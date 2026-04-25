@@ -97,7 +97,9 @@ def load_env_file(path):
 for env_file in (BASE / ".env.local", BASE / ".env"):
     load_env_file(env_file)
 
-ADMIN_PASS = os.environ.get("ADMIN_PASS", "gaertner2026")
+DEFAULT_ADMIN_PASS = "gaertner2026"
+DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
+ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
 DATE_FMT = "%d.%m.%Y"
 DATETIME_FMT = "%d.%m.%Y %H:%M"
 MAX_UPLOAD_MB = 25
@@ -306,8 +308,21 @@ TESSERACT_CMD = shutil.which("tesseract")
 
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "gaertner-autohaus-2026")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or DEFAULT_FLASK_SECRET_KEY
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
+
+
+def get_startup_warnings():
+    warnings = []
+    if ADMIN_PASS in {"", "change-me", DEFAULT_ADMIN_PASS}:
+        warnings.append(
+            "ADMIN_PASS ist nicht sicher gesetzt. Bitte in .env.local ein eigenes Passwort eintragen."
+        )
+    if app.secret_key in {"", "change-me", DEFAULT_FLASK_SECRET_KEY}:
+        warnings.append(
+            "FLASK_SECRET_KEY ist nicht sicher gesetzt. Bitte in .env.local einen langen Zufallswert eintragen."
+        )
+    return warnings
 
 
 def clean_text(value):
@@ -2033,9 +2048,7 @@ def row_to_autohaus(row):
     autohaus["portal_welcome"] = clean_text(autohaus.get("willkommen_text")) or (
         f"Willkommen im Portal von {autohaus['name']}."
     )
-    autohaus["portal_url"] = url_for(
-        "partner_login_key", portal_key=autohaus["portal_key"], _external=False
-    )
+    autohaus["portal_url"] = f"/portal/{clean_text(autohaus.get('portal_key'))}"
     return autohaus
 
 
@@ -3949,5 +3962,7 @@ if __name__ == "__main__":
     print("  Gärtner Autohaus-Terminportal gestartet")
     print("  Admin:   http://localhost:5000/admin")
     print("  Partner: http://localhost:5000/partner")
+    for warning in get_startup_warnings():
+        print(f"  WARNUNG: {warning}")
     print("=" * 58)
     app.run(debug=False, host="0.0.0.0", port=5000)

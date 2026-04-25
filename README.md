@@ -30,6 +30,7 @@ Die App verwaltet Fahrzeuge, Termine, Angebotsanfragen, Verzögerungen, Reklamat
 
 ```powershell
 cd "C:\Users\info\OneDrive\Desktop\Arbeit\Kundenstatus-App"
+python -m pip install -r requirements.txt
 python app.py
 ```
 
@@ -84,13 +85,20 @@ Syntax prüfen:
 python -m py_compile app.py
 ```
 
+Smoke-Test ausführen:
+
+```powershell
+python scripts/smoke_test.py
+```
+
 Server starten:
 
 ```powershell
 python app.py
 ```
 
+Hinweis: Für die lokale OCR muss Tesseract zusätzlich als Windows-Programm installiert sein. Ohne Tesseract arbeitet die App weiter, aber die OCR-Qualität kann schlechter sein.
+
 ## Lizenz
 
 Proprietär. Nutzung und Weitergabe nur mit Zustimmung von Gärtner Karosserie & Lack.
-

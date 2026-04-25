@@ -35,6 +35,7 @@ App starten:
 
 ```powershell
 cd "C:\Users\info\OneDrive\Desktop\Arbeit\Kundenstatus-App"
+python -m pip install -r requirements.txt
 python app.py
 ```
 
@@ -62,7 +63,13 @@ Syntax prüfen:
 python -m py_compile app.py
 ```
 
-Aktuell gibt es noch keinen eigenen Build-Schritt und keinen formalen Testordner.
+Smoke-Test:
+
+```powershell
+python scripts/smoke_test.py
+```
+
+Aktuell gibt es noch keinen eigenen Build-Schritt. Ein kleiner Smoke-Test liegt unter `scripts/smoke_test.py`.
 
 ## Aktueller Stand
 
@@ -97,7 +104,6 @@ Noch offen / nächste Meilensteine:
 - Google Document AI und OpenAI API-Schlüssel in `.env.local` eintragen.
 - Mit echten Belegen testen und Regeln für automatische Übernahme vs. Prüfung festlegen.
 - Vorschau vor Übernahme für erkannte Felder ausbauen.
-- `requirements.txt` oder `pyproject.toml` anlegen.
 - Kleine automatisierte Smoke-Tests für Kernrouten ergänzen.
 
 ## Konventionen
@@ -139,6 +145,10 @@ Commits:
 - `data/auftraege.db` und `data/uploads/` enthalten lokale Betriebs-/Kundendaten und gehören nicht nach GitHub.
 - Der Server darf nicht mehrfach parallel auf Port `5000` laufen; sonst sieht der Browser manchmal alte Zustände.
 - Ohne Google/OpenAI-Schlüssel bleibt die lokale OCR aktiv.
+- Python-Abhängigkeiten sind in `requirements.txt` festgehalten.
+- Ein kleiner Smoke-Test prueft zentrale Routen ohne Browser.
+- Für bessere lokale OCR muss Tesseract zusätzlich als Windows-Programm installiert sein.
+- Beim Start warnt die App, wenn `ADMIN_PASS` oder `FLASK_SECRET_KEY` noch unsichere Standardwerte nutzen.
 - OCR von Fotos, Tabellen und Handschrift ist nicht zuverlässig genug für blinde Übernahme.
 - Upload-Kategorien beachten: nur `standard`-Unterlagen sollen Fahrzeugdaten verändern.
 - `.env.local` enthält aktuell auch `ADMIN_PASS` und `FLASK_SECRET_KEY`.
