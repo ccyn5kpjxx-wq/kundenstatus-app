@@ -98,7 +98,6 @@ Noch offen / nächste Meilensteine:
 - Mit echten Belegen testen und Regeln für automatische Übernahme vs. Prüfung festlegen.
 - Vorschau vor Übernahme für erkannte Felder ausbauen.
 - `requirements.txt` oder `pyproject.toml` anlegen.
-- GitHub-Repository einrichten und ersten sauberen Commit pushen.
 - Kleine automatisierte Smoke-Tests für Kernrouten ergänzen.
 
 ## Konventionen
@@ -145,8 +144,18 @@ Commits:
 - `.env.local` enthält aktuell auch `ADMIN_PASS` und `FLASK_SECRET_KEY`.
 - Wenn neue Datenbankspalten nötig sind, `ensure_column(...)` in `init_db()` ergänzen.
 - Git ist lokal initialisiert auf Branch `main`.
-- GitHub CLI `gh` ist aktuell nicht installiert; GitHub-Repo daher manuell im Browser anlegen oder `gh` nachinstallieren.
+- GitHub-Remote ist verbunden: `https://github.com/ccyn5kpjxx-wq/kundenstatus-app.git`.
+- Branch `main` trackt `origin/main`.
+- GitHub CLI `gh` ist aktuell nicht installiert; Push laeuft ueber Git Credential Manager.
 - `.gitignore` muss Secrets, Datenbank und Uploads schützen.
+
+## Proaktive Skills
+
+Lokale Projekt-Helfer liegen unter `.claude/skills/`:
+
+- `/start`: liest Projektkontext, Git-Status, letzte Commits und TODO/FIXME-Hinweise.
+- `/commit-push`: zeigt Diff, prueft auf Secrets, schlaegt Commit-Message vor und pusht erst nach OK.
+- `/task-add <text>`: notiert neue Aufgaben mit Datum in `TODO.md`.
 
 ## Session-Start für Codex/Claude
 
