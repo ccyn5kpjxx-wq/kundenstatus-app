@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Neues Fahrzeug{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-xl-11">
+    <div class="page-card p-4 p-lg-5">
+      <div class="section-title">
+        <div>
+          <div class="badge-soft mb-3">Neues Fahrzeug</div>
+          <h1 class="mb-2">Fahrzeug manuell für ein Autohaus anlegen</h1>
+          <p>Du kannst intern jederzeit Fahrzeuge direkt einem Autohaus zuordnen.</p>
+        </div>
+      </div>
+
+      <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
+        <div class="col-md-6">
+          <label class="form-label">Autohaus</label>
+          <select name="autohaus_id" class="form-select form-select-lg">
+            <option value="">Ohne Autohaus</option>
+            {% for h in autohaeuser %}
+            <option value="{{ h['id'] }}">{{ h['name'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Endkunde / Referenz</label>
+          <input type="text" name="kunde_name" class="form-control form-control-lg">
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Fahrzeug</label>
+          <input type="text" name="fahrzeug" class="form-control form-control-lg" placeholder="Wird bei Upload wenn moeglich automatisch erkannt">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Kennzeichen</label>
+          <input type="text" name="kennzeichen" class="form-control form-control-lg" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Telefon</label>
+          <input type="text" name="kontakt_telefon" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Analyse</label>
+          <input type="text" name="analyse_text" class="form-control" placeholder="z.B. Stoßstange hinten instandsetzen">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Beschreibung</label>
+          <textarea name="beschreibung" class="form-control" rows="4"></textarea>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Transport</label>
+          <select name="transport_art" class="form-select form-select-lg">
+            {% for key, meta in transport_arten.items() %}
+            <option value="{{ key }}">{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Übernahme</label>
+          <input type="date" name="annahme_datum" class="form-control form-control-lg">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Start</label>
+          <input type="date" name="start_datum" class="form-control form-control-lg">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Fertig</label>
+          <input type="date" name="fertig_datum" class="form-control form-control-lg">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Rückgabe</label>
+          <input type="date" name="abholtermin" class="form-control form-control-lg">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Anhänge</label>
+          <input type="file" name="dateien" class="form-control form-control-lg" multiple>
+          <div class="form-text">Mit dem Upload-Button wird die Datei sofort gelesen und der Auftrag automatisch vorbefuellt. Bei Gutachten kann das ein paar Sekunden dauern.</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Interne Notiz</label>
+          <textarea name="notiz_intern" class="form-control" rows="4"></textarea>
+        </div>
+        <div class="col-12 d-flex gap-2 flex-wrap">
+          <button type="submit" name="aktion" value="upload_analyze" class="btn btn-soft btn-lg">Hochladen & analysieren</button>
+          <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Fahrzeug speichern</button>
+          <a href="{{ url_for('dashboard') }}" class="btn btn-soft btn-lg">Zurück</a>
+        </div>
+        <div class="col-12">
+          <div class="alert alert-info d-none mb-0" data-upload-status>Analyse läuft. Bitte kurz warten...</div>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+  const form = document.querySelector('[data-upload-form]');
+  const status = document.querySelector('[data-upload-status]');
+  if (form && status) {
+    form.addEventListener('submit', () => {
+      status.classList.remove('d-none');
+    });
+  }
+</script>
+{% endblock %}

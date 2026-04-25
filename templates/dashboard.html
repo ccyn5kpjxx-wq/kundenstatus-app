@@ -1,0 +1,586 @@
+{% extends "base.html" %}
+{% block title %}Autohaus-Cockpit{% endblock %}
+{% block extra_css %}
+<style>
+  .bulk-bar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border:1px solid #e4d6c3; border-radius:18px; background:#f7f0e6; margin-bottom:16px; }
+  .row-select-cell { width:88px; white-space:nowrap; }
+  .row-check { width:20px; height:20px; accent-color:#1f3557; }
+  tr[data-select-row] { cursor:pointer; }
+  tr[data-select-row].is-selected { background:#f8f1e6; }
+  .selection-badge { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid #d9cab4; border-radius:999px; background:#fffaf2; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-card p-4 p-lg-5 mb-4">
+  <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-lg-center">
+    <div>
+      <div class="badge-soft mb-3">Gesamtblick {{ cockpit['heute_text'] }}</div>
+      <h1 class="mb-2">Autohäuser anlegen und Termine zentral steuern</h1>
+      <p class="mb-0 text-muted">Du verwaltest hier alle Autohäuser, alle Fahrzeuge, Hol- und Bringtermine sowie Terminänderungen.</p>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="{{ url_for('neuer_auftrag') }}" class="btn btn-brand btn-lg">Fahrzeug anlegen</a>
+      <a href="{{ url_for('partner_login') }}" target="_blank" class="btn btn-soft btn-lg">Autohaus-Login öffnen</a>
+    </div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
+    <div>
+      <div class="badge-soft mb-2">KI-Dokumentanalyse</div>
+      <h4 class="mb-1">Google Document AI + OpenAI</h4>
+      <p class="mb-2 text-muted">{{ ki_status['message'] }}</p>
+      <div class="small text-muted">Konfigurationsdatei: <code>{{ ki_status['env_file'] }}</code></div>
+      <div class="small text-muted">OpenAI-Modell: <code>{{ ki_status['openai_model'] }}</code></div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <span class="badge {% if ki_status['google_ready'] %}text-bg-success{% else %}text-bg-secondary{% endif %}">Google OCR {% if ki_status['google_ready'] %}bereit{% else %}fehlt{% endif %}</span>
+      <span class="badge {% if ki_status['openai_ready'] %}text-bg-success{% else %}text-bg-secondary{% endif %}">OpenAI {% if ki_status['openai_ready'] %}bereit{% else %}fehlt{% endif %}</span>
+      <span class="badge {% if ki_status['ready'] %}text-bg-success{% else %}text-bg-warning{% endif %}">{% if ki_status['ready'] %}Pipeline aktiv{% else %}Fallback aktiv{% endif %}</span>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-6 col-xl-3">
+    <div class="metric-card metric-warm page-card">
+      <div class="metric-label">Autohäuser</div>
+      <div class="metric-value mt-2">{{ autohaeuser|length }}</div>
+      <div class="mt-2 text-white-50">Angelegte Partnerzugänge</div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="metric-card metric-blue page-card">
+      <div class="metric-label">Heute übernehmen</div>
+      <div class="metric-value mt-2">{{ cockpit['heute_bringen']|length }}</div>
+      <div class="mt-2 text-white-50">Anlieferung oder Abholung durch euch</div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="metric-card metric-green page-card">
+      <div class="metric-label">Heute zurückgeben</div>
+      <div class="metric-value mt-2">{{ cockpit['heute_abholen']|length }}</div>
+      <div class="mt-2 text-white-50">Abholung oder Rückbringung</div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="metric-card metric-gold page-card">
+      <div class="metric-label">Offene Verzögerungen</div>
+      <div class="metric-value mt-2">{{ cockpit['offene_verzoegerungen']|length }}</div>
+      <div class="mt-2 text-white-50">Meldungen von Autohaus oder Werkstatt</div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="metric-card page-card" style="background:linear-gradient(135deg,#8f1f1f,#d64545);">
+      <div class="metric-label">Reklamations-Alarme</div>
+      <div class="metric-value mt-2">{{ cockpit['offene_reklamationen']|length }}</div>
+      <div class="mt-2 text-white-50">Wichtige Reklamationen mit Priorität</div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="metric-card page-card" style="background:linear-gradient(135deg,#34556f,#5d86a6);">
+      <div class="metric-label">Offene Angebote</div>
+      <div class="metric-value mt-2">{{ angebotsanfragen|length }}</div>
+      <div class="mt-2 text-white-50">Anfragen der Autohäuser zur Freigabe</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-5">
+    <div class="page-card p-4 h-100">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Neues Autohaus</h4>
+          <p>Hier legst du einen neuen Partnerzugang an.</p>
+        </div>
+      </div>
+      <form method="POST" action="{{ url_for('autohaus_neu') }}" class="row g-3">
+        <div class="col-12">
+          <label class="form-label">Autohausname</label>
+          <input type="text" name="name" class="form-control form-control-lg" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Kontaktperson</label>
+          <input type="text" name="kontakt_name" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Telefon</label>
+          <input type="text" name="telefon" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">E-Mail</label>
+          <input type="email" name="email" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Zugangscode</label>
+          <input type="text" name="zugangscode" class="form-control" placeholder="leer = automatisch">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Portal-Titel</label>
+          <input type="text" name="portal_titel" class="form-control" placeholder="z.B. Portal Autohaus Müller">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Willkommenssatz</label>
+          <input type="text" name="willkommen_text" class="form-control" placeholder="z.B. Willkommen im persönlichen Terminbereich.">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Notiz</label>
+          <textarea name="notiz" class="form-control" rows="3"></textarea>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-brand">Autohaus anlegen</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-xl-7">
+    <div class="page-card p-4 h-100">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Autohaus-Zugänge</h4>
+          <p>Jedes Autohaus bekommt seinen eigenen Bereich.</p>
+        </div>
+      </div>
+      {% if autohaeuser %}
+        <div class="d-grid gap-3">
+          {% for h in autohaeuser %}
+          <div class="page-card p-3">
+            <div class="d-flex justify-content-between gap-3 flex-wrap">
+              <div>
+                <div class="fw-bold">{{ h['name'] }}</div>
+                <div class="text-muted small">{{ h['portal_label'] }}</div>
+                <div class="text-muted small">{{ h['kontakt_name'] }}{% if h['telefon'] %} · {{ h['telefon'] }}{% endif %}</div>
+                {% if h['email'] %}<div class="text-muted small">{{ h['email'] }}</div>{% endif %}
+                {% if h['portal_welcome'] %}<div class="text-muted small mt-1">{{ h['portal_welcome'] }}</div>{% endif %}
+              </div>
+              <div class="text-end">
+                <div class="small text-muted">Portal</div>
+                <div><code>{{ h['portal_url'] }}</code></div>
+                <div class="small text-muted mt-1">Code: <strong>{{ h['zugangscode'] }}</strong></div>
+              </div>
+            </div>
+            <details class="mt-3">
+              <summary class="text-muted small">Autohaus bearbeiten</summary>
+              <form method="POST" action="{{ url_for('autohaus_update', autohaus_id=h['id']) }}" class="row g-2 mt-2">
+                <div class="col-md-6">
+                  <input type="text" name="name" class="form-control" value="{{ h['name'] }}" placeholder="Name">
+                </div>
+                <div class="col-md-6">
+                  <input type="text" name="kontakt_name" class="form-control" value="{{ h['kontakt_name'] }}" placeholder="Kontakt">
+                </div>
+                <div class="col-md-6">
+                  <input type="text" name="telefon" class="form-control" value="{{ h['telefon'] }}" placeholder="Telefon">
+                </div>
+                <div class="col-md-6">
+                  <input type="email" name="email" class="form-control" value="{{ h['email'] }}" placeholder="E-Mail">
+                </div>
+                <div class="col-md-6">
+                  <input type="text" name="zugangscode" class="form-control" value="{{ h['zugangscode'] }}" placeholder="Zugangscode">
+                </div>
+                <div class="col-md-6">
+                  <input type="text" name="portal_titel" class="form-control" value="{{ h['portal_titel'] }}" placeholder="Portal-Titel">
+                </div>
+                <div class="col-12">
+                  <input type="text" name="willkommen_text" class="form-control" value="{{ h['willkommen_text'] }}" placeholder="Willkommenssatz">
+                </div>
+                <div class="col-12">
+                  <textarea name="notiz" class="form-control" rows="2" placeholder="Notiz">{{ h['notiz'] }}</textarea>
+                </div>
+                <div class="col-12">
+                  <button type="submit" class="btn btn-soft btn-sm">Speichern</button>
+                </div>
+              </form>
+            </details>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-muted">Noch kein Autohaus angelegt.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if angebotsanfragen %}
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Offene Angebotsanfragen</h4>
+      <p>Diese Angebotswünsche werden erst nach deiner Annahme zu normalen Aufträgen.</p>
+    </div>
+  </div>
+  <div class="row g-3">
+    {% for a in angebotsanfragen %}
+    <div class="col-xl-6">
+      <div class="page-card p-3 h-100">
+        <div class="d-flex justify-content-between gap-3 flex-wrap">
+          <div>
+            <div class="fw-bold">{{ a['autohaus_name'] or 'Ohne Autohaus' }}</div>
+            <div class="text-muted small">{{ a['fahrzeug'] or 'Angebotsanfrage' }}{% if a['kennzeichen'] %} · {{ a['kennzeichen'] }}{% endif %}</div>
+          </div>
+          <span class="badge text-bg-primary">Angebot offen</span>
+        </div>
+        <div class="mt-2">{{ a['analyse_text'] or a['beschreibung'] or 'Noch keine Schadenbeschreibung' }}</div>
+        <div class="mt-3 d-flex gap-2 flex-wrap">
+          {% if a['auftragsnummer'] %}<span class="schedule-pill">Auftrag {{ a['auftragsnummer'] }}</span>{% endif %}
+          {% if a['fin_nummer'] %}<span class="schedule-pill">FIN {{ a['fin_nummer'] }}</span>{% endif %}
+          {% if a['annahme_datum'] %}<span class="schedule-pill">{{ a['angebot_annahme_label'] }} {{ a['annahme_datum'] }}</span>{% endif %}
+          {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['angebot_abholung_label'] }} {{ a['abholtermin'] }}</span>{% endif %}
+          {% if a['dateien'] %}<span class="schedule-pill">{{ a['dateien']|length }} Unterlagen</span>{% endif %}
+        </div>
+        <div class="mt-3 d-flex gap-2 flex-wrap">
+          <form method="POST" action="{{ url_for('angebot_annehmen_route', auftrag_id=a['id']) }}">
+            <button type="submit" class="btn btn-brand btn-sm">Angebot annehmen</button>
+          </form>
+          <a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Öffnen</a>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if cockpit['offene_verzoegerungen'] %}
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Offene Verzögerungsmeldungen</h4>
+      <p>Hier siehst du Meldungen, die noch nicht in Termine übernommen wurden.</p>
+    </div>
+  </div>
+  <div class="row g-3">
+    {% for v in cockpit['offene_verzoegerungen'] %}
+    <div class="col-xl-6">
+      <div class="page-card p-3 h-100">
+        <div class="d-flex justify-content-between gap-3">
+          <div>
+            <div class="fw-bold">{{ v['autohaus_name'] or 'Ohne Autohaus' }}</div>
+            <div class="text-muted small">{{ v['fahrzeug'] }}{% if v['kennzeichen'] %} · {{ v['kennzeichen'] }}{% endif %}</div>
+          </div>
+          <span class="badge text-bg-warning">{{ v['quelle']|capitalize }}</span>
+        </div>
+        <div class="mt-2">{{ v['meldung'] }}</div>
+        <div class="mt-3 d-flex gap-2 flex-wrap">
+          {% if v['vorgeschlagen_start'] %}<span class="schedule-pill">Start {{ v['vorgeschlagen_start'] }}</span>{% endif %}
+          {% if v['vorgeschlagen_fertig'] %}<span class="schedule-pill">Fertig {{ v['vorgeschlagen_fertig'] }}</span>{% endif %}
+          {% if v['vorgeschlagen_abholung'] %}<span class="schedule-pill">Rückgabe {{ v['vorgeschlagen_abholung'] }}</span>{% endif %}
+        </div>
+        <div class="mt-3 d-flex gap-2 flex-wrap">
+          <form method="POST" action="{{ url_for('verzoegerung_uebernehmen', verzoegerung_id=v['id']) }}">
+            <button type="submit" class="btn btn-brand btn-sm">Übernehmen</button>
+          </form>
+          <a href="{{ url_for('auftrag_detail', auftrag_id=v['auftrag_id']) }}" class="btn btn-soft btn-sm">Auftrag öffnen</a>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if cockpit['offene_reklamationen'] %}
+<div class="page-card p-4 mb-4 border border-danger-subtle">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1 text-danger">Reklamations-Alarme</h4>
+      <p>Diese Meldungen bitte vorrangig prüfen.</p>
+    </div>
+  </div>
+  <div class="row g-3">
+    {% for r in cockpit['offene_reklamationen'] %}
+    <div class="col-xl-6">
+      <div class="page-card p-3 h-100 border border-danger-subtle">
+        <div class="d-flex justify-content-between gap-3">
+          <div>
+            <div class="fw-bold">{{ r['autohaus_name'] or 'Ohne Autohaus' }}</div>
+            <div class="text-muted small">{{ r['fahrzeug'] }}{% if r['kennzeichen'] %} · {{ r['kennzeichen'] }}{% endif %}</div>
+          </div>
+          <span class="badge text-bg-danger">Alarm</span>
+        </div>
+        <div class="mt-2">{{ r['meldung'] }}</div>
+        {% if r['dateien'] %}
+        <div class="mt-3 d-flex gap-2 flex-wrap">
+          {% for datei in r['dateien'] %}
+          <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" class="schedule-pill">{{ datei['original_name'] }}</a>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <div class="mt-3 d-flex gap-2 flex-wrap">
+          <form method="POST" action="{{ url_for('reklamation_status', reklamation_id=r['id']) }}">
+            <input type="hidden" name="bearbeitet" value="1">
+            <button type="submit" class="btn btn-brand btn-sm">Als erledigt markieren</button>
+          </form>
+          <a href="{{ url_for('auftrag_detail', auftrag_id=r['auftrag_id']) }}" class="btn btn-soft btn-sm">Auftrag öffnen</a>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Tagessteuerung</h4>
+      <p>Was heute übernommen, gestartet, fertig und zurückgegeben wird.</p>
+    </div>
+  </div>
+  <div class="row g-3">
+    <div class="col-lg-3">
+      <div class="page-card p-3 h-100">
+        <div class="fw-bold mb-3">Heute übernehmen</div>
+        {% if cockpit['heute_bringen'] %}
+          {% for a in cockpit['heute_bringen'] %}
+          <div class="schedule-pill mb-2">{{ a['autohaus_name'] or 'Ohne Autohaus' }} · {{ a['fahrzeug'] }} · {{ a['annahme_label'] }}</div>
+          {% endfor %}
+        {% else %}
+          <div class="text-muted small">Keine Übernahme</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="col-lg-3">
+      <div class="page-card p-3 h-100">
+        <div class="fw-bold mb-3">Heute starten</div>
+        {% if cockpit['heute_starten'] %}
+          {% for a in cockpit['heute_starten'] %}
+          <div class="schedule-pill mb-2">{{ a['autohaus_name'] or 'Ohne Autohaus' }} · {{ a['fahrzeug'] }}</div>
+          {% endfor %}
+        {% else %}
+          <div class="text-muted small">Kein Start</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="col-lg-3">
+      <div class="page-card p-3 h-100">
+        <div class="fw-bold mb-3">Heute fertig</div>
+        {% if cockpit['heute_fertig'] %}
+          {% for a in cockpit['heute_fertig'] %}
+          <div class="schedule-pill mb-2">{{ a['autohaus_name'] or 'Ohne Autohaus' }} · {{ a['fahrzeug'] }}</div>
+          {% endfor %}
+        {% else %}
+          <div class="text-muted small">Nichts fertig</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="col-lg-3">
+      <div class="page-card p-3 h-100">
+        <div class="fw-bold mb-3">Heute zurückgeben</div>
+        {% if cockpit['heute_abholen'] %}
+          {% for a in cockpit['heute_abholen'] %}
+          <div class="schedule-pill mb-2">{{ a['autohaus_name'] or 'Ohne Autohaus' }} · {{ a['fahrzeug'] }} · {{ a['abholung_label'] }}</div>
+          {% endfor %}
+        {% else %}
+          <div class="text-muted small">Keine Rückgabe</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Alle Fahrzeuge</h4>
+      <p>Gesamtübersicht über alle aktiven Aufträge.</p>
+    </div>
+  </div>
+  {% if auftraege %}
+  <form method="POST" action="{{ url_for('admin_sammelaktion') }}" data-bulk-form>
+  <div class="bulk-bar">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <label class="selection-badge mb-0">
+        <input type="checkbox" class="row-check" data-select-all>
+        <span>Alle markieren</span>
+      </label>
+      <span class="text-muted" data-selected-count>0 Fahrzeuge ausgewählt</span>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <button type="submit" name="aktion" value="archivieren" class="btn btn-soft btn-sm">Ausgewählte archivieren</button>
+      <button type="submit" name="aktion" value="loeschen" class="btn btn-outline-danger btn-sm" data-confirm="Ausgewählte Fahrzeuge wirklich löschen?">Ausgewählte löschen</button>
+    </div>
+  </div>
+  <div class="table-shell">
+    <table class="table align-middle mb-0">
+      <thead>
+        <tr>
+          <th class="row-select-cell">Auswahl</th>
+          <th>Autohaus</th>
+          <th>Fahrzeug</th>
+          <th>Analyse</th>
+          <th>Termine</th>
+          <th>Status</th>
+          <th>Aktion</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in auftraege %}
+        <tr data-select-row>
+          <td class="row-select-cell">
+            <label class="selection-badge mb-0">
+              <input type="checkbox" class="row-check" name="auftrag_ids" value="{{ a['id'] }}" data-select-item>
+              <span>Wählen</span>
+            </label>
+          </td>
+          <td>
+            <div class="fw-bold">{{ a['autohaus_name'] or 'Ohne Autohaus' }}</div>
+            {% if a['kunde_name'] %}<div class="text-muted small">Endkunde: {{ a['kunde_name'] }}</div>{% endif %}
+          </td>
+          <td>
+            <div>{{ a['fahrzeug'] }}</div>
+            {% if a['kennzeichen'] %}<div class="small"><code>{{ a['kennzeichen'] }}</code></div>{% endif %}
+          </td>
+          <td>{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
+          <td>
+            <div class="d-flex gap-2 flex-wrap">
+              {% if a['annahme_datum'] %}<span class="schedule-pill">{{ a['annahme_label'] }} {{ a['annahme_datum'] }}</span>{% endif %}
+              {% if a['start_datum'] %}<span class="schedule-pill">Start {{ a['start_datum'] }}</span>{% endif %}
+              {% if a['fertig_datum'] %}<span class="schedule-pill">Fertig {{ a['fertig_datum'] }}</span>{% endif %}
+              {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['abholung_label'] }} {{ a['abholtermin'] }}</span>{% endif %}
+            </div>
+          </td>
+          <td>
+            <span class="badge text-bg-{{ a['status_meta']['farbe'] }}">{{ a['status_meta']['icon'] }} {{ a['status_meta']['label'] }}</span>
+          </td>
+          <td>
+            <a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Öffnen</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  </form>
+  {% else %}
+    <div class="text-muted">Noch keine Fahrzeuge angelegt.</div>
+  {% endif %}
+</div>
+
+<div class="page-card p-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Archiv</h4>
+      <p>Hier liegen abgeschlossene oder ausgeblendete Aufträge.</p>
+    </div>
+  </div>
+  {% if archivierte_auftraege %}
+  <form method="POST" action="{{ url_for('admin_sammelaktion') }}" data-bulk-form>
+  <div class="bulk-bar">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <label class="selection-badge mb-0">
+        <input type="checkbox" class="row-check" data-select-all>
+        <span>Alle markieren</span>
+      </label>
+      <span class="text-muted" data-selected-count>0 Fahrzeuge ausgewählt</span>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <button type="submit" name="aktion" value="aktivieren" class="btn btn-soft btn-sm">Ausgewählte aktivieren</button>
+      <button type="submit" name="aktion" value="loeschen" class="btn btn-outline-danger btn-sm" data-confirm="Ausgewählte Fahrzeuge wirklich löschen?">Ausgewählte löschen</button>
+    </div>
+  </div>
+  <div class="table-shell">
+    <table class="table align-middle mb-0">
+      <thead>
+        <tr>
+          <th class="row-select-cell">Auswahl</th>
+          <th>Autohaus</th>
+          <th>Fahrzeug</th>
+          <th>Analyse</th>
+          <th>Letzte Termine</th>
+          <th>Aktion</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in archivierte_auftraege %}
+        <tr data-select-row>
+          <td class="row-select-cell">
+            <label class="selection-badge mb-0">
+              <input type="checkbox" class="row-check" name="auftrag_ids" value="{{ a['id'] }}" data-select-item>
+              <span>Wählen</span>
+            </label>
+          </td>
+          <td>{{ a['autohaus_name'] or 'Ohne Autohaus' }}</td>
+          <td>
+            <div>{{ a['fahrzeug'] }}</div>
+            {% if a['kennzeichen'] %}<div class="small"><code>{{ a['kennzeichen'] }}</code></div>{% endif %}
+          </td>
+          <td>{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
+          <td>
+            <div class="d-flex gap-2 flex-wrap">
+              {% if a['fertig_datum'] %}<span class="schedule-pill">Fertig {{ a['fertig_datum'] }}</span>{% endif %}
+              {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['abholung_label'] }} {{ a['abholtermin'] }}</span>{% endif %}
+            </div>
+          </td>
+          <td><a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Öffnen</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  </form>
+  {% else %}
+    <div class="text-muted">Noch keine archivierten Aufträge.</div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+  document.querySelectorAll('[data-bulk-form]').forEach((form) => {
+    const selectAll = form.querySelector('[data-select-all]');
+    const items = Array.from(form.querySelectorAll('[data-select-item]'));
+    const counter = form.querySelector('[data-selected-count]');
+    const rows = Array.from(form.querySelectorAll('[data-select-row]'));
+    let submitter = null;
+    const refresh = () => {
+      const selected = items.filter((item) => item.checked).length;
+      counter.textContent = `${selected} Fahrzeuge ausgewählt`;
+      if (selectAll) {
+        selectAll.checked = selected > 0 && selected === items.length;
+        selectAll.indeterminate = selected > 0 && selected < items.length;
+      }
+      rows.forEach((row) => {
+        const checkbox = row.querySelector('[data-select-item]');
+        row.classList.toggle('is-selected', !!checkbox?.checked);
+      });
+    };
+    if (selectAll) {
+      selectAll.addEventListener('change', () => {
+        items.forEach((item) => { item.checked = selectAll.checked; });
+        refresh();
+      });
+    }
+    form.addEventListener('click', (event) => {
+      const button = event.target.closest('button[type="submit"]');
+      if (button) {
+        submitter = button;
+      }
+    });
+    form.addEventListener('submit', (event) => {
+      const message = submitter?.dataset.confirm;
+      if (message && !window.confirm(message)) {
+        event.preventDefault();
+      }
+    });
+    items.forEach((item) => item.addEventListener('change', refresh));
+    rows.forEach((row) => {
+      row.addEventListener('click', (event) => {
+        if (event.target.closest('a, button, input, label, form')) {
+          return;
+        }
+        const checkbox = row.querySelector('[data-select-item]');
+        if (!checkbox) {
+          return;
+        }
+        checkbox.checked = !checkbox.checked;
+        refresh();
+      });
+    });
+    refresh();
+  });
+</script>
+{% endblock %}

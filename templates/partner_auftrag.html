@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ autohaus['portal_label'] }} — Fahrzeug</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background:#f4f1ea; font-family:"DM Sans",sans-serif; }
+    h1,h2,h3,h4,h5 { font-family:"Space Grotesk",sans-serif; }
+    .shell { max-width:1200px; margin:0 auto; padding:32px 16px; }
+    .panel { background:#fffdf9; border-radius:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
+    .chip { display:inline-flex; align-items:center; padding:.4rem .75rem; border-radius:999px; background:#f4ede4; border:1px solid #e4d6c3; margin:0 .4rem .4rem 0; }
+    .timeline-item { border-left:3px solid #dbc8af; padding-left:1rem; margin-left:.35rem; }
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(24, 20, 14, .52);
+      backdrop-filter: blur(3px);
+      z-index: 1000;
+      padding: 20px;
+    }
+    .loading-overlay.show { display: flex; }
+    .loading-card {
+      width: min(500px, 100%);
+      background: #fffdf9;
+      border-radius: 28px;
+      padding: 28px;
+      box-shadow: 0 22px 60px rgba(24, 20, 14, .24);
+      text-align: center;
+    }
+    .spinner-ring {
+      width: 54px;
+      height: 54px;
+      margin: 0 auto 18px;
+      border-radius: 50%;
+      border: 5px solid #e4d6c3;
+      border-top-color: #1f3557;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .loading-progress {
+      width: 100%;
+      height: 8px;
+      border-radius: 999px;
+      background: #eee2cf;
+      overflow: hidden;
+      margin: 18px 0 22px;
+    }
+    .loading-progress-bar {
+      width: 42%;
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #1f3557, #3f6a8f);
+      animation: loadingPulse 1.8s ease-in-out infinite;
+      transform-origin: left center;
+    }
+    @keyframes loadingPulse {
+      0% { transform: translateX(-20%) scaleX(.72); opacity: .72; }
+      50% { transform: translateX(105%) scaleX(1.08); opacity: 1; }
+      100% { transform: translateX(230%) scaleX(.72); opacity: .72; }
+    }
+    .loading-status {
+      font-size: .95rem;
+      color: #6b6257;
+      margin-bottom: 18px;
+    }
+    .loading-news {
+      text-align: left;
+      border: 1px solid #e4d6c3;
+      background: #f8f2e8;
+      border-radius: 18px;
+      padding: 16px 18px;
+    }
+    .loading-news-kicker {
+      font-size: .78rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #8a6e46;
+      margin-bottom: 8px;
+    }
+    .loading-news-title {
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 1rem;
+      margin-bottom: 6px;
+      color: #1f3557;
+    }
+    .loading-news-text {
+      color: #51463b;
+      line-height: 1.45;
+      min-height: 3.2em;
+    }
+    .check-card {
+      border: 1px solid #e4d6c3;
+      background: #f8f2e8;
+      border-radius: 18px;
+      padding: 16px 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="loading-overlay" data-loading-overlay>
+    <div class="loading-card">
+      <div class="spinner-ring"></div>
+      <h4 class="mb-2">Datei wird analysiert</h4>
+      <div class="text-muted" data-loading-text>Bitte kurz warten. Die Datei wird jetzt ausgewertet und in den Auftrag übernommen.</div>
+      <div class="loading-progress" aria-hidden="true">
+        <div class="loading-progress-bar"></div>
+      </div>
+      <div class="loading-status">Analyse läuft. Je nach PDF oder Bild kann das ein paar Sekunden dauern.</div>
+      <div class="loading-news">
+        <div class="loading-news-kicker">Werkstatt-News</div>
+        <div class="loading-news-title" data-loading-news-title>Ab 27.04.2026: neue ION-7 im Einsatz</div>
+        <div class="loading-news-text" data-loading-news-text>Während Ihre Datei gelesen wird, hier ein kurzer Blick auf unsere Technik-Neuigkeit.</div>
+      </div>
+    </div>
+  </div>
+  <div class="shell">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+      <div class="alert alert-{{ cat }} mb-4">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <div class="row g-4">
+      <div class="col-xl-7">
+        <div class="panel h-100">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+            <div>
+              <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
+              <h1 class="mb-1">{{ auftrag['fahrzeug'] }}</h1>
+              <div class="text-muted">{{ autohaus['portal_label'] }}{% if auftrag['kennzeichen'] %} · {{ auftrag['kennzeichen'] }}{% endif %}</div>
+            </div>
+            <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zurück</a>
+          </div>
+
+          <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
+            <div class="col-md-6">
+              <label class="form-label">Endkunde / Referenz</label>
+              <input type="text" name="kunde_name" class="form-control form-control-lg" value="{{ auftrag['kunde_name'] }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Telefon</label>
+              <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ auftrag['kontakt_telefon'] }}">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label">Fahrzeug</label>
+              <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ auftrag['fahrzeug'] }}" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Kennzeichen</label>
+              <input type="text" name="kennzeichen" class="form-control form-control-lg" value="{{ auftrag['kennzeichen'] }}" style="text-transform:uppercase;">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Analyse</label>
+              <input type="text" name="analyse_text" class="form-control" value="{{ auftrag['analyse_text'] }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Unterlagen</label>
+              <input type="file" name="dateien" class="form-control form-control-lg" multiple>
+              <div class="form-text">Neue Datei direkt hochladen und sofort neu analysieren. Bei Gutachten kann das ein paar Sekunden dauern.</div>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Beschreibung</label>
+              <textarea name="beschreibung" class="form-control" rows="4">{{ auftrag['beschreibung'] }}</textarea>
+            </div>
+            {% if auftrag['kunden_bauteile'] %}
+            <div class="col-12">
+              <div class="check-card">
+                <div class="fw-bold mb-2">Erkannte Bauteile zur kurzen Kontrolle</div>
+                <div class="text-muted small mb-3">Bitte kurz prüfen, ob diese betroffenen Bauteile zu Ihrem Auftrag passen.</div>
+                <div class="d-flex gap-2 flex-wrap">
+                  {% for item in auftrag['kunden_bauteile'] %}
+                  <span class="chip">
+                    {{ item['teil'] }}{% if item['arbeiten'] %} · {{ item['arbeiten']|join(', ') }}{% endif %}
+                  </span>
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+            {% endif %}
+            <div class="col-12">
+              <label class="form-label">Bauteile bei Bedarf korrigieren</label>
+              <textarea name="bauteile_override" class="form-control" rows="3" placeholder="z.B. Stoßstange vorne&#10;Tür vorne links">{{ auftrag['bauteile_override'] }}</textarea>
+              <div class="form-text">Wenn die Erkennung falsch ist, können Sie die richtigen Bauteile hier selbst eintragen. Am besten ein Bauteil pro Zeile.</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Transportart</label>
+              <select name="transport_art" class="form-select form-select-lg" data-transport-select>
+                {% for key, meta in transport_arten.items() %}
+                <option value="{{ key }}" {% if auftrag['transport_art'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" data-annahme-label>{{ auftrag['partner_annahme_label'] }}</label>
+              <input type="date" name="annahme_datum" class="form-control form-control-lg" value="{{ auftrag['annahme_datum']|iso_date }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" data-abholung-label>{{ auftrag['partner_abholung_label'] }}</label>
+              <input type="date" name="abholtermin" class="form-control form-control-lg" value="{{ auftrag['abholtermin']|iso_date }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Fertigbilder</label>
+              <input type="file" name="fertigbilder" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.pdf">
+              <div class="form-text">Hier können Sie Abschlussbilder oder ein fertiges Übergabe-PDF hochladen.</div>
+            </div>
+            <div class="col-12 d-flex gap-2 flex-wrap">
+              <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark btn-lg" data-loading-message="Datei wird analysiert. Bitte kurz warten.">Hochladen & analysieren</button>
+              <button type="submit" name="aktion" value="speichern" class="btn btn-dark btn-lg" data-loading-message="Auftrag wird gespeichert. Bitte kurz warten.">Termine speichern</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="col-xl-5">
+        <div class="panel mb-4">
+          <h4 class="mb-3">Status</h4>
+          <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }}">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
+          <div class="mt-3">
+            {% if auftrag['annahme_datum'] %}<span class="chip">{{ auftrag['partner_annahme_label'] }} {{ auftrag['annahme_datum'] }}</span>{% endif %}
+            {% if auftrag['abholtermin'] %}<span class="chip">{{ auftrag['partner_abholung_label'] }} {{ auftrag['abholtermin'] }}</span>{% endif %}
+          </div>
+        </div>
+
+        <div class="panel mb-4">
+          <h4 class="mb-3">Verzögerung melden</h4>
+          <form method="POST" action="{{ url_for('partner_verzoegerung', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="row g-3">
+            <div class="col-12">
+              <label class="form-label">Meldung</label>
+              <textarea name="meldung" class="form-control" rows="3" placeholder="z.B. Fahrzeug kommt einen Tag später" required></textarea>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Neuer Fertigstellungstermin</label>
+              <input type="date" name="fertig_datum" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Neuer Endtermin</label>
+              <input type="date" name="abholtermin" class="form-control">
+            </div>
+            <div class="col-12">
+              <button type="submit" class="btn btn-outline-dark">Verzögerung senden</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel mb-4">
+          <h4 class="mb-3">Unterlagen</h4>
+          {% if dateien %}
+            <div class="d-grid gap-2">
+              {% for datei in dateien %}
+              <div class="border rounded-4 p-3">
+                <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" class="btn btn-outline-dark text-start w-100">{{ datei['original_name'] }}</a>
+                {% if datei['has_extract'] %}
+                  <div class="mt-3">
+                    <div class="small text-muted">Datei-Auswertung{% if datei['dokument_typ'] %} · {{ datei['dokument_typ'] }}{% endif %}</div>
+                    {% if datei['extrakt_kurz'] %}
+                      <div class="fw-semibold mt-1">{{ datei['extrakt_kurz'] }}</div>
+                    {% else %}
+                      <div class="text-muted mt-1">Kein lesbarer Text gefunden.</div>
+                    {% endif %}
+                    {% if datei['text_preview'] %}
+                      <details class="mt-2">
+                        <summary class="text-muted small">Textvorschau öffnen</summary>
+                        <div class="small mt-2" style="white-space:pre-wrap;">{{ datei['text_preview'] }}</div>
+                      </details>
+                    {% endif %}
+                  </div>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-muted">Noch keine Unterlagen vorhanden.</div>
+          {% endif %}
+        </div>
+
+        <div class="panel mb-4">
+          <h4 class="mb-3">Fertigbilder</h4>
+          {% if fertigbilder %}
+            <div class="d-grid gap-2">
+              {% for datei in fertigbilder %}
+              <div class="border rounded-4 p-3">
+                <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" class="btn btn-outline-dark text-start w-100">{{ datei['original_name'] }}</a>
+              </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-muted">Noch keine Fertigbilder vorhanden.</div>
+          {% endif %}
+        </div>
+
+        <div class="panel mb-4">
+          <h4 class="mb-3">Verzögerungsverlauf</h4>
+          {% if verzoegerungen %}
+            <div class="d-grid gap-3">
+              {% for eintrag in verzoegerungen %}
+              <div class="timeline-item">
+                <div class="d-flex justify-content-between gap-2 flex-wrap">
+                  <div class="fw-bold">{{ eintrag['quelle']|capitalize }}</div>
+                  <div class="text-muted small">{{ eintrag['erstellt_am'] }}</div>
+                </div>
+                <div class="mt-1">{{ eintrag['meldung'] }}</div>
+                <div class="mt-2 d-flex gap-2 flex-wrap">
+                  {% if eintrag['vorgeschlagen_start'] %}<span class="chip">Start {{ eintrag['vorgeschlagen_start'] }}</span>{% endif %}
+                  {% if eintrag['vorgeschlagen_fertig'] %}<span class="chip">Fertig {{ eintrag['vorgeschlagen_fertig'] }}</span>{% endif %}
+                  {% if eintrag['vorgeschlagen_abholung'] %}<span class="chip">{{ auftrag['partner_abholung_label'] }} {{ eintrag['vorgeschlagen_abholung'] }}</span>{% endif %}
+                  {% if eintrag['uebernommen'] %}<span class="badge text-bg-success">Übernommen</span>{% else %}<span class="badge text-bg-warning">Offen</span>{% endif %}
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-muted">Noch keine Verzögerungen vorhanden.</div>
+          {% endif %}
+        </div>
+
+        <div class="panel mb-4 border border-danger-subtle">
+          <h4 class="mb-3 text-danger">Reklamationen</h4>
+          <form method="POST" action="{{ url_for('partner_reklamation', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" enctype="multipart/form-data" class="row g-3 mb-4">
+            <div class="col-12">
+              <label class="form-label">Reklamation melden</label>
+              <textarea name="meldung" class="form-control" rows="3" placeholder="Bitte die Reklamation genau beschreiben" required></textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Bilder oder Dateien</label>
+              <input type="file" name="reklamationsbilder" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.pdf">
+              <div class="form-text">Diese Meldung geht als wichtiger Alarm direkt an die Werkstatt.</div>
+            </div>
+            <div class="col-12">
+              <button type="submit" class="btn btn-danger">Reklamation als Alarm senden</button>
+            </div>
+          </form>
+
+          {% if reklamationen %}
+            <div class="d-grid gap-3">
+              {% for reklamation in reklamationen %}
+              <div class="timeline-item">
+                <div class="d-flex justify-content-between gap-2 flex-wrap">
+                  <div class="fw-bold">Reklamation</div>
+                  <div class="d-flex gap-2 align-items-center">
+                    {% if reklamation['bearbeitet'] %}
+                    <span class="badge text-bg-success">Bearbeitet</span>
+                    {% else %}
+                    <span class="badge text-bg-danger">Alarm offen</span>
+                    {% endif %}
+                    <div class="text-muted small">{{ reklamation['erstellt_am'] }}</div>
+                  </div>
+                </div>
+                <div class="mt-1">{{ reklamation['meldung'] }}</div>
+                {% if reklamation['dateien'] %}
+                <div class="mt-2 d-flex gap-2 flex-wrap">
+                  {% for datei in reklamation['dateien'] %}
+                  <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" class="chip">{{ datei['original_name'] }}</a>
+                  {% endfor %}
+                </div>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-muted">Noch keine Reklamationen vorhanden.</div>
+          {% endif %}
+        </div>
+
+        <div class="panel">
+          <h4 class="mb-3">Auftrag verwalten</h4>
+          <div class="d-grid gap-2">
+            <form method="POST" action="{{ url_for('partner_archivieren', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}">
+              <button type="submit" class="btn btn-outline-secondary w-100">{{ 'Auftrag wieder aktivieren' if auftrag['archiviert'] else 'Auftrag archivieren' }}</button>
+            </form>
+            <form method="POST" action="{{ url_for('partner_loeschen', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" onsubmit="return confirm('Fahrzeug wirklich löschen?')">
+              <button type="submit" class="btn btn-outline-danger w-100">Fahrzeug löschen</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const form = document.querySelector('[data-upload-form]');
+    const overlay = document.querySelector('[data-loading-overlay]');
+    const loadingText = document.querySelector('[data-loading-text]');
+    const loadingNewsTitle = document.querySelector('[data-loading-news-title]');
+    const loadingNewsText = document.querySelector('[data-loading-news-text]');
+    const transportLabels = {{ transport_arten | tojson }};
+    const transportSelect = document.querySelector('[data-transport-select]');
+    const annahmeLabel = document.querySelector('[data-annahme-label]');
+    const abholungLabel = document.querySelector('[data-abholung-label]');
+    const neueAbholungLabel = document.querySelector('[data-neue-abholung-label]');
+    const loadingNewsItems = [
+      {
+        title: 'Ab 27.04.2026: neue ION-7 im Einsatz',
+        text: 'Für Sie bedeutet das vor allem ein ruhigerer, planbarer Lackierprozess und ein Finish, das wir noch gleichmäßiger steuern können.'
+      },
+      {
+        title: 'Mehr Konstanz beim Lackbild',
+        text: 'Die neue Technik arbeitet laut Anbieter mit erwärmtem Stickstoff. Für unsere Kunden übersetzen wir das in noch mehr Stabilität beim Lackierergebnis.'
+      },
+      {
+        title: 'Sauberer Prozess, weniger Nacharbeit',
+        text: 'Weniger Overspray heißt für Sie im Idealfall: sauberere Abläufe, weniger unnötige Nacharbeit und ein klarer Fokus auf ein sauberes Endergebnis.'
+      },
+      {
+        title: 'Planbarere Fertigstellung',
+        text: 'ION-7 nennt verkürzte Ablüftzeiten als Vorteil. Für unsere Kunden heißt das vor allem: Termine lassen sich verlässlicher halten, sobald das Fahrzeug bei uns im Prozess ist.'
+      }
+    ];
+    let loadingNewsIndex = 0;
+    let loadingNewsTimer = null;
+    let submitterMessage = '';
+    const updateLoadingNews = () => {
+      if (!loadingNewsTitle || !loadingNewsText) {
+        return;
+      }
+      const item = loadingNewsItems[loadingNewsIndex % loadingNewsItems.length];
+      loadingNewsTitle.textContent = item.title;
+      loadingNewsText.textContent = item.text;
+      loadingNewsIndex += 1;
+    };
+    const startLoadingNews = () => {
+      updateLoadingNews();
+      if (loadingNewsTimer) {
+        window.clearInterval(loadingNewsTimer);
+      }
+      loadingNewsTimer = window.setInterval(updateLoadingNews, 3200);
+    };
+    if (form && overlay && loadingText) {
+      form.addEventListener('click', (event) => {
+        const button = event.target.closest('button[type="submit"]');
+        if (button) {
+          submitterMessage = button.dataset.loadingMessage || '';
+        }
+      });
+      form.addEventListener('submit', () => {
+        loadingText.textContent = submitterMessage || 'Bitte kurz warten. Die Datei wird jetzt ausgewertet und in den Auftrag übernommen.';
+        startLoadingNews();
+        overlay.classList.add('show');
+      });
+    }
+    const updateTransportLabels = () => {
+      if (!transportSelect) {
+        return;
+      }
+      const selected = transportLabels[transportSelect.value] || transportLabels.standard || {};
+      if (annahmeLabel) {
+        annahmeLabel.textContent = selected.partner_annahme_label || 'Fahrzeug wird von Ihnen angeliefert';
+      }
+      if (abholungLabel) {
+        abholungLabel.textContent = selected.partner_abholung_label || 'Fahrzeug wird von Ihnen geholt';
+      }
+      if (neueAbholungLabel) {
+        neueAbholungLabel.textContent = `Neue ${selected.partner_abholung_label || 'Fahrzeug wird von Ihnen geholt'}`;
+      }
+    };
+    if (transportSelect) {
+      transportSelect.addEventListener('change', updateTransportLabels);
+      updateTransportLabels();
+    }
+  </script>
+</body>
+</html>

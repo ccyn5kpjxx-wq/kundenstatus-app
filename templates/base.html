@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Werkstatt-Cockpit{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f3efe6;
+      --panel: #fffdf9;
+      --panel-soft: #f7f1e8;
+      --ink: #16202a;
+      --muted: #6f7a83;
+      --line: #ddd1c0;
+      --brand: #a23f2d;
+      --brand-dark: #7f2a1b;
+      --accent: #145d66;
+      --good: #1b7f53;
+      --warning: #cc8a16;
+      --shadow: 0 16px 40px rgba(64, 47, 25, 0.12);
+      --radius: 22px;
+    }
+
+    body {
+      background:
+        radial-gradient(circle at top left, rgba(162, 63, 45, 0.08), transparent 28%),
+        radial-gradient(circle at top right, rgba(20, 93, 102, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f2ea 0%, var(--bg) 100%);
+      color: var(--ink);
+      font-family: "DM Sans", sans-serif;
+      min-height: 100vh;
+    }
+
+    h1, h2, h3, h4, h5, h6, .navbar-brand span {
+      font-family: "Space Grotesk", sans-serif;
+      letter-spacing: -0.02em;
+    }
+
+    .navbar {
+      background: rgba(18, 30, 43, 0.94) !important;
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 12px 30px rgba(18, 30, 43, 0.18);
+    }
+
+    .navbar-brand img {
+      height: 38px;
+      width: auto;
+      filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.2));
+    }
+
+    .nav-link {
+      color: rgba(255, 255, 255, 0.82) !important;
+      padding: .55rem .95rem !important;
+      border-radius: 999px;
+      transition: .2s ease;
+      font-weight: 500;
+    }
+
+    .nav-link:hover {
+      color: #fff !important;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .hero-shell {
+      padding: 2rem 0 1rem;
+    }
+
+    .page-card, .card {
+      background: rgba(255, 253, 249, 0.94);
+      border: 1px solid rgba(221, 209, 192, 0.9);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .metric-card {
+      padding: 1.2rem 1.3rem;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .metric-card::after {
+      content: "";
+      position: absolute;
+      inset: auto -28px -36px auto;
+      width: 110px;
+      height: 110px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.35);
+    }
+
+    .metric-card .metric-label {
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-size: .76rem;
+      color: rgba(255, 255, 255, 0.82);
+    }
+
+    .metric-card .metric-value {
+      font-size: 2.15rem;
+      line-height: 1;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .metric-warm { background: linear-gradient(135deg, #a23f2d, #c1602b); }
+    .metric-blue { background: linear-gradient(135deg, #145d66, #2b808b); }
+    .metric-green { background: linear-gradient(135deg, #1b7f53, #29a168); }
+    .metric-gold { background: linear-gradient(135deg, #a66b00, #d38f13); }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .section-title p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .badge-soft {
+      background: var(--panel-soft);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: .45rem .8rem;
+      font-weight: 600;
+    }
+
+    .schedule-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      background: #f4ede4;
+      color: #574631;
+      border: 1px solid #e4d6c3;
+      border-radius: 999px;
+      padding: .35rem .75rem;
+      font-size: .86rem;
+      font-weight: 500;
+    }
+
+    .table-shell {
+      overflow-x: auto;
+      border-radius: 18px;
+    }
+
+    .table > :not(caption) > * > * {
+      padding: 1rem .9rem;
+      vertical-align: middle;
+      background: transparent;
+      border-bottom-color: rgba(221, 209, 192, 0.8);
+    }
+
+    .table thead th {
+      color: var(--muted);
+      font-size: .82rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      font-weight: 700;
+    }
+
+    .btn-brand {
+      background: var(--brand);
+      border-color: var(--brand);
+      color: #fff;
+    }
+
+    .btn-brand:hover {
+      background: var(--brand-dark);
+      border-color: var(--brand-dark);
+      color: #fff;
+    }
+
+    .btn-soft {
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      color: var(--ink);
+    }
+
+    .btn-soft:hover {
+      background: #efe5d7;
+      border-color: #d6c4ac;
+      color: var(--ink);
+    }
+
+    .status-bar {
+      display: flex;
+      gap: .4rem;
+      min-width: 180px;
+    }
+
+    .status-bar span {
+      height: 8px;
+      flex: 1;
+      border-radius: 999px;
+      background: #e7ddd0;
+    }
+
+    .status-bar span.done { background: var(--brand); }
+
+    .timeline-item {
+      border-left: 3px solid #dbc8af;
+      padding-left: 1rem;
+      margin-left: .35rem;
+    }
+
+    footer {
+      color: var(--muted);
+      text-align: center;
+      padding: 2rem 1rem 2.4rem;
+      font-size: .9rem;
+    }
+  </style>
+  {% block extra_css %}{% endblock %}
+</head>
+<body>
+{% block navbar %}
+<nav class="navbar navbar-expand-lg">
+  <div class="container py-2">
+    <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('dashboard') }}">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
+      <span>Werkstatt-Cockpit</span>
+    </a>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <a class="nav-link" href="{{ url_for('dashboard') }}">Übersicht</a>
+      <a class="nav-link" href="{{ url_for('kalender') }}">Kalender</a>
+      <a class="nav-link" href="{{ url_for('neuer_auftrag') }}">Fahrzeug neu</a>
+      <a class="nav-link" href="{{ url_for('partner_login') }}" target="_blank">Autohaus-Portal</a>
+      <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+    </div>
+  </div>
+</nav>
+{% endblock %}
+
+<main class="hero-shell">
+  <div class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="alert alert-{{ cat }} alert-dismissible fade show page-card mb-4" role="alert">
+          {{ msg }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </div>
+</main>
+
+<footer>Gärtner Karosserie &amp; Lack GmbH · Binauer Höhe 4, 74821 Mosbach · +49 1522 7706694</footer>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+{% block title %}Auftragsdetails{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-xl-7">
+    <div class="page-card p-4 p-lg-5 h-100">
+      <div class="section-title">
+        <div>
+          <div class="badge-soft mb-3">Fahrzeugdetails</div>
+          <h1 class="mb-2">{{ auftrag['fahrzeug'] }}</h1>
+          <p>{{ auftrag['autohaus_name'] or 'Ohne Autohaus' }}{% if auftrag['kennzeichen'] %} · {{ auftrag['kennzeichen'] }}{% endif %}</p>
+        </div>
+        <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }}">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
+      </div>
+
+      {% if auftrag['angebotsphase'] %}
+      <div class="alert alert-primary d-flex justify-content-between align-items-center flex-wrap gap-3">
+        <div>Diese Anfrage ist aktuell noch im Angebotsbereich und wird erst nach deiner Annahme ein normaler Auftrag.</div>
+        <form method="POST" action="{{ url_for('angebot_annehmen_route', auftrag_id=auftrag['id']) }}">
+          <button type="submit" class="btn btn-brand btn-sm">Angebot annehmen</button>
+        </form>
+      </div>
+      {% endif %}
+
+      <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
+        <div class="col-md-6">
+          <label class="form-label">Autohaus</label>
+          <select name="autohaus_id" class="form-select form-select-lg">
+            <option value="">Ohne Autohaus</option>
+            {% for h in autohaeuser %}
+            <option value="{{ h['id'] }}" {% if auftrag['autohaus_id'] == h['id'] %}selected{% endif %}>{{ h['name'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Endkunde / Referenz</label>
+          <input type="text" name="kunde_name" class="form-control form-control-lg" value="{{ auftrag['kunde_name'] }}">
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Fahrzeug</label>
+          <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ auftrag['fahrzeug'] }}" required>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Kennzeichen</label>
+          <input type="text" name="kennzeichen" class="form-control form-control-lg" value="{{ auftrag['kennzeichen'] }}" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">FIN-Nummer</label>
+          <input type="text" name="fin_nummer" class="form-control form-control-lg" value="{{ auftrag['fin_nummer'] }}" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Auftrag / Vorgangsnummer</label>
+          <input type="text" name="auftragsnummer" class="form-control form-control-lg" value="{{ auftrag['auftragsnummer'] }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Telefon</label>
+          <input type="text" name="kontakt_telefon" class="form-control" value="{{ auftrag['kontakt_telefon'] }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Analyse</label>
+          <input type="text" name="analyse_text" class="form-control" value="{{ auftrag['analyse_text'] }}">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Beschreibung</label>
+          <textarea name="beschreibung" class="form-control" rows="4">{{ auftrag['beschreibung'] }}</textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Bauteile manuell korrigieren</label>
+          <textarea name="bauteile_override" class="form-control" rows="3" placeholder="z.B. Stoßstange vorne&#10;Tür vorne links">{{ auftrag['bauteile_override'] }}</textarea>
+          <div class="form-text">Falls die automatische Erkennung falsch liegt, kannst du hier die Bauteile manuell überschreiben.</div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Transport</label>
+          <select name="transport_art" class="form-select form-select-lg">
+            {% for key, meta in transport_arten.items() %}
+            <option value="{{ key }}" {% if auftrag['transport_art'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">{{ auftrag['annahme_label'] }}</label>
+          <input type="date" name="annahme_datum" class="form-control form-control-lg" value="{{ auftrag['annahme_datum']|iso_date }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Start</label>
+          <input type="date" name="start_datum" class="form-control form-control-lg" value="{{ auftrag['start_datum']|iso_date }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Fertig</label>
+          <input type="date" name="fertig_datum" class="form-control form-control-lg" value="{{ auftrag['fertig_datum']|iso_date }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">{{ auftrag['abholung_label'] }}</label>
+          <input type="date" name="abholtermin" class="form-control form-control-lg" value="{{ auftrag['abholtermin']|iso_date }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Neue Unterlagen</label>
+          <input type="file" name="dateien" class="form-control form-control-lg" multiple>
+          <div class="form-text">Datei direkt hochladen und den Auftrag sofort neu analysieren. Bei Gutachten kann das ein paar Sekunden dauern.</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Fertigbilder</label>
+          <input type="file" name="fertigbilder" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.pdf">
+          <div class="form-text">Hier kannst du Abschlussbilder oder ein fertiges Übergabe-PDF hochladen.</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Interne Notiz</label>
+          <textarea name="notiz_intern" class="form-control" rows="4">{{ auftrag['notiz_intern'] }}</textarea>
+        </div>
+        <div class="col-12 d-flex gap-2 flex-wrap">
+          <button type="submit" name="aktion" value="upload_analyze" class="btn btn-soft btn-lg">Hochladen & analysieren</button>
+          <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Änderungen speichern</button>
+          <a href="{{ url_for('dashboard') }}" class="btn btn-soft btn-lg">Zurück</a>
+        </div>
+        <div class="col-12">
+          <div class="alert alert-info d-none mb-0" data-upload-status>Analyse läuft. Bitte kurz warten...</div>
+        </div>
+      </form>
+
+      <div class="mt-4 d-flex gap-2 flex-wrap">
+        {% if auftrag['status'] < 4 %}
+        <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=auftrag['status'] + 1) }}">
+          <button type="submit" class="btn btn-soft">Status weiterschalten</button>
+        </form>
+        {% endif %}
+        <form method="POST" action="{{ url_for('archivieren', auftrag_id=auftrag['id']) }}">
+          <button type="submit" class="btn btn-outline-secondary">{{ 'Archiv verlassen' if auftrag['archiviert'] else 'Archivieren' }}</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-xl-5">
+    <div class="page-card p-4 mb-4">
+      <h4 class="mb-3">Unterlagen</h4>
+      {% if dateien %}
+        <div class="d-grid gap-2">
+          {% for datei in dateien %}
+          <div class="page-card p-3">
+            <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" class="btn btn-soft text-start w-100">{{ datei['original_name'] }}</a>
+            {% if datei['has_extract'] %}
+              <div class="mt-3">
+                <div class="small text-muted">Datei gelesen{% if datei['dokument_typ'] %} · {{ datei['dokument_typ'] }}{% endif %}</div>
+                {% if datei['extrakt_kurz'] %}
+                  <div class="fw-semibold mt-1">{{ datei['extrakt_kurz'] }}</div>
+                {% else %}
+                  <div class="text-muted mt-1">Kein lesbarer Text gefunden.</div>
+                {% endif %}
+                {% if datei['text_preview'] %}
+                  <details class="mt-2">
+                    <summary class="text-muted small">Textvorschau öffnen</summary>
+                    <div class="small mt-2" style="white-space:pre-wrap;">{{ datei['text_preview'] }}</div>
+                  </details>
+                {% endif %}
+              </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-muted">Noch keine Unterlagen vorhanden.</div>
+      {% endif %}
+    </div>
+
+    <div class="page-card p-4 mb-4">
+      <h4 class="mb-3">Fertigbilder</h4>
+      {% if fertigbilder %}
+        <div class="d-grid gap-2">
+          {% for datei in fertigbilder %}
+          <div class="page-card p-3">
+            <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" class="btn btn-soft text-start w-100">{{ datei['original_name'] }}</a>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-muted">Noch keine Fertigbilder vorhanden.</div>
+      {% endif %}
+    </div>
+
+    <div class="page-card p-4 mb-4">
+      <h4 class="mb-3">Verzögerung melden</h4>
+      <form method="POST" action="{{ url_for('admin_verzoegerung', auftrag_id=auftrag['id']) }}" class="row g-3 mb-4">
+        <div class="col-12">
+          <label class="form-label">Werkstattmeldung</label>
+          <textarea name="meldung" class="form-control" rows="3" placeholder="z.B. Ersatzteil fehlt, Rückgabe verschiebt sich" required></textarea>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Neuer Start</label>
+          <input type="date" name="start_datum" class="form-control">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Neues Fertigdatum</label>
+          <input type="date" name="fertig_datum" class="form-control">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Neue {{ auftrag['abholung_label'] }}</label>
+          <input type="date" name="abholtermin" class="form-control">
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-soft">Verzögerung speichern</button>
+        </div>
+      </form>
+
+      {% if verzoegerungen %}
+        <div class="d-grid gap-3">
+          {% for eintrag in verzoegerungen %}
+          <div class="timeline-item">
+            <div class="d-flex justify-content-between gap-2 flex-wrap">
+              <div class="fw-bold">{{ eintrag['quelle']|capitalize }}</div>
+              <div class="text-muted small">{{ eintrag['erstellt_am'] }}</div>
+            </div>
+            <div class="mt-1">{{ eintrag['meldung'] }}</div>
+            <div class="mt-2 d-flex gap-2 flex-wrap">
+              {% if eintrag['vorgeschlagen_start'] %}<span class="schedule-pill">Start {{ eintrag['vorgeschlagen_start'] }}</span>{% endif %}
+              {% if eintrag['vorgeschlagen_fertig'] %}<span class="schedule-pill">Fertig {{ eintrag['vorgeschlagen_fertig'] }}</span>{% endif %}
+              {% if eintrag['vorgeschlagen_abholung'] %}<span class="schedule-pill">{{ auftrag['abholung_label'] }} {{ eintrag['vorgeschlagen_abholung'] }}</span>{% endif %}
+              {% if eintrag['uebernommen'] %}
+                <span class="badge text-bg-success">Übernommen</span>
+              {% else %}
+                <form method="POST" action="{{ url_for('verzoegerung_uebernehmen', verzoegerung_id=eintrag['id']) }}">
+                  <button type="submit" class="btn btn-sm btn-brand">Übernehmen</button>
+                </form>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-muted">Noch keine Verzögerungen vorhanden.</div>
+      {% endif %}
+    </div>
+
+    <div class="page-card p-4 mb-4 border border-danger-subtle">
+      <h4 class="mb-3 text-danger">Reklamationen</h4>
+      {% if reklamationen %}
+        <div class="d-grid gap-3">
+          {% for reklamation in reklamationen %}
+          <div class="timeline-item">
+            <div class="d-flex justify-content-between gap-2 flex-wrap">
+              <div class="fw-bold">{{ reklamation['quelle']|capitalize }}</div>
+              <div class="d-flex gap-2 align-items-center">
+                {% if reklamation['bearbeitet'] %}
+                <span class="badge text-bg-success">Bearbeitet</span>
+                {% else %}
+                <span class="badge text-bg-danger">Alarm offen</span>
+                {% endif %}
+                <div class="text-muted small">{{ reklamation['erstellt_am'] }}</div>
+              </div>
+            </div>
+            <div class="mt-1">{{ reklamation['meldung'] }}</div>
+            {% if reklamation['dateien'] %}
+            <div class="mt-2 d-flex gap-2 flex-wrap">
+              {% for datei in reklamation['dateien'] %}
+              <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" class="schedule-pill">{{ datei['original_name'] }}</a>
+              {% endfor %}
+            </div>
+            {% endif %}
+            <div class="mt-3 d-flex gap-2 flex-wrap">
+              <form method="POST" action="{{ url_for('reklamation_status', reklamation_id=reklamation['id']) }}">
+                <input type="hidden" name="bearbeitet" value="{{ 0 if reklamation['bearbeitet'] else 1 }}">
+                <button type="submit" class="btn btn-sm {{ 'btn-soft' if reklamation['bearbeitet'] else 'btn-brand' }}">
+                  {{ 'Wieder öffnen' if reklamation['bearbeitet'] else 'Als erledigt markieren' }}
+                </button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-muted">Noch keine Reklamationen vorhanden.</div>
+      {% endif %}
+    </div>
+
+    <div class="page-card p-4">
+      <h4 class="mb-3">Statusverlauf</h4>
+      {% if log %}
+        <div class="d-grid gap-3">
+          {% for entry in log %}
+          {% set st = statusliste[entry['status']] %}
+          <div class="timeline-item">
+            <div class="fw-bold">{{ st['icon'] }} {{ st['label'] }}</div>
+            <div class="text-muted small">{{ entry['zeitstempel'] }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-muted">Noch kein Verlauf vorhanden.</div>
+      {% endif %}
+
+      <hr class="my-4">
+      <div class="d-grid gap-2">
+        <form method="POST" action="{{ url_for('archivieren', auftrag_id=auftrag['id']) }}">
+          <button type="submit" class="btn btn-outline-secondary w-100">{{ 'Auftrag wieder aktivieren' if auftrag['archiviert'] else 'Auftrag archivieren' }}</button>
+        </form>
+        <form method="POST" action="{{ url_for('loeschen', auftrag_id=auftrag['id']) }}" onsubmit="return confirm('Fahrzeug wirklich löschen?')">
+          <button type="submit" class="btn btn-outline-danger w-100">Fahrzeug löschen</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  const form = document.querySelector('[data-upload-form]');
+  const status = document.querySelector('[data-upload-status]');
+  if (form && status) {
+    form.addEventListener('submit', () => {
+      status.classList.remove('d-none');
+    });
+  }
+</script>
+{% endblock %}
