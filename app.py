@@ -11,15 +11,22 @@ import base64
 from datetime import date, datetime
 from difflib import SequenceMatcher
 from functools import wraps
+import hmac
 import json
 import mimetypes
 import os
 import pathlib
 import re
+import secrets
 import shutil
 import sqlite3
 import time
 import uuid
+
+try:
+    import psycopg
+except Exception:
+    psycopg = None
 
 try:
     import cv2
@@ -97,6 +104,8 @@ def load_env_file(path):
 for env_file in (BASE / ".env.local", BASE / ".env"):
     load_env_file(env_file)
 
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+USE_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
 DEFAULT_ADMIN_PASS = "gaertner2026"
 DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
@@ -110,6 +119,9 @@ OPENAI_API_URL = os.environ.get(
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_DOC_AI_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 GOOGLE_DOC_AI_TIMEOUT = 45
+OPENAI_VISION_MAX_PAGES = 4
+OPENAI_VISION_MAX_IMAGE_SIDE = 1800
+CSRF_FIELD_NAME = "csrf_token"
 
 GOOGLE_ACCESS_TOKEN = {"token": "", "expires_at": 0}
 
@@ -141,11 +153,78 @@ TRANSPORT_ARTEN = {
     },
 }
 
+PREISLISTE_LACKIERUNG = {
+    "hinweis": (
+        "Reine Lackierarbeiten. Montage- und Demontagearbeiten sind nicht enthalten. "
+        "Diese Richtwerte gelten ausschließlich für die Lackierleistung."
+    ),
+    "positionen": {
+        ("stossstange", "gebrauchtteil"): {
+            "leistung": "Stoßstange lackieren (Gebrauchtteil)",
+            "von": 220,
+            "bis": 300,
+        },
+        ("stossstange", "neuteil"): {
+            "leistung": "Stoßstange lackieren (Neuteil)",
+            "von": 260,
+            "bis": 340,
+        },
+        ("kotfluegel", "gebrauchtteil"): {
+            "leistung": "Kotflügel lackieren (Gebrauchtteil)",
+            "von": 160,
+            "bis": 220,
+        },
+        ("kotfluegel", "neuteil"): {
+            "leistung": "Kotflügel lackieren (Neuteil)",
+            "von": 190,
+            "bis": 250,
+        },
+        ("motorhaube", "gebrauchtteil"): {
+            "leistung": "Motorhaube lackieren (Gebrauchtteil)",
+            "von": 260,
+            "bis": 340,
+        },
+        ("motorhaube", "neuteil"): {
+            "leistung": "Motorhaube lackieren (Neuteil)",
+            "von": 320,
+            "bis": 420,
+        },
+        ("beilackieren", "standard"): {
+            "leistung": "Beilackieren angrenzender Teile",
+            "von": 80,
+            "bis": 120,
+        },
+        ("neuwagenaufbereitung", "standard"): {
+            "leistung": "Neuwagenaufbereitung komplett",
+            "von": 90,
+            "bis": 140,
+        },
+        ("gebrauchtwagenaufbereitung", "standard"): {
+            "leistung": "Gebrauchtwagenaufbereitung komplett",
+            "von": 150,
+            "bis": 240,
+        },
+    },
+}
+
 EVENT_FELDER = (
     ("annahme_datum", "Anlieferung", "secondary"),
     ("start_datum", "Start", "primary"),
     ("fertig_datum", "Fertig", "warning"),
     ("abholtermin", "Abholung", "success"),
+)
+
+DOCUMENT_REVIEW_FIELDS = (
+    ("fahrzeug", "Fahrzeug"),
+    ("kennzeichen", "Kennzeichen"),
+    ("fin_nummer", "FIN"),
+    ("auftragsnummer", "Auftrag / Vorgang"),
+    ("rep_max_kosten", "Rep.-Max.-Kosten"),
+    ("bauteile_override", "Bauteile"),
+    ("analyse_text", "Kurzanalyse"),
+    ("beschreibung", "Beschreibung"),
+    ("annahme_datum", "Annahme"),
+    ("fertig_datum", "Fertig bis"),
 )
 
 WOCHENTAGE = {
@@ -177,13 +256,18 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"}
 
 TEILE_PATTERNS = {
     "Stoßstange vorne": [r"(stoß|stoss)(fänger|stange).*(vorn|vorne|front)", r"frontschürze"],
-    "Stoßstange hinten": [r"(stoß|stoss)(fänger|stange).*(hinten|heck)", r"heckschürze"],
+    "Stoßstange hinten": [r"(stoß|stoss)(fänger|stange).*(hinten|heck)", r"heckschürze", r"\bladekante\b"],
     "Tür vorne links": [r"(fahrertür|vordertür links|tür vorne links)"],
     "Tür vorne rechts": [r"(beifahrertür|vordertür rechts|tür vorne rechts)"],
     "Tür hinten links": [r"(hintertür links|tür hinten links)"],
     "Tür hinten rechts": [r"(hintertür rechts|tür hinten rechts)"],
+    "Kotflügel links": [r"(kotflügel|kotfluegel).*(links)"],
+    "Kotflügel rechts": [r"(kotflügel|kotfluegel).*(rechts)"],
     "Kotflügel vorne links": [r"(kotflügel|kotfluegel).*(vorn|vorne).*(links)"],
     "Kotflügel vorne rechts": [r"(kotflügel|kotfluegel).*(vorn|vorne).*(rechts)"],
+    "Radhausverbreiterung hinten links": [r"radhausverbreiterung.*hinten.*links"],
+    "Radhausverbreiterung hinten rechts": [r"radhausverbreiterung.*hinten.*rechts"],
+    "Radhausverbreiterung": [r"radhausverbreiterung"],
     "Heckklappe": [r"heckklappe", r"kofferraumklappe"],
     "Motorhaube": [r"motorhaube"],
     "Seitenteil links": [r"seitenteil.*links"],
@@ -220,6 +304,11 @@ OCR_TEILE_PATTERNS = (
     ("Frontblech", [r"frontblech"]),
     ("Motorhaube", [r"haube", r"motorhaube"]),
     ("Heckklappe", [r"heckklappe"]),
+    ("Radhausverbreiterung hinten links", [r"radhausverbreiterung.*hinten.*links"]),
+    ("Radhausverbreiterung hinten rechts", [r"radhausverbreiterung.*hinten.*rechts"]),
+    ("Radhausverbreiterung", [r"radhausverbreiterung"]),
+    ("Kotflügel links", [r"kotfluegel\s+links\b", r"kotfluegel\s+l\b"]),
+    ("Kotflügel rechts", [r"kotfluegel\s+rechts\b", r"kotfluegel\s+r\b"]),
     ("Kotflügel vorne links", [r"kotfluegel\s*l\b"]),
     ("Kotflügel vorne rechts", [r"kotfluegel\s*r\b"]),
     ("Tür vorne links", [r"tuer\s*vorn\s*l\b"]),
@@ -245,6 +334,11 @@ LINE_ITEM_PART_PATTERNS = (
     ("Stoßstange vorne", [r"stossfaenger\s+v\b", r"stossf\s+v\b"]),
     ("Stoßstange hinten", [r"stossfaenger\s+h\b", r"stossf\s+h\b"]),
     ("Stoßstangenträger vorne", [r"stossfaengertraeger\s+v"]),
+    ("Radhausverbreiterung hinten links", [r"radhausverbreiterung.*hinten.*links"]),
+    ("Radhausverbreiterung hinten rechts", [r"radhausverbreiterung.*hinten.*rechts"]),
+    ("Radhausverbreiterung", [r"radhausverbreiterung"]),
+    ("Kotflügel links", [r"kotfluegel\s+links\b", r"kotfl\s+links\b"]),
+    ("Kotflügel rechts", [r"kotfluegel\s+rechts\b", r"kotfl\s+rechts\b"]),
     ("Kotflügel vorne links", [r"kotfluegel\s+v\s+l\b", r"kotfl\s+v\s+l\b"]),
     ("Kotflügel vorne rechts", [r"kotfluegel\s+v\s+r\b", r"kotfl\s+v\s+r\b"]),
     ("Motorhaube", [r"motorhaube"]),
@@ -310,6 +404,58 @@ TESSERACT_CMD = shutil.which("tesseract")
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or DEFAULT_FLASK_SECRET_KEY
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
+
+
+def get_csrf_token():
+    token = session.get(CSRF_FIELD_NAME)
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session[CSRF_FIELD_NAME] = token
+    return token
+
+
+def csrf_field():
+    return (
+        f'<input type="hidden" name="{CSRF_FIELD_NAME}" '
+        f'value="{get_csrf_token()}">'
+    )
+
+
+@app.context_processor
+def inject_csrf_helpers():
+    return {"csrf_token": get_csrf_token, "csrf_field": csrf_field}
+
+
+@app.before_request
+def protect_csrf():
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+    expected = session.get(CSRF_FIELD_NAME)
+    provided = request.form.get(CSRF_FIELD_NAME) or request.headers.get("X-CSRF-Token")
+    if not expected or not provided or not hmac.compare_digest(expected, provided):
+        abort(400)
+    return None
+
+
+@app.after_request
+def add_csrf_fields(response):
+    content_type = response.headers.get("Content-Type", "")
+    if "text/html" not in content_type.lower() or response.direct_passthrough:
+        return response
+    html = response.get_data(as_text=True)
+    field = csrf_field()
+
+    def inject_field(match):
+        return f"{match.group(1)}\n    {field}"
+
+    html = re.sub(
+        r'(<form\b(?=[^>]*\bmethod\s*=\s*["\']?post["\']?)[^>]*>)',
+        inject_field,
+        html,
+        flags=re.IGNORECASE,
+    )
+    response.set_data(html)
+    return response
 
 
 def get_startup_warnings():
@@ -586,7 +732,79 @@ def extract_openai_response_json(data):
     return {}
 
 
-def extract_structured_data_with_openai(filename, ocr_text, local_text=""):
+def encode_openai_image_data_url(image_bytes, mime_type):
+    if not image_bytes:
+        return ""
+    mime_type = clean_text(mime_type) or "image/jpeg"
+    return "data:{};base64,{}".format(
+        mime_type,
+        base64.b64encode(image_bytes).decode("ascii"),
+    )
+
+
+def prepare_openai_image_bytes(path):
+    raw = pathlib.Path(path).read_bytes()
+    if cv2 is None or np is None:
+        return raw, mimetypes.guess_type(str(path))[0] or "image/jpeg"
+    try:
+        image = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if image is None:
+            return raw, mimetypes.guess_type(str(path))[0] or "image/jpeg"
+        height, width = image.shape[:2]
+        longest = max(height, width)
+        if longest > OPENAI_VISION_MAX_IMAGE_SIDE:
+            scale = OPENAI_VISION_MAX_IMAGE_SIDE / longest
+            image = cv2.resize(
+                image,
+                (max(1, int(width * scale)), max(1, int(height * scale))),
+                interpolation=cv2.INTER_AREA,
+            )
+        ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+        if ok:
+            return encoded.tobytes(), "image/jpeg"
+    except Exception:
+        pass
+    return raw, mimetypes.guess_type(str(path))[0] or "image/jpeg"
+
+
+def build_openai_visual_inputs(path, filename=""):
+    suffix = pathlib.Path(filename or str(path)).suffix.lower()
+    path = pathlib.Path(path)
+    inputs = []
+
+    if suffix in IMAGE_EXTENSIONS:
+        image_bytes, mime_type = prepare_openai_image_bytes(path)
+        data_url = encode_openai_image_data_url(image_bytes, mime_type)
+        if data_url:
+            inputs.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_url, "detail": "high"},
+                }
+            )
+        return inputs
+
+    if suffix == ".pdf" and fitz is not None:
+        try:
+            doc = fitz.open(str(path))
+            max_pages = min(doc.page_count, OPENAI_VISION_MAX_PAGES)
+            for page_index in range(max_pages):
+                page = doc.load_page(page_index)
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                data_url = encode_openai_image_data_url(pix.tobytes("png"), "image/png")
+                if data_url:
+                    inputs.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": data_url, "detail": "high"},
+                        }
+                    )
+        except Exception:
+            return inputs
+    return inputs
+
+
+def extract_structured_data_with_openai(filename, ocr_text, local_text="", visual_inputs=None):
     config = get_ai_config()
     if not config["openai_ready"]:
         return {"data": {}, "error": "OpenAI ist noch nicht konfiguriert"}
@@ -602,6 +820,8 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text=""):
             "- In offene_bauteile nur Positionen aufnehmen, die noch fuer unsere Werkstatt relevant sind.",
             "- Wenn unsicher, Feld leer lassen und needs_review auf true setzen.",
             "- Datumsformat immer TT.MM.JJJJ.",
+            "- Wenn Originalbilder angehaengt sind, pruefe die sichtbaren Tabellen, Haekchen, handschriftlichen Notizen und Datumsfelder direkt im Bild.",
+            "- Bei Lackierauftraegen sind angekreuzte Karosserieteile und Bemerkungen entscheidend.",
             "",
             f"Dateiname: {filename}",
             "",
@@ -612,6 +832,9 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text=""):
             clean_text(local_text) or "-",
         ]
     )
+    user_content = [{"type": "text", "text": user_prompt}]
+    for visual_input in visual_inputs or []:
+        user_content.append(visual_input)
 
     payload = {
         "model": config["openai_model"],
@@ -623,7 +846,7 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text=""):
                     "Arbeite vorsichtig, halluziniere nicht und liefere nur sichere Werte."
                 ),
             },
-            {"role": "user", "content": user_prompt},
+            {"role": "user", "content": user_content},
         ],
         "response_format": {
             "type": "json_schema",
@@ -673,7 +896,7 @@ def normalize_openai_document_data(data):
                 f"Rep.-Max.-Kosten {clean_text(data['rep_max_kosten'])}"
             )
         beschreibung = ". ".join(description_parts)
-    return {
+    fields = {
         "fahrzeug": clean_text(data.get("vehicle_type")),
         "fin_nummer": clean_text(data.get("fin_nummer")).upper(),
         "auftragsnummer": clean_text(data.get("auftragsnummer")),
@@ -688,6 +911,64 @@ def normalize_openai_document_data(data):
         "analyse_hinweis": clean_text(data.get("review_reason")),
         "analyse_confidence": float(data.get("confidence") or 0),
     }
+    return quality_check_document_fields(fields)
+
+
+def add_analysis_note(fields, note):
+    note = clean_text(note)
+    if not note:
+        return fields
+    existing = clean_text(fields.get("analyse_hinweis"))
+    if note not in existing:
+        fields["analyse_hinweis"] = f"{existing} {note}".strip()
+    fields["analyse_pruefen"] = 1
+    return fields
+
+
+def values_disagree(left, right, is_date=False):
+    left_text = clean_text(left)
+    right_text = clean_text(right)
+    if not left_text or not right_text:
+        return False
+    if is_date:
+        left_date = parse_date(left_text)
+        right_date = parse_date(right_text)
+        if left_date and right_date:
+            return left_date != right_date
+    return normalize_document_text(left_text) != normalize_document_text(right_text)
+
+
+def quality_check_document_fields(fields):
+    fields = dict(fields or {})
+    confidence = float(fields.get("analyse_confidence") or 0)
+    if confidence and confidence < 0.72:
+        add_analysis_note(
+            fields,
+            "Die automatische Erkennung war nicht sicher genug. Bitte die Felder kurz gegen die Originaldatei prüfen.",
+        )
+
+    beschreibung_norm = normalize_document_text(fields.get("beschreibung"))
+    is_lackierauftrag = "lackierauftrag" in beschreibung_norm
+    has_work = clean_text(fields.get("analyse_text")) or clean_text(fields.get("bauteile_override"))
+
+    if not clean_text(fields.get("fahrzeug")):
+        add_analysis_note(fields, "Fahrzeugtyp konnte nicht sicher erkannt werden.")
+    if not has_work:
+        add_analysis_note(fields, "Reparaturpositionen/Bauteile konnten nicht sicher erkannt werden.")
+    if is_lackierauftrag and not clean_text(fields.get("auftragsnummer")):
+        add_analysis_note(fields, "Auftragsnummer aus dem Lackierauftrag fehlt oder ist unsicher.")
+    if is_lackierauftrag and not clean_text(fields.get("fertig_datum")):
+        add_analysis_note(fields, "Fertig-bis-Datum aus dem Lackierauftrag fehlt oder ist unsicher.")
+
+    for key, label in (
+        ("annahme_datum", "Auftrags-/Annahmedatum"),
+        ("fertig_datum", "Fertig-bis-Datum"),
+    ):
+        value = clean_text(fields.get(key))
+        if value and not parse_date(value):
+            add_analysis_note(fields, f"{label} wurde nicht als gültiges Datum erkannt.")
+
+    return fields
 
 
 def build_document_analysis_bundle(path, filename=""):
@@ -723,10 +1004,12 @@ def build_document_analysis_bundle(path, filename=""):
 
     ai_result = {"data": {}, "error": ""}
     try:
+        visual_inputs = build_openai_visual_inputs(path, filename)
         ai_result = extract_structured_data_with_openai(
             filename,
             google_result.get("text") or local_text,
             local_text,
+            visual_inputs,
         )
     except Exception as exc:
         ai_result["error"] = str(exc)
@@ -736,11 +1019,14 @@ def build_document_analysis_bundle(path, filename=""):
         bundle["structured"] = structured
         bundle["analysis_json"] = json.dumps(ai_result.get("data"), ensure_ascii=False)
         bundle["status"] = "ai_ready"
-        bundle["source"] = (
-            "google_document_ai+openai"
-            if google_result.get("text")
-            else "local_ocr+openai"
-        )
+        if google_result.get("text") and visual_inputs:
+            bundle["source"] = "google_document_ai+openai_vision"
+        elif google_result.get("text"):
+            bundle["source"] = "google_document_ai+openai"
+        elif visual_inputs:
+            bundle["source"] = "local_ocr+openai_vision"
+        else:
+            bundle["source"] = "local_ocr+openai"
         if structured.get("analyse_pruefen"):
             bundle["hint"] = structured.get("analyse_hinweis") or "Bitte kurz pruefen"
             bundle["status"] = "review"
@@ -749,7 +1035,8 @@ def build_document_analysis_bundle(path, filename=""):
     elif google_result.get("error") and not local_text:
         bundle["hint"] = google_result["error"]
 
-    if not bundle["hint"] and not get_ai_config()["ready"]:
+    config = get_ai_config()
+    if not bundle["hint"] and not (config["openai_ready"] or config["google_ready"]):
         bundle["hint"] = "API-Konfiguration fehlt, lokale OCR bleibt aktiv"
     return bundle
 
@@ -836,7 +1123,19 @@ def extract_affected_parts(text):
     for label, patterns in LINE_ITEM_PART_PATTERNS:
         if label not in found and matches_any_pattern(patterns, lowered, normalized):
             found.append(label)
-    return found
+    return remove_less_specific_part_labels(found)
+
+
+def remove_less_specific_part_labels(parts):
+    normalized_parts = [normalize_document_text(part) for part in parts or []]
+    result = []
+    for part, part_norm in zip(parts or [], normalized_parts):
+        if not part_norm:
+            continue
+        if any(other != part_norm and other.startswith(f"{part_norm} ") for other in normalized_parts):
+            continue
+        result.append(part)
+    return result
 
 
 def build_customer_part_summaries(auftrag):
@@ -857,7 +1156,7 @@ def build_customer_part_summaries(auftrag):
 
     fragments = [
         compact_whitespace(fragment)
-        for fragment in re.split(r"[.\n;]+", source)
+        for fragment in re.split(r"[.\n;,]+", source)
         if clean_text(fragment)
     ]
     summaries = []
@@ -869,7 +1168,18 @@ def build_customer_part_summaries(auftrag):
             normalized_fragment = normalize_document_text(fragment)
             if not matches_any_pattern(patterns, lowered_fragment, normalized_fragment):
                 continue
+            smart_repair_fragment = matches_any_pattern(
+                [r"smart\s*repair", r"smart\s*rep", r"\bsr\b"],
+                lowered_fragment,
+                normalized_fragment,
+            )
             for action_label, action_patterns in ARBEIT_PATTERNS:
+                if (
+                    action_label == "lackieren"
+                    and smart_repair_fragment
+                    and not re.search(r"lack|schleif|polier", normalized_fragment)
+                ):
+                    continue
                 if action_label not in actions and matches_any_pattern(
                     action_patterns, lowered_fragment, normalized_fragment
                 ):
@@ -881,6 +1191,140 @@ def build_customer_part_summaries(auftrag):
             }
         )
     return summaries
+
+
+def parse_price_amount(value):
+    text = normalize_document_text(value)
+    match = re.search(r"([0-9]{1,6})(?:[.,][0-9]{2})?", text)
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except Exception:
+        return 0
+
+
+def format_euro(value):
+    if not value:
+        return ""
+    return f"{int(value)} € netto"
+
+
+def format_price_range(von, bis):
+    if von and bis and von != bis:
+        return f"{int(von)} - {int(bis)} € netto"
+    if von:
+        return format_euro(von)
+    return ""
+
+
+def get_price_part_family(part):
+    normalized = normalize_document_text(part)
+    if any(term in normalized for term in ("stossfaenger", "stossstange")):
+        return "stossstange"
+    if "kotfluegel" in normalized:
+        return "kotfluegel"
+    if "motorhaube" in normalized or re.search(r"\bhaube\b", normalized):
+        return "motorhaube"
+    return ""
+
+
+def get_price_part_condition(source):
+    normalized = normalize_document_text(source)
+    if re.search(r"\b(neuteil|neu teil|neues teil)\b", normalized):
+        return "neuteil"
+    return "gebrauchtteil"
+
+
+def build_price_suggestion(auftrag):
+    source = " ".join(
+        part
+        for part in (
+            clean_text(auftrag.get("analyse_text")),
+            clean_text(auftrag.get("beschreibung")),
+            clean_text(auftrag.get("bauteile_override")),
+        )
+        if part
+    )
+    normalized_source = normalize_document_text(source)
+    parts = auftrag.get("kunden_bauteile") or build_customer_part_summaries(auftrag)
+    condition = get_price_part_condition(source)
+    positionen = []
+    hinweise = []
+    seen = set()
+
+    for item in parts:
+        teil = clean_text(item.get("teil"))
+        arbeiten = [normalize_document_text(arbeit) for arbeit in item.get("arbeiten", [])]
+        family = get_price_part_family(teil)
+        if not family:
+            continue
+        has_lackieren = "lackieren" in arbeiten or bool(
+            re.search(rf"{re.escape(normalize_document_text(teil))}.*lackier", normalized_source)
+        )
+        has_smart_repair = any("smart repair" in arbeit for arbeit in arbeiten) or bool(
+            re.search(rf"{re.escape(normalize_document_text(teil))}.*smart repair", normalized_source)
+        )
+        if has_lackieren:
+            key = (family, condition)
+            if key in PREISLISTE_LACKIERUNG["positionen"]:
+                preis = PREISLISTE_LACKIERUNG["positionen"][key]
+                entry_key = (key, teil)
+                if entry_key not in seen:
+                    seen.add(entry_key)
+                    positionen.append(
+                        {
+                            "teil": teil,
+                            "leistung": preis["leistung"],
+                            "von": preis["von"],
+                            "bis": preis["bis"],
+                            "richtwert": format_price_range(preis["von"], preis["bis"]),
+                        }
+                    )
+        elif has_smart_repair:
+            hinweise.append(f"Für {teil} Smart Repair ist noch kein fester Richtwert hinterlegt.")
+
+    for family in ("beilackieren", "neuwagenaufbereitung", "gebrauchtwagenaufbereitung"):
+        if family not in normalized_source:
+            continue
+        key = (family, "standard")
+        preis = PREISLISTE_LACKIERUNG["positionen"][key]
+        if key not in seen:
+            seen.add(key)
+            positionen.append(
+                {
+                    "teil": "",
+                    "leistung": preis["leistung"],
+                    "von": preis["von"],
+                    "bis": preis["bis"],
+                    "richtwert": format_price_range(preis["von"], preis["bis"]),
+                }
+            )
+
+    rep_max = parse_price_amount(auftrag.get("rep_max_kosten"))
+    if rep_max:
+        hinweise.append(f"Rep.-Max.-Kosten aus Unterlage: {format_euro(rep_max)}.")
+
+    if "smart repair" in normalized_source and not any("Smart Repair" in hinweis for hinweis in hinweise):
+        hinweise.append("Smart-Repair-Arbeiten bitte separat prüfen, wenn sie nicht in der Preisliste stehen.")
+
+    total_von = sum(item["von"] for item in positionen)
+    total_bis = sum(item["bis"] for item in positionen)
+    empfehlung = 0
+    if total_von or total_bis:
+        empfehlung = int(round(((total_von + total_bis) / 2) / 10) * 10)
+        if rep_max and empfehlung > rep_max:
+            empfehlung = rep_max
+            hinweise.append("Empfehlung wurde auf die Rep.-Max.-Kosten begrenzt.")
+
+    return {
+        "hat_vorschlag": bool(positionen),
+        "positionen": positionen,
+        "hinweise": list(dict.fromkeys(hinweise)),
+        "richtwert": format_price_range(total_von, total_bis),
+        "empfehlung": format_euro(empfehlung),
+        "hinweis_preisliste": PREISLISTE_LACKIERUNG["hinweis"],
+    }
 
 
 def parse_manual_parts(value):
@@ -983,7 +1427,6 @@ def normalize_document_text(text):
         "ö": "oe",
         "ü": "ue",
         "ß": "ss",
-        "smart rep": "smart repair",
         "spatestens": "spaetestens",
         "stobtanger": "stossfaenger",
         "stobtfanger": "stossfaenger",
@@ -1001,7 +1444,10 @@ def normalize_document_text(text):
     }
     for source, target in replacements.items():
         value = value.replace(source, target)
+    value = re.sub(r"\bsmart\s*rep\b", "smart repair", value)
+    value = re.sub(r"(?<![a-z])sr(?![a-z])", "smart repair", value)
     value = re.sub(r"sto\w{0,4}fanger", "stossfaenger", value)
+    value = re.sub(r"\bstossfaenger([hvy])\b", r"stossfaenger \1", value)
     value = re.sub(r"[^a-z0-9#./:\-\n\s\[\]]+", " ", value)
     return compact_whitespace(value).replace(" \n ", "\n")
 
@@ -1202,7 +1648,7 @@ def detect_action(text, doc_type=""):
     normalized = normalize_document_text(text)
     if re.search(r"ersetz|erneuer", normalized):
         return "ersetzen"
-    if re.search(r"instand", normalized):
+    if re.search(r"instand|delle|drueck|drck", normalized):
         return "instandsetzen"
     if re.search(r"lack|neuteillack|reparaturlack|oberfl|lackierung", normalized):
         return "lackieren"
@@ -1214,6 +1660,19 @@ def detect_action(text, doc_type=""):
     return ""
 
 
+def clean_work_remark(text):
+    value = compact_whitespace(text)
+    if not value:
+        return ""
+    value = re.sub(r"\bsto(?:ss|s|f)?f?[aä]nger\b", "Stoßstange", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bsto[fs]{1,2}stange\b", "Stoßstange", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bundpolieren\b", "und polieren", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bSO GUT ES GEHT\b", "so gut es geht", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bsmart\s*rep\b", "Smart Repair", value, flags=re.IGNORECASE)
+    value = re.sub(r"(?<![A-Za-z])SR(?![A-Za-z])", "Smart Repair", value)
+    return compact_whitespace(value)
+
+
 def is_relevant_lackierauftrag_position(line_text, bemerkung_text=""):
     source = " ".join(
         part for part in [clean_text(line_text), clean_text(bemerkung_text)] if clean_text(part)
@@ -1223,7 +1682,8 @@ def is_relevant_lackierauftrag_position(line_text, bemerkung_text=""):
     normalized = normalize_document_text(source)
     return bool(
         re.search(
-            r"smart\s*repair|smart\s*rep|lack|instand|neuteillack|reparaturlack|oberfl|spachtel",
+            r"smart\s*repair|smart\s*rep|\bsr\b|lack|instand|delle|drueck|drck|kratzer|schleif|polier|"
+            r"neuteillack|reparaturlack|oberfl|spachtel",
             normalized,
         )
     )
@@ -1275,7 +1735,8 @@ def looks_like_work_position(normalized_line):
         re.search(
             r"beschadig|beschaedig|schaden|instand|lack(?!stift\b)|ersetz|erneuer|neuteillack|"
             r"reparaturlack|oberfl|aus-/einbauen|a\+e|aufgerissen|deformiert|abgerissen|"
-            r"verkratzt|verschuerft|verschurft|gedrueckt|beaufschlagt|smart\s*repair|smart\s*rep",
+            r"verkratzt|kratzer|schleif|polier|verschuerft|verschurft|gedrueckt|delle|drueck|drck|"
+            r"beaufschlagt|smart\s*repair|smart\s*rep|\bsr\b",
             normalized_line,
         )
     )
@@ -1370,6 +1831,7 @@ def extract_rep_max_kosten(text):
             value = re.sub(r"(?<=euro)(?=[A-Za-z])", " ", value, flags=re.IGNORECASE)
             value = re.sub(r"(?i)euro", "Euro", value)
             value = re.sub(r"(?i)\bkomplett\b", "komplett", value)
+            value = re.sub(r"(?i)\s+(auftrag|arbeit|datum|unterschrift).*$", "", value).strip()
             return value
     return ""
 
@@ -1404,6 +1866,18 @@ def extract_position_entries(text, doc_type=""):
                     break
                 if is_ignored_ocr_line(normalized_candidate):
                     continue
+                if (
+                    doc_type == "Lackierauftrag"
+                    and not marked
+                    and is_short_repair_note(normalized_candidate)
+                    and index + offset + 1 < len(lines)
+                    and looks_like_part_label(
+                        normalize_document_text(lines[index + offset + 1])
+                    )
+                ):
+                    # In Foto-OCR steht eine kurze Bemerkung wie "rechts SR" oft
+                    # zwischen leerer Vorzeile und der tatsaechlich markierten Zeile.
+                    break
                 bemerkung = candidate
                 break
 
@@ -1424,7 +1898,7 @@ def extract_position_entries(text, doc_type=""):
         positionen.append(
             {
                 "teil": teil,
-                "bemerkung": bemerkung,
+                "bemerkung": clean_work_remark(bemerkung),
                 "aktion": action,
             }
         )
@@ -1432,9 +1906,14 @@ def extract_position_entries(text, doc_type=""):
 
 
 def detect_contextual_part_label(lines, index, radius=3):
+    current_line = normalize_document_text(lines[index]) if 0 <= index < len(lines) else ""
+    short_repair_note = is_short_repair_note(current_line)
     positions = [index]
     for offset in range(1, radius + 1):
-        positions.extend([index - offset, index + offset])
+        if short_repair_note:
+            positions.extend([index + offset, index - offset])
+        else:
+            positions.extend([index - offset, index + offset])
     for position in positions:
         if position < 0 or position >= len(lines):
             continue
@@ -1444,6 +1923,27 @@ def detect_contextual_part_label(lines, index, radius=3):
         normalized_candidate = normalize_document_text(candidate)
         label = detect_line_item_part(normalized_candidate)
         if label:
+            if label == "Radhausverbreiterung":
+                directions = []
+                for neighbor_offset in range(-2, 3):
+                    if neighbor_offset == 0:
+                        continue
+                    neighbor_position = position + neighbor_offset
+                    if neighbor_position < 0 or neighbor_position >= len(lines):
+                        continue
+                    normalized_neighbor = normalize_document_text(lines[neighbor_position])
+                    for token in ("hinten", "vorne", "links", "rechts"):
+                        if re.search(rf"\b{token}\b", normalized_neighbor) and token not in directions:
+                            directions.append(token)
+                for first in directions:
+                    for second in directions:
+                        if first == second:
+                            continue
+                        directed_label = detect_line_item_part(
+                            f"{normalized_candidate} {first} {second}"
+                        )
+                        if directed_label and directed_label != label:
+                            return directed_label
             return label
 
         directions = []
@@ -1457,10 +1957,6 @@ def detect_contextual_part_label(lines, index, radius=3):
             for token in ("vorne", "hinten", "links", "rechts"):
                 if re.search(rf"\b{token}\b", normalized_neighbor) and token not in directions:
                     directions.append(token)
-        for direction in directions:
-            label = detect_line_item_part(f"{normalized_candidate} {direction}")
-            if label:
-                return label
         for first in directions:
             for second in directions:
                 if first == second:
@@ -1468,7 +1964,19 @@ def detect_contextual_part_label(lines, index, radius=3):
                 label = detect_line_item_part(f"{normalized_candidate} {first} {second}")
                 if label:
                     return label
+        for direction in directions:
+            label = detect_line_item_part(f"{normalized_candidate} {direction}")
+            if label:
+                return label
     return ""
+
+
+def is_short_repair_note(normalized_line):
+    line = clean_text(normalized_line)
+    return bool(
+        re.fullmatch(r"(rechts|links|li|re)?\s*(smart\s*repair|sr)\s*(rechts|links|li|re)?", line)
+        or re.fullmatch(r"(rechts|links|li|re)\s+(smart\s*repair|sr)", line)
+    )
 
 
 def extract_lackierauftrag_work_entries(lines):
@@ -1480,14 +1988,94 @@ def extract_lackierauftrag_work_entries(lines):
         teil = detect_contextual_part_label(lines, index)
         if not teil:
             continue
-        bemerkung = clean_text(line)
+        bemerkung = build_lackierauftrag_remark(lines, index, teil)
         action = detect_action(bemerkung, "Lackierauftrag")
         key = (teil, bemerkung.lower(), action)
         if key in seen:
             continue
         seen.add(key)
         positionen.append({"teil": teil, "bemerkung": bemerkung, "aktion": action})
-    return positionen
+    return merge_same_part_action(positionen)
+
+
+def build_lackierauftrag_remark(lines, index, teil):
+    line = clean_work_remark(lines[index])
+    normalized_part = normalize_document_text(teil)
+    hints = []
+    start = max(0, index - 3)
+    end = min(len(lines), index + 5)
+    for position in range(start, end):
+        candidate = clean_text(lines[position])
+        normalized_candidate = normalize_document_text(candidate)
+        if not candidate or is_ignored_ocr_line(normalized_candidate):
+            continue
+        if "ladekante" in normalized_candidate and "Ladekante" not in hints:
+            hints.append("Ladekante")
+        if "stossstange hinten" in normalized_part or "stossfaenger h" in normalized_candidate:
+            if re.search(r"\bhinten\s+rechts\b|\brechts\b", normalized_candidate) and "hinten rechts" not in hints:
+                hints.append("hinten rechts")
+            if re.search(r"\bhinten\s+links\b|\blinks\b", normalized_candidate) and "hinten links" not in hints:
+                hints.append("hinten links")
+    if hints:
+        return clean_work_remark(f"{' / '.join(hints)} {line}")
+    return line
+
+
+def merge_position_entries(*entry_groups):
+    merged = []
+    seen = set()
+    for entries in entry_groups:
+        for entry in entries or []:
+            key = (
+                clean_text(entry.get("teil")).lower(),
+                clean_text(entry.get("bemerkung")).lower(),
+                clean_text(entry.get("aktion")).lower(),
+            )
+            if not key[0] or key in seen:
+                continue
+            seen.add(key)
+            merged.append(entry)
+    return merged
+
+
+def merge_same_part_action(entries):
+    merged = []
+    by_key = {}
+    for entry in entries or []:
+        teil = clean_text(entry.get("teil"))
+        action = clean_text(entry.get("aktion"))
+        bemerkung = clean_text(entry.get("bemerkung"))
+        if not teil:
+            continue
+        key = (teil.lower(), action.lower())
+        if key not in by_key:
+            new_entry = {"teil": teil, "bemerkung": bemerkung, "aktion": action}
+            by_key[key] = new_entry
+            merged.append(new_entry)
+            continue
+        existing = by_key[key]
+        if bemerkung and bemerkung.lower() not in clean_text(existing.get("bemerkung")).lower():
+            existing["bemerkung"] = compact_whitespace(
+                f"{clean_text(existing.get('bemerkung'))}; {bemerkung}".strip("; ")
+            )
+    return merged
+
+
+def remove_less_specific_part_entries(entries):
+    result = []
+    normalized_parts = [normalize_document_text(entry.get("teil")) for entry in entries or []]
+    for entry in entries or []:
+        teil_norm = normalize_document_text(entry.get("teil"))
+        if not teil_norm:
+            continue
+        is_less_specific = any(
+            other != teil_norm and other.startswith(f"{teil_norm} ")
+            for other in normalized_parts
+        )
+        if is_less_specific:
+            continue
+        result.append(entry)
+    return result
 
 
 def first_match(text, patterns, flags=re.IGNORECASE):
@@ -1496,6 +2084,35 @@ def first_match(text, patterns, flags=re.IGNORECASE):
         if match:
             return clean_text(match.group(1))
     return ""
+
+
+def looks_like_field_label(value):
+    normalized = normalize_document_text(value)
+    return bool(
+        re.search(
+            r"^(typ|fg[-.\s]*nr|farb[-.\s]*nr|abnahme|auftrags[-\s]*nr|amtl\.?\s*kennzeichen|"
+            r"kennzeichen|auftraggeber|lieferant|auftrags[-\s]*datum|fertig\s*bis|fertigbis|i\.?o\.?|n\.?i\.?o\.?)",
+            normalized,
+        )
+    )
+
+
+def looks_like_date(value):
+    return bool(re.fullmatch(r"\d{1,2}\.\d{1,2}\.\d{2,4}", clean_text(value)))
+
+
+def is_vehicle_candidate(candidate, normalized_candidate):
+    candidate = clean_text(candidate)
+    normalized_candidate = clean_text(normalized_candidate)
+    return bool(
+        re.fullmatch(r"[A-Za-z0-9ÄÖÜäöüß][A-Za-z0-9ÄÖÜäöüß ._/-]{1,30}", candidate)
+        and re.search(r"[A-Za-zÄÖÜäöüß]", candidate)
+        and not looks_like_field_label(candidate)
+        and not looks_like_date(candidate)
+        and not re.search(r"^audi$|^vw$|^volkswagen$|^gaertner$|^kasmann$|^kaesmann$", normalized_candidate)
+        and not re.fullmatch(r"#?[A-HJ-NPR-Z0-9]{8,20}", candidate.upper())
+        and "/" not in candidate
+    )
 
 
 def find_nearby_value(
@@ -1546,8 +2163,12 @@ def parse_document_fields(text, filename=""):
     doc_type = classify_document(cleaned, filename)
     positionen = extract_position_entries(cleaned, doc_type)
     lines = [clean_text(line) for line in cleaned.splitlines() if clean_text(line)]
-    if not positionen and doc_type == "Lackierauftrag":
-        positionen = extract_lackierauftrag_work_entries(lines)
+    if doc_type == "Lackierauftrag":
+        positionen = merge_position_entries(
+            positionen,
+            extract_lackierauftrag_work_entries(lines),
+        )
+        positionen = merge_same_part_action(remove_less_specific_part_entries(positionen))
 
     fahrzeug = ""
     hersteller = ""
@@ -1613,14 +2234,10 @@ def parse_document_fields(text, filename=""):
                 lines,
                 index,
                 lambda candidate, normalized_candidate: bool(
-                    re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .-]{1,24}", candidate)
-                    and re.search(r"[A-Za-z]", candidate)
-                    and not re.search(r"^audi$|^vw$", normalized_candidate)
-                    and not re.fullmatch(r"[A-HJ-NPR-Z0-9]{15,20}", candidate.upper())
-                    and "/" not in candidate
+                    is_vehicle_candidate(candidate, normalized_candidate)
                 ),
                 window_before=0,
-                window_after=5,
+                window_after=7,
             )
         elif re.search(r"^kennzeichen$", normalized_line) and not kennzeichen:
             kennzeichen = find_nearby_value(
@@ -1649,11 +2266,12 @@ def parse_document_fields(text, filename=""):
                     lines,
                     index,
                     lambda candidate, _: bool(re.fullmatch(r"\d{2}\.\d{2}\.\d{4}", candidate)),
-                    window_before=0,
+                    window_before=4,
                     window_after=3,
+                    prefer_nearest=True,
                 )
             )
-        elif re.search(r"^fertig bis", normalized_line) and not fertig_datum:
+        elif re.search(r"^fertig\s*bis|^fertigbis", normalized_line) and not fertig_datum:
             fertig_datum = format_date(
                 find_nearby_value(
                     lines,
@@ -1709,6 +2327,8 @@ def parse_document_fields(text, filename=""):
                 r"\bHaupttyp[:.\s]+([A-Za-z0-9ÄÖÜäöüß .()/-]{2,40})",
             ],
         )
+        if fahrzeug and not is_vehicle_candidate(fahrzeug, normalize_document_text(fahrzeug)):
+            fahrzeug = ""
     if not hersteller:
         hersteller = first_match(cleaned, [r"\bHersteller[:.\s]+([A-Za-zÄÖÜäöüß .-]{2,30})"])
     if not haupttyp:
@@ -1729,7 +2349,7 @@ def parse_document_fields(text, filename=""):
         fertig_datum = format_date(
             first_match(
                 cleaned,
-                [r"Fertig bis(?: spaetestens| spätestens)?[:.]?\s*(\d{2}\.\d{2}\.\d{4})"],
+                [r"Fertig\s*bis(?:\s*spaetestens|\s*spätestens)?[:.]?\s*(\d{2}\.\d{2}\.\d{4})"],
             )
         )
 
@@ -1822,18 +2442,15 @@ def summarize_document_text(text, filename=""):
 
     doc_type = classify_document(cleaned, filename)
     felder = parse_document_fields(text, filename)
-    fahrzeug_treffer = re.findall(
-        r"\b([A-Z]{1,3}-[A-Z]{1,2}\s?\d{1,4}|[A-ZÄÖÜ]{2,}\s?[A-Z0-9-]{2,})\b",
-        cleaned,
-        re.IGNORECASE,
-    )
     analyse = clean_text(felder.get("analyse_text")) or analyse_text(cleaned)
 
     hints = []
     if clean_text(felder.get("fahrzeug")):
         hints.append(f"Typ: {felder['fahrzeug']}")
-    if fahrzeug_treffer:
-        hints.append(f"Bezug: {fahrzeug_treffer[0]}")
+    if clean_text(felder.get("kennzeichen")):
+        hints.append(f"Kennzeichen: {felder['kennzeichen']}")
+    if clean_text(felder.get("auftragsnummer")):
+        hints.append(f"Auftrag: {felder['auftragsnummer']}")
     if analyse:
         hints.append(f"Arbeit: {analyse}")
     if clean_text(felder.get("annahme_datum")):
@@ -1874,19 +2491,120 @@ def slugify(text):
 
 
 def get_db():
+    if USE_POSTGRES:
+        if psycopg is None:
+            raise RuntimeError(
+                "DATABASE_URL ist gesetzt, aber psycopg ist nicht installiert."
+            )
+        return PostgresConnection(psycopg.connect(DATABASE_URL))
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
     return conn
 
 
+class DbRow(dict):
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+
+
+class PostgresCursor:
+    def __init__(self, rows=None, lastrowid=None):
+        self._rows = rows
+        self.lastrowid = lastrowid
+
+    def fetchone(self):
+        if self._rows is None:
+            return None
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return list(self._rows or [])
+
+
+class PostgresConnection:
+    def __init__(self, conn):
+        self.conn = conn
+        self.lastrowid = None
+
+    def execute(self, sql, params=()):
+        sql = sql.strip()
+        if sql.upper() == "SELECT LAST_INSERT_ROWID()":
+            return PostgresCursor([DbRow({"last_insert_rowid": self.lastrowid})])
+
+        converted_sql = convert_sqlite_sql_to_postgres(sql)
+        params = tuple(params or ())
+        lowered = converted_sql.lstrip().lower()
+        inserts_with_id = lowered.startswith("insert into ") and " returning " not in lowered
+        if inserts_with_id:
+            converted_sql = f"{converted_sql} RETURNING id"
+
+        with self.conn.cursor() as cur:
+            cur.execute(converted_sql, params)
+            if cur.description:
+                names = [column.name for column in cur.description]
+                rows = [DbRow(dict(zip(names, values))) for values in cur.fetchall()]
+            else:
+                rows = []
+
+        if inserts_with_id:
+            self.lastrowid = rows[0]["id"] if rows else None
+            return PostgresCursor([], self.lastrowid)
+        return PostgresCursor(rows)
+
+    def executescript(self, script):
+        for statement in split_sql_script(script):
+            self.execute(statement)
+
+    def commit(self):
+        self.conn.commit()
+
+    def close(self):
+        self.conn.close()
+
+
+def split_sql_script(script):
+    return [part.strip() for part in script.split(";") if part.strip()]
+
+
+def convert_sqlite_sql_to_postgres(sql):
+    converted = sql.replace("?", "%s")
+    converted = re.sub(
+        r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b",
+        "SERIAL PRIMARY KEY",
+        converted,
+        flags=re.IGNORECASE,
+    )
+    return converted
+
+
+def get_table_columns(db, table_name):
+    if USE_POSTGRES:
+        rows = db.execute(
+            """
+            SELECT column_name AS name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s
+            """,
+            (table_name,),
+        ).fetchall()
+    else:
+        rows = db.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row["name"] for row in rows}
+
+
 def ensure_column(db, table_name, column_name, column_definition):
-    columns = {
-        row["name"] for row in db.execute(f"PRAGMA table_info({table_name})").fetchall()
-    }
+    columns = get_table_columns(db, table_name)
     if column_name not in columns:
-        db.execute(
-            f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
-        )
+        try:
+            db.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+            )
+        except Exception as exc:
+            message = str(exc).lower()
+            if "duplicate column name" not in message and "already exists" not in message:
+                raise
 
 
 def init_db():
@@ -1903,6 +2621,9 @@ def init_db():
             kontakt_name TEXT DEFAULT '',
             email        TEXT DEFAULT '',
             telefon      TEXT DEFAULT '',
+            strasse      TEXT DEFAULT '',
+            plz          TEXT DEFAULT '',
+            ort          TEXT DEFAULT '',
             zugangscode  TEXT NOT NULL,
             portal_titel TEXT DEFAULT '',
             willkommen_text TEXT DEFAULT '',
@@ -1928,6 +2649,11 @@ def init_db():
             analyse_hinweis TEXT DEFAULT '',
             analyse_confidence REAL DEFAULT 0,
             angebotsphase  INTEGER DEFAULT 0,
+            angebot_abgesendet INTEGER DEFAULT 0,
+            angebot_status TEXT DEFAULT 'entwurf',
+            werkstatt_angebot_text TEXT DEFAULT '',
+            werkstatt_angebot_preis TEXT DEFAULT '',
+            werkstatt_angebot_am TEXT DEFAULT '',
             status         INTEGER DEFAULT 1,
             annahme_datum  TEXT DEFAULT '',
             start_datum    TEXT DEFAULT '',
@@ -2007,6 +2733,11 @@ def init_db():
     ensure_column(db, "auftraege", "analyse_hinweis", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "analyse_confidence", "REAL DEFAULT 0")
     ensure_column(db, "auftraege", "angebotsphase", "INTEGER DEFAULT 0")
+    ensure_column(db, "auftraege", "angebot_abgesendet", "INTEGER DEFAULT 0")
+    ensure_column(db, "auftraege", "angebot_status", "TEXT DEFAULT 'entwurf'")
+    ensure_column(db, "auftraege", "werkstatt_angebot_text", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "werkstatt_angebot_preis", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "werkstatt_angebot_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "annahme_datum", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "start_datum", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "abholtermin", "TEXT DEFAULT ''")
@@ -2027,6 +2758,9 @@ def init_db():
     ensure_column(db, "autohaeuser", "portal_key", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "portal_titel", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "willkommen_text", "TEXT DEFAULT ''")
+    ensure_column(db, "autohaeuser", "strasse", "TEXT DEFAULT ''")
+    ensure_column(db, "autohaeuser", "plz", "TEXT DEFAULT ''")
+    ensure_column(db, "autohaeuser", "ort", "TEXT DEFAULT ''")
 
     rows = db.execute("SELECT id, portal_key FROM autohaeuser").fetchall()
     for row in rows:
@@ -2045,6 +2779,15 @@ def row_to_autohaus(row):
         return None
     autohaus = dict(row)
     autohaus["portal_label"] = clean_text(autohaus.get("portal_titel")) or autohaus["name"]
+    adresse_teile = [
+        clean_text(autohaus.get("strasse")),
+        " ".join(
+            teil
+            for teil in (clean_text(autohaus.get("plz")), clean_text(autohaus.get("ort")))
+            if teil
+        ),
+    ]
+    autohaus["adresse_kompakt"] = ", ".join(teil for teil in adresse_teile if teil)
     autohaus["portal_welcome"] = clean_text(autohaus.get("willkommen_text")) or (
         f"Willkommen im Portal von {autohaus['name']}."
     )
@@ -2064,6 +2807,10 @@ def row_to_auftrag(row):
     auftrag["transport_meta"] = transport_meta
     auftrag["archiviert"] = bool(auftrag.get("archiviert"))
     auftrag["angebotsphase"] = bool(auftrag.get("angebotsphase"))
+    auftrag["angebot_abgesendet"] = bool(auftrag.get("angebot_abgesendet"))
+    auftrag["angebot_status"] = clean_text(auftrag.get("angebot_status")) or (
+        "angefragt" if auftrag["angebot_abgesendet"] else "entwurf"
+    )
     auftrag["analyse_pruefen"] = bool(auftrag.get("analyse_pruefen"))
     try:
         auftrag["analyse_confidence"] = float(auftrag.get("analyse_confidence") or 0)
@@ -2080,6 +2827,7 @@ def row_to_auftrag(row):
     auftrag["angebot_annahme_label"] = transport_meta.get("angebot_annahme_label", "Gewünschter Bringtermin")
     auftrag["angebot_abholung_label"] = transport_meta.get("angebot_abholung_label", "Gewünschter Holtermin")
     auftrag["kunden_bauteile"] = build_customer_part_summaries(auftrag)
+    auftrag["preisvorschlag"] = build_price_suggestion(auftrag)
     return auftrag
 
 
@@ -2207,7 +2955,7 @@ def list_angebotsanfragen(autohaus_id=None):
             SELECT a.*, h.name AS autohaus_name, h.slug AS autohaus_slug
             FROM auftraege a
             LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
-            WHERE a.angebotsphase = 1
+            WHERE a.angebotsphase = 1 AND a.angebot_abgesendet = 1
             ORDER BY a.geaendert_am DESC, a.id DESC
             """
         ).fetchall()
@@ -2217,7 +2965,7 @@ def list_angebotsanfragen(autohaus_id=None):
             SELECT a.*, h.name AS autohaus_name, h.slug AS autohaus_slug
             FROM auftraege a
             LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
-            WHERE a.angebotsphase = 1 AND a.autohaus_id = ?
+            WHERE a.angebotsphase = 1 AND a.angebot_abgesendet = 1 AND a.autohaus_id = ?
             ORDER BY a.geaendert_am DESC, a.id DESC
             """,
             (autohaus_id,),
@@ -2264,56 +3012,6 @@ def hydrate_datei(datei):
     datei["is_pdf"] = suffix == ".pdf"
     datei["is_image"] = suffix in IMAGE_EXTENSIONS
     datei["kategorie"] = clean_text(datei.get("kategorie")) or "standard"
-    is_analysis_document = (
-        datei["kategorie"] == "standard" and not datei.get("reklamation_id")
-    )
-    if (
-        is_analysis_document
-        and (datei["is_pdf"] or datei["is_image"])
-        and not clean_text(datei.get("extrakt_kurz"))
-    ):
-        path = UPLOAD_DIR / datei["stored_name"]
-        if path.exists():
-            bundle = build_document_analysis_bundle(path, datei["original_name"])
-            extracted_text = bundle.get("text", "")
-            short_summary = summarize_document_text(extracted_text, datei["original_name"])
-            doc_type = (
-                classify_document(extracted_text, datei["original_name"])
-                if extracted_text
-                else classify_document("", datei["original_name"])
-            )
-            db = get_db()
-            db.execute(
-                """
-                UPDATE dateien
-                SET dokument_typ=?,
-                    extrahierter_text=?,
-                    extrakt_kurz=?,
-                    analyse_quelle=?,
-                    analyse_json=?,
-                    analyse_hinweis=?
-                WHERE id=?
-                """,
-                (
-                    doc_type,
-                    extracted_text,
-                    short_summary,
-                    clean_text(bundle.get("source")),
-                    clean_text(bundle.get("analysis_json")),
-                    clean_text(bundle.get("hint")),
-                    datei["id"],
-                ),
-            )
-            db.commit()
-            db.close()
-            datei["dokument_typ"] = doc_type
-            datei["extrahierter_text"] = extracted_text
-            datei["extrakt_kurz"] = short_summary
-            datei["analyse_quelle"] = clean_text(bundle.get("source"))
-            datei["analyse_json"] = clean_text(bundle.get("analysis_json"))
-            datei["analyse_hinweis"] = clean_text(bundle.get("hint"))
-            if extracted_text:
-                apply_document_data_to_auftrag(datei["auftrag_id"])
     datei["has_extract"] = bool(
         clean_text(datei.get("extrakt_kurz")) or clean_text(datei.get("extrahierter_text"))
     )
@@ -2337,6 +3035,132 @@ def load_saved_analysis_json(value):
     return normalize_openai_document_data(data)
 
 
+def looks_like_specific_work_text(value):
+    normalized = normalize_document_text(value)
+    if not normalized:
+        return False
+    return any(matches_any_pattern(patterns, normalized, normalized) for patterns in TEILE_PATTERNS.values())
+
+
+def merge_document_fields(ai_fields, local_fields):
+    fields = dict(ai_fields or {})
+    review_notes = []
+    for key, label, is_date in (
+        ("fahrzeug", "Fahrzeugtyp", False),
+        ("fin_nummer", "FIN", False),
+        ("auftragsnummer", "Auftragsnummer", False),
+        ("annahme_datum", "Auftrags-/Annahmedatum", True),
+        ("fertig_datum", "Fertig-bis-Datum", True),
+    ):
+        ai_value = (ai_fields or {}).get(key)
+        local_value = (local_fields or {}).get(key)
+        if values_disagree(ai_value, local_value, is_date=is_date):
+            review_notes.append(
+                f"{label}: OCR und KI liefern unterschiedliche Werte. Bitte Originaldatei prüfen."
+            )
+
+    for key, value in (local_fields or {}).items():
+        if value and not clean_text(fields.get(key)):
+            fields[key] = value
+
+    local_analysis = clean_text((local_fields or {}).get("analyse_text"))
+    ai_analysis = clean_text(fields.get("analyse_text"))
+    if local_analysis and looks_like_specific_work_text(local_analysis):
+        ai_is_generic = (
+            not looks_like_specific_work_text(ai_analysis)
+            or "durchgefuehrt" in normalize_document_text(ai_analysis)
+        )
+        if ai_is_generic:
+            fields["analyse_text"] = local_analysis
+
+    fields = quality_check_document_fields(fields)
+    for note in review_notes:
+        add_analysis_note(fields, note)
+    return fields
+
+
+def normalized_review_value(key, value):
+    value = clean_text(value)
+    if not value:
+        return ""
+    if key in {"annahme_datum", "fertig_datum", "abholtermin", "start_datum"}:
+        return format_date(value)
+    if key in {"kennzeichen", "fin_nummer"}:
+        return value.upper()
+    return value
+
+
+def values_match_for_review(key, left, right):
+    left_value = normalized_review_value(key, left)
+    right_value = normalized_review_value(key, right)
+    if not left_value or not right_value:
+        return False
+    return left_value == right_value
+
+
+def list_document_review_items(auftrag_id, auftrag=None):
+    if not auftrag:
+        auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        return []
+
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT id, original_name, dokument_typ, extrahierter_text, analyse_json,
+               analyse_quelle, analyse_hinweis
+        FROM dateien
+        WHERE auftrag_id=?
+          AND kategorie='standard'
+          AND reklamation_id IS NULL
+          AND (extrahierter_text != '' OR analyse_json != '')
+        ORDER BY id DESC
+        """,
+        (auftrag_id,),
+    ).fetchall()
+    db.close()
+
+    reviews = []
+    for row in rows:
+        datei = dict(row)
+        ai_felder = load_saved_analysis_json(datei.get("analyse_json"))
+        local_felder = parse_document_fields(
+            datei.get("extrahierter_text"),
+            datei.get("original_name"),
+        )
+        felder = merge_document_fields(ai_felder, local_felder)
+        items = []
+        for key, label in DOCUMENT_REVIEW_FIELDS:
+            value = normalized_review_value(key, felder.get(key))
+            if not value:
+                continue
+            current_value = normalized_review_value(key, auftrag.get(key))
+            items.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "value": value,
+                    "current_value": current_value,
+                    "active": values_match_for_review(key, value, current_value),
+                }
+            )
+        if items:
+            reviews.append(
+                {
+                    "datei_id": datei["id"],
+                    "original_name": clean_text(datei.get("original_name")),
+                    "dokument_typ": clean_text(datei.get("dokument_typ")),
+                    "analyse_quelle": clean_text(datei.get("analyse_quelle")),
+                    "analyse_hinweis": clean_text(datei.get("analyse_hinweis"))
+                    or clean_text(felder.get("analyse_hinweis")),
+                    "needs_review": bool(felder.get("analyse_pruefen")),
+                    "confidence": felder.get("analyse_confidence") or 0,
+                    "items": items,
+                }
+            )
+    return reviews
+
+
 def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
     db = get_db()
     auftrag_row = db.execute("SELECT * FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
@@ -2349,7 +3173,7 @@ def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
         """
         SELECT original_name, extrahierter_text, analyse_json, analyse_hinweis
         FROM dateien
-        WHERE auftrag_id=? AND extrahierter_text != ''
+        WHERE auftrag_id=? AND (extrahierter_text != '' OR analyse_json != '')
         ORDER BY id DESC
         """,
         (auftrag_id,),
@@ -2357,9 +3181,9 @@ def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
 
     erkannt = {}
     for datei in dateien:
-        felder = load_saved_analysis_json(datei["analyse_json"])
-        if not felder:
-            felder = parse_document_fields(datei["extrahierter_text"], datei["original_name"])
+        ai_felder = load_saved_analysis_json(datei["analyse_json"])
+        local_felder = parse_document_fields(datei["extrahierter_text"], datei["original_name"])
+        felder = merge_document_fields(ai_felder, local_felder)
         for key, value in felder.items():
             if value and key not in erkannt:
                 erkannt[key] = value
@@ -2399,10 +3223,8 @@ def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
         prefer_documents or not clean_text(auftrag.get("fertig_datum"))
     ):
         updates["fertig_datum"] = erkannt["fertig_datum"]
-    if (
-        auftrag.get("angebotsphase")
-        and erkannt.get("fertig_datum")
-        and (prefer_documents or not clean_text(auftrag.get("abholtermin")))
+    if erkannt.get("fertig_datum") and (
+        prefer_documents or not clean_text(auftrag.get("abholtermin"))
     ):
         updates["abholtermin"] = erkannt["fertig_datum"]
     if erkannt.get("analyse_text") and (
@@ -2606,6 +3428,64 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
     return saved
 
 
+def reanalyze_existing_documents(auftrag_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT *
+        FROM dateien
+        WHERE auftrag_id=?
+          AND kategorie='standard'
+          AND reklamation_id IS NULL
+        ORDER BY id ASC
+        """,
+        (auftrag_id,),
+    ).fetchall()
+    count = 0
+    for row in rows:
+        datei = dict(row)
+        original_name = clean_text(datei.get("original_name"))
+        suffix = pathlib.Path(original_name).suffix.lower()
+        if suffix != ".pdf" and suffix not in IMAGE_EXTENSIONS:
+            continue
+        path = UPLOAD_DIR / clean_text(datei.get("stored_name"))
+        if not path.exists():
+            continue
+        bundle = build_document_analysis_bundle(path, original_name)
+        extracted_text = clean_text(bundle.get("text"))
+        doc_type = (
+            classify_document(extracted_text, original_name)
+            if extracted_text
+            else classify_document("", original_name)
+        )
+        db.execute(
+            """
+            UPDATE dateien
+            SET dokument_typ=?,
+                extrahierter_text=?,
+                extrakt_kurz=?,
+                analyse_quelle=?,
+                analyse_json=?,
+                analyse_hinweis=?
+            WHERE id=?
+            """,
+            (
+                doc_type,
+                extracted_text,
+                summarize_document_text(extracted_text, original_name),
+                clean_text(bundle.get("source")),
+                clean_text(bundle.get("analysis_json")),
+                clean_text(bundle.get("hint")),
+                datei["id"],
+            ),
+        )
+        count += 1
+    db.commit()
+    db.close()
+    updates = apply_document_data_to_auftrag(auftrag_id, prefer_documents=True) if count else {}
+    return count, updates
+
+
 def get_allowed_uploads(files):
     uploads = []
     for file in files or []:
@@ -2724,6 +3604,8 @@ def create_auftrag(
     fin_nummer="",
     auftragsnummer="",
     rep_max_kosten="",
+    werkstatt_angebot_text="",
+    werkstatt_angebot_preis="",
     kennzeichen="",
     beschreibung="",
     analyse="",
@@ -2735,6 +3617,7 @@ def create_auftrag(
     kontakt_telefon="",
     notiz_intern="",
     angebotsphase=0,
+    angebot_abgesendet=0,
 ):
     jetzt = now_str()
     db = get_db()
@@ -2742,9 +3625,9 @@ def create_auftrag(
         """
         INSERT INTO auftraege
         (token, kunde_email, autohaus_id, kunde_name, fahrzeug, fin_nummer, auftragsnummer, rep_max_kosten, bauteile_override, kennzeichen,
-         beschreibung, analyse_text, angebotsphase, status, annahme_datum, start_datum, fertig_datum, abholtermin, transport_art,
+         beschreibung, analyse_text, angebotsphase, angebot_abgesendet, angebot_status, werkstatt_angebot_text, werkstatt_angebot_preis, werkstatt_angebot_am, status, annahme_datum, start_datum, fertig_datum, abholtermin, transport_art,
          kontakt_telefon, notiz_intern, quelle, erstellt_am, geaendert_am)
-        VALUES (?, '', ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, '', ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, '', 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             uuid.uuid4().hex[:12],
@@ -2758,6 +3641,10 @@ def create_auftrag(
             beschreibung,
             analyse,
             1 if angebotsphase else 0,
+            1 if angebot_abgesendet else 0,
+            "angefragt" if angebot_abgesendet else ("entwurf" if angebotsphase else ""),
+            werkstatt_angebot_text,
+            werkstatt_angebot_preis,
             annahme_datum,
             start_datum,
             fertig_datum,
@@ -2847,6 +3734,7 @@ def angebot_annehmen(auftrag_id):
         """
         UPDATE auftraege
         SET angebotsphase=0,
+            angebot_status='angenommen',
             geaendert_am=?
         WHERE id=?
         """,
@@ -2893,6 +3781,46 @@ def refresh_offer_texts(auftrag_id, customer_short="", customer_long=""):
     db.commit()
     db.close()
     return updates
+
+
+def submit_offer_request(auftrag_id):
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET angebot_abgesendet=1,
+            angebot_status='angefragt',
+            geaendert_am=?
+        WHERE id=? AND angebotsphase=1 AND angebot_status!='angebot_abgegeben'
+        """,
+        (now_str(), auftrag_id),
+    )
+    db.commit()
+    db.close()
+
+
+def send_workshop_offer(auftrag_id, angebot_text, angebot_preis):
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET werkstatt_angebot_text=?,
+            werkstatt_angebot_preis=?,
+            werkstatt_angebot_am=?,
+            angebot_status='angebot_abgegeben',
+            geaendert_am=?
+        WHERE id=? AND angebotsphase=1
+        """,
+        (
+            clean_text(angebot_text),
+            clean_text(angebot_preis),
+            now_str(),
+            now_str(),
+            auftrag_id,
+        ),
+    )
+    db.commit()
+    db.close()
 
 
 def dashboard_daten(auftraege):
@@ -3091,6 +4019,7 @@ def dashboard():
         autohaeuser=list_autohaeuser(),
         cockpit=dashboard_daten(auftraege),
         ki_status=get_ai_status(),
+        startup_warnings=get_startup_warnings(),
         statusliste=STATUSLISTE,
     )
 
@@ -3111,9 +4040,9 @@ def autohaus_neu():
     db.execute(
         """
         INSERT INTO autohaeuser
-        (name, slug, portal_key, kontakt_name, email, telefon, zugangscode,
+        (name, slug, portal_key, kontakt_name, email, telefon, strasse, plz, ort, zugangscode,
          portal_titel, willkommen_text, notiz, erstellt_am)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             name,
@@ -3122,6 +4051,9 @@ def autohaus_neu():
             clean_text(request.form.get("kontakt_name")),
             clean_text(request.form.get("email")),
             clean_text(request.form.get("telefon")),
+            clean_text(request.form.get("strasse")),
+            clean_text(request.form.get("plz")),
+            clean_text(request.form.get("ort")),
             zugangscode,
             clean_text(request.form.get("portal_titel")),
             clean_text(request.form.get("willkommen_text")),
@@ -3150,6 +4082,9 @@ def autohaus_update(autohaus_id):
             kontakt_name=?,
             email=?,
             telefon=?,
+            strasse=?,
+            plz=?,
+            ort=?,
             zugangscode=?,
             portal_titel=?,
             willkommen_text=?,
@@ -3161,6 +4096,9 @@ def autohaus_update(autohaus_id):
             clean_text(request.form.get("kontakt_name")),
             clean_text(request.form.get("email")),
             clean_text(request.form.get("telefon")),
+            clean_text(request.form.get("strasse")),
+            clean_text(request.form.get("plz")),
+            clean_text(request.form.get("ort")),
             clean_text(request.form.get("zugangscode")) or autohaus["zugangscode"],
             clean_text(request.form.get("portal_titel")),
             clean_text(request.form.get("willkommen_text")),
@@ -3288,6 +4226,13 @@ def auftrag_detail(auftrag_id):
         db.close()
         dateien = request.files.getlist("dateien")
         erlaubte_dateien = get_allowed_uploads(dateien)
+        if aktion == "reanalyze_existing":
+            count, _ = reanalyze_existing_documents(auftrag_id)
+            if count:
+                flash(f"{count} vorhandene Unterlage(n) neu analysiert.", "success")
+            else:
+                flash("Keine auswertbaren vorhandenen Unterlagen gefunden.", "warning")
+            return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
         if aktion == "upload_analyze" and not any(file and file.filename for file in dateien):
             flash("Bitte zuerst eine Datei auswählen.", "warning")
             return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
@@ -3319,9 +4264,30 @@ def auftrag_detail(auftrag_id):
         log=get_status_log(auftrag_id),
         dateien=standard_dateien,
         fertigbilder=fertigbilder,
+        dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
         reklamationen=list_reklamationen(auftrag_id),
         verzoegerungen=list_verzoegerungen(auftrag_id),
     )
+
+
+@app.route("/admin/auftrag/<int:auftrag_id>/fertigbilder", methods=["POST"])
+@admin_required
+def admin_fertigbilder_upload(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+
+    erlaubte_dateien = get_allowed_uploads(request.files.getlist("fertigbilder"))
+    if not erlaubte_dateien:
+        flash("Bitte JPG, PNG, WebP oder PDF als Fertigbild auswählen.", "warning")
+        return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
+
+    gespeichert = save_uploads(auftrag_id, erlaubte_dateien, "intern", "fertigbild")
+    if gespeichert:
+        flash(f"{gespeichert} Fertigbild(er) hochgeladen. Das Autohaus sieht sie im Portal.", "success")
+    else:
+        flash("Es wurde kein Fertigbild gespeichert.", "warning")
+    return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
 
 @app.route("/admin/status/<int:auftrag_id>/<int:neuer_status>", methods=["POST"])
@@ -3353,7 +4319,10 @@ def status_update(auftrag_id, neuer_status):
     db.commit()
     db.close()
     flash("Status aktualisiert.", "success")
-    return redirect(request.referrer or url_for("dashboard"))
+    ziel = clean_text(request.form.get("next"))
+    if ziel.startswith("/"):
+        return redirect(ziel)
+    return redirect(request.referrer or url_for("auftrag_detail", auftrag_id=auftrag_id))
 
 
 @app.route("/admin/auftrag/<int:auftrag_id>/verzoegerung", methods=["POST"])
@@ -3415,6 +4384,22 @@ def angebot_annehmen_route(auftrag_id):
     return redirect(request.referrer or url_for("auftrag_detail", auftrag_id=auftrag_id))
 
 
+@app.route("/admin/angebot/<int:auftrag_id>/senden", methods=["POST"])
+@admin_required
+def angebot_senden_route(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or not auftrag.get("angebotsphase"):
+        abort(404)
+    angebot_text = clean_text(request.form.get("werkstatt_angebot_text"))
+    angebot_preis = clean_text(request.form.get("werkstatt_angebot_preis"))
+    if not angebot_text and not angebot_preis:
+        flash("Bitte Angebotstext oder Preis eintragen.", "warning")
+        return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
+    send_workshop_offer(auftrag_id, angebot_text, angebot_preis)
+    flash("Angebot an das Autohaus gesendet.", "success")
+    return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
+
+
 @app.route("/admin/reklamation/<int:reklamation_id>/status", methods=["POST"])
 @admin_required
 def reklamation_status(reklamation_id):
@@ -3439,7 +4424,29 @@ def admin_datei(datei_id):
     path = UPLOAD_DIR / datei["stored_name"]
     if not path.exists():
         abort(404)
-    return send_file(path, download_name=datei["original_name"], mimetype=datei["mime_type"])
+    return send_file(
+        path,
+        download_name=datei["original_name"],
+        mimetype=datei["mime_type"],
+        as_attachment=False,
+    )
+
+
+@app.route("/admin/datei/<int:datei_id>/download")
+@admin_required
+def admin_datei_download(datei_id):
+    datei = get_datei(datei_id)
+    if not datei:
+        abort(404)
+    path = UPLOAD_DIR / datei["stored_name"]
+    if not path.exists():
+        abort(404)
+    return send_file(
+        path,
+        download_name=datei["original_name"],
+        mimetype=datei["mime_type"],
+        as_attachment=True,
+    )
 
 
 @app.route("/admin/loeschen/<int:auftrag_id>", methods=["POST"])
@@ -3644,10 +4651,11 @@ def partner_neues_angebot(slug):
             transport_art=clean_text(form.get("transport_art")) or "standard",
             kontakt_telefon=clean_text(form.get("kontakt_telefon")),
             angebotsphase=1,
+            angebot_abgesendet=0,
         )
         save_uploads(angebot_id, erlaubte_dateien, "autohaus", "standard")
         refresh_offer_texts(angebot_id, kunden_kurz, kunden_text)
-        flash("Angebotsanfrage analysiert und abgeschickt.", "success")
+        flash("Angebotsanfrage analysiert. Bitte prüfen und danach absenden.", "success")
         return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=angebot_id))
 
     return render_template(
@@ -3673,11 +4681,13 @@ def partner_angebot_detail(slug, auftrag_id):
 
     if request.method == "POST":
         form = request.form
+        aktion = clean_text(form.get("aktion")) or "analyze"
         dateien = request.files.getlist("dateien")
         erlaubte_dateien = get_allowed_uploads(dateien)
         kunden_kurz = beautify_offer_text(form.get("analyse_text"))
         kunden_text = beautify_offer_text(form.get("beschreibung"))
         analyse = kunden_kurz or analyse_text(kunden_text)
+        bleibt_abgesendet = bool(angebot.get("angebot_abgesendet")) or aktion == "submit_offer"
         db = get_db()
         db.execute(
             """
@@ -3694,6 +4704,7 @@ def partner_angebot_detail(slug, auftrag_id):
                 abholtermin=?,
                 transport_art=?,
                 kontakt_telefon=?,
+                angebot_abgesendet=?,
                 geaendert_am=?
             WHERE id=? AND autohaus_id=? AND angebotsphase=1
             """,
@@ -3710,6 +4721,7 @@ def partner_angebot_detail(slug, auftrag_id):
                 format_date(form.get("abholtermin")),
                 clean_text(form.get("transport_art")) or "standard",
                 clean_text(form.get("kontakt_telefon")),
+                1 if bleibt_abgesendet else 0,
                 now_str(),
                 auftrag_id,
                 autohaus["id"],
@@ -3719,7 +4731,11 @@ def partner_angebot_detail(slug, auftrag_id):
         db.close()
         save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
         refresh_offer_texts(auftrag_id, kunden_kurz, kunden_text)
-        flash("Angebotsanfrage aktualisiert und neu analysiert.", "success")
+        if aktion == "submit_offer":
+            submit_offer_request(auftrag_id)
+            flash("Angebotsanfrage abgesendet. Die Werkstatt kann sie jetzt prüfen.", "success")
+        else:
+            flash("Angebotsanfrage analysiert. Bitte prüfen und danach absenden.", "success")
         return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
 
     sichtbare_dateien = [d for d in list_dateien(auftrag_id) if d.get("quelle") in {"autohaus", "intern"}]
@@ -3728,8 +4744,25 @@ def partner_angebot_detail(slug, auftrag_id):
         autohaus=autohaus,
         angebot=angebot,
         dateien=sichtbare_dateien,
+        dokument_pruefung=list_document_review_items(auftrag_id, angebot),
         transport_arten=TRANSPORT_ARTEN,
     )
+
+
+@app.route("/partner/<slug>/angebot/<int:auftrag_id>/annehmen", methods=["POST"])
+def partner_angebot_annehmen(slug, auftrag_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    angebot = get_auftrag(auftrag_id)
+    if not angebot or angebot.get("autohaus_id") != autohaus["id"] or not angebot.get("angebotsphase"):
+        abort(404)
+    if angebot.get("angebot_status") != "angebot_abgegeben":
+        flash("Das Angebot der Werkstatt liegt noch nicht vor.", "warning")
+        return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
+    angebot_annehmen(auftrag_id)
+    flash("Angebot angenommen. Das Fahrzeug wurde in Ihre Aufträge übernommen.", "success")
+    return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
 
 @app.route("/partner/<slug>/auftrag/<int:auftrag_id>", methods=["GET", "POST"])
@@ -3795,6 +4828,13 @@ def partner_auftrag(slug, auftrag_id):
         db.close()
         dateien = request.files.getlist("dateien")
         erlaubte_dateien = get_allowed_uploads(dateien)
+        if aktion == "reanalyze_existing":
+            count, _ = reanalyze_existing_documents(auftrag_id)
+            if count:
+                flash(f"{count} vorhandene Unterlage(n) neu analysiert.", "success")
+            else:
+                flash("Keine auswertbaren vorhandenen Unterlagen gefunden.", "warning")
+            return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
         if aktion == "upload_analyze" and not any(file and file.filename for file in dateien):
             flash("Bitte zuerst eine Datei auswählen.", "warning")
             return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
@@ -3823,6 +4863,7 @@ def partner_auftrag(slug, auftrag_id):
         auftrag=auftrag,
         dateien=standard_dateien,
         fertigbilder=fertigbilder,
+        dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
         reklamationen=list_reklamationen(auftrag_id),
         verzoegerungen=list_verzoegerungen(auftrag_id),
         transport_arten=TRANSPORT_ARTEN,
@@ -3953,11 +4994,39 @@ def partner_datei(slug, datei_id):
     path = UPLOAD_DIR / datei["stored_name"]
     if not path.exists():
         abort(404)
-    return send_file(path, download_name=datei["original_name"], mimetype=datei["mime_type"])
+    return send_file(
+        path,
+        download_name=datei["original_name"],
+        mimetype=datei["mime_type"],
+        as_attachment=False,
+    )
+
+
+@app.route("/partner/<slug>/datei/<int:datei_id>/download")
+def partner_datei_download(slug, datei_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    datei = get_datei(datei_id)
+    if not datei:
+        abort(404)
+    auftrag = get_auftrag(datei["auftrag_id"])
+    if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
+        abort(404)
+    path = UPLOAD_DIR / datei["stored_name"]
+    if not path.exists():
+        abort(404)
+    return send_file(
+        path,
+        download_name=datei["original_name"],
+        mimetype=datei["mime_type"],
+        as_attachment=True,
+    )
+
+init_db()
 
 
 if __name__ == "__main__":
-    init_db()
     print("=" * 58)
     print("  Gärtner Autohaus-Terminportal gestartet")
     print("  Admin:   http://localhost:5000/admin")
