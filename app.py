@@ -471,6 +471,10 @@ def get_startup_warnings():
     return warnings
 
 
+def get_admin_pass():
+    return clean_text(os.environ.get("ADMIN_PASS")) or clean_text(ADMIN_PASS) or DEFAULT_ADMIN_PASS
+
+
 def clean_text(value):
     return str(value or "").strip()
 
@@ -3992,7 +3996,7 @@ def partner_session_required_by_key(portal_key):
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        if request.form.get("passwort") == ADMIN_PASS:
+        if clean_text(request.form.get("passwort")) == get_admin_pass():
             session["admin"] = True
             return redirect(url_for("dashboard"))
         flash("Falsches Passwort.", "danger")
