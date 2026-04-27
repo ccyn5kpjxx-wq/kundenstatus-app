@@ -106,6 +106,8 @@ for env_file in (BASE / ".env.local", BASE / ".env"):
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 USE_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
+if USE_POSTGRES:
+    UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", "/tmp/kundenstatus-uploads"))
 DEFAULT_ADMIN_PASS = "gaertner2026"
 DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
@@ -2612,7 +2614,9 @@ def ensure_column(db, table_name, column_name, column_definition):
 
 
 def init_db():
-    if not USE_POSTGRES:
+    if USE_POSTGRES:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    else:
         DATA_DIR.mkdir(exist_ok=True)
         UPLOAD_DIR.mkdir(exist_ok=True)
     db = get_db()
