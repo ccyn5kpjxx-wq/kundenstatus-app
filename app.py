@@ -2608,8 +2608,9 @@ def ensure_column(db, table_name, column_name, column_definition):
 
 
 def init_db():
-    DATA_DIR.mkdir(exist_ok=True)
-    UPLOAD_DIR.mkdir(exist_ok=True)
+    if not USE_POSTGRES:
+        DATA_DIR.mkdir(exist_ok=True)
+        UPLOAD_DIR.mkdir(exist_ok=True)
     db = get_db()
     db.executescript(
         """
