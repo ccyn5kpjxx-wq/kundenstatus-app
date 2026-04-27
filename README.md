@@ -99,6 +99,10 @@ python app.py
 
 Hinweis: Für die lokale OCR muss Tesseract zusätzlich als Windows-Programm installiert sein. Ohne Tesseract arbeitet die App weiter, aber die OCR-Qualität kann schlechter sein.
 
+Deployment refresh.
+
+
+
 ## Lizenz
 
 Proprietär. Nutzung und Weitergabe nur mit Zustimmung von Gärtner Karosserie & Lack.
