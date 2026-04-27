@@ -827,10 +827,12 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
             "- Bei Lackierauftrag-Formularen sind Felder wie Typ, FG-Nr, Amtl. Kennzeichen, Auftrags-Nr, Fertig bis und angekreuzte Teile wichtig.",
             "- Bei handschriftlich erledigten Positionen diese in erledigte_bauteile aufnehmen und NICHT in offene_bauteile.",
             "- In offene_bauteile nur Positionen aufnehmen, die noch fuer unsere Werkstatt relevant sind.",
-            "- Wenn unsicher, Feld leer lassen und needs_review auf true setzen.",
+            "- Sichtbare Werte immer eintragen, auch wenn sie unsicher sind.",
+            "- Wenn ein Wert unsicher ist, den erkannten Wert trotzdem eintragen, needs_review auf true setzen und review_reason mit 'Bitte überprüfen' beginnen.",
             "- Datumsformat immer TT.MM.JJJJ.",
+            "- Wenn ein Fertig-bis-Datum vor dem Auftragsdatum liegt, den sichtbaren Wert trotzdem eintragen und zur Pruefung markieren.",
             "- Wenn Originalbilder angehaengt sind, pruefe die sichtbaren Tabellen, Haekchen, handschriftlichen Notizen und Datumsfelder direkt im Bild.",
-            "- Bei Lackierauftraegen sind angekreuzte Karosserieteile und Bemerkungen entscheidend.",
+            "- Bei Lackierauftraegen sind Auftrags-Nr., Typ, FG-Nr., Farb-Nr., Fertig-bis-Datum, angekreuzte Karosserieteile und Bemerkungen entscheidend.",
             "",
             f"Dateiname: {filename}",
             "",
@@ -852,7 +854,8 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
                 "role": "system",
                 "content": (
                     "Du extrahierst strukturierte Felder aus deutschen Werkstattbelegen. "
-                    "Arbeite vorsichtig, halluziniere nicht und liefere nur sichere Werte."
+                    "Arbeite vorsichtig und halluziniere nicht. Wenn ein Wert sichtbar, aber unsicher ist, "
+                    "gib ihn trotzdem zur menschlichen Pruefung zurueck."
                 ),
             },
             {"role": "user", "content": user_content},
@@ -947,8 +950,32 @@ def values_disagree(left, right, is_date=False):
     return normalize_document_text(left_text) != normalize_document_text(right_text)
 
 
+def has_extracted_document_values(fields):
+    for key in (
+        "fahrzeug",
+        "fin_nummer",
+        "auftragsnummer",
+        "kennzeichen",
+        "annahme_datum",
+        "fertig_datum",
+        "rep_max_kosten",
+        "analyse_text",
+        "beschreibung",
+        "bauteile_override",
+    ):
+        if clean_text((fields or {}).get(key)):
+            return True
+    return False
+
+
 def quality_check_document_fields(fields):
     fields = dict(fields or {})
+    if has_extracted_document_values(fields):
+        add_analysis_note(
+            fields,
+            "Bitte überprüfen: Die Daten wurden automatisch aus der Unterlage übernommen.",
+        )
+
     confidence = float(fields.get("analyse_confidence") or 0)
     if confidence and confidence < 0.72:
         add_analysis_note(
@@ -976,6 +1003,14 @@ def quality_check_document_fields(fields):
         value = clean_text(fields.get(key))
         if value and not parse_date(value):
             add_analysis_note(fields, f"{label} wurde nicht als gültiges Datum erkannt.")
+
+    annahme = parse_date(fields.get("annahme_datum"))
+    fertig = parse_date(fields.get("fertig_datum"))
+    if annahme and fertig and fertig < annahme:
+        add_analysis_note(
+            fields,
+            "Bitte überprüfen: Das Fertig-bis-Datum liegt vor dem Auftrags-/Annahmedatum.",
+        )
 
     return fields
 
