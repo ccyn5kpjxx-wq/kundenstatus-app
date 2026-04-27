@@ -129,6 +129,15 @@
         </div>
         <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zurück</a>
       </div>
+      <div class="border rounded-4 p-3 mb-4" style="background:#f8f2e8;border-color:#e4d6c3 !important;">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+          <div>
+            <div class="fw-semibold">Vorausgefüllten Lackierauftrag verwenden</div>
+            <div class="text-muted small">PDF herunterladen, ausfüllen und anschließend unten bei Anhänge wieder hochladen.</div>
+          </div>
+          <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
+        </div>
+      </div>
       <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
         <div class="col-md-6">
           <label class="form-label">Endkunde / Referenz</label>

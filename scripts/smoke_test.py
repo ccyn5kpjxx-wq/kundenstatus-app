@@ -55,6 +55,12 @@ def main():
 
     autohaus = portal.get_autohaus_by_slug("kaesmann")
     if autohaus:
+        admin_pdf_response = client.get(f"/admin/autohaus/{autohaus['id']}/lackierauftrag-vorlage.pdf")
+        ok &= check("Admin Lackierauftrag-PDF", admin_pdf_response, {200})
+        is_pdf = admin_pdf_response.mimetype == "application/pdf"
+        print("[OK] Admin Lackierauftrag ist PDF" if is_pdf else "[FEHLER] Admin Lackierauftrag ist kein PDF")
+        ok &= is_pdf
+
         client = portal.app.test_client()
         ok &= check(
             "Käsmann-Dashboard ohne Partner-Login geschuetzt",
@@ -68,6 +74,11 @@ def main():
             client.get("/partner/kaesmann/dashboard"),
             {200},
         )
+        partner_pdf_response = client.get("/partner/kaesmann/lackierauftrag-vorlage.pdf")
+        ok &= check("Käsmann Lackierauftrag-PDF", partner_pdf_response, {200})
+        is_pdf = partner_pdf_response.mimetype == "application/pdf"
+        print("[OK] Käsmann Lackierauftrag ist PDF" if is_pdf else "[FEHLER] Käsmann Lackierauftrag ist kein PDF")
+        ok &= is_pdf
     else:
         print("[INFO] Autohaus 'kaesmann' existiert lokal nicht, Partner-Dashboard-Test uebersprungen.")
 

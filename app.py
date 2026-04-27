@@ -11,7 +11,9 @@ import base64
 from datetime import date, datetime
 from difflib import SequenceMatcher
 from functools import wraps
+from html import escape
 import hmac
+from io import BytesIO
 import json
 import mimetypes
 import os
@@ -2988,6 +2990,237 @@ def row_to_autohaus(row):
     return autohaus
 
 
+def lackierauftrag_filename(autohaus):
+    slug = clean_text(autohaus.get("slug")) or slugify(autohaus.get("name")) or "autohaus"
+    return f"Lackierauftrag_{slug}.pdf"
+
+
+def make_lackierauftrag_pdf(autohaus):
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    def text(value):
+        return escape(clean_text(value))
+
+    def style(name, size=9, bold=False, color=None, align=TA_LEFT, space=0):
+        return ParagraphStyle(
+            name,
+            fontName="Helvetica-Bold" if bold else "Helvetica",
+            fontSize=size,
+            textColor=color or colors.HexColor("#1A1A1A"),
+            alignment=align,
+            spaceAfter=space,
+            leading=size * 1.3,
+        )
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=1.5 * cm,
+        bottomMargin=1.5 * cm,
+    )
+
+    orange = colors.HexColor("#E8651A")
+    light_gray = colors.HexColor("#F0F0F0")
+    mid_gray = colors.HexColor("#CCCCCC")
+    black = colors.HexColor("#1A1A1A")
+
+    hdr = style("hdr", 22, bold=True)
+    sub = style("sub", 8, color=colors.HexColor("#555555"), align=TA_RIGHT)
+    label = style("lbl", 8)
+    bold8 = style("b8", 8, bold=True)
+    bold9 = style("b9", 9, bold=True)
+    small = style("sm", 7, color=colors.HexColor("#555555"))
+    footer_style = style("ft", 8, align=TA_CENTER)
+
+    telefon_email = " / ".join(
+        part
+        for part in (clean_text(autohaus.get("telefon")), clean_text(autohaus.get("email")))
+        if part
+    )
+    firma = text(autohaus.get("name"))
+    ansprechpartner = text(autohaus.get("kontakt_name"))
+    kontakt = text(telefon_email)
+
+    story = []
+    story.append(
+        Table(
+            [
+                [
+                    Paragraph("Lackierauftrag", hdr),
+                    Paragraph(
+                        "Gärtner Karosserie &amp; Lack GmbH<br/>"
+                        "Binauer Höhe 4 · 74821 Mosbach-Lohrbach<br/>"
+                        "Tel. +49 1522 770 66 94 · info@auto-lackierzentrum.de",
+                        sub,
+                    ),
+                ]
+            ],
+            colWidths=[9 * cm, 9 * cm],
+            style=TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                    ("LINEBELOW", (0, 0), (-1, 0), 2, orange),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+                ]
+            ),
+        )
+    )
+    story.append(Spacer(1, 8))
+
+    left_rows = [
+        [Paragraph("Auftraggeber", bold9), ""],
+        [Paragraph("Firma:", label), Paragraph(firma, bold8)],
+        [Paragraph("Ansprechpartner:", label), Paragraph(ansprechpartner, bold8)],
+        [Paragraph("Tel. / E-Mail:", label), Paragraph(kontakt, bold8)],
+        [Paragraph("Auftrags-Datum:", label), ""],
+        [Paragraph("Fertig bis spätestens:", label), ""],
+    ]
+    right_rows = [
+        [Paragraph("Fahrzeug", bold9), ""],
+        [Paragraph("Typ:", label), ""],
+        [Paragraph("Amtl. Kennzeichen:", label), ""],
+        [Paragraph("Fg.-Nr.:", label), ""],
+        [Paragraph("Farb-Nr.:", label), ""],
+        [Paragraph("km-Stand:", label), ""],
+    ]
+
+    table_style = TableStyle(
+        [
+            ("GRID", (0, 1), (-1, -1), 0.5, mid_gray),
+            ("BACKGROUND", (0, 0), (-1, 0), light_gray),
+            ("SPAN", (0, 0), (1, 0)),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ]
+    )
+    row_h = 0.72 * cm
+    left_t = Table(left_rows, colWidths=[3.5 * cm, 5.2 * cm], rowHeights=[0.6 * cm] + [row_h] * 5, style=table_style)
+    right_t = Table(right_rows, colWidths=[4.2 * cm, 4.5 * cm], rowHeights=[0.6 * cm] + [row_h] * 5, style=table_style)
+    story.append(
+        Table(
+            [[left_t, right_t]],
+            colWidths=[8.9 * cm, 9.1 * cm],
+            style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (1, 0), (1, 0), 8)]),
+        )
+    )
+    story.append(Spacer(1, 10))
+
+    story.append(
+        Table(
+            [
+                [Paragraph("Abrechnung", bold9), "", "", ""],
+                [
+                    Paragraph("[ ] Selbstzahler", label),
+                    Paragraph("[ ] Kaskoversicherung", label),
+                    Paragraph("[ ] Haftpflicht gegnerisch", label),
+                    Paragraph("[ ] Sammelrechnung", label),
+                ],
+                [Paragraph("Versicherung / Schaden-Nr.:", label), "", Paragraph("Vers.-Nehmer:", label), ""],
+            ],
+            colWidths=[4.5 * cm, 4.5 * cm, 4.5 * cm, 4.5 * cm],
+            rowHeights=[0.55 * cm, 0.6 * cm, 0.7 * cm],
+            style=TableStyle(
+                [
+                    ("SPAN", (0, 0), (3, 0)),
+                    ("BACKGROUND", (0, 0), (3, 0), light_gray),
+                    ("FONTNAME", (0, 0), (3, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("GRID", (0, 2), (1, 2), 0.5, mid_gray),
+                    ("GRID", (2, 2), (3, 2), 0.5, mid_gray),
+                    ("SPAN", (0, 2), (1, 2)),
+                    ("SPAN", (2, 2), (3, 2)),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("LINEBELOW", (0, 0), (3, 0), 0.5, mid_gray),
+                ]
+            ),
+        )
+    )
+    story.append(Spacer(1, 10))
+
+    data = [[Paragraph("Karosserieteil", bold9), Paragraph("Seite", bold9), Paragraph("Bemerkung / Arbeitsumfang", bold9), Paragraph("I.O. / n.I.O.", bold9)]]
+    data.extend([["", "", "", ""] for _ in range(14)])
+    story.append(
+        Table(
+            data,
+            colWidths=[4.5 * cm, 2 * cm, 9 * cm, 2.5 * cm],
+            rowHeights=[0.55 * cm] + [0.7 * cm] * 14,
+            style=TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.5, mid_gray),
+                    ("BACKGROUND", (0, 0), (-1, 0), light_gray),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ]
+            ),
+        )
+    )
+    story.append(Spacer(1, 14))
+
+    story.append(
+        Table(
+            [
+                [Paragraph("Auftrag ordnungsgemäß ausgeführt / Qualitätskontrolle durchgeführt", footer_style)],
+                [
+                    Table(
+                        [[Paragraph("Datum:", label), "", Paragraph("Unterschrift Auftragnehmer:", label), ""]],
+                        colWidths=[2 * cm, 5.5 * cm, 5 * cm, 5.5 * cm],
+                        rowHeights=[0.8 * cm],
+                        style=TableStyle(
+                            [
+                                ("LINEBELOW", (1, 0), (1, 0), 0.5, mid_gray),
+                                ("LINEBELOW", (3, 0), (3, 0), 0.5, mid_gray),
+                                ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+                                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                            ]
+                        ),
+                    )
+                ],
+            ],
+            colWidths=[18 * cm],
+            style=TableStyle(
+                [
+                    ("LINEABOVE", (0, 0), (0, 0), 1.5, orange),
+                    ("TOPPADDING", (0, 0), (0, 0), 6),
+                    ("ALIGN", (0, 0), (0, 0), "CENTER"),
+                ]
+            ),
+        )
+    )
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+def send_lackierauftrag_pdf(autohaus):
+    return send_file(
+        make_lackierauftrag_pdf(autohaus),
+        download_name=lackierauftrag_filename(autohaus),
+        mimetype="application/pdf",
+        as_attachment=True,
+    )
+
+
 def row_to_auftrag(row):
     if not row:
         return None
@@ -4396,6 +4629,15 @@ def autohaus_update(autohaus_id):
     return redirect(url_for("dashboard"))
 
 
+@app.route("/admin/autohaus/<int:autohaus_id>/lackierauftrag-vorlage.pdf")
+@admin_required
+def admin_lackierauftrag_vorlage(autohaus_id):
+    autohaus = get_autohaus(autohaus_id)
+    if not autohaus:
+        abort(404)
+    return send_lackierauftrag_pdf(autohaus)
+
+
 @app.route("/admin/neu", methods=["GET", "POST"])
 @admin_required
 def neuer_auftrag():
@@ -4903,12 +5145,28 @@ def partner_dashboard(slug):
     )
 
 
+@app.route("/partner/<slug>/lackierauftrag-vorlage.pdf")
+def partner_lackierauftrag_vorlage(slug):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    return send_lackierauftrag_pdf(autohaus)
+
+
 @app.route("/portal/<portal_key>/dashboard")
 def partner_dashboard_key(portal_key):
     autohaus, redirect_response = partner_session_required_by_key(portal_key)
     if redirect_response:
         return redirect_response
     return redirect(url_for("partner_dashboard", slug=autohaus["slug"]))
+
+
+@app.route("/portal/<portal_key>/lackierauftrag-vorlage.pdf")
+def partner_lackierauftrag_vorlage_key(portal_key):
+    autohaus, redirect_response = partner_session_required_by_key(portal_key)
+    if redirect_response:
+        return redirect_response
+    return redirect(url_for("partner_lackierauftrag_vorlage", slug=autohaus["slug"]))
 
 
 @app.route("/partner/<slug>/neu", methods=["GET", "POST"])
