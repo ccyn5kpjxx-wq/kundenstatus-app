@@ -127,6 +127,93 @@ CSRF_FIELD_NAME = "csrf_token"
 
 GOOGLE_ACCESS_TOKEN = {"token": "", "expires_at": 0}
 
+DEFAULT_AUTOHAEUSER = [
+    {
+        "name": "Auto Pfaff GmbH",
+        "slug": "autohaus-pfaff",
+        "portal_key": "b900b7d3d54f4afa",
+        "kontakt_name": "Auto Pfaff GmbH",
+        "email": "info@auto-pfaff.de",
+        "telefon": "06261 9310-0",
+        "strasse": "Neuwiesenweg 19",
+        "plz": "74834",
+        "ort": "Elztal-Dallau",
+        "zugangscode": "PFAFF2026",
+        "portal_titel": "Portal Auto Pfaff",
+        "willkommen_text": "Willkommen im persönlichen Terminbereich von Auto Pfaff.",
+    },
+    {
+        "name": "Autohaus Ralph Müller OHG",
+        "slug": "autohaus-mueller",
+        "portal_key": "9847b961ecdf4387",
+        "kontakt_name": "Autohaus Ralph Müller",
+        "email": "",
+        "telefon": "",
+        "strasse": "Ortsstraße 7",
+        "plz": "74847",
+        "ort": "Obrigheim-Asbach",
+        "zugangscode": "MUELLER2026",
+        "portal_titel": "Portal Autohaus Müller",
+        "willkommen_text": "Willkommen im persönlichen Terminbereich von Autohaus Müller.",
+    },
+    {
+        "name": "HSE Autowelt GmbH",
+        "slug": "hse-autowelt",
+        "portal_key": "ecd6b48321124e96",
+        "kontakt_name": "HSE Autowelt",
+        "email": "info@hse-autowelt.de",
+        "telefon": "+49 1515 0928930",
+        "strasse": "Langenelzer Str. 45",
+        "plz": "69427",
+        "ort": "Mudau",
+        "zugangscode": "HSE2026",
+        "portal_titel": "Portal HSE Autowelt",
+        "willkommen_text": "Willkommen im persönlichen Terminbereich von HSE Autowelt.",
+    },
+    {
+        "name": "Johnatan Dold und Marcel Deisling GbR",
+        "slug": "johnatan-dold-und-marcel-deisling-gbr",
+        "portal_key": "f255abee6f8d4353",
+        "kontakt_name": "Johnatan Dold / Marcel Deisling",
+        "email": "",
+        "telefon": "",
+        "strasse": "Hohlweg 24",
+        "plz": "74821",
+        "ort": "Mosbach",
+        "zugangscode": "DOLD2026",
+        "portal_titel": "Portal Dold & Deisling",
+        "willkommen_text": "Willkommen im persönlichen Terminbereich von Dold & Deisling.",
+    },
+    {
+        "name": "Käsmann",
+        "slug": "kaesmann",
+        "portal_key": "4080695acfd54eea",
+        "kontakt_name": "Käsmann",
+        "email": "info@kaesmann.de",
+        "telefon": "06261 9730-0",
+        "strasse": "Mosbacher Straße 67",
+        "plz": "74821",
+        "ort": "Mosbach",
+        "zugangscode": "KAES2026",
+        "portal_titel": "Portal Käsmann",
+        "willkommen_text": "Willkommen im persönlichen Terminbereich von Käsmann.",
+    },
+    {
+        "name": "MHC Mobility GmbH",
+        "slug": "mhc-mobility",
+        "portal_key": "620bc857773b4b60",
+        "kontakt_name": "MHC Mobility",
+        "email": "info@mhcmobility.de",
+        "telefon": "04286 7703-0",
+        "strasse": "An der Autobahn 12-16",
+        "plz": "27404",
+        "ort": "Gyhum/Bockel",
+        "zugangscode": "MHC2026",
+        "portal_titel": "Portal MHC Mobility",
+        "willkommen_text": "Willkommen im persönlichen Terminbereich von MHC Mobility.",
+    },
+]
+
 STATUSLISTE = {
     1: dict(key="angelegt", label="Angelegt", icon="📝", farbe="secondary"),
     2: dict(key="eingeplant", label="Eingeplant", icon="📅", farbe="primary"),
@@ -2820,6 +2907,8 @@ def init_db():
     ensure_column(db, "autohaeuser", "plz", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "ort", "TEXT DEFAULT ''")
 
+    seed_default_autohaeuser(db)
+
     rows = db.execute("SELECT id, portal_key FROM autohaeuser").fetchall()
     for row in rows:
         if not clean_text(row["portal_key"]):
@@ -2830,6 +2919,50 @@ def init_db():
 
     db.commit()
     db.close()
+
+
+def seed_default_autohaeuser(db):
+    now = now_str()
+    for autohaus in DEFAULT_AUTOHAEUSER:
+        existing = db.execute(
+            "SELECT id FROM autohaeuser WHERE slug=? OR portal_key=?",
+            (autohaus["slug"], autohaus["portal_key"]),
+        ).fetchone()
+        values = (
+            autohaus["name"],
+            autohaus["slug"],
+            autohaus["portal_key"],
+            autohaus["kontakt_name"],
+            autohaus["email"],
+            autohaus["telefon"],
+            autohaus["strasse"],
+            autohaus["plz"],
+            autohaus["ort"],
+            autohaus["zugangscode"],
+            autohaus["portal_titel"],
+            autohaus["willkommen_text"],
+        )
+        if existing:
+            db.execute(
+                """
+                UPDATE autohaeuser
+                SET name=?, slug=?, portal_key=?, kontakt_name=?, email=?, telefon=?,
+                    strasse=?, plz=?, ort=?, zugangscode=?, portal_titel=?,
+                    willkommen_text=?
+                WHERE id=?
+                """,
+                values + (existing["id"],),
+            )
+            continue
+        db.execute(
+            """
+            INSERT INTO autohaeuser
+            (name, slug, portal_key, kontakt_name, email, telefon, strasse, plz, ort,
+             zugangscode, portal_titel, willkommen_text, notiz, erstellt_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?)
+            """,
+            values + (now,),
+        )
 
 
 def row_to_autohaus(row):
