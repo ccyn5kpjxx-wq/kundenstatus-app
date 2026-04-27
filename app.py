@@ -2867,6 +2867,17 @@ def init_db():
             erstellt_am TEXT NOT NULL,
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
         );
+
+        CREATE TABLE IF NOT EXISTS chat_nachrichten (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            auftrag_id        INTEGER NOT NULL,
+            absender          TEXT NOT NULL,
+            nachricht         TEXT NOT NULL,
+            gelesen_admin     INTEGER DEFAULT 0,
+            gelesen_autohaus  INTEGER DEFAULT 0,
+            erstellt_am       TEXT NOT NULL,
+            FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
+        );
         """
     )
 
@@ -3758,6 +3769,89 @@ def list_autohaus_benachrichtigungen(autohaus_id, limit=10):
     return [dict(row) for row in rows]
 
 
+def add_chat_nachricht(auftrag_id, absender, nachricht):
+    nachricht = clean_text(nachricht)
+    absender = clean_text(absender) or "werkstatt"
+    if absender not in {"werkstatt", "autohaus"}:
+        absender = "werkstatt"
+    if not nachricht:
+        return None
+    gelesen_admin = 1 if absender == "werkstatt" else 0
+    gelesen_autohaus = 1 if absender == "autohaus" else 0
+    db = get_db()
+    cursor = db.execute(
+        """
+        INSERT INTO chat_nachrichten
+        (auftrag_id, absender, nachricht, gelesen_admin, gelesen_autohaus, erstellt_am)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (auftrag_id, absender, nachricht, gelesen_admin, gelesen_autohaus, now_str()),
+    )
+    db.execute(
+        "UPDATE auftraege SET geaendert_am=? WHERE id=?",
+        (now_str(), auftrag_id),
+    )
+    db.commit()
+    chat_id = cursor.lastrowid
+    db.close()
+    return chat_id
+
+
+def list_chat_nachrichten(auftrag_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT *
+        FROM chat_nachrichten
+        WHERE auftrag_id=?
+        ORDER BY id ASC
+        """,
+        (auftrag_id,),
+    ).fetchall()
+    db.close()
+    return [dict(row) for row in rows]
+
+
+def mark_chat_gelesen(auftrag_id, empfaenger):
+    empfaenger = clean_text(empfaenger)
+    if empfaenger not in {"admin", "autohaus"}:
+        return
+    if empfaenger == "admin":
+        sql = """
+            UPDATE chat_nachrichten
+            SET gelesen_admin=1
+            WHERE auftrag_id=? AND absender='autohaus' AND gelesen_admin=0
+        """
+    else:
+        sql = """
+            UPDATE chat_nachrichten
+            SET gelesen_autohaus=1
+            WHERE auftrag_id=? AND absender='werkstatt' AND gelesen_autohaus=0
+        """
+    db = get_db()
+    db.execute(sql, (auftrag_id,))
+    db.commit()
+    db.close()
+
+
+def list_offene_chat_nachrichten(limit=12):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT c.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer, h.name AS autohaus_name
+        FROM chat_nachrichten c
+        JOIN auftraege a ON a.id = c.auftrag_id
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE c.absender='autohaus' AND c.gelesen_admin=0 AND a.archiviert=0
+        ORDER BY c.id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    db.close()
+    return [dict(row) for row in rows]
+
+
 def get_verzoegerung(verzoegerung_id):
     db = get_db()
     row = db.execute(
@@ -4107,6 +4201,7 @@ def delete_auftrag(auftrag_id):
     db.execute("DELETE FROM verzoegerungen WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM status_log WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM benachrichtigungen WHERE auftrag_id=?", (auftrag_id,))
+    db.execute("DELETE FROM chat_nachrichten WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM auftraege WHERE id=?", (auftrag_id,))
     db.commit()
     db.close()
@@ -4343,6 +4438,7 @@ def dashboard_daten(auftraege):
     heute = date.today()
     offene_verzoegerungen = []
     offene_reklamationen = []
+    offene_chat_nachrichten = list_offene_chat_nachrichten()
 
     db = get_db()
     rows = db.execute(
@@ -4411,6 +4507,7 @@ def dashboard_daten(auftraege):
         "ueberfaellig": ueberfaellig,
         "offene_verzoegerungen": offene_verzoegerungen,
         "offene_reklamationen": offene_reklamationen,
+        "offene_chat_nachrichten": offene_chat_nachrichten,
         "naechste_events": naechste_events[:12],
     }
 
@@ -4810,6 +4907,8 @@ def auftrag_detail(auftrag_id):
     dateien = list_dateien(auftrag_id)
     standard_dateien = dateien_mit_kategorie(dateien, "standard")
     fertigbilder = dateien_mit_kategorie(dateien, "fertigbild")
+    chat_nachrichten = list_chat_nachrichten(auftrag_id)
+    mark_chat_gelesen(auftrag_id, "admin")
     return render_template(
         "auftrag_detail.html",
         auftrag=auftrag,
@@ -4823,7 +4922,28 @@ def auftrag_detail(auftrag_id):
         reklamationen=list_reklamationen(auftrag_id),
         verzoegerungen=list_verzoegerungen(auftrag_id),
         benachrichtigungen=list_benachrichtigungen(auftrag_id),
+        chat_nachrichten=chat_nachrichten,
     )
+
+
+@app.route("/admin/auftrag/<int:auftrag_id>/chat", methods=["POST"])
+@admin_required
+def admin_chat_nachricht(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+    nachricht = clean_text(request.form.get("nachricht"))
+    if not nachricht:
+        flash("Bitte eine Nachricht eingeben.", "warning")
+        return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
+    add_chat_nachricht(auftrag_id, "werkstatt", nachricht)
+    add_benachrichtigung(
+        auftrag_id,
+        "Neue Chat-Nachricht",
+        "Die Werkstatt hat im Auftrag geantwortet.",
+    )
+    flash("Nachricht an das Autohaus gesendet.", "success")
+    return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
 
 @app.route("/admin/auftrag/<int:auftrag_id>/fertigbilder", methods=["POST"])
@@ -5471,6 +5591,8 @@ def partner_auftrag(slug, auftrag_id):
     sichtbare_dateien = [d for d in list_dateien(auftrag_id) if d.get("quelle") in {"autohaus", "intern"}]
     standard_dateien = dateien_mit_kategorie(sichtbare_dateien, "standard")
     fertigbilder = dateien_mit_kategorie(sichtbare_dateien, "fertigbild")
+    chat_nachrichten = list_chat_nachrichten(auftrag_id)
+    mark_chat_gelesen(auftrag_id, "autohaus")
     return render_template(
         "partner_auftrag.html",
         autohaus=autohaus,
@@ -5483,6 +5605,7 @@ def partner_auftrag(slug, auftrag_id):
         verzoegerungen=list_verzoegerungen(auftrag_id),
         transport_arten=TRANSPORT_ARTEN,
         statusliste=STATUSLISTE,
+        chat_nachrichten=chat_nachrichten,
     )
 
 
@@ -5565,6 +5688,25 @@ def partner_verzoegerung(slug, auftrag_id):
         uebernommen=0,
     )
     flash("Verzögerung an die Werkstatt gemeldet.", "success")
+    return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+
+
+@app.route("/partner/<slug>/auftrag/<int:auftrag_id>/chat", methods=["POST"])
+def partner_chat_nachricht(slug, auftrag_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
+        abort(404)
+
+    nachricht = clean_text(request.form.get("nachricht"))
+    if not nachricht:
+        flash("Bitte eine Nachricht eingeben.", "warning")
+        return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+
+    add_chat_nachricht(auftrag_id, "autohaus", nachricht)
+    flash("Nachricht an die Werkstatt gesendet.", "success")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
 

@@ -177,6 +177,30 @@
     margin-top: 1rem;
   }
 
+  .chat-thread {
+    max-height: 360px;
+    overflow-y: auto;
+    display: grid;
+    gap: .75rem;
+  }
+
+  .chat-message {
+    border: 1px solid #e4d6c3;
+    border-radius: 18px;
+    padding: .85rem .95rem;
+    background: #fffdf9;
+  }
+
+  .chat-message.is-autohaus {
+    background: #f8f2e8;
+    border-color: #d8c4a6;
+  }
+
+  .chat-message.is-werkstatt {
+    background: #eef5f1;
+    border-color: #bdd7c8;
+  }
+
   @media (max-width: 900px) {
     .process-steps {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -525,6 +549,38 @@
   </div>
 
   <div class="col-xl-5">
+    <div class="page-card p-4 mb-4 border border-warning-subtle">
+      <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
+        <div>
+          <h4 class="mb-1">Chat mit Autohaus</h4>
+          <div class="text-muted small">Fragen und kurze Abstimmungen direkt zu diesem Auftrag.</div>
+        </div>
+        {% if chat_nachrichten %}
+        <span class="badge text-bg-warning">{{ chat_nachrichten|length }} Nachricht(en)</span>
+        {% endif %}
+      </div>
+      {% if chat_nachrichten %}
+      <div class="chat-thread mb-3">
+        {% for chat in chat_nachrichten %}
+        <div class="chat-message {{ 'is-autohaus' if chat['absender'] == 'autohaus' else 'is-werkstatt' }}">
+          <div class="d-flex justify-content-between gap-2 flex-wrap mb-1">
+            <div class="fw-bold">{{ 'Autohaus' if chat['absender'] == 'autohaus' else 'Werkstatt' }}</div>
+            <div class="text-muted small">{{ chat['erstellt_am'] }}</div>
+          </div>
+          <div style="white-space:pre-wrap;">{{ chat['nachricht'] }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-muted mb-3">Noch keine Chat-Nachrichten vorhanden.</div>
+      {% endif %}
+      <form method="POST" action="{{ url_for('admin_chat_nachricht', auftrag_id=auftrag['id']) }}" class="d-grid gap-2">
+        <label class="form-label mb-0">Antwort an das Autohaus</label>
+        <textarea name="nachricht" class="form-control" rows="3" placeholder="Kurze Antwort oder Rückfrage schreiben..." required></textarea>
+        <button type="submit" class="btn btn-brand">Nachricht senden</button>
+      </form>
+    </div>
+
     <div class="page-card p-4 mb-4">
       <h4 class="mb-3">Unterlagen</h4>
       {% if dateien %}

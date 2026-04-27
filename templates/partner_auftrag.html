@@ -177,6 +177,26 @@
       border: 1px solid #e4d6c3;
       background: #f7f1e8;
     }
+    .chat-thread {
+      max-height: 360px;
+      overflow-y: auto;
+      display: grid;
+      gap: .75rem;
+    }
+    .chat-message {
+      border: 1px solid #e4d6c3;
+      border-radius: 18px;
+      padding: .85rem .95rem;
+      background: #fffdf9;
+    }
+    .chat-message.is-autohaus {
+      background: #eef5f1;
+      border-color: #bdd7c8;
+    }
+    .chat-message.is-werkstatt {
+      background: #f8f2e8;
+      border-color: #d8c4a6;
+    }
   </style>
 </head>
 <body>
@@ -343,6 +363,38 @@
             {% if auftrag['annahme_datum'] %}<span class="chip">{{ auftrag['partner_annahme_label'] }} {{ auftrag['annahme_datum'] }}</span>{% endif %}
             {% if auftrag['abholtermin'] %}<span class="chip">{{ auftrag['partner_abholung_label'] }} {{ auftrag['abholtermin'] }}</span>{% endif %}
           </div>
+        </div>
+
+        <div class="panel mb-4 border border-warning-subtle">
+          <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
+            <div>
+              <h4 class="mb-1">Chat mit der Werkstatt</h4>
+              <div class="text-muted small">Hier können Sie Fragen oder Probleme direkt zu diesem Auftrag schreiben.</div>
+            </div>
+            {% if chat_nachrichten %}
+            <span class="badge text-bg-warning">{{ chat_nachrichten|length }} Nachricht(en)</span>
+            {% endif %}
+          </div>
+          {% if chat_nachrichten %}
+          <div class="chat-thread mb-3">
+            {% for chat in chat_nachrichten %}
+            <div class="chat-message {{ 'is-autohaus' if chat['absender'] == 'autohaus' else 'is-werkstatt' }}">
+              <div class="d-flex justify-content-between gap-2 flex-wrap mb-1">
+                <div class="fw-bold">{{ 'Sie' if chat['absender'] == 'autohaus' else 'Werkstatt' }}</div>
+                <div class="text-muted small">{{ chat['erstellt_am'] }}</div>
+              </div>
+              <div style="white-space:pre-wrap;">{{ chat['nachricht'] }}</div>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="text-muted mb-3">Noch keine Chat-Nachrichten vorhanden.</div>
+          {% endif %}
+          <form method="POST" action="{{ url_for('partner_chat_nachricht', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="d-grid gap-2">
+            <label class="form-label mb-0">Nachricht an die Werkstatt</label>
+            <textarea name="nachricht" class="form-control" rows="3" placeholder="Frage oder Problem kurz beschreiben..." required></textarea>
+            <button type="submit" class="btn btn-outline-dark">Nachricht senden</button>
+          </form>
         </div>
 
         {% if dokument_pruefung %}

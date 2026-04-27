@@ -174,6 +174,68 @@ def main():
         response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}")
         check("Partner-Auftrag nach Annahme öffnet", response.status_code == 200)
 
+        response = partner.post(
+            f"/partner/kaesmann/auftrag/{angebot_id}/chat",
+            data=with_csrf(partner, {"nachricht": "Ist die Rückgabe am Nachmittag möglich?"}),
+            follow_redirects=False,
+        )
+        check("Partner sendet Chat-Nachricht", response.status_code in {302, 303})
+        db = portal.get_db()
+        chat = db.execute(
+            """
+            SELECT *
+            FROM chat_nachrichten
+            WHERE auftrag_id=? AND absender='autohaus'
+            ORDER BY id DESC
+            """,
+            (angebot_id,),
+        ).fetchone()
+        db.close()
+        check("Chat-Nachricht ist für Admin ungelesen", bool(chat) and chat["gelesen_admin"] == 0, str(chat))
+        response = admin.get("/admin")
+        admin_dashboard_html = response.get_data(as_text=True)
+        check(
+            "Admin-Dashboard zeigt neue Chat-Nachricht",
+            "Neue Chat-Nachrichten" in admin_dashboard_html
+            and "Ist die Rückgabe am Nachmittag möglich?" in admin_dashboard_html,
+        )
+        response = admin.get(f"/admin/auftrag/{angebot_id}")
+        admin_auftrag_html = response.get_data(as_text=True)
+        check(
+            "Admin sieht Chat im Auftrag",
+            response.status_code == 200 and "Chat mit Autohaus" in admin_auftrag_html,
+            f"Status {response.status_code}",
+        )
+        db = portal.get_db()
+        chat = db.execute("SELECT gelesen_admin FROM chat_nachrichten WHERE id=?", (chat["id"],)).fetchone()
+        db.close()
+        check("Admin-Öffnen markiert Chat als gelesen", chat["gelesen_admin"] == 1)
+        response = admin.post(
+            f"/admin/auftrag/{angebot_id}/chat",
+            data=with_csrf(admin, {"nachricht": "Ja, Rückgabe am Nachmittag passt."}),
+            follow_redirects=False,
+        )
+        check("Admin antwortet im Chat", response.status_code in {302, 303})
+        db = portal.get_db()
+        hinweis = db.execute(
+            """
+            SELECT *
+            FROM benachrichtigungen
+            WHERE auftrag_id=? AND titel='Neue Chat-Nachricht'
+            ORDER BY id DESC
+            """,
+            (angebot_id,),
+        ).fetchone()
+        db.close()
+        check("Admin-Chat erzeugt Autohaus-Hinweis", bool(hinweis), str(hinweis))
+        response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}")
+        partner_chat_html = response.get_data(as_text=True)
+        check(
+            "Partner sieht Werkstatt-Antwort im Chat",
+            "Ja, Rückgabe am Nachmittag passt." in partner_chat_html,
+            partner_chat_html[:300],
+        )
+
         db = portal.get_db()
         db.execute(
             """
