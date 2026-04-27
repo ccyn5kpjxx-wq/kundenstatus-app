@@ -1,6 +1,11 @@
 # KI-Setup fuer die Dokumentanalyse
 
-Die App ist auf `Google Document AI + OpenAI` vorbereitet.
+Die App ist auf `OpenAI Vision + optional Google Document AI` vorbereitet.
+
+Empfohlene Reihenfolge:
+
+1. OpenAI einrichten, damit Bilder und PDF-Vorschauen direkt analysiert werden.
+2. Google Document AI spaeter optional ergaenzen, wenn noch mehr OCR-Stabilitaet noetig ist.
 
 ## 1. Google Document AI
 
@@ -28,6 +33,8 @@ Eintragen in `.env.local`:
 - `OPENAI_API_KEY`
 - optional `OPENAI_EXTRACTION_MODEL`
 
+Die App sendet bei PDF- und Bild-Uploads bis zu 4 PDF-Seiten bzw. das hochgeladene Bild an OpenAI Vision. OpenAI gleicht das Original mit lokaler OCR ab und gibt strukturierte Felder zurueck.
+
 ## 3. Starten
 
 1. `.env.local` fuellen
@@ -51,6 +58,6 @@ Dort siehst du:
 ## 5. Verhalten der App
 
 - Ohne Zugangsdaten bleibt die lokale OCR aktiv.
-- Mit Zugangsdaten nutzt die App zuerst `Google Document AI`.
-- Danach wird der OCR-Text durch `OpenAI` in strukturierte Felder umgewandelt.
+- Mit OpenAI-Key nutzt die App zusaetzlich `OpenAI Vision` fuer Bilder und PDF-Vorschauen.
+- Mit Google-Zugangsdaten nutzt die App zusaetzlich `Google Document AI` als OCR-Stufe.
 - Unsichere Faelle werden mit Review-Hinweis markiert.

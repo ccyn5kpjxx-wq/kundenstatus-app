@@ -1,8 +1,207 @@
 {% extends "base.html" %}
 {% block title %}Auftragsdetails{% endblock %}
 
+{% block extra_css %}
+<style>
+  .process-panel {
+    background: linear-gradient(135deg, rgba(247, 241, 232, .96), rgba(255, 253, 249, .96));
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 1rem;
+    margin: 1.25rem 0 1.75rem;
+  }
+
+  .process-steps {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: .7rem;
+  }
+
+  .process-step {
+    appearance: none;
+    border: 1px solid #e4d6c3;
+    cursor: pointer;
+    display: block;
+    text-align: left;
+    width: 100%;
+    position: relative;
+    border-radius: 18px;
+    background: #fffdf9;
+    padding: .85rem .9rem;
+    min-height: 86px;
+    transition: .18s ease;
+  }
+
+  .process-step:hover {
+    border-color: rgba(162, 63, 45, .42);
+    box-shadow: 0 10px 24px rgba(64, 47, 25, .08);
+    transform: translateY(-1px);
+  }
+
+  .process-step:disabled {
+    color: var(--ink);
+    cursor: default;
+    opacity: 1;
+  }
+
+  .process-step:disabled:hover {
+    transform: none;
+  }
+
+  .process-step::after {
+    content: "";
+    position: absolute;
+    top: 24px;
+    right: -.7rem;
+    width: .7rem;
+    height: 3px;
+    background: #e4d6c3;
+  }
+
+  .process-step:last-child::after {
+    display: none;
+  }
+
+  .process-step.is-done {
+    border-color: rgba(27, 127, 83, .35);
+    background: rgba(27, 127, 83, .08);
+  }
+
+  .process-step.is-active {
+    border-color: rgba(162, 63, 45, .5);
+    background: rgba(162, 63, 45, .1);
+    box-shadow: inset 0 0 0 2px rgba(162, 63, 45, .2), 0 12px 28px rgba(162, 63, 45, .1);
+  }
+
+  .process-step.is-active .process-label {
+    color: var(--brand-dark);
+  }
+
+  .process-icon {
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: #f4ede4;
+    margin-bottom: .55rem;
+  }
+
+  .process-step.is-done .process-icon {
+    background: rgba(27, 127, 83, .16);
+  }
+
+  .process-step.is-active .process-icon {
+    background: rgba(162, 63, 45, .16);
+  }
+
+  .process-label {
+    display: block;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+
+  .process-small {
+    display: block;
+    color: var(--muted);
+    font-size: .82rem;
+    margin-top: .2rem;
+  }
+
+  .process-current {
+    background: #fffdf9;
+    border: 1px solid #eadcc9;
+    border-radius: 999px;
+    color: var(--ink);
+    display: inline-flex;
+    gap: .45rem;
+    align-items: center;
+    padding: .45rem .75rem;
+    font-size: .9rem;
+  }
+
+  .auftrag-detail-grid > [class*="col-"],
+  .analysis-review-card,
+  .analysis-file-card {
+    min-width: 0;
+  }
+
+  .analysis-review-card,
+  .analysis-file-card {
+    overflow: hidden;
+  }
+
+  .analysis-review-card .table-responsive {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .analysis-review-table {
+    min-width: 720px;
+    table-layout: fixed;
+  }
+
+  .analysis-review-table th,
+  .analysis-review-table td,
+  .breakable-text {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .min-width-0 {
+    min-width: 0;
+  }
+
+  .analysis-review-table th:first-child,
+  .analysis-review-table td:first-child,
+  .analysis-review-table th:last-child,
+  .analysis-review-table td:last-child {
+    width: 18%;
+  }
+
+  .finish-image-preview {
+    width: 100%;
+    max-height: 220px;
+    object-fit: cover;
+    border-radius: 16px;
+    border: 1px solid #e4d6c3;
+    background: #f7f1e8;
+  }
+
+  .process-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
+  @media (max-width: 900px) {
+    .process-steps {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .process-step::after {
+      display: none;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .process-steps {
+      grid-template-columns: 1fr;
+    }
+
+    .process-actions {
+      align-items: stretch;
+      flex-direction: column;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="row g-4">
+<div class="row g-4 auftrag-detail-grid">
   <div class="col-xl-7">
     <div class="page-card p-4 p-lg-5 h-100">
       <div class="section-title">
@@ -14,12 +213,149 @@
         <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }}">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
       </div>
 
+      {% set next_status = auftrag['status'] + 1 %}
+      <div class="process-panel">
+        <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
+          <div>
+            <div class="fw-bold">Prozess</div>
+            <div class="text-muted small">Hier siehst du den kompletten Ablauf und schaltest den Auftrag weiter.</div>
+          </div>
+          <span class="process-current">
+            <span>Aktuell:</span>
+            <strong>{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</strong>
+          </span>
+        </div>
+        <div class="process-steps">
+          {% for nummer, meta in statusliste.items() %}
+          <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=nummer) }}">
+            <input type="hidden" name="next" value="{{ url_for('auftrag_detail', auftrag_id=auftrag['id']) }}">
+            <button type="submit" class="process-step {% if nummer < auftrag['status'] %}is-done{% elif nummer == auftrag['status'] %}is-active{% endif %}" {% if nummer == auftrag['status'] %}disabled{% endif %}>
+              <span class="process-icon">{{ meta['icon'] }}</span>
+              <span class="process-label">{{ meta['label'] }}</span>
+              <span class="process-small">
+                {% if nummer < auftrag['status'] %}
+                  erledigt · anklicken zum Zurücksetzen
+                {% elif nummer == auftrag['status'] %}
+                  aktueller Status
+                {% else %}
+                  anklicken zum Setzen
+                {% endif %}
+              </span>
+            </button>
+          </form>
+          {% endfor %}
+        </div>
+        <div class="process-actions">
+          <div class="text-muted small">
+            {% if log %}
+              Letzter Eintrag: {{ log[0]['zeitstempel'] }}
+            {% else %}
+              Noch kein Statusverlauf gespeichert.
+            {% endif %}
+          </div>
+          <div class="d-flex gap-2 flex-wrap justify-content-end">
+            {% if auftrag['status'] > 1 %}
+            {% set previous_status = auftrag['status'] - 1 %}
+            <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=previous_status) }}">
+              <input type="hidden" name="next" value="{{ url_for('auftrag_detail', auftrag_id=auftrag['id']) }}">
+              <button type="submit" class="btn btn-soft">Zurück zu {{ statusliste[previous_status]['label'] }}</button>
+            </form>
+            {% endif %}
+            {% if next_status in statusliste %}
+            <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=next_status) }}">
+              <input type="hidden" name="next" value="{{ url_for('auftrag_detail', auftrag_id=auftrag['id']) }}">
+              <button type="submit" class="btn btn-brand">Weiter zu {{ statusliste[next_status]['label'] }}</button>
+            </form>
+            {% else %}
+            <span class="badge text-bg-success px-3 py-2">Prozess abgeschlossen</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
       {% if auftrag['angebotsphase'] %}
-      <div class="alert alert-primary d-flex justify-content-between align-items-center flex-wrap gap-3">
-        <div>Diese Anfrage ist aktuell noch im Angebotsbereich und wird erst nach deiner Annahme ein normaler Auftrag.</div>
-        <form method="POST" action="{{ url_for('angebot_annehmen_route', auftrag_id=auftrag['id']) }}">
-          <button type="submit" class="btn btn-brand btn-sm">Angebot annehmen</button>
-        </form>
+      <div class="alert alert-primary">
+        <div class="fw-bold mb-1">Angebotsanfrage</div>
+        <div>
+          Status:
+          {% if auftrag['angebot_status'] == 'angebot_abgegeben' %}
+            Angebot wurde an das Autohaus gesendet.
+          {% elif auftrag['angebot_abgesendet'] %}
+            Autohaus wartet auf dein Werkstatt-Angebot.
+          {% else %}
+            Autohaus bereitet die Anfrage noch vor.
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      {% if auftrag['analyse_pruefen'] or auftrag['analyse_hinweis'] or auftrag['analyse_confidence'] %}
+      <div class="alert {{ 'alert-warning' if auftrag['analyse_pruefen'] else 'alert-success' }}">
+        <strong>{{ 'Analyse bitte prüfen' if auftrag['analyse_pruefen'] else 'Analyse wirkt plausibel' }}</strong>
+        {% if auftrag['analyse_hinweis'] %}
+        <div class="mt-1">{{ auftrag['analyse_hinweis'] }}</div>
+        {% endif %}
+        {% if auftrag['analyse_confidence'] %}
+        <div class="small mt-1">KI-Sicherheit: {{ '%.0f'|format((auftrag['analyse_confidence'] or 0) * 100) }}%</div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if dokument_pruefung %}
+      <div class="page-card p-3 mb-4 border border-warning-subtle analysis-review-card">
+        <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
+          <div>
+            <h4 class="mb-1">Erkannte Felder aus Unterlagen</h4>
+            <div class="text-muted small">Bitte mit der Originaldatei abgleichen, bevor unsichere Werte weiterverwendet werden.</div>
+          </div>
+          <span class="badge text-bg-warning">Prüfansicht</span>
+        </div>
+        <div class="d-grid gap-3">
+          {% for pruefung in dokument_pruefung %}
+          <div class="border rounded-4 p-3 bg-light analysis-file-card">
+            <div class="d-flex justify-content-between gap-2 flex-wrap">
+              <div class="min-width-0">
+                <div class="fw-bold breakable-text">{{ pruefung['original_name'] }}</div>
+                <div class="text-muted small">
+                  {{ pruefung['dokument_typ'] or 'Dokument' }}{% if pruefung['analyse_quelle'] %} · {{ pruefung['analyse_quelle'] }}{% endif %}
+                </div>
+              </div>
+              {% if pruefung['confidence'] %}
+              <span class="badge text-bg-secondary">Sicherheit {{ '%.0f'|format((pruefung['confidence'] or 0) * 100) }}%</span>
+              {% endif %}
+            </div>
+            {% if pruefung['analyse_hinweis'] %}
+            <div class="alert alert-warning py-2 mt-3 mb-0 small">{{ pruefung['analyse_hinweis'] }}</div>
+            {% endif %}
+            <div class="table-responsive mt-3">
+              <table class="table table-sm align-middle mb-0 analysis-review-table">
+                <thead>
+                  <tr>
+                    <th>Feld</th>
+                    <th>Erkannt</th>
+                    <th>Aktuell im Auftrag</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for item in pruefung['items'] %}
+                  <tr>
+                    <td class="fw-semibold">{{ item['label'] }}</td>
+                    <td>{{ item['value'] }}</td>
+                    <td>{{ item['current_value'] or '—' }}</td>
+                    <td>
+                      <span class="badge {{ 'text-bg-success' if item['active'] else 'text-bg-warning' }}">
+                        {{ 'übernommen' if item['active'] else 'abweichend / prüfen' }}
+                      </span>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
       </div>
       {% endif %}
 
@@ -101,7 +437,7 @@
         </div>
         <div class="col-md-6">
           <label class="form-label">Fertigbilder</label>
-          <input type="file" name="fertigbilder" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.pdf">
+          <input type="file" name="fertigbilder" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf">
           <div class="form-text">Hier kannst du Abschlussbilder oder ein fertiges Übergabe-PDF hochladen.</div>
         </div>
         <div class="col-md-6">
@@ -110,6 +446,7 @@
         </div>
         <div class="col-12 d-flex gap-2 flex-wrap">
           <button type="submit" name="aktion" value="upload_analyze" class="btn btn-soft btn-lg">Hochladen & analysieren</button>
+          <button type="submit" name="aktion" value="reanalyze_existing" class="btn btn-soft btn-lg">Vorhandene Unterlagen neu analysieren</button>
           <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Änderungen speichern</button>
           <a href="{{ url_for('dashboard') }}" class="btn btn-soft btn-lg">Zurück</a>
         </div>
@@ -118,12 +455,68 @@
         </div>
       </form>
 
-      <div class="mt-4 d-flex gap-2 flex-wrap">
-        {% if auftrag['status'] < 4 %}
-        <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=auftrag['status'] + 1) }}">
-          <button type="submit" class="btn btn-soft">Status weiterschalten</button>
+      {% if auftrag['angebotsphase'] and auftrag['angebot_abgesendet'] %}
+      <div class="page-card p-4 mt-4 border border-primary-subtle">
+        <h4 class="mb-2">Angebot an Autohaus senden</h4>
+        <p class="text-muted mb-3">Dieses Angebot sieht das Autohaus im Portal und kann es dort annehmen.</p>
+        <form method="POST" action="{{ url_for('angebot_senden_route', auftrag_id=auftrag['id']) }}" class="row g-3">
+          {% if auftrag['preisvorschlag']['hat_vorschlag'] or auftrag['preisvorschlag']['hinweise'] %}
+          <div class="col-12">
+            <div class="p-3 rounded-4 border bg-light">
+              <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
+                <div>
+                  <strong>Preisvorschlag nach interner Preisliste</strong>
+                  <div class="text-muted small">{{ auftrag['preisvorschlag']['hinweis_preisliste'] }}</div>
+                </div>
+                {% if auftrag['preisvorschlag']['empfehlung'] %}
+                <button type="button" class="btn btn-outline-primary btn-sm" data-fill-offer-price data-price-suggestion="{{ auftrag['preisvorschlag']['empfehlung'] }}">Preis übernehmen</button>
+                {% endif %}
+              </div>
+              {% if auftrag['preisvorschlag']['hat_vorschlag'] %}
+              <div class="mt-3 d-flex gap-2 flex-wrap">
+                <span class="badge rounded-pill text-bg-dark">Empfehlung: {{ auftrag['preisvorschlag']['empfehlung'] }}</span>
+                <span class="badge rounded-pill text-bg-secondary">Richtwert: {{ auftrag['preisvorschlag']['richtwert'] }}</span>
+              </div>
+              <div class="mt-3 d-grid gap-2">
+                {% for position in auftrag['preisvorschlag']['positionen'] %}
+                <div class="d-flex justify-content-between gap-3 flex-wrap border-top pt-2">
+                  <span>{{ position['leistung'] }}{% if position['teil'] %} · {{ position['teil'] }}{% endif %}</span>
+                  <strong>{{ position['richtwert'] }}</strong>
+                </div>
+                {% endfor %}
+              </div>
+              {% endif %}
+              {% if auftrag['preisvorschlag']['hinweise'] %}
+              <div class="mt-3 small text-muted">
+                {% for hinweis in auftrag['preisvorschlag']['hinweise'] %}
+                <div>{{ hinweis }}</div>
+                {% endfor %}
+              </div>
+              {% endif %}
+            </div>
+          </div>
+          {% endif %}
+          <div class="col-md-4">
+            <label class="form-label">Angebotspreis</label>
+            <input type="text" name="werkstatt_angebot_preis" class="form-control form-control-lg" value="{{ auftrag['werkstatt_angebot_preis'] }}" placeholder="z.B. 730,00 € netto">
+          </div>
+          <div class="col-md-8">
+            <label class="form-label">Angebotstext</label>
+            <textarea name="werkstatt_angebot_text" class="form-control" rows="3" placeholder="z.B. Reparatur gemäß Lackierauftrag inkl. Smart Repair.">{{ auftrag['werkstatt_angebot_text'] }}</textarea>
+          </div>
+          {% if auftrag['werkstatt_angebot_am'] %}
+          <div class="col-12">
+            <span class="badge text-bg-success">Zuletzt gesendet am {{ auftrag['werkstatt_angebot_am'] }}</span>
+          </div>
+          {% endif %}
+          <div class="col-12">
+            <button type="submit" class="btn btn-brand btn-lg">Angebot an Autohaus senden</button>
+          </div>
         </form>
-        {% endif %}
+      </div>
+      {% endif %}
+
+      <div class="mt-4 d-flex gap-2 flex-wrap">
         <form method="POST" action="{{ url_for('archivieren', auftrag_id=auftrag['id']) }}">
           <button type="submit" class="btn btn-outline-secondary">{{ 'Archiv verlassen' if auftrag['archiviert'] else 'Archivieren' }}</button>
         </form>
@@ -138,7 +531,11 @@
         <div class="d-grid gap-2">
           {% for datei in dateien %}
           <div class="page-card p-3">
-            <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" class="btn btn-soft text-start w-100">{{ datei['original_name'] }}</a>
+            <div class="d-flex gap-2 flex-wrap align-items-center">
+              <div class="fw-semibold flex-grow-1 breakable-text">{{ datei['original_name'] }}</div>
+              <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Original öffnen</a>
+              <a href="{{ url_for('admin_datei_download', datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+            </div>
             {% if datei['has_extract'] %}
               <div class="mt-3">
                 <div class="small text-muted">Datei gelesen{% if datei['dokument_typ'] %} · {{ datei['dokument_typ'] }}{% endif %}</div>
@@ -150,7 +547,7 @@
                 {% if datei['text_preview'] %}
                   <details class="mt-2">
                     <summary class="text-muted small">Textvorschau öffnen</summary>
-                    <div class="small mt-2" style="white-space:pre-wrap;">{{ datei['text_preview'] }}</div>
+                    <div class="small mt-2 breakable-text" style="white-space:pre-wrap;">{{ datei['text_preview'] }}</div>
                   </details>
                 {% endif %}
               </div>
@@ -165,16 +562,50 @@
 
     <div class="page-card p-4 mb-4">
       <h4 class="mb-3">Fertigbilder</h4>
+      <form method="POST" action="{{ url_for('admin_fertigbilder_upload', auftrag_id=auftrag['id']) }}" enctype="multipart/form-data" class="mb-3">
+        <label class="form-label">Bilder für das Autohaus hochladen</label>
+        <input type="file" name="fertigbilder" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf" required>
+        <div class="form-text">Diese Dateien sind danach im Autohaus-Portal sichtbar.</div>
+        <button type="submit" class="btn btn-brand btn-sm mt-2">Fertigbilder hochladen</button>
+      </form>
       {% if fertigbilder %}
         <div class="d-grid gap-2">
           {% for datei in fertigbilder %}
           <div class="page-card p-3">
-            <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" class="btn btn-soft text-start w-100">{{ datei['original_name'] }}</a>
+            {% if datei['mime_type'] and datei['mime_type'].startswith('image/') %}
+            <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener">
+              <img src="{{ url_for('admin_datei', datei_id=datei['id']) }}" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-3">
+            </a>
+            {% endif %}
+            <div class="d-flex gap-2 flex-wrap align-items-center">
+              <div class="fw-semibold flex-grow-1 breakable-text">{{ datei['original_name'] }}</div>
+              <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Original öffnen</a>
+              <a href="{{ url_for('admin_datei_download', datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+            </div>
           </div>
           {% endfor %}
         </div>
       {% else %}
         <div class="text-muted">Noch keine Fertigbilder vorhanden.</div>
+      {% endif %}
+    </div>
+
+    <div class="page-card p-4 mb-4">
+      <h4 class="mb-3">Autohaus-Benachrichtigungen</h4>
+      {% if benachrichtigungen %}
+        <div class="d-grid gap-2">
+          {% for hinweis in benachrichtigungen %}
+          <div class="page-card p-3">
+            <div class="d-flex justify-content-between gap-2 flex-wrap">
+              <div class="fw-bold">{{ hinweis['titel'] }}</div>
+              <div class="text-muted small">{{ hinweis['erstellt_am'] }}</div>
+            </div>
+            <div class="mt-1">{{ hinweis['nachricht'] }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-muted">Noch keine Benachrichtigungen für das Autohaus.</div>
       {% endif %}
     </div>
 
@@ -252,7 +683,8 @@
             {% if reklamation['dateien'] %}
             <div class="mt-2 d-flex gap-2 flex-wrap">
               {% for datei in reklamation['dateien'] %}
-              <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" class="schedule-pill">{{ datei['original_name'] }}</a>
+              <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="schedule-pill">{{ datei['original_name'] }} öffnen</a>
+              <a href="{{ url_for('admin_datei_download', datei_id=datei['id']) }}" class="schedule-pill">{{ datei['original_name'] }} herunterladen</a>
               {% endfor %}
             </div>
             {% endif %}
@@ -308,5 +740,14 @@
       status.classList.remove('d-none');
     });
   }
+  document.querySelectorAll('[data-fill-offer-price]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const priceInput = document.querySelector('[name="werkstatt_angebot_preis"]');
+      if (priceInput) {
+        priceInput.value = button.dataset.priceSuggestion || '';
+        priceInput.focus();
+      }
+    });
+  });
 </script>
 {% endblock %}

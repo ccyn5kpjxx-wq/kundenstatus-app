@@ -27,6 +27,16 @@
     tr[data-select-row] { cursor:pointer; }
     tr[data-select-row].is-selected { background:#f8f1e6; }
     .selection-badge { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid #d9cab4; border-radius:999px; background:#fffaf2; }
+    .priority-panel {
+      background:
+        radial-gradient(circle at 8% 10%, rgba(43,128,139,.14), transparent 30%),
+        linear-gradient(135deg,#fffdf9,#f8f0e4);
+      border:1px solid #e4d6c3;
+    }
+    .status-track { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .track-step { padding:.4rem .7rem; border-radius:999px; background:#efe4d4; border:1px solid #dfceb6; color:#6a5b4a; font-size:.9rem; }
+    .track-step.is-active { background:#132635; border-color:#132635; color:#fff; }
+    .track-step.is-done { background:#1b7f53; border-color:#1b7f53; color:#fff; }
   </style>
 </head>
 <body>
@@ -42,7 +52,7 @@
         <div>
           <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
           <h1 class="mb-2">{{ autohaus['portal_label'] }}</h1>
-          <div class="text-muted">Ihre Fahrzeuge und Termine auf einen Blick.</div>
+          <div class="text-muted">Heute sehen, was kommt, was fertig wird und welche Angebote offen sind.</div>
         </div>
         <div class="d-flex gap-2 flex-wrap">
           <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Angebot anfordern</a>
@@ -51,6 +61,27 @@
         </div>
       </div>
     </div>
+
+    {% if benachrichtigungen %}
+    <div class="panel mb-4 border border-warning-subtle">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h4 class="mb-1">Neue Werkstatt-Hinweise</h4>
+          <div class="text-muted">Hier sehen Sie, wenn die Werkstatt an einem Auftrag etwas geändert hat.</div>
+        </div>
+        <span class="badge text-bg-warning">{{ benachrichtigungen|length }} Hinweis(e)</span>
+      </div>
+      <div class="d-grid gap-2">
+        {% for hinweis in benachrichtigungen %}
+        <a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=hinweis['auftrag_id']) }}" class="chip chip-link">
+          <strong>{{ hinweis['titel'] }}</strong>
+          <span>{{ hinweis['fahrzeug'] }}{% if hinweis['kennzeichen'] %} · {{ hinweis['kennzeichen'] }}{% endif %}</span>
+          <span class="text-muted">{{ hinweis['erstellt_am'] }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
 
     <div class="row g-3 mb-4">
       <div class="col-md-6 col-xl-3">
@@ -79,8 +110,9 @@
       </div>
     </div>
 
-    <div class="panel mb-4">
+    <div class="panel priority-panel mb-4">
       <h4 class="mb-3">Heute {{ cockpit['heute_text'] }}</h4>
+      <div class="text-muted mb-3">Schneller Tagesblick für Dispo und Annahme.</div>
       <div class="row g-3">
         <div class="col-lg-3">
           <div class="border rounded-4 p-3 h-100">
@@ -137,7 +169,7 @@
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
         <div>
           <h4 class="mb-1">Angebotsanfragen</h4>
-          <div class="text-muted">Hier stehen alle offenen Angebotswünsche bis zur Annahme durch die Werkstatt.</div>
+          <div class="text-muted">Erst Anfrage senden, dann prüft die Werkstatt, danach können Sie das Angebot annehmen.</div>
         </div>
       </div>
       {% if angebotsanfragen %}
@@ -148,7 +180,15 @@
               <div>
                 <div class="fw-bold">{{ a['fahrzeug'] or 'Angebotsanfrage' }}{% if a['kennzeichen'] %} · {{ a['kennzeichen'] }}{% endif %}</div>
                 <div class="text-muted small">{{ a['analyse_text'] or a['beschreibung'] or 'Noch keine Schadenbeschreibung' }}</div>
+                <div class="status-track">
+                  <span class="track-step is-done">Anfrage gesendet</span>
+                  <span class="track-step {{ 'is-done' if a['angebot_status'] == 'angebot_abgegeben' else 'is-active' }}">Werkstatt prüft</span>
+                  <span class="track-step {{ 'is-active' if a['angebot_status'] == 'angebot_abgegeben' else '' }}">Angebot ansehen</span>
+                  <span class="track-step">Annehmen</span>
+                </div>
                 <div class="mt-2 d-flex gap-2 flex-wrap">
+                  {% if a['angebot_status'] == 'angebot_abgegeben' %}<span class="chip">Angebot liegt vor</span>{% else %}<span class="chip">Wartet auf Werkstatt</span>{% endif %}
+                  {% if a['werkstatt_angebot_preis'] %}<span class="chip">{{ a['werkstatt_angebot_preis'] }}</span>{% endif %}
                   {% if a['auftragsnummer'] %}<span class="chip">Auftrag {{ a['auftragsnummer'] }}</span>{% endif %}
                   {% if a['fin_nummer'] %}<span class="chip">FIN {{ a['fin_nummer'] }}</span>{% endif %}
                   {% if a['annahme_datum'] %}<span class="chip">{{ a['angebot_annahme_label'] }} {{ a['annahme_datum'] }}</span>{% endif %}
@@ -156,7 +196,12 @@
                 </div>
               </div>
               <div class="d-flex gap-2 flex-wrap">
-                <a href="{{ url_for('partner_angebot_detail', slug=autohaus['slug'], auftrag_id=a['id']) }}" class="btn btn-outline-dark btn-sm">Öffnen</a>
+                <a href="{{ url_for('partner_angebot_detail', slug=autohaus['slug'], auftrag_id=a['id']) }}" class="btn btn-outline-dark btn-sm">{{ 'Angebot ansehen' if a['angebot_status'] == 'angebot_abgegeben' else 'Öffnen' }}</a>
+                {% if a['angebot_status'] == 'angebot_abgegeben' %}
+                <form method="POST" action="{{ url_for('partner_angebot_annehmen', slug=autohaus['slug'], auftrag_id=a['id']) }}">
+                  <button type="submit" class="btn btn-dark btn-sm">Annehmen</button>
+                </form>
+                {% endif %}
                 <form method="POST" action="{{ url_for('partner_loeschen', slug=autohaus['slug'], auftrag_id=a['id']) }}" onsubmit="return confirm('Angebotsanfrage wirklich löschen?')">
                   <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
                 </form>

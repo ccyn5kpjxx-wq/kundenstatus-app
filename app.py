@@ -2765,6 +2765,17 @@ def init_db():
             bearbeitet_am  TEXT DEFAULT '',
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
         );
+
+        CREATE TABLE IF NOT EXISTS benachrichtigungen (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            auftrag_id  INTEGER NOT NULL,
+            quelle      TEXT NOT NULL,
+            titel       TEXT NOT NULL,
+            nachricht   TEXT NOT NULL,
+            gelesen     INTEGER DEFAULT 0,
+            erstellt_am TEXT NOT NULL,
+            FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
+        );
         """
     )
 
@@ -3328,6 +3339,57 @@ def list_verzoegerungen(auftrag_id):
     return [dict(row) for row in rows]
 
 
+def add_benachrichtigung(auftrag_id, titel, nachricht, quelle="werkstatt"):
+    titel = clean_text(titel)
+    nachricht = clean_text(nachricht)
+    if not titel or not nachricht:
+        return
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO benachrichtigungen
+        (auftrag_id, quelle, titel, nachricht, gelesen, erstellt_am)
+        VALUES (?, ?, ?, ?, 0, ?)
+        """,
+        (auftrag_id, clean_text(quelle) or "werkstatt", titel, nachricht, now_str()),
+    )
+    db.commit()
+    db.close()
+
+
+def list_benachrichtigungen(auftrag_id, limit=20):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT *
+        FROM benachrichtigungen
+        WHERE auftrag_id=?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (auftrag_id, limit),
+    ).fetchall()
+    db.close()
+    return [dict(row) for row in rows]
+
+
+def list_autohaus_benachrichtigungen(autohaus_id, limit=10):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT b.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer
+        FROM benachrichtigungen b
+        JOIN auftraege a ON a.id = b.auftrag_id
+        WHERE a.autohaus_id=? AND a.archiviert=0
+        ORDER BY b.id DESC
+        LIMIT ?
+        """,
+        (autohaus_id, limit),
+    ).fetchall()
+    db.close()
+    return [dict(row) for row in rows]
+
+
 def get_verzoegerung(verzoegerung_id):
     db = get_db()
     row = db.execute(
@@ -3568,6 +3630,21 @@ def get_allowed_uploads(files):
     return uploads
 
 
+def get_allowed_finish_uploads(files):
+    uploads = []
+    allowed = IMAGE_EXTENSIONS | {".pdf"}
+    for file in files or []:
+        if not file or not file.filename:
+            continue
+        original_name = secure_filename(file.filename)
+        if not original_name:
+            continue
+        if pathlib.Path(original_name).suffix.lower() not in allowed:
+            continue
+        uploads.append(file)
+    return uploads
+
+
 def add_reklamation(auftrag_id, quelle, meldung):
     db = get_db()
     cursor = db.execute(
@@ -3661,6 +3738,7 @@ def delete_auftrag(auftrag_id):
     db.execute("DELETE FROM reklamationen WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM verzoegerungen WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM status_log WHERE auftrag_id=?", (auftrag_id,))
+    db.execute("DELETE FROM benachrichtigungen WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM auftraege WHERE id=?", (auftrag_id,))
     db.commit()
     db.close()
@@ -4302,6 +4380,11 @@ def auftrag_detail(auftrag_id):
         if aktion == "reanalyze_existing":
             count, _ = reanalyze_existing_documents(auftrag_id)
             if count:
+                add_benachrichtigung(
+                    auftrag_id,
+                    "Unterlagen neu geprüft",
+                    "Die Werkstatt hat vorhandene Unterlagen erneut analysiert und den Auftrag geprüft.",
+                )
                 flash(f"{count} vorhandene Unterlage(n) neu analysiert.", "success")
             else:
                 flash("Keine auswertbaren vorhandenen Unterlagen gefunden.", "warning")
@@ -4313,9 +4396,9 @@ def auftrag_detail(auftrag_id):
             flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.", "warning")
             return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
         upload_result = save_uploads(auftrag_id, erlaubte_dateien, "intern", "standard")
-        save_uploads(
+        fertigbilder_result = save_uploads(
             auftrag_id,
-            get_allowed_uploads(request.files.getlist("fertigbilder")),
+            get_allowed_finish_uploads(request.files.getlist("fertigbilder")),
             "intern",
             "fertigbild",
         )
@@ -4326,6 +4409,24 @@ def auftrag_detail(auftrag_id):
             )
         else:
             flash("Auftrag aktualisiert.", "success")
+        if aktion == "upload_analyze":
+            add_benachrichtigung(
+                auftrag_id,
+                "Neue Unterlage ausgewertet",
+                "Die Werkstatt hat eine Unterlage hochgeladen und den Auftrag aktualisiert.",
+            )
+        else:
+            add_benachrichtigung(
+                auftrag_id,
+                "Auftrag aktualisiert",
+                "Die Werkstatt hat Daten oder Termine an diesem Auftrag geändert.",
+            )
+        if isinstance(fertigbilder_result, tuple) and fertigbilder_result[0]:
+            add_benachrichtigung(
+                auftrag_id,
+                "Neue Fertigbilder",
+                f"Die Werkstatt hat {fertigbilder_result[0]} Fertigbild(er) hochgeladen.",
+            )
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
     dateien = list_dateien(auftrag_id)
@@ -4343,6 +4444,7 @@ def auftrag_detail(auftrag_id):
         dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
         reklamationen=list_reklamationen(auftrag_id),
         verzoegerungen=list_verzoegerungen(auftrag_id),
+        benachrichtigungen=list_benachrichtigungen(auftrag_id),
     )
 
 
@@ -4353,13 +4455,22 @@ def admin_fertigbilder_upload(auftrag_id):
     if not auftrag:
         abort(404)
 
-    erlaubte_dateien = get_allowed_uploads(request.files.getlist("fertigbilder"))
+    erlaubte_dateien = get_allowed_finish_uploads(request.files.getlist("fertigbilder"))
     if not erlaubte_dateien:
-        flash("Bitte JPG, PNG, WebP oder PDF als Fertigbild auswählen.", "warning")
+        flash("Bitte ein Bild oder PDF als Fertigbild auswählen.", "warning")
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
     gespeichert, _ = save_uploads(auftrag_id, erlaubte_dateien, "intern", "fertigbild")
     if gespeichert:
+        db = get_db()
+        db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag_id))
+        db.commit()
+        db.close()
+        add_benachrichtigung(
+            auftrag_id,
+            "Neue Fertigbilder",
+            f"Die Werkstatt hat {gespeichert} Fertigbild(er) hochgeladen.",
+        )
         flash(f"{gespeichert} Fertigbild(er) hochgeladen. Das Autohaus sieht sie im Portal.", "success")
     else:
         flash("Es wurde kein Fertigbild gespeichert.", "warning")
@@ -4394,6 +4505,11 @@ def status_update(auftrag_id, neuer_status):
     )
     db.commit()
     db.close()
+    add_benachrichtigung(
+        auftrag_id,
+        "Status geändert",
+        f"Die Werkstatt hat den Status auf „{STATUSLISTE[neuer_status]['label']}“ gesetzt.",
+    )
     flash("Status aktualisiert.", "success")
     ziel = clean_text(request.form.get("next"))
     if ziel.startswith("/"):
@@ -4425,6 +4541,11 @@ def admin_verzoegerung(auftrag_id):
         uebernommen=1,
     )
     apply_delay_to_order(auftrag_id, start_datum, fertig_datum, abholtermin)
+    add_benachrichtigung(
+        auftrag_id,
+        "Terminänderung",
+        meldung,
+    )
     flash("Verzögerung gespeichert.", "success")
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
@@ -4445,6 +4566,11 @@ def verzoegerung_uebernehmen(verzoegerung_id):
     db.execute("UPDATE verzoegerungen SET uebernommen=1 WHERE id=?", (verzoegerung_id,))
     db.commit()
     db.close()
+    add_benachrichtigung(
+        verzoegerung["auftrag_id"],
+        "Terminänderung übernommen",
+        "Die Werkstatt hat die gemeldete Terminänderung übernommen.",
+    )
     flash("Terminänderung übernommen.", "success")
     return redirect(request.referrer or url_for("dashboard"))
 
@@ -4472,6 +4598,11 @@ def angebot_senden_route(auftrag_id):
         flash("Bitte Angebotstext oder Preis eintragen.", "warning")
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
     send_workshop_offer(auftrag_id, angebot_text, angebot_preis)
+    add_benachrichtigung(
+        auftrag_id,
+        "Werkstatt-Angebot liegt vor",
+        "Die Werkstatt hat ein Angebot abgegeben. Sie können es im Portal prüfen und annehmen.",
+    )
     flash("Angebot an das Autohaus gesendet.", "success")
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
@@ -4630,6 +4761,7 @@ def partner_dashboard(slug):
         auftraege=auftraege,
         archivierte_auftraege=archivierte_auftraege,
         angebotsanfragen=list_angebotsanfragen(autohaus["id"]),
+        benachrichtigungen=list_autohaus_benachrichtigungen(autohaus["id"]),
         cockpit=autohaus_dashboard_daten(auftraege),
         statusliste=STATUSLISTE,
     )
@@ -4929,7 +5061,7 @@ def partner_auftrag(slug, auftrag_id):
         upload_result = save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
         save_uploads(
             auftrag_id,
-            get_allowed_uploads(request.files.getlist("fertigbilder")),
+            get_allowed_finish_uploads(request.files.getlist("fertigbilder")),
             "autohaus",
             "fertigbild",
         )
@@ -4952,6 +5084,7 @@ def partner_auftrag(slug, auftrag_id):
         dateien=standard_dateien,
         fertigbilder=fertigbilder,
         dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
+        benachrichtigungen=list_benachrichtigungen(auftrag_id),
         reklamationen=list_reklamationen(auftrag_id),
         verzoegerungen=list_verzoegerungen(auftrag_id),
         transport_arten=TRANSPORT_ARTEN,
@@ -5122,4 +5255,4 @@ if __name__ == "__main__":
     for warning in get_startup_warnings():
         print(f"  WARNUNG: {warning}")
     print("=" * 58)
-    app.run(debug=False, host="0.0.0.0", port=5000)
+    app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", "5000")))

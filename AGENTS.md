@@ -174,13 +174,13 @@ Commits:
 
 ## Proaktive Skills
 
-Lokale Projekt-Helfer liegen unter `.claude/skills/`:
+Lokale Projekt-Helfer liegen unter `.Codex/skills/`:
 
 - `/start`: liest Projektkontext, Git-Status, letzte Commits und TODO/FIXME-Hinweise.
 - `/commit-push`: zeigt Diff, prueft auf Secrets, schlaegt Commit-Message vor und pusht erst nach OK.
 - `/task-add <text>`: notiert neue Aufgaben mit Datum in `TODO.md`.
 
-## Session-Start für Codex/Claude
+## Session-Start für Codex/Codex
 
 Beim Start einer neuen Session:
 

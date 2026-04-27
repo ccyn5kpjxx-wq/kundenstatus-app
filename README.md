@@ -91,6 +91,12 @@ Smoke-Test ausführen:
 python scripts/smoke_test.py
 ```
 
+Angebotsablauf auf einer Datenbank-Kopie testen:
+
+```powershell
+python scripts/flow_test.py
+```
+
 Server starten:
 
 ```powershell
@@ -99,9 +105,23 @@ python app.py
 
 Hinweis: Für die lokale OCR muss Tesseract zusätzlich als Windows-Programm installiert sein. Ohne Tesseract arbeitet die App weiter, aber die OCR-Qualität kann schlechter sein.
 
-Deployment refresh.
+## Deployment
 
+Für verschickbare Autohaus-Links muss die App auf einem öffentlichen Hoster laufen. GitHub speichert nur den Code; ein Dienst wie Render startet die Flask-App und liefert die öffentliche Domain.
 
+Render-Dateien:
+
+- `Procfile`
+- `render.yaml`
+- `DEPLOY_RENDER.md`
+
+Start Command:
+
+```text
+gunicorn app:app
+```
+
+Details stehen in `DEPLOY_RENDER.md`.
 
 ## Lizenz
 

@@ -14,6 +14,16 @@
     .shell { max-width:1180px; margin:0 auto; padding:32px 16px; }
     .panel { background:#fffdf9; border-radius:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
     .chip { display:inline-flex; align-items:center; padding:.4rem .75rem; border-radius:999px; background:#f4ede4; border:1px solid #e4d6c3; margin:0 .4rem .4rem 0; }
+    .process-card {
+      border:1px solid #e4d6c3;
+      background:linear-gradient(135deg,#fff8ed,#f6ebdc);
+      border-radius:22px;
+      padding:18px;
+    }
+    .status-track { display:flex; flex-wrap:wrap; gap:8px; }
+    .track-step { padding:.45rem .75rem; border-radius:999px; background:#efe4d4; border:1px solid #dfceb6; color:#6a5b4a; font-size:.9rem; }
+    .track-step.is-active { background:#132635; border-color:#132635; color:#fff; }
+    .track-step.is-done { background:#1b7f53; border-color:#1b7f53; color:#fff; }
     .loading-overlay {
       position: fixed;
       inset: 0;
@@ -128,9 +138,19 @@
         <div>
           <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
           <h1 class="mb-1">{{ 'Angebotsanfrage bearbeiten' if angebot else 'Angebot anfordern' }}</h1>
-          <div class="text-muted">Schaden kurz beschreiben, Unterlagen anhängen und Wunschtermin senden.</div>
+          <div class="text-muted">Schaden einreichen, Werkstatt-Angebot erhalten und danach bewusst annehmen.</div>
         </div>
         <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zurück</a>
+      </div>
+
+      <div class="process-card mb-4">
+        <div class="fw-bold mb-2">So läuft die Anfrage ab</div>
+        <div class="status-track">
+          <span class="track-step {{ 'is-done' if angebot else 'is-active' }}">1. Daten erfassen</span>
+          <span class="track-step {{ 'is-done' if angebot and angebot['angebot_abgesendet'] else ('is-active' if angebot else '') }}">2. Anfrage absenden</span>
+          <span class="track-step {{ 'is-done' if angebot and angebot['angebot_status'] == 'angebot_abgegeben' else ('is-active' if angebot and angebot['angebot_abgesendet'] else '') }}">3. Werkstatt prüft</span>
+          <span class="track-step {{ 'is-active' if angebot and angebot['angebot_status'] == 'angebot_abgegeben' else '' }}">4. Angebot annehmen</span>
+        </div>
       </div>
 
       <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
@@ -209,26 +229,114 @@
           <div class="form-text">PDF, Bilder oder andere Unterlagen werden mit analysiert. Texteingaben werden zusätzlich lesbarer für die Werkstatt aufbereitet.</div>
         </div>
         <div class="col-12 d-flex gap-2 flex-wrap">
-          <button type="submit" class="btn btn-dark btn-lg" data-loading-message="Angebotsanfrage wird analysiert und aufbereitet. Bitte kurz warten.">{{ 'Angebotsanfrage analysieren & speichern' if angebot else 'Angebot analysieren & abschicken' }}</button>
+          <button type="submit" name="aktion" value="analyze" class="btn btn-outline-dark btn-lg" data-loading-message="Angebotsanfrage wird analysiert und aufbereitet. Bitte kurz warten.">Angebotsanfrage analysieren</button>
+          {% if angebot and angebot['angebot_status'] != 'angebot_abgegeben' %}
+          <button type="submit" name="aktion" value="submit_offer" class="btn btn-dark btn-lg" data-loading-message="Angebotsanfrage wird abgesendet. Bitte kurz warten.">Angebotsanfrage absenden</button>
+          {% endif %}
         </div>
       </form>
 
       {% if angebot %}
+      <div class="alert {{ 'alert-success' if angebot['angebot_abgesendet'] else 'alert-warning' }} mt-4 mb-0">
+        {% if angebot['angebot_abgesendet'] %}
+          Die Angebotsanfrage wurde an die Werkstatt abgesendet.
+        {% else %}
+          Die Analyse ist vorbereitet. Bitte prüfen Sie die Felder und senden Sie die Angebotsanfrage danach ab.
+        {% endif %}
+      </div>
       {% if angebot['analyse_pruefen'] or angebot['analyse_hinweis'] %}
       <div class="alert alert-warning mt-4 mb-0">
-        <strong>Bitte kurz pruefen:</strong>
+        <strong>Bitte kurz prüfen:</strong>
         {{ angebot['analyse_hinweis'] or 'Die automatische Analyse war nicht in allen Punkten sicher.' }}
+      </div>
+      {% endif %}
+      {% if dokument_pruefung %}
+      <div class="border rounded-4 p-3 mt-4" style="background:#fffaf2;border-color:#e4d6c3 !important;">
+        <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
+          <div>
+            <h4 class="mb-1">Erkannte Felder aus Unterlagen</h4>
+            <div class="text-muted small">Bitte prüfen Sie die Werte vor dem Absenden der Angebotsanfrage.</div>
+          </div>
+          <span class="badge text-bg-warning">Prüfansicht</span>
+        </div>
+        <div class="d-grid gap-3">
+          {% for pruefung in dokument_pruefung %}
+          <div class="border rounded-4 p-3 bg-white">
+            <div class="d-flex justify-content-between gap-2 flex-wrap">
+              <div>
+                <div class="fw-bold">{{ pruefung['original_name'] }}</div>
+                <div class="text-muted small">{{ pruefung['dokument_typ'] or 'Dokument' }}</div>
+              </div>
+              {% if pruefung['confidence'] %}
+              <span class="badge text-bg-secondary">Sicherheit {{ '%.0f'|format((pruefung['confidence'] or 0) * 100) }}%</span>
+              {% endif %}
+            </div>
+            {% if pruefung['analyse_hinweis'] %}
+            <div class="alert alert-warning py-2 mt-3 mb-0 small">{{ pruefung['analyse_hinweis'] }}</div>
+            {% endif %}
+            <div class="table-responsive mt-3">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Feld</th>
+                    <th>Erkannt</th>
+                    <th>Aktuell</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for item in pruefung['items'] %}
+                  <tr>
+                    <td class="fw-semibold">{{ item['label'] }}</td>
+                    <td>{{ item['value'] }}</td>
+                    <td>{{ item['current_value'] or '—' }}</td>
+                    <td>
+                      <span class="badge {{ 'text-bg-success' if item['active'] else 'text-bg-warning' }}">
+                        {{ 'übernommen' if item['active'] else 'prüfen' }}
+                      </span>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
       </div>
       {% endif %}
       <div class="mt-4">
         <h4 class="mb-3">Status</h4>
-        <span class="chip">Wartet auf Annahme durch die Werkstatt</span>
+        {% if angebot['angebot_status'] == 'angebot_abgegeben' %}
+          <span class="chip">Angebot der Werkstatt liegt vor</span>
+        {% elif angebot['angebot_abgesendet'] %}
+          <span class="chip">Wartet auf Werkstatt-Angebot</span>
+        {% else %}
+          <span class="chip">Noch nicht abgesendet</span>
+        {% endif %}
         {% if angebot['analyse_confidence'] %}
         <span class="chip">KI-Sicherheit {{ '%.0f'|format((angebot['analyse_confidence'] or 0) * 100) }}%</span>
         {% endif %}
         {% if angebot['annahme_datum'] %}<span class="chip">{{ angebot['angebot_annahme_label'] }} {{ angebot['annahme_datum'] }}</span>{% endif %}
         {% if angebot['abholtermin'] %}<span class="chip">{{ angebot['angebot_abholung_label'] }} {{ angebot['abholtermin'] }}</span>{% endif %}
       </div>
+      {% if angebot['angebot_status'] == 'angebot_abgegeben' %}
+      <div class="border rounded-4 p-4 mt-4" style="background:#f8f2e8;border-color:#e4d6c3 !important;">
+        <div class="fw-bold mb-2">Angebot der Werkstatt</div>
+        {% if angebot['werkstatt_angebot_preis'] %}
+        <div class="h4 mb-2">{{ angebot['werkstatt_angebot_preis'] }}</div>
+        {% endif %}
+        {% if angebot['werkstatt_angebot_text'] %}
+        <div class="mb-3" style="white-space:pre-wrap;">{{ angebot['werkstatt_angebot_text'] }}</div>
+        {% endif %}
+        {% if angebot['werkstatt_angebot_am'] %}
+        <div class="text-muted small mb-3">Gesendet am {{ angebot['werkstatt_angebot_am'] }}</div>
+        {% endif %}
+        <form method="POST" action="{{ url_for('partner_angebot_annehmen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}">
+          <button type="submit" class="btn btn-dark btn-lg">Angebot annehmen</button>
+        </form>
+      </div>
+      {% endif %}
       {% endif %}
 
       {% if dateien %}

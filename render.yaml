@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: kundenstatus-app
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: ADMIN_PASS
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_EXTRACTION_MODEL
+        value: gpt-4o
+      - key: UPLOAD_DIR
+        value: /tmp/kundenstatus-uploads

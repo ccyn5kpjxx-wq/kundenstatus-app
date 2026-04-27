@@ -1,0 +1,327 @@
+from pathlib import Path
+from io import BytesIO
+import json
+import shutil
+import sys
+import tempfile
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+import app as portal  # noqa: E402
+
+
+def check(label, condition, detail=""):
+    status = "OK" if condition else "FEHLER"
+    message = f"[{status}] {label}"
+    if detail:
+        message += f" - {detail}"
+    print(message)
+    if not condition:
+        raise AssertionError(f"{label}: {detail}")
+
+
+def extract_id_from_location(location):
+    last = (location or "").rstrip("/").split("/")[-1]
+    return int(last) if last.isdigit() else 0
+
+
+def with_csrf(client, data=None):
+    payload = dict(data or {})
+    with client.session_transaction() as session:
+        token = session.get("csrf_token") or "test-csrf-token"
+        session["csrf_token"] = token
+    payload["csrf_token"] = token
+    return payload
+
+
+def main():
+    original_db = portal.DB
+    original_upload_dir = portal.UPLOAD_DIR
+    if not original_db.exists():
+        raise SystemExit(f"Datenbank nicht gefunden: {original_db}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        test_db = Path(tmp) / "auftraege-test.db"
+        test_uploads = Path(tmp) / "uploads"
+        test_uploads.mkdir()
+        shutil.copy2(original_db, test_db)
+
+        portal.DB = test_db
+        portal.UPLOAD_DIR = test_uploads
+        portal.app.config["TESTING"] = True
+        portal.init_db()
+
+        autohaus = portal.get_autohaus_by_slug("kaesmann")
+        check("Autohaus Käsmann vorhanden", bool(autohaus))
+
+        admin = portal.app.test_client()
+        partner = portal.app.test_client()
+        with admin.session_transaction() as session:
+            session["admin"] = True
+        with partner.session_transaction() as session:
+            session["partner_autohaus_id"] = autohaus["id"]
+
+        route_checks = (
+            ("Admin Dashboard", admin, "/admin"),
+            ("Admin Kalender", admin, "/admin/kalender"),
+            ("Partner Dashboard", partner, "/partner/kaesmann/dashboard"),
+            ("Partner Neues Fahrzeug", partner, "/partner/kaesmann/neu"),
+            ("Partner Angebot neu", partner, "/partner/kaesmann/angebot/neu"),
+        )
+        for label, client, url in route_checks:
+            response = client.get(url)
+            check(label, response.status_code == 200, f"Status {response.status_code}")
+
+        response = partner.post(
+            "/partner/kaesmann/angebot/neu",
+            data=with_csrf(partner, {
+                "kunde_name": "Testkunde Codex",
+                "telefon": "01234",
+                "fahrzeug": "Audi Q7",
+                "kennzeichen": "MOS-T 123",
+                "fin_nummer": "WAUZZZTEST0000001",
+                "auftragsnummer": "TEST-ANGEBOT-1",
+                "analyse_text": "Kotflügel links lackieren",
+                "beschreibung": "Kotflügel links lackieren. Bitte Angebot erstellen.",
+                "transport_art": "standard",
+                "annahme_datum": "02.05.2026",
+                "abholtermin": "04.05.2026",
+            }),
+            follow_redirects=False,
+        )
+        check(
+            "Angebotsanfrage erstellen leitet weiter",
+            response.status_code in {302, 303},
+            f"Status {response.status_code}",
+        )
+        angebot_id = extract_id_from_location(response.headers.get("Location", ""))
+        check("Neue Angebots-ID erkannt", angebot_id > 0, response.headers.get("Location", ""))
+
+        angebot = portal.get_auftrag(angebot_id)
+        check("Neue Anfrage ist Angebotsphase", angebot["angebotsphase"])
+        check("Anfrage ist noch nicht abgesendet", not angebot["angebot_abgesendet"])
+        check(
+            "Preisvorschlag wird nur berechnet",
+            angebot["preisvorschlag"]["empfehlung"] == "190 € netto",
+            str(angebot["preisvorschlag"]),
+        )
+
+        response = partner.post(
+            f"/partner/kaesmann/angebot/{angebot_id}",
+            data=with_csrf(partner, {
+                "aktion": "submit_offer",
+                "kunde_name": "Testkunde Codex",
+                "fahrzeug": "Audi Q7",
+                "kennzeichen": "MOS-T 123",
+                "fin_nummer": "WAUZZZTEST0000001",
+                "auftragsnummer": "TEST-ANGEBOT-1",
+                "analyse_text": "Kotflügel links lackieren",
+                "beschreibung": "Kotflügel links lackieren. Bitte Angebot erstellen.",
+                "transport_art": "standard",
+                "annahme_datum": "02.05.2026",
+                "abholtermin": "04.05.2026",
+            }),
+            follow_redirects=False,
+        )
+        check("Kunde sendet Angebotsanfrage ab", response.status_code in {302, 303})
+        angebot = portal.get_auftrag(angebot_id)
+        check(
+            "Angebot wartet auf Werkstatt",
+            angebot["angebot_abgesendet"] and angebot["angebot_status"] == "angefragt",
+            angebot["angebot_status"],
+        )
+
+        response = admin.get(f"/admin/auftrag/{angebot_id}")
+        html = response.get_data(as_text=True)
+        check("Admin-Angebotsseite lädt", response.status_code == 200)
+        check(
+            "Preisvorschlag im Admin sichtbar",
+            "Preisvorschlag nach interner Preisliste" in html and "190 € netto" in html,
+        )
+
+        response = admin.post(
+            f"/admin/angebot/{angebot_id}/senden",
+            data=with_csrf(admin, {
+                "werkstatt_angebot_preis": "190 € netto",
+                "werkstatt_angebot_text": "Reparatur gemäß Anfrage: Kotflügel links lackieren.",
+            }),
+            follow_redirects=False,
+        )
+        check("Werkstatt sendet Angebot", response.status_code in {302, 303})
+        angebot = portal.get_auftrag(angebot_id)
+        check(
+            "Angebot abgegeben gespeichert",
+            angebot["angebot_status"] == "angebot_abgegeben"
+            and angebot["werkstatt_angebot_preis"] == "190 € netto",
+            angebot["angebot_status"],
+        )
+
+        response = partner.post(
+            f"/partner/kaesmann/angebot/{angebot_id}/annehmen",
+            data=with_csrf(partner),
+            follow_redirects=False,
+        )
+        check("Kunde nimmt Angebot an", response.status_code in {302, 303})
+        auftrag = portal.get_auftrag(angebot_id)
+        check(
+            "Annahme macht normalen Auftrag",
+            not auftrag["angebotsphase"] and auftrag["angebot_status"] == "angenommen",
+            auftrag["angebot_status"],
+        )
+
+        response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}")
+        check("Partner-Auftrag nach Annahme öffnet", response.status_code == 200)
+
+        db = portal.get_db()
+        db.execute(
+            """
+            INSERT INTO dateien
+            (auftrag_id, original_name, stored_name, mime_type, size, quelle, kategorie,
+             dokument_typ, extrahierter_text, extrakt_kurz, analyse_quelle, analyse_json,
+             analyse_hinweis, hochgeladen_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                angebot_id,
+                "lackierauftrag-test.pdf",
+                "codex-test.pdf",
+                "application/pdf",
+                0,
+                "autohaus",
+                "standard",
+                "Lackierauftrag",
+                "Audi Q7 FIN WAUZZZTEST0000001 Kennzeichen MOS-T 123 Kotflügel links lackieren",
+                "Kotflügel links lackieren",
+                "test",
+                json.dumps(
+                    {
+                        "document_type": "Lackierauftrag",
+                        "vehicle_type": "Audi Q7",
+                        "fin_nummer": "WAUZZZTEST0000001",
+                        "auftragsnummer": "TEST-ANGEBOT-1",
+                        "kennzeichen": "MOS-T 123",
+                        "auftrags_datum": "02.05.2026",
+                        "fertig_bis": "04.05.2026",
+                        "rep_max_kosten": "",
+                        "offene_bauteile": ["Kotflügel links"],
+                        "erledigte_bauteile": [],
+                        "kurzanalyse": "Kotflügel links lackieren",
+                        "lesefassung": "Lackierauftrag Audi Q7, Kotflügel links lackieren.",
+                        "needs_review": False,
+                        "review_reason": "",
+                        "confidence": 0.91,
+                    },
+                    ensure_ascii=False,
+                ),
+                "",
+                portal.now_str(),
+            ),
+        )
+        db.commit()
+        db.close()
+        auftrag = portal.get_auftrag(angebot_id)
+        pruefung = portal.list_document_review_items(angebot_id, auftrag)
+        check("Dokument-Prüfansicht liefert Felder", bool(pruefung and pruefung[0]["items"]))
+        check(
+            "Dokument-Prüfansicht erkennt übernommene FIN",
+            any(item["key"] == "fin_nummer" and item["active"] for item in pruefung[0]["items"]),
+            str(pruefung[0]["items"]),
+        )
+        response = admin.get(f"/admin/auftrag/{angebot_id}")
+        check(
+            "Admin zeigt Dokument-Prüfansicht",
+            "Erkannte Felder aus Unterlagen" in response.get_data(as_text=True),
+        )
+        response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}")
+        check(
+            "Partner zeigt Dokument-Prüfansicht",
+            "Erkannte Felder aus Unterlagen" in response.get_data(as_text=True),
+        )
+
+        response = admin.post(
+            f"/admin/status/{angebot_id}/2",
+            data=with_csrf(admin, {"next": f"/admin/auftrag/{angebot_id}"}),
+            follow_redirects=False,
+        )
+        check("Status vorwärts möglich", response.status_code in {302, 303})
+        check("Status ist Eingeplant", portal.get_auftrag(angebot_id)["status"] == 2)
+
+        response = admin.post(
+            f"/admin/status/{angebot_id}/1",
+            data=with_csrf(admin, {"next": f"/admin/auftrag/{angebot_id}"}),
+            follow_redirects=False,
+        )
+        check("Status rückwärts möglich", response.status_code in {302, 303})
+        check("Status ist wieder Angelegt", portal.get_auftrag(angebot_id)["status"] == 1)
+
+        response = admin.post(
+            f"/admin/auftrag/{angebot_id}/fertigbilder",
+            data=with_csrf(
+                admin,
+                {
+                    "fertigbilder": (
+                        BytesIO(b"codex-test-fertigbild"),
+                        "fertigbild-test.jpg",
+                    )
+                },
+            ),
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        check("Admin lädt Fertigbild hoch", response.status_code in {302, 303})
+        db = portal.get_db()
+        fertigbild = db.execute(
+            """
+            SELECT *
+            FROM dateien
+            WHERE auftrag_id=? AND kategorie='fertigbild'
+            ORDER BY id DESC
+            """,
+            (angebot_id,),
+        ).fetchone()
+        hinweis = db.execute(
+            """
+            SELECT *
+            FROM benachrichtigungen
+            WHERE auftrag_id=? AND titel='Neue Fertigbilder'
+            ORDER BY id DESC
+            """,
+            (angebot_id,),
+        ).fetchone()
+        db.close()
+        check("Fertigbild als Fertigbild gespeichert", bool(fertigbild), str(fertigbild))
+        check("Fertigbild-Datei liegt im Upload-Ordner", (test_uploads / fertigbild["stored_name"]).exists())
+        check("Fertigbild erzeugt Autohaus-Hinweis", bool(hinweis), str(hinweis))
+        response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}")
+        partner_html = response.get_data(as_text=True)
+        check(
+            "Partner sieht Fertigbild",
+            response.status_code == 200 and "fertigbild-test.jpg" in partner_html,
+            f"Status {response.status_code}",
+        )
+        check(
+            "Partner sieht Werkstatt-Hinweis",
+            "Neue Fertigbilder" in partner_html,
+            partner_html[:300],
+        )
+
+        db = portal.get_db()
+        datei = db.execute("SELECT id FROM dateien LIMIT 1").fetchone()
+        db.close()
+        if datei:
+            response = admin.get(f"/admin/datei/{datei['id']}")
+            check("Admin Originaldatei öffnen Route", response.status_code in {200, 404})
+            response = admin.get(f"/admin/datei/{datei['id']}/download")
+            check("Admin Originaldatei Download Route", response.status_code in {200, 404})
+        else:
+            print("[INFO] Keine Datei in Testdatenbank gefunden, Datei-Routen übersprungen.")
+
+    portal.DB = original_db
+    portal.UPLOAD_DIR = original_upload_dir
+    print("Flow-Test erfolgreich.")
+
+
+if __name__ == "__main__":
+    main()

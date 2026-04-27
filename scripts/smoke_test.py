@@ -16,13 +16,36 @@ def check(label, response, expected_statuses):
     return True
 
 
+def csrf_data(client, data=None):
+    payload = dict(data or {})
+    with client.session_transaction() as session:
+        token = session.get("csrf_token")
+    if token:
+        payload["csrf_token"] = token
+    return payload
+
+
 def main():
     portal.app.config["TESTING"] = True
     portal.init_db()
     client = portal.app.test_client()
     ok = True
 
-    ok &= check("Login-Seite", client.get("/login"), {200})
+    login_response = client.get("/login")
+    ok &= check("Login-Seite", login_response, {200})
+    has_csrf = "name=\"csrf_token\"" in login_response.get_data(as_text=True)
+    print("[OK] Login-Formular enthält CSRF-Token" if has_csrf else "[FEHLER] Login-Formular ohne CSRF-Token")
+    ok &= has_csrf
+    ok &= check(
+        "Login-POST ohne CSRF blockiert",
+        client.post("/login", data={"passwort": "falsch"}),
+        {400},
+    )
+    ok &= check(
+        "Login-POST mit CSRF verarbeitet",
+        client.post("/login", data=csrf_data(client, {"passwort": "falsch"})),
+        {200},
+    )
     ok &= check("Admin ohne Login geschuetzt", client.get("/admin"), {302})
     ok &= check("Partner-Einstieg", client.get("/partner"), {200})
 
