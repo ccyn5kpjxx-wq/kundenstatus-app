@@ -822,6 +822,9 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
             "Gib NUR JSON gemaess Schema zurueck.",
             "Wichtig:",
             "- OCR kann fehlerhaft sein.",
+            "- Wenn ein Bild/PDF sichtbar ist, nutze vorrangig das Originalbild und nicht nur OCR-Text.",
+            "- Lies Fahrzeugtyp, Kennzeichen, FIN, Auftragsnummer, Termine und angekreuzte/markierte Bauteile direkt aus Formularfeldern und Tabellen.",
+            "- Bei Lackierauftrag-Formularen sind Felder wie Typ, FG-Nr, Amtl. Kennzeichen, Auftrags-Nr, Fertig bis und angekreuzte Teile wichtig.",
             "- Bei handschriftlich erledigten Positionen diese in erledigte_bauteile aufnehmen und NICHT in offene_bauteile.",
             "- In offene_bauteile nur Positionen aufnehmen, die noch fuer unsere Werkstatt relevant sind.",
             "- Wenn unsicher, Feld leer lassen und needs_review auf true setzen.",
@@ -3433,7 +3436,30 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
     db.commit()
     db.close()
     if saved_analysis_document:
-        apply_document_data_to_auftrag(auftrag_id, prefer_documents=True)
+        return saved, apply_document_data_to_auftrag(auftrag_id, prefer_documents=True)
+    return saved, {}
+
+
+def flash_upload_analysis_result(saved_result, success_message="Datei hochgeladen."):
+    if isinstance(saved_result, tuple):
+        saved, updates = saved_result
+    else:
+        saved, updates = saved_result, {}
+    if not saved:
+        return saved
+    meaningful_updates = {
+        key: value
+        for key, value in (updates or {}).items()
+        if key not in {"geaendert_am", "analyse_pruefen", "analyse_confidence"}
+        and clean_text(value)
+    }
+    if meaningful_updates:
+        flash(success_message, "success")
+    else:
+        flash(
+            "Datei hochgeladen, aber keine sicheren Fahrzeugdaten erkannt. Bitte Felder manuell pruefen.",
+            "warning",
+        )
     return saved
 
 
@@ -4161,9 +4187,12 @@ def neuer_auftrag():
             kontakt_telefon=clean_text(form.get("kontakt_telefon")),
             notiz_intern=clean_text(form.get("notiz_intern")),
         )
-        save_uploads(auftrag_id, erlaubte_dateien, "intern", "standard")
+        upload_result = save_uploads(auftrag_id, erlaubte_dateien, "intern", "standard")
         if aktion == "upload_analyze":
-            flash("Datei hochgeladen und Auftrag automatisch befuellt.", "success")
+            flash_upload_analysis_result(
+                upload_result,
+                "Datei hochgeladen und Auftrag automatisch befuellt.",
+            )
         else:
             flash("Fahrzeug angelegt.", "success")
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
@@ -4248,7 +4277,7 @@ def auftrag_detail(auftrag_id):
         if aktion == "upload_analyze" and not erlaubte_dateien:
             flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.", "warning")
             return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
-        save_uploads(auftrag_id, erlaubte_dateien, "intern", "standard")
+        upload_result = save_uploads(auftrag_id, erlaubte_dateien, "intern", "standard")
         save_uploads(
             auftrag_id,
             get_allowed_uploads(request.files.getlist("fertigbilder")),
@@ -4256,7 +4285,10 @@ def auftrag_detail(auftrag_id):
             "fertigbild",
         )
         if aktion == "upload_analyze":
-            flash("Datei hochgeladen und Auftrag neu analysiert.", "success")
+            flash_upload_analysis_result(
+                upload_result,
+                "Datei hochgeladen und Auftrag neu analysiert.",
+            )
         else:
             flash("Auftrag aktualisiert.", "success")
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
@@ -4291,7 +4323,7 @@ def admin_fertigbilder_upload(auftrag_id):
         flash("Bitte JPG, PNG, WebP oder PDF als Fertigbild auswählen.", "warning")
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
-    gespeichert = save_uploads(auftrag_id, erlaubte_dateien, "intern", "fertigbild")
+    gespeichert, _ = save_uploads(auftrag_id, erlaubte_dateien, "intern", "fertigbild")
     if gespeichert:
         flash(f"{gespeichert} Fertigbild(er) hochgeladen. Das Autohaus sieht sie im Portal.", "success")
     else:
@@ -4618,9 +4650,12 @@ def partner_neuer_auftrag(slug):
             transport_art=clean_text(form.get("transport_art")) or "standard",
             kontakt_telefon=clean_text(form.get("kontakt_telefon")),
         )
-        save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
+        upload_result = save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
         if aktion == "upload_analyze":
-            flash("Datei hochgeladen und Auftrag automatisch befuellt.", "success")
+            flash_upload_analysis_result(
+                upload_result,
+                "Datei hochgeladen und Auftrag automatisch befuellt.",
+            )
         else:
             flash("Fahrzeug angelegt.", "success")
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
@@ -4662,9 +4697,12 @@ def partner_neues_angebot(slug):
             angebotsphase=1,
             angebot_abgesendet=0,
         )
-        save_uploads(angebot_id, erlaubte_dateien, "autohaus", "standard")
+        upload_result = save_uploads(angebot_id, erlaubte_dateien, "autohaus", "standard")
         refresh_offer_texts(angebot_id, kunden_kurz, kunden_text)
-        flash("Angebotsanfrage analysiert. Bitte prüfen und danach absenden.", "success")
+        flash_upload_analysis_result(
+            upload_result,
+            "Angebotsanfrage analysiert. Bitte prüfen und danach absenden.",
+        )
         return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=angebot_id))
 
     return render_template(
@@ -4738,13 +4776,16 @@ def partner_angebot_detail(slug, auftrag_id):
         )
         db.commit()
         db.close()
-        save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
+        upload_result = save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
         refresh_offer_texts(auftrag_id, kunden_kurz, kunden_text)
         if aktion == "submit_offer":
             submit_offer_request(auftrag_id)
             flash("Angebotsanfrage abgesendet. Die Werkstatt kann sie jetzt prüfen.", "success")
         else:
-            flash("Angebotsanfrage analysiert. Bitte prüfen und danach absenden.", "success")
+            flash_upload_analysis_result(
+                upload_result,
+                "Angebotsanfrage analysiert. Bitte prüfen und danach absenden.",
+            )
         return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
 
     sichtbare_dateien = [d for d in list_dateien(auftrag_id) if d.get("quelle") in {"autohaus", "intern"}]
@@ -4850,7 +4891,7 @@ def partner_auftrag(slug, auftrag_id):
         if aktion == "upload_analyze" and not erlaubte_dateien:
             flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.", "warning")
             return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
-        save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
+        upload_result = save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
         save_uploads(
             auftrag_id,
             get_allowed_uploads(request.files.getlist("fertigbilder")),
@@ -4858,7 +4899,10 @@ def partner_auftrag(slug, auftrag_id):
             "fertigbild",
         )
         if aktion == "upload_analyze":
-            flash("Datei hochgeladen und Auftrag neu analysiert.", "success")
+            flash_upload_analysis_result(
+                upload_result,
+                "Datei hochgeladen und Auftrag neu analysiert.",
+            )
         else:
             flash("Termine aktualisiert.", "success")
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
