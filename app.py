@@ -111,6 +111,8 @@ if USE_POSTGRES:
 DEFAULT_ADMIN_PASS = "gaertner2026"
 DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
+DEFAULT_PUBLIC_BASE_URL = "https://kundenstatus-app.vercel.app"
+PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
 DATE_FMT = "%d.%m.%Y"
 DATETIME_FMT = "%d.%m.%Y %H:%M"
 MAX_UPLOAD_MB = 25
@@ -4302,6 +4304,7 @@ def dashboard():
         ki_status=get_ai_status(),
         startup_warnings=get_startup_warnings(),
         statusliste=STATUSLISTE,
+        public_base_url=PUBLIC_BASE_URL,
     )
 
 
