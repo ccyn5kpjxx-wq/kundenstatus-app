@@ -1,4 +1,5 @@
 from pathlib import Path
+from io import BytesIO
 import sys
 
 
@@ -67,6 +68,26 @@ def main():
     with client.session_transaction() as session:
         session["admin"] = True
     ok &= check("Admin mit Login", client.get("/admin"), {200})
+    external_client = portal.app.test_client()
+    with external_client.session_transaction(base_url="https://werkstatt.example.test") as session:
+        session["admin"] = True
+    external_admin = external_client.get(
+        "/admin",
+        base_url="https://werkstatt.example.test",
+        headers={
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "werkstatt.example.test",
+        },
+    )
+    ok &= check("Admin mit oeffentlichem Host", external_admin, {200})
+    external_html = external_admin.get_data(as_text=True)
+    external_link_ok = "https://werkstatt.example.test/portal/" in external_html
+    print(
+        "[OK] Kundenlinks nutzen aktuellen oeffentlichen Host"
+        if external_link_ok
+        else "[FEHLER] Kundenlinks nutzen nicht den aktuellen oeffentlichen Host"
+    )
+    ok &= external_link_ok
 
     autohaus = portal.get_autohaus_by_slug("kaesmann")
     if autohaus:
@@ -94,6 +115,94 @@ def main():
         is_pdf = partner_pdf_response.mimetype == "application/pdf"
         print("[OK] Käsmann Lackierauftrag ist PDF" if is_pdf else "[FEHLER] Käsmann Lackierauftrag ist kein PDF")
         ok &= is_pdf
+
+        upload_client = portal.app.test_client()
+        with upload_client.session_transaction() as session:
+            session["partner_autohaus_id"] = autohaus["id"]
+        upload_client.get("/partner/kaesmann/neu")
+        upload_response = upload_client.post(
+            "/partner/kaesmann/neu",
+            data=csrf_data(
+                upload_client,
+                {
+                    "aktion": "upload_analyze",
+                    "kunde_name": "Smoke Test Kunde",
+                    "kontakt_telefon": "01234 567890",
+                    "fahrzeug": "",
+                    "kennzeichen": "",
+                    "analyse_text": "",
+                    "beschreibung": "",
+                    "transport_art": "standard",
+                    "dateien": (
+                        BytesIO(
+                            b"Lackierauftrag Smoke Test\n"
+                            b"Fahrzeug: Audi A4\n"
+                            b"Kennzeichen: MOS ST 42\n"
+                            b"Auftrag: SMOKE-PORTAL-42\n"
+                        ),
+                        "smoke-kunden-upload.txt",
+                    ),
+                },
+            ),
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        ok &= check("Kundenportal Upload leitet zum Auftrag", upload_response, {302})
+        auftrag_id = None
+        location = upload_response.headers.get("Location", "")
+        marker = "/auftrag/"
+        if marker in location:
+            try:
+                auftrag_id = int(location.rsplit(marker, 1)[1].split("?", 1)[0].strip("/"))
+            except ValueError:
+                auftrag_id = None
+        upload_created = auftrag_id is not None and portal.get_auftrag(auftrag_id)
+        print(
+            "[OK] Kundenportal Upload erstellt Auftrag"
+            if upload_created
+            else "[FEHLER] Kundenportal Upload erstellt keinen pruefbaren Auftrag"
+        )
+        ok &= bool(upload_created)
+        if auftrag_id:
+            try:
+                dateien = portal.list_dateien(auftrag_id)
+                upload_saved = bool(
+                    len(dateien) == 1
+                    and dateien[0]["quelle"] == "autohaus"
+                    and dateien[0]["original_name"] == "smoke-kunden-upload.txt"
+                    and dateien[0]["extrahierter_text"]
+                )
+                print(
+                    "[OK] Kundendatei gespeichert und analysiert"
+                    if upload_saved
+                    else "[FEHLER] Kundendatei wurde nicht korrekt gespeichert/analysiert"
+                )
+                ok &= upload_saved
+                admin_upload_client = portal.app.test_client()
+                with admin_upload_client.session_transaction() as session:
+                    session["admin"] = True
+                admin_detail = admin_upload_client.get(f"/admin/auftrag/{auftrag_id}")
+                ok &= check("Admin sieht Kundenauftrag", admin_detail, {200})
+                admin_html = admin_detail.get_data(as_text=True)
+                admin_shows_file = (
+                    "smoke-kunden-upload.txt" in admin_html
+                    and "Autohaus/Kundenportal" in admin_html
+                )
+                print(
+                    "[OK] Admin sieht gespeicherte Kundendatei mit Herkunft"
+                    if admin_shows_file
+                    else "[FEHLER] Admin sieht Kundendatei/Herkunft nicht"
+                )
+                ok &= admin_shows_file
+                if dateien:
+                    ok &= check("Admin Originaldatei oeffnet", admin_upload_client.get(f"/admin/datei/{dateien[0]['id']}"), {200})
+                    ok &= check(
+                        "Admin Originaldatei Download",
+                        admin_upload_client.get(f"/admin/datei/{dateien[0]['id']}/download"),
+                        {200},
+                    )
+            finally:
+                portal.delete_auftrag(auftrag_id)
     else:
         print("[INFO] Autohaus 'kaesmann' existiert lokal nicht, Partner-Dashboard-Test uebersprungen.")
 
