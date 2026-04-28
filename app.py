@@ -25,6 +25,8 @@ import shutil
 import sqlite3
 import time
 import uuid
+import zipfile
+import xml.etree.ElementTree as ET
 
 try:
     import psycopg
@@ -408,6 +410,8 @@ ALLOWED_EXTENSIONS = {
 }
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"}
+TEXT_ANALYSIS_EXTENSIONS = {".txt", ".docx", ".xlsx"}
+ANALYSIS_EXTENSIONS = {".pdf"} | IMAGE_EXTENSIONS | TEXT_ANALYSIS_EXTENSIONS
 
 TEILE_PATTERNS = {
     "Stoßstange vorne": [r"(stoß|stoss)(fänger|stange).*(vorn|vorne|front)", r"frontschürze"],
@@ -1960,12 +1964,72 @@ def extract_pdf_text(path):
     return "\n".join(unique_chunks)
 
 
+def extract_plain_text_file(path):
+    raw = pathlib.Path(path).read_bytes()
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="ignore")
+
+
+def xml_text_nodes(xml_bytes):
+    try:
+        root = ET.fromstring(xml_bytes)
+    except Exception:
+        return []
+    return [
+        clean_text(element.text)
+        for element in root.iter()
+        if clean_text(element.text)
+    ]
+
+
+def extract_docx_text(path):
+    chunks = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = [
+                name
+                for name in archive.namelist()
+                if name.startswith("word/") and name.endswith(".xml")
+            ]
+            for name in names:
+                if name.startswith(("word/header", "word/footer")):
+                    continue
+                chunks.extend(xml_text_nodes(archive.read(name)))
+    except Exception:
+        return ""
+    return "\n".join(dict.fromkeys(chunks))
+
+
+def extract_xlsx_text(path):
+    chunks = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for name in archive.namelist():
+                if name == "xl/sharedStrings.xml" or (
+                    name.startswith("xl/worksheets/") and name.endswith(".xml")
+                ):
+                    chunks.extend(xml_text_nodes(archive.read(name)))
+    except Exception:
+        return ""
+    return "\n".join(dict.fromkeys(chunks))
+
+
 def extract_document_text_local(path, filename=""):
     suffix = pathlib.Path(filename or str(path)).suffix.lower()
     if suffix == ".pdf":
         return extract_pdf_text(path)
     if suffix in IMAGE_EXTENSIONS:
         return extract_image_text(path)
+    if suffix == ".txt":
+        return extract_plain_text_file(path)
+    if suffix == ".docx":
+        return extract_docx_text(path)
+    if suffix == ".xlsx":
+        return extract_xlsx_text(path)
     return ""
 
 
@@ -3033,6 +3097,11 @@ def ensure_column(db, table_name, column_name, column_definition):
                 raise
 
 
+def ensure_index(db, index_name, table_name, columns):
+    column_sql = ", ".join(columns)
+    db.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_sql})")
+
+
 def init_db():
     if USE_POSTGRES:
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -3212,6 +3281,13 @@ def init_db():
     ensure_column(db, "autohaeuser", "strasse", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "plz", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "ort", "TEXT DEFAULT ''")
+
+    ensure_index(db, "idx_auftraege_dashboard", "auftraege", ("archiviert", "angebotsphase", "autohaus_id"))
+    ensure_index(db, "idx_auftraege_angebote", "auftraege", ("angebotsphase", "angebot_abgesendet", "autohaus_id"))
+    ensure_index(db, "idx_dateien_auftrag", "dateien", ("auftrag_id", "kategorie", "reklamation_id"))
+    ensure_index(db, "idx_status_log_lookup", "status_log", ("status", "zeitstempel", "auftrag_id"))
+    ensure_index(db, "idx_verzoegerungen_offen", "verzoegerungen", ("uebernommen", "erstellt_am"))
+    ensure_index(db, "idx_reklamationen_offen", "reklamationen", ("bearbeitet", "erstellt_am"))
 
     seed_default_autohaeuser(db)
 
@@ -3680,7 +3756,12 @@ def list_angebotsanfragen(autohaus_id=None):
     if autohaus_id is None:
         rows = db.execute(
             """
-            SELECT a.*, h.name AS autohaus_name, h.slug AS autohaus_slug
+            SELECT a.*, h.name AS autohaus_name, h.slug AS autohaus_slug,
+                   (
+                       SELECT COUNT(*)
+                       FROM dateien d
+                       WHERE d.auftrag_id = a.id
+                   ) AS dateien_count
             FROM auftraege a
             LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
             WHERE a.angebotsphase = 1 AND a.angebot_abgesendet = 1
@@ -3690,7 +3771,12 @@ def list_angebotsanfragen(autohaus_id=None):
     else:
         rows = db.execute(
             """
-            SELECT a.*, h.name AS autohaus_name, h.slug AS autohaus_slug
+            SELECT a.*, h.name AS autohaus_name, h.slug AS autohaus_slug,
+                   (
+                       SELECT COUNT(*)
+                       FROM dateien d
+                       WHERE d.auftrag_id = a.id
+                   ) AS dateien_count
             FROM auftraege a
             LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
             WHERE a.angebotsphase = 1 AND a.angebot_abgesendet = 1 AND a.autohaus_id = ?
@@ -3701,7 +3787,7 @@ def list_angebotsanfragen(autohaus_id=None):
     db.close()
     anfragen = [row_to_auftrag(row) for row in rows]
     for anfrage in anfragen:
-        anfrage["dateien"] = list_dateien(anfrage["id"])
+        anfrage["dateien_count"] = int(anfrage.get("dateien_count") or 0)
     return anfragen
 
 
@@ -4317,7 +4403,7 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
         is_analysis_document = (
             clean_text(kategorie) == "standard" and reklamation_id is None
         )
-        if is_analysis_document and (suffix == ".pdf" or suffix in IMAGE_EXTENSIONS):
+        if is_analysis_document and suffix in ANALYSIS_EXTENSIONS:
             saved_analysis_document = True
             bundle = build_document_analysis_bundle_safe(target, original_name)
             extrahierter_text = bundle.get("text", "")
@@ -4416,7 +4502,7 @@ def reanalyze_existing_documents(auftrag_id):
         datei = dict(row)
         original_name = clean_text(datei.get("original_name"))
         suffix = pathlib.Path(original_name).suffix.lower()
-        if suffix != ".pdf" and suffix not in IMAGE_EXTENSIONS:
+        if suffix not in ANALYSIS_EXTENSIONS:
             continue
         path = UPLOAD_DIR / clean_text(datei.get("stored_name"))
         if not path.exists():

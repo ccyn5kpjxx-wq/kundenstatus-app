@@ -310,7 +310,7 @@
           {% if a['annahme_datum'] %}<span class="schedule-pill">{{ a['angebot_annahme_label'] }} {{ a['annahme_datum'] }}</span>{% endif %}
           {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['angebot_abholung_label'] }} {{ a['abholtermin'] }}</span>{% endif %}
           {% if a['werkstatt_angebot_preis'] %}<span class="schedule-pill">Angebot {{ a['werkstatt_angebot_preis'] }}</span>{% endif %}
-          {% if a['dateien'] %}<span class="schedule-pill">{{ a['dateien']|length }} Unterlagen</span>{% endif %}
+          {% if a['dateien_count'] %}<span class="schedule-pill">{{ a['dateien_count'] }} Unterlagen</span>{% endif %}
         </div>
         <div class="mt-3 d-flex gap-2 flex-wrap">
           <a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-brand btn-sm">{{ 'Angebot bearbeiten' if a['angebot_status'] == 'angebot_abgegeben' else 'Angebot abgeben' }}</a>
