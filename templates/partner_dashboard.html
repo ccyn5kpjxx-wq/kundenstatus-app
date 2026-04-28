@@ -37,6 +37,74 @@
     .track-step { padding:.4rem .7rem; border-radius:999px; background:#efe4d4; border:1px solid #dfceb6; color:#6a5b4a; font-size:.9rem; }
     .track-step.is-active { background:#132635; border-color:#132635; color:#fff; }
     .track-step.is-done { background:#1b7f53; border-color:#1b7f53; color:#fff; }
+    .btn,
+    .form-control {
+      min-height:44px;
+      font-size:16px;
+    }
+    @media (max-width: 575.98px) {
+      .shell { padding:14px; }
+      .panel { padding:20px 16px; border-radius:18px; box-shadow:0 10px 28px rgba(64,47,25,.1); }
+      h1 { font-size:1.8rem; line-height:1.12; }
+      .panel .btn,
+      .bulk-bar .btn {
+        width:100%;
+      }
+      .bulk-bar {
+        align-items:stretch;
+        border-radius:16px;
+      }
+      .bulk-bar,
+      .bulk-bar > div {
+        display:grid !important;
+        grid-template-columns:1fr;
+        width:100%;
+      }
+      .chip {
+        max-width:100%;
+        overflow-wrap:anywhere;
+        white-space:normal;
+      }
+      .table-responsive table,
+      .table-responsive thead,
+      .table-responsive tbody,
+      .table-responsive tr,
+      .table-responsive th,
+      .table-responsive td {
+        display:block;
+        width:100%;
+      }
+      .table-responsive thead { display:none; }
+      .table-responsive tr {
+        border:1px solid #e4d6c3;
+        border-radius:16px;
+        padding:12px;
+        margin-bottom:12px;
+        background:#fffdf9;
+      }
+      .table-responsive td {
+        border:0;
+        padding:.45rem 0;
+      }
+      .table-responsive td::before {
+        content:attr(data-label);
+        display:block;
+        margin-bottom:.15rem;
+        font-size:.72rem;
+        line-height:1.2;
+        letter-spacing:.06em;
+        text-transform:uppercase;
+        color:#8a6e46;
+        font-weight:700;
+      }
+      .row-select-cell {
+        width:100%;
+      }
+      .selection-badge {
+        justify-content:center;
+        width:100%;
+      }
+    }
   </style>
 </head>
 <body>
@@ -263,24 +331,24 @@
           <tbody>
             {% for a in auftraege %}
             <tr data-select-row>
-              <td class="row-select-cell">
+              <td class="row-select-cell" data-label="Auswahl">
                 <label class="selection-badge mb-0">
                   <input type="checkbox" class="row-check" name="auftrag_ids" value="{{ a['id'] }}" data-select-item>
                   <span>Wählen</span>
                 </label>
               </td>
-              <td>
+              <td data-label="Fahrzeug">
                 <div class="fw-bold">{{ a['fahrzeug'] }}</div>
                 {% if a['kennzeichen'] %}<div class="small text-muted">{{ a['kennzeichen'] }}</div>{% endif %}
                 {% if a['kunde_name'] %}<div class="small text-muted">{{ a['kunde_name'] }}</div>{% endif %}
               </td>
-              <td>{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
-              <td>
+              <td data-label="Analyse">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
+              <td data-label="Termine">
                 {% if a['annahme_datum'] %}<div class="chip">{{ a['partner_annahme_label'] }} {{ a['annahme_datum'] }}</div>{% endif %}
                 {% if a['abholtermin'] %}<div class="chip">{{ a['partner_abholung_label'] }} {{ a['abholtermin'] }}</div>{% endif %}
               </td>
-              <td><span class="badge text-bg-{{ a['status_meta']['farbe'] }}">{{ a['status_meta']['icon'] }} {{ a['status_meta']['label'] }}</span></td>
-              <td><a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=a['id']) }}" class="btn btn-outline-dark btn-sm">Öffnen</a></td>
+              <td data-label="Status"><span class="badge text-bg-{{ a['status_meta']['farbe'] }}">{{ a['status_meta']['icon'] }} {{ a['status_meta']['label'] }}</span></td>
+              <td data-label="Aktion"><a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=a['id']) }}" class="btn btn-outline-dark btn-sm">Öffnen</a></td>
             </tr>
             {% endfor %}
           </tbody>
@@ -328,21 +396,21 @@
           <tbody>
             {% for a in archivierte_auftraege %}
             <tr data-select-row>
-              <td class="row-select-cell">
+              <td class="row-select-cell" data-label="Auswahl">
                 <label class="selection-badge mb-0">
                   <input type="checkbox" class="row-check" name="auftrag_ids" value="{{ a['id'] }}" data-select-item>
                   <span>Wählen</span>
                 </label>
               </td>
-              <td>
+              <td data-label="Fahrzeug">
                 <div class="fw-bold">{{ a['fahrzeug'] }}</div>
                 {% if a['kennzeichen'] %}<div class="small text-muted">{{ a['kennzeichen'] }}</div>{% endif %}
               </td>
-              <td>{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
-              <td>
+              <td data-label="Analyse">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
+              <td data-label="Letzte Termine">
                 {% if a['abholtermin'] %}<div class="chip">{{ a['partner_abholung_label'] }} {{ a['abholtermin'] }}</div>{% endif %}
               </td>
-              <td><a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=a['id']) }}" class="btn btn-outline-dark btn-sm">Öffnen</a></td>
+              <td data-label="Aktion"><a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=a['id']) }}" class="btn btn-outline-dark btn-sm">Öffnen</a></td>
             </tr>
             {% endfor %}
           </tbody>
