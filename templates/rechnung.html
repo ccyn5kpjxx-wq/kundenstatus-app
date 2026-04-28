@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}Rechnung schreiben{% endblock %}
+
+{% block extra_css %}
+<style>
+  .rechnung-grid {
+    align-items: start;
+  }
+
+  .copy-box {
+    background: #f8f2e8;
+    border: 1px solid #e4d6c3;
+    border-radius: 14px;
+    padding: .9rem 1rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .step-number {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--brand);
+    color: #fff;
+    font-weight: 700;
+    flex: 0 0 auto;
+  }
+
+  .step-row {
+    display: flex;
+    gap: .9rem;
+    align-items: flex-start;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-4">
+  <div>
+    <div class="badge-soft mb-3">Lexware</div>
+    <h1 class="mb-2">Rechnung schreiben</h1>
+    <p class="text-muted mb-0">{{ auftrag['autohaus_name'] or 'Ohne Autohaus' }} · {{ auftrag['fahrzeug'] }}{% if auftrag['kennzeichen'] %} · {{ auftrag['kennzeichen'] }}{% endif %}</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('auftrag_detail', auftrag_id=auftrag['id']) }}" class="btn btn-soft">Zum Auftrag</a>
+    {% if rechnung['lexware_kunden_url'] %}
+      <a href="{{ rechnung['lexware_kunden_url'] }}" class="btn btn-soft" target="_blank" rel="noopener">Lexware Kunden</a>
+    {% endif %}
+    {% if rechnung['lexware_rechnungen_url'] %}
+      <a href="{{ rechnung['lexware_rechnungen_url'] }}" class="btn btn-brand" target="_blank" rel="noopener">Lexware Rechnung</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if auftrag['status'] < 5 %}
+<div class="alert alert-warning page-card">
+  Der Auftrag ist noch nicht auf „Zurückgegeben“. Du kannst die Daten vorbereiten, die Rechnung aber besser erst nach der Rückgabe schreiben.
+</div>
+{% endif %}
+
+<div class="row g-4 rechnung-grid">
+  <div class="col-lg-7">
+    <div class="page-card p-4 mb-4">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Ablauf in Lexware</h4>
+          <p>Erst den Kunden prüfen oder anlegen, danach die Rechnung erfassen.</p>
+        </div>
+      </div>
+      <div class="vstack gap-3">
+        <div class="step-row">
+          <span class="step-number">1</span>
+          <div>
+            <div class="fw-bold">Lexware öffnen: Arbeit &gt; Kunde</div>
+            <div class="text-muted">Nach „{{ rechnung['kunde']['name'] }}“ suchen. Wenn der Kunde fehlt, mit den Daten rechts neu anlegen.</div>
+          </div>
+        </div>
+        <div class="step-row">
+          <span class="step-number">2</span>
+          <div>
+            <div class="fw-bold">Rechnung schreiben</div>
+            <div class="text-muted">Kunde auswählen, Fahrzeugdaten in den Belegtext übernehmen und die Position eintragen.</div>
+          </div>
+        </div>
+        <div class="step-row">
+          <span class="step-number">3</span>
+          <div>
+            <div class="fw-bold">Hier als erledigt markieren</div>
+            <div class="text-muted">Damit in der Übersicht sichtbar bleibt, dass die Rechnung schon geschrieben wurde.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-card p-4">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Rechnungsdaten</h4>
+          <p>Diese Angaben kannst du direkt in Lexware übernehmen.</p>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <div class="d-flex justify-content-between gap-2 align-items-center mb-2">
+          <div class="fw-bold">Belegtext</div>
+          <button type="button" class="btn btn-soft btn-sm" data-copy-target="belegtext">Kopieren</button>
+        </div>
+        <div class="copy-box" id="belegtext">{{ rechnung['belegtext'] }}</div>
+      </div>
+
+      <div class="mb-2 fw-bold">Position</div>
+      {% for position in rechnung['positionen'] %}
+      <div class="copy-box mb-3" id="position-{{ loop.index }}">
+{{ position['bezeichnung'] }}{% if position['preis'] %}
+Preis/Vorgabe: {{ position['preis'] }}{% endif %}
+      </div>
+      <button type="button" class="btn btn-soft btn-sm mb-3" data-copy-target="position-{{ loop.index }}">Position kopieren</button>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="page-card p-4 mb-4">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Direkt in Lexware</h4>
+          <p>Kontakt suchen/anlegen und Rechnungsentwurf erzeugen.</p>
+        </div>
+      </div>
+      {% if auftrag['lexware_invoice_url'] %}
+        <div class="alert alert-success">
+          Lexware-Entwurf ist erstellt.
+        </div>
+        <a href="{{ auftrag['lexware_invoice_url'] }}" class="btn btn-brand w-100" target="_blank" rel="noopener">
+          Lexware-Entwurf öffnen
+        </a>
+      {% elif not rechnung['api_ready'] %}
+        <div class="alert alert-warning mb-0">
+          Für den Direkt-Button fehlt noch <code>LEXWARE_API_KEY</code> in <code>.env.local</code>.
+        </div>
+      {% else %}
+        <form method="POST" action="{{ url_for('lexware_rechnung_erstellen', auftrag_id=auftrag['id']) }}">
+          <div class="mb-3">
+            <label class="form-label">Netto-Betrag für Lexware</label>
+            <div class="input-group">
+              <input type="text" class="form-control" name="netto_betrag" value="{{ '%.2f'|format(rechnung['netto_betrag']) if rechnung['netto_betrag'] else '' }}" required>
+              <span class="input-group-text">EUR netto</span>
+            </div>
+            <div class="form-text">Der Entwurf wird mit {{ rechnung['tax_rate']|int }}% MwSt. angelegt.</div>
+          </div>
+          <div class="small text-muted mb-3">
+            Beim Klick werden Kundendaten und Rechnungsdaten an Lexware übertragen. Die Rechnung bleibt als Entwurf und wird nicht automatisch finalisiert.
+          </div>
+          <button type="submit" class="btn btn-brand w-100" {% if auftrag['status'] < 5 %}disabled{% endif %}>
+            Rechnung in Lexware vorbereiten
+          </button>
+        </form>
+      {% endif %}
+    </div>
+
+    <div class="page-card p-4 mb-4">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Kundendaten</h4>
+          <p>{{ rechnung['kunde']['quelle'] }}</p>
+        </div>
+        <button type="button" class="btn btn-soft btn-sm" data-copy-target="kundendaten">Kopieren</button>
+      </div>
+      <div class="copy-box" id="kundendaten">Name: {{ rechnung['kunde']['name'] }}
+{% if rechnung['kunde']['kontakt_name'] %}Kontakt: {{ rechnung['kunde']['kontakt_name'] }}
+{% endif %}{% if rechnung['kunde']['strasse'] %}Straße: {{ rechnung['kunde']['strasse'] }}
+{% endif %}{% if rechnung['kunde']['plz'] or rechnung['kunde']['ort'] %}Ort: {{ rechnung['kunde']['plz'] }} {{ rechnung['kunde']['ort'] }}
+{% endif %}{% if rechnung['kunde']['email'] %}E-Mail: {{ rechnung['kunde']['email'] }}
+{% endif %}{% if rechnung['kunde']['telefon'] %}Telefon: {{ rechnung['kunde']['telefon'] }}{% endif %}</div>
+    </div>
+
+    <div class="page-card p-4">
+      <h4 class="mb-3">Status speichern</h4>
+      <form method="POST">
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" role="switch" name="lexware_kunde_angelegt" id="lexware_kunde_angelegt" {% if auftrag['lexware_kunde_angelegt'] %}checked{% endif %}>
+          <label class="form-check-label" for="lexware_kunde_angelegt">Kunde in Lexware angelegt/geprüft</label>
+        </div>
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" role="switch" name="rechnung_geschrieben" id="rechnung_geschrieben" {% if auftrag['rechnung_status'] == 'geschrieben' %}checked{% endif %}>
+          <label class="form-check-label" for="rechnung_geschrieben">Rechnung geschrieben</label>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Rechnungsnummer</label>
+          <input type="text" class="form-control" name="rechnung_nummer" value="{{ auftrag['rechnung_nummer'] }}">
+        </div>
+        {% if auftrag['rechnung_geschrieben_am'] %}
+        <div class="text-muted small mb-3">Gespeichert am {{ auftrag['rechnung_geschrieben_am'] }}</div>
+        {% endif %}
+        <button type="submit" class="btn btn-brand w-100">Status speichern</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  document.querySelectorAll('[data-copy-target]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const target = document.getElementById(button.dataset.copyTarget);
+      if (!target) {
+        return;
+      }
+      await navigator.clipboard.writeText(target.textContent.trim());
+      const original = button.textContent;
+      button.textContent = 'Kopiert';
+      window.setTimeout(() => {
+        button.textContent = original;
+      }, 1200);
+    });
+  });
+</script>
+{% endblock %}

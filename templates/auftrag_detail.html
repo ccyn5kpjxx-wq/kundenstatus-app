@@ -291,7 +291,16 @@
               <button type="submit" class="btn btn-brand">Weiter zu {{ statusliste[next_status]['label'] }}</button>
             </form>
             {% else %}
+            <a href="{{ url_for('rechnung_schreiben', auftrag_id=auftrag['id']) }}" class="btn btn-brand">
+              Rechnung schreiben in Lexware
+            </a>
+            {% if auftrag['rechnung_status'] == 'geschrieben' %}
+            <span class="badge text-bg-success px-3 py-2">Rechnung geschrieben{% if auftrag['rechnung_nummer'] %}: {{ auftrag['rechnung_nummer'] }}{% endif %}</span>
+            {% elif auftrag['rechnung_status'] == 'lexware_entwurf' %}
+            <span class="badge text-bg-primary px-3 py-2">Lexware-Entwurf erstellt</span>
+            {% else %}
             <span class="badge text-bg-success px-3 py-2">Prozess abgeschlossen</span>
+            {% endif %}
             {% endif %}
           </div>
         </div>

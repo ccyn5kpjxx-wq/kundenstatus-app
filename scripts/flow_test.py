@@ -404,6 +404,21 @@ def main():
         check("Status ist Zurückgegeben", auftrag["status"] == 5)
         check("Rückgabetermin wird gesetzt", bool(auftrag["abholtermin"]), auftrag["abholtermin"])
 
+        response = admin.get(f"/admin/auftrag/{angebot_id}")
+        admin_auftrag_html = response.get_data(as_text=True)
+        check(
+            "Zurückgegebener Auftrag zeigt Rechnungslink",
+            response.status_code == 200 and "Rechnung schreiben in Lexware" in admin_auftrag_html,
+            f"Status {response.status_code}",
+        )
+        response = admin.get(f"/admin/auftrag/{angebot_id}/rechnung")
+        rechnung_html = response.get_data(as_text=True)
+        check(
+            "Rechnungsseite nach Rückgabe erreichbar",
+            response.status_code == 200 and "Rechnung schreiben" in rechnung_html and "Direkt in Lexware" in rechnung_html,
+            f"Status {response.status_code}",
+        )
+
         response = admin.post(
             f"/admin/auftrag/{angebot_id}/fertigbilder",
             data=with_csrf(

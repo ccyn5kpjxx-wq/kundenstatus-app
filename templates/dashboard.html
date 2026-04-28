@@ -549,6 +549,16 @@
           </td>
           <td>
             <a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Öffnen</a>
+            {% if a['status'] == 5 %}
+              <a href="{{ url_for('rechnung_schreiben', auftrag_id=a['id']) }}" class="btn btn-brand btn-sm mt-1">
+                Rechnung schreiben in Lexware
+              </a>
+              {% if a['rechnung_status'] == 'geschrieben' %}
+                <div class="small text-success mt-1">Rechnung erledigt{% if a['rechnung_nummer'] %}: {{ a['rechnung_nummer'] }}{% endif %}</div>
+              {% elif a['rechnung_status'] == 'lexware_entwurf' %}
+                <div class="small text-primary mt-1">Lexware-Entwurf erstellt</div>
+              {% endif %}
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

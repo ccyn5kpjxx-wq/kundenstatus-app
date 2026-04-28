@@ -25,6 +25,7 @@ import shutil
 import sqlite3
 import tempfile
 import time
+from urllib.parse import quote
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
@@ -179,6 +180,12 @@ DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
 DEFAULT_PUBLIC_BASE_URL = ""
 PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
+LEXWARE_KUNDEN_URL = (os.environ.get("LEXWARE_KUNDEN_URL") or "").strip()
+LEXWARE_RECHNUNGEN_URL = (os.environ.get("LEXWARE_RECHNUNGEN_URL") or "").strip()
+LEXWARE_API_KEY = (os.environ.get("LEXWARE_API_KEY") or "").strip()
+LEXWARE_API_BASE_URL = (os.environ.get("LEXWARE_API_BASE_URL") or "https://api.lexware.io").strip().rstrip("/")
+LEXWARE_APP_BASE_URL = (os.environ.get("LEXWARE_APP_BASE_URL") or "https://app.lexware.de").strip().rstrip("/")
+LEXWARE_TAX_RATE = float(os.environ.get("LEXWARE_TAX_RATE") or 19)
 DATE_FMT = "%d.%m.%Y"
 DATETIME_FMT = "%d.%m.%Y %H:%M"
 MAX_UPLOAD_MB = 25
@@ -3172,6 +3179,13 @@ def init_db():
             abholtermin    TEXT DEFAULT '',
             transport_art  TEXT DEFAULT 'standard',
             archiviert     INTEGER DEFAULT 0,
+            lexware_kunde_angelegt INTEGER DEFAULT 0,
+            lexware_contact_id TEXT DEFAULT '',
+            lexware_invoice_id TEXT DEFAULT '',
+            lexware_invoice_url TEXT DEFAULT '',
+            rechnung_status TEXT DEFAULT 'offen',
+            rechnung_nummer TEXT DEFAULT '',
+            rechnung_geschrieben_am TEXT DEFAULT '',
             kontakt_telefon TEXT DEFAULT '',
             notiz_intern   TEXT DEFAULT '',
             quelle         TEXT DEFAULT 'intern',
@@ -3276,6 +3290,13 @@ def init_db():
     ensure_column(db, "auftraege", "abholtermin", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "transport_art", "TEXT DEFAULT 'standard'")
     ensure_column(db, "auftraege", "archiviert", "INTEGER DEFAULT 0")
+    ensure_column(db, "auftraege", "lexware_kunde_angelegt", "INTEGER DEFAULT 0")
+    ensure_column(db, "auftraege", "lexware_contact_id", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "lexware_invoice_id", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "lexware_invoice_url", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "rechnung_status", "TEXT DEFAULT 'offen'")
+    ensure_column(db, "auftraege", "rechnung_nummer", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "rechnung_geschrieben_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kontakt_telefon", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "notiz_intern", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "quelle", "TEXT DEFAULT 'intern'")
@@ -3625,6 +3646,13 @@ def row_to_auftrag(row):
     auftrag["archiviert"] = bool(auftrag.get("archiviert"))
     auftrag["angebotsphase"] = bool(auftrag.get("angebotsphase"))
     auftrag["angebot_abgesendet"] = bool(auftrag.get("angebot_abgesendet"))
+    auftrag["lexware_kunde_angelegt"] = bool(auftrag.get("lexware_kunde_angelegt"))
+    auftrag["lexware_contact_id"] = clean_text(auftrag.get("lexware_contact_id"))
+    auftrag["lexware_invoice_id"] = clean_text(auftrag.get("lexware_invoice_id"))
+    auftrag["lexware_invoice_url"] = clean_text(auftrag.get("lexware_invoice_url"))
+    auftrag["rechnung_status"] = clean_text(auftrag.get("rechnung_status")) or "offen"
+    auftrag["rechnung_nummer"] = clean_text(auftrag.get("rechnung_nummer"))
+    auftrag["rechnung_geschrieben_am"] = clean_text(auftrag.get("rechnung_geschrieben_am"))
     auftrag["angebot_status"] = clean_text(auftrag.get("angebot_status")) or (
         "angefragt" if auftrag["angebot_abgesendet"] else "entwurf"
     )
@@ -3713,6 +3741,213 @@ def get_auftrag(auftrag_id):
     ).fetchone()
     db.close()
     return ensure_auftrag_analysis_from_documents(row_to_auftrag(row))
+
+
+def build_lexware_rechnung_context(auftrag):
+    autohaus = get_autohaus(auftrag["autohaus_id"]) if auftrag.get("autohaus_id") else None
+    kunde_name = clean_text(autohaus.get("name") if autohaus else "") or clean_text(auftrag.get("kunde_name"))
+    kunde = {
+        "name": kunde_name or "Kunde noch eintragen",
+        "kontakt_name": clean_text(autohaus.get("kontakt_name") if autohaus else ""),
+        "email": clean_text(autohaus.get("email") if autohaus else auftrag.get("kunde_email")),
+        "telefon": clean_text(autohaus.get("telefon") if autohaus else auftrag.get("kontakt_telefon")),
+        "strasse": clean_text(autohaus.get("strasse") if autohaus else ""),
+        "plz": clean_text(autohaus.get("plz") if autohaus else ""),
+        "ort": clean_text(autohaus.get("ort") if autohaus else ""),
+        "quelle": "Autohaus" if autohaus else "Endkunde / Referenz",
+    }
+    positionen = []
+    angebot_text = clean_text(auftrag.get("werkstatt_angebot_text"))
+    angebot_preis = clean_text(auftrag.get("werkstatt_angebot_preis"))
+    if angebot_text or angebot_preis:
+        positionen.append(
+            {
+                "bezeichnung": angebot_text or "Karosserie- und Lackierarbeiten",
+                "preis": angebot_preis,
+            }
+        )
+    else:
+        positionen.append(
+            {
+                "bezeichnung": clean_text(auftrag.get("analyse_text"))
+                or clean_text(auftrag.get("beschreibung"))
+                or "Karosserie- und Lackierarbeiten",
+                "preis": clean_text(auftrag.get("rep_max_kosten")),
+            }
+        )
+    belegtext = "\n".join(
+        part
+        for part in [
+            f"Auftrag #{auftrag['id']}",
+            f"Autohaus: {clean_text(auftrag.get('autohaus_name'))}" if auftrag.get("autohaus_name") else "",
+            f"Endkunde/Referenz: {clean_text(auftrag.get('kunde_name'))}" if auftrag.get("kunde_name") else "",
+            f"Fahrzeug: {clean_text(auftrag.get('fahrzeug'))}",
+            f"Kennzeichen: {clean_text(auftrag.get('kennzeichen'))}" if auftrag.get("kennzeichen") else "",
+            f"FIN: {clean_text(auftrag.get('fin_nummer'))}" if auftrag.get("fin_nummer") else "",
+            f"Auftragsnummer: {clean_text(auftrag.get('auftragsnummer'))}" if auftrag.get("auftragsnummer") else "",
+            f"Zurückgegeben am: {clean_text(auftrag.get('abholtermin'))}" if auftrag.get("abholtermin") else "",
+        ]
+        if part
+    )
+    return {
+        "kunde": kunde,
+        "positionen": positionen,
+        "belegtext": belegtext,
+        "netto_betrag": parse_money_amount(clean_text(auftrag.get("werkstatt_angebot_preis"))),
+        "api_ready": bool(LEXWARE_API_KEY),
+        "tax_rate": LEXWARE_TAX_RATE,
+        "lexware_kunden_url": LEXWARE_KUNDEN_URL,
+        "lexware_rechnungen_url": LEXWARE_RECHNUNGEN_URL,
+    }
+
+
+def parse_money_amount(value):
+    text = clean_text(value)
+    if not text:
+        return None
+    matches = re.findall(r"\d{1,3}(?:[.\s]\d{3})*(?:,\d+)?|\d+(?:[,.]\d+)?", text)
+    if not matches:
+        return None
+    raw = matches[-1].replace(" ", "")
+    if "," in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    try:
+        return round(float(raw), 2)
+    except ValueError:
+        return None
+
+
+def lexware_request(method, path, payload=None, query=""):
+    if not LEXWARE_API_KEY:
+        raise RuntimeError("LEXWARE_API_KEY fehlt. Bitte in .env.local eintragen.")
+    requests_module = get_requests()
+    if requests_module is None:
+        raise RuntimeError("Python-Paket requests ist nicht verfügbar.")
+    url = f"{LEXWARE_API_BASE_URL}{path}{query}"
+    response = requests_module.request(
+        method,
+        url,
+        headers={
+            "Authorization": f"Bearer {LEXWARE_API_KEY}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        details = ""
+        try:
+            details = response.json()
+        except Exception:
+            details = response.text[:500]
+        raise RuntimeError(f"Lexware API Fehler {response.status_code}: {details}")
+    if response.status_code == 204 or not response.content:
+        return {}
+    return response.json()
+
+
+def find_lexware_contact(kunde):
+    name = clean_text(kunde.get("name"))
+    if len(name) < 3:
+        return None
+    data = lexware_request(
+        "GET",
+        "/v1/contacts",
+        query=f"?name={quote(name)}&customer=true",
+    )
+    for contact in data.get("content", []):
+        company_name = clean_text((contact.get("company") or {}).get("name"))
+        person = contact.get("person") or {}
+        person_name = clean_text(f"{person.get('firstName', '')} {person.get('lastName', '')}")
+        if company_name.lower() == name.lower() or person_name.lower() == name.lower():
+            return contact
+    content = data.get("content") or []
+    return content[0] if content else None
+
+
+def create_lexware_contact(kunde):
+    payload = {
+        "version": 0,
+        "roles": {"customer": {}},
+        "company": {"name": clean_text(kunde.get("name"))},
+    }
+    addresses = {}
+    if clean_text(kunde.get("strasse")) or clean_text(kunde.get("plz")) or clean_text(kunde.get("ort")):
+        addresses["billing"] = [
+            {
+                "street": clean_text(kunde.get("strasse")),
+                "zip": clean_text(kunde.get("plz")),
+                "city": clean_text(kunde.get("ort")),
+                "countryCode": "DE",
+            }
+        ]
+    if addresses:
+        payload["addresses"] = addresses
+    email = clean_text(kunde.get("email"))
+    telefon = clean_text(kunde.get("telefon"))
+    if email:
+        payload["emailAddresses"] = {"business": [email]}
+    if telefon:
+        payload["phoneNumbers"] = {"business": [telefon]}
+    return lexware_request("POST", "/v1/contacts", payload)
+
+
+def ensure_lexware_contact(kunde):
+    contact = find_lexware_contact(kunde)
+    if contact:
+        return contact["id"], False
+    created = create_lexware_contact(kunde)
+    return created["id"], True
+
+
+def lexware_datetime(value=None):
+    parsed = parse_date(value) or date.today()
+    return f"{parsed.strftime('%Y-%m-%d')}T00:00:00.000+01:00"
+
+
+def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
+    contact_id, contact_created = ensure_lexware_contact(rechnung["kunde"])
+    position = rechnung["positionen"][0] if rechnung["positionen"] else {}
+    description = rechnung["belegtext"]
+    payload = {
+        "archived": False,
+        "voucherDate": lexware_datetime(),
+        "address": {"contactId": contact_id},
+        "lineItems": [
+            {
+                "type": "custom",
+                "name": clean_text(position.get("bezeichnung")) or "Karosserie- und Lackierarbeiten",
+                "description": description,
+                "quantity": 1,
+                "unitName": "Stück",
+                "unitPrice": {
+                    "currency": "EUR",
+                    "netAmount": net_amount,
+                    "taxRatePercentage": LEXWARE_TAX_RATE,
+                },
+                "discountPercentage": 0,
+            }
+        ],
+        "totalPrice": {"currency": "EUR"},
+        "taxConditions": {"taxType": "net"},
+        "shippingConditions": {
+            "shippingDate": lexware_datetime(auftrag.get("abholtermin")),
+            "shippingType": "delivery",
+        },
+        "title": "Rechnung",
+        "introduction": "Die ausgeführten Karosserie- und Lackierarbeiten stellen wir Ihnen hiermit in Rechnung.",
+        "remark": "Vielen Dank für Ihren Auftrag.",
+    }
+    created = lexware_request("POST", "/v1/invoices", payload)
+    invoice_id = created["id"]
+    invoice_url = f"{LEXWARE_APP_BASE_URL}/permalink/invoices/edit/{invoice_id}"
+    return {
+        "contact_id": contact_id,
+        "contact_created": contact_created,
+        "invoice_id": invoice_id,
+        "invoice_url": invoice_url,
+    }
 
 
 def list_auftraege(autohaus_id=None, include_archived=False, include_angebote=False):
@@ -5566,6 +5801,113 @@ def status_update(auftrag_id, neuer_status):
     if ziel.startswith("/"):
         return redirect(ziel)
     return redirect(request.referrer or url_for("auftrag_detail", auftrag_id=auftrag_id))
+
+
+@app.route("/admin/auftrag/<int:auftrag_id>/rechnung", methods=["GET", "POST"])
+@admin_required
+def rechnung_schreiben(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+
+    if request.method == "POST":
+        lexware_kunde_angelegt = 1 if request.form.get("lexware_kunde_angelegt") else 0
+        rechnung_geschrieben = 1 if request.form.get("rechnung_geschrieben") else 0
+        rechnung_nummer = clean_text(request.form.get("rechnung_nummer"))
+        rechnung_status = "geschrieben" if rechnung_geschrieben else "offen"
+        if rechnung_geschrieben:
+            geschrieben_am = clean_text(auftrag.get("rechnung_geschrieben_am")) or now_str()
+        else:
+            geschrieben_am = ""
+
+        db = get_db()
+        db.execute(
+            """
+            UPDATE auftraege
+            SET lexware_kunde_angelegt=?,
+                rechnung_status=?,
+                rechnung_nummer=?,
+                rechnung_geschrieben_am=?,
+                geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                lexware_kunde_angelegt,
+                rechnung_status,
+                rechnung_nummer,
+                geschrieben_am,
+                now_str(),
+                auftrag_id,
+            ),
+        )
+        db.commit()
+        db.close()
+        flash("Rechnungsstatus gespeichert.", "success")
+        return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
+
+    if auftrag["status"] < 5:
+        flash("Rechnung am besten erst nach Zurückgabe schreiben.", "warning")
+
+    return render_template(
+        "rechnung.html",
+        auftrag=auftrag,
+        rechnung=build_lexware_rechnung_context(auftrag),
+    )
+
+
+@app.route("/admin/auftrag/<int:auftrag_id>/rechnung/lexware", methods=["POST"])
+@admin_required
+def lexware_rechnung_erstellen(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+    if auftrag["status"] < 5:
+        flash("Bitte den Auftrag zuerst auf Zurückgegeben setzen.", "warning")
+        return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
+    if auftrag.get("lexware_invoice_id"):
+        flash("Für diesen Auftrag gibt es bereits einen Lexware-Rechnungsentwurf.", "info")
+        return redirect(auftrag.get("lexware_invoice_url") or url_for("rechnung_schreiben", auftrag_id=auftrag_id))
+
+    rechnung = build_lexware_rechnung_context(auftrag)
+    net_amount = parse_money_amount(request.form.get("netto_betrag"))
+    if not net_amount or net_amount <= 0:
+        flash("Bitte einen Netto-Rechnungsbetrag eintragen.", "warning")
+        return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
+
+    try:
+        result = create_lexware_invoice_draft(auftrag, rechnung, net_amount)
+    except Exception as exc:
+        flash(str(exc), "danger")
+        return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
+
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET lexware_kunde_angelegt=1,
+            lexware_contact_id=?,
+            lexware_invoice_id=?,
+            lexware_invoice_url=?,
+            rechnung_status='lexware_entwurf',
+            geaendert_am=?
+        WHERE id=?
+        """,
+        (
+            result["contact_id"],
+            result["invoice_id"],
+            result["invoice_url"],
+            now_str(),
+            auftrag_id,
+        ),
+    )
+    db.commit()
+    db.close()
+
+    if result["contact_created"]:
+        flash("Kunde in Lexware angelegt und Rechnungsentwurf erstellt.", "success")
+    else:
+        flash("Bestehenden Lexware-Kunden gefunden und Rechnungsentwurf erstellt.", "success")
+    return redirect(result["invoice_url"])
 
 
 @app.route("/admin/auftrag/<int:auftrag_id>/verzoegerung", methods=["POST"])
