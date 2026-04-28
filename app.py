@@ -402,9 +402,7 @@ ALLOWED_EXTENSIONS = {
     ".gif",
     ".pdf",
     ".txt",
-    ".doc",
     ".docx",
-    ".xls",
     ".xlsx",
     ".heic",
 }
@@ -5085,6 +5083,14 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+@app.route("/favicon.ico")
+def favicon():
+    logo_path = BASE / "static" / "logo.png"
+    if not logo_path.exists():
+        abort(404)
+    return send_file(logo_path, mimetype="image/png")
 
 
 @app.route("/")

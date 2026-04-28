@@ -48,6 +48,21 @@ def main():
     )
     ok &= check("Admin ohne Login geschuetzt", client.get("/admin"), {302})
     ok &= check("Partner-Einstieg", client.get("/partner"), {200})
+    old_office_blocked = not portal.allowed_file("altauftrag.doc") and not portal.allowed_file("tabelle.xls")
+    modern_office_allowed = portal.allowed_file("auftrag.docx") and portal.allowed_file("kalkulation.xlsx")
+    print(
+        "[OK] Alte Office-Formate werden nicht als Upload angeboten"
+        if old_office_blocked
+        else "[FEHLER] Alte Office-Formate sind noch als Upload erlaubt"
+    )
+    ok &= old_office_blocked
+    print(
+        "[OK] Moderne Office-Formate bleiben erlaubt"
+        if modern_office_allowed
+        else "[FEHLER] Moderne Office-Formate sind nicht erlaubt"
+    )
+    ok &= modern_office_allowed
+    ok &= check("Favicon vorhanden", client.get("/favicon.ico"), {200})
 
     with client.session_transaction() as session:
         session["admin"] = True
