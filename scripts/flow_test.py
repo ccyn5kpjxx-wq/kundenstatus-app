@@ -319,6 +319,24 @@ def main():
         check("Status ist wieder Angelegt", portal.get_auftrag(angebot_id)["status"] == 1)
 
         response = admin.post(
+            f"/admin/status/{angebot_id}/4",
+            data=with_csrf(admin, {"next": f"/admin/auftrag/{angebot_id}"}),
+            follow_redirects=False,
+        )
+        check("Status Fertig möglich", response.status_code in {302, 303})
+        check("Status ist Fertig", portal.get_auftrag(angebot_id)["status"] == 4)
+
+        response = admin.post(
+            f"/admin/status/{angebot_id}/5",
+            data=with_csrf(admin, {"next": f"/admin/auftrag/{angebot_id}"}),
+            follow_redirects=False,
+        )
+        auftrag = portal.get_auftrag(angebot_id)
+        check("Status Zurückgegeben möglich", response.status_code in {302, 303})
+        check("Status ist Zurückgegeben", auftrag["status"] == 5)
+        check("Rückgabetermin wird gesetzt", bool(auftrag["abholtermin"]), auftrag["abholtermin"])
+
+        response = admin.post(
             f"/admin/auftrag/{angebot_id}/fertigbilder",
             data=with_csrf(
                 admin,

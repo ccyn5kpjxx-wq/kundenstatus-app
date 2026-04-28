@@ -13,6 +13,7 @@ from difflib import SequenceMatcher
 from functools import wraps
 from html import escape
 import hmac
+import importlib
 from io import BytesIO
 import json
 import mimetypes
@@ -30,45 +31,18 @@ try:
 except Exception:
     psycopg = None
 
-try:
-    import cv2
-except Exception:
-    cv2 = None
+cv2 = None
+fitz = None
+np = None
+pytesseract = None
+RapidOCR = None
+requests = None
+hashes = None
+serialization = None
+padding = None
+PdfReader = None
+OPTIONAL_IMPORT_ERRORS = {}
 
-try:
-    import fitz
-except Exception:
-    fitz = None
-
-try:
-    import numpy as np
-except Exception:
-    np = None
-
-try:
-    import pytesseract
-except Exception:
-    pytesseract = None
-
-try:
-    from rapidocr_onnxruntime import RapidOCR
-except Exception:
-    RapidOCR = None
-
-try:
-    import requests
-except Exception:
-    requests = None
-
-try:
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import padding
-except Exception:
-    hashes = None
-    serialization = None
-    padding = None
-
-from pypdf import PdfReader
 from flask import (
     Flask,
     abort,
@@ -87,6 +61,91 @@ BASE = pathlib.Path(__file__).parent
 DATA_DIR = BASE / "data"
 DB = DATA_DIR / "auftraege.db"
 UPLOAD_DIR = DATA_DIR / "uploads"
+
+
+def load_optional_module(module_name, global_name=None):
+    target_name = global_name or module_name
+    cached = globals().get(target_name)
+    if cached is not None:
+        return cached
+    if target_name in OPTIONAL_IMPORT_ERRORS:
+        return None
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as exc:
+        OPTIONAL_IMPORT_ERRORS[target_name] = str(exc)
+        return None
+    globals()[target_name] = module
+    return module
+
+
+def get_cv2():
+    return load_optional_module("cv2", "cv2")
+
+
+def get_fitz():
+    return load_optional_module("fitz", "fitz")
+
+
+def get_numpy():
+    return load_optional_module("numpy", "np")
+
+
+def get_pytesseract():
+    return load_optional_module("pytesseract", "pytesseract")
+
+
+def get_requests():
+    return load_optional_module("requests", "requests")
+
+
+def get_pdf_reader():
+    global PdfReader
+    if PdfReader is not None:
+        return PdfReader
+    if "PdfReader" in OPTIONAL_IMPORT_ERRORS:
+        return None
+    try:
+        from pypdf import PdfReader as reader
+    except Exception as exc:
+        OPTIONAL_IMPORT_ERRORS["PdfReader"] = str(exc)
+        return None
+    PdfReader = reader
+    return PdfReader
+
+
+def get_rapidocr_class():
+    global RapidOCR
+    if RapidOCR is not None:
+        return RapidOCR
+    if "RapidOCR" in OPTIONAL_IMPORT_ERRORS:
+        return None
+    try:
+        from rapidocr_onnxruntime import RapidOCR as rapid_ocr_class
+    except Exception as exc:
+        OPTIONAL_IMPORT_ERRORS["RapidOCR"] = str(exc)
+        return None
+    RapidOCR = rapid_ocr_class
+    return RapidOCR
+
+
+def load_crypto_modules():
+    global hashes, serialization, padding
+    if hashes is not None and serialization is not None and padding is not None:
+        return True
+    if "cryptography" in OPTIONAL_IMPORT_ERRORS:
+        return False
+    try:
+        from cryptography.hazmat.primitives import hashes as crypto_hashes
+        from cryptography.hazmat.primitives import serialization as crypto_serialization
+        from cryptography.hazmat.primitives.asymmetric import padding as crypto_padding
+    except Exception as exc:
+        OPTIONAL_IMPORT_ERRORS["cryptography"] = str(exc)
+        return False
+    hashes = crypto_hashes
+    serialization = crypto_serialization
+    padding = crypto_padding
+    return True
 
 
 def load_env_file(path):
@@ -223,6 +282,7 @@ STATUSLISTE = {
     2: dict(key="eingeplant", label="Eingeplant", icon="📅", farbe="primary"),
     3: dict(key="in_arbeit", label="In Arbeit", icon="🔧", farbe="info"),
     4: dict(key="fertig", label="Fertig", icon="✅", farbe="success"),
+    5: dict(key="zurueckgegeben", label="Zurückgegeben", icon="↩️", farbe="dark"),
 }
 
 TRANSPORT_ARTEN = {
@@ -646,19 +706,13 @@ def get_ai_config():
         or os.environ.get("GOOGLE_DOC_AI_SERVICE_ACCOUNT_FILE")
     )
     google_ready = bool(
-        requests is not None
-        and hashes is not None
-        and serialization is not None
-        and padding is not None
-        and service_account_path
+        service_account_path
         and service_account_path.exists()
         and clean_text(os.environ.get("GOOGLE_DOC_AI_PROJECT_ID"))
         and clean_text(os.environ.get("GOOGLE_DOC_AI_LOCATION"))
         and clean_text(os.environ.get("GOOGLE_DOC_AI_PROCESSOR_ID"))
     )
-    openai_ready = bool(
-        requests is not None and clean_text(os.environ.get("OPENAI_API_KEY"))
-    )
+    openai_ready = bool(clean_text(os.environ.get("OPENAI_API_KEY")))
     ready = google_ready and openai_ready
     return {
         "ready": ready,
@@ -700,7 +754,7 @@ def b64url_encode(data):
 
 
 def create_google_service_account_jwt(service_account_info):
-    if hashes is None or serialization is None or padding is None:
+    if not load_crypto_modules():
         raise RuntimeError("cryptography ist nicht verfuegbar")
     header = {"alg": "RS256", "typ": "JWT"}
     now_ts = int(time.time())
@@ -739,7 +793,10 @@ def get_google_access_token():
         pathlib.Path(config["service_account_path"]).read_text(encoding="utf-8")
     )
     assertion = create_google_service_account_jwt(service_account_info)
-    response = requests.post(
+    requests_module = get_requests()
+    if requests_module is None:
+        raise RuntimeError("requests ist nicht verfuegbar")
+    response = requests_module.post(
         GOOGLE_TOKEN_URL,
         data={
             "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
@@ -772,7 +829,10 @@ def extract_text_with_google_document_ai(path, filename=""):
             "content": base64.b64encode(pathlib.Path(path).read_bytes()).decode("ascii"),
         },
     }
-    response = requests.post(
+    requests_module = get_requests()
+    if requests_module is None:
+        raise RuntimeError("requests ist nicht verfuegbar")
+    response = requests_module.post(
         endpoint,
         headers={
             "Authorization": f"Bearer {token}",
@@ -869,22 +929,24 @@ def encode_openai_image_data_url(image_bytes, mime_type):
 
 def prepare_openai_image_bytes(path):
     raw = pathlib.Path(path).read_bytes()
-    if cv2 is None or np is None:
+    cv2_module = get_cv2()
+    np_module = get_numpy()
+    if cv2_module is None or np_module is None:
         return raw, mimetypes.guess_type(str(path))[0] or "image/jpeg"
     try:
-        image = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = cv2_module.imdecode(np_module.frombuffer(raw, dtype=np_module.uint8), cv2_module.IMREAD_COLOR)
         if image is None:
             return raw, mimetypes.guess_type(str(path))[0] or "image/jpeg"
         height, width = image.shape[:2]
         longest = max(height, width)
         if longest > OPENAI_VISION_MAX_IMAGE_SIDE:
             scale = OPENAI_VISION_MAX_IMAGE_SIDE / longest
-            image = cv2.resize(
+            image = cv2_module.resize(
                 image,
                 (max(1, int(width * scale)), max(1, int(height * scale))),
-                interpolation=cv2.INTER_AREA,
+                interpolation=cv2_module.INTER_AREA,
             )
-        ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+        ok, encoded = cv2_module.imencode(".jpg", image, [int(cv2_module.IMWRITE_JPEG_QUALITY), 88])
         if ok:
             return encoded.tobytes(), "image/jpeg"
     except Exception:
@@ -909,13 +971,14 @@ def build_openai_visual_inputs(path, filename=""):
             )
         return inputs
 
-    if suffix == ".pdf" and fitz is not None:
+    fitz_module = get_fitz() if suffix == ".pdf" else None
+    if suffix == ".pdf" and fitz_module is not None:
         try:
-            doc = fitz.open(str(path))
+            doc = fitz_module.open(str(path))
             max_pages = min(doc.page_count, OPENAI_VISION_MAX_PAGES)
             for page_index in range(max_pages):
                 page = doc.load_page(page_index)
-                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                pix = page.get_pixmap(matrix=fitz_module.Matrix(2, 2), alpha=False)
                 data_url = encode_openai_image_data_url(pix.tobytes("png"), "image/png")
                 if data_url:
                     inputs.append(
@@ -988,7 +1051,10 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
             },
         },
     }
-    response = requests.post(
+    requests_module = get_requests()
+    if requests_module is None:
+        return {"data": {}, "error": "requests ist nicht verfuegbar"}
+    response = requests_module.post(
         OPENAI_API_URL,
         headers={
             "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}",
@@ -1631,32 +1697,36 @@ def normalize_document_text(text):
 
 def get_rapid_ocr():
     global RAPID_OCR_ENGINE
-    if RAPID_OCR_ENGINE is None and RapidOCR is not None:
-        RAPID_OCR_ENGINE = RapidOCR()
+    rapid_ocr_class = get_rapidocr_class()
+    if RAPID_OCR_ENGINE is None and rapid_ocr_class is not None:
+        RAPID_OCR_ENGINE = rapid_ocr_class()
     return RAPID_OCR_ENGINE
 
 
 def load_image_for_ocr(path):
-    if cv2 is None or np is None:
+    cv2_module = get_cv2()
+    np_module = get_numpy()
+    if cv2_module is None or np_module is None:
         return None
     try:
-        buffer = np.fromfile(path, dtype=np.uint8)
+        buffer = np_module.fromfile(path, dtype=np_module.uint8)
         if buffer.size == 0:
             return None
-        image = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
+        image = cv2_module.imdecode(buffer, cv2_module.IMREAD_COLOR)
         return preprocess_cv_image(image)
     except Exception:
         return None
 
 
 def preprocess_cv_image(image):
-    if cv2 is None or image is None:
+    cv2_module = get_cv2()
+    if cv2_module is None or image is None:
         return image
     try:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        scaled = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-        _, threshold = cv2.threshold(
-            scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+        gray = cv2_module.cvtColor(image, cv2_module.COLOR_BGR2GRAY)
+        scaled = cv2_module.resize(gray, None, fx=2, fy=2, interpolation=cv2_module.INTER_CUBIC)
+        _, threshold = cv2_module.threshold(
+            scaled, 0, 255, cv2_module.THRESH_BINARY + cv2_module.THRESH_OTSU
         )
         return threshold
     except Exception:
@@ -1707,12 +1777,13 @@ def extract_ocr_lines(source):
 def extract_image_text(path):
     best_lines = extract_ocr_lines(str(path))
 
-    if not best_lines and pytesseract is not None and TESSERACT_CMD:
+    pytesseract_module = get_pytesseract()
+    if not best_lines and pytesseract_module is not None and TESSERACT_CMD:
         try:
-            pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+            pytesseract_module.pytesseract.tesseract_cmd = TESSERACT_CMD
             image = load_image_for_ocr(str(path))
             if image is not None:
-                text = pytesseract.image_to_string(image, lang="deu+eng")
+                text = pytesseract_module.image_to_string(image, lang="deu+eng")
                 best_lines = [
                     clean_text(line) for line in text.splitlines() if clean_text(line)
                 ]
@@ -1724,8 +1795,9 @@ def extract_image_text(path):
 
 def extract_pdf_text(path):
     text_chunks = []
+    pdf_reader_class = get_pdf_reader()
     try:
-        reader = PdfReader(str(path))
+        reader = pdf_reader_class(str(path)) if pdf_reader_class is not None else None
     except Exception:
         reader = None
 
@@ -1742,23 +1814,24 @@ def extract_pdf_text(path):
     needs_ocr = len(compact_whitespace(direct_text)) < 1200
 
     # Gescannte PDFs und bildlastige PDFs zusätzlich per OCR lesen.
-    if needs_ocr and fitz is not None:
+    fitz_module = get_fitz() if needs_ocr else None
+    cv2_module = get_cv2() if needs_ocr else None
+    np_module = get_numpy() if needs_ocr else None
+    if needs_ocr and fitz_module is not None and cv2_module is not None and np_module is not None:
         try:
-            doc = fitz.open(str(path))
+            doc = fitz_module.open(str(path))
             max_pages = min(doc.page_count, 4)
             for page_index in range(max_pages):
                 try:
                     page = doc.load_page(page_index)
-                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-                    if cv2 is None or np is None:
-                        continue
-                    image = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+                    pix = page.get_pixmap(matrix=fitz_module.Matrix(2, 2), alpha=False)
+                    image = np_module.frombuffer(pix.samples, dtype=np_module.uint8).reshape(
                         pix.height, pix.width, pix.n
                     )
                     if pix.n == 4:
-                        image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
+                        image = cv2_module.cvtColor(image, cv2_module.COLOR_RGBA2BGR)
                     elif pix.n == 3:
-                        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                        image = cv2_module.cvtColor(image, cv2_module.COLOR_RGB2BGR)
                     lines = extract_ocr_lines(image)
                     if lines:
                         text_chunks.append("\n".join(lines))
@@ -3414,10 +3487,10 @@ def list_auftraege(autohaus_id=None, include_archived=False, include_angebote=Fa
         ).fetchall()
     db.close()
 
-    auftraege = [ensure_auftrag_analysis_from_documents(row_to_auftrag(row)) for row in rows]
+    auftraege = [row_to_auftrag(row) for row in rows]
     auftraege.sort(
         key=lambda a: (
-            a["status"] == 4,
+            a["status"] >= 4,
             a["annahme_datum_obj"] or date.max,
             a["abholtermin_obj"] or date.max,
             clean_text(a.get("kennzeichen")).lower(),
@@ -3450,7 +3523,7 @@ def list_angebotsanfragen(autohaus_id=None):
             (autohaus_id,),
         ).fetchall()
     db.close()
-    anfragen = [ensure_auftrag_analysis_from_documents(row_to_auftrag(row)) for row in rows]
+    anfragen = [row_to_auftrag(row) for row in rows]
     for anfrage in anfragen:
         anfrage["dateien"] = list_dateien(anfrage["id"])
     return anfragen
@@ -4525,7 +4598,8 @@ def dashboard_daten(auftraege):
     heute_bringen = [a for a in auftraege if a["annahme_datum_obj"] == heute]
     heute_abholen = [a for a in auftraege if a["abholtermin_obj"] == heute]
     heute_starten = [a for a in auftraege if a["start_datum_obj"] == heute]
-    heute_fertig = [a for a in auftraege if a["fertig_datum_obj"] == heute]
+    heute_fertig = [a for a in auftraege if a["fertig_datum_obj"] == heute and a["status"] == 4]
+    zurueckgegeben = [a for a in auftraege if a["status"] == 5]
     ueberfaellig = [
         a for a in auftraege if a["fertig_datum_obj"] and a["fertig_datum_obj"] < heute and a["status"] < 4
     ]
@@ -4559,6 +4633,7 @@ def dashboard_daten(auftraege):
         "heute_abholen": heute_abholen,
         "heute_starten": heute_starten,
         "heute_fertig": heute_fertig,
+        "zurueckgegeben": zurueckgegeben,
         "ueberfaellig": ueberfaellig,
         "offene_verzoegerungen": offene_verzoegerungen,
         "offene_reklamationen": offene_reklamationen,
@@ -4618,8 +4693,8 @@ def autohaus_dashboard_daten(auftraege):
             for a in auftraege
             if a["status"] == 3 or (a["start_datum_obj"] and a["start_datum_obj"] <= heute and a["status"] < 4)
         ],
-        "heute_fertig": [a for a in auftraege if a["fertig_datum_obj"] == heute],
-        "zurueckgegeben": [a for a in auftraege if a["status"] == 4 and a["abholtermin_obj"] and a["abholtermin_obj"] < heute],
+        "heute_fertig": [a for a in auftraege if a["fertig_datum_obj"] == heute and a["status"] == 4],
+        "zurueckgegeben": [a for a in auftraege if a["status"] == 5],
     }
 
 
@@ -4676,9 +4751,9 @@ def logout():
 @app.route("/admin")
 @admin_required
 def dashboard():
-    auftraege = list_auftraege()
-    archivierte_auftraege = list_auftraege(include_archived=True)
-    archivierte_auftraege = [a for a in archivierte_auftraege if a["archiviert"]]
+    alle_auftraege = list_auftraege(include_archived=True)
+    auftraege = [a for a in alle_auftraege if not a["archiviert"]]
+    archivierte_auftraege = [a for a in alle_auftraege if a["archiviert"]]
     return render_template(
         "dashboard.html",
         auftraege=auftraege,
@@ -5041,16 +5116,17 @@ def status_update(auftrag_id, neuer_status):
 
     heute = format_date(date.today().strftime("%Y-%m-%d"))
     start_datum = auftrag["start_datum"] or heute if neuer_status >= 2 else auftrag["start_datum"]
-    fertig_datum = auftrag["fertig_datum"] or heute if neuer_status == 4 else auftrag["fertig_datum"]
+    fertig_datum = auftrag["fertig_datum"] or heute if neuer_status >= 4 else auftrag["fertig_datum"]
+    abholtermin = auftrag["abholtermin"] or heute if neuer_status >= 5 else auftrag["abholtermin"]
 
     db = get_db()
     db.execute(
         """
         UPDATE auftraege
-        SET status=?, start_datum=?, fertig_datum=?, geaendert_am=?
+        SET status=?, start_datum=?, fertig_datum=?, abholtermin=?, geaendert_am=?
         WHERE id=?
         """,
-        (neuer_status, start_datum, fertig_datum, now_str(), auftrag_id),
+        (neuer_status, start_datum, fertig_datum, abholtermin, now_str(), auftrag_id),
     )
     db.execute(
         "INSERT INTO status_log (auftrag_id, status, zeitstempel) VALUES (?, ?, ?)",
@@ -5304,10 +5380,9 @@ def partner_dashboard(slug):
     autohaus, redirect_response = partner_session_required(slug)
     if redirect_response:
         return redirect_response
-    auftraege = list_auftraege(autohaus["id"])
-    archivierte_auftraege = [
-        a for a in list_auftraege(autohaus["id"], include_archived=True) if a["archiviert"]
-    ]
+    alle_auftraege = list_auftraege(autohaus["id"], include_archived=True)
+    auftraege = [a for a in alle_auftraege if not a["archiviert"]]
+    archivierte_auftraege = [a for a in alle_auftraege if a["archiviert"]]
     return render_template(
         "partner_dashboard.html",
         autohaus=autohaus,
