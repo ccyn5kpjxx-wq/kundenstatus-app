@@ -3973,12 +3973,16 @@ def parse_money_amount(value):
     text = clean_text(value)
     if not text:
         return None
-    matches = re.findall(r"\d{1,3}(?:[.\s]\d{3})*(?:,\d+)?|\d+(?:[,.]\d+)?", text)
+    matches = re.findall(r"\d+(?:[.\s]\d{3})*(?:[,.]\d+)?", text)
     if not matches:
         return None
     raw = matches[-1].replace(" ", "")
-    if "," in raw:
+    if "," in raw and "." in raw:
         raw = raw.replace(".", "").replace(",", ".")
+    elif "," in raw:
+        raw = raw.replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}(?:\.\d{3})+", raw):
+        raw = raw.replace(".", "")
     try:
         return round(float(raw), 2)
     except ValueError:

@@ -146,7 +146,7 @@ Preis/Vorgabe: {{ position['preis'] }}{% endif %}
           <div class="mb-3">
             <label class="form-label">Netto-Betrag für Lexware</label>
             <div class="input-group">
-              <input type="text" class="form-control" name="netto_betrag" value="{{ '%.2f'|format(rechnung['netto_betrag']) if rechnung['netto_betrag'] else '' }}" required>
+              <input type="text" class="form-control" name="netto_betrag" inputmode="decimal" placeholder="z.B. 1200,00" value="{{ '%.2f'|format(rechnung['netto_betrag']) if rechnung['netto_betrag'] else '' }}" required>
               <span class="input-group-text">EUR netto</span>
             </div>
             <div class="form-text">Der Entwurf wird mit {{ rechnung['tax_rate']|int }}% MwSt. angelegt.</div>
