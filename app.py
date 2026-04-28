@@ -176,7 +176,7 @@ if USE_POSTGRES:
 DEFAULT_ADMIN_PASS = "gaertner2026"
 DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
-DEFAULT_PUBLIC_BASE_URL = "https://kundenstatus-app.vercel.app"
+DEFAULT_PUBLIC_BASE_URL = ""
 PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
 DATE_FMT = "%d.%m.%Y"
 DATETIME_FMT = "%d.%m.%Y %H:%M"
@@ -193,6 +193,20 @@ OPENAI_VISION_MAX_IMAGE_SIDE = 1800
 CSRF_FIELD_NAME = "csrf_token"
 
 GOOGLE_ACCESS_TOKEN = {"token": "", "expires_at": 0}
+
+
+def get_public_base_url():
+    if PUBLIC_BASE_URL:
+        return PUBLIC_BASE_URL
+    if has_request_context():
+        forwarded_proto = clean_text(request.headers.get("X-Forwarded-Proto")).split(",", 1)[0]
+        forwarded_host = clean_text(request.headers.get("X-Forwarded-Host")).split(",", 1)[0]
+        scheme = forwarded_proto or request.scheme
+        host = forwarded_host or request.host
+        if host:
+            return f"{scheme}://{host}".rstrip("/")
+        return request.url_root.rstrip("/")
+    return ""
 
 DEFAULT_AUTOHAEUSER = [
     {
@@ -5110,7 +5124,7 @@ def dashboard():
         ki_status=get_ai_status(),
         startup_warnings=get_startup_warnings(),
         statusliste=STATUSLISTE,
-        public_base_url=PUBLIC_BASE_URL,
+        public_base_url=get_public_base_url(),
     )
 
 

@@ -192,9 +192,10 @@
               <div class="text-lg-end portal-link-box">
                 {% set full_portal_url = public_base_url ~ h['portal_url'] %}
                 {% set portal_message = h['name'] ~ ' Kundenportal: ' ~ full_portal_url ~ '\nCode: ' ~ h['zugangscode'] %}
-                <div class="small text-muted">Öffentlicher Portal-Link</div>
+                <div class="small text-muted">Kundenlink zum Hochladen</div>
                 <div class="portal-link-value"><code>{{ full_portal_url }}</code></div>
                 <div class="small text-muted mt-1">Code: <strong>{{ h['zugangscode'] }}</strong></div>
+                <div class="small text-muted mt-1">Kunden laden dort Unterlagen hoch. Die Dateien landen direkt im internen Auftrag.</div>
                 <div class="d-flex justify-content-lg-end gap-2 flex-wrap mt-2">
                   <a href="{{ full_portal_url }}" target="_blank" class="btn btn-soft btn-sm">Öffnen</a>
                   <button type="button" class="btn btn-soft btn-sm" data-copy-link="{{ full_portal_url }}">Link kopieren</button>
