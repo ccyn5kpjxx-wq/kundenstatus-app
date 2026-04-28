@@ -4082,19 +4082,8 @@ def create_lexware_contact(kunde):
         "version": 0,
         "roles": {"customer": {}},
         "company": {"name": clean_text(kunde.get("name"))},
+        "addresses": {"billing": [build_lexware_contact_address(kunde)]},
     }
-    addresses = {}
-    if clean_text(kunde.get("strasse")) or clean_text(kunde.get("plz")) or clean_text(kunde.get("ort")):
-        addresses["billing"] = [
-            {
-                "street": clean_text(kunde.get("strasse")),
-                "zip": clean_text(kunde.get("plz")),
-                "city": clean_text(kunde.get("ort")),
-                "countryCode": "DE",
-            }
-        ]
-    if addresses:
-        payload["addresses"] = addresses
     email = clean_text(kunde.get("email"))
     telefon = clean_text(kunde.get("telefon"))
     if email:
@@ -4104,12 +4093,45 @@ def create_lexware_contact(kunde):
     return lexware_request("POST", "/v1/contacts", payload)
 
 
+def build_lexware_contact_address(kunde):
+    address = {"countryCode": "DE"}
+    if clean_text(kunde.get("strasse")):
+        address["street"] = clean_text(kunde.get("strasse"))
+    if clean_text(kunde.get("plz")):
+        address["zip"] = clean_text(kunde.get("plz"))
+    if clean_text(kunde.get("ort")):
+        address["city"] = clean_text(kunde.get("ort"))
+    return address
+
+
+def build_lexware_invoice_address(kunde):
+    address = build_lexware_contact_address(kunde)
+    address["name"] = clean_text(kunde.get("name")) or "Kunde"
+    return address
+
+
+def get_lexware_contact(contact_id):
+    if not clean_text(contact_id):
+        return None
+    return lexware_request("GET", f"/v1/contacts/{contact_id}")
+
+
+def lexware_contact_has_single_billing_address(contact):
+    addresses = (contact or {}).get("addresses") or {}
+    billing = addresses.get("billing") or []
+    return len(billing) == 1
+
+
 def ensure_lexware_contact(kunde):
     contact = find_lexware_contact(kunde)
     if contact:
-        return contact["id"], False
+        contact_id = contact["id"]
+        full_contact = get_lexware_contact(contact_id)
+        return contact_id, False, lexware_contact_has_single_billing_address(full_contact)
     created = create_lexware_contact(kunde)
-    return created["id"], True
+    contact_id = created["id"]
+    full_contact = get_lexware_contact(contact_id)
+    return contact_id, True, lexware_contact_has_single_billing_address(full_contact)
 
 
 def lexware_datetime(value=None):
@@ -4118,13 +4140,18 @@ def lexware_datetime(value=None):
 
 
 def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
-    contact_id, contact_created = ensure_lexware_contact(rechnung["kunde"])
+    contact_id, contact_created, can_reference_contact = ensure_lexware_contact(rechnung["kunde"])
     position = rechnung["positionen"][0] if rechnung["positionen"] else {}
     description = rechnung["belegtext"]
+    invoice_address = (
+        {"contactId": contact_id}
+        if can_reference_contact
+        else build_lexware_invoice_address(rechnung["kunde"])
+    )
     payload = {
         "archived": False,
         "voucherDate": lexware_datetime(),
-        "address": {"contactId": contact_id},
+        "address": invoice_address,
         "lineItems": [
             {
                 "type": "custom",
