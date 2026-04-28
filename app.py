@@ -952,6 +952,20 @@ def extract_openai_response_json(data):
     return {}
 
 
+def friendly_analysis_error(message, provider="OpenAI"):
+    normalized = normalize_document_text(message)
+    provider = clean_text(provider) or "KI"
+    if "401" in normalized or "unauthorized" in normalized:
+        return f"{provider}-Zugang ist nicht gültig oder abgelaufen. Die lokale Auslesung bleibt aktiv."
+    if "403" in normalized or "forbidden" in normalized:
+        return f"{provider}-Zugriff ist nicht freigegeben. Die lokale Auslesung bleibt aktiv."
+    if "429" in normalized or "rate limit" in normalized or "quota" in normalized:
+        return f"{provider} ist gerade limitiert. Die lokale Auslesung bleibt aktiv."
+    if normalized:
+        return f"{provider}-Auslesung war gerade nicht erreichbar. Die lokale Auslesung bleibt aktiv."
+    return ""
+
+
 def encode_openai_image_data_url(image_bytes, mime_type):
     if not image_bytes:
         return ""
@@ -1099,6 +1113,14 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
         json=payload,
         timeout=GOOGLE_DOC_AI_TIMEOUT,
     )
+    if response.status_code >= 400:
+        return {
+            "data": {},
+            "error": friendly_analysis_error(
+                f"{response.status_code} {response.reason}",
+                "OpenAI",
+            ),
+        }
     response.raise_for_status()
     parsed = extract_openai_response_json(response.json())
     return {"data": parsed, "error": ""}
@@ -1295,10 +1317,10 @@ def build_document_analysis_bundle(path, filename=""):
         if structured.get("analyse_pruefen"):
             bundle["hint"] = structured.get("analyse_hinweis") or "Bitte kurz pruefen"
             bundle["status"] = "review"
-    elif ai_result.get("error"):
-        bundle["hint"] = ai_result["error"]
+    elif ai_result.get("error") and not clean_text(bundle.get("text")):
+        bundle["hint"] = friendly_analysis_error(ai_result["error"], "OpenAI")
     elif google_result.get("error") and not local_text:
-        bundle["hint"] = google_result["error"]
+        bundle["hint"] = friendly_analysis_error(google_result["error"], "Google OCR")
 
     config = get_ai_config()
     if not bundle["hint"] and not (config["openai_ready"] or config["google_ready"]):

@@ -99,6 +99,14 @@ def main():
             and "stossstange hinten" in gutachten_ki_analyse,
             gutachten_mit_ki.get("analyse_text"),
         )
+        check(
+            "OpenAI-Fehler wird benutzerfreundlich angezeigt",
+            "https://api.openai.com" not in portal.friendly_analysis_error(
+                "401 Client Error: Unauthorized for url: https://api.openai.com/v1/chat/completions",
+                "OpenAI",
+            )
+            and "OpenAI-Zugang" in portal.friendly_analysis_error("401 Unauthorized", "OpenAI"),
+        )
 
         autohaus = portal.get_autohaus_by_slug("kaesmann")
         check("Autohaus Käsmann vorhanden", bool(autohaus))
