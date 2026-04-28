@@ -3855,6 +3855,25 @@ def merge_document_fields(ai_fields, local_fields):
     return fields
 
 
+def ensure_document_review_fallback(fields, extracted_text="", original_name=""):
+    fields = dict(fields or {})
+    if not clean_text(fields.get("analyse_text")):
+        summary = summarize_document_text(extracted_text, original_name)
+        if summary:
+            fields["analyse_text"] = summary[:220]
+    if not clean_text(fields.get("beschreibung")):
+        doc_type = classify_document(extracted_text, original_name)
+        parts = [part for part in (doc_type, summarize_document_text(extracted_text, original_name)) if clean_text(part)]
+        if parts:
+            fields["beschreibung"] = ". ".join(parts)[:500]
+    if clean_text(fields.get("analyse_text")) or clean_text(fields.get("beschreibung")):
+        add_analysis_note(
+            fields,
+            "Bitte überprüfen: Die Unterlage wurde automatisch eingetragen, aber die Erkennung ist unsicher.",
+        )
+    return fields
+
+
 def normalized_review_value(key, value):
     value = clean_text(value)
     if not value:
@@ -3960,6 +3979,11 @@ def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
         ai_felder = load_saved_analysis_json(datei["analyse_json"])
         local_felder = parse_document_fields(datei["extrahierter_text"], datei["original_name"])
         felder = merge_document_fields(ai_felder, local_felder)
+        felder = ensure_document_review_fallback(
+            felder,
+            datei["extrahierter_text"],
+            datei["original_name"],
+        )
         for key, value in felder.items():
             if value and key not in erkannt:
                 erkannt[key] = value
@@ -4368,7 +4392,7 @@ def flash_upload_analysis_result(saved_result, success_message="Datei hochgelade
         flash(success_message, "success")
     else:
         flash(
-            "Datei hochgeladen, aber keine sicheren Fahrzeugdaten erkannt. Bitte Felder manuell pruefen.",
+            "Datei hochgeladen und zur Prüfung eingetragen. Bitte die erkannten Daten kontrollieren.",
             "warning",
         )
     return saved
