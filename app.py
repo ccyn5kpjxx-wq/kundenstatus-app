@@ -3705,6 +3705,37 @@ def list_angebotsanfragen(autohaus_id=None):
     return anfragen
 
 
+def get_status_ids_logged_today(auftraege, status):
+    ids = [int(a["id"]) for a in auftraege if a.get("status") == status]
+    if not ids:
+        return set()
+    placeholders = ",".join("?" for _ in ids)
+    heute_prefix = date.today().strftime(DATE_FMT) + "%"
+    db = get_db()
+    rows = db.execute(
+        f"""
+        SELECT DISTINCT auftrag_id
+        FROM status_log
+        WHERE status=?
+          AND zeitstempel LIKE ?
+          AND auftrag_id IN ({placeholders})
+        """,
+        (status, heute_prefix, *ids),
+    ).fetchall()
+    db.close()
+    return {int(row["auftrag_id"]) for row in rows}
+
+
+def is_today_finished_auftrag(auftrag, today_finished_ids, today):
+    return (
+        auftrag["status"] == 4
+        and (
+            auftrag["fertig_datum_obj"] == today
+            or int(auftrag["id"]) in today_finished_ids
+        )
+    )
+
+
 def list_dateien(auftrag_id):
     db = get_db()
     rows = db.execute(
@@ -4791,7 +4822,10 @@ def dashboard_daten(auftraege):
     heute_bringen = [a for a in auftraege if a["annahme_datum_obj"] == heute]
     heute_abholen = [a for a in auftraege if a["abholtermin_obj"] == heute]
     heute_starten = [a for a in auftraege if a["start_datum_obj"] == heute]
-    heute_fertig = [a for a in auftraege if a["fertig_datum_obj"] == heute and a["status"] == 4]
+    heute_fertig_ids = get_status_ids_logged_today(auftraege, 4)
+    heute_fertig = [
+        a for a in auftraege if is_today_finished_auftrag(a, heute_fertig_ids, heute)
+    ]
     zurueckgegeben = [a for a in auftraege if a["status"] == 5]
     ueberfaellig = [
         a for a in auftraege if a["fertig_datum_obj"] and a["fertig_datum_obj"] < heute and a["status"] < 4
@@ -4877,6 +4911,7 @@ def kalender_daten(auftraege):
 
 def autohaus_dashboard_daten(auftraege):
     heute = date.today()
+    heute_fertig_ids = get_status_ids_logged_today(auftraege, 4)
     return {
         "heute_text": format_date(heute.strftime("%Y-%m-%d")),
         "heute_bringen": [a for a in auftraege if a["annahme_datum_obj"] == heute],
@@ -4886,7 +4921,9 @@ def autohaus_dashboard_daten(auftraege):
             for a in auftraege
             if a["status"] == 3 or (a["start_datum_obj"] and a["start_datum_obj"] <= heute and a["status"] < 4)
         ],
-        "heute_fertig": [a for a in auftraege if a["fertig_datum_obj"] == heute and a["status"] == 4],
+        "heute_fertig": [
+            a for a in auftraege if is_today_finished_auftrag(a, heute_fertig_ids, heute)
+        ],
         "zurueckgegeben": [a for a in auftraege if a["status"] == 5],
     }
 

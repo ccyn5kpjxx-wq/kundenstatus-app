@@ -379,7 +379,20 @@ def main():
             follow_redirects=False,
         )
         check("Status Fertig möglich", response.status_code in {302, 303})
-        check("Status ist Fertig", portal.get_auftrag(angebot_id)["status"] == 4)
+        auftrag = portal.get_auftrag(angebot_id)
+        check("Status ist Fertig", auftrag["status"] == 4)
+        autohaus_cockpit = portal.autohaus_dashboard_daten([auftrag])
+        check(
+            "Partner-Dashboard zählt heute fertig nach Statuswechsel",
+            any(a["id"] == angebot_id for a in autohaus_cockpit["heute_fertig"]),
+            str([a["id"] for a in autohaus_cockpit["heute_fertig"]]),
+        )
+        admin_cockpit = portal.dashboard_daten([auftrag])
+        check(
+            "Admin-Dashboard zählt heute fertig nach Statuswechsel",
+            any(a["id"] == angebot_id for a in admin_cockpit["heute_fertig"]),
+            str([a["id"] for a in admin_cockpit["heute_fertig"]]),
+        )
 
         response = admin.post(
             f"/admin/status/{angebot_id}/5",
