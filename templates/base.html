@@ -213,6 +213,98 @@
       margin-left: .35rem;
     }
 
+    .analysis-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(22, 32, 42, .58);
+      backdrop-filter: blur(4px);
+      z-index: 2000;
+      padding: 1.25rem;
+    }
+
+    .analysis-overlay.show {
+      display: flex;
+    }
+
+    .analysis-card {
+      width: min(520px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: 0 24px 70px rgba(22, 32, 42, .28);
+      padding: 1.75rem;
+      text-align: center;
+    }
+
+    .analysis-spinner {
+      width: 54px;
+      height: 54px;
+      margin: 0 auto 1rem;
+      border-radius: 50%;
+      border: 5px solid #e4d6c3;
+      border-top-color: var(--accent);
+      animation: analysis-spin 1s linear infinite;
+    }
+
+    @keyframes analysis-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .analysis-progress {
+      width: 100%;
+      height: 8px;
+      border-radius: 999px;
+      background: #eadfce;
+      overflow: hidden;
+      margin: 1rem 0 1.25rem;
+    }
+
+    .analysis-progress-bar {
+      width: 42%;
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), var(--brand));
+      animation: analysis-progress 1.8s ease-in-out infinite;
+      transform-origin: left center;
+    }
+
+    @keyframes analysis-progress {
+      0% { transform: translateX(-20%) scaleX(.72); opacity: .72; }
+      50% { transform: translateX(105%) scaleX(1.08); opacity: 1; }
+      100% { transform: translateX(230%) scaleX(.72); opacity: .72; }
+    }
+
+    .analysis-news {
+      text-align: left;
+      border: 1px solid #e4d6c3;
+      background: #f8f2e8;
+      border-radius: 18px;
+      padding: 1rem 1.1rem;
+    }
+
+    .analysis-news-kicker {
+      font-size: .78rem;
+      text-transform: uppercase;
+      color: #7a6039;
+      margin-bottom: .45rem;
+    }
+
+    .analysis-news-title {
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 1rem;
+      margin-bottom: .35rem;
+      color: var(--accent);
+    }
+
+    .analysis-news-text {
+      color: #51463b;
+      line-height: 1.45;
+      min-height: 3.1em;
+    }
+
     footer {
       color: var(--muted);
       text-align: center;
@@ -223,6 +315,22 @@
   {% block extra_css %}{% endblock %}
 </head>
 <body>
+<div class="analysis-overlay" data-analysis-overlay>
+  <div class="analysis-card">
+    <div class="analysis-spinner" aria-hidden="true"></div>
+    <h4 class="mb-2">Datei wird analysiert</h4>
+    <div class="text-muted" data-analysis-text>Bitte kurz warten. Der Auftrag wird aus der Datei vorbereitet.</div>
+    <div class="analysis-progress" aria-hidden="true">
+      <div class="analysis-progress-bar"></div>
+    </div>
+    <div class="text-muted small mb-3">Analyse läuft. Je nach PDF oder Bild kann das ein paar Sekunden dauern.</div>
+    <div class="analysis-news">
+      <div class="analysis-news-kicker">Werkstatt-News</div>
+      <div class="analysis-news-title" data-analysis-news-title>Ab 27.04.2026: neue ION-7 im Einsatz</div>
+      <div class="analysis-news-text" data-analysis-news-text>Während die Datei gelesen wird, hier ein kurzer Blick auf unsere Technik-Neuigkeit.</div>
+    </div>
+  </div>
+</div>
 {% block navbar %}
 <nav class="navbar navbar-expand-lg">
   <div class="container py-2">
@@ -257,6 +365,64 @@
 
 <footer>Gärtner Karosserie &amp; Lack GmbH · Binauer Höhe 4, 74821 Mosbach · +49 1522 7706694</footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  (() => {
+    const overlay = document.querySelector('[data-analysis-overlay]');
+    const text = document.querySelector('[data-analysis-text]');
+    const newsTitle = document.querySelector('[data-analysis-news-title]');
+    const newsText = document.querySelector('[data-analysis-news-text]');
+    if (!overlay || !text) {
+      return;
+    }
+    const newsItems = [
+      {
+        title: 'Ab 27.04.2026: neue ION-7 im Einsatz',
+        text: 'Die neue Technik hilft uns, Lackierprozesse ruhiger und gleichmäßiger zu steuern.'
+      },
+      {
+        title: 'Mehr Konstanz beim Lackbild',
+        text: 'Erwärmter Stickstoff sorgt laut Anbieter für stabilere Bedingungen beim Lackauftrag.'
+      },
+      {
+        title: 'Sauberer Prozess, weniger Nacharbeit',
+        text: 'Weniger Overspray bedeutet klarere Abläufe und mehr Fokus auf ein sauberes Endergebnis.'
+      },
+      {
+        title: 'Planbarere Fertigstellung',
+        text: 'Kürzere Ablüftzeiten können helfen, Termine im Werkstattprozess verlässlicher zu halten.'
+      }
+    ];
+    let newsIndex = 0;
+    let newsTimer = null;
+    const updateNews = () => {
+      if (!newsTitle || !newsText) {
+        return;
+      }
+      const item = newsItems[newsIndex % newsItems.length];
+      newsTitle.textContent = item.title;
+      newsText.textContent = item.text;
+      newsIndex += 1;
+    };
+    const showOverlay = (message) => {
+      text.textContent = message || 'Bitte kurz warten. Der Auftrag wird aus der Datei vorbereitet.';
+      updateNews();
+      window.clearInterval(newsTimer);
+      newsTimer = window.setInterval(updateNews, 3200);
+      overlay.classList.add('show');
+    };
+    document.querySelectorAll('[data-upload-form]').forEach((form) => {
+      form.addEventListener('submit', (event) => {
+        const submitter = event.submitter || document.activeElement;
+        const action = submitter && submitter.value ? submitter.value : '';
+        if (!['upload_analyze', 'reanalyze_existing'].includes(action)) {
+          return;
+        }
+        const customMessage = submitter && submitter.dataset ? submitter.dataset.loadingMessage : '';
+        showOverlay(customMessage || 'Bitte kurz warten. Die Unterlage wird gelesen und die Felder werden vorbereitet.');
+      });
+    });
+  })();
+</script>
 {% block extra_js %}{% endblock %}
 </body>
 </html>

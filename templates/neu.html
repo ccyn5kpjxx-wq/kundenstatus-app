@@ -81,24 +81,12 @@
           <textarea name="notiz_intern" class="form-control" rows="4"></textarea>
         </div>
         <div class="col-12 d-flex gap-2 flex-wrap">
-          <button type="submit" name="aktion" value="upload_analyze" class="btn btn-soft btn-lg">Hochladen & analysieren</button>
+          <button type="submit" name="aktion" value="upload_analyze" class="btn btn-soft btn-lg" data-loading-message="Bitte kurz warten. Die Datei wird gelesen und das Fahrzeug wird vorbereitet.">Hochladen & analysieren</button>
           <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Fahrzeug speichern</button>
           <a href="{{ url_for('dashboard') }}" class="btn btn-soft btn-lg">Zurück</a>
-        </div>
-        <div class="col-12">
-          <div class="alert alert-info d-none mb-0" data-upload-status>Analyse läuft. Bitte kurz warten...</div>
         </div>
       </form>
     </div>
   </div>
 </div>
-<script>
-  const form = document.querySelector('[data-upload-form]');
-  const status = document.querySelector('[data-upload-status]');
-  if (form && status) {
-    form.addEventListener('submit', () => {
-      status.classList.remove('d-none');
-    });
-  }
-</script>
 {% endblock %}

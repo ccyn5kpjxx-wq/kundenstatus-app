@@ -553,7 +553,7 @@ def add_csrf_fields(response):
 
 def get_startup_warnings():
     warnings = []
-    if ADMIN_PASS in {"", "change-me", DEFAULT_ADMIN_PASS}:
+    if get_admin_pass() in {"", "change-me", DEFAULT_ADMIN_PASS}:
         warnings.append(
             "ADMIN_PASS ist nicht sicher gesetzt. Bitte in .env.local ein eigenes Passwort eintragen."
         )
@@ -564,12 +564,33 @@ def get_startup_warnings():
     return warnings
 
 
-def get_admin_pass():
-    return clean_text(os.environ.get("ADMIN_PASS")) or clean_text(ADMIN_PASS) or DEFAULT_ADMIN_PASS
-
-
 def clean_text(value):
     return str(value or "").strip()
+
+
+def clean_secret_value(value):
+    text = clean_text(value)
+    for _ in range(3):
+        previous = text
+        if "=" in text:
+            key, possible_value = text.split("=", 1)
+            if key.strip().upper() == "ADMIN_PASS":
+                text = possible_value.strip()
+        if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+            text = text[1:-1].strip()
+        if text == previous:
+            break
+    return text
+
+
+def get_admin_pass():
+    return clean_secret_value(os.environ.get("ADMIN_PASS")) or clean_secret_value(ADMIN_PASS) or DEFAULT_ADMIN_PASS
+
+
+def admin_password_matches(value):
+    submitted = clean_secret_value(value)
+    expected = get_admin_pass()
+    return bool(submitted and expected and hmac.compare_digest(submitted, expected))
 
 
 def parse_date(value):
@@ -1174,6 +1195,20 @@ def build_document_analysis_bundle(path, filename=""):
     if not bundle["hint"] and not (config["openai_ready"] or config["google_ready"]):
         bundle["hint"] = "API-Konfiguration fehlt, lokale OCR bleibt aktiv"
     return bundle
+
+
+def build_document_analysis_bundle_safe(path, filename=""):
+    try:
+        return build_document_analysis_bundle(path, filename)
+    except Exception as exc:
+        return {
+            "text": "",
+            "source": "analysis_error",
+            "status": "error",
+            "hint": f"Analyse konnte nicht abgeschlossen werden: {clean_text(str(exc))[:300]}",
+            "structured": {},
+            "analysis_json": "",
+        }
 
 
 def day_label(day_value):
@@ -3931,6 +3966,7 @@ def list_dateien_by_reklamation(reklamation_id):
 def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id=None):
     saved = 0
     saved_analysis_document = False
+    analysis_errors = []
     db = get_db()
     timestamp = now_str()
     for file in files:
@@ -3955,11 +3991,13 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
         )
         if is_analysis_document and (suffix == ".pdf" or suffix in IMAGE_EXTENSIONS):
             saved_analysis_document = True
-            bundle = build_document_analysis_bundle(target, original_name)
+            bundle = build_document_analysis_bundle_safe(target, original_name)
             extrahierter_text = bundle.get("text", "")
             analyse_quelle = clean_text(bundle.get("source"))
             analyse_json = clean_text(bundle.get("analysis_json"))
             analyse_hinweis = clean_text(bundle.get("hint"))
+            if bundle.get("status") == "error" and analyse_hinweis:
+                analysis_errors.append(analyse_hinweis)
             dokument_typ = (
                 classify_document(extrahierter_text, original_name)
                 if extrahierter_text
@@ -3995,7 +4033,13 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
     db.commit()
     db.close()
     if saved_analysis_document:
-        return saved, apply_document_data_to_auftrag(auftrag_id, prefer_documents=True)
+        try:
+            updates = apply_document_data_to_auftrag(auftrag_id, prefer_documents=True) or {}
+        except Exception as exc:
+            updates = {"_analysis_error": f"Analyse konnte nicht übernommen werden: {clean_text(str(exc))[:300]}"}
+        if analysis_errors and not clean_text(updates.get("_analysis_error")):
+            updates["_analysis_error"] = analysis_errors[0]
+        return saved, updates
     return saved, {}
 
 
@@ -4005,6 +4049,10 @@ def flash_upload_analysis_result(saved_result, success_message="Datei hochgelade
     else:
         saved, updates = saved_result, {}
     if not saved:
+        return saved
+    analysis_error = clean_text((updates or {}).get("_analysis_error"))
+    if analysis_error:
+        flash(f"Datei gespeichert, aber die Analyse ist abgebrochen. {analysis_error}", "warning")
         return saved
     meaningful_updates = {
         key: value
@@ -4045,7 +4093,7 @@ def reanalyze_existing_documents(auftrag_id):
         path = UPLOAD_DIR / clean_text(datei.get("stored_name"))
         if not path.exists():
             continue
-        bundle = build_document_analysis_bundle(path, original_name)
+        bundle = build_document_analysis_bundle_safe(path, original_name)
         extracted_text = clean_text(bundle.get("text"))
         doc_type = (
             classify_document(extracted_text, original_name)
@@ -4604,7 +4652,7 @@ def partner_session_required_by_key(portal_key):
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        if clean_text(request.form.get("passwort")) == get_admin_pass():
+        if admin_password_matches(request.form.get("passwort")):
             session["admin"] = True
             return redirect(url_for("dashboard"))
         flash("Falsches Passwort.", "danger")

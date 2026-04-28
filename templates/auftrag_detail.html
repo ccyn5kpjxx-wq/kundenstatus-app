@@ -469,13 +469,10 @@
           <textarea name="notiz_intern" class="form-control" rows="4">{{ auftrag['notiz_intern'] }}</textarea>
         </div>
         <div class="col-12 d-flex gap-2 flex-wrap">
-          <button type="submit" name="aktion" value="upload_analyze" class="btn btn-soft btn-lg">Hochladen & analysieren</button>
-          <button type="submit" name="aktion" value="reanalyze_existing" class="btn btn-soft btn-lg">Vorhandene Unterlagen neu analysieren</button>
+          <button type="submit" name="aktion" value="upload_analyze" class="btn btn-soft btn-lg" data-loading-message="Bitte kurz warten. Die neue Unterlage wird gelesen und der Auftrag wird vorbereitet.">Hochladen & analysieren</button>
+          <button type="submit" name="aktion" value="reanalyze_existing" class="btn btn-soft btn-lg" data-loading-message="Bitte kurz warten. Vorhandene Unterlagen werden neu geprüft.">Vorhandene Unterlagen neu analysieren</button>
           <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Änderungen speichern</button>
           <a href="{{ url_for('dashboard') }}" class="btn btn-soft btn-lg">Zurück</a>
-        </div>
-        <div class="col-12">
-          <div class="alert alert-info d-none mb-0" data-upload-status>Analyse läuft. Bitte kurz warten...</div>
         </div>
       </form>
 
@@ -789,13 +786,6 @@
   </div>
 </div>
 <script>
-  const form = document.querySelector('[data-upload-form]');
-  const status = document.querySelector('[data-upload-status]');
-  if (form && status) {
-    form.addEventListener('submit', () => {
-      status.classList.remove('d-none');
-    });
-  }
   document.querySelectorAll('[data-fill-offer-price]').forEach((button) => {
     button.addEventListener('click', () => {
       const priceInput = document.querySelector('[name="werkstatt_angebot_preis"]');
