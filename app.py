@@ -47,6 +47,8 @@ from flask import (
     Flask,
     abort,
     flash,
+    g,
+    has_request_context,
     redirect,
     render_template,
     request,
@@ -557,6 +559,13 @@ TESSERACT_CMD = shutil.which("tesseract")
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or DEFAULT_FLASK_SECRET_KEY
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
+
+
+@app.teardown_appcontext
+def close_request_db(exception=None):
+    db = g.pop("db_connection", None)
+    if db is not None:
+        db.force_close()
 
 
 def get_csrf_token():
@@ -2746,6 +2755,12 @@ def get_db():
             raise RuntimeError(
                 "DATABASE_URL ist gesetzt, aber psycopg ist nicht installiert."
             )
+        if has_request_context():
+            db = getattr(g, "db_connection", None)
+            if db is None:
+                db = PostgresConnection(psycopg.connect(DATABASE_URL), close_on_close=False)
+                g.db_connection = db
+            return db
         return PostgresConnection(psycopg.connect(DATABASE_URL))
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
@@ -2774,9 +2789,10 @@ class PostgresCursor:
 
 
 class PostgresConnection:
-    def __init__(self, conn):
+    def __init__(self, conn, close_on_close=True):
         self.conn = conn
         self.lastrowid = None
+        self.close_on_close = close_on_close
 
     def execute(self, sql, params=()):
         sql = sql.strip()
@@ -2811,6 +2827,10 @@ class PostgresConnection:
         self.conn.commit()
 
     def close(self):
+        if self.close_on_close:
+            self.conn.close()
+
+    def force_close(self):
         self.conn.close()
 
 
