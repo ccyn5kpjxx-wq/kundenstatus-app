@@ -24,6 +24,7 @@ import secrets
 import shutil
 import sqlite3
 import tempfile
+import threading
 import time
 from urllib.parse import quote
 import uuid
@@ -206,6 +207,15 @@ LEXWARE_TAX_RATE = float(os.environ.get("LEXWARE_TAX_RATE") or 19)
 DATE_FMT = "%d.%m.%Y"
 DATETIME_FMT = "%d.%m.%Y %H:%M"
 MAX_UPLOAD_MB = 25
+BACKUP_DIR = pathlib.Path(
+    os.environ.get(
+        "BACKUP_DIR",
+        str((UPLOAD_DIR.parent if USE_POSTGRES else DATA_DIR) / "backups"),
+    )
+)
+AUTO_BACKUP_ENABLED = env_flag("AUTO_BACKUP_ENABLED", True)
+AUTO_BACKUP_INTERVAL_SECONDS = max(60, env_int("AUTO_BACKUP_INTERVAL_SECONDS", 3600))
+AUTO_BACKUP_KEEP = max(1, env_int("AUTO_BACKUP_KEEP", 168))
 OPENAI_EXTRACTION_MODEL = os.environ.get("OPENAI_EXTRACTION_MODEL", "gpt-4o")
 OPENAI_API_URL = os.environ.get(
     "OPENAI_API_URL", "https://api.openai.com/v1/chat/completions"
@@ -3149,6 +3159,137 @@ def ensure_index(db, index_name, table_name, columns):
     db.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_sql})")
 
 
+BACKUP_TABLES = (
+    "autohaeuser",
+    "auftraege",
+    "dateien",
+    "status_log",
+    "chat_nachrichten",
+    "benachrichtigungen",
+    "verzoegerungen",
+    "reklamationen",
+)
+_backup_lock = threading.Lock()
+_backup_thread_started = False
+
+
+def list_table_rows_for_backup(db, table_name):
+    try:
+        columns = get_table_columns(db, table_name)
+    except Exception:
+        return []
+    if not columns:
+        return []
+    return [dict(row) for row in db.execute(f"SELECT * FROM {table_name}").fetchall()]
+
+
+def write_uploads_to_backup(archive):
+    if not UPLOAD_DIR.exists():
+        return 0
+    count = 0
+    for path in sorted(UPLOAD_DIR.iterdir()):
+        if not path.is_file():
+            continue
+        archive.write(path, f"uploads/{path.name}")
+        count += 1
+    return count
+
+
+def create_backup_package(reason="auto"):
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = BACKUP_DIR / f"kundenstatus-backup-{timestamp}.zip"
+
+    with _backup_lock:
+        db = get_db()
+        try:
+            export = {
+                "created_at": now_str(),
+                "reason": reason,
+                "database": "postgres" if USE_POSTGRES else "sqlite",
+                "tables": {},
+            }
+            for table_name in BACKUP_TABLES:
+                export["tables"][table_name] = list_table_rows_for_backup(db, table_name)
+
+            with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(
+                    "backup.json",
+                    json.dumps(export, ensure_ascii=False, indent=2, default=str),
+                )
+                if not USE_POSTGRES and DB.exists():
+                    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+                        tmp_path = pathlib.Path(tmp.name)
+                    try:
+                        sqlite_source = sqlite3.connect(DB)
+                        sqlite_target = sqlite3.connect(tmp_path)
+                        try:
+                            sqlite_source.backup(sqlite_target)
+                        finally:
+                            sqlite_target.close()
+                            sqlite_source.close()
+                        archive.write(tmp_path, "auftraege.db")
+                    finally:
+                        try:
+                            tmp_path.unlink()
+                        except OSError:
+                            pass
+                upload_count = write_uploads_to_backup(archive)
+                archive.writestr(
+                    "manifest.json",
+                    json.dumps(
+                        {
+                            "created_at": now_str(),
+                            "reason": reason,
+                            "backup_file": backup_path.name,
+                            "upload_count": upload_count,
+                            "keep": AUTO_BACKUP_KEEP,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                )
+        finally:
+            if not has_request_context():
+                db.close()
+
+    prune_old_backups()
+    return backup_path
+
+
+def prune_old_backups():
+    if not BACKUP_DIR.exists():
+        return
+    backups = sorted(
+        BACKUP_DIR.glob("kundenstatus-backup-*.zip"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for old_backup in backups[AUTO_BACKUP_KEEP:]:
+        try:
+            old_backup.unlink()
+        except OSError:
+            pass
+
+
+def hourly_backup_worker():
+    while True:
+        try:
+            create_backup_package("auto")
+        except Exception as exc:
+            print(f"WARNUNG: Automatisches Backup fehlgeschlagen: {exc}")
+        time.sleep(AUTO_BACKUP_INTERVAL_SECONDS)
+
+
+def start_hourly_backups():
+    global _backup_thread_started
+    if _backup_thread_started or not AUTO_BACKUP_ENABLED:
+        return
+    _backup_thread_started = True
+    thread = threading.Thread(target=hourly_backup_worker, daemon=True)
+    thread.start()
+
+
 def init_db():
     if USE_POSTGRES:
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -5452,6 +5593,17 @@ def admin_daten_import():
     return redirect(url_for("dashboard"))
 
 
+@app.route("/admin/backup/sofort", methods=["POST"])
+@admin_required
+def admin_backup_sofort():
+    try:
+        backup_path = create_backup_package("manual")
+        flash(f"Backup erstellt: {backup_path.name}", "success")
+    except Exception as exc:
+        flash(f"Backup fehlgeschlagen: {clean_text(str(exc))[:300]}", "danger")
+    return redirect(url_for("dashboard"))
+
+
 @app.route("/admin/autohaus/neu", methods=["POST"])
 @admin_required
 def autohaus_neu():
@@ -6711,6 +6863,7 @@ def partner_datei_download(slug, datei_id):
     )
 
 init_db()
+start_hourly_backups()
 
 
 if __name__ == "__main__":

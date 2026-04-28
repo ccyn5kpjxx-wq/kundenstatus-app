@@ -25,6 +25,10 @@
     <div class="d-flex gap-2 flex-wrap">
       <a href="{{ url_for('neuer_auftrag') }}" class="btn btn-brand btn-lg">Fahrzeug anlegen</a>
       <a href="{{ url_for('partner_login') }}" target="_blank" class="btn btn-soft btn-lg">Autohaus-Login öffnen</a>
+      <form method="POST" action="{{ url_for('admin_backup_sofort') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-soft btn-lg">Backup jetzt erstellen</button>
+      </form>
       <button type="button" class="btn btn-soft btn-lg" data-bs-toggle="modal" data-bs-target="#datenImportModal">Daten importieren</button>
     </div>
   </div>
