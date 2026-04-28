@@ -176,6 +176,10 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 USE_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
 if USE_POSTGRES:
     UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", "/tmp/kundenstatus-uploads"))
+elif os.environ.get("RENDER"):
+    DATA_DIR = pathlib.Path(os.environ.get("DATA_DIR", "/var/data"))
+    DB = pathlib.Path(os.environ.get("SQLITE_DB_PATH", str(DATA_DIR / "auftraege.db")))
+    UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", str(DATA_DIR / "uploads")))
 
 
 def env_flag(name, default=False):
@@ -210,7 +214,7 @@ MAX_UPLOAD_MB = 25
 BACKUP_DIR = pathlib.Path(
     os.environ.get(
         "BACKUP_DIR",
-        str((UPLOAD_DIR.parent if USE_POSTGRES else DATA_DIR) / "backups"),
+        str(DATA_DIR / "backups"),
     )
 )
 AUTO_BACKUP_ENABLED = env_flag("AUTO_BACKUP_ENABLED", True)
