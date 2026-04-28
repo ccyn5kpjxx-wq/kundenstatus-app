@@ -4,16 +4,27 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
+    disk:
+      name: kundenstatus-uploads
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: ADMIN_PASS
         sync: false
       - key: FLASK_SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: kundenstatus-db
+          property: connectionString
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_EXTRACTION_MODEL
         value: gpt-4o
       - key: UPLOAD_DIR
-        value: /tmp/kundenstatus-uploads
+        value: /var/data/uploads
+
+databases:
+  - name: kundenstatus-db
+    databaseName: kundenstatus
+    user: kundenstatus

@@ -37,17 +37,16 @@ gunicorn app:app
 ```text
 ADMIN_PASS=<eigenes-sicheres-admin-passwort>
 FLASK_SECRET_KEY=<langer-zufallswert>
-DATABASE_URL=<postgres-datenbank-url>
 OPENAI_API_KEY=<optional>
 OPENAI_EXTRACTION_MODEL=gpt-4o
-UPLOAD_DIR=/tmp/kundenstatus-uploads
+UPLOAD_DIR=/var/data/uploads
 ```
 
-Wichtig: `DATABASE_URL` sollte auf eine Postgres-Datenbank zeigen. Ohne `DATABASE_URL` nutzt die App SQLite, was auf Hosting-Plattformen nicht dauerhaft genug ist.
+Wichtig: Im `render.yaml` ist eine Postgres-Datenbank vorbereitet. `DATABASE_URL` wird daraus automatisch gesetzt.
 
 ## Uploads
 
-`UPLOAD_DIR=/tmp/kundenstatus-uploads` funktioniert technisch, ist aber auf vielen Hostern nicht dauerhaft. Fuer echte Nutzung sollte ein persistenter Speicher verwendet werden, zum Beispiel ein Render Disk oder spaeter ein Objektspeicher.
+`UPLOAD_DIR=/var/data/uploads` liegt auf dem im `render.yaml` eingetragenen Render Disk. Damit bleiben hochgeladene Dateien erhalten, solange der Render Disk bestehen bleibt.
 
 ## Links verschicken
 
@@ -59,20 +58,28 @@ https://kundenstatus-app.onrender.com
 
 Dann ersetzt du `localhost:5000` durch diese Domain.
 
+Der einfachste Kundenweg ist der zentrale Einstieg:
+
+```text
+https://kundenstatus-app.onrender.com/partner
+```
+
+Der Kunde waehlt sein Autohaus aus und meldet sich mit dem Zugangscode an. Einzelne Autohaus-Links funktionieren weiter, sind aber nicht mehr zwingend noetig.
+
 Beispiele:
 
 ```text
 Autohaus Mueller:
 https://kundenstatus-app.onrender.com/portal/9847b961ecdf4387
-Code: MUELLER2026
+Passwort/Zugangscode: MUELLER2026
 
 Auto Pfaff:
 https://kundenstatus-app.onrender.com/portal/b900b7d3d54f4afa
-Code: PFAFF2026
+Passwort/Zugangscode: PFAFF2026
 
 HSE Autowelt:
 https://kundenstatus-app.onrender.com/portal/ecd6b48321124e96
-Code: HSE2026
+Passwort/Zugangscode: HSE2026
 ```
 
 ## Nach dem Deploy testen

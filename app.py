@@ -5698,9 +5698,18 @@ def portal_redirect():
     return redirect(url_for("partner_login"))
 
 
-@app.route("/partner")
+@app.route("/partner", methods=["GET", "POST"])
 def partner_login():
-    return render_template("partner_index.html", autohaeuser=list_autohaeuser())
+    autohaeuser = list_autohaeuser()
+    if request.method == "POST":
+        portal_key = clean_text(request.form.get("portal_key"))
+        zugangscode = clean_text(request.form.get("zugangscode"))
+        autohaus = get_autohaus_by_portal_key(portal_key)
+        if autohaus and zugangscode == autohaus["zugangscode"]:
+            session["partner_autohaus_id"] = autohaus["id"]
+            return redirect(url_for("partner_dashboard_key", portal_key=autohaus["portal_key"]))
+        flash("Autohaus oder Passwort/Zugangscode stimmt nicht.", "danger")
+    return render_template("partner_index.html", autohaeuser=autohaeuser)
 
 
 @app.route("/portal/<portal_key>", methods=["GET", "POST"])

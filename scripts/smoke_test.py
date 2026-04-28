@@ -48,7 +48,16 @@ def main():
         {200},
     )
     ok &= check("Admin ohne Login geschuetzt", client.get("/admin"), {302})
-    ok &= check("Partner-Einstieg", client.get("/partner"), {200})
+    partner_index_response = client.get("/partner")
+    ok &= check("Partner-Einstieg", partner_index_response, {200})
+    partner_index_html = partner_index_response.get_data(as_text=True)
+    central_partner_login = "name=\"portal_key\"" in partner_index_html and "name=\"zugangscode\"" in partner_index_html
+    print(
+        "[OK] Zentraler Partner-Login vorhanden"
+        if central_partner_login
+        else "[FEHLER] Zentraler Partner-Login fehlt"
+    )
+    ok &= central_partner_login
     old_office_blocked = not portal.allowed_file("altauftrag.doc") and not portal.allowed_file("tabelle.xls")
     modern_office_allowed = portal.allowed_file("auftrag.docx") and portal.allowed_file("kalkulation.xlsx")
     print(
@@ -81,11 +90,12 @@ def main():
     )
     ok &= check("Admin mit oeffentlichem Host", external_admin, {200})
     external_html = external_admin.get_data(as_text=True)
-    external_link_ok = "https://werkstatt.example.test/portal/" in external_html
+    expected_public_base_url = portal.PUBLIC_BASE_URL or "https://werkstatt.example.test"
+    external_link_ok = f"{expected_public_base_url}/portal/" in external_html
     print(
-        "[OK] Kundenlinks nutzen aktuellen oeffentlichen Host"
+        "[OK] Kundenlinks nutzen oeffentliche Basisadresse"
         if external_link_ok
-        else "[FEHLER] Kundenlinks nutzen nicht den aktuellen oeffentlichen Host"
+        else "[FEHLER] Kundenlinks nutzen nicht die oeffentliche Basisadresse"
     )
     ok &= external_link_ok
 
@@ -103,6 +113,39 @@ def main():
             client.get("/partner/kaesmann/dashboard"),
             {302},
         )
+        client.get("/partner")
+        wrong_login = client.post(
+            "/partner",
+            data=csrf_data(
+                client,
+                {
+                    "portal_key": autohaus["portal_key"],
+                    "zugangscode": "FALSCH",
+                },
+            ),
+            follow_redirects=False,
+        )
+        ok &= check("Zentraler Partner-Login lehnt falschen Code ab", wrong_login, {200})
+        right_login = client.post(
+            "/partner",
+            data=csrf_data(
+                client,
+                {
+                    "portal_key": autohaus["portal_key"],
+                    "zugangscode": autohaus["zugangscode"],
+                },
+            ),
+            follow_redirects=False,
+        )
+        ok &= check("Zentraler Partner-Login akzeptiert richtigen Code", right_login, {302})
+        target_ok = "/portal/" in (right_login.headers.get("Location") or "")
+        print(
+            "[OK] Zentraler Partner-Login leitet ins Portal"
+            if target_ok
+            else "[FEHLER] Zentraler Partner-Login leitet nicht ins Portal"
+        )
+        ok &= target_ok
+        client = portal.app.test_client()
         with client.session_transaction() as session:
             session["partner_autohaus_id"] = autohaus["id"]
         ok &= check(
