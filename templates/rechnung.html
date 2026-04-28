@@ -142,7 +142,7 @@ Preis/Vorgabe: {{ position['preis'] }}{% endif %}
           Für den Direkt-Button fehlt noch <code>LEXWARE_API_KEY</code> in <code>.env.local</code>.
         </div>
       {% else %}
-        <form method="POST" action="{{ url_for('lexware_rechnung_erstellen', auftrag_id=auftrag['id']) }}">
+        <form method="POST" action="{{ url_for('lexware_rechnung_erstellen', auftrag_id=auftrag['id']) }}" data-submit-once>
           <div class="mb-3">
             <label class="form-label">Netto-Betrag für Lexware</label>
             <div class="input-group">
@@ -216,6 +216,17 @@ Preis/Vorgabe: {{ position['preis'] }}{% endif %}
       window.setTimeout(() => {
         button.textContent = original;
       }, 1200);
+    });
+  });
+
+  document.querySelectorAll('form[data-submit-once]').forEach((form) => {
+    form.addEventListener('submit', () => {
+      const button = form.querySelector('button[type="submit"]');
+      if (!button) {
+        return;
+      }
+      button.disabled = true;
+      button.textContent = 'Wird an Lexware gesendet...';
     });
   });
 </script>

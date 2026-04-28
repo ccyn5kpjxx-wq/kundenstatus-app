@@ -4000,23 +4000,38 @@ def lexware_request(method, path, payload=None, query=""):
     if requests_module is None:
         raise RuntimeError("Python-Paket requests ist nicht verfügbar.")
     url = f"{LEXWARE_API_BASE_URL}{path}{query}"
-    response = requests_module.request(
-        method,
-        url,
-        headers={
-            "Authorization": f"Bearer {LEXWARE_API_KEY}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=30,
-    )
+    response = None
+    for attempt in range(3):
+        response = requests_module.request(
+            method,
+            url,
+            headers={
+                "Authorization": f"Bearer {LEXWARE_API_KEY}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=30,
+        )
+        if response.status_code != 429 or attempt == 2:
+            break
+        retry_after = response.headers.get("Retry-After")
+        try:
+            wait_seconds = min(max(int(retry_after or 0), 1), 8)
+        except ValueError:
+            wait_seconds = 2 + attempt * 2
+        time.sleep(wait_seconds)
     if response.status_code >= 400:
         details = ""
         try:
             details = response.json()
         except Exception:
             details = response.text[:500]
+        if response.status_code == 429:
+            raise RuntimeError(
+                "Lexware hat gerade zu viele Anfragen bekommen. "
+                "Bitte 1 bis 2 Minuten warten und dann genau einmal erneut klicken."
+            )
         raise RuntimeError(f"Lexware API Fehler {response.status_code}: {details}")
     if response.status_code == 204 or not response.content:
         return {}
