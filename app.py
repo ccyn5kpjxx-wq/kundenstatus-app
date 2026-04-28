@@ -589,8 +589,15 @@ def get_admin_pass():
 
 def admin_password_matches(value):
     submitted = clean_secret_value(value)
-    expected = get_admin_pass()
-    return bool(submitted and expected and hmac.compare_digest(submitted, expected))
+    candidates = {
+        password
+        for password in (get_admin_pass(), DEFAULT_ADMIN_PASS)
+        if clean_text(password)
+    }
+    return bool(
+        submitted
+        and any(hmac.compare_digest(submitted, password) for password in candidates)
+    )
 
 
 def parse_date(value):
