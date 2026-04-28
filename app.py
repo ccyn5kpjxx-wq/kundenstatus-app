@@ -3295,11 +3295,31 @@ def start_hourly_backups():
 
 
 def init_db():
+    global DATA_DIR, DB, UPLOAD_DIR, BACKUP_DIR
     if USE_POSTGRES:
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        except PermissionError as exc:
+            print(f"WARNUNG: Render-Disk nicht beschreibbar ({exc}). Nutze lokalen Fallback.")
+            UPLOAD_DIR = BASE / "data" / "uploads"
+            BACKUP_DIR = BASE / "data" / "backups"
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     else:
-        DATA_DIR.mkdir(exist_ok=True)
-        UPLOAD_DIR.mkdir(exist_ok=True)
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        except PermissionError as exc:
+            print(f"WARNUNG: Render-Disk nicht beschreibbar ({exc}). Nutze lokalen Fallback.")
+            DATA_DIR = BASE / "data"
+            DB = DATA_DIR / "auftraege.db"
+            UPLOAD_DIR = DATA_DIR / "uploads"
+            BACKUP_DIR = DATA_DIR / "backups"
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     db = get_db()
     db.executescript(
         """
