@@ -53,6 +53,53 @@ def main():
         portal.app.config["TESTING"] = True
         portal.init_db()
 
+        gutachten_text = """
+        Schadensgutachten
+        Schadensfeststellung
+        Hauptbeschädigungsbereich
+        Schadensbeschreibung
+        Durch den Anstoß im Heckbereich rechts wurden die beiden unteren Stoßfängerteile stark eingedrückt.
+        Die Heckklappenblende rechts unten wurde gestaucht und verschrammt.
+        Vorschäden
+        Unreparierte Vorschäden
+        An dem Fahrzeug wurden folgende unreparierte Vorschäden festgestellt:
+        Tür hinten links etwas verschrammt
+        DEKRA-Nr: TEST
+        Seite 5 von 7
+        Instandsetzung
+        ARB.POS.NR/ INSTANDSETZUNGS-/EINZEL-/VERBUNDARBEITEN AW
+        REIFEN 235/55 R19 FELGE 7.5 J X 19 ALU NOTRAD 18 X 4 T
+        NA02R0 STOSSFAENGER H ERSETZEN 9 148.50
+        2581 STOSSFAENGER H NEUTEILLACK ST K1R 9
+        """
+        gutachten_felder = portal.parse_document_fields(gutachten_text, "schaden-gutachten.pdf")
+        gutachten_analyse = portal.normalize_document_text(gutachten_felder.get("analyse_text"))
+        check(
+            "Gutachten ignoriert Vorschaden",
+            "tuer hinten links" not in gutachten_analyse,
+            gutachten_felder.get("analyse_text"),
+        )
+        check(
+            "Gutachten erkennt aktuellen Heckschaden",
+            "stossstange hinten" in gutachten_analyse,
+            gutachten_felder.get("analyse_text"),
+        )
+        gutachten_mit_ki = portal.merge_document_fields(
+            {
+                "analyse_text": "Tür hinten links lackieren, Stoßstange hinten lackieren",
+                "bauteile_override": "Tür hinten links\nStoßstange hinten",
+                "analyse_confidence": 0.9,
+            },
+            gutachten_felder,
+        )
+        gutachten_ki_analyse = portal.normalize_document_text(gutachten_mit_ki.get("analyse_text"))
+        check(
+            "KI-Ergebnis wird um Vorschaden bereinigt",
+            "tuer hinten links" not in gutachten_ki_analyse
+            and "stossstange hinten" in gutachten_ki_analyse,
+            gutachten_mit_ki.get("analyse_text"),
+        )
+
         autohaus = portal.get_autohaus_by_slug("kaesmann")
         check("Autohaus Käsmann vorhanden", bool(autohaus))
 

@@ -552,6 +552,32 @@ OCR_TABLE_PART_LABEL_PATTERNS = (
     r"^lackstift$",
 )
 
+PREVIOUS_DAMAGE_SECTION_START_PATTERNS = (
+    r"^v\s*orsch(?:a|ae)den?$",
+    r"^unreparierte?\s+v\s*orsch(?:a|ae)den?",
+    r"^reparierte?\s+v\s*orsch(?:a|ae)den?",
+    r"^bild\s+\d+\s*:?\s*v\s*orsch(?:a|ae)d",
+)
+
+PREVIOUS_DAMAGE_SECTION_END_PATTERNS = (
+    r"^dekra[-\s]*nr",
+    r"^seite\s+\d+",
+    r"^instandsetzung$",
+    r"^hinweise\s+zum\s+reparaturweg",
+    r"^reparaturauftrag$",
+    r"^reparaturkosten$",
+    r"^schadenkalkulation",
+)
+
+NON_WORK_POSITION_LINE_PATTERNS = (
+    r"^arb[.\s]*pos[.\s]*nr",
+    r"^instandsetzung$",
+    r"^schadenkalkulation\s+nr",
+    r"^reifen\b.*\bfelge\b.*\bnotrad\b",
+    r"^gesamtsumme\s+lackierung",
+    r"^summe\s+lackierung",
+)
+
 RAPID_OCR_ENGINE = None
 TESSERACT_CMD = shutil.which("tesseract")
 
@@ -1018,6 +1044,7 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
             "- Bei Lackierauftrag-Formularen sind Felder wie Typ, FG-Nr, Amtl. Kennzeichen, Auftrags-Nr, Fertig bis und angekreuzte Teile wichtig.",
             "- Bei handschriftlich erledigten Positionen diese in erledigte_bauteile aufnehmen und NICHT in offene_bauteile.",
             "- In offene_bauteile nur Positionen aufnehmen, die noch fuer unsere Werkstatt relevant sind.",
+            "- Vorschaden, Vorschäden, Altschaden oder unreparierte Vorschäden sind keine aktuelle Reparatur: niemals in offene_bauteile, kurzanalyse oder lesefassung aufnehmen.",
             "- Sichtbare Werte immer eintragen, auch wenn sie unsicher sind.",
             "- Wenn ein Wert unsicher ist, den erkannten Wert trotzdem eintragen, needs_review auf true setzen und review_reason mit 'Bitte überprüfen' beginnen.",
             "- Datumsformat immer TT.MM.JJJJ.",
@@ -1388,6 +1415,58 @@ def remove_less_specific_part_labels(parts):
             continue
         result.append(part)
     return result
+
+
+def extract_previous_damage_parts(text):
+    parts = []
+    in_previous_damage = False
+    for line in [clean_text(line) for line in clean_text(text).splitlines() if clean_text(line)]:
+        normalized_line = normalize_document_text(line)
+        if starts_previous_damage_section(normalized_line):
+            in_previous_damage = True
+            continue
+        if not in_previous_damage:
+            continue
+        if ends_previous_damage_section(normalized_line):
+            in_previous_damage = False
+            continue
+        part = detect_line_item_part(normalized_line)
+        if part:
+            parts.append(part)
+    return remove_less_specific_part_labels(list(dict.fromkeys(parts)))
+
+
+def part_mentioned_in_text(text, part):
+    normalized_text = normalize_document_text(text)
+    normalized_part = normalize_document_text(part)
+    if not normalized_text or not normalized_part:
+        return False
+    return normalized_part in normalized_text or matches_any_pattern(
+        get_part_patterns(part),
+        normalized_text,
+        normalized_text,
+    )
+
+
+def remove_previous_damage_fragments(value, previous_parts, keep_text=""):
+    fragments = [
+        compact_whitespace(fragment)
+        for fragment in re.split(r"[\n;,]+", clean_text(value))
+        if clean_text(fragment)
+    ]
+    if not fragments:
+        return clean_text(value)
+
+    kept = []
+    for fragment in fragments:
+        is_previous_only = any(
+            part_mentioned_in_text(fragment, part)
+            and not part_mentioned_in_text(keep_text, part)
+            for part in previous_parts
+        )
+        if not is_previous_only:
+            kept.append(fragment)
+    return ", ".join(dict.fromkeys(kept))[:220]
 
 
 def build_customer_part_summaries(auftrag):
@@ -1974,6 +2053,8 @@ def extract_damage_entries(lines, doc_type=""):
     seen = set()
     for line in merge_damage_lines(lines):
         normalized_line = normalize_document_text(line)
+        if is_previous_damage_marker(normalized_line):
+            continue
         if "beschaedigung" not in normalized_line and "schaden" not in normalized_line:
             continue
         teil = detect_ocr_part(normalized_line)
@@ -1998,6 +2079,36 @@ def looks_like_work_position(normalized_line):
             r"beaufschlagt|smart\s*repair|smart\s*rep|\bsr\b",
             normalized_line,
         )
+    )
+
+
+def is_previous_damage_marker(normalized_line):
+    return bool(
+        re.search(
+            r"\bv\s*orsch(?:a|ae)d[a-z]*|unreparierte?\s+v\s*orsch|alt\s*schad",
+            normalized_line,
+        )
+    )
+
+
+def starts_previous_damage_section(normalized_line):
+    return any(
+        re.search(pattern, normalized_line)
+        for pattern in PREVIOUS_DAMAGE_SECTION_START_PATTERNS
+    )
+
+
+def ends_previous_damage_section(normalized_line):
+    return any(
+        re.search(pattern, normalized_line)
+        for pattern in PREVIOUS_DAMAGE_SECTION_END_PATTERNS
+    )
+
+
+def is_non_work_position_line(normalized_line):
+    return any(
+        re.search(pattern, normalized_line)
+        for pattern in NON_WORK_POSITION_LINE_PATTERNS
     )
 
 
@@ -2027,14 +2138,31 @@ def select_relevant_position_lines(text, doc_type=""):
         relevant = []
         in_damage = False
         in_calc = False
+        in_previous_damage = False
         for line in lines:
             normalized_line = normalize_document_text(line)
+            if starts_previous_damage_section(normalized_line):
+                in_previous_damage = True
+                in_damage = False
+                continue
+            if in_previous_damage:
+                if ends_previous_damage_section(normalized_line):
+                    in_previous_damage = False
+                    if re.search(r"^instandsetzung$|^arb[.\s]*pos[.\s]*nr", normalized_line):
+                        in_calc = True
+                continue
+            if is_previous_damage_marker(normalized_line):
+                continue
             if "schadensbeschreibung" in normalized_line or "hauptbeschaedigungsbereich" in normalized_line:
                 in_damage = True
-            if re.search(r"^instandsetzung$|arb\.pos\.nr", normalized_line):
+                continue
+            if re.search(r"^instandsetzung$|^arb[.\s]*pos[.\s]*nr", normalized_line):
                 in_calc = True
+                continue
             if re.search(r"^e\s*r\s*s\s*a\s*t\s*z", normalized_line):
                 in_calc = False
+            if is_non_work_position_line(normalized_line):
+                continue
             if in_damage and (
                 looks_like_work_position(normalized_line)
                 or detect_line_item_part(normalized_line)
@@ -2103,7 +2231,11 @@ def extract_position_entries(text, doc_type=""):
         seen.add((eintrag["teil"], eintrag["bemerkung"].lower(), eintrag["aktion"]))
     for index, line in enumerate(lines):
         normalized_line = normalize_document_text(line)
-        if is_ignored_ocr_line(normalized_line):
+        if (
+            is_ignored_ocr_line(normalized_line)
+            or is_previous_damage_marker(normalized_line)
+            or is_non_work_position_line(normalized_line)
+        ):
             continue
         teil = detect_line_item_part(normalized_line)
         if not teil:
@@ -2421,6 +2553,7 @@ def parse_document_fields(text, filename=""):
     normalized = normalize_document_text(cleaned)
     doc_type = classify_document(cleaned, filename)
     positionen = extract_position_entries(cleaned, doc_type)
+    previous_damage_parts = extract_previous_damage_parts(cleaned)
     lines = [clean_text(line) for line in cleaned.splitlines() if clean_text(line)]
     if doc_type == "Lackierauftrag":
         positionen = merge_position_entries(
@@ -2676,6 +2809,7 @@ def parse_document_fields(text, filename=""):
         "rep_max_kosten": rep_max_kosten,
         "analyse_text": analyse,
         "beschreibung": ". ".join(part for part in details if part)[:500],
+        "_previous_damage_parts": "\n".join(previous_damage_parts),
     }
 
 
@@ -3617,6 +3751,24 @@ def looks_like_specific_work_text(value):
 def merge_document_fields(ai_fields, local_fields):
     fields = dict(ai_fields or {})
     review_notes = []
+    previous_damage_parts = parse_manual_parts((local_fields or {}).get("_previous_damage_parts"))
+    local_analysis = clean_text((local_fields or {}).get("analyse_text"))
+    if previous_damage_parts:
+        cleaned_analysis = remove_previous_damage_fragments(
+            fields.get("analyse_text"),
+            previous_damage_parts,
+            local_analysis,
+        )
+        cleaned_bauteile = remove_previous_damage_fragments(
+            fields.get("bauteile_override"),
+            previous_damage_parts,
+            local_analysis,
+        )
+        if clean_text(fields.get("analyse_text")) and cleaned_analysis != clean_text(fields.get("analyse_text")):
+            fields["analyse_text"] = cleaned_analysis
+            review_notes.append("Vorschäden aus dem Gutachten wurden nicht als aktuelle Arbeit übernommen.")
+        if clean_text(fields.get("bauteile_override")) and cleaned_bauteile != clean_text(fields.get("bauteile_override")):
+            fields["bauteile_override"] = cleaned_bauteile
     for key, label, is_date in (
         ("fahrzeug", "Fahrzeugtyp", False),
         ("fin_nummer", "FIN", False),
@@ -3635,7 +3787,6 @@ def merge_document_fields(ai_fields, local_fields):
         if value and not clean_text(fields.get(key)):
             fields[key] = value
 
-    local_analysis = clean_text((local_fields or {}).get("analyse_text"))
     ai_analysis = clean_text(fields.get("analyse_text"))
     if local_analysis and looks_like_specific_work_text(local_analysis):
         ai_is_generic = (
