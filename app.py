@@ -175,6 +175,23 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 USE_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
 if USE_POSTGRES:
     UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", "/tmp/kundenstatus-uploads"))
+
+
+def env_flag(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name, default):
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+RUNNING_ON_RENDER = bool(os.environ.get("RENDER") or USE_POSTGRES)
 DEFAULT_ADMIN_PASS = "gaertner2026"
 DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
@@ -195,7 +212,11 @@ OPENAI_API_URL = os.environ.get(
 )
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_DOC_AI_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
-GOOGLE_DOC_AI_TIMEOUT = 45
+GOOGLE_DOC_AI_TIMEOUT = env_int(
+    "DOCUMENT_ANALYSIS_TIMEOUT_SECONDS",
+    20 if RUNNING_ON_RENDER else 45,
+)
+ENABLE_LOCAL_OCR = env_flag("ENABLE_LOCAL_OCR", not RUNNING_ON_RENDER)
 OPENAI_VISION_MAX_PAGES = 4
 OPENAI_VISION_MAX_IMAGE_SIDE = 1800
 CSRF_FIELD_NAME = "csrf_token"
@@ -1002,6 +1023,8 @@ def encode_openai_image_data_url(image_bytes, mime_type):
 
 def prepare_openai_image_bytes(path):
     raw = pathlib.Path(path).read_bytes()
+    if not ENABLE_LOCAL_OCR:
+        return raw, mimetypes.guess_type(str(path))[0] or "image/jpeg"
     cv2_module = get_cv2()
     np_module = get_numpy()
     if cv2_module is None or np_module is None:
@@ -1831,6 +1854,8 @@ def normalize_document_text(text):
 
 def get_rapid_ocr():
     global RAPID_OCR_ENGINE
+    if not ENABLE_LOCAL_OCR:
+        return None
     rapid_ocr_class = get_rapidocr_class()
     if RAPID_OCR_ENGINE is None and rapid_ocr_class is not None:
         RAPID_OCR_ENGINE = rapid_ocr_class()
@@ -1909,6 +1934,8 @@ def extract_ocr_lines(source):
 
 
 def extract_image_text(path):
+    if not ENABLE_LOCAL_OCR:
+        return ""
     best_lines = extract_ocr_lines(str(path))
 
     pytesseract_module = get_pytesseract()
@@ -1948,9 +1975,9 @@ def extract_pdf_text(path):
     needs_ocr = len(compact_whitespace(direct_text)) < 1200
 
     # Gescannte PDFs und bildlastige PDFs zusätzlich per OCR lesen.
-    fitz_module = get_fitz() if needs_ocr else None
-    cv2_module = get_cv2() if needs_ocr else None
-    np_module = get_numpy() if needs_ocr else None
+    fitz_module = get_fitz() if needs_ocr and ENABLE_LOCAL_OCR else None
+    cv2_module = get_cv2() if needs_ocr and ENABLE_LOCAL_OCR else None
+    np_module = get_numpy() if needs_ocr and ENABLE_LOCAL_OCR else None
     if needs_ocr and fitz_module is not None and cv2_module is not None and np_module is not None:
         try:
             doc = fitz_module.open(str(path))
