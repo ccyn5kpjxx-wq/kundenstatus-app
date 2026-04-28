@@ -23,6 +23,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import tempfile
 import time
 import uuid
 import zipfile
@@ -5126,6 +5127,67 @@ def dashboard():
         statusliste=STATUSLISTE,
         public_base_url=get_public_base_url(),
     )
+
+
+@app.route("/admin/daten-import", methods=["POST"])
+@admin_required
+def admin_daten_import():
+    if USE_POSTGRES:
+        flash("Datenimport per SQLite-Paket ist bei Postgres nicht verfügbar.", "warning")
+        return redirect(url_for("dashboard"))
+
+    paket = request.files.get("datenpaket")
+    if not paket or not paket.filename:
+        flash("Bitte ein Datenpaket auswählen.", "warning")
+        return redirect(url_for("dashboard"))
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = pathlib.Path(tmp_dir)
+            archive_path = tmp_path / "datenpaket.zip"
+            paket.save(archive_path)
+
+            with zipfile.ZipFile(archive_path) as archive:
+                names = set(archive.namelist())
+                if "auftraege.db" not in names:
+                    flash("Datenpaket ungültig: auftraege.db fehlt.", "danger")
+                    return redirect(url_for("dashboard"))
+
+                imported_db = tmp_path / "auftraege.db"
+                with archive.open("auftraege.db") as source, imported_db.open("wb") as target:
+                    shutil.copyfileobj(source, target)
+
+                probe = sqlite3.connect(imported_db)
+                try:
+                    probe.execute("SELECT COUNT(*) FROM auftraege").fetchone()
+                    probe.execute("SELECT COUNT(*) FROM autohaeuser").fetchone()
+                finally:
+                    probe.close()
+
+                DATA_DIR.mkdir(exist_ok=True)
+                UPLOAD_DIR.mkdir(exist_ok=True)
+                backup_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+                if DB.exists():
+                    shutil.copy2(DB, DATA_DIR / f"auftraege.backup-{backup_suffix}.db")
+                shutil.copy2(imported_db, DB)
+
+                for existing in UPLOAD_DIR.iterdir():
+                    if existing.is_file():
+                        existing.unlink()
+
+                for name in names:
+                    if not name.startswith("uploads/") or name.endswith("/"):
+                        continue
+                    stored_name = pathlib.Path(name).name
+                    if not stored_name:
+                        continue
+                    with archive.open(name) as source, (UPLOAD_DIR / stored_name).open("wb") as target:
+                        shutil.copyfileobj(source, target)
+
+        flash("Daten wurden importiert. Fahrzeuge und Dateien sind jetzt auf diesem Server verfügbar.", "success")
+    except Exception as exc:
+        flash(f"Datenimport fehlgeschlagen: {clean_text(str(exc))[:300]}", "danger")
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/admin/autohaus/neu", methods=["POST"])

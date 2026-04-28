@@ -25,6 +25,28 @@
     <div class="d-flex gap-2 flex-wrap">
       <a href="{{ url_for('neuer_auftrag') }}" class="btn btn-brand btn-lg">Fahrzeug anlegen</a>
       <a href="{{ url_for('partner_login') }}" target="_blank" class="btn btn-soft btn-lg">Autohaus-Login öffnen</a>
+      <button type="button" class="btn btn-soft btn-lg" data-bs-toggle="modal" data-bs-target="#datenImportModal">Daten importieren</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="datenImportModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="POST" action="{{ url_for('admin_daten_import') }}" enctype="multipart/form-data">
+        <div class="modal-header">
+          <h5 class="modal-title">Daten importieren</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted">Importiert ein lokal erstelltes Datenpaket mit Fahrzeugen und Upload-Dateien.</p>
+          <input type="file" name="datenpaket" class="form-control" accept=".zip" required>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-soft" data-bs-dismiss="modal">Abbrechen</button>
+          <button type="submit" class="btn btn-brand">Import starten</button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
