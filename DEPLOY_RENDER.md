@@ -27,6 +27,8 @@ Für stabilen Betrieb gehört die App auf Render:
 - Datenbank: Render Postgres über `DATABASE_URL`
 - Uploads/Backups: Render Disk unter `/var/data`
 - Öffentlicher Link: feste Render-Adresse, z. B. `https://kundenstatus-app.onrender.com`
+- Live darf nicht mehr dauerhaft mit SQLite laufen. `REQUIRE_POSTGRES_ON_RENDER=true`
+  sorgt dafür, dass eine fehlende Postgres-Verbindung sofort auffällt.
 
 ## Render einrichten
 
@@ -48,12 +50,42 @@ gunicorn app:app
 ```text
 ADMIN_PASS=<eigenes-sicheres-admin-passwort>
 FLASK_SECRET_KEY=<langer-zufallswert>
+DATABASE_URL=<Internal Database URL der Render-Postgres-Datenbank>
+REQUIRE_POSTGRES_ON_RENDER=true
 OPENAI_API_KEY=<optional>
 OPENAI_EXTRACTION_MODEL=gpt-4o
 UPLOAD_DIR=/var/data/uploads
 ```
 
-Wichtig: Im `render.yaml` ist eine Postgres-Datenbank vorbereitet. `DATABASE_URL` wird daraus automatisch gesetzt.
+Wichtig: Wenn Render über das Blueprint-`render.yaml` angelegt wird, wird die
+Postgres-Datenbank vorbereitet und `DATABASE_URL` automatisch gesetzt. Bei einem
+bereits manuell angelegten Web Service muss die Postgres-Datenbank in Render
+manuell erstellt und die interne `DATABASE_URL` als Environment Variable im
+Web Service eingetragen werden.
+
+## Bestehende Live-Daten von SQLite nach Postgres umziehen
+
+Wenn die Live-App bisher mit SQLite gelaufen ist:
+
+1. Vor dem Umschalten im Admin auf `Backup herunterladen` klicken.
+2. Die ZIP-Datei lokal aufheben. Sie enthält `auftraege.db` und `uploads/`.
+3. In Render eine PostgreSQL-Datenbank erstellen oder die Blueprint-Datenbank
+   `kundenstatus-db` nutzen.
+4. Im Web Service setzen:
+
+```text
+DATABASE_URL=<Internal Database URL>
+REQUIRE_POSTGRES_ON_RENDER=true
+```
+
+5. `Manual Deploy` -> `Deploy latest commit` ausführen.
+6. Nach dem Start im Admin prüfen: Die Karte `Datenbank` muss `Postgres aktiv`
+   anzeigen.
+7. Im Admin `Daten importieren` öffnen und die Backup-ZIP hochladen.
+
+Die Upload-Dateien bleiben auf der Render Disk unter `/var/data/uploads`. Der
+Import schreibt die Fahrzeug-/Autohaus-/Chat-/Dateidaten in Postgres und ersetzt
+die Upload-Dateien mit dem Inhalt aus der ZIP.
 
 ## Lokale Daten nach Render übernehmen
 

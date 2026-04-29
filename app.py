@@ -199,6 +199,12 @@ def env_int(name, default):
 
 
 RUNNING_ON_RENDER = bool(os.environ.get("RENDER") or USE_POSTGRES)
+REQUIRE_POSTGRES_ON_RENDER = env_flag("REQUIRE_POSTGRES_ON_RENDER", False)
+if RUNNING_ON_RENDER and REQUIRE_POSTGRES_ON_RENDER and not USE_POSTGRES:
+    raise RuntimeError(
+        "Render ist auf Postgres festgelegt, aber DATABASE_URL fehlt. "
+        "Bitte in Render eine PostgreSQL-Datenbank verbinden und DATABASE_URL setzen."
+    )
 SQLITE_BUSY_TIMEOUT_SECONDS = max(
     5,
     env_int("SQLITE_BUSY_TIMEOUT_SECONDS", 60 if RUNNING_ON_RENDER else 15),
@@ -882,7 +888,37 @@ def get_startup_warnings():
         warnings.append(
             "FLASK_SECRET_KEY ist nicht sicher gesetzt. Bitte in .env.local einen langen Zufallswert eintragen."
         )
+    if RUNNING_ON_RENDER and not USE_POSTGRES:
+        warnings.append(
+            "Live läuft noch mit SQLite. Für stabilen Betrieb bitte Render PostgreSQL verbinden und DATABASE_URL setzen."
+        )
     return warnings
+
+
+def get_database_status():
+    engine = "postgres" if USE_POSTGRES else "sqlite"
+    if USE_POSTGRES:
+        label = "Postgres aktiv"
+        message = "Render nutzt die stabile PostgreSQL-Datenbank."
+        detail = "DATABASE_URL ist gesetzt."
+    else:
+        label = "SQLite aktiv"
+        if RUNNING_ON_RENDER:
+            message = "Live nutzt noch SQLite. Das kann bei gleichzeitigen Zugriffen zu Sperren führen."
+            detail = f"Datenbankdatei: {DB}"
+        else:
+            message = "Lokale Entwicklung nutzt SQLite."
+            detail = f"Datenbankdatei: {DB}"
+    return {
+        "engine": engine,
+        "label": label,
+        "message": message,
+        "detail": detail,
+        "stable": USE_POSTGRES or not RUNNING_ON_RENDER,
+        "running_on_render": RUNNING_ON_RENDER,
+        "database_url_present": bool(DATABASE_URL),
+        "require_postgres": REQUIRE_POSTGRES_ON_RENDER,
+    }
 
 
 def clean_text(value):
@@ -3436,7 +3472,8 @@ class PostgresConnection:
         converted_sql = convert_sqlite_sql_to_postgres(sql)
         params = tuple(params or ())
         lowered = converted_sql.lstrip().lower()
-        inserts_with_id = lowered.startswith("insert into ") and " returning " not in lowered
+        insert_table = get_insert_table_name(converted_sql)
+        inserts_with_id = bool(insert_table and insert_table not in {"app_settings"} and " returning " not in lowered)
         if inserts_with_id:
             converted_sql = f"{converted_sql} RETURNING id"
 
@@ -3473,6 +3510,11 @@ class PostgresConnection:
 
 def split_sql_script(script):
     return [part.strip() for part in script.split(";") if part.strip()]
+
+
+def get_insert_table_name(sql):
+    match = re.match(r"\s*insert\s+into\s+\"?([a-zA-Z_][\w]*)\"?", sql, re.IGNORECASE)
+    return match.group(1).lower() if match else ""
 
 
 def convert_sqlite_sql_to_postgres(sql):
@@ -3679,6 +3721,7 @@ def schedule_change_backup(reason="change"):
 
 DATA_CHANGE_ENDPOINT_EXCLUDES = {
     "admin_backup_sofort",
+    "admin_backup_download",
     "login",
     "partner_login",
     "partner_login_key",
@@ -6354,6 +6397,7 @@ def dashboard():
         autohaeuser=list_autohaeuser(),
         cockpit=dashboard_daten(auftraege),
         ki_status=get_ai_status(),
+        database_status=get_database_status(),
         startup_warnings=get_startup_warnings(),
         statusliste=STATUSLISTE,
         public_base_url=get_public_base_url(),
@@ -6570,6 +6614,22 @@ def admin_backup_sofort():
     except Exception as exc:
         flash(f"Backup fehlgeschlagen: {clean_text(str(exc))[:300]}", "danger")
     return redirect(url_for("dashboard"))
+
+
+@app.route("/admin/backup/download", methods=["POST"])
+@admin_required
+def admin_backup_download():
+    try:
+        backup_path = create_backup_package("manual-download")
+    except Exception as exc:
+        flash(f"Backup fehlgeschlagen: {clean_text(str(exc))[:300]}", "danger")
+        return redirect(url_for("dashboard"))
+    return send_file(
+        backup_path,
+        download_name=backup_path.name,
+        mimetype="application/zip",
+        as_attachment=True,
+    )
 
 
 @app.route("/admin/autohaus/neu", methods=["POST"])

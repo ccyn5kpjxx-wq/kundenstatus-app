@@ -32,6 +32,10 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-soft btn-lg">Backup jetzt erstellen</button>
       </form>
+      <form method="POST" action="{{ url_for('admin_backup_download') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-soft btn-lg">Backup herunterladen</button>
+      </form>
       <button type="button" class="btn btn-soft btn-lg" data-bs-toggle="modal" data-bs-target="#datenImportModal">Daten importieren</button>
     </div>
   </div>
@@ -66,6 +70,28 @@
   {% endfor %}
 </div>
 {% endif %}
+
+<div class="page-card p-4 mb-4 border {% if database_status['stable'] %}border-success-subtle{% else %}border-danger-subtle{% endif %}">
+  <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
+    <div>
+      <div class="badge-soft mb-2">Datenbank</div>
+      <h4 class="mb-1">{{ database_status['label'] }}</h4>
+      <p class="mb-1 text-muted">{{ database_status['message'] }}</p>
+      <div class="small text-muted">{{ database_status['detail'] }}</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <span class="badge {% if database_status['engine'] == 'postgres' %}text-bg-success{% else %}text-bg-warning{% endif %}">
+        {{ database_status['engine']|upper }}
+      </span>
+      <span class="badge {% if database_status['database_url_present'] %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+        DATABASE_URL {{ 'gesetzt' if database_status['database_url_present'] else 'fehlt' }}
+      </span>
+      {% if database_status['running_on_render'] %}
+      <span class="badge text-bg-primary">Render</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
 
 <div class="page-card p-4 mb-4">
   <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">

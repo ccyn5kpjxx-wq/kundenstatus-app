@@ -17,10 +17,14 @@ services:
         fromDatabase:
           name: kundenstatus-db
           property: connectionString
+      - key: REQUIRE_POSTGRES_ON_RENDER
+        value: true
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_EXTRACTION_MODEL
         value: gpt-4o
+      - key: AUTO_BACKUP_ON_STARTUP
+        value: false
       - key: DATA_DIR
         value: /var/data
       - key: SQLITE_DB_PATH

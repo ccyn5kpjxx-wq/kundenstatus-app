@@ -4,6 +4,7 @@ import json
 import shutil
 import sys
 import tempfile
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,17 +40,24 @@ def with_csrf(client, data=None):
 def main():
     original_db = portal.DB
     original_upload_dir = portal.UPLOAD_DIR
+    original_backup_dir = portal.BACKUP_DIR
+    original_deleted_upload_dir = portal.DELETED_UPLOAD_DIR
     if not original_db.exists():
         raise SystemExit(f"Datenbank nicht gefunden: {original_db}")
 
     with tempfile.TemporaryDirectory() as tmp:
         test_db = Path(tmp) / "auftraege-test.db"
         test_uploads = Path(tmp) / "uploads"
+        test_backups = Path(tmp) / "backups"
+        test_deleted_uploads = Path(tmp) / "deleted_uploads"
         test_uploads.mkdir()
+        test_backups.mkdir()
         shutil.copy2(original_db, test_db)
 
         portal.DB = test_db
         portal.UPLOAD_DIR = test_uploads
+        portal.BACKUP_DIR = test_backups
+        portal.DELETED_UPLOAD_DIR = test_deleted_uploads
         portal.app.config["TESTING"] = True
         portal.init_db()
         db = portal.get_db()
@@ -142,6 +150,21 @@ def main():
         for label, client, url in route_checks:
             response = client.get(url)
             check(label, response.status_code == 200, f"Status {response.status_code}")
+
+        response = admin.post(
+            "/admin/backup/download",
+            data=with_csrf(admin),
+            follow_redirects=False,
+        )
+        check("Admin kann Backup-ZIP herunterladen", response.status_code == 200, f"Status {response.status_code}")
+        backup_bytes = BytesIO(response.get_data())
+        with zipfile.ZipFile(backup_bytes) as archive:
+            backup_names = set(archive.namelist())
+        check(
+            "Backup-ZIP enthält Datenbank und JSON-Export",
+            "backup.json" in backup_names and "auftraege.db" in backup_names,
+            str(sorted(backup_names)[:5]),
+        )
 
         response = partner.post(
             "/partner/kaesmann/angebot/neu",
@@ -617,6 +640,8 @@ def main():
 
     portal.DB = original_db
     portal.UPLOAD_DIR = original_upload_dir
+    portal.BACKUP_DIR = original_backup_dir
+    portal.DELETED_UPLOAD_DIR = original_deleted_upload_dir
     print("Flow-Test erfolgreich.")
 
 
