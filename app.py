@@ -1022,7 +1022,7 @@ def get_ai_config():
         and clean_text(os.environ.get("GOOGLE_DOC_AI_PROCESSOR_ID"))
     )
     openai_ready = bool(openai_api_key)
-    ready = google_ready and openai_ready
+    ready = google_ready or openai_ready
     return {
         "ready": ready,
         "google_ready": google_ready,
