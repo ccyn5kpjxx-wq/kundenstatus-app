@@ -199,6 +199,10 @@ def env_int(name, default):
 
 
 RUNNING_ON_RENDER = bool(os.environ.get("RENDER") or USE_POSTGRES)
+SQLITE_BUSY_TIMEOUT_SECONDS = max(
+    5,
+    env_int("SQLITE_BUSY_TIMEOUT_SECONDS", 60 if RUNNING_ON_RENDER else 15),
+)
 DEFAULT_ADMIN_PASS = "gaertner2026"
 DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
@@ -228,6 +232,7 @@ DELETED_UPLOAD_DIR = pathlib.Path(
 AUTO_BACKUP_ENABLED = env_flag("AUTO_BACKUP_ENABLED", True)
 AUTO_BACKUP_INTERVAL_SECONDS = max(60, env_int("AUTO_BACKUP_INTERVAL_SECONDS", 3600))
 AUTO_BACKUP_KEEP = max(1, env_int("AUTO_BACKUP_KEEP", 168))
+AUTO_BACKUP_ON_STARTUP = env_flag("AUTO_BACKUP_ON_STARTUP", False)
 AUTO_CHANGE_BACKUP_ENABLED = env_flag("AUTO_CHANGE_BACKUP_ENABLED", True)
 AUTO_CHANGE_BACKUP_DELAY_SECONDS = max(1, env_int("AUTO_CHANGE_BACKUP_DELAY_SECONDS", 3))
 OPENAI_EXTRACTION_MODEL = os.environ.get("OPENAI_EXTRACTION_MODEL", "gpt-4o")
@@ -249,6 +254,8 @@ OPENAI_VISION_MAX_PAGES = 4
 OPENAI_VISION_MAX_IMAGE_SIDE = 1800
 OPENAI_TRANSIENT_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 CSRF_FIELD_NAME = "csrf_token"
+_sqlite_wal_configured = False
+_sqlite_wal_lock = threading.Lock()
 
 GOOGLE_ACCESS_TOKEN = {"token": "", "expires_at": 0}
 
@@ -3366,9 +3373,32 @@ def get_db():
                 g.db_connection = db
             return db
         return PostgresConnection(psycopg.connect(DATABASE_URL))
-    conn = sqlite3.connect(DB)
+    conn = sqlite3.connect(DB, timeout=SQLITE_BUSY_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
+    configure_sqlite_connection(conn)
     return conn
+
+
+def configure_sqlite_connection(conn):
+    global _sqlite_wal_configured
+    busy_timeout_ms = SQLITE_BUSY_TIMEOUT_SECONDS * 1000
+    try:
+        conn.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.Error:
+        return
+    if _sqlite_wal_configured:
+        return
+    with _sqlite_wal_lock:
+        if _sqlite_wal_configured:
+            return
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA wal_autocheckpoint=1000")
+            _sqlite_wal_configured = True
+        except sqlite3.Error as exc:
+            print(f"WARNUNG: SQLite WAL konnte nicht aktiviert werden: {exc}")
 
 
 class DbRow(dict):
@@ -3572,9 +3602,10 @@ def create_backup_package(reason="auto"):
                     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
                         tmp_path = pathlib.Path(tmp.name)
                     try:
-                        sqlite_source = sqlite3.connect(DB)
-                        sqlite_target = sqlite3.connect(tmp_path)
+                        sqlite_source = sqlite3.connect(DB, timeout=SQLITE_BUSY_TIMEOUT_SECONDS)
+                        sqlite_target = sqlite3.connect(tmp_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS)
                         try:
+                            configure_sqlite_connection(sqlite_source)
                             sqlite_source.backup(sqlite_target)
                         finally:
                             sqlite_target.close()
@@ -3697,6 +3728,8 @@ def prune_old_backups():
 
 
 def hourly_backup_worker():
+    if not AUTO_BACKUP_ON_STARTUP:
+        time.sleep(AUTO_BACKUP_INTERVAL_SECONDS)
     while True:
         try:
             create_backup_package("auto")

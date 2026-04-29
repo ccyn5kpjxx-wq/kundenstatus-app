@@ -52,6 +52,20 @@ def main():
         portal.UPLOAD_DIR = test_uploads
         portal.app.config["TESTING"] = True
         portal.init_db()
+        db = portal.get_db()
+        busy_timeout = db.execute("PRAGMA busy_timeout").fetchone()[0]
+        journal_mode = db.execute("PRAGMA journal_mode").fetchone()[0]
+        db.close()
+        check(
+            "SQLite wartet bei kurzer Datenbanksperre",
+            busy_timeout >= portal.SQLITE_BUSY_TIMEOUT_SECONDS * 1000,
+            str(busy_timeout),
+        )
+        check(
+            "SQLite WAL-Modus aktiv",
+            str(journal_mode).lower() == "wal",
+            str(journal_mode),
+        )
 
         gutachten_text = """
         Schadensgutachten
@@ -293,12 +307,15 @@ def main():
             and "zusätzlich kleine Beilackierung" in partner_html,
             f"Status {response.status_code}",
         )
-        check(
-            "Partner sieht Angebotsbild mit Öffnen-Link",
+        partner_hat_angebotsbild = (
             "schadenfoto.png" in partner_html
             and f"/partner/kaesmann/datei/" in partner_html
-            and "Original öffnen" in partner_html,
-            "Angebotsbild fehlt",
+            and "Original öffnen" in partner_html
+        )
+        check(
+            "Partner sieht Angebotsbild mit Öffnen-Link",
+            partner_hat_angebotsbild,
+            "" if partner_hat_angebotsbild else "Angebotsbild fehlt",
         )
 
         response = partner.post(
