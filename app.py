@@ -901,6 +901,60 @@ def get_admin_pass():
     return clean_secret_value(os.environ.get("ADMIN_PASS")) or clean_secret_value(ADMIN_PASS) or DEFAULT_ADMIN_PASS
 
 
+def get_app_setting(key, default=""):
+    key = clean_text(key)
+    if not key:
+        return default
+    db = None
+    try:
+        db = get_db()
+        row = db.execute(
+            "SELECT value FROM app_settings WHERE key=?",
+            (key,),
+        ).fetchone()
+        if row:
+            return clean_text(row["value"])
+    except Exception:
+        return default
+    finally:
+        if db is not None:
+            db.close()
+    return default
+
+
+def set_app_setting(key, value):
+    key = clean_text(key)
+    if not key:
+        return
+    db = get_db()
+    now = now_str()
+    try:
+        existing = db.execute(
+            "SELECT key FROM app_settings WHERE key=?",
+            (key,),
+        ).fetchone()
+        if existing:
+            db.execute(
+                "UPDATE app_settings SET value=?, updated_at=? WHERE key=?",
+                (clean_text(value), now, key),
+            )
+        else:
+            db.execute(
+                "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)",
+                (key, clean_text(value), now),
+            )
+        db.commit()
+    finally:
+        db.close()
+
+
+def get_openai_api_key():
+    return clean_secret_value(
+        os.environ.get("OPENAI_API_KEY")
+        or get_app_setting("OPENAI_API_KEY")
+    )
+
+
 def admin_password_matches(value):
     submitted = clean_secret_value(value)
     candidates = {
@@ -955,6 +1009,7 @@ def resolve_config_path(value):
 
 
 def get_ai_config():
+    openai_api_key = get_openai_api_key()
     service_account_path = resolve_config_path(
         os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         or os.environ.get("GOOGLE_DOC_AI_SERVICE_ACCOUNT_FILE")
@@ -966,7 +1021,7 @@ def get_ai_config():
         and clean_text(os.environ.get("GOOGLE_DOC_AI_LOCATION"))
         and clean_text(os.environ.get("GOOGLE_DOC_AI_PROCESSOR_ID"))
     )
-    openai_ready = bool(clean_text(os.environ.get("OPENAI_API_KEY")))
+    openai_ready = bool(openai_api_key)
     ready = google_ready and openai_ready
     return {
         "ready": ready,
@@ -1209,13 +1264,16 @@ def extract_openai_error_message(response):
 
 
 def post_openai_chat_completion(requests_module, payload):
+    api_key = get_openai_api_key()
+    if not api_key:
+        return None, "OpenAI ist noch nicht konfiguriert"
     last_error = ""
     for attempt in range(3):
         try:
             response = requests_module.post(
                 OPENAI_API_URL,
                 headers={
-                    "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json=payload,
@@ -3691,6 +3749,12 @@ def init_db():
     db = get_db()
     db.executescript(
         """
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key        TEXT PRIMARY KEY,
+            value      TEXT DEFAULT '',
+            updated_at TEXT DEFAULT ''
+        );
+
         CREATE TABLE IF NOT EXISTS autohaeuser (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             name         TEXT NOT NULL,
@@ -6416,6 +6480,21 @@ def admin_daten_import():
         flash(clean_text(str(exc))[:300], "danger")
     except Exception as exc:
         flash(f"Datenimport fehlgeschlagen: {clean_text(str(exc))[:300]}", "danger")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/admin/ki/openai-key", methods=["POST"])
+@admin_required
+def admin_openai_key_speichern():
+    api_key = clean_secret_value(request.form.get("openai_api_key"))
+    if not api_key:
+        flash("Bitte einen OpenAI API-Key eintragen.", "warning")
+        return redirect(url_for("dashboard"))
+    if not api_key.startswith("sk-"):
+        flash("Der OpenAI API-Key sieht ungültig aus. Bitte den Key prüfen.", "warning")
+        return redirect(url_for("dashboard"))
+    set_app_setting("OPENAI_API_KEY", api_key)
+    flash("OpenAI-Key wurde gespeichert. Neue Uploads werden jetzt mit OpenAI analysiert.", "success")
     return redirect(url_for("dashboard"))
 
 
