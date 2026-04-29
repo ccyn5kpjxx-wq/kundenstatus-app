@@ -265,9 +265,20 @@
         <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
           <div>
             <h4 class="mb-1">Erkannte Felder aus Unterlagen</h4>
-            <div class="text-muted small">Bitte prüfen Sie die Werte vor dem Absenden der Angebotsanfrage.</div>
+            <div class="text-muted small">Bitte prüfen Sie die Werte gegen die Originaldatei. Die Werkstatt prüft ebenfalls.</div>
           </div>
           <span class="badge text-bg-warning">Prüfansicht</span>
+        </div>
+        <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-3">
+          <div class="d-flex gap-2 flex-wrap">
+            <span class="badge {{ 'text-bg-success' if angebot['analyse_autohaus_geprueft'] else 'text-bg-warning' }}">Autohaus {{ 'geprüft' if angebot['analyse_autohaus_geprueft'] else 'offen' }}</span>
+            <span class="badge {{ 'text-bg-success' if angebot['analyse_werkstatt_geprueft'] else 'text-bg-warning' }}">Werkstatt {{ 'geprüft' if angebot['analyse_werkstatt_geprueft'] else 'offen' }}</span>
+          </div>
+          {% if not angebot['analyse_autohaus_geprueft'] %}
+          <form method="POST" action="{{ url_for('partner_dokumente_geprueft', slug=autohaus['slug'], auftrag_id=angebot['id']) }}">
+            <button type="submit" class="btn btn-sm btn-outline-success">Autohaus-Prüfung bestätigen</button>
+          </form>
+          {% endif %}
         </div>
         <div class="d-grid gap-3">
           {% for pruefung in dokument_pruefung %}
@@ -302,7 +313,7 @@
                     <td>{{ item['current_value'] or '—' }}</td>
                     <td>
                       <span class="badge {{ 'text-bg-success' if item['active'] else 'text-bg-warning' }}">
-                        {{ 'übernommen' if item['active'] else 'prüfen' }}
+                        {{ 'passt zum Auftrag' if item['active'] else 'Bitte prüfen' }}
                       </span>
                     </td>
                   </tr>

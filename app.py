@@ -4687,6 +4687,10 @@ def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
         return {}
 
     auftrag = dict(auftrag_row)
+    analysis_double_checked = bool(
+        int(auftrag.get("analyse_autohaus_geprueft") or 0)
+        and int(auftrag.get("analyse_werkstatt_geprueft") or 0)
+    )
     dateien = db.execute(
         """
         SELECT original_name, extrahierter_text, analyse_json, analyse_hinweis
@@ -4760,17 +4764,12 @@ def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
         prefer_documents or not clean_text(auftrag.get("beschreibung"))
     ):
         updates["beschreibung"] = erkannt["beschreibung"]
-    if "analyse_pruefen" in erkannt:
+    if "analyse_pruefen" in erkannt and not analysis_double_checked:
         updates["analyse_pruefen"] = 1 if erkannt.get("analyse_pruefen") else 0
-    if erkannt.get("analyse_hinweis"):
+    if erkannt.get("analyse_hinweis") and not analysis_double_checked:
         updates["analyse_hinweis"] = erkannt["analyse_hinweis"]
     if erkannt.get("analyse_confidence") is not None:
         updates["analyse_confidence"] = erkannt.get("analyse_confidence") or 0
-    if has_extracted_document_values(erkannt):
-        updates["analyse_autohaus_geprueft"] = 0
-        updates["analyse_werkstatt_geprueft"] = 0
-        updates["analyse_geprueft_am"] = ""
-
     if updates:
         updates["geaendert_am"] = now_str()
         assignments = ", ".join(f"{feld}=?" for feld in updates)
@@ -5103,6 +5102,11 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
     if saved_analysis_document:
         try:
             updates = apply_document_data_to_auftrag(auftrag_id, prefer_documents=False) or {}
+            reset_document_review_checks(
+                auftrag_id,
+                clean_text(updates.get("analyse_hinweis"))
+                or "Neue Unterlage hochgeladen. Bitte erkannte Werte gegen die Originaldatei prüfen.",
+            )
         except Exception as exc:
             updates = {"_analysis_error": f"Analyse konnte nicht übernommen werden: {clean_text(str(exc))[:300]}"}
         if analysis_errors and not clean_text(updates.get("_analysis_error")):
@@ -5196,6 +5200,12 @@ def reanalyze_existing_documents(auftrag_id):
     db.commit()
     db.close()
     updates = apply_document_data_to_auftrag(auftrag_id, prefer_documents=False) if count else {}
+    if count:
+        reset_document_review_checks(
+            auftrag_id,
+            clean_text(updates.get("analyse_hinweis"))
+            or "Unterlagen neu analysiert. Bitte erkannte Werte gegen die Originaldatei prüfen.",
+        )
     return count, updates
 
 

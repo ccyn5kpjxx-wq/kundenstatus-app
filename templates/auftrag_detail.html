@@ -339,9 +339,20 @@
         <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
           <div>
             <h4 class="mb-1">Erkannte Felder aus Unterlagen</h4>
-            <div class="text-muted small">Bitte mit der Originaldatei abgleichen, bevor unsichere Werte weiterverwendet werden.</div>
+            <div class="text-muted small">Autohaus und Werkstatt prüfen die Werte jeweils einmal gegen die Originaldatei.</div>
           </div>
           <span class="badge text-bg-warning">Prüfansicht</span>
+        </div>
+        <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-3">
+          <div class="d-flex gap-2 flex-wrap">
+            <span class="badge {{ 'text-bg-success' if auftrag['analyse_autohaus_geprueft'] else 'text-bg-warning' }}">Autohaus {{ 'geprüft' if auftrag['analyse_autohaus_geprueft'] else 'offen' }}</span>
+            <span class="badge {{ 'text-bg-success' if auftrag['analyse_werkstatt_geprueft'] else 'text-bg-warning' }}">Werkstatt {{ 'geprüft' if auftrag['analyse_werkstatt_geprueft'] else 'offen' }}</span>
+          </div>
+          {% if not auftrag['analyse_werkstatt_geprueft'] %}
+          <form method="POST" action="{{ url_for('admin_dokumente_geprueft', auftrag_id=auftrag['id']) }}">
+            <button type="submit" class="btn btn-sm btn-outline-success">Werkstatt-Prüfung bestätigen</button>
+          </form>
+          {% endif %}
         </div>
         <div class="d-grid gap-3">
           {% for pruefung in dokument_pruefung %}
@@ -378,7 +389,7 @@
                     <td>{{ item['current_value'] or '—' }}</td>
                     <td>
                       <span class="badge {{ 'text-bg-success' if item['active'] else 'text-bg-warning' }}">
-                        {{ 'übernommen' if item['active'] else 'abweichend / prüfen' }}
+                        {{ 'passt zum Auftrag' if item['active'] else 'Bitte prüfen' }}
                       </span>
                     </td>
                   </tr>

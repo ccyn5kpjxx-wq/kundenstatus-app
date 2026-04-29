@@ -338,6 +338,7 @@ def main():
         )
         db.commit()
         db.close()
+        portal.reset_document_review_checks(angebot_id, "Testunterlage zur Prüfung")
         auftrag = portal.get_auftrag(angebot_id)
         pruefung = portal.list_document_review_items(angebot_id, auftrag)
         check("Dokument-Prüfansicht liefert Felder", bool(pruefung and pruefung[0]["items"]))
@@ -355,6 +356,34 @@ def main():
         check(
             "Partner zeigt Dokument-Prüfansicht",
             "Erkannte Felder aus Unterlagen" in response.get_data(as_text=True),
+        )
+        response = partner.post(
+            f"/partner/kaesmann/auftrag/{angebot_id}/dokumente/geprueft",
+            data=with_csrf(partner, {}),
+            follow_redirects=False,
+        )
+        auftrag = portal.get_auftrag(angebot_id)
+        check("Autohaus-Prüfung speicherbar", response.status_code in {302, 303}, response.headers.get("Location", ""))
+        check(
+            "Nach Autohaus-Prüfung bleibt Werkstatt-Prüfung offen",
+            auftrag["analyse_autohaus_geprueft"] == 1
+            and auftrag["analyse_werkstatt_geprueft"] == 0
+            and auftrag["analyse_pruefen"],
+            f"autohaus={auftrag['analyse_autohaus_geprueft']} werkstatt={auftrag['analyse_werkstatt_geprueft']} pruefen={auftrag['analyse_pruefen']}",
+        )
+        response = admin.post(
+            f"/admin/auftrag/{angebot_id}/dokumente/geprueft",
+            data=with_csrf(admin, {}),
+            follow_redirects=False,
+        )
+        auftrag = portal.get_auftrag(angebot_id)
+        check("Werkstatt-Prüfung speicherbar", response.status_code in {302, 303})
+        check(
+            "Doppelte Dokumentprüfung schließt Prüfwarnung",
+            auftrag["analyse_autohaus_geprueft"] == 1
+            and auftrag["analyse_werkstatt_geprueft"] == 1
+            and not auftrag["analyse_pruefen"],
+            f"autohaus={auftrag['analyse_autohaus_geprueft']} werkstatt={auftrag['analyse_werkstatt_geprueft']} pruefen={auftrag['analyse_pruefen']}",
         )
 
         response = admin.post(
