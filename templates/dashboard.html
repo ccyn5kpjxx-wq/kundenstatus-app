@@ -101,22 +101,23 @@
       <p class="mb-2 text-muted">{{ ki_status['message'] }}</p>
       <div class="small text-muted">Konfigurationsdatei: <code>{{ ki_status['env_file'] }}</code></div>
       <div class="small text-muted">OpenAI-Modell: <code>{{ ki_status['openai_model'] }}</code></div>
-      {% if not ki_status['openai_ready'] %}
       <form method="POST" action="{{ url_for('admin_openai_key_speichern') }}" class="row g-2 align-items-end mt-3">
         <div class="col-md-8">
           <label class="form-label small text-muted" for="openai_api_key">OpenAI API-Key</label>
           <input type="password" id="openai_api_key" name="openai_api_key" class="form-control" placeholder="sk-..." autocomplete="off" required>
         </div>
         <div class="col-md-4">
-          <button type="submit" class="btn btn-brand w-100">OpenAI verbinden</button>
+          <button type="submit" class="btn btn-brand w-100">{% if ki_status['openai_ready'] %}Key aktualisieren{% else %}OpenAI verbinden{% endif %}</button>
         </div>
       </form>
-      {% endif %}
     </div>
-    <div class="d-flex gap-2 flex-wrap">
+    <div class="d-flex gap-2 flex-wrap align-items-start justify-content-end">
       <span class="badge {% if ki_status['google_ready'] %}text-bg-success{% else %}text-bg-secondary{% endif %}">Google OCR {% if ki_status['google_ready'] %}bereit{% else %}fehlt{% endif %}</span>
       <span class="badge {% if ki_status['openai_ready'] %}text-bg-success{% else %}text-bg-secondary{% endif %}">OpenAI {% if ki_status['openai_ready'] %}bereit{% else %}fehlt{% endif %}</span>
       <span class="badge {% if ki_status['ready'] %}text-bg-success{% else %}text-bg-warning{% endif %}">{% if ki_status['ready'] %}Pipeline aktiv{% else %}Fallback aktiv{% endif %}</span>
+      <form method="POST" action="{{ url_for('admin_openai_test') }}" class="w-100 text-end">
+        <button type="submit" class="btn btn-soft btn-sm">OpenAI testen</button>
+      </form>
     </div>
   </div>
 </div>

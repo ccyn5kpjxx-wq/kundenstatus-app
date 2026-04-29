@@ -259,6 +259,13 @@ ENABLE_LOCAL_OCR = env_flag("ENABLE_LOCAL_OCR", not RUNNING_ON_RENDER)
 OPENAI_VISION_MAX_PAGES = 4
 OPENAI_VISION_MAX_IMAGE_SIDE = 1800
 OPENAI_TRANSIENT_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
+OPENAI_TEST_IMAGE_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAfElEQVR4nNXOQREAIADDsFL/"
+    "nocIHlyjIGcbZRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncR"
+    "IncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncf4OvLpyqgN9"
+    "ZSiDcwAAAABJRU5ErkJggg=="
+)
 CSRF_FIELD_NAME = "csrf_token"
 _sqlite_wal_configured = False
 _sqlite_wal_lock = threading.Lock()
@@ -993,8 +1000,8 @@ def set_app_setting(key, value):
 
 def get_openai_api_key():
     return clean_secret_value(
-        os.environ.get("OPENAI_API_KEY")
-        or get_app_setting("OPENAI_API_KEY")
+        get_app_setting("OPENAI_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
     )
 
 
@@ -1338,6 +1345,74 @@ def post_openai_chat_completion(requests_module, payload):
             continue
         return response, ""
     return None, last_error
+
+
+def test_openai_document_analysis_connection():
+    config = get_ai_config()
+    if not config["openai_ready"]:
+        return False, "OpenAI ist noch nicht konfiguriert."
+    requests_module = get_requests()
+    if requests_module is None:
+        return False, "requests ist nicht verfuegbar."
+
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["status"],
+        "properties": {
+            "status": {
+                "type": "string",
+                "description": "ok wenn der Test erfolgreich war",
+            }
+        },
+    }
+    payload = {
+        "model": config["openai_model"],
+        "messages": [
+            {
+                "role": "system",
+                "content": "Du pruefst nur die Verbindung fuer eine Dokumentanalyse.",
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Antworte als JSON mit status=ok, wenn du dieses Testbild lesen kannst.",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": OPENAI_TEST_IMAGE_DATA_URL, "detail": "low"},
+                    },
+                ],
+            },
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "openai_connection_test",
+                "strict": True,
+                "schema": schema,
+            },
+        },
+        "max_tokens": 50,
+    }
+
+    response, request_error = post_openai_chat_completion(requests_module, payload)
+    if request_error:
+        readable = friendly_analysis_error(request_error, "OpenAI")
+        return False, readable or "OpenAI-Test fehlgeschlagen."
+    if response.status_code >= 400:
+        raw_error = extract_openai_error_message(response)
+        readable = friendly_analysis_error(raw_error, "OpenAI")
+        detail = clean_text(raw_error)[:220]
+        if detail and detail not in readable:
+            return False, f"{readable} Detail: {detail}"
+        return False, readable or "OpenAI-Test fehlgeschlagen."
+    parsed = extract_openai_response_json(response.json())
+    if normalize_document_text((parsed or {}).get("status")) != "ok":
+        return False, "OpenAI-Testantwort war erreichbar, aber nicht im erwarteten Format."
+    return True, "OpenAI-Test erfolgreich. Der Dokumentanalyse-Aufruf funktioniert live."
 
 
 def should_retry_openai_without_schema(error_message):
@@ -6602,6 +6677,14 @@ def admin_openai_key_speichern():
         return redirect(url_for("dashboard"))
     set_app_setting("OPENAI_API_KEY", api_key)
     flash("OpenAI-Key wurde gespeichert. Neue Uploads werden jetzt mit OpenAI analysiert.", "success")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/admin/ki/openai-test", methods=["POST"])
+@admin_required
+def admin_openai_test():
+    ok, message = test_openai_document_analysis_connection()
+    flash(message, "success" if ok else "danger")
     return redirect(url_for("dashboard"))
 
 
