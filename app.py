@@ -56,6 +56,7 @@ from flask import (
     has_request_context,
     redirect,
     render_template,
+    render_template_string,
     request,
     send_file,
     session,
@@ -4869,6 +4870,11 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
     analysis_errors = []
     db = get_db()
     timestamp = now_str()
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        db.close()
+        return 0, {"_analysis_error": f"Upload-Speicher ist nicht erreichbar: {clean_text(str(exc))[:300]}"}
     for file in files:
         if not file or not file.filename:
             continue
@@ -4878,7 +4884,11 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
         suffix = pathlib.Path(original_name).suffix.lower()
         stored_name = f"{uuid.uuid4().hex}{suffix}"
         target = UPLOAD_DIR / stored_name
-        file.save(target)
+        try:
+            file.save(target)
+        except Exception as exc:
+            analysis_errors.append(f"{original_name} konnte nicht gespeichert werden: {clean_text(str(exc))[:300]}")
+            continue
         mime_type = file.mimetype or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
         dokument_typ = ""
         extrahierter_text = ""
@@ -4932,6 +4942,8 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
         saved += 1
     db.commit()
     db.close()
+    if not saved and analysis_errors:
+        return 0, {"_analysis_error": analysis_errors[0]}
     if saved_analysis_document:
         try:
             updates = apply_document_data_to_auftrag(auftrag_id, prefer_documents=True) or {}
@@ -5555,6 +5567,106 @@ def partner_session_required_by_key(portal_key):
     if session.get("partner_autohaus_id") != autohaus["id"]:
         return None, redirect(url_for("partner_login_key", portal_key=portal_key))
     return autohaus, None
+
+
+def render_partner_new_form(autohaus):
+    try:
+        return render_template(
+            "partner_neu.html",
+            autohaus=autohaus,
+            transport_arten=TRANSPORT_ARTEN,
+        )
+    except Exception as exc:
+        print(f"FEHLER partner_neu.html: {exc}")
+        return render_template_string(
+            """
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ autohaus['portal_label'] }} - Neues Fahrzeug</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background:#f4f1ea; }
+    .shell { max-width:900px; margin:0 auto; padding:24px 14px; }
+    .panel { background:#fffdf9; border-radius:18px; padding:24px; box-shadow:0 12px 34px rgba(64,47,25,.12); }
+    .form-control,.form-select,.btn { min-height:48px; font-size:16px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+      <div class="alert alert-{{ cat }} mb-3">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+    <div class="panel">
+      <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-4">
+        <div>
+          <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
+          <h1 class="h2 mb-0">Neues Fahrzeug für {{ autohaus['portal_label'] }}</h1>
+        </div>
+        <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zurück</a>
+      </div>
+      <form method="POST" enctype="multipart/form-data" class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">Endkunde / Referenz</label>
+          <input type="text" name="kunde_name" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Telefon</label>
+          <input type="text" name="kontakt_telefon" class="form-control">
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Fahrzeug</label>
+          <input type="text" name="fahrzeug" class="form-control" placeholder="Wird beim Upload, wenn möglich, automatisch erkannt">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Kennzeichen</label>
+          <input type="text" name="kennzeichen" class="form-control" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Kurzbeschreibung / Analyse</label>
+          <input type="text" name="analyse_text" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Datei hochladen</label>
+          <input type="file" name="dateien" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Beschreibung</label>
+          <textarea name="beschreibung" class="form-control" rows="4"></textarea>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Transport</label>
+          <select name="transport_art" class="form-select">
+            {% for key, meta in transport_arten.items() %}
+            <option value="{{ key }}">{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Anlieferung</label>
+          <input type="date" name="annahme_datum" class="form-control">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Abholung</label>
+          <input type="date" name="abholtermin" class="form-control">
+        </div>
+        <div class="col-12 d-grid gap-2 d-md-flex">
+          <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark">Hochladen & analysieren</button>
+          <button type="submit" name="aktion" value="speichern" class="btn btn-dark">Fahrzeug speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
+            """,
+            autohaus=autohaus,
+            transport_arten=TRANSPORT_ARTEN,
+        )
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -6454,18 +6566,10 @@ def partner_neuer_auftrag(slug):
         erlaubte_dateien = get_allowed_uploads(dateien)
         if aktion == "upload_analyze" and not any(file and file.filename for file in dateien):
             flash("Bitte zuerst eine Datei auswählen.", "warning")
-            return render_template(
-                "partner_neu.html",
-                autohaus=autohaus,
-                transport_arten=TRANSPORT_ARTEN,
-            )
+            return render_partner_new_form(autohaus)
         if aktion == "upload_analyze" and not erlaubte_dateien:
             flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.", "warning")
-            return render_template(
-                "partner_neu.html",
-                autohaus=autohaus,
-                transport_arten=TRANSPORT_ARTEN,
-            )
+            return render_partner_new_form(autohaus)
         beschreibung = clean_text(form.get("beschreibung"))
         analyse = clean_text(form.get("analyse_text")) or analyse_text(beschreibung)
         auftrag_id = create_auftrag(
@@ -6493,11 +6597,7 @@ def partner_neuer_auftrag(slug):
             flash("Fahrzeug angelegt.", "success")
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
-    return render_template(
-        "partner_neu.html",
-        autohaus=autohaus,
-        transport_arten=TRANSPORT_ARTEN,
-    )
+    return render_partner_new_form(autohaus)
 
 
 @app.route("/partner/<slug>/angebot/neu", methods=["GET", "POST"])
