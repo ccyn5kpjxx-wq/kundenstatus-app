@@ -3413,6 +3413,24 @@ def get_table_columns(db, table_name):
     return {row["name"] for row in rows}
 
 
+def get_table_column_types(db, table_name):
+    if USE_POSTGRES:
+        rows = db.execute(
+            """
+            SELECT column_name AS name, data_type AS type
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s
+            """,
+            (table_name,),
+        ).fetchall()
+    else:
+        rows = db.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {
+        row["name"]: clean_text(row["type"]).lower()
+        for row in rows
+    }
+
+
 def ensure_column(db, table_name, column_name, column_definition):
     columns = get_table_columns(db, table_name)
     if column_name not in columns:
@@ -6274,6 +6292,42 @@ def reset_postgres_id_sequences(db):
         )
 
 
+def normalize_import_value(value, column_type):
+    column_type = clean_text(column_type).lower()
+    if value == "":
+        if any(
+            marker in column_type
+            for marker in (
+                "int",
+                "real",
+                "double",
+                "numeric",
+                "decimal",
+                "bool",
+            )
+        ):
+            return None
+    if value is None:
+        return None
+    if "bool" in column_type and isinstance(value, str):
+        normalized = normalize_document_text(value)
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    if "int" in column_type and isinstance(value, str):
+        stripped = value.strip()
+        if re.fullmatch(r"-?\d+", stripped):
+            return int(stripped)
+    if any(marker in column_type for marker in ("real", "double", "numeric", "decimal")) and isinstance(value, str):
+        stripped = value.strip().replace(",", ".")
+        try:
+            return float(stripped)
+        except ValueError:
+            return value
+    return value
+
+
 def import_sqlite_rows_into_current_database(imported_db):
     source = sqlite3.connect(imported_db)
     source.row_factory = sqlite3.Row
@@ -6292,12 +6346,13 @@ def import_sqlite_rows_into_current_database(imported_db):
             if table_name not in source_tables:
                 continue
             target_columns = get_table_columns(target, table_name)
+            target_types = get_table_column_types(target, table_name)
             if not target_columns:
                 continue
             rows = source.execute(f"SELECT * FROM {table_name}").fetchall()
             for row in rows:
                 data = {
-                    key: row[key]
+                    key: normalize_import_value(row[key], target_types.get(key, ""))
                     for key in row.keys()
                     if key in target_columns
                 }
