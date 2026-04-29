@@ -153,6 +153,42 @@ def main():
         )
         angebot_id = extract_id_from_location(response.headers.get("Location", ""))
         check("Neue Angebots-ID erkannt", angebot_id > 0, response.headers.get("Location", ""))
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
+            b"\x00\x00\x00\x0cIDATx\x9cc\xf8\xff\xff?\x00\x05"
+            b"\xfe\x02\xfeA\xe2!=\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        stored_image_name = f"angebot-{angebot_id}-schadenfoto.png"
+        (test_uploads / stored_image_name).write_bytes(png_bytes)
+        db = portal.get_db()
+        db.execute(
+            """
+            INSERT INTO dateien
+            (auftrag_id, original_name, stored_name, mime_type, size, quelle,
+             kategorie, dokument_typ, extrahierter_text, extrakt_kurz,
+             analyse_quelle, analyse_json, analyse_hinweis, hochgeladen_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                angebot_id,
+                "schadenfoto.png",
+                stored_image_name,
+                "image/png",
+                len(png_bytes),
+                "autohaus",
+                "standard",
+                "Bilddokument",
+                "",
+                "Schadenfoto vom Autohaus",
+                "",
+                "",
+                "",
+                portal.now_str(),
+            ),
+        )
+        db.commit()
+        db.close()
 
         angebot = portal.get_auftrag(angebot_id)
         check("Neue Anfrage ist Angebotsphase", angebot["angebotsphase"])
@@ -194,6 +230,16 @@ def main():
         check(
             "Preisvorschlag im Admin sichtbar",
             "Preisvorschlag nach interner Preisliste" in html and "190 € netto" in html,
+        )
+        response = admin.get("/admin")
+        admin_html = response.get_data(as_text=True)
+        check(
+            "Admin-Angebotskarte zeigt Unterlage mit Bildvorschau",
+            response.status_code == 200
+            and "schadenfoto.png" in admin_html
+            and f"/admin/datei/" in admin_html
+            and "Unterlagen und Bilder" in admin_html,
+            f"Status {response.status_code}",
         )
 
         response = admin.post(
@@ -246,6 +292,13 @@ def main():
             and "210 € netto" in partner_html
             and "zusätzlich kleine Beilackierung" in partner_html,
             f"Status {response.status_code}",
+        )
+        check(
+            "Partner sieht Angebotsbild mit Öffnen-Link",
+            "schadenfoto.png" in partner_html
+            and f"/partner/kaesmann/datei/" in partner_html
+            and "Original öffnen" in partner_html,
+            "Angebotsbild fehlt",
         )
 
         response = partner.post(

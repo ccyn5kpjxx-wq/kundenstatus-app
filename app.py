@@ -4770,8 +4770,10 @@ def list_angebotsanfragen(autohaus_id=None):
         ).fetchall()
     db.close()
     anfragen = [row_to_auftrag(row) for row in rows]
+    dateien_by_auftrag = list_dateien_for_auftraege([anfrage["id"] for anfrage in anfragen])
     for anfrage in anfragen:
         anfrage["dateien_count"] = int(anfrage.get("dateien_count") or 0)
+        anfrage["dateien"] = dateien_by_auftrag.get(int(anfrage["id"]), [])
     return anfragen
 
 
@@ -4816,6 +4818,29 @@ def list_dateien(auftrag_id):
     return [hydrate_datei(dict(row)) for row in rows]
 
 
+def list_dateien_for_auftraege(auftrag_ids):
+    ids = [int(auftrag_id) for auftrag_id in auftrag_ids if auftrag_id]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    db = get_db()
+    rows = db.execute(
+        f"""
+        SELECT *
+        FROM dateien
+        WHERE auftrag_id IN ({placeholders})
+        ORDER BY hochgeladen_am DESC, id DESC
+        """,
+        ids,
+    ).fetchall()
+    db.close()
+    grouped = {auftrag_id: [] for auftrag_id in ids}
+    for row in rows:
+        datei = hydrate_datei(dict(row))
+        grouped.setdefault(int(datei["auftrag_id"]), []).append(datei)
+    return grouped
+
+
 def split_dateien(dateien):
     standard = [d for d in dateien if clean_text(d.get("kategorie")) != "fertigbild"]
     fertigbilder = [d for d in dateien if clean_text(d.get("kategorie")) == "fertigbild"]
@@ -4840,6 +4865,7 @@ def hydrate_datei(datei):
     suffix = pathlib.Path(datei["original_name"]).suffix.lower()
     datei["is_pdf"] = suffix == ".pdf"
     datei["is_image"] = suffix in IMAGE_EXTENSIONS
+    datei["is_browser_image"] = suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}
     datei["kategorie"] = clean_text(datei.get("kategorie")) or "standard"
     datei["has_extract"] = bool(
         clean_text(datei.get("extrakt_kurz")) or clean_text(datei.get("extrahierter_text"))

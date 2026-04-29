@@ -560,6 +560,11 @@
             <div class="d-grid gap-2">
               {% for datei in dateien %}
               <div class="border rounded-4 p-3">
+                {% if datei['is_browser_image'] %}
+                <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener">
+                  <img src="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-3">
+                </a>
+                {% endif %}
                 <div class="d-flex gap-2 flex-wrap align-items-center">
                   <div class="fw-semibold flex-grow-1">{{ datei['original_name'] }}</div>
                   <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Original öffnen</a>

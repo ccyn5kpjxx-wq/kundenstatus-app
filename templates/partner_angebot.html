@@ -24,6 +24,9 @@
     .track-step { padding:.45rem .75rem; border-radius:999px; background:#efe4d4; border:1px solid #dfceb6; color:#6a5b4a; font-size:.9rem; }
     .track-step.is-active { background:#132635; border-color:#132635; color:#fff; }
     .track-step.is-done { background:#1b7f53; border-color:#1b7f53; color:#fff; }
+    .offer-file-preview { width: 128px; height: 92px; object-fit: cover; border-radius: 10px; border: 1px solid #e4d6c3; background: #f7f1e8; }
+    .offer-file-name { overflow-wrap: anywhere; word-break: break-word; }
+    .min-width-0 { min-width: 0; }
     .loading-overlay {
       position: fixed;
       inset: 0;
@@ -369,7 +372,24 @@
         <div class="d-grid gap-2">
           {% for datei in dateien %}
           <div class="border rounded-4 p-3">
-            <div class="fw-semibold">{{ datei['original_name'] }}</div>
+            <div class="d-flex gap-2 align-items-start flex-wrap">
+              {% if datei['is_browser_image'] %}
+              <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener">
+                <img src="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" alt="{{ datei['original_name'] }}" class="offer-file-preview">
+              </a>
+              {% endif %}
+              <div class="flex-grow-1 min-width-0">
+                <div class="fw-semibold offer-file-name">{{ datei['original_name'] }}</div>
+                <div class="small text-muted">
+                  {{ 'Bild' if datei['is_image'] else ('PDF' if datei['is_pdf'] else 'Datei') }}
+                  {% if datei['hochgeladen_am'] %} · {{ datei['hochgeladen_am'] }}{% endif %}
+                </div>
+                <div class="d-flex gap-2 flex-wrap mt-2">
+                  <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Original öffnen</a>
+                  <a href="{{ url_for('partner_datei_download', slug=autohaus['slug'], datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+                </div>
+              </div>
+            </div>
             {% if datei['extrakt_kurz'] %}
             <div class="small text-muted mt-1">{{ datei['extrakt_kurz'] }}</div>
             {% endif %}

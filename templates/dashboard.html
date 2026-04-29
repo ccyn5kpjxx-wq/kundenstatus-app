@@ -11,6 +11,9 @@
   .portal-link-box { min-width: min(100%, 360px); }
   .portal-link-value { max-width: 460px; overflow-wrap: anywhere; }
   .chat-preview { max-height: 4.5em; overflow: hidden; }
+  .offer-file-preview { width: 128px; height: 92px; object-fit: cover; border-radius: 10px; border: 1px solid #e4d6c3; background: #f7f1e8; }
+  .offer-file-name { overflow-wrap: anywhere; word-break: break-word; }
+  .min-width-0 { min-width: 0; }
 </style>
 {% endblock %}
 
@@ -350,6 +353,38 @@
           {% if a['werkstatt_angebot_preis'] %}<span class="schedule-pill">Angebot {{ a['werkstatt_angebot_preis'] }}</span>{% endif %}
           {% if a['dateien_count'] %}<span class="schedule-pill">{{ a['dateien_count'] }} Unterlagen</span>{% endif %}
         </div>
+        {% if a['dateien'] %}
+        <div class="mt-3 border-top pt-3">
+          <div class="fw-semibold small text-muted mb-2">Unterlagen und Bilder</div>
+          <div class="d-grid gap-2">
+            {% for datei in a['dateien'] %}
+            <div class="border rounded-3 p-2 bg-white">
+              <div class="d-flex gap-2 align-items-start flex-wrap">
+                {% if datei['is_browser_image'] %}
+                <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener">
+                  <img src="{{ url_for('admin_datei', datei_id=datei['id']) }}" alt="{{ datei['original_name'] }}" class="offer-file-preview">
+                </a>
+                {% endif %}
+                <div class="flex-grow-1 min-width-0">
+                  <div class="fw-semibold offer-file-name">{{ datei['original_name'] }}</div>
+                  <div class="small text-muted">
+                    {{ 'Bild' if datei['is_image'] else ('PDF' if datei['is_pdf'] else 'Datei') }}
+                    {% if datei['hochgeladen_am'] %} · {{ datei['hochgeladen_am'] }}{% endif %}
+                  </div>
+                  {% if datei['extrakt_kurz'] %}
+                  <div class="small mt-1 offer-file-name">{{ datei['extrakt_kurz'] }}</div>
+                  {% endif %}
+                  <div class="d-flex gap-2 flex-wrap mt-2">
+                    <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Original öffnen</a>
+                    <a href="{{ url_for('admin_datei_download', datei_id=datei['id']) }}" class="btn btn-outline-secondary btn-sm">Herunterladen</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
         <form method="POST" action="{{ url_for('angebot_senden_route', auftrag_id=a['id']) }}" class="row g-2 mt-3">
           <div class="col-md-4">
             <label class="form-label small text-muted">Preis</label>

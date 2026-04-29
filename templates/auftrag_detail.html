@@ -608,6 +608,11 @@
         <div class="d-grid gap-2">
           {% for datei in dateien %}
           <div class="page-card p-3">
+            {% if datei['is_browser_image'] %}
+            <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener">
+              <img src="{{ url_for('admin_datei', datei_id=datei['id']) }}" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-3">
+            </a>
+            {% endif %}
             <div class="d-flex gap-2 flex-wrap align-items-center">
               <div class="fw-semibold flex-grow-1 breakable-text">{{ datei['original_name'] }}</div>
               <span class="badge bg-light text-dark border">
