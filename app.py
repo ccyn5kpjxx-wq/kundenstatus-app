@@ -706,6 +706,39 @@ def add_csrf_fields(response):
     return response
 
 
+@app.errorhandler(500)
+def internal_server_error(error):
+    original = getattr(error, "original_exception", None) or error
+    message = clean_text(str(original)) or original.__class__.__name__
+    print(f"INTERNAL SERVER ERROR: {original.__class__.__name__}: {message}")
+    return render_template_string(
+        """
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fehler</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+  <main class="container py-5">
+    <div class="alert alert-danger">
+      <h1 class="h4">Diese Seite konnte gerade nicht geladen werden.</h1>
+      <p class="mb-2">Pfad: <code>{{ path }}</code></p>
+      <p class="mb-0">Technischer Fehler: <code>{{ message }}</code></p>
+    </div>
+    <a class="btn btn-outline-dark" href="{{ fallback_url }}">Zurück</a>
+  </main>
+</body>
+</html>
+        """,
+        path=request.path,
+        message=message[:500],
+        fallback_url=request.referrer or url_for("partner_login"),
+    ), 500
+
+
 def get_startup_warnings():
     warnings = []
     if get_admin_pass() in {"", "change-me", DEFAULT_ADMIN_PASS}:
