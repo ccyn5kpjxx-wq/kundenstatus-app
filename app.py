@@ -69,6 +69,7 @@ BASE = pathlib.Path(__file__).parent
 DATA_DIR = BASE / "data"
 DB = DATA_DIR / "auftraege.db"
 UPLOAD_DIR = DATA_DIR / "uploads"
+DELETED_UPLOAD_DIR = DATA_DIR / "deleted_uploads"
 
 
 def load_optional_module(module_name, global_name=None):
@@ -218,6 +219,12 @@ BACKUP_DIR = pathlib.Path(
         str(DATA_DIR / "backups"),
     )
 )
+DELETED_UPLOAD_DIR = pathlib.Path(
+    os.environ.get(
+        "DELETED_UPLOAD_DIR",
+        str(DATA_DIR / "deleted_uploads"),
+    )
+)
 AUTO_BACKUP_ENABLED = env_flag("AUTO_BACKUP_ENABLED", True)
 AUTO_BACKUP_INTERVAL_SECONDS = max(60, env_int("AUTO_BACKUP_INTERVAL_SECONDS", 3600))
 AUTO_BACKUP_KEEP = max(1, env_int("AUTO_BACKUP_KEEP", 168))
@@ -231,7 +238,7 @@ GOOGLE_DOC_AI_TIMEOUT = env_int(
     "DOCUMENT_ANALYSIS_TIMEOUT_SECONDS",
     20 if RUNNING_ON_RENDER else 45,
 )
-ENABLE_LOCAL_OCR = env_flag("ENABLE_LOCAL_OCR", not RUNNING_ON_RENDER)
+ENABLE_LOCAL_OCR = env_flag("ENABLE_LOCAL_OCR", True)
 OPENAI_VISION_MAX_PAGES = 4
 OPENAI_VISION_MAX_IMAGE_SIDE = 1800
 CSRF_FIELD_NAME = "csrf_token"
@@ -864,8 +871,10 @@ def get_ai_status():
         message = "Google OCR ist bereit, OpenAI fehlt noch."
     elif config["openai_ready"] and not config["google_ready"]:
         message = "OpenAI ist bereit, Google Document AI fehlt noch."
+    elif ENABLE_LOCAL_OCR:
+        message = "API-Zugangsdaten fehlen noch. Bis dahin liest die lokale OCR Dateien aus."
     else:
-        message = "API-Zugangsdaten fehlen noch. Bis dahin bleibt die lokale OCR aktiv."
+        message = "API-Zugangsdaten fehlen und die lokale OCR ist deaktiviert."
     return {
         "ready": config["ready"],
         "google_ready": config["google_ready"],
@@ -2758,6 +2767,7 @@ def parse_document_fields(text, filename=""):
 
     for index, line in enumerate(lines):
         normalized_line = normalize_document_text(line)
+        inline_date = first_match(line, [r"(\d{2}\.\d{2}\.\d{4})"])
         typ_inline = first_match(
             line,
             [r"\bTyp[:.\s]+([A-Za-z][A-Za-z0-9 .\-/]{1,24})"],
@@ -2835,6 +2845,8 @@ def parse_document_fields(text, filename=""):
                 ).upper()
         elif re.search(r"^auftrags[-\s]*datum", normalized_line) and not annahme_datum:
             annahme_datum = format_date(
+                inline_date
+                or
                 find_nearby_value(
                     lines,
                     index,
@@ -2846,6 +2858,8 @@ def parse_document_fields(text, filename=""):
             )
         elif re.search(r"^fertig\s*bis|^fertigbis", normalized_line) and not fertig_datum:
             fertig_datum = format_date(
+                inline_date
+                or
                 find_nearby_value(
                     lines,
                     index,
@@ -2922,7 +2936,7 @@ def parse_document_fields(text, filename=""):
         fertig_datum = format_date(
             first_match(
                 cleaned,
-                [r"Fertig\s*bis(?:\s*spaetestens|\s*spätestens)?[:.]?\s*(\d{2}\.\d{2}\.\d{4})"],
+                [r"Fertig\s*bis(?:\s*spaetestens|\s*spätestens|\s*spatestens)?[:.]?\s*(\d{2}\.\d{2}\.\d{4})"],
             )
         )
 
@@ -3295,6 +3309,32 @@ def create_backup_package(reason="auto"):
     return backup_path
 
 
+def create_safety_backup(reason):
+    if not AUTO_BACKUP_ENABLED:
+        return None
+    try:
+        return create_backup_package(reason)
+    except Exception as exc:
+        print(f"WARNUNG: Sicherheitsbackup fehlgeschlagen ({reason}): {exc}")
+        return None
+
+
+def move_upload_to_deleted_area(path, reason="deleted"):
+    if not path.exists() or not path.is_file() or path.parent != UPLOAD_DIR:
+        return False
+    DELETED_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    safe_reason = re.sub(r"[^a-zA-Z0-9_-]+", "-", clean_text(reason))[:40] or "deleted"
+    target_name = f"{timestamp}-{safe_reason}-{path.name}"
+    target = DELETED_UPLOAD_DIR / target_name
+    counter = 1
+    while target.exists():
+        target = DELETED_UPLOAD_DIR / f"{timestamp}-{safe_reason}-{counter}-{path.name}"
+        counter += 1
+    shutil.move(str(path), str(target))
+    return True
+
+
 def prune_old_backups():
     if not BACKUP_DIR.exists():
         return
@@ -3329,31 +3369,37 @@ def start_hourly_backups():
 
 
 def init_db():
-    global DATA_DIR, DB, UPLOAD_DIR, BACKUP_DIR
+    global DATA_DIR, DB, UPLOAD_DIR, BACKUP_DIR, DELETED_UPLOAD_DIR
     if USE_POSTGRES:
         try:
             UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
             BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            DELETED_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         except PermissionError as exc:
             print(f"WARNUNG: Render-Disk nicht beschreibbar ({exc}). Nutze lokalen Fallback.")
             UPLOAD_DIR = BASE / "data" / "uploads"
             BACKUP_DIR = BASE / "data" / "backups"
+            DELETED_UPLOAD_DIR = BASE / "data" / "deleted_uploads"
             UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
             BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            DELETED_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     else:
         try:
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
             BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            DELETED_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         except PermissionError as exc:
             print(f"WARNUNG: Render-Disk nicht beschreibbar ({exc}). Nutze lokalen Fallback.")
             DATA_DIR = BASE / "data"
             DB = DATA_DIR / "auftraege.db"
             UPLOAD_DIR = DATA_DIR / "uploads"
             BACKUP_DIR = DATA_DIR / "backups"
+            DELETED_UPLOAD_DIR = DATA_DIR / "deleted_uploads"
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
             BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            DELETED_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     db = get_db()
     db.executescript(
         """
@@ -4941,6 +4987,8 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
             analyse_hinweis = clean_text(bundle.get("hint"))
             if bundle.get("status") == "error" and analyse_hinweis:
                 analysis_errors.append(analyse_hinweis)
+            elif analyse_hinweis and not (clean_text(extrahierter_text) or clean_text(analyse_json)):
+                analysis_errors.append(analyse_hinweis)
             dokument_typ = (
                 classify_document(extrahierter_text, original_name)
                 if extrahierter_text
@@ -5158,6 +5206,7 @@ def archive_auftraege(auftrag_ids, archiviert=1, autohaus_id=None):
 
 def delete_auftraege(auftrag_ids, autohaus_id=None):
     geloescht = 0
+    geplante_ids = []
     for raw_id in auftrag_ids:
         try:
             auftrag_id = int(raw_id)
@@ -5168,12 +5217,18 @@ def delete_auftraege(auftrag_ids, autohaus_id=None):
             continue
         if autohaus_id is not None and auftrag.get("autohaus_id") != autohaus_id:
             continue
-        delete_auftrag(auftrag_id)
+        geplante_ids.append(auftrag_id)
+    if geplante_ids:
+        create_safety_backup(f"before-bulk-delete-{len(geplante_ids)}")
+    for auftrag_id in geplante_ids:
+        delete_auftrag(auftrag_id, safety_backup=False)
         geloescht += 1
     return geloescht
 
 
-def delete_auftrag(auftrag_id):
+def delete_auftrag(auftrag_id, safety_backup=True):
+    if safety_backup:
+        create_safety_backup(f"before-delete-auftrag-{auftrag_id}")
     db = get_db()
     dateien = db.execute(
         "SELECT stored_name FROM dateien WHERE auftrag_id=?",
@@ -5185,8 +5240,7 @@ def delete_auftrag(auftrag_id):
             continue
         path = UPLOAD_DIR / pathlib.Path(stored_name).name
         try:
-            if path.exists() and path.is_file() and path.parent == UPLOAD_DIR:
-                path.unlink()
+            move_upload_to_deleted_area(path, f"auftrag-{auftrag_id}")
         except OSError:
             pass
     db.execute("DELETE FROM dateien WHERE auftrag_id=?", (auftrag_id,))
@@ -5782,6 +5836,18 @@ def admin_daten_import():
                 finally:
                     probe.close()
 
+                imported_uploads = tmp_path / "uploads"
+                imported_uploads.mkdir(exist_ok=True)
+                for name in names:
+                    if not name.startswith("uploads/") or name.endswith("/"):
+                        continue
+                    stored_name = pathlib.Path(name).name
+                    if not stored_name:
+                        continue
+                    with archive.open(name) as source, (imported_uploads / stored_name).open("wb") as target:
+                        shutil.copyfileobj(source, target)
+
+                create_safety_backup("before-data-import")
                 DATA_DIR.mkdir(exist_ok=True)
                 UPLOAD_DIR.mkdir(exist_ok=True)
                 backup_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -5791,16 +5857,11 @@ def admin_daten_import():
 
                 for existing in UPLOAD_DIR.iterdir():
                     if existing.is_file():
-                        existing.unlink()
+                        move_upload_to_deleted_area(existing, "before-data-import")
 
-                for name in names:
-                    if not name.startswith("uploads/") or name.endswith("/"):
-                        continue
-                    stored_name = pathlib.Path(name).name
-                    if not stored_name:
-                        continue
-                    with archive.open(name) as source, (UPLOAD_DIR / stored_name).open("wb") as target:
-                        shutil.copyfileobj(source, target)
+                for imported_upload in imported_uploads.iterdir():
+                    if imported_upload.is_file():
+                        shutil.copy2(imported_upload, UPLOAD_DIR / imported_upload.name)
 
         flash("Daten wurden importiert. Fahrzeuge und Dateien sind jetzt auf diesem Server verfügbar.", "success")
     except Exception as exc:
