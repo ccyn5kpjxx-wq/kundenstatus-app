@@ -498,8 +498,8 @@
 
       {% if auftrag['angebotsphase'] and auftrag['angebot_abgesendet'] %}
       <div class="page-card p-4 mt-4 border border-primary-subtle">
-        <h4 class="mb-2">Angebot an Autohaus senden</h4>
-        <p class="text-muted mb-3">Dieses Angebot sieht das Autohaus im Portal und kann es dort annehmen.</p>
+        <h4 class="mb-2">{{ 'Angebot bearbeiten' if auftrag['angebot_status'] == 'angebot_abgegeben' else 'Angebot an Autohaus senden' }}</h4>
+        <p class="text-muted mb-3">Preis, Leistungsbeschreibung und Notiz sind im Autohaus-Portal sichtbar.</p>
         <form method="POST" action="{{ url_for('angebot_senden_route', auftrag_id=auftrag['id']) }}" class="row g-3">
           {% if auftrag['preisvorschlag']['hat_vorschlag'] or auftrag['preisvorschlag']['hinweise'] %}
           <div class="col-12">
@@ -542,16 +542,20 @@
             <input type="text" name="werkstatt_angebot_preis" class="form-control form-control-lg" value="{{ auftrag['werkstatt_angebot_preis'] }}" placeholder="z.B. 730,00 € netto">
           </div>
           <div class="col-md-8">
-            <label class="form-label">Angebotstext</label>
+            <label class="form-label">Leistungsbeschreibung</label>
             <textarea name="werkstatt_angebot_text" class="form-control" rows="3" placeholder="z.B. Reparatur gemäß Lackierauftrag inkl. Smart Repair.">{{ auftrag['werkstatt_angebot_text'] }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Notiz zum Angebot</label>
+            <textarea name="werkstatt_angebot_notiz" class="form-control" rows="3" placeholder="z.B. Preis netto, vorbehaltlich Prüfung der Unterlagen.">{{ auftrag['werkstatt_angebot_notiz'] }}</textarea>
           </div>
           {% if auftrag['werkstatt_angebot_am'] %}
           <div class="col-12">
-            <span class="badge text-bg-success">Zuletzt gesendet am {{ auftrag['werkstatt_angebot_am'] }}</span>
+            <span class="badge text-bg-success">Zuletzt aktualisiert am {{ auftrag['werkstatt_angebot_am'] }}</span>
           </div>
           {% endif %}
           <div class="col-12">
-            <button type="submit" class="btn btn-brand btn-lg">Angebot an Autohaus senden</button>
+            <button type="submit" class="btn btn-brand btn-lg">{{ 'Angebot aktualisieren' if auftrag['angebot_status'] == 'angebot_abgegeben' else 'Angebot an Autohaus senden' }}</button>
           </div>
         </form>
       </div>

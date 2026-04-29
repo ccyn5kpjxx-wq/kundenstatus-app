@@ -3795,6 +3795,7 @@ def init_db():
             angebot_status TEXT DEFAULT 'entwurf',
             werkstatt_angebot_text TEXT DEFAULT '',
             werkstatt_angebot_preis TEXT DEFAULT '',
+            werkstatt_angebot_notiz TEXT DEFAULT '',
             werkstatt_angebot_am TEXT DEFAULT '',
             status         INTEGER DEFAULT 1,
             annahme_datum  TEXT DEFAULT '',
@@ -3911,6 +3912,7 @@ def init_db():
     ensure_column(db, "auftraege", "angebot_status", "TEXT DEFAULT 'entwurf'")
     ensure_column(db, "auftraege", "werkstatt_angebot_text", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "werkstatt_angebot_preis", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "werkstatt_angebot_notiz", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "werkstatt_angebot_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "annahme_datum", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "start_datum", "TEXT DEFAULT ''")
@@ -5953,13 +5955,14 @@ def submit_offer_request(auftrag_id):
     db.close()
 
 
-def send_workshop_offer(auftrag_id, angebot_text, angebot_preis):
+def send_workshop_offer(auftrag_id, angebot_text, angebot_preis, angebot_notiz=""):
     db = get_db()
     db.execute(
         """
         UPDATE auftraege
         SET werkstatt_angebot_text=?,
             werkstatt_angebot_preis=?,
+            werkstatt_angebot_notiz=?,
             werkstatt_angebot_am=?,
             angebot_status='angebot_abgegeben',
             geaendert_am=?
@@ -5968,6 +5971,7 @@ def send_workshop_offer(auftrag_id, angebot_text, angebot_preis):
         (
             clean_text(angebot_text),
             clean_text(angebot_preis),
+            clean_text(angebot_notiz),
             now_str(),
             now_str(),
             auftrag_id,
@@ -7085,16 +7089,29 @@ def angebot_senden_route(auftrag_id):
         abort(404)
     angebot_text = clean_text(request.form.get("werkstatt_angebot_text"))
     angebot_preis = clean_text(request.form.get("werkstatt_angebot_preis"))
-    if not angebot_text and not angebot_preis:
-        flash("Bitte Angebotstext oder Preis eintragen.", "warning")
+    angebot_notiz = clean_text(request.form.get("werkstatt_angebot_notiz"))
+    angebot_war_vorhanden = auftrag.get("angebot_status") == "angebot_abgegeben"
+    if not angebot_text and not angebot_preis and not angebot_notiz:
+        flash("Bitte Preis, Angebotstext oder Notiz eintragen.", "warning")
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
-    send_workshop_offer(auftrag_id, angebot_text, angebot_preis)
+    send_workshop_offer(auftrag_id, angebot_text, angebot_preis, angebot_notiz)
+    titel = "Werkstatt-Angebot wurde aktualisiert" if angebot_war_vorhanden else "Werkstatt-Angebot liegt vor"
+    nachricht = (
+        "Die Werkstatt hat das Angebot aktualisiert. Sie können es im Portal erneut prüfen und annehmen."
+        if angebot_war_vorhanden
+        else "Die Werkstatt hat ein Angebot abgegeben. Sie können es im Portal prüfen und annehmen."
+    )
     add_benachrichtigung(
         auftrag_id,
-        "Werkstatt-Angebot liegt vor",
-        "Die Werkstatt hat ein Angebot abgegeben. Sie können es im Portal prüfen und annehmen.",
+        titel,
+        nachricht,
     )
-    flash("Angebot an das Autohaus gesendet.", "success")
+    flash(
+        "Angebot aktualisiert und an das Autohaus gesendet."
+        if angebot_war_vorhanden
+        else "Angebot an das Autohaus gesendet.",
+        "success",
+    )
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
 

@@ -350,8 +350,11 @@
         {% if angebot['werkstatt_angebot_text'] %}
         <div class="mb-3" style="white-space:pre-wrap;">{{ angebot['werkstatt_angebot_text'] }}</div>
         {% endif %}
+        {% if angebot['werkstatt_angebot_notiz'] %}
+        <div class="border-top pt-3 mb-3" style="white-space:pre-wrap;">{{ angebot['werkstatt_angebot_notiz'] }}</div>
+        {% endif %}
         {% if angebot['werkstatt_angebot_am'] %}
-        <div class="text-muted small mb-3">Gesendet am {{ angebot['werkstatt_angebot_am'] }}</div>
+        <div class="text-muted small mb-3">Aktualisiert am {{ angebot['werkstatt_angebot_am'] }}</div>
         {% endif %}
         <form method="POST" action="{{ url_for('partner_angebot_annehmen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}">
           <button type="submit" class="btn btn-dark btn-lg">Angebot annehmen</button>

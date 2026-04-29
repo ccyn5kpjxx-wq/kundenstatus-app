@@ -201,6 +201,7 @@ def main():
             data=with_csrf(admin, {
                 "werkstatt_angebot_preis": "190 € netto",
                 "werkstatt_angebot_text": "Reparatur gemäß Anfrage: Kotflügel links lackieren.",
+                "werkstatt_angebot_notiz": "Preis netto, inklusive Material.",
             }),
             follow_redirects=False,
         )
@@ -209,8 +210,42 @@ def main():
         check(
             "Angebot abgegeben gespeichert",
             angebot["angebot_status"] == "angebot_abgegeben"
-            and angebot["werkstatt_angebot_preis"] == "190 € netto",
+            and angebot["werkstatt_angebot_preis"] == "190 € netto"
+            and angebot["werkstatt_angebot_notiz"] == "Preis netto, inklusive Material.",
             angebot["angebot_status"],
+        )
+
+        response = admin.post(
+            f"/admin/angebot/{angebot_id}/senden",
+            data=with_csrf(admin, {
+                "werkstatt_angebot_preis": "210 € netto",
+                "werkstatt_angebot_text": "Reparatur gemäß Anfrage: Kotflügel links lackieren.",
+                "werkstatt_angebot_notiz": "Preis netto, zusätzlich kleine Beilackierung.",
+            }),
+            follow_redirects=False,
+        )
+        check("Werkstatt ändert Angebot", response.status_code in {302, 303})
+        angebot = portal.get_auftrag(angebot_id)
+        check(
+            "Geändertes Angebot gespeichert",
+            angebot["angebot_status"] == "angebot_abgegeben"
+            and angebot["werkstatt_angebot_preis"] == "210 € netto"
+            and angebot["werkstatt_angebot_notiz"] == "Preis netto, zusätzlich kleine Beilackierung.",
+            (
+                f"Status {angebot['angebot_status']}, "
+                f"Preis {angebot['werkstatt_angebot_preis']}, "
+                f"Notiz {angebot['werkstatt_angebot_notiz']}"
+            ),
+        )
+
+        response = partner.get(f"/partner/kaesmann/angebot/{angebot_id}")
+        partner_html = response.get_data(as_text=True)
+        check(
+            "Partner sieht geänderte Angebotsnotiz",
+            response.status_code == 200
+            and "210 € netto" in partner_html
+            and "zusätzlich kleine Beilackierung" in partner_html,
+            f"Status {response.status_code}",
         )
 
         response = partner.post(
