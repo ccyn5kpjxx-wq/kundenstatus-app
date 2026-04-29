@@ -238,7 +238,7 @@ GOOGLE_DOC_AI_TIMEOUT = env_int(
     "DOCUMENT_ANALYSIS_TIMEOUT_SECONDS",
     20 if RUNNING_ON_RENDER else 45,
 )
-ENABLE_LOCAL_OCR = env_flag("ENABLE_LOCAL_OCR", True)
+ENABLE_LOCAL_OCR = env_flag("ENABLE_LOCAL_OCR", not RUNNING_ON_RENDER)
 OPENAI_VISION_MAX_PAGES = 4
 OPENAI_VISION_MAX_IMAGE_SIDE = 1800
 CSRF_FIELD_NAME = "csrf_token"
@@ -874,7 +874,7 @@ def get_ai_status():
     elif ENABLE_LOCAL_OCR:
         message = "API-Zugangsdaten fehlen noch. Bis dahin liest die lokale OCR Dateien aus."
     else:
-        message = "API-Zugangsdaten fehlen und die lokale OCR ist deaktiviert."
+        message = "OpenAI fehlt auf Render. Bitte OPENAI_API_KEY in Render eintragen, damit Kunden-Uploads online ausgelesen werden."
     return {
         "ready": config["ready"],
         "google_ready": config["google_ready"],
@@ -1428,7 +1428,14 @@ def build_document_analysis_bundle(path, filename=""):
 
     config = get_ai_config()
     if not bundle["hint"] and not (config["openai_ready"] or config["google_ready"]):
-        bundle["hint"] = "API-Konfiguration fehlt, lokale OCR bleibt aktiv"
+        if ENABLE_LOCAL_OCR:
+            bundle["hint"] = "API-Konfiguration fehlt, lokale OCR bleibt aktiv"
+        else:
+            bundle["hint"] = "OpenAI ist auf Render noch nicht eingerichtet. Bitte OPENAI_API_KEY in Render setzen, damit Kunden-Uploads online analysiert werden."
+    if not clean_text(bundle.get("text")) and not bundle.get("structured"):
+        bundle["status"] = "error"
+        if not bundle["hint"]:
+            bundle["hint"] = "Aus der Datei konnten keine Daten gelesen werden."
     return bundle
 
 
@@ -3551,6 +3558,9 @@ def init_db():
     ensure_column(db, "auftraege", "analyse_pruefen", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "analyse_hinweis", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "analyse_confidence", "REAL DEFAULT 0")
+    ensure_column(db, "auftraege", "analyse_autohaus_geprueft", "INTEGER DEFAULT 0")
+    ensure_column(db, "auftraege", "analyse_werkstatt_geprueft", "INTEGER DEFAULT 0")
+    ensure_column(db, "auftraege", "analyse_geprueft_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "angebotsphase", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "angebot_abgesendet", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "angebot_status", "TEXT DEFAULT 'entwurf'")
@@ -4608,6 +4618,67 @@ def list_document_review_items(auftrag_id, auftrag=None):
     return reviews
 
 
+def reset_document_review_checks(auftrag_id, reason=""):
+    hint = clean_text(reason) or "Neue Unterlage hochgeladen. Bitte erkannte Werte gegen die Originaldatei prüfen."
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET analyse_pruefen=1,
+            analyse_hinweis=?,
+            analyse_autohaus_geprueft=0,
+            analyse_werkstatt_geprueft=0,
+            analyse_geprueft_am='',
+            geaendert_am=?
+        WHERE id=?
+        """,
+        (hint, now_str(), auftrag_id),
+    )
+    db.commit()
+    db.close()
+
+
+def confirm_document_review(auftrag_id, role):
+    if role not in {"autohaus", "werkstatt"}:
+        return False
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        return False
+    autohaus_checked = 1 if role == "autohaus" else int(auftrag.get("analyse_autohaus_geprueft") or 0)
+    werkstatt_checked = 1 if role == "werkstatt" else int(auftrag.get("analyse_werkstatt_geprueft") or 0)
+    both_checked = bool(autohaus_checked and werkstatt_checked)
+    hint = (
+        "Dokumentdaten wurden von Autohaus und Werkstatt geprüft."
+        if both_checked
+        else "Dokumentdaten sind sichtbar. Bitte zweite Prüfung noch abschließen."
+    )
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET analyse_autohaus_geprueft=?,
+            analyse_werkstatt_geprueft=?,
+            analyse_pruefen=?,
+            analyse_hinweis=?,
+            analyse_geprueft_am=?,
+            geaendert_am=?
+        WHERE id=?
+        """,
+        (
+            autohaus_checked,
+            werkstatt_checked,
+            0 if both_checked else 1,
+            hint,
+            now_str() if both_checked else "",
+            now_str(),
+            auftrag_id,
+        ),
+    )
+    db.commit()
+    db.close()
+    return both_checked
+
+
 def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
     db = get_db()
     auftrag_row = db.execute("SELECT * FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
@@ -4695,6 +4766,10 @@ def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
         updates["analyse_hinweis"] = erkannt["analyse_hinweis"]
     if erkannt.get("analyse_confidence") is not None:
         updates["analyse_confidence"] = erkannt.get("analyse_confidence") or 0
+    if has_extracted_document_values(erkannt):
+        updates["analyse_autohaus_geprueft"] = 0
+        updates["analyse_werkstatt_geprueft"] = 0
+        updates["analyse_geprueft_am"] = ""
 
     if updates:
         updates["geaendert_am"] = now_str()
@@ -5027,7 +5102,7 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
         return 0, {"_analysis_error": analysis_errors[0]}
     if saved_analysis_document:
         try:
-            updates = apply_document_data_to_auftrag(auftrag_id, prefer_documents=True) or {}
+            updates = apply_document_data_to_auftrag(auftrag_id, prefer_documents=False) or {}
         except Exception as exc:
             updates = {"_analysis_error": f"Analyse konnte nicht übernommen werden: {clean_text(str(exc))[:300]}"}
         if analysis_errors and not clean_text(updates.get("_analysis_error")):
@@ -5054,7 +5129,10 @@ def flash_upload_analysis_result(saved_result, success_message="Datei hochgelade
         and clean_text(value)
     }
     if meaningful_updates:
-        flash(success_message, "success")
+        flash(
+            "Datei hochgeladen und Analyse sichtbar gemacht. Bitte erkannte Werte prüfen.",
+            "warning",
+        )
     else:
         flash(
             "Datei hochgeladen und zur Prüfung eingetragen. Bitte die erkannten Daten kontrollieren.",
@@ -5117,7 +5195,7 @@ def reanalyze_existing_documents(auftrag_id):
         count += 1
     db.commit()
     db.close()
-    updates = apply_document_data_to_auftrag(auftrag_id, prefer_documents=True) if count else {}
+    updates = apply_document_data_to_auftrag(auftrag_id, prefer_documents=False) if count else {}
     return count, updates
 
 
@@ -6021,7 +6099,7 @@ def neuer_auftrag():
         if aktion == "upload_analyze":
             flash_upload_analysis_result(
                 upload_result,
-                "Datei hochgeladen und Auftrag automatisch befuellt.",
+                "Datei hochgeladen und Analyse sichtbar gemacht.",
             )
         else:
             flash("Fahrzeug angelegt.", "success")
@@ -6122,7 +6200,7 @@ def auftrag_detail(auftrag_id):
         if aktion == "upload_analyze":
             flash_upload_analysis_result(
                 upload_result,
-                "Datei hochgeladen und Auftrag neu analysiert.",
+                "Datei hochgeladen und Analyse sichtbar gemacht.",
             )
         else:
             flash("Auftrag aktualisiert.", "success")
@@ -6130,7 +6208,7 @@ def auftrag_detail(auftrag_id):
             add_benachrichtigung(
                 auftrag_id,
                 "Neue Unterlage ausgewertet",
-                "Die Werkstatt hat eine Unterlage hochgeladen und den Auftrag aktualisiert.",
+                "Die Werkstatt hat eine Unterlage hochgeladen. Erkannte Werte sind zur Prüfung sichtbar.",
             )
         else:
             add_benachrichtigung(
@@ -6185,6 +6263,20 @@ def admin_chat_nachricht(auftrag_id):
         "Die Werkstatt hat im Auftrag geantwortet.",
     )
     flash("Nachricht an das Autohaus gesendet.", "success")
+    return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
+
+
+@app.route("/admin/auftrag/<int:auftrag_id>/dokumente/geprueft", methods=["POST"])
+@admin_required
+def admin_dokumente_geprueft(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+    both_checked = confirm_document_review(auftrag_id, "werkstatt")
+    if both_checked:
+        flash("Dokumentdaten sind jetzt doppelt geprüft.", "success")
+    else:
+        flash("Werkstatt-Prüfung gespeichert. Die Autohaus-Prüfung fehlt noch.", "warning")
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
 
@@ -6685,7 +6777,7 @@ def partner_neuer_auftrag(slug):
         if aktion == "upload_analyze":
             flash_upload_analysis_result(
                 upload_result,
-                "Datei hochgeladen und Auftrag automatisch befuellt.",
+                "Datei hochgeladen und Analyse sichtbar gemacht.",
             )
         else:
             flash("Fahrzeug angelegt.", "success")
@@ -6928,7 +7020,7 @@ def partner_auftrag(slug, auftrag_id):
         if aktion == "upload_analyze":
             flash_upload_analysis_result(
                 upload_result,
-                "Datei hochgeladen und Auftrag neu analysiert.",
+                "Datei hochgeladen und Analyse sichtbar gemacht.",
             )
         else:
             flash("Termine aktualisiert.", "success")
@@ -6970,6 +7062,23 @@ def partner_archivieren(slug, auftrag_id):
         "info",
     )
     return redirect(url_for("partner_dashboard", slug=slug))
+
+
+@app.route("/partner/<slug>/auftrag/<int:auftrag_id>/dokumente/geprueft", methods=["POST"])
+def partner_dokumente_geprueft(slug, auftrag_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
+        abort(404)
+    both_checked = confirm_document_review(auftrag_id, "autohaus")
+    if both_checked:
+        flash("Dokumentdaten sind jetzt doppelt geprüft.", "success")
+    else:
+        flash("Ihre Prüfung wurde gespeichert. Die Werkstatt prüft die Werte ebenfalls.", "warning")
+    target = "partner_angebot_detail" if auftrag.get("angebotsphase") else "partner_auftrag"
+    return redirect(url_for(target, slug=slug, auftrag_id=auftrag_id))
 
 
 @app.route("/partner/<slug>/auftraege/sammelaktion", methods=["POST"])
