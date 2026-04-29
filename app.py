@@ -275,6 +275,7 @@ DEFAULT_AUTOHAEUSER = [
         "zugangscode": "PFAFF2026",
         "portal_titel": "Portal Auto Pfaff",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Auto Pfaff.",
+        "notiz": "Aus Kundenordner angelegt und mit öffentlichem Impressum ergänzt am 26.04.2026.",
     },
     {
         "name": "Autohaus Ralph Müller OHG",
@@ -289,6 +290,7 @@ DEFAULT_AUTOHAEUSER = [
         "zugangscode": "MUELLER2026",
         "portal_titel": "Portal Autohaus Müller",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Autohaus Müller.",
+        "notiz": "Aus Rechnungen im Kundenordner übernommen am 26.04.2026.",
     },
     {
         "name": "HSE Autowelt GmbH",
@@ -303,6 +305,7 @@ DEFAULT_AUTOHAEUSER = [
         "zugangscode": "HSE2026",
         "portal_titel": "Portal HSE Autowelt",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von HSE Autowelt.",
+        "notiz": "Aus Kundenordner/Partnermappe ergänzt am 26.04.2026. Ansprechpartner bitte bei Gelegenheit final prüfen.",
     },
     {
         "name": "Johnatan Dold und Marcel Deisling GbR",
@@ -317,6 +320,7 @@ DEFAULT_AUTOHAEUSER = [
         "zugangscode": "DOLD2026",
         "portal_titel": "Portal Dold & Deisling",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Dold & Deisling.",
+        "notiz": "Adresse aus vorhandenen Rechnungen im Kundenordner übernommen am 26.04.2026.",
     },
     {
         "name": "Käsmann",
@@ -331,6 +335,7 @@ DEFAULT_AUTOHAEUSER = [
         "zugangscode": "KAES2026",
         "portal_titel": "Portal Käsmann",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Käsmann.",
+        "notiz": "Stammdaten ergänzt am 26.04.2026. Quelle: Käsmann-Impressum; Audi-Standort zusätzlich Industriestraße 1a, 74821 Mosbach.",
     },
     {
         "name": "MHC Mobility GmbH",
@@ -345,6 +350,106 @@ DEFAULT_AUTOHAEUSER = [
         "zugangscode": "MHC2026",
         "portal_titel": "Portal MHC Mobility",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von MHC Mobility.",
+        "notiz": "Aus Kundenordner und MHC-Impressum ergänzt am 26.04.2026.",
+    },
+    {
+        "name": "Kraftfahrzeugtechnik Lock",
+        "slug": "kraftfahrzeugtechnik-lock",
+        "portal_key": "72c1b85572a2468b",
+        "kontakt_name": "",
+        "email": "",
+        "telefon": "",
+        "strasse": "",
+        "plz": "",
+        "ort": "",
+        "zugangscode": "LOCK2026",
+        "portal_titel": "Portal Kraftfahrzeugtechnik Lock",
+        "willkommen_text": "",
+        "notiz": "",
+    },
+    {
+        "name": "Autohaus Günther GmbH",
+        "slug": "autohaus-guenther-gmbh",
+        "portal_key": "ac718b1335474918",
+        "kontakt_name": "Johannes Baumann",
+        "email": "johannes.baumann@guenther-dasautohaus.de",
+        "telefon": "06282/9230-25",
+        "strasse": "",
+        "plz": "",
+        "ort": "",
+        "zugangscode": "GUENTHER2026",
+        "portal_titel": "Portal Autohaus Günther",
+        "willkommen_text": "Willkommen im persönlichen Terminbereich von Autohaus Günther.",
+        "notiz": "Gebrauchtwagenkoordinator. Fax: 06282/6345. Webseite: www.wolfert-gruppe.de",
+    },
+]
+
+DEFAULT_AUFTRAEGE = [
+    {
+        "autohaus_slug": "autohaus-pfaff",
+        "kunde_name": "Sabine Jörg / Denis Schwalbe",
+        "fahrzeug": "Hyundai Kona SX2",
+        "fin_nummer": "KMHHB813XTU379862",
+        "auftragsnummer": "Schwalbe / 24.04.2026",
+        "kennzeichen": "MOS-J 1551",
+        "beschreibung": (
+            "Quelle: Email Denis Schwalbe vom 22.04.2026.\n"
+            "Endkunde: Sabine Jörg. Farbcode SAW.\n"
+            "1x Stoßstange hinten / Neuteil (SAW), 1x Radlaufleiste hinten rechts / Neuteil (SAW), "
+            "4x Zierleiste: 1x Neuteil und 3x Farbangleich wenn notwendig.\n"
+            "Fertigstellung gewünscht bis 24.04.2026, 12:00 Uhr."
+        ),
+        "analyse_text": "Stoßstange hinten, Radlaufleiste hinten rechts und Zierleisten lackieren",
+        "bauteile_override": "Stoßstange hinten\nRadlaufleiste hinten rechts\nZierleisten",
+        "status": 4,
+        "annahme_datum": "21.04.2026",
+        "start_datum": "21.04.2026",
+        "fertig_datum": "24.04.2026",
+        "abholtermin": "24.04.2026",
+        "notiz_intern": "Aus Pfaff-Mail/Kalender übernommen. Deadline 24.04.2026 bis 12 Uhr.",
+    },
+    {
+        "autohaus_slug": "autohaus-pfaff",
+        "kunde_name": "Frau Nies / Frank Frühwirth",
+        "fahrzeug": "Hyundai i10",
+        "fin_nummer": "",
+        "auftragsnummer": "61876",
+        "kennzeichen": "MOS-K 842",
+        "beschreibung": (
+            "Quelle: Email Frank Frühwirth vom 23.04.2026.\n"
+            "Unfallschaden Frau Nies, Gutachten-Nr. 61876.\n"
+            "Bitte einplanen vom 11.05.2026 bis 13.05.2026. Lackumfang aus Gutachten im Anhang."
+        ),
+        "analyse_text": "GP-Schaden, Lackumfang laut Gutachten",
+        "bauteile_override": "GP-Schaden laut Gutachten\nLackumfang aus Gutachten",
+        "status": 1,
+        "annahme_datum": "11.05.2026",
+        "start_datum": "11.05.2026",
+        "fertig_datum": "13.05.2026",
+        "abholtermin": "13.05.2026",
+        "notiz_intern": "Aus Pfaff-Mail/Kalender übernommen. Termin 11.05.-13.05.2026.",
+    },
+    {
+        "autohaus_slug": "autohaus-pfaff",
+        "kunde_name": "Auto Pfaff / Frank Frühwirth",
+        "fahrzeug": "Hyundai Kona SX2 EV",
+        "fin_nummer": "TMAH881BXSJ060170",
+        "auftragsnummer": "KV 2026-0415-01",
+        "kennzeichen": "MOS-HU 574",
+        "beschreibung": (
+            "Quelle: Kalender Disposition_Termine_KW16.ics und KV_Hyundai_Kona_MOS-HU574.pdf.\n"
+            "Delle in der Motorhaube mit Lackbeschädigung, Komplettinstandsetzung mittels Smart Repair.\n"
+            "Spachtelarbeiten, Spot-Lackierung Motorhaube Farbton Meta Blue PM2 sowie De-/Montage.\n"
+            "Termin bestätigt: 18.05.2026 bis 21.05.2026."
+        ),
+        "analyse_text": "Delle Motorhaube, Smart Repair komplett",
+        "bauteile_override": "Motorhaube\nSmart Repair\nSpot-Lackierung",
+        "status": 1,
+        "annahme_datum": "18.05.2026",
+        "start_datum": "18.05.2026",
+        "fertig_datum": "21.05.2026",
+        "abholtermin": "21.05.2026",
+        "notiz_intern": "Aus Kalender übernommen. KV brutto 416,50 EUR, netto 350,00 EUR.",
     },
 ]
 
@@ -3665,6 +3770,7 @@ def init_db():
     ensure_index(db, "idx_reklamationen_offen", "reklamationen", ("bearbeitet", "erstellt_am"))
 
     seed_default_autohaeuser(db)
+    seed_default_auftraege(db)
 
     rows = db.execute("SELECT id, portal_key FROM autohaeuser").fetchall()
     for row in rows:
@@ -3698,6 +3804,7 @@ def seed_default_autohaeuser(db):
             autohaus["zugangscode"],
             autohaus["portal_titel"],
             autohaus["willkommen_text"],
+            clean_text(autohaus.get("notiz")),
         )
         if existing:
             db.execute(
@@ -3705,7 +3812,7 @@ def seed_default_autohaeuser(db):
                 UPDATE autohaeuser
                 SET name=?, slug=?, portal_key=?, kontakt_name=?, email=?, telefon=?,
                     strasse=?, plz=?, ort=?, zugangscode=?, portal_titel=?,
-                    willkommen_text=?
+                    willkommen_text=?, notiz=?
                 WHERE id=?
                 """,
                 values + (existing["id"],),
@@ -3716,9 +3823,68 @@ def seed_default_autohaeuser(db):
             INSERT INTO autohaeuser
             (name, slug, portal_key, kontakt_name, email, telefon, strasse, plz, ort,
              zugangscode, portal_titel, willkommen_text, notiz, erstellt_am)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             values + (now,),
+        )
+
+
+def seed_default_auftraege(db):
+    now = now_str()
+    for auftrag in DEFAULT_AUFTRAEGE:
+        existing = db.execute(
+            """
+            SELECT id FROM auftraege
+            WHERE kennzeichen=? OR (auftragsnummer != '' AND auftragsnummer=?)
+            """,
+            (auftrag["kennzeichen"], auftrag["auftragsnummer"]),
+        ).fetchone()
+        if existing:
+            continue
+        autohaus = db.execute(
+            "SELECT id FROM autohaeuser WHERE slug=?",
+            (auftrag["autohaus_slug"],),
+        ).fetchone()
+        if not autohaus:
+            continue
+        db.execute(
+            """
+            INSERT INTO auftraege
+            (token, kunde_email, autohaus_id, kunde_name, fahrzeug, fin_nummer,
+             auftragsnummer, rep_max_kosten, bauteile_override, kennzeichen,
+             beschreibung, analyse_text, angebotsphase, angebot_abgesendet,
+             angebot_status, werkstatt_angebot_text, werkstatt_angebot_preis,
+             werkstatt_angebot_am, status, annahme_datum, start_datum,
+             fertig_datum, abholtermin, transport_art, archiviert, kontakt_telefon,
+             notiz_intern, quelle, erstellt_am, geaendert_am)
+            VALUES (?, '', ?, ?, ?, ?, ?, '', ?, ?, ?, ?, 0, 0, '', '', '', '',
+                    ?, ?, ?, ?, ?, 'standard', 0, '', ?, 'intern', ?, ?)
+            """,
+            (
+                uuid.uuid4().hex[:12],
+                autohaus["id"],
+                auftrag["kunde_name"],
+                auftrag["fahrzeug"],
+                auftrag["fin_nummer"],
+                auftrag["auftragsnummer"],
+                auftrag["bauteile_override"],
+                auftrag["kennzeichen"],
+                auftrag["beschreibung"],
+                auftrag["analyse_text"],
+                auftrag["status"],
+                auftrag["annahme_datum"],
+                auftrag["start_datum"],
+                auftrag["fertig_datum"],
+                auftrag["abholtermin"],
+                auftrag["notiz_intern"],
+                now,
+                now,
+            ),
+        )
+        auftrag_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        db.execute(
+            "INSERT INTO status_log (auftrag_id, status, zeitstempel) VALUES (?, ?, ?)",
+            (auftrag_id, auftrag["status"], now),
         )
 
 
