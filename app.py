@@ -228,6 +228,8 @@ DELETED_UPLOAD_DIR = pathlib.Path(
 AUTO_BACKUP_ENABLED = env_flag("AUTO_BACKUP_ENABLED", True)
 AUTO_BACKUP_INTERVAL_SECONDS = max(60, env_int("AUTO_BACKUP_INTERVAL_SECONDS", 3600))
 AUTO_BACKUP_KEEP = max(1, env_int("AUTO_BACKUP_KEEP", 168))
+AUTO_CHANGE_BACKUP_ENABLED = env_flag("AUTO_CHANGE_BACKUP_ENABLED", True)
+AUTO_CHANGE_BACKUP_DELAY_SECONDS = max(1, env_int("AUTO_CHANGE_BACKUP_DELAY_SECONDS", 3))
 OPENAI_EXTRACTION_MODEL = os.environ.get("OPENAI_EXTRACTION_MODEL", "gpt-4o")
 OPENAI_API_URL = os.environ.get(
     "OPENAI_API_URL", "https://api.openai.com/v1/chat/completions"
@@ -710,6 +712,13 @@ def add_csrf_fields(response):
         flags=re.IGNORECASE,
     )
     response.set_data(html)
+    return response
+
+
+@app.after_request
+def backup_after_successful_change(response):
+    if not app.config.get("TESTING") and response.status_code < 400 and should_backup_after_request():
+        schedule_change_backup(request.endpoint)
     return response
 
 
@@ -3230,6 +3239,9 @@ BACKUP_TABLES = (
 )
 _backup_lock = threading.Lock()
 _backup_thread_started = False
+_change_backup_lock = threading.Lock()
+_change_backup_pending = False
+_change_backup_running = False
 
 
 def list_table_rows_for_backup(db, table_name):
@@ -3324,6 +3336,53 @@ def create_safety_backup(reason):
     except Exception as exc:
         print(f"WARNUNG: Sicherheitsbackup fehlgeschlagen ({reason}): {exc}")
         return None
+
+
+def change_backup_worker():
+    global _change_backup_pending, _change_backup_running
+    while True:
+        time.sleep(AUTO_CHANGE_BACKUP_DELAY_SECONDS)
+        with _change_backup_lock:
+            if not _change_backup_pending:
+                _change_backup_running = False
+                return
+            _change_backup_pending = False
+        try:
+            create_backup_package("change")
+        except Exception as exc:
+            print(f"WARNUNG: Änderungsbackup fehlgeschlagen: {exc}")
+
+
+def schedule_change_backup(reason="change"):
+    global _change_backup_pending, _change_backup_running
+    if not AUTO_CHANGE_BACKUP_ENABLED or not AUTO_BACKUP_ENABLED:
+        return
+    with _change_backup_lock:
+        _change_backup_pending = True
+        if _change_backup_running:
+            return
+        _change_backup_running = True
+    thread = threading.Thread(target=change_backup_worker, daemon=True)
+    thread.start()
+
+
+DATA_CHANGE_ENDPOINT_EXCLUDES = {
+    "admin_backup_sofort",
+    "login",
+    "partner_login",
+    "partner_login_key",
+    "partner_login_slug",
+    "partner_logout",
+}
+
+
+def should_backup_after_request():
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return False
+    endpoint = clean_text(request.endpoint)
+    if not endpoint or endpoint in DATA_CHANGE_ENDPOINT_EXCLUDES:
+        return False
+    return True
 
 
 def move_upload_to_deleted_area(path, reason="deleted"):
@@ -5120,9 +5179,11 @@ def flash_upload_analysis_result(saved_result, success_message="Datei hochgelade
         saved, updates = saved_result
     else:
         saved, updates = saved_result, {}
-    if not saved:
-        return saved
     analysis_error = clean_text((updates or {}).get("_analysis_error"))
+    if not saved:
+        if analysis_error:
+            flash(f"Datei konnte nicht ausgewertet werden. {analysis_error}", "warning")
+        return saved
     if analysis_error:
         flash(f"Datei gespeichert, aber die Analyse ist abgebrochen. {analysis_error}", "warning")
         return saved
@@ -6783,7 +6844,13 @@ def partner_neuer_auftrag(slug):
             transport_art=clean_text(form.get("transport_art")) or "standard",
             kontakt_telefon=clean_text(form.get("kontakt_telefon")),
         )
-        upload_result = save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
+        try:
+            upload_result = save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
+        except Exception as exc:
+            upload_result = (
+                0,
+                {"_analysis_error": f"Upload/Analyse konnte nicht abgeschlossen werden: {clean_text(str(exc))[:300]}"},
+            )
         if aktion == "upload_analyze":
             flash_upload_analysis_result(
                 upload_result,
@@ -7020,7 +7087,13 @@ def partner_auftrag(slug, auftrag_id):
         if aktion == "upload_analyze" and not erlaubte_dateien:
             flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.", "warning")
             return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
-        upload_result = save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
+        try:
+            upload_result = save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
+        except Exception as exc:
+            upload_result = (
+                0,
+                {"_analysis_error": f"Upload/Analyse konnte nicht abgeschlossen werden: {clean_text(str(exc))[:300]}"},
+            )
         save_uploads(
             auftrag_id,
             get_allowed_finish_uploads(request.files.getlist("fertigbilder")),
