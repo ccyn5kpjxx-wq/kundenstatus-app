@@ -17,6 +17,17 @@ Nicht nach GitHub pushen:
 - `data/uploads/`
 - echte Kundendaten, Belege, Bilder, API-Keys
 
+## Was stabil ist und was nicht
+
+Der lokale Cloudflare-/Tunnel-Link ist nur ein Testzugang. Wenn der Tunnel oder der PC aus ist,
+ist nur der Link weg. Die lokalen Daten bleiben unter `data/` erhalten.
+
+Für stabilen Betrieb gehört die App auf Render:
+
+- Datenbank: Render Postgres über `DATABASE_URL`
+- Uploads/Backups: Render Disk unter `/var/data`
+- Öffentlicher Link: feste Render-Adresse, z. B. `https://kundenstatus-app.onrender.com`
+
 ## Render einrichten
 
 1. GitHub-Repo bei Render als neuen Web Service verbinden.
@@ -43,6 +54,30 @@ UPLOAD_DIR=/var/data/uploads
 ```
 
 Wichtig: Im `render.yaml` ist eine Postgres-Datenbank vorbereitet. `DATABASE_URL` wird daraus automatisch gesetzt.
+
+## Lokale Daten nach Render übernehmen
+
+Vor dem Umzug lokal ein Importpaket erzeugen:
+
+```powershell
+python scripts/export_render_import_package.py
+```
+
+Die Ausgabe liegt unter:
+
+```text
+data/exports/kundenstatus-render-import-<datum>.zip
+```
+
+Nach dem Render-Deploy:
+
+1. Render-Admin öffnen: `https://<render-app>.onrender.com/admin`
+2. Mit `ADMIN_PASS` einloggen.
+3. Im Dashboard das Datenpaket unter "Datenimport" hochladen.
+
+Der Import übernimmt Fahrzeuge, Autohäuser, Chats, Statuslog, Hinweise, Reklamationen,
+Dateiverweise und die Upload-Dateien. Vor dem Import legt die App auf dem Server ein
+Sicherheitsbackup an.
 
 ## Uploads
 

@@ -240,9 +240,14 @@ GOOGLE_DOC_AI_TIMEOUT = env_int(
     "DOCUMENT_ANALYSIS_TIMEOUT_SECONDS",
     20 if RUNNING_ON_RENDER else 45,
 )
+OPENAI_API_TIMEOUT = env_int(
+    "OPENAI_API_TIMEOUT_SECONDS",
+    max(GOOGLE_DOC_AI_TIMEOUT, 90),
+)
 ENABLE_LOCAL_OCR = env_flag("ENABLE_LOCAL_OCR", not RUNNING_ON_RENDER)
 OPENAI_VISION_MAX_PAGES = 4
 OPENAI_VISION_MAX_IMAGE_SIDE = 1800
+OPENAI_TRANSIENT_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 CSRF_FIELD_NAME = "csrf_token"
 
 GOOGLE_ACCESS_TOKEN = {"token": "", "expires_at": 0}
@@ -1171,6 +1176,10 @@ def extract_openai_response_json(data):
 def friendly_analysis_error(message, provider="OpenAI"):
     normalized = normalize_document_text(message)
     provider = clean_text(provider) or "KI"
+    if "timeout" in normalized or "timed out" in normalized or "read timed out" in normalized:
+        return f"{provider} hat zu lange gebraucht. Die lokale Auslesung bleibt aktiv."
+    if "connection" in normalized or "network" in normalized or "dns" in normalized:
+        return f"{provider} konnte vom Server nicht erreicht werden. Die lokale Auslesung bleibt aktiv."
     if "401" in normalized or "unauthorized" in normalized:
         return f"{provider}-Zugang ist nicht gültig oder abgelaufen. Die lokale Auslesung bleibt aktiv."
     if "403" in normalized or "forbidden" in normalized:
@@ -1180,6 +1189,70 @@ def friendly_analysis_error(message, provider="OpenAI"):
     if normalized:
         return f"{provider}-Auslesung war gerade nicht erreichbar. Die lokale Auslesung bleibt aktiv."
     return ""
+
+
+def extract_openai_error_message(response):
+    if response is None:
+        return ""
+    detail = ""
+    try:
+        payload = response.json()
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict):
+            detail = clean_text(error.get("message") or error.get("code") or error.get("type"))
+        elif error:
+            detail = clean_text(error)
+    except Exception:
+        detail = clean_text(getattr(response, "text", ""))
+    status = f"{response.status_code} {getattr(response, 'reason', '')}".strip()
+    return f"{status}: {detail[:500]}" if detail else status
+
+
+def post_openai_chat_completion(requests_module, payload):
+    last_error = ""
+    for attempt in range(3):
+        try:
+            response = requests_module.post(
+                OPENAI_API_URL,
+                headers={
+                    "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=OPENAI_API_TIMEOUT,
+            )
+        except Exception as exc:
+            last_error = str(exc)
+            if attempt < 2:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            return None, last_error
+        if response.status_code in OPENAI_TRANSIENT_STATUS_CODES and attempt < 2:
+            retry_after = response.headers.get("Retry-After")
+            try:
+                wait_seconds = min(max(float(retry_after or 0), 1), 8)
+            except ValueError:
+                wait_seconds = 1.5 * (attempt + 1)
+            time.sleep(wait_seconds)
+            continue
+        return response, ""
+    return None, last_error
+
+
+def should_retry_openai_without_schema(error_message):
+    normalized = normalize_document_text(error_message)
+    return (
+        "response_format" in normalized
+        or "json_schema" in normalized
+        or "schema" in normalized
+        or "structured output" in normalized
+    )
+
+
+def build_openai_json_mode_fallback_payload(payload):
+    fallback = dict(payload)
+    fallback["response_format"] = {"type": "json_object"}
+    return fallback
 
 
 def encode_openai_image_data_url(image_bytes, mime_type):
@@ -1322,25 +1395,48 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
     requests_module = get_requests()
     if requests_module is None:
         return {"data": {}, "error": "requests ist nicht verfuegbar"}
-    response = requests_module.post(
-        OPENAI_API_URL,
-        headers={
-            "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=GOOGLE_DOC_AI_TIMEOUT,
-    )
+    response, request_error = post_openai_chat_completion(requests_module, payload)
+    if request_error:
+        return {
+            "data": {},
+            "error": friendly_analysis_error(request_error, "OpenAI"),
+        }
     if response.status_code >= 400:
+        error_message = extract_openai_error_message(response)
+        if response.status_code == 400 and should_retry_openai_without_schema(error_message):
+            fallback_payload = build_openai_json_mode_fallback_payload(payload)
+            response, request_error = post_openai_chat_completion(
+                requests_module,
+                fallback_payload,
+            )
+            if request_error:
+                return {
+                    "data": {},
+                    "error": friendly_analysis_error(request_error, "OpenAI"),
+                }
+            if response.status_code < 400:
+                parsed = extract_openai_response_json(response.json())
+                if parsed:
+                    return {"data": parsed, "error": ""}
+                return {
+                    "data": {},
+                    "error": "OpenAI-Antwort enthielt kein lesbares JSON.",
+                }
+            error_message = extract_openai_error_message(response)
         return {
             "data": {},
             "error": friendly_analysis_error(
-                f"{response.status_code} {response.reason}",
+                error_message,
                 "OpenAI",
             ),
         }
     response.raise_for_status()
     parsed = extract_openai_response_json(response.json())
+    if not parsed:
+        return {
+            "data": {},
+            "error": "OpenAI-Antwort enthielt kein lesbares JSON.",
+        }
     return {"data": parsed, "error": ""}
 
 
@@ -3275,6 +3371,9 @@ class PostgresConnection:
 
     def commit(self):
         self.conn.commit()
+
+    def rollback(self):
+        self.conn.rollback()
 
     def close(self):
         if self.close_on_close:
@@ -6116,13 +6215,117 @@ def dashboard():
     )
 
 
+def extract_import_package_files(archive, names, tmp_path):
+    if "auftraege.db" not in names:
+        raise ValueError("Datenpaket ungültig: auftraege.db fehlt.")
+
+    imported_db = tmp_path / "auftraege.db"
+    with archive.open("auftraege.db") as source, imported_db.open("wb") as target:
+        shutil.copyfileobj(source, target)
+
+    probe = sqlite3.connect(imported_db)
+    try:
+        probe.execute("SELECT COUNT(*) FROM auftraege").fetchone()
+        probe.execute("SELECT COUNT(*) FROM autohaeuser").fetchone()
+    finally:
+        probe.close()
+
+    imported_uploads = tmp_path / "uploads"
+    imported_uploads.mkdir(exist_ok=True)
+    for name in names:
+        if not name.startswith("uploads/") or name.endswith("/"):
+            continue
+        stored_name = pathlib.Path(name).name
+        if not stored_name:
+            continue
+        with archive.open(name) as source, (imported_uploads / stored_name).open("wb") as target:
+            shutil.copyfileobj(source, target)
+
+    return imported_db, imported_uploads
+
+
+def replace_uploads_from_import(imported_uploads):
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    for existing in UPLOAD_DIR.iterdir():
+        if existing.is_file():
+            move_upload_to_deleted_area(existing, "before-data-import")
+
+    for imported_upload in imported_uploads.iterdir():
+        if imported_upload.is_file():
+            shutil.copy2(imported_upload, UPLOAD_DIR / imported_upload.name)
+
+
+def reset_postgres_id_sequences(db):
+    for table_name in BACKUP_TABLES:
+        try:
+            columns = get_table_columns(db, table_name)
+        except Exception:
+            continue
+        if "id" not in columns:
+            continue
+        db.execute(
+            f"""
+            SELECT setval(
+                pg_get_serial_sequence('{table_name}', 'id'),
+                COALESCE((SELECT MAX(id) FROM {table_name}), 1),
+                (SELECT COUNT(*) FROM {table_name}) > 0
+            )
+            """
+        )
+
+
+def import_sqlite_rows_into_current_database(imported_db):
+    source = sqlite3.connect(imported_db)
+    source.row_factory = sqlite3.Row
+    target = get_db()
+    try:
+        source_tables = {
+            row["name"]
+            for row in source.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        for table_name in reversed(BACKUP_TABLES):
+            target.execute(f"DELETE FROM {table_name}")
+
+        for table_name in BACKUP_TABLES:
+            if table_name not in source_tables:
+                continue
+            target_columns = get_table_columns(target, table_name)
+            if not target_columns:
+                continue
+            rows = source.execute(f"SELECT * FROM {table_name}").fetchall()
+            for row in rows:
+                data = {
+                    key: row[key]
+                    for key in row.keys()
+                    if key in target_columns
+                }
+                if not data:
+                    continue
+                columns = list(data.keys())
+                placeholders = ", ".join("?" for _ in columns)
+                column_sql = ", ".join(columns)
+                target.execute(
+                    f"INSERT INTO {table_name} ({column_sql}) VALUES ({placeholders})",
+                    tuple(data[column] for column in columns),
+                )
+
+        if USE_POSTGRES:
+            reset_postgres_id_sequences(target)
+        target.commit()
+    except Exception:
+        if hasattr(target, "rollback"):
+            target.rollback()
+        raise
+    finally:
+        source.close()
+        target.close()
+
+
 @app.route("/admin/daten-import", methods=["POST"])
 @admin_required
 def admin_daten_import():
-    if USE_POSTGRES:
-        flash("Datenimport per SQLite-Paket ist bei Postgres nicht verfügbar.", "warning")
-        return redirect(url_for("dashboard"))
-
     paket = request.files.get("datenpaket")
     if not paket or not paket.filename:
         flash("Bitte ein Datenpaket auswählen.", "warning")
@@ -6136,49 +6339,26 @@ def admin_daten_import():
 
             with zipfile.ZipFile(archive_path) as archive:
                 names = set(archive.namelist())
-                if "auftraege.db" not in names:
-                    flash("Datenpaket ungültig: auftraege.db fehlt.", "danger")
-                    return redirect(url_for("dashboard"))
-
-                imported_db = tmp_path / "auftraege.db"
-                with archive.open("auftraege.db") as source, imported_db.open("wb") as target:
-                    shutil.copyfileobj(source, target)
-
-                probe = sqlite3.connect(imported_db)
-                try:
-                    probe.execute("SELECT COUNT(*) FROM auftraege").fetchone()
-                    probe.execute("SELECT COUNT(*) FROM autohaeuser").fetchone()
-                finally:
-                    probe.close()
-
-                imported_uploads = tmp_path / "uploads"
-                imported_uploads.mkdir(exist_ok=True)
-                for name in names:
-                    if not name.startswith("uploads/") or name.endswith("/"):
-                        continue
-                    stored_name = pathlib.Path(name).name
-                    if not stored_name:
-                        continue
-                    with archive.open(name) as source, (imported_uploads / stored_name).open("wb") as target:
-                        shutil.copyfileobj(source, target)
+                imported_db, imported_uploads = extract_import_package_files(
+                    archive,
+                    names,
+                    tmp_path,
+                )
 
                 create_safety_backup("before-data-import")
-                DATA_DIR.mkdir(exist_ok=True)
-                UPLOAD_DIR.mkdir(exist_ok=True)
-                backup_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
-                if DB.exists():
-                    shutil.copy2(DB, DATA_DIR / f"auftraege.backup-{backup_suffix}.db")
-                shutil.copy2(imported_db, DB)
-
-                for existing in UPLOAD_DIR.iterdir():
-                    if existing.is_file():
-                        move_upload_to_deleted_area(existing, "before-data-import")
-
-                for imported_upload in imported_uploads.iterdir():
-                    if imported_upload.is_file():
-                        shutil.copy2(imported_upload, UPLOAD_DIR / imported_upload.name)
+                if USE_POSTGRES:
+                    import_sqlite_rows_into_current_database(imported_db)
+                else:
+                    DATA_DIR.mkdir(exist_ok=True)
+                    backup_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+                    if DB.exists():
+                        shutil.copy2(DB, DATA_DIR / f"auftraege.backup-{backup_suffix}.db")
+                    shutil.copy2(imported_db, DB)
+                replace_uploads_from_import(imported_uploads)
 
         flash("Daten wurden importiert. Fahrzeuge und Dateien sind jetzt auf diesem Server verfügbar.", "success")
+    except ValueError as exc:
+        flash(clean_text(str(exc))[:300], "danger")
     except Exception as exc:
         flash(f"Datenimport fehlgeschlagen: {clean_text(str(exc))[:300]}", "danger")
     return redirect(url_for("dashboard"))
