@@ -14,6 +14,7 @@
     .shell { max-width:1180px; margin:0 auto; padding:32px 16px; }
     .panel { background:#fffdf9; border-radius:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
     .chip { display:inline-flex; align-items:center; padding:.4rem .75rem; border-radius:999px; background:#f4ede4; border:1px solid #e4d6c3; margin:0 .4rem .4rem 0; }
+    .mail-badge { display:inline-flex; min-width:1.45rem; height:1.45rem; align-items:center; justify-content:center; margin-left:.35rem; padding:0 .42rem; border-radius:999px; background:#d64545; color:#fff; font-size:.78rem; font-weight:700; line-height:1; }
     .process-card {
       border:1px solid #e4d6c3;
       background:linear-gradient(135deg,#fff8ed,#f6ebdc);
@@ -143,7 +144,10 @@
           <h1 class="mb-1">{{ 'Angebotsanfrage bearbeiten' if angebot else 'Angebot anfordern' }}</h1>
           <div class="text-muted">Schaden einreichen, Werkstatt-Angebot erhalten und danach bewusst annehmen.</div>
         </div>
-        <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zurück</a>
+        <div class="d-flex gap-2 flex-wrap">
+          <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
+          <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zurück</a>
+        </div>
       </div>
 
       <div class="process-card mb-4">

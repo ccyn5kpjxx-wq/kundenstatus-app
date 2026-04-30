@@ -8,7 +8,7 @@ Partner: http://localhost:5000/partner/<slug>
 
 from collections import defaultdict
 import base64
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
 from functools import wraps
 from html import escape
@@ -568,6 +568,16 @@ EVENT_FELDER = (
     ("abholtermin", "Abholung", "success"),
 )
 
+KALENDER_KATEGORIEN = {
+    "termin": {"label": "Termin", "farbe": "primary"},
+    "urlaub": {"label": "Urlaub", "farbe": "success"},
+    "geburtstag": {"label": "Geburtstag", "farbe": "warning"},
+    "privat": {"label": "Privat", "farbe": "secondary"},
+    "betrieb": {"label": "Betrieb", "farbe": "dark"},
+    "feiertag": {"label": "Feiertag", "farbe": "danger"},
+    "hinweis": {"label": "Hinweis", "farbe": "info"},
+}
+
 DOCUMENT_REVIEW_FIELDS = (
     ("fahrzeug", "Fahrzeug"),
     ("kennzeichen", "Kennzeichen"),
@@ -810,7 +820,11 @@ def csrf_field():
 
 @app.context_processor
 def inject_csrf_helpers():
-    return {"csrf_token": get_csrf_token, "csrf_field": csrf_field}
+    return {
+        "csrf_token": get_csrf_token,
+        "csrf_field": csrf_field,
+        "admin_postfach_count": admin_postfach_count,
+    }
 
 
 @app.before_request
@@ -3661,8 +3675,10 @@ BACKUP_TABLES = (
     "status_log",
     "chat_nachrichten",
     "benachrichtigungen",
+    "postfach_ausblendungen",
     "verzoegerungen",
     "reklamationen",
+    "kalender_notizen",
 )
 _backup_lock = threading.Lock()
 _backup_thread_started = False
@@ -4041,6 +4057,24 @@ def init_db():
             erstellt_am       TEXT NOT NULL,
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
         );
+
+        CREATE TABLE IF NOT EXISTS kalender_notizen (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            datum        TEXT NOT NULL,
+            titel        TEXT NOT NULL,
+            notiz        TEXT DEFAULT '',
+            kategorie    TEXT DEFAULT 'termin',
+            wiederholung TEXT DEFAULT 'einmalig',
+            erstellt_am  TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS postfach_ausblendungen (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            empfaenger   TEXT NOT NULL,
+            autohaus_id  INTEGER DEFAULT 0,
+            item_key     TEXT NOT NULL,
+            erstellt_am  TEXT NOT NULL
+        );
         """
     )
 
@@ -4102,6 +4136,13 @@ def init_db():
     ensure_index(db, "idx_status_log_lookup", "status_log", ("status", "zeitstempel", "auftrag_id"))
     ensure_index(db, "idx_verzoegerungen_offen", "verzoegerungen", ("uebernommen", "erstellt_am"))
     ensure_index(db, "idx_reklamationen_offen", "reklamationen", ("bearbeitet", "erstellt_am"))
+    ensure_index(db, "idx_kalender_notizen_datum", "kalender_notizen", ("datum", "wiederholung"))
+    ensure_index(
+        db,
+        "idx_postfach_ausblendungen_lookup",
+        "postfach_ausblendungen",
+        ("empfaenger", "autohaus_id", "item_key"),
+    )
 
     seed_default_autohaeuser(db)
     seed_default_auftraege(db)
@@ -5430,7 +5471,7 @@ def list_autohaus_benachrichtigungen(autohaus_id, limit=10):
     db = get_db()
     rows = db.execute(
         """
-        SELECT b.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer
+        SELECT b.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer, a.angebotsphase
         FROM benachrichtigungen b
         JOIN auftraege a ON a.id = b.auftrag_id
         WHERE a.autohaus_id=? AND a.archiviert=0
@@ -5440,7 +5481,12 @@ def list_autohaus_benachrichtigungen(autohaus_id, limit=10):
         (autohaus_id, limit),
     ).fetchall()
     db.close()
-    return [dict(row) for row in rows]
+    hidden = postfach_hidden_keys("autohaus", autohaus_id)
+    return [
+        dict(row)
+        for row in rows
+        if f"autohaus-hinweis-{row['id']}" not in hidden
+    ]
 
 
 def add_chat_nachricht(auftrag_id, absender, nachricht):
@@ -5524,6 +5570,393 @@ def list_offene_chat_nachrichten(limit=12):
     ).fetchall()
     db.close()
     return [dict(row) for row in rows]
+
+
+def parse_postfach_datetime(value):
+    cleaned = clean_text(value)
+    if not cleaned:
+        return datetime.min
+    for fmt in (DATETIME_FMT, "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(cleaned, fmt)
+        except ValueError:
+            continue
+    return datetime.min
+
+
+def postfach_excerpt(value, length=180):
+    cleaned = clean_text(value)
+    if len(cleaned) <= length:
+        return cleaned
+    return cleaned[: max(0, length - 1)].rstrip() + "…"
+
+
+def postfach_hidden_keys(empfaenger, autohaus_id=0):
+    empfaenger = clean_text(empfaenger) or "admin"
+    autohaus_id = int(autohaus_id or 0)
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT item_key
+        FROM postfach_ausblendungen
+        WHERE empfaenger=? AND autohaus_id=?
+        """,
+        (empfaenger, autohaus_id),
+    ).fetchall()
+    db.close()
+    return {clean_text(row["item_key"]) for row in rows}
+
+
+def hide_postfach_item(empfaenger, item_key, autohaus_id=0):
+    empfaenger = clean_text(empfaenger) or "admin"
+    item_key = clean_text(item_key)
+    if not item_key:
+        return
+    autohaus_id = int(autohaus_id or 0)
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO postfach_ausblendungen (empfaenger, autohaus_id, item_key, erstellt_am)
+        SELECT ?, ?, ?, ?
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM postfach_ausblendungen
+            WHERE empfaenger=? AND autohaus_id=? AND item_key=?
+        )
+        """,
+        (
+            empfaenger,
+            autohaus_id,
+            item_key,
+            now_str(),
+            empfaenger,
+            autohaus_id,
+            item_key,
+        ),
+    )
+    db.commit()
+    db.close()
+
+
+def sort_postfach_items(items, limit=80):
+    items.sort(
+        key=lambda item: (
+            parse_postfach_datetime(item.get("erstellt_am")),
+            clean_text(item.get("item_key")),
+        ),
+        reverse=True,
+    )
+    return items[:limit]
+
+
+def list_admin_postfach_items(limit=80):
+    hidden = postfach_hidden_keys("admin", 0)
+    items = []
+    db = get_db()
+
+    rows = db.execute(
+        """
+        SELECT c.id, c.auftrag_id, c.nachricht, c.erstellt_am,
+               a.fahrzeug, a.kennzeichen, a.auftragsnummer, h.name AS autohaus_name
+        FROM chat_nachrichten c
+        JOIN auftraege a ON a.id = c.auftrag_id
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE c.absender='autohaus' AND c.gelesen_admin=0 AND a.archiviert=0
+        ORDER BY c.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    for row in rows:
+        key = f"admin-chat-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Chat",
+                "titel": "Neue Nachricht vom Autohaus",
+                "nachricht": postfach_excerpt(row["nachricht"]),
+                "erstellt_am": row["erstellt_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": url_for("auftrag_detail", auftrag_id=row["auftrag_id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT a.id, a.fahrzeug, a.kennzeichen, a.auftragsnummer, a.analyse_text,
+               a.beschreibung, a.geaendert_am, h.name AS autohaus_name
+        FROM auftraege a
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE a.angebotsphase=1
+          AND a.angebot_abgesendet=1
+          AND a.angebot_status='angefragt'
+          AND a.archiviert=0
+        ORDER BY a.geaendert_am DESC, a.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    for row in rows:
+        key = f"admin-angebot-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Anfrage",
+                "titel": "Offene Angebotsanfrage",
+                "nachricht": postfach_excerpt(row["analyse_text"] or row["beschreibung"] or "Das Autohaus wartet auf ein Werkstatt-Angebot."),
+                "erstellt_am": row["geaendert_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": url_for("auftrag_detail", auftrag_id=row["id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT a.id, a.fahrzeug, a.kennzeichen, a.analyse_text, a.beschreibung,
+               a.erstellt_am, h.name AS autohaus_name
+        FROM auftraege a
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE a.quelle='autohaus'
+          AND a.angebotsphase=0
+          AND a.archiviert=0
+          AND a.status=1
+        ORDER BY a.erstellt_am DESC, a.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    for row in rows:
+        key = f"admin-auftrag-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Fahrzeug",
+                "titel": "Neues Fahrzeug vom Autohaus",
+                "nachricht": postfach_excerpt(row["analyse_text"] or row["beschreibung"] or "Neuer Auftrag wartet auf Prüfung."),
+                "erstellt_am": row["erstellt_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": url_for("auftrag_detail", auftrag_id=row["id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT v.id, v.auftrag_id, v.meldung, v.erstellt_am,
+               a.fahrzeug, a.kennzeichen, h.name AS autohaus_name
+        FROM verzoegerungen v
+        JOIN auftraege a ON a.id = v.auftrag_id
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE v.uebernommen=0 AND a.archiviert=0
+        ORDER BY v.erstellt_am DESC, v.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    for row in rows:
+        key = f"admin-verzoegerung-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Termin",
+                "titel": "Terminänderung gemeldet",
+                "nachricht": postfach_excerpt(row["meldung"]),
+                "erstellt_am": row["erstellt_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": url_for("auftrag_detail", auftrag_id=row["auftrag_id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT r.id, r.auftrag_id, r.meldung, r.erstellt_am,
+               a.fahrzeug, a.kennzeichen, h.name AS autohaus_name
+        FROM reklamationen r
+        JOIN auftraege a ON a.id = r.auftrag_id
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE r.bearbeitet=0 AND a.archiviert=0
+        ORDER BY r.erstellt_am DESC, r.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    for row in rows:
+        key = f"admin-reklamation-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Alarm",
+                "titel": "Reklamation offen",
+                "nachricht": postfach_excerpt(row["meldung"]),
+                "erstellt_am": row["erstellt_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": url_for("auftrag_detail", auftrag_id=row["auftrag_id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT a.id, a.fahrzeug, a.kennzeichen, a.analyse_hinweis, a.geaendert_am,
+               h.name AS autohaus_name
+        FROM auftraege a
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE a.analyse_pruefen=1
+          AND a.analyse_werkstatt_geprueft=0
+          AND a.archiviert=0
+        ORDER BY a.geaendert_am DESC, a.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    db.close()
+    for row in rows:
+        key = f"admin-dokument-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Prüfung",
+                "titel": "Dokumentprüfung offen",
+                "nachricht": postfach_excerpt(row["analyse_hinweis"] or "Erkannte Werte müssen von der Werkstatt geprüft werden."),
+                "erstellt_am": row["geaendert_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": url_for("auftrag_detail", auftrag_id=row["id"]),
+            }
+        )
+
+    return sort_postfach_items(items, limit)
+
+
+def admin_postfach_count():
+    try:
+        return len(list_admin_postfach_items(limit=200))
+    except Exception:
+        return 0
+
+
+def list_partner_postfach_items(autohaus_id, slug, limit=80):
+    autohaus_id = int(autohaus_id or 0)
+    hidden = postfach_hidden_keys("autohaus", autohaus_id)
+    items = []
+    db = get_db()
+
+    rows = db.execute(
+        """
+        SELECT b.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer, a.angebotsphase
+        FROM benachrichtigungen b
+        JOIN auftraege a ON a.id = b.auftrag_id
+        WHERE a.autohaus_id=? AND a.archiviert=0
+        ORDER BY b.id DESC
+        LIMIT 80
+        """,
+        (autohaus_id,),
+    ).fetchall()
+    for row in rows:
+        key = f"autohaus-hinweis-{row['id']}"
+        if key in hidden:
+            continue
+        endpoint = "partner_angebot_detail" if row["angebotsphase"] else "partner_auftrag"
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Werkstatt",
+                "titel": row["titel"],
+                "nachricht": postfach_excerpt(row["nachricht"]),
+                "erstellt_am": row["erstellt_am"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": url_for(endpoint, slug=slug, auftrag_id=row["auftrag_id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT c.id, c.auftrag_id, c.nachricht, c.erstellt_am,
+               a.fahrzeug, a.kennzeichen
+        FROM chat_nachrichten c
+        JOIN auftraege a ON a.id = c.auftrag_id
+        WHERE a.autohaus_id=?
+          AND c.absender='werkstatt'
+          AND c.gelesen_autohaus=0
+          AND a.archiviert=0
+        ORDER BY c.id DESC
+        LIMIT 80
+        """,
+        (autohaus_id,),
+    ).fetchall()
+    for row in rows:
+        key = f"autohaus-chat-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Chat",
+                "titel": "Neue Nachricht der Werkstatt",
+                "nachricht": postfach_excerpt(row["nachricht"]),
+                "erstellt_am": row["erstellt_am"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": url_for("partner_auftrag", slug=slug, auftrag_id=row["auftrag_id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT a.id, a.fahrzeug, a.kennzeichen, a.analyse_hinweis, a.geaendert_am, a.angebotsphase
+        FROM auftraege a
+        WHERE a.autohaus_id=?
+          AND a.analyse_pruefen=1
+          AND a.analyse_autohaus_geprueft=0
+          AND a.archiviert=0
+        ORDER BY a.geaendert_am DESC, a.id DESC
+        LIMIT 80
+        """,
+        (autohaus_id,),
+    ).fetchall()
+    db.close()
+    for row in rows:
+        key = f"autohaus-dokument-{row['id']}"
+        if key in hidden:
+            continue
+        endpoint = "partner_angebot_detail" if row["angebotsphase"] else "partner_auftrag"
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Prüfung",
+                "titel": "Dokumentprüfung offen",
+                "nachricht": postfach_excerpt(row["analyse_hinweis"] or "Erkannte Werte müssen geprüft werden."),
+                "erstellt_am": row["geaendert_am"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": url_for(endpoint, slug=slug, auftrag_id=row["id"]),
+            }
+        )
+
+    return sort_postfach_items(items, limit)
+
+
+def partner_postfach_count(autohaus_id, slug):
+    try:
+        return len(list_partner_postfach_items(autohaus_id, slug, limit=200))
+    except Exception:
+        return 0
 
 
 def get_verzoegerung(verzoegerung_id):
@@ -6158,11 +6591,301 @@ def send_workshop_offer(auftrag_id, angebot_text, angebot_preis, angebot_notiz="
     db.close()
 
 
+def easter_date(year):
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def bw_feiertage(year):
+    ostern = easter_date(year)
+    return {
+        date(year, 1, 1): "Neujahr",
+        date(year, 1, 6): "Heilige Drei Könige",
+        ostern - timedelta(days=2): "Karfreitag",
+        ostern + timedelta(days=1): "Ostermontag",
+        date(year, 5, 1): "Tag der Arbeit",
+        ostern + timedelta(days=39): "Christi Himmelfahrt",
+        ostern + timedelta(days=50): "Pfingstmontag",
+        ostern + timedelta(days=60): "Fronleichnam",
+        date(year, 10, 3): "Tag der Deutschen Einheit",
+        date(year, 11, 1): "Allerheiligen",
+        date(year, 12, 25): "1. Weihnachtstag",
+        date(year, 12, 26): "2. Weihnachtstag",
+    }
+
+
+def urlaubs_hinweise(year):
+    hinweise = []
+    feiertage = bw_feiertage(year)
+    for feiertag, titel in sorted(feiertage.items()):
+        if feiertag.weekday() == 3:
+            freitag = feiertag + timedelta(days=1)
+            if freitag.year == year:
+                hinweise.append(
+                    {
+                        "datum": freitag,
+                        "titel": f"Brückentag nach {titel}",
+                        "notiz": "1 Urlaubstag ergibt mit dem Wochenende 4 freie Tage.",
+                    }
+                )
+        elif feiertag.weekday() == 1:
+            montag = feiertag - timedelta(days=1)
+            if montag.year == year:
+                hinweise.append(
+                    {
+                        "datum": montag,
+                        "titel": f"Brückentag vor {titel}",
+                        "notiz": "1 Urlaubstag ergibt mit dem Wochenende 4 freie Tage.",
+                    }
+                )
+
+    weihnachten = date(year, 12, 25)
+    if weihnachten.weekday() == 4:
+        hinweise.append(
+            {
+                "datum": date(year, 12, 28),
+                "titel": "Urlaub zwischen Weihnachten und Neujahr prüfen",
+                "notiz": "28.12. bis 31.12. frei nehmen und bis Neujahr lang abschalten.",
+            }
+        )
+    return hinweise
+
+
+def infer_kalender_kategorie(text):
+    normalized = clean_text(text).lower()
+    if any(word in normalized for word in ("urlaub", "frei", "abwesend")):
+        return "urlaub"
+    if "geburt" in normalized:
+        return "geburtstag"
+    if any(word in normalized for word in ("heirat", "hochzeit", "privat")):
+        return "privat"
+    if any(word in normalized for word in ("geschlossen", "betrieb", "inventur")):
+        return "betrieb"
+    return "termin"
+
+
+def parse_kalender_schnelleintrag(text):
+    original = clean_text(text).replace(",", ".")
+    if not original:
+        raise ValueError("Bitte einen Eintrag schreiben.")
+
+    match = re.search(r"\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\b", original)
+    if not match:
+        raise ValueError("Bitte ein Datum wie 28.05 oder 28.05.2026 angeben.")
+
+    day = int(match.group(1))
+    month = int(match.group(2))
+    year_text = match.group(3)
+    today = date.today()
+    if year_text:
+        year = int(year_text)
+        if year < 100:
+            year += 2000
+    else:
+        year = today.year
+
+    try:
+        parsed_date = date(year, month, day)
+    except ValueError as exc:
+        raise ValueError("Das Datum konnte nicht erkannt werden.") from exc
+
+    rest = f"{original[:match.start()]} {original[match.end():]}".strip(" -:;")
+    repeat_patterns = (
+        r"\bjährlich\b",
+        r"\bjaehrlich\b",
+        r"\bjedes\s+jahr\b",
+        r"\bjedes\s+jahr\s+wieder\b",
+        r"\bgeburt\w*\b",
+        r"\bhochzeitstag\b",
+    )
+    repeat = "jaehrlich" if any(re.search(pattern, rest.lower()) for pattern in repeat_patterns) else "einmalig"
+
+    if not year_text and repeat == "einmalig" and parsed_date < today:
+        parsed_date = date(today.year + 1, month, day)
+
+    title = re.sub(
+        r"\b(jährlich|jaehrlich|jedes\s+jahr(?:\s+wieder)?)\b",
+        "",
+        rest,
+        flags=re.IGNORECASE,
+    )
+    title = compact_whitespace(title).strip(" -:;") or "Termin"
+
+    return {
+        "datum": parsed_date.strftime(DATE_FMT),
+        "titel": title[:140],
+        "notiz": original[:500],
+        "kategorie": infer_kalender_kategorie(title),
+        "wiederholung": repeat,
+    }
+
+
+def create_kalender_notiz(datum, titel, notiz="", kategorie="termin", wiederholung="einmalig"):
+    parsed = parse_date(datum)
+    if not parsed:
+        raise ValueError("Bitte ein gültiges Datum eintragen.")
+    titel = clean_text(titel)
+    if not titel:
+        raise ValueError("Bitte einen Titel eintragen.")
+    kategorie = clean_text(kategorie) or "termin"
+    if kategorie not in KALENDER_KATEGORIEN:
+        kategorie = "termin"
+    wiederholung = clean_text(wiederholung) or "einmalig"
+    if wiederholung not in {"einmalig", "jaehrlich"}:
+        wiederholung = "einmalig"
+
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO kalender_notizen
+                (datum, titel, notiz, kategorie, wiederholung, erstellt_am)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                parsed.strftime(DATE_FMT),
+                titel,
+                clean_text(notiz),
+                kategorie,
+                wiederholung,
+                now_str(),
+            ),
+        )
+        db.commit()
+        return cursor.lastrowid
+    finally:
+        db.close()
+
+
+def delete_kalender_notiz(notiz_id):
+    db = get_db()
+    try:
+        db.execute("DELETE FROM kalender_notizen WHERE id=?", (notiz_id,))
+        db.commit()
+    finally:
+        db.close()
+
+
+def list_kalender_notizen_raw():
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM kalender_notizen
+            ORDER BY datum ASC, id ASC
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        db.close()
+
+
+def kalender_jahre(auftraege):
+    heute = date.today()
+    years = {heute.year, heute.year + 1}
+    for auftrag in auftraege:
+        for feld, _, _ in EVENT_FELDER:
+            event_date = auftrag.get(f"{feld}_obj")
+            if event_date:
+                years.add(event_date.year)
+    for notiz in list_kalender_notizen_raw():
+        parsed = parse_date(notiz.get("datum"))
+        if parsed:
+            years.add(parsed.year)
+            if notiz.get("wiederholung") == "jaehrlich":
+                years.add(heute.year)
+                years.add(heute.year + 1)
+    return sorted(years)
+
+
+def format_kalender_notiz(row, occurrence_date):
+    kategorie = clean_text(row.get("kategorie")) or "termin"
+    meta = KALENDER_KATEGORIEN.get(kategorie, KALENDER_KATEGORIEN["termin"])
+    return {
+        "id": row.get("id"),
+        "datum": occurrence_date,
+        "datum_text": occurrence_date.strftime(DATE_FMT),
+        "titel": clean_text(row.get("titel")) or "Termin",
+        "notiz": clean_text(row.get("notiz")),
+        "kategorie": kategorie,
+        "kategorie_label": meta["label"],
+        "farbe": meta["farbe"],
+        "wiederholung": clean_text(row.get("wiederholung")) or "einmalig",
+        "system": False,
+    }
+
+
+def list_kalender_notizen(years):
+    occurrences = []
+    for row in list_kalender_notizen_raw():
+        parsed = parse_date(row.get("datum"))
+        if not parsed:
+            continue
+        if row.get("wiederholung") == "jaehrlich":
+            for year in years:
+                try:
+                    occurrences.append(format_kalender_notiz(row, date(year, parsed.month, parsed.day)))
+                except ValueError:
+                    continue
+        elif parsed.year in years:
+            occurrences.append(format_kalender_notiz(row, parsed))
+    return occurrences
+
+
+def kalender_systemeintraege(years):
+    items = []
+    for year in years:
+        for tag, titel in bw_feiertage(year).items():
+            items.append(
+                {
+                    "datum": tag,
+                    "datum_text": tag.strftime(DATE_FMT),
+                    "titel": titel,
+                    "notiz": "Gesetzlicher Feiertag in Baden-Württemberg.",
+                    "kategorie": "feiertag",
+                    "kategorie_label": KALENDER_KATEGORIEN["feiertag"]["label"],
+                    "farbe": KALENDER_KATEGORIEN["feiertag"]["farbe"],
+                    "system": True,
+                }
+            )
+        for hinweis in urlaubs_hinweise(year):
+            items.append(
+                {
+                    "datum": hinweis["datum"],
+                    "datum_text": hinweis["datum"].strftime(DATE_FMT),
+                    "titel": hinweis["titel"],
+                    "notiz": hinweis["notiz"],
+                    "kategorie": "hinweis",
+                    "kategorie_label": KALENDER_KATEGORIEN["hinweis"]["label"],
+                    "farbe": KALENDER_KATEGORIEN["hinweis"]["farbe"],
+                    "system": True,
+                }
+            )
+    return items
+
+
 def dashboard_daten(auftraege):
     heute = date.today()
     offene_verzoegerungen = []
     offene_reklamationen = []
-    offene_chat_nachrichten = list_offene_chat_nachrichten()
+    postfach_items = list_admin_postfach_items()
+    offene_chat_nachrichten = [
+        item for item in postfach_items if item.get("typ") == "Chat"
+    ]
 
     db = get_db()
     rows = db.execute(
@@ -6237,17 +6960,19 @@ def dashboard_daten(auftraege):
         "offene_verzoegerungen": offene_verzoegerungen,
         "offene_reklamationen": offene_reklamationen,
         "offene_chat_nachrichten": offene_chat_nachrichten,
+        "postfach_items": postfach_items,
+        "postfach_count": len(postfach_items),
         "naechste_events": naechste_events[:12],
     }
 
 
 def kalender_daten(auftraege):
-    tage = defaultdict(dict)
+    tage = defaultdict(lambda: {"auftraege": {}, "notizen": [], "system": []})
     for auftrag in auftraege:
         for feld, label, farbe in EVENT_FELDER:
             event_date = auftrag.get(f"{feld}_obj")
             if event_date:
-                eintraege = tage[event_date]
+                eintraege = tage[event_date]["auftraege"]
                 eintrag = eintraege.get(auftrag["id"])
                 if not eintrag:
                     eintrag = {
@@ -6262,23 +6987,53 @@ def kalender_daten(auftraege):
                     )
                     eintrag["felder"].add(feld)
 
+    years = kalender_jahre(auftraege)
+    for notiz in list_kalender_notizen(years):
+        tage[notiz["datum"]]["notizen"].append(notiz)
+    for item in kalender_systemeintraege(years):
+        tage[item["datum"]]["system"].append(item)
+
     kalender = []
     for tag in sorted(tage.keys()):
+        day_data = tage[tag]
         events = sorted(
-            tage[tag].values(),
+            day_data["auftraege"].values(),
             key=lambda item: (
                 clean_text(item["auftrag"].get("autohaus_name")).lower(),
                 clean_text(item["auftrag"].get("kennzeichen")).lower(),
             ),
+        )
+        notizen = sorted(
+            day_data["notizen"],
+            key=lambda item: (clean_text(item.get("titel")).lower(), item.get("id") or 0),
+        )
+        system = sorted(
+            day_data["system"],
+            key=lambda item: (clean_text(item.get("kategorie")), clean_text(item.get("titel")).lower()),
         )
         kalender.append(
             {
                 "datum_lang": day_label(tag),
                 "datum_text": tag.strftime(DATE_FMT),
                 "events": events,
+                "notizen": notizen,
+                "system": system,
+                "gesamt_count": len(events) + len(notizen) + len(system),
             }
         )
     return kalender
+
+
+def naechste_kalender_tage(auftraege, limit=6):
+    heute = date.today()
+    result = []
+    for tag in kalender_daten(auftraege):
+        parsed = parse_date(tag["datum_text"])
+        if parsed and parsed >= heute:
+            result.append(tag)
+        if len(result) >= limit:
+            break
+    return result
 
 
 def autohaus_dashboard_daten(auftraege):
@@ -6438,7 +7193,7 @@ def login():
     if request.method == "POST":
         if admin_password_matches(request.form.get("passwort")):
             session["admin"] = True
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("betriebs_cockpit"))
         flash("Falsches Passwort.", "danger")
     return render_template("login.html")
 
@@ -6477,6 +7232,42 @@ def dashboard():
         statusliste=STATUSLISTE,
         public_base_url=get_public_base_url(),
     )
+
+
+@app.route("/admin/start")
+@app.route("/admin/cockpit")
+@admin_required
+def betriebs_cockpit():
+    alle_auftraege = list_auftraege(include_archived=True)
+    auftraege = [a for a in alle_auftraege if not a["archiviert"]]
+    return render_template(
+        "cockpit.html",
+        auftraege=auftraege,
+        archivierte_auftraege=[a for a in alle_auftraege if a["archiviert"]],
+        angebotsanfragen=list_angebotsanfragen(),
+        autohaeuser=list_autohaeuser(),
+        cockpit=dashboard_daten(auftraege),
+        kalender_vorschau=naechste_kalender_tage(auftraege),
+        ki_status=get_ai_status(),
+        database_status=get_database_status(),
+    )
+
+
+@app.route("/admin/postfach")
+@admin_required
+def admin_postfach():
+    return render_template("postfach_admin.html", items=list_admin_postfach_items(limit=200))
+
+
+@app.route("/admin/postfach/<path:item_key>/loeschen", methods=["POST"])
+@admin_required
+def admin_postfach_loeschen(item_key):
+    hide_postfach_item("admin", item_key, 0)
+    flash("Nachricht aus dem Werkstatt-Postfach gelöscht.", "info")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/"):
+        return redirect(next_url)
+    return redirect(url_for("admin_postfach"))
 
 
 def extract_import_package_files(archive, names, tmp_path):
@@ -7407,10 +8198,52 @@ def admin_sammelaktion():
     return redirect(request.referrer or url_for("dashboard"))
 
 
+@app.route("/admin/kalender/notiz", methods=["POST"])
+@admin_required
+def kalender_notiz_neu():
+    schnelleintrag = clean_text(request.form.get("quick_text"))
+    try:
+        if schnelleintrag:
+            daten = parse_kalender_schnelleintrag(schnelleintrag)
+        else:
+            daten = {
+                "datum": format_date(request.form.get("datum")),
+                "titel": clean_text(request.form.get("titel")),
+                "notiz": clean_text(request.form.get("notiz")),
+                "kategorie": clean_text(request.form.get("kategorie")) or "termin",
+                "wiederholung": clean_text(request.form.get("wiederholung")) or "einmalig",
+            }
+        create_kalender_notiz(**daten)
+        repeat_text = " jährlich" if daten.get("wiederholung") == "jaehrlich" else ""
+        flash(f"Kalendereintrag für {daten['datum']}{repeat_text} gespeichert.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/"):
+        return redirect(next_url)
+    return redirect(url_for("kalender"))
+
+
+@app.route("/admin/kalender/notiz/<int:notiz_id>/loeschen", methods=["POST"])
+@admin_required
+def kalender_notiz_loeschen(notiz_id):
+    delete_kalender_notiz(notiz_id)
+    flash("Kalendereintrag gelöscht.", "info")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/"):
+        return redirect(next_url)
+    return redirect(url_for("kalender"))
+
+
 @app.route("/admin/kalender")
 @admin_required
 def kalender():
-    return render_template("kalender.html", kalender_items=kalender_daten(list_auftraege()))
+    return render_template(
+        "kalender.html",
+        kalender_items=kalender_daten(list_auftraege()),
+        kalender_kategorien=KALENDER_KATEGORIEN,
+    )
 
 
 @app.route("/portal")
@@ -7473,6 +8306,7 @@ def partner_dashboard(slug):
     alle_auftraege = list_auftraege(autohaus["id"], include_archived=True)
     auftraege = [a for a in alle_auftraege if not a["archiviert"]]
     archivierte_auftraege = [a for a in alle_auftraege if a["archiviert"]]
+    postfach_items = list_partner_postfach_items(autohaus["id"], autohaus["slug"], limit=8)
     return render_template(
         "partner_dashboard.html",
         autohaus=autohaus,
@@ -7480,9 +8314,37 @@ def partner_dashboard(slug):
         archivierte_auftraege=archivierte_auftraege,
         angebotsanfragen=list_angebotsanfragen(autohaus["id"]),
         benachrichtigungen=list_autohaus_benachrichtigungen(autohaus["id"]),
+        postfach_items=postfach_items,
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
         cockpit=autohaus_dashboard_daten(auftraege),
         statusliste=STATUSLISTE,
     )
+
+
+@app.route("/partner/<slug>/postfach")
+def partner_postfach(slug):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    return render_template(
+        "partner_postfach.html",
+        autohaus=autohaus,
+        items=list_partner_postfach_items(autohaus["id"], autohaus["slug"], limit=200),
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
+    )
+
+
+@app.route("/partner/<slug>/postfach/<path:item_key>/loeschen", methods=["POST"])
+def partner_postfach_loeschen(slug, item_key):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    hide_postfach_item("autohaus", item_key, autohaus["id"])
+    flash("Nachricht aus dem Postfach gelöscht.", "info")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/"):
+        return redirect(next_url)
+    return redirect(url_for("partner_postfach", slug=slug))
 
 
 @app.route("/partner/<slug>/lackierauftrag-vorlage.pdf")
@@ -7605,6 +8467,7 @@ def partner_neues_angebot(slug):
         autohaus=autohaus,
         angebot=None,
         dateien=[],
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
         transport_arten=TRANSPORT_ARTEN,
     )
 
@@ -7690,6 +8553,7 @@ def partner_angebot_detail(slug, auftrag_id):
         angebot=angebot,
         dateien=sichtbare_dateien,
         dokument_pruefung=list_document_review_items(auftrag_id, angebot),
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
         transport_arten=TRANSPORT_ARTEN,
     )
 
@@ -7826,6 +8690,7 @@ def partner_auftrag(slug, auftrag_id):
         transport_arten=TRANSPORT_ARTEN,
         statusliste=STATUSLISTE,
         chat_nachrichten=chat_nachrichten,
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
     )
 
 

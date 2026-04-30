@@ -22,6 +22,7 @@
     textarea.form-control { min-height:112px; }
     .mobile-actions { display:flex; gap:.75rem; flex-wrap:wrap; }
     .chip { display:inline-flex; align-items:center; padding:.4rem .75rem; border-radius:999px; background:#f4ede4; border:1px solid #e4d6c3; margin:0 .4rem .4rem 0; }
+    .mail-badge { display:inline-flex; min-width:1.45rem; height:1.45rem; align-items:center; justify-content:center; margin-left:.35rem; padding:0 .42rem; border-radius:999px; background:#d64545; color:#fff; font-size:.78rem; font-weight:700; line-height:1; }
     .timeline-item { border-left:3px solid #dbc8af; padding-left:1rem; margin-left:.35rem; }
     .hero-panel {
       background:
@@ -278,6 +279,7 @@
         </div>
         <div class="d-flex gap-2 flex-wrap align-items-center">
           <span class="hero-badge">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
+          <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-light">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
           <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-light">Zurück</a>
         </div>
       </div>

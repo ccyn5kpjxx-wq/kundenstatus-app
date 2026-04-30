@@ -66,6 +66,22 @@
       background: rgba(255, 255, 255, 0.1);
     }
 
+    .nav-badge {
+      display: inline-flex;
+      min-width: 1.45rem;
+      height: 1.45rem;
+      align-items: center;
+      justify-content: center;
+      margin-left: .35rem;
+      padding: 0 .42rem;
+      border-radius: 999px;
+      background: #d64545;
+      color: #fff;
+      font-size: .78rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
     .hero-shell {
       padding: 2rem 0 1rem;
     }
@@ -334,14 +350,16 @@
 {% block navbar %}
 <nav class="navbar navbar-expand-lg">
   <div class="container py-2">
-    <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('dashboard') }}">
+    <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('betriebs_cockpit') }}">
       <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
       <span>Werkstatt-Cockpit</span>
     </a>
     <div class="d-flex align-items-center gap-2 flex-wrap">
-      <a class="nav-link" href="{{ url_for('dashboard') }}">Übersicht</a>
+      <a class="nav-link" href="{{ url_for('betriebs_cockpit') }}">Start</a>
+      <a class="nav-link" href="{{ url_for('dashboard') }}">Lackierportal</a>
       <a class="nav-link" href="{{ url_for('kalender') }}">Kalender</a>
       <a class="nav-link" href="{{ url_for('neuer_auftrag') }}">Fahrzeug neu</a>
+      <a class="nav-link" href="{{ url_for('admin_postfach') }}">Postfach{% set postfach_badge = admin_postfach_count() %}{% if postfach_badge %}<span class="nav-badge">{{ postfach_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('partner_login') }}" target="_blank">Autohaus-Portal</a>
       <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
     </div>

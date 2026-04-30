@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}Betriebs-Cockpit{% endblock %}
+{% block extra_css %}
+<style>
+  .cockpit-hero {
+    background:
+      linear-gradient(135deg, rgba(22, 32, 42, .96), rgba(20, 93, 102, .92)),
+      #16202a;
+    color: #fff;
+    overflow: hidden;
+  }
+  .cockpit-hero .text-muted { color: rgba(255,255,255,.72) !important; }
+  .module-tile {
+    display: flex;
+    flex-direction: column;
+    gap: .85rem;
+    height: 100%;
+    padding: 1.15rem;
+    text-decoration: none;
+    color: var(--ink);
+    border-left: 5px solid var(--accent);
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+  }
+  .module-tile:hover {
+    color: var(--ink);
+    transform: translateY(-2px);
+    box-shadow: 0 18px 46px rgba(64, 47, 25, .16);
+    border-color: var(--brand);
+  }
+  .module-kicker {
+    font-size: .76rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    font-weight: 700;
+  }
+  .module-count {
+    align-self: flex-start;
+    min-width: 42px;
+    padding: .35rem .65rem;
+    border-radius: 999px;
+    background: #eef5f6;
+    color: #145d66;
+    font-weight: 700;
+    text-align: center;
+  }
+  .quick-entry {
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 18px;
+    padding: 1rem;
+  }
+  .quick-entry .form-control {
+    border-color: rgba(255,255,255,.2);
+  }
+  .calendar-compact {
+    display: grid;
+    gap: .8rem;
+  }
+  .calendar-compact-item {
+    border: 1px solid #e4d6c3;
+    border-radius: 16px;
+    padding: .9rem 1rem;
+    background: #fffaf2;
+  }
+  .status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    border-radius: 999px;
+    padding: .35rem .7rem;
+    background: #f4ede4;
+    border: 1px solid #e4d6c3;
+    font-size: .88rem;
+    font-weight: 600;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-card cockpit-hero p-4 p-lg-5 mb-4">
+  <div class="row g-4 align-items-center">
+    <div class="col-lg-7">
+      <div class="badge bg-light text-dark mb-3">Lokal gestartet</div>
+      <h1 class="mb-2">Betriebs-Cockpit</h1>
+      <p class="mb-0 text-muted">Der neue Startpunkt für Werkstatt, Autohaus-Kommunikation, Termine, Urlaub und offene Freigaben.</p>
+    </div>
+    <div class="col-lg-5">
+      <form method="POST" action="{{ url_for('kalender_notiz_neu') }}" class="quick-entry">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}">
+        <label class="form-label text-white-50">Kalender-Schnelleintrag</label>
+        <div class="input-group">
+          <input type="text" name="quick_text" class="form-control form-control-lg" placeholder="28.05 Urlaub Max oder 14.04 Geburtstag jährlich" required>
+          <button type="submit" class="btn btn-brand btn-lg">Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-sm-6 col-xl-3">
+    <div class="metric-card metric-warm page-card">
+      <div class="metric-label">Aktive Fahrzeuge</div>
+      <div class="metric-value mt-2">{{ auftraege|length }}</div>
+      <div class="mt-2 text-white-50">im Lackierportal</div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="metric-card metric-blue page-card">
+      <div class="metric-label">Partner</div>
+      <div class="metric-value mt-2">{{ autohaeuser|length }}</div>
+      <div class="mt-2 text-white-50">Autohaus-Zugänge</div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="metric-card metric-green page-card">
+      <div class="metric-label">Offene Angebote</div>
+      <div class="metric-value mt-2">{{ angebotsanfragen|length }}</div>
+      <div class="mt-2 text-white-50">zur Werkstatt-Freigabe</div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="metric-card metric-gold page-card">
+      <div class="metric-label">Alarme</div>
+      <div class="metric-value mt-2">{{ cockpit['offene_reklamationen']|length }}</div>
+      <div class="mt-2 text-white-50">offene Reklamationen</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-8">
+    <div class="section-title">
+      <div>
+        <h4 class="mb-1">Module</h4>
+        <p>Die Kacheln sind der erste lokale Prototyp für die spätere Plattform-Struktur.</p>
+      </div>
+    </div>
+    <div class="row g-3">
+      <div class="col-md-6 col-xxl-4">
+        <a class="page-card module-tile" href="{{ url_for('dashboard') }}">
+          <span class="module-kicker">Werkstatt</span>
+          <h5 class="mb-0">Lackierportal</h5>
+          <p class="text-muted mb-0">Fahrzeuge, Status, Angebote, Dokumente und Reklamationen.</p>
+          <span class="module-count">{{ auftraege|length }}</span>
+        </a>
+      </div>
+      <div class="col-md-6 col-xxl-4">
+        <a class="page-card module-tile" href="{{ url_for('kalender') }}">
+          <span class="module-kicker">Planung</span>
+          <h5 class="mb-0">Kalender</h5>
+          <p class="text-muted mb-0">Termine, Feiertage, Brückentage und freie Notizen.</p>
+          <span class="module-count">{{ kalender_vorschau|length }}</span>
+        </a>
+      </div>
+      <div class="col-md-6 col-xxl-4">
+        <a class="page-card module-tile" href="{{ url_for('partner_login') }}" target="_blank">
+          <span class="module-kicker">Partner</span>
+          <h5 class="mb-0">Autohaus-Portal</h5>
+          <p class="text-muted mb-0">Einstieg für Autohäuser, Uploads und Angebotsanfragen.</p>
+          <span class="module-count">{{ autohaeuser|length }}</span>
+        </a>
+      </div>
+      <div class="col-md-6 col-xxl-4">
+        <a class="page-card module-tile" href="{{ url_for('kalender') }}">
+          <span class="module-kicker">Personal</span>
+          <h5 class="mb-0">Urlaubsplanung</h5>
+          <p class="text-muted mb-0">Urlaub als Kalendernotiz erfassen, Brückentage direkt sehen.</p>
+          <span class="module-count">neu</span>
+        </a>
+      </div>
+      <div class="col-md-6 col-xxl-4">
+        <a class="page-card module-tile" href="{{ url_for('dashboard') }}">
+          <span class="module-kicker">Freigaben</span>
+          <h5 class="mb-0">Angebote</h5>
+          <p class="text-muted mb-0">Anfragen prüfen, Preise setzen und Annahmen verfolgen.</p>
+          <span class="module-count">{{ angebotsanfragen|length }}</span>
+        </a>
+      </div>
+      <div class="col-md-6 col-xxl-4">
+        <a class="page-card module-tile" href="{{ url_for('admin_postfach') }}">
+          <span class="module-kicker">Kommunikation</span>
+          <h5 class="mb-0">Postfach</h5>
+          <p class="text-muted mb-0">Neue Nachrichten und Partner-Rückfragen gesammelt prüfen.</p>
+          <span class="module-count">{{ cockpit['offene_chat_nachrichten']|length }}</span>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-xl-4">
+    <div class="page-card p-4 h-100">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Nächste Termine</h4>
+          <p>Fahrzeuge, Feiertage, Brückentage und eigene Notizen.</p>
+        </div>
+      </div>
+      {% if kalender_vorschau %}
+        <div class="calendar-compact">
+          {% for day in kalender_vorschau %}
+          <div class="calendar-compact-item">
+            <div class="d-flex justify-content-between gap-2 mb-2">
+              <div class="fw-bold">{{ day['datum_lang'] }}</div>
+              <span class="status-chip">{{ day['gesamt_count'] }}</span>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              {% for item in day['system'][:2] %}
+                <span class="badge text-bg-{{ item['farbe'] }}">{{ item['titel'] }}</span>
+              {% endfor %}
+              {% for item in day['notizen'][:2] %}
+                <span class="badge text-bg-{{ item['farbe'] }}">{{ item['titel'] }}</span>
+              {% endfor %}
+              {% for event in day['events'][:2] %}
+                {% set a = event['auftrag'] %}
+                <span class="badge text-bg-secondary">{{ a['fahrzeug'] or 'Fahrzeug' }}</span>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-muted">Noch keine kommenden Termine.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
