@@ -178,11 +178,12 @@ for env_file in (BASE / ".env.local", BASE / ".env"):
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 USE_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
-if USE_POSTGRES:
-    UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", "/tmp/kundenstatus-uploads"))
-elif os.environ.get("RENDER"):
+if os.environ.get("RENDER"):
     DATA_DIR = pathlib.Path(os.environ.get("DATA_DIR", "/var/data"))
     DB = pathlib.Path(os.environ.get("SQLITE_DB_PATH", str(DATA_DIR / "auftraege.db")))
+if USE_POSTGRES:
+    UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", str(DATA_DIR / "uploads")))
+elif os.environ.get("RENDER"):
     UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", str(DATA_DIR / "uploads")))
 
 
@@ -3678,6 +3679,12 @@ _change_backup_lock = threading.Lock()
 _change_backup_pending = False
 _change_backup_running = False
 
+DATEI_LIST_COLUMNS = """
+    id, auftrag_id, reklamation_id, original_name, stored_name, mime_type, size,
+    quelle, kategorie, dokument_typ, extrahierter_text, extrakt_kurz,
+    analyse_quelle, analyse_json, analyse_hinweis, hochgeladen_am
+"""
+
 
 def list_table_rows_for_backup(db, table_name):
     try:
@@ -4000,6 +4007,7 @@ def init_db():
             analyse_quelle TEXT DEFAULT '',
             analyse_json   TEXT DEFAULT '',
             analyse_hinweis TEXT DEFAULT '',
+            content_blob   BYTEA,
             hochgeladen_am TEXT NOT NULL,
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
         );
@@ -4097,6 +4105,7 @@ def init_db():
     ensure_column(db, "dateien", "analyse_quelle", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "analyse_json", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "analyse_hinweis", "TEXT DEFAULT ''")
+    ensure_column(db, "dateien", "content_blob", "BYTEA")
     ensure_column(db, "autohaeuser", "portal_key", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "portal_titel", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "willkommen_text", "TEXT DEFAULT ''")
@@ -5195,7 +5204,7 @@ def is_today_finished_auftrag(auftrag, today_finished_ids, today):
 def list_dateien(auftrag_id):
     db = get_db()
     rows = db.execute(
-        "SELECT * FROM dateien WHERE auftrag_id=? ORDER BY hochgeladen_am DESC, id DESC",
+        f"SELECT {DATEI_LIST_COLUMNS} FROM dateien WHERE auftrag_id=? ORDER BY hochgeladen_am DESC, id DESC",
         (auftrag_id,),
     ).fetchall()
     db.close()
@@ -5210,7 +5219,7 @@ def list_dateien_for_auftraege(auftrag_ids):
     db = get_db()
     rows = db.execute(
         f"""
-        SELECT *
+        SELECT {DATEI_LIST_COLUMNS}
         FROM dateien
         WHERE auftrag_id IN ({placeholders})
         ORDER BY hochgeladen_am DESC, id DESC
@@ -5240,6 +5249,72 @@ def get_datei(datei_id):
     row = db.execute("SELECT * FROM dateien WHERE id=?", (datei_id,)).fetchone()
     db.close()
     return hydrate_datei(dict(row)) if row else None
+
+
+def blob_to_bytes(value):
+    if value is None:
+        return b""
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, bytearray):
+        return bytes(value)
+    if isinstance(value, memoryview):
+        return value.tobytes()
+    return b""
+
+
+def resolve_datei_path(datei):
+    stored_name = pathlib.Path(clean_text(datei.get("stored_name"))).name
+    if not stored_name:
+        return None
+    path = UPLOAD_DIR / stored_name
+    if path.exists():
+        return path
+
+    content = blob_to_bytes(datei.get("content_blob"))
+    if not content:
+        return None
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    except OSError:
+        fallback = pathlib.Path(tempfile.gettempdir()) / stored_name
+        fallback.write_bytes(content)
+        return fallback
+    return path
+
+
+def missing_datei_response(datei):
+    return (
+        render_template_string(
+            """
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Datei nicht verfügbar</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+  <main class="container py-5">
+    <div class="alert alert-warning">
+      <h1 class="h4">Datei ist nicht mehr im Speicher vorhanden.</h1>
+      <p class="mb-2">
+        Der Datenbankeintrag existiert noch, aber die Originaldatei
+        <strong>{{ datei['original_name'] }}</strong> liegt nicht mehr im Upload-Speicher.
+      </p>
+      <p class="mb-0">Bitte die Unterlage in diesem Auftrag einmal neu hochladen.</p>
+    </div>
+    <a class="btn btn-outline-dark" href="{{ url_for('auftrag_detail', auftrag_id=datei['auftrag_id']) }}">Zurück zum Auftrag</a>
+  </main>
+</body>
+</html>
+            """,
+            datei=datei,
+        ),
+        404,
+    )
 
 
 def delete_partner_datei(autohaus_id, datei_id):
@@ -5878,7 +5953,7 @@ def get_reklamation(reklamation_id):
 def list_dateien_by_reklamation(reklamation_id):
     db = get_db()
     rows = db.execute(
-        "SELECT * FROM dateien WHERE reklamation_id=? ORDER BY hochgeladen_am DESC, id DESC",
+        f"SELECT {DATEI_LIST_COLUMNS} FROM dateien WHERE reklamation_id=? ORDER BY hochgeladen_am DESC, id DESC",
         (reklamation_id,),
     ).fetchall()
     db.close()
@@ -5910,6 +5985,10 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
         except Exception as exc:
             analysis_errors.append(f"{original_name} konnte nicht gespeichert werden: {clean_text(str(exc))[:300]}")
             continue
+        try:
+            content_blob = target.read_bytes()
+        except OSError:
+            content_blob = b""
         mime_type = file.mimetype or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
         dokument_typ = ""
         extrahierter_text = ""
@@ -5941,8 +6020,8 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
             """
             INSERT INTO dateien
             (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, dokument_typ,
-             extrahierter_text, extrakt_kurz, analyse_quelle, analyse_json, analyse_hinweis, hochgeladen_am)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             extrahierter_text, extrakt_kurz, analyse_quelle, analyse_json, analyse_hinweis, content_blob, hochgeladen_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 auftrag_id,
@@ -5959,6 +6038,7 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
                 analyse_quelle,
                 analyse_json,
                 analyse_hinweis,
+                content_blob,
                 timestamp,
             ),
         )     
@@ -7779,9 +7859,9 @@ def admin_datei(datei_id):
     datei = get_datei(datei_id)
     if not datei:
         abort(404)
-    path = UPLOAD_DIR / datei["stored_name"]
-    if not path.exists():
-        abort(404)
+    path = resolve_datei_path(datei)
+    if not path:
+        return missing_datei_response(datei)
     return send_file(
         path,
         download_name=datei["original_name"],
@@ -7796,9 +7876,9 @@ def admin_datei_download(datei_id):
     datei = get_datei(datei_id)
     if not datei:
         abort(404)
-    path = UPLOAD_DIR / datei["stored_name"]
-    if not path.exists():
-        abort(404)
+    path = resolve_datei_path(datei)
+    if not path:
+        return missing_datei_response(datei)
     return send_file(
         path,
         download_name=datei["original_name"],
@@ -8478,8 +8558,8 @@ def partner_datei(slug, datei_id):
     auftrag = get_auftrag(datei["auftrag_id"])
     if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
         abort(404)
-    path = UPLOAD_DIR / datei["stored_name"]
-    if not path.exists():
+    path = resolve_datei_path(datei)
+    if not path:
         abort(404)
     return send_file(
         path,
@@ -8500,8 +8580,8 @@ def partner_datei_download(slug, datei_id):
     auftrag = get_auftrag(datei["auftrag_id"])
     if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
         abort(404)
-    path = UPLOAD_DIR / datei["stored_name"]
-    if not path.exists():
+    path = resolve_datei_path(datei)
+    if not path:
         abort(404)
     return send_file(
         path,
