@@ -1,6 +1,5 @@
 from pathlib import Path
 from io import BytesIO
-import gc
 import json
 import shutil
 import sys
@@ -383,25 +382,6 @@ def main():
             "Neue Chat-Nachrichten" in admin_dashboard_html
             and "Ist die Rückgabe am Nachmittag möglich?" in admin_dashboard_html,
         )
-        response = admin.get("/admin/postfach")
-        admin_postfach_html = response.get_data(as_text=True)
-        check(
-            "Werkstatt-Postfach zeigt Chat-Nachricht",
-            response.status_code == 200
-            and "Werkstatt-Postfach" in admin_postfach_html
-            and "Ist die Rückgabe am Nachmittag möglich?" in admin_postfach_html,
-            f"Status {response.status_code}",
-        )
-        response = admin.post(
-            f"/admin/postfach/admin-chat-{chat['id']}/loeschen",
-            data=with_csrf(admin, {"next": "/admin/postfach"}),
-            follow_redirects=True,
-        )
-        check(
-            "Werkstatt-Postfach-Nachricht ist löschbar",
-            response.status_code == 200
-            and "Ist die Rückgabe am Nachmittag möglich?" not in response.get_data(as_text=True),
-        )
         response = admin.get(f"/admin/auftrag/{angebot_id}")
         admin_auftrag_html = response.get_data(as_text=True)
         check(
@@ -431,25 +411,6 @@ def main():
         ).fetchone()
         db.close()
         check("Admin-Chat erzeugt Autohaus-Hinweis", bool(hinweis), str(hinweis))
-        response = partner.get("/partner/kaesmann/postfach")
-        partner_postfach_html = response.get_data(as_text=True)
-        check(
-            "Autohaus-Postfach zeigt Werkstatt-Hinweis",
-            response.status_code == 200
-            and "Postfach" in partner_postfach_html
-            and "Neue Chat-Nachricht" in partner_postfach_html,
-            f"Status {response.status_code}",
-        )
-        response = partner.post(
-            f"/partner/kaesmann/postfach/autohaus-hinweis-{hinweis['id']}/loeschen",
-            data=with_csrf(partner, {"next": "/partner/kaesmann/postfach"}),
-            follow_redirects=True,
-        )
-        check(
-            "Autohaus-Postfach-Nachricht ist löschbar",
-            response.status_code == 200
-            and "Neue Chat-Nachricht" not in response.get_data(as_text=True),
-        )
         response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}")
         partner_chat_html = response.get_data(as_text=True)
         check(
@@ -676,12 +637,6 @@ def main():
             check("Admin Originaldatei Download Route", response.status_code in {200, 404})
         else:
             print("[INFO] Keine Datei in Testdatenbank gefunden, Datei-Routen übersprungen.")
-
-        response = None
-        admin = None
-        partner = None
-        db = None
-        gc.collect()
 
     portal.DB = original_db
     portal.UPLOAD_DIR = original_upload_dir

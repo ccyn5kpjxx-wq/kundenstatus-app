@@ -77,21 +77,6 @@ def main():
     with client.session_transaction() as session:
         session["admin"] = True
     ok &= check("Admin mit Login", client.get("/admin"), {200})
-    ok &= check("Betriebs-Cockpit mit Login", client.get("/admin/cockpit"), {200})
-    ok &= check("Interner Kalender mit Login", client.get("/admin/kalender"), {200})
-    ok &= check("Werkstatt-Postfach mit Login", client.get("/admin/postfach"), {200})
-    parsed_calendar_note = portal.parse_kalender_schnelleintrag("14.04 Geburtstag Max jährlich")
-    parser_ok = (
-        parsed_calendar_note["datum"].startswith("14.04.")
-        and parsed_calendar_note["wiederholung"] == "jaehrlich"
-        and parsed_calendar_note["kategorie"] == "geburtstag"
-    )
-    print(
-        "[OK] Kalender-Schnelleintrag erkennt Datum und Wiederholung"
-        if parser_ok
-        else "[FEHLER] Kalender-Schnelleintrag erkennt Datum/Wiederholung nicht"
-    )
-    ok &= parser_ok
     external_client = portal.app.test_client()
     with external_client.session_transaction(base_url="https://werkstatt.example.test") as session:
         session["admin"] = True
@@ -166,11 +151,6 @@ def main():
         ok &= check(
             "Käsmann-Dashboard mit Partner-Login",
             client.get("/partner/kaesmann/dashboard"),
-            {200},
-        )
-        ok &= check(
-            "Käsmann-Postfach mit Partner-Login",
-            client.get("/partner/kaesmann/postfach"),
             {200},
         )
         partner_pdf_response = client.get("/partner/kaesmann/lackierauftrag-vorlage.pdf")

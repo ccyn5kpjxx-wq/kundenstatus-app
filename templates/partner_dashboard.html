@@ -21,7 +21,6 @@
     .chip { display:inline-flex; align-items:center; padding:.4rem .75rem; border-radius:999px; background:#f4ede4; border:1px solid #e4d6c3; margin:0 .4rem .4rem 0; }
     .chip-link { color:inherit; text-decoration:none; transition:.18s ease; }
     .chip-link:hover { background:#ecdfcd; border-color:#d0bda2; color:inherit; }
-    .mail-badge { display:inline-flex; min-width:1.45rem; height:1.45rem; align-items:center; justify-content:center; margin-left:.35rem; padding:0 .42rem; border-radius:999px; background:#d64545; color:#fff; font-size:.78rem; font-weight:700; line-height:1; }
     .bulk-bar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border:1px solid #e4d6c3; border-radius:18px; background:#f7f0e6; margin-bottom:16px; }
     .row-select-cell { width:88px; white-space:nowrap; }
     .row-check { width:20px; height:20px; accent-color:#1f3557; }
@@ -127,7 +126,6 @@
           <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Lackierauftrag PDF</a>
           <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Angebot anfordern</a>
           <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}" class="btn btn-dark btn-lg">Neues Fahrzeug</a>
-          <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
           <a href="{{ url_for('partner_logout') }}" class="btn btn-outline-dark btn-lg">Logout</a>
         </div>
       </div>
@@ -145,28 +143,22 @@
       </div>
     </div>
 
-    {% if postfach_items %}
+    {% if benachrichtigungen %}
     <div class="panel mb-4 border border-warning-subtle">
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
         <div>
-          <h4 class="mb-1">Postfach</h4>
-          <div class="text-muted">Neue Werkstatt-Hinweise, Chat-Antworten und offene Prüfungen.</div>
+          <h4 class="mb-1">Neue Werkstatt-Hinweise</h4>
+          <div class="text-muted">Hier sehen Sie, wenn die Werkstatt an einem Auftrag etwas geändert hat.</div>
         </div>
-        <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-sm">Postfach öffnen</a>
+        <span class="badge text-bg-warning">{{ benachrichtigungen|length }} Hinweis(e)</span>
       </div>
       <div class="d-grid gap-2">
-        {% for item in postfach_items %}
-        <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap border rounded-4 p-3 bg-white">
-          <a href="{{ url_for('partner_postfach_oeffnen', slug=autohaus['slug'], item_key=item['item_key']) }}" class="chip chip-link mb-0">
-            <strong>{{ item['titel'] }}</strong>
-            <span>{{ item['fahrzeug'] }}{% if item['kennzeichen'] %} · {{ item['kennzeichen'] }}{% endif %}</span>
-            <span class="text-muted">{{ item['typ'] }} · {{ item['erstellt_am'] }}</span>
-          </a>
-          <form method="POST" action="{{ url_for('partner_postfach_loeschen', slug=autohaus['slug'], item_key=item['item_key']) }}" class="m-0">
-            <input type="hidden" name="next" value="{{ request.path }}">
-            <button type="submit" class="btn btn-outline-dark btn-sm">Löschen</button>
-          </form>
-        </div>
+        {% for hinweis in benachrichtigungen %}
+        <a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=hinweis['auftrag_id']) }}" class="chip chip-link">
+          <strong>{{ hinweis['titel'] }}</strong>
+          <span>{{ hinweis['fahrzeug'] }}{% if hinweis['kennzeichen'] %} · {{ hinweis['kennzeichen'] }}{% endif %}</span>
+          <span class="text-muted">{{ hinweis['erstellt_am'] }}</span>
+        </a>
         {% endfor %}
       </div>
     </div>
