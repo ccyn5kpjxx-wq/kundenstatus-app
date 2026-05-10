@@ -7922,7 +7922,6 @@ def partner_dashboard(slug):
         angebotsanfragen=list_angebotsanfragen(autohaus["id"]),
         benachrichtigungen=list_autohaus_benachrichtigungen(autohaus["id"]),
         cockpit=autohaus_dashboard_daten(auftraege),
-        bonusmodell=build_bonusmodell(alle_auftraege),
         mini_calendar=build_mini_monatskalender(
             auftraege,
             request.args.get("monat"),
@@ -7931,6 +7930,19 @@ def partner_dashboard(slug):
             only_arrival_events=True,
         ),
         statusliste=STATUSLISTE,
+    )
+
+
+@app.route("/partner/<slug>/bonusmodell")
+def partner_bonusmodell(slug):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    alle_auftraege = list_auftraege(autohaus["id"], include_archived=True)
+    return render_template(
+        "partner_bonusmodell.html",
+        autohaus=autohaus,
+        bonusmodell=build_bonusmodell(alle_auftraege),
     )
 
 

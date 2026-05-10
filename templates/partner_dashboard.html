@@ -160,7 +160,7 @@
         <div class="d-flex gap-2 flex-wrap">
           <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Lackierauftrag PDF</a>
           <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Angebot anfordern</a>
-          <a href="#bonusmodell" class="btn btn-outline-dark btn-lg">Bonusmodell</a>
+          <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Bonusmodell</a>
           <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}" class="btn btn-dark btn-lg">Neues Fahrzeug</a>
           <a href="{{ url_for('partner_logout') }}" class="btn btn-outline-dark btn-lg">Logout</a>
         </div>
@@ -168,10 +168,6 @@
     </div>
 
     {% include "_mini_month_calendar.html" %}
-
-    <div id="bonusmodell">
-      {% include "_partner_bonusmodell_panel.html" %}
-    </div>
 
     <div class="panel mb-4">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
