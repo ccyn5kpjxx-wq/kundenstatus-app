@@ -42,15 +42,22 @@ def main():
         [
             {
                 "annahme_datum_obj": date.today(),
-                "abholtermin_obj": date.today(),
+                "start_datum_obj": date.today(),
                 "autohaus_name": "Smoke Autohaus",
                 "kunde_name": "Smoke Kunde",
                 "fahrzeug": "Audi A4",
                 "kennzeichen": "MOS ST 42",
+            },
+            {
+                "annahme_datum_obj": date.today(),
+                "autohaus_name": "Nur Annahme Autohaus",
+                "kunde_name": "",
+                "fahrzeug": "BMW 3er",
+                "kennzeichen": "MOS NO 1",
             }
         ],
         date.today().strftime("%Y-%m"),
-        include_timeline=True,
+        only_start_events=True,
     )
     today_text = date.today().strftime(portal.DATE_FMT)
     today_calendar_day = next(
@@ -60,26 +67,16 @@ def main():
         if day["datum_text"] == today_text
     )
     calendar_names_ok = (
-        today_calendar_day["events"]
+        today_calendar_day["event_count"] == 1
+        and today_calendar_day["events"]
         and today_calendar_day["events"][0]["party_name"] == "Smoke Autohaus"
     )
     print(
-        "[OK] Monatskalender liefert Autohausnamen pro Tag"
+        "[OK] Monatskalender liefert nur Starttermin-Autohausnamen pro Tag"
         if calendar_names_ok
-        else "[FEHLER] Monatskalender liefert keinen Autohausnamen pro Tag"
+        else "[FEHLER] Monatskalender liefert nicht nur Starttermin-Autohausnamen pro Tag"
     )
     ok &= calendar_names_ok
-    timeline_ok = (
-        mini_calendar["timeline_rows"]
-        and mini_calendar["timeline_rows"][0]["party_name"] == "Smoke Autohaus"
-        and mini_calendar["timeline_rows"][0]["start_col"] < mini_calendar["timeline_rows"][0]["end_col"]
-    )
-    print(
-        "[OK] Monatskalender liefert Von-bis-Zeitstrahl"
-        if timeline_ok
-        else "[FEHLER] Monatskalender liefert keinen Von-bis-Zeitstrahl"
-    )
-    ok &= timeline_ok
     ok &= check(
         "Login-POST ohne CSRF blockiert",
         client.post("/login", data={"passwort": "falsch"}),
@@ -123,9 +120,9 @@ def main():
     ok &= check("Admin mit Login", admin_response, {200})
     admin_html = admin_response.get_data(as_text=True)
     admin_calendar_ok = (
-        "Werkstatt-Kalender" in admin_html
+        "Starttermine" in admin_html
         and "mini-calendar-large" in admin_html
-        and "Auftragsplan von bis" in admin_html
+        and "Auftragsplan von bis" not in admin_html
     )
     print(
         "[OK] Admin-Dashboard zeigt grossen Kalender"

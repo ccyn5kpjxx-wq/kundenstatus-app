@@ -182,130 +182,6 @@
     background:rgba(255,255,255,.16);
     color:#fff;
   }
-  .mini-timeline-wrap {
-    display:grid;
-    gap:12px;
-    padding-top:8px;
-    border-top:1px solid #e4d6c3;
-  }
-  .mini-timeline-head {
-    display:flex;
-    justify-content:space-between;
-    gap:12px;
-    align-items:flex-start;
-    flex-wrap:wrap;
-  }
-  .mini-timeline-title {
-    margin:0;
-    font-size:1.05rem;
-  }
-  .mini-timeline-summary {
-    display:inline-flex;
-    align-items:center;
-    min-height:30px;
-    padding:4px 10px;
-    border:1px solid #d9cab4;
-    border-radius:999px;
-    background:#fffaf2;
-    color:#152636;
-    font-size:.84rem;
-    font-weight:800;
-  }
-  .mini-range-list {
-    display:grid;
-    grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));
-    gap:10px;
-    max-height:360px;
-    overflow:auto;
-    padding-right:4px;
-  }
-  .mini-range-item {
-    display:grid;
-    grid-template-columns:minmax(0, 1fr) auto;
-    gap:10px 14px;
-    padding:12px;
-    border:1px solid #e4d6c3;
-    border-radius:12px;
-    background:#fffaf2;
-    color:inherit;
-    text-decoration:none;
-  }
-  .mini-range-item:hover {
-    border-color:#b54b32;
-    background:#fff7eb;
-  }
-  .mini-range-item.is-active {
-    border-color:#111827;
-    box-shadow:inset 4px 0 0 #111827;
-  }
-  .mini-range-party,
-  .mini-range-vehicle {
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
-  }
-  .mini-range-party {
-    color:#152636;
-    font-weight:900;
-  }
-  .mini-range-vehicle {
-    color:#5f6b78;
-    font-size:.86rem;
-  }
-  .mini-range-dates {
-    display:flex;
-    gap:6px;
-    flex-wrap:wrap;
-    justify-content:flex-end;
-  }
-  .mini-range-date {
-    min-width:94px;
-    padding:5px 8px;
-    border-radius:9px;
-    background:#f3e9db;
-    text-align:center;
-  }
-  .mini-range-date span {
-    display:block;
-    color:#6b7280;
-    font-size:.66rem;
-    font-weight:800;
-    letter-spacing:0;
-    text-transform:uppercase;
-  }
-  .mini-range-date strong {
-    display:block;
-    color:#152636;
-    font-size:.84rem;
-  }
-  .mini-range-bar {
-    grid-column:1 / -1;
-    display:flex;
-    align-items:center;
-    gap:8px;
-    min-width:0;
-  }
-  .mini-range-line {
-    flex:1;
-    height:8px;
-    min-width:42px;
-    border-radius:999px;
-  }
-  .mini-range-duration {
-    color:#5f6b78;
-    font-size:.78rem;
-    font-weight:800;
-    white-space:nowrap;
-  }
-  .timeline-color-blue { background:#2563eb; }
-  .timeline-color-green { background:#0f766e; }
-  .timeline-color-warm { background:#b54b32; }
-  .timeline-color-gold { background:#c47a00; }
-  .timeline-color-red { background:#b4232c; }
-  .timeline-color-steel { background:#34556f; }
-  .mini-timeline-empty {
-    color:#5f6b78;
-  }
   @media (max-width: 575.98px) {
     .mini-calendar-large .mini-calendar-grid {
       grid-template-columns:repeat(7, minmax(38px, 1fr));
@@ -325,18 +201,6 @@
       padding:0 4px;
       font-size:.68rem;
     }
-    .mini-range-list {
-      grid-template-columns:1fr;
-      max-height:none;
-      overflow:visible;
-      padding-right:0;
-    }
-    .mini-range-item {
-      grid-template-columns:1fr;
-    }
-    .mini-range-dates {
-      justify-content:flex-start;
-    }
   }
 </style>
 <section class="{{ mini_calendar.get('section_class', 'panel mb-4 mini-calendar') }}" aria-label="{{ mini_calendar.get('aria_label', 'Monatskalender') }}">
@@ -354,53 +218,6 @@
       {% endif %}
     </div>
   </div>
-  {% if mini_calendar.get('show_timeline') %}
-  <div class="mini-timeline-wrap">
-    <div class="mini-timeline-head">
-      <div>
-        <h5 class="mini-timeline-title">Auftragsplan von bis</h5>
-        <div class="text-muted small">Jede Zeile zeigt Autohaus, Fahrzeug und den Zeitraum.</div>
-      </div>
-      <span class="mini-timeline-summary">{{ mini_calendar['timeline_rows']|length }} im Monat</span>
-    </div>
-    {% if mini_calendar.get('timeline_rows') %}
-    <div class="mini-range-list">
-      {% for row in mini_calendar['timeline_rows'] %}
-        {% if row['detail_url'] %}
-        <a class="mini-range-item{% if row['is_active_today'] %} is-active{% endif %}" href="{{ row['detail_url'] }}" title="{{ row['party_name'] }} · {{ row['vehicle_label'] }}">
-        {% else %}
-        <div class="mini-range-item{% if row['is_active_today'] %} is-active{% endif %}" title="{{ row['party_name'] }} · {{ row['vehicle_label'] }}">
-        {% endif %}
-          <div>
-            <div class="mini-range-party">{{ row['party_name'] }}</div>
-            <div class="mini-range-vehicle">{{ row['vehicle_label'] }}</div>
-          </div>
-          <div class="mini-range-dates">
-            <div class="mini-range-date">
-              <span>von</span>
-              <strong>{{ row['start_text'] }}</strong>
-            </div>
-            <div class="mini-range-date">
-              <span>bis</span>
-              <strong>{{ row['end_text'] }}</strong>
-            </div>
-          </div>
-          <div class="mini-range-bar">
-            <span class="mini-range-line {{ row['color_class'] }}"></span>
-            <span class="mini-range-duration">{{ row['duration_text'] }}</span>
-          </div>
-        {% if row['detail_url'] %}
-        </a>
-        {% else %}
-        </div>
-        {% endif %}
-      {% endfor %}
-    </div>
-    {% else %}
-    <div class="mini-timeline-empty">Keine Von-bis-Termine in diesem Monat.</div>
-    {% endif %}
-  </div>
-  {% endif %}
   <div class="mini-calendar-grid">
     {% for weekday in mini_calendar['weekdays'] %}
     <div class="mini-weekday">{{ weekday }}</div>
