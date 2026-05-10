@@ -148,11 +148,28 @@ def main():
         client = portal.app.test_client()
         with client.session_transaction() as session:
             session["partner_autohaus_id"] = autohaus["id"]
+        partner_dashboard_response = client.get("/partner/kaesmann/dashboard")
         ok &= check(
             "Käsmann-Dashboard mit Partner-Login",
-            client.get("/partner/kaesmann/dashboard"),
+            partner_dashboard_response,
             {200},
         )
+        with client.session_transaction() as session:
+            session["admin"] = True
+        mixed_session_dashboard_response = client.get("/partner/kaesmann/dashboard")
+        mixed_session_dashboard_html = mixed_session_dashboard_response.get_data(as_text=True)
+        partner_ki_endpoint_ok = (
+            mixed_session_dashboard_response.status_code == 200
+            and 'data-chat-url="/partner/kaesmann/ki/chat"' in mixed_session_dashboard_html
+            and 'data-clear-url="/partner/kaesmann/ki/chat/loeschen"' in mixed_session_dashboard_html
+            and 'data-chat-url="/admin/ki/chat"' not in mixed_session_dashboard_html
+        )
+        print(
+            "[OK] Partner-Dashboard nutzt Partner-KI-Endpunkte trotz Admin-Session"
+            if partner_ki_endpoint_ok
+            else "[FEHLER] Partner-Dashboard nutzt falsche KI-Endpunkte"
+        )
+        ok &= partner_ki_endpoint_ok
         partner_pdf_response = client.get("/partner/kaesmann/lackierauftrag-vorlage.pdf")
         ok &= check("Käsmann Lackierauftrag-PDF", partner_pdf_response, {200})
         is_pdf = partner_pdf_response.mimetype == "application/pdf"
