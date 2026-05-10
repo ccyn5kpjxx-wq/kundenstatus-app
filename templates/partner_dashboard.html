@@ -133,6 +133,8 @@
       </div>
     </div>
 
+    {% include "_mini_month_calendar.html" %}
+
     <div class="panel mb-4">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
         <div>
@@ -155,7 +157,7 @@
       <div class="d-grid gap-2">
         {% for item in postfach_items %}
         <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap border rounded-4 p-3 bg-white">
-          <a href="{{ item['ziel_url'] }}" class="chip chip-link mb-0">
+          <a href="{{ url_for('partner_postfach_oeffnen', slug=autohaus['slug'], item_key=item['item_key']) }}" class="chip chip-link mb-0">
             <strong>{{ item['titel'] }}</strong>
             <span>{{ item['fahrzeug'] }}{% if item['kennzeichen'] %} · {{ item['kennzeichen'] }}{% endif %}</span>
             <span class="text-muted">{{ item['typ'] }} · {{ item['erstellt_am'] }}</span>

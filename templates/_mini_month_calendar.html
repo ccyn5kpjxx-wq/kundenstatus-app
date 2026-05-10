@@ -1,0 +1,124 @@
+{% if mini_calendar %}
+<style>
+  .mini-calendar {
+    display:grid;
+    gap:12px;
+  }
+  .mini-calendar-head {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .mini-calendar-grid {
+    display:grid;
+    grid-template-columns:repeat(7, minmax(34px, 1fr));
+    gap:6px;
+  }
+  .mini-weekday {
+    color:#6b7280;
+    font-size:.78rem;
+    font-weight:700;
+    text-align:center;
+    text-transform:uppercase;
+  }
+  .mini-day {
+    position:relative;
+    min-height:42px;
+    border:1px solid #e4d6c3;
+    border-radius:10px;
+    background:#fffaf2;
+    color:#152636;
+    font-weight:700;
+    text-align:center;
+    line-height:40px;
+  }
+  .mini-day.is-muted {
+    opacity:.34;
+  }
+  .mini-day.is-weekend {
+    background:#f6efe5;
+  }
+  .mini-day.is-today {
+    background:#111827;
+    border-color:#111827;
+    color:#fff;
+  }
+  .mini-day.is-holiday {
+    border-color:#dc3545;
+    box-shadow:inset 0 -4px 0 #dc3545;
+  }
+  .mini-day.has-betriebsurlaub {
+    box-shadow:inset 0 -4px 0 #0f766e;
+  }
+  .mini-day.is-holiday.has-betriebsurlaub {
+    box-shadow:inset 0 -4px 0 #dc3545, inset 0 -8px 0 #0f766e;
+  }
+  .mini-day.has-events::after {
+    content:"";
+    position:absolute;
+    left:50%;
+    bottom:7px;
+    width:6px;
+    height:6px;
+    border-radius:999px;
+    background:#2563eb;
+    transform:translateX(-50%);
+  }
+  .mini-calendar-legend {
+    display:flex;
+    gap:10px 16px;
+    flex-wrap:wrap;
+    color:#5f6b78;
+    font-size:.9rem;
+  }
+  .mini-legend-dot {
+    display:inline-block;
+    width:12px;
+    height:4px;
+    margin-right:6px;
+    border-radius:999px;
+    vertical-align:middle;
+  }
+  .mini-legend-today { background:#111827; height:12px; }
+  .mini-legend-holiday { background:#dc3545; }
+  .mini-legend-vacation { background:#0f766e; }
+  .mini-legend-event { background:#2563eb; height:8px; width:8px; }
+</style>
+<section class="panel mb-4 mini-calendar" aria-label="Monatskalender">
+  <div class="mini-calendar-head">
+    <div>
+      <h4 class="mb-1">Monatsblick {{ mini_calendar['title'] }}</h4>
+      <div class="text-muted">Heute: {{ mini_calendar['today_text'] }}</div>
+    </div>
+    <div class="d-flex gap-2">
+      {% if mini_calendar['prev_url'] %}
+      <a href="{{ mini_calendar['prev_url'] }}" class="btn btn-outline-dark btn-sm">Zurück</a>
+      {% endif %}
+      {% if mini_calendar['next_url'] %}
+      <a href="{{ mini_calendar['next_url'] }}" class="btn btn-outline-dark btn-sm">Weiter</a>
+      {% endif %}
+    </div>
+  </div>
+  <div class="mini-calendar-grid">
+    {% for weekday in mini_calendar['weekdays'] %}
+    <div class="mini-weekday">{{ weekday }}</div>
+    {% endfor %}
+    {% for week in mini_calendar['weeks'] %}
+      {% for day in week %}
+      <div
+        class="mini-day{% if not day['in_month'] %} is-muted{% endif %}{% if day['is_weekend'] %} is-weekend{% endif %}{% if day['is_today'] %} is-today{% endif %}{% if day['is_holiday'] %} is-holiday{% endif %}{% if day['has_betriebsurlaub'] %} has-betriebsurlaub{% endif %}{% if day['has_events'] %} has-events{% endif %}"
+        title="{{ day['datum_text'] }}{% if day['tooltip'] %} · {{ day['tooltip'] }}{% endif %}"
+      >{{ day['tag'] }}</div>
+      {% endfor %}
+    {% endfor %}
+  </div>
+  <div class="mini-calendar-legend">
+    <span><i class="mini-legend-dot mini-legend-today"></i>Heute</span>
+    <span><i class="mini-legend-dot mini-legend-holiday"></i>Feiertag</span>
+    <span><i class="mini-legend-dot mini-legend-vacation"></i>Betriebsurlaub</span>
+    <span><i class="mini-legend-dot mini-legend-event"></i>Fahrzeugtermin</span>
+  </div>
+</section>
+{% endif %}

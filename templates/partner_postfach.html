@@ -55,7 +55,7 @@
                 </div>
               </div>
               <div class="d-flex gap-2 flex-wrap">
-                <a href="{{ item['ziel_url'] }}" class="btn btn-dark btn-sm">Öffnen</a>
+            <a href="{{ url_for('partner_postfach_oeffnen', slug=autohaus['slug'], item_key=item['item_key']) }}" class="btn btn-dark btn-sm">Öffnen</a>
                 <form method="POST" action="{{ url_for('partner_postfach_loeschen', slug=autohaus['slug'], item_key=item['item_key']) }}" class="m-0">
                   <input type="hidden" name="next" value="{{ request.path }}">
                   <button type="submit" class="btn btn-outline-dark btn-sm">Löschen</button>

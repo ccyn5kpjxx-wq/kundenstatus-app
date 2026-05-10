@@ -8,6 +8,7 @@ Partner: http://localhost:5000/partner/<slug>
 
 from collections import defaultdict
 import base64
+import calendar
 from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
 from functools import wraps
@@ -7024,6 +7025,115 @@ def kalender_daten(auftraege):
     return kalender
 
 
+BETRIEBSURLAUB_ZEITRAEUME = (
+    (date(2026, 8, 19), date(2026, 9, 4), "Betriebsurlaub"),
+)
+
+
+def parse_mini_calendar_month(value):
+    cleaned = clean_text(value)
+    if cleaned:
+        try:
+            parsed = datetime.strptime(cleaned, "%Y-%m").date()
+            return date(parsed.year, parsed.month, 1)
+        except ValueError:
+            pass
+    today = date.today()
+    return date(today.year, today.month, 1)
+
+
+def shift_month(month_start, offset):
+    month_index = month_start.month - 1 + offset
+    year = month_start.year + month_index // 12
+    month = month_index % 12 + 1
+    return date(year, month, 1)
+
+
+def build_mini_monatskalender(auftraege, month_value="", endpoint="", route_values=None):
+    month_start = parse_mini_calendar_month(month_value)
+    month_end = shift_month(month_start, 1) - timedelta(days=1)
+    today = date.today()
+    cal = calendar.Calendar(firstweekday=0)
+    month_names = {
+        1: "Januar",
+        2: "Februar",
+        3: "März",
+        4: "April",
+        5: "Mai",
+        6: "Juni",
+        7: "Juli",
+        8: "August",
+        9: "September",
+        10: "Oktober",
+        11: "November",
+        12: "Dezember",
+    }
+
+    event_dates = defaultdict(list)
+    for auftrag in auftraege or []:
+        for feld, label, _ in EVENT_FELDER:
+            event_date = auftrag.get(f"{feld}_obj")
+            if event_date and month_start <= event_date <= month_end:
+                event_dates[event_date].append(
+                    f"{label}: {clean_text(auftrag.get('fahrzeug')) or 'Fahrzeug'}"
+                )
+
+    holidays = bw_feiertage(month_start.year)
+    betriebsurlaub_dates = defaultdict(list)
+    for start, end, title in BETRIEBSURLAUB_ZEITRAEUME:
+        current = max(start, month_start)
+        last_day = min(end, month_end)
+        while current <= last_day:
+            betriebsurlaub_dates[current].append(title)
+            current += timedelta(days=1)
+
+    weeks = []
+    for week in cal.monthdatescalendar(month_start.year, month_start.month):
+        row = []
+        for current in week:
+            holiday_title = holidays.get(current)
+            labels = []
+            if holiday_title:
+                labels.append(holiday_title)
+            labels.extend(betriebsurlaub_dates.get(current, []))
+            labels.extend(event_dates.get(current, [])[:3])
+            row.append(
+                {
+                    "datum": current,
+                    "tag": current.day,
+                    "datum_text": current.strftime(DATE_FMT),
+                    "in_month": current.month == month_start.month,
+                    "is_today": current == today,
+                    "is_weekend": current.weekday() >= 5,
+                    "is_holiday": bool(holiday_title),
+                    "has_betriebsurlaub": bool(betriebsurlaub_dates.get(current)),
+                    "has_events": bool(event_dates.get(current)),
+                    "tooltip": " | ".join(labels),
+                }
+            )
+        weeks.append(row)
+
+    prev_month = shift_month(month_start, -1)
+    next_month = shift_month(month_start, 1)
+    route_values = dict(route_values or {})
+    prev_url = next_url = ""
+    if endpoint and has_request_context():
+        prev_url = url_for(endpoint, **route_values, monat=prev_month.strftime("%Y-%m"))
+        next_url = url_for(endpoint, **route_values, monat=next_month.strftime("%Y-%m"))
+
+    return {
+        "title": f"{month_names[month_start.month]} {month_start.year}",
+        "prev_url": prev_url,
+        "next_url": next_url,
+        "today_text": today.strftime(DATE_FMT),
+        "weekdays": ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
+        "weeks": weeks,
+        "event_count": sum(len(items) for items in event_dates.values()),
+        "holiday_count": sum(1 for day in holidays if day.month == month_start.month),
+        "betriebsurlaub_count": len(betriebsurlaub_dates),
+    }
+
+
 def naechste_kalender_tage(auftraege, limit=6):
     heute = date.today()
     result = []
@@ -8317,6 +8427,12 @@ def partner_dashboard(slug):
         postfach_items=postfach_items,
         postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
         cockpit=autohaus_dashboard_daten(auftraege),
+        mini_calendar=build_mini_monatskalender(
+            auftraege,
+            request.args.get("monat"),
+            endpoint="partner_dashboard",
+            route_values={"slug": autohaus["slug"]},
+        ),
         statusliste=STATUSLISTE,
     )
 
@@ -8332,6 +8448,20 @@ def partner_postfach(slug):
         items=list_partner_postfach_items(autohaus["id"], autohaus["slug"], limit=200),
         postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
     )
+
+
+@app.route("/partner/<slug>/postfach/<path:item_key>/oeffnen")
+def partner_postfach_oeffnen(slug, item_key):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    items = list_partner_postfach_items(autohaus["id"], autohaus["slug"], limit=200)
+    for item in items:
+        if item["item_key"] == item_key:
+            hide_postfach_item("autohaus", item_key, autohaus["id"])
+            return redirect(item["ziel_url"])
+    flash("Diese Nachricht ist bereits erledigt.", "info")
+    return redirect(url_for("partner_postfach", slug=slug))
 
 
 @app.route("/partner/<slug>/postfach/<path:item_key>/loeschen", methods=["POST"])
