@@ -7052,7 +7052,7 @@ def build_mini_monatskalender(
                 ("abholtermin", "Abholung", "success"),
             )
         elif only_start_events:
-            event_fields = (("start_datum", "Starttermin", "primary"),)
+            event_fields = (("start_datum", "Beginn", "primary"),)
         elif only_arrival_events:
             event_fields = (("annahme_datum", "Anlieferung", "secondary"),)
         for feld, label, _ in event_fields:
@@ -7079,7 +7079,10 @@ def build_mini_monatskalender(
                     {
                         "label": label,
                         "party_name": party_name,
-                        "display_name": label if event_display_mode == "label" else party_name,
+                        "display_name": (
+                            label if event_display_mode == "label" else party_name
+                        ),
+                        "display_detail": vehicle_label if event_display_mode == "party_vehicle" else "",
                         "vehicle_label": vehicle_label,
                         "tooltip": label if event_display_mode == "label" else title,
                     }
@@ -7151,7 +7154,7 @@ def build_mini_monatskalender(
     if only_arrival_events:
         event_label = "Anlieferung"
     elif only_start_events:
-        event_label = "Starttermin"
+        event_label = "Beginn"
     elif only_start_pickup_events:
         event_label = "Beginn / Abholung"
 
@@ -7163,7 +7166,7 @@ def build_mini_monatskalender(
         "weekdays": ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
         "weeks": weeks,
         "event_label": event_label,
-        "show_event_count": event_display_mode != "label",
+        "show_event_count": event_display_mode not in {"label", "party_vehicle"},
         "show_more_events": event_display_mode != "label",
     }
 
@@ -7355,15 +7358,15 @@ def dashboard():
         auftraege,
         request.args.get("monat", ""),
         endpoint="dashboard",
-        only_start_pickup_events=True,
-        event_display_mode="label",
+        only_start_events=True,
+        event_display_mode="party_vehicle",
     )
     mini_calendar.update(
         {
             "section_class": "page-card p-4 p-lg-5 mb-4 mini-calendar mini-calendar-large",
-            "heading": f"Beginn und Abholung {mini_calendar['title']}",
-            "subtitle": f"Heute: {mini_calendar['today_text']} · Nur Beginn und Abholung im Monatsblick",
-            "aria_label": "Beginn-und-Abholung-Kalender",
+            "heading": f"Beginn-Termine {mini_calendar['title']}",
+            "subtitle": f"Heute: {mini_calendar['today_text']} · Nur Beginn mit Autohaus und Fahrzeug",
+            "aria_label": "Beginn-Termine-Kalender",
         }
     )
     return render_template(

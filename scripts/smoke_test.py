@@ -43,7 +43,6 @@ def main():
             {
                 "annahme_datum_obj": date.today(),
                 "start_datum_obj": date.today(),
-                "abholtermin_obj": date.today(),
                 "autohaus_name": "Smoke Autohaus",
                 "kunde_name": "Smoke Kunde",
                 "fahrzeug": "Audi A4",
@@ -58,8 +57,8 @@ def main():
             }
         ],
         date.today().strftime("%Y-%m"),
-        only_start_pickup_events=True,
-        event_display_mode="label",
+        only_start_events=True,
+        event_display_mode="party_vehicle",
     )
     today_text = date.today().strftime(portal.DATE_FMT)
     today_calendar_day = next(
@@ -69,16 +68,17 @@ def main():
         if day["datum_text"] == today_text
     )
     calendar_names_ok = (
-        today_calendar_day["event_count"] == 2
+        today_calendar_day["event_count"] == 1
         and today_calendar_day["events"]
-        and {event["display_name"] for event in today_calendar_day["events"]} == {"Beginn", "Abholung"}
-        and "Smoke Autohaus" not in {event["display_name"] for event in today_calendar_day["events"]}
-        and "Smoke Autohaus" not in today_calendar_day["tooltip"]
+        and today_calendar_day["events"][0]["display_name"] == "Smoke Autohaus"
+        and today_calendar_day["events"][0]["display_detail"] == "Audi A4 · MOS ST 42"
+        and "Beginn: Smoke Autohaus" in today_calendar_day["tooltip"]
+        and "Nur Annahme Autohaus" not in today_calendar_day["tooltip"]
     )
     print(
-        "[OK] Monatskalender liefert nur Beginn/Abholung pro Tag"
+        "[OK] Monatskalender liefert nur Beginn mit Autohaus und Fahrzeug"
         if calendar_names_ok
-        else "[FEHLER] Monatskalender liefert nicht nur Beginn/Abholung pro Tag"
+        else "[FEHLER] Monatskalender liefert nicht nur Beginn mit Autohaus und Fahrzeug"
     )
     ok &= calendar_names_ok
     ok &= check(
@@ -124,10 +124,10 @@ def main():
     ok &= check("Admin mit Login", admin_response, {200})
     admin_html = admin_response.get_data(as_text=True)
     admin_calendar_ok = (
-        "Beginn und Abholung" in admin_html
+        "Beginn-Termine" in admin_html
         and "mini-calendar-large" in admin_html
         and "Auftragsplan von bis" not in admin_html
-        and "Nur Beginn und Abholung" in admin_html
+        and "Nur Beginn mit Autohaus und Fahrzeug" in admin_html
     )
     print(
         "[OK] Admin-Dashboard zeigt grossen Kalender"

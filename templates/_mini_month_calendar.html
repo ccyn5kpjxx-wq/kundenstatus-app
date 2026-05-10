@@ -173,6 +173,21 @@
     font-weight:700;
     line-height:1.2;
   }
+  .mini-calendar-large .mini-event-name {
+    display:grid;
+    gap:1px;
+  }
+  .mini-calendar-large .mini-event-title,
+  .mini-calendar-large .mini-event-detail {
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .mini-calendar-large .mini-event-detail {
+    color:#5f6b78;
+    font-size:.72rem;
+    font-weight:700;
+  }
   .mini-calendar-large .mini-event-more {
     background:rgba(17,24,39,.08);
     color:#46515d;
@@ -180,6 +195,9 @@
   .mini-calendar-large .mini-day.is-today .mini-event-name,
   .mini-calendar-large .mini-day.is-today .mini-event-more {
     background:rgba(255,255,255,.16);
+    color:#fff;
+  }
+  .mini-calendar-large .mini-day.is-today .mini-event-detail {
     color:#fff;
   }
   @media (max-width: 575.98px) {
@@ -235,7 +253,12 @@
         {% if day['events'] %}
         <span class="mini-day-events">
           {% for event in day['events'] %}
-          <span class="mini-event-name">{{ event.get('display_name') or event['party_name'] }}</span>
+          <span class="mini-event-name" title="{{ event['tooltip'] }}">
+            <span class="mini-event-title">{{ event.get('display_name') or event['party_name'] }}</span>
+            {% if event.get('display_detail') %}
+            <span class="mini-event-detail">{{ event['display_detail'] }}</span>
+            {% endif %}
+          </span>
           {% endfor %}
           {% if day['more_event_count'] and mini_calendar.get('show_more_events', True) %}
           <span class="mini-event-more">+{{ day['more_event_count'] }} weitere</span>
