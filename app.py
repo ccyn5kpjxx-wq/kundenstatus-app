@@ -7057,6 +7057,8 @@ def build_mini_monatskalender(
             event_fields = (("annahme_datum", "Anlieferung", "secondary"),)
         for feld, label, _ in event_fields:
             event_date = auftrag.get(f"{feld}_obj")
+            if only_start_events and feld == "start_datum" and not event_date:
+                event_date = auftrag.get("annahme_datum_obj")
             if event_date and month_start <= event_date <= month_end:
                 party_name = (
                     clean_text(auftrag.get("autohaus_name"))

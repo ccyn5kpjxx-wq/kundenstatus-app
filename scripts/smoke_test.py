@@ -67,18 +67,20 @@ def main():
         for day in week
         if day["datum_text"] == today_text
     )
+    event_names = {event["display_name"] for event in today_calendar_day["events"]}
+    event_details = {event["display_detail"] for event in today_calendar_day["events"]}
     calendar_names_ok = (
-        today_calendar_day["event_count"] == 1
-        and today_calendar_day["events"]
-        and today_calendar_day["events"][0]["display_name"] == "Smoke Autohaus"
-        and today_calendar_day["events"][0]["display_detail"] == "Audi A4 · MOS ST 42"
+        today_calendar_day["event_count"] == 2
+        and event_names == {"Smoke Autohaus", "Nur Annahme Autohaus"}
+        and "Audi A4 · MOS ST 42" in event_details
+        and "BMW 3er · MOS NO 1" in event_details
         and "Beginn: Smoke Autohaus" in today_calendar_day["tooltip"]
-        and "Nur Annahme Autohaus" not in today_calendar_day["tooltip"]
+        and "Beginn: Nur Annahme Autohaus" in today_calendar_day["tooltip"]
     )
     print(
-        "[OK] Monatskalender liefert nur Beginn mit Autohaus und Fahrzeug"
+        "[OK] Monatskalender liefert Beginn mit Autohaus/Fahrzeug und Annahme-Fallback"
         if calendar_names_ok
-        else "[FEHLER] Monatskalender liefert nicht nur Beginn mit Autohaus und Fahrzeug"
+        else "[FEHLER] Monatskalender liefert Beginn/Fallback nicht korrekt"
     )
     ok &= calendar_names_ok
     ok &= check(
@@ -128,6 +130,7 @@ def main():
         and "mini-calendar-large" in admin_html
         and "Auftragsplan von bis" not in admin_html
         and "Nur Beginn mit Autohaus und Fahrzeug" in admin_html
+        and "window.location.reload" in admin_html
     )
     print(
         "[OK] Admin-Dashboard zeigt grossen Kalender"

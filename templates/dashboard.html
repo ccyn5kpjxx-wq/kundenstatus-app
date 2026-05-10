@@ -666,5 +666,20 @@
     });
     refresh();
   });
+
+  window.setInterval(() => {
+    if (document.hidden) {
+      return;
+    }
+    const activeTag = document.activeElement?.tagName;
+    if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(activeTag)) {
+      return;
+    }
+    const hasSelection = document.querySelector('[data-select-item]:checked');
+    if (hasSelection) {
+      return;
+    }
+    window.location.reload();
+  }, 60000);
 </script>
 {% endblock %}
