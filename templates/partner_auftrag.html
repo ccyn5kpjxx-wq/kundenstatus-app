@@ -569,6 +569,15 @@
                   <div class="fw-semibold flex-grow-1">{{ datei['original_name'] }}</div>
                   <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Original öffnen</a>
                   <a href="{{ url_for('partner_datei_download', slug=autohaus['slug'], datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+                  {% if datei['quelle'] == 'autohaus' %}
+                  <form method="POST" action="{{ url_for('partner_datei_loeschen', slug=autohaus['slug'], datei_id=datei['id']) }}" class="m-0" onsubmit="return confirm('Diese hochgeladene Datei wirklich entfernen?')">
+                    {{ csrf_field()|safe }}
+                    <input type="hidden" name="next" value="{{ request.path }}">
+                    <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
+                  </form>
+                  {% else %}
+                  <span class="badge text-bg-light border">Werkstatt-Datei</span>
+                  {% endif %}
                 </div>
                 {% if datei['has_extract'] %}
                   <div class="mt-3">
@@ -609,6 +618,15 @@
                   <div class="fw-semibold flex-grow-1">{{ datei['original_name'] }}</div>
                   <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Original öffnen</a>
                   <a href="{{ url_for('partner_datei_download', slug=autohaus['slug'], datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+                  {% if datei['quelle'] == 'autohaus' %}
+                  <form method="POST" action="{{ url_for('partner_datei_loeschen', slug=autohaus['slug'], datei_id=datei['id']) }}" class="m-0" onsubmit="return confirm('Dieses hochgeladene Bild wirklich entfernen?')">
+                    {{ csrf_field()|safe }}
+                    <input type="hidden" name="next" value="{{ request.path }}">
+                    <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
+                  </form>
+                  {% else %}
+                  <span class="badge text-bg-light border">Werkstatt-Datei</span>
+                  {% endif %}
                 </div>
               </div>
               {% endfor %}

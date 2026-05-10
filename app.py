@@ -5242,6 +5242,39 @@ def get_datei(datei_id):
     return hydrate_datei(dict(row)) if row else None
 
 
+def delete_partner_datei(autohaus_id, datei_id):
+    datei = get_datei(datei_id)
+    if not datei:
+        return False, None
+    auftrag = get_auftrag(datei["auftrag_id"])
+    if (
+        not auftrag
+        or int(auftrag.get("autohaus_id") or 0) != int(autohaus_id or 0)
+        or clean_text(datei.get("quelle")) != "autohaus"
+    ):
+        return False, None
+
+    stored_name = pathlib.Path(clean_text(datei.get("stored_name"))).name
+    path = UPLOAD_DIR / stored_name
+    try:
+        move_upload_to_deleted_area(path, f"partner-datei-{datei_id}")
+    except OSError:
+        pass
+
+    db = get_db()
+    db.execute("DELETE FROM dateien WHERE id=? AND auftrag_id=? AND quelle='autohaus'", (datei_id, auftrag["id"]))
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag["id"]))
+    db.commit()
+    db.close()
+
+    if clean_text(datei.get("kategorie")) == "standard":
+        reset_document_review_checks(
+            auftrag["id"],
+            "Eine hochgeladene Unterlage wurde entfernt. Bitte die erkannten Daten kurz prüfen.",
+        )
+    return True, auftrag
+
+
 def hydrate_datei(datei):
     if not datei:
         return None
@@ -8464,6 +8497,25 @@ def partner_datei_download(slug, datei_id):
         mimetype=datei["mime_type"],
         as_attachment=True,
     )
+
+
+@app.route("/partner/<slug>/datei/<int:datei_id>/loeschen", methods=["POST"])
+def partner_datei_loeschen(slug, datei_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    ok, auftrag = delete_partner_datei(autohaus["id"], datei_id)
+    if ok:
+        flash("Datei entfernt. Falls dadurch erkannte Daten falsch waren, bitte oben korrigieren und speichern.", "info")
+    else:
+        flash("Diese Datei kann hier nicht gelöscht werden.", "warning")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/partner/"):
+        return redirect(next_url)
+    if auftrag:
+        return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag["id"]))
+    return redirect(url_for("partner_dashboard", slug=slug))
+
 
 init_db()
 start_hourly_backups()
