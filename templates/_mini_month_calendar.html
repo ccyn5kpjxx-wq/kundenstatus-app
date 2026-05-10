@@ -41,6 +41,9 @@
   .mini-event-count {
     display:none;
   }
+  .mini-day-events {
+    display:none;
+  }
   .mini-day.is-muted {
     opacity:.34;
   }
@@ -106,16 +109,23 @@
     font-size:.84rem;
   }
   .mini-calendar-large .mini-day {
-    min-height:76px;
-    display:flex;
-    align-items:flex-start;
-    justify-content:space-between;
+    min-height:108px;
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) auto;
+    align-content:start;
     gap:8px;
     padding:10px 12px;
     border-radius:12px;
     font-size:1.05rem;
     line-height:1.2;
     text-align:left;
+  }
+  .mini-calendar-large .mini-day-number {
+    grid-column:1;
+  }
+  .mini-calendar-large .mini-event-count {
+    grid-column:2;
+    grid-row:1;
   }
   .mini-calendar-large .mini-day.has-events::after {
     left:12px;
@@ -142,15 +152,48 @@
     background:#fff;
     color:#111827;
   }
+  .mini-calendar-large .mini-day-events {
+    grid-column:1 / -1;
+    display:grid;
+    gap:4px;
+    min-width:0;
+  }
+  .mini-calendar-large .mini-event-name,
+  .mini-calendar-large .mini-event-more {
+    display:block;
+    max-width:100%;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    border-radius:7px;
+    padding:3px 6px;
+    background:rgba(37,99,235,.1);
+    color:#173f76;
+    font-size:.78rem;
+    font-weight:700;
+    line-height:1.2;
+  }
+  .mini-calendar-large .mini-event-more {
+    background:rgba(17,24,39,.08);
+    color:#46515d;
+  }
+  .mini-calendar-large .mini-day.is-today .mini-event-name,
+  .mini-calendar-large .mini-day.is-today .mini-event-more {
+    background:rgba(255,255,255,.16);
+    color:#fff;
+  }
   @media (max-width: 575.98px) {
     .mini-calendar-large .mini-calendar-grid {
       grid-template-columns:repeat(7, minmax(38px, 1fr));
       gap:5px;
     }
     .mini-calendar-large .mini-day {
-      min-height:52px;
+      min-height:66px;
       padding:7px;
       font-size:.95rem;
+    }
+    .mini-calendar-large .mini-day-events {
+      display:none;
     }
     .mini-calendar-large .mini-event-count {
       min-width:18px;
@@ -188,6 +231,16 @@
         <span class="mini-day-number">{{ day['tag'] }}</span>
         {% if day['event_count'] %}
         <span class="mini-event-count">{{ day['event_count'] }}</span>
+        {% endif %}
+        {% if day['events'] %}
+        <span class="mini-day-events">
+          {% for event in day['events'] %}
+          <span class="mini-event-name">{{ event['party_name'] }}</span>
+          {% endfor %}
+          {% if day['more_event_count'] %}
+          <span class="mini-event-more">+{{ day['more_event_count'] }} weitere</span>
+          {% endif %}
+        </span>
         {% endif %}
       </div>
       {% endfor %}

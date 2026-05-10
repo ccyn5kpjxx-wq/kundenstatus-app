@@ -1,5 +1,6 @@
 from pathlib import Path
 from io import BytesIO
+from datetime import date
 import sys
 
 
@@ -37,6 +38,35 @@ def main():
     has_csrf = "name=\"csrf_token\"" in login_response.get_data(as_text=True)
     print("[OK] Login-Formular enthält CSRF-Token" if has_csrf else "[FEHLER] Login-Formular ohne CSRF-Token")
     ok &= has_csrf
+    mini_calendar = portal.build_mini_monatskalender(
+        [
+            {
+                "annahme_datum_obj": date.today(),
+                "autohaus_name": "Smoke Autohaus",
+                "kunde_name": "Smoke Kunde",
+                "fahrzeug": "Audi A4",
+                "kennzeichen": "MOS ST 42",
+            }
+        ],
+        date.today().strftime("%Y-%m"),
+    )
+    today_text = date.today().strftime(portal.DATE_FMT)
+    today_calendar_day = next(
+        day
+        for week in mini_calendar["weeks"]
+        for day in week
+        if day["datum_text"] == today_text
+    )
+    calendar_names_ok = (
+        today_calendar_day["events"]
+        and today_calendar_day["events"][0]["party_name"] == "Smoke Autohaus"
+    )
+    print(
+        "[OK] Monatskalender liefert Autohausnamen pro Tag"
+        if calendar_names_ok
+        else "[FEHLER] Monatskalender liefert keinen Autohausnamen pro Tag"
+    )
+    ok &= calendar_names_ok
     ok &= check(
         "Login-POST ohne CSRF blockiert",
         client.post("/login", data={"passwort": "falsch"}),

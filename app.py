@@ -7048,7 +7048,15 @@ def build_mini_monatskalender(
         for feld, label, _ in event_fields:
             event_date = auftrag.get(f"{feld}_obj")
             if event_date and month_start <= event_date <= month_end:
-                title = f"{label}: {clean_text(auftrag.get('fahrzeug')) or 'Fahrzeug'}"
+                party_name = (
+                    clean_text(auftrag.get("autohaus_name"))
+                    or clean_text(auftrag.get("kunde_name"))
+                    or "Kunde noch eintragen"
+                )
+                fahrzeug_name = clean_text(auftrag.get("fahrzeug")) or "Fahrzeug"
+                kennzeichen = clean_text(auftrag.get("kennzeichen"))
+                vehicle_label = f"{fahrzeug_name} · {kennzeichen}" if kennzeichen else fahrzeug_name
+                title = f"{label}: {party_name} | {vehicle_label}"
                 if only_arrival_events:
                     rueckgabe = (
                         auftrag.get("abholtermin_obj")
@@ -7058,7 +7066,12 @@ def build_mini_monatskalender(
                     if rueckgabe:
                         title = f"{title} | Rückgabe: {rueckgabe.strftime(DATE_FMT)}"
                 event_dates[event_date].append(
-                    title
+                    {
+                        "label": label,
+                        "party_name": party_name,
+                        "vehicle_label": vehicle_label,
+                        "tooltip": title,
+                    }
                 )
 
     holidays = bw_feiertage(month_start.year)
@@ -7079,7 +7092,15 @@ def build_mini_monatskalender(
             if holiday_title:
                 labels.append(holiday_title)
             labels.extend(betriebsurlaub_dates.get(current, []))
-            labels.extend(event_dates.get(current, [])[:3])
+            day_events = sorted(
+                event_dates.get(current, []),
+                key=lambda event: (
+                    clean_text(event.get("party_name")).lower(),
+                    clean_text(event.get("vehicle_label")).lower(),
+                    clean_text(event.get("label")).lower(),
+                ),
+            )
+            labels.extend([event["tooltip"] for event in day_events[:3]])
             row.append(
                 {
                     "tag": current.day,
@@ -7089,8 +7110,10 @@ def build_mini_monatskalender(
                     "is_weekend": current.weekday() >= 5,
                     "is_holiday": bool(holiday_title),
                     "has_betriebsurlaub": bool(betriebsurlaub_dates.get(current)),
-                    "has_events": bool(event_dates.get(current)),
-                    "event_count": len(event_dates.get(current, [])),
+                    "has_events": bool(day_events),
+                    "event_count": len(day_events),
+                    "events": day_events[:2],
+                    "more_event_count": max(0, len(day_events) - 2),
                     "tooltip": " | ".join(labels),
                 }
             )
