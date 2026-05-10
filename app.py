@@ -5485,6 +5485,45 @@ def replace_datei_content(datei, file_storage):
     return stored_name
 
 
+def datei_ersetzen_form_response(datei):
+    return render_template_string(
+        """
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Datei ersetzen</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+  <main class="container py-5">
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h4 mb-2">Datei ersetzen</h1>
+        <p class="text-muted mb-4">
+          Datei-ID {{ datei['id'] }} · aktuell hinterlegt:
+          <strong>{{ datei['original_name'] }}</strong>
+        </p>
+        <form method="POST" action="{{ url_for('admin_datei_ersetzen', datei_id=datei['id']) }}" enctype="multipart/form-data">
+          {{ csrf_field()|safe }}
+          <label class="form-label fw-semibold">Originaldatei neu hochladen</label>
+          <input type="file" name="datei" class="form-control form-control-lg mb-3" required>
+          <div class="d-flex gap-2 flex-wrap">
+            <button type="submit" class="btn btn-dark btn-lg">Datei ersetzen</button>
+            <a class="btn btn-outline-dark btn-lg" href="{{ url_for('auftrag_detail', auftrag_id=datei['auftrag_id']) }}">Zurück zum Auftrag</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
+        """,
+        datei=datei,
+    )
+
+
 def delete_partner_datei(autohaus_id, datei_id):
     datei = get_datei(datei_id)
     if not datei:
@@ -8071,12 +8110,14 @@ def admin_datei_download(datei_id):
     )
 
 
-@app.route("/admin/datei/<int:datei_id>/ersetzen", methods=["POST"])
+@app.route("/admin/datei/<int:datei_id>/ersetzen", methods=["GET", "POST"])
 @admin_required
 def admin_datei_ersetzen(datei_id):
     datei = get_datei(datei_id)
     if not datei:
         abort(404)
+    if request.method == "GET":
+        return datei_ersetzen_form_response(datei)
     try:
         replace_datei_content(datei, request.files.get("datei"))
     except ValueError as exc:

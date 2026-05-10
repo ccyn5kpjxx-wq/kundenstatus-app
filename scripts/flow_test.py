@@ -655,6 +655,15 @@ def main():
             restored_blob_size == len(b"codex-test-fertigbild"),
             str(restored_blob_size),
         )
+        response = admin.get(f"/admin/datei/{fertigbild['id']}/ersetzen")
+        replacement_form_html = response.get_data(as_text=True)
+        check(
+            "Admin-Reparaturseite zeigt Upload-Feld",
+            response.status_code == 200
+            and "Originaldatei neu hochladen" in replacement_form_html
+            and "name=\"datei\"" in replacement_form_html,
+            f"Status {response.status_code}",
+        )
         response = admin.post(
             f"/admin/datei/{fertigbild['id']}/ersetzen",
             data=with_csrf(
