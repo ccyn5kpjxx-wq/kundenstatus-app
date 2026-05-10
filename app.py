@@ -7168,6 +7168,16 @@ def dashboard():
     )
 
 
+@app.route("/admin/zugaenge")
+@admin_required
+def admin_zugaenge():
+    return render_template(
+        "zugaenge.html",
+        autohaeuser=list_autohaeuser(),
+        public_base_url=get_public_base_url(),
+    )
+
+
 def extract_import_package_files(archive, names, tmp_path):
     if "auftraege.db" not in names:
         raise ValueError("Datenpaket ungültig: auftraege.db fehlt.")
@@ -7410,7 +7420,7 @@ def autohaus_neu():
     name = clean_text(request.form.get("name"))
     if not name:
         flash("Bitte einen Autohaus-Namen eintragen.", "warning")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("admin_zugaenge"))
 
     slug = get_unique_slug(name)
     zugangscode = clean_text(request.form.get("zugangscode")) or uuid.uuid4().hex[:8].upper()
@@ -7444,7 +7454,7 @@ def autohaus_neu():
     db.commit()
     db.close()
     flash(f"Autohaus angelegt. Portal-Link: /portal/{portal_key}", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("admin_zugaenge"))
 
 
 @app.route("/admin/autohaus/<int:autohaus_id>/update", methods=["POST"])
@@ -7489,7 +7499,7 @@ def autohaus_update(autohaus_id):
     db.commit()
     db.close()
     flash("Autohaus aktualisiert.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("admin_zugaenge"))
 
 
 @app.route("/admin/autohaus/<int:autohaus_id>/lackierauftrag-vorlage.pdf")

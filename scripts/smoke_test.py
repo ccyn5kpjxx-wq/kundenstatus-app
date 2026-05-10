@@ -81,14 +81,14 @@ def main():
     with external_client.session_transaction(base_url="https://werkstatt.example.test") as session:
         session["admin"] = True
     external_admin = external_client.get(
-        "/admin",
+        "/admin/zugaenge",
         base_url="https://werkstatt.example.test",
         headers={
             "X-Forwarded-Proto": "https",
             "X-Forwarded-Host": "werkstatt.example.test",
         },
     )
-    ok &= check("Admin mit oeffentlichem Host", external_admin, {200})
+    ok &= check("Admin-Zugaenge mit oeffentlichem Host", external_admin, {200})
     external_html = external_admin.get_data(as_text=True)
     expected_public_base_url = portal.PUBLIC_BASE_URL or "https://werkstatt.example.test"
     external_link_ok = f"{expected_public_base_url}/portal/" in external_html
