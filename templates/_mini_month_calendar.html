@@ -229,15 +229,15 @@
         title="{{ day['datum_text'] }}{% if day['tooltip'] %} · {{ day['tooltip'] }}{% endif %}"
       >
         <span class="mini-day-number">{{ day['tag'] }}</span>
-        {% if day['event_count'] %}
+        {% if day['event_count'] and mini_calendar.get('show_event_count', True) %}
         <span class="mini-event-count">{{ day['event_count'] }}</span>
         {% endif %}
         {% if day['events'] %}
         <span class="mini-day-events">
           {% for event in day['events'] %}
-          <span class="mini-event-name">{{ event['party_name'] }}</span>
+          <span class="mini-event-name">{{ event.get('display_name') or event['party_name'] }}</span>
           {% endfor %}
-          {% if day['more_event_count'] %}
+          {% if day['more_event_count'] and mini_calendar.get('show_more_events', True) %}
           <span class="mini-event-more">+{{ day['more_event_count'] }} weitere</span>
           {% endif %}
         </span>

@@ -7021,6 +7021,8 @@ def build_mini_monatskalender(
     route_values=None,
     only_arrival_events=False,
     only_start_events=False,
+    only_start_pickup_events=False,
+    event_display_mode="party",
 ):
     month_start = parse_mini_calendar_month(month_value)
     month_end = shift_month(month_start, 1) - timedelta(days=1)
@@ -7044,7 +7046,12 @@ def build_mini_monatskalender(
     event_dates = defaultdict(list)
     for auftrag in auftraege or []:
         event_fields = EVENT_FELDER
-        if only_start_events:
+        if only_start_pickup_events:
+            event_fields = (
+                ("start_datum", "Beginn", "primary"),
+                ("abholtermin", "Abholung", "success"),
+            )
+        elif only_start_events:
             event_fields = (("start_datum", "Starttermin", "primary"),)
         elif only_arrival_events:
             event_fields = (("annahme_datum", "Anlieferung", "secondary"),)
@@ -7072,8 +7079,9 @@ def build_mini_monatskalender(
                     {
                         "label": label,
                         "party_name": party_name,
+                        "display_name": label if event_display_mode == "label" else party_name,
                         "vehicle_label": vehicle_label,
-                        "tooltip": title,
+                        "tooltip": label if event_display_mode == "label" else title,
                     }
                 )
 
@@ -7106,7 +7114,10 @@ def build_mini_monatskalender(
             compact_events = []
             seen_events = set()
             for event in day_events:
-                event_key = (event.get("party_name"), event.get("vehicle_label"))
+                if event_display_mode == "label":
+                    event_key = (event.get("display_name"),)
+                else:
+                    event_key = (event.get("party_name"), event.get("vehicle_label"))
                 if event_key in seen_events:
                     continue
                 seen_events.add(event_key)
@@ -7141,6 +7152,8 @@ def build_mini_monatskalender(
         event_label = "Anlieferung"
     elif only_start_events:
         event_label = "Starttermin"
+    elif only_start_pickup_events:
+        event_label = "Beginn / Abholung"
 
     return {
         "title": f"{month_names[month_start.month]} {month_start.year}",
@@ -7150,6 +7163,8 @@ def build_mini_monatskalender(
         "weekdays": ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
         "weeks": weeks,
         "event_label": event_label,
+        "show_event_count": event_display_mode != "label",
+        "show_more_events": event_display_mode != "label",
     }
 
 
@@ -7340,14 +7355,15 @@ def dashboard():
         auftraege,
         request.args.get("monat", ""),
         endpoint="dashboard",
-        only_start_events=True,
+        only_start_pickup_events=True,
+        event_display_mode="label",
     )
     mini_calendar.update(
         {
             "section_class": "page-card p-4 p-lg-5 mb-4 mini-calendar mini-calendar-large",
-            "heading": f"Starttermine {mini_calendar['title']}",
-            "subtitle": f"Heute: {mini_calendar['today_text']} · Nur Starttermine im Monatsblick",
-            "aria_label": "Starttermine-Kalender",
+            "heading": f"Beginn und Abholung {mini_calendar['title']}",
+            "subtitle": f"Heute: {mini_calendar['today_text']} · Nur Beginn und Abholung im Monatsblick",
+            "aria_label": "Beginn-und-Abholung-Kalender",
         }
     )
     return render_template(

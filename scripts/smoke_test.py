@@ -43,6 +43,7 @@ def main():
             {
                 "annahme_datum_obj": date.today(),
                 "start_datum_obj": date.today(),
+                "abholtermin_obj": date.today(),
                 "autohaus_name": "Smoke Autohaus",
                 "kunde_name": "Smoke Kunde",
                 "fahrzeug": "Audi A4",
@@ -57,7 +58,8 @@ def main():
             }
         ],
         date.today().strftime("%Y-%m"),
-        only_start_events=True,
+        only_start_pickup_events=True,
+        event_display_mode="label",
     )
     today_text = date.today().strftime(portal.DATE_FMT)
     today_calendar_day = next(
@@ -67,14 +69,16 @@ def main():
         if day["datum_text"] == today_text
     )
     calendar_names_ok = (
-        today_calendar_day["event_count"] == 1
+        today_calendar_day["event_count"] == 2
         and today_calendar_day["events"]
-        and today_calendar_day["events"][0]["party_name"] == "Smoke Autohaus"
+        and {event["display_name"] for event in today_calendar_day["events"]} == {"Beginn", "Abholung"}
+        and "Smoke Autohaus" not in {event["display_name"] for event in today_calendar_day["events"]}
+        and "Smoke Autohaus" not in today_calendar_day["tooltip"]
     )
     print(
-        "[OK] Monatskalender liefert nur Starttermin-Autohausnamen pro Tag"
+        "[OK] Monatskalender liefert nur Beginn/Abholung pro Tag"
         if calendar_names_ok
-        else "[FEHLER] Monatskalender liefert nicht nur Starttermin-Autohausnamen pro Tag"
+        else "[FEHLER] Monatskalender liefert nicht nur Beginn/Abholung pro Tag"
     )
     ok &= calendar_names_ok
     ok &= check(
@@ -120,9 +124,10 @@ def main():
     ok &= check("Admin mit Login", admin_response, {200})
     admin_html = admin_response.get_data(as_text=True)
     admin_calendar_ok = (
-        "Starttermine" in admin_html
+        "Beginn und Abholung" in admin_html
         and "mini-calendar-large" in admin_html
         and "Auftragsplan von bis" not in admin_html
+        and "Nur Beginn und Abholung" in admin_html
     )
     print(
         "[OK] Admin-Dashboard zeigt grossen Kalender"
