@@ -7090,6 +7090,7 @@ def build_mini_monatskalender(
                     "is_holiday": bool(holiday_title),
                     "has_betriebsurlaub": bool(betriebsurlaub_dates.get(current)),
                     "has_events": bool(event_dates.get(current)),
+                    "event_count": len(event_dates.get(current, [])),
                     "tooltip": " | ".join(labels),
                 }
             )
@@ -7295,6 +7296,19 @@ def dashboard():
     alle_auftraege = list_auftraege(include_archived=True)
     auftraege = [a for a in alle_auftraege if not a["archiviert"]]
     archivierte_auftraege = [a for a in alle_auftraege if a["archiviert"]]
+    mini_calendar = build_mini_monatskalender(
+        auftraege,
+        request.args.get("monat", ""),
+        endpoint="dashboard",
+    )
+    mini_calendar.update(
+        {
+            "section_class": "page-card p-4 p-lg-5 mb-4 mini-calendar mini-calendar-large",
+            "heading": f"Werkstatt-Kalender {mini_calendar['title']}",
+            "subtitle": f"Heute: {mini_calendar['today_text']} · Alle Fahrzeugtermine im Monatsblick",
+            "aria_label": "Werkstatt-Kalender",
+        }
+    )
     return render_template(
         "dashboard.html",
         auftraege=auftraege,
@@ -7305,6 +7319,7 @@ def dashboard():
         ki_status=get_ai_status(),
         database_status=get_database_status(),
         startup_warnings=get_startup_warnings(),
+        mini_calendar=mini_calendar,
         statusliste=STATUSLISTE,
         public_base_url=get_public_base_url(),
     )

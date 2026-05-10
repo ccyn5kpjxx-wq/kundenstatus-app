@@ -76,7 +76,16 @@ def main():
 
     with client.session_transaction() as session:
         session["admin"] = True
-    ok &= check("Admin mit Login", client.get("/admin"), {200})
+    admin_response = client.get("/admin")
+    ok &= check("Admin mit Login", admin_response, {200})
+    admin_html = admin_response.get_data(as_text=True)
+    admin_calendar_ok = "Werkstatt-Kalender" in admin_html and "mini-calendar-large" in admin_html
+    print(
+        "[OK] Admin-Dashboard zeigt grossen Kalender"
+        if admin_calendar_ok
+        else "[FEHLER] Admin-Dashboard zeigt keinen grossen Kalender"
+    )
+    ok &= admin_calendar_ok
     external_client = portal.app.test_client()
     with external_client.session_transaction(base_url="https://werkstatt.example.test") as session:
         session["admin"] = True
