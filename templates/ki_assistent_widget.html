@@ -1,0 +1,293 @@
+{% set ki_assistent_auftrag_id = '' %}
+{% if auftrag is defined and auftrag %}
+  {% set ki_assistent_auftrag_id = auftrag['id'] %}
+{% elif angebot is defined and angebot %}
+  {% set ki_assistent_auftrag_id = angebot['id'] %}
+{% endif %}
+{% if ki_assistent_chat_url is defined %}
+  {% set ki_chat_url = ki_assistent_chat_url %}
+  {% set ki_clear_url = ki_assistent_clear_url %}
+  {% set ki_subtitle = ki_assistent_subtitle if ki_assistent_subtitle is defined else 'Fragen zu Kalender, Fahrzeugen, E-Mail und Portal.' %}
+{% elif session.get('admin') %}
+  {% set ki_chat_url = url_for('admin_ki_chat') %}
+  {% set ki_clear_url = url_for('admin_ki_chat_loeschen') %}
+  {% set ki_subtitle = 'Fragen zu Kalender, Fahrzeugen, E-Mail und Portal.' %}
+{% else %}
+  {% set ki_chat_url = url_for('partner_ki_chat', slug=autohaus['slug']) %}
+  {% set ki_clear_url = url_for('partner_ki_chat_loeschen', slug=autohaus['slug']) %}
+  {% set ki_subtitle = 'Fragen zum Portal, Auftrag oder Upload.' %}
+{% endif %}
+<style>
+  .ki-assistent {
+    position: fixed;
+    right: 22px;
+    bottom: 22px;
+    z-index: 1100;
+    font-family: "DM Sans", sans-serif;
+  }
+  .ki-assistent-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 0;
+    border-radius: 999px;
+    background: #132635;
+    color: #fff;
+    min-height: 52px;
+    padding: 0 18px 0 10px;
+    box-shadow: 0 16px 34px rgba(18, 38, 53, .26);
+    font-weight: 700;
+  }
+  .ki-assistent-toggle-mark {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    background: #1b7f53;
+    color: #fff;
+    font-size: .9rem;
+  }
+  .ki-assistent-panel {
+    position: absolute;
+    right: 0;
+    bottom: 66px;
+    width: min(380px, calc(100vw - 28px));
+    background: #fffdf9;
+    border: 1px solid #ddcfbb;
+    border-radius: 18px;
+    box-shadow: 0 22px 55px rgba(24, 20, 14, .22);
+    overflow: hidden;
+    display: none;
+  }
+  .ki-assistent.is-open .ki-assistent-panel {
+    display: block;
+  }
+  .ki-assistent-head {
+    padding: 14px 16px;
+    background: linear-gradient(135deg, #132635, #145d66);
+    color: #fff;
+  }
+  .ki-assistent-title {
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+  .ki-assistent-subtitle {
+    color: rgba(255,255,255,.76);
+    font-size: .86rem;
+  }
+  .ki-assistent-history {
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 14px;
+    display: grid;
+    gap: 10px;
+    background: #f7f1e8;
+  }
+  .ki-assistent-message {
+    max-width: 88%;
+    padding: 10px 12px;
+    border-radius: 14px;
+    line-height: 1.38;
+    white-space: pre-wrap;
+  }
+  .ki-assistent-message.is-ki {
+    justify-self: start;
+    background: #fffdf9;
+    border: 1px solid #e4d6c3;
+    color: #16202a;
+  }
+  .ki-assistent-message.is-user {
+    justify-self: end;
+    background: #132635;
+    color: #fff;
+  }
+  .ki-assistent-form {
+    padding: 12px;
+    background: #fffdf9;
+    border-top: 1px solid #e4d6c3;
+  }
+  .ki-assistent-input {
+    resize: none;
+    min-height: 54px;
+    max-height: 120px;
+  }
+  .ki-assistent-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .ki-assistent-actions .btn {
+    min-height: 40px;
+  }
+  @media (max-width: 575.98px) {
+    .ki-assistent {
+      left: 14px;
+      right: 14px;
+      bottom: 14px;
+    }
+    .ki-assistent-toggle {
+      width: 100%;
+      justify-content: center;
+    }
+    .ki-assistent-panel {
+      left: 0;
+      right: 0;
+      width: 100%;
+      bottom: 64px;
+    }
+  }
+</style>
+<div
+  class="ki-assistent"
+  data-ki-assistent
+  data-chat-url="{{ ki_chat_url }}"
+  data-clear-url="{{ ki_clear_url }}"
+  data-csrf-token="{{ csrf_token() }}"
+  data-auftrag-id="{{ ki_assistent_auftrag_id }}"
+>
+  <div class="ki-assistent-panel" role="dialog" aria-label="KI-Helfer">
+    <div class="ki-assistent-head">
+      <div class="ki-assistent-title">KI-Helfer</div>
+      <div class="ki-assistent-subtitle">{{ ki_subtitle }}</div>
+    </div>
+    <div class="ki-assistent-history" data-ki-history>
+      <div class="ki-assistent-message is-ki">Womit kann ich helfen?</div>
+    </div>
+    <form class="ki-assistent-form" data-ki-form>
+      <textarea class="form-control ki-assistent-input" name="message" data-ki-input rows="2" placeholder="Ihre Frage an den KI-Helfer" aria-label="Frage an den KI-Helfer" autocomplete="off"></textarea>
+      <div class="ki-assistent-actions">
+        <button type="submit" class="btn btn-dark flex-grow-1" data-ki-send>Senden</button>
+        <button type="button" class="btn btn-outline-dark" data-ki-clear>Verlauf löschen</button>
+      </div>
+    </form>
+  </div>
+  <button type="button" class="ki-assistent-toggle" data-ki-toggle aria-expanded="false">
+    <span class="ki-assistent-toggle-mark">KI</span>
+    <span>Wie kann ich Ihnen helfen?</span>
+  </button>
+</div>
+<script>
+  (() => {
+    document.querySelectorAll('[data-ki-assistent]').forEach((root) => {
+      if (root.dataset.kiReady === '1') return;
+      root.dataset.kiReady = '1';
+
+      const toggle = root.querySelector('[data-ki-toggle]');
+      const panel = root.querySelector('.ki-assistent-panel');
+      const form = root.querySelector('[data-ki-form]');
+      const input = root.querySelector('[data-ki-input]');
+      const history = root.querySelector('[data-ki-history]');
+      const sendButton = root.querySelector('[data-ki-send]');
+      const clearButton = root.querySelector('[data-ki-clear]');
+      const chatUrl = root.dataset.chatUrl;
+      const clearUrl = root.dataset.clearUrl;
+      const csrfToken = root.dataset.csrfToken;
+      const auftragId = root.dataset.auftragId || '';
+      if (!toggle || !panel || !form || !input || !history || !sendButton || !clearButton) return;
+
+      const appendMessage = (kind, text) => {
+        const message = document.createElement('div');
+        message.className = `ki-assistent-message ${kind === 'user' ? 'is-user' : 'is-ki'}`;
+        message.textContent = text;
+        history.appendChild(message);
+        history.scrollTop = history.scrollHeight;
+        return message;
+      };
+
+      const focusInput = () => {
+        try {
+          input.focus({ preventScroll: true });
+        } catch (error) {
+          input.focus();
+        }
+        const cursorPosition = input.value.length;
+        input.setSelectionRange(cursorPosition, cursorPosition);
+      };
+
+      const setOpen = (open) => {
+        root.classList.toggle('is-open', open);
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) {
+          focusInput();
+          window.requestAnimationFrame(focusInput);
+        }
+      };
+
+      toggle.addEventListener('click', () => {
+        setOpen(!root.classList.contains('is-open'));
+      });
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const text = input.value.trim();
+        if (!text || sendButton.disabled) {
+          focusInput();
+          return;
+        }
+        appendMessage('user', text);
+        input.value = '';
+        input.style.height = '';
+        sendButton.disabled = true;
+        const waitMessage = appendMessage('ki', 'Ich prüfe das kurz...');
+        try {
+          const response = await fetch(chatUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ message: text, auftrag_id: auftragId })
+          });
+          const payload = await response.json().catch(() => ({}));
+          waitMessage.textContent = payload.answer || payload.error || 'Die KI ist gerade nicht erreichbar. Bitte schreibe der Werkstatt direkt im Auftrag.';
+        } catch (error) {
+          waitMessage.textContent = 'Die KI ist gerade nicht erreichbar. Bitte schreibe der Werkstatt direkt im Auftrag.';
+        } finally {
+          sendButton.disabled = false;
+          focusInput();
+        }
+      });
+
+      clearButton.addEventListener('click', async () => {
+        history.innerHTML = '';
+        appendMessage('ki', 'Womit kann ich helfen?');
+        focusInput();
+        try {
+          await fetch(clearUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ auftrag_id: auftragId })
+          });
+        } catch (error) {
+          appendMessage('ki', 'Der sichtbare Verlauf ist gelöscht. Speichern konnte gerade nicht bestätigt werden.');
+        }
+      });
+
+      input.addEventListener('input', () => {
+        input.style.height = 'auto';
+        input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+      });
+
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault();
+          if (typeof form.requestSubmit === 'function') {
+            form.requestSubmit();
+          } else {
+            form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+          }
+        }
+      });
+
+      panel.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          setOpen(false);
+        }
+      });
+    });
+  })();
+</script>

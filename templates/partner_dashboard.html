@@ -40,6 +40,25 @@
     .hint-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:6px; border-radius:18px; background:#fffaf2; }
     .hint-row .chip-link { flex:1 1 300px; margin:0; }
     .hint-row form { margin-left:auto; }
+    .bonus-panel { background:#fffdf9; color:#111827; border:1px solid #e4d6c3; border-radius:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
+    .bonus-panel .text-muted { color:#6c6255 !important; }
+    .bonus-kicker { color:#a23f2d; text-transform:uppercase; letter-spacing:.12em; font-weight:700; font-size:.78rem; }
+    .bonus-tier-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+    .bonus-tier { background:#fffaf2; color:#111827; border:1px solid #e4d6c3; border-top:4px solid #d0bda2; border-radius:14px; min-height:132px; padding:18px; }
+    .bonus-tier.is-dark { background:#f7f1e8; border-top-color:#145d66; }
+    .bonus-tier.is-red { background:#fff1f3; border-top-color:#a23f2d; }
+    .bonus-tier.is-active { outline:3px solid rgba(20,93,102,.28); outline-offset:0; }
+    .bonus-tier small { display:block; text-transform:uppercase; letter-spacing:.1em; color:#7d7163; font-size:.68rem; }
+    .bonus-tier strong { display:block; font-size:2.1rem; line-height:1; margin:.55rem 0 .2rem; }
+    .bonus-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; background:#e4d6c3; border:1px solid #e4d6c3; border-radius:16px; overflow:hidden; margin-top:18px; }
+    .bonus-summary-item { background:#fffaf2; padding:16px; min-height:94px; }
+    .bonus-summary-item span { display:block; color:#7d7163; text-transform:uppercase; letter-spacing:.08em; font-size:.68rem; margin-bottom:.35rem; }
+    .bonus-summary-item strong { color:#132635; font-size:1.2rem; }
+    .bonus-open { color:#a23f2d !important; font-size:1.35rem !important; }
+    .bonus-order-list { display:grid; gap:10px; margin-top:18px; }
+    .bonus-order { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:12px; align-items:center; padding:12px 0; border-top:1px solid rgba(64,47,25,.14); }
+    .bonus-order a { color:#132635; font-weight:700; text-decoration:none; }
+    .bonus-source { border:1px solid #d9cab4; border-radius:999px; padding:.22rem .55rem; background:#fff7eb; color:#6c6255; font-size:.78rem; white-space:nowrap; }
     .btn,
     .form-control {
       min-height:44px;
@@ -75,6 +94,11 @@
       .hint-row form,
       .hint-row form .btn {
         width:100%;
+      }
+      .bonus-tier-grid,
+      .bonus-summary,
+      .bonus-order {
+        grid-template-columns:1fr;
       }
       .table-responsive table,
       .table-responsive thead,
@@ -136,6 +160,7 @@
         <div class="d-flex gap-2 flex-wrap">
           <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Lackierauftrag PDF</a>
           <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Angebot anfordern</a>
+          <a href="#bonusmodell" class="btn btn-outline-dark btn-lg">Bonusmodell</a>
           <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}" class="btn btn-dark btn-lg">Neues Fahrzeug</a>
           <a href="{{ url_for('partner_logout') }}" class="btn btn-outline-dark btn-lg">Logout</a>
         </div>
@@ -143,6 +168,10 @@
     </div>
 
     {% include "_mini_month_calendar.html" %}
+
+    <div id="bonusmodell">
+      {% include "_partner_bonusmodell_panel.html" %}
+    </div>
 
     <div class="panel mb-4">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
@@ -495,5 +524,6 @@
       refresh();
     });
   </script>
+  {% include "ki_assistent_widget.html" %}
 </body>
 </html>

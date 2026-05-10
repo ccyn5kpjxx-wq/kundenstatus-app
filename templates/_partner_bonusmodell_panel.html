@@ -1,0 +1,75 @@
+<section class="bonus-panel mb-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+    <div>
+      <div class="bonus-kicker">Partnermodell</div>
+      <h2 class="h3 mb-1">Bonusmodell klar erklärt</h2>
+      <div class="text-muted">Aktueller Stand für {{ bonusmodell['monat_label'] }} aus zurückgegebenen Aufträgen mit Netto-Preis.</div>
+    </div>
+    {% if bonusmodell['naechste_stufe'] %}
+    <span class="bonus-source">Noch {{ bonusmodell['bis_naechste_stufe_label'] }} bis {{ bonusmodell['naechste_stufe']['label'] }}</span>
+    {% else %}
+    <span class="bonus-source">Höchste Bonusstufe erreicht</span>
+    {% endif %}
+  </div>
+
+  <div class="bonus-tier-grid">
+    {% for stufe in bonusmodell['stufen'] %}
+    <div class="bonus-tier {% if loop.index == 2 %}is-dark{% elif loop.index == 3 %}is-red{% endif %} {% if stufe['aktiv'] %}is-active{% endif %}">
+      <small>Ab Monatsumsatz</small>
+      <strong>{{ stufe['label'] }}</strong>
+      <div>Bonus</div>
+      <div class="fw-bold mt-2">{{ stufe['schwelle_label'] }}</div>
+      <small>netto / Monat</small>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="bonus-summary">
+    <div class="bonus-summary-item">
+      <span>Monatsumsatz netto</span>
+      <strong>{{ bonusmodell['umsatz_netto_label'] }}</strong>
+    </div>
+    <div class="bonus-summary-item">
+      <span>Bonusstufe</span>
+      <strong>{{ bonusmodell['bonus_satz_label'] }}</strong>
+    </div>
+    <div class="bonus-summary-item">
+      <span>Bonus netto</span>
+      <strong>{{ bonusmodell['bonus_netto_label'] }}</strong>
+    </div>
+    <div class="bonus-summary-item">
+      <span>Verrechnung</span>
+      <strong class="bonus-open">{{ bonusmodell['verrechnung_label'] }}</strong>
+    </div>
+  </div>
+
+  <div class="mt-3 text-muted">
+    {{ bonusmodell['gezaehlte_auftraege_count'] }} zurückgegebene Auftrag/Aufträge zählen aktuell.
+    {% if bonusmodell['offene_preise_count'] %}
+      {{ bonusmodell['offene_preise_count'] }} Preis(e) werden noch von der Werkstatt ergänzt.
+    {% endif %}
+  </div>
+
+  {% if bonusmodell['auftraege'] %}
+  <div class="bonus-order-list">
+    {% for item in bonusmodell['auftraege'][:8] %}
+    {% set a = item['auftrag'] %}
+    <div class="bonus-order">
+      <div>
+        <a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=a['id']) }}">{{ a['fahrzeug'] or 'Fahrzeug' }}{% if a['kennzeichen'] %} · {{ a['kennzeichen'] }}{% endif %}</a>
+        <div class="text-muted small">Zurückgegeben am {{ item['datum_text'] }}</div>
+      </div>
+      {% if item['preis_fehlt'] %}
+      <strong class="bonus-open">Preis offen</strong>
+      <span class="bonus-source">wird ergänzt</span>
+      {% else %}
+      <strong>{{ item['betrag_label'] }}</strong>
+      <span class="bonus-source">{{ item['quelle'] }}</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="mt-3 text-muted">In diesem Monat ist noch kein zurückgegebener Auftrag im Bonuslauf.</div>
+  {% endif %}
+</section>

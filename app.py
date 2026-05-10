@@ -55,6 +55,7 @@ from flask import (
     flash,
     g,
     has_request_context,
+    jsonify,
     redirect,
     render_template,
     render_template_string,
@@ -486,6 +487,12 @@ STATUSLISTE = {
     4: dict(key="fertig", label="Fertig", icon="✅", farbe="success"),
     5: dict(key="zurueckgegeben", label="Zurückgegeben", icon="↩️", farbe="dark"),
 }
+
+BONUSMODELL_STUFEN = (
+    {"schwelle": 3000.0, "satz": 0.02, "label": "2 %", "schwelle_label": "3.000 EUR"},
+    {"schwelle": 5000.0, "satz": 0.03, "label": "3 %", "schwelle_label": "5.000 EUR"},
+    {"schwelle": 8000.0, "satz": 0.04, "label": "4 %", "schwelle_label": "8.000 EUR"},
+)
 
 TRANSPORT_ARTEN = {
     "standard": {
@@ -4663,6 +4670,231 @@ def parse_money_amount(value):
         return None
 
 
+def format_bonus_money(value):
+    try:
+        amount = round(float(value or 0), 2)
+    except (TypeError, ValueError):
+        amount = 0.0
+    integer, decimals = f"{amount:.2f}".split(".")
+    groups = []
+    while integer:
+        groups.append(integer[-3:])
+        integer = integer[:-3]
+    return f"{'.'.join(reversed(groups))},{decimals} EUR"
+
+
+def auftrag_bonus_preis(auftrag):
+    for key, label in (
+        ("werkstatt_angebot_preis", "Werkstatt-Angebot"),
+        ("rep_max_kosten", "Reparaturwert"),
+    ):
+        amount = parse_money_amount((auftrag or {}).get(key))
+        if amount:
+            return amount, label
+    internal_note = clean_text((auftrag or {}).get("notiz_intern"))
+    if "netto" in normalize_document_text(internal_note):
+        amount = parse_money_amount(internal_note)
+        if amount:
+            return amount, "Fahrzeugdaten"
+    return 0.0, ""
+
+
+def build_bonusmodell(auftraege, reference_date=None):
+    today = reference_date or date.today()
+    month_start = date(today.year, today.month, 1)
+    month_end = date(today.year + int(today.month == 12), 1 if today.month == 12 else today.month + 1, 1) - timedelta(days=1)
+    bonus_items = []
+    monatsumsatz = 0.0
+    offene_preise = 0
+
+    for auftrag in auftraege or []:
+        if auftrag.get("angebotsphase"):
+            continue
+        if int(auftrag.get("status") or 1) < 5:
+            continue
+        rueckgabe = parse_date(auftrag.get("abholtermin")) or parse_date(auftrag.get("geaendert_am"))
+        if not rueckgabe or rueckgabe < month_start or rueckgabe > month_end:
+            continue
+        betrag, quelle = auftrag_bonus_preis(auftrag)
+        preis_fehlt = not bool(betrag)
+        if preis_fehlt:
+            offene_preise += 1
+        else:
+            monatsumsatz += betrag
+        bonus_items.append(
+            {
+                "auftrag": auftrag,
+                "datum_text": format_date(rueckgabe),
+                "betrag": betrag,
+                "betrag_label": format_bonus_money(betrag) if betrag else "",
+                "quelle": quelle,
+                "preis_fehlt": preis_fehlt,
+            }
+        )
+
+    aktive_stufe = {"schwelle": 0.0, "satz": 0.0, "label": "0 %", "schwelle_label": "unter 3.000 EUR"}
+    for stufe in BONUSMODELL_STUFEN:
+        if monatsumsatz >= stufe["schwelle"]:
+            aktive_stufe = stufe
+
+    naechste_stufe = next((stufe for stufe in BONUSMODELL_STUFEN if monatsumsatz < stufe["schwelle"]), None)
+    bonus_netto = round(monatsumsatz * aktive_stufe["satz"], 2)
+    stufen = []
+    for stufe in BONUSMODELL_STUFEN:
+        item = dict(stufe)
+        item["aktiv"] = stufe["label"] == aktive_stufe["label"]
+        item["erreicht"] = monatsumsatz >= stufe["schwelle"]
+        stufen.append(item)
+
+    return {
+        "monat_label": f"{month_start.strftime('%m.%Y')}",
+        "umsatz_netto": round(monatsumsatz, 2),
+        "umsatz_netto_label": format_bonus_money(monatsumsatz),
+        "bonus_satz_label": aktive_stufe["label"],
+        "bonus_netto": bonus_netto,
+        "bonus_netto_label": format_bonus_money(bonus_netto),
+        "verrechnung_label": "offen" if bonus_netto > 0 else "unter Schwelle",
+        "stufen": stufen,
+        "naechste_stufe": naechste_stufe,
+        "bis_naechste_stufe_label": (
+            format_bonus_money(max(0.0, naechste_stufe["schwelle"] - monatsumsatz))
+            if naechste_stufe
+            else ""
+        ),
+        "auftraege": sorted(bonus_items, key=lambda item: item["datum_text"], reverse=True),
+        "offene_preise_count": offene_preise,
+        "gezaehlte_auftraege_count": sum(1 for item in bonus_items if not item["preis_fehlt"]),
+    }
+
+
+def get_partner_assistant_auftrag(auftrag_id, autohaus_id):
+    try:
+        auftrag_id = int(auftrag_id or 0)
+    except (TypeError, ValueError):
+        return None
+    if auftrag_id <= 0:
+        return None
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or int(auftrag.get("autohaus_id") or 0) != int(autohaus_id or 0):
+        return None
+    return auftrag
+
+
+def is_vehicle_planning_question(question):
+    text = normalize_document_text(question)
+    vehicle_terms = ("fahrzeug", "fahrzeuge", "auto", "autos", "wagen", "auftrag", "auftraege")
+    planning_terms = ("eingeplant", "geplant", "planung", "termin", "termine", "heute", "morgen", "woche", "start", "fertig", "abholung")
+    return any(term in text for term in vehicle_terms) and any(term in text for term in planning_terms)
+
+
+def assistant_vehicle_line(auftrag):
+    fahrzeug = clean_text(auftrag.get("fahrzeug")) or "Fahrzeug"
+    kennzeichen = clean_text(auftrag.get("kennzeichen"))
+    status = clean_text((auftrag.get("status_meta") or {}).get("label")) or "Status offen"
+    event_parts = []
+    for feld, label, _ in EVENT_FELDER:
+        if auftrag.get(feld):
+            event_parts.append(f"{label} {auftrag[feld]}")
+    details = f" ({kennzeichen})" if kennzeichen else ""
+    termin = ", ".join(event_parts[:4]) if event_parts else "kein Termin gesetzt"
+    return f"{fahrzeug}{details}: {termin}, Status {status}"
+
+
+def assistant_planned_vehicle_answer(question, autohaus_id):
+    auftraege = [a for a in list_auftraege(autohaus_id) if not a.get("archiviert") and not a.get("angebotsphase")]
+    dated = []
+    for auftrag in auftraege:
+        dates = [auftrag.get(f"{feld}_obj") for feld, _, _ in EVENT_FELDER if auftrag.get(f"{feld}_obj")]
+        if dates:
+            dated.append((min(dates), auftrag))
+    dated.sort(key=lambda item: item[0])
+    if not dated:
+        return "Aktuell sind keine aktiven Fahrzeugtermine hinterlegt."
+    lines = [f"- {assistant_vehicle_line(auftrag)}" for _, auftrag in dated[:6]]
+    rest = len(dated) - len(lines)
+    if rest > 0:
+        lines.append(f"- Weitere {rest} Fahrzeuge stehen im Portal.")
+    return "Aktuelle Fahrzeugplanung:\n" + "\n".join(lines)
+
+
+def partner_assistant_context_text(autohaus, auftrag=None):
+    parts = [
+        f"Autohaus: {clean_text((autohaus or {}).get('name'))}",
+        "Portal-Funktionen: Fahrzeuge anlegen, Unterlagen hochladen, Angebote anfragen, Status und Termine ansehen.",
+    ]
+    if auftrag:
+        parts.append(
+            "Aktueller Auftrag: "
+            + "; ".join(
+                part
+                for part in [
+                    clean_text(auftrag.get("fahrzeug")),
+                    clean_text(auftrag.get("kennzeichen")),
+                    clean_text(auftrag.get("analyse_text") or auftrag.get("beschreibung")),
+                    assistant_vehicle_line(auftrag),
+                ]
+                if part
+            )
+        )
+    planned = assistant_planned_vehicle_answer("fahrzeuge termine", autohaus["id"])
+    parts.append(planned)
+    return "\n".join(parts)
+
+
+def fallback_partner_assistant_answer(question, autohaus=None):
+    text = normalize_document_text(question)
+    if autohaus and is_vehicle_planning_question(question):
+        return assistant_planned_vehicle_answer(question, autohaus["id"])
+    if "bonus" in text or "stufe" in text:
+        return "Das Bonusmodell sehen Sie im Kundenportal. Dort stehen Monatsumsatz, aktuelle Stufe, Bonus netto und der Betrag bis zur nächsten Stufe."
+    if "angebot" in text:
+        return "Für ein Angebot können Sie im Portal 'Angebot anfordern' nutzen. Die Werkstatt prüft die Anfrage und stellt das Angebot anschließend zur Annahme bereit."
+    if "upload" in text or "datei" in text or "bild" in text:
+        return "Sie können Bilder, PDFs und Unterlagen direkt im Auftrag oder beim neuen Fahrzeug hochladen. Danach prüft die Werkstatt die Daten."
+    if "termin" in text or "kalender" in text:
+        return "Die Termine sehen Sie im Monatsblick und in den Fahrzeugdetails. Feiertage und Betriebsurlaub sind im Kalender markiert."
+    return "Ich helfe direkt hier im Autohaus-Portal: Fragen Sie nach Fahrzeugen, Terminen, Status, Uploads, Angeboten oder dem Bonusmodell."
+
+
+def ask_partner_assistant(question, autohaus, auftrag=None):
+    question = clean_text(question)[:900]
+    if not question:
+        return "Bitte geben Sie eine Frage ein.", "portal"
+    if is_vehicle_planning_question(question):
+        return assistant_planned_vehicle_answer(question, autohaus["id"]), "portal"
+
+    config = get_ai_config()
+    requests_module = get_requests()
+    if not config["openai_ready"] or requests_module is None:
+        return fallback_partner_assistant_answer(question, autohaus), "fallback"
+
+    payload = {
+        "model": config["openai_model"],
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Du bist der digitale KI-Helfer im Autohaus-Portal von Gärtner Karosserie & Lack. "
+                    "Antworte kurz, freundlich und praktisch. Hilf bei Fahrzeugstatus, Terminen, Uploads, "
+                    "Angeboten und Bonusmodell. Erfinde keine Preise, Termine oder Zusagen."
+                ),
+            },
+            {"role": "system", "content": partner_assistant_context_text(autohaus, auftrag)},
+            {"role": "user", "content": question},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 320,
+    }
+    response, request_error = post_openai_chat_completion(requests_module, payload)
+    if request_error or response is None or response.status_code >= 400:
+        return fallback_partner_assistant_answer(question, autohaus), "fallback"
+    try:
+        answer = clean_text(response.json()["choices"][0]["message"]["content"])
+    except Exception:
+        answer = ""
+    return (answer or fallback_partner_assistant_answer(question, autohaus), "openai" if answer else "fallback")
+
+
 def lexware_request(method, path, payload=None, query=""):
     if not LEXWARE_API_KEY:
         raise RuntimeError("LEXWARE_API_KEY fehlt. Bitte in .env.local eintragen.")
@@ -7657,6 +7889,7 @@ def partner_dashboard(slug):
         angebotsanfragen=list_angebotsanfragen(autohaus["id"]),
         benachrichtigungen=list_autohaus_benachrichtigungen(autohaus["id"]),
         cockpit=autohaus_dashboard_daten(auftraege),
+        bonusmodell=build_bonusmodell(alle_auftraege),
         mini_calendar=build_mini_monatskalender(
             auftraege,
             request.args.get("monat"),
@@ -7676,6 +7909,28 @@ def partner_hinweis_entfernen(slug, hinweis_id):
     mark_autohaus_benachrichtigung_gelesen(autohaus["id"], hinweis_id)
     flash("Hinweis entfernt.", "info")
     return redirect(url_for("partner_dashboard", slug=slug))
+
+
+@app.route("/partner/<slug>/ki/chat", methods=["POST"])
+def partner_ki_chat(slug):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return jsonify({"error": "Nicht eingeloggt."}), 401
+    payload = request.get_json(silent=True) or {}
+    question = clean_text(payload.get("message"))[:900]
+    if not question:
+        return jsonify({"error": "Bitte eine Frage eingeben."}), 400
+    auftrag = get_partner_assistant_auftrag(payload.get("auftrag_id"), autohaus["id"])
+    answer, source = ask_partner_assistant(question, autohaus, auftrag)
+    return jsonify({"answer": answer, "source": source})
+
+
+@app.route("/partner/<slug>/ki/chat/loeschen", methods=["POST"])
+def partner_ki_chat_loeschen(slug):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return jsonify({"error": "Nicht eingeloggt."}), 401
+    return jsonify({"ok": True})
 
 
 @app.route("/partner/<slug>/lackierauftrag-vorlage.pdf")
