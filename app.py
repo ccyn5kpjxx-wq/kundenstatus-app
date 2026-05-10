@@ -3678,6 +3678,7 @@ _backup_thread_started = False
 _change_backup_lock = threading.Lock()
 _change_backup_pending = False
 _change_backup_running = False
+_upload_blob_backfill_started = False
 
 DATEI_LIST_COLUMNS = """
     id, auftrag_id, reklamation_id, original_name, stored_name, mime_type, size,
@@ -3693,7 +3694,11 @@ def list_table_rows_for_backup(db, table_name):
         return []
     if not columns:
         return []
-    return [dict(row) for row in db.execute(f"SELECT * FROM {table_name}").fetchall()]
+    rows = [dict(row) for row in db.execute(f"SELECT * FROM {table_name}").fetchall()]
+    if table_name == "dateien":
+        for row in rows:
+            row.pop("content_blob", None)
+    return rows
 
 
 def write_uploads_to_backup(archive):
@@ -3704,6 +3709,35 @@ def write_uploads_to_backup(archive):
         if not path.is_file():
             continue
         archive.write(path, f"uploads/{path.name}")
+        count += 1
+    return count
+
+
+def write_datei_blobs_to_backup(archive, db):
+    try:
+        rows = db.execute(
+            """
+            SELECT id, stored_name, content_blob
+            FROM dateien
+            WHERE content_blob IS NOT NULL AND length(content_blob) > 0
+            """
+        ).fetchall()
+    except Exception as exc:
+        print(f"WARNUNG: Datei-Blobs konnten nicht ins Backup geschrieben werden: {exc}")
+        return 0
+
+    existing_names = set(archive.namelist())
+    count = 0
+    for row in rows:
+        stored_name = pathlib.Path(clean_text(row["stored_name"])).name
+        content = blob_to_bytes(row["content_blob"])
+        if not stored_name or not content:
+            continue
+        archive_name = f"uploads/{stored_name}"
+        if archive_name in existing_names:
+            continue
+        archive.writestr(archive_name, content)
+        existing_names.add(archive_name)
         count += 1
     return count
 
@@ -3749,6 +3783,7 @@ def create_backup_package(reason="auto"):
                         except OSError:
                             pass
                 upload_count = write_uploads_to_backup(archive)
+                blob_upload_count = write_datei_blobs_to_backup(archive, db)
                 archive.writestr(
                     "manifest.json",
                     json.dumps(
@@ -3757,6 +3792,7 @@ def create_backup_package(reason="auto"):
                             "reason": reason,
                             "backup_file": backup_path.name,
                             "upload_count": upload_count,
+                            "blob_upload_count": blob_upload_count,
                             "keep": AUTO_BACKUP_KEEP,
                         },
                         ensure_ascii=False,
@@ -5348,6 +5384,69 @@ def resolve_datei_path(datei):
     return write_restored_datei_file(stored_name, content)
 
 
+def backfill_upload_content_blobs(limit=None):
+    max_bytes = MAX_UPLOAD_MB * 1024 * 1024
+    limit = max(1, int(limit or env_int("UPLOAD_BLOB_BACKFILL_LIMIT", 5000)))
+    db = get_db()
+    saved = 0
+    missing = 0
+    try:
+        rows = db.execute(
+            """
+            SELECT id, stored_name
+            FROM dateien
+            WHERE content_blob IS NULL OR length(content_blob)=0
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        for row in rows:
+            stored_name = pathlib.Path(clean_text(row["stored_name"])).name
+            if not stored_name:
+                missing += 1
+                continue
+            path = UPLOAD_DIR / stored_name
+            content = b""
+            try:
+                if path.exists() and path.is_file() and path.stat().st_size <= max_bytes:
+                    content = path.read_bytes()
+            except OSError:
+                content = b""
+            if not content:
+                content = restore_datei_content_from_backups(stored_name)
+            if content:
+                db.execute(
+                    "UPDATE dateien SET content_blob=?, size=? WHERE id=?",
+                    (content, len(content), row["id"]),
+                )
+                saved += 1
+            else:
+                missing += 1
+        db.commit()
+    finally:
+        db.close()
+    if saved or missing:
+        print(f"Upload-Nachsicherung: {saved} Datei(en) in der Datenbank gesichert, {missing} fehlen weiterhin.")
+    return {"saved": saved, "missing": missing}
+
+
+def upload_blob_backfill_worker():
+    try:
+        backfill_upload_content_blobs()
+    except Exception as exc:
+        print(f"WARNUNG: Upload-Nachsicherung fehlgeschlagen: {exc}")
+
+
+def start_upload_blob_backfill():
+    global _upload_blob_backfill_started
+    if _upload_blob_backfill_started or not env_flag("UPLOAD_BLOB_BACKFILL_ON_STARTUP", True):
+        return
+    _upload_blob_backfill_started = True
+    thread = threading.Thread(target=upload_blob_backfill_worker, daemon=True)
+    thread.start()
+
+
 def missing_datei_response(datei, back_url=None, replace_url=None):
     back_url = clean_text(back_url)
     if not back_url:
@@ -5485,7 +5584,9 @@ def replace_datei_content(datei, file_storage):
     return stored_name
 
 
-def datei_ersetzen_form_response(datei):
+def datei_ersetzen_form_response(datei, action_url=None, back_url=None):
+    action_url = clean_text(action_url) or url_for("admin_datei_ersetzen", datei_id=datei["id"])
+    back_url = clean_text(back_url) or url_for("auftrag_detail", auftrag_id=datei["auftrag_id"])
     return render_template_string(
         """
 <!DOCTYPE html>
@@ -5505,13 +5606,13 @@ def datei_ersetzen_form_response(datei):
           Datei-ID {{ datei['id'] }} · aktuell hinterlegt:
           <strong>{{ datei['original_name'] }}</strong>
         </p>
-        <form method="POST" action="{{ url_for('admin_datei_ersetzen', datei_id=datei['id']) }}" enctype="multipart/form-data">
+        <form method="POST" action="{{ action_url }}" enctype="multipart/form-data">
           {{ csrf_field()|safe }}
           <label class="form-label fw-semibold">Originaldatei neu hochladen</label>
           <input type="file" name="datei" class="form-control form-control-lg mb-3" required>
           <div class="d-flex gap-2 flex-wrap">
             <button type="submit" class="btn btn-dark btn-lg">Datei ersetzen</button>
-            <a class="btn btn-outline-dark btn-lg" href="{{ url_for('auftrag_detail', auftrag_id=datei['auftrag_id']) }}">Zurück zum Auftrag</a>
+            <a class="btn btn-outline-dark btn-lg" href="{{ back_url }}">Zurück zum Auftrag</a>
           </div>
         </form>
       </div>
@@ -5521,6 +5622,8 @@ def datei_ersetzen_form_response(datei):
 </html>
         """,
         datei=datei,
+        action_url=action_url,
+        back_url=back_url,
     )
 
 
@@ -8803,9 +8906,13 @@ def partner_datei(slug, datei_id):
         abort(404)
     path = resolve_datei_path(datei)
     if not path:
+        replace_url = ""
+        if clean_text(datei.get("quelle")) == "autohaus":
+            replace_url = url_for("partner_datei_ersetzen", slug=slug, datei_id=datei_id)
         return missing_datei_response(
             datei,
             url_for("partner_auftrag", slug=slug, auftrag_id=datei["auftrag_id"]),
+            replace_url=replace_url,
         )
     return send_file(
         path,
@@ -8828,9 +8935,13 @@ def partner_datei_download(slug, datei_id):
         abort(404)
     path = resolve_datei_path(datei)
     if not path:
+        replace_url = ""
+        if clean_text(datei.get("quelle")) == "autohaus":
+            replace_url = url_for("partner_datei_ersetzen", slug=slug, datei_id=datei_id)
         return missing_datei_response(
             datei,
             url_for("partner_auftrag", slug=slug, auftrag_id=datei["auftrag_id"]),
+            replace_url=replace_url,
         )
     return send_file(
         path,
@@ -8838,6 +8949,40 @@ def partner_datei_download(slug, datei_id):
         mimetype=datei["mime_type"],
         as_attachment=True,
     )
+
+
+@app.route("/partner/<slug>/datei/<int:datei_id>/ersetzen", methods=["GET", "POST"])
+def partner_datei_ersetzen(slug, datei_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    datei = get_datei(datei_id)
+    if not datei:
+        abort(404)
+    auftrag = get_auftrag(datei["auftrag_id"])
+    if (
+        not auftrag
+        or auftrag.get("autohaus_id") != autohaus["id"]
+        or clean_text(datei.get("quelle")) != "autohaus"
+    ):
+        abort(404)
+    back_url = url_for("partner_auftrag", slug=slug, auftrag_id=datei["auftrag_id"])
+    if request.method == "GET":
+        return datei_ersetzen_form_response(
+            datei,
+            action_url=url_for("partner_datei_ersetzen", slug=slug, datei_id=datei_id),
+            back_url=back_url,
+        )
+    try:
+        replace_datei_content(datei, request.files.get("datei"))
+    except ValueError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("partner_datei_ersetzen", slug=slug, datei_id=datei_id))
+    except Exception as exc:
+        flash(f"Datei konnte nicht ersetzt werden: {clean_text(str(exc))[:300]}", "danger")
+        return redirect(url_for("partner_datei_ersetzen", slug=slug, datei_id=datei_id))
+    flash("Datei ersetzt und wieder gespeichert.", "success")
+    return redirect(url_for("partner_datei", slug=slug, datei_id=datei_id))
 
 
 @app.route("/partner/<slug>/datei/<int:datei_id>/loeschen", methods=["POST"])
@@ -8859,6 +9004,7 @@ def partner_datei_loeschen(slug, datei_id):
 
 
 init_db()
+start_upload_blob_backfill()
 start_hourly_backups()
 
 

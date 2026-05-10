@@ -613,6 +613,10 @@ def main():
         db.close()
         check("Fertigbild als Fertigbild gespeichert", bool(fertigbild), str(fertigbild))
         check("Fertigbild-Datei liegt im Upload-Ordner", (test_uploads / fertigbild["stored_name"]).exists())
+        check(
+            "Fertigbild ist zusätzlich in der Datenbank gesichert",
+            fertigbild["content_blob"] == b"codex-test-fertigbild",
+        )
         check("Fertigbild erzeugt Autohaus-Hinweis", bool(hinweis), str(hinweis))
         response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}")
         partner_html = response.get_data(as_text=True)
@@ -629,6 +633,16 @@ def main():
         backup_path = portal.create_backup_package("flow-upload-restore")
         check("Backup für Upload-Restore erstellt", backup_path.exists(), str(backup_path))
         fertigbild_path = test_uploads / fertigbild["stored_name"]
+        db = portal.get_db()
+        db.execute("UPDATE dateien SET content_blob=NULL WHERE id=?", (fertigbild["id"],))
+        db.commit()
+        db.close()
+        backfill_result = portal.backfill_upload_content_blobs()
+        check(
+            "Nachsicherung speichert vorhandene Upload-Datei in DB",
+            backfill_result["saved"] >= 1,
+            str(backfill_result),
+        )
         db = portal.get_db()
         db.execute("UPDATE dateien SET content_blob=NULL WHERE id=?", (fertigbild["id"],))
         db.commit()
@@ -654,6 +668,20 @@ def main():
             "Wiederhergestellte Datei ist wieder in der Datenbank gesichert",
             restored_blob_size == len(b"codex-test-fertigbild"),
             str(restored_blob_size),
+        )
+        fertigbild_path.unlink()
+        blob_backup_path = portal.create_backup_package("flow-blob-backup")
+        with zipfile.ZipFile(blob_backup_path) as archive:
+            blob_backup_has_upload = f"uploads/{fertigbild['stored_name']}" in archive.namelist()
+        check("Backup enthält Upload aus Datenbank-Blob", blob_backup_has_upload)
+        response = partner.get(f"/partner/kaesmann/datei/{fertigbild['id']}")
+        restored_from_blob_status = response.status_code
+        restored_from_blob_bytes = response.get_data()
+        response.close()
+        check(
+            "Datei wird ohne Upload-Ordner direkt aus Datenbank wiederhergestellt",
+            restored_from_blob_status == 200 and restored_from_blob_bytes == b"codex-test-fertigbild",
+            f"Status {restored_from_blob_status}",
         )
         response = admin.get(f"/admin/datei/{fertigbild['id']}/ersetzen")
         replacement_form_html = response.get_data(as_text=True)
