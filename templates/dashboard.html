@@ -487,10 +487,10 @@
           <td>{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
           <td>
             <div class="d-flex gap-2 flex-wrap">
-              {% if a['annahme_datum'] %}<span class="schedule-pill">{{ a['annahme_label'] }} {{ a['annahme_datum'] }}</span>{% endif %}
-              {% if a['start_datum'] %}<span class="schedule-pill">Start {{ a['start_datum'] }}</span>{% endif %}
-              {% if a['fertig_datum'] %}<span class="schedule-pill">Fertig {{ a['fertig_datum'] }}</span>{% endif %}
-              {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['abholung_label'] }} {{ a['abholtermin'] }}</span>{% endif %}
+              {% if a['annahme_datum'] %}<span class="schedule-pill">{{ a['annahme_datum'] }}</span>{% endif %}
+              {% if a['start_datum'] %}<span class="schedule-pill">{{ a['start_datum'] }}</span>{% endif %}
+              {% if a['fertig_datum'] %}<span class="schedule-pill">{{ a['fertig_datum'] }}</span>{% endif %}
+              {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['abholtermin'] }}</span>{% endif %}
             </div>
           </td>
           <td>
@@ -571,8 +571,8 @@
           <td>{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
           <td>
             <div class="d-flex gap-2 flex-wrap">
-              {% if a['fertig_datum'] %}<span class="schedule-pill">Fertig {{ a['fertig_datum'] }}</span>{% endif %}
-              {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['abholung_label'] }} {{ a['abholtermin'] }}</span>{% endif %}
+              {% if a['fertig_datum'] %}<span class="schedule-pill">{{ a['fertig_datum'] }}</span>{% endif %}
+              {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['abholtermin'] }}</span>{% endif %}
             </div>
           </td>
           <td><a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Öffnen</a></td>
