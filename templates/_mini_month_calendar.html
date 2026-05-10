@@ -188,99 +188,113 @@
     padding-top:8px;
     border-top:1px solid #e4d6c3;
   }
+  .mini-timeline-head {
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    align-items:flex-start;
+    flex-wrap:wrap;
+  }
   .mini-timeline-title {
     margin:0;
-    font-size:1rem;
+    font-size:1.05rem;
   }
-  .mini-timeline-scroll {
-    overflow-x:auto;
-    padding-bottom:4px;
-  }
-  .mini-timeline {
-    display:grid;
-    gap:8px;
-    min-width:980px;
-  }
-  .mini-timeline-row {
-    display:grid;
-    grid-template-columns:minmax(190px, 240px) minmax(0, 1fr);
-    gap:12px;
+  .mini-timeline-summary {
+    display:inline-flex;
     align-items:center;
+    min-height:30px;
+    padding:4px 10px;
+    border:1px solid #d9cab4;
+    border-radius:999px;
+    background:#fffaf2;
+    color:#152636;
+    font-size:.84rem;
+    font-weight:800;
   }
-  .mini-timeline-label {
+  .mini-range-list {
     display:grid;
-    gap:2px;
-    min-width:0;
+    grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));
+    gap:10px;
+    max-height:360px;
+    overflow:auto;
+    padding-right:4px;
+  }
+  .mini-range-item {
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) auto;
+    gap:10px 14px;
+    padding:12px;
+    border:1px solid #e4d6c3;
+    border-radius:12px;
+    background:#fffaf2;
     color:inherit;
     text-decoration:none;
   }
-  .mini-timeline-party,
-  .mini-timeline-meta,
-  .mini-timeline-range {
+  .mini-range-item:hover {
+    border-color:#b54b32;
+    background:#fff7eb;
+  }
+  .mini-range-item.is-active {
+    border-color:#111827;
+    box-shadow:inset 4px 0 0 #111827;
+  }
+  .mini-range-party,
+  .mini-range-vehicle {
     overflow:hidden;
     text-overflow:ellipsis;
     white-space:nowrap;
   }
-  .mini-timeline-party {
+  .mini-range-party {
     color:#152636;
-    font-weight:800;
+    font-weight:900;
   }
-  .mini-timeline-meta,
-  .mini-timeline-range {
+  .mini-range-vehicle {
     color:#5f6b78;
-    font-size:.82rem;
+    font-size:.86rem;
   }
-  .mini-timeline-track {
-    position:relative;
-    display:grid;
-    grid-template-columns:repeat(var(--timeline-days), minmax(22px, 1fr));
-    align-items:center;
-    min-height:38px;
-    border:1px solid #e4d6c3;
-    border-radius:10px;
-    background:#fffaf2;
-    background-image:linear-gradient(to right, rgba(228,214,195,.75) 1px, transparent 1px);
-    background-size:calc(100% / var(--timeline-days)) 100%;
-    overflow:hidden;
+  .mini-range-dates {
+    display:flex;
+    gap:6px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
   }
-  .mini-timeline-days {
-    min-height:24px;
-    border:0;
-    background:transparent;
-  }
-  .mini-timeline-day {
+  .mini-range-date {
+    min-width:94px;
+    padding:5px 8px;
+    border-radius:9px;
+    background:#f3e9db;
     text-align:center;
+  }
+  .mini-range-date span {
+    display:block;
     color:#6b7280;
-    font-size:.68rem;
-    font-weight:700;
+    font-size:.66rem;
+    font-weight:800;
+    letter-spacing:0;
+    text-transform:uppercase;
   }
-  .mini-timeline-day.is-weekend {
-    color:#ad513c;
+  .mini-range-date strong {
+    display:block;
+    color:#152636;
+    font-size:.84rem;
   }
-  .mini-timeline-day.is-today {
-    color:#111827;
-    text-decoration:underline;
-    text-underline-offset:3px;
-  }
-  .mini-timeline-bar {
-    grid-row:1;
+  .mini-range-bar {
+    grid-column:1 / -1;
     display:flex;
     align-items:center;
+    gap:8px;
     min-width:0;
-    height:26px;
-    padding:0 10px;
+  }
+  .mini-range-line {
+    flex:1;
+    height:8px;
+    min-width:42px;
     border-radius:999px;
-    color:#fff;
+  }
+  .mini-range-duration {
+    color:#5f6b78;
     font-size:.78rem;
     font-weight:800;
-    line-height:1;
-    text-decoration:none;
-    box-shadow:0 8px 16px rgba(17,24,39,.12);
-  }
-  .mini-timeline-bar span {
-    min-width:0;
-    overflow:hidden;
-    text-overflow:ellipsis;
     white-space:nowrap;
   }
   .timeline-color-blue { background:#2563eb; }
@@ -311,12 +325,17 @@
       padding:0 4px;
       font-size:.68rem;
     }
-    .mini-timeline {
-      min-width:860px;
+    .mini-range-list {
+      grid-template-columns:1fr;
+      max-height:none;
+      overflow:visible;
+      padding-right:0;
     }
-    .mini-timeline-row {
-      grid-template-columns:170px minmax(0, 1fr);
-      gap:8px;
+    .mini-range-item {
+      grid-template-columns:1fr;
+    }
+    .mini-range-dates {
+      justify-content:flex-start;
     }
   }
 </style>
@@ -335,6 +354,53 @@
       {% endif %}
     </div>
   </div>
+  {% if mini_calendar.get('show_timeline') %}
+  <div class="mini-timeline-wrap">
+    <div class="mini-timeline-head">
+      <div>
+        <h5 class="mini-timeline-title">Auftragsplan von bis</h5>
+        <div class="text-muted small">Jede Zeile zeigt Autohaus, Fahrzeug und den Zeitraum.</div>
+      </div>
+      <span class="mini-timeline-summary">{{ mini_calendar['timeline_rows']|length }} im Monat</span>
+    </div>
+    {% if mini_calendar.get('timeline_rows') %}
+    <div class="mini-range-list">
+      {% for row in mini_calendar['timeline_rows'] %}
+        {% if row['detail_url'] %}
+        <a class="mini-range-item{% if row['is_active_today'] %} is-active{% endif %}" href="{{ row['detail_url'] }}" title="{{ row['party_name'] }} · {{ row['vehicle_label'] }}">
+        {% else %}
+        <div class="mini-range-item{% if row['is_active_today'] %} is-active{% endif %}" title="{{ row['party_name'] }} · {{ row['vehicle_label'] }}">
+        {% endif %}
+          <div>
+            <div class="mini-range-party">{{ row['party_name'] }}</div>
+            <div class="mini-range-vehicle">{{ row['vehicle_label'] }}</div>
+          </div>
+          <div class="mini-range-dates">
+            <div class="mini-range-date">
+              <span>von</span>
+              <strong>{{ row['start_text'] }}</strong>
+            </div>
+            <div class="mini-range-date">
+              <span>bis</span>
+              <strong>{{ row['end_text'] }}</strong>
+            </div>
+          </div>
+          <div class="mini-range-bar">
+            <span class="mini-range-line {{ row['color_class'] }}"></span>
+            <span class="mini-range-duration">{{ row['duration_text'] }}</span>
+          </div>
+        {% if row['detail_url'] %}
+        </a>
+        {% else %}
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="mini-timeline-empty">Keine Von-bis-Termine in diesem Monat.</div>
+    {% endif %}
+  </div>
+  {% endif %}
   <div class="mini-calendar-grid">
     {% for weekday in mini_calendar['weekdays'] %}
     <div class="mini-weekday">{{ weekday }}</div>
@@ -369,57 +435,5 @@
     <span><i class="mini-legend-dot mini-legend-vacation"></i>Betriebsurlaub</span>
     <span><i class="mini-legend-dot mini-legend-event"></i>{{ mini_calendar.get('event_label', 'Fahrzeugtermin') }}</span>
   </div>
-  {% if mini_calendar.get('show_timeline') %}
-  <div class="mini-timeline-wrap">
-    <div>
-      <h5 class="mini-timeline-title">Zeitstrahl von bis</h5>
-      <div class="text-muted small">Von Annahme oder Start bis Fertigstellung oder Abholung.</div>
-    </div>
-    {% if mini_calendar.get('timeline_rows') %}
-    <div class="mini-timeline-scroll">
-      <div class="mini-timeline" style="--timeline-days: {{ mini_calendar['timeline_days_count'] }};">
-        <div class="mini-timeline-row mini-timeline-row-head">
-          <div class="mini-timeline-label"></div>
-          <div class="mini-timeline-track mini-timeline-days">
-            {% for day in mini_calendar['timeline_days'] %}
-            <span class="mini-timeline-day{% if day['is_weekend'] %} is-weekend{% endif %}{% if day['is_today'] %} is-today{% endif %}" title="{{ day['weekday'] }}">{{ day['tag'] }}</span>
-            {% endfor %}
-          </div>
-        </div>
-        {% for row in mini_calendar['timeline_rows'] %}
-        <div class="mini-timeline-row">
-          {% if row['detail_url'] %}
-          <a class="mini-timeline-label" href="{{ row['detail_url'] }}">
-          {% else %}
-          <div class="mini-timeline-label">
-          {% endif %}
-            <span class="mini-timeline-party">{{ row['party_name'] }}</span>
-            <span class="mini-timeline-meta">{{ row['vehicle_label'] }}</span>
-            <span class="mini-timeline-range">von {{ row['start_text'] }} bis {{ row['end_text'] }}</span>
-          {% if row['detail_url'] %}
-          </a>
-          {% else %}
-          </div>
-          {% endif %}
-          <div class="mini-timeline-track" title="{{ row['party_name'] }} · {{ row['vehicle_label'] }} · von {{ row['start_text'] }} bis {{ row['end_text'] }}">
-            {% if row['detail_url'] %}
-            <a class="mini-timeline-bar {{ row['color_class'] }}" href="{{ row['detail_url'] }}" style="grid-column: {{ row['start_col'] }} / {{ row['end_col'] }};">
-              <span>{{ row['short_range'] }}</span>
-            </a>
-            {% else %}
-            <span class="mini-timeline-bar {{ row['color_class'] }}" style="grid-column: {{ row['start_col'] }} / {{ row['end_col'] }};">
-              <span>{{ row['short_range'] }}</span>
-            </span>
-            {% endif %}
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% else %}
-    <div class="mini-timeline-empty">Keine Von-bis-Termine in diesem Monat.</div>
-    {% endif %}
-  </div>
-  {% endif %}
 </section>
 {% endif %}

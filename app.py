@@ -7101,6 +7101,14 @@ def build_mini_monatskalender(
                     clean_text(event.get("label")).lower(),
                 ),
             )
+            compact_events = []
+            seen_events = set()
+            for event in day_events:
+                event_key = (event.get("party_name"), event.get("vehicle_label"))
+                if event_key in seen_events:
+                    continue
+                seen_events.add(event_key)
+                compact_events.append(event)
             labels.extend([event["tooltip"] for event in day_events[:3]])
             row.append(
                 {
@@ -7112,9 +7120,9 @@ def build_mini_monatskalender(
                     "is_holiday": bool(holiday_title),
                     "has_betriebsurlaub": bool(betriebsurlaub_dates.get(current)),
                     "has_events": bool(day_events),
-                    "event_count": len(day_events),
-                    "events": day_events[:2],
-                    "more_event_count": max(0, len(day_events) - 2),
+                    "event_count": len(compact_events),
+                    "events": compact_events[:2],
+                    "more_event_count": max(0, len(compact_events) - 2),
                     "tooltip": " | ".join(labels),
                 }
             )
@@ -7177,6 +7185,8 @@ def build_mini_monatskalender(
                     "start_text": start_date.strftime(DATE_FMT),
                     "end_text": end_date.strftime(DATE_FMT),
                     "short_range": f"{start_date.strftime('%d.%m.')} - {end_date.strftime('%d.%m.')}",
+                    "duration_text": f"{(end_date - start_date).days + 1} Tag(e)",
+                    "is_active_today": start_date <= today <= end_date,
                     "start_col": (visible_start - month_start).days + 1,
                     "end_col": (visible_end - month_start).days + 2,
                     "detail_url": detail_url,

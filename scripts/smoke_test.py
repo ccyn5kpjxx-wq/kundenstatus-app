@@ -125,7 +125,7 @@ def main():
     admin_calendar_ok = (
         "Werkstatt-Kalender" in admin_html
         and "mini-calendar-large" in admin_html
-        and "Zeitstrahl von bis" in admin_html
+        and "Auftragsplan von bis" in admin_html
     )
     print(
         "[OK] Admin-Dashboard zeigt grossen Kalender"
