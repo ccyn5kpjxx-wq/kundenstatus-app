@@ -7020,6 +7020,7 @@ def build_mini_monatskalender(
     endpoint="",
     route_values=None,
     only_arrival_events=False,
+    include_timeline=False,
 ):
     month_start = parse_mini_calendar_month(month_value)
     month_end = shift_month(month_start, 1) - timedelta(days=1)
@@ -7119,6 +7120,77 @@ def build_mini_monatskalender(
             )
         weeks.append(row)
 
+    timeline_days = []
+    current = month_start
+    while current <= month_end:
+        timeline_days.append(
+            {
+                "tag": current.day,
+                "weekday": ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"][current.weekday()],
+                "is_weekend": current.weekday() >= 5,
+                "is_today": current == today,
+            }
+        )
+        current += timedelta(days=1)
+
+    timeline_rows = []
+    if include_timeline:
+        color_classes = (
+            "timeline-color-blue",
+            "timeline-color-green",
+            "timeline-color-warm",
+            "timeline-color-gold",
+            "timeline-color-red",
+            "timeline-color-steel",
+        )
+        for auftrag in auftraege or []:
+            all_dates = [
+                auftrag.get(f"{feld}_obj")
+                for feld, _, _ in EVENT_FELDER
+                if auftrag.get(f"{feld}_obj")
+            ]
+            if not all_dates:
+                continue
+            start_date = auftrag.get("annahme_datum_obj") or auftrag.get("start_datum_obj") or min(all_dates)
+            end_date = auftrag.get("abholtermin_obj") or auftrag.get("fertig_datum_obj") or max(all_dates)
+            if end_date < start_date:
+                end_date = start_date
+            if end_date < month_start or start_date > month_end:
+                continue
+            visible_start = max(start_date, month_start)
+            visible_end = min(end_date, month_end)
+            party_name = (
+                clean_text(auftrag.get("autohaus_name"))
+                or clean_text(auftrag.get("kunde_name"))
+                or "Kunde noch eintragen"
+            )
+            fahrzeug_name = clean_text(auftrag.get("fahrzeug")) or "Fahrzeug"
+            kennzeichen = clean_text(auftrag.get("kennzeichen"))
+            vehicle_label = f"{fahrzeug_name} · {kennzeichen}" if kennzeichen else fahrzeug_name
+            detail_url = ""
+            if has_request_context() and auftrag.get("id"):
+                detail_url = url_for("auftrag_detail", auftrag_id=auftrag["id"])
+            timeline_rows.append(
+                {
+                    "party_name": party_name,
+                    "vehicle_label": vehicle_label,
+                    "start_text": start_date.strftime(DATE_FMT),
+                    "end_text": end_date.strftime(DATE_FMT),
+                    "short_range": f"{start_date.strftime('%d.%m.')} - {end_date.strftime('%d.%m.')}",
+                    "start_col": (visible_start - month_start).days + 1,
+                    "end_col": (visible_end - month_start).days + 2,
+                    "detail_url": detail_url,
+                    "color_class": color_classes[len(timeline_rows) % len(color_classes)],
+                }
+            )
+        timeline_rows.sort(
+            key=lambda row: (
+                row["start_col"],
+                clean_text(row["party_name"]).lower(),
+                clean_text(row["vehicle_label"]).lower(),
+            )
+        )
+
     route_values = dict(route_values or {})
     prev_url = next_url = ""
     if endpoint and has_request_context():
@@ -7133,6 +7205,10 @@ def build_mini_monatskalender(
         "weekdays": ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
         "weeks": weeks,
         "event_label": "Anlieferung" if only_arrival_events else "Fahrzeugtermin",
+        "show_timeline": include_timeline,
+        "timeline_days": timeline_days,
+        "timeline_days_count": len(timeline_days),
+        "timeline_rows": timeline_rows,
     }
 
 
@@ -7323,6 +7399,7 @@ def dashboard():
         auftraege,
         request.args.get("monat", ""),
         endpoint="dashboard",
+        include_timeline=True,
     )
     mini_calendar.update(
         {

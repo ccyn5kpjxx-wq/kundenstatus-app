@@ -182,6 +182,116 @@
     background:rgba(255,255,255,.16);
     color:#fff;
   }
+  .mini-timeline-wrap {
+    display:grid;
+    gap:12px;
+    padding-top:8px;
+    border-top:1px solid #e4d6c3;
+  }
+  .mini-timeline-title {
+    margin:0;
+    font-size:1rem;
+  }
+  .mini-timeline-scroll {
+    overflow-x:auto;
+    padding-bottom:4px;
+  }
+  .mini-timeline {
+    display:grid;
+    gap:8px;
+    min-width:980px;
+  }
+  .mini-timeline-row {
+    display:grid;
+    grid-template-columns:minmax(190px, 240px) minmax(0, 1fr);
+    gap:12px;
+    align-items:center;
+  }
+  .mini-timeline-label {
+    display:grid;
+    gap:2px;
+    min-width:0;
+    color:inherit;
+    text-decoration:none;
+  }
+  .mini-timeline-party,
+  .mini-timeline-meta,
+  .mini-timeline-range {
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .mini-timeline-party {
+    color:#152636;
+    font-weight:800;
+  }
+  .mini-timeline-meta,
+  .mini-timeline-range {
+    color:#5f6b78;
+    font-size:.82rem;
+  }
+  .mini-timeline-track {
+    position:relative;
+    display:grid;
+    grid-template-columns:repeat(var(--timeline-days), minmax(22px, 1fr));
+    align-items:center;
+    min-height:38px;
+    border:1px solid #e4d6c3;
+    border-radius:10px;
+    background:#fffaf2;
+    background-image:linear-gradient(to right, rgba(228,214,195,.75) 1px, transparent 1px);
+    background-size:calc(100% / var(--timeline-days)) 100%;
+    overflow:hidden;
+  }
+  .mini-timeline-days {
+    min-height:24px;
+    border:0;
+    background:transparent;
+  }
+  .mini-timeline-day {
+    text-align:center;
+    color:#6b7280;
+    font-size:.68rem;
+    font-weight:700;
+  }
+  .mini-timeline-day.is-weekend {
+    color:#ad513c;
+  }
+  .mini-timeline-day.is-today {
+    color:#111827;
+    text-decoration:underline;
+    text-underline-offset:3px;
+  }
+  .mini-timeline-bar {
+    grid-row:1;
+    display:flex;
+    align-items:center;
+    min-width:0;
+    height:26px;
+    padding:0 10px;
+    border-radius:999px;
+    color:#fff;
+    font-size:.78rem;
+    font-weight:800;
+    line-height:1;
+    text-decoration:none;
+    box-shadow:0 8px 16px rgba(17,24,39,.12);
+  }
+  .mini-timeline-bar span {
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .timeline-color-blue { background:#2563eb; }
+  .timeline-color-green { background:#0f766e; }
+  .timeline-color-warm { background:#b54b32; }
+  .timeline-color-gold { background:#c47a00; }
+  .timeline-color-red { background:#b4232c; }
+  .timeline-color-steel { background:#34556f; }
+  .mini-timeline-empty {
+    color:#5f6b78;
+  }
   @media (max-width: 575.98px) {
     .mini-calendar-large .mini-calendar-grid {
       grid-template-columns:repeat(7, minmax(38px, 1fr));
@@ -200,6 +310,13 @@
       height:18px;
       padding:0 4px;
       font-size:.68rem;
+    }
+    .mini-timeline {
+      min-width:860px;
+    }
+    .mini-timeline-row {
+      grid-template-columns:170px minmax(0, 1fr);
+      gap:8px;
     }
   }
 </style>
@@ -252,5 +369,57 @@
     <span><i class="mini-legend-dot mini-legend-vacation"></i>Betriebsurlaub</span>
     <span><i class="mini-legend-dot mini-legend-event"></i>{{ mini_calendar.get('event_label', 'Fahrzeugtermin') }}</span>
   </div>
+  {% if mini_calendar.get('show_timeline') %}
+  <div class="mini-timeline-wrap">
+    <div>
+      <h5 class="mini-timeline-title">Zeitstrahl von bis</h5>
+      <div class="text-muted small">Von Annahme oder Start bis Fertigstellung oder Abholung.</div>
+    </div>
+    {% if mini_calendar.get('timeline_rows') %}
+    <div class="mini-timeline-scroll">
+      <div class="mini-timeline" style="--timeline-days: {{ mini_calendar['timeline_days_count'] }};">
+        <div class="mini-timeline-row mini-timeline-row-head">
+          <div class="mini-timeline-label"></div>
+          <div class="mini-timeline-track mini-timeline-days">
+            {% for day in mini_calendar['timeline_days'] %}
+            <span class="mini-timeline-day{% if day['is_weekend'] %} is-weekend{% endif %}{% if day['is_today'] %} is-today{% endif %}" title="{{ day['weekday'] }}">{{ day['tag'] }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        {% for row in mini_calendar['timeline_rows'] %}
+        <div class="mini-timeline-row">
+          {% if row['detail_url'] %}
+          <a class="mini-timeline-label" href="{{ row['detail_url'] }}">
+          {% else %}
+          <div class="mini-timeline-label">
+          {% endif %}
+            <span class="mini-timeline-party">{{ row['party_name'] }}</span>
+            <span class="mini-timeline-meta">{{ row['vehicle_label'] }}</span>
+            <span class="mini-timeline-range">von {{ row['start_text'] }} bis {{ row['end_text'] }}</span>
+          {% if row['detail_url'] %}
+          </a>
+          {% else %}
+          </div>
+          {% endif %}
+          <div class="mini-timeline-track" title="{{ row['party_name'] }} · {{ row['vehicle_label'] }} · von {{ row['start_text'] }} bis {{ row['end_text'] }}">
+            {% if row['detail_url'] %}
+            <a class="mini-timeline-bar {{ row['color_class'] }}" href="{{ row['detail_url'] }}" style="grid-column: {{ row['start_col'] }} / {{ row['end_col'] }};">
+              <span>{{ row['short_range'] }}</span>
+            </a>
+            {% else %}
+            <span class="mini-timeline-bar {{ row['color_class'] }}" style="grid-column: {{ row['start_col'] }} / {{ row['end_col'] }};">
+              <span>{{ row['short_range'] }}</span>
+            </span>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+    <div class="mini-timeline-empty">Keine Von-bis-Termine in diesem Monat.</div>
+    {% endif %}
+  </div>
+  {% endif %}
 </section>
 {% endif %}

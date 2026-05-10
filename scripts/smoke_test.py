@@ -42,6 +42,7 @@ def main():
         [
             {
                 "annahme_datum_obj": date.today(),
+                "abholtermin_obj": date.today(),
                 "autohaus_name": "Smoke Autohaus",
                 "kunde_name": "Smoke Kunde",
                 "fahrzeug": "Audi A4",
@@ -49,6 +50,7 @@ def main():
             }
         ],
         date.today().strftime("%Y-%m"),
+        include_timeline=True,
     )
     today_text = date.today().strftime(portal.DATE_FMT)
     today_calendar_day = next(
@@ -67,6 +69,17 @@ def main():
         else "[FEHLER] Monatskalender liefert keinen Autohausnamen pro Tag"
     )
     ok &= calendar_names_ok
+    timeline_ok = (
+        mini_calendar["timeline_rows"]
+        and mini_calendar["timeline_rows"][0]["party_name"] == "Smoke Autohaus"
+        and mini_calendar["timeline_rows"][0]["start_col"] < mini_calendar["timeline_rows"][0]["end_col"]
+    )
+    print(
+        "[OK] Monatskalender liefert Von-bis-Zeitstrahl"
+        if timeline_ok
+        else "[FEHLER] Monatskalender liefert keinen Von-bis-Zeitstrahl"
+    )
+    ok &= timeline_ok
     ok &= check(
         "Login-POST ohne CSRF blockiert",
         client.post("/login", data={"passwort": "falsch"}),
@@ -109,7 +122,11 @@ def main():
     admin_response = client.get("/admin")
     ok &= check("Admin mit Login", admin_response, {200})
     admin_html = admin_response.get_data(as_text=True)
-    admin_calendar_ok = "Werkstatt-Kalender" in admin_html and "mini-calendar-large" in admin_html
+    admin_calendar_ok = (
+        "Werkstatt-Kalender" in admin_html
+        and "mini-calendar-large" in admin_html
+        and "Zeitstrahl von bis" in admin_html
+    )
     print(
         "[OK] Admin-Dashboard zeigt grossen Kalender"
         if admin_calendar_ok
