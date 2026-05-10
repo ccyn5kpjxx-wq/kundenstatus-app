@@ -5434,7 +5434,7 @@ def list_autohaus_benachrichtigungen(autohaus_id, limit=10):
         SELECT b.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer
         FROM benachrichtigungen b
         JOIN auftraege a ON a.id = b.auftrag_id
-        WHERE a.autohaus_id=? AND a.archiviert=0
+        WHERE a.autohaus_id=? AND a.archiviert=0 AND COALESCE(b.gelesen, 0)=0
         ORDER BY b.id DESC
         LIMIT ?
         """,
@@ -5442,6 +5442,23 @@ def list_autohaus_benachrichtigungen(autohaus_id, limit=10):
     ).fetchall()
     db.close()
     return [dict(row) for row in rows]
+
+
+def mark_autohaus_benachrichtigung_gelesen(autohaus_id, benachrichtigung_id):
+    db = get_db()
+    db.execute(
+        """
+        UPDATE benachrichtigungen
+        SET gelesen=1
+        WHERE id=?
+          AND auftrag_id IN (
+            SELECT id FROM auftraege WHERE autohaus_id=?
+          )
+        """,
+        (benachrichtigung_id, autohaus_id),
+    )
+    db.commit()
+    db.close()
 
 
 def add_chat_nachricht(auftrag_id, absender, nachricht):
@@ -7649,6 +7666,16 @@ def partner_dashboard(slug):
         ),
         statusliste=STATUSLISTE,
     )
+
+
+@app.route("/partner/<slug>/hinweis/<int:hinweis_id>/entfernen", methods=["POST"])
+def partner_hinweis_entfernen(slug, hinweis_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    mark_autohaus_benachrichtigung_gelesen(autohaus["id"], hinweis_id)
+    flash("Hinweis entfernt.", "info")
+    return redirect(url_for("partner_dashboard", slug=slug))
 
 
 @app.route("/partner/<slug>/lackierauftrag-vorlage.pdf")
