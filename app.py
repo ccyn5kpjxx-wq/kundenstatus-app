@@ -5263,28 +5263,95 @@ def blob_to_bytes(value):
     return b""
 
 
+def update_datei_content_blob(datei_id, content):
+    if not datei_id or not content:
+        return
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE dateien SET content_blob=?, size=? WHERE id=?",
+            (content, len(content), datei_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def remember_existing_datei_file(datei, path):
+    if blob_to_bytes(datei.get("content_blob")):
+        return
+    try:
+        content = path.read_bytes()
+    except OSError:
+        return
+    update_datei_content_blob(datei.get("id"), content)
+
+
+def newest_backup_paths():
+    if not BACKUP_DIR.exists():
+        return []
+
+    def sort_key(path):
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0
+
+    return sorted(BACKUP_DIR.glob("kundenstatus-backup-*.zip"), key=sort_key, reverse=True)
+
+
+def restore_datei_content_from_backups(stored_name):
+    member_name = f"uploads/{stored_name}"
+    max_bytes = MAX_UPLOAD_MB * 1024 * 1024
+    for backup_path in newest_backup_paths():
+        try:
+            with zipfile.ZipFile(backup_path) as archive:
+                if member_name not in archive.namelist():
+                    continue
+                with archive.open(member_name) as source:
+                    content = source.read(max_bytes + 1)
+        except Exception as exc:
+            print(f"WARNUNG: Upload-Restore aus {backup_path.name} fehlgeschlagen: {exc}")
+            continue
+        if content and len(content) <= max_bytes:
+            return content
+    return b""
+
+
+def write_restored_datei_file(stored_name, content):
+    path = UPLOAD_DIR / stored_name
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        return path
+    except OSError:
+        fallback = pathlib.Path(tempfile.gettempdir()) / stored_name
+        fallback.write_bytes(content)
+        return fallback
+
+
 def resolve_datei_path(datei):
     stored_name = pathlib.Path(clean_text(datei.get("stored_name"))).name
     if not stored_name:
         return None
     path = UPLOAD_DIR / stored_name
     if path.exists():
+        remember_existing_datei_file(datei, path)
         return path
 
     content = blob_to_bytes(datei.get("content_blob"))
     if not content:
-        return None
-    try:
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
-    except OSError:
-        fallback = pathlib.Path(tempfile.gettempdir()) / stored_name
-        fallback.write_bytes(content)
-        return fallback
-    return path
+        content = restore_datei_content_from_backups(stored_name)
+        if not content:
+            return None
+        update_datei_content_blob(datei.get("id"), content)
+    return write_restored_datei_file(stored_name, content)
 
 
-def missing_datei_response(datei):
+def missing_datei_response(datei, back_url=None, replace_url=None):
+    back_url = clean_text(back_url)
+    if not back_url:
+        back_url = url_for("auftrag_detail", auftrag_id=datei["auftrag_id"])
     return (
         render_template_string(
             """
@@ -5306,15 +5373,116 @@ def missing_datei_response(datei):
       </p>
       <p class="mb-0">Bitte die Unterlage in diesem Auftrag einmal neu hochladen.</p>
     </div>
-    <a class="btn btn-outline-dark" href="{{ url_for('auftrag_detail', auftrag_id=datei['auftrag_id']) }}">Zurück zum Auftrag</a>
+    {% if replace_url %}
+    <form method="POST" action="{{ replace_url }}" enctype="multipart/form-data" class="card card-body mb-3">
+      {{ csrf_field()|safe }}
+      <label class="form-label fw-semibold">Fehlende Datei ersetzen</label>
+      <input type="file" name="datei" class="form-control mb-3" required>
+      <button type="submit" class="btn btn-dark align-self-start">Datei ersetzen</button>
+    </form>
+    {% endif %}
+    <a class="btn btn-outline-dark" href="{{ back_url }}">Zurück zum Auftrag</a>
   </main>
 </body>
 </html>
             """,
             datei=datei,
+            back_url=back_url,
+            replace_url=replace_url,
         ),
         404,
     )
+
+
+def replace_datei_content(datei, file_storage):
+    if not datei:
+        raise ValueError("Datei-Eintrag nicht gefunden.")
+    if not file_storage or not file_storage.filename:
+        raise ValueError("Bitte eine Datei auswählen.")
+
+    original_name = secure_filename(file_storage.filename)
+    if not original_name or not allowed_file(original_name):
+        raise ValueError("Dieser Dateityp ist nicht erlaubt.")
+
+    suffix = pathlib.Path(original_name).suffix.lower()
+    stored_name = f"{uuid.uuid4().hex}{suffix}"
+    target = UPLOAD_DIR / stored_name
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    file_storage.save(target)
+    content = target.read_bytes()
+    mime_type = file_storage.mimetype or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+
+    dokument_typ = clean_text(datei.get("dokument_typ"))
+    extrahierter_text = clean_text(datei.get("extrahierter_text"))
+    extrakt_kurz = clean_text(datei.get("extrakt_kurz"))
+    analyse_quelle = clean_text(datei.get("analyse_quelle"))
+    analyse_json = clean_text(datei.get("analyse_json"))
+    analyse_hinweis = clean_text(datei.get("analyse_hinweis"))
+    is_analysis_document = (
+        clean_text(datei.get("kategorie")) == "standard"
+        and datei.get("reklamation_id") is None
+        and suffix in ANALYSIS_EXTENSIONS
+    )
+    if is_analysis_document:
+        bundle = build_document_analysis_bundle_safe(target, original_name)
+        extrahierter_text = clean_text(bundle.get("text"))
+        analyse_quelle = clean_text(bundle.get("source"))
+        analyse_json = clean_text(bundle.get("analysis_json"))
+        analyse_hinweis = clean_text(bundle.get("hint"))
+        dokument_typ = (
+            classify_document(extrahierter_text, original_name)
+            if extrahierter_text
+            else classify_document("", original_name)
+        )
+        extrakt_kurz = summarize_document_text(extrahierter_text, original_name)
+
+    old_stored_name = pathlib.Path(clean_text(datei.get("stored_name"))).name
+    if old_stored_name and old_stored_name != stored_name:
+        move_upload_to_deleted_area(UPLOAD_DIR / old_stored_name, f"replace-datei-{datei['id']}")
+
+    db = get_db()
+    try:
+        db.execute(
+            """
+            UPDATE dateien
+            SET original_name=?,
+                stored_name=?,
+                mime_type=?,
+                size=?,
+                dokument_typ=?,
+                extrahierter_text=?,
+                extrakt_kurz=?,
+                analyse_quelle=?,
+                analyse_json=?,
+                analyse_hinweis=?,
+                content_blob=?,
+                hochgeladen_am=?
+            WHERE id=?
+            """,
+            (
+                original_name,
+                stored_name,
+                mime_type,
+                len(content),
+                dokument_typ,
+                extrahierter_text,
+                extrakt_kurz,
+                analyse_quelle,
+                analyse_json,
+                analyse_hinweis,
+                content,
+                now_str(),
+                datei["id"],
+            ),
+        )
+        db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), datei["auftrag_id"]))
+        db.commit()
+    finally:
+        db.close()
+
+    if is_analysis_document:
+        apply_document_data_to_auftrag(datei["auftrag_id"], prefer_documents=False)
+    return stored_name
 
 
 def delete_partner_datei(autohaus_id, datei_id):
@@ -7861,7 +8029,10 @@ def admin_datei(datei_id):
         abort(404)
     path = resolve_datei_path(datei)
     if not path:
-        return missing_datei_response(datei)
+        return missing_datei_response(
+            datei,
+            replace_url=url_for("admin_datei_ersetzen", datei_id=datei_id),
+        )
     return send_file(
         path,
         download_name=datei["original_name"],
@@ -7878,13 +8049,34 @@ def admin_datei_download(datei_id):
         abort(404)
     path = resolve_datei_path(datei)
     if not path:
-        return missing_datei_response(datei)
+        return missing_datei_response(
+            datei,
+            replace_url=url_for("admin_datei_ersetzen", datei_id=datei_id),
+        )
     return send_file(
         path,
         download_name=datei["original_name"],
         mimetype=datei["mime_type"],
         as_attachment=True,
     )
+
+
+@app.route("/admin/datei/<int:datei_id>/ersetzen", methods=["POST"])
+@admin_required
+def admin_datei_ersetzen(datei_id):
+    datei = get_datei(datei_id)
+    if not datei:
+        abort(404)
+    try:
+        replace_datei_content(datei, request.files.get("datei"))
+    except ValueError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("admin_datei", datei_id=datei_id))
+    except Exception as exc:
+        flash(f"Datei konnte nicht ersetzt werden: {clean_text(str(exc))[:300]}", "danger")
+        return redirect(url_for("admin_datei", datei_id=datei_id))
+    flash("Datei ersetzt und wieder gespeichert.", "success")
+    return redirect(url_for("admin_datei", datei_id=datei_id))
 
 
 @app.route("/admin/loeschen/<int:auftrag_id>", methods=["POST"])
@@ -8560,7 +8752,10 @@ def partner_datei(slug, datei_id):
         abort(404)
     path = resolve_datei_path(datei)
     if not path:
-        abort(404)
+        return missing_datei_response(
+            datei,
+            url_for("partner_auftrag", slug=slug, auftrag_id=datei["auftrag_id"]),
+        )
     return send_file(
         path,
         download_name=datei["original_name"],
@@ -8582,7 +8777,10 @@ def partner_datei_download(slug, datei_id):
         abort(404)
     path = resolve_datei_path(datei)
     if not path:
-        abort(404)
+        return missing_datei_response(
+            datei,
+            url_for("partner_auftrag", slug=slug, auftrag_id=datei["auftrag_id"]),
+        )
     return send_file(
         path,
         download_name=datei["original_name"],

@@ -626,15 +626,72 @@ def main():
             "Neue Fertigbilder" in partner_html,
             partner_html[:300],
         )
+        backup_path = portal.create_backup_package("flow-upload-restore")
+        check("Backup für Upload-Restore erstellt", backup_path.exists(), str(backup_path))
+        fertigbild_path = test_uploads / fertigbild["stored_name"]
+        db = portal.get_db()
+        db.execute("UPDATE dateien SET content_blob=NULL WHERE id=?", (fertigbild["id"],))
+        db.commit()
+        db.close()
+        fertigbild_path.unlink()
+        response = partner.get(f"/partner/kaesmann/datei/{fertigbild['id']}")
+        restored_status = response.status_code
+        restored_bytes = response.get_data()
+        response.close()
+        check(
+            "Partner-Datei wird aus Backup wiederhergestellt",
+            restored_status == 200 and restored_bytes == b"codex-test-fertigbild",
+            f"Status {restored_status}",
+        )
+        check("Wiederhergestellte Datei liegt im Upload-Ordner", fertigbild_path.exists())
+        db = portal.get_db()
+        restored_blob_size = db.execute(
+            "SELECT length(content_blob) AS size FROM dateien WHERE id=?",
+            (fertigbild["id"],),
+        ).fetchone()["size"]
+        db.close()
+        check(
+            "Wiederhergestellte Datei ist wieder in der Datenbank gesichert",
+            restored_blob_size == len(b"codex-test-fertigbild"),
+            str(restored_blob_size),
+        )
+        response = admin.post(
+            f"/admin/datei/{fertigbild['id']}/ersetzen",
+            data=with_csrf(
+                admin,
+                {
+                    "datei": (
+                        BytesIO(b"codex-test-ersatzbild"),
+                        "fertigbild-ersetzt.jpg",
+                    )
+                },
+            ),
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        check("Admin kann fehlende Datei ersetzen", response.status_code in {302, 303})
+        response = admin.get(f"/admin/datei/{fertigbild['id']}")
+        replaced_status = response.status_code
+        replaced_bytes = response.get_data()
+        response.close()
+        check(
+            "Ersetzte Datei öffnet unter alter Datei-ID",
+            replaced_status == 200 and replaced_bytes == b"codex-test-ersatzbild",
+            f"Status {replaced_status}",
+        )
 
         db = portal.get_db()
         datei = db.execute("SELECT id FROM dateien LIMIT 1").fetchone()
         db.close()
         if datei:
             response = admin.get(f"/admin/datei/{datei['id']}")
-            check("Admin Originaldatei öffnen Route", response.status_code in {200, 404})
+            admin_file_status = response.status_code
+            response.close()
+            check("Admin Originaldatei öffnen Route", admin_file_status in {200, 404})
             response = admin.get(f"/admin/datei/{datei['id']}/download")
-            check("Admin Originaldatei Download Route", response.status_code in {200, 404})
+            admin_download_status = response.status_code
+            response.close()
+            check("Admin Originaldatei Download Route", admin_download_status in {200, 404})
         else:
             print("[INFO] Keine Datei in Testdatenbank gefunden, Datei-Routen übersprungen.")
 
