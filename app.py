@@ -6342,7 +6342,13 @@ def shift_month(month_start, offset):
     return date(year, month, 1)
 
 
-def build_mini_monatskalender(auftraege, month_value="", endpoint="", route_values=None):
+def build_mini_monatskalender(
+    auftraege,
+    month_value="",
+    endpoint="",
+    route_values=None,
+    only_arrival_events=False,
+):
     month_start = parse_mini_calendar_month(month_value)
     month_end = shift_month(month_start, 1) - timedelta(days=1)
     today = date.today()
@@ -6364,11 +6370,23 @@ def build_mini_monatskalender(auftraege, month_value="", endpoint="", route_valu
 
     event_dates = defaultdict(list)
     for auftrag in auftraege or []:
-        for feld, label, _ in EVENT_FELDER:
+        event_fields = EVENT_FELDER
+        if only_arrival_events:
+            event_fields = (("annahme_datum", "Anlieferung", "secondary"),)
+        for feld, label, _ in event_fields:
             event_date = auftrag.get(f"{feld}_obj")
             if event_date and month_start <= event_date <= month_end:
+                title = f"{label}: {clean_text(auftrag.get('fahrzeug')) or 'Fahrzeug'}"
+                if only_arrival_events:
+                    rueckgabe = (
+                        auftrag.get("abholtermin_obj")
+                        or parse_date(auftrag.get("abholtermin"))
+                        or parse_date(auftrag.get("fertig_datum"))
+                    )
+                    if rueckgabe:
+                        title = f"{title} | Rückgabe: {rueckgabe.strftime(DATE_FMT)}"
                 event_dates[event_date].append(
-                    f"{label}: {clean_text(auftrag.get('fahrzeug')) or 'Fahrzeug'}"
+                    title
                 )
 
     holidays = bw_feiertage(month_start.year)
@@ -6418,6 +6436,7 @@ def build_mini_monatskalender(auftraege, month_value="", endpoint="", route_valu
         "today_text": today.strftime(DATE_FMT),
         "weekdays": ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
         "weeks": weeks,
+        "event_label": "Anlieferung" if only_arrival_events else "Fahrzeugtermin",
     }
 
 
@@ -7626,6 +7645,7 @@ def partner_dashboard(slug):
             request.args.get("monat"),
             endpoint="partner_dashboard",
             route_values={"slug": autohaus["slug"]},
+            only_arrival_events=True,
         ),
         statusliste=STATUSLISTE,
     )
