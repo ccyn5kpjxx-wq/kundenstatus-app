@@ -5827,6 +5827,35 @@ def datei_ersetzen_form_response(datei, action_url=None, back_url=None):
     )
 
 
+def delete_datei_eintrag(datei_id, reason="datei"):
+    datei = get_datei(datei_id)
+    if not datei:
+        return False, None
+    auftrag = get_auftrag(datei["auftrag_id"])
+    if not auftrag:
+        return False, None
+
+    stored_name = pathlib.Path(clean_text(datei.get("stored_name"))).name
+    path = UPLOAD_DIR / stored_name
+    try:
+        move_upload_to_deleted_area(path, f"{reason}-{datei_id}")
+    except OSError:
+        pass
+
+    db = get_db()
+    db.execute("DELETE FROM dateien WHERE id=? AND auftrag_id=?", (datei_id, auftrag["id"]))
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag["id"]))
+    db.commit()
+    db.close()
+
+    if clean_text(datei.get("kategorie")) == "standard" and datei.get("reklamation_id") is None:
+        reset_document_review_checks(
+            auftrag["id"],
+            "Eine hochgeladene Unterlage wurde entfernt. Bitte die erkannten Daten kurz prüfen.",
+        )
+    return True, auftrag
+
+
 def delete_partner_datei(autohaus_id, datei_id):
     datei = get_datei(datei_id)
     if not datei:
@@ -5838,26 +5867,25 @@ def delete_partner_datei(autohaus_id, datei_id):
         or clean_text(datei.get("quelle")) != "autohaus"
     ):
         return False, None
+    return delete_datei_eintrag(datei_id, "partner-datei")
 
-    stored_name = pathlib.Path(clean_text(datei.get("stored_name"))).name
-    path = UPLOAD_DIR / stored_name
-    try:
-        move_upload_to_deleted_area(path, f"partner-datei-{datei_id}")
-    except OSError:
-        pass
 
+def delete_reklamation_eintrag(reklamation_id, autohaus_id=None):
+    reklamation = get_reklamation(reklamation_id)
+    if not reklamation:
+        return False, None
+    if autohaus_id is not None and int(reklamation.get("autohaus_id") or 0) != int(autohaus_id or 0):
+        return False, None
+    auftrag_id = reklamation["auftrag_id"]
+    dateien = list_dateien_by_reklamation(reklamation_id)
+    for datei in dateien:
+        delete_datei_eintrag(datei["id"], "reklamation-datei")
     db = get_db()
-    db.execute("DELETE FROM dateien WHERE id=? AND auftrag_id=? AND quelle='autohaus'", (datei_id, auftrag["id"]))
-    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag["id"]))
+    db.execute("DELETE FROM reklamationen WHERE id=?", (reklamation_id,))
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag_id))
     db.commit()
     db.close()
-
-    if clean_text(datei.get("kategorie")) == "standard":
-        reset_document_review_checks(
-            auftrag["id"],
-            "Eine hochgeladene Unterlage wurde entfernt. Bitte die erkannten Daten kurz prüfen.",
-        )
-    return True, auftrag
+    return True, get_auftrag(auftrag_id)
 
 
 def hydrate_datei(datei):
@@ -8700,6 +8728,19 @@ def reklamation_status(reklamation_id):
     return redirect(request.referrer or url_for("auftrag_detail", auftrag_id=reklamation["auftrag_id"]))
 
 
+@app.route("/admin/reklamation/<int:reklamation_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_reklamation_loeschen(reklamation_id):
+    ok, auftrag = delete_reklamation_eintrag(reklamation_id)
+    if ok:
+        flash("Reklamation und Anhänge gelöscht.", "info")
+    else:
+        flash("Reklamation konnte nicht gelöscht werden.", "warning")
+    if auftrag:
+        return redirect(url_for("auftrag_detail", auftrag_id=auftrag["id"]))
+    return redirect(url_for("dashboard"))
+
+
 @app.route("/admin/datei/<int:datei_id>")
 @admin_required
 def admin_datei(datei_id):
@@ -8758,6 +8799,22 @@ def admin_datei_ersetzen(datei_id):
         return redirect(url_for("admin_datei", datei_id=datei_id))
     flash("Datei ersetzt und wieder gespeichert.", "success")
     return redirect(url_for("admin_datei", datei_id=datei_id))
+
+
+@app.route("/admin/datei/<int:datei_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_datei_loeschen(datei_id):
+    ok, auftrag = delete_datei_eintrag(datei_id, "admin-datei")
+    if ok:
+        flash("Datei gelöscht. Falls dadurch erkannte Daten falsch waren, bitte den Auftrag kurz prüfen.", "info")
+    else:
+        flash("Datei konnte nicht gelöscht werden.", "warning")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/admin/"):
+        return redirect(next_url)
+    if auftrag:
+        return redirect(url_for("auftrag_detail", auftrag_id=auftrag["id"]))
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/admin/loeschen/<int:auftrag_id>", methods=["POST"])
@@ -9551,6 +9608,21 @@ def partner_reklamation(slug, auftrag_id):
     )
     flash("Reklamation als Alarm an die Werkstatt gemeldet.", "danger")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+
+
+@app.route("/partner/<slug>/reklamation/<int:reklamation_id>/loeschen", methods=["POST"])
+def partner_reklamation_loeschen(slug, reklamation_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    ok, auftrag = delete_reklamation_eintrag(reklamation_id, autohaus_id=autohaus["id"])
+    if ok:
+        flash("Reklamation und Anhänge gelöscht.", "info")
+    else:
+        flash("Reklamation konnte nicht gelöscht werden.", "warning")
+    if auftrag:
+        return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag["id"]))
+    return redirect(url_for("partner_dashboard", slug=slug))
 
 
 @app.route("/partner/<slug>/datei/<int:datei_id>")

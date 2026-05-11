@@ -418,11 +418,12 @@ def main():
                 admin_shows_file = (
                     "smoke-kunden-upload.txt" in admin_html
                     and "Autohaus/Kundenportal" in admin_html
+                    and "Löschen" in admin_html
                 )
                 print(
-                    "[OK] Admin sieht gespeicherte Kundendatei mit Herkunft"
+                    "[OK] Admin sieht gespeicherte Kundendatei mit Herkunft und Loeschen"
                     if admin_shows_file
-                    else "[FEHLER] Admin sieht Kundendatei/Herkunft nicht"
+                    else "[FEHLER] Admin sieht Kundendatei/Herkunft/Loeschen nicht"
                 )
                 ok &= admin_shows_file
                 if dateien:
@@ -432,6 +433,62 @@ def main():
                         admin_upload_client.get(f"/admin/datei/{dateien[0]['id']}/download"),
                         {200},
                     )
+                    delete_response = admin_upload_client.post(
+                        f"/admin/datei/{dateien[0]['id']}/loeschen",
+                        data=csrf_data(admin_upload_client),
+                        follow_redirects=False,
+                    )
+                    ok &= check("Admin kann Datei loeschen", delete_response, {302})
+                    admin_file_deleted = portal.get_datei(dateien[0]["id"]) is None
+                    print(
+                        "[OK] Admin-Datei ist geloescht"
+                        if admin_file_deleted
+                        else "[FEHLER] Admin-Datei ist noch vorhanden"
+                    )
+                    ok &= admin_file_deleted
+                reklamation_response = upload_client.post(
+                    f"/partner/kaesmann/auftrag/{auftrag_id}/reklamation",
+                    data=csrf_data(
+                        upload_client,
+                        {
+                            "meldung": "Smoke Reklamation wieder loeschen",
+                            "reklamationsbilder": (
+                                BytesIO(b"fake image content"),
+                                "smoke-reklamation.jpg",
+                            ),
+                        },
+                    ),
+                    content_type="multipart/form-data",
+                    follow_redirects=False,
+                )
+                ok &= check("Partner meldet Reklamation", reklamation_response, {302})
+                reklamationen = [
+                    r
+                    for r in portal.list_reklamationen(auftrag_id)
+                    if r.get("meldung") == "Smoke Reklamation wieder loeschen"
+                ]
+                reklamation_created = bool(reklamationen and reklamationen[0].get("dateien"))
+                print(
+                    "[OK] Reklamation mit Anhang gespeichert"
+                    if reklamation_created
+                    else "[FEHLER] Reklamation mit Anhang fehlt"
+                )
+                ok &= reklamation_created
+                if reklamationen:
+                    reklamation_id = reklamationen[0]["id"]
+                    delete_reklamation_response = upload_client.post(
+                        f"/partner/kaesmann/reklamation/{reklamation_id}/loeschen",
+                        data=csrf_data(upload_client),
+                        follow_redirects=False,
+                    )
+                    ok &= check("Partner kann Reklamation loeschen", delete_reklamation_response, {302})
+                    reklamation_deleted = portal.get_reklamation(reklamation_id) is None
+                    print(
+                        "[OK] Reklamation ist geloescht"
+                        if reklamation_deleted
+                        else "[FEHLER] Reklamation ist noch vorhanden"
+                    )
+                    ok &= reklamation_deleted
             finally:
                 portal.delete_auftrag(auftrag_id)
     else:
