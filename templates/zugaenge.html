@@ -2,8 +2,5 @@
 {% block title %}Autohaus-Zugänge{% endblock %}
 
 {% block content %}
-{% set autohaus_next_url = url_for('admin_zugaenge') %}
-{% set show_autohaus_create_form = false %}
-{% set autohaus_section_intro = "Hier stehen nur die bestehenden Portal-Links und Zugangscodes der Autohäuser." %}
 {% include "autohaus_zugaenge_section.html" %}
 {% endblock %}

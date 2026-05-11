@@ -108,10 +108,86 @@ def main():
 
     with client.session_transaction() as session:
         session["admin"] = True
-    ok &= check("Admin mit Login", client.get("/admin"), {200})
+    admin_response = client.get("/admin")
+    ok &= check("Admin mit Login", admin_response, {200})
+    admin_html = admin_response.get_data(as_text=True)
+    admin_lackierportal_simple_ok = (
+        "Alle Aufträge" in admin_html
+        and all(text in admin_html for text in ("Auswahl", "Fahrzeug", "Analyse", "Termine", "Status", "Aktion"))
+        and "Autohäuser anlegen und Termine zentral steuern" not in admin_html
+        and "Alle Fahrzeuge, nach Dringlichkeit sortiert" not in admin_html
+        and "Konfiguration bitte prüfen" not in admin_html
+        and "data-workshop-row" not in admin_html
+        and "Rechnung schreiben in Lexware" not in admin_html
+    )
+    print(
+        "[OK] Lackierportal zeigt wieder die einfache Auftragsliste"
+        if admin_lackierportal_simple_ok
+        else "[FEHLER] Lackierportal ist noch zu umfangreich"
+    )
+    ok &= admin_lackierportal_simple_ok
     cockpit_response = client.get("/admin/cockpit")
     ok &= check("Betriebs-Cockpit mit Login", cockpit_response, {200})
     cockpit_html = cockpit_response.get_data(as_text=True)
+    zugaenge_ui_slim_ok = (
+        "/admin/zugaenge" in cockpit_html
+        and "Zugänge öffnen" not in cockpit_html
+        and "Autohaus-Übersicht" not in cockpit_html
+    )
+    print(
+        "[OK] Betriebs-Cockpit zeigt nur den schlanken Zugänge-Menüpunkt"
+        if zugaenge_ui_slim_ok
+        else "[FEHLER] Betriebs-Cockpit zeigt die Zugänge-Verwaltung zu prominent"
+    )
+    ok &= zugaenge_ui_slim_ok
+    zugaenge_response = client.get("/admin/zugaenge")
+    ok &= check("Autohaus-Zugaenge mit Login", zugaenge_response, {200})
+    zugaenge_html = zugaenge_response.get_data(as_text=True)
+    zugaenge_page_slim_ok = (
+        "Autohaus-Zugänge" in zugaenge_html
+        and "/portal/" in zugaenge_html
+        and "Lokal öffnen" in zugaenge_html
+        and "Link kopieren" not in zugaenge_html
+        and "Lackierauftrag PDF" not in zugaenge_html
+        and "Autohaus bearbeiten" not in zugaenge_html
+    )
+    print(
+        "[OK] Autohaus-Zugaenge-Seite bleibt schlank"
+        if zugaenge_page_slim_ok
+        else "[FEHLER] Autohaus-Zugaenge-Seite enthält wieder zu viele Funktionen"
+    )
+    ok &= zugaenge_page_slim_ok
+    removed_modules_ok = all(
+        text not in cockpit_html
+        for text in (
+            "Mitarbeiter",
+            "E-Mail-Zentrale",
+            "Rechnungskontrolle",
+            "Einkauf",
+            "Aktuelle Woche",
+            "Nächste Termine",
+        )
+    )
+    print(
+        "[OK] Betriebs-Cockpit blendet entfernte Module aus"
+        if removed_modules_ok
+        else "[FEHLER] Betriebs-Cockpit zeigt entfernte Module noch an"
+    )
+    ok &= removed_modules_ok
+    start_clock_calendar_ok = (
+        "data-live-clock" in cockpit_html
+        and "data-live-date" in cockpit_html
+        and "Monatsblick" in cockpit_html
+        and "Kalender öffnen" in cockpit_html
+        and "Feiertag" in cockpit_html
+        and "Betriebsurlaub" in cockpit_html
+    )
+    print(
+        "[OK] Startseite zeigt Uhr, Datum und Kalender"
+        if start_clock_calendar_ok
+        else "[FEHLER] Startseite zeigt Uhr/Datum/Kalender nicht vollständig"
+    )
+    ok &= start_clock_calendar_ok
     reminder_form_ok = "Kurz notieren, was später erledigt werden soll" in cockpit_html and "/admin/erinnerungen/neu" in cockpit_html
     print(
         "[OK] Startseite zeigt Erinnerungsfeld"
@@ -119,16 +195,6 @@ def main():
         else "[FEHLER] Startseite zeigt kein Erinnerungsfeld"
     )
     ok &= reminder_form_ok
-    quick_search_ui_ok = (
-        "data-quick-search-input" in cockpit_html
-        and "/admin/cockpit/auftraege-suche" in cockpit_html
-    )
-    print(
-        "[OK] Cockpit zeigt Live-Auftragssuche"
-        if quick_search_ui_ok
-        else "[FEHLER] Cockpit zeigt keine Live-Auftragssuche"
-    )
-    ok &= quick_search_ui_ok
     quick_search_response = client.get("/admin/cockpit/auftraege-suche?q=MOS-K")
     ok &= check("Cockpit-Auftragssuche nach Kennzeichen", quick_search_response, {200})
     quick_search_data = quick_search_response.get_json(silent=True) or {}
@@ -451,28 +517,6 @@ def main():
         else "[FEHLER] Bonusmodell addiert Rechnungen aus mehreren Aufträgen nicht korrekt"
     )
     ok &= bonus_rechnungen_ok
-    external_client = portal.app.test_client()
-    with external_client.session_transaction(base_url="https://werkstatt.example.test") as session:
-        session["admin"] = True
-    external_admin = external_client.get(
-        "/admin/zugaenge",
-        base_url="https://werkstatt.example.test",
-        headers={
-            "X-Forwarded-Proto": "https",
-            "X-Forwarded-Host": "werkstatt.example.test",
-        },
-    )
-    ok &= check("Autohaus-Zugaenge mit oeffentlichem Host", external_admin, {200})
-    external_html = external_admin.get_data(as_text=True)
-    expected_public_base_url = portal.PUBLIC_BASE_URL or "https://werkstatt.example.test"
-    external_link_ok = f"{expected_public_base_url}/portal/" in external_html
-    print(
-        "[OK] Kundenlinks nutzen oeffentliche Basisadresse"
-        if external_link_ok
-        else "[FEHLER] Kundenlinks nutzen nicht die oeffentliche Basisadresse"
-    )
-    ok &= external_link_ok
-
     autohaus = portal.get_autohaus_by_slug("kaesmann")
     if autohaus:
         admin_pdf_response = client.get(f"/admin/autohaus/{autohaus['id']}/lackierauftrag-vorlage.pdf")

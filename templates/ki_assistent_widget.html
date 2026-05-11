@@ -7,7 +7,7 @@
 {% if ki_assistent_chat_url is defined and ki_assistent_chat_url %}
   {% set ki_chat_url = ki_assistent_chat_url %}
   {% set ki_clear_url = ki_assistent_clear_url %}
-  {% set ki_subtitle = ki_assistent_subtitle if ki_assistent_subtitle is defined else 'Fragen zu Kalender, Fahrzeugen, E-Mail und Portal.' %}
+  {% set ki_subtitle = ki_assistent_subtitle if ki_assistent_subtitle is defined else 'Fragen zu Fahrzeugen, Auftrag, Upload und Portal.' %}
 {% elif autohaus is defined and autohaus %}
   {% set ki_chat_url = url_for('partner_ki_chat', slug=autohaus['slug']) %}
   {% set ki_clear_url = url_for('partner_ki_chat_loeschen', slug=autohaus['slug']) %}
@@ -15,7 +15,7 @@
 {% elif session.get('admin') %}
   {% set ki_chat_url = url_for('admin_ki_chat') %}
   {% set ki_clear_url = url_for('admin_ki_chat_loeschen') %}
-  {% set ki_subtitle = 'Fragen zu Kalender, Fahrzeugen, E-Mail und Portal.' %}
+  {% set ki_subtitle = 'Fragen zu Fahrzeugen, Auftrag, Upload und Portal.' %}
 {% endif %}
 <style>
   .ki-assistent {

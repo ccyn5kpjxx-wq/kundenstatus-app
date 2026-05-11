@@ -10097,7 +10097,7 @@ def list_admin_postfach_items(limit=80):
                 "autohaus_name": row["autohaus_name"],
                 "fahrzeug": "",
                 "kennzeichen": "",
-                "ziel_url": (url_for("betriebs_cockpit") + "#autohaus-zugaenge") if has_request_context() else "/admin/cockpit#autohaus-zugaenge",
+                "ziel_url": url_for("betriebs_cockpit") if has_request_context() else "/admin/cockpit",
             }
         )
 
@@ -16113,15 +16113,6 @@ def dashboard():
         "dashboard.html",
         auftraege=auftraege,
         archivierte_auftraege=archivierte_auftraege,
-        angebotsanfragen=list_angebotsanfragen(),
-        autohaeuser=list_autohaeuser(),
-        cockpit=dashboard_daten(auftraege),
-        ki_status=get_ai_status(),
-        database_status=get_database_status(),
-        startup_warnings=get_startup_warnings(),
-        statusliste=STATUSLISTE,
-        werkstatt_uebersicht=build_werkstatt_auftragsuebersicht(auftraege),
-        public_base_url=get_public_base_url(),
         zurueck_archivierbar_count=sum(1 for a in auftraege if a.get("archivierbar_zurueckgegeben")),
     )
 
@@ -16134,53 +16125,38 @@ def betriebs_cockpit():
     auftraege = [a for a in alle_auftraege if not a["archiviert"]]
     autohaeuser = list_autohaeuser()
     angebotsanfragen = list_angebotsanfragen()
-    kalender_items = kalender_daten(auftraege)
     cockpit_data = dashboard_daten(auftraege)
-    email_items = list_werkstatt_emails("aktiv", limit=5)
-    email_count = admin_email_count()
+    current_datetime = datetime.now()
+    mini_calendar = build_mini_monatskalender(
+        auftraege,
+        request.args.get("monat"),
+        endpoint="betriebs_cockpit",
+        include_internal_notes=True,
+    )
+    mini_calendar["full_url"] = url_for("kalender")
     return render_template(
         "cockpit.html",
         auftraege=auftraege,
         archivierte_auftraege=[a for a in alle_auftraege if a["archiviert"]],
         angebotsanfragen=angebotsanfragen,
         autohaeuser=autohaeuser,
-        autohaus_uebersicht=build_autohaus_uebersicht(
-            autohaeuser,
-            auftraege,
-            angebotsanfragen,
-        ),
         cockpit=cockpit_data,
-        mini_calendar=build_mini_monatskalender(
-            auftraege,
-            request.args.get("monat"),
-            endpoint="betriebs_cockpit",
-            include_internal_notes=True,
-        ),
-        kalender_vorschau=naechste_kalender_tage(auftraege),
-        kalender_woche=kalender_wochenuebersicht(kalender_items),
-        kalender_naechste_woche=kalender_wochenuebersicht(
-            kalender_items,
-            reference_date=date.today() + timedelta(days=7),
-        ),
-        email_count=email_count,
-        email_items=email_items,
         start_inbox=start_inbox_daten(
             cockpit_data["postfach_items"],
-            email_items,
-            email_count_total=email_count,
+            [],
+            email_count_total=0,
         ),
         erinnerungen=list_erinnerungen(limit=8),
-        einkauf_offen_count=admin_einkauf_count(),
-        einkauf_artikel_count=admin_einkauf_artikel_count(),
-        einkauf_belege=list_einkauf_belege(limit=3),
-        einkauf_news=build_einkauf_offer_groups(limit=5),
         ki_status=get_ai_status(),
         database_status=get_database_status(),
-        public_base_url=get_public_base_url(),
         zurueck_archivierbar_count=sum(1 for a in auftraege if a.get("archivierbar_zurueckgegeben")),
+        mini_calendar=mini_calendar,
+        current_datetime_iso=current_datetime.isoformat(timespec="seconds"),
+        current_time_label=current_datetime.strftime("%H:%M:%S"),
+        current_date_label=f"{WOCHENTAGE[current_datetime.weekday()]}, {current_datetime.strftime(DATE_FMT)}",
         ki_assistent_chat_url=url_for("admin_ki_chat"),
         ki_assistent_clear_url=url_for("admin_ki_chat_loeschen"),
-        ki_assistent_subtitle="Fragen zu Kalender, Auftrag, Upload oder Portal.",
+        ki_assistent_subtitle="Fragen zu Auftrag, Upload oder Portal.",
     )
 
 
@@ -16214,11 +16190,7 @@ def admin_postfach_oeffnen(item_key):
 @app.route("/admin/zugaenge")
 @admin_required
 def admin_zugaenge():
-    return render_template(
-        "zugaenge.html",
-        autohaeuser=list_autohaeuser(),
-        public_base_url=get_public_base_url(),
-    )
+    return render_template("zugaenge.html", autohaeuser=list_autohaeuser())
 
 
 @app.route("/admin/ki/chat", methods=["POST"])
@@ -17023,7 +16995,7 @@ def admin_backup_download():
 def autohaus_neu():
     name = clean_text(request.form.get("name"))
     next_url = clean_text(request.form.get("next"))
-    redirect_url = next_url if next_url.startswith("/admin") else url_for("betriebs_cockpit") + "#autohaus-zugaenge"
+    redirect_url = next_url if next_url.startswith("/admin") else url_for("betriebs_cockpit")
     if not name:
         flash("Bitte einen Autohaus-Namen eintragen.", "warning")
         return redirect(redirect_url)
@@ -17070,7 +17042,7 @@ def autohaus_update(autohaus_id):
     if not autohaus:
         abort(404)
     next_url = clean_text(request.form.get("next"))
-    redirect_url = next_url if next_url.startswith("/admin") else url_for("betriebs_cockpit") + "#autohaus-zugaenge"
+    redirect_url = next_url if next_url.startswith("/admin") else url_for("betriebs_cockpit")
 
     db = get_db()
     db.execute(

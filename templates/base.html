@@ -361,13 +361,8 @@
       <a class="nav-link" href="{{ url_for('betriebs_cockpit') }}">Start</a>
       <a class="nav-link" href="{{ url_for('admin_news') }}">News</a>
       <a class="nav-link" href="{{ url_for('dashboard') }}#auftraege">Lackierportal</a>
-      <a class="nav-link" href="{{ url_for('kalender') }}">Kalender</a>
-      <a class="nav-link" href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter{% set mitarbeiter_badge = admin_mitarbeiter_urlaub_count() %}{% if mitarbeiter_badge %}<span class="nav-badge">{{ mitarbeiter_badge }}</span>{% endif %}</a>
-      <a class="nav-link" href="{{ url_for('admin_emails') }}">E-Mail{% set email_badge = admin_email_count() %}{% if email_badge %}<span class="nav-badge">{{ email_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('neuer_auftrag') }}">Fahrzeug neu</a>
       <a class="nav-link" href="{{ url_for('admin_postfach') }}">Postfach{% set postfach_badge = admin_postfach_count() %}{% if postfach_badge %}<span class="nav-badge">{{ postfach_badge }}</span>{% endif %}</a>
-      <a class="nav-link" href="{{ url_for('admin_rechnungen') }}">Rechnungskontrolle{% set rechnung_badge = admin_rechnungen_count() %}{% if rechnung_badge %}<span class="nav-badge">{{ rechnung_badge }}</span>{% endif %}</a>
-      <a class="nav-link" href="{{ url_for('admin_einkauf') }}">Einkauf{% set einkauf_badge = admin_einkauf_count() %}{% if einkauf_badge %}<span class="nav-badge">{{ einkauf_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('admin_zugaenge') }}">Zugänge</a>
       <a class="nav-link" href="{{ url_for('partner_login') }}" target="_blank">Autohaus-Portal</a>
       <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>

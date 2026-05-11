@@ -10,6 +10,34 @@
     overflow: hidden;
   }
   .cockpit-hero .text-muted { color: rgba(255,255,255,.72) !important; }
+  .start-clock-panel {
+    width: min(100%, 320px);
+    margin-left: auto;
+    margin-bottom: 1rem;
+    border: 1px solid rgba(255,255,255,.24);
+    border-radius: 18px;
+    background: rgba(255,255,255,.1);
+    padding: 1rem 1.1rem;
+  }
+  .start-clock-label {
+    color: rgba(255,255,255,.72);
+    font-size: .82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .start-clock-time {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 2.4rem;
+    line-height: 1;
+    font-weight: 700;
+    margin-top: .35rem;
+  }
+  .start-clock-date {
+    margin-top: .35rem;
+    color: rgba(255,255,255,.82);
+    font-weight: 600;
+  }
   .module-tile {
     display: flex;
     flex-direction: column;
@@ -432,6 +460,7 @@
     .start-list-actions { justify-content: flex-start; }
     .start-week-grid { grid-template-columns: 1fr; }
     .cockpit-today-item { align-items: flex-start; }
+    .start-clock-panel { margin-left: 0; }
   }
 </style>
 {% endblock %}
@@ -445,20 +474,17 @@
       <p class="mb-0 text-muted">Der neue Startpunkt für Werkstatt, Autohaus-Kommunikation, Termine und offene Freigaben.</p>
     </div>
     <div class="col-lg-5">
-      <form method="POST" action="{{ url_for('kalender_notiz_neu') }}" class="quick-entry" data-quick-search-form data-search-url="{{ url_for('admin_cockpit_auftraege_suche') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}">
-        <label class="form-label text-white-50">Kalender suchen oder speichern</label>
-        <div class="input-group">
-          <input type="text" name="quick_text" class="form-control form-control-lg" placeholder="Kennzeichen, Fahrzeug, Datum oder 14.04 Geburtstag Max jährlich" autocomplete="off" data-quick-search-input required>
-          <button type="submit" name="aktion" value="suchen" class="btn btn-outline-light btn-lg">Suchen</button>
-          <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Speichern</button>
-        </div>
-        <div class="quick-search-results" data-quick-search-results aria-live="polite" hidden></div>
-        <div class="mt-2">
-          <a href="{{ url_for('kalender') }}" class="link-light text-decoration-none">Kalender öffnen</a>
-        </div>
-      </form>
+      <div class="start-clock-panel" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
+        <div class="start-clock-label">Heute</div>
+        <div class="start-clock-time" data-live-clock>{{ current_time_label }}</div>
+        <div class="start-clock-date" data-live-date>{{ current_date_label }}</div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap justify-content-lg-end">
+        <a href="{{ url_for('dashboard') }}#auftraege" class="btn btn-brand btn-lg">Lackierportal</a>
+        <a href="{{ url_for('neuer_auftrag') }}" class="btn btn-outline-light btn-lg">Fahrzeug neu</a>
+        <a href="{{ url_for('admin_postfach') }}" class="btn btn-outline-light btn-lg">Postfach</a>
+        <a href="{{ url_for('admin_zugaenge') }}" class="btn btn-outline-light btn-lg">Zugänge</a>
+      </div>
     </div>
   </div>
 </div>
@@ -484,7 +510,7 @@
           <span>Neue Anfragen</span>
           <strong>{{ start_inbox['anfragen_count'] }}</strong>
         </a>
-        <a href="{{ url_for('admin_emails') if start_inbox['email_count'] else url_for('admin_postfach') }}" class="start-counter">
+        <a href="{{ url_for('admin_postfach') }}" class="start-counter">
           <span>Neue Aufgaben</span>
           <strong>{{ start_inbox['aufgaben_count'] }}</strong>
         </a>
@@ -551,85 +577,7 @@
 
 </div>
 
-<div class="page-card p-4 mb-4">
-  <div class="section-title align-items-start">
-    <div>
-      <h4 class="mb-1">Aktuelle Woche</h4>
-      <p>KW {{ kalender_woche['kw'] }} · {{ kalender_woche['start_text'] }} bis {{ kalender_woche['end_text'] }}</p>
-    </div>
-    <a href="{{ url_for('kalender') }}" class="btn btn-soft btn-sm">Kalender öffnen</a>
-  </div>
-  <div class="start-week-grid">
-    {% for day in kalender_woche['days'] %}
-    <div class="start-week-day {{ 'is-today' if day['is_today'] else '' }} {{ 'is-weekend' if day['is_weekend'] else '' }}">
-      <div class="start-week-date">
-        <div>
-          <strong>{{ day['wochentag_kurz'] }}</strong>
-          {% if day['is_today'] %}<span class="badge text-bg-danger ms-1">Heute</span>{% endif %}
-        </div>
-        <span>{{ day['datum_text'] }}</span>
-      </div>
-      <div class="start-week-events">
-        {% for point in day['calendar_points'][:2] %}
-          <span class="start-week-chip">
-            <span class="badge text-bg-{{ point['farbe'] }} me-1">{{ point['kategorie_label'] }}</span>
-            {{ point['titel'] }}
-          </span>
-        {% endfor %}
-        {% for task in day['tasks'][:4] %}
-          <a href="{{ url_for('auftrag_detail', auftrag_id=task['auftrag_id'], back='kalender') }}" class="start-week-chip">
-            <span class="badge text-bg-{{ task['farbe'] }} me-1">{{ task['label'] }}</span>
-            {{ task['fahrzeug'] }}{% if task['kennzeichen'] %} · {{ task['kennzeichen'] }}{% endif %}
-          </a>
-        {% endfor %}
-        {% if not day['calendar_points'] and not day['tasks'] %}
-          <span class="start-week-empty">Nichts geplant.</span>
-        {% elif day['gesamt_count'] > 6 %}
-          <a href="{{ url_for('kalender') }}" class="start-week-chip">Weitere Einträge öffnen</a>
-        {% endif %}
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-
-  <div class="section-title align-items-start mt-4">
-    <div>
-      <h4 class="mb-1">Nächste Woche</h4>
-      <p>KW {{ kalender_naechste_woche['kw'] }} · {{ kalender_naechste_woche['start_text'] }} bis {{ kalender_naechste_woche['end_text'] }}</p>
-    </div>
-  </div>
-  <div class="start-week-grid">
-    {% for day in kalender_naechste_woche['days'] %}
-    <div class="start-week-day {{ 'is-weekend' if day['is_weekend'] else '' }}">
-      <div class="start-week-date">
-        <strong>{{ day['wochentag_kurz'] }}</strong>
-        <span>{{ day['datum_text'] }}</span>
-      </div>
-      <div class="start-week-events">
-        {% for point in day['calendar_points'][:2] %}
-          <span class="start-week-chip">
-            <span class="badge text-bg-{{ point['farbe'] }} me-1">{{ point['kategorie_label'] }}</span>
-            {{ point['titel'] }}
-          </span>
-        {% endfor %}
-        {% for task in day['tasks'][:4] %}
-          <a href="{{ url_for('auftrag_detail', auftrag_id=task['auftrag_id'], back='kalender') }}" class="start-week-chip">
-            <span class="badge text-bg-{{ task['farbe'] }} me-1">{{ task['label'] }}</span>
-            {{ task['fahrzeug'] }}{% if task['kennzeichen'] %} · {{ task['kennzeichen'] }}{% endif %}
-          </a>
-        {% endfor %}
-        {% if not day['calendar_points'] and not day['tasks'] %}
-          <span class="start-week-empty">Nichts geplant.</span>
-        {% elif day['gesamt_count'] > 6 %}
-          <a href="{{ url_for('kalender') }}" class="start-week-chip">Weitere Einträge öffnen</a>
-        {% endif %}
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-</div>
-
-<div class="d-none" aria-hidden="true">
+{#
 <div class="row g-4 mb-4 start-overview-grid">
   <div class="col-xl-4">
     <div class="page-card p-4 h-100">
@@ -750,36 +698,6 @@
       <div class="mt-2 text-white-50">offene Reklamationen</div>
     </div>
   </div>
-</div>
-
-<div class="page-card p-4 mb-4">
-  <div class="section-title align-items-start">
-    <div>
-      <h4 class="mb-1">Autohaus-Übersicht</h4>
-      <p>Partner sauber sortiert nach offenen Meldungen, Fahrzeugen und nächstem Termin.</p>
-    </div>
-    <a href="{{ url_for('admin_zugaenge') }}" class="btn btn-soft btn-sm">Zugänge öffnen</a>
-  </div>
-  {% if autohaus_uebersicht %}
-    <div class="partner-overview-list">
-      {% for partner in autohaus_uebersicht %}
-      <div class="partner-overview-item">
-        <div>
-          <div class="partner-overview-name">{{ partner['name'] }}</div>
-          <div class="text-muted small">{{ partner['portal_label'] or 'Autohaus-Portal' }}</div>
-        </div>
-        <span class="partner-overview-pill" title="Aktive Fahrzeuge">{{ partner['aktiv_count'] }} Auto</span>
-        <span class="partner-overview-pill" title="Offene Angebote">{{ partner['angebot_count'] }} Angebot</span>
-        <span class="partner-overview-pill" title="Postfach">{{ partner['postfach_count'] }} Info</span>
-        <div class="text-muted small">
-          {% if partner['naechster_termin'] %}Nächster Termin {{ partner['naechster_termin'] }}{% else %}Kein Termin offen{% endif %}
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-  {% else %}
-    <div class="news-empty">Noch keine Autohaus-Zugänge angelegt.</div>
-  {% endif %}
 </div>
 
 <div class="row g-4 mb-4">
@@ -955,14 +873,6 @@
           <span class="module-count">{{ einkauf_offen_count }}</span>
         </a>
       </div>
-      <div class="col-md-6 col-xxl-4">
-        <a class="page-card module-tile" href="{{ url_for('admin_zugaenge') }}">
-          <span class="module-kicker">Partner</span>
-          <h5 class="mb-0">Zugänge</h5>
-          <p class="text-muted mb-0">Autohaus-Links, Passwörter und neue Partnerzugänge verwalten.</p>
-          <span class="module-count">{{ autohaeuser|length }}</span>
-        </a>
-      </div>
     </div>
   </div>
 
@@ -1003,11 +913,42 @@
     </div>
   </div>
 </div>
-</div>
+#}
 {% endblock %}
 
 {% block extra_js %}
 <script>
+  (() => {
+    const root = document.querySelector('[data-live-clock-root]');
+    if (!root) {
+      return;
+    }
+    const timeTarget = root.querySelector('[data-live-clock]');
+    const dateTarget = root.querySelector('[data-live-date]');
+    const timeFormatter = new Intl.DateTimeFormat('de-DE', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    const dateFormatter = new Intl.DateTimeFormat('de-DE', {
+      weekday: 'long',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+    const updateClock = () => {
+      const now = new Date();
+      if (timeTarget) {
+        timeTarget.textContent = timeFormatter.format(now);
+      }
+      if (dateTarget) {
+        dateTarget.textContent = dateFormatter.format(now);
+      }
+    };
+    updateClock();
+    window.setInterval(updateClock, 1000);
+  })();
+
   (() => {
     const form = document.querySelector('[data-quick-search-form]');
     if (!form) {

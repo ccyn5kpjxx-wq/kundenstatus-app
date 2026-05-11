@@ -96,6 +96,7 @@
       <div class="text-muted small">Heute: {{ mini_calendar['today_text'] }}</div>
     </div>
     <div class="d-flex gap-2">
+      {% if mini_calendar.get('full_url') %}<a class="btn btn-brand btn-sm" href="{{ mini_calendar['full_url'] }}">Kalender öffnen</a>{% endif %}
       {% if mini_calendar['prev_url'] %}<a class="btn btn-soft btn-sm" href="{{ mini_calendar['prev_url'] }}">Zurück</a>{% endif %}
       {% if mini_calendar['next_url'] %}<a class="btn btn-soft btn-sm" href="{{ mini_calendar['next_url'] }}">Weiter</a>{% endif %}
     </div>
