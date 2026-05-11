@@ -27,6 +27,38 @@
     .offer-file-preview { width: 128px; height: 92px; object-fit: cover; border-radius: 10px; border: 1px solid #e4d6c3; background: #f7f1e8; }
     .offer-file-name { overflow-wrap: anywhere; word-break: break-word; }
     .min-width-0 { min-width: 0; }
+    .quick-upload-panel {
+      border:2px solid #c88b24;
+      background:linear-gradient(135deg,#fff6df,#f8e3bd 55%,#e9c77e);
+      border-radius:24px;
+      box-shadow:0 18px 42px rgba(125,78,20,.16);
+      padding:22px;
+    }
+    .quick-upload-kicker {
+      text-transform:uppercase;
+      letter-spacing:.08em;
+      font-size:.76rem;
+      color:#795016;
+      font-weight:700;
+      margin-bottom:4px;
+    }
+    .quick-upload-grid {
+      display:grid;
+      grid-template-columns:minmax(240px,1.1fr) minmax(260px,1.25fr) minmax(220px,.95fr) auto;
+      gap:14px;
+      align-items:end;
+    }
+    .quick-upload-panel .form-control {
+      background:#fffdf9;
+      border-color:#d7b56d;
+    }
+    .quick-upload-panel .btn {
+      white-space:nowrap;
+    }
+    @media (max-width: 992px) {
+      .quick-upload-grid { grid-template-columns:1fr; }
+      .quick-upload-panel .btn { width:100%; }
+    }
     .loading-overlay {
       position: fixed;
       inset: 0;
@@ -168,6 +200,30 @@
           </div>
         </div>
       </div>
+
+      {% if angebot %}
+      <form method="POST" enctype="multipart/form-data" class="quick-upload-panel mb-4" data-upload-form>
+        <div class="quick-upload-grid">
+          <div>
+            <div class="quick-upload-kicker">Schnell-Upload</div>
+            <h2 class="h4 mb-1">Bilder oder Dokumente zur Anfrage</h2>
+            <div class="text-muted">Direkt hochladen, speichern und automatisch analysieren lassen.</div>
+          </div>
+          <div>
+            <label class="form-label fw-bold">Dateien auswählen</label>
+            <input type="file" name="dateien" class="form-control form-control-lg" multiple required accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
+            <div class="form-text">Neue Unterlagen werden sofort zur Anfrage gelegt.</div>
+          </div>
+          <div>
+            <label class="form-label">Kurzer Hinweis (optional)</label>
+            <input type="text" name="upload_notiz" class="form-control form-control-lg" placeholder="z.B. Schadenfoto links">
+          </div>
+          <div>
+            <button type="submit" name="aktion" value="quick_upload_analyze" class="btn btn-dark btn-lg" data-loading-message="Unterlage wird hochgeladen, gespeichert und analysiert. Bitte kurz warten.">Speichern & analysieren</button>
+          </div>
+        </div>
+      </form>
+      {% endif %}
 
       <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
         <div class="col-md-6">
@@ -422,7 +478,7 @@
   </div>
   {% include "ki_assistent_widget.html" %}
   <script>
-    const form = document.querySelector('[data-upload-form]');
+    const uploadForms = document.querySelectorAll('[data-upload-form]');
     const overlay = document.querySelector('[data-loading-overlay]');
     const loadingText = document.querySelector('[data-loading-text]');
     const loadingNewsTitle = document.querySelector('[data-loading-news-title]');
@@ -451,17 +507,19 @@
       }
       loadingNewsTimer = window.setInterval(updateLoadingNews, 3200);
     };
-    if (form && overlay && loadingText) {
-      form.addEventListener('click', (event) => {
-        const button = event.target.closest('button[type="submit"]');
-        if (button) {
-          submitterMessage = button.dataset.loadingMessage || '';
-        }
-      });
-      form.addEventListener('submit', () => {
-        loadingText.textContent = submitterMessage || 'Text, Bilder und Dokumente werden gerade ausgewertet und lesbarer für die Werkstatt aufbereitet.';
-        startLoadingNews();
-        overlay.classList.add('show');
+    if (uploadForms.length && overlay && loadingText) {
+      uploadForms.forEach((form) => {
+        form.addEventListener('click', (event) => {
+          const button = event.target.closest('button[type="submit"]');
+          if (button) {
+            submitterMessage = button.dataset.loadingMessage || '';
+          }
+        });
+        form.addEventListener('submit', () => {
+          loadingText.textContent = submitterMessage || 'Text, Bilder und Dokumente werden gerade ausgewertet und lesbarer für die Werkstatt aufbereitet.';
+          startLoadingNews();
+          overlay.classList.add('show');
+        });
       });
     }
     const updateTransportLabels = () => {

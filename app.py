@@ -13593,6 +13593,30 @@ def get_allowed_uploads(files):
     return uploads
 
 
+def save_partner_standard_uploads(auftrag_id, files, upload_note="", success_message="Unterlage gespeichert und analysiert."):
+    files = list(files or [])
+    if not any(file and file.filename for file in files):
+        flash("Bitte zuerst ein Bild oder Dokument auswählen.", "warning")
+        return 0
+    erlaubte_dateien = get_allowed_uploads(files)
+    if not erlaubte_dateien:
+        flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, TXT, DOCX oder XLSX verwenden.", "warning")
+        return 0
+    try:
+        upload_result = save_uploads(
+            auftrag_id,
+            erlaubte_dateien,
+            "autohaus",
+            "standard",
+            upload_note=upload_note,
+        )
+    except Exception as exc:
+        upload_result = (
+            0,
+            {"_analysis_error": f"Upload/Analyse konnte nicht abgeschlossen werden: {clean_text(str(exc))[:300]}"},
+        )
+    return flash_upload_analysis_result(upload_result, success_message)
+
 def get_allowed_finish_uploads(files):
     uploads = []
     allowed = IMAGE_EXTENSIONS | {".pdf"}
@@ -18410,6 +18434,20 @@ def partner_angebot_detail(slug, auftrag_id):
         aktion = clean_text(form.get("aktion")) or "analyze"
         dateien = request.files.getlist("dateien")
         erlaubte_dateien = get_allowed_uploads(dateien)
+        if aktion == "quick_upload_analyze":
+            saved = save_partner_standard_uploads(
+                auftrag_id,
+                dateien,
+                upload_note=form.get("upload_notiz"),
+                success_message="Unterlage gespeichert, analysiert und zur Angebotsanfrage hinzugefügt.",
+            )
+            if saved:
+                refresh_offer_texts(
+                    auftrag_id,
+                    angebot.get("analyse_text"),
+                    angebot.get("beschreibung"),
+                )
+            return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
         kunden_kurz = beautify_offer_text(form.get("analyse_text"))
         kunden_text = beautify_offer_text(form.get("beschreibung"))
         analyse = kunden_kurz or analyse_text(kunden_text)
@@ -18520,6 +18558,14 @@ def partner_auftrag(slug, auftrag_id):
     if request.method == "POST":
         form = request.form
         aktion = form.get("aktion", "speichern")
+        if aktion == "quick_upload_analyze":
+            save_partner_standard_uploads(
+                auftrag_id,
+                request.files.getlist("dateien"),
+                upload_note=form.get("upload_notiz"),
+                success_message="Unterlage gespeichert, analysiert und für Autohaus und Werkstatt sichtbar.",
+            )
+            return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
         analyse = clean_text(form.get("analyse_text")) or analyse_text(form.get("beschreibung"))
         start_datum = format_date(form.get("start_datum")) if "start_datum" in form else auftrag["start_datum"]
         fertig_datum = format_date(form.get("fertig_datum")) if "fertig_datum" in form else auftrag["fertig_datum"]
