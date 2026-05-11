@@ -21,12 +21,69 @@
     .chip { display:inline-flex; align-items:center; padding:.4rem .75rem; border-radius:999px; background:#f4ede4; border:1px solid #e4d6c3; margin:0 .4rem .4rem 0; }
     .chip-link { color:inherit; text-decoration:none; transition:.18s ease; }
     .chip-link:hover { background:#ecdfcd; border-color:#d0bda2; color:inherit; }
+    .mail-badge { display:inline-flex; min-width:1.45rem; height:1.45rem; align-items:center; justify-content:center; margin-left:.35rem; padding:0 .42rem; border-radius:999px; background:#d64545; color:#fff; font-size:.78rem; font-weight:700; line-height:1; }
     .bulk-bar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border:1px solid #e4d6c3; border-radius:18px; background:#f7f0e6; margin-bottom:16px; }
     .row-select-cell { width:88px; white-space:nowrap; }
     .row-check { width:20px; height:20px; accent-color:#1f3557; }
     tr[data-select-row] { cursor:pointer; }
     tr[data-select-row].is-selected { background:#f8f1e6; }
     .selection-badge { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid #d9cab4; border-radius:999px; background:#fffaf2; }
+    .portal-search {
+      margin-top:20px;
+      max-width:640px;
+      border:1px solid #e4d6c3;
+      border-radius:18px;
+      background:#fffaf2;
+      padding:16px;
+    }
+    .portal-search-results {
+      display:grid;
+      gap:8px;
+      margin-top:12px;
+    }
+    .portal-search-results[hidden] {
+      display:none;
+    }
+    .portal-search-result,
+    .portal-search-empty {
+      display:block;
+      border:1px solid #e4d6c3;
+      border-radius:14px;
+      background:#fffdf9;
+      padding:12px 14px;
+      color:#111827;
+      text-decoration:none;
+    }
+    .portal-search-result:hover {
+      color:#111827;
+      background:#f7f1e8;
+      border-color:#d0bda2;
+    }
+    .portal-search-title {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      font-weight:700;
+    }
+    .portal-search-meta {
+      margin-top:3px;
+      color:#6c6255;
+      font-size:.9rem;
+      overflow-wrap:anywhere;
+    }
+    .portal-search-status {
+      border-radius:999px;
+      background:#132635;
+      color:#fff;
+      padding:.18rem .55rem;
+      font-size:.78rem;
+      font-weight:700;
+    }
+    .portal-search-empty {
+      color:#6c6255;
+    }
     .live-clock-stage {
       position:relative;
       overflow:hidden;
@@ -116,28 +173,119 @@
     .track-step { padding:.4rem .7rem; border-radius:999px; background:#efe4d4; border:1px solid #dfceb6; color:#6a5b4a; font-size:.9rem; }
     .track-step.is-active { background:#132635; border-color:#132635; color:#fff; }
     .track-step.is-done { background:#1b7f53; border-color:#1b7f53; color:#fff; }
-    .hint-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:6px; border-radius:18px; background:#fffaf2; }
-    .hint-row .chip-link { flex:1 1 300px; margin:0; }
-    .hint-row form { margin-left:auto; }
-    .bonus-panel { background:#fffdf9; color:#111827; border:1px solid #e4d6c3; border-radius:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
+    .planner-list { display:grid; gap:12px; }
+    .planner-day { border:1px solid #e4d6c3; border-radius:18px; background:#fffaf2; padding:12px; }
+    .planner-count { display:inline-flex; align-items:center; justify-content:center; border:1px solid #e4d6c3; border-radius:999px; background:#fff7eb; padding:.22rem .6rem; font-weight:700; font-size:.82rem; }
+    .planner-link { display:flex; align-items:center; flex-wrap:wrap; gap:8px; width:100%; text-decoration:none; color:inherit; padding:.45rem .55rem; border-radius:14px; background:#f7f1e8; border:1px solid #e4d6c3; transition:.18s ease; }
+    .planner-link:hover { color:inherit; background:#ecdfcd; border-color:#d0bda2; }
+    .planner-link strong { line-height:1.2; }
+    .planner-main { display:inline-flex; align-items:center; flex-wrap:wrap; gap:8px; min-width:min(100%,280px); }
+    .planner-period { color:#145d66; font-weight:700; }
+    .planner-separator { color:#7d7163; font-size:.82rem; }
+    .news-strip { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); }
+    .news-item { border:1px solid #e4d6c3; border-left:5px solid #145d66; border-radius:18px; background:#fffaf2; padding:16px; }
+    .news-item h5 { font-size:1rem; margin-bottom:.35rem; }
+    .news-item p { margin:0; color:#6c6255; }
+    .bonus-panel {
+      background:#fffdf9;
+      color:#111827;
+      border:1px solid #e4d6c3;
+      border-radius:24px;
+      box-shadow:0 16px 40px rgba(64,47,25,.12);
+      padding:28px;
+    }
     .bonus-panel .text-muted { color:#6c6255 !important; }
-    .bonus-kicker { color:#a23f2d; text-transform:uppercase; letter-spacing:.12em; font-weight:700; font-size:.78rem; }
-    .bonus-tier-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
-    .bonus-tier { background:#fffaf2; color:#111827; border:1px solid #e4d6c3; border-top:4px solid #d0bda2; border-radius:14px; min-height:132px; padding:18px; }
-    .bonus-tier.is-dark { background:#f7f1e8; border-top-color:#145d66; }
-    .bonus-tier.is-red { background:#fff1f3; border-top-color:#a23f2d; }
-    .bonus-tier.is-active { outline:3px solid rgba(20,93,102,.28); outline-offset:0; }
-    .bonus-tier small { display:block; text-transform:uppercase; letter-spacing:.1em; color:#7d7163; font-size:.68rem; }
-    .bonus-tier strong { display:block; font-size:2.1rem; line-height:1; margin:.55rem 0 .2rem; }
-    .bonus-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; background:#e4d6c3; border:1px solid #e4d6c3; border-radius:16px; overflow:hidden; margin-top:18px; }
-    .bonus-summary-item { background:#fffaf2; padding:16px; min-height:94px; }
-    .bonus-summary-item span { display:block; color:#7d7163; text-transform:uppercase; letter-spacing:.08em; font-size:.68rem; margin-bottom:.35rem; }
-    .bonus-summary-item strong { color:#132635; font-size:1.2rem; }
-    .bonus-open { color:#a23f2d !important; font-size:1.35rem !important; }
-    .bonus-order-list { display:grid; gap:10px; margin-top:18px; }
-    .bonus-order { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:12px; align-items:center; padding:12px 0; border-top:1px solid rgba(64,47,25,.14); }
+    .bonus-kicker {
+      color:#c11734;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      font-weight:700;
+      font-size:.78rem;
+    }
+    .bonus-tier-grid {
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:14px;
+    }
+    .bonus-tier {
+      background:#fffaf2;
+      color:#111827;
+      border:1px solid #e4d6c3;
+      border-top:4px solid #d0bda2;
+      border-radius:14px;
+      min-height:144px;
+      padding:20px;
+    }
+    .bonus-tier.is-dark { background:#f7f1e8; color:#111827; border-top-color:#c11734; }
+    .bonus-tier.is-red { background:#fff1f3; color:#111827; border-top-color:#d80d2f; }
+    .bonus-tier.is-red strong { color:#c11734; }
+    .bonus-tier.is-active { outline:3px solid rgba(193,23,52,.34); outline-offset:0; }
+    .bonus-tier small {
+      display:block;
+      text-transform:uppercase;
+      letter-spacing:.12em;
+      color:inherit;
+      opacity:.62;
+      font-size:.68rem;
+    }
+    .bonus-tier strong {
+      display:block;
+      font-size:2.35rem;
+      line-height:1;
+      margin:.55rem 0 .2rem;
+    }
+    .bonus-summary {
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:1px;
+      background:#e4d6c3;
+      border:1px solid #e4d6c3;
+      border-radius:16px;
+      overflow:hidden;
+      margin-top:18px;
+    }
+    .bonus-summary-item {
+      background:#fffaf2;
+      padding:16px;
+      min-height:96px;
+    }
+    .bonus-summary-item span {
+      display:block;
+      color:#7d7163;
+      text-transform:uppercase;
+      letter-spacing:.08em;
+      font-size:.68rem;
+      margin-bottom:.35rem;
+    }
+    .bonus-summary-item strong {
+      color:#132635;
+      font-size:1.25rem;
+    }
+    .bonus-open { color:#c11734 !important; font-size:1.55rem !important; }
+    .bonus-order-list {
+      display:grid;
+      gap:10px;
+      margin-top:18px;
+    }
+    .bonus-order {
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto auto;
+      gap:12px;
+      align-items:center;
+      padding:12px 0;
+      border-top:1px solid rgba(64,47,25,.14);
+    }
     .bonus-order a { color:#132635; font-weight:700; text-decoration:none; }
-    .bonus-source { border:1px solid #d9cab4; border-radius:999px; padding:.22rem .55rem; background:#fff7eb; color:#6c6255; font-size:.78rem; white-space:nowrap; }
+    .bonus-order a:hover { color:#145d66; }
+    .bonus-source {
+      border:1px solid #d9cab4;
+      border-radius:999px;
+      padding:.22rem .55rem;
+      background:#fff7eb;
+      color:#6c6255;
+      font-size:.78rem;
+      white-space:nowrap;
+    }
     .btn,
     .form-control {
       min-height:44px;
@@ -228,6 +376,25 @@
         justify-content:center;
         width:100%;
       }
+      .bonus-panel { padding:20px 16px; border-radius:18px; }
+      .bonus-tier-grid,
+      .bonus-summary,
+      .bonus-order {
+        grid-template-columns:1fr;
+      }
+      .bonus-summary { gap:0; }
+      .bonus-order { align-items:start; }
+      .bonus-source { width:max-content; max-width:100%; white-space:normal; }
+      .live-clock-stage { padding:20px 18px; border-radius:20px; }
+      .live-clock-top { align-items:flex-start; }
+      .live-clock-title { font-size:2.35rem; }
+      .clock-time {
+        width:100%;
+        font-size:2rem;
+        text-align:left;
+        margin-top:18px;
+      }
+      .clock-subline { justify-content:flex-start; }
     }
   </style>
 </head>
@@ -264,18 +431,21 @@
           <div class="text-muted">Heute sehen, was kommt, was fertig wird und welche Angebote offen sind.</div>
         </div>
         <div class="d-flex gap-2 flex-wrap">
-          <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">
-            Postfach
-            {% if postfach_ungelesen %}
-            <span class="badge text-bg-warning ms-1">{{ postfach_ungelesen }}</span>
-            {% endif %}
-          </a>
-          <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Lackierauftrag PDF</a>
+          <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Lackierauftrag ausfüllen</a>
           <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Angebot anfordern</a>
           <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Bonusmodell</a>
+          {% if not rahmenvertrag['aktiv'] %}
+          <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Rahmenvertrag vereinbaren</a>
+          {% endif %}
           <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}" class="btn btn-dark btn-lg">Neues Fahrzeug</a>
+          <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
           <a href="{{ url_for('partner_logout') }}" class="btn btn-outline-dark btn-lg">Logout</a>
         </div>
+      </div>
+      <div class="portal-search" data-portal-search data-search-url="{{ url_for('partner_auftraege_suche', slug=autohaus['slug']) }}">
+        <label class="form-label fw-bold mb-2">Fahrzeug suchen</label>
+        <input type="text" class="form-control form-control-lg" placeholder="Kennzeichen oder Fahrzeug eingeben" autocomplete="off" data-portal-search-input>
+        <div class="portal-search-results" data-portal-search-results aria-live="polite" hidden></div>
       </div>
     </div>
 
@@ -285,38 +455,39 @@
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
         <div>
           <h4 class="mb-1">Vorausgefüllter Lackierauftrag</h4>
-          <div class="text-muted">Die Vorlage ist mit Ihrem Autohaus vorausgefüllt und kann nach dem Ausfüllen wieder hochgeladen werden.</div>
+          <div class="text-muted">Direkt im Browser ausfüllen, speichern und danach als fertiges PDF herunterladen.</div>
         </div>
-        <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
+        <div class="d-flex gap-2 flex-wrap">
+          <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-dark">Online ausfüllen</a>
+          <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
+        </div>
       </div>
     </div>
 
-    {% if benachrichtigungen %}
+    {% if postfach_items %}
     <div class="panel mb-4 border border-warning-subtle">
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
         <div>
           <h4 class="mb-1">Postfach</h4>
-          <div class="text-muted">Neue Nachrichten der Werkstatt zu Status, Terminen, Bildern und Unterlagen.</div>
+          <div class="text-muted">Neue Werkstatt-Hinweise, Chat-Antworten und offene Prüfungen.</div>
         </div>
-        <span class="badge text-bg-warning">{{ benachrichtigungen|length }} Hinweis(e)</span>
+        <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-sm">Postfach öffnen</a>
       </div>
       <div class="d-grid gap-2">
-        {% for hinweis in benachrichtigungen %}
-        <div class="hint-row">
-          <a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=hinweis['auftrag_id']) }}" class="chip chip-link">
-            <strong>{{ hinweis['titel'] }}</strong>
-            <span>{{ hinweis['fahrzeug'] }}{% if hinweis['kennzeichen'] %} · {{ hinweis['kennzeichen'] }}{% endif %}</span>
-            <span class="text-muted">{{ hinweis['erstellt_am'] }}</span>
+        {% for item in postfach_items %}
+        <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap border rounded-4 p-3 bg-white">
+          <a href="{{ url_for('partner_postfach_oeffnen', slug=autohaus['slug'], item_key=item['item_key']) }}" class="chip chip-link mb-0">
+            <strong>{{ item['titel'] }}</strong>
+            <span>{{ item['fahrzeug'] }}{% if item['kennzeichen'] %} · {{ item['kennzeichen'] }}{% endif %}</span>
+            <span class="text-muted">{{ item['typ'] }} · {{ item['erstellt_am'] }}</span>
           </a>
-          <form method="post" action="{{ url_for('partner_hinweis_entfernen', slug=autohaus['slug'], hinweis_id=hinweis['id']) }}">
-            {{ csrf_field()|safe }}
+          <form method="POST" action="{{ url_for('partner_postfach_loeschen', slug=autohaus['slug'], item_key=item['item_key']) }}" class="m-0">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="next" value="{{ request.path }}">
             <button type="submit" class="btn btn-outline-dark btn-sm">Löschen</button>
           </form>
         </div>
         {% endfor %}
-      </div>
-      <div class="mt-3">
-        <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-dark btn-sm">Postfach öffnen</a>
       </div>
     </div>
     {% endif %}
@@ -346,6 +517,75 @@
           <div class="display-5 fw-bold">{{ cockpit['zurueckgegeben']|length }}</div>
         </div>
       </div>
+    </div>
+
+    {% if werkstatt_news %}
+    <div class="panel mb-4">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h4 class="mb-1">Werkstatt-News</h4>
+          <div class="text-muted">Aktuelle Hinweise von Gärtner Karosserie &amp; Lack.</div>
+        </div>
+      </div>
+      <div class="news-strip">
+        {% for news in werkstatt_news %}
+        <div class="news-item">
+          <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+            <span class="badge text-bg-{{ news['kategorie_meta']['farbe'] }}">{{ news['kategorie_meta']['label'] }}</span>
+            {% if news['zeitraum_text'] %}<span class="text-muted small">{{ news['zeitraum_text'] }}</span>{% endif %}
+          </div>
+          <h5>{{ news['titel'] }}</h5>
+          {% if news['nachricht'] %}<p>{{ news['nachricht'] }}</p>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="panel mb-4">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h4 class="mb-1">{% if terminplaner_vergangenheit %}Vergangene Termine{% else %}Nächste Termine{% endif %}</h4>
+          <div class="text-muted">
+            {% if terminplaner_vergangenheit %}Ihre erledigten Fahrzeugtermine mit aktuellem Auftragsstatus.{% else %}Ihre anstehenden Fahrzeugtermine mit aktuellem Auftragsstatus.{% endif %}
+          </div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+          <span class="badge rounded-pill text-bg-light">{{ terminplaner_tage|length }} Aufträge</span>
+          {% if terminplaner_vergangenheit %}
+            <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-sm">Kommende Termine</a>
+          {% else %}
+            <a href="{{ url_for('partner_dashboard', slug=autohaus['slug'], termine='vergangenheit') }}" class="btn btn-outline-dark btn-sm">Vergangenheit ansehen</a>
+          {% endif %}
+        </div>
+      </div>
+      {% if terminplaner_tage %}
+        <div class="planner-list">
+          {% for item in terminplaner_tage %}
+          <div class="planner-day">
+            {% set a = item['auftrag'] %}
+            {% set ziel = 'partner_angebot_detail' if a['angebotsphase'] else 'partner_auftrag' %}
+            {% set status = a['status_meta'] %}
+            <a href="{{ url_for(ziel, slug=autohaus['slug'], auftrag_id=a['id']) }}" class="planner-link">
+              <span class="planner-main">
+                  <strong>{{ a['fahrzeug'] or 'Fahrzeug' }}</strong>
+                  {% if a['kennzeichen'] %}<span class="text-muted">{{ a['kennzeichen'] }}</span>{% endif %}
+                  <span class="planner-period">{{ item['zeitraum_text'] }}</span>
+              </span>
+              <span class="badge text-bg-{{ status['farbe'] }}">Status: {{ status['label'] }}</span>
+              {% if item['aktueller_termin'] %}
+                <span class="planner-separator">Aktuell:</span>
+                <span class="badge text-bg-{{ item['aktueller_termin']['farbe'] }}">{{ item['aktueller_termin'].get('termin_label') or item['aktueller_termin']['label'] }}</span>
+              {% endif %}
+            </a>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-muted">
+          {% if terminplaner_vergangenheit %}Aktuell sind keine vergangenen Fahrzeugtermine vorhanden.{% else %}Aktuell sind keine kommenden Fahrzeugtermine eingetragen.{% endif %}
+        </div>
+      {% endif %}
     </div>
 
     <div class="panel priority-panel mb-4">
@@ -581,6 +821,7 @@
       {% endif %}
     </div>
   </div>
+  {% include "ki_assistent_widget.html" %}
   <script>
     (() => {
       const clock = document.querySelector('[data-dashboard-clock]');
@@ -620,6 +861,98 @@
 
       updateClock();
       window.setInterval(updateClock, 1000);
+    })();
+
+    (() => {
+      const searchBox = document.querySelector('[data-portal-search]');
+      if (!searchBox) {
+        return;
+      }
+      const input = searchBox.querySelector('[data-portal-search-input]');
+      const results = searchBox.querySelector('[data-portal-search-results]');
+      const endpoint = searchBox.dataset.searchUrl;
+      if (!input || !results || !endpoint) {
+        return;
+      }
+      let debounceTimer = null;
+      let controller = null;
+
+      const clearResults = () => {
+        results.replaceChildren();
+        results.hidden = true;
+      };
+
+      const renderEmpty = () => {
+        const empty = document.createElement('div');
+        empty.className = 'portal-search-empty';
+        empty.textContent = 'Kein Fahrzeug gefunden.';
+        results.replaceChildren(empty);
+        results.hidden = false;
+      };
+
+      const renderItems = (items) => {
+        if (!items.length) {
+          renderEmpty();
+          return;
+        }
+        const fragment = document.createDocumentFragment();
+        items.forEach((item) => {
+          const link = document.createElement('a');
+          link.className = 'portal-search-result';
+          link.href = item.url;
+
+          const title = document.createElement('div');
+          title.className = 'portal-search-title';
+          const name = document.createElement('span');
+          name.textContent = `${item.fahrzeug || 'Fahrzeug'}${item.kennzeichen ? ` · ${item.kennzeichen}` : ''}`;
+          const status = document.createElement('span');
+          status.className = 'portal-search-status';
+          status.textContent = item.status || 'Offen';
+          title.append(name, status);
+
+          const meta = document.createElement('div');
+          meta.className = 'portal-search-meta';
+          meta.textContent = item.meta || '';
+
+          link.append(title, meta);
+          fragment.append(link);
+        });
+        results.replaceChildren(fragment);
+        results.hidden = false;
+      };
+
+      const search = async () => {
+        const query = input.value.trim();
+        if (query.length < 2) {
+          clearResults();
+          return;
+        }
+        if (controller) {
+          controller.abort();
+        }
+        controller = new AbortController();
+        try {
+          const response = await fetch(`${endpoint}?q=${encodeURIComponent(query)}`, {
+            headers: { Accept: 'application/json' },
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            clearResults();
+            return;
+          }
+          const data = await response.json();
+          renderItems(Array.isArray(data.items) ? data.items : []);
+        } catch (error) {
+          if (error.name !== 'AbortError') {
+            clearResults();
+          }
+        }
+      };
+
+      input.addEventListener('input', () => {
+        window.clearTimeout(debounceTimer);
+        debounceTimer = window.setTimeout(search, 160);
+      });
     })();
 
     document.querySelectorAll('[data-bulk-form]').forEach((form) => {
@@ -675,6 +1008,5 @@
       refresh();
     });
   </script>
-  {% include "ki_assistent_widget.html" %}
 </body>
 </html>

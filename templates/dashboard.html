@@ -14,26 +14,258 @@
   .offer-file-preview { width: 128px; height: 92px; object-fit: cover; border-radius: 10px; border: 1px solid #e4d6c3; background: #f7f1e8; }
   .offer-file-name { overflow-wrap: anywhere; word-break: break-word; }
   .min-width-0 { min-width: 0; }
-  .postfach-row { border:1px solid #e4d6c3; border-radius:16px; background:#fffaf2; padding:16px; }
-  .postfach-row.is-unread { border-color:#e1b448; background:#fff7dd; }
-  .postfach-message { overflow-wrap:anywhere; }
-  .vehicle-status-board { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; align-items:start; }
-  .vehicle-status-column { border:1px solid #e4d6c3; border-radius:18px; background:#fffaf2; padding:14px; min-height:190px; }
-  .vehicle-status-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
-  .vehicle-status-count { min-width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; border:1px solid #d9cab4; border-radius:999px; background:#fff; font-weight:700; }
-  .vehicle-status-list { display:grid; gap:10px; max-height:520px; overflow:auto; padding-right:2px; }
-  .vehicle-mini-card { display:block; color:inherit; text-decoration:none; border:1px solid #eadcc8; border-left:5px solid #d9cab4; border-radius:14px; background:#fff; padding:12px; transition:border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
-  .vehicle-mini-card:hover { color:inherit; border-color:#a33b2a; box-shadow:0 10px 24px rgba(31, 53, 87, .12); transform:translateY(-1px); }
-  .vehicle-mini-card.is-today { border-left-color:#111827; }
-  .vehicle-mini-card.is-overdue { border-left-color:#dc3545; background:#fff6f4; }
-  .vehicle-mini-card.is-future { border-left-color:#0d6efd; }
-  .vehicle-mini-card.is-done { border-left-color:#198754; }
-  .vehicle-mini-title { font-weight:700; overflow-wrap:anywhere; }
-  .vehicle-mini-meta { color:#6c757d; font-size:.875rem; overflow-wrap:anywhere; }
-  .vehicle-mini-text { font-size:.875rem; margin-top:8px; overflow-wrap:anywhere; }
-  .vehicle-mini-date { display:inline-flex; align-items:center; gap:6px; margin-top:10px; padding:6px 9px; border-radius:999px; background:#f7f0e6; border:1px solid #e4d6c3; font-size:.85rem; font-weight:700; }
-  .vehicle-mini-open { color:#a33b2a; font-weight:700; font-size:.85rem; }
-  .vehicle-status-empty { color:#6c757d; border:1px dashed #d9cab4; border-radius:14px; padding:14px; background:#fff; }
+  .planning-cell { min-width: 170px; }
+  .planning-focus {
+    border: 1px solid #e4d6c3;
+    border-radius: 12px;
+    background: #fffaf2;
+    padding: .7rem .8rem;
+  }
+  .planning-focus.overdue {
+    border-color: rgba(214, 69, 69, .35);
+    background: rgba(214, 69, 69, .08);
+  }
+  .planning-focus.today {
+    border-color: rgba(27, 127, 83, .35);
+    background: rgba(27, 127, 83, .08);
+  }
+  .planning-focus.done {
+    opacity: .8;
+  }
+  .planning-date {
+    font-family: "Space Grotesk", sans-serif;
+    font-weight: 700;
+    margin-top: .35rem;
+  }
+  .timeline-stack {
+    display: grid;
+    gap: .4rem;
+  }
+  .planning-pill {
+    justify-content: flex-start;
+    border-radius: 10px;
+    width: 100%;
+  }
+  .planning-pill.is-active {
+    border-color: var(--brand);
+    background: #fff2e8;
+    font-weight: 700;
+  }
+  .planning-pill.is-past:not(.is-active) {
+    opacity: .72;
+  }
+  .analysis-cell {
+    max-width: 340px;
+    line-height: 1.35;
+  }
+  .workshop-overview {
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:12px;
+  }
+  .workshop-metric {
+    border:1px solid #e4d6c3;
+    border-radius:16px;
+    background:#fffaf2;
+    padding:14px 16px;
+    min-height:104px;
+  }
+  .workshop-metric.is-active {
+    border-color:#132635;
+    box-shadow:0 10px 24px rgba(19, 38, 53, .10);
+  }
+  .workshop-metric strong {
+    display:block;
+    font-family:"Space Grotesk", sans-serif;
+    font-size:2rem;
+    line-height:1;
+    margin:.25rem 0;
+  }
+  .workshop-board {
+    display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+    gap:12px;
+  }
+  .workshop-lane {
+    border:1px solid #e4d6c3;
+    border-radius:16px;
+    background:#fffaf2;
+    padding:14px;
+    text-align:left;
+    min-height:190px;
+  }
+  .workshop-lane.is-active,
+  .workshop-lane:hover {
+    border-color:#132635;
+    box-shadow:0 10px 24px rgba(19, 38, 53, .10);
+  }
+  .workshop-lane-title {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:.35rem;
+  }
+  .workshop-lane-title strong {
+    font-family:"Space Grotesk", sans-serif;
+    font-size:1rem;
+    line-height:1.2;
+  }
+  .workshop-lane-count {
+    min-width:2rem;
+    height:2rem;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:999px;
+    background:#132635;
+    color:#fff;
+    font-weight:700;
+  }
+  .workshop-lane-items {
+    display:grid;
+    gap:8px;
+    margin-top:12px;
+  }
+  .workshop-lane-item {
+    display:block;
+    border:1px solid #eadbc8;
+    border-radius:12px;
+    background:#fffdf9;
+    padding:9px 10px;
+    color:var(--ink);
+    text-decoration:none;
+  }
+  .workshop-lane-item:hover {
+    border-color:#d6c4ac;
+    color:var(--ink);
+  }
+  .workshop-lane-item-title {
+    font-weight:700;
+    line-height:1.25;
+  }
+  .workshop-lane-item-meta {
+    color:var(--muted);
+    font-size:.82rem;
+    margin-top:2px;
+  }
+  .workshop-lane-more {
+    color:var(--muted);
+    font-size:.84rem;
+  }
+  .workshop-filterbar {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    border:1px solid #e4d6c3;
+    border-radius:18px;
+    background:#f7f0e6;
+    padding:14px;
+  }
+  .filter-chip {
+    border:1px solid #d9cab4;
+    background:#fffaf2;
+    border-radius:999px;
+    padding:.48rem .8rem;
+    min-height:40px;
+  }
+  .filter-chip.is-active {
+    background:#132635;
+    border-color:#132635;
+    color:#fff;
+  }
+  .vehicle-structure-rail {
+    display:grid;
+    grid-template-columns:repeat(6,minmax(0,1fr));
+    gap:10px;
+    margin-bottom:16px;
+  }
+  .vehicle-structure-card {
+    border:1px solid #e4d6c3;
+    border-radius:14px;
+    background:#fffaf2;
+    padding:12px;
+    min-height:102px;
+    text-align:left;
+  }
+  .vehicle-structure-card.is-active,
+  .vehicle-structure-card:hover {
+    border-color:#132635;
+    background:#fffdf9;
+    box-shadow:0 10px 24px rgba(19, 38, 53, .10);
+  }
+  .vehicle-structure-card[disabled] {
+    cursor:not-allowed;
+    opacity:.62;
+  }
+  .vehicle-structure-card[disabled]:hover {
+    border-color:#e4d6c3;
+    box-shadow:none;
+  }
+  .vehicle-structure-number {
+    display:block;
+    font-family:"Space Grotesk", sans-serif;
+    font-size:1.8rem;
+    line-height:1;
+    font-weight:700;
+    color:#132635;
+    margin-bottom:.35rem;
+  }
+  .vehicle-structure-label {
+    display:block;
+    font-weight:700;
+    line-height:1.15;
+  }
+  .vehicle-structure-hint {
+    color:var(--muted);
+    font-size:.78rem;
+    line-height:1.25;
+    margin-top:.3rem;
+  }
+  .auftrag-group-row th {
+    background:#f7f0e6 !important;
+    border-top:1px solid #d9cab4;
+    border-bottom:1px solid #d9cab4 !important;
+    padding:.75rem .9rem !important;
+  }
+  .auftrag-group-row[hidden] { display:none; }
+  .auftrag-group-heading {
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  .auftrag-group-title {
+    font-family:"Space Grotesk", sans-serif;
+    font-weight:700;
+    color:#243546;
+  }
+  .auftrag-group-hint {
+    color:var(--muted);
+    font-size:.86rem;
+  }
+  .auftrag-row[hidden] { display:none; }
+  .empty-filter-state {
+    border:1px dashed #d9cab4;
+    border-radius:16px;
+    padding:18px;
+    background:#fffaf2;
+  }
+  @media (max-width: 991.98px) {
+    .workshop-overview { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .workshop-board { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .vehicle-structure-rail { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  }
+  @media (max-width: 575.98px) {
+    .workshop-overview { grid-template-columns:1fr; }
+    .workshop-board { grid-template-columns:1fr; }
+    .vehicle-structure-rail { grid-template-columns:1fr; }
+    .workshop-filterbar .form-select,
+    .workshop-filterbar .form-control { width:100%; }
+  }
 </style>
 {% endblock %}
 
@@ -46,12 +278,6 @@
       <p class="mb-0 text-muted">Du verwaltest hier alle Autohäuser, alle Fahrzeuge, Hol- und Bringtermine sowie Terminänderungen.</p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-      <a href="#admin-postfach" class="btn btn-soft btn-lg">
-        Postfach
-        {% if admin_postfach_ungelesen %}
-        <span class="badge text-bg-warning ms-1">{{ admin_postfach_ungelesen }}</span>
-        {% endif %}
-      </a>
       <a href="{{ url_for('neuer_auftrag') }}" class="btn btn-brand btn-lg">Fahrzeug anlegen</a>
       <a href="{{ url_for('partner_login') }}" target="_blank" class="btn btn-soft btn-lg">Autohaus-Login öffnen</a>
       <form method="POST" action="{{ url_for('admin_backup_sofort') }}" class="d-inline">
@@ -148,58 +374,6 @@
   </div>
 </div>
 
-{% include "_mini_month_calendar.html" %}
-
-<div id="admin-postfach" class="page-card p-4 mb-4 border {% if admin_postfach_ungelesen %}border-warning-subtle{% else %}border-success-subtle{% endif %}">
-  <div class="section-title">
-    <div>
-      <h4 class="mb-1">Postfach</h4>
-      <p>Neue Aufträge, Uploads, Nachrichten und Änderungen aus den Autohaus-Portalen.</p>
-    </div>
-    <span class="badge {% if admin_postfach_ungelesen %}text-bg-warning{% else %}text-bg-success{% endif %}">
-      {{ admin_postfach_ungelesen }} ungelesen
-    </span>
-  </div>
-  {% if admin_benachrichtigungen %}
-  <div class="d-grid gap-3">
-    {% for hinweis in admin_benachrichtigungen %}
-    <div class="postfach-row {% if not hinweis['gelesen'] %}is-unread{% endif %}">
-      <div class="d-flex justify-content-between gap-3 flex-wrap">
-        <div>
-          <div class="fw-bold">{{ hinweis['titel'] }}</div>
-          <div class="text-muted small">
-            {{ hinweis['autohaus_name'] or 'Autohaus' }}
-            {% if hinweis['fahrzeug'] %} · {{ hinweis['fahrzeug'] }}{% endif %}
-            {% if hinweis['kennzeichen'] %} · {{ hinweis['kennzeichen'] }}{% endif %}
-            {% if hinweis['auftragsnummer'] %} · Auftrag {{ hinweis['auftragsnummer'] }}{% endif %}
-          </div>
-        </div>
-        <span class="badge text-bg-light border">{{ hinweis['erstellt_am'] }}</span>
-      </div>
-      <div class="postfach-message mt-2">{{ hinweis['nachricht'] }}</div>
-      <div class="d-flex gap-2 flex-wrap mt-3">
-        {% if hinweis['auftrag_id'] %}
-        <a href="{{ url_for('auftrag_detail', auftrag_id=hinweis['auftrag_id']) }}" class="btn btn-brand btn-sm">Auftrag öffnen</a>
-        {% endif %}
-        {% if not hinweis['gelesen'] %}
-        <form method="POST" action="{{ url_for('admin_postfach_gelesen', hinweis_id=hinweis['id']) }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn btn-soft btn-sm">Gelesen</button>
-        </form>
-        {% endif %}
-        <form method="POST" action="{{ url_for('admin_postfach_loeschen', hinweis_id=hinweis['id']) }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
-        </form>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="text-muted">Keine neuen Meldungen.</div>
-  {% endif %}
-</div>
-
 <div class="row g-3 mb-4">
   <div class="col-md-6 col-xl-3">
     <div class="metric-card metric-warm page-card">
@@ -245,35 +419,40 @@
   </div>
   <div class="col-md-6 col-xl-3">
     <div class="metric-card page-card" style="background:linear-gradient(135deg,#6d4a14,#c28a2c);">
-      <div class="metric-label">Neue Nachrichten</div>
-      <div class="metric-value mt-2">{{ cockpit['offene_chat_nachrichten']|length }}</div>
-      <div class="mt-2 text-white-50">Ungelesene Chat-Fragen der Autohäuser</div>
+      <div class="metric-label">Postfach</div>
+      <div class="metric-value mt-2">{{ cockpit['postfach_count'] }}</div>
+      <div class="mt-2 text-white-50">Anfragen, Chat und Alarme</div>
     </div>
   </div>
 </div>
 
-{% if cockpit['offene_chat_nachrichten'] %}
+{% if cockpit['postfach_items'] %}
 <div class="page-card p-4 mb-4 border border-warning-subtle">
   <div class="section-title">
     <div>
-      <h4 class="mb-1">Neue Chat-Nachrichten</h4>
-      <p>Autohaus-Fragen, die noch nicht im Auftrag geöffnet wurden.</p>
+      <h4 class="mb-1">Neue Chat-Nachrichten und Anfragen</h4>
+      <p>Dein Werkstatt-Postfach für alles, was gerade Aufmerksamkeit braucht.</p>
     </div>
+    <a href="{{ url_for('admin_postfach') }}" class="btn btn-soft btn-sm">Postfach öffnen</a>
   </div>
   <div class="row g-3">
-    {% for chat in cockpit['offene_chat_nachrichten'] %}
+    {% for item in cockpit['postfach_items'][:6] %}
     <div class="col-xl-6">
       <div class="page-card p-3 h-100 border border-warning-subtle">
         <div class="d-flex justify-content-between gap-3 flex-wrap">
           <div>
-            <div class="fw-bold">{{ chat['autohaus_name'] or 'Autohaus' }}</div>
-            <div class="text-muted small">{{ chat['fahrzeug'] }}{% if chat['kennzeichen'] %} · {{ chat['kennzeichen'] }}{% endif %}</div>
+            <div class="fw-bold">{{ item['titel'] }}</div>
+            <div class="text-muted small">{{ item['autohaus_name'] or 'Autohaus' }} · {{ item['fahrzeug'] }}{% if item['kennzeichen'] %} · {{ item['kennzeichen'] }}{% endif %}</div>
           </div>
-          <span class="badge text-bg-warning">{{ chat['erstellt_am'] }}</span>
+          <span class="badge text-bg-warning">{{ item['typ'] }} · {{ item['erstellt_am'] }}</span>
         </div>
-        <div class="mt-2 chat-preview">{{ chat['nachricht'] }}</div>
-        <div class="mt-3">
-          <a href="{{ url_for('auftrag_detail', auftrag_id=chat['auftrag_id']) }}" class="btn btn-brand btn-sm">Im Auftrag antworten</a>
+        <div class="mt-2 chat-preview">{{ item['nachricht'] }}</div>
+        <div class="mt-3 d-flex gap-2 flex-wrap">
+          <a href="{{ item['ziel_url'] }}" class="btn btn-brand btn-sm">Öffnen</a>
+          <form method="POST" action="{{ url_for('admin_postfach_loeschen', item_key=item['item_key']) }}" class="d-inline">
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button type="submit" class="btn btn-soft btn-sm">Löschen</button>
+          </form>
         </div>
       </div>
     </div>
@@ -508,62 +687,115 @@
   </div>
 </div>
 
-<div class="page-card p-4 mb-4" id="status-uebersicht" data-status-board>
+<div class="page-card p-4 mb-4" data-workshop-overview>
   <div class="section-title">
     <div>
-      <h4 class="mb-1">Fahrzeuge nach Status</h4>
-      <p>Klare Arbeitsübersicht: erst die dringenden Termine, dann der Rest. Zum Bearbeiten einfach den Auftrag öffnen.</p>
+      <h4 class="mb-1">Werkstatt-Übersicht</h4>
+      <p>Arbeitslisten statt Endlos-Tabelle: erst entscheiden, dann öffnen.</p>
     </div>
-    <span class="badge text-bg-light border">{{ auftraege|length }} aktiv</span>
   </div>
-  <div class="vehicle-status-board">
-    {% for column in status_board %}
-    <section class="vehicle-status-column">
-      <div class="vehicle-status-head">
-        <span class="badge text-bg-{{ column['meta']['farbe'] }}">
-          {{ column['meta']['icon'] }} {{ column['meta']['label'] }}
-        </span>
-        <span class="vehicle-status-count">{{ column['count'] }}</span>
+  <div class="workshop-overview mb-3">
+    <button type="button" class="workshop-metric text-start" data-workshop-filter="focus">
+      <span class="text-muted small text-uppercase">Heute / fällig</span>
+      <strong>{{ werkstatt_uebersicht['counts']['fokus'] }}</strong>
+      <span class="small text-muted">{{ werkstatt_uebersicht['counts']['heute'] }} heute · {{ werkstatt_uebersicht['counts']['ueberfaellig'] }} fällig</span>
+    </button>
+    <button type="button" class="workshop-metric text-start" data-workshop-filter="week">
+      <span class="text-muted small text-uppercase">Nächste 7 Tage</span>
+      <strong>{{ werkstatt_uebersicht['counts']['woche'] }}</strong>
+      <span class="small text-muted">Anlieferung, Start, Fertig oder Rückgabe</span>
+    </button>
+    <button type="button" class="workshop-metric text-start" data-workshop-filter="work">
+      <span class="text-muted small text-uppercase">In Arbeit</span>
+      <strong>{{ werkstatt_uebersicht['counts']['in_arbeit'] }}</strong>
+      <span class="small text-muted">{{ werkstatt_uebersicht['counts']['fertig'] }} fertig · {{ werkstatt_uebersicht['counts']['zurueckgegeben'] }} zurück</span>
+    </button>
+    <button type="button" class="workshop-metric text-start" data-workshop-filter="date-warning">
+      <span class="text-muted small text-uppercase">Termin prüfen</span>
+      <strong>{{ werkstatt_uebersicht['counts']['termin_pruefen'] }}</strong>
+      <span class="small text-muted">Auffällige Alt- oder Zukunftsdaten</span>
+    </button>
+  </div>
+  <div class="workshop-board mb-3">
+    {% for gruppe in werkstatt_uebersicht['arbeitsgruppen'] %}
+    <button type="button" class="workshop-lane" data-workshop-filter="{{ gruppe['filter'] }}">
+      <div class="workshop-lane-title">
+        <div>
+          <strong>{{ gruppe['label'] }}</strong>
+          <div class="small text-muted">{{ gruppe['description'] }}</div>
+        </div>
+        <span class="workshop-lane-count">{{ gruppe['count'] }}</span>
       </div>
-      <div class="vehicle-status-list">
-        {% if column['items'] %}
-          {% for a in column['items'] %}
-          {% set board_event = a['status_board_event'] %}
-          <a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="vehicle-mini-card is-{{ board_event['state'] }}">
-            <div class="d-flex justify-content-between gap-2 align-items-start">
-              <div class="vehicle-mini-title">{{ a['fahrzeug'] or 'Fahrzeug' }}</div>
-              <span class="vehicle-mini-open">Öffnen</span>
+      <div class="workshop-lane-items">
+        {% for item in gruppe['items'] %}
+          <div class="workshop-lane-item">
+            <div class="workshop-lane-item-title">{{ item['autohaus_name'] or 'Ohne Autohaus' }} · {{ item['fahrzeug'] or 'Fahrzeug' }}</div>
+            <div class="workshop-lane-item-meta">
+              {% if item['kennzeichen'] %}{{ item['kennzeichen'] }} · {% endif %}
+              {{ item['planung']['badge'] }}{% if item['planung']['date_text'] %} {{ item['planung']['date_text'] }}{% endif %}
             </div>
-            <div class="vehicle-mini-meta">
-              {{ a['autohaus_name'] or 'Ohne Autohaus' }}
-              {% if a['kennzeichen'] %} · <code>{{ a['kennzeichen'] }}</code>{% endif %}
-            </div>
-            {% if a['kunde_name'] %}
-            <div class="vehicle-mini-meta">Endkunde: {{ a['kunde_name'] }}</div>
-            {% endif %}
-            {% if a['analyse_text'] or a['beschreibung'] %}
-            <div class="vehicle-mini-text">{{ (a['analyse_text'] or a['beschreibung'])|truncate(92, true, '…') }}</div>
-            {% endif %}
-            <div class="vehicle-mini-date">{{ board_event['label'] }} {{ board_event['date_text'] }}</div>
-          </a>
-          {% endfor %}
+          </div>
         {% else %}
-          <div class="vehicle-status-empty">Keine Fahrzeuge in diesem Status.</div>
+          <div class="text-muted small">{{ gruppe['empty'] }}</div>
+        {% endfor %}
+        {% if gruppe['more_count'] %}
+          <div class="workshop-lane-more">+ {{ gruppe['more_count'] }} weitere in der Liste</div>
         {% endif %}
       </div>
-    </section>
+    </button>
     {% endfor %}
+  </div>
+  <div class="workshop-filterbar" data-workshop-filters>
+    <div class="d-flex gap-2 flex-wrap">
+      <button type="button" class="filter-chip is-active" data-workshop-filter="all">Alle {{ werkstatt_uebersicht['counts']['gesamt'] }}</button>
+      <button type="button" class="filter-chip" data-workshop-filter="focus">Heute/Fällig</button>
+      <button type="button" class="filter-chip" data-workshop-filter="week">Diese Woche</button>
+      <button type="button" class="filter-chip" data-workshop-filter="work">In Arbeit</button>
+      <button type="button" class="filter-chip" data-workshop-filter="done">Fertig/Zurück</button>
+      <button type="button" class="filter-chip" data-workshop-filter="empty">Ohne Termin</button>
+      {% if werkstatt_uebersicht['counts']['reklamation'] %}
+      <button type="button" class="filter-chip" data-workshop-filter="complaint">Reklamation</button>
+      {% endif %}
+    </div>
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+      <select class="form-select form-select-sm" data-workshop-autohaus style="width:220px">
+        <option value="">Alle Autohäuser</option>
+        {% for autohaus in werkstatt_uebersicht['autohaeuser'] %}
+        <option value="{{ autohaus['id'] }}">{{ autohaus['name'] }} ({{ autohaus['count'] }})</option>
+        {% endfor %}
+      </select>
+      <input type="search" class="form-control form-control-sm" data-workshop-search placeholder="Suchen: Kennzeichen, Autohaus, Kunde" style="width:280px">
+      <span class="text-muted small" data-workshop-visible-count>{{ werkstatt_uebersicht['counts']['gesamt'] }} sichtbar</span>
+      <button type="button" class="btn btn-soft btn-sm" data-workshop-reset>Filter zurücksetzen</button>
+    </div>
   </div>
 </div>
 
-<div class="page-card p-4 mb-4">
+<div class="page-card p-4 mb-4" id="auftraege">
   <div class="section-title">
     <div>
-      <h4 class="mb-1">Alle Fahrzeuge</h4>
-      <p>Detail-Liste für Sammelaktionen, Archivieren, Löschen und Kontrolle.</p>
+      <h4 class="mb-1">Alle Fahrzeuge, nach Dringlichkeit sortiert</h4>
+      <p>20+ Fahrzeuge bleiben hier in Arbeitsgruppen: fällig, heute, diese Woche, fertig, Prüffälle und ohne Termin.</p>
     </div>
   </div>
   {% if auftraege %}
+  <div class="vehicle-structure-rail" aria-label="Fahrzeuge nach Arbeitsgruppen">
+    {% for gruppe in werkstatt_uebersicht['planungsgruppen'] %}
+    <button type="button" class="vehicle-structure-card" data-workshop-filter="{{ gruppe['filter'] }}" {% if not gruppe['count'] %}disabled{% endif %}>
+      <span class="vehicle-structure-number">{{ gruppe['count'] }}</span>
+      <span class="vehicle-structure-label">{{ gruppe['label'] }}</span>
+      <span class="vehicle-structure-hint">{{ gruppe['hinweis'] }}</span>
+    </button>
+    {% endfor %}
+  </div>
+  {% if zurueck_archivierbar_count %}
+  <form method="POST" action="{{ url_for('admin_zurueckgegebene_archivieren') }}" class="d-flex justify-content-end mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-soft btn-sm">
+      {{ zurueck_archivierbar_count }} zurückgegebene ohne Reklamation archivieren
+    </button>
+  </form>
+  {% endif %}
   <form method="POST" action="{{ url_for('admin_sammelaktion') }}" data-bulk-form>
   <div class="bulk-bar">
     <div class="d-flex align-items-center gap-3 flex-wrap">
@@ -583,22 +815,59 @@
       <thead>
         <tr>
           <th class="row-select-cell">Auswahl</th>
+          <th>Planung</th>
           <th>Autohaus</th>
           <th>Fahrzeug</th>
           <th>Analyse</th>
-          <th>Termine</th>
+          <th>Terminfolge</th>
           <th>Status</th>
           <th>Aktion</th>
         </tr>
       </thead>
       <tbody>
+        {% set row_groups = namespace(last='') %}
         {% for a in auftraege %}
-        <tr data-select-row>
+        {% set current_group = a['planung']['group_key'] %}
+        {% if current_group != row_groups.last %}
+        {% set gruppe_meta = werkstatt_uebersicht['planungsgruppen_by_key'].get(current_group) %}
+        <tr class="auftrag-group-row" data-workshop-group-row data-group-key="{{ current_group }}">
+          <th colspan="8">
+            <div class="auftrag-group-heading">
+              <div>
+                <div class="auftrag-group-title">{{ gruppe_meta['label'] if gruppe_meta else current_group }}</div>
+                <div class="auftrag-group-hint">{{ gruppe_meta['hinweis'] if gruppe_meta else '' }}</div>
+              </div>
+              <span class="schedule-pill">
+                <span data-workshop-group-visible>{{ gruppe_meta['count'] if gruppe_meta else 0 }}</span> Fahrzeuge
+              </span>
+            </div>
+          </th>
+        </tr>
+        {% set row_groups.last = current_group %}
+        {% endif %}
+        {% set row_search = (a['autohaus_name'] ~ ' ' ~ a['kunde_name'] ~ ' ' ~ a['fahrzeug'] ~ ' ' ~ a['kennzeichen'] ~ ' ' ~ a['analyse_text'] ~ ' ' ~ a['beschreibung'])|lower %}
+        <tr class="auftrag-row" data-select-row data-workshop-row
+          data-plan="{{ a['planung']['group_key'] }}"
+          data-week="{{ 1 if a['planung']['is_week_relevant'] else 0 }}"
+          data-date-warning="{{ 1 if a['planung']['has_date_warning'] else 0 }}"
+          data-status="{{ a['status'] }}"
+          data-autohaus="{{ a['autohaus_id'] or 0 }}"
+          data-complaint="{{ 1 if a['hat_offene_reklamation'] else 0 }}"
+          data-search="{{ row_search|e }}">
           <td class="row-select-cell">
             <label class="selection-badge mb-0">
               <input type="checkbox" class="row-check" name="auftrag_ids" value="{{ a['id'] }}" data-select-item>
               <span>Wählen</span>
             </label>
+          </td>
+          <td class="planning-cell">
+            <div class="planning-focus {{ a['planung']['group_key'] }}">
+              <span class="badge text-bg-{{ a['planung']['badge_farbe'] }}">{{ a['planung']['badge'] }}</span>
+              {% if a['planung']['date_text'] %}
+                <div class="planning-date">{{ a['planung']['date_text'] }}</div>
+              {% endif %}
+              <div class="small text-muted mt-1">{{ a['planung']['hinweis'] }}</div>
+            </div>
           </td>
           <td>
             <div class="fw-bold">{{ a['autohaus_name'] or 'Ohne Autohaus' }}</div>
@@ -608,20 +877,44 @@
             <div>{{ a['fahrzeug'] }}</div>
             {% if a['kennzeichen'] %}<div class="small"><code>{{ a['kennzeichen'] }}</code></div>{% endif %}
           </td>
-          <td>{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
+          <td class="analysis-cell">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
           <td>
-            <div class="d-flex gap-2 flex-wrap">
-              {% if a['annahme_datum'] %}<span class="schedule-pill">{{ a['annahme_datum'] }}</span>{% endif %}
-              {% if a['start_datum'] %}<span class="schedule-pill">{{ a['start_datum'] }}</span>{% endif %}
-              {% if a['fertig_datum'] %}<span class="schedule-pill">{{ a['fertig_datum'] }}</span>{% endif %}
-              {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['abholtermin'] }}</span>{% endif %}
+            <div class="timeline-stack">
+              {% for event in a['planung']['events'] %}
+                <span class="schedule-pill planning-pill {% if event['is_relevant'] %}is-active{% endif %} {% if event['is_past'] %}is-past{% endif %}">
+                  {{ event['label'] }} {{ event['datum_text'] }}
+                </span>
+              {% endfor %}
+              {% if not a['planung']['events'] %}
+                <span class="text-muted small">Keine Termine</span>
+              {% endif %}
             </div>
           </td>
           <td>
             <span class="badge text-bg-{{ a['status_meta']['farbe'] }}">{{ a['status_meta']['icon'] }} {{ a['status_meta']['label'] }}</span>
+            {% if a['hat_offene_reklamation'] %}
+              <div class="small text-danger mt-1">Reklamation offen: neu mit Start und Fertig planen.</div>
+            {% elif a['archivierbar_zurueckgegeben'] %}
+              <div class="small text-muted mt-1">Rückgabe erledigt, kann ins Archiv.</div>
+            {% endif %}
           </td>
           <td>
             <a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Öffnen</a>
+            {% if a['status'] == 5 and a['hat_offene_reklamation'] %}
+              <div class="row g-1 mt-2">
+                <div class="col-6">
+                  <input type="date" name="start_datum_{{ a['id'] }}" class="form-control form-control-sm" value="{{ a['start_datum']|iso_date }}" aria-label="Reklamation Start">
+                </div>
+                <div class="col-6">
+                  <input type="date" name="fertig_datum_{{ a['id'] }}" class="form-control form-control-sm" value="{{ a['fertig_datum']|iso_date }}" aria-label="Reklamation Fertig">
+                </div>
+                <div class="col-12 d-grid">
+                  <button type="submit" class="btn btn-brand btn-sm" formaction="{{ url_for('reklamation_neu_planen', auftrag_id=a['id']) }}" formmethod="post">
+                    Reklamation neu planen
+                  </button>
+                </div>
+              </div>
+            {% endif %}
             {% if a['status'] == 5 %}
               <a href="{{ url_for('rechnung_schreiben', auftrag_id=a['id']) }}" class="btn btn-brand btn-sm mt-1">
                 Rechnung schreiben in Lexware
@@ -637,6 +930,9 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="empty-filter-state text-muted mt-3" data-workshop-empty hidden>
+    Keine Fahrzeuge für diese Auswahl. Filter ändern oder Suche leeren.
   </div>
   </form>
   {% else %}
@@ -695,8 +991,8 @@
           <td>{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
           <td>
             <div class="d-flex gap-2 flex-wrap">
-              {% if a['fertig_datum'] %}<span class="schedule-pill">{{ a['fertig_datum'] }}</span>{% endif %}
-              {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['abholtermin'] }}</span>{% endif %}
+              {% if a['fertig_datum'] %}<span class="schedule-pill">Fertig {{ a['fertig_datum'] }}</span>{% endif %}
+              {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['abholung_label'] }} {{ a['abholtermin'] }}</span>{% endif %}
             </div>
           </td>
           <td><a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Öffnen</a></td>
@@ -738,18 +1034,165 @@
     });
   });
 
+  const workshopRows = Array.from(document.querySelectorAll('[data-workshop-row]'));
+  if (workshopRows.length) {
+    const filterButtons = Array.from(document.querySelectorAll('[data-workshop-filter]'));
+    const groupRows = Array.from(document.querySelectorAll('[data-workshop-group-row]'));
+    const searchInput = document.querySelector('[data-workshop-search]');
+    const autohausSelect = document.querySelector('[data-workshop-autohaus]');
+    const resetButton = document.querySelector('[data-workshop-reset]');
+    const visibleCounter = document.querySelector('[data-workshop-visible-count]');
+    const emptyState = document.querySelector('[data-workshop-empty]');
+    const storageKey = 'werkstatt-auftragsfilter';
+    const availableFilters = new Set(filterButtons.map((button) => button.dataset.workshopFilter).filter(Boolean));
+    const readSavedFilters = () => {
+      try {
+        return JSON.parse(window.localStorage.getItem(storageKey) || '{}') || {};
+      } catch (error) {
+        return {};
+      }
+    };
+    const saveFilters = () => {
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify({
+          filter: activeFilter,
+          autohaus: autohausSelect?.value || '',
+          search: searchInput?.value || '',
+        }));
+      } catch (error) {
+        return;
+      }
+    };
+    const savedFilters = readSavedFilters();
+    let activeFilter = availableFilters.has(savedFilters.filter) ? savedFilters.filter : 'all';
+    if (searchInput && savedFilters.search) {
+      searchInput.value = savedFilters.search;
+    }
+    if (autohausSelect && savedFilters.autohaus) {
+      autohausSelect.value = savedFilters.autohaus;
+    }
+
+    const matchesFilter = (row) => {
+      const plan = row.dataset.plan || '';
+      const status = Number(row.dataset.status || 0);
+      if (activeFilter === 'focus') {
+        return plan === 'overdue' || plan === 'today';
+      }
+      if (activeFilter === 'week') {
+        return row.dataset.week === '1';
+      }
+      if (activeFilter === 'work') {
+        return status === 2 || status === 3;
+      }
+      if (activeFilter === 'done') {
+        return status === 4 || status >= 5;
+      }
+      if (activeFilter === 'empty') {
+        return plan === 'empty';
+      }
+      if (activeFilter === 'date-warning') {
+        return row.dataset.dateWarning === '1';
+      }
+      if (activeFilter === 'complaint') {
+        return row.dataset.complaint === '1';
+      }
+      return true;
+    };
+
+    const refreshGroupRows = () => {
+      const visibleByGroup = {};
+      workshopRows.forEach((row) => {
+        if (!row.hidden) {
+          const key = row.dataset.plan || 'empty';
+          visibleByGroup[key] = (visibleByGroup[key] || 0) + 1;
+        }
+      });
+      groupRows.forEach((row) => {
+        const visible = visibleByGroup[row.dataset.groupKey || 'empty'] || 0;
+        row.hidden = visible === 0;
+        const counter = row.querySelector('[data-workshop-group-visible]');
+        if (counter) {
+          counter.textContent = String(visible);
+        }
+      });
+    };
+
+    const applyWorkshopFilters = () => {
+      const query = (searchInput?.value || '').trim().toLowerCase();
+      const autohaus = autohausSelect?.value || '';
+      let visible = 0;
+      workshopRows.forEach((row) => {
+        const matchesSearch = !query || (row.dataset.search || '').includes(query);
+        const matchesAutohaus = !autohaus || row.dataset.autohaus === autohaus;
+        const show = matchesFilter(row) && matchesSearch && matchesAutohaus;
+        row.hidden = !show;
+        if (!show) {
+          const checkbox = row.querySelector('[data-select-item]');
+          if (checkbox?.checked) {
+            checkbox.checked = false;
+            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        } else {
+          visible += 1;
+        }
+      });
+      if (visibleCounter) {
+        visibleCounter.textContent = `${visible} sichtbar`;
+      }
+      if (emptyState) {
+        emptyState.hidden = visible !== 0;
+      }
+      refreshGroupRows();
+      saveFilters();
+      document.querySelectorAll('[data-bulk-form]').forEach((form) => {
+        form.dispatchEvent(new CustomEvent('workshop:filters-changed'));
+      });
+    };
+
+    const activateFilter = (filter) => {
+      activeFilter = filter || 'all';
+      filterButtons.forEach((button) => {
+        button.classList.toggle('is-active', button.dataset.workshopFilter === activeFilter);
+      });
+      applyWorkshopFilters();
+    };
+
+    filterButtons.forEach((button) => {
+      button.addEventListener('click', () => activateFilter(button.dataset.workshopFilter));
+    });
+    searchInput?.addEventListener('input', applyWorkshopFilters);
+    autohausSelect?.addEventListener('change', applyWorkshopFilters);
+    resetButton?.addEventListener('click', () => {
+      if (searchInput) {
+        searchInput.value = '';
+      }
+      if (autohausSelect) {
+        autohausSelect.value = '';
+      }
+      activateFilter('all');
+    });
+    activateFilter(activeFilter);
+  }
+
   document.querySelectorAll('[data-bulk-form]').forEach((form) => {
     const selectAll = form.querySelector('[data-select-all]');
     const items = Array.from(form.querySelectorAll('[data-select-item]'));
     const counter = form.querySelector('[data-selected-count]');
     const rows = Array.from(form.querySelectorAll('[data-select-row]'));
     let submitter = null;
+    const visibleRows = () => rows.filter((row) => !row.hidden);
+    const visibleItems = () => visibleRows()
+      .map((row) => row.querySelector('[data-select-item]'))
+      .filter(Boolean);
     const refresh = () => {
-      const selected = items.filter((item) => item.checked).length;
-      counter.textContent = `${selected} Fahrzeuge ausgewählt`;
+      const currentVisibleItems = visibleItems();
+      const selected = currentVisibleItems.filter((item) => item.checked).length;
+      if (counter) {
+        counter.textContent = `${selected} von ${currentVisibleItems.length} Fahrzeugen ausgewählt`;
+      }
       if (selectAll) {
-        selectAll.checked = selected > 0 && selected === items.length;
-        selectAll.indeterminate = selected > 0 && selected < items.length;
+        selectAll.checked = selected > 0 && selected === currentVisibleItems.length;
+        selectAll.indeterminate = selected > 0 && selected < currentVisibleItems.length;
       }
       rows.forEach((row) => {
         const checkbox = row.querySelector('[data-select-item]');
@@ -758,10 +1201,11 @@
     };
     if (selectAll) {
       selectAll.addEventListener('change', () => {
-        items.forEach((item) => { item.checked = selectAll.checked; });
+        visibleItems().forEach((item) => { item.checked = selectAll.checked; });
         refresh();
       });
     }
+    form.addEventListener('workshop:filters-changed', refresh);
     form.addEventListener('click', (event) => {
       const button = event.target.closest('button[type="submit"]');
       if (button) {
@@ -790,20 +1234,5 @@
     });
     refresh();
   });
-
-  window.setInterval(() => {
-    if (document.hidden) {
-      return;
-    }
-    const activeTag = document.activeElement?.tagName;
-    if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(activeTag)) {
-      return;
-    }
-    const hasSelection = document.querySelector('[data-select-item]:checked');
-    if (hasSelection) {
-      return;
-    }
-    window.location.reload();
-  }, 60000);
 </script>
 {% endblock %}

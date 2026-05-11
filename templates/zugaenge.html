@@ -1,24 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Autohaus-Zugänge{% endblock %}
-{% block extra_css %}
-<style>
-  .portal-link-box { min-width:min(100%, 360px); }
-  .portal-link-value { max-width:460px; overflow-wrap:anywhere; }
-</style>
-{% endblock %}
 
 {% block content %}
-<div class="page-card p-4 p-lg-5 mb-4">
-  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
-    <div>
-      <div class="badge-soft mb-3">Partner</div>
-      <h1 class="mb-2">Zugänge verwalten</h1>
-      <p class="mb-0 text-muted">Portal-Links, Zugangscodes und Autohausdaten liegen hier getrennt von der Startseite.</p>
-    </div>
-    <a href="{{ url_for('dashboard') }}" class="btn btn-soft btn-lg">Zurück zur Übersicht</a>
-  </div>
-</div>
-
 {% set autohaus_next_url = url_for('admin_zugaenge') %}
+{% set show_autohaus_create_form = false %}
+{% set autohaus_section_intro = "Hier stehen nur die bestehenden Portal-Links und Zugangscodes der Autohäuser." %}
 {% include "autohaus_zugaenge_section.html" %}
 {% endblock %}

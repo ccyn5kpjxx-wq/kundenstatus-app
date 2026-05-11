@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ autohaus['portal_label'] }} - Lackierauftrag</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background:#f4f1ea; font-family:"DM Sans",sans-serif; color:#132635; }
+    h1,h2,h3,h4,h5 { font-family:"Space Grotesk",sans-serif; }
+    .shell { max-width:1180px; margin:0 auto; padding:32px 16px; }
+    .panel { background:#fffdf9; border-radius:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
+    .form-control,.form-select,.btn { min-height:44px; font-size:16px; }
+    .section-title { color:#a54817; text-transform:uppercase; letter-spacing:.12em; font-size:.78rem; font-weight:700; }
+    .position-grid { display:grid; gap:10px; }
+    .position-row {
+      display:grid;
+      grid-template-columns:1.25fr .7fr minmax(220px,2fr) .8fr;
+      gap:10px;
+      align-items:end;
+      padding:12px;
+      border:1px solid #e4d6c3;
+      border-radius:14px;
+      background:#fffaf2;
+    }
+    .mobile-label { display:none; color:#7d7163; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; font-weight:700; }
+    .saved-note { color:#6c6255; }
+    @media (max-width: 767.98px) {
+      .shell { padding:14px; }
+      .panel { padding:20px 16px; border-radius:18px; }
+      .position-row { grid-template-columns:1fr; }
+      .mobile-label { display:block; margin-bottom:.2rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+      <div class="alert alert-{{ cat }} mb-4">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <div class="panel mb-4">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+        <div>
+          <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
+          <h1 class="mb-2">Lackierauftrag online ausfüllen</h1>
+          <div class="text-muted">Direkt eintragen, speichern und danach als ausgefülltes PDF herunterladen.</div>
+          {% if entwurf['geaendert_am'] %}
+          <div class="saved-note small mt-2">Zuletzt gespeichert: {{ entwurf['geaendert_am'] }}</div>
+          {% endif %}
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Dashboard</a>
+          <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
+        </div>
+      </div>
+    </div>
+
+    <form method="POST" class="panel">
+      {{ csrf_field()|safe }}
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
+        <div>
+          <div class="section-title">Auftraggeber</div>
+          <h2 class="h4 mb-1">Stammdaten und Fahrzeug</h2>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <button type="submit" name="aktion" value="speichern" class="btn btn-outline-dark">Speichern</button>
+          <button type="submit" name="aktion" value="download" class="btn btn-dark">Speichern & PDF herunterladen</button>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-6">
+          <label class="form-label">Firma</label>
+          <input type="text" name="firma" class="form-control" value="{{ daten['firma'] }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Ansprechpartner</label>
+          <input type="text" name="ansprechpartner" class="form-control" value="{{ daten['ansprechpartner'] }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Tel. / E-Mail</label>
+          <input type="text" name="kontakt" class="form-control" value="{{ daten['kontakt'] }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Auftrags-Datum</label>
+          <input type="date" name="auftrags_datum" class="form-control" value="{{ daten['auftrags_datum']|iso_date }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Fertig bis spätestens</label>
+          <input type="date" name="fertig_bis" class="form-control" value="{{ daten['fertig_bis']|iso_date }}">
+        </div>
+      </div>
+
+      <div class="section-title mb-2">Fahrzeug</div>
+      <div class="row g-3 mb-4">
+        <div class="col-md-4">
+          <label class="form-label">Typ</label>
+          <input type="text" name="typ" class="form-control" value="{{ daten['typ'] }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Amtl. Kennzeichen</label>
+          <input type="text" name="kennzeichen" class="form-control" value="{{ daten['kennzeichen'] }}" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Fg.-Nr.</label>
+          <input type="text" name="fg_nr" class="form-control" value="{{ daten['fg_nr'] }}" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Farb-Nr.</label>
+          <input type="text" name="farb_nr" class="form-control" value="{{ daten['farb_nr'] }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">km-Stand</label>
+          <input type="text" name="km_stand" class="form-control" value="{{ daten['km_stand'] }}">
+        </div>
+      </div>
+
+      <div class="section-title mb-2">Abrechnung</div>
+      <div class="row g-3 mb-4">
+        <div class="col-12">
+          <div class="d-flex gap-3 flex-wrap">
+            {% for key, label in abrechnung_optionen %}
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="abrechnung" value="{{ key }}" id="abrechnung-{{ key }}" {% if daten['abrechnung'] == key %}checked{% endif %}>
+              <label class="form-check-label" for="abrechnung-{{ key }}">{{ label }}</label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Versicherung / Schaden-Nr.</label>
+          <input type="text" name="versicherung_schaden_nr" class="form-control" value="{{ daten['versicherung_schaden_nr'] }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Vers.-Nehmer</label>
+          <input type="text" name="versicherungsnehmer" class="form-control" value="{{ daten['versicherungsnehmer'] }}">
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-between align-items-end gap-3 flex-wrap mb-2">
+        <div>
+          <div class="section-title">Karosserieteile</div>
+          <h3 class="h5 mb-0">Arbeitsumfang eintragen</h3>
+        </div>
+      </div>
+      <div class="position-grid mb-4">
+        {% for index in range(1, position_count + 1) %}
+        <div class="position-row">
+          <div>
+            <span class="mobile-label">Karosserieteil</span>
+            <input type="text" name="position_{{ index }}_teil" class="form-control" placeholder="z.B. Stoßstange hinten" value="{{ daten['position_' ~ index ~ '_teil'] }}">
+          </div>
+          <div>
+            <span class="mobile-label">Seite</span>
+            <input type="text" name="position_{{ index }}_seite" class="form-control" placeholder="z.B. links" value="{{ daten['position_' ~ index ~ '_seite'] }}">
+          </div>
+          <div>
+            <span class="mobile-label">Bemerkung / Arbeitsumfang</span>
+            <input type="text" name="position_{{ index }}_bemerkung" class="form-control" placeholder="z.B. lackieren, Delle instandsetzen" value="{{ daten['position_' ~ index ~ '_bemerkung'] }}">
+          </div>
+          <div>
+            <span class="mobile-label">I.O. / n.I.O.</span>
+            <input type="text" name="position_{{ index }}_status" class="form-control" placeholder="I.O." value="{{ daten['position_' ~ index ~ '_status'] }}">
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="section-title mb-2">Qualitätskontrolle</div>
+      <div class="row g-3 mb-4">
+        <div class="col-md-4">
+          <label class="form-label">Datum</label>
+          <input type="date" name="kontrolle_datum" class="form-control" value="{{ daten['kontrolle_datum']|iso_date }}">
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Unterschrift Auftragnehmer</label>
+          <input type="text" name="unterschrift_auftragnehmer" class="form-control" value="{{ daten['unterschrift_auftragnehmer'] }}">
+        </div>
+      </div>
+
+      <div class="d-flex gap-2 flex-wrap justify-content-end">
+        <button type="submit" name="aktion" value="speichern" class="btn btn-outline-dark btn-lg">Speichern</button>
+        <button type="submit" name="aktion" value="download" class="btn btn-dark btn-lg">Speichern & PDF herunterladen</button>
+      </div>
+    </form>
+  </div>
+  {% include "ki_assistent_widget.html" ignore missing %}
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

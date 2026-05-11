@@ -1,0 +1,1165 @@
+{% extends "base.html" %}
+{% block title %}Einkauf / Topcolor{% endblock %}
+{% block extra_css %}
+<style>
+  .purchase-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1rem;
+  }
+  .purchase-item {
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #fffdf9;
+    padding: 1rem;
+    min-width: 0;
+  }
+  .purchase-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #f7f1e8;
+    overflow: hidden;
+    color: var(--muted);
+    font-weight: 700;
+  }
+  .purchase-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #fff;
+  }
+  .purchase-note,
+  .qr-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .mail-draft {
+    min-height: 300px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: .92rem;
+  }
+  .qr-text {
+    border-radius: 8px;
+    background: #eef5f6;
+    color: #145d66;
+    padding: .65rem .75rem;
+    font-size: .86rem;
+  }
+  .purchase-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .65rem;
+    font-size: .9rem;
+  }
+  .purchase-meta div {
+    min-width: 0;
+    border-top: 1px solid rgba(221, 209, 192, .75);
+    padding-top: .55rem;
+  }
+  .supplier-band {
+    border-left: 4px solid var(--accent);
+    padding: .8rem 1rem;
+    background: #f4faf9;
+    border-radius: 8px;
+  }
+  .edit-panel {
+    border-top: 1px solid rgba(221, 209, 192, .85);
+    margin-top: 1rem;
+    padding-top: 1rem;
+  }
+  .offer-group {
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #fffdf9;
+    padding: 1rem;
+  }
+  .offer-group + .offer-group {
+    margin-top: 1rem;
+  }
+  .offer-position-title {
+    overflow-wrap: anywhere;
+  }
+  .compare-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+  }
+  .compare-links a {
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
+  }
+  .compare-query {
+    border: 1px dashed #d8c7b0;
+    border-radius: 8px;
+    background: #fffaf2;
+    padding: .55rem .7rem;
+    overflow-wrap: anywhere;
+  }
+  .purchase-title-link {
+    color: inherit;
+    text-decoration: none;
+  }
+  .purchase-title-link:hover {
+    color: var(--brand);
+    text-decoration: underline;
+  }
+  .invoice-upload-grid {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.4fr);
+    gap: 1rem;
+  }
+  .article-table-title {
+    max-width: 360px;
+    overflow-wrap: anywhere;
+  }
+  .invoice-review-item {
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #fffdf9;
+    padding: 1rem;
+  }
+  .invoice-review-item + .invoice-review-item {
+    margin-top: .85rem;
+  }
+  .invoice-review-source {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border-radius: 8px;
+    background: #eef5f6;
+    color: #145d66;
+    padding: .6rem .75rem;
+    font-size: .86rem;
+  }
+  .price-radar {
+    border: 1px solid #d8c7b0;
+    border-radius: 8px;
+    background: #fffaf2;
+    padding: .7rem .8rem;
+    font-size: .9rem;
+  }
+  .price-alert-danger {
+    border-color: #dc3545 !important;
+  }
+  .purchase-item.price-alert-danger,
+  .invoice-review-item.price-alert-danger,
+  .offer-row.price-alert-danger {
+    box-shadow: inset 4px 0 0 #dc3545;
+    background: #fff8f8;
+  }
+  .price-radar.price-alert-danger {
+    background: #fff1f1;
+    color: #66151c;
+  }
+  .price-alert-warning {
+    border-color: #c98500 !important;
+  }
+  .purchase-item.price-alert-warning,
+  .invoice-review-item.price-alert-warning {
+    box-shadow: inset 4px 0 0 #c98500;
+  }
+  .price-radar.price-alert-warning {
+    background: #fff7e6;
+    color: #614000;
+  }
+  .price-radar.price-alert-info {
+    background: #eef7fb;
+    border-color: #8ec4da;
+  }
+  .price-radar.price-alert-success {
+    background: #eff8f2;
+    border-color: #84c69a;
+  }
+  .product-thumb-mini {
+    width: 54px;
+    height: 54px;
+    border-radius: 8px;
+    border: 1px solid #e4d6c3;
+    object-fit: contain;
+    background: #fff;
+    flex: 0 0 54px;
+  }
+  .product-thumb-mini.missing {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: .25rem;
+    background: #f7f1e8;
+    color: #7a6955;
+    font-size: .62rem;
+    font-weight: 700;
+    line-height: 1.05;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+  .purchase-category-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+  }
+  .purchase-category-bar .btn {
+    white-space: nowrap;
+  }
+  .article-category-grid {
+    display: grid;
+    gap: .85rem;
+  }
+  .article-category {
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #fffdf9;
+    overflow: hidden;
+  }
+  .article-category summary {
+    display: flex;
+    justify-content: space-between;
+    gap: .75rem;
+    align-items: center;
+    padding: .85rem 1rem;
+    cursor: pointer;
+    background: #f7f1e8;
+    border-bottom: 1px solid transparent;
+    list-style: none;
+  }
+  .article-category[open] summary {
+    border-bottom-color: #e4d6c3;
+  }
+  .article-category summary::-webkit-details-marker {
+    display: none;
+  }
+  .article-category-title {
+    font-weight: 800;
+  }
+  .article-list-row {
+    display: grid;
+    grid-template-columns: minmax(260px, 1.5fr) minmax(100px, .5fr) minmax(160px, .7fr) minmax(120px, .5fr) minmax(180px, .8fr);
+    gap: .85rem;
+    align-items: center;
+    padding: .85rem 1rem;
+    border-top: 1px solid rgba(221, 209, 192, .75);
+  }
+  .article-list-row:first-child {
+    border-top: 0;
+  }
+  .article-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem;
+  }
+  .order-supplier-group {
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #fffdf9;
+    overflow: hidden;
+  }
+  .order-supplier-head {
+    display: flex;
+    justify-content: space-between;
+    gap: .75rem;
+    align-items: center;
+    padding: .8rem 1rem;
+    background: #f7f1e8;
+    border-bottom: 1px solid #e4d6c3;
+  }
+  .order-thumb-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: .75rem;
+    padding: 1rem;
+  }
+  .order-thumb {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: .65rem;
+    align-items: center;
+    min-width: 0;
+  }
+  .order-thumb-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 72px;
+    height: 72px;
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #fff;
+    color: #7a6955;
+    font-size: .75rem;
+    font-weight: 700;
+    text-align: center;
+    overflow: hidden;
+  }
+  .order-thumb-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .order-thumb-title {
+    display: block;
+    color: inherit;
+    font-weight: 700;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    text-decoration: none;
+  }
+  .order-thumb-title:hover {
+    color: var(--brand);
+    text-decoration: underline;
+  }
+  .api-checklist {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: .6rem;
+  }
+  .api-checklist div {
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #fffdf9;
+    padding: .7rem .8rem;
+  }
+  @media (max-width: 900px) {
+    .invoice-upload-grid {
+      grid-template-columns: 1fr;
+    }
+    .article-list-row {
+      grid-template-columns: 1fr;
+      align-items: stretch;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-card p-4 p-lg-5 mb-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div>
+      <div class="badge-soft mb-3">Einkauf</div>
+      <h1 class="mb-2">Topcolor-Liste und Preisvergleich</h1>
+      <p class="mb-0 text-muted">QR-Bilder, Rechnungsartikel, VE/Stückzahl, Lieferantenpreise und Angebotsstatus zentral sammeln.</p>
+    </div>
+    <a href="{{ url_for('betriebs_cockpit') }}" class="btn btn-soft">Zurück zum Cockpit</a>
+  </div>
+</div>
+
+<div class="page-card p-3 mb-4">
+  <div class="purchase-category-bar">
+    <a href="#angelegte-teile" class="btn btn-brand btn-sm">Angelegte Teile {{ gespeicherte_artikel|length }}</a>
+    <a href="#bestellen" class="btn btn-soft btn-sm">Was bestellen?</a>
+    <a href="#rechnungen" class="btn btn-soft btn-sm">Rechnung hochladen</a>
+    <a href="#produktanlage" class="btn btn-soft btn-sm">Produkte aus Rechnung {{ rechnung_pruef_items|length }}</a>
+    {% if unklare_items %}
+      <a href="#unklare-einkaufspositionen" class="btn btn-soft btn-sm">Prüfen {{ unklare_items|length }}</a>
+    {% endif %}
+    <a href="#lieferantenangebote" class="btn btn-soft btn-sm">Lieferantenangebote</a>
+    <a href="#offene-einkaufspositionen" class="btn btn-soft btn-sm">Offene Bestellungen</a>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4" id="angelegte-teile">
+  <span id="angelegte-produkte" class="visually-hidden"></span>
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Angelegte Teile</h4>
+      <p>
+        {{ gespeicherte_artikel|length }} gespeicherte Artikel sind nach Kategorie sortiert.
+        Neue Rechnungspositionen, die schon angelegt sind, werden unten ausgeblendet.
+        {% if verworfene_artikel_count %}{{ verworfene_artikel_count }} OCR-Altlast(en) sind ausgeblendet.{% endif %}
+      </p>
+    </div>
+    {% if artikel_altlasten %}
+      <form method="POST" action="{{ url_for('admin_einkauf_artikel_altlasten_ausblenden') }}" class="m-0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-soft btn-sm">{{ artikel_altlasten|length }} Altlast(en) ausblenden</button>
+      </form>
+    {% endif %}
+  </div>
+  {% if artikel_gruppen %}
+    <div class="purchase-category-bar mb-3">
+      {% for gruppe in artikel_gruppen %}
+        <a href="#artikelgruppe-{{ gruppe['key'] }}" class="btn btn-soft btn-sm">{{ gruppe['label'] }} <span class="badge text-bg-light ms-1">{{ gruppe['count'] }}</span></a>
+      {% endfor %}
+    </div>
+    <div class="article-category-grid">
+      {% for gruppe in artikel_gruppen %}
+        <details class="article-category" id="artikelgruppe-{{ gruppe['key'] }}" {% if loop.first %}open{% endif %}>
+          <summary>
+            <span class="article-category-title">{{ gruppe['label'] }}</span>
+            <span class="badge-soft">{{ gruppe['count'] }} Teil(e)</span>
+          </summary>
+          <div>
+            {% for artikel in gruppe['items'] %}
+              <div class="article-list-row">
+                <div class="article-table-title">
+                  <div class="d-flex gap-2 align-items-center">
+                    {% if artikel['produktbild_preview_url'] %}
+                      <img src="{{ artikel['produktbild_preview_url'] }}" alt="{{ artikel['produkt_name'] }}" class="product-thumb-mini">
+                    {% else %}
+                      <a href="{{ url_for('admin_einkauf_artikel_vergleich', artikel_id=artikel['id'], anbieter='bilder') }}" target="_blank" rel="noopener" class="product-thumb-mini missing text-decoration-none" title="Produktbild suchen">Bild fehlt</a>
+                    {% endif %}
+                    <div class="min-width-0">
+                      <strong>{{ artikel['produkt_name'] }}</strong>
+                      <div class="text-muted small">{{ artikel['kategorie_label'] or artikel['kategorie'] }}{% if artikel['gebinde'] %} · {{ artikel['gebinde'] }}{% endif %}</div>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <div class="text-muted small">Nr.</div>
+                  {{ artikel['artikelnummer'] or '-' }}
+                </div>
+                <div>
+                  <div class="text-muted small">Lieferant</div>
+                  {{ artikel['lieferant'] }}
+                </div>
+                <div>
+                  <div class="text-muted small">Preis</div>
+                  {{ artikel['letzter_preis_label'] or '-' }}
+                  {% if artikel['letzter_preis_datum'] %}<div class="text-muted small">{{ artikel['letzter_preis_datum'] }}</div>{% endif %}
+                </div>
+                <div class="article-actions">
+                  <a href="{{ url_for('admin_einkauf_artikel_vergleich', artikel_id=artikel['id'], anbieter='bilder') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Bild</a>
+                  <a href="{{ url_for('admin_einkauf_artikel_vergleich', artikel_id=artikel['id'], anbieter='google-shopping') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Shopping</a>
+                  <a href="{{ url_for('admin_einkauf_artikel_vergleich', artikel_id=artikel['id'], anbieter='google') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Google</a>
+                  <a href="{{ url_for('admin_einkauf_artikel_vergleich', artikel_id=artikel['id'], anbieter='idealo') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Idealo</a>
+                  <form method="POST" action="{{ url_for('admin_einkauf_artikel_verwerfen', artikel_id=artikel['id']) }}" class="m-0">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-soft btn-sm">Ausblenden</button>
+                  </form>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </details>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="text-muted">Noch keine Teile gespeichert. Nach dem Rechnungsimport und „Artikel anlegen“ erscheinen sie hier oben.</div>
+  {% endif %}
+</div>
+
+<div class="page-card p-4 mb-4" id="bestellen">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Was muss ich bestellen?</h4>
+      <p>{{ offene_items|length }} offene Position(en) mit Bild/Datei warten auf die Bestellung. Montag kannst du die Gruppen je Lieferant abschicken.</p>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      {% if mail_draft['mailto_url'] %}
+        <a class="btn btn-brand btn-sm" href="{{ mail_draft['mailto_url'] }}">Mail-Entwurf öffnen</a>
+      {% endif %}
+      <a class="btn btn-soft btn-sm" href="#bestellentwurf">Entwurf prüfen</a>
+    </div>
+  </div>
+  {% if offene_items %}
+    <div class="d-grid gap-3">
+      {% for lieferant, items in items_by_lieferant.items() %}
+        <div class="order-supplier-group">
+          <div class="order-supplier-head">
+            <div>
+              <strong>{{ lieferant }}</strong>
+              <div class="text-muted small">{{ items|length }} Position(en) für diesen Lieferanten</div>
+            </div>
+            <a class="btn btn-soft btn-sm" href="#bestellentwurf">Bestellung vorbereiten</a>
+          </div>
+          <div class="order-thumb-list">
+            {% for item in items %}
+              <div class="order-thumb">
+                <a class="order-thumb-preview" href="{{ item['detail_url'] }}">
+                  {% if item['produktbild_preview_url'] %}
+                    <img src="{{ item['produktbild_preview_url'] }}" alt="{{ item['produkt_name'] or item['titel'] }}">
+                  {% elif item['datei_url'] and item['is_pdf'] %}
+                    PDF
+                  {% elif item['datei_url'] %}
+                    Datei
+                  {% else %}
+                    Bild offen
+                  {% endif %}
+                </a>
+                <div class="min-width-0">
+                  <a href="{{ item['detail_url'] }}" class="order-thumb-title">{{ item['produkt_name'] or item['titel'] }}</a>
+                  <div class="text-muted small">{{ item['stueckzahl'] }} {{ item['ve'] }}{% if item['artikelnummer'] %} · {{ item['artikelnummer'] }}{% endif %}</div>
+                  <div class="text-muted small">{{ item['kategorie_label'] or item['kategorie'] }}</div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="text-muted">Aktuell ist nichts offen. Neue hochgeladene Produktbilder oder Rechnungspositionen erscheinen hier automatisch.</div>
+  {% endif %}
+</div>
+
+{% if unklare_items %}
+<div class="page-card p-4 mb-4" id="unklare-einkaufspositionen">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Bitte prüfen</h4>
+      <p>{{ unklare_items|length }} Position(en) sehen nach Rechnungs- oder OCR-Text aus und werden nicht in den Bestellentwurf übernommen.</p>
+    </div>
+  </div>
+  <div class="table-shell">
+    <table class="table align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Position</th>
+          <th>Lieferant</th>
+          <th>Quelle</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in unklare_items %}
+          <tr>
+            <td class="article-table-title">{{ item['produkt_name'] or item['titel'] }}</td>
+            <td>{{ item['lieferant'] }}</td>
+            <td class="text-muted small">{{ item['preisquelle'] or item['notiz'] or item['erstellt_am'] }}</td>
+            <td class="text-end">
+              <div class="d-flex gap-2 justify-content-end flex-wrap">
+                <a href="{{ item['detail_url'] }}" class="btn btn-soft btn-sm">Prüfen</a>
+                <form method="POST" action="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}" class="m-0">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="btn btn-soft btn-sm">Entfernen</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="page-card p-4 mb-4" id="rechnungen">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Produkte aus Rechnung anlegen</h4>
+      <p>Rechnungen nur für den Artikelstamm auslesen. Die echte Rechnungsprüfung läuft separat in der Rechnungskontrolle.</p>
+    </div>
+  </div>
+  <div class="invoice-upload-grid">
+    <form method="POST" action="{{ url_for('admin_einkauf_rechnung_upload') }}" enctype="multipart/form-data" class="row g-3 align-content-start">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ url_for('admin_einkauf') }}#produktanlage">
+      <div class="col-12">
+        <label class="form-label">Lieferant</label>
+        <input type="text" name="lieferant" class="form-control" value="Auto-Color / Topcolor">
+      </div>
+      <div class="col-12">
+        <label class="form-label">Rechnung oder Beleg</label>
+        <input type="file" name="rechnung_dateien" class="form-control" accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,image/*,application/pdf,text/plain" multiple>
+      </div>
+      <div class="col-12">
+        <button type="submit" class="btn btn-brand">Produkte einlesen</button>
+      </div>
+    </form>
+    <div>
+      <div class="supplier-band">
+        <strong>Nur Produktanlage</strong>
+        <div class="text-muted small mt-1">Hier werden aus einer Rechnung nur Artikel, VE, Stückzahl, Preis und Produktdaten vorbereitet. Zahlstatus, offene Beträge und echte Rechnungsprüfung bleiben in der Rechnungskontrolle.</div>
+        <a href="{{ url_for('admin_rechnungen') }}" class="btn btn-soft btn-sm mt-3">Zur Rechnungskontrolle</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4" id="produktanlage">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Produkte aus Rechnung anlegen</h4>
+      <p>
+        {{ rechnung_pruef_items|length }} neue Artikelposition(en) warten auf „Artikel anlegen“.
+        {% if rechnung_pruef_hidden_count %}
+          {{ rechnung_pruef_hidden_count }} bereits angelegte Position(en) sind hier ausgeblendet und stehen oben bei „Angelegte Teile“.
+        {% endif %}
+        Es werden hier keine Rechnungen geprüft oder übernommen.
+      </p>
+    </div>
+  </div>
+  {% if rechnung_pruef_items %}
+    {% for item in rechnung_pruef_items %}
+      <div class="invoice-review-item {{ item['preiswarnung_class'] }}" id="rechnung-position-{{ item['id'] }}">
+        <form method="POST" action="{{ url_for('admin_einkauf_artikel_anlegen', item_id=item['id']) }}" class="row g-3">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="titel" value="{{ item['titel'] }}">
+          <input type="hidden" name="menge" value="{{ item['menge'] }}">
+          <div class="col-lg-7">
+            <div class="row g-2">
+              <div class="col-md-8">
+                <label class="form-label">Produkt</label>
+                <input type="text" name="produkt_name" class="form-control" value="{{ item['produkt_name'] }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Artikelnummer</label>
+                <input type="text" name="artikelnummer" class="form-control" value="{{ item['artikelnummer'] }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Preis</label>
+                <input type="text" name="auto_color_preis" class="form-control" value="{{ item['auto_color_preis'] }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Stückzahl</label>
+                <input type="number" name="stueckzahl" min="1" step="1" class="form-control" value="{{ item['stueckzahl'] }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">VE</label>
+                <select name="ve" class="form-select">
+                  {% for ve in ve_optionen %}
+                    <option value="{{ ve }}" {% if item['ve'] == ve %}selected{% endif %}>{{ ve }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Kategorie</label>
+                <select name="kategorie" class="form-select">
+                  {% for kategorie in kategorien %}
+                    <option value="{{ kategorie }}" {% if item['kategorie'] == kategorie %}selected{% endif %}>{{ kategorie }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Lieferant</label>
+                <input type="text" name="lieferant" class="form-control" value="{{ item['lieferant'] }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Vergleichspreis</label>
+                <input type="text" name="vergleich_preis" class="form-control" value="{{ item['vergleich_preis'] }}" placeholder="z. B. 299,00">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Vergleichslieferant</label>
+                <input type="text" name="vergleich_lieferant" class="form-control" value="{{ item['vergleich_lieferant'] }}" placeholder="Shop / Lieferant">
+              </div>
+              <div class="col-12">
+                <label class="form-label">Preisquelle / Vergleichslink</label>
+                <input type="text" name="preisquelle" class="form-control" value="{{ item['preisquelle'] }}" placeholder="Link oder Angebotsnummer">
+              </div>
+              <div class="col-12">
+                <label class="form-label">Produktbild-URL</label>
+                <input type="url" name="produktbild_url" class="form-control" value="{{ item['produktbild_url'] }}" placeholder="Bildlink einfügen, wenn du eins gefunden hast">
+              </div>
+              <div class="col-12">
+                <label class="form-label">Beschreibung</label>
+                <textarea name="produkt_beschreibung" rows="3" class="form-control">{{ item['produkt_beschreibung'] }}</textarea>
+              </div>
+              <input type="hidden" name="gebinde" value="{{ item['gebinde'] }}">
+              <input type="hidden" name="lieferzeit" value="{{ item['lieferzeit'] }}">
+              <input type="hidden" name="angebotsstatus" value="{{ item['angebotsstatus'] }}">
+              <input type="hidden" name="angebotsnotiz" value="{{ item['angebotsnotiz'] }}">
+              <input type="hidden" name="notiz" value="{{ item['notiz'] }}">
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="purchase-preview mb-3">
+              {% if item['produktbild_preview_url'] %}
+                <img src="{{ item['produktbild_preview_url'] }}" alt="{{ item['produkt_name'] or item['titel'] }}">
+              {% else %}
+                Produktbild offen
+              {% endif %}
+            </div>
+            <div class="d-flex gap-2 flex-wrap mb-2">
+              {% if item['beleg_datei_url'] %}
+                <a href="{{ item['beleg_datei_url'] }}" class="btn btn-soft btn-sm" target="_blank">Beleg öffnen</a>
+              {% endif %}
+              <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='bilder') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Bildsuche</a>
+              <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='google-shopping') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Shopping</a>
+              <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='google') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Google</a>
+              <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='idealo') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Idealo</a>
+            </div>
+            {% set radar = item['preisradar'] %}
+            <div class="price-radar {{ item['preiswarnung_class'] }} mb-3">
+              <div class="d-flex gap-2 align-items-center flex-wrap mb-1">
+                <span class="badge {% if radar['status'] == 'danger' %}text-bg-danger{% elif radar['status'] == 'warning' %}text-bg-warning{% elif radar['status'] == 'success' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ radar['badge'] }}</span>
+                <strong>{{ radar['title'] }}</strong>
+              </div>
+              <div>{{ radar['text'] }}</div>
+              {% if radar['span_label'] %}
+                <div class="small mt-1">Spanne: {{ radar['span_label'] }}</div>
+              {% endif %}
+            </div>
+            {% if item['qr_text'] %}
+              <div class="text-muted small mb-1">Erkannte Rechnungszeile</div>
+              <div class="invoice-review-source mb-3">{{ item['qr_text'] }}</div>
+            {% endif %}
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="submit" class="btn btn-brand btn-sm">Artikel anlegen</button>
+              <button type="submit" class="btn btn-soft btn-sm" formaction="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}">Verwerfen</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="text-muted">Keine neuen Artikelpositionen zum Anlegen. Bereits gespeicherte Teile findest du oben bei „Angelegte Teile“.</div>
+  {% endif %}
+</div>
+
+<div class="page-card p-4 mb-4" id="lieferantenangebote">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Lieferantenangebote</h4>
+      <p>Aus E-Mails erkannte Angebote und Preispositionen.</p>
+    </div>
+    {% if mail_draft['mailto_url'] %}
+      <a class="btn btn-brand btn-sm" href="{{ mail_draft['mailto_url'] }}">Bestellung vorbereiten</a>
+    {% else %}
+      <a class="btn btn-brand btn-sm" href="#bestellentwurf">Bestellung vorbereiten</a>
+    {% endif %}
+  </div>
+  {% if einkauf_offer_groups %}
+    {% for offer in einkauf_offer_groups %}
+      <div class="offer-group" id="{{ offer['anchor'] }}">
+        <div class="d-flex justify-content-between gap-3 flex-wrap mb-3">
+          <div>
+            <div class="d-flex gap-2 align-items-center flex-wrap mb-1">
+              <span class="badge text-bg-info">Angebot</span>
+              <strong>{{ offer['titel'] }}</strong>
+              {% if offer['preis_summe_label'] %}<span class="badge-soft">ca. {{ offer['preis_summe_label'] }}</span>{% endif %}
+            </div>
+            <div class="text-muted small">{{ offer['absender'] }} · {{ offer['empfangen_am'] }} · {{ offer['count'] }} Artikel</div>
+          </div>
+          <a href="#offene-einkaufspositionen" class="btn btn-soft btn-sm">Artikel bearbeiten</a>
+        </div>
+        <div class="table-shell">
+          <table class="table align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Artikel</th>
+                <th>Nr.</th>
+                <th>Menge</th>
+                <th>Preis</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in offer['items'] %}
+              <tr class="offer-row {{ item['preiswarnung_class'] }}">
+                <td class="offer-position-title">
+                  <a href="{{ item['detail_url'] }}" class="purchase-title-link">{{ item['produkt_name'] or item['titel'] }}</a>
+                </td>
+                <td>{{ item['artikelnummer'] or '-' }}</td>
+                <td>{{ item['stueckzahl'] }} {{ item['ve'] }}</td>
+                <td>
+                  {{ item['angebot_preis_label'] or '-' }}
+                  {% if item['preiswarnung'] %}<div class="text-danger small">Preis prüfen</div>{% endif %}
+                </td>
+                <td><span class="badge text-bg-success">{{ item['angebotsstatus_label'] }}</span></td>
+                <td class="text-end">
+                  <div class="d-flex gap-2 justify-content-end flex-wrap">
+                    <a href="{{ item['detail_url'] }}" class="btn btn-soft btn-sm">Öffnen</a>
+                    <form method="POST" action="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}" class="m-0">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button type="submit" class="btn btn-soft btn-sm">Entfernen</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="text-muted">Noch kein Lieferantenangebot erkannt. Sobald eine passende E-Mail eingeht, erscheint sie hier.</div>
+  {% endif %}
+</div>
+
+<div class="page-card p-4 mb-4" id="api-anbindung">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Topcolor API und Konditionen</h4>
+      <p>Feste Preise, Produktbilder, Lieferzeiten und Bestellübergabe direkt beim Lieferanten anfragen.</p>
+    </div>
+    {% if api_draft['mailto_url'] %}
+      <a class="btn btn-brand btn-sm" href="{{ api_draft['mailto_url'] }}">API-Anfrage öffnen</a>
+    {% endif %}
+  </div>
+  <div class="api-checklist mb-3">
+    <div><strong>Artikel</strong><br><span class="text-muted small">Artikelnummer, EAN, Hersteller-Nr., Produktname, Kategorie.</span></div>
+    <div><strong>Preise</strong><br><span class="text-muted small">Netto-EK, Staffelpreise, Rabatte und Preisgültigkeit.</span></div>
+    <div><strong>Lieferung</strong><br><span class="text-muted small">Bestand, Lieferzeit, Auftragsnummer und Tracking.</span></div>
+    <div><strong>Qualität</strong><br><span class="text-muted small">Alternativen nur gleichwertig zu Topcolor/Auto-Color oder Originalartikel.</span></div>
+  </div>
+  <label class="form-label">Entwurf für Lieferantengespräch</label>
+  <textarea class="form-control mail-draft" readonly>{{ api_draft['body'] }}</textarea>
+  <div class="text-muted small mt-2">Ziel: Topcolor bleibt als Lieferant im Boot, wir bekommen feste Konditionen und andere Lackierbetriebe könnten später denselben sauberen Einkauf nutzen.</div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-5">
+    <div class="page-card p-4 h-100" id="neue-position">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Neue Position</h4>
+          <p>Produktfoto, QR-Code, Rechnungsauszug oder manuelle Artikelposition erfassen.</p>
+        </div>
+      </div>
+      <form method="POST" action="{{ url_for('admin_einkauf_neu') }}" enctype="multipart/form-data" class="row g-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="col-12">
+          <label class="form-label">Bilder oder PDF</label>
+          <input type="file" name="qr_bilder" class="form-control" accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf" multiple>
+        </div>
+        <div class="col-md-7">
+          <label class="form-label">Produkt</label>
+          <input type="text" name="produkt_name" class="form-control" placeholder="z. B. 3M Soft Edge Foam">
+        </div>
+        <div class="col-md-5">
+          <label class="form-label">Artikelnummer</label>
+          <input type="text" name="artikelnummer" class="form-control" placeholder="z. B. 09678">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Produktbild-URL</label>
+          <input type="url" name="produktbild_url" class="form-control" placeholder="Optionaler Bildlink aus der Produktsuche">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Kategorie</label>
+          <select name="kategorie" class="form-select">
+            {% for kategorie in kategorien %}
+              <option value="{{ kategorie }}">{{ kategorie }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Lieferant / Ziel</label>
+          <input type="text" name="lieferant" class="form-control" value="Auto-Color / Topcolor">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Stückzahl</label>
+          <input type="number" name="stueckzahl" min="1" step="1" class="form-control" value="1">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">VE</label>
+          <select name="ve" class="form-select">
+            {% for ve in ve_optionen %}
+              <option value="{{ ve }}">{{ ve }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Gebinde</label>
+          <input type="text" name="gebinde" class="form-control" placeholder="z. B. 5 L">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Auto-Color Preis</label>
+          <input type="text" name="auto_color_preis" class="form-control" placeholder="z. B. 38,50">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Alternative</label>
+          <input type="text" name="vergleich_lieferant" class="form-control" placeholder="Lieferant / Shop">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Alternativpreis</label>
+          <input type="text" name="vergleich_preis" class="form-control" placeholder="z. B. 31,90">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Lieferzeit</label>
+          <input type="text" name="lieferzeit" class="form-control" placeholder="z. B. 24-48 h">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Preisquelle / Link</label>
+          <input type="text" name="preisquelle" class="form-control" placeholder="URL, Rechnung oder Angebotsnummer">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Notiz</label>
+          <textarea name="notiz" rows="3" class="form-control" placeholder="Gesprächsargument, Qualität, Dringlichkeit"></textarea>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-brand">Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-xl-7">
+    <div class="page-card p-4 h-100" id="bestellentwurf">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Angebots- und Bestellentwurf</h4>
+          <p>Positionen sind nach Lieferant gruppiert, damit Farbe, Klebebänder und Teile sauber getrennt laufen.</p>
+        </div>
+      </div>
+      <form method="POST" action="{{ url_for('admin_einkauf_topcolor_email') }}" class="row g-2 align-items-end mb-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md">
+          <label class="form-label">Standard E-Mail</label>
+          <input type="email" name="topcolor_email" class="form-control" value="{{ topcolor_email }}" placeholder="bestellung@lieferant.de">
+        </div>
+        <div class="col-md-auto">
+          <button type="submit" class="btn btn-soft">Speichern</button>
+        </div>
+      </form>
+      <div class="row g-2 mb-3">
+        {% for lieferant, items in items_by_lieferant.items() %}
+          <div class="col-md-6">
+            <div class="supplier-band">
+              <strong>{{ lieferant }}</strong>
+              <div class="text-muted small">{{ items|length }} Position(en)</div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="d-flex gap-2 flex-wrap mb-3">
+        {% if mail_draft['mailto_url'] %}
+          <a class="btn btn-brand" href="{{ mail_draft['mailto_url'] }}">Mail-Entwurf öffnen</a>
+        {% endif %}
+        <form method="POST" action="{{ url_for('admin_einkauf_alle_bestellt') }}" class="m-0">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-soft" {% if not offene_items %}disabled{% endif %}>Offene als bestellt markieren</button>
+        </form>
+      </div>
+      <label class="form-label">Entwurf</label>
+      <textarea class="form-control mail-draft" readonly>{{ mail_draft['body'] }}</textarea>
+      <div class="text-muted small mt-2">Anhänge werden über mailto nicht automatisch angehängt. Alternativen sollen nur bei gleicher oder gleichwertiger Qualität übernommen werden. Die Positionen können vor der Bestellung einzeln entfernt oder geändert werden.</div>
+    </div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4" id="offene-einkaufspositionen">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Offene Einkaufspositionen</h4>
+      <p>{{ offene_items|length }} Positionen warten auf Preisprüfung, Angebot oder Bestellung.</p>
+    </div>
+    <form method="POST" action="{{ url_for('admin_einkauf_alle_analysieren') }}" class="m-0">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-brand btn-sm">Alle Produkte analysieren</button>
+    </form>
+  </div>
+  {% if offene_items %}
+    <div class="purchase-grid">
+      {% for item in offene_items %}
+      <div class="purchase-item {{ item['preiswarnung_class'] }}" id="einkauf-position-{{ item['id'] }}">
+        <div class="purchase-preview mb-3">
+          {% if item['produktbild_preview_url'] %}
+            <img src="{{ item['produktbild_preview_url'] }}" alt="{{ item['original_name'] or item['produkt_name'] }}">
+          {% elif item['datei_url'] and item['is_pdf'] %}
+            <a href="{{ item['datei_url'] }}" class="btn btn-soft" target="_blank">PDF öffnen</a>
+          {% elif item['datei_url'] %}
+            <a href="{{ item['datei_url'] }}" class="btn btn-soft" target="_blank">Datei öffnen</a>
+          {% else %}
+            Ohne Datei
+          {% endif %}
+        </div>
+        <div class="d-flex justify-content-between gap-2 align-items-start mb-2">
+          <div class="min-width-0">
+            <div class="text-muted small">{{ item['kategorie_label'] or item['kategorie'] }} · {{ item['lieferant'] }}</div>
+            <h5 class="mb-1">
+              <a href="{{ item['detail_url'] }}" class="purchase-title-link">{{ item['produkt_name'] or item['titel'] }}</a>
+            </h5>
+            <div class="text-muted small">{{ item['erstellt_am'] }}{% if item['original_name'] %} · {{ item['original_name'] }}{% endif %}</div>
+          </div>
+          <span class="badge text-bg-success">{{ item['angebotsstatus_label'] }}</span>
+        </div>
+        <div class="purchase-meta mb-3">
+          <div><strong>Artikel</strong><br>{{ item['artikelnummer'] or '-' }}</div>
+          <div><strong>Menge</strong><br>{{ item['stueckzahl'] }} {{ item['ve'] }}{% if item['gebinde'] %} · {{ item['gebinde'] }}{% endif %}</div>
+          <div><strong>Auto-Color</strong><br>{{ item['auto_color_preis_label'] or '-' }}</div>
+          <div><strong>Alternative</strong><br>{{ item['vergleich_lieferant'] or '-' }}{% if item['vergleich_preis_label'] %} · {{ item['vergleich_preis_label'] }}{% endif %}</div>
+          <div><strong>Differenz</strong><br><span class="{{ item['preis_delta_class'] }}">{{ item['preis_delta_label'] or '-' }}</span></div>
+          <div><strong>Lieferzeit</strong><br>{{ item['lieferzeit'] or '-' }}</div>
+        </div>
+        {% set radar = item['preisradar'] %}
+        <div class="price-radar {{ item['preiswarnung_class'] }} mb-3">
+          <div class="d-flex gap-2 align-items-center flex-wrap mb-1">
+            <span class="badge {% if radar['status'] == 'danger' %}text-bg-danger{% elif radar['status'] == 'warning' %}text-bg-warning{% elif radar['status'] == 'success' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ radar['badge'] }}</span>
+            <strong>{{ radar['title'] }}</strong>
+          </div>
+          <div>{{ radar['text'] }}</div>
+          {% if radar['span_label'] %}
+            <div class="small mt-1">Spanne: {{ radar['span_label'] }}</div>
+          {% endif %}
+        </div>
+        <div class="compare-query small text-muted mb-2">
+          Suchbasis: {{ item['internet_query'] }}
+        </div>
+        <div class="compare-links mb-3">
+          <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='bilder') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Bildsuche</a>
+          <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='google-shopping') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Google Shopping</a>
+          <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='google') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Google</a>
+          <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='idealo') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Idealo</a>
+          <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='ebay') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">eBay</a>
+        </div>
+        {% if item['qr_text'] %}
+          <div class="text-muted small mb-1">Erkannter Etikett-Text</div>
+          <div class="qr-text mb-2">{{ item['qr_text'] }}</div>
+        {% endif %}
+        {% if item['preisquelle'] %}
+          <div class="text-muted small mb-2">
+            Quelle:
+            {% if item['preisquelle'].startswith('http') %}
+              <a href="{{ item['preisquelle'] }}" target="_blank" rel="noopener">Vergleich öffnen</a>
+            {% else %}
+              {{ item['preisquelle'] }}
+            {% endif %}
+          </div>
+        {% endif %}
+        {% if item['notiz'] or item['angebotsnotiz'] %}
+          <div class="purchase-note text-muted mb-3">{{ item['notiz'] }}{% if item['angebotsnotiz'] %}{% if item['notiz'] %}<br>{% endif %}{{ item['angebotsnotiz'] }}{% endif %}</div>
+        {% endif %}
+        <div class="d-flex gap-2 flex-wrap">
+          <a href="{{ item['detail_url'] }}" class="btn btn-soft btn-sm">Details</a>
+          <form method="POST" action="{{ url_for('admin_einkauf_analysieren', item_id=item['id']) }}" class="m-0">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-soft btn-sm">Analysieren</button>
+          </form>
+          <form method="POST" action="{{ url_for('admin_einkauf_bestellt', item_id=item['id']) }}" class="m-0">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-brand btn-sm">Bestellt</button>
+          </form>
+          <form method="POST" action="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}" class="m-0">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-soft btn-sm">Entfernen</button>
+          </form>
+          <button class="btn btn-soft btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#edit-einkauf-{{ item['id'] }}">Bearbeiten</button>
+        </div>
+        <div class="collapse edit-panel" id="edit-einkauf-{{ item['id'] }}">
+          <form method="POST" action="{{ url_for('admin_einkauf_bearbeiten', item_id=item['id']) }}" class="row g-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-7">
+              <label class="form-label">Produkt</label>
+              <input type="text" name="produkt_name" class="form-control" value="{{ item['produkt_name'] }}">
+            </div>
+            <div class="col-md-5">
+              <label class="form-label">Artikelnummer</label>
+              <input type="text" name="artikelnummer" class="form-control" value="{{ item['artikelnummer'] }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Produktbild-URL</label>
+              <input type="url" name="produktbild_url" class="form-control" value="{{ item['produktbild_url'] }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Kategorie</label>
+              <select name="kategorie" class="form-select">
+                {% for kategorie in kategorien %}
+                  <option value="{{ kategorie }}" {% if item['kategorie'] == kategorie %}selected{% endif %}>{{ kategorie }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Lieferant</label>
+              <input type="text" name="lieferant" class="form-control" value="{{ item['lieferant'] }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Stückzahl</label>
+              <input type="number" name="stueckzahl" min="1" step="1" class="form-control" value="{{ item['stueckzahl'] }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">VE</label>
+              <select name="ve" class="form-select">
+                {% for ve in ve_optionen %}
+                  <option value="{{ ve }}" {% if item['ve'] == ve %}selected{% endif %}>{{ ve }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Gebinde</label>
+              <input type="text" name="gebinde" class="form-control" value="{{ item['gebinde'] }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Auto-Color Preis</label>
+              <input type="text" name="auto_color_preis" class="form-control" value="{{ item['auto_color_preis'] }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Alternative</label>
+              <input type="text" name="vergleich_lieferant" class="form-control" value="{{ item['vergleich_lieferant'] }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Alternativpreis</label>
+              <input type="text" name="vergleich_preis" class="form-control" value="{{ item['vergleich_preis'] }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Lieferzeit</label>
+              <input type="text" name="lieferzeit" class="form-control" value="{{ item['lieferzeit'] }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Status</label>
+              <select name="angebotsstatus" class="form-select">
+                {% for key, label in angebotsstatus.items() %}
+                  <option value="{{ key }}" {% if item['angebotsstatus'] == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Quelle / Link</label>
+              <input type="text" name="preisquelle" class="form-control" value="{{ item['preisquelle'] }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Produktbeschreibung</label>
+              <textarea name="produkt_beschreibung" rows="4" class="form-control">{{ item['produkt_beschreibung'] }}</textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Notiz</label>
+              <textarea name="notiz" rows="2" class="form-control">{{ item['notiz'] }}</textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Angebotsnotiz</label>
+              <textarea name="angebotsnotiz" rows="2" class="form-control">{{ item['angebotsnotiz'] }}</textarea>
+            </div>
+            <input type="hidden" name="titel" value="{{ item['titel'] }}">
+            <input type="hidden" name="menge" value="{{ item['menge'] }}">
+            <div class="col-12">
+              <button type="submit" class="btn btn-brand btn-sm">Änderungen speichern</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="text-muted">Noch nichts offen. Neue QR-Bilder, Rechnungsartikel oder Gutachten-Positionen landen direkt hier.</div>
+  {% endif %}
+</div>
+
+<div class="page-card p-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Zuletzt bestellt</h4>
+      <p>Kurzer Verlauf für die Kontrolle.</p>
+    </div>
+  </div>
+  {% if bestellte_items %}
+    <div class="table-shell">
+      <table class="table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Position</th>
+            <th>Kategorie</th>
+            <th>Menge</th>
+            <th>Lieferant</th>
+            <th>Bestellt am</th>
+            <th>Datei</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in bestellte_items %}
+          <tr>
+            <td><a href="{{ item['detail_url'] }}" class="purchase-title-link">{{ item['produkt_name'] or item['titel'] }}</a></td>
+            <td>{{ item['kategorie_label'] or item['kategorie'] }}</td>
+            <td>{{ item['stueckzahl'] }} {{ item['ve'] }}</td>
+            <td>{{ item['lieferant'] }}</td>
+            <td>{{ item['bestellt_am'] or item['erstellt_am'] }}</td>
+            <td>
+              {% if item['datei_url'] %}
+                <a href="{{ item['datei_url'] }}" target="_blank">öffnen</a>
+              {% else %}
+                <span class="text-muted">ohne Datei</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="text-muted">Noch keine abgeschlossenen Einkaufspositionen.</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -82,7 +82,7 @@
           <span class="step-number">2</span>
           <div>
             <div class="fw-bold">Rechnung schreiben</div>
-            <div class="text-muted">Kunde auswählen, Fahrzeugdaten in den Belegtext übernehmen und die Position eintragen.</div>
+            <div class="text-muted">Kunde auswählen, Fahrzeugdaten und Bonus-Transparenz in den Belegtext übernehmen und die Position eintragen.</div>
           </div>
         </div>
         <div class="step-row">
@@ -110,6 +110,17 @@
         </div>
         <div class="copy-box" id="belegtext">{{ rechnung['belegtext'] }}</div>
       </div>
+
+      {% if rechnung['bonus_text'] %}
+      <div class="mb-4">
+        <div class="d-flex justify-content-between gap-2 align-items-center mb-2">
+          <div class="fw-bold">Bonus-Transparenz auf der Rechnung</div>
+          <button type="button" class="btn btn-soft btn-sm" data-copy-target="bonus-text">Kopieren</button>
+        </div>
+        <div class="copy-box" id="bonus-text">{{ rechnung['bonus_text'] }}</div>
+        <div class="form-text mt-2">Beim Lexware-Direktbutton wird dieser Text automatisch in die Rechnungsposition übernommen.</div>
+      </div>
+      {% endif %}
 
       <div class="mb-2 fw-bold">Position</div>
       {% for position in rechnung['positionen'] %}
@@ -191,6 +202,14 @@ Preis/Vorgabe: {{ position['preis'] }}{% endif %}
         <div class="mb-3">
           <label class="form-label">Rechnungsnummer</label>
           <input type="text" class="form-control" name="rechnung_nummer" value="{{ auftrag['rechnung_nummer'] }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Bonus-/Rechnungsbetrag netto</label>
+          <div class="input-group">
+            <input type="text" class="form-control" name="bonus_netto_betrag" inputmode="decimal" placeholder="z.B. 1200,00" value="{{ auftrag['bonus_netto_betrag_label'] or ('%.2f'|format(rechnung['netto_betrag']) if rechnung['netto_betrag'] else '') }}">
+            <span class="input-group-text">EUR netto</span>
+          </div>
+          <div class="form-text">Dieser Betrag aktualisiert den Partnerbonus im Autohaus-Portal.</div>
         </div>
         {% if auftrag['rechnung_geschrieben_am'] %}
         <div class="text-muted small mb-3">Gespeichert am {{ auftrag['rechnung_geschrieben_am'] }}</div>

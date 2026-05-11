@@ -9,10 +9,11 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    body { background:#f4f1ea; font-family:"DM Sans",sans-serif; color:#081827; }
+    body { background:#f4f1ea; font-family:"DM Sans",sans-serif; }
     h1,h2,h3,h4,h5 { font-family:"Space Grotesk",sans-serif; }
     .shell { max-width:1180px; margin:0 auto; padding:32px 16px; }
     .panel { background:#fffdf9; border-radius:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
+    .mail-badge { display:inline-flex; min-width:1.45rem; height:1.45rem; align-items:center; justify-content:center; margin-left:.35rem; padding:0 .42rem; border-radius:999px; background:#d64545; color:#fff; font-size:.78rem; font-weight:700; line-height:1; }
     .bonus-panel {
       background:#fffdf9;
       color:#111827;
@@ -23,7 +24,7 @@
     }
     .bonus-panel .text-muted { color:#6c6255 !important; }
     .bonus-kicker {
-      color:#b23a2b;
+      color:#c11734;
       text-transform:uppercase;
       letter-spacing:.14em;
       font-weight:700;
@@ -43,10 +44,10 @@
       min-height:144px;
       padding:20px;
     }
-    .bonus-tier.is-dark { background:#f7f1e8; color:#111827; border-top-color:#0b6a71; }
-    .bonus-tier.is-red { background:#fff1f3; color:#111827; border-top-color:#b23a2b; }
-    .bonus-tier.is-red strong { color:#081827; }
-    .bonus-tier.is-active { outline:3px solid rgba(11,106,113,.28); outline-offset:0; }
+    .bonus-tier.is-dark { background:#f7f1e8; color:#111827; border-top-color:#c11734; }
+    .bonus-tier.is-red { background:#fff1f3; color:#111827; border-top-color:#d80d2f; }
+    .bonus-tier.is-red strong { color:#c11734; }
+    .bonus-tier.is-active { outline:3px solid rgba(193,23,52,.34); outline-offset:0; }
     .bonus-tier small {
       display:block;
       text-transform:uppercase;
@@ -88,7 +89,7 @@
       color:#132635;
       font-size:1.25rem;
     }
-    .bonus-open { color:#b23a2b !important; font-size:1.55rem !important; }
+    .bonus-open { color:#c11734 !important; font-size:1.55rem !important; }
     .bonus-order-list {
       display:grid;
       gap:10px;
@@ -122,7 +123,9 @@
       .panel .btn { width:100%; }
       .bonus-tier-grid,
       .bonus-summary,
-      .bonus-order { grid-template-columns:1fr; }
+      .bonus-order {
+        grid-template-columns:1fr;
+      }
       .bonus-summary { gap:0; }
       .bonus-order { align-items:start; }
       .bonus-source { width:max-content; max-width:100%; white-space:normal; }
@@ -142,11 +145,15 @@
         <div>
           <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
           <h1 class="mb-2">Bonusmodell</h1>
-          <div class="text-muted">{{ autohaus['portal_label'] }} - aktueller Monatsstand und Verrechnung.</div>
+          <div class="text-muted">
+            {{ autohaus['portal_label'] }} ·
+            {% if rahmenvertrag['aktiv'] %}aktueller Monatsstand und Verrechnung.{% else %}Rahmenvertrag und Partnerpreis gemeinsam vereinbaren.{% endif %}
+          </div>
         </div>
         <div class="d-flex gap-2 flex-wrap">
           <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Dashboard</a>
           <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}" class="btn btn-dark btn-lg">Neues Fahrzeug</a>
+          <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
           <a href="{{ url_for('partner_logout') }}" class="btn btn-outline-dark btn-lg">Logout</a>
         </div>
       </div>

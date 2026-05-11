@@ -1,0 +1,409 @@
+{% extends "base.html" %}
+{% block title %}Rechnungskontrolle / Lexware{% endblock %}
+{% block extra_css %}
+<style>
+  .finance-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+  }
+  .finance-tile {
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #fffdf9;
+    padding: 1rem;
+  }
+  .finance-value {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 1.8rem;
+    line-height: 1.1;
+  }
+  .sync-box {
+    border: 1px solid #cbe0e3;
+    border-radius: 8px;
+    background: #f3f8f9;
+    padding: 1rem;
+  }
+  .invoice-row-overdue {
+    box-shadow: inset 4px 0 0 #dc3545;
+    background: #fff8f8;
+  }
+  .invoice-row-open {
+    box-shadow: inset 4px 0 0 #cc8a16;
+  }
+  .invoice-row-check {
+    box-shadow: inset 4px 0 0 #6c757d;
+  }
+  .bank-grid {
+    display: grid;
+    grid-template-columns: minmax(260px, .9fr) minmax(320px, 1.4fr);
+    gap: 1rem;
+  }
+  .bank-upload {
+    border: 1px dashed #d8c7b0;
+    border-radius: 8px;
+    background: #fffaf2;
+    padding: 1rem;
+  }
+  .bank-booking-open {
+    box-shadow: inset 4px 0 0 #cc8a16;
+  }
+  .bank-booking-matched {
+    box-shadow: inset 4px 0 0 #198754;
+  }
+  .statement-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: .85rem;
+    margin-top: 1rem;
+  }
+  .statement-tile {
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #fffdf9;
+    padding: 1rem;
+    min-height: 104px;
+  }
+  .statement-tile strong {
+    display: block;
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 1.55rem;
+    line-height: 1.1;
+    margin-top: .35rem;
+  }
+  .bank-details {
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #fffdf9;
+    padding: 1rem;
+  }
+  .bank-details summary {
+    cursor: pointer;
+    font-weight: 700;
+  }
+  @media (max-width: 900px) {
+    .bank-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set default_kontoauszug_auswertung = {
+  'hat_import': false,
+  'datei': '',
+  'erstellt_am': '',
+  'buchungen_count': 0,
+  'einnahmen_count': 0,
+  'ausgaben_count': 0,
+  'zugeordnet_count': 0,
+  'offen_count': 0,
+  'pruefen_count': 0,
+  'duplikat_count': 0,
+  'einnahmen_label': '0,00 EUR',
+  'ausgaben_label': '0,00 EUR',
+  'umsatz_label': '0,00 EUR',
+  'umsatz_class': 'text-success',
+  'offene_einnahmen_label': '0,00 EUR',
+  'offene_ausgaben_label': '0,00 EUR',
+  'pruefen_label': '0,00 EUR'
+} %}
+{% set kontoauszug_auswertung = kontoauszug_auswertung|default(default_kontoauszug_auswertung, true) %}
+<div class="page-card p-4 p-lg-5 mb-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div>
+      <div class="badge-soft mb-3">Rechnungskontrolle</div>
+      <h1 class="mb-2">Rechnungskontrolle</h1>
+      <p class="mb-0 text-muted">Offene, überfällige und aus E-Mails erkannte Rechnungen aus Einnahmen und Ausgaben prüfen.</p>
+    </div>
+    <form method="POST" action="{{ url_for('admin_rechnungen_sync') }}" class="m-0">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button
+        type="submit"
+        class="btn btn-brand"
+        data-loading-title="Lexware wird geprüft"
+        data-loading-message="Bitte kurz warten. Rechnungen und Zahlungsstatus werden mit Lexware abgeglichen."
+        {% if not lexware_api_ready %}disabled{% endif %}
+      >Jetzt mit Lexware prüfen</button>
+    </form>
+  </div>
+</div>
+
+<div class="finance-grid mb-4">
+  <div class="finance-tile">
+    <div class="text-muted small">Gesamt offen</div>
+    <div class="finance-value">{{ summary['offen_count'] }}</div>
+    <div>{{ summary['offen_amount_label'] }}</div>
+  </div>
+  <div class="finance-tile">
+    <div class="text-muted small">Überfällig</div>
+    <div class="finance-value text-danger">{{ summary['ueberfaellig_count'] }}</div>
+    <div>{{ summary['ueberfaellig_amount_label'] }}</div>
+  </div>
+  <div class="finance-tile">
+    <div class="text-muted small">Offene Rechnungen</div>
+    <div class="finance-value">{{ summary['einnahmen_offen_total_count'] }}</div>
+    <div>{{ summary['einnahmen_offen_total_amount_label'] }}</div>
+  </div>
+  <div class="finance-tile">
+    <div class="text-muted small">Offene Ausgaben</div>
+    <div class="finance-value">{{ summary['ausgaben_offen_total_count'] }}</div>
+    <div>{{ summary['ausgaben_offen_total_amount_label'] }}</div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="sync-box">
+    <div class="d-flex justify-content-between gap-3 flex-wrap">
+      <div>
+        <strong>Status der Anbindung</strong>
+        <div class="text-muted small">
+          API: {{ lexware_api_base_url }} · Auto-Prüfung alle {{ auto_sync_minutes }} Minuten beim Öffnen der Seite.
+        </div>
+      </div>
+      {% if lexware_api_ready %}
+        <span class="badge text-bg-success align-self-start">LEXWARE_API_KEY gesetzt</span>
+      {% else %}
+        <span class="badge text-bg-secondary align-self-start">LEXWARE_API_KEY fehlt</span>
+      {% endif %}
+    </div>
+    {% if summary['last_sync'] %}
+      <div class="small mt-2">Letzter Sync: {{ summary['last_sync'] }}</div>
+    {% endif %}
+    {% if summary['last_error'] %}
+      <div class="small text-danger mt-2">{{ summary['last_error'] }}</div>
+    {% endif %}
+    {% if sync_result %}
+      <div class="small mt-2">{{ sync_result['message'] }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4" id="kontoauszug">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Kontoauszug hochladen</h4>
+      <p>Übergangslösung ohne Bankverbindung: CSV, TXT oder PDF hochladen. Doppelte Dateien, Saldozeilen und unsichere Buchungen werden blockiert.</p>
+    </div>
+  </div>
+  <div class="bank-grid">
+    <form method="POST" action="{{ url_for('admin_rechnungen_kontoauszug_upload') }}" enctype="multipart/form-data" class="bank-upload">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="form-label">Kontoauszug-Dateien</label>
+      <input type="file" name="kontoauszug_dateien" class="form-control mb-3" accept=".csv,.txt,.pdf,.tsv" multiple>
+      <button
+        type="submit"
+        class="btn btn-brand"
+        data-loading-title="Kontoauszug wird analysiert"
+        data-loading-message="Bitte kurz warten. Buchungen werden gelesen und mit offenen Rechnungen verglichen."
+      >Kontoauszug analysieren</button>
+      <div class="text-muted small mt-3">Nur eindeutige Treffer mit passendem Betrag, Richtung und Rechnungsnummer/Kontakt werden erledigt. Alles andere bleibt sichtbar.</div>
+    </form>
+    <div>
+      <h5 class="mb-1">Auswertung letzter Kontoauszug</h5>
+      {% if kontoauszug_auswertung['hat_import'] %}
+        <div class="text-muted small">
+          {{ kontoauszug_auswertung['datei'] }} · {{ kontoauszug_auswertung['erstellt_am'] }}
+        </div>
+      {% else %}
+        <div class="text-muted small">Noch kein Kontoauszug importiert.</div>
+      {% endif %}
+      <div class="statement-summary">
+        <div class="statement-tile">
+          <span class="text-muted small">Einnahmen</span>
+          <strong class="text-success">{{ kontoauszug_auswertung['einnahmen_label'] }}</strong>
+          <span class="text-muted small">{{ kontoauszug_auswertung['einnahmen_count'] }} Buchung(en)</span>
+        </div>
+        <div class="statement-tile">
+          <span class="text-muted small">Ausgaben</span>
+          <strong class="text-danger">{{ kontoauszug_auswertung['ausgaben_label'] }}</strong>
+          <span class="text-muted small">{{ kontoauszug_auswertung['ausgaben_count'] }} Buchung(en)</span>
+        </div>
+        <div class="statement-tile">
+          <span class="text-muted small">Umsatz / Saldo</span>
+          <strong class="{{ kontoauszug_auswertung['umsatz_class'] }}">{{ kontoauszug_auswertung['umsatz_label'] }}</strong>
+          <span class="text-muted small">{{ kontoauszug_auswertung['buchungen_count'] }} Buchung(en) gesamt</span>
+        </div>
+        <div class="statement-tile">
+          <span class="text-muted small">Zugeordnet</span>
+          <strong>{{ kontoauszug_auswertung['zugeordnet_count'] }}</strong>
+          <span class="text-muted small">{{ kontoauszug_auswertung['offen_count'] }} offen · {{ kontoauszug_auswertung['pruefen_count'] }} prüfen</span>
+        </div>
+        <div class="statement-tile">
+          <span class="text-muted small">Sicherheitsstopp</span>
+          <strong class="text-danger">{{ kontoauszug_auswertung['pruefen_label'] }}</strong>
+          <span class="text-muted small">{{ kontoauszug_auswertung['pruefen_count'] }} Buchung(en) · {{ kontoauszug_auswertung['duplikat_count'] }} doppelt</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Wichtige offene Punkte</h4>
+      <p>Nach dem Kontoauszug zählt hier nur noch, was Geld oder Kontrolle braucht.</p>
+    </div>
+  </div>
+  <div class="statement-summary mb-4">
+    <div class="statement-tile">
+      <span class="text-muted small">Offene Rechnungen</span>
+      <strong>{{ summary['einnahmen_offen_total_amount_label'] }}</strong>
+      <span class="text-muted small">{{ summary['einnahmen_offen_total_count'] }} Rechnung(en)</span>
+    </div>
+    <div class="statement-tile">
+      <span class="text-muted small">Offene Ausgaben</span>
+      <strong>{{ summary['ausgaben_offen_total_amount_label'] }}</strong>
+      <span class="text-muted small">{{ summary['ausgaben_offen_total_count'] }} Lieferantenbeleg(e)</span>
+    </div>
+    <div class="statement-tile">
+      <span class="text-muted small">Unklare Einnahmen</span>
+      <strong>{{ kontoauszug_auswertung['offene_einnahmen_label'] }}</strong>
+      <span class="text-muted small">aus letztem Kontoauszug</span>
+    </div>
+    <div class="statement-tile">
+      <span class="text-muted small">Unklare Ausgaben</span>
+      <strong>{{ kontoauszug_auswertung['offene_ausgaben_label'] }}</strong>
+      <span class="text-muted small">aus letztem Kontoauszug</span>
+    </div>
+  </div>
+  {% if kontoauszug_buchungen %}
+    <details class="bank-details">
+      <summary>Einzelbuchungen prüfen ({{ kontoauszug_buchungen|length }})</summary>
+      <div class="table-shell mt-3">
+        <table class="table align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Datum</th>
+              <th>Name / Zweck</th>
+              <th>Betrag</th>
+              <th>Zuordnung</th>
+              <th>Hinweis</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in kontoauszug_buchungen %}
+            <tr class="{% if item['status'] == 'zugeordnet' %}bank-booking-matched{% elif item['status'] in ['offen', 'pruefen'] %}bank-booking-open{% endif %}">
+              <td><span class="badge text-bg-{{ item['status_class'] }}">{{ item['status_label'] }}</span></td>
+              <td>{{ item['buchung_datum'] or '-' }}</td>
+              <td>
+                <strong>{{ item['name'] or '-' }}</strong>
+                <div class="text-muted small">{{ item['verwendungszweck'] }}</div>
+              </td>
+              <td>{{ item['betrag_label'] }}</td>
+              <td>
+                {% if item['rechnung_id'] %}
+                  {% if item['lexware_url'] %}
+                    <a href="{{ item['lexware_url'] }}" target="_blank" rel="noopener">{{ item['voucher_number'] or ('Rechnung #' ~ item['rechnung_id']) }}</a>
+                  {% else %}
+                    {{ item['voucher_number'] or ('Rechnung #' ~ item['rechnung_id']) }}
+                  {% endif %}
+                  <div class="text-muted small">{{ item['rechnung_contact_name'] or '' }}</div>
+                {% else %}
+                  <span class="text-muted">nicht sicher zugeordnet</span>
+                {% endif %}
+              </td>
+              <td class="small">{{ item['hinweis'] }}{% if item['match_score'] %} · Score {{ item['match_score'] }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  {% else %}
+    <div class="text-muted">Nach dem Kontoauszug-Upload siehst du hier, welche Zahlungen erledigt sind und welche offen bleiben.</div>
+  {% endif %}
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Offen und zu prüfen</h4>
+      <p>{{ rechnungen|length }} Rechnung(en), die gerade Aufmerksamkeit brauchen.</p>
+    </div>
+  </div>
+  {% if rechnungen %}
+    <div class="table-shell">
+      <table class="table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Nr. / Kontakt</th>
+            <th>Typ</th>
+            <th>Datum</th>
+            <th>Fällig</th>
+            <th>Offen</th>
+            <th>Lexware</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in rechnungen %}
+          <tr class="{% if item['status'] == 'ueberfaellig' %}invoice-row-overdue{% elif item['status'] == 'offen' %}invoice-row-open{% elif item['status'] == 'pruefen' %}invoice-row-check{% endif %}">
+            <td><span class="badge text-bg-{{ item['status_class'] }}">{{ item['status_label'] }}</span></td>
+            <td>
+              <strong>{{ item['voucher_number'] or item['voucher_id'] }}</strong>
+              <div class="text-muted small">{{ item['contact_name'] or '-' }}</div>
+            </td>
+            <td>{{ item['richtung_label'] }}<div class="text-muted small">{{ item['voucher_type'] }}</div></td>
+            <td>{{ item['voucher_date'] or '-' }}</td>
+            <td>{{ item['due_date'] or '-' }}</td>
+            <td>{{ item['open_amount_label'] or '-' }}</td>
+            <td>
+              {% if item['lexware_url'] %}
+                <a href="{{ item['lexware_url'] }}" target="_blank" rel="noopener">öffnen</a>
+              {% elif item['source_email_id'] %}
+                <a href="{{ url_for('admin_emails') }}">E-Mail #{{ item['source_email_id'] }}</a>
+              {% else %}
+                <span class="text-muted">-</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="text-muted">Keine offenen Rechnungen im lokalen Spiegel. Nach dem ersten Lexware-Sync erscheinen sie hier.</div>
+  {% endif %}
+</div>
+
+<div class="page-card p-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Zuletzt bezahlt</h4>
+      <p>Kurzer Verlauf aus Lexware.</p>
+    </div>
+  </div>
+  {% if bezahlte_rechnungen %}
+    <div class="table-shell">
+      <table class="table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Nr.</th>
+            <th>Kontakt</th>
+            <th>Typ</th>
+            <th>Betrag</th>
+            <th>Bezahlt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in bezahlte_rechnungen %}
+          <tr>
+            <td>{{ item['voucher_number'] or item['voucher_id'] }}</td>
+            <td>{{ item['contact_name'] or '-' }}</td>
+            <td>{{ item['richtung_label'] }}</td>
+            <td>{{ item['total_amount_label'] }}</td>
+            <td>{{ item['paid_date'] or item['zuletzt_synced_am'] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="text-muted">Noch keine bezahlten Rechnungen synchronisiert.</div>
+  {% endif %}
+</div>
+{% endblock %}

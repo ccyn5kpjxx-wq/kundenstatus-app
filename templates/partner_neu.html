@@ -154,9 +154,12 @@
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
           <div>
             <div class="fw-semibold">Vorausgefüllten Lackierauftrag verwenden</div>
-            <div class="text-muted small">PDF herunterladen, ausfüllen und anschließend unten bei Anhänge wieder hochladen.</div>
+            <div class="text-muted small">Online ausfüllen, speichern und danach als fertiges PDF herunterladen.</div>
           </div>
-          <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
+          <div class="d-flex gap-2 flex-wrap">
+            <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-dark">Online ausfüllen</a>
+            <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
+          </div>
         </div>
       </div>
       <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
@@ -186,6 +189,11 @@
           <div class="form-text">Mit dem Upload-Button wird die Datei sofort gelesen und der Auftrag automatisch vorbefüllt. Bei Gutachten kann das ein paar Sekunden dauern.</div>
         </div>
         <div class="col-12">
+          <label class="form-label">Hinweis zum Bild oder Dokument (optional)</label>
+          <input type="text" name="upload_notiz" class="form-control form-control-lg" placeholder="z.B. Kotflügel links Kratzer, Tür hinten rechts Delle">
+          <div class="form-text">Bei Schadensfotos reichen kurze Schlagwörter. Die Werkstatt sieht den Hinweis direkt im Auftrag.</div>
+        </div>
+        <div class="col-12">
           <label class="form-label">Beschreibung</label>
           <textarea name="beschreibung" class="form-control" rows="4"></textarea>
         </div>
@@ -212,6 +220,7 @@
       </form>
     </div>
   </div>
+  {% include "ki_assistent_widget.html" %}
   <script>
     const form = document.querySelector('[data-upload-form]');
     const overlay = document.querySelector('[data-loading-overlay]');
@@ -222,24 +231,7 @@
     const transportSelect = document.querySelector('[data-transport-select]');
     const annahmeLabel = document.querySelector('[data-annahme-label]');
     const abholungLabel = document.querySelector('[data-abholung-label]');
-    const loadingNewsItems = [
-      {
-        title: 'Ab 27.04.2026: neue ION-7 im Einsatz',
-        text: 'Für Sie bedeutet das vor allem ein ruhigerer, planbarer Lackierprozess und ein Finish, das wir noch gleichmäßiger steuern können.'
-      },
-      {
-        title: 'Mehr Konstanz beim Lackbild',
-        text: 'Die neue Technik arbeitet laut Anbieter mit erwärmtem Stickstoff. Für unsere Kunden übersetzen wir das in noch mehr Stabilität beim Lackierergebnis.'
-      },
-      {
-        title: 'Sauberer Prozess, weniger Nacharbeit',
-        text: 'Weniger Overspray heißt für Sie im Idealfall: sauberere Abläufe, weniger unnötige Nacharbeit und ein klarer Fokus auf ein sauberes Endergebnis.'
-      },
-      {
-        title: 'Planbarere Fertigstellung',
-        text: 'ION-7 nennt verkürzte Ablüftzeiten als Vorteil. Für unsere Kunden heißt das vor allem: Termine lassen sich verlässlicher halten, sobald das Fahrzeug bei uns im Prozess ist.'
-      }
-    ];
+    const loadingNewsItems = {{ analysis_loading_news() | tojson }};
     let loadingNewsIndex = 0;
     let loadingNewsTimer = null;
     let submitterMessage = '';

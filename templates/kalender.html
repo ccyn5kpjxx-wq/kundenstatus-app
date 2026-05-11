@@ -1,15 +1,205 @@
 {% extends "base.html" %}
 {% block title %}Interner Kalender{% endblock %}
+{% block extra_css %}
+<style>
+  .calendar-note {
+    border: 1px solid #e4d6c3;
+    border-radius: 14px;
+    background: #fffaf2;
+    padding: .85rem 1rem;
+  }
+  .calendar-note.system {
+    background: #f3f8f9;
+    border-color: #cbe0e3;
+  }
+  .calendar-empty {
+    border: 1px dashed #d8c8b1;
+    border-radius: 16px;
+    padding: 1.25rem;
+    color: var(--muted);
+  }
+  .week-overview {
+    border: 1px solid #d8c8b1;
+    border-radius: 20px;
+    background: #fffaf2;
+    padding: 1rem;
+  }
+  .week-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: .65rem;
+  }
+  .week-day {
+    min-height: 190px;
+    border: 1px solid #e4d6c3;
+    border-radius: 16px;
+    background: #fffdf9;
+    padding: .85rem;
+  }
+  .week-day.is-today {
+    border-color: #a23f2d;
+    box-shadow: inset 0 0 0 2px rgba(162,63,45,.14);
+  }
+  .week-day.is-weekend {
+    background: #f7f1e8;
+  }
+  .week-date {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: .5rem;
+    margin-bottom: .65rem;
+  }
+  .week-date strong {
+    font-size: .95rem;
+  }
+  .week-date span {
+    color: var(--muted);
+    font-size: .84rem;
+  }
+  .week-list {
+    display: grid;
+    gap: .45rem;
+  }
+  .week-task,
+  .week-point {
+    border-radius: 12px;
+    padding: .55rem .65rem;
+    background: #f7f1e8;
+    border: 1px solid #e4d6c3;
+    font-size: .9rem;
+    line-height: 1.25;
+  }
+  .week-task a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .week-task a:hover {
+    text-decoration: underline;
+  }
+  .week-point {
+    background: #f3f8f9;
+    border-color: #cbe0e3;
+  }
+  .week-empty {
+    border: 1px dashed #dccdb8;
+    border-radius: 12px;
+    padding: .65rem;
+    color: var(--muted);
+    font-size: .9rem;
+  }
+  @media (max-width: 1199.98px) {
+    .week-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 575.98px) {
+    .week-grid { grid-template-columns: 1fr; }
+    .week-day { min-height: auto; }
+  }
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="page-card p-4 p-lg-5 mb-4">
-  <div class="section-title">
+  <div class="section-title align-items-start">
     <div>
       <div class="badge-soft mb-3">Interner Kalender</div>
-      <h1 class="mb-2">Termine aller Autohäuser in einer Zeitleiste</h1>
-      <p>Ideal für die tägliche Werkstattplanung und Fahrzeuglogistik.</p>
+      <h1 class="mb-2">{% if kalender_suche %}Kalendersuche{% elif zeige_vergangenheit %}Vergangene Termine{% else %}Kommende Termine{% endif %} aller Autohäuser und Mitarbeiter</h1>
+      <p>{% if kalender_suche %}Treffer für „{{ kalender_suche }}“. Bei eindeutigen Fahrzeugtreffern öffnet die Suche direkt den Auftrag.{% elif zeige_vergangenheit %}Rückblick auf erledigte Fahrzeugtermine, Belege, Urlaub und Kalenderpunkte.{% else %}Standardmäßig zeigt der Kalender nur heute und alles, was vor uns liegt.{% endif %}</p>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      {% if kalender_suche %}
+        <a href="{{ url_for('kalender') }}" class="btn btn-brand">Kommende Termine</a>
+        <a href="{{ url_for('betriebs_cockpit') }}" class="btn btn-soft">Zur Startseite</a>
+      {% elif zeige_vergangenheit %}
+        <a href="{{ url_for('kalender') }}" class="btn btn-brand">Kommende Termine</a>
+      {% else %}
+        <a href="{{ url_for('kalender', ansicht='vergangenheit') }}" class="btn btn-soft">Vergangenheit ansehen</a>
+      {% endif %}
+      <a href="{{ url_for('admin_mitarbeiter') }}" class="btn btn-soft">Mitarbeiter</a>
     </div>
   </div>
+  <div class="week-overview mt-4">
+    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+      <div>
+        <div class="badge-soft mb-2">Diese Woche · KW {{ kalender_woche['kw'] }}</div>
+        <h4 class="mb-1">{{ kalender_woche['start_text'] }} bis {{ kalender_woche['end_text'] }}</h4>
+        <div class="text-muted">
+          {{ kalender_woche['total_tasks'] }} Werkstattaufgaben · {{ kalender_woche['total_calendar_points'] }} Feiertage, Geburtstage, Urlaub oder Notizen
+        </div>
+      </div>
+      <span class="badge-soft">Heute {{ kalender_woche['heute_text'] }}</span>
+    </div>
+    <div class="week-grid">
+      {% for day in kalender_woche['days'] %}
+      <div class="week-day {{ 'is-today' if day['is_today'] else '' }} {{ 'is-weekend' if day['is_weekend'] else '' }}">
+        <div class="week-date">
+          <div>
+            <strong>{{ day['wochentag'] }}</strong>
+            {% if day['is_today'] %}<span class="badge text-bg-danger ms-1">Heute</span>{% endif %}
+          </div>
+          <span>{{ day['datum_text'] }}</span>
+        </div>
+        <div class="week-list">
+          {% for point in day['calendar_points'] %}
+          <div class="week-point">
+            <div>
+              <span class="badge text-bg-{{ point['farbe'] }} me-1">{{ point['kategorie_label'] }}</span>
+              <strong>{{ point['titel'] }}</strong>
+            </div>
+            {% if point['notiz'] %}<div class="text-muted small mt-1">{{ point['notiz'] }}</div>{% endif %}
+          </div>
+          {% endfor %}
+          {% for task in day['tasks'] %}
+          <div class="week-task">
+            <div><span class="badge text-bg-{{ task['farbe'] }} me-1">{{ task['label'] }}</span></div>
+            <a href="{{ url_for('auftrag_detail', auftrag_id=task['auftrag_id'], back='kalender') }}">
+              <strong>{{ task['fahrzeug'] }}</strong>{% if task['kennzeichen'] %} · {{ task['kennzeichen'] }}{% endif %}
+            </a>
+            <div class="text-muted small">{{ task['autohaus'] }}</div>
+          </div>
+          {% endfor %}
+          {% if not day['calendar_points'] and not day['tasks'] %}
+          <div class="week-empty">Nichts geplant.</div>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  <form method="POST" action="{{ url_for('kalender_notiz_neu') }}" class="row g-3 align-items-end mt-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ url_for('kalender') }}">
+    <div class="col-lg-7">
+      <label class="form-label">Schnelleintrag</label>
+      <input type="text" name="quick_text" class="form-control form-control-lg" placeholder="28.05 Urlaub Max oder 14.04 Geburtstag jährlich">
+    </div>
+    <div class="col-lg-3">
+      <label class="form-label">Oder Datum</label>
+      <input type="date" name="datum" class="form-control form-control-lg">
+    </div>
+    <div class="col-lg-2 d-grid">
+      <button type="submit" class="btn btn-brand btn-lg">Speichern</button>
+    </div>
+    <div class="col-md-5">
+      <input type="text" name="titel" class="form-control" placeholder="Titel für manuellen Datumseintrag">
+    </div>
+    <div class="col-md-3">
+      <select name="kategorie" class="form-select">
+        {% for key, meta in kalender_kategorien.items() if key not in ['feiertag', 'hinweis'] %}
+          <option value="{{ key }}">{{ meta['label'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <select name="wiederholung" class="form-select">
+        <option value="einmalig">Einmalig</option>
+        <option value="jaehrlich">Jährlich</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <input type="text" name="notiz" class="form-control" placeholder="Notiz">
+    </div>
+  </form>
 </div>
 
 {% if kalender_items %}
@@ -20,10 +210,50 @@
         <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-3">
           <div>
             <h4 class="mb-1">{{ day['datum_lang'] }}</h4>
-            <div class="text-muted">{{ day['events']|length }} Fahrzeuge</div>
+            <div class="text-muted">{{ day['events']|length }} Fahrzeuge · {{ day['notizen']|length + day['system']|length }} Kalenderpunkte</div>
           </div>
           <span class="badge-soft">{{ day['datum_text'] }}</span>
         </div>
+        {% if day['system'] or day['notizen'] %}
+        <div class="d-grid gap-2 mb-3">
+          {% for item in day['system'] %}
+          <div class="calendar-note system">
+            <div class="d-flex justify-content-between gap-2 flex-wrap">
+              <div>
+                <span class="badge text-bg-{{ item['farbe'] }} me-2">{{ item['kategorie_label'] }}</span>
+                <strong>{{ item['titel'] }}</strong>
+              </div>
+              {% if item.get('mitarbeiter_urlaub') %}
+                <a href="{{ url_for('admin_mitarbeiter') }}#mitarbeiter-{{ item['mitarbeiter_id'] }}" class="btn btn-soft btn-sm">Mitarbeiter öffnen</a>
+              {% else %}
+                <span class="text-muted small">automatisch</span>
+              {% endif %}
+            </div>
+            {% if item['notiz'] %}<div class="text-muted small mt-1">{{ item['notiz'] }}</div>{% endif %}
+          </div>
+          {% endfor %}
+          {% for item in day['notizen'] %}
+          <div class="calendar-note">
+            <div class="d-flex justify-content-between gap-2 flex-wrap">
+              <div>
+                <span class="badge text-bg-{{ item['farbe'] }} me-2">{{ item['kategorie_label'] }}</span>
+                <strong>{{ item['titel'] }}</strong>
+                {% if item['wiederholung'] == 'jaehrlich' %}
+                  <span class="badge-soft ms-2">jährlich</span>
+                {% endif %}
+              </div>
+              <form method="POST" action="{{ url_for('kalender_notiz_loeschen', notiz_id=item['id']) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="next" value="{{ url_for('kalender') }}">
+                <button type="submit" class="btn btn-soft btn-sm">Löschen</button>
+              </form>
+            </div>
+            {% if item['notiz'] %}<div class="text-muted small mt-1">{{ item['notiz'] }}</div>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if day['events'] %}
         <div class="row g-3">
           {% for event in day['events'] %}
           {% set a = event['auftrag'] %}
@@ -32,7 +262,9 @@
               <div class="d-flex justify-content-between gap-3 flex-wrap">
                 <div>
                   <div class="fw-bold">{{ a['autohaus_name'] or 'Ohne Autohaus' }}</div>
-                  <div class="text-muted small">{{ a['fahrzeug'] }}{% if a['kennzeichen'] %} · {{ a['kennzeichen'] }}{% endif %}</div>
+                  <a href="{{ url_for('auftrag_detail', auftrag_id=a['id'], back='kalender') }}" class="text-muted small text-decoration-none">
+                    {{ a['fahrzeug'] }}{% if a['kennzeichen'] %} · {{ a['kennzeichen'] }}{% endif %}
+                  </a>
                 </div>
                 <div class="d-flex gap-2 flex-wrap justify-content-end">
                   {% for termin in event['termine'] %}
@@ -47,17 +279,22 @@
                 {% if a['abholtermin'] %}<span class="schedule-pill">Abholung {{ a['abholtermin'] }}</span>{% endif %}
               </div>
               <div class="mt-3">
-                <a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Auftrag öffnen</a>
+                <a href="{{ url_for('auftrag_detail', auftrag_id=a['id'], back='kalender') }}" class="btn btn-soft btn-sm">Auftrag öffnen</a>
               </div>
             </div>
           </div>
           {% endfor %}
         </div>
+        {% else %}
+        <div class="calendar-empty">Keine Fahrzeuge an diesem Tag.</div>
+        {% endif %}
       </div>
     </div>
     {% endfor %}
   </div>
 {% else %}
-  <div class="page-card p-5 text-center text-muted">Noch keine Termine vorhanden.</div>
+  <div class="page-card p-5 text-center text-muted">
+    {% if kalender_suche %}Keine Treffer für „{{ kalender_suche }}“.{% elif zeige_vergangenheit %}Keine vergangenen Termine vorhanden.{% else %}Keine kommenden Termine vorhanden.{% endif %}
+  </div>
 {% endif %}
 {% endblock %}

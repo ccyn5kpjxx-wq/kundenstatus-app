@@ -66,6 +66,22 @@
       background: rgba(255, 255, 255, 0.1);
     }
 
+    .nav-badge {
+      display: inline-flex;
+      min-width: 1.45rem;
+      height: 1.45rem;
+      align-items: center;
+      justify-content: center;
+      margin-left: .35rem;
+      padding: 0 .42rem;
+      border-radius: 999px;
+      background: #d64545;
+      color: #fff;
+      font-size: .78rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
     .hero-shell {
       padding: 2rem 0 1rem;
     }
@@ -315,33 +331,43 @@
   {% block extra_css %}{% endblock %}
 </head>
 <body>
+{% set show_customer_news_overlay = not session.get('admin') %}
 <div class="analysis-overlay" data-analysis-overlay>
   <div class="analysis-card">
     <div class="analysis-spinner" aria-hidden="true"></div>
-    <h4 class="mb-2">Datei wird analysiert</h4>
+    <h4 class="mb-2" data-analysis-title>Datei wird verarbeitet</h4>
     <div class="text-muted" data-analysis-text>Bitte kurz warten. Der Auftrag wird aus der Datei vorbereitet.</div>
     <div class="analysis-progress" aria-hidden="true">
       <div class="analysis-progress-bar"></div>
     </div>
     <div class="text-muted small mb-3">Analyse läuft. Je nach PDF oder Bild kann das ein paar Sekunden dauern.</div>
+    {% if show_customer_news_overlay %}
     <div class="analysis-news">
       <div class="analysis-news-kicker">Werkstatt-News</div>
       <div class="analysis-news-title" data-analysis-news-title>Ab 27.04.2026: neue ION-7 im Einsatz</div>
       <div class="analysis-news-text" data-analysis-news-text>Während die Datei gelesen wird, hier ein kurzer Blick auf unsere Technik-Neuigkeit.</div>
     </div>
+    {% endif %}
   </div>
 </div>
 {% block navbar %}
 <nav class="navbar navbar-expand-lg">
   <div class="container py-2">
-    <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('dashboard') }}">
+    <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('betriebs_cockpit') }}">
       <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
       <span>Werkstatt-Cockpit</span>
     </a>
     <div class="d-flex align-items-center gap-2 flex-wrap">
-      <a class="nav-link" href="{{ url_for('dashboard') }}">Übersicht</a>
+      <a class="nav-link" href="{{ url_for('betriebs_cockpit') }}">Start</a>
+      <a class="nav-link" href="{{ url_for('admin_news') }}">News</a>
+      <a class="nav-link" href="{{ url_for('dashboard') }}#auftraege">Lackierportal</a>
       <a class="nav-link" href="{{ url_for('kalender') }}">Kalender</a>
+      <a class="nav-link" href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter{% set mitarbeiter_badge = admin_mitarbeiter_urlaub_count() %}{% if mitarbeiter_badge %}<span class="nav-badge">{{ mitarbeiter_badge }}</span>{% endif %}</a>
+      <a class="nav-link" href="{{ url_for('admin_emails') }}">E-Mail{% set email_badge = admin_email_count() %}{% if email_badge %}<span class="nav-badge">{{ email_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('neuer_auftrag') }}">Fahrzeug neu</a>
+      <a class="nav-link" href="{{ url_for('admin_postfach') }}">Postfach{% set postfach_badge = admin_postfach_count() %}{% if postfach_badge %}<span class="nav-badge">{{ postfach_badge }}</span>{% endif %}</a>
+      <a class="nav-link" href="{{ url_for('admin_rechnungen') }}">Rechnungskontrolle{% set rechnung_badge = admin_rechnungen_count() %}{% if rechnung_badge %}<span class="nav-badge">{{ rechnung_badge }}</span>{% endif %}</a>
+      <a class="nav-link" href="{{ url_for('admin_einkauf') }}">Einkauf{% set einkauf_badge = admin_einkauf_count() %}{% if einkauf_badge %}<span class="nav-badge">{{ einkauf_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('admin_zugaenge') }}">Zugänge</a>
       <a class="nav-link" href="{{ url_for('partner_login') }}" target="_blank">Autohaus-Portal</a>
       <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
@@ -369,34 +395,18 @@
 <script>
   (() => {
     const overlay = document.querySelector('[data-analysis-overlay]');
+    const title = document.querySelector('[data-analysis-title]');
     const text = document.querySelector('[data-analysis-text]');
     const newsTitle = document.querySelector('[data-analysis-news-title]');
     const newsText = document.querySelector('[data-analysis-news-text]');
     if (!overlay || !text) {
       return;
     }
-    const newsItems = [
-      {
-        title: 'Ab 27.04.2026: neue ION-7 im Einsatz',
-        text: 'Die neue Technik hilft uns, Lackierprozesse ruhiger und gleichmäßiger zu steuern.'
-      },
-      {
-        title: 'Mehr Konstanz beim Lackbild',
-        text: 'Erwärmter Stickstoff sorgt laut Anbieter für stabilere Bedingungen beim Lackauftrag.'
-      },
-      {
-        title: 'Sauberer Prozess, weniger Nacharbeit',
-        text: 'Weniger Overspray bedeutet klarere Abläufe und mehr Fokus auf ein sauberes Endergebnis.'
-      },
-      {
-        title: 'Planbarere Fertigstellung',
-        text: 'Kürzere Ablüftzeiten können helfen, Termine im Werkstattprozess verlässlicher zu halten.'
-      }
-    ];
+    const newsItems = {{ (analysis_loading_news() if show_customer_news_overlay else []) | tojson }};
     let newsIndex = 0;
     let newsTimer = null;
     const updateNews = () => {
-      if (!newsTitle || !newsText) {
+      if (!newsTitle || !newsText || !newsItems.length) {
         return;
       }
       const item = newsItems[newsIndex % newsItems.length];
@@ -404,26 +414,80 @@
       newsText.textContent = item.text;
       newsIndex += 1;
     };
-    const showOverlay = (message) => {
+    const showOverlay = (message, headline) => {
+      if (title) {
+        title.textContent = headline || 'Datei wird verarbeitet';
+      }
       text.textContent = message || 'Bitte kurz warten. Der Auftrag wird aus der Datei vorbereitet.';
       updateNews();
       window.clearInterval(newsTimer);
-      newsTimer = window.setInterval(updateNews, 3200);
+      if (newsItems.length) {
+        newsTimer = window.setInterval(updateNews, 3200);
+      }
       overlay.classList.add('show');
     };
-    document.querySelectorAll('[data-upload-form]').forEach((form) => {
+    const formUploadsFiles = (form) => {
+      if (!form) {
+        return false;
+      }
+      const enctype = (form.getAttribute('enctype') || '').toLowerCase();
+      if (enctype.includes('multipart/form-data')) {
+        return true;
+      }
+      return Array.from(form.querySelectorAll('input[type="file"]')).some((input) => input.files && input.files.length);
+    };
+    document.querySelectorAll('form').forEach((form) => {
       form.addEventListener('submit', (event) => {
         const submitter = event.submitter || document.activeElement;
         const action = submitter && submitter.value ? submitter.value : '';
-        if (!['upload_analyze', 'reanalyze_existing'].includes(action)) {
+        const customMessage = submitter && submitter.dataset ? submitter.dataset.loadingMessage : '';
+        const customTitle = submitter && submitter.dataset ? submitter.dataset.loadingTitle : '';
+        const isAnalysisAction = ['upload_analyze', 'reanalyze_existing'].includes(action);
+        if (!customMessage && !customTitle && !isAnalysisAction && !formUploadsFiles(form)) {
           return;
         }
-        const customMessage = submitter && submitter.dataset ? submitter.dataset.loadingMessage : '';
-        showOverlay(customMessage || 'Bitte kurz warten. Die Unterlage wird gelesen und die Felder werden vorbereitet.');
+        const message = customMessage || (
+          isAnalysisAction
+            ? 'Bitte kurz warten. Die Unterlage wird gelesen und die Felder werden vorbereitet.'
+            : 'Bitte kurz warten. Die Datei wird hochgeladen und verarbeitet.'
+        );
+        const title = customTitle || (isAnalysisAction ? 'Datei wird analysiert' : 'Datei wird verarbeitet');
+        showOverlay(message, title);
+        window.setTimeout(() => {
+          form.querySelectorAll('button[type="submit"], input[type="submit"]').forEach((button) => {
+            button.disabled = true;
+          });
+        }, 0);
+      });
+    });
+    document.querySelectorAll('[data-copy-link]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const value = button.dataset.copyLink || '';
+        const originalText = button.textContent;
+        try {
+          await navigator.clipboard.writeText(value);
+        } catch (error) {
+          const helper = document.createElement('textarea');
+          helper.value = value;
+          helper.setAttribute('readonly', '');
+          helper.style.position = 'fixed';
+          helper.style.opacity = '0';
+          document.body.appendChild(helper);
+          helper.select();
+          document.execCommand('copy');
+          helper.remove();
+        }
+        button.textContent = 'Kopiert';
+        window.setTimeout(() => {
+          button.textContent = originalText;
+        }, 1800);
       });
     });
   })();
 </script>
+{% if session.get('admin') %}
+  {% include "ki_assistent_widget.html" %}
+{% endif %}
 {% block extra_js %}{% endblock %}
 </body>
 </html>

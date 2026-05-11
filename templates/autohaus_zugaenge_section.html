@@ -1,6 +1,6 @@
-{% set autohaus_next_url = autohaus_next_url|default(url_for('admin_zugaenge')) %}
+{% set autohaus_next_url = autohaus_next_url|default(url_for('betriebs_cockpit') ~ '#autohaus-zugaenge') %}
 {% set show_autohaus_create_form = show_autohaus_create_form|default(true) %}
-{% set autohaus_section_intro = autohaus_section_intro|default("Bestehende Portal-Links, Passwörter und Partnerdaten an einem festen Ort.") %}
+{% set autohaus_section_intro = autohaus_section_intro|default("Partnerlinks und Passwörter getrennt von der Neuanlage, damit die bestehenden Zugänge sofort sichtbar sind.") %}
 <div class="page-card p-4 mb-4" id="autohaus-zugaenge">
   <div class="section-title">
     <div>
@@ -28,13 +28,16 @@
           </div>
           <div class="text-lg-end portal-link-box">
             {% set full_portal_url = public_base_url ~ h['portal_url'] %}
+            {% set local_portal_url = h['portal_url'] %}
             {% set portal_message = h['name'] ~ ' Kundenportal: ' ~ full_portal_url ~ '\nPasswort/Zugangscode: ' ~ h['zugangscode'] %}
             <div class="small text-muted">Kundenlink zum Hochladen</div>
             <div class="portal-link-value"><code>{{ full_portal_url }}</code></div>
+            {% if 'trycloudflare.com' in public_base_url %}
+              <div class="small text-warning mt-1">Cloudflare-Testlink: nur gültig, solange der Tunnel läuft.</div>
+            {% endif %}
             <div class="small text-muted mt-1">Passwort/Zugangscode: <strong>{{ h['zugangscode'] }}</strong></div>
-            <div class="small text-muted mt-1">Kunden laden dort Unterlagen hoch. Die Dateien landen direkt im internen Auftrag.</div>
             <div class="d-flex justify-content-lg-end gap-2 flex-wrap mt-2">
-              <a href="{{ full_portal_url }}" target="_blank" class="btn btn-soft btn-sm">Öffnen</a>
+              <a href="{{ local_portal_url }}" target="_blank" class="btn btn-soft btn-sm">Lokal öffnen</a>
               <button type="button" class="btn btn-soft btn-sm" data-copy-link="{{ full_portal_url }}">Link kopieren</button>
               <button type="button" class="btn btn-soft btn-sm" data-copy-link="{{ portal_message }}">Link + Passwort kopieren</button>
               <a href="{{ url_for('admin_lackierauftrag_vorlage', autohaus_id=h['id']) }}" class="btn btn-soft btn-sm">Lackierauftrag PDF</a>
@@ -44,6 +47,7 @@
         <details class="mt-3">
           <summary class="text-muted small">Autohaus bearbeiten</summary>
           <form method="POST" action="{{ url_for('autohaus_update', autohaus_id=h['id']) }}" class="row g-2 mt-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="next" value="{{ autohaus_next_url }}">
             <div class="col-md-6">
               <input type="text" name="name" class="form-control" value="{{ h['name'] }}" placeholder="Name">
@@ -95,6 +99,7 @@
     <h5 class="mb-1">Neues Autohaus</h5>
     <div class="text-muted mb-3">Hier legst du einen neuen Partnerzugang an.</div>
     <form method="POST" action="{{ url_for('autohaus_neu') }}" class="row g-3">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="next" value="{{ autohaus_next_url }}">
       <div class="col-lg-6">
         <label class="form-label">Autohausname</label>

@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+{% block title %}Mitarbeiter{% endblock %}
+{% block extra_css %}
+<style>
+  .staff-form,
+  .vacation-form {
+    border: 1px solid #e4d6c3;
+    border-radius: 18px;
+    background: #fffaf2;
+    padding: 1rem;
+  }
+  .staff-card {
+    border: 1px solid #e4d6c3;
+    border-left: 5px solid var(--accent);
+    border-radius: 18px;
+    background: #fffdf9;
+    padding: 1rem;
+  }
+  .staff-card.inactive {
+    border-left-color: #9aa4ad;
+    opacity: .82;
+  }
+  .vacation-list {
+    display: grid;
+    gap: .65rem;
+  }
+  .vacation-item {
+    border: 1px solid #e4d6c3;
+    border-radius: 14px;
+    background: #f8f2e8;
+    padding: .75rem .85rem;
+  }
+  .vacation-item.current {
+    border-color: rgba(27, 127, 83, .42);
+    background: #edf8f2;
+  }
+  .summary-list {
+    display: grid;
+    gap: .75rem;
+  }
+  .summary-item {
+    border: 1px solid #e4d6c3;
+    border-radius: 16px;
+    background: #fffdf9;
+    padding: .85rem 1rem;
+  }
+  .staff-details {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: .65rem;
+    margin-bottom: 1rem;
+  }
+  .staff-detail {
+    border: 1px solid #e4d6c3;
+    border-radius: 14px;
+    background: #f8f2e8;
+    padding: .7rem .8rem;
+    min-height: 74px;
+  }
+  .staff-detail span {
+    display: block;
+    color: var(--muted);
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    margin-bottom: .15rem;
+  }
+  .staff-detail strong {
+    overflow-wrap: anywhere;
+  }
+  .staff-note {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 1199.98px) {
+    .staff-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 575.98px) {
+    .staff-details { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-card p-4 p-lg-5 mb-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div>
+      <div class="badge-soft mb-3">Mitarbeiter</div>
+      <h1 class="mb-2">Team und Urlaub</h1>
+      <p class="mb-0 text-muted">Mitarbeiter pflegen, Urlaub direkt am Mitarbeiter eintragen und automatisch im Kalender sehen.</p>
+    </div>
+    <a href="{{ url_for('kalender') }}" class="btn btn-soft">Zum Kalender</a>
+  </div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-5">
+    <div class="page-card p-4 h-100">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Mitarbeiter anlegen</h4>
+          <p>{{ summary['aktive_count'] }} aktive Mitarbeiter im Team.</p>
+        </div>
+      </div>
+      <form method="POST" action="{{ url_for('admin_mitarbeiter_neu') }}" class="staff-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+          <label class="form-label">Name</label>
+          <input type="text" name="name" class="form-control" placeholder="Vorname Nachname" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Bereich / Rolle</label>
+          <input type="text" name="rolle" class="form-control" placeholder="z. B. Lackierer, Büro, Vorbereitung">
+        </div>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Telefon</label>
+            <input type="text" name="telefon" class="form-control">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">E-Mail</label>
+            <input type="email" name="email" class="form-control">
+          </div>
+        </div>
+        <div class="mt-3">
+          <label class="form-label">Notiz</label>
+          <textarea name="notiz" rows="3" class="form-control"></textarea>
+        </div>
+        <button type="submit" class="btn btn-brand mt-3">Mitarbeiter speichern</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-xl-7">
+    <div class="page-card p-4 h-100">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Urlaubsübersicht</h4>
+          <p>{{ summary['aktuelle']|length }} heute im Urlaub · {{ summary['kommende']|length }} kommende Einträge.</p>
+        </div>
+      </div>
+      <div class="summary-list">
+        {% if summary['aktuelle'] %}
+          {% for urlaub in summary['aktuelle'] %}
+          <a href="#mitarbeiter-{{ urlaub['mitarbeiter']['id'] }}" class="summary-item text-decoration-none text-reset">
+            <div class="d-flex justify-content-between gap-3 flex-wrap">
+              <div>
+                <span class="badge text-bg-success me-2">Heute Urlaub</span>
+                <strong>{{ urlaub['mitarbeiter']['name'] }}</strong>
+                {% if urlaub['mitarbeiter']['rolle'] %}<span class="text-muted">· {{ urlaub['mitarbeiter']['rolle'] }}</span>{% endif %}
+              </div>
+              <span class="text-muted">{{ urlaub['zeitraum_text'] }}</span>
+            </div>
+            {% if urlaub['notiz'] %}<div class="text-muted small mt-1">{{ urlaub['notiz'] }}</div>{% endif %}
+          </a>
+          {% endfor %}
+        {% elif summary['kommende'] %}
+          {% for urlaub in summary['kommende'] %}
+          <a href="#mitarbeiter-{{ urlaub['mitarbeiter']['id'] }}" class="summary-item text-decoration-none text-reset">
+            <div class="d-flex justify-content-between gap-3 flex-wrap">
+              <div>
+                <span class="badge text-bg-success me-2">Urlaub</span>
+                <strong>{{ urlaub['mitarbeiter']['name'] }}</strong>
+                {% if urlaub['mitarbeiter']['rolle'] %}<span class="text-muted">· {{ urlaub['mitarbeiter']['rolle'] }}</span>{% endif %}
+              </div>
+              <span class="text-muted">{{ urlaub['zeitraum_text'] }}</span>
+            </div>
+            {% if urlaub['notiz'] %}<div class="text-muted small mt-1">{{ urlaub['notiz'] }}</div>{% endif %}
+          </a>
+          {% endfor %}
+        {% else %}
+          <div class="text-muted">Noch kein Urlaub eingetragen.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Mitarbeiterliste</h4>
+      <p>Urlaub wird pro Tag in den internen Kalender übernommen.</p>
+    </div>
+  </div>
+
+  {% if mitarbeiter_liste %}
+    <div class="d-grid gap-3">
+      {% for mitarbeiter in mitarbeiter_liste %}
+      <div class="staff-card {{ 'inactive' if not mitarbeiter['aktiv'] else '' }}" id="mitarbeiter-{{ mitarbeiter['id'] }}">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+          <div>
+            <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
+              {% if mitarbeiter['aktiv'] %}
+                <span class="badge text-bg-success">aktiv</span>
+              {% else %}
+                <span class="badge text-bg-secondary">inaktiv</span>
+              {% endif %}
+              {% if mitarbeiter['aktuelle_urlaube'] %}<span class="badge text-bg-success">heute Urlaub</span>{% endif %}
+            </div>
+            <h4 class="mb-1">{{ mitarbeiter['name'] }}</h4>
+            <div class="text-muted">
+              {{ mitarbeiter['rolle'] or 'Ohne Bereich' }}
+              {% if mitarbeiter['telefon'] %} · {{ mitarbeiter['telefon'] }}{% endif %}
+              {% if mitarbeiter['email'] %} · {{ mitarbeiter['email'] }}{% endif %}
+            </div>
+          </div>
+          <a href="{{ url_for('kalender', suche=mitarbeiter['name']) }}" class="btn btn-soft btn-sm">Im Kalender suchen</a>
+        </div>
+
+        <div class="staff-details">
+          {% if mitarbeiter['adresse'] %}
+          <div class="staff-detail"><span>Adresse</span><strong>{{ mitarbeiter['adresse'] }}</strong></div>
+          {% endif %}
+          {% if mitarbeiter['geburtsdatum'] or mitarbeiter['geburtsort'] %}
+          <div class="staff-detail"><span>Geburt</span><strong>{{ mitarbeiter['geburtsdatum'] }}{% if mitarbeiter['geburtsort'] %} · {{ mitarbeiter['geburtsort'] }}{% endif %}</strong></div>
+          {% endif %}
+          {% if mitarbeiter['eintritt_datum'] or mitarbeiter['austritt_datum'] %}
+          <div class="staff-detail"><span>Zeitraum</span><strong>{% if mitarbeiter['eintritt_datum'] %}ab {{ mitarbeiter['eintritt_datum'] }}{% endif %}{% if mitarbeiter['austritt_datum'] %} bis {{ mitarbeiter['austritt_datum'] }}{% endif %}</strong></div>
+          {% endif %}
+          {% if mitarbeiter['beschaeftigung'] %}
+          <div class="staff-detail"><span>Beschäftigung</span><strong>{{ mitarbeiter['beschaeftigung'] }}</strong></div>
+          {% endif %}
+          {% if mitarbeiter['qualifikation'] %}
+          <div class="staff-detail"><span>Qualifikation</span><strong>{{ mitarbeiter['qualifikation'] }}</strong></div>
+          {% endif %}
+          {% if mitarbeiter['arbeitszeit'] %}
+          <div class="staff-detail"><span>Arbeitszeit</span><strong>{{ mitarbeiter['arbeitszeit'] }}</strong></div>
+          {% endif %}
+          {% if mitarbeiter['urlaubsanspruch'] %}
+          <div class="staff-detail"><span>Urlaubsanspruch</span><strong>{{ mitarbeiter['urlaubsanspruch'] }}</strong></div>
+          {% endif %}
+          {% if mitarbeiter['staatsangehoerigkeit'] %}
+          <div class="staff-detail"><span>Staatsangehörigkeit</span><strong>{{ mitarbeiter['staatsangehoerigkeit'] }}</strong></div>
+          {% endif %}
+        </div>
+
+        {% if mitarbeiter['ordner_pfad'] or mitarbeiter['dokumente_notiz'] or mitarbeiter['notiz'] %}
+        <div class="staff-note text-muted small mb-3">
+          {% if mitarbeiter['ordner_pfad'] %}<strong>Ordner:</strong> {{ mitarbeiter['ordner_pfad'] }}{% endif %}
+          {% if mitarbeiter['dokumente_notiz'] %}{% if mitarbeiter['ordner_pfad'] %}
+{% endif %}<strong>Dokumente:</strong> {{ mitarbeiter['dokumente_notiz'] }}{% endif %}
+          {% if mitarbeiter['notiz'] %}{% if mitarbeiter['ordner_pfad'] or mitarbeiter['dokumente_notiz'] %}
+{% endif %}<strong>Notiz:</strong> {{ mitarbeiter['notiz'] }}{% endif %}
+        </div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('admin_mitarbeiter_bearbeiten', mitarbeiter_id=mitarbeiter['id']) }}" class="row g-2 align-items-end mb-3">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="col-lg-3">
+            <label class="form-label">Name</label>
+            <input type="text" name="name" class="form-control" value="{{ mitarbeiter['name'] }}" required>
+          </div>
+          <div class="col-lg-2">
+            <label class="form-label">Bereich</label>
+            <input type="text" name="rolle" class="form-control" value="{{ mitarbeiter['rolle'] }}">
+          </div>
+          <div class="col-lg-2">
+            <label class="form-label">Telefon</label>
+            <input type="text" name="telefon" class="form-control" value="{{ mitarbeiter['telefon'] }}">
+          </div>
+          <div class="col-lg-2">
+            <label class="form-label">E-Mail</label>
+            <input type="email" name="email" class="form-control" value="{{ mitarbeiter['email'] }}">
+          </div>
+          <div class="col-lg-1">
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" name="aktiv" value="1" id="aktiv-{{ mitarbeiter['id'] }}" {% if mitarbeiter['aktiv'] %}checked{% endif %}>
+              <label class="form-check-label" for="aktiv-{{ mitarbeiter['id'] }}">Aktiv</label>
+            </div>
+            <button type="submit" class="btn btn-soft btn-sm">Speichern</button>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Adresse</label>
+            <input type="text" name="adresse" class="form-control" value="{{ mitarbeiter['adresse'] }}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Geburtsdatum</label>
+            <input type="date" name="geburtsdatum" class="form-control" value="{{ mitarbeiter['geburtsdatum']|iso_date }}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Geburtsort</label>
+            <input type="text" name="geburtsort" class="form-control" value="{{ mitarbeiter['geburtsort'] }}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Eintritt</label>
+            <input type="date" name="eintritt_datum" class="form-control" value="{{ mitarbeiter['eintritt_datum']|iso_date }}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Austritt</label>
+            <input type="date" name="austritt_datum" class="form-control" value="{{ mitarbeiter['austritt_datum']|iso_date }}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Beschäftigung</label>
+            <input type="text" name="beschaeftigung" class="form-control" value="{{ mitarbeiter['beschaeftigung'] }}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Staatsangehörigkeit</label>
+            <input type="text" name="staatsangehoerigkeit" class="form-control" value="{{ mitarbeiter['staatsangehoerigkeit'] }}">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Qualifikation</label>
+            <input type="text" name="qualifikation" class="form-control" value="{{ mitarbeiter['qualifikation'] }}">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Arbeitszeit</label>
+            <input type="text" name="arbeitszeit" class="form-control" value="{{ mitarbeiter['arbeitszeit'] }}">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Urlaubsanspruch</label>
+            <input type="text" name="urlaubsanspruch" class="form-control" value="{{ mitarbeiter['urlaubsanspruch'] }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Ordnerpfad</label>
+            <input type="text" name="ordner_pfad" class="form-control" value="{{ mitarbeiter['ordner_pfad'] }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Dokumente / Quellen</label>
+            <input type="text" name="dokumente_notiz" class="form-control" value="{{ mitarbeiter['dokumente_notiz'] }}">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Notiz</label>
+            <textarea name="notiz" rows="2" class="form-control">{{ mitarbeiter['notiz'] }}</textarea>
+          </div>
+        </form>
+
+        <div class="row g-3">
+          <div class="col-lg-5">
+            <form method="POST" action="{{ url_for('admin_mitarbeiter_urlaub_neu', mitarbeiter_id=mitarbeiter['id']) }}" class="vacation-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="row g-2">
+                <div class="col-md-6">
+                  <label class="form-label">Urlaub von</label>
+                  <input type="date" name="start_datum" class="form-control" required>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Bis</label>
+                  <input type="date" name="end_datum" class="form-control">
+                </div>
+                <div class="col-12">
+                  <label class="form-label">Notiz</label>
+                  <input type="text" name="notiz" class="form-control" placeholder="z. B. Sommerurlaub, halber Tag, Resturlaub">
+                </div>
+                <div class="col-12">
+                  <button type="submit" class="btn btn-brand btn-sm">Urlaub eintragen</button>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="col-lg-7">
+            {% if mitarbeiter['urlaube'] %}
+              <div class="vacation-list">
+                {% for urlaub in mitarbeiter['urlaube'] %}
+                <div class="vacation-item {{ 'current' if urlaub['ist_aktuell'] else '' }}">
+                  <div class="d-flex justify-content-between gap-3 flex-wrap">
+                    <div>
+                      <span class="badge text-bg-success me-2">Urlaub</span>
+                      <strong>{{ urlaub['zeitraum_text'] }}</strong>
+                      {% if urlaub['ist_vergangen'] %}<span class="badge text-bg-secondary ms-1">vergangen</span>{% endif %}
+                    </div>
+                    <form method="POST" action="{{ url_for('admin_mitarbeiter_urlaub_loeschen', urlaub_id=urlaub['id']) }}" class="m-0">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <input type="hidden" name="next" value="{{ url_for('admin_mitarbeiter') }}#mitarbeiter-{{ mitarbeiter['id'] }}">
+                      <button type="submit" class="btn btn-soft btn-sm">Löschen</button>
+                    </form>
+                  </div>
+                  {% if urlaub['notiz'] %}<div class="text-muted small mt-1">{{ urlaub['notiz'] }}</div>{% endif %}
+                </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="text-muted">Noch kein Urlaub für diesen Mitarbeiter eingetragen.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="text-muted">Noch keine Mitarbeiter angelegt.</div>
+  {% endif %}
+</div>
+{% endblock %}

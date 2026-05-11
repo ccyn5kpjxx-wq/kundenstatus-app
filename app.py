@@ -9,11 +9,18 @@ Partner: http://localhost:5000/partner/<slug>
 from collections import defaultdict
 import base64
 import calendar
+import csv
 from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
+from email import policy
+from email.header import decode_header, make_header
+from email.parser import BytesParser
+from email.utils import getaddresses, parsedate_to_datetime
 from functools import wraps
-from html import escape
+from html import escape, unescape
 import hmac
+import hashlib
+import imaplib
 import importlib
 from io import BytesIO
 import json
@@ -178,12 +185,11 @@ for env_file in (BASE / ".env.local", BASE / ".env"):
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 USE_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
-if os.environ.get("RENDER"):
+if USE_POSTGRES:
+    UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", "/tmp/kundenstatus-uploads"))
+elif os.environ.get("RENDER"):
     DATA_DIR = pathlib.Path(os.environ.get("DATA_DIR", "/var/data"))
     DB = pathlib.Path(os.environ.get("SQLITE_DB_PATH", str(DATA_DIR / "auftraege.db")))
-if USE_POSTGRES:
-    UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", str(DATA_DIR / "uploads")))
-elif os.environ.get("RENDER"):
     UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", str(DATA_DIR / "uploads")))
 
 
@@ -220,9 +226,22 @@ PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL)
 LEXWARE_KUNDEN_URL = (os.environ.get("LEXWARE_KUNDEN_URL") or "").strip()
 LEXWARE_RECHNUNGEN_URL = (os.environ.get("LEXWARE_RECHNUNGEN_URL") or "").strip()
 LEXWARE_API_KEY = (os.environ.get("LEXWARE_API_KEY") or "").strip()
+WERKSTATT_EMAIL_API_TOKEN = (os.environ.get("WERKSTATT_EMAIL_API_TOKEN") or "").strip()
+MAIL_IMAP_HOST = (os.environ.get("MAIL_IMAP_HOST") or "").strip()
+MAIL_IMAP_PORT = max(1, env_int("MAIL_IMAP_PORT", 993))
+MAIL_IMAP_USER = (os.environ.get("MAIL_IMAP_USER") or "").strip()
+MAIL_IMAP_PASS = (os.environ.get("MAIL_IMAP_PASS") or "").strip()
+MAIL_IMAP_FOLDER = (os.environ.get("MAIL_IMAP_FOLDER") or "INBOX").strip() or "INBOX"
+MAIL_IMAP_SSL = env_flag("MAIL_IMAP_SSL", True)
+MAIL_IMAP_MARK_SEEN = env_flag("MAIL_IMAP_MARK_SEEN", False)
+MAIL_IMAP_ARCHIVE_FOLDER = (os.environ.get("MAIL_IMAP_ARCHIVE_FOLDER") or "").strip()
+MAIL_IMAP_SEARCH = (os.environ.get("MAIL_IMAP_SEARCH") or "UNSEEN").strip().upper() or "UNSEEN"
+MAIL_IMAP_LIMIT = max(1, min(env_int("MAIL_IMAP_LIMIT", 30), 200))
+MAIL_IMAP_TIMEOUT_SECONDS = max(5, env_int("MAIL_IMAP_TIMEOUT_SECONDS", 20))
 LEXWARE_API_BASE_URL = (os.environ.get("LEXWARE_API_BASE_URL") or "https://api.lexware.io").strip().rstrip("/")
 LEXWARE_APP_BASE_URL = (os.environ.get("LEXWARE_APP_BASE_URL") or "https://app.lexware.de").strip().rstrip("/")
 LEXWARE_TAX_RATE = float(os.environ.get("LEXWARE_TAX_RATE") or 19)
+LEXWARE_AUTO_SYNC_MINUTES = max(5, env_int("LEXWARE_AUTO_SYNC_MINUTES", 30))
 DATE_FMT = "%d.%m.%Y"
 DATETIME_FMT = "%d.%m.%Y %H:%M"
 MAX_UPLOAD_MB = 25
@@ -248,6 +267,7 @@ OPENAI_EXTRACTION_MODEL = os.environ.get("OPENAI_EXTRACTION_MODEL", "gpt-4o")
 OPENAI_API_URL = os.environ.get(
     "OPENAI_API_URL", "https://api.openai.com/v1/chat/completions"
 )
+TOPCOLOR_EMAIL = (os.environ.get("TOPCOLOR_EMAIL") or "").strip()
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_DOC_AI_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 GOOGLE_DOC_AI_TIMEOUT = env_int(
@@ -270,6 +290,14 @@ OPENAI_TEST_IMAGE_DATA_URL = (
     "ZSiDcwAAAABJRU5ErkJggg=="
 )
 CSRF_FIELD_NAME = "csrf_token"
+INSECURE_SECRET_VALUES = {"", "change-me", DEFAULT_FLASK_SECRET_KEY}
+INSECURE_ADMIN_PASSWORDS = {"", "change-me", DEFAULT_ADMIN_PASS}
+ALLOW_INSECURE_LOCAL_LOGIN = env_flag("ALLOW_INSECURE_LOCAL_LOGIN", True)
+LOGIN_RATE_LIMIT_MAX = max(3, env_int("LOGIN_RATE_LIMIT_MAX", 8))
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = max(60, env_int("LOGIN_RATE_LIMIT_WINDOW_SECONDS", 15 * 60))
+LOGIN_RATE_LIMIT_LOCK_SECONDS = max(60, env_int("LOGIN_RATE_LIMIT_LOCK_SECONDS", 10 * 60))
+LOGIN_ATTEMPTS = {}
+LOGIN_ATTEMPTS_LOCK = threading.Lock()
 _sqlite_wal_configured = False
 _sqlite_wal_lock = threading.Lock()
 
@@ -490,9 +518,22 @@ STATUSLISTE = {
 }
 
 BONUSMODELL_STUFEN = (
-    {"schwelle": 3000.0, "satz": 0.02, "label": "2 %", "schwelle_label": "3.000 EUR"},
-    {"schwelle": 5000.0, "satz": 0.03, "label": "3 %", "schwelle_label": "5.000 EUR"},
-    {"schwelle": 8000.0, "satz": 0.04, "label": "4 %", "schwelle_label": "8.000 EUR"},
+    {"schwelle": 3000.0, "satz": 0.02, "label": "2 %", "schwelle_label": "3.000 €"},
+    {"schwelle": 5000.0, "satz": 0.03, "label": "3 %", "schwelle_label": "5.000 €"},
+    {"schwelle": 8000.0, "satz": 0.04, "label": "4 %", "schwelle_label": "8.000 €"},
+)
+BONUSMODELL_AKTIVE_PARTNER = {"autohaus-pfaff"}
+RAHMENVERTRAG_TEXT = (
+    "Den Rahmenvertrag vereinbaren wir gemeinsam im Gespräch. Dabei legen wir einen fairen "
+    "Partnerpreis fest; bei höherem Monatsumsatz kann die Bonusstufe größer werden. So sieht "
+    "das Autohaus direkt, wie viel zur nächsten Stufe fehlt und wann der Bonus verrechnet wird."
+)
+LACKIERAUFTRAG_POSITION_COUNT = 14
+LACKIERAUFTRAG_ABRECHNUNG = (
+    ("selbstzahler", "Selbstzahler"),
+    ("kasko", "Kaskoversicherung"),
+    ("haftpflicht", "Haftpflicht gegnerisch"),
+    ("sammelrechnung", "Sammelrechnung"),
 )
 
 TRANSPORT_ARTEN = {
@@ -570,12 +611,46 @@ PREISLISTE_LACKIERUNG = {
     },
 }
 
+DEFAULT_WERKSTATT_NEWS = [
+    {
+        "news_key": "betriebsurlaub-2026",
+        "titel": "Betriebsurlaub",
+        "nachricht": "Betriebsurlaub vom 19.08.2026 bis 04.09.2026.",
+        "start_datum": "19.08.2026",
+        "end_datum": "04.09.2026",
+        "kategorie": "betrieb",
+        "pinned": 1,
+    },
+    {
+        "news_key": "ion7-stickstoff-technik",
+        "titel": "Lackieren mit erwärmtem Stickstoff",
+        "nachricht": (
+            "Unsere neue ION-7 nutzt erwärmten Stickstoff für stabilere Bedingungen beim Lackauftrag. "
+            "Das unterstützt ein gleichmäßigeres Lackbild, weniger Overspray und planbarere Abläufe."
+        ),
+        "start_datum": "",
+        "end_datum": "",
+        "kategorie": "betrieb",
+        "pinned": 1,
+    },
+]
+
 EVENT_FELDER = (
     ("annahme_datum", "Anlieferung", "secondary"),
     ("start_datum", "Start", "primary"),
     ("fertig_datum", "Fertig", "warning"),
     ("abholtermin", "Abholung", "success"),
 )
+
+KALENDER_KATEGORIEN = {
+    "termin": {"label": "Termin", "farbe": "primary"},
+    "urlaub": {"label": "Urlaub", "farbe": "success"},
+    "geburtstag": {"label": "Geburtstag", "farbe": "warning"},
+    "privat": {"label": "Privat", "farbe": "secondary"},
+    "betrieb": {"label": "Betrieb", "farbe": "dark"},
+    "feiertag": {"label": "Feiertag", "farbe": "danger"},
+    "hinweis": {"label": "Hinweis", "farbe": "info"},
+}
 
 DOCUMENT_REVIEW_FIELDS = (
     ("fahrzeug", "Fahrzeug"),
@@ -600,6 +675,21 @@ WOCHENTAGE = {
     6: "Sonntag",
 }
 
+MONATSNAMEN = {
+    1: "Januar",
+    2: "Februar",
+    3: "März",
+    4: "April",
+    5: "Mai",
+    6: "Juni",
+    7: "Juli",
+    8: "August",
+    9: "September",
+    10: "Oktober",
+    11: "November",
+    12: "Dezember",
+}
+
 ALLOWED_EXTENSIONS = {
     ".jpg",
     ".jpeg",
@@ -616,6 +706,8 @@ ALLOWED_EXTENSIONS = {
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"}
 TEXT_ANALYSIS_EXTENSIONS = {".txt", ".docx", ".xlsx"}
 ANALYSIS_EXTENSIONS = {".pdf"} | IMAGE_EXTENSIONS | TEXT_ANALYSIS_EXTENSIONS
+EINKAUF_UPLOAD_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf", ".txt"}
+KONTOAUSZUG_UPLOAD_EXTENSIONS = {".csv", ".txt", ".pdf", ".tsv"}
 
 TEILE_PATTERNS = {
     "Stoßstange vorne": [r"(stoß|stoss)(fänger|stange).*(vorn|vorne|front)", r"frontschürze"],
@@ -645,9 +737,10 @@ TEILE_PATTERNS = {
 
 ARBEIT_PATTERNS = (
     ("smart repair", [r"smart\s*rep", r"smart\s*repair"]),
-    ("instandsetzen", [r"instand", r"ausbeulen", r"richten", r"beule", r"eingedrückt", r"verformt"]),
-    ("lackieren", [r"lack", r"kratzer", r"schramm", r"lackieren", r"lackschaden"]),
-    ("ersetzen", [r"ersetzen", r"tauschen", r"gerissen", r"gebrochen", r"kaputt"]),
+    ("instandsetzen", [r"instand", r"ausbeulen", r"richten", r"beule", r"delle", r"dellen", r"eingedrückt", r"eingedellt", r"verformt", r"verbeult"]),
+    ("lackieren", [r"lack", r"kratzer", r"schramm", r"verkratzt", r"lackieren", r"lackschaden"]),
+    ("ersetzen", [r"ersetzen", r"tauschen", r"gerissen", r"gebrochen", r"kaputt", r"abgebrochen"]),
+    ("demontiert/prüfen", [r"demont", r"zerlegt", r"abgebaut", r"bauteil\s+fehlt", r"teil\s+fehlt"]),
 )
 
 DOCUMENT_PATTERNS = (
@@ -790,9 +883,25 @@ RAPID_OCR_ENGINE = None
 TESSERACT_CMD = shutil.which("tesseract")
 
 
+def configured_flask_secret_key():
+    configured = (os.environ.get("FLASK_SECRET_KEY") or "").strip().strip('"').strip("'")
+    if configured in INSECURE_SECRET_VALUES:
+        return secrets.token_urlsafe(64), True
+    return configured or secrets.token_urlsafe(64), False
+
+
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY") or DEFAULT_FLASK_SECRET_KEY
-app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
+_configured_secret_key, USING_EPHEMERAL_SECRET_KEY = configured_flask_secret_key()
+app.secret_key = _configured_secret_key
+app.config.update(
+    MAX_CONTENT_LENGTH=MAX_UPLOAD_MB * 1024 * 1024,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=env_flag(
+        "SESSION_COOKIE_SECURE",
+        RUNNING_ON_RENDER,
+    ),
+)
 
 
 @app.teardown_appcontext
@@ -819,12 +928,23 @@ def csrf_field():
 
 @app.context_processor
 def inject_csrf_helpers():
-    return {"csrf_token": get_csrf_token, "csrf_field": csrf_field}
+    return {
+        "csrf_token": get_csrf_token,
+        "csrf_field": csrf_field,
+        "admin_postfach_count": admin_postfach_count,
+        "admin_einkauf_count": admin_einkauf_count,
+        "admin_rechnungen_count": admin_rechnungen_count,
+        "admin_email_count": admin_email_count,
+        "admin_mitarbeiter_urlaub_count": admin_mitarbeiter_urlaub_count,
+        "analysis_loading_news": analysis_loading_news,
+    }
 
 
 @app.before_request
 def protect_csrf():
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+    if request.path.startswith("/api/werkstatt/") and werkstatt_api_token_valid():
         return None
     expected = session.get(CSRF_FIELD_NAME)
     provided = request.form.get(CSRF_FIELD_NAME) or request.headers.get("X-CSRF-Token")
@@ -855,6 +975,41 @@ def add_csrf_fields(response):
 
 
 @app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()",
+    )
+    if request.scheme == "https" or PUBLIC_BASE_URL.startswith("https://"):
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
+        )
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "; ".join(
+            [
+                "default-src 'self'",
+                "base-uri 'self'",
+                "form-action 'self'",
+                "frame-ancestors 'self'",
+                "object-src 'none'",
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com",
+                "font-src 'self' https://fonts.gstatic.com data:",
+                "img-src 'self' data: blob: https:",
+                "connect-src 'self'",
+            ]
+        ),
+    )
+    response.headers.setdefault("Cache-Control", "no-store" if session.get("admin") else "private, no-cache")
+    return response
+
+
+@app.after_request
 def backup_after_successful_change(response):
     if not app.config.get("TESTING") and response.status_code < 400 and should_backup_after_request():
         schedule_change_backup(request.endpoint)
@@ -880,16 +1035,13 @@ def internal_server_error(error):
   <main class="container py-5">
     <div class="alert alert-danger">
       <h1 class="h4">Diese Seite konnte gerade nicht geladen werden.</h1>
-      <p class="mb-2">Pfad: <code>{{ path }}</code></p>
-      <p class="mb-0">Technischer Fehler: <code>{{ message }}</code></p>
+      <p class="mb-0">Der Fehler wurde intern protokolliert. Bitte kurz neu laden oder später erneut versuchen.</p>
     </div>
     <a class="btn btn-outline-dark" href="{{ fallback_url }}">Zurück</a>
   </main>
 </body>
-</html>
+        </html>
         """,
-        path=request.path,
-        message=message[:500],
         fallback_url=request.referrer or url_for("partner_login"),
     ), 500
 
@@ -900,9 +1052,9 @@ def get_startup_warnings():
         warnings.append(
             "ADMIN_PASS ist nicht sicher gesetzt. Bitte in .env.local ein eigenes Passwort eintragen."
         )
-    if app.secret_key in {"", "change-me", DEFAULT_FLASK_SECRET_KEY}:
+    if USING_EPHEMERAL_SECRET_KEY:
         warnings.append(
-            "FLASK_SECRET_KEY ist nicht sicher gesetzt. Bitte in .env.local einen langen Zufallswert eintragen."
+            "FLASK_SECRET_KEY ist nicht sicher gesetzt. Die App nutzt vorübergehend einen Zufalls-Secret; bitte in .env.local dauerhaft setzen."
         )
     if RUNNING_ON_RENDER and not USE_POSTGRES:
         warnings.append(
@@ -1014,17 +1166,78 @@ def get_openai_api_key():
     )
 
 
+def is_local_request():
+    if not has_request_context():
+        return False
+    remote = clean_text(request.remote_addr)
+    host = clean_text(request.host).split(":", 1)[0].lower()
+    return remote in {"127.0.0.1", "::1", "localhost"} or host in {"localhost", "127.0.0.1", "::1"}
+
+
 def admin_password_matches(value):
     submitted = clean_secret_value(value)
-    candidates = {
-        password
-        for password in (get_admin_pass(), DEFAULT_ADMIN_PASS)
-        if clean_text(password)
-    }
+    configured = get_admin_pass()
+    candidates = set()
+    if configured and configured not in INSECURE_ADMIN_PASSWORDS:
+        candidates.add(configured)
+    elif ALLOW_INSECURE_LOCAL_LOGIN and is_local_request():
+        candidates.add(DEFAULT_ADMIN_PASS)
     return bool(
         submitted
         and any(hmac.compare_digest(submitted, password) for password in candidates)
     )
+
+
+def partner_access_code_matches(submitted, autohaus):
+    submitted = clean_secret_value(submitted)
+    expected = clean_secret_value((autohaus or {}).get("zugangscode"))
+    return bool(submitted and expected and hmac.compare_digest(submitted, expected))
+
+
+def login_attempt_key(scope, identifier=""):
+    remote = clean_text(request.remote_addr) if has_request_context() else "unknown"
+    identifier = normalize_document_text(identifier)[:120]
+    return f"{scope}:{remote}:{identifier}"
+
+
+def login_rate_limit_status(scope, identifier=""):
+    key = login_attempt_key(scope, identifier)
+    now_ts = time.time()
+    with LOGIN_ATTEMPTS_LOCK:
+        state = LOGIN_ATTEMPTS.get(key)
+        if not state:
+            return False, 0
+        if now_ts >= float(state.get("locked_until") or 0):
+            if now_ts - float(state.get("first_failed_at") or now_ts) > LOGIN_RATE_LIMIT_WINDOW_SECONDS:
+                LOGIN_ATTEMPTS.pop(key, None)
+            return False, 0
+        return True, int(float(state.get("locked_until") or now_ts) - now_ts) + 1
+
+
+def record_failed_login(scope, identifier=""):
+    key = login_attempt_key(scope, identifier)
+    now_ts = time.time()
+    with LOGIN_ATTEMPTS_LOCK:
+        state = LOGIN_ATTEMPTS.get(key) or {"count": 0, "first_failed_at": now_ts, "locked_until": 0}
+        if now_ts - float(state.get("first_failed_at") or now_ts) > LOGIN_RATE_LIMIT_WINDOW_SECONDS:
+            state = {"count": 0, "first_failed_at": now_ts, "locked_until": 0}
+        state["count"] = int(state.get("count") or 0) + 1
+        if state["count"] >= LOGIN_RATE_LIMIT_MAX:
+            state["locked_until"] = now_ts + LOGIN_RATE_LIMIT_LOCK_SECONDS
+        LOGIN_ATTEMPTS[key] = state
+        return int(state.get("locked_until") or 0)
+
+
+def clear_login_attempts(scope, identifier=""):
+    key = login_attempt_key(scope, identifier)
+    with LOGIN_ATTEMPTS_LOCK:
+        LOGIN_ATTEMPTS.pop(key, None)
+
+
+def login_wait_label(seconds):
+    seconds = max(1, int(seconds or 1))
+    minutes = max(1, (seconds + 59) // 60)
+    return f"{minutes} Minute" if minutes == 1 else f"{minutes} Minuten"
 
 
 def parse_date(value):
@@ -1424,6 +1637,466 @@ def test_openai_document_analysis_connection():
     return True, "OpenAI-Test erfolgreich. Der Dokumentanalyse-Aufruf funktioniert live."
 
 
+def get_partner_assistant_auftrag(auftrag_id, autohaus_id):
+    try:
+        auftrag_id = int(auftrag_id or 0)
+    except (TypeError, ValueError):
+        return None
+    if auftrag_id <= 0:
+        return None
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or int(auftrag.get("autohaus_id") or 0) != int(autohaus_id or 0):
+        return None
+    return auftrag
+
+
+def save_ki_assistent_message(autohaus_id, auftrag_id, absender, nachricht):
+    text = clean_text(nachricht)
+    if not text:
+        return
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT INTO ki_assistent_nachrichten
+            (autohaus_id, auftrag_id, absender, nachricht, erstellt_am)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                int(autohaus_id or 0),
+                int(auftrag_id or 0),
+                clean_text(absender) or "ki",
+                text[:1600],
+                now_str(),
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def list_ki_assistent_history(autohaus_id, auftrag_id, limit=8):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT absender, nachricht
+        FROM ki_assistent_nachrichten
+        WHERE autohaus_id=? AND auftrag_id=?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (int(autohaus_id or 0), int(auftrag_id or 0), int(limit or 8)),
+    ).fetchall()
+    db.close()
+    history = []
+    for row in reversed(rows):
+        role = "assistant" if row["absender"] == "ki" else "user"
+        content = clean_text(row["nachricht"])[:1000]
+        if role == "assistant" and is_unhelpful_login_answer(content):
+            continue
+        history.append({"role": role, "content": content})
+    return history
+
+
+def is_login_or_tone_correction(question):
+    text = normalize_document_text(question)
+    login_terms = (
+        "eingeloggt",
+        "eingellog",
+        "angemeldet",
+        "bin doch drin",
+        "ich bin drin",
+        "login",
+        "anmeld",
+    )
+    complaint_terms = (
+        "frech",
+        "unfreundlich",
+        "falsch",
+        "quatsch",
+        "stimmt nicht",
+        "du sagst",
+        "du sags",
+        "sagst immer",
+        "support",
+    )
+    return any(term in text for term in login_terms) or any(term in text for term in complaint_terms)
+
+
+def is_unhelpful_login_answer(answer):
+    text = normalize_document_text(answer)
+    bad_phrases = (
+        "wenn sie eingeloggt sind",
+        "wenn du eingeloggt bist",
+        "bitte melden sie sich",
+        "melden sie sich im autohaus portal",
+        "nicht eingeloggt",
+        "technischen support",
+        "technischer support",
+    )
+    return any(phrase in text for phrase in bad_phrases)
+
+
+def friendly_login_acknowledgement(context="partner"):
+    if context == "admin":
+        return (
+            "Sie sind im internen Portal. Entschuldigung, die vorige Antwort war nicht hilfreich. "
+            "Ich helfe direkt hier weiter: Sie können nach eingeplanten Fahrzeugen, offenen E-Mails, "
+            "Terminen, Angeboten, Uploads oder einem bestimmten Auftrag fragen."
+        )
+    return (
+        "Sie sind im Autohaus-Portal. Entschuldigung, die vorige Antwort war nicht passend. "
+        "Ich helfe direkt hier weiter: Sie können nach Ihren Fahrzeugen, Terminen, Status, "
+        "Uploads oder Angebotsanfragen fragen."
+    )
+
+
+def is_vehicle_planning_question(question):
+    text = normalize_document_text(question)
+    vehicle_terms = (
+        "fahrzeug",
+        "fahrzeuge",
+        "auto",
+        "autos",
+        "wagen",
+        "auftrag",
+        "auftraege",
+    )
+    planning_terms = (
+        "eingeplant",
+        "geplant",
+        "planung",
+        "termin",
+        "termine",
+        "anstehend",
+        "heute",
+        "morgen",
+        "woche",
+        "start",
+        "fertig",
+        "abholung",
+    )
+    return any(term in text for term in vehicle_terms) and any(term in text for term in planning_terms)
+
+
+def assistant_planning_event(auftrag):
+    events = list((auftrag.get("planung") or {}).get("events") or [])
+    if not events:
+        return None
+    relevant = next((event for event in events if event.get("is_relevant")), None)
+    if relevant:
+        return relevant
+    return sorted(events, key=lambda event: (event.get("datum") or date.max, event.get("priority") or 99))[0]
+
+
+def assistant_vehicle_line(auftrag, include_autohaus=False):
+    fahrzeug = clean_text(auftrag.get("fahrzeug")) or "Fahrzeug"
+    kennzeichen = clean_text(auftrag.get("kennzeichen"))
+    autohaus_name = clean_text(auftrag.get("autohaus_name"))
+    status = clean_text((auftrag.get("status_meta") or {}).get("label")) or "Status offen"
+    event = assistant_planning_event(auftrag)
+    termin = "kein Termin gesetzt"
+    if event:
+        termin = f"{clean_text(event.get('label'))} {clean_text(event.get('datum_text'))}".strip()
+        if event.get("is_past") and int(auftrag.get("status") or 1) < 5:
+            termin = f"{termin} (überfällig)"
+    details = []
+    if kennzeichen:
+        details.append(kennzeichen)
+    if include_autohaus and autohaus_name:
+        details.append(autohaus_name)
+    detail_text = f" ({', '.join(details)})" if details else ""
+    return f"{fahrzeug}{detail_text}: {termin}, Status {status}"
+
+
+def assistant_planned_vehicles(autohaus_id=None):
+    try:
+        auftraege = list_auftraege(autohaus_id=autohaus_id)
+    except Exception:
+        return []
+    planned = []
+    for auftrag in auftraege:
+        if int(auftrag.get("status") or 1) >= 5:
+            continue
+        event = assistant_planning_event(auftrag)
+        if not event:
+            continue
+        planned.append((event, auftrag))
+    return sorted(
+        planned,
+        key=lambda item: (
+            item[0].get("datum") or date.max,
+            item[0].get("priority") or 99,
+            clean_text(item[1].get("fahrzeug")).lower(),
+            int(item[1].get("id") or 0),
+        ),
+    )
+
+
+def assistant_planned_vehicle_lines(autohaus_id=None, include_autohaus=False, limit=6):
+    lines = []
+    for _, auftrag in assistant_planned_vehicles(autohaus_id=autohaus_id)[:limit]:
+        lines.append(assistant_vehicle_line(auftrag, include_autohaus=include_autohaus))
+    return lines
+
+
+def assistant_planned_vehicle_answer(question, autohaus_id=None, include_autohaus=False):
+    text = normalize_document_text(question)
+    planned = assistant_planned_vehicles(autohaus_id=autohaus_id)
+    today = date.today()
+    scope = "aktuell"
+    if "heute" in text:
+        planned = [item for item in planned if item[0].get("datum") == today]
+        scope = "heute"
+    elif "morgen" in text:
+        planned = [item for item in planned if item[0].get("datum") == today + timedelta(days=1)]
+        scope = "morgen"
+    elif "woche" in text:
+        planned = [
+            item
+            for item in planned
+            if item[0].get("datum") and today <= item[0].get("datum") <= today + timedelta(days=7)
+        ]
+        scope = "in den nächsten 7 Tagen"
+
+    if not planned:
+        return f"Es sind {scope} keine aktiven Fahrzeuge mit Termin hinterlegt."
+
+    max_lines = 6
+    lines = [
+        f"- {assistant_vehicle_line(auftrag, include_autohaus=include_autohaus)}"
+        for _, auftrag in planned[:max_lines]
+    ]
+    extra_count = max(0, len(planned) - max_lines)
+    extra_text = f"\nWeitere {extra_count} Fahrzeuge stehen im Lackierportal." if extra_count else ""
+    return f"Diese Fahrzeuge sind {scope} eingeplant:\n" + "\n".join(lines) + extra_text
+
+
+def partner_assistant_context_text(autohaus, auftrag=None):
+    parts = [
+        "Portal: Gärtner Karosserie & Lack Autohaus-Portal",
+        f"Autohaus: {clean_text(autohaus.get('name'))}",
+    ]
+    if auftrag:
+        parts.extend(
+            [
+                f"Fahrzeug: {clean_text(auftrag.get('fahrzeug')) or 'unbekannt'}",
+                f"Kennzeichen: {clean_text(auftrag.get('kennzeichen')) or 'nicht gesetzt'}",
+                f"Status: {clean_text((auftrag.get('status_meta') or {}).get('label'))}",
+                f"Bringtermin: {clean_text(auftrag.get('annahme_datum')) or 'nicht gesetzt'}",
+                f"Abholtermin: {clean_text(auftrag.get('abholtermin')) or 'nicht gesetzt'}",
+                f"Kurzanalyse: {clean_text(auftrag.get('analyse_text')) or clean_text(auftrag.get('beschreibung'))}",
+            ]
+        )
+        if auftrag.get("angebotsphase"):
+            parts.append(f"Angebotsstatus: {clean_text(auftrag.get('angebot_status'))}")
+    planned_lines = assistant_planned_vehicle_lines(autohaus.get("id"), limit=8)
+    if planned_lines:
+        parts.append("Aktuell eingeplante Fahrzeuge dieses Autohauses:\n" + "\n".join(planned_lines))
+    return "\n".join(part for part in parts if clean_text(part))
+
+
+def fallback_partner_assistant_answer(question, autohaus=None):
+    text = normalize_document_text(question)
+    if is_login_or_tone_correction(question):
+        return friendly_login_acknowledgement("partner")
+    if is_vehicle_planning_question(question) and autohaus:
+        return assistant_planned_vehicle_answer(question, autohaus_id=autohaus["id"])
+    if any(word in text for word in ("datei", "bild", "pdf", "hochladen", "dokument", "unterlage")):
+        return (
+            "Sie können Bilder, PDFs oder Unterlagen direkt im Auftrag hochladen. "
+            "Die Werkstatt sieht die Datei danach im internen Auftrag; erkannte Werte bitte kurz prüfen."
+        )
+    if any(word in text for word in ("angebot", "preis", "kosten", "kostet")):
+        return (
+            "Für ein Angebot öffnen Sie im Portal 'Angebot anfordern', füllen die Fahrzeugdaten aus "
+            "und laden Bilder oder Dokumente dazu hoch. Den verbindlichen Preis gibt danach die Werkstatt frei."
+        )
+    if any(word in text for word in ("termin", "abholung", "bringen", "holen", "fertig")):
+        return (
+            "Termine sehen Sie direkt im Auftrag. Wenn sich etwas ändert, können Sie im Auftrag eine Verzögerung "
+            "oder Rückfrage an die Werkstatt senden."
+        )
+    if any(word in text for word in ("status", "fertig", "arbeit", "prozess")):
+        return (
+            "Der Status im Auftrag zeigt, ob das Fahrzeug angelegt, eingeplant, in Arbeit, fertig oder zurückgegeben ist. "
+            "Bei Unklarheiten schreiben Sie am besten direkt im Auftragschat."
+        )
+    return (
+        "Ich helfe Ihnen beim Portal: Fahrzeug anlegen, Angebotsanfrage senden, Bilder oder PDFs hochladen, "
+        "Status prüfen und der Werkstatt eine Rückfrage schreiben. Worum geht es genau?"
+    )
+
+
+def ask_partner_assistant(question, autohaus, auftrag=None):
+    question = clean_text(question)[:900]
+    if not question:
+        return "Bitte geben Sie kurz ein, wobei ich helfen soll.", "fallback"
+    if is_login_or_tone_correction(question):
+        return friendly_login_acknowledgement("partner"), "portal"
+    if is_vehicle_planning_question(question):
+        return fallback_partner_assistant_answer(question, autohaus), "portal"
+    config = get_ai_config()
+    requests_module = get_requests()
+    if not config["openai_ready"] or requests_module is None:
+        return fallback_partner_assistant_answer(question, autohaus), "fallback"
+
+    auftrag_id = int((auftrag or {}).get("id") or 0)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Du bist der digitale KI-Helfer von Gärtner Karosserie & Lack im Autohaus-Portal. "
+                "Antworte auf Deutsch, warm, freundlich, konkret und in der Sie-Form. Der Nutzer ist bereits "
+                "im Portal, sonst könnte er den Chat nicht sehen. Sage niemals 'wenn Sie eingeloggt sind', "
+                "niemals 'melden Sie sich an' und verweise nicht auf technischen Support. Entschuldige dich kurz, "
+                "wenn eine vorherige Antwort unpassend war, und hilf dann direkt weiter. Hilf bei Fahrzeug anlegen, "
+                "Angebotsanfrage, Bilder/PDFs hochladen, Lackierauftrag, Status, Termine und Chat mit der Werkstatt. "
+                "Gib keine verbindlichen Preise, Zusagen oder Rechtsberatung. Verweise bei Preis, Terminfreigabe "
+                "oder Sonderfällen an die Werkstatt. Maximal fünf Sätze."
+            ),
+        },
+        {
+            "role": "system",
+            "content": partner_assistant_context_text(autohaus, auftrag),
+        },
+    ]
+    messages.extend(list_ki_assistent_history(autohaus["id"], auftrag_id, limit=8))
+    messages.append({"role": "user", "content": question})
+    payload = {
+        "model": config["openai_model"],
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 320,
+    }
+    response, request_error = post_openai_chat_completion(requests_module, payload)
+    if request_error:
+        return fallback_partner_assistant_answer(question, autohaus), "fallback"
+    if response.status_code >= 400:
+        return fallback_partner_assistant_answer(question, autohaus), "fallback"
+    try:
+        data = response.json()
+        answer = clean_text(data["choices"][0]["message"]["content"])[:1400]
+    except Exception:
+        answer = ""
+    if not answer:
+        return fallback_partner_assistant_answer(question, autohaus), "fallback"
+    if is_unhelpful_login_answer(answer):
+        return fallback_partner_assistant_answer(question, autohaus), "portal"
+    return answer, "openai"
+
+
+def fallback_admin_assistant_answer(question):
+    text = normalize_document_text(question)
+    if is_login_or_tone_correction(question):
+        return friendly_login_acknowledgement("admin")
+    if is_vehicle_planning_question(question):
+        return assistant_planned_vehicle_answer(question, include_autohaus=True)
+    if any(word in text for word in ("kalender", "termin", "geburtstag", "feiertag", "schnelleintrag")):
+        return (
+            "Kalendereinträge können Sie oben im Betriebs-Cockpit oder im internen Kalender anlegen. "
+            "Der Kalender zeigt standardmäßig kommende Termine; die Vergangenheit erreichen Sie über den Umschalter. "
+            "Feiertage bleiben in der Wochenansicht sichtbar, werden unten aber nicht als eigene Tageskarten gelistet."
+        )
+    if any(word in text for word in ("angebot", "preis", "freigabe", "lackierpreis")):
+        return (
+            "Offene Angebotsanfragen finden Sie im Cockpit und im Admin-Dashboard. "
+            "Die Preisvorschläge sind nur Entscheidungshilfe; den verbindlichen Werkstattpreis tragen Sie im Angebot ein."
+        )
+    if any(word in text for word in ("datei", "bild", "pdf", "ocr", "beleg", "dokument")):
+        return (
+            "Normale Beleg-Unterlagen können Fahrzeugdaten aktualisieren, Fertigbilder und Reklamationsbilder nicht. "
+            "Bei unsicherer Auslese sollten erkannte Felder erst geprüft werden, bevor sie übernommen werden."
+        )
+    if any(word in text for word in ("partner", "autohaus", "kunde", "portal", "zugang")):
+        return (
+            "Partner nutzen ihr Autohausportal für Fahrzeuge, Angebotsanfragen, Uploads, Verzögerungen und Reklamationen. "
+            "Im Adminbereich sehen Sie dieselben Vorgänge zentral mit Status, Dateien, Postfach und Alarmen."
+        )
+    return (
+        "Ich helfe im Betriebs-Cockpit bei Kalender, Aufträgen, Angeboten, Uploads, Postfach, Einkauf und Partnerportal. "
+        "Sagen Sie kurz, wobei Sie gerade hängen."
+    )
+
+
+def ask_admin_assistant(question):
+    question = clean_text(question)[:900]
+    if not question:
+        return "Bitte geben Sie kurz ein, wobei ich helfen soll.", "fallback"
+    if is_login_or_tone_correction(question):
+        return friendly_login_acknowledgement("admin"), "portal"
+    if is_vehicle_planning_question(question):
+        return fallback_admin_assistant_answer(question), "portal"
+    config = get_ai_config()
+    requests_module = get_requests()
+    if not config["openai_ready"] or requests_module is None:
+        return fallback_admin_assistant_answer(question), "fallback"
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Du bist der interne KI-Helfer im Betriebs-Cockpit von Gärtner Karosserie & Lack. "
+                "Antworte auf Deutsch, warm, freundlich und praktisch. Hilf bei Kalender, Aufträgen, "
+                "Angeboten, Dokumentanalyse, Upload-Kategorien, Autohaus-Portal, Postfach, Reklamationen "
+                "und Werkstattorganisation. Der Nutzer ist bereits im internen Adminbereich; sonst könnte er "
+                "den Chat nicht sehen. Sage niemals 'wenn Sie eingeloggt sind', niemals 'melden Sie sich an' "
+                "und verweise nicht auf technischen Support. Entschuldige dich kurz, wenn eine vorherige Antwort "
+                "unpassend war, und hilf dann direkt weiter. Keine verbindlichen Preise oder Rechtsberatung. Maximal fünf Sätze."
+            ),
+        },
+        {
+            "role": "system",
+            "content": (
+                f"Heutiges Datum: {date.today().strftime(DATE_FMT)}. "
+                "Kalender: Standardansicht zeigt kommende Termine; Vergangenheit ist separat aufrufbar; "
+                "Feiertage bleiben in der Wochenansicht sichtbar."
+            ),
+        },
+        {
+            "role": "system",
+            "content": "Aktuell eingeplante Fahrzeuge:\n"
+            + ("\n".join(assistant_planned_vehicle_lines(include_autohaus=True, limit=10)) or "Keine aktiven Termine hinterlegt."),
+        },
+    ]
+    messages.extend(list_ki_assistent_history(0, 0, limit=8))
+    messages.append({"role": "user", "content": question})
+    payload = {
+        "model": config["openai_model"],
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 320,
+    }
+    response, request_error = post_openai_chat_completion(requests_module, payload)
+    if request_error or response.status_code >= 400:
+        return fallback_admin_assistant_answer(question), "fallback"
+    try:
+        data = response.json()
+        answer = clean_text(data["choices"][0]["message"]["content"])[:1400]
+    except Exception:
+        answer = ""
+    if not answer:
+        return fallback_admin_assistant_answer(question), "fallback"
+    if is_unhelpful_login_answer(answer):
+        return fallback_admin_assistant_answer(question), "portal"
+    return answer, "openai"
+
+
+def clear_ki_assistent_history(autohaus_id, auftrag_id=0):
+    db = get_db()
+    try:
+        db.execute(
+            """
+            DELETE FROM ki_assistent_nachrichten
+            WHERE autohaus_id=? AND auftrag_id=?
+            """,
+            (int(autohaus_id or 0), int(auftrag_id or 0)),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
 def should_retry_openai_without_schema(error_message):
     normalized = normalize_document_text(error_message)
     return (
@@ -1523,13 +2196,21 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
         return {"data": {}, "error": "OpenAI ist noch nicht konfiguriert"}
 
     schema = build_openai_document_schema()
+    has_visual_input = bool(visual_inputs)
     user_prompt = "\n".join(
         [
-            "Analysiere den folgenden Werkstattbeleg fuer einen Karosserie- und Lackbetrieb.",
+            "Analysiere den folgenden Werkstattbeleg oder das folgende Fahrzeugfoto fuer einen Karosserie- und Lackbetrieb.",
             "Gib NUR JSON gemaess Schema zurueck.",
             "Wichtig:",
             "- OCR kann fehlerhaft sein.",
             "- Wenn ein Bild/PDF sichtbar ist, nutze vorrangig das Originalbild und nicht nur OCR-Text.",
+            "- Wenn es ein Schadensfoto ist, beschreibe nur sichtbar erkennbare Karosserieteile und Schaeden.",
+            "- Denke bei Fahrzeugfotos auch an zerlegte oder demontierte Fahrzeuge: fehlende Stoßstange, abgebauter Scheinwerfer, offener Radlauf, demontierter Kotflügel, freiliegende Halter oder lose Verkleidung.",
+            "- Verwende fuer Schadensfotos kurze deutsche Schlagwoerter: z.B. 'Kotflügel links Kratzer', 'Tür hinten rechts Delle', 'Stoßstange vorne gerissen', 'Scheinwerfer links fehlt', 'Seitenteil rechts demontiert'.",
+            "- Wenn links/rechts oder vorne/hinten aus dem Foto nicht sicher erkennbar ist, schreibe den Wert trotzdem vorsichtig und markiere needs_review=true.",
+            "- Bei Fotos nicht erfinden: keine FIN, Termine, Preise oder Kennzeichen ausdenken, wenn sie nicht sichtbar sind.",
+            "- Bei Fotos offene_bauteile mit kurzen Eintraegen fuellen, je ein sichtbares Teil/Schaden pro Eintrag.",
+            "- Bei Fotos kurzanalyse maximal 6 einfache Schlagwoerter/Fragmente, keine langen Saetze.",
             "- Lies Fahrzeugtyp, Kennzeichen, FIN, Auftragsnummer, Termine und angekreuzte/markierte Bauteile direkt aus Formularfeldern und Tabellen.",
             "- Bei Lackierauftrag-Formularen sind Felder wie Typ, FG-Nr, Amtl. Kennzeichen, Auftrags-Nr, Fertig bis und angekreuzte Teile wichtig.",
             "- Bei handschriftlich erledigten Positionen diese in erledigte_bauteile aufnehmen und NICHT in offene_bauteile.",
@@ -1561,9 +2242,11 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
             {
                 "role": "system",
                 "content": (
-                    "Du extrahierst strukturierte Felder aus deutschen Werkstattbelegen. "
-                    "Arbeite vorsichtig und halluziniere nicht. Wenn ein Wert sichtbar, aber unsicher ist, "
-                    "gib ihn trotzdem zur menschlichen Pruefung zurueck."
+                    "Du extrahierst strukturierte Felder aus deutschen Werkstattbelegen und Schadensfotos. "
+                    "Du kennst typische Karosserieteile auch in zerlegtem Zustand: Stoßstange, Kotflügel, "
+                    "Radlauf, Seitenteil, Tür, Schweller, Motorhaube, Heckklappe, Scheinwerfer, Spiegel, "
+                    "Halter, Verkleidung und Anbauteile. Arbeite vorsichtig und halluziniere nicht. "
+                    "Wenn ein Wert sichtbar, aber unsicher ist, gib ihn trotzdem zur menschlichen Pruefung zurueck."
                 ),
             },
             {"role": "user", "content": user_content},
@@ -1576,6 +2259,7 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
                 "schema": schema,
             },
         },
+        "max_tokens": 900 if has_visual_input else 700,
     }
     requests_module = get_requests()
     if requests_module is None:
@@ -1666,6 +2350,84 @@ def normalize_openai_document_data(data):
         "analyse_confidence": float(data.get("confidence") or 0),
     }
     return quality_check_document_fields(fields)
+
+
+def structured_analysis_text(fields, filename=""):
+    fields = dict(fields or {})
+    lines = ["Automatische Bild-/Dokumentanalyse"]
+    filename = clean_text(filename)
+    if filename:
+        lines.append(f"Datei: {filename}")
+    if clean_text(fields.get("fahrzeug")):
+        lines.append(f"Fahrzeug: {fields['fahrzeug']}")
+    if clean_text(fields.get("kennzeichen")):
+        lines.append(f"Kennzeichen: {fields['kennzeichen']}")
+    if clean_text(fields.get("auftragsnummer")):
+        lines.append(f"Auftrag: {fields['auftragsnummer']}")
+    if clean_text(fields.get("analyse_text")):
+        lines.append(f"Erkannt: {fields['analyse_text']}")
+    if clean_text(fields.get("bauteile_override")):
+        parts = [
+            clean_text(part)
+            for part in clean_text(fields.get("bauteile_override")).splitlines()
+            if clean_text(part)
+        ]
+        if parts:
+            lines.append("Bauteile/Schaden: " + "; ".join(parts[:8]))
+    if clean_text(fields.get("beschreibung")):
+        lines.append(f"Beschreibung: {fields['beschreibung']}")
+    if clean_text(fields.get("analyse_hinweis")):
+        lines.append(f"Prüfung: {fields['analyse_hinweis']}")
+    return "\n".join(lines)
+
+
+def structured_analysis_summary(fields, filename=""):
+    fields = dict(fields or {})
+    suffix = pathlib.Path(filename or "").suffix.lower()
+    prefix = "Bildanalyse" if suffix in IMAGE_EXTENSIONS else "Dokumentanalyse"
+    hints = []
+    if clean_text(fields.get("analyse_text")):
+        hints.append(clean_text(fields["analyse_text"]))
+    parts = [
+        clean_text(part)
+        for part in clean_text(fields.get("bauteile_override")).splitlines()
+        if clean_text(part)
+    ]
+    if parts:
+        hints.append("; ".join(parts[:4]))
+    if clean_text(fields.get("fahrzeug")):
+        hints.append(f"Typ: {fields['fahrzeug']}")
+    if clean_text(fields.get("kennzeichen")):
+        hints.append(f"Kennzeichen: {fields['kennzeichen']}")
+    if not hints and clean_text(fields.get("beschreibung")):
+        hints.append(clean_text(fields["beschreibung"])[:220])
+    return f"{prefix}: " + " | ".join(dict.fromkeys(hints))[:460] if hints else ""
+
+
+def append_upload_note_to_analysis(text, note):
+    note = clean_text(note)[:500]
+    if not note:
+        return clean_text(text)
+    base = clean_text(text)
+    note_text = f"Hinweis vom Autohaus: {note}"
+    if not base:
+        return note_text
+    if note_text in base:
+        return base
+    return f"{base}\n\n{note_text}"
+
+
+def append_upload_note_to_summary(summary, note):
+    note = clean_text(note)[:220]
+    if not note:
+        return clean_text(summary)
+    note_text = f"Hinweis Autohaus: {note}"
+    summary = clean_text(summary)
+    if not summary:
+        return note_text
+    if note_text in summary:
+        return summary
+    return f"{summary} | {note_text}"[:500]
 
 
 def add_analysis_note(fields, note):
@@ -1804,6 +2566,8 @@ def build_document_analysis_bundle(path, filename=""):
     if structured:
         bundle["structured"] = structured
         bundle["analysis_json"] = json.dumps(ai_result.get("data"), ensure_ascii=False)
+        if not clean_text(bundle.get("text")):
+            bundle["text"] = structured_analysis_text(structured, filename)
         bundle["status"] = "ai_ready"
         if google_result.get("text") and visual_inputs:
             bundle["source"] = "google_document_ai+openai_vision"
@@ -3670,22 +4434,29 @@ BACKUP_TABLES = (
     "status_log",
     "chat_nachrichten",
     "benachrichtigungen",
-    "admin_benachrichtigungen",
+    "rahmenvertrag_anfragen",
+    "lackierauftrag_entwuerfe",
+    "postfach_ausblendungen",
+    "ki_assistent_nachrichten",
+    "einkaufsliste",
+    "einkauf_belege",
+    "einkauf_artikel",
+    "werkstatt_news",
+    "werkstatt_emails",
+    "lexware_rechnungen",
+    "kontoauszug_importe",
+    "kontoauszug_buchungen",
     "verzoegerungen",
     "reklamationen",
+    "kalender_notizen",
+    "mitarbeiter",
+    "mitarbeiter_urlaub",
 )
 _backup_lock = threading.Lock()
 _backup_thread_started = False
 _change_backup_lock = threading.Lock()
 _change_backup_pending = False
 _change_backup_running = False
-_upload_blob_backfill_started = False
-
-DATEI_LIST_COLUMNS = """
-    id, auftrag_id, reklamation_id, original_name, stored_name, mime_type, size,
-    quelle, kategorie, dokument_typ, extrahierter_text, extrakt_kurz,
-    analyse_quelle, analyse_json, analyse_hinweis, hochgeladen_am
-"""
 
 
 def list_table_rows_for_backup(db, table_name):
@@ -3695,11 +4466,7 @@ def list_table_rows_for_backup(db, table_name):
         return []
     if not columns:
         return []
-    rows = [dict(row) for row in db.execute(f"SELECT * FROM {table_name}").fetchall()]
-    if table_name == "dateien":
-        for row in rows:
-            row.pop("content_blob", None)
-    return rows
+    return [dict(row) for row in db.execute(f"SELECT * FROM {table_name}").fetchall()]
 
 
 def write_uploads_to_backup(archive):
@@ -3710,35 +4477,6 @@ def write_uploads_to_backup(archive):
         if not path.is_file():
             continue
         archive.write(path, f"uploads/{path.name}")
-        count += 1
-    return count
-
-
-def write_datei_blobs_to_backup(archive, db):
-    try:
-        rows = db.execute(
-            """
-            SELECT id, stored_name, content_blob
-            FROM dateien
-            WHERE content_blob IS NOT NULL AND length(content_blob) > 0
-            """
-        ).fetchall()
-    except Exception as exc:
-        print(f"WARNUNG: Datei-Blobs konnten nicht ins Backup geschrieben werden: {exc}")
-        return 0
-
-    existing_names = set(archive.namelist())
-    count = 0
-    for row in rows:
-        stored_name = pathlib.Path(clean_text(row["stored_name"])).name
-        content = blob_to_bytes(row["content_blob"])
-        if not stored_name or not content:
-            continue
-        archive_name = f"uploads/{stored_name}"
-        if archive_name in existing_names:
-            continue
-        archive.writestr(archive_name, content)
-        existing_names.add(archive_name)
         count += 1
     return count
 
@@ -3784,7 +4522,6 @@ def create_backup_package(reason="auto"):
                         except OSError:
                             pass
                 upload_count = write_uploads_to_backup(archive)
-                blob_upload_count = write_datei_blobs_to_backup(archive, db)
                 archive.writestr(
                     "manifest.json",
                     json.dumps(
@@ -3793,7 +4530,6 @@ def create_backup_package(reason="auto"):
                             "reason": reason,
                             "backup_file": backup_path.name,
                             "upload_count": upload_count,
-                            "blob_upload_count": blob_upload_count,
                             "keep": AUTO_BACKUP_KEEP,
                         },
                         ensure_ascii=False,
@@ -3835,6 +4571,8 @@ def change_backup_worker():
 
 def schedule_change_backup(reason="change"):
     global _change_backup_pending, _change_backup_running
+    if app.config.get("TESTING"):
+        return
     if not AUTO_CHANGE_BACKUP_ENABLED or not AUTO_BACKUP_ENABLED:
         return
     with _change_backup_lock:
@@ -3915,69 +4653,6 @@ def start_hourly_backups():
     _backup_thread_started = True
     thread = threading.Thread(target=hourly_backup_worker, daemon=True)
     thread.start()
-
-
-def backfill_chat_postfach_notifications(db):
-    db.execute(
-        """
-        INSERT INTO admin_benachrichtigungen
-        (auftrag_id, autohaus_id, typ, titel, nachricht, gelesen, gelesen_am,
-         entfernt, entfernt_am, quelle_typ, quelle_id, erstellt_am)
-        SELECT
-            c.auftrag_id,
-            a.autohaus_id,
-            'chat',
-            'Neue Nachricht vom Autohaus',
-            COALESCE(h.name, 'Autohaus') || ' · '
-                || COALESCE(NULLIF(a.fahrzeug, ''), 'Fahrzeug') || ' · '
-                || c.nachricht,
-            0,
-            '',
-            0,
-            '',
-            'chat',
-            c.id,
-            c.erstellt_am
-        FROM chat_nachrichten c
-        JOIN auftraege a ON a.id = c.auftrag_id
-        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
-        WHERE c.absender='autohaus'
-          AND COALESCE(c.gelesen_admin, 0)=0
-          AND NOT EXISTS (
-            SELECT 1
-            FROM admin_benachrichtigungen n
-            WHERE n.quelle_typ='chat' AND n.quelle_id=c.id
-          )
-        """
-    )
-    db.execute(
-        """
-        INSERT INTO benachrichtigungen
-        (auftrag_id, quelle, titel, nachricht, gelesen, gelesen_am, entfernt,
-         entfernt_am, quelle_typ, quelle_id, erstellt_am)
-        SELECT
-            c.auftrag_id,
-            'werkstatt',
-            'Neue Nachricht der Werkstatt',
-            'Die Werkstatt hat geschrieben: ' || c.nachricht,
-            0,
-            '',
-            0,
-            '',
-            'chat',
-            c.id,
-            c.erstellt_am
-        FROM chat_nachrichten c
-        JOIN auftraege a ON a.id = c.auftrag_id
-        WHERE c.absender='werkstatt'
-          AND COALESCE(c.gelesen_autohaus, 0)=0
-          AND NOT EXISTS (
-            SELECT 1
-            FROM benachrichtigungen b
-            WHERE b.quelle_typ='chat' AND b.quelle_id=c.id
-          )
-        """
-    )
 
 
 def init_db():
@@ -4063,6 +4738,8 @@ def init_db():
             werkstatt_angebot_preis TEXT DEFAULT '',
             werkstatt_angebot_notiz TEXT DEFAULT '',
             werkstatt_angebot_am TEXT DEFAULT '',
+            bonus_netto_betrag REAL DEFAULT 0,
+            bonus_preis_aktualisiert_am TEXT DEFAULT '',
             status         INTEGER DEFAULT 1,
             annahme_datum  TEXT DEFAULT '',
             start_datum    TEXT DEFAULT '',
@@ -4102,12 +4779,12 @@ def init_db():
             size           INTEGER DEFAULT 0,
             quelle         TEXT DEFAULT 'intern',
             dokument_typ   TEXT DEFAULT '',
+            notiz          TEXT DEFAULT '',
             extrahierter_text TEXT DEFAULT '',
             extrakt_kurz   TEXT DEFAULT '',
             analyse_quelle TEXT DEFAULT '',
             analyse_json   TEXT DEFAULT '',
             analyse_hinweis TEXT DEFAULT '',
-            content_blob   BYTEA,
             hochgeladen_am TEXT NOT NULL,
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
         );
@@ -4143,30 +4820,26 @@ def init_db():
             titel       TEXT NOT NULL,
             nachricht   TEXT NOT NULL,
             gelesen     INTEGER DEFAULT 0,
-            gelesen_am  TEXT DEFAULT '',
-            entfernt    INTEGER DEFAULT 0,
-            entfernt_am TEXT DEFAULT '',
-            quelle_typ  TEXT DEFAULT '',
-            quelle_id   INTEGER,
             erstellt_am TEXT NOT NULL,
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
         );
 
-        CREATE TABLE IF NOT EXISTS admin_benachrichtigungen (
+        CREATE TABLE IF NOT EXISTS rahmenvertrag_anfragen (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            auftrag_id  INTEGER,
-            autohaus_id INTEGER,
-            typ         TEXT DEFAULT 'info',
-            titel       TEXT NOT NULL,
-            nachricht   TEXT NOT NULL,
-            gelesen     INTEGER DEFAULT 0,
-            gelesen_am  TEXT DEFAULT '',
-            entfernt    INTEGER DEFAULT 0,
-            entfernt_am TEXT DEFAULT '',
-            quelle_typ  TEXT DEFAULT '',
-            quelle_id   INTEGER,
+            autohaus_id INTEGER NOT NULL,
+            status      TEXT DEFAULT 'offen',
+            nachricht   TEXT DEFAULT '',
             erstellt_am TEXT NOT NULL,
-            FOREIGN KEY (auftrag_id) REFERENCES auftraege(id),
+            erledigt_am TEXT DEFAULT '',
+            FOREIGN KEY (autohaus_id) REFERENCES autohaeuser(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS lackierauftrag_entwuerfe (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            autohaus_id  INTEGER NOT NULL,
+            daten_json   TEXT DEFAULT '{}',
+            erstellt_am  TEXT NOT NULL,
+            geaendert_am TEXT NOT NULL,
             FOREIGN KEY (autohaus_id) REFERENCES autohaeuser(id)
         );
 
@@ -4179,6 +4852,236 @@ def init_db():
             gelesen_autohaus  INTEGER DEFAULT 0,
             erstellt_am       TEXT NOT NULL,
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS kalender_notizen (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            datum        TEXT NOT NULL,
+            titel        TEXT NOT NULL,
+            notiz        TEXT DEFAULT '',
+            kategorie    TEXT DEFAULT 'termin',
+            wiederholung TEXT DEFAULT 'einmalig',
+            erstellt_am  TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS erinnerungen (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            text        TEXT NOT NULL,
+            status      TEXT DEFAULT 'offen',
+            erstellt_am TEXT NOT NULL,
+            erledigt_am TEXT DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS mitarbeiter (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT NOT NULL,
+            rolle        TEXT DEFAULT '',
+            telefon      TEXT DEFAULT '',
+            email        TEXT DEFAULT '',
+            adresse      TEXT DEFAULT '',
+            geburtsdatum TEXT DEFAULT '',
+            geburtsort   TEXT DEFAULT '',
+            staatsangehoerigkeit TEXT DEFAULT '',
+            eintritt_datum TEXT DEFAULT '',
+            austritt_datum TEXT DEFAULT '',
+            beschaeftigung TEXT DEFAULT '',
+            qualifikation TEXT DEFAULT '',
+            arbeitszeit  TEXT DEFAULT '',
+            urlaubsanspruch TEXT DEFAULT '',
+            ordner_pfad  TEXT DEFAULT '',
+            dokumente_notiz TEXT DEFAULT '',
+            notiz        TEXT DEFAULT '',
+            aktiv        INTEGER DEFAULT 1,
+            erstellt_am  TEXT NOT NULL,
+            geaendert_am TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS mitarbeiter_urlaub (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            mitarbeiter_id INTEGER NOT NULL,
+            start_datum    TEXT NOT NULL,
+            end_datum      TEXT NOT NULL,
+            notiz          TEXT DEFAULT '',
+            erstellt_am    TEXT NOT NULL,
+            geaendert_am   TEXT NOT NULL,
+            FOREIGN KEY (mitarbeiter_id) REFERENCES mitarbeiter(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS postfach_ausblendungen (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            empfaenger   TEXT NOT NULL,
+            autohaus_id  INTEGER DEFAULT 0,
+            item_key     TEXT NOT NULL,
+            erstellt_am  TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS ki_assistent_nachrichten (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            autohaus_id INTEGER NOT NULL,
+            auftrag_id  INTEGER DEFAULT 0,
+            absender    TEXT NOT NULL,
+            nachricht   TEXT NOT NULL,
+            erstellt_am TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS einkaufsliste (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            lieferant     TEXT DEFAULT 'Topcolor',
+            kategorie     TEXT DEFAULT 'Material',
+            artikelnummer TEXT DEFAULT '',
+            produkt_name  TEXT DEFAULT '',
+            produkt_beschreibung TEXT DEFAULT '',
+            produktbild_url TEXT DEFAULT '',
+            titel         TEXT DEFAULT '',
+            menge         TEXT DEFAULT '',
+            ve            TEXT DEFAULT 'Stueck',
+            stueckzahl    INTEGER DEFAULT 1,
+            gebinde       TEXT DEFAULT '',
+            auto_color_preis TEXT DEFAULT '',
+            vergleich_preis TEXT DEFAULT '',
+            vergleich_lieferant TEXT DEFAULT '',
+            lieferzeit    TEXT DEFAULT '',
+            preisquelle   TEXT DEFAULT '',
+            angebotsstatus TEXT DEFAULT 'offen',
+            angebotsnotiz TEXT DEFAULT '',
+            notiz         TEXT DEFAULT '',
+            qr_text       TEXT DEFAULT '',
+            quelle_email_id INTEGER DEFAULT 0,
+            status        TEXT DEFAULT 'offen',
+            original_name TEXT DEFAULT '',
+            stored_name   TEXT DEFAULT '',
+            mime_type     TEXT DEFAULT '',
+            size          INTEGER DEFAULT 0,
+            erstellt_am   TEXT NOT NULL,
+            bestellt_am   TEXT DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS einkauf_belege (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            beleg_typ        TEXT DEFAULT 'rechnung',
+            lieferant        TEXT DEFAULT '',
+            original_name    TEXT DEFAULT '',
+            stored_name      TEXT DEFAULT '',
+            mime_type        TEXT DEFAULT '',
+            size             INTEGER DEFAULT 0,
+            extrahierter_text TEXT DEFAULT '',
+            positionen_count INTEGER DEFAULT 0,
+            status           TEXT DEFAULT 'importiert',
+            erstellt_am      TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS einkauf_artikel (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            lieferant           TEXT DEFAULT '',
+            kategorie           TEXT DEFAULT 'Material',
+            artikelnummer       TEXT DEFAULT '',
+            produkt_name        TEXT DEFAULT '',
+            produkt_beschreibung TEXT DEFAULT '',
+            produktbild_url     TEXT DEFAULT '',
+            ve                  TEXT DEFAULT 'Stueck',
+            gebinde             TEXT DEFAULT '',
+            letzter_preis       TEXT DEFAULT '',
+            letzter_preis_datum TEXT DEFAULT '',
+            preisquelle         TEXT DEFAULT '',
+            quelle_beleg_id     INTEGER DEFAULT 0,
+            quelle_item_id      INTEGER DEFAULT 0,
+            nutzungen_count     INTEGER DEFAULT 0,
+            status              TEXT DEFAULT 'aktiv',
+            erstellt_am         TEXT NOT NULL,
+            geaendert_am        TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS werkstatt_news (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            news_key    TEXT DEFAULT '',
+            titel       TEXT NOT NULL,
+            nachricht   TEXT DEFAULT '',
+            start_datum TEXT DEFAULT '',
+            end_datum   TEXT DEFAULT '',
+            kategorie   TEXT DEFAULT 'betrieb',
+            sichtbar    INTEGER DEFAULT 1,
+            pinned      INTEGER DEFAULT 1,
+            erstellt_am TEXT NOT NULL,
+            geaendert_am TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS werkstatt_emails (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            quelle         TEXT DEFAULT 'manuell',
+            kategorie      TEXT DEFAULT 'allgemein',
+            ziel_modul     TEXT DEFAULT '',
+            absender_name  TEXT DEFAULT '',
+            absender_email TEXT DEFAULT '',
+            empfaenger     TEXT DEFAULT '',
+            betreff        TEXT DEFAULT '',
+            nachricht      TEXT DEFAULT '',
+            empfangen_am   TEXT DEFAULT '',
+            message_id     TEXT DEFAULT '',
+            source_uid     TEXT DEFAULT '',
+            raw_hash       TEXT DEFAULT '',
+            attachments_count INTEGER DEFAULT 0,
+            status         TEXT DEFAULT 'neu',
+            autohaus_id    INTEGER DEFAULT 0,
+            auftrag_id     INTEGER DEFAULT 0,
+            original_payload TEXT DEFAULT '',
+            erstellt_am    TEXT NOT NULL,
+            geaendert_am   TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS lexware_rechnungen (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            voucher_id         TEXT UNIQUE NOT NULL,
+            voucher_type       TEXT DEFAULT '',
+            richtung           TEXT DEFAULT '',
+            status             TEXT DEFAULT 'offen',
+            payment_status     TEXT DEFAULT '',
+            voucher_status     TEXT DEFAULT '',
+            voucher_number     TEXT DEFAULT '',
+            contact_name       TEXT DEFAULT '',
+            contact_id         TEXT DEFAULT '',
+            total_amount       REAL DEFAULT 0,
+            open_amount        REAL DEFAULT 0,
+            currency           TEXT DEFAULT 'EUR',
+            voucher_date       TEXT DEFAULT '',
+            due_date           TEXT DEFAULT '',
+            paid_date          TEXT DEFAULT '',
+            lexware_url        TEXT DEFAULT '',
+            source_email_id    INTEGER DEFAULT 0,
+            raw_json           TEXT DEFAULT '',
+            zuletzt_synced_am  TEXT DEFAULT '',
+            erstellt_am        TEXT NOT NULL,
+            geaendert_am       TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS kontoauszug_importe (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            original_name    TEXT DEFAULT '',
+            stored_name      TEXT DEFAULT '',
+            mime_type        TEXT DEFAULT '',
+            size             INTEGER DEFAULT 0,
+            file_hash        TEXT DEFAULT '',
+            extrahierter_text TEXT DEFAULT '',
+            buchungen_count  INTEGER DEFAULT 0,
+            matched_count    INTEGER DEFAULT 0,
+            pruefen_count    INTEGER DEFAULT 0,
+            erstellt_am      TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS kontoauszug_buchungen (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            import_id        INTEGER DEFAULT 0,
+            buchung_datum    TEXT DEFAULT '',
+            name             TEXT DEFAULT '',
+            verwendungszweck TEXT DEFAULT '',
+            betrag           REAL DEFAULT 0,
+            waehrung         TEXT DEFAULT 'EUR',
+            richtung         TEXT DEFAULT '',
+            status           TEXT DEFAULT 'offen',
+            rechnung_id      INTEGER DEFAULT 0,
+            match_score      INTEGER DEFAULT 0,
+            hinweis          TEXT DEFAULT '',
+            buchung_key      TEXT DEFAULT '',
+            erstellt_am      TEXT NOT NULL
         );
         """
     )
@@ -4204,6 +5107,8 @@ def init_db():
     ensure_column(db, "auftraege", "werkstatt_angebot_preis", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "werkstatt_angebot_notiz", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "werkstatt_angebot_am", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "bonus_netto_betrag", "REAL DEFAULT 0")
+    ensure_column(db, "auftraege", "bonus_preis_aktualisiert_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "annahme_datum", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "start_datum", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "abholtermin", "TEXT DEFAULT ''")
@@ -4223,19 +5128,21 @@ def init_db():
     ensure_column(db, "dateien", "kategorie", "TEXT DEFAULT 'standard'")
     ensure_column(db, "dateien", "reklamation_id", "INTEGER")
     ensure_column(db, "dateien", "dokument_typ", "TEXT DEFAULT ''")
+    ensure_column(db, "dateien", "notiz", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "extrahierter_text", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "extrakt_kurz", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "analyse_quelle", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "analyse_json", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "analyse_hinweis", "TEXT DEFAULT ''")
-    ensure_column(db, "dateien", "content_blob", "BYTEA")
-    ensure_column(db, "benachrichtigungen", "gelesen_am", "TEXT DEFAULT ''")
-    ensure_column(db, "benachrichtigungen", "entfernt", "INTEGER DEFAULT 0")
-    ensure_column(db, "benachrichtigungen", "entfernt_am", "TEXT DEFAULT ''")
-    ensure_column(db, "benachrichtigungen", "quelle_typ", "TEXT DEFAULT ''")
-    ensure_column(db, "benachrichtigungen", "quelle_id", "INTEGER")
-    ensure_column(db, "admin_benachrichtigungen", "quelle_typ", "TEXT DEFAULT ''")
-    ensure_column(db, "admin_benachrichtigungen", "quelle_id", "INTEGER")
+    ensure_column(db, "rahmenvertrag_anfragen", "autohaus_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "rahmenvertrag_anfragen", "status", "TEXT DEFAULT 'offen'")
+    ensure_column(db, "rahmenvertrag_anfragen", "nachricht", "TEXT DEFAULT ''")
+    ensure_column(db, "rahmenvertrag_anfragen", "erstellt_am", "TEXT DEFAULT ''")
+    ensure_column(db, "rahmenvertrag_anfragen", "erledigt_am", "TEXT DEFAULT ''")
+    ensure_column(db, "lackierauftrag_entwuerfe", "autohaus_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "lackierauftrag_entwuerfe", "daten_json", "TEXT DEFAULT '{}'")
+    ensure_column(db, "lackierauftrag_entwuerfe", "erstellt_am", "TEXT DEFAULT ''")
+    ensure_column(db, "lackierauftrag_entwuerfe", "geaendert_am", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "portal_key", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "portal_titel", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "willkommen_text", "TEXT DEFAULT ''")
@@ -4246,28 +5153,224 @@ def init_db():
     ensure_index(db, "idx_auftraege_dashboard", "auftraege", ("archiviert", "angebotsphase", "autohaus_id"))
     ensure_index(db, "idx_auftraege_angebote", "auftraege", ("angebotsphase", "angebot_abgesendet", "autohaus_id"))
     ensure_index(db, "idx_dateien_auftrag", "dateien", ("auftrag_id", "kategorie", "reklamation_id"))
-    ensure_index(db, "idx_benachrichtigungen_auftrag_status", "benachrichtigungen", ("auftrag_id", "entfernt", "gelesen"))
-    ensure_index(db, "idx_benachrichtigungen_quelle", "benachrichtigungen", ("quelle_typ", "quelle_id"))
-    ensure_index(db, "idx_admin_benachrichtigungen_offen", "admin_benachrichtigungen", ("entfernt", "gelesen", "erstellt_am"))
-    ensure_index(db, "idx_admin_benachrichtigungen_quelle", "admin_benachrichtigungen", ("quelle_typ", "quelle_id"))
+    ensure_index(db, "idx_rahmenvertrag_anfragen_autohaus", "rahmenvertrag_anfragen", ("autohaus_id", "status"))
+    ensure_index(db, "idx_lackierauftrag_entwuerfe_autohaus", "lackierauftrag_entwuerfe", ("autohaus_id",))
     ensure_index(db, "idx_status_log_lookup", "status_log", ("status", "zeitstempel", "auftrag_id"))
     ensure_index(db, "idx_verzoegerungen_offen", "verzoegerungen", ("uebernommen", "erstellt_am"))
     ensure_index(db, "idx_reklamationen_offen", "reklamationen", ("bearbeitet", "erstellt_am"))
-
-    db.execute(
-        """
-        UPDATE benachrichtigungen
-        SET entfernt=1, entfernt_am=COALESCE(NULLIF(entfernt_am, ''), erstellt_am)
-        WHERE COALESCE(gelesen, 0)=1
-          AND COALESCE(gelesen_am, '')=''
-          AND COALESCE(entfernt, 0)=0
-        """
+    ensure_index(db, "idx_kalender_notizen_datum", "kalender_notizen", ("datum", "wiederholung"))
+    ensure_index(db, "idx_erinnerungen_status", "erinnerungen", ("status", "erstellt_am"))
+    ensure_column(db, "mitarbeiter", "rolle", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "telefon", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "email", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "adresse", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "geburtsdatum", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "geburtsort", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "staatsangehoerigkeit", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "eintritt_datum", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "austritt_datum", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "beschaeftigung", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "qualifikation", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "arbeitszeit", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "urlaubsanspruch", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "ordner_pfad", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "dokumente_notiz", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "notiz", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter", "aktiv", "INTEGER DEFAULT 1")
+    ensure_column(db, "mitarbeiter", "geaendert_am", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter_urlaub", "end_datum", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter_urlaub", "notiz", "TEXT DEFAULT ''")
+    ensure_column(db, "mitarbeiter_urlaub", "geaendert_am", "TEXT DEFAULT ''")
+    ensure_index(db, "idx_mitarbeiter_aktiv", "mitarbeiter", ("aktiv", "name"))
+    ensure_index(
+        db,
+        "idx_mitarbeiter_urlaub_zeitraum",
+        "mitarbeiter_urlaub",
+        ("mitarbeiter_id", "start_datum", "end_datum"),
+    )
+    ensure_index(
+        db,
+        "idx_postfach_ausblendungen_lookup",
+        "postfach_ausblendungen",
+        ("empfaenger", "autohaus_id", "item_key"),
+    )
+    ensure_index(
+        db,
+        "idx_ki_assistent_lookup",
+        "ki_assistent_nachrichten",
+        ("autohaus_id", "auftrag_id", "id"),
+    )
+    ensure_index(
+        db,
+        "idx_einkaufsliste_status",
+        "einkaufsliste",
+        ("status", "lieferant", "erstellt_am"),
+    )
+    ensure_column(db, "einkaufsliste", "qr_text", "TEXT DEFAULT ''")
+    ensure_column(db, "einkaufsliste", "kategorie", "TEXT DEFAULT 'Material'")
+    ensure_column(db, "einkaufsliste", "artikelnummer", "TEXT DEFAULT ''")
+    ensure_column(db, "einkaufsliste", "produkt_name", "TEXT DEFAULT ''")
+    ensure_column(db, "einkaufsliste", "produkt_beschreibung", "TEXT DEFAULT ''")
+    ensure_column(db, "einkaufsliste", "produktbild_url", "TEXT DEFAULT ''")
+    ensure_column(db, "einkaufsliste", "ve", "TEXT DEFAULT 'Stueck'")
+    ensure_column(db, "einkaufsliste", "stueckzahl", "INTEGER DEFAULT 1")
+    ensure_column(db, "einkaufsliste", "gebinde", "TEXT DEFAULT ''")
+    ensure_column(db, "einkaufsliste", "auto_color_preis", "TEXT DEFAULT ''")
+    ensure_column(db, "einkaufsliste", "vergleich_preis", "TEXT DEFAULT ''")
+    ensure_column(db, "einkaufsliste", "vergleich_lieferant", "TEXT DEFAULT ''")
+    ensure_column(db, "einkaufsliste", "lieferzeit", "TEXT DEFAULT ''")
+    ensure_column(db, "einkaufsliste", "preisquelle", "TEXT DEFAULT ''")
+    ensure_column(db, "einkaufsliste", "angebotsstatus", "TEXT DEFAULT 'offen'")
+    ensure_column(db, "einkaufsliste", "angebotsnotiz", "TEXT DEFAULT ''")
+    ensure_column(db, "einkaufsliste", "quelle_email_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "einkaufsliste", "quelle_beleg_id", "INTEGER DEFAULT 0")
+    ensure_index(
+        db,
+        "idx_einkaufsliste_email",
+        "einkaufsliste",
+        ("quelle_email_id", "status", "angebotsstatus"),
+    )
+    ensure_index(
+        db,
+        "idx_einkaufsliste_beleg",
+        "einkaufsliste",
+        ("quelle_beleg_id", "status", "id"),
+    )
+    ensure_column(db, "einkauf_belege", "beleg_typ", "TEXT DEFAULT 'rechnung'")
+    ensure_column(db, "einkauf_belege", "lieferant", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_belege", "original_name", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_belege", "stored_name", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_belege", "mime_type", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_belege", "size", "INTEGER DEFAULT 0")
+    ensure_column(db, "einkauf_belege", "extrahierter_text", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_belege", "positionen_count", "INTEGER DEFAULT 0")
+    ensure_column(db, "einkauf_belege", "status", "TEXT DEFAULT 'importiert'")
+    ensure_column(db, "einkauf_belege", "erstellt_am", "TEXT DEFAULT ''")
+    ensure_index(
+        db,
+        "idx_einkauf_belege_lieferant",
+        "einkauf_belege",
+        ("lieferant", "id"),
+    )
+    ensure_column(db, "einkauf_artikel", "lieferant", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_artikel", "kategorie", "TEXT DEFAULT 'Material'")
+    ensure_column(db, "einkauf_artikel", "artikelnummer", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_artikel", "produkt_name", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_artikel", "produkt_beschreibung", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_artikel", "produktbild_url", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_artikel", "ve", "TEXT DEFAULT 'Stueck'")
+    ensure_column(db, "einkauf_artikel", "gebinde", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_artikel", "letzter_preis", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_artikel", "letzter_preis_datum", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_artikel", "preisquelle", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_artikel", "quelle_beleg_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "einkauf_artikel", "quelle_item_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "einkauf_artikel", "nutzungen_count", "INTEGER DEFAULT 0")
+    ensure_column(db, "einkauf_artikel", "status", "TEXT DEFAULT 'aktiv'")
+    ensure_column(db, "einkauf_artikel", "erstellt_am", "TEXT DEFAULT ''")
+    ensure_column(db, "einkauf_artikel", "geaendert_am", "TEXT DEFAULT ''")
+    ensure_index(
+        db,
+        "idx_einkauf_artikel_lookup",
+        "einkauf_artikel",
+        ("lieferant", "artikelnummer", "produkt_name"),
+    )
+    ensure_index(
+        db,
+        "idx_werkstatt_news_sichtbar",
+        "werkstatt_news",
+        ("sichtbar", "pinned", "start_datum"),
+    )
+    ensure_index(db, "idx_werkstatt_news_key", "werkstatt_news", ("news_key",))
+    ensure_index(
+        db,
+        "idx_werkstatt_emails_status",
+        "werkstatt_emails",
+        ("status", "empfangen_am", "id"),
+    )
+    ensure_column(db, "werkstatt_emails", "kategorie", "TEXT DEFAULT 'allgemein'")
+    ensure_column(db, "werkstatt_emails", "ziel_modul", "TEXT DEFAULT ''")
+    ensure_column(db, "werkstatt_emails", "message_id", "TEXT DEFAULT ''")
+    ensure_column(db, "werkstatt_emails", "source_uid", "TEXT DEFAULT ''")
+    ensure_column(db, "werkstatt_emails", "raw_hash", "TEXT DEFAULT ''")
+    ensure_column(db, "werkstatt_emails", "attachments_count", "INTEGER DEFAULT 0")
+    ensure_index(db, "idx_werkstatt_emails_message_id", "werkstatt_emails", ("message_id",))
+    ensure_index(db, "idx_werkstatt_emails_source_uid", "werkstatt_emails", ("source_uid",))
+    ensure_index(db, "idx_werkstatt_emails_raw_hash", "werkstatt_emails", ("raw_hash",))
+    ensure_column(db, "lexware_rechnungen", "voucher_id", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "voucher_type", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "richtung", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "status", "TEXT DEFAULT 'offen'")
+    ensure_column(db, "lexware_rechnungen", "payment_status", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "voucher_status", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "voucher_number", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "contact_name", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "contact_id", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "total_amount", "REAL DEFAULT 0")
+    ensure_column(db, "lexware_rechnungen", "open_amount", "REAL DEFAULT 0")
+    ensure_column(db, "lexware_rechnungen", "currency", "TEXT DEFAULT 'EUR'")
+    ensure_column(db, "lexware_rechnungen", "voucher_date", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "due_date", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "paid_date", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "lexware_url", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "source_email_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "lexware_rechnungen", "raw_json", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "zuletzt_synced_am", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "erstellt_am", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "geaendert_am", "TEXT DEFAULT ''")
+    ensure_index(db, "idx_lexware_rechnungen_voucher", "lexware_rechnungen", ("voucher_id",))
+    ensure_index(
+        db,
+        "idx_lexware_rechnungen_status",
+        "lexware_rechnungen",
+        ("status", "richtung", "due_date"),
+    )
+    ensure_column(db, "kontoauszug_importe", "original_name", "TEXT DEFAULT ''")
+    ensure_column(db, "kontoauszug_importe", "stored_name", "TEXT DEFAULT ''")
+    ensure_column(db, "kontoauszug_importe", "mime_type", "TEXT DEFAULT ''")
+    ensure_column(db, "kontoauszug_importe", "size", "INTEGER DEFAULT 0")
+    ensure_column(db, "kontoauszug_importe", "file_hash", "TEXT DEFAULT ''")
+    ensure_column(db, "kontoauszug_importe", "extrahierter_text", "TEXT DEFAULT ''")
+    ensure_column(db, "kontoauszug_importe", "buchungen_count", "INTEGER DEFAULT 0")
+    ensure_column(db, "kontoauszug_importe", "matched_count", "INTEGER DEFAULT 0")
+    ensure_column(db, "kontoauszug_importe", "pruefen_count", "INTEGER DEFAULT 0")
+    ensure_column(db, "kontoauszug_importe", "erstellt_am", "TEXT DEFAULT ''")
+    ensure_column(db, "kontoauszug_buchungen", "import_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "kontoauszug_buchungen", "buchung_datum", "TEXT DEFAULT ''")
+    ensure_column(db, "kontoauszug_buchungen", "name", "TEXT DEFAULT ''")
+    ensure_column(db, "kontoauszug_buchungen", "verwendungszweck", "TEXT DEFAULT ''")
+    ensure_column(db, "kontoauszug_buchungen", "betrag", "REAL DEFAULT 0")
+    ensure_column(db, "kontoauszug_buchungen", "waehrung", "TEXT DEFAULT 'EUR'")
+    ensure_column(db, "kontoauszug_buchungen", "richtung", "TEXT DEFAULT ''")
+    ensure_column(db, "kontoauszug_buchungen", "status", "TEXT DEFAULT 'offen'")
+    ensure_column(db, "kontoauszug_buchungen", "rechnung_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "kontoauszug_buchungen", "match_score", "INTEGER DEFAULT 0")
+    ensure_column(db, "kontoauszug_buchungen", "hinweis", "TEXT DEFAULT ''")
+    ensure_column(db, "kontoauszug_buchungen", "buchung_key", "TEXT DEFAULT ''")
+    ensure_column(db, "kontoauszug_buchungen", "erstellt_am", "TEXT DEFAULT ''")
+    ensure_index(db, "idx_kontoauszug_importe_hash", "kontoauszug_importe", ("file_hash",))
+    ensure_index(db, "idx_kontoauszug_buchungen_key", "kontoauszug_buchungen", ("buchung_key",))
+    ensure_index(
+        db,
+        "idx_kontoauszug_buchungen_status",
+        "kontoauszug_buchungen",
+        ("status", "buchung_datum", "id"),
     )
 
-    backfill_chat_postfach_notifications(db)
+    old_betriebsurlaub_key = "betriebsurlaub-2026-" + "thai" + "land"
+    db.execute(
+        """
+        UPDATE werkstatt_news
+        SET news_key='betriebsurlaub-2026'
+        WHERE news_key=?
+        """,
+        (old_betriebsurlaub_key,),
+    )
 
     seed_default_autohaeuser(db)
     seed_default_auftraege(db)
+    seed_default_werkstatt_news(db)
+    merge_duplicate_einkauf_artikel(db)
 
     rows = db.execute("SELECT id, portal_key FROM autohaeuser").fetchall()
     for row in rows:
@@ -4276,6 +5379,15 @@ def init_db():
                 "UPDATE autohaeuser SET portal_key=? WHERE id=?",
                 (uuid.uuid4().hex[:16], row["id"]),
             )
+
+    db.execute(
+        """
+        UPDATE einkaufsliste
+        SET produkt_beschreibung=qr_text
+        WHERE COALESCE(produkt_beschreibung, '')=''
+          AND COALESCE(qr_text, '')<>''
+        """
+    )
 
     db.commit()
     db.close()
@@ -4385,6 +5497,47 @@ def seed_default_auftraege(db):
         )
 
 
+def seed_default_werkstatt_news(db):
+    now = now_str()
+    for item in DEFAULT_WERKSTATT_NEWS:
+        news_key = clean_text(item.get("news_key"))
+        existing = db.execute(
+            "SELECT id FROM werkstatt_news WHERE news_key=?",
+            (news_key,),
+        ).fetchone()
+        values = (
+            news_key,
+            clean_text(item.get("titel")),
+            clean_text(item.get("nachricht")),
+            format_date(item.get("start_datum")),
+            format_date(item.get("end_datum")),
+            clean_text(item.get("kategorie")) or "betrieb",
+            1,
+            int(item.get("pinned") or 0),
+            now,
+        )
+        if existing:
+            db.execute(
+                """
+                UPDATE werkstatt_news
+                SET news_key=?, titel=?, nachricht=?, start_datum=?, end_datum=?,
+                    kategorie=?, sichtbar=?, pinned=?, geaendert_am=?
+                WHERE id=?
+                """,
+                values + (existing["id"],),
+            )
+            continue
+        db.execute(
+            """
+            INSERT INTO werkstatt_news
+              (news_key, titel, nachricht, start_datum, end_datum, kategorie,
+               sichtbar, pinned, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            values + (now,),
+        )
+
+
 def row_to_autohaus(row):
     if not row:
         return None
@@ -4406,12 +5559,126 @@ def row_to_autohaus(row):
     return autohaus
 
 
+def lackierauftrag_default_data(autohaus):
+    telefon_email = " / ".join(
+        part
+        for part in (clean_text(autohaus.get("telefon")), clean_text(autohaus.get("email")))
+        if part
+    )
+    data = {
+        "firma": clean_text(autohaus.get("name")),
+        "ansprechpartner": clean_text(autohaus.get("kontakt_name")),
+        "kontakt": telefon_email,
+        "auftrags_datum": date.today().strftime(DATE_FMT),
+        "fertig_bis": "",
+        "typ": "",
+        "kennzeichen": "",
+        "fg_nr": "",
+        "farb_nr": "",
+        "km_stand": "",
+        "abrechnung": "",
+        "versicherung_schaden_nr": "",
+        "versicherungsnehmer": "",
+        "kontrolle_datum": "",
+        "unterschrift_auftragnehmer": "",
+    }
+    for index in range(1, LACKIERAUFTRAG_POSITION_COUNT + 1):
+        data[f"position_{index}_teil"] = ""
+        data[f"position_{index}_seite"] = ""
+        data[f"position_{index}_bemerkung"] = ""
+        data[f"position_{index}_status"] = ""
+    return data
+
+
+def normalize_lackierauftrag_data(raw_data, autohaus=None):
+    data = lackierauftrag_default_data(autohaus or {})
+    for key in list(data.keys()):
+        data[key] = clean_text((raw_data or {}).get(key, data[key]))[:600]
+    abrechnung = clean_text((raw_data or {}).get("abrechnung"))
+    allowed_abrechnung = {key for key, _ in LACKIERAUFTRAG_ABRECHNUNG}
+    data["abrechnung"] = abrechnung if abrechnung in allowed_abrechnung else ""
+    for date_key in ("auftrags_datum", "fertig_bis", "kontrolle_datum"):
+        data[date_key] = format_date(data.get(date_key)) or clean_text(data.get(date_key))
+    return data
+
+
+def parse_lackierauftrag_form(form, autohaus):
+    return normalize_lackierauftrag_data(form, autohaus)
+
+
+def get_lackierauftrag_entwurf(autohaus):
+    defaults = lackierauftrag_default_data(autohaus)
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT *
+        FROM lackierauftrag_entwuerfe
+        WHERE autohaus_id=?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (autohaus["id"],),
+    ).fetchone()
+    db.close()
+    if not row:
+        return {
+            "id": 0,
+            "daten": defaults,
+            "erstellt_am": "",
+            "geaendert_am": "",
+        }
+    try:
+        saved = json.loads(row["daten_json"] or "{}")
+    except Exception:
+        saved = {}
+    merged = dict(defaults)
+    merged.update(saved if isinstance(saved, dict) else {})
+    return {
+        "id": row["id"],
+        "daten": normalize_lackierauftrag_data(merged, autohaus),
+        "erstellt_am": clean_text(row["erstellt_am"]),
+        "geaendert_am": clean_text(row["geaendert_am"]),
+    }
+
+
+def save_lackierauftrag_entwurf(autohaus, data):
+    normalized = normalize_lackierauftrag_data(data, autohaus)
+    payload = json.dumps(normalized, ensure_ascii=False)
+    now = now_str()
+    db = get_db()
+    existing = db.execute(
+        "SELECT id FROM lackierauftrag_entwuerfe WHERE autohaus_id=? ORDER BY id DESC LIMIT 1",
+        (autohaus["id"],),
+    ).fetchone()
+    if existing:
+        db.execute(
+            """
+            UPDATE lackierauftrag_entwuerfe
+            SET daten_json=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (payload, now, existing["id"]),
+        )
+    else:
+        db.execute(
+            """
+            INSERT INTO lackierauftrag_entwuerfe
+            (autohaus_id, daten_json, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?)
+            """,
+            (autohaus["id"], payload, now, now),
+        )
+    db.commit()
+    db.close()
+    return normalized
+
+
 def lackierauftrag_filename(autohaus):
     slug = clean_text(autohaus.get("slug")) or slugify(autohaus.get("name")) or "autohaus"
     return f"Lackierauftrag_{slug}.pdf"
 
 
-def make_lackierauftrag_pdf(autohaus):
+def make_lackierauftrag_pdf(autohaus, data=None):
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     from reportlab.lib.pagesizes import A4
@@ -4421,6 +5688,15 @@ def make_lackierauftrag_pdf(autohaus):
 
     def text(value):
         return escape(clean_text(value))
+
+    form_data = normalize_lackierauftrag_data(data or {}, autohaus)
+
+    def value(key):
+        return Paragraph(text(form_data.get(key)), bold8)
+
+    def checkbox(key, label_text):
+        mark = "x" if form_data.get("abrechnung") == key else " "
+        return Paragraph(f"[{mark}] {escape(label_text)}", label)
 
     def style(name, size=9, bold=False, color=None, align=TA_LEFT, space=0):
         return ParagraphStyle(
@@ -4456,15 +5732,6 @@ def make_lackierauftrag_pdf(autohaus):
     small = style("sm", 7, color=colors.HexColor("#555555"))
     footer_style = style("ft", 8, align=TA_CENTER)
 
-    telefon_email = " / ".join(
-        part
-        for part in (clean_text(autohaus.get("telefon")), clean_text(autohaus.get("email")))
-        if part
-    )
-    firma = text(autohaus.get("name"))
-    ansprechpartner = text(autohaus.get("kontakt_name"))
-    kontakt = text(telefon_email)
-
     story = []
     story.append(
         Table(
@@ -4494,19 +5761,19 @@ def make_lackierauftrag_pdf(autohaus):
 
     left_rows = [
         [Paragraph("Auftraggeber", bold9), ""],
-        [Paragraph("Firma:", label), Paragraph(firma, bold8)],
-        [Paragraph("Ansprechpartner:", label), Paragraph(ansprechpartner, bold8)],
-        [Paragraph("Tel. / E-Mail:", label), Paragraph(kontakt, bold8)],
-        [Paragraph("Auftrags-Datum:", label), ""],
-        [Paragraph("Fertig bis spätestens:", label), ""],
+        [Paragraph("Firma:", label), value("firma")],
+        [Paragraph("Ansprechpartner:", label), value("ansprechpartner")],
+        [Paragraph("Tel. / E-Mail:", label), value("kontakt")],
+        [Paragraph("Auftrags-Datum:", label), value("auftrags_datum")],
+        [Paragraph("Fertig bis spätestens:", label), value("fertig_bis")],
     ]
     right_rows = [
         [Paragraph("Fahrzeug", bold9), ""],
-        [Paragraph("Typ:", label), ""],
-        [Paragraph("Amtl. Kennzeichen:", label), ""],
-        [Paragraph("Fg.-Nr.:", label), ""],
-        [Paragraph("Farb-Nr.:", label), ""],
-        [Paragraph("km-Stand:", label), ""],
+        [Paragraph("Typ:", label), value("typ")],
+        [Paragraph("Amtl. Kennzeichen:", label), value("kennzeichen")],
+        [Paragraph("Fg.-Nr.:", label), value("fg_nr")],
+        [Paragraph("Farb-Nr.:", label), value("farb_nr")],
+        [Paragraph("km-Stand:", label), value("km_stand")],
     ]
 
     table_style = TableStyle(
@@ -4539,12 +5806,17 @@ def make_lackierauftrag_pdf(autohaus):
             [
                 [Paragraph("Abrechnung", bold9), "", "", ""],
                 [
-                    Paragraph("[ ] Selbstzahler", label),
-                    Paragraph("[ ] Kaskoversicherung", label),
-                    Paragraph("[ ] Haftpflicht gegnerisch", label),
-                    Paragraph("[ ] Sammelrechnung", label),
+                    checkbox("selbstzahler", "Selbstzahler"),
+                    checkbox("kasko", "Kaskoversicherung"),
+                    checkbox("haftpflicht", "Haftpflicht gegnerisch"),
+                    checkbox("sammelrechnung", "Sammelrechnung"),
                 ],
-                [Paragraph("Versicherung / Schaden-Nr.:", label), "", Paragraph("Vers.-Nehmer:", label), ""],
+                [
+                    Paragraph("Versicherung / Schaden-Nr.:", label),
+                    value("versicherung_schaden_nr"),
+                    Paragraph("Vers.-Nehmer:", label),
+                    value("versicherungsnehmer"),
+                ],
             ],
             colWidths=[4.5 * cm, 4.5 * cm, 4.5 * cm, 4.5 * cm],
             rowHeights=[0.55 * cm, 0.6 * cm, 0.7 * cm],
@@ -4569,11 +5841,19 @@ def make_lackierauftrag_pdf(autohaus):
     )
     story.append(Spacer(1, 10))
 
-    data = [[Paragraph("Karosserieteil", bold9), Paragraph("Seite", bold9), Paragraph("Bemerkung / Arbeitsumfang", bold9), Paragraph("I.O. / n.I.O.", bold9)]]
-    data.extend([["", "", "", ""] for _ in range(14)])
+    positions = [[Paragraph("Karosserieteil", bold9), Paragraph("Seite", bold9), Paragraph("Bemerkung / Arbeitsumfang", bold9), Paragraph("I.O. / n.I.O.", bold9)]]
+    for index in range(1, LACKIERAUFTRAG_POSITION_COUNT + 1):
+        positions.append(
+            [
+                Paragraph(text(form_data.get(f"position_{index}_teil")), label),
+                Paragraph(text(form_data.get(f"position_{index}_seite")), label),
+                Paragraph(text(form_data.get(f"position_{index}_bemerkung")), label),
+                Paragraph(text(form_data.get(f"position_{index}_status")), label),
+            ]
+        )
     story.append(
         Table(
-            data,
+            positions,
             colWidths=[4.5 * cm, 2 * cm, 9 * cm, 2.5 * cm],
             rowHeights=[0.55 * cm] + [0.7 * cm] * 14,
             style=TableStyle(
@@ -4597,7 +5877,7 @@ def make_lackierauftrag_pdf(autohaus):
                 [Paragraph("Auftrag ordnungsgemäß ausgeführt / Qualitätskontrolle durchgeführt", footer_style)],
                 [
                     Table(
-                        [[Paragraph("Datum:", label), "", Paragraph("Unterschrift Auftragnehmer:", label), ""]],
+                        [[Paragraph("Datum:", label), value("kontrolle_datum"), Paragraph("Unterschrift Auftragnehmer:", label), value("unterschrift_auftragnehmer")]],
                         colWidths=[2 * cm, 5.5 * cm, 5 * cm, 5.5 * cm],
                         rowHeights=[0.8 * cm],
                         style=TableStyle(
@@ -4628,9 +5908,9 @@ def make_lackierauftrag_pdf(autohaus):
     return buffer
 
 
-def send_lackierauftrag_pdf(autohaus):
+def send_lackierauftrag_pdf(autohaus, data=None):
     return send_file(
-        make_lackierauftrag_pdf(autohaus),
+        make_lackierauftrag_pdf(autohaus, data),
         download_name=lackierauftrag_filename(autohaus),
         mimetype="application/pdf",
         as_attachment=True,
@@ -4657,6 +5937,10 @@ def row_to_auftrag(row):
     auftrag["rechnung_status"] = clean_text(auftrag.get("rechnung_status")) or "offen"
     auftrag["rechnung_nummer"] = clean_text(auftrag.get("rechnung_nummer"))
     auftrag["rechnung_geschrieben_am"] = clean_text(auftrag.get("rechnung_geschrieben_am"))
+    bonus_amount = positive_money_amount(auftrag.get("bonus_netto_betrag"))
+    auftrag["bonus_netto_betrag"] = bonus_amount or 0.0
+    auftrag["bonus_netto_betrag_label"] = format_bonus_money(bonus_amount) if bonus_amount else ""
+    auftrag["bonus_preis_aktualisiert_am"] = clean_text(auftrag.get("bonus_preis_aktualisiert_am"))
     auftrag["angebot_status"] = clean_text(auftrag.get("angebot_status")) or (
         "angefragt" if auftrag["angebot_abgesendet"] else "entwurf"
     )
@@ -4675,9 +5959,165 @@ def row_to_auftrag(row):
     auftrag["partner_abholung_label"] = transport_meta.get("partner_abholung_label", transport_meta["abholung_label"])
     auftrag["angebot_annahme_label"] = transport_meta.get("angebot_annahme_label", "Gewünschter Bringtermin")
     auftrag["angebot_abholung_label"] = transport_meta.get("angebot_abholung_label", "Gewünschter Holtermin")
+    auftrag["planung"] = build_auftrag_planung(auftrag)
     auftrag["kunden_bauteile"] = build_customer_part_summaries(auftrag)
     auftrag["preisvorschlag"] = build_price_suggestion(auftrag)
+    bonus_basis, bonus_quelle, bonus_quelle_key = auftrag_bonus_preis(auftrag)
+    auftrag["bonus_basis_betrag"] = bonus_basis or 0.0
+    auftrag["bonus_basis_label"] = format_bonus_money(bonus_basis) if bonus_basis else ""
+    auftrag["bonus_basis_quelle"] = bonus_quelle
+    auftrag["bonus_basis_quelle_key"] = bonus_quelle_key
+    auftrag["bonus_preis_fehlt"] = int(auftrag.get("status") or 1) >= 5 and not bonus_basis
+    bonus_reference_date = auftrag.get("abholtermin_obj") or date.today()
+    auftrag["bonus_verrechnung_label"] = bonus_verrechnung_label(bonus_reference_date, bonus_basis)
+    auftrag["bonus_verrechnung_detail"] = bonus_verrechnung_detail(bonus_reference_date, bonus_basis)
     return auftrag
+
+
+def auftrag_planung_label(auftrag, feld):
+    if feld == "annahme_datum":
+        return "Holen" if auftrag.get("transport_art") == "hol_und_bring" else "Kommt"
+    if feld == "abholtermin":
+        return "Rückbringen" if auftrag.get("transport_art") == "hol_und_bring" else "Muss weg"
+    if feld == "start_datum":
+        return "Start"
+    if feld == "fertig_datum":
+        return "Fertig"
+    return feld
+
+
+def build_auftrag_planung(auftrag, reference_date=None):
+    heute = reference_date or date.today()
+    felder = (
+        ("annahme_datum", "secondary", 1),
+        ("start_datum", "primary", 2),
+        ("fertig_datum", "warning", 3),
+        ("abholtermin", "success", 4),
+    )
+    events = []
+    for feld, farbe, priority in felder:
+        event_date = auftrag.get(f"{feld}_obj")
+        if not event_date:
+            continue
+        label = auftrag_planung_label(auftrag, feld)
+        events.append(
+            {
+                "feld": feld,
+                "label": label,
+                "datum": event_date,
+                "datum_text": auftrag.get(feld),
+                "farbe": farbe,
+                "priority": priority,
+                "is_today": event_date == heute,
+                "is_past": event_date < heute,
+                "is_relevant": False,
+            }
+        )
+
+    date_warning = any(
+        event["datum"].year < heute.year - 1 or event["datum"].year > heute.year + 2
+        for event in events
+    )
+
+    status = int(auftrag.get("status") or 1)
+    if status >= 5:
+        relevante_felder = ("abholtermin", "fertig_datum", "start_datum", "annahme_datum")
+    elif status >= 4:
+        relevante_felder = ("abholtermin", "fertig_datum")
+    elif status >= 3:
+        relevante_felder = ("fertig_datum", "abholtermin")
+    elif status >= 2:
+        relevante_felder = ("start_datum", "fertig_datum", "abholtermin")
+    else:
+        relevante_felder = ("annahme_datum", "start_datum", "fertig_datum", "abholtermin")
+
+    candidates = [event for event in events if event["feld"] in relevante_felder]
+    future_or_today = [event for event in candidates if event["datum"] >= heute]
+    if future_or_today:
+        relevant = sorted(future_or_today, key=lambda event: (event["datum"], event["priority"]))[0]
+    elif candidates:
+        relevant = sorted(candidates, key=lambda event: (event["datum"], event["priority"]), reverse=True)[0]
+    else:
+        relevant = sorted(events, key=lambda event: (event["datum"], event["priority"]))[0] if events else None
+
+    if relevant:
+        for event in events:
+            event["is_relevant"] = event["feld"] == relevant["feld"]
+        delta = (relevant["datum"] - heute).days
+        if status >= 5:
+            sort_group = 3
+            badge_farbe = "dark"
+            hinweis = "Zurückgegeben"
+        elif date_warning:
+            sort_group = 4
+            badge_farbe = "danger"
+            hinweis = "Termin prüfen: Datum wirkt ungewöhnlich"
+        elif delta < 0:
+            sort_group = 0
+            badge_farbe = "danger"
+            hinweis = f"{relevant['label']} überfällig seit {relevant['datum_text']}"
+        elif delta == 0:
+            sort_group = 1
+            badge_farbe = "success"
+            hinweis = f"{relevant['label']} heute"
+        else:
+            sort_group = 2
+            badge_farbe = "primary"
+            hinweis = f"{relevant['label']} morgen" if delta == 1 else f"{relevant['label']} in {delta} Tagen"
+        sort_days = abs(delta)
+        sort_date_ord = relevant["datum"].toordinal()
+        badge = "Zurückgegeben" if status >= 5 else ("Termin prüfen" if date_warning else relevant["label"])
+        date_text = relevant["datum_text"]
+    else:
+        sort_group = 5
+        badge_farbe = "secondary"
+        hinweis = "Kein Termin gesetzt"
+        sort_days = 9999
+        sort_date_ord = date.max.toordinal()
+        badge = "Ohne Termin"
+        date_text = ""
+
+    group_keys = {
+        0: "overdue",
+        1: "today",
+        2: "upcoming",
+        3: "done",
+        4: "date-warning",
+        5: "empty",
+    }
+    is_week_relevant = bool(
+        relevant
+        and not date_warning
+        and status < 5
+        and relevant["datum"] >= heute
+        and (relevant["datum"] - heute).days <= 7
+    )
+    return {
+        "events": events,
+        "badge": badge,
+        "badge_farbe": badge_farbe,
+        "date_text": date_text,
+        "hinweis": hinweis,
+        "sort_group": sort_group,
+        "sort_days": sort_days,
+        "sort_date_ord": sort_date_ord,
+        "group_key": group_keys.get(sort_group, "empty"),
+        "has_date_warning": date_warning,
+        "is_week_relevant": is_week_relevant,
+    }
+
+
+def auftrag_planung_sort_key(auftrag):
+    planung = auftrag.get("planung") or {}
+    return (
+        int(planung.get("sort_group", 4)),
+        int(planung.get("sort_days", 9999)),
+        int(planung.get("sort_date_ord", date.max.toordinal())),
+        int(auftrag.get("status") or 1),
+        clean_text(auftrag.get("autohaus_name")).lower(),
+        clean_text(auftrag.get("kennzeichen")).lower(),
+        int(auftrag.get("id") or 0),
+    )
 
 
 def ensure_auftrag_analysis_from_documents(auftrag):
@@ -4747,7 +6187,7 @@ def get_auftrag(auftrag_id):
     return ensure_auftrag_analysis_from_documents(row_to_auftrag(row))
 
 
-def build_lexware_rechnung_context(auftrag):
+def build_lexware_rechnung_context(auftrag, invoice_net_amount=None):
     autohaus = get_autohaus(auftrag["autohaus_id"]) if auftrag.get("autohaus_id") else None
     kunde_name = clean_text(autohaus.get("name") if autohaus else "") or clean_text(auftrag.get("kunde_name"))
     kunde = {
@@ -4763,11 +6203,13 @@ def build_lexware_rechnung_context(auftrag):
     positionen = []
     angebot_text = clean_text(auftrag.get("werkstatt_angebot_text"))
     angebot_preis = clean_text(auftrag.get("werkstatt_angebot_preis"))
-    if angebot_text or angebot_preis:
+    bonus_betrag, _, _ = auftrag_bonus_preis(auftrag)
+    bonus_preis_label = format_bonus_money(bonus_betrag) if bonus_betrag else ""
+    if angebot_text or angebot_preis or bonus_preis_label:
         positionen.append(
             {
                 "bezeichnung": angebot_text or "Karosserie- und Lackierarbeiten",
-                "preis": angebot_preis,
+                "preis": angebot_preis or bonus_preis_label,
             }
         )
     else:
@@ -4793,11 +6235,17 @@ def build_lexware_rechnung_context(auftrag):
         ]
         if part
     )
+    bonus_invoice = build_invoice_bonus_transparency(auftrag, invoice_net_amount)
     return {
         "kunde": kunde,
         "positionen": positionen,
         "belegtext": belegtext,
-        "netto_betrag": parse_money_amount(clean_text(auftrag.get("werkstatt_angebot_preis"))),
+        "lexware_beschreibung": build_invoice_lexware_description(belegtext, bonus_invoice.get("text")),
+        "bonus_text": clean_text(bonus_invoice.get("text")),
+        "bonus_summary": clean_text(bonus_invoice.get("summary")),
+        "bonus_remark": clean_text(bonus_invoice.get("remark")),
+        "bonusmodell": bonus_invoice.get("bonusmodell") or {},
+        "netto_betrag": bonus_betrag,
         "api_ready": bool(LEXWARE_API_KEY),
         "tax_rate": LEXWARE_TAX_RATE,
         "lexware_kunden_url": LEXWARE_KUNDEN_URL,
@@ -4825,19 +6273,6 @@ def parse_money_amount(value):
         return None
 
 
-def format_bonus_money(value):
-    try:
-        amount = round(float(value or 0), 2)
-    except (TypeError, ValueError):
-        amount = 0.0
-    integer, decimals = f"{amount:.2f}".split(".")
-    groups = []
-    while integer:
-        groups.append(integer[-3:])
-        integer = integer[:-3]
-    return f"{'.'.join(reversed(groups))},{decimals} EUR"
-
-
 def positive_money_amount(value):
     if isinstance(value, (int, float)):
         amount = round(float(value), 2)
@@ -4846,6 +6281,243 @@ def positive_money_amount(value):
     if amount is None or amount <= 0:
         return None
     return amount
+
+
+def format_bonus_money(value):
+    amount = positive_money_amount(value)
+    if amount is None:
+        amount = 0.0
+    formatted = f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{formatted} €"
+
+
+def is_bonusmodell_aktiv(autohaus):
+    slug = clean_text((autohaus or {}).get("slug"))
+    return slug in BONUSMODELL_AKTIVE_PARTNER
+
+
+def rahmenvertrag_context(autohaus):
+    aktiv = is_bonusmodell_aktiv(autohaus)
+    return {
+        "aktiv": aktiv,
+        "status_label": "Rahmenvertrag aktiv" if aktiv else "Rahmenvertrag offen",
+        "button_label": "Bonusmodell" if aktiv else "Rahmenvertrag vereinbaren",
+        "erklaerung": RAHMENVERTRAG_TEXT,
+    }
+
+
+def bonus_verrechnung_date(reference_date=None):
+    _, monat_ende = month_bounds(reference_date or date.today())
+    return monat_ende
+
+
+def bonus_verrechnung_label(reference_date=None, bonus_amount=0):
+    if not positive_money_amount(bonus_amount):
+        return "unter Schwelle"
+    return f"ab {bonus_verrechnung_date(reference_date).strftime(DATE_FMT)}"
+
+
+def bonus_verrechnung_detail(reference_date=None, bonus_amount=0):
+    if not positive_money_amount(bonus_amount):
+        return "Sobald eine Bonusstufe erreicht ist, wird die Verrechnung hier mit Datum angezeigt."
+    return (
+        f"Der Bonus wird {bonus_verrechnung_label(reference_date, bonus_amount)} "
+        "auf der nächsten Rechnung verrechnet."
+    )
+
+
+def auftrag_bonus_preis(auftrag):
+    bonus_betrag = positive_money_amount((auftrag or {}).get("bonus_netto_betrag"))
+    if bonus_betrag:
+        return bonus_betrag, "Rechnungs-/Bonuspreis", "final"
+    angebot_betrag = positive_money_amount((auftrag or {}).get("werkstatt_angebot_preis"))
+    if angebot_betrag:
+        return angebot_betrag, "Werkstatt-Angebot", "angebot"
+    return None, "", ""
+
+
+def month_bounds(reference_date=None):
+    reference = reference_date or date.today()
+    start = date(reference.year, reference.month, 1)
+    if reference.month == 12:
+        ende = date(reference.year + 1, 1, 1)
+    else:
+        ende = date(reference.year, reference.month + 1, 1)
+    return start, ende
+
+
+def build_bonusmodell(auftraege, reference_date=None):
+    reference = reference_date or date.today()
+    monat_start, monat_ende = month_bounds(reference)
+    monatsumsatz = 0.0
+    bonus_auftraege = []
+    offene_preise = []
+
+    for auftrag in auftraege or []:
+        try:
+            status = int((auftrag or {}).get("status") or 0)
+        except Exception:
+            status = 0
+        if status < 5:
+            continue
+        rueckgabe_datum = (auftrag or {}).get("abholtermin_obj") or parse_date((auftrag or {}).get("abholtermin"))
+        if not rueckgabe_datum or rueckgabe_datum < monat_start or rueckgabe_datum >= monat_ende:
+            continue
+
+        betrag, quelle, quelle_key = auftrag_bonus_preis(auftrag)
+        item = {
+            "auftrag": auftrag,
+            "datum": rueckgabe_datum,
+            "datum_text": rueckgabe_datum.strftime(DATE_FMT),
+            "betrag": betrag,
+            "betrag_label": format_bonus_money(betrag) if betrag else "",
+            "quelle": quelle,
+            "quelle_key": quelle_key,
+            "preis_fehlt": betrag is None,
+        }
+        if betrag is None:
+            offene_preise.append(item)
+        else:
+            monatsumsatz += betrag
+        bonus_auftraege.append(item)
+
+    bonus_auftraege.sort(
+        key=lambda item: (
+            item["datum"],
+            int((item.get("auftrag") or {}).get("id") or 0),
+        ),
+        reverse=True,
+    )
+
+    aktive_stufe = {"schwelle": 0.0, "satz": 0.0, "label": "0 %", "schwelle_label": "0 €"}
+    for stufe in BONUSMODELL_STUFEN:
+        if monatsumsatz >= stufe["schwelle"]:
+            aktive_stufe = stufe
+    naechste_stufe = next((stufe for stufe in BONUSMODELL_STUFEN if monatsumsatz < stufe["schwelle"]), None)
+    bonus_netto = round(monatsumsatz * aktive_stufe["satz"], 2)
+    stufen = []
+    for stufe in BONUSMODELL_STUFEN:
+        item = dict(stufe)
+        item["erreicht"] = monatsumsatz >= stufe["schwelle"]
+        item["aktiv"] = stufe["schwelle"] == aktive_stufe.get("schwelle") and monatsumsatz >= stufe["schwelle"]
+        item["satz_prozent"] = int(round(stufe["satz"] * 100))
+        stufen.append(item)
+
+    return {
+        "monat_label": f"{MONATSNAMEN.get(reference.month, reference.month)} {reference.year}",
+        "umsatz_netto": round(monatsumsatz, 2),
+        "umsatz_netto_label": format_bonus_money(monatsumsatz),
+        "bonus_satz": aktive_stufe["satz"],
+        "bonus_satz_label": aktive_stufe["label"],
+        "bonus_netto": bonus_netto,
+        "bonus_netto_label": format_bonus_money(bonus_netto),
+        "verrechnung_label": bonus_verrechnung_label(reference, bonus_netto),
+        "verrechnung_detail": bonus_verrechnung_detail(reference, bonus_netto),
+        "stufen": stufen,
+        "aktive_stufe": aktive_stufe,
+        "naechste_stufe": naechste_stufe,
+        "bis_naechste_stufe_label": (
+            format_bonus_money(max(0.0, naechste_stufe["schwelle"] - monatsumsatz))
+            if naechste_stufe
+            else ""
+        ),
+        "auftraege": bonus_auftraege,
+        "offene_preise": offene_preise,
+        "offene_preise_count": len(offene_preise),
+        "gezaehlte_auftraege_count": sum(1 for item in bonus_auftraege if not item["preis_fehlt"]),
+    }
+
+
+def build_invoice_bonusmodell(auftrag, invoice_net_amount=None):
+    autohaus_id = int((auftrag or {}).get("autohaus_id") or 0)
+    if autohaus_id <= 0:
+        return {}
+    reference = parse_date((auftrag or {}).get("abholtermin")) or date.today()
+    effective_amount = positive_money_amount(invoice_net_amount) or positive_money_amount(
+        (auftrag or {}).get("bonus_netto_betrag")
+    )
+    current_id = int((auftrag or {}).get("id") or 0)
+    auftraege = list_auftraege(autohaus_id, include_archived=True)
+    found = False
+    for item in auftraege:
+        if int(item.get("id") or 0) != current_id:
+            continue
+        found = True
+        if effective_amount:
+            item["bonus_netto_betrag"] = effective_amount
+            item["bonus_netto_betrag_label"] = format_bonus_money(effective_amount)
+        break
+    if current_id and not found:
+        item = dict(auftrag)
+        if effective_amount:
+            item["bonus_netto_betrag"] = effective_amount
+        auftraege.append(row_to_auftrag(item) if "status_meta" not in item else item)
+    return build_bonusmodell(auftraege, reference)
+
+
+def build_invoice_bonus_transparency(auftrag, invoice_net_amount=None):
+    if not int((auftrag or {}).get("autohaus_id") or 0):
+        return {}
+    bonusmodell = build_invoice_bonusmodell(auftrag, invoice_net_amount)
+    if not bonusmodell:
+        return {}
+    current_amount = positive_money_amount(invoice_net_amount) or positive_money_amount(
+        (auftrag or {}).get("bonus_netto_betrag")
+    )
+    current_label = format_bonus_money(current_amount) if current_amount else "noch nicht gesetzt"
+    next_tier = bonusmodell.get("naechste_stufe")
+    lines = [
+        f"Partnerbonus transparent - Monatsübersicht {bonusmodell['monat_label']} (netto)",
+        f"Aktueller Monatsumsatz: {bonusmodell['umsatz_netto_label']}",
+        f"Diese Rechnung zählt mit: {current_label}",
+        f"Aktuelle Bonusstufe: {bonusmodell['bonus_satz_label']}",
+        f"Aktueller Bonus netto: {bonusmodell['bonus_netto_label']}",
+        f"Verrechnung: {bonusmodell['verrechnung_label']} auf der Folgerechnung",
+    ]
+    if next_tier:
+        lines.append(
+            f"Nächste Stufe: noch {bonusmodell['bis_naechste_stufe_label']} bis {next_tier['label']} Bonus"
+        )
+    else:
+        lines.append("Nächste Stufe: höchste Bonusstufe erreicht")
+    lines.append(
+        "Berechnung: Gezählt werden zurückgegebene Aufträge dieses Monats mit hinterlegtem Netto-Rechnungsbetrag."
+    )
+    counted_items = [item for item in bonusmodell.get("auftraege", []) if not item.get("preis_fehlt")]
+    if counted_items:
+        lines.append("Berücksichtigte Aufträge:")
+        for item in counted_items[:8]:
+            a = item.get("auftrag") or {}
+            title_parts = [
+                f"Auftrag #{a.get('id')}",
+                clean_text(a.get("fahrzeug")) or "Fahrzeug",
+                clean_text(a.get("kennzeichen")),
+            ]
+            title = " · ".join(part for part in title_parts if clean_text(part))
+            lines.append(f"- {item['datum_text']} · {title} · {item['betrag_label']}")
+        if len(counted_items) > 8:
+            lines.append(f"- weitere {len(counted_items) - 8} Auftrag/Aufträge im Monatslauf")
+    if bonusmodell.get("offene_preise_count"):
+        lines.append(f"Hinweis: {bonusmodell['offene_preise_count']} zurückgegebene Auftrag/Aufträge haben noch keinen Netto-Preis.")
+    summary = (
+        f"Monatsumsatz {bonusmodell['umsatz_netto_label']}, "
+        f"Stufe {bonusmodell['bonus_satz_label']}, "
+        f"Bonus {bonusmodell['bonus_netto_label']}, "
+        f"Verrechnung {bonusmodell['verrechnung_label']}."
+    )
+    return {
+        "text": "\n".join(lines),
+        "summary": summary,
+        "remark": f"Partnerbonus: {summary} Details stehen in der Rechnungsposition.",
+        "bonusmodell": bonusmodell,
+    }
+
+
+def build_invoice_lexware_description(belegtext, bonus_text=""):
+    parts = [clean_text(belegtext)]
+    if clean_text(bonus_text):
+        parts.append(clean_text(bonus_text))
+    return "\n\n".join(part for part in parts if part)[:3500]
 
 
 def extract_money_amounts_from_line(line):
@@ -4973,9 +6645,8 @@ def text_tokens_match_reference(blob, reference, minimum_matches=1):
     ]
     if not words:
         return False
-    unique_words = set(words)
-    matches = sum(1 for word in unique_words if word in blob)
-    return matches >= min(len(unique_words), max(1, minimum_matches))
+    matches = sum(1 for word in dict.fromkeys(words) if word in blob)
+    return matches >= min(len(set(words)), max(1, minimum_matches))
 
 
 def validate_werkstatt_rechnung_upload(auftrag, invoice_text, original_name, amount=None, invoice_number=""):
@@ -5015,13 +6686,13 @@ def validate_werkstatt_rechnung_upload(auftrag, invoice_text, original_name, amo
         result["blockers"].append("Die Datei sieht nicht eindeutig wie eine Rechnung aus.")
         return result
 
-    expected_plate = normalize_invoice_reference((auftrag or {}).get("kennzeichen"))
+    expected_plate = normalize_invoice_reference(auftrag.get("kennzeichen"))
     found_plates = extract_license_plate_tokens(combined)
     if expected_plate and found_plates and expected_plate not in found_plates:
         result["blockers"].append("Das erkannte Kennzeichen passt nicht zu diesem Auftrag.")
         return result
 
-    expected_vin = normalize_invoice_reference((auftrag or {}).get("fin_nummer"))
+    expected_vin = normalize_invoice_reference(auftrag.get("fin_nummer"))
     found_vins = extract_vin_tokens(combined)
     if expected_vin and found_vins and expected_vin not in found_vins:
         result["blockers"].append("Die erkannte FIN passt nicht zu diesem Auftrag.")
@@ -5032,11 +6703,11 @@ def validate_werkstatt_rechnung_upload(auftrag, invoice_text, original_name, amo
     if expected_vin and expected_vin in compact:
         result["evidence"].append("FIN passt")
 
-    auftragsnummer = normalize_invoice_reference((auftrag or {}).get("auftragsnummer"))
+    auftragsnummer = normalize_invoice_reference(auftrag.get("auftragsnummer"))
     if auftragsnummer and len(auftragsnummer) >= 4 and auftragsnummer in compact:
         result["evidence"].append("Auftragsnummer passt")
 
-    auftrag_id = clean_text((auftrag or {}).get("id"))
+    auftrag_id = clean_text(auftrag.get("id"))
     if auftrag_id and any(
         token in compact
         for token in (
@@ -5047,11 +6718,11 @@ def validate_werkstatt_rechnung_upload(auftrag, invoice_text, original_name, amo
     ):
         result["evidence"].append("Portal-Auftrag passt")
 
-    if text_tokens_match_reference(compact, (auftrag or {}).get("fahrzeug"), minimum_matches=2):
+    if text_tokens_match_reference(compact, auftrag.get("fahrzeug"), minimum_matches=2):
         result["evidence"].append("Fahrzeug passt")
-    if text_tokens_match_reference(compact, (auftrag or {}).get("autohaus_name"), minimum_matches=1):
+    if text_tokens_match_reference(compact, auftrag.get("autohaus_name"), minimum_matches=1):
         result["evidence"].append("Autohaus passt")
-    if text_tokens_match_reference(compact, (auftrag or {}).get("kunde_name"), minimum_matches=1):
+    if text_tokens_match_reference(compact, auftrag.get("kunde_name"), minimum_matches=1):
         result["evidence"].append("Kundenreferenz passt")
 
     if not result["evidence"]:
@@ -5069,229 +6740,248 @@ def validate_werkstatt_rechnung_upload(auftrag, invoice_text, original_name, amo
     return result
 
 
-def append_invoice_amount_to_internal_note(existing_note, amount):
-    amount = positive_money_amount(amount)
-    note = clean_text(existing_note)
-    if not amount:
-        return note
-    marker = "Rechnungsbetrag netto:"
-    normalized_note = normalize_document_text(note)
-    if normalize_document_text(marker) in normalized_note:
-        return note
-    line = f"{marker} {format_bonus_money(amount)}"
-    return "\n".join(part for part in [note, line] if clean_text(part))[:1000]
-
-
-def auftrag_bonus_preis(auftrag):
-    for key, label in (
-        ("werkstatt_angebot_preis", "Werkstatt-Angebot"),
-        ("rep_max_kosten", "Reparaturwert"),
-    ):
-        amount = parse_money_amount((auftrag or {}).get(key))
-        if amount:
-            return amount, label
-    internal_note = clean_text((auftrag or {}).get("notiz_intern"))
-    if "netto" in normalize_document_text(internal_note):
-        amount = parse_money_amount(internal_note)
-        if amount:
-            return amount, "Fahrzeugdaten"
-    return 0.0, ""
-
-
-def build_bonusmodell(auftraege, reference_date=None):
-    today = reference_date or date.today()
-    month_start = date(today.year, today.month, 1)
-    month_end = date(today.year + int(today.month == 12), 1 if today.month == 12 else today.month + 1, 1) - timedelta(days=1)
-    bonus_items = []
-    monatsumsatz = 0.0
-    offene_preise = 0
-
-    for auftrag in auftraege or []:
-        if auftrag.get("angebotsphase"):
-            continue
-        if int(auftrag.get("status") or 1) < 5:
-            continue
-        rueckgabe = parse_date(auftrag.get("abholtermin")) or parse_date(auftrag.get("geaendert_am"))
-        if not rueckgabe or rueckgabe < month_start or rueckgabe > month_end:
-            continue
-        betrag, quelle = auftrag_bonus_preis(auftrag)
-        preis_fehlt = not bool(betrag)
-        if preis_fehlt:
-            offene_preise += 1
-        else:
-            monatsumsatz += betrag
-        bonus_items.append(
-            {
-                "auftrag": auftrag,
-                "datum_text": format_date(rueckgabe),
-                "betrag": betrag,
-                "betrag_label": format_bonus_money(betrag) if betrag else "",
-                "quelle": quelle,
-                "preis_fehlt": preis_fehlt,
-            }
-        )
-
-    aktive_stufe = {"schwelle": 0.0, "satz": 0.0, "label": "0 %", "schwelle_label": "unter 3.000 EUR"}
-    for stufe in BONUSMODELL_STUFEN:
-        if monatsumsatz >= stufe["schwelle"]:
-            aktive_stufe = stufe
-
-    naechste_stufe = next((stufe for stufe in BONUSMODELL_STUFEN if monatsumsatz < stufe["schwelle"]), None)
-    bonus_netto = round(monatsumsatz * aktive_stufe["satz"], 2)
-    stufen = []
-    for stufe in BONUSMODELL_STUFEN:
-        item = dict(stufe)
-        item["aktiv"] = stufe["label"] == aktive_stufe["label"]
-        item["erreicht"] = monatsumsatz >= stufe["schwelle"]
-        stufen.append(item)
-
-    return {
-        "monat_label": f"{month_start.strftime('%m.%Y')}",
-        "umsatz_netto": round(monatsumsatz, 2),
-        "umsatz_netto_label": format_bonus_money(monatsumsatz),
-        "bonus_satz_label": aktive_stufe["label"],
-        "bonus_netto": bonus_netto,
-        "bonus_netto_label": format_bonus_money(bonus_netto),
-        "verrechnung_label": "offen" if bonus_netto > 0 else "unter Schwelle",
-        "stufen": stufen,
-        "naechste_stufe": naechste_stufe,
-        "bis_naechste_stufe_label": (
-            format_bonus_money(max(0.0, naechste_stufe["schwelle"] - monatsumsatz))
-            if naechste_stufe
-            else ""
-        ),
-        "auftraege": sorted(bonus_items, key=lambda item: item["datum_text"], reverse=True),
-        "offene_preise_count": offene_preise,
-        "gezaehlte_auftraege_count": sum(1 for item in bonus_items if not item["preis_fehlt"]),
-    }
-
-
-def get_partner_assistant_auftrag(auftrag_id, autohaus_id):
-    try:
-        auftrag_id = int(auftrag_id or 0)
-    except (TypeError, ValueError):
-        return None
-    if auftrag_id <= 0:
-        return None
+def save_werkstatt_rechnung_upload(auftrag_id, files):
     auftrag = get_auftrag(auftrag_id)
-    if not auftrag or int(auftrag.get("autohaus_id") or 0) != int(autohaus_id or 0):
-        return None
-    return auftrag
+    if not auftrag:
+        return {"saved": 0, "verified": 0, "amount": None, "invoice_number": "", "error": "Auftrag nicht gefunden."}
 
-
-def is_vehicle_planning_question(question):
-    text = normalize_document_text(question)
-    vehicle_terms = ("fahrzeug", "fahrzeuge", "auto", "autos", "wagen", "auftrag", "auftraege")
-    planning_terms = ("eingeplant", "geplant", "planung", "termin", "termine", "heute", "morgen", "woche", "start", "fertig", "abholung")
-    return any(term in text for term in vehicle_terms) and any(term in text for term in planning_terms)
-
-
-def assistant_vehicle_line(auftrag):
-    fahrzeug = clean_text(auftrag.get("fahrzeug")) or "Fahrzeug"
-    kennzeichen = clean_text(auftrag.get("kennzeichen"))
-    status = clean_text((auftrag.get("status_meta") or {}).get("label")) or "Status offen"
-    event_parts = []
-    for feld, label, _ in EVENT_FELDER:
-        if auftrag.get(feld):
-            event_parts.append(f"{label} {auftrag[feld]}")
-    details = f" ({kennzeichen})" if kennzeichen else ""
-    termin = ", ".join(event_parts[:4]) if event_parts else "kein Termin gesetzt"
-    return f"{fahrzeug}{details}: {termin}, Status {status}"
-
-
-def assistant_planned_vehicle_answer(question, autohaus_id):
-    auftraege = [a for a in list_auftraege(autohaus_id) if not a.get("archiviert") and not a.get("angebotsphase")]
-    dated = []
-    for auftrag in auftraege:
-        dates = [auftrag.get(f"{feld}_obj") for feld, _, _ in EVENT_FELDER if auftrag.get(f"{feld}_obj")]
-        if dates:
-            dated.append((min(dates), auftrag))
-    dated.sort(key=lambda item: item[0])
-    if not dated:
-        return "Aktuell sind keine aktiven Fahrzeugtermine hinterlegt."
-    lines = [f"- {assistant_vehicle_line(auftrag)}" for _, auftrag in dated[:6]]
-    rest = len(dated) - len(lines)
-    if rest > 0:
-        lines.append(f"- Weitere {rest} Fahrzeuge stehen im Portal.")
-    return "Aktuelle Fahrzeugplanung:\n" + "\n".join(lines)
-
-
-def partner_assistant_context_text(autohaus, auftrag=None):
-    parts = [
-        f"Autohaus: {clean_text((autohaus or {}).get('name'))}",
-        "Portal-Funktionen: Fahrzeuge anlegen, Unterlagen hochladen, Angebote anfragen, Status und Termine ansehen.",
-    ]
-    if auftrag:
-        parts.append(
-            "Aktueller Auftrag: "
-            + "; ".join(
-                part
-                for part in [
-                    clean_text(auftrag.get("fahrzeug")),
-                    clean_text(auftrag.get("kennzeichen")),
-                    clean_text(auftrag.get("analyse_text") or auftrag.get("beschreibung")),
-                    assistant_vehicle_line(auftrag),
-                ]
-                if part
-            )
-        )
-    planned = assistant_planned_vehicle_answer("fahrzeuge termine", autohaus["id"])
-    parts.append(planned)
-    return "\n".join(parts)
-
-
-def fallback_partner_assistant_answer(question, autohaus=None):
-    text = normalize_document_text(question)
-    if autohaus and is_vehicle_planning_question(question):
-        return assistant_planned_vehicle_answer(question, autohaus["id"])
-    if "bonus" in text or "stufe" in text:
-        return "Das Bonusmodell sehen Sie im Kundenportal. Dort stehen Monatsumsatz, aktuelle Stufe, Bonus netto und der Betrag bis zur nächsten Stufe."
-    if "angebot" in text:
-        return "Für ein Angebot können Sie im Portal 'Angebot anfordern' nutzen. Die Werkstatt prüft die Anfrage und stellt das Angebot anschließend zur Annahme bereit."
-    if "upload" in text or "datei" in text or "bild" in text:
-        return "Sie können Bilder, PDFs und Unterlagen direkt im Auftrag oder beim neuen Fahrzeug hochladen. Danach prüft die Werkstatt die Daten."
-    if "termin" in text or "kalender" in text:
-        return "Die Termine sehen Sie im Monatsblick und in den Fahrzeugdetails. Feiertage und Betriebsurlaub sind im Kalender markiert."
-    return "Ich helfe direkt hier im Autohaus-Portal: Fragen Sie nach Fahrzeugen, Terminen, Status, Uploads, Angeboten oder dem Bonusmodell."
-
-
-def ask_partner_assistant(question, autohaus, auftrag=None):
-    question = clean_text(question)[:900]
-    if not question:
-        return "Bitte geben Sie eine Frage ein.", "portal"
-    if is_vehicle_planning_question(question):
-        return assistant_planned_vehicle_answer(question, autohaus["id"]), "portal"
-
-    config = get_ai_config()
-    requests_module = get_requests()
-    if not config["openai_ready"] or requests_module is None:
-        return fallback_partner_assistant_answer(question, autohaus), "fallback"
-
-    payload = {
-        "model": config["openai_model"],
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Du bist der digitale KI-Helfer im Autohaus-Portal von Gärtner Karosserie & Lack. "
-                    "Antworte kurz, freundlich und praktisch. Hilf bei Fahrzeugstatus, Terminen, Uploads, "
-                    "Angeboten und Bonusmodell. Erfinde keine Preise, Termine oder Zusagen."
-                ),
-            },
-            {"role": "system", "content": partner_assistant_context_text(autohaus, auftrag)},
-            {"role": "user", "content": question},
-        ],
-        "temperature": 0.2,
-        "max_tokens": 320,
-    }
-    response, request_error = post_openai_chat_completion(requests_module, payload)
-    if request_error or response is None or response.status_code >= 400:
-        return fallback_partner_assistant_answer(question, autohaus), "fallback"
+    saved = 0
+    verified = 0
+    needs_review = 0
+    best_amount = None
+    best_invoice_number = ""
+    errors = []
+    warnings = []
+    db = get_db()
+    timestamp = now_str()
     try:
-        answer = clean_text(response.json()["choices"][0]["message"]["content"])
-    except Exception:
-        answer = ""
-    return (answer or fallback_partner_assistant_answer(question, autohaus), "openai" if answer else "fallback")
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        db.close()
+        return {"saved": 0, "verified": 0, "amount": None, "invoice_number": "", "error": f"Upload-Speicher ist nicht erreichbar: {clean_text(str(exc))[:300]}"}
+
+    for file in files or []:
+        if not file or not file.filename:
+            continue
+        original_name = secure_filename(file.filename)
+        if not original_name or not allowed_file(original_name):
+            continue
+        suffix = pathlib.Path(original_name).suffix.lower()
+        stored_name = f"{uuid.uuid4().hex}{suffix}"
+        target = UPLOAD_DIR / stored_name
+        try:
+            file.save(target)
+        except Exception as exc:
+            errors.append(f"{original_name} konnte nicht gespeichert werden: {clean_text(str(exc))[:300]}")
+            continue
+
+        mime_type = file.mimetype or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+        bundle = build_document_analysis_bundle_safe(target, original_name) if suffix in ANALYSIS_EXTENSIONS else {}
+        analysis_text = clean_text(bundle.get("text"))
+        structured_text = structured_analysis_text(bundle.get("structured"), original_name) if bundle.get("structured") else ""
+        invoice_text = "\n".join(part for part in [analysis_text, structured_text, original_name] if clean_text(part))
+        amount, amount_source = extract_invoice_total_amount(invoice_text)
+        invoice_number = extract_invoice_number(invoice_text)
+        validation = validate_werkstatt_rechnung_upload(
+            auftrag,
+            invoice_text,
+            original_name,
+            amount=amount,
+            invoice_number=invoice_number,
+        )
+        analyse_hinweis = clean_text(bundle.get("hint"))
+        if bundle.get("status") == "error" and analyse_hinweis:
+            validation["warnings"].append(analyse_hinweis)
+
+        if validation["blockers"]:
+            try:
+                target.unlink(missing_ok=True)
+            except Exception:
+                pass
+            errors.append(f"{original_name}: {' '.join(validation['blockers'])}")
+            continue
+
+        evidence = "; ".join(validation["evidence"])
+        if validation["valid"]:
+            status_text = "Prüfung bestanden"
+            verified += 1
+            if amount:
+                best_amount = amount
+            if invoice_number:
+                best_invoice_number = invoice_number
+        else:
+            status_text = "Bitte prüfen"
+            needs_review += 1
+        if validation["warnings"]:
+            warnings.extend(f"{original_name}: {warning}" for warning in validation["warnings"])
+
+        amount_text = format_bonus_money(amount) if amount else ""
+        extrakt_parts = [
+            f"Werkstatt-Rechnung: {status_text}.",
+            f"Betrag {amount_text} ({amount_source})." if amount_text else "",
+            f"Rechnungsnummer {invoice_number}." if invoice_number else "",
+            evidence if evidence else "",
+        ]
+        extrakt_kurz = " ".join(part for part in extrakt_parts if clean_text(part))[:500]
+        if not extrakt_kurz:
+            extrakt_kurz = "Werkstatt-Rechnung gespeichert. Bitte Original prüfen."
+
+        db.execute(
+            """
+            INSERT INTO dateien
+            (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, dokument_typ, notiz,
+             extrahierter_text, extrakt_kurz, analyse_quelle, analyse_json, analyse_hinweis, hochgeladen_am)
+            VALUES (?, NULL, ?, ?, ?, ?, 'intern', 'rechnung', 'Rechnung', ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                auftrag_id,
+                original_name,
+                stored_name,
+                mime_type,
+                target.stat().st_size,
+                status_text,
+                analysis_text,
+                extrakt_kurz,
+                clean_text(bundle.get("source")),
+                clean_text(bundle.get("analysis_json")),
+                " ".join(validation["warnings"])[:500] or analyse_hinweis,
+                timestamp,
+            ),
+        )
+        saved += 1
+
+    if verified:
+        db.execute(
+            """
+            UPDATE auftraege
+            SET rechnung_status='geschrieben',
+                rechnung_nummer=CASE WHEN ? != '' THEN ? ELSE rechnung_nummer END,
+                rechnung_geschrieben_am=CASE WHEN COALESCE(rechnung_geschrieben_am, '')='' THEN ? ELSE rechnung_geschrieben_am END,
+                bonus_netto_betrag=CASE WHEN ? > 0 THEN ? ELSE bonus_netto_betrag END,
+                bonus_preis_aktualisiert_am=CASE WHEN ? > 0 THEN ? ELSE bonus_preis_aktualisiert_am END,
+                geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                best_invoice_number,
+                best_invoice_number,
+                timestamp,
+                best_amount or 0,
+                best_amount or 0,
+                best_amount or 0,
+                timestamp,
+                timestamp,
+                auftrag_id,
+            ),
+        )
+    elif saved:
+        db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (timestamp, auftrag_id))
+
+    db.commit()
+    db.close()
+    return {
+        "saved": saved,
+        "verified": verified,
+        "needs_review": needs_review,
+        "amount": best_amount,
+        "invoice_number": best_invoice_number,
+        "error": errors[0] if errors else "",
+        "warning": warnings[0] if warnings else "",
+    }
+
+
+def save_bonusrechnung_upload(auftrag_id, files):
+    saved = 0
+    best_amount = None
+    best_source = ""
+    best_filename = ""
+    errors = []
+    db = get_db()
+    timestamp = now_str()
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        db.close()
+        return {"saved": 0, "amount": None, "error": f"Upload-Speicher ist nicht erreichbar: {clean_text(str(exc))[:300]}"}
+
+    for file in files or []:
+        if not file or not file.filename:
+            continue
+        original_name = secure_filename(file.filename)
+        if not original_name or not allowed_file(original_name):
+            continue
+        suffix = pathlib.Path(original_name).suffix.lower()
+        stored_name = f"{uuid.uuid4().hex}{suffix}"
+        target = UPLOAD_DIR / stored_name
+        try:
+            file.save(target)
+        except Exception as exc:
+            errors.append(f"{original_name} konnte nicht gespeichert werden: {clean_text(str(exc))[:300]}")
+            continue
+
+        mime_type = file.mimetype or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+        bundle = build_document_analysis_bundle_safe(target, original_name) if suffix in ANALYSIS_EXTENSIONS else {}
+        analysis_text = clean_text(bundle.get("text"))
+        structured_text = structured_analysis_text(bundle.get("structured"), original_name) if bundle.get("structured") else ""
+        invoice_text = "\n".join(part for part in [analysis_text, structured_text, original_name] if clean_text(part))
+        amount, amount_source = extract_invoice_total_amount(invoice_text)
+        extrakt_kurz = ""
+        if amount:
+            extrakt_kurz = f"Bonus-Rechnung: {format_bonus_money(amount)} erkannt ({amount_source})."
+            best_amount = amount
+            best_source = amount_source
+            best_filename = original_name
+        else:
+            extrakt_kurz = summarize_document_text(analysis_text, original_name) or "Rechnung gespeichert, Gesamtbetrag bitte prüfen."
+        analyse_hinweis = clean_text(bundle.get("hint"))
+        if bundle.get("status") == "error" and analyse_hinweis:
+            errors.append(analyse_hinweis)
+
+        db.execute(
+            """
+            INSERT INTO dateien
+            (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, dokument_typ, notiz,
+             extrahierter_text, extrakt_kurz, analyse_quelle, analyse_json, analyse_hinweis, hochgeladen_am)
+            VALUES (?, NULL, ?, ?, ?, ?, 'intern', 'bonusrechnung', 'Rechnung', '', ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                auftrag_id,
+                original_name,
+                stored_name,
+                mime_type,
+                target.stat().st_size,
+                analysis_text,
+                extrakt_kurz,
+                clean_text(bundle.get("source")),
+                clean_text(bundle.get("analysis_json")),
+                analyse_hinweis,
+                timestamp,
+            ),
+        )
+        saved += 1
+
+    if best_amount:
+        db.execute(
+            """
+            UPDATE auftraege
+            SET bonus_netto_betrag=?,
+                bonus_preis_aktualisiert_am=?,
+                rechnung_status=CASE WHEN COALESCE(rechnung_status, '') IN ('', 'offen') THEN 'geschrieben' ELSE rechnung_status END,
+                rechnung_geschrieben_am=CASE WHEN COALESCE(rechnung_geschrieben_am, '')='' THEN ? ELSE rechnung_geschrieben_am END,
+                geaendert_am=?
+            WHERE id=?
+            """,
+            (best_amount, timestamp, timestamp, timestamp, auftrag_id),
+        )
+    db.commit()
+    db.close()
+    return {
+        "saved": saved,
+        "amount": best_amount,
+        "source": best_source,
+        "filename": best_filename,
+        "error": errors[0] if errors else "",
+    }
 
 
 def lexware_request(method, path, payload=None, query=""):
@@ -5337,6 +7027,1551 @@ def lexware_request(method, path, payload=None, query=""):
     if response.status_code == 204 or not response.content:
         return {}
     return response.json()
+
+
+LEXWARE_RECHNUNG_TYPES = {
+    "invoice": "Einnahme",
+    "salesinvoice": "Einnahme",
+    "downpaymentinvoice": "Einnahme",
+    "purchaseinvoice": "Ausgabe",
+}
+
+LEXWARE_STATUS_LABELS = {
+    "draft": "Entwurf",
+    "open": "offen",
+    "overdue": "ueberfaellig",
+    "paid": "bezahlt",
+    "paidoff": "bezahlt",
+    "balanced": "bezahlt",
+    "transferred": "in Ueberweisung",
+    "sepadebit": "Lastschrift",
+    "voided": "storniert",
+    "unchecked": "zu pruefen",
+}
+
+
+def lexware_iso_to_date(value):
+    cleaned = clean_text(value)
+    if not cleaned:
+        return None
+    return parse_date(cleaned[:10])
+
+
+def lexware_date_label(value):
+    parsed = lexware_iso_to_date(value)
+    return parsed.strftime(DATE_FMT) if parsed else clean_text(value)
+
+
+def lexware_amount_label(value):
+    try:
+        amount = float(value or 0)
+    except (TypeError, ValueError):
+        return ""
+    return f"{amount:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def normalize_lexware_rechnung_status(voucher_status="", payment_status="", due_date="", open_amount=None):
+    voucher_status = clean_text(voucher_status).lower()
+    payment_status = clean_text(payment_status).lower()
+    try:
+        amount_open = float(open_amount or 0)
+    except (TypeError, ValueError):
+        amount_open = 0
+    if voucher_status in {"paid", "paidoff", "voided"} or payment_status == "balanced" or amount_open <= 0:
+        return "bezahlt"
+    if voucher_status == "unchecked":
+        return "pruefen"
+    due = lexware_iso_to_date(due_date)
+    if voucher_status == "overdue" or (due and due < date.today()):
+        return "ueberfaellig"
+    if voucher_status in {"transferred", "sepadebit"}:
+        return "in_zahlung"
+    return "offen"
+
+
+def lexware_rechnung_status_label(status):
+    return {
+        "bezahlt": "bezahlt",
+        "offen": "offen",
+        "ueberfaellig": "ueberfaellig",
+        "in_zahlung": "in Zahlung",
+        "pruefen": "zu pruefen",
+    }.get(clean_text(status), clean_text(status) or "offen")
+
+
+def lexware_rechnung_typ(voucher_type):
+    return LEXWARE_RECHNUNG_TYPES.get(clean_text(voucher_type).lower(), "Sonstiges")
+
+
+def lexware_rechnung_permalink(voucher_id, voucher_type):
+    voucher_id = clean_text(voucher_id)
+    voucher_type = clean_text(voucher_type).lower()
+    if not voucher_id:
+        return ""
+    path = "vouchers"
+    if voucher_type in {"invoice", "salesinvoice", "downpaymentinvoice"}:
+        path = "invoices"
+    elif voucher_type == "purchaseinvoice":
+        path = "vouchers"
+    elif voucher_type == "creditnote":
+        path = "credit-notes"
+    return f"{LEXWARE_APP_BASE_URL}/permalink/{path}/view/{voucher_id}"
+
+
+def fetch_lexware_voucherlist(voucher_types, voucher_status, size=100):
+    query = (
+        f"?voucherType={quote(voucher_types)}"
+        f"&voucherStatus={quote(voucher_status)}"
+        f"&archived=false&size={int(size)}&page=0&sort=updatedDate,DESC"
+    )
+    return lexware_request("GET", "/v1/voucherlist", query=query).get("content", [])
+
+
+def fetch_lexware_payment(voucher_id):
+    try:
+        return lexware_request("GET", f"/v1/payments/{quote(clean_text(voucher_id))}")
+    except RuntimeError as exc:
+        return {"error": str(exc)}
+
+
+def upsert_lexware_rechnung(voucher, payment=None):
+    payment = payment or {}
+    voucher_id = clean_text(voucher.get("id"))
+    if not voucher_id:
+        return False
+    open_amount = payment.get("openAmount", voucher.get("openAmount"))
+    status = normalize_lexware_rechnung_status(
+        voucher.get("voucherStatus"),
+        payment.get("paymentStatus"),
+        voucher.get("dueDate"),
+        open_amount,
+    )
+    now = now_str()
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT INTO lexware_rechnungen
+              (voucher_id, voucher_type, richtung, status, payment_status, voucher_status,
+               voucher_number, contact_name, contact_id, total_amount, open_amount, currency,
+               voucher_date, due_date, paid_date, lexware_url, raw_json, zuletzt_synced_am, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(voucher_id) DO UPDATE SET
+              voucher_type=excluded.voucher_type,
+              richtung=excluded.richtung,
+              status=excluded.status,
+              payment_status=excluded.payment_status,
+              voucher_status=excluded.voucher_status,
+              voucher_number=excluded.voucher_number,
+              contact_name=excluded.contact_name,
+              contact_id=excluded.contact_id,
+              total_amount=excluded.total_amount,
+              open_amount=excluded.open_amount,
+              currency=excluded.currency,
+              voucher_date=excluded.voucher_date,
+              due_date=excluded.due_date,
+              paid_date=excluded.paid_date,
+              lexware_url=excluded.lexware_url,
+              raw_json=excluded.raw_json,
+              zuletzt_synced_am=excluded.zuletzt_synced_am,
+              geaendert_am=excluded.geaendert_am
+            """,
+            (
+                voucher_id,
+                clean_text(voucher.get("voucherType")),
+                lexware_rechnung_typ(voucher.get("voucherType")),
+                status,
+                clean_text(payment.get("paymentStatus")),
+                clean_text(payment.get("voucherStatus") or voucher.get("voucherStatus")),
+                clean_text(voucher.get("voucherNumber")),
+                clean_text(voucher.get("contactName")),
+                clean_text(voucher.get("contactId")),
+                float(voucher.get("totalAmount") or 0),
+                float(open_amount or 0),
+                clean_text(voucher.get("currency") or payment.get("currency") or "EUR"),
+                lexware_date_label(voucher.get("voucherDate")),
+                lexware_date_label(voucher.get("dueDate")),
+                lexware_date_label(payment.get("paidDate")),
+                lexware_rechnung_permalink(voucher_id, voucher.get("voucherType")),
+                json.dumps({"voucher": voucher, "payment": payment}, ensure_ascii=False)[:20000],
+                now,
+                now,
+                now,
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return True
+
+
+def sync_lexware_rechnungen():
+    if not LEXWARE_API_KEY:
+        return {"ok": False, "message": "LEXWARE_API_KEY fehlt.", "synced": 0}
+    synced = 0
+    errors = []
+    for voucher_status in ("open", "overdue", "transferred", "sepadebit", "paid"):
+        try:
+            vouchers = fetch_lexware_voucherlist("invoice,salesinvoice,purchaseinvoice,downpaymentinvoice", voucher_status)
+        except RuntimeError as exc:
+            errors.append(str(exc))
+            continue
+        for voucher in vouchers:
+            payment = fetch_lexware_payment(voucher.get("id"))
+            upsert_lexware_rechnung(voucher, payment)
+            synced += 1
+            time.sleep(0.55)
+    set_app_setting("LEXWARE_LAST_SYNC", now_str())
+    set_app_setting("LEXWARE_LAST_SYNC_ERROR", "\n".join(errors)[:1000])
+    schedule_change_backup("lexware-rechnungen")
+    return {
+        "ok": not errors,
+        "message": f"{synced} Lexware-Rechnung(en) synchronisiert." if synced else "Keine Rechnungen gefunden.",
+        "synced": synced,
+        "errors": errors,
+    }
+
+
+def maybe_sync_lexware_rechnungen():
+    if app.config.get("TESTING"):
+        return None
+    if not LEXWARE_API_KEY:
+        return None
+    last_sync = get_app_setting("LEXWARE_LAST_SYNC", "")
+    try:
+        last_dt = datetime.strptime(last_sync, DATETIME_FMT)
+    except ValueError:
+        last_dt = None
+    if last_dt and datetime.now() - last_dt < timedelta(minutes=LEXWARE_AUTO_SYNC_MINUTES):
+        return None
+    return sync_lexware_rechnungen()
+
+
+def hydrate_lexware_rechnung(row):
+    item = dict(row)
+    item["status_label"] = lexware_rechnung_status_label(item.get("status"))
+    item["status_class"] = {
+        "bezahlt": "success",
+        "offen": "warning",
+        "ueberfaellig": "danger",
+        "in_zahlung": "info",
+        "pruefen": "secondary",
+    }.get(clean_text(item.get("status")), "secondary")
+    item["total_amount_label"] = lexware_amount_label(item.get("total_amount"))
+    item["open_amount_label"] = lexware_amount_label(item.get("open_amount"))
+    item["richtung_label"] = clean_text(item.get("richtung")) or lexware_rechnung_typ(item.get("voucher_type"))
+    return item
+
+
+def list_lexware_rechnungen(status="kritisch", limit=200):
+    status = clean_text(status) or "kritisch"
+    limit = max(1, min(int(limit or 200), 500))
+    db = get_db()
+    try:
+        if status == "alle":
+            rows = db.execute(
+                "SELECT * FROM lexware_rechnungen ORDER BY CASE WHEN status='ueberfaellig' THEN 0 WHEN status='offen' THEN 1 ELSE 2 END, due_date ASC, id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        elif status == "kritisch":
+            rows = db.execute(
+                "SELECT * FROM lexware_rechnungen WHERE status IN ('offen','ueberfaellig','in_zahlung','pruefen') ORDER BY CASE WHEN status='ueberfaellig' THEN 0 WHEN status='offen' THEN 1 ELSE 2 END, due_date ASC, id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT * FROM lexware_rechnungen WHERE status=? ORDER BY due_date ASC, id DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+    finally:
+        db.close()
+    return [hydrate_lexware_rechnung(row) for row in rows]
+
+
+def lexware_rechnungen_summary():
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT status, richtung, COUNT(*) AS count, COALESCE(SUM(open_amount), 0) AS amount
+            FROM lexware_rechnungen
+            GROUP BY status, richtung
+            """
+        ).fetchall()
+    finally:
+        db.close()
+    summary = {
+        "offen_count": 0,
+        "ueberfaellig_count": 0,
+        "offen_amount": 0.0,
+        "ueberfaellig_amount": 0.0,
+        "ausgaben_offen_count": 0,
+        "ausgaben_offen_amount": 0.0,
+        "ausgaben_offen_total_count": 0,
+        "ausgaben_offen_total_amount": 0.0,
+        "einnahmen_offen_count": 0,
+        "einnahmen_offen_amount": 0.0,
+        "einnahmen_offen_total_count": 0,
+        "einnahmen_offen_total_amount": 0.0,
+    }
+    for row in rows:
+        status = clean_text(row["status"])
+        richtung = clean_text(row["richtung"])
+        count = int(row["count"] or 0)
+        amount = float(row["amount"] or 0)
+        if status in {"offen", "in_zahlung", "pruefen"}:
+            summary["offen_count"] += count
+            summary["offen_amount"] += amount
+            if richtung == "Ausgabe":
+                summary["ausgaben_offen_count"] += count
+                summary["ausgaben_offen_amount"] += amount
+            elif richtung == "Einnahme":
+                summary["einnahmen_offen_count"] += count
+                summary["einnahmen_offen_amount"] += amount
+        if status == "ueberfaellig":
+            summary["ueberfaellig_count"] += count
+            summary["ueberfaellig_amount"] += amount
+            if richtung == "Ausgabe":
+                summary["ausgaben_offen_total_count"] += count
+                summary["ausgaben_offen_total_amount"] += amount
+            elif richtung == "Einnahme":
+                summary["einnahmen_offen_total_count"] += count
+                summary["einnahmen_offen_total_amount"] += amount
+    summary["ausgaben_offen_total_count"] += summary["ausgaben_offen_count"]
+    summary["ausgaben_offen_total_amount"] += summary["ausgaben_offen_amount"]
+    summary["einnahmen_offen_total_count"] += summary["einnahmen_offen_count"]
+    summary["einnahmen_offen_total_amount"] += summary["einnahmen_offen_amount"]
+    summary["offen_amount_label"] = lexware_amount_label(summary["offen_amount"])
+    summary["ueberfaellig_amount_label"] = lexware_amount_label(summary["ueberfaellig_amount"])
+    summary["ausgaben_offen_amount_label"] = lexware_amount_label(summary["ausgaben_offen_amount"])
+    summary["einnahmen_offen_amount_label"] = lexware_amount_label(summary["einnahmen_offen_amount"])
+    summary["ausgaben_offen_total_amount_label"] = lexware_amount_label(summary["ausgaben_offen_total_amount"])
+    summary["einnahmen_offen_total_amount_label"] = lexware_amount_label(summary["einnahmen_offen_total_amount"])
+    summary["last_sync"] = get_app_setting("LEXWARE_LAST_SYNC", "")
+    summary["last_error"] = get_app_setting("LEXWARE_LAST_SYNC_ERROR", "")
+    return summary
+
+
+def kontoauszug_file_allowed(filename):
+    return pathlib.Path(clean_text(filename)).suffix.lower() in KONTOAUSZUG_UPLOAD_EXTENSIONS
+
+
+def decode_bank_statement_bytes(raw):
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1", errors="ignore")
+
+
+def sha256_hex(data):
+    return hashlib.sha256(data or b"").hexdigest()
+
+
+BANK_DEBIT_TERMS = (
+    "soll",
+    "s",
+    "belastung",
+    "lastschrift",
+    "ausgang",
+    "abgang",
+    "abbuchung",
+    "kartenzahlung",
+    "debit",
+    "dr",
+)
+BANK_CREDIT_TERMS = (
+    "haben",
+    "h",
+    "gutschrift",
+    "eingang",
+    "zugang",
+    "zahlungseingang",
+    "credit",
+    "cr",
+)
+
+
+def normalize_bank_amount_text(value):
+    return clean_text(value).replace("\u2212", "-").replace("\u2013", "-").replace("\u2014", "-")
+
+
+def bank_sign_from_text(value):
+    text = normalize_bank_amount_text(value)
+    if not text:
+        return 0
+    normalized = normalize_document_text(text)
+    if re.search(r"(^\s*-)|(-\s*$)|\((.*?)\)", text):
+        return -1
+    if re.search(r"(^\s*\+)|(\+\s*$)", text):
+        return 1
+    has_debit = any(re.search(rf"\b{re.escape(term)}\b", normalized) for term in BANK_DEBIT_TERMS)
+    has_credit = any(re.search(rf"\b{re.escape(term)}\b", normalized) for term in BANK_CREDIT_TERMS)
+    if has_debit and not has_credit:
+        return -1
+    if has_credit and not has_debit:
+        return 1
+    return 0
+
+
+def parse_bank_amount(value):
+    text = normalize_bank_amount_text(value)
+    if not text:
+        return None
+    sign = bank_sign_from_text(text)
+    text = re.sub(
+        r"(EUR|€|Haben|Soll|Belastung|Lastschrift|Gutschrift|Eingang|Ausgang|Abgang|Zugang|Debit|Credit|Dr|Cr)",
+        "",
+        text,
+        flags=re.I,
+    )
+    text = text.replace("\u00a0", " ").replace("'", "").strip()
+    text = re.sub(r"[^0-9,.\-+]", "", text)
+    if not text:
+        return None
+    text = text.strip("+-")
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
+        text = text.replace(".", "").replace(",", ".")
+    elif "." in text:
+        parts = text.split(".")
+        if len(parts[-1]) == 2:
+            text = "".join(parts[:-1]).replace(".", "") + "." + parts[-1]
+        elif re.fullmatch(r"\d{1,3}(?:\.\d{3})+", text):
+            text = text.replace(".", "")
+    elif re.fullmatch(r"\d{1,3}(?:\.\d{3})+", text):
+        text = text.replace(".", "")
+    try:
+        amount = round(float(text), 2)
+    except ValueError:
+        return None
+    if sign < 0:
+        amount = -abs(amount)
+    elif sign > 0:
+        amount = abs(amount)
+    return amount
+
+
+def find_bank_amount_candidates(text):
+    value = normalize_bank_amount_text(text)
+    context_sign = bank_sign_from_text(value)
+    pattern = (
+        r"[-+]?\s*\(?\d{1,3}(?:[.']\d{3})*(?:,\d{2})\)?(?:\s*[-+])?(?:\s*(?:EUR|€|S|H|Soll|Haben|Abgang|Zugang))?"
+        r"|[-+]?\s*\(?\d+\.\d{2}\)?(?:\s*[-+])?(?:\s*(?:EUR|€|S|H|Soll|Haben|Abgang|Zugang))?"
+    )
+    candidates = []
+    for match in re.finditer(pattern, value, re.I):
+        token = match.group(0)
+        amount = parse_bank_amount(token)
+        if amount is not None and bank_sign_from_text(token) == 0 and context_sign:
+            amount = abs(amount) * context_sign
+        if amount is not None:
+            candidates.append({"text": token, "amount": amount, "start": match.start(), "end": match.end()})
+    return candidates
+
+
+def find_bank_amount_in_text(text):
+    value = clean_text(text)
+    if line_is_bank_summary(value):
+        return None
+    candidates = find_bank_amount_candidates(value)
+    if not candidates:
+        return None
+    saldo_match = re.search(r"\b(Saldo|Kontostand|Alter Bestand|Neuer Bestand)\b", value, re.I)
+    if saldo_match:
+        non_saldo = [candidate for candidate in candidates if candidate["start"] < saldo_match.start()]
+        if non_saldo:
+            return non_saldo[-1]["amount"]
+        return None
+    for candidate in reversed(candidates):
+        return candidate["amount"]
+    return None
+
+
+def parse_bank_date(value):
+    text = clean_text(value)
+    if not text:
+        return None
+    match = re.search(r"\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2})\b", text)
+    candidate = match.group(1) if match else text
+    for fmt in ("%d.%m.%Y", "%d.%m.%y", "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%m-%y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(candidate, fmt).date()
+        except ValueError:
+            continue
+    return parse_date(candidate)
+
+
+def parse_bank_date_label(value):
+    text = clean_text(value)
+    if not text:
+        return ""
+    parsed = parse_bank_date(text)
+    if parsed:
+        return parsed.strftime(DATE_FMT)
+    match = re.search(r"\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2})\b", text)
+    return clean_text(match.group(1) if match else text)
+
+
+def infer_bank_statement_year(text="", original_name=""):
+    filename = clean_text(original_name)
+    filename_date = re.search(r"(20\d{2})[._-]\d{1,2}[._-]\d{1,2}", filename)
+    if filename_date:
+        return filename_date.group(1)
+    for source in (filename, text[:1000]):
+        matches = re.findall(r"(?<!\d)(20\d{2})(?!\d)", clean_text(source))
+        if matches:
+            return matches[0]
+    return str(date.today().year)
+
+
+def bank_short_date_label(value, year):
+    text = clean_text(value).rstrip(".")
+    match = re.match(r"^(\d{1,2})\.(\d{1,2})$", text)
+    if not match:
+        return parse_bank_date_label(value)
+    return f"{int(match.group(1)):02d}.{int(match.group(2)):02d}.{year}"
+
+
+def parse_bank_statement_amount_with_marker(amount_text, marker):
+    amount = parse_bank_amount(amount_text)
+    if amount is None:
+        return None
+    marker = clean_text(marker).upper()
+    if marker == "S":
+        return -abs(amount)
+    if marker == "H":
+        return abs(amount)
+    return amount
+
+
+def line_starts_structured_bank_booking(line):
+    return bool(
+        re.match(
+            r"^\s*\d{1,2}\.\d{1,2}\.\s+\d{1,2}\.\d{1,2}\.\s+.+?\s+\d{1,3}(?:\.\d{3})*,\d{2}\s*[SH]\s*$",
+            clean_text(line),
+            re.I,
+        )
+    )
+
+
+def line_ends_bank_statement_section(line):
+    normalized = normalize_document_text(line)
+    return bool(
+        re.fullmatch(r"[─━_\-\s]+", clean_text(line))
+        or
+        line_is_bank_summary(line)
+        or normalized.startswith("ubertrag ")
+        or normalized.startswith("uebertrag ")
+        or normalized.startswith("anlage ")
+        or normalized.startswith("buchungstag")
+        or normalized.startswith("wert:")
+        or normalized.startswith("rechnung nr")
+        or normalized.startswith("ust")
+        or normalized.startswith("sehr geehrte")
+        or normalized.startswith("sie haben ")
+        or normalized.startswith("mit freundlichen")
+        or normalized in {"wert vorgang", "vorgangwert"}
+    )
+
+
+def parse_structured_kontoauszug_text(text, original_name=""):
+    year = infer_bank_statement_year(text, original_name)
+    rows = []
+    current = None
+    booking_re = re.compile(
+        r"^\s*(?P<book>\d{1,2}\.\d{1,2}\.)\s+"
+        r"(?P<valuta>\d{1,2}\.\d{1,2}\.)\s+"
+        r"(?P<title>.+?)\s+"
+        r"(?P<amount>\d{1,3}(?:\.\d{3})*,\d{2})\s*(?P<marker>[SH])\s*$",
+        re.I,
+    )
+
+    def flush():
+        nonlocal current
+        if not current:
+            return
+        details = [compact_whitespace(line) for line in current["details"] if compact_whitespace(line)]
+        name = details[0] if details else current["title"]
+        purpose = " ".join([current["title"]] + details)
+        rows.append(
+            {
+                "buchung_datum": bank_short_date_label(current["book"], year),
+                "name": name[:180],
+                "verwendungszweck": purpose[:1000],
+                "betrag": current["amount"],
+            }
+        )
+        current = None
+
+    for raw_line in text.splitlines():
+        line = compact_whitespace(raw_line)
+        if not line:
+            continue
+        match = booking_re.match(line)
+        if match:
+            flush()
+            amount = parse_bank_statement_amount_with_marker(match.group("amount"), match.group("marker"))
+            if amount is None:
+                current = None
+                continue
+            current = {
+                "book": match.group("book"),
+                "title": compact_whitespace(match.group("title")),
+                "amount": amount,
+                "details": [],
+            }
+            title_norm = normalize_document_text(current["title"])
+            if title_norm.startswith("abschluss lt anlage"):
+                current["details"].append(current["title"])
+            continue
+        if not current:
+            continue
+        if line_starts_structured_bank_booking(line):
+            flush()
+            continue
+        if line_ends_bank_statement_section(line):
+            flush()
+            continue
+        current["details"].append(line)
+    flush()
+    return rows
+
+
+def normalize_bank_header(value):
+    text = normalize_document_text(value)
+    return re.sub(r"[^a-z0-9]+", "", text)
+
+
+def csv_pick(row, wanted_headers):
+    _, value = csv_pick_with_key(row, wanted_headers)
+    return value
+
+
+def csv_pick_with_key(row, wanted_headers):
+    normalized = {normalize_bank_header(key): value for key, value in row.items()}
+    for header in wanted_headers:
+        key = normalize_bank_header(header)
+        if key in normalized and clean_text(normalized[key]):
+            return key, clean_text(normalized[key])
+    for raw_key, raw_value in row.items():
+        normalized_key = normalize_bank_header(raw_key)
+        if not clean_text(raw_value):
+            continue
+        for header in wanted_headers:
+            wanted = normalize_bank_header(header)
+            if wanted and wanted in normalized_key:
+                return normalized_key, clean_text(raw_value)
+    return "", ""
+
+
+def csv_join_values(row, wanted_headers):
+    parts = []
+    seen = set()
+    for header in wanted_headers:
+        _, value = csv_pick_with_key(row, (header,))
+        key = value.lower()
+        if value and key not in seen:
+            parts.append(value)
+            seen.add(key)
+    return " ".join(parts)
+
+
+def guess_bank_csv_delimiter(lines):
+    sample_lines = [line for line in lines[:20] if clean_text(line)]
+    counts = {
+        ";": sum(line.count(";") for line in sample_lines),
+        "\t": sum(line.count("\t") for line in sample_lines),
+        ",": sum(line.count(",") for line in sample_lines),
+    }
+    if counts[";"] >= 2:
+        return ";"
+    if counts["\t"] >= 2:
+        return "\t"
+    return "," if counts[","] >= 2 else ";"
+
+
+BANK_CSV_HEADER_MARKERS = {
+    "buchungstag",
+    "buchungsdatum",
+    "valuta",
+    "valutadatum",
+    "wertstellung",
+    "datum",
+    "date",
+    "auftraggeberempfaenger",
+    "auftraggeber",
+    "empfaenger",
+    "beguenstigter",
+    "zahlungspflichtiger",
+    "name",
+    "verwendungszweck",
+    "buchungstext",
+    "beschreibung",
+    "zahlungsreferenz",
+    "kundenreferenz",
+    "referenz",
+    "betrag",
+    "betrageur",
+    "betraginer",
+    "umsatz",
+    "umsatzeur",
+    "abgang",
+    "zugang",
+    "soll",
+    "haben",
+    "sollhaben",
+    "sh",
+    "waehrung",
+    "wahrung",
+    "currency",
+}
+
+
+def bank_csv_header_score(row):
+    score = 0
+    for cell in row:
+        normalized = normalize_bank_header(cell)
+        if not normalized:
+            continue
+        if normalized in BANK_CSV_HEADER_MARKERS:
+            score += 2
+        elif any(marker and marker in normalized for marker in BANK_CSV_HEADER_MARKERS):
+            score += 1
+    return score
+
+
+def csv_reader_rows(text):
+    lines = text.splitlines()
+    delimiter = guess_bank_csv_delimiter(lines)
+    reader = csv.reader(lines, delimiter=delimiter)
+    return [[clean_text(cell) for cell in row] for row in reader if any(clean_text(cell) for cell in row)]
+
+
+def csv_amount_from_row(row):
+    amount_key, amount_text = csv_pick_with_key(
+        row,
+        (
+            "Betrag",
+            "Umsatz",
+            "Amount",
+            "Wert",
+            "Abgang",
+            "Zugang",
+            "Betrag EUR",
+            "Betrag in EUR",
+            "Umsatz EUR",
+            "Umsatz in EUR",
+            "Transaction Amount",
+        ),
+    )
+    amount = parse_bank_amount(amount_text)
+    soll_key, soll_text = csv_pick_with_key(
+        row,
+        ("Soll", "Belastung", "Ausgang", "Abgang", "Abbuchung", "Debit", "Lastschrift"),
+    )
+    haben_key, haben_text = csv_pick_with_key(row, ("Haben", "Gutschrift", "Eingang", "Zugang", "Credit"))
+    if amount is None and soll_text:
+        amount = parse_bank_amount(soll_text)
+        if amount is not None:
+            amount = -abs(amount)
+    if amount is None and haben_text:
+        amount = parse_bank_amount(haben_text)
+        if amount is not None:
+            amount = abs(amount)
+    marker = csv_join_values(
+        row,
+        ("Soll/Haben", "S/H", "Haben/Soll", "Debit/Credit", "Umsatzart", "Kennzeichen", "Buchungsart", "Art", "Typ"),
+    )
+    marker_sign = bank_sign_from_text(marker)
+    debit_keys = {"soll", "belastung", "ausgang", "abgang", "abbuchung", "debit", "lastschrift"}
+    credit_keys = {"haben", "gutschrift", "eingang", "zugang", "credit"}
+    if amount is not None:
+        if amount_key in debit_keys or soll_key in debit_keys or marker_sign < 0:
+            amount = -abs(amount)
+        elif amount_key in credit_keys or haben_key in credit_keys or marker_sign > 0:
+            amount = abs(amount)
+    return amount
+
+
+def parse_kontoauszug_csv(text):
+    rows = []
+    try:
+        raw_rows = csv_reader_rows(text)
+    except csv.Error:
+        rows = []
+        raw_rows = []
+    if not raw_rows:
+        return rows
+    header_index = 0
+    best_score = -1
+    for index, raw_row in enumerate(raw_rows[:30]):
+        score = bank_csv_header_score(raw_row)
+        if score > best_score:
+            best_score = score
+            header_index = index
+    if best_score < 2:
+        return rows
+    headers = [clean_text(header) or f"Spalte {index + 1}" for index, header in enumerate(raw_rows[header_index])]
+    for raw_row in raw_rows[header_index + 1 :]:
+        if len(raw_row) < 2:
+            continue
+        padded = list(raw_row) + [""] * max(0, len(headers) - len(raw_row))
+        if len(padded) > len(headers):
+            padded = padded[: len(headers) - 1] + [" ".join(padded[len(headers) - 1 :])]
+        row = dict(zip(headers, padded))
+        amount = csv_amount_from_row(row)
+        if amount is None:
+            continue
+        purpose = csv_join_values(
+            row,
+            (
+                "Verwendungszweck",
+                "Zahlungsreferenz",
+                "Kundenreferenz",
+                "Mandatsreferenz",
+                "Referenz",
+                "Buchungstext",
+                "Beschreibung",
+                "Text",
+                "Purpose",
+            ),
+        )
+        name = csv_pick(
+            row,
+            (
+                "Auftraggeber/Empfänger",
+                "Auftraggeber",
+                "Empfänger",
+                "Name",
+                "Begünstigter",
+                "Zahlungspflichtiger",
+                "Debitor/Kreditor",
+            ),
+        )
+        booking_date = parse_bank_date_label(
+            csv_pick(row, ("Buchungstag", "Buchungsdatum", "Valuta", "Valutadatum", "Wertstellung", "Datum", "Date"))
+        )
+        joined_row = " ".join(clean_text(value) for value in row.values() if clean_text(value))
+        rows.append(
+            {
+                "buchung_datum": booking_date,
+                "name": name,
+                "verwendungszweck": purpose or joined_row[:500],
+                "betrag": amount,
+            }
+        )
+    return rows
+
+
+def line_is_bank_summary(line):
+    return bool(
+        re.search(
+            r"\b("
+            r"alter\s+saldo|neuer\s+saldo|anfangssaldo|endsaldo|zwischensaldo|saldo\s+alt|saldo\s+neu|"
+            r"kontostand|kontosaldo|alter\s+bestand|neuer\s+bestand|buchungssaldo|abschlusssaldo|"
+            r"summe\s+einnahmen|summe\s+ausgaben|gesamtumsatz|kontonummer|iban|bic|auszug\s+nr"
+            r")\b",
+            normalize_document_text(line),
+            re.I,
+        )
+    )
+
+
+def bank_line_has_date(line):
+    return bool(re.search(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|\b\d{4}-\d{1,2}-\d{1,2}\b", line))
+
+
+def finalize_bank_text_block(block):
+    lines = [line for line in block if clean_text(line)]
+    if not lines:
+        return None
+    joined = " ".join(lines)
+    if any(line_is_bank_summary(line) for line in lines):
+        return None
+    amount = None
+    for line in reversed(lines):
+        if line_is_bank_summary(line):
+            continue
+        candidate = find_bank_amount_in_text(line)
+        if candidate is not None:
+            amount = candidate
+            break
+    if amount is None:
+        return None
+    block_sign = bank_sign_from_text(joined)
+    if block_sign:
+        amount = abs(amount) * block_sign
+    booking_date = ""
+    for line in lines:
+        if bank_line_has_date(line):
+            booking_date = parse_bank_date_label(line)
+            break
+    if not booking_date:
+        return None
+    detail_lines = []
+    for line in lines:
+        cleaned = line
+        cleaned = re.sub(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|\b\d{4}-\d{1,2}-\d{1,2}\b", " ", cleaned)
+        for candidate in find_bank_amount_candidates(cleaned):
+            cleaned = cleaned.replace(candidate["text"], " ")
+        cleaned = compact_whitespace(cleaned)
+        if cleaned and not line_is_bank_summary(cleaned):
+            detail_lines.append(cleaned)
+    name = detail_lines[0] if detail_lines else ""
+    purpose = " ".join(detail_lines) or joined
+    return {
+        "buchung_datum": booking_date,
+        "name": name[:180],
+        "verwendungszweck": purpose[:1000],
+        "betrag": amount,
+    }
+
+
+def parse_kontoauszug_text(text, original_name=""):
+    structured_rows = parse_structured_kontoauszug_text(text, original_name)
+    if len(structured_rows) >= 3:
+        return structured_rows
+    rows = []
+    current = []
+    for raw_line in text.splitlines():
+        line = compact_whitespace(raw_line)
+        if not line:
+            continue
+        if line_is_bank_summary(line):
+            continue
+        has_date = bank_line_has_date(line)
+        if has_date and current:
+            finalized = finalize_bank_text_block(current)
+            if finalized:
+                rows.append(finalized)
+            current = [line]
+        else:
+            current.append(line)
+        if has_date and find_bank_amount_in_text(line) is not None and len(current) == 1:
+            # Single-line export: keep the block open until the next date, so trailing
+            # purpose lines can still be attached.
+            pass
+    if current:
+        finalized = finalize_bank_text_block(current)
+        if finalized:
+            rows.append(finalized)
+    if not rows:
+        for raw_line in text.splitlines():
+            line = compact_whitespace(raw_line)
+            if not line or line_is_bank_summary(line):
+                continue
+            has_date = bank_line_has_date(line)
+            amount = find_bank_amount_in_text(line)
+            if has_date and amount is not None:
+                rows.append(
+                    {
+                        "buchung_datum": parse_bank_date_label(line),
+                        "name": "",
+                        "verwendungszweck": line,
+                        "betrag": amount,
+                    }
+                )
+    return rows
+
+
+def parse_kontoauszug_buchungen(text, original_name=""):
+    suffix = pathlib.Path(clean_text(original_name)).suffix.lower()
+    rows = []
+    if suffix in {".csv", ".tsv"} or ";" in text[:1000] or "\t" in text[:1000]:
+        rows = parse_kontoauszug_csv(text)
+    if not rows:
+        rows = parse_kontoauszug_text(text, original_name)
+    cleaned = []
+    for row in rows:
+        amount = row.get("betrag")
+        if amount is None:
+            continue
+        purpose = compact_whitespace(clean_text(row.get("verwendungszweck")))
+        name = compact_whitespace(clean_text(row.get("name")))
+        if not purpose and not name:
+            continue
+        cleaned.append(
+            {
+                "buchung_datum": clean_text(row.get("buchung_datum")),
+                "name": name[:180],
+                "verwendungszweck": purpose[:1000],
+                "betrag": round(float(amount), 2),
+                "waehrung": "EUR",
+                "richtung": "Eingang" if float(amount) >= 0 else "Ausgang",
+            }
+        )
+    return cleaned
+
+
+def effective_bank_booking_amount(row):
+    try:
+        amount = float((row or {}).get("betrag") or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    text_sign = bank_sign_from_text(
+        " ".join(
+            clean_text((row or {}).get(key))
+            for key in ("name", "verwendungszweck")
+            if clean_text((row or {}).get(key))
+        )
+    )
+    direction = clean_text((row or {}).get("richtung"))
+    direction_sign = 0
+    if direction == "Ausgang":
+        direction_sign = -1
+    elif direction == "Eingang":
+        direction_sign = 1
+    if text_sign:
+        amount = abs(amount) * text_sign
+    elif direction_sign:
+        amount = abs(amount) * direction_sign
+    return round(amount, 2)
+
+
+def bank_booking_direction(amount):
+    try:
+        return "Eingang" if float(amount or 0) >= 0 else "Ausgang"
+    except (TypeError, ValueError):
+        return ""
+
+
+def save_kontoauszug_upload(file_storage):
+    filename = clean_text(getattr(file_storage, "filename", ""))
+    if not filename:
+        raise ValueError("Bitte einen Kontoauszug auswählen.")
+    if not kontoauszug_file_allowed(filename):
+        raise ValueError(f"{filename} ist kein erlaubter Kontoauszug. Bitte CSV, TXT oder PDF hochladen.")
+    suffix = pathlib.Path(filename).suffix.lower()
+    original_name = secure_filename(filename) or f"kontoauszug{suffix}"
+    stored_name = f"kontoauszug-{uuid.uuid4().hex}{suffix}"
+    target = UPLOAD_DIR / stored_name
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    file_storage.save(target)
+    raw = target.read_bytes()
+    if suffix == ".pdf":
+        text = clean_text(extract_document_text_local(target, original_name))
+    else:
+        text = decode_bank_statement_bytes(raw)
+    return {
+        "original_name": original_name,
+        "stored_name": stored_name,
+        "mime_type": clean_text(getattr(file_storage, "mimetype", "")) or clean_text(mimetypes.guess_type(original_name)[0]),
+        "size": target.stat().st_size if target.exists() else 0,
+        "file_hash": sha256_hex(raw),
+        "text": clean_text(text),
+    }
+
+
+def amount_matches_invoice(amount, invoice):
+    amount = abs(float(amount or 0))
+    candidates = [float(invoice.get("open_amount") or 0), float(invoice.get("total_amount") or 0)]
+    return any(abs(amount - abs(candidate)) <= 0.05 for candidate in candidates if abs(candidate) > 0)
+
+
+def bank_direction_matches_invoice(amount, invoice):
+    direction = clean_text(invoice.get("richtung"))
+    if amount >= 0 and direction == "Einnahme":
+        return True
+    if amount < 0 and direction == "Ausgabe":
+        return True
+    return False
+
+
+def compact_match_key(value):
+    return re.sub(r"[^a-z0-9]+", "", normalize_document_text(value))
+
+
+def kontoauszug_buchung_key(row):
+    date_key = clean_text(row.get("buchung_datum"))
+    amount_key = f"{float(row.get('betrag') or 0):.2f}"
+    text_key = compact_match_key(" ".join([row.get("name", ""), row.get("verwendungszweck", "")]))[:160]
+    return sha256_hex(f"{date_key}|{amount_key}|{text_key}".encode("utf-8"))
+
+
+def kontoauszug_buchung_already_imported(row, exclude_import_id=0):
+    key = kontoauszug_buchung_key(row)
+    if not key:
+        return False
+    db = get_db()
+    try:
+        existing = db.execute(
+            """
+            SELECT id
+            FROM kontoauszug_buchungen
+            WHERE buchung_key=? AND import_id<>?
+            LIMIT 1
+            """,
+            (key, int(exclude_import_id or 0)),
+        ).fetchone()
+    finally:
+        db.close()
+    return bool(existing)
+
+
+def validate_kontoauszug_buchung(row):
+    amount = abs(float(row.get("betrag") or 0))
+    text_blob = " ".join([clean_text(row.get("name")), clean_text(row.get("verwendungszweck"))])
+    normalized = normalize_document_text(text_blob)
+    reasons = []
+    if not clean_text(row.get("buchung_datum")):
+        reasons.append("Datum fehlt")
+    if amount <= 0:
+        reasons.append("Betrag fehlt")
+    if amount >= 50000:
+        reasons.append("Betrag ungewoehnlich hoch")
+    if any(term in normalized for term in ("saldo", "kontostand", "alter bestand", "neuer bestand", "iban", "bic")):
+        reasons.append("Saldo/Kontodaten erkannt")
+    if len(compact_match_key(text_blob)) < 8:
+        reasons.append("Text zu kurz")
+    if reasons:
+        return False, "; ".join(reasons)
+    return True, ""
+
+
+def invoice_number_found_in_bank_text(voucher_number, bank_text):
+    voucher = normalize_document_text(voucher_number)
+    if not voucher:
+        return False
+    if voucher in bank_text:
+        return True
+    compact_voucher = compact_match_key(voucher)
+    compact_text = compact_match_key(bank_text)
+    return bool(compact_voucher and compact_voucher in compact_text)
+
+
+def match_kontoauszug_buchung_to_rechnung(buchung):
+    amount = float(buchung.get("betrag") or 0)
+    text_blob = normalize_document_text(
+        " ".join([buchung.get("name", ""), buchung.get("verwendungszweck", "")])
+    )
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM lexware_rechnungen
+            WHERE status IN ('offen', 'ueberfaellig', 'in_zahlung', 'pruefen')
+            ORDER BY CASE WHEN status='ueberfaellig' THEN 0 ELSE 1 END, due_date ASC, id DESC
+            LIMIT 500
+            """
+        ).fetchall()
+    finally:
+        db.close()
+    candidates = []
+    for row in rows:
+        invoice = dict(row)
+        score = 0
+        reasons = []
+        amount_hit = amount_matches_invoice(amount, invoice)
+        direction_hit = bank_direction_matches_invoice(amount, invoice)
+        invoice_hit = invoice_number_found_in_bank_text(invoice.get("voucher_number"), text_blob)
+        if amount_hit:
+            score += 45
+            reasons.append("Betrag passt")
+        if invoice_hit:
+            score += 60
+            reasons.append("Rechnungsnummer gefunden")
+        contact_words = [
+            word
+            for word in normalize_document_text(invoice.get("contact_name")).split()
+            if len(word) >= 4
+        ][:4]
+        if contact_words:
+            hits = sum(1 for word in contact_words if word in text_blob)
+            if hits:
+                score += min(25, hits * 10)
+                reasons.append("Kontakt passt")
+        if direction_hit:
+            score += 10
+            reasons.append("Richtung passt")
+        elif clean_text(invoice.get("richtung")) in {"Einnahme", "Ausgabe"}:
+            score -= 15
+            reasons.append("Richtung widerspricht")
+        if score > 0:
+            candidates.append(
+                {
+                    "invoice": invoice,
+                    "score": score,
+                    "reasons": reasons,
+                    "amount_hit": amount_hit,
+                    "direction_hit": direction_hit,
+                    "invoice_hit": invoice_hit,
+                }
+            )
+    if not candidates:
+        return None, 0, "Kein sicherer Treffer"
+    candidates.sort(key=lambda item: item["score"], reverse=True)
+    best = candidates[0]
+    second = candidates[1] if len(candidates) > 1 else None
+    hint = ", ".join(best["reasons"]) if best["reasons"] else "Treffer unsicher"
+    if best["score"] < 70:
+        return None, best["score"], f"Zu unsicher: {hint}"
+    if not best["amount_hit"]:
+        return None, best["score"], f"Betrag weicht ab - bitte manuell prüfen: {hint}"
+    if not best["direction_hit"]:
+        return None, best["score"], f"Richtung widerspricht - bitte manuell prüfen: {hint}"
+    if not best["invoice_hit"]:
+        return None, best["score"], f"Keine eindeutige Rechnungsnummer im Kontoauszug: {hint}"
+    if second and second["score"] >= best["score"] - 12 and not best["invoice_hit"]:
+        return None, best["score"], "Mehrere ähnliche Treffer - bitte manuell prüfen"
+    return best["invoice"], best["score"], hint
+
+
+def mark_rechnung_from_kontoauszug_paid(rechnung_id, buchung):
+    db = get_db()
+    try:
+        db.execute(
+            """
+            UPDATE lexware_rechnungen
+            SET status='bezahlt',
+                payment_status='bankauszug',
+                open_amount=0,
+                paid_date=?,
+                zuletzt_synced_am=?,
+                geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                clean_text(buchung.get("buchung_datum")) or date.today().strftime(DATE_FMT),
+                now_str(),
+                now_str(),
+                int(rechnung_id),
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def import_kontoauszug(file_storage):
+    upload = save_kontoauszug_upload(file_storage)
+    db = get_db()
+    try:
+        duplicate_import = db.execute(
+            """
+            SELECT id, original_name, erstellt_am
+            FROM kontoauszug_importe
+            WHERE file_hash<>'' AND file_hash=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (upload["file_hash"],),
+        ).fetchone()
+    finally:
+        db.close()
+    if duplicate_import:
+        return {
+            "ok": True,
+            "duplicate": True,
+            "import_id": int(duplicate_import["id"]),
+            "buchungen": 0,
+            "matched": 0,
+            "pruefen": 0,
+            "message": (
+                "Kontoauszug wurde bereits importiert "
+                f"({duplicate_import['original_name']} am {duplicate_import['erstellt_am']})."
+            ),
+        }
+    rows = parse_kontoauszug_buchungen(upload["text"], upload["original_name"])
+    now = now_str()
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO kontoauszug_importe
+              (original_name, stored_name, mime_type, size, file_hash, extrahierter_text,
+               buchungen_count, matched_count, pruefen_count, erstellt_am)
+            VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?)
+            """,
+            (
+                upload["original_name"],
+                upload["stored_name"],
+                upload["mime_type"],
+                int(upload["size"] or 0),
+                upload["file_hash"],
+                upload["text"][:20000],
+                now,
+            ),
+        )
+        import_id = int(cursor.lastrowid)
+        db.commit()
+    finally:
+        db.close()
+
+    matched = 0
+    pruefen = 0
+    duplicate_rows = 0
+    for row in rows:
+        effective_amount = effective_bank_booking_amount(row)
+        row["betrag"] = effective_amount
+        row["richtung"] = bank_booking_direction(effective_amount)
+        booking_key = kontoauszug_buchung_key(row)
+        row_ok, row_hint = validate_kontoauszug_buchung(row)
+        if kontoauszug_buchung_already_imported(row, exclude_import_id=import_id):
+            rechnung, score, hint = None, 0, "Doppelte Buchung aus bereits importiertem Kontoauszug"
+            status = "duplikat"
+            rechnung_id = 0
+            duplicate_rows += 1
+        elif not row_ok:
+            rechnung, score, hint = None, 0, f"Bitte pruefen: {row_hint}"
+            status = "pruefen"
+            rechnung_id = 0
+            pruefen += 1
+        else:
+            rechnung, score, hint = match_kontoauszug_buchung_to_rechnung(row)
+            status = "zugeordnet" if rechnung else "offen"
+            rechnung_id = int(rechnung["id"]) if rechnung else 0
+        if rechnung and status == "zugeordnet":
+            mark_rechnung_from_kontoauszug_paid(rechnung_id, row)
+            matched += 1
+        db = get_db()
+        try:
+            db.execute(
+                """
+                INSERT INTO kontoauszug_buchungen
+                  (import_id, buchung_datum, name, verwendungszweck, betrag, waehrung, richtung,
+                   status, rechnung_id, match_score, hinweis, buchung_key, erstellt_am)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    import_id,
+                    row["buchung_datum"],
+                    row["name"],
+                    row["verwendungszweck"],
+                    row["betrag"],
+                    row["waehrung"],
+                    row["richtung"],
+                    status,
+                    rechnung_id,
+                    int(score or 0),
+                    hint,
+                    booking_key,
+                    now_str(),
+                ),
+            )
+            db.commit()
+        finally:
+            db.close()
+
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE kontoauszug_importe SET buchungen_count=?, matched_count=?, pruefen_count=? WHERE id=?",
+            (len(rows), matched, pruefen, import_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+    schedule_change_backup("kontoauszug")
+    return {
+        "ok": True,
+        "import_id": import_id,
+        "buchungen": len(rows),
+        "matched": matched,
+        "pruefen": pruefen,
+        "duplicates": duplicate_rows,
+        "message": (
+            f"{len(rows)} Buchung(en) erkannt, {matched} Zahlung(en) zugeordnet, "
+            f"{pruefen} zur Kontrolle, {duplicate_rows} doppelt."
+        ),
+    }
+
+
+def hydrate_kontoauszug_buchung(row):
+    item = dict(row)
+    item["effektiver_betrag"] = effective_bank_booking_amount(item)
+    item["effektive_richtung"] = bank_booking_direction(item["effektiver_betrag"])
+    item["betrag_label"] = lexware_amount_label(item["effektiver_betrag"])
+    item["betrag_korrigiert"] = abs(float(item.get("betrag") or 0) - item["effektiver_betrag"]) > 0.001
+    item["status_label"] = {
+        "zugeordnet": "erledigt",
+        "offen": "offen",
+        "pruefen": "prüfen",
+        "duplikat": "doppelt",
+        "ignoriert": "ignoriert",
+    }.get(clean_text(item.get("status")), clean_text(item.get("status")) or "offen")
+    item["status_class"] = {
+        "zugeordnet": "success",
+        "offen": "warning",
+        "pruefen": "danger",
+        "duplikat": "secondary",
+        "ignoriert": "secondary",
+    }.get(clean_text(item.get("status")), "secondary")
+    return item
+
+
+def kontoauszug_import_statement_sort_key(row):
+    item = dict(row or {})
+    original_name = clean_text(item.get("original_name"))
+    candidates = [
+        r"vom[_\s-]+(20\d{2})[._-](\d{1,2})[._-](\d{1,2})",
+        r"(20\d{2})[._-](\d{1,2})[._-](\d{1,2})",
+    ]
+    for pattern in candidates:
+        match = re.search(pattern, original_name, re.I)
+        if match:
+            year, month, day = (int(part) for part in match.groups())
+            return (year * 10000 + month * 100 + day, int(item.get("id") or 0))
+    return (0, int(item.get("id") or 0))
+
+
+def list_kontoauszug_buchungen(limit=80):
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT b.*, r.voucher_number, r.contact_name AS rechnung_contact_name, r.lexware_url
+            FROM kontoauszug_buchungen b
+            LEFT JOIN lexware_rechnungen r ON r.id=b.rechnung_id
+            ORDER BY b.id DESC
+            LIMIT ?
+            """,
+            (max(1, min(int(limit or 80), 300)),),
+        ).fetchall()
+    finally:
+        db.close()
+    return [hydrate_kontoauszug_buchung(row) for row in rows]
+
+
+def list_kontoauszug_importe(limit=10):
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM kontoauszug_importe
+            ORDER BY id DESC
+            LIMIT 200
+            """
+        ).fetchall()
+    finally:
+        db.close()
+    sorted_rows = sorted((dict(row) for row in rows), key=kontoauszug_import_statement_sort_key, reverse=True)
+    return sorted_rows[: max(1, min(int(limit or 10), 50))]
+
+
+def kontoauszug_auswertung(import_id=None):
+    db = get_db()
+    try:
+        latest_import = None
+        if import_id:
+            latest_import = db.execute(
+                "SELECT * FROM kontoauszug_importe WHERE id=?",
+                (int(import_id),),
+            ).fetchone()
+        if latest_import is None:
+            import_rows = db.execute(
+                """
+                SELECT *
+                FROM kontoauszug_importe
+                """
+            ).fetchall()
+            if import_rows:
+                latest_import = sorted(import_rows, key=kontoauszug_import_statement_sort_key, reverse=True)[0]
+        params = ()
+        where_sql = ""
+        if latest_import:
+            where_sql = "WHERE import_id=?"
+            params = (int(latest_import["id"]),)
+        rows = db.execute(
+            f"""
+            SELECT betrag, status, name, verwendungszweck
+            FROM kontoauszug_buchungen
+            {where_sql}
+            """,
+            params,
+        ).fetchall()
+    finally:
+        db.close()
+    data = {
+        "buchungen_count": len(rows or []),
+        "einnahmen": 0.0,
+        "ausgaben": 0.0,
+        "saldo": 0.0,
+        "einnahmen_count": 0,
+        "ausgaben_count": 0,
+        "zugeordnet_count": 0,
+        "offen_count": 0,
+        "pruefen_count": 0,
+        "duplikat_count": 0,
+        "offene_einnahmen": 0.0,
+        "offene_ausgaben": 0.0,
+        "pruefen_amount": 0.0,
+    }
+    for source_row in rows or []:
+        row = dict(source_row)
+        status = clean_text(row.get("status"))
+        amount = effective_bank_booking_amount(row)
+        if status == "zugeordnet":
+            data["zugeordnet_count"] += 1
+        elif status == "offen":
+            data["offen_count"] += 1
+        elif status == "pruefen":
+            data["pruefen_count"] += 1
+            data["pruefen_amount"] += abs(amount)
+        elif status == "duplikat":
+            data["duplikat_count"] += 1
+        if status not in {"zugeordnet", "offen"}:
+            continue
+        data["saldo"] += amount
+        if amount >= 0:
+            data["einnahmen"] += amount
+            data["einnahmen_count"] += 1
+            if status == "offen":
+                data["offene_einnahmen"] += amount
+        else:
+            data["ausgaben"] += abs(amount)
+            data["ausgaben_count"] += 1
+            if status == "offen":
+                data["offene_ausgaben"] += abs(amount)
+    einnahmen = float(data.get("einnahmen") or 0)
+    ausgaben = float(data.get("ausgaben") or 0)
+    saldo = float(data.get("saldo") or 0)
+    offene_einnahmen = float(data.get("offene_einnahmen") or 0)
+    offene_ausgaben = float(data.get("offene_ausgaben") or 0)
+    pruefen_amount = float(data.get("pruefen_amount") or 0)
+    latest = dict(latest_import) if latest_import else {}
+    result = {
+        "hat_import": bool(latest_import),
+        "import_id": int(latest.get("id") or 0),
+        "datei": clean_text(latest.get("original_name")),
+        "erstellt_am": clean_text(latest.get("erstellt_am")),
+        "buchungen_count": int(data.get("buchungen_count") or 0),
+        "einnahmen_count": int(data.get("einnahmen_count") or 0),
+        "ausgaben_count": int(data.get("ausgaben_count") or 0),
+        "zugeordnet_count": int(data.get("zugeordnet_count") or 0),
+        "offen_count": int(data.get("offen_count") or 0),
+        "pruefen_count": int(data.get("pruefen_count") or 0),
+        "duplikat_count": int(data.get("duplikat_count") or 0),
+        "einnahmen_amount": einnahmen,
+        "ausgaben_amount": ausgaben,
+        "umsatz_amount": saldo,
+        "offene_einnahmen_amount": offene_einnahmen,
+        "offene_ausgaben_amount": offene_ausgaben,
+        "pruefen_amount": pruefen_amount,
+    }
+    result["einnahmen_label"] = lexware_amount_label(einnahmen)
+    result["ausgaben_label"] = lexware_amount_label(ausgaben)
+    result["umsatz_label"] = lexware_amount_label(saldo)
+    result["offene_einnahmen_label"] = lexware_amount_label(offene_einnahmen)
+    result["offene_ausgaben_label"] = lexware_amount_label(offene_ausgaben)
+    result["pruefen_label"] = lexware_amount_label(pruefen_amount)
+    result["umsatz_class"] = "text-success" if saldo >= 0 else "text-danger"
+    return result
+
+
+def admin_rechnungen_count():
+    try:
+        summary = lexware_rechnungen_summary()
+        return int(summary["offen_count"] + summary["ueberfaellig_count"])
+    except Exception:
+        return 0
 
 
 def find_lexware_contact(kunde):
@@ -5423,7 +8658,11 @@ def lexware_datetime(value=None):
 def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
     contact_id, contact_created, can_reference_contact = ensure_lexware_contact(rechnung["kunde"])
     position = rechnung["positionen"][0] if rechnung["positionen"] else {}
-    description = rechnung["belegtext"]
+    description = clean_text(rechnung.get("lexware_beschreibung")) or build_invoice_lexware_description(
+        rechnung.get("belegtext"),
+        rechnung.get("bonus_text"),
+    )
+    remark = clean_text(rechnung.get("bonus_remark")) or "Vielen Dank für Ihren Auftrag."
     invoice_address = (
         {"contactId": contact_id}
         if can_reference_contact
@@ -5456,7 +8695,7 @@ def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
         },
         "title": "Rechnung",
         "introduction": "Die ausgeführten Karosserie- und Lackierarbeiten stellen wir Ihnen hiermit in Rechnung.",
-        "remark": "Vielen Dank für Ihren Auftrag.",
+        "remark": remark,
     }
     created = lexware_request("POST", "/v1/invoices", payload)
     invoice_id = created["id"]
@@ -5507,105 +8746,9 @@ def list_auftraege(autohaus_id=None, include_archived=False, include_angebote=Fa
     db.close()
 
     auftraege = [row_to_auftrag(row) for row in rows]
-    auftraege.sort(
-        key=lambda a: (
-            a["status"] >= 4,
-            a["annahme_datum_obj"] or date.max,
-            a["abholtermin_obj"] or date.max,
-            clean_text(a.get("kennzeichen")).lower(),
-        )
-    )
+    mark_auftraege_reklamationsstatus(auftraege)
+    auftraege.sort(key=auftrag_planung_sort_key)
     return auftraege
-
-
-def build_status_board_event(auftrag, heute=None):
-    heute = heute or date.today()
-    status = int(auftrag.get("status") or 1)
-    labels = {
-        "annahme_datum": auftrag.get("annahme_label") or "Anlieferung",
-        "start_datum": "Start",
-        "fertig_datum": "Fertig",
-        "abholtermin": auftrag.get("abholung_label") or "Abholung",
-    }
-    field_order_by_status = {
-        1: ("annahme_datum", "start_datum", "fertig_datum", "abholtermin"),
-        2: ("start_datum", "fertig_datum", "abholtermin", "annahme_datum"),
-        3: ("fertig_datum", "abholtermin", "start_datum", "annahme_datum"),
-        4: ("abholtermin", "fertig_datum", "start_datum", "annahme_datum"),
-        5: ("abholtermin", "fertig_datum", "start_datum", "annahme_datum"),
-    }
-    dated_events = []
-    for field in field_order_by_status.get(status, field_order_by_status[1]):
-        event_date = auftrag.get(f"{field}_obj") or parse_date(auftrag.get(field))
-        if not event_date:
-            continue
-        dated_events.append(
-            {
-                "field": field,
-                "label": labels[field],
-                "date": event_date,
-                "date_text": event_date.strftime(DATE_FMT),
-            }
-        )
-
-    if not dated_events:
-        return {
-            "label": "Termin",
-            "date_text": "kein Termin",
-            "state": "missing",
-            "sort": (3, 0),
-        }
-
-    upcoming = [event for event in dated_events if event["date"] >= heute]
-    if upcoming:
-        event = min(upcoming, key=lambda item: item["date"])
-        state = "today" if event["date"] == heute else "future"
-        sort_bucket = 0 if state == "today" else 1
-        sort_value = event["date"].toordinal()
-    else:
-        event = max(dated_events, key=lambda item: item["date"])
-        state = "done" if status >= 5 else "overdue"
-        sort_bucket = 2 if state == "done" else 0
-        sort_value = -event["date"].toordinal()
-
-    return {
-        "label": event["label"],
-        "date_text": event["date_text"],
-        "state": state,
-        "sort": (sort_bucket, sort_value),
-    }
-
-
-def build_admin_status_board(auftraege):
-    heute = date.today()
-    grouped = {status_id: [] for status_id in STATUSLISTE}
-    for auftrag in auftraege or []:
-        status = int(auftrag.get("status") or 1)
-        if status not in grouped:
-            status = 1
-        auftrag["status_board_event"] = build_status_board_event(auftrag, heute)
-        grouped[status].append(auftrag)
-
-    columns = []
-    for status_id, meta in STATUSLISTE.items():
-        items = sorted(
-            grouped.get(status_id, []),
-            key=lambda auftrag: (
-                auftrag["status_board_event"]["sort"],
-                clean_text(auftrag.get("autohaus_name")).lower(),
-                clean_text(auftrag.get("kennzeichen")).lower(),
-                int(auftrag.get("id") or 0),
-            ),
-        )
-        columns.append(
-            {
-                "status": status_id,
-                "meta": meta,
-                "count": len(items),
-                "items": items,
-            }
-        )
-    return columns
 
 
 def list_angebotsanfragen(autohaus_id=None):
@@ -5684,7 +8827,7 @@ def is_today_finished_auftrag(auftrag, today_finished_ids, today):
 def list_dateien(auftrag_id):
     db = get_db()
     rows = db.execute(
-        f"SELECT {DATEI_LIST_COLUMNS} FROM dateien WHERE auftrag_id=? ORDER BY hochgeladen_am DESC, id DESC",
+        "SELECT * FROM dateien WHERE auftrag_id=? ORDER BY hochgeladen_am DESC, id DESC",
         (auftrag_id,),
     ).fetchall()
     db.close()
@@ -5699,7 +8842,7 @@ def list_dateien_for_auftraege(auftrag_ids):
     db = get_db()
     rows = db.execute(
         f"""
-        SELECT {DATEI_LIST_COLUMNS}
+        SELECT *
         FROM dateien
         WHERE auftrag_id IN ({placeholders})
         ORDER BY hochgeladen_am DESC, id DESC
@@ -5731,375 +8874,6 @@ def get_datei(datei_id):
     return hydrate_datei(dict(row)) if row else None
 
 
-def blob_to_bytes(value):
-    if value is None:
-        return b""
-    if isinstance(value, bytes):
-        return value
-    if isinstance(value, bytearray):
-        return bytes(value)
-    if isinstance(value, memoryview):
-        return value.tobytes()
-    return b""
-
-
-def update_datei_content_blob(datei_id, content):
-    if not datei_id or not content:
-        return
-    db = get_db()
-    try:
-        db.execute(
-            "UPDATE dateien SET content_blob=?, size=? WHERE id=?",
-            (content, len(content), datei_id),
-        )
-        db.commit()
-    finally:
-        db.close()
-
-
-def remember_existing_datei_file(datei, path):
-    if blob_to_bytes(datei.get("content_blob")):
-        return
-    try:
-        content = path.read_bytes()
-    except OSError:
-        return
-    update_datei_content_blob(datei.get("id"), content)
-
-
-def newest_backup_paths():
-    if not BACKUP_DIR.exists():
-        return []
-
-    def sort_key(path):
-        try:
-            return path.stat().st_mtime
-        except OSError:
-            return 0
-
-    return sorted(BACKUP_DIR.glob("kundenstatus-backup-*.zip"), key=sort_key, reverse=True)
-
-
-def restore_datei_content_from_backups(stored_name):
-    member_name = f"uploads/{stored_name}"
-    max_bytes = MAX_UPLOAD_MB * 1024 * 1024
-    for backup_path in newest_backup_paths():
-        try:
-            with zipfile.ZipFile(backup_path) as archive:
-                if member_name not in archive.namelist():
-                    continue
-                with archive.open(member_name) as source:
-                    content = source.read(max_bytes + 1)
-        except Exception as exc:
-            print(f"WARNUNG: Upload-Restore aus {backup_path.name} fehlgeschlagen: {exc}")
-            continue
-        if content and len(content) <= max_bytes:
-            return content
-    return b""
-
-
-def write_restored_datei_file(stored_name, content):
-    path = UPLOAD_DIR / stored_name
-    try:
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
-        return path
-    except OSError:
-        fallback = pathlib.Path(tempfile.gettempdir()) / stored_name
-        fallback.write_bytes(content)
-        return fallback
-
-
-def resolve_datei_path(datei):
-    stored_name = pathlib.Path(clean_text(datei.get("stored_name"))).name
-    if not stored_name:
-        return None
-    path = UPLOAD_DIR / stored_name
-    if path.exists():
-        remember_existing_datei_file(datei, path)
-        return path
-
-    content = blob_to_bytes(datei.get("content_blob"))
-    if not content:
-        content = restore_datei_content_from_backups(stored_name)
-        if not content:
-            return None
-        update_datei_content_blob(datei.get("id"), content)
-    return write_restored_datei_file(stored_name, content)
-
-
-def backfill_upload_content_blobs(limit=None):
-    max_bytes = MAX_UPLOAD_MB * 1024 * 1024
-    limit = max(1, int(limit or env_int("UPLOAD_BLOB_BACKFILL_LIMIT", 5000)))
-    db = get_db()
-    saved = 0
-    missing = 0
-    try:
-        rows = db.execute(
-            """
-            SELECT id, stored_name
-            FROM dateien
-            WHERE content_blob IS NULL OR length(content_blob)=0
-            ORDER BY id ASC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-        for row in rows:
-            stored_name = pathlib.Path(clean_text(row["stored_name"])).name
-            if not stored_name:
-                missing += 1
-                continue
-            path = UPLOAD_DIR / stored_name
-            content = b""
-            try:
-                if path.exists() and path.is_file() and path.stat().st_size <= max_bytes:
-                    content = path.read_bytes()
-            except OSError:
-                content = b""
-            if not content:
-                content = restore_datei_content_from_backups(stored_name)
-            if content:
-                db.execute(
-                    "UPDATE dateien SET content_blob=?, size=? WHERE id=?",
-                    (content, len(content), row["id"]),
-                )
-                saved += 1
-            else:
-                missing += 1
-        db.commit()
-    finally:
-        db.close()
-    if saved or missing:
-        print(f"Upload-Nachsicherung: {saved} Datei(en) in der Datenbank gesichert, {missing} fehlen weiterhin.")
-    return {"saved": saved, "missing": missing}
-
-
-def upload_blob_backfill_worker():
-    try:
-        backfill_upload_content_blobs()
-    except Exception as exc:
-        print(f"WARNUNG: Upload-Nachsicherung fehlgeschlagen: {exc}")
-
-
-def start_upload_blob_backfill():
-    global _upload_blob_backfill_started
-    if _upload_blob_backfill_started or not env_flag("UPLOAD_BLOB_BACKFILL_ON_STARTUP", True):
-        return
-    _upload_blob_backfill_started = True
-    thread = threading.Thread(target=upload_blob_backfill_worker, daemon=True)
-    thread.start()
-
-
-def missing_datei_response(datei, back_url=None, replace_url=None):
-    back_url = clean_text(back_url)
-    if not back_url:
-        back_url = url_for("auftrag_detail", auftrag_id=datei["auftrag_id"])
-    return (
-        render_template_string(
-            """
-<!DOCTYPE html>
-<html lang="de">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Datei nicht verfügbar</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
-  <main class="container py-5">
-    <div class="alert alert-warning">
-      <h1 class="h4">Datei ist nicht mehr im Speicher vorhanden.</h1>
-      <p class="mb-2">
-        Der Datenbankeintrag existiert noch, aber die Originaldatei
-        <strong>{{ datei['original_name'] }}</strong> liegt nicht mehr im Upload-Speicher.
-      </p>
-      <p class="mb-0">Bitte die Unterlage in diesem Auftrag einmal neu hochladen.</p>
-    </div>
-    {% if replace_url %}
-    <form method="POST" action="{{ replace_url }}" enctype="multipart/form-data" class="card card-body mb-3">
-      {{ csrf_field()|safe }}
-      <label class="form-label fw-semibold">Fehlende Datei ersetzen</label>
-      <input type="file" name="datei" class="form-control mb-3" required>
-      <button type="submit" class="btn btn-dark align-self-start">Datei ersetzen</button>
-    </form>
-    {% endif %}
-    <a class="btn btn-outline-dark" href="{{ back_url }}">Zurück zum Auftrag</a>
-  </main>
-</body>
-</html>
-            """,
-            datei=datei,
-            back_url=back_url,
-            replace_url=replace_url,
-        ),
-        404,
-    )
-
-
-def replace_datei_content(datei, file_storage):
-    if not datei:
-        raise ValueError("Datei-Eintrag nicht gefunden.")
-    if not file_storage or not file_storage.filename:
-        raise ValueError("Bitte eine Datei auswählen.")
-
-    original_name = secure_filename(file_storage.filename)
-    if not original_name or not allowed_file(original_name):
-        raise ValueError("Dieser Dateityp ist nicht erlaubt.")
-
-    suffix = pathlib.Path(original_name).suffix.lower()
-    stored_name = f"{uuid.uuid4().hex}{suffix}"
-    target = UPLOAD_DIR / stored_name
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    file_storage.save(target)
-    content = target.read_bytes()
-    mime_type = file_storage.mimetype or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
-
-    dokument_typ = clean_text(datei.get("dokument_typ"))
-    extrahierter_text = clean_text(datei.get("extrahierter_text"))
-    extrakt_kurz = clean_text(datei.get("extrakt_kurz"))
-    analyse_quelle = clean_text(datei.get("analyse_quelle"))
-    analyse_json = clean_text(datei.get("analyse_json"))
-    analyse_hinweis = clean_text(datei.get("analyse_hinweis"))
-    is_analysis_document = (
-        clean_text(datei.get("kategorie")) == "standard"
-        and datei.get("reklamation_id") is None
-        and suffix in ANALYSIS_EXTENSIONS
-    )
-    if is_analysis_document:
-        bundle = build_document_analysis_bundle_safe(target, original_name)
-        extrahierter_text = clean_text(bundle.get("text"))
-        analyse_quelle = clean_text(bundle.get("source"))
-        analyse_json = clean_text(bundle.get("analysis_json"))
-        analyse_hinweis = clean_text(bundle.get("hint"))
-        dokument_typ = (
-            classify_document(extrahierter_text, original_name)
-            if extrahierter_text
-            else classify_document("", original_name)
-        )
-        extrakt_kurz = summarize_document_text(extrahierter_text, original_name)
-
-    old_stored_name = pathlib.Path(clean_text(datei.get("stored_name"))).name
-    if old_stored_name and old_stored_name != stored_name:
-        move_upload_to_deleted_area(UPLOAD_DIR / old_stored_name, f"replace-datei-{datei['id']}")
-
-    db = get_db()
-    try:
-        db.execute(
-            """
-            UPDATE dateien
-            SET original_name=?,
-                stored_name=?,
-                mime_type=?,
-                size=?,
-                dokument_typ=?,
-                extrahierter_text=?,
-                extrakt_kurz=?,
-                analyse_quelle=?,
-                analyse_json=?,
-                analyse_hinweis=?,
-                content_blob=?,
-                hochgeladen_am=?
-            WHERE id=?
-            """,
-            (
-                original_name,
-                stored_name,
-                mime_type,
-                len(content),
-                dokument_typ,
-                extrahierter_text,
-                extrakt_kurz,
-                analyse_quelle,
-                analyse_json,
-                analyse_hinweis,
-                content,
-                now_str(),
-                datei["id"],
-            ),
-        )
-        db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), datei["auftrag_id"]))
-        db.commit()
-    finally:
-        db.close()
-
-    if is_analysis_document:
-        apply_document_data_to_auftrag(datei["auftrag_id"], prefer_documents=False)
-    return stored_name
-
-
-def datei_ersetzen_form_response(datei, action_url=None, back_url=None):
-    action_url = clean_text(action_url) or url_for("admin_datei_ersetzen", datei_id=datei["id"])
-    back_url = clean_text(back_url) or url_for("auftrag_detail", auftrag_id=datei["auftrag_id"])
-    return render_template_string(
-        """
-<!DOCTYPE html>
-<html lang="de">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Datei ersetzen</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
-  <main class="container py-5">
-    <div class="card shadow-sm">
-      <div class="card-body p-4">
-        <h1 class="h4 mb-2">Datei ersetzen</h1>
-        <p class="text-muted mb-4">
-          Datei-ID {{ datei['id'] }} · aktuell hinterlegt:
-          <strong>{{ datei['original_name'] }}</strong>
-        </p>
-        <form method="POST" action="{{ action_url }}" enctype="multipart/form-data">
-          {{ csrf_field()|safe }}
-          <label class="form-label fw-semibold">Originaldatei neu hochladen</label>
-          <input type="file" name="datei" class="form-control form-control-lg mb-3" required>
-          <div class="d-flex gap-2 flex-wrap">
-            <button type="submit" class="btn btn-dark btn-lg">Datei ersetzen</button>
-            <a class="btn btn-outline-dark btn-lg" href="{{ back_url }}">Zurück zum Auftrag</a>
-          </div>
-        </form>
-      </div>
-    </div>
-  </main>
-</body>
-</html>
-        """,
-        datei=datei,
-        action_url=action_url,
-        back_url=back_url,
-    )
-
-
-def delete_datei_eintrag(datei_id, reason="datei"):
-    datei = get_datei(datei_id)
-    if not datei:
-        return False, None
-    auftrag = get_auftrag(datei["auftrag_id"])
-    if not auftrag:
-        return False, None
-
-    stored_name = pathlib.Path(clean_text(datei.get("stored_name"))).name
-    path = UPLOAD_DIR / stored_name
-    try:
-        move_upload_to_deleted_area(path, f"{reason}-{datei_id}")
-    except OSError:
-        pass
-
-    db = get_db()
-    db.execute("DELETE FROM dateien WHERE id=? AND auftrag_id=?", (datei_id, auftrag["id"]))
-    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag["id"]))
-    db.commit()
-    db.close()
-
-    if clean_text(datei.get("kategorie")) == "standard" and datei.get("reklamation_id") is None:
-        reset_document_review_checks(
-            auftrag["id"],
-            "Eine hochgeladene Unterlage wurde entfernt. Bitte die erkannten Daten kurz prüfen.",
-        )
-    return True, auftrag
-
-
 def delete_partner_datei(autohaus_id, datei_id):
     datei = get_datei(datei_id)
     if not datei:
@@ -6111,25 +8885,32 @@ def delete_partner_datei(autohaus_id, datei_id):
         or clean_text(datei.get("quelle")) != "autohaus"
     ):
         return False, None
-    return delete_datei_eintrag(datei_id, "partner-datei")
 
+    stored_name = pathlib.Path(clean_text(datei.get("stored_name"))).name
+    path = UPLOAD_DIR / stored_name
+    try:
+        move_upload_to_deleted_area(path, f"partner-datei-{datei_id}")
+    except OSError:
+        pass
 
-def delete_reklamation_eintrag(reklamation_id, autohaus_id=None):
-    reklamation = get_reklamation(reklamation_id)
-    if not reklamation:
-        return False, None
-    if autohaus_id is not None and int(reklamation.get("autohaus_id") or 0) != int(autohaus_id or 0):
-        return False, None
-    auftrag_id = reklamation["auftrag_id"]
-    dateien = list_dateien_by_reklamation(reklamation_id)
-    for datei in dateien:
-        delete_datei_eintrag(datei["id"], "reklamation-datei")
     db = get_db()
-    db.execute("DELETE FROM reklamationen WHERE id=?", (reklamation_id,))
-    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag_id))
+    db.execute("DELETE FROM dateien WHERE id=? AND auftrag_id=? AND quelle='autohaus'", (datei_id, auftrag["id"]))
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag["id"]))
     db.commit()
     db.close()
-    return True, get_auftrag(auftrag_id)
+
+    if notiz:
+        try:
+            apply_document_data_to_auftrag(auftrag["id"], prefer_documents=False)
+        except Exception:
+            pass
+
+    if clean_text(datei.get("kategorie")) == "standard":
+        reset_document_review_checks(
+            auftrag["id"],
+            "Eine hochgeladene Unterlage wurde entfernt. Bitte die erkannten Daten kurz prüfen.",
+        )
+    return True, auftrag
 
 
 def hydrate_datei(datei):
@@ -6141,8 +8922,10 @@ def hydrate_datei(datei):
     datei["is_image"] = suffix in IMAGE_EXTENSIONS
     datei["is_browser_image"] = suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}
     datei["kategorie"] = clean_text(datei.get("kategorie")) or "standard"
+    datei["notiz"] = clean_text(datei.get("notiz"))
     datei["has_extract"] = bool(
         clean_text(datei.get("extrakt_kurz")) or clean_text(datei.get("extrahierter_text"))
+        or clean_text(datei.get("notiz"))
     )
     datei["text_preview"] = clean_text(datei.get("extrahierter_text"))[:2000]
     return datei
@@ -6272,7 +9055,7 @@ def list_document_review_items(auftrag_id, auftrag=None):
     db = get_db()
     rows = db.execute(
         """
-        SELECT id, original_name, dokument_typ, extrahierter_text, analyse_json,
+        SELECT id, original_name, dokument_typ, notiz, extrahierter_text, analyse_json,
                analyse_quelle, analyse_hinweis
         FROM dateien
         WHERE auftrag_id=?
@@ -6289,8 +9072,12 @@ def list_document_review_items(auftrag_id, auftrag=None):
     for row in rows:
         datei = dict(row)
         ai_felder = load_saved_analysis_json(datei.get("analyse_json"))
-        local_felder = parse_document_fields(
+        review_text = append_upload_note_to_analysis(
             datei.get("extrahierter_text"),
+            datei.get("notiz"),
+        )
+        local_felder = parse_document_fields(
+            review_text,
             datei.get("original_name"),
         )
         felder = merge_document_fields(ai_felder, local_felder)
@@ -6401,9 +9188,9 @@ def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
     )
     dateien = db.execute(
         """
-        SELECT original_name, extrahierter_text, analyse_json, analyse_hinweis
+        SELECT original_name, notiz, extrahierter_text, analyse_json, analyse_hinweis
         FROM dateien
-        WHERE auftrag_id=? AND (extrahierter_text != '' OR analyse_json != '')
+        WHERE auftrag_id=? AND (extrahierter_text != '' OR analyse_json != '' OR notiz != '')
         ORDER BY id DESC
         """,
         (auftrag_id,),
@@ -6412,11 +9199,12 @@ def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
     erkannt = {}
     for datei in dateien:
         ai_felder = load_saved_analysis_json(datei["analyse_json"])
-        local_felder = parse_document_fields(datei["extrahierter_text"], datei["original_name"])
+        review_text = append_upload_note_to_analysis(datei["extrahierter_text"], datei["notiz"])
+        local_felder = parse_document_fields(review_text, datei["original_name"])
         felder = merge_document_fields(ai_felder, local_felder)
         felder = ensure_document_review_fallback(
             felder,
-            datei["extrahierter_text"],
+            review_text,
             datei["original_name"],
         )
         for key, value in felder.items():
@@ -6515,118 +9303,98 @@ def list_verzoegerungen(auftrag_id):
     return [dict(row) for row in rows]
 
 
-def auftrag_postfach_label(auftrag):
-    if not auftrag:
-        return "Auftrag"
-    parts = [
-        clean_text(auftrag.get("fahrzeug")) or "Fahrzeug",
-        clean_text(auftrag.get("kennzeichen")),
-        clean_text(auftrag.get("auftragsnummer")),
-    ]
-    return " · ".join(part for part in parts if part)
-
-
-def normalize_source_id(value):
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def add_benachrichtigung(auftrag_id, titel, nachricht, quelle="werkstatt", quelle_typ="", quelle_id=None):
+def add_benachrichtigung(auftrag_id, titel, nachricht, quelle="werkstatt"):
     titel = clean_text(titel)
     nachricht = clean_text(nachricht)
     if not titel or not nachricht:
         return
-    quelle_typ = clean_text(quelle_typ)
-    quelle_id = normalize_source_id(quelle_id)
     db = get_db()
-    if quelle_typ and quelle_id is not None:
-        existing = db.execute(
-            """
-            SELECT id FROM benachrichtigungen
-            WHERE quelle_typ=? AND quelle_id=?
-            LIMIT 1
-            """,
-            (quelle_typ, quelle_id),
-        ).fetchone()
-        if existing:
-            db.close()
-            return
     db.execute(
         """
         INSERT INTO benachrichtigungen
-        (auftrag_id, quelle, titel, nachricht, gelesen, gelesen_am, entfernt,
-         entfernt_am, quelle_typ, quelle_id, erstellt_am)
-        VALUES (?, ?, ?, ?, 0, '', 0, '', ?, ?, ?)
+        (auftrag_id, quelle, titel, nachricht, gelesen, erstellt_am)
+        VALUES (?, ?, ?, ?, 0, ?)
         """,
-        (
-            auftrag_id,
-            clean_text(quelle) or "werkstatt",
-            titel,
-            nachricht,
-            quelle_typ,
-            quelle_id,
-            now_str(),
-        ),
+        (auftrag_id, clean_text(quelle) or "werkstatt", titel, nachricht, now_str()),
     )
     db.commit()
     db.close()
 
 
-def list_benachrichtigungen(auftrag_id, limit=20):
+def add_rahmenvertrag_anfrage(autohaus_id, nachricht=""):
+    autohaus_id = int(autohaus_id or 0)
+    if autohaus_id <= 0:
+        return None, False
+    db = get_db()
+    existing = db.execute(
+        """
+        SELECT id
+        FROM rahmenvertrag_anfragen
+        WHERE autohaus_id=? AND status='offen'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (autohaus_id,),
+    ).fetchone()
+    if existing:
+        db.close()
+        return int(existing["id"]), False
+    cursor = db.execute(
+        """
+        INSERT INTO rahmenvertrag_anfragen
+        (autohaus_id, status, nachricht, erstellt_am)
+        VALUES (?, 'offen', ?, ?)
+        """,
+        (
+            autohaus_id,
+            clean_text(nachricht)
+            or "Das Autohaus möchte einen Rahmenvertrag und mögliche Bonusstufen besprechen.",
+            now_str(),
+        ),
+    )
+    db.commit()
+    request_id = cursor.lastrowid
+    db.close()
+    return request_id, True
+
+
+def list_benachrichtigungen(auftrag_id, limit=20, nur_ungelesen=False):
     db = get_db()
     rows = db.execute(
         """
         SELECT *
         FROM benachrichtigungen
-        WHERE auftrag_id=? AND COALESCE(entfernt, 0)=0
+        WHERE auftrag_id=?
+          AND (?=0 OR COALESCE(gelesen, 0)=0)
         ORDER BY id DESC
         LIMIT ?
         """,
-        (auftrag_id, limit),
+        (auftrag_id, 1 if nur_ungelesen else 0, limit),
     ).fetchall()
     db.close()
     return [dict(row) for row in rows]
 
 
-def list_autohaus_benachrichtigungen(autohaus_id, limit=10, only_unread=True):
+def list_autohaus_benachrichtigungen(autohaus_id, limit=10):
     db = get_db()
-    unread_sql = "AND COALESCE(b.gelesen, 0)=0" if only_unread else ""
     rows = db.execute(
-        f"""
-        SELECT b.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer
+        """
+        SELECT b.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer, a.angebotsphase
         FROM benachrichtigungen b
         JOIN auftraege a ON a.id = b.auftrag_id
-        WHERE a.autohaus_id=?
-          AND a.archiviert=0
-          AND COALESCE(b.entfernt, 0)=0
-          {unread_sql}
+        WHERE a.autohaus_id=? AND a.archiviert=0 AND COALESCE(b.gelesen, 0)=0
         ORDER BY b.id DESC
         LIMIT ?
         """,
         (autohaus_id, limit),
     ).fetchall()
     db.close()
-    return [dict(row) for row in rows]
-
-
-def count_autohaus_benachrichtigungen(autohaus_id):
-    db = get_db()
-    row = db.execute(
-        """
-        SELECT COUNT(*) AS anzahl
-        FROM benachrichtigungen b
-        JOIN auftraege a ON a.id = b.auftrag_id
-        WHERE a.autohaus_id=?
-          AND a.archiviert=0
-          AND COALESCE(b.gelesen, 0)=0
-          AND COALESCE(b.entfernt, 0)=0
-        """,
-        (autohaus_id,),
-    ).fetchone()
-    db.close()
-    return int(row["anzahl"] or 0) if row else 0
+    hidden = postfach_hidden_keys("autohaus", autohaus_id)
+    return [
+        dict(row)
+        for row in rows
+        if f"autohaus-hinweis-{row['id']}" not in hidden
+    ]
 
 
 def mark_autohaus_benachrichtigung_gelesen(autohaus_id, benachrichtigung_id):
@@ -6634,178 +9402,13 @@ def mark_autohaus_benachrichtigung_gelesen(autohaus_id, benachrichtigung_id):
     db.execute(
         """
         UPDATE benachrichtigungen
-        SET gelesen=1,
-            gelesen_am=?
-        WHERE id=?
-          AND auftrag_id IN (
-            SELECT id FROM auftraege WHERE autohaus_id=?
-          )
-          AND COALESCE(entfernt, 0)=0
-        """,
-        (now_str(), benachrichtigung_id, autohaus_id),
-    )
-    db.commit()
-    db.close()
-
-
-def delete_autohaus_benachrichtigung(autohaus_id, benachrichtigung_id):
-    db = get_db()
-    db.execute(
-        """
-        UPDATE benachrichtigungen
-        SET entfernt=1,
-            entfernt_am=?,
-            gelesen=1,
-            gelesen_am=COALESCE(NULLIF(gelesen_am, ''), ?)
+        SET gelesen=1
         WHERE id=?
           AND auftrag_id IN (
             SELECT id FROM auftraege WHERE autohaus_id=?
           )
         """,
-        (now_str(), now_str(), benachrichtigung_id, autohaus_id),
-    )
-    db.commit()
-    db.close()
-
-
-def add_admin_benachrichtigung(
-    titel,
-    nachricht,
-    auftrag_id=None,
-    autohaus_id=None,
-    typ="info",
-    quelle_typ="",
-    quelle_id=None,
-):
-    titel = clean_text(titel)
-    nachricht = clean_text(nachricht)
-    typ = clean_text(typ) or "info"
-    if not titel or not nachricht:
-        return
-    quelle_typ = clean_text(quelle_typ)
-    quelle_id = normalize_source_id(quelle_id)
-    db = get_db()
-    if quelle_typ and quelle_id is not None:
-        existing = db.execute(
-            """
-            SELECT id FROM admin_benachrichtigungen
-            WHERE quelle_typ=? AND quelle_id=?
-            LIMIT 1
-            """,
-            (quelle_typ, quelle_id),
-        ).fetchone()
-        if existing:
-            db.close()
-            return
-    db.execute(
-        """
-        INSERT INTO admin_benachrichtigungen
-        (auftrag_id, autohaus_id, typ, titel, nachricht, gelesen, gelesen_am,
-         entfernt, entfernt_am, quelle_typ, quelle_id, erstellt_am)
-        VALUES (?, ?, ?, ?, ?, 0, '', 0, '', ?, ?, ?)
-        """,
-        (
-            auftrag_id,
-            autohaus_id,
-            typ,
-            titel,
-            nachricht,
-            quelle_typ,
-            quelle_id,
-            now_str(),
-        ),
-    )
-    db.commit()
-    db.close()
-
-
-def notify_admin_autohaus_event(
-    autohaus,
-    auftrag_id,
-    titel,
-    detail,
-    typ="info",
-    quelle_typ="",
-    quelle_id=None,
-):
-    auftrag = get_auftrag(auftrag_id) if auftrag_id else None
-    autohaus_name = clean_text((autohaus or {}).get("name")) or "Autohaus"
-    message_parts = [autohaus_name]
-    if auftrag:
-        message_parts.append(auftrag_postfach_label(auftrag))
-    if clean_text(detail):
-        message_parts.append(clean_text(detail))
-    add_admin_benachrichtigung(
-        titel,
-        " · ".join(message_parts),
-        auftrag_id=auftrag_id,
-        autohaus_id=(autohaus or {}).get("id"),
-        typ=typ,
-        quelle_typ=quelle_typ,
-        quelle_id=quelle_id,
-    )
-
-
-def list_admin_benachrichtigungen(limit=12, only_unread=False):
-    db = get_db()
-    unread_sql = "AND COALESCE(n.gelesen, 0)=0" if only_unread else ""
-    rows = db.execute(
-        f"""
-        SELECT n.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer, h.name AS autohaus_name
-        FROM admin_benachrichtigungen n
-        LEFT JOIN auftraege a ON a.id = n.auftrag_id
-        LEFT JOIN autohaeuser h ON h.id = COALESCE(n.autohaus_id, a.autohaus_id)
-        WHERE COALESCE(n.entfernt, 0)=0
-          {unread_sql}
-        ORDER BY n.id DESC
-        LIMIT ?
-        """,
-        (limit,),
-    ).fetchall()
-    db.close()
-    return [dict(row) for row in rows]
-
-
-def count_admin_benachrichtigungen():
-    db = get_db()
-    row = db.execute(
-        """
-        SELECT COUNT(*) AS anzahl
-        FROM admin_benachrichtigungen
-        WHERE COALESCE(gelesen, 0)=0 AND COALESCE(entfernt, 0)=0
-        """
-    ).fetchone()
-    db.close()
-    return int(row["anzahl"] or 0) if row else 0
-
-
-def mark_admin_benachrichtigung_gelesen(benachrichtigung_id):
-    db = get_db()
-    db.execute(
-        """
-        UPDATE admin_benachrichtigungen
-        SET gelesen=1,
-            gelesen_am=?
-        WHERE id=? AND COALESCE(entfernt, 0)=0
-        """,
-        (now_str(), benachrichtigung_id),
-    )
-    db.commit()
-    db.close()
-
-
-def delete_admin_benachrichtigung(benachrichtigung_id):
-    db = get_db()
-    db.execute(
-        """
-        UPDATE admin_benachrichtigungen
-        SET entfernt=1,
-            entfernt_am=?,
-            gelesen=1,
-            gelesen_am=COALESCE(NULLIF(gelesen_am, ''), ?)
-        WHERE id=?
-        """,
-        (now_str(), now_str(), benachrichtigung_id),
+        (benachrichtigung_id, autohaus_id),
     )
     db.commit()
     db.close()
@@ -6894,6 +9497,3763 @@ def list_offene_chat_nachrichten(limit=12):
     return [dict(row) for row in rows]
 
 
+def parse_postfach_datetime(value):
+    cleaned = clean_text(value)
+    if not cleaned:
+        return datetime.min
+    for fmt in (DATETIME_FMT, "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(cleaned, fmt)
+        except ValueError:
+            continue
+    return datetime.min
+
+
+def postfach_excerpt(value, length=180):
+    cleaned = clean_text(value)
+    if len(cleaned) <= length:
+        return cleaned
+    return cleaned[: max(0, length - 1)].rstrip() + "…"
+
+
+def postfach_hidden_keys(empfaenger, autohaus_id=0):
+    empfaenger = clean_text(empfaenger) or "admin"
+    autohaus_id = int(autohaus_id or 0)
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT item_key
+        FROM postfach_ausblendungen
+        WHERE empfaenger=? AND autohaus_id=?
+        """,
+        (empfaenger, autohaus_id),
+    ).fetchall()
+    db.close()
+    return {clean_text(row["item_key"]) for row in rows}
+
+
+def hide_postfach_item(empfaenger, item_key, autohaus_id=0):
+    empfaenger = clean_text(empfaenger) or "admin"
+    item_key = clean_text(item_key)
+    if not item_key:
+        return
+    autohaus_id = int(autohaus_id or 0)
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO postfach_ausblendungen (empfaenger, autohaus_id, item_key, erstellt_am)
+        SELECT ?, ?, ?, ?
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM postfach_ausblendungen
+            WHERE empfaenger=? AND autohaus_id=? AND item_key=?
+        )
+        """,
+        (
+            empfaenger,
+            autohaus_id,
+            item_key,
+            now_str(),
+            empfaenger,
+            autohaus_id,
+            item_key,
+        ),
+    )
+    db.commit()
+    db.close()
+
+
+def mark_autohaus_chat_gelesen_by_id(autohaus_id, chat_id):
+    try:
+        chat_id = int(chat_id or 0)
+    except (TypeError, ValueError):
+        return
+    if chat_id <= 0:
+        return
+    db = get_db()
+    db.execute(
+        """
+        UPDATE chat_nachrichten
+        SET gelesen_autohaus=1
+        WHERE id=?
+          AND absender='werkstatt'
+          AND auftrag_id IN (
+            SELECT id FROM auftraege WHERE autohaus_id=?
+          )
+        """,
+        (chat_id, int(autohaus_id or 0)),
+    )
+    db.commit()
+    db.close()
+
+
+def mark_autohaus_postfach_item_erledigt(autohaus_id, item_key):
+    item_key = clean_text(item_key)
+    hide_postfach_item("autohaus", item_key, autohaus_id)
+    if item_key.startswith("autohaus-hinweis-"):
+        raw_id = item_key.removeprefix("autohaus-hinweis-")
+        if raw_id.isdigit():
+            mark_autohaus_benachrichtigung_gelesen(autohaus_id, int(raw_id))
+    elif item_key.startswith("autohaus-chat-"):
+        raw_id = item_key.removeprefix("autohaus-chat-")
+        if raw_id.isdigit():
+            mark_autohaus_chat_gelesen_by_id(autohaus_id, int(raw_id))
+
+
+def sort_postfach_items(items, limit=80):
+    items.sort(
+        key=lambda item: (
+            parse_postfach_datetime(item.get("erstellt_am")),
+            clean_text(item.get("item_key")),
+        ),
+        reverse=True,
+    )
+    return items[:limit]
+
+
+def normalize_auftrag_search_key(value):
+    return re.sub(r"[^0-9a-zA-ZäöüÄÖÜß]", "", clean_text(value)).lower()
+
+
+def list_admin_auftrag_suche(query, limit=8):
+    query = clean_text(query)[:80]
+    if len(query) < 2:
+        return []
+    query_text = query.lower()
+    query_key = normalize_auftrag_search_key(query)
+    treffer = []
+    for index, auftrag in enumerate(list_auftraege(include_archived=True, include_angebote=True)):
+        suchfelder = [
+            auftrag.get("fahrzeug"),
+            auftrag.get("kennzeichen"),
+            auftrag.get("auftragsnummer"),
+            auftrag.get("fin_nummer"),
+            auftrag.get("kunde_name"),
+            auftrag.get("autohaus_name"),
+        ]
+        suchtext = " ".join(clean_text(value).lower() for value in suchfelder if clean_text(value))
+        suchkey = " ".join(normalize_auftrag_search_key(value) for value in suchfelder if clean_text(value))
+        kennzeichen_key = normalize_auftrag_search_key(auftrag.get("kennzeichen"))
+        if not (query_text in suchtext or (query_key and query_key in suchkey)):
+            continue
+
+        if query_key and kennzeichen_key == query_key:
+            score = 0
+        elif query_key and kennzeichen_key.startswith(query_key):
+            score = 1
+        elif query_key and query_key in kennzeichen_key:
+            score = 2
+        elif query_text in clean_text(auftrag.get("fahrzeug")).lower():
+            score = 3
+        else:
+            score = 4
+
+        status = auftrag.get("status_meta") or {}
+        meta = []
+        if clean_text(auftrag.get("autohaus_name")):
+            meta.append(clean_text(auftrag.get("autohaus_name")))
+        if clean_text(auftrag.get("auftragsnummer")):
+            meta.append(f"Auftrag {clean_text(auftrag.get('auftragsnummer'))}")
+        if auftrag.get("archiviert"):
+            meta.append("Archiv")
+        treffer.append(
+            (
+                score,
+                index,
+                {
+                    "id": auftrag["id"],
+                    "fahrzeug": clean_text(auftrag.get("fahrzeug")) or "Fahrzeug",
+                    "kennzeichen": clean_text(auftrag.get("kennzeichen")),
+                    "autohaus": clean_text(auftrag.get("autohaus_name")),
+                    "status": clean_text(status.get("label")) or "Offen",
+                    "status_farbe": clean_text(status.get("farbe")) or "secondary",
+                    "meta": " · ".join(meta),
+                    "url": url_for("auftrag_detail", auftrag_id=auftrag["id"]),
+                },
+            )
+        )
+    treffer.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in treffer[:limit]]
+
+
+def list_partner_auftrag_suche(autohaus, query, limit=8):
+    query = clean_text(query)[:80]
+    if len(query) < 2:
+        return []
+    query_text = query.lower()
+    query_key = normalize_auftrag_search_key(query)
+    treffer = []
+    for index, auftrag in enumerate(
+        list_auftraege(autohaus["id"], include_archived=True, include_angebote=True)
+    ):
+        suchfelder = [
+            auftrag.get("fahrzeug"),
+            auftrag.get("kennzeichen"),
+            auftrag.get("auftragsnummer"),
+            auftrag.get("fin_nummer"),
+            auftrag.get("kunde_name"),
+        ]
+        suchtext = " ".join(clean_text(value).lower() for value in suchfelder if clean_text(value))
+        suchkey = " ".join(normalize_auftrag_search_key(value) for value in suchfelder if clean_text(value))
+        kennzeichen_key = normalize_auftrag_search_key(auftrag.get("kennzeichen"))
+        if not (query_text in suchtext or (query_key and query_key in suchkey)):
+            continue
+
+        if query_key and kennzeichen_key == query_key:
+            score = 0
+        elif query_key and kennzeichen_key.startswith(query_key):
+            score = 1
+        elif query_key and query_key in kennzeichen_key:
+            score = 2
+        elif query_text in clean_text(auftrag.get("fahrzeug")).lower():
+            score = 3
+        else:
+            score = 4
+
+        status = auftrag.get("status_meta") or {}
+        url_endpoint = "partner_angebot_detail" if auftrag.get("angebotsphase") else "partner_auftrag"
+        meta = []
+        if clean_text(auftrag.get("kunde_name")):
+            meta.append(clean_text(auftrag.get("kunde_name")))
+        if clean_text(auftrag.get("auftragsnummer")):
+            meta.append(f"Auftrag {clean_text(auftrag.get('auftragsnummer'))}")
+        if auftrag.get("archiviert"):
+            meta.append("Archiv")
+        if auftrag.get("angebotsphase"):
+            meta.append("Angebotsanfrage")
+        treffer.append(
+            (
+                score,
+                index,
+                {
+                    "id": auftrag["id"],
+                    "fahrzeug": clean_text(auftrag.get("fahrzeug")) or "Fahrzeug",
+                    "kennzeichen": clean_text(auftrag.get("kennzeichen")),
+                    "status": clean_text(status.get("label")) or "Offen",
+                    "status_farbe": clean_text(status.get("farbe")) or "secondary",
+                    "meta": " · ".join(meta),
+                    "url": url_for(
+                        url_endpoint,
+                        slug=autohaus["slug"],
+                        auftrag_id=auftrag["id"],
+                    ),
+                },
+            )
+        )
+    treffer.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in treffer[:limit]]
+
+
+def list_admin_postfach_items(limit=80):
+    hidden = postfach_hidden_keys("admin", 0)
+    items = []
+    db = get_db()
+
+    def admin_auftrag_detail_url(auftrag_id):
+        if has_request_context():
+            return url_for("auftrag_detail", auftrag_id=auftrag_id)
+        return f"/admin/auftrag/{auftrag_id}"
+
+    rows = db.execute(
+        """
+        SELECT c.id, c.auftrag_id, c.nachricht, c.erstellt_am,
+               a.fahrzeug, a.kennzeichen, a.auftragsnummer, h.name AS autohaus_name
+        FROM chat_nachrichten c
+        JOIN auftraege a ON a.id = c.auftrag_id
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE c.absender='autohaus' AND c.gelesen_admin=0 AND a.archiviert=0
+        ORDER BY c.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    for row in rows:
+        key = f"admin-chat-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Chat",
+                "titel": "Neue Nachricht vom Autohaus",
+                "nachricht": postfach_excerpt(row["nachricht"]),
+                "erstellt_am": row["erstellt_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": admin_auftrag_detail_url(row["auftrag_id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT a.id, a.fahrzeug, a.kennzeichen, a.auftragsnummer, a.analyse_text,
+               a.beschreibung, a.geaendert_am, h.name AS autohaus_name
+        FROM auftraege a
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE a.angebotsphase=1
+          AND a.angebot_abgesendet=1
+          AND a.angebot_status='angefragt'
+          AND a.archiviert=0
+        ORDER BY a.geaendert_am DESC, a.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    for row in rows:
+        key = f"admin-angebot-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Anfrage",
+                "titel": "Offene Angebotsanfrage",
+                "nachricht": postfach_excerpt(row["analyse_text"] or row["beschreibung"] or "Das Autohaus wartet auf ein Werkstatt-Angebot."),
+                "erstellt_am": row["geaendert_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": admin_auftrag_detail_url(row["id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT a.id, a.fahrzeug, a.kennzeichen, a.analyse_text, a.beschreibung,
+               a.erstellt_am, h.name AS autohaus_name
+        FROM auftraege a
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE a.quelle='autohaus'
+          AND a.angebotsphase=0
+          AND a.archiviert=0
+          AND a.status=1
+        ORDER BY a.erstellt_am DESC, a.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    for row in rows:
+        key = f"admin-auftrag-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Fahrzeug",
+                "titel": "Neues Fahrzeug vom Autohaus",
+                "nachricht": postfach_excerpt(row["analyse_text"] or row["beschreibung"] or "Neuer Auftrag wartet auf Prüfung."),
+                "erstellt_am": row["erstellt_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": admin_auftrag_detail_url(row["id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT v.id, v.auftrag_id, v.meldung, v.erstellt_am,
+               a.fahrzeug, a.kennzeichen, h.name AS autohaus_name
+        FROM verzoegerungen v
+        JOIN auftraege a ON a.id = v.auftrag_id
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE v.uebernommen=0 AND a.archiviert=0
+        ORDER BY v.erstellt_am DESC, v.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    for row in rows:
+        key = f"admin-verzoegerung-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Termin",
+                "titel": "Terminänderung gemeldet",
+                "nachricht": postfach_excerpt(row["meldung"]),
+                "erstellt_am": row["erstellt_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": admin_auftrag_detail_url(row["auftrag_id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT r.id, r.auftrag_id, r.meldung, r.erstellt_am,
+               a.fahrzeug, a.kennzeichen, h.name AS autohaus_name
+        FROM reklamationen r
+        JOIN auftraege a ON a.id = r.auftrag_id
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE r.bearbeitet=0 AND a.archiviert=0
+        ORDER BY r.erstellt_am DESC, r.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    for row in rows:
+        key = f"admin-reklamation-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Alarm",
+                "titel": "Reklamation offen",
+                "nachricht": postfach_excerpt(row["meldung"]),
+                "erstellt_am": row["erstellt_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": admin_auftrag_detail_url(row["auftrag_id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT a.id, a.fahrzeug, a.kennzeichen, a.analyse_hinweis, a.geaendert_am,
+               h.name AS autohaus_name
+        FROM auftraege a
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE a.analyse_pruefen=1
+          AND a.analyse_werkstatt_geprueft=0
+          AND a.archiviert=0
+        ORDER BY a.geaendert_am DESC, a.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    db.close()
+    for row in rows:
+        key = f"admin-dokument-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Prüfung",
+                "titel": "Dokumentprüfung offen",
+                "nachricht": postfach_excerpt(row["analyse_hinweis"] or "Erkannte Werte müssen von der Werkstatt geprüft werden."),
+                "erstellt_am": row["geaendert_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": admin_auftrag_detail_url(row["id"]),
+            }
+        )
+
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT r.id, r.nachricht, r.erstellt_am, h.name AS autohaus_name
+        FROM rahmenvertrag_anfragen r
+        JOIN autohaeuser h ON h.id = r.autohaus_id
+        WHERE r.status='offen'
+        ORDER BY r.id DESC
+        LIMIT 80
+        """
+    ).fetchall()
+    db.close()
+    for row in rows:
+        key = f"admin-rahmenvertrag-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Partner",
+                "titel": "Rahmenvertrag angefragt",
+                "nachricht": postfach_excerpt(row["nachricht"] or RAHMENVERTRAG_TEXT),
+                "erstellt_am": row["erstellt_am"],
+                "autohaus_name": row["autohaus_name"],
+                "fahrzeug": "",
+                "kennzeichen": "",
+                "ziel_url": (url_for("betriebs_cockpit") + "#autohaus-zugaenge") if has_request_context() else "/admin/cockpit#autohaus-zugaenge",
+            }
+        )
+
+    return sort_postfach_items(items, limit)
+
+
+def admin_postfach_count():
+    try:
+        return len(list_admin_postfach_items(limit=200))
+    except Exception:
+        return 0
+
+
+def einkauf_file_allowed(filename):
+    return pathlib.Path(filename or "").suffix.lower() in EINKAUF_UPLOAD_EXTENSIONS
+
+
+def get_topcolor_email():
+    try:
+        configured = get_app_setting("TOPCOLOR_EMAIL", "")
+    except Exception:
+        configured = ""
+    return clean_text(configured or TOPCOLOR_EMAIL)
+
+
+def set_topcolor_email(value):
+    set_app_setting("TOPCOLOR_EMAIL", clean_text(value))
+
+
+EINKAUF_KATEGORIEN = (
+    "Material",
+    "Farbe / Lack",
+    "Klarlack / Haerter",
+    "Schleifmittel",
+    "Klebeband / Abdeckung",
+    "Politur / Finish",
+    "Karosserieteile",
+    "Verbrauchsmaterial",
+    "Werkzeug",
+    "Sonstiges",
+)
+
+EINKAUF_KATEGORIE_LABELS = {
+    "Farbe / Lack": "Farbe",
+    "Klarlack / Haerter": "Klarlack / Härter",
+    "Schleifmittel": "Schleifpapier",
+    "Klebeband / Abdeckung": "Abdecken / Kleben",
+}
+
+EINKAUF_KATEGORIE_ALIASES = {
+    "farbe": "Farbe / Lack",
+    "lack": "Farbe / Lack",
+    "farbe lack": "Farbe / Lack",
+    "basislack": "Farbe / Lack",
+    "klarlack": "Klarlack / Haerter",
+    "haerter": "Klarlack / Haerter",
+    "harter": "Klarlack / Haerter",
+    "klarlack haerter": "Klarlack / Haerter",
+    "klarlack harter": "Klarlack / Haerter",
+    "schleifpapier": "Schleifmittel",
+    "schleifscheibe": "Schleifmittel",
+    "schleifmittel": "Schleifmittel",
+    "abdecken kleben": "Klebeband / Abdeckung",
+    "klebeband": "Klebeband / Abdeckung",
+    "abdeckung": "Klebeband / Abdeckung",
+    "politur": "Politur / Finish",
+    "finish": "Politur / Finish",
+    "karosserieteile": "Karosserieteile",
+    "verbrauchsmaterial": "Verbrauchsmaterial",
+    "werkzeug": "Werkzeug",
+    "sonstiges": "Sonstiges",
+}
+
+EINKAUF_ARTIKEL_STOP_WORDS = {
+    "auf",
+    "beleg",
+    "betrag",
+    "bitte",
+    "brutto",
+    "datum",
+    "einzelpreis",
+    "eur",
+    "euro",
+    "gesamt",
+    "gesamtbetrag",
+    "gesamtpreis",
+    "iban",
+    "kg",
+    "kundennummer",
+    "lt",
+    "ltr",
+    "mwst",
+    "netto",
+    "preis",
+    "rabatt",
+    "rechnung",
+    "rechnungsnummer",
+    "stk",
+    "stueck",
+    "summe",
+    "ueber",
+    "uebertrag",
+    "ust",
+    "von",
+    "zahlung",
+    "zahlen",
+    "zahlbar",
+    "zwischensumme",
+}
+
+EINKAUF_ARTIKEL_SKIP_TERMS = (
+    "anzupassen",
+    "bankverbindung",
+    "bitte rechnung",
+    "gesamtbetrag",
+    "iban",
+    "mehrwertsteuer",
+    "rechnung ueber",
+    "uebertrag",
+    "zahlung",
+    "zahlen",
+    "zahlbar",
+)
+
+EINKAUF_VE_OPTIONEN = (
+    "Stueck",
+    "Dose",
+    "Liter",
+    "Set",
+    "Rolle",
+    "Karton",
+    "Packung",
+    "Meter",
+)
+
+EINKAUF_ANGEBOTSSTATUS = {
+    "offen": "zu pruefen",
+    "angefragt": "Angebot angefragt",
+    "angebot_erhalten": "Angebot erhalten",
+    "freigegeben": "freigegeben",
+    "bestellt": "bestellt",
+}
+
+EINKAUF_RECHNUNG_PRUEF_STATUS = "rechnung_pruefen"
+
+EINKAUF_VERGLEICH_ANBIETER = {
+    "google-shopping": "google_shopping_url",
+    "google": "google_suche_url",
+    "bilder": "google_images_url",
+    "idealo": "idealo_suche_url",
+    "ebay": "ebay_suche_url",
+}
+
+
+def parse_positive_int(value, default=1):
+    try:
+        parsed = int(str(value or "").strip())
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(parsed, 9999))
+
+
+def normalize_einkauf_kategorie(value):
+    raw = clean_text(value)
+    if not raw:
+        return "Material"
+    for kategorie in EINKAUF_KATEGORIEN:
+        if raw.lower() == kategorie.lower():
+            return kategorie
+    key = re.sub(r"[^a-z0-9]+", " ", normalize_document_text(raw)).strip()
+    if key in EINKAUF_KATEGORIE_ALIASES:
+        return EINKAUF_KATEGORIE_ALIASES[key]
+    for alias, kategorie in EINKAUF_KATEGORIE_ALIASES.items():
+        if alias in key:
+            return kategorie
+    return raw if raw in EINKAUF_KATEGORIEN else "Material"
+
+
+def plausible_einkauf_product_text(product_name, article_number="", source_text=""):
+    product = clean_text(product_name)
+    if not product:
+        return False
+    normalized_product = normalize_document_text(product)
+    normalized_source = normalize_document_text(source_text)
+    combined = f"{normalized_product} {normalized_source}".strip()
+    if any(term in combined for term in EINKAUF_ARTIKEL_SKIP_TERMS):
+        return False
+    if re.fullmatch(r"[\d\s,./%€$+-]+", product):
+        return False
+
+    words = [
+        word
+        for word in re.findall(r"[a-z][a-z0-9+-]{2,}", normalized_product)
+        if word not in EINKAUF_ARTIKEL_STOP_WORDS and not re.fullmatch(r"\d+", word)
+    ]
+    has_article_number = bool(normalize_article_number(article_number))
+    if not words and not has_article_number:
+        return False
+    if not words and has_article_number and normalized_product.startswith("artikel "):
+        return True
+
+    letters = len(re.findall(r"[A-Za-zÄÖÜäöüß]", product))
+    noisy_chars = len(re.findall(r"[\d,./%€$+-]", product))
+    if not has_article_number and noisy_chars > max(8, letters * 2):
+        return False
+    return True
+
+
+def normalize_einkauf_status(value):
+    status = clean_text(value).lower()
+    return status if status in EINKAUF_ANGEBOTSSTATUS else "offen"
+
+
+def parse_price_value(value):
+    text = clean_text(value)
+    if not text:
+        return None
+    normalized = text.replace(".", "").replace(",", ".")
+    match = re.search(r"-?\d+(?:\.\d+)?", normalized)
+    if not match:
+        return None
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return None
+
+
+def format_price_value(value):
+    parsed = parse_price_value(value)
+    if parsed is None:
+        return clean_text(value)
+    return f"{parsed:.2f} EUR".replace(".", ",")
+
+
+def einkauf_form_payload(form):
+    return {
+        "lieferant": clean_text(form.get("lieferant")) or "Auto-Color / Topcolor",
+        "kategorie": normalize_einkauf_kategorie(form.get("kategorie")),
+        "artikelnummer": clean_text(form.get("artikelnummer")),
+        "produkt_name": clean_text(form.get("produkt_name")),
+        "produkt_beschreibung": clean_text(form.get("produkt_beschreibung")),
+        "produktbild_url": clean_text(form.get("produktbild_url")),
+        "titel": clean_text(form.get("titel")),
+        "menge": clean_text(form.get("menge")),
+        "ve": clean_text(form.get("ve")) or "Stueck",
+        "stueckzahl": parse_positive_int(form.get("stueckzahl"), 1),
+        "gebinde": clean_text(form.get("gebinde")),
+        "auto_color_preis": clean_text(form.get("auto_color_preis")),
+        "vergleich_preis": clean_text(form.get("vergleich_preis")),
+        "vergleich_lieferant": clean_text(form.get("vergleich_lieferant")),
+        "lieferzeit": clean_text(form.get("lieferzeit")),
+        "preisquelle": clean_text(form.get("preisquelle")),
+        "angebotsstatus": normalize_einkauf_status(form.get("angebotsstatus")),
+        "angebotsnotiz": clean_text(form.get("angebotsnotiz")),
+        "notiz": clean_text(form.get("notiz")),
+    }
+
+
+def extract_qr_text_from_image(path):
+    suffix = pathlib.Path(path).suffix.lower()
+    if suffix not in IMAGE_EXTENSIONS:
+        return ""
+    cv2_module = get_cv2()
+    if cv2_module is None or not hasattr(cv2_module, "QRCodeDetector"):
+        return ""
+    try:
+        image = cv2_module.imread(str(path))
+        if image is None:
+            return ""
+        detector = cv2_module.QRCodeDetector()
+        decoded = []
+        if hasattr(detector, "detectAndDecodeMulti"):
+            try:
+                result = detector.detectAndDecodeMulti(image)
+                ok = bool(result[0]) if result else False
+                values = result[1] if len(result) > 1 else []
+                if ok:
+                    decoded.extend(clean_text(value) for value in values if clean_text(value))
+            except Exception:
+                decoded = []
+        if not decoded:
+            value, *_ = detector.detectAndDecode(image)
+            if clean_text(value):
+                decoded.append(clean_text(value))
+        unique_values = list(dict.fromkeys(decoded))
+        return "\n".join(unique_values)[:2000]
+    except Exception:
+        return ""
+
+
+def is_placeholder_product_name(value):
+    text = clean_text(value)
+    if not text:
+        return True
+    if len(text) >= 24 and re.fullmatch(r"[a-f0-9-]+(?:_\d+)?", text.lower()):
+        return True
+    return bool(re.fullmatch(r"einkauf[-_][a-f0-9-]+", text.lower()))
+
+
+def extract_line_matching(lines, pattern):
+    for line in lines:
+        if re.search(pattern, line, re.I):
+            return clean_text(line)
+    return ""
+
+
+def detect_einkauf_brand(lines, text):
+    lowered = normalize_document_text(text)
+    if "mipa" in lowered:
+        return "Mipa"
+    if "3m" in lowered or any(line.strip().lower().startswith("3m") for line in lines):
+        return "3M"
+    if "q-refinish" in lowered or ("refinish" in lowered and "30-100" in lowered):
+        return "Q-Refinish"
+    for line in lines[:3]:
+        candidate = clean_text(line)
+        if candidate and len(candidate) <= 30:
+            return candidate
+    return ""
+
+
+def detect_einkauf_category(text):
+    lowered = normalize_document_text(text)
+    if any(token in lowered for token in ("abrasive", "schleif", "sanding", "velour", "p320", "p400", "p500", "p800", "15-hole", "15 hole")):
+        return "Schleifmittel"
+    if any(token in lowered for token in ("perfect-it", "perfect it", "politur", "polish", "compound", "fast cut")):
+        return "Politur / Finish"
+    if any(token in lowered for token in ("spachtel", "filler", "masilla", "multi star", "polyester")):
+        return "Verbrauchsmaterial"
+    if any(token in lowered for token in ("klarlack", "haerter", "härter")):
+        return "Klarlack / Haerter"
+    return "Material"
+
+
+def extract_einkauf_article_number(lines, text, brand=""):
+    patterns = (
+        r"\bP/?N[:\s]*([A-Z0-9][A-Z0-9./_-]{2,})",
+        r"\b(?:Art\.?|Artikel(?:nr|nummer)?|Bestell(?:nr|nummer)?|SKU)[:#\s-]*([A-Z0-9][A-Z0-9./_-]{2,})",
+        r"\b(\d{2,4}-\d{3}-\d{4})\b",
+        r"\b(51815[A-Z]?)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            return clean_text(match.group(1)).upper()
+    if brand.lower() == "mipa" and re.search(r"\bP\s*99\b", text, re.I):
+        return "P99"
+    return ""
+
+
+def extract_einkauf_grit(text):
+    match = re.search(r"P\s?(\d{2,4})\b", text, re.I)
+    if match:
+        return f"P{match.group(1)}"
+    return ""
+
+
+def extract_einkauf_dimension(text):
+    match = re.search(r"\b(75|125|150|180)\s*mm\b", text, re.I)
+    if match:
+        return f"{match.group(1)} mm"
+    return ""
+
+
+def extract_einkauf_packaging(text):
+    text = clean_text(text)
+    match = re.search(r"\b(?:Box|Packung|Pack|Inhalt)[:\s]*(\d{1,4})\s*(?:pcs\.?|stk\.?|stueck|stück)\b", text, re.I)
+    if match:
+        return f"{match.group(1)} Stueck"
+    match = re.search(r"\b(\d{1,4})\s*(?:pcs\.?|stk\.?|stueck|stück)\b", text, re.I)
+    if match and int(match.group(1)) > 1:
+        return f"{match.group(1)} Stueck"
+    match = re.search(r"\b(\d+(?:[.,]\d+)?)\s*(kg|l|ml)\b", text, re.I)
+    if match:
+        return f"{match.group(1).replace('.', ',')} {match.group(2).lower()}"
+    return ""
+
+
+def build_einkauf_product_name_from_text(lines, text, brand, article_number):
+    lowered = normalize_document_text(text)
+    grit = extract_einkauf_grit(text)
+    dimension = extract_einkauf_dimension(text)
+    if brand == "Q-Refinish" or "30-100" in lowered:
+        parts = ["Q-Refinish", "30-100", "Abrasive Disc Premium Gold"]
+        if grit:
+            parts.append(grit)
+        if dimension:
+            parts.append(dimension)
+        if "15" in lowered and ("hole" in lowered or "loch" in lowered or "huller" in lowered):
+            parts.append("15-Loch")
+        return " ".join(dict.fromkeys(parts))
+    if brand == "Mipa" and ("p99" in lowered or "multi star" in lowered):
+        return "Mipa P 99 Multi Star PE-Universalspachtel"
+    if brand == "3M" and ("perfect" in lowered or article_number.startswith("51815")):
+        return "3M Perfect-It Fast Cut Plus Extreme 51815"
+    if brand == "3M" and grit:
+        return f"3M Schleifscheibe {grit}"
+
+    ignored = {
+        "made in eu",
+        "batch",
+        "batch.no.",
+        "use by",
+        "hdpe",
+        "bombola",
+        "chiusura",
+    }
+    candidates = []
+    for line in lines:
+        clean = clean_text(line)
+        normalized = normalize_document_text(clean)
+        if not clean or normalized in ignored:
+            continue
+        if re.fullmatch(r"[\d\s./:-]+", clean):
+            continue
+        if clean.upper() == article_number:
+            continue
+        candidates.append(clean)
+    if brand and candidates and candidates[0].lower() == brand.lower():
+        candidates = candidates[1:]
+    result = " ".join(candidates[:3]).strip()
+    if brand and brand.lower() not in result.lower():
+        result = f"{brand} {result}".strip()
+    return result[:160] or article_number or "Material / Produkt"
+
+
+def analyse_einkauf_product_text(text, filename=""):
+    text = clean_text(text)
+    lines = [clean_text(line) for line in text.splitlines() if clean_text(line)]
+    if not lines and clean_text(filename):
+        lines = [pathlib.Path(filename).stem]
+        text = lines[0]
+    brand = detect_einkauf_brand(lines, text)
+    article_number = extract_einkauf_article_number(lines, text, brand)
+    product_name = build_einkauf_product_name_from_text(lines, text, brand, article_number)
+    category = detect_einkauf_category(text)
+    if article_number.startswith("51815"):
+        category = "Politur / Finish"
+    elif brand == "3M" and extract_einkauf_grit(text):
+        category = "Schleifmittel"
+    packaging = extract_einkauf_packaging(text)
+    ve = "Stueck"
+    gebinde = packaging
+    if category == "Schleifmittel" and packaging:
+        ve = "Packung"
+    elif category in {"Politur / Finish", "Verbrauchsmaterial", "Klarlack / Haerter"}:
+        ve = "Dose"
+    note_parts = []
+    if brand:
+        note_parts.append(f"Hersteller erkannt: {brand}")
+    if text:
+        note_parts.append("Etikett lokal gelesen.")
+    return {
+        "lieferant": "Auto-Color / Topcolor",
+        "kategorie": category,
+        "artikelnummer": article_number,
+        "produkt_name": product_name,
+        "titel": product_name,
+        "produkt_beschreibung": text[:3000],
+        "ve": ve,
+        "stueckzahl": 1,
+        "gebinde": gebinde,
+        "notiz": " ".join(note_parts),
+        "qr_text": text[:2000],
+    }
+
+
+def build_einkauf_item_search_query(item):
+    parts = []
+    for key in ("artikelnummer", "produkt_name", "gebinde"):
+        value = clean_text(item.get(key))
+        if value and value not in parts:
+            parts.append(value)
+    category = clean_text(item.get("kategorie"))
+    if category == "Schleifmittel":
+        parts.append("Schleifscheibe Autolack")
+    elif category == "Politur / Finish":
+        parts.append("Politur Autolack")
+    elif category == "Verbrauchsmaterial":
+        parts.append("Autolack Verbrauchsmaterial")
+    query = " ".join(parts).strip()
+    return compact_whitespace(query) or clean_text(item.get("titel")) or "Autolack Material"
+
+
+def is_high_value_einkauf_item(item, auto_price=None):
+    category = clean_text(item.get("kategorie"))
+    name = normalize_document_text(item.get("produkt_name") or item.get("titel"))
+    if category in {"Farbe / Lack", "Klarlack / Haerter"}:
+        return True
+    if any(token in name for token in ("envirobase", "ppg", "deltron", "basislack", "klarlack", "haerter")):
+        return True
+    return auto_price is not None and auto_price >= 150
+
+
+def build_einkauf_preisradar(item, auto_price=None, compare_price=None):
+    auto_price = parse_price_value(item.get("auto_color_preis")) if auto_price is None else auto_price
+    compare_price = parse_price_value(item.get("vergleich_preis")) if compare_price is None else compare_price
+    has_auto = auto_price is not None
+    has_compare = compare_price is not None
+    high_value = is_high_value_einkauf_item(item, auto_price)
+    if has_auto and has_compare:
+        cheaper = min(auto_price, compare_price)
+        expensive = max(auto_price, compare_price)
+        span = expensive - cheaper
+        percent = (span / cheaper * 100) if cheaper > 0 else 0
+        span_value_label = f"{span:.2f} EUR".replace(".", ",")
+        if auto_price > compare_price and span >= 5 and percent >= 5:
+            return {
+                "status": "danger",
+                "badge": "Bitte prüfen",
+                "title": "Vergleich ist günstiger",
+                "text": (
+                    f"Auto-Color liegt {span_value_label} bzw. {percent:.0f}% über dem Vergleich. "
+                    "Vor Bestellung Kondition prüfen oder beim Lieferanten nachverhandeln."
+                ),
+                "span_label": f"{cheaper:.2f} bis {expensive:.2f} EUR".replace(".", ","),
+                "needs_review": True,
+            }
+        if high_value:
+            return {
+                "status": "warning",
+                "badge": "Kondition",
+                "title": "Teurer Lack-/Materialartikel",
+                "text": "Preis ist erfasst. Bei Farbe, Lack und Hochpreisartikeln lohnt sich eine feste Kondition mit Topcolor.",
+                "span_label": f"{cheaper:.2f} bis {expensive:.2f} EUR".replace(".", ","),
+                "needs_review": True,
+            }
+        return {
+            "status": "success",
+            "badge": "Verglichen",
+            "title": "Vergleichspreis vorhanden",
+            "text": "Preis und Vergleich sind hinterlegt. Die Position kann fachlich geprüft werden.",
+            "span_label": f"{cheaper:.2f} bis {expensive:.2f} EUR".replace(".", ","),
+            "needs_review": False,
+        }
+    if high_value and has_auto:
+        return {
+            "status": "warning",
+            "badge": "Kondition",
+            "title": "Vergleich noch offen",
+            "text": "Teurer Lack-/Materialartikel ohne Vergleichspreis. Bitte Webpreise prüfen und Konditionen anfragen.",
+            "span_label": "",
+            "needs_review": True,
+        }
+    if has_auto and not has_compare:
+        return {
+            "status": "info",
+            "badge": "Web prüfen",
+            "title": "Vergleichspreis fehlt",
+            "text": "Preis ist aus der Rechnung erkannt. Für echtes Preisradar einen Web-/Lieferantenvergleich eintragen.",
+            "span_label": "",
+            "needs_review": False,
+        }
+    return {
+        "status": "muted",
+        "badge": "offen",
+        "title": "Preis noch offen",
+        "text": "Noch kein belastbarer Preisvergleich gespeichert.",
+        "span_label": "",
+        "needs_review": False,
+    }
+
+
+def hydrate_einkauf_internet_links(item):
+    query = build_einkauf_item_search_query(item)
+    encoded = quote(query)
+    item["internet_query"] = query
+    item["google_suche_url"] = f"https://www.google.com/search?q={encoded}"
+    item["google_shopping_url"] = f"https://www.google.com/search?tbm=shop&q={encoded}"
+    item["google_images_url"] = f"https://www.google.com/search?tbm=isch&q={encoded}"
+    item["idealo_suche_url"] = f"https://www.idealo.de/preisvergleich/MainSearchProductCategory.html?q={encoded}"
+    item["ebay_suche_url"] = f"https://www.ebay.de/sch/i.html?_nkw={encoded}"
+    return item
+
+
+def hydrate_einkauf_item(row):
+    item = dict(row)
+    original_name = clean_text(item.get("original_name"))
+    stored_name = clean_text(item.get("stored_name"))
+    suffix = pathlib.Path(original_name or stored_name).suffix.lower()
+    item["is_image"] = suffix in IMAGE_EXTENSIONS
+    item["is_browser_image"] = suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+    item["is_pdf"] = suffix == ".pdf"
+    item["datei_url"] = (
+        url_for("admin_einkauf_datei", item_id=item["id"])
+        if stored_name and has_request_context()
+        else ""
+    )
+    try:
+        item["quelle_beleg_id"] = int(item.get("quelle_beleg_id") or 0)
+    except (TypeError, ValueError):
+        item["quelle_beleg_id"] = 0
+    item["beleg_datei_url"] = (
+        url_for("admin_einkauf_beleg_datei", beleg_id=item["quelle_beleg_id"])
+        if item["quelle_beleg_id"] and has_request_context()
+        else ""
+    )
+    item["detail_url"] = url_for("admin_einkauf_detail", item_id=item["id"]) if has_request_context() else ""
+    if not clean_text(item.get("produkt_name")):
+        item["produkt_name"] = clean_text(item.get("titel"))
+    item["produkt_beschreibung"] = clean_text(item.get("produkt_beschreibung")) or clean_text(item.get("qr_text"))
+    item["produktbild_url"] = clean_text(item.get("produktbild_url"))
+    if not clean_text(item.get("kategorie")):
+        item["kategorie"] = "Material"
+    item["kategorie"] = normalize_einkauf_kategorie(item.get("kategorie"))
+    if item["kategorie"] == "Material":
+        inferred_category = detect_einkauf_category(
+            " ".join(
+                clean_text(part)
+                for part in (
+                    item.get("produkt_name"),
+                    item.get("titel"),
+                    item.get("produkt_beschreibung"),
+                    item.get("gebinde"),
+                )
+                if clean_text(part)
+            )
+        )
+        if inferred_category != "Material":
+            item["kategorie"] = inferred_category
+    item["kategorie_label"] = einkauf_kategorie_label(item["kategorie"])
+    if not clean_text(item.get("ve")):
+        item["ve"] = "Stueck"
+    item["stueckzahl"] = parse_positive_int(item.get("stueckzahl"), 1)
+    item["angebotsstatus"] = normalize_einkauf_status(item.get("angebotsstatus"))
+    item["angebotsstatus_label"] = EINKAUF_ANGEBOTSSTATUS.get(item["angebotsstatus"], item["angebotsstatus"])
+    try:
+        item["quelle_email_id"] = int(item.get("quelle_email_id") or 0)
+    except (TypeError, ValueError):
+        item["quelle_email_id"] = 0
+    auto_price = parse_price_value(item.get("auto_color_preis"))
+    compare_price = parse_price_value(item.get("vergleich_preis"))
+    item["auto_color_preis_label"] = format_price_value(item.get("auto_color_preis"))
+    item["vergleich_preis_label"] = format_price_value(item.get("vergleich_preis"))
+    item["angebot_preis_label"] = item["auto_color_preis_label"] or item["vergleich_preis_label"]
+    item["preis_delta_label"] = ""
+    item["preis_delta_class"] = "text-muted"
+    if auto_price is not None and compare_price is not None:
+        delta = compare_price - auto_price
+        if abs(delta) >= 0.01:
+            item["preis_delta_label"] = f"{abs(delta):.2f} EUR {'teurer' if delta > 0 else 'guenstiger'}".replace(".", ",")
+            item["preis_delta_class"] = "text-success" if delta > 0 else "text-danger"
+        else:
+            item["preis_delta_label"] = "preisgleich"
+    item["preisradar"] = build_einkauf_preisradar(item, auto_price, compare_price)
+    item["preiswarnung"] = item["preisradar"]["needs_review"]
+    item["preiswarnung_class"] = f"price-alert-{item['preisradar']['status']}"
+    item = hydrate_einkauf_internet_links(item)
+    source_file_image = item["datei_url"] if item["is_browser_image"] else ""
+    item["produktbild_preview_url"] = source_file_image or item["produktbild_url"]
+    item["produktbild_missing"] = not bool(item["produktbild_preview_url"])
+    return item
+
+
+def get_einkauf_item(item_id):
+    db = get_db()
+    row = db.execute("SELECT * FROM einkaufsliste WHERE id=?", (int(item_id),)).fetchone()
+    db.close()
+    return hydrate_einkauf_item(row) if row else None
+
+
+def list_einkauf_items(status="offen", limit=200):
+    status = clean_text(status) or "offen"
+    limit = max(1, min(int(limit or 200), 500))
+    db = get_db()
+    if status == "alle":
+        rows = db.execute(
+            """
+            SELECT * FROM einkaufsliste
+            ORDER BY CASE WHEN status='offen' THEN 0 ELSE 1 END, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """
+            SELECT * FROM einkaufsliste
+            WHERE status=?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (status, limit),
+        ).fetchall()
+    db.close()
+    return [hydrate_einkauf_item(row) for row in rows]
+
+
+def einkauf_item_is_orderable(item):
+    product = item.get("produkt_name") or item.get("titel")
+    source = item.get("produkt_beschreibung") or item.get("qr_text") or item.get("notiz")
+    if plausible_einkauf_product_text(product, item.get("artikelnummer"), source):
+        return True
+    if clean_text(item.get("stored_name")) and not any(
+        term in normalize_document_text(source or product)
+        for term in EINKAUF_ARTIKEL_SKIP_TERMS
+    ):
+        return True
+    return False
+
+
+def split_einkauf_items_by_orderability(items):
+    orderable = []
+    unclear = []
+    for item in items or []:
+        if einkauf_item_is_orderable(item):
+            orderable.append(item)
+        else:
+            unclear.append(item)
+    return orderable, unclear
+
+
+def admin_einkauf_count():
+    try:
+        offene_items, _ = split_einkauf_items_by_orderability(list_einkauf_items("offen", limit=500))
+        return len(offene_items)
+    except Exception:
+        return 0
+
+
+def save_einkauf_upload(file_storage):
+    filename = clean_text(getattr(file_storage, "filename", ""))
+    if not filename:
+        return {
+            "original_name": "",
+            "stored_name": "",
+            "mime_type": "",
+            "size": 0,
+            "qr_text": "",
+            "analysis_text": "",
+        }
+    if not einkauf_file_allowed(filename):
+        raise ValueError(f"{filename} ist kein erlaubtes Einkaufsbild oder PDF.")
+    suffix = pathlib.Path(filename).suffix.lower()
+    original_name = secure_filename(filename) or f"einkauf{suffix}"
+    stored_name = f"einkauf-{uuid.uuid4().hex}{suffix}"
+    target = UPLOAD_DIR / stored_name
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    file_storage.save(target)
+    mime_type = clean_text(getattr(file_storage, "mimetype", "")) or clean_text(
+        mimetypes.guess_type(original_name)[0]
+    )
+    qr_text = extract_qr_text_from_image(target)
+    analysis_text = clean_text(extract_document_text_local(target, original_name))
+    combined_text = "\n".join(
+        dict.fromkeys(
+            clean_text(chunk)
+            for chunk in (qr_text, analysis_text)
+            if clean_text(chunk)
+        )
+    )
+    return {
+        "original_name": original_name,
+        "stored_name": stored_name,
+        "mime_type": mime_type,
+        "size": target.stat().st_size if target.exists() else 0,
+        "qr_text": combined_text[:3000],
+        "analysis_text": analysis_text[:3000],
+    }
+
+
+def merge_einkauf_upload_analysis(payload, upload):
+    text = clean_text(upload.get("qr_text") or upload.get("analysis_text"))
+    if not text:
+        return payload, upload
+    parsed = analyse_einkauf_product_text(text, upload.get("original_name"))
+    merged = dict(payload)
+    if parsed.get("produkt_name") and (
+        not clean_text(merged.get("produkt_name"))
+        or is_placeholder_product_name(merged.get("produkt_name"))
+    ):
+        merged["produkt_name"] = parsed["produkt_name"]
+    if parsed.get("titel") and (
+        not clean_text(merged.get("titel"))
+        or is_placeholder_product_name(merged.get("titel"))
+    ):
+        merged["titel"] = parsed["titel"]
+    for key in ("artikelnummer", "gebinde"):
+        if parsed.get(key) and not clean_text(merged.get(key)):
+            merged[key] = parsed[key]
+    if parsed.get("kategorie") and clean_text(merged.get("kategorie")) in {"", "Material"}:
+        merged["kategorie"] = parsed["kategorie"]
+    if parsed.get("ve") and clean_text(merged.get("ve")) in {"", "Stueck"}:
+        merged["ve"] = parsed["ve"]
+    if parsed.get("produkt_beschreibung") and not clean_text(merged.get("produkt_beschreibung")):
+        merged["produkt_beschreibung"] = parsed["produkt_beschreibung"]
+    if parsed.get("notiz") and not clean_text(merged.get("notiz")):
+        merged["notiz"] = parsed["notiz"]
+    upload = dict(upload)
+    upload["qr_text"] = parsed.get("qr_text") or clean_text(upload.get("qr_text"))
+    return merged, upload
+
+
+def create_einkauf_item(
+    titel="",
+    menge="",
+    notiz="",
+    file_storage=None,
+    lieferant="Topcolor",
+    **fields,
+):
+    upload = save_einkauf_upload(file_storage) if file_storage else {
+        "original_name": "",
+        "stored_name": "",
+        "mime_type": "",
+        "size": 0,
+        "qr_text": "",
+        "analysis_text": "",
+    }
+    payload = {
+        "lieferant": clean_text(fields.get("lieferant") or lieferant) or "Topcolor",
+        "kategorie": normalize_einkauf_kategorie(fields.get("kategorie")),
+        "artikelnummer": clean_text(fields.get("artikelnummer")),
+        "produkt_name": clean_text(fields.get("produkt_name")),
+        "produkt_beschreibung": clean_text(fields.get("produkt_beschreibung")),
+        "produktbild_url": clean_text(fields.get("produktbild_url")),
+        "titel": clean_text(fields.get("titel") or titel),
+        "menge": clean_text(fields.get("menge") or menge),
+        "ve": clean_text(fields.get("ve")) or "Stueck",
+        "stueckzahl": parse_positive_int(fields.get("stueckzahl"), 1),
+        "gebinde": clean_text(fields.get("gebinde")),
+        "auto_color_preis": clean_text(fields.get("auto_color_preis")),
+        "vergleich_preis": clean_text(fields.get("vergleich_preis")),
+        "vergleich_lieferant": clean_text(fields.get("vergleich_lieferant")),
+        "lieferzeit": clean_text(fields.get("lieferzeit")),
+        "preisquelle": clean_text(fields.get("preisquelle")),
+        "angebotsstatus": normalize_einkauf_status(fields.get("angebotsstatus")),
+        "angebotsnotiz": clean_text(fields.get("angebotsnotiz")),
+        "notiz": clean_text(fields.get("notiz") or notiz),
+        "quelle_email_id": int(fields.get("quelle_email_id") or 0),
+        "quelle_beleg_id": int(fields.get("quelle_beleg_id") or 0),
+    }
+    payload, upload = merge_einkauf_upload_analysis(payload, upload)
+    titel = payload["titel"]
+    qr_text = clean_text(upload.get("qr_text"))
+    if not titel and upload.get("original_name"):
+        titel = pathlib.Path(upload["original_name"]).stem
+    if not titel and qr_text:
+        titel = qr_text.splitlines()[0][:90]
+    titel = titel or payload["produkt_name"] or "Material / QR-Code"
+    produkt_name = payload["produkt_name"] or titel
+    db = get_db()
+    cursor = db.execute(
+        """
+        INSERT INTO einkaufsliste
+          (lieferant, kategorie, artikelnummer, produkt_name, produkt_beschreibung, produktbild_url, titel, menge, ve,
+           stueckzahl, gebinde, auto_color_preis, vergleich_preis, vergleich_lieferant,
+           lieferzeit, preisquelle, angebotsstatus, angebotsnotiz, notiz, qr_text,
+           quelle_email_id, quelle_beleg_id, status, original_name, stored_name, mime_type, size, erstellt_am, bestellt_am)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'offen', ?, ?, ?, ?, ?, '')
+        """,
+        (
+            payload["lieferant"],
+            payload["kategorie"],
+            payload["artikelnummer"],
+            produkt_name,
+            payload["produkt_beschreibung"],
+            payload["produktbild_url"],
+            titel,
+            payload["menge"],
+            payload["ve"],
+            payload["stueckzahl"],
+            payload["gebinde"],
+            payload["auto_color_preis"],
+            payload["vergleich_preis"],
+            payload["vergleich_lieferant"],
+            payload["lieferzeit"],
+            payload["preisquelle"],
+            payload["angebotsstatus"],
+            payload["angebotsnotiz"],
+            payload["notiz"],
+            qr_text,
+            payload["quelle_email_id"],
+            payload["quelle_beleg_id"],
+            clean_text(upload.get("original_name")),
+            clean_text(upload.get("stored_name")),
+            clean_text(upload.get("mime_type")),
+            int(upload.get("size") or 0),
+            now_str(),
+        ),
+    )
+    db.commit()
+    item_id = cursor.lastrowid
+    db.close()
+    sync_einkauf_item_to_artikel(item_id, increment_count=1)
+    schedule_change_backup("einkauf")
+    return item_id
+
+
+def update_einkauf_item(item_id, sync_artikel=True, **fields):
+    existing = get_einkauf_item(item_id)
+    if not existing:
+        return False
+    payload = {
+        "lieferant": clean_text(fields.get("lieferant")) or "Auto-Color / Topcolor",
+        "kategorie": normalize_einkauf_kategorie(fields.get("kategorie")),
+        "artikelnummer": clean_text(fields.get("artikelnummer")),
+        "produkt_name": clean_text(fields.get("produkt_name")),
+        "produkt_beschreibung": clean_text(fields.get("produkt_beschreibung")) or clean_text(existing.get("produkt_beschreibung")),
+        "produktbild_url": clean_text(fields.get("produktbild_url")) if "produktbild_url" in fields else clean_text(existing.get("produktbild_url")),
+        "titel": clean_text(fields.get("titel")),
+        "menge": clean_text(fields.get("menge")),
+        "ve": clean_text(fields.get("ve")) or "Stueck",
+        "stueckzahl": parse_positive_int(fields.get("stueckzahl"), 1),
+        "gebinde": clean_text(fields.get("gebinde")),
+        "auto_color_preis": clean_text(fields.get("auto_color_preis")),
+        "vergleich_preis": clean_text(fields.get("vergleich_preis")),
+        "vergleich_lieferant": clean_text(fields.get("vergleich_lieferant")),
+        "lieferzeit": clean_text(fields.get("lieferzeit")),
+        "preisquelle": clean_text(fields.get("preisquelle")),
+        "angebotsstatus": normalize_einkauf_status(fields.get("angebotsstatus")),
+        "angebotsnotiz": clean_text(fields.get("angebotsnotiz")),
+        "notiz": clean_text(fields.get("notiz")),
+    }
+    payload["titel"] = payload["titel"] or payload["produkt_name"] or "Material / QR-Code"
+    payload["produkt_name"] = payload["produkt_name"] or payload["titel"]
+    db = get_db()
+    db.execute(
+        """
+        UPDATE einkaufsliste
+        SET lieferant=?, kategorie=?, artikelnummer=?, produkt_name=?, produkt_beschreibung=?, produktbild_url=?, titel=?,
+            menge=?, ve=?, stueckzahl=?, gebinde=?, auto_color_preis=?,
+            vergleich_preis=?, vergleich_lieferant=?, lieferzeit=?, preisquelle=?,
+            angebotsstatus=?, angebotsnotiz=?, notiz=?
+        WHERE id=?
+        """,
+        (
+            payload["lieferant"],
+            payload["kategorie"],
+            payload["artikelnummer"],
+            payload["produkt_name"],
+            payload["produkt_beschreibung"],
+            payload["produktbild_url"],
+            payload["titel"],
+            payload["menge"],
+            payload["ve"],
+            payload["stueckzahl"],
+            payload["gebinde"],
+            payload["auto_color_preis"],
+            payload["vergleich_preis"],
+            payload["vergleich_lieferant"],
+            payload["lieferzeit"],
+            payload["preisquelle"],
+            payload["angebotsstatus"],
+            payload["angebotsnotiz"],
+            payload["notiz"],
+            int(item_id),
+        ),
+    )
+    db.commit()
+    db.close()
+    if sync_artikel and clean_text(existing.get("status")) != EINKAUF_RECHNUNG_PRUEF_STATUS:
+        sync_einkauf_item_to_artikel(item_id, increment_count=0)
+    schedule_change_backup("einkauf")
+    return True
+
+
+def mark_einkauf_item_bestellt(item_id):
+    db = get_db()
+    db.execute(
+        "UPDATE einkaufsliste SET status='bestellt', angebotsstatus='bestellt', bestellt_am=? WHERE id=?",
+        (now_str(), int(item_id)),
+    )
+    db.commit()
+    db.close()
+    schedule_change_backup("einkauf")
+
+
+def mark_all_einkauf_items_bestellt():
+    db = get_db()
+    db.execute(
+        "UPDATE einkaufsliste SET status='bestellt', angebotsstatus='bestellt', bestellt_am=? WHERE status='offen'",
+        (now_str(),),
+    )
+    db.commit()
+    db.close()
+    schedule_change_backup("einkauf")
+
+
+def delete_einkauf_item(item_id):
+    item = get_einkauf_item(item_id)
+    if not item:
+        return False
+    stored_name = clean_text(item.get("stored_name"))
+    if stored_name:
+        path = UPLOAD_DIR / pathlib.Path(stored_name).name
+        move_upload_to_deleted_area(path, reason="einkauf")
+    db = get_db()
+    db.execute("DELETE FROM einkaufsliste WHERE id=?", (int(item_id),))
+    db.commit()
+    db.close()
+    schedule_change_backup("einkauf")
+    return True
+
+
+def analyse_einkauf_item(item_id, force=False):
+    item = get_einkauf_item(item_id)
+    if not item:
+        return {"ok": False, "message": "Einkaufsposition nicht gefunden.", "item": None}
+    stored_name = clean_text(item.get("stored_name"))
+    original_name = clean_text(item.get("original_name"))
+    text = clean_text(item.get("qr_text"))
+    if stored_name:
+        path = UPLOAD_DIR / pathlib.Path(stored_name).name
+        if path.exists() and path.is_file():
+            text = clean_text(extract_document_text_local(path, original_name or stored_name)) or text
+    if not text:
+        return {"ok": False, "message": "Aus dem Produktbild konnte kein Etikett gelesen werden.", "item": item}
+
+    parsed = analyse_einkauf_product_text(text, original_name or stored_name)
+    existing_name = clean_text(item.get("produkt_name") or item.get("titel"))
+    should_replace_name = force or is_placeholder_product_name(existing_name)
+    merged = {
+        "lieferant": clean_text(item.get("lieferant")) or parsed["lieferant"],
+        "kategorie": normalize_einkauf_kategorie(
+            parsed["kategorie"] if force or clean_text(item.get("kategorie")) in {"", "Material"} else item["kategorie"]
+        ),
+        "artikelnummer": parsed["artikelnummer"] if force or not clean_text(item.get("artikelnummer")) else item["artikelnummer"],
+        "produkt_name": parsed["produkt_name"] if should_replace_name else item["produkt_name"],
+        "produkt_beschreibung": parsed["produkt_beschreibung"] if force or not clean_text(item.get("produkt_beschreibung")) else item["produkt_beschreibung"],
+        "titel": parsed["titel"] if should_replace_name else item["titel"],
+        "menge": item.get("menge"),
+        "ve": parsed["ve"] if force or clean_text(item.get("ve")) in {"", "Stueck"} else item["ve"],
+        "stueckzahl": item.get("stueckzahl") or 1,
+        "gebinde": parsed["gebinde"] if force or not clean_text(item.get("gebinde")) else item["gebinde"],
+        "auto_color_preis": item.get("auto_color_preis"),
+        "vergleich_preis": item.get("vergleich_preis"),
+        "vergleich_lieferant": item.get("vergleich_lieferant"),
+        "lieferzeit": item.get("lieferzeit"),
+        "preisquelle": item.get("preisquelle"),
+        "produktbild_url": item.get("produktbild_url"),
+        "angebotsstatus": item.get("angebotsstatus"),
+        "angebotsnotiz": item.get("angebotsnotiz"),
+        "notiz": clean_text(item.get("notiz")) or parsed["notiz"],
+    }
+    update_einkauf_item(item_id, **merged)
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE einkaufsliste SET qr_text=?, produkt_beschreibung=? WHERE id=?",
+            (parsed["qr_text"], merged["produkt_beschreibung"], int(item_id)),
+        )
+        db.commit()
+    finally:
+        db.close()
+    schedule_change_backup("einkauf-analyse")
+    updated = get_einkauf_item(item_id)
+    return {"ok": True, "message": "Produktanalyse gespeichert.", "item": updated}
+
+
+def analyse_offene_einkauf_items(force=False):
+    results = []
+    for item in list_einkauf_items("offen", limit=500):
+        if not clean_text(item.get("stored_name")):
+            continue
+        results.append(analyse_einkauf_item(item["id"], force=force))
+    ok_count = sum(1 for result in results if result.get("ok"))
+    return ok_count, len(results)
+
+
+def normalize_article_lookup(value):
+    return compact_whitespace(clean_text(value)).lower()
+
+
+def normalize_article_number(value):
+    return re.sub(r"[^a-z0-9]", "", clean_text(value).lower())
+
+
+def normalize_supplier_lookup(value):
+    normalized = normalize_article_lookup(value)
+    normalized = normalized.replace("–", "-").replace("—", "-")
+    compact = re.sub(r"[^a-z0-9]", "", normalized)
+    if compact in {"autocolortopcolor", "topcolor", "topcolour", "autocolor"}:
+        return "auto-color / topcolor"
+    return normalized
+
+
+def normalize_product_lookup(value):
+    normalized = normalize_document_text(value)
+    normalized = re.sub(r"\b(artikel|art|nr|nummer|produkt|material)\b", " ", normalized)
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return compact_whitespace(normalized)
+
+
+def product_names_match(left, right):
+    left_key = normalize_product_lookup(left)
+    right_key = normalize_product_lookup(right)
+    if not left_key or not right_key:
+        return False
+    if left_key == right_key:
+        return True
+    if len(left_key) < 8 or len(right_key) < 8:
+        return False
+    return SequenceMatcher(None, left_key, right_key).ratio() >= 0.92
+
+
+def hydrate_einkauf_beleg(row):
+    item = dict(row)
+    original_name = clean_text(item.get("original_name"))
+    stored_name = clean_text(item.get("stored_name"))
+    suffix = pathlib.Path(original_name or stored_name).suffix.lower()
+    item["is_image"] = suffix in IMAGE_EXTENSIONS
+    item["is_browser_image"] = suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+    item["is_pdf"] = suffix == ".pdf"
+    item["datei_url"] = (
+        url_for("admin_einkauf_beleg_datei", beleg_id=item["id"])
+        if stored_name and has_request_context()
+        else ""
+    )
+    item["positionen_count"] = int(item.get("positionen_count") or 0)
+    item["lieferant"] = clean_text(item.get("lieferant")) or "Lieferant offen"
+    item["status"] = clean_text(item.get("status")) or "importiert"
+    return item
+
+
+def list_einkauf_belege(limit=20):
+    limit = max(1, min(int(limit or 20), 200))
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM einkauf_belege
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    finally:
+        db.close()
+    return [hydrate_einkauf_beleg(row) for row in rows]
+
+
+def get_einkauf_beleg(beleg_id):
+    db = get_db()
+    try:
+        row = db.execute("SELECT * FROM einkauf_belege WHERE id=?", (int(beleg_id),)).fetchone()
+    finally:
+        db.close()
+    return hydrate_einkauf_beleg(row) if row else None
+
+
+def einkauf_artikel_source_image_url(quelle_item_id):
+    if not has_request_context():
+        return ""
+    try:
+        source_id = int(quelle_item_id or 0)
+    except (TypeError, ValueError):
+        source_id = 0
+    if not source_id:
+        return ""
+    db = get_db()
+    try:
+        row = db.execute(
+            """
+            SELECT original_name, stored_name
+            FROM einkaufsliste
+            WHERE id=?
+            """,
+            (source_id,),
+        ).fetchone()
+    finally:
+        db.close()
+    if not row:
+        return ""
+    stored_name = clean_text(row["stored_name"])
+    if not stored_name:
+        return ""
+    original_name = clean_text(row["original_name"])
+    suffix = pathlib.Path(original_name or stored_name).suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        return ""
+    path = UPLOAD_DIR / pathlib.Path(stored_name).name
+    if not path.exists() or not path.is_file():
+        return ""
+    return url_for("admin_einkauf_datei", item_id=source_id)
+
+
+def hydrate_einkauf_artikel(row):
+    item = dict(row)
+    item["lieferant"] = clean_text(item.get("lieferant")) or "Lieferant offen"
+    item["produkt_name"] = clean_text(item.get("produkt_name")) or "Material / Artikel"
+    item["produktbild_url"] = clean_text(item.get("produktbild_url"))
+    item["status"] = clean_text(item.get("status")) or "aktiv"
+    item["kategorie"] = normalize_einkauf_kategorie(item.get("kategorie"))
+    if item["kategorie"] == "Material":
+        inferred_category = detect_einkauf_category(
+            " ".join(
+                clean_text(part)
+                for part in (
+                    item.get("produkt_name"),
+                    item.get("produkt_beschreibung"),
+                    item.get("gebinde"),
+                )
+                if clean_text(part)
+            )
+        )
+        if inferred_category != "Material":
+            item["kategorie"] = inferred_category
+    item["kategorie_label"] = einkauf_kategorie_label(item["kategorie"])
+    item["ve"] = clean_text(item.get("ve")) or "Stueck"
+    item["nutzungen_count"] = int(item.get("nutzungen_count") or 0)
+    item["letzter_preis_label"] = format_price_value(item.get("letzter_preis"))
+    item = hydrate_einkauf_internet_links(item)
+    item["detail_query"] = item["internet_query"]
+    source_image_url = (
+        einkauf_artikel_source_image_url(item.get("quelle_item_id"))
+        if not item["produktbild_url"]
+        else ""
+    )
+    item["produktbild_preview_url"] = item["produktbild_url"] or source_image_url
+    item["produktbild_missing"] = not bool(item["produktbild_preview_url"])
+    return item
+
+
+def einkauf_artikel_is_plausible(item):
+    return plausible_einkauf_product_text(
+        item.get("produkt_name"),
+        item.get("artikelnummer"),
+        item.get("produkt_beschreibung") or item.get("preisquelle"),
+    )
+
+
+def list_einkauf_artikel(limit=200):
+    limit = max(1, min(int(limit or 200), 500))
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM einkauf_artikel
+            WHERE COALESCE(status, 'aktiv')!='verworfen'
+            ORDER BY geaendert_am DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    finally:
+        db.close()
+    artikel = [hydrate_einkauf_artikel(row) for row in rows]
+    return [item for item in artikel if einkauf_artikel_is_plausible(item)]
+
+
+def list_einkauf_artikel_altlasten(limit=200):
+    limit = max(1, min(int(limit or 200), 500))
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM einkauf_artikel
+            WHERE COALESCE(status, 'aktiv')!='verworfen'
+            ORDER BY geaendert_am DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    finally:
+        db.close()
+    artikel = [hydrate_einkauf_artikel(row) for row in rows]
+    return [item for item in artikel if not einkauf_artikel_is_plausible(item)]
+
+
+def count_verworfene_einkauf_artikel():
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT COUNT(*) AS count FROM einkauf_artikel WHERE status='verworfen'"
+        ).fetchone()
+        return int(row["count"] or 0) if row else 0
+    finally:
+        db.close()
+
+
+def get_einkauf_artikel(artikel_id):
+    try:
+        artikel_id = int(artikel_id or 0)
+    except (TypeError, ValueError):
+        artikel_id = 0
+    if not artikel_id:
+        return None
+    db = get_db()
+    try:
+        row = db.execute("SELECT * FROM einkauf_artikel WHERE id=?", (artikel_id,)).fetchone()
+    finally:
+        db.close()
+    if not row:
+        return None
+    artikel = hydrate_einkauf_artikel(row)
+    return None if artikel.get("status") == "verworfen" else artikel
+
+
+def einkauf_kategorie_label(kategorie):
+    value = normalize_einkauf_kategorie(kategorie)
+    return EINKAUF_KATEGORIE_LABELS.get(value, value)
+
+
+def group_einkauf_artikel_by_kategorie(artikel_items):
+    grouped = {}
+    for artikel in artikel_items or []:
+        kategorie = clean_text(artikel.get("kategorie")) or "Material"
+        key = slugify(kategorie)
+        if key not in grouped:
+            grouped[key] = {
+                "key": key,
+                "kategorie": kategorie,
+                "label": einkauf_kategorie_label(kategorie),
+                "items": [],
+            }
+        grouped[key]["items"].append(artikel)
+
+    order = {slugify(kategorie): index for index, kategorie in enumerate(EINKAUF_KATEGORIEN)}
+    groups = list(grouped.values())
+    groups.sort(
+        key=lambda group: (
+            order.get(group["key"], len(order) + 1),
+            normalize_document_text(group["label"]),
+        )
+    )
+    for group in groups:
+        group["count"] = len(group["items"])
+    return groups
+
+
+def admin_einkauf_artikel_count():
+    try:
+        return len(list_einkauf_artikel(limit=500))
+    except Exception:
+        return 0
+
+
+def mark_einkauf_artikel_verworfen(artikel_id):
+    try:
+        artikel_id = int(artikel_id or 0)
+    except (TypeError, ValueError):
+        return False
+    if not artikel_id:
+        return False
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "UPDATE einkauf_artikel SET status='verworfen', geaendert_am=? WHERE id=?",
+            (now_str(), artikel_id),
+        )
+        db.commit()
+        changed = cursor.rowcount > 0
+    finally:
+        db.close()
+    if changed:
+        schedule_change_backup("einkauf-artikel-verworfen")
+    return changed
+
+
+def cleanup_einkauf_artikel_altlasten(limit=500):
+    altlasten = list_einkauf_artikel_altlasten(limit=limit)
+    if not altlasten:
+        return 0
+    ids = [int(item["id"]) for item in altlasten if item.get("id")]
+    if not ids:
+        return 0
+    placeholders = ",".join("?" for _ in ids)
+    db = get_db()
+    try:
+        db.execute(
+            f"UPDATE einkauf_artikel SET status='verworfen', geaendert_am=? WHERE id IN ({placeholders})",
+            [now_str(), *ids],
+        )
+        db.commit()
+    finally:
+        db.close()
+    schedule_change_backup("einkauf-artikel-altlasten")
+    return len(ids)
+
+
+def find_existing_einkauf_artikel(db, lieferant, artikelnummer, produkt_name):
+    lieferant_key = normalize_supplier_lookup(lieferant)
+    artikelnummer_key = normalize_article_number(artikelnummer)
+    produkt_key = normalize_product_lookup(produkt_name)
+    if artikelnummer_key:
+        row = db.execute(
+            """
+            SELECT *
+            FROM einkauf_artikel
+            WHERE replace(replace(replace(lower(artikelnummer), '-', ''), ' ', ''), '/', '')=?
+              AND COALESCE(status, 'aktiv')!='verworfen'
+            ORDER BY
+              CASE WHEN lower(lieferant)=? THEN 0 ELSE 1 END,
+              geaendert_am DESC,
+              id DESC
+            LIMIT 1
+            """,
+            (artikelnummer_key, lieferant_key),
+        ).fetchone()
+        if row:
+            return row
+    if produkt_key:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM einkauf_artikel
+            WHERE COALESCE(status, 'aktiv')!='verworfen'
+            ORDER BY geaendert_am DESC, id DESC
+            LIMIT 80
+            """
+        ).fetchall()
+        for row in rows:
+            if normalize_supplier_lookup(row["lieferant"]) == lieferant_key and product_names_match(row["produkt_name"], produkt_name):
+                return row
+        rows = db.execute(
+            """
+            SELECT *
+            FROM einkauf_artikel
+            WHERE COALESCE(status, 'aktiv')!='verworfen'
+            ORDER BY geaendert_am DESC, id DESC
+            LIMIT 200
+            """
+        ).fetchall()
+        for row in rows:
+            if product_names_match(row["produkt_name"], produkt_name):
+                return row
+    return None
+
+
+def einkauf_item_has_artikelstamm_match(db, item):
+    try:
+        item_id = int(item.get("id") or 0)
+    except (TypeError, ValueError):
+        item_id = 0
+    if item_id:
+        row = db.execute(
+            "SELECT id FROM einkauf_artikel WHERE quelle_item_id=? LIMIT 1",
+            (item_id,),
+        ).fetchone()
+        if row:
+            return True
+    produkt_name = item.get("produkt_name") or item.get("titel")
+    return bool(
+        find_existing_einkauf_artikel(
+            db,
+            item.get("lieferant"),
+            item.get("artikelnummer"),
+            produkt_name,
+        )
+    )
+
+
+def filter_rechnung_pruef_items_without_artikel(raw_items):
+    items = [
+        item
+        for item in list(raw_items or [])
+        if plausible_einkauf_product_text(
+            item.get("produkt_name") or item.get("titel"),
+            item.get("artikelnummer"),
+            item.get("produkt_beschreibung") or item.get("qr_text"),
+        )
+    ]
+    if not items:
+        return []
+    db = get_db()
+    try:
+        return [item for item in items if not einkauf_item_has_artikelstamm_match(db, item)]
+    finally:
+        db.close()
+
+
+def merge_duplicate_einkauf_artikel(db):
+    rows = [
+        dict(row)
+        for row in db.execute(
+            "SELECT * FROM einkauf_artikel WHERE COALESCE(status, 'aktiv')!='verworfen' ORDER BY id ASC"
+        ).fetchall()
+    ]
+    keep_by_number = {}
+    keep_by_name = {}
+    for row in rows:
+        number_key = normalize_article_number(row.get("artikelnummer"))
+        supplier_key = normalize_supplier_lookup(row.get("lieferant"))
+        name_key = normalize_product_lookup(row.get("produkt_name"))
+        duplicate_of = None
+        if number_key and number_key in keep_by_number:
+            duplicate_of = keep_by_number[number_key]
+        elif supplier_key and name_key and (supplier_key, name_key) in keep_by_name:
+            duplicate_of = keep_by_name[(supplier_key, name_key)]
+
+        if not duplicate_of:
+            if number_key:
+                keep_by_number[number_key] = row
+            if supplier_key and name_key:
+                keep_by_name[(supplier_key, name_key)] = row
+            continue
+
+        target = duplicate_of
+        target_id = int(target["id"])
+        source_id = int(row["id"])
+        payload = {
+            "lieferant": clean_text(target.get("lieferant")) or clean_text(row.get("lieferant")),
+            "kategorie": clean_text(target.get("kategorie")) or clean_text(row.get("kategorie")) or "Material",
+            "artikelnummer": clean_text(target.get("artikelnummer")) or clean_text(row.get("artikelnummer")),
+            "produkt_name": clean_text(target.get("produkt_name")) or clean_text(row.get("produkt_name")),
+            "produkt_beschreibung": clean_text(target.get("produkt_beschreibung")) or clean_text(row.get("produkt_beschreibung")),
+            "produktbild_url": clean_text(target.get("produktbild_url")) or clean_text(row.get("produktbild_url")),
+            "ve": clean_text(target.get("ve")) or clean_text(row.get("ve")) or "Stueck",
+            "gebinde": clean_text(target.get("gebinde")) or clean_text(row.get("gebinde")),
+            "letzter_preis": clean_text(row.get("letzter_preis")) or clean_text(target.get("letzter_preis")),
+            "letzter_preis_datum": clean_text(row.get("letzter_preis_datum")) or clean_text(target.get("letzter_preis_datum")),
+            "preisquelle": clean_text(row.get("preisquelle")) or clean_text(target.get("preisquelle")),
+            "quelle_beleg_id": int(row.get("quelle_beleg_id") or target.get("quelle_beleg_id") or 0),
+            "quelle_item_id": int(row.get("quelle_item_id") or target.get("quelle_item_id") or 0),
+            "nutzungen_count": int(target.get("nutzungen_count") or 0) + int(row.get("nutzungen_count") or 0),
+        }
+        db.execute(
+            """
+            UPDATE einkauf_artikel
+            SET lieferant=?, kategorie=?, artikelnummer=?, produkt_name=?,
+                produkt_beschreibung=?, produktbild_url=?, ve=?, gebinde=?,
+                letzter_preis=?, letzter_preis_datum=?, preisquelle=?,
+                quelle_beleg_id=?, quelle_item_id=?, nutzungen_count=?, status='aktiv', geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                payload["lieferant"],
+                payload["kategorie"],
+                payload["artikelnummer"],
+                payload["produkt_name"],
+                payload["produkt_beschreibung"],
+                payload["produktbild_url"],
+                payload["ve"],
+                payload["gebinde"],
+                payload["letzter_preis"],
+                payload["letzter_preis_datum"],
+                payload["preisquelle"],
+                payload["quelle_beleg_id"],
+                payload["quelle_item_id"],
+                payload["nutzungen_count"],
+                now_str(),
+                target_id,
+            ),
+        )
+        db.execute(
+            "UPDATE einkaufsliste SET quelle_item_id=? WHERE quelle_item_id=?",
+            (target_id, source_id),
+        )
+        db.execute("DELETE FROM einkauf_artikel WHERE id=?", (source_id,))
+        target.update(payload)
+
+
+def upsert_einkauf_artikel(
+    lieferant="",
+    kategorie="Material",
+    artikelnummer="",
+    produkt_name="",
+    produkt_beschreibung="",
+    produktbild_url="",
+    ve="Stueck",
+    gebinde="",
+    letzter_preis="",
+    preisquelle="",
+    quelle_beleg_id=0,
+    quelle_item_id=0,
+    increment_count=0,
+):
+    lieferant = clean_text(lieferant) or "Lieferant offen"
+    kategorie = normalize_einkauf_kategorie(kategorie)
+    produkt_name = clean_text(produkt_name)
+    artikelnummer = clean_text(artikelnummer)
+    if not produkt_name and artikelnummer:
+        produkt_name = f"Artikel {artikelnummer}"
+    if not produkt_name:
+        return 0
+    if not plausible_einkauf_product_text(produkt_name, artikelnummer, produkt_beschreibung or preisquelle):
+        return 0
+    now = now_str()
+    price = clean_text(letzter_preis)
+    db = get_db()
+    try:
+        existing = find_existing_einkauf_artikel(db, lieferant, artikelnummer, produkt_name)
+        if existing:
+            current = dict(existing)
+            payload = {
+                "lieferant": lieferant or current.get("lieferant"),
+                "kategorie": normalize_einkauf_kategorie(kategorie or current.get("kategorie")),
+                "artikelnummer": artikelnummer or clean_text(current.get("artikelnummer")),
+                "produkt_name": produkt_name or clean_text(current.get("produkt_name")),
+                "produkt_beschreibung": clean_text(produkt_beschreibung) or clean_text(current.get("produkt_beschreibung")),
+                "produktbild_url": clean_text(produktbild_url) or clean_text(current.get("produktbild_url")),
+                "ve": clean_text(ve) or clean_text(current.get("ve")) or "Stueck",
+                "gebinde": clean_text(gebinde) or clean_text(current.get("gebinde")),
+                "letzter_preis": price or clean_text(current.get("letzter_preis")),
+                "letzter_preis_datum": date.today().strftime(DATE_FMT) if price else clean_text(current.get("letzter_preis_datum")),
+                "preisquelle": clean_text(preisquelle) or clean_text(current.get("preisquelle")),
+                "quelle_beleg_id": int(quelle_beleg_id or current.get("quelle_beleg_id") or 0),
+                "quelle_item_id": int(quelle_item_id or current.get("quelle_item_id") or 0),
+                "nutzungen_count": int(current.get("nutzungen_count") or 0) + int(increment_count or 0),
+            }
+            db.execute(
+                """
+                UPDATE einkauf_artikel
+                SET lieferant=?, kategorie=?, artikelnummer=?, produkt_name=?, produkt_beschreibung=?, produktbild_url=?,
+                    ve=?, gebinde=?, letzter_preis=?, letzter_preis_datum=?, preisquelle=?,
+                    quelle_beleg_id=?, quelle_item_id=?, nutzungen_count=?, geaendert_am=?
+                WHERE id=?
+                """,
+                (
+                    payload["lieferant"],
+                    payload["kategorie"],
+                    payload["artikelnummer"],
+                    payload["produkt_name"],
+                    payload["produkt_beschreibung"],
+                    payload["produktbild_url"],
+                    payload["ve"],
+                    payload["gebinde"],
+                    payload["letzter_preis"],
+                    payload["letzter_preis_datum"],
+                    payload["preisquelle"],
+                    payload["quelle_beleg_id"],
+                    payload["quelle_item_id"],
+                    payload["nutzungen_count"],
+                    now,
+                    existing["id"],
+                ),
+            )
+            db.commit()
+            return int(existing["id"])
+        cursor = db.execute(
+            """
+            INSERT INTO einkauf_artikel
+              (lieferant, kategorie, artikelnummer, produkt_name, produkt_beschreibung, produktbild_url,
+               ve, gebinde, letzter_preis, letzter_preis_datum, preisquelle,
+               quelle_beleg_id, quelle_item_id, nutzungen_count, status, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'aktiv', ?, ?)
+            """,
+            (
+                lieferant,
+                normalize_einkauf_kategorie(kategorie),
+                artikelnummer,
+                produkt_name,
+                clean_text(produkt_beschreibung),
+                clean_text(produktbild_url),
+                clean_text(ve) or "Stueck",
+                clean_text(gebinde),
+                price,
+                date.today().strftime(DATE_FMT) if price else "",
+                clean_text(preisquelle),
+                int(quelle_beleg_id or 0),
+                int(quelle_item_id or 0),
+                max(1, int(increment_count or 0)),
+                now,
+                now,
+            ),
+        )
+        db.commit()
+        return int(cursor.lastrowid)
+    finally:
+        db.close()
+
+
+def sync_einkauf_item_to_artikel(item_id, increment_count=0):
+    item = get_einkauf_item(item_id)
+    if not item:
+        return 0
+    price = clean_text(item.get("auto_color_preis") or item.get("vergleich_preis"))
+    return upsert_einkauf_artikel(
+        lieferant=item.get("lieferant"),
+        kategorie=item.get("kategorie"),
+        artikelnummer=item.get("artikelnummer"),
+        produkt_name=item.get("produkt_name") or item.get("titel"),
+        produkt_beschreibung=item.get("produkt_beschreibung") or item.get("qr_text"),
+        produktbild_url=item.get("produktbild_url"),
+        ve=item.get("ve"),
+        gebinde=item.get("gebinde"),
+        letzter_preis=price,
+        preisquelle=item.get("preisquelle") or item.get("original_name"),
+        quelle_beleg_id=item.get("quelle_beleg_id") or 0,
+        quelle_item_id=item.get("id") or 0,
+        increment_count=increment_count,
+    )
+
+
+def save_einkauf_beleg_upload(file_storage, lieferant="", beleg_typ="rechnung"):
+    filename = clean_text(getattr(file_storage, "filename", ""))
+    if not filename:
+        raise ValueError("Bitte eine Rechnung oder einen Beleg auswählen.")
+    if not einkauf_file_allowed(filename):
+        raise ValueError(f"{filename} ist kein erlaubter Einkaufsbeleg.")
+    suffix = pathlib.Path(filename).suffix.lower()
+    original_name = secure_filename(filename) or f"einkauf-beleg{suffix}"
+    stored_name = f"einkauf-beleg-{uuid.uuid4().hex}{suffix}"
+    target = UPLOAD_DIR / stored_name
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    file_storage.save(target)
+    mime_type = clean_text(getattr(file_storage, "mimetype", "")) or clean_text(
+        mimetypes.guess_type(original_name)[0]
+    )
+    qr_text = extract_qr_text_from_image(target)
+    text = clean_text(extract_document_text_local(target, original_name))
+    combined_text = "\n".join(
+        dict.fromkeys(clean_text(chunk) for chunk in (qr_text, text) if clean_text(chunk))
+    )
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO einkauf_belege
+              (beleg_typ, lieferant, original_name, stored_name, mime_type, size,
+               extrahierter_text, positionen_count, status, erstellt_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'importiert', ?)
+            """,
+            (
+                clean_text(beleg_typ) or "rechnung",
+                clean_text(lieferant) or "Auto-Color / Topcolor",
+                original_name,
+                stored_name,
+                mime_type,
+                target.stat().st_size if target.exists() else 0,
+                combined_text[:10000],
+                now_str(),
+            ),
+        )
+        db.commit()
+        beleg_id = cursor.lastrowid
+    finally:
+        db.close()
+    return get_einkauf_beleg(beleg_id)
+
+
+def clean_beleg_product_text(line, price_matches, article_number=""):
+    text = clean_text(line)
+    for match in reversed(price_matches):
+        text = (text[: match.start()] + text[match.end() :]).strip()
+    if article_number:
+        text = re.sub(
+            r"(?:artikel(?:nr|nummer)?|bestell(?:nr|nummer)?|art\.?|nr\.?)[:#\s-]*"
+            + re.escape(article_number),
+            "",
+            text,
+            flags=re.I,
+        )
+        text = re.sub(r"^" + re.escape(article_number) + r"\b", "", text, flags=re.I).strip()
+    text = re.sub(
+        r"\b\d+\s*(?:x|stk\.?|stck\.?|stück|stueck|dose|dosen|l|ltr|liter|rolle|rollen|karton|packung|set|pack)\b",
+        "",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"\b(?:netto|brutto|eur|€|preis|einzelpreis|gesamtpreis|rabatt)\b[:\s-]*", "", text, flags=re.I)
+    text = re.sub(r"\s{2,}", " ", text).strip(" -|:\t")
+    return text[:180]
+
+
+def extract_article_number_from_beleg_line(line):
+    article_re = re.compile(
+        r"(?:artikel(?:nr|nummer)?|bestell(?:nr|nummer)?|art\.?|nr\.?)[:#\s-]*(?P<article>[A-Za-z0-9][A-Za-z0-9./_-]{2,})",
+        re.I,
+    )
+    match = article_re.search(line)
+    if match:
+        return clean_text(match.group("article"))
+    first_token = re.match(r"^\s*(?P<article>[A-Za-z0-9][A-Za-z0-9./_-]{2,})\s+", line)
+    if first_token:
+        article = clean_text(first_token.group("article"))
+        if any(char.isdigit() for char in article) and not re.fullmatch(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", article):
+            return article
+    return ""
+
+
+def extract_einkauf_beleg_positions(text, filename=""):
+    raw_text = clean_text(text)
+    if not raw_text:
+        return []
+    lines = [
+        compact_whitespace(line.replace("\t", " "))
+        for line in re.split(r"[\r\n;]+", raw_text)
+        if compact_whitespace(line)
+    ]
+    positions = []
+    seen = set()
+    price_re = re.compile(r"\b\d{1,6}(?:[.,]\d{2})\b")
+    amount_re = re.compile(
+        r"\b(?P<count>\d{1,4})\s*(?P<unit>x|stk\.?|stck\.?|stück|stueck|dose|dosen|l|ltr|liter|rolle|rollen|karton|packung|set|pack)\b",
+        re.I,
+    )
+    skip_terms = (
+        "bankverbindung",
+        "bitte rechnung",
+        "summe",
+        "zwischensumme",
+        "gesamtbetrag",
+        "uebertrag",
+        "übertrag",
+        "vortrag",
+        "mehrwertsteuer",
+        "mwst",
+        "ust",
+        "steuer",
+        "versand",
+        "porto",
+        "zahlung",
+        "zahlen",
+        "zahlbar",
+        "iban",
+        "rechnungsnummer",
+        "kundennummer",
+        "anzupassen",
+    )
+    for line in lines:
+        lowered = line.lower()
+        price_matches = list(price_re.finditer(line))
+        if not price_matches:
+            continue
+        if any(term in lowered for term in skip_terms):
+            continue
+        if not (re.search(r"(eur|€)", line, re.I) or len(price_matches) >= 2 or amount_re.search(line)):
+            continue
+        article_number = extract_article_number_from_beleg_line(line)
+        amount_match = amount_re.search(line)
+        count = parse_positive_int(amount_match.group("count"), 1) if amount_match else 1
+        unit = normalize_offer_unit(amount_match.group("unit")) if amount_match else "Stueck"
+        product = clean_beleg_product_text(line, price_matches, article_number)
+        if not product:
+            product = f"Artikel {article_number}" if article_number else pathlib.Path(filename).stem
+        if not plausible_einkauf_product_text(product, article_number, line):
+            continue
+        if len(product) < 4 or not re.search(r"[A-Za-zÄÖÜäöü]", product):
+            continue
+        if re.fullmatch(r"[\d\s,./%-]+", product):
+            continue
+        price = clean_text(price_matches[-1].group(0))
+        key = (article_number.lower(), normalize_article_lookup(product), price)
+        if key in seen:
+            continue
+        seen.add(key)
+        parsed_product = analyse_einkauf_product_text(f"{article_number}\n{product}", filename)
+        positions.append(
+            {
+                "produkt_name": product[:180],
+                "artikelnummer": article_number[:80],
+                "stueckzahl": count,
+                "ve": unit,
+                "preis": price,
+                "kategorie": parsed_product.get("kategorie") or "Material",
+                "produkt_beschreibung": line[:500],
+                "quelle": line[:240],
+            }
+        )
+    return positions[:150]
+
+
+def normalize_einkauf_invoice_ai_position(position, filename=""):
+    if not isinstance(position, dict):
+        return {}
+    product = clean_text(position.get("produkt_name") or position.get("name"))[:180]
+    article_number = clean_text(position.get("artikelnummer") or position.get("nr"))[:80]
+    if not product and article_number:
+        product = f"Artikel {article_number}"
+    if not product:
+        return {}
+    price = clean_text(position.get("preis") or position.get("einzelpreis") or position.get("gesamtpreis"))
+    if price:
+        price = price.replace("EUR", "").replace("€", "").strip()
+    description = clean_text(position.get("produkt_beschreibung") or position.get("beschreibung") or product)
+    if not plausible_einkauf_product_text(product, article_number, description):
+        return {}
+    unit = clean_text(position.get("ve") or position.get("einheit")) or "Stueck"
+    return {
+        "produkt_name": product,
+        "artikelnummer": article_number,
+        "stueckzahl": parse_positive_int(position.get("stueckzahl") or position.get("menge"), 1),
+        "ve": normalize_offer_unit(unit),
+        "preis": price[:60],
+        "kategorie": normalize_einkauf_kategorie(position.get("kategorie") or detect_einkauf_category(description)),
+        "produkt_beschreibung": description[:500],
+        "quelle": clean_text(position.get("quelle") or filename)[:240],
+    }
+
+
+def extract_einkauf_beleg_positions_openai(path, filename="", text=""):
+    config = get_ai_config()
+    requests_module = get_requests()
+    if not config["openai_ready"] or requests_module is None:
+        return []
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["positionen"],
+        "properties": {
+            "positionen": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "produkt_name",
+                        "artikelnummer",
+                        "stueckzahl",
+                        "ve",
+                        "preis",
+                        "kategorie",
+                        "produkt_beschreibung",
+                        "quelle",
+                    ],
+                    "properties": {
+                        "produkt_name": {"type": "string"},
+                        "artikelnummer": {"type": "string"},
+                        "stueckzahl": {"type": "integer"},
+                        "ve": {"type": "string"},
+                        "preis": {"type": "string"},
+                        "kategorie": {"type": "string"},
+                        "produkt_beschreibung": {"type": "string"},
+                        "quelle": {"type": "string"},
+                    },
+                },
+            }
+        },
+    }
+    prompt = "\n".join(
+        [
+            "Analysiere diese deutsche Lieferantenrechnung fuer den Einkauf einer Karosserie- und Lackwerkstatt.",
+            "Extrahiere nur echte Produkt-/Materialpositionen.",
+            "Ignoriere Summen, Uebertrag, MwSt, Versand, Zahlbedingungen, IBAN, Rabatte ohne Produktbezug und Kopf-/Fusszeilen.",
+            "Nutze sichtbare PDF-/Bildseiten vorrangig vor fehlerhaftem OCR-Text.",
+            "Wenn eine Position nur Kopfzeile, Summe, Zahlungshinweis, Uebertrag oder OCR-Zahlensalat ist, ignoriere sie.",
+            "Preis ist der sichtbare Einzelpreis oder beste Positionspreis ohne Waehrung.",
+            "Kategorien: Material, Farbe / Lack, Klarlack / Haerter, Schleifmittel, Klebeband / Abdeckung, Politur / Finish, Karosserieteile, Verbrauchsmaterial, Werkzeug, Sonstiges.",
+            "",
+            f"Dateiname: {filename}",
+            "",
+            "[OCR-Text]",
+            clean_text(text)[:12000] or "-",
+        ]
+    )
+    user_content = [{"type": "text", "text": prompt}]
+    user_content.extend(build_openai_visual_inputs(path, filename))
+    payload = {
+        "model": config["openai_model"],
+        "messages": [
+            {
+                "role": "system",
+                "content": "Du liest Rechnungspositionen vorsichtig aus und gibst ausschliesslich JSON zurueck.",
+            },
+            {"role": "user", "content": user_content},
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "einkauf_rechnung_positionen",
+                "strict": True,
+                "schema": schema,
+            },
+        },
+    }
+    response, request_error = post_openai_chat_completion(requests_module, payload)
+    if request_error or response is None:
+        return []
+    if response.status_code >= 400:
+        error_message = extract_openai_error_message(response)
+        if response.status_code == 400 and should_retry_openai_without_schema(error_message):
+            response, request_error = post_openai_chat_completion(
+                requests_module,
+                build_openai_json_mode_fallback_payload(payload),
+            )
+            if request_error or response is None or response.status_code >= 400:
+                return []
+        else:
+            return []
+    parsed = extract_openai_response_json(response.json())
+    positions = parsed.get("positionen") if isinstance(parsed, dict) else []
+    normalized = []
+    seen = set()
+    for position in positions or []:
+        item = normalize_einkauf_invoice_ai_position(position, filename)
+        if not item:
+            continue
+        key = (
+            item["artikelnummer"].lower(),
+            normalize_article_lookup(item["produkt_name"]),
+            clean_text(item["preis"]),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(item)
+    return normalized[:150]
+
+
+def einkauf_pruefposition_exists(db, lieferant, artikelnummer, produkt_name):
+    artikelnummer_key = normalize_article_number(artikelnummer)
+    produkt_key = normalize_product_lookup(produkt_name)
+    lieferant_key = normalize_supplier_lookup(lieferant)
+    if artikelnummer_key:
+        row = db.execute(
+            """
+            SELECT id
+            FROM einkaufsliste
+            WHERE status IN ('rechnung_pruefen', 'offen')
+              AND replace(replace(replace(lower(artikelnummer), '-', ''), ' ', ''), '/', '')=?
+            LIMIT 1
+            """,
+            (artikelnummer_key,),
+        ).fetchone()
+        if row:
+            return True
+    if not produkt_key:
+        return False
+    rows = db.execute(
+        """
+        SELECT lieferant, produkt_name
+        FROM einkaufsliste
+        WHERE status IN ('rechnung_pruefen', 'offen')
+        ORDER BY id DESC
+        LIMIT 250
+        """
+    ).fetchall()
+    for row in rows:
+        same_supplier = normalize_supplier_lookup(row["lieferant"]) == lieferant_key
+        if product_names_match(row["produkt_name"], produkt_name) and same_supplier:
+            return True
+    return False
+
+
+def create_einkauf_rechnung_pruefposition(beleg, position, lieferant=""):
+    beleg_id = int(beleg.get("id") or 0)
+    source = f"Rechnung #{beleg_id}: {beleg.get('original_name')}"
+    produkt_name = clean_text(position.get("produkt_name")) or "Material / Rechnung"
+    artikelnummer = clean_text(position.get("artikelnummer"))
+    preis = clean_text(position.get("preis"))
+    produkt_beschreibung = clean_text(position.get("produkt_beschreibung") or position.get("quelle"))
+    lieferant_name = clean_text(lieferant) or clean_text(beleg.get("lieferant")) or "Auto-Color / Topcolor"
+    if not plausible_einkauf_product_text(produkt_name, artikelnummer, produkt_beschreibung):
+        return 0
+    db = get_db()
+    try:
+        if find_existing_einkauf_artikel(db, lieferant_name, artikelnummer, produkt_name):
+            return 0
+        if einkauf_pruefposition_exists(db, lieferant_name, artikelnummer, produkt_name):
+            return 0
+        cursor = db.execute(
+            """
+            INSERT INTO einkaufsliste
+              (lieferant, kategorie, artikelnummer, produkt_name, produkt_beschreibung, titel, menge, ve,
+               stueckzahl, gebinde, auto_color_preis, vergleich_preis, vergleich_lieferant,
+               lieferzeit, preisquelle, angebotsstatus, angebotsnotiz, notiz, qr_text,
+               quelle_email_id, quelle_beleg_id, status, original_name, stored_name, mime_type, size, erstellt_am, bestellt_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '', '', '', ?, 'offen', '', ?, ?, 0, ?, ?, ?, '', '', 0, ?, '')
+            """,
+            (
+                lieferant_name,
+                normalize_einkauf_kategorie(position.get("kategorie")),
+                artikelnummer,
+                produkt_name,
+                produkt_beschreibung,
+                produkt_name,
+                f"{parse_positive_int(position.get('stueckzahl'), 1)} {clean_text(position.get('ve')) or 'Stueck'}",
+                clean_text(position.get("ve")) or "Stueck",
+                parse_positive_int(position.get("stueckzahl"), 1),
+                preis,
+                source,
+                clean_text(position.get("quelle")),
+                produkt_beschreibung,
+                beleg_id,
+                EINKAUF_RECHNUNG_PRUEF_STATUS,
+                clean_text(beleg.get("original_name")),
+                now_str(),
+            ),
+        )
+        db.commit()
+        return int(cursor.lastrowid)
+    finally:
+        db.close()
+
+
+def update_einkauf_beleg_status(beleg_id, positionen_count=0, status="importiert"):
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE einkauf_belege SET positionen_count=?, status=? WHERE id=?",
+            (int(positionen_count or 0), clean_text(status) or "importiert", int(beleg_id)),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def import_einkauf_rechnung(file_storage, lieferant="Auto-Color / Topcolor"):
+    beleg = save_einkauf_beleg_upload(file_storage, lieferant=lieferant, beleg_typ="rechnung")
+    if not beleg:
+        return {"ok": False, "beleg": None, "created": 0, "positions": [], "message": "Beleg konnte nicht gespeichert werden."}
+    text = clean_text(beleg.get("extrahierter_text"))
+    beleg_path = UPLOAD_DIR / pathlib.Path(clean_text(beleg.get("stored_name"))).name
+    positions = []
+    if beleg_path.exists() and beleg_path.is_file():
+        positions = extract_einkauf_beleg_positions_openai(
+            beleg_path,
+            beleg.get("original_name"),
+            text,
+        )
+    if not positions:
+        positions = extract_einkauf_beleg_positions(text, beleg.get("original_name"))
+    created_ids = []
+    for position in positions:
+        item_id = create_einkauf_rechnung_pruefposition(beleg, position, lieferant=lieferant)
+        if item_id:
+            created_ids.append(item_id)
+    skipped = max(0, len(positions) - len(created_ids))
+    status = "pruefen" if created_ids else "manuell_pruefen"
+    update_einkauf_beleg_status(beleg["id"], len(created_ids), status)
+    schedule_change_backup("einkauf-rechnung")
+    if created_ids:
+        message = f"{len(created_ids)} Produktposition(en) aus {beleg['original_name']} zum Anlegen vorbereitet."
+        if skipped:
+            message += f" {skipped} bereits bekannte oder ungeeignete Zeile(n) wurden übersprungen."
+    elif positions:
+        message = "Rechnung gespeichert. Die erkannten Positionen waren bereits angelegt oder nicht bestellfähig."
+    else:
+        message = "Rechnung gespeichert, aber es wurden noch keine sicheren Produktpositionen erkannt."
+    return {
+        "ok": bool(created_ids),
+        "beleg": get_einkauf_beleg(beleg["id"]),
+        "created": len(created_ids),
+        "skipped": skipped,
+        "positions": positions,
+        "message": message,
+    }
+
+
+def group_einkauf_items_by_lieferant(items):
+    grouped = defaultdict(list)
+    for item in items:
+        grouped[clean_text(item.get("lieferant")) or "Lieferant offen"].append(item)
+    return dict(sorted(grouped.items(), key=lambda entry: entry[0].lower()))
+
+
+def build_topcolor_order_draft(items, topcolor_email=""):
+    subject = f"Einkauf / Angebotsanfrage Gaertner - {date.today().strftime(DATE_FMT)}"
+    lines = [
+        "Hallo,",
+        "",
+        "bitte fuer folgende Positionen ein Angebot bzw. eine schnelle Lieferung pruefen:",
+        "Wichtig: Alternativen bitte nur anbieten, wenn sie technisch gleichwertig sind "
+        "(gleiche Marke/Artikelnummer oder vergleichbare Spezifikation, Qualitaet, Gebinde und Freigabe fuer Fahrzeuglackierung).",
+        "",
+    ]
+    if items:
+        for lieferant, lieferant_items in group_einkauf_items_by_lieferant(items).items():
+            lines.append(f"Lieferant/Ziel: {lieferant}")
+            for index, item in enumerate(lieferant_items, 1):
+                line_parts = [f"{index}. {clean_text(item.get('produkt_name') or item.get('titel')) or 'Material'}"]
+                if clean_text(item.get("artikelnummer")):
+                    line_parts.append(f"Artikel: {clean_text(item.get('artikelnummer'))}")
+                line_parts.append(f"Menge: {item.get('stueckzahl') or 1} {clean_text(item.get('ve')) or 'Stueck'}")
+                if clean_text(item.get("gebinde")):
+                    line_parts.append(f"Gebinde: {clean_text(item.get('gebinde'))}")
+                if clean_text(item.get("kategorie")):
+                    line_parts.append(f"Kategorie: {clean_text(item.get('kategorie'))}")
+                if clean_text(item.get("qr_text")):
+                    line_parts.append(f"QR: {clean_text(item.get('qr_text')).replace(chr(10), ' / ')}")
+                if clean_text(item.get("original_name")):
+                    line_parts.append(f"Datei: {clean_text(item.get('original_name'))}")
+                lines.append(" | ".join(line_parts))
+                detail_lines = []
+                if clean_text(item.get("auto_color_preis")):
+                    detail_lines.append(f"Auto-Color bisher: {format_price_value(item.get('auto_color_preis'))}")
+                if clean_text(item.get("vergleich_lieferant")) or clean_text(item.get("vergleich_preis")):
+                    detail_lines.append(
+                        "Alternative: "
+                        + clean_text(item.get("vergleich_lieferant") or "offen")
+                        + (
+                            f" / {format_price_value(item.get('vergleich_preis'))}"
+                            if clean_text(item.get("vergleich_preis"))
+                            else ""
+                        )
+                    )
+                if clean_text(item.get("lieferzeit")):
+                    detail_lines.append(f"Lieferzeit: {clean_text(item.get('lieferzeit'))}")
+                if clean_text(item.get("notiz")):
+                    detail_lines.append(f"Notiz: {clean_text(item.get('notiz'))}")
+                for detail in detail_lines:
+                    lines.append(f"   {detail}")
+            lines.append("")
+    else:
+        lines.append("- Aktuell sind keine offenen Einkaufspositionen gespeichert.")
+    lines.extend(["", "Vielen Dank.", "", "Mit freundlichen Gruessen", "Gärtner Karosserie & Lack"])
+    body = "\n".join(lines)
+    email = clean_text(topcolor_email)
+    mailto_url = (
+        f"mailto:{quote(email, safe='@.+-_')}?subject={quote(subject)}&body={quote(body)}"
+        if email
+        else ""
+    )
+    return {
+        "subject": subject,
+        "body": body,
+        "mailto_url": mailto_url,
+    }
+
+
+def build_supplier_api_request_draft(topcolor_email=""):
+    subject = "API / feste Einkaufskonditionen fuer Gaertner-Portal"
+    lines = [
+        "Hallo,",
+        "",
+        "wir bauen unser Werkstatt- und Einkaufsportal weiter aus und moechten Topcolor/Auto-Color als festen Lieferanten sauber anbinden.",
+        "Bitte teilen Sie uns mit, ob Sie eine API, OCI-/IDS-Anbindung, BMEcat, CSV/Excel-Export oder einen regelmaessigen Artikel-/Preisfeed anbieten.",
+        "",
+        "Fuer uns wichtig:",
+        "- Artikelstamm mit Artikelnummer, EAN/Hersteller-Nr., Produktname, Kategorie, Gebinde und VE",
+        "- kundenspezifische Netto-EK-Preise inklusive Staffelpreisen, Rabatten und Preisgueltigkeit",
+        "- Verfuegbarkeit/Lagerbestand und Lieferzeit",
+        "- Produktbilder, Sicherheitsdatenblaetter und technische Datenblaetter",
+        "- Alternativartikel nur bei gleicher oder gleichwertiger Qualitaet",
+        "- direkte Bestellausloesung oder Uebergabe eines Warenkorbs",
+        "- Rueckmeldung mit Auftragsnummer, Liefertermin und Tracking",
+        "",
+        "Wir vergleichen aktuell insbesondere Verbrauchsmaterial, Schleifmittel, Klebebaender, Polituren, Lack/Klarlack/Haerter und Karosserieteile mit Auto-Color/Topcolor.",
+        "Gerade bei teuren Lack- und PPG-/Envirobase-Positionen moechten wir feste Konditionen sauber im Portal hinterlegen, damit nicht jede Bestellung einzeln nachverhandelt werden muss.",
+        "",
+        "Wenn spaeter weitere Lackierbetriebe das Portal nutzen, koennte Topcolor als integrierter Lieferant direkt in deren Einkauf sichtbar sein. Das waere fuer beide Seiten eine Win-win-Situation: weniger Rueckfragen, sauberere Bestellungen und bessere Bindung ueber feste Konditionen.",
+        "",
+        "Bitte senden Sie uns technische Unterlagen, Preise und den passenden Ansprechpartner fuer API/Preisliste/Konditionen.",
+        "",
+        "Vielen Dank.",
+        "",
+        "Mit freundlichen Gruessen",
+        "Gaertner Karosserie & Lack",
+    ]
+    body = "\n".join(lines)
+    email = clean_text(topcolor_email)
+    mailto_url = (
+        f"mailto:{quote(email, safe='@.+-_')}?subject={quote(subject)}&body={quote(body)}"
+        if email
+        else ""
+    )
+    return {
+        "subject": subject,
+        "body": body,
+        "mailto_url": mailto_url,
+    }
+
+
+def list_einkauf_items_for_email(email_id):
+    try:
+        email_id = int(email_id or 0)
+    except (TypeError, ValueError):
+        email_id = 0
+    if not email_id:
+        return []
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM einkaufsliste
+            WHERE quelle_email_id=?
+            ORDER BY id DESC
+            """,
+            (email_id,),
+        ).fetchall()
+    finally:
+        db.close()
+    return [hydrate_einkauf_item(row) for row in rows]
+
+
+def guess_lieferant_from_email(email_item):
+    subject = clean_text(email_item.get("betreff"))
+    body = clean_text(email_item.get("nachricht"))
+    name = clean_text(email_item.get("absender_name"))
+    address = clean_text(email_item.get("absender_email"))
+    search = f"{name} {address} {subject} {body}".lower()
+    if any(token in search for token in ("topcolor", "top color", "auto-color", "autocolor")):
+        return "Auto-Color / Topcolor"
+    if name:
+        return name[:120]
+    if address and "@" in address:
+        domain = address.split("@", 1)[1].split(".", 1)[0]
+        return domain.replace("-", " ").title()[:120]
+    return "Lieferant offen"
+
+
+def is_lieferantenangebot_email(email_item, force=False):
+    subject = clean_text(email_item.get("betreff"))
+    body = clean_text(email_item.get("nachricht"))
+    sender = email_sender_display(email_item)
+    text = f"{sender}\n{subject}\n{body}".lower()
+    has_price = bool(re.search(r"\d{1,6}(?:[.,]\d{2})\s*(?:eur|€)", text, re.I))
+    if force:
+        return has_price
+    offer_terms = ("angebot", "preis", "netto", "eur", "€", "lieferzeit")
+    purchase_terms = ("einkauf", "bestellung", "material", "artikel", "lieferant", "position")
+    supplier_terms = (
+        "topcolor",
+        "top color",
+        "auto-color",
+        "autocolor",
+        "mipa",
+        "3m",
+        "sata",
+        "wurth",
+        "würth",
+        "lack",
+        "schleif",
+    )
+    return (
+        has_price
+        and any(term in text for term in offer_terms)
+        and (any(term in text for term in supplier_terms) or any(term in text for term in purchase_terms))
+    )
+
+
+def normalize_offer_unit(value):
+    value = clean_text(value).lower()
+    mapping = {
+        "x": "Stueck",
+        "stk": "Stueck",
+        "stck": "Stueck",
+        "stück": "Stueck",
+        "stueck": "Stueck",
+        "dose": "Dose",
+        "dosen": "Dose",
+        "l": "Liter",
+        "ltr": "Liter",
+        "liter": "Liter",
+        "rolle": "Rolle",
+        "rollen": "Rolle",
+        "karton": "Karton",
+        "packung": "Packung",
+        "set": "Set",
+    }
+    return mapping.get(value, "Stueck")
+
+
+def clean_offer_product_text(line, price_match, article_number=""):
+    text = clean_text(line)
+    if price_match:
+        text = (text[: price_match.start()] + text[price_match.end() :]).strip()
+    if article_number:
+        text = re.sub(
+            r"(?:artikel(?:nr|nummer)?|bestell(?:nr|nummer)?|art\.?|nr\.?)\b[:#\s-]*"
+            + re.escape(article_number),
+            "",
+            text,
+            flags=re.I,
+        )
+    text = re.sub(
+        r"\b\d+\s*(?:x|stk\.?|stck\.?|stück|stueck|dose|dosen|l|ltr|liter|rolle|rollen|karton|packung|set)\b",
+        "",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"\b(?:netto|brutto|eur|preis|angebotspreis|einzelpreis|gesamtpreis)\b[:\s-]*", "", text, flags=re.I)
+    text = re.sub(r"\s{2,}", " ", text).strip(" -|:\t")
+    return text[:160]
+
+
+def extract_lieferantenangebot_positions(email_item):
+    subject = clean_text(email_item.get("betreff"))
+    body = clean_text(email_item.get("nachricht"))
+    raw_text = f"{subject}\n{body}"
+    lines = [clean_text(line) for line in re.split(r"[\r\n;]+", raw_text) if clean_text(line)]
+    positions = []
+    price_re = re.compile(r"(?P<price>\d{1,6}(?:[.,]\d{2}))\s*(?:eur|€)", re.I)
+    article_re = re.compile(
+        r"(?:artikel(?:nr|nummer)?|bestell(?:nr|nummer)?|art\.?|nr\.?)\b[:#\s-]*(?P<article>[A-Za-z0-9][A-Za-z0-9./_-]{2,})",
+        re.I,
+    )
+    amount_re = re.compile(
+        r"\b(?P<count>\d{1,4})\s*(?P<unit>x|stk\.?|stck\.?|stück|stueck|dose|dosen|l|ltr|liter|rolle|rollen|karton|packung|set)\b",
+        re.I,
+    )
+    skip_terms = ("summe", "gesamt", "zwischensumme", "mwst", "ust", "versand", "porto", "rabatt")
+    for line in lines:
+        lowered = line.lower()
+        price_match = price_re.search(line)
+        if not price_match:
+            continue
+        if any(term in lowered for term in skip_terms) and not article_re.search(line):
+            continue
+        article_match = article_re.search(line)
+        amount_match = amount_re.search(line)
+        article_number = clean_text(article_match.group("article")) if article_match else ""
+        count = parse_positive_int(amount_match.group("count"), 1) if amount_match else 1
+        unit = normalize_offer_unit(amount_match.group("unit")) if amount_match else "Stueck"
+        product = clean_offer_product_text(line, price_match, article_number)
+        if not product and article_number:
+            product = f"Artikel {article_number}"
+        if not product:
+            product = clean_text(subject) or "Lieferantenposition"
+        if not plausible_einkauf_product_text(product, article_number, line):
+            continue
+        positions.append(
+            {
+                "produkt_name": product,
+                "artikelnummer": article_number,
+                "stueckzahl": count,
+                "ve": unit,
+                "preis": clean_text(price_match.group("price")),
+                "quelle": line[:220],
+            }
+        )
+    return positions[:80]
+
+
+def analyse_lieferantenangebot_email(email_id, force=False):
+    email_item = get_werkstatt_email(email_id)
+    if not email_item:
+        return {"ok": False, "reason": "email_missing", "created": 0, "items": []}
+    existing_items = list_einkauf_items_for_email(email_id)
+    if existing_items:
+        return {"ok": True, "reason": "existing", "created": 0, "items": existing_items}
+    if not is_lieferantenangebot_email(email_item, force=force):
+        return {"ok": False, "reason": "not_offer", "created": 0, "items": []}
+    lieferant = guess_lieferant_from_email(email_item)
+    positions = extract_lieferantenangebot_positions(email_item)
+    if not positions:
+        return {"ok": False, "reason": "no_positions", "created": 0, "items": []}
+    created_ids = []
+    supplier_lower = lieferant.lower()
+    source = f"E-Mail #{email_item['id']}: {email_item['betreff']}"
+    for position in positions:
+        price_fields = {}
+        if any(token in supplier_lower for token in ("topcolor", "top color", "auto-color", "autocolor")):
+            price_fields["auto_color_preis"] = position["preis"]
+        else:
+            price_fields["vergleich_preis"] = position["preis"]
+            price_fields["vergleich_lieferant"] = lieferant
+        created_ids.append(
+            create_einkauf_item(
+                lieferant=lieferant,
+                kategorie="Material",
+                produkt_name=position["produkt_name"],
+                titel=position["produkt_name"],
+                artikelnummer=position["artikelnummer"],
+                stueckzahl=position["stueckzahl"],
+                ve=position["ve"],
+                preisquelle=source,
+                angebotsstatus="angebot_erhalten",
+                angebotsnotiz=f"Aus Lieferanten-E-Mail erkannt: {position['quelle']}",
+                quelle_email_id=email_item["id"],
+                **price_fields,
+            )
+        )
+    return {
+        "ok": True,
+        "reason": "created",
+        "created": len(created_ids),
+        "items": [get_einkauf_item(item_id) for item_id in created_ids],
+    }
+
+
+def einkauf_offer_anchor(key):
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", clean_text(key)).strip("-") or "offen"
+    return f"lieferantenangebot-{slug}"
+
+
+def build_einkauf_offer_groups(items=None, limit=20):
+    source_items = items if items is not None else list_einkauf_items("offen", limit=500)
+    offer_items = [
+        item
+        for item in source_items
+        if item.get("quelle_email_id")
+        or item.get("angebotsstatus") in {"angebot_erhalten", "freigegeben", "angefragt"}
+    ]
+    email_ids = sorted({int(item.get("quelle_email_id") or 0) for item in offer_items if item.get("quelle_email_id")})
+    emails = {email_id: get_werkstatt_email(email_id) for email_id in email_ids}
+    groups = {}
+    for item in offer_items:
+        email_id = int(item.get("quelle_email_id") or 0)
+        key = f"email-{email_id}" if email_id else f"lieferant-{clean_text(item.get('lieferant')) or 'offen'}"
+        email_item = emails.get(email_id) if email_id else None
+        if key not in groups:
+            title = clean_text((email_item or {}).get("betreff")) if email_item else ""
+            supplier = clean_text(item.get("lieferant")) or "Lieferant offen"
+            anchor = einkauf_offer_anchor(key)
+            groups[key] = {
+                "key": key,
+                "anchor": anchor,
+                "ziel_url": (url_for("admin_einkauf") + f"#{anchor}") if has_request_context() else "",
+                "titel": title or f"Angebot von {supplier}",
+                "lieferant": supplier,
+                "empfangen_am": clean_text((email_item or {}).get("empfangen_am")) or clean_text(item.get("erstellt_am")),
+                "absender": email_sender_display(email_item) if email_item else supplier,
+                "items": [],
+                "price_total": 0.0,
+                "price_count": 0,
+            }
+        groups[key]["items"].append(item)
+        price = parse_price_value(item.get("auto_color_preis") or item.get("vergleich_preis"))
+        if price is not None:
+            groups[key]["price_total"] += price * parse_positive_int(item.get("stueckzahl"), 1)
+            groups[key]["price_count"] += 1
+    result = []
+    for group in groups.values():
+        group["count"] = len(group["items"])
+        group["preview"] = ", ".join(
+            clean_text(item.get("produkt_name") or item.get("titel")) for item in group["items"][:3]
+        )
+        if group["price_count"]:
+            group["preis_summe_label"] = f"{group['price_total']:.2f} EUR".replace(".", ",")
+        else:
+            group["preis_summe_label"] = ""
+        result.append(group)
+    return result[: max(1, int(limit or 20))]
+
+
+def get_werkstatt_email_api_token():
+    try:
+        configured = get_app_setting("WERKSTATT_EMAIL_API_TOKEN", "")
+    except Exception:
+        configured = ""
+    return clean_secret_value(configured or WERKSTATT_EMAIL_API_TOKEN)
+
+
+def werkstatt_api_token_valid():
+    token = get_werkstatt_email_api_token()
+    if not token:
+        return False
+    provided = clean_secret_value(request.headers.get("X-Werkstatt-Token"))
+    auth_header = clean_text(request.headers.get("Authorization"))
+    if auth_header.lower().startswith("bearer "):
+        provided = clean_secret_value(auth_header[7:])
+    return bool(provided and hmac.compare_digest(provided, token))
+
+
+def email_sender_display(email_item):
+    name = clean_text(email_item.get("absender_name"))
+    address = clean_text(email_item.get("absender_email"))
+    if name and address:
+        return f"{name} <{address}>"
+    return name or address or "Unbekannter Absender"
+
+
+def hydrate_werkstatt_email(row):
+    item = dict(row)
+    item["absender_display"] = email_sender_display(item)
+    item["betreff"] = clean_text(item.get("betreff")) or "(ohne Betreff)"
+    item["nachricht"] = clean_text(item.get("nachricht"))
+    item["excerpt"] = postfach_excerpt(item["nachricht"], 170)
+    item["empfangen_am"] = clean_text(item.get("empfangen_am")) or clean_text(item.get("erstellt_am"))
+    item["is_neu"] = clean_text(item.get("status")) == "neu"
+    item["kategorie"] = clean_text(item.get("kategorie")) or "allgemein"
+    item["ziel_modul"] = clean_text(item.get("ziel_modul"))
+    item["message_id"] = clean_text(item.get("message_id"))
+    item["source_uid"] = clean_text(item.get("source_uid"))
+    item["raw_hash"] = clean_text(item.get("raw_hash"))
+    try:
+        item["attachments_count"] = int(item.get("attachments_count") or 0)
+    except (TypeError, ValueError):
+        item["attachments_count"] = 0
+    return item
+
+
+def classify_werkstatt_email(betreff="", nachricht="", absender_email=""):
+    text_blob = normalize_document_text(" ".join([betreff or "", nachricht or "", absender_email or ""]))
+    invoice_tokens = (
+        "rechnung",
+        "invoice",
+        "zahlbar",
+        "faellig",
+        "fällig",
+        "mahnung",
+        "beleg",
+        "gutschrift",
+        "zahlungserinnerung",
+    )
+    purchase_tokens = (
+        "lieferant",
+        "topcolor",
+        "top color",
+        "auto-color",
+        "material",
+        "bestellung",
+        "angebot",
+        "lieferschein",
+    )
+    if any(token in text_blob for token in invoice_tokens):
+        if any(token in text_blob for token in purchase_tokens):
+            return "rechnung_ausgabe", "rechnungen"
+        return "rechnung", "rechnungen"
+    if any(token in text_blob for token in purchase_tokens):
+        return "einkauf", "einkauf"
+    return "allgemein", ""
+
+
+def list_werkstatt_emails(status="aktiv", limit=120):
+    status = clean_text(status) or "aktiv"
+    limit = max(1, min(int(limit or 120), 500))
+    db = get_db()
+    try:
+        if status == "alle":
+            rows = db.execute(
+                """
+                SELECT *
+                FROM werkstatt_emails
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        elif status == "aktiv":
+            rows = db.execute(
+                """
+                SELECT *
+                FROM werkstatt_emails
+                WHERE status!='archiviert'
+                ORDER BY CASE WHEN status='neu' THEN 0 ELSE 1 END, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT *
+                FROM werkstatt_emails
+                WHERE status=?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (status, limit),
+            ).fetchall()
+    finally:
+        db.close()
+    return [hydrate_werkstatt_email(row) for row in rows]
+
+
+def get_werkstatt_email(email_id):
+    db = get_db()
+    try:
+        row = db.execute("SELECT * FROM werkstatt_emails WHERE id=?", (int(email_id),)).fetchone()
+    finally:
+        db.close()
+    return hydrate_werkstatt_email(row) if row else None
+
+
+def admin_email_count():
+    try:
+        db = get_db()
+        row = db.execute(
+            "SELECT COUNT(*) AS count FROM werkstatt_emails WHERE status='neu'"
+        ).fetchone()
+        return int(row["count"] or 0) if row else 0
+    except Exception:
+        return 0
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+def normalize_email_date(value):
+    cleaned = clean_text(value)
+    if not cleaned:
+        return now_str()
+    parsed = parse_date(cleaned)
+    if parsed:
+        return parsed.strftime(DATE_FMT)
+    for fmt in (DATETIME_FMT, "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+        try:
+            return datetime.strptime(cleaned[:19], fmt).strftime(DATETIME_FMT)
+        except ValueError:
+            continue
+    return cleaned[:80]
+
+
+def get_werkstatt_imap_config():
+    search = re.sub(r"\s+", " ", MAIL_IMAP_SEARCH).strip().upper()
+    if not search or any(char in search for char in "\r\n\"\\"):
+        search = "UNSEEN"
+    password = clean_secret_value(MAIL_IMAP_PASS)
+    return {
+        "configured": bool(MAIL_IMAP_HOST and MAIL_IMAP_USER and password),
+        "host": MAIL_IMAP_HOST,
+        "port": MAIL_IMAP_PORT,
+        "user": MAIL_IMAP_USER,
+        "password": password,
+        "folder": MAIL_IMAP_FOLDER,
+        "ssl": bool(MAIL_IMAP_SSL),
+        "mark_seen": bool(MAIL_IMAP_MARK_SEEN),
+        "archive_folder": MAIL_IMAP_ARCHIVE_FOLDER,
+        "search": search,
+        "limit": MAIL_IMAP_LIMIT,
+        "timeout": MAIL_IMAP_TIMEOUT_SECONDS,
+    }
+
+
+def werkstatt_imap_status():
+    config = get_werkstatt_imap_config()
+    return {
+        "configured": config["configured"],
+        "host": config["host"],
+        "port": config["port"],
+        "user": config["user"],
+        "folder": config["folder"],
+        "ssl": config["ssl"],
+        "mark_seen": config["mark_seen"],
+        "archive_folder": config["archive_folder"],
+        "search": config["search"],
+        "limit": config["limit"],
+    }
+
+
+def decode_email_header_value(value):
+    if not value:
+        return ""
+    try:
+        return str(make_header(decode_header(str(value))))
+    except Exception:
+        return clean_text(value)
+
+
+def email_address_parts(value):
+    decoded = decode_email_header_value(value)
+    for name, address in getaddresses([decoded]):
+        if name or address:
+            return decode_email_header_value(name), clean_text(address)
+    return "", clean_text(decoded)
+
+
+def email_address_list(value):
+    decoded = decode_email_header_value(value)
+    addresses = []
+    for name, address in getaddresses([decoded]):
+        address = clean_text(address)
+        if not address:
+            continue
+        name = decode_email_header_value(name)
+        addresses.append(f"{name} <{address}>" if name else address)
+    return ", ".join(addresses)
+
+
+def email_message_date_label(message):
+    date_header = clean_text(message.get("Date"))
+    if not date_header:
+        return now_str()
+    try:
+        parsed = parsedate_to_datetime(date_header)
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone()
+        return parsed.strftime(DATETIME_FMT)
+    except Exception:
+        return normalize_email_date(date_header)
+
+
+def normalize_email_body_text(value):
+    text = unescape(str(value or ""))
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = []
+    previous_blank = False
+    for raw_line in text.splitlines():
+        line = compact_whitespace(raw_line)
+        blank = not line
+        if blank and previous_blank:
+            continue
+        lines.append(line)
+        previous_blank = blank
+    return "\n".join(lines).strip()
+
+
+def html_email_to_text(value):
+    html = str(value or "")
+    html = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
+    html = re.sub(r"(?i)<br\s*/?>", "\n", html)
+    html = re.sub(r"(?i)</(p|div|tr|li|h[1-6])>", "\n", html)
+    html = re.sub(r"<[^>]+>", " ", html)
+    return normalize_email_body_text(html)
+
+
+def email_part_text(part):
+    try:
+        content = part.get_content()
+        if isinstance(content, str):
+            return content
+    except Exception:
+        pass
+    payload = part.get_payload(decode=True)
+    if not payload:
+        return ""
+    charset = part.get_content_charset() or "utf-8"
+    try:
+        return payload.decode(charset, errors="replace")
+    except LookupError:
+        return payload.decode("utf-8", errors="replace")
+
+
+def email_message_body_text(message):
+    plain_parts = []
+    html_parts = []
+    parts = message.walk() if message.is_multipart() else [message]
+    for part in parts:
+        if part.is_multipart():
+            continue
+        disposition = clean_text(part.get_content_disposition()).lower()
+        if disposition == "attachment":
+            continue
+        content_type = clean_text(part.get_content_type()).lower()
+        if content_type == "text/plain":
+            plain_parts.append(email_part_text(part))
+        elif content_type == "text/html":
+            html_parts.append(email_part_text(part))
+    if plain_parts:
+        return normalize_email_body_text("\n\n".join(plain_parts))
+    if html_parts:
+        return html_email_to_text("\n\n".join(html_parts))
+    return ""
+
+
+def email_attachment_count(message):
+    count = 0
+    for part in message.walk() if message.is_multipart() else [message]:
+        if part.is_multipart():
+            continue
+        disposition = clean_text(part.get_content_disposition()).lower()
+        if disposition == "attachment" or clean_text(part.get_filename()):
+            count += 1
+    return count
+
+
+def parse_werkstatt_email_raw_message(raw_bytes, source_uid=""):
+    if isinstance(raw_bytes, str):
+        raw_bytes = raw_bytes.encode("utf-8", errors="replace")
+    raw_bytes = bytes(raw_bytes or b"")
+    message = BytesParser(policy=policy.default).parsebytes(raw_bytes)
+    absender_name, absender_email = email_address_parts(message.get("From"))
+    message_id = clean_text(message.get("Message-ID") or message.get("Message-Id"))
+    empfaenger = email_address_list(message.get("To") or message.get("Delivered-To"))
+    betreff = decode_email_header_value(message.get("Subject"))
+    nachricht = email_message_body_text(message)
+    raw_hash = hashlib.sha256(raw_bytes).hexdigest() if raw_bytes else ""
+    attachments_count = email_attachment_count(message)
+    return {
+        "absender_name": absender_name,
+        "absender_email": absender_email,
+        "empfaenger": empfaenger,
+        "betreff": betreff,
+        "nachricht": nachricht,
+        "empfangen_am": email_message_date_label(message),
+        "quelle": "imap",
+        "message_id": message_id[:255],
+        "source_uid": clean_text(source_uid)[:255],
+        "raw_hash": raw_hash,
+        "attachments_count": attachments_count,
+        "original_payload": {
+            "message_id": message_id,
+            "source_uid": clean_text(source_uid),
+            "raw_hash": raw_hash,
+            "attachments_count": attachments_count,
+            "from": {"name": absender_name, "email": absender_email},
+            "to": empfaenger,
+            "subject": betreff,
+        },
+    }
+
+
+def find_existing_werkstatt_email(message_id="", raw_hash="", source_uid=""):
+    checks = []
+    params = []
+    for column, value in (
+        ("message_id", message_id),
+        ("raw_hash", raw_hash),
+        ("source_uid", source_uid),
+    ):
+        value = clean_text(value)
+        if not value:
+            continue
+        checks.append(f"{column}=?")
+        params.append(value[:255])
+    if not checks:
+        return 0
+    db = get_db()
+    try:
+        row = db.execute(
+            f"""
+            SELECT id
+            FROM werkstatt_emails
+            WHERE {' OR '.join(checks)}
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            tuple(params),
+        ).fetchone()
+    finally:
+        db.close()
+    return int(row["id"]) if row else 0
+
+
+def import_werkstatt_email_raw_message(raw_bytes, source_uid=""):
+    payload = parse_werkstatt_email_raw_message(raw_bytes, source_uid=source_uid)
+    existing_id = find_existing_werkstatt_email(
+        message_id=payload.get("message_id"),
+        raw_hash=payload.get("raw_hash"),
+        source_uid=payload.get("source_uid"),
+    )
+    if existing_id:
+        return {
+            "ok": True,
+            "created": False,
+            "id": existing_id,
+            "reason": "duplicate",
+            "betreff": payload.get("betreff") or "",
+        }
+    email_id = create_werkstatt_email(**payload)
+    return {
+        "ok": True,
+        "created": True,
+        "id": email_id,
+        "reason": "created",
+        "betreff": payload.get("betreff") or "",
+    }
+
+
+def connect_werkstatt_imap(config):
+    if config["ssl"]:
+        return imaplib.IMAP4_SSL(
+            config["host"],
+            config["port"],
+            timeout=config["timeout"],
+        )
+    return imaplib.IMAP4(
+        config["host"],
+        config["port"],
+        timeout=config["timeout"],
+    )
+
+
+def sync_werkstatt_imap(limit=None):
+    config = get_werkstatt_imap_config()
+    if not config["configured"]:
+        raise ValueError(
+            "IMAP ist noch nicht konfiguriert. Bitte MAIL_IMAP_HOST, MAIL_IMAP_USER und MAIL_IMAP_PASS in .env.local setzen."
+        )
+    limit = max(1, min(int(limit or config["limit"] or 30), 200))
+    summary = {
+        "ok": True,
+        "checked": 0,
+        "fetched": 0,
+        "created": 0,
+        "skipped": 0,
+        "errors": [],
+        "created_ids": [],
+    }
+    client = None
+    delete_after_copy = False
+    try:
+        client = connect_werkstatt_imap(config)
+        client.login(config["user"], config["password"])
+        readonly = not (config["mark_seen"] or config["archive_folder"])
+        status, _ = client.select(config["folder"], readonly=readonly)
+        if status != "OK":
+            raise RuntimeError(f"IMAP-Ordner '{config['folder']}' konnte nicht geöffnet werden.")
+        status, data = client.uid("search", None, config["search"])
+        if status != "OK":
+            raise RuntimeError(f"IMAP-Suche '{config['search']}' ist fehlgeschlagen.")
+        uid_blob = data[0] if data else b""
+        uids = [uid for uid in uid_blob.split() if uid]
+        selected_uids = uids[-limit:]
+        summary["checked"] = len(selected_uids)
+        for uid in reversed(selected_uids):
+            uid_text = uid.decode("ascii", errors="ignore")
+            source_uid = f"{config['folder']}:{uid_text}"
+            if find_existing_werkstatt_email(source_uid=source_uid):
+                summary["skipped"] += 1
+                if config["mark_seen"]:
+                    client.uid("STORE", uid, "+FLAGS", r"(\Seen)")
+                continue
+            status, fetched = client.uid("fetch", uid, "(BODY.PEEK[])")
+            if status != "OK":
+                summary["errors"].append(f"UID {uid_text}: Abruf fehlgeschlagen")
+                continue
+            raw_bytes = b""
+            for item in fetched or []:
+                if isinstance(item, tuple) and item[1]:
+                    raw_bytes = item[1]
+                    break
+            if not raw_bytes:
+                summary["errors"].append(f"UID {uid_text}: keine Nachrichtendaten")
+                continue
+            summary["fetched"] += 1
+            result = import_werkstatt_email_raw_message(raw_bytes, source_uid=source_uid)
+            if result.get("created"):
+                summary["created"] += 1
+                summary["created_ids"].append(result.get("id"))
+            else:
+                summary["skipped"] += 1
+            if config["archive_folder"]:
+                copy_status, _ = client.uid("COPY", uid, config["archive_folder"])
+                if copy_status == "OK":
+                    client.uid("STORE", uid, "+FLAGS", r"(\Deleted)")
+                    delete_after_copy = True
+                else:
+                    summary["errors"].append(f"UID {uid_text}: Archivierung fehlgeschlagen")
+            elif config["mark_seen"]:
+                client.uid("STORE", uid, "+FLAGS", r"(\Seen)")
+        if delete_after_copy:
+            client.expunge()
+        return summary
+    finally:
+        if client is not None:
+            try:
+                client.logout()
+            except Exception:
+                pass
+
+
+def create_werkstatt_email(
+    absender_name="",
+    absender_email="",
+    empfaenger="",
+    betreff="",
+    nachricht="",
+    empfangen_am="",
+    quelle="manuell",
+    autohaus_id=0,
+    auftrag_id=0,
+    original_payload=None,
+    message_id="",
+    source_uid="",
+    raw_hash="",
+    attachments_count=0,
+):
+    betreff = clean_text(betreff)
+    nachricht = clean_text(nachricht)
+    absender_email = clean_text(absender_email)
+    absender_name = clean_text(absender_name)
+    message_id = clean_text(message_id)[:255]
+    source_uid = clean_text(source_uid)[:255]
+    raw_hash = clean_text(raw_hash)[:255]
+    try:
+        attachments_count = max(0, int(attachments_count or 0))
+    except (TypeError, ValueError):
+        attachments_count = 0
+    if not any((betreff, nachricht, absender_email, absender_name)):
+        raise ValueError("Bitte mindestens Absender, Betreff oder Nachricht eintragen.")
+    existing_id = find_existing_werkstatt_email(
+        message_id=message_id,
+        raw_hash=raw_hash,
+        source_uid=source_uid,
+    )
+    if existing_id:
+        return existing_id
+    kategorie, ziel_modul = classify_werkstatt_email(betreff, nachricht, absender_email)
+    now = now_str()
+    email_id = 0
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO werkstatt_emails
+              (quelle, kategorie, ziel_modul, absender_name, absender_email, empfaenger, betreff, nachricht,
+               empfangen_am, message_id, source_uid, raw_hash, attachments_count,
+               status, autohaus_id, auftrag_id, original_payload,
+               erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'neu', ?, ?, ?, ?, ?)
+            """,
+            (
+                clean_text(quelle) or "manuell",
+                kategorie,
+                ziel_modul,
+                absender_name[:160],
+                absender_email[:220],
+                clean_text(empfaenger)[:220],
+                betreff[:220],
+                nachricht[:5000],
+                normalize_email_date(empfangen_am),
+                message_id,
+                source_uid,
+                raw_hash,
+                attachments_count,
+                int(autohaus_id or 0),
+                int(auftrag_id or 0),
+                json.dumps(original_payload or {}, ensure_ascii=False)[:5000],
+                now,
+                now,
+            ),
+        )
+        db.commit()
+        email_id = cursor.lastrowid
+    finally:
+        db.close()
+    try:
+        analyse_lieferantenangebot_email(email_id)
+    except Exception:
+        pass
+    try:
+        create_rechnung_marker_from_email(email_id)
+    except Exception:
+        pass
+    schedule_change_backup("werkstatt-email")
+    return email_id
+
+
+def create_rechnung_marker_from_email(email_id):
+    email_item = get_werkstatt_email(email_id)
+    if not email_item or clean_text(email_item.get("ziel_modul")) != "rechnungen":
+        return 0
+    direction = "Ausgabe" if clean_text(email_item.get("kategorie")) == "rechnung_ausgabe" else "Einnahme"
+    text_blob = " ".join([email_item.get("betreff", ""), email_item.get("nachricht", "")])
+    amount = parse_money_amount(text_blob) or 0
+    invoice_number = ""
+    match = re.search(r"(?:rechnung(?:snummer)?|re\.?\s*nr\.?|invoice)\s*[:#-]?\s*([A-Z0-9][A-Z0-9./_-]{2,})", text_blob, re.I)
+    if match:
+        invoice_number = clean_text(match.group(1))
+    voucher_id = f"email-{int(email_id)}"
+    now = now_str()
+    db = get_db()
+    try:
+        existing = db.execute(
+            "SELECT id FROM lexware_rechnungen WHERE source_email_id=? OR voucher_id=?",
+            (int(email_id), voucher_id),
+        ).fetchone()
+        if existing:
+            return int(existing["id"])
+        cursor = db.execute(
+            """
+            INSERT INTO lexware_rechnungen
+              (voucher_id, voucher_type, richtung, status, payment_status, voucher_status,
+               voucher_number, contact_name, total_amount, open_amount, currency,
+               voucher_date, due_date, source_email_id, raw_json, zuletzt_synced_am, erstellt_am, geaendert_am)
+            VALUES (?, 'email', ?, 'pruefen', '', 'unchecked', ?, ?, ?, ?, 'EUR', ?, '', ?, ?, ?, ?, ?)
+            """,
+            (
+                voucher_id,
+                direction,
+                invoice_number,
+                email_sender_display(email_item),
+                amount,
+                amount,
+                clean_text(email_item.get("empfangen_am")),
+                int(email_id),
+                json.dumps({"email_id": email_id, "betreff": email_item.get("betreff")}, ensure_ascii=False),
+                now,
+                now,
+                now,
+            ),
+        )
+        db.commit()
+        return int(cursor.lastrowid)
+    finally:
+        db.close()
+
+
+def update_werkstatt_email_status(email_id, status):
+    status = clean_text(status)
+    if status not in {"neu", "gelesen", "erledigt", "archiviert"}:
+        status = "gelesen"
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE werkstatt_emails SET status=?, geaendert_am=? WHERE id=?",
+            (status, now_str(), int(email_id)),
+        )
+        db.commit()
+        schedule_change_backup("werkstatt-email-status")
+    finally:
+        db.close()
+
+
+def email_payload_from_request():
+    payload = request.get_json(silent=True) or {}
+    sender = payload.get("sender") or payload.get("from") or {}
+    if isinstance(sender, str):
+        absender_name = ""
+        absender_email = sender
+    else:
+        absender_name = sender.get("name") or payload.get("from_name") or payload.get("absender_name")
+        absender_email = sender.get("email") or payload.get("from_email") or payload.get("absender_email")
+    return {
+        "absender_name": absender_name,
+        "absender_email": absender_email,
+        "empfaenger": payload.get("to") or payload.get("empfaenger"),
+        "betreff": payload.get("subject") or payload.get("betreff"),
+        "nachricht": payload.get("text") or payload.get("body") or payload.get("nachricht"),
+        "empfangen_am": payload.get("received_at") or payload.get("empfangen_am"),
+        "quelle": payload.get("source") or payload.get("quelle") or "api",
+        "autohaus_id": payload.get("autohaus_id") or 0,
+        "auftrag_id": payload.get("auftrag_id") or 0,
+        "original_payload": payload,
+    }
+
+
+def list_partner_postfach_items(autohaus_id, slug, limit=80):
+    autohaus_id = int(autohaus_id or 0)
+    hidden = postfach_hidden_keys("autohaus", autohaus_id)
+    items = []
+    db = get_db()
+
+    rows = db.execute(
+        """
+        SELECT b.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer, a.angebotsphase
+        FROM benachrichtigungen b
+        JOIN auftraege a ON a.id = b.auftrag_id
+        WHERE a.autohaus_id=? AND a.archiviert=0 AND COALESCE(b.gelesen, 0)=0
+        ORDER BY b.id DESC
+        LIMIT 80
+        """,
+        (autohaus_id,),
+    ).fetchall()
+    for row in rows:
+        key = f"autohaus-hinweis-{row['id']}"
+        if key in hidden:
+            continue
+        endpoint = "partner_angebot_detail" if row["angebotsphase"] else "partner_auftrag"
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Werkstatt",
+                "titel": row["titel"],
+                "nachricht": postfach_excerpt(row["nachricht"]),
+                "erstellt_am": row["erstellt_am"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": url_for(endpoint, slug=slug, auftrag_id=row["auftrag_id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT c.id, c.auftrag_id, c.nachricht, c.erstellt_am,
+               a.fahrzeug, a.kennzeichen
+        FROM chat_nachrichten c
+        JOIN auftraege a ON a.id = c.auftrag_id
+        WHERE a.autohaus_id=?
+          AND c.absender='werkstatt'
+          AND c.gelesen_autohaus=0
+          AND a.archiviert=0
+        ORDER BY c.id DESC
+        LIMIT 80
+        """,
+        (autohaus_id,),
+    ).fetchall()
+    for row in rows:
+        key = f"autohaus-chat-{row['id']}"
+        if key in hidden:
+            continue
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Chat",
+                "titel": "Neue Nachricht der Werkstatt",
+                "nachricht": postfach_excerpt(row["nachricht"]),
+                "erstellt_am": row["erstellt_am"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": url_for("partner_auftrag", slug=slug, auftrag_id=row["auftrag_id"]),
+            }
+        )
+
+    rows = db.execute(
+        """
+        SELECT a.id, a.fahrzeug, a.kennzeichen, a.analyse_hinweis, a.geaendert_am, a.angebotsphase
+        FROM auftraege a
+        WHERE a.autohaus_id=?
+          AND a.analyse_pruefen=1
+          AND a.analyse_autohaus_geprueft=0
+          AND a.archiviert=0
+        ORDER BY a.geaendert_am DESC, a.id DESC
+        LIMIT 80
+        """,
+        (autohaus_id,),
+    ).fetchall()
+    db.close()
+    for row in rows:
+        key = f"autohaus-dokument-{row['id']}"
+        if key in hidden:
+            continue
+        endpoint = "partner_angebot_detail" if row["angebotsphase"] else "partner_auftrag"
+        items.append(
+            {
+                "item_key": key,
+                "typ": "Prüfung",
+                "titel": "Dokumentprüfung offen",
+                "nachricht": postfach_excerpt(row["analyse_hinweis"] or "Erkannte Werte müssen geprüft werden."),
+                "erstellt_am": row["geaendert_am"],
+                "fahrzeug": row["fahrzeug"],
+                "kennzeichen": row["kennzeichen"],
+                "ziel_url": url_for(endpoint, slug=slug, auftrag_id=row["id"]),
+            }
+        )
+
+    return sort_postfach_items(items, limit)
+
+
+def partner_postfach_count(autohaus_id, slug):
+    try:
+        return len(list_partner_postfach_items(autohaus_id, slug, limit=200))
+    except Exception:
+        return 0
+
+
 def get_verzoegerung(verzoegerung_id):
     db = get_db()
     row = db.execute(
@@ -6945,6 +13305,50 @@ def list_offene_reklamationen():
     return reklamationen
 
 
+def get_offene_reklamation_counts(auftrag_ids=None):
+    ids = [int(auftrag_id) for auftrag_id in (auftrag_ids or []) if auftrag_id]
+    db = get_db()
+    try:
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            rows = db.execute(
+                f"""
+                SELECT auftrag_id, COUNT(*) AS count
+                FROM reklamationen
+                WHERE bearbeitet=0
+                  AND auftrag_id IN ({placeholders})
+                GROUP BY auftrag_id
+                """,
+                ids,
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT auftrag_id, COUNT(*) AS count
+                FROM reklamationen
+                WHERE bearbeitet=0
+                GROUP BY auftrag_id
+                """
+            ).fetchall()
+    finally:
+        db.close()
+    return {int(row["auftrag_id"]): int(row["count"] or 0) for row in rows}
+
+
+def mark_auftraege_reklamationsstatus(auftraege):
+    counts = get_offene_reklamation_counts([auftrag.get("id") for auftrag in auftraege])
+    for auftrag in auftraege:
+        count = counts.get(int(auftrag.get("id") or 0), 0)
+        auftrag["offene_reklamationen_count"] = count
+        auftrag["hat_offene_reklamation"] = count > 0
+        auftrag["archivierbar_zurueckgegeben"] = auftrag.get("status") == 5 and count == 0
+    return auftraege
+
+
+def auftrag_has_offene_reklamation(auftrag_id):
+    return bool(get_offene_reklamation_counts([auftrag_id]).get(int(auftrag_id or 0), 0))
+
+
 def get_reklamation(reklamation_id):
     db = get_db()
     row = db.execute(
@@ -6963,17 +13367,18 @@ def get_reklamation(reklamation_id):
 def list_dateien_by_reklamation(reklamation_id):
     db = get_db()
     rows = db.execute(
-        f"SELECT {DATEI_LIST_COLUMNS} FROM dateien WHERE reklamation_id=? ORDER BY hochgeladen_am DESC, id DESC",
+        "SELECT * FROM dateien WHERE reklamation_id=? ORDER BY hochgeladen_am DESC, id DESC",
         (reklamation_id,),
     ).fetchall()
     db.close()
     return [hydrate_datei(dict(row)) for row in rows]
 
 
-def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id=None):
+def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id=None, upload_note=""):
     saved = 0
     saved_analysis_document = False
     analysis_errors = []
+    upload_note = clean_text(upload_note)[:500]
     db = get_db()
     timestamp = now_str()
     try:
@@ -6995,10 +13400,6 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
         except Exception as exc:
             analysis_errors.append(f"{original_name} konnte nicht gespeichert werden: {clean_text(str(exc))[:300]}")
             continue
-        try:
-            content_blob = target.read_bytes()
-        except OSError:
-            content_blob = b""
         mime_type = file.mimetype or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
         dokument_typ = ""
         extrahierter_text = ""
@@ -7006,6 +13407,7 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
         analyse_quelle = ""
         analyse_json = ""
         analyse_hinweis = ""
+        datei_notiz = upload_note if clean_text(kategorie) == "standard" else ""
         is_analysis_document = (
             clean_text(kategorie) == "standard" and reklamation_id is None
         )
@@ -7025,12 +13427,16 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
                 if extrahierter_text
                 else classify_document("", original_name)
             )
-            extrakt_kurz = summarize_document_text(extrahierter_text, original_name)
+            structured_summary = structured_analysis_summary(bundle.get("structured"), original_name)
+            extrakt_kurz = structured_summary or summarize_document_text(extrahierter_text, original_name)
+        if datei_notiz:
+            extrahierter_text = append_upload_note_to_analysis(extrahierter_text, datei_notiz)
+            extrakt_kurz = append_upload_note_to_summary(extrakt_kurz, datei_notiz)
         db.execute(
             """
             INSERT INTO dateien
-            (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, dokument_typ,
-             extrahierter_text, extrakt_kurz, analyse_quelle, analyse_json, analyse_hinweis, content_blob, hochgeladen_am)
+            (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, dokument_typ, notiz,
+             extrahierter_text, extrakt_kurz, analyse_quelle, analyse_json, analyse_hinweis, hochgeladen_am)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -7043,15 +13449,15 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
                 quelle,
                 kategorie,
                 dokument_typ,
+                datei_notiz,
                 extrahierter_text,
                 extrakt_kurz,
                 analyse_quelle,
                 analyse_json,
                 analyse_hinweis,
-                content_blob,
                 timestamp,
             ),
-        )     
+        )
         saved += 1
     db.commit()
     db.close()
@@ -7073,153 +13479,6 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
     return saved, {}
 
 
-def save_werkstatt_rechnung_upload(auftrag_id, files):
-    auftrag = get_auftrag(auftrag_id)
-    if not auftrag:
-        return {"saved": 0, "verified": 0, "amount": None, "invoice_number": "", "error": "Auftrag nicht gefunden."}
-
-    saved = 0
-    verified = 0
-    needs_review = 0
-    best_amount = None
-    best_invoice_number = ""
-    errors = []
-    warnings = []
-    db = get_db()
-    timestamp = now_str()
-    try:
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    except Exception as exc:
-        db.close()
-        return {"saved": 0, "verified": 0, "amount": None, "invoice_number": "", "error": f"Upload-Speicher ist nicht erreichbar: {clean_text(str(exc))[:300]}"}
-
-    for file in files or []:
-        if not file or not file.filename:
-            continue
-        original_name = secure_filename(file.filename)
-        if not original_name or not allowed_file(original_name):
-            continue
-        suffix = pathlib.Path(original_name).suffix.lower()
-        stored_name = f"{uuid.uuid4().hex}{suffix}"
-        target = UPLOAD_DIR / stored_name
-        try:
-            file.save(target)
-            content_blob = target.read_bytes()
-        except Exception as exc:
-            errors.append(f"{original_name} konnte nicht gespeichert werden: {clean_text(str(exc))[:300]}")
-            continue
-
-        mime_type = file.mimetype or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
-        bundle = build_document_analysis_bundle_safe(target, original_name) if suffix in ANALYSIS_EXTENSIONS else {}
-        analysis_text = clean_text(bundle.get("text"))
-        structured_text = structured_analysis_text(bundle.get("structured"), original_name) if bundle.get("structured") else ""
-        invoice_text = "\n".join(part for part in [analysis_text, structured_text, original_name] if clean_text(part))
-        amount, amount_source = extract_invoice_total_amount(invoice_text)
-        invoice_number = extract_invoice_number(invoice_text)
-        validation = validate_werkstatt_rechnung_upload(
-            auftrag,
-            invoice_text,
-            original_name,
-            amount=amount,
-            invoice_number=invoice_number,
-        )
-        analyse_hinweis = clean_text(bundle.get("hint"))
-        if bundle.get("status") == "error" and analyse_hinweis:
-            validation["warnings"].append(analyse_hinweis)
-
-        if validation["blockers"]:
-            try:
-                target.unlink(missing_ok=True)
-            except Exception:
-                pass
-            errors.append(f"{original_name}: {' '.join(validation['blockers'])}")
-            continue
-
-        if validation["valid"]:
-            verified += 1
-            status_text = "Prüfung bestanden"
-            if amount:
-                best_amount = amount
-            if invoice_number:
-                best_invoice_number = invoice_number
-        else:
-            needs_review += 1
-            status_text = "Bitte prüfen"
-        if validation["warnings"]:
-            warnings.extend(f"{original_name}: {warning}" for warning in validation["warnings"])
-
-        evidence = "; ".join(validation["evidence"])
-        amount_text = format_bonus_money(amount) if amount else ""
-        extrakt_parts = [
-            f"Werkstatt-Rechnung: {status_text}.",
-            f"Betrag {amount_text} ({amount_source})." if amount_text else "",
-            f"Rechnungsnummer {invoice_number}." if invoice_number else "",
-            evidence if evidence else "",
-        ]
-        extrakt_kurz = " ".join(part for part in extrakt_parts if clean_text(part))[:500]
-        if not extrakt_kurz:
-            extrakt_kurz = "Werkstatt-Rechnung gespeichert. Bitte Original prüfen."
-
-        db.execute(
-            """
-            INSERT INTO dateien
-            (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, dokument_typ,
-             extrahierter_text, extrakt_kurz, analyse_quelle, analyse_json, analyse_hinweis, content_blob, hochgeladen_am)
-            VALUES (?, NULL, ?, ?, ?, ?, 'intern', 'rechnung', 'Rechnung', ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                auftrag_id,
-                original_name,
-                stored_name,
-                mime_type,
-                len(content_blob),
-                analysis_text,
-                extrakt_kurz,
-                clean_text(bundle.get("source")),
-                clean_text(bundle.get("analysis_json")),
-                " ".join(validation["warnings"])[:500] or analyse_hinweis,
-                content_blob,
-                timestamp,
-            ),
-        )
-        saved += 1
-
-    if verified:
-        db.execute(
-            """
-            UPDATE auftraege
-            SET rechnung_status='geschrieben',
-                rechnung_nummer=CASE WHEN ? != '' THEN ? ELSE rechnung_nummer END,
-                rechnung_geschrieben_am=CASE WHEN COALESCE(rechnung_geschrieben_am, '')='' THEN ? ELSE rechnung_geschrieben_am END,
-                notiz_intern=?,
-                geaendert_am=?
-            WHERE id=?
-            """,
-            (
-                best_invoice_number,
-                best_invoice_number,
-                timestamp,
-                append_invoice_amount_to_internal_note(auftrag.get("notiz_intern"), best_amount),
-                timestamp,
-                auftrag_id,
-            ),
-        )
-    elif saved:
-        db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (timestamp, auftrag_id))
-
-    db.commit()
-    db.close()
-    return {
-        "saved": saved,
-        "verified": verified,
-        "needs_review": needs_review,
-        "amount": best_amount,
-        "invoice_number": best_invoice_number,
-        "error": errors[0] if errors else "",
-        "warning": warnings[0] if warnings else "",
-    }
-
-
 def flash_upload_analysis_result(saved_result, success_message="Datei hochgeladen."):
     if isinstance(saved_result, tuple):
         saved, updates = saved_result
@@ -7239,14 +13498,15 @@ def flash_upload_analysis_result(saved_result, success_message="Datei hochgelade
         if key not in {"geaendert_am", "analyse_pruefen", "analyse_confidence"}
         and clean_text(value)
     }
+    message = clean_text(success_message) or "Datei hochgeladen."
     if meaningful_updates:
         flash(
-            "Datei hochgeladen und Analyse sichtbar gemacht. Bitte erkannte Werte prüfen.",
+            f"{message} Bitte erkannte Werte prüfen.",
             "warning",
         )
     else:
         flash(
-            "Datei hochgeladen und zur Prüfung eingetragen. Bitte die erkannten Daten kontrollieren.",
+            f"{message} Bitte die erkannten Daten kontrollieren.",
             "warning",
         )
     return saved
@@ -7277,11 +13537,16 @@ def reanalyze_existing_documents(auftrag_id):
             continue
         bundle = build_document_analysis_bundle_safe(path, original_name)
         extracted_text = clean_text(bundle.get("text"))
+        note = clean_text(datei.get("notiz"))
         doc_type = (
             classify_document(extracted_text, original_name)
             if extracted_text
             else classify_document("", original_name)
         )
+        summary = structured_analysis_summary(bundle.get("structured"), original_name) or summarize_document_text(extracted_text, original_name)
+        if note:
+            extracted_text = append_upload_note_to_analysis(extracted_text, note)
+            summary = append_upload_note_to_summary(summary, note)
         db.execute(
             """
             UPDATE dateien
@@ -7296,7 +13561,7 @@ def reanalyze_existing_documents(auftrag_id):
             (
                 doc_type,
                 extracted_text,
-                summarize_document_text(extracted_text, original_name),
+                summary,
                 clean_text(bundle.get("source")),
                 clean_text(bundle.get("analysis_json")),
                 clean_text(bundle.get("hint")),
@@ -7394,9 +13659,39 @@ def archive_auftraege(auftrag_ids, archiviert=1, autohaus_id=None):
             continue
         if autohaus_id is not None and auftrag.get("autohaus_id") != autohaus_id:
             continue
+        if archiviert and auftrag_has_offene_reklamation(auftrag_id):
+            continue
         archive_auftrag(auftrag_id, archiviert)
         geaendert += 1
     return geaendert
+
+
+def archive_zurueckgegebene_ohne_offene_reklamation():
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            UPDATE auftraege
+            SET archiviert=1,
+                geaendert_am=?
+            WHERE archiviert=0
+              AND status=5
+              AND NOT EXISTS (
+                SELECT 1
+                FROM reklamationen r
+                WHERE r.auftrag_id = auftraege.id
+                  AND r.bearbeitet = 0
+              )
+            """,
+            (now_str(),),
+        )
+        db.commit()
+        count = int(cursor.rowcount or 0)
+    finally:
+        db.close()
+    if count:
+        schedule_change_backup("archive-zurueckgegeben")
+    return count
 
 
 def delete_auftraege(auftrag_ids, autohaus_id=None):
@@ -7443,7 +13738,6 @@ def delete_auftrag(auftrag_id, safety_backup=True):
     db.execute("DELETE FROM verzoegerungen WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM status_log WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM benachrichtigungen WHERE auftrag_id=?", (auftrag_id,))
-    db.execute("DELETE FROM admin_benachrichtigungen WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM chat_nachrichten WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM auftraege WHERE id=?", (auftrag_id,))
     db.commit()
@@ -7679,11 +13973,997 @@ def send_workshop_offer(auftrag_id, angebot_text, angebot_preis, angebot_notiz="
     db.close()
 
 
+def easter_date(year):
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def bw_feiertage(year):
+    ostern = easter_date(year)
+    return {
+        date(year, 1, 1): "Neujahr",
+        date(year, 1, 6): "Heilige Drei Könige",
+        ostern - timedelta(days=2): "Karfreitag",
+        ostern + timedelta(days=1): "Ostermontag",
+        date(year, 5, 1): "Tag der Arbeit",
+        ostern + timedelta(days=39): "Christi Himmelfahrt",
+        ostern + timedelta(days=50): "Pfingstmontag",
+        ostern + timedelta(days=60): "Fronleichnam",
+        date(year, 10, 3): "Tag der Deutschen Einheit",
+        date(year, 11, 1): "Allerheiligen",
+        date(year, 12, 25): "1. Weihnachtstag",
+        date(year, 12, 26): "2. Weihnachtstag",
+    }
+
+
+def urlaubs_hinweise(year):
+    hinweise = []
+    feiertage = bw_feiertage(year)
+    for feiertag, titel in sorted(feiertage.items()):
+        if feiertag.weekday() == 3:
+            freitag = feiertag + timedelta(days=1)
+            if freitag.year == year:
+                hinweise.append(
+                    {
+                        "datum": freitag,
+                        "titel": f"Brückentag nach {titel}",
+                        "notiz": "1 Urlaubstag ergibt mit dem Wochenende 4 freie Tage.",
+                    }
+                )
+        elif feiertag.weekday() == 1:
+            montag = feiertag - timedelta(days=1)
+            if montag.year == year:
+                hinweise.append(
+                    {
+                        "datum": montag,
+                        "titel": f"Brückentag vor {titel}",
+                        "notiz": "1 Urlaubstag ergibt mit dem Wochenende 4 freie Tage.",
+                    }
+                )
+
+    weihnachten = date(year, 12, 25)
+    if weihnachten.weekday() == 4:
+        hinweise.append(
+            {
+                "datum": date(year, 12, 28),
+                "titel": "Urlaub zwischen Weihnachten und Neujahr prüfen",
+                "notiz": "28.12. bis 31.12. frei nehmen und bis Neujahr lang abschalten.",
+            }
+        )
+    return hinweise
+
+
+def infer_kalender_kategorie(text):
+    normalized = clean_text(text).lower()
+    if any(word in normalized for word in ("urlaub", "frei", "abwesend")):
+        return "urlaub"
+    if "geburt" in normalized:
+        return "geburtstag"
+    if any(word in normalized for word in ("heirat", "hochzeit", "privat")):
+        return "privat"
+    if any(word in normalized for word in ("geschlossen", "betrieb", "inventur")):
+        return "betrieb"
+    return "termin"
+
+
+def parse_kalender_schnelleintrag(text):
+    original = clean_text(text).replace(",", ".")
+    if not original:
+        raise ValueError("Bitte einen Eintrag schreiben.")
+
+    match = re.search(r"\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\b", original)
+    if not match:
+        raise ValueError("Bitte ein Datum wie 28.05 oder 28.05.2026 angeben.")
+
+    day = int(match.group(1))
+    month = int(match.group(2))
+    year_text = match.group(3)
+    today = date.today()
+    if year_text:
+        year = int(year_text)
+        if year < 100:
+            year += 2000
+    else:
+        year = today.year
+
+    try:
+        parsed_date = date(year, month, day)
+    except ValueError as exc:
+        raise ValueError("Das Datum konnte nicht erkannt werden.") from exc
+
+    rest = f"{original[:match.start()]} {original[match.end():]}".strip(" -:;")
+    repeat_patterns = (
+        r"\bjährlich\b",
+        r"\bjaehrlich\b",
+        r"\bjedes\s+jahr\b",
+        r"\bjedes\s+jahr\s+wieder\b",
+        r"\bgeburt\w*\b",
+        r"\bhochzeitstag\b",
+    )
+    repeat = "jaehrlich" if any(re.search(pattern, rest.lower()) for pattern in repeat_patterns) else "einmalig"
+
+    if not year_text and repeat == "einmalig" and parsed_date < today:
+        parsed_date = date(today.year + 1, month, day)
+
+    title = re.sub(
+        r"\b(jährlich|jaehrlich|jedes\s+jahr(?:\s+wieder)?)\b",
+        "",
+        rest,
+        flags=re.IGNORECASE,
+    )
+    title = compact_whitespace(title).strip(" -:;") or "Termin"
+
+    return {
+        "datum": parsed_date.strftime(DATE_FMT),
+        "titel": title[:140],
+        "notiz": original[:500],
+        "kategorie": infer_kalender_kategorie(title),
+        "wiederholung": repeat,
+    }
+
+
+def list_erinnerungen(status="offen", limit=12):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT *
+        FROM erinnerungen
+        WHERE status=?
+        ORDER BY erstellt_am DESC, id DESC
+        LIMIT ?
+        """,
+        (clean_text(status) or "offen", int(limit)),
+    ).fetchall()
+    db.close()
+    return [dict(row) for row in rows]
+
+
+def create_erinnerung(text):
+    text = clean_text(text)
+    if not text:
+        raise ValueError("Bitte eine Erinnerung eintragen.")
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO erinnerungen (text, status, erstellt_am, erledigt_am)
+        VALUES (?, 'offen', ?, '')
+        """,
+        (text[:600], now_str()),
+    )
+    db.commit()
+    db.close()
+    schedule_change_backup("erinnerung")
+
+
+def mark_erinnerung_erledigt(erinnerung_id):
+    db = get_db()
+    db.execute(
+        "UPDATE erinnerungen SET status='erledigt', erledigt_am=? WHERE id=?",
+        (now_str(), int(erinnerung_id)),
+    )
+    db.commit()
+    changed = db.total_changes
+    db.close()
+    if changed:
+        schedule_change_backup("erinnerung-erledigt")
+    return bool(changed)
+
+
+def create_kalender_notiz(datum, titel, notiz="", kategorie="termin", wiederholung="einmalig"):
+    parsed = parse_date(datum)
+    if not parsed:
+        raise ValueError("Bitte ein gültiges Datum eintragen.")
+    titel = clean_text(titel)
+    if not titel:
+        raise ValueError("Bitte einen Titel eintragen.")
+    kategorie = clean_text(kategorie) or "termin"
+    if kategorie not in KALENDER_KATEGORIEN:
+        kategorie = "termin"
+    wiederholung = clean_text(wiederholung) or "einmalig"
+    if wiederholung not in {"einmalig", "jaehrlich"}:
+        wiederholung = "einmalig"
+
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO kalender_notizen
+                (datum, titel, notiz, kategorie, wiederholung, erstellt_am)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                parsed.strftime(DATE_FMT),
+                titel,
+                clean_text(notiz),
+                kategorie,
+                wiederholung,
+                now_str(),
+            ),
+        )
+        db.commit()
+        return cursor.lastrowid
+    finally:
+        db.close()
+
+
+def delete_kalender_notiz(notiz_id):
+    db = get_db()
+    try:
+        db.execute("DELETE FROM kalender_notizen WHERE id=?", (notiz_id,))
+        db.commit()
+    finally:
+        db.close()
+
+
+def list_kalender_notizen_raw():
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM kalender_notizen
+            ORDER BY datum ASC, id ASC
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        db.close()
+
+
+def kalender_jahre(auftraege):
+    heute = date.today()
+    years = {heute.year, heute.year + 1}
+    for auftrag in auftraege:
+        for feld, _, _ in EVENT_FELDER:
+            event_date = auftrag.get(f"{feld}_obj")
+            if event_date:
+                years.add(event_date.year)
+    for notiz in list_kalender_notizen_raw():
+        parsed = parse_date(notiz.get("datum"))
+        if parsed:
+            years.add(parsed.year)
+            if notiz.get("wiederholung") == "jaehrlich":
+                years.add(heute.year)
+                years.add(heute.year + 1)
+    for urlaub in list_mitarbeiter_urlaub_raw(active_only=True):
+        for feld in ("start_datum", "end_datum"):
+            parsed = parse_date(urlaub.get(feld))
+            if parsed:
+                years.add(parsed.year)
+    for news in list_werkstatt_news(limit=200):
+        for feld in ("start_datum", "end_datum"):
+            parsed = parse_date(news.get(feld))
+            if parsed:
+                years.add(parsed.year)
+    return sorted(years)
+
+
+def format_kalender_notiz(row, occurrence_date):
+    kategorie = clean_text(row.get("kategorie")) or "termin"
+    meta = KALENDER_KATEGORIEN.get(kategorie, KALENDER_KATEGORIEN["termin"])
+    return {
+        "id": row.get("id"),
+        "datum": occurrence_date,
+        "datum_text": occurrence_date.strftime(DATE_FMT),
+        "titel": clean_text(row.get("titel")) or "Termin",
+        "notiz": clean_text(row.get("notiz")),
+        "kategorie": kategorie,
+        "kategorie_label": meta["label"],
+        "farbe": meta["farbe"],
+        "wiederholung": clean_text(row.get("wiederholung")) or "einmalig",
+        "system": False,
+    }
+
+
+def list_kalender_notizen(years):
+    occurrences = []
+    for row in list_kalender_notizen_raw():
+        parsed = parse_date(row.get("datum"))
+        if not parsed:
+            continue
+        if row.get("wiederholung") == "jaehrlich":
+            for year in years:
+                try:
+                    occurrences.append(format_kalender_notiz(row, date(year, parsed.month, parsed.day)))
+                except ValueError:
+                    continue
+        elif parsed.year in years:
+            occurrences.append(format_kalender_notiz(row, parsed))
+    return occurrences
+
+
+def mitarbeiter_zeitraum_text(start, end):
+    start_text = start.strftime(DATE_FMT) if start else ""
+    end_text = end.strftime(DATE_FMT) if end else start_text
+    if start_text and end_text and start_text != end_text:
+        return f"{start_text} bis {end_text}"
+    return start_text or end_text
+
+
+def hydrate_mitarbeiter_urlaub(row):
+    urlaub = dict(row)
+    start = parse_date(urlaub.get("start_datum"))
+    end = parse_date(urlaub.get("end_datum")) or start
+    if start and end and end < start:
+        start, end = end, start
+    heute = date.today()
+    urlaub["start_obj"] = start
+    urlaub["end_obj"] = end
+    urlaub["start_iso"] = iso_date(start) if start else ""
+    urlaub["end_iso"] = iso_date(end) if end else ""
+    urlaub["zeitraum_text"] = mitarbeiter_zeitraum_text(start, end)
+    urlaub["ist_aktuell"] = bool(start and end and start <= heute <= end)
+    urlaub["ist_vergangen"] = bool(end and end < heute)
+    urlaub["notiz"] = clean_text(urlaub.get("notiz"))
+    return urlaub
+
+
+def hydrate_mitarbeiter(row):
+    mitarbeiter = dict(row)
+    mitarbeiter["aktiv"] = bool(mitarbeiter.get("aktiv"))
+    mitarbeiter["name"] = clean_text(mitarbeiter.get("name"))
+    mitarbeiter["rolle"] = clean_text(mitarbeiter.get("rolle"))
+    mitarbeiter["telefon"] = clean_text(mitarbeiter.get("telefon"))
+    mitarbeiter["email"] = clean_text(mitarbeiter.get("email"))
+    mitarbeiter["adresse"] = clean_text(mitarbeiter.get("adresse"))
+    mitarbeiter["geburtsdatum"] = clean_text(mitarbeiter.get("geburtsdatum"))
+    mitarbeiter["geburtsort"] = clean_text(mitarbeiter.get("geburtsort"))
+    mitarbeiter["staatsangehoerigkeit"] = clean_text(mitarbeiter.get("staatsangehoerigkeit"))
+    mitarbeiter["eintritt_datum"] = clean_text(mitarbeiter.get("eintritt_datum"))
+    mitarbeiter["austritt_datum"] = clean_text(mitarbeiter.get("austritt_datum"))
+    mitarbeiter["beschaeftigung"] = clean_text(mitarbeiter.get("beschaeftigung"))
+    mitarbeiter["qualifikation"] = clean_text(mitarbeiter.get("qualifikation"))
+    mitarbeiter["arbeitszeit"] = clean_text(mitarbeiter.get("arbeitszeit"))
+    mitarbeiter["urlaubsanspruch"] = clean_text(mitarbeiter.get("urlaubsanspruch"))
+    mitarbeiter["ordner_pfad"] = clean_text(mitarbeiter.get("ordner_pfad"))
+    mitarbeiter["dokumente_notiz"] = clean_text(mitarbeiter.get("dokumente_notiz"))
+    mitarbeiter["notiz"] = clean_text(mitarbeiter.get("notiz"))
+    return mitarbeiter
+
+
+def list_mitarbeiter(include_inactive=True):
+    db = get_db()
+    try:
+        if include_inactive:
+            rows = db.execute(
+                """
+                SELECT *
+                FROM mitarbeiter
+                ORDER BY aktiv DESC, name ASC, id ASC
+                """
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT *
+                FROM mitarbeiter
+                WHERE aktiv=1
+                ORDER BY name ASC, id ASC
+                """
+            ).fetchall()
+        urlaub_rows = db.execute(
+            """
+            SELECT u.*
+            FROM mitarbeiter_urlaub u
+            ORDER BY u.id DESC
+            """
+        ).fetchall()
+    finally:
+        db.close()
+
+    heute = date.today()
+    urlaube_by_mitarbeiter = defaultdict(list)
+    for row in urlaub_rows:
+        urlaub = hydrate_mitarbeiter_urlaub(row)
+        urlaube_by_mitarbeiter[urlaub["mitarbeiter_id"]].append(urlaub)
+
+    mitarbeiter_liste = []
+    for row in sorted(
+        rows,
+        key=lambda item: (
+            0 if item["aktiv"] else 1,
+            clean_text(item["name"]).lower(),
+            item["id"],
+        ),
+    ):
+        mitarbeiter = hydrate_mitarbeiter(row)
+        urlaube = urlaube_by_mitarbeiter.get(mitarbeiter["id"], [])
+        urlaube.sort(
+            key=lambda item: (
+                item["end_obj"] < heute if item.get("end_obj") else True,
+                item.get("start_obj") or date.max,
+                item.get("id") or 0,
+            )
+        )
+        mitarbeiter["urlaube"] = urlaube
+        mitarbeiter["aktuelle_urlaube"] = [item for item in urlaube if item["ist_aktuell"]]
+        mitarbeiter["kommende_urlaube"] = [
+            item for item in urlaube if item.get("start_obj") and item["start_obj"] >= heute
+        ]
+        mitarbeiter_liste.append(mitarbeiter)
+    return mitarbeiter_liste
+
+
+def get_mitarbeiter(mitarbeiter_id):
+    db = get_db()
+    try:
+        row = db.execute("SELECT * FROM mitarbeiter WHERE id=?", (int(mitarbeiter_id),)).fetchone()
+    finally:
+        db.close()
+    return hydrate_mitarbeiter(row) if row else None
+
+
+def create_mitarbeiter(
+    name,
+    rolle="",
+    telefon="",
+    email="",
+    adresse="",
+    geburtsdatum="",
+    geburtsort="",
+    staatsangehoerigkeit="",
+    eintritt_datum="",
+    austritt_datum="",
+    beschaeftigung="",
+    qualifikation="",
+    arbeitszeit="",
+    urlaubsanspruch="",
+    ordner_pfad="",
+    dokumente_notiz="",
+    notiz="",
+    aktiv=True,
+):
+    name = clean_text(name)
+    if not name:
+        raise ValueError("Bitte den Namen des Mitarbeiters eintragen.")
+    now = now_str()
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO mitarbeiter
+                (name, rolle, telefon, email, adresse, geburtsdatum, geburtsort,
+                 staatsangehoerigkeit, eintritt_datum, austritt_datum,
+                 beschaeftigung, qualifikation, arbeitszeit, urlaubsanspruch,
+                 ordner_pfad, dokumente_notiz, notiz, aktiv, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                name,
+                clean_text(rolle),
+                clean_text(telefon),
+                clean_text(email),
+                clean_text(adresse),
+                format_date(geburtsdatum),
+                clean_text(geburtsort),
+                clean_text(staatsangehoerigkeit),
+                format_date(eintritt_datum),
+                format_date(austritt_datum),
+                clean_text(beschaeftigung),
+                clean_text(qualifikation),
+                clean_text(arbeitszeit),
+                clean_text(urlaubsanspruch),
+                clean_text(ordner_pfad),
+                clean_text(dokumente_notiz),
+                clean_text(notiz),
+                1 if aktiv else 0,
+                now,
+                now,
+            ),
+        )
+        db.commit()
+        schedule_change_backup("mitarbeiter")
+        return cursor.lastrowid
+    finally:
+        db.close()
+
+
+def update_mitarbeiter(
+    mitarbeiter_id,
+    name,
+    rolle="",
+    telefon="",
+    email="",
+    adresse="",
+    geburtsdatum="",
+    geburtsort="",
+    staatsangehoerigkeit="",
+    eintritt_datum="",
+    austritt_datum="",
+    beschaeftigung="",
+    qualifikation="",
+    arbeitszeit="",
+    urlaubsanspruch="",
+    ordner_pfad="",
+    dokumente_notiz="",
+    notiz="",
+    aktiv=True,
+):
+    name = clean_text(name)
+    if not name:
+        raise ValueError("Bitte den Namen des Mitarbeiters eintragen.")
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            UPDATE mitarbeiter
+            SET name=?, rolle=?, telefon=?, email=?, adresse=?, geburtsdatum=?,
+                geburtsort=?, staatsangehoerigkeit=?, eintritt_datum=?,
+                austritt_datum=?, beschaeftigung=?, qualifikation=?, arbeitszeit=?,
+                urlaubsanspruch=?, ordner_pfad=?, dokumente_notiz=?, notiz=?,
+                aktiv=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                name,
+                clean_text(rolle),
+                clean_text(telefon),
+                clean_text(email),
+                clean_text(adresse),
+                format_date(geburtsdatum),
+                clean_text(geburtsort),
+                clean_text(staatsangehoerigkeit),
+                format_date(eintritt_datum),
+                format_date(austritt_datum),
+                clean_text(beschaeftigung),
+                clean_text(qualifikation),
+                clean_text(arbeitszeit),
+                clean_text(urlaubsanspruch),
+                clean_text(ordner_pfad),
+                clean_text(dokumente_notiz),
+                clean_text(notiz),
+                1 if aktiv else 0,
+                now_str(),
+                int(mitarbeiter_id),
+            ),
+        )
+        db.commit()
+        schedule_change_backup("mitarbeiter")
+        return getattr(cursor, "rowcount", 1)
+    finally:
+        db.close()
+
+
+def create_mitarbeiter_urlaub(mitarbeiter_id, start_datum, end_datum="", notiz=""):
+    mitarbeiter = get_mitarbeiter(mitarbeiter_id)
+    if not mitarbeiter:
+        raise ValueError("Mitarbeiter wurde nicht gefunden.")
+    start = parse_date(start_datum)
+    end = parse_date(end_datum) or start
+    if not start:
+        raise ValueError("Bitte ein gültiges Startdatum für den Urlaub eintragen.")
+    if end and end < start:
+        start, end = end, start
+    if (end - start).days > 369:
+        raise ValueError("Bitte den Urlaubszeitraum auf maximal 370 Tage begrenzen.")
+    now = now_str()
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO mitarbeiter_urlaub
+                (mitarbeiter_id, start_datum, end_datum, notiz, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(mitarbeiter_id),
+                start.strftime(DATE_FMT),
+                end.strftime(DATE_FMT),
+                clean_text(notiz),
+                now,
+                now,
+            ),
+        )
+        db.commit()
+        schedule_change_backup("mitarbeiter-urlaub")
+        return cursor.lastrowid
+    finally:
+        db.close()
+
+
+def delete_mitarbeiter_urlaub(urlaub_id):
+    db = get_db()
+    try:
+        db.execute("DELETE FROM mitarbeiter_urlaub WHERE id=?", (int(urlaub_id),))
+        db.commit()
+        schedule_change_backup("mitarbeiter-urlaub-loeschen")
+    finally:
+        db.close()
+
+
+def list_mitarbeiter_urlaub_raw(active_only=True):
+    db = get_db()
+    try:
+        where = "WHERE m.aktiv=1" if active_only else ""
+        rows = db.execute(
+            f"""
+            SELECT u.*, m.name AS mitarbeiter_name, m.rolle AS mitarbeiter_rolle,
+                   m.aktiv AS mitarbeiter_aktiv
+            FROM mitarbeiter_urlaub u
+            JOIN mitarbeiter m ON m.id = u.mitarbeiter_id
+            {where}
+            ORDER BY u.id ASC
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        db.close()
+
+
+def mitarbeiter_urlaub_calendar_items(years):
+    years = {int(year) for year in years}
+    meta = KALENDER_KATEGORIEN["urlaub"]
+    items = []
+    for row in list_mitarbeiter_urlaub_raw(active_only=True):
+        start = parse_date(row.get("start_datum"))
+        end = parse_date(row.get("end_datum")) or start
+        if not start:
+            continue
+        if end < start:
+            start, end = end, start
+        current = start
+        days = 0
+        name = clean_text(row.get("mitarbeiter_name")) or "Mitarbeiter"
+        rolle = clean_text(row.get("mitarbeiter_rolle"))
+        notiz_parts = []
+        if rolle:
+            notiz_parts.append(rolle)
+        if clean_text(row.get("notiz")):
+            notiz_parts.append(clean_text(row.get("notiz")))
+        while current <= end and days < 370:
+            if current.year in years:
+                items.append(
+                    {
+                        "datum": current,
+                        "datum_text": current.strftime(DATE_FMT),
+                        "titel": f"{name} im Urlaub",
+                        "notiz": " · ".join(notiz_parts),
+                        "kategorie": "urlaub",
+                        "kategorie_label": meta["label"],
+                        "farbe": meta["farbe"],
+                        "system": True,
+                        "mitarbeiter_urlaub": True,
+                        "mitarbeiter_id": row.get("mitarbeiter_id"),
+                        "urlaub_id": row.get("id"),
+                    }
+                )
+            current += timedelta(days=1)
+            days += 1
+    return items
+
+
+def admin_mitarbeiter_urlaub_count():
+    heute = date.today()
+    try:
+        count = 0
+        for row in list_mitarbeiter_urlaub_raw(active_only=True):
+            start = parse_date(row.get("start_datum"))
+            end = parse_date(row.get("end_datum")) or start
+            if start and end and end < start:
+                start, end = end, start
+            if start and end and start <= heute <= end:
+                count += 1
+        return count
+    except Exception:
+        return 0
+
+
+def mitarbeiter_urlaub_summary(mitarbeiter_liste):
+    heute = date.today()
+    aktuelle = []
+    kommende = []
+    for mitarbeiter in mitarbeiter_liste:
+        if not mitarbeiter.get("aktiv"):
+            continue
+        for urlaub in mitarbeiter.get("urlaube", []):
+            item = dict(urlaub)
+            item["mitarbeiter"] = mitarbeiter
+            if item.get("ist_aktuell"):
+                aktuelle.append(item)
+            elif item.get("start_obj") and item["start_obj"] >= heute:
+                kommende.append(item)
+    kommende.sort(key=lambda item: (item.get("start_obj") or date.max, item.get("end_obj") or date.max))
+    return {
+        "aktuelle": aktuelle,
+        "kommende": kommende[:8],
+        "aktive_count": sum(1 for item in mitarbeiter_liste if item.get("aktiv")),
+    }
+
+
+def werkstatt_news_zeitraum_text(news):
+    start_text = format_date(news.get("start_datum"))
+    end_text = format_date(news.get("end_datum"))
+    if start_text and end_text and start_text != end_text:
+        return f"{start_text} bis {end_text}"
+    return start_text or end_text
+
+
+def hydrate_werkstatt_news(row):
+    news = dict(row)
+    news["start_datum_text"] = format_date(news.get("start_datum"))
+    news["end_datum_text"] = format_date(news.get("end_datum"))
+    news["start_datum_iso"] = iso_date(news.get("start_datum"))
+    news["end_datum_iso"] = iso_date(news.get("end_datum"))
+    news["zeitraum_text"] = werkstatt_news_zeitraum_text(news)
+    news["kategorie"] = clean_text(news.get("kategorie")) or "betrieb"
+    news["kategorie_meta"] = KALENDER_KATEGORIEN.get(news["kategorie"], KALENDER_KATEGORIEN["betrieb"])
+    news["sichtbar"] = bool(news.get("sichtbar"))
+    news["pinned"] = bool(news.get("pinned"))
+    return news
+
+
+def list_werkstatt_news(limit=80, visible_only=True):
+    limit = max(1, min(int(limit or 80), 500))
+    db = get_db()
+    try:
+        if visible_only:
+            rows = db.execute(
+                """
+                SELECT *
+                FROM werkstatt_news
+                WHERE sichtbar=1
+                ORDER BY pinned DESC,
+                         CASE WHEN start_datum='' THEN '99.99.9999' ELSE start_datum END ASC,
+                         id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT *
+                FROM werkstatt_news
+                ORDER BY sichtbar DESC, pinned DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+    finally:
+        db.close()
+    return [hydrate_werkstatt_news(row) for row in rows]
+
+
+def is_betriebsurlaub_news(news):
+    text = normalize_document_text(
+        " ".join(
+            clean_text(part)
+            for part in (
+                news.get("titel"),
+                news.get("nachricht"),
+                news.get("kategorie"),
+                (news.get("kategorie_meta") or {}).get("label"),
+            )
+            if clean_text(part)
+        )
+    )
+    return "betriebsurlaub" in text or (
+        "urlaub" in text and clean_text(news.get("kategorie")) in {"betrieb", "urlaub"}
+    )
+
+
+def planungszeitraum_from_values(*values):
+    dates = [parse_date(value) for value in values if parse_date(value)]
+    if not dates:
+        return None, None
+    return min(dates), max(dates)
+
+
+def list_betriebsurlaub_konflikte(*date_values):
+    plan_start, plan_end = planungszeitraum_from_values(*date_values)
+    if not plan_start or not plan_end:
+        return []
+    konflikte = []
+    seen = set()
+    try:
+        news_items = list_werkstatt_news(limit=200)
+    except sqlite3.Error:
+        return []
+    for news in news_items:
+        if not is_betriebsurlaub_news(news):
+            continue
+        start = parse_date(news.get("start_datum"))
+        end = parse_date(news.get("end_datum")) or start
+        if not start:
+            continue
+        if end < start:
+            start, end = end, start
+        if plan_start <= end and plan_end >= start and news.get("id") not in seen:
+            konflikte.append(news)
+            seen.add(news.get("id"))
+    return konflikte
+
+
+def flash_betriebsurlaub_planungshinweis(*date_values):
+    for news in list_betriebsurlaub_konflikte(*date_values):
+        zeitraum = news.get("zeitraum_text") or werkstatt_news_zeitraum_text(news)
+        titel = clean_text(news.get("titel")) or "Betriebsurlaub"
+        detail = f" {zeitraum}" if zeitraum else ""
+        flash(
+            f"Achtung Betriebsurlaub: {titel}{detail}. Bitte stimmen Sie die Einplanung mit der Werkstatt ab.",
+            "warning",
+        )
+
+
+def analysis_loading_news(limit=6):
+    items = []
+    try:
+        news_items = list_werkstatt_news(limit=limit)
+    except sqlite3.Error:
+        news_items = []
+    for news in news_items:
+        text = clean_text(news.get("nachricht"))
+        if not text and news.get("zeitraum_text"):
+            text = news["zeitraum_text"]
+        if not text:
+            continue
+        items.append(
+            {
+                "title": clean_text(news.get("titel")) or "Werkstatt-News",
+                "text": text,
+            }
+        )
+    if items:
+        return items
+    return [
+        {
+            "title": clean_text(item.get("titel")) or "Werkstatt-News",
+            "text": clean_text(item.get("nachricht")) or clean_text(item.get("start_datum")),
+        }
+        for item in DEFAULT_WERKSTATT_NEWS
+        if clean_text(item.get("titel")) and (clean_text(item.get("nachricht")) or clean_text(item.get("start_datum")))
+    ]
+
+
+def get_werkstatt_news(news_id):
+    db = get_db()
+    try:
+        row = db.execute("SELECT * FROM werkstatt_news WHERE id=?", (int(news_id),)).fetchone()
+    finally:
+        db.close()
+    return hydrate_werkstatt_news(row) if row else None
+
+
+def create_werkstatt_news(titel, nachricht="", start_datum="", end_datum="", kategorie="betrieb", pinned=1):
+    titel = clean_text(titel)
+    if not titel:
+        raise ValueError("Bitte einen Titel für die Werkstatt-News eintragen.")
+    start = parse_date(start_datum)
+    end = parse_date(end_datum) or start
+    if start and end and end < start:
+        start, end = end, start
+    kategorie = clean_text(kategorie) or "betrieb"
+    if kategorie not in KALENDER_KATEGORIEN:
+        kategorie = "betrieb"
+    now = now_str()
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO werkstatt_news
+              (news_key, titel, nachricht, start_datum, end_datum, kategorie,
+               sichtbar, pinned, erstellt_am, geaendert_am)
+            VALUES ('', ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            """,
+            (
+                titel,
+                clean_text(nachricht),
+                start.strftime(DATE_FMT) if start else "",
+                end.strftime(DATE_FMT) if end else "",
+                kategorie,
+                1 if pinned else 0,
+                now,
+                now,
+            ),
+        )
+        db.commit()
+        schedule_change_backup("werkstatt-news")
+        return cursor.lastrowid
+    finally:
+        db.close()
+
+
+def archive_werkstatt_news(news_id):
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE werkstatt_news SET sichtbar=0, geaendert_am=? WHERE id=?",
+            (now_str(), int(news_id)),
+        )
+        db.commit()
+        schedule_change_backup("werkstatt-news-archiv")
+    finally:
+        db.close()
+
+
+def werkstatt_news_calendar_items(years):
+    years = {int(year) for year in years}
+    items = []
+    for news in list_werkstatt_news(limit=200):
+        start = parse_date(news.get("start_datum"))
+        end = parse_date(news.get("end_datum")) or start
+        if not start:
+            continue
+        if end and end < start:
+            end = start
+        current = start
+        days = 0
+        meta = KALENDER_KATEGORIEN.get(news.get("kategorie"), KALENDER_KATEGORIEN["betrieb"])
+        while current <= end and days < 370:
+            if current.year in years:
+                items.append(
+                    {
+                        "datum": current,
+                        "datum_text": current.strftime(DATE_FMT),
+                        "titel": clean_text(news.get("titel")) or "Werkstatt-News",
+                        "notiz": clean_text(news.get("nachricht")),
+                        "kategorie": news.get("kategorie") or "betrieb",
+                        "kategorie_label": meta["label"],
+                        "farbe": meta["farbe"],
+                        "system": True,
+                        "news": True,
+                    }
+                )
+            current += timedelta(days=1)
+            days += 1
+    return items
+
+
+def kalender_systemeintraege(years):
+    items = []
+    for year in years:
+        for tag, titel in bw_feiertage(year).items():
+            items.append(
+                {
+                    "datum": tag,
+                    "datum_text": tag.strftime(DATE_FMT),
+                    "titel": titel,
+                    "notiz": "Gesetzlicher Feiertag in Baden-Württemberg.",
+                    "kategorie": "feiertag",
+                    "kategorie_label": KALENDER_KATEGORIEN["feiertag"]["label"],
+                    "farbe": KALENDER_KATEGORIEN["feiertag"]["farbe"],
+                    "system": True,
+                }
+            )
+        for hinweis in urlaubs_hinweise(year):
+            items.append(
+                {
+                    "datum": hinweis["datum"],
+                    "datum_text": hinweis["datum"].strftime(DATE_FMT),
+                    "titel": hinweis["titel"],
+                    "notiz": hinweis["notiz"],
+                    "kategorie": "hinweis",
+                    "kategorie_label": KALENDER_KATEGORIEN["hinweis"]["label"],
+                    "farbe": KALENDER_KATEGORIEN["hinweis"]["farbe"],
+                    "system": True,
+                }
+            )
+    items.extend(mitarbeiter_urlaub_calendar_items(years))
+    items.extend(werkstatt_news_calendar_items(years))
+    return items
+
+
 def dashboard_daten(auftraege):
     heute = date.today()
     offene_verzoegerungen = []
     offene_reklamationen = []
-    offene_chat_nachrichten = list_offene_chat_nachrichten()
+    postfach_items = list_admin_postfach_items()
+    offene_chat_nachrichten = [
+        item for item in postfach_items if item.get("typ") == "Chat"
+    ]
 
     db = get_db()
     rows = db.execute(
@@ -7758,17 +15038,273 @@ def dashboard_daten(auftraege):
         "offene_verzoegerungen": offene_verzoegerungen,
         "offene_reklamationen": offene_reklamationen,
         "offene_chat_nachrichten": offene_chat_nachrichten,
+        "postfach_items": postfach_items,
+        "postfach_count": len(postfach_items),
         "naechste_events": naechste_events[:12],
     }
 
 
+def build_werkstatt_auftragsuebersicht(auftraege):
+    autohaus_counts = {}
+    planungsgruppen_defs = [
+        {
+            "key": "overdue",
+            "label": "Überfällig",
+            "hinweis": "Termine, die schon hätten passieren müssen.",
+            "filter": "focus",
+        },
+        {
+            "key": "today",
+            "label": "Heute",
+            "hinweis": "Anlieferung, Start, Fertigstellung oder Rückgabe heute.",
+            "filter": "focus",
+        },
+        {
+            "key": "upcoming",
+            "label": "Als Nächstes",
+            "hinweis": "Kommende Termine nach Datum sortiert.",
+            "filter": "week",
+        },
+        {
+            "key": "done",
+            "label": "Fertig / Zurückgegeben",
+            "hinweis": "Erledigte Fahrzeuge, teils bereit fürs Archiv.",
+            "filter": "done",
+        },
+        {
+            "key": "date-warning",
+            "label": "Termin prüfen",
+            "hinweis": "Auffällige Alt- oder Zukunftsdaten korrigieren.",
+            "filter": "date-warning",
+        },
+        {
+            "key": "empty",
+            "label": "Ohne Termin",
+            "hinweis": "Noch kein verwertbarer Termin gesetzt.",
+            "filter": "empty",
+        },
+    ]
+    planungsgruppen = {
+        group["key"]: {**group, "count": 0} for group in planungsgruppen_defs
+    }
+    counts = {
+        "gesamt": len(auftraege or []),
+        "fokus": 0,
+        "ueberfaellig": 0,
+        "heute": 0,
+        "woche": 0,
+        "in_arbeit": 0,
+        "fertig": 0,
+        "zurueckgegeben": 0,
+        "ohne_termin": 0,
+        "termin_pruefen": 0,
+        "reklamation": 0,
+    }
+
+    for auftrag in auftraege or []:
+        planung = auftrag.get("planung") or {}
+        group_key = planung.get("group_key") or "empty"
+        status = int(auftrag.get("status") or 1)
+        if group_key not in planungsgruppen:
+            group_key = "empty"
+        planungsgruppen[group_key]["count"] += 1
+
+        if group_key == "overdue":
+            counts["ueberfaellig"] += 1
+        if group_key == "today":
+            counts["heute"] += 1
+        if group_key in {"overdue", "today"}:
+            counts["fokus"] += 1
+        if planung.get("is_week_relevant"):
+            counts["woche"] += 1
+        if status in {2, 3}:
+            counts["in_arbeit"] += 1
+        if status == 4:
+            counts["fertig"] += 1
+        if status >= 5:
+            counts["zurueckgegeben"] += 1
+        if group_key == "empty":
+            counts["ohne_termin"] += 1
+        if planung.get("has_date_warning"):
+            counts["termin_pruefen"] += 1
+        if auftrag.get("hat_offene_reklamation"):
+            counts["reklamation"] += 1
+
+        autohaus_id = int(auftrag.get("autohaus_id") or 0)
+        name = clean_text(auftrag.get("autohaus_name")) or "Ohne Autohaus"
+        if autohaus_id not in autohaus_counts:
+            autohaus_counts[autohaus_id] = {"id": autohaus_id, "name": name, "count": 0}
+        autohaus_counts[autohaus_id]["count"] += 1
+
+    def group_items(filter_key, predicate, limit=3):
+        matches = [auftrag for auftrag in auftraege or [] if predicate(auftrag)]
+        return {
+            "filter": filter_key,
+            "count": len(matches),
+            "items": matches[:limit],
+            "more_count": max(0, len(matches) - limit),
+        }
+
+    arbeitsgruppen_defs = [
+        {
+            "key": "focus",
+            "label": "Heute & fällig",
+            "description": "Direkt entscheiden oder erledigen.",
+            "empty": "Nichts Dringendes.",
+            "tone": "urgent",
+            **group_items(
+                "focus",
+                lambda auftrag: (auftrag.get("planung") or {}).get("group_key")
+                in {"overdue", "today"},
+            ),
+        },
+        {
+            "key": "work",
+            "label": "In Arbeit",
+            "description": "Aktive Werkstatt-Aufträge.",
+            "empty": "Gerade nichts aktiv.",
+            "tone": "work",
+            **group_items(
+                "work",
+                lambda auftrag: int(auftrag.get("status") or 1) in {2, 3},
+            ),
+        },
+        {
+            "key": "week",
+            "label": "Nächste 7 Tage",
+            "description": "Was in der Woche geplant ist.",
+            "empty": "Keine Termine in den nächsten Tagen.",
+            "tone": "week",
+            **group_items(
+                "week",
+                lambda auftrag: bool((auftrag.get("planung") or {}).get("is_week_relevant")),
+            ),
+        },
+        {
+            "key": "date-warning",
+            "label": "Prüfen",
+            "description": "Unplausible oder fehlende Planung.",
+            "empty": "Keine auffälligen Termine.",
+            "tone": "check",
+            **group_items(
+                "date-warning",
+                lambda auftrag: bool((auftrag.get("planung") or {}).get("has_date_warning")),
+            ),
+        },
+        {
+            "key": "empty",
+            "label": "Ohne Termin",
+            "description": "Noch nicht sauber eingeplant.",
+            "empty": "Alle aktiven Fahrzeuge haben Termine.",
+            "tone": "empty",
+            **group_items(
+                "empty",
+                lambda auftrag: (auftrag.get("planung") or {}).get("group_key") == "empty",
+            ),
+        },
+    ]
+
+    autohaeuser = sorted(
+        autohaus_counts.values(),
+        key=lambda item: (-int(item["count"]), item["name"].lower()),
+    )
+
+    return {
+        "counts": counts,
+        "autohaeuser": autohaeuser,
+        "arbeitsgruppen": arbeitsgruppen_defs,
+        "planungsgruppen": list(planungsgruppen.values()),
+        "planungsgruppen_by_key": planungsgruppen,
+    }
+
+
+def build_autohaus_uebersicht(autohaeuser, auftraege, angebotsanfragen=None, limit=12):
+    heute = date.today()
+    angebotsanfragen = angebotsanfragen or []
+    rows = []
+    for autohaus in autohaeuser or []:
+        autohaus_id = int(autohaus.get("id") or 0)
+        aktive = [a for a in auftraege if int(a.get("autohaus_id") or 0) == autohaus_id]
+        offene_angebote = [
+            a for a in angebotsanfragen if int(a.get("autohaus_id") or 0) == autohaus_id
+        ]
+        future_dates = []
+        for auftrag in aktive + offene_angebote:
+            for feld, _, _ in EVENT_FELDER:
+                event_date = auftrag.get(f"{feld}_obj")
+                if event_date and event_date >= heute:
+                    future_dates.append(event_date)
+        next_date = min(future_dates) if future_dates else None
+        rows.append(
+            {
+                "id": autohaus_id,
+                "name": clean_text(autohaus.get("name")) or "Autohaus",
+                "slug": autohaus.get("slug"),
+                "portal_label": autohaus.get("portal_label"),
+                "aktiv_count": len(aktive),
+                "angebot_count": len(offene_angebote),
+                "postfach_count": partner_postfach_count(autohaus_id, autohaus.get("slug")),
+                "naechster_termin": next_date.strftime(DATE_FMT) if next_date else "",
+                "_sort_date": next_date or date.max,
+            }
+        )
+    rows.sort(
+        key=lambda item: (
+            0 if item["postfach_count"] or item["angebot_count"] or item["aktiv_count"] else 1,
+            item["_sort_date"],
+            item["name"].lower(),
+        )
+    )
+    for item in rows:
+        item.pop("_sort_date", None)
+    return rows[: max(1, int(limit or 12))]
+
+
+def start_inbox_daten(postfach_items, email_items, limit=6, email_count_total=None):
+    fahrzeuge = [item for item in postfach_items if item.get("typ") == "Fahrzeug"]
+    anfragen = [item for item in postfach_items if item.get("typ") == "Anfrage"]
+    sonstige_aufgaben = [
+        item for item in postfach_items if item.get("typ") not in {"Fahrzeug", "Anfrage"}
+    ]
+    email_aufgaben = []
+    for email in email_items:
+        if not email.get("is_neu"):
+            continue
+        email_aufgaben.append(
+            {
+                "item_key": f"admin-email-{email.get('id')}",
+                "typ": "E-Mail",
+                "titel": email.get("betreff") or "Neue E-Mail",
+                "nachricht": email.get("excerpt") or "Neue Aufgabe aus dem Werkstatt-Postfach.",
+                "erstellt_am": email.get("empfangen_am") or email.get("erstellt_am"),
+                "autohaus_name": email.get("absender_display"),
+                "fahrzeug": "",
+                "kennzeichen": "",
+                "ziel_url": url_for("admin_emails"),
+            }
+        )
+
+    email_count = len(email_aufgaben) if email_count_total is None else int(email_count_total or 0)
+    alle_eingaenge = list(postfach_items) + email_aufgaben
+    return {
+        "fahrzeuge": fahrzeuge,
+        "anfragen": anfragen,
+        "aufgaben": sonstige_aufgaben + email_aufgaben,
+        "fahrzeuge_count": len(fahrzeuge),
+        "anfragen_count": len(anfragen),
+        "aufgaben_count": len(sonstige_aufgaben) + email_count,
+        "email_count": email_count,
+        "items": sort_postfach_items(alle_eingaenge, limit),
+    }
+
+
 def kalender_daten(auftraege):
-    tage = defaultdict(dict)
+    tage = defaultdict(lambda: {"auftraege": {}, "notizen": [], "system": []})
     for auftrag in auftraege:
-        for feld, label, farbe in EVENT_FELDER:
+        for priority, (feld, label, farbe) in enumerate(EVENT_FELDER):
             event_date = auftrag.get(f"{feld}_obj")
             if event_date:
-                eintraege = tage[event_date]
+                eintraege = tage[event_date]["auftraege"]
                 eintrag = eintraege.get(auftrag["id"])
                 if not eintrag:
                     eintrag = {
@@ -7783,82 +15319,230 @@ def kalender_daten(auftraege):
                     )
                     eintrag["felder"].add(feld)
 
+    years = kalender_jahre(auftraege)
+    for notiz in list_kalender_notizen(years):
+        tage[notiz["datum"]]["notizen"].append(notiz)
+    for item in kalender_systemeintraege(years):
+        tage[item["datum"]]["system"].append(item)
+
     kalender = []
     for tag in sorted(tage.keys()):
+        day_data = tage[tag]
         events = sorted(
-            tage[tag].values(),
+            day_data["auftraege"].values(),
             key=lambda item: (
                 clean_text(item["auftrag"].get("autohaus_name")).lower(),
                 clean_text(item["auftrag"].get("kennzeichen")).lower(),
             ),
         )
+        notizen = sorted(
+            day_data["notizen"],
+            key=lambda item: (clean_text(item.get("titel")).lower(), item.get("id") or 0),
+        )
+        system = sorted(
+            day_data["system"],
+            key=lambda item: (clean_text(item.get("kategorie")), clean_text(item.get("titel")).lower()),
+        )
         kalender.append(
             {
+                "datum": tag,
                 "datum_lang": day_label(tag),
                 "datum_text": tag.strftime(DATE_FMT),
                 "events": events,
+                "notizen": notizen,
+                "system": system,
+                "gesamt_count": len(events) + len(notizen) + len(system),
             }
         )
     return kalender
 
 
-def easter_date(year):
-    a = year % 19
-    b = year // 100
-    c = year % 100
-    d = b // 4
-    e = b % 4
-    f = (b + 8) // 25
-    g = (b - f + 1) // 3
-    h = (19 * a + b - d - g + 15) % 30
-    i = c // 4
-    k = c % 4
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    month = (h + l - 7 * m + 114) // 31
-    day = ((h + l - 7 * m + 114) % 31) + 1
-    return date(year, month, day)
+def filter_kalender_items(kalender_items, vergangenheit=False, reference_date=None):
+    heute = reference_date or date.today()
+    gefilterte_items = []
+    for item in kalender_items:
+        visible_system = [
+            system_item
+            for system_item in item.get("system", [])
+            if system_item.get("kategorie") not in {"feiertag", "hinweis"}
+        ]
+        visible_item = dict(item)
+        visible_item["system"] = visible_system
+        visible_item["gesamt_count"] = (
+            len(visible_item.get("events", []))
+            + len(visible_item.get("notizen", []))
+            + len(visible_system)
+        )
+        if visible_item["gesamt_count"] > 0:
+            gefilterte_items.append(visible_item)
+
+    if vergangenheit:
+        return sorted(
+            [item for item in gefilterte_items if item["datum"] < heute],
+            key=lambda item: item["datum"],
+            reverse=True,
+        )
+    return [item for item in gefilterte_items if item["datum"] >= heute]
 
 
-def bw_feiertage(year):
-    ostern = easter_date(year)
+def kalender_suchtext_auftrag(auftrag, event, day):
+    texte = [
+        day.get("datum_text"),
+        day.get("datum_lang"),
+        auftrag.get("id"),
+        auftrag.get("fahrzeug"),
+        auftrag.get("kennzeichen"),
+        auftrag.get("kunde_name"),
+        auftrag.get("autohaus_name"),
+        auftrag.get("auftragsnummer"),
+        auftrag.get("fin_nummer"),
+        auftrag.get("analyse_text"),
+        auftrag.get("beschreibung"),
+    ]
+    for feld, _, _ in EVENT_FELDER:
+        texte.append(auftrag.get(feld))
+    for termin in event.get("termine", []):
+        texte.append(termin.get("label"))
+        texte.append(termin.get("feld"))
+    return " ".join(clean_text(text).lower() for text in texte if clean_text(text))
+
+
+def kalender_suchtext_item(item, day):
+    texte = [
+        day.get("datum_text"),
+        day.get("datum_lang"),
+        item.get("titel"),
+        item.get("notiz"),
+        item.get("kategorie"),
+        item.get("kategorie_label"),
+    ]
+    return " ".join(clean_text(text).lower() for text in texte if clean_text(text))
+
+
+def filter_kalender_suche(kalender_items, query):
+    suchtext = clean_text(query).lower()
+    if not suchtext:
+        return [], set()
+    result = []
+    event_ids = set()
+    for day in kalender_items:
+        day_match = suchtext in clean_text(day.get("datum_text")).lower() or suchtext in clean_text(day.get("datum_lang")).lower()
+        events = []
+        for event in day.get("events", []):
+            auftrag = event.get("auftrag") or {}
+            if day_match or suchtext in kalender_suchtext_auftrag(auftrag, event, day):
+                events.append(event)
+                event_ids.add(auftrag.get("id"))
+        notizen = []
+        for item in day.get("notizen", []):
+            if day_match or suchtext in kalender_suchtext_item(item, day):
+                notizen.append(item)
+        system = []
+        for item in day.get("system", []):
+            if item.get("kategorie") == "feiertag":
+                continue
+            if day_match or suchtext in kalender_suchtext_item(item, day):
+                system.append(item)
+        gesamt_count = len(events) + len(notizen) + len(system)
+        if gesamt_count:
+            visible_day = dict(day)
+            visible_day["events"] = events
+            visible_day["notizen"] = notizen
+            visible_day["system"] = system
+            visible_day["gesamt_count"] = gesamt_count
+            result.append(visible_day)
+    return result, {event_id for event_id in event_ids if event_id}
+
+
+def kalender_wochenuebersicht(kalender_items, reference_date=None):
+    heute = reference_date or date.today()
+    week_start = heute - timedelta(days=heute.weekday())
+    week_end = week_start + timedelta(days=6)
+    by_date = {}
+    for item in kalender_items:
+        parsed = item.get("datum") or parse_date(item.get("datum_text"))
+        if parsed:
+            by_date[parsed] = item
+
+    days = []
+    total_tasks = 0
+    total_calendar_points = 0
+    for offset in range(7):
+        current = week_start + timedelta(days=offset)
+        source = by_date.get(
+            current,
+            {"events": [], "notizen": [], "system": [], "gesamt_count": 0},
+        )
+        tasks = []
+        for event in source.get("events", []):
+            auftrag = event["auftrag"]
+            for termin in event["termine"]:
+                tasks.append(
+                    {
+                        "label": termin["label"],
+                        "farbe": termin["farbe"],
+                        "fahrzeug": clean_text(auftrag.get("fahrzeug")) or "Fahrzeug",
+                        "kennzeichen": clean_text(auftrag.get("kennzeichen")),
+                        "autohaus": clean_text(auftrag.get("autohaus_name")) or "Ohne Autohaus",
+                        "auftrag_id": auftrag["id"],
+                    }
+                )
+        calendar_points = sorted(
+            list(source.get("system", [])) + list(source.get("notizen", [])),
+            key=lambda item: (
+                0
+                if item.get("kategorie") in {"feiertag", "geburtstag", "urlaub"}
+                else 1,
+                clean_text(item.get("titel")).lower(),
+            ),
+        )
+        total_tasks += len(tasks)
+        total_calendar_points += len(calendar_points)
+        days.append(
+            {
+                "datum": current,
+                "datum_text": current.strftime(DATE_FMT),
+                "wochentag": WOCHENTAGE[current.weekday()],
+                "wochentag_kurz": WOCHENTAGE[current.weekday()][:2],
+                "is_today": current == heute,
+                "is_weekend": current.weekday() >= 5,
+                "tasks": tasks,
+                "calendar_points": calendar_points,
+                "gesamt_count": len(tasks) + len(calendar_points),
+            }
+        )
+
     return {
-        date(year, 1, 1): "Neujahr",
-        date(year, 1, 6): "Heilige Drei Könige",
-        ostern - timedelta(days=2): "Karfreitag",
-        ostern + timedelta(days=1): "Ostermontag",
-        date(year, 5, 1): "Tag der Arbeit",
-        ostern + timedelta(days=39): "Christi Himmelfahrt",
-        ostern + timedelta(days=50): "Pfingstmontag",
-        ostern + timedelta(days=60): "Fronleichnam",
-        date(year, 10, 3): "Tag der Deutschen Einheit",
-        date(year, 11, 1): "Allerheiligen",
-        date(year, 12, 25): "1. Weihnachtsfeiertag",
-        date(year, 12, 26): "2. Weihnachtsfeiertag",
+        "kw": heute.isocalendar().week,
+        "start_text": week_start.strftime(DATE_FMT),
+        "end_text": week_end.strftime(DATE_FMT),
+        "heute_text": heute.strftime(DATE_FMT),
+        "days": days,
+        "total_tasks": total_tasks,
+        "total_calendar_points": total_calendar_points,
     }
-
-
-BETRIEBSURLAUB_ZEITRAEUME = (
-    (date(2026, 8, 19), date(2026, 9, 4), "Betriebsurlaub"),
-)
 
 
 def parse_mini_calendar_month(value):
     cleaned = clean_text(value)
     if cleaned:
-        try:
-            parsed = datetime.strptime(cleaned, "%Y-%m").date()
-            return date(parsed.year, parsed.month, 1)
-        except ValueError:
-            pass
+        match = re.match(r"^(\d{4})-(\d{1,2})$", cleaned)
+        if match:
+            year = int(match.group(1))
+            month = int(match.group(2))
+            if 1 <= month <= 12:
+                try:
+                    return date(year, month, 1)
+                except ValueError:
+                    pass
     today = date.today()
     return date(today.year, today.month, 1)
 
 
-def shift_month(month_start, offset):
-    month_index = month_start.month - 1 + offset
-    year = month_start.year + month_index // 12
-    month = month_index % 12 + 1
+def shift_month(month_start, delta):
+    month_index = (month_start.year * 12) + (month_start.month - 1) + int(delta)
+    year = month_index // 12
+    month = (month_index % 12) + 1
     return date(year, month, 1)
 
 
@@ -7867,56 +15551,22 @@ def build_mini_monatskalender(
     month_value="",
     endpoint="",
     route_values=None,
+    include_internal_notes=False,
     only_arrival_events=False,
-    only_start_events=False,
-    only_start_pickup_events=False,
-    event_display_mode="party",
 ):
     month_start = parse_mini_calendar_month(month_value)
-    month_end = shift_month(month_start, 1) - timedelta(days=1)
     today = date.today()
+    month_end = shift_month(month_start, 1) - timedelta(days=1)
     cal = calendar.Calendar(firstweekday=0)
-    month_names = {
-        1: "Januar",
-        2: "Februar",
-        3: "März",
-        4: "April",
-        5: "Mai",
-        6: "Juni",
-        7: "Juli",
-        8: "August",
-        9: "September",
-        10: "Oktober",
-        11: "November",
-        12: "Dezember",
-    }
-
     event_dates = defaultdict(list)
     for auftrag in auftraege or []:
         event_fields = EVENT_FELDER
-        if only_start_pickup_events:
-            event_fields = (
-                ("start_datum", "Beginn", "primary"),
-                ("abholtermin", "Abholung", "success"),
-            )
-        elif only_start_events:
-            event_fields = (("start_datum", "Beginn", "primary"),)
-        elif only_arrival_events:
+        if only_arrival_events:
             event_fields = (("annahme_datum", "Anlieferung", "secondary"),)
         for feld, label, _ in event_fields:
             event_date = auftrag.get(f"{feld}_obj")
-            if only_start_events and feld == "start_datum" and not event_date:
-                event_date = auftrag.get("annahme_datum_obj")
             if event_date and month_start <= event_date <= month_end:
-                party_name = (
-                    clean_text(auftrag.get("autohaus_name"))
-                    or clean_text(auftrag.get("kunde_name"))
-                    or "Kunde noch eintragen"
-                )
-                fahrzeug_name = clean_text(auftrag.get("fahrzeug")) or "Fahrzeug"
-                kennzeichen = clean_text(auftrag.get("kennzeichen"))
-                vehicle_label = f"{fahrzeug_name} · {kennzeichen}" if kennzeichen else fahrzeug_name
-                title = f"{label}: {party_name} | {vehicle_label}"
+                title = f"{label}: {clean_text(auftrag.get('fahrzeug')) or 'Fahrzeug'}"
                 if only_arrival_events:
                     rueckgabe = (
                         auftrag.get("abholtermin_obj")
@@ -7926,26 +15576,32 @@ def build_mini_monatskalender(
                     if rueckgabe:
                         title = f"{title} | Rückgabe: {rueckgabe.strftime(DATE_FMT)}"
                 event_dates[event_date].append(
-                    {
-                        "label": label,
-                        "party_name": party_name,
-                        "display_name": (
-                            label if event_display_mode == "label" else party_name
-                        ),
-                        "display_detail": vehicle_label if event_display_mode == "party_vehicle" else "",
-                        "vehicle_label": vehicle_label,
-                        "tooltip": label if event_display_mode == "label" else title,
-                    }
+                    title
                 )
 
     holidays = bw_feiertage(month_start.year)
     betriebsurlaub_dates = defaultdict(list)
-    for start, end, title in BETRIEBSURLAUB_ZEITRAEUME:
+    for news in list_werkstatt_news(limit=200):
+        if not is_betriebsurlaub_news(news):
+            continue
+        start = parse_date(news.get("start_datum"))
+        end = parse_date(news.get("end_datum")) or start
+        if not start:
+            continue
+        if end < start:
+            start, end = end, start
         current = max(start, month_start)
         last_day = min(end, month_end)
         while current <= last_day:
-            betriebsurlaub_dates[current].append(title)
+            betriebsurlaub_dates[current].append(clean_text(news.get("titel")) or "Betriebsurlaub")
             current += timedelta(days=1)
+
+    note_dates = defaultdict(list)
+    if include_internal_notes:
+        for note in list_kalender_notizen([month_start.year]):
+            note_date = note.get("datum") or parse_date(note.get("datum_text"))
+            if note_date and month_start <= note_date <= month_end:
+                note_dates[note_date].append(clean_text(note.get("titel")) or "Kalendereintrag")
 
     weeks = []
     for week in cal.monthdatescalendar(month_start.year, month_start.month):
@@ -7956,28 +15612,11 @@ def build_mini_monatskalender(
             if holiday_title:
                 labels.append(holiday_title)
             labels.extend(betriebsurlaub_dates.get(current, []))
-            day_events = sorted(
-                event_dates.get(current, []),
-                key=lambda event: (
-                    clean_text(event.get("party_name")).lower(),
-                    clean_text(event.get("vehicle_label")).lower(),
-                    clean_text(event.get("label")).lower(),
-                ),
-            )
-            compact_events = []
-            seen_events = set()
-            for event in day_events:
-                if event_display_mode == "label":
-                    event_key = (event.get("display_name"),)
-                else:
-                    event_key = (event.get("party_name"), event.get("vehicle_label"))
-                if event_key in seen_events:
-                    continue
-                seen_events.add(event_key)
-                compact_events.append(event)
-            labels.extend([event["tooltip"] for event in day_events[:3]])
+            labels.extend(event_dates.get(current, [])[:3])
+            labels.extend(note_dates.get(current, [])[:3])
             row.append(
                 {
+                    "datum": current,
                     "tag": current.day,
                     "datum_text": current.strftime(DATE_FMT),
                     "in_month": current.month == month_start.month,
@@ -7985,40 +15624,143 @@ def build_mini_monatskalender(
                     "is_weekend": current.weekday() >= 5,
                     "is_holiday": bool(holiday_title),
                     "has_betriebsurlaub": bool(betriebsurlaub_dates.get(current)),
-                    "has_events": bool(day_events),
-                    "event_count": len(compact_events),
-                    "events": compact_events[:2],
-                    "more_event_count": max(0, len(compact_events) - 2),
+                    "has_events": bool(event_dates.get(current)),
+                    "has_notes": bool(note_dates.get(current)),
                     "tooltip": " | ".join(labels),
                 }
             )
         weeks.append(row)
 
+    prev_month = shift_month(month_start, -1)
+    next_month = shift_month(month_start, 1)
     route_values = dict(route_values or {})
     prev_url = next_url = ""
     if endpoint and has_request_context():
-        prev_url = url_for(endpoint, **route_values, monat=shift_month(month_start, -1).strftime("%Y-%m"))
-        next_url = url_for(endpoint, **route_values, monat=shift_month(month_start, 1).strftime("%Y-%m"))
-
-    event_label = "Fahrzeugtermin"
-    if only_arrival_events:
-        event_label = "Anlieferung"
-    elif only_start_events:
-        event_label = "Beginn"
-    elif only_start_pickup_events:
-        event_label = "Beginn / Abholung"
-
+        prev_url = url_for(endpoint, **route_values, monat=prev_month.strftime("%Y-%m"))
+        next_url = url_for(endpoint, **route_values, monat=next_month.strftime("%Y-%m"))
     return {
-        "title": f"{month_names[month_start.month]} {month_start.year}",
+        "title": f"{MONATSNAMEN[month_start.month]} {month_start.year}",
+        "month_param": month_start.strftime("%Y-%m"),
         "prev_url": prev_url,
         "next_url": next_url,
         "today_text": today.strftime(DATE_FMT),
         "weekdays": ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
         "weeks": weeks,
-        "event_label": event_label,
-        "show_event_count": event_display_mode not in {"label", "party_vehicle"},
-        "show_more_events": event_display_mode != "label",
+        "event_count": sum(len(items) for items in event_dates.values()),
+        "holiday_count": sum(1 for day in holidays if day.month == month_start.month),
+        "betriebsurlaub_count": len(betriebsurlaub_dates),
+        "show_notes": include_internal_notes,
+        "event_label": "Anlieferung" if only_arrival_events else "Fahrzeugtermin",
     }
+
+
+def naechste_kalender_tage(auftraege, limit=6):
+    result = []
+    for tag in filter_kalender_items(kalender_daten(auftraege), vergangenheit=False):
+        result.append(tag)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def partner_termin_label(auftrag, feld, fallback):
+    transport_art = clean_text(auftrag.get("transport_art"))
+    if feld == "annahme_datum":
+        if transport_art == "hol_und_bring":
+            return "Abholung durch Werkstatt geplant"
+        return "Anlieferung geplant"
+    if feld == "start_datum":
+        return "Arbeitsstart geplant"
+    if feld == "fertig_datum":
+        return "Fertigstellung geplant"
+    if feld == "abholtermin":
+        if transport_art == "hol_und_bring":
+            return "Rückgabe geplant"
+        return "Abholung geplant"
+    return fallback
+
+
+def partner_termin_tage(auftraege, limit=6, vergangenheit=False):
+    heute = date.today()
+    eintraege = []
+    for auftrag in auftraege:
+        termine = []
+        felder = set()
+        termin_daten = []
+        for priority, (feld, label, farbe) in enumerate(EVENT_FELDER):
+            event_date = auftrag.get(f"{feld}_obj")
+            if not event_date:
+                continue
+            if vergangenheit and event_date >= heute:
+                continue
+            if not vergangenheit and event_date < heute:
+                continue
+            if feld not in felder:
+                termine.append(
+                    {
+                        "feld": feld,
+                        "label": label,
+                        "termin_label": partner_termin_label(auftrag, feld, label),
+                        "farbe": farbe,
+                        "datum": event_date,
+                        "datum_text": event_date.strftime(DATE_FMT),
+                        "priority": priority,
+                    }
+                )
+                felder.add(feld)
+                termin_daten.append(event_date)
+        if not termine:
+            continue
+        termine = sorted(termine, key=lambda termin: (termin["datum"], termin["priority"]))
+        if vergangenheit:
+            aktueller_termin = sorted(
+                termine,
+                key=lambda termin: (termin["datum"], termin["priority"]),
+                reverse=True,
+            )[0]
+        else:
+            aktueller_termin = termine[0]
+        termin_daten = sorted(termin_daten)
+        start = termin_daten[0]
+        ende = termin_daten[-1]
+        zeitraum_text = start.strftime(DATE_FMT)
+        if ende != start:
+            zeitraum_text = f"{start.strftime(DATE_FMT)} bis {ende.strftime(DATE_FMT)}"
+        eintraege.append(
+            {
+                "auftrag": auftrag,
+                "termine": termine,
+                "aktueller_termin": aktueller_termin,
+                "start_datum": start,
+                "ende_datum": ende,
+                "zeitraum_text": zeitraum_text,
+                "gesamt_count": len(termine),
+            }
+        )
+    if vergangenheit:
+        eintraege.sort(
+            key=lambda item: (
+                item["ende_datum"],
+                item["start_datum"],
+                clean_text(item["auftrag"].get("fahrzeug")).lower(),
+                clean_text(item["auftrag"].get("kennzeichen")).lower(),
+            ),
+            reverse=True,
+        )
+    else:
+        eintraege.sort(
+            key=lambda item: (
+                item["start_datum"],
+                item["ende_datum"],
+                clean_text(item["auftrag"].get("fahrzeug")).lower(),
+                clean_text(item["auftrag"].get("kennzeichen")).lower(),
+            )
+        )
+    return eintraege[:limit]
+
+
+def partner_naechste_termin_tage(auftraege, limit=6):
+    return partner_termin_tage(auftraege, limit=limit)
 
 
 def autohaus_dashboard_daten(auftraege):
@@ -8176,9 +15918,16 @@ def render_partner_new_form(autohaus):
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
+        limited, wait_seconds = login_rate_limit_status("admin", "admin")
+        if limited:
+            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen.", "danger")
+            return render_template("login.html"), 429
         if admin_password_matches(request.form.get("passwort")):
+            clear_login_attempts("admin", "admin")
+            session.clear()
             session["admin"] = True
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("betriebs_cockpit"))
+        record_failed_login("admin", "admin")
         flash("Falsches Passwort.", "danger")
     return render_template("login.html")
 
@@ -8204,21 +15953,6 @@ def dashboard():
     alle_auftraege = list_auftraege(include_archived=True)
     auftraege = [a for a in alle_auftraege if not a["archiviert"]]
     archivierte_auftraege = [a for a in alle_auftraege if a["archiviert"]]
-    mini_calendar = build_mini_monatskalender(
-        auftraege,
-        request.args.get("monat", ""),
-        endpoint="dashboard",
-        only_start_events=True,
-        event_display_mode="party_vehicle",
-    )
-    mini_calendar.update(
-        {
-            "section_class": "page-card p-4 p-lg-5 mb-4 mini-calendar mini-calendar-large",
-            "heading": f"Beginn-Termine {mini_calendar['title']}",
-            "subtitle": f"Heute: {mini_calendar['today_text']} · Nur Beginn mit Autohaus und Fahrzeug",
-            "aria_label": "Beginn-Termine-Kalender",
-        }
-    )
     return render_template(
         "dashboard.html",
         auftraege=auftraege,
@@ -8226,32 +15960,99 @@ def dashboard():
         angebotsanfragen=list_angebotsanfragen(),
         autohaeuser=list_autohaeuser(),
         cockpit=dashboard_daten(auftraege),
-        status_board=build_admin_status_board(auftraege),
-        admin_benachrichtigungen=list_admin_benachrichtigungen(limit=10),
-        admin_postfach_ungelesen=count_admin_benachrichtigungen(),
         ki_status=get_ai_status(),
         database_status=get_database_status(),
         startup_warnings=get_startup_warnings(),
-        mini_calendar=mini_calendar,
         statusliste=STATUSLISTE,
+        werkstatt_uebersicht=build_werkstatt_auftragsuebersicht(auftraege),
         public_base_url=get_public_base_url(),
+        zurueck_archivierbar_count=sum(1 for a in auftraege if a.get("archivierbar_zurueckgegeben")),
     )
 
 
-@app.route("/admin/postfach/<int:hinweis_id>/gelesen", methods=["POST"])
+@app.route("/admin/start")
+@app.route("/admin/cockpit")
 @admin_required
-def admin_postfach_gelesen(hinweis_id):
-    mark_admin_benachrichtigung_gelesen(hinweis_id)
-    flash("Nachricht als gelesen markiert.", "info")
-    return redirect(url_for("dashboard"))
+def betriebs_cockpit():
+    alle_auftraege = list_auftraege(include_archived=True)
+    auftraege = [a for a in alle_auftraege if not a["archiviert"]]
+    autohaeuser = list_autohaeuser()
+    angebotsanfragen = list_angebotsanfragen()
+    kalender_items = kalender_daten(auftraege)
+    cockpit_data = dashboard_daten(auftraege)
+    email_items = list_werkstatt_emails("aktiv", limit=5)
+    email_count = admin_email_count()
+    return render_template(
+        "cockpit.html",
+        auftraege=auftraege,
+        archivierte_auftraege=[a for a in alle_auftraege if a["archiviert"]],
+        angebotsanfragen=angebotsanfragen,
+        autohaeuser=autohaeuser,
+        autohaus_uebersicht=build_autohaus_uebersicht(
+            autohaeuser,
+            auftraege,
+            angebotsanfragen,
+        ),
+        cockpit=cockpit_data,
+        mini_calendar=build_mini_monatskalender(
+            auftraege,
+            request.args.get("monat"),
+            endpoint="betriebs_cockpit",
+            include_internal_notes=True,
+        ),
+        kalender_vorschau=naechste_kalender_tage(auftraege),
+        kalender_woche=kalender_wochenuebersicht(kalender_items),
+        kalender_naechste_woche=kalender_wochenuebersicht(
+            kalender_items,
+            reference_date=date.today() + timedelta(days=7),
+        ),
+        email_count=email_count,
+        email_items=email_items,
+        start_inbox=start_inbox_daten(
+            cockpit_data["postfach_items"],
+            email_items,
+            email_count_total=email_count,
+        ),
+        erinnerungen=list_erinnerungen(limit=8),
+        einkauf_offen_count=admin_einkauf_count(),
+        einkauf_artikel_count=admin_einkauf_artikel_count(),
+        einkauf_belege=list_einkauf_belege(limit=3),
+        einkauf_news=build_einkauf_offer_groups(limit=5),
+        ki_status=get_ai_status(),
+        database_status=get_database_status(),
+        public_base_url=get_public_base_url(),
+        zurueck_archivierbar_count=sum(1 for a in auftraege if a.get("archivierbar_zurueckgegeben")),
+        ki_assistent_chat_url=url_for("admin_ki_chat"),
+        ki_assistent_clear_url=url_for("admin_ki_chat_loeschen"),
+        ki_assistent_subtitle="Fragen zu Kalender, Auftrag, Upload oder Portal.",
+    )
 
 
-@app.route("/admin/postfach/<int:hinweis_id>/loeschen", methods=["POST"])
+@app.route("/admin/cockpit/auftraege-suche")
 @admin_required
-def admin_postfach_loeschen(hinweis_id):
-    delete_admin_benachrichtigung(hinweis_id)
-    flash("Nachricht gelöscht.", "info")
-    return redirect(url_for("dashboard"))
+def admin_cockpit_auftraege_suche():
+    return jsonify({"items": list_admin_auftrag_suche(request.args.get("q"), limit=8)})
+
+
+@app.route("/admin/postfach")
+@admin_required
+def admin_postfach():
+    return render_template("postfach_admin.html", items=list_admin_postfach_items(limit=200))
+
+
+@app.route("/admin/postfach/<path:item_key>/oeffnen")
+@admin_required
+def admin_postfach_oeffnen(item_key):
+    item_key = clean_text(item_key)
+    item = next(
+        (entry for entry in list_admin_postfach_items(limit=200) if entry.get("item_key") == item_key),
+        None,
+    )
+    if not item:
+        flash("Die Meldung ist bereits erledigt oder nicht mehr vorhanden.", "info")
+        return redirect(url_for("admin_postfach"))
+    hide_postfach_item("admin", item_key, 0)
+    return redirect(item.get("ziel_url") or url_for("admin_postfach"))
 
 
 @app.route("/admin/zugaenge")
@@ -8262,6 +16063,567 @@ def admin_zugaenge():
         autohaeuser=list_autohaeuser(),
         public_base_url=get_public_base_url(),
     )
+
+
+@app.route("/admin/ki/chat", methods=["POST"])
+@admin_required
+def admin_ki_chat():
+    payload = request.get_json(silent=True) or {}
+    question = clean_text(payload.get("message"))[:900]
+    if not question:
+        return jsonify({"error": "Bitte eine Frage eingeben."}), 400
+    save_ki_assistent_message(0, 0, "kunde", question)
+    answer, source = ask_admin_assistant(question)
+    save_ki_assistent_message(0, 0, "ki", answer)
+    schedule_change_backup("admin-ki-assistent")
+    return jsonify({"answer": answer, "source": source})
+
+
+@app.route("/admin/ki/chat/loeschen", methods=["POST"])
+@admin_required
+def admin_ki_chat_loeschen():
+    clear_ki_assistent_history(0, 0)
+    schedule_change_backup("admin-ki-assistent-loeschen")
+    return jsonify({"ok": True})
+
+
+@app.route("/admin/postfach/<path:item_key>/loeschen", methods=["POST"])
+@admin_required
+def admin_postfach_loeschen(item_key):
+    hide_postfach_item("admin", item_key, 0)
+    flash("Nachricht aus dem Werkstatt-Postfach gelöscht.", "info")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/"):
+        return redirect(next_url)
+    return redirect(url_for("admin_postfach"))
+
+
+@app.route("/admin/cockpit/eingang/<path:item_key>/oeffnen")
+@admin_required
+def admin_cockpit_eingang_oeffnen(item_key):
+    item_key = clean_text(item_key)
+    if item_key.startswith("admin-email-"):
+        email_id_text = item_key.removeprefix("admin-email-")
+        if email_id_text.isdigit() and get_werkstatt_email(int(email_id_text)):
+            update_werkstatt_email_status(int(email_id_text), "erledigt")
+        return redirect(url_for("admin_emails"))
+    item = next(
+        (entry for entry in list_admin_postfach_items(limit=200) if entry.get("item_key") == item_key),
+        None,
+    )
+    if item:
+        hide_postfach_item("admin", item_key, 0)
+        return redirect(item.get("ziel_url") or url_for("admin_postfach"))
+    flash("Die Meldung ist bereits erledigt oder nicht mehr vorhanden.", "info")
+    return redirect(url_for("betriebs_cockpit"))
+
+
+@app.route("/admin/cockpit/eingang/<path:item_key>/loeschen", methods=["POST"])
+@admin_required
+def admin_cockpit_eingang_loeschen(item_key):
+    item_key = clean_text(item_key)
+    if item_key.startswith("admin-email-"):
+        email_id_text = item_key.removeprefix("admin-email-")
+        if not email_id_text.isdigit() or not get_werkstatt_email(int(email_id_text)):
+            abort(404)
+        update_werkstatt_email_status(int(email_id_text), "erledigt")
+        flash("E-Mail aus dem Cockpit entfernt.", "info")
+    else:
+        hide_postfach_item("admin", item_key, 0)
+        flash("Meldung aus dem Cockpit entfernt.", "info")
+
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/admin"):
+        return redirect(next_url)
+    return redirect(url_for("betriebs_cockpit"))
+
+
+@app.route("/admin/einkauf")
+@admin_required
+def admin_einkauf():
+    raw_offene_items = list_einkauf_items("offen", limit=200)
+    offene_items, unklare_items = split_einkauf_items_by_orderability(raw_offene_items)
+    bestellte_items = list_einkauf_items("bestellt", limit=80)
+    raw_rechnung_pruef_items = list_einkauf_items(EINKAUF_RECHNUNG_PRUEF_STATUS, limit=500)
+    rechnung_pruef_items = filter_rechnung_pruef_items_without_artikel(raw_rechnung_pruef_items)
+    rechnungsbelege = list_einkauf_belege(limit=20)
+    gespeicherte_artikel = list_einkauf_artikel(limit=200)
+    artikel_altlasten = list_einkauf_artikel_altlasten(limit=200)
+    artikel_gruppen = group_einkauf_artikel_by_kategorie(gespeicherte_artikel)
+    topcolor_email = get_topcolor_email()
+    mail_draft = build_topcolor_order_draft(offene_items, topcolor_email)
+    api_draft = build_supplier_api_request_draft(topcolor_email)
+    return render_template(
+        "einkauf.html",
+        offene_items=offene_items,
+        unklare_items=unklare_items,
+        bestellte_items=bestellte_items,
+        rechnung_pruef_items=rechnung_pruef_items,
+        rechnung_pruef_hidden_count=max(0, len(raw_rechnung_pruef_items) - len(rechnung_pruef_items)),
+        rechnungsbelege=rechnungsbelege,
+        gespeicherte_artikel=gespeicherte_artikel,
+        artikel_altlasten=artikel_altlasten,
+        verworfene_artikel_count=count_verworfene_einkauf_artikel(),
+        artikel_gruppen=artikel_gruppen,
+        topcolor_email=topcolor_email,
+        mail_draft=mail_draft,
+        api_draft=api_draft,
+        kategorien=EINKAUF_KATEGORIEN,
+        ve_optionen=EINKAUF_VE_OPTIONEN,
+        angebotsstatus=EINKAUF_ANGEBOTSSTATUS,
+        items_by_lieferant=group_einkauf_items_by_lieferant(offene_items),
+        einkauf_offer_groups=build_einkauf_offer_groups(offene_items, limit=20),
+        beleg_items=rechnungsbelege,
+        artikel_items=gespeicherte_artikel,
+    )
+
+
+@app.route("/admin/rechnungen")
+@admin_required
+def admin_rechnungen():
+    sync_result = maybe_sync_lexware_rechnungen()
+    summary = lexware_rechnungen_summary()
+    return render_template(
+        "rechnungen_admin.html",
+        rechnungen=list_lexware_rechnungen("kritisch", limit=250),
+        bezahlte_rechnungen=list_lexware_rechnungen("bezahlt", limit=40),
+        summary=summary,
+        sync_result=sync_result,
+        lexware_api_ready=bool(LEXWARE_API_KEY),
+        lexware_api_base_url=LEXWARE_API_BASE_URL,
+        auto_sync_minutes=LEXWARE_AUTO_SYNC_MINUTES,
+        kontoauszug_importe=list_kontoauszug_importe(limit=8),
+        kontoauszug_buchungen=list_kontoauszug_buchungen(limit=80),
+        kontoauszug_auswertung=kontoauszug_auswertung(),
+    )
+
+
+@app.route("/admin/rechnungen/sync", methods=["POST"])
+@admin_required
+def admin_rechnungen_sync():
+    result = sync_lexware_rechnungen()
+    flash(result["message"], "success" if result.get("ok") else "warning")
+    if result.get("errors"):
+        flash(result["errors"][0], "warning")
+    return redirect(url_for("admin_rechnungen"))
+
+
+@app.route("/admin/rechnungen/kontoauszug", methods=["POST"])
+@admin_required
+def admin_rechnungen_kontoauszug_upload():
+    files = [
+        file
+        for file in request.files.getlist("kontoauszug_dateien")
+        if clean_text(getattr(file, "filename", ""))
+    ]
+    if not files:
+        flash("Bitte mindestens einen Kontoauszug hochladen.", "warning")
+        return redirect(url_for("admin_rechnungen") + "#kontoauszug")
+
+    total_rows = 0
+    total_matched = 0
+    errors = []
+    for file in files:
+        try:
+            result = import_kontoauszug(file)
+            total_rows += int(result.get("buchungen") or 0)
+            total_matched += int(result.get("matched") or 0)
+            flash(f"{clean_text(getattr(file, 'filename', 'Kontoauszug'))}: {result['message']}", "success")
+        except ValueError as exc:
+            errors.append(str(exc))
+        except Exception as exc:
+            errors.append(f"{clean_text(getattr(file, 'filename', 'Kontoauszug'))}: {exc}")
+
+    for error in errors:
+        flash(error, "warning")
+    if total_rows:
+        flash(f"Insgesamt {total_rows} Buchung(en) analysiert, {total_matched} Rechnung(en) als erledigt markiert.", "info")
+    return redirect(url_for("admin_rechnungen") + "#kontoauszug")
+
+
+@app.route("/admin/einkauf/<int:item_id>")
+@admin_required
+def admin_einkauf_detail(item_id):
+    item = get_einkauf_item(item_id)
+    if not item:
+        abort(404)
+    return render_template(
+        "einkauf_detail.html",
+        item=item,
+        kategorien=EINKAUF_KATEGORIEN,
+        ve_optionen=EINKAUF_VE_OPTIONEN,
+        angebotsstatus=EINKAUF_ANGEBOTSSTATUS,
+    )
+
+
+@app.route("/admin/einkauf/<int:item_id>/vergleich/<anbieter>")
+@admin_required
+def admin_einkauf_vergleich(item_id, anbieter):
+    item = get_einkauf_item(item_id)
+    if not item:
+        abort(404)
+    url_key = EINKAUF_VERGLEICH_ANBIETER.get(clean_text(anbieter).lower())
+    if not url_key:
+        abort(404)
+    ziel_url = clean_text(item.get(url_key))
+    if not ziel_url.startswith("https://"):
+        abort(404)
+    return redirect(ziel_url)
+
+
+@app.route("/admin/einkauf/artikel/<int:artikel_id>/vergleich/<anbieter>")
+@admin_required
+def admin_einkauf_artikel_vergleich(artikel_id, anbieter):
+    artikel = get_einkauf_artikel(artikel_id)
+    if not artikel:
+        abort(404)
+    url_key = EINKAUF_VERGLEICH_ANBIETER.get(clean_text(anbieter).lower())
+    if not url_key:
+        abort(404)
+    ziel_url = clean_text(artikel.get(url_key))
+    if not ziel_url.startswith("https://"):
+        abort(404)
+    return redirect(ziel_url)
+
+
+@app.route("/admin/einkauf/artikel/<int:artikel_id>/verwerfen", methods=["POST"])
+@admin_required
+def admin_einkauf_artikel_verwerfen(artikel_id):
+    if not mark_einkauf_artikel_verworfen(artikel_id):
+        abort(404)
+    flash("Artikel wurde aus dem Artikelstamm ausgeblendet.", "info")
+    return redirect(url_for("admin_einkauf") + "#angelegte-teile")
+
+
+@app.route("/admin/einkauf/artikel/altlasten-ausblenden", methods=["POST"])
+@admin_required
+def admin_einkauf_artikel_altlasten_ausblenden():
+    count = cleanup_einkauf_artikel_altlasten()
+    if count:
+        flash(f"{count} alte OCR-/Rechnungszeile(n) im Artikelstamm ausgeblendet.", "info")
+    else:
+        flash("Keine OCR-Altlasten im Artikelstamm gefunden.", "success")
+    return redirect(url_for("admin_einkauf") + "#angelegte-teile")
+
+
+@app.route("/admin/einkauf/topcolor-email", methods=["POST"])
+@admin_required
+def admin_einkauf_topcolor_email():
+    set_topcolor_email(request.form.get("topcolor_email"))
+    flash("Topcolor-E-Mail gespeichert.", "success")
+    return redirect(url_for("admin_einkauf"))
+
+
+@app.route("/admin/einkauf/neu", methods=["POST"])
+@admin_required
+def admin_einkauf_neu():
+    payload = einkauf_form_payload(request.form)
+    files = [
+        file
+        for file in request.files.getlist("qr_bilder")
+        if clean_text(getattr(file, "filename", ""))
+    ]
+    has_text_item = any(
+        clean_text(payload.get(key))
+        for key in (
+            "titel",
+            "produkt_name",
+            "artikelnummer",
+            "menge",
+            "notiz",
+            "angebotsnotiz",
+        )
+    )
+    if not files and not has_text_item:
+        flash("Bitte mindestens ein QR-Bild, eine Datei oder eine Materialnotiz eintragen.", "warning")
+        return redirect(url_for("admin_einkauf"))
+
+    created = 0
+    errors = []
+    if files:
+        for file in files:
+            try:
+                create_einkauf_item(file_storage=file, **payload)
+                created += 1
+            except ValueError as exc:
+                errors.append(str(exc))
+    else:
+        create_einkauf_item(**payload)
+        created = 1
+
+    for error in errors:
+        flash(error, "warning")
+    if created:
+        flash(f"{created} Einkaufsposition gespeichert.", "success")
+    return redirect(url_for("admin_einkauf"))
+
+
+@app.route("/admin/einkauf/rechnung", methods=["POST"])
+@admin_required
+def admin_einkauf_rechnung_upload():
+    lieferant = clean_text(request.form.get("lieferant")) or "Auto-Color / Topcolor"
+    files = [
+        file
+        for file in (request.files.getlist("rechnung_dateien") or request.files.getlist("rechnungen"))
+        if clean_text(getattr(file, "filename", ""))
+    ]
+    next_url = clean_text(request.form.get("next"))
+    target_url = next_url if next_url.startswith("/admin") else url_for("admin_einkauf") + "#rechnungen"
+    if not files:
+        flash("Bitte mindestens eine Rechnung oder einen Beleg auswählen.", "warning")
+        return redirect(target_url)
+
+    imported = 0
+    saved = 0
+    errors = []
+    for file in files:
+        try:
+            result = import_einkauf_rechnung(file, lieferant=lieferant)
+            saved += 1 if result.get("beleg") else 0
+            imported += int(result.get("created") or 0)
+            flash(result["message"], "success" if result.get("ok") else "warning")
+        except ValueError as exc:
+            errors.append(str(exc))
+
+    for error in errors:
+        flash(error, "warning")
+    if saved and not imported:
+        flash("Die Rechnung wurde nur fuer die Produktanlage gespeichert. Bitte Artikel manuell ergaenzen, falls nichts erkannt wurde.", "info")
+    elif imported:
+        flash(f"{imported} Produktposition(en) warten auf Artikel anlegen.", "success")
+    return redirect(target_url)
+
+
+@app.route("/admin/einkauf/<int:item_id>/artikel-anlegen", methods=["POST"])
+@admin_required
+def admin_einkauf_artikel_anlegen(item_id):
+    item = get_einkauf_item(item_id)
+    if not item:
+        abort(404)
+    if not update_einkauf_item(item_id, sync_artikel=False, **einkauf_form_payload(request.form)):
+        abort(404)
+    artikel_id = sync_einkauf_item_to_artikel(item_id, increment_count=1)
+    if not artikel_id:
+        flash("Artikel konnte nicht angelegt werden. Bitte Produktname oder Artikelnummer pruefen.", "warning")
+        return redirect(url_for("admin_einkauf") + "#produktanlage")
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE einkaufsliste SET status='bestellt', angebotsstatus='bestellt', bestellt_am=? WHERE id=?",
+            (now_str(), int(item_id)),
+        )
+        db.commit()
+    finally:
+        db.close()
+    schedule_change_backup("einkauf-artikel-anlegen")
+    flash("Artikel wurde im Artikelstamm angelegt.", "success")
+    return redirect(url_for("admin_einkauf") + "#angelegte-teile")
+
+
+@app.route("/admin/einkauf/<int:item_id>/bearbeiten", methods=["POST"])
+@admin_required
+def admin_einkauf_bearbeiten(item_id):
+    if not update_einkauf_item(item_id, **einkauf_form_payload(request.form)):
+        abort(404)
+    flash("Einkaufsposition aktualisiert.", "success")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/admin/einkauf"):
+        return redirect(next_url)
+    return redirect(url_for("admin_einkauf"))
+
+
+@app.route("/admin/einkauf/<int:item_id>/analysieren", methods=["POST"])
+@admin_required
+def admin_einkauf_analysieren(item_id):
+    result = analyse_einkauf_item(item_id, force=True)
+    flash(result["message"], "success" if result["ok"] else "warning")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/admin/einkauf"):
+        return redirect(next_url)
+    return redirect(url_for("admin_einkauf") + f"#einkauf-position-{item_id}")
+
+
+@app.route("/admin/einkauf/alle-analysieren", methods=["POST"])
+@admin_required
+def admin_einkauf_alle_analysieren():
+    ok_count, total_count = analyse_offene_einkauf_items(force=True)
+    if total_count:
+        flash(f"{ok_count} von {total_count} Einkaufsbildern analysiert.", "success" if ok_count else "warning")
+    else:
+        flash("Keine offenen Einkaufsbilder für die Analyse gefunden.", "info")
+    return redirect(url_for("admin_einkauf") + "#offene-einkaufspositionen")
+
+
+@app.route("/admin/einkauf/<int:item_id>/bestellt", methods=["POST"])
+@admin_required
+def admin_einkauf_bestellt(item_id):
+    if not get_einkauf_item(item_id):
+        abort(404)
+    mark_einkauf_item_bestellt(item_id)
+    flash("Einkaufsposition als bestellt markiert.", "success")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/admin/einkauf"):
+        return redirect(next_url)
+    return redirect(url_for("admin_einkauf"))
+
+
+@app.route("/admin/einkauf/alle-bestellt", methods=["POST"])
+@admin_required
+def admin_einkauf_alle_bestellt():
+    mark_all_einkauf_items_bestellt()
+    flash("Alle offenen Einkaufspositionen wurden als bestellt markiert.", "success")
+    return redirect(url_for("admin_einkauf"))
+
+
+@app.route("/admin/einkauf/<int:item_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_einkauf_loeschen(item_id):
+    if not delete_einkauf_item(item_id):
+        abort(404)
+    flash("Einkaufsposition gelöscht.", "info")
+    return redirect(url_for("admin_einkauf"))
+
+
+@app.route("/admin/einkauf/datei/<int:item_id>")
+@admin_required
+def admin_einkauf_datei(item_id):
+    item = get_einkauf_item(item_id)
+    if not item or not clean_text(item.get("stored_name")):
+        abort(404)
+    path = UPLOAD_DIR / pathlib.Path(item["stored_name"]).name
+    if not path.exists() or not path.is_file():
+        abort(404)
+    mimetype = clean_text(item.get("mime_type")) or mimetypes.guess_type(item["original_name"])[0]
+    return send_file(
+        path,
+        mimetype=mimetype,
+        as_attachment=False,
+        download_name=clean_text(item.get("original_name")) or path.name,
+    )
+
+
+@app.route("/admin/einkauf/beleg/datei/<int:beleg_id>")
+@admin_required
+def admin_einkauf_beleg_datei(beleg_id):
+    beleg = get_einkauf_beleg(beleg_id)
+    if not beleg or not clean_text(beleg.get("stored_name")):
+        abort(404)
+    path = UPLOAD_DIR / pathlib.Path(beleg["stored_name"]).name
+    if not path.exists() or not path.is_file():
+        abort(404)
+    mimetype = clean_text(beleg.get("mime_type")) or mimetypes.guess_type(beleg["original_name"])[0]
+    return send_file(
+        path,
+        mimetype=mimetype,
+        as_attachment=False,
+        download_name=clean_text(beleg.get("original_name")) or path.name,
+    )
+
+
+@app.route("/admin/emails")
+@admin_required
+def admin_emails():
+    return render_template(
+        "emails_admin.html",
+        emails=list_werkstatt_emails("aktiv", limit=200),
+        api_token_configured=bool(get_werkstatt_email_api_token()),
+        imap_status=werkstatt_imap_status(),
+    )
+
+
+@app.route("/admin/emails/sync", methods=["POST"])
+@admin_required
+def admin_emails_sync():
+    try:
+        summary = sync_werkstatt_imap()
+    except ValueError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("admin_emails"))
+    except Exception as exc:
+        flash(f"Postfach konnte nicht abgerufen werden: {exc}", "danger")
+        return redirect(url_for("admin_emails"))
+    created = int(summary.get("created") or 0)
+    skipped = int(summary.get("skipped") or 0)
+    checked = int(summary.get("checked") or 0)
+    errors = summary.get("errors") or []
+    if created:
+        flash(f"{created} neue E-Mail(s) aus dem Postfach übernommen.", "success")
+    else:
+        flash(f"Postfach geprüft: {checked} Mail(s), keine neuen Einträge. {skipped} Dublette(n) übersprungen.", "info")
+    if errors:
+        flash("Einzelne Mails konnten nicht gelesen werden: " + "; ".join(errors[:3]), "warning")
+    return redirect(url_for("admin_emails"))
+
+
+@app.route("/admin/emails/neu", methods=["POST"])
+@admin_required
+def admin_email_neu():
+    try:
+        create_werkstatt_email(
+            absender_name=request.form.get("absender_name"),
+            absender_email=request.form.get("absender_email"),
+            empfaenger=request.form.get("empfaenger"),
+            betreff=request.form.get("betreff"),
+            nachricht=request.form.get("nachricht"),
+            empfangen_am=request.form.get("empfangen_am"),
+            quelle="manuell",
+        )
+        flash("E-Mail/Notiz gespeichert.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("admin_emails"))
+
+
+@app.route("/admin/emails/<int:email_id>/erledigt", methods=["POST"])
+@admin_required
+def admin_email_erledigt(email_id):
+    if not get_werkstatt_email(email_id):
+        abort(404)
+    update_werkstatt_email_status(email_id, "erledigt")
+    flash("E-Mail als erledigt markiert.", "success")
+    return redirect(url_for("admin_emails"))
+
+
+@app.route("/admin/emails/<int:email_id>/einkauf-analysieren", methods=["POST"])
+@admin_required
+def admin_email_einkauf_analysieren(email_id):
+    result = analyse_lieferantenangebot_email(email_id, force=True)
+    if result["reason"] == "existing":
+        flash("Dieses Lieferantenangebot ist bereits im Einkauf sichtbar.", "info")
+        return redirect(url_for("admin_einkauf") + f"#{einkauf_offer_anchor(f'email-{email_id}')}")
+    if result["ok"] and result["items"]:
+        flash(f"{len(result['items'])} Einkaufsposition(en) aus dem Lieferantenangebot bereitgestellt.", "success")
+        first_item = result["items"][0]
+        anchor_key = f"email-{first_item.get('quelle_email_id')}" if first_item.get("quelle_email_id") else "offen"
+        return redirect(url_for("admin_einkauf") + f"#{einkauf_offer_anchor(anchor_key)}")
+    flash("Ich konnte aus dieser E-Mail noch keine Preispositionen erkennen. Bitte Text/Preise prüfen.", "warning")
+    return redirect(url_for("admin_emails"))
+
+
+@app.route("/admin/emails/<int:email_id>/archivieren", methods=["POST"])
+@admin_required
+def admin_email_archivieren(email_id):
+    if not get_werkstatt_email(email_id):
+        abort(404)
+    update_werkstatt_email_status(email_id, "archiviert")
+    flash("E-Mail archiviert.", "info")
+    return redirect(url_for("admin_emails"))
+
+
+@app.route("/api/werkstatt/emails", methods=["GET", "POST"])
+def api_werkstatt_emails():
+    is_admin = bool(session.get("admin"))
+    is_token = werkstatt_api_token_valid()
+    if not is_admin and not is_token:
+        return jsonify({"error": "Nicht autorisiert."}), 401
+    if request.method == "GET":
+        emails = list_werkstatt_emails("aktiv", limit=80)
+        return jsonify({"emails": emails, "count": len(emails)})
+    try:
+        email_id = create_werkstatt_email(**email_payload_from_request())
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "id": email_id}), 201
 
 
 def extract_import_package_files(archive, names, tmp_path):
@@ -8493,7 +16855,7 @@ def admin_backup_download():
         flash(f"Backup fehlgeschlagen: {clean_text(str(exc))[:300]}", "danger")
         return redirect(url_for("dashboard"))
     return send_file(
-        backup_path,
+        BytesIO(backup_path.read_bytes()),
         download_name=backup_path.name,
         mimetype="application/zip",
         as_attachment=True,
@@ -8504,9 +16866,11 @@ def admin_backup_download():
 @admin_required
 def autohaus_neu():
     name = clean_text(request.form.get("name"))
+    next_url = clean_text(request.form.get("next"))
+    redirect_url = next_url if next_url.startswith("/admin") else url_for("betriebs_cockpit") + "#autohaus-zugaenge"
     if not name:
         flash("Bitte einen Autohaus-Namen eintragen.", "warning")
-        return redirect(url_for("admin_zugaenge"))
+        return redirect(redirect_url)
 
     slug = get_unique_slug(name)
     zugangscode = clean_text(request.form.get("zugangscode")) or uuid.uuid4().hex[:8].upper()
@@ -8540,7 +16904,7 @@ def autohaus_neu():
     db.commit()
     db.close()
     flash(f"Autohaus angelegt. Portal-Link: /portal/{portal_key}", "success")
-    return redirect(url_for("admin_zugaenge"))
+    return redirect(redirect_url)
 
 
 @app.route("/admin/autohaus/<int:autohaus_id>/update", methods=["POST"])
@@ -8549,6 +16913,8 @@ def autohaus_update(autohaus_id):
     autohaus = get_autohaus(autohaus_id)
     if not autohaus:
         abort(404)
+    next_url = clean_text(request.form.get("next"))
+    redirect_url = next_url if next_url.startswith("/admin") else url_for("betriebs_cockpit") + "#autohaus-zugaenge"
 
     db = get_db()
     db.execute(
@@ -8585,7 +16951,7 @@ def autohaus_update(autohaus_id):
     db.commit()
     db.close()
     flash("Autohaus aktualisiert.", "success")
-    return redirect(url_for("admin_zugaenge"))
+    return redirect(redirect_url)
 
 
 @app.route("/admin/autohaus/<int:autohaus_id>/lackierauftrag-vorlage.pdf")
@@ -8661,11 +17027,24 @@ def auftrag_detail(auftrag_id):
     if not auftrag:
         abort(404)
 
+    back_context = clean_text(request.values.get("back"))
+    detail_back_url = url_for("kalender") if back_context == "kalender" else url_for("dashboard")
+    detail_self_url = (
+        url_for("auftrag_detail", auftrag_id=auftrag_id, back=back_context)
+        if back_context == "kalender"
+        else url_for("auftrag_detail", auftrag_id=auftrag_id)
+    )
+
     autohaeuser = list_autohaeuser()
     if request.method == "POST":
         form = request.form
         aktion = form.get("aktion", "speichern")
         analyse = clean_text(form.get("analyse_text")) or analyse_text(form.get("beschreibung"))
+        bonus_netto_betrag = positive_money_amount(form.get("bonus_netto_betrag")) or 0.0
+        bisheriger_bonus = positive_money_amount(auftrag.get("bonus_netto_betrag")) or 0.0
+        bonus_preis_aktualisiert_am = clean_text(auftrag.get("bonus_preis_aktualisiert_am"))
+        if round(bonus_netto_betrag, 2) != round(bisheriger_bonus, 2):
+            bonus_preis_aktualisiert_am = now_str() if bonus_netto_betrag else ""
         db = get_db()
         db.execute(
             """
@@ -8684,6 +17063,8 @@ def auftrag_detail(auftrag_id):
                 fertig_datum=?,
                 abholtermin=?,
                 transport_art=?,
+                bonus_netto_betrag=?,
+                bonus_preis_aktualisiert_am=?,
                 kontakt_telefon=?,
                 notiz_intern=?,
                 geaendert_am=?
@@ -8704,6 +17085,8 @@ def auftrag_detail(auftrag_id):
                 format_date(form.get("fertig_datum")),
                 format_date(form.get("abholtermin")),
                 clean_text(form.get("transport_art")) or "standard",
+                bonus_netto_betrag,
+                bonus_preis_aktualisiert_am,
                 clean_text(form.get("kontakt_telefon")),
                 clean_text(form.get("notiz_intern")),
                 now_str(),
@@ -8725,13 +17108,13 @@ def auftrag_detail(auftrag_id):
                 flash(f"{count} vorhandene Unterlage(n) neu analysiert.", "success")
             else:
                 flash("Keine auswertbaren vorhandenen Unterlagen gefunden.", "warning")
-            return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
+            return redirect(detail_self_url)
         if aktion == "upload_analyze" and not any(file and file.filename for file in dateien):
             flash("Bitte zuerst eine Datei auswählen.", "warning")
-            return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
+            return redirect(detail_self_url)
         if aktion == "upload_analyze" and not erlaubte_dateien:
             flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.", "warning")
-            return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
+            return redirect(detail_self_url)
         upload_result = save_uploads(auftrag_id, erlaubte_dateien, "intern", "standard")
         fertigbilder_result = save_uploads(
             auftrag_id,
@@ -8764,11 +17147,16 @@ def auftrag_detail(auftrag_id):
                 "Neue Fertigbilder",
                 f"Die Werkstatt hat {fertigbilder_result[0]} Fertigbild(er) hochgeladen.",
             )
-        return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
+        return redirect(detail_self_url)
 
     dateien = list_dateien(auftrag_id)
     standard_dateien = dateien_mit_kategorie(dateien, "standard")
-    rechnungsdateien = dateien_mit_kategorie(dateien, "rechnung")
+    bonusrechnungen = dateien_mit_kategorie(dateien, "bonusrechnung")
+    rechnungsdateien = [
+        datei
+        for datei in dateien
+        if clean_text(datei.get("kategorie")) in {"rechnung", "bonusrechnung"}
+    ]
     fertigbilder = dateien_mit_kategorie(dateien, "fertigbild")
     chat_nachrichten = list_chat_nachrichten(auftrag_id)
     mark_chat_gelesen(auftrag_id, "admin")
@@ -8780,6 +17168,7 @@ def auftrag_detail(auftrag_id):
         statusliste=STATUSLISTE,
         log=get_status_log(auftrag_id),
         dateien=standard_dateien,
+        bonusrechnungen=bonusrechnungen,
         rechnungsdateien=rechnungsdateien,
         fertigbilder=fertigbilder,
         dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
@@ -8787,7 +17176,46 @@ def auftrag_detail(auftrag_id):
         verzoegerungen=list_verzoegerungen(auftrag_id),
         benachrichtigungen=list_benachrichtigungen(auftrag_id),
         chat_nachrichten=chat_nachrichten,
+        detail_back_url=detail_back_url,
+        detail_self_url=detail_self_url,
+        back_context=back_context,
     )
+
+
+@app.route("/admin/auftrag/<int:auftrag_id>/bonusrechnung", methods=["POST"])
+@admin_required
+def admin_bonusrechnung_upload(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+    next_url = clean_text(request.form.get("next"))
+    redirect_url = next_url if next_url.startswith("/admin") else url_for("auftrag_detail", auftrag_id=auftrag_id)
+    dateien = get_allowed_uploads(request.files.getlist("bonusrechnung"))
+    if not dateien:
+        flash("Bitte eine Rechnung als PDF, Bild oder Textdatei auswählen.", "warning")
+        return redirect(redirect_url)
+
+    result = save_bonusrechnung_upload(auftrag_id, dateien)
+    if result.get("amount"):
+        amount_label = format_bonus_money(result["amount"])
+        add_benachrichtigung(
+            auftrag_id,
+            "Bonusstand aktualisiert",
+            f"Der Rechnungsbetrag wurde auf {amount_label} gesetzt. Der Monatsbonus wird automatisch neu berechnet.",
+            quelle="werkstatt",
+        )
+        flash(
+            f"Rechnung gespeichert. {amount_label} wurde als Bonus-/Rechnungsbetrag übernommen.",
+            "success",
+        )
+    elif result.get("saved"):
+        message = "Rechnung gespeichert, aber der Gesamtbetrag wurde nicht sicher erkannt. Bitte Betrag manuell prüfen."
+        if result.get("error"):
+            message += f" Hinweis: {clean_text(result['error'])[:220]}"
+        flash(message, "warning")
+    else:
+        flash(result.get("error") or "Rechnung konnte nicht gespeichert werden.", "danger")
+    return redirect(redirect_url)
 
 
 @app.route("/admin/auftrag/<int:auftrag_id>/rechnung/upload", methods=["POST"])
@@ -8817,6 +17245,7 @@ def admin_rechnung_upload(auftrag_id):
             auftrag_id,
             "Rechnung geprüft",
             "Die Werkstatt hat die Rechnung hochgeladen und dem Auftrag zugeordnet.",
+            quelle="werkstatt",
         )
         flash(f"Rechnung geprüft und gespeichert{suffix}. Status und Rechnungsbetrag wurden aktualisiert.", "success")
     elif result.get("saved"):
@@ -8839,13 +17268,11 @@ def admin_chat_nachricht(auftrag_id):
     if not nachricht:
         flash("Bitte eine Nachricht eingeben.", "warning")
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
-    chat_id = add_chat_nachricht(auftrag_id, "werkstatt", nachricht)
+    add_chat_nachricht(auftrag_id, "werkstatt", nachricht)
     add_benachrichtigung(
         auftrag_id,
-        "Neue Nachricht der Werkstatt",
-        f"Die Werkstatt hat geschrieben: {nachricht}",
-        quelle_typ="chat",
-        quelle_id=chat_id,
+        "Neue Chat-Nachricht",
+        "Die Werkstatt hat im Auftrag geantwortet.",
     )
     flash("Nachricht an das Autohaus gesendet.", "success")
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
@@ -8928,11 +17355,63 @@ def status_update(auftrag_id, neuer_status):
         "Status geändert",
         f"Die Werkstatt hat den Status auf „{STATUSLISTE[neuer_status]['label']}“ gesetzt.",
     )
-    flash("Status aktualisiert.", "success")
+    if neuer_status >= 5 and not auftrag_bonus_preis(auftrag)[0]:
+        flash("Status aktualisiert. Bitte noch den Netto-Preis für Bonus und Rechnung ergänzen.", "warning")
+    else:
+        flash("Status aktualisiert.", "success")
     ziel = clean_text(request.form.get("next"))
     if ziel.startswith("/"):
         return redirect(ziel)
     return redirect(request.referrer or url_for("auftrag_detail", auftrag_id=auftrag_id))
+
+
+@app.route("/admin/auftrag/<int:auftrag_id>/reklamation-neu-planen", methods=["POST"])
+@admin_required
+def reklamation_neu_planen(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+    if not auftrag_has_offene_reklamation(auftrag_id):
+        flash("Für diesen Auftrag ist keine offene Reklamation vorhanden.", "info")
+        return redirect(request.referrer or url_for("dashboard") + "#auftraege")
+
+    start_datum = format_date(
+        request.form.get(f"start_datum_{auftrag_id}") or request.form.get("start_datum")
+    )
+    fertig_datum = format_date(
+        request.form.get(f"fertig_datum_{auftrag_id}") or request.form.get("fertig_datum")
+    )
+    if not start_datum or not fertig_datum:
+        flash("Bitte Start- und Fertig-Datum für die Reklamation eintragen.", "warning")
+        return redirect(request.referrer or url_for("dashboard") + "#auftraege")
+
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET status=2,
+            start_datum=?,
+            fertig_datum=?,
+            abholtermin='',
+            archiviert=0,
+            geaendert_am=?
+        WHERE id=?
+        """,
+        (start_datum, fertig_datum, now_str(), auftrag_id),
+    )
+    db.execute(
+        "INSERT INTO status_log (auftrag_id, status, zeitstempel) VALUES (?, 2, ?)",
+        (auftrag_id, now_str()),
+    )
+    db.commit()
+    db.close()
+    add_benachrichtigung(
+        auftrag_id,
+        "Reklamation neu eingeplant",
+        f"Die Reklamation wurde neu geplant: Start {start_datum}, Fertig {fertig_datum}.",
+    )
+    flash("Reklamation neu eingeplant. Der Auftrag startet wieder im Prozess.", "success")
+    return redirect(request.referrer or url_for("dashboard") + "#auftraege")
 
 
 @app.route("/admin/auftrag/<int:auftrag_id>/rechnung", methods=["GET", "POST"])
@@ -8951,6 +17430,11 @@ def rechnung_schreiben(auftrag_id):
             geschrieben_am = clean_text(auftrag.get("rechnung_geschrieben_am")) or now_str()
         else:
             geschrieben_am = ""
+        bonus_netto_betrag = positive_money_amount(request.form.get("bonus_netto_betrag")) or 0.0
+        bisheriger_bonus = positive_money_amount(auftrag.get("bonus_netto_betrag")) or 0.0
+        bonus_preis_aktualisiert_am = clean_text(auftrag.get("bonus_preis_aktualisiert_am"))
+        if round(bonus_netto_betrag, 2) != round(bisheriger_bonus, 2):
+            bonus_preis_aktualisiert_am = now_str() if bonus_netto_betrag else ""
 
         db = get_db()
         db.execute(
@@ -8960,6 +17444,8 @@ def rechnung_schreiben(auftrag_id):
                 rechnung_status=?,
                 rechnung_nummer=?,
                 rechnung_geschrieben_am=?,
+                bonus_netto_betrag=?,
+                bonus_preis_aktualisiert_am=?,
                 geaendert_am=?
             WHERE id=?
             """,
@@ -8968,6 +17454,8 @@ def rechnung_schreiben(auftrag_id):
                 rechnung_status,
                 rechnung_nummer,
                 geschrieben_am,
+                bonus_netto_betrag,
+                bonus_preis_aktualisiert_am,
                 now_str(),
                 auftrag_id,
             ),
@@ -9000,11 +17488,11 @@ def lexware_rechnung_erstellen(auftrag_id):
         flash("Für diesen Auftrag gibt es bereits einen Lexware-Rechnungsentwurf.", "info")
         return redirect(auftrag.get("lexware_invoice_url") or url_for("rechnung_schreiben", auftrag_id=auftrag_id))
 
-    rechnung = build_lexware_rechnung_context(auftrag)
     net_amount = parse_money_amount(request.form.get("netto_betrag"))
     if not net_amount or net_amount <= 0:
         flash("Bitte einen Netto-Rechnungsbetrag eintragen.", "warning")
         return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
+    rechnung = build_lexware_rechnung_context(auftrag, invoice_net_amount=net_amount)
 
     try:
         result = create_lexware_invoice_draft(auftrag, rechnung, net_amount)
@@ -9021,6 +17509,8 @@ def lexware_rechnung_erstellen(auftrag_id):
             lexware_invoice_id=?,
             lexware_invoice_url=?,
             rechnung_status='lexware_entwurf',
+            bonus_netto_betrag=?,
+            bonus_preis_aktualisiert_am=?,
             geaendert_am=?
         WHERE id=?
         """,
@@ -9028,6 +17518,8 @@ def lexware_rechnung_erstellen(auftrag_id):
             result["contact_id"],
             result["invoice_id"],
             result["invoice_url"],
+            net_amount,
+            now_str(),
             now_str(),
             auftrag_id,
         ),
@@ -9160,31 +17652,15 @@ def reklamation_status(reklamation_id):
     return redirect(request.referrer or url_for("auftrag_detail", auftrag_id=reklamation["auftrag_id"]))
 
 
-@app.route("/admin/reklamation/<int:reklamation_id>/loeschen", methods=["POST"])
-@admin_required
-def admin_reklamation_loeschen(reklamation_id):
-    ok, auftrag = delete_reklamation_eintrag(reklamation_id)
-    if ok:
-        flash("Reklamation und Anhänge gelöscht.", "info")
-    else:
-        flash("Reklamation konnte nicht gelöscht werden.", "warning")
-    if auftrag:
-        return redirect(url_for("auftrag_detail", auftrag_id=auftrag["id"]))
-    return redirect(url_for("dashboard"))
-
-
 @app.route("/admin/datei/<int:datei_id>")
 @admin_required
 def admin_datei(datei_id):
     datei = get_datei(datei_id)
     if not datei:
         abort(404)
-    path = resolve_datei_path(datei)
-    if not path:
-        return missing_datei_response(
-            datei,
-            replace_url=url_for("admin_datei_ersetzen", datei_id=datei_id),
-        )
+    path = UPLOAD_DIR / datei["stored_name"]
+    if not path.exists():
+        abort(404)
     return send_file(
         path,
         download_name=datei["original_name"],
@@ -9199,54 +17675,15 @@ def admin_datei_download(datei_id):
     datei = get_datei(datei_id)
     if not datei:
         abort(404)
-    path = resolve_datei_path(datei)
-    if not path:
-        return missing_datei_response(
-            datei,
-            replace_url=url_for("admin_datei_ersetzen", datei_id=datei_id),
-        )
+    path = UPLOAD_DIR / datei["stored_name"]
+    if not path.exists():
+        abort(404)
     return send_file(
         path,
         download_name=datei["original_name"],
         mimetype=datei["mime_type"],
         as_attachment=True,
     )
-
-
-@app.route("/admin/datei/<int:datei_id>/ersetzen", methods=["GET", "POST"])
-@admin_required
-def admin_datei_ersetzen(datei_id):
-    datei = get_datei(datei_id)
-    if not datei:
-        abort(404)
-    if request.method == "GET":
-        return datei_ersetzen_form_response(datei)
-    try:
-        replace_datei_content(datei, request.files.get("datei"))
-    except ValueError as exc:
-        flash(str(exc), "warning")
-        return redirect(url_for("admin_datei", datei_id=datei_id))
-    except Exception as exc:
-        flash(f"Datei konnte nicht ersetzt werden: {clean_text(str(exc))[:300]}", "danger")
-        return redirect(url_for("admin_datei", datei_id=datei_id))
-    flash("Datei ersetzt und wieder gespeichert.", "success")
-    return redirect(url_for("admin_datei", datei_id=datei_id))
-
-
-@app.route("/admin/datei/<int:datei_id>/loeschen", methods=["POST"])
-@admin_required
-def admin_datei_loeschen(datei_id):
-    ok, auftrag = delete_datei_eintrag(datei_id, "admin-datei")
-    if ok:
-        flash("Datei gelöscht. Falls dadurch erkannte Daten falsch waren, bitte den Auftrag kurz prüfen.", "info")
-    else:
-        flash("Datei konnte nicht gelöscht werden.", "warning")
-    next_url = clean_text(request.form.get("next"))
-    if next_url.startswith("/admin/"):
-        return redirect(next_url)
-    if auftrag:
-        return redirect(url_for("auftrag_detail", auftrag_id=auftrag["id"]))
-    return redirect(url_for("dashboard"))
 
 
 @app.route("/admin/loeschen/<int:auftrag_id>", methods=["POST"])
@@ -9290,10 +17727,256 @@ def admin_sammelaktion():
     return redirect(request.referrer or url_for("dashboard"))
 
 
+@app.route("/admin/auftraege/zurueckgegeben-archivieren", methods=["POST"])
+@admin_required
+def admin_zurueckgegebene_archivieren():
+    anzahl = archive_zurueckgegebene_ohne_offene_reklamation()
+    if anzahl:
+        flash(f"{anzahl} zurückgegebene Auftrag/Aufträge ohne offene Reklamation archiviert.", "info")
+    else:
+        flash("Keine archivierbaren Rückgaben gefunden. Offene Reklamationen bleiben sichtbar.", "info")
+    return redirect(request.referrer or url_for("dashboard") + "#auftraege")
+
+
+@app.route("/admin/mitarbeiter")
+@admin_required
+def admin_mitarbeiter():
+    mitarbeiter_liste = list_mitarbeiter(include_inactive=True)
+    return render_template(
+        "mitarbeiter.html",
+        mitarbeiter_liste=mitarbeiter_liste,
+        summary=mitarbeiter_urlaub_summary(mitarbeiter_liste),
+    )
+
+
+@app.route("/admin/mitarbeiter/neu", methods=["POST"])
+@admin_required
+def admin_mitarbeiter_neu():
+    try:
+        mitarbeiter_id = create_mitarbeiter(
+            name=request.form.get("name"),
+            rolle=request.form.get("rolle"),
+            telefon=request.form.get("telefon"),
+            email=request.form.get("email"),
+            adresse=request.form.get("adresse"),
+            geburtsdatum=request.form.get("geburtsdatum"),
+            geburtsort=request.form.get("geburtsort"),
+            staatsangehoerigkeit=request.form.get("staatsangehoerigkeit"),
+            eintritt_datum=request.form.get("eintritt_datum"),
+            austritt_datum=request.form.get("austritt_datum"),
+            beschaeftigung=request.form.get("beschaeftigung"),
+            qualifikation=request.form.get("qualifikation"),
+            arbeitszeit=request.form.get("arbeitszeit"),
+            urlaubsanspruch=request.form.get("urlaubsanspruch"),
+            ordner_pfad=request.form.get("ordner_pfad"),
+            dokumente_notiz=request.form.get("dokumente_notiz"),
+            notiz=request.form.get("notiz"),
+        )
+        flash("Mitarbeiter gespeichert.", "success")
+        return redirect(url_for("admin_mitarbeiter") + f"#mitarbeiter-{mitarbeiter_id}")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("admin_mitarbeiter"))
+
+
+@app.route("/admin/mitarbeiter/<int:mitarbeiter_id>/bearbeiten", methods=["POST"])
+@admin_required
+def admin_mitarbeiter_bearbeiten(mitarbeiter_id):
+    if not get_mitarbeiter(mitarbeiter_id):
+        abort(404)
+    try:
+        update_mitarbeiter(
+            mitarbeiter_id,
+            name=request.form.get("name"),
+            rolle=request.form.get("rolle"),
+            telefon=request.form.get("telefon"),
+            email=request.form.get("email"),
+            adresse=request.form.get("adresse"),
+            geburtsdatum=request.form.get("geburtsdatum"),
+            geburtsort=request.form.get("geburtsort"),
+            staatsangehoerigkeit=request.form.get("staatsangehoerigkeit"),
+            eintritt_datum=request.form.get("eintritt_datum"),
+            austritt_datum=request.form.get("austritt_datum"),
+            beschaeftigung=request.form.get("beschaeftigung"),
+            qualifikation=request.form.get("qualifikation"),
+            arbeitszeit=request.form.get("arbeitszeit"),
+            urlaubsanspruch=request.form.get("urlaubsanspruch"),
+            ordner_pfad=request.form.get("ordner_pfad"),
+            dokumente_notiz=request.form.get("dokumente_notiz"),
+            notiz=request.form.get("notiz"),
+            aktiv=request.form.get("aktiv") == "1",
+        )
+        flash("Mitarbeiter aktualisiert.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("admin_mitarbeiter") + f"#mitarbeiter-{mitarbeiter_id}")
+
+
+@app.route("/admin/mitarbeiter/<int:mitarbeiter_id>/urlaub", methods=["POST"])
+@admin_required
+def admin_mitarbeiter_urlaub_neu(mitarbeiter_id):
+    if not get_mitarbeiter(mitarbeiter_id):
+        abort(404)
+    try:
+        create_mitarbeiter_urlaub(
+            mitarbeiter_id,
+            start_datum=request.form.get("start_datum"),
+            end_datum=request.form.get("end_datum"),
+            notiz=request.form.get("notiz"),
+        )
+        flash("Urlaub gespeichert und im Kalender übernommen.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("admin_mitarbeiter") + f"#mitarbeiter-{mitarbeiter_id}")
+
+
+@app.route("/admin/mitarbeiter/urlaub/<int:urlaub_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_mitarbeiter_urlaub_loeschen(urlaub_id):
+    delete_mitarbeiter_urlaub(urlaub_id)
+    flash("Urlaubseintrag gelöscht.", "info")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/admin/mitarbeiter"):
+        return redirect(next_url)
+    return redirect(url_for("admin_mitarbeiter"))
+
+
+@app.route("/admin/news")
+@admin_required
+def admin_news():
+    return render_template(
+        "werkstatt_news.html",
+        news_items=list_werkstatt_news(limit=200),
+        kalender_kategorien=KALENDER_KATEGORIEN,
+    )
+
+
+@app.route("/admin/news/neu", methods=["POST"])
+@admin_required
+def admin_news_neu():
+    try:
+        create_werkstatt_news(
+            titel=request.form.get("titel"),
+            nachricht=request.form.get("nachricht"),
+            start_datum=request.form.get("start_datum"),
+            end_datum=request.form.get("end_datum"),
+            kategorie=request.form.get("kategorie") or "betrieb",
+            pinned=bool(request.form.get("pinned")),
+        )
+        flash("Werkstatt-News gespeichert.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("admin_news"))
+
+
+@app.route("/admin/news/<int:news_id>/archivieren", methods=["POST"])
+@admin_required
+def admin_news_archivieren(news_id):
+    if not get_werkstatt_news(news_id):
+        abort(404)
+    archive_werkstatt_news(news_id)
+    flash("Werkstatt-News archiviert.", "info")
+    return redirect(url_for("admin_news"))
+
+
+@app.route("/admin/kalender/notiz", methods=["POST"])
+@admin_required
+def kalender_notiz_neu():
+    schnelleintrag = clean_text(request.form.get("quick_text"))
+    if clean_text(request.form.get("aktion")) == "suchen":
+        if schnelleintrag:
+            return redirect(url_for("kalender", suche=schnelleintrag))
+        flash("Bitte geben Sie einen Suchbegriff ein.", "warning")
+        return redirect(url_for("betriebs_cockpit"))
+    try:
+        if schnelleintrag:
+            daten = parse_kalender_schnelleintrag(schnelleintrag)
+        else:
+            daten = {
+                "datum": format_date(request.form.get("datum")),
+                "titel": clean_text(request.form.get("titel")),
+                "notiz": clean_text(request.form.get("notiz")),
+                "kategorie": clean_text(request.form.get("kategorie")) or "termin",
+                "wiederholung": clean_text(request.form.get("wiederholung")) or "einmalig",
+            }
+        create_kalender_notiz(**daten)
+        repeat_text = " jährlich" if daten.get("wiederholung") == "jaehrlich" else ""
+        flash(f"Kalendereintrag für {daten['datum']}{repeat_text} gespeichert.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/"):
+        return redirect(next_url)
+    return redirect(url_for("kalender"))
+
+
+@app.route("/admin/kalender/notiz/<int:notiz_id>/loeschen", methods=["POST"])
+@admin_required
+def kalender_notiz_loeschen(notiz_id):
+    delete_kalender_notiz(notiz_id)
+    flash("Kalendereintrag gelöscht.", "info")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/"):
+        return redirect(next_url)
+    return redirect(url_for("kalender"))
+
+
+@app.route("/admin/erinnerungen/neu", methods=["POST"])
+@admin_required
+def admin_erinnerung_neu():
+    next_url = clean_text(request.form.get("next"))
+    redirect_url = next_url if next_url.startswith("/admin") else url_for("betriebs_cockpit")
+    try:
+        create_erinnerung(request.form.get("text"))
+        flash("Erinnerung gespeichert.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(redirect_url)
+
+
+@app.route("/admin/erinnerungen/<int:erinnerung_id>/erledigt", methods=["POST"])
+@admin_required
+def admin_erinnerung_erledigt(erinnerung_id):
+    if mark_erinnerung_erledigt(erinnerung_id):
+        flash("Erinnerung erledigt.", "success")
+    else:
+        flash("Erinnerung nicht gefunden.", "warning")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/admin"):
+        return redirect(next_url)
+    return redirect(url_for("betriebs_cockpit"))
+
+
 @app.route("/admin/kalender")
 @admin_required
 def kalender():
-    return render_template("kalender.html", kalender_items=kalender_daten(list_auftraege()))
+    auftraege = list_auftraege(include_archived=True, include_angebote=True)
+    zeige_vergangenheit = request.args.get("ansicht") == "vergangenheit"
+    kalender_suche = clean_text(request.args.get("suche"))
+    alle_kalender_items = kalender_daten(auftraege)
+    if kalender_suche:
+        kalender_items, gefundene_auftrag_ids = filter_kalender_suche(
+            alle_kalender_items,
+            kalender_suche,
+        )
+        event_count = sum(len(item["events"]) for item in kalender_items)
+        calendar_point_count = sum(len(item["notizen"]) + len(item["system"]) for item in kalender_items)
+        if event_count >= 1 and calendar_point_count == 0 and len(gefundene_auftrag_ids) == 1:
+            return redirect(url_for("auftrag_detail", auftrag_id=next(iter(gefundene_auftrag_ids)), back="kalender"))
+    else:
+        kalender_items = filter_kalender_items(
+            alle_kalender_items,
+            vergangenheit=zeige_vergangenheit,
+        )
+    return render_template(
+        "kalender.html",
+        kalender_items=kalender_items,
+        kalender_woche=kalender_wochenuebersicht(alle_kalender_items),
+        zeige_vergangenheit=zeige_vergangenheit,
+        kalender_suche=kalender_suche,
+        kalender_kategorien=KALENDER_KATEGORIEN,
+    )
 
 
 @app.route("/portal")
@@ -9309,9 +17992,17 @@ def partner_login():
         portal_key = clean_text(request.form.get("portal_key"))
         zugangscode = clean_text(request.form.get("zugangscode"))
         autohaus = get_autohaus_by_portal_key(portal_key)
-        if autohaus and zugangscode == autohaus["zugangscode"]:
+        limit_identifier = portal_key or "zentral"
+        limited, wait_seconds = login_rate_limit_status("partner", limit_identifier)
+        if limited:
+            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen.", "danger")
+            return render_template("partner_index.html", autohaeuser=autohaeuser), 429
+        if autohaus and partner_access_code_matches(zugangscode, autohaus):
+            clear_login_attempts("partner", limit_identifier)
+            session.clear()
             session["partner_autohaus_id"] = autohaus["id"]
             return redirect(url_for("partner_dashboard_key", portal_key=autohaus["portal_key"]))
+        record_failed_login("partner", limit_identifier)
         flash("Autohaus oder Passwort/Zugangscode stimmt nicht.", "danger")
     return render_template("partner_index.html", autohaeuser=autohaeuser)
 
@@ -9323,9 +18014,16 @@ def partner_login_key(portal_key):
         abort(404)
 
     if request.method == "POST":
-        if clean_text(request.form.get("zugangscode")) == autohaus["zugangscode"]:
+        limited, wait_seconds = login_rate_limit_status("partner", portal_key)
+        if limited:
+            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen.", "danger")
+            return render_template("partner_login.html", autohaus=autohaus), 429
+        if partner_access_code_matches(request.form.get("zugangscode"), autohaus):
+            clear_login_attempts("partner", portal_key)
+            session.clear()
             session["partner_autohaus_id"] = autohaus["id"]
             return redirect(url_for("partner_dashboard_key", portal_key=portal_key))
+        record_failed_login("partner", portal_key)
         flash("Falscher Zugangscode.", "danger")
 
     if session.get("partner_autohaus_id") == autohaus["id"]:
@@ -9356,43 +18054,47 @@ def partner_dashboard(slug):
     alle_auftraege = list_auftraege(autohaus["id"], include_archived=True)
     auftraege = [a for a in alle_auftraege if not a["archiviert"]]
     archivierte_auftraege = [a for a in alle_auftraege if a["archiviert"]]
+    postfach_items = list_partner_postfach_items(autohaus["id"], autohaus["slug"], limit=8)
+    angebotsanfragen = list_angebotsanfragen(autohaus["id"])
+    terminplaner_auftraege = auftraege + angebotsanfragen
+    zeige_vergangenheit = request.args.get("termine") == "vergangenheit"
     return render_template(
         "partner_dashboard.html",
         autohaus=autohaus,
         auftraege=auftraege,
         archivierte_auftraege=archivierte_auftraege,
-        angebotsanfragen=list_angebotsanfragen(autohaus["id"]),
-        benachrichtigungen=list_autohaus_benachrichtigungen(autohaus["id"], limit=5, only_unread=True),
-        postfach_ungelesen=count_autohaus_benachrichtigungen(autohaus["id"]),
+        angebotsanfragen=angebotsanfragen,
+        benachrichtigungen=list_autohaus_benachrichtigungen(autohaus["id"]),
+        postfach_items=postfach_items,
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
         cockpit=autohaus_dashboard_daten(auftraege),
+        werkstatt_news=list_werkstatt_news(limit=5),
         mini_calendar=build_mini_monatskalender(
-            auftraege,
+            terminplaner_auftraege,
             request.args.get("monat"),
             endpoint="partner_dashboard",
             route_values={"slug": autohaus["slug"]},
+            include_internal_notes=False,
             only_arrival_events=True,
         ),
+        terminplaner_tage=partner_termin_tage(
+            terminplaner_auftraege,
+            vergangenheit=zeige_vergangenheit,
+        ),
+        terminplaner_vergangenheit=zeige_vergangenheit,
+        rahmenvertrag=rahmenvertrag_context(autohaus),
         statusliste=STATUSLISTE,
     )
 
 
-@app.route("/partner/<slug>/postfach")
-def partner_postfach(slug):
+@app.route("/partner/<slug>/hinweis/<int:hinweis_id>/entfernen", methods=["POST"])
+def partner_hinweis_entfernen(slug, hinweis_id):
     autohaus, redirect_response = partner_session_required(slug)
     if redirect_response:
         return redirect_response
-    return render_template(
-        "partner_postfach.html",
-        autohaus=autohaus,
-        benachrichtigungen=list_autohaus_benachrichtigungen(autohaus["id"], limit=100, only_unread=False),
-        postfach_ungelesen=count_autohaus_benachrichtigungen(autohaus["id"]),
-    )
-
-
-def partner_postfach_redirect(slug):
-    if clean_text(request.form.get("ziel")) == "dashboard":
-        return redirect(url_for("partner_dashboard", slug=slug))
-    return redirect(url_for("partner_postfach", slug=slug))
+    mark_autohaus_postfach_item_erledigt(autohaus["id"], f"autohaus-hinweis-{hinweis_id}")
+    flash("Hinweis entfernt.", "info")
+    return redirect(url_for("partner_dashboard", slug=slug))
 
 
 @app.route("/partner/<slug>/bonusmodell")
@@ -9405,37 +18107,80 @@ def partner_bonusmodell(slug):
         "partner_bonusmodell.html",
         autohaus=autohaus,
         bonusmodell=build_bonusmodell(alle_auftraege),
+        rahmenvertrag=rahmenvertrag_context(autohaus),
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
     )
 
 
-@app.route("/partner/<slug>/hinweis/<int:hinweis_id>/entfernen", methods=["POST"])
-def partner_hinweis_entfernen(slug, hinweis_id):
+@app.route("/partner/<slug>/rahmenvertrag-anfragen", methods=["POST"])
+def partner_rahmenvertrag_anfragen(slug):
     autohaus, redirect_response = partner_session_required(slug)
     if redirect_response:
         return redirect_response
-    delete_autohaus_benachrichtigung(autohaus["id"], hinweis_id)
-    flash("Hinweis entfernt.", "info")
-    return redirect(url_for("partner_dashboard", slug=slug))
+    _, created = add_rahmenvertrag_anfrage(
+        autohaus["id"],
+        f"{autohaus['name']} möchte den Rahmenvertrag, Partnerpreise und mögliche Bonusstufen gemeinsam besprechen.",
+    )
+    if created:
+        flash("Anfrage gesendet. Wir melden uns für den Rahmenvertrag und Partnerpreis.", "success")
+    else:
+        flash("Die Anfrage ist schon im Werkstatt-Postfach sichtbar.", "info")
+    return redirect(url_for("partner_bonusmodell", slug=slug))
 
 
-@app.route("/partner/<slug>/hinweis/<int:hinweis_id>/gelesen", methods=["POST"])
-def partner_hinweis_gelesen(slug, hinweis_id):
+@app.route("/partner/<slug>/auftraege-suche")
+def partner_auftraege_suche(slug):
     autohaus, redirect_response = partner_session_required(slug)
     if redirect_response:
         return redirect_response
-    mark_autohaus_benachrichtigung_gelesen(autohaus["id"], hinweis_id)
-    flash("Nachricht als gelesen markiert.", "info")
-    return partner_postfach_redirect(slug)
+    return jsonify({"items": list_partner_auftrag_suche(autohaus, request.args.get("q"), limit=8)})
 
 
-@app.route("/partner/<slug>/hinweis/<int:hinweis_id>/loeschen", methods=["POST"])
-def partner_hinweis_loeschen(slug, hinweis_id):
+@app.route("/partner/<slug>/postfach")
+def partner_postfach(slug):
     autohaus, redirect_response = partner_session_required(slug)
     if redirect_response:
         return redirect_response
-    delete_autohaus_benachrichtigung(autohaus["id"], hinweis_id)
-    flash("Nachricht gelöscht.", "info")
-    return partner_postfach_redirect(slug)
+    return render_template(
+        "partner_postfach.html",
+        autohaus=autohaus,
+        items=list_partner_postfach_items(autohaus["id"], autohaus["slug"], limit=200),
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
+    )
+
+
+@app.route("/partner/<slug>/postfach/<path:item_key>/oeffnen")
+def partner_postfach_oeffnen(slug, item_key):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    item_key = clean_text(item_key)
+    item = next(
+        (
+            entry
+            for entry in list_partner_postfach_items(autohaus["id"], autohaus["slug"], limit=200)
+            if entry.get("item_key") == item_key
+        ),
+        None,
+    )
+    if not item:
+        flash("Die Meldung ist bereits erledigt oder nicht mehr vorhanden.", "info")
+        return redirect(url_for("partner_dashboard", slug=slug))
+    mark_autohaus_postfach_item_erledigt(autohaus["id"], item_key)
+    return redirect(item.get("ziel_url") or url_for("partner_dashboard", slug=slug))
+
+
+@app.route("/partner/<slug>/postfach/<path:item_key>/loeschen", methods=["POST"])
+def partner_postfach_loeschen(slug, item_key):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    mark_autohaus_postfach_item_erledigt(autohaus["id"], item_key)
+    flash("Nachricht aus dem Postfach gelöscht.", "info")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/"):
+        return redirect(next_url)
+    return redirect(url_for("partner_postfach", slug=slug))
 
 
 @app.route("/partner/<slug>/ki/chat", methods=["POST"])
@@ -9448,7 +18193,11 @@ def partner_ki_chat(slug):
     if not question:
         return jsonify({"error": "Bitte eine Frage eingeben."}), 400
     auftrag = get_partner_assistant_auftrag(payload.get("auftrag_id"), autohaus["id"])
+    auftrag_id = int((auftrag or {}).get("id") or 0)
+    save_ki_assistent_message(autohaus["id"], auftrag_id, "kunde", question)
     answer, source = ask_partner_assistant(question, autohaus, auftrag)
+    save_ki_assistent_message(autohaus["id"], auftrag_id, "ki", answer)
+    schedule_change_backup("ki-assistent")
     return jsonify({"answer": answer, "source": source})
 
 
@@ -9457,6 +18206,10 @@ def partner_ki_chat_loeschen(slug):
     autohaus, redirect_response = partner_session_required(slug)
     if redirect_response:
         return jsonify({"error": "Nicht eingeloggt."}), 401
+    payload = request.get_json(silent=True) or {}
+    auftrag = get_partner_assistant_auftrag(payload.get("auftrag_id"), autohaus["id"])
+    clear_ki_assistent_history(autohaus["id"], int((auftrag or {}).get("id") or 0))
+    schedule_change_backup("ki-assistent-loeschen")
     return jsonify({"ok": True})
 
 
@@ -9465,7 +18218,32 @@ def partner_lackierauftrag_vorlage(slug):
     autohaus, redirect_response = partner_session_required(slug)
     if redirect_response:
         return redirect_response
-    return send_lackierauftrag_pdf(autohaus)
+    entwurf = get_lackierauftrag_entwurf(autohaus)
+    return send_lackierauftrag_pdf(autohaus, entwurf["daten"])
+
+
+@app.route("/partner/<slug>/lackierauftrag", methods=["GET", "POST"])
+def partner_lackierauftrag_bearbeiten(slug):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    entwurf = get_lackierauftrag_entwurf(autohaus)
+    if request.method == "POST":
+        daten = parse_lackierauftrag_form(request.form, autohaus)
+        daten = save_lackierauftrag_entwurf(autohaus, daten)
+        if request.form.get("aktion") == "download":
+            return send_lackierauftrag_pdf(autohaus, daten)
+        flash("Lackierauftrag gespeichert. Sie können ihn später weiterbearbeiten oder als PDF herunterladen.", "success")
+        return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
+    return render_template(
+        "partner_lackierauftrag.html",
+        autohaus=autohaus,
+        entwurf=entwurf,
+        daten=entwurf["daten"],
+        abrechnung_optionen=LACKIERAUFTRAG_ABRECHNUNG,
+        position_count=LACKIERAUFTRAG_POSITION_COUNT,
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
+    )
 
 
 @app.route("/portal/<portal_key>/dashboard")
@@ -9482,6 +18260,14 @@ def partner_lackierauftrag_vorlage_key(portal_key):
     if redirect_response:
         return redirect_response
     return redirect(url_for("partner_lackierauftrag_vorlage", slug=autohaus["slug"]))
+
+
+@app.route("/portal/<portal_key>/lackierauftrag")
+def partner_lackierauftrag_bearbeiten_key(portal_key):
+    autohaus, redirect_response = partner_session_required_by_key(portal_key)
+    if redirect_response:
+        return redirect_response
+    return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=autohaus["slug"]))
 
 
 @app.route("/partner/<slug>/neu", methods=["GET", "POST"])
@@ -9519,21 +18305,18 @@ def partner_neuer_auftrag(slug):
             kontakt_telefon=clean_text(form.get("kontakt_telefon")),
         )
         try:
-            upload_result = save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
+            upload_result = save_uploads(
+                auftrag_id,
+                erlaubte_dateien,
+                "autohaus",
+                "standard",
+                upload_note=form.get("upload_notiz"),
+            )
         except Exception as exc:
             upload_result = (
                 0,
                 {"_analysis_error": f"Upload/Analyse konnte nicht abgeschlossen werden: {clean_text(str(exc))[:300]}"},
             )
-        upload_count = upload_result[0] if isinstance(upload_result, tuple) else int(upload_result or 0)
-        upload_text = f"{upload_count} Unterlage(n) hochgeladen." if upload_count else "Ohne Unterlagen angelegt."
-        notify_admin_autohaus_event(
-            autohaus,
-            auftrag_id,
-            "Neuer Auftrag vom Autohaus",
-            upload_text,
-            "auftrag",
-        )
         if aktion == "upload_analyze":
             flash_upload_analysis_result(
                 upload_result,
@@ -9541,6 +18324,12 @@ def partner_neuer_auftrag(slug):
             )
         else:
             flash("Fahrzeug angelegt.", "success")
+        flash_betriebsurlaub_planungshinweis(
+            form.get("annahme_datum"),
+            form.get("start_datum"),
+            form.get("fertig_datum"),
+            form.get("abholtermin"),
+        )
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
     return render_partner_new_form(autohaus)
@@ -9576,11 +18365,21 @@ def partner_neues_angebot(slug):
             angebotsphase=1,
             angebot_abgesendet=0,
         )
-        upload_result = save_uploads(angebot_id, erlaubte_dateien, "autohaus", "standard")
+        upload_result = save_uploads(
+            angebot_id,
+            erlaubte_dateien,
+            "autohaus",
+            "standard",
+            upload_note=form.get("upload_notiz"),
+        )
         refresh_offer_texts(angebot_id, kunden_kurz, kunden_text)
         flash_upload_analysis_result(
             upload_result,
             "Angebotsanfrage analysiert. Bitte prüfen und danach absenden.",
+        )
+        flash_betriebsurlaub_planungshinweis(
+            form.get("annahme_datum"),
+            form.get("abholtermin"),
         )
         return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=angebot_id))
 
@@ -9589,6 +18388,7 @@ def partner_neues_angebot(slug):
         autohaus=autohaus,
         angebot=None,
         dateien=[],
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
         transport_arten=TRANSPORT_ARTEN,
     )
 
@@ -9655,33 +18455,26 @@ def partner_angebot_detail(slug, auftrag_id):
         )
         db.commit()
         db.close()
-        upload_result = save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
+        upload_result = save_uploads(
+            auftrag_id,
+            erlaubte_dateien,
+            "autohaus",
+            "standard",
+            upload_note=form.get("upload_notiz"),
+        )
         refresh_offer_texts(auftrag_id, kunden_kurz, kunden_text)
-        upload_count = upload_result[0] if isinstance(upload_result, tuple) else int(upload_result or 0)
         if aktion == "submit_offer":
             submit_offer_request(auftrag_id)
-            titel = "Neue Angebotsanfrage" if not angebot.get("angebot_abgesendet") else "Angebotsanfrage aktualisiert"
-            detail = "Zur Prüfung abgesendet."
-            if upload_count:
-                detail = f"{detail} {upload_count} Unterlage(n) hochgeladen."
-            notify_admin_autohaus_event(autohaus, auftrag_id, titel, detail, "angebot")
             flash("Angebotsanfrage abgesendet. Die Werkstatt kann sie jetzt prüfen.", "success")
         else:
-            if angebot.get("angebot_abgesendet"):
-                detail = "Daten der bereits abgesendeten Angebotsanfrage geändert."
-                if upload_count:
-                    detail = f"{detail} {upload_count} Unterlage(n) hochgeladen."
-                notify_admin_autohaus_event(
-                    autohaus,
-                    auftrag_id,
-                    "Angebotsanfrage aktualisiert",
-                    detail,
-                    "angebot",
-                )
             flash_upload_analysis_result(
                 upload_result,
                 "Angebotsanfrage analysiert. Bitte prüfen und danach absenden.",
             )
+        flash_betriebsurlaub_planungshinweis(
+            form.get("annahme_datum"),
+            form.get("abholtermin"),
+        )
         return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
 
     sichtbare_dateien = [d for d in list_dateien(auftrag_id) if d.get("quelle") in {"autohaus", "intern"}]
@@ -9691,6 +18484,7 @@ def partner_angebot_detail(slug, auftrag_id):
         angebot=angebot,
         dateien=sichtbare_dateien,
         dokument_pruefung=list_document_review_items(auftrag_id, angebot),
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
         transport_arten=TRANSPORT_ARTEN,
     )
 
@@ -9707,13 +18501,6 @@ def partner_angebot_annehmen(slug, auftrag_id):
         flash("Das Angebot der Werkstatt liegt noch nicht vor.", "warning")
         return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
     angebot_annehmen(auftrag_id)
-    notify_admin_autohaus_event(
-        autohaus,
-        auftrag_id,
-        "Angebot angenommen",
-        "Das Autohaus hat das Werkstatt-Angebot angenommen.",
-        "angebot",
-    )
     flash("Angebot angenommen. Das Fahrzeug wurde in Ihre Aufträge übernommen.", "success")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
@@ -9779,6 +18566,12 @@ def partner_auftrag(slug, auftrag_id):
         )
         db.commit()
         db.close()
+        flash_betriebsurlaub_planungshinweis(
+            form.get("annahme_datum"),
+            start_datum,
+            fertig_datum,
+            form.get("abholtermin"),
+        )
         dateien = request.files.getlist("dateien")
         erlaubte_dateien = get_allowed_uploads(dateien)
         if aktion == "reanalyze_existing":
@@ -9795,51 +18588,55 @@ def partner_auftrag(slug, auftrag_id):
             flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.", "warning")
             return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
         try:
-            upload_result = save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
+            upload_result = save_uploads(
+                auftrag_id,
+                erlaubte_dateien,
+                "autohaus",
+                "standard",
+                upload_note=form.get("upload_notiz"),
+            )
         except Exception as exc:
             upload_result = (
                 0,
                 {"_analysis_error": f"Upload/Analyse konnte nicht abgeschlossen werden: {clean_text(str(exc))[:300]}"},
             )
-        fertigbilder_result = save_uploads(
+        fertig_upload_result = save_uploads(
             auftrag_id,
             get_allowed_finish_uploads(request.files.getlist("fertigbilder")),
             "autohaus",
             "fertigbild",
         )
-        upload_count = upload_result[0] if isinstance(upload_result, tuple) else int(upload_result or 0)
-        fertig_count = fertigbilder_result[0] if isinstance(fertigbilder_result, tuple) else int(fertigbilder_result or 0)
-        if upload_count:
-            notify_admin_autohaus_event(
-                autohaus,
-                auftrag_id,
-                "Neue Unterlage vom Autohaus",
-                f"{upload_count} Unterlage(n) hochgeladen.",
-                "upload",
-            )
-        if fertig_count:
-            notify_admin_autohaus_event(
-                autohaus,
-                auftrag_id,
-                "Neue Bilder vom Autohaus",
-                f"{fertig_count} Bild(er) oder PDF(s) hochgeladen.",
-                "bilder",
-            )
-        if not upload_count and not fertig_count:
-            notify_admin_autohaus_event(
-                autohaus,
-                auftrag_id,
-                "Auftrag vom Autohaus aktualisiert",
-                "Daten oder Termine wurden geändert.",
-                "auftrag",
-            )
+        standard_saved = upload_result[0] if isinstance(upload_result, tuple) else int(upload_result or 0)
+        standard_updates = upload_result[1] if isinstance(upload_result, tuple) and len(upload_result) > 1 else {}
+        fertig_saved = (
+            fertig_upload_result[0]
+            if isinstance(fertig_upload_result, tuple)
+            else int(fertig_upload_result or 0)
+        )
         if aktion == "upload_analyze":
             flash_upload_analysis_result(
                 upload_result,
-                "Datei hochgeladen und Analyse sichtbar gemacht.",
+                "Unterlage gespeichert, analysiert und für Autohaus und Werkstatt sichtbar.",
             )
         else:
-            flash("Termine aktualisiert.", "success")
+            analysis_error = clean_text((standard_updates or {}).get("_analysis_error"))
+            if analysis_error and standard_saved:
+                flash(
+                    f"Auftrag gespeichert. Unterlage ist sichtbar, aber die Analyse ist abgebrochen. {analysis_error}",
+                    "warning",
+                )
+            elif standard_saved or fertig_saved:
+                teile = []
+                if standard_saved:
+                    teile.append(f"{standard_saved} Unterlage(n)")
+                if fertig_saved:
+                    teile.append(f"{fertig_saved} Fertigbild(er)")
+                flash(
+                    f"Auftrag gespeichert. {' und '.join(teile)} sind jetzt für Autohaus und Werkstatt sichtbar.",
+                    "success",
+                )
+            else:
+                flash("Auftrag gespeichert.", "success")
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
     sichtbare_dateien = [d for d in list_dateien(auftrag_id) if d.get("quelle") in {"autohaus", "intern"}]
@@ -9854,12 +18651,13 @@ def partner_auftrag(slug, auftrag_id):
         dateien=standard_dateien,
         fertigbilder=fertigbilder,
         dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
-        benachrichtigungen=list_benachrichtigungen(auftrag_id),
+        benachrichtigungen=list_benachrichtigungen(auftrag_id, nur_ungelesen=True),
         reklamationen=list_reklamationen(auftrag_id),
         verzoegerungen=list_verzoegerungen(auftrag_id),
         transport_arten=TRANSPORT_ARTEN,
         statusliste=STATUSLISTE,
         chat_nachrichten=chat_nachrichten,
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
     )
 
 
@@ -9893,13 +18691,6 @@ def partner_dokumente_geprueft(slug, auftrag_id):
         flash("Dokumentdaten sind jetzt doppelt geprüft.", "success")
     else:
         flash("Ihre Prüfung wurde gespeichert. Die Werkstatt prüft die Werte ebenfalls.", "warning")
-    notify_admin_autohaus_event(
-        autohaus,
-        auftrag_id,
-        "Dokumentprüfung vom Autohaus",
-        "Das Autohaus hat erkannte Dokumentdaten geprüft.",
-        "dokumente",
-    )
     target = "partner_angebot_detail" if auftrag.get("angebotsphase") else "partner_auftrag"
     return redirect(url_for(target, slug=slug, auftrag_id=auftrag_id))
 
@@ -9965,13 +18756,6 @@ def partner_verzoegerung(slug, auftrag_id):
         abholtermin=request.form.get("abholtermin", ""),
         uebernommen=0,
     )
-    notify_admin_autohaus_event(
-        autohaus,
-        auftrag_id,
-        "Neue Verzögerung vom Autohaus",
-        meldung,
-        "verzoegerung",
-    )
     flash("Verzögerung an die Werkstatt gemeldet.", "success")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
@@ -9990,16 +18774,7 @@ def partner_chat_nachricht(slug, auftrag_id):
         flash("Bitte eine Nachricht eingeben.", "warning")
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
-    chat_id = add_chat_nachricht(auftrag_id, "autohaus", nachricht)
-    notify_admin_autohaus_event(
-        autohaus,
-        auftrag_id,
-        "Neue Nachricht vom Autohaus",
-        nachricht,
-        "chat",
-        quelle_typ="chat",
-        quelle_id=chat_id,
-    )
+    add_chat_nachricht(auftrag_id, "autohaus", nachricht)
     flash("Nachricht an die Werkstatt gesendet.", "success")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
@@ -10020,41 +18795,15 @@ def partner_reklamation(slug, auftrag_id):
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
     reklamation_id = add_reklamation(auftrag_id, "autohaus", meldung)
-    upload_result = save_uploads(
+    save_uploads(
         auftrag_id,
         dateien,
         "autohaus",
         "reklamation",
         reklamation_id=reklamation_id,
     )
-    upload_count = upload_result[0] if isinstance(upload_result, tuple) else int(upload_result or 0)
-    detail = meldung
-    if upload_count:
-        detail = f"{detail} · {upload_count} Reklamationsanhang/Anhänge hochgeladen."
-    notify_admin_autohaus_event(
-        autohaus,
-        auftrag_id,
-        "Neue Reklamation vom Autohaus",
-        detail,
-        "reklamation",
-    )
     flash("Reklamation als Alarm an die Werkstatt gemeldet.", "danger")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
-
-
-@app.route("/partner/<slug>/reklamation/<int:reklamation_id>/loeschen", methods=["POST"])
-def partner_reklamation_loeschen(slug, reklamation_id):
-    autohaus, redirect_response = partner_session_required(slug)
-    if redirect_response:
-        return redirect_response
-    ok, auftrag = delete_reklamation_eintrag(reklamation_id, autohaus_id=autohaus["id"])
-    if ok:
-        flash("Reklamation und Anhänge gelöscht.", "info")
-    else:
-        flash("Reklamation konnte nicht gelöscht werden.", "warning")
-    if auftrag:
-        return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag["id"]))
-    return redirect(url_for("partner_dashboard", slug=slug))
 
 
 @app.route("/partner/<slug>/datei/<int:datei_id>")
@@ -10068,16 +18817,9 @@ def partner_datei(slug, datei_id):
     auftrag = get_auftrag(datei["auftrag_id"])
     if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
         abort(404)
-    path = resolve_datei_path(datei)
-    if not path:
-        replace_url = ""
-        if clean_text(datei.get("quelle")) == "autohaus":
-            replace_url = url_for("partner_datei_ersetzen", slug=slug, datei_id=datei_id)
-        return missing_datei_response(
-            datei,
-            url_for("partner_auftrag", slug=slug, auftrag_id=datei["auftrag_id"]),
-            replace_url=replace_url,
-        )
+    path = UPLOAD_DIR / datei["stored_name"]
+    if not path.exists():
+        abort(404)
     return send_file(
         path,
         download_name=datei["original_name"],
@@ -10097,16 +18839,9 @@ def partner_datei_download(slug, datei_id):
     auftrag = get_auftrag(datei["auftrag_id"])
     if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
         abort(404)
-    path = resolve_datei_path(datei)
-    if not path:
-        replace_url = ""
-        if clean_text(datei.get("quelle")) == "autohaus":
-            replace_url = url_for("partner_datei_ersetzen", slug=slug, datei_id=datei_id)
-        return missing_datei_response(
-            datei,
-            url_for("partner_auftrag", slug=slug, auftrag_id=datei["auftrag_id"]),
-            replace_url=replace_url,
-        )
+    path = UPLOAD_DIR / datei["stored_name"]
+    if not path.exists():
+        abort(404)
     return send_file(
         path,
         download_name=datei["original_name"],
@@ -10115,8 +18850,8 @@ def partner_datei_download(slug, datei_id):
     )
 
 
-@app.route("/partner/<slug>/datei/<int:datei_id>/ersetzen", methods=["GET", "POST"])
-def partner_datei_ersetzen(slug, datei_id):
+@app.route("/partner/<slug>/datei/<int:datei_id>/notiz", methods=["POST"])
+def partner_datei_notiz(slug, datei_id):
     autohaus, redirect_response = partner_session_required(slug)
     if redirect_response:
         return redirect_response
@@ -10124,29 +18859,50 @@ def partner_datei_ersetzen(slug, datei_id):
     if not datei:
         abort(404)
     auftrag = get_auftrag(datei["auftrag_id"])
-    if (
-        not auftrag
-        or auftrag.get("autohaus_id") != autohaus["id"]
-        or clean_text(datei.get("quelle")) != "autohaus"
-    ):
+    if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
         abort(404)
-    back_url = url_for("partner_auftrag", slug=slug, auftrag_id=datei["auftrag_id"])
-    if request.method == "GET":
-        return datei_ersetzen_form_response(
-            datei,
-            action_url=url_for("partner_datei_ersetzen", slug=slug, datei_id=datei_id),
-            back_url=back_url,
+    if clean_text(datei.get("quelle")) != "autohaus":
+        flash("Zu Werkstatt-Dateien kann das Autohaus keine Bildnotiz ändern.", "warning")
+        return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag["id"]))
+
+    notiz = clean_text(request.form.get("datei_notiz"))[:500]
+    db = get_db()
+    db.execute(
+        """
+        UPDATE dateien
+        SET notiz=?
+        WHERE id=? AND auftrag_id=? AND quelle='autohaus'
+        """,
+        (notiz, datei_id, auftrag["id"]),
+    )
+    analyse_from_note = analyse_text(notiz) or notiz[:220]
+    if notiz and analyse_from_note and (
+        not clean_text(auftrag.get("analyse_text"))
+        or len(clean_text(auftrag.get("analyse_text"))) < 10
+    ):
+        db.execute(
+            """
+            UPDATE auftraege
+            SET analyse_text=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (analyse_from_note[:220], now_str(), auftrag["id"]),
         )
-    try:
-        replace_datei_content(datei, request.files.get("datei"))
-    except ValueError as exc:
-        flash(str(exc), "warning")
-        return redirect(url_for("partner_datei_ersetzen", slug=slug, datei_id=datei_id))
-    except Exception as exc:
-        flash(f"Datei konnte nicht ersetzt werden: {clean_text(str(exc))[:300]}", "danger")
-        return redirect(url_for("partner_datei_ersetzen", slug=slug, datei_id=datei_id))
-    flash("Datei ersetzt und wieder gespeichert.", "success")
-    return redirect(url_for("partner_datei", slug=slug, datei_id=datei_id))
+    else:
+        db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag["id"]))
+    db.commit()
+    db.close()
+
+    if clean_text(datei.get("kategorie")) == "standard":
+        reset_document_review_checks(
+            auftrag["id"],
+            "Bild-/Dateihinweis wurde ergänzt. Bitte die erkannten Daten kurz prüfen.",
+        )
+    flash("Bild-/Dateihinweis gespeichert. Die Werkstatt sieht ihn direkt im Auftrag.", "success")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/partner/"):
+        return redirect(next_url)
+    return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag["id"]))
 
 
 @app.route("/partner/<slug>/datei/<int:datei_id>/loeschen", methods=["POST"])
@@ -10168,7 +18924,6 @@ def partner_datei_loeschen(slug, datei_id):
 
 
 init_db()
-start_upload_blob_backfill()
 start_hourly_backups()
 
 

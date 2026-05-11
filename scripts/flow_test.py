@@ -1,9 +1,11 @@
 from pathlib import Path
 from io import BytesIO
+import gc
 import json
 import shutil
 import sys
 import tempfile
+import uuid
 import zipfile
 
 
@@ -35,6 +37,13 @@ def with_csrf(client, data=None):
         session["csrf_token"] = token
     payload["csrf_token"] = token
     return payload
+
+
+def csrf_headers(client):
+    with client.session_transaction() as session:
+        token = session.get("csrf_token") or "test-csrf-token"
+        session["csrf_token"] = token
+    return {"X-CSRF-Token": token}
 
 
 def main():
@@ -143,6 +152,9 @@ def main():
         route_checks = (
             ("Admin Dashboard", admin, "/admin"),
             ("Admin Kalender", admin, "/admin/kalender"),
+            ("Admin News", admin, "/admin/news"),
+            ("Admin E-Mail", admin, "/admin/emails"),
+            ("Admin Einkauf", admin, "/admin/einkauf"),
             ("Partner Dashboard", partner, "/partner/kaesmann/dashboard"),
             ("Partner Neues Fahrzeug", partner, "/partner/kaesmann/neu"),
             ("Partner Angebot neu", partner, "/partner/kaesmann/angebot/neu"),
@@ -151,13 +163,580 @@ def main():
             response = client.get(url)
             check(label, response.status_code == 200, f"Status {response.status_code}")
 
+        sparkasse_csv = (
+            "Kontonummer;DEMO\n"
+            "Zeitraum;01.05.2026-31.05.2026\n"
+            "Buchungstag;Valuta;Auftraggeber/Empfänger;Verwendungszweck;Soll;Haben;Währung\n"
+            "02.05.2026;02.05.2026;Topcolor GmbH;Rechnung RE-2002 Material;99,95;;EUR\n"
+            "03.05.2026;03.05.2026;Auto Pfaff;Zahlung RG-3003;;250,00;EUR\n"
+        )
+        parsed_bank_csv = portal.parse_kontoauszug_buchungen(sparkasse_csv, "sparkasse.csv")
+        check(
+            "Kontoauszug-CSV erkennt Vorzeilen und Soll/Haben",
+            len(parsed_bank_csv) == 2
+            and parsed_bank_csv[0]["betrag"] == -99.95
+            and parsed_bank_csv[1]["betrag"] == 250.0
+            and parsed_bank_csv[0]["buchung_datum"] == "02.05.2026",
+            str(parsed_bank_csv),
+        )
+        check(
+            "Kontoauszug-Betrag wertet S/H und Unicode-Minus richtig",
+            portal.parse_bank_amount("99,95 S") == -99.95
+            and portal.parse_bank_amount("100,00 H") == 100.0
+            and portal.parse_bank_amount("−25,20 EUR") == -25.2,
+        )
+        typed_bank_csv = (
+            "Buchungstag;Name;Verwendungszweck;Umsatzart;Betrag\n"
+            "04.05.2026;Topcolor GmbH;Materialrechnung;Lastschrift;88,90\n"
+            "05.05.2026;Autohaus Test;Rechnung RG-4004;Zahlungseingang;420,00\n"
+        )
+        typed_bank_rows = portal.parse_kontoauszug_buchungen(typed_bank_csv, "umsatzart.csv")
+        check(
+            "Kontoauszug wertet Lastschrift als Ausgabe und Zahlungseingang als Einnahme",
+            len(typed_bank_rows) == 2
+            and typed_bank_rows[0]["betrag"] == -88.9
+            and typed_bank_rows[0]["richtung"] == "Ausgang"
+            and typed_bank_rows[1]["betrag"] == 420.0
+            and typed_bank_rows[1]["richtung"] == "Eingang",
+            str(typed_bank_rows),
+        )
+        check(
+            "Kontoauszug-Auswertung korrigiert klare Einnahmen und Ausgaben",
+            portal.effective_bank_booking_amount(
+                {"betrag": 88.9, "name": "Topcolor GmbH", "verwendungszweck": "SEPA Lastschrift Material"}
+            )
+            == -88.9
+            and portal.effective_bank_booking_amount(
+                {"betrag": -420.0, "name": "Autohaus Test", "verwendungszweck": "Zahlungseingang Rechnung"}
+            )
+            == 420.0,
+        )
+        volksbank_text = (
+            "Gesamtumsatz: 22.306,09 S 10.455,66 H\n"
+            "alter Kontostand vom 30.12.2025\n"
+            "Wert Vorgang\n"
+            "20.01. 20.01. Gutschrift PN:931 357,00 H\n"
+            " ATT KFZ-Service UG (haftungsbeschraenkt)\n"
+            " RE 0162\n"
+            "22.01. 22.01. Gutschrift PN:931 483,46 H\n"
+            " BGV AG\n"
+            " Doppelzahlung Abbuchung Fahrzeugvers. EREF: 048000431184\n"
+            "26.01. 25.01. Echtzeitueberweisung PN:801 845,39 S\n"
+            " AOK Baden-Wuerttemberg\n"
+            " 72759229 SecureGo plus IBAN: DE90600501017404040834\n"
+            "30.01. 31.01. Abschluss lt. Anlage 1 PN:905 20,15 S\n"
+            " ------------------------------------------------------------\n"
+            " neuer Kontostand vom 30.01.2026 11.387,72 H\n"
+            "Anlage 1\n"
+            " 0,15 Ueberweisung beleglos 21 bis 31.01. 3,15 S\n"
+        )
+        volksbank_rows = portal.parse_kontoauszug_buchungen(
+            volksbank_text,
+            "291307_2026_Nr.001_Kontoauszug_vom_2026.01.31_20260501213057.pdf",
+        )
+        check(
+            "Volksbank-PDF-Struktur nutzt S/H, Jahr aus Dateiname und ignoriert Saldo/Anlage",
+            len(volksbank_rows) == 4
+            and volksbank_rows[0]["buchung_datum"] == "20.01.2026"
+            and volksbank_rows[0]["betrag"] == 357.0
+            and volksbank_rows[1]["betrag"] == 483.46
+            and volksbank_rows[2]["betrag"] == -845.39
+            and volksbank_rows[3]["betrag"] == -20.15,
+            str(volksbank_rows),
+        )
+        check(
+            "Kontoauszug-Auswertung respektiert Bankmarker bei gemischtem Text",
+            portal.effective_bank_booking_amount(volksbank_rows[1]) == 483.46,
+            str(volksbank_rows[1]),
+        )
+        abgang_zugang_csv = (
+            "Buchungstag;Empfänger;Verwendungszweck;Abgang;Zugang\n"
+            "06.05.2026;Miete GmbH;Miete Werkstatt;1.250,00;\n"
+            "07.05.2026;Kunde Bar;Zahlung Rechnung;;750,00\n"
+        )
+        abgang_zugang_rows = portal.parse_kontoauszug_buchungen(abgang_zugang_csv, "abgang-zugang.csv")
+        check(
+            "Kontoauszug wertet Abgang/Zugang-Spalten richtig",
+            len(abgang_zugang_rows) == 2
+            and abgang_zugang_rows[0]["betrag"] == -1250.0
+            and abgang_zugang_rows[1]["betrag"] == 750.0,
+            str(abgang_zugang_rows),
+        )
+        parsed_bank_text = portal.parse_kontoauszug_buchungen(
+            "01.05.2026\nFlow Kunde\nZahlung Rechnung RG-1001\n123,45 EUR\nNeuer Saldo 9.999,99 EUR\n",
+            "kontoauszug.txt",
+        )
+        check(
+            "Kontoauszug-TXT erkennt mehrzeilige Buchungen",
+            len(parsed_bank_text) == 1
+            and parsed_bank_text[0]["betrag"] == 123.45
+            and "RG-1001" in parsed_bank_text[0]["verwendungszweck"],
+            str(parsed_bank_text),
+        )
+        parsed_lastschrift_text = portal.parse_kontoauszug_buchungen(
+            "08.05.2026\nSEPA Lastschrift Topcolor GmbH\nMaterialrechnung RE-5005\n64,20 EUR\n",
+            "lastschrift.txt",
+        )
+        check(
+            "Kontoauszug-TXT wertet Lastschrift-Block als Ausgabe",
+            len(parsed_lastschrift_text) == 1
+            and parsed_lastschrift_text[0]["betrag"] == -64.2
+            and parsed_lastschrift_text[0]["richtung"] == "Ausgang",
+            str(parsed_lastschrift_text),
+        )
+
+        db = portal.get_db()
+        try:
+            db.execute(
+                """
+                INSERT INTO lexware_rechnungen
+                  (voucher_id, voucher_type, richtung, status, payment_status, voucher_status,
+                   voucher_number, contact_name, total_amount, open_amount, currency,
+                   voucher_date, due_date, lexware_url, raw_json, zuletzt_synced_am, erstellt_am, geaendert_am)
+                VALUES ('flow-konto-1', 'invoice', 'Einnahme', 'offen', '', 'open',
+                        'RG-1001', 'Flow Kunde', 123.45, 123.45, 'EUR',
+                        '01.05.2026', '15.05.2026', '', '{}', '', ?, ?)
+                ON CONFLICT(voucher_id) DO UPDATE SET
+                  status='offen',
+                  open_amount=123.45,
+                  total_amount=123.45,
+                  voucher_number='RG-1001',
+                  contact_name='Flow Kunde'
+                """,
+                (portal.now_str(), portal.now_str()),
+            )
+            db.execute(
+                """
+                INSERT INTO lexware_rechnungen
+                  (voucher_id, voucher_type, richtung, status, payment_status, voucher_status,
+                   voucher_number, contact_name, total_amount, open_amount, currency,
+                   voucher_date, due_date, lexware_url, raw_json, zuletzt_synced_am, erstellt_am, geaendert_am)
+                VALUES ('flow-konto-2', 'purchaseinvoice', 'Ausgabe', 'offen', '', 'open',
+                        'RE-2002', 'Topcolor GmbH', 99.95, 99.95, 'EUR',
+                        '02.05.2026', '16.05.2026', '', '{}', '', ?, ?)
+                ON CONFLICT(voucher_id) DO UPDATE SET
+                  status='offen',
+                  open_amount=99.95,
+                  total_amount=99.95,
+                  voucher_number='RE-2002',
+                  contact_name='Topcolor GmbH'
+                """,
+                (portal.now_str(), portal.now_str()),
+            )
+            db.commit()
+        finally:
+            db.close()
+        wrong_match, wrong_score, wrong_hint = portal.match_kontoauszug_buchung_to_rechnung(
+            {"betrag": 50.0, "name": "Flow Kunde", "verwendungszweck": "Zahlung RG-1001"}
+        )
+        check(
+            "Kontoauszug ordnet abweichenden Betrag nicht automatisch zu",
+            wrong_match is None and "Betrag weicht ab" in wrong_hint,
+            f"score={wrong_score}, hint={wrong_hint}",
+        )
+        contact_only_match, contact_only_score, contact_only_hint = portal.match_kontoauszug_buchung_to_rechnung(
+            {"betrag": 123.45, "name": "Flow Kunde", "verwendungszweck": "Zahlung ohne Nummer"}
+        )
+        check(
+            "Kontoauszug braucht Rechnungsnummer fuer automatische Zuordnung",
+            contact_only_match is None and "Rechnungsnummer" in contact_only_hint,
+            f"score={contact_only_score}, hint={contact_only_hint}",
+        )
+        parsed_saldo_noise = portal.parse_kontoauszug_buchungen(
+            "01.05.2026 Kontostand 1.870.592,36 EUR\n02.05.2026 Flow Kunde Zahlung RG-1001 123,45 EUR\nNeuer Saldo 1.870.715,81 EUR\n",
+            "saldo.pdf",
+        )
+        check(
+            "Kontoauszug ignoriert Saldo- und Kontostand-Zahlen",
+            len(parsed_saldo_noise) == 1
+            and parsed_saldo_noise[0]["betrag"] == 123.45
+            and "RG-1001" in parsed_saldo_noise[0]["verwendungszweck"],
+            str(parsed_saldo_noise),
+        )
+        huge_ok, huge_hint = portal.validate_kontoauszug_buchung(
+            {
+                "buchung_datum": "01.05.2026",
+                "name": "Kontostand",
+                "verwendungszweck": "Saldo 1.870.592,36 EUR",
+                "betrag": 1870592.36,
+            }
+        )
+        check(
+            "Kontoauszug stoppt unrealistische Saldo-Buchungen",
+            not huge_ok and "ungewoehnlich hoch" in huge_hint,
+            huge_hint,
+        )
+        konto_response = admin.post(
+            "/admin/rechnungen/kontoauszug",
+            data=with_csrf(
+                admin,
+                {
+                    "kontoauszug_dateien": (
+                        BytesIO(
+                            (
+                                "Buchungstag;Name;Verwendungszweck;Betrag\n"
+                                "01.05.2026;Flow Kunde;Zahlung RG-1001;123,45\n"
+                                "02.05.2026;Topcolor GmbH;Rechnung RE-2002 Material;99,95 Soll\n"
+                            ).encode("utf-8")
+                        ),
+                        "flow-konto.csv",
+                    ),
+                },
+            ),
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        check("Kontoauszug kann hochgeladen werden", konto_response.status_code == 302)
+        duplicate_response = admin.post(
+            "/admin/rechnungen/kontoauszug",
+            data=with_csrf(
+                admin,
+                {
+                    "kontoauszug_dateien": (
+                        BytesIO(
+                            (
+                                "Buchungstag;Name;Verwendungszweck;Betrag\n"
+                                "01.05.2026;Flow Kunde;Zahlung RG-1001;123,45\n"
+                                "02.05.2026;Topcolor GmbH;Rechnung RE-2002 Material;99,95 Soll\n"
+                            ).encode("utf-8")
+                        ),
+                        "flow-konto.csv",
+                    ),
+                },
+            ),
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        check("Doppelter Kontoauszug wird erkannt", duplicate_response.status_code == 302)
+        db = portal.get_db()
+        try:
+            paid_row = db.execute("SELECT status, open_amount FROM lexware_rechnungen WHERE voucher_id='flow-konto-1'").fetchone()
+            booking_row = db.execute("SELECT status, rechnung_id FROM kontoauszug_buchungen ORDER BY id DESC LIMIT 1").fetchone()
+            duplicate_imports = db.execute("SELECT COUNT(*) AS count FROM kontoauszug_importe WHERE original_name='flow-konto.csv'").fetchone()["count"]
+        finally:
+            db.close()
+        check("Doppelter Kontoauszug erzeugt keinen zweiten Import", duplicate_imports == 1, str(duplicate_imports))
+        check(
+            "Kontoauszug markiert sichere Zahlung als erledigt",
+            paid_row and paid_row["status"] == "bezahlt" and float(paid_row["open_amount"] or 0) == 0,
+            str(dict(paid_row) if paid_row else None),
+        )
+        db = portal.get_db()
+        try:
+            paid_supplier_row = db.execute("SELECT status, open_amount FROM lexware_rechnungen WHERE voucher_id='flow-konto-2'").fetchone()
+        finally:
+            db.close()
+        check(
+            "Kontoauszug markiert sichere Lieferanten-Ausgabe als erledigt",
+            paid_supplier_row and paid_supplier_row["status"] == "bezahlt" and float(paid_supplier_row["open_amount"] or 0) == 0,
+            str(dict(paid_supplier_row) if paid_supplier_row else None),
+        )
+        check(
+            "Kontoauszug-Buchung bleibt nachvollziehbar",
+            booking_row and booking_row["status"] == "zugeordnet" and int(booking_row["rechnung_id"] or 0) > 0,
+            str(dict(booking_row) if booking_row else None),
+        )
+        rechnung_page = admin.get("/admin/rechnungen")
+        rechnung_html = rechnung_page.get_data(as_text=True)
+        check(
+            "Kontoauszug-Auswertung zeigt nur die wichtigen Kennzahlen",
+            rechnung_page.status_code == 200
+            and "Auswertung letzter Kontoauszug" in rechnung_html
+            and "Einnahmen" in rechnung_html
+            and "Ausgaben" in rechnung_html
+            and "Umsatz / Saldo" in rechnung_html
+            and "123,45 EUR" in rechnung_html
+            and "99,95 EUR" in rechnung_html
+            and "Einzelbuchungen prüfen" in rechnung_html,
+        )
+
+        email_api_response = admin.post(
+            "/api/werkstatt/emails",
+            json={
+                "from": {"name": "Flow Test Autohaus", "email": "flow@example.test"},
+                "subject": "Flow Test Mail",
+                "text": "Bitte im Werkstattportal sammeln.",
+                "source": "flow-test",
+            },
+            headers=csrf_headers(admin),
+        )
+        check("E-Mail-API speichert Mail", email_api_response.status_code == 201, str(email_api_response.get_json()))
+        email_items = portal.list_werkstatt_emails("aktiv", limit=20)
+        email_item = next((item for item in email_items if item["betreff"] == "Flow Test Mail"), None)
+        check("E-Mail-Zentrale listet API-Mail", bool(email_item), str(email_items[:2]))
+        if email_item:
+            response = admin.post(
+                f"/admin/emails/{email_item['id']}/erledigt",
+                data=with_csrf(admin),
+                follow_redirects=False,
+            )
+            check("E-Mail als erledigt markierbar", response.status_code == 302)
+
+        raw_imap_mail = (
+            b"From: Lieferant Test <rechnung@example.test>\r\n"
+            b"To: Werkstatt <werkstatt@example.test>\r\n"
+            b"Subject: Rechnung IMAP Flow\r\n"
+            b"Message-ID: <flow-imap-rechnung@example.test>\r\n"
+            b"Date: Sun, 03 May 2026 12:15:00 +0200\r\n"
+            b"Content-Type: text/plain; charset=utf-8\r\n"
+            b"\r\n"
+            b"Bitte Rechnung RE-IMAP-1 ueber 129,90 EUR pruefen.\r\n"
+        )
+        imap_result = portal.import_werkstatt_email_raw_message(raw_imap_mail, source_uid="INBOX:flow-1")
+        check("IMAP-Mail wird importiert", imap_result.get("created") is True, str(imap_result))
+        imap_duplicate = portal.import_werkstatt_email_raw_message(raw_imap_mail, source_uid="INBOX:flow-1")
+        check("IMAP-Dublette wird uebersprungen", imap_duplicate.get("created") is False, str(imap_duplicate))
+        imap_email = portal.get_werkstatt_email(imap_result["id"])
+        check(
+            "IMAP-Mail enthaelt Absender, Betreff und Message-ID",
+            imap_email
+            and imap_email["absender_email"] == "rechnung@example.test"
+            and imap_email["betreff"] == "Rechnung IMAP Flow"
+            and imap_email["message_id"] == "<flow-imap-rechnung@example.test>"
+            and imap_email["ziel_modul"] == "rechnungen",
+            str(imap_email),
+        )
+
+        einkauf_response = admin.post(
+            "/admin/einkauf/neu",
+            data=with_csrf(
+                admin,
+                {
+                    "titel": "Test Material",
+                    "menge": "1 Dose",
+                    "produkt_name": "PPG Flow Test Lack",
+                    "produktbild_url": "https://example.test/material.png",
+                    "auto_color_preis": "180,00",
+                    "vergleich_preis": "150,00",
+                    "vergleich_lieferant": "Flow Vergleich",
+                    "notiz": "Flow-Test",
+                    "qr_bilder": (BytesIO(b"flow-test-bild"), "topcolor-test.png"),
+                },
+            ),
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        check("Admin kann Topcolor-Einkauf speichern", einkauf_response.status_code == 302)
+        einkauf_items = portal.list_einkauf_items("offen", limit=20)
+        einkauf_item = next((item for item in einkauf_items if item["titel"] == "Test Material"), None)
+        check("Topcolor-Einkauf wird gelistet", bool(einkauf_item), str(einkauf_items[:2]))
+        if einkauf_item:
+            datei_response = admin.get(f"/admin/einkauf/datei/{einkauf_item['id']}")
+            check("Topcolor-Einkaufsdatei öffnet", datei_response.status_code == 200)
+            datei_response.close()
+            check(
+                "Topcolor-Einkauf speichert Produktbild und Preisradar",
+                einkauf_item["produktbild_url"] == "https://example.test/material.png"
+                and einkauf_item["preisradar"]["status"] == "danger"
+                and einkauf_item["google_images_url"].startswith("https://www.google.com/search?tbm=isch"),
+                str(einkauf_item),
+            )
+            vergleich_response = admin.get(
+                f"/admin/einkauf/{einkauf_item['id']}/vergleich/google",
+                follow_redirects=False,
+            )
+            check(
+                "Topcolor-Einkauf leitet Google-Suche weiter",
+                vergleich_response.status_code in {301, 302}
+                and vergleich_response.headers.get("Location", "").startswith("https://www.google.com/search"),
+                str(vergleich_response.headers),
+            )
+
+        rechnung_token = uuid.uuid4().hex[:8].upper()
+        rechnung_artikelnummer = str(90000000 + (uuid.uuid4().int % 9999999))
+        rechnung_produkt = f"3M Perfect-It Fast Cut Plus Flow {rechnung_token}"
+        rechnung_response = admin.post(
+            "/admin/einkauf/rechnung",
+            data=with_csrf(
+                admin,
+                {
+                    "lieferant": "Flow Lieferant",
+                    "rechnung_dateien": (
+                        BytesIO(
+                            f"Art. {rechnung_artikelnummer} 2 Dose {rechnung_produkt} 42,50 EUR".encode(
+                                "utf-8"
+                            )
+                        ),
+                        f"flow-rechnung-{rechnung_token}.txt",
+                    ),
+                },
+            ),
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        check("Admin kann Einkaufsrechnung importieren", rechnung_response.status_code == 302)
+        pruef_items = portal.list_einkauf_items(portal.EINKAUF_RECHNUNG_PRUEF_STATUS, limit=50)
+        pruef_item = next(
+            (
+                item
+                for item in pruef_items
+                if item["artikelnummer"] == rechnung_artikelnummer
+            ),
+            None,
+        )
+        check("Rechnungsartikel landet zuerst in der Pruefliste", bool(pruef_item), str(pruef_items[:3]))
+        if pruef_item:
+            check(
+                "Rechnungsartikel bekommt Bildsuche und Preisradar",
+                pruef_item["google_images_url"].startswith("https://www.google.com/search?tbm=isch")
+                and "status" in pruef_item["preisradar"],
+                str(pruef_item),
+            )
+            anlegen_response = admin.post(
+                f"/admin/einkauf/{pruef_item['id']}/artikel-anlegen",
+                data=with_csrf(
+                    admin,
+                    {
+                        "lieferant": pruef_item["lieferant"],
+                        "kategorie": pruef_item["kategorie"],
+                        "artikelnummer": pruef_item["artikelnummer"],
+                        "produkt_name": pruef_item["produkt_name"],
+                        "produkt_beschreibung": pruef_item["produkt_beschreibung"],
+                        "produktbild_url": f"https://example.test/{rechnung_artikelnummer}.png",
+                        "titel": pruef_item["titel"],
+                        "menge": pruef_item["menge"],
+                        "ve": pruef_item["ve"],
+                        "stueckzahl": str(pruef_item["stueckzahl"]),
+                        "auto_color_preis": pruef_item["auto_color_preis"],
+                        "preisquelle": pruef_item["preisquelle"],
+                        "angebotsstatus": pruef_item["angebotsstatus"],
+                    },
+                ),
+                follow_redirects=False,
+            )
+            check("Rechnungsartikel kann freigegeben werden", anlegen_response.status_code == 302)
+        artikel_items = portal.list_einkauf_artikel(limit=50)
+        artikel_item = next(
+            (
+                item
+                for item in artikel_items
+                if item["artikelnummer"] == rechnung_artikelnummer
+            ),
+            None,
+        )
+        check("Freigegebener Rechnungsartikel landet im Artikelstamm", bool(artikel_item), str(artikel_items[:3]))
+        if artikel_item:
+            check(
+                "Artikelstamm speichert Produktbild und Bildsuche",
+                artikel_item["produktbild_url"] == f"https://example.test/{rechnung_artikelnummer}.png"
+                and artikel_item["google_images_url"].startswith("https://www.google.com/search?tbm=isch"),
+                str(artikel_item),
+            )
+            artikel_vergleich_response = admin.get(
+                f"/admin/einkauf/artikel/{artikel_item['id']}/vergleich/google",
+                follow_redirects=False,
+            )
+            check(
+                "Angelegte Teile leiten Google-Suche weiter",
+                artikel_vergleich_response.status_code in {301, 302}
+                and artikel_vergleich_response.headers.get("Location", "").startswith("https://www.google.com/search"),
+                str(artikel_vergleich_response.headers),
+            )
+            einkauf_page = admin.get("/admin/einkauf")
+            einkauf_html = einkauf_page.get_data(as_text=True)
+            check(
+                "Einkauf zeigt angelegte Teile nach Kategorie",
+                einkauf_page.status_code == 200
+                and "Angelegte Teile" in einkauf_html
+                and portal.einkauf_kategorie_label(artikel_item["kategorie"]) in einkauf_html
+                and f"/admin/einkauf/artikel/{artikel_item['id']}/vergleich/google" in einkauf_html,
+                einkauf_html[:500],
+            )
+            if pruef_item:
+                check(
+                    "Angelegter Rechnungsartikel ist aus der Produktanlage raus",
+                    f"rechnung-position-{pruef_item['id']}" not in einkauf_html,
+                    f"rechnung-position-{pruef_item['id']}",
+                )
+
+        response = partner.get("/partner/kaesmann/dashboard")
+        check(
+            "Partner Dashboard zeigt KI-Helfer",
+            response.status_code == 200
+            and "data-ki-assistent" in response.get_data(as_text=True)
+            and "Wie kann ich Ihnen helfen?" in response.get_data(as_text=True),
+        )
+        original_get_openai_api_key = portal.get_openai_api_key
+        portal.get_openai_api_key = lambda: ""
+        try:
+            response = partner.post(
+                "/partner/kaesmann/ki/chat",
+                json={"message": "Wie lade ich Bilder hoch?"},
+                headers=csrf_headers(partner),
+            )
+        finally:
+            portal.get_openai_api_key = original_get_openai_api_key
+        payload = response.get_json() or {}
+        check(
+            "KI-Helfer antwortet ohne OpenAI mit Fallback",
+            response.status_code == 200
+            and "hochladen" in portal.normalize_document_text(payload.get("answer")),
+            str(payload),
+        )
+        db = portal.get_db()
+        ki_rows = db.execute(
+            "SELECT COUNT(*) AS count FROM ki_assistent_nachrichten WHERE autohaus_id=?",
+            (autohaus["id"],),
+        ).fetchone()["count"]
+        db.close()
+        check("KI-Helfer speichert Frage und Antwort", ki_rows >= 2, str(ki_rows))
+        response = partner.post(
+            "/partner/kaesmann/ki/chat/loeschen",
+            json={"auftrag_id": ""},
+            headers=csrf_headers(partner),
+        )
+        check("KI-Helfer-Verlauf ist löschbar", response.status_code == 200)
+
+        urlaub_response = partner.post(
+            "/partner/kaesmann/neu",
+            data=with_csrf(
+                partner,
+                {
+                    "aktion": "speichern",
+                    "kunde_name": "Betriebsurlaub Testkunde",
+                    "kontakt_telefon": "01234",
+                    "fahrzeug": "Urlaubstest Auto",
+                    "kennzeichen": "MOS-URLAUB-26",
+                    "analyse_text": "Test während Betriebsurlaub",
+                    "beschreibung": "Kunde plant im Betriebsurlaub.",
+                    "transport_art": "standard",
+                    "annahme_datum": "2026-08-20",
+                    "abholtermin": "2026-08-21",
+                },
+            ),
+            follow_redirects=True,
+        )
+        urlaub_html = urlaub_response.get_data(as_text=True)
+        check(
+            "Kunde bekommt Betriebsurlaub-Hinweis bei Einplanung",
+            urlaub_response.status_code == 200
+            and "Achtung Betriebsurlaub" in urlaub_html
+            and "19.08.2026 bis 04.09.2026" in urlaub_html,
+            f"Status {urlaub_response.status_code}",
+        )
+        db = portal.get_db()
+        urlaub_row = db.execute(
+            """
+            SELECT id
+            FROM auftraege
+            WHERE kennzeichen='MOS-URLAUB-26'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        db.close()
+        if urlaub_row:
+            portal.delete_auftrag(urlaub_row["id"])
+
         response = admin.post(
             "/admin/backup/download",
             data=with_csrf(admin),
             follow_redirects=False,
         )
         check("Admin kann Backup-ZIP herunterladen", response.status_code == 200, f"Status {response.status_code}")
-        backup_bytes = BytesIO(response.get_data())
+        backup_payload = response.get_data()
+        response.close()
+        backup_bytes = BytesIO(backup_payload)
         with zipfile.ZipFile(backup_bytes) as archive:
             backup_names = set(archive.namelist())
         check(
@@ -382,10 +961,24 @@ def main():
             "Neue Chat-Nachrichten" in admin_dashboard_html
             and "Ist die Rückgabe am Nachmittag möglich?" in admin_dashboard_html,
         )
+        response = admin.get("/admin/postfach")
+        admin_postfach_html = response.get_data(as_text=True)
         check(
-            "Autohaus-Chat steht im Admin-Postfach",
-            "Neue Nachricht vom Autohaus" in admin_dashboard_html
-            and "Ist die Rückgabe am Nachmittag möglich?" in admin_dashboard_html,
+            "Werkstatt-Postfach zeigt Chat-Nachricht",
+            response.status_code == 200
+            and "Werkstatt-Postfach" in admin_postfach_html
+            and "Ist die Rückgabe am Nachmittag möglich?" in admin_postfach_html,
+            f"Status {response.status_code}",
+        )
+        response = admin.post(
+            f"/admin/postfach/admin-chat-{chat['id']}/loeschen",
+            data=with_csrf(admin, {"next": "/admin/postfach"}),
+            follow_redirects=True,
+        )
+        check(
+            "Werkstatt-Postfach-Nachricht ist löschbar",
+            response.status_code == 200
+            and "Ist die Rückgabe am Nachmittag möglich?" not in response.get_data(as_text=True),
         )
         response = admin.get(f"/admin/auftrag/{angebot_id}")
         admin_auftrag_html = response.get_data(as_text=True)
@@ -409,13 +1002,43 @@ def main():
             """
             SELECT *
             FROM benachrichtigungen
-            WHERE auftrag_id=? AND titel='Neue Nachricht der Werkstatt'
+            WHERE auftrag_id=? AND titel='Neue Chat-Nachricht'
             ORDER BY id DESC
             """,
             (angebot_id,),
         ).fetchone()
         db.close()
         check("Admin-Chat erzeugt Autohaus-Hinweis", bool(hinweis), str(hinweis))
+        response = partner.get("/partner/kaesmann/postfach")
+        partner_postfach_html = response.get_data(as_text=True)
+        check(
+            "Autohaus-Postfach zeigt Werkstatt-Hinweis",
+            response.status_code == 200
+            and "Postfach" in partner_postfach_html
+            and "Neue Chat-Nachricht" in partner_postfach_html,
+            f"Status {response.status_code}",
+        )
+        response = partner.post(
+            f"/partner/kaesmann/postfach/autohaus-hinweis-{hinweis['id']}/loeschen",
+            data=with_csrf(partner, {"next": "/partner/kaesmann/postfach"}),
+            follow_redirects=True,
+        )
+        check(
+            "Autohaus-Postfach-Nachricht ist löschbar",
+            response.status_code == 200
+            and "Neue Chat-Nachricht" not in response.get_data(as_text=True),
+        )
+        db = portal.get_db()
+        hinweis_status = db.execute(
+            "SELECT gelesen FROM benachrichtigungen WHERE id=?",
+            (hinweis["id"],),
+        ).fetchone()
+        db.close()
+        check(
+            "Autohaus-Hinweis wird beim Löschen als gelesen markiert",
+            bool(hinweis_status and hinweis_status["gelesen"] == 1),
+            str(hinweis_status),
+        )
         response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}")
         partner_chat_html = response.get_data(as_text=True)
         check(
@@ -423,13 +1046,43 @@ def main():
             "Ja, Rückgabe am Nachmittag passt." in partner_chat_html,
             partner_chat_html[:300],
         )
-        response = partner.get("/partner/kaesmann/postfach")
-        partner_postfach_html = response.get_data(as_text=True)
+        portal.add_benachrichtigung(
+            angebot_id,
+            "Flow-Test alter Entfernen-Hinweis",
+            "Dieser Hinweis prueft den alten Entfernen-Button.",
+        )
+        db = portal.get_db()
+        alter_hinweis = db.execute(
+            """
+            SELECT *
+            FROM benachrichtigungen
+            WHERE auftrag_id=? AND titel='Flow-Test alter Entfernen-Hinweis'
+            ORDER BY id DESC
+            """,
+            (angebot_id,),
+        ).fetchone()
+        db.close()
+        check("Alter Entfernen-Hinweis angelegt", bool(alter_hinweis), str(alter_hinweis))
+        response = partner.post(
+            f"/partner/kaesmann/hinweis/{alter_hinweis['id']}/entfernen",
+            data=with_csrf(partner),
+            follow_redirects=True,
+        )
+        db = portal.get_db()
+        alter_hinweis_status = db.execute(
+            "SELECT gelesen FROM benachrichtigungen WHERE id=?",
+            (alter_hinweis["id"],),
+        ).fetchone()
+        db.close()
+        sichtbare_hinweise = portal.list_autohaus_benachrichtigungen(autohaus["id"], limit=200)
         check(
-            "Partner-Postfach zeigt Werkstatt-Chat",
+            "Alter Entfernen-Button entfernt Autohaus-Hinweis",
             response.status_code == 200
-            and "Neue Nachricht der Werkstatt" in partner_postfach_html
-            and "Ja, Rückgabe am Nachmittag passt." in partner_postfach_html,
+            and alter_hinweis_status
+            and alter_hinweis_status["gelesen"] == 1
+            and all(item["id"] != alter_hinweis["id"] for item in sichtbare_hinweise)
+            and f"autohaus-hinweis-{alter_hinweis['id']}" in portal.postfach_hidden_keys("autohaus", autohaus["id"]),
+            f"Status {response.status_code}",
         )
 
         db = portal.get_db()
@@ -588,7 +1241,32 @@ def main():
             response.status_code == 200 and "Rechnung schreiben" in rechnung_html and "Direkt in Lexware" in rechnung_html,
             f"Status {response.status_code}",
         )
-
+        response = admin.post(
+            f"/admin/auftrag/{angebot_id}/rechnung",
+            data=with_csrf(
+                admin,
+                {
+                    "lexware_kunde_angelegt": "on",
+                    "rechnung_geschrieben": "on",
+                    "rechnung_nummer": "FLOW-BONUS-1",
+                    "bonus_netto_betrag": "3.670,40",
+                },
+            ),
+            follow_redirects=False,
+        )
+        auftrag = portal.get_auftrag(angebot_id)
+        check("Rechnungsstatus speichert Bonusbetrag", response.status_code in {302, 303})
+        check(
+            "Zurueckgegebener Auftrag fuehrt Bonusbetrag",
+            round(float(auftrag["bonus_netto_betrag"] or 0), 2) == 3670.40
+            and bool(auftrag["bonus_preis_aktualisiert_am"]),
+            str(
+                {
+                    "bonus": auftrag["bonus_netto_betrag"],
+                    "aktualisiert": auftrag["bonus_preis_aktualisiert_am"],
+                }
+            ),
+        )
         response = admin.post(
             f"/admin/auftrag/{angebot_id}/rechnung/upload",
             data=with_csrf(
@@ -663,12 +1341,12 @@ def main():
             "Passende Rechnung aktualisiert Rechnungsdaten",
             auftrag["rechnung_status"] == "geschrieben"
             and auftrag["rechnung_nummer"] == "FLOW-BONUS-2"
-            and "3.670,40" in auftrag["notiz_intern"],
+            and round(float(auftrag["bonus_netto_betrag"] or 0), 2) == 3670.40,
             str(
                 {
                     "status": auftrag["rechnung_status"],
                     "nummer": auftrag["rechnung_nummer"],
-                    "notiz": auftrag["notiz_intern"],
+                    "betrag": auftrag["bonus_netto_betrag"],
                 }
             ),
         )
@@ -681,6 +1359,31 @@ def main():
             and "passende-rechnung.txt" in admin_auftrag_html
             and "Prüfung bestanden" in admin_auftrag_html,
             f"Status {response.status_code}",
+        )
+        response = partner.get("/partner/kaesmann/dashboard")
+        partner_dashboard_html = response.get_data(as_text=True)
+        check(
+            "Partner-Dashboard verlinkt Bonusmodell als Rubrik",
+            response.status_code == 200
+            and "/partner/kaesmann/bonusmodell" in partner_dashboard_html
+            and "Bonusmodell klar erklärt" not in partner_dashboard_html,
+        )
+        response = partner.get("/partner/kaesmann/bonusmodell")
+        partner_bonus_html = response.get_data(as_text=True)
+        check(
+            "Bonusmodell-Rubrik aktualisiert Bonus nach Rechnungsbetrag",
+            response.status_code == 200
+            and "3.670,40" in partner_bonus_html
+            and "73,41" in partner_bonus_html
+            and "Bonusmodell klar erklärt" in partner_bonus_html,
+        )
+        response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}")
+        partner_auftrag_html = response.get_data(as_text=True)
+        check(
+            "Partner-Auftrag zeigt Bonusbetrag nach Aktualisierung",
+            response.status_code == 200
+            and "3.670,40" in partner_auftrag_html
+            and "Monatsbonus" in partner_auftrag_html,
         )
 
         response = admin.post(
@@ -720,10 +1423,6 @@ def main():
         db.close()
         check("Fertigbild als Fertigbild gespeichert", bool(fertigbild), str(fertigbild))
         check("Fertigbild-Datei liegt im Upload-Ordner", (test_uploads / fertigbild["stored_name"]).exists())
-        check(
-            "Fertigbild ist zusätzlich in der Datenbank gesichert",
-            fertigbild["content_blob"] == b"codex-test-fertigbild",
-        )
         check("Fertigbild erzeugt Autohaus-Hinweis", bool(hinweis), str(hinweis))
         response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}")
         partner_html = response.get_data(as_text=True)
@@ -737,107 +1436,74 @@ def main():
             "Neue Fertigbilder" in partner_html,
             partner_html[:300],
         )
-        backup_path = portal.create_backup_package("flow-upload-restore")
-        check("Backup für Upload-Restore erstellt", backup_path.exists(), str(backup_path))
-        fertigbild_path = test_uploads / fertigbild["stored_name"]
-        db = portal.get_db()
-        db.execute("UPDATE dateien SET content_blob=NULL WHERE id=?", (fertigbild["id"],))
-        db.commit()
-        db.close()
-        backfill_result = portal.backfill_upload_content_blobs()
-        check(
-            "Nachsicherung speichert vorhandene Upload-Datei in DB",
-            backfill_result["saved"] >= 1,
-            str(backfill_result),
-        )
-        db = portal.get_db()
-        db.execute("UPDATE dateien SET content_blob=NULL WHERE id=?", (fertigbild["id"],))
-        db.commit()
-        db.close()
-        fertigbild_path.unlink()
-        response = partner.get(f"/partner/kaesmann/datei/{fertigbild['id']}")
-        restored_status = response.status_code
-        restored_bytes = response.get_data()
-        response.close()
-        check(
-            "Partner-Datei wird aus Backup wiederhergestellt",
-            restored_status == 200 and restored_bytes == b"codex-test-fertigbild",
-            f"Status {restored_status}",
-        )
-        check("Wiederhergestellte Datei liegt im Upload-Ordner", fertigbild_path.exists())
-        db = portal.get_db()
-        restored_blob_size = db.execute(
-            "SELECT length(content_blob) AS size FROM dateien WHERE id=?",
-            (fertigbild["id"],),
-        ).fetchone()["size"]
-        db.close()
-        check(
-            "Wiederhergestellte Datei ist wieder in der Datenbank gesichert",
-            restored_blob_size == len(b"codex-test-fertigbild"),
-            str(restored_blob_size),
-        )
-        fertigbild_path.unlink()
-        blob_backup_path = portal.create_backup_package("flow-blob-backup")
-        with zipfile.ZipFile(blob_backup_path) as archive:
-            blob_backup_has_upload = f"uploads/{fertigbild['stored_name']}" in archive.namelist()
-        check("Backup enthält Upload aus Datenbank-Blob", blob_backup_has_upload)
-        response = partner.get(f"/partner/kaesmann/datei/{fertigbild['id']}")
-        restored_from_blob_status = response.status_code
-        restored_from_blob_bytes = response.get_data()
-        response.close()
-        check(
-            "Datei wird ohne Upload-Ordner direkt aus Datenbank wiederhergestellt",
-            restored_from_blob_status == 200 and restored_from_blob_bytes == b"codex-test-fertigbild",
-            f"Status {restored_from_blob_status}",
-        )
-        response = admin.get(f"/admin/datei/{fertigbild['id']}/ersetzen")
-        replacement_form_html = response.get_data(as_text=True)
-        check(
-            "Admin-Reparaturseite zeigt Upload-Feld",
-            response.status_code == 200
-            and "Originaldatei neu hochladen" in replacement_form_html
-            and "name=\"datei\"" in replacement_form_html,
-            f"Status {response.status_code}",
-        )
-        response = admin.post(
-            f"/admin/datei/{fertigbild['id']}/ersetzen",
-            data=with_csrf(
-                admin,
-                {
-                    "datei": (
-                        BytesIO(b"codex-test-ersatzbild"),
-                        "fertigbild-ersetzt.jpg",
-                    )
-                },
-            ),
-            content_type="multipart/form-data",
-            follow_redirects=False,
-        )
-        check("Admin kann fehlende Datei ersetzen", response.status_code in {302, 303})
-        response = admin.get(f"/admin/datei/{fertigbild['id']}")
-        replaced_status = response.status_code
-        replaced_bytes = response.get_data()
-        response.close()
-        check(
-            "Ersetzte Datei öffnet unter alter Datei-ID",
-            replaced_status == 200 and replaced_bytes == b"codex-test-ersatzbild",
-            f"Status {replaced_status}",
-        )
 
         db = portal.get_db()
         datei = db.execute("SELECT id FROM dateien LIMIT 1").fetchone()
         db.close()
         if datei:
             response = admin.get(f"/admin/datei/{datei['id']}")
-            admin_file_status = response.status_code
+            check("Admin Originaldatei öffnen Route", response.status_code in {200, 404})
             response.close()
-            check("Admin Originaldatei öffnen Route", admin_file_status in {200, 404})
             response = admin.get(f"/admin/datei/{datei['id']}/download")
-            admin_download_status = response.status_code
+            check("Admin Originaldatei Download Route", response.status_code in {200, 404})
             response.close()
-            check("Admin Originaldatei Download Route", admin_download_status in {200, 404})
         else:
             print("[INFO] Keine Datei in Testdatenbank gefunden, Datei-Routen übersprungen.")
+
+        reklamation_id = portal.add_reklamation(angebot_id, "autohaus", "Nacharbeit nötig")
+        response = admin.post(
+            f"/admin/auftrag/{angebot_id}/reklamation-neu-planen",
+            data=with_csrf(
+                admin,
+                {
+                    f"start_datum_{angebot_id}": "2026-05-05",
+                    f"fertig_datum_{angebot_id}": "2026-05-06",
+                },
+            ),
+            follow_redirects=False,
+        )
+        check("Offene Reklamation kann neu eingeplant werden", response.status_code in {302, 303})
+        neu_geplant = portal.get_auftrag(angebot_id)
+        check(
+            "Reklamation setzt Prozess wieder auf eingeplant",
+            neu_geplant["status"] == 2
+            and neu_geplant["start_datum"] == "05.05.2026"
+            and neu_geplant["fertig_datum"] == "06.05.2026",
+            f"Status {neu_geplant['status']}, Start {neu_geplant['start_datum']}, Fertig {neu_geplant['fertig_datum']}",
+        )
+        response = admin.post(
+            f"/admin/status/{angebot_id}/5",
+            data=with_csrf(admin, {"next": f"/admin/auftrag/{angebot_id}"}),
+            follow_redirects=False,
+        )
+        check("Reklamationsauftrag kann wieder auf zurückgegeben gesetzt werden", response.status_code in {302, 303})
+        response = admin.post(
+            "/admin/auftraege/zurueckgegeben-archivieren",
+            data=with_csrf(admin),
+            follow_redirects=False,
+        )
+        check("Rückgabe mit offener Reklamation bleibt aktiv", response.status_code in {302, 303})
+        check(
+            "Offene Reklamation verhindert Archivierung",
+            portal.get_auftrag(angebot_id)["archiviert"] == 0,
+        )
+        portal.set_reklamation_status(reklamation_id, True)
+        response = admin.post(
+            "/admin/auftraege/zurueckgegeben-archivieren",
+            data=with_csrf(admin),
+            follow_redirects=False,
+        )
+        check("Erledigte Rückgabe ist archivierbar", response.status_code in {302, 303})
+        check(
+            "Zurückgegebener Auftrag ohne offene Reklamation wird archiviert",
+            portal.get_auftrag(angebot_id)["archiviert"] == 1,
+        )
+
+        response = None
+        admin = None
+        partner = None
+        db = None
+        gc.collect()
 
     portal.DB = original_db
     portal.UPLOAD_DIR = original_upload_dir

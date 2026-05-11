@@ -1,279 +1,125 @@
 {% if mini_calendar %}
 <style>
-  .mini-calendar {
-    display:grid;
-    gap:12px;
+  .mini-calendar-card {
+    border:1px solid #e4d6c3;
+    border-radius:20px;
+    background:#fffdf9;
+    box-shadow:0 14px 36px rgba(64,47,25,.1);
   }
-  .mini-calendar-head {
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:12px;
-    flex-wrap:wrap;
-  }
+  .mini-calendar-head,
   .mini-calendar-grid {
     display:grid;
-    grid-template-columns:repeat(7, minmax(34px, 1fr));
+    grid-template-columns:repeat(7, minmax(0, 1fr));
     gap:6px;
   }
-  .mini-weekday {
-    color:#6b7280;
+  .mini-calendar-head span {
+    color:#6d7780;
     font-size:.78rem;
     font-weight:700;
     text-align:center;
-    text-transform:uppercase;
   }
   .mini-day {
     position:relative;
-    min-height:42px;
-    border:1px solid #e4d6c3;
-    border-radius:10px;
-    background:#fffaf2;
-    color:#152636;
-    font-weight:700;
-    text-align:center;
-    line-height:40px;
-  }
-  .mini-day-number {
-    position:relative;
-    z-index:1;
-  }
-  .mini-event-count {
-    display:none;
-  }
-  .mini-day-events {
-    display:none;
-  }
-  .mini-day.is-muted {
-    opacity:.34;
-  }
-  .mini-day.is-weekend {
-    background:#f6efe5;
-  }
-  .mini-day.is-today {
-    background:#111827;
-    border-color:#111827;
-    color:#fff;
-  }
-  .mini-day.is-holiday {
-    border-color:#dc3545;
-    box-shadow:inset 0 -4px 0 #dc3545;
-  }
-  .mini-day.has-betriebsurlaub {
-    box-shadow:inset 0 -4px 0 #0f766e;
-  }
-  .mini-day.is-holiday.has-betriebsurlaub {
-    box-shadow:inset 0 -4px 0 #dc3545, inset 0 -8px 0 #0f766e;
-  }
-  .mini-day.has-events::after {
-    content:"";
-    position:absolute;
-    left:50%;
-    bottom:7px;
-    width:6px;
-    height:6px;
-    border-radius:999px;
-    background:#2563eb;
-    transform:translateX(-50%);
-  }
-  .mini-calendar-legend {
+    min-height:38px;
     display:flex;
-    gap:10px 16px;
-    flex-wrap:wrap;
-    color:#5f6b78;
-    font-size:.9rem;
-  }
-  .mini-legend-dot {
-    display:inline-block;
-    width:12px;
-    height:4px;
-    margin-right:6px;
-    border-radius:999px;
-    vertical-align:middle;
-  }
-  .mini-legend-today { background:#111827; height:12px; }
-  .mini-legend-holiday { background:#dc3545; }
-  .mini-legend-vacation { background:#0f766e; }
-  .mini-legend-event { background:#2563eb; height:8px; width:8px; }
-  .mini-calendar-large {
-    gap:18px;
-  }
-  .mini-calendar-large .mini-calendar-head {
-    align-items:flex-start;
-  }
-  .mini-calendar-large .mini-calendar-grid {
-    grid-template-columns:repeat(7, minmax(72px, 1fr));
-    gap:8px;
-  }
-  .mini-calendar-large .mini-weekday {
-    font-size:.84rem;
-  }
-  .mini-calendar-large .mini-day {
-    min-height:108px;
-    display:grid;
-    grid-template-columns:minmax(0, 1fr) auto;
-    align-content:start;
-    gap:8px;
-    padding:10px 12px;
-    border-radius:12px;
-    font-size:1.05rem;
-    line-height:1.2;
-    text-align:left;
-  }
-  .mini-calendar-large .mini-day-number {
-    grid-column:1;
-  }
-  .mini-calendar-large .mini-event-count {
-    grid-column:2;
-    grid-row:1;
-  }
-  .mini-calendar-large .mini-day.has-events::after {
-    left:12px;
-    right:12px;
-    bottom:8px;
-    width:auto;
-    height:4px;
-    transform:none;
-  }
-  .mini-calendar-large .mini-event-count {
-    display:inline-flex;
     align-items:center;
     justify-content:center;
-    min-width:24px;
-    height:24px;
-    padding:0 7px;
+    border:1px solid #eadccb;
+    border-radius:12px;
+    background:#fffaf2;
+    color:#1c2732;
+    font-weight:700;
+  }
+  .mini-day.is-other-month {
+    color:#b4aa9b;
+    background:#f6efe4;
+  }
+  .mini-day.is-today {
+    background:#121820;
+    border-color:#121820;
+    color:#fff;
+  }
+  .mini-day.has-holiday {
+    box-shadow:inset 0 -4px 0 #dc3545;
+  }
+  .mini-day.has-vacation {
+    box-shadow:inset 0 -4px 0 #145d66;
+  }
+  .mini-day.has-holiday.has-vacation {
+    background:linear-gradient(180deg,#fffaf2 0 68%,#dc3545 68% 82%,#145d66 82% 100%);
+  }
+  .mini-day.has-events::after,
+  .mini-day.has-notes::before {
+    content:"";
+    position:absolute;
+    top:5px;
+    width:7px;
+    height:7px;
     border-radius:999px;
-    background:#2563eb;
-    color:#fff;
-    font-size:.78rem;
-    line-height:1;
   }
-  .mini-calendar-large .mini-day.is-today .mini-event-count {
-    background:#fff;
-    color:#111827;
+  .mini-day.has-events::after {
+    right:6px;
+    background:#0d6efd;
   }
-  .mini-calendar-large .mini-day-events {
-    grid-column:1 / -1;
-    display:grid;
-    gap:4px;
-    min-width:0;
+  .mini-day.has-notes::before {
+    left:6px;
+    background:#c78300;
   }
-  .mini-calendar-large .mini-event-name,
-  .mini-calendar-large .mini-event-more {
-    display:block;
-    max-width:100%;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
-    border-radius:7px;
-    padding:3px 6px;
-    background:rgba(37,99,235,.1);
-    color:#173f76;
-    font-size:.78rem;
-    font-weight:700;
-    line-height:1.2;
+  .mini-legend {
+    display:flex;
+    gap:12px;
+    flex-wrap:wrap;
+    color:#66737d;
+    font-size:.85rem;
   }
-  .mini-calendar-large .mini-event-name {
-    display:grid;
-    gap:1px;
+  .mini-legend span {
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
   }
-  .mini-calendar-large .mini-event-title,
-  .mini-calendar-large .mini-event-detail {
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
+  .mini-dot {
+    width:10px;
+    height:10px;
+    border-radius:999px;
+    display:inline-block;
+    background:#0d6efd;
   }
-  .mini-calendar-large .mini-event-detail {
-    color:#5f6b78;
-    font-size:.72rem;
-    font-weight:700;
-  }
-  .mini-calendar-large .mini-event-more {
-    background:rgba(17,24,39,.08);
-    color:#46515d;
-  }
-  .mini-calendar-large .mini-day.is-today .mini-event-name,
-  .mini-calendar-large .mini-day.is-today .mini-event-more {
-    background:rgba(255,255,255,.16);
-    color:#fff;
-  }
-  .mini-calendar-large .mini-day.is-today .mini-event-detail {
-    color:#fff;
-  }
-  @media (max-width: 575.98px) {
-    .mini-calendar-large .mini-calendar-grid {
-      grid-template-columns:repeat(7, minmax(38px, 1fr));
-      gap:5px;
-    }
-    .mini-calendar-large .mini-day {
-      min-height:66px;
-      padding:7px;
-      font-size:.95rem;
-    }
-    .mini-calendar-large .mini-day-events {
-      display:none;
-    }
-    .mini-calendar-large .mini-event-count {
-      min-width:18px;
-      height:18px;
-      padding:0 4px;
-      font-size:.68rem;
-    }
-  }
+  .mini-dot.holiday { background:#dc3545; }
+  .mini-dot.vacation { background:#145d66; }
+  .mini-dot.note { background:#c78300; }
 </style>
-<section class="{{ mini_calendar.get('section_class', 'panel mb-4 mini-calendar') }}" aria-label="{{ mini_calendar.get('aria_label', 'Monatskalender') }}">
-  <div class="mini-calendar-head">
+
+<div class="mini-calendar-card p-3 p-lg-4 mb-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
     <div>
-      <h4 class="mb-1">{{ mini_calendar.get('heading') or ('Monatsblick ' ~ mini_calendar['title']) }}</h4>
-      <div class="text-muted">{{ mini_calendar.get('subtitle') or ('Heute: ' ~ mini_calendar['today_text']) }}</div>
+      <h4 class="mb-1">Monatsblick {{ mini_calendar['title'] }}</h4>
+      <div class="text-muted small">Heute: {{ mini_calendar['today_text'] }}</div>
     </div>
     <div class="d-flex gap-2">
-      {% if mini_calendar['prev_url'] %}
-      <a href="{{ mini_calendar['prev_url'] }}" class="btn btn-outline-dark btn-sm">Zurück</a>
-      {% endif %}
-      {% if mini_calendar['next_url'] %}
-      <a href="{{ mini_calendar['next_url'] }}" class="btn btn-outline-dark btn-sm">Weiter</a>
-      {% endif %}
+      {% if mini_calendar['prev_url'] %}<a class="btn btn-soft btn-sm" href="{{ mini_calendar['prev_url'] }}">Zurück</a>{% endif %}
+      {% if mini_calendar['next_url'] %}<a class="btn btn-soft btn-sm" href="{{ mini_calendar['next_url'] }}">Weiter</a>{% endif %}
     </div>
   </div>
-  <div class="mini-calendar-grid">
-    {% for weekday in mini_calendar['weekdays'] %}
-    <div class="mini-weekday">{{ weekday }}</div>
+  <div class="mini-calendar-head mb-2">
+    {% for label in mini_calendar['weekdays'] %}
+      <span>{{ label }}</span>
     {% endfor %}
+  </div>
+  <div class="mini-calendar-grid">
     {% for week in mini_calendar['weeks'] %}
       {% for day in week %}
-      <div
-        class="mini-day{% if not day['in_month'] %} is-muted{% endif %}{% if day['is_weekend'] %} is-weekend{% endif %}{% if day['is_today'] %} is-today{% endif %}{% if day['is_holiday'] %} is-holiday{% endif %}{% if day['has_betriebsurlaub'] %} has-betriebsurlaub{% endif %}{% if day['has_events'] %} has-events{% endif %}"
-        title="{{ day['datum_text'] }}{% if day['tooltip'] %} · {{ day['tooltip'] }}{% endif %}"
-      >
-        <span class="mini-day-number">{{ day['tag'] }}</span>
-        {% if day['event_count'] and mini_calendar.get('show_event_count', True) %}
-        <span class="mini-event-count">{{ day['event_count'] }}</span>
-        {% endif %}
-        {% if day['events'] %}
-        <span class="mini-day-events">
-          {% for event in day['events'] %}
-          <span class="mini-event-name" title="{{ event['tooltip'] }}">
-            <span class="mini-event-title">{{ event.get('display_name') or event['party_name'] }}</span>
-            {% if event.get('display_detail') %}
-            <span class="mini-event-detail">{{ event['display_detail'] }}</span>
-            {% endif %}
-          </span>
-          {% endfor %}
-          {% if day['more_event_count'] and mini_calendar.get('show_more_events', True) %}
-          <span class="mini-event-more">+{{ day['more_event_count'] }} weitere</span>
-          {% endif %}
-        </span>
-        {% endif %}
-      </div>
+        <div
+          class="mini-day {{ '' if day['in_month'] else 'is-other-month' }} {{ 'is-today' if day['is_today'] else '' }} {{ 'has-holiday' if day['is_holiday'] else '' }} {{ 'has-vacation' if day['has_betriebsurlaub'] else '' }} {{ 'has-events' if day['has_events'] else '' }} {{ 'has-notes' if day['has_notes'] else '' }}"
+          title="{{ day['tooltip'] or day['datum_text'] }}"
+        >{{ day['tag'] }}</div>
       {% endfor %}
     {% endfor %}
   </div>
-  <div class="mini-calendar-legend">
-    <span><i class="mini-legend-dot mini-legend-today"></i>Heute</span>
-    <span><i class="mini-legend-dot mini-legend-holiday"></i>Feiertag</span>
-    <span><i class="mini-legend-dot mini-legend-vacation"></i>Betriebsurlaub</span>
-    <span><i class="mini-legend-dot mini-legend-event"></i>{{ mini_calendar.get('event_label', 'Fahrzeugtermin') }}</span>
+  <div class="mini-legend mt-3">
+    <span><i class="mini-dot holiday"></i>Feiertag</span>
+    <span><i class="mini-dot vacation"></i>Betriebsurlaub</span>
+    <span><i class="mini-dot"></i>{{ mini_calendar.get('event_label', 'Fahrzeugtermin') }}</span>
+    {% if mini_calendar['show_notes'] %}<span><i class="mini-dot note"></i>Notiz</span>{% endif %}
   </div>
-</section>
+</div>
 {% endif %}
