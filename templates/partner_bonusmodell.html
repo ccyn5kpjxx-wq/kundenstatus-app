@@ -114,6 +114,26 @@
       font-size:.78rem;
       white-space:nowrap;
     }
+    .month-switch {
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+    .archive-invoice-form {
+      display:grid;
+      grid-template-columns:minmax(180px,1fr) auto;
+      gap:8px;
+      align-items:end;
+      min-width:min(100%,360px);
+    }
+    .archive-invoice-form .form-control {
+      min-height:44px;
+    }
+    .archive-bonus-note {
+      color:#6c6255;
+      font-size:.88rem;
+      margin-top:.35rem;
+    }
     .btn { min-height:44px; font-size:16px; }
     @media (max-width: 575.98px) {
       .shell { padding:14px; }
@@ -121,6 +141,12 @@
       .bonus-panel { padding:20px 16px; border-radius:18px; }
       h1 { font-size:1.8rem; line-height:1.12; }
       .panel .btn { width:100%; }
+      .month-switch,
+      .archive-invoice-form {
+        grid-template-columns:1fr;
+        display:grid;
+        width:100%;
+      }
       .bonus-tier-grid,
       .bonus-summary,
       .bonus-order {
@@ -159,7 +185,92 @@
       </div>
     </div>
 
+    {% if bonus_monate|length > 1 %}
+    <div class="panel mb-4">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+        <div>
+          <h4 class="mb-1">Bonusmonat</h4>
+          <div class="text-muted">Monatsstand aus gespeicherten Rechnungen und Rückgaben.</div>
+        </div>
+        <div class="month-switch">
+          {% for monat in bonus_monate %}
+          <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug'], monat=monat['key']) }}" class="btn {{ 'btn-dark' if monat['active'] else 'btn-outline-dark' }}">{{ monat['label'] }}</a>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
     {% include "_partner_bonusmodell_panel.html" %}
+
+    <div class="panel" id="archivierte-auftraege">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h4 class="mb-1">Archivierte Aufträge</h4>
+          <div class="text-muted">Rechnung je Auftrag hochladen, damit der Netto-Betrag im Bonusmodell zählt.</div>
+        </div>
+        <span class="badge rounded-pill text-bg-light">{{ archivierte_auftraege|length }} Auftrag/Aufträge</span>
+      </div>
+      {% if archivierte_auftraege %}
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Fahrzeug</th>
+              <th>Monat</th>
+              <th>Bonus/Rechnung</th>
+              <th>Rechnung hochladen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in archivierte_auftraege %}
+            <tr>
+              <td>
+                <div class="fw-bold">{{ a['fahrzeug'] or 'Fahrzeug' }}</div>
+                {% if a['kennzeichen'] %}<div class="small text-muted">{{ a['kennzeichen'] }}</div>{% endif %}
+                {% if a['kunde_name'] %}<div class="small text-muted">{{ a['kunde_name'] }}</div>{% endif %}
+                <a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=a['id']) }}" class="btn btn-outline-dark btn-sm mt-2">Öffnen</a>
+              </td>
+              <td>
+                {% if a['bonus_monat_label'] %}
+                <div class="fw-semibold">{{ a['bonus_monat_label'] }}</div>
+                {% endif %}
+                {% if a['letzter_termin_label'] %}
+                <div class="small text-muted">Rückgabe/letzter Termin {{ a['letzter_termin_label'] }}</div>
+                {% else %}
+                <div class="small text-muted">Ohne Rückgabedatum</div>
+                {% endif %}
+                {% if a['bonus_monat_key'] %}
+                <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug'], monat=a['bonus_monat_key']) }}" class="btn btn-outline-dark btn-sm mt-2">Monat öffnen</a>
+                {% endif %}
+              </td>
+              <td>
+                {% if a['bonus_basis_label'] %}
+                <div class="fw-bold">{{ a['bonus_basis_label'] }} netto</div>
+                <div class="small text-muted">{{ a['bonus_basis_quelle'] }}{% if a['bonus_preis_aktualisiert_am'] %} · {{ a['bonus_preis_aktualisiert_am'] }}{% endif %}</div>
+                {% else %}
+                <div class="fw-bold text-danger">Preis offen</div>
+                <div class="small text-muted">Nach dem Upload aktualisiert sich der Bonus.</div>
+                {% endif %}
+                {% if a['rechnung_nummer'] %}<div class="archive-bonus-note">Rechnung {{ a['rechnung_nummer'] }}</div>{% endif %}
+              </td>
+              <td>
+                <form method="POST" action="{{ url_for('partner_bonusrechnung_upload', slug=autohaus['slug'], auftrag_id=a['id']) }}" enctype="multipart/form-data" class="archive-invoice-form">
+                  <input type="hidden" name="next" value="{{ url_for('partner_bonusmodell', slug=autohaus['slug'], monat=a['bonus_monat_key'] or bonusmodell['monat_key'], _anchor='archivierte-auftraege') }}">
+                  <input type="file" name="bonusrechnung" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.txt,.docx,.xlsx,image/*,application/pdf,text/plain" required>
+                  <button type="submit" class="btn btn-dark" data-loading-message="Bitte kurz warten. Die Rechnung wird gelesen und der Bonusbetrag aktualisiert.">Hochladen</button>
+                </form>
+                <div class="archive-bonus-note">Übernommen wird der erkannte Netto-Gesamtbetrag.</div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="text-muted">Noch keine archivierten Aufträge.</div>
+      {% endif %}
+    </div>
   </div>
 
   {% include "ki_assistent_widget.html" ignore missing %}

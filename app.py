@@ -6311,6 +6311,22 @@ def bonus_verrechnung_date(reference_date=None):
     return monat_ende
 
 
+def parse_bonusmonat(value):
+    text = clean_text(value)
+    match = re.fullmatch(r"(\d{4})-(\d{1,2})", text)
+    if not match:
+        return None
+    try:
+        return date(int(match.group(1)), int(match.group(2)), 1)
+    except ValueError:
+        return None
+
+
+def bonusmonat_label(reference_date):
+    reference = reference_date or date.today()
+    return f"{MONATSNAMEN.get(reference.month, reference.month)} {reference.year}"
+
+
 def bonus_verrechnung_label(reference_date=None, bonus_amount=0):
     if not positive_money_amount(bonus_amount):
         return "unter Schwelle"
@@ -6346,6 +6362,91 @@ def month_bounds(reference_date=None):
     return start, ende
 
 
+def parse_bonus_date(value):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    cleaned = clean_text(value)
+    if not cleaned:
+        return None
+    return parse_date(cleaned) or parse_date(cleaned[:10])
+
+
+def auftrag_bonus_rechnungsdatum(auftrag):
+    for feld in ("rechnung_geschrieben_am", "bonus_preis_aktualisiert_am"):
+        parsed = parse_bonus_date((auftrag or {}).get(feld))
+        if parsed:
+            return parsed
+    return None
+
+
+def auftrag_bonus_reference_date(auftrag):
+    return (
+        auftrag_bonus_rechnungsdatum(auftrag)
+        or (auftrag or {}).get("abholtermin_obj")
+        or parse_bonus_date((auftrag or {}).get("abholtermin"))
+    )
+
+
+def build_bonus_month_options(auftraege, selected_reference=None):
+    months = {}
+    selected_start, _ = month_bounds(selected_reference or date.today())
+
+    def add_month(reference_date):
+        if not reference_date:
+            return
+        month_start, _ = month_bounds(reference_date)
+        key = month_start.strftime("%Y-%m")
+        months[key] = {
+            "key": key,
+            "label": bonusmonat_label(month_start),
+            "active": key == selected_start.strftime("%Y-%m"),
+        }
+
+    add_month(date.today())
+    add_month(selected_reference)
+    for auftrag in auftraege or []:
+        add_month(auftrag_bonus_reference_date(auftrag))
+
+    return [
+        months[key]
+        for key in sorted(months.keys(), reverse=True)
+    ]
+
+
+def prepare_archivierte_bonus_auftraege(auftraege):
+    archivierte = []
+    for auftrag in auftraege or []:
+        if not (auftrag or {}).get("archiviert"):
+            continue
+        reference = (
+            auftrag_bonus_reference_date(auftrag)
+            or auftrag.get("fertig_datum_obj")
+            or auftrag.get("start_datum_obj")
+            or auftrag.get("annahme_datum_obj")
+        )
+        if reference:
+            auftrag["bonus_monat_key"] = reference.strftime("%Y-%m")
+            auftrag["bonus_monat_label"] = bonusmonat_label(reference)
+            auftrag["letzter_termin_obj"] = reference
+            auftrag["letzter_termin_label"] = reference.strftime(DATE_FMT)
+        else:
+            auftrag["bonus_monat_key"] = ""
+            auftrag["bonus_monat_label"] = ""
+            auftrag["letzter_termin_obj"] = date.min
+            auftrag["letzter_termin_label"] = ""
+        archivierte.append(auftrag)
+    archivierte.sort(
+        key=lambda item: (
+            item.get("letzter_termin_obj") or date.min,
+            int(item.get("id") or 0),
+        ),
+        reverse=True,
+    )
+    return archivierte
+
+
 def build_bonusmodell(auftraege, reference_date=None):
     reference = reference_date or date.today()
     monat_start, monat_ende = month_bounds(reference)
@@ -6358,22 +6459,26 @@ def build_bonusmodell(auftraege, reference_date=None):
             status = int((auftrag or {}).get("status") or 0)
         except Exception:
             status = 0
-        if status < 5:
+        rechnungsbetrag = positive_money_amount((auftrag or {}).get("bonus_netto_betrag"))
+        if status < 5 and not rechnungsbetrag:
             continue
-        rueckgabe_datum = (auftrag or {}).get("abholtermin_obj") or parse_date((auftrag or {}).get("abholtermin"))
-        if not rueckgabe_datum or rueckgabe_datum < monat_start or rueckgabe_datum >= monat_ende:
+        bonus_datum = auftrag_bonus_reference_date(auftrag)
+        if not bonus_datum or bonus_datum < monat_start or bonus_datum >= monat_ende:
             continue
 
         betrag, quelle, quelle_key = auftrag_bonus_preis(auftrag)
+        datum_label = "Rechnung vom" if rechnungsbetrag else "Zurückgegeben am"
         item = {
             "auftrag": auftrag,
-            "datum": rueckgabe_datum,
-            "datum_text": rueckgabe_datum.strftime(DATE_FMT),
+            "datum": bonus_datum,
+            "datum_text": bonus_datum.strftime(DATE_FMT),
+            "datum_label": datum_label,
             "betrag": betrag,
             "betrag_label": format_bonus_money(betrag) if betrag else "",
             "quelle": quelle,
             "quelle_key": quelle_key,
             "preis_fehlt": betrag is None,
+            "rechnung_zaehlt": bool(rechnungsbetrag),
         }
         if betrag is None:
             offene_preise.append(item)
@@ -6404,7 +6509,8 @@ def build_bonusmodell(auftraege, reference_date=None):
         stufen.append(item)
 
     return {
-        "monat_label": f"{MONATSNAMEN.get(reference.month, reference.month)} {reference.year}",
+        "monat_key": monat_start.strftime("%Y-%m"),
+        "monat_label": bonusmonat_label(reference),
         "umsatz_netto": round(monatsumsatz, 2),
         "umsatz_netto_label": format_bonus_money(monatsumsatz),
         "bonus_satz": aktive_stufe["satz"],
@@ -6425,6 +6531,7 @@ def build_bonusmodell(auftraege, reference_date=None):
         "offene_preise": offene_preise,
         "offene_preise_count": len(offene_preise),
         "gezaehlte_auftraege_count": sum(1 for item in bonus_auftraege if not item["preis_fehlt"]),
+        "gezaehlte_rechnungen_count": sum(1 for item in bonus_auftraege if item.get("rechnung_zaehlt")),
     }
 
 
@@ -6432,7 +6539,7 @@ def build_invoice_bonusmodell(auftrag, invoice_net_amount=None):
     autohaus_id = int((auftrag or {}).get("autohaus_id") or 0)
     if autohaus_id <= 0:
         return {}
-    reference = parse_date((auftrag or {}).get("abholtermin")) or date.today()
+    reference = auftrag_bonus_reference_date(auftrag) or date.today()
     effective_amount = positive_money_amount(invoice_net_amount) or positive_money_amount(
         (auftrag or {}).get("bonus_netto_betrag")
     )
@@ -6481,7 +6588,7 @@ def build_invoice_bonus_transparency(auftrag, invoice_net_amount=None):
     else:
         lines.append("Nächste Stufe: höchste Bonusstufe erreicht")
     lines.append(
-        "Berechnung: Gezählt werden zurückgegebene Aufträge dieses Monats mit hinterlegtem Netto-Rechnungsbetrag."
+        "Berechnung: Gezählt werden gespeicherte Werkstatt-Rechnungen dieses Monats; zurückgegebene Aufträge ohne Rechnung bleiben als Preisprüfung sichtbar."
     )
     counted_items = [item for item in bonusmodell.get("auftraege", []) if not item.get("preis_fehlt")]
     if counted_items:
@@ -6494,7 +6601,7 @@ def build_invoice_bonus_transparency(auftrag, invoice_net_amount=None):
                 clean_text(a.get("kennzeichen")),
             ]
             title = " · ".join(part for part in title_parts if clean_text(part))
-            lines.append(f"- {item['datum_text']} · {title} · {item['betrag_label']}")
+            lines.append(f"- {item['datum_label']} {item['datum_text']} · {title} · {item['betrag_label']}")
         if len(counted_items) > 8:
             lines.append(f"- weitere {len(counted_items) - 8} Auftrag/Aufträge im Monatslauf")
     if bonusmodell.get("offene_preise_count"):
@@ -6890,12 +6997,17 @@ def save_werkstatt_rechnung_upload(auftrag_id, files):
     }
 
 
-def save_bonusrechnung_upload(auftrag_id, files):
+def save_bonusrechnung_upload(auftrag_id, files, quelle="intern", notiz=""):
     saved = 0
     best_amount = None
     best_source = ""
     best_filename = ""
+    best_invoice_number = ""
     errors = []
+    quelle = clean_text(quelle) or "intern"
+    if quelle not in {"intern", "autohaus"}:
+        quelle = "intern"
+    notiz = clean_text(notiz)[:500]
     db = get_db()
     timestamp = now_str()
     try:
@@ -6925,14 +7037,21 @@ def save_bonusrechnung_upload(auftrag_id, files):
         structured_text = structured_analysis_text(bundle.get("structured"), original_name) if bundle.get("structured") else ""
         invoice_text = "\n".join(part for part in [analysis_text, structured_text, original_name] if clean_text(part))
         amount, amount_source = extract_invoice_total_amount(invoice_text)
+        invoice_number = extract_invoice_number(invoice_text)
         extrakt_kurz = ""
         if amount:
             extrakt_kurz = f"Bonus-Rechnung: {format_bonus_money(amount)} erkannt ({amount_source})."
+            if invoice_number:
+                extrakt_kurz = f"{extrakt_kurz} Rechnungsnummer {invoice_number}."
             best_amount = amount
             best_source = amount_source
             best_filename = original_name
+            if invoice_number:
+                best_invoice_number = invoice_number
         else:
             extrakt_kurz = summarize_document_text(analysis_text, original_name) or "Rechnung gespeichert, Gesamtbetrag bitte prüfen."
+            if invoice_number:
+                extrakt_kurz = f"{extrakt_kurz} Rechnungsnummer {invoice_number}."
         analyse_hinweis = clean_text(bundle.get("hint"))
         if bundle.get("status") == "error" and analyse_hinweis:
             errors.append(analyse_hinweis)
@@ -6942,7 +7061,7 @@ def save_bonusrechnung_upload(auftrag_id, files):
             INSERT INTO dateien
             (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, dokument_typ, notiz,
              extrahierter_text, extrakt_kurz, analyse_quelle, analyse_json, analyse_hinweis, hochgeladen_am)
-            VALUES (?, NULL, ?, ?, ?, ?, 'intern', 'bonusrechnung', 'Rechnung', '', ?, ?, ?, ?, ?, ?)
+            VALUES (?, NULL, ?, ?, ?, ?, ?, 'bonusrechnung', 'Rechnung', ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 auftrag_id,
@@ -6950,6 +7069,8 @@ def save_bonusrechnung_upload(auftrag_id, files):
                 stored_name,
                 mime_type,
                 target.stat().st_size,
+                quelle,
+                notiz,
                 analysis_text,
                 extrakt_kurz,
                 clean_text(bundle.get("source")),
@@ -6966,12 +7087,21 @@ def save_bonusrechnung_upload(auftrag_id, files):
             UPDATE auftraege
             SET bonus_netto_betrag=?,
                 bonus_preis_aktualisiert_am=?,
+                rechnung_nummer=CASE WHEN ? != '' THEN ? ELSE rechnung_nummer END,
                 rechnung_status=CASE WHEN COALESCE(rechnung_status, '') IN ('', 'offen') THEN 'geschrieben' ELSE rechnung_status END,
                 rechnung_geschrieben_am=CASE WHEN COALESCE(rechnung_geschrieben_am, '')='' THEN ? ELSE rechnung_geschrieben_am END,
                 geaendert_am=?
             WHERE id=?
             """,
-            (best_amount, timestamp, timestamp, timestamp, auftrag_id),
+            (
+                best_amount,
+                timestamp,
+                best_invoice_number,
+                best_invoice_number,
+                timestamp,
+                timestamp,
+                auftrag_id,
+            ),
         )
     db.commit()
     db.close()
@@ -6980,6 +7110,7 @@ def save_bonusrechnung_upload(auftrag_id, files):
         "amount": best_amount,
         "source": best_source,
         "filename": best_filename,
+        "invoice_number": best_invoice_number,
         "error": errors[0] if errors else "",
     }
 
@@ -13617,6 +13748,7 @@ def save_partner_standard_uploads(auftrag_id, files, upload_note="", success_mes
         )
     return flash_upload_analysis_result(upload_result, success_message)
 
+
 def get_allowed_finish_uploads(files):
     uploads = []
     allowed = IMAGE_EXTENSIONS | {".pdf"}
@@ -18127,13 +18259,73 @@ def partner_bonusmodell(slug):
     if redirect_response:
         return redirect_response
     alle_auftraege = list_auftraege(autohaus["id"], include_archived=True)
+    bonus_reference = parse_bonusmonat(request.args.get("monat")) or date.today()
     return render_template(
         "partner_bonusmodell.html",
         autohaus=autohaus,
-        bonusmodell=build_bonusmodell(alle_auftraege),
+        bonusmodell=build_bonusmodell(alle_auftraege, bonus_reference),
+        bonus_monate=build_bonus_month_options(alle_auftraege, bonus_reference),
+        archivierte_auftraege=prepare_archivierte_bonus_auftraege(alle_auftraege),
         rahmenvertrag=rahmenvertrag_context(autohaus),
         postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
     )
+
+
+@app.route("/partner/<slug>/auftrag/<int:auftrag_id>/bonusrechnung", methods=["POST"])
+def partner_bonusrechnung_upload(slug, auftrag_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
+        abort(404)
+
+    reference = auftrag_bonus_reference_date(auftrag) or date.today()
+    fallback_url = url_for(
+        "partner_bonusmodell",
+        slug=slug,
+        monat=reference.strftime("%Y-%m"),
+        _anchor="archivierte-auftraege",
+    )
+    next_url = clean_text(request.form.get("next"))
+    redirect_url = next_url if next_url.startswith(f"/partner/{slug}/bonusmodell") else fallback_url
+    dateien = get_allowed_uploads(request.files.getlist("bonusrechnung"))
+    if not dateien:
+        flash("Bitte eine Rechnung als PDF, Bild, TXT, DOCX oder XLSX auswählen.", "warning")
+        return redirect(redirect_url)
+
+    result = save_bonusrechnung_upload(
+        auftrag_id,
+        dateien,
+        quelle="autohaus",
+        notiz="Vom Autohaus im Bonusmodell hochgeladen.",
+    )
+    if result.get("amount"):
+        amount_label = format_bonus_money(result["amount"])
+        details = []
+        if result.get("invoice_number"):
+            details.append(f"Rechnungsnummer {result['invoice_number']}")
+        if result.get("filename"):
+            details.append(result["filename"])
+        suffix = f" ({', '.join(details)})" if details else ""
+        add_benachrichtigung(
+            auftrag_id,
+            "Bonusrechnung hochgeladen",
+            f"Das Autohaus hat eine Rechnung hochgeladen. {amount_label} netto wurde als Bonus-/Rechnungsbetrag übernommen.",
+            quelle="autohaus",
+        )
+        flash(
+            f"Rechnung gespeichert. {amount_label} netto wurde für den Bonus übernommen{suffix}.",
+            "success",
+        )
+    elif result.get("saved"):
+        message = "Rechnung gespeichert, aber der Netto-Gesamtbetrag wurde nicht sicher erkannt. Bitte Betrag manuell prüfen."
+        if result.get("error"):
+            message += f" Hinweis: {clean_text(result['error'])[:220]}"
+        flash(message, "warning")
+    else:
+        flash(result.get("error") or "Rechnung konnte nicht gespeichert werden.", "danger")
+    return redirect(redirect_url)
 
 
 @app.route("/partner/<slug>/rahmenvertrag-anfragen", methods=["POST"])

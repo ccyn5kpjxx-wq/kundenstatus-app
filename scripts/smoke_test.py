@@ -413,6 +413,44 @@ def main():
         else "[FEHLER] Bonusmodell berechnet das Beispiel nicht korrekt"
     )
     ok &= bonus_ok
+    bonus_rechnungen = portal.build_bonusmodell(
+        [
+            {
+                "id": 999101,
+                "status": 2,
+                "fahrzeug": "Smoke Rechnung 1",
+                "kennzeichen": "MOS-R 1",
+                "rechnung_status": "geschrieben",
+                "rechnung_geschrieben_am": "11.05.2026 22:33",
+                "bonus_netto_betrag": "580,00",
+                "werkstatt_angebot_preis": "",
+            },
+            {
+                "id": 999102,
+                "status": 3,
+                "fahrzeug": "Smoke Rechnung 2",
+                "kennzeichen": "MOS-R 2",
+                "rechnung_status": "geschrieben",
+                "rechnung_geschrieben_am": "12.05.2026 09:15",
+                "bonus_netto_betrag": "4.500,00",
+                "werkstatt_angebot_preis": "",
+            },
+        ],
+        reference_date=date(2026, 5, 20),
+    )
+    bonus_rechnungen_ok = (
+        bonus_rechnungen["umsatz_netto_label"] == "5.080,00 €"
+        and bonus_rechnungen["bonus_satz_label"] == "3 %"
+        and bonus_rechnungen["bonus_netto_label"] == "152,40 €"
+        and bonus_rechnungen["gezaehlte_auftraege_count"] == 2
+        and bonus_rechnungen["auftraege"][0]["datum_label"] == "Rechnung vom"
+    )
+    print(
+        "[OK] Bonusmodell addiert Rechnungen aus mehreren Aufträgen"
+        if bonus_rechnungen_ok
+        else "[FEHLER] Bonusmodell addiert Rechnungen aus mehreren Aufträgen nicht korrekt"
+    )
+    ok &= bonus_rechnungen_ok
     external_client = portal.app.test_client()
     with external_client.session_transaction(base_url="https://werkstatt.example.test") as session:
         session["admin"] = True
