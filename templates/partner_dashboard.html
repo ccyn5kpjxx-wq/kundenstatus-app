@@ -27,6 +27,85 @@
     tr[data-select-row] { cursor:pointer; }
     tr[data-select-row].is-selected { background:#f8f1e6; }
     .selection-badge { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid #d9cab4; border-radius:999px; background:#fffaf2; }
+    .live-clock-stage {
+      position:relative;
+      overflow:hidden;
+      border-radius:24px;
+      padding:24px 28px;
+      color:#fff;
+      background:
+        linear-gradient(135deg, rgba(19,38,53,.96), rgba(20,93,102,.94) 58%, rgba(127,70,36,.9)),
+        repeating-linear-gradient(90deg, rgba(255,255,255,.08) 0 1px, transparent 1px 48px);
+      box-shadow:0 18px 46px rgba(30,38,45,.2);
+    }
+    .live-clock-stage::after {
+      content:"";
+      position:absolute;
+      inset:0;
+      background:linear-gradient(90deg, rgba(255,255,255,.1), transparent 38%, rgba(0,0,0,.12));
+      pointer-events:none;
+    }
+    .live-clock-stage > * {
+      position:relative;
+      z-index:1;
+    }
+    .live-clock-top {
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:18px;
+      flex-wrap:wrap;
+    }
+    .live-clock-kicker {
+      text-transform:uppercase;
+      letter-spacing:0;
+      font-size:.76rem;
+      font-weight:700;
+      color:rgba(255,255,255,.72);
+      margin-bottom:6px;
+    }
+    .live-clock-title {
+      font-family:"Space Grotesk",sans-serif;
+      font-size:3.1rem;
+      font-weight:700;
+      line-height:1;
+      letter-spacing:0;
+    }
+    .live-clock-date {
+      color:rgba(255,255,255,.78);
+      margin-top:8px;
+      font-weight:700;
+      font-size:1rem;
+    }
+    .clock-time {
+      font-family:"Space Grotesk",sans-serif;
+      font-size:2.8rem;
+      line-height:1;
+      font-weight:700;
+      letter-spacing:0;
+      font-variant-numeric:tabular-nums;
+      text-align:right;
+      overflow-wrap:anywhere;
+    }
+    .clock-subline {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      color:rgba(255,255,255,.78);
+      margin-top:10px;
+      font-weight:700;
+    }
+    .clock-subline span {
+      display:inline-flex;
+      align-items:center;
+      min-height:32px;
+      padding:.25rem .62rem;
+      border:1px solid rgba(255,255,255,.2);
+      border-radius:999px;
+      background:rgba(255,255,255,.1);
+    }
     .priority-panel {
       background:
         radial-gradient(circle at 8% 10%, rgba(43,128,139,.14), transparent 30%),
@@ -95,6 +174,16 @@
       .hint-row form .btn {
         width:100%;
       }
+      .live-clock-stage { padding:20px 18px; border-radius:20px; }
+      .live-clock-top { align-items:flex-start; }
+      .live-clock-title { font-size:2.35rem; }
+      .clock-time {
+        width:100%;
+        font-size:2rem;
+        text-align:left;
+        margin-top:18px;
+      }
+      .clock-subline { justify-content:flex-start; }
       .bonus-tier-grid,
       .bonus-summary,
       .bonus-order {
@@ -149,6 +238,23 @@
       <div class="alert alert-{{ cat }} mb-4">{{ msg }}</div>
       {% endfor %}
     {% endwith %}
+
+    <div class="live-clock-stage mb-4" data-dashboard-clock>
+      <div class="live-clock-top">
+        <div>
+          <div class="live-clock-kicker">Live-Uhr</div>
+          <div class="live-clock-title">{{ autohaus['portal_label'] }}</div>
+          <div class="live-clock-date" data-clock-date>Heute</div>
+        </div>
+        <div>
+          <div class="clock-time" data-clock-time>--:--:--</div>
+          <div class="clock-subline">
+            <span data-clock-weekday>Heute</span>
+            <span data-clock-zone>Europe/Berlin</span>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div class="panel mb-4">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
@@ -476,6 +582,46 @@
     </div>
   </div>
   <script>
+    (() => {
+      const clock = document.querySelector('[data-dashboard-clock]');
+      if (!clock) {
+        return;
+      }
+      const timeEl = clock.querySelector('[data-clock-time]');
+      const dateEl = clock.querySelector('[data-clock-date]');
+      const weekdayEl = clock.querySelector('[data-clock-weekday]');
+      const timeFormatter = new Intl.DateTimeFormat('de-DE', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+      const dateFormatter = new Intl.DateTimeFormat('de-DE', {
+        weekday: 'long',
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+      });
+      const weekdayFormatter = new Intl.DateTimeFormat('de-DE', {
+        weekday: 'long',
+      });
+
+      const updateClock = () => {
+        const now = new Date();
+        if (timeEl) {
+          timeEl.textContent = timeFormatter.format(now);
+        }
+        if (dateEl) {
+          dateEl.textContent = dateFormatter.format(now);
+        }
+        if (weekdayEl) {
+          weekdayEl.textContent = weekdayFormatter.format(now);
+        }
+      };
+
+      updateClock();
+      window.setInterval(updateClock, 1000);
+    })();
+
     document.querySelectorAll('[data-bulk-form]').forEach((form) => {
       const selectAll = form.querySelector('[data-select-all]');
       const items = Array.from(form.querySelectorAll('[data-select-item]'));
