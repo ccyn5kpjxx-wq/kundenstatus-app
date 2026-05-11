@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ autohaus['portal_label'] }} - Postfach</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background:#f4f1ea; font-family:"DM Sans",sans-serif; color:#132635; }
+    h1,h2,h3,h4,h5 { font-family:"Space Grotesk",sans-serif; }
+    .shell { max-width:1040px; margin:0 auto; padding:32px 16px; }
+    .panel { background:#fffdf9; border:1px solid #e4d6c3; border-radius:22px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
+    .message { border:1px solid #e4d6c3; border-radius:16px; background:#fffaf2; padding:18px; }
+    .message.is-unread { border-color:#e2b84b; background:#fff7db; }
+    .message-title { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .message-title a { color:#132635; text-decoration:none; }
+    .message-title a:hover { text-decoration:underline; }
+    .message-body { color:#3e4752; overflow-wrap:anywhere; }
+    .btn { min-height:42px; }
+    @media (max-width:575.98px) {
+      .shell { padding:14px; }
+      .panel { padding:20px 16px; border-radius:18px; }
+      .message-title { display:grid; grid-template-columns:1fr; }
+      .message form, .message .btn { width:100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+      <div class="alert alert-{{ cat }} mb-4">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <div class="panel mb-4">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+        <div>
+          <div class="text-muted">{{ autohaus['portal_label'] }}</div>
+          <h1 class="mb-2">Postfach</h1>
+          <div class="text-muted">Nachrichten zu Status, Bildern, Unterlagen und Terminänderungen.</div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zurück zum Dashboard</a>
+          <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}" class="btn btn-dark">Neues Fahrzeug</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-3">
+        <h4 class="mb-0">Nachrichten</h4>
+        <span class="badge text-bg-warning">{{ postfach_ungelesen }} ungelesen</span>
+      </div>
+      {% if benachrichtigungen %}
+      <div class="d-grid gap-3">
+        {% for hinweis in benachrichtigungen %}
+        <div class="message {% if not hinweis['gelesen'] %}is-unread{% endif %}">
+          <div class="message-title">
+            <div>
+              <a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=hinweis['auftrag_id']) }}" class="fw-bold">
+                {{ hinweis['titel'] }}
+              </a>
+              <div class="small text-muted">
+                {{ hinweis['fahrzeug'] }}{% if hinweis['kennzeichen'] %} · {{ hinweis['kennzeichen'] }}{% endif %}
+                {% if hinweis['auftragsnummer'] %} · Auftrag {{ hinweis['auftragsnummer'] }}{% endif %}
+              </div>
+            </div>
+            <div class="small text-muted">{{ hinweis['erstellt_am'] }}</div>
+          </div>
+          <div class="message-body mt-2">{{ hinweis['nachricht'] }}</div>
+          <div class="d-flex gap-2 flex-wrap mt-3">
+            {% if not hinweis['gelesen'] %}
+            <form method="post" action="{{ url_for('partner_hinweis_gelesen', slug=autohaus['slug'], hinweis_id=hinweis['id']) }}">
+              {{ csrf_field()|safe }}
+              <button type="submit" class="btn btn-outline-dark btn-sm">Als gelesen markieren</button>
+            </form>
+            {% endif %}
+            <form method="post" action="{{ url_for('partner_hinweis_loeschen', slug=autohaus['slug'], hinweis_id=hinweis['id']) }}">
+              {{ csrf_field()|safe }}
+              <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
+            </form>
+            <a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=hinweis['auftrag_id']) }}" class="btn btn-dark btn-sm">Auftrag öffnen</a>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-muted">Keine Nachrichten im Postfach.</div>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

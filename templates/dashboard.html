@@ -14,6 +14,9 @@
   .offer-file-preview { width: 128px; height: 92px; object-fit: cover; border-radius: 10px; border: 1px solid #e4d6c3; background: #f7f1e8; }
   .offer-file-name { overflow-wrap: anywhere; word-break: break-word; }
   .min-width-0 { min-width: 0; }
+  .postfach-row { border:1px solid #e4d6c3; border-radius:16px; background:#fffaf2; padding:16px; }
+  .postfach-row.is-unread { border-color:#e1b448; background:#fff7dd; }
+  .postfach-message { overflow-wrap:anywhere; }
 </style>
 {% endblock %}
 
@@ -26,6 +29,12 @@
       <p class="mb-0 text-muted">Du verwaltest hier alle Autohäuser, alle Fahrzeuge, Hol- und Bringtermine sowie Terminänderungen.</p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
+      <a href="#admin-postfach" class="btn btn-soft btn-lg">
+        Postfach
+        {% if admin_postfach_ungelesen %}
+        <span class="badge text-bg-warning ms-1">{{ admin_postfach_ungelesen }}</span>
+        {% endif %}
+      </a>
       <a href="{{ url_for('neuer_auftrag') }}" class="btn btn-brand btn-lg">Fahrzeug anlegen</a>
       <a href="{{ url_for('partner_login') }}" target="_blank" class="btn btn-soft btn-lg">Autohaus-Login öffnen</a>
       <form method="POST" action="{{ url_for('admin_backup_sofort') }}" class="d-inline">
@@ -123,6 +132,56 @@
 </div>
 
 {% include "_mini_month_calendar.html" %}
+
+<div id="admin-postfach" class="page-card p-4 mb-4 border {% if admin_postfach_ungelesen %}border-warning-subtle{% else %}border-success-subtle{% endif %}">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Postfach</h4>
+      <p>Neue Aufträge, Uploads, Nachrichten und Änderungen aus den Autohaus-Portalen.</p>
+    </div>
+    <span class="badge {% if admin_postfach_ungelesen %}text-bg-warning{% else %}text-bg-success{% endif %}">
+      {{ admin_postfach_ungelesen }} ungelesen
+    </span>
+  </div>
+  {% if admin_benachrichtigungen %}
+  <div class="d-grid gap-3">
+    {% for hinweis in admin_benachrichtigungen %}
+    <div class="postfach-row {% if not hinweis['gelesen'] %}is-unread{% endif %}">
+      <div class="d-flex justify-content-between gap-3 flex-wrap">
+        <div>
+          <div class="fw-bold">{{ hinweis['titel'] }}</div>
+          <div class="text-muted small">
+            {{ hinweis['autohaus_name'] or 'Autohaus' }}
+            {% if hinweis['fahrzeug'] %} · {{ hinweis['fahrzeug'] }}{% endif %}
+            {% if hinweis['kennzeichen'] %} · {{ hinweis['kennzeichen'] }}{% endif %}
+            {% if hinweis['auftragsnummer'] %} · Auftrag {{ hinweis['auftragsnummer'] }}{% endif %}
+          </div>
+        </div>
+        <span class="badge text-bg-light border">{{ hinweis['erstellt_am'] }}</span>
+      </div>
+      <div class="postfach-message mt-2">{{ hinweis['nachricht'] }}</div>
+      <div class="d-flex gap-2 flex-wrap mt-3">
+        {% if hinweis['auftrag_id'] %}
+        <a href="{{ url_for('auftrag_detail', auftrag_id=hinweis['auftrag_id']) }}" class="btn btn-brand btn-sm">Auftrag öffnen</a>
+        {% endif %}
+        {% if not hinweis['gelesen'] %}
+        <form method="POST" action="{{ url_for('admin_postfach_gelesen', hinweis_id=hinweis['id']) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-soft btn-sm">Gelesen</button>
+        </form>
+        {% endif %}
+        <form method="POST" action="{{ url_for('admin_postfach_loeschen', hinweis_id=hinweis['id']) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-muted">Keine neuen Meldungen.</div>
+  {% endif %}
+</div>
 
 <div class="row g-3 mb-4">
   <div class="col-md-6 col-xl-3">

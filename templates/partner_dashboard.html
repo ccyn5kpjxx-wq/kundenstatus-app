@@ -158,6 +158,12 @@
           <div class="text-muted">Heute sehen, was kommt, was fertig wird und welche Angebote offen sind.</div>
         </div>
         <div class="d-flex gap-2 flex-wrap">
+          <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">
+            Postfach
+            {% if postfach_ungelesen %}
+            <span class="badge text-bg-warning ms-1">{{ postfach_ungelesen }}</span>
+            {% endif %}
+          </a>
           <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Lackierauftrag PDF</a>
           <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Angebot anfordern</a>
           <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Bonusmodell</a>
@@ -183,8 +189,8 @@
     <div class="panel mb-4 border border-warning-subtle">
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
         <div>
-          <h4 class="mb-1">Neue Werkstatt-Hinweise</h4>
-          <div class="text-muted">Hier sehen Sie, wenn die Werkstatt an einem Auftrag etwas geändert hat.</div>
+          <h4 class="mb-1">Postfach</h4>
+          <div class="text-muted">Neue Nachrichten der Werkstatt zu Status, Terminen, Bildern und Unterlagen.</div>
         </div>
         <span class="badge text-bg-warning">{{ benachrichtigungen|length }} Hinweis(e)</span>
       </div>
@@ -198,10 +204,13 @@
           </a>
           <form method="post" action="{{ url_for('partner_hinweis_entfernen', slug=autohaus['slug'], hinweis_id=hinweis['id']) }}">
             {{ csrf_field()|safe }}
-            <button type="submit" class="btn btn-outline-dark btn-sm">Entfernen</button>
+            <button type="submit" class="btn btn-outline-dark btn-sm">Löschen</button>
           </form>
         </div>
         {% endfor %}
+      </div>
+      <div class="mt-3">
+        <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-dark btn-sm">Postfach öffnen</a>
       </div>
     </div>
     {% endif %}

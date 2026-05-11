@@ -131,6 +131,7 @@ def main():
         and "Auftragsplan von bis" not in admin_html
         and "Nur Beginn mit Autohaus und Fahrzeug" in admin_html
         and "window.location.reload" in admin_html
+        and "Postfach" in admin_html
     )
     print(
         "[OK] Admin-Dashboard zeigt grossen Kalender"
@@ -224,6 +225,7 @@ def main():
             and 'data-chat-url="/partner/kaesmann/ki/chat"' in mixed_session_dashboard_html
             and 'data-clear-url="/partner/kaesmann/ki/chat/loeschen"' in mixed_session_dashboard_html
             and 'data-chat-url="/admin/ki/chat"' not in mixed_session_dashboard_html
+            and "/partner/kaesmann/postfach" in mixed_session_dashboard_html
         )
         print(
             "[OK] Partner-Dashboard nutzt Partner-KI-Endpunkte trotz Admin-Session"
@@ -299,6 +301,114 @@ def main():
                     else "[FEHLER] Kundendatei wurde nicht korrekt gespeichert/analysiert"
                 )
                 ok &= upload_saved
+                admin_hinweise = [
+                    hinweis
+                    for hinweis in portal.list_admin_benachrichtigungen(limit=50)
+                    if hinweis.get("auftrag_id") == auftrag_id
+                    and hinweis.get("titel") == "Neuer Auftrag vom Autohaus"
+                ]
+                print(
+                    "[OK] Kundenauftrag erzeugt Admin-Postfach-Hinweis"
+                    if admin_hinweise
+                    else "[FEHLER] Kundenauftrag erzeugt keinen Admin-Postfach-Hinweis"
+                )
+                ok &= bool(admin_hinweise)
+                if admin_hinweise:
+                    hinweis_id = admin_hinweise[0]["id"]
+                    portal.mark_admin_benachrichtigung_gelesen(hinweis_id)
+                    admin_marked = any(
+                        hinweis["id"] == hinweis_id and hinweis["gelesen"]
+                        for hinweis in portal.list_admin_benachrichtigungen(limit=50)
+                    )
+                    print(
+                        "[OK] Admin-Postfach-Hinweis kann gelesen werden"
+                        if admin_marked
+                        else "[FEHLER] Admin-Postfach-Hinweis wird nicht gelesen markiert"
+                    )
+                    ok &= admin_marked
+                    portal.delete_admin_benachrichtigung(hinweis_id)
+                    admin_deleted = all(
+                        hinweis["id"] != hinweis_id
+                        for hinweis in portal.list_admin_benachrichtigungen(limit=50)
+                    )
+                    print(
+                        "[OK] Admin-Postfach-Hinweis kann geloescht werden"
+                        if admin_deleted
+                        else "[FEHLER] Admin-Postfach-Hinweis bleibt nach Loeschen sichtbar"
+                    )
+                    ok &= admin_deleted
+                portal.add_benachrichtigung(
+                    auftrag_id,
+                    "Smoke Werkstatt-Hinweis",
+                    "Status, Bilder oder Termine wurden aktualisiert.",
+                )
+                postfach_response = upload_client.get("/partner/kaesmann/postfach")
+                ok &= check("Partner-Postfach", postfach_response, {200})
+                postfach_html = postfach_response.get_data(as_text=True)
+                partner_notice = next(
+                    (
+                        hinweis
+                        for hinweis in portal.list_autohaus_benachrichtigungen(
+                            autohaus["id"],
+                            limit=50,
+                            only_unread=True,
+                        )
+                        if hinweis.get("auftrag_id") == auftrag_id
+                        and hinweis.get("titel") == "Smoke Werkstatt-Hinweis"
+                    ),
+                    None,
+                )
+                partner_postfach_ok = (
+                    "Smoke Werkstatt-Hinweis" in postfach_html
+                    and partner_notice is not None
+                )
+                print(
+                    "[OK] Partner-Postfach zeigt Werkstatt-Hinweis"
+                    if partner_postfach_ok
+                    else "[FEHLER] Partner-Postfach zeigt Werkstatt-Hinweis nicht"
+                )
+                ok &= partner_postfach_ok
+                if partner_notice:
+                    read_response = upload_client.post(
+                        f"/partner/kaesmann/hinweis/{partner_notice['id']}/gelesen",
+                        data=csrf_data(upload_client),
+                        follow_redirects=False,
+                    )
+                    ok &= check("Partner-Hinweis gelesen", read_response, {302})
+                    unread_after_read = any(
+                        hinweis["id"] == partner_notice["id"]
+                        for hinweis in portal.list_autohaus_benachrichtigungen(
+                            autohaus["id"],
+                            limit=50,
+                            only_unread=True,
+                        )
+                    )
+                    print(
+                        "[OK] Partner-Hinweis verschwindet aus ungelesenen Nachrichten"
+                        if not unread_after_read
+                        else "[FEHLER] Partner-Hinweis bleibt ungelesen"
+                    )
+                    ok &= not unread_after_read
+                    delete_response = upload_client.post(
+                        f"/partner/kaesmann/hinweis/{partner_notice['id']}/loeschen",
+                        data=csrf_data(upload_client),
+                        follow_redirects=False,
+                    )
+                    ok &= check("Partner-Hinweis loeschen", delete_response, {302})
+                    deleted_after_post = all(
+                        hinweis["id"] != partner_notice["id"]
+                        for hinweis in portal.list_autohaus_benachrichtigungen(
+                            autohaus["id"],
+                            limit=50,
+                            only_unread=False,
+                        )
+                    )
+                    print(
+                        "[OK] Partner-Hinweis kann geloescht werden"
+                        if deleted_after_post
+                        else "[FEHLER] Partner-Hinweis bleibt nach Loeschen sichtbar"
+                    )
+                    ok &= deleted_after_post
                 admin_upload_client = portal.app.test_client()
                 with admin_upload_client.session_transaction() as session:
                     session["admin"] = True

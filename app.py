@@ -3670,6 +3670,7 @@ BACKUP_TABLES = (
     "status_log",
     "chat_nachrichten",
     "benachrichtigungen",
+    "admin_benachrichtigungen",
     "verzoegerungen",
     "reklamationen",
 )
@@ -4079,8 +4080,27 @@ def init_db():
             titel       TEXT NOT NULL,
             nachricht   TEXT NOT NULL,
             gelesen     INTEGER DEFAULT 0,
+            gelesen_am  TEXT DEFAULT '',
+            entfernt    INTEGER DEFAULT 0,
+            entfernt_am TEXT DEFAULT '',
             erstellt_am TEXT NOT NULL,
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS admin_benachrichtigungen (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            auftrag_id  INTEGER,
+            autohaus_id INTEGER,
+            typ         TEXT DEFAULT 'info',
+            titel       TEXT NOT NULL,
+            nachricht   TEXT NOT NULL,
+            gelesen     INTEGER DEFAULT 0,
+            gelesen_am  TEXT DEFAULT '',
+            entfernt    INTEGER DEFAULT 0,
+            entfernt_am TEXT DEFAULT '',
+            erstellt_am TEXT NOT NULL,
+            FOREIGN KEY (auftrag_id) REFERENCES auftraege(id),
+            FOREIGN KEY (autohaus_id) REFERENCES autohaeuser(id)
         );
 
         CREATE TABLE IF NOT EXISTS chat_nachrichten (
@@ -4142,6 +4162,9 @@ def init_db():
     ensure_column(db, "dateien", "analyse_json", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "analyse_hinweis", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "content_blob", "BYTEA")
+    ensure_column(db, "benachrichtigungen", "gelesen_am", "TEXT DEFAULT ''")
+    ensure_column(db, "benachrichtigungen", "entfernt", "INTEGER DEFAULT 0")
+    ensure_column(db, "benachrichtigungen", "entfernt_am", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "portal_key", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "portal_titel", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "willkommen_text", "TEXT DEFAULT ''")
@@ -4152,9 +4175,21 @@ def init_db():
     ensure_index(db, "idx_auftraege_dashboard", "auftraege", ("archiviert", "angebotsphase", "autohaus_id"))
     ensure_index(db, "idx_auftraege_angebote", "auftraege", ("angebotsphase", "angebot_abgesendet", "autohaus_id"))
     ensure_index(db, "idx_dateien_auftrag", "dateien", ("auftrag_id", "kategorie", "reklamation_id"))
+    ensure_index(db, "idx_benachrichtigungen_auftrag_status", "benachrichtigungen", ("auftrag_id", "entfernt", "gelesen"))
+    ensure_index(db, "idx_admin_benachrichtigungen_offen", "admin_benachrichtigungen", ("entfernt", "gelesen", "erstellt_am"))
     ensure_index(db, "idx_status_log_lookup", "status_log", ("status", "zeitstempel", "auftrag_id"))
     ensure_index(db, "idx_verzoegerungen_offen", "verzoegerungen", ("uebernommen", "erstellt_am"))
     ensure_index(db, "idx_reklamationen_offen", "reklamationen", ("bearbeitet", "erstellt_am"))
+
+    db.execute(
+        """
+        UPDATE benachrichtigungen
+        SET entfernt=1, entfernt_am=COALESCE(NULLIF(entfernt_am, ''), erstellt_am)
+        WHERE COALESCE(gelesen, 0)=1
+          AND COALESCE(gelesen_am, '')=''
+          AND COALESCE(entfernt, 0)=0
+        """
+    )
 
     seed_default_autohaeuser(db)
     seed_default_auftraege(db)
@@ -6043,6 +6078,17 @@ def list_verzoegerungen(auftrag_id):
     return [dict(row) for row in rows]
 
 
+def auftrag_postfach_label(auftrag):
+    if not auftrag:
+        return "Auftrag"
+    parts = [
+        clean_text(auftrag.get("fahrzeug")) or "Fahrzeug",
+        clean_text(auftrag.get("kennzeichen")),
+        clean_text(auftrag.get("auftragsnummer")),
+    ]
+    return " · ".join(part for part in parts if part)
+
+
 def add_benachrichtigung(auftrag_id, titel, nachricht, quelle="werkstatt"):
     titel = clean_text(titel)
     nachricht = clean_text(nachricht)
@@ -6052,8 +6098,8 @@ def add_benachrichtigung(auftrag_id, titel, nachricht, quelle="werkstatt"):
     db.execute(
         """
         INSERT INTO benachrichtigungen
-        (auftrag_id, quelle, titel, nachricht, gelesen, erstellt_am)
-        VALUES (?, ?, ?, ?, 0, ?)
+        (auftrag_id, quelle, titel, nachricht, gelesen, gelesen_am, entfernt, entfernt_am, erstellt_am)
+        VALUES (?, ?, ?, ?, 0, '', 0, '', ?)
         """,
         (auftrag_id, clean_text(quelle) or "werkstatt", titel, nachricht, now_str()),
     )
@@ -6067,7 +6113,7 @@ def list_benachrichtigungen(auftrag_id, limit=20):
         """
         SELECT *
         FROM benachrichtigungen
-        WHERE auftrag_id=?
+        WHERE auftrag_id=? AND COALESCE(entfernt, 0)=0
         ORDER BY id DESC
         LIMIT ?
         """,
@@ -6077,14 +6123,18 @@ def list_benachrichtigungen(auftrag_id, limit=20):
     return [dict(row) for row in rows]
 
 
-def list_autohaus_benachrichtigungen(autohaus_id, limit=10):
+def list_autohaus_benachrichtigungen(autohaus_id, limit=10, only_unread=True):
     db = get_db()
+    unread_sql = "AND COALESCE(b.gelesen, 0)=0" if only_unread else ""
     rows = db.execute(
-        """
+        f"""
         SELECT b.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer
         FROM benachrichtigungen b
         JOIN auftraege a ON a.id = b.auftrag_id
-        WHERE a.autohaus_id=? AND a.archiviert=0 AND COALESCE(b.gelesen, 0)=0
+        WHERE a.autohaus_id=?
+          AND a.archiviert=0
+          AND COALESCE(b.entfernt, 0)=0
+          {unread_sql}
         ORDER BY b.id DESC
         LIMIT ?
         """,
@@ -6094,18 +6144,159 @@ def list_autohaus_benachrichtigungen(autohaus_id, limit=10):
     return [dict(row) for row in rows]
 
 
+def count_autohaus_benachrichtigungen(autohaus_id):
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT COUNT(*) AS anzahl
+        FROM benachrichtigungen b
+        JOIN auftraege a ON a.id = b.auftrag_id
+        WHERE a.autohaus_id=?
+          AND a.archiviert=0
+          AND COALESCE(b.gelesen, 0)=0
+          AND COALESCE(b.entfernt, 0)=0
+        """,
+        (autohaus_id,),
+    ).fetchone()
+    db.close()
+    return int(row["anzahl"] or 0) if row else 0
+
+
 def mark_autohaus_benachrichtigung_gelesen(autohaus_id, benachrichtigung_id):
     db = get_db()
     db.execute(
         """
         UPDATE benachrichtigungen
-        SET gelesen=1
+        SET gelesen=1,
+            gelesen_am=?
+        WHERE id=?
+          AND auftrag_id IN (
+            SELECT id FROM auftraege WHERE autohaus_id=?
+          )
+          AND COALESCE(entfernt, 0)=0
+        """,
+        (now_str(), benachrichtigung_id, autohaus_id),
+    )
+    db.commit()
+    db.close()
+
+
+def delete_autohaus_benachrichtigung(autohaus_id, benachrichtigung_id):
+    db = get_db()
+    db.execute(
+        """
+        UPDATE benachrichtigungen
+        SET entfernt=1,
+            entfernt_am=?,
+            gelesen=1,
+            gelesen_am=COALESCE(NULLIF(gelesen_am, ''), ?)
         WHERE id=?
           AND auftrag_id IN (
             SELECT id FROM auftraege WHERE autohaus_id=?
           )
         """,
-        (benachrichtigung_id, autohaus_id),
+        (now_str(), now_str(), benachrichtigung_id, autohaus_id),
+    )
+    db.commit()
+    db.close()
+
+
+def add_admin_benachrichtigung(titel, nachricht, auftrag_id=None, autohaus_id=None, typ="info"):
+    titel = clean_text(titel)
+    nachricht = clean_text(nachricht)
+    typ = clean_text(typ) or "info"
+    if not titel or not nachricht:
+        return
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO admin_benachrichtigungen
+        (auftrag_id, autohaus_id, typ, titel, nachricht, gelesen, gelesen_am, entfernt, entfernt_am, erstellt_am)
+        VALUES (?, ?, ?, ?, ?, 0, '', 0, '', ?)
+        """,
+        (auftrag_id, autohaus_id, typ, titel, nachricht, now_str()),
+    )
+    db.commit()
+    db.close()
+
+
+def notify_admin_autohaus_event(autohaus, auftrag_id, titel, detail, typ="info"):
+    auftrag = get_auftrag(auftrag_id) if auftrag_id else None
+    autohaus_name = clean_text((autohaus or {}).get("name")) or "Autohaus"
+    message_parts = [autohaus_name]
+    if auftrag:
+        message_parts.append(auftrag_postfach_label(auftrag))
+    if clean_text(detail):
+        message_parts.append(clean_text(detail))
+    add_admin_benachrichtigung(
+        titel,
+        " · ".join(message_parts),
+        auftrag_id=auftrag_id,
+        autohaus_id=(autohaus or {}).get("id"),
+        typ=typ,
+    )
+
+
+def list_admin_benachrichtigungen(limit=12, only_unread=False):
+    db = get_db()
+    unread_sql = "AND COALESCE(n.gelesen, 0)=0" if only_unread else ""
+    rows = db.execute(
+        f"""
+        SELECT n.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer, h.name AS autohaus_name
+        FROM admin_benachrichtigungen n
+        LEFT JOIN auftraege a ON a.id = n.auftrag_id
+        LEFT JOIN autohaeuser h ON h.id = COALESCE(n.autohaus_id, a.autohaus_id)
+        WHERE COALESCE(n.entfernt, 0)=0
+          {unread_sql}
+        ORDER BY n.id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    db.close()
+    return [dict(row) for row in rows]
+
+
+def count_admin_benachrichtigungen():
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT COUNT(*) AS anzahl
+        FROM admin_benachrichtigungen
+        WHERE COALESCE(gelesen, 0)=0 AND COALESCE(entfernt, 0)=0
+        """
+    ).fetchone()
+    db.close()
+    return int(row["anzahl"] or 0) if row else 0
+
+
+def mark_admin_benachrichtigung_gelesen(benachrichtigung_id):
+    db = get_db()
+    db.execute(
+        """
+        UPDATE admin_benachrichtigungen
+        SET gelesen=1,
+            gelesen_am=?
+        WHERE id=? AND COALESCE(entfernt, 0)=0
+        """,
+        (now_str(), benachrichtigung_id),
+    )
+    db.commit()
+    db.close()
+
+
+def delete_admin_benachrichtigung(benachrichtigung_id):
+    db = get_db()
+    db.execute(
+        """
+        UPDATE admin_benachrichtigungen
+        SET entfernt=1,
+            entfernt_am=?,
+            gelesen=1,
+            gelesen_am=COALESCE(NULLIF(gelesen_am, ''), ?)
+        WHERE id=?
+        """,
+        (now_str(), now_str(), benachrichtigung_id),
     )
     db.commit()
     db.close()
@@ -6596,6 +6787,7 @@ def delete_auftrag(auftrag_id, safety_backup=True):
     db.execute("DELETE FROM verzoegerungen WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM status_log WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM benachrichtigungen WHERE auftrag_id=?", (auftrag_id,))
+    db.execute("DELETE FROM admin_benachrichtigungen WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM chat_nachrichten WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM auftraege WHERE id=?", (auftrag_id,))
     db.commit()
@@ -7378,6 +7570,8 @@ def dashboard():
         angebotsanfragen=list_angebotsanfragen(),
         autohaeuser=list_autohaeuser(),
         cockpit=dashboard_daten(auftraege),
+        admin_benachrichtigungen=list_admin_benachrichtigungen(limit=10),
+        admin_postfach_ungelesen=count_admin_benachrichtigungen(),
         ki_status=get_ai_status(),
         database_status=get_database_status(),
         startup_warnings=get_startup_warnings(),
@@ -7385,6 +7579,22 @@ def dashboard():
         statusliste=STATUSLISTE,
         public_base_url=get_public_base_url(),
     )
+
+
+@app.route("/admin/postfach/<int:hinweis_id>/gelesen", methods=["POST"])
+@admin_required
+def admin_postfach_gelesen(hinweis_id):
+    mark_admin_benachrichtigung_gelesen(hinweis_id)
+    flash("Nachricht als gelesen markiert.", "info")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/admin/postfach/<int:hinweis_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_postfach_loeschen(hinweis_id):
+    delete_admin_benachrichtigung(hinweis_id)
+    flash("Nachricht gelöscht.", "info")
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/admin/zugaenge")
@@ -8423,7 +8633,8 @@ def partner_dashboard(slug):
         auftraege=auftraege,
         archivierte_auftraege=archivierte_auftraege,
         angebotsanfragen=list_angebotsanfragen(autohaus["id"]),
-        benachrichtigungen=list_autohaus_benachrichtigungen(autohaus["id"]),
+        benachrichtigungen=list_autohaus_benachrichtigungen(autohaus["id"], limit=5, only_unread=True),
+        postfach_ungelesen=count_autohaus_benachrichtigungen(autohaus["id"]),
         cockpit=autohaus_dashboard_daten(auftraege),
         mini_calendar=build_mini_monatskalender(
             auftraege,
@@ -8434,6 +8645,25 @@ def partner_dashboard(slug):
         ),
         statusliste=STATUSLISTE,
     )
+
+
+@app.route("/partner/<slug>/postfach")
+def partner_postfach(slug):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    return render_template(
+        "partner_postfach.html",
+        autohaus=autohaus,
+        benachrichtigungen=list_autohaus_benachrichtigungen(autohaus["id"], limit=100, only_unread=False),
+        postfach_ungelesen=count_autohaus_benachrichtigungen(autohaus["id"]),
+    )
+
+
+def partner_postfach_redirect(slug):
+    if clean_text(request.form.get("ziel")) == "dashboard":
+        return redirect(url_for("partner_dashboard", slug=slug))
+    return redirect(url_for("partner_postfach", slug=slug))
 
 
 @app.route("/partner/<slug>/bonusmodell")
@@ -8454,9 +8684,29 @@ def partner_hinweis_entfernen(slug, hinweis_id):
     autohaus, redirect_response = partner_session_required(slug)
     if redirect_response:
         return redirect_response
-    mark_autohaus_benachrichtigung_gelesen(autohaus["id"], hinweis_id)
+    delete_autohaus_benachrichtigung(autohaus["id"], hinweis_id)
     flash("Hinweis entfernt.", "info")
     return redirect(url_for("partner_dashboard", slug=slug))
+
+
+@app.route("/partner/<slug>/hinweis/<int:hinweis_id>/gelesen", methods=["POST"])
+def partner_hinweis_gelesen(slug, hinweis_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    mark_autohaus_benachrichtigung_gelesen(autohaus["id"], hinweis_id)
+    flash("Nachricht als gelesen markiert.", "info")
+    return partner_postfach_redirect(slug)
+
+
+@app.route("/partner/<slug>/hinweis/<int:hinweis_id>/loeschen", methods=["POST"])
+def partner_hinweis_loeschen(slug, hinweis_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    delete_autohaus_benachrichtigung(autohaus["id"], hinweis_id)
+    flash("Nachricht gelöscht.", "info")
+    return partner_postfach_redirect(slug)
 
 
 @app.route("/partner/<slug>/ki/chat", methods=["POST"])
@@ -8546,6 +8796,15 @@ def partner_neuer_auftrag(slug):
                 0,
                 {"_analysis_error": f"Upload/Analyse konnte nicht abgeschlossen werden: {clean_text(str(exc))[:300]}"},
             )
+        upload_count = upload_result[0] if isinstance(upload_result, tuple) else int(upload_result or 0)
+        upload_text = f"{upload_count} Unterlage(n) hochgeladen." if upload_count else "Ohne Unterlagen angelegt."
+        notify_admin_autohaus_event(
+            autohaus,
+            auftrag_id,
+            "Neuer Auftrag vom Autohaus",
+            upload_text,
+            "auftrag",
+        )
         if aktion == "upload_analyze":
             flash_upload_analysis_result(
                 upload_result,
@@ -8669,10 +8928,27 @@ def partner_angebot_detail(slug, auftrag_id):
         db.close()
         upload_result = save_uploads(auftrag_id, erlaubte_dateien, "autohaus", "standard")
         refresh_offer_texts(auftrag_id, kunden_kurz, kunden_text)
+        upload_count = upload_result[0] if isinstance(upload_result, tuple) else int(upload_result or 0)
         if aktion == "submit_offer":
             submit_offer_request(auftrag_id)
+            titel = "Neue Angebotsanfrage" if not angebot.get("angebot_abgesendet") else "Angebotsanfrage aktualisiert"
+            detail = "Zur Prüfung abgesendet."
+            if upload_count:
+                detail = f"{detail} {upload_count} Unterlage(n) hochgeladen."
+            notify_admin_autohaus_event(autohaus, auftrag_id, titel, detail, "angebot")
             flash("Angebotsanfrage abgesendet. Die Werkstatt kann sie jetzt prüfen.", "success")
         else:
+            if angebot.get("angebot_abgesendet"):
+                detail = "Daten der bereits abgesendeten Angebotsanfrage geändert."
+                if upload_count:
+                    detail = f"{detail} {upload_count} Unterlage(n) hochgeladen."
+                notify_admin_autohaus_event(
+                    autohaus,
+                    auftrag_id,
+                    "Angebotsanfrage aktualisiert",
+                    detail,
+                    "angebot",
+                )
             flash_upload_analysis_result(
                 upload_result,
                 "Angebotsanfrage analysiert. Bitte prüfen und danach absenden.",
@@ -8702,6 +8978,13 @@ def partner_angebot_annehmen(slug, auftrag_id):
         flash("Das Angebot der Werkstatt liegt noch nicht vor.", "warning")
         return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
     angebot_annehmen(auftrag_id)
+    notify_admin_autohaus_event(
+        autohaus,
+        auftrag_id,
+        "Angebot angenommen",
+        "Das Autohaus hat das Werkstatt-Angebot angenommen.",
+        "angebot",
+    )
     flash("Angebot angenommen. Das Fahrzeug wurde in Ihre Aufträge übernommen.", "success")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
@@ -8789,12 +9072,38 @@ def partner_auftrag(slug, auftrag_id):
                 0,
                 {"_analysis_error": f"Upload/Analyse konnte nicht abgeschlossen werden: {clean_text(str(exc))[:300]}"},
             )
-        save_uploads(
+        fertigbilder_result = save_uploads(
             auftrag_id,
             get_allowed_finish_uploads(request.files.getlist("fertigbilder")),
             "autohaus",
             "fertigbild",
         )
+        upload_count = upload_result[0] if isinstance(upload_result, tuple) else int(upload_result or 0)
+        fertig_count = fertigbilder_result[0] if isinstance(fertigbilder_result, tuple) else int(fertigbilder_result or 0)
+        if upload_count:
+            notify_admin_autohaus_event(
+                autohaus,
+                auftrag_id,
+                "Neue Unterlage vom Autohaus",
+                f"{upload_count} Unterlage(n) hochgeladen.",
+                "upload",
+            )
+        if fertig_count:
+            notify_admin_autohaus_event(
+                autohaus,
+                auftrag_id,
+                "Neue Bilder vom Autohaus",
+                f"{fertig_count} Bild(er) oder PDF(s) hochgeladen.",
+                "bilder",
+            )
+        if not upload_count and not fertig_count:
+            notify_admin_autohaus_event(
+                autohaus,
+                auftrag_id,
+                "Auftrag vom Autohaus aktualisiert",
+                "Daten oder Termine wurden geändert.",
+                "auftrag",
+            )
         if aktion == "upload_analyze":
             flash_upload_analysis_result(
                 upload_result,
@@ -8855,6 +9164,13 @@ def partner_dokumente_geprueft(slug, auftrag_id):
         flash("Dokumentdaten sind jetzt doppelt geprüft.", "success")
     else:
         flash("Ihre Prüfung wurde gespeichert. Die Werkstatt prüft die Werte ebenfalls.", "warning")
+    notify_admin_autohaus_event(
+        autohaus,
+        auftrag_id,
+        "Dokumentprüfung vom Autohaus",
+        "Das Autohaus hat erkannte Dokumentdaten geprüft.",
+        "dokumente",
+    )
     target = "partner_angebot_detail" if auftrag.get("angebotsphase") else "partner_auftrag"
     return redirect(url_for(target, slug=slug, auftrag_id=auftrag_id))
 
@@ -8920,6 +9236,13 @@ def partner_verzoegerung(slug, auftrag_id):
         abholtermin=request.form.get("abholtermin", ""),
         uebernommen=0,
     )
+    notify_admin_autohaus_event(
+        autohaus,
+        auftrag_id,
+        "Neue Verzögerung vom Autohaus",
+        meldung,
+        "verzoegerung",
+    )
     flash("Verzögerung an die Werkstatt gemeldet.", "success")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
@@ -8939,6 +9262,13 @@ def partner_chat_nachricht(slug, auftrag_id):
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
     add_chat_nachricht(auftrag_id, "autohaus", nachricht)
+    notify_admin_autohaus_event(
+        autohaus,
+        auftrag_id,
+        "Neue Nachricht vom Autohaus",
+        nachricht,
+        "chat",
+    )
     flash("Nachricht an die Werkstatt gesendet.", "success")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
@@ -8959,12 +9289,23 @@ def partner_reklamation(slug, auftrag_id):
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
     reklamation_id = add_reklamation(auftrag_id, "autohaus", meldung)
-    save_uploads(
+    upload_result = save_uploads(
         auftrag_id,
         dateien,
         "autohaus",
         "reklamation",
         reklamation_id=reklamation_id,
+    )
+    upload_count = upload_result[0] if isinstance(upload_result, tuple) else int(upload_result or 0)
+    detail = meldung
+    if upload_count:
+        detail = f"{detail} · {upload_count} Reklamationsanhang/Anhänge hochgeladen."
+    notify_admin_autohaus_event(
+        autohaus,
+        auftrag_id,
+        "Neue Reklamation vom Autohaus",
+        detail,
+        "reklamation",
     )
     flash("Reklamation als Alarm an die Werkstatt gemeldet.", "danger")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
