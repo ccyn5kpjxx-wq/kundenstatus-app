@@ -18211,33 +18211,24 @@ def partner_dashboard(slug):
     auftraege = [a for a in alle_auftraege if not a["archiviert"]]
     archivierte_auftraege = [a for a in alle_auftraege if a["archiviert"]]
     postfach_items = list_partner_postfach_items(autohaus["id"], autohaus["slug"], limit=8)
-    angebotsanfragen = list_angebotsanfragen(autohaus["id"])
-    terminplaner_auftraege = auftraege + angebotsanfragen
-    zeige_vergangenheit = request.args.get("termine") == "vergangenheit"
     return render_template(
         "partner_dashboard.html",
         autohaus=autohaus,
         auftraege=auftraege,
         archivierte_auftraege=archivierte_auftraege,
-        angebotsanfragen=angebotsanfragen,
         benachrichtigungen=list_autohaus_benachrichtigungen(autohaus["id"]),
         postfach_items=postfach_items,
         postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
         cockpit=autohaus_dashboard_daten(auftraege),
         werkstatt_news=list_werkstatt_news(limit=5),
         mini_calendar=build_mini_monatskalender(
-            terminplaner_auftraege,
+            auftraege,
             request.args.get("monat"),
             endpoint="partner_dashboard",
             route_values={"slug": autohaus["slug"]},
             include_internal_notes=False,
             only_arrival_events=True,
         ),
-        terminplaner_tage=partner_termin_tage(
-            terminplaner_auftraege,
-            vergangenheit=zeige_vergangenheit,
-        ),
-        terminplaner_vergangenheit=zeige_vergangenheit,
         rahmenvertrag=rahmenvertrag_context(autohaus),
         statusliste=STATUSLISTE,
     )

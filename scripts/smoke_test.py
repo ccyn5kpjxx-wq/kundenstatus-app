@@ -529,17 +529,19 @@ def main():
             {200},
         )
         partner_dashboard_html = partner_dashboard_response.get_data(as_text=True)
-        partner_planner_ok = (
-            "Nächste Termine" in partner_dashboard_html
-            and "terminplaner_tage" not in partner_dashboard_html
-            and "aktuellem Auftragsstatus" in partner_dashboard_html
+        partner_start_reduced_ok = (
+            "Fahrzeuge suchen, neue Aufträge anlegen und Hinweise im Blick behalten." in partner_dashboard_html
+            and "Nächste Termine" not in partner_dashboard_html
+            and "Schneller Tagesblick für Dispo und Annahme." not in partner_dashboard_html
+            and "Angebotsanfragen" not in partner_dashboard_html
+            and "Ihre Fahrzeuge" in partner_dashboard_html
         )
         print(
-            "[OK] Käsmann-Dashboard zeigt Terminplaner mit echtem Status"
-            if partner_planner_ok
-            else "[FEHLER] Käsmann-Dashboard zeigt keinen eindeutigen Terminplaner-Status"
+            "[OK] Käsmann-Dashboard zeigt reduzierte Startseite"
+            if partner_start_reduced_ok
+            else "[FEHLER] Käsmann-Dashboard zeigt entfernte Startseiten-Blöcke noch an"
         )
-        ok &= partner_planner_ok
+        ok &= partner_start_reduced_ok
         partner_bonus_link_ok = (
             "Bonusmodell" in partner_dashboard_html
             and "/partner/kaesmann/bonusmodell" in partner_dashboard_html
@@ -611,24 +613,19 @@ def main():
                 else "[FEHLER] Partner-Auftragssuche liefert keinen klickbaren Auftrag"
             )
             ok &= pfaff_search_ok
-            pfaff_first_period_ok = (
-                "11.05.2026 bis 13.05.2026" in pfaff_dashboard_html
-                or "13.05.2026" in pfaff_dashboard_html
-            )
-            pfaff_grouped_planner_ok = (
-                "2 Aufträge" in pfaff_dashboard_html
-                and pfaff_first_period_ok
-                and "18.05.2026 bis 21.05.2026" in pfaff_dashboard_html
-                and pfaff_dashboard_html.count("Aktuell:") == 2
-                and "Termine:" not in pfaff_dashboard_html
-                and "4 Termine" not in pfaff_dashboard_html
+            pfaff_reduced_start_ok = (
+                "Nächste Termine" not in pfaff_dashboard_html
+                and "Schneller Tagesblick für Dispo und Annahme." not in pfaff_dashboard_html
+                and "Angebotsanfragen" not in pfaff_dashboard_html
+                and "Aktuell:" not in pfaff_dashboard_html
+                and "Ihre Fahrzeuge" in pfaff_dashboard_html
             )
             print(
-                "[OK] Partner-Terminplaner gruppiert Aufträge mit einem aktuellen Terminstatus"
-                if pfaff_grouped_planner_ok
-                else "[FEHLER] Partner-Terminplaner zeigt nicht genau einen aktuellen Terminstatus"
+                "[OK] Partner-Dashboard blendet Termin- und Angebotsblöcke aus"
+                if pfaff_reduced_start_ok
+                else "[FEHLER] Partner-Dashboard zeigt Termin- oder Angebotsblöcke noch an"
             )
-            ok &= pfaff_grouped_planner_ok
+            ok &= pfaff_reduced_start_ok
         ok &= check(
             "Käsmann-Postfach mit Partner-Login",
             client.get("/partner/kaesmann/postfach"),
