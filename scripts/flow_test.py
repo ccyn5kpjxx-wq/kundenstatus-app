@@ -382,6 +382,11 @@ def main():
             "Neue Chat-Nachrichten" in admin_dashboard_html
             and "Ist die Rückgabe am Nachmittag möglich?" in admin_dashboard_html,
         )
+        check(
+            "Autohaus-Chat steht im Admin-Postfach",
+            "Neue Nachricht vom Autohaus" in admin_dashboard_html
+            and "Ist die Rückgabe am Nachmittag möglich?" in admin_dashboard_html,
+        )
         response = admin.get(f"/admin/auftrag/{angebot_id}")
         admin_auftrag_html = response.get_data(as_text=True)
         check(
@@ -404,7 +409,7 @@ def main():
             """
             SELECT *
             FROM benachrichtigungen
-            WHERE auftrag_id=? AND titel='Neue Chat-Nachricht'
+            WHERE auftrag_id=? AND titel='Neue Nachricht der Werkstatt'
             ORDER BY id DESC
             """,
             (angebot_id,),
@@ -417,6 +422,14 @@ def main():
             "Partner sieht Werkstatt-Antwort im Chat",
             "Ja, Rückgabe am Nachmittag passt." in partner_chat_html,
             partner_chat_html[:300],
+        )
+        response = partner.get("/partner/kaesmann/postfach")
+        partner_postfach_html = response.get_data(as_text=True)
+        check(
+            "Partner-Postfach zeigt Werkstatt-Chat",
+            response.status_code == 200
+            and "Neue Nachricht der Werkstatt" in partner_postfach_html
+            and "Ja, Rückgabe am Nachmittag passt." in partner_postfach_html,
         )
 
         db = portal.get_db()

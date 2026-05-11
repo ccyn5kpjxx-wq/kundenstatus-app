@@ -3917,6 +3917,69 @@ def start_hourly_backups():
     thread.start()
 
 
+def backfill_chat_postfach_notifications(db):
+    db.execute(
+        """
+        INSERT INTO admin_benachrichtigungen
+        (auftrag_id, autohaus_id, typ, titel, nachricht, gelesen, gelesen_am,
+         entfernt, entfernt_am, quelle_typ, quelle_id, erstellt_am)
+        SELECT
+            c.auftrag_id,
+            a.autohaus_id,
+            'chat',
+            'Neue Nachricht vom Autohaus',
+            COALESCE(h.name, 'Autohaus') || ' · '
+                || COALESCE(NULLIF(a.fahrzeug, ''), 'Fahrzeug') || ' · '
+                || c.nachricht,
+            0,
+            '',
+            0,
+            '',
+            'chat',
+            c.id,
+            c.erstellt_am
+        FROM chat_nachrichten c
+        JOIN auftraege a ON a.id = c.auftrag_id
+        LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
+        WHERE c.absender='autohaus'
+          AND COALESCE(c.gelesen_admin, 0)=0
+          AND NOT EXISTS (
+            SELECT 1
+            FROM admin_benachrichtigungen n
+            WHERE n.quelle_typ='chat' AND n.quelle_id=c.id
+          )
+        """
+    )
+    db.execute(
+        """
+        INSERT INTO benachrichtigungen
+        (auftrag_id, quelle, titel, nachricht, gelesen, gelesen_am, entfernt,
+         entfernt_am, quelle_typ, quelle_id, erstellt_am)
+        SELECT
+            c.auftrag_id,
+            'werkstatt',
+            'Neue Nachricht der Werkstatt',
+            'Die Werkstatt hat geschrieben: ' || c.nachricht,
+            0,
+            '',
+            0,
+            '',
+            'chat',
+            c.id,
+            c.erstellt_am
+        FROM chat_nachrichten c
+        JOIN auftraege a ON a.id = c.auftrag_id
+        WHERE c.absender='werkstatt'
+          AND COALESCE(c.gelesen_autohaus, 0)=0
+          AND NOT EXISTS (
+            SELECT 1
+            FROM benachrichtigungen b
+            WHERE b.quelle_typ='chat' AND b.quelle_id=c.id
+          )
+        """
+    )
+
+
 def init_db():
     global DATA_DIR, DB, UPLOAD_DIR, BACKUP_DIR, DELETED_UPLOAD_DIR
     if USE_POSTGRES:
@@ -4083,6 +4146,8 @@ def init_db():
             gelesen_am  TEXT DEFAULT '',
             entfernt    INTEGER DEFAULT 0,
             entfernt_am TEXT DEFAULT '',
+            quelle_typ  TEXT DEFAULT '',
+            quelle_id   INTEGER,
             erstellt_am TEXT NOT NULL,
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
         );
@@ -4098,6 +4163,8 @@ def init_db():
             gelesen_am  TEXT DEFAULT '',
             entfernt    INTEGER DEFAULT 0,
             entfernt_am TEXT DEFAULT '',
+            quelle_typ  TEXT DEFAULT '',
+            quelle_id   INTEGER,
             erstellt_am TEXT NOT NULL,
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id),
             FOREIGN KEY (autohaus_id) REFERENCES autohaeuser(id)
@@ -4165,6 +4232,10 @@ def init_db():
     ensure_column(db, "benachrichtigungen", "gelesen_am", "TEXT DEFAULT ''")
     ensure_column(db, "benachrichtigungen", "entfernt", "INTEGER DEFAULT 0")
     ensure_column(db, "benachrichtigungen", "entfernt_am", "TEXT DEFAULT ''")
+    ensure_column(db, "benachrichtigungen", "quelle_typ", "TEXT DEFAULT ''")
+    ensure_column(db, "benachrichtigungen", "quelle_id", "INTEGER")
+    ensure_column(db, "admin_benachrichtigungen", "quelle_typ", "TEXT DEFAULT ''")
+    ensure_column(db, "admin_benachrichtigungen", "quelle_id", "INTEGER")
     ensure_column(db, "autohaeuser", "portal_key", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "portal_titel", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "willkommen_text", "TEXT DEFAULT ''")
@@ -4176,7 +4247,9 @@ def init_db():
     ensure_index(db, "idx_auftraege_angebote", "auftraege", ("angebotsphase", "angebot_abgesendet", "autohaus_id"))
     ensure_index(db, "idx_dateien_auftrag", "dateien", ("auftrag_id", "kategorie", "reklamation_id"))
     ensure_index(db, "idx_benachrichtigungen_auftrag_status", "benachrichtigungen", ("auftrag_id", "entfernt", "gelesen"))
+    ensure_index(db, "idx_benachrichtigungen_quelle", "benachrichtigungen", ("quelle_typ", "quelle_id"))
     ensure_index(db, "idx_admin_benachrichtigungen_offen", "admin_benachrichtigungen", ("entfernt", "gelesen", "erstellt_am"))
+    ensure_index(db, "idx_admin_benachrichtigungen_quelle", "admin_benachrichtigungen", ("quelle_typ", "quelle_id"))
     ensure_index(db, "idx_status_log_lookup", "status_log", ("status", "zeitstempel", "auftrag_id"))
     ensure_index(db, "idx_verzoegerungen_offen", "verzoegerungen", ("uebernommen", "erstellt_am"))
     ensure_index(db, "idx_reklamationen_offen", "reklamationen", ("bearbeitet", "erstellt_am"))
@@ -4190,6 +4263,8 @@ def init_db():
           AND COALESCE(entfernt, 0)=0
         """
     )
+
+    backfill_chat_postfach_notifications(db)
 
     seed_default_autohaeuser(db)
     seed_default_auftraege(db)
@@ -6089,19 +6164,49 @@ def auftrag_postfach_label(auftrag):
     return " · ".join(part for part in parts if part)
 
 
-def add_benachrichtigung(auftrag_id, titel, nachricht, quelle="werkstatt"):
+def normalize_source_id(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def add_benachrichtigung(auftrag_id, titel, nachricht, quelle="werkstatt", quelle_typ="", quelle_id=None):
     titel = clean_text(titel)
     nachricht = clean_text(nachricht)
     if not titel or not nachricht:
         return
+    quelle_typ = clean_text(quelle_typ)
+    quelle_id = normalize_source_id(quelle_id)
     db = get_db()
+    if quelle_typ and quelle_id is not None:
+        existing = db.execute(
+            """
+            SELECT id FROM benachrichtigungen
+            WHERE quelle_typ=? AND quelle_id=?
+            LIMIT 1
+            """,
+            (quelle_typ, quelle_id),
+        ).fetchone()
+        if existing:
+            db.close()
+            return
     db.execute(
         """
         INSERT INTO benachrichtigungen
-        (auftrag_id, quelle, titel, nachricht, gelesen, gelesen_am, entfernt, entfernt_am, erstellt_am)
-        VALUES (?, ?, ?, ?, 0, '', 0, '', ?)
+        (auftrag_id, quelle, titel, nachricht, gelesen, gelesen_am, entfernt,
+         entfernt_am, quelle_typ, quelle_id, erstellt_am)
+        VALUES (?, ?, ?, ?, 0, '', 0, '', ?, ?, ?)
         """,
-        (auftrag_id, clean_text(quelle) or "werkstatt", titel, nachricht, now_str()),
+        (
+            auftrag_id,
+            clean_text(quelle) or "werkstatt",
+            titel,
+            nachricht,
+            quelle_typ,
+            quelle_id,
+            now_str(),
+        ),
     )
     db.commit()
     db.close()
@@ -6201,26 +6306,66 @@ def delete_autohaus_benachrichtigung(autohaus_id, benachrichtigung_id):
     db.close()
 
 
-def add_admin_benachrichtigung(titel, nachricht, auftrag_id=None, autohaus_id=None, typ="info"):
+def add_admin_benachrichtigung(
+    titel,
+    nachricht,
+    auftrag_id=None,
+    autohaus_id=None,
+    typ="info",
+    quelle_typ="",
+    quelle_id=None,
+):
     titel = clean_text(titel)
     nachricht = clean_text(nachricht)
     typ = clean_text(typ) or "info"
     if not titel or not nachricht:
         return
+    quelle_typ = clean_text(quelle_typ)
+    quelle_id = normalize_source_id(quelle_id)
     db = get_db()
+    if quelle_typ and quelle_id is not None:
+        existing = db.execute(
+            """
+            SELECT id FROM admin_benachrichtigungen
+            WHERE quelle_typ=? AND quelle_id=?
+            LIMIT 1
+            """,
+            (quelle_typ, quelle_id),
+        ).fetchone()
+        if existing:
+            db.close()
+            return
     db.execute(
         """
         INSERT INTO admin_benachrichtigungen
-        (auftrag_id, autohaus_id, typ, titel, nachricht, gelesen, gelesen_am, entfernt, entfernt_am, erstellt_am)
-        VALUES (?, ?, ?, ?, ?, 0, '', 0, '', ?)
+        (auftrag_id, autohaus_id, typ, titel, nachricht, gelesen, gelesen_am,
+         entfernt, entfernt_am, quelle_typ, quelle_id, erstellt_am)
+        VALUES (?, ?, ?, ?, ?, 0, '', 0, '', ?, ?, ?)
         """,
-        (auftrag_id, autohaus_id, typ, titel, nachricht, now_str()),
+        (
+            auftrag_id,
+            autohaus_id,
+            typ,
+            titel,
+            nachricht,
+            quelle_typ,
+            quelle_id,
+            now_str(),
+        ),
     )
     db.commit()
     db.close()
 
 
-def notify_admin_autohaus_event(autohaus, auftrag_id, titel, detail, typ="info"):
+def notify_admin_autohaus_event(
+    autohaus,
+    auftrag_id,
+    titel,
+    detail,
+    typ="info",
+    quelle_typ="",
+    quelle_id=None,
+):
     auftrag = get_auftrag(auftrag_id) if auftrag_id else None
     autohaus_name = clean_text((autohaus or {}).get("name")) or "Autohaus"
     message_parts = [autohaus_name]
@@ -6234,6 +6379,8 @@ def notify_admin_autohaus_event(autohaus, auftrag_id, titel, detail, typ="info")
         auftrag_id=auftrag_id,
         autohaus_id=(autohaus or {}).get("id"),
         typ=typ,
+        quelle_typ=quelle_typ,
+        quelle_id=quelle_id,
     )
 
 
@@ -8141,11 +8288,13 @@ def admin_chat_nachricht(auftrag_id):
     if not nachricht:
         flash("Bitte eine Nachricht eingeben.", "warning")
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
-    add_chat_nachricht(auftrag_id, "werkstatt", nachricht)
+    chat_id = add_chat_nachricht(auftrag_id, "werkstatt", nachricht)
     add_benachrichtigung(
         auftrag_id,
-        "Neue Chat-Nachricht",
-        "Die Werkstatt hat im Auftrag geantwortet.",
+        "Neue Nachricht der Werkstatt",
+        f"Die Werkstatt hat geschrieben: {nachricht}",
+        quelle_typ="chat",
+        quelle_id=chat_id,
     )
     flash("Nachricht an das Autohaus gesendet.", "success")
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
@@ -9261,13 +9410,15 @@ def partner_chat_nachricht(slug, auftrag_id):
         flash("Bitte eine Nachricht eingeben.", "warning")
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
-    add_chat_nachricht(auftrag_id, "autohaus", nachricht)
+    chat_id = add_chat_nachricht(auftrag_id, "autohaus", nachricht)
     notify_admin_autohaus_event(
         autohaus,
         auftrag_id,
         "Neue Nachricht vom Autohaus",
         nachricht,
         "chat",
+        quelle_typ="chat",
+        quelle_id=chat_id,
     )
     flash("Nachricht an die Werkstatt gesendet.", "success")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
