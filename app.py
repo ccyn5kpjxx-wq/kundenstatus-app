@@ -5274,6 +5274,96 @@ def list_auftraege(autohaus_id=None, include_archived=False, include_angebote=Fa
     return auftraege
 
 
+def build_status_board_event(auftrag, heute=None):
+    heute = heute or date.today()
+    status = int(auftrag.get("status") or 1)
+    labels = {
+        "annahme_datum": auftrag.get("annahme_label") or "Anlieferung",
+        "start_datum": "Start",
+        "fertig_datum": "Fertig",
+        "abholtermin": auftrag.get("abholung_label") or "Abholung",
+    }
+    field_order_by_status = {
+        1: ("annahme_datum", "start_datum", "fertig_datum", "abholtermin"),
+        2: ("start_datum", "fertig_datum", "abholtermin", "annahme_datum"),
+        3: ("fertig_datum", "abholtermin", "start_datum", "annahme_datum"),
+        4: ("abholtermin", "fertig_datum", "start_datum", "annahme_datum"),
+        5: ("abholtermin", "fertig_datum", "start_datum", "annahme_datum"),
+    }
+    dated_events = []
+    for field in field_order_by_status.get(status, field_order_by_status[1]):
+        event_date = auftrag.get(f"{field}_obj") or parse_date(auftrag.get(field))
+        if not event_date:
+            continue
+        dated_events.append(
+            {
+                "field": field,
+                "label": labels[field],
+                "date": event_date,
+                "date_text": event_date.strftime(DATE_FMT),
+            }
+        )
+
+    if not dated_events:
+        return {
+            "label": "Termin",
+            "date_text": "kein Termin",
+            "state": "missing",
+            "sort": (3, 0),
+        }
+
+    upcoming = [event for event in dated_events if event["date"] >= heute]
+    if upcoming:
+        event = min(upcoming, key=lambda item: item["date"])
+        state = "today" if event["date"] == heute else "future"
+        sort_bucket = 0 if state == "today" else 1
+        sort_value = event["date"].toordinal()
+    else:
+        event = max(dated_events, key=lambda item: item["date"])
+        state = "done" if status >= 5 else "overdue"
+        sort_bucket = 2 if state == "done" else 0
+        sort_value = -event["date"].toordinal()
+
+    return {
+        "label": event["label"],
+        "date_text": event["date_text"],
+        "state": state,
+        "sort": (sort_bucket, sort_value),
+    }
+
+
+def build_admin_status_board(auftraege):
+    heute = date.today()
+    grouped = {status_id: [] for status_id in STATUSLISTE}
+    for auftrag in auftraege or []:
+        status = int(auftrag.get("status") or 1)
+        if status not in grouped:
+            status = 1
+        auftrag["status_board_event"] = build_status_board_event(auftrag, heute)
+        grouped[status].append(auftrag)
+
+    columns = []
+    for status_id, meta in STATUSLISTE.items():
+        items = sorted(
+            grouped.get(status_id, []),
+            key=lambda auftrag: (
+                auftrag["status_board_event"]["sort"],
+                clean_text(auftrag.get("autohaus_name")).lower(),
+                clean_text(auftrag.get("kennzeichen")).lower(),
+                int(auftrag.get("id") or 0),
+            ),
+        )
+        columns.append(
+            {
+                "status": status_id,
+                "meta": meta,
+                "count": len(items),
+                "items": items,
+            }
+        )
+    return columns
+
+
 def list_angebotsanfragen(autohaus_id=None):
     db = get_db()
     if autohaus_id is None:
@@ -7717,6 +7807,7 @@ def dashboard():
         angebotsanfragen=list_angebotsanfragen(),
         autohaeuser=list_autohaeuser(),
         cockpit=dashboard_daten(auftraege),
+        status_board=build_admin_status_board(auftraege),
         admin_benachrichtigungen=list_admin_benachrichtigungen(limit=10),
         admin_postfach_ungelesen=count_admin_benachrichtigungen(),
         ki_status=get_ai_status(),
