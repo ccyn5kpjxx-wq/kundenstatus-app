@@ -252,7 +252,7 @@
         <div class="process-steps">
           {% for nummer, meta in statusliste.items() %}
           <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=nummer) }}">
-            <input type="hidden" name="next" value="{{ url_for('auftrag_detail', auftrag_id=auftrag['id']) }}">
+            <input type="hidden" name="next" value="{{ detail_self_url }}">
             <button type="submit" class="process-step {% if nummer < auftrag['status'] %}is-done{% elif nummer == auftrag['status'] %}is-active{% endif %}" {% if nummer == auftrag['status'] %}disabled{% endif %}>
               <span class="process-icon">{{ meta['icon'] }}</span>
               <span class="process-label">{{ meta['label'] }}</span>
@@ -281,13 +281,13 @@
             {% if auftrag['status'] > 1 %}
             {% set previous_status = auftrag['status'] - 1 %}
             <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=previous_status) }}">
-              <input type="hidden" name="next" value="{{ url_for('auftrag_detail', auftrag_id=auftrag['id']) }}">
+              <input type="hidden" name="next" value="{{ detail_self_url }}">
               <button type="submit" class="btn btn-soft">Zurück zu {{ statusliste[previous_status]['label'] }}</button>
             </form>
             {% endif %}
             {% if next_status in statusliste %}
             <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=next_status) }}">
-              <input type="hidden" name="next" value="{{ url_for('auftrag_detail', auftrag_id=auftrag['id']) }}">
+              <input type="hidden" name="next" value="{{ detail_self_url }}">
               <button type="submit" class="btn btn-brand">Weiter zu {{ statusliste[next_status]['label'] }}</button>
             </form>
             {% else %}
@@ -304,6 +304,67 @@
             {% endif %}
           </div>
         </div>
+      </div>
+
+      {% if auftrag['status'] >= 5 %}
+      <div class="alert {{ 'alert-warning' if auftrag['bonus_preis_fehlt'] else 'alert-success' }} page-card">
+        <div class="fw-bold mb-1">Bonus-/Rechnungsbetrag</div>
+        {% if auftrag['bonus_basis_label'] %}
+          <div>{{ auftrag['bonus_basis_label'] }} netto zählt für den Monatsbonus des Autohauses.</div>
+          <div class="small mt-1">Quelle: {{ auftrag['bonus_basis_quelle'] }}{% if auftrag['bonus_preis_aktualisiert_am'] %} · aktualisiert am {{ auftrag['bonus_preis_aktualisiert_am'] }}{% endif %}</div>
+          <div class="small mt-1">{{ auftrag['bonus_verrechnung_detail'] }}</div>
+        {% else %}
+          <div>Für diesen zurückgegebenen Auftrag fehlt noch der Netto-Preis. Ohne Preis bleibt der Kundenbonus zu niedrig.</div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <div class="page-card p-4 mb-4 border border-success-subtle">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+          <div>
+            <h4 class="mb-1">Werkstatt-Rechnung hochladen & prüfen</h4>
+            <div class="text-muted small">Die Rechnung wird gelesen und gegen diesen Auftrag geprüft. Nur bei passender Zuordnung werden Status und Betrag übernommen.</div>
+          </div>
+          {% if auftrag['rechnung_status'] == 'geschrieben' %}
+          <span class="badge text-bg-success">Rechnung gespeichert{% if auftrag['rechnung_nummer'] %}: {{ auftrag['rechnung_nummer'] }}{% endif %}</span>
+          {% elif auftrag['rechnung_status'] == 'lexware_entwurf' %}
+          <span class="badge text-bg-primary">Lexware-Entwurf</span>
+          {% elif auftrag['bonus_preis_fehlt'] %}
+          <span class="badge text-bg-warning">Preis offen</span>
+          {% endif %}
+        </div>
+        <form method="POST" action="{{ url_for('admin_rechnung_upload', auftrag_id=auftrag['id']) }}" enctype="multipart/form-data" class="row g-3 align-items-end">
+          <input type="hidden" name="next" value="{{ detail_self_url }}">
+          <div class="col-md-8">
+            <label class="form-label">Rechnung</label>
+            <input type="file" name="rechnung_dateien" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.txt,.docx,.xlsx,image/*,application/pdf,text/plain" required>
+            <div class="form-text">Geprüft werden Rechnungsmerkmale und Auftragsdaten wie Kennzeichen, FIN, Auftrag, Fahrzeug oder Autohaus.</div>
+          </div>
+          <div class="col-md-4">
+            <button type="submit" class="btn btn-success w-100" data-loading-message="Bitte kurz warten. Die Rechnung wird gelesen und gegen den Auftrag geprüft.">Rechnung hochladen & prüfen</button>
+          </div>
+        </form>
+        {% if rechnungsdateien %}
+        <div class="d-grid gap-2 mt-3">
+          {% for datei in rechnungsdateien[:4] %}
+          <div class="border rounded-4 p-3 bg-light">
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+              <div class="fw-semibold flex-grow-1 breakable-text">{{ datei['original_name'] }}</div>
+              <span class="badge {{ 'text-bg-success' if datei['notiz'] == 'Prüfung bestanden' else 'text-bg-warning' }}">{{ datei['notiz'] or 'Gespeichert' }}</span>
+              {% if datei['hochgeladen_am'] %}<span class="small text-muted">{{ datei['hochgeladen_am'] }}</span>{% endif %}
+              <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Öffnen</a>
+              <a href="{{ url_for('admin_datei_download', datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+            </div>
+            {% if datei['extrakt_kurz'] %}
+            <div class="small text-muted mt-2">{{ datei['extrakt_kurz'] }}</div>
+            {% endif %}
+            {% if datei['analyse_hinweis'] %}
+            <div class="alert alert-warning py-2 mt-2 mb-0 small">{{ datei['analyse_hinweis'] }}</div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
       </div>
 
       {% if auftrag['angebotsphase'] %}
@@ -434,6 +495,11 @@
           <input type="text" name="auftragsnummer" class="form-control form-control-lg" value="{{ auftrag['auftragsnummer'] }}">
         </div>
         <div class="col-md-6">
+          <label class="form-label">Bonus-/Rechnungsbetrag netto</label>
+          <input type="text" name="bonus_netto_betrag" class="form-control form-control-lg" value="{{ auftrag['bonus_netto_betrag_label'] }}" placeholder="z.B. 1.200,00 € netto">
+          <div class="form-text">Zählt nach „Zurückgegeben“ automatisch in den Monatsbonus des Autohauses.</div>
+        </div>
+        <div class="col-md-6">
           <label class="form-label">Telefon</label>
           <input type="text" name="kontakt_telefon" class="form-control" value="{{ auftrag['kontakt_telefon'] }}">
         </div>
@@ -492,7 +558,8 @@
           <button type="submit" name="aktion" value="upload_analyze" class="btn btn-soft btn-lg" data-loading-message="Bitte kurz warten. Die neue Unterlage wird gelesen und der Auftrag wird vorbereitet.">Hochladen & analysieren</button>
           <button type="submit" name="aktion" value="reanalyze_existing" class="btn btn-soft btn-lg" data-loading-message="Bitte kurz warten. Vorhandene Unterlagen werden neu geprüft.">Vorhandene Unterlagen neu analysieren</button>
           <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Änderungen speichern</button>
-          <a href="{{ url_for('dashboard') }}" class="btn btn-soft btn-lg">Zurück</a>
+          {% if back_context %}<input type="hidden" name="back" value="{{ back_context }}">{% endif %}
+          <a href="{{ detail_back_url }}" class="btn btn-soft btn-lg">Zurück</a>
         </div>
       </form>
 
@@ -624,6 +691,12 @@
               <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Original öffnen</a>
               <a href="{{ url_for('admin_datei_download', datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
             </div>
+            {% if datei['notiz'] %}
+              <div class="mt-3">
+                <div class="small text-muted">Hinweis Autohaus</div>
+                <div class="fw-semibold">{{ datei['notiz'] }}</div>
+              </div>
+            {% endif %}
             {% if datei['has_extract'] %}
               <div class="mt-3">
                 <div class="small text-muted">Datei gelesen{% if datei['dokument_typ'] %} · {{ datei['dokument_typ'] }}{% endif %}</div>

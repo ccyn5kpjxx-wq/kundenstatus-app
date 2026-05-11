@@ -1,0 +1,125 @@
+{% if mini_calendar %}
+<style>
+  .mini-calendar-card {
+    border:1px solid #e4d6c3;
+    border-radius:20px;
+    background:#fffdf9;
+    box-shadow:0 14px 36px rgba(64,47,25,.1);
+  }
+  .mini-calendar-head,
+  .mini-calendar-grid {
+    display:grid;
+    grid-template-columns:repeat(7, minmax(0, 1fr));
+    gap:6px;
+  }
+  .mini-calendar-head span {
+    color:#6d7780;
+    font-size:.78rem;
+    font-weight:700;
+    text-align:center;
+  }
+  .mini-day {
+    position:relative;
+    min-height:38px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border:1px solid #eadccb;
+    border-radius:12px;
+    background:#fffaf2;
+    color:#1c2732;
+    font-weight:700;
+  }
+  .mini-day.is-other-month {
+    color:#b4aa9b;
+    background:#f6efe4;
+  }
+  .mini-day.is-today {
+    background:#121820;
+    border-color:#121820;
+    color:#fff;
+  }
+  .mini-day.has-holiday {
+    box-shadow:inset 0 -4px 0 #dc3545;
+  }
+  .mini-day.has-vacation {
+    box-shadow:inset 0 -4px 0 #145d66;
+  }
+  .mini-day.has-holiday.has-vacation {
+    background:linear-gradient(180deg,#fffaf2 0 68%,#dc3545 68% 82%,#145d66 82% 100%);
+  }
+  .mini-day.has-events::after,
+  .mini-day.has-notes::before {
+    content:"";
+    position:absolute;
+    top:5px;
+    width:7px;
+    height:7px;
+    border-radius:999px;
+  }
+  .mini-day.has-events::after {
+    right:6px;
+    background:#0d6efd;
+  }
+  .mini-day.has-notes::before {
+    left:6px;
+    background:#c78300;
+  }
+  .mini-legend {
+    display:flex;
+    gap:12px;
+    flex-wrap:wrap;
+    color:#66737d;
+    font-size:.85rem;
+  }
+  .mini-legend span {
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+  }
+  .mini-dot {
+    width:10px;
+    height:10px;
+    border-radius:999px;
+    display:inline-block;
+    background:#0d6efd;
+  }
+  .mini-dot.holiday { background:#dc3545; }
+  .mini-dot.vacation { background:#145d66; }
+  .mini-dot.note { background:#c78300; }
+</style>
+
+<div class="mini-calendar-card p-3 p-lg-4 mb-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+    <div>
+      <h4 class="mb-1">Monatsblick {{ mini_calendar['title'] }}</h4>
+      <div class="text-muted small">Heute: {{ mini_calendar['today_text'] }}</div>
+    </div>
+    <div class="d-flex gap-2">
+      {% if mini_calendar['prev_url'] %}<a class="btn btn-soft btn-sm" href="{{ mini_calendar['prev_url'] }}">Zurück</a>{% endif %}
+      {% if mini_calendar['next_url'] %}<a class="btn btn-soft btn-sm" href="{{ mini_calendar['next_url'] }}">Weiter</a>{% endif %}
+    </div>
+  </div>
+  <div class="mini-calendar-head mb-2">
+    {% for label in mini_calendar['weekdays'] %}
+      <span>{{ label }}</span>
+    {% endfor %}
+  </div>
+  <div class="mini-calendar-grid">
+    {% for week in mini_calendar['weeks'] %}
+      {% for day in week %}
+        <div
+          class="mini-day {{ '' if day['in_month'] else 'is-other-month' }} {{ 'is-today' if day['is_today'] else '' }} {{ 'has-holiday' if day['is_holiday'] else '' }} {{ 'has-vacation' if day['has_betriebsurlaub'] else '' }} {{ 'has-events' if day['has_events'] else '' }} {{ 'has-notes' if day['has_notes'] else '' }}"
+          title="{{ day['tooltip'] or day['datum_text'] }}"
+        >{{ day['tag'] }}</div>
+      {% endfor %}
+    {% endfor %}
+  </div>
+  <div class="mini-legend mt-3">
+    <span><i class="mini-dot holiday"></i>Feiertag</span>
+    <span><i class="mini-dot vacation"></i>Betriebsurlaub</span>
+    <span><i class="mini-dot"></i>{{ mini_calendar.get('event_label', 'Fahrzeugtermin') }}</span>
+    {% if mini_calendar['show_notes'] %}<span><i class="mini-dot note"></i>Notiz</span>{% endif %}
+  </div>
+</div>
+{% endif %}

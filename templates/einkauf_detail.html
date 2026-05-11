@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% block title %}Einkaufsprodukt{% endblock %}
+
+{% block extra_css %}
+<style>
+  .detail-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+    gap: 1.25rem;
+  }
+  .product-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #f7f1e8;
+    overflow: hidden;
+    color: var(--muted);
+    font-weight: 700;
+  }
+  .product-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #fff;
+  }
+  .product-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .7rem;
+  }
+  .product-meta div {
+    border-top: 1px solid rgba(221, 209, 192, .85);
+    padding-top: .6rem;
+    min-width: 0;
+  }
+  .product-description,
+  .raw-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border-radius: 8px;
+    padding: .85rem 1rem;
+  }
+  .product-description {
+    background: #fffaf2;
+    border: 1px solid #e4d6c3;
+  }
+  .raw-text {
+    background: #eef5f6;
+    border: 1px solid rgba(20, 93, 102, .18);
+    color: #145d66;
+    font-size: .9rem;
+  }
+  .compare-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem;
+  }
+  .compare-links a {
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
+  }
+  .price-radar {
+    border: 1px solid #d8c7b0;
+    border-radius: 8px;
+    background: #fffaf2;
+    padding: .75rem .85rem;
+    font-size: .92rem;
+  }
+  .price-radar.price-alert-danger {
+    border-color: #dc3545;
+    background: #fff1f1;
+    color: #66151c;
+  }
+  .price-radar.price-alert-warning {
+    border-color: #c98500;
+    background: #fff7e6;
+    color: #614000;
+  }
+  .price-radar.price-alert-info {
+    border-color: #8ec4da;
+    background: #eef7fb;
+  }
+  .price-radar.price-alert-success {
+    border-color: #84c69a;
+    background: #eff8f2;
+  }
+  @media (max-width: 900px) {
+    .detail-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-card p-4 p-lg-5 mb-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div class="min-width-0">
+      <div class="badge-soft mb-3">Einkaufsprodukt</div>
+      <h1 class="mb-2">{{ item['produkt_name'] or item['titel'] }}</h1>
+      <p class="mb-0 text-muted">{{ item['kategorie_label'] or item['kategorie'] }} · {{ item['lieferant'] }} · {{ item['erstellt_am'] }}</p>
+    </div>
+    <a href="{{ url_for('admin_einkauf') }}#einkauf-position-{{ item['id'] }}" class="btn btn-soft">Zurück zum Einkauf</a>
+  </div>
+</div>
+
+<div class="detail-grid mb-4">
+  <div class="page-card p-4">
+    <div class="product-preview mb-3">
+      {% if item['produktbild_preview_url'] %}
+        <img src="{{ item['produktbild_preview_url'] }}" alt="{{ item['original_name'] or item['produkt_name'] }}">
+      {% elif item['datei_url'] and item['is_pdf'] %}
+        <a href="{{ item['datei_url'] }}" class="btn btn-soft" target="_blank">PDF öffnen</a>
+      {% elif item['datei_url'] %}
+        <a href="{{ item['datei_url'] }}" class="btn btn-soft" target="_blank">Datei öffnen</a>
+      {% else %}
+        Ohne Datei
+      {% endif %}
+    </div>
+    <div class="product-meta mb-3">
+      <div><strong>Artikelnummer</strong><br>{{ item['artikelnummer'] or '-' }}</div>
+      <div><strong>Menge</strong><br>{{ item['stueckzahl'] }} {{ item['ve'] }}{% if item['gebinde'] %} · {{ item['gebinde'] }}{% endif %}</div>
+      <div><strong>Auto-Color</strong><br>{{ item['auto_color_preis_label'] or '-' }}</div>
+      <div><strong>Alternative</strong><br>{{ item['vergleich_lieferant'] or '-' }}{% if item['vergleich_preis_label'] %} · {{ item['vergleich_preis_label'] }}{% endif %}</div>
+      <div><strong>Differenz</strong><br><span class="{{ item['preis_delta_class'] }}">{{ item['preis_delta_label'] or '-' }}</span></div>
+      <div><strong>Lieferzeit</strong><br>{{ item['lieferzeit'] or '-' }}</div>
+    </div>
+    {% set radar = item['preisradar'] %}
+    <div class="price-radar {{ item['preiswarnung_class'] }} mb-3">
+      <div class="d-flex gap-2 align-items-center flex-wrap mb-1">
+        <span class="badge {% if radar['status'] == 'danger' %}text-bg-danger{% elif radar['status'] == 'warning' %}text-bg-warning{% elif radar['status'] == 'success' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ radar['badge'] }}</span>
+        <strong>{{ radar['title'] }}</strong>
+      </div>
+      <div>{{ radar['text'] }}</div>
+      {% if radar['span_label'] %}
+        <div class="small mt-1">Spanne: {{ radar['span_label'] }}</div>
+      {% endif %}
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <form method="POST" action="{{ url_for('admin_einkauf_analysieren', item_id=item['id']) }}" class="m-0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <button type="submit" class="btn btn-soft btn-sm">Neu analysieren</button>
+      </form>
+      <form method="POST" action="{{ url_for('admin_einkauf_bestellt', item_id=item['id']) }}" class="m-0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <button type="submit" class="btn btn-brand btn-sm">Bestellt</button>
+      </form>
+      <form method="POST" action="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}" class="m-0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-soft btn-sm">Entfernen</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="page-card p-4">
+    <div class="section-title">
+      <div>
+        <h4 class="mb-1">Gespeicherte Produktbeschreibung</h4>
+        <p>Diese Beschreibung wird beim Upload aus dem Bild gelesen und am Produkt gespeichert.</p>
+      </div>
+    </div>
+    {% if item['produkt_beschreibung'] %}
+      <div class="product-description mb-3">{{ item['produkt_beschreibung'] }}</div>
+    {% else %}
+      <div class="text-muted mb-3">Noch keine Beschreibung gespeichert. Mit „Neu analysieren“ kann das Bild erneut gelesen werden.</div>
+    {% endif %}
+    <div class="compare-links mb-3">
+      <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='bilder') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Bildsuche</a>
+      <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='google-shopping') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Google Shopping</a>
+      <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='google') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Google</a>
+      <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='idealo') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">Idealo</a>
+      <a href="{{ url_for('admin_einkauf_vergleich', item_id=item['id'], anbieter='ebay') }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener">eBay</a>
+    </div>
+    <div class="text-muted small">
+      Suchbasis: {{ item['internet_query'] }}
+      {% if item['preisquelle'] %}
+        <br>Quelle:
+        {% if item['preisquelle'].startswith('http') %}
+          <a href="{{ item['preisquelle'] }}" target="_blank" rel="noopener">Vergleich öffnen</a>
+        {% else %}
+          {{ item['preisquelle'] }}
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Produktdaten bearbeiten</h4>
+      <p>Hier bleibt die genaue Beschreibung am Produkt gespeichert.</p>
+    </div>
+  </div>
+  <form method="POST" action="{{ url_for('admin_einkauf_bearbeiten', item_id=item['id']) }}" class="row g-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ request.path }}">
+    <div class="col-md-7">
+      <label class="form-label">Produkt</label>
+      <input type="text" name="produkt_name" class="form-control" value="{{ item['produkt_name'] }}">
+    </div>
+    <div class="col-md-5">
+      <label class="form-label">Artikelnummer</label>
+      <input type="text" name="artikelnummer" class="form-control" value="{{ item['artikelnummer'] }}">
+    </div>
+    <div class="col-12">
+      <label class="form-label">Produktbild-URL</label>
+      <input type="url" name="produktbild_url" class="form-control" value="{{ item['produktbild_url'] }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Kategorie</label>
+      <select name="kategorie" class="form-select">
+        {% for kategorie in kategorien %}
+          <option value="{{ kategorie }}" {% if item['kategorie'] == kategorie %}selected{% endif %}>{{ kategorie }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Lieferant</label>
+      <input type="text" name="lieferant" class="form-control" value="{{ item['lieferant'] }}">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Stückzahl</label>
+      <input type="number" name="stueckzahl" min="1" step="1" class="form-control" value="{{ item['stueckzahl'] }}">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">VE</label>
+      <select name="ve" class="form-select">
+        {% for ve in ve_optionen %}
+          <option value="{{ ve }}" {% if item['ve'] == ve %}selected{% endif %}>{{ ve }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Gebinde</label>
+      <input type="text" name="gebinde" class="form-control" value="{{ item['gebinde'] }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Auto-Color Preis</label>
+      <input type="text" name="auto_color_preis" class="form-control" value="{{ item['auto_color_preis'] }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Alternative</label>
+      <input type="text" name="vergleich_lieferant" class="form-control" value="{{ item['vergleich_lieferant'] }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Alternativpreis</label>
+      <input type="text" name="vergleich_preis" class="form-control" value="{{ item['vergleich_preis'] }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Lieferzeit</label>
+      <input type="text" name="lieferzeit" class="form-control" value="{{ item['lieferzeit'] }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Status</label>
+      <select name="angebotsstatus" class="form-select">
+        {% for key, label in angebotsstatus.items() %}
+          <option value="{{ key }}" {% if item['angebotsstatus'] == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Quelle / Link</label>
+      <input type="text" name="preisquelle" class="form-control" value="{{ item['preisquelle'] }}">
+    </div>
+    <div class="col-12">
+      <label class="form-label">Produktbeschreibung</label>
+      <textarea name="produkt_beschreibung" rows="6" class="form-control">{{ item['produkt_beschreibung'] }}</textarea>
+    </div>
+    <div class="col-12">
+      <label class="form-label">Notiz</label>
+      <textarea name="notiz" rows="2" class="form-control">{{ item['notiz'] }}</textarea>
+    </div>
+    <div class="col-12">
+      <label class="form-label">Angebotsnotiz</label>
+      <textarea name="angebotsnotiz" rows="2" class="form-control">{{ item['angebotsnotiz'] }}</textarea>
+    </div>
+    <input type="hidden" name="titel" value="{{ item['titel'] }}">
+    <input type="hidden" name="menge" value="{{ item['menge'] }}">
+    <div class="col-12">
+      <button type="submit" class="btn btn-brand">Änderungen speichern</button>
+    </div>
+  </form>
+</div>
+
+{% if item['qr_text'] %}
+<div class="page-card p-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Gelesener Etikett-Text</h4>
+      <p>Rohtext aus QR-Code, OCR oder PDF-Lesung.</p>
+    </div>
+  </div>
+  <div class="raw-text">{{ item['qr_text'] }}</div>
+</div>
+{% endif %}
+{% endblock %}

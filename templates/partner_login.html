@@ -24,6 +24,10 @@
       min-height:48px;
       font-size:16px;
     }
+    .access-code-input {
+      text-transform:uppercase;
+      letter-spacing:.04em;
+    }
     @media (max-width: 575.98px) {
       body { align-items:flex-start; padding:14px; }
       .container { padding:0; }
@@ -45,12 +49,37 @@
       {% endwith %}
       <form method="POST">
         <div class="mb-3">
-          <label class="form-label">Zugangscode</label>
-          <input type="password" name="zugangscode" class="form-control form-control-lg" required autofocus>
+          <label class="form-label" for="zugangscode">Zugangscode</label>
+          <input
+            type="text"
+            id="zugangscode"
+            name="zugangscode"
+            class="form-control form-control-lg access-code-input"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck="false"
+            required
+            autofocus
+          >
         </div>
         <button type="submit" class="btn btn-dark w-100 btn-lg">Einloggen</button>
       </form>
     </div>
   </div>
+  <script>
+    (() => {
+      const input = document.getElementById('zugangscode');
+      if (!input) return;
+      const focusInput = () => input.focus({ preventScroll: true });
+      window.addEventListener('load', focusInput);
+      document.querySelector('.login-card')?.addEventListener('click', focusInput);
+      input.addEventListener('input', () => {
+        const start = input.selectionStart;
+        const end = input.selectionEnd;
+        input.value = input.value.toUpperCase().trim();
+        input.setSelectionRange(start, end);
+      });
+    })();
+  </script>
 </body>
 </html>

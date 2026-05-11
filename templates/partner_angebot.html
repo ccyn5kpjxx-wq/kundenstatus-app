@@ -164,9 +164,12 @@
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
           <div>
             <div class="fw-bold mb-1">Vorausgefüllter Lackierauftrag</div>
-            <div class="text-muted small">PDF herunterladen, ausfüllen und unten bei Bilder oder Dokumente wieder hochladen.</div>
+            <div class="text-muted small">Online ausfüllen, speichern und danach als fertiges PDF herunterladen.</div>
           </div>
-          <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
+          <div class="d-flex gap-2 flex-wrap">
+            <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-dark">Online ausfüllen</a>
+            <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
+          </div>
         </div>
       </div>
 
@@ -244,6 +247,11 @@
           <label class="form-label">Bilder oder Dokumente</label>
           <input type="file" name="dateien" class="form-control form-control-lg" multiple>
           <div class="form-text">PDF, Bilder oder andere Unterlagen werden mit analysiert. Texteingaben werden zusätzlich lesbarer für die Werkstatt aufbereitet.</div>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Hinweis zum Bild oder Dokument (optional)</label>
+          <input type="text" name="upload_notiz" class="form-control form-control-lg" placeholder="z.B. Kotflügel links Kratzer, Stoßstange vorne gerissen">
+          <div class="form-text">Bei Schadensfotos reichen kurze Schlagwörter. Die Werkstatt sieht den Hinweis direkt mit der Datei.</div>
         </div>
         <div class="col-12 d-flex gap-2 flex-wrap">
           <button type="submit" name="aktion" value="analyze" class="btn btn-outline-dark btn-lg" data-loading-message="Angebotsanfrage wird analysiert und aufbereitet. Bitte kurz warten.">Angebotsanfrage analysieren</button>
@@ -391,9 +399,21 @@
                 <div class="d-flex gap-2 flex-wrap mt-2">
                   <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Original öffnen</a>
                   <a href="{{ url_for('partner_datei_download', slug=autohaus['slug'], datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+                  {% if datei['quelle'] == 'autohaus' %}
+                  <form method="POST" action="{{ url_for('partner_datei_loeschen', slug=autohaus['slug'], datei_id=datei['id']) }}" class="m-0" onsubmit="return confirm('Diese hochgeladene Datei wirklich entfernen?')">
+                    {{ csrf_field()|safe }}
+                    <input type="hidden" name="next" value="{{ request.path }}">
+                    <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
+                  </form>
+                  {% else %}
+                  <span class="badge text-bg-light border">Werkstatt-Datei</span>
+                  {% endif %}
                 </div>
               </div>
             </div>
+            {% if datei['notiz'] %}
+            <div class="small fw-semibold mt-2">Hinweis Autohaus: {{ datei['notiz'] }}</div>
+            {% endif %}
             {% if datei['extrakt_kurz'] %}
             <div class="small text-muted mt-1">{{ datei['extrakt_kurz'] }}</div>
             {% endif %}
@@ -404,6 +424,7 @@
       {% endif %}
     </div>
   </div>
+  {% include "ki_assistent_widget.html" %}
   <script>
     const form = document.querySelector('[data-upload-form]');
     const overlay = document.querySelector('[data-loading-overlay]');
@@ -414,24 +435,7 @@
     const transportSelect = document.querySelector('[data-transport-select]');
     const annahmeLabel = document.querySelector('[data-angebot-annahme-label]');
     const abholungLabel = document.querySelector('[data-angebot-abholung-label]');
-    const loadingNewsItems = [
-      {
-        title: 'Ab 27.04.2026: neue ION-7 im Einsatz',
-        text: 'Für Sie bedeutet das vor allem ein ruhigerer, planbarer Lackierprozess und ein Finish, das wir noch gleichmäßiger steuern können.'
-      },
-      {
-        title: 'Mehr Konstanz beim Lackbild',
-        text: 'Die neue Technik arbeitet laut Anbieter mit erwärmtem Stickstoff. Für unsere Kunden übersetzen wir das in noch mehr Stabilität beim Lackierergebnis.'
-      },
-      {
-        title: 'Sauberer Prozess, weniger Nacharbeit',
-        text: 'Weniger Overspray heißt für Sie im Idealfall: sauberere Abläufe, weniger unnötige Nacharbeit und ein klarer Fokus auf ein sauberes Endergebnis.'
-      },
-      {
-        title: 'Planbarere Fertigstellung',
-        text: 'ION-7 nennt verkürzte Ablüftzeiten als Vorteil. Für unsere Kunden heißt das vor allem: Termine lassen sich verlässlicher halten, sobald das Fahrzeug bei uns im Prozess ist.'
-      }
-    ];
+    const loadingNewsItems = {{ analysis_loading_news() | tojson }};
     let loadingNewsIndex = 0;
     let loadingNewsTimer = null;
     let submitterMessage = '';

@@ -1,5 +1,6 @@
 from pathlib import Path
 from io import BytesIO
+from datetime import date
 import sys
 
 
@@ -37,6 +38,37 @@ def main():
     has_csrf = "name=\"csrf_token\"" in login_response.get_data(as_text=True)
     print("[OK] Login-Formular enthält CSRF-Token" if has_csrf else "[FEHLER] Login-Formular ohne CSRF-Token")
     ok &= has_csrf
+    security_headers_ok = (
+        login_response.headers.get("X-Content-Type-Options") == "nosniff"
+        and login_response.headers.get("X-Frame-Options") == "SAMEORIGIN"
+        and "frame-ancestors 'self'" in login_response.headers.get("Content-Security-Policy", "")
+    )
+    print(
+        "[OK] Sicherheitsheader werden gesetzt"
+        if security_headers_ok
+        else "[FEHLER] Sicherheitsheader fehlen"
+    )
+    ok &= security_headers_ok
+    with portal.app.test_request_context("/", environ_base={"REMOTE_ADDR": "203.0.113.250"}, headers={"Host": "example.test"}):
+        external_default_denied = not portal.admin_password_matches(portal.DEFAULT_ADMIN_PASS)
+    print(
+        "[OK] Admin-Defaultpasswort wird extern nicht akzeptiert"
+        if external_default_denied
+        else "[FEHLER] Admin-Defaultpasswort ist extern akzeptiert"
+    )
+    ok &= external_default_denied
+    with portal.app.test_request_context("/", environ_base={"REMOTE_ADDR": "203.0.113.251"}, headers={"Host": "example.test"}):
+        for _ in range(portal.LOGIN_RATE_LIMIT_MAX):
+            portal.record_failed_login("smoke", "audit")
+        limited, wait_seconds = portal.login_rate_limit_status("smoke", "audit")
+        portal.clear_login_attempts("smoke", "audit")
+    rate_limit_ok = limited and wait_seconds > 0
+    print(
+        "[OK] Login-Rate-Limit sperrt nach Fehlversuchen"
+        if rate_limit_ok
+        else "[FEHLER] Login-Rate-Limit sperrt nicht"
+    )
+    ok &= rate_limit_ok
     ok &= check(
         "Login-POST ohne CSRF blockiert",
         client.post("/login", data={"passwort": "falsch"}),
@@ -77,9 +109,272 @@ def main():
     with client.session_transaction() as session:
         session["admin"] = True
     ok &= check("Admin mit Login", client.get("/admin"), {200})
-    ok &= check("Betriebs-Cockpit mit Login", client.get("/admin/cockpit"), {200})
-    ok &= check("Interner Kalender mit Login", client.get("/admin/kalender"), {200})
+    cockpit_response = client.get("/admin/cockpit")
+    ok &= check("Betriebs-Cockpit mit Login", cockpit_response, {200})
+    cockpit_html = cockpit_response.get_data(as_text=True)
+    reminder_form_ok = "Kurz notieren, was später erledigt werden soll" in cockpit_html and "/admin/erinnerungen/neu" in cockpit_html
+    print(
+        "[OK] Startseite zeigt Erinnerungsfeld"
+        if reminder_form_ok
+        else "[FEHLER] Startseite zeigt kein Erinnerungsfeld"
+    )
+    ok &= reminder_form_ok
+    quick_search_ui_ok = (
+        "data-quick-search-input" in cockpit_html
+        and "/admin/cockpit/auftraege-suche" in cockpit_html
+    )
+    print(
+        "[OK] Cockpit zeigt Live-Auftragssuche"
+        if quick_search_ui_ok
+        else "[FEHLER] Cockpit zeigt keine Live-Auftragssuche"
+    )
+    ok &= quick_search_ui_ok
+    quick_search_response = client.get("/admin/cockpit/auftraege-suche?q=MOS-K")
+    ok &= check("Cockpit-Auftragssuche nach Kennzeichen", quick_search_response, {200})
+    quick_search_data = quick_search_response.get_json(silent=True) or {}
+    quick_search_items = quick_search_data.get("items") or []
+    quick_search_result_ok = any(
+        "MOS-K" in item.get("kennzeichen", "") and "/admin/auftrag/" in item.get("url", "")
+        for item in quick_search_items
+    )
+    print(
+        "[OK] Cockpit-Auftragssuche liefert klickbaren Auftrag"
+        if quick_search_result_ok
+        else "[FEHLER] Cockpit-Auftragssuche liefert keinen klickbaren Auftrag"
+    )
+    ok &= quick_search_result_ok
+    reminder_text = "Smoke-Test Erinnerung erledigen"
+    reminder_post = client.post(
+        "/admin/erinnerungen/neu",
+        data=csrf_data(client, {"text": reminder_text, "next": "/admin/cockpit"}),
+        follow_redirects=False,
+    )
+    ok &= check("Erinnerung speichern", reminder_post, {302})
+    reminders = portal.list_erinnerungen(limit=20)
+    created_reminder = next((item for item in reminders if item["text"] == reminder_text), None)
+    reminder_saved_ok = created_reminder is not None
+    print(
+        "[OK] Erinnerung ist gespeichert"
+        if reminder_saved_ok
+        else "[FEHLER] Erinnerung wurde nicht gespeichert"
+    )
+    ok &= reminder_saved_ok
+    if created_reminder:
+        done_response = client.post(
+            f"/admin/erinnerungen/{created_reminder['id']}/erledigt",
+            data=csrf_data(client, {"next": "/admin/cockpit"}),
+            follow_redirects=False,
+        )
+        ok &= check("Erinnerung erledigen", done_response, {302})
+    cockpit_news_hidden = "News-Fenster öffnen" not in cockpit_html and "Werkstatt-News" not in cockpit_html
+    print(
+        "[OK] Betriebs-Cockpit blendet interne Werkstatt-News aus"
+        if cockpit_news_hidden
+        else "[FEHLER] Betriebs-Cockpit zeigt noch Werkstatt-News"
+    )
+    ok &= cockpit_news_hidden
+    cockpit_hide_response = client.post(
+        "/admin/cockpit/eingang/smoke-start-delete/loeschen",
+        data=csrf_data(client, {"next": "/admin/cockpit"}),
+        follow_redirects=False,
+    )
+    ok &= check("Cockpit-Meldung ausblenden", cockpit_hide_response, {302})
+    hidden_ok = "smoke-start-delete" in portal.postfach_hidden_keys("admin", 0)
+    print(
+        "[OK] Cockpit blendet gelöschte Meldungen aus"
+        if hidden_ok
+        else "[FEHLER] Cockpit-Meldung wurde nicht ausgeblendet"
+    )
+    ok &= hidden_ok
+    smoke_email_id = portal.create_werkstatt_email(
+        absender_name="Smoke Test",
+        betreff="Smoke Cockpit entfernen",
+        nachricht="Testnachricht ohne Kundenbezug",
+        quelle="smoke",
+    )
+    cockpit_email_response = client.post(
+        f"/admin/cockpit/eingang/admin-email-{smoke_email_id}/loeschen",
+        data=csrf_data(client, {"next": "/admin/cockpit"}),
+        follow_redirects=False,
+    )
+    ok &= check("Cockpit-E-Mail entfernen", cockpit_email_response, {302})
+    smoke_email = portal.get_werkstatt_email(smoke_email_id)
+    email_done_ok = bool(smoke_email and smoke_email["status"] == "erledigt")
+    print(
+        "[OK] Cockpit-E-Mail wird als erledigt markiert"
+        if email_done_ok
+        else "[FEHLER] Cockpit-E-Mail bleibt neu"
+    )
+    ok &= email_done_ok
+    db = portal.get_db()
+    try:
+        db.execute(
+            "DELETE FROM postfach_ausblendungen WHERE empfaenger='admin' AND autohaus_id=0 AND item_key=?",
+            ("smoke-start-delete",),
+        )
+        db.execute("DELETE FROM werkstatt_emails WHERE id=?", (smoke_email_id,))
+        db.commit()
+    finally:
+        db.close()
+    kalender_response = client.get("/admin/kalender")
+    ok &= check("Interner Kalender mit Login", kalender_response, {200})
+    kalender_html = kalender_response.get_data(as_text=True)
+    kalender_week_ok = "Diese Woche" in kalender_html and "KW " in kalender_html
+    print(
+        "[OK] Kalender zeigt Wochenübersicht"
+        if kalender_week_ok
+        else "[FEHLER] Kalender-Wochenübersicht fehlt"
+    )
+    ok &= kalender_week_ok
+    kalender_news_ok = (
+        "Betriebsurlaub" in kalender_html
+        and "19.08.2026" in kalender_html
+        and "04.09.2026" in kalender_html
+    )
+    print(
+        "[OK] Kalender zeigt Werkstatt-News"
+        if kalender_news_ok
+        else "[FEHLER] Kalender zeigt Werkstatt-News nicht"
+    )
+    ok &= kalender_news_ok
+    mitarbeiter_response = client.get("/admin/mitarbeiter")
+    ok &= check("Mitarbeiter mit Login", mitarbeiter_response, {200})
+    mitarbeiter_html = mitarbeiter_response.get_data(as_text=True)
+    mitarbeiter_page_ok = "Team und Urlaub" in mitarbeiter_html and "Mitarbeiter speichern" in mitarbeiter_html
+    print(
+        "[OK] Mitarbeiterseite zeigt Team- und Urlaubsverwaltung"
+        if mitarbeiter_page_ok
+        else "[FEHLER] Mitarbeiterseite zeigt die Urlaubsverwaltung nicht"
+    )
+    ok &= mitarbeiter_page_ok
+
+    smoke_mitarbeiter_id = None
+    smoke_urlaub_id = None
+    try:
+        smoke_mitarbeiter_id = portal.create_mitarbeiter("Smoke Mitarbeiter", rolle="Test")
+        smoke_urlaub_id = portal.create_mitarbeiter_urlaub(
+            smoke_mitarbeiter_id,
+            date.today(),
+            date.today(),
+            "Smoke Urlaub",
+        )
+        mitarbeiter_after_create = client.get("/admin/mitarbeiter")
+        ok &= check("Mitarbeiter-Urlaub angelegt", mitarbeiter_after_create, {200})
+        mitarbeiter_after_html = mitarbeiter_after_create.get_data(as_text=True)
+        mitarbeiter_urlaub_ok = "Smoke Mitarbeiter" in mitarbeiter_after_html and "Smoke Urlaub" in mitarbeiter_after_html
+        print(
+            "[OK] Mitarbeiterurlaub erscheint beim Mitarbeiter"
+            if mitarbeiter_urlaub_ok
+            else "[FEHLER] Mitarbeiterurlaub erscheint nicht beim Mitarbeiter"
+        )
+        ok &= mitarbeiter_urlaub_ok
+        kalender_urlaub_response = client.get("/admin/kalender?suche=Smoke%20Mitarbeiter")
+        ok &= check("Mitarbeiterurlaub im Kalender", kalender_urlaub_response, {200})
+        kalender_urlaub_html = kalender_urlaub_response.get_data(as_text=True)
+        kalender_urlaub_ok = "Smoke Mitarbeiter im Urlaub" in kalender_urlaub_html and "Smoke Urlaub" in kalender_urlaub_html
+        print(
+            "[OK] Mitarbeiterurlaub wird in den Kalender übernommen"
+            if kalender_urlaub_ok
+            else "[FEHLER] Mitarbeiterurlaub fehlt im Kalender"
+        )
+        ok &= kalender_urlaub_ok
+    finally:
+        if smoke_mitarbeiter_id:
+            db = portal.get_db()
+            try:
+                if smoke_urlaub_id:
+                    db.execute("DELETE FROM mitarbeiter_urlaub WHERE id=?", (smoke_urlaub_id,))
+                db.execute("DELETE FROM mitarbeiter WHERE id=?", (smoke_mitarbeiter_id,))
+                db.commit()
+            finally:
+                db.close()
+    news_response = client.get("/admin/news")
+    ok &= check("Werkstatt-News mit Login", news_response, {200})
+    news_html = news_response.get_data(as_text=True)
+    news_ok = (
+        "News-Fenster" in news_html
+        and "Betriebsurlaub" in news_html
+        and "Betriebsurlaub vom 19.08.2026 bis 04.09.2026." in news_html
+    )
+    print(
+        "[OK] Werkstatt-News-Fenster zeigt Betriebsurlaub"
+        if news_ok
+        else "[FEHLER] Werkstatt-News-Fenster zeigt Betriebsurlaub nicht"
+    )
+    ok &= news_ok
+    email_response = client.get("/admin/emails")
+    ok &= check("E-Mail-Zentrale mit Login", email_response, {200})
+    email_html = email_response.get_data(as_text=True)
+    email_ok = (
+        "E-Mail-Zentrale" in email_html
+        and "/api/werkstatt/emails" in email_html
+        and "Postfach jetzt abrufen" in email_html
+        and "IMAP" in email_html
+    )
+    print(
+        "[OK] E-Mail-Zentrale zeigt API- und IMAP-Hinweis"
+        if email_ok
+        else "[FEHLER] E-Mail-Zentrale zeigt API-/IMAP-Hinweis nicht"
+    )
+    ok &= email_ok
     ok &= check("Werkstatt-Postfach mit Login", client.get("/admin/postfach"), {200})
+    rechnungen_response = client.get("/admin/rechnungen")
+    ok &= check("Rechnungskontrolle mit Login", rechnungen_response, {200})
+    rechnungen_html = rechnungen_response.get_data(as_text=True)
+    rechnungen_ok = (
+        "Kontoauszug hochladen" in rechnungen_html
+        and "Kontoauszug analysieren" in rechnungen_html
+        and "Lexware wird geprüft" in rechnungen_html
+        and "Einnahmen" in rechnungen_html
+        and "Ausgaben" in rechnungen_html
+        and "Umsatz / Saldo" in rechnungen_html
+        and "Offene Rechnungen" in rechnungen_html
+    )
+    print(
+        "[OK] Rechnungskontrolle zeigt Kontoauszug-Upload, Ladehinweis und Kennzahlen"
+        if rechnungen_ok
+        else "[FEHLER] Rechnungskontrolle zeigt Kontoauszug-Upload/Kennzahlen nicht"
+    )
+    ok &= rechnungen_ok
+    einkauf_response = client.get("/admin/einkauf")
+    ok &= check("Werkstatt-Einkauf mit Login", einkauf_response, {200})
+    einkauf_html = einkauf_response.get_data(as_text=True)
+    einkauf_ok = (
+        "Topcolor-Liste" in einkauf_html
+        and "Offene Einkaufspositionen" in einkauf_html
+        and "Angelegte Teile" in einkauf_html
+        and "Produkte aus Rechnung" in einkauf_html
+        and "Topcolor API und Konditionen" in einkauf_html
+        and "Produktbild-URL" in einkauf_html
+    )
+    print(
+        "[OK] Einkauf zeigt Topcolor- und Rechnungsmodul"
+        if einkauf_ok
+        else "[FEHLER] Einkauf zeigt Topcolor-/Rechnungsmodul nicht"
+    )
+    ok &= einkauf_ok
+    parsed_einkauf = portal.extract_einkauf_beleg_positions(
+        "\n".join(
+            [
+                "Bitte Rechnung über 129,90 EUR zahlen.",
+                "1,/KG -% 20,3036,9020. 45,00 EUR",
+                "12345 Schleifscheibe P500 2 Stk 12,50 EUR",
+                "777 Klarlack 1 Dose 88,90 EUR",
+            ]
+        ),
+        "test.pdf",
+    )
+    parsed_names = {item["produkt_name"] for item in parsed_einkauf}
+    einkauf_parser_ok = (
+        parsed_names == {"Schleifscheibe P500", "Klarlack"}
+        and all("Rechnung" not in item["produkt_name"] for item in parsed_einkauf)
+    )
+    print(
+        "[OK] Einkauf ignoriert OCR-Rechnungszeilen"
+        if einkauf_parser_ok
+        else "[FEHLER] Einkauf übernimmt OCR-Rechnungszeilen als Artikel"
+    )
+    ok &= einkauf_parser_ok
     parsed_calendar_note = portal.parse_kalender_schnelleintrag("14.04 Geburtstag Max jährlich")
     parser_ok = (
         parsed_calendar_note["datum"].startswith("14.04.")
@@ -92,18 +387,44 @@ def main():
         else "[FEHLER] Kalender-Schnelleintrag erkennt Datum/Wiederholung nicht"
     )
     ok &= parser_ok
+    bonus_beispiel = portal.build_bonusmodell(
+        [
+            {
+                "id": 999001,
+                "status": 5,
+                "fahrzeug": "Smoke Bonus",
+                "kennzeichen": "MOS-B 1",
+                "abholtermin_obj": date(2026, 5, 12),
+                "abholtermin": "12.05.2026",
+                "werkstatt_angebot_preis": "3.670,40 € netto",
+                "bonus_netto_betrag": 0,
+            }
+        ],
+        reference_date=date(2026, 5, 20),
+    )
+    bonus_ok = (
+        bonus_beispiel["umsatz_netto_label"] == "3.670,40 €"
+        and bonus_beispiel["bonus_satz_label"] == "2 %"
+        and bonus_beispiel["bonus_netto_label"] == "73,41 €"
+    )
+    print(
+        "[OK] Bonusmodell berechnet Monatsumsatz und 2-Prozent-Bonus"
+        if bonus_ok
+        else "[FEHLER] Bonusmodell berechnet das Beispiel nicht korrekt"
+    )
+    ok &= bonus_ok
     external_client = portal.app.test_client()
     with external_client.session_transaction(base_url="https://werkstatt.example.test") as session:
         session["admin"] = True
     external_admin = external_client.get(
-        "/admin",
+        "/admin/zugaenge",
         base_url="https://werkstatt.example.test",
         headers={
             "X-Forwarded-Proto": "https",
             "X-Forwarded-Host": "werkstatt.example.test",
         },
     )
-    ok &= check("Admin mit oeffentlichem Host", external_admin, {200})
+    ok &= check("Autohaus-Zugaenge mit oeffentlichem Host", external_admin, {200})
     external_html = external_admin.get_data(as_text=True)
     expected_public_base_url = portal.PUBLIC_BASE_URL or "https://werkstatt.example.test"
     external_link_ok = f"{expected_public_base_url}/portal/" in external_html
@@ -163,11 +484,113 @@ def main():
         client = portal.app.test_client()
         with client.session_transaction() as session:
             session["partner_autohaus_id"] = autohaus["id"]
+        partner_dashboard_response = client.get("/partner/kaesmann/dashboard")
         ok &= check(
             "Käsmann-Dashboard mit Partner-Login",
-            client.get("/partner/kaesmann/dashboard"),
+            partner_dashboard_response,
             {200},
         )
+        partner_dashboard_html = partner_dashboard_response.get_data(as_text=True)
+        partner_planner_ok = (
+            "Nächste Termine" in partner_dashboard_html
+            and "terminplaner_tage" not in partner_dashboard_html
+            and "aktuellem Auftragsstatus" in partner_dashboard_html
+        )
+        print(
+            "[OK] Käsmann-Dashboard zeigt Terminplaner mit echtem Status"
+            if partner_planner_ok
+            else "[FEHLER] Käsmann-Dashboard zeigt keinen eindeutigen Terminplaner-Status"
+        )
+        ok &= partner_planner_ok
+        partner_bonus_link_ok = (
+            "Bonusmodell" in partner_dashboard_html
+            and "/partner/kaesmann/bonusmodell" in partner_dashboard_html
+            and "Bonusmodell klar erklärt" not in partner_dashboard_html
+        )
+        print(
+            "[OK] Partner-Dashboard zeigt Bonusmodell als eigene Rubrik"
+            if partner_bonus_link_ok
+            else "[FEHLER] Partner-Dashboard zeigt die Bonusmodell-Rubrik nicht korrekt"
+        )
+        ok &= partner_bonus_link_ok
+        partner_bonus_response = client.get("/partner/kaesmann/bonusmodell")
+        partner_bonus_html = partner_bonus_response.get_data(as_text=True)
+        partner_bonus_page_ok = (
+            partner_bonus_response.status_code == 200
+            and "Bonusmodell klar erklärt" in partner_bonus_html
+            and "Monatsumsatz netto" in partner_bonus_html
+            and "Bonus netto" in partner_bonus_html
+            and "Verrechnung auf Folgerechnung" in partner_bonus_html
+        )
+        print(
+            "[OK] Bonusmodell-Rubrik zeigt aktuelles Bonusmodell"
+            if partner_bonus_page_ok
+            else "[FEHLER] Bonusmodell-Rubrik zeigt das Bonusmodell nicht"
+        )
+        ok &= partner_bonus_page_ok
+        partner_search_ui_ok = (
+            "data-portal-search-input" in partner_dashboard_html
+            and "/partner/kaesmann/auftraege-suche" in partner_dashboard_html
+        )
+        print(
+            "[OK] Partner-Dashboard zeigt Fahrzeug-Suche"
+            if partner_search_ui_ok
+            else "[FEHLER] Partner-Dashboard zeigt keine Fahrzeug-Suche"
+        )
+        ok &= partner_search_ui_ok
+        with client.session_transaction() as session:
+            session["admin"] = True
+        mixed_session_dashboard_response = client.get("/partner/kaesmann/dashboard")
+        mixed_session_dashboard_html = mixed_session_dashboard_response.get_data(as_text=True)
+        partner_ki_endpoint_ok = (
+            mixed_session_dashboard_response.status_code == 200
+            and 'data-chat-url="/partner/kaesmann/ki/chat"' in mixed_session_dashboard_html
+            and 'data-clear-url="/partner/kaesmann/ki/chat/loeschen"' in mixed_session_dashboard_html
+            and 'data-chat-url="/admin/ki/chat"' not in mixed_session_dashboard_html
+        )
+        print(
+            "[OK] Partner-Dashboard nutzt Partner-KI-Endpunkte trotz Admin-Session"
+            if partner_ki_endpoint_ok
+            else "[FEHLER] Partner-Dashboard nutzt falsche KI-Endpunkte"
+        )
+        ok &= partner_ki_endpoint_ok
+        pfaff = portal.get_autohaus_by_slug("autohaus-pfaff")
+        if pfaff:
+            pfaff_client = portal.app.test_client()
+            with pfaff_client.session_transaction() as session:
+                session["partner_autohaus_id"] = pfaff["id"]
+            pfaff_dashboard_html = pfaff_client.get("/partner/autohaus-pfaff/dashboard").get_data(as_text=True)
+            pfaff_search_response = pfaff_client.get("/partner/autohaus-pfaff/auftraege-suche?q=MOS-K")
+            ok &= check("Partner-Auftragssuche nach Kennzeichen", pfaff_search_response, {200})
+            pfaff_search_items = (pfaff_search_response.get_json(silent=True) or {}).get("items") or []
+            pfaff_search_ok = any(
+                "MOS-K" in item.get("kennzeichen", "") and "/partner/autohaus-pfaff/auftrag/" in item.get("url", "")
+                for item in pfaff_search_items
+            )
+            print(
+                "[OK] Partner-Auftragssuche liefert klickbaren Auftrag"
+                if pfaff_search_ok
+                else "[FEHLER] Partner-Auftragssuche liefert keinen klickbaren Auftrag"
+            )
+            ok &= pfaff_search_ok
+            pfaff_first_period_ok = (
+                "11.05.2026 bis 13.05.2026" in pfaff_dashboard_html
+                or "13.05.2026" in pfaff_dashboard_html
+            )
+            pfaff_grouped_planner_ok = (
+                "2 Aufträge" in pfaff_dashboard_html
+                and pfaff_first_period_ok
+                and "18.05.2026 bis 21.05.2026" in pfaff_dashboard_html
+                and pfaff_dashboard_html.count("Aktuell:") == 2
+                and "Termine:" not in pfaff_dashboard_html
+                and "4 Termine" not in pfaff_dashboard_html
+            )
+            print(
+                "[OK] Partner-Terminplaner gruppiert Aufträge mit einem aktuellen Terminstatus"
+                if pfaff_grouped_planner_ok
+                else "[FEHLER] Partner-Terminplaner zeigt nicht genau einen aktuellen Terminstatus"
+            )
+            ok &= pfaff_grouped_planner_ok
         ok &= check(
             "Käsmann-Postfach mit Partner-Login",
             client.get("/partner/kaesmann/postfach"),
