@@ -4838,6 +4838,250 @@ def format_bonus_money(value):
     return f"{'.'.join(reversed(groups))},{decimals} EUR"
 
 
+def positive_money_amount(value):
+    if isinstance(value, (int, float)):
+        amount = round(float(value), 2)
+    else:
+        amount = parse_money_amount(value)
+    if amount is None or amount <= 0:
+        return None
+    return amount
+
+
+def extract_money_amounts_from_line(line):
+    text = clean_text(line)
+    if not text:
+        return []
+    matches = re.findall(
+        r"(?<![A-Za-z0-9])([0-9]{1,3}(?:[.\s'’][0-9]{3})*(?:[,.][0-9]{2})|[0-9]{4,}(?:[,.][0-9]{2})|[0-9]{1,6},[0-9]{2})(?:\s*(?:€|eur|euro))?",
+        text,
+        flags=re.IGNORECASE,
+    )
+    amounts = []
+    for raw in matches:
+        amount = positive_money_amount(raw)
+        if amount is not None:
+            amounts.append(amount)
+    return amounts
+
+
+def extract_invoice_total_amount(text):
+    cleaned = clean_text(text)
+    if not cleaned:
+        return None, ""
+    lines = [compact_whitespace(line) for line in cleaned.splitlines() if clean_text(line)]
+    priority_groups = (
+        (
+            "Netto-Gesamtbetrag",
+            (
+                "gesamt netto",
+                "summe netto",
+                "netto gesamt",
+                "nettobetrag",
+                "netto-betrag",
+                "betrag netto",
+                "rechnungsbetrag netto",
+                "rechnung netto",
+            ),
+        ),
+        (
+            "Rechnungs-Gesamtbetrag",
+            (
+                "gesamtbetrag",
+                "rechnungsbetrag",
+                "rechnungssumme",
+                "endbetrag",
+                "zahlbetrag",
+                "zu zahlen",
+                "gesamt summe",
+                "gesamtsumme",
+                "gesamt",
+            ),
+        ),
+        ("Brutto-Gesamtbetrag", ("bruttobetrag", "brutto gesamt", "gesamt brutto")),
+    )
+    for label, markers in priority_groups:
+        for line in reversed(lines):
+            normalized = normalize_document_text(line)
+            if not any(marker in normalized for marker in markers):
+                continue
+            amounts = extract_money_amounts_from_line(line)
+            if amounts:
+                return amounts[-1], label
+
+    all_amounts = []
+    for line in lines:
+        normalized = normalize_document_text(line)
+        if any(skip in normalized for skip in ("mwst", "ust", "steuer", "rabatt", "skonto")):
+            continue
+        all_amounts.extend(extract_money_amounts_from_line(line))
+    if all_amounts:
+        return max(all_amounts), "größter erkannter Rechnungsbetrag"
+    return None, ""
+
+
+def normalize_invoice_reference(value):
+    return re.sub(r"[^a-z0-9]", "", normalize_document_text(value))
+
+
+def extract_invoice_number(text):
+    source = clean_text(text)
+    if not source:
+        return ""
+    patterns = (
+        r"\brechnungs(?:nummer|nr\.?)\s*[:#.\-]?\s*([A-Z0-9][A-Z0-9/_\-]{2,30})",
+        r"\brechnung\s*(?:nr\.?|nummer)\s*[:#.\-]?\s*([A-Z0-9][A-Z0-9/_\-]{2,30})",
+        r"\bbeleg(?:nummer|nr\.?)\s*[:#.\-]?\s*([A-Z0-9][A-Z0-9/_\-]{2,30})",
+        r"\binvoice\s*(?:no\.?|number|nr\.?)\s*[:#.\-]?\s*([A-Z0-9][A-Z0-9/_\-]{2,30})",
+        r"\b(RG[-_/ ]?[A-Z0-9][A-Z0-9/_\-]{2,30})\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, source, flags=re.IGNORECASE)
+        if not match:
+            continue
+        number = clean_text(match.group(1)).strip(" .:-_/")
+        if number and not re.search(r"[,.]\d{2}$", number):
+            return number[:40]
+    return ""
+
+
+def extract_license_plate_tokens(text):
+    source = clean_text(text).upper()
+    tokens = set()
+    for match in re.finditer(r"\b([A-ZÄÖÜ]{1,3})[-\s]+([A-Z]{1,2})\s*[-\s]*(\d{1,4})\b", source):
+        token = re.sub(r"[^A-Z0-9ÄÖÜ]", "", "".join(match.groups()))
+        if 4 <= len(token) <= 9:
+            tokens.add(normalize_invoice_reference(token))
+    return tokens
+
+
+def extract_vin_tokens(text):
+    source = clean_text(text).upper()
+    tokens = set()
+    for match in re.finditer(r"\b[A-HJ-NPR-Z0-9]{17}\b", source):
+        token = match.group(0)
+        if re.search(r"[A-Z]", token) and re.search(r"\d", token):
+            tokens.add(normalize_invoice_reference(token))
+    return tokens
+
+
+def text_tokens_match_reference(blob, reference, minimum_matches=1):
+    words = [
+        word
+        for word in re.findall(r"[a-z0-9]{3,}", normalize_document_text(reference))
+        if word not in {"und", "der", "die", "das", "von", "mit", "autohaus", "gmbh"}
+    ]
+    if not words:
+        return False
+    unique_words = set(words)
+    matches = sum(1 for word in unique_words if word in blob)
+    return matches >= min(len(unique_words), max(1, minimum_matches))
+
+
+def validate_werkstatt_rechnung_upload(auftrag, invoice_text, original_name, amount=None, invoice_number=""):
+    combined = "\n".join(part for part in [original_name, invoice_text] if clean_text(part))
+    normalized = normalize_document_text(combined)
+    filename_normalized = normalize_document_text(original_name)
+    compact = normalize_invoice_reference(combined)
+    amount = positive_money_amount(amount)
+    invoice_number = clean_text(invoice_number)
+    invoice_word = bool(re.search(r"\brechnung\b|rechnungs", normalized))
+    filename_invoice = bool(re.search(r"\brechnung\b|rechnungs|invoice|\brg[-\s_/]?\d", filename_normalized))
+    invoice_marker = any(
+        marker in normalized
+        for marker in (
+            "zahlbetrag",
+            "gesamtbetrag",
+            "rechnungssumme",
+            "nettobetrag",
+            "bruttobetrag",
+            "umsatzsteuer",
+            "mwst",
+            "ust",
+            "invoice",
+        )
+    )
+    looks_like_invoice = bool(invoice_number or (invoice_word and (amount or invoice_marker)) or filename_invoice)
+
+    result = {
+        "valid": False,
+        "needs_review": False,
+        "looks_like_invoice": looks_like_invoice,
+        "evidence": [],
+        "warnings": [],
+        "blockers": [],
+    }
+    if not looks_like_invoice:
+        result["blockers"].append("Die Datei sieht nicht eindeutig wie eine Rechnung aus.")
+        return result
+
+    expected_plate = normalize_invoice_reference((auftrag or {}).get("kennzeichen"))
+    found_plates = extract_license_plate_tokens(combined)
+    if expected_plate and found_plates and expected_plate not in found_plates:
+        result["blockers"].append("Das erkannte Kennzeichen passt nicht zu diesem Auftrag.")
+        return result
+
+    expected_vin = normalize_invoice_reference((auftrag or {}).get("fin_nummer"))
+    found_vins = extract_vin_tokens(combined)
+    if expected_vin and found_vins and expected_vin not in found_vins:
+        result["blockers"].append("Die erkannte FIN passt nicht zu diesem Auftrag.")
+        return result
+
+    if expected_plate and expected_plate in compact:
+        result["evidence"].append("Kennzeichen passt")
+    if expected_vin and expected_vin in compact:
+        result["evidence"].append("FIN passt")
+
+    auftragsnummer = normalize_invoice_reference((auftrag or {}).get("auftragsnummer"))
+    if auftragsnummer and len(auftragsnummer) >= 4 and auftragsnummer in compact:
+        result["evidence"].append("Auftragsnummer passt")
+
+    auftrag_id = clean_text((auftrag or {}).get("id"))
+    if auftrag_id and any(
+        token in compact
+        for token in (
+            f"auftrag{auftrag_id}",
+            f"auftragsnummer{auftrag_id}",
+            f"auftragid{auftrag_id}",
+        )
+    ):
+        result["evidence"].append("Portal-Auftrag passt")
+
+    if text_tokens_match_reference(compact, (auftrag or {}).get("fahrzeug"), minimum_matches=2):
+        result["evidence"].append("Fahrzeug passt")
+    if text_tokens_match_reference(compact, (auftrag or {}).get("autohaus_name"), minimum_matches=1):
+        result["evidence"].append("Autohaus passt")
+    if text_tokens_match_reference(compact, (auftrag or {}).get("kunde_name"), minimum_matches=1):
+        result["evidence"].append("Kundenreferenz passt")
+
+    if not result["evidence"]:
+        result["needs_review"] = True
+        result["warnings"].append(
+            "Rechnung erkannt, aber keine eindeutige Auftragszuordnung gefunden. Bitte Original gegen den Auftrag prüfen."
+        )
+    else:
+        result["valid"] = True
+
+    if invoice_number:
+        result["evidence"].append(f"Rechnungsnummer {invoice_number}")
+    if amount:
+        result["evidence"].append(f"Betrag {format_bonus_money(amount)} erkannt")
+    return result
+
+
+def append_invoice_amount_to_internal_note(existing_note, amount):
+    amount = positive_money_amount(amount)
+    note = clean_text(existing_note)
+    if not amount:
+        return note
+    marker = "Rechnungsbetrag netto:"
+    normalized_note = normalize_document_text(note)
+    if normalize_document_text(marker) in normalized_note:
+        return note
+    line = f"{marker} {format_bonus_money(amount)}"
+    return "\n".join(part for part in [note, line] if clean_text(part))[:1000]
+
+
 def auftrag_bonus_preis(auftrag):
     for key, label in (
         ("werkstatt_angebot_preis", "Werkstatt-Angebot"),
@@ -6829,6 +7073,153 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
     return saved, {}
 
 
+def save_werkstatt_rechnung_upload(auftrag_id, files):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        return {"saved": 0, "verified": 0, "amount": None, "invoice_number": "", "error": "Auftrag nicht gefunden."}
+
+    saved = 0
+    verified = 0
+    needs_review = 0
+    best_amount = None
+    best_invoice_number = ""
+    errors = []
+    warnings = []
+    db = get_db()
+    timestamp = now_str()
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        db.close()
+        return {"saved": 0, "verified": 0, "amount": None, "invoice_number": "", "error": f"Upload-Speicher ist nicht erreichbar: {clean_text(str(exc))[:300]}"}
+
+    for file in files or []:
+        if not file or not file.filename:
+            continue
+        original_name = secure_filename(file.filename)
+        if not original_name or not allowed_file(original_name):
+            continue
+        suffix = pathlib.Path(original_name).suffix.lower()
+        stored_name = f"{uuid.uuid4().hex}{suffix}"
+        target = UPLOAD_DIR / stored_name
+        try:
+            file.save(target)
+            content_blob = target.read_bytes()
+        except Exception as exc:
+            errors.append(f"{original_name} konnte nicht gespeichert werden: {clean_text(str(exc))[:300]}")
+            continue
+
+        mime_type = file.mimetype or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+        bundle = build_document_analysis_bundle_safe(target, original_name) if suffix in ANALYSIS_EXTENSIONS else {}
+        analysis_text = clean_text(bundle.get("text"))
+        structured_text = structured_analysis_text(bundle.get("structured"), original_name) if bundle.get("structured") else ""
+        invoice_text = "\n".join(part for part in [analysis_text, structured_text, original_name] if clean_text(part))
+        amount, amount_source = extract_invoice_total_amount(invoice_text)
+        invoice_number = extract_invoice_number(invoice_text)
+        validation = validate_werkstatt_rechnung_upload(
+            auftrag,
+            invoice_text,
+            original_name,
+            amount=amount,
+            invoice_number=invoice_number,
+        )
+        analyse_hinweis = clean_text(bundle.get("hint"))
+        if bundle.get("status") == "error" and analyse_hinweis:
+            validation["warnings"].append(analyse_hinweis)
+
+        if validation["blockers"]:
+            try:
+                target.unlink(missing_ok=True)
+            except Exception:
+                pass
+            errors.append(f"{original_name}: {' '.join(validation['blockers'])}")
+            continue
+
+        if validation["valid"]:
+            verified += 1
+            status_text = "Prüfung bestanden"
+            if amount:
+                best_amount = amount
+            if invoice_number:
+                best_invoice_number = invoice_number
+        else:
+            needs_review += 1
+            status_text = "Bitte prüfen"
+        if validation["warnings"]:
+            warnings.extend(f"{original_name}: {warning}" for warning in validation["warnings"])
+
+        evidence = "; ".join(validation["evidence"])
+        amount_text = format_bonus_money(amount) if amount else ""
+        extrakt_parts = [
+            f"Werkstatt-Rechnung: {status_text}.",
+            f"Betrag {amount_text} ({amount_source})." if amount_text else "",
+            f"Rechnungsnummer {invoice_number}." if invoice_number else "",
+            evidence if evidence else "",
+        ]
+        extrakt_kurz = " ".join(part for part in extrakt_parts if clean_text(part))[:500]
+        if not extrakt_kurz:
+            extrakt_kurz = "Werkstatt-Rechnung gespeichert. Bitte Original prüfen."
+
+        db.execute(
+            """
+            INSERT INTO dateien
+            (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, dokument_typ,
+             extrahierter_text, extrakt_kurz, analyse_quelle, analyse_json, analyse_hinweis, content_blob, hochgeladen_am)
+            VALUES (?, NULL, ?, ?, ?, ?, 'intern', 'rechnung', 'Rechnung', ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                auftrag_id,
+                original_name,
+                stored_name,
+                mime_type,
+                len(content_blob),
+                analysis_text,
+                extrakt_kurz,
+                clean_text(bundle.get("source")),
+                clean_text(bundle.get("analysis_json")),
+                " ".join(validation["warnings"])[:500] or analyse_hinweis,
+                content_blob,
+                timestamp,
+            ),
+        )
+        saved += 1
+
+    if verified:
+        db.execute(
+            """
+            UPDATE auftraege
+            SET rechnung_status='geschrieben',
+                rechnung_nummer=CASE WHEN ? != '' THEN ? ELSE rechnung_nummer END,
+                rechnung_geschrieben_am=CASE WHEN COALESCE(rechnung_geschrieben_am, '')='' THEN ? ELSE rechnung_geschrieben_am END,
+                notiz_intern=?,
+                geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                best_invoice_number,
+                best_invoice_number,
+                timestamp,
+                append_invoice_amount_to_internal_note(auftrag.get("notiz_intern"), best_amount),
+                timestamp,
+                auftrag_id,
+            ),
+        )
+    elif saved:
+        db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (timestamp, auftrag_id))
+
+    db.commit()
+    db.close()
+    return {
+        "saved": saved,
+        "verified": verified,
+        "needs_review": needs_review,
+        "amount": best_amount,
+        "invoice_number": best_invoice_number,
+        "error": errors[0] if errors else "",
+        "warning": warnings[0] if warnings else "",
+    }
+
+
 def flash_upload_analysis_result(saved_result, success_message="Datei hochgeladen."):
     if isinstance(saved_result, tuple):
         saved, updates = saved_result
@@ -8377,6 +8768,7 @@ def auftrag_detail(auftrag_id):
 
     dateien = list_dateien(auftrag_id)
     standard_dateien = dateien_mit_kategorie(dateien, "standard")
+    rechnungsdateien = dateien_mit_kategorie(dateien, "rechnung")
     fertigbilder = dateien_mit_kategorie(dateien, "fertigbild")
     chat_nachrichten = list_chat_nachrichten(auftrag_id)
     mark_chat_gelesen(auftrag_id, "admin")
@@ -8388,6 +8780,7 @@ def auftrag_detail(auftrag_id):
         statusliste=STATUSLISTE,
         log=get_status_log(auftrag_id),
         dateien=standard_dateien,
+        rechnungsdateien=rechnungsdateien,
         fertigbilder=fertigbilder,
         dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
         reklamationen=list_reklamationen(auftrag_id),
@@ -8395,6 +8788,45 @@ def auftrag_detail(auftrag_id):
         benachrichtigungen=list_benachrichtigungen(auftrag_id),
         chat_nachrichten=chat_nachrichten,
     )
+
+
+@app.route("/admin/auftrag/<int:auftrag_id>/rechnung/upload", methods=["POST"])
+@admin_required
+def admin_rechnung_upload(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+    next_url = clean_text(request.form.get("next"))
+    redirect_url = next_url if next_url.startswith("/admin") else url_for("auftrag_detail", auftrag_id=auftrag_id)
+    dateien = get_allowed_uploads(
+        request.files.getlist("rechnung_dateien") or request.files.getlist("rechnung")
+    )
+    if not dateien:
+        flash("Bitte eine Rechnung als PDF, Bild, TXT, DOCX oder XLSX auswählen.", "warning")
+        return redirect(redirect_url)
+
+    result = save_werkstatt_rechnung_upload(auftrag_id, dateien)
+    if result.get("verified"):
+        details = []
+        if result.get("invoice_number"):
+            details.append(f"Rechnungsnummer {result['invoice_number']}")
+        if result.get("amount"):
+            details.append(f"{format_bonus_money(result['amount'])} netto")
+        suffix = f" ({', '.join(details)})" if details else ""
+        add_benachrichtigung(
+            auftrag_id,
+            "Rechnung geprüft",
+            "Die Werkstatt hat die Rechnung hochgeladen und dem Auftrag zugeordnet.",
+        )
+        flash(f"Rechnung geprüft und gespeichert{suffix}. Status und Rechnungsbetrag wurden aktualisiert.", "success")
+    elif result.get("saved"):
+        message = "Rechnung gespeichert, aber nicht sicher dem Auftrag zugeordnet. Bitte Original gegen Auftrag/Kennzeichen prüfen."
+        if result.get("warning"):
+            message += f" Hinweis: {clean_text(result['warning'])[:220]}"
+        flash(message, "warning")
+    else:
+        flash(result.get("error") or "Rechnung konnte nicht geprüft werden.", "danger")
+    return redirect(redirect_url)
 
 
 @app.route("/admin/auftrag/<int:auftrag_id>/chat", methods=["POST"])

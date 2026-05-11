@@ -590,6 +590,100 @@ def main():
         )
 
         response = admin.post(
+            f"/admin/auftrag/{angebot_id}/rechnung/upload",
+            data=with_csrf(
+                admin,
+                {
+                    "rechnung_dateien": (
+                        BytesIO(
+                            b"Rechnung Nr. FALSCH-1\n"
+                            b"Kennzeichen: HD-LB 197\n"
+                            b"Fahrzeug: Mercedes C300\n"
+                            b"Gesamt netto 999,00 EUR\n"
+                        ),
+                        "falsche-rechnung.txt",
+                    ),
+                },
+            ),
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        check("Falsche Rechnung wird verarbeitet", response.status_code in {302, 303})
+        db = portal.get_db()
+        try:
+            falsche_rechnung = db.execute(
+                "SELECT COUNT(*) AS count FROM dateien WHERE auftrag_id=? AND original_name='falsche-rechnung.txt'",
+                (angebot_id,),
+            ).fetchone()["count"]
+        finally:
+            db.close()
+        check("Falsche Rechnung wird nicht gespeichert", falsche_rechnung == 0, str(falsche_rechnung))
+
+        response = admin.post(
+            f"/admin/auftrag/{angebot_id}/rechnung/upload",
+            data=with_csrf(
+                admin,
+                {
+                    "rechnung_dateien": (
+                        BytesIO(
+                            (
+                                f"Rechnung Nr. FLOW-BONUS-2\n"
+                                f"Auftrag #{angebot_id}\n"
+                                f"Autohaus: Kaesmann\n"
+                                f"Fahrzeug: Audi Q7\n"
+                                f"Kennzeichen: MOS-T 123\n"
+                                f"FIN: WAUZZZTEST0000001\n"
+                                f"Gesamt netto 3.670,40 EUR\n"
+                            ).encode("utf-8")
+                        ),
+                        "passende-rechnung.txt",
+                    ),
+                },
+            ),
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        check("Passende Rechnung kann hochgeladen werden", response.status_code in {302, 303})
+        auftrag = portal.get_auftrag(angebot_id)
+        db = portal.get_db()
+        try:
+            rechnung_datei = db.execute(
+                """
+                SELECT *
+                FROM dateien
+                WHERE auftrag_id=? AND kategorie='rechnung' AND original_name='passende-rechnung.txt'
+                ORDER BY id DESC
+                """,
+                (angebot_id,),
+            ).fetchone()
+        finally:
+            db.close()
+        check("Passende Rechnung wird als Rechnung gespeichert", bool(rechnung_datei), str(rechnung_datei))
+        check(
+            "Passende Rechnung aktualisiert Rechnungsdaten",
+            auftrag["rechnung_status"] == "geschrieben"
+            and auftrag["rechnung_nummer"] == "FLOW-BONUS-2"
+            and "3.670,40" in auftrag["notiz_intern"],
+            str(
+                {
+                    "status": auftrag["rechnung_status"],
+                    "nummer": auftrag["rechnung_nummer"],
+                    "notiz": auftrag["notiz_intern"],
+                }
+            ),
+        )
+        response = admin.get(f"/admin/auftrag/{angebot_id}")
+        admin_auftrag_html = response.get_data(as_text=True)
+        check(
+            "Admin-Auftrag zeigt Rechnungsupload und Pruefung",
+            response.status_code == 200
+            and "Werkstatt-Rechnung hochladen" in admin_auftrag_html
+            and "passende-rechnung.txt" in admin_auftrag_html
+            and "Prüfung bestanden" in admin_auftrag_html,
+            f"Status {response.status_code}",
+        )
+
+        response = admin.post(
             f"/admin/auftrag/{angebot_id}/fertigbilder",
             data=with_csrf(
                 admin,
