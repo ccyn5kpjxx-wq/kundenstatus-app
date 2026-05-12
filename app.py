@@ -311,6 +311,9 @@ LOGIN_RATE_LIMIT_MAX = max(3, env_int("LOGIN_RATE_LIMIT_MAX", 8))
 LOGIN_RATE_LIMIT_WINDOW_SECONDS = max(60, env_int("LOGIN_RATE_LIMIT_WINDOW_SECONDS", 15 * 60))
 LOGIN_RATE_LIMIT_LOCK_SECONDS = max(60, env_int("LOGIN_RATE_LIMIT_LOCK_SECONDS", 10 * 60))
 SESSION_IDLE_TIMEOUT_MINUTES = max(5, env_int("SESSION_IDLE_TIMEOUT_MINUTES", 8 * 60))
+REMEMBER_LOGIN_DAYS = max(1, env_int("REMEMBER_LOGIN_DAYS", 30))
+ADMIN_REMEMBER_COOKIE = "gaertner_admin_remember"
+PARTNER_REMEMBER_COOKIE = "gaertner_partner_remember"
 LOGIN_ATTEMPTS = {}
 LOGIN_ATTEMPTS_LOCK = threading.Lock()
 _sqlite_wal_configured = False
@@ -999,8 +1002,161 @@ def mark_authenticated_session_active():
         session.modified = True
 
 
+def remember_login_cookie_name(scope):
+    return PARTNER_REMEMBER_COOKIE if scope == "partner" else ADMIN_REMEMBER_COOKIE
+
+
+def remember_login_token_hash(token):
+    token = clean_secret_value(token)
+    if not token:
+        return ""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def remember_login_max_age_seconds():
+    return REMEMBER_LOGIN_DAYS * 24 * 60 * 60
+
+
+def remember_login_expires_at():
+    return db_datetime_str(datetime.now() + timedelta(days=REMEMBER_LOGIN_DAYS))
+
+
+def prune_expired_remember_logins(db):
+    db.execute("DELETE FROM login_tokens WHERE expires_at < ?", (db_datetime_str(),))
+
+
+def create_remember_login_token(scope, autohaus_id=0):
+    scope = "partner" if scope == "partner" else "admin"
+    token = secrets.token_urlsafe(48)
+    db = get_db()
+    try:
+        prune_expired_remember_logins(db)
+        db.execute(
+            """
+            INSERT INTO login_tokens
+              (token_hash, scope, autohaus_id, erstellt_am, zuletzt_genutzt_am, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                remember_login_token_hash(token),
+                scope,
+                int(autohaus_id or 0),
+                db_datetime_str(),
+                db_datetime_str(),
+                remember_login_expires_at(),
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return token
+
+
+def get_remember_login(scope, token):
+    token_hash = remember_login_token_hash(token)
+    if not token_hash:
+        return None
+    scope = "partner" if scope == "partner" else "admin"
+    db = get_db()
+    try:
+        row = db.execute(
+            """
+            SELECT *
+            FROM login_tokens
+            WHERE token_hash=? AND scope=?
+            LIMIT 1
+            """,
+            (token_hash, scope),
+        ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        expires_at = parse_postfach_datetime(item.get("expires_at"))
+        if expires_at <= datetime.now():
+            db.execute("DELETE FROM login_tokens WHERE token_hash=?", (token_hash,))
+            db.commit()
+            return None
+        db.execute(
+            "UPDATE login_tokens SET zuletzt_genutzt_am=? WHERE token_hash=?",
+            (db_datetime_str(), token_hash),
+        )
+        db.commit()
+        return item
+    finally:
+        db.close()
+
+
+def delete_remember_login_token(token):
+    token_hash = remember_login_token_hash(token)
+    if not token_hash:
+        return
+    db = get_db()
+    try:
+        db.execute("DELETE FROM login_tokens WHERE token_hash=?", (token_hash,))
+        db.commit()
+    finally:
+        db.close()
+
+
+def set_remember_login_cookie(response, scope, token):
+    response.set_cookie(
+        remember_login_cookie_name(scope),
+        token,
+        max_age=remember_login_max_age_seconds(),
+        httponly=True,
+        secure=app.config.get("SESSION_COOKIE_SECURE", False),
+        samesite="Lax",
+        path="/",
+    )
+
+
+def clear_remember_login_cookie(response, scope):
+    delete_remember_login_token(request.cookies.get(remember_login_cookie_name(scope)))
+    response.delete_cookie(
+        remember_login_cookie_name(scope),
+        path="/",
+        secure=app.config.get("SESSION_COOKIE_SECURE", False),
+        samesite="Lax",
+    )
+
+
+def remember_authenticated_login(response, scope, autohaus_id=0):
+    token = create_remember_login_token(scope, autohaus_id=autohaus_id)
+    set_remember_login_cookie(response, scope, token)
+    return response
+
+
+def restore_remember_login_scope(scope):
+    token = request.cookies.get(remember_login_cookie_name(scope))
+    item = get_remember_login(scope, token)
+    if not item:
+        return False
+    if scope == "partner":
+        autohaus_id = int(item.get("autohaus_id") or 0)
+        if not get_autohaus(autohaus_id):
+            delete_remember_login_token(token)
+            return False
+        session.permanent = True
+        session["partner_autohaus_id"] = autohaus_id
+        return True
+    session.permanent = True
+    session["admin"] = True
+    return True
+
+
+def restore_remember_login_session():
+    if session_is_authenticated():
+        return
+    preferred_scopes = ("partner", "admin") if request.path.startswith("/partner") else ("admin", "partner")
+    for scope in preferred_scopes:
+        if restore_remember_login_scope(scope):
+            session.modified = True
+            return
+
+
 @app.before_request
 def refresh_authenticated_session():
+    restore_remember_login_session()
     mark_authenticated_session_active()
     return None
 
@@ -1347,6 +1503,10 @@ def iso_date(value):
 
 def now_str():
     return datetime.now().strftime(DATETIME_FMT)
+
+
+def db_datetime_str(value=None):
+    return (value or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def resolve_config_path(value):
@@ -4776,6 +4936,16 @@ def init_db():
             updated_at TEXT DEFAULT ''
         );
 
+        CREATE TABLE IF NOT EXISTS login_tokens (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            token_hash          TEXT UNIQUE NOT NULL,
+            scope               TEXT NOT NULL,
+            autohaus_id         INTEGER DEFAULT 0,
+            erstellt_am         TEXT NOT NULL,
+            zuletzt_genutzt_am  TEXT DEFAULT '',
+            expires_at          TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS autohaeuser (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             name         TEXT NOT NULL,
@@ -5245,6 +5415,9 @@ def init_db():
     ensure_column(db, "autohaeuser", "strasse", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "plz", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "ort", "TEXT DEFAULT ''")
+    ensure_column(db, "login_tokens", "autohaus_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "login_tokens", "zuletzt_genutzt_am", "TEXT DEFAULT ''")
+    ensure_index(db, "idx_login_tokens_scope", "login_tokens", ("scope", "autohaus_id", "expires_at"))
 
     ensure_index(db, "idx_auftraege_dashboard", "auftraege", ("archiviert", "angebotsphase", "autohaus_id"))
     ensure_index(db, "idx_auftraege_angebote", "auftraege", ("angebotsphase", "angebot_abgesendet", "autohaus_id"))
@@ -16718,7 +16891,9 @@ def login():
             session.clear()
             session.permanent = True
             session["admin"] = True
-            return redirect(url_for("betriebs_cockpit"))
+            response = redirect(url_for("betriebs_cockpit"))
+            remember_authenticated_login(response, "admin")
+            return response
         record_failed_login("admin", "admin")
         flash("Falsches Passwort.", "danger")
     return render_template("login.html")
@@ -16727,7 +16902,10 @@ def login():
 @app.route("/logout")
 def logout():
     session.clear()
-    return redirect(url_for("login"))
+    response = redirect(url_for("login"))
+    clear_remember_login_cookie(response, "admin")
+    clear_remember_login_cookie(response, "partner")
+    return response
 
 
 @app.route("/session/ping", methods=["POST"])
@@ -18800,7 +18978,9 @@ def partner_login():
             session.clear()
             session.permanent = True
             session["partner_autohaus_id"] = autohaus["id"]
-            return redirect(url_for("partner_dashboard_key", portal_key=autohaus["portal_key"]))
+            response = redirect(url_for("partner_dashboard_key", portal_key=autohaus["portal_key"]))
+            remember_authenticated_login(response, "partner", autohaus_id=autohaus["id"])
+            return response
         record_failed_login("partner", limit_identifier)
         flash("Autohaus oder Passwort/Zugangscode stimmt nicht.", "danger")
     return render_template("partner_index.html", autohaeuser=autohaeuser)
@@ -18822,7 +19002,9 @@ def partner_login_key(portal_key):
             session.clear()
             session.permanent = True
             session["partner_autohaus_id"] = autohaus["id"]
-            return redirect(url_for("partner_dashboard_key", portal_key=portal_key))
+            response = redirect(url_for("partner_dashboard_key", portal_key=portal_key))
+            remember_authenticated_login(response, "partner", autohaus_id=autohaus["id"])
+            return response
         record_failed_login("partner", portal_key)
         flash("Falscher Zugangscode.", "danger")
 
@@ -18835,7 +19017,9 @@ def partner_login_key(portal_key):
 @app.route("/partner/logout")
 def partner_logout():
     session.pop("partner_autohaus_id", None)
-    return redirect(url_for("partner_login"))
+    response = redirect(url_for("partner_login"))
+    clear_remember_login_cookie(response, "partner")
+    return response
 
 
 @app.route("/partner/<slug>", methods=["GET", "POST"])

@@ -244,6 +244,20 @@ def main():
         else "[FEHLER] Session-Ping verlaengert den Login nicht"
     )
     ok &= session_ping_ok
+    remember_token = portal.create_remember_login_token("admin")
+    remember_row = portal.get_remember_login("admin", remember_token)
+    remember_login_ok = bool(
+        bool(remember_row)
+        and remember_row.get("scope") == "admin"
+        and remember_row.get("expires_at")
+    )
+    portal.delete_remember_login_token(remember_token)
+    print(
+        "[OK] Dauerlogin-Token wird gespeichert und erkannt"
+        if remember_login_ok
+        else "[FEHLER] Dauerlogin-Token funktioniert nicht"
+    )
+    ok &= remember_login_ok
     reminder_form_ok = "Kurz notieren, was später erledigt werden soll" in cockpit_html and "/admin/erinnerungen/neu" in cockpit_html
     print(
         "[OK] Startseite zeigt Erinnerungsfeld"
