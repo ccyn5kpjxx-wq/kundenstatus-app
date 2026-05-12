@@ -227,6 +227,20 @@ LEXWARE_KUNDEN_URL = (os.environ.get("LEXWARE_KUNDEN_URL") or "").strip()
 LEXWARE_RECHNUNGEN_URL = (os.environ.get("LEXWARE_RECHNUNGEN_URL") or "").strip()
 LEXWARE_API_KEY = (os.environ.get("LEXWARE_API_KEY") or "").strip()
 WERKSTATT_EMAIL_API_TOKEN = (os.environ.get("WERKSTATT_EMAIL_API_TOKEN") or "").strip()
+WHATSAPP_ENABLED = env_flag("WHATSAPP_ENABLED", False)
+WHATSAPP_ACCESS_TOKEN = (os.environ.get("WHATSAPP_ACCESS_TOKEN") or "").strip()
+WHATSAPP_PHONE_NUMBER_ID = (os.environ.get("WHATSAPP_PHONE_NUMBER_ID") or "").strip()
+WHATSAPP_VERIFY_TOKEN = (os.environ.get("WHATSAPP_VERIFY_TOKEN") or "").strip()
+WHATSAPP_APP_SECRET = (os.environ.get("WHATSAPP_APP_SECRET") or "").strip()
+WHATSAPP_WORKSHOP_NUMBERS = (
+    os.environ.get("WHATSAPP_WORKSHOP_NUMBERS")
+    or os.environ.get("WHATSAPP_WORKSHOP_NUMBER")
+    or ""
+).strip()
+WHATSAPP_GRAPH_VERSION = (os.environ.get("WHATSAPP_GRAPH_VERSION") or "v25.0").strip()
+WHATSAPP_REPLY_WINDOW_HOURS = max(1, env_int("WHATSAPP_REPLY_WINDOW_HOURS", 48))
+WHATSAPP_NOTIFICATION_TEMPLATE = (os.environ.get("WHATSAPP_NOTIFICATION_TEMPLATE") or "").strip()
+WHATSAPP_TEMPLATE_LANGUAGE = (os.environ.get("WHATSAPP_TEMPLATE_LANGUAGE") or "de").strip()
 MAIL_IMAP_HOST = (os.environ.get("MAIL_IMAP_HOST") or "").strip()
 MAIL_IMAP_PORT = max(1, env_int("MAIL_IMAP_PORT", 993))
 MAIL_IMAP_USER = (os.environ.get("MAIL_IMAP_USER") or "").strip()
@@ -296,7 +310,7 @@ ALLOW_INSECURE_LOCAL_LOGIN = env_flag("ALLOW_INSECURE_LOCAL_LOGIN", True)
 LOGIN_RATE_LIMIT_MAX = max(3, env_int("LOGIN_RATE_LIMIT_MAX", 8))
 LOGIN_RATE_LIMIT_WINDOW_SECONDS = max(60, env_int("LOGIN_RATE_LIMIT_WINDOW_SECONDS", 15 * 60))
 LOGIN_RATE_LIMIT_LOCK_SECONDS = max(60, env_int("LOGIN_RATE_LIMIT_LOCK_SECONDS", 10 * 60))
-SESSION_IDLE_TIMEOUT_MINUTES = max(5, env_int("SESSION_IDLE_TIMEOUT_MINUTES", 5))
+SESSION_IDLE_TIMEOUT_MINUTES = max(5, env_int("SESSION_IDLE_TIMEOUT_MINUTES", 8 * 60))
 LOGIN_ATTEMPTS = {}
 LOGIN_ATTEMPTS_LOCK = threading.Lock()
 _sqlite_wal_configured = False
@@ -884,15 +898,47 @@ RAPID_OCR_ENGINE = None
 TESSERACT_CMD = shutil.which("tesseract")
 
 
+def generated_flask_secret_path():
+    configured_path = (os.environ.get("FLASK_SECRET_KEY_FILE") or "").strip().strip('"').strip("'")
+    if configured_path:
+        return pathlib.Path(configured_path)
+    if os.environ.get("RENDER"):
+        return pathlib.Path(os.environ.get("DATA_DIR", "/var/data")) / "flask_secret.key"
+    return DATA_DIR / "flask_secret.key"
+
+
+def read_or_create_generated_flask_secret():
+    secret_path = generated_flask_secret_path()
+    try:
+        if secret_path.exists():
+            saved_secret = secret_path.read_text(encoding="utf-8").strip()
+            if saved_secret and saved_secret not in INSECURE_SECRET_VALUES:
+                return saved_secret
+        secret_path.parent.mkdir(parents=True, exist_ok=True)
+        generated_secret = secrets.token_urlsafe(64)
+        secret_path.write_text(generated_secret, encoding="utf-8")
+        return generated_secret
+    except Exception as exc:
+        print(f"WARNUNG: Flask-Secret konnte nicht dauerhaft gespeichert werden: {exc}")
+        return ""
+
+
 def configured_flask_secret_key():
     configured = (os.environ.get("FLASK_SECRET_KEY") or "").strip().strip('"').strip("'")
-    if configured in INSECURE_SECRET_VALUES:
-        return secrets.token_urlsafe(64), True
-    return configured or secrets.token_urlsafe(64), False
+    if configured and configured not in INSECURE_SECRET_VALUES:
+        return configured, False, False
+    generated = read_or_create_generated_flask_secret()
+    if generated:
+        return generated, False, True
+    return secrets.token_urlsafe(64), True, False
 
 
 app = Flask(__name__)
-_configured_secret_key, USING_EPHEMERAL_SECRET_KEY = configured_flask_secret_key()
+(
+    _configured_secret_key,
+    USING_EPHEMERAL_SECRET_KEY,
+    USING_GENERATED_FLASK_SECRET_KEY,
+) = configured_flask_secret_key()
 app.secret_key = _configured_secret_key
 app.config.update(
     MAX_CONTENT_LENGTH=MAX_UPLOAD_MB * 1024 * 1024,
@@ -962,6 +1008,8 @@ def refresh_authenticated_session():
 @app.before_request
 def protect_csrf():
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+    if request.path.startswith("/webhooks/whatsapp"):
         return None
     if request.path.startswith("/api/werkstatt/") and werkstatt_api_token_valid():
         return None
@@ -1075,9 +1123,21 @@ def get_startup_warnings():
         warnings.append(
             "FLASK_SECRET_KEY ist nicht sicher gesetzt. Die App nutzt vorübergehend einen Zufalls-Secret; bitte in .env.local dauerhaft setzen."
         )
+    elif USING_GENERATED_FLASK_SECRET_KEY:
+        warnings.append(
+            "FLASK_SECRET_KEY fehlt. Die App nutzt einen lokal gespeicherten Secret; für Render bitte trotzdem dauerhaft als Umgebungsvariable setzen."
+        )
     if RUNNING_ON_RENDER and not USE_POSTGRES:
         warnings.append(
             "Live läuft noch mit SQLite. Für stabilen Betrieb bitte Render PostgreSQL verbinden und DATABASE_URL setzen."
+        )
+    if WHATSAPP_ENABLED and not whatsapp_bridge_enabled():
+        warnings.append(
+            "WhatsApp ist aktiviert, aber Token, Phone-Number-ID oder Werkstattnummer fehlen."
+        )
+    if WHATSAPP_ENABLED and not WHATSAPP_APP_SECRET:
+        warnings.append(
+            "WHATSAPP_APP_SECRET fehlt. Eingehende WhatsApp-Webhooks werden ohne Signaturprüfung angenommen."
         )
     return warnings
 
@@ -4452,6 +4512,7 @@ BACKUP_TABLES = (
     "dateien",
     "status_log",
     "chat_nachrichten",
+    "whatsapp_nachrichten",
     "benachrichtigungen",
     "rahmenvertrag_anfragen",
     "lackierauftrag_entwuerfe",
@@ -4873,6 +4934,22 @@ def init_db():
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
         );
 
+        CREATE TABLE IF NOT EXISTS whatsapp_nachrichten (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            auftrag_id          INTEGER NOT NULL,
+            chat_id             INTEGER DEFAULT 0,
+            richtung            TEXT NOT NULL,
+            telefon             TEXT DEFAULT '',
+            provider_message_id TEXT DEFAULT '',
+            provider_context_id TEXT DEFAULT '',
+            nachricht           TEXT DEFAULT '',
+            status              TEXT DEFAULT '',
+            fehler              TEXT DEFAULT '',
+            payload_json        TEXT DEFAULT '',
+            erstellt_am         TEXT NOT NULL,
+            FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
+        );
+
         CREATE TABLE IF NOT EXISTS kalender_notizen (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             datum        TEXT NOT NULL,
@@ -5218,6 +5295,26 @@ def init_db():
         "idx_ki_assistent_lookup",
         "ki_assistent_nachrichten",
         ("autohaus_id", "auftrag_id", "id"),
+    )
+    ensure_column(db, "whatsapp_nachrichten", "chat_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "whatsapp_nachrichten", "telefon", "TEXT DEFAULT ''")
+    ensure_column(db, "whatsapp_nachrichten", "provider_message_id", "TEXT DEFAULT ''")
+    ensure_column(db, "whatsapp_nachrichten", "provider_context_id", "TEXT DEFAULT ''")
+    ensure_column(db, "whatsapp_nachrichten", "nachricht", "TEXT DEFAULT ''")
+    ensure_column(db, "whatsapp_nachrichten", "status", "TEXT DEFAULT ''")
+    ensure_column(db, "whatsapp_nachrichten", "fehler", "TEXT DEFAULT ''")
+    ensure_column(db, "whatsapp_nachrichten", "payload_json", "TEXT DEFAULT ''")
+    ensure_index(
+        db,
+        "idx_whatsapp_provider_message",
+        "whatsapp_nachrichten",
+        ("provider_message_id",),
+    )
+    ensure_index(
+        db,
+        "idx_whatsapp_reply_lookup",
+        "whatsapp_nachrichten",
+        ("telefon", "erstellt_am", "id"),
     )
     ensure_index(
         db,
@@ -9647,6 +9744,415 @@ def list_offene_chat_nachrichten(limit=12):
     return [dict(row) for row in rows]
 
 
+def normalize_whatsapp_number(value):
+    text = clean_text(value)
+    if text.lower().startswith("whatsapp:"):
+        text = text.split(":", 1)[1]
+    text = re.sub(r"[^\d+]", "", text)
+    if text.startswith("00"):
+        text = f"+{text[2:]}"
+    if text and not text.startswith("+"):
+        text = f"+{text}"
+    return text
+
+
+def whatsapp_number_key(value):
+    return re.sub(r"\D", "", normalize_whatsapp_number(value))
+
+
+def whatsapp_workshop_number_keys():
+    raw_numbers = re.split(r"[,;\s]+", WHATSAPP_WORKSHOP_NUMBERS or "")
+    return {
+        whatsapp_number_key(number)
+        for number in raw_numbers
+        if whatsapp_number_key(number)
+    }
+
+
+def whatsapp_workshop_numbers():
+    raw_numbers = re.split(r"[,;\s]+", WHATSAPP_WORKSHOP_NUMBERS or "")
+    numbers = []
+    seen = set()
+    for number in raw_numbers:
+        normalized = normalize_whatsapp_number(number)
+        key = whatsapp_number_key(normalized)
+        if key and key not in seen:
+            numbers.append(normalized)
+            seen.add(key)
+    return numbers
+
+
+def whatsapp_graph_version():
+    version = clean_text(WHATSAPP_GRAPH_VERSION) or "v25.0"
+    if not version.startswith("v"):
+        version = f"v{version}"
+    return version
+
+
+def whatsapp_bridge_enabled():
+    return bool(
+        WHATSAPP_ENABLED
+        and WHATSAPP_ACCESS_TOKEN
+        and WHATSAPP_PHONE_NUMBER_ID
+        and whatsapp_workshop_number_keys()
+    )
+
+
+def whatsapp_message_template_enabled():
+    return bool(WHATSAPP_NOTIFICATION_TEMPLATE)
+
+
+def whatsapp_payload_phone(value):
+    return whatsapp_number_key(value)
+
+
+def whatsapp_order_code(auftrag_id):
+    try:
+        return f"#A{int(auftrag_id)}"
+    except (TypeError, ValueError):
+        return "#A0"
+
+
+def whatsapp_auftrag_label(auftrag):
+    if not auftrag:
+        return "Unbekannter Auftrag"
+    details = []
+    kennzeichen = clean_text(auftrag.get("kennzeichen"))
+    fahrzeug = clean_text(auftrag.get("fahrzeug"))
+    auftragsnummer = clean_text(auftrag.get("auftragsnummer"))
+    autohaus_name = clean_text(auftrag.get("autohaus_name"))
+    if kennzeichen:
+        details.append(kennzeichen)
+    if fahrzeug:
+        details.append(fahrzeug)
+    if auftragsnummer:
+        details.append(f"Auftrag {auftragsnummer}")
+    if autohaus_name:
+        details.append(autohaus_name)
+    label = " / ".join(details)
+    return label or f"Auftrag {auftrag.get('id')}"
+
+
+def build_whatsapp_chat_notification(auftrag, nachricht, absender_label="Autohaus"):
+    auftrag_id = int((auftrag or {}).get("id") or 0)
+    lines = [
+        "Neue Portal-Nachricht",
+        f"Kennung: {whatsapp_order_code(auftrag_id)}",
+        f"Von: {clean_text(absender_label) or 'Autohaus'}",
+        f"Fahrzeug: {whatsapp_auftrag_label(auftrag)}",
+        "",
+        clean_text(nachricht)[:1800],
+        "",
+        "Bitte direkt auf diese WhatsApp antworten. Die Antwort wird im Portal-Chat gespeichert.",
+    ]
+    return "\n".join(lines).strip()
+
+
+def build_whatsapp_template_payload(to_phone, auftrag, nachricht, absender_label="Autohaus"):
+    auftrag_id = int((auftrag or {}).get("id") or 0)
+    parameters = [
+        {"type": "text", "text": whatsapp_order_code(auftrag_id)},
+        {"type": "text", "text": whatsapp_auftrag_label(auftrag)[:250]},
+        {"type": "text", "text": (clean_text(absender_label) or "Autohaus")[:80]},
+        {"type": "text", "text": clean_text(nachricht)[:900]},
+    ]
+    return {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": whatsapp_payload_phone(to_phone),
+        "type": "template",
+        "template": {
+            "name": WHATSAPP_NOTIFICATION_TEMPLATE,
+            "language": {"code": WHATSAPP_TEMPLATE_LANGUAGE or "de"},
+            "components": [{"type": "body", "parameters": parameters}],
+        },
+    }
+
+
+def build_whatsapp_text_payload(to_phone, body):
+    return {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": whatsapp_payload_phone(to_phone),
+        "type": "text",
+        "text": {"preview_url": False, "body": clean_text(body)[:4000]},
+    }
+
+
+def post_whatsapp_payload(payload):
+    requests_module = get_requests()
+    if not requests_module:
+        return False, "", "Python-Modul requests ist nicht verfügbar."
+    url = (
+        f"https://graph.facebook.com/{whatsapp_graph_version()}/"
+        f"{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    )
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests_module.post(url, headers=headers, json=payload, timeout=12)
+    except Exception as exc:
+        return False, "", f"WhatsApp-Versand fehlgeschlagen: {exc}"
+
+    try:
+        data = response.json()
+    except Exception:
+        data = {}
+    message_id = ""
+    messages = data.get("messages") if isinstance(data, dict) else None
+    if messages:
+        message_id = clean_text(messages[0].get("id"))
+    if 200 <= response.status_code < 300 and message_id:
+        return True, message_id, ""
+    error = ""
+    if isinstance(data, dict):
+        raw_error = data.get("error") or {}
+        error = clean_text(raw_error.get("message") or raw_error.get("error_user_msg"))
+    return False, message_id, error or f"WhatsApp API Status {response.status_code}"
+
+
+def record_whatsapp_message(
+    auftrag_id,
+    chat_id=0,
+    richtung="outbound",
+    telefon="",
+    provider_message_id="",
+    provider_context_id="",
+    nachricht="",
+    status="",
+    fehler="",
+    payload=None,
+):
+    try:
+        auftrag_id = int(auftrag_id or 0)
+    except (TypeError, ValueError):
+        auftrag_id = 0
+    if auftrag_id <= 0:
+        return None
+    payload_json = ""
+    if payload is not None:
+        try:
+            payload_json = json.dumps(payload, ensure_ascii=False)[:12000]
+        except (TypeError, ValueError):
+            payload_json = ""
+    db = get_db()
+    cursor = db.execute(
+        """
+        INSERT INTO whatsapp_nachrichten
+          (auftrag_id, chat_id, richtung, telefon, provider_message_id,
+           provider_context_id, nachricht, status, fehler, payload_json, erstellt_am)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            auftrag_id,
+            int(chat_id or 0),
+            clean_text(richtung) or "outbound",
+            normalize_whatsapp_number(telefon),
+            clean_text(provider_message_id)[:255],
+            clean_text(provider_context_id)[:255],
+            clean_text(nachricht)[:4000],
+            clean_text(status)[:80],
+            clean_text(fehler)[:500],
+            payload_json,
+            now_str(),
+        ),
+    )
+    db.commit()
+    row_id = cursor.lastrowid
+    db.close()
+    return row_id
+
+
+def whatsapp_message_exists(provider_message_id):
+    provider_message_id = clean_text(provider_message_id)
+    if not provider_message_id:
+        return False
+    db = get_db()
+    row = db.execute(
+        "SELECT id FROM whatsapp_nachrichten WHERE provider_message_id=? LIMIT 1",
+        (provider_message_id,),
+    ).fetchone()
+    db.close()
+    return bool(row)
+
+
+def find_whatsapp_context(provider_context_id):
+    provider_context_id = clean_text(provider_context_id)
+    if not provider_context_id:
+        return None
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT *
+        FROM whatsapp_nachrichten
+        WHERE provider_message_id=?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (provider_context_id,),
+    ).fetchone()
+    db.close()
+    return dict(row) if row else None
+
+
+def find_recent_whatsapp_thread_for_phone(phone):
+    phone_key = whatsapp_number_key(phone)
+    if not phone_key:
+        return None
+    cutoff = datetime.now() - timedelta(hours=WHATSAPP_REPLY_WINDOW_HOURS)
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT *
+        FROM whatsapp_nachrichten
+        WHERE telefon LIKE ?
+        ORDER BY id DESC
+        LIMIT 20
+        """,
+        (f"%{phone_key}",),
+    ).fetchall()
+    db.close()
+    for row in rows:
+        item = dict(row)
+        created = parse_postfach_datetime(item.get("erstellt_am"))
+        if created >= cutoff:
+            return item
+    return None
+
+
+def extract_whatsapp_order_id(text):
+    match = re.search(r"(?:#A|auftrag\s*#?)\s*(\d+)", clean_text(text), flags=re.IGNORECASE)
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):
+        return 0
+
+
+def notify_workshop_whatsapp_for_chat(auftrag_id, chat_id, nachricht, absender_label="Autohaus"):
+    if not whatsapp_bridge_enabled():
+        return False
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        return False
+    body = build_whatsapp_chat_notification(auftrag, nachricht, absender_label=absender_label)
+    sent_any = False
+    for target_number in whatsapp_workshop_numbers():
+        if whatsapp_message_template_enabled():
+            payload = build_whatsapp_template_payload(target_number, auftrag, nachricht, absender_label=absender_label)
+        else:
+            payload = build_whatsapp_text_payload(target_number, body)
+        ok, provider_id, error = post_whatsapp_payload(payload)
+        sent_any = sent_any or ok
+        record_whatsapp_message(
+            auftrag_id,
+            chat_id=chat_id,
+            richtung="outbound",
+            telefon=target_number,
+            provider_message_id=provider_id,
+            nachricht=body,
+            status="gesendet" if ok else "fehler",
+            fehler=error,
+            payload=payload if not ok else None,
+        )
+        if not ok:
+            print(f"WARNUNG: WhatsApp-Benachrichtigung konnte nicht gesendet werden: {error}")
+    return sent_any
+
+
+def verify_whatsapp_signature():
+    if not WHATSAPP_APP_SECRET:
+        return True
+    signature = clean_text(request.headers.get("X-Hub-Signature-256"))
+    if not signature.startswith("sha256="):
+        return False
+    expected = "sha256=" + hmac.new(
+        WHATSAPP_APP_SECRET.encode("utf-8"),
+        request.get_data(),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+
+def whatsapp_inbound_text(message):
+    message_type = clean_text(message.get("type"))
+    if message_type == "text":
+        return clean_text((message.get("text") or {}).get("body"))
+    if message_type:
+        return f"[WhatsApp-{message_type}]"
+    return ""
+
+
+def resolve_whatsapp_reply_auftrag_id(message, text, from_phone):
+    context_id = clean_text((message.get("context") or {}).get("id"))
+    context_row = find_whatsapp_context(context_id)
+    if context_row:
+        return int(context_row.get("auftrag_id") or 0), context_id
+
+    explicit_id = extract_whatsapp_order_id(text)
+    if explicit_id:
+        return explicit_id, context_id
+
+    recent_row = find_recent_whatsapp_thread_for_phone(from_phone)
+    if recent_row:
+        return int(recent_row.get("auftrag_id") or 0), context_id
+    return 0, context_id
+
+
+def handle_whatsapp_inbound_message(message):
+    provider_id = clean_text(message.get("id"))
+    if provider_id and whatsapp_message_exists(provider_id):
+        return False
+
+    from_phone = normalize_whatsapp_number(message.get("from"))
+    if whatsapp_number_key(from_phone) not in whatsapp_workshop_number_keys():
+        return False
+
+    text = whatsapp_inbound_text(message)
+    if not text:
+        return False
+
+    auftrag_id, context_id = resolve_whatsapp_reply_auftrag_id(message, text, from_phone)
+    auftrag = get_auftrag(auftrag_id) if auftrag_id else None
+    if not auftrag:
+        print("WARNUNG: WhatsApp-Antwort konnte keinem Auftrag zugeordnet werden.")
+        return False
+
+    chat_id = add_chat_nachricht(auftrag_id, "werkstatt", text)
+    add_benachrichtigung(
+        auftrag_id,
+        "Neue Chat-Nachricht",
+        "Die Werkstatt hat per WhatsApp geantwortet.",
+    )
+    record_whatsapp_message(
+        auftrag_id,
+        chat_id=chat_id,
+        richtung="inbound",
+        telefon=from_phone,
+        provider_message_id=provider_id,
+        provider_context_id=context_id,
+        nachricht=text,
+        status="empfangen",
+        payload=message,
+    )
+    return True
+
+
+def process_whatsapp_webhook(payload):
+    processed = 0
+    entries = payload.get("entry") if isinstance(payload, dict) else []
+    for entry in entries or []:
+        for change in entry.get("changes") or []:
+            value = change.get("value") or {}
+            for message in value.get("messages") or []:
+                if handle_whatsapp_inbound_message(message):
+                    processed += 1
+    return processed
+
+
 def parse_postfach_datetime(value):
     cleaned = clean_text(value)
     if not cleaned:
@@ -13914,6 +14420,7 @@ def delete_auftrag(auftrag_id, safety_backup=True):
     db.execute("DELETE FROM status_log WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM benachrichtigungen WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM chat_nachrichten WHERE auftrag_id=?", (auftrag_id,))
+    db.execute("DELETE FROM whatsapp_nachrichten WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM auftraege WHERE id=?", (auftrag_id,))
     db.commit()
     db.close()
@@ -15724,24 +16231,37 @@ def shift_month(month_start, delta):
 def build_mini_monatskalender(
     auftraege,
     month_value="",
+    selected_day_value="",
     endpoint="",
     route_values=None,
     include_internal_notes=False,
     only_arrival_events=False,
 ):
+    selected_day = parse_date(selected_day_value)
     month_start = parse_mini_calendar_month(month_value)
+    if selected_day:
+        month_start = date(selected_day.year, selected_day.month, 1)
     today = date.today()
     month_end = shift_month(month_start, 1) - timedelta(days=1)
+    route_values = dict(route_values or {})
     cal = calendar.Calendar(firstweekday=0)
     event_dates = defaultdict(list)
+    event_day_items = defaultdict(list)
     for auftrag in auftraege or []:
         event_fields = EVENT_FELDER
         if only_arrival_events:
             event_fields = (("annahme_datum", "Anlieferung", "secondary"),)
-        for feld, label, _ in event_fields:
+        for feld, label, farbe in event_fields:
             event_date = auftrag.get(f"{feld}_obj")
             if event_date and month_start <= event_date <= month_end:
-                title = f"{label}: {clean_text(auftrag.get('fahrzeug')) or 'Fahrzeug'}"
+                fahrzeug = clean_text(auftrag.get("fahrzeug")) or "Fahrzeug"
+                kennzeichen = clean_text(auftrag.get("kennzeichen"))
+                title = f"{label}: {fahrzeug}"
+                if kennzeichen:
+                    title = f"{title} | {kennzeichen}"
+                subtitle_parts = []
+                if clean_text(auftrag.get("autohaus_name")):
+                    subtitle_parts.append(clean_text(auftrag.get("autohaus_name")))
                 if only_arrival_events:
                     rueckgabe = (
                         auftrag.get("abholtermin_obj")
@@ -15749,9 +16269,26 @@ def build_mini_monatskalender(
                         or parse_date(auftrag.get("fertig_datum"))
                     )
                     if rueckgabe:
-                        title = f"{title} | Rückgabe: {rueckgabe.strftime(DATE_FMT)}"
-                event_dates[event_date].append(
-                    title
+                        subtitle_parts.append(f"Rückgabe: {rueckgabe.strftime(DATE_FMT)}")
+                item_url = ""
+                if has_request_context():
+                    if endpoint == "partner_dashboard" and route_values.get("slug"):
+                        item_url = url_for(
+                            "partner_auftrag",
+                            slug=route_values["slug"],
+                            auftrag_id=auftrag["id"],
+                        )
+                    elif endpoint == "betriebs_cockpit":
+                        item_url = url_for("auftrag_detail", auftrag_id=auftrag["id"], back="kalender")
+                event_dates[event_date].append(title)
+                event_day_items[event_date].append(
+                    {
+                        "label": label,
+                        "farbe": farbe,
+                        "title": title,
+                        "subtitle": " | ".join(subtitle_parts),
+                        "url": item_url,
+                    }
                 )
 
     holidays = bw_feiertage(month_start.year)
@@ -15772,11 +16309,22 @@ def build_mini_monatskalender(
             current += timedelta(days=1)
 
     note_dates = defaultdict(list)
+    note_day_items = defaultdict(list)
     if include_internal_notes:
         for note in list_kalender_notizen([month_start.year]):
             note_date = note.get("datum") or parse_date(note.get("datum_text"))
             if note_date and month_start <= note_date <= month_end:
-                note_dates[note_date].append(clean_text(note.get("titel")) or "Kalendereintrag")
+                title = clean_text(note.get("titel")) or "Kalendereintrag"
+                note_dates[note_date].append(title)
+                note_day_items[note_date].append(
+                    {
+                        "label": note.get("kategorie_label") or "Notiz",
+                        "farbe": note.get("farbe") or "secondary",
+                        "title": title,
+                        "subtitle": clean_text(note.get("notiz")),
+                        "url": "",
+                    }
+                )
 
     weeks = []
     for week in cal.monthdatescalendar(month_start.year, month_start.month):
@@ -15789,12 +16337,37 @@ def build_mini_monatskalender(
             labels.extend(betriebsurlaub_dates.get(current, []))
             labels.extend(event_dates.get(current, [])[:3])
             labels.extend(note_dates.get(current, [])[:3])
+            day_items = []
+            if holiday_title:
+                day_items.append(
+                    {
+                        "label": "Feiertag",
+                        "farbe": "danger",
+                        "title": holiday_title,
+                        "subtitle": "",
+                        "url": "",
+                    }
+                )
+            for title in betriebsurlaub_dates.get(current, []):
+                day_items.append(
+                    {
+                        "label": "Betriebsurlaub",
+                        "farbe": "info",
+                        "title": title,
+                        "subtitle": "",
+                        "url": "",
+                    }
+                )
+            day_items.extend(event_day_items.get(current, []))
+            day_items.extend(note_day_items.get(current, []))
             row.append(
                 {
                     "datum": current,
                     "tag": current.day,
                     "datum_text": current.strftime(DATE_FMT),
+                    "aria_label": day_label(current),
                     "in_month": current.month == month_start.month,
+                    "is_selected": current == selected_day,
                     "is_today": current == today,
                     "is_weekend": current.weekday() >= 5,
                     "is_holiday": bool(holiday_title),
@@ -15802,23 +16375,66 @@ def build_mini_monatskalender(
                     "has_events": bool(event_dates.get(current)),
                     "has_notes": bool(note_dates.get(current)),
                     "tooltip": " | ".join(labels),
+                    "items": day_items,
+                    "url": (
+                        url_for(
+                            endpoint,
+                            **route_values,
+                            monat=current.strftime("%Y-%m"),
+                            tag=current.strftime("%Y-%m-%d"),
+                        )
+                        if endpoint and has_request_context()
+                        else ""
+                    ),
                 }
             )
         weeks.append(row)
 
     prev_month = shift_month(month_start, -1)
     next_month = shift_month(month_start, 1)
-    route_values = dict(route_values or {})
     prev_url = next_url = ""
     if endpoint and has_request_context():
         prev_url = url_for(endpoint, **route_values, monat=prev_month.strftime("%Y-%m"))
         next_url = url_for(endpoint, **route_values, monat=next_month.strftime("%Y-%m"))
+    selected_day_data = None
+    if selected_day:
+        selected_items = []
+        holiday_title = holidays.get(selected_day)
+        if holiday_title:
+            selected_items.append(
+                {
+                    "label": "Feiertag",
+                    "farbe": "danger",
+                    "title": holiday_title,
+                    "subtitle": "",
+                    "url": "",
+                }
+            )
+        for title in betriebsurlaub_dates.get(selected_day, []):
+            selected_items.append(
+                {
+                    "label": "Betriebsurlaub",
+                    "farbe": "info",
+                    "title": title,
+                    "subtitle": "",
+                    "url": "",
+                }
+            )
+        selected_items.extend(event_day_items.get(selected_day, []))
+        selected_items.extend(note_day_items.get(selected_day, []))
+        selected_day_data = {
+            "value": selected_day.strftime("%Y-%m-%d"),
+            "datum_text": selected_day.strftime(DATE_FMT),
+            "datum_lang": day_label(selected_day),
+            "items": selected_items,
+        }
     return {
         "title": f"{MONATSNAMEN[month_start.month]} {month_start.year}",
         "month_param": month_start.strftime("%Y-%m"),
         "prev_url": prev_url,
         "next_url": next_url,
         "today_text": today.strftime(DATE_FMT),
+        "selected_day": selected_day_data,
         "weekdays": ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
         "weeks": weeks,
         "event_count": sum(len(items) for items in event_dates.values()),
@@ -16128,6 +16744,25 @@ def session_ping():
     )
 
 
+@app.route("/webhooks/whatsapp", methods=["GET", "POST"])
+def whatsapp_webhook():
+    if request.method == "GET":
+        mode = clean_text(request.args.get("hub.mode"))
+        token = clean_text(request.args.get("hub.verify_token"))
+        challenge = clean_text(request.args.get("hub.challenge"))
+        if mode == "subscribe" and WHATSAPP_VERIFY_TOKEN and hmac.compare_digest(token, WHATSAPP_VERIFY_TOKEN):
+            return challenge, 200, {"Content-Type": "text/plain; charset=utf-8"}
+        abort(403)
+
+    if not whatsapp_bridge_enabled():
+        return jsonify({"ok": False, "enabled": False, "processed": 0})
+    if not verify_whatsapp_signature():
+        abort(403)
+    payload = request.get_json(silent=True) or {}
+    processed = process_whatsapp_webhook(payload)
+    return jsonify({"ok": True, "processed": processed})
+
+
 @app.route("/favicon.ico")
 def favicon():
     logo_path = BASE / "static" / "logo.png"
@@ -16164,6 +16799,7 @@ def betriebs_cockpit():
     mini_calendar = build_mini_monatskalender(
         auftraege,
         request.args.get("monat"),
+        request.args.get("tag"),
         endpoint="betriebs_cockpit",
         include_internal_notes=True,
     )
@@ -18233,6 +18869,7 @@ def partner_dashboard(slug):
         mini_calendar=build_mini_monatskalender(
             auftraege,
             request.args.get("monat"),
+            request.args.get("tag"),
             endpoint="partner_dashboard",
             route_values={"slug": autohaus["slug"]},
             include_internal_notes=False,
@@ -19015,7 +19652,13 @@ def partner_chat_nachricht(slug, auftrag_id):
         flash("Bitte eine Nachricht eingeben.", "warning")
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
-    add_chat_nachricht(auftrag_id, "autohaus", nachricht)
+    chat_id = add_chat_nachricht(auftrag_id, "autohaus", nachricht)
+    notify_workshop_whatsapp_for_chat(
+        auftrag_id,
+        chat_id,
+        nachricht,
+        absender_label=autohaus.get("name") or "Autohaus",
+    )
     flash("Nachricht an die Werkstatt gesendet.", "success")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 

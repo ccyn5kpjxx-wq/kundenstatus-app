@@ -21,6 +21,7 @@
   </style>
 </head>
 <body>
+  {% include "_live_clock_widget.html" %}
   <div class="shell">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}

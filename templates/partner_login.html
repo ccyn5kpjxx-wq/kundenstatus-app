@@ -36,6 +36,7 @@
   </style>
 </head>
 <body>
+  {% include "_live_clock_widget.html" %}
   <div class="container">
     <div class="mx-auto bg-white shadow login-card">
       <div class="text-center mb-4">
@@ -47,15 +48,25 @@
           <div class="alert alert-{{ cat }}">{{ msg }}</div>
         {% endfor %}
       {% endwith %}
-      <form method="POST">
+      <form method="POST" autocomplete="on">
+        <input
+          type="text"
+          name="benutzername"
+          value="{{ autohaus['portal_key'] or autohaus['slug'] }}"
+          autocomplete="username"
+          class="visually-hidden"
+          tabindex="-1"
+          aria-hidden="true"
+          readonly
+        >
         <div class="mb-3">
           <label class="form-label" for="zugangscode">Zugangscode</label>
           <input
-            type="text"
+            type="password"
             id="zugangscode"
             name="zugangscode"
             class="form-control form-control-lg access-code-input"
-            autocomplete="off"
+            autocomplete="current-password"
             autocapitalize="characters"
             spellcheck="false"
             required

@@ -35,9 +35,27 @@ def main():
 
     login_response = client.get("/login")
     ok &= check("Login-Seite", login_response, {200})
-    has_csrf = "name=\"csrf_token\"" in login_response.get_data(as_text=True)
+    login_html = login_response.get_data(as_text=True)
+    has_csrf = "name=\"csrf_token\"" in login_html
     print("[OK] Login-Formular enthält CSRF-Token" if has_csrf else "[FEHLER] Login-Formular ohne CSRF-Token")
     ok &= has_csrf
+    login_clock_ok = "data-live-clock" in login_html and "data-live-date" in login_html
+    print(
+        "[OK] Login-Seite zeigt Live-Uhr"
+        if login_clock_ok
+        else "[FEHLER] Login-Seite zeigt keine Live-Uhr"
+    )
+    ok &= login_clock_ok
+    login_autocomplete_ok = (
+        'autocomplete="username"' in login_html
+        and 'autocomplete="current-password"' in login_html
+    )
+    print(
+        "[OK] Admin-Login erlaubt Passwortmanager"
+        if login_autocomplete_ok
+        else "[FEHLER] Admin-Login blockiert Passwortmanager-Hinweise"
+    )
+    ok &= login_autocomplete_ok
     security_headers_ok = (
         login_response.headers.get("X-Content-Type-Options") == "nosniff"
         and login_response.headers.get("X-Frame-Options") == "SAMEORIGIN"
@@ -90,6 +108,23 @@ def main():
         else "[FEHLER] Zentraler Partner-Login fehlt"
     )
     ok &= central_partner_login
+    partner_autocomplete_ok = (
+        'autocomplete="username"' in partner_index_html
+        and 'autocomplete="current-password"' in partner_index_html
+    )
+    print(
+        "[OK] Partner-Login erlaubt Passwortmanager"
+        if partner_autocomplete_ok
+        else "[FEHLER] Partner-Login blockiert Passwortmanager-Hinweise"
+    )
+    ok &= partner_autocomplete_ok
+    partner_login_clock_ok = "data-live-clock" in partner_index_html and "data-live-date" in partner_index_html
+    print(
+        "[OK] Partner-Login zeigt Live-Uhr"
+        if partner_login_clock_ok
+        else "[FEHLER] Partner-Login zeigt keine Live-Uhr"
+    )
+    ok &= partner_login_clock_ok
     old_office_blocked = not portal.allowed_file("altauftrag.doc") and not portal.allowed_file("tabelle.xls")
     modern_office_allowed = portal.allowed_file("auftrag.docx") and portal.allowed_file("kalkulation.xlsx")
     print(

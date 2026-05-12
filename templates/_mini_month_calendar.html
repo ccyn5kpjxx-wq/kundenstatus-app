@@ -18,8 +18,12 @@
     font-weight:700;
     text-align:center;
   }
+  .mini-day-wrap {
+    min-width:0;
+  }
   .mini-day {
     position:relative;
+    width:100%;
     min-height:38px;
     display:flex;
     align-items:center;
@@ -29,6 +33,23 @@
     background:#fffaf2;
     color:#1c2732;
     font-weight:700;
+    text-decoration:none;
+    appearance:none;
+    font:inherit;
+    cursor:pointer;
+    transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease, background .16s ease;
+  }
+  .mini-day.is-open {
+    border-color:#a23f2d;
+    box-shadow:0 0 0 3px rgba(162,63,45,.18), 0 8px 18px rgba(64,47,25,.12);
+  }
+  .mini-day:hover,
+  .mini-day:focus-visible {
+    color:#1c2732;
+    border-color:#a23f2d;
+    box-shadow:0 8px 18px rgba(64,47,25,.12);
+    transform:translateY(-1px);
+    outline:0;
   }
   .mini-day.is-other-month {
     color:#b4aa9b;
@@ -39,11 +60,31 @@
     border-color:#121820;
     color:#fff;
   }
+  .mini-day.is-today:hover,
+  .mini-day.is-today:focus-visible {
+    color:#fff;
+  }
+  .mini-day.is-selected {
+    border-color:#a23f2d;
+    box-shadow:0 0 0 3px rgba(162,63,45,.18);
+  }
   .mini-day.has-holiday {
     box-shadow:inset 0 -4px 0 #dc3545;
   }
+  .mini-day.has-holiday.is-selected {
+    box-shadow:inset 0 -4px 0 #dc3545, 0 0 0 3px rgba(162,63,45,.18);
+  }
   .mini-day.has-vacation {
     box-shadow:inset 0 -4px 0 #145d66;
+  }
+  .mini-day.has-vacation.is-selected {
+    box-shadow:inset 0 -4px 0 #145d66, 0 0 0 3px rgba(162,63,45,.18);
+  }
+  .mini-day.has-holiday.is-open {
+    box-shadow:inset 0 -4px 0 #dc3545, 0 0 0 3px rgba(162,63,45,.18), 0 8px 18px rgba(64,47,25,.12);
+  }
+  .mini-day.has-vacation.is-open {
+    box-shadow:inset 0 -4px 0 #145d66, 0 0 0 3px rgba(162,63,45,.18), 0 8px 18px rgba(64,47,25,.12);
   }
   .mini-day.has-holiday.has-vacation {
     background:linear-gradient(180deg,#fffaf2 0 68%,#dc3545 68% 82%,#145d66 82% 100%);
@@ -87,9 +128,85 @@
   .mini-dot.holiday { background:#dc3545; }
   .mini-dot.vacation { background:#145d66; }
   .mini-dot.note { background:#c78300; }
+  .mini-day-popover {
+    position:fixed;
+    z-index:1080;
+    width:min(320px, calc(100vw - 28px));
+    border:1px solid #e4d6c3;
+    border-radius:16px;
+    background:#fffdf9;
+    padding:14px;
+    box-shadow:0 18px 44px rgba(64,47,25,.2);
+  }
+  .mini-day-popover[hidden] {
+    display:none;
+  }
+  .mini-day-popover::before {
+    content:"";
+    position:absolute;
+    top:-7px;
+    left:var(--mini-bubble-arrow-left, 50%);
+    width:14px;
+    height:14px;
+    transform:translateX(-50%) rotate(45deg);
+    background:#fffdf9;
+    border-left:1px solid #e4d6c3;
+    border-top:1px solid #e4d6c3;
+  }
+  .mini-day-popover.is-above::before {
+    top:auto;
+    bottom:-7px;
+    border:0;
+    border-right:1px solid #e4d6c3;
+    border-bottom:1px solid #e4d6c3;
+  }
+  .mini-selected-kicker {
+    color:#6d7780;
+    font-size:.76rem;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+  }
+  .mini-selected-count {
+    display:inline-flex;
+    align-items:center;
+    border:1px solid #e4d6c3;
+    border-radius:999px;
+    background:#fffdf9;
+    color:#1c2732;
+    padding:.28rem .65rem;
+    font-size:.82rem;
+    font-weight:700;
+  }
+  .mini-selected-list {
+    display:grid;
+    gap:8px;
+    margin-top:10px;
+    max-height:min(340px, 54vh);
+    overflow:auto;
+  }
+  .mini-selected-item,
+  .mini-selected-empty {
+    display:block;
+    border:1px solid #e4d6c3;
+    border-radius:12px;
+    background:#fffdf9;
+    padding:10px 12px;
+    color:#1c2732;
+    text-decoration:none;
+  }
+  .mini-selected-item:hover {
+    color:#1c2732;
+    border-color:#a23f2d;
+    background:#f7f1e8;
+  }
+  .mini-selected-empty {
+    color:#6d7780;
+    border-style:dashed;
+  }
 </style>
 
-<div class="mini-calendar-card p-3 p-lg-4 mb-4">
+<div class="mini-calendar-card p-3 p-lg-4 mb-4" data-mini-calendar>
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
     <div>
       <h4 class="mb-1">Monatsblick {{ mini_calendar['title'] }}</h4>
@@ -108,11 +225,54 @@
   </div>
   <div class="mini-calendar-grid">
     {% for week in mini_calendar['weeks'] %}
+      {% set week_index = loop.index %}
       {% for day in week %}
-        <div
-          class="mini-day {{ '' if day['in_month'] else 'is-other-month' }} {{ 'is-today' if day['is_today'] else '' }} {{ 'has-holiday' if day['is_holiday'] else '' }} {{ 'has-vacation' if day['has_betriebsurlaub'] else '' }} {{ 'has-events' if day['has_events'] else '' }} {{ 'has-notes' if day['has_notes'] else '' }}"
-          title="{{ day['tooltip'] or day['datum_text'] }}"
-        >{{ day['tag'] }}</div>
+        {% set day_popover_id = "mini-day-popover-" ~ mini_calendar['month_param'] ~ "-" ~ day['datum_text']|replace(".", "") ~ "-" ~ week_index ~ "-" ~ loop.index %}
+        {% set day_classes = "mini-day " ~ ('' if day['in_month'] else 'is-other-month') ~ " " ~ ('is-selected' if day['is_selected'] else '') ~ " " ~ ('is-today' if day['is_today'] else '') ~ " " ~ ('has-holiday' if day['is_holiday'] else '') ~ " " ~ ('has-vacation' if day['has_betriebsurlaub'] else '') ~ " " ~ ('has-events' if day['has_events'] else '') ~ " " ~ ('has-notes' if day['has_notes'] else '') %}
+        <div class="mini-day-wrap">
+          <button
+            type="button"
+            class="{{ day_classes }}"
+            title="{{ day['tooltip'] or day['datum_text'] }}"
+            aria-label="{{ day['aria_label'] }}"
+            aria-controls="{{ day_popover_id }}"
+            aria-expanded="false"
+            data-mini-day-trigger
+          >{{ day['tag'] }}</button>
+          <div
+            id="{{ day_popover_id }}"
+            class="mini-day-popover"
+            data-mini-day-popover
+            hidden
+          >
+            <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+              <div>
+                <div class="mini-selected-kicker">Tagesnotiz</div>
+                <strong>{{ day['aria_label'] }}</strong>
+              </div>
+              <span class="mini-selected-count">{{ day['items']|length }}</span>
+            </div>
+            {% if day['items'] %}
+            <div class="mini-selected-list">
+              {% for item in day['items'] %}
+                {% if item['url'] %}
+                <a class="mini-selected-item" href="{{ item['url'] }}">
+                  <div><span class="badge text-bg-{{ item['farbe'] }} me-1">{{ item['label'] }}</span><strong>{{ item['title'] }}</strong></div>
+                  {% if item['subtitle'] %}<div class="text-muted small mt-1">{{ item['subtitle'] }}</div>{% endif %}
+                </a>
+                {% else %}
+                <div class="mini-selected-item">
+                  <div><span class="badge text-bg-{{ item['farbe'] }} me-1">{{ item['label'] }}</span><strong>{{ item['title'] }}</strong></div>
+                  {% if item['subtitle'] %}<div class="text-muted small mt-1">{{ item['subtitle'] }}</div>{% endif %}
+                </div>
+                {% endif %}
+              {% endfor %}
+            </div>
+            {% else %}
+            <div class="mini-selected-empty mt-3">Keine Einträge.</div>
+            {% endif %}
+          </div>
+        </div>
       {% endfor %}
     {% endfor %}
   </div>
@@ -123,4 +283,79 @@
     {% if mini_calendar['show_notes'] %}<span><i class="mini-dot note"></i>Notiz</span>{% endif %}
   </div>
 </div>
+<script>
+  (function () {
+    if (window.miniCalendarBubbleReady) return;
+    window.miniCalendarBubbleReady = true;
+
+    function closeBubble(popover) {
+      if (!popover) return;
+      var trigger = document.querySelector('[aria-controls="' + popover.id + '"]');
+      popover.hidden = true;
+      popover.classList.remove('is-above');
+      if (trigger) {
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.classList.remove('is-open');
+      }
+    }
+
+    function closeAllBubbles(except) {
+      document.querySelectorAll('[data-mini-day-popover]').forEach(function (popover) {
+        if (popover !== except) closeBubble(popover);
+      });
+    }
+
+    function positionBubble(trigger, popover) {
+      var triggerRect = trigger.getBoundingClientRect();
+      var bubbleWidth = Math.min(320, Math.max(240, window.innerWidth - 28));
+      var left = triggerRect.left + triggerRect.width / 2 - bubbleWidth / 2;
+      left = Math.max(14, Math.min(window.innerWidth - bubbleWidth - 14, left));
+
+      popover.style.width = bubbleWidth + 'px';
+      popover.style.left = left + 'px';
+      popover.style.top = triggerRect.bottom + 10 + 'px';
+      popover.classList.remove('is-above');
+
+      var bubbleRect = popover.getBoundingClientRect();
+      var shouldOpenAbove = bubbleRect.bottom > window.innerHeight - 12 && triggerRect.top > bubbleRect.height + 18;
+      if (shouldOpenAbove) {
+        popover.style.top = triggerRect.top - bubbleRect.height - 10 + 'px';
+        popover.classList.add('is-above');
+      }
+
+      var arrowLeft = triggerRect.left + triggerRect.width / 2 - left;
+      popover.style.setProperty('--mini-bubble-arrow-left', arrowLeft + 'px');
+    }
+
+    document.addEventListener('click', function (event) {
+      var trigger = event.target.closest('[data-mini-day-trigger]');
+      if (trigger) {
+        var popover = document.getElementById(trigger.getAttribute('aria-controls'));
+        if (!popover) return;
+        var willOpen = popover.hidden;
+        closeAllBubbles(popover);
+        if (willOpen) {
+          popover.hidden = false;
+          trigger.setAttribute('aria-expanded', 'true');
+          trigger.classList.add('is-open');
+          positionBubble(trigger, popover);
+        } else {
+          closeBubble(popover);
+        }
+        return;
+      }
+
+      if (event.target.closest('[data-mini-day-popover]')) return;
+      closeAllBubbles();
+    });
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') closeAllBubbles();
+    });
+
+    window.addEventListener('resize', function () {
+      closeAllBubbles();
+    });
+  })();
+</script>
 {% endif %}
