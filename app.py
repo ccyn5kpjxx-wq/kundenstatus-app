@@ -220,7 +220,7 @@ SQLITE_BUSY_TIMEOUT_SECONDS = max(
 )
 DEFAULT_ADMIN_PASS = "gaertner2026"
 DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
-APP_VERSION = "login-remember-v2"
+APP_VERSION = "login-redirect-v3"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
 DEFAULT_PUBLIC_BASE_URL = ""
 PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
@@ -16883,6 +16883,8 @@ def render_partner_new_form(autohaus):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if request.method == "GET" and session.get("admin"):
+        return redirect(url_for("betriebs_cockpit"))
     if request.method == "POST":
         limited, wait_seconds = login_rate_limit_status("admin", "admin")
         if limited:
@@ -18966,6 +18968,10 @@ def portal_redirect():
 @app.route("/partner", methods=["GET", "POST"])
 def partner_login():
     autohaeuser = list_autohaeuser()
+    if request.method == "GET" and session.get("partner_autohaus_id"):
+        autohaus = get_autohaus(session.get("partner_autohaus_id"))
+        if autohaus:
+            return redirect(url_for("partner_dashboard", slug=autohaus["slug"]))
     if request.method == "POST":
         portal_key = clean_text(request.form.get("portal_key"))
         zugangscode = clean_text(request.form.get("zugangscode"))

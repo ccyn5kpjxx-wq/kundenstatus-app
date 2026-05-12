@@ -145,6 +145,15 @@ def main():
         session["admin"] = True
     admin_response = client.get("/admin")
     ok &= check("Admin mit Login", admin_response, {200})
+    logged_in_login_response = client.get("/login", follow_redirects=False)
+    ok &= check("Login-Seite leitet eingeloggte Admins weiter", logged_in_login_response, {302})
+    logged_in_login_target_ok = "/admin/cockpit" in (logged_in_login_response.headers.get("Location") or "")
+    print(
+        "[OK] Eingeloggte Admins bleiben beim Neuladen aus dem Login heraus"
+        if logged_in_login_target_ok
+        else "[FEHLER] Eingeloggte Admins landen wieder auf der Login-Seite"
+    )
+    ok &= logged_in_login_target_ok
     admin_html = admin_response.get_data(as_text=True)
     admin_lackierportal_simple_ok = (
         "Alle Aufträge" in admin_html
@@ -636,6 +645,17 @@ def main():
         client = portal.app.test_client()
         with client.session_transaction() as session:
             session["partner_autohaus_id"] = autohaus["id"]
+        partner_login_reload_response = client.get("/partner", follow_redirects=False)
+        ok &= check("Partner-Login leitet eingeloggte Partner weiter", partner_login_reload_response, {302})
+        partner_login_reload_ok = "/partner/kaesmann/dashboard" in (
+            partner_login_reload_response.headers.get("Location") or ""
+        )
+        print(
+            "[OK] Eingeloggte Partner bleiben beim Neuladen aus dem Login heraus"
+            if partner_login_reload_ok
+            else "[FEHLER] Eingeloggte Partner landen wieder auf der Login-Seite"
+        )
+        ok &= partner_login_reload_ok
         partner_dashboard_response = client.get("/partner/kaesmann/dashboard")
         ok &= check(
             "Käsmann-Dashboard mit Partner-Login",
