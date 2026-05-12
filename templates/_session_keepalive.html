@@ -1,0 +1,57 @@
+{% if session.get('admin') or session.get('partner_autohaus_id') %}
+<script>
+  (() => {
+    const endpoint = "{{ url_for('session_ping') }}";
+    const csrfToken = "{{ csrf_token() }}";
+    const pingIntervalMs = 60 * 1000;
+    const activeWindowMs = {{ (config.get('PERMANENT_SESSION_LIFETIME').total_seconds() * 1000)|int if config.get('PERMANENT_SESSION_LIFETIME') else 300000 }};
+    let lastActivityAt = Date.now();
+    let lastPingAt = 0;
+    let pingInFlight = false;
+
+    const ping = async (force = false) => {
+      const now = Date.now();
+      if (pingInFlight || (!force && now - lastPingAt < pingIntervalMs)) {
+        return;
+      }
+      if (!force && now - lastActivityAt > activeWindowMs) {
+        return;
+      }
+      lastPingAt = now;
+      pingInFlight = true;
+      try {
+        await fetch(endpoint, {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: {
+            "Accept": "application/json",
+            "X-CSRF-Token": csrfToken,
+          },
+        });
+      } catch (error) {
+        return;
+      } finally {
+        pingInFlight = false;
+      }
+    };
+
+    const markActive = () => {
+      lastActivityAt = Date.now();
+      ping();
+    };
+
+    ["click", "keydown", "mousemove", "scroll", "touchstart", "input"].forEach((eventName) => {
+      window.addEventListener(eventName, markActive, { passive: true });
+    });
+    window.addEventListener("focus", markActive);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        markActive();
+      }
+    });
+    window.setInterval(() => ping(), pingIntervalMs);
+    ping(true);
+  })();
+</script>
+{% endif %}

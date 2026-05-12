@@ -296,6 +296,7 @@ ALLOW_INSECURE_LOCAL_LOGIN = env_flag("ALLOW_INSECURE_LOCAL_LOGIN", True)
 LOGIN_RATE_LIMIT_MAX = max(3, env_int("LOGIN_RATE_LIMIT_MAX", 8))
 LOGIN_RATE_LIMIT_WINDOW_SECONDS = max(60, env_int("LOGIN_RATE_LIMIT_WINDOW_SECONDS", 15 * 60))
 LOGIN_RATE_LIMIT_LOCK_SECONDS = max(60, env_int("LOGIN_RATE_LIMIT_LOCK_SECONDS", 10 * 60))
+SESSION_IDLE_TIMEOUT_MINUTES = max(5, env_int("SESSION_IDLE_TIMEOUT_MINUTES", 5))
 LOGIN_ATTEMPTS = {}
 LOGIN_ATTEMPTS_LOCK = threading.Lock()
 _sqlite_wal_configured = False
@@ -895,6 +896,8 @@ _configured_secret_key, USING_EPHEMERAL_SECRET_KEY = configured_flask_secret_key
 app.secret_key = _configured_secret_key
 app.config.update(
     MAX_CONTENT_LENGTH=MAX_UPLOAD_MB * 1024 * 1024,
+    PERMANENT_SESSION_LIFETIME=timedelta(minutes=SESSION_IDLE_TIMEOUT_MINUTES),
+    SESSION_REFRESH_EACH_REQUEST=True,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=env_flag(
@@ -938,6 +941,22 @@ def inject_csrf_helpers():
         "admin_mitarbeiter_urlaub_count": admin_mitarbeiter_urlaub_count,
         "analysis_loading_news": analysis_loading_news,
     }
+
+
+def session_is_authenticated():
+    return bool(session.get("admin") or session.get("partner_autohaus_id"))
+
+
+def mark_authenticated_session_active():
+    if session_is_authenticated():
+        session.permanent = True
+        session.modified = True
+
+
+@app.before_request
+def refresh_authenticated_session():
+    mark_authenticated_session_active()
+    return None
 
 
 @app.before_request
@@ -16081,6 +16100,7 @@ def login():
         if admin_password_matches(request.form.get("passwort")):
             clear_login_attempts("admin", "admin")
             session.clear()
+            session.permanent = True
             session["admin"] = True
             return redirect(url_for("betriebs_cockpit"))
         record_failed_login("admin", "admin")
@@ -16092,6 +16112,20 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+@app.route("/session/ping", methods=["POST"])
+def session_ping():
+    if not session_is_authenticated():
+        return jsonify({"ok": False, "authenticated": False}), 401
+    mark_authenticated_session_active()
+    return jsonify(
+        {
+            "ok": True,
+            "authenticated": True,
+            "idle_timeout_seconds": SESSION_IDLE_TIMEOUT_MINUTES * 60,
+        }
+    )
 
 
 @app.route("/favicon.ico")
@@ -18128,6 +18162,7 @@ def partner_login():
         if autohaus and partner_access_code_matches(zugangscode, autohaus):
             clear_login_attempts("partner", limit_identifier)
             session.clear()
+            session.permanent = True
             session["partner_autohaus_id"] = autohaus["id"]
             return redirect(url_for("partner_dashboard_key", portal_key=autohaus["portal_key"]))
         record_failed_login("partner", limit_identifier)
@@ -18149,6 +18184,7 @@ def partner_login_key(portal_key):
         if partner_access_code_matches(request.form.get("zugangscode"), autohaus):
             clear_login_attempts("partner", portal_key)
             session.clear()
+            session.permanent = True
             session["partner_autohaus_id"] = autohaus["id"]
             return redirect(url_for("partner_dashboard_key", portal_key=portal_key))
         record_failed_login("partner", portal_key)
@@ -18179,6 +18215,7 @@ def partner_dashboard(slug):
     autohaus, redirect_response = partner_session_required(slug)
     if redirect_response:
         return redirect_response
+    current_datetime = datetime.now()
     alle_auftraege = list_auftraege(autohaus["id"], include_archived=True)
     auftraege = [a for a in alle_auftraege if not a["archiviert"]]
     archivierte_auftraege = [a for a in alle_auftraege if a["archiviert"]]
@@ -18203,6 +18240,9 @@ def partner_dashboard(slug):
         ),
         rahmenvertrag=rahmenvertrag_context(autohaus),
         statusliste=STATUSLISTE,
+        current_datetime_iso=current_datetime.isoformat(timespec="seconds"),
+        current_time_label=current_datetime.strftime("%H:%M:%S"),
+        current_date_label=f"{WOCHENTAGE[current_datetime.weekday()]}, {current_datetime.strftime(DATE_FMT)}",
     )
 
 

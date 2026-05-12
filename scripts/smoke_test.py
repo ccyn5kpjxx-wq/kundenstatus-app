@@ -1,6 +1,6 @@
 from pathlib import Path
 from io import BytesIO
-from datetime import date
+from datetime import date, timedelta
 import sys
 
 
@@ -179,6 +179,7 @@ def main():
         and "data-live-date" in cockpit_html
         and "Monatsblick" in cockpit_html
         and "Kalender öffnen" in cockpit_html
+        and "/session/ping" in cockpit_html
         and "Feiertag" in cockpit_html
         and "Betriebsurlaub" in cockpit_html
     )
@@ -188,6 +189,26 @@ def main():
         else "[FEHLER] Startseite zeigt Uhr/Datum/Kalender nicht vollständig"
     )
     ok &= start_clock_calendar_ok
+    session_timeout_ok = portal.app.permanent_session_lifetime >= timedelta(minutes=5)
+    print(
+        "[OK] Sitzung haelt mindestens 5 Minuten Inaktivitaet"
+        if session_timeout_ok
+        else "[FEHLER] Sitzung laeuft zu schnell ab"
+    )
+    ok &= session_timeout_ok
+    session_ping_response = client.post("/session/ping", data=csrf_data(client))
+    ok &= check("Sitzung bei Aktivitaet verlaengern", session_ping_response, {200})
+    session_ping_data = session_ping_response.get_json(silent=True) or {}
+    session_ping_ok = (
+        session_ping_data.get("authenticated") is True
+        and session_ping_data.get("idle_timeout_seconds", 0) >= 300
+    )
+    print(
+        "[OK] Session-Ping bestaetigt aktiven Login"
+        if session_ping_ok
+        else "[FEHLER] Session-Ping verlaengert den Login nicht"
+    )
+    ok &= session_ping_ok
     reminder_form_ok = "Kurz notieren, was später erledigt werden soll" in cockpit_html and "/admin/erinnerungen/neu" in cockpit_html
     print(
         "[OK] Startseite zeigt Erinnerungsfeld"
@@ -579,6 +600,9 @@ def main():
             and "Schneller Tagesblick für Dispo und Annahme." not in partner_dashboard_html
             and "Angebotsanfragen" not in partner_dashboard_html
             and "Ihre Fahrzeuge" in partner_dashboard_html
+            and "data-live-clock" in partner_dashboard_html
+            and "data-live-date" in partner_dashboard_html
+            and "/session/ping" in partner_dashboard_html
         )
         print(
             "[OK] Käsmann-Dashboard zeigt reduzierte Startseite"
@@ -663,6 +687,8 @@ def main():
                 and "Angebotsanfragen" not in pfaff_dashboard_html
                 and "Aktuell:" not in pfaff_dashboard_html
                 and "Ihre Fahrzeuge" in pfaff_dashboard_html
+                and "data-live-clock" in pfaff_dashboard_html
+                and "/session/ping" in pfaff_dashboard_html
             )
             print(
                 "[OK] Partner-Dashboard blendet Termin- und Angebotsblöcke aus"
