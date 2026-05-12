@@ -39,11 +39,11 @@ def main():
     has_csrf = "name=\"csrf_token\"" in login_html
     print("[OK] Login-Formular enthält CSRF-Token" if has_csrf else "[FEHLER] Login-Formular ohne CSRF-Token")
     ok &= has_csrf
-    login_clock_ok = "data-live-clock" in login_html and "data-live-date" in login_html
+    login_clock_ok = "data-live-clock" not in login_html and "data-live-date" not in login_html
     print(
-        "[OK] Login-Seite zeigt Live-Uhr"
+        "[OK] Login-Seite bleibt ohne Live-Uhr"
         if login_clock_ok
-        else "[FEHLER] Login-Seite zeigt keine Live-Uhr"
+        else "[FEHLER] Login-Seite enthaelt noch die Live-Uhr"
     )
     ok &= login_clock_ok
     login_autocomplete_ok = (
@@ -118,11 +118,11 @@ def main():
         else "[FEHLER] Partner-Login blockiert Passwortmanager-Hinweise"
     )
     ok &= partner_autocomplete_ok
-    partner_login_clock_ok = "data-live-clock" in partner_index_html and "data-live-date" in partner_index_html
+    partner_login_clock_ok = "data-live-clock" not in partner_index_html and "data-live-date" not in partner_index_html
     print(
-        "[OK] Partner-Login zeigt Live-Uhr"
+        "[OK] Partner-Login bleibt ohne Live-Uhr"
         if partner_login_clock_ok
-        else "[FEHLER] Partner-Login zeigt keine Live-Uhr"
+        else "[FEHLER] Partner-Login enthaelt noch die Live-Uhr"
     )
     ok &= partner_login_clock_ok
     old_office_blocked = not portal.allowed_file("altauftrag.doc") and not portal.allowed_file("tabelle.xls")
