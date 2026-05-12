@@ -220,7 +220,7 @@ SQLITE_BUSY_TIMEOUT_SECONDS = max(
 )
 DEFAULT_ADMIN_PASS = "gaertner2026"
 DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
-APP_VERSION = "login-no-clock-v4"
+APP_VERSION = "login-password-save-v5"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
 DEFAULT_PUBLIC_BASE_URL = ""
 PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
@@ -16890,7 +16890,8 @@ def login():
         if limited:
             flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen.", "danger")
             return render_template("login.html"), 429
-        if admin_password_matches(request.form.get("passwort")):
+        submitted_password = request.form.get("password") or request.form.get("passwort")
+        if admin_password_matches(submitted_password):
             clear_login_attempts("admin", "admin")
             session.clear()
             session.permanent = True
@@ -18974,7 +18975,7 @@ def partner_login():
             return redirect(url_for("partner_dashboard", slug=autohaus["slug"]))
     if request.method == "POST":
         portal_key = clean_text(request.form.get("portal_key"))
-        zugangscode = clean_text(request.form.get("zugangscode"))
+        zugangscode = clean_text(request.form.get("password") or request.form.get("zugangscode"))
         autohaus = get_autohaus_by_portal_key(portal_key)
         limit_identifier = portal_key or "zentral"
         limited, wait_seconds = login_rate_limit_status("partner", limit_identifier)
@@ -19005,7 +19006,8 @@ def partner_login_key(portal_key):
         if limited:
             flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen.", "danger")
             return render_template("partner_login.html", autohaus=autohaus), 429
-        if partner_access_code_matches(request.form.get("zugangscode"), autohaus):
+        submitted_code = request.form.get("password") or request.form.get("zugangscode")
+        if partner_access_code_matches(submitted_code, autohaus):
             clear_login_attempts("partner", portal_key)
             session.clear()
             session.permanent = True

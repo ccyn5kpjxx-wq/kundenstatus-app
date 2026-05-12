@@ -21,21 +21,24 @@
     {% endfor %}
   {% endwith %}
   <form method="POST" autocomplete="on">
-    <input
-      type="text"
-      name="benutzername"
-      value="admin"
-      autocomplete="username"
-      class="visually-hidden"
-      tabindex="-1"
-      aria-hidden="true"
-      readonly
-    >
     <div class="mb-3">
+      <label class="form-label" for="username">Benutzer</label>
+      <input
+        type="text"
+        id="username"
+        name="username"
+        value="admin"
+        class="form-control form-control-lg"
+        autocomplete="username"
+        readonly
+      >
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="password">Passwort</label>
       <input
         type="password"
-        id="passwort"
-        name="passwort"
+        id="password"
+        name="password"
         class="form-control form-control-lg"
         placeholder="Passwort"
         autocomplete="current-password"

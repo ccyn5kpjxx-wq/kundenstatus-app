@@ -49,6 +49,8 @@ def main():
     login_autocomplete_ok = (
         'autocomplete="username"' in login_html
         and 'autocomplete="current-password"' in login_html
+        and 'name="username"' in login_html
+        and 'name="password"' in login_html
     )
     print(
         "[OK] Admin-Login erlaubt Passwortmanager"
@@ -89,19 +91,19 @@ def main():
     ok &= rate_limit_ok
     ok &= check(
         "Login-POST ohne CSRF blockiert",
-        client.post("/login", data={"passwort": "falsch"}),
+        client.post("/login", data={"password": "falsch"}),
         {400},
     )
     ok &= check(
         "Login-POST mit CSRF verarbeitet",
-        client.post("/login", data=csrf_data(client, {"passwort": "falsch"})),
+        client.post("/login", data=csrf_data(client, {"password": "falsch"})),
         {200},
     )
     ok &= check("Admin ohne Login geschuetzt", client.get("/admin"), {302})
     partner_index_response = client.get("/partner")
     ok &= check("Partner-Einstieg", partner_index_response, {200})
     partner_index_html = partner_index_response.get_data(as_text=True)
-    central_partner_login = "name=\"portal_key\"" in partner_index_html and "name=\"zugangscode\"" in partner_index_html
+    central_partner_login = "name=\"portal_key\"" in partner_index_html and "name=\"password\"" in partner_index_html
     print(
         "[OK] Zentraler Partner-Login vorhanden"
         if central_partner_login
@@ -111,6 +113,8 @@ def main():
     partner_autocomplete_ok = (
         'autocomplete="username"' in partner_index_html
         and 'autocomplete="current-password"' in partner_index_html
+        and 'name="username"' in partner_index_html
+        and 'name="password"' in partner_index_html
     )
     print(
         "[OK] Partner-Login erlaubt Passwortmanager"
