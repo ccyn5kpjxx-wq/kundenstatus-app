@@ -17365,7 +17365,9 @@ def get_mosbach_weather_payload(force_refresh=False):
 @app.route("/api/wetter/mosbach")
 def wetter_mosbach():
     payload, status_code = get_mosbach_weather_payload()
-    return jsonify(payload), status_code
+    response = jsonify(payload)
+    response.headers.setdefault("Access-Control-Allow-Origin", "*")
+    return response, status_code
 
 
 @app.route("/")

@@ -870,7 +870,10 @@
       const currentTemp = root.querySelector('[data-weather-current-temp]');
       const currentText = root.querySelector('[data-weather-current-text]');
       const hoursTarget = root.querySelector('[data-weather-hours]');
-      const endpoint = root.dataset.weatherUrl;
+      let endpoint = root.dataset.weatherUrl;
+      if (!endpoint || endpoint.includes('{') || endpoint.includes('url_for')) {
+        endpoint = window.location.protocol === 'file:' ? 'http://localhost:5000/api/wetter/mosbach' : '/api/wetter/mosbach';
+      }
       if (!locationSelect || !currentIcon || !currentTemp || !currentText || !hoursTarget) {
         return;
       }
