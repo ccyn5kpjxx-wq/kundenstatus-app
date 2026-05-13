@@ -117,13 +117,55 @@
     .portal-header-actions {
       display:contents;
     }
+    .portal-side-stack {
+      display:grid;
+      gap:18px;
+      width:min(100%,602px);
+      justify-self:end;
+    }
     .portal-header-top {
       display:grid;
       grid-template-columns:minmax(320px,380px) 210px;
       align-items:stretch;
       gap:12px;
-      width:min(100%,602px);
-      justify-self:end;
+      width:100%;
+    }
+    .portal-services-panel {
+      min-width:0;
+    }
+    .portal-services-title {
+      margin-bottom:10px;
+      color:#132635;
+      font-family:"Space Grotesk",sans-serif;
+      font-size:1.32rem;
+      line-height:1.1;
+      font-weight:700;
+    }
+    .portal-services-grid {
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:8px 18px;
+    }
+    .portal-service-item {
+      display:grid;
+      grid-template-columns:9px minmax(0,1fr);
+      gap:8px;
+      color:#2e3741;
+      font-size:.9rem;
+      line-height:1.28;
+    }
+    .portal-service-item::before {
+      content:"";
+      width:6px;
+      height:6px;
+      margin-top:.46rem;
+      border-radius:999px;
+      background:#d8281f;
+      box-shadow:0 0 0 3px rgba(216,40,31,.08);
+    }
+    .portal-service-item strong {
+      color:#111827;
+      font-weight:700;
     }
     .portal-clock-panel {
       min-width:0;
@@ -408,6 +450,9 @@
       .portal-header-top {
         grid-template-columns:minmax(320px,440px) 220px;
         width:100%;
+      }
+      .portal-side-stack {
+        width:100%;
         justify-self:start;
       }
       .portal-action-row {
@@ -422,6 +467,9 @@
         gap:18px;
       }
       .portal-header-top {
+        grid-template-columns:1fr;
+      }
+      .portal-services-grid {
         grid-template-columns:1fr;
       }
       .portal-search {
@@ -522,6 +570,7 @@
       .bonus-order { align-items:start; }
       .bonus-source { width:max-content; max-width:100%; white-space:normal; }
       .portal-hero { grid-template-columns:1fr; }
+      .portal-side-stack,
       .portal-header-top { width:100%; }
       .portal-brand-stage img { width:100%; }
       .portal-clock-panel { width:100%; text-align:left; }
@@ -563,27 +612,41 @@
           </div>
         </div>
         <div class="portal-header-actions">
-          <div class="portal-header-top">
-            <div class="portal-weather-panel" data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}">
-              <div class="portal-weather-head">
-                <div>
-                  <div class="portal-weather-label">Wetter</div>
-                  <select class="portal-weather-select" data-weather-location aria-label="Wetterort auswählen">
-                    <option value="mosbach" data-latitude="49.3536" data-longitude="9.1517" selected>Mosbach</option>
-                  </select>
+          <div class="portal-side-stack">
+            <div class="portal-header-top">
+              <div class="portal-weather-panel" data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}">
+                <div class="portal-weather-head">
+                  <div>
+                    <div class="portal-weather-label">Wetter</div>
+                    <select class="portal-weather-select" data-weather-location aria-label="Wetterort auswählen">
+                      <option value="mosbach" data-latitude="49.3536" data-longitude="9.1517" selected>Mosbach</option>
+                    </select>
+                  </div>
+                  <div class="portal-weather-current">
+                    <span class="portal-weather-icon" data-weather-current-icon aria-hidden="true">--</span>
+                    <strong class="portal-weather-temp" data-weather-current-temp>--°C</strong>
+                  </div>
                 </div>
-                <div class="portal-weather-current">
-                  <span class="portal-weather-icon" data-weather-current-icon aria-hidden="true">--</span>
-                  <strong class="portal-weather-temp" data-weather-current-temp>--°C</strong>
-                </div>
+                <div class="portal-weather-meta" data-weather-current-text>Wetter wird geladen.</div>
+                <div class="portal-weather-hours" data-weather-hours aria-label="Wetter in den nächsten 3 Stunden"></div>
               </div>
-              <div class="portal-weather-meta" data-weather-current-text>Wetter wird geladen.</div>
-              <div class="portal-weather-hours" data-weather-hours aria-label="Wetter in den nächsten 3 Stunden"></div>
+              <div class="portal-clock-panel" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
+                <div class="portal-clock-label">Heute</div>
+                <div class="portal-clock-time" data-live-clock>{{ current_time_label }}</div>
+                <div class="portal-clock-date" data-live-date>{{ current_date_label }}</div>
+              </div>
             </div>
-            <div class="portal-clock-panel" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
-              <div class="portal-clock-label">Heute</div>
-              <div class="portal-clock-time" data-live-clock>{{ current_time_label }}</div>
-              <div class="portal-clock-date" data-live-date>{{ current_date_label }}</div>
+            <div class="portal-services-panel" aria-label="Unsere Leistungen">
+              <div class="portal-services-title">Unsere Leistungen</div>
+              <div class="portal-services-grid">
+                <div class="portal-service-item"><span><strong>Lackiererei / Fahrzeuglackierung:</strong> Spot-Repair, Teil- und Komplettlackierung.</span></div>
+                <div class="portal-service-item"><span><strong>Unfallinstandsetzung &amp; Smart Repair:</strong> Richtbank, Kunststoffreparatur, Kleinschäden.</span></div>
+                <div class="portal-service-item"><span><strong>Dellendoktor:</strong> Ausbeulen bei Park- und Hageldellen.</span></div>
+                <div class="portal-service-item"><span><strong>Fahrzeugpflege:</strong> Innenreinigung, Politur und Versiegelung.</span></div>
+                <div class="portal-service-item"><span><strong>Industrielackierung:</strong> Bauteile und Kleinserien.</span></div>
+                <div class="portal-service-item"><span><strong>Glas-Rep.:</strong> Steinschlagreparatur und Scheibentausch.</span></div>
+                <div class="portal-service-item"><span><strong>Mechanikarbeiten:</strong> Ölwechsel, Service und Bremsen wechseln.</span></div>
+              </div>
             </div>
           </div>
           <div class="portal-action-row">
