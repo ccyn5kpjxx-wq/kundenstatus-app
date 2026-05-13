@@ -96,7 +96,7 @@
     }
     .portal-hero {
       display:grid;
-      grid-template-columns:minmax(0,1fr) auto;
+      grid-template-columns:minmax(0,1fr) minmax(560px,602px);
       gap:18px 28px;
       align-items:start;
     }
@@ -120,7 +120,8 @@
     .portal-side-stack {
       display:grid;
       gap:18px;
-      width:min(100%,602px);
+      min-width:0;
+      width:100%;
       justify-self:end;
     }
     .portal-header-top {
