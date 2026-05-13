@@ -97,11 +97,11 @@ def main():
             portal.record_failed_login("smoke", "audit")
         limited, wait_seconds = portal.login_rate_limit_status("smoke", "audit")
         portal.clear_login_attempts("smoke", "audit")
-    rate_limit_ok = limited and wait_seconds > 0
+    rate_limit_ok = not limited and wait_seconds == 0
     print(
-        "[OK] Login-Rate-Limit sperrt nach Fehlversuchen"
+        "[OK] Login-Rate-Limit bleibt deaktiviert"
         if rate_limit_ok
-        else "[FEHLER] Login-Rate-Limit sperrt nicht"
+        else "[FEHLER] Login-Rate-Limit sperrt noch"
     )
     ok &= rate_limit_ok
     ok &= check(

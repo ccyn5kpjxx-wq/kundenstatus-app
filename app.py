@@ -220,7 +220,7 @@ SQLITE_BUSY_TIMEOUT_SECONDS = max(
 )
 DEFAULT_ADMIN_PASS = "gaertner2026"
 DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
-APP_VERSION = "login-password-save-v5"
+APP_VERSION = "login-unlimited-attempts-v6"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
 DEFAULT_PUBLIC_BASE_URL = ""
 PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
@@ -317,6 +317,7 @@ CSRF_FIELD_NAME = "csrf_token"
 INSECURE_SECRET_VALUES = {"", "change-me", DEFAULT_FLASK_SECRET_KEY}
 INSECURE_ADMIN_PASSWORDS = {"", "change-me", DEFAULT_ADMIN_PASS}
 ALLOW_INSECURE_LOCAL_LOGIN = env_flag("ALLOW_INSECURE_LOCAL_LOGIN", True)
+LOGIN_RATE_LIMIT_ENABLED = env_flag("LOGIN_RATE_LIMIT_ENABLED", False)
 LOGIN_RATE_LIMIT_MAX = max(3, env_int("LOGIN_RATE_LIMIT_MAX", 8))
 LOGIN_RATE_LIMIT_WINDOW_SECONDS = max(60, env_int("LOGIN_RATE_LIMIT_WINDOW_SECONDS", 15 * 60))
 LOGIN_RATE_LIMIT_LOCK_SECONDS = max(60, env_int("LOGIN_RATE_LIMIT_LOCK_SECONDS", 10 * 60))
@@ -1449,6 +1450,8 @@ def login_attempt_key(scope, identifier=""):
 
 
 def login_rate_limit_status(scope, identifier=""):
+    if not LOGIN_RATE_LIMIT_ENABLED:
+        return False, 0
     key = login_attempt_key(scope, identifier)
     now_ts = time.time()
     with LOGIN_ATTEMPTS_LOCK:
@@ -1463,6 +1466,8 @@ def login_rate_limit_status(scope, identifier=""):
 
 
 def record_failed_login(scope, identifier=""):
+    if not LOGIN_RATE_LIMIT_ENABLED:
+        return 0
     key = login_attempt_key(scope, identifier)
     now_ts = time.time()
     with LOGIN_ATTEMPTS_LOCK:
