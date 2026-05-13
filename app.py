@@ -220,8 +220,9 @@ SQLITE_BUSY_TIMEOUT_SECONDS = max(
 )
 DEFAULT_ADMIN_PASS = "gaertner2026"
 DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
-APP_VERSION = "login-csrf-retry-v7"
+APP_VERSION = "login-admin-password-alias-v8"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ""
 DEFAULT_PUBLIC_BASE_URL = ""
 PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
 LEXWARE_KUNDEN_URL = (os.environ.get("LEXWARE_KUNDEN_URL") or "").strip()
@@ -1352,7 +1353,7 @@ def clean_secret_value(value):
         previous = text
         if "=" in text:
             key, possible_value = text.split("=", 1)
-            if key.strip().upper() == "ADMIN_PASS":
+            if key.strip().upper() in {"ADMIN_PASS", "ADMIN_PASSWORD"}:
                 text = possible_value.strip()
         if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
             text = text[1:-1].strip()
@@ -1362,7 +1363,13 @@ def clean_secret_value(value):
 
 
 def get_admin_pass():
-    return clean_secret_value(os.environ.get("ADMIN_PASS")) or clean_secret_value(ADMIN_PASS) or DEFAULT_ADMIN_PASS
+    return (
+        clean_secret_value(os.environ.get("ADMIN_PASSWORD"))
+        or clean_secret_value(ADMIN_PASSWORD)
+        or clean_secret_value(os.environ.get("ADMIN_PASS"))
+        or clean_secret_value(ADMIN_PASS)
+        or DEFAULT_ADMIN_PASS
+    )
 
 
 def get_app_setting(key, default=""):

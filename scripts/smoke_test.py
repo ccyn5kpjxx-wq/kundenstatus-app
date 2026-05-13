@@ -92,6 +92,22 @@ def main():
         else "[FEHLER] Admin-Defaultpasswort ist extern akzeptiert"
     )
     ok &= external_default_denied
+    old_admin_password = portal.os.environ.get("ADMIN_PASSWORD")
+    try:
+        portal.os.environ["ADMIN_PASSWORD"] = "SmokeAdminPassword2026"
+        with portal.app.test_request_context("/", environ_base={"REMOTE_ADDR": "203.0.113.252"}, headers={"Host": "example.test"}):
+            admin_password_alias_ok = portal.admin_password_matches("SmokeAdminPassword2026")
+    finally:
+        if old_admin_password is None:
+            portal.os.environ.pop("ADMIN_PASSWORD", None)
+        else:
+            portal.os.environ["ADMIN_PASSWORD"] = old_admin_password
+    print(
+        "[OK] ADMIN_PASSWORD wird als Admin-Passwort akzeptiert"
+        if admin_password_alias_ok
+        else "[FEHLER] ADMIN_PASSWORD wird nicht akzeptiert"
+    )
+    ok &= admin_password_alias_ok
     with portal.app.test_request_context("/", environ_base={"REMOTE_ADDR": "203.0.113.251"}, headers={"Host": "example.test"}):
         for _ in range(portal.LOGIN_RATE_LIMIT_MAX):
             portal.record_failed_login("smoke", "audit")
