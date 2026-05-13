@@ -29,17 +29,27 @@
     tr[data-select-row].is-selected { background:#f8f1e6; }
     .selection-badge { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid #d9cab4; border-radius:999px; background:#fffaf2; }
     .portal-search {
-      margin-top:20px;
-      max-width:640px;
+      grid-column:1 / -1;
+      display:grid;
+      grid-template-columns:160px minmax(0,1fr);
+      align-items:center;
+      gap:12px 14px;
+      max-width:none;
+      width:100%;
       border:1px solid #e4d6c3;
       border-radius:18px;
       background:#fffaf2;
-      padding:16px;
+      padding:14px 16px;
+    }
+    .portal-search .form-label {
+      margin-bottom:0 !important;
+      white-space:nowrap;
     }
     .portal-search-results {
       display:grid;
       gap:8px;
-      margin-top:12px;
+      grid-column:2;
+      margin-top:0;
     }
     .portal-search-results[hidden] {
       display:none;
@@ -84,26 +94,47 @@
     .portal-search-empty {
       color:#6c6255;
     }
-    .portal-header-actions {
+    .portal-hero {
       display:grid;
-      gap:12px;
-      justify-items:end;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:18px 28px;
+      align-items:start;
+    }
+    .portal-hero-copy {
+      min-width:0;
+    }
+    .portal-brand-stage {
+      display:flex;
+      align-items:center;
+      min-height:300px;
+      margin-top:28px;
+    }
+    .portal-brand-stage img {
+      display:block;
+      width:min(100%,680px);
+      height:auto;
+    }
+    .portal-header-actions {
+      display:contents;
     }
     .portal-header-top {
-      display:flex;
+      display:grid;
+      grid-template-columns:minmax(320px,380px) 210px;
       align-items:stretch;
-      justify-content:flex-end;
-      flex-wrap:wrap;
       gap:12px;
+      width:min(100%,602px);
+      justify-self:end;
     }
     .portal-clock-panel {
-      min-width:220px;
+      min-width:0;
       border:1px solid #d8c8b1;
       border-radius:18px;
       background:#132635;
       color:#fff;
       padding:14px 16px;
       text-align:right;
+      display:grid;
+      align-content:center;
     }
     .portal-clock-label {
       color:rgba(255,255,255,.72);
@@ -125,8 +156,8 @@
       margin-top:.25rem;
     }
     .portal-weather-panel {
-      width:min(440px,100%);
-      min-width:340px;
+      width:100%;
+      min-width:0;
       border:1px solid #bfd3d7;
       border-radius:18px;
       background:#f7fcfb;
@@ -228,6 +259,19 @@
     }
     .portal-weather-error {
       color:#8a4d12;
+    }
+    .portal-action-row {
+      display:flex;
+      flex-wrap:wrap;
+      grid-column:1 / -1;
+      justify-content:flex-start;
+      gap:8px;
+      padding-top:18px;
+      border-top:1px solid #eadfce;
+    }
+    .portal-action-row .btn {
+      border-radius:10px;
+      white-space:nowrap;
     }
     .priority-panel {
       background:
@@ -357,6 +401,42 @@
       min-height:44px;
       font-size:16px;
     }
+    @media (max-width: 1199.98px) {
+      .portal-hero {
+        grid-template-columns:1fr;
+      }
+      .portal-header-top {
+        grid-template-columns:minmax(320px,440px) 220px;
+        width:100%;
+        justify-self:start;
+      }
+      .portal-action-row {
+        justify-content:flex-start;
+      }
+      .portal-brand-stage {
+        min-height:auto;
+      }
+    }
+    @media (max-width: 767.98px) {
+      .portal-hero {
+        gap:18px;
+      }
+      .portal-header-top {
+        grid-template-columns:1fr;
+      }
+      .portal-search {
+        grid-template-columns:1fr;
+      }
+      .portal-search-results {
+        grid-column:1;
+      }
+      .portal-action-row .btn {
+        flex:1 1 220px;
+      }
+      .portal-brand-stage {
+        margin-top:20px;
+      }
+    }
     @media (max-width: 575.98px) {
       .shell { padding:14px; }
       .panel { padding:20px 16px; border-radius:18px; box-shadow:0 10px 28px rgba(64,47,25,.1); }
@@ -441,8 +521,9 @@
       .bonus-summary { gap:0; }
       .bonus-order { align-items:start; }
       .bonus-source { width:max-content; max-width:100%; white-space:normal; }
-      .portal-header-actions { justify-items:start; width:100%; }
-      .portal-header-top { justify-content:flex-start; width:100%; }
+      .portal-hero { grid-template-columns:1fr; }
+      .portal-header-top { width:100%; }
+      .portal-brand-stage img { width:100%; }
       .portal-clock-panel { width:100%; text-align:left; }
       .portal-weather-panel { min-width:0; width:100%; }
       .portal-weather-hours { grid-template-columns:1fr; gap:8px; }
@@ -470,11 +551,16 @@
     {% endwith %}
 
     <div class="panel mb-4">
-      <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
-        <div>
-          <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
-          <h1 class="mb-2">{{ autohaus['portal_label'] }}</h1>
-          <div class="text-muted">Fahrzeuge suchen, neue Aufträge anlegen und Hinweise im Blick behalten.</div>
+      <div class="portal-hero">
+        <div class="portal-hero-copy">
+          <div>
+            <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
+            <h1 class="mb-2">{{ autohaus['portal_label'] }}</h1>
+            <div class="text-muted">Fahrzeuge suchen, neue Aufträge anlegen und Hinweise im Blick behalten.</div>
+          </div>
+          <div class="portal-brand-stage">
+            <img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack">
+          </div>
         </div>
         <div class="portal-header-actions">
           <div class="portal-header-top">
@@ -500,7 +586,7 @@
               <div class="portal-clock-date" data-live-date>{{ current_date_label }}</div>
             </div>
           </div>
-          <div class="d-flex gap-2 flex-wrap justify-content-end">
+          <div class="portal-action-row">
             <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Lackierauftrag ausfüllen</a>
             <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Angebot anfordern</a>
             <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Bonusmodell</a>
@@ -511,12 +597,12 @@
             <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
             <a href="{{ url_for('partner_logout') }}" class="btn btn-outline-dark btn-lg">Logout</a>
           </div>
+          <div class="portal-search" data-portal-search data-search-url="{{ url_for('partner_auftraege_suche', slug=autohaus['slug']) }}">
+            <label class="form-label fw-bold mb-2">Fahrzeug suchen</label>
+            <input type="text" class="form-control form-control-lg" placeholder="Kennzeichen oder Fahrzeug eingeben" autocomplete="off" data-portal-search-input>
+            <div class="portal-search-results" data-portal-search-results aria-live="polite" hidden></div>
+          </div>
         </div>
-      </div>
-      <div class="portal-search" data-portal-search data-search-url="{{ url_for('partner_auftraege_suche', slug=autohaus['slug']) }}">
-        <label class="form-label fw-bold mb-2">Fahrzeug suchen</label>
-        <input type="text" class="form-control form-control-lg" placeholder="Kennzeichen oder Fahrzeug eingeben" autocomplete="off" data-portal-search-input>
-        <div class="portal-search-results" data-portal-search-results aria-live="polite" hidden></div>
       </div>
     </div>
 

@@ -4,19 +4,39 @@
 <style>
   .cockpit-hero {
     background:
-      linear-gradient(135deg, rgba(22, 32, 42, .96), rgba(20, 93, 102, .92)),
-      #16202a;
-    color: #fff;
+      linear-gradient(135deg, rgba(255, 253, 249, .98), rgba(247, 241, 232, .94)),
+      #fffdf9;
+    color: var(--ink);
     overflow: hidden;
   }
-  .cockpit-hero .text-muted { color: rgba(255,255,255,.72) !important; }
+  .cockpit-hero .text-muted { color: var(--muted) !important; }
+  .cockpit-hero .btn-outline-light {
+    border-color: #132635;
+    color: #132635;
+  }
+  .cockpit-hero .btn-outline-light:hover {
+    background: #132635;
+    border-color: #132635;
+    color: #fff;
+  }
+  .cockpit-brand-stage {
+    width: min(100%, 680px);
+    margin-top: 2rem;
+    filter: drop-shadow(0 14px 18px rgba(64, 47, 25, .16));
+  }
+  .cockpit-brand-stage img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
   .start-clock-panel {
     width: min(100%, 320px);
     margin-left: auto;
     margin-bottom: 1rem;
-    border: 1px solid rgba(255,255,255,.24);
+    border: 1px solid #d8c8b1;
     border-radius: 18px;
-    background: rgba(255,255,255,.1);
+    background: #132635;
+    color: #fff;
     padding: 1rem 1.1rem;
   }
   .start-clock-label {
@@ -575,6 +595,7 @@
     .cockpit-today-item { align-items: flex-start; }
     .start-side-panel { justify-items: stretch; }
     .start-clock-panel { margin-left: 0; }
+    .cockpit-brand-stage { margin-top: 1.5rem; }
     .portal-weather-panel { min-width: 0; width: 100%; }
     .portal-weather-hours { grid-template-columns: 1fr; gap: 8px; }
     .portal-weather-hour {
@@ -600,6 +621,9 @@
       <div class="badge bg-light text-dark mb-3">Lokal gestartet</div>
       <h1 class="mb-2">Betriebs-Cockpit</h1>
       <p class="mb-0 text-muted">Der neue Startpunkt für Werkstatt, Autohaus-Kommunikation, Termine und offene Freigaben.</p>
+      <div class="cockpit-brand-stage">
+        <img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack">
+      </div>
     </div>
     <div class="col-lg-5">
       <div class="start-side-panel">
