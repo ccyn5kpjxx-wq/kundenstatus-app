@@ -89,6 +89,13 @@
       gap:12px;
       justify-items:end;
     }
+    .portal-header-top {
+      display:flex;
+      align-items:stretch;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+      gap:12px;
+    }
     .portal-clock-panel {
       min-width:220px;
       border:1px solid #d8c8b1;
@@ -116,6 +123,111 @@
       color:rgba(255,255,255,.82);
       font-weight:600;
       margin-top:.25rem;
+    }
+    .portal-weather-panel {
+      width:min(440px,100%);
+      min-width:340px;
+      border:1px solid #bfd3d7;
+      border-radius:18px;
+      background:#f7fcfb;
+      color:#132635;
+      padding:14px 16px;
+    }
+    .portal-weather-head {
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .portal-weather-label {
+      color:#41636b;
+      font-size:.76rem;
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:.08em;
+    }
+    .portal-weather-select {
+      border:0;
+      background:transparent;
+      color:#132635;
+      font-family:"Space Grotesk",sans-serif;
+      font-size:1.12rem;
+      font-weight:700;
+      padding:0;
+    }
+    .portal-weather-select:focus {
+      outline:2px solid rgba(20,93,102,.28);
+      outline-offset:3px;
+      border-radius:8px;
+    }
+    .portal-weather-current {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      text-align:right;
+      white-space:nowrap;
+    }
+    .portal-weather-icon {
+      display:inline-flex;
+      width:34px;
+      height:34px;
+      align-items:center;
+      justify-content:center;
+      border-radius:999px;
+      background:#132635;
+      color:#fff;
+      font-size:1.25rem;
+      line-height:1;
+    }
+    .portal-weather-temp {
+      font-family:"Space Grotesk",sans-serif;
+      font-size:1.55rem;
+      line-height:1;
+    }
+    .portal-weather-meta {
+      color:#4f6b72;
+      font-size:.9rem;
+      margin-top:6px;
+    }
+    .portal-weather-hours {
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      border-top:1px solid #d5e4e7;
+      margin-top:10px;
+      padding-top:10px;
+    }
+    .portal-weather-hour {
+      min-width:0;
+      padding:0 10px;
+      border-left:1px solid #d5e4e7;
+    }
+    .portal-weather-hour:first-child {
+      border-left:0;
+      padding-left:0;
+    }
+    .portal-weather-hour:last-child {
+      padding-right:0;
+    }
+    .portal-weather-hour-time {
+      color:#41636b;
+      font-size:.78rem;
+      font-weight:700;
+    }
+    .portal-weather-hour-main {
+      display:flex;
+      align-items:center;
+      gap:6px;
+      margin-top:4px;
+      font-weight:700;
+    }
+    .portal-weather-hour-wind {
+      color:#5f7479;
+      font-size:.78rem;
+      margin-top:2px;
+      white-space:nowrap;
+    }
+    .portal-weather-error {
+      color:#8a4d12;
     }
     .priority-panel {
       background:
@@ -330,7 +442,22 @@
       .bonus-order { align-items:start; }
       .bonus-source { width:max-content; max-width:100%; white-space:normal; }
       .portal-header-actions { justify-items:start; width:100%; }
+      .portal-header-top { justify-content:flex-start; width:100%; }
       .portal-clock-panel { width:100%; text-align:left; }
+      .portal-weather-panel { min-width:0; width:100%; }
+      .portal-weather-hours { grid-template-columns:1fr; gap:8px; }
+      .portal-weather-hour {
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        border-left:0;
+        border-top:1px solid #d5e4e7;
+        padding:8px 0 0;
+      }
+      .portal-weather-hour:first-child { border-top:0; padding-top:0; }
+      .portal-weather-hour-main { margin-top:0; }
+      .portal-weather-hour-wind { margin-top:0; }
     }
   </style>
 </head>
@@ -350,10 +477,28 @@
           <div class="text-muted">Fahrzeuge suchen, neue Aufträge anlegen und Hinweise im Blick behalten.</div>
         </div>
         <div class="portal-header-actions">
-          <div class="portal-clock-panel" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
-            <div class="portal-clock-label">Heute</div>
-            <div class="portal-clock-time" data-live-clock>{{ current_time_label }}</div>
-            <div class="portal-clock-date" data-live-date>{{ current_date_label }}</div>
+          <div class="portal-header-top">
+            <div class="portal-weather-panel" data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}">
+              <div class="portal-weather-head">
+                <div>
+                  <div class="portal-weather-label">Wetter</div>
+                  <select class="portal-weather-select" data-weather-location aria-label="Wetterort auswählen">
+                    <option value="mosbach" data-latitude="49.3536" data-longitude="9.1517" selected>Mosbach</option>
+                  </select>
+                </div>
+                <div class="portal-weather-current">
+                  <span class="portal-weather-icon" data-weather-current-icon aria-hidden="true">--</span>
+                  <strong class="portal-weather-temp" data-weather-current-temp>--°C</strong>
+                </div>
+              </div>
+              <div class="portal-weather-meta" data-weather-current-text>Wetter wird geladen.</div>
+              <div class="portal-weather-hours" data-weather-hours aria-label="Wetter in den nächsten 3 Stunden"></div>
+            </div>
+            <div class="portal-clock-panel" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
+              <div class="portal-clock-label">Heute</div>
+              <div class="portal-clock-time" data-live-clock>{{ current_time_label }}</div>
+              <div class="portal-clock-date" data-live-date>{{ current_date_label }}</div>
+            </div>
           </div>
           <div class="d-flex gap-2 flex-wrap justify-content-end">
             <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Lackierauftrag ausfüllen</a>
@@ -627,6 +772,178 @@
       };
       updateClock();
       window.setInterval(updateClock, 1000);
+    })();
+
+    (() => {
+      const root = document.querySelector('[data-weather-widget]');
+      if (!root) {
+        return;
+      }
+      const locationSelect = root.querySelector('[data-weather-location]');
+      const currentIcon = root.querySelector('[data-weather-current-icon]');
+      const currentTemp = root.querySelector('[data-weather-current-temp]');
+      const currentText = root.querySelector('[data-weather-current-text]');
+      const hoursTarget = root.querySelector('[data-weather-hours]');
+      const endpoint = root.dataset.weatherUrl;
+      if (!locationSelect || !currentIcon || !currentTemp || !currentText || !hoursTarget) {
+        return;
+      }
+
+      const weatherCodeMap = new Map([
+        [0, ['☀', 'Sonnig']],
+        [1, ['🌤', 'Leicht bewölkt']],
+        [2, ['⛅', 'Wolkig']],
+        [3, ['☁', 'Bedeckt']],
+        [45, ['🌫', 'Nebel']],
+        [48, ['🌫', 'Reifnebel']],
+        [51, ['☂', 'Leichter Nieselregen']],
+        [53, ['☂', 'Nieselregen']],
+        [55, ['☂', 'Starker Nieselregen']],
+        [56, ['☂', 'Gefrierender Nieselregen']],
+        [57, ['☂', 'Starker gefrierender Nieselregen']],
+        [61, ['☂', 'Leichter Regen']],
+        [63, ['☂', 'Regen']],
+        [65, ['☂', 'Starker Regen']],
+        [66, ['☂', 'Gefrierender Regen']],
+        [67, ['☂', 'Starker gefrierender Regen']],
+        [71, ['❄', 'Leichter Schnee']],
+        [73, ['❄', 'Schnee']],
+        [75, ['❄', 'Starker Schnee']],
+        [77, ['❄', 'Schneegriesel']],
+        [80, ['☂', 'Leichte Schauer']],
+        [81, ['☂', 'Schauer']],
+        [82, ['☂', 'Starke Schauer']],
+        [85, ['❄', 'Leichte Schneeschauer']],
+        [86, ['❄', 'Schneeschauer']],
+        [95, ['⚡', 'Gewitter']],
+        [96, ['⚡', 'Gewitter mit Hagel']],
+        [99, ['⚡', 'Starkes Gewitter mit Hagel']],
+      ]);
+      const hourFormatter = new Intl.DateTimeFormat('de-DE', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      const parseLocalDate = (value) => {
+        const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value || '');
+        if (!match) {
+          return new Date(value);
+        }
+        return new Date(
+          Number(match[1]),
+          Number(match[2]) - 1,
+          Number(match[3]),
+          Number(match[4]),
+          Number(match[5]),
+        );
+      };
+
+      const weatherState = (code, windSpeed = 0) => {
+        if (Number(windSpeed) >= 35 && [0, 1, 2, 3].includes(Number(code))) {
+          return ['🌬', 'Windig'];
+        }
+        return weatherCodeMap.get(Number(code)) || ['?', 'Wetter'];
+      };
+
+      const rounded = (value) => {
+        const number = Number(value);
+        if (!Number.isFinite(number)) {
+          return '--';
+        }
+        return Math.round(number).toString();
+      };
+
+      const renderLoading = () => {
+        currentIcon.textContent = '--';
+        currentTemp.textContent = '--°C';
+        currentText.textContent = 'Wetter wird geladen.';
+        currentText.classList.remove('portal-weather-error');
+        hoursTarget.replaceChildren();
+      };
+
+      const renderError = () => {
+        currentIcon.textContent = '?';
+        currentTemp.textContent = '--°C';
+        currentText.textContent = 'Wetter gerade nicht verfügbar.';
+        currentText.classList.add('portal-weather-error');
+        hoursTarget.replaceChildren();
+      };
+
+      const renderHours = (hourly) => {
+        const times = Array.isArray(hourly?.time) ? hourly.time : [];
+        const temps = Array.isArray(hourly?.temperature_2m) ? hourly.temperature_2m : [];
+        const codes = Array.isArray(hourly?.weather_code) ? hourly.weather_code : [];
+        const winds = Array.isArray(hourly?.wind_speed_10m) ? hourly.wind_speed_10m : [];
+        const now = Date.now();
+        const upcoming = times
+          .map((time, index) => ({
+            time,
+            date: parseLocalDate(time),
+            temp: temps[index],
+            code: codes[index],
+            wind: winds[index],
+          }))
+          .filter((item) => item.date.getTime() > now)
+          .slice(0, 3);
+
+        const fragment = document.createDocumentFragment();
+        upcoming.forEach((item) => {
+          const [icon, label] = weatherState(item.code, item.wind);
+          const entry = document.createElement('div');
+          entry.className = 'portal-weather-hour';
+          entry.innerHTML = `
+            <div>
+              <div class="portal-weather-hour-time">${hourFormatter.format(item.date)}</div>
+              <div class="portal-weather-hour-main"><span aria-hidden="true">${icon}</span><span>${rounded(item.temp)}°C</span></div>
+            </div>
+            <div class="portal-weather-hour-wind" title="${label}">🌬 ${rounded(item.wind)} km/h</div>
+          `;
+          fragment.append(entry);
+        });
+        hoursTarget.replaceChildren(fragment);
+      };
+
+      const loadWeather = async () => {
+        const selected = locationSelect.selectedOptions[0];
+        const latitude = selected?.dataset.latitude;
+        const longitude = selected?.dataset.longitude;
+        if (!endpoint && (!latitude || !longitude)) {
+          renderError();
+          return;
+        }
+        renderLoading();
+        const params = endpoint ? null : new URLSearchParams({
+          latitude,
+          longitude,
+          current: 'temperature_2m,weather_code,wind_speed_10m',
+          hourly: 'temperature_2m,weather_code,wind_speed_10m',
+          timezone: 'Europe/Berlin',
+          forecast_days: '2',
+        });
+        try {
+          const response = await fetch(endpoint || `https://api.open-meteo.com/v1/forecast?${params.toString()}`, {
+            headers: { Accept: 'application/json' },
+          });
+          if (!response.ok) {
+            renderError();
+            return;
+          }
+          const data = await response.json();
+          const current = data.current || {};
+          const [icon, label] = weatherState(current.weather_code, current.wind_speed_10m);
+          currentIcon.textContent = icon;
+          currentTemp.textContent = `${rounded(current.temperature_2m)}°C`;
+          currentText.textContent = `${label} · Wind ${rounded(current.wind_speed_10m)} km/h`;
+          currentText.classList.remove('portal-weather-error');
+          renderHours(data.hourly || {});
+        } catch (error) {
+          renderError();
+        }
+      };
+
+      locationSelect.addEventListener('change', loadWeather);
+      loadWeather();
+      window.setInterval(loadWeather, 10 * 60 * 1000);
     })();
 
     (() => {

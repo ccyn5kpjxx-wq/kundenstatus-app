@@ -2,6 +2,7 @@ from pathlib import Path
 from io import BytesIO
 from datetime import date, timedelta
 import sys
+import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,20 @@ def main():
     portal.app.config["TESTING"] = True
     portal.init_db()
     client = portal.app.test_client()
+    portal.WEATHER_CACHE["payload"] = {
+        "ok": True,
+        "location": {"name": "Mosbach", "latitude": 49.3536, "longitude": 9.1517},
+        "current": {"temperature_2m": 12.4, "weather_code": 1, "wind_speed_10m": 8.2},
+        "hourly": {
+            "time": ["2026-05-13T12:00", "2026-05-13T13:00", "2026-05-13T14:00"],
+            "temperature_2m": [12.4, 13.0, 13.5],
+            "weather_code": [1, 2, 2],
+            "wind_speed_10m": [8.2, 9.1, 10.0],
+        },
+        "units": {},
+        "updated_at": "2026-05-13T12:00:00",
+    }
+    portal.WEATHER_CACHE["expires_at"] = time.time() + 300
     ok = True
 
     login_response = client.get("/login")
@@ -237,6 +252,32 @@ def main():
         else "[FEHLER] Startseite zeigt Uhr/Datum/Kalender nicht vollständig"
     )
     ok &= start_clock_calendar_ok
+    cockpit_weather_ui_ok = (
+        "data-weather-widget" in cockpit_html
+        and "Mosbach" in cockpit_html
+        and "/api/wetter/mosbach" in cockpit_html
+        and "Wetter in den nächsten 3 Stunden" in cockpit_html
+    )
+    print(
+        "[OK] Betriebs-Cockpit zeigt Mosbach-Wetter"
+        if cockpit_weather_ui_ok
+        else "[FEHLER] Betriebs-Cockpit zeigt den Mosbach-Wetterblock nicht korrekt"
+    )
+    ok &= cockpit_weather_ui_ok
+    weather_response = client.get("/api/wetter/mosbach")
+    ok &= check("Mosbach-Wetter API", weather_response, {200})
+    weather_data = weather_response.get_json(silent=True) or {}
+    weather_api_ok = (
+        weather_data.get("ok") is True
+        and weather_data.get("location", {}).get("name") == "Mosbach"
+        and weather_data.get("current", {}).get("temperature_2m") is not None
+    )
+    print(
+        "[OK] Mosbach-Wetter API liefert aktuelle Werte"
+        if weather_api_ok
+        else "[FEHLER] Mosbach-Wetter API liefert keine aktuellen Werte"
+    )
+    ok &= weather_api_ok
     session_timeout_ok = portal.app.permanent_session_lifetime >= timedelta(minutes=5)
     print(
         "[OK] Sitzung haelt mindestens 5 Minuten Inaktivitaet"
@@ -683,6 +724,18 @@ def main():
             else "[FEHLER] Käsmann-Dashboard zeigt entfernte Startseiten-Blöcke noch an"
         )
         ok &= partner_start_reduced_ok
+        partner_weather_ui_ok = (
+            "data-weather-widget" in partner_dashboard_html
+            and "Mosbach" in partner_dashboard_html
+            and "/api/wetter/mosbach" in partner_dashboard_html
+            and "Wetter in den nächsten 3 Stunden" in partner_dashboard_html
+        )
+        print(
+            "[OK] Partner-Dashboard zeigt Mosbach-Wetter"
+            if partner_weather_ui_ok
+            else "[FEHLER] Partner-Dashboard zeigt den Mosbach-Wetterblock nicht korrekt"
+        )
+        ok &= partner_weather_ui_ok
         partner_bonus_link_ok = (
             "Bonusmodell" in partner_dashboard_html
             and "/partner/kaesmann/bonusmodell" in partner_dashboard_html

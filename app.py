@@ -279,9 +279,18 @@ AUTO_BACKUP_ON_STARTUP = env_flag("AUTO_BACKUP_ON_STARTUP", False)
 AUTO_CHANGE_BACKUP_ENABLED = env_flag("AUTO_CHANGE_BACKUP_ENABLED", True)
 AUTO_CHANGE_BACKUP_DELAY_SECONDS = max(1, env_int("AUTO_CHANGE_BACKUP_DELAY_SECONDS", 3))
 OPENAI_EXTRACTION_MODEL = os.environ.get("OPENAI_EXTRACTION_MODEL", "gpt-4o")
+OPENAI_CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL") or OPENAI_EXTRACTION_MODEL
 OPENAI_API_URL = os.environ.get(
     "OPENAI_API_URL", "https://api.openai.com/v1/chat/completions"
 )
+OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+MOSBACH_WEATHER_LOCATION = {
+    "name": "Mosbach",
+    "latitude": 49.3536,
+    "longitude": 9.1517,
+}
+WEATHER_API_TIMEOUT_SECONDS = max(3, env_int("WEATHER_API_TIMEOUT_SECONDS", 8))
+WEATHER_CACHE_SECONDS = max(60, env_int("WEATHER_CACHE_SECONDS", 600))
 TOPCOLOR_EMAIL = (os.environ.get("TOPCOLOR_EMAIL") or "").strip()
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_DOC_AI_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
@@ -321,6 +330,8 @@ _sqlite_wal_configured = False
 _sqlite_wal_lock = threading.Lock()
 
 GOOGLE_ACCESS_TOKEN = {"token": "", "expires_at": 0}
+WEATHER_CACHE = {"payload": None, "expires_at": 0}
+WEATHER_CACHE_LOCK = threading.Lock()
 
 
 def get_public_base_url():
@@ -1547,6 +1558,8 @@ def get_ai_config():
         "google_processor_id": clean_text(os.environ.get("GOOGLE_DOC_AI_PROCESSOR_ID")),
         "openai_model": clean_text(os.environ.get("OPENAI_EXTRACTION_MODEL"))
         or OPENAI_EXTRACTION_MODEL,
+        "openai_chat_model": clean_text(os.environ.get("OPENAI_CHAT_MODEL"))
+        or OPENAI_CHAT_MODEL,
     }
 
 
@@ -1569,6 +1582,7 @@ def get_ai_status():
         "message": message,
         "env_file": config["env_file"],
         "openai_model": config["openai_model"],
+        "openai_chat_model": config["openai_chat_model"],
         "service_account_path": config["service_account_path"],
     }
 
@@ -2050,6 +2064,279 @@ def assistant_vehicle_line(auftrag, include_autohaus=False):
     return f"{fahrzeug}{detail_text}: {termin}, Status {status}"
 
 
+ASSISTANT_SEARCH_STOP_WORDS = {
+    "aber",
+    "alle",
+    "also",
+    "auch",
+    "auf",
+    "auftrag",
+    "auftraege",
+    "bei",
+    "bin",
+    "bitte",
+    "das",
+    "dem",
+    "den",
+    "der",
+    "des",
+    "die",
+    "dies",
+    "dieser",
+    "dieses",
+    "ein",
+    "eine",
+    "einen",
+    "einer",
+    "es",
+    "fuer",
+    "gibt",
+    "haben",
+    "ich",
+    "ist",
+    "jetzt",
+    "ki",
+    "mal",
+    "mir",
+    "mit",
+    "nach",
+    "noch",
+    "oder",
+    "portal",
+    "sehen",
+    "sie",
+    "sind",
+    "status",
+    "und",
+    "vom",
+    "von",
+    "warum",
+    "was",
+    "welche",
+    "welcher",
+    "welches",
+    "wenn",
+    "wie",
+    "wir",
+    "wo",
+    "zu",
+    "zum",
+    "zur",
+}
+
+
+def assistant_search_tokens(question):
+    normalized = normalize_document_text(question)
+    tokens = []
+    for token in re.findall(r"[a-z0-9]+", normalized):
+        if len(token) < 3 and not token.isdigit():
+            continue
+        if token in ASSISTANT_SEARCH_STOP_WORDS:
+            continue
+        tokens.append(token)
+    return list(dict.fromkeys(tokens))[:8]
+
+
+def assistant_auftrag_search_values(auftrag, include_autohaus=False):
+    values = [
+        auftrag.get("fahrzeug"),
+        auftrag.get("kennzeichen"),
+        auftrag.get("auftragsnummer"),
+        auftrag.get("fin_nummer"),
+        auftrag.get("kunde_name"),
+        auftrag.get("analyse_text"),
+        auftrag.get("beschreibung"),
+        clean_text((auftrag.get("status_meta") or {}).get("label")),
+        auftrag.get("angebot_status"),
+    ]
+    if include_autohaus:
+        values.append(auftrag.get("autohaus_name"))
+    return [clean_text(value) for value in values if clean_text(value)]
+
+
+def assistant_relevant_auftraege(question, autohaus_id=None, include_autohaus=False, limit=5):
+    tokens = assistant_search_tokens(question)
+    query_key = normalize_auftrag_search_key(question)
+    if not tokens and len(query_key) < 3:
+        return []
+    try:
+        auftraege = list_auftraege(
+            autohaus_id=autohaus_id,
+            include_archived=True,
+            include_angebote=True,
+        )
+    except Exception:
+        return []
+
+    scored = []
+    for index, auftrag in enumerate(auftraege):
+        values = assistant_auftrag_search_values(auftrag, include_autohaus=include_autohaus)
+        normalized_blob = normalize_document_text(" ".join(values))
+        key_blob = " ".join(normalize_auftrag_search_key(value) for value in values)
+        score = 0
+        if len(query_key) >= 3 and query_key in key_blob:
+            score += 14
+        for token in tokens:
+            token_key = normalize_auftrag_search_key(token)
+            if token in normalized_blob:
+                score += 2
+            if token_key and token_key in key_blob:
+                score += 3
+        kennzeichen_key = normalize_auftrag_search_key(auftrag.get("kennzeichen"))
+        if query_key and kennzeichen_key and query_key == kennzeichen_key:
+            score += 20
+        if score:
+            scored.append((-score, index, auftrag))
+    scored.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in scored[:limit]]
+
+
+def assistant_auftrag_context_line(auftrag, include_autohaus=False):
+    typ = "Angebotsanfrage" if auftrag.get("angebotsphase") else "Auftrag"
+    fahrzeug = clean_text(auftrag.get("fahrzeug")) or "Fahrzeug"
+    kopf = f"{typ} #{auftrag.get('id')}: {fahrzeug}"
+    kennzeichen = clean_text(auftrag.get("kennzeichen"))
+    if kennzeichen:
+        kopf += f", Kennzeichen {kennzeichen}"
+    if include_autohaus and clean_text(auftrag.get("autohaus_name")):
+        kopf += f", Autohaus {clean_text(auftrag.get('autohaus_name'))}"
+
+    details = []
+    kunde = clean_text(auftrag.get("kunde_name"))
+    if kunde:
+        details.append(f"Kunde {kunde}")
+    auftragsnummer = clean_text(auftrag.get("auftragsnummer"))
+    if auftragsnummer:
+        details.append(f"Auftragsnummer {auftragsnummer}")
+    status = clean_text((auftrag.get("status_meta") or {}).get("label"))
+    if status:
+        details.append(f"Status {status}")
+    if auftrag.get("angebotsphase"):
+        angebot_status = clean_text(auftrag.get("angebot_status")) or "offen"
+        details.append(f"Angebotsstatus {angebot_status}")
+    termine = []
+    for feld, label in (
+        ("annahme_datum", "Anlieferung"),
+        ("start_datum", "Start"),
+        ("fertig_datum", "Fertig"),
+        ("abholtermin", "Abholung"),
+    ):
+        wert = clean_text(auftrag.get(feld))
+        if wert:
+            termine.append(f"{label} {wert}")
+    if termine:
+        details.append("Termine " + ", ".join(termine))
+    arbeit = clean_text(auftrag.get("analyse_text")) or clean_text(auftrag.get("beschreibung"))
+    if arbeit:
+        details.append(f"Arbeiten {arbeit[:180]}")
+    preis = clean_text(auftrag.get("werkstatt_angebot_preis"))
+    if preis and preis not in {"0", "0.0", "0,00"}:
+        preis_label = preis if ("€" in preis or "eur" in preis.lower()) else f"{preis} EUR"
+        details.append(f"Werkstattangebot netto {preis_label}")
+    return (kopf + (" | " + " | ".join(details) if details else ""))[:700]
+
+
+def assistant_auftrag_context_block(title, auftraege, include_autohaus=False, limit=5):
+    lines = [
+        assistant_auftrag_context_line(auftrag, include_autohaus=include_autohaus)
+        for auftrag in (auftraege or [])[:limit]
+    ]
+    lines = [line for line in lines if clean_text(line)]
+    if not lines:
+        return ""
+    return title + ":\n" + "\n".join(f"- {line}" for line in lines)
+
+
+def is_offer_overview_question(question):
+    text = normalize_document_text(question)
+    offer_terms = ("angebot", "angebote", "anfrage", "anfragen", "preis", "kosten")
+    overview_terms = ("offen", "welche", "gibt", "status", "stand", "uebersicht", "wartet", "freigabe")
+    return any(term in text for term in offer_terms) and any(term in text for term in overview_terms)
+
+
+def assistant_offer_lines(autohaus_id=None, include_autohaus=False, limit=6):
+    try:
+        anfragen = list_angebotsanfragen(autohaus_id=autohaus_id)
+    except Exception:
+        return []
+    return [
+        assistant_auftrag_context_line(anfrage, include_autohaus=include_autohaus)
+        for anfrage in anfragen[:limit]
+    ]
+
+
+def assistant_offer_answer(autohaus_id=None, include_autohaus=False):
+    try:
+        anfragen = list_angebotsanfragen(autohaus_id=autohaus_id)
+    except Exception:
+        anfragen = []
+    if not anfragen:
+        return "Aktuell sehe ich keine offenen Angebotsanfragen."
+    max_lines = 6
+    lines = [
+        f"- {assistant_auftrag_context_line(anfrage, include_autohaus=include_autohaus)}"
+        for anfrage in anfragen[:max_lines]
+    ]
+    extra_count = max(0, len(anfragen) - max_lines)
+    extra_text = f"\nWeitere {extra_count} Angebotsanfrage(n) stehen im Portal." if extra_count else ""
+    return "Diese offenen Angebotsanfragen sehe ich:\n" + "\n".join(lines) + extra_text
+
+
+def is_current_order_question(question):
+    text = normalize_document_text(question)
+    current_terms = ("dieser", "diesem", "diese", "aktueller", "aktuellen", "hier", "auftrag", "angebot")
+    info_terms = ("status", "stand", "naechste", "weiter", "termin", "fertig", "abholung", "preis")
+    return any(term in text for term in current_terms) and any(term in text for term in info_terms)
+
+
+def is_order_lookup_question(question):
+    text = normalize_document_text(question)
+    if any(term in text for term in ("hochladen", "upload", "datei", "bild", "bilder", "pdf", "dokument")):
+        return any(term in text for term in ("status", "stand", "termin", "fertig", "auftrag"))
+    lookup_terms = (
+        "abholung",
+        "annahme",
+        "auto",
+        "fahrzeug",
+        "fertig",
+        "fin",
+        "kennzeichen",
+        "kunde",
+        "naechste",
+        "stand",
+        "start",
+        "status",
+        "termin",
+        "vorgang",
+        "wagen",
+        "wo",
+    )
+    tokens = assistant_search_tokens(question)
+    return any(term in text for term in lookup_terms) or any(any(ch.isdigit() for ch in token) for token in tokens)
+
+
+def assistant_order_lookup_answer(question, autohaus_id=None, include_autohaus=False):
+    if not is_order_lookup_question(question):
+        return ""
+    matches = assistant_relevant_auftraege(
+        question,
+        autohaus_id=autohaus_id,
+        include_autohaus=include_autohaus,
+        limit=5,
+    )
+    if not matches:
+        return ""
+    if len(matches) == 1:
+        return "Dazu sehe ich diesen Vorgang:\n- " + assistant_auftrag_context_line(
+            matches[0],
+            include_autohaus=include_autohaus,
+        )
+    return "Ich habe diese passenden Vorgänge gefunden:\n" + "\n".join(
+        f"- {assistant_auftrag_context_line(auftrag, include_autohaus=include_autohaus)}"
+        for auftrag in matches
+    )
+
+
 def assistant_planned_vehicles(autohaus_id=None):
     try:
         auftraege = list_auftraege(autohaus_id=autohaus_id)
@@ -2113,36 +2400,62 @@ def assistant_planned_vehicle_answer(question, autohaus_id=None, include_autohau
     return f"Diese Fahrzeuge sind {scope} eingeplant:\n" + "\n".join(lines) + extra_text
 
 
-def partner_assistant_context_text(autohaus, auftrag=None):
+def partner_assistant_context_text(autohaus, auftrag=None, question=""):
     parts = [
         "Portal: Gärtner Karosserie & Lack Autohaus-Portal",
+        f"Heutiges Datum: {date.today().strftime(DATE_FMT)}",
         f"Autohaus: {clean_text(autohaus.get('name'))}",
     ]
     if auftrag:
-        parts.extend(
-            [
-                f"Fahrzeug: {clean_text(auftrag.get('fahrzeug')) or 'unbekannt'}",
-                f"Kennzeichen: {clean_text(auftrag.get('kennzeichen')) or 'nicht gesetzt'}",
-                f"Status: {clean_text((auftrag.get('status_meta') or {}).get('label'))}",
-                f"Bringtermin: {clean_text(auftrag.get('annahme_datum')) or 'nicht gesetzt'}",
-                f"Abholtermin: {clean_text(auftrag.get('abholtermin')) or 'nicht gesetzt'}",
-                f"Kurzanalyse: {clean_text(auftrag.get('analyse_text')) or clean_text(auftrag.get('beschreibung'))}",
-            ]
+        parts.append(
+            assistant_auftrag_context_block(
+                "Aktueller sichtbarer Vorgang",
+                [auftrag],
+                include_autohaus=False,
+                limit=1,
+            )
         )
-        if auftrag.get("angebotsphase"):
-            parts.append(f"Angebotsstatus: {clean_text(auftrag.get('angebot_status'))}")
     planned_lines = assistant_planned_vehicle_lines(autohaus.get("id"), limit=8)
     if planned_lines:
         parts.append("Aktuell eingeplante Fahrzeuge dieses Autohauses:\n" + "\n".join(planned_lines))
+    offer_lines = assistant_offer_lines(autohaus_id=autohaus.get("id"), limit=6)
+    if offer_lines:
+        parts.append("Offene Angebotsanfragen dieses Autohauses:\n" + "\n".join(offer_lines))
+    relevant_auftraege = assistant_relevant_auftraege(
+        question,
+        autohaus_id=autohaus.get("id"),
+        limit=5,
+    )
+    if auftrag:
+        current_id = int(auftrag.get("id") or 0)
+        relevant_auftraege = [
+            item for item in relevant_auftraege if int(item.get("id") or 0) != current_id
+        ]
+    relevant_block = assistant_auftrag_context_block(
+        "Weitere zur Frage passende Vorgänge",
+        relevant_auftraege,
+        include_autohaus=False,
+        limit=5,
+    )
+    if relevant_block:
+        parts.append(relevant_block)
     return "\n".join(part for part in parts if clean_text(part))
 
 
-def fallback_partner_assistant_answer(question, autohaus=None):
+def fallback_partner_assistant_answer(question, autohaus=None, auftrag=None):
     text = normalize_document_text(question)
     if is_login_or_tone_correction(question):
         return friendly_login_acknowledgement("partner")
+    if auftrag and is_current_order_question(question):
+        return "Zum aktuellen Vorgang sehe ich:\n- " + assistant_auftrag_context_line(auftrag)
     if is_vehicle_planning_question(question) and autohaus:
         return assistant_planned_vehicle_answer(question, autohaus_id=autohaus["id"])
+    if is_offer_overview_question(question) and autohaus:
+        return assistant_offer_answer(autohaus_id=autohaus["id"])
+    if autohaus:
+        lookup_answer = assistant_order_lookup_answer(question, autohaus_id=autohaus["id"])
+        if lookup_answer:
+            return lookup_answer
     if any(word in text for word in ("datei", "bild", "pdf", "hochladen", "dokument", "unterlage")):
         return (
             "Sie können Bilder, PDFs oder Unterlagen direkt im Auftrag hochladen. "
@@ -2175,12 +2488,16 @@ def ask_partner_assistant(question, autohaus, auftrag=None):
         return "Bitte geben Sie kurz ein, wobei ich helfen soll.", "fallback"
     if is_login_or_tone_correction(question):
         return friendly_login_acknowledgement("partner"), "portal"
+    if auftrag and is_current_order_question(question):
+        return fallback_partner_assistant_answer(question, autohaus, auftrag), "portal"
     if is_vehicle_planning_question(question):
-        return fallback_partner_assistant_answer(question, autohaus), "portal"
+        return fallback_partner_assistant_answer(question, autohaus, auftrag), "portal"
+    if is_offer_overview_question(question):
+        return fallback_partner_assistant_answer(question, autohaus, auftrag), "portal"
     config = get_ai_config()
     requests_module = get_requests()
     if not config["openai_ready"] or requests_module is None:
-        return fallback_partner_assistant_answer(question, autohaus), "fallback"
+        return fallback_partner_assistant_answer(question, autohaus, auftrag), "fallback"
 
     auftrag_id = int((auftrag or {}).get("id") or 0)
     messages = [
@@ -2195,36 +2512,65 @@ def ask_partner_assistant(question, autohaus, auftrag=None):
                 "Angebotsanfrage, Bilder/PDFs hochladen, Lackierauftrag, Status, Termine und Chat mit der Werkstatt. "
                 "Gib keine verbindlichen Preise, Zusagen oder Rechtsberatung. Verweise bei Preis, Terminfreigabe "
                 "oder Sonderfällen an die Werkstatt. Maximal fünf Sätze."
+                " Nutze fuer Live-Daten nur den Kontext, den das Portal mitgibt. Erfinde keine Fahrzeuge,"
+                " Preise oder Termine, wenn sie dort nicht stehen."
             ),
         },
         {
             "role": "system",
-            "content": partner_assistant_context_text(autohaus, auftrag),
+            "content": partner_assistant_context_text(autohaus, auftrag, question),
         },
     ]
     messages.extend(list_ki_assistent_history(autohaus["id"], auftrag_id, limit=8))
     messages.append({"role": "user", "content": question})
     payload = {
-        "model": config["openai_model"],
+        "model": config["openai_chat_model"],
         "messages": messages,
         "temperature": 0.2,
         "max_tokens": 320,
     }
     response, request_error = post_openai_chat_completion(requests_module, payload)
     if request_error:
-        return fallback_partner_assistant_answer(question, autohaus), "fallback"
+        return fallback_partner_assistant_answer(question, autohaus, auftrag), "fallback"
     if response.status_code >= 400:
-        return fallback_partner_assistant_answer(question, autohaus), "fallback"
+        return fallback_partner_assistant_answer(question, autohaus, auftrag), "fallback"
     try:
         data = response.json()
         answer = clean_text(data["choices"][0]["message"]["content"])[:1400]
     except Exception:
         answer = ""
     if not answer:
-        return fallback_partner_assistant_answer(question, autohaus), "fallback"
+        return fallback_partner_assistant_answer(question, autohaus, auftrag), "fallback"
     if is_unhelpful_login_answer(answer):
-        return fallback_partner_assistant_answer(question, autohaus), "portal"
+        return fallback_partner_assistant_answer(question, autohaus, auftrag), "portal"
     return answer, "openai"
+
+
+def admin_assistant_context_text(question=""):
+    parts = [
+        f"Heutiges Datum: {date.today().strftime(DATE_FMT)}",
+        (
+            "Kalender: Standardansicht zeigt kommende Termine; Vergangenheit ist separat aufrufbar; "
+            "Feiertage bleiben in der Wochenansicht sichtbar."
+        ),
+    ]
+    planned_lines = assistant_planned_vehicle_lines(include_autohaus=True, limit=10)
+    parts.append(
+        "Aktuell eingeplante Fahrzeuge:\n"
+        + ("\n".join(planned_lines) if planned_lines else "Keine aktiven Termine hinterlegt.")
+    )
+    offer_lines = assistant_offer_lines(include_autohaus=True, limit=8)
+    if offer_lines:
+        parts.append("Offene Angebotsanfragen:\n" + "\n".join(offer_lines))
+    relevant_block = assistant_auftrag_context_block(
+        "Zur Frage passende Vorgänge",
+        assistant_relevant_auftraege(question, include_autohaus=True, limit=6),
+        include_autohaus=True,
+        limit=6,
+    )
+    if relevant_block:
+        parts.append(relevant_block)
+    return "\n".join(part for part in parts if clean_text(part))
 
 
 def fallback_admin_assistant_answer(question):
@@ -2233,6 +2579,11 @@ def fallback_admin_assistant_answer(question):
         return friendly_login_acknowledgement("admin")
     if is_vehicle_planning_question(question):
         return assistant_planned_vehicle_answer(question, include_autohaus=True)
+    if is_offer_overview_question(question):
+        return assistant_offer_answer(include_autohaus=True)
+    lookup_answer = assistant_order_lookup_answer(question, include_autohaus=True)
+    if lookup_answer:
+        return lookup_answer
     if any(word in text for word in ("kalender", "termin", "geburtstag", "feiertag", "schnelleintrag")):
         return (
             "Kalendereinträge können Sie oben im Betriebs-Cockpit oder im internen Kalender anlegen. "
@@ -2268,6 +2619,8 @@ def ask_admin_assistant(question):
         return friendly_login_acknowledgement("admin"), "portal"
     if is_vehicle_planning_question(question):
         return fallback_admin_assistant_answer(question), "portal"
+    if is_offer_overview_question(question):
+        return fallback_admin_assistant_answer(question), "portal"
     config = get_ai_config()
     requests_module = get_requests()
     if not config["openai_ready"] or requests_module is None:
@@ -2284,26 +2637,19 @@ def ask_admin_assistant(question):
                 "den Chat nicht sehen. Sage niemals 'wenn Sie eingeloggt sind', niemals 'melden Sie sich an' "
                 "und verweise nicht auf technischen Support. Entschuldige dich kurz, wenn eine vorherige Antwort "
                 "unpassend war, und hilf dann direkt weiter. Keine verbindlichen Preise oder Rechtsberatung. Maximal fünf Sätze."
+                " Nutze fuer Live-Daten nur den Kontext, den das Portal mitgibt. Erfinde keine Fahrzeuge,"
+                " Preise oder Termine, wenn sie dort nicht stehen."
             ),
         },
         {
             "role": "system",
-            "content": (
-                f"Heutiges Datum: {date.today().strftime(DATE_FMT)}. "
-                "Kalender: Standardansicht zeigt kommende Termine; Vergangenheit ist separat aufrufbar; "
-                "Feiertage bleiben in der Wochenansicht sichtbar."
-            ),
-        },
-        {
-            "role": "system",
-            "content": "Aktuell eingeplante Fahrzeuge:\n"
-            + ("\n".join(assistant_planned_vehicle_lines(include_autohaus=True, limit=10)) or "Keine aktiven Termine hinterlegt."),
+            "content": admin_assistant_context_text(question),
         },
     ]
     messages.extend(list_ki_assistent_history(0, 0, limit=8))
     messages.append({"role": "user", "content": question})
     payload = {
-        "model": config["openai_model"],
+        "model": config["openai_chat_model"],
         "messages": messages,
         "temperature": 0.2,
         "max_tokens": 320,
@@ -16954,6 +17300,65 @@ def favicon():
     return send_file(logo_path, mimetype="image/png")
 
 
+def get_mosbach_weather_payload(force_refresh=False):
+    now = time.time()
+    with WEATHER_CACHE_LOCK:
+        cached_payload = WEATHER_CACHE.get("payload")
+        if cached_payload and not force_refresh and WEATHER_CACHE.get("expires_at", 0) > now:
+            return cached_payload, 200
+
+    requests_module = get_requests()
+    if requests_module is None:
+        if cached_payload:
+            stale_payload = dict(cached_payload)
+            stale_payload["stale"] = True
+            return stale_payload, 200
+        return {"ok": False, "error": "HTTP-Client fuer Wetterdaten nicht verfuegbar."}, 503
+
+    try:
+        response = requests_module.get(
+            OPEN_METEO_FORECAST_URL,
+            params={
+                "latitude": MOSBACH_WEATHER_LOCATION["latitude"],
+                "longitude": MOSBACH_WEATHER_LOCATION["longitude"],
+                "current": "temperature_2m,weather_code,wind_speed_10m",
+                "hourly": "temperature_2m,weather_code,wind_speed_10m",
+                "timezone": "Europe/Berlin",
+                "forecast_days": 2,
+            },
+            timeout=WEATHER_API_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        raw_payload = response.json()
+        payload = {
+            "ok": True,
+            "location": MOSBACH_WEATHER_LOCATION,
+            "current": raw_payload.get("current") or {},
+            "hourly": raw_payload.get("hourly") or {},
+            "units": {
+                "current": raw_payload.get("current_units") or {},
+                "hourly": raw_payload.get("hourly_units") or {},
+            },
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        with WEATHER_CACHE_LOCK:
+            WEATHER_CACHE["payload"] = payload
+            WEATHER_CACHE["expires_at"] = now + WEATHER_CACHE_SECONDS
+        return payload, 200
+    except Exception as exc:
+        if cached_payload:
+            stale_payload = dict(cached_payload)
+            stale_payload["stale"] = True
+            return stale_payload, 200
+        return {"ok": False, "error": clean_text(str(exc))[:240]}, 503
+
+
+@app.route("/api/wetter/mosbach")
+def wetter_mosbach():
+    payload, status_code = get_mosbach_weather_payload()
+    return jsonify(payload), status_code
+
+
 @app.route("/")
 @app.route("/admin")
 @admin_required
@@ -17804,7 +18209,7 @@ def admin_openai_key_speichern():
         flash("Der OpenAI API-Key sieht ungültig aus. Bitte den Key prüfen.", "warning")
         return redirect(url_for("dashboard"))
     set_app_setting("OPENAI_API_KEY", api_key)
-    flash("OpenAI-Key wurde gespeichert. Neue Uploads werden jetzt mit OpenAI analysiert.", "success")
+    flash("OpenAI-Key wurde gespeichert. Uploads und KI-Helfer nutzen jetzt OpenAI.", "success")
     return redirect(url_for("dashboard"))
 
 

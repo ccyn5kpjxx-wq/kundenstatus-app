@@ -102,6 +102,29 @@
     background: #132635;
     color: #fff;
   }
+  .ki-assistent-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: -2px;
+  }
+  .ki-assistent-presets[hidden] {
+    display: none;
+  }
+  .ki-assistent-preset {
+    border: 1px solid #d6c7b4;
+    border-radius: 999px;
+    background: #fffdf9;
+    color: #2a3035;
+    font-size: .82rem;
+    line-height: 1.2;
+    padding: 7px 10px;
+  }
+  .ki-assistent-preset:hover,
+  .ki-assistent-preset:focus {
+    border-color: #145d66;
+    color: #0f4f58;
+  }
   .ki-assistent-form {
     padding: 12px;
     background: #fffdf9;
@@ -153,6 +176,14 @@
     </div>
     <div class="ki-assistent-history" data-ki-history>
       <div class="ki-assistent-message is-ki">Womit kann ich helfen?</div>
+      <div class="ki-assistent-presets" data-ki-presets>
+        <button type="button" class="ki-assistent-preset" data-ki-prompt="Welche Fahrzeuge sind heute eingeplant?">Heute</button>
+        <button type="button" class="ki-assistent-preset" data-ki-prompt="Welche offenen Angebote gibt es?">Offene Angebote</button>
+        <button type="button" class="ki-assistent-preset" data-ki-prompt="Wie lade ich Bilder oder PDFs hoch?">Upload</button>
+        {% if ki_assistent_auftrag_id %}
+        <button type="button" class="ki-assistent-preset" data-ki-prompt="Was ist der aktuelle Stand dieses Vorgangs?">Dieser Vorgang</button>
+        {% endif %}
+      </div>
     </div>
     <form class="ki-assistent-form" data-ki-form>
       <textarea class="form-control ki-assistent-input" name="message" data-ki-input rows="2" placeholder="Ihre Frage an den KI-Helfer" aria-label="Frage an den KI-Helfer" autocomplete="off"></textarea>
@@ -180,6 +211,7 @@
       const history = root.querySelector('[data-ki-history]');
       const sendButton = root.querySelector('[data-ki-send]');
       const clearButton = root.querySelector('[data-ki-clear]');
+      const presets = root.querySelector('[data-ki-presets]');
       const chatUrl = root.dataset.chatUrl;
       const clearUrl = root.dataset.clearUrl;
       const csrfToken = root.dataset.csrfToken;
@@ -193,6 +225,13 @@
         history.appendChild(message);
         history.scrollTop = history.scrollHeight;
         return message;
+      };
+
+      const setPresetsVisible = (visible) => {
+        if (presets) {
+          presets.hidden = !visible;
+          history.scrollTop = history.scrollHeight;
+        }
       };
 
       const focusInput = () => {
@@ -218,14 +257,13 @@
         setOpen(!root.classList.contains('is-open'));
       });
 
-      form.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const text = input.value.trim();
+      const sendText = async (text) => {
         if (!text || sendButton.disabled) {
           focusInput();
           return;
         }
         appendMessage('user', text);
+        setPresetsVisible(false);
         input.value = '';
         input.style.height = '';
         sendButton.disabled = true;
@@ -247,11 +285,27 @@
           sendButton.disabled = false;
           focusInput();
         }
+      };
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        await sendText(input.value.trim());
+      });
+
+      root.querySelectorAll('[data-ki-prompt]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          setOpen(true);
+          await sendText((button.dataset.kiPrompt || button.textContent || '').trim());
+        });
       });
 
       clearButton.addEventListener('click', async () => {
         history.innerHTML = '';
         appendMessage('ki', 'Womit kann ich helfen?');
+        if (presets) {
+          history.appendChild(presets);
+        }
+        setPresetsVisible(true);
         focusInput();
         try {
           await fetch(clearUrl, {

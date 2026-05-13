@@ -32,8 +32,10 @@ Eintragen in `.env.local`:
 
 - `OPENAI_API_KEY`
 - optional `OPENAI_EXTRACTION_MODEL`
+- optional `OPENAI_CHAT_MODEL` fuer den KI-Helfer im Portal
 
 Die App sendet bei PDF- und Bild-Uploads bis zu 4 PDF-Seiten bzw. das hochgeladene Bild an OpenAI Vision. OpenAI gleicht das Original mit lokaler OCR ab und gibt strukturierte Felder zurueck.
+Der KI-Helfer nutzt denselben API-Key und bekommt passende Portal-Kontexte wie aktuellen Auftrag, Termine und offene Angebotsanfragen mit.
 
 ## 3. Starten
 
@@ -59,5 +61,6 @@ Dort siehst du:
 
 - Ohne Zugangsdaten bleibt die lokale OCR aktiv.
 - Mit OpenAI-Key nutzt die App zusaetzlich `OpenAI Vision` fuer Bilder und PDF-Vorschauen.
+- Mit OpenAI-Key antwortet der KI-Helfer frei auf Portalfragen; ohne Key nutzt er feste lokale Hilfetexte.
 - Mit Google-Zugangsdaten nutzt die App zusaetzlich `Google Document AI` als OCR-Stufe.
 - Unsichere Faelle werden mit Review-Hinweis markiert.
