@@ -105,9 +105,9 @@ def main():
     )
     ok &= rate_limit_ok
     ok &= check(
-        "Login-POST ohne CSRF blockiert",
+        "Login-POST ohne CSRF lädt Login neu",
         client.post("/login", data={"password": "falsch"}),
-        {400},
+        {302},
     )
     ok &= check(
         "Login-POST mit CSRF verarbeitet",

@@ -220,7 +220,7 @@ SQLITE_BUSY_TIMEOUT_SECONDS = max(
 )
 DEFAULT_ADMIN_PASS = "gaertner2026"
 DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
-APP_VERSION = "login-unlimited-attempts-v6"
+APP_VERSION = "login-csrf-retry-v7"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
 DEFAULT_PUBLIC_BASE_URL = ""
 PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
@@ -1185,6 +1185,10 @@ def protect_csrf():
     expected = session.get(CSRF_FIELD_NAME)
     provided = request.form.get(CSRF_FIELD_NAME) or request.headers.get("X-CSRF-Token")
     if not expected or not provided or not hmac.compare_digest(expected, provided):
+        if request.endpoint in {"login", "partner_login", "partner_login_key"}:
+            session.pop(CSRF_FIELD_NAME, None)
+            flash("Die Login-Seite war veraltet. Bitte Passwort noch einmal eingeben.", "warning")
+            return redirect(request.path)
         abort(400)
     return None
 
