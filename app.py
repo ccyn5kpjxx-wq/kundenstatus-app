@@ -220,7 +220,7 @@ SQLITE_BUSY_TIMEOUT_SECONDS = max(
 )
 DEFAULT_ADMIN_PASS = "gaertner2026"
 DEFAULT_FLASK_SECRET_KEY = "gaertner-autohaus-2026"
-APP_VERSION = "versicherung-portal-v2"
+APP_VERSION = "versicherung-portal-v3"
 ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ""
 DEFAULT_PUBLIC_BASE_URL = ""
