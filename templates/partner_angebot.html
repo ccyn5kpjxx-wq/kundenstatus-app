@@ -240,7 +240,7 @@
           </div>
           <div class="d-flex gap-2 flex-wrap mt-3">
             <button type="submit" class="btn btn-dark">Freigabe zum Senden erteilen</button>
-            <a href="{{ url_for('partner_versicherung_auftrag_abtretungserklaerung_pdf', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="btn btn-outline-dark">Abtretungserklärung herunterladen</a>
+            <a href="{{ url_for('partner_versicherung_auftrag_abtretungserklaerung_pdf', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="btn btn-outline-dark" id="pflicht-abtretung">Abtretungserklärung herunterladen</a>
           </div>
           {% if angebot['versicherung_sendefreigabe_am'] %}
           <div class="text-success small mt-2">Freigegeben am {{ angebot['versicherung_sendefreigabe_am'] }}{% if angebot['versicherung_email'] %} an {{ angebot['versicherung_email'] }}{% endif %}.</div>
@@ -295,7 +295,7 @@
       {% endif %}
 
       {% if angebot %}
-      <form method="POST" enctype="multipart/form-data" class="quick-upload-panel mb-4" data-upload-form>
+      <form method="POST" enctype="multipart/form-data" class="quick-upload-panel mb-4" data-upload-form id="pflicht-upload">
         <div class="quick-upload-grid">
           <div>
             <div class="quick-upload-kicker">Schnell-Upload</div>
@@ -319,11 +319,15 @@
       {% endif %}
 
       <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
-        <div class="col-md-6">
+        <div class="col-md-4" id="pflicht-kunde">
           <label class="form-label">Endkunde / Referenz</label>
           <input type="text" name="kunde_name" class="form-control form-control-lg" value="{{ angebot['kunde_name'] if angebot else '' }}">
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
+          <label class="form-label">Versicherungsnehmer</label>
+          <input type="text" name="versicherungsnehmer" class="form-control form-control-lg" value="{{ angebot['versicherungsnehmer'] if angebot else '' }}" placeholder="falls abweichend">
+        </div>
+        <div class="col-md-4">
           <label class="form-label">Telefon</label>
           <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ angebot['kontakt_telefon'] if angebot else '' }}">
         </div>
@@ -335,15 +339,23 @@
           <label class="form-label">Kennzeichen</label>
           <input type="text" name="kennzeichen" class="form-control form-control-lg" value="{{ angebot['kennzeichen'] if angebot else '' }}" style="text-transform:uppercase;">
         </div>
-        <div class="col-md-4">
+        <div class="col-md-4" id="pflicht-fahrzeugdaten">
           <label class="form-label">FIN-Nummer</label>
           <input type="text" name="fin_nummer" class="form-control form-control-lg" value="{{ angebot['fin_nummer'] if angebot else '' }}" style="text-transform:uppercase;">
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
           <label class="form-label">Auftrag / Vorgangsnummer</label>
           <input type="text" name="auftragsnummer" class="form-control form-control-lg" value="{{ angebot['auftragsnummer'] if angebot else '' }}">
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4" id="pflicht-schadennummer">
+          <label class="form-label">Schaden-Nr.</label>
+          <input type="text" name="schaden_nummer" class="form-control form-control-lg" value="{{ angebot['schaden_nummer'] if angebot else '' }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Police / Vertrag</label>
+          <input type="text" name="versicherung_police" class="form-control form-control-lg" value="{{ angebot['versicherung_police'] if angebot else '' }}">
+        </div>
+        <div class="col-md-8">
           <label class="form-label">Kurze Schadensbeschreibung</label>
           <input type="text" name="analyse_text" class="form-control form-control-lg" value="{{ angebot['analyse_text'] if angebot else '' }}" placeholder="z.B. Stoßfänger hinten verkratzt">
         </div>
@@ -365,7 +377,7 @@
                 <input type="text" class="form-control form-control-lg" value="{{ angebot['fertig_datum'] or '' }}" readonly>
               </div>
               <div class="col-md-4">
-                <label class="form-label">Rep.-Max.-Kosten</label>
+                <label class="form-label">Reparaturkosten laut Gutachten</label>
                 <input type="text" class="form-control form-control-lg" value="{{ angebot['rep_max_kosten'] or '' }}" readonly>
               </div>
             </div>

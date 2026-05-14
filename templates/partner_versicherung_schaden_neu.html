@@ -119,7 +119,7 @@
           <input type="text" name="versicherung_email_cc" class="form-control" value="{{ request.form.get('versicherung_email_cc') or (vorlage['versicherung_email_cc'] if vorlage else '') }}" placeholder="z.B. zweite Person im Autohaus">
         </div>
 
-        <div class="col-md-6">
+        <div class="col-md-6" id="pflicht-kunde">
           <label class="form-label">Kunde / Halter</label>
           <input type="text" name="kunde_name" class="form-control form-control-lg" value="{{ request.form.get('kunde_name') or (vorlage['kunde_name'] if vorlage else '') }}">
         </div>
@@ -131,7 +131,7 @@
           <label class="form-label">Telefon Kunde</label>
           <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ request.form.get('kontakt_telefon') or (vorlage['kontakt_telefon'] if vorlage else '') }}">
         </div>
-        <div class="col-md-3">
+        <div class="col-md-3" id="pflicht-schadennummer">
           <label class="form-label">Schaden-Nr.</label>
           <input type="text" name="schaden_nummer" class="form-control form-control-lg" value="{{ request.form.get('schaden_nummer') or (vorlage['schaden_nummer'] if vorlage else '') }}">
         </div>
@@ -152,7 +152,7 @@
           <label class="form-label">Kennzeichen</label>
           <input type="text" name="kennzeichen" class="form-control form-control-lg" value="{{ request.form.get('kennzeichen') or (vorlage['kennzeichen'] if vorlage else '') }}" style="text-transform:uppercase;">
         </div>
-        <div class="col-md-4">
+        <div class="col-md-4" id="pflicht-fahrzeugdaten">
           <label class="form-label">FIN</label>
           <input type="text" name="fin_nummer" class="form-control form-control-lg" value="{{ request.form.get('fin_nummer') or (vorlage['fin_nummer'] if vorlage else '') }}" style="text-transform:uppercase;">
         </div>
@@ -185,7 +185,7 @@
           <textarea name="beschreibung" class="form-control" rows="4" placeholder="Was ist passiert, welche Unterlagen liegen vor, was soll die Versicherung wissen?">{{ request.form.get('beschreibung') or (vorlage['beschreibung'] if vorlage else '') }}</textarea>
         </div>
 
-        <div class="col-12 pt-2">
+        <div class="col-12 pt-2" id="pflicht-upload">
           <h2 class="h4 mb-1">Gutachten und Bilder</h2>
           <div class="text-muted">Gutachten oder Kalkulation auswählen. Nach dem Hochladen liest die App die Datei und markiert erkannte Schadenbereiche.</div>
         </div>
@@ -212,6 +212,7 @@
             formenctype="application/x-www-form-urlencoded"
             formnovalidate
             data-no-loading="true"
+            id="pflicht-abtretung"
           >Abtretungserklärung herunterladen</button>
           <button
             type="submit"

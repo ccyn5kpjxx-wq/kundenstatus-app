@@ -130,6 +130,74 @@ def main():
             and "stossstange hinten" in gutachten_ki_analyse,
             gutachten_mit_ki.get("analyse_text"),
         )
+        kosten_gutachten_text = """
+        Zusammenfassung und Ergebnis
+        ohne MwSt. mit MwSt.
+        Reparaturkosten 2.925,95 EUR 3.481,88 EUR
+        Merkantile Wertminderung 350,00 EUR
+        Wiederbeschaffungswert 10.011,85 EUR
+        R E P A R A T U R K O S T E N OHNE MWST 2 925.95
+        R E P A R A T U R K O S T E N MIT MWST 3 481.88
+        """
+        kosten_felder = portal.parse_document_fields(kosten_gutachten_text, "schaden-gutachten.pdf")
+        check(
+            "Gutachten nutzt Reparaturkosten brutto statt WBW",
+            kosten_felder.get("rep_max_kosten") == "3.481,88 EUR",
+            kosten_felder.get("rep_max_kosten"),
+        )
+        kosten_ki = portal.normalize_openai_document_data(
+            {
+                "document_type": "Gutachten",
+                "vehicle_type": "",
+                "fin_nummer": "",
+                "auftragsnummer": "",
+                "kennzeichen": "",
+                "auftrags_datum": "",
+                "fertig_bis": "",
+                "rep_max_kosten": "10.011,85 EUR",
+                "farbnummer": "",
+                "offene_bauteile": [],
+                "erledigte_bauteile": [],
+                "kurzanalyse": "",
+                "lesefassung": "",
+                "confidence": 0.9,
+                "needs_review": False,
+                "review_reason": "",
+            },
+            kosten_gutachten_text,
+        )
+        check(
+            "KI-WBW wird durch Reparaturkosten ersetzt",
+            kosten_ki.get("rep_max_kosten") == "3.481,88 EUR",
+            kosten_ki.get("rep_max_kosten"),
+        )
+        pflicht_status = portal.versicherung_pflichtunterlagen_status(
+            {
+                "id": 0,
+                "kunde_name": "",
+                "versicherungsnehmer": "",
+                "fin_nummer": "",
+                "schaden_nummer": "",
+                "versicherung_police": "",
+            },
+            [],
+        )
+        pflicht_kalkulation = next(item for item in pflicht_status["items"] if item["key"] == "kalkulation")
+        pflicht_kunde = next(item for item in pflicht_status["items"] if item["key"] == "anspruchsteller")
+        check(
+            "Pflichtunterlagen nennen genaues Upload-Ziel",
+            pflicht_kalkulation["anchor"] == "pflicht-upload"
+            and "Gutachten" in pflicht_kalkulation["required"]
+            and "Reparaturkosten" in pflicht_kalkulation["required"],
+            str(pflicht_kalkulation),
+        )
+        check(
+            "Fehlende Kundendaten haben Klickziel",
+            pflicht_kunde["status"] == "missing"
+            and pflicht_kunde["anchor"] == "pflicht-kunde"
+            and "Versicherungsnehmer" in pflicht_kunde["required"],
+            str(pflicht_kunde),
+        )
         check(
             "OpenAI-Fehler wird benutzerfreundlich angezeigt",
             "https://api.openai.com" not in portal.friendly_analysis_error(

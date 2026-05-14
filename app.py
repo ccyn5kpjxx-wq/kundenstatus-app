@@ -1238,7 +1238,7 @@ DOCUMENT_REVIEW_FIELDS = (
     ("kennzeichen", "Kennzeichen"),
     ("fin_nummer", "FIN"),
     ("auftragsnummer", "Auftrag / Vorgang"),
-    ("rep_max_kosten", "Rep.-Max.-Kosten"),
+    ("rep_max_kosten", "Reparaturkosten"),
     ("bauteile_override", "Bauteile"),
     ("analyse_text", "Kurzanalyse"),
     ("beschreibung", "Beschreibung"),
@@ -3376,6 +3376,8 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
             "- Bei Fotos kurzanalyse maximal 6 einfache Schlagwoerter/Fragmente, keine langen Saetze.",
             "- Lies Fahrzeugtyp, Kennzeichen, FIN, Auftragsnummer, Termine und angekreuzte/markierte Bauteile direkt aus Formularfeldern und Tabellen.",
             "- Bei Lackierauftrag-Formularen sind Felder wie Typ, FG-Nr, Amtl. Kennzeichen, Auftrags-Nr, Fertig bis und angekreuzte Teile wichtig.",
+            "- rep_max_kosten bedeutet Reparaturkosten laut Gutachten/Kalkulation, bevorzugt brutto falls sichtbar, sonst netto.",
+            "- Niemals Wiederbeschaffungswert/WBW, Wiederbeschaffungsaufwand, Restwert, Fahrzeugwert, Zeitwert oder Wertminderung als rep_max_kosten eintragen.",
             "- Bei handschriftlich erledigten Positionen diese in erledigte_bauteile aufnehmen und NICHT in offene_bauteile.",
             "- In offene_bauteile nur Positionen aufnehmen, die noch fuer unsere Werkstatt relevant sind.",
             "- Vorschaden, Vorschäden, Altschaden oder unreparierte Vorschäden sind keine aktuelle Reparatur: niemals in offene_bauteile, kurzanalyse oder lesefassung aufnehmen.",
@@ -3472,7 +3474,7 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
     return {"data": parsed, "error": ""}
 
 
-def normalize_openai_document_data(data):
+def normalize_openai_document_data(data, source_text=""):
     if not data:
         return {}
     offene_bauteile = [
@@ -3484,18 +3486,34 @@ def normalize_openai_document_data(data):
     if not analyse and offene_bauteile:
         analyse = ", ".join(offene_bauteile)[:220]
     beschreibung = clean_text(data.get("lesefassung"))
+    description_parts = []
     if not beschreibung:
-        description_parts = []
         if clean_text(data.get("document_type")):
             description_parts.append(clean_text(data["document_type"]))
         if clean_text(data.get("vehicle_type")):
             description_parts.append(f"Typ {clean_text(data['vehicle_type'])}")
         if analyse:
             description_parts.append(f"Arbeit {analyse}")
-        if clean_text(data.get("rep_max_kosten")):
-            description_parts.append(
-                f"Rep.-Max.-Kosten {clean_text(data['rep_max_kosten'])}"
-            )
+
+    raw_rep_max_kosten = clean_text(data.get("rep_max_kosten"))
+    rep_max_kosten = sanitize_reparaturkosten_value(raw_rep_max_kosten, source_text)
+    if raw_rep_max_kosten and source_text and not rep_max_kosten:
+        rep_max_kosten = extract_rep_max_kosten(source_text)
+    if raw_rep_max_kosten and source_text and (
+        is_wert_money_value(raw_rep_max_kosten, source_text)
+        or (rep_max_kosten and not document_money_equal(raw_rep_max_kosten, rep_max_kosten))
+    ):
+        review_reason = clean_text(data.get("review_reason"))
+        data["review_reason"] = (
+            f"{review_reason} Bitte überprüfen: WBW/Restwert wurde nicht als Reparaturkosten übernommen."
+        ).strip()
+        data["needs_review"] = True
+    if rep_max_kosten:
+        if not beschreibung:
+            description_parts.append(f"Reparaturkosten {rep_max_kosten}")
+        elif "reparaturkosten" not in normalize_document_text(beschreibung):
+            beschreibung = f"{beschreibung}. Reparaturkosten {rep_max_kosten}"
+    if description_parts:
         beschreibung = ". ".join(description_parts)
     fields = {
         "fahrzeug": clean_text(data.get("vehicle_type")),
@@ -3504,7 +3522,7 @@ def normalize_openai_document_data(data):
         "kennzeichen": clean_text(data.get("kennzeichen")).upper(),
         "annahme_datum": format_date(clean_text(data.get("auftrags_datum"))),
         "fertig_datum": format_date(clean_text(data.get("fertig_bis"))),
-        "rep_max_kosten": clean_text(data.get("rep_max_kosten")),
+        "rep_max_kosten": rep_max_kosten,
         "analyse_text": analyse[:220],
         "beschreibung": beschreibung[:900],
         "bauteile_override": "\n".join(offene_bauteile),
@@ -3727,7 +3745,7 @@ def build_document_analysis_bundle(path, filename=""):
     except Exception as exc:
         ai_result["error"] = str(exc)
 
-    structured = normalize_openai_document_data(ai_result.get("data"))
+    structured = normalize_openai_document_data(ai_result.get("data"), preferred_text)
     if structured:
         bundle["structured"] = structured
         bundle["analysis_json"] = json.dumps(ai_result.get("data"), ensure_ascii=False)
@@ -4091,7 +4109,7 @@ def build_price_suggestion(auftrag):
 
     rep_max = parse_price_amount(auftrag.get("rep_max_kosten"))
     if rep_max:
-        hinweise.append(f"Rep.-Max.-Kosten aus Unterlage: {format_euro(rep_max)}.")
+        hinweise.append(f"Reparaturkosten aus Unterlage: {format_euro(rep_max)}.")
 
     if "smart repair" in normalized_source and not any("Smart Repair" in hinweis for hinweis in hinweise):
         hinweise.append("Smart-Repair-Arbeiten bitte separat prüfen, wenn sie nicht in der Preisliste stehen.")
@@ -4103,7 +4121,7 @@ def build_price_suggestion(auftrag):
         empfehlung = int(round(((total_von + total_bis) / 2) / 10) * 10)
         if rep_max and empfehlung > rep_max:
             empfehlung = rep_max
-            hinweise.append("Empfehlung wurde auf die Rep.-Max.-Kosten begrenzt.")
+            hinweise.append("Empfehlung wurde auf die Reparaturkosten begrenzt.")
 
     return {
         "hat_vorschlag": bool(positionen),
@@ -4701,47 +4719,214 @@ def select_relevant_position_lines(text, doc_type=""):
 
 def extract_cost_hints(text):
     hints = []
+    rep_cost = extract_reparaturkosten_value(text)
+    if rep_cost:
+        hints.append(f"Reparaturkosten {rep_cost}")
     for label, patterns in (
-        ("Reparaturkosten netto", [r"reparaturkosten netto\s+([\d.'’]+,\d{2}\s*eur?)"]),
-        (
-            "Reparaturkosten brutto",
-            [
-                r"reparaturkosten brutto\s+([\d.'’]+,\d{2}\s*eur?)",
-                r"reparaturkosten\s+[\d.'’]+,\d{2}\s*eur\s+([\d.'’]+,\d{2}\s*eur?)",
-            ],
-        ),
         ("Reparaturdauer", [r"reparaturdauer\s+([0-9]+\s*[a-zäöüß ]+)"]),
-        ("Wiederbeschaffungswert", [r"wiederbeschaffungswert[^\n]*?([\d.'’]+,\d{2}\s*eur?)"]),
+        ("Wiederbeschaffungswert", [rf"wiederbeschaffungswert[^\n]*?({DOCUMENT_MONEY_PATTERN}\s*(?:€|eur|euro)?)"]),
     ):
         value = first_match(text, patterns)
         if value:
+            if label == "Wiederbeschaffungswert":
+                value = normalize_document_money_value(value) or clean_text(value)
             hints.append(f"{label} {value}")
     rep_max = extract_rep_max_kosten(text)
-    if rep_max:
-        hints.append(f"Rep.-Max.-Kosten {rep_max}")
+    if rep_max and not document_money_equal(rep_max, rep_cost):
+        hints.append(f"Maximale Reparaturkosten {rep_max}")
     return hints
+
+
+DOCUMENT_MONEY_PATTERN = r"\d{1,3}(?:[.\s'’]\d{3})*,\d{2}|\d{1,6},\d{2}"
+WERT_LABEL_PATTERN = (
+    r"wiederbeschaffungswert|wiederbeschaffungs\s*wert|\bwbw\b|"
+    r"wiederbeschaffungsaufwand|restwert|fahrzeugwert|zeitwert|"
+    r"neuwert|marktwert|wertminderung|entsch[aä]digung"
+)
+REPARATURKOSTEN_LABEL_PATTERN = (
+    r"rep\.?\s*max\.?\s*kosten|max\.?\s*rep\.?\s*kosten|"
+    r"reparaturkosten|reparatur\s*kosten|instandsetzungskosten|"
+    r"instandsetzungs\s*kosten|reparaturaufwand|reparaturbetrag|"
+    r"summe\s+reparatur|reparatur\s+gesamt"
+)
+
+
+def normalize_document_money_value(value):
+    value = clean_text(value)
+    if not value:
+        return ""
+    match = re.search(DOCUMENT_MONEY_PATTERN, value)
+    if not match:
+        return ""
+    amount = match.group(0)
+    amount = amount.replace("'", ".").replace("’", ".")
+    amount = re.sub(r"\s+", ".", amount)
+    return f"{amount} EUR"
+
+
+def document_money_amount(value):
+    value = normalize_document_money_value(value)
+    if not value:
+        return None
+    raw = re.search(DOCUMENT_MONEY_PATTERN, value)
+    if not raw:
+        return None
+    number = raw.group(0).replace("'", ".").replace("’", ".").replace(" ", "")
+    if "," in number and "." in number:
+        number = number.replace(".", "").replace(",", ".")
+    elif "," in number:
+        number = number.replace(",", ".")
+    try:
+        return round(float(number), 2)
+    except ValueError:
+        return None
+
+
+def document_money_equal(left, right):
+    left_amount = document_money_amount(left)
+    right_amount = document_money_amount(right)
+    if left_amount is None or right_amount is None:
+        return False
+    return abs(left_amount - right_amount) < 0.01
+
+
+def money_values_near_value_labels(text):
+    values = []
+    for line in clean_text(text).splitlines():
+        normalized_line = normalize_document_text(line)
+        if not re.search(WERT_LABEL_PATTERN, normalized_line):
+            continue
+        line_values = []
+        for label_match in re.finditer(WERT_LABEL_PATTERN, line, re.IGNORECASE):
+            before = line[max(0, label_match.start() - 60) : label_match.start()]
+            before_matches = list(re.finditer(DOCUMENT_MONEY_PATTERN, before))
+            if before_matches:
+                line_values.append(before_matches[-1].group(0))
+            after = line[label_match.end() : label_match.end() + 90]
+            after_match = re.search(DOCUMENT_MONEY_PATTERN, after)
+            if after_match:
+                line_values.append(after_match.group(0))
+        if not line_values and not re.search(REPARATURKOSTEN_LABEL_PATTERN, normalized_line):
+            line_values = [match.group(0) for match in re.finditer(DOCUMENT_MONEY_PATTERN, line)]
+        for raw_value in line_values:
+            value = normalize_document_money_value(raw_value)
+            if value:
+                values.append(value)
+    return values
+
+
+def is_wert_money_value(value, text):
+    if not clean_text(value):
+        return False
+    return any(document_money_equal(value, wert) for wert in money_values_near_value_labels(text))
+
+
+def repair_cost_score(context):
+    normalized = normalize_document_text(context)
+    if not re.search(REPARATURKOSTEN_LABEL_PATTERN, normalized):
+        return 0
+    if re.search(WERT_LABEL_PATTERN, normalized) and not re.search(r"reparatur", normalized):
+        return 0
+    score = 20
+    if re.search(r"rep\.?\s*max|max\.?\s*rep", normalized):
+        score += 50
+    if re.search(r"brutto|inkl|incl|inklusive|gesamt|endbetrag|mwst|mehrwertsteuer", normalized):
+        score += 20
+    if re.search(r"netto|ohne\s+mwst|ohne\s+mehrwertsteuer", normalized):
+        score += 10
+    return score
+
+
+def extract_reparaturkosten_value(text):
+    cleaned = clean_text(text)
+    if not cleaned:
+        return ""
+    lines = [clean_text(line) for line in cleaned.splitlines() if clean_text(line)]
+    candidates = []
+    wert_values = money_values_near_value_labels(cleaned)
+    for index, line in enumerate(lines):
+        normalized_line = normalize_document_text(line)
+        line_score = repair_cost_score(line)
+        if line_score:
+            money_matches = list(re.finditer(DOCUMENT_MONEY_PATTERN, line))
+            if money_matches:
+                values = [
+                    normalize_document_money_value(match.group(0))
+                    for match in money_matches
+                ]
+                values = [
+                    value
+                    for value in values
+                    if value and not any(document_money_equal(value, wert) for wert in wert_values)
+                ]
+                if values:
+                    candidates.append((line_score, values[-1]))
+                continue
+        if line_score and not re.search(DOCUMENT_MONEY_PATTERN, line):
+            nearby = " ".join(lines[index + 1 : index + 3])
+            if re.search(WERT_LABEL_PATTERN, normalize_document_text(nearby)):
+                continue
+            match = re.search(DOCUMENT_MONEY_PATTERN, nearby)
+            if match:
+                value = normalize_document_money_value(match.group(0))
+                if value and not any(document_money_equal(value, wert) for wert in wert_values):
+                    candidates.append((line_score - 2, value))
+
+    # OCR often flattens the totals into one paragraph. Prefer explicit gross repair costs.
+    flat_patterns = (
+        rf"reparatur\s*kosten[^\n]{{0,80}}brutto[^\n]{{0,80}}({DOCUMENT_MONEY_PATTERN})",
+        rf"reparaturkosten\s+brutto[^\n]{{0,80}}({DOCUMENT_MONEY_PATTERN})",
+        rf"reparatur\s*kosten[^\n]{{0,80}}(?:inkl|incl|inklusive)[^\n]{{0,80}}({DOCUMENT_MONEY_PATTERN})",
+        rf"reparatur\s*kosten[^\n]{{0,80}}(?:mwst|mehrwertsteuer)[^\n]{{0,80}}({DOCUMENT_MONEY_PATTERN})",
+        rf"reparatur\s*kosten[^\n]{{0,80}}({DOCUMENT_MONEY_PATTERN})[^\n]{{0,80}}({DOCUMENT_MONEY_PATTERN})",
+        rf"reparatur\s*kosten[^\n]{{0,80}}({DOCUMENT_MONEY_PATTERN})",
+        rf"instandsetzungs\s*kosten[^\n]{{0,80}}({DOCUMENT_MONEY_PATTERN})",
+    )
+    normalized_cleaned = normalize_document_text(cleaned)
+    for pattern in flat_patterns:
+        match = re.search(pattern, normalized_cleaned, re.IGNORECASE)
+        if not match:
+            continue
+        raw_value = match.group(match.lastindex or 1)
+        value = normalize_document_money_value(raw_value)
+        if value and not any(document_money_equal(value, wert) for wert in wert_values):
+            candidates.append((35, value))
+
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
+def sanitize_reparaturkosten_value(value, source_text=""):
+    value = normalize_document_money_value(value) or clean_text(value)
+    if not value:
+        return ""
+    source_text = clean_text(source_text)
+    if source_text and is_wert_money_value(value, source_text):
+        replacement = extract_reparaturkosten_value(source_text)
+        if replacement and not document_money_equal(replacement, value):
+            return replacement
+        return ""
+    return value
 
 
 def extract_rep_max_kosten(text):
     cleaned = clean_text(text)
     normalized = normalize_document_text(text)
     patterns = (
-        r"max\.?\s*rep\.?\s*kosten\s*([0-9]{1,5}(?:[.,][0-9]{2})?\s*euro(?:\s*[a-z]+)?)",
-        r"rep\.?\s*max\.?\s*kosten\s*([0-9]{1,5}(?:[.,][0-9]{2})?\s*euro(?:\s*[a-z]+)?)",
+        rf"max\.?\s*[-.\s]*rep\.?\s*[-.\s]*kosten\s*({DOCUMENT_MONEY_PATTERN}\s*(?:€|eur|euro)?)",
+        rf"rep\.?\s*[-.\s]*max\.?\s*[-.\s]*kosten\s*({DOCUMENT_MONEY_PATTERN}\s*(?:€|eur|euro)?)",
     )
     for source in (cleaned, normalized):
         for pattern in patterns:
             match = re.search(pattern, source, re.IGNORECASE)
             if not match:
                 continue
-            value = compact_whitespace(match.group(1))
-            value = re.sub(r"(?<=\d)(?=euro)", " ", value, flags=re.IGNORECASE)
-            value = re.sub(r"(?<=euro)(?=[A-Za-z])", " ", value, flags=re.IGNORECASE)
-            value = re.sub(r"(?i)euro", "Euro", value)
-            value = re.sub(r"(?i)\bkomplett\b", "komplett", value)
-            value = re.sub(r"(?i)\s+(auftrag|arbeit|datum|unterschrift).*$", "", value).strip()
-            return value
-    return ""
+            value = normalize_document_money_value(match.group(1))
+            if value and not is_wert_money_value(value, cleaned):
+                return value
+    return extract_reparaturkosten_value(cleaned)
 
 
 def extract_position_entries(text, doc_type=""):
@@ -11345,6 +11530,10 @@ def merge_document_fields(ai_fields, local_fields):
     review_notes = []
     previous_damage_parts = parse_manual_parts((local_fields or {}).get("_previous_damage_parts"))
     local_analysis = clean_text((local_fields or {}).get("analyse_text"))
+    local_source = " ".join(
+        clean_text((local_fields or {}).get(key))
+        for key in ("beschreibung", "analyse_text", "bauteile_override")
+    )
     if previous_damage_parts:
         cleaned_analysis = remove_previous_damage_fragments(
             fields.get("analyse_text"),
@@ -11374,6 +11563,28 @@ def merge_document_fields(ai_fields, local_fields):
             review_notes.append(
                 f"{label}: OCR und KI liefern unterschiedliche Werte. Bitte Originaldatei prüfen."
             )
+
+    local_rep = clean_text((local_fields or {}).get("rep_max_kosten"))
+    ai_rep = clean_text(fields.get("rep_max_kosten"))
+    if ai_rep and local_source:
+        sanitized_ai_rep = sanitize_reparaturkosten_value(ai_rep, local_source)
+        if sanitized_ai_rep and not document_money_equal(ai_rep, sanitized_ai_rep):
+            fields["rep_max_kosten"] = sanitized_ai_rep
+            review_notes.append(
+                "Reparaturkosten: WBW/Restwert wurde nicht als Reparaturkosten übernommen."
+            )
+        elif not sanitized_ai_rep and is_wert_money_value(ai_rep, local_source):
+            fields["rep_max_kosten"] = ""
+            review_notes.append(
+                "Reparaturkosten: WBW/Restwert wurde nicht als Reparaturkosten übernommen."
+            )
+    if local_rep:
+        current_rep = clean_text(fields.get("rep_max_kosten"))
+        if current_rep and not document_money_equal(current_rep, local_rep):
+            review_notes.append(
+                "Reparaturkosten: OCR und KI liefern unterschiedliche Werte. Bitte Originaldatei prüfen."
+            )
+        fields["rep_max_kosten"] = local_rep
 
     for key, value in (local_fields or {}).items():
         if value and not clean_text(fields.get(key)):
@@ -11419,6 +11630,8 @@ def normalized_review_value(key, value):
         return ""
     if key in {"annahme_datum", "fertig_datum", "abholtermin", "start_datum"}:
         return format_date(value)
+    if key == "rep_max_kosten":
+        return normalize_document_money_value(value) or value
     if key in {"kennzeichen", "fin_nummer"}:
         return value.upper()
     return value
@@ -12102,6 +12315,31 @@ def build_whatsapp_new_order_template_text(auftrag, absender_label="Autohaus"):
     )
 
 
+def whatsapp_outbound_notice_sent(auftrag_id, chat_id=0):
+    try:
+        auftrag_id = int(auftrag_id or 0)
+        chat_id = int(chat_id or 0)
+    except (TypeError, ValueError):
+        return False
+    if auftrag_id <= 0:
+        return False
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT id
+        FROM whatsapp_nachrichten
+        WHERE auftrag_id=?
+          AND chat_id=?
+          AND richtung='outbound'
+          AND status='gesendet'
+        LIMIT 1
+        """,
+        (auftrag_id, chat_id),
+    ).fetchone()
+    db.close()
+    return bool(row)
+
+
 def notify_workshop_whatsapp_for_new_order(auftrag_id, absender_label="Autohaus", return_errors=False):
     errors = whatsapp_bridge_config_errors()
     if errors:
@@ -12110,6 +12348,8 @@ def notify_workshop_whatsapp_for_new_order(auftrag_id, absender_label="Autohaus"
     if not auftrag:
         errors.append("Auftrag wurde nicht gefunden.")
         return (False, errors) if return_errors else False
+    if whatsapp_outbound_notice_sent(auftrag_id, chat_id=0):
+        return (True, errors) if return_errors else True
     body = build_whatsapp_new_order_notification(auftrag, absender_label=absender_label)
     sent_any = False
     for target_number in whatsapp_workshop_numbers():
@@ -12364,6 +12604,8 @@ def notify_workshop_whatsapp_for_chat(auftrag_id, chat_id, nachricht, absender_l
     auftrag = get_auftrag(auftrag_id)
     if not auftrag:
         return False
+    if whatsapp_outbound_notice_sent(auftrag_id, chat_id=chat_id):
+        return True
     body = build_whatsapp_chat_notification(auftrag, nachricht, absender_label=absender_label)
     sent_any = False
     for target_number in whatsapp_workshop_numbers():
@@ -17114,7 +17356,7 @@ def datei_matches_terms(datei, terms):
     return any(normalize_document_text(term) in haystack for term in terms if clean_text(term))
 
 
-def versicherung_requirement_item(key, label, status, detail, action=""):
+def versicherung_requirement_item(key, label, status, detail, action="", required="", anchor=""):
     status = status if status in {"ok", "warning", "missing"} else "missing"
     return {
         "key": key,
@@ -17122,6 +17364,8 @@ def versicherung_requirement_item(key, label, status, detail, action=""):
         "status": status,
         "detail": clean_text(detail),
         "action": clean_text(action),
+        "required": clean_text(required),
+        "anchor": clean_text(anchor),
         "badge": {
             "ok": "Vorhanden",
             "warning": "Prüfen",
@@ -17197,16 +17441,20 @@ def versicherung_pflichtunterlagen_status(auftrag, dateien=None):
             (
                 "GT-Kalkulation oder Unterlage liegt vor."
                 if has_estimate_file or has_gt_amount
-                else "Gutachten, DAT/GT-Kalkulation oder Kostenvoranschlag hochladen."
+                else "Gutachten, DAT-/GT-Kalkulation oder Kostenvoranschlag hochladen."
             ),
-            "Kalkulation hochladen oder GT Estimate abrufen.",
+            "Als PDF hochladen und im Hinweis z.B. Gutachten oder Kalkulation eintragen.",
+            "PDF mit Gutachten, DAT-/GT-Kalkulation oder Kostenvoranschlag. Wichtig sind Reparaturkosten, Fahrzeug, Kennzeichen/FIN und Schadenpositionen.",
+            "pflicht-upload",
         ),
         versicherung_requirement_item(
             "schadenbilder",
             "Schadenbilder",
             "ok" if has_damage_images else "missing",
             "Schadenbilder sind gespeichert." if has_damage_images else "Mindestens ein aussagekräftiges Schadenfoto hochladen.",
-            "Fotos vom Schadenbereich hochladen.",
+            "Fotos hochladen und im Hinweis z.B. Schadenfotos eintragen.",
+            "Mindestens 4 bis 6 Bilder: Gesamtansicht, Kennzeichen, betroffene Seite/Front/Heck, Nahaufnahme der Schäden und falls sinnvoll Kilometerstand.",
+            "pflicht-upload",
         ),
         versicherung_requirement_item(
             "fahrzeugdaten",
@@ -17214,6 +17462,8 @@ def versicherung_pflichtunterlagen_status(auftrag, dateien=None):
             "ok" if has_vehicle_identity else "warning",
             "FIN oder Fahrzeugschein liegt vor." if has_vehicle_identity else "FIN ergänzen oder Fahrzeugschein hochladen.",
             "FIN eintragen oder Fahrzeugschein hochladen.",
+            "FIN direkt eintragen oder Zulassungsbescheinigung Teil I/Fahrzeugschein als Foto/PDF hochladen.",
+            "pflicht-fahrzeugdaten",
         ),
         versicherung_requirement_item(
             "abtretung",
@@ -17221,6 +17471,8 @@ def versicherung_pflichtunterlagen_status(auftrag, dateien=None):
             "ok" if has_assignment else "warning",
             "Unterschriebene Abtretungserklärung liegt als Unterlage vor." if has_assignment else "PDF ist vorausgefüllt abrufbar, unterschriebene Version noch nicht hochgeladen.",
             "PDF herunterladen, unterschreiben lassen und hochladen.",
+            "Vorausgefüllte Abtretungserklärung, vom Kunden unterschrieben. Danach als Foto/PDF mit Hinweis Abtretung hochladen.",
+            "pflicht-abtretung",
         ),
         versicherung_requirement_item(
             "schadennummer",
@@ -17228,6 +17480,8 @@ def versicherung_pflichtunterlagen_status(auftrag, dateien=None):
             "ok" if has_damage_number else "warning",
             "Schaden- oder Policennummer ist hinterlegt." if has_damage_number else "Schaden-Nr. oder Policennummer ergänzen, sobald bekannt.",
             "Schaden-Nr. nachtragen.",
+            "Schaden-Nr. der Versicherung oder Policen-/Vertragsnummer. Wenn noch nicht bekannt, später nachtragen.",
+            "pflicht-schadennummer",
         ),
         versicherung_requirement_item(
             "anspruchsteller",
@@ -17235,6 +17489,8 @@ def versicherung_pflichtunterlagen_status(auftrag, dateien=None):
             "ok" if has_holder else "missing",
             "Anspruchsteller ist hinterlegt." if has_holder else "Kunde oder Versicherungsnehmer fehlt.",
             "Kunden-/Halterdaten ergänzen.",
+            "Name des Kunden/Halters und, falls abweichend, Versicherungsnehmer. Telefonnummer hilft bei Rückfragen.",
+            "pflicht-kunde",
         ),
     ]
     missing = [item for item in items if item["status"] == "missing"]
@@ -17249,6 +17505,7 @@ def versicherung_pflichtunterlagen_status(auftrag, dateien=None):
         "percent": int(round((ok_count / max(len(items), 1)) * 100)),
         "overall": "danger" if missing else ("warning" if warnings else "success"),
         "missing_labels": [item["label"] for item in missing],
+        "open_labels": [item["label"] for item in [*missing, *warnings]],
     }
 
 
@@ -20316,6 +20573,8 @@ def admin_auftrag_whatsapp_hinweis(auftrag_id):
         abort(404)
     if not auftrag.get("autohaus_id"):
         flash("Für diesen Auftrag ist kein Autohaus hinterlegt.", "warning")
+    elif whatsapp_outbound_notice_sent(auftrag_id, chat_id=0):
+        flash("WhatsApp-Hinweis wurde für diesen Auftrag bereits gesendet.", "info")
     else:
         sent, errors = notify_workshop_whatsapp_for_new_order(
             auftrag_id,
@@ -23091,6 +23350,9 @@ def partner_neues_angebot(slug):
             kontakt_telefon=clean_text(form.get("kontakt_telefon")),
             angebotsphase=1,
             angebot_abgesendet=0,
+            versicherungsnehmer=clean_text(form.get("versicherungsnehmer")),
+            schaden_nummer=clean_text(form.get("schaden_nummer")),
+            versicherung_police=clean_text(form.get("versicherung_police")),
         )
         upload_result = save_uploads(
             angebot_id,
@@ -23169,9 +23431,12 @@ def partner_angebot_detail(slug, auftrag_id):
             """
             UPDATE auftraege
             SET kunde_name=?,
+                versicherungsnehmer=?,
                 fahrzeug=?,
                 fin_nummer=?,
                 auftragsnummer=?,
+                schaden_nummer=?,
+                versicherung_police=?,
                 bauteile_override=?,
                 kennzeichen=?,
                 beschreibung=?,
@@ -23186,9 +23451,12 @@ def partner_angebot_detail(slug, auftrag_id):
             """,
             (
                 clean_text(form.get("kunde_name")),
+                clean_text(form.get("versicherungsnehmer")),
                 clean_text(form.get("fahrzeug")) or angebot["fahrzeug"],
                 clean_text(form.get("fin_nummer")).upper(),
                 clean_text(form.get("auftragsnummer")),
+                clean_text(form.get("schaden_nummer")),
+                clean_text(form.get("versicherung_police")),
                 clean_text(form.get("bauteile_override")) or angebot.get("bauteile_override", ""),
                 clean_text(form.get("kennzeichen")).upper(),
                 kunden_text,
@@ -23430,9 +23698,12 @@ def partner_auftrag(slug, auftrag_id):
             """
             UPDATE auftraege
             SET kunde_name=?,
+                versicherungsnehmer=?,
                 fahrzeug=?,
                 fin_nummer=?,
                 auftragsnummer=?,
+                schaden_nummer=?,
+                versicherung_police=?,
                 bauteile_override=?,
                 kennzeichen=?,
                 beschreibung=?,
@@ -23448,9 +23719,12 @@ def partner_auftrag(slug, auftrag_id):
             """,
             (
                 clean_text(form.get("kunde_name")),
+                clean_text(form.get("versicherungsnehmer")),
                 clean_text(form.get("fahrzeug")),
                 clean_text(form.get("fin_nummer")).upper(),
                 clean_text(form.get("auftragsnummer")),
+                clean_text(form.get("schaden_nummer")),
+                clean_text(form.get("versicherung_police")),
                 clean_text(form.get("bauteile_override")),
                 clean_text(form.get("kennzeichen")).upper(),
                 clean_text(form.get("beschreibung")),

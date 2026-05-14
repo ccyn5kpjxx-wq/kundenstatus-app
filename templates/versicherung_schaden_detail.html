@@ -70,7 +70,7 @@
             {% endfor %}
           </select>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-6" id="pflicht-kunde">
           <label class="form-label">Kunde / Halter</label>
           <input type="text" name="kunde_name" value="{{ auftrag['kunde_name'] }}" class="form-control">
         </div>
@@ -86,11 +86,11 @@
           <label class="form-label">Kennzeichen</label>
           <input type="text" name="kennzeichen" value="{{ auftrag['kennzeichen'] }}" class="form-control" style="text-transform:uppercase;">
         </div>
-        <div class="col-md-4">
+        <div class="col-md-4" id="pflicht-fahrzeugdaten">
           <label class="form-label">FIN</label>
           <input type="text" name="fin_nummer" value="{{ auftrag['fin_nummer'] }}" class="form-control" style="text-transform:uppercase;">
         </div>
-        <div class="col-md-4">
+        <div class="col-md-4" id="pflicht-schadennummer">
           <label class="form-label">Schaden-Nr.</label>
           <input type="text" name="schaden_nummer" value="{{ auftrag['schaden_nummer'] }}" class="form-control">
         </div>
@@ -236,6 +236,7 @@
           formenctype="application/x-www-form-urlencoded"
           data-no-loading="true"
           class="btn btn-soft"
+          id="pflicht-abtretung"
         >Abtretungserklärung herunterladen</button>
         <a href="{{ url_for('admin_versicherung_gt_motive_payload', auftrag_id=auftrag['id']) }}" class="btn btn-soft" target="_blank">GT-Motive Paket ansehen</a>
       </div>
@@ -273,7 +274,7 @@
 
   <div class="col-xl-4">
     <div class="insurance-side">
-      <div class="page-card p-4">
+      <div class="page-card p-4" id="pflicht-upload">
         <h5 class="mb-3">Unterlagen hochladen</h5>
         <input type="file" name="dateien" class="form-control mb-3" multiple>
         <textarea name="upload_notiz" class="form-control mb-3" rows="3" placeholder="Notiz zum Upload"></textarea>

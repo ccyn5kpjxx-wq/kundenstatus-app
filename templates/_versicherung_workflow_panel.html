@@ -1,24 +1,66 @@
 {% if pflichtunterlagen %}
+<style>
+  .requirement-link {
+    color: inherit;
+    text-decoration: none;
+    transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+  }
+  .requirement-link:hover,
+  .requirement-link:focus {
+    border-color: #17212a !important;
+    box-shadow: 0 8px 22px rgba(23, 33, 42, .12);
+    color: inherit;
+    transform: translateY(-1px);
+  }
+  [id^="pflicht-"]:target {
+    scroll-margin-top: 120px;
+    outline: 3px solid rgba(255, 193, 7, .65);
+    outline-offset: 8px;
+    border-radius: 16px;
+  }
+</style>
 <div class="border rounded-4 p-3 mb-3" style="background:#fffdf9;border-color:#e4d6c3 !important;">
   <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
     <div>
       <div class="fw-bold">Pflichtunterlagen-Ampel</div>
       <div class="text-muted small">{{ pflichtunterlagen['ok_count'] }} von {{ pflichtunterlagen['total'] }} Punkten erledigt.</div>
+      {% if pflichtunterlagen['open_labels'] %}
+      <div class="small mt-1">
+        Noch offen: {{ pflichtunterlagen['open_labels']|join(', ') }}.
+      </div>
+      {% endif %}
     </div>
     <span class="badge text-bg-{{ pflichtunterlagen['overall'] }}">{{ pflichtunterlagen['percent'] }}%</span>
   </div>
   <div class="d-grid gap-2">
     {% for item in pflichtunterlagen['items'] %}
-    <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start border rounded-3 p-2 bg-white">
+    {% set item_body %}
       <div>
         <div class="fw-semibold">{{ item['label'] }}</div>
         <div class="text-muted small">{{ item['detail'] }}</div>
+        {% if item['required'] %}
+        <div class="small mt-1"><strong>Benötigt:</strong> {{ item['required'] }}</div>
+        {% endif %}
         {% if item['status'] != 'ok' and item['action'] %}
-        <div class="small mt-1">{{ item['action'] }}</div>
+        <div class="small mt-1"><strong>Erledigen:</strong> {{ item['action'] }}</div>
         {% endif %}
       </div>
-      <span class="badge text-bg-{{ item['class'] }}">{{ item['badge'] }}</span>
+      <div class="d-flex flex-column align-items-end gap-2">
+        <span class="badge text-bg-{{ item['class'] }}">{{ item['badge'] }}</span>
+        {% if item['anchor'] and item['status'] != 'ok' %}
+        <span class="small fw-semibold">Zum Feld</span>
+        {% endif %}
+      </div>
+    {% endset %}
+    {% if item['anchor'] and item['status'] != 'ok' %}
+    <a href="#{{ item['anchor'] }}" class="requirement-link d-flex justify-content-between gap-3 flex-wrap align-items-start border rounded-3 p-2 bg-white">
+      {{ item_body }}
+    </a>
+    {% else %}
+    <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start border rounded-3 p-2 bg-white">
+      {{ item_body }}
     </div>
+    {% endif %}
     {% endfor %}
   </div>
 </div>

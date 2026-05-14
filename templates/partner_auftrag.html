@@ -421,7 +421,7 @@
       </div>
     </div>
 
-    <form method="POST" enctype="multipart/form-data" class="quick-upload-panel mb-4" data-upload-form>
+    <form method="POST" enctype="multipart/form-data" class="quick-upload-panel mb-4" data-upload-form id="pflicht-upload">
       <div class="quick-upload-grid">
         <div>
           <div class="quick-upload-kicker">Schnell-Upload</div>
@@ -550,21 +550,41 @@
               <h3 class="h5 mb-1">Kundendaten und Termine prüfen</h3>
               <div class="text-muted small">Wenn etwas nicht passt, können Sie es hier korrigieren.</div>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4" id="pflicht-kunde">
               <label class="form-label">Endkunde / Referenz</label>
               <input type="text" name="kunde_name" class="form-control form-control-lg" value="{{ auftrag['kunde_name'] }}">
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
+              <label class="form-label">Versicherungsnehmer</label>
+              <input type="text" name="versicherungsnehmer" class="form-control form-control-lg" value="{{ auftrag['versicherungsnehmer'] }}" placeholder="falls abweichend">
+            </div>
+            <div class="col-md-4">
               <label class="form-label">Telefon</label>
               <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ auftrag['kontakt_telefon'] }}">
             </div>
-            <div class="col-md-8">
+            <div class="col-md-4">
               <label class="form-label">Fahrzeug</label>
               <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ auftrag['fahrzeug'] }}" required>
             </div>
             <div class="col-md-4">
               <label class="form-label">Kennzeichen</label>
               <input type="text" name="kennzeichen" class="form-control form-control-lg" value="{{ auftrag['kennzeichen'] }}" style="text-transform:uppercase;">
+            </div>
+            <div class="col-md-4" id="pflicht-fahrzeugdaten">
+              <label class="form-label">FIN-Nummer</label>
+              <input type="text" name="fin_nummer" class="form-control form-control-lg" value="{{ auftrag['fin_nummer'] }}" style="text-transform:uppercase;">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Auftrag / Vorgangsnummer</label>
+              <input type="text" name="auftragsnummer" class="form-control form-control-lg" value="{{ auftrag['auftragsnummer'] }}">
+            </div>
+            <div class="col-md-4" id="pflicht-schadennummer">
+              <label class="form-label">Schaden-Nr.</label>
+              <input type="text" name="schaden_nummer" class="form-control form-control-lg" value="{{ auftrag['schaden_nummer'] }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Police / Vertrag</label>
+              <input type="text" name="versicherung_police" class="form-control form-control-lg" value="{{ auftrag['versicherung_police'] }}">
             </div>
             {% if auftrag['kunden_bauteile'] %}
             <div class="col-12">
@@ -653,7 +673,7 @@
             {% if auftrag['versicherung_gemeldet_am'] %} · gemeldet am {{ auftrag['versicherung_gemeldet_am'] }}{% endif %}
           </div>
           {% include "_versicherung_workflow_panel.html" %}
-          <a href="{{ url_for('partner_versicherung_auftrag_abtretungserklaerung_pdf', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="btn btn-outline-dark mb-3">Abtretungserklärung herunterladen</a>
+          <a href="{{ url_for('partner_versicherung_auftrag_abtretungserklaerung_pdf', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="btn btn-outline-dark mb-3" id="pflicht-abtretung">Abtretungserklärung herunterladen</a>
           <form method="POST" enctype="multipart/form-data" action="{{ url_for('partner_versicherung_antwort', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="d-grid gap-2 mb-3" data-upload-form>
             {{ csrf_field()|safe }}
             <label class="form-label mb-0">Antwort an die Versicherung</label>
@@ -670,8 +690,7 @@
           <div class="text-muted">Sobald die Freigabe vorliegt, kann der Auftrag hier weiter eingeplant werden.</div>
           {% endif %}
           {% else %}
-          <div class="text-muted mb-3">Falls der Kunde mit einem Versicherungsschaden kommt, kann das Autohaus den Fall direkt mit Gutachten und Bildern melden.</div>
-          <a href="{{ url_for('partner_versicherung_schaden_neu', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="btn btn-outline-dark">Als Versicherungsfall melden</a>
+          <div class="text-muted">Versicherungsfälle werden aktuell noch intern vorbereitet.</div>
           {% endif %}
         </div>
 
