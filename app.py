@@ -12216,6 +12216,7 @@ def list_admin_postfach_items(limit=80):
                 "fahrzeug": row["fahrzeug"],
                 "kennzeichen": row["kennzeichen"],
                 "ziel_url": admin_auftrag_detail_url(row["id"]),
+                "whatsapp_auftrag_id": row["id"],
             }
         )
 
@@ -12248,6 +12249,7 @@ def list_admin_postfach_items(limit=80):
                 "fahrzeug": row["fahrzeug"],
                 "kennzeichen": row["kennzeichen"],
                 "ziel_url": admin_auftrag_detail_url(row["id"]),
+                "whatsapp_auftrag_id": row["id"],
             }
         )
 
@@ -19694,6 +19696,28 @@ def admin_postfach_loeschen(item_key):
     if next_url.startswith("/"):
         return redirect(next_url)
     return redirect(url_for("admin_postfach"))
+
+
+@app.route("/admin/auftrag/<int:auftrag_id>/whatsapp-hinweis", methods=["POST"])
+@admin_required
+def admin_auftrag_whatsapp_hinweis(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+    if not auftrag.get("autohaus_id"):
+        flash("Für diesen Auftrag ist kein Autohaus hinterlegt.", "warning")
+    elif notify_workshop_whatsapp_for_new_order(
+        auftrag_id,
+        absender_label=auftrag.get("autohaus_name") or "Autohaus",
+    ):
+        flash("WhatsApp-Hinweis an die Werkstatt gesendet.", "success")
+    else:
+        flash("WhatsApp-Hinweis konnte nicht gesendet werden. Bitte WhatsApp-Konfiguration prüfen.", "warning")
+
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/admin"):
+        return redirect(next_url)
+    return redirect(admin_auftrag_detail_url(auftrag_id))
 
 
 @app.route("/admin/cockpit/eingang/<path:item_key>/oeffnen")

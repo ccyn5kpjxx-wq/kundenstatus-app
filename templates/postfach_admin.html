@@ -35,6 +35,13 @@
             </div>
           </div>
           <div class="d-flex gap-2 flex-wrap">
+            {% if item['whatsapp_auftrag_id'] %}
+            <form method="POST" action="{{ url_for('admin_auftrag_whatsapp_hinweis', auftrag_id=item['whatsapp_auftrag_id']) }}" class="m-0">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="next" value="{{ request.path }}">
+              <button type="submit" class="btn btn-soft btn-sm">WhatsApp senden</button>
+            </form>
+            {% endif %}
             <a href="{{ url_for('admin_postfach_oeffnen', item_key=item['item_key']) }}" class="btn btn-brand btn-sm">Öffnen</a>
             <form method="POST" action="{{ url_for('admin_postfach_loeschen', item_key=item['item_key']) }}" class="m-0">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

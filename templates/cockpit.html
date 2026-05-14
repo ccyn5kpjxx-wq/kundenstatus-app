@@ -732,6 +732,13 @@
                 <div class="start-list-meta mt-1">{{ item['nachricht'] }}</div>
               {% endif %}
             </a>
+            {% if item['whatsapp_auftrag_id'] %}
+            <form method="POST" action="{{ url_for('admin_auftrag_whatsapp_hinweis', auftrag_id=item['whatsapp_auftrag_id']) }}" class="start-list-actions m-0">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}">
+              <button type="submit" class="btn btn-soft btn-sm">WhatsApp senden</button>
+            </form>
+            {% endif %}
             <form method="POST" action="{{ url_for('admin_cockpit_eingang_loeschen', item_key=item['item_key']) }}" class="start-list-actions m-0">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}">
