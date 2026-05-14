@@ -1,0 +1,65 @@
+{% if pflichtunterlagen %}
+<div class="border rounded-4 p-3 mb-3" style="background:#fffdf9;border-color:#e4d6c3 !important;">
+  <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
+    <div>
+      <div class="fw-bold">Pflichtunterlagen-Ampel</div>
+      <div class="text-muted small">{{ pflichtunterlagen['ok_count'] }} von {{ pflichtunterlagen['total'] }} Punkten erledigt.</div>
+    </div>
+    <span class="badge text-bg-{{ pflichtunterlagen['overall'] }}">{{ pflichtunterlagen['percent'] }}%</span>
+  </div>
+  <div class="d-grid gap-2">
+    {% for item in pflichtunterlagen['items'] %}
+    <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start border rounded-3 p-2 bg-white">
+      <div>
+        <div class="fw-semibold">{{ item['label'] }}</div>
+        <div class="text-muted small">{{ item['detail'] }}</div>
+        {% if item['status'] != 'ok' and item['action'] %}
+        <div class="small mt-1">{{ item['action'] }}</div>
+        {% endif %}
+      </div>
+      <span class="badge text-bg-{{ item['class'] }}">{{ item['badge'] }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if versicherung_aufgaben %}
+<div class="border rounded-4 p-3 mb-3" style="background:#fffdf9;border-color:#e4d6c3 !important;">
+  <div class="fw-bold mb-2">Rückfragen als Aufgaben</div>
+  <div class="d-grid gap-2">
+    {% for aufgabe in versicherung_aufgaben %}
+    <div class="border rounded-3 p-2 {{ 'bg-white' if aufgabe['status'] == 'offen' else 'bg-light' }}">
+      <div class="d-flex justify-content-between gap-2 flex-wrap">
+        <div class="fw-semibold">{{ aufgabe['titel'] }}</div>
+        <span class="badge {{ 'text-bg-warning' if aufgabe['status'] == 'offen' else 'text-bg-success' }}">{{ 'Offen' if aufgabe['status'] == 'offen' else 'Erledigt' }}</span>
+      </div>
+      {% if aufgabe['beschreibung'] %}
+      <div class="small mt-1" style="white-space:pre-wrap;">{{ aufgabe['beschreibung'] }}</div>
+      {% endif %}
+      <div class="text-muted small mt-1">
+        Erstellt {{ aufgabe['erstellt_am'] }}
+        {% if aufgabe['erledigt_am'] %} · erledigt {{ aufgabe['erledigt_am'] }}{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if freigabe_zusammenfassung %}
+<div class="border rounded-4 p-3 mb-3" style="background:#eef9f2;border-color:#bdd7c8 !important;">
+  <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-2">
+    <div class="fw-bold">{{ freigabe_zusammenfassung['titel'] }}</div>
+    <span class="badge text-bg-success">Freigegeben</span>
+  </div>
+  {% if freigabe_zusammenfassung['hinweis'] %}
+  <div class="small mb-2" style="white-space:pre-wrap;">{{ freigabe_zusammenfassung['hinweis'] }}</div>
+  {% endif %}
+  <ul class="mb-0 small">
+    {% for punkt in freigabe_zusammenfassung['punkte'] %}
+    <li>{{ punkt }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}

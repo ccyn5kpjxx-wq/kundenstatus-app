@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ autohaus['portal_label'] }} - Versicherungsfall melden</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background:#f4f1ea; font-family:"DM Sans",sans-serif; color:#17212a; }
+    h1,h2,h3,h4,h5 { font-family:"Space Grotesk",sans-serif; }
+    .shell { max-width:1180px; margin:0 auto; padding:32px 16px; }
+    .panel { background:#fffdf9; border:1px solid #e4d6c3; border-radius:22px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
+    .step-card { border:1px solid #e4d6c3; border-radius:18px; background:#fffaf2; padding:18px; height:100%; }
+    .step-number { width:34px; height:34px; border-radius:50%; background:#17212a; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-weight:700; margin-bottom:10px; }
+    .damage-map { position:relative; width:100%; aspect-ratio:13/7; min-height:260px; border:1px solid #e4d6c3; border-radius:18px; background:#f7f1e8; overflow:hidden; }
+    .damage-car { position:absolute; inset:5% 4%; width:92%; height:90%; }
+    .damage-zone-check { position:absolute; opacity:0; pointer-events:none; }
+    .damage-zone-label { position:absolute; transform:translate(-50%,-50%); border:1px solid #cdbda8; border-radius:999px; background:rgba(255,253,249,.94); color:#21303b; padding:.42rem .65rem; font-size:.82rem; font-weight:700; cursor:pointer; box-shadow:0 8px 18px rgba(64,47,25,.12); white-space:nowrap; }
+    .damage-zone-check:checked + .damage-zone-label { background:#a23f2d; border-color:#a23f2d; color:#fff; }
+    .soft-note { border:1px solid #d9cab4; border-radius:16px; background:#f8f2e8; padding:14px 16px; color:#5e5144; }
+    @media (max-width:575.98px) {
+      .damage-map { min-height:360px; aspect-ratio:3/4; }
+      .damage-zone-label { font-size:.76rem; padding:.36rem .5rem; }
+      .panel { padding:20px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+      <div class="alert alert-{{ cat }} mb-4">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <div class="panel mb-4">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+        <div>
+          <div class="badge text-bg-dark mb-3">Versicherungsfall</div>
+          <h1 class="mb-2">Schaden für Kunden melden</h1>
+          <div class="text-muted">Gutachten, Fotos und Fahrzeugdaten einmal erfassen. Werkstatt und Versicherung sehen denselben Stand.</div>
+        </div>
+        <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zurück</a>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-md-4">
+        <div class="step-card">
+          <div class="step-number">1</div>
+          <div class="fw-bold">Schaden melden</div>
+          <div class="text-muted small">Kunde, Fahrzeug, Versicherung und Schadenbereiche eintragen.</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="step-card">
+          <div class="step-number">2</div>
+          <div class="fw-bold">Unterlagen hochladen</div>
+          <div class="text-muted small">Gutachten, Kalkulation und Fotos werden gespeichert und analysiert.</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="step-card">
+          <div class="step-number">3</div>
+          <div class="fw-bold">Freigabe abwarten</div>
+          <div class="text-muted small">Nach Freigabe kann das Fahrzeug als Auftrag eingeplant werden.</div>
+        </div>
+      </div>
+    </div>
+
+    <form method="POST" enctype="multipart/form-data" class="panel" data-upload-form>
+      {{ csrf_field()|safe }}
+      {% if vorlage %}
+      <input type="hidden" name="auftrag_id" value="{{ vorlage['id'] }}">
+      {% endif %}
+      <div class="row g-4">
+        <div class="col-12">
+          <h2 class="h4 mb-1">Versicherung und Kunde</h2>
+          <div class="text-muted">Bestehende Versicherung auswählen oder schnell neu anlegen.</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Versicherung</label>
+          <select name="versicherung_id" class="form-select form-select-lg" data-insurance-select>
+            <option value="">Bitte auswählen</option>
+            {% for item in versicherungen %}
+            <option value="{{ item['id'] }}" data-email="{{ item['email'] }}" {% if request.form.get('versicherung_id')|int == item['id'] or (vorlage and vorlage['versicherung_id'] == item['id']) %}selected{% endif %}>{{ item['name'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Neue Versicherung (optional)</label>
+          <input type="text" name="versicherung_name" class="form-control form-control-lg" value="{{ request.form.get('versicherung_name', '') }}" placeholder="z.B. HUK, Allianz, BGV">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Kontakt Versicherung</label>
+          <input type="text" name="versicherung_kontakt_name" class="form-control" value="{{ request.form.get('versicherung_kontakt_name', '') }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">E-Mail Versicherung / An</label>
+          <input type="email" name="versicherung_email" class="form-control" value="{{ request.form.get('versicherung_email') or (vorlage['versicherung_email'] if vorlage else '') }}" data-insurance-email>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Portal-Code neue Versicherung</label>
+          <input type="text" name="versicherung_zugangscode" class="form-control" value="{{ request.form.get('versicherung_zugangscode', '') }}" placeholder="optional">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">CC an</label>
+          <input type="text" name="versicherung_email_cc" class="form-control" value="{{ request.form.get('versicherung_email_cc') or (vorlage['versicherung_email_cc'] if vorlage else '') }}" placeholder="z.B. zweite Person im Autohaus">
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label">Kunde / Halter</label>
+          <input type="text" name="kunde_name" class="form-control form-control-lg" value="{{ request.form.get('kunde_name') or (vorlage['kunde_name'] if vorlage else '') }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Versicherungsnehmer</label>
+          <input type="text" name="versicherungsnehmer" class="form-control form-control-lg" value="{{ request.form.get('versicherungsnehmer') or (vorlage['versicherungsnehmer'] if vorlage else '') }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Telefon Kunde</label>
+          <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ request.form.get('kontakt_telefon') or (vorlage['kontakt_telefon'] if vorlage else '') }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Schaden-Nr.</label>
+          <input type="text" name="schaden_nummer" class="form-control form-control-lg" value="{{ request.form.get('schaden_nummer') or (vorlage['schaden_nummer'] if vorlage else '') }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Police / Vertrag</label>
+          <input type="text" name="versicherung_police" class="form-control form-control-lg" value="{{ request.form.get('versicherung_police') or (vorlage['versicherung_police'] if vorlage else '') }}">
+        </div>
+
+        <div class="col-12 pt-2">
+          <h2 class="h4 mb-1">Fahrzeug und Schaden</h2>
+          <div class="text-muted">Die GT-Estimate-Fahrzeugdarstellung wird vorbereitet; die Bereiche werden als Übergabedaten gespeichert.</div>
+        </div>
+        <div class="col-md-5">
+          <label class="form-label">Fahrzeug</label>
+          <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ request.form.get('fahrzeug') or (vorlage['fahrzeug'] if vorlage else '') }}" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Kennzeichen</label>
+          <input type="text" name="kennzeichen" class="form-control form-control-lg" value="{{ request.form.get('kennzeichen') or (vorlage['kennzeichen'] if vorlage else '') }}" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">FIN</label>
+          <input type="text" name="fin_nummer" class="form-control form-control-lg" value="{{ request.form.get('fin_nummer') or (vorlage['fin_nummer'] if vorlage else '') }}" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Schadenart</label>
+          <select name="schadenart" class="form-select form-select-lg">
+            {% set selected_art = request.form.get('schadenart') or (vorlage['schadenart'] if vorlage else 'haftpflicht') %}
+            {% for key, label in schadenarten %}
+            <option value="{{ key }}" {% if key == selected_art %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Kurze Schadenbeschreibung</label>
+          <input type="text" name="analyse_text" class="form-control form-control-lg" value="{{ request.form.get('analyse_text') or (vorlage['analyse_text'] if vorlage else '') }}" placeholder="z.B. Frontschaden, Stoßfänger und Kotflügel links">
+        </div>
+        <div class="col-12">
+          <div class="border rounded-3 p-3 bg-light">
+            <div class="fw-bold mb-2">GT Estimate API</div>
+            <div class="row g-3">
+              <div class="col-md-3">
+                <label class="form-label">GT Modellcode</label>
+                <input type="text" name="gt_motive_model_code" class="form-control" value="{{ request.form.get('gt_motive_model_code') or (vorlage['gt_motive_model_code'] if vorlage else '') }}" placeholder="z.B. CI02301">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">GT Zone</label>
+                <input type="text" name="gt_motive_zone" class="form-control" value="{{ request.form.get('gt_motive_zone') or (vorlage['gt_motive_zone'] if vorlage else '11000') }}">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">JobType</label>
+                <select name="gt_motive_job_type" class="form-select">
+                  {% set gt_job = request.form.get('gt_motive_job_type') or (vorlage['gt_motive_job_type'] if vorlage else 'All') %}
+                  {% for job in ['All', 'Mechanic', 'Forecasting'] %}
+                  <option value="{{ job }}" {% if gt_job == job %}selected{% endif %}>{{ job }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Sprache</label>
+                <input type="text" name="gt_motive_language" class="form-control" value="{{ request.form.get('gt_motive_language') or (vorlage['gt_motive_language'] if vorlage else 'de-DE') }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">GT Model-ID</label>
+                <input type="text" name="gt_motive_model_id" class="form-control" value="{{ request.form.get('gt_motive_model_id') or (vorlage['gt_motive_model_id'] if vorlage else '') }}" placeholder="optional">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Equipments</label>
+                <input type="text" name="gt_motive_equipments" class="form-control" value="{{ request.form.get('gt_motive_equipments') or (vorlage['gt_motive_equipments'] if vorlage else '') }}" placeholder="z.B. AT30,CB03">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Manufacturing Values</label>
+                <input type="text" name="gt_motive_manufacturing_values" class="form-control" value="{{ request.form.get('gt_motive_manufacturing_values') or (vorlage['gt_motive_manufacturing_values'] if vorlage else '') }}" placeholder="z.B. FEC 2020-01-01">
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Fahrzeugdarstellung</label>
+          {% set editable = true %}
+          {% set selected_zones = request.form.getlist('schaden_zonen') or (vorlage['schaden_zonen'] if vorlage else []) %}
+          {% include "_fahrzeug_schadenkarte.html" %}
+        </div>
+        <div class="col-12">
+          <label class="form-label">Notiz zu den markierten Bereichen</label>
+          <textarea name="schaden_zonen_notiz" class="form-control" rows="2">{{ request.form.get('schaden_zonen_notiz') or (vorlage['schaden_zonen_notiz'] if vorlage else '') }}</textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Freitext / Zusatzinfo</label>
+          <textarea name="beschreibung" class="form-control" rows="4" placeholder="Was ist passiert, welche Unterlagen liegen vor, was soll die Versicherung wissen?">{{ request.form.get('beschreibung') or (vorlage['beschreibung'] if vorlage else '') }}</textarea>
+        </div>
+
+        <div class="col-12 pt-2">
+          <h2 class="h4 mb-1">Gutachten und Bilder</h2>
+          <div class="text-muted">Alles, was hier hochgeladen wird, bleibt direkt am Schadenfall hängen.</div>
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Gutachten, Kalkulation, Bilder</label>
+          <input type="file" name="dateien" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Hinweis zum Upload</label>
+          <input type="text" name="upload_notiz" class="form-control form-control-lg" placeholder="z.B. Gutachten + Schadenfotos">
+        </div>
+
+        <div class="col-12">
+          <div class="soft-note">
+            Nach dem Speichern bleibt der Fall zuerst bei Autohaus und Versicherung. Gärtner wird erst aktiv, wenn die Versicherung freigegeben hat und das Autohaus das Fahrzeug einplant.
+          </div>
+        </div>
+        <div class="col-12 d-flex gap-2 flex-wrap">
+          <button
+            type="submit"
+            class="btn btn-outline-dark btn-lg"
+            formaction="{{ url_for('partner_versicherung_abtretungserklaerung_pdf', slug=autohaus['slug']) }}"
+            formmethod="post"
+            formenctype="application/x-www-form-urlencoded"
+          >Abtretungserklärung herunterladen</button>
+          <button type="submit" class="btn btn-dark btn-lg">Vorlage erstellen und prüfen</button>
+          <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Abbrechen</a>
+        </div>
+      </div>
+    </form>
+  </main>
+  <script>
+    (() => {
+      const select = document.querySelector('[data-insurance-select]');
+      const emailInput = document.querySelector('[data-insurance-email]');
+      if (!select || !emailInput) return;
+      let wasSuggested = !emailInput.value;
+      const applyInsuranceEmail = () => {
+        const selected = select.options[select.selectedIndex];
+        const suggested = selected ? (selected.dataset.email || '') : '';
+        if (!emailInput.value || wasSuggested) {
+          emailInput.value = suggested;
+          wasSuggested = Boolean(suggested);
+        }
+      };
+      emailInput.addEventListener('input', () => {
+        wasSuggested = false;
+      });
+      select.addEventListener('change', applyInsuranceEmail);
+      applyInsuranceEmail();
+    })();
+  </script>
+</body>
+</html>

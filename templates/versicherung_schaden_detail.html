@@ -1,0 +1,359 @@
+{% extends "base.html" %}
+{% block title %}Versicherungsschaden{% endblock %}
+
+{% block extra_css %}
+<style>
+  .damage-map { position:relative; width:100%; aspect-ratio:13/7; min-height:260px; border:1px solid #e4d6c3; border-radius:18px; background:#f7f1e8; overflow:hidden; }
+  .damage-car { position:absolute; inset:5% 4%; width:92%; height:90%; }
+  .damage-zone-check { position:absolute; opacity:0; pointer-events:none; }
+  .damage-zone-label { position:absolute; transform:translate(-50%,-50%); border:1px solid #cdbda8; border-radius:999px; background:rgba(255,253,249,.94); color:#21303b; padding:.42rem .65rem; font-size:.82rem; font-weight:700; cursor:pointer; box-shadow:0 8px 18px rgba(64,47,25,.12); white-space:nowrap; }
+  .damage-zone-check:checked + .damage-zone-label { background:#a23f2d; border-color:#a23f2d; color:#fff; }
+  .insurance-side { display:grid; gap:1rem; }
+  .info-box { border:1px solid #e4d6c3; border-radius:16px; background:#fffaf2; padding:1rem; }
+  .info-box code { white-space:normal; overflow-wrap:anywhere; }
+  .file-list { display:grid; gap:.65rem; }
+  .file-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.75rem; align-items:center; border:1px solid #e4d6c3; border-radius:14px; padding:.75rem .9rem; background:#fffdf9; }
+  .chat-thread { max-height:360px; overflow-y:auto; display:grid; gap:.75rem; }
+  .chat-message { border:1px solid #e4d6c3; border-radius:16px; padding:.85rem .95rem; background:#fffdf9; }
+  .chat-message.is-versicherung { background:#eef5ff; border-color:#b8cce8; }
+  .chat-message.is-autohaus { background:#eef5f1; border-color:#bdd7c8; }
+  .chat-message.is-werkstatt { background:#f8f2e8; border-color:#d8c4a6; }
+  textarea.mail-draft { min-height:360px; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:.92rem; }
+  @media (max-width:575.98px) {
+    .damage-map { min-height:360px; aspect-ratio:3/4; }
+    .damage-zone-label { font-size:.76rem; padding:.36rem .5rem; }
+    .file-item { grid-template-columns:1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<form method="POST" enctype="multipart/form-data" data-upload-form>
+<div class="row g-4">
+  <div class="col-xl-8">
+    <div class="page-card p-4 p-lg-5 mb-4">
+      <div class="section-title align-items-start">
+        <div>
+          <div class="badge-soft mb-3">Versicherungsschaden</div>
+          <h1 class="mb-2">{{ auftrag['fahrzeug'] }}</h1>
+          <p>
+            {{ versicherung['name'] if versicherung else 'Versicherung offen' }}
+            {% if auftrag['kennzeichen'] %} · {{ auftrag['kennzeichen'] }}{% endif %}
+            {% if auftrag['schaden_nummer'] %} · Schaden {{ auftrag['schaden_nummer'] }}{% endif %}
+          </p>
+        </div>
+        <span class="badge text-bg-{{ auftrag['versicherung_freigabe_meta']['farbe'] }}">{{ auftrag['versicherung_freigabe_meta']['label'] }}</span>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">Versicherung</label>
+          <select name="versicherung_id" class="form-select" data-insurance-select>
+            {% for item in versicherungen %}
+            <option value="{{ item['id'] }}" data-email="{{ item['email'] }}" {% if item['id'] == auftrag['versicherung_id'] %}selected{% endif %}>{{ item['name'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Freigabe</label>
+          <select name="versicherung_freigabe_status" class="form-select">
+            {% for key, meta in freigabe_status.items() %}
+            <option value="{{ key }}" {% if key == auftrag['versicherung_freigabe_status'] %}selected{% endif %}>{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Schadenart</label>
+          <select name="schadenart" class="form-select">
+            {% for key, label in schadenarten %}
+            <option value="{{ key }}" {% if key == auftrag['schadenart'] %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Kunde / Halter</label>
+          <input type="text" name="kunde_name" value="{{ auftrag['kunde_name'] }}" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Versicherungsnehmer</label>
+          <input type="text" name="versicherungsnehmer" value="{{ auftrag['versicherungsnehmer'] }}" class="form-control">
+        </div>
+        <div class="col-md-5">
+          <label class="form-label">Fahrzeug</label>
+          <input type="text" name="fahrzeug" value="{{ auftrag['fahrzeug'] }}" class="form-control">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Kennzeichen</label>
+          <input type="text" name="kennzeichen" value="{{ auftrag['kennzeichen'] }}" class="form-control" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">FIN</label>
+          <input type="text" name="fin_nummer" value="{{ auftrag['fin_nummer'] }}" class="form-control" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Schaden-Nr.</label>
+          <input type="text" name="schaden_nummer" value="{{ auftrag['schaden_nummer'] }}" class="form-control">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Police / Vertrag</label>
+          <input type="text" name="versicherung_police" value="{{ auftrag['versicherung_police'] }}" class="form-control">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Telefon Kunde</label>
+          <input type="text" name="kontakt_telefon" value="{{ auftrag['kontakt_telefon'] }}" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">E-Mail Versicherung / An</label>
+          <input type="email" name="versicherung_email" value="{{ auftrag['versicherung_email'] or (versicherung['email'] if versicherung else '') }}" class="form-control" data-insurance-email>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">CC an</label>
+          <input type="text" name="versicherung_email_cc" value="{{ auftrag['versicherung_email_cc'] }}" class="form-control" placeholder="optional">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Fahrzeugdarstellung</label>
+          {% set editable = true %}
+          {% set selected_zones = auftrag['schaden_zonen'] %}
+          {% include "_fahrzeug_schadenkarte.html" %}
+        </div>
+        <div class="col-12">
+          <label class="form-label">Notiz zu den markierten Bereichen</label>
+          <textarea name="schaden_zonen_notiz" class="form-control" rows="2">{{ auftrag['schaden_zonen_notiz'] }}</textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Schadenbeschreibung</label>
+          <textarea name="beschreibung" class="form-control" rows="4">{{ auftrag['beschreibung'] }}</textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Analyse / Kurztext</label>
+          <input type="text" name="analyse_text" value="{{ auftrag['analyse_text'] }}" class="form-control">
+        </div>
+        <div class="col-12">
+          <div class="border rounded-3 p-3 bg-light">
+            <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+              <div>
+                <div class="fw-bold">GT Estimate API</div>
+                <div class="text-muted small">VehicleRepresentation abrufen: Modellcode und Zone werden direkt an GT übergeben.</div>
+                {% if auftrag['gt_motive_vehicle_representation_loaded_at'] %}
+                <div class="text-success small mt-1">
+                  Geladen am {{ auftrag['gt_motive_vehicle_representation_loaded_at'] }}{% if auftrag['gt_motive_vehicle_items'] %} · {{ auftrag['gt_motive_vehicle_items']|length }} Bauteile{% endif %}{% if auftrag['gt_motive_kalkulation_betrag'] %} · {{ auftrag['gt_motive_kalkulation_betrag'] }}{% endif %}
+                </div>
+                {% endif %}
+              </div>
+              <button
+                type="submit"
+                formaction="{{ url_for('admin_versicherung_gt_motive_fahrzeugdarstellung', auftrag_id=auftrag['id']) }}"
+                formmethod="post"
+                formenctype="application/x-www-form-urlencoded"
+                class="btn btn-dark"
+                data-loading-message="GT Estimate wird abgefragt. Bitte kurz warten."
+                data-loading-title="GT API"
+              >GT-Fahrzeugdarstellung laden</button>
+            </div>
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label">GT-Motive Vorgangs-ID</label>
+                <input type="text" name="gt_motive_vorgang_id" value="{{ auftrag['gt_motive_vorgang_id'] }}" class="form-control">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">GT-Status</label>
+                <input type="text" name="gt_motive_status" value="{{ auftrag['gt_motive_status'] }}" class="form-control">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Kalkulation</label>
+                <input type="text" name="gt_motive_kalkulation_betrag" value="{{ auftrag['gt_motive_kalkulation_betrag'] }}" class="form-control" placeholder="2.450 EUR">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">GT Modellcode</label>
+                <input type="text" name="gt_motive_model_code" value="{{ auftrag['gt_motive_model_code'] }}" class="form-control" placeholder="z.B. CI02301">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">GT Zone</label>
+                <input type="text" name="gt_motive_zone" value="{{ auftrag['gt_motive_zone'] }}" class="form-control" placeholder="11000">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">JobType</label>
+                <select name="gt_motive_job_type" class="form-select">
+                  {% for job in ['All', 'Mechanic', 'Forecasting'] %}
+                  <option value="{{ job }}" {% if auftrag['gt_motive_job_type'] == job %}selected{% endif %}>{{ job }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Sprache</label>
+                <input type="text" name="gt_motive_language" value="{{ auftrag['gt_motive_language'] }}" class="form-control">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">GT Model-ID</label>
+                <input type="text" name="gt_motive_model_id" value="{{ auftrag['gt_motive_model_id'] }}" class="form-control" placeholder="optional">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Equipments</label>
+                <input type="text" name="gt_motive_equipments" value="{{ auftrag['gt_motive_equipments'] }}" class="form-control" placeholder="z.B. AT30,CB03">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Manufacturing Values</label>
+                <input type="text" name="gt_motive_manufacturing_values" value="{{ auftrag['gt_motive_manufacturing_values'] }}" class="form-control" placeholder="z.B. FEC 2020-01-01">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-card p-4 mb-4">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Prüfung und Aufgaben</h4>
+          <p>Pflichtunterlagen, Rückfragen und Freigabe auf einen Blick.</p>
+        </div>
+      </div>
+      {% include "_versicherung_workflow_panel.html" %}
+    </div>
+
+    <div class="page-card p-4 mb-4">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Anschreiben an die Versicherung</h4>
+          <p>Automatisch vorbereitet, vor dem Senden kurz prüfen.</p>
+        </div>
+      </div>
+      <textarea name="versicherung_anschreiben" class="form-control mail-draft">{{ anschreiben }}</textarea>
+      {% set anschreiben_empfaenger = auftrag['versicherung_email'] or (versicherung['email'] if versicherung else '') %}
+      <div class="text-muted small mt-2">
+        An: {{ anschreiben_empfaenger or 'offen' }}
+        {% if auftrag['versicherung_email_cc'] %} · CC: {{ auftrag['versicherung_email_cc'] }}{% endif %}
+        {% if auftrag['versicherung_sendefreigabe_am'] %} · Freigegeben am {{ auftrag['versicherung_sendefreigabe_am'] }}{% endif %}
+      </div>
+      <div class="d-flex gap-2 flex-wrap mt-3">
+        <button type="submit" class="btn btn-brand">Speichern</button>
+        <button type="submit" formaction="{{ url_for('admin_versicherung_schaden_melden', auftrag_id=auftrag['id']) }}" formmethod="post" class="btn btn-soft">Als gemeldet markieren</button>
+        <button
+          type="submit"
+          formaction="{{ url_for('admin_versicherung_abtretungserklaerung_pdf') }}"
+          formmethod="post"
+          formenctype="application/x-www-form-urlencoded"
+          data-no-loading="true"
+          class="btn btn-soft"
+        >Abtretungserklärung herunterladen</button>
+        <a href="{{ url_for('admin_versicherung_gt_motive_payload', auftrag_id=auftrag['id']) }}" class="btn btn-soft" target="_blank">GT-Motive Paket ansehen</a>
+      </div>
+    </div>
+
+    <div class="page-card p-4 mb-4">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Nachrichten zur Versicherung</h4>
+          <p>Rückfragen, Freigaben und Antworten aus der App.</p>
+        </div>
+        {% if chat_nachrichten %}
+        <span class="badge text-bg-warning">{{ chat_nachrichten|length }} Nachricht(en)</span>
+        {% endif %}
+      </div>
+      {% if chat_nachrichten %}
+      <div class="chat-thread">
+        {% for chat in chat_nachrichten %}
+        {% set chat_class = 'is-versicherung' if chat['absender'] == 'versicherung' else ('is-autohaus' if chat['absender'] == 'autohaus' else 'is-werkstatt') %}
+        {% set chat_label = 'Versicherung' if chat['absender'] == 'versicherung' else ('Autohaus' if chat['absender'] == 'autohaus' else 'Werkstatt') %}
+        <div class="chat-message {{ chat_class }}">
+          <div class="d-flex justify-content-between gap-2 flex-wrap mb-1">
+            <div class="fw-bold">{{ chat_label }}</div>
+            <div class="text-muted small">{{ chat['erstellt_am'] }}</div>
+          </div>
+          <div style="white-space:pre-wrap;">{{ chat['nachricht'] }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-muted">Noch keine Nachrichten vorhanden.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-xl-4">
+    <div class="insurance-side">
+      <div class="page-card p-4">
+        <h5 class="mb-3">Unterlagen hochladen</h5>
+        <input type="file" name="dateien" class="form-control mb-3" multiple>
+        <textarea name="upload_notiz" class="form-control mb-3" rows="3" placeholder="Notiz zum Upload"></textarea>
+        <button type="submit" class="btn btn-brand w-100" data-loading-message="Bitte kurz warten. Unterlagen werden gelesen.">Hochladen & speichern</button>
+      </div>
+      <div class="page-card p-4">
+        <h5 class="mb-3">Kundenstatus</h5>
+        {% if auftrag['kunden_status_url'] %}
+          <div class="info-box">
+            <div class="text-muted small mb-1">Status-Link für QR-Code</div>
+            <code>{{ auftrag['kunden_status_url'] }}</code>
+          </div>
+        {% else %}
+          <div class="text-muted">Noch kein Kundenstatus-Link vorhanden.</div>
+        {% endif %}
+      </div>
+      <div class="page-card p-4">
+        <h5 class="mb-3">GT Motive</h5>
+        <div class="info-box">
+          <div class="fw-bold">{{ 'API-Daten gesetzt' if gt_motive_payload['gt_motive']['configured'] else 'API vorbereitet' }}</div>
+          <div class="text-muted small">
+            Modellcode: {{ auftrag['gt_motive_model_code'] or 'offen' }} · Zone: {{ auftrag['gt_motive_zone'] or '11000' }}
+          </div>
+          {% if auftrag['gt_motive_vehicle_representation_loaded_at'] %}
+            <div class="text-success small mt-2">Fahrzeugdarstellung geladen: {{ auftrag['gt_motive_vehicle_representation_loaded_at'] }}</div>
+          {% elif auftrag['gt_motive_vehicle_representation_error'] %}
+            <div class="text-warning small mt-2">{{ auftrag['gt_motive_vehicle_representation_error'] }}</div>
+          {% else %}
+            <div class="text-muted small mt-2">Noch keine GT-Fahrzeugdarstellung geladen.</div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="page-card p-4">
+        <h5 class="mb-3">Dateien</h5>
+        {% if dateien %}
+          <div class="file-list">
+            {% for datei in dateien %}
+            <div class="file-item">
+              <div>
+                <div class="fw-bold">{{ datei['original_name'] }}</div>
+                <div class="text-muted small">{{ datei['dokument_typ'] or datei['kategorie'] }} · {{ datei['hochgeladen_am'] }}</div>
+              </div>
+              <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" class="btn btn-soft btn-sm" target="_blank">Öffnen</a>
+            </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="text-muted">Noch keine Dateien hochgeladen.</div>
+        {% endif %}
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a href="{{ url_for('admin_versicherung') }}" class="btn btn-soft">Zur Übersicht</a>
+        <a href="{{ url_for('auftrag_detail', auftrag_id=auftrag['id']) }}" class="btn btn-soft">Werkstattauftrag</a>
+      </div>
+    </div>
+  </div>
+</div>
+</form>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (() => {
+    const select = document.querySelector('[data-insurance-select]');
+    const emailInput = document.querySelector('[data-insurance-email]');
+    if (!select || !emailInput) return;
+    let wasSuggested = !emailInput.value;
+    const applyInsuranceEmail = () => {
+      const selected = select.options[select.selectedIndex];
+      const suggested = selected ? (selected.dataset.email || '') : '';
+      if (!emailInput.value || wasSuggested) {
+        emailInput.value = suggested;
+        wasSuggested = Boolean(suggested);
+      }
+    };
+    emailInput.addEventListener('input', () => {
+      wasSuggested = false;
+    });
+    select.addEventListener('change', applyInsuranceEmail);
+    applyInsuranceEmail();
+  })();
+</script>
+{% endblock %}

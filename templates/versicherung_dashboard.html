@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ versicherung['name'] }} - Schadenfälle</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background:#f3efe6; color:#16202a; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    .shell { max-width:1120px; margin:0 auto; padding:28px 16px; }
+    .panel { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); }
+    .case-list { display:grid; gap:.8rem; }
+    .case-row { display:grid; grid-template-columns:minmax(220px,1fr) auto auto; gap:1rem; align-items:center; border:1px solid #e4d6c3; border-radius:14px; background:#fffaf2; padding:1rem; color:#16202a; text-decoration:none; }
+    .case-row:hover { color:#16202a; border-color:#a23f2d; }
+    @media (max-width:760px) { .case-row { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="panel mb-4">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+        <div>
+          <div class="badge text-bg-dark mb-3">Versicherungsportal</div>
+          <h1 class="mb-1">{{ versicherung['name'] }}</h1>
+          <div class="text-muted">Digitale Schadenakte, Unterlagen und Reparaturstatus.</div>
+        </div>
+        <a href="{{ url_for('versicherung_logout') }}" class="btn btn-outline-dark">Logout</a>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="h4 mb-1">Schadenfälle</h2>
+          <div class="text-muted">Alle aktiven Fälle dieser Versicherung.</div>
+        </div>
+        <span class="badge text-bg-secondary">{{ schadenfaelle|length }} offen</span>
+      </div>
+      {% if schadenfaelle %}
+        <div class="case-list">
+          {% for fall in schadenfaelle %}
+          <a class="case-row" href="{{ url_for('versicherung_auftrag', slug=versicherung['slug'], auftrag_id=fall['id']) }}">
+            <div>
+              <div class="fw-bold">{{ fall['fahrzeug'] }}</div>
+              <div class="text-muted small">
+                {% if fall['kennzeichen'] %}{{ fall['kennzeichen'] }}{% endif %}
+                {% if fall['schaden_nummer'] %} · Schaden {{ fall['schaden_nummer'] }}{% endif %}
+                {% if fall['kunde_name'] %} · {{ fall['kunde_name'] }}{% endif %}
+              </div>
+            </div>
+            <span class="badge text-bg-{{ fall['versicherung_freigabe_meta']['farbe'] }}">{{ fall['versicherung_freigabe_meta']['label'] }}</span>
+            <span class="text-muted small">{{ fall['status_meta']['label'] }}</span>
+          </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-muted">Aktuell sind keine Schadenfälle freigegeben.</div>
+      {% endif %}
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Versicherungsschäden{% endblock %}
+
+{% block extra_css %}
+<style>
+  .insurance-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.8rem; }
+  .insurance-metric { border:1px solid #e4d6c3; border-radius:16px; background:#fffaf2; padding:1rem; }
+  .insurance-metric span { display:block; color:var(--muted); font-size:.86rem; }
+  .insurance-metric strong { font-family:"Space Grotesk",sans-serif; font-size:1.8rem; line-height:1; }
+  .case-row { display:grid; grid-template-columns:minmax(220px,1.2fr) minmax(160px,.8fr) minmax(160px,.8fr) auto; gap:1rem; align-items:center; border:1px solid #e4d6c3; border-radius:16px; background:#fffdf9; padding:1rem; }
+  .case-list { display:grid; gap:.75rem; }
+  @media (max-width: 900px) {
+    .insurance-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .case-row { grid-template-columns:1fr; }
+  }
+  @media (max-width: 575.98px) { .insurance-grid { grid-template-columns:1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-card p-4 p-lg-5 mb-4">
+  <div class="section-title align-items-start">
+    <div>
+      <div class="badge-soft mb-3">Versicherungen</div>
+      <h1 class="mb-2">Schadenportal</h1>
+      <p>Eigene Schadenfälle für Versicherungen, ohne den Autohausbereich zu verändern.</p>
+    </div>
+    <a href="{{ url_for('admin_versicherung_schaden_neu') }}" class="btn btn-brand btn-lg">Schaden aufnehmen</a>
+  </div>
+  <div class="insurance-grid">
+    <div class="insurance-metric"><span>Aktive Fälle</span><strong>{{ schadenfaelle|length }}</strong></div>
+    <div class="insurance-metric"><span>Versicherungen</span><strong>{{ versicherungen|length }}</strong></div>
+    <div class="insurance-metric"><span>Freigegeben</span><strong>{{ schadenfaelle|selectattr('versicherung_freigabe_status', 'equalto', 'freigegeben')|list|length }}</strong></div>
+    <div class="insurance-metric"><span>Rückfragen</span><strong>{{ schadenfaelle|selectattr('versicherung_freigabe_status', 'equalto', 'rueckfrage')|list|length }}</strong></div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Aktuelle Versicherungsschäden</h4>
+      <p>Schadenmeldung, Fahrzeugdarstellung und Freigabe auf einen Blick.</p>
+    </div>
+  </div>
+  {% if schadenfaelle %}
+    <div class="case-list">
+      {% for fall in schadenfaelle %}
+      <div class="case-row">
+        <div>
+          <div class="fw-bold">{{ fall['fahrzeug'] }}</div>
+          <div class="text-muted small">
+            {{ fall['versicherung_name'] or 'Versicherung offen' }}
+            {% if fall['kennzeichen'] %} · {{ fall['kennzeichen'] }}{% endif %}
+            {% if fall['schaden_nummer'] %} · Schaden {{ fall['schaden_nummer'] }}{% endif %}
+          </div>
+        </div>
+        <div>
+          <span class="badge text-bg-{{ fall['versicherung_freigabe_meta']['farbe'] }}">{{ fall['versicherung_freigabe_meta']['label'] }}</span>
+          <div class="text-muted small mt-1">{{ fall['schadenart_label'] }}</div>
+        </div>
+        <div>
+          {% if fall['schaden_zonen_labels'] %}
+            <div class="small">{{ fall['schaden_zonen_labels']|join(', ') }}</div>
+          {% else %}
+            <div class="text-muted small">Keine Schadenzone markiert</div>
+          {% endif %}
+        </div>
+        <div class="text-end">
+          <a href="{{ url_for('admin_versicherung_schaden_detail', auftrag_id=fall['id']) }}" class="btn btn-soft btn-sm">Öffnen</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="text-muted">Noch kein Versicherungsschaden angelegt.</div>
+  {% endif %}
+</div>
+{% endblock %}

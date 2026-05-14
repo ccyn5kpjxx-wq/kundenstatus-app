@@ -1,0 +1,106 @@
+{% set selected_zone_keys = selected_zones if selected_zones is defined and selected_zones else (auftrag.get('schaden_zonen', []) if auftrag else []) %}
+{% set editable_map = editable if editable is defined else false %}
+{% if gt_motive_payload is defined %}
+  {% set gt_ready = gt_motive_payload['gt_motive']['configured'] %}
+{% else %}
+  {% set gt_ready = gt_motive_configured if gt_motive_configured is defined else false %}
+{% endif %}
+{% set gt_items = auftrag.get('gt_motive_vehicle_items', []) if auftrag else [] %}
+{% set gt_error = auftrag.get('gt_motive_vehicle_representation_error', '') if auftrag else '' %}
+{% set gt_loaded_at = auftrag.get('gt_motive_vehicle_representation_loaded_at', '') if auftrag else '' %}
+
+<div class="border rounded-3 p-3 bg-white">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+    <div>
+      <div class="text-uppercase text-muted small fw-bold">GT Estimate</div>
+      <div class="fw-bold">Fahrzeugdarstellung aus GT Estimate</div>
+      <div class="text-muted small">
+        {% if gt_ready %}
+          Zugangsdaten sind gesetzt. Die GT-Fahrzeugdarstellung wird ueber die VehicleRepresentation-Schnittstelle geladen.
+        {% else %}
+          Noch keine GT-Estimate-Zugangsdaten gesetzt. Bitte GT_MOTIVE_API_KEY bzw. CLIENT_ID in .env.local eintragen.
+        {% endif %}
+        {% if gt_loaded_at %}<span class="d-block">Zuletzt geladen: {{ gt_loaded_at }}</span>{% endif %}
+      </div>
+    </div>
+    <span class="badge text-bg-{{ 'success' if gt_ready else 'warning' }}">
+      {{ 'GT-Zugang aktiv' if gt_ready else 'GT-Zugang offen' }}
+    </span>
+  </div>
+
+  {% if gt_error %}
+    <div class="alert alert-warning py-2 mb-3">{{ gt_error }}</div>
+  {% endif %}
+
+  {% if gt_items %}
+    {% set ns = namespace(positioned=false) %}
+    {% for item in gt_items %}
+      {% if item.x or item.y %}
+        {% set ns.positioned = true %}
+      {% endif %}
+    {% endfor %}
+    {% if ns.positioned %}
+      <div class="border rounded-3 bg-light mb-3 overflow-auto" style="min-height:420px;">
+        <div style="position:relative; width:980px; min-height:520px; margin:0 auto;">
+          {% for item in gt_items %}
+            <div
+              title="{{ item.label }}"
+              style="position:absolute; left:{{ item.x }}px; top:{{ item.y }}px; z-index:{{ item.order }}; transform:scale({{ item.scale }}) rotate({{ item.rotation }}deg); transform-origin:top left;"
+            >
+              <div style="max-width:420px;">{{ item.svg|safe }}</div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% else %}
+      <div class="border rounded-3 bg-light mb-3 p-3 d-flex flex-wrap gap-3 align-items-start">
+        {% for item in gt_items %}
+          <div title="{{ item.label }}" style="max-width:260px;">{{ item.svg|safe }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% else %}
+    <div class="border rounded-3 p-4 text-center bg-light mb-3">
+      <div class="fw-bold">GT-Fahrzeugdarstellung noch nicht geladen</div>
+      <div class="text-muted small">
+        {% if auftrag is defined and auftrag and auftrag.get('id') %}
+          GT Modellcode und Zone eintragen, dann die Darstellung ueber GT abrufen.
+        {% else %}
+          GT Modellcode und Zone werden gespeichert; danach kann die Darstellung ueber GT geladen werden.
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+
+  {% if editable_map %}
+    <div class="d-flex flex-wrap gap-2">
+      {% for zone in schaden_zonen %}
+        {% set is_selected = zone['key'] in selected_zone_keys %}
+        <input
+          class="btn-check"
+          type="checkbox"
+          id="schaden-zone-{{ zone['key'] }}"
+          name="schaden_zonen"
+          value="{{ zone['key'] }}"
+          autocomplete="off"
+          {% if is_selected %}checked{% endif %}
+        >
+        <label class="btn btn-sm btn-outline-danger" for="schaden-zone-{{ zone['key'] }}">
+          {{ zone['label'] }}
+        </label>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="d-flex flex-wrap gap-2">
+      {% for zone in schaden_zonen %}
+        {% set is_selected = zone['key'] in selected_zone_keys %}
+        {% if is_selected %}
+          <span class="badge text-bg-danger">{{ zone['label'] }}</span>
+        {% endif %}
+      {% endfor %}
+      {% if not selected_zone_keys %}
+        <span class="text-muted small">Noch keine Schadenbereiche markiert.</span>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>

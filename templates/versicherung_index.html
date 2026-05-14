@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Versicherungsportal</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { min-height:100vh; background:#16202a; display:flex; align-items:center; padding:18px; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    .login-card { max-width:540px; width:100%; border-radius:22px; padding:32px; }
+    .form-select, .form-control, .btn { min-height:48px; font-size:16px; }
+    @media (max-width:575.98px) { body { align-items:flex-start; padding:14px; } .login-card { padding:24px 18px; margin-top:24px; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="mx-auto bg-white shadow login-card">
+      <div class="text-center mb-4">
+        <h1 class="h3 mb-2">Versicherungsportal</h1>
+        <div class="text-muted">Bitte Versicherung auswählen und mit dem Zugangscode anmelden.</div>
+      </div>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in messages %}
+          <div class="alert alert-{{ cat }}">{{ msg }}</div>
+        {% endfor %}
+      {% endwith %}
+      <form method="POST" autocomplete="on">
+        <input type="text" id="versicherung-benutzername" name="username" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
+        <div class="mb-3">
+          <label class="form-label" for="portal_key">Versicherung</label>
+          <select id="portal_key" name="portal_key" class="form-select form-select-lg" required autofocus>
+            <option value="">Bitte auswählen</option>
+            {% for versicherung in versicherungen %}
+            <option value="{{ versicherung['portal_key'] }}">{{ versicherung['name'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="zugangscode">Passwort / Zugangscode</label>
+          <input type="password" id="zugangscode" name="password" class="form-control form-control-lg" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn btn-dark w-100 btn-lg">Einloggen</button>
+      </form>
+    </div>
+  </div>
+  <script>
+    (() => {
+      const portalSelect = document.getElementById("portal_key");
+      const usernameInput = document.getElementById("versicherung-benutzername");
+      if (!portalSelect || !usernameInput) return;
+      const syncUsername = () => { usernameInput.value = portalSelect.value || ""; };
+      portalSelect.addEventListener("change", syncUsername);
+      syncUsername();
+    })();
+  </script>
+</body>
+</html>

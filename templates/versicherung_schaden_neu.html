@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}Versicherungsschaden aufnehmen{% endblock %}
+
+{% block extra_css %}
+<style>
+  .damage-map { position:relative; width:100%; aspect-ratio:13/7; min-height:260px; border:1px solid #e4d6c3; border-radius:18px; background:#f7f1e8; overflow:hidden; }
+  .damage-car { position:absolute; inset:5% 4%; width:92%; height:90%; }
+  .damage-zone-check { position:absolute; opacity:0; pointer-events:none; }
+  .damage-zone-label { position:absolute; transform:translate(-50%,-50%); border:1px solid #cdbda8; border-radius:999px; background:rgba(255,253,249,.94); color:#21303b; padding:.42rem .65rem; font-size:.82rem; font-weight:700; cursor:pointer; box-shadow:0 8px 18px rgba(64,47,25,.12); white-space:nowrap; }
+  .damage-zone-check:checked + .damage-zone-label { background:#a23f2d; border-color:#a23f2d; color:#fff; }
+  @media (max-width:575.98px) {
+    .damage-map { min-height:360px; aspect-ratio:3/4; }
+    .damage-zone-label { font-size:.76rem; padding:.36rem .5rem; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-xl-11">
+    <div class="page-card p-4 p-lg-5">
+      <div class="section-title align-items-start">
+        <div>
+          <div class="badge-soft mb-3">Rundum-sorglos</div>
+          <h1 class="mb-2">Versicherungsschaden aufnehmen</h1>
+          <p>Bilder und Unterlagen hochladen, Schadenbereiche markieren und die Meldung automatisch vorbereiten.</p>
+        </div>
+        <a href="{{ url_for('admin_versicherung') }}" class="btn btn-soft">Zur Übersicht</a>
+      </div>
+
+      <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
+        <div class="col-lg-6">
+          <label class="form-label">Versicherung</label>
+          <select name="versicherung_id" class="form-select form-select-lg" data-insurance-select>
+            <option value="">Neue Versicherung unten eintragen</option>
+            {% for versicherung in versicherungen %}
+            <option value="{{ versicherung['id'] }}" data-email="{{ versicherung['email'] }}">{{ versicherung['name'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-6">
+          <label class="form-label">Neue Versicherung</label>
+          <input type="text" name="versicherung_name" class="form-control form-control-lg" placeholder="z.B. HUK, Allianz, R+V">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Kontakt Versicherung</label>
+          <input type="text" name="versicherung_kontakt_name" class="form-control">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">E-Mail Versicherung / An</label>
+          <input type="email" name="versicherung_email" class="form-control" data-insurance-email>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Zugangscode</label>
+          <input type="text" name="versicherung_zugangscode" class="form-control" placeholder="leer = automatisch">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">CC an</label>
+          <input type="text" name="versicherung_email_cc" class="form-control" placeholder="optional">
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label">Kunde / Halter</label>
+          <input type="text" name="kunde_name" class="form-control form-control-lg">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Telefon Kunde</label>
+          <input type="text" name="kontakt_telefon" class="form-control form-control-lg">
+        </div>
+        <div class="col-md-5">
+          <label class="form-label">Fahrzeug</label>
+          <input type="text" name="fahrzeug" class="form-control form-control-lg" placeholder="z.B. VW Golf">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Kennzeichen</label>
+          <input type="text" name="kennzeichen" class="form-control form-control-lg" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">FIN</label>
+          <input type="text" name="fin_nummer" class="form-control form-control-lg" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Schaden-Nr.</label>
+          <input type="text" name="schaden_nummer" class="form-control">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Police / Vertrag</label>
+          <input type="text" name="versicherung_police" class="form-control">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Schadenart</label>
+          <select name="schadenart" class="form-select">
+            {% for key, label in schadenarten %}
+            <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-12">
+          <div class="border rounded-3 p-3 bg-light">
+            <div class="fw-bold mb-2">GT Estimate API</div>
+            <div class="row g-3">
+              <div class="col-md-3">
+                <label class="form-label">GT Modellcode</label>
+                <input type="text" name="gt_motive_model_code" class="form-control" placeholder="z.B. CI02301">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">GT Zone</label>
+                <input type="text" name="gt_motive_zone" class="form-control" value="11000">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">JobType</label>
+                <select name="gt_motive_job_type" class="form-select">
+                  <option value="All">All</option>
+                  <option value="Mechanic">Mechanic</option>
+                  <option value="Forecasting">Forecasting</option>
+                </select>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Sprache</label>
+                <input type="text" name="gt_motive_language" class="form-control" value="de-DE">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">GT Model-ID</label>
+                <input type="text" name="gt_motive_model_id" class="form-control" placeholder="optional">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Equipments</label>
+                <input type="text" name="gt_motive_equipments" class="form-control" placeholder="z.B. AT30,CB03">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Manufacturing Values</label>
+                <input type="text" name="gt_motive_manufacturing_values" class="form-control" placeholder="z.B. FEC 2020-01-01">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <label class="form-label">Fahrzeugdarstellung</label>
+          {% set editable = true %}
+          {% set selected_zones = [] %}
+          {% include "_fahrzeug_schadenkarte.html" %}
+        </div>
+        <div class="col-12">
+          <label class="form-label">Notiz zu den markierten Bereichen</label>
+          <textarea name="schaden_zonen_notiz" class="form-control" rows="2"></textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Schadenbeschreibung</label>
+          <textarea name="beschreibung" class="form-control" rows="4" placeholder="Was ist passiert, welche Stellen sind sichtbar beschädigt?"></textarea>
+        </div>
+        <div class="col-md-7">
+          <label class="form-label">Bilder und Unterlagen</label>
+          <input type="file" name="dateien" class="form-control form-control-lg" multiple>
+          <div class="form-text">Fotos, Fahrzeugschein, Versicherungsschreiben, Gutachten oder Kalkulation hochladen.</div>
+        </div>
+        <div class="col-md-5">
+          <label class="form-label">Upload-Notiz</label>
+          <textarea name="upload_notiz" class="form-control" rows="3"></textarea>
+        </div>
+        <div class="col-12 d-flex gap-2 flex-wrap">
+          <button
+            type="submit"
+            class="btn btn-soft btn-lg"
+            formaction="{{ url_for('admin_versicherung_abtretungserklaerung_pdf') }}"
+            formmethod="post"
+            formenctype="application/x-www-form-urlencoded"
+            data-no-loading="true"
+          >Abtretungserklärung herunterladen</button>
+          <button type="submit" class="btn btn-brand btn-lg" data-loading-message="Bitte kurz warten. Schadenfall und Unterlagen werden vorbereitet.">Schadenfall anlegen</button>
+          <a href="{{ url_for('admin_versicherung') }}" class="btn btn-soft btn-lg">Zurück</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (() => {
+    const select = document.querySelector('[data-insurance-select]');
+    const emailInput = document.querySelector('[data-insurance-email]');
+    if (!select || !emailInput) return;
+    let wasSuggested = !emailInput.value;
+    const applyInsuranceEmail = () => {
+      const selected = select.options[select.selectedIndex];
+      const suggested = selected ? (selected.dataset.email || '') : '';
+      if (!emailInput.value || wasSuggested) {
+        emailInput.value = suggested;
+        wasSuggested = Boolean(suggested);
+      }
+    };
+    emailInput.addEventListener('input', () => {
+      wasSuggested = false;
+    });
+    select.addEventListener('change', applyInsuranceEmail);
+    applyInsuranceEmail();
+  })();
+</script>
+{% endblock %}

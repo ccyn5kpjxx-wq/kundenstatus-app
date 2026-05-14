@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Status - {{ auftrag['fahrzeug'] }}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background:#f3efe6; color:#16202a; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    .shell { max-width:760px; margin:0 auto; padding:28px 16px; }
+    .panel { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); }
+    .timeline { display:grid; gap:.85rem; margin-top:1rem; }
+    .timeline-step { display:grid; grid-template-columns:34px minmax(0,1fr); gap:.75rem; align-items:start; }
+    .timeline-dot { width:34px; height:34px; border-radius:999px; display:flex; align-items:center; justify-content:center; border:1px solid #d7c7b0; background:#f7f1e8; font-weight:800; }
+    .timeline-step.is-done .timeline-dot { background:#1f7a4d; border-color:#1f7a4d; color:#fff; }
+    .timeline-step.is-active .timeline-dot { background:#1f3557; border-color:#1f3557; color:#fff; }
+    .timeline-card { border:1px solid #e4d6c3; border-radius:14px; background:#fffdf9; padding:.85rem 1rem; }
+    .timeline-step.is-active .timeline-card { border-color:#b9c8dc; background:#eef5ff; }
+    .doc-grid { display:grid; gap:.55rem; }
+    .doc-row { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; border:1px solid #e4d6c3; border-radius:12px; padding:.7rem .85rem; background:#fffdf9; }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="panel mb-4">
+      <div class="badge text-bg-dark mb-3">Fahrzeugstatus</div>
+      <h1 class="mb-2">{{ auftrag['fahrzeug'] }}</h1>
+      <div class="text-muted">
+        {% if auftrag['kennzeichen'] %}{{ auftrag['kennzeichen'] }}{% endif %}
+        {% if auftrag['kunde_name'] %} · {{ auftrag['kunde_name'] }}{% endif %}
+      </div>
+      <div class="mt-3">
+        <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }} fs-6">{{ auftrag['status_meta']['label'] }}</span>
+        {% if auftrag['versicherung_id'] %}
+        <span class="badge text-bg-{{ auftrag['versicherung_freigabe_meta']['farbe'] }} fs-6">{{ auftrag['versicherung_freigabe_meta']['label'] }}</span>
+        {% endif %}
+      </div>
+      <div class="timeline">
+        {% for step in kunden_timeline %}
+        <div class="timeline-step is-{{ step['state'] }}">
+          <div class="timeline-dot">{{ loop.index }}</div>
+          <div class="timeline-card">
+            <div class="fw-bold">{{ step['label'] }}</div>
+            <div class="text-muted small">{{ step['detail'] }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% if freigabe_zusammenfassung %}
+    <div class="panel mb-4">
+      <h2 class="h4 mb-3">Versicherungsfreigabe</h2>
+      <div class="alert alert-success mb-0">Die Versicherung hat den Schaden freigegeben. Das Autohaus kann die Einplanung mit der Werkstatt abstimmen.</div>
+    </div>
+    {% endif %}
+    {% if pflichtunterlagen %}
+    <div class="panel mb-4">
+      <h2 class="h4 mb-3">Unterlagenstatus</h2>
+      <div class="doc-grid">
+        {% for item in pflichtunterlagen['items'] %}
+        <div class="doc-row">
+          <div>
+            <div class="fw-semibold">{{ item['label'] }}</div>
+            <div class="text-muted small">{{ item['detail'] }}</div>
+          </div>
+          <span class="badge text-bg-{{ item['class'] }}">{{ item['badge'] }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    <div class="panel">
+      <h2 class="h4 mb-3">Termine</h2>
+      <div class="row g-3">
+        <div class="col-sm-6"><div class="text-muted small">Annahme</div><div class="fw-bold">{{ auftrag['annahme_datum'] or 'offen' }}</div></div>
+        <div class="col-sm-6"><div class="text-muted small">Start</div><div class="fw-bold">{{ auftrag['start_datum'] or 'offen' }}</div></div>
+        <div class="col-sm-6"><div class="text-muted small">Fertig</div><div class="fw-bold">{{ auftrag['fertig_datum'] or 'offen' }}</div></div>
+        <div class="col-sm-6"><div class="text-muted small">Abholung</div><div class="fw-bold">{{ auftrag['abholtermin'] or 'offen' }}</div></div>
+      </div>
+      {% if auftrag['status'] >= 4 %}
+        <div class="alert alert-success mt-4 mb-0">Ihr Fahrzeug ist fertig oder kurz vor der Abholung. Wir melden uns, sobald alles bereitsteht.</div>
+      {% else %}
+        <div class="alert alert-info mt-4 mb-0">Wir halten den Reparaturstatus hier aktuell.</div>
+      {% endif %}
+    </div>
+  </main>
+</body>
+</html>

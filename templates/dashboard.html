@@ -16,6 +16,84 @@
 {% endblock %}
 
 {% block content %}
+{% if cockpit and cockpit['offene_chat_nachrichten'] %}
+<div class="page-card p-4 mb-4" id="chat-nachrichten">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Neue Chat-Nachrichten</h4>
+      <p>Ungelesene Rückfragen aus den Partnerportalen.</p>
+    </div>
+    <a href="{{ url_for('admin_postfach') }}" class="btn btn-soft btn-sm">Postfach öffnen</a>
+  </div>
+  <div class="d-grid gap-2">
+    {% for item in cockpit['offene_chat_nachrichten'][:4] %}
+    <div class="border rounded-3 p-3 bg-white">
+      <div class="d-flex justify-content-between gap-2 align-items-start flex-wrap">
+        <div>
+          <div class="fw-bold">{{ item['titel'] }}</div>
+          <div class="text-muted small">
+            {{ item['autohaus_name'] or 'Autohaus' }} · {{ item['fahrzeug'] or 'Fahrzeug' }}{% if item['kennzeichen'] %} · {{ item['kennzeichen'] }}{% endif %} · {{ item['erstellt_am'] }}
+          </div>
+        </div>
+        <a href="{{ url_for('admin_postfach_oeffnen', item_key=item['item_key']) }}" class="btn btn-brand btn-sm">Öffnen</a>
+      </div>
+      {% if item['nachricht'] %}
+      <div class="mt-2" style="white-space:pre-wrap;">{{ item['nachricht'] }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if angebotsanfragen %}
+<div class="page-card p-4 mb-4" id="angebote">
+  <div class="section-title">
+    <div>
+      <h4 class="mb-1">Offene Angebotsanfragen</h4>
+      <p>Neue Anfragen aus den Partnerportalen, inklusive Unterlagen und Bilder.</p>
+    </div>
+  </div>
+  <div class="row g-3">
+    {% for angebot in angebotsanfragen %}
+    <div class="col-lg-6 col-xxl-4">
+      <div class="border rounded-3 p-3 h-100 bg-white">
+        <div class="d-flex justify-content-between gap-2 align-items-start mb-2">
+          <div>
+            <div class="fw-bold">{{ angebot['fahrzeug'] or 'Fahrzeug' }}</div>
+            <div class="text-muted small">
+              {{ angebot['autohaus_name'] or 'Autohaus' }}{% if angebot['kennzeichen'] %} · {{ angebot['kennzeichen'] }}{% endif %}
+            </div>
+          </div>
+          <span class="badge text-bg-warning">Anfrage</span>
+        </div>
+        <div class="analysis-cell mb-3">{{ angebot['analyse_text'] or angebot['beschreibung'] or 'Keine Beschreibung hinterlegt.' }}</div>
+        {% if angebot['dateien'] %}
+        <div class="small text-muted mb-2">Unterlagen und Bilder</div>
+        <div class="d-grid gap-2 mb-3">
+          {% for datei in angebot['dateien'][:3] %}
+          <div class="border rounded-3 p-2">
+            {% if datei['is_browser_image'] %}
+            <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener">
+              <img src="{{ url_for('admin_datei', datei_id=datei['id']) }}" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-2">
+            </a>
+            {% endif %}
+            <div class="d-flex justify-content-between gap-2 align-items-center">
+              <span class="small fw-semibold breakable-text">{{ datei['original_name'] }}</span>
+              <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Öffnen</a>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <a href="{{ url_for('auftrag_detail', auftrag_id=angebot['id']) }}" class="btn btn-brand btn-sm">Anfrage prüfen</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 <div class="page-card p-4 mb-4" id="auftraege">
   <div class="section-title">
     <div>

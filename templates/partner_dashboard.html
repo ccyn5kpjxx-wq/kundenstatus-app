@@ -321,6 +321,48 @@
       border-radius:10px;
       white-space:nowrap;
     }
+    .whatsapp-quick-status {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-height:38px;
+      margin-left:auto;
+      padding:6px 10px;
+      border:1px solid #b9ddc6;
+      border-radius:10px;
+      background:#eef9f2;
+      color:#173f2b;
+      flex:0 0 auto;
+      max-width:190px;
+    }
+    .whatsapp-mark {
+      display:inline-flex;
+      width:24px;
+      height:24px;
+      flex:0 0 24px;
+      align-items:center;
+      justify-content:center;
+      border-radius:999px;
+      background:#1fae62;
+      color:#fff;
+      font-size:.56rem;
+      font-weight:800;
+      letter-spacing:.02em;
+      box-shadow:0 4px 10px rgba(31,174,98,.18);
+    }
+    .whatsapp-quick-status strong {
+      display:block;
+      color:#102f21;
+      font-size:.86rem;
+      line-height:1.1;
+    }
+    .whatsapp-quick-status small {
+      display:block;
+      color:#3f6d54;
+      font-size:.72rem;
+      line-height:1.2;
+      margin-top:2px;
+    }
     .priority-panel {
       background:
         radial-gradient(circle at 8% 10%, rgba(43,128,139,.14), transparent 30%),
@@ -464,6 +506,10 @@
       .portal-action-row {
         justify-content:flex-start;
       }
+      .whatsapp-quick-status {
+        margin-left:0;
+        flex:1 1 260px;
+      }
       .portal-brand-stage {
         min-height:auto;
       }
@@ -498,6 +544,10 @@
       .panel .btn,
       .bulk-bar .btn {
         width:100%;
+      }
+      .whatsapp-quick-status {
+        width:100%;
+        flex-basis:100%;
       }
       .bulk-bar {
         align-items:stretch;
@@ -658,6 +708,7 @@
           <div class="portal-action-row">
             <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Lackierauftrag ausfüllen</a>
             <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Angebot anfordern</a>
+            <a href="{{ url_for('partner_versicherung_schaden_neu', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Versicherungsfall melden</a>
             <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Bonusmodell</a>
             {% if not rahmenvertrag['aktiv'] %}
             <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Rahmenvertrag vereinbaren</a>
@@ -665,6 +716,13 @@
             <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}" class="btn btn-dark btn-lg">Neues Fahrzeug</a>
             <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
             <a href="{{ url_for('partner_logout') }}" class="btn btn-outline-dark btn-lg">Logout</a>
+            <div class="whatsapp-quick-status" role="status" aria-label="WhatsApp Verbindung aktiv">
+              <span class="whatsapp-mark" aria-hidden="true">WA</span>
+              <div>
+                <strong>WhatsApp aktiv</strong>
+                <small>Schnelle Antwort</small>
+              </div>
+            </div>
           </div>
           <div class="portal-search" data-portal-search data-search-url="{{ url_for('partner_auftraege_suche', slug=autohaus['slug']) }}">
             <label class="form-label fw-bold mb-2">Fahrzeug suchen</label>
@@ -712,6 +770,35 @@
             <input type="hidden" name="next" value="{{ request.path }}">
             <button type="submit" class="btn btn-outline-dark btn-sm">Löschen</button>
           </form>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if versicherungsfaelle %}
+    <div class="panel mb-4 border border-warning-subtle">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h4 class="mb-1">Versicherungsfälle</h4>
+          <div class="text-muted">Schadenmeldungen, die auf Prüfung oder Freigabe warten.</div>
+        </div>
+        <a href="{{ url_for('partner_versicherung_schaden_neu', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-sm">Neuen Fall melden</a>
+      </div>
+      <div class="d-grid gap-2">
+        {% for fall in versicherungsfaelle[:5] %}
+        {% set fall_url = url_for('partner_angebot_detail', slug=autohaus['slug'], auftrag_id=fall['id']) if fall['angebotsphase'] else url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=fall['id']) %}
+        <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap border rounded-4 p-3 bg-white">
+          <div>
+            <div class="fw-bold">{{ fall['fahrzeug'] }}</div>
+            <div class="text-muted small">
+              {{ fall['versicherung_name'] or 'Versicherung' }}{% if fall['kennzeichen'] %} · {{ fall['kennzeichen'] }}{% endif %}{% if fall['schaden_nummer'] %} · Schaden {{ fall['schaden_nummer'] }}{% endif %}
+            </div>
+          </div>
+          <div class="d-flex gap-2 align-items-center flex-wrap">
+            <span class="badge text-bg-{{ fall['versicherung_freigabe_meta']['farbe'] }}">{{ fall['versicherung_freigabe_meta']['label'] }}</span>
+            <a href="{{ fall_url }}" class="btn btn-outline-dark btn-sm">Öffnen</a>
+          </div>
         </div>
         {% endfor %}
       </div>

@@ -281,6 +281,39 @@
       border-radius: 18px;
       padding: 16px 18px;
     }
+    .whatsapp-forward-note {
+      display:flex;
+      align-items:flex-start;
+      gap:12px;
+      border:1px solid #b9ddc6;
+      background:#eef9f2;
+      border-radius:16px;
+      color:#173f2b;
+      padding:12px 14px;
+      font-size:.94rem;
+      line-height:1.35;
+    }
+    .whatsapp-mark {
+      display:inline-flex;
+      width:34px;
+      height:34px;
+      flex:0 0 34px;
+      align-items:center;
+      justify-content:center;
+      border-radius:999px;
+      background:#1fae62;
+      color:#fff;
+      font-size:.72rem;
+      font-weight:800;
+      letter-spacing:.02em;
+      box-shadow:0 6px 14px rgba(31,174,98,.22);
+    }
+    .whatsapp-forward-note strong {
+      display:block;
+      color:#102f21;
+      font-weight:800;
+      margin-bottom:2px;
+    }
     .finish-image-preview {
       width: 100%;
       max-height: 220px;
@@ -308,6 +341,10 @@
     .chat-message.is-werkstatt {
       background: #f8f2e8;
       border-color: #d8c4a6;
+    }
+    .chat-message.is-versicherung {
+      background: #eef5ff;
+      border-color: #b8cce8;
     }
   </style>
 </head>
@@ -584,6 +621,40 @@
           </div>
         </div>
 
+        <div class="panel mb-4">
+          <h4 class="mb-2">Versicherung</h4>
+          {% if auftrag['versicherung_id'] %}
+          <div class="d-flex gap-2 align-items-center flex-wrap mb-2">
+            <span class="badge text-bg-{{ auftrag['versicherung_freigabe_meta']['farbe'] }}">{{ auftrag['versicherung_freigabe_meta']['label'] }}</span>
+            {% if auftrag['versicherung_name'] %}<span class="chip">{{ auftrag['versicherung_name'] }}</span>{% endif %}
+          </div>
+          <div class="text-muted small mb-3">
+            {% if auftrag['schaden_nummer'] %}Schaden {{ auftrag['schaden_nummer'] }}{% else %}Schadenfall im Portal erfasst{% endif %}
+            {% if auftrag['versicherung_gemeldet_am'] %} · gemeldet am {{ auftrag['versicherung_gemeldet_am'] }}{% endif %}
+          </div>
+          {% include "_versicherung_workflow_panel.html" %}
+          <a href="{{ url_for('partner_versicherung_auftrag_abtretungserklaerung_pdf', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="btn btn-outline-dark mb-3">Abtretungserklärung herunterladen</a>
+          <form method="POST" enctype="multipart/form-data" action="{{ url_for('partner_versicherung_antwort', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="d-grid gap-2 mb-3" data-upload-form>
+            {{ csrf_field()|safe }}
+            <label class="form-label mb-0">Antwort an die Versicherung</label>
+            <textarea name="nachricht" class="form-control" rows="3" placeholder="Antwort oder fehlende Angaben ergänzen"></textarea>
+            <input type="file" name="dateien" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
+            <button type="submit" class="btn btn-outline-dark" data-loading-message="Antwort wird gespeichert und Unterlagen werden analysiert. Bitte kurz warten.">Antwort senden</button>
+          </form>
+          {% if auftrag['versicherung_freigabe_status'] == 'freigegeben' %}
+          <form method="POST" action="{{ url_for('partner_versicherung_freigabe_einplanen', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}">
+            {{ csrf_field()|safe }}
+            <button type="submit" class="btn btn-dark">Freigabe übernehmen</button>
+          </form>
+          {% else %}
+          <div class="text-muted">Sobald die Freigabe vorliegt, kann der Auftrag hier weiter eingeplant werden.</div>
+          {% endif %}
+          {% else %}
+          <div class="text-muted mb-3">Falls der Kunde mit einem Versicherungsschaden kommt, kann das Autohaus den Fall direkt mit Gutachten und Bildern melden.</div>
+          <a href="{{ url_for('partner_versicherung_schaden_neu', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="btn btn-outline-dark">Als Versicherungsfall melden</a>
+          {% endif %}
+        </div>
+
         {% if auftrag['status'] >= 5 %}
         <div class="panel mb-4">
           <h4 class="mb-2">Bonus</h4>
@@ -601,19 +672,28 @@
         <div class="panel mb-4 border border-warning-subtle">
           <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
             <div>
-              <h4 class="mb-1">Chat mit der Werkstatt</h4>
-              <div class="text-muted small">Hier können Sie Fragen oder Probleme direkt zu diesem Auftrag schreiben.</div>
+              <h4 class="mb-1">Nachrichten zum Auftrag</h4>
+              <div class="text-muted small">Werkstatt und Versicherung bleiben hier nachvollziehbar.</div>
             </div>
             {% if chat_nachrichten %}
             <span class="badge text-bg-warning">{{ chat_nachrichten|length }} Nachricht(en)</span>
             {% endif %}
           </div>
+          <div class="whatsapp-forward-note mb-3">
+            <span class="whatsapp-mark" aria-hidden="true">WA</span>
+            <div>
+              <strong>WhatsApp-Verbindung aktiv</strong>
+              Ihre Nachricht wird direkt an die Werkstatt-WhatsApp weitergeleitet. Antworten der Werkstatt werden hier im Portal-Chat gespeichert.
+            </div>
+          </div>
           {% if chat_nachrichten %}
           <div class="chat-thread mb-3">
             {% for chat in chat_nachrichten %}
-            <div class="chat-message {{ 'is-autohaus' if chat['absender'] == 'autohaus' else 'is-werkstatt' }}">
+            {% set chat_class = 'is-versicherung' if chat['absender'] == 'versicherung' else ('is-autohaus' if chat['absender'] == 'autohaus' else 'is-werkstatt') %}
+            {% set chat_label = 'Versicherung' if chat['absender'] == 'versicherung' else ('Sie' if chat['absender'] == 'autohaus' else 'Werkstatt') %}
+            <div class="chat-message {{ chat_class }}">
               <div class="d-flex justify-content-between gap-2 flex-wrap mb-1">
-                <div class="fw-bold">{{ 'Sie' if chat['absender'] == 'autohaus' else 'Werkstatt' }}</div>
+                <div class="fw-bold">{{ chat_label }}</div>
                 <div class="text-muted small">{{ chat['erstellt_am'] }}</div>
               </div>
               <div style="white-space:pre-wrap;">{{ chat['nachricht'] }}</div>
@@ -763,12 +843,12 @@
                     <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
                   </form>
                   {% else %}
-                  <span class="badge text-bg-light border">Werkstatt-Datei</span>
+                  <span class="badge text-bg-light border">{{ 'Versicherung-Datei' if datei['quelle'] == 'versicherung' else 'Werkstatt-Datei' }}</span>
                   {% endif %}
                 </div>
                 {% if datei['notiz'] %}
                   <div class="mt-3">
-                    <div class="small text-muted">Hinweis Autohaus</div>
+                    <div class="small text-muted">Hinweis {{ 'Versicherung' if datei['quelle'] == 'versicherung' else ('Autohaus' if datei['quelle'] == 'autohaus' else 'Werkstatt') }}</div>
                     <div class="fw-semibold">{{ datei['notiz'] }}</div>
                   </div>
                 {% endif %}
@@ -830,7 +910,7 @@
                     <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
                   </form>
                   {% else %}
-                  <span class="badge text-bg-light border">Werkstatt-Datei</span>
+                  <span class="badge text-bg-light border">{{ 'Versicherung-Datei' if datei['quelle'] == 'versicherung' else 'Werkstatt-Datei' }}</span>
                   {% endif %}
                 </div>
               </div>

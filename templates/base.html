@@ -362,6 +362,7 @@
       <a class="nav-link" href="{{ url_for('admin_news') }}">News</a>
       <a class="nav-link" href="{{ url_for('dashboard') }}#auftraege">Lackierportal</a>
       <a class="nav-link" href="{{ url_for('neuer_auftrag') }}">Fahrzeug neu</a>
+      <a class="nav-link" href="{{ url_for('admin_versicherung') }}">Versicherung</a>
       <a class="nav-link" href="{{ url_for('admin_postfach') }}">Postfach{% set postfach_badge = admin_postfach_count() %}{% if postfach_badge %}<span class="nav-badge">{{ postfach_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('admin_zugaenge') }}">Zugänge</a>
       <a class="nav-link" href="{{ url_for('partner_login') }}" target="_blank">Autohaus-Portal</a>
@@ -434,6 +435,9 @@
     document.querySelectorAll('form').forEach((form) => {
       form.addEventListener('submit', (event) => {
         const submitter = event.submitter || document.activeElement;
+        if (submitter && submitter.dataset && submitter.dataset.noLoading === 'true') {
+          return;
+        }
         const action = submitter && submitter.value ? submitter.value : '';
         const customMessage = submitter && submitter.dataset ? submitter.dataset.loadingMessage : '';
         const customTitle = submitter && submitter.dataset ? submitter.dataset.loadingTitle : '';
