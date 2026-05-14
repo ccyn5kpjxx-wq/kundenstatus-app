@@ -12000,6 +12000,11 @@ def whatsapp_payload_phone(value):
     return whatsapp_number_key(value)
 
 
+def whatsapp_template_parameter(value, limit=900):
+    text = re.sub(r"\s+", " ", clean_text(value)).strip()
+    return (text or "-")[:limit]
+
+
 def whatsapp_order_code(auftrag_id):
     try:
         return f"#A{int(auftrag_id)}"
@@ -12090,6 +12095,13 @@ def build_whatsapp_new_order_notification(auftrag, absender_label="Autohaus"):
     return "\n".join(lines).strip()
 
 
+def build_whatsapp_new_order_template_text(auftrag, absender_label="Autohaus"):
+    return whatsapp_template_parameter(
+        build_whatsapp_new_order_notification(auftrag, absender_label=absender_label),
+        limit=900,
+    )
+
+
 def notify_workshop_whatsapp_for_new_order(auftrag_id, absender_label="Autohaus", return_errors=False):
     errors = whatsapp_bridge_config_errors()
     if errors:
@@ -12106,6 +12118,7 @@ def notify_workshop_whatsapp_for_new_order(auftrag_id, absender_label="Autohaus"
             chat_id=0,
             target_number=target_number,
             body=body,
+            template_text=build_whatsapp_new_order_template_text(auftrag, absender_label=absender_label),
             auftrag=auftrag,
             absender_label=absender_label,
         )
@@ -12118,10 +12131,10 @@ def notify_workshop_whatsapp_for_new_order(auftrag_id, absender_label="Autohaus"
 def build_whatsapp_template_payload(to_phone, auftrag, nachricht, absender_label="Autohaus"):
     auftrag_id = int((auftrag or {}).get("id") or 0)
     parameters = [
-        {"type": "text", "text": whatsapp_order_code(auftrag_id)},
-        {"type": "text", "text": whatsapp_auftrag_label(auftrag)[:250]},
-        {"type": "text", "text": (clean_text(absender_label) or "Autohaus")[:80]},
-        {"type": "text", "text": clean_text(nachricht)[:900]},
+        {"type": "text", "text": whatsapp_template_parameter(whatsapp_order_code(auftrag_id), limit=40)},
+        {"type": "text", "text": whatsapp_template_parameter(whatsapp_auftrag_label(auftrag), limit=250)},
+        {"type": "text", "text": whatsapp_template_parameter(absender_label or "Autohaus", limit=80)},
+        {"type": "text", "text": whatsapp_template_parameter(nachricht, limit=900)},
     ]
     return {
         "messaging_product": "whatsapp",
@@ -12151,6 +12164,7 @@ def send_whatsapp_notice_with_fallback(
     chat_id,
     target_number,
     body,
+    template_text,
     auftrag,
     absender_label="Autohaus",
 ):
@@ -12162,7 +12176,7 @@ def send_whatsapp_notice_with_fallback(
                 build_whatsapp_template_payload(
                     target_number,
                     auftrag,
-                    body,
+                    template_text,
                     absender_label=absender_label,
                 ),
             )
@@ -12358,6 +12372,7 @@ def notify_workshop_whatsapp_for_chat(auftrag_id, chat_id, nachricht, absender_l
             chat_id=chat_id,
             target_number=target_number,
             body=body,
+            template_text=nachricht,
             auftrag=auftrag,
             absender_label=absender_label,
         )
