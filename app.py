@@ -5005,9 +5005,10 @@ class DbRow(dict):
 
 
 class PostgresCursor:
-    def __init__(self, rows=None, lastrowid=None):
+    def __init__(self, rows=None, lastrowid=None, rowcount=-1):
         self._rows = rows
         self.lastrowid = lastrowid
+        self.rowcount = rowcount
 
     def fetchone(self):
         if self._rows is None:
@@ -5039,6 +5040,7 @@ class PostgresConnection:
 
         with self.conn.cursor() as cur:
             cur.execute(converted_sql, params)
+            rowcount = cur.rowcount
             if cur.description:
                 names = [column.name for column in cur.description]
                 rows = [DbRow(dict(zip(names, values))) for values in cur.fetchall()]
@@ -5047,8 +5049,8 @@ class PostgresConnection:
 
         if inserts_with_id:
             self.lastrowid = rows[0]["id"] if rows else None
-            return PostgresCursor([], self.lastrowid)
-        return PostgresCursor(rows)
+            return PostgresCursor([], self.lastrowid, rowcount)
+        return PostgresCursor(rows, rowcount=rowcount)
 
     def executescript(self, script):
         for statement in split_sql_script(script):
