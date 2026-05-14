@@ -179,7 +179,7 @@
 
         <div class="col-12 pt-2">
           <h2 class="h4 mb-1">Gutachten und Bilder</h2>
-          <div class="text-muted">Alles, was hier hochgeladen wird, bleibt direkt am Schadenfall hängen.</div>
+          <div class="text-muted">Gutachten oder Kalkulation auswählen. Nach dem Hochladen liest die App die Datei und markiert erkannte Schadenbereiche.</div>
         </div>
         <div class="col-md-8">
           <label class="form-label">Gutachten, Kalkulation, Bilder</label>
@@ -202,8 +202,16 @@
             formaction="{{ url_for('partner_versicherung_abtretungserklaerung_pdf', slug=autohaus['slug']) }}"
             formmethod="post"
             formenctype="application/x-www-form-urlencoded"
+            formnovalidate
+            data-no-loading="true"
           >Abtretungserklärung herunterladen</button>
-          <button type="submit" class="btn btn-dark btn-lg">Vorlage erstellen und prüfen</button>
+          <button
+            type="submit"
+            name="aktion"
+            value="upload_analyze"
+            class="btn btn-dark btn-lg"
+            data-loading-message="Gutachten oder Kalkulation wird hochgeladen und analysiert. Bitte kurz warten."
+          >Hochladen &amp; analysieren</button>
           <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Abbrechen</a>
         </div>
       </div>
@@ -228,6 +236,30 @@
       });
       select.addEventListener('change', applyInsuranceEmail);
       applyInsuranceEmail();
+    })();
+
+    (() => {
+      const form = document.querySelector('[data-upload-form]');
+      if (!form) return;
+      form.addEventListener('submit', (event) => {
+        const submitter = event.submitter || document.activeElement;
+        if (submitter && submitter.dataset && submitter.dataset.noLoading === 'true') {
+          return;
+        }
+        const message = (submitter && submitter.dataset && submitter.dataset.loadingMessage)
+          || 'Unterlagen werden hochgeladen und analysiert. Bitte kurz warten.';
+        window.setTimeout(() => {
+          if (submitter && submitter.tagName === 'BUTTON') {
+            submitter.disabled = true;
+            submitter.textContent = message;
+          }
+          form.querySelectorAll('button[type="submit"]').forEach((button) => {
+            if (button !== submitter) {
+              button.disabled = true;
+            }
+          });
+        }, 0);
+      });
     })();
   </script>
 </body>
