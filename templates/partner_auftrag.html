@@ -346,6 +346,26 @@
       background: #eef5ff;
       border-color: #b8cce8;
     }
+    .chat-delete-form {
+      margin: 0;
+    }
+    .chat-delete-btn {
+      min-height: 0;
+      border: 1px solid #e5b7b7;
+      background: #fffafa;
+      color: #a01818;
+      border-radius: 999px;
+      padding: .16rem .55rem;
+      font-size: .78rem;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+    .chat-delete-btn:hover,
+    .chat-delete-btn:focus {
+      background: #fce8e8;
+      border-color: #d58f8f;
+      color: #7e1212;
+    }
   </style>
 </head>
 <body>
@@ -694,7 +714,13 @@
             <div class="chat-message {{ chat_class }}">
               <div class="d-flex justify-content-between gap-2 flex-wrap mb-1">
                 <div class="fw-bold">{{ chat_label }}</div>
-                <div class="text-muted small">{{ chat['erstellt_am'] }}</div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  <div class="text-muted small">{{ chat['erstellt_am'] }}</div>
+                  <form method="POST" action="{{ url_for('partner_chat_nachricht_loeschen', slug=autohaus['slug'], auftrag_id=auftrag['id'], chat_id=chat['id']) }}" class="chat-delete-form" onsubmit="return confirm('Diese Nachricht wirklich löschen?')">
+                    {{ csrf_field()|safe }}
+                    <button type="submit" class="chat-delete-btn">Löschen</button>
+                  </form>
+                </div>
               </div>
               <div style="white-space:pre-wrap;">{{ chat['nachricht'] }}</div>
             </div>

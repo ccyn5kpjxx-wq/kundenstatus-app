@@ -11303,6 +11303,35 @@ def list_chat_nachrichten(auftrag_id):
     return [dict(row) for row in rows]
 
 
+def delete_chat_nachricht(auftrag_id, chat_id):
+    try:
+        auftrag_id = int(auftrag_id or 0)
+        chat_id = int(chat_id or 0)
+    except (TypeError, ValueError):
+        return False
+    if auftrag_id <= 0 or chat_id <= 0:
+        return False
+
+    db = get_db()
+    cursor = db.execute(
+        "DELETE FROM chat_nachrichten WHERE id=? AND auftrag_id=?",
+        (chat_id, auftrag_id),
+    )
+    if cursor.rowcount:
+        db.execute(
+            "UPDATE whatsapp_nachrichten SET chat_id=0 WHERE chat_id=? AND auftrag_id=?",
+            (chat_id, auftrag_id),
+        )
+        db.execute(
+            "UPDATE auftraege SET geaendert_am=? WHERE id=?",
+            (now_str(), auftrag_id),
+        )
+    db.commit()
+    deleted = bool(cursor.rowcount)
+    db.close()
+    return deleted
+
+
 def mark_chat_gelesen(auftrag_id, empfaenger):
     empfaenger = clean_text(empfaenger)
     if empfaenger not in {"admin", "autohaus"}:
@@ -20847,6 +20876,19 @@ def admin_chat_nachricht(auftrag_id):
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
 
+@app.route("/admin/auftrag/<int:auftrag_id>/chat/<int:chat_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_chat_nachricht_loeschen(auftrag_id, chat_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+    if delete_chat_nachricht(auftrag_id, chat_id):
+        flash("Nachricht gelöscht.", "success")
+    else:
+        flash("Nachricht wurde nicht gefunden.", "warning")
+    return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
+
+
 @app.route("/admin/auftrag/<int:auftrag_id>/dokumente/geprueft", methods=["POST"])
 @admin_required
 def admin_dokumente_geprueft(auftrag_id):
@@ -23000,6 +23042,22 @@ def partner_chat_nachricht(slug, auftrag_id):
         absender_label=autohaus.get("name") or "Autohaus",
     )
     flash("Nachricht an die Werkstatt gesendet.", "success")
+    return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+
+
+@app.route("/partner/<slug>/auftrag/<int:auftrag_id>/chat/<int:chat_id>/loeschen", methods=["POST"])
+def partner_chat_nachricht_loeschen(slug, auftrag_id, chat_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
+        abort(404)
+
+    if delete_chat_nachricht(auftrag_id, chat_id):
+        flash("Nachricht gelöscht.", "success")
+    else:
+        flash("Nachricht wurde nicht gefunden.", "warning")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
 
