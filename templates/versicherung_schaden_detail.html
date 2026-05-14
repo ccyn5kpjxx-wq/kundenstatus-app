@@ -113,6 +113,7 @@
         <div class="col-12">
           <label class="form-label">Fahrzeugdarstellung</label>
           {% set editable = true %}
+          {% set show_gt_technical = true %}
           {% set selected_zones = auftrag['schaden_zonen'] %}
           {% include "_fahrzeug_schadenkarte.html" %}
         </div>

@@ -678,18 +678,54 @@ SCHADENARTEN = (
 )
 
 FAHRZEUG_SCHADEN_ZONEN = (
-    {"key": "front", "label": "Front", "x": 50, "y": 16},
-    {"key": "front_links", "label": "Vorne links", "x": 25, "y": 25},
-    {"key": "front_rechts", "label": "Vorne rechts", "x": 75, "y": 25},
-    {"key": "seite_links", "label": "Seite links", "x": 18, "y": 50},
-    {"key": "seite_rechts", "label": "Seite rechts", "x": 82, "y": 50},
-    {"key": "dach", "label": "Dach", "x": 50, "y": 48},
-    {"key": "glas", "label": "Glas", "x": 50, "y": 33},
-    {"key": "heck_links", "label": "Hinten links", "x": 25, "y": 75},
-    {"key": "heck_rechts", "label": "Hinten rechts", "x": 75, "y": 75},
-    {"key": "heck", "label": "Heck", "x": 50, "y": 84},
-    {"key": "raeder", "label": "Räder", "x": 50, "y": 66},
+    {"key": "stossfaenger_vorne", "label": "Stoßfänger vorne", "gruppe": "Front"},
+    {"key": "frontblech", "label": "Frontblech", "gruppe": "Front"},
+    {"key": "motorhaube", "label": "Motorhaube", "gruppe": "Front"},
+    {"key": "kotfluegel_links", "label": "Kotflügel links", "gruppe": "Front"},
+    {"key": "kotfluegel_rechts", "label": "Kotflügel rechts", "gruppe": "Front"},
+    {"key": "spoiler_vorne", "label": "Spoiler vorne", "gruppe": "Front"},
+    {"key": "parksensor_vorne", "label": "Parksensor vorne", "gruppe": "Front"},
+    {"key": "tuer_vorne_links", "label": "Tür vorne links", "gruppe": "Linke Seite"},
+    {"key": "tuer_hinten_links", "label": "Tür hinten links", "gruppe": "Linke Seite"},
+    {"key": "seitenteil_links", "label": "Seitenteil links", "gruppe": "Linke Seite"},
+    {"key": "einstieg_links", "label": "Einstieg links", "gruppe": "Linke Seite"},
+    {"key": "schweller_links", "label": "Schweller links", "gruppe": "Linke Seite"},
+    {"key": "aussenspiegel_links", "label": "Außenspiegel links", "gruppe": "Linke Seite"},
+    {"key": "felge_links", "label": "Felge links", "gruppe": "Linke Seite"},
+    {"key": "tuer_vorne_rechts", "label": "Tür vorne rechts", "gruppe": "Rechte Seite"},
+    {"key": "tuer_hinten_rechts", "label": "Tür hinten rechts", "gruppe": "Rechte Seite"},
+    {"key": "seitenteil_rechts", "label": "Seitenteil rechts", "gruppe": "Rechte Seite"},
+    {"key": "einstieg_rechts", "label": "Einstieg rechts", "gruppe": "Rechte Seite"},
+    {"key": "schweller_rechts", "label": "Schweller rechts", "gruppe": "Rechte Seite"},
+    {"key": "aussenspiegel_rechts", "label": "Außenspiegel rechts", "gruppe": "Rechte Seite"},
+    {"key": "felge_rechts", "label": "Felge rechts", "gruppe": "Rechte Seite"},
+    {"key": "stossfaenger_hinten", "label": "Stoßfänger hinten", "gruppe": "Heck"},
+    {"key": "heckklappe", "label": "Heckklappe", "gruppe": "Heck"},
+    {"key": "abschlussblech", "label": "Abschlussblech", "gruppe": "Heck"},
+    {"key": "spoiler_hinten", "label": "Spoiler hinten", "gruppe": "Heck"},
+    {"key": "parksensor_hinten", "label": "Parksensor hinten", "gruppe": "Heck"},
+    {"key": "dach", "label": "Dach", "gruppe": "Dach / Glas"},
+    {"key": "frontscheibe", "label": "Frontscheibe", "gruppe": "Dach / Glas"},
+    {"key": "heckscheibe", "label": "Heckscheibe", "gruppe": "Dach / Glas"},
+    {"key": "seitenscheibe_links", "label": "Seitenscheibe links", "gruppe": "Dach / Glas"},
+    {"key": "seitenscheibe_rechts", "label": "Seitenscheibe rechts", "gruppe": "Dach / Glas"},
+    {"key": "felge", "label": "Felge allgemein", "gruppe": "Räder / Zubehör"},
+    {"key": "radlauf_links", "label": "Radlauf links", "gruppe": "Räder / Zubehör"},
+    {"key": "radlauf_rechts", "label": "Radlauf rechts", "gruppe": "Räder / Zubehör"},
 )
+
+SCHADEN_ZONEN_LEGACY_MAP = {
+    "front": "stossfaenger_vorne",
+    "front_links": "kotfluegel_links",
+    "front_rechts": "kotfluegel_rechts",
+    "seite_links": "seitenteil_links",
+    "seite_rechts": "seitenteil_rechts",
+    "glas": "frontscheibe",
+    "heck_links": "seitenteil_links",
+    "heck_rechts": "seitenteil_rechts",
+    "heck": "stossfaenger_hinten",
+    "raeder": "felge",
+}
 
 PREISLISTE_LACKIERUNG = {
     "hinweis": (
@@ -6513,6 +6549,7 @@ def parse_schaden_zonen(value):
     selected = []
     for item in (raw_items if isinstance(raw_items, list) else []):
         key = clean_text(item)
+        key = SCHADEN_ZONEN_LEGACY_MAP.get(key, key)
         if key in allowed and key not in selected:
             selected.append(key)
     return selected

@@ -97,48 +97,9 @@
         </div>
 
         <div class="col-12">
-          <div class="border rounded-3 p-3 bg-light">
-            <div class="fw-bold mb-2">GT Estimate API</div>
-            <div class="row g-3">
-              <div class="col-md-3">
-                <label class="form-label">GT Modellcode</label>
-                <input type="text" name="gt_motive_model_code" class="form-control" placeholder="z.B. CI02301">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">GT Zone</label>
-                <input type="text" name="gt_motive_zone" class="form-control" value="11000">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">JobType</label>
-                <select name="gt_motive_job_type" class="form-select">
-                  <option value="All">All</option>
-                  <option value="Mechanic">Mechanic</option>
-                  <option value="Forecasting">Forecasting</option>
-                </select>
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Sprache</label>
-                <input type="text" name="gt_motive_language" class="form-control" value="de-DE">
-              </div>
-              <div class="col-md-3">
-                <label class="form-label">GT Model-ID</label>
-                <input type="text" name="gt_motive_model_id" class="form-control" placeholder="optional">
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Equipments</label>
-                <input type="text" name="gt_motive_equipments" class="form-control" placeholder="z.B. AT30,CB03">
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Manufacturing Values</label>
-                <input type="text" name="gt_motive_manufacturing_values" class="form-control" placeholder="z.B. FEC 2020-01-01">
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12">
-          <label class="form-label">Fahrzeugdarstellung</label>
+          <label class="form-label">Beschädigte Bereiche</label>
           {% set editable = true %}
+          {% set show_gt_technical = false %}
           {% set selected_zones = [] %}
           {% include "_fahrzeug_schadenkarte.html" %}
         </div>

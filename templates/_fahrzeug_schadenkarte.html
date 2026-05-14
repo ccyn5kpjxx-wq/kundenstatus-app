@@ -8,27 +8,47 @@
 {% set gt_items = auftrag.get('gt_motive_vehicle_items', []) if auftrag else [] %}
 {% set gt_error = auftrag.get('gt_motive_vehicle_representation_error', '') if auftrag else '' %}
 {% set gt_loaded_at = auftrag.get('gt_motive_vehicle_representation_loaded_at', '') if auftrag else '' %}
+{% set technical_gt_view = show_gt_technical if show_gt_technical is defined else false %}
+{% set fallback_zone_map = (not gt_items) and (not technical_gt_view) %}
 
 <div class="border rounded-3 p-3 bg-white">
   <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
     <div>
+      {% if technical_gt_view %}
       <div class="text-uppercase text-muted small fw-bold">GT Estimate</div>
-      <div class="fw-bold">Fahrzeugdarstellung aus GT Estimate</div>
-      <div class="text-muted small">
-        {% if gt_ready %}
-          Zugangsdaten sind gesetzt. Die GT-Fahrzeugdarstellung wird ueber die VehicleRepresentation-Schnittstelle geladen.
+      {% endif %}
+      <div class="fw-bold">
+        {% if gt_items %}
+          {{ 'Fahrzeugdarstellung aus GT Estimate' if technical_gt_view else 'Originale Bauteilansicht' }}
+        {% elif editable_map %}
+          Beschädigte Bereiche markieren
         {% else %}
-          Noch keine GT-Estimate-Zugangsdaten gesetzt. Bitte GT_MOTIVE_API_KEY bzw. CLIENT_ID in .env.local eintragen.
+          Markierte Schadenbereiche
+        {% endif %}
+      </div>
+      <div class="text-muted small">
+        {% if gt_items %}
+          Die Bauteilansicht wurde geladen. Bitte die betroffenen Bereiche markieren oder prüfen.
+        {% elif technical_gt_view and gt_ready %}
+          Zugangsdaten sind gesetzt. Modellcode und Zone eintragen, dann die Darstellung ueber GT Estimate laden.
+        {% elif technical_gt_view %}
+          GT-Zugangsdaten fehlen noch. In .env.local GT_MOTIVE_API_KEY bzw. GT_MOTIVE_CLIENT_ID setzen.
+        {% elif editable_map %}
+          Bitte nur die sichtbaren Schadenstellen auswählen. Die genaue Bauteilansicht lädt die Werkstatt intern nach.
+        {% else %}
+          Diese Bereiche wurden für die Schadenmeldung gespeichert.
         {% endif %}
         {% if gt_loaded_at %}<span class="d-block">Zuletzt geladen: {{ gt_loaded_at }}</span>{% endif %}
       </div>
     </div>
+    {% if technical_gt_view %}
     <span class="badge text-bg-{{ 'success' if gt_ready else 'warning' }}">
       {{ 'GT-Zugang aktiv' if gt_ready else 'GT-Zugang offen' }}
     </span>
+    {% endif %}
   </div>
 
-  {% if gt_error %}
+  {% if gt_error and technical_gt_view %}
     <div class="alert alert-warning py-2 mb-3">{{ gt_error }}</div>
   {% endif %}
 
@@ -59,20 +79,225 @@
         {% endfor %}
       </div>
     {% endif %}
-  {% else %}
+  {% elif technical_gt_view %}
     <div class="border rounded-3 p-4 text-center bg-light mb-3">
       <div class="fw-bold">GT-Fahrzeugdarstellung noch nicht geladen</div>
       <div class="text-muted small">
         {% if auftrag is defined and auftrag and auftrag.get('id') %}
           GT Modellcode und Zone eintragen, dann die Darstellung ueber GT abrufen.
         {% else %}
-          GT Modellcode und Zone werden gespeichert; danach kann die Darstellung ueber GT geladen werden.
+          Die technische GT-Konfiguration wird später in der Detailansicht gepflegt.
         {% endif %}
+      </div>
+    </div>
+  {% else %}
+    <style>
+      .vehicle-zone-shell {
+        --zone-accent: #b23b2a;
+        --zone-ink: #17212a;
+        --zone-line: #d7e0e4;
+        --zone-panel: #f8fafb;
+        position: relative;
+      }
+      .vehicle-zone-map {
+        position: relative;
+        width: 100%;
+        min-height: 0;
+        border: 1px solid var(--zone-line);
+        border-radius: 16px;
+        background: #f8fafb;
+        overflow: hidden;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.8);
+        padding: 14px;
+      }
+      .vehicle-zone-form-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        color: #5d6b75;
+        font-size: .8rem;
+        font-weight: 800;
+        margin-bottom: 10px;
+        text-transform: uppercase;
+      }
+      .vehicle-zone-form-title span:last-child {
+        color: #8a98a2;
+        font-weight: 700;
+        text-transform: none;
+      }
+      .vehicle-zone-check {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .vehicle-zone-chip {
+        border: 0;
+        border-top: 1px solid #e3ebef;
+        border-radius: 0;
+        background: #fff;
+        color: var(--zone-ink);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 36px;
+        padding: 7px 4px;
+        font-size: .9rem;
+        font-weight: 650;
+        transition: background .16s ease, border-color .16s ease, color .16s ease;
+      }
+      .vehicle-zone-chip:first-of-type {
+        border-top: 0;
+      }
+      .vehicle-zone-chip span {
+        width: 16px;
+        height: 16px;
+        border-radius: 4px;
+        background: #eef4f6;
+        border: 1px solid #cbd8de;
+        flex: 0 0 16px;
+      }
+      .vehicle-zone-chip.is-selected {
+        background: #fff7f5;
+        border-color: #e3ebef;
+        color: var(--zone-accent);
+      }
+      .vehicle-zone-chip.is-selected span {
+        background: var(--zone-accent);
+        border-color: var(--zone-accent);
+        box-shadow: inset 0 0 0 3px #fff;
+      }
+      .vehicle-zone-groups {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .vehicle-zone-group {
+        border: 1px solid #d8e1e5;
+        border-radius: 12px;
+        background: #fff;
+        padding: 12px;
+      }
+      .vehicle-zone-group-title {
+        color: #40505a;
+        font-size: .78rem;
+        font-weight: 800;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+      }
+      .vehicle-zone-group .vehicle-zone-chip {
+        margin-bottom: 8px;
+      }
+      .vehicle-zone-group .vehicle-zone-chip:last-child {
+        margin-bottom: 0;
+      }
+      @media (max-width: 575.98px) {
+        .vehicle-zone-groups {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+    <div class="vehicle-zone-shell mb-3">
+      <div class="vehicle-zone-map" aria-label="Fahrzeugbereiche">
+        <div class="vehicle-zone-form-title">
+          <span>Karosserieteil / Anbauteil</span>
+          <span>Mehrfachauswahl möglich</span>
+        </div>
+        {% for zone in schaden_zonen %}
+          {% set is_selected = zone['key'] in selected_zone_keys %}
+          {% if editable_map %}
+            <input
+              class="vehicle-zone-check"
+              type="checkbox"
+              id="schaden-zone-{{ zone['key'] }}"
+              name="schaden_zonen"
+              value="{{ zone['key'] }}"
+              autocomplete="off"
+              {% if is_selected %}checked{% endif %}
+            >
+          {% elif is_selected %}
+          {% endif %}
+        {% endfor %}
+      {% if editable_map %}
+      <div class="vehicle-zone-groups" data-zone-controls>
+        <div class="vehicle-zone-group">
+          <div class="vehicle-zone-group-title">Front</div>
+          {% for zone in schaden_zonen if zone['gruppe'] == 'Front' %}
+            {% set is_selected = zone['key'] in selected_zone_keys %}
+            <label class="vehicle-zone-chip {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
+              <span aria-hidden="true"></span>{{ zone['label'] }}
+            </label>
+          {% endfor %}
+        </div>
+        <div class="vehicle-zone-group">
+          <div class="vehicle-zone-group-title">Linke Seite</div>
+          {% for zone in schaden_zonen if zone['gruppe'] == 'Linke Seite' %}
+            {% set is_selected = zone['key'] in selected_zone_keys %}
+            <label class="vehicle-zone-chip {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
+              <span aria-hidden="true"></span>{{ zone['label'] }}
+            </label>
+          {% endfor %}
+        </div>
+        <div class="vehicle-zone-group">
+          <div class="vehicle-zone-group-title">Rechte Seite</div>
+          {% for zone in schaden_zonen if zone['gruppe'] == 'Rechte Seite' %}
+            {% set is_selected = zone['key'] in selected_zone_keys %}
+            <label class="vehicle-zone-chip {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
+              <span aria-hidden="true"></span>{{ zone['label'] }}
+            </label>
+          {% endfor %}
+        </div>
+        <div class="vehicle-zone-group">
+          <div class="vehicle-zone-group-title">Heck</div>
+          {% for zone in schaden_zonen if zone['gruppe'] == 'Heck' %}
+            {% set is_selected = zone['key'] in selected_zone_keys %}
+            <label class="vehicle-zone-chip {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
+              <span aria-hidden="true"></span>{{ zone['label'] }}
+            </label>
+          {% endfor %}
+        </div>
+        <div class="vehicle-zone-group">
+          <div class="vehicle-zone-group-title">Dach / Glas</div>
+          {% for zone in schaden_zonen if zone['gruppe'] == 'Dach / Glas' %}
+            {% set is_selected = zone['key'] in selected_zone_keys %}
+            <label class="vehicle-zone-chip {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
+              <span aria-hidden="true"></span>{{ zone['label'] }}
+            </label>
+          {% endfor %}
+        </div>
+        <div class="vehicle-zone-group">
+          <div class="vehicle-zone-group-title">Räder / Zubehör</div>
+          {% for zone in schaden_zonen if zone['gruppe'] == 'Räder / Zubehör' %}
+            {% set is_selected = zone['key'] in selected_zone_keys %}
+            <label class="vehicle-zone-chip {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
+              <span aria-hidden="true"></span>{{ zone['label'] }}
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+      <script>
+        document.querySelectorAll('[data-zone-controls]').forEach((controls) => {
+          const shell = controls.closest('.vehicle-zone-shell');
+          if (!shell) return;
+          const sync = () => {
+            controls.querySelectorAll('.vehicle-zone-chip').forEach((chip) => {
+              const input = shell.querySelector('#' + CSS.escape(chip.getAttribute('for')));
+              chip.classList.toggle('is-selected', Boolean(input && input.checked));
+            });
+          };
+          shell.querySelectorAll('.vehicle-zone-check').forEach((input) => {
+            input.addEventListener('change', sync);
+          });
+          sync();
+        });
+      </script>
+      {% endif %}
       </div>
     </div>
   {% endif %}
 
-  {% if editable_map %}
+  {% if editable_map and not fallback_zone_map %}
     <div class="d-flex flex-wrap gap-2">
       {% for zone in schaden_zonen %}
         {% set is_selected = zone['key'] in selected_zone_keys %}
@@ -90,7 +315,7 @@
         </label>
       {% endfor %}
     </div>
-  {% else %}
+  {% elif not editable_map %}
     <div class="d-flex flex-wrap gap-2">
       {% for zone in schaden_zonen %}
         {% set is_selected = zone['key'] in selected_zone_keys %}
