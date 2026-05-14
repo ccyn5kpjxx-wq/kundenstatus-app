@@ -727,6 +727,43 @@ SCHADEN_ZONEN_LEGACY_MAP = {
     "raeder": "felge",
 }
 
+SCHADEN_ZONE_PART_PATTERNS = (
+    ("stossfaenger_vorne", [r"stossfaenger\s*(v|vorne|vorn)\b", r"stossstange\s*(v|vorne|vorn)\b", r"frontschuerze"]),
+    ("stossfaenger_hinten", [r"stossfaenger\s*(h|hinten|heck)\b", r"stossstange\s*(h|hinten|heck)\b", r"heckschuerze"]),
+    ("frontblech", [r"\bfrontblech\b"]),
+    ("motorhaube", [r"\bmotorhaube\b", r"(?<!heck)\bhaube\b"]),
+    ("kotfluegel_links", [r"kotfluegel.*\b(l|links)\b", r"kotfl\s+v?\s*l\b"]),
+    ("kotfluegel_rechts", [r"kotfluegel.*\b(r|rechts)\b", r"kotfl\s+v?\s*r\b"]),
+    ("spoiler_vorne", [r"spoiler\s*(v|vorne|vorn)\b"]),
+    ("parksensor_vorne", [r"parksensor.*\b(v|vorne|vorn)\b"]),
+    ("tuer_vorne_links", [r"tuer\s*(v|vorn|vorne)\s*(l|links)\b", r"vordertuer\s*links", r"fahrertuer"]),
+    ("tuer_vorne_rechts", [r"tuer\s*(v|vorn|vorne)\s*(r|rechts)\b", r"vordertuer\s*rechts", r"beifahrertuer"]),
+    ("tuer_hinten_links", [r"tuer\s*(h|hinten)\s*(l|links)\b", r"hintertuer\s*links"]),
+    ("tuer_hinten_rechts", [r"tuer\s*(h|hinten)\s*(r|rechts)\b", r"hintertuer\s*rechts"]),
+    ("seitenteil_links", [r"seitenteil.*\b(l|links)\b"]),
+    ("seitenteil_rechts", [r"seitenteil.*\b(r|rechts)\b"]),
+    ("einstieg_links", [r"einstieg.*\b(l|links)\b"]),
+    ("einstieg_rechts", [r"einstieg.*\b(r|rechts)\b"]),
+    ("schweller_links", [r"schweller.*\b(l|links)\b"]),
+    ("schweller_rechts", [r"schweller.*\b(r|rechts)\b"]),
+    ("aussenspiegel_links", [r"(aussen)?spiegel.*\b(l|links)\b"]),
+    ("aussenspiegel_rechts", [r"(aussen)?spiegel.*\b(r|rechts)\b"]),
+    ("felge_links", [r"\bfelge.*\b(l|links)\b"]),
+    ("felge_rechts", [r"\bfelge.*\b(r|rechts)\b"]),
+    ("heckklappe", [r"\bheckklappe\b", r"kofferraumklappe"]),
+    ("abschlussblech", [r"\babschlussblech\b"]),
+    ("spoiler_hinten", [r"spoiler\s*(h|hinten|heck)\b"]),
+    ("parksensor_hinten", [r"parksensor.*\b(h|hinten|heck)\b"]),
+    ("dach", [r"\bdach\b"]),
+    ("frontscheibe", [r"\bfrontscheibe\b", r"windschutzscheibe"]),
+    ("heckscheibe", [r"\bheckscheibe\b"]),
+    ("seitenscheibe_links", [r"seitenscheibe.*\b(l|links)\b"]),
+    ("seitenscheibe_rechts", [r"seitenscheibe.*\b(r|rechts)\b"]),
+    ("felge", [r"\bfelge\b", r"leichtmetallfelge", r"stahlfelge"]),
+    ("radlauf_links", [r"radlauf.*\b(l|links)\b", r"radhausverbreiterung.*\b(l|links)\b"]),
+    ("radlauf_rechts", [r"radlauf.*\b(r|rechts)\b", r"radhausverbreiterung.*\b(r|rechts)\b"]),
+)
+
 PREISLISTE_LACKIERUNG = {
     "hinweis": (
         "Reine Lackierarbeiten. Montage- und Demontagearbeiten sind nicht enthalten. "
@@ -950,6 +987,8 @@ OCR_TEILE_PATTERNS = (
     ("Abschlussblech", [r"abschlussblech"]),
     ("Dach", [r"\bdach\b"]),
     ("Außenspiegel", [r"aussenspiegel"]),
+    ("Parksensor vorne", [r"parksensor.*\b(v|vorne|vorn)\b"]),
+    ("Parksensor hinten", [r"parksensor.*\b(h|hinten|heck)\b"]),
     ("Parksensor", [r"parksensor"]),
     ("Felge", [r"\bfelge\b"]),
     ("Schweller", [r"schweller"]),
@@ -979,6 +1018,8 @@ LINE_ITEM_PART_PATTERNS = (
     ("Halter Kotflügel hinten links", [r"halter\s+v\s+kotfl\s+h\s+l\b"]),
     ("Scheinwerfer", [r"scheinwerfer"]),
     ("Spiegel", [r"spiegel"]),
+    ("Parksensor vorne", [r"parksensor.*\b(v|vorne|vorn)\b"]),
+    ("Parksensor hinten", [r"parksensor.*\b(h|hinten|heck)\b"]),
     ("Schwellerverkleidung", [r"schwellerverkleidung"]),
 )
 
@@ -3093,6 +3134,7 @@ def normalize_openai_document_data(data):
         "analyse_text": analyse[:220],
         "beschreibung": beschreibung[:900],
         "bauteile_override": "\n".join(offene_bauteile),
+        "schaden_zonen_json": schaden_zonen_json_from_text_values(offene_bauteile, analyse, beschreibung),
         "analyse_pruefen": 1 if data.get("needs_review") else 0,
         "analyse_hinweis": clean_text(data.get("review_reason")),
         "analyse_confidence": float(data.get("confidence") or 0),
@@ -3214,6 +3256,7 @@ def has_extracted_document_values(fields):
         "analyse_text",
         "beschreibung",
         "bauteile_override",
+        "schaden_zonen_json",
     ):
         if clean_text((fields or {}).get(key)):
             return True
@@ -4855,9 +4898,16 @@ def parse_document_fields(text, filename=""):
         )
 
     analyse = ""
+    erkannte_bauteile = []
     if positionen:
         teile = []
         for eintrag in positionen:
+            teil = clean_text(eintrag.get("teil"))
+            aktion = clean_text(eintrag.get("aktion"))
+            if teil:
+                bauteil_text = f"{teil} {aktion}".strip()
+                if bauteil_text not in erkannte_bauteile:
+                    erkannte_bauteile.append(bauteil_text)
             if eintrag["aktion"]:
                 teile.append(f"{eintrag['teil']} {eintrag['aktion']}")
             else:
@@ -4873,6 +4923,9 @@ def parse_document_fields(text, filename=""):
         if teile:
             action = detect_action(normalized, doc_type) or "pruefen"
             analyse = ", ".join(f"{teil} {action}" for teil in dict.fromkeys(teile))[:220]
+            for teil in dict.fromkeys(teile):
+                if teil not in erkannte_bauteile:
+                    erkannte_bauteile.append(teil)
 
     if not fahrzeug:
         fahrzeug = " ".join(part for part in [hersteller, haupttyp, untertyp] if part).strip()
@@ -4917,6 +4970,8 @@ def parse_document_fields(text, filename=""):
         "fertig_datum": fertig_datum,
         "rep_max_kosten": rep_max_kosten,
         "analyse_text": analyse,
+        "bauteile_override": "\n".join(erkannte_bauteile),
+        "schaden_zonen_json": schaden_zonen_json_from_text_values(positionen, erkannte_bauteile, analyse),
         "beschreibung": ". ".join(part for part in details if part)[:500],
         "_previous_damage_parts": "\n".join(previous_damage_parts),
     }
@@ -6558,6 +6613,70 @@ def parse_schaden_zonen(value):
 def schaden_zonen_json_from_form(form):
     selected = parse_schaden_zonen(form.getlist("schaden_zonen"))
     return json.dumps(selected, ensure_ascii=False)
+
+
+def schaden_zonen_from_text_values(*values):
+    selected = []
+    allowed = {zone["key"] for zone in FAHRZEUG_SCHADEN_ZONEN}
+
+    def add_zone(key):
+        key = SCHADEN_ZONEN_LEGACY_MAP.get(clean_text(key), clean_text(key))
+        if key in allowed and key not in selected:
+            selected.append(key)
+
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, dict):
+            text = " ".join(
+                clean_text(value.get(field))
+                for field in ("teil", "bemerkung", "aktion")
+                if clean_text(value.get(field))
+            )
+        elif isinstance(value, (list, tuple, set)):
+            for item in value:
+                for key in schaden_zonen_from_text_values(item):
+                    add_zone(key)
+            continue
+        else:
+            text = clean_text(value)
+        raw_fragments = [
+            fragment
+            for fragment in re.split(r"[,;\n]+|\s+und\s+", text, flags=re.IGNORECASE)
+            if clean_text(fragment)
+        ] or [text]
+        fragments = [normalize_document_text(fragment) for fragment in raw_fragments if normalize_document_text(fragment)]
+        if not fragments:
+            continue
+        for fragment in fragments:
+            for zone_key, patterns in SCHADEN_ZONE_PART_PATTERNS:
+                if any(re.search(pattern, fragment) for pattern in patterns):
+                    add_zone(zone_key)
+
+            # Generic entries are useful when side information is missing.
+            if re.search(r"\b(aussen)?spiegel\b", fragment) and not re.search(r"\b(l|links|r|rechts)\b", fragment):
+                add_zone("aussenspiegel_links")
+                add_zone("aussenspiegel_rechts")
+            if re.search(r"\bschweller\b", fragment) and not re.search(r"\b(l|links|r|rechts)\b", fragment):
+                add_zone("schweller_links")
+                add_zone("schweller_rechts")
+            if re.search(r"\bparksensor\b", fragment) and not re.search(r"\b(v|vorne|vorn|h|hinten|heck)\b", fragment):
+                add_zone("parksensor_vorne")
+                add_zone("parksensor_hinten")
+    return selected
+
+
+def schaden_zonen_json_from_text_values(*values):
+    return json.dumps(schaden_zonen_from_text_values(*values), ensure_ascii=False)
+
+
+def merge_schaden_zonen(*values):
+    selected = []
+    for value in values:
+        for key in parse_schaden_zonen(value):
+            if key not in selected:
+                selected.append(key)
+    return selected
 
 
 def schaden_zonen_labels(selected):
@@ -11096,6 +11215,11 @@ def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
             datei["original_name"],
         )
         for key, value in felder.items():
+            if key == "schaden_zonen_json" and clean_text(value):
+                merged = merge_schaden_zonen(erkannt.get(key), value)
+                if merged:
+                    erkannt[key] = json.dumps(merged, ensure_ascii=False)
+                continue
             if value and key not in erkannt:
                 erkannt[key] = value
 
@@ -11122,6 +11246,14 @@ def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
         prefer_documents or not clean_text(auftrag.get("bauteile_override"))
     ):
         updates["bauteile_override"] = erkannt["bauteile_override"]
+    if erkannt.get("schaden_zonen_json"):
+        merged_zones = merge_schaden_zonen(
+            auftrag.get("schaden_zonen_json"),
+            erkannt.get("schaden_zonen_json"),
+        )
+        current_zones = parse_schaden_zonen(auftrag.get("schaden_zonen_json"))
+        if merged_zones and (prefer_documents or merged_zones != current_zones):
+            updates["schaden_zonen_json"] = json.dumps(merged_zones, ensure_ascii=False)
     if erkannt.get("kennzeichen") and (
         prefer_documents or not clean_text(auftrag.get("kennzeichen"))
     ):
@@ -11460,12 +11592,25 @@ def whatsapp_graph_version():
 
 
 def whatsapp_bridge_enabled():
-    return bool(
-        WHATSAPP_ENABLED
-        and WHATSAPP_ACCESS_TOKEN
-        and WHATSAPP_PHONE_NUMBER_ID
-        and whatsapp_workshop_number_keys()
-    )
+    return not whatsapp_bridge_config_errors()
+
+
+def whatsapp_bridge_config_errors():
+    errors = []
+    if not WHATSAPP_ENABLED:
+        errors.append("WHATSAPP_ENABLED ist nicht aktiv.")
+    if not WHATSAPP_ACCESS_TOKEN:
+        errors.append("WHATSAPP_ACCESS_TOKEN fehlt.")
+    if not WHATSAPP_PHONE_NUMBER_ID:
+        errors.append("WHATSAPP_PHONE_NUMBER_ID fehlt.")
+    if not whatsapp_workshop_number_keys():
+        errors.append("WHATSAPP_WORKSHOP_NUMBER fehlt.")
+    return errors
+
+
+def whatsapp_error_summary(errors):
+    cleaned = [clean_text(error) for error in errors if clean_text(error)]
+    return "; ".join(cleaned)[:500]
 
 
 def whatsapp_message_template_enabled():
@@ -11566,35 +11711,29 @@ def build_whatsapp_new_order_notification(auftrag, absender_label="Autohaus"):
     return "\n".join(lines).strip()
 
 
-def notify_workshop_whatsapp_for_new_order(auftrag_id, absender_label="Autohaus"):
-    if not whatsapp_bridge_enabled():
-        return False
+def notify_workshop_whatsapp_for_new_order(auftrag_id, absender_label="Autohaus", return_errors=False):
+    errors = whatsapp_bridge_config_errors()
+    if errors:
+        return (False, errors) if return_errors else False
     auftrag = get_auftrag(auftrag_id)
     if not auftrag:
-        return False
+        errors.append("Auftrag wurde nicht gefunden.")
+        return (False, errors) if return_errors else False
     body = build_whatsapp_new_order_notification(auftrag, absender_label=absender_label)
     sent_any = False
     for target_number in whatsapp_workshop_numbers():
-        if whatsapp_message_template_enabled():
-            payload = build_whatsapp_template_payload(target_number, auftrag, body, absender_label=absender_label)
-        else:
-            payload = build_whatsapp_text_payload(target_number, body)
-        ok, provider_id, error = post_whatsapp_payload(payload)
-        sent_any = sent_any or ok
-        record_whatsapp_message(
+        ok, send_errors = send_whatsapp_notice_with_fallback(
             auftrag_id,
             chat_id=0,
-            richtung="outbound",
-            telefon=target_number,
-            provider_message_id=provider_id,
-            nachricht=body,
-            status="gesendet" if ok else "fehler",
-            fehler=error,
-            payload=payload if not ok else None,
+            target_number=target_number,
+            body=body,
+            auftrag=auftrag,
+            absender_label=absender_label,
         )
+        sent_any = sent_any or ok
         if not ok:
-            print(f"WARNUNG: WhatsApp-Auftragsmeldung konnte nicht gesendet werden: {error}")
-    return sent_any
+            errors.extend(send_errors)
+    return (sent_any, errors) if return_errors else sent_any
 
 
 def build_whatsapp_template_payload(to_phone, auftrag, nachricht, absender_label="Autohaus"):
@@ -11626,6 +11765,51 @@ def build_whatsapp_text_payload(to_phone, body):
         "type": "text",
         "text": {"preview_url": False, "body": clean_text(body)[:4000]},
     }
+
+
+def send_whatsapp_notice_with_fallback(
+    auftrag_id,
+    chat_id,
+    target_number,
+    body,
+    auftrag,
+    absender_label="Autohaus",
+):
+    attempts = []
+    if whatsapp_message_template_enabled():
+        attempts.append(
+            (
+                "Vorlage",
+                build_whatsapp_template_payload(
+                    target_number,
+                    auftrag,
+                    body,
+                    absender_label=absender_label,
+                ),
+            )
+        )
+    attempts.append(("Text", build_whatsapp_text_payload(target_number, body)))
+
+    errors = []
+    for label, payload in attempts:
+        ok, provider_id, error = post_whatsapp_payload(payload)
+        error_text = clean_text(error) or "unbekannter Fehler"
+        record_whatsapp_message(
+            auftrag_id,
+            chat_id=chat_id,
+            richtung="outbound",
+            telefon=target_number,
+            provider_message_id=provider_id,
+            nachricht=body,
+            status="gesendet" if ok else "fehler",
+            fehler="" if ok else f"{label}: {error_text}",
+            payload=payload if not ok else None,
+        )
+        if ok:
+            return True, errors
+        errors.append(f"{target_number} {label}: {error_text}")
+        print(f"WARNUNG: WhatsApp-{label} konnte nicht gesendet werden: {error_text}")
+    return False, errors
 
 
 def post_whatsapp_payload(payload):
@@ -11782,7 +11966,7 @@ def extract_whatsapp_order_id(text):
 
 
 def notify_workshop_whatsapp_for_chat(auftrag_id, chat_id, nachricht, absender_label="Autohaus"):
-    if not whatsapp_bridge_enabled():
+    if whatsapp_bridge_config_errors():
         return False
     auftrag = get_auftrag(auftrag_id)
     if not auftrag:
@@ -11790,25 +11974,15 @@ def notify_workshop_whatsapp_for_chat(auftrag_id, chat_id, nachricht, absender_l
     body = build_whatsapp_chat_notification(auftrag, nachricht, absender_label=absender_label)
     sent_any = False
     for target_number in whatsapp_workshop_numbers():
-        if whatsapp_message_template_enabled():
-            payload = build_whatsapp_template_payload(target_number, auftrag, nachricht, absender_label=absender_label)
-        else:
-            payload = build_whatsapp_text_payload(target_number, body)
-        ok, provider_id, error = post_whatsapp_payload(payload)
-        sent_any = sent_any or ok
-        record_whatsapp_message(
+        ok, _errors = send_whatsapp_notice_with_fallback(
             auftrag_id,
             chat_id=chat_id,
-            richtung="outbound",
-            telefon=target_number,
-            provider_message_id=provider_id,
-            nachricht=body,
-            status="gesendet" if ok else "fehler",
-            fehler=error,
-            payload=payload if not ok else None,
+            target_number=target_number,
+            body=body,
+            auftrag=auftrag,
+            absender_label=absender_label,
         )
-        if not ok:
-            print(f"WARNUNG: WhatsApp-Benachrichtigung konnte nicht gesendet werden: {error}")
+        sent_any = sent_any or ok
     return sent_any
 
 
@@ -19748,19 +19922,23 @@ def admin_auftrag_whatsapp_hinweis(auftrag_id):
         abort(404)
     if not auftrag.get("autohaus_id"):
         flash("Für diesen Auftrag ist kein Autohaus hinterlegt.", "warning")
-    elif notify_workshop_whatsapp_for_new_order(
-        auftrag_id,
-        absender_label=auftrag.get("autohaus_name") or "Autohaus",
-    ):
-        flash("WhatsApp-Hinweis an die Werkstatt gesendet.", "success")
     else:
-        flash("WhatsApp-Hinweis konnte nicht gesendet werden. Bitte WhatsApp-Konfiguration prüfen.", "warning")
+        sent, errors = notify_workshop_whatsapp_for_new_order(
+            auftrag_id,
+            absender_label=auftrag.get("autohaus_name") or "Autohaus",
+            return_errors=True,
+        )
+        if sent:
+            flash("WhatsApp-Hinweis an die Werkstatt gesendet.", "success")
+        else:
+            detail = whatsapp_error_summary(errors)
+            suffix = f" Grund: {detail}" if detail else " Bitte WhatsApp-Konfiguration prüfen."
+            flash(f"WhatsApp-Hinweis konnte nicht gesendet werden.{suffix}", "warning")
 
     next_url = clean_text(request.form.get("next"))
     if next_url.startswith("/admin"):
         return redirect(next_url)
     return redirect(admin_auftrag_detail_url(auftrag_id))
-
 
 @app.route("/admin/cockpit/eingang/<path:item_key>/oeffnen")
 @admin_required
@@ -22476,10 +22654,15 @@ def partner_neuer_auftrag(slug):
             form.get("fertig_datum"),
             form.get("abholtermin"),
         )
-        notify_workshop_whatsapp_for_new_order(
+        whatsapp_sent, whatsapp_errors = notify_workshop_whatsapp_for_new_order(
             auftrag_id,
             absender_label=autohaus.get("name") or autohaus.get("portal_label") or "Autohaus",
+            return_errors=True,
         )
+        if not whatsapp_sent:
+            detail = whatsapp_error_summary(whatsapp_errors)
+            suffix = f" Grund: {detail}" if detail else ""
+            flash(f"WhatsApp-Hinweis an die Werkstatt wurde nicht gesendet.{suffix}", "warning")
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
     return render_partner_new_form(autohaus)
@@ -22642,10 +22825,15 @@ def partner_angebot_detail(slug, auftrag_id):
         if aktion == "submit_offer":
             submit_offer_request(auftrag_id)
             if neue_anfrage_abgesendet:
-                notify_workshop_whatsapp_for_new_order(
+                whatsapp_sent, whatsapp_errors = notify_workshop_whatsapp_for_new_order(
                     auftrag_id,
                     absender_label=autohaus.get("name") or autohaus.get("portal_label") or "Autohaus",
+                    return_errors=True,
                 )
+                if not whatsapp_sent:
+                    detail = whatsapp_error_summary(whatsapp_errors)
+                    suffix = f" Grund: {detail}" if detail else ""
+                    flash(f"WhatsApp-Hinweis an die Werkstatt wurde nicht gesendet.{suffix}", "warning")
             flash("Angebotsanfrage abgesendet. Die Werkstatt kann sie jetzt prüfen.", "success")
         else:
             flash_upload_analysis_result(
