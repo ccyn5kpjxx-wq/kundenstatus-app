@@ -699,6 +699,7 @@
       <div class="text-muted mb-3">Noch keine Chat-Nachrichten vorhanden.</div>
       {% endif %}
       <form method="POST" action="{{ url_for('admin_chat_nachricht', auftrag_id=auftrag['id']) }}" class="d-grid gap-2">
+        {{ csrf_field()|safe }}
         <label class="form-label mb-0">Antwort an das Autohaus</label>
         <textarea name="nachricht" class="form-control" rows="3" placeholder="Kurze Antwort oder Rückfrage schreiben..." required></textarea>
         <button type="submit" class="btn btn-brand">Nachricht senden</button>

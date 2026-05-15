@@ -749,6 +749,7 @@
           <div class="text-muted mb-3">Noch keine Chat-Nachrichten vorhanden.</div>
           {% endif %}
           <form method="POST" action="{{ url_for('partner_chat_nachricht', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="d-grid gap-2">
+            {{ csrf_field()|safe }}
             <label class="form-label mb-0">Nachricht an die Werkstatt</label>
             <textarea name="nachricht" class="form-control" rows="3" placeholder="Frage oder Problem kurz beschreiben..." required></textarea>
             <button type="submit" class="btn btn-outline-dark">Nachricht senden</button>

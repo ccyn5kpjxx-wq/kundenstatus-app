@@ -1740,11 +1740,33 @@ def protect_csrf():
     expected = session.get(CSRF_FIELD_NAME)
     provided = request.form.get(CSRF_FIELD_NAME) or request.headers.get("X-CSRF-Token")
     if not expected or not provided or not hmac.compare_digest(expected, provided):
+        recovery = csrf_recovery_response()
+        if recovery is not None:
+            return recovery
         if request.endpoint in {"login", "partner_login", "partner_login_key", "versicherung_login", "versicherung_login_key"}:
             session.pop(CSRF_FIELD_NAME, None)
             flash("Die Login-Seite war veraltet. Bitte Passwort noch einmal eingeben.", "warning")
             return redirect(request.path)
         abort(400)
+    return None
+
+
+def csrf_recovery_response():
+    endpoint = request.endpoint or ""
+    view_args = request.view_args or {}
+    if endpoint in {"partner_chat_nachricht", "partner_chat_nachricht_loeschen"}:
+        slug = clean_text(view_args.get("slug"))
+        auftrag_id = view_args.get("auftrag_id")
+        if slug and auftrag_id:
+            session.pop(CSRF_FIELD_NAME, None)
+            flash("Die Seite war veraltet. Bitte Nachricht noch einmal senden.", "warning")
+            return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+    if endpoint in {"admin_chat_nachricht", "admin_chat_nachricht_loeschen"}:
+        auftrag_id = view_args.get("auftrag_id")
+        if auftrag_id:
+            session.pop(CSRF_FIELD_NAME, None)
+            flash("Die Seite war veraltet. Bitte Nachricht noch einmal senden.", "warning")
+            return redirect(admin_auftrag_detail_url(auftrag_id))
     return None
 
 
