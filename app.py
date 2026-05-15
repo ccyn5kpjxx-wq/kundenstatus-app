@@ -5819,6 +5819,7 @@ BACKUP_TABLES = (
     "versicherungen",
     "auftraege",
     "dateien",
+    "datei_backups",
     "versicherung_aufgaben",
     "status_log",
     "chat_nachrichten",
@@ -6230,6 +6231,16 @@ def init_db():
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
         );
 
+        CREATE TABLE IF NOT EXISTS datei_backups (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            datei_id       INTEGER NOT NULL UNIQUE,
+            file_base64    TEXT NOT NULL,
+            file_sha256    TEXT DEFAULT '',
+            size           INTEGER DEFAULT 0,
+            erstellt_am    TEXT NOT NULL,
+            FOREIGN KEY (datei_id) REFERENCES dateien(id)
+        );
+
         CREATE TABLE IF NOT EXISTS versicherung_aufgaben (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             auftrag_id        INTEGER NOT NULL,
@@ -6633,6 +6644,11 @@ def init_db():
     ensure_column(db, "dateien", "analyse_quelle", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "analyse_json", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "analyse_hinweis", "TEXT DEFAULT ''")
+    ensure_column(db, "datei_backups", "datei_id", "INTEGER")
+    ensure_column(db, "datei_backups", "file_base64", "TEXT DEFAULT ''")
+    ensure_column(db, "datei_backups", "file_sha256", "TEXT DEFAULT ''")
+    ensure_column(db, "datei_backups", "size", "INTEGER DEFAULT 0")
+    ensure_column(db, "datei_backups", "erstellt_am", "TEXT DEFAULT ''")
     ensure_column(db, "rahmenvertrag_anfragen", "autohaus_id", "INTEGER DEFAULT 0")
     ensure_column(db, "rahmenvertrag_anfragen", "status", "TEXT DEFAULT 'offen'")
     ensure_column(db, "rahmenvertrag_anfragen", "nachricht", "TEXT DEFAULT ''")
@@ -6663,6 +6679,7 @@ def init_db():
     ensure_index(db, "idx_auftraege_angebote", "auftraege", ("angebotsphase", "angebot_abgesendet", "autohaus_id"))
     ensure_index(db, "idx_versicherungen_portal_key", "versicherungen", ("portal_key",))
     ensure_index(db, "idx_dateien_auftrag", "dateien", ("auftrag_id", "kategorie", "reklamation_id"))
+    ensure_index(db, "idx_datei_backups_datei", "datei_backups", ("datei_id",))
     ensure_index(db, "idx_versicherung_aufgaben_auftrag", "versicherung_aufgaben", ("auftrag_id", "status"))
     ensure_index(db, "idx_rahmenvertrag_anfragen_autohaus", "rahmenvertrag_anfragen", ("autohaus_id", "status"))
     ensure_index(db, "idx_lackierauftrag_entwuerfe_autohaus", "lackierauftrag_entwuerfe", ("autohaus_id",))
@@ -6920,6 +6937,8 @@ def init_db():
           AND COALESCE(qr_text, '')<>''
         """
     )
+
+    backfill_existing_upload_backups(db)
 
     db.commit()
     db.close()
@@ -9392,7 +9411,7 @@ def save_werkstatt_rechnung_upload(auftrag_id, files):
         if not extrakt_kurz:
             extrakt_kurz = "Werkstatt-Rechnung gespeichert. Bitte Original prüfen."
 
-        db.execute(
+        cursor = db.execute(
             """
             INSERT INTO dateien
             (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, dokument_typ, notiz,
@@ -9414,6 +9433,7 @@ def save_werkstatt_rechnung_upload(auftrag_id, files):
                 timestamp,
             ),
         )
+        store_datei_backup(db, cursor.lastrowid, target)
         saved += 1
 
     if verified:
@@ -9515,7 +9535,7 @@ def save_bonusrechnung_upload(auftrag_id, files, quelle="intern", notiz=""):
         if bundle.get("status") == "error" and analyse_hinweis:
             errors.append(analyse_hinweis)
 
-        db.execute(
+        cursor = db.execute(
             """
             INSERT INTO dateien
             (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, dokument_typ, notiz,
@@ -9538,6 +9558,7 @@ def save_bonusrechnung_upload(auftrag_id, files, quelle="intern", notiz=""):
                 timestamp,
             ),
         )
+        store_datei_backup(db, cursor.lastrowid, target)
         saved += 1
 
     if best_amount:
@@ -11488,12 +11509,13 @@ def delete_partner_datei(autohaus_id, datei_id):
         pass
 
     db = get_db()
+    delete_datei_backup(db, datei_id)
     db.execute("DELETE FROM dateien WHERE id=? AND auftrag_id=? AND quelle='autohaus'", (datei_id, auftrag["id"]))
     db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag["id"]))
     db.commit()
     db.close()
 
-    if notiz:
+    if clean_text(datei.get("notiz")):
         try:
             apply_document_data_to_auftrag(auftrag["id"], prefer_documents=False)
         except Exception:
@@ -11533,9 +11555,139 @@ def upload_file_path(datei):
     return UPLOAD_DIR / stored_name
 
 
+def upload_backup_payload(path):
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return "", "", 0
+    if not data:
+        return "", "", 0
+    return base64.b64encode(data).decode("ascii"), hashlib.sha256(data).hexdigest(), len(data)
+
+
+def store_datei_backup(db, datei_id, path):
+    try:
+        datei_id = int(datei_id or 0)
+    except (TypeError, ValueError):
+        return False
+    if not datei_id:
+        return False
+    file_base64, file_sha256, size = upload_backup_payload(path)
+    if not file_base64:
+        return False
+    db.execute("DELETE FROM datei_backups WHERE datei_id=?", (datei_id,))
+    db.execute(
+        """
+        INSERT INTO datei_backups
+        (datei_id, file_base64, file_sha256, size, erstellt_am)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (datei_id, file_base64, file_sha256, size, now_str()),
+    )
+    return True
+
+
+def delete_datei_backup(db, datei_id):
+    try:
+        datei_id = int(datei_id or 0)
+    except (TypeError, ValueError):
+        return
+    if datei_id:
+        db.execute("DELETE FROM datei_backups WHERE datei_id=?", (datei_id,))
+
+
+def backfill_existing_upload_backups(db):
+    try:
+        rows = db.execute(
+            """
+            SELECT d.id, d.stored_name
+            FROM dateien d
+            LEFT JOIN datei_backups b ON b.datei_id = d.id
+            WHERE b.datei_id IS NULL
+            ORDER BY d.id ASC
+            """
+        ).fetchall()
+    except Exception:
+        return 0
+    created = 0
+    for row in rows:
+        stored_name = pathlib.Path(clean_text(row["stored_name"])).name
+        if not stored_name:
+            continue
+        path = UPLOAD_DIR / stored_name
+        if not path.exists() or not path.is_file():
+            continue
+        if store_datei_backup(db, row["id"], path):
+            created += 1
+    return created
+
+
+def datei_backup_exists(datei_id):
+    try:
+        datei_id = int(datei_id or 0)
+    except (TypeError, ValueError):
+        return False
+    if not datei_id:
+        return False
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT 1 FROM datei_backups WHERE datei_id=? LIMIT 1",
+            (datei_id,),
+        ).fetchone()
+        return bool(row)
+    finally:
+        db.close()
+
+
+def restore_upload_file_from_backup(datei, path):
+    try:
+        datei_id = int((datei or {}).get("id") or 0)
+    except (TypeError, ValueError):
+        return False
+    if not datei_id or not path:
+        return False
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT file_base64, file_sha256 FROM datei_backups WHERE datei_id=?",
+            (datei_id,),
+        ).fetchone()
+    finally:
+        db.close()
+    if not row:
+        return False
+    try:
+        data = base64.b64decode(clean_text(row["file_base64"]), validate=True)
+    except Exception:
+        return False
+    expected_hash = clean_text(row["file_sha256"]).lower()
+    if expected_hash and hashlib.sha256(data).hexdigest().lower() != expected_hash:
+        return False
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    except OSError:
+        return False
+    return True
+
+
+def ensure_upload_file_available(datei):
+    path = upload_file_path(datei)
+    if not path:
+        return None
+    if path.exists() and path.is_file():
+        return path
+    if restore_upload_file_from_backup(datei, path):
+        return path
+    return None
+
+
 def upload_file_exists(datei):
     path = upload_file_path(datei)
-    return bool(path and path.exists() and path.is_file())
+    if path and path.exists() and path.is_file():
+        return True
+    return datei_backup_exists((datei or {}).get("id"))
 
 
 def missing_upload_response(datei, back_url=""):
@@ -11578,8 +11730,8 @@ def missing_upload_response(datei, back_url=""):
 
 
 def send_upload_file(datei, as_attachment=False, missing_back_url=""):
-    path = upload_file_path(datei)
-    if not path or not path.exists() or not path.is_file():
+    path = ensure_upload_file_available(datei)
+    if not path:
         return missing_upload_response(datei, missing_back_url)
     return send_file(
         path,
@@ -16818,7 +16970,7 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
         if datei_notiz:
             extrahierter_text = append_upload_note_to_analysis(extrahierter_text, datei_notiz)
             extrakt_kurz = append_upload_note_to_summary(extrakt_kurz, datei_notiz)
-        db.execute(
+        cursor = db.execute(
             """
             INSERT INTO dateien
             (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, dokument_typ, notiz,
@@ -16844,6 +16996,7 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
                 timestamp,
             ),
         )
+        store_datei_backup(db, cursor.lastrowid, target)
         saved += 1
     db.commit()
     db.close()
@@ -16920,8 +17073,8 @@ def reanalyze_existing_documents(auftrag_id):
         suffix = pathlib.Path(original_name).suffix.lower()
         if suffix not in ANALYSIS_EXTENSIONS:
             continue
-        path = UPLOAD_DIR / clean_text(datei.get("stored_name"))
-        if not path.exists():
+        path = ensure_upload_file_available(datei)
+        if not path:
             continue
         bundle = build_document_analysis_bundle_safe(path, original_name)
         extracted_text = clean_text(bundle.get("text"))
@@ -17134,7 +17287,7 @@ def delete_auftrag(auftrag_id, safety_backup=True):
         create_safety_backup(f"before-delete-auftrag-{auftrag_id}")
     db = get_db()
     dateien = db.execute(
-        "SELECT stored_name FROM dateien WHERE auftrag_id=?",
+        "SELECT id, stored_name FROM dateien WHERE auftrag_id=?",
         (auftrag_id,),
     ).fetchall()
     for datei in dateien:
@@ -17146,6 +17299,13 @@ def delete_auftrag(auftrag_id, safety_backup=True):
             move_upload_to_deleted_area(path, f"auftrag-{auftrag_id}")
         except OSError:
             pass
+    db.execute(
+        """
+        DELETE FROM datei_backups
+        WHERE datei_id IN (SELECT id FROM dateien WHERE auftrag_id=?)
+        """,
+        (auftrag_id,),
+    )
     db.execute("DELETE FROM dateien WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM reklamationen WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM verzoegerungen WHERE auftrag_id=?", (auftrag_id,))
@@ -21385,6 +21545,12 @@ def admin_daten_import():
                         shutil.copy2(DB, DATA_DIR / f"auftraege.backup-{backup_suffix}.db")
                     shutil.copy2(imported_db, DB)
                 replace_uploads_from_import(imported_uploads)
+                db = get_db()
+                try:
+                    backfill_existing_upload_backups(db)
+                    db.commit()
+                finally:
+                    db.close()
 
         flash("Daten wurden importiert. Fahrzeuge und Dateien sind jetzt auf diesem Server verfügbar.", "success")
     except ValueError as exc:
