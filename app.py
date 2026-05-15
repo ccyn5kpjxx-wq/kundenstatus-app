@@ -186,7 +186,8 @@ for env_file in (BASE / ".env.local", BASE / ".env"):
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 USE_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
 if USE_POSTGRES:
-    UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", "/tmp/kundenstatus-uploads"))
+    default_upload_dir = "/var/data/uploads" if os.environ.get("RENDER") else "/tmp/kundenstatus-uploads"
+    UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", default_upload_dir))
 elif os.environ.get("RENDER"):
     DATA_DIR = pathlib.Path(os.environ.get("DATA_DIR", "/var/data"))
     DB = pathlib.Path(os.environ.get("SQLITE_DB_PATH", str(DATA_DIR / "auftraege.db")))
@@ -1766,7 +1767,7 @@ def csrf_recovery_response():
         if auftrag_id:
             session.pop(CSRF_FIELD_NAME, None)
             flash("Die Seite war veraltet. Bitte Nachricht noch einmal senden.", "warning")
-            return redirect(admin_auftrag_detail_url(auftrag_id))
+            return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
     return None
 
 
@@ -11521,7 +11522,71 @@ def hydrate_datei(datei):
         or clean_text(datei.get("notiz"))
     )
     datei["text_preview"] = clean_text(datei.get("extrahierter_text"))[:2000]
+    datei["original_available"] = upload_file_exists(datei)
     return datei
+
+
+def upload_file_path(datei):
+    stored_name = pathlib.Path(clean_text((datei or {}).get("stored_name"))).name
+    if not stored_name:
+        return None
+    return UPLOAD_DIR / stored_name
+
+
+def upload_file_exists(datei):
+    path = upload_file_path(datei)
+    return bool(path and path.exists() and path.is_file())
+
+
+def missing_upload_response(datei, back_url=""):
+    return (
+        render_template_string(
+            """
+            <!doctype html>
+            <html lang="de">
+              <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <title>Originaldatei fehlt</title>
+                <style>
+                  body { font-family: Arial, sans-serif; background: #f6f2ea; margin: 0; padding: 40px; color: #102033; }
+                  .box { max-width: 820px; margin: 0 auto; background: #fffaf2; border: 1px solid #e2cda8; border-radius: 14px; padding: 28px; }
+                  .name { font-weight: 700; margin: 12px 0; }
+                  .hint { color: #6b5a36; line-height: 1.5; }
+                  a { display: inline-block; margin-top: 18px; color: #102033; }
+                </style>
+              </head>
+              <body>
+                <div class="box">
+                  <h1>Originaldatei nicht mehr verfügbar</h1>
+                  <div class="name">{{ datei['original_name'] }}</div>
+                  <p class="hint">
+                    Die Auswertung ist noch im Auftrag gespeichert, aber die hochgeladene Originaldatei liegt
+                    nicht mehr auf dem Server. Bitte die Datei erneut hochladen, damit sie wieder geöffnet oder
+                    heruntergeladen werden kann.
+                  </p>
+                  {% if back_url %}<a href="{{ back_url }}">Zurück zum Auftrag</a>{% endif %}
+                </div>
+              </body>
+            </html>
+            """,
+            datei=datei,
+            back_url=back_url,
+        ),
+        404,
+    )
+
+
+def send_upload_file(datei, as_attachment=False, missing_back_url=""):
+    path = upload_file_path(datei)
+    if not path or not path.exists() or not path.is_file():
+        return missing_upload_response(datei, missing_back_url)
+    return send_file(
+        path,
+        download_name=datei["original_name"],
+        mimetype=datei["mime_type"],
+        as_attachment=as_attachment,
+    )
 
 
 def should_replace_fahrzeug(existing_value):
@@ -20613,7 +20678,7 @@ def admin_auftrag_whatsapp_hinweis(auftrag_id):
     next_url = clean_text(request.form.get("next"))
     if next_url.startswith("/admin"):
         return redirect(next_url)
-    return redirect(admin_auftrag_detail_url(auftrag_id))
+    return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
 @app.route("/admin/cockpit/eingang/<path:item_key>/oeffnen")
 @admin_required
@@ -22188,14 +22253,10 @@ def admin_datei(datei_id):
     datei = get_datei(datei_id)
     if not datei:
         abort(404)
-    path = UPLOAD_DIR / datei["stored_name"]
-    if not path.exists():
-        abort(404)
-    return send_file(
-        path,
-        download_name=datei["original_name"],
-        mimetype=datei["mime_type"],
+    return send_upload_file(
+        datei,
         as_attachment=False,
+        missing_back_url=url_for("auftrag_detail", auftrag_id=datei["auftrag_id"]),
     )
 
 
@@ -22205,14 +22266,10 @@ def admin_datei_download(datei_id):
     datei = get_datei(datei_id)
     if not datei:
         abort(404)
-    path = UPLOAD_DIR / datei["stored_name"]
-    if not path.exists():
-        abort(404)
-    return send_file(
-        path,
-        download_name=datei["original_name"],
-        mimetype=datei["mime_type"],
+    return send_upload_file(
+        datei,
         as_attachment=True,
+        missing_back_url=url_for("auftrag_detail", auftrag_id=datei["auftrag_id"]),
     )
 
 
@@ -22689,14 +22746,10 @@ def versicherung_datei(slug, datei_id):
     auftrag = get_auftrag(datei["auftrag_id"])
     if not auftrag or int(auftrag.get("versicherung_id") or 0) != int(versicherung["id"]):
         abort(404)
-    path = UPLOAD_DIR / datei["stored_name"]
-    if not path.exists():
-        abort(404)
-    return send_file(
-        path,
-        download_name=datei["original_name"],
-        mimetype=datei["mime_type"],
+    return send_upload_file(
+        datei,
         as_attachment=False,
+        missing_back_url=url_for("versicherung_auftrag", slug=slug, auftrag_id=auftrag["id"]),
     )
 
 
@@ -24043,14 +24096,10 @@ def partner_datei(slug, datei_id):
     auftrag = get_auftrag(datei["auftrag_id"])
     if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
         abort(404)
-    path = UPLOAD_DIR / datei["stored_name"]
-    if not path.exists():
-        abort(404)
-    return send_file(
-        path,
-        download_name=datei["original_name"],
-        mimetype=datei["mime_type"],
+    return send_upload_file(
+        datei,
         as_attachment=False,
+        missing_back_url=url_for("partner_auftrag", slug=slug, auftrag_id=auftrag["id"]),
     )
 
 
@@ -24065,14 +24114,10 @@ def partner_datei_download(slug, datei_id):
     auftrag = get_auftrag(datei["auftrag_id"])
     if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
         abort(404)
-    path = UPLOAD_DIR / datei["stored_name"]
-    if not path.exists():
-        abort(404)
-    return send_file(
-        path,
-        download_name=datei["original_name"],
-        mimetype=datei["mime_type"],
+    return send_upload_file(
+        datei,
         as_attachment=True,
+        missing_back_url=url_for("partner_auftrag", slug=slug, auftrag_id=auftrag["id"]),
     )
 
 
