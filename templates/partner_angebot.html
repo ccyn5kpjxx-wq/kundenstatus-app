@@ -644,7 +644,7 @@
           {% if angebot['versicherung_freigabe_status'] == 'freigegeben' %}
           <form method="POST" action="{{ url_for('partner_versicherung_freigabe_einplanen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="mt-3">
             {{ csrf_field()|safe }}
-            <button type="submit" class="btn btn-dark">Freigabe liegt vor - Fahrzeug bei Werkstatt einplanen</button>
+            <button type="submit" class="btn btn-dark">Freigabe liegt vor - Fahrzeug bei Gärtner einplanen</button>
           </form>
           {% else %}
           <div class="text-muted small mt-3">Nach der Rückmeldung der Versicherung kann das Fahrzeug hier bei Gärtner eingeplant werden.</div>

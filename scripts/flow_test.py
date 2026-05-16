@@ -231,6 +231,142 @@ def main():
             response = client.get(url)
             check(label, response.status_code == 200, f"Status {response.status_code}")
 
+        partner_dashboard_html = partner.get("/partner/kaesmann/dashboard").get_data(as_text=True)
+        check(
+            "Partner-Dashboard bietet Versicherungsfall-Einstieg",
+            "Versicherungsfall melden" in partner_dashboard_html
+            and "/partner/kaesmann/versicherung/neu" in partner_dashboard_html,
+        )
+
+        versicherungen = portal.list_versicherungen()
+        check("Versicherungen fuer Schadenprozess vorhanden", bool(versicherungen))
+        flow_versicherung = versicherungen[0]
+        partner_case_get = partner.get("/partner/kaesmann/versicherung/neu")
+        check("Autohaus kann Versicherungsfall-Formular öffnen", partner_case_get.status_code == 200, f"Status {partner_case_get.status_code}")
+        partner_case_response = partner.post(
+            "/partner/kaesmann/versicherung/neu",
+            data=with_csrf(
+                partner,
+                {
+                    "versicherung_id": str(flow_versicherung["id"]),
+                    "kunde_name": "Flow Autohaus Kunde",
+                    "versicherungsnehmer": "Flow Autohaus Kunde",
+                    "kontakt_telefon": "0171 100200",
+                    "fahrzeug": "Skoda Octavia Flow",
+                    "kennzeichen": "MOS-F 170",
+                    "fin_nummer": "TMBFLOWAUTOHAUS01",
+                    "schaden_nummer": "FLOW-AH-170",
+                    "versicherung_police": "POL-FLOW-AH",
+                    "versicherung_email": flow_versicherung.get("email") or "schaden@example.test",
+                    "schadenart": "haftpflicht",
+                    "analyse_text": "Seitenschaden links",
+                    "beschreibung": "Kunde meldet Unfall im Autohaus. Autohaus bereitet Meldung an Versicherung vor.",
+                },
+            ),
+        )
+        check(
+            "Autohaus legt Versicherungsfall an",
+            partner_case_response.status_code == 302,
+            f"Status {partner_case_response.status_code}",
+        )
+        partner_case_id = extract_id_from_location(partner_case_response.headers.get("Location"))
+        partner_case = portal.get_auftrag(partner_case_id)
+        check(
+            "Autohaus-Versicherungsfall bleibt vor Freigabe beim Autohaus",
+            partner_case
+            and int(partner_case.get("autohaus_id") or 0) == int(autohaus["id"])
+            and int(partner_case.get("versicherung_id") or 0) == int(flow_versicherung["id"])
+            and partner_case.get("quelle") == "autohaus"
+            and partner_case.get("angebotsphase")
+            and partner_case.get("versicherung_freigabe_status") == "vorbereitet",
+            (
+                f"id={partner_case_id}, "
+                f"autohaus={partner_case.get('autohaus_id') if partner_case else None}, "
+                f"versicherung={partner_case.get('versicherung_id') if partner_case else None}, "
+                f"quelle={partner_case.get('quelle') if partner_case else None}, "
+                f"angebotsphase={partner_case.get('angebotsphase') if partner_case else None}, "
+                f"freigabe={partner_case.get('versicherung_freigabe_status') if partner_case else None}"
+            ),
+        )
+        partner_case_html = partner.get(f"/partner/kaesmann/angebot/{partner_case_id}").get_data(as_text=True)
+        check(
+            "Autohaus-Fall zeigt Versicherungsversand und spätere Einplanung",
+            "An Versicherung senden" in partner_case_html
+            and "bei Gärtner eingeplant" in partner_case_html,
+        )
+
+        versicherung_client = portal.app.test_client()
+        with versicherung_client.session_transaction() as session:
+            session["versicherung_id"] = flow_versicherung["id"]
+        versicherung_dashboard = versicherung_client.get(f"/versicherung/{flow_versicherung['slug']}/dashboard")
+        check(
+            "Versicherung sieht Zuteilung nur an Gärtner",
+            versicherung_dashboard.status_code == 200
+            and "An Gärtner zuteilen" in versicherung_dashboard.get_data(as_text=True),
+            f"Status {versicherung_dashboard.status_code}",
+        )
+        zuteilung_form = versicherung_client.get(f"/versicherung/{flow_versicherung['slug']}/zuteilung/neu")
+        zuteilung_html = zuteilung_form.get_data(as_text=True)
+        check(
+            "Versicherungs-Zuteilung nennt Gärtner statt andere Werkstatt",
+            zuteilung_form.status_code == 200
+            and "Fahrzeug an Gärtner zuteilen" in zuteilung_html
+            and "Partnerwerkstatt" not in zuteilung_html,
+            f"Status {zuteilung_form.status_code}",
+        )
+        zuteilung_response = versicherung_client.post(
+            f"/versicherung/{flow_versicherung['slug']}/zuteilung/neu",
+            data=with_csrf(
+                versicherung_client,
+                {
+                    "kunde_name": "Flow Versicherungs Kunde",
+                    "versicherungsnehmer": "Flow Versicherungs Kunde",
+                    "kontakt_telefon": "0171 300400",
+                    "kundenkontakt_kanal": "beides",
+                    "besichtigung_datum": "2026-05-18",
+                    "transport_art": "standard",
+                    "schaden_fahrbereit": "ja",
+                    "schaden_abschleppen": "nein",
+                    "schaden_mietwagen": "ja",
+                    "schaden_gutachter": "ja",
+                    "schadenart": "haftpflicht",
+                    "fahrzeug": "VW Golf Flow",
+                    "kennzeichen": "MOS-V 170",
+                    "fin_nummer": "WVWFLOWVERSICH01",
+                    "schaden_nummer": "FLOW-VS-170",
+                    "versicherung_police": "POL-FLOW-VS",
+                    "beschreibung": "Versicherung steuert den Schaden direkt an Gärtner.",
+                    "hinweis": "Kunde soll zur Begutachtung kontaktiert werden.",
+                },
+            ),
+        )
+        check(
+            "Versicherung legt Zuteilung an Gärtner an",
+            zuteilung_response.status_code == 302,
+            f"Status {zuteilung_response.status_code}",
+        )
+        zuteilung_id = extract_id_from_location(zuteilung_response.headers.get("Location"))
+        zuteilung = portal.get_auftrag(zuteilung_id)
+        check(
+            "Versicherungs-Zuteilung bleibt direkt bei Gärtner ohne Fremdwerkstatt",
+            zuteilung
+            and zuteilung.get("quelle") == "versicherung"
+            and int(zuteilung.get("autohaus_id") or 0) == 0
+            and int(zuteilung.get("versicherung_id") or 0) == int(flow_versicherung["id"])
+            and zuteilung.get("versicherung_freigabe_status") == "zugeteilt"
+            and zuteilung.get("angebotsphase")
+            and "Gärtner" in zuteilung.get("netzwerk_zuteilung_status", ""),
+            (
+                f"id={zuteilung_id}, "
+                f"autohaus={zuteilung.get('autohaus_id') if zuteilung else None}, "
+                f"versicherung={zuteilung.get('versicherung_id') if zuteilung else None}, "
+                f"quelle={zuteilung.get('quelle') if zuteilung else None}, "
+                f"angebotsphase={zuteilung.get('angebotsphase') if zuteilung else None}, "
+                f"freigabe={zuteilung.get('versicherung_freigabe_status') if zuteilung else None}, "
+                f"zuteilung={zuteilung.get('netzwerk_zuteilung_status') if zuteilung else None}"
+            ),
+        )
+
         sparkasse_csv = (
             "Kontonummer;DEMO\n"
             "Zeitraum;01.05.2026-31.05.2026\n"

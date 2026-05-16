@@ -607,7 +607,7 @@
           {% if auftrag['versicherung_freigabe_status'] == 'freigegeben' %}
           <form method="POST" action="{{ url_for('partner_versicherung_freigabe_einplanen', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}">
             {{ csrf_field()|safe }}
-            <button type="submit" class="btn btn-dark">Freigabe übernehmen</button>
+            <button type="submit" class="btn btn-dark">Freigabe übernehmen und bei Gärtner einplanen</button>
           </form>
           {% else %}
           <div class="text-muted">Sobald die Freigabe vorliegt, kann der Auftrag hier weiter eingeplant werden.</div>

@@ -1080,7 +1080,7 @@ KUNDENKONTAKT_KANAELE = {
 VERSICHERUNG_FREIGABE_STATUS = {
     "offen": {"label": "Offen", "farbe": "secondary"},
     "vorbereitet": {"label": "Vorbereitet", "farbe": "info"},
-    "zugeteilt": {"label": "Zugewiesen an Werkstatt", "farbe": "primary"},
+    "zugeteilt": {"label": "Zugewiesen an Gärtner", "farbe": "primary"},
     "gemeldet": {"label": "Gemeldet", "farbe": "primary"},
     "in_pruefung": {"label": "In Prüfung", "farbe": "info"},
     "rueckfrage": {"label": "Rückfrage", "farbe": "warning"},
@@ -25706,7 +25706,7 @@ def versicherung_zuteilung_neu(slug):
             hinweise.append(f"Besichtigung/Gutachten gewünscht am {besichtigung}.")
         hinweise.append(f"Kundenkontakt: {KUNDENKONTAKT_KANAELE[kundenkontakt_kanal]['label']}.")
         if kundenkontakt_kanal == "telefon":
-            hinweise.append("Kunde kann keinen QR-Code nutzen und soll die Werkstatt telefonisch kontaktieren; Termine werden manuell nachgetragen.")
+            hinweise.append("Kunde kann keinen QR-Code nutzen und soll Gärtner telefonisch kontaktieren; Termine werden manuell nachgetragen.")
         elif kundenkontakt_kanal == "beides":
             hinweise.append("QR-Code wird angeboten, telefonisch bleibt als Fallback möglich.")
         hinweise.append(f"Übergabe: {TRANSPORT_ARTEN[transport_art]['label']}.")
@@ -25741,7 +25741,7 @@ def versicherung_zuteilung_neu(slug):
             analyse=clean_text(form.get("analyse_text")) or analyse_text(beschreibung),
             transport_art=transport_art,
             kontakt_telefon=clean_text(form.get("kontakt_telefon")),
-            notiz_intern="Zuteilung durch Versicherung. Kunde soll zur Besichtigung/Gutachten kontaktiert werden.",
+            notiz_intern="Zuteilung durch Versicherung. Kunde soll zur Besichtigung/Gutachten durch Gärtner kontaktiert werden.",
             versicherung_freigabe_status="zugeteilt",
             angebotsphase=1,
         )
@@ -25761,7 +25761,7 @@ def versicherung_zuteilung_neu(slug):
             WHERE id=?
             """,
             (
-                "Von Versicherung zugeteilt - Erstkontakt/Begutachtung abstimmen",
+                "Von Versicherung an Gärtner zugeteilt - Erstkontakt/Begutachtung abstimmen",
                 schaden_fahrbereit,
                 schaden_abschleppen,
                 schaden_mietwagen,

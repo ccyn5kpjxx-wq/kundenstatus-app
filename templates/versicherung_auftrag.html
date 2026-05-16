@@ -110,7 +110,7 @@
               {% endif %}
             </div>
             {% if auftrag['kundenkontakt_kanal'] == 'telefon' %}
-            <div class="small mt-2">Wenn der Kunde kein Handy hat oder keinen QR-Code scannen kann, läuft die Terminabstimmung telefonisch. Die Werkstatt trägt Besichtigung, Abholung oder späteren Reparaturtermin manuell in der Akte nach.</div>
+            <div class="small mt-2">Wenn der Kunde kein Handy hat oder keinen QR-Code scannen kann, läuft die Terminabstimmung telefonisch. Gärtner trägt Besichtigung, Abholung oder späteren Reparaturtermin manuell in der Akte nach.</div>
             {% elif auftrag['kundenkontakt_kanal'] == 'beides' %}
             <div class="small mt-2">Der QR-Code bleibt verfügbar. Wenn der Kunde lieber anruft, wird der Termin wie gewohnt telefonisch vereinbart und manuell nachgetragen.</div>
             {% endif %}
@@ -120,7 +120,7 @@
             <img src="{{ url_for('kunden_status_qr', token=auftrag['kunden_status_token'], target='local') if auftrag['kunden_status_public_warning'] else url_for('kunden_status_qr', token=auftrag['kunden_status_token']) }}" alt="Kundenstatus QR-Code" style="width:132px;height:132px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;">
             <div class="flex-grow-1">
               <div class="fw-bold">{{ 'Optionaler QR-Code' if auftrag['kundenkontakt_kanal'] == 'telefon' else 'QR-Code für den Kunden' }}</div>
-              <div class="text-muted small mb-2">Der Kunde sieht den Status nur lesend und kann erst nach Freigabe und Teileklärung einen Terminwunsch senden. Ohne QR läuft der gleiche Schritt telefonisch über die Werkstatt.</div>
+              <div class="text-muted small mb-2">Der Kunde sieht den Status nur lesend und kann erst nach Freigabe und Teileklärung einen Terminwunsch senden. Ohne QR läuft der gleiche Schritt telefonisch über Gärtner.</div>
               <code class="small">{{ auftrag['kunden_status_local_url'] if auftrag['kunden_status_public_warning'] else auftrag['kunden_status_url'] }}</code>
               {% if auftrag['kunden_status_public_warning'] %}
               <div class="alert alert-warning small mt-3 mb-0">Öffentlicher Link nutzt aktuell einen Tunnel. Vor Weitergabe bitte Erreichbarkeit prüfen.</div>
@@ -140,7 +140,7 @@
             {{ csrf_field()|safe }}
             <label class="form-label mb-0">Status</label>
             <select name="versicherung_freigabe_status" class="form-select">
-              <option value="zugeteilt" {% if auftrag['versicherung_freigabe_status'] == 'zugeteilt' %}selected{% endif %}>Zugewiesen an Werkstatt</option>
+              <option value="zugeteilt" {% if auftrag['versicherung_freigabe_status'] == 'zugeteilt' %}selected{% endif %}>Zugewiesen an Gärtner</option>
               <option value="gemeldet" {% if auftrag['versicherung_freigabe_status'] == 'gemeldet' %}selected{% endif %}>Gemeldet</option>
               <option value="in_pruefung" {% if auftrag['versicherung_freigabe_status'] == 'in_pruefung' %}selected{% endif %}>In Prüfung</option>
               <option value="rueckfrage" {% if auftrag['versicherung_freigabe_status'] == 'rueckfrage' %}selected{% endif %}>Rückfrage</option>
@@ -148,7 +148,7 @@
               <option value="abgelehnt" {% if auftrag['versicherung_freigabe_status'] == 'abgelehnt' %}selected{% endif %}>Sperre / abgelehnt</option>
             </select>
             <label class="form-label mb-0">Nachricht / Rückfrage</label>
-            <textarea name="freigabe_hinweis" class="form-control" rows="4" placeholder="Rückfrage, Freigabehinweis oder Begründung an Autohaus und Werkstatt"></textarea>
+            <textarea name="freigabe_hinweis" class="form-control" rows="4" placeholder="Rückfrage, Freigabehinweis oder Begründung an Autohaus und Gärtner"></textarea>
             <label class="form-label mb-0">Unterlagen</label>
             <input type="file" name="dateien" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
             <button type="submit" class="btn btn-dark" {% if rollen_vorschau is defined and rollen_vorschau %}disabled{% endif %}>Antwort speichern</button>
