@@ -9648,6 +9648,34 @@ def list_versicherung_auftraege(versicherung_id=None, include_archived=False):
     return [row_to_auftrag(row) for row in rows]
 
 
+def build_versicherung_portal_dashboard(schadenfaelle):
+    aktive = [fall for fall in schadenfaelle if not fall.get("archiviert")]
+    archivierte = [fall for fall in schadenfaelle if fall.get("archiviert")]
+
+    def with_freigabe(status_values):
+        status_set = set(status_values)
+        return [fall for fall in aktive if fall.get("versicherung_freigabe_status") in status_set]
+
+    neue_meldungen = with_freigabe({"offen", "vorbereitet", "zugeteilt", "gemeldet"})
+    in_pruefung = with_freigabe({"in_pruefung", "rueckfrage"})
+    freigegeben = with_freigabe({"freigegeben"})
+    gesperrt = with_freigabe({"abgelehnt"})
+    return {
+        "alle": aktive,
+        "neue_meldungen": neue_meldungen,
+        "in_pruefung": in_pruefung,
+        "freigegeben": freigegeben,
+        "gesperrt": gesperrt,
+        "archivierte": archivierte,
+        "kennzahlen": {
+            "offen": len(neue_meldungen),
+            "pruefung": len(in_pruefung),
+            "freigegeben": len(freigegeben),
+            "archiv": len(archivierte),
+        },
+    }
+
+
 def build_lexware_rechnung_context(auftrag, invoice_net_amount=None):
     autohaus = get_autohaus(auftrag["autohaus_id"]) if auftrag.get("autohaus_id") else None
     kunde_name = clean_text(autohaus.get("name") if autohaus else "") or clean_text(auftrag.get("kunde_name"))
@@ -20332,12 +20360,12 @@ def set_versicherung_freigabe_status(auftrag_id, status, hinweis="", quelle="ver
     db.commit()
     db.close()
     auftrag = get_auftrag(auftrag_id)
-    if auftrag and auftrag.get("autohaus_id"):
+    if auftrag:
         meta = VERSICHERUNG_FREIGABE_STATUS[status]
         text = clean_text(hinweis)
         if not text:
             if status == "freigegeben":
-                text = "Die Versicherung hat den Schaden freigegeben. Das Fahrzeug kann jetzt bei der Werkstatt eingeplant werden."
+                text = "Die Versicherung hat den Schaden freigegeben. Das Fahrzeug kann jetzt bei Gärtner eingeplant werden."
             elif status == "rueckfrage":
                 text = "Die Versicherung hat eine Rückfrage zum Schadenfall gestellt."
             elif status == "in_pruefung":
@@ -25665,11 +25693,17 @@ def versicherung_dashboard(slug):
     versicherung, redirect_response = versicherung_session_required(slug)
     if redirect_response:
         return redirect_response
+    current_datetime = datetime.now()
+    schadenfaelle = list_versicherung_auftraege(versicherung["id"], include_archived=True)
     return render_template(
         "versicherung_dashboard.html",
         versicherung=versicherung,
-        schadenfaelle=list_versicherung_auftraege(versicherung["id"]),
+        schadenfaelle=[fall for fall in schadenfaelle if not fall.get("archiviert")],
+        dashboard=build_versicherung_portal_dashboard(schadenfaelle),
         freigabe_status=VERSICHERUNG_FREIGABE_STATUS,
+        current_datetime_iso=current_datetime.isoformat(timespec="seconds"),
+        current_time_label=current_datetime.strftime("%H:%M:%S"),
+        current_date_label=f"{WOCHENTAGE[current_datetime.weekday()]}, {current_datetime.strftime(DATE_FMT)}",
     )
 
 

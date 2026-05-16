@@ -176,6 +176,14 @@
           {% else %}
           <div class="text-muted">Noch keine Nachrichten vorhanden.</div>
           {% endif %}
+          <form method="POST" enctype="multipart/form-data" action="{{ '#' if rollen_vorschau is defined and rollen_vorschau else url_for('versicherung_freigabe_status', slug=versicherung['slug'], auftrag_id=auftrag['id']) }}" class="d-grid gap-2 mt-3">
+            {{ csrf_field()|safe }}
+            <input type="hidden" name="versicherung_freigabe_status" value="{{ auftrag['versicherung_freigabe_status'] }}">
+            <label class="form-label mb-0">Kurze Nachricht an Gärtner</label>
+            <textarea name="freigabe_hinweis" class="form-control" rows="3" placeholder="Rückfrage, Hinweis oder kurze Abstimmung zu diesem Schadenfall"></textarea>
+            <input type="file" name="dateien" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
+            <button type="submit" class="btn btn-outline-dark" {% if rollen_vorschau is defined and rollen_vorschau %}disabled{% endif %}>Nachricht senden</button>
+          </form>
         </div>
         <div class="panel">
           <h2 class="h4 mb-3">Unterlagen</h2>

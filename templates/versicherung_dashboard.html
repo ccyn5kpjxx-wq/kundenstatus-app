@@ -7,25 +7,92 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     body { background:#f3efe6; color:#16202a; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-    .shell { max-width:1120px; margin:0 auto; padding:28px 16px; }
+    .shell { max-width:1180px; margin:0 auto; padding:28px 16px; }
     .panel { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); }
+    .hero-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,360px); gap:18px; align-items:stretch; }
+    .portal-tools { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .weather-card, .clock-card { border:1px solid #ddd1c0; border-radius:16px; background:#fffaf2; padding:16px; min-height:132px; }
+    .weather-label, .clock-label { color:#6b5f53; font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+    .weather-main { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-top:8px; }
+    .weather-temp, .clock-time { font-size:2rem; line-height:1; font-weight:800; }
+    .weather-meta, .clock-date { color:#6b5f53; font-size:.92rem; margin-top:8px; }
+    .weather-hours { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
+    .weather-hour { border-top:1px solid #e4d6c3; padding-top:7px; font-size:.78rem; color:#51483e; }
     .action-panel { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1rem; align-items:center; border:1px solid #cddcca; border-radius:14px; background:#f7fbf6; padding:1rem; }
-    .case-list { display:grid; gap:.8rem; }
+    .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+    .metric { border:1px solid #ddd1c0; border-radius:16px; background:#fffaf2; padding:16px; }
+    .metric span { color:#6b5f53; font-size:.82rem; font-weight:700; text-transform:uppercase; }
+    .metric strong { display:block; font-size:2rem; line-height:1; margin-top:8px; }
+    .case-section { display:grid; gap:.75rem; }
     .case-row { display:grid; grid-template-columns:minmax(220px,1fr) auto auto; gap:1rem; align-items:center; border:1px solid #e4d6c3; border-radius:14px; background:#fffaf2; padding:1rem; color:#16202a; text-decoration:none; }
-    .case-row:hover { color:#16202a; border-color:#a23f2d; }
-    @media (max-width:760px) { .case-row, .action-panel { grid-template-columns:1fr; } }
+    .case-row:hover { color:#16202a; border-color:#a23f2d; background:#fff7eb; }
+    .case-meta { color:#6b5f53; font-size:.88rem; }
+    .section-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:14px; }
+    @media (max-width:900px) { .hero-grid, .action-panel { grid-template-columns:1fr; } .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media (max-width:640px) { .portal-tools, .metric-grid, .case-row { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
+  {% macro case_card(fall) -%}
+  <a class="case-row" href="{{ url_for('versicherung_auftrag', slug=versicherung['slug'], auftrag_id=fall['id']) }}">
+    <div>
+      <div class="fw-bold">{{ fall['fahrzeug'] }}</div>
+      <div class="case-meta">
+        {% if fall['kennzeichen'] %}{{ fall['kennzeichen'] }}{% endif %}
+        {% if fall['schaden_nummer'] %} · Schaden {{ fall['schaden_nummer'] }}{% endif %}
+        {% if fall['kunde_name'] %} · {{ fall['kunde_name'] }}{% endif %}
+      </div>
+    </div>
+    <span class="badge text-bg-{{ fall['versicherung_freigabe_meta']['farbe'] }}">{{ fall['versicherung_freigabe_meta']['label'] }}</span>
+    <span class="case-meta">{{ fall['status_meta']['label'] }}</span>
+  </a>
+  {%- endmacro %}
+
+  {% macro case_section(title, subtitle, items, empty_text) -%}
+  <div class="panel case-section">
+    <div class="section-head">
+      <div>
+        <h2 class="h4 mb-1">{{ title }}</h2>
+        <div class="text-muted">{{ subtitle }}</div>
+      </div>
+      <span class="badge text-bg-secondary">{{ items|length }}</span>
+    </div>
+    {% if items %}
+      {% for fall in items[:8] %}
+        {{ case_card(fall) }}
+      {% endfor %}
+    {% else %}
+      <div class="text-muted">{{ empty_text }}</div>
+    {% endif %}
+  </div>
+  {%- endmacro %}
+
   <main class="shell">
-    <div class="panel mb-4">
-      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
-        <div>
-          <div class="badge text-bg-dark mb-3">Versicherungsportal</div>
-          <h1 class="mb-1">{{ versicherung['name'] }}</h1>
-          <div class="text-muted">Digitale Schadenakte, Unterlagen und Reparaturstatus.</div>
+    <div class="hero-grid mb-4">
+      <div class="panel">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+          <div>
+            <div class="badge text-bg-dark mb-3">Versicherungsportal</div>
+            <h1 class="mb-1">{{ versicherung['name'] }}</h1>
+            <div class="text-muted">Digitale Schadenakte, Unterlagen, Freigaben und Reparaturstatus bei Gärtner.</div>
+          </div>
+          <a href="{{ url_for('versicherung_logout') }}" class="btn btn-outline-dark">Logout</a>
         </div>
-        <a href="{{ url_for('versicherung_logout') }}" class="btn btn-outline-dark">Logout</a>
+      </div>
+      <div class="portal-tools">
+        <div class="weather-card" data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}">
+          <div class="weather-label">Wetter Mosbach</div>
+          <div class="weather-main">
+            <strong class="weather-temp" data-weather-current-temp>--°C</strong>
+            <span class="badge text-bg-light border text-dark" data-weather-current-text>lädt</span>
+          </div>
+          <div class="weather-hours" data-weather-hours aria-label="Wetter in den nächsten Stunden"></div>
+        </div>
+        <div class="clock-card" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
+          <div class="clock-label">Heute</div>
+          <div class="clock-time" data-live-clock>{{ current_time_label }}</div>
+          <div class="clock-date" data-live-date>{{ current_date_label }}</div>
+        </div>
       </div>
     </div>
 
@@ -39,35 +106,89 @@
       </div>
     </div>
 
-    <div class="panel">
-      <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-3">
-        <div>
-          <h2 class="h4 mb-1">Schadenfälle</h2>
-          <div class="text-muted">Alle aktiven Fälle dieser Versicherung.</div>
-        </div>
-        <span class="badge text-bg-secondary">{{ schadenfaelle|length }} offen</span>
+    <div class="metric-grid mb-4">
+      <div class="metric"><span>Neue Meldungen</span><strong>{{ dashboard['kennzahlen']['offen'] }}</strong></div>
+      <div class="metric"><span>In Prüfung</span><strong>{{ dashboard['kennzahlen']['pruefung'] }}</strong></div>
+      <div class="metric"><span>Freigegeben</span><strong>{{ dashboard['kennzahlen']['freigegeben'] }}</strong></div>
+      <div class="metric"><span>Archiv</span><strong>{{ dashboard['kennzahlen']['archiv'] }}</strong></div>
+    </div>
+
+    <div class="row g-4">
+      <div class="col-lg-6">
+        {{ case_section('Neue Meldungen', 'Zuteilungen und frisch gemeldete Fälle.', dashboard['neue_meldungen'], 'Keine neuen Meldungen.') }}
       </div>
-      {% if schadenfaelle %}
-        <div class="case-list">
-          {% for fall in schadenfaelle %}
-          <a class="case-row" href="{{ url_for('versicherung_auftrag', slug=versicherung['slug'], auftrag_id=fall['id']) }}">
-            <div>
-              <div class="fw-bold">{{ fall['fahrzeug'] }}</div>
-              <div class="text-muted small">
-                {% if fall['kennzeichen'] %}{{ fall['kennzeichen'] }}{% endif %}
-                {% if fall['schaden_nummer'] %} · Schaden {{ fall['schaden_nummer'] }}{% endif %}
-                {% if fall['kunde_name'] %} · {{ fall['kunde_name'] }}{% endif %}
-              </div>
-            </div>
-            <span class="badge text-bg-{{ fall['versicherung_freigabe_meta']['farbe'] }}">{{ fall['versicherung_freigabe_meta']['label'] }}</span>
-            <span class="text-muted small">{{ fall['status_meta']['label'] }}</span>
-          </a>
-          {% endfor %}
-        </div>
-      {% else %}
-        <div class="text-muted">Aktuell sind keine Schadenfälle freigegeben.</div>
+      <div class="col-lg-6">
+        {{ case_section('In Prüfung', 'Fälle mit Prüfung, Rückfrage oder fehlender Freigabe.', dashboard['in_pruefung'], 'Keine offenen Prüfungen.') }}
+      </div>
+      <div class="col-lg-6">
+        {{ case_section('Freigegeben / in Arbeit', 'Freigegebene Fälle, die bei Gärtner weiterlaufen.', dashboard['freigegeben'], 'Keine freigegebenen Fälle.') }}
+      </div>
+      <div class="col-lg-6">
+        {{ case_section('Aktive Schadenakten', 'Alle nicht archivierten Fälle dieser Versicherung.', dashboard['alle'], 'Aktuell sind keine aktiven Schadenfälle vorhanden.') }}
+      </div>
+      {% if dashboard['gesperrt'] %}
+      <div class="col-12">
+        {{ case_section('Sperre / abgelehnt', 'Fälle ohne aktuelle Freigabe.', dashboard['gesperrt'], 'Keine gesperrten Fälle.') }}
+      </div>
       {% endif %}
+      <div class="col-12">
+        {{ case_section('Archivierte Schadenakten', 'Abgeschlossene oder archivierte Vorgänge.', dashboard['archivierte'], 'Noch keine archivierten Schadenakten.') }}
+      </div>
     </div>
   </main>
+
+  <script>
+    (() => {
+      const clockRoot = document.querySelector('[data-live-clock-root]');
+      if (clockRoot) {
+        const timeEl = clockRoot.querySelector('[data-live-clock]');
+        const dateEl = clockRoot.querySelector('[data-live-date]');
+        let current = new Date(clockRoot.dataset.serverNow || Date.now());
+        const weekdays = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+        const pad = (value) => String(value).padStart(2, '0');
+        const tick = () => {
+          current = new Date(current.getTime() + 1000);
+          if (timeEl) timeEl.textContent = `${pad(current.getHours())}:${pad(current.getMinutes())}:${pad(current.getSeconds())}`;
+          if (dateEl) dateEl.textContent = `${weekdays[current.getDay()]}, ${pad(current.getDate())}.${pad(current.getMonth() + 1)}.${current.getFullYear()}`;
+        };
+        setInterval(tick, 1000);
+      }
+
+      const weatherRoot = document.querySelector('[data-weather-widget]');
+      if (!weatherRoot) return;
+      const tempEl = weatherRoot.querySelector('[data-weather-current-temp]');
+      const textEl = weatherRoot.querySelector('[data-weather-current-text]');
+      const hoursEl = weatherRoot.querySelector('[data-weather-hours]');
+      const labelFor = (code) => {
+        const value = Number(code);
+        if (value === 0) return 'klar';
+        if ([1,2,3].includes(value)) return 'bewölkt';
+        if ([45,48].includes(value)) return 'Nebel';
+        if ([51,53,55,61,63,65,80,81,82].includes(value)) return 'Regen';
+        if ([71,73,75,77,85,86].includes(value)) return 'Schnee';
+        if ([95,96,99].includes(value)) return 'Gewitter';
+        return 'Wetter';
+      };
+      const rounded = (value) => Math.round(Number(value || 0));
+      fetch(weatherRoot.dataset.weatherUrl, { cache: 'no-store' })
+        .then((response) => response.ok ? response.json() : Promise.reject())
+        .then((payload) => {
+          const current = payload.current || {};
+          tempEl.textContent = `${rounded(current.temperature_2m)}°C`;
+          textEl.textContent = labelFor(current.weather_code);
+          const times = payload.hourly?.time || [];
+          const temps = payload.hourly?.temperature_2m || [];
+          const winds = payload.hourly?.wind_speed_10m || [];
+          hoursEl.innerHTML = times.slice(0, 3).map((time, index) => {
+            const hour = new Date(time).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+            return `<div class="weather-hour"><strong>${hour}</strong><br>${rounded(temps[index])}°C<br>Wind ${rounded(winds[index])} km/h</div>`;
+          }).join('');
+        })
+        .catch(() => {
+          textEl.textContent = 'nicht verfügbar';
+          tempEl.textContent = '--°C';
+        });
+    })();
+  </script>
 </body>
 </html>

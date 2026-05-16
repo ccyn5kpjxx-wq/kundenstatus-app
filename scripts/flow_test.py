@@ -299,11 +299,21 @@ def main():
         with versicherung_client.session_transaction() as session:
             session["versicherung_id"] = flow_versicherung["id"]
         versicherung_dashboard = versicherung_client.get(f"/versicherung/{flow_versicherung['slug']}/dashboard")
+        versicherung_dashboard_html = versicherung_dashboard.get_data(as_text=True)
         check(
             "Versicherung sieht Zuteilung nur an Gärtner",
             versicherung_dashboard.status_code == 200
-            and "An Gärtner zuteilen" in versicherung_dashboard.get_data(as_text=True),
+            and "An Gärtner zuteilen" in versicherung_dashboard_html,
             f"Status {versicherung_dashboard.status_code}",
+        )
+        check(
+            "Versicherungsportal zeigt Cockpit mit Wetter, Uhr und Statusgruppen",
+            "data-weather-widget" in versicherung_dashboard_html
+            and "data-live-clock" in versicherung_dashboard_html
+            and "Neue Meldungen" in versicherung_dashboard_html
+            and "In Prüfung" in versicherung_dashboard_html
+            and "Freigegeben / in Arbeit" in versicherung_dashboard_html
+            and "Archivierte Schadenakten" in versicherung_dashboard_html,
         )
         zuteilung_form = versicherung_client.get(f"/versicherung/{flow_versicherung['slug']}/zuteilung/neu")
         zuteilung_html = zuteilung_form.get_data(as_text=True)
@@ -365,6 +375,42 @@ def main():
                 f"freigabe={zuteilung.get('versicherung_freigabe_status') if zuteilung else None}, "
                 f"zuteilung={zuteilung.get('netzwerk_zuteilung_status') if zuteilung else None}"
             ),
+        )
+        zuteilung_detail = versicherung_client.get(f"/versicherung/{flow_versicherung['slug']}/auftrag/{zuteilung_id}")
+        zuteilung_detail_html = zuteilung_detail.get_data(as_text=True)
+        check(
+            "Versicherungsakte bietet kurze Nachricht an Gärtner",
+            zuteilung_detail.status_code == 200
+            and "Kurze Nachricht an Gärtner" in zuteilung_detail_html
+            and "Nachricht senden" in zuteilung_detail_html,
+            f"Status {zuteilung_detail.status_code}",
+        )
+        rueckfrage_response = versicherung_client.post(
+            f"/versicherung/{flow_versicherung['slug']}/auftrag/{zuteilung_id}/freigabe",
+            data=with_csrf(
+                versicherung_client,
+                {
+                    "versicherung_freigabe_status": "zugeteilt",
+                    "freigabe_hinweis": "Bitte Rückruf mit dem Kunden abstimmen.",
+                },
+            ),
+        )
+        check(
+            "Versicherung kann kurze Rückfrage an Gärtner senden",
+            rueckfrage_response.status_code == 302,
+            f"Status {rueckfrage_response.status_code}",
+        )
+        zuteilung_chat = portal.list_chat_nachrichten(zuteilung_id)
+        zuteilung_hinweise = portal.list_benachrichtigungen(zuteilung_id, nur_ungelesen=True)
+        check(
+            "Versicherungs-Rückfrage landet im Chat und als Hinweis",
+            any(
+                item.get("absender") == "versicherung"
+                and "Rückruf" in item.get("nachricht", "")
+                for item in zuteilung_chat
+            )
+            and any("Rückruf" in item.get("nachricht", "") for item in zuteilung_hinweise),
+            f"chat={zuteilung_chat}, hinweise={zuteilung_hinweise}",
         )
 
         sparkasse_csv = (
