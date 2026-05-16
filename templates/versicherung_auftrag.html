@@ -26,6 +26,12 @@
 </head>
 <body>
   <main class="shell">
+    {% if rollen_vorschau is defined and rollen_vorschau %}
+    <div class="alert alert-info mb-4">
+      Rollenvorschau Versicherung: So sieht die Versicherung diese Schadenakte. Aktionen sind in der Vorschau nicht aktiv.
+      <a href="{{ url_for('admin_versicherung_schaden_detail', auftrag_id=auftrag['id']) }}" class="alert-link">Zur internen Akte</a>
+    </div>
+    {% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
       <div class="alert alert-{{ cat }} mb-4">{{ msg }}</div>
@@ -35,7 +41,11 @@
     <div class="panel mb-4">
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
         <div>
+          {% if rollen_vorschau is defined and rollen_vorschau %}
+          <a href="{{ url_for('admin_versicherung_schaden_detail', auftrag_id=auftrag['id']) }}" class="btn btn-outline-dark btn-sm mb-3">Zur internen Akte</a>
+          {% else %}
           <a href="{{ url_for('versicherung_dashboard', slug=versicherung['slug']) }}" class="btn btn-outline-dark btn-sm mb-3">Zurück</a>
+          {% endif %}
           <h1 class="mb-1">{{ auftrag['fahrzeug'] }}</h1>
           <div class="text-muted">
             {% if auftrag['kennzeichen'] %}{{ auftrag['kennzeichen'] }}{% endif %}
@@ -79,30 +89,69 @@
           <dl class="row mb-0">
             <dt class="col-sm-5">Schadenart</dt><dd class="col-sm-7">{{ auftrag['schadenart_label'] }}</dd>
             <dt class="col-sm-5">FIN</dt><dd class="col-sm-7">{{ auftrag['fin_nummer'] or 'offen' }}</dd>
+            <dt class="col-sm-5">Begutachtung</dt><dd class="col-sm-7">{{ auftrag['schaden_besichtigung_datum'] or 'offen' }}</dd>
             <dt class="col-sm-5">Kalkulation</dt><dd class="col-sm-7">{{ auftrag['gt_motive_kalkulation_betrag'] or 'offen' }}</dd>
             <dt class="col-sm-5">Beschreibung</dt><dd class="col-sm-7">{{ auftrag['beschreibung'] or auftrag['analyse_text'] or 'offen' }}</dd>
           </dl>
+        </div>
+        <div class="panel mb-4">
+          {% include "_versicherung_schadenprotokoll.html" %}
+        </div>
+        <div class="panel mb-4">
+          <h2 class="h4 mb-3">Kundenverbindung</h2>
+          <div class="border rounded-3 p-3 mb-3 bg-white">
+            <div class="d-flex justify-content-between gap-3 flex-wrap">
+              <div>
+                <div class="fw-bold">{{ auftrag['kundenkontakt_label'] }}</div>
+                <div class="text-muted small">{{ auftrag['kundenkontakt_meta']['hinweis'] }}</div>
+              </div>
+              {% if auftrag['kontakt_telefon'] %}
+              <span class="badge text-bg-light border text-dark">{{ auftrag['kontakt_telefon'] }}</span>
+              {% endif %}
+            </div>
+            {% if auftrag['kundenkontakt_kanal'] == 'telefon' %}
+            <div class="small mt-2">Wenn der Kunde kein Handy hat oder keinen QR-Code scannen kann, läuft die Terminabstimmung telefonisch. Die Werkstatt trägt Besichtigung, Abholung oder späteren Reparaturtermin manuell in der Akte nach.</div>
+            {% elif auftrag['kundenkontakt_kanal'] == 'beides' %}
+            <div class="small mt-2">Der QR-Code bleibt verfügbar. Wenn der Kunde lieber anruft, wird der Termin wie gewohnt telefonisch vereinbart und manuell nachgetragen.</div>
+            {% endif %}
+          </div>
+          {% if auftrag['kunden_status_url'] %}
+          <div class="d-flex gap-3 align-items-start flex-wrap">
+            <img src="{{ url_for('kunden_status_qr', token=auftrag['kunden_status_token'], target='local') if auftrag['kunden_status_public_warning'] else url_for('kunden_status_qr', token=auftrag['kunden_status_token']) }}" alt="Kundenstatus QR-Code" style="width:132px;height:132px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;">
+            <div class="flex-grow-1">
+              <div class="fw-bold">{{ 'Optionaler QR-Code' if auftrag['kundenkontakt_kanal'] == 'telefon' else 'QR-Code für den Kunden' }}</div>
+              <div class="text-muted small mb-2">Der Kunde sieht den Status nur lesend und kann erst nach Freigabe und Teileklärung einen Terminwunsch senden. Ohne QR läuft der gleiche Schritt telefonisch über die Werkstatt.</div>
+              <code class="small">{{ auftrag['kunden_status_local_url'] if auftrag['kunden_status_public_warning'] else auftrag['kunden_status_url'] }}</code>
+              {% if auftrag['kunden_status_public_warning'] %}
+              <div class="alert alert-warning small mt-3 mb-0">Öffentlicher Link nutzt aktuell einen Tunnel. Vor Weitergabe bitte Erreichbarkeit prüfen.</div>
+              {% endif %}
+            </div>
+          </div>
+          {% else %}
+          <div class="text-muted">Noch kein Kundenstatus-Link vorhanden.</div>
+          {% endif %}
         </div>
         <div class="panel mb-4">
           {% include "_versicherung_workflow_panel.html" %}
         </div>
         <div class="panel mb-4">
           <h2 class="h4 mb-3">Freigabe</h2>
-          <form method="POST" enctype="multipart/form-data" action="{{ url_for('versicherung_freigabe_status', slug=versicherung['slug'], auftrag_id=auftrag['id']) }}" class="d-grid gap-3">
+          <form method="POST" enctype="multipart/form-data" action="{{ '#' if rollen_vorschau is defined and rollen_vorschau else url_for('versicherung_freigabe_status', slug=versicherung['slug'], auftrag_id=auftrag['id']) }}" class="d-grid gap-3">
             {{ csrf_field()|safe }}
             <label class="form-label mb-0">Status</label>
             <select name="versicherung_freigabe_status" class="form-select">
+              <option value="zugeteilt" {% if auftrag['versicherung_freigabe_status'] == 'zugeteilt' %}selected{% endif %}>Zugewiesen an Werkstatt</option>
               <option value="gemeldet" {% if auftrag['versicherung_freigabe_status'] == 'gemeldet' %}selected{% endif %}>Gemeldet</option>
               <option value="in_pruefung" {% if auftrag['versicherung_freigabe_status'] == 'in_pruefung' %}selected{% endif %}>In Prüfung</option>
               <option value="rueckfrage" {% if auftrag['versicherung_freigabe_status'] == 'rueckfrage' %}selected{% endif %}>Rückfrage</option>
               <option value="freigegeben" {% if auftrag['versicherung_freigabe_status'] == 'freigegeben' %}selected{% endif %}>Freigegeben</option>
-              <option value="abgelehnt" {% if auftrag['versicherung_freigabe_status'] == 'abgelehnt' %}selected{% endif %}>Abgelehnt</option>
+              <option value="abgelehnt" {% if auftrag['versicherung_freigabe_status'] == 'abgelehnt' %}selected{% endif %}>Sperre / abgelehnt</option>
             </select>
             <label class="form-label mb-0">Nachricht / Rückfrage</label>
             <textarea name="freigabe_hinweis" class="form-control" rows="4" placeholder="Rückfrage, Freigabehinweis oder Begründung an Autohaus und Werkstatt"></textarea>
             <label class="form-label mb-0">Unterlagen</label>
             <input type="file" name="dateien" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
-            <button type="submit" class="btn btn-dark">Antwort speichern</button>
+            <button type="submit" class="btn btn-dark" {% if rollen_vorschau is defined and rollen_vorschau %}disabled{% endif %}>Antwort speichern</button>
           </form>
         </div>
         <div class="panel mb-4">

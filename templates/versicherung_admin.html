@@ -9,11 +9,15 @@
   .insurance-metric strong { font-family:"Space Grotesk",sans-serif; font-size:1.8rem; line-height:1; }
   .case-row { display:grid; grid-template-columns:minmax(220px,1.2fr) minmax(160px,.8fr) minmax(160px,.8fr) auto; gap:1rem; align-items:center; border:1px solid #e4d6c3; border-radius:16px; background:#fffdf9; padding:1rem; }
   .case-list { display:grid; gap:.75rem; }
+  .cockpit-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; }
+  .cockpit-box { border:1px solid #e4d6c3; border-radius:14px; background:#fffdf9; padding:.9rem; min-height:120px; }
+  .cockpit-box strong { font-family:"Space Grotesk",sans-serif; font-size:1.55rem; line-height:1; }
   @media (max-width: 900px) {
     .insurance-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .cockpit-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .case-row { grid-template-columns:1fr; }
   }
-  @media (max-width: 575.98px) { .insurance-grid { grid-template-columns:1fr; } }
+  @media (max-width: 575.98px) { .insurance-grid, .cockpit-strip { grid-template-columns:1fr; } }
 </style>
 {% endblock %}
 
@@ -38,6 +42,33 @@
 <div class="page-card p-4 mb-4">
   <div class="section-title">
     <div>
+      <h4 class="mb-1">Tages-Cockpit</h4>
+      <p>Die wichtigsten Blocker für Versicherungsschäden, damit morgens sofort klar ist, wer auf wen wartet.</p>
+    </div>
+  </div>
+  <div class="cockpit-strip">
+    <div class="cockpit-box">
+      <div class="text-muted small">Wartet auf Freigabe</div>
+      <strong>{{ versicherung_cockpit['warte_freigabe']|length }}</strong>
+    </div>
+    <div class="cockpit-box">
+      <div class="text-muted small">Rückfragen</div>
+      <strong>{{ versicherung_cockpit['rueckfragen']|length }}</strong>
+    </div>
+    <div class="cockpit-box">
+      <div class="text-muted small">Teile offen</div>
+      <strong>{{ versicherung_cockpit['teile']|length }}</strong>
+    </div>
+    <div class="cockpit-box">
+      <div class="text-muted small">Abrechnung offen</div>
+      <strong>{{ versicherung_cockpit['abrechnung']|length }}</strong>
+    </div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
       <h4 class="mb-1">Aktuelle Versicherungsschäden</h4>
       <p>Schadenmeldung, Fahrzeugdarstellung und Freigabe auf einen Blick.</p>
     </div>
@@ -56,6 +87,7 @@
         </div>
         <div>
           <span class="badge text-bg-{{ fall['versicherung_freigabe_meta']['farbe'] }}">{{ fall['versicherung_freigabe_meta']['label'] }}</span>
+          <span class="badge text-bg-light border text-dark">{{ fall['schaden_station_label'] }}</span>
           <div class="text-muted small mt-1">{{ fall['schadenart_label'] }}</div>
         </div>
         <div>

@@ -1,0 +1,347 @@
+{% if versicherung_steuerung %}
+{% set editable = steuerung_editable|default(false) %}
+{% set fall = auftrag if auftrag is defined else angebot %}
+<style>
+  .claim-control { border:1px solid #d9c9b4; border-radius:8px; background:#fffdf9; padding:1rem; }
+  .claim-command { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,420px); gap:1rem; align-items:stretch; }
+  .claim-command-main { border:1px solid #d7e2d9; border-radius:8px; background:#f8fbf8; padding:1rem; }
+  .claim-command-meta { border:1px solid #eadfce; border-radius:8px; background:#fff; padding:1rem; }
+  .claim-command-kicker { color:#60705f; font-size:.76rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+  .claim-command-title { font-size:1.22rem; font-weight:800; line-height:1.2; }
+  .claim-role-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.65rem; }
+  .claim-role { border:1px solid #eadfce; border-radius:8px; background:#fff; padding:.75rem; min-height:132px; }
+  .claim-role strong { display:block; font-size:.95rem; margin-bottom:.35rem; }
+  .claim-role .role-label { color:#746958; font-size:.76rem; font-weight:700; text-transform:uppercase; }
+  .claim-control-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.65rem; }
+  .claim-control-tile { border:1px solid #eadfce; border-radius:8px; background:#fff; padding:.72rem; min-height:128px; position:relative; }
+  .claim-control-tile::before { content:""; position:absolute; left:.72rem; right:.72rem; top:0; height:3px; border-radius:999px; background:#c8d2c9; }
+  .claim-control-tile.status-success::before { background:#2f7d50; }
+  .claim-control-tile.status-warning::before { background:#e5a700; }
+  .claim-control-tile.status-danger::before { background:#cf374c; }
+  .claim-control-tile.status-info::before { background:#2374ab; }
+  .claim-control-tile strong { display:block; font-size:.9rem; line-height:1.2; }
+  .claim-control-tile .number { width:1.65rem; height:1.65rem; border-radius:999px; display:inline-grid; place-items:center; background:#17212a; color:#fff; font-weight:700; font-size:.78rem; margin:.35rem 0 .55rem; }
+  .claim-cost-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.65rem; }
+  .claim-cost-item { border:1px solid #eadfce; border-radius:8px; background:#fff; padding:.75rem; }
+  .claim-cost-item span { display:block; color:#6f6253; font-size:.78rem; }
+  .claim-cost-item strong { display:block; font-size:1rem; margin-top:.12rem; }
+  .claim-supplier-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.65rem; }
+  .claim-supplier { border:1px solid #eadfce; border-radius:8px; background:#fff; padding:.75rem; min-height:144px; }
+  .claim-supplier strong { display:block; line-height:1.2; margin:.35rem 0; }
+  .claim-supplier .supplier-action { color:#746958; font-size:.78rem; font-weight:700; text-transform:uppercase; }
+  .claim-control-form { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; }
+  .claim-control-wide { grid-column:span 2; }
+  .claim-part-row { display:grid; grid-template-columns:minmax(180px,1fr) 160px 150px minmax(160px,1fr) auto; gap:.65rem; align-items:end; border-top:1px solid #eadfce; padding-top:.75rem; margin-top:.75rem; }
+  @media (max-width: 1100px) {
+    .claim-control-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .claim-command { grid-template-columns:1fr; }
+    .claim-role-grid,
+    .claim-supplier-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .claim-cost-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .claim-control-form { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .claim-part-row { grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width: 575.98px) {
+    .claim-control-grid,
+    .claim-role-grid,
+    .claim-supplier-grid,
+    .claim-cost-grid,
+    .claim-control-form,
+    .claim-part-row { grid-template-columns:1fr; }
+    .claim-control-wide { grid-column:auto; }
+  }
+</style>
+
+<div class="claim-control mb-3" id="schadensteuerung">
+  <div class="claim-command mb-3">
+    <div class="claim-command-main">
+      <div class="claim-command-kicker">Schadenleitstand</div>
+      <div class="claim-command-title mt-1">{{ versicherung_steuerung['naechste_aktion']['titel'] }}</div>
+      <div class="text-muted mt-2">{{ versicherung_steuerung['naechste_aktion']['text'] }}</div>
+      <div class="d-flex gap-2 flex-wrap mt-3">
+        <span class="badge text-bg-{{ versicherung_steuerung['naechste_aktion']['status'] }}">{{ versicherung_steuerung['naechste_aktion']['rolle'] }}</span>
+        <span class="badge text-bg-{{ 'success' if versicherung_steuerung['freigabe_ok'] else 'info' }}">
+          {{ 'Freigabe erteilt' if versicherung_steuerung['freigabe_ok'] else 'Freigabe offen' }}
+        </span>
+        <span class="badge text-bg-{{ 'warning' if versicherung_steuerung['freigabe_ok'] and versicherung_steuerung['offene_teile_count'] else ('success' if versicherung_steuerung['freigabe_ok'] else 'secondary') }}">
+          {{ versicherung_steuerung['offene_teile_count'] ~ ' offene Teile' if versicherung_steuerung['freigabe_ok'] else 'Teile nach Freigabe' }}
+        </span>
+      </div>
+    </div>
+    <div class="claim-command-meta">
+      <div class="fw-bold">Professioneller Ablauf</div>
+      <div class="text-muted small mt-1">Aufnahme, Kalkulation, Versicherung, Nachtrag, Teile, Termin, Werkstatt und Abrechnung laufen in einer Akte. Jede Rolle sieht nur das, was sie wirklich braucht.</div>
+      <div class="d-flex gap-2 flex-wrap mt-3">
+        <span class="badge text-bg-light border text-dark">Kunde read-only</span>
+        <span class="badge text-bg-light border text-dark">Versicherung prüft</span>
+        <span class="badge text-bg-light border text-dark">Lieferant getrennt</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="claim-role-grid mb-3">
+    {% for rolle in versicherung_steuerung['rollen'] %}
+    <div class="claim-role">
+      <div class="d-flex justify-content-between gap-2 align-items-start">
+        <strong>{{ rolle['name'] }}</strong>
+        <span class="badge text-bg-{{ rolle['status'] }}">Sicht</span>
+      </div>
+      <div class="role-label mt-1">Darf sehen</div>
+      <div class="small">{{ rolle['sicht'] }}</div>
+      <div class="role-label mt-2">Geschützt</div>
+      <div class="small text-muted">{{ rolle['schutz'] }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="claim-control-grid mb-3">
+    {% for item in versicherung_steuerung['bausteine'] %}
+    <div class="claim-control-tile status-{{ item['status'] }}">
+      <span class="number">{{ item['nr'] }}</span>
+      <span class="badge text-bg-{{ item['status'] }} mb-2">
+        {% if item['status'] == 'success' %}OK{% elif item['status'] == 'danger' %}Blockiert{% elif item['status'] == 'warning' %}Prüfen{% else %}Optional{% endif %}
+      </span>
+      <strong>{{ item['titel'] }}</strong>
+      <div class="text-muted small mt-1">{{ item['text'] }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="border-top pt-3 mt-3 mb-3">
+    <div class="d-flex justify-content-between gap-2 flex-wrap align-items-start mb-2">
+      <div>
+        <div class="fw-semibold">Kalkulationsvergleich</div>
+        <div class="text-muted small">Gutachten, Werkstattpreis, Freigabe und Rechnung bleiben nebeneinander prüfbar.</div>
+      </div>
+      {% if versicherung_steuerung['differenz_label'] %}
+      <span class="badge text-bg-{{ 'warning' if versicherung_steuerung['differenz_warnung'] else 'success' }}">
+        Differenz {{ versicherung_steuerung['differenz_label'] }}
+      </span>
+      {% endif %}
+    </div>
+    <div class="claim-cost-grid">
+      {% for kosten in versicherung_steuerung['kostenvergleich'] %}
+      <div class="claim-cost-item">
+        <span>{{ kosten['label'] }}</span>
+        <strong>{{ kosten['value'] }}</strong>
+      </div>
+      {% endfor %}
+    </div>
+    {% if freigabe_zusammenfassung is defined and freigabe_zusammenfassung %}
+    <div class="alert alert-success py-2 small mt-3 mb-0">Freigabebericht liegt vor: {{ freigabe_zusammenfassung['punkte'][0] }}</div>
+    {% endif %}
+  </div>
+
+  <div class="border-top pt-3 mt-3 mb-3">
+    <div class="d-flex justify-content-between gap-2 flex-wrap align-items-start mb-2">
+      <div>
+        <div class="fw-semibold">Teile & Lieferanten</div>
+        <div class="text-muted small">So wirkt der Prozess nach außen vollständig: Originalteile, Zubehör, Material und API/Warenkorb sind getrennt.</div>
+      </div>
+      <span class="badge text-bg-light border text-dark">Bestellung erst nach Werkstattfreigabe</span>
+    </div>
+    <div class="claim-supplier-grid">
+      {% for item in versicherung_steuerung['lieferantenmatrix'] %}
+      <div class="claim-supplier">
+        <span class="badge text-bg-{{ item['status'] }}">{{ item['typ'] }}</span>
+        <strong>{{ item['lieferant'] }}</strong>
+        <div class="small text-muted">{{ item['hinweis'] }}</div>
+        <div class="supplier-action mt-2">{{ item['aktion'] }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if editable %}
+  <div class="claim-control-form mb-3">
+    <div>
+      <label class="form-label">Fahrbereit</label>
+      <select name="schaden_fahrbereit" class="form-select">
+        {% for key, label in steuerung_optionen.items() %}
+        <option value="{{ key }}" {% if fall['schaden_fahrbereit'] == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">Gutachter</label>
+      <select name="schaden_gutachter" class="form-select">
+        {% for key, label in steuerung_optionen.items() %}
+        <option value="{{ key }}" {% if fall['schaden_gutachter'] == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">Anwalt</label>
+      <select name="schaden_anwalt" class="form-select">
+        {% for key, label in steuerung_optionen.items() %}
+        <option value="{{ key }}" {% if fall['schaden_anwalt'] == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">Leasing / Finanzierung</label>
+      <select name="schaden_leasing" class="form-select">
+        {% for key, label in steuerung_optionen.items() %}
+        <option value="{{ key }}" {% if fall['schaden_leasing'] == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">Mietwagen</label>
+      <select name="schaden_mietwagen" class="form-select">
+        {% for key, label in steuerung_optionen.items() %}
+        <option value="{{ key }}" {% if fall['schaden_mietwagen'] == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">Abschleppen</label>
+      <select name="schaden_abschleppen" class="form-select">
+        {% for key, label in steuerung_optionen.items() %}
+        <option value="{{ key }}" {% if fall['schaden_abschleppen'] == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">Vorsteuerabzug</label>
+      <select name="schaden_vorsteuerabzug" class="form-select">
+        {% for key, label in steuerung_optionen.items() %}
+        <option value="{{ key }}" {% if fall['schaden_vorsteuerabzug'] == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">Selbstbeteiligung</label>
+      <input type="text" name="schaden_selbstbeteiligung" value="{{ fall['schaden_selbstbeteiligung'] }}" class="form-control" placeholder="z.B. 300 EUR">
+    </div>
+    <div class="claim-control-wide">
+      <label class="form-label">Werkstatt-Station</label>
+      <select name="schaden_station" class="form-select">
+        {% for key, label in kanban_stationen %}
+        <option value="{{ key }}" {% if fall['schaden_station'] == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Vor Freigabe bleibt die Akte in Versicherungsprüfung oder Nacharbeit. Teile und Reparaturplanung folgen danach.</div>
+    </div>
+    <div class="claim-control-wide">
+      <label class="form-label">Abrechnung</label>
+      <select name="abrechnung_status" class="form-select">
+        {% for key, label in abrechnung_status.items() %}
+        <option value="{{ key }}" {% if fall['abrechnung_status'] == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">Gutachten</label>
+      <input type="text" name="kosten_gutachten_betrag" value="{{ fall['kosten_gutachten_betrag'] }}" class="form-control" placeholder="EUR">
+    </div>
+    <div>
+      <label class="form-label">Werkstattpreis</label>
+      <input type="text" name="kosten_werkstatt_betrag" value="{{ fall['kosten_werkstatt_betrag'] }}" class="form-control" placeholder="EUR">
+    </div>
+    <div>
+      <label class="form-label">Freigegeben</label>
+      <input type="text" name="kosten_freigabe_betrag" value="{{ fall['kosten_freigabe_betrag'] }}" class="form-control" placeholder="EUR">
+    </div>
+    <div>
+      <label class="form-label">Rechnung</label>
+      <input type="text" name="kosten_rechnung_betrag" value="{{ fall['kosten_rechnung_betrag'] }}" class="form-control" placeholder="EUR">
+    </div>
+    <div>
+      <label class="form-label">Kürzung / Differenz</label>
+      <input type="text" name="kosten_kuerzung_betrag" value="{{ fall['kosten_kuerzung_betrag'] }}" class="form-control" placeholder="EUR">
+    </div>
+    <div class="claim-control-wide d-flex align-items-end gap-2 flex-wrap">
+      <label class="form-check">
+        <input type="checkbox" name="schaden_eigenauftrag" value="1" class="form-check-input" {% if fall['schaden_eigenauftrag'] %}checked{% endif %}>
+        <span class="form-check-label">Kunde/Werkstatt hat bewussten Eigenauftrag ohne Versicherungsfreigabe dokumentiert</span>
+      </label>
+    </div>
+  </div>
+
+  {% if versicherung_steuerung['freigabe_ok'] %}
+  <div class="border-top pt-3 mt-3">
+    <div class="fw-semibold mb-2">Teileprozess</div>
+    <div class="claim-control-form">
+      <div class="claim-control-wide">
+        <label class="form-label">Teil hinzufügen</label>
+        <input type="text" name="teil_bezeichnung" class="form-control" placeholder="z.B. Stoßfänger vorne Originalteil">
+      </div>
+      <div>
+        <label class="form-label">Status</label>
+        <select name="teil_status" class="form-select">
+          {% for key, meta in teile_status.items() %}
+          <option value="{{ key }}">{{ meta['label'] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Liefertermin</label>
+        <input type="date" name="teil_liefertermin" class="form-control">
+      </div>
+      <div class="claim-control-wide">
+        <label class="form-label">Lieferant / Bestellinfo</label>
+        <input type="text" name="teil_notiz" class="form-control" placeholder="z.B. Käsmann Audi, OE-Nr., Bestellnummer oder Zubehörfreigabe">
+      </div>
+    </div>
+    <button type="submit" class="btn btn-dark mt-3" formaction="{{ url_for('admin_versicherung_steuerung_speichern', auftrag_id=fall['id']) }}" formmethod="post">Schadensteuerung speichern</button>
+  </div>
+  {% else %}
+  <div class="border-top pt-3 mt-3">
+    <div class="fw-semibold mb-1">Nächster Werkstatt-Schritt</div>
+    <div class="text-muted small">Teilebestellung und Reparaturplanung werden erst nach der Versicherungsfreigabe bearbeitet. Bis dahin steht die Prüfung durch die Versicherung im Vordergrund.</div>
+  </div>
+  {% endif %}
+
+  {% if versicherung_steuerung['freigabe_ok'] and versicherung_teile %}
+  <div class="mt-3">
+    {% for teil in versicherung_teile %}
+    <div class="claim-part-row">
+      <div>
+        <div class="fw-semibold">{{ teil['bezeichnung'] }}</div>
+        <span class="badge text-bg-{{ teil['status_meta']['farbe'] }}">{{ teil['status_meta']['label'] }}</span>
+      </div>
+      <div>
+        <label class="form-label small">Status</label>
+        <select name="teil_status_{{ teil['id'] }}" class="form-select form-select-sm">
+          {% for key, meta in teile_status.items() %}
+          <option value="{{ key }}" {% if teil['status'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label small">Liefertermin</label>
+        <input type="date" name="teil_liefertermin_{{ teil['id'] }}" value="{{ teil['liefertermin']|iso_date }}" class="form-control form-control-sm">
+      </div>
+      <div>
+        <label class="form-label small">Lieferant / Info</label>
+        <input type="text" name="teil_notiz_{{ teil['id'] }}" value="{{ teil['notiz'] }}" class="form-control form-control-sm">
+      </div>
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-sm btn-outline-dark" formaction="{{ url_for('admin_versicherung_teil_update', auftrag_id=fall['id'], teil_id=teil['id']) }}" formmethod="post">Speichern</button>
+        <button type="submit" name="aktion" value="loeschen" class="btn btn-sm btn-outline-danger" formaction="{{ url_for('admin_versicherung_teil_update', auftrag_id=fall['id'], teil_id=teil['id']) }}" formmethod="post">Löschen</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="row g-3">
+    <div class="col-md-4"><div class="small text-muted">Werkstatt-Station</div><div class="fw-semibold">{{ fall['schaden_station_label'] }}</div></div>
+    <div class="col-md-4"><div class="small text-muted">Mietwagen</div><div class="fw-semibold">{{ fall['schaden_mietwagen_label'] }}</div></div>
+    <div class="col-md-4"><div class="small text-muted">Abrechnung</div><div class="fw-semibold">{{ fall['abrechnung_status_label'] }}</div></div>
+  </div>
+  {% if versicherung_teile %}
+  <div class="mt-3">
+    <div class="fw-semibold mb-2">Teile</div>
+    <div class="d-flex gap-2 flex-wrap">
+      {% for teil in versicherung_teile %}
+      <span class="badge text-bg-{{ teil['status_meta']['farbe'] }}">{{ teil['bezeichnung'] }} · {{ teil['status_meta']['label'] }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% endif %}
+
+</div>
+{% endif %}

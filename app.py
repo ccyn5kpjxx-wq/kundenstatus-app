@@ -14,8 +14,9 @@ from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
 from email import policy
 from email.header import decode_header, make_header
+from email.message import EmailMessage
 from email.parser import BytesParser
-from email.utils import getaddresses, parsedate_to_datetime
+from email.utils import formataddr, getaddresses, parsedate_to_datetime
 from functools import wraps
 from html import escape, unescape
 import hmac
@@ -30,6 +31,7 @@ import pathlib
 import re
 import secrets
 import shutil
+import smtplib
 import sqlite3
 import tempfile
 import threading
@@ -266,6 +268,30 @@ MAIL_IMAP_ARCHIVE_FOLDER = (os.environ.get("MAIL_IMAP_ARCHIVE_FOLDER") or "").st
 MAIL_IMAP_SEARCH = (os.environ.get("MAIL_IMAP_SEARCH") or "UNSEEN").strip().upper() or "UNSEEN"
 MAIL_IMAP_LIMIT = max(1, min(env_int("MAIL_IMAP_LIMIT", 30), 200))
 MAIL_IMAP_TIMEOUT_SECONDS = max(5, env_int("MAIL_IMAP_TIMEOUT_SECONDS", 20))
+MAIL_ROUTE_ALIASES = (os.environ.get("MAIL_ROUTE_ALIASES") or "").strip()
+SCHADEN_MAIL_ADDRESS = (
+    os.environ.get("SCHADEN_MAIL_ADDRESS")
+    or os.environ.get("SCHADEN_EMAIL_ADDRESS")
+    or ""
+).strip()
+SCHADEN_MAIL_DISPLAY_NAME = (
+    os.environ.get("SCHADEN_MAIL_DISPLAY_NAME")
+    or "Gärtner Karosserie & Lack - Schadenregulierung"
+).strip()
+SCHADEN_IMAP_HOST = (os.environ.get("SCHADEN_IMAP_HOST") or MAIL_IMAP_HOST).strip()
+SCHADEN_IMAP_PORT = max(1, env_int("SCHADEN_IMAP_PORT", MAIL_IMAP_PORT))
+SCHADEN_IMAP_USER = (os.environ.get("SCHADEN_IMAP_USER") or "").strip()
+SCHADEN_IMAP_PASS = (os.environ.get("SCHADEN_IMAP_PASS") or "").strip()
+SCHADEN_IMAP_FOLDER = (os.environ.get("SCHADEN_IMAP_FOLDER") or MAIL_IMAP_FOLDER).strip() or "INBOX"
+SCHADEN_IMAP_SSL = env_flag("SCHADEN_IMAP_SSL", MAIL_IMAP_SSL)
+SCHADEN_SMTP_HOST = (os.environ.get("SCHADEN_SMTP_HOST") or "").strip()
+SCHADEN_SMTP_PORT = max(1, env_int("SCHADEN_SMTP_PORT", 587))
+SCHADEN_SMTP_USER = (os.environ.get("SCHADEN_SMTP_USER") or "").strip()
+SCHADEN_SMTP_PASS = (os.environ.get("SCHADEN_SMTP_PASS") or "").strip()
+SCHADEN_SMTP_TLS = env_flag("SCHADEN_SMTP_TLS", True)
+SCHADEN_SMTP_SSL = env_flag("SCHADEN_SMTP_SSL", False)
+SCHADEN_SMTP_ATTACHMENTS = env_flag("SCHADEN_SMTP_ATTACHMENTS", True)
+SCHADEN_SMTP_ATTACHMENT_LIMIT_MB = max(1, min(env_int("SCHADEN_SMTP_ATTACHMENT_LIMIT_MB", 18), 50))
 LEXWARE_API_BASE_URL = (os.environ.get("LEXWARE_API_BASE_URL") or "https://api.lexware.io").strip().rstrip("/")
 LEXWARE_APP_BASE_URL = (os.environ.get("LEXWARE_APP_BASE_URL") or "https://app.lexware.de").strip().rstrip("/")
 LEXWARE_TAX_RATE = float(os.environ.get("LEXWARE_TAX_RATE") or 19)
@@ -351,6 +377,10 @@ WEATHER_CACHE_LOCK = threading.Lock()
 def get_public_base_url():
     if PUBLIC_BASE_URL:
         return PUBLIC_BASE_URL
+    return get_request_base_url()
+
+
+def get_request_base_url():
     if has_request_context():
         forwarded_proto = clean_text(request.headers.get("X-Forwarded-Proto")).split(",", 1)[0]
         forwarded_host = clean_text(request.headers.get("X-Forwarded-Host")).split(",", 1)[0]
@@ -1032,14 +1062,30 @@ TRANSPORT_ARTEN = {
     },
 }
 
+KUNDENKONTAKT_KANAELE = {
+    "qr": {
+        "label": "QR-Code / Statuslink",
+        "hinweis": "Kunde kann den Status digital öffnen und später einen Terminwunsch senden.",
+    },
+    "telefon": {
+        "label": "Telefonisch über Werkstatt",
+        "hinweis": "Kunde ruft die Werkstatt an; Termine werden manuell in der Akte nachgetragen.",
+    },
+    "beides": {
+        "label": "QR-Code und Telefon",
+        "hinweis": "QR wird angeboten, telefonisch bleibt als Fallback möglich.",
+    },
+}
+
 VERSICHERUNG_FREIGABE_STATUS = {
     "offen": {"label": "Offen", "farbe": "secondary"},
     "vorbereitet": {"label": "Vorbereitet", "farbe": "info"},
+    "zugeteilt": {"label": "Zugewiesen an Werkstatt", "farbe": "primary"},
     "gemeldet": {"label": "Gemeldet", "farbe": "primary"},
     "in_pruefung": {"label": "In Prüfung", "farbe": "info"},
     "rueckfrage": {"label": "Rückfrage", "farbe": "warning"},
     "freigegeben": {"label": "Freigegeben", "farbe": "success"},
-    "abgelehnt": {"label": "Abgelehnt", "farbe": "danger"},
+    "abgelehnt": {"label": "Sperre / abgelehnt", "farbe": "danger"},
 }
 
 SCHADENARTEN = (
@@ -1050,7 +1096,278 @@ SCHADENARTEN = (
     ("glasschaden", "Glasschaden"),
     ("wildschaden", "Wildschaden"),
     ("parkrempler", "Parkschaden"),
+    ("hagel_unwetter", "Hagel / Unwetter"),
+    ("vandalismus", "Vandalismus / Fahrerflucht"),
 )
+
+VERSICHERUNG_SCHADENART_HINTS = (
+    {
+        "key": "haftpflicht",
+        "titel": "Unfallgegner / Haftpflicht",
+        "deckung": "gegnerische Kfz-Haftpflicht",
+        "beispiele": "Auffahrunfall, Vorfahrt, Fremdverschulden",
+        "hinweis": "Für Schäden, die ein anderer verursacht hat. Gegnerdaten und Versicherung sind wichtig.",
+    },
+    {
+        "key": "vollkasko",
+        "titel": "Kasko-Unfall",
+        "deckung": "Vollkasko",
+        "beispiele": "selbst verursachter Unfall, Poller, Parkrempler",
+        "hinweis": "Eigenschäden durch Unfall am eigenen Fahrzeug laufen in der Regel über Vollkasko.",
+    },
+    {
+        "key": "teilkasko",
+        "titel": "Natur / Diebstahl / Tier",
+        "deckung": "Teilkasko",
+        "beispiele": "Hagel, Sturm, Überschwemmung, Wild, Marder, Diebstahl",
+        "hinweis": "Typische äußere Ereignisse ohne klassischen selbst verursachten Unfall.",
+    },
+    {
+        "key": "glasschaden",
+        "titel": "Glasschaden",
+        "deckung": "meist Teilkasko",
+        "beispiele": "Steinschlag, Windschutzscheibe, Seiten-/Heckscheibe",
+        "hinweis": "Glasbruch ist typischer Teilkasko-Fall; Folgeschäden gesondert prüfen.",
+    },
+)
+
+VERSICHERUNG_PROZESS_STATUS = {
+    "offen": {"label": "Offen", "farbe": "secondary", "resolved": False},
+    "erledigt": {"label": "Erledigt", "farbe": "success", "resolved": True},
+    "nicht_vorhanden": {"label": "Nicht vorhanden", "farbe": "warning", "resolved": True},
+    "nicht_noetig": {"label": "Nicht nötig", "farbe": "secondary", "resolved": True},
+}
+
+VERSICHERUNG_PROZESS_ITEMS = (
+    {
+        "key": "grunddaten",
+        "gruppe": "1. Schadensaufnahme & Kalkulation",
+        "label": "Schadenaufnahme",
+        "kurz": "Kunde, Fahrzeug, Schadenart und kurze Beschreibung.",
+        "required": "Kunde/Halter, Fahrzeug oder Kennzeichen, Schadenart und Schadenbeschreibung.",
+        "anchor": "pflicht-kunde",
+        "manual": False,
+    },
+    {
+        "key": "kunden_qr",
+        "gruppe": "1. Schadensaufnahme & Kalkulation",
+        "label": "Kunden-QR-Code",
+        "kurz": "Statuszugang direkt bei der Schadensaufnahme aushändigen.",
+        "required": "QR-Code oder Status-Link dem Kunden mitgeben.",
+        "manual": False,
+        "optional": True,
+    },
+    {
+        "key": "fahrzeugschein",
+        "gruppe": "1. Schadensaufnahme & Kalkulation",
+        "label": "Fahrzeugschein / FIN",
+        "kurz": "Fahrzeug eindeutig identifizieren.",
+        "required": "FIN eintragen oder Fahrzeugschein/Zulassungsbescheinigung hochladen.",
+        "accept": ".jpg,.jpeg,.png,.webp,.heic,.pdf,image/*,application/pdf",
+        "terms": ("fahrzeugschein", "zulassung", "zulassungsbescheinigung", "teil i", "teil 1", "fin"),
+        "anchor": "pflicht-fahrzeugdaten",
+        "analyze": True,
+    },
+    {
+        "key": "gutachten",
+        "gruppe": "1. Schadensaufnahme & Kalkulation",
+        "label": "Kalkulation / Gutachten / KVA",
+        "kurz": "Kostenbasis schon in der Schadensaufnahme erstellen, bevor der Fall zur Versicherung geht.",
+        "required": "Gutachten, DAT-/GT-Kalkulation oder Kostenvoranschlag als PDF/Bild.",
+        "accept": ".jpg,.jpeg,.png,.webp,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf",
+        "terms": ("gutachten", "schadengutachten", "kalkulation", "dat", "kostenvoranschlag", "kva", "gt estimate"),
+        "analyze": True,
+    },
+    {
+        "key": "schadenfotos",
+        "gruppe": "1. Schadensaufnahme & Kalkulation",
+        "label": "Schadenfotos",
+        "kurz": "Alle benötigten Schadenbilder zusammen hochladen.",
+        "required": "Bitte mehrere Fotos gemeinsam hochladen.",
+        "required_list": (
+            "Gesamtansicht vom Fahrzeug mit erkennbarem Schadenbereich",
+            "Kennzeichen / Fahrzeug eindeutig erkennbar",
+            "Betroffener Bereich aus normalem Abstand",
+            "Nahaufnahme vom Schaden",
+            "Bei mehreren Schäden: je Schadenbereich ein weiteres Detailfoto",
+        ),
+        "accept": ".jpg,.jpeg,.png,.webp,.heic,image/*",
+        "terms": ("schadenfoto", "schadenfotos", "front", "vorne", "heck", "hinten", "links", "rechts", "detail", "nahaufnahme", "schaden"),
+        "image_only": True,
+        "multiple": True,
+        "analyze": False,
+    },
+    {
+        "key": "abtretung",
+        "gruppe": "2. Versicherung",
+        "label": "Abtretung / Reparaturauftrag",
+        "kurz": "Unterschriebene Grundlage für Direktabrechnung oder Auftrag.",
+        "required": "Unterschriebene Abtretungserklärung oder Reparaturauftrag hochladen.",
+        "accept": ".jpg,.jpeg,.png,.webp,.heic,.pdf,image/*,application/pdf",
+        "terms": ("abtretung", "abtretungserklaerung", "abtretungserklärung", "anspruchsabtretung", "reparaturauftrag"),
+        "anchor": "pflicht-abtretung",
+        "download_label": "Abtretungserklärung herunterladen",
+        "download_hint": "PDF herunterladen, unterschreiben lassen und hier wieder hochladen.",
+        "analyze": False,
+    },
+    {
+        "key": "freigabe",
+        "gruppe": "2. Versicherung",
+        "label": "Reparaturfreigabe",
+        "kurz": "Entscheidung der Versicherung dokumentieren.",
+        "required": "Schriftliche Freigabe oder Kostenübernahme der Versicherung ablegen.",
+        "accept": ".jpg,.jpeg,.png,.webp,.heic,.pdf,.txt,.docx,image/*,application/pdf",
+        "terms": ("freigabe", "kostenuebernahme", "kostenübernahme", "reparaturfreigabe", "deckung"),
+        "analyze": False,
+    },
+    {
+        "key": "kalkulation_nacharbeit",
+        "gruppe": "3. Nachtrag / Neuberechnung",
+        "label": "Kalkulationsnacharbeit",
+        "kurz": "Bei Rückfrage, Sperre oder Kürzung neu rechnen und nachreichen.",
+        "required": "Bei Rückfrage oder abweichender Freigabe Nachtrag/Korrektur hochladen oder neu kalkulieren.",
+        "accept": ".jpg,.jpeg,.png,.webp,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf",
+        "terms": ("nacharbeit", "rueckfrage", "rückfrage", "kuerzung", "kürzung", "korrektur", "ergaenzung", "ergänzung"),
+        "optional": True,
+        "analyze": False,
+    },
+    {
+        "key": "nachtrag",
+        "gruppe": "3. Nachtrag / Neuberechnung",
+        "label": "Nachtrag / Zusatzschaden",
+        "kurz": "Wenn nach Prüfung oder Demontage mehr Schaden sichtbar wird, zurück in die Kalkulation.",
+        "required": "Bei Zusatzschaden Nachtragsfotos/Kalkulation hochladen, sonst als nicht nötig markieren.",
+        "accept": ".jpg,.jpeg,.png,.webp,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf",
+        "terms": ("nachtrag", "zusatzschaden", "demontage", "erweiterung", "versteckter schaden"),
+        "optional": True,
+        "analyze": False,
+    },
+    {
+        "key": "teile",
+        "gruppe": "4. Teile und Termin",
+        "label": "Teile bestellen",
+        "kurz": "Erst nach Freigabe: Teilebedarf, Bestellung, Lieferzeit und Rückstand festhalten.",
+        "required": "Nach Freigabe Teilebedarf prüfen, Bestellung/Status pflegen oder als nicht nötig markieren.",
+        "manual_only": True,
+    },
+    {
+        "key": "teile_lieferschein",
+        "gruppe": "4. Teile und Termin",
+        "label": "Teilebelege / Lieferschein",
+        "kurz": "Bestellte und gelieferte Teile für die Versicherung nachvollziehbar belegen.",
+        "required": "Lieferschein, Bestellbeleg oder Rückstandsinfo hochladen, wenn Teile benötigt werden.",
+        "accept": ".jpg,.jpeg,.png,.webp,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf",
+        "terms": ("lieferschein", "bestellung", "rueckstand", "rückstand", "teilebeleg", "teile", "ersatzteil"),
+        "optional": True,
+        "analyze": False,
+    },
+    {
+        "key": "terminfreigabe",
+        "gruppe": "4. Teile und Termin",
+        "label": "Terminfreigabe Kunde",
+        "kurz": "Erst nach Freigabe und geklärter Teilelage bekommt der Kunde die Terminaktion.",
+        "required": "Kunde informieren und Bring-/Abholtermin abstimmen.",
+        "manual_only": True,
+        "optional": True,
+    },
+    {
+        "key": "reparatur_doku",
+        "gruppe": "5. Werkstattdurchlauf",
+        "label": "Reparaturdokumentation",
+        "kurz": "Demontage, Instandsetzung, Lackierung, Montage und Endkontrolle dokumentieren.",
+        "required": "Werkstattfotos, Arbeitsnotiz, Prüf-/Kalibrierbeleg oder Reparaturdoku hochladen.",
+        "required_list": (
+            "Demontage- oder Zwischenstand bei verdecktem Schaden",
+            "Instandsetzung / Karosseriearbeit",
+            "Lackierung oder Lackvorbereitung",
+            "Montage / Kalibrierung / Vermessung, falls relevant",
+            "Endkontrolle vor Übergabe",
+        ),
+        "accept": ".jpg,.jpeg,.png,.webp,.heic,.pdf,.txt,.docx,image/*,application/pdf",
+        "terms": ("reparaturdoku", "werkstattfoto", "demontage", "instandsetzung", "lackierung", "montage", "endkontrolle", "kalibrierung", "vermessung"),
+        "optional": True,
+        "multiple": True,
+        "analyze": False,
+    },
+    {
+        "key": "fertigbilder",
+        "gruppe": "6. Abschluss & Abrechnung",
+        "label": "Fertigbilder",
+        "kurz": "Fertige Reparatur sichtbar belegen, ohne Fahrzeugdaten zu verändern.",
+        "required": "Fertigbilder nach Abschluss hochladen.",
+        "required_list": (
+            "Gesamtansicht nach Instandsetzung",
+            "Reparierter Bereich aus normalem Abstand",
+            "Detailaufnahme vom reparierten Bereich",
+        ),
+        "accept": ".jpg,.jpeg,.png,.webp,.heic,image/*",
+        "terms": ("fertigbild", "fertigbilder", "endfoto", "abschlussfoto", "repariert", "fertig"),
+        "image_only": True,
+        "multiple": True,
+        "optional": True,
+        "analyze": False,
+        "upload_category": "fertigbild",
+    },
+    {
+        "key": "zahlung_freigabe",
+        "gruppe": "6. Abschluss & Abrechnung",
+        "label": "Abrechnung / Zahlungsfreigabe",
+        "kurz": "Rechnung, Kürzung, Nachforderung und Zahlung sichtbar abschließen.",
+        "required": "Rechnung oder Zahlungs-/Kürzungsstatus pflegen.",
+        "manual_only": True,
+        "optional": True,
+    },
+)
+
+SCHADEN_STEUERUNG_OPTIONEN = {
+    "unbekannt": "Noch offen",
+    "ja": "Ja",
+    "nein": "Nein",
+}
+
+SCHADEN_KANBAN_STATIONEN = (
+    ("aufnahme", "Schadensaufnahme"),
+    ("kalkulation", "Aufnahme / Kalkulation"),
+    ("warte_unterlagen", "Unterlagen fehlen"),
+    ("versicherung_pruefung", "Bei Versicherung"),
+    ("warte_freigabe", "Wartet auf Freigabe"),
+    ("kalkulation_nacharbeit", "Kalkulationsnacharbeit"),
+    ("sperre", "Sperre / keine Freigabe"),
+    ("freigegeben", "Freigabe liegt vor"),
+    ("teile_bestellen", "Teile bestellen"),
+    ("warte_teile", "Wartet auf Teile"),
+    ("terminvereinbarung", "Termin mit Kunde"),
+    ("fahrzeug_in_werkstatt", "Fahrzeug in Werkstatt"),
+    ("demontage", "Demontage"),
+    ("karosserie", "Karosserie"),
+    ("vorbereitung", "Vorbereitung"),
+    ("lackierung", "Lackierung"),
+    ("montage", "Montage"),
+    ("kalibrierung", "Kalibrierung / Vermessung"),
+    ("endkontrolle", "Endkontrolle"),
+    ("fertigbilder", "Fertigbilder"),
+    ("abrechnung", "Abrechnung"),
+    ("abgeschlossen", "Abgeschlossen"),
+)
+
+SCHADEN_TEILE_STATUS = {
+    "offen": {"label": "Offen", "farbe": "secondary"},
+    "angefragt": {"label": "Angefragt", "farbe": "info"},
+    "bestellt": {"label": "Bestellt", "farbe": "primary"},
+    "geliefert": {"label": "Geliefert", "farbe": "success"},
+    "rueckstand": {"label": "Rückstand", "farbe": "warning"},
+    "nicht_noetig": {"label": "Nicht nötig", "farbe": "secondary"},
+}
+
+SCHADEN_ABRECHNUNG_STATUS = {
+    "offen": "Offen",
+    "abrechnungsbereit": "Abrechnungsbereit",
+    "rechnung_geschrieben": "Rechnung geschrieben",
+    "teilbezahlt": "Teilbezahlt",
+    "bezahlt": "Bezahlt",
+    "kuerzung": "Kürzung / Differenz",
+    "nachforderung": "Nachforderung läuft",
+}
 
 FAHRZEUG_SCHADEN_ZONEN = (
     {"key": "stossfaenger_vorne", "label": "Stoßfänger vorne", "gruppe": "Front"},
@@ -1190,6 +1507,116 @@ PREISLISTE_LACKIERUNG = {
             "von": 150,
             "bis": 240,
         },
+    },
+}
+
+KALKULATION_STANDARDWERTE = {
+    "arbeitslohn_satz": 92.0,
+    "lacklohn_satz": 98.0,
+    "material_je_lackstunde": 32.0,
+    "mwst_satz": 19.0,
+}
+
+KALKULATION_STATUS = {
+    "entwurf": {"label": "Entwurf", "farbe": "secondary"},
+    "geprueft": {"label": "Geprüft", "farbe": "success"},
+}
+
+KALKULATION_GRUPPEN = {
+    "arbeit": {"label": "Karosserie / Montage", "farbe": "primary"},
+    "lack": {"label": "Lackierung", "farbe": "danger"},
+    "material": {"label": "Lackmaterial / Nebenmaterial", "farbe": "warning"},
+    "ersatzteil": {"label": "Ersatzteile", "farbe": "info"},
+    "extern": {"label": "Fremdleistung", "farbe": "secondary"},
+}
+
+KALKULATION_BAUTEIL_PROFILE = {
+    "stossfaenger": {
+        "terms": ("stossfaenger", "stossstange", "frontschuerze", "heckschuerze"),
+        "karosserie_stunden": 0.7,
+        "demontage_stunden": 0.8,
+        "lack_stunden": 2.3,
+        "teilehinweis": "Stoßfängerhaut, Halter, Clips, Sensorhalter und Leisten prüfen.",
+    },
+    "kotfluegel": {
+        "terms": ("kotfluegel", "kotfluegel", "kotfl"),
+        "karosserie_stunden": 1.2,
+        "demontage_stunden": 0.6,
+        "lack_stunden": 1.7,
+        "teilehinweis": "Kotflügel, Radhausschale, Clips und Anbauteile prüfen.",
+    },
+    "motorhaube": {
+        "terms": ("motorhaube", "haube"),
+        "karosserie_stunden": 1.5,
+        "demontage_stunden": 0.8,
+        "lack_stunden": 2.8,
+        "teilehinweis": "Haube, Dämmung, Emblem, Düsen und Scharniere prüfen.",
+    },
+    "tuer": {
+        "terms": ("tuer", "vordertuer", "hintertuer", "fahrertuer", "beifahrertuer"),
+        "karosserie_stunden": 1.4,
+        "demontage_stunden": 1.0,
+        "lack_stunden": 2.1,
+        "teilehinweis": "Tür, Leisten, Griff, Spiegel, Dichtungen und Clips prüfen.",
+    },
+    "seitenteil": {
+        "terms": ("seitenteil", "radlauf", "seitenwand"),
+        "karosserie_stunden": 1.8,
+        "demontage_stunden": 0.9,
+        "lack_stunden": 2.4,
+        "teilehinweis": "Seitenteil/Radlauf, Innenradhaus, Leisten und Clips prüfen.",
+    },
+    "schweller": {
+        "terms": ("schweller", "einstieg"),
+        "karosserie_stunden": 1.6,
+        "demontage_stunden": 0.6,
+        "lack_stunden": 1.8,
+        "teilehinweis": "Schweller, Einstieg, Clips und Unterbodenschutz prüfen.",
+    },
+    "heckklappe": {
+        "terms": ("heckklappe", "kofferraumklappe", "heckdeckel"),
+        "karosserie_stunden": 1.4,
+        "demontage_stunden": 1.1,
+        "lack_stunden": 2.4,
+        "teilehinweis": "Heckklappe, Emblem, Leuchten, Dichtungen und Verkleidung prüfen.",
+    },
+    "dach": {
+        "terms": ("dach",),
+        "karosserie_stunden": 2.2,
+        "demontage_stunden": 0.8,
+        "lack_stunden": 3.0,
+        "teilehinweis": "Dachleisten, Antenne, Himmel-/Innenarbeiten und Glasübergänge prüfen.",
+    },
+    "glas": {
+        "terms": ("scheibe", "frontscheibe", "heckscheibe", "seitenscheibe", "windschutzscheibe"),
+        "karosserie_stunden": 0.0,
+        "demontage_stunden": 1.4,
+        "lack_stunden": 0.0,
+        "teilehinweis": "Scheibe, Klebesatz, Sensor-/Kameraaufnahme und Kalibrierung prüfen.",
+        "lackieren": False,
+    },
+    "felge": {
+        "terms": ("felge", "rad"),
+        "karosserie_stunden": 0.4,
+        "demontage_stunden": 0.3,
+        "lack_stunden": 0.0,
+        "teilehinweis": "Felge, Reifen, Ventil/RDKS und Wuchtung prüfen.",
+        "lackieren": False,
+    },
+    "sensor": {
+        "terms": ("sensor", "parksensor", "pdc", "radar"),
+        "karosserie_stunden": 0.0,
+        "demontage_stunden": 0.4,
+        "lack_stunden": 0.0,
+        "teilehinweis": "Sensor, Halter, Leitung und ggf. Kalibrierung prüfen.",
+        "lackieren": False,
+    },
+    "standard": {
+        "terms": (),
+        "karosserie_stunden": 0.9,
+        "demontage_stunden": 0.5,
+        "lack_stunden": 1.4,
+        "teilehinweis": "Ersatzteilbedarf nach Demontage und Originalkatalog prüfen.",
     },
 }
 
@@ -4156,6 +4583,461 @@ def build_price_suggestion(auftrag):
     }
 
 
+def kalkulation_float(value, default=0.0, minimum=0.0, maximum=999999.0):
+    if isinstance(value, (int, float)):
+        amount = float(value)
+    else:
+        amount = parse_money_amount(value)
+        if amount is None:
+            normalized = clean_text(value).replace(",", ".")
+            try:
+                amount = float(normalized)
+            except ValueError:
+                amount = default
+    amount = default if amount is None else amount
+    amount = max(minimum, min(float(amount), maximum))
+    return round(amount, 2)
+
+
+def format_kalkulation_euro(value, suffix=""):
+    label = format_bonus_money(value)
+    return f"{label} {suffix}".strip()
+
+
+def kalkulation_gruppe(value):
+    key = clean_text(value).lower()
+    return key if key in KALKULATION_GRUPPEN else "arbeit"
+
+
+def kalkulation_status(value):
+    key = clean_text(value).lower()
+    return key if key in KALKULATION_STATUS else "entwurf"
+
+
+def kalkulation_bauteil_profile(part):
+    normalized = normalize_document_text(part)
+    for profile_key, profile in KALKULATION_BAUTEIL_PROFILE.items():
+        if profile_key == "standard":
+            continue
+        if any(term and term in normalized for term in profile["terms"]):
+            return profile_key, profile
+    return "standard", KALKULATION_BAUTEIL_PROFILE["standard"]
+
+
+def kalkulation_auftrag_bauteile(auftrag):
+    result = []
+    seen = set()
+
+    def add_part(teil, arbeiten=None, quelle="Auftrag"):
+        teil = clean_text(teil)
+        if not teil:
+            return
+        key = normalize_document_text(teil)
+        if key in seen:
+            return
+        seen.add(key)
+        result.append(
+            {
+                "teil": teil,
+                "arbeiten": [clean_text(item) for item in (arbeiten or []) if clean_text(item)],
+                "quelle": quelle,
+            }
+        )
+
+    manual_parts = parse_manual_parts(auftrag.get("bauteile_override"))
+    for teil in manual_parts:
+        add_part(teil, quelle="Manuell korrigierte Bauteile")
+
+    if not manual_parts:
+        for item in auftrag.get("kunden_bauteile") or build_customer_part_summaries(auftrag):
+            add_part(item.get("teil"), item.get("arbeiten"), "Dokumentanalyse")
+
+    for label in schaden_zonen_labels(auftrag.get("schaden_zonen") or auftrag.get("schaden_zonen_json")):
+        add_part(label, quelle="Schadenkarte")
+
+    return result
+
+
+def kalkulation_position(gruppe, bauteil, arbeit, menge=1, stunden=0, satz=0, einzelpreis=0, quelle="", notiz="", aktiv=True):
+    return {
+        "id": uuid.uuid4().hex[:10],
+        "aktiv": bool(aktiv),
+        "gruppe": kalkulation_gruppe(gruppe),
+        "bauteil": clean_text(bauteil),
+        "arbeit": clean_text(arbeit),
+        "menge": kalkulation_float(menge, 1, 0, 999),
+        "stunden": kalkulation_float(stunden, 0, 0, 999),
+        "satz": kalkulation_float(satz, 0, 0, 9999),
+        "einzelpreis": kalkulation_float(einzelpreis, 0, 0, 999999),
+        "quelle": clean_text(quelle),
+        "notiz": clean_text(notiz),
+    }
+
+
+def kalkulation_part_actions(part_item, auftrag):
+    text = " ".join(
+        [
+            clean_text(part_item.get("teil")),
+            " ".join(part_item.get("arbeiten") or []),
+            clean_text(auftrag.get("analyse_text")),
+            clean_text(auftrag.get("beschreibung")),
+        ]
+    )
+    normalized = normalize_document_text(text)
+    return {
+        "ersetzen": bool(re.search(r"ersetz|erneuer|austausch|neuteil|neu\s*teil", normalized)),
+        "lackieren": bool(re.search(r"lack|oberflaech|beilack|spot|smart\s*repair|kratzer|schramm", normalized)),
+        "instandsetzen": bool(re.search(r"instand|richten|delle|deform|ausbeul|drueck|verform", normalized)),
+        "smart": bool(re.search(r"smart\s*repair|spot\s*repair|\bsr\b", normalized)),
+    }
+
+
+def kalkulation_positionen_vorschlag(auftrag):
+    positionen = []
+    hinweise = []
+    source = " ".join(
+        item
+        for item in [
+            clean_text(auftrag.get("analyse_text")),
+            clean_text(auftrag.get("beschreibung")),
+            clean_text(auftrag.get("bauteile_override")),
+        ]
+        if item
+    )
+    arbeitslohn = KALKULATION_STANDARDWERTE["arbeitslohn_satz"]
+    lacklohn = KALKULATION_STANDARDWERTE["lacklohn_satz"]
+    material_je_lackstunde = KALKULATION_STANDARDWERTE["material_je_lackstunde"]
+
+    for part_item in kalkulation_auftrag_bauteile(auftrag):
+        teil = part_item["teil"]
+        _, profile = kalkulation_bauteil_profile(teil)
+        actions = kalkulation_part_actions(part_item, auftrag)
+        lack_erlaubt = profile.get("lackieren", True) and profile.get("lack_stunden", 0) > 0
+        basis_notiz = f"Vorschlag aus {part_item.get('quelle') or 'Auftrag'}."
+
+        if profile.get("demontage_stunden", 0):
+            positionen.append(
+                kalkulation_position(
+                    "arbeit",
+                    teil,
+                    "Demontage / Montage",
+                    stunden=profile["demontage_stunden"],
+                    satz=arbeitslohn,
+                    quelle="Internes Regelwerk",
+                    notiz=basis_notiz,
+                )
+            )
+
+        if actions["ersetzen"]:
+            positionen.append(
+                kalkulation_position(
+                    "ersatzteil",
+                    teil,
+                    "Ersatzteilpreis eintragen",
+                    einzelpreis=0,
+                    quelle="partslink24/TecRMI später",
+                    notiz=profile.get("teilehinweis") or "OEM-Preis und Verfügbarkeit prüfen.",
+                )
+            )
+        elif profile.get("karosserie_stunden", 0):
+            arbeit = "Smart Repair / Spot Repair" if actions["smart"] else "Instandsetzen / Richten"
+            stunden = min(profile["karosserie_stunden"], 0.9) if actions["smart"] else profile["karosserie_stunden"]
+            positionen.append(
+                kalkulation_position(
+                    "arbeit",
+                    teil,
+                    arbeit,
+                    stunden=stunden,
+                    satz=arbeitslohn,
+                    quelle="Internes Regelwerk",
+                    notiz=basis_notiz,
+                )
+            )
+
+        if lack_erlaubt and (
+            actions["lackieren"]
+            or actions["ersetzen"]
+            or actions["instandsetzen"]
+            or not any(actions.values())
+        ):
+            positionen.append(
+                kalkulation_position(
+                    "lack",
+                    teil,
+                    "Lackieren",
+                    stunden=profile["lack_stunden"],
+                    satz=lacklohn,
+                    quelle="Interne Lackierwerte",
+                    notiz="Lackumfang bitte gegen Farbton, Beilackieren und Demontage prüfen.",
+                )
+            )
+            positionen.append(
+                kalkulation_position(
+                    "material",
+                    teil,
+                    "Lack- und Nebenmaterial",
+                    menge=profile["lack_stunden"],
+                    einzelpreis=material_je_lackstunde,
+                    quelle="Interner Materialansatz",
+                    notiz="Materialansatz je Lackstunde; bei Sonderlackierung manuell anpassen.",
+                )
+            )
+
+        if "sensor" in normalize_document_text(teil) or "parksensor" in normalize_document_text(teil):
+            hinweise.append(f"{teil}: Sensorik/Kalibrierung und Halter separat prüfen.")
+
+    if not positionen:
+        hinweise.append("Noch keine Bauteile erkannt. Bitte Schadenbereiche markieren oder Bauteile manuell ergänzen.")
+    hinweise.append(
+        "Ersatzteilpreise sind Platzhalter. Für verbindliche OEM-Teile braucht es partslink24/OrderBridge, TecRMI oder manuelle Händlerpreise."
+    )
+    hinweise.append("Diese Kalkulation ist eine interne Vorkalkulation und muss vor Angebot/Rechnung geprüft werden.")
+    return positionen, list(dict.fromkeys(hinweise))
+
+
+def build_kalkulation_vorschlag(auftrag):
+    positionen, hinweise = kalkulation_positionen_vorschlag(auftrag)
+    payload = {
+        "schema": 1,
+        "status": "entwurf",
+        "quelle": "Interne Vorkalkulation",
+        "erstellt_am": now_str(),
+        "geaendert_am": now_str(),
+        "fahrzeug_snapshot": clean_text(auftrag.get("fahrzeug")),
+        "fin_snapshot": clean_text(auftrag.get("fin_nummer")).upper(),
+        "kennzeichen_snapshot": clean_text(auftrag.get("kennzeichen")).upper(),
+        "arbeitslohn_satz": KALKULATION_STANDARDWERTE["arbeitslohn_satz"],
+        "lacklohn_satz": KALKULATION_STANDARDWERTE["lacklohn_satz"],
+        "material_je_lackstunde": KALKULATION_STANDARDWERTE["material_je_lackstunde"],
+        "mwst_satz": KALKULATION_STANDARDWERTE["mwst_satz"],
+        "positionen": positionen,
+        "hinweise": hinweise,
+        "notiz": "",
+    }
+    return kalkulation_berechnen(payload)
+
+
+def kalkulation_berechnen(kalkulation):
+    kalkulation = dict(kalkulation or {})
+    kalkulation["status"] = kalkulation_status(kalkulation.get("status"))
+    kalkulation["arbeitslohn_satz"] = kalkulation_float(
+        kalkulation.get("arbeitslohn_satz"),
+        KALKULATION_STANDARDWERTE["arbeitslohn_satz"],
+    )
+    kalkulation["lacklohn_satz"] = kalkulation_float(
+        kalkulation.get("lacklohn_satz"),
+        KALKULATION_STANDARDWERTE["lacklohn_satz"],
+    )
+    kalkulation["material_je_lackstunde"] = kalkulation_float(
+        kalkulation.get("material_je_lackstunde"),
+        KALKULATION_STANDARDWERTE["material_je_lackstunde"],
+    )
+    kalkulation["mwst_satz"] = kalkulation_float(kalkulation.get("mwst_satz"), KALKULATION_STANDARDWERTE["mwst_satz"])
+    kalkulation["notiz"] = clean_text(kalkulation.get("notiz"))
+    kalkulation["hinweise"] = [clean_text(item) for item in kalkulation.get("hinweise", []) if clean_text(item)]
+
+    gruppen_summen = {key: 0.0 for key in KALKULATION_GRUPPEN}
+    positionen = []
+    for raw_position in kalkulation.get("positionen") or []:
+        position = dict(raw_position or {})
+        gruppe = kalkulation_gruppe(position.get("gruppe"))
+        menge = kalkulation_float(position.get("menge"), 1, 0, 999)
+        stunden = kalkulation_float(position.get("stunden"), 0, 0, 999)
+        satz = kalkulation_float(position.get("satz"), 0, 0, 9999)
+        einzelpreis = kalkulation_float(position.get("einzelpreis"), 0, 0, 999999)
+        if gruppe in {"arbeit", "lack"}:
+            summe = menge * stunden * satz
+        else:
+            summe = menge * einzelpreis
+        summe = round(summe, 2)
+        aktiv = bool(position.get("aktiv", True))
+        if aktiv:
+            gruppen_summen[gruppe] += summe
+        positionen.append(
+            {
+                "id": clean_text(position.get("id")) or uuid.uuid4().hex[:10],
+                "aktiv": aktiv,
+                "gruppe": gruppe,
+                "gruppe_label": KALKULATION_GRUPPEN[gruppe]["label"],
+                "bauteil": clean_text(position.get("bauteil")),
+                "arbeit": clean_text(position.get("arbeit")),
+                "menge": menge,
+                "stunden": stunden,
+                "satz": satz,
+                "einzelpreis": einzelpreis,
+                "summe": summe,
+                "summe_label": format_kalkulation_euro(summe),
+                "quelle": clean_text(position.get("quelle")),
+                "notiz": clean_text(position.get("notiz")),
+            }
+        )
+    netto = round(sum(gruppen_summen.values()), 2)
+    mwst = round(netto * kalkulation["mwst_satz"] / 100, 2)
+    brutto = round(netto + mwst, 2)
+    kalkulation["positionen"] = positionen
+    kalkulation["gruppen_summen"] = {
+        key: {
+            "betrag": round(value, 2),
+            "label": format_kalkulation_euro(value),
+            "meta": KALKULATION_GRUPPEN[key],
+        }
+        for key, value in gruppen_summen.items()
+    }
+    kalkulation["summen"] = {
+        "netto": netto,
+        "mwst": mwst,
+        "brutto": brutto,
+        "netto_label": format_kalkulation_euro(netto, "netto"),
+        "mwst_label": format_kalkulation_euro(mwst),
+        "brutto_label": format_kalkulation_euro(brutto, "brutto"),
+    }
+    kalkulation["aktive_positionen_count"] = len([item for item in positionen if item["aktiv"]])
+    kalkulation["status_meta"] = KALKULATION_STATUS[kalkulation["status"]]
+    return kalkulation
+
+
+def load_auftrag_kalkulation(auftrag):
+    raw = clean_text(auftrag.get("kalkulation_json"))
+    if raw:
+        try:
+            loaded = json.loads(raw)
+            if isinstance(loaded, dict):
+                return kalkulation_berechnen(loaded)
+        except Exception:
+            pass
+    return build_kalkulation_vorschlag(auftrag)
+
+
+def save_auftrag_kalkulation(auftrag_id, kalkulation):
+    kalkulation = kalkulation_berechnen(kalkulation)
+    kalkulation["geaendert_am"] = now_str()
+    payload = json.dumps(kalkulation, ensure_ascii=False)
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET kalkulation_json=?,
+            kalkulation_status=?,
+            kalkulation_aktualisiert_am=?,
+            geaendert_am=?
+        WHERE id=?
+        """,
+        (payload, kalkulation["status"], kalkulation["geaendert_am"], kalkulation["geaendert_am"], auftrag_id),
+    )
+    db.commit()
+    db.close()
+    return kalkulation
+
+
+def parse_kalkulation_form(form, current=None):
+    current = current or {}
+    status = kalkulation_status(form.get("kalkulation_status"))
+    arbeitslohn = kalkulation_float(form.get("arbeitslohn_satz"), current.get("arbeitslohn_satz", KALKULATION_STANDARDWERTE["arbeitslohn_satz"]))
+    lacklohn = kalkulation_float(form.get("lacklohn_satz"), current.get("lacklohn_satz", KALKULATION_STANDARDWERTE["lacklohn_satz"]))
+    material = kalkulation_float(
+        form.get("material_je_lackstunde"),
+        current.get("material_je_lackstunde", KALKULATION_STANDARDWERTE["material_je_lackstunde"]),
+    )
+    mwst = kalkulation_float(form.get("mwst_satz"), current.get("mwst_satz", KALKULATION_STANDARDWERTE["mwst_satz"]))
+    positionen = []
+    for raw_index in form.getlist("position_index"):
+        index = re.sub(r"[^0-9]", "", clean_text(raw_index))
+        if index == "":
+            continue
+        bauteil = clean_text(form.get(f"bauteil_{index}"))
+        arbeit = clean_text(form.get(f"arbeit_{index}"))
+        if not bauteil and not arbeit:
+            continue
+        gruppe = kalkulation_gruppe(form.get(f"gruppe_{index}"))
+        default_satz = lacklohn if gruppe == "lack" else arbeitslohn
+        positionen.append(
+            {
+                "id": clean_text(form.get(f"position_id_{index}")) or uuid.uuid4().hex[:10],
+                "aktiv": f"aktiv_{index}" in form,
+                "gruppe": gruppe,
+                "bauteil": bauteil,
+                "arbeit": arbeit,
+                "menge": kalkulation_float(form.get(f"menge_{index}"), 1, 0, 999),
+                "stunden": kalkulation_float(form.get(f"stunden_{index}"), 0, 0, 999),
+                "satz": kalkulation_float(form.get(f"satz_{index}"), default_satz, 0, 9999),
+                "einzelpreis": kalkulation_float(form.get(f"einzelpreis_{index}"), 0, 0, 999999),
+                "quelle": clean_text(form.get(f"quelle_{index}")),
+                "notiz": clean_text(form.get(f"notiz_{index}")),
+            }
+        )
+
+    new_bauteil = clean_text(form.get("new_bauteil"))
+    new_arbeit = clean_text(form.get("new_arbeit"))
+    if new_bauteil or new_arbeit:
+        gruppe = kalkulation_gruppe(form.get("new_gruppe"))
+        default_satz = lacklohn if gruppe == "lack" else arbeitslohn
+        positionen.append(
+            {
+                "id": uuid.uuid4().hex[:10],
+                "aktiv": True,
+                "gruppe": gruppe,
+                "bauteil": new_bauteil,
+                "arbeit": new_arbeit or "Manuelle Position",
+                "menge": kalkulation_float(form.get("new_menge"), 1, 0, 999),
+                "stunden": kalkulation_float(form.get("new_stunden"), 0, 0, 999),
+                "satz": kalkulation_float(form.get("new_satz"), default_satz, 0, 9999),
+                "einzelpreis": kalkulation_float(form.get("new_einzelpreis"), 0, 0, 999999),
+                "quelle": "Manuell",
+                "notiz": clean_text(form.get("new_notiz")),
+            }
+        )
+
+    hinweise = current.get("hinweise") or []
+    payload = {
+        "schema": 1,
+        "status": status,
+        "quelle": clean_text(current.get("quelle")) or "Interne Vorkalkulation",
+        "erstellt_am": clean_text(current.get("erstellt_am")) or now_str(),
+        "geaendert_am": now_str(),
+        "fahrzeug_snapshot": clean_text(current.get("fahrzeug_snapshot")),
+        "fin_snapshot": clean_text(current.get("fin_snapshot")).upper(),
+        "kennzeichen_snapshot": clean_text(current.get("kennzeichen_snapshot")).upper(),
+        "arbeitslohn_satz": arbeitslohn,
+        "lacklohn_satz": lacklohn,
+        "material_je_lackstunde": material,
+        "mwst_satz": mwst,
+        "positionen": positionen,
+        "hinweise": hinweise,
+        "notiz": clean_text(form.get("kalkulation_notiz")),
+    }
+    return kalkulation_berechnen(payload)
+
+
+def kalkulation_offer_text(kalkulation):
+    kalkulation = kalkulation_berechnen(kalkulation)
+    lines = ["Vorkalkulation gemäß Schadenaufnahme:"]
+    for position in kalkulation["positionen"]:
+        if not position["aktiv"]:
+            continue
+        beschreibung = " - ".join(
+            item for item in [position["bauteil"], position["arbeit"]] if item
+        )
+        if not beschreibung:
+            continue
+        lines.append(f"- {beschreibung}: {position['summe_label']} netto")
+    if kalkulation.get("notiz"):
+        lines.append("")
+        lines.append(kalkulation["notiz"])
+    lines.append("")
+    lines.append("Hinweis: Ersatzteilpreise und verdeckte Schäden bleiben vorbehaltlich Prüfung/Teileverfügbarkeit.")
+    return "\n".join(lines)
+
+
+def update_auftrag_schaden_zonen(auftrag_id, form):
+    db = get_db()
+    db.execute(
+        "UPDATE auftraege SET schaden_zonen_json=?, geaendert_am=? WHERE id=?",
+        (schaden_zonen_json_from_form(form), now_str(), auftrag_id),
+    )
+    db.commit()
+    db.close()
+
+
 def parse_manual_parts(value):
     parts = []
     seen = set()
@@ -5820,6 +6702,8 @@ BACKUP_TABLES = (
     "auftraege",
     "dateien",
     "datei_backups",
+    "versicherung_checkpunkte",
+    "versicherung_teile",
     "versicherung_aufgaben",
     "status_log",
     "chat_nachrichten",
@@ -6180,6 +7064,9 @@ def init_db():
             werkstatt_angebot_preis TEXT DEFAULT '',
             werkstatt_angebot_notiz TEXT DEFAULT '',
             werkstatt_angebot_am TEXT DEFAULT '',
+            kalkulation_json TEXT DEFAULT '',
+            kalkulation_status TEXT DEFAULT 'entwurf',
+            kalkulation_aktualisiert_am TEXT DEFAULT '',
             bonus_netto_betrag REAL DEFAULT 0,
             bonus_preis_aktualisiert_am TEXT DEFAULT '',
             status         INTEGER DEFAULT 1,
@@ -6252,6 +7139,30 @@ def init_db():
             erstellt_am      TEXT NOT NULL,
             erledigt_am      TEXT DEFAULT '',
             erledigt_hinweis TEXT DEFAULT '',
+            FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS versicherung_checkpunkte (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            auftrag_id        INTEGER NOT NULL,
+            prozess_key       TEXT NOT NULL,
+            status           TEXT DEFAULT 'offen',
+            notiz            TEXT DEFAULT '',
+            aktualisiert_von TEXT DEFAULT 'werkstatt',
+            aktualisiert_am  TEXT NOT NULL,
+            UNIQUE (auftrag_id, prozess_key),
+            FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS versicherung_teile (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            auftrag_id     INTEGER NOT NULL,
+            bezeichnung    TEXT NOT NULL,
+            status        TEXT DEFAULT 'offen',
+            liefertermin  TEXT DEFAULT '',
+            notiz         TEXT DEFAULT '',
+            erstellt_am   TEXT NOT NULL,
+            geaendert_am  TEXT DEFAULT '',
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
         );
 
@@ -6585,8 +7496,10 @@ def init_db():
     ensure_column(db, "auftraege", "versicherung_freigabe_status", "TEXT DEFAULT 'offen'")
     ensure_column(db, "auftraege", "versicherung_gemeldet_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "versicherung_sendefreigabe_am", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "versicherung_text_geprueft", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "kunden_status_token", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kunden_status_aktiv", "INTEGER DEFAULT 1")
+    ensure_column(db, "auftraege", "kundenkontakt_kanal", "TEXT DEFAULT 'qr'")
     ensure_column(db, "auftraege", "schaden_zonen_json", "TEXT DEFAULT '[]'")
     ensure_column(db, "auftraege", "schaden_zonen_notiz", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "gt_motive_vorgang_id", "TEXT DEFAULT ''")
@@ -6617,6 +7530,9 @@ def init_db():
     ensure_column(db, "auftraege", "werkstatt_angebot_preis", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "werkstatt_angebot_notiz", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "werkstatt_angebot_am", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "kalkulation_json", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "kalkulation_status", "TEXT DEFAULT 'entwurf'")
+    ensure_column(db, "auftraege", "kalkulation_aktualisiert_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "bonus_netto_betrag", "REAL DEFAULT 0")
     ensure_column(db, "auftraege", "bonus_preis_aktualisiert_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "annahme_datum", "TEXT DEFAULT ''")
@@ -6634,6 +7550,24 @@ def init_db():
     ensure_column(db, "auftraege", "kontakt_telefon", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "notiz_intern", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "quelle", "TEXT DEFAULT 'intern'")
+    ensure_column(db, "auftraege", "schaden_fahrbereit", "TEXT DEFAULT 'unbekannt'")
+    ensure_column(db, "auftraege", "schaden_gutachter", "TEXT DEFAULT 'unbekannt'")
+    ensure_column(db, "auftraege", "schaden_anwalt", "TEXT DEFAULT 'unbekannt'")
+    ensure_column(db, "auftraege", "schaden_leasing", "TEXT DEFAULT 'unbekannt'")
+    ensure_column(db, "auftraege", "schaden_mietwagen", "TEXT DEFAULT 'unbekannt'")
+    ensure_column(db, "auftraege", "schaden_abschleppen", "TEXT DEFAULT 'unbekannt'")
+    ensure_column(db, "auftraege", "schaden_vorsteuerabzug", "TEXT DEFAULT 'unbekannt'")
+    ensure_column(db, "auftraege", "schaden_selbstbeteiligung", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "schaden_eigenauftrag", "INTEGER DEFAULT 0")
+    ensure_column(db, "auftraege", "schaden_besichtigung_datum", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "schaden_station", "TEXT DEFAULT 'aufnahme'")
+    ensure_column(db, "auftraege", "kosten_gutachten_betrag", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "kosten_werkstatt_betrag", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "kosten_freigabe_betrag", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "kosten_rechnung_betrag", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "kosten_kuerzung_betrag", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "abrechnung_status", "TEXT DEFAULT 'offen'")
+    ensure_column(db, "auftraege", "netzwerk_zuteilung_status", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "quelle", "TEXT DEFAULT 'intern'")
     ensure_column(db, "dateien", "kategorie", "TEXT DEFAULT 'standard'")
     ensure_column(db, "dateien", "reklamation_id", "INTEGER")
@@ -6644,6 +7578,7 @@ def init_db():
     ensure_column(db, "dateien", "analyse_quelle", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "analyse_json", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "analyse_hinweis", "TEXT DEFAULT ''")
+    ensure_column(db, "dateien", "prozess_key", "TEXT DEFAULT ''")
     ensure_column(db, "datei_backups", "datei_id", "INTEGER")
     ensure_column(db, "datei_backups", "file_base64", "TEXT DEFAULT ''")
     ensure_column(db, "datei_backups", "file_sha256", "TEXT DEFAULT ''")
@@ -6679,8 +7614,11 @@ def init_db():
     ensure_index(db, "idx_auftraege_angebote", "auftraege", ("angebotsphase", "angebot_abgesendet", "autohaus_id"))
     ensure_index(db, "idx_versicherungen_portal_key", "versicherungen", ("portal_key",))
     ensure_index(db, "idx_dateien_auftrag", "dateien", ("auftrag_id", "kategorie", "reklamation_id"))
+    ensure_index(db, "idx_dateien_prozess", "dateien", ("auftrag_id", "prozess_key"))
     ensure_index(db, "idx_datei_backups_datei", "datei_backups", ("datei_id",))
     ensure_index(db, "idx_versicherung_aufgaben_auftrag", "versicherung_aufgaben", ("auftrag_id", "status"))
+    ensure_index(db, "idx_versicherung_checkpunkte", "versicherung_checkpunkte", ("auftrag_id", "prozess_key"))
+    ensure_index(db, "idx_versicherung_teile_auftrag", "versicherung_teile", ("auftrag_id", "status"))
     ensure_index(db, "idx_rahmenvertrag_anfragen_autohaus", "rahmenvertrag_anfragen", ("autohaus_id", "status"))
     ensure_index(db, "idx_lackierauftrag_entwuerfe_autohaus", "lackierauftrag_entwuerfe", ("autohaus_id",))
     ensure_index(db, "idx_status_log_lookup", "status_log", ("status", "zeitstempel", "auftrag_id"))
@@ -7294,11 +8232,11 @@ def schaden_zonen_labels(selected):
     ]
 
 
-def kunden_status_url(auftrag):
+def kunden_status_url(auftrag, force_request_host=False):
     token = clean_text((auftrag or {}).get("kunden_status_token"))
     if not token:
         return ""
-    base = get_public_base_url()
+    base = get_request_base_url() if force_request_host else get_public_base_url()
     path = url_for("kunden_status", token=token) if has_request_context() else f"/status/{token}"
     return f"{base}{path}" if base and path.startswith("/") else path
 
@@ -8280,11 +9218,19 @@ def row_to_auftrag(row):
     auftrag["angebot_status"] = clean_text(auftrag.get("angebot_status")) or (
         "angefragt" if auftrag["angebot_abgesendet"] else "entwurf"
     )
+    auftrag["kalkulation_json"] = clean_text(auftrag.get("kalkulation_json"))
+    auftrag["kalkulation_status"] = clean_text(auftrag.get("kalkulation_status")) or "entwurf"
+    if auftrag["kalkulation_status"] not in KALKULATION_STATUS:
+        auftrag["kalkulation_status"] = "entwurf"
+    auftrag["kalkulation_status_meta"] = KALKULATION_STATUS[auftrag["kalkulation_status"]]
+    auftrag["kalkulation_aktualisiert_am"] = clean_text(auftrag.get("kalkulation_aktualisiert_am"))
+    auftrag["kalkulation_vorhanden"] = bool(auftrag["kalkulation_json"])
     auftrag["versicherung_id"] = int(auftrag.get("versicherung_id") or 0)
     auftrag["versicherung_email"] = clean_text(auftrag.get("versicherung_email")).lower()
     auftrag["versicherung_email_cc"] = clean_text(auftrag.get("versicherung_email_cc")).lower()
     auftrag["versicherung_sendefreigabe_am"] = clean_text(auftrag.get("versicherung_sendefreigabe_am"))
     auftrag["versicherung_gemeldet_am"] = clean_text(auftrag.get("versicherung_gemeldet_am"))
+    auftrag["versicherung_text_geprueft"] = bool(auftrag.get("versicherung_text_geprueft"))
     auftrag["schadenart"] = normalize_schadenart(auftrag.get("schadenart"))
     auftrag["schadenart_label"] = schadenart_label(auftrag["schadenart"])
     auftrag["versicherung_freigabe_status"] = normalize_freigabe_status(
@@ -8293,9 +9239,46 @@ def row_to_auftrag(row):
     auftrag["versicherung_freigabe_meta"] = VERSICHERUNG_FREIGABE_STATUS[
         auftrag["versicherung_freigabe_status"]
     ]
+    for feld in (
+        "schaden_fahrbereit",
+        "schaden_gutachter",
+        "schaden_anwalt",
+        "schaden_leasing",
+        "schaden_mietwagen",
+        "schaden_abschleppen",
+        "schaden_vorsteuerabzug",
+    ):
+        value = clean_text(auftrag.get(feld)) or "unbekannt"
+        auftrag[feld] = value if value in SCHADEN_STEUERUNG_OPTIONEN else "unbekannt"
+        auftrag[f"{feld}_label"] = SCHADEN_STEUERUNG_OPTIONEN[auftrag[feld]]
+    auftrag["schaden_selbstbeteiligung"] = clean_text(auftrag.get("schaden_selbstbeteiligung"))
+    auftrag["schaden_eigenauftrag"] = bool(auftrag.get("schaden_eigenauftrag"))
+    station_keys = {key for key, _ in SCHADEN_KANBAN_STATIONEN}
+    station = clean_text(auftrag.get("schaden_station")) or "aufnahme"
+    auftrag["schaden_station"] = station if station in station_keys else "aufnahme"
+    auftrag["schaden_station_label"] = dict(SCHADEN_KANBAN_STATIONEN).get(auftrag["schaden_station"], "Aufnahme")
+    auftrag["kosten_gutachten_betrag"] = clean_text(auftrag.get("kosten_gutachten_betrag"))
+    auftrag["kosten_werkstatt_betrag"] = clean_text(auftrag.get("kosten_werkstatt_betrag"))
+    auftrag["kosten_freigabe_betrag"] = clean_text(auftrag.get("kosten_freigabe_betrag"))
+    auftrag["kosten_rechnung_betrag"] = clean_text(auftrag.get("kosten_rechnung_betrag"))
+    auftrag["kosten_kuerzung_betrag"] = clean_text(auftrag.get("kosten_kuerzung_betrag"))
+    abrechnung_status = clean_text(auftrag.get("abrechnung_status")) or clean_text(auftrag.get("rechnung_status")) or "offen"
+    auftrag["abrechnung_status"] = abrechnung_status if abrechnung_status in SCHADEN_ABRECHNUNG_STATUS else "offen"
+    auftrag["abrechnung_status_label"] = SCHADEN_ABRECHNUNG_STATUS[auftrag["abrechnung_status"]]
+    auftrag["netzwerk_zuteilung_status"] = clean_text(auftrag.get("netzwerk_zuteilung_status"))
     auftrag["kunden_status_aktiv"] = bool(auftrag.get("kunden_status_aktiv", 1))
     auftrag["kunden_status_token"] = clean_text(auftrag.get("kunden_status_token"))
     auftrag["kunden_status_url"] = kunden_status_url(auftrag)
+    auftrag["kunden_status_local_url"] = kunden_status_url(auftrag, force_request_host=True)
+    auftrag["kunden_status_public_warning"] = bool(
+        auftrag["kunden_status_url"]
+        and auftrag["kunden_status_local_url"]
+        and auftrag["kunden_status_url"] != auftrag["kunden_status_local_url"]
+        and ("trycloudflare.com" in auftrag["kunden_status_url"] or "localhost" in auftrag["kunden_status_local_url"])
+    )
+    auftrag["kundenkontakt_kanal"] = normalize_kundenkontakt_kanal(auftrag.get("kundenkontakt_kanal"))
+    auftrag["kundenkontakt_meta"] = KUNDENKONTAKT_KANAELE[auftrag["kundenkontakt_kanal"]]
+    auftrag["kundenkontakt_label"] = auftrag["kundenkontakt_meta"]["label"]
     auftrag["schaden_zonen"] = parse_schaden_zonen(auftrag.get("schaden_zonen_json"))
     auftrag["schaden_zonen_labels"] = schaden_zonen_labels(auftrag["schaden_zonen"])
     auftrag["schaden_zonen_count"] = len(auftrag["schaden_zonen"])
@@ -11538,6 +12521,7 @@ def hydrate_datei(datei):
     datei["is_image"] = suffix in IMAGE_EXTENSIONS
     datei["is_browser_image"] = suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}
     datei["kategorie"] = clean_text(datei.get("kategorie")) or "standard"
+    datei["prozess_key"] = clean_text(datei.get("prozess_key"))
     datei["notiz"] = clean_text(datei.get("notiz"))
     datei["has_analysis"] = bool(
         clean_text(datei.get("extrakt_kurz"))
@@ -15995,6 +16979,227 @@ def email_sender_display(email_item):
     return name or address or "Unbekannter Absender"
 
 
+MAIL_ROUTE_TARGETS = {
+    "allgemein": ("allgemein", ""),
+    "info": ("allgemein", ""),
+    "schaden": ("schaden", "versicherung"),
+    "versicherung": ("schaden", "versicherung"),
+    "rechnungen": ("rechnung_ausgabe", "rechnungen"),
+    "rechnung": ("rechnung_ausgabe", "rechnungen"),
+    "belege": ("rechnung_ausgabe", "rechnungen"),
+    "buchhaltung": ("rechnung_ausgabe", "rechnungen"),
+    "einkauf": ("einkauf", "einkauf"),
+    "bestellung": ("einkauf", "einkauf"),
+    "termine": ("termin", "kalender"),
+    "termin": ("termin", "kalender"),
+    "reklamationen": ("reklamation", "reklamationen"),
+    "reklamation": ("reklamation", "reklamationen"),
+}
+
+DEFAULT_MAIL_ROUTE_ALIASES = {
+    "info@auto-lackierzentrum.de": "info",
+    "schaden@auto-lackierzentrum.de": "schaden",
+    "schadenmeldung@auto-lackierzentrum.de": "schaden",
+    "versicherung@auto-lackierzentrum.de": "versicherung",
+    "rechnungen@auto-lackierzentrum.de": "rechnungen",
+    "rechnung@auto-lackierzentrum.de": "rechnungen",
+    "belege@auto-lackierzentrum.de": "belege",
+    "buchhaltung@auto-lackierzentrum.de": "buchhaltung",
+    "einkauf@auto-lackierzentrum.de": "einkauf",
+    "bestellung@auto-lackierzentrum.de": "bestellung",
+    "termine@auto-lackierzentrum.de": "termine",
+    "termin@auto-lackierzentrum.de": "termine",
+    "reklamation@auto-lackierzentrum.de": "reklamation",
+    "reklamationen@auto-lackierzentrum.de": "reklamation",
+}
+
+MAIL_SETUP_ALIASES = (
+    ("schaden@auto-lackierzentrum.de", "Schaden / Versicherung"),
+    ("schadenmeldung@auto-lackierzentrum.de", "Schaden / Versicherung"),
+    ("versicherung@auto-lackierzentrum.de", "Schaden / Versicherung"),
+    ("rechnungen@auto-lackierzentrum.de", "Rechnungskontrolle"),
+    ("rechnung@auto-lackierzentrum.de", "Rechnungskontrolle"),
+    ("belege@auto-lackierzentrum.de", "Rechnungskontrolle"),
+    ("buchhaltung@auto-lackierzentrum.de", "Buchhaltung"),
+    ("einkauf@auto-lackierzentrum.de", "Einkauf"),
+    ("bestellung@auto-lackierzentrum.de", "Einkauf"),
+    ("termine@auto-lackierzentrum.de", "Termine"),
+    ("termin@auto-lackierzentrum.de", "Termine"),
+    ("reklamation@auto-lackierzentrum.de", "Reklamationen"),
+    ("reklamationen@auto-lackierzentrum.de", "Reklamationen"),
+)
+
+EMAIL_MODULE_LABELS = {
+    "": "Allgemein",
+    "rechnungen": "Rechnung",
+    "einkauf": "Einkauf",
+    "versicherung": "Schaden",
+    "kalender": "Termin",
+    "reklamationen": "Reklamation",
+}
+
+EMAIL_CATEGORY_LABELS = {
+    "allgemein": "Allgemein",
+    "rechnung": "Rechnung",
+    "rechnung_ausgabe": "Eingangsrechnung",
+    "einkauf": "Einkauf",
+    "schaden": "Schaden",
+    "termin": "Termin",
+    "reklamation": "Reklamation",
+}
+
+
+def normalize_mail_route_target(value):
+    value = clean_text(value).lower()
+    if not value:
+        return None
+    if value in MAIL_ROUTE_TARGETS:
+        return MAIL_ROUTE_TARGETS[value]
+    separator = ":" if ":" in value else ("/" if "/" in value else "")
+    if separator:
+        category, module = value.split(separator, 1)
+        category = re.sub(r"[^a-z0-9_-]+", "", category)
+        module = re.sub(r"[^a-z0-9_-]+", "", module)
+        if category:
+            return category, module
+    return None
+
+
+def configured_mail_route_aliases():
+    routes = {}
+    for address, target in DEFAULT_MAIL_ROUTE_ALIASES.items():
+        normalized = normalize_mail_route_target(target)
+        if normalized:
+            routes[address] = normalized
+    for entry in re.split(r"[;\n,]+", MAIL_ROUTE_ALIASES):
+        entry = clean_text(entry)
+        if not entry or "=" not in entry:
+            continue
+        address, target = entry.split("=", 1)
+        address = clean_text(address).lower()
+        if "@" not in address:
+            continue
+        normalized = normalize_mail_route_target(target)
+        if normalized:
+            routes[address] = normalized
+    return routes
+
+
+def email_recipient_matches(stored_recipients, address):
+    address = clean_text(address).lower()
+    if not address:
+        return False
+    return address in parse_email_recipients(stored_recipients)
+
+
+def mail_setup_testmail_counts():
+    addresses = [address for address, _label in MAIL_SETUP_ALIASES]
+    counts = {address: 0 for address in addresses}
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT empfaenger
+            FROM werkstatt_emails
+            WHERE COALESCE(empfaenger, '')!=''
+            ORDER BY id DESC
+            LIMIT 500
+            """
+        ).fetchall()
+    finally:
+        db.close()
+    for row in rows:
+        recipients = parse_email_recipients(row["empfaenger"])
+        for address in addresses:
+            if address in recipients:
+                counts[address] += 1
+    return counts
+
+
+def mail_morgencheck_automation_active():
+    try:
+        automation_file = pathlib.Path.home() / ".codex" / "automations" / "e-mail-morgencheck" / "automation.toml"
+        if not automation_file.exists():
+            return False
+        content = automation_file.read_text(encoding="utf-8", errors="ignore")
+        return 'status = "ACTIVE"' in content
+    except Exception:
+        return False
+
+
+def mail_setup_status():
+    imap = werkstatt_imap_status()
+    schaden = schaden_mail_status()
+    routes = configured_mail_route_aliases()
+    test_counts = mail_setup_testmail_counts()
+    alias_rows = []
+    for address, label in MAIL_SETUP_ALIASES:
+        route = routes.get(address)
+        route_label = ""
+        if route:
+            category, module = route
+            route_label = EMAIL_MODULE_LABELS.get(module) or EMAIL_CATEGORY_LABELS.get(category) or category
+        alias_rows.append(
+            {
+                "address": address,
+                "label": label,
+                "route_label": route_label,
+                "route_configured": bool(route),
+                "test_count": int(test_counts.get(address) or 0),
+            }
+        )
+
+    routing_ready = all(row["route_configured"] for row in alias_rows)
+    tested_count = sum(1 for row in alias_rows if row["test_count"])
+    automation_ready = mail_morgencheck_automation_active()
+    checklist = [
+        {
+            "label": "Webjoker-Aliase angefragt",
+            "detail": "Mail an Tanja Marrone mit Aliasliste und Zielpostfach info@auto-lackierzentrum.de ist raus.",
+            "state": "done",
+            "badge": "angefragt",
+        },
+        {
+            "label": "Alias-Routing in der App",
+            "detail": f"{sum(1 for row in alias_rows if row['route_configured'])} von {len(alias_rows)} Adressen sind lokal einer Aufgabe zugeordnet.",
+            "state": "done" if routing_ready else "warning",
+            "badge": "bereit" if routing_ready else "prüfen",
+        },
+        {
+            "label": "IMAP-Abruf",
+            "detail": "MAIL_IMAP_USER und MAIL_IMAP_PASS sind gesetzt." if imap.get("configured") else "Wartet auf MAIL_IMAP_USER und MAIL_IMAP_PASS in .env.local.",
+            "state": "done" if imap.get("configured") else "open",
+            "badge": "aktiv" if imap.get("configured") else "offen",
+        },
+        {
+            "label": "Schaden-Mailbox SMTP/IMAP",
+            "detail": "Schadenmails können gesendet und gelesen werden." if schaden.get("configured") else "Für automatischen Versand fehlen noch Schadenmail-Adresse oder SMTP/IMAP-Zugang.",
+            "state": "done" if schaden.get("configured") else "open",
+            "badge": "aktiv" if schaden.get("configured") else "offen",
+        },
+        {
+            "label": "Täglicher Morgencheck",
+            "detail": "Automation E-Mail-Morgencheck läuft täglich um 07:30 Uhr." if automation_ready else "Automation ist lokal nicht sichtbar oder noch nicht aktiv.",
+            "state": "done" if automation_ready else "warning",
+            "badge": "aktiv" if automation_ready else "prüfen",
+        },
+        {
+            "label": "Testmails",
+            "detail": f"{tested_count} von {len(alias_rows)} Alias-Adressen wurden bereits in importierten Mails gesehen.",
+            "state": "done" if tested_count == len(alias_rows) else ("warning" if tested_count else "open"),
+            "badge": "bestanden" if tested_count == len(alias_rows) else "ausstehend",
+        },
+    ]
+    done_count = sum(1 for item in checklist if item["state"] == "done")
+    return {
+        "checklist": checklist,
+        "aliases": alias_rows,
+        "done_count": done_count,
+        "total_count": len(checklist),
+        "percent": round(done_count / len(checklist) * 100) if checklist else 0,
+    }
+
+
 def hydrate_werkstatt_email(row):
     item = dict(row)
     item["absender_display"] = email_sender_display(item)
@@ -16005,6 +17210,8 @@ def hydrate_werkstatt_email(row):
     item["is_neu"] = clean_text(item.get("status")) == "neu"
     item["kategorie"] = clean_text(item.get("kategorie")) or "allgemein"
     item["ziel_modul"] = clean_text(item.get("ziel_modul"))
+    item["kategorie_label"] = EMAIL_CATEGORY_LABELS.get(item["kategorie"], item["kategorie"].replace("_", " ").title())
+    item["ziel_modul_label"] = EMAIL_MODULE_LABELS.get(item["ziel_modul"], item["ziel_modul"].replace("_", " ").title())
     item["message_id"] = clean_text(item.get("message_id"))
     item["source_uid"] = clean_text(item.get("source_uid"))
     item["raw_hash"] = clean_text(item.get("raw_hash"))
@@ -16015,8 +17222,13 @@ def hydrate_werkstatt_email(row):
     return item
 
 
-def classify_werkstatt_email(betreff="", nachricht="", absender_email=""):
-    text_blob = normalize_document_text(" ".join([betreff or "", nachricht or "", absender_email or ""]))
+def classify_werkstatt_email(betreff="", nachricht="", absender_email="", empfaenger=""):
+    route_aliases = configured_mail_route_aliases()
+    for recipient in parse_email_recipients(empfaenger):
+        if recipient in route_aliases:
+            return route_aliases[recipient]
+
+    text_blob = normalize_document_text(" ".join([betreff or "", nachricht or "", absender_email or "", empfaenger or ""]))
     invoice_tokens = (
         "rechnung",
         "invoice",
@@ -16044,6 +17256,12 @@ def classify_werkstatt_email(betreff="", nachricht="", absender_email=""):
         return "rechnung", "rechnungen"
     if any(token in text_blob for token in purchase_tokens):
         return "einkauf", "einkauf"
+    if any(token in text_blob for token in ("schaden", "schadennummer", "versicherung", "gutachten", "freigabe")):
+        return "schaden", "versicherung"
+    if any(token in text_blob for token in ("termin", "abholung", "bringservice", "holservice")):
+        return "termin", "kalender"
+    if any(token in text_blob for token in ("reklamation", "nacharbeit", "mangel", "beschwerde")):
+        return "reklamation", "reklamationen"
     return "allgemein", ""
 
 
@@ -16163,6 +17381,197 @@ def werkstatt_imap_status():
         "archive_folder": config["archive_folder"],
         "search": config["search"],
         "limit": config["limit"],
+    }
+
+
+def get_schaden_mail_config():
+    address = clean_text(get_app_setting("SCHADEN_MAIL_ADDRESS") or SCHADEN_MAIL_ADDRESS).lower()
+    display_name = clean_text(get_app_setting("SCHADEN_MAIL_DISPLAY_NAME") or SCHADEN_MAIL_DISPLAY_NAME)
+    smtp_user = clean_text(SCHADEN_SMTP_USER or address)
+    imap_user = clean_text(SCHADEN_IMAP_USER or address)
+    smtp_password = clean_secret_value(SCHADEN_SMTP_PASS)
+    imap_password = clean_secret_value(SCHADEN_IMAP_PASS)
+    from_address = clean_text(os.environ.get("SCHADEN_SMTP_FROM") or address or smtp_user).lower()
+    smtp_configured = bool(address and SCHADEN_SMTP_HOST and smtp_user and smtp_password and from_address)
+    imap_configured = bool(address and SCHADEN_IMAP_HOST and imap_user and imap_password)
+    return {
+        "address": address,
+        "display_name": display_name,
+        "from_address": from_address,
+        "reply_to": address or from_address,
+        "imap_host": SCHADEN_IMAP_HOST,
+        "imap_port": SCHADEN_IMAP_PORT,
+        "imap_user": imap_user,
+        "imap_folder": SCHADEN_IMAP_FOLDER,
+        "imap_ssl": bool(SCHADEN_IMAP_SSL),
+        "imap_configured": imap_configured,
+        "smtp_host": SCHADEN_SMTP_HOST,
+        "smtp_port": SCHADEN_SMTP_PORT,
+        "smtp_user": smtp_user,
+        "smtp_tls": bool(SCHADEN_SMTP_TLS),
+        "smtp_ssl": bool(SCHADEN_SMTP_SSL),
+        "smtp_configured": smtp_configured,
+        "attachments_enabled": bool(SCHADEN_SMTP_ATTACHMENTS),
+        "attachment_limit_mb": SCHADEN_SMTP_ATTACHMENT_LIMIT_MB,
+        "_smtp_password": smtp_password,
+    }
+
+
+def schaden_mail_status():
+    config = get_schaden_mail_config()
+    missing = []
+    if not config["address"]:
+        missing.append("SCHADEN_MAIL_ADDRESS")
+    if not config["smtp_host"]:
+        missing.append("SCHADEN_SMTP_HOST")
+    if not config["smtp_user"]:
+        missing.append("SCHADEN_SMTP_USER")
+    if not config["_smtp_password"]:
+        missing.append("SCHADEN_SMTP_PASS")
+    if not config["imap_host"]:
+        missing.append("SCHADEN_IMAP_HOST")
+    if not config["imap_user"]:
+        missing.append("SCHADEN_IMAP_USER")
+    if not clean_secret_value(SCHADEN_IMAP_PASS):
+        missing.append("SCHADEN_IMAP_PASS")
+    return {
+        key: value
+        for key, value in config.items()
+        if not key.startswith("_")
+    } | {
+        "configured": bool(config["smtp_configured"] and config["imap_configured"]),
+        "missing": missing,
+        "smtp_badge": "SMTP bereit" if config["smtp_configured"] else "SMTP fehlt",
+        "imap_badge": "IMAP bereit" if config["imap_configured"] else "IMAP fehlt",
+    }
+
+
+def parse_email_recipients(value):
+    recipients = []
+    seen = set()
+    if isinstance(value, (list, tuple, set)):
+        raw_values = [clean_text(item) for item in value]
+    else:
+        raw_values = [clean_text(value)]
+    for _name, address in getaddresses(raw_values):
+        address = clean_text(address).lower()
+        if "@" not in address or address in seen:
+            continue
+        recipients.append(address)
+        seen.add(address)
+    return recipients
+
+
+def split_mail_subject_and_body(text):
+    subject = ""
+    body_lines = []
+    for line in clean_text(text).splitlines():
+        cleaned = clean_text(line)
+        if not subject and cleaned.lower().startswith("betreff:"):
+            subject = clean_text(cleaned.split(":", 1)[1])
+            continue
+        body_lines.append(line)
+    return subject or "Schadenmeldung / Bitte um Reparaturfreigabe", "\n".join(body_lines).strip()
+
+
+def versicherung_mail_attachments(dateien, limit_mb=None):
+    limit_bytes = int((limit_mb or SCHADEN_SMTP_ATTACHMENT_LIMIT_MB) * 1024 * 1024)
+    total = 0
+    attachments = []
+    skipped = []
+    for datei in dateien or []:
+        if clean_text(datei.get("quelle")) == "versicherung":
+            continue
+        if clean_text(datei.get("kategorie")) == "fertigbild":
+            continue
+        path = upload_file_path(datei)
+        if not path or not path.exists() or not path.is_file():
+            continue
+        size = int(datei.get("size") or path.stat().st_size or 0)
+        name = clean_text(datei.get("original_name")) or path.name
+        if size <= 0:
+            continue
+        if total + size > limit_bytes:
+            skipped.append(name)
+            continue
+        mime_type = clean_text(datei.get("mime_type")) or mimetypes.guess_type(name)[0] or "application/octet-stream"
+        main_type, _, sub_type = mime_type.partition("/")
+        attachments.append(
+            {
+                "path": path,
+                "name": name,
+                "size": size,
+                "main_type": main_type or "application",
+                "sub_type": sub_type or "octet-stream",
+            }
+        )
+        total += size
+    return attachments, skipped, total
+
+
+def send_versicherung_schadenmail(auftrag, empfaenger, cc, anschreiben, dateien=None):
+    config = get_schaden_mail_config()
+    if not config["smtp_configured"]:
+        return {"sent": False, "mode": "manual", "message": "SMTP ist noch nicht konfiguriert."}
+    to_recipients = parse_email_recipients(empfaenger)
+    cc_recipients = parse_email_recipients(cc)
+    if not to_recipients:
+        raise ValueError("Bitte eine gültige Empfängeradresse der Versicherung eintragen.")
+
+    subject, body = split_mail_subject_and_body(anschreiben)
+    if not body:
+        body = anschreiben
+    attachments = []
+    skipped = []
+    if config["attachments_enabled"]:
+        attachments, skipped, _total = versicherung_mail_attachments(
+            dateien or list_dateien(auftrag.get("id")),
+            config["attachment_limit_mb"],
+        )
+        if skipped:
+            body += (
+                "\n\nHinweis: Folgende Dateien wurden wegen der Größenbegrenzung nicht automatisch angehängt: "
+                + ", ".join(skipped)
+            )
+
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = formataddr((config["display_name"], config["from_address"]))
+    message["To"] = ", ".join(to_recipients)
+    if cc_recipients:
+        message["Cc"] = ", ".join(cc_recipients)
+    if config["reply_to"]:
+        message["Reply-To"] = config["reply_to"]
+    if auftrag and auftrag.get("id"):
+        message["X-Gaertner-Auftrag-ID"] = str(auftrag.get("id"))
+    message.set_content(body)
+
+    for attachment in attachments:
+        message.add_attachment(
+            attachment["path"].read_bytes(),
+            maintype=attachment["main_type"],
+            subtype=attachment["sub_type"],
+            filename=attachment["name"],
+        )
+
+    if config["smtp_ssl"]:
+        with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], timeout=30) as smtp:
+            smtp.login(config["smtp_user"], config["_smtp_password"])
+            smtp.send_message(message)
+    else:
+        with smtplib.SMTP(config["smtp_host"], config["smtp_port"], timeout=30) as smtp:
+            if config["smtp_tls"]:
+                smtp.starttls()
+            smtp.login(config["smtp_user"], config["_smtp_password"])
+            smtp.send_message(message)
+    return {
+        "sent": True,
+        "mode": "smtp",
+        "to": to_recipients,
+        "cc": cc_recipients,
+        "attachments": len(attachments),
+        "skipped": skipped,
+        "from": config["from_address"],
     }
 
 
@@ -16289,7 +17698,10 @@ def parse_werkstatt_email_raw_message(raw_bytes, source_uid=""):
     message = BytesParser(policy=policy.default).parsebytes(raw_bytes)
     absender_name, absender_email = email_address_parts(message.get("From"))
     message_id = clean_text(message.get("Message-ID") or message.get("Message-Id"))
-    empfaenger = email_address_list(message.get("To") or message.get("Delivered-To"))
+    recipient_headers = []
+    for header_name in ("To", "Cc", "Delivered-To", "Envelope-To", "X-Original-To", "X-Envelope-To"):
+        recipient_headers.extend(message.get_all(header_name, []))
+    empfaenger = email_address_list(", ".join(clean_text(value) for value in recipient_headers))
     betreff = decode_email_header_value(message.get("Subject"))
     nachricht = email_message_body_text(message)
     raw_hash = hashlib.sha256(raw_bytes).hexdigest() if raw_bytes else ""
@@ -16504,7 +17916,7 @@ def create_werkstatt_email(
     )
     if existing_id:
         return existing_id
-    kategorie, ziel_modul = classify_werkstatt_email(betreff, nachricht, absender_email)
+    kategorie, ziel_modul = classify_werkstatt_email(betreff, nachricht, absender_email, empfaenger)
     now = now_str()
     email_id = 0
     db = get_db()
@@ -16915,11 +18327,21 @@ def list_dateien_by_reklamation(reklamation_id):
     return [hydrate_datei(dict(row)) for row in rows]
 
 
-def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id=None, upload_note="", analyze=True):
+def save_uploads(
+    auftrag_id,
+    files,
+    quelle,
+    kategorie="standard",
+    reklamation_id=None,
+    upload_note="",
+    analyze=True,
+    prozess_key="",
+):
     saved = 0
     saved_analysis_document = False
     analysis_errors = []
     upload_note = clean_text(upload_note)[:500]
+    prozess_key = re.sub(r"[^a-z0-9_\\-]", "", clean_text(prozess_key).lower())[:80]
     db = get_db()
     timestamp = now_str()
     try:
@@ -16976,9 +18398,9 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
         cursor = db.execute(
             """
             INSERT INTO dateien
-            (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, dokument_typ, notiz,
+            (auftrag_id, reklamation_id, original_name, stored_name, mime_type, size, quelle, kategorie, prozess_key, dokument_typ, notiz,
              extrahierter_text, extrakt_kurz, analyse_quelle, analyse_json, analyse_hinweis, hochgeladen_am)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 auftrag_id,
@@ -16989,6 +18411,7 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
                 target.stat().st_size,
                 quelle,
                 kategorie,
+                prozess_key,
                 dokument_typ,
                 datei_notiz,
                 extrahierter_text,
@@ -17331,6 +18754,8 @@ def delete_auftrag(auftrag_id, safety_backup=True):
     db.execute("DELETE FROM status_log WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM benachrichtigungen WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM versicherung_aufgaben WHERE auftrag_id=?", (auftrag_id,))
+    db.execute("DELETE FROM versicherung_checkpunkte WHERE auftrag_id=?", (auftrag_id,))
+    db.execute("DELETE FROM versicherung_teile WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM chat_nachrichten WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM whatsapp_nachrichten WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM auftraege WHERE id=?", (auftrag_id,))
@@ -17558,6 +18983,14 @@ def build_versicherung_anschreiben(auftrag, versicherung=None, dateien=None):
         lines.append(f"- Schaden-Nr.: {schaden_nummer}")
     if zones:
         lines.append(f"- Sichtbare Schadenbereiche: {', '.join(zones)}")
+    if clean_text(auftrag.get("schaden_fahrbereit")) and auftrag.get("schaden_fahrbereit") != "unbekannt":
+        lines.append(f"- Fahrbereitschaft: {clean_text(auftrag.get('schaden_fahrbereit_label')) or SCHADEN_STEUERUNG_OPTIONEN.get(auftrag.get('schaden_fahrbereit'), '')}")
+    if clean_text(auftrag.get("schaden_abschleppen")) and auftrag.get("schaden_abschleppen") != "unbekannt":
+        lines.append(f"- Abholung/Abschleppen: {clean_text(auftrag.get('schaden_abschleppen_label')) or SCHADEN_STEUERUNG_OPTIONEN.get(auftrag.get('schaden_abschleppen'), '')}")
+    if clean_text(auftrag.get("schaden_mietwagen")) and auftrag.get("schaden_mietwagen") != "unbekannt":
+        lines.append(f"- Mietwagenbedarf: {clean_text(auftrag.get('schaden_mietwagen_label')) or SCHADEN_STEUERUNG_OPTIONEN.get(auftrag.get('schaden_mietwagen'), '')}")
+    if clean_text(auftrag.get("schaden_selbstbeteiligung")):
+        lines.append(f"- Selbstbeteiligung laut Angabe: {clean_text(auftrag.get('schaden_selbstbeteiligung'))}")
     if gt_details:
         lines.append(f"- GT Estimate: {'; '.join(gt_details)}")
     if datei_labels:
@@ -17571,6 +19004,7 @@ def build_versicherung_anschreiben(auftrag, versicherung=None, dateien=None):
             "",
             "Fachliche Ersteinschaetzung:",
             "Nach Sichtung der vorliegenden Angaben und Bilder ist eine karosserie- und lackiertechnische Instandsetzung zu erwarten. Verdeckte Beschaedigungen an Haltern, Fuehrungen, Befestigungspunkten oder angrenzenden Bauteilen koennen erst nach Demontage belastbar beurteilt werden.",
+            "Soweit angrenzende Bauteile oder Flaechen in der Kalkulation enthalten sind, dient dies der fachgerechten Wiederherstellung von Farbton, Verlauf und Oberflaechenbild. Erforderliche Beilackierungen, De-/Montagearbeiten und Materialpositionen werden mit Gutachten/Kalkulation und Schadenfotos dokumentiert.",
             "Wir dokumentieren den gesamten Ablauf mit Bildern, Unterlagen und Statusverlauf, damit die Regulierung nachvollziehbar bleibt.",
             "",
             "Bitte teilen Sie uns mit, ob weitere Unterlagen benoetigt werden. Nach Ihrer Freigabe kann das Autohaus die Einplanung bei Gärtner Karosserie & Lack veranlassen.",
@@ -17620,6 +19054,662 @@ def datei_match_text(datei):
 def datei_matches_terms(datei, terms):
     haystack = datei_match_text(datei)
     return any(normalize_document_text(term) in haystack for term in terms if clean_text(term))
+
+
+def normalize_versicherung_prozess_key(value):
+    key = re.sub(r"[^a-z0-9_\\-]", "", clean_text(value).lower())
+    allowed = {item["key"] for item in VERSICHERUNG_PROZESS_ITEMS}
+    return key if key in allowed else ""
+
+
+def normalize_versicherung_prozess_status(value):
+    status = clean_text(value).lower()
+    return status if status in VERSICHERUNG_PROZESS_STATUS else "offen"
+
+
+def schaden_station_rank(value):
+    key = normalize_schaden_station(value)
+    station_keys = [station_key for station_key, _ in SCHADEN_KANBAN_STATIONEN]
+    try:
+        return station_keys.index(key)
+    except ValueError:
+        return 0
+
+
+def get_versicherung_prozess_item(key):
+    key = normalize_versicherung_prozess_key(key)
+    for item in VERSICHERUNG_PROZESS_ITEMS:
+        if item["key"] == key:
+            return dict(item)
+    return None
+
+
+def list_versicherung_checkpunkte(auftrag_id):
+    if not auftrag_id:
+        return {}
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM versicherung_checkpunkte WHERE auftrag_id=?",
+        (auftrag_id,),
+    ).fetchall()
+    db.close()
+    return {clean_text(row["prozess_key"]): dict(row) for row in rows}
+
+
+def set_versicherung_checkpunkt(auftrag_id, prozess_key, status, notiz="", quelle="werkstatt"):
+    prozess_key = normalize_versicherung_prozess_key(prozess_key)
+    if not auftrag_id or not prozess_key:
+        return False
+    status = normalize_versicherung_prozess_status(status)
+    notiz = clean_text(notiz)[:600]
+    quelle = clean_text(quelle)[:80] or "werkstatt"
+    db = get_db()
+    cursor = db.execute(
+        """
+        UPDATE versicherung_checkpunkte
+        SET status=?,
+            notiz=?,
+            aktualisiert_von=?,
+            aktualisiert_am=?
+        WHERE auftrag_id=? AND prozess_key=?
+        """,
+        (status, notiz, quelle, now_str(), auftrag_id, prozess_key),
+    )
+    if not (cursor.rowcount or 0):
+        db.execute(
+            """
+            INSERT INTO versicherung_checkpunkte
+            (auftrag_id, prozess_key, status, notiz, aktualisiert_von, aktualisiert_am)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (auftrag_id, prozess_key, status, notiz, quelle, now_str()),
+        )
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag_id))
+    db.commit()
+    db.close()
+    return True
+
+
+def versicherung_prozess_files_for_item(item, dateien):
+    key = clean_text(item.get("key"))
+    terms = item.get("terms") or ()
+    image_only = bool(item.get("image_only"))
+    expected_category = clean_text(item.get("upload_category")) or "standard"
+    legacy_photo_keys = {"foto_front", "foto_heck", "foto_links", "foto_rechts", "foto_detail"} if key == "schadenfotos" else set()
+    matches = []
+    for datei in dateien or []:
+        if clean_text(datei.get("kategorie")) != expected_category:
+            continue
+        if image_only and not datei.get("is_image"):
+            continue
+        datei_key = clean_text(datei.get("prozess_key"))
+        if datei_key == key or datei_key in legacy_photo_keys or datei_matches_terms(datei, terms):
+            matches.append(datei)
+    return matches
+
+
+def versicherung_prozess_derived_ok(item, auftrag, files):
+    key = clean_text(item.get("key"))
+    auftrag = auftrag or {}
+    freigabe = normalize_freigabe_status(auftrag.get("versicherung_freigabe_status"))
+    if key == "grunddaten":
+        has_holder = bool(clean_text(auftrag.get("kunde_name")) or clean_text(auftrag.get("versicherungsnehmer")))
+        has_vehicle = bool(clean_text(auftrag.get("fahrzeug")) or clean_text(auftrag.get("kennzeichen")) or clean_text(auftrag.get("fin_nummer")))
+        has_damage = bool(clean_text(auftrag.get("beschreibung")) or clean_text(auftrag.get("analyse_text")) or auftrag.get("schaden_zonen"))
+        has_type = normalize_schadenart(auftrag.get("schadenart")) != "unbekannt"
+        return has_holder and has_vehicle and has_damage and has_type
+    if key == "kunden_qr":
+        return bool(clean_text(auftrag.get("kunden_status_token")) and auftrag.get("kunden_status_aktiv", True))
+    if key == "fahrzeugschein":
+        return bool(clean_text(auftrag.get("fin_nummer")) or files)
+    if key == "gutachten":
+        return bool(
+            files
+            or clean_text(auftrag.get("gt_motive_kalkulation_betrag"))
+            or clean_text(auftrag.get("rep_max_kosten"))
+            or clean_text(auftrag.get("kosten_gutachten_betrag"))
+            or clean_text(auftrag.get("kosten_werkstatt_betrag"))
+        )
+    if key == "freigabe":
+        return bool(files or freigabe == "freigegeben")
+    if key == "kalkulation_nacharbeit":
+        return bool(files or freigabe in {"freigegeben", "abgelehnt"})
+    if key == "teile":
+        teile = list_versicherung_teile(auftrag.get("id"))
+        if not teile:
+            return False
+        return not any(teil["status"] in {"offen", "angefragt", "bestellt", "rueckstand"} for teil in teile)
+    if key == "teile_lieferschein":
+        teile = list_versicherung_teile(auftrag.get("id"))
+        if not teile or all(teil["status"] == "nicht_noetig" for teil in teile):
+            return True
+        return bool(files)
+    if key == "terminfreigabe":
+        return bool(clean_text(auftrag.get("annahme_datum")) or int(auftrag.get("status") or 1) >= 2)
+    if key == "reparatur_doku":
+        station_rank = schaden_station_rank(auftrag.get("schaden_station"))
+        return bool(files or station_rank >= schaden_station_rank("endkontrolle"))
+    if key == "fertigbilder":
+        return bool(files or int(auftrag.get("status") or 1) >= 4)
+    if key == "zahlung_freigabe":
+        abrechnung = normalize_abrechnung_status(auftrag.get("abrechnung_status") or auftrag.get("rechnung_status"))
+        return abrechnung in {"abrechnungsbereit", "rechnung_geschrieben", "teilbezahlt", "bezahlt", "kuerzung", "nachforderung"}
+    return bool(files)
+
+
+def versicherung_prozess_item_urls(item, context, autohaus=None):
+    key = item["key"]
+    auftrag_id = item.get("auftrag_id")
+    urls = {}
+    if context == "admin":
+        urls["upload_url"] = url_for("admin_versicherung_prozess_upload", auftrag_id=auftrag_id, prozess_key=key)
+        urls["status_url"] = url_for("admin_versicherung_prozess_status", auftrag_id=auftrag_id, prozess_key=key)
+        if key == "abtretung":
+            urls["download_url"] = url_for("admin_versicherung_schaden_abtretungserklaerung_pdf", auftrag_id=auftrag_id)
+    elif context == "partner" and autohaus:
+        urls["upload_url"] = url_for(
+            "partner_versicherung_prozess_upload",
+            slug=autohaus["slug"],
+            auftrag_id=auftrag_id,
+            prozess_key=key,
+        )
+        urls["status_url"] = url_for(
+            "partner_versicherung_prozess_status",
+            slug=autohaus["slug"],
+            auftrag_id=auftrag_id,
+            prozess_key=key,
+        )
+        if key == "abtretung":
+            urls["download_url"] = url_for(
+                "partner_versicherung_auftrag_abtretungserklaerung_pdf",
+                slug=autohaus["slug"],
+                auftrag_id=auftrag_id,
+            )
+    return urls
+
+
+def build_versicherung_prozess(auftrag, dateien=None, context="admin", autohaus=None):
+    if not auftrag or not auftrag.get("versicherung_id"):
+        return None
+    auftrag_id = int(auftrag.get("id") or 0)
+    dateien = dateien if dateien is not None else list_dateien(auftrag_id)
+    checkpunkte = list_versicherung_checkpunkte(auftrag_id)
+    items = []
+    open_required = []
+    send_required_keys = {"grunddaten", "fahrzeugschein", "gutachten", "schadenfotos", "abtretung"}
+    blocked_by_freigabe = normalize_freigabe_status(auftrag.get("versicherung_freigabe_status")) != "freigegeben"
+    freigabe_status = normalize_freigabe_status(auftrag.get("versicherung_freigabe_status"))
+
+    for config in VERSICHERUNG_PROZESS_ITEMS:
+        item = dict(config)
+        key = item["key"]
+        if key in {"kalkulation_nacharbeit", "nachtrag"} and freigabe_status == "rueckfrage":
+            item["optional"] = False
+        item["auftrag_id"] = auftrag_id
+        files = versicherung_prozess_files_for_item(item, dateien)
+        manual = checkpunkte.get(key) or {}
+        manual_status = normalize_versicherung_prozess_status(manual.get("status"))
+        derived_ok = versicherung_prozess_derived_ok(item, auftrag, files)
+        if derived_ok:
+            status = "erledigt"
+            detail = "Vorhanden oder erledigt."
+        elif manual_status != "offen":
+            status = manual_status
+            detail = clean_text(manual.get("notiz")) or VERSICHERUNG_PROZESS_STATUS[status]["label"]
+        else:
+            status = "offen"
+            detail = clean_text(item.get("required")) or "Noch offen."
+
+        if key == "freigabe" and status == "offen":
+            freigabe = normalize_freigabe_status(auftrag.get("versicherung_freigabe_status"))
+            if freigabe in {"gemeldet", "in_pruefung", "rueckfrage", "vorbereitet"}:
+                detail = VERSICHERUNG_FREIGABE_STATUS[freigabe]["label"]
+
+        meta = VERSICHERUNG_PROZESS_STATUS[status]
+        required_before_send = key in send_required_keys
+        resolved = bool(meta["resolved"] or derived_ok)
+        if required_before_send and status == "nicht_vorhanden" and not derived_ok:
+            resolved = False
+            detail = "Pflichtpunkt für den Versand: bitte Unterlage hochladen oder Daten vollständig eintragen."
+        if not resolved and not item.get("optional"):
+            open_required.append(item["label"])
+
+        item.update(
+            {
+                "status": status,
+                "status_label": meta["label"],
+                "status_farbe": meta["farbe"],
+                "resolved": resolved,
+                "detail": detail,
+                "files": files,
+                "file_count": len(files),
+                "manual_notiz": clean_text(manual.get("notiz")),
+                "manual_status": manual_status,
+                "manual_updated": clean_text(manual.get("aktualisiert_am")),
+                "can_upload": bool(item.get("accept")) and not item.get("manual_only"),
+                "can_mark_missing": key not in {"grunddaten", "freigabe", "kunden_qr"} and not required_before_send,
+                "can_mark_done": bool(item.get("manual_only")),
+            }
+        )
+        item.update(versicherung_prozess_item_urls(item, context, autohaus=autohaus))
+        if key == "kunden_qr":
+            item["link_url"] = kunden_status_url(auftrag)
+            item["link_label"] = "Kundenstatus öffnen"
+            if clean_text(auftrag.get("kunden_status_token")):
+                item["qr_url"] = url_for("kunden_status_qr", token=auftrag["kunden_status_token"])
+        items.append(item)
+
+    grouped = []
+    for gruppe in dict.fromkeys(item["gruppe"] for item in items):
+        grouped.append({"label": gruppe, "items": [item for item in items if item["gruppe"] == gruppe]})
+
+    resolved_count = len([item for item in items if item["resolved"]])
+    percent = int(round((resolved_count / max(len(items), 1)) * 100))
+    send_blocker = [
+        item["label"]
+        for item in items
+        if not item["resolved"]
+        and item["key"] in send_required_keys
+    ]
+    return {
+        "items": items,
+        "gruppen": grouped,
+        "resolved_count": resolved_count,
+        "total": len(items),
+        "percent": percent,
+        "open_required": open_required,
+        "send_blocker": send_blocker,
+        "ready_for_send": not send_blocker,
+        "blocked_by_freigabe": blocked_by_freigabe,
+    }
+
+
+def normalize_steuerung_option(value):
+    value = clean_text(value).lower()
+    return value if value in SCHADEN_STEUERUNG_OPTIONEN else "unbekannt"
+
+
+def normalize_kundenkontakt_kanal(value):
+    value = clean_text(value).lower()
+    return value if value in KUNDENKONTAKT_KANAELE else "qr"
+
+
+def normalize_schaden_station(value):
+    value = clean_text(value).lower()
+    allowed = {key for key, _ in SCHADEN_KANBAN_STATIONEN}
+    return value if value in allowed else "aufnahme"
+
+
+def normalize_teil_status(value):
+    value = clean_text(value).lower()
+    return value if value in SCHADEN_TEILE_STATUS else "offen"
+
+
+def normalize_abrechnung_status(value):
+    value = clean_text(value).lower()
+    return value if value in SCHADEN_ABRECHNUNG_STATUS else "offen"
+
+
+def list_versicherung_teile(auftrag_id):
+    if not auftrag_id:
+        return []
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT *
+        FROM versicherung_teile
+        WHERE auftrag_id=?
+        ORDER BY CASE status
+            WHEN 'rueckstand' THEN 0
+            WHEN 'offen' THEN 1
+            WHEN 'angefragt' THEN 2
+            WHEN 'bestellt' THEN 3
+            WHEN 'geliefert' THEN 4
+            ELSE 5 END,
+            id DESC
+        """,
+        (auftrag_id,),
+    ).fetchall()
+    db.close()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["status"] = normalize_teil_status(item.get("status"))
+        item["status_meta"] = SCHADEN_TEILE_STATUS[item["status"]]
+        item["liefertermin"] = format_date(item.get("liefertermin"))
+        item["notiz"] = clean_text(item.get("notiz"))
+        items.append(item)
+    return items
+
+
+def add_versicherung_teil(auftrag_id, bezeichnung, status="offen", liefertermin="", notiz=""):
+    bezeichnung = clean_text(bezeichnung)[:180]
+    if not auftrag_id or not bezeichnung:
+        return None
+    db = get_db()
+    cursor = db.execute(
+        """
+        INSERT INTO versicherung_teile
+        (auftrag_id, bezeichnung, status, liefertermin, notiz, erstellt_am, geaendert_am)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            auftrag_id,
+            bezeichnung,
+            normalize_teil_status(status),
+            format_date(liefertermin),
+            clean_text(notiz)[:600],
+            now_str(),
+            now_str(),
+        ),
+    )
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag_id))
+    db.commit()
+    teil_id = cursor.lastrowid
+    db.close()
+    return teil_id
+
+
+def update_versicherung_teil(auftrag_id, teil_id, status, liefertermin="", notiz=""):
+    db = get_db()
+    cursor = db.execute(
+        """
+        UPDATE versicherung_teile
+        SET status=?,
+            liefertermin=?,
+            notiz=?,
+            geaendert_am=?
+        WHERE id=? AND auftrag_id=?
+        """,
+        (
+            normalize_teil_status(status),
+            format_date(liefertermin),
+            clean_text(notiz)[:600],
+            now_str(),
+            teil_id,
+            auftrag_id,
+        ),
+    )
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag_id))
+    db.commit()
+    updated = bool(cursor.rowcount)
+    db.close()
+    return updated
+
+
+def delete_versicherung_teil(auftrag_id, teil_id):
+    db = get_db()
+    cursor = db.execute(
+        "DELETE FROM versicherung_teile WHERE id=? AND auftrag_id=?",
+        (teil_id, auftrag_id),
+    )
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag_id))
+    db.commit()
+    deleted = bool(cursor.rowcount)
+    db.close()
+    return deleted
+
+
+def build_versicherung_steuerung(auftrag, dateien=None, teile=None, chat_nachrichten=None, prozess=None):
+    if not auftrag or not auftrag.get("versicherung_id"):
+        return None
+    dateien = dateien if dateien is not None else list_dateien(auftrag.get("id"))
+    teile = teile if teile is not None else list_versicherung_teile(auftrag.get("id"))
+    chat_nachrichten = chat_nachrichten or []
+    prozess = prozess or build_versicherung_prozess(auftrag, dateien)
+    offene_teile = [teil for teil in teile if teil["status"] not in {"geliefert", "nicht_noetig"}]
+    rueckstand_teile = [teil for teil in teile if teil["status"] == "rueckstand"]
+    freigabe_ok = normalize_freigabe_status(auftrag.get("versicherung_freigabe_status")) == "freigegeben"
+    eigenauftrag = bool(auftrag.get("schaden_eigenauftrag"))
+    fotos_ok = True
+    if prozess:
+        foto_items = [item for item in prozess["items"] if item["key"] == "schadenfotos"]
+        fotos_ok = all(item["resolved"] for item in foto_items)
+    gutachten_amount = positive_money_amount(auftrag.get("kosten_gutachten_betrag")) or positive_money_amount(auftrag.get("gt_motive_kalkulation_betrag")) or positive_money_amount(auftrag.get("rep_max_kosten"))
+    werkstatt_amount = positive_money_amount(auftrag.get("kosten_werkstatt_betrag")) or positive_money_amount(auftrag.get("werkstatt_angebot_preis"))
+    freigabe_amount = positive_money_amount(auftrag.get("kosten_freigabe_betrag"))
+    rechnung_amount = positive_money_amount(auftrag.get("kosten_rechnung_betrag")) or positive_money_amount(auftrag.get("bonus_netto_betrag"))
+    kuerzung_amount = positive_money_amount(auftrag.get("kosten_kuerzung_betrag"))
+    differenz = None
+    if rechnung_amount and freigabe_amount:
+        differenz = round(rechnung_amount - freigabe_amount, 2)
+    kostenvergleich = [
+        {"label": "Gutachten / Kalkulation", "value": format_bonus_money(gutachten_amount) if gutachten_amount else "offen"},
+        {"label": "Werkstattpreis", "value": format_bonus_money(werkstatt_amount) if werkstatt_amount else "offen"},
+        {"label": "Freigabe", "value": format_bonus_money(freigabe_amount) if freigabe_amount else "offen"},
+        {"label": "Rechnung", "value": format_bonus_money(rechnung_amount) if rechnung_amount else "offen"},
+    ]
+    prozess_items = {item.get("key"): item for item in (prozess or {}).get("items", [])}
+    station_rank = schaden_station_rank(auftrag.get("schaden_station"))
+    werkstatt_started = station_rank >= schaden_station_rank("fahrzeug_in_werkstatt")
+    terminbereit = freigabe_ok and not offene_teile
+    termin_ok = bool(clean_text(auftrag.get("annahme_datum")) or int(auftrag.get("status") or 1) >= 2)
+    freigabe_status = normalize_freigabe_status(auftrag.get("versicherung_freigabe_status"))
+    nacharbeit_noetig = freigabe_status == "rueckfrage" or auftrag.get("schaden_station") == "kalkulation_nacharbeit"
+    nacharbeit_ok = any(
+        bool(prozess_items.get(key, {}).get("resolved"))
+        for key in ("kalkulation_nacharbeit", "nachtrag")
+    )
+    reparatur_doku_ok = bool(prozess_items.get("reparatur_doku", {}).get("resolved"))
+    fertigbilder_ok = bool(prozess_items.get("fertigbilder", {}).get("resolved"))
+    ready_for_send = bool((prozess or {}).get("ready_for_send"))
+    fahrzeug_blob = normalize_document_text(
+        " ".join(
+            clean_text(auftrag.get(key))
+            for key in ("fahrzeug", "fin_nummer", "kennzeichen", "bauteile_override", "analyse_text")
+        )
+    )
+    originalteile_lieferant = {
+        "name": "Lieferant offen",
+        "detail": "Marke/FIN prüfen und bevorzugten Originalteile-Partner zuordnen.",
+        "status": "secondary",
+    }
+    if "audi" in fahrzeug_blob or "vw" in fahrzeug_blob or "volkswagen" in fahrzeug_blob:
+        originalteile_lieferant = {
+            "name": "Käsmann / VW-Audi Originalteile",
+            "detail": "VW/Audi-Fahrzeug erkannt. FIN-basierte Teileliste vorbereiten.",
+            "status": "success",
+        }
+    elif "mercedes" in fahrzeug_blob or "benz" in fahrzeug_blob:
+        originalteile_lieferant = {
+            "name": "Assenheimer / Mercedes Originalteile",
+            "detail": "Mercedes-Fahrzeug erkannt. FIN-basierte Teileliste vorbereiten.",
+            "status": "success",
+        }
+    elif "cupra" in fahrzeug_blob or "seat" in fahrzeug_blob:
+        originalteile_lieferant = {
+            "name": "Cupra/Seat Originalteile",
+            "detail": "Cupra/Seat erkannt. Bevorzugten Vertragspartner noch fest hinterlegen.",
+            "status": "warning",
+        }
+    elif "opel" in fahrzeug_blob:
+        originalteile_lieferant = {
+            "name": "Opel Originalteile",
+            "detail": "Opel erkannt. Bevorzugten Opel-Teilepartner noch fest hinterlegen.",
+            "status": "warning",
+        }
+    if freigabe_status == "abgelehnt":
+        naechste_aktion = {
+            "titel": "Sperre klären",
+            "text": "Keine Reparatur einplanen. Ablehnung, Eigenauftrag oder neue Freigabe schriftlich dokumentieren.",
+            "rolle": "Werkstatt / Kunde",
+            "status": "danger",
+        }
+    elif freigabe_status == "rueckfrage":
+        naechste_aktion = {
+            "titel": "Nachtrag beantworten",
+            "text": "Rückfrage der Versicherung mit Kalkulationsnacharbeit, Fotos oder Begründung beantworten.",
+            "rolle": "Werkstatt / Autohaus",
+            "status": "warning",
+        }
+    elif not ready_for_send:
+        blocker = ", ".join((prozess or {}).get("send_blocker") or []) or "Pflichtunterlagen"
+        naechste_aktion = {
+            "titel": "Versandpaket vervollständigen",
+            "text": f"Noch offen: {blocker}. Erst danach geht der Fall an die Versicherung.",
+            "rolle": "Schadensaufnahme",
+            "status": "warning",
+        }
+    elif freigabe_status in {"offen", "vorbereitet"}:
+        naechste_aktion = {
+            "titel": "Anschreiben prüfen und senden",
+            "text": "Schadentext, Empfänger und Unterlagen prüfen, dann zur Versicherung geben.",
+            "rolle": "Autohaus / Werkstatt",
+            "status": "info",
+        }
+    elif not freigabe_ok:
+        naechste_aktion = {
+            "titel": "Versicherungsantwort abwarten",
+            "text": "Der Fall liegt bei der Versicherung. Rückfrage oder Freigabe wird in der Akte dokumentiert.",
+            "rolle": "Versicherung",
+            "status": "info",
+        }
+    elif offene_teile:
+        naechste_aktion = {
+            "titel": "Teilelage klären",
+            "text": "Offene Bestellungen, Liefertermin, Rückstand und Lieferschein pflegen. Kunde bleibt bis dahin gesperrt.",
+            "rolle": "Teile / Lieferant",
+            "status": "warning" if not rueckstand_teile else "danger",
+        }
+    elif not termin_ok:
+        naechste_aktion = {
+            "titel": "Kundentermin freigeben",
+            "text": "Freigabe und Teilelage sind sauber. Kunde kann jetzt per Statuslink einen Terminwunsch senden.",
+            "rolle": "Kunde / Service",
+            "status": "success",
+        }
+    elif not werkstatt_started:
+        naechste_aktion = {
+            "titel": "Fahrzeug in Werkstatt übernehmen",
+            "text": "Bringtermin bestätigen, Mietwagen/Transport klären und Werkstattdurchlauf starten.",
+            "rolle": "Werkstatt",
+            "status": "info",
+        }
+    elif not reparatur_doku_ok or not fertigbilder_ok:
+        naechste_aktion = {
+            "titel": "Reparatur dokumentieren",
+            "text": "Demontage, Instandsetzung, Lackierung, Montage, Endkontrolle und Fertigbilder in der Akte ablegen.",
+            "rolle": "Werkstatt",
+            "status": "warning",
+        }
+    else:
+        naechste_aktion = {
+            "titel": "Abrechnung abschließen",
+            "text": "Rechnung, Kürzung, Nachforderung und Zahlungsfreigabe sauber dokumentieren.",
+            "rolle": "Abrechnung",
+            "status": "info",
+        }
+    rollen = [
+        {
+            "name": "Kunde",
+            "sicht": "Status lesen, QR-Code, Terminwunsch erst nach Freigabe und Teileklärung.",
+            "schutz": "Keine Bearbeitung, keine internen Preise, keine Lieferanten.",
+            "status": "success" if terminbereit or termin_ok else "secondary",
+        },
+        {
+            "name": "Werkstatt",
+            "sicht": "Vollständige Akte, Station, Reparaturdoku, Fertigbilder und Abrechnung.",
+            "schutz": "Reparatur bleibt vor Freigabe gesperrt, außer Eigenauftrag ist bewusst dokumentiert.",
+            "status": "warning" if not freigabe_ok and not eigenauftrag else "success",
+        },
+        {
+            "name": "Versicherung",
+            "sicht": "Schadenunterlagen, Fotos, Kalkulation, Nachtrag, Freigabe, Rechnung/Fertigbilder.",
+            "schutz": "Keine Einkaufskonditionen und keine internen Werkstattnotizen.",
+            "status": "info" if not freigabe_ok else "success",
+        },
+        {
+            "name": "Lieferant",
+            "sicht": "Später nur Warenkorb, FIN/Marke, Teilenummern, Menge, Lieferadresse.",
+            "schutz": "Keine komplette Schadenakte und keine Kundendetails außer zwingend nötig.",
+            "status": "warning",
+        },
+    ]
+    lieferantenmatrix = [
+        {
+            "typ": "Originalteile",
+            "lieferant": originalteile_lieferant["name"],
+            "status": originalteile_lieferant["status"],
+            "hinweis": originalteile_lieferant["detail"],
+            "aktion": "FIN-/Markenabgleich",
+        },
+        {
+            "typ": "Zubehörteile",
+            "lieferant": "Zubehörlieferant offen",
+            "status": "warning",
+            "hinweis": "Zubehörwunsch muss vor Bestellung mit dem Kunden freigegeben werden.",
+            "aktion": "Kundenfreigabe",
+        },
+        {
+            "typ": "Lack / Verbrauch",
+            "lieferant": "Einkauf / Topcolor-Preisradar",
+            "status": "info",
+            "hinweis": "Einkaufsmodul erkennt Rechnungen und Vergleichspreise bereits, ist aber noch nicht mit der Schadenakte verbunden.",
+            "aktion": "Einkauf koppeln",
+        },
+        {
+            "typ": "API / Warenkorb",
+            "lieferant": "partslink24 / OrderBridge angefragt",
+            "status": "secondary",
+            "hinweis": "Ein-Klick-Bestellung erst nach offizieller Schnittstelle und manueller Werkstattfreigabe.",
+            "aktion": "Schnittstelle",
+        },
+    ]
+    bausteine = [
+        {"nr": 1, "titel": "Schadensaufnahme", "status": "success" if (prozess_items.get("grunddaten", {}).get("resolved") and fotos_ok and prozess_items.get("kunden_qr", {}).get("resolved")) else "warning", "text": "Daten, Schadenbereiche, Fotos und Kunden-QR direkt bei der Aufnahme sauber erfassen."},
+        {"nr": 2, "titel": "Kalkulation", "status": "success" if (prozess_items.get("gutachten", {}).get("resolved") or gutachten_amount or werkstatt_amount) else "warning", "text": "Gutachten, DAT/GT-Kalkulation oder Werkstatt-KVA gehören zur Schadensaufnahme."},
+        {"nr": 3, "titel": "Freigabe / Sperre", "status": "success" if freigabe_ok else ("danger" if freigabe_status == "abgelehnt" else ("warning" if freigabe_status == "rueckfrage" else "info")), "text": f"Status: {auftrag.get('versicherung_freigabe_meta', {}).get('label', 'Offen')}."},
+        {"nr": 4, "titel": "Freigabebericht", "status": "success" if freigabe_ok else ("warning" if nacharbeit_noetig else "secondary"), "text": "Freigabe, Sperre oder Rückfrage wird mit Hinweis und Unterlagen nachvollziehbar dokumentiert."},
+        {"nr": 5, "titel": "Nachtrag / Neuberechnung", "status": "success" if nacharbeit_ok else ("warning" if nacharbeit_noetig else "secondary"), "text": "Bei Rückfrage oder Zusatzschaden zurück in die Kalkulation, danach erneut zur Prüfung."},
+        {"nr": 6, "titel": "Teile bestellen", "status": ("success" if not offene_teile else ("danger" if rueckstand_teile else "warning")) if freigabe_ok else "secondary", "text": "Erst nach Freigabe: Teilebedarf, Bestellung, Lieferzeit, Lieferschein und Rückstand sichtbar halten."},
+        {"nr": 7, "titel": "Termin Kunde", "status": "success" if termin_ok else ("warning" if terminbereit else "secondary"), "text": "Kunde sieht den QR-Status nur lesend; Terminaktion erst nach Freigabe und geklärter Teilelage."},
+        {"nr": 8, "titel": "Werkstatt-Durchlauf", "status": "success" if werkstatt_started else "warning", "text": f"Aktuelle Station: {auftrag.get('schaden_station_label', 'Schadensaufnahme')}."},
+        {"nr": 9, "titel": "Reparaturdoku", "status": "success" if reparatur_doku_ok and fertigbilder_ok else ("warning" if station_rank >= schaden_station_rank("endkontrolle") else "secondary"), "text": "Instandsetzung, Teilebelege, Endkontrolle und Fertigbilder für Versicherung dokumentieren."},
+        {"nr": 10, "titel": "Abrechnung", "status": "success" if auftrag.get("abrechnung_status") in {"bezahlt", "rechnung_geschrieben", "abrechnungsbereit"} else ("danger" if auftrag.get("abrechnung_status") in {"kuerzung", "nachforderung"} else "warning"), "text": f"Status: {auftrag.get('abrechnung_status_label', 'Offen')}."},
+    ]
+    return {
+        "bausteine": bausteine,
+        "teile": teile,
+        "offene_teile_count": len(offene_teile),
+        "rueckstand_teile_count": len(rueckstand_teile),
+        "freigabe_ok": freigabe_ok,
+        "reparatur_blockiert": not freigabe_ok and not eigenauftrag,
+        "naechste_aktion": naechste_aktion,
+        "rollen": rollen,
+        "lieferantenmatrix": lieferantenmatrix,
+        "gutachten_betrag_label": format_bonus_money(gutachten_amount) if gutachten_amount else "",
+        "werkstatt_betrag_label": format_bonus_money(werkstatt_amount) if werkstatt_amount else "",
+        "freigabe_betrag_label": format_bonus_money(freigabe_amount) if freigabe_amount else "",
+        "rechnung_betrag_label": format_bonus_money(rechnung_amount) if rechnung_amount else "",
+        "kuerzung_betrag_label": format_bonus_money(kuerzung_amount) if kuerzung_amount else "",
+        "kostenvergleich": kostenvergleich,
+        "differenz_label": format_bonus_money(abs(differenz)) if differenz else "",
+        "differenz_warnung": bool(differenz and differenz > 0),
+    }
+
+
+def build_versicherung_tages_cockpit(schadenfaelle):
+    buckets = {
+        "warte_freigabe": [],
+        "rueckfragen": [],
+        "teile": [],
+        "abrechnung": [],
+        "zuteilung": [],
+    }
+    for fall in schadenfaelle or []:
+        freigabe = normalize_freigabe_status(fall.get("versicherung_freigabe_status"))
+        if freigabe != "freigegeben" and not fall.get("schaden_eigenauftrag"):
+            buckets["warte_freigabe"].append(fall)
+        if freigabe == "rueckfrage":
+            buckets["rueckfragen"].append(fall)
+        teile = list_versicherung_teile(fall.get("id"))
+        if any(teil["status"] not in {"geliefert", "nicht_noetig"} for teil in teile):
+            buckets["teile"].append({**fall, "offene_teile": [teil for teil in teile if teil["status"] not in {"geliefert", "nicht_noetig"}]})
+        if fall.get("abrechnung_status") in {"offen", "kuerzung", "nachforderung"} and freigabe == "freigegeben":
+            buckets["abrechnung"].append(fall)
+        if clean_text(fall.get("netzwerk_zuteilung_status")):
+            buckets["zuteilung"].append(fall)
+    return buckets
 
 
 def versicherung_requirement_item(key, label, status, detail, action="", required="", anchor=""):
@@ -17854,6 +19944,7 @@ def maybe_auto_advance_versicherung_after_documents(auftrag_id, quelle="autohaus
         """
         UPDATE auftraege
         SET versicherung_freigabe_status='in_pruefung',
+            schaden_station='versicherung_pruefung',
             geaendert_am=?
         WHERE id=?
         """,
@@ -17909,17 +20000,245 @@ def build_versicherung_freigabe_zusammenfassung(auftrag, dateien=None, chat_nach
     }
 
 
-def kunden_status_timeline(auftrag, log=None):
+def prozess_item_lookup(prozess):
+    return {item.get("key"): item for item in (prozess or {}).get("items", [])}
+
+
+def prozess_item_resolved(prozess, key):
+    return bool(prozess_item_lookup(prozess).get(key, {}).get("resolved"))
+
+
+def versicherung_teile_geklaert(auftrag, teile=None, prozess=None):
+    if not auftrag:
+        return False
+    teile = teile if teile is not None else list_versicherung_teile(auftrag.get("id"))
+    if teile:
+        return not any(teil["status"] in {"offen", "angefragt", "bestellt", "rueckstand"} for teil in teile)
+    return prozess_item_resolved(prozess, "teile")
+
+
+def kunden_terminfreigabe_info(auftrag, teile=None, prozess=None):
+    auftrag = auftrag or {}
+    freigabe_ok = (
+        normalize_freigabe_status(auftrag.get("versicherung_freigabe_status")) == "freigegeben"
+        or bool(auftrag.get("schaden_eigenauftrag"))
+        or not auftrag.get("versicherung_id")
+    )
+    teile_ok = True if not auftrag.get("versicherung_id") else versicherung_teile_geklaert(auftrag, teile=teile, prozess=prozess)
+    termin_gesetzt = bool(clean_text(auftrag.get("annahme_datum")))
+    can_request = bool(freigabe_ok and teile_ok and not termin_gesetzt and int(auftrag.get("status") or 1) < 2)
+    if termin_gesetzt:
+        label = "Termin ist abgestimmt"
+        detail = "Der Bringtermin ist bereits hinterlegt."
+    elif not freigabe_ok:
+        label = "Wartet auf Versicherungsfreigabe"
+        detail = "Der Reparaturtermin wird erst nach der Freigabe geöffnet."
+    elif not teile_ok:
+        label = "Wartet auf Teileklärung"
+        detail = "Sobald die Teilelage geklärt ist, wird die Terminvereinbarung freigeschaltet."
+    else:
+        label = "Termin vereinbaren"
+        detail = "Der Kunde kann jetzt einen Wunschtermin senden. Die Werkstatt bestätigt den Termin danach."
+    return {
+        "can_request": can_request,
+        "freigabe_ok": freigabe_ok,
+        "teile_ok": teile_ok,
+        "termin_gesetzt": termin_gesetzt,
+        "label": label,
+        "detail": detail,
+    }
+
+
+def build_versicherung_schadenprotokoll(auftrag, dateien=None, prozess=None, teile=None):
+    if not auftrag or not auftrag.get("versicherung_id"):
+        return None
+    dateien = dateien if dateien is not None else list_dateien(auftrag.get("id"))
+    prozess = prozess if prozess is not None else build_versicherung_prozess(auftrag, dateien=dateien, context="admin")
+    teile = teile if teile is not None else list_versicherung_teile(auftrag.get("id"))
+    freigabe = normalize_freigabe_status(auftrag.get("versicherung_freigabe_status"))
+    station_rank = schaden_station_rank(auftrag.get("schaden_station"))
+    termininfo = kunden_terminfreigabe_info(auftrag, teile=teile, prozess=prozess)
+    versicherung_gemeldet = bool(
+        freigabe in {"gemeldet", "in_pruefung", "rueckfrage", "freigegeben", "abgelehnt"}
+        or clean_text(auftrag.get("versicherung_sendefreigabe_am"))
+    )
+    besichtigung_datum = clean_text(auftrag.get("schaden_besichtigung_datum"))
+    gutachten_ok = prozess_item_resolved(prozess, "gutachten")
+    fotos_ok = prozess_item_resolved(prozess, "schadenfotos")
+    ready_for_send = bool((prozess or {}).get("ready_for_send"))
+    teile_ok = termininfo["teile_ok"]
+    liefertermine = [teil["liefertermin"] for teil in teile if clean_text(teil.get("liefertermin"))]
+    werkstatt_started = station_rank >= schaden_station_rank("fahrzeug_in_werkstatt") or int(auftrag.get("status") or 1) >= 3
+    kontakt_kanal = normalize_kundenkontakt_kanal(auftrag.get("kundenkontakt_kanal"))
+    kontakt_meta = KUNDENKONTAKT_KANAELE[kontakt_kanal]
+    telefon = clean_text(auftrag.get("kontakt_telefon"))
+    if kontakt_kanal == "telefon":
+        kontakt_detail = "Kunde nutzt keinen QR-Code. Versicherung gibt die Telefonnummer der Werkstatt weiter; Termin wird telefonisch vereinbart und manuell nachgetragen."
+    elif kontakt_kanal == "beides":
+        kontakt_detail = "QR-Code wird angeboten, telefonisch bleibt als Fallback möglich. Wenn der Kunde anruft, trägt die Werkstatt den Termin manuell nach."
+    else:
+        kontakt_detail = "Kunde kann den QR-Code oder Statuslink nutzen. Telefonische Abstimmung bleibt bei Bedarf möglich."
+    if telefon:
+        kontakt_detail = f"{kontakt_detail} Kundenkontakt: {telefon}."
+
+    def step(titel, detail, state, owner="Werkstatt"):
+        farbe = {
+            "done": "success",
+            "active": "primary",
+            "waiting": "secondary",
+            "warning": "warning",
+            "danger": "danger",
+        }.get(state, "secondary")
+        label = {
+            "done": "Erledigt",
+            "active": "Läuft",
+            "waiting": "Wartet",
+            "warning": "Prüfen",
+            "danger": "Blockiert",
+        }.get(state, "Wartet")
+        return {
+            "titel": titel,
+            "detail": detail,
+            "state": state,
+            "farbe": farbe,
+            "label": label,
+            "owner": owner,
+        }
+
+    schritte = [
+        step(
+            "1. Zuteilung durch Versicherung",
+            clean_text(auftrag.get("netzwerk_zuteilung_status")) or "Versicherung kann den Schadenfall direkt an Gärtner weiterleiten.",
+            "done" if clean_text(auftrag.get("netzwerk_zuteilung_status")) or freigabe != "offen" else "active",
+            "Versicherung",
+        ),
+        step(
+            "2. Kunde kontaktieren",
+            (
+                f"Begutachtung/Gutachten: {besichtigung_datum}. {kontakt_detail}"
+                if besichtigung_datum
+                else f"Termin zur Besichtigung, Anlieferung oder Abholung mit dem Kunden abstimmen. {kontakt_detail}"
+            ),
+            "done" if besichtigung_datum else "active",
+            "Werkstatt",
+        ),
+        step(
+            "3. Fahrzeug zur Begutachtung",
+            f"Übergabe: {auftrag.get('transport_meta', TRANSPORT_ARTEN['standard'])['label']}. Fahrbereit: {auftrag.get('schaden_fahrbereit_label', 'Noch offen')}.",
+            "done" if station_rank >= schaden_station_rank("kalkulation") or fotos_ok else ("active" if besichtigung_datum else "waiting"),
+            "Kunde/Werkstatt",
+        ),
+        step(
+            "4. Begutachtung und Dienstleister",
+            f"Gutachter/Dienstleister: {auftrag.get('schaden_gutachter_label', 'Noch offen')}. Kalkulation oder Gutachten wird in der Akte gesammelt.",
+            "done" if gutachten_ok else ("active" if besichtigung_datum or auftrag.get("schaden_gutachter") == "ja" else "waiting"),
+            "Werkstatt",
+        ),
+        step(
+            "5. Unterlagenpaket an Versicherung",
+            (
+                "Alle Pflichtpunkte fuer den Versand sind erledigt."
+                if ready_for_send
+                else "Pflichtunterlagen, Schadenbilder, FIN/Fahrzeugschein, Kalkulation und Abtretung sammeln."
+            ),
+            "done" if ready_for_send and versicherung_gemeldet else ("active" if ready_for_send else "warning"),
+            "Werkstatt",
+        ),
+        step(
+            "6. Versicherungsprüfung",
+            VERSICHERUNG_FREIGABE_STATUS[freigabe]["label"],
+            (
+                "done"
+                if freigabe == "freigegeben"
+                else "danger"
+                if freigabe == "abgelehnt"
+                else "warning"
+                if freigabe == "rueckfrage"
+                else "active"
+                if freigabe in {"gemeldet", "in_pruefung"}
+                else "waiting"
+            ),
+            "Versicherung",
+        ),
+        step(
+            "7. Rückfrage / Nachtrag",
+            "Fehlende Unterlagen oder Nachtrag hochladen, danach wieder zur Prüfung."
+            if freigabe == "rueckfrage"
+            else "Nur aktiv, wenn die Versicherung Unterlagen nachfordert oder nach Demontage ein Zusatzschaden sichtbar wird.",
+            "active" if freigabe == "rueckfrage" else ("done" if prozess_item_resolved(prozess, "kalkulation_nacharbeit") or prozess_item_resolved(prozess, "nachtrag") else "waiting"),
+            "Werkstatt",
+        ),
+        step(
+            "8. Teilebestellung und Lieferdatum",
+            (
+                f"Lieferdatum: {', '.join(liefertermine)}."
+                if liefertermine
+                else "Nach Freigabe Teile bestellen, Rueckstand und Lieferschein dokumentieren."
+            ),
+            "done" if teile_ok and freigabe == "freigegeben" else ("active" if freigabe == "freigegeben" else "waiting"),
+            "Werkstatt/Lieferant",
+        ),
+        step(
+            "9. Reparaturtermin und Ersatzmobilität",
+            (
+                f"Reparaturtermin: {clean_text(auftrag.get('annahme_datum'))}. Mietwagen/Ersatzfahrzeug: {auftrag.get('schaden_mietwagen_label', 'Noch offen')}."
+                if clean_text(auftrag.get("annahme_datum"))
+                else f"Nach Lieferdatum mit Kunde Reparaturtermin abstimmen. Mietwagen/Ersatzfahrzeug: {auftrag.get('schaden_mietwagen_label', 'Noch offen')}."
+            ),
+            "done" if clean_text(auftrag.get("annahme_datum")) and freigabe == "freigegeben" else ("active" if termininfo["can_request"] or (freigabe == "freigegeben" and teile_ok) else "waiting"),
+            "Kunde/Werkstatt",
+        ),
+        step(
+            "10. Reparatur, Fertigbilder, Abrechnung",
+            "Reparaturdurchlauf, Teilebelege, Endkontrolle, Fertigbilder und Rechnung bleiben fuer die Versicherung nachvollziehbar.",
+            "done" if int(auftrag.get("status") or 1) >= 5 else ("active" if werkstatt_started else "waiting"),
+            "Werkstatt",
+        ),
+    ]
+    return {
+        "schritte": schritte,
+        "mobilitaet": {
+            "fahrbereit": auftrag.get("schaden_fahrbereit_label", "Noch offen"),
+            "abholung": auftrag.get("schaden_abschleppen_label", "Noch offen"),
+            "mietwagen": auftrag.get("schaden_mietwagen_label", "Noch offen"),
+            "gutachter": auftrag.get("schaden_gutachter_label", "Noch offen"),
+            "transport": auftrag.get("transport_meta", TRANSPORT_ARTEN["standard"])["label"],
+            "besichtigung": besichtigung_datum or "Noch offen",
+            "kontakt": telefon or "Noch offen",
+            "kontaktweg": kontakt_meta["label"],
+            "kontakt_hinweis": kontakt_meta["hinweis"],
+        },
+        "send_blocker": (prozess or {}).get("send_blocker", []),
+    }
+
+
+def kunden_status_timeline(auftrag, log=None, prozess=None, teile=None):
     auftrag = auftrag or {}
     freigabe = normalize_freigabe_status(auftrag.get("versicherung_freigabe_status"))
     status = int(auftrag.get("status") or 1)
     has_insurance = bool(auftrag.get("versicherung_id"))
+    prozess_items = prozess_item_lookup(prozess)
+    terminfreigabe = kunden_terminfreigabe_info(auftrag, teile=teile, prozess=prozess)
+    station_rank = schaden_station_rank(auftrag.get("schaden_station"))
     steps = []
 
     def add(label, detail, state):
         steps.append({"label": label, "detail": detail, "state": state})
 
-    add("Schaden aufgenommen", "Die Schadenakte ist angelegt.", "done")
+    aufnahme_ok = bool(
+        prozess_items.get("grunddaten", {}).get("resolved")
+        or (clean_text(auftrag.get("kunde_name")) and clean_text(auftrag.get("fahrzeug")))
+    )
+    add(
+        "Schaden aufgenommen",
+        "Fahrzeug, Schaden, Mobilität, Fotos und QR-Status werden in einer Akte geführt.",
+        "done" if aufnahme_ok else "active",
+    )
+    add(
+        "Kalkulation in Aufnahme",
+        "Gutachten, DAT/GT-Kalkulation oder Kostenvoranschlag bilden direkt die Grundlage für die Versicherung.",
+        "done" if prozess_items.get("gutachten", {}).get("resolved") else ("active" if aufnahme_ok else "waiting"),
+    )
     if has_insurance:
         if freigabe == "rueckfrage":
             add("Versicherung prüft", "Es gibt eine Rückfrage, die gerade geklärt wird.", "active")
@@ -17927,32 +20246,69 @@ def kunden_status_timeline(auftrag, log=None):
             add("Versicherung prüft", "Die Prüfung ist abgeschlossen.", "done")
             add("Freigabe erteilt", "Die Reparaturfreigabe liegt vor.", "done")
         elif freigabe == "abgelehnt":
-            add("Versicherung prüft", "Der Fall ist noch nicht freigegeben.", "active")
+            add("Freigabe / Sperre", "Der Fall ist noch gesperrt oder nicht freigegeben.", "active")
         elif freigabe in {"gemeldet", "in_pruefung"}:
             add("Versicherung prüft", "Die Versicherung prüft die Unterlagen.", "active")
         else:
             add("Versicherung vorbereiten", "Die Schadenmeldung wird vorbereitet.", "active")
-
-    repair_steps = (
-        (2, "Reparatur geplant", "Das Fahrzeug ist für die Werkstatt eingeplant."),
-        (3, "In Arbeit", "Die Reparatur läuft."),
-        (4, "Abholbereit", "Das Fahrzeug ist fertig oder kurz vor der Übergabe."),
-        (5, "Übergeben", "Das Fahrzeug wurde zurückgegeben."),
-    )
-    for step_status, label, detail in repair_steps:
-        if status > step_status:
-            state = "done"
-        elif status == step_status:
-            state = "active"
+        if freigabe == "rueckfrage":
+            add("Nachtrag / Neuberechnung", "Kalkulation oder Unterlagen werden nachgearbeitet und danach erneut geprüft.", "active")
+        elif prozess_item_resolved(prozess, "kalkulation_nacharbeit") or prozess_item_resolved(prozess, "nachtrag"):
+            add("Nachtrag / Neuberechnung", "Nachtrag oder Nacharbeit ist dokumentiert.", "done")
         else:
-            state = "waiting"
-        add(label, detail, state)
+            add("Nachtrag / Neuberechnung", "Nur nötig, wenn nach Demontage oder Prüfung etwas nachgereicht werden muss.", "waiting")
+
+    if terminfreigabe["teile_ok"]:
+        add("Teile geklärt", "Benötigte Teile sind geklärt oder nicht erforderlich.", "done")
+    elif freigabe == "freigegeben" or auftrag.get("schaden_eigenauftrag"):
+        add("Teile klären", "Teile werden bestellt, Lieferzeiten geprüft und Rückstände dokumentiert.", "active")
+    else:
+        add("Teile klären", "Dieser Schritt beginnt nach der Freigabe.", "waiting")
+
+    if terminfreigabe["termin_gesetzt"]:
+        add("Termin vereinbart", f"Bringtermin: {clean_text(auftrag.get('annahme_datum'))}.", "done")
+    elif terminfreigabe["can_request"]:
+        add("Termin vereinbaren", "Die Terminabstimmung ist jetzt möglich.", "active")
+    else:
+        add("Termin vereinbaren", terminfreigabe["detail"], "waiting")
+
+    werkstatt_started = status >= 3 or station_rank >= schaden_station_rank("fahrzeug_in_werkstatt")
+    add(
+        "Fahrzeug in der Werkstatt",
+        f"Aktuelle Station: {auftrag.get('schaden_station_label', 'Schadensaufnahme')}.",
+        "done" if status >= 4 else ("active" if werkstatt_started else "waiting"),
+    )
+    add(
+        "Reparatur dokumentiert",
+        "Instandsetzung, Teilebelege, Endkontrolle und Fertigbilder werden für die Abrechnung festgehalten.",
+        "done" if (prozess_item_resolved(prozess, "reparatur_doku") and prozess_item_resolved(prozess, "fertigbilder")) or status >= 4 else ("active" if werkstatt_started else "waiting"),
+    )
+    add(
+        "Abholung / Übergabe",
+        "Das Fahrzeug ist fertig oder wurde bereits zurückgegeben.",
+        "done" if status >= 5 else ("active" if status >= 4 else "waiting"),
+    )
     return steps
 
 
 def set_versicherung_freigabe_status(auftrag_id, status, hinweis="", quelle="versicherung"):
     status = normalize_freigabe_status(status)
+    target_station = ""
+    if status == "freigegeben":
+        target_station = "freigegeben"
+    elif status == "rueckfrage":
+        target_station = "kalkulation_nacharbeit"
+    elif status == "abgelehnt":
+        target_station = "sperre"
+    elif status in {"gemeldet", "in_pruefung"}:
+        target_station = "versicherung_pruefung"
+    elif status == "zugeteilt":
+        target_station = "aufnahme"
+    elif status == "vorbereitet":
+        target_station = "kalkulation"
     db = get_db()
+    row = db.execute("SELECT schaden_station FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
+    current_station = normalize_schaden_station(row["schaden_station"] if row else "")
     db.execute(
         """
         UPDATE auftraege
@@ -17962,6 +20318,17 @@ def set_versicherung_freigabe_status(auftrag_id, status, hinweis="", quelle="ver
         """,
         (status, now_str(), auftrag_id),
     )
+    if target_station:
+        should_move_station = (
+            status in {"rueckfrage", "abgelehnt"}
+            or current_station in {"warte_freigabe", "kalkulation_nacharbeit", "sperre"}
+            or schaden_station_rank(current_station) < schaden_station_rank(target_station)
+        )
+        if should_move_station:
+            db.execute(
+                "UPDATE auftraege SET schaden_station=?, geaendert_am=? WHERE id=?",
+                (target_station, now_str(), auftrag_id),
+            )
     db.commit()
     db.close()
     auftrag = get_auftrag(auftrag_id)
@@ -20481,6 +22848,7 @@ def admin_versicherung():
         "versicherung_admin.html",
         schadenfaelle=aktive,
         archivierte_schadenfaelle=archivierte,
+        versicherung_cockpit=build_versicherung_tages_cockpit(aktive),
         versicherungen=list_versicherungen(),
         freigabe_status=VERSICHERUNG_FREIGABE_STATUS,
     )
@@ -20596,6 +22964,204 @@ def admin_versicherung_schaden_abtretungserklaerung_pdf(auftrag_id):
     )
 
 
+def request_prozess_note(prozess_key):
+    return clean_text(
+        request.form.get(f"prozess_notiz_{prozess_key}")
+        or request.form.get("prozess_notiz")
+        or request.form.get("upload_notiz")
+    )
+
+
+def request_prozess_files(prozess_key, item):
+    files = request.files.getlist(f"prozess_dateien_{prozess_key}") or request.files.getlist("dateien")
+    allowed = get_allowed_uploads(files)
+    if item.get("image_only"):
+        allowed = [
+            file
+            for file in allowed
+            if pathlib.Path(secure_filename(file.filename or "")).suffix.lower() in IMAGE_EXTENSIONS
+        ]
+    return allowed
+
+
+def handle_versicherung_prozess_upload(auftrag_id, prozess_key, quelle, redirect_target):
+    item = get_versicherung_prozess_item(prozess_key)
+    auftrag = get_auftrag(auftrag_id)
+    if not item or not auftrag or not auftrag.get("versicherung_id"):
+        abort(404)
+    if item.get("manual_only"):
+        flash("Dieser Punkt wird ohne Datei als erledigt oder nicht nötig markiert.", "warning")
+        return redirect(redirect_target)
+    files = request_prozess_files(item["key"], item)
+    if not files:
+        flash("Bitte für diesen Prozesspunkt zuerst eine passende Datei auswählen.", "warning")
+        return redirect(redirect_target)
+    note = request_prozess_note(item["key"])
+    upload_note = f"{item['label']}: {note}" if note else item["label"]
+    upload_result = save_uploads(
+        auftrag_id,
+        files,
+        quelle,
+        clean_text(item.get("upload_category")) or "standard",
+        upload_note=upload_note,
+        analyze=bool(item.get("analyze", True)),
+        prozess_key=item["key"],
+    )
+    saved = flash_upload_analysis_result(upload_result, f"{item['label']} hochgeladen.")
+    if saved:
+        set_versicherung_checkpunkt(
+            auftrag_id,
+            item["key"],
+            "erledigt",
+            note or f"{saved} Datei(en) hochgeladen.",
+            quelle=quelle,
+        )
+    schedule_change_backup("versicherung-prozess-upload")
+    return redirect(redirect_target)
+
+
+def handle_versicherung_prozess_status(auftrag_id, prozess_key, quelle, redirect_target):
+    item = get_versicherung_prozess_item(prozess_key)
+    auftrag = get_auftrag(auftrag_id)
+    if not item or not auftrag or not auftrag.get("versicherung_id"):
+        abort(404)
+    status = normalize_versicherung_prozess_status(
+        request.form.get(f"prozess_status_{item['key']}") or request.form.get("prozess_status")
+    )
+    note = request_prozess_note(item["key"])
+    set_versicherung_checkpunkt(auftrag_id, item["key"], status, note, quelle=quelle)
+    label = VERSICHERUNG_PROZESS_STATUS[status]["label"]
+    flash(f"{item['label']} wurde auf \"{label}\" gesetzt.", "success")
+    schedule_change_backup("versicherung-prozess-status")
+    return redirect(redirect_target)
+
+
+@app.route("/admin/versicherung/schaden/<int:auftrag_id>/prozess/<prozess_key>/upload", methods=["POST"])
+@admin_required
+def admin_versicherung_prozess_upload(auftrag_id, prozess_key):
+    return handle_versicherung_prozess_upload(
+        auftrag_id,
+        prozess_key,
+        "intern",
+        url_for("admin_versicherung_schaden_detail", auftrag_id=auftrag_id) + "#versicherung-prozess",
+    )
+
+
+@app.route("/admin/versicherung/schaden/<int:auftrag_id>/prozess/<prozess_key>/status", methods=["POST"])
+@admin_required
+def admin_versicherung_prozess_status(auftrag_id, prozess_key):
+    return handle_versicherung_prozess_status(
+        auftrag_id,
+        prozess_key,
+        "werkstatt",
+        url_for("admin_versicherung_schaden_detail", auftrag_id=auftrag_id) + "#versicherung-prozess",
+    )
+
+
+@app.route("/admin/versicherung/schaden/<int:auftrag_id>/steuerung", methods=["POST"])
+@admin_required
+def admin_versicherung_steuerung_speichern(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or not auftrag.get("versicherung_id"):
+        abort(404)
+    form = request.form
+    station = normalize_schaden_station(form.get("schaden_station"))
+    if normalize_freigabe_status(auftrag.get("versicherung_freigabe_status")) != "freigegeben" and not form.get("schaden_eigenauftrag"):
+        if station not in {"aufnahme", "kalkulation", "warte_unterlagen", "versicherung_pruefung", "warte_freigabe", "kalkulation_nacharbeit", "sperre"}:
+            station = "warte_freigabe"
+            flash("Vor Versicherungsfreigabe bleibt der Fall in Prüfung oder Nacharbeit.", "warning")
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET schaden_fahrbereit=?,
+            schaden_gutachter=?,
+            schaden_anwalt=?,
+            schaden_leasing=?,
+            schaden_mietwagen=?,
+            schaden_abschleppen=?,
+            schaden_vorsteuerabzug=?,
+            schaden_selbstbeteiligung=?,
+            schaden_eigenauftrag=?,
+            schaden_station=?,
+            kosten_gutachten_betrag=?,
+            kosten_werkstatt_betrag=?,
+            kosten_freigabe_betrag=?,
+            kosten_rechnung_betrag=?,
+            kosten_kuerzung_betrag=?,
+            abrechnung_status=?,
+            netzwerk_zuteilung_status=?,
+            geaendert_am=?
+        WHERE id=?
+        """,
+        (
+            normalize_steuerung_option(form.get("schaden_fahrbereit")),
+            normalize_steuerung_option(form.get("schaden_gutachter")),
+            normalize_steuerung_option(form.get("schaden_anwalt")),
+            normalize_steuerung_option(form.get("schaden_leasing")),
+            normalize_steuerung_option(form.get("schaden_mietwagen")),
+            normalize_steuerung_option(form.get("schaden_abschleppen")),
+            normalize_steuerung_option(form.get("schaden_vorsteuerabzug")),
+            clean_text(form.get("schaden_selbstbeteiligung")),
+            1 if form.get("schaden_eigenauftrag") else 0,
+            station,
+            clean_text(form.get("kosten_gutachten_betrag")),
+            clean_text(form.get("kosten_werkstatt_betrag")),
+            clean_text(form.get("kosten_freigabe_betrag")),
+            clean_text(form.get("kosten_rechnung_betrag")),
+            clean_text(form.get("kosten_kuerzung_betrag")),
+            normalize_abrechnung_status(form.get("abrechnung_status")),
+            clean_text(form.get("netzwerk_zuteilung_status")),
+            now_str(),
+            auftrag_id,
+        ),
+    )
+    db.commit()
+    db.close()
+    freigabe_ok = normalize_freigabe_status(get_auftrag(auftrag_id).get("versicherung_freigabe_status")) == "freigegeben"
+    if clean_text(form.get("teil_bezeichnung")) and freigabe_ok:
+        add_versicherung_teil(
+            auftrag_id,
+            form.get("teil_bezeichnung"),
+            status=form.get("teil_status"),
+            liefertermin=form.get("teil_liefertermin"),
+            notiz=form.get("teil_notiz"),
+        )
+        flash("Schadensteuerung gespeichert und Teil ergänzt.", "success")
+    elif clean_text(form.get("teil_bezeichnung")):
+        flash("Schadensteuerung gespeichert. Teilebestellung wird erst nach Versicherungsfreigabe freigeschaltet.", "warning")
+    else:
+        flash("Schadensteuerung gespeichert.", "success")
+    schedule_change_backup("versicherung-steuerung")
+    return redirect(url_for("admin_versicherung_schaden_detail", auftrag_id=auftrag_id) + "#schadensteuerung")
+
+
+@app.route("/admin/versicherung/schaden/<int:auftrag_id>/teil/<int:teil_id>", methods=["POST"])
+@admin_required
+def admin_versicherung_teil_update(auftrag_id, teil_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or not auftrag.get("versicherung_id"):
+        abort(404)
+    if normalize_freigabe_status(auftrag.get("versicherung_freigabe_status")) != "freigegeben":
+        flash("Teilebestellung wird erst nach Versicherungsfreigabe bearbeitet.", "warning")
+        return redirect(url_for("admin_versicherung_schaden_detail", auftrag_id=auftrag_id) + "#schadensteuerung")
+    aktion = clean_text(request.form.get("aktion"))
+    if aktion == "loeschen":
+        delete_versicherung_teil(auftrag_id, teil_id)
+        flash("Teil entfernt.", "success")
+    else:
+        update_versicherung_teil(
+            auftrag_id,
+            teil_id,
+            request.form.get(f"teil_status_{teil_id}") or request.form.get("teil_status"),
+            liefertermin=request.form.get(f"teil_liefertermin_{teil_id}") or request.form.get("teil_liefertermin"),
+            notiz=request.form.get(f"teil_notiz_{teil_id}") or request.form.get("teil_notiz"),
+        )
+        flash("Teilstatus gespeichert.", "success")
+    schedule_change_backup("versicherung-teil")
+    return redirect(url_for("admin_versicherung_schaden_detail", auftrag_id=auftrag_id) + "#schadensteuerung")
+
+
 @app.route("/admin/versicherung/schaden/<int:auftrag_id>", methods=["GET", "POST"])
 @admin_required
 def admin_versicherung_schaden_detail(auftrag_id):
@@ -20701,6 +23267,15 @@ def admin_versicherung_schaden_detail(auftrag_id):
     aufgaben = list_versicherung_aufgaben(auftrag_id, include_done=True)
     pflichtunterlagen = versicherung_pflichtunterlagen_status(auftrag, dateien)
     freigabe_zusammenfassung = build_versicherung_freigabe_zusammenfassung(auftrag, dateien, chat_nachrichten)
+    versicherung_prozess = build_versicherung_prozess(auftrag, dateien, context="admin")
+    versicherung_teile = list_versicherung_teile(auftrag_id)
+    versicherung_steuerung = build_versicherung_steuerung(
+        auftrag,
+        dateien=dateien,
+        teile=versicherung_teile,
+        chat_nachrichten=chat_nachrichten,
+        prozess=versicherung_prozess,
+    )
     mark_chat_gelesen(auftrag_id, "admin")
     versicherung = get_versicherung(auftrag.get("versicherung_id"))
     anschreiben = clean_text(auftrag.get("versicherung_anschreiben")) or build_versicherung_anschreiben(
@@ -20721,8 +23296,81 @@ def admin_versicherung_schaden_detail(auftrag_id):
         versicherung_aufgaben=aufgaben,
         pflichtunterlagen=pflichtunterlagen,
         freigabe_zusammenfassung=freigabe_zusammenfassung,
+        versicherung_prozess=versicherung_prozess,
+        versicherung_steuerung=versicherung_steuerung,
+        versicherung_teile=versicherung_teile,
+        steuerung_optionen=SCHADEN_STEUERUNG_OPTIONEN,
+        kanban_stationen=SCHADEN_KANBAN_STATIONEN,
+        teile_status=SCHADEN_TEILE_STATUS,
+        abrechnung_status=SCHADEN_ABRECHNUNG_STATUS,
         gt_motive_payload=gt_motive_ready_payload(auftrag, versicherung),
         anschreiben=anschreiben,
+    )
+
+
+@app.route("/admin/versicherung/schaden/<int:auftrag_id>/vorschau/versicherung")
+@admin_required
+def admin_versicherung_schaden_vorschau_versicherung(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or not auftrag.get("versicherung_id"):
+        abort(404)
+    versicherung = get_versicherung(auftrag.get("versicherung_id"))
+    if not versicherung:
+        abort(404)
+    dateien = list_dateien(auftrag_id)
+    chat_nachrichten = list_chat_nachrichten(auftrag_id)
+    prozess = build_versicherung_prozess(auftrag, dateien, context="admin")
+    teile = list_versicherung_teile(auftrag_id)
+    return render_template(
+        "versicherung_auftrag.html",
+        versicherung=versicherung,
+        auftrag=auftrag,
+        dateien=dateien,
+        log=get_status_log(auftrag_id),
+        chat_nachrichten=chat_nachrichten,
+        versicherung_aufgaben=list_versicherung_aufgaben(auftrag_id, include_done=True),
+        pflichtunterlagen=versicherung_pflichtunterlagen_status(auftrag, dateien),
+        freigabe_zusammenfassung=build_versicherung_freigabe_zusammenfassung(auftrag, dateien, chat_nachrichten),
+        schadenprotokoll=build_versicherung_schadenprotokoll(auftrag, dateien=dateien, prozess=prozess, teile=teile),
+        schaden_zonen=FAHRZEUG_SCHADEN_ZONEN,
+        rollen_vorschau=True,
+    )
+
+
+@app.route("/admin/versicherung/<slug>/zuteilung/vorschau")
+@admin_required
+def admin_versicherung_zuteilung_vorschau(slug):
+    versicherung = get_versicherung_by_slug(slug)
+    if not versicherung:
+        abort(404)
+    return render_template(
+        "versicherung_zuteilung_neu.html",
+        versicherung=versicherung,
+        schadenarten=SCHADENARTEN,
+        steuerung_optionen=SCHADEN_STEUERUNG_OPTIONEN,
+        transport_arten=TRANSPORT_ARTEN,
+        kundenkontakt_kanaele=KUNDENKONTAKT_KANAELE,
+        rollen_vorschau=True,
+        vorschau_daten={
+            "kunde_name": "Max Mustermann",
+            "versicherungsnehmer": "Max Mustermann",
+            "kontakt_telefon": "0171 1234567",
+            "kundenkontakt_kanal": "beides",
+            "besichtigung_datum": date.today().isoformat(),
+            "transport_art": "standard",
+            "schaden_fahrbereit": "ja",
+            "schaden_abschleppen": "nein",
+            "schaden_mietwagen": "ja",
+            "schaden_gutachter": "ja",
+            "schadenart": "haftpflicht",
+            "fahrzeug": "VW Golf 8",
+            "kennzeichen": "MOS-V 2026",
+            "fin_nummer": "WVWZZZCDZPW123456",
+            "schaden_nummer": "AZ-2026-0417",
+            "versicherung_police": "POL-849201",
+            "beschreibung": "Kunde hat Frontschaden gemeldet. Fahrzeug ist fahrbereit, Stoßfänger vorne und Kotflügel links betroffen.",
+            "hinweis": "Bitte Kunden zur Besichtigung kontaktieren und Kundenstatus-QR bereitstellen.",
+        },
     )
 
 
@@ -20740,6 +23388,7 @@ def admin_versicherung_schaden_melden(auftrag_id):
         """
         UPDATE auftraege
         SET versicherung_freigabe_status='gemeldet',
+            schaden_station='versicherung_pruefung',
             versicherung_email=?,
             versicherung_email_cc=?,
             versicherung_anschreiben=?,
@@ -21289,6 +23938,8 @@ def admin_emails():
         emails=list_werkstatt_emails("aktiv", limit=200),
         api_token_configured=bool(get_werkstatt_email_api_token()),
         imap_status=werkstatt_imap_status(),
+        schaden_mail=schaden_mail_status(),
+        mail_setup=mail_setup_status(),
     )
 
 
@@ -22101,6 +24752,79 @@ def admin_fertigbilder_upload(auftrag_id):
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
 
+@app.route("/admin/auftrag/<int:auftrag_id>/kalkulation", methods=["GET", "POST"])
+@admin_required
+def admin_auftrag_kalkulation(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+
+    if request.method == "POST":
+        aktion = clean_text(request.form.get("aktion")) or "speichern"
+        if clean_text(request.form.get("schaden_zonen_form")) == "1":
+            update_auftrag_schaden_zonen(auftrag_id, request.form)
+            auftrag = get_auftrag(auftrag_id)
+
+        if aktion == "neu_vorschlagen":
+            kalkulation = save_auftrag_kalkulation(auftrag_id, build_kalkulation_vorschlag(auftrag))
+            flash("Kalkulationsvorschlag neu aus Schadenkarte und Bauteilen aufgebaut.", "success")
+            return redirect(url_for("admin_auftrag_kalkulation", auftrag_id=auftrag_id))
+
+        current = load_auftrag_kalkulation(auftrag)
+        kalkulation = parse_kalkulation_form(request.form, current)
+        kalkulation["fahrzeug_snapshot"] = clean_text(auftrag.get("fahrzeug"))
+        kalkulation["fin_snapshot"] = clean_text(auftrag.get("fin_nummer")).upper()
+        kalkulation["kennzeichen_snapshot"] = clean_text(auftrag.get("kennzeichen")).upper()
+        kalkulation = save_auftrag_kalkulation(auftrag_id, kalkulation)
+
+        if aktion == "angebot_uebernehmen":
+            angebot_preis = kalkulation["summen"]["netto_label"]
+            angebot_text = kalkulation_offer_text(kalkulation)
+            db = get_db()
+            db.execute(
+                """
+                UPDATE auftraege
+                SET werkstatt_angebot_preis=?,
+                    werkstatt_angebot_text=?,
+                    werkstatt_angebot_notiz=?,
+                    angebot_status=CASE WHEN angebotsphase=1 AND angebot_abgesendet=1 THEN 'angebot_abgegeben' ELSE angebot_status END,
+                    werkstatt_angebot_am=?,
+                    geaendert_am=?
+                WHERE id=?
+                """,
+                (
+                    angebot_preis,
+                    angebot_text,
+                    "Aus interner Vorkalkulation übernommen. Ersatzteilpreise und verdeckte Schäden vorbehalten.",
+                    now_str(),
+                    now_str(),
+                    auftrag_id,
+                ),
+            )
+            db.commit()
+            db.close()
+            add_benachrichtigung(
+                auftrag_id,
+                "Kalkulation übernommen",
+                f"Die Werkstatt hat eine Vorkalkulation über {angebot_preis} als Angebot vorbereitet.",
+            )
+            flash("Kalkulation gespeichert und als Werkstatt-Angebot übernommen.", "success")
+        else:
+            flash("Kalkulation gespeichert.", "success")
+        return redirect(url_for("admin_auftrag_kalkulation", auftrag_id=auftrag_id))
+
+    kalkulation = load_auftrag_kalkulation(auftrag)
+    return render_template(
+        "kalkulation.html",
+        auftrag=auftrag,
+        kalkulation=kalkulation,
+        gruppen=KALKULATION_GRUPPEN,
+        status_optionen=KALKULATION_STATUS,
+        schaden_zonen=FAHRZEUG_SCHADEN_ZONEN,
+        detail_url=url_for("auftrag_detail", auftrag_id=auftrag_id),
+    )
+
+
 @app.route("/admin/status/<int:auftrag_id>/<int:neuer_status>", methods=["POST"])
 @admin_required
 def status_update(auftrag_id, neuer_status):
@@ -22764,14 +25488,114 @@ def kunden_status(token):
         abort(404)
     dateien = list_dateien(auftrag["id"])
     chat_nachrichten = list_chat_nachrichten(auftrag["id"])
+    versicherung_prozess = build_versicherung_prozess(auftrag, dateien, context="kunde") if auftrag.get("versicherung_id") else None
+    versicherung_teile = list_versicherung_teile(auftrag["id"]) if auftrag.get("versicherung_id") else []
+    terminfreigabe = kunden_terminfreigabe_info(auftrag, teile=versicherung_teile, prozess=versicherung_prozess)
     return render_template(
         "kunden_status.html",
         auftrag=auftrag,
         log=get_status_log(auftrag["id"]),
-        kunden_timeline=kunden_status_timeline(auftrag),
+        kunden_timeline=kunden_status_timeline(auftrag, prozess=versicherung_prozess, teile=versicherung_teile),
         pflichtunterlagen=versicherung_pflichtunterlagen_status(auftrag, dateien) if auftrag.get("versicherung_id") else None,
         freigabe_zusammenfassung=build_versicherung_freigabe_zusammenfassung(auftrag, dateien, chat_nachrichten),
+        versicherung_prozess=versicherung_prozess,
+        versicherung_teile=versicherung_teile,
+        terminfreigabe=terminfreigabe,
+        kunden_status_qr_url=url_for("kunden_status_qr", token=token),
     )
+
+
+@app.route("/status/<token>/termin", methods=["POST"])
+def kunden_status_terminwunsch(token):
+    auftrag = get_auftrag_by_kunden_status_token(token)
+    if not auftrag:
+        abort(404)
+    dateien = list_dateien(auftrag["id"])
+    prozess = build_versicherung_prozess(auftrag, dateien, context="kunde") if auftrag.get("versicherung_id") else None
+    teile = list_versicherung_teile(auftrag["id"]) if auftrag.get("versicherung_id") else []
+    terminfreigabe = kunden_terminfreigabe_info(auftrag, teile=teile, prozess=prozess)
+    if not terminfreigabe["can_request"]:
+        flash("Die Terminvereinbarung ist noch nicht freigeschaltet.", "warning")
+        return redirect(url_for("kunden_status", token=token))
+
+    wunschtermin = format_date(request.form.get("wunschtermin"))
+    zeitfenster = clean_text(request.form.get("zeitfenster"))[:80]
+    kontakt = clean_text(request.form.get("kontakt"))[:160]
+    nachricht = clean_text(request.form.get("nachricht"))[:600]
+    if not wunschtermin:
+        flash("Bitte einen Wunschtermin eintragen.", "warning")
+        return redirect(url_for("kunden_status", token=token) + "#terminvereinbarung")
+
+    lines = [
+        f"Kunde möchte einen Reparaturtermin vereinbaren.",
+        f"Wunschtermin: {wunschtermin}",
+    ]
+    if zeitfenster:
+        lines.append(f"Zeitfenster: {zeitfenster}")
+    if kontakt:
+        lines.append(f"Kontakt: {kontakt}")
+    if nachricht:
+        lines.append(f"Hinweis: {nachricht}")
+    beschreibung = "\n".join(lines)
+    add_versicherung_aufgabe(
+        auftrag["id"],
+        "Terminwunsch vom Kunden",
+        beschreibung,
+        quelle="kunde",
+        typ="termin",
+    )
+    add_benachrichtigung(
+        auftrag["id"],
+        "Terminwunsch vom Kunden",
+        beschreibung,
+        quelle="kunde",
+    )
+    schedule_change_backup("kunden-status-terminwunsch")
+    flash("Ihr Terminwunsch ist angekommen. Die Werkstatt bestätigt den Termin separat.", "success")
+    return redirect(url_for("kunden_status", token=token) + "#terminvereinbarung")
+
+
+@app.route("/status/<token>/qr.svg")
+def kunden_status_qr(token):
+    auftrag = get_auftrag_by_kunden_status_token(token)
+    if not auftrag:
+        abort(404)
+    status_url = kunden_status_url(
+        auftrag,
+        force_request_host=clean_text(request.args.get("target")).lower() == "local",
+    )
+    if not status_url:
+        abort(404)
+    try:
+        from reportlab.graphics import renderSVG
+        from reportlab.graphics.barcode import qr
+        from reportlab.graphics.shapes import Drawing
+    except Exception:
+        abort(404)
+    qr_code = qr.QrCodeWidget(status_url)
+    bounds = qr_code.getBounds()
+    width = bounds[2] - bounds[0]
+    height = bounds[3] - bounds[1]
+    size = 220
+    padding_px = 12
+    scale = size / max(width, height, 1)
+    drawing = Drawing(
+        size + padding_px * 2,
+        size + padding_px * 2,
+        transform=[
+            scale,
+            0,
+            0,
+            scale,
+            padding_px - bounds[0] * scale,
+            padding_px - bounds[1] * scale,
+        ],
+    )
+    drawing.add(qr_code)
+    svg = renderSVG.drawToString(drawing)
+    if isinstance(svg, bytes):
+        svg = svg.decode("utf-8", errors="ignore")
+    return svg, 200, {"Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "no-store"}
 
 
 @app.route("/versicherung", methods=["GET", "POST"])
@@ -22849,6 +25673,131 @@ def versicherung_dashboard(slug):
     )
 
 
+@app.route("/versicherung/<slug>/zuteilung/neu", methods=["GET", "POST"])
+def versicherung_zuteilung_neu(slug):
+    versicherung, redirect_response = versicherung_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    template_context = {
+        "versicherung": versicherung,
+        "schadenarten": SCHADENARTEN,
+        "steuerung_optionen": SCHADEN_STEUERUNG_OPTIONEN,
+        "transport_arten": TRANSPORT_ARTEN,
+        "kundenkontakt_kanaele": KUNDENKONTAKT_KANAELE,
+    }
+    if request.method == "POST":
+        form = request.form
+        kunde_name = clean_text(form.get("kunde_name"))
+        fahrzeug = clean_text(form.get("fahrzeug"))
+        if not kunde_name or not fahrzeug:
+            flash("Bitte mindestens Kunde und Fahrzeug eintragen.", "warning")
+            return render_template("versicherung_zuteilung_neu.html", **template_context)
+        besichtigung = format_date(form.get("besichtigung_datum"))
+        transport_art = clean_text(form.get("transport_art")) or "standard"
+        if transport_art not in TRANSPORT_ARTEN:
+            transport_art = "standard"
+        kundenkontakt_kanal = normalize_kundenkontakt_kanal(form.get("kundenkontakt_kanal"))
+        schaden_fahrbereit = normalize_steuerung_option(form.get("schaden_fahrbereit"))
+        schaden_abschleppen = normalize_steuerung_option(form.get("schaden_abschleppen"))
+        schaden_mietwagen = normalize_steuerung_option(form.get("schaden_mietwagen"))
+        schaden_gutachter = normalize_steuerung_option(form.get("schaden_gutachter"))
+        hinweise = []
+        if besichtigung:
+            hinweise.append(f"Besichtigung/Gutachten gewünscht am {besichtigung}.")
+        hinweise.append(f"Kundenkontakt: {KUNDENKONTAKT_KANAELE[kundenkontakt_kanal]['label']}.")
+        if kundenkontakt_kanal == "telefon":
+            hinweise.append("Kunde kann keinen QR-Code nutzen und soll die Werkstatt telefonisch kontaktieren; Termine werden manuell nachgetragen.")
+        elif kundenkontakt_kanal == "beides":
+            hinweise.append("QR-Code wird angeboten, telefonisch bleibt als Fallback möglich.")
+        hinweise.append(f"Übergabe: {TRANSPORT_ARTEN[transport_art]['label']}.")
+        if schaden_fahrbereit != "unbekannt":
+            hinweise.append(f"Fahrzeug fahrbereit: {SCHADEN_STEUERUNG_OPTIONEN[schaden_fahrbereit]}.")
+        if schaden_abschleppen != "unbekannt":
+            hinweise.append(f"Abholung/Abschleppen benötigt: {SCHADEN_STEUERUNG_OPTIONEN[schaden_abschleppen]}.")
+        if schaden_mietwagen != "unbekannt":
+            hinweise.append(f"Mietwagen/Ersatzfahrzeug: {SCHADEN_STEUERUNG_OPTIONEN[schaden_mietwagen]}.")
+        if schaden_gutachter != "unbekannt":
+            hinweise.append(f"Gutachter/Dienstleister einbeziehen: {SCHADEN_STEUERUNG_OPTIONEN[schaden_gutachter]}.")
+        if clean_text(form.get("kontakt_telefon")):
+            hinweise.append(f"Kundenkontakt: {clean_text(form.get('kontakt_telefon'))}.")
+        if clean_text(form.get("hinweis")):
+            hinweise.append(clean_text(form.get("hinweis")))
+        beschreibung = clean_text(form.get("beschreibung")) or "Versicherung hat den Kunden zur Schadenbesichtigung an Gärtner Karosserie & Lack zugeteilt."
+        if hinweise:
+            beschreibung = "\n".join([beschreibung, *hinweise])
+        auftrag_id = create_auftrag(
+            "versicherung",
+            versicherung_id=versicherung["id"],
+            kunde_name=kunde_name,
+            versicherungsnehmer=clean_text(form.get("versicherungsnehmer")) or kunde_name,
+            fahrzeug=fahrzeug,
+            fin_nummer=clean_text(form.get("fin_nummer")).upper(),
+            kennzeichen=clean_text(form.get("kennzeichen")).upper(),
+            schaden_nummer=clean_text(form.get("schaden_nummer")),
+            schadenart=normalize_schadenart(form.get("schadenart")),
+            versicherung_police=clean_text(form.get("versicherung_police")),
+            versicherung_email=clean_text(versicherung.get("email")).lower(),
+            beschreibung=beschreibung,
+            analyse=clean_text(form.get("analyse_text")) or analyse_text(beschreibung),
+            transport_art=transport_art,
+            kontakt_telefon=clean_text(form.get("kontakt_telefon")),
+            notiz_intern="Zuteilung durch Versicherung. Kunde soll zur Besichtigung/Gutachten kontaktiert werden.",
+            versicherung_freigabe_status="zugeteilt",
+            angebotsphase=1,
+        )
+        db = get_db()
+        db.execute(
+            """
+            UPDATE auftraege
+            SET schaden_station='aufnahme',
+                netzwerk_zuteilung_status=?,
+                schaden_fahrbereit=?,
+                schaden_abschleppen=?,
+                schaden_mietwagen=?,
+                schaden_gutachter=?,
+                schaden_besichtigung_datum=?,
+                kundenkontakt_kanal=?,
+                geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                "Von Versicherung zugeteilt - Erstkontakt/Begutachtung abstimmen",
+                schaden_fahrbereit,
+                schaden_abschleppen,
+                schaden_mietwagen,
+                schaden_gutachter,
+                besichtigung,
+                kundenkontakt_kanal,
+                now_str(),
+                auftrag_id,
+            ),
+        )
+        db.commit()
+        db.close()
+        add_versicherung_aufgabe(
+            auftrag_id,
+            "Neue Zuteilung der Versicherung",
+            beschreibung,
+            quelle="versicherung",
+            typ="zuteilung",
+        )
+        add_chat_nachricht(
+            auftrag_id,
+            "versicherung",
+            f"Versicherung hat den Kunden zugeteilt. {beschreibung}",
+        )
+        add_benachrichtigung(
+            auftrag_id,
+            "Neue Versicherungszuteilung",
+            f"{versicherung['name']} hat {kunde_name} mit {fahrzeug} zur Schadenaufnahme zugeteilt.",
+            quelle="versicherung",
+        )
+        schedule_change_backup("versicherung-zuteilung")
+        flash("Zuteilung angelegt. Kundenkontakt ist in der Schadenakte sichtbar.", "success")
+        return redirect(url_for("versicherung_auftrag", slug=versicherung["slug"], auftrag_id=auftrag_id))
+    return render_template("versicherung_zuteilung_neu.html", **template_context)
+
+
 @app.route("/versicherung/<slug>/auftrag/<int:auftrag_id>")
 def versicherung_auftrag(slug, auftrag_id):
     versicherung, redirect_response = versicherung_session_required(slug)
@@ -22867,6 +25816,8 @@ def versicherung_auftrag(slug, auftrag_id):
         auftrag = get_auftrag(auftrag_id)
     dateien = list_dateien(auftrag_id)
     chat_nachrichten = list_chat_nachrichten(auftrag_id)
+    prozess = build_versicherung_prozess(auftrag, dateien, context="admin")
+    teile = list_versicherung_teile(auftrag_id)
     return render_template(
         "versicherung_auftrag.html",
         versicherung=versicherung,
@@ -22877,6 +25828,7 @@ def versicherung_auftrag(slug, auftrag_id):
         versicherung_aufgaben=list_versicherung_aufgaben(auftrag_id, include_done=True),
         pflichtunterlagen=versicherung_pflichtunterlagen_status(auftrag, dateien),
         freigabe_zusammenfassung=build_versicherung_freigabe_zusammenfassung(auftrag, dateien, chat_nachrichten),
+        schadenprotokoll=build_versicherung_schadenprotokoll(auftrag, dateien=dateien, prozess=prozess, teile=teile),
         schaden_zonen=FAHRZEUG_SCHADEN_ZONEN,
     )
 
@@ -22890,7 +25842,7 @@ def versicherung_freigabe_status(slug, auftrag_id):
     if not auftrag or int(auftrag.get("versicherung_id") or 0) != int(versicherung["id"]):
         abort(404)
     neuer_status = normalize_freigabe_status(request.form.get("versicherung_freigabe_status"))
-    if neuer_status not in {"gemeldet", "freigegeben", "rueckfrage", "abgelehnt", "in_pruefung"}:
+    if neuer_status not in {"zugeteilt", "gemeldet", "freigegeben", "rueckfrage", "abgelehnt", "in_pruefung"}:
         neuer_status = "in_pruefung"
     hinweis = clean_text(request.form.get("freigabe_hinweis"))
     dateien = get_allowed_uploads(request.files.getlist("dateien"))
@@ -23507,6 +26459,40 @@ def partner_versicherung_auftrag_abtretungserklaerung_pdf(slug, auftrag_id):
     )
 
 
+@app.route("/partner/<slug>/versicherung/<int:auftrag_id>/prozess/<prozess_key>/upload", methods=["POST"])
+def partner_versicherung_prozess_upload(slug, auftrag_id, prozess_key):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or int(auftrag.get("autohaus_id") or 0) != int(autohaus["id"]) or not auftrag.get("versicherung_id"):
+        abort(404)
+    target = "partner_angebot_detail" if auftrag.get("angebotsphase") else "partner_auftrag"
+    return handle_versicherung_prozess_upload(
+        auftrag_id,
+        prozess_key,
+        "autohaus",
+        url_for(target, slug=slug, auftrag_id=auftrag_id) + "#versicherung-prozess",
+    )
+
+
+@app.route("/partner/<slug>/versicherung/<int:auftrag_id>/prozess/<prozess_key>/status", methods=["POST"])
+def partner_versicherung_prozess_status(slug, auftrag_id, prozess_key):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or int(auftrag.get("autohaus_id") or 0) != int(autohaus["id"]) or not auftrag.get("versicherung_id"):
+        abort(404)
+    target = "partner_angebot_detail" if auftrag.get("angebotsphase") else "partner_auftrag"
+    return handle_versicherung_prozess_status(
+        auftrag_id,
+        prozess_key,
+        "autohaus",
+        url_for(target, slug=slug, auftrag_id=auftrag_id) + "#versicherung-prozess",
+    )
+
+
 @app.route("/partner/<slug>/neu", methods=["GET", "POST"])
 def partner_neuer_auftrag(slug):
     autohaus, redirect_response = partner_session_required(slug)
@@ -23682,21 +26668,57 @@ def partner_angebot_detail(slug, auftrag_id):
                 if angebot.get("versicherung_id"):
                     refresh_versicherung_anschreiben(auftrag_id)
             return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
-        kunden_kurz = beautify_offer_text(form.get("analyse_text"))
-        kunden_text = beautify_offer_text(form.get("beschreibung"))
+        def form_text(name, fallback=""):
+            if name in form:
+                return clean_text(form.get(name))
+            return clean_text(fallback)
+
+        def form_upper(name, fallback=""):
+            return form_text(name, fallback).upper()
+
+        kunden_kurz = (
+            beautify_offer_text(form.get("analyse_text"))
+            if "analyse_text" in form
+            else clean_text(angebot.get("analyse_text"))
+        )
+        kunden_text = (
+            beautify_offer_text(form.get("beschreibung"))
+            if "beschreibung" in form
+            else clean_text(angebot.get("beschreibung"))
+        )
         analyse = kunden_kurz or analyse_text(kunden_text)
         bleibt_abgesendet = bool(angebot.get("angebot_abgesendet")) or aktion == "submit_offer"
+        is_versicherung = bool(angebot.get("versicherung_id"))
+        form_versicherung_id = int(form.get("versicherung_id") or angebot.get("versicherung_id") or 0)
+        form_versicherung = get_versicherung(form_versicherung_id) if form_versicherung_id else None
+        form_versicherung_email = clean_text(form.get("versicherung_email")).lower()
+        if not form_versicherung_email and form_versicherung:
+            form_versicherung_email = clean_text(form_versicherung.get("email")).lower()
+        annahme_neu = angebot.get("annahme_datum") if is_versicherung else format_date(form.get("annahme_datum"))
+        abholung_neu = angebot.get("abholtermin") if is_versicherung else format_date(form.get("abholtermin"))
+        transport_neu = angebot.get("transport_art") if is_versicherung else (clean_text(form.get("transport_art")) or "standard")
+        fahrbereit_neu = normalize_steuerung_option(form.get("schaden_fahrbereit")) if is_versicherung else angebot.get("schaden_fahrbereit")
+        mietwagen_neu = normalize_steuerung_option(form.get("schaden_mietwagen")) if is_versicherung else angebot.get("schaden_mietwagen")
+        abschleppen_neu = normalize_steuerung_option(form.get("schaden_abschleppen")) if is_versicherung else angebot.get("schaden_abschleppen")
+        selbstbeteiligung_neu = clean_text(form.get("schaden_selbstbeteiligung")) if is_versicherung else angebot.get("schaden_selbstbeteiligung")
+        text_geprueft_neu = int(bool(angebot.get("versicherung_text_geprueft")))
+        if is_versicherung and ("analyse_text" in form or "beschreibung" in form):
+            text_geprueft_neu = 1 if clean_text(form.get("versicherung_text_geprueft")) == "1" else 0
         db = get_db()
         db.execute(
             """
             UPDATE auftraege
             SET kunde_name=?,
                 versicherungsnehmer=?,
+                versicherung_id=?,
                 fahrzeug=?,
                 fin_nummer=?,
                 auftragsnummer=?,
                 schaden_nummer=?,
+                schadenart=?,
                 versicherung_police=?,
+                versicherung_email=?,
+                versicherung_email_cc=?,
                 bauteile_override=?,
                 kennzeichen=?,
                 beschreibung=?,
@@ -23704,27 +26726,41 @@ def partner_angebot_detail(slug, auftrag_id):
                 annahme_datum=?,
                 abholtermin=?,
                 transport_art=?,
+                schaden_fahrbereit=?,
+                schaden_mietwagen=?,
+                schaden_abschleppen=?,
+                schaden_selbstbeteiligung=?,
+                versicherung_text_geprueft=?,
                 kontakt_telefon=?,
                 angebot_abgesendet=?,
                 geaendert_am=?
             WHERE id=? AND autohaus_id=? AND angebotsphase=1
             """,
             (
-                clean_text(form.get("kunde_name")),
-                clean_text(form.get("versicherungsnehmer")),
-                clean_text(form.get("fahrzeug")) or angebot["fahrzeug"],
-                clean_text(form.get("fin_nummer")).upper(),
-                clean_text(form.get("auftragsnummer")),
-                clean_text(form.get("schaden_nummer")),
-                clean_text(form.get("versicherung_police")),
-                clean_text(form.get("bauteile_override")) or angebot.get("bauteile_override", ""),
-                clean_text(form.get("kennzeichen")).upper(),
+                form_text("kunde_name", angebot.get("kunde_name")),
+                form_text("versicherungsnehmer", angebot.get("versicherungsnehmer")),
+                form_versicherung_id,
+                form_text("fahrzeug", angebot.get("fahrzeug")) or angebot["fahrzeug"],
+                form_upper("fin_nummer", angebot.get("fin_nummer")),
+                form_text("auftragsnummer", angebot.get("auftragsnummer")),
+                form_text("schaden_nummer", angebot.get("schaden_nummer")),
+                normalize_schadenart(form.get("schadenart") if "schadenart" in form else angebot.get("schadenart")),
+                form_text("versicherung_police", angebot.get("versicherung_police")),
+                form_versicherung_email,
+                form_text("versicherung_email_cc", angebot.get("versicherung_email_cc")).lower(),
+                form_text("bauteile_override", angebot.get("bauteile_override")) or angebot.get("bauteile_override", ""),
+                form_upper("kennzeichen", angebot.get("kennzeichen")),
                 kunden_text,
                 analyse,
-                format_date(form.get("annahme_datum")),
-                format_date(form.get("abholtermin")),
-                clean_text(form.get("transport_art")) or "standard",
-                clean_text(form.get("kontakt_telefon")),
+                annahme_neu,
+                abholung_neu,
+                transport_neu,
+                fahrbereit_neu,
+                mietwagen_neu,
+                abschleppen_neu,
+                selbstbeteiligung_neu,
+                text_geprueft_neu,
+                form_text("kontakt_telefon", angebot.get("kontakt_telefon")),
                 1 if bleibt_abgesendet else 0,
                 now_str(),
                 auftrag_id,
@@ -23758,15 +26794,24 @@ def partner_angebot_detail(slug, auftrag_id):
                     flash(f"WhatsApp-Hinweis an die Werkstatt wurde nicht gesendet.{suffix}", "warning")
             flash("Angebotsanfrage abgesendet. Die Werkstatt kann sie jetzt prüfen.", "success")
         else:
-            flash_upload_analysis_result(
-                upload_result,
-                "Angebotsanfrage analysiert. Bitte prüfen und danach absenden.",
-            )
+            if angebot.get("versicherung_id") and aktion == "review_damage":
+                if text_geprueft_neu:
+                    flash("Schadensbeschreibung gespeichert und als geprüft markiert.", "success")
+                else:
+                    flash("Schadensbeschreibung gespeichert. Bitte vor dem Versand noch als geprüft markieren.", "warning")
+            elif angebot.get("versicherung_id") and not erlaubte_dateien:
+                flash("Kundendaten gespeichert. Danach bitte Unterlagen und Bilder im Versicherungsprozess abhaken.", "success")
+            else:
+                flash_upload_analysis_result(
+                    upload_result,
+                    "Angebotsanfrage analysiert. Bitte prüfen und danach absenden.",
+                )
         flash_betriebsurlaub_planungshinweis(
             form.get("annahme_datum"),
             form.get("abholtermin"),
         )
-        return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
+        target_anchor = "#schadentext-pruefen" if angebot.get("versicherung_id") and aktion == "review_damage" else ""
+        return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id) + target_anchor)
 
     sichtbare_dateien = [d for d in list_dateien(auftrag_id) if d.get("quelle") in {"autohaus", "intern", "versicherung"}]
     versicherung = get_versicherung(angebot.get("versicherung_id")) if angebot.get("versicherung_id") else None
@@ -23779,6 +26824,15 @@ def partner_angebot_detail(slug, auftrag_id):
     versicherung_aufgaben = list_versicherung_aufgaben(auftrag_id, include_done=True) if angebot.get("versicherung_id") else []
     pflichtunterlagen = versicherung_pflichtunterlagen_status(angebot, sichtbare_dateien) if angebot.get("versicherung_id") else None
     freigabe_zusammenfassung = build_versicherung_freigabe_zusammenfassung(angebot, sichtbare_dateien, chat_nachrichten)
+    versicherung_prozess = build_versicherung_prozess(angebot, sichtbare_dateien, context="partner", autohaus=autohaus) if angebot.get("versicherung_id") else None
+    versicherung_teile = list_versicherung_teile(auftrag_id) if angebot.get("versicherung_id") else []
+    versicherung_steuerung = build_versicherung_steuerung(
+        angebot,
+        dateien=sichtbare_dateien,
+        teile=versicherung_teile,
+        chat_nachrichten=chat_nachrichten,
+        prozess=versicherung_prozess,
+    ) if angebot.get("versicherung_id") else None
     return render_template(
         "partner_angebot.html",
         autohaus=autohaus,
@@ -23789,7 +26843,14 @@ def partner_angebot_detail(slug, auftrag_id):
         versicherung_aufgaben=versicherung_aufgaben,
         pflichtunterlagen=pflichtunterlagen,
         freigabe_zusammenfassung=freigabe_zusammenfassung,
+        versicherung_prozess=versicherung_prozess,
+        versicherung_steuerung=versicherung_steuerung,
+        versicherung_teile=versicherung_teile,
         dokument_pruefung=list_document_review_items(auftrag_id, angebot),
+        versicherungen=list_versicherungen(),
+        schadenarten=SCHADENARTEN,
+        schadenart_hinweise=VERSICHERUNG_SCHADENART_HINTS,
+        schaden_mail=schaden_mail_status(),
         postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
         transport_arten=TRANSPORT_ARTEN,
     )
@@ -23822,6 +26883,14 @@ def partner_versicherung_sendefreigabe(slug, auftrag_id):
     if not auftrag.get("versicherung_id"):
         abort(404)
 
+    prozess = build_versicherung_prozess(auftrag, context="partner", autohaus=autohaus)
+    if prozess and not prozess.get("ready_for_send"):
+        flash("Bitte zuerst Kundendaten, Unterlagen und Pflichtpunkte im Versicherungsprozess klären.", "warning")
+        return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id) + "#versicherung-prozess")
+    if not auftrag.get("versicherung_text_geprueft"):
+        flash("Bitte zuerst die analysierte Schadensbeschreibung prüfen und freigeben.", "warning")
+        return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id) + "#schadentext-pruefen")
+
     anschreiben = clean_text(request.form.get("versicherung_anschreiben")) or refresh_versicherung_anschreiben(auftrag_id)
     empfaenger = clean_text(request.form.get("versicherung_email")).lower()
     cc = clean_text(request.form.get("versicherung_email_cc")).lower()
@@ -23840,15 +26909,45 @@ def partner_versicherung_sendefreigabe(slug, auftrag_id):
         )
         db.commit()
         db.close()
-        flash("Vorlage gespeichert. Bitte eine Empfängeradresse eintragen, bevor die Sendefreigabe erteilt wird.", "warning")
-        return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
+        flash("Vorlage gespeichert. Bitte eine Empfängeradresse eintragen, bevor der Fall als versandbereit markiert wird.", "warning")
+        return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id) + "#versicherung-senden")
+
+    mail_status = schaden_mail_status()
+    mail_result = {"sent": False, "mode": "manual", "attachments": 0}
+    if mail_status.get("smtp_configured"):
+        try:
+            mail_result = send_versicherung_schadenmail(
+                auftrag,
+                empfaenger,
+                cc,
+                anschreiben,
+                list_dateien(auftrag_id),
+            )
+        except Exception as exc:
+            db = get_db()
+            db.execute(
+                """
+                UPDATE auftraege
+                SET versicherung_email=?,
+                    versicherung_email_cc=?,
+                    versicherung_anschreiben=?,
+                    geaendert_am=?
+                WHERE id=? AND autohaus_id=?
+                """,
+                (empfaenger, cc, anschreiben, now_str(), auftrag_id, autohaus["id"]),
+            )
+            db.commit()
+            db.close()
+            flash(f"E-Mail wurde nicht versendet: {exc}", "danger")
+            return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id) + "#versicherung-senden")
 
     zeitpunkt = now_str()
     db = get_db()
     db.execute(
         """
         UPDATE auftraege
-        SET versicherung_freigabe_status='gemeldet',
+        SET versicherung_freigabe_status='in_pruefung',
+            schaden_station='versicherung_pruefung',
             versicherung_email=?,
             versicherung_email_cc=?,
             versicherung_anschreiben=?,
@@ -23861,15 +26960,29 @@ def partner_versicherung_sendefreigabe(slug, auftrag_id):
     )
     db.commit()
     db.close()
+    uebergabe_text = (
+        f"per Schaden-Mailbox {mail_result.get('from')} an {empfaenger} gesendet"
+        if mail_result.get("sent")
+        else f"mit geprüften Unterlagen an {empfaenger} zur Prüfung übergeben"
+    )
     add_benachrichtigung(
         auftrag_id,
-        "Sendefreigabe Versicherung",
-        f"Das Autohaus hat die Vorlage geprüft und zum Senden an {empfaenger} freigegeben.",
+        "Versicherung: in Prüfung",
+        f"Das Autohaus hat den Fall {uebergabe_text}.",
         quelle="autohaus",
     )
-    flash("Sendefreigabe erteilt. Die Schadenmeldung ist als versandbereit an die Versicherung markiert.", "success")
+    add_chat_nachricht(
+        auftrag_id,
+        "autohaus",
+        f"Fall an Versicherung zur Prüfung übergeben: {empfaenger}"
+        + (f" ({mail_result.get('attachments') or 0} Anhänge versendet)" if mail_result.get("sent") else ""),
+    )
+    if mail_result.get("sent"):
+        flash("E-Mail an die Versicherung wurde versendet. Der Fall steht jetzt auf \"In Prüfung\".", "success")
+    else:
+        flash("Der Fall ist jetzt auf \"Wird von der Versicherung geprüft\" gesetzt. E-Mail-Versand wird aktiv, sobald SMTP konfiguriert ist.", "success")
     schedule_change_backup("partner-versicherung-sendefreigabe")
-    return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
+    return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id) + "#versicherung-status")
 
 
 @app.route("/partner/<slug>/versicherung/<int:auftrag_id>/antwort", methods=["POST"])
@@ -23886,7 +26999,7 @@ def partner_versicherung_antwort(slug, auftrag_id):
     dateien = get_allowed_uploads(request.files.getlist("dateien"))
     if not nachricht and not dateien:
         flash("Bitte eine Antwort schreiben oder Unterlagen auswählen.", "warning")
-        return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
+        return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id) + "#versicherung-status")
 
     if nachricht:
         add_chat_nachricht(auftrag_id, "autohaus", nachricht)
@@ -23906,7 +27019,7 @@ def partner_versicherung_antwort(slug, auftrag_id):
     else:
         flash("Antwort an die Versicherung gespeichert.", "success")
     schedule_change_backup("partner-versicherung-antwort")
-    return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
+    return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id) + "#versicherung-status")
 
 
 @app.route("/partner/<slug>/versicherung/<int:auftrag_id>/einplanen", methods=["POST"])
@@ -24085,6 +27198,15 @@ def partner_auftrag(slug, auftrag_id):
     versicherung_aufgaben = list_versicherung_aufgaben(auftrag_id, include_done=True) if auftrag.get("versicherung_id") else []
     pflichtunterlagen = versicherung_pflichtunterlagen_status(auftrag, sichtbare_dateien) if auftrag.get("versicherung_id") else None
     freigabe_zusammenfassung = build_versicherung_freigabe_zusammenfassung(auftrag, sichtbare_dateien, chat_nachrichten)
+    versicherung_prozess = build_versicherung_prozess(auftrag, sichtbare_dateien, context="partner", autohaus=autohaus) if auftrag.get("versicherung_id") else None
+    versicherung_teile = list_versicherung_teile(auftrag_id) if auftrag.get("versicherung_id") else []
+    versicherung_steuerung = build_versicherung_steuerung(
+        auftrag,
+        dateien=sichtbare_dateien,
+        teile=versicherung_teile,
+        chat_nachrichten=chat_nachrichten,
+        prozess=versicherung_prozess,
+    ) if auftrag.get("versicherung_id") else None
     return render_template(
         "partner_auftrag.html",
         autohaus=autohaus,
@@ -24101,6 +27223,9 @@ def partner_auftrag(slug, auftrag_id):
         versicherung_aufgaben=versicherung_aufgaben,
         pflichtunterlagen=pflichtunterlagen,
         freigabe_zusammenfassung=freigabe_zusammenfassung,
+        versicherung_prozess=versicherung_prozess,
+        versicherung_steuerung=versicherung_steuerung,
+        versicherung_teile=versicherung_teile,
         postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
     )
 

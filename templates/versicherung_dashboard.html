@@ -9,10 +9,11 @@
     body { background:#f3efe6; color:#16202a; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
     .shell { max-width:1120px; margin:0 auto; padding:28px 16px; }
     .panel { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); }
+    .action-panel { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1rem; align-items:center; border:1px solid #cddcca; border-radius:14px; background:#f7fbf6; padding:1rem; }
     .case-list { display:grid; gap:.8rem; }
     .case-row { display:grid; grid-template-columns:minmax(220px,1fr) auto auto; gap:1rem; align-items:center; border:1px solid #e4d6c3; border-radius:14px; background:#fffaf2; padding:1rem; color:#16202a; text-decoration:none; }
     .case-row:hover { color:#16202a; border-color:#a23f2d; }
-    @media (max-width:760px) { .case-row { grid-template-columns:1fr; } }
+    @media (max-width:760px) { .case-row, .action-panel { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
@@ -25,6 +26,16 @@
           <div class="text-muted">Digitale Schadenakte, Unterlagen und Reparaturstatus.</div>
         </div>
         <a href="{{ url_for('versicherung_logout') }}" class="btn btn-outline-dark">Logout</a>
+      </div>
+    </div>
+
+    <div class="panel mb-4">
+      <div class="action-panel">
+        <div>
+          <div class="fw-bold">Neues Schadenprotokoll</div>
+          <div class="text-muted small">Kunde meldet Schaden bei der Versicherung, die Versicherung weist Fahrzeug, Begutachtung und Mobilität direkt an Gärtner zu.</div>
+        </div>
+        <a href="{{ url_for('versicherung_zuteilung_neu', slug=versicherung['slug']) }}" class="btn btn-dark">Schaden zuteilen</a>
       </div>
     </div>
 

@@ -7,8 +7,12 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     body { background:#f3efe6; color:#16202a; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-    .shell { max-width:760px; margin:0 auto; padding:28px 16px; }
+    .shell { max-width:980px; margin:0 auto; padding:28px 16px; }
     .panel { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); }
+    .hero-grid { display:grid; grid-template-columns:minmax(0,1fr) 190px; gap:1.25rem; align-items:start; }
+    .qr-box { border:1px solid #e4d6c3; border-radius:14px; background:#fff; padding:12px; text-align:center; }
+    .qr-box img { width:150px; height:150px; max-width:100%; }
+    .meta-line { color:#66717a; overflow-wrap:anywhere; }
     .timeline { display:grid; gap:.85rem; margin-top:1rem; }
     .timeline-step { display:grid; grid-template-columns:34px minmax(0,1fr); gap:.75rem; align-items:start; }
     .timeline-dot { width:34px; height:34px; border-radius:999px; display:flex; align-items:center; justify-content:center; border:1px solid #d7c7b0; background:#f7f1e8; font-weight:800; }
@@ -18,23 +22,51 @@
     .timeline-step.is-active .timeline-card { border-color:#b9c8dc; background:#eef5ff; }
     .doc-grid { display:grid; gap:.55rem; }
     .doc-row { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; border:1px solid #e4d6c3; border-radius:12px; padding:.7rem .85rem; background:#fffdf9; }
+    .appointment-panel { border:1px solid #d8c4a7; border-radius:16px; background:#fffaf2; padding:1rem; }
+    .readonly-note { border:1px solid #dbe4ef; background:#f4f8fd; border-radius:12px; padding:.75rem .9rem; color:#465767; }
+    @media (max-width: 767.98px) {
+      .hero-grid { grid-template-columns:1fr; }
+      .qr-box { text-align:left; }
+    }
   </style>
 </head>
 <body>
   <main class="shell">
     <div class="panel mb-4">
-      <div class="badge text-bg-dark mb-3">Fahrzeugstatus</div>
-      <h1 class="mb-2">{{ auftrag['fahrzeug'] }}</h1>
-      <div class="text-muted">
-        {% if auftrag['kennzeichen'] %}{{ auftrag['kennzeichen'] }}{% endif %}
-        {% if auftrag['kunde_name'] %} · {{ auftrag['kunde_name'] }}{% endif %}
+      <div class="hero-grid">
+        <div>
+          <div class="badge text-bg-dark mb-3">Fahrzeugstatus</div>
+          <h1 class="mb-2">{{ auftrag['fahrzeug'] }}</h1>
+          <div class="meta-line">
+            {% if auftrag['kennzeichen'] %}{{ auftrag['kennzeichen'] }}{% endif %}
+            {% if auftrag['kunde_name'] %} · {{ auftrag['kunde_name'] }}{% endif %}
+          </div>
+          <div class="d-flex gap-2 flex-wrap mt-3">
+            <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }} fs-6">{{ auftrag['status_meta']['label'] }}</span>
+            {% if auftrag['versicherung_id'] %}
+            <span class="badge text-bg-{{ auftrag['versicherung_freigabe_meta']['farbe'] }} fs-6">{{ auftrag['versicherung_freigabe_meta']['label'] }}</span>
+            {% endif %}
+            {% if auftrag['schaden_station_label'] %}
+            <span class="badge text-bg-light border text-dark fs-6">{{ auftrag['schaden_station_label'] }}</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="qr-box">
+          <img src="{{ kunden_status_qr_url }}" alt="Status-QR-Code">
+          <div class="small text-muted mt-2">Status direkt wieder öffnen. Änderungen sind erst bei der Terminabstimmung möglich.</div>
+        </div>
       </div>
-      <div class="mt-3">
-        <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }} fs-6">{{ auftrag['status_meta']['label'] }}</span>
-        {% if auftrag['versicherung_id'] %}
-        <span class="badge text-bg-{{ auftrag['versicherung_freigabe_meta']['farbe'] }} fs-6">{{ auftrag['versicherung_freigabe_meta']['label'] }}</span>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="mt-3">
+            {% for category, message in messages %}
+            <div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else 'success') }} mb-2">{{ message }}</div>
+            {% endfor %}
+          </div>
         {% endif %}
-      </div>
+      {% endwith %}
+
       <div class="timeline">
         {% for step in kunden_timeline %}
         <div class="timeline-step is-{{ step['state'] }}">
@@ -47,12 +79,50 @@
         {% endfor %}
       </div>
     </div>
-    {% if freigabe_zusammenfassung %}
-    <div class="panel mb-4">
-      <h2 class="h4 mb-3">Versicherungsfreigabe</h2>
-      <div class="alert alert-success mb-0">Die Versicherung hat den Schaden freigegeben. Das Autohaus kann die Einplanung mit der Werkstatt abstimmen.</div>
+
+    <div class="panel mb-4" id="terminvereinbarung">
+      <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
+        <div>
+          <h2 class="h4 mb-1">{{ terminfreigabe['label'] }}</h2>
+          <div class="text-muted">{{ terminfreigabe['detail'] }}</div>
+        </div>
+        <span class="badge text-bg-{{ 'success' if terminfreigabe['can_request'] or terminfreigabe['termin_gesetzt'] else 'secondary' }}">
+          {{ 'bereit' if terminfreigabe['can_request'] else ('gesetzt' if terminfreigabe['termin_gesetzt'] else 'wartet') }}
+        </span>
+      </div>
+      {% if terminfreigabe['can_request'] %}
+      <form method="POST" action="{{ url_for('kunden_status_terminwunsch', token=auftrag['kunden_status_token']) }}" class="appointment-panel">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">Wunschtermin</label>
+            <input type="date" name="wunschtermin" class="form-control" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Zeitfenster</label>
+            <input type="text" name="zeitfenster" class="form-control" placeholder="vormittags / nachmittags">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Kontakt</label>
+            <input type="text" name="kontakt" class="form-control" value="{{ auftrag['kontakt_telefon'] }}">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Hinweis</label>
+            <textarea name="nachricht" rows="3" class="form-control" placeholder="Kurzer Hinweis zur Anlieferung"></textarea>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-dark mt-3">Terminwunsch senden</button>
+      </form>
+      {% else %}
+      <div class="readonly-note">
+        {% if auftrag['annahme_datum'] %}
+          Bringtermin: <strong>{{ auftrag['annahme_datum'] }}</strong>{% if auftrag['abholtermin'] %} · geplante Abholung: <strong>{{ auftrag['abholtermin'] }}</strong>{% endif %}
+        {% else %}
+          Sobald Freigabe und Teilelage passen, erscheint hier die Terminaktion.
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
+
     {% if pflichtunterlagen %}
     <div class="panel mb-4">
       <h2 class="h4 mb-3">Unterlagenstatus</h2>
@@ -62,9 +132,6 @@
           <div>
             <div class="fw-semibold">{{ item['label'] }}</div>
             <div class="text-muted small">{{ item['detail'] }}</div>
-            {% if item['required'] %}
-            <div class="small mt-1"><strong>Benötigt:</strong> {{ item['required'] }}</div>
-            {% endif %}
           </div>
           <span class="badge text-bg-{{ item['class'] }}">{{ item['badge'] }}</span>
         </div>
@@ -72,6 +139,7 @@
       </div>
     </div>
     {% endif %}
+
     <div class="panel">
       <h2 class="h4 mb-3">Termine</h2>
       <div class="row g-3">
@@ -81,9 +149,9 @@
         <div class="col-sm-6"><div class="text-muted small">Abholung</div><div class="fw-bold">{{ auftrag['abholtermin'] or 'offen' }}</div></div>
       </div>
       {% if auftrag['status'] >= 4 %}
-        <div class="alert alert-success mt-4 mb-0">Ihr Fahrzeug ist fertig oder kurz vor der Abholung. Wir melden uns, sobald alles bereitsteht.</div>
+        <div class="alert alert-success mt-4 mb-0">Ihr Fahrzeug ist fertig oder kurz vor der Abholung.</div>
       {% else %}
-        <div class="alert alert-info mt-4 mb-0">Wir halten den Reparaturstatus hier aktuell.</div>
+        <div class="alert alert-info mt-4 mb-0">Der aktuelle Stand bleibt hier sichtbar.</div>
       {% endif %}
     </div>
   </main>

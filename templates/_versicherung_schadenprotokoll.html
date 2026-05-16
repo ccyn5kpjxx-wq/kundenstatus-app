@@ -1,0 +1,93 @@
+{% if schadenprotokoll %}
+<style>
+  .protocol-grid { display:grid; gap:.65rem; }
+  .protocol-step {
+    display:grid;
+    grid-template-columns:auto minmax(0,1fr) auto;
+    gap:.75rem;
+    align-items:start;
+    border:1px solid #e4d6c3;
+    border-radius:14px;
+    background:#fffaf2;
+    padding:.8rem .9rem;
+  }
+  .protocol-dot {
+    width:2rem;
+    height:2rem;
+    border-radius:999px;
+    display:grid;
+    place-items:center;
+    font-weight:800;
+    background:#16202a;
+    color:#fff;
+    font-size:.85rem;
+  }
+  .protocol-meta {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:.55rem;
+  }
+  .protocol-meta-item {
+    border:1px solid #e4d6c3;
+    border-radius:12px;
+    background:#fff;
+    padding:.65rem .75rem;
+  }
+  @media (max-width:760px) {
+    .protocol-step { grid-template-columns:auto minmax(0,1fr); }
+    .protocol-step .badge { grid-column:2; width:max-content; }
+    .protocol-meta { grid-template-columns:1fr; }
+  }
+</style>
+<div class="d-flex justify-content-between gap-3 align-items-start flex-wrap mb-3">
+  <div>
+    <h2 class="h4 mb-1">Schadenprotokoll</h2>
+    <div class="text-muted small">Ablauf von Zuteilung bis Abrechnung.</div>
+  </div>
+  <span class="badge text-bg-dark">{{ schadenprotokoll['schritte']|length }} Schritte</span>
+</div>
+
+<div class="protocol-meta mb-3">
+  <div class="protocol-meta-item">
+    <div class="text-muted small">Begutachtung</div>
+    <div class="fw-semibold">{{ schadenprotokoll['mobilitaet']['besichtigung'] }}</div>
+  </div>
+  <div class="protocol-meta-item">
+    <div class="text-muted small">Kundenkontakt</div>
+    <div class="fw-semibold">{{ schadenprotokoll['mobilitaet']['kontaktweg'] }}</div>
+    <div class="small text-muted">{{ schadenprotokoll['mobilitaet']['kontakt'] }}</div>
+  </div>
+  <div class="protocol-meta-item">
+    <div class="text-muted small">Übergabe</div>
+    <div class="fw-semibold">{{ schadenprotokoll['mobilitaet']['transport'] }}</div>
+  </div>
+  <div class="protocol-meta-item">
+    <div class="text-muted small">Fahrbereit</div>
+    <div class="fw-semibold">{{ schadenprotokoll['mobilitaet']['fahrbereit'] }}</div>
+  </div>
+  <div class="protocol-meta-item">
+    <div class="text-muted small">Ersatzfahrzeug</div>
+    <div class="fw-semibold">{{ schadenprotokoll['mobilitaet']['mietwagen'] }}</div>
+  </div>
+</div>
+
+{% if schadenprotokoll['send_blocker'] %}
+<div class="alert alert-warning small">
+  Noch nicht versandbereit: {{ schadenprotokoll['send_blocker']|join(', ') }}.
+</div>
+{% endif %}
+
+<div class="protocol-grid">
+  {% for step in schadenprotokoll['schritte'] %}
+  <div class="protocol-step">
+    <div class="protocol-dot">{{ loop.index }}</div>
+    <div>
+      <div class="fw-bold">{{ step['titel'] }}</div>
+      <div class="small text-muted">{{ step['owner'] }}</div>
+      <div class="small mt-1">{{ step['detail'] }}</div>
+    </div>
+    <span class="badge text-bg-{{ step['farbe'] }}">{{ step['label'] }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

@@ -591,6 +591,10 @@
             {% if auftrag['schaden_nummer'] %}Schaden {{ auftrag['schaden_nummer'] }}{% else %}Schadenfall im Portal erfasst{% endif %}
             {% if auftrag['versicherung_gemeldet_am'] %} · gemeldet am {{ auftrag['versicherung_gemeldet_am'] }}{% endif %}
           </div>
+          {% set versicherung_prozess_standalone = true %}
+          {% include "_versicherung_prozess_assistent.html" %}
+          {% set steuerung_editable = false %}
+          {% include "_versicherung_steuerung_panel.html" %}
           {% include "_versicherung_workflow_panel.html" %}
           <a href="{{ url_for('partner_versicherung_auftrag_abtretungserklaerung_pdf', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="btn btn-outline-dark mb-3" id="pflicht-abtretung">Abtretungserklärung herunterladen</a>
           <form method="POST" enctype="multipart/form-data" action="{{ url_for('partner_versicherung_antwort', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="d-grid gap-2 mb-3" data-upload-form>

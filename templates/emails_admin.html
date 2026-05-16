@@ -54,6 +54,48 @@
     letter-spacing: .03em;
     text-transform: uppercase;
   }
+  .mail-setup-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: .75rem;
+  }
+  .mail-setup-item {
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #fffdf9;
+    padding: .85rem;
+  }
+  .mail-setup-item.is-done {
+    border-left: 4px solid #198754;
+  }
+  .mail-setup-item.is-warning {
+    border-left: 4px solid #cc8a16;
+  }
+  .mail-setup-item.is-open {
+    border-left: 4px solid #6c757d;
+  }
+  .alias-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: .5rem;
+  }
+  .alias-row {
+    border-top: 1px solid #eee3d5;
+    padding-top: .55rem;
+  }
+  .alias-row code {
+    overflow-wrap: anywhere;
+  }
+  .mail-details {
+    border: 1px solid #e4d6c3;
+    border-radius: 8px;
+    background: #fffdf9;
+    padding: .85rem;
+  }
+  .mail-details summary {
+    cursor: pointer;
+    font-weight: 700;
+  }
 </style>
 {% endblock %}
 
@@ -67,6 +109,46 @@
     </div>
     <a href="{{ url_for('betriebs_cockpit') }}" class="btn btn-soft">Zum Cockpit</a>
   </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+    <div>
+      <div class="section-title mb-0">
+        <div>
+          <h4 class="mb-1">Mail-Einrichtung</h4>
+          <p>Stand für Abteilungsadressen, Abruf und automatische Verteilung.</p>
+        </div>
+      </div>
+    </div>
+    <span class="badge text-bg-{{ 'success' if mail_setup.percent == 100 else 'warning' }}">{{ mail_setup.done_count }}/{{ mail_setup.total_count }} erledigt</span>
+  </div>
+  <div class="mail-setup-grid mb-3">
+    {% for item in mail_setup.checklist %}
+    <div class="mail-setup-item is-{{ item.state }}">
+      <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+        <strong>{{ item.label }}</strong>
+        <span class="badge text-bg-{{ 'success' if item.state == 'done' else ('warning' if item.state == 'warning' else 'secondary') }}">{{ item.badge }}</span>
+      </div>
+      <div class="text-muted small">{{ item.detail }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <details class="mail-details">
+    <summary>Aliasliste und Teststatus</summary>
+    <div class="alias-list mt-3">
+      {% for alias in mail_setup.aliases %}
+      <div class="alias-row">
+        <div><code>{{ alias.address }}</code></div>
+        <div class="small text-muted">{{ alias.label }}{% if alias.route_label %} · Route: {{ alias.route_label }}{% endif %}</div>
+        <div class="mt-1">
+          <span class="badge text-bg-{{ 'success' if alias.route_configured else 'secondary' }}">{{ 'Route bereit' if alias.route_configured else 'Route offen' }}</span>
+          <span class="badge text-bg-{{ 'success' if alias.test_count else 'light border' }}">{{ alias.test_count }} Testmail{{ '' if alias.test_count == 1 else 's' }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
 </div>
 
 <div class="row g-4 mb-4">
@@ -154,6 +236,41 @@
           Zugangsdaten kommen aus <code>.env.local</code>. Standard ist sicher: nur ungelesene Mails, keine automatische Markierung als gelesen, keine Passwörter in der Datenbank.
         </div>
       </div>
+      <div class="imap-box mb-3">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+          <div>
+            <h5 class="mb-2">Schadenregulierung-Mailbox</h5>
+            <div class="mb-2">
+              <span class="badge text-bg-{{ 'success' if schaden_mail.smtp_configured else 'secondary' }}">{{ schaden_mail.smtp_badge }}</span>
+              <span class="badge text-bg-{{ 'success' if schaden_mail.imap_configured else 'secondary' }}">{{ schaden_mail.imap_badge }}</span>
+            </div>
+            <div class="mail-meta-grid">
+              <div class="mail-meta-item">
+                <span>Adresse</span>
+                <strong>{{ schaden_mail.address or 'SCHADEN_MAIL_ADDRESS' }}</strong>
+              </div>
+              <div class="mail-meta-item">
+                <span>SMTP</span>
+                <strong>{{ schaden_mail.smtp_host or 'SCHADEN_SMTP_HOST' }}</strong>
+              </div>
+              <div class="mail-meta-item">
+                <span>IMAP</span>
+                <strong>{{ schaden_mail.imap_host or 'SCHADEN_IMAP_HOST' }}</strong>
+              </div>
+              <div class="mail-meta-item">
+                <span>Anhänge</span>
+                <strong>{{ schaden_mail.attachment_limit_mb }} MB Limit</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="text-muted small">
+          Empfehlung: eigene Adresse wie <code>schaden@auto-lackierzentrum.de</code> oder <code>schadenmeldung@...</code> anlegen. Danach <code>SCHADEN_MAIL_ADDRESS</code>, <code>SCHADEN_SMTP_*</code> und <code>SCHADEN_IMAP_*</code> in <code>.env.local</code> setzen.
+          {% if schaden_mail.missing %}
+          Noch offen: <code>{{ schaden_mail.missing|join('</code>, <code>')|safe }}</code>.
+          {% endif %}
+        </div>
+      </div>
       <div class="api-box">
         <div class="mb-2"><strong>Endpoint:</strong> <code>/api/werkstatt/emails</code></div>
         <div class="mb-2"><strong>Status:</strong>
@@ -202,14 +319,18 @@
             <div class="d-flex gap-2 align-items-center flex-wrap mb-1">
               {% if email['is_neu'] %}<span class="badge text-bg-danger">neu</span>{% endif %}
               <span class="badge text-bg-secondary">{{ email['quelle'] }}</span>
-              {% if email['ziel_modul'] == 'rechnungen' %}
-                <span class="badge text-bg-warning">Rechnung</span>
-              {% elif email['ziel_modul'] == 'einkauf' %}
-                <span class="badge text-bg-info">Einkauf</span>
+              {% if email['ziel_modul'] %}
+                {% set module_badge = 'warning' if email['ziel_modul'] == 'rechnungen' else ('info' if email['ziel_modul'] == 'einkauf' else ('primary' if email['ziel_modul'] == 'versicherung' else ('danger' if email['ziel_modul'] == 'reklamationen' else 'light border'))) %}
+                <span class="badge text-bg-{{ module_badge }}">{{ email['ziel_modul_label'] }}</span>
+              {% elif email['kategorie'] != 'allgemein' %}
+                <span class="badge text-bg-light border">{{ email['kategorie_label'] }}</span>
               {% endif %}
               <strong>{{ email['betreff'] }}</strong>
             </div>
-            <div class="text-muted small">{{ email['absender_display'] }} · {{ email['empfangen_am'] }}</div>
+            <div class="text-muted small">
+              {{ email['absender_display'] }} · {{ email['empfangen_am'] }}
+              {% if email['empfaenger'] %} · an {{ email['empfaenger'] }}{% endif %}
+            </div>
           </div>
           <div class="d-flex gap-2 flex-wrap">
             <form method="POST" action="{{ url_for('admin_email_einkauf_analysieren', email_id=email['id']) }}" class="m-0">

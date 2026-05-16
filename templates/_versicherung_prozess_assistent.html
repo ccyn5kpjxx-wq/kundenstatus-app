@@ -1,0 +1,199 @@
+{% if versicherung_prozess %}
+{% set standalone = versicherung_prozess_standalone|default(false) %}
+{% set phase = versicherung_prozess_phase|default('full') %}
+{% set preparation_keys = ['grunddaten', 'kunden_qr', 'fahrzeugschein', 'gutachten', 'schadenfotos', 'abtretung'] %}
+{% set sichtbare = namespace(items=[]) %}
+{% for gruppe in versicherung_prozess['gruppen'] %}
+  {% for item in gruppe['items'] %}
+    {% if phase != 'send_vorbereitung' or item['key'] in preparation_keys %}
+      {% set sichtbare.items = sichtbare.items + [item] %}
+    {% endif %}
+  {% endfor %}
+{% endfor %}
+{% set sichtbare_total = sichtbare.items|length %}
+{% set sichtbare_erledigt = sichtbare.items|selectattr('resolved')|list|length %}
+{% set sichtbare_percent = ((sichtbare_erledigt / (sichtbare_total if sichtbare_total else 1)) * 100)|round|int %}
+<style>
+  .insurance-process { border:1px solid #e4d6c3; border-radius:18px; background:#fffdf9; padding:1rem; }
+  .insurance-process-head { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1rem; align-items:start; }
+  .insurance-process-progress { height:.55rem; background:#efe4d5; border-radius:999px; overflow:hidden; }
+  .insurance-process-progress span { display:block; height:100%; background:#2f7d50; }
+  .insurance-process-group { border-top:1px solid #eadfce; padding-top:1rem; margin-top:1rem; }
+  .insurance-process-step { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,360px); gap:1rem; align-items:start; border:1px solid #eadfce; border-radius:14px; background:#fff; padding:.9rem; }
+  .insurance-process-step + .insurance-process-step { margin-top:.75rem; }
+  .insurance-process-step.is-done { border-color:#b9d7c2; background:#f7fbf8; }
+  .insurance-process-step.is-muted { background:#f7f4ee; }
+  .insurance-process-actions { display:grid; gap:.55rem; }
+  .insurance-process-qr { width:118px; height:118px; border:1px solid #eadfce; border-radius:12px; background:#fff; padding:.45rem; }
+  .insurance-upload-label { font-size:.84rem; font-weight:700; margin-bottom:.15rem; }
+  .insurance-upload-help { font-size:.82rem; color:#6f6253; }
+  .insurance-required-list { margin:.35rem 0 0; padding-left:1.05rem; }
+  .insurance-required-list li { margin:.12rem 0; }
+  .insurance-process-files { display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.55rem; }
+  .insurance-process-files a { text-decoration:none; }
+  .insurance-process-statusline { display:flex; gap:.45rem; align-items:center; flex-wrap:wrap; }
+  @media (max-width: 991.98px) {
+    .insurance-process-head,
+    .insurance-process-step { grid-template-columns:1fr; }
+  }
+</style>
+
+<div class="insurance-process mb-3" id="versicherung-prozess">
+  <div class="insurance-process-head mb-3">
+    <div>
+      <div class="fw-bold">{{ 'Unterlagenpaket für die Versicherung' if phase == 'send_vorbereitung' else 'Versicherungsprozess' }}</div>
+      <div class="text-muted small">
+        {% if phase == 'send_vorbereitung' %}
+        Erst Kundendaten, QR-Status, Kalkulation, Fotos und Abtretung sauber vorbereiten. Danach geht der Fall zur Versicherung in die Prüfung.
+        {% else %}
+        Schadensaufnahme mit Kalkulation, Freigabe/Sperre, Nachtrag, Teile, Werkstattdurchlauf, Fertigbilder und Abrechnung sauber nacheinander klären.
+        {% endif %}
+      </div>
+    </div>
+    <div class="text-end">
+      <span class="badge text-bg-{{ 'success' if versicherung_prozess['ready_for_send'] else 'warning' }}">{{ sichtbare_percent }}%</span>
+      <div class="text-muted small mt-1">{{ sichtbare_erledigt }} von {{ sichtbare_total }} geklärt</div>
+    </div>
+  </div>
+  <div class="insurance-process-progress mb-3" aria-hidden="true">
+    <span style="width:{{ sichtbare_percent }}%;"></span>
+  </div>
+
+  {% if versicherung_prozess['ready_for_send'] %}
+  <div class="alert alert-success py-2 small">Das Unterlagenpaket ist sauber vorbereitet. Die Reparaturfreigabe bleibt trotzdem der entscheidende Startpunkt.</div>
+  {% else %}
+  <div class="alert alert-warning py-2 small">Noch offen für die Versicherung: {{ versicherung_prozess['send_blocker']|join(', ') }}.</div>
+  {% endif %}
+
+  {% for gruppe in versicherung_prozess['gruppen'] %}
+  {% set gruppe_sichtbar = namespace(items=[]) %}
+  {% for item in gruppe['items'] %}
+    {% if phase != 'send_vorbereitung' or item['key'] in preparation_keys %}
+      {% set gruppe_sichtbar.items = gruppe_sichtbar.items + [item] %}
+    {% endif %}
+  {% endfor %}
+  {% if gruppe_sichtbar.items %}
+  <div class="insurance-process-group">
+    <div class="fw-semibold mb-2">{{ gruppe['label'] }}</div>
+    {% for item in gruppe_sichtbar.items %}
+    <div class="insurance-process-step {% if item['status'] == 'erledigt' %}is-done{% elif item['status'] in ['nicht_vorhanden', 'nicht_noetig'] %}is-muted{% endif %}">
+      <div>
+        <div class="insurance-process-statusline mb-1">
+          <span class="badge text-bg-{{ item['status_farbe'] }}">{{ item['status_label'] }}</span>
+          <span class="fw-bold">{{ item['label'] }}</span>
+        </div>
+        <div class="text-muted small">{{ item['kurz'] }}</div>
+        <div class="small mt-2">{{ item['detail'] }}</div>
+        {% if item['required'] %}
+        <div class="small text-muted mt-1">Benötigt: {{ item['required'] }}</div>
+        {% endif %}
+        {% if item.get('required_list') %}
+        <ul class="small text-muted insurance-required-list">
+          {% for punkt in item['required_list'] %}
+          <li>{{ punkt }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% if item['manual_notiz'] %}
+        <div class="small mt-2"><strong>Notiz:</strong> {{ item['manual_notiz'] }}</div>
+        {% endif %}
+        {% if item['files'] %}
+        <div class="insurance-process-files">
+          {% for datei in item['files'][:4] %}
+            {% if autohaus is defined %}
+            <a class="badge text-bg-light border text-dark" href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank">{{ datei['original_name'] }}</a>
+            {% else %}
+            <a class="badge text-bg-light border text-dark" href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank">{{ datei['original_name'] }}</a>
+            {% endif %}
+          {% endfor %}
+          {% if item['file_count'] > 4 %}<span class="badge text-bg-light border text-dark">+{{ item['file_count'] - 4 }}</span>{% endif %}
+        </div>
+        {% endif %}
+        {% if item['anchor'] and item['status'] == 'offen' and not item.get('download_url') %}
+        <a href="#{{ item['anchor'] }}" class="small fw-semibold d-inline-block mt-2">Zum passenden Feld</a>
+        {% endif %}
+      </div>
+
+      <div class="insurance-process-actions">
+        {% if item.get('qr_url') %}
+        <img src="{{ item['qr_url'] }}" alt="Kundenstatus QR-Code" class="insurance-process-qr">
+        {% endif %}
+        {% if item.get('link_url') %}
+        <a href="{{ item['link_url'] }}" class="btn btn-sm btn-outline-dark" target="_blank">{{ item.get('link_label') or 'Öffnen' }}</a>
+        {% endif %}
+        {% if item.get('download_url') %}
+        <a href="{{ item['download_url'] }}" class="btn btn-sm btn-outline-dark">{{ item.get('download_label') or 'PDF herunterladen' }}</a>
+        {% if item.get('download_hint') %}
+        <div class="insurance-upload-help">{{ item['download_hint'] }}</div>
+        {% endif %}
+        {% endif %}
+        {% if item['can_upload'] %}
+          {% if standalone %}
+          <form method="POST" enctype="multipart/form-data" action="{{ item['upload_url'] }}" class="insurance-process-actions" data-upload-form>
+            {{ csrf_field()|safe }}
+            <label class="insurance-upload-label" for="prozess-file-{{ item['key'] }}">{{ 'Schadenfotos auswählen' if item['image_only'] else 'Datei auswählen' }}</label>
+            <input type="file" id="prozess-file-{{ item['key'] }}" name="prozess_dateien_{{ item['key'] }}" class="form-control form-control-sm" {% if item['accept'] %}accept="{{ item['accept'] }}"{% endif %} {% if item['multiple'] %}multiple{% endif %} required>
+            {% if item['multiple'] %}<div class="insurance-upload-help">Mehrere Dateien können zusammen ausgewählt werden.</div>{% endif %}
+            <input type="text" name="prozess_notiz_{{ item['key'] }}" class="form-control form-control-sm" placeholder="Kurzer Hinweis optional">
+            <button type="submit" class="btn btn-sm btn-dark" data-loading-message="{{ item['label'] }} wird hochgeladen. Bitte kurz warten.">Hochladen</button>
+          </form>
+          {% else %}
+            <label class="insurance-upload-label" for="prozess-file-{{ item['key'] }}">{{ 'Schadenfotos auswählen' if item['image_only'] else 'Datei auswählen' }}</label>
+            <input type="file" id="prozess-file-{{ item['key'] }}" name="prozess_dateien_{{ item['key'] }}" class="form-control form-control-sm" {% if item['accept'] %}accept="{{ item['accept'] }}"{% endif %} {% if item['multiple'] %}multiple{% endif %}>
+            {% if item['multiple'] %}<div class="insurance-upload-help">Mehrere Dateien können zusammen ausgewählt werden.</div>{% endif %}
+            <input type="text" name="prozess_notiz_{{ item['key'] }}" class="form-control form-control-sm" placeholder="Kurzer Hinweis optional">
+            <button type="submit" class="btn btn-sm btn-dark" formaction="{{ item['upload_url'] }}" formmethod="post" formenctype="multipart/form-data" data-loading-message="{{ item['label'] }} wird hochgeladen. Bitte kurz warten.">Hochladen</button>
+          {% endif %}
+        {% elif item['manual_only'] %}
+          {% if standalone %}
+          <form method="POST" action="{{ item['status_url'] }}" class="insurance-process-actions">
+            {{ csrf_field()|safe }}
+            <input type="text" name="prozess_notiz_{{ item['key'] }}" class="form-control form-control-sm" placeholder="Notiz optional">
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="submit" name="prozess_status_{{ item['key'] }}" value="erledigt" class="btn btn-sm btn-outline-success">Erledigt</button>
+              <button type="submit" name="prozess_status_{{ item['key'] }}" value="nicht_noetig" class="btn btn-sm btn-outline-secondary">Nicht nötig</button>
+            </div>
+          </form>
+          {% else %}
+            <input type="text" name="prozess_notiz_{{ item['key'] }}" class="form-control form-control-sm" placeholder="Notiz optional">
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="submit" name="prozess_status_{{ item['key'] }}" value="erledigt" class="btn btn-sm btn-outline-success" formaction="{{ item['status_url'] }}" formmethod="post">Erledigt</button>
+              <button type="submit" name="prozess_status_{{ item['key'] }}" value="nicht_noetig" class="btn btn-sm btn-outline-secondary" formaction="{{ item['status_url'] }}" formmethod="post">Nicht nötig</button>
+            </div>
+          {% endif %}
+        {% endif %}
+
+        {% if item['can_mark_missing'] %}
+          {% set missing_status = 'nicht_noetig' if item['optional'] or item['key'].startswith('foto_') else 'nicht_vorhanden' %}
+          {% set missing_label = 'Nicht nötig' if missing_status == 'nicht_noetig' else 'Nicht vorhanden' %}
+          {% if standalone %}
+          <form method="POST" action="{{ item['status_url'] }}">
+            {{ csrf_field()|safe }}
+            <input type="hidden" name="prozess_status_{{ item['key'] }}" value="{{ missing_status }}">
+            <input type="hidden" name="prozess_notiz_{{ item['key'] }}" value="{{ missing_label }}">
+            <button type="submit" class="btn btn-sm btn-outline-secondary w-100">{{ missing_label }}</button>
+          </form>
+          {% else %}
+          <button type="submit" name="prozess_status_{{ item['key'] }}" value="{{ missing_status }}" class="btn btn-sm btn-outline-secondary" formaction="{{ item['status_url'] }}" formmethod="post">{{ missing_label }}</button>
+          {% endif %}
+        {% endif %}
+
+        {% if item['manual_status'] != 'offen' %}
+          {% if standalone %}
+          <form method="POST" action="{{ item['status_url'] }}">
+            {{ csrf_field()|safe }}
+            <input type="hidden" name="prozess_status_{{ item['key'] }}" value="offen">
+            <button type="submit" class="btn btn-sm btn-outline-dark w-100">Wieder öffnen</button>
+          </form>
+          {% else %}
+          <button type="submit" name="prozess_status_{{ item['key'] }}" value="offen" class="btn btn-sm btn-outline-dark" formaction="{{ item['status_url'] }}" formmethod="post">Wieder öffnen</button>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endif %}

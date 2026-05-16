@@ -206,9 +206,13 @@
       <div class="section-title">
         <div>
           <h4 class="mb-1">Prüfung und Aufgaben</h4>
-          <p>Pflichtunterlagen, Rückfragen und Freigabe auf einen Blick.</p>
+          <p>Unterlagen, Fotos, Rückfragen und Freigabe auf einen Blick.</p>
         </div>
       </div>
+      {% set versicherung_prozess_standalone = false %}
+      {% include "_versicherung_prozess_assistent.html" %}
+      {% set steuerung_editable = true %}
+      {% include "_versicherung_steuerung_panel.html" %}
       {% include "_versicherung_workflow_panel.html" %}
     </div>
 
@@ -285,7 +289,17 @@
         {% if auftrag['kunden_status_url'] %}
           <div class="info-box">
             <div class="text-muted small mb-1">Status-Link für QR-Code</div>
-            <code>{{ auftrag['kunden_status_url'] }}</code>
+            <img src="{{ url_for('kunden_status_qr', token=auftrag['kunden_status_token'], target='local') if auftrag['kunden_status_public_warning'] else url_for('kunden_status_qr', token=auftrag['kunden_status_token']) }}" alt="Kundenstatus QR-Code" style="width:148px;height:148px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;margin-bottom:.75rem;">
+            <code>{{ auftrag['kunden_status_local_url'] if auftrag['kunden_status_public_warning'] else auftrag['kunden_status_url'] }}</code>
+            <div class="d-flex gap-2 flex-wrap mt-2">
+              <a href="{{ auftrag['kunden_status_local_url'] }}" class="btn btn-sm btn-soft" target="_blank">Lokal testen</a>
+              {% if auftrag['kunden_status_public_warning'] %}
+              <a href="{{ auftrag['kunden_status_url'] }}" class="btn btn-sm btn-soft" target="_blank">Öffentlichen Link testen</a>
+              {% endif %}
+            </div>
+            {% if auftrag['kunden_status_public_warning'] %}
+            <div class="alert alert-warning small mt-3 mb-0">Der öffentliche QR-Link nutzt aktuell einen Tunnel. Für echte Kunden bitte prüfen, ob diese Adresse erreichbar ist.</div>
+            {% endif %}
           </div>
         {% else %}
           <div class="text-muted">Noch kein Kundenstatus-Link vorhanden.</div>
@@ -328,6 +342,7 @@
       <div class="d-flex gap-2 flex-wrap">
         <a href="{{ url_for('admin_versicherung') }}" class="btn btn-soft">Zur Übersicht</a>
         <a href="{{ url_for('auftrag_detail', auftrag_id=auftrag['id']) }}" class="btn btn-soft">Werkstattauftrag</a>
+        <a href="{{ url_for('admin_versicherung_schaden_vorschau_versicherung', auftrag_id=auftrag['id']) }}" class="btn btn-soft" target="_blank">Versicherungsansicht</a>
       </div>
     </div>
   </div>
