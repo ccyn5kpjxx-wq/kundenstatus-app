@@ -916,20 +916,23 @@ def main():
                 quick_upload_ui_ok = (
                     detail_response.status_code == 200
                     and "Schnell-Upload" in detail_html
-                    and 'value="quick_upload_analyze"' in detail_html
+                    and 'value="quick_upload"' in detail_html
+                    and "Nur hochladen" in detail_html
+                    and "Dokumente anschauen" in detail_html
                 )
                 print(
-                    "[OK] Partner-Auftrag zeigt Schnell-Upload oben"
+                    "[OK] Partner-Auftrag zeigt Schnell-Upload und Dokumente-Link"
                     if quick_upload_ui_ok
-                    else "[FEHLER] Partner-Auftrag zeigt keinen Schnell-Upload oben"
+                    else "[FEHLER] Partner-Auftrag zeigt Schnell-Upload/Dokumente-Link nicht"
                 )
                 ok &= quick_upload_ui_ok
+                auftrag_before_quick_upload = portal.get_auftrag(auftrag_id)
                 quick_upload_response = upload_client.post(
                     f"/partner/kaesmann/auftrag/{auftrag_id}",
                     data=csrf_data(
                         upload_client,
                         {
-                            "aktion": "quick_upload_analyze",
+                            "aktion": "quick_upload",
                             "upload_notiz": "Schnellupload Smoke Hinweis",
                             "dateien": (
                                 BytesIO(b"Schnellupload Smoke Test\nSchadenfoto Hinweis links\n"),
@@ -946,20 +949,24 @@ def main():
                     datei["original_name"] == "smoke-schnell-upload.txt"
                     and datei["quelle"] == "autohaus"
                     and datei["notiz"] == "Schnellupload Smoke Hinweis"
-                    and datei["extrahierter_text"]
+                    and not datei["extrahierter_text"]
+                    and not datei["analyse_json"]
                     for datei in quick_dateien
                 )
                 print(
-                    "[OK] Partner Schnell-Upload speichert und analysiert Datei"
+                    "[OK] Partner Schnell-Upload speichert Datei ohne Analyse"
                     if quick_upload_saved
-                    else "[FEHLER] Partner Schnell-Upload speichert/analysiert Datei nicht"
+                    else "[FEHLER] Partner Schnell-Upload speichert Datei nicht analyselos"
                 )
                 ok &= quick_upload_saved
                 auftrag_after_quick_upload = portal.get_auftrag(auftrag_id)
                 quick_upload_preserved_fields = bool(
-                    auftrag_after_quick_upload
-                    and auftrag_after_quick_upload["kunde_name"] == "Smoke Test Kunde"
-                    and auftrag_after_quick_upload["fahrzeug"]
+                    auftrag_before_quick_upload
+                    and auftrag_after_quick_upload
+                    and auftrag_after_quick_upload["kunde_name"] == auftrag_before_quick_upload["kunde_name"]
+                    and auftrag_after_quick_upload["fahrzeug"] == auftrag_before_quick_upload["fahrzeug"]
+                    and auftrag_after_quick_upload["analyse_text"] == auftrag_before_quick_upload["analyse_text"]
+                    and auftrag_after_quick_upload["beschreibung"] == auftrag_before_quick_upload["beschreibung"]
                 )
                 print(
                     "[OK] Partner Schnell-Upload überschreibt keine Auftragsdaten"

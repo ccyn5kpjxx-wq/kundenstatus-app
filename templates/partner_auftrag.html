@@ -9,10 +9,10 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    body { background:#f4f1ea; font-family:"DM Sans",sans-serif; }
+    body { background:#f6f7f5; font-family:"DM Sans",sans-serif; color:#102033; }
     h1,h2,h3,h4,h5 { font-family:"Space Grotesk",sans-serif; }
-    .shell { max-width:1200px; margin:0 auto; padding:32px 16px; }
-    .panel { background:#fffdf9; border-radius:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
+    .shell { max-width:1180px; margin:0 auto; padding:28px 16px; }
+    .panel { background:#fff; border:1px solid #e4e8e5; border-radius:18px; box-shadow:0 12px 30px rgba(24,38,45,.08); padding:24px; }
     .form-control,
     .form-select,
     .btn {
@@ -21,14 +21,14 @@
     }
     textarea.form-control { min-height:112px; }
     .mobile-actions { display:flex; gap:.75rem; flex-wrap:wrap; }
-    .chip { display:inline-flex; align-items:center; padding:.4rem .75rem; border-radius:999px; background:#f4ede4; border:1px solid #e4d6c3; margin:0 .4rem .4rem 0; }
-    .timeline-item { border-left:3px solid #dbc8af; padding-left:1rem; margin-left:.35rem; }
+    .chip { display:inline-flex; align-items:center; padding:.4rem .75rem; border-radius:999px; background:#eef3f1; border:1px solid #d6e0dc; margin:0 .4rem .4rem 0; }
+    .timeline-item { border-left:3px solid #ccd8d4; padding-left:1rem; margin-left:.35rem; }
     .hero-panel {
       background:
         radial-gradient(circle at 8% 10%, rgba(43,128,139,.18), transparent 30%),
         linear-gradient(135deg, #132635, #24465c 58%, #7f4624);
       color:#fff;
-      border-radius:28px;
+      border-radius:22px;
       padding:30px;
       box-shadow:0 18px 46px rgba(30,38,45,.2);
     }
@@ -78,11 +78,11 @@
       margin-bottom:6px;
     }
     .soft-note {
-      background:#f7f0e6;
-      border:1px solid #e4d6c3;
-      border-radius:18px;
+      background:#f4f8f6;
+      border:1px solid #d6e0dc;
+      border-radius:14px;
       padding:14px 16px;
-      color:#5e5347;
+      color:#45524d;
     }
     .upload-priority {
       border:2px solid #d7b56d;
@@ -94,37 +94,50 @@
       background:#fffdf9;
     }
     .quick-upload-panel {
-      border:2px solid #c88b24;
-      background:linear-gradient(135deg,#fff6df,#f8e3bd 55%,#e9c77e);
-      border-radius:24px;
-      box-shadow:0 18px 42px rgba(125,78,20,.16);
-      padding:22px;
+      border:1px solid #c8d9d7;
+      background:#f8fbfa;
+      border-radius:18px;
+      box-shadow:0 12px 28px rgba(24,66,72,.08);
+      padding:20px;
     }
     .quick-upload-kicker {
       text-transform:uppercase;
       letter-spacing:.08em;
       font-size:.76rem;
-      color:#795016;
+      color:#37616a;
       font-weight:700;
       margin-bottom:4px;
     }
     .quick-upload-grid {
       display:grid;
-      grid-template-columns:minmax(240px,1.1fr) minmax(260px,1.25fr) minmax(220px,.95fr) auto;
+      grid-template-columns:minmax(240px,1.1fr) minmax(250px,1.2fr) minmax(210px,.9fr) auto;
       gap:14px;
       align-items:end;
     }
     .quick-upload-panel .form-control {
       background:#fffdf9;
-      border-color:#d7b56d;
+      border-color:#c8d9d7;
     }
     .quick-upload-panel .btn {
       white-space:nowrap;
     }
+    .document-summary {
+      border-color:#c8d9d7;
+      background:#fbfdfc;
+    }
+    .document-summary-counts {
+      display:flex;
+      flex-wrap:wrap;
+      gap:.5rem;
+      margin-top:12px;
+    }
+    .document-summary-counts .chip {
+      margin:0;
+    }
     .analysis-preview {
       border:1px solid #e4d6c3;
       background:#fffdf9;
-      border-radius:18px;
+      border-radius:14px;
       padding:16px;
     }
     .analysis-current {
@@ -143,7 +156,7 @@
       text-transform:uppercase;
       letter-spacing:.08em;
       font-size:.72rem;
-      color:#8a6e46;
+      color:#37616a;
       font-weight:700;
     }
     @media (max-width: 992px) {
@@ -373,16 +386,16 @@
   <div class="loading-overlay" data-loading-overlay>
     <div class="loading-card">
       <div class="spinner-ring"></div>
-      <h4 class="mb-2">Datei wird analysiert</h4>
-      <div class="text-muted" data-loading-text>Bitte kurz warten. Die Datei wird jetzt ausgewertet und in den Auftrag übernommen.</div>
+      <h4 class="mb-2">Vorgang läuft</h4>
+      <div class="text-muted" data-loading-text>Bitte kurz warten. Der Auftrag wird gespeichert oder eine Datei wird hochgeladen.</div>
       <div class="loading-progress" aria-hidden="true">
         <div class="loading-progress-bar"></div>
       </div>
-      <div class="loading-status">Analyse läuft. Je nach PDF oder Bild kann das ein paar Sekunden dauern.</div>
+      <div class="loading-status">Upload oder Speicherung läuft. Das kann einen kurzen Moment dauern.</div>
       <div class="loading-news">
         <div class="loading-news-kicker">Werkstatt-News</div>
         <div class="loading-news-title" data-loading-news-title>Ab 27.04.2026: neue ION-7 im Einsatz</div>
-        <div class="loading-news-text" data-loading-news-text>Während Ihre Datei gelesen wird, hier ein kurzer Blick auf unsere Technik-Neuigkeit.</div>
+        <div class="loading-news-text" data-loading-news-text>Während der Vorgang läuft, hier ein kurzer Blick auf unsere Technik-Neuigkeit.</div>
       </div>
     </div>
   </div>
@@ -426,19 +439,19 @@
         <div>
           <div class="quick-upload-kicker">Schnell-Upload</div>
           <h2 class="h4 mb-1">Bilder oder Dokumente zum Auftrag</h2>
-          <div class="text-muted">Direkt hier hochladen, speichern und automatisch analysieren lassen.</div>
+          <div class="text-muted">Nur hochladen. Es wird nichts analysiert und nichts am Auftrag automatisch verändert.</div>
         </div>
         <div>
           <label class="form-label fw-bold">Dateien auswählen</label>
           <input type="file" name="dateien" class="form-control form-control-lg" multiple required accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
-          <div class="form-text">PDFs, Fotos, Belege und Office-Dateien werden als Unterlagen erkannt.</div>
+          <div class="form-text">PDFs, Fotos, Belege und Office-Dateien werden nur als Datei gespeichert.</div>
         </div>
         <div>
           <label class="form-label">Kurzer Hinweis (optional)</label>
           <input type="text" name="upload_notiz" class="form-control form-control-lg" placeholder="z.B. Schadenfoto links">
         </div>
         <div>
-          <button type="submit" name="aktion" value="quick_upload_analyze" class="btn btn-dark btn-lg" data-loading-message="Unterlage wird hochgeladen, gespeichert und analysiert. Bitte kurz warten.">Speichern & analysieren</button>
+          <button type="submit" name="aktion" value="quick_upload" class="btn btn-dark btn-lg" data-loading-message="Unterlage wird nur hochgeladen und gespeichert. Es wird keine Analyse gestartet.">Nur hochladen</button>
         </div>
       </div>
     </form>
@@ -447,116 +460,12 @@
       <div class="col-xl-7">
         <div class="panel h-100">
           <div class="mb-4">
-            <div class="section-kicker">Unterlagen</div>
-            <h2 class="h3 mb-2">Unterlagen hinzufügen & analysieren</h2>
-            <div class="text-muted">Datei auswählen, kurz prüfen, optional Beschreibung ergänzen und speichern. Danach ist die Unterlage für Autohaus und Werkstatt sichtbar.</div>
+            <div class="section-kicker">Auftragsdaten</div>
+            <h2 class="h3 mb-2">Kundendaten und Termine prüfen</h2>
+            <div class="text-muted">Wenn etwas nicht passt, können Sie es hier korrigieren. Unterlagen liegen in einer eigenen Ansicht.</div>
           </div>
 
           <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
-            <div class="col-12">
-              <div class="upload-priority">
-                <div class="row g-3 align-items-end">
-                  <div class="col-12">
-                    <label class="form-label fw-bold">Neue Unterlagen hinzufügen</label>
-                    <input type="file" name="dateien" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
-                    <div class="form-text">PDFs, Bilder und Belege werden direkt ausgelesen. Fertigbilder bitte weiter unten als Fertigbilder hochladen.</div>
-                  </div>
-                  <div class="col-12">
-                    <label class="form-label">Hinweis zum Bild oder Dokument (optional)</label>
-                    <input type="text" name="upload_notiz" class="form-control form-control-lg" placeholder="z.B. Kotflügel links Kratzer, Tür hinten rechts Delle, Stoßstange vorne zerlegt">
-                    <div class="form-text">Wenn die Datei nur ein Foto ist, helfen kurze Schlagwörter der Werkstatt besonders.</div>
-                  </div>
-                  <div class="col-md-6">
-                    <label class="form-label">Erkannte Arbeit / kurze Beschreibung</label>
-                    <input type="text" name="analyse_text" class="form-control form-control-lg" value="{{ auftrag['analyse_text'] }}" placeholder="z.B. Stoßstange hinten lackieren">
-                  </div>
-                  <div class="col-md-6">
-                    <label class="form-label">Beschreibung ergänzen (optional)</label>
-                    <textarea name="beschreibung" class="form-control" rows="3" placeholder="Kurze Ergänzung, falls nötig">{{ auftrag['beschreibung'] }}</textarea>
-                  </div>
-                  <div class="col-12 mobile-actions">
-                    <button type="submit" name="aktion" value="upload_analyze" class="btn btn-dark btn-lg" data-loading-message="Unterlage wird gespeichert und analysiert. Bitte kurz warten.">Unterlage speichern & analysieren</button>
-                    <button type="submit" name="aktion" value="speichern" class="btn btn-outline-dark btn-lg" data-loading-message="Auftrag wird gespeichert. Bitte kurz warten.">Auftrag speichern</button>
-                  </div>
-                </div>
-
-                <div class="analysis-preview mt-4">
-                  <div class="d-flex justify-content-between gap-2 flex-wrap align-items-start mb-3">
-                    <div>
-                      <div class="analysis-label">Analyse</div>
-                      <h3 class="h5 mb-1">Was aktuell aus den Unterlagen gelesen wurde</h3>
-                    </div>
-                    <span class="badge text-bg-light border">{{ dateien|length }} Unterlage(n)</span>
-                  </div>
-                  <div class="analysis-current mb-3">
-                    <div class="analysis-label mb-1">Aktuell im Auftrag</div>
-                    <div class="fw-semibold">{{ auftrag['analyse_text'] or 'Noch keine erkannte Arbeit vorhanden.' }}</div>
-                    {% if auftrag['beschreibung'] %}
-                    <div class="text-muted small mt-1">{{ auftrag['beschreibung'] }}</div>
-                    {% endif %}
-                    {% if auftrag['analyse_hinweis'] %}
-                    <div class="alert alert-warning py-2 mt-3 mb-0 small">{{ auftrag['analyse_hinweis'] }}</div>
-                    {% endif %}
-                  </div>
-                  {% if dateien %}
-                  <div class="d-grid gap-2">
-                    {% for datei in dateien %}
-                    <div class="analysis-file">
-                      {% if datei['is_browser_image'] and datei['original_available'] %}
-                      <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener">
-                        <img src="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-3">
-                      </a>
-                      {% endif %}
-                      <div class="d-flex gap-2 flex-wrap align-items-center">
-                        <div class="fw-semibold flex-grow-1">{{ datei['original_name'] }}</div>
-                        {% if datei['has_extract'] %}
-                        <span class="badge text-bg-success">analysiert</span>
-                        {% else %}
-                        <span class="badge text-bg-light border">gespeichert</span>
-                        {% endif %}
-                        {% if datei['original_available'] %}
-                        <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Original öffnen</a>
-                        {% else %}
-                        <span class="badge text-bg-warning">Original fehlt</span>
-                        {% endif %}
-                      </div>
-                      {% if not datei['original_available'] %}
-                      <div class="text-muted small mt-2">Die Auswertung ist noch vorhanden. Bitte das Original erneut hochladen, wenn es geöffnet werden soll.</div>
-                      {% endif %}
-                      <div class="mt-3">
-                        <div class="small text-muted">Datei-Auswertung{% if datei['dokument_typ'] %} · {{ datei['dokument_typ'] }}{% endif %}</div>
-                        {% if datei['notiz'] %}
-                        <div class="fw-semibold mt-1">Hinweis Autohaus: {{ datei['notiz'] }}</div>
-                        {% endif %}
-                        {% if datei['extrakt_kurz'] %}
-                        <div class="fw-semibold mt-1">{{ datei['extrakt_kurz'] }}</div>
-                        {% elif datei['has_extract'] %}
-                        <div class="text-muted mt-1">Text wurde gelesen, aber es gab keine kurze Zusammenfassung.</div>
-                        {% else %}
-                        <div class="text-muted mt-1">Diese Datei ist gespeichert. Es wurde kein lesbarer Text erkannt.</div>
-                        {% endif %}
-                        {% if datei['text_preview'] %}
-                        <details class="mt-2">
-                          <summary class="text-muted small">Gelesenen Text anzeigen</summary>
-                          <div class="small mt-2" style="white-space:pre-wrap;">{{ datei['text_preview'] }}</div>
-                        </details>
-                        {% endif %}
-                      </div>
-                    </div>
-                    {% endfor %}
-                  </div>
-                  {% else %}
-                  <div class="text-muted">Noch keine Unterlagen vorhanden.</div>
-                  {% endif %}
-                </div>
-              </div>
-            </div>
-
-            <div class="col-12">
-              <div class="section-kicker">Auftragsdaten</div>
-              <h3 class="h5 mb-1">Kundendaten und Termine prüfen</h3>
-              <div class="text-muted small">Wenn etwas nicht passt, können Sie es hier korrigieren.</div>
-            </div>
             <div class="col-md-4" id="pflicht-kunde">
               <label class="form-label">Endkunde / Referenz</label>
               <input type="text" name="kunde_name" class="form-control form-control-lg" value="{{ auftrag['kunde_name'] }}">
@@ -630,17 +539,10 @@
               <label class="form-label" data-abholung-label>{{ auftrag['partner_abholung_label'] }}</label>
               <input type="date" name="abholtermin" class="form-control form-control-lg" value="{{ auftrag['abholtermin']|iso_date }}">
             </div>
-            <div class="col-md-6">
-              <label class="form-label">Fertigbilder</label>
-              <input type="file" name="fertigbilder" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,image/*,application/pdf">
-              <div class="form-text">Hier können Sie Abschlussbilder oder ein fertiges Übergabe-PDF hochladen.</div>
-            </div>
             <div class="col-12">
-              <div class="soft-note">Tipp: Wenn die automatische Erkennung nicht ganz passt, reicht eine kurze Korrektur im Feld „Bauteile“. Die Werkstatt sieht Ihre Änderung sofort.</div>
+              <div class="soft-note">Tipp: Bilder, PDFs und Fertigbilder laden Sie oben oder in der Dokumentansicht hoch. Diese Uploads werden nur gespeichert und verändern die Auftragsdaten nicht automatisch.</div>
             </div>
             <div class="col-12 mobile-actions">
-              <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark btn-lg" data-loading-message="Unterlage wird gespeichert und analysiert. Bitte kurz warten.">Unterlage speichern & analysieren</button>
-              <button type="submit" name="aktion" value="reanalyze_existing" class="btn btn-outline-dark btn-lg" data-loading-message="Vorhandene Unterlagen werden neu analysiert. Bitte kurz warten.">Vorhandene Unterlagen neu analysieren</button>
               <button type="submit" name="aktion" value="speichern" class="btn btn-dark btn-lg" data-loading-message="Auftrag wird gespeichert. Bitte kurz warten.">Auftrag speichern</button>
             </div>
           </form>
@@ -666,6 +568,16 @@
             {% if auftrag['annahme_datum'] %}<span class="chip">{{ auftrag['partner_annahme_label'] }} {{ auftrag['annahme_datum'] }}</span>{% endif %}
             {% if auftrag['abholtermin'] %}<span class="chip">{{ auftrag['partner_abholung_label'] }} {{ auftrag['abholtermin'] }}</span>{% endif %}
           </div>
+        </div>
+
+        <div class="panel mb-4 document-summary">
+          <h4 class="mb-2">Dokumente</h4>
+          <div class="text-muted small">Alle bereits hochgeladenen Unterlagen, Fertigbilder und Originaldateien liegen gesammelt auf einer eigenen Seite.</div>
+          <div class="document-summary-counts">
+            <span class="chip">{{ dateien|length }} Unterlage(n)</span>
+            <span class="chip">{{ fertigbilder|length }} Fertigbild(er)</span>
+          </div>
+          <a href="{{ url_for('partner_auftrag_dokumente', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="btn btn-dark w-100 mt-3">Dokumente anschauen</a>
         </div>
 
         <div class="panel mb-4">
@@ -763,73 +675,6 @@
           </form>
         </div>
 
-        {% if dokument_pruefung %}
-        <div class="panel mb-4">
-          <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
-            <div>
-              <h4 class="mb-1">Erkannte Felder aus Unterlagen</h4>
-              <div class="text-muted small">Bitte prüfen Sie die erkannten Werte gegen die Originaldatei. Die Werkstatt prüft ebenfalls.</div>
-            </div>
-            <span class="badge text-bg-warning">Prüfansicht</span>
-          </div>
-          <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-3">
-            <div class="d-flex gap-2 flex-wrap">
-              <span class="badge {{ 'text-bg-success' if auftrag['analyse_autohaus_geprueft'] else 'text-bg-warning' }}">Autohaus {{ 'geprüft' if auftrag['analyse_autohaus_geprueft'] else 'offen' }}</span>
-              <span class="badge {{ 'text-bg-success' if auftrag['analyse_werkstatt_geprueft'] else 'text-bg-warning' }}">Werkstatt {{ 'geprüft' if auftrag['analyse_werkstatt_geprueft'] else 'offen' }}</span>
-            </div>
-            {% if not auftrag['analyse_autohaus_geprueft'] %}
-            <form method="POST" action="{{ url_for('partner_dokumente_geprueft', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}">
-              <button type="submit" class="btn btn-sm btn-outline-success">Autohaus-Prüfung bestätigen</button>
-            </form>
-            {% endif %}
-          </div>
-          <div class="d-grid gap-3">
-            {% for pruefung in dokument_pruefung %}
-            <div class="border rounded-4 p-3">
-              <div class="d-flex justify-content-between gap-2 flex-wrap">
-                <div>
-                  <div class="fw-bold">{{ pruefung['original_name'] }}</div>
-                  <div class="text-muted small">{{ pruefung['dokument_typ'] or 'Dokument' }}</div>
-                </div>
-                {% if pruefung['confidence'] %}
-                <span class="badge text-bg-secondary">Sicherheit {{ '%.0f'|format((pruefung['confidence'] or 0) * 100) }}%</span>
-                {% endif %}
-              </div>
-              {% if pruefung['analyse_hinweis'] %}
-              <div class="alert alert-warning py-2 mt-3 mb-0 small">{{ pruefung['analyse_hinweis'] }}</div>
-              {% endif %}
-              <div class="table-responsive mt-3">
-                <table class="table table-sm align-middle mb-0">
-                  <thead>
-                    <tr>
-                      <th>Feld</th>
-                      <th>Erkannt</th>
-                      <th>Aktuell</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for item in pruefung['items'] %}
-                    <tr>
-                      <td class="fw-semibold">{{ item['label'] }}</td>
-                      <td>{{ item['value'] }}</td>
-                      <td>{{ item['current_value'] or '—' }}</td>
-                      <td>
-                        <span class="badge {{ 'text-bg-success' if item['active'] else 'text-bg-warning' }}">
-                          {{ 'passt zum Auftrag' if item['active'] else 'Bitte prüfen' }}
-                        </span>
-                      </td>
-                    </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            {% endfor %}
-          </div>
-        </div>
-        {% endif %}
-
         {% if benachrichtigungen %}
         <div class="panel mb-4 border border-warning-subtle">
           <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
@@ -872,120 +717,6 @@
               <button type="submit" class="btn btn-outline-dark">Verzögerung senden</button>
             </div>
           </form>
-        </div>
-
-        <div class="panel mb-4">
-          <h4 class="mb-3">Unterlagen verwalten</h4>
-          {% if dateien %}
-            <div class="d-grid gap-2">
-              {% for datei in dateien %}
-              <div class="border rounded-4 p-3">
-                {% if datei['is_browser_image'] and datei['original_available'] %}
-                <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener">
-                  <img src="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-3">
-                </a>
-                {% endif %}
-                <div class="d-flex gap-2 flex-wrap align-items-center">
-                  <div class="fw-semibold flex-grow-1">{{ datei['original_name'] }}</div>
-                  {% if datei['original_available'] %}
-                  <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Original öffnen</a>
-                  <a href="{{ url_for('partner_datei_download', slug=autohaus['slug'], datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
-                  {% else %}
-                  <span class="badge text-bg-warning">Original fehlt</span>
-                  {% endif %}
-                  {% if datei['quelle'] == 'autohaus' %}
-                  <form method="POST" action="{{ url_for('partner_datei_loeschen', slug=autohaus['slug'], datei_id=datei['id']) }}" class="m-0" onsubmit="return confirm('Diese hochgeladene Datei wirklich entfernen?')">
-                    {{ csrf_field()|safe }}
-                    <input type="hidden" name="next" value="{{ request.path }}">
-                    <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
-                  </form>
-                  {% else %}
-                  <span class="badge text-bg-light border">{{ 'Versicherung-Datei' if datei['quelle'] == 'versicherung' else 'Werkstatt-Datei' }}</span>
-                  {% endif %}
-                </div>
-                {% if not datei['original_available'] %}
-                  <div class="text-muted small mt-2">Die Auswertung ist noch vorhanden. Bitte das Original erneut hochladen, wenn es geöffnet werden soll.</div>
-                {% endif %}
-                {% if datei['notiz'] %}
-                  <div class="mt-3">
-                    <div class="small text-muted">Hinweis {{ 'Versicherung' if datei['quelle'] == 'versicherung' else ('Autohaus' if datei['quelle'] == 'autohaus' else 'Werkstatt') }}</div>
-                    <div class="fw-semibold">{{ datei['notiz'] }}</div>
-                  </div>
-                {% endif %}
-                {% if datei['has_extract'] %}
-                  <div class="mt-3">
-                    <div class="small text-muted">Datei-Auswertung{% if datei['dokument_typ'] %} · {{ datei['dokument_typ'] }}{% endif %}</div>
-                    {% if datei['extrakt_kurz'] %}
-                      <div class="fw-semibold mt-1">{{ datei['extrakt_kurz'] }}</div>
-                    {% else %}
-                      <div class="text-muted mt-1">Kein lesbarer Text gefunden.</div>
-                    {% endif %}
-                    {% if datei['text_preview'] %}
-                      <details class="mt-2">
-                        <summary class="text-muted small">Textvorschau öffnen</summary>
-                        <div class="small mt-2" style="white-space:pre-wrap;">{{ datei['text_preview'] }}</div>
-                      </details>
-                    {% endif %}
-                  </div>
-                {% endif %}
-                {% if datei['quelle'] == 'autohaus' %}
-                <form method="POST" action="{{ url_for('partner_datei_notiz', slug=autohaus['slug'], datei_id=datei['id']) }}" class="row g-2 align-items-end mt-3">
-                  <div class="col-md">
-                    <label class="form-label small text-muted">Was ist auf dem Bild zu sehen?</label>
-                    <input type="text" name="datei_notiz" class="form-control" value="{{ datei['notiz'] }}" placeholder="z.B. Kotflügel links Kratzer oder Delle">
-                    <input type="hidden" name="next" value="{{ request.path }}">
-                  </div>
-                  <div class="col-md-auto">
-                    <button type="submit" class="btn btn-outline-dark">Hinweis speichern</button>
-                  </div>
-                </form>
-                {% endif %}
-              </div>
-              {% endfor %}
-            </div>
-          {% else %}
-            <div class="text-muted">Noch keine Unterlagen vorhanden.</div>
-          {% endif %}
-        </div>
-
-        <div class="panel mb-4">
-          <h4 class="mb-3">Fertigbilder</h4>
-          {% if fertigbilder %}
-            <div class="d-grid gap-2">
-              {% for datei in fertigbilder %}
-              <div class="border rounded-4 p-3">
-                {% if datei['mime_type'] and datei['mime_type'].startswith('image/') and datei['original_available'] %}
-                <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener">
-                  <img src="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-3">
-                </a>
-                {% endif %}
-                <div class="d-flex gap-2 flex-wrap align-items-center">
-                  <div class="fw-semibold flex-grow-1">{{ datei['original_name'] }}</div>
-                  {% if datei['original_available'] %}
-                  <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Original öffnen</a>
-                  <a href="{{ url_for('partner_datei_download', slug=autohaus['slug'], datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
-                  {% else %}
-                  <span class="badge text-bg-warning">Original fehlt</span>
-                  {% endif %}
-                  {% if datei['quelle'] == 'autohaus' %}
-                  <form method="POST" action="{{ url_for('partner_datei_loeschen', slug=autohaus['slug'], datei_id=datei['id']) }}" class="m-0" onsubmit="return confirm('Dieses hochgeladene Bild wirklich entfernen?')">
-                    {{ csrf_field()|safe }}
-                    <input type="hidden" name="next" value="{{ request.path }}">
-                    <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
-                  </form>
-                  {% else %}
-                  <span class="badge text-bg-light border">{{ 'Versicherung-Datei' if datei['quelle'] == 'versicherung' else 'Werkstatt-Datei' }}</span>
-                  {% endif %}
-                </div>
-                {% if not datei['original_available'] %}
-                  <div class="text-muted small mt-2">Bitte das Bild erneut hochladen, wenn es geöffnet werden soll.</div>
-                {% endif %}
-              </div>
-              {% endfor %}
-            </div>
-          {% else %}
-            <div class="text-muted">Noch keine Fertigbilder vorhanden.</div>
-          {% endif %}
         </div>
 
         <div class="panel mb-4">

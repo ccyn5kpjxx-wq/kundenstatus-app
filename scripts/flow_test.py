@@ -1216,8 +1216,13 @@ def main():
         )
         response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}")
         check(
-            "Partner zeigt Dokument-Prüfansicht",
-            "Erkannte Felder aus Unterlagen" in response.get_data(as_text=True),
+            "Partner-Auftrag verweist auf Dokumentseite",
+            "Dokumente anschauen" in response.get_data(as_text=True),
+        )
+        response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}/dokumente")
+        check(
+            "Partner zeigt Dokument-Prüfansicht auf Dokumentseite",
+            "Erkannte Felder" in response.get_data(as_text=True),
         )
         response = partner.post(
             f"/partner/kaesmann/auftrag/{angebot_id}/dokumente/geprueft",
@@ -1495,14 +1500,21 @@ def main():
         response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}")
         partner_html = response.get_data(as_text=True)
         check(
-            "Partner sieht Fertigbild",
-            response.status_code == 200 and "fertigbild-test.jpg" in partner_html,
+            "Partner-Auftrag verlinkt Dokumente nach Fertigbild",
+            response.status_code == 200 and "Dokumente anschauen" in partner_html,
             f"Status {response.status_code}",
         )
         check(
             "Partner sieht Werkstatt-Hinweis",
             "Neue Fertigbilder" in partner_html,
             partner_html[:300],
+        )
+        response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}/dokumente")
+        partner_html = response.get_data(as_text=True)
+        check(
+            "Partner sieht Fertigbild auf Dokumentseite",
+            response.status_code == 200 and "fertigbild-test.jpg" in partner_html,
+            f"Status {response.status_code}",
         )
 
         db = portal.get_db()

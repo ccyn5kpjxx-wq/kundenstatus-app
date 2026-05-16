@@ -11539,10 +11539,13 @@ def hydrate_datei(datei):
     datei["is_browser_image"] = suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}
     datei["kategorie"] = clean_text(datei.get("kategorie")) or "standard"
     datei["notiz"] = clean_text(datei.get("notiz"))
-    datei["has_extract"] = bool(
-        clean_text(datei.get("extrakt_kurz")) or clean_text(datei.get("extrahierter_text"))
-        or clean_text(datei.get("notiz"))
+    datei["has_analysis"] = bool(
+        clean_text(datei.get("extrakt_kurz"))
+        or clean_text(datei.get("extrahierter_text"))
+        or clean_text(datei.get("analyse_json"))
+        or clean_text(datei.get("analyse_quelle"))
     )
+    datei["has_extract"] = bool(datei["has_analysis"] or clean_text(datei.get("notiz")))
     datei["text_preview"] = clean_text(datei.get("extrahierter_text"))[:2000]
     datei["original_available"] = upload_file_exists(datei)
     return datei
@@ -16912,7 +16915,7 @@ def list_dateien_by_reklamation(reklamation_id):
     return [hydrate_datei(dict(row)) for row in rows]
 
 
-def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id=None, upload_note=""):
+def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id=None, upload_note="", analyze=True):
     saved = 0
     saved_analysis_document = False
     analysis_errors = []
@@ -16947,7 +16950,7 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
         analyse_hinweis = ""
         datei_notiz = upload_note if clean_text(kategorie) == "standard" else ""
         is_analysis_document = (
-            clean_text(kategorie) == "standard" and reklamation_id is None
+            analyze and clean_text(kategorie) == "standard" and reklamation_id is None
         )
         if is_analysis_document and suffix in ANALYSIS_EXTENSIONS:
             saved_analysis_document = True
@@ -16967,7 +16970,7 @@ def save_uploads(auftrag_id, files, quelle, kategorie="standard", reklamation_id
             )
             structured_summary = structured_analysis_summary(bundle.get("structured"), original_name)
             extrakt_kurz = structured_summary or summarize_document_text(extrahierter_text, original_name)
-        if datei_notiz:
+        if datei_notiz and is_analysis_document:
             extrahierter_text = append_upload_note_to_analysis(extrahierter_text, datei_notiz)
             extrakt_kurz = append_upload_note_to_summary(extrakt_kurz, datei_notiz)
         cursor = db.execute(
@@ -17134,7 +17137,13 @@ def get_allowed_uploads(files):
     return uploads
 
 
-def save_partner_standard_uploads(auftrag_id, files, upload_note="", success_message="Unterlage gespeichert und analysiert."):
+def save_partner_standard_uploads(
+    auftrag_id,
+    files,
+    upload_note="",
+    success_message="Unterlage gespeichert und analysiert.",
+    analyze=True,
+):
     files = list(files or [])
     if not any(file and file.filename for file in files):
         flash("Bitte zuerst ein Bild oder Dokument auswählen.", "warning")
@@ -17150,12 +17159,22 @@ def save_partner_standard_uploads(auftrag_id, files, upload_note="", success_mes
             "autohaus",
             "standard",
             upload_note=upload_note,
+            analyze=analyze,
         )
     except Exception as exc:
+        action_label = "Upload/Analyse" if analyze else "Upload"
         upload_result = (
             0,
-            {"_analysis_error": f"Upload/Analyse konnte nicht abgeschlossen werden: {clean_text(str(exc))[:300]}"},
+            {"_analysis_error": f"{action_label} konnte nicht abgeschlossen werden: {clean_text(str(exc))[:300]}"},
         )
+    if not analyze:
+        saved, updates = upload_result if isinstance(upload_result, tuple) else (upload_result, {})
+        analysis_error = clean_text((updates or {}).get("_analysis_error"))
+        if saved:
+            flash(clean_text(success_message) or "Unterlage hochgeladen. Es wurde keine Analyse gestartet.", "success")
+        elif analysis_error:
+            flash(f"Datei konnte nicht hochgeladen werden. {analysis_error}", "warning")
+        return saved
     return flash_upload_analysis_result(upload_result, success_message)
 
 
@@ -23923,12 +23942,13 @@ def partner_auftrag(slug, auftrag_id):
     if request.method == "POST":
         form = request.form
         aktion = form.get("aktion", "speichern")
-        if aktion == "quick_upload_analyze":
+        if aktion == "quick_upload":
             save_partner_standard_uploads(
                 auftrag_id,
                 request.files.getlist("dateien"),
                 upload_note=form.get("upload_notiz"),
-                success_message="Unterlage gespeichert, analysiert und für Autohaus und Werkstatt sichtbar.",
+                success_message="Unterlage hochgeladen. Es wurde keine Analyse gestartet und der Auftrag wurde nicht automatisch verändert.",
+                analyze=False,
             )
             return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
         analyse = clean_text(form.get("analyse_text")) or analyse_text(form.get("beschreibung"))
@@ -24011,6 +24031,7 @@ def partner_auftrag(slug, auftrag_id):
                 "autohaus",
                 "standard",
                 upload_note=form.get("upload_notiz"),
+                analyze=aktion == "upload_analyze",
             )
         except Exception as exc:
             upload_result = (
@@ -24084,6 +24105,62 @@ def partner_auftrag(slug, auftrag_id):
     )
 
 
+@app.route("/partner/<slug>/auftrag/<int:auftrag_id>/dokumente", methods=["GET", "POST"])
+def partner_auftrag_dokumente(slug, auftrag_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
+        abort(404)
+    if auftrag.get("angebotsphase"):
+        return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
+
+    if request.method == "POST":
+        aktion = clean_text(request.form.get("aktion"))
+        if aktion == "upload_standard":
+            save_partner_standard_uploads(
+                auftrag_id,
+                request.files.getlist("dateien"),
+                upload_note=request.form.get("upload_notiz"),
+                success_message="Unterlage hochgeladen. Sie wurde nur gespeichert, nicht analysiert.",
+                analyze=False,
+            )
+        elif aktion == "upload_fertigbilder":
+            files = request.files.getlist("fertigbilder")
+            if not any(file and file.filename for file in files):
+                flash("Bitte zuerst ein Fertigbild oder PDF auswählen.", "warning")
+            else:
+                erlaubte_dateien = get_allowed_finish_uploads(files)
+                if not erlaubte_dateien:
+                    flash("Dateityp nicht unterstützt. Bitte JPG, PNG, HEIC, WEBP oder PDF verwenden.", "warning")
+                else:
+                    saved, _ = save_uploads(
+                        auftrag_id,
+                        erlaubte_dateien,
+                        "autohaus",
+                        "fertigbild",
+                        analyze=False,
+                    )
+                    if saved:
+                        flash(f"{saved} Fertigbild(er) hochgeladen. Es wurde keine Analyse gestartet.", "success")
+        return redirect(url_for("partner_auftrag_dokumente", slug=slug, auftrag_id=auftrag_id))
+
+    sichtbare_dateien = [d for d in list_dateien(auftrag_id) if d.get("quelle") in {"autohaus", "intern", "versicherung"}]
+    standard_dateien = dateien_mit_kategorie(sichtbare_dateien, "standard")
+    fertigbilder = dateien_mit_kategorie(sichtbare_dateien, "fertigbild")
+    return render_template(
+        "partner_auftrag_dokumente.html",
+        autohaus=autohaus,
+        auftrag=auftrag,
+        dateien=standard_dateien,
+        fertigbilder=fertigbilder,
+        dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
+        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
+    )
+
+
 @app.route("/partner/<slug>/auftrag/<int:auftrag_id>/archivieren", methods=["POST"])
 def partner_archivieren(slug, auftrag_id):
     autohaus, redirect_response = partner_session_required(slug)
@@ -24114,6 +24191,9 @@ def partner_dokumente_geprueft(slug, auftrag_id):
         flash("Dokumentdaten sind jetzt doppelt geprüft.", "success")
     else:
         flash("Ihre Prüfung wurde gespeichert. Die Werkstatt prüft die Werte ebenfalls.", "warning")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/partner/"):
+        return redirect(next_url)
     target = "partner_angebot_detail" if auftrag.get("angebotsphase") else "partner_auftrag"
     return redirect(url_for(target, slug=slug, auftrag_id=auftrag_id))
 
@@ -24312,30 +24392,11 @@ def partner_datei_notiz(slug, datei_id):
         """,
         (notiz, datei_id, auftrag["id"]),
     )
-    analyse_from_note = analyse_text(notiz) or notiz[:220]
-    if notiz and analyse_from_note and (
-        not clean_text(auftrag.get("analyse_text"))
-        or len(clean_text(auftrag.get("analyse_text"))) < 10
-    ):
-        db.execute(
-            """
-            UPDATE auftraege
-            SET analyse_text=?, geaendert_am=?
-            WHERE id=?
-            """,
-            (analyse_from_note[:220], now_str(), auftrag["id"]),
-        )
-    else:
-        db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag["id"]))
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag["id"]))
     db.commit()
     db.close()
 
-    if clean_text(datei.get("kategorie")) == "standard":
-        reset_document_review_checks(
-            auftrag["id"],
-            "Bild-/Dateihinweis wurde ergänzt. Bitte die erkannten Daten kurz prüfen.",
-        )
-    flash("Bild-/Dateihinweis gespeichert. Die Werkstatt sieht ihn direkt im Auftrag.", "success")
+    flash("Bild-/Dateihinweis gespeichert. Der Auftrag wurde nicht automatisch verändert.", "success")
     next_url = clean_text(request.form.get("next"))
     if next_url.startswith("/partner/"):
         return redirect(next_url)
