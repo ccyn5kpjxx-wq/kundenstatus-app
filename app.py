@@ -270,6 +270,7 @@ LEXWARE_API_BASE_URL = (os.environ.get("LEXWARE_API_BASE_URL") or "https://api.l
 LEXWARE_APP_BASE_URL = (os.environ.get("LEXWARE_APP_BASE_URL") or "https://app.lexware.de").strip().rstrip("/")
 LEXWARE_TAX_RATE = float(os.environ.get("LEXWARE_TAX_RATE") or 19)
 LEXWARE_AUTO_SYNC_MINUTES = max(5, env_int("LEXWARE_AUTO_SYNC_MINUTES", 30))
+LEXWARE_MIN_DATE = date(2014, 1, 1)
 DATE_FMT = "%d.%m.%Y"
 DATETIME_FMT = "%d.%m.%Y %H:%M"
 MAX_UPLOAD_MB = 25
@@ -9595,6 +9596,17 @@ def save_bonusrechnung_upload(auftrag_id, files, quelle="intern", notiz=""):
     }
 
 
+def lexware_error_text(status_code, details):
+    if isinstance(details, dict):
+        message = clean_text(details.get("message"))
+        error = clean_text(details.get("error"))
+        trace_id = clean_text(details.get("traceId") or details.get("traceid"))
+        parts = [part for part in [message or error, f"Trace-ID {trace_id}" if trace_id else ""] if part]
+        if parts:
+            return f"Lexware API Fehler {status_code}: {' | '.join(parts)}"
+    return f"Lexware API Fehler {status_code}: {details}"
+
+
 def lexware_request(method, path, payload=None, query=""):
     if not LEXWARE_API_KEY:
         raise RuntimeError("LEXWARE_API_KEY fehlt. Bitte in .env.local eintragen.")
@@ -9634,7 +9646,7 @@ def lexware_request(method, path, payload=None, query=""):
                 "Lexware hat gerade zu viele Anfragen bekommen. "
                 "Bitte 1 bis 2 Minuten warten und dann genau einmal erneut klicken."
             )
-        raise RuntimeError(f"Lexware API Fehler {response.status_code}: {details}")
+        raise RuntimeError(lexware_error_text(response.status_code, details))
     if response.status_code == 204 or not response.content:
         return {}
     return response.json()
@@ -11261,9 +11273,28 @@ def ensure_lexware_contact(kunde):
     return contact_id, True, lexware_contact_has_single_billing_address(full_contact)
 
 
-def lexware_datetime(value=None):
-    parsed = parse_date(value) or date.today()
-    return f"{parsed.strftime('%Y-%m-%d')}T00:00:00.000+01:00"
+def parse_date_value(value):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return parse_date(value)
+
+
+def lexware_api_date(value=None, fallback=None):
+    parsed = parse_date_value(value)
+    if parsed and parsed >= LEXWARE_MIN_DATE:
+        return parsed
+    fallback_date = parse_date_value(fallback)
+    if fallback_date and fallback_date >= LEXWARE_MIN_DATE:
+        return fallback_date
+    today = date.today()
+    return today if today >= LEXWARE_MIN_DATE else LEXWARE_MIN_DATE
+
+
+def lexware_datetime(value=None, fallback=None):
+    parsed = lexware_api_date(value, fallback=fallback)
+    return f"{parsed.isoformat()}T00:00:00.000+01:00"
 
 
 def create_lexware_invoice_draft(auftrag, rechnung, net_amount):

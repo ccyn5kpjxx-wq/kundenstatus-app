@@ -593,6 +593,29 @@ def main():
         else "[FEHLER] Kalender-Schnelleintrag erkennt Datum/Wiederholung nicht"
     )
     ok &= parser_ok
+    lexware_date_ok = (
+        portal.lexware_api_date("01.01.0001", fallback=date(2026, 5, 20)) == date(2026, 5, 20)
+        and portal.lexware_datetime("01.01.0001", fallback=date(2026, 5, 20)).startswith("2026-05-20T")
+    )
+    print(
+        "[OK] Lexware-Datum ersetzt zu alte Platzhaltertermine"
+        if lexware_date_ok
+        else "[FEHLER] Lexware-Datum lässt zu alte Platzhaltertermine durch"
+    )
+    ok &= lexware_date_ok
+    lexware_error_ok = (
+        portal.lexware_error_text(
+            406,
+            {"message": "Validation failed: [shippingDate: Datum darf nicht vor dem 01.01.2014 liegen.]", "traceId": "SMOKE"},
+        )
+        == "Lexware API Fehler 406: Validation failed: [shippingDate: Datum darf nicht vor dem 01.01.2014 liegen.] | Trace-ID SMOKE"
+    )
+    print(
+        "[OK] Lexware-Fehler werden kompakt angezeigt"
+        if lexware_error_ok
+        else "[FEHLER] Lexware-Fehler bleiben unleserlich"
+    )
+    ok &= lexware_error_ok
     bonus_beispiel = portal.build_bonusmodell(
         [
             {
