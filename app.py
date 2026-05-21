@@ -3499,11 +3499,16 @@ def extract_structured_data_with_openai(filename, ocr_text, local_text="", visua
 
 
 def normalize_openai_document_data(data, source_text=""):
-    if not data:
+    if not isinstance(data, dict) or not data:
         return {}
+    raw_bauteile = data.get("offene_bauteile", [])
+    if isinstance(raw_bauteile, str):
+        raw_bauteile = [raw_bauteile]
+    elif not isinstance(raw_bauteile, (list, tuple, set)):
+        raw_bauteile = []
     offene_bauteile = [
         compact_whitespace(item)
-        for item in data.get("offene_bauteile", [])
+        for item in raw_bauteile
         if clean_text(item)
     ]
     analyse = clean_text(data.get("kurzanalyse"))
@@ -3539,6 +3544,10 @@ def normalize_openai_document_data(data, source_text=""):
             beschreibung = f"{beschreibung}. Reparaturkosten {rep_max_kosten}"
     if description_parts:
         beschreibung = ". ".join(description_parts)
+    try:
+        analyse_confidence = float(data.get("confidence") or 0)
+    except (TypeError, ValueError):
+        analyse_confidence = 0
     fields = {
         "fahrzeug": clean_text(data.get("vehicle_type")),
         "fin_nummer": clean_text(data.get("fin_nummer")).upper(),
@@ -3553,7 +3562,7 @@ def normalize_openai_document_data(data, source_text=""):
         "schaden_zonen_json": schaden_zonen_json_from_text_values(offene_bauteile, analyse, beschreibung),
         "analyse_pruefen": 1 if data.get("needs_review") else 0,
         "analyse_hinweis": clean_text(data.get("review_reason")),
-        "analyse_confidence": float(data.get("confidence") or 0),
+        "analyse_confidence": analyse_confidence,
     }
     return quality_check_document_fields(fields)
 
@@ -11788,7 +11797,10 @@ def load_saved_analysis_json(value):
         data = json.loads(raw)
     except Exception:
         return {}
-    return normalize_openai_document_data(data)
+    try:
+        return normalize_openai_document_data(data)
+    except Exception:
+        return {}
 
 
 def looks_like_specific_work_text(value):
