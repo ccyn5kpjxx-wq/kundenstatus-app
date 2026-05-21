@@ -24034,6 +24034,26 @@ def partner_auftrag_fallback_response(autohaus, auftrag):
       </div>
     </div>
 
+    <div class="card mb-3 border-danger-subtle">
+      <div class="card-body">
+        <h2 class="h5 text-danger">Reklamation melden</h2>
+        <form method="POST" action="{{ url_for('partner_reklamation', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" enctype="multipart/form-data" class="row g-3">
+          {{ csrf_field()|safe }}
+          <div class="col-12">
+            <label class="form-label">Was stimmt nicht?</label>
+            <textarea name="meldung" class="form-control" rows="4" placeholder="Bitte die Reklamation genau beschreiben" required></textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Bilder oder Dateien</label>
+            <input type="file" name="reklamationsbilder" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.pdf,image/*,application/pdf">
+          </div>
+          <div class="col-12">
+            <button type="submit" class="btn btn-danger">Reklamation als Alarm senden</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div class="d-flex gap-2 flex-wrap">
       <a href="{{ url_for('partner_auftrag_dokumente', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="btn btn-dark">Dokumente öffnen</a>
       <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zum Dashboard</a>
