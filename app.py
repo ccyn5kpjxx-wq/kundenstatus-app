@@ -8507,7 +8507,14 @@ def auftrag_planung_sort_key(auftrag):
 def ensure_auftrag_analysis_from_documents(auftrag):
     if not auftrag:
         return auftrag
-    updates = apply_document_data_to_auftrag(auftrag["id"])
+    try:
+        updates = apply_document_data_to_auftrag(auftrag["id"])
+    except Exception as exc:
+        print(
+            f"WARNUNG: Dokumentdaten fuer Auftrag {auftrag.get('id')} konnten nicht automatisch uebernommen werden: "
+            f"{exc.__class__.__name__}: {clean_text(str(exc))[:300]}"
+        )
+        return auftrag
     if updates:
         auftrag.update(updates)
     return auftrag
@@ -23970,6 +23977,76 @@ def partner_versicherung_freigabe_einplanen(slug, auftrag_id):
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
 
+def partner_auftrag_fallback_response(autohaus, auftrag):
+    return render_template_string(
+        """
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ autohaus['portal_label'] }} - Auftrag</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+  <main class="container py-4">
+    <div class="d-flex justify-content-between gap-3 align-items-start flex-wrap mb-4">
+      <div>
+        <div class="text-muted">{{ autohaus['portal_label'] }}</div>
+        <h1 class="h3 mb-1">{{ auftrag.get('fahrzeug') or 'Auftrag' }}</h1>
+        {% if auftrag.get('kennzeichen') %}<div class="text-muted">{{ auftrag.get('kennzeichen') }}</div>{% endif %}
+      </div>
+      <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zurück</a>
+    </div>
+
+    <div class="alert alert-warning">
+      Die Detailansicht wurde reduziert geladen. Der Auftrag ist erreichbar; einzelne Zusatzbereiche werden gerade übersprungen.
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-body">
+        <h2 class="h5">Status</h2>
+        <span class="badge text-bg-{{ (auftrag.get('status_meta') or {}).get('farbe', 'secondary') }}">
+          {{ (auftrag.get('status_meta') or {}).get('label', 'Offen') }}
+        </span>
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-body">
+        <h2 class="h5">Auftrag</h2>
+        {% if auftrag.get('analyse_text') %}<p class="mb-2">{{ auftrag.get('analyse_text') }}</p>{% endif %}
+        {% if auftrag.get('beschreibung') %}<p class="text-muted mb-0">{{ auftrag.get('beschreibung') }}</p>{% endif %}
+        {% if not auftrag.get('analyse_text') and not auftrag.get('beschreibung') %}
+        <p class="text-muted mb-0">Noch keine Beschreibung hinterlegt.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-body">
+        <h2 class="h5">Termine</h2>
+        <div class="d-flex gap-2 flex-wrap">
+          {% if auftrag.get('annahme_datum') %}<span class="badge text-bg-light border">{{ auftrag.get('partner_annahme_label') or 'Annahme' }} {{ auftrag.get('annahme_datum') }}</span>{% endif %}
+          {% if auftrag.get('abholtermin') %}<span class="badge text-bg-light border">{{ auftrag.get('partner_abholung_label') or 'Abholung' }} {{ auftrag.get('abholtermin') }}</span>{% endif %}
+          {% if not auftrag.get('annahme_datum') and not auftrag.get('abholtermin') %}<span class="text-muted">Noch offen</span>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="{{ url_for('partner_auftrag_dokumente', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="btn btn-dark">Dokumente öffnen</a>
+      <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zum Dashboard</a>
+    </div>
+  </main>
+</body>
+</html>
+        """,
+        autohaus=autohaus,
+        auftrag=auftrag,
+    )
+
+
 @app.route("/partner/<slug>/auftrag/<int:auftrag_id>", methods=["GET", "POST"])
 def partner_auftrag(slug, auftrag_id):
     autohaus, redirect_response = partner_session_required(slug)
@@ -24120,32 +24197,39 @@ def partner_auftrag(slug, auftrag_id):
                 flash("Auftrag gespeichert.", "success")
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
-    sichtbare_dateien = [d for d in list_dateien(auftrag_id) if d.get("quelle") in {"autohaus", "intern", "versicherung"}]
-    standard_dateien = dateien_mit_kategorie(sichtbare_dateien, "standard")
-    fertigbilder = dateien_mit_kategorie(sichtbare_dateien, "fertigbild")
-    chat_nachrichten = list_chat_nachrichten(auftrag_id)
-    mark_chat_gelesen(auftrag_id, "autohaus")
-    versicherung_aufgaben = list_versicherung_aufgaben(auftrag_id, include_done=True) if auftrag.get("versicherung_id") else []
-    pflichtunterlagen = versicherung_pflichtunterlagen_status(auftrag, sichtbare_dateien) if auftrag.get("versicherung_id") else None
-    freigabe_zusammenfassung = build_versicherung_freigabe_zusammenfassung(auftrag, sichtbare_dateien, chat_nachrichten)
-    return render_template(
-        "partner_auftrag.html",
-        autohaus=autohaus,
-        auftrag=auftrag,
-        dateien=standard_dateien,
-        fertigbilder=fertigbilder,
-        dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
-        benachrichtigungen=list_benachrichtigungen(auftrag_id, nur_ungelesen=True),
-        reklamationen=list_reklamationen(auftrag_id),
-        verzoegerungen=list_verzoegerungen(auftrag_id),
-        transport_arten=TRANSPORT_ARTEN,
-        statusliste=STATUSLISTE,
-        chat_nachrichten=chat_nachrichten,
-        versicherung_aufgaben=versicherung_aufgaben,
-        pflichtunterlagen=pflichtunterlagen,
-        freigabe_zusammenfassung=freigabe_zusammenfassung,
-        postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
-    )
+    try:
+        sichtbare_dateien = [d for d in list_dateien(auftrag_id) if d.get("quelle") in {"autohaus", "intern", "versicherung"}]
+        standard_dateien = dateien_mit_kategorie(sichtbare_dateien, "standard")
+        fertigbilder = dateien_mit_kategorie(sichtbare_dateien, "fertigbild")
+        chat_nachrichten = list_chat_nachrichten(auftrag_id)
+        mark_chat_gelesen(auftrag_id, "autohaus")
+        versicherung_aufgaben = list_versicherung_aufgaben(auftrag_id, include_done=True) if auftrag.get("versicherung_id") else []
+        pflichtunterlagen = versicherung_pflichtunterlagen_status(auftrag, sichtbare_dateien) if auftrag.get("versicherung_id") else None
+        freigabe_zusammenfassung = build_versicherung_freigabe_zusammenfassung(auftrag, sichtbare_dateien, chat_nachrichten)
+        return render_template(
+            "partner_auftrag.html",
+            autohaus=autohaus,
+            auftrag=auftrag,
+            dateien=standard_dateien,
+            fertigbilder=fertigbilder,
+            dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
+            benachrichtigungen=list_benachrichtigungen(auftrag_id, nur_ungelesen=True),
+            reklamationen=list_reklamationen(auftrag_id),
+            verzoegerungen=list_verzoegerungen(auftrag_id),
+            transport_arten=TRANSPORT_ARTEN,
+            statusliste=STATUSLISTE,
+            chat_nachrichten=chat_nachrichten,
+            versicherung_aufgaben=versicherung_aufgaben,
+            pflichtunterlagen=pflichtunterlagen,
+            freigabe_zusammenfassung=freigabe_zusammenfassung,
+            postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
+        )
+    except Exception as exc:
+        print(
+            f"WARNUNG: Partner-Auftrag {auftrag_id} wurde reduziert geladen: "
+            f"{exc.__class__.__name__}: {clean_text(str(exc))[:300]}"
+        )
+        return partner_auftrag_fallback_response(autohaus, auftrag)
 
 
 @app.route("/partner/<slug>/auftrag/<int:auftrag_id>/dokumente", methods=["GET", "POST"])
