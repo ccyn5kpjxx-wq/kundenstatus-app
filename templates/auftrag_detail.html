@@ -382,6 +382,11 @@
               {% if datei['hochgeladen_am'] %}<span class="small text-muted">{{ datei['hochgeladen_am'] }}</span>{% endif %}
               <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Öffnen</a>
               <a href="{{ url_for('admin_datei_download', datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+              <form method="POST" action="{{ url_for('admin_datei_loeschen', datei_id=datei['id']) }}" class="m-0" onsubmit="return confirm('Diese hochgeladene Datei wirklich löschen?')">
+                {{ csrf_field()|safe }}
+                <input type="hidden" name="next" value="{{ detail_self_url }}">
+                <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
+              </form>
             </div>
             {% if datei['extrakt_kurz'] %}
             <div class="small text-muted mt-2">{{ datei['extrakt_kurz'] }}</div>
@@ -727,6 +732,11 @@
               {% endif %}
               <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Original öffnen</a>
               <a href="{{ url_for('admin_datei_download', datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+              <form method="POST" action="{{ url_for('admin_datei_loeschen', datei_id=datei['id']) }}" class="m-0" onsubmit="return confirm('Diese hochgeladene Datei wirklich löschen?')">
+                {{ csrf_field()|safe }}
+                <input type="hidden" name="next" value="{{ detail_self_url }}">
+                <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
+              </form>
             </div>
             {% if datei['notiz'] %}
               <div class="mt-3">
@@ -779,6 +789,11 @@
               <div class="fw-semibold flex-grow-1 breakable-text">{{ datei['original_name'] }}</div>
               <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Original öffnen</a>
               <a href="{{ url_for('admin_datei_download', datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+              <form method="POST" action="{{ url_for('admin_datei_loeschen', datei_id=datei['id']) }}" class="m-0" onsubmit="return confirm('Dieses hochgeladene Bild wirklich löschen?')">
+                {{ csrf_field()|safe }}
+                <input type="hidden" name="next" value="{{ detail_self_url }}">
+                <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
+              </form>
             </div>
           </div>
           {% endfor %}

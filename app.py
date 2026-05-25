@@ -11576,6 +11576,36 @@ def delete_partner_datei(autohaus_id, datei_id):
     return True, auftrag
 
 
+def delete_admin_datei(datei_id):
+    datei = get_datei(datei_id)
+    if not datei:
+        return False, None
+    auftrag = get_auftrag(datei["auftrag_id"])
+    if not auftrag:
+        return False, None
+
+    stored_name = pathlib.Path(clean_text(datei.get("stored_name"))).name
+    path = UPLOAD_DIR / stored_name
+    try:
+        move_upload_to_deleted_area(path, f"admin-datei-{datei_id}")
+    except OSError:
+        pass
+
+    db = get_db()
+    delete_datei_backup(db, datei_id)
+    db.execute("DELETE FROM dateien WHERE id=? AND auftrag_id=?", (datei_id, auftrag["id"]))
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag["id"]))
+    db.commit()
+    db.close()
+
+    if clean_text(datei.get("kategorie")) == "standard":
+        reset_document_review_checks(
+            auftrag["id"],
+            "Eine Unterlage wurde entfernt. Bitte die erkannten Daten kurz prüfen.",
+        )
+    return True, auftrag
+
+
 def hydrate_datei(datei):
     if not datei:
         return None
@@ -22506,6 +22536,22 @@ def admin_datei_download(datei_id):
         as_attachment=True,
         missing_back_url=url_for("auftrag_detail", auftrag_id=datei["auftrag_id"]),
     )
+
+
+@app.route("/admin/datei/<int:datei_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_datei_loeschen(datei_id):
+    ok, auftrag = delete_admin_datei(datei_id)
+    if ok:
+        flash("Datei entfernt. Falls dadurch erkannte Daten falsch waren, bitte die Akte kurz prüfen.", "info")
+    else:
+        flash("Diese Datei konnte nicht gelöscht werden.", "warning")
+    next_url = clean_text(request.form.get("next") or request.args.get("next"))
+    if next_url.startswith("/admin/"):
+        return redirect(next_url)
+    if auftrag:
+        return redirect(url_for("auftrag_detail", auftrag_id=auftrag["id"]))
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/admin/loeschen/<int:auftrag_id>", methods=["POST"])
