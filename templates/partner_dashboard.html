@@ -817,8 +817,8 @@
               {% if angebot['kennzeichen'] %}{{ angebot['kennzeichen'] }}{% endif %}
               {% if angebot['kunde_name'] %}{% if angebot['kennzeichen'] %} · {% endif %}{{ angebot['kunde_name'] }}{% endif %}
             </div>
-            {% if angebot['werkstatt_angebot_text'] %}
-            <div class="mt-2">{{ angebot['werkstatt_angebot_text']|truncate(180, True) }}</div>
+            {% if angebot['werkstatt_angebot_text_display'] %}
+            <div class="mt-2">{{ angebot['werkstatt_angebot_text_display']|truncate(180, True) }}</div>
             {% endif %}
           </div>
           <div class="offer-price">

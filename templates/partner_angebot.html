@@ -525,8 +525,8 @@
         {% if angebot['werkstatt_angebot_preis'] %}
         <div class="h4 mb-2">{{ angebot['werkstatt_angebot_preis_label'] }}</div>
         {% endif %}
-        {% if angebot['werkstatt_angebot_text'] %}
-        <div class="mb-3" style="white-space:pre-wrap;">{{ angebot['werkstatt_angebot_text'] }}</div>
+        {% if angebot['werkstatt_angebot_text_display'] %}
+        <div class="mb-3" style="white-space:pre-wrap;">{{ angebot['werkstatt_angebot_text_display'] }}</div>
         {% endif %}
         {% if angebot['werkstatt_angebot_notiz'] %}
         <div class="border-top pt-3 mb-3" style="white-space:pre-wrap;">{{ angebot['werkstatt_angebot_notiz'] }}</div>

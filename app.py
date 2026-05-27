@@ -8288,6 +8288,11 @@ def row_to_auftrag(row):
     auftrag["bonus_netto_betrag_label"] = format_bonus_money(bonus_amount) if bonus_amount else ""
     auftrag["bonus_preis_aktualisiert_am"] = clean_text(auftrag.get("bonus_preis_aktualisiert_am"))
     auftrag["werkstatt_angebot_text"] = clean_text(auftrag.get("werkstatt_angebot_text"))
+    auftrag["werkstatt_angebot_text_display"] = (
+        auftrag["werkstatt_angebot_text"]
+        or clean_text(auftrag.get("beschreibung"))
+        or clean_text(auftrag.get("analyse_text"))
+    )
     auftrag["werkstatt_angebot_preis"] = clean_text(auftrag.get("werkstatt_angebot_preis"))
     auftrag["werkstatt_angebot_preis_label"] = format_werkstatt_angebot_preis(
         auftrag["werkstatt_angebot_preis"]
@@ -18173,6 +18178,9 @@ def angebot_annehmen(auftrag_id):
     angebot_preis = clean_text((auftrag or {}).get("werkstatt_angebot_preis"))
     angebot_betrag = positive_money_amount(angebot_preis) or 0.0
     bonus_betrag = positive_money_amount((auftrag or {}).get("bonus_netto_betrag")) or 0.0
+    angebot_text = clean_text((auftrag or {}).get("werkstatt_angebot_text"))
+    beschreibung = clean_text((auftrag or {}).get("beschreibung"))
+    fallback_text = angebot_text or beschreibung or clean_text((auftrag or {}).get("analyse_text"))
     updates = {
         "angebotsphase": 0,
         "angebot_status": "angenommen",
@@ -18181,6 +18189,8 @@ def angebot_annehmen(auftrag_id):
     if angebot_betrag and not bonus_betrag:
         updates["bonus_netto_betrag"] = round(angebot_betrag, 2)
         updates["bonus_preis_aktualisiert_am"] = now_str()
+    if fallback_text and not beschreibung:
+        updates["beschreibung"] = fallback_text
 
     db = get_db()
     assignments = ", ".join(f"{field}=?" for field in updates)

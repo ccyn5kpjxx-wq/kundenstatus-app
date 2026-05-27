@@ -434,7 +434,7 @@
       </div>
     </div>
 
-    {% if auftrag['angebot_status'] == 'angenommen' and (auftrag['werkstatt_angebot_preis'] or auftrag['werkstatt_angebot_text'] or auftrag['werkstatt_angebot_notiz']) %}
+    {% if auftrag['angebot_status'] == 'angenommen' and (auftrag['werkstatt_angebot_preis'] or auftrag['werkstatt_angebot_text_display'] or auftrag['werkstatt_angebot_notiz']) %}
     <div class="panel mb-4 border border-success-subtle">
       <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
         <div>
@@ -449,8 +449,8 @@
         </div>
         {% endif %}
       </div>
-      {% if auftrag['werkstatt_angebot_text'] %}
-      <div class="mt-3" style="white-space:pre-wrap;">{{ auftrag['werkstatt_angebot_text'] }}</div>
+      {% if auftrag['werkstatt_angebot_text_display'] %}
+      <div class="mt-3" style="white-space:pre-wrap;">{{ auftrag['werkstatt_angebot_text_display'] }}</div>
       {% endif %}
       {% if auftrag['werkstatt_angebot_notiz'] %}
       <div class="soft-note mt-3" style="white-space:pre-wrap;">{{ auftrag['werkstatt_angebot_notiz'] }}</div>
