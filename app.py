@@ -8287,6 +8287,10 @@ def row_to_auftrag(row):
     auftrag["bonus_netto_betrag"] = bonus_amount or 0.0
     auftrag["bonus_netto_betrag_label"] = format_bonus_money(bonus_amount) if bonus_amount else ""
     auftrag["bonus_preis_aktualisiert_am"] = clean_text(auftrag.get("bonus_preis_aktualisiert_am"))
+    auftrag["werkstatt_angebot_preis"] = clean_text(auftrag.get("werkstatt_angebot_preis"))
+    auftrag["werkstatt_angebot_preis_label"] = format_werkstatt_angebot_preis(
+        auftrag["werkstatt_angebot_preis"]
+    )
     auftrag["angebot_status"] = clean_text(auftrag.get("angebot_status")) or (
         "angefragt" if auftrag["angebot_abgesendet"] else "entwurf"
     )
@@ -8784,6 +8788,24 @@ def format_bonus_money(value):
         amount = 0.0
     formatted = f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"{formatted} €"
+
+
+def format_werkstatt_angebot_preis(value):
+    text = clean_text(value)
+    if not text:
+        return ""
+    normalized = text.lower()
+    if "€" in text or "eur" in normalized or "euro" in normalized:
+        return text
+    amount = positive_money_amount(text)
+    if amount is None:
+        return text
+    compact = re.sub(r"\s+", " ", normalized).strip()
+    if not re.fullmatch(r"(?:ca\.?\s*)?\d[\d., ]*(?:\s*(?:netto|brutto))?", compact):
+        return text
+    prefix = "ca. " if compact.startswith("ca") else ""
+    suffix = " netto" if "netto" in compact else (" brutto" if "brutto" in compact else "")
+    return f"{prefix}{format_bonus_money(amount)}{suffix}"
 
 
 def is_bonusmodell_aktiv(autohaus):
@@ -23118,6 +23140,14 @@ def partner_dashboard(slug):
     alle_vorgaenge = list_auftraege(autohaus["id"], include_archived=True, include_angebote=True)
     auftraege = [a for a in alle_auftraege if not a["archiviert"]]
     archivierte_auftraege = [a for a in alle_auftraege if a["archiviert"]]
+    werkstattangebote = [
+        a
+        for a in alle_vorgaenge
+        if not a["archiviert"]
+        and a["angebotsphase"]
+        and a["angebot_status"] == "angebot_abgegeben"
+        and int(a.get("versicherung_id") or 0) == 0
+    ]
     versicherungsfaelle = [
         a for a in alle_vorgaenge if not a["archiviert"] and int(a.get("versicherung_id") or 0) > 0
     ]
@@ -23127,6 +23157,7 @@ def partner_dashboard(slug):
         autohaus=autohaus,
         auftraege=auftraege,
         archivierte_auftraege=archivierte_auftraege,
+        werkstattangebote=werkstattangebote,
         versicherungsfaelle=versicherungsfaelle,
         benachrichtigungen=list_autohaus_benachrichtigungen(autohaus["id"]),
         postfach_items=postfach_items,
