@@ -434,6 +434,30 @@
       </div>
     </div>
 
+    {% if auftrag['angebot_status'] == 'angenommen' and (auftrag['werkstatt_angebot_preis'] or auftrag['werkstatt_angebot_text'] or auftrag['werkstatt_angebot_notiz']) %}
+    <div class="panel mb-4 border border-success-subtle">
+      <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
+        <div>
+          <div class="section-kicker">Angenommenes Angebot</div>
+          <h2 class="h4 mb-1">Werkstatt-Angebot übernommen</h2>
+          <div class="text-muted">Dieses Angebot wurde angenommen und läuft jetzt als Auftrag weiter.</div>
+        </div>
+        {% if auftrag['werkstatt_angebot_preis_label'] %}
+        <div class="text-end">
+          <div class="section-kicker">Vereinbarter Preis</div>
+          <div class="h4 mb-0">{{ auftrag['werkstatt_angebot_preis_label'] }}</div>
+        </div>
+        {% endif %}
+      </div>
+      {% if auftrag['werkstatt_angebot_text'] %}
+      <div class="mt-3" style="white-space:pre-wrap;">{{ auftrag['werkstatt_angebot_text'] }}</div>
+      {% endif %}
+      {% if auftrag['werkstatt_angebot_notiz'] %}
+      <div class="soft-note mt-3" style="white-space:pre-wrap;">{{ auftrag['werkstatt_angebot_notiz'] }}</div>
+      {% endif %}
+    </div>
+    {% endif %}
+
     <form method="POST" enctype="multipart/form-data" class="quick-upload-panel mb-4" data-upload-form id="pflicht-upload">
       <div class="quick-upload-grid">
         <div>

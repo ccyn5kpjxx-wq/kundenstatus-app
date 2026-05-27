@@ -8287,10 +8287,12 @@ def row_to_auftrag(row):
     auftrag["bonus_netto_betrag"] = bonus_amount or 0.0
     auftrag["bonus_netto_betrag_label"] = format_bonus_money(bonus_amount) if bonus_amount else ""
     auftrag["bonus_preis_aktualisiert_am"] = clean_text(auftrag.get("bonus_preis_aktualisiert_am"))
+    auftrag["werkstatt_angebot_text"] = clean_text(auftrag.get("werkstatt_angebot_text"))
     auftrag["werkstatt_angebot_preis"] = clean_text(auftrag.get("werkstatt_angebot_preis"))
     auftrag["werkstatt_angebot_preis_label"] = format_werkstatt_angebot_preis(
         auftrag["werkstatt_angebot_preis"]
     )
+    auftrag["werkstatt_angebot_notiz"] = clean_text(auftrag.get("werkstatt_angebot_notiz"))
     auftrag["angebot_status"] = clean_text(auftrag.get("angebot_status")) or (
         "angefragt" if auftrag["angebot_abgesendet"] else "entwurf"
     )
@@ -18167,16 +18169,24 @@ def apply_delay_to_order(auftrag_id, start_datum="", fertig_datum="", abholtermi
 
 
 def angebot_annehmen(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    angebot_preis = clean_text((auftrag or {}).get("werkstatt_angebot_preis"))
+    angebot_betrag = positive_money_amount(angebot_preis) or 0.0
+    bonus_betrag = positive_money_amount((auftrag or {}).get("bonus_netto_betrag")) or 0.0
+    updates = {
+        "angebotsphase": 0,
+        "angebot_status": "angenommen",
+        "geaendert_am": now_str(),
+    }
+    if angebot_betrag and not bonus_betrag:
+        updates["bonus_netto_betrag"] = round(angebot_betrag, 2)
+        updates["bonus_preis_aktualisiert_am"] = now_str()
+
     db = get_db()
+    assignments = ", ".join(f"{field}=?" for field in updates)
     db.execute(
-        """
-        UPDATE auftraege
-        SET angebotsphase=0,
-            angebot_status='angenommen',
-            geaendert_am=?
-        WHERE id=?
-        """,
-        (now_str(), auftrag_id),
+        f"UPDATE auftraege SET {assignments} WHERE id=?",
+        tuple(updates.values()) + (auftrag_id,),
     )
     db.commit()
     db.close()
