@@ -190,8 +190,8 @@
         <div class="status-track">
           <span class="track-step {{ 'is-done' if angebot else 'is-active' }}">1. Daten erfassen</span>
           <span class="track-step {{ 'is-done' if angebot and angebot['angebot_abgesendet'] else ('is-active' if angebot else '') }}">2. Anfrage absenden</span>
-          <span class="track-step {{ 'is-done' if angebot and angebot['angebot_status'] == 'angebot_abgegeben' else ('is-active' if angebot and angebot['angebot_abgesendet'] else '') }}">3. Werkstatt prüft</span>
-          <span class="track-step {{ 'is-active' if angebot and angebot['angebot_status'] == 'angebot_abgegeben' else '' }}">4. Angebot annehmen</span>
+          <span class="track-step {{ 'is-done' if angebot and angebot['angebot_status'] in ['angebot_abgegeben', 'abgelehnt'] else ('is-active' if angebot and angebot['angebot_abgesendet'] else '') }}">3. Werkstatt prüft</span>
+          <span class="track-step {{ 'is-active' if angebot and angebot['angebot_status'] in ['angebot_abgegeben', 'abgelehnt'] else '' }}">4. Angebot entscheiden</span>
         </div>
       </div>
 
@@ -506,6 +506,8 @@
         <h4 class="mb-3">Status</h4>
         {% if angebot['angebot_status'] == 'angebot_abgegeben' %}
           <span class="chip">Angebot der Werkstatt liegt vor</span>
+        {% elif angebot['angebot_status'] == 'abgelehnt' %}
+          <span class="chip">Werkstatt-Angebot abgelehnt</span>
         {% elif angebot['angebot_abgesendet'] %}
           <span class="chip">Wartet auf Werkstatt-Angebot</span>
         {% else %}
@@ -517,7 +519,7 @@
         {% if angebot['annahme_datum'] %}<span class="chip">{{ angebot['angebot_annahme_label'] }} {{ angebot['annahme_datum'] }}</span>{% endif %}
         {% if angebot['abholtermin'] %}<span class="chip">{{ angebot['angebot_abholung_label'] }} {{ angebot['abholtermin'] }}</span>{% endif %}
       </div>
-      {% if angebot['angebot_status'] == 'angebot_abgegeben' %}
+      {% if angebot['angebot_status'] in ['angebot_abgegeben', 'abgelehnt'] %}
       <div class="border rounded-4 p-4 mt-4" style="background:#f8f2e8;border-color:#e4d6c3 !important;">
         <div class="fw-bold mb-2">Angebot der Werkstatt</div>
         {% if angebot['werkstatt_angebot_preis'] %}
@@ -532,9 +534,21 @@
         {% if angebot['werkstatt_angebot_am'] %}
         <div class="text-muted small mb-3">Aktualisiert am {{ angebot['werkstatt_angebot_am'] }}</div>
         {% endif %}
-        <form method="POST" action="{{ url_for('partner_angebot_annehmen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}">
-          <button type="submit" class="btn btn-dark btn-lg">Angebot annehmen</button>
-        </form>
+        {% if angebot['angebot_status'] == 'abgelehnt' %}
+        <div class="alert alert-light border mb-0">Dieses Angebot wurde abgelehnt. Die Anfrage bleibt gespeichert.</div>
+        {% else %}
+        <div class="d-flex gap-2 flex-wrap">
+          <form method="POST" action="{{ url_for('partner_angebot_annehmen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="m-0">
+            {{ csrf_field()|safe }}
+            <button type="submit" class="btn btn-dark btn-lg">Angebot annehmen</button>
+          </form>
+          <form method="POST" action="{{ url_for('partner_angebot_ablehnen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="m-0" onsubmit="return confirm('Dieses Werkstatt-Angebot wirklich ablehnen?')">
+            {{ csrf_field()|safe }}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button type="submit" class="btn btn-outline-danger btn-lg">Ablehnen</button>
+          </form>
+        </div>
+        {% endif %}
       </div>
       {% endif %}
       {% endif %}

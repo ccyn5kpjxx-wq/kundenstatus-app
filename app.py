@@ -18182,6 +18182,21 @@ def angebot_annehmen(auftrag_id):
     db.close()
 
 
+def angebot_ablehnen(auftrag_id):
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET angebot_status='abgelehnt',
+            geaendert_am=?
+        WHERE id=? AND angebotsphase=1 AND angebot_status='angebot_abgegeben'
+        """,
+        (now_str(), auftrag_id),
+    )
+    db.commit()
+    db.close()
+
+
 def refresh_offer_texts(auftrag_id, customer_short="", customer_long=""):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag:
@@ -23936,6 +23951,32 @@ def partner_angebot_annehmen(slug, auftrag_id):
     angebot_annehmen(auftrag_id)
     flash("Angebot angenommen. Das Fahrzeug wurde in Ihre Aufträge übernommen.", "success")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+
+
+@app.route("/partner/<slug>/angebot/<int:auftrag_id>/ablehnen", methods=["POST"])
+def partner_angebot_ablehnen(slug, auftrag_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    angebot = get_auftrag(auftrag_id)
+    if not angebot or angebot.get("autohaus_id") != autohaus["id"] or not angebot.get("angebotsphase"):
+        abort(404)
+    if angebot.get("angebot_status") != "angebot_abgegeben":
+        flash("Dieses Angebot kann nicht mehr abgelehnt werden.", "warning")
+        return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
+
+    angebot_ablehnen(auftrag_id)
+    add_benachrichtigung(
+        auftrag_id,
+        "Werkstatt-Angebot abgelehnt",
+        f"{autohaus['name']} hat das Werkstatt-Angebot abgelehnt. Der Vorgang bleibt als Angebotsanfrage gespeichert.",
+        quelle="autohaus",
+    )
+    flash("Angebot abgelehnt. Der Vorgang bleibt als Angebotsanfrage gespeichert.", "info")
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith(f"/partner/{slug}"):
+        return redirect(next_url)
+    return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
 
 
 @app.route("/partner/<slug>/versicherung/<int:auftrag_id>/sendefreigabe", methods=["POST"])
