@@ -25,6 +25,23 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
+  .mail-assignment {
+    border: 1px solid #d7e7df;
+    border-radius: 8px;
+    background: #f7fbf8;
+    padding: .75rem;
+  }
+  .mail-assignment-form {
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) auto auto;
+    gap: .5rem;
+    align-items: center;
+  }
+  @media (max-width: 720px) {
+    .mail-assignment-form {
+      grid-template-columns: 1fr;
+    }
+  }
   .api-box {
     border: 1px solid #cbe0e3;
     border-radius: 18px;
@@ -263,9 +280,13 @@
               </div>
             </div>
           </div>
+          <form method="POST" action="{{ url_for('admin_emails_sync_schaden') }}" class="m-0">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-brand" {% if not schaden_mail.imap_configured %}disabled{% endif %}>Schaden-Mailbox abrufen</button>
+          </form>
         </div>
         <div class="text-muted small">
-          Empfehlung: eigene Adresse wie <code>schaden@auto-lackierzentrum.de</code> oder <code>schadenmeldung@...</code> anlegen. Danach <code>SCHADEN_MAIL_ADDRESS</code>, <code>SCHADEN_SMTP_*</code> und <code>SCHADEN_IMAP_*</code> in <code>.env.local</code> setzen.
+          Das Portal liest Schadenmails als Kopie ein und lässt die Originale im Webmail bestehen. Zugeordnete Antworten erscheinen direkt in der jeweiligen Fallakte.
           {% if schaden_mail.missing %}
           Noch offen: <code>{{ schaden_mail.missing|join('</code>, <code>')|safe }}</code>.
           {% endif %}
@@ -311,19 +332,27 @@
     </div>
   </div>
   {% if emails %}
+    <datalist id="email-auftrag-candidates">
+      {% for candidate in email_zuordnung_auftraege %}
+      <option value="{{ candidate['id'] }}">{{ candidate['label'] }}</option>
+      {% endfor %}
+    </datalist>
     <div class="email-list">
       {% for email in emails %}
-      <div class="email-item {{ 'is-new' if email['is_neu'] else '' }}">
+      <div class="email-item {{ 'is-new' if email['is_neu'] else '' }}" id="email-{{ email['id'] }}">
         <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-2">
           <div>
             <div class="d-flex gap-2 align-items-center flex-wrap mb-1">
               {% if email['is_neu'] %}<span class="badge text-bg-danger">neu</span>{% endif %}
               <span class="badge text-bg-secondary">{{ email['quelle'] }}</span>
               {% if email['ziel_modul'] %}
-                {% set module_badge = 'warning' if email['ziel_modul'] == 'rechnungen' else ('info' if email['ziel_modul'] == 'einkauf' else ('primary' if email['ziel_modul'] == 'versicherung' else ('danger' if email['ziel_modul'] == 'reklamationen' else 'light border'))) %}
+                {% set module_badge = 'warning' if email['ziel_modul'] == 'rechnungen' else ('info' if email['ziel_modul'] == 'einkauf' else ('primary' if email['ziel_modul'] == 'versicherung' else ('danger' if email['ziel_modul'] == 'reklamationen' else ('success' if email['ziel_modul'] == 'lead' else 'light border')))) %}
                 <span class="badge text-bg-{{ module_badge }}">{{ email['ziel_modul_label'] }}</span>
               {% elif email['kategorie'] != 'allgemein' %}
                 <span class="badge text-bg-light border">{{ email['kategorie_label'] }}</span>
+              {% endif %}
+              {% if email['lead_id'] %}
+                <span class="badge text-bg-success">Lead #{{ email['lead_id'] }}</span>
               {% endif %}
               <strong>{{ email['betreff'] }}</strong>
             </div>
@@ -331,8 +360,43 @@
               {{ email['absender_display'] }} · {{ email['empfangen_am'] }}
               {% if email['empfaenger'] %} · an {{ email['empfaenger'] }}{% endif %}
             </div>
+            <div class="mail-assignment mt-2">
+              <div class="d-flex gap-2 align-items-start flex-wrap mb-2">
+                <span class="badge text-bg-{{ email['zuordnung_badge'] }}">
+                  {{ 'Zugeordnet' if email['zuordnung_status'] == 'zugeordnet' else 'Zuordnung offen' }}
+                </span>
+                <div>
+                  {% if email['zuordnung_url'] %}
+                    <a href="{{ email['zuordnung_url'] }}" class="fw-bold">{{ email['zuordnung_label'] }}</a>
+                  {% else %}
+                    <span class="fw-bold">{{ email['zuordnung_label'] }}</span>
+                  {% endif %}
+                  <div class="text-muted small">
+                    {{ email['zuordnung_detail'] }}
+                    {% if email['zuordnung_hinweis'] %} · {{ email['zuordnung_hinweis'] }}{% endif %}
+                    {% if email['zuordnung_manuell'] %} · manuell gesetzt{% endif %}
+                  </div>
+                </div>
+              </div>
+              <form method="POST" action="{{ url_for('admin_email_zuordnung', email_id=email['id']) }}" class="mail-assignment-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="text" name="auftrag_id" class="form-control form-control-sm" list="email-auftrag-candidates" placeholder="Fallakte/Auftrag-ID" value="{{ email['zuordnung_auftrag_id'] or '' }}">
+                <button type="submit" class="btn btn-sm btn-soft">Zuordnen</button>
+                {% if email['zuordnung_auftrag_id'] %}
+                <button type="submit" name="zuordnung_action" value="loesen" class="btn btn-sm btn-outline-secondary">Lösen</button>
+                {% endif %}
+              </form>
+            </div>
           </div>
           <div class="d-flex gap-2 flex-wrap">
+            {% if email['lead_id'] %}
+            <a href="{{ email['lead_url'] }}" class="btn btn-success btn-sm">Lead öffnen</a>
+            {% else %}
+            <form method="POST" action="{{ url_for('admin_email_to_lead', email_id=email['id']) }}" class="m-0">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-outline-success btn-sm">Als Lead übernehmen</button>
+            </form>
+            {% endif %}
             <form method="POST" action="{{ url_for('admin_email_einkauf_analysieren', email_id=email['id']) }}" class="m-0">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-soft btn-sm">Als Einkaufsangebot prüfen</button>

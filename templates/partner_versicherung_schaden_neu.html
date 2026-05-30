@@ -15,16 +15,13 @@
     .panel { background:#fffdf9; border:1px solid #e4d6c3; border-radius:22px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
     .step-card { border:1px solid #e4d6c3; border-radius:18px; background:#fffaf2; padding:18px; height:100%; }
     .step-number { width:34px; height:34px; border-radius:50%; background:#17212a; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-weight:700; margin-bottom:10px; }
-    .damage-map { position:relative; width:100%; aspect-ratio:13/7; min-height:260px; border:1px solid #e4d6c3; border-radius:18px; background:#f7f1e8; overflow:hidden; }
-    .damage-car { position:absolute; inset:5% 4%; width:92%; height:90%; }
-    .damage-zone-check { position:absolute; opacity:0; pointer-events:none; }
-    .damage-zone-label { position:absolute; transform:translate(-50%,-50%); border:1px solid #cdbda8; border-radius:999px; background:rgba(255,253,249,.94); color:#21303b; padding:.42rem .65rem; font-size:.82rem; font-weight:700; cursor:pointer; box-shadow:0 8px 18px rgba(64,47,25,.12); white-space:nowrap; }
-    .damage-zone-check:checked + .damage-zone-label { background:#a23f2d; border-color:#a23f2d; color:#fff; }
     .soft-note { border:1px solid #d9cab4; border-radius:16px; background:#f8f2e8; padding:14px 16px; color:#5e5144; }
+    .damage-type-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; }
+    .damage-type-card { border:1px solid #e4d6c3; border-radius:14px; background:#fffaf2; padding:.9rem; }
+    .damage-type-card span { display:block; color:#8b5e2e; font-size:.76rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
     @media (max-width:575.98px) {
-      .damage-map { min-height:360px; aspect-ratio:3/4; }
-      .damage-zone-label { font-size:.76rem; padding:.36rem .5rem; }
       .panel { padding:20px; }
+      .damage-type-grid { grid-template-columns:1fr; }
     }
   </style>
 </head>
@@ -41,7 +38,7 @@
         <div>
           <div class="badge text-bg-dark mb-3">Versicherungsfall</div>
           <h1 class="mb-2">Schaden für Kunden melden</h1>
-          <div class="text-muted">Gutachten, Fotos und Fahrzeugdaten einmal erfassen. Werkstatt und Versicherung sehen denselben Stand.</div>
+          <div class="text-muted">Das Autohaus meldet den Versicherungsschaden selbst über dieses Portal an die Versicherung. Gärtner übernimmt den Fall nach Freigabe und Einplanung.</div>
         </div>
         <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zurück</a>
       </div>
@@ -51,8 +48,8 @@
       <div class="col-md-4">
         <div class="step-card">
           <div class="step-number">1</div>
-          <div class="fw-bold">Schaden melden</div>
-          <div class="text-muted small">Kunde, Fahrzeug, Versicherung und Schadenbereiche eintragen.</div>
+          <div class="fw-bold">Kunde kommt zur Werkstatt</div>
+          <div class="text-muted small">Autohaus erfasst Kunde, Fahrzeug, Versicherung und Schadeninfo direkt im Portal.</div>
         </div>
       </div>
       <div class="col-md-4">
@@ -65,8 +62,8 @@
       <div class="col-md-4">
         <div class="step-card">
           <div class="step-number">3</div>
-          <div class="fw-bold">Freigabe abwarten</div>
-          <div class="text-muted small">Nach Freigabe kann das Fahrzeug als Auftrag eingeplant werden.</div>
+          <div class="fw-bold">E-Mail prüfen und senden</div>
+          <div class="text-muted small">Das Autohaus prüft den Text und sendet das Paket per Schaden-Mailbox an die Versicherung.</div>
         </div>
       </div>
     </div>
@@ -128,8 +125,9 @@
           <input type="text" name="versicherungsnehmer" class="form-control form-control-lg" value="{{ request.form.get('versicherungsnehmer') or (vorlage['versicherungsnehmer'] if vorlage else '') }}">
         </div>
         <div class="col-md-6">
-          <label class="form-label">Telefon Kunde</label>
-          <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ request.form.get('kontakt_telefon') or (vorlage['kontakt_telefon'] if vorlage else '') }}">
+          <label class="form-label">Handy / WhatsApp Kunde</label>
+          <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ request.form.get('kontakt_telefon') or (vorlage['kontakt_telefon'] if vorlage else '') }}" placeholder="z.B. 0171 1234567">
+          <div class="form-text">Mit der Handynummer kann der Kundenstatus später per QR-Link oder WhatsApp vorbereitet werden.</div>
         </div>
         <div class="col-md-3" id="pflicht-schadennummer">
           <label class="form-label">Schaden-Nr.</label>
@@ -142,19 +140,35 @@
 
         <div class="col-12 pt-2">
           <h2 class="h4 mb-1">Fahrzeug und Schaden</h2>
-          <div class="text-muted">Für die Meldung reichen Fahrzeugdaten, sichtbare Schadenbereiche und die vorhandenen Unterlagen. Technische Kalkulationsdaten lädt die Werkstatt intern nach.</div>
+          <div class="text-muted">Für die Meldung reichen Fahrzeugdaten, eine kurze Schadenbeschreibung und die vorhandenen Unterlagen. Kalkulationen und Gutachten werden nach dem Upload ausgelesen.</div>
         </div>
-        <div class="col-md-5">
+        <div class="col-md-4">
           <label class="form-label">Fahrzeug</label>
-          <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ request.form.get('fahrzeug') or (vorlage['fahrzeug'] if vorlage else '') }}" required>
+          <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ request.form.get('fahrzeug') or (vorlage['fahrzeug'] if vorlage else '') }}" required data-vehicle-input>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
           <label class="form-label">Kennzeichen</label>
           <input type="text" name="kennzeichen" class="form-control form-control-lg" value="{{ request.form.get('kennzeichen') or (vorlage['kennzeichen'] if vorlage else '') }}" style="text-transform:uppercase;">
         </div>
         <div class="col-md-4" id="pflicht-fahrzeugdaten">
           <label class="form-label">FIN</label>
-          <input type="text" name="fin_nummer" class="form-control form-control-lg" value="{{ request.form.get('fin_nummer') or (vorlage['fin_nummer'] if vorlage else '') }}" style="text-transform:uppercase;">
+          <div class="input-group input-group-lg" data-fin-widget>
+            <input type="text" name="fin_nummer" class="form-control" value="{{ request.form.get('fin_nummer') or (vorlage['fin_nummer'] if vorlage else '') }}" style="text-transform:uppercase;" data-fin-input>
+            <button class="btn btn-outline-dark" type="button" data-fin-analyze>FIN analysieren</button>
+          </div>
+          <div class="form-text" data-fin-result>Lokale Prüfung erkennt Hersteller, Modellcode und Baujahr-/Modelljahr-Hinweis, wenn der Code bekannt ist. Exakte Ausstattung braucht später eine FIN-Datenquelle.</div>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">HSN</label>
+          <input type="text" name="hsn_nummer" class="form-control form-control-lg" value="{{ request.form.get('hsn_nummer') or (vorlage['hsn_nummer'] if vorlage else '') }}" placeholder="2.1">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">TSN</label>
+          <input type="text" name="tsn_nummer" class="form-control form-control-lg" value="{{ request.form.get('tsn_nummer') or (vorlage['tsn_nummer'] if vorlage else '') }}" placeholder="2.2" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Kilometerstand</label>
+          <input type="text" name="kilometerstand" class="form-control form-control-lg" value="{{ request.form.get('kilometerstand') or (vorlage['kilometerstand'] if vorlage else '') }}" placeholder="z.B. 84.500">
         </div>
         <div class="col-md-4">
           <label class="form-label">Schadenart</label>
@@ -164,21 +178,31 @@
             <option value="{{ key }}" {% if key == selected_art %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
+          <div class="form-text">Wichtig für Selbstbeteiligung und mögliche Versicherungsfolge.</div>
         </div>
-        <div class="col-md-8">
+        <div class="col-md-4">
+          <label class="form-label">Selbstbeteiligung</label>
+          <input type="text" name="schaden_selbstbeteiligung" class="form-control form-control-lg" value="{{ request.form.get('schaden_selbstbeteiligung') or (vorlage['schaden_selbstbeteiligung'] if vorlage else '') }}" placeholder="z.B. Vollkasko, SB 300 EUR">
+          <div class="form-text">Dem Kunden transparent erklären: Vollkasko, Teilkasko/Sturm oder Fremdverschulden.</div>
+        </div>
+        <div class="col-md-4">
           <label class="form-label">Kurze Schadenbeschreibung</label>
           <input type="text" name="analyse_text" class="form-control form-control-lg" value="{{ request.form.get('analyse_text') or (vorlage['analyse_text'] if vorlage else '') }}" placeholder="z.B. Frontschaden, Stoßfänger und Kotflügel links">
         </div>
         <div class="col-12">
-          <label class="form-label">Beschädigte Bereiche</label>
-          {% set editable = true %}
-          {% set show_gt_technical = false %}
-          {% set selected_zones = request.form.getlist('schaden_zonen') or (vorlage['schaden_zonen'] if vorlage else []) %}
-          {% include "_fahrzeug_schadenkarte.html" %}
-        </div>
-        <div class="col-12">
-          <label class="form-label">Notiz zu den markierten Bereichen</label>
-          <textarea name="schaden_zonen_notiz" class="form-control" rows="2">{{ request.form.get('schaden_zonen_notiz') or (vorlage['schaden_zonen_notiz'] if vorlage else '') }}</textarea>
+          <div class="damage-type-grid">
+            {% for hinweis in schadenart_hinweise %}
+            <div class="damage-type-card">
+              <span>{{ hinweis['deckung'] }}</span>
+              <strong>{{ hinweis['titel'] }}</strong>
+              <div class="small text-muted">{{ hinweis['beispiele'] }}</div>
+              <div class="small mt-2">{{ hinweis['hinweis'] }}</div>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="soft-note mt-3">
+            Standardablauf: Das Autohaus meldet den Schaden mit allen Unterlagen über das Portal an die Versicherung. Nach der Freigabe kann der Fall bei Gärtner eingeplant werden.
+          </div>
         </div>
         <div class="col-12">
           <label class="form-label">Freitext / Zusatzinfo</label>
@@ -187,7 +211,7 @@
 
         <div class="col-12 pt-2" id="pflicht-upload">
           <h2 class="h4 mb-1">Gutachten und Bilder</h2>
-          <div class="text-muted">Gutachten oder Kalkulation auswählen. Nach dem Hochladen liest die App die Datei und markiert erkannte Schadenbereiche.</div>
+          <div class="text-muted">Gutachten oder Kalkulation auswählen. Nach dem Hochladen liest die App die Datei und trägt erkannte Fahrzeug-, Kosten- und Versicherungsdaten als Vorschlag in die Felder ein.</div>
         </div>
         <div class="col-md-8">
           <label class="form-label">Gutachten, Kalkulation, Bilder</label>
@@ -200,7 +224,7 @@
 
         <div class="col-12">
           <div class="soft-note">
-            Nach dem Speichern bleibt der Fall zuerst bei Autohaus und Versicherung. Gärtner wird erst aktiv, wenn die Versicherung freigegeben hat und das Autohaus das Fahrzeug einplant.
+            Nach dem Hochladen öffnet sich der vorbereitete Versicherungsfall. Dort prüft das Autohaus den Text und sendet das Versicherungspaket direkt an die Versicherung.
           </div>
         </div>
         <div class="col-12 d-flex gap-2 flex-wrap">
@@ -219,8 +243,8 @@
             name="aktion"
             value="upload_analyze"
             class="btn btn-dark btn-lg"
-            data-loading-message="Gutachten oder Kalkulation wird hochgeladen und analysiert. Bitte kurz warten."
-          >Hochladen &amp; analysieren</button>
+            data-loading-message="Unterlagen werden hochgeladen und analysiert. Danach öffnet sich die E-Mail-Prüfung."
+          >Fall speichern &amp; zur E-Mail-Prüfung</button>
           <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Abbrechen</a>
         </div>
       </div>
@@ -321,5 +345,6 @@
       });
     })();
   </script>
+  {% include "_fin_analyse_script.html" %}
 </body>
 </html>

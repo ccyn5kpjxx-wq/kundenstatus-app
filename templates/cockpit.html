@@ -535,6 +535,34 @@
     font-size: .88rem;
     font-weight: 600;
   }
+  .source-mix {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .75rem;
+    margin-bottom: 1rem;
+  }
+  .source-mix-item {
+    border: 1px solid #e4d6c3;
+    border-left-width: 6px;
+    border-radius: 16px;
+    background: #fffaf2;
+    padding: .95rem 1rem;
+  }
+  .source-mix-versicherung { border-left-color: #1f6feb; }
+  .source-mix-autohaus { border-left-color: #198754; }
+  .source-mix-privat { border-left-color: #6c757d; }
+  .source-mix-item span {
+    display: block;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .source-mix-item strong {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 1.6rem;
+    line-height: 1.1;
+  }
   .news-list, .purchase-mini-list {
     display: grid;
     gap: .75rem;
@@ -579,6 +607,7 @@
   }
   @media (max-width: 575.98px) {
     .start-counter-grid,
+    .source-mix,
     .start-day-counts {
       grid-template-columns: 1fr;
     }
@@ -661,6 +690,16 @@
 </div>
 
 {% include "_mini_month_calendar.html" %}
+
+<div class="source-mix">
+  {% for item in cockpit['quelle_mix'] %}
+  <div class="source-mix-item source-mix-{{ item['key'] }}">
+    <span>{{ item['label'] }}</span>
+    <strong>{{ item['percent'] }}%</strong>
+    <div class="text-muted small">{{ item['count'] }} Fahrzeug(e) im Werkstattportal</div>
+  </div>
+  {% endfor %}
+</div>
 
 <div class="row g-4 mb-4 start-focus-grid">
   <div class="col-12">
@@ -876,6 +915,16 @@
       <div class="mt-2 text-white-50">offene Reklamationen</div>
     </div>
   </div>
+</div>
+
+<div class="source-mix">
+  {% for item in cockpit['quelle_mix'] %}
+  <div class="source-mix-item source-mix-{{ item['key'] }}">
+    <span>{{ item['label'] }}</span>
+    <strong>{{ item['percent'] }}%</strong>
+    <div class="text-muted small">{{ item['count'] }} Fahrzeug(e) im Werkstattportal</div>
+  </div>
+  {% endfor %}
 </div>
 
 <div class="row g-4 mb-4">

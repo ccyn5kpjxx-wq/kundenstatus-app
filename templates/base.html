@@ -82,6 +82,12 @@
       line-height: 1;
     }
 
+    .nav-badge.is-alert {
+      background: #ffc107;
+      color: #2b1d00;
+      box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.25);
+    }
+
     .hero-shell {
       padding: 2rem 0 1rem;
     }
@@ -360,6 +366,9 @@
     <div class="d-flex align-items-center gap-2 flex-wrap">
       <a class="nav-link" href="{{ url_for('betriebs_cockpit') }}">Start</a>
       <a class="nav-link" href="{{ url_for('admin_news') }}">News</a>
+      <a class="nav-link" href="{{ url_for('admin_leads') }}">Leads{% set leads_badge = admin_leads_count() %}{% if leads_badge %}<span class="nav-badge">{{ leads_badge }}</span>{% endif %}</a>
+      <a class="nav-link" href="{{ url_for('admin_fahrzeugsuche') }}">Auktion{% set fs_alert_badge = fahrzeugsuche_auktion_alert_count() %}{% set fs_badge = fs_alert_badge or fahrzeugsuche_count() %}{% if fs_badge %}<span class="nav-badge {% if fs_alert_badge %}is-alert{% endif %}" title="{% if fs_alert_badge %}Auktion startet in Kürze{% else %}Aktive Auktionssuchen{% endif %}">{{ fs_badge }}</span>{% endif %}</a>
+      <a class="nav-link" href="{{ url_for('admin_fahrzeugverkauf') }}">Fahrzeugverkauf{% set fv_badge = fahrzeugverkauf_count() %}{% if fv_badge %}<span class="nav-badge">{{ fv_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('dashboard') }}#auftraege">Lackierportal</a>
       <a class="nav-link" href="{{ url_for('neuer_auftrag') }}">Fahrzeug neu</a>
       <a class="nav-link" href="{{ url_for('admin_versicherung') }}">Versicherung</a>
@@ -488,6 +497,7 @@
 {% if session.get('admin') %}
   {% include "ki_assistent_widget.html" %}
 {% endif %}
+{% include "_fin_analyse_script.html" %}
 {% block extra_js %}{% endblock %}
 </body>
 </html>

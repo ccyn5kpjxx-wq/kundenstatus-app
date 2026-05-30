@@ -91,6 +91,7 @@
       Auftrag #{{ auftrag['id'] }}
       {% if auftrag['kennzeichen'] %} · {{ auftrag['kennzeichen'] }}{% endif %}
       {% if auftrag['fin_nummer'] %} · FIN {{ auftrag['fin_nummer'] }}{% endif %}
+      {% if auftrag['hsn_nummer'] or auftrag['tsn_nummer'] %} · HSN/TSN {{ auftrag['hsn_nummer'] }}{% if auftrag['hsn_nummer'] and auftrag['tsn_nummer'] %}/{% endif %}{{ auftrag['tsn_nummer'] }}{% endif %}
     </div>
   </div>
   <div class="d-flex gap-2 flex-wrap">
@@ -100,19 +101,23 @@
 
 <form method="POST" data-loading-message="Kalkulation wird gespeichert.">
   {{ csrf_field()|safe }}
-  <input type="hidden" name="schaden_zonen_form" value="1">
   <div class="calc-header mb-4">
     <div class="page-card p-4">
       <div class="section-title">
         <div>
-          <h2 class="h4 mb-1">Schadenbereiche</h2>
-          <p>Bereiche markieren und danach den Vorschlag neu aufbauen oder Positionen manuell anpassen.</p>
+          <h2 class="h4 mb-1">Analysebasis</h2>
+          <p>Bauteile und Reparaturumfang kommen aus Gutachten, Kalkulation, Fotos oder manueller Prüfung. Ein Eintrag pro Zeile reicht für den Kalkulationsvorschlag.</p>
         </div>
         <span class="badge text-bg-{{ kalkulation['status_meta']['farbe'] }}">{{ kalkulation['status_meta']['label'] }}</span>
       </div>
-      {% set selected_zones = auftrag['schaden_zonen'] %}
-      {% set editable = true %}
-      {% include "_fahrzeug_schadenkarte.html" %}
+      <label class="form-label">Erkannte / manuelle Bauteile</label>
+      <textarea name="bauteile_override" class="form-control" rows="8" placeholder="z.B. Stoßfänger vorne&#10;Kotflügel links&#10;Scheinwerferhalter prüfen">{{ auftrag['bauteile_override'] }}</textarea>
+      <div class="form-text">Uploads und Dokumentanalyse füllen diese Liste automatisch vor. Du kannst sie hier korrigieren und dann den Vorschlag neu aufbauen.</div>
+      {% if auftrag['analyse_text'] %}
+      <div class="alert alert-light border small mt-3 mb-0">
+        <strong>Kurzanalyse:</strong> {{ auftrag['analyse_text'] }}
+      </div>
+      {% endif %}
     </div>
 
     <div class="calc-total">
@@ -149,12 +154,16 @@
         <div class="calc-muted">Ersatzteilpositionen bleiben bei 0,00 €, bis OEM-Preis und Verfügbarkeit aus partslink24, Händlerangebot oder CSV eingetragen sind.</div>
       </div>
       <div class="calc-source">
-        <div class="fw-bold mb-1">FIN-Status</div>
+        <div class="fw-bold mb-1">Fahrzeugdaten-Status</div>
         <div class="calc-muted">
-          {% if auftrag['fin_nummer'] %}
-            FIN vorhanden. Damit können wir später OrderBridge/VIN-Teilelisten anbinden.
+          {% if auftrag['fin_nummer'] and (auftrag['hsn_nummer'] or auftrag['tsn_nummer']) %}
+            FIN und HSN/TSN vorhanden. Das ist die beste Basis für Teile-, KBA- und Kalkulationsdaten.
+          {% elif auftrag['fin_nummer'] %}
+            FIN vorhanden. Für deutsche Fahrzeugdaten bitte zusätzlich HSN/TSN aus dem Fahrzeugschein ergänzen.
+          {% elif auftrag['hsn_nummer'] or auftrag['tsn_nummer'] %}
+            HSN/TSN vorhanden. Für Teilezuordnung bitte nach Möglichkeit auch FIN ergänzen.
           {% else %}
-            Noch keine FIN. Für echte Teilezuordnung bitte FIN oder Fahrzeugschein ergänzen.
+            Noch keine FIN/HSN/TSN. Für echte Teilezuordnung bitte FIN oder Fahrzeugschein ergänzen.
           {% endif %}
         </div>
       </div>

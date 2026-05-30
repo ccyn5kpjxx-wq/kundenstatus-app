@@ -69,6 +69,14 @@
     <div class="text-muted small">Ersatzfahrzeug</div>
     <div class="fw-semibold">{{ schadenprotokoll['mobilitaet']['mietwagen'] }}</div>
   </div>
+  <div class="protocol-meta-item">
+    <div class="text-muted small">Selbstbeteiligung</div>
+    <div class="fw-semibold">{{ schadenprotokoll['mobilitaet']['selbstbeteiligung'] }}</div>
+  </div>
+</div>
+
+<div class="alert alert-info py-2 small">
+  <strong>Kunden-Transparenz:</strong> {{ schadenprotokoll['mobilitaet']['kunden_transparenz'] }}
 </div>
 
 {% if schadenprotokoll['send_blocker'] %}

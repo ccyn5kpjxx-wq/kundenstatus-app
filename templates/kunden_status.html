@@ -7,26 +7,47 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     body { background:#f3efe6; color:#16202a; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-    .shell { max-width:980px; margin:0 auto; padding:28px 16px; }
-    .panel { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); }
-    .hero-grid { display:grid; grid-template-columns:minmax(0,1fr) 190px; gap:1.25rem; align-items:start; }
-    .qr-box { border:1px solid #e4d6c3; border-radius:14px; background:#fff; padding:12px; text-align:center; }
-    .qr-box img { width:150px; height:150px; max-width:100%; }
+    .shell { max-width:980px; margin:0 auto; padding:24px 14px; }
+    .panel { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:22px; box-shadow:0 16px 40px rgba(64,47,25,.12); }
+    .hero-grid { display:grid; grid-template-columns:minmax(0,1fr) 160px; gap:1rem; align-items:start; }
+    .brand-row { display:flex; align-items:center; gap:.75rem; margin-bottom:.9rem; }
+    .brand-logo { width:54px; height:54px; object-fit:contain; border-radius:12px; background:#fff; border:1px solid #eadcc9; padding:6px; }
     .meta-line { color:#66717a; overflow-wrap:anywhere; }
-    .timeline { display:grid; gap:.85rem; margin-top:1rem; }
+    .contact-card { border:1px solid #dbe4ef; border-radius:14px; background:#f4f8fd; padding:.9rem 1rem; }
+    .quick-actions { display:flex; flex-wrap:wrap; gap:.5rem; }
+    .qr-box { border:1px solid #e4d6c3; border-radius:14px; background:#fff; padding:10px; text-align:center; }
+    .qr-box img { width:118px; height:118px; max-width:100%; }
+    .status-link { overflow-wrap:anywhere; font-size:.78rem; color:#53616c; }
+    .section-head { display:flex; justify-content:space-between; gap:1rem; align-items:start; flex-wrap:wrap; margin-bottom:1rem; }
+    .schedule-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.65rem; }
+    .schedule-card { border:1px solid #e4d6c3; border-radius:12px; background:#fffdf9; padding:.72rem .8rem; min-height:92px; }
+    .schedule-card.is-next { border-color:#b9c8dc; background:#eef5ff; }
+    .schedule-card.is-open { color:#6c757d; }
+    .appointment-panel { border:1px solid #d8c4a7; border-radius:16px; background:#fffaf2; padding:1rem; }
+    .change-box { border-top:1px solid #eadcc9; padding-top:.55rem; }
+    .change-box summary { cursor:pointer; font-weight:700; color:#1f3557; }
+    .change-box .form-control { font-size:.92rem; }
+    .readonly-note { border:1px solid #dbe4ef; background:#f4f8fd; border-radius:12px; padding:.75rem .9rem; color:#465767; }
+    .message-list { display:grid; gap:.55rem; }
+    .message-row { border:1px solid #e4d6c3; border-radius:12px; background:#fffdf9; padding:.75rem .85rem; }
+    .timeline { display:grid; gap:.85rem; }
     .timeline-step { display:grid; grid-template-columns:34px minmax(0,1fr); gap:.75rem; align-items:start; }
     .timeline-dot { width:34px; height:34px; border-radius:999px; display:flex; align-items:center; justify-content:center; border:1px solid #d7c7b0; background:#f7f1e8; font-weight:800; }
     .timeline-step.is-done .timeline-dot { background:#1f7a4d; border-color:#1f7a4d; color:#fff; }
     .timeline-step.is-active .timeline-dot { background:#1f3557; border-color:#1f3557; color:#fff; }
     .timeline-card { border:1px solid #e4d6c3; border-radius:14px; background:#fffdf9; padding:.85rem 1rem; }
     .timeline-step.is-active .timeline-card { border-color:#b9c8dc; background:#eef5ff; }
-    .doc-grid { display:grid; gap:.55rem; }
-    .doc-row { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; border:1px solid #e4d6c3; border-radius:12px; padding:.7rem .85rem; background:#fffdf9; }
-    .appointment-panel { border:1px solid #d8c4a7; border-radius:16px; background:#fffaf2; padding:1rem; }
-    .readonly-note { border:1px solid #dbe4ef; background:#f4f8fd; border-radius:12px; padding:.75rem .9rem; color:#465767; }
     @media (max-width: 767.98px) {
+      .shell { padding:14px 10px 22px; }
+      .panel { border-radius:16px; padding:18px; }
       .hero-grid { grid-template-columns:1fr; }
-      .qr-box { text-align:left; }
+      .qr-box { display:flex; align-items:center; gap:.85rem; text-align:left; }
+      .qr-box img { width:92px; height:92px; }
+      .schedule-grid { grid-template-columns:1fr 1fr; }
+      .quick-actions .btn { flex:1 1 130px; }
+    }
+    @media (max-width: 420px) {
+      .schedule-grid { grid-template-columns:1fr; }
     }
   </style>
 </head>
@@ -35,7 +56,13 @@
     <div class="panel mb-4">
       <div class="hero-grid">
         <div>
-          <div class="badge text-bg-dark mb-3">Fahrzeugstatus</div>
+          <div class="brand-row">
+            <img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack" class="brand-logo">
+            <div>
+              <div class="badge text-bg-dark mb-2">Fahrzeugstatus</div>
+              <div class="small text-muted">{{ werkstatt_kontakt.name }}</div>
+            </div>
+          </div>
           <h1 class="mb-2">{{ auftrag['fahrzeug'] }}</h1>
           <div class="meta-line">
             {% if auftrag['kennzeichen'] %}{{ auftrag['kennzeichen'] }}{% endif %}
@@ -50,10 +77,23 @@
             <span class="badge text-bg-light border text-dark fs-6">{{ auftrag['schaden_station_label'] }}</span>
             {% endif %}
           </div>
+          <div class="contact-card mt-3">
+            <div class="fw-bold">{{ werkstatt_kontakt.name }}</div>
+            <div class="text-muted small">{{ werkstatt_kontakt.adresse }}</div>
+            <div class="small mt-1">Bei Fragen gerne anrufen: <a href="{{ werkstatt_kontakt.telefon_url }}">{{ werkstatt_kontakt.telefon }}</a></div>
+            <div class="quick-actions mt-3">
+              <a class="btn btn-dark btn-sm" href="{{ werkstatt_kontakt.telefon_url }}">Anrufen</a>
+              <a class="btn btn-success btn-sm" href="{{ werkstatt_kontakt.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>
+            </div>
+          </div>
         </div>
         <div class="qr-box">
           <img src="{{ kunden_status_qr_url }}" alt="Status-QR-Code">
-          <div class="small text-muted mt-2">Status direkt wieder öffnen. Änderungen sind erst bei der Terminabstimmung möglich.</div>
+          <div>
+            <div class="small fw-semibold">QR-Code oder Link</div>
+            <div class="small text-muted">Status und Termine direkt wieder öffnen.</div>
+            <div class="status-link mt-2">{{ kunden_status_link }}</div>
+          </div>
         </div>
       </div>
 
@@ -66,11 +106,53 @@
           </div>
         {% endif %}
       {% endwith %}
+    </div>
 
+    <div class="panel mb-4" id="termine">
+      <div class="section-head">
+        <div>
+          <h2 class="h4 mb-1">Termine</h2>
+          {% if kunden_termine.next %}
+          <div class="text-muted">Nächster Termin: <strong>{{ kunden_termine.next.label }} am {{ kunden_termine.next.datum_text }}</strong></div>
+          {% else %}
+          <div class="text-muted">Termine werden von Versicherung oder Werkstatt eingetragen. Wenn ein Termin nicht passt, kann er hier geändert werden.</div>
+          {% endif %}
+        </div>
+        <span class="badge text-bg-{{ 'success' if terminfreigabe['can_request'] or terminfreigabe['termin_gesetzt'] else 'secondary' }}">
+          {{ 'bereit' if terminfreigabe['can_request'] else ('gesetzt' if terminfreigabe['termin_gesetzt'] else 'wartet') }}
+        </span>
+      </div>
+
+      <div class="schedule-grid mb-3">
+        {% for termin in kunden_termine['items'] %}
+        <div class="schedule-card {% if kunden_termine.next and kunden_termine.next.key == termin.key %}is-next{% endif %} {% if termin.is_open %}is-open{% endif %}">
+          <div class="text-muted small">{{ termin.label }}</div>
+          <div class="fw-bold">{{ termin.datum_text }}</div>
+          <div class="small text-muted">{{ termin.detail }}</div>
+          {% if termin.can_change %}
+          <details class="change-box mt-2">
+            <summary>ändern</summary>
+            <form method="POST" action="{{ url_for('kunden_status_verzoegerung', token=auftrag['kunden_status_token']) }}" class="mt-2">
+              <input type="hidden" name="termin_art" value="{{ termin.key }}">
+              <label class="form-label small mb-1">Alternativtermin</label>
+              <input type="date" name="neuer_termin" class="form-control form-control-sm mb-2">
+              <label class="form-label small mb-1">Hinweis</label>
+              <textarea name="meldung" rows="2" class="form-control form-control-sm" placeholder="Kurz schreiben, was sich ändert."></textarea>
+              <button type="submit" class="btn btn-outline-dark btn-sm mt-2">Senden</button>
+            </form>
+          </details>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="panel mb-4">
+      <h2 class="h4 mb-3">Fortschritt</h2>
       <div class="timeline">
         {% for step in kunden_timeline %}
         <div class="timeline-step is-{{ step['state'] }}">
-          <div class="timeline-dot">{{ loop.index }}</div>
+          <div class="timeline-dot">{% if step['state'] == 'done' %}&#10003;{% else %}{{ loop.index }}{% endif %}</div>
           <div class="timeline-card">
             <div class="fw-bold">{{ step['label'] }}</div>
             <div class="text-muted small">{{ step['detail'] }}</div>
@@ -80,80 +162,6 @@
       </div>
     </div>
 
-    <div class="panel mb-4" id="terminvereinbarung">
-      <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
-        <div>
-          <h2 class="h4 mb-1">{{ terminfreigabe['label'] }}</h2>
-          <div class="text-muted">{{ terminfreigabe['detail'] }}</div>
-        </div>
-        <span class="badge text-bg-{{ 'success' if terminfreigabe['can_request'] or terminfreigabe['termin_gesetzt'] else 'secondary' }}">
-          {{ 'bereit' if terminfreigabe['can_request'] else ('gesetzt' if terminfreigabe['termin_gesetzt'] else 'wartet') }}
-        </span>
-      </div>
-      {% if terminfreigabe['can_request'] %}
-      <form method="POST" action="{{ url_for('kunden_status_terminwunsch', token=auftrag['kunden_status_token']) }}" class="appointment-panel">
-        <div class="row g-3">
-          <div class="col-md-4">
-            <label class="form-label">Wunschtermin</label>
-            <input type="date" name="wunschtermin" class="form-control" required>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label">Zeitfenster</label>
-            <input type="text" name="zeitfenster" class="form-control" placeholder="vormittags / nachmittags">
-          </div>
-          <div class="col-md-4">
-            <label class="form-label">Kontakt</label>
-            <input type="text" name="kontakt" class="form-control" value="{{ auftrag['kontakt_telefon'] }}">
-          </div>
-          <div class="col-12">
-            <label class="form-label">Hinweis</label>
-            <textarea name="nachricht" rows="3" class="form-control" placeholder="Kurzer Hinweis zur Anlieferung"></textarea>
-          </div>
-        </div>
-        <button type="submit" class="btn btn-dark mt-3">Terminwunsch senden</button>
-      </form>
-      {% else %}
-      <div class="readonly-note">
-        {% if auftrag['annahme_datum'] %}
-          Bringtermin: <strong>{{ auftrag['annahme_datum'] }}</strong>{% if auftrag['abholtermin'] %} · geplante Abholung: <strong>{{ auftrag['abholtermin'] }}</strong>{% endif %}
-        {% else %}
-          Sobald Freigabe und Teilelage passen, erscheint hier die Terminaktion.
-        {% endif %}
-      </div>
-      {% endif %}
-    </div>
-
-    {% if pflichtunterlagen %}
-    <div class="panel mb-4">
-      <h2 class="h4 mb-3">Unterlagenstatus</h2>
-      <div class="doc-grid">
-        {% for item in pflichtunterlagen['items'] %}
-        <div class="doc-row">
-          <div>
-            <div class="fw-semibold">{{ item['label'] }}</div>
-            <div class="text-muted small">{{ item['detail'] }}</div>
-          </div>
-          <span class="badge text-bg-{{ item['class'] }}">{{ item['badge'] }}</span>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-
-    <div class="panel">
-      <h2 class="h4 mb-3">Termine</h2>
-      <div class="row g-3">
-        <div class="col-sm-6"><div class="text-muted small">Annahme</div><div class="fw-bold">{{ auftrag['annahme_datum'] or 'offen' }}</div></div>
-        <div class="col-sm-6"><div class="text-muted small">Start</div><div class="fw-bold">{{ auftrag['start_datum'] or 'offen' }}</div></div>
-        <div class="col-sm-6"><div class="text-muted small">Fertig</div><div class="fw-bold">{{ auftrag['fertig_datum'] or 'offen' }}</div></div>
-        <div class="col-sm-6"><div class="text-muted small">Abholung</div><div class="fw-bold">{{ auftrag['abholtermin'] or 'offen' }}</div></div>
-      </div>
-      {% if auftrag['status'] >= 4 %}
-        <div class="alert alert-success mt-4 mb-0">Ihr Fahrzeug ist fertig oder kurz vor der Abholung.</div>
-      {% else %}
-        <div class="alert alert-info mt-4 mb-0">Der aktuelle Stand bleibt hier sichtbar.</div>
-      {% endif %}
-    </div>
   </main>
 </body>
 </html>

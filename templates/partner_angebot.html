@@ -212,8 +212,8 @@
           {% else %}
           <span class="track-step {{ 'is-done' if angebot else 'is-active' }}">1. Daten erfassen</span>
           <span class="track-step {{ 'is-done' if angebot and angebot['angebot_abgesendet'] else ('is-active' if angebot else '') }}">2. Anfrage absenden</span>
-          <span class="track-step {{ 'is-done' if angebot and angebot['angebot_status'] == 'angebot_abgegeben' else ('is-active' if angebot and angebot['angebot_abgesendet'] else '') }}">3. Werkstatt prüft</span>
-          <span class="track-step {{ 'is-active' if angebot and angebot['angebot_status'] == 'angebot_abgegeben' else '' }}">4. Angebot annehmen</span>
+          <span class="track-step {{ 'is-done' if angebot and angebot['angebot_status'] in ['angebot_abgegeben', 'abgelehnt'] else ('is-active' if angebot and angebot['angebot_abgesendet'] else '') }}">3. Werkstatt prüft</span>
+          <span class="track-step {{ 'is-active' if angebot and angebot['angebot_status'] in ['angebot_abgegeben', 'abgelehnt'] else '' }}">4. Angebot entscheiden</span>
           {% endif %}
         </div>
       </div>
@@ -261,8 +261,8 @@
       <div class="process-card mb-3" id="kundendaten">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
           <div>
-            <div class="fw-bold">1. Kundendaten und Schaden erfassen</div>
-            <div class="text-muted small">Erst die Grunddaten speichern. Danach folgen Bilder, Gutachten und Abtretung Schritt für Schritt.</div>
+            <div class="fw-bold">1. Kunde/Werkstatt meldet Schaden</div>
+            <div class="text-muted small">Wenn der Kunde direkt kommt, entfällt „Versicherung meldet an Gärtner“. Erst Kundendaten speichern, dann Unterlagen sammeln und an die Versicherung senden.</div>
           </div>
           <span class="badge text-bg-{{ angebot['versicherung_freigabe_meta']['farbe'] }}">{{ angebot['versicherung_freigabe_meta']['label'] }}</span>
         </div>
@@ -312,8 +312,9 @@
             </div>
             <div class="alert alert-info py-2 small mt-3 mb-0">
               <strong>Kundenhinweis:</strong>
-              Teilkasko verursacht in der Regel keine SF-Rückstufung, trotzdem kann eine Selbstbeteiligung anfallen.
-              Vollkasko oder eigene Haftpflicht können durch Rückstufung später teurer werden. Bitte Vertrag, Rabattschutz und Selbstbeteiligung prüfen.
+              Haftpflicht/Fremdverschulden verursacht normalerweise keine eigene Selbstbeteiligung oder SF-Rückstufung.
+              Teilkasko bei Sturm, Hagel, Wild oder Glas kann eine Selbstbeteiligung haben, meist ohne SF-Rückstufung.
+              Vollkasko kann durch Selbstbeteiligung und Rückstufung später teurer werden. Bitte Vertrag, Rabattschutz und Police prüfen.
             </div>
           </div>
         </div>
@@ -327,12 +328,12 @@
           <input type="text" name="versicherungsnehmer" class="form-control form-control-lg" value="{{ angebot['versicherungsnehmer'] if angebot else '' }}" placeholder="falls abweichend">
         </div>
         <div class="col-md-4">
-          <label class="form-label">Telefon</label>
-          <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ angebot['kontakt_telefon'] if angebot else '' }}">
+          <label class="form-label">Handy / WhatsApp Kunde</label>
+          <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ angebot['kontakt_telefon'] if angebot else '' }}" placeholder="z.B. 0171 1234567">
         </div>
         <div class="col-md-4">
           <label class="form-label">Typ / Fahrzeug</label>
-          <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ angebot['fahrzeug'] if angebot else '' }}" placeholder="z.B. Audi Q7">
+          <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ angebot['fahrzeug'] if angebot else '' }}" placeholder="z.B. Audi Q7" data-vehicle-input>
         </div>
         <div class="col-md-4">
           <label class="form-label">Kennzeichen</label>
@@ -340,7 +341,23 @@
         </div>
         <div class="col-md-4" id="pflicht-fahrzeugdaten">
           <label class="form-label">FIN-Nummer</label>
-          <input type="text" name="fin_nummer" class="form-control form-control-lg" value="{{ angebot['fin_nummer'] if angebot else '' }}" style="text-transform:uppercase;">
+          <div class="input-group input-group-lg" data-fin-widget>
+            <input type="text" name="fin_nummer" class="form-control" value="{{ angebot['fin_nummer'] if angebot else '' }}" style="text-transform:uppercase;" data-fin-input>
+            <button class="btn btn-outline-dark" type="button" data-fin-analyze>FIN analysieren</button>
+          </div>
+          <div class="form-text" data-fin-result>Lokale Prüfung erkennt Hersteller, Modellcode und Baujahr-/Modelljahr-Hinweis, wenn der Code bekannt ist. Exakte Ausstattung braucht eine FIN-Datenquelle.</div>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">HSN</label>
+          <input type="text" name="hsn_nummer" class="form-control form-control-lg" value="{{ angebot['hsn_nummer'] if angebot else '' }}" placeholder="2.1">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">TSN</label>
+          <input type="text" name="tsn_nummer" class="form-control form-control-lg" value="{{ angebot['tsn_nummer'] if angebot else '' }}" placeholder="2.2" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Kilometerstand</label>
+          <input type="text" name="kilometerstand" class="form-control form-control-lg" value="{{ angebot['kilometerstand'] if angebot else '' }}" placeholder="z.B. 84.500">
         </div>
         <div class="col-md-4">
           <label class="form-label">Auftrag / Vorgangsnummer</label>
@@ -396,7 +413,8 @@
               </div>
               <div class="col-md-3">
                 <label class="form-label">Selbstbeteiligung</label>
-                <input type="text" name="schaden_selbstbeteiligung" class="form-control" value="{{ angebot['schaden_selbstbeteiligung'] }}" placeholder="z.B. 150 EUR / 300 EUR">
+                <input type="text" name="schaden_selbstbeteiligung" class="form-control" value="{{ angebot['schaden_selbstbeteiligung'] }}" placeholder="z.B. Vollkasko, SB 300 EUR">
+                <div class="form-text">Für das Kundengespräch transparent eintragen.</div>
               </div>
             </div>
           </div>
@@ -589,6 +607,7 @@
             </div>
             <span class="badge text-bg-{{ angebot['versicherung_freigabe_meta']['farbe'] }}">{{ angebot['versicherung_freigabe_meta']['label'] }}</span>
           </div>
+          {% include "_versicherung_pruefung_status.html" %}
 
           {% if chat_nachrichten %}
           <div class="insurance-thread mb-3">
@@ -647,7 +666,7 @@
             <button type="submit" class="btn btn-dark">Freigabe liegt vor - Fahrzeug bei Gärtner einplanen</button>
           </form>
           {% else %}
-          <div class="text-muted small mt-3">Nach der Rückmeldung der Versicherung kann das Fahrzeug hier bei Gärtner eingeplant werden.</div>
+          <div class="text-muted small mt-3">Nach der Rückmeldung der Versicherung kann das Fahrzeug hier bei Gärtner eingeplant werden, dem Lackierzentrum Gärtner Karosserie &amp; Lack GmbH.</div>
           {% endif %}
         </div>
       </div>
@@ -740,6 +759,8 @@
         <h4 class="mb-3">Status</h4>
         {% if angebot['angebot_status'] == 'angebot_abgegeben' %}
           <span class="chip">Angebot der Werkstatt liegt vor</span>
+        {% elif angebot['angebot_status'] == 'abgelehnt' %}
+          <span class="chip">Werkstatt-Angebot abgelehnt</span>
         {% elif angebot['angebot_abgesendet'] %}
           <span class="chip">Wartet auf Werkstatt-Angebot</span>
         {% else %}
@@ -752,11 +773,30 @@
         {% if angebot['abholtermin'] %}<span class="chip">{{ angebot['angebot_abholung_label'] }} {{ angebot['abholtermin'] }}</span>{% endif %}
       </div>
       {% endif %}
-      {% if angebot['angebot_status'] == 'angebot_abgegeben' %}
+      {% if angebot['kunden_status_url'] %}
+      <div class="border rounded-4 p-4 mt-4" style="background:#fffdf9;border-color:#e4d6c3 !important;">
+        <div class="fw-bold mb-1">Kundenstatus weitergeben</div>
+        <div class="text-muted small mb-3">Der Kunde sieht den aktuellen Stand und spätere Termine über den Statuslink.</div>
+        <div class="d-flex gap-2 flex-wrap">
+          <a class="btn btn-outline-dark btn-sm" href="{{ angebot['kunden_status_url'] }}" target="_blank" rel="noopener">Statuslink öffnen</a>
+          {% if angebot['kunden_whatsapp_status']['can_whatsapp'] %}
+          <a class="btn btn-success btn-sm" href="{{ angebot['kunden_whatsapp_status']['status_update_whatsapp_url'] }}" target="_blank" rel="noopener">Statusupdate WhatsApp</a>
+          {% endif %}
+        </div>
+        {% if angebot['kunden_whatsapp_status']['can_whatsapp'] %}
+        <div class="text-muted small mt-2">WhatsApp wird nur vorbereitet und erst im geöffneten Chat versendet.</div>
+        {% elif angebot['kontakt_telefon'] %}
+        <div class="text-muted small mt-2">Für WhatsApp bitte eine Mobilnummer hinterlegen.</div>
+        {% else %}
+        <div class="text-muted small mt-2">Mit einer Handynummer kann der Status später per WhatsApp vorbereitet werden.</div>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% if angebot['angebot_status'] in ['angebot_abgegeben', 'abgelehnt'] %}
       <div class="border rounded-4 p-4 mt-4" style="background:#f8f2e8;border-color:#e4d6c3 !important;">
         <div class="fw-bold mb-2">Angebot der Werkstatt</div>
         {% if angebot['werkstatt_angebot_preis'] %}
-        <div class="h4 mb-2">{{ angebot['werkstatt_angebot_preis'] }}</div>
+        <div class="h4 mb-2">{{ angebot['werkstatt_angebot_preis_label'] }}</div>
         {% endif %}
         {% if angebot['werkstatt_angebot_text'] %}
         <div class="mb-3" style="white-space:pre-wrap;">{{ angebot['werkstatt_angebot_text'] }}</div>
@@ -767,9 +807,21 @@
         {% if angebot['werkstatt_angebot_am'] %}
         <div class="text-muted small mb-3">Aktualisiert am {{ angebot['werkstatt_angebot_am'] }}</div>
         {% endif %}
-        <form method="POST" action="{{ url_for('partner_angebot_annehmen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}">
-          <button type="submit" class="btn btn-dark btn-lg">Angebot annehmen</button>
-        </form>
+        {% if angebot['angebot_status'] == 'abgelehnt' %}
+        <div class="alert alert-light border mb-0">Dieses Angebot wurde abgelehnt. Die Anfrage bleibt gespeichert.</div>
+        {% else %}
+        <div class="d-flex gap-2 flex-wrap">
+          <form method="POST" action="{{ url_for('partner_angebot_annehmen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="m-0">
+            {{ csrf_field()|safe }}
+            <button type="submit" class="btn btn-dark btn-lg">Angebot annehmen</button>
+          </form>
+          <form method="POST" action="{{ url_for('partner_angebot_ablehnen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="m-0" onsubmit="return confirm('Dieses Werkstatt-Angebot wirklich ablehnen?')">
+            {{ csrf_field()|safe }}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button type="submit" class="btn btn-outline-danger btn-lg">Ablehnen</button>
+          </form>
+        </div>
+        {% endif %}
       </div>
       {% endif %}
       {% endif %}
@@ -897,6 +949,7 @@
       });
     }
   </script>
+  {% include "_fin_analyse_script.html" %}
   {% include "ki_assistent_widget.html" %}
   {% include "_session_keepalive.html" %}
 </body>

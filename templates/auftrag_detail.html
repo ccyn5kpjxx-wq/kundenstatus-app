@@ -262,7 +262,9 @@
           <h1 class="mb-2">{{ auftrag['fahrzeug'] }}</h1>
           <p>{{ auftrag['autohaus_name'] or 'Ohne Autohaus' }}{% if auftrag['kennzeichen'] %} · {{ auftrag['kennzeichen'] }}{% endif %}</p>
         </div>
-        <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }}">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
+        <div class="d-flex gap-2 flex-wrap justify-content-end">
+          <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }}">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
+        </div>
       </div>
 
       {% set next_status = auftrag['status'] + 1 %}
@@ -337,6 +339,50 @@
         </div>
       </div>
 
+      <div class="page-card p-4 mb-4 border border-success-subtle" id="kundenkommunikation">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+          <div>
+            <h4 class="mb-1">Kundenkommunikation</h4>
+            <div class="text-muted small">QR-Code, Statuslink und WhatsApp-Entwurf für den Fahrzeughalter.</div>
+          </div>
+          {% if auftrag['kontakt_telefon'] %}
+          <span class="badge text-bg-light border text-dark">{{ auftrag['kontakt_telefon'] }}</span>
+          {% endif %}
+        </div>
+        {% if auftrag['kunden_status_url'] %}
+        <div class="d-flex gap-3 align-items-start flex-wrap">
+          <img src="{{ url_for('kunden_status_qr', token=auftrag['kunden_status_token'], target='local') if auftrag['kunden_status_public_warning'] else url_for('kunden_status_qr', token=auftrag['kunden_status_token']) }}" alt="Kundenstatus QR-Code" style="width:120px;height:120px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;">
+          <div class="flex-grow-1 min-width-0">
+            <div class="fw-bold">Kundenstatus ist aktiv</div>
+            <div class="text-muted small mb-2">Der Kunde sieht den aktuellen Fahrzeugstatus, Termine und Hinweise über diesen Link.</div>
+            <code class="small breakable-text">{{ auftrag['kunden_status_local_url'] if auftrag['kunden_status_public_warning'] else auftrag['kunden_status_url'] }}</code>
+            <div class="d-flex gap-2 flex-wrap mt-3">
+              <a href="{{ auftrag['kunden_status_local_url'] }}" class="btn btn-sm btn-soft" target="_blank">Statuslink testen</a>
+              {% if auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
+              <a href="{{ auftrag['kunden_whatsapp_status']['whatsapp_url'] }}" class="btn btn-sm btn-success" target="_blank" rel="noopener">QR-Link per WhatsApp</a>
+              <a href="{{ auftrag['kunden_whatsapp_status']['status_update_whatsapp_url'] }}" class="btn btn-sm btn-outline-success" target="_blank" rel="noopener">Statusupdate WhatsApp</a>
+              {% endif %}
+            </div>
+            {% if auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
+            <div class="text-muted small mt-2">Kein automatischer Versand: WhatsApp öffnet mit vorbereitetem Text. Bitte nur senden, wenn der Kunde den Kanal wünscht.</div>
+            {% elif auftrag['kontakt_telefon'] %}
+            <div class="text-muted small mt-2">Die hinterlegte Nummer wirkt nicht wie eine Handynummer. Für WhatsApp bitte eine Mobilnummer eintragen.</div>
+            {% else %}
+            <div class="text-muted small mt-2">Handynummer eintragen, dann kann bei jeder Statusänderung eine WhatsApp an den Kunden vorbereitet werden.</div>
+            {% endif %}
+          </div>
+        </div>
+        {% else %}
+        <div class="text-muted">Noch kein Kundenstatus-Link vorhanden.</div>
+        {% endif %}
+      </div>
+
+      {% if auftrag['versicherung_id'] %}
+      <div class="mt-4">
+        {% include "_versicherung_pruefung_status.html" %}
+      </div>
+      {% endif %}
+
       {% if auftrag['status'] >= 5 %}
       <div class="alert {{ 'alert-warning' if auftrag['bonus_preis_fehlt'] else 'alert-success' }} page-card">
         <div class="fw-bold mb-1">Bonus-/Rechnungsbetrag</div>
@@ -385,6 +431,11 @@
               {% if datei['hochgeladen_am'] %}<span class="small text-muted">{{ datei['hochgeladen_am'] }}</span>{% endif %}
               <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Öffnen</a>
               <a href="{{ url_for('admin_datei_download', datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+              <form method="POST" action="{{ url_for('admin_datei_loeschen', datei_id=datei['id']) }}" class="m-0" onsubmit="return confirm('Diese hochgeladene Datei wirklich löschen?')">
+                {{ csrf_field()|safe }}
+                <input type="hidden" name="next" value="{{ detail_self_url }}">
+                <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
+              </form>
             </div>
             {% if datei['extrakt_kurz'] %}
             <div class="small text-muted mt-2">{{ datei['extrakt_kurz'] }}</div>
@@ -511,7 +562,7 @@
         </div>
         <div class="col-md-8">
           <label class="form-label">Fahrzeug</label>
-          <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ auftrag['fahrzeug'] }}" required>
+          <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ auftrag['fahrzeug'] }}" required data-vehicle-input>
         </div>
         <div class="col-md-4">
           <label class="form-label">Kennzeichen</label>
@@ -519,7 +570,23 @@
         </div>
         <div class="col-md-6">
           <label class="form-label">FIN-Nummer</label>
-          <input type="text" name="fin_nummer" class="form-control form-control-lg" value="{{ auftrag['fin_nummer'] }}" style="text-transform:uppercase;">
+          <div class="input-group input-group-lg" data-fin-widget>
+            <input type="text" name="fin_nummer" class="form-control" value="{{ auftrag['fin_nummer'] }}" style="text-transform:uppercase;" data-fin-input>
+            <button class="btn btn-outline-dark" type="button" data-fin-analyze>FIN analysieren</button>
+          </div>
+          <div class="form-text" data-fin-result></div>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">HSN</label>
+          <input type="text" name="hsn_nummer" class="form-control form-control-lg" value="{{ auftrag['hsn_nummer'] }}" placeholder="2.1">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">TSN</label>
+          <input type="text" name="tsn_nummer" class="form-control form-control-lg" value="{{ auftrag['tsn_nummer'] }}" placeholder="2.2" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Kilometerstand</label>
+          <input type="text" name="kilometerstand" class="form-control form-control-lg" value="{{ auftrag['kilometerstand'] }}" placeholder="z.B. 84.500">
         </div>
         <div class="col-md-6">
           <label class="form-label">Auftrag / Vorgangsnummer</label>
@@ -531,8 +598,8 @@
           <div class="form-text">Zählt nach „Zurückgegeben“ automatisch in den Monatsbonus des Autohauses.</div>
         </div>
         <div class="col-md-6">
-          <label class="form-label">Telefon</label>
-          <input type="text" name="kontakt_telefon" class="form-control" value="{{ auftrag['kontakt_telefon'] }}">
+          <label class="form-label">Handy / WhatsApp Kunde</label>
+          <input type="text" name="kontakt_telefon" class="form-control" value="{{ auftrag['kontakt_telefon'] }}" placeholder="z.B. 0171 1234567">
         </div>
         <div class="col-md-6">
           <label class="form-label">Analyse</label>
@@ -730,6 +797,11 @@
               {% endif %}
               <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Original öffnen</a>
               <a href="{{ url_for('admin_datei_download', datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+              <form method="POST" action="{{ url_for('admin_datei_loeschen', datei_id=datei['id']) }}" class="m-0" onsubmit="return confirm('Diese hochgeladene Datei wirklich löschen?')">
+                {{ csrf_field()|safe }}
+                <input type="hidden" name="next" value="{{ detail_self_url }}">
+                <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
+              </form>
             </div>
             {% if datei['notiz'] %}
               <div class="mt-3">
@@ -782,6 +854,11 @@
               <div class="fw-semibold flex-grow-1 breakable-text">{{ datei['original_name'] }}</div>
               <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Original öffnen</a>
               <a href="{{ url_for('admin_datei_download', datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+              <form method="POST" action="{{ url_for('admin_datei_loeschen', datei_id=datei['id']) }}" class="m-0" onsubmit="return confirm('Dieses hochgeladene Bild wirklich löschen?')">
+                {{ csrf_field()|safe }}
+                <input type="hidden" name="next" value="{{ detail_self_url }}">
+                <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
+              </form>
             </div>
           </div>
           {% endfor %}

@@ -7,16 +7,20 @@
 {% if ki_assistent_chat_url is defined and ki_assistent_chat_url %}
   {% set ki_chat_url = ki_assistent_chat_url %}
   {% set ki_clear_url = ki_assistent_clear_url %}
+  {% set ki_speech_url = ki_assistent_speech_url if ki_assistent_speech_url is defined else '' %}
   {% set ki_subtitle = ki_assistent_subtitle if ki_assistent_subtitle is defined else 'Fragen zu Fahrzeugen, Auftrag, Upload und Portal.' %}
 {% elif autohaus is defined and autohaus %}
   {% set ki_chat_url = url_for('partner_ki_chat', slug=autohaus['slug']) %}
   {% set ki_clear_url = url_for('partner_ki_chat_loeschen', slug=autohaus['slug']) %}
+  {% set ki_speech_url = url_for('partner_ki_sprache', slug=autohaus['slug']) %}
   {% set ki_subtitle = 'Fragen zum Portal, Auftrag oder Upload.' %}
 {% elif session.get('admin') %}
   {% set ki_chat_url = url_for('admin_ki_chat') %}
   {% set ki_clear_url = url_for('admin_ki_chat_loeschen') %}
+  {% set ki_speech_url = url_for('admin_ki_sprache') %}
   {% set ki_subtitle = 'Fragen zu Fahrzeugen, Auftrag, Upload und Portal.' %}
 {% endif %}
+{% set ki_codex_enabled = session.get('admin') and ki_chat_url is defined and ki_chat_url == url_for('admin_ki_chat') %}
 <style>
   .ki-assistent {
     position: fixed;
@@ -137,11 +141,70 @@
   }
   .ki-assistent-actions {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
     margin-top: 8px;
   }
   .ki-assistent-actions .btn {
     min-height: 40px;
+  }
+  .ki-assistent-actions .btn[data-ki-send] {
+    min-width: 110px;
+  }
+  .ki-assistent-actions .btn[data-ki-clear] {
+    flex-basis: 100%;
+  }
+  .ki-assistent-actions .btn[data-ki-codex] {
+    border-color: #1b7f53;
+    color: #145d66;
+    font-weight: 700;
+  }
+  .ki-assistent-actions .btn[data-ki-conversation].is-on {
+    background: #145d66;
+    border-color: #145d66;
+    color: #fff;
+  }
+  .ki-assistent-actions .btn[data-ki-voice].is-listening {
+    background: #1b7f53;
+    border-color: #1b7f53;
+    color: #fff;
+  }
+  .ki-assistent-voice-options {
+    margin-top: 10px;
+    border: 1px solid #e4d6c3;
+    border-radius: 12px;
+    background: #fbf7f0;
+    padding: 8px 10px;
+  }
+  .ki-assistent-voice-options summary {
+    cursor: pointer;
+    color: #31404c;
+    font-weight: 700;
+    font-size: .86rem;
+  }
+  .ki-assistent-voice-grid {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .ki-assistent-voice-grid label {
+    color: #5c6670;
+    font-size: .8rem;
+    font-weight: 700;
+  }
+  .ki-assistent-voice-grid select,
+  .ki-assistent-voice-grid input[type="range"] {
+    width: 100%;
+  }
+  .ki-assistent-voice-status {
+    margin-top: 8px;
+    min-height: 1.2rem;
+    color: #5c6670;
+    font-size: .84rem;
+  }
+  .ki-assistent-voice-status[hidden] {
+    display: none;
   }
   @media (max-width: 575.98px) {
     .ki-assistent {
@@ -166,6 +229,7 @@
   data-ki-assistent
   data-chat-url="{{ ki_chat_url }}"
   data-clear-url="{{ ki_clear_url }}"
+  data-speech-url="{{ ki_speech_url if ki_speech_url is defined else '' }}"
   data-csrf-token="{{ csrf_token() }}"
   data-auftrag-id="{{ ki_assistent_auftrag_id }}"
 >
@@ -189,8 +253,27 @@
       <textarea class="form-control ki-assistent-input" name="message" data-ki-input rows="2" placeholder="Ihre Frage an den KI-Helfer" aria-label="Frage an den KI-Helfer" autocomplete="off"></textarea>
       <div class="ki-assistent-actions">
         <button type="submit" class="btn btn-dark flex-grow-1" data-ki-send>Senden</button>
+        <button type="button" class="btn btn-outline-dark" data-ki-voice title="Frage sprechen">Sprechen</button>
+        <button type="button" class="btn btn-outline-dark" data-ki-speech-toggle aria-pressed="true" title="Antwort vorlesen">Ton an</button>
+        <button type="button" class="btn btn-outline-dark" data-ki-conversation aria-pressed="false" title="Nach jeder Antwort wieder zuhören">Gespräch</button>
+        {% if ki_codex_enabled %}
+        <button type="button" class="btn btn-outline-dark" data-ki-codex title="Entwicklungsauftrag lokal an Codex legen">Codex-Auftrag</button>
+        {% endif %}
         <button type="button" class="btn btn-outline-dark" data-ki-clear>Verlauf löschen</button>
       </div>
+      <details class="ki-assistent-voice-options" data-ki-voice-options>
+        <summary>Stimme anpassen</summary>
+        <div class="ki-assistent-voice-grid">
+          <label for="ki-voice-select-{{ ki_assistent_auftrag_id or 'global' }}">Stimme</label>
+          <select class="form-select form-select-sm" id="ki-voice-select-{{ ki_assistent_auftrag_id or 'global' }}" data-ki-voice-select></select>
+          <label for="ki-rate-{{ ki_assistent_auftrag_id or 'global' }}">Tempo</label>
+          <input type="range" id="ki-rate-{{ ki_assistent_auftrag_id or 'global' }}" data-ki-rate min="0.85" max="1.2" step="0.01" value="1.05">
+          <label for="ki-pitch-{{ ki_assistent_auftrag_id or 'global' }}">Tonlage</label>
+          <input type="range" id="ki-pitch-{{ ki_assistent_auftrag_id or 'global' }}" data-ki-pitch min="0.82" max="1.08" step="0.01" value="0.94">
+          <button type="button" class="btn btn-outline-dark btn-sm" data-ki-test-voice>Stimme testen</button>
+        </div>
+      </details>
+      <div class="ki-assistent-voice-status" data-ki-voice-status hidden></div>
     </form>
   </div>
   <button type="button" class="ki-assistent-toggle" data-ki-toggle aria-expanded="false">
@@ -211,12 +294,47 @@
       const history = root.querySelector('[data-ki-history]');
       const sendButton = root.querySelector('[data-ki-send]');
       const clearButton = root.querySelector('[data-ki-clear]');
+      const voiceButton = root.querySelector('[data-ki-voice]');
+      const speechToggleButton = root.querySelector('[data-ki-speech-toggle]');
+      const conversationButton = root.querySelector('[data-ki-conversation]');
+      const codexButton = root.querySelector('[data-ki-codex]');
+      const voiceStatus = root.querySelector('[data-ki-voice-status]');
+      const voiceSelect = root.querySelector('[data-ki-voice-select]');
+      const rateInput = root.querySelector('[data-ki-rate]');
+      const pitchInput = root.querySelector('[data-ki-pitch]');
+      const testVoiceButton = root.querySelector('[data-ki-test-voice]');
       const presets = root.querySelector('[data-ki-presets]');
       const chatUrl = root.dataset.chatUrl;
       const clearUrl = root.dataset.clearUrl;
+      const speechUrl = root.dataset.speechUrl || '';
       const csrfToken = root.dataset.csrfToken;
       const auftragId = root.dataset.auftragId || '';
       if (!toggle || !panel || !form || !input || !history || !sendButton || !clearButton) return;
+
+      const canSpeak = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+      const localHosts = ['localhost', '127.0.0.1', '::1'];
+      const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+      const canListen = Boolean(
+        speechUrl &&
+        localHosts.includes(window.location.hostname) &&
+        navigator.mediaDevices &&
+        navigator.mediaDevices.getUserMedia &&
+        AudioContextConstructor
+      );
+      const voiceStorageKey = 'gaertner-ki-voice-v2';
+      let speakAnswers = canSpeak;
+      let isListening = false;
+      let conversationMode = false;
+      let selectedVoiceName = '';
+      let speechRate = 1.05;
+      let speechPitch = 0.94;
+      let audioContext = null;
+      let mediaStream = null;
+      let sourceNode = null;
+      let processorNode = null;
+      let recordingBuffers = [];
+      let recordingLength = 0;
+      let recordingTimer = null;
 
       const appendMessage = (kind, text) => {
         const message = document.createElement('div');
@@ -225,6 +343,216 @@
         history.appendChild(message);
         history.scrollTop = history.scrollHeight;
         return message;
+      };
+
+      const setVoiceStatus = (text) => {
+        if (!voiceStatus) return;
+        voiceStatus.textContent = text || '';
+        voiceStatus.hidden = !text;
+      };
+
+      const updateInputHeight = () => {
+        input.style.height = 'auto';
+        input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+      };
+
+      const loadVoiceSettings = () => {
+        try {
+          const settings = JSON.parse(window.localStorage.getItem(voiceStorageKey) || '{}');
+          selectedVoiceName = settings.voice || '';
+          speechRate = Number(settings.rate || 1.05);
+          speechPitch = Number(settings.pitch || 0.94);
+          conversationMode = Boolean(settings.conversation);
+        } catch (error) {
+          selectedVoiceName = '';
+        }
+        speechRate = Math.min(1.2, Math.max(0.85, speechRate || 1.05));
+        speechPitch = Math.min(1.08, Math.max(0.82, speechPitch || 0.94));
+        if (rateInput) rateInput.value = speechRate.toFixed(2);
+        if (pitchInput) pitchInput.value = speechPitch.toFixed(2);
+      };
+
+      const saveVoiceSettings = () => {
+        try {
+          window.localStorage.setItem(voiceStorageKey, JSON.stringify({
+            voice: selectedVoiceName,
+            rate: speechRate,
+            pitch: speechPitch,
+            conversation: conversationMode
+          }));
+        } catch (error) {}
+      };
+
+      const germanVoices = () => {
+        if (!canSpeak) return null;
+        return window.speechSynthesis
+          .getVoices()
+          .filter((voice) => voice.localService === true && voice.lang && voice.lang.toLowerCase().startsWith('de'))
+          .sort((left, right) => left.name.localeCompare(right.name, 'de'));
+      };
+
+      const getGermanVoice = () => {
+        const voices = germanVoices() || [];
+        return (
+          voices.find((voice) => voice.name === selectedVoiceName) ||
+          voices.find((voice) => /katja|conrad|helena|markus/i.test(voice.name)) ||
+          voices.find((voice) => voice.default) ||
+          voices[0] ||
+          null
+        );
+      };
+
+      const updateConversationButton = () => {
+        if (!conversationButton) return;
+        conversationButton.classList.toggle('is-on', conversationMode);
+        conversationButton.textContent = conversationMode ? 'Gespräch an' : 'Gespräch';
+        conversationButton.setAttribute('aria-pressed', conversationMode ? 'true' : 'false');
+      };
+
+      const populateVoiceSelect = () => {
+        if (!voiceSelect) return;
+        const voices = germanVoices() || [];
+        voiceSelect.innerHTML = '';
+        if (!voices.length) {
+          const option = document.createElement('option');
+          option.value = '';
+          option.textContent = 'Keine lokale deutsche Stimme gefunden';
+          voiceSelect.appendChild(option);
+          voiceSelect.disabled = true;
+          return;
+        }
+        voiceSelect.disabled = false;
+        voices.forEach((voice) => {
+          const option = document.createElement('option');
+          option.value = voice.name;
+          option.textContent = voice.name.replace(/^Microsoft\s+/i, '');
+          voiceSelect.appendChild(option);
+        });
+        const selected = getGermanVoice();
+        selectedVoiceName = selected?.name || voices[0].name;
+        voiceSelect.value = selectedVoiceName;
+      };
+
+      const syncSpeechToggle = () => {
+        if (!speechToggleButton) return;
+        const hasLocalVoice = Boolean(getGermanVoice());
+        speechToggleButton.disabled = !canSpeak || !hasLocalVoice;
+        speechToggleButton.textContent = canSpeak && hasLocalVoice ? (speakAnswers ? 'Ton an' : 'Ton aus') : 'Kein lokaler Ton';
+        speechToggleButton.setAttribute('aria-pressed', speakAnswers && canSpeak && hasLocalVoice ? 'true' : 'false');
+        speechToggleButton.title = canSpeak && hasLocalVoice
+          ? 'Antwort lokal vorlesen'
+          : 'Keine lokale Browser-Stimme gefunden';
+      };
+
+      const textForSpeech = (text) => {
+        const cleaned = String(text || '')
+          .replace(/https?:\/\/\S+/g, '')
+          .replace(/^\s*[-*]\s+/gm, '')
+          .replace(/[#*_`]/g, '')
+          .replace(/\bEUR\b/gi, 'Euro')
+          .replace(/\s*\|\s*/g, '. ')
+          .replace(/\n+/g, '. ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (!cleaned) return '';
+        const sentences = cleaned.match(/[^.!?]+[.!?]*/g) || [cleaned];
+        return sentences.slice(0, 4).join(' ').trim();
+      };
+
+      const speakText = (text, onDone = null) => {
+        if (!canSpeak || !speakAnswers || !text) {
+          if (onDone) onDone();
+          return;
+        }
+        const voice = getGermanVoice();
+        if (!voice) {
+          setVoiceStatus('Keine lokale Browser-Stimme gefunden. Die Antwort bleibt im Chat sichtbar.');
+          syncSpeechToggle();
+          if (onDone) onDone();
+          return;
+        }
+        const spokenText = textForSpeech(text);
+        if (!spokenText) {
+          if (onDone) onDone();
+          return;
+        }
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(spokenText);
+        utterance.lang = 'de-DE';
+        utterance.rate = speechRate;
+        utterance.pitch = speechPitch;
+        utterance.volume = 1;
+        utterance.voice = voice;
+        utterance.onend = () => {
+          if (onDone) onDone();
+        };
+        utterance.onerror = () => {
+          if (onDone) onDone();
+        };
+        window.speechSynthesis.speak(utterance);
+      };
+
+      const mergeBuffers = (buffers, length) => {
+        const result = new Float32Array(length);
+        let offset = 0;
+        buffers.forEach((buffer) => {
+          result.set(buffer, offset);
+          offset += buffer.length;
+        });
+        return result;
+      };
+
+      const downsampleBuffer = (buffer, inputRate, outputRate) => {
+        if (outputRate === inputRate) return buffer;
+        const ratio = inputRate / outputRate;
+        const newLength = Math.round(buffer.length / ratio);
+        const result = new Float32Array(newLength);
+        let offsetResult = 0;
+        let offsetBuffer = 0;
+        while (offsetResult < result.length) {
+          const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+          let accumulator = 0;
+          let count = 0;
+          for (let index = offsetBuffer; index < nextOffsetBuffer && index < buffer.length; index += 1) {
+            accumulator += buffer[index];
+            count += 1;
+          }
+          result[offsetResult] = count ? accumulator / count : 0;
+          offsetResult += 1;
+          offsetBuffer = nextOffsetBuffer;
+        }
+        return result;
+      };
+
+      const encodeWav = (samples, sampleRate) => {
+        const dataLength = samples.length * 2;
+        const buffer = new ArrayBuffer(44 + dataLength);
+        const view = new DataView(buffer);
+        const writeString = (offset, value) => {
+          for (let index = 0; index < value.length; index += 1) {
+            view.setUint8(offset + index, value.charCodeAt(index));
+          }
+        };
+        writeString(0, 'RIFF');
+        view.setUint32(4, 36 + dataLength, true);
+        writeString(8, 'WAVE');
+        writeString(12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, 1, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        writeString(36, 'data');
+        view.setUint32(40, dataLength, true);
+        let offset = 44;
+        samples.forEach((sample) => {
+          const clamped = Math.max(-1, Math.min(1, sample));
+          view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+          offset += 2;
+        });
+        return new Blob([view], { type: 'audio/wav' });
       };
 
       const setPresetsVisible = (visible) => {
@@ -244,6 +572,20 @@
         input.setSelectionRange(cursorPosition, cursorPosition);
       };
 
+      const microphoneStartHint = (error) => {
+        const name = error?.name || '';
+        if (name === 'NotAllowedError' || name === 'SecurityError') {
+          return 'Mikrofon ist blockiert. Bitte in Chrome oder Edge bei localhost die Mikrofon-Berechtigung erlauben.';
+        }
+        if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+          return 'Kein Mikrofon gefunden. Bitte Headset oder Mikrofon anschließen und im Browser freigeben.';
+        }
+        if (name === 'NotReadableError' || name === 'TrackStartError') {
+          return 'Mikrofon ist gerade von einem anderen Programm belegt. Bitte Teams, Telefonie oder Aufnahme-Apps kurz schließen.';
+        }
+        return 'Mikrofon konnte in diesem Browser nicht gestartet werden. Bitte im normalen Chrome oder Edge öffnen.';
+      };
+
       const setOpen = (open) => {
         root.classList.toggle('is-open', open);
         toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -257,17 +599,27 @@
         setOpen(!root.classList.contains('is-open'));
       });
 
-      const sendText = async (text) => {
+      const sendText = async (text, target = 'chat') => {
         if (!text || sendButton.disabled) {
           focusInput();
           return;
+        }
+        if (canSpeak) {
+          window.speechSynthesis.cancel();
         }
         appendMessage('user', text);
         setPresetsVisible(false);
         input.value = '';
         input.style.height = '';
         sendButton.disabled = true;
-        const waitMessage = appendMessage('ki', 'Ich prüfe das kurz...');
+        if (voiceButton) {
+          voiceButton.disabled = true;
+        }
+        if (codexButton) {
+          codexButton.disabled = true;
+        }
+        setVoiceStatus('');
+        const waitMessage = appendMessage('ki', target === 'codex' ? 'Ich lege das lokal für Codex ab...' : 'Ich prüfe das kurz...');
         try {
           const response = await fetch(chatUrl, {
             method: 'POST',
@@ -275,17 +627,233 @@
               'Content-Type': 'application/json',
               'X-CSRF-Token': csrfToken
             },
-            body: JSON.stringify({ message: text, auftrag_id: auftragId })
+            body: JSON.stringify({ message: text, auftrag_id: auftragId, target })
           });
           const payload = await response.json().catch(() => ({}));
-          waitMessage.textContent = payload.answer || payload.error || 'Die KI ist gerade nicht erreichbar. Bitte schreibe der Werkstatt direkt im Auftrag.';
+          const answerText = payload.answer || payload.error || 'Die KI ist gerade nicht erreichbar. Bitte schreibe der Werkstatt direkt im Auftrag.';
+          waitMessage.textContent = answerText;
+          speakText(answerText, () => {
+            if (conversationMode && target !== 'codex' && canListen && !sendButton.disabled) {
+              window.setTimeout(startListening, 350);
+            }
+          });
         } catch (error) {
-          waitMessage.textContent = 'Die KI ist gerade nicht erreichbar. Bitte schreibe der Werkstatt direkt im Auftrag.';
+          const fallbackText = 'Die KI ist gerade nicht erreichbar. Bitte schreibe der Werkstatt direkt im Auftrag.';
+          waitMessage.textContent = fallbackText;
+          speakText(fallbackText);
         } finally {
           sendButton.disabled = false;
+          if (voiceButton) {
+            voiceButton.disabled = false;
+          }
+          if (codexButton) {
+            codexButton.disabled = false;
+          }
           focusInput();
         }
       };
+
+      const resetVoiceButton = () => {
+        if (!voiceButton) return;
+        isListening = false;
+        voiceButton.classList.remove('is-listening');
+        voiceButton.textContent = 'Sprechen';
+        voiceButton.disabled = sendButton.disabled;
+      };
+
+      const cleanupRecording = async () => {
+        if (recordingTimer) {
+          window.clearTimeout(recordingTimer);
+          recordingTimer = null;
+        }
+        if (processorNode) {
+          processorNode.disconnect();
+          processorNode.onaudioprocess = null;
+          processorNode = null;
+        }
+        if (sourceNode) {
+          sourceNode.disconnect();
+          sourceNode = null;
+        }
+        if (mediaStream) {
+          mediaStream.getTracks().forEach((track) => track.stop());
+          mediaStream = null;
+        }
+        if (audioContext) {
+          await audioContext.close().catch(() => {});
+          audioContext = null;
+        }
+      };
+
+      const stopLocalRecording = async () => {
+        if (!isListening) return;
+        const sampleRate = audioContext ? audioContext.sampleRate : 48000;
+        isListening = false;
+        resetVoiceButton();
+        await cleanupRecording();
+        const merged = mergeBuffers(recordingBuffers, recordingLength);
+        recordingBuffers = [];
+        recordingLength = 0;
+        if (!merged.length) {
+          setVoiceStatus('Keine lokale Aufnahme erkannt. Bitte erneut sprechen oder tippen.');
+          focusInput();
+          return;
+        }
+        if (!canListen) {
+          setVoiceStatus('Lokale Spracheingabe ist nur auf localhost mit Mikrofonfreigabe möglich.');
+          focusInput();
+          return;
+        }
+        setVoiceStatus('Lokale Aufnahme wird ausgewertet...');
+        const wavBlob = encodeWav(downsampleBuffer(merged, sampleRate, 16000), 16000);
+        const formData = new FormData();
+        formData.append('audio', wavBlob, 'sprache.wav');
+        try {
+          const response = await fetch(speechUrl, {
+            method: 'POST',
+            headers: {
+              'X-CSRF-Token': csrfToken
+            },
+            body: formData
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.text) {
+            setVoiceStatus(payload.error || 'Lokale Spracherkennung ist gerade nicht verfügbar.');
+            focusInput();
+            return;
+          }
+          input.value = payload.text;
+          updateInputHeight();
+          setVoiceStatus(`Lokal erkannt: ${payload.text}`);
+          await sendText(payload.text);
+        } catch (error) {
+          setVoiceStatus('Lokale Spracherkennung konnte nicht abgeschlossen werden.');
+          focusInput();
+        }
+      };
+
+      const startListening = async () => {
+        if (!voiceButton || sendButton.disabled) {
+          focusInput();
+          return;
+        }
+        if (!canListen) {
+          setVoiceStatus('Lokale Spracheingabe ist nur auf localhost mit Mikrofonfreigabe möglich.');
+          focusInput();
+          return;
+        }
+        if (isListening) {
+          await stopLocalRecording();
+          return;
+        }
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          audioContext = new AudioContextConstructor();
+          sourceNode = audioContext.createMediaStreamSource(mediaStream);
+          processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+          recordingBuffers = [];
+          recordingLength = 0;
+          processorNode.onaudioprocess = (event) => {
+            const inputData = event.inputBuffer.getChannelData(0);
+            recordingBuffers.push(new Float32Array(inputData));
+            recordingLength += inputData.length;
+          };
+          sourceNode.connect(processorNode);
+          processorNode.connect(audioContext.destination);
+          isListening = true;
+          voiceButton.classList.add('is-listening');
+          voiceButton.textContent = 'Stoppen';
+          setVoiceStatus('Ich nehme lokal auf. Zum Senden erneut auf Stoppen klicken.');
+          recordingTimer = window.setTimeout(stopLocalRecording, 12000);
+        } catch (error) {
+          await cleanupRecording();
+          resetVoiceButton();
+          setVoiceStatus(microphoneStartHint(error));
+          focusInput();
+        }
+      };
+
+      loadVoiceSettings();
+      populateVoiceSelect();
+      updateConversationButton();
+      syncSpeechToggle();
+      if (canSpeak) {
+        window.speechSynthesis.onvoiceschanged = () => {
+          populateVoiceSelect();
+          syncSpeechToggle();
+        };
+        window.setTimeout(() => {
+          populateVoiceSelect();
+          syncSpeechToggle();
+        }, 250);
+      }
+      if (voiceButton) {
+        voiceButton.disabled = false;
+        voiceButton.title = canListen ? 'Frage lokal aufnehmen und senden' : 'Lokale Spracheingabe nur auf localhost';
+        voiceButton.addEventListener('click', startListening);
+      }
+      if (speechToggleButton) {
+        speechToggleButton.addEventListener('click', () => {
+          if (!canSpeak) return;
+          speakAnswers = !speakAnswers;
+          if (!speakAnswers) {
+            window.speechSynthesis.cancel();
+          }
+          syncSpeechToggle();
+          focusInput();
+        });
+      }
+      if (conversationButton) {
+        conversationButton.addEventListener('click', () => {
+          conversationMode = !conversationMode;
+          updateConversationButton();
+          saveVoiceSettings();
+          if (conversationMode && !canListen) {
+            setVoiceStatus('Gesprächsmodus braucht Chrome oder Edge mit Mikrofonfreigabe auf localhost.');
+          } else if (conversationMode) {
+            setVoiceStatus('Gesprächsmodus ist an. Nach einer Antwort höre ich wieder zu.');
+          } else {
+            setVoiceStatus('');
+          }
+          focusInput();
+        });
+      }
+      if (voiceSelect) {
+        voiceSelect.addEventListener('change', () => {
+          selectedVoiceName = voiceSelect.value;
+          saveVoiceSettings();
+          syncSpeechToggle();
+          focusInput();
+        });
+      }
+      if (rateInput) {
+        rateInput.addEventListener('input', () => {
+          speechRate = Number(rateInput.value || 1.05);
+          saveVoiceSettings();
+        });
+      }
+      if (pitchInput) {
+        pitchInput.addEventListener('input', () => {
+          speechPitch = Number(pitchInput.value || 0.94);
+          saveVoiceSettings();
+        });
+      }
+      if (testVoiceButton) {
+        testVoiceButton.addEventListener('click', () => {
+          speakText('So klinge ich jetzt. Wir können Tempo und Tonlage anpassen, bis es angenehmer ist.');
+        });
+      }
+      if (codexButton) {
+        codexButton.addEventListener('click', async () => {
+          const text = input.value.trim();
+          if (!text) {
+            setVoiceStatus('Kurz beschreiben, was Codex bauen oder ändern soll.');
+            focusInput();
+            return;
+          }
+          await sendText(text, 'codex');
+        });
+      }
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -300,12 +868,19 @@
       });
 
       clearButton.addEventListener('click', async () => {
+        if (canSpeak) {
+          window.speechSynthesis.cancel();
+        }
+        if (isListening) {
+          await stopLocalRecording();
+        }
         history.innerHTML = '';
         appendMessage('ki', 'Womit kann ich helfen?');
         if (presets) {
           history.appendChild(presets);
         }
         setPresetsVisible(true);
+        setVoiceStatus('');
         focusInput();
         try {
           await fetch(clearUrl, {
@@ -322,8 +897,7 @@
       });
 
       input.addEventListener('input', () => {
-        input.style.height = 'auto';
-        input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+        updateInputHeight();
       });
 
       input.addEventListener('keydown', (event) => {

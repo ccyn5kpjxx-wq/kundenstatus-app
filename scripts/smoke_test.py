@@ -84,6 +84,19 @@ def main():
         else "[FEHLER] Sicherheitsheader fehlen"
     )
     ok &= security_headers_ok
+    try:
+        malformed_analysis_ok = all(
+            isinstance(portal.load_saved_analysis_json(value), dict)
+            for value in ('[{"x":1}]', '"abc"', '{"confidence":"hoch"}')
+        )
+    except Exception:
+        malformed_analysis_ok = False
+    print(
+        "[OK] Fehlerhafte Analyse-JSONs blockieren Auftragsseiten nicht"
+        if malformed_analysis_ok
+        else "[FEHLER] Fehlerhafte Analyse-JSONs koennen Auftragsseiten blockieren"
+    )
+    ok &= malformed_analysis_ok
     with portal.app.test_request_context("/", environ_base={"REMOTE_ADDR": "203.0.113.250"}, headers={"Host": "example.test"}):
         external_default_denied = not portal.admin_password_matches(portal.DEFAULT_ADMIN_PASS)
     print(
@@ -593,6 +606,29 @@ def main():
         else "[FEHLER] Kalender-Schnelleintrag erkennt Datum/Wiederholung nicht"
     )
     ok &= parser_ok
+    lexware_date_ok = (
+        portal.lexware_api_date("01.01.0001", fallback=date(2026, 5, 20)) == date(2026, 5, 20)
+        and portal.lexware_datetime("01.01.0001", fallback=date(2026, 5, 20)).startswith("2026-05-20T")
+    )
+    print(
+        "[OK] Lexware-Datum ersetzt zu alte Platzhaltertermine"
+        if lexware_date_ok
+        else "[FEHLER] Lexware-Datum lässt zu alte Platzhaltertermine durch"
+    )
+    ok &= lexware_date_ok
+    lexware_error_ok = (
+        portal.lexware_error_text(
+            406,
+            {"message": "Validation failed: [shippingDate: Datum darf nicht vor dem 01.01.2014 liegen.]", "traceId": "SMOKE"},
+        )
+        == "Lexware API Fehler 406: Validation failed: [shippingDate: Datum darf nicht vor dem 01.01.2014 liegen.] | Trace-ID SMOKE"
+    )
+    print(
+        "[OK] Lexware-Fehler werden kompakt angezeigt"
+        if lexware_error_ok
+        else "[FEHLER] Lexware-Fehler bleiben unleserlich"
+    )
+    ok &= lexware_error_ok
     bonus_beispiel = portal.build_bonusmodell(
         [
             {
@@ -657,6 +693,17 @@ def main():
         else "[FEHLER] Bonusmodell addiert Rechnungen aus mehreren Aufträgen nicht korrekt"
     )
     ok &= bonus_rechnungen_ok
+    preis_label_ok = (
+        portal.format_werkstatt_angebot_preis("520") == "520,00 €"
+        and portal.format_werkstatt_angebot_preis("520 netto") == "520,00 € netto"
+        and portal.format_werkstatt_angebot_preis("520 € netto") == "520 € netto"
+    )
+    print(
+        "[OK] Werkstatt-Angebotspreise bekommen Euro-Anzeige"
+        if preis_label_ok
+        else "[FEHLER] Werkstatt-Angebotspreise werden nicht lesbar formatiert"
+    )
+    ok &= preis_label_ok
     autohaus = portal.get_autohaus_by_slug("kaesmann")
     if autohaus:
         admin_pdf_response = client.get(f"/admin/autohaus/{autohaus['id']}/lackierauftrag-vorlage.pdf")

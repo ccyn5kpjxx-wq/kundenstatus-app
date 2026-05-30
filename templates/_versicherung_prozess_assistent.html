@@ -1,11 +1,34 @@
 {% if versicherung_prozess %}
 {% set standalone = versicherung_prozess_standalone|default(false) %}
 {% set phase = versicherung_prozess_phase|default('full') %}
-{% set preparation_keys = ['grunddaten', 'kunden_qr', 'fahrzeugschein', 'gutachten', 'schadenfotos', 'abtretung'] %}
+{% set phase_config = {
+  'send_vorbereitung': {
+    'title': 'Unterlagenpaket für die Versicherung',
+    'text': 'Erst Kundendaten, Schadenart, Selbstbeteiligung, QR-Status, Kalkulation, Fotos und Abtretung sauber vorbereiten; danach geht der Fall zur Versicherung in die Prüfung.',
+    'keys': ['grunddaten', 'kunden_qr', 'fahrzeugschein', 'gutachten', 'schadenfotos', 'abtretung']
+  },
+  'freigabe_teile': {
+    'title': 'Freigabe & Teile',
+    'text': 'Freigabe dokumentieren, danach Teilebedarf, Bestellung, Lieferzeit, Rückstand und Kundentermin sauber festhalten.',
+    'keys': ['freigabe', 'teile', 'teile_lieferschein', 'terminfreigabe']
+  },
+  'reparatur': {
+    'title': 'Reparaturablauf',
+    'text': 'Nachtrag, Zusatzschaden und Werkstattdurchlauf mit Fotos und Belegen dokumentieren.',
+    'keys': ['kalkulation_nacharbeit', 'nachtrag', 'reparatur_doku']
+  },
+  'abschluss': {
+    'title': 'Fertigmeldung & Abrechnung',
+    'text': 'Fertigbilder, Rechnung, Kürzungen, Nachforderungen und Zahlungsfreigabe sauber abschließen.',
+    'keys': ['fertigbilder', 'zahlung_freigabe']
+  }
+} %}
+{% set active_phase = phase_config.get(phase) %}
+{% set phase_keys = active_phase['keys'] if active_phase else none %}
 {% set sichtbare = namespace(items=[]) %}
 {% for gruppe in versicherung_prozess['gruppen'] %}
   {% for item in gruppe['items'] %}
-    {% if phase != 'send_vorbereitung' or item['key'] in preparation_keys %}
+    {% if not phase_keys or item['key'] in phase_keys %}
       {% set sichtbare.items = sichtbare.items + [item] %}
     {% endif %}
   {% endfor %}
@@ -31,6 +54,11 @@
   .insurance-required-list li { margin:.12rem 0; }
   .insurance-process-files { display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.55rem; }
   .insurance-process-files a { text-decoration:none; }
+  .insurance-process-file-chip { display:inline-flex; gap:.25rem; align-items:center; border:1px solid #dee2e6; border-radius:999px; background:#f8f9fa; padding:.18rem .25rem .18rem .5rem; }
+  .insurance-process-file-chip a { color:#17212a; font-size:.76rem; font-weight:700; }
+  .insurance-process-file-chip button { border:0; border-radius:999px; background:#fff; color:#b42335; font-size:.72rem; font-weight:900; line-height:1; width:1.25rem; height:1.25rem; }
+  .insurance-process-file-chip button:hover,
+  .insurance-process-file-chip button:focus { background:#fff3f4; }
   .insurance-process-statusline { display:flex; gap:.45rem; align-items:center; flex-wrap:wrap; }
   @media (max-width: 991.98px) {
     .insurance-process-head,
@@ -38,15 +66,15 @@
   }
 </style>
 
-<div class="insurance-process mb-3" id="versicherung-prozess">
+<div class="insurance-process mb-3" id="versicherung-prozess{% if phase != 'full' %}-{{ phase }}{% endif %}">
   <div class="insurance-process-head mb-3">
     <div>
-      <div class="fw-bold">{{ 'Unterlagenpaket für die Versicherung' if phase == 'send_vorbereitung' else 'Versicherungsprozess' }}</div>
+      <div class="fw-bold">{{ active_phase['title'] if active_phase else 'Versicherungsprozess' }}</div>
       <div class="text-muted small">
-        {% if phase == 'send_vorbereitung' %}
-        Erst Kundendaten, QR-Status, Kalkulation, Fotos und Abtretung sauber vorbereiten. Danach geht der Fall zur Versicherung in die Prüfung.
+        {% if active_phase %}
+        {{ active_phase['text'] }}
         {% else %}
-        Schadensaufnahme mit Kalkulation, Freigabe/Sperre, Nachtrag, Teile, Werkstattdurchlauf, Fertigbilder und Abrechnung sauber nacheinander klären.
+        Schadensaufnahme mit Selbstbeteiligung/Kundenerklärung, Kalkulation, Freigabe/Sperre, Nachtrag, Teile, Werkstattdurchlauf, Fertigbilder und Abrechnung sauber nacheinander klären.
         {% endif %}
       </div>
     </div>
@@ -68,7 +96,7 @@
   {% for gruppe in versicherung_prozess['gruppen'] %}
   {% set gruppe_sichtbar = namespace(items=[]) %}
   {% for item in gruppe['items'] %}
-    {% if phase != 'send_vorbereitung' or item['key'] in preparation_keys %}
+    {% if not phase_keys or item['key'] in phase_keys %}
       {% set gruppe_sichtbar.items = gruppe_sichtbar.items + [item] %}
     {% endif %}
   {% endfor %}
@@ -101,9 +129,23 @@
         <div class="insurance-process-files">
           {% for datei in item['files'][:4] %}
             {% if autohaus is defined %}
-            <a class="badge text-bg-light border text-dark" href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank">{{ datei['original_name'] }}</a>
+            <span class="insurance-process-file-chip">
+              <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=datei['id']) }}" target="_blank">{{ datei['original_name'] }}</a>
+            </span>
             {% else %}
-            <a class="badge text-bg-light border text-dark" href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank">{{ datei['original_name'] }}</a>
+            <span class="insurance-process-file-chip">
+              <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank">{{ datei['original_name'] }}</a>
+              {% if not standalone %}
+              <button
+                type="submit"
+                title="Datei löschen"
+                aria-label="{{ datei['original_name'] }} löschen"
+                formaction="{{ url_for('admin_datei_loeschen', datei_id=datei['id'], next=request.full_path) }}"
+                formmethod="post"
+                data-no-loading="true"
+              >×</button>
+              {% endif %}
+            </span>
             {% endif %}
           {% endfor %}
           {% if item['file_count'] > 4 %}<span class="badge text-bg-light border text-dark">+{{ item['file_count'] - 4 }}</span>{% endif %}
@@ -161,6 +203,16 @@
               <button type="submit" name="prozess_status_{{ item['key'] }}" value="nicht_noetig" class="btn btn-sm btn-outline-secondary" formaction="{{ item['status_url'] }}" formmethod="post">Nicht nötig</button>
             </div>
           {% endif %}
+        {% endif %}
+
+        {% if item['key'] in ['nachtrag', 'kalkulation_nacharbeit'] and item['files'] and item.get('mail_url') and not standalone and autohaus is not defined %}
+          <button
+            type="submit"
+            class="btn btn-sm btn-warning"
+            formaction="{{ item['mail_url'] }}"
+            formmethod="post"
+          >Nachtrag an Versicherung senden</button>
+          <div class="insurance-upload-help">Sendet nur, wenn die Schaden-Mailbox per SMTP eingerichtet ist.</div>
         {% endif %}
 
         {% if item['can_mark_missing'] %}

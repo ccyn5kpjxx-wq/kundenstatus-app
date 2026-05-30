@@ -28,8 +28,49 @@
     .case-row:hover { color:#16202a; border-color:#a23f2d; background:#fff7eb; }
     .case-meta { color:#6b5f53; font-size:.88rem; }
     .section-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:14px; }
-    @media (max-width:900px) { .hero-grid, .action-panel { grid-template-columns:1fr; } .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-    @media (max-width:640px) { .portal-tools, .metric-grid, .case-row { grid-template-columns:1fr; } }
+    .portal-start-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; margin-bottom:24px; }
+    .portal-card { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:20px; box-shadow:0 12px 30px rgba(64,47,25,.08); }
+    .portal-card h2 { font-size:1.15rem; margin-bottom:.6rem; }
+    .portal-card-list { display:grid; gap:.7rem; }
+    .portal-news-item, .portal-mail-item, .portal-event-item {
+      border:1px solid #e4d6c3;
+      border-radius:14px;
+      background:#fffaf2;
+      padding:.85rem .9rem;
+    }
+    .portal-event-item { display:grid; grid-template-columns:auto minmax(0,1fr); gap:.75rem; }
+    .portal-event-date {
+      min-width:4.8rem;
+      border-radius:12px;
+      background:#16202a;
+      color:#fff;
+      text-align:center;
+      padding:.5rem .45rem;
+      font-weight:800;
+      line-height:1.1;
+    }
+    .portal-workshop-form { display:grid; gap:.75rem; }
+    .case-dashboard-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin-bottom:24px; }
+    .overview-grid { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(280px,.75fr); gap:18px; align-items:start; }
+    .overview-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:14px; }
+    .case-list { display:grid; gap:.7rem; }
+    .case-row-compact {
+      display:grid;
+      grid-template-columns:minmax(220px,1fr) auto auto;
+      gap:1rem;
+      align-items:center;
+      border:1px solid #e4d6c3;
+      border-radius:14px;
+      background:#fffaf2;
+      padding:1rem;
+      color:#16202a;
+      text-decoration:none;
+    }
+    .case-row-compact:hover { color:#16202a; border-color:#a23f2d; background:#fff7eb; }
+    .case-title { font-weight:800; }
+    .case-subline { color:#6b5f53; font-size:.88rem; }
+    @media (max-width:900px) { .hero-grid, .action-panel, .portal-start-grid, .case-dashboard-grid, .overview-grid { grid-template-columns:1fr; } .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media (max-width:640px) { .portal-tools, .metric-grid, .case-row, .case-row-compact { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
@@ -68,13 +109,14 @@
   {%- endmacro %}
 
   <main class="shell">
+    {% set werkstatt_name = "Lackierzentrum Gärtner Karosserie & Lack GmbH" %}
     <div class="hero-grid mb-4">
       <div class="panel">
         <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
           <div>
             <div class="badge text-bg-dark mb-3">Versicherungsportal</div>
             <h1 class="mb-1">{{ versicherung['name'] }}</h1>
-            <div class="text-muted">Digitale Schadenakte, Unterlagen, Freigaben und Reparaturstatus bei Gärtner.</div>
+            <div class="text-muted">Digitale Schadenakte, Unterlagen, Freigaben und Reparaturstatus bei {{ werkstatt_name }}.</div>
           </div>
           <a href="{{ url_for('versicherung_logout') }}" class="btn btn-outline-dark">Logout</a>
         </div>
@@ -96,44 +138,122 @@
       </div>
     </div>
 
-    <div class="panel mb-4">
-      <div class="action-panel">
-        <div>
-          <div class="fw-bold">Neues Schadenprotokoll für Gärtner</div>
-          <div class="text-muted small">Kunde meldet Schaden bei der Versicherung, die Versicherung weist Fahrzeug, Begutachtung und Mobilität direkt an Gärtner zu.</div>
+    <div class="portal-start-grid">
+      <section class="portal-card">
+        <h2>Lackierportal-News</h2>
+        <div class="portal-card-list">
+          <div class="portal-news-item">
+            <div class="fw-bold">Digitale Schadenakte aktiv</div>
+            <div class="text-muted small">Unterlagen, Rückfragen und Freigaben werden direkt am Schadenfall gesammelt.</div>
+          </div>
+          <div class="portal-news-item">
+            <div class="fw-bold">Besichtigung mit Statuslink</div>
+            <div class="text-muted small">Kunden können den Status lesend verfolgen, ohne interne Akten zu sehen.</div>
+          </div>
         </div>
-        <a href="{{ url_for('versicherung_zuteilung_neu', slug=versicherung['slug']) }}" class="btn btn-dark">An Gärtner zuteilen</a>
-      </div>
+      </section>
+
+      <section class="portal-card">
+        <div class="d-flex justify-content-between gap-3 align-items-start">
+          <h2>Postfach</h2>
+          <span class="badge text-bg-warning">{{ dashboard['kennzahlen']['pruefung'] + dashboard['kennzahlen']['offen'] }}</span>
+        </div>
+        <div class="portal-card-list">
+          <div class="portal-mail-item">
+            <div class="fw-bold">Neue Rückfrage möglich</div>
+            <div class="text-muted small">Fälle in Prüfung oder mit Zuteilung erscheinen hier als Hinweis.</div>
+          </div>
+          <div class="portal-mail-item">
+            <div class="fw-bold">Freigabe-Antworten</div>
+            <div class="text-muted small">Antworten landen zusätzlich direkt in der jeweiligen Schadenakte.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="portal-card">
+        <h2>Schaden an Gärtner zuteilen</h2>
+        <form class="portal-workshop-form" action="{{ url_for('versicherung_zuteilung_neu', slug=versicherung['slug']) }}" method="GET">
+          <label class="form-label mb-0" for="werkstatt_ziel">Werkstatt auswählen</label>
+          <select id="werkstatt_ziel" class="form-select" name="werkstatt">
+            <option value="gaertner">{{ werkstatt_name }}</option>
+          </select>
+          <div class="text-muted small">Nach der Auswahl öffnet sich Schritt 1: Zuteilung an die gewählte Werkstatt.</div>
+          <button type="submit" class="btn btn-dark">An Gärtner zuteilen</button>
+        </form>
+      </section>
     </div>
 
-    <div class="metric-grid mb-4">
-      <div class="metric"><span>Neue Meldungen</span><strong>{{ dashboard['kennzahlen']['offen'] }}</strong></div>
-      <div class="metric"><span>In Prüfung</span><strong>{{ dashboard['kennzahlen']['pruefung'] }}</strong></div>
-      <div class="metric"><span>Freigegeben</span><strong>{{ dashboard['kennzahlen']['freigegeben'] }}</strong></div>
-      <div class="metric"><span>Archiv</span><strong>{{ dashboard['kennzahlen']['archiv'] }}</strong></div>
+    <div class="case-dashboard-grid">
+      {{ case_section('Neue Meldungen', 'Neue Zuteilungen und vorbereitete Schadenmeldungen.', dashboard['neue_meldungen'], 'Aktuell keine neuen Meldungen.') }}
+      {{ case_section('In Prüfung', 'Schadenakten mit laufender Versicherungsprüfung oder Rückfrage.', dashboard['in_pruefung'], 'Aktuell keine Fälle in Prüfung.') }}
+      {{ case_section('Freigegeben / in Arbeit', 'Freigegebene Schadenfälle bis zur Reparatur und Rückgabe.', dashboard['freigegeben'], 'Aktuell keine freigegebenen Fälle.') }}
+      {{ case_section('Archivierte Schadenakten', 'Abgeschlossene oder archivierte Schadenfälle.', dashboard['archivierte'], 'Aktuell keine archivierten Schadenakten.') }}
     </div>
 
-    <div class="row g-4">
-      <div class="col-lg-6">
-        {{ case_section('Neue Meldungen', 'Zuteilungen und frisch gemeldete Fälle.', dashboard['neue_meldungen'], 'Keine neuen Meldungen.') }}
-      </div>
-      <div class="col-lg-6">
-        {{ case_section('In Prüfung', 'Fälle mit Prüfung, Rückfrage oder fehlender Freigabe.', dashboard['in_pruefung'], 'Keine offenen Prüfungen.') }}
-      </div>
-      <div class="col-lg-6">
-        {{ case_section('Freigegeben / in Arbeit', 'Freigegebene Fälle, die bei Gärtner weiterlaufen.', dashboard['freigegeben'], 'Keine freigegebenen Fälle.') }}
-      </div>
-      <div class="col-lg-6">
-        {{ case_section('Aktive Schadenakten', 'Alle nicht archivierten Fälle dieser Versicherung.', dashboard['alle'], 'Aktuell sind keine aktiven Schadenfälle vorhanden.') }}
-      </div>
-      {% if dashboard['gesperrt'] %}
-      <div class="col-12">
-        {{ case_section('Sperre / abgelehnt', 'Fälle ohne aktuelle Freigabe.', dashboard['gesperrt'], 'Keine gesperrten Fälle.') }}
-      </div>
-      {% endif %}
-      <div class="col-12">
-        {{ case_section('Archivierte Schadenakten', 'Abgeschlossene oder archivierte Vorgänge.', dashboard['archivierte'], 'Noch keine archivierten Schadenakten.') }}
-      </div>
+    <div class="overview-grid">
+      <section class="panel">
+        <div class="overview-head">
+          <div>
+            <h2 class="h4 mb-1">Auftragsübersicht</h2>
+            <div class="text-muted">Alle aktiven Schadenfälle dieser Versicherung.</div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <span class="badge text-bg-secondary">{{ dashboard['alle']|length }} aktiv</span>
+            <span class="badge text-bg-warning">{{ dashboard['kennzahlen']['pruefung'] }} in Prüfung</span>
+            <span class="badge text-bg-success">{{ dashboard['kennzahlen']['freigegeben'] }} freigegeben</span>
+          </div>
+        </div>
+        <div class="case-list">
+          {% for fall in dashboard['alle'][:10] %}
+          <a class="case-row-compact" href="{{ url_for('versicherung_auftrag', slug=versicherung['slug'], auftrag_id=fall['id']) }}">
+            <div>
+              <div class="case-title">{{ fall['fahrzeug'] or 'Fahrzeug' }}</div>
+              <div class="case-subline">
+                {% if fall['kennzeichen'] %}{{ fall['kennzeichen'] }}{% endif %}
+                {% if fall['schaden_nummer'] %} · Schaden {{ fall['schaden_nummer'] }}{% endif %}
+                {% if fall['kunde_name'] %} · {{ fall['kunde_name'] }}{% endif %}
+              </div>
+            </div>
+            <span class="badge text-bg-{{ fall['versicherung_freigabe_meta']['farbe'] }}">{{ fall['versicherung_freigabe_meta']['label'] }}</span>
+            {% if fall['versicherung_pruefung'] %}
+            <span class="badge text-bg-info">{{ fall['versicherung_pruefung']['percent'] }}% geprüft</span>
+            {% endif %}
+            <span class="case-meta">{{ fall['status_meta']['label'] }}</span>
+          </a>
+          {% else %}
+          <div class="text-muted">Aktuell sind keine aktiven Schadenfälle vorhanden.</div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <aside class="panel">
+        <div class="overview-head">
+          <div>
+            <h2 class="h4 mb-1">Kalenderauszug</h2>
+            <div class="text-muted">Termine aus den Schadenakten.</div>
+          </div>
+        </div>
+        <div class="portal-card-list">
+          {% for termin in portal_termine %}
+          <a class="portal-event-item text-decoration-none text-reset" href="{{ url_for('versicherung_auftrag', slug=versicherung['slug'], auftrag_id=termin['auftrag']['id']) }}">
+            <div class="portal-event-date">{{ termin['datum_text'][:5] }}</div>
+            <div>
+              <div class="fw-bold">{{ termin['label'] }}</div>
+              <div class="text-muted small">{{ termin['detail'] }}</div>
+              {% if termin['is_past'] %}<span class="badge text-bg-light border text-dark mt-2">vergangen</span>{% endif %}
+            </div>
+          </a>
+          {% else %}
+          <div class="portal-event-item">
+            <div class="portal-event-date">--</div>
+            <div>
+              <div class="fw-bold">Noch keine Termine</div>
+              <div class="text-muted small">Sobald Besichtigung, Teile oder Reparaturtermine gesetzt sind, erscheinen sie hier.</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </aside>
     </div>
   </main>
 

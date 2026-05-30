@@ -363,6 +363,59 @@
       line-height:1.2;
       margin-top:2px;
     }
+    .offer-decision-panel {
+      border:1px solid #d9b56a;
+      background:linear-gradient(135deg,#fffaf0,#f6ebd6);
+    }
+    .offer-decision-list {
+      display:grid;
+      gap:12px;
+      margin-top:18px;
+    }
+    .offer-decision-card {
+      display:grid;
+      grid-template-columns:minmax(0,1.35fr) minmax(180px,.45fr) auto;
+      align-items:center;
+      gap:16px;
+      border:1px solid #e1cfad;
+      border-radius:18px;
+      background:#fffdf9;
+      padding:16px;
+    }
+    .offer-decision-card h5 {
+      margin-bottom:4px;
+      font-size:1.12rem;
+    }
+    .offer-price {
+      min-width:0;
+      border-left:1px solid #eadfce;
+      padding-left:16px;
+    }
+    .offer-price span {
+      display:block;
+      color:#7d6844;
+      font-size:.72rem;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .offer-price strong {
+      display:block;
+      color:#132635;
+      font-family:"Space Grotesk",sans-serif;
+      font-size:1.45rem;
+      line-height:1.1;
+      overflow-wrap:anywhere;
+    }
+    .offer-actions {
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      gap:8px;
+    }
+    .offer-actions .btn {
+      white-space:nowrap;
+    }
     .priority-panel {
       background:
         radial-gradient(circle at 8% 10%, rgba(43,128,139,.14), transparent 30%),
@@ -533,6 +586,19 @@
       .portal-action-row .btn {
         flex:1 1 220px;
       }
+      .offer-decision-card {
+        grid-template-columns:1fr;
+        align-items:start;
+      }
+      .offer-price {
+        border-left:0;
+        border-top:1px solid #eadfce;
+        padding-left:0;
+        padding-top:12px;
+      }
+      .offer-actions {
+        justify-content:flex-start;
+      }
       .portal-brand-stage {
         margin-top:20px;
       }
@@ -699,6 +765,7 @@
                 <div class="portal-service-item"><span><strong>Unfallinstandsetzung &amp; Smart Repair:</strong> Richtbank, Kunststoffreparatur, Kleinschäden.</span></div>
                 <div class="portal-service-item"><span><strong>Dellendoktor:</strong> Ausbeulen bei Park- und Hageldellen.</span></div>
                 <div class="portal-service-item"><span><strong>Fahrzeugpflege:</strong> Innenreinigung, Politur und Versiegelung.</span></div>
+                <div class="portal-service-item"><span><strong>Softlack-Erneuerung:</strong> Armaturen im Innenraum.</span></div>
                 <div class="portal-service-item"><span><strong>Industrielackierung:</strong> Bauteile und Kleinserien.</span></div>
                 <div class="portal-service-item"><span><strong>Glas-Rep.:</strong> Steinschlagreparatur und Scheibentausch.</span></div>
                 <div class="portal-service-item"><span><strong>Mechanikarbeiten:</strong> Ölwechsel, Service und Bremsen wechseln.</span></div>
@@ -732,6 +799,51 @@
         </div>
       </div>
     </div>
+
+    {% if werkstattangebote %}
+    <div class="panel mb-4 offer-decision-panel" id="werkstattangebote">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+        <div>
+          <h4 class="mb-1">Werkstatt-Angebote zur Entscheidung</h4>
+          <div class="text-muted">Die Werkstatt hat einen Preis abgegeben. Sie können das Angebot direkt annehmen oder ablehnen.</div>
+        </div>
+        <span class="badge text-bg-warning">{{ werkstattangebote|length }} offen</span>
+      </div>
+      <div class="offer-decision-list">
+        {% for angebot in werkstattangebote %}
+        <div class="offer-decision-card">
+          <div>
+            <div class="small text-muted mb-1">Angebot abgegeben von der Werkstatt{% if angebot['werkstatt_angebot_am'] %} · {{ angebot['werkstatt_angebot_am'] }}{% endif %}</div>
+            <h5>{{ angebot['fahrzeug'] or 'Fahrzeug' }}</h5>
+            <div class="text-muted small">
+              {% if angebot['kennzeichen'] %}{{ angebot['kennzeichen'] }}{% endif %}
+              {% if angebot['kunde_name'] %}{% if angebot['kennzeichen'] %} · {% endif %}{{ angebot['kunde_name'] }}{% endif %}
+            </div>
+            {% if angebot['werkstatt_angebot_text'] %}
+            <div class="mt-2">{{ angebot['werkstatt_angebot_text']|truncate(180, True) }}</div>
+            {% endif %}
+          </div>
+          <div class="offer-price">
+            <span>Werkstattpreis</span>
+            <strong>{{ angebot['werkstatt_angebot_preis_label'] or 'Preis im Angebot' }}</strong>
+          </div>
+          <div class="offer-actions">
+            <form method="POST" action="{{ url_for('partner_angebot_annehmen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="m-0">
+              {{ csrf_field()|safe }}
+              <button type="submit" class="btn btn-dark">Angebot annehmen</button>
+            </form>
+            <form method="POST" action="{{ url_for('partner_angebot_ablehnen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="m-0" onsubmit="return confirm('Dieses Werkstatt-Angebot wirklich ablehnen?')">
+              {{ csrf_field()|safe }}
+              <input type="hidden" name="next" value="{{ request.path }}#werkstattangebote">
+              <button type="submit" class="btn btn-outline-danger">Ablehnen</button>
+            </form>
+            <a href="{{ url_for('partner_angebot_detail', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="btn btn-outline-dark">Details öffnen</a>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
 
     {% include "_mini_month_calendar.html" %}
 
@@ -796,6 +908,9 @@
           </div>
           <div class="d-flex gap-2 align-items-center flex-wrap">
             <span class="badge text-bg-{{ fall['versicherung_freigabe_meta']['farbe'] }}">{{ fall['versicherung_freigabe_meta']['label'] }}</span>
+            {% if fall['versicherung_pruefung'] %}
+            <span class="badge text-bg-info">{{ fall['versicherung_pruefung']['percent'] }}% geprüft</span>
+            {% endif %}
             <a href="{{ fall_url }}" class="btn btn-outline-dark btn-sm">Öffnen</a>
           </div>
         </div>
