@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}Zahlen · Umsatz-Ziel{% endblock %}
+
+{% block extra_css %}
+<style>
+  .zahlen-grid { display: grid; gap: 1rem; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 992px) { .zahlen-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 560px) { .zahlen-grid { grid-template-columns: 1fr; } }
+
+  .ampel-hero { border-radius: var(--radius); padding: 1.6rem 1.8rem; color: #fff; box-shadow: var(--shadow); }
+  .ampel-gruen   { background: linear-gradient(135deg, #1b7f53, #29a168); }
+  .ampel-gelb    { background: linear-gradient(135deg, #c0820f, #e0a72e); }
+  .ampel-rot     { background: linear-gradient(135deg, #a23f2d, #c74b34); }
+  .ampel-neutral { background: linear-gradient(135deg, #3a4a57, #54676f); }
+  .ampel-dot { display: inline-block; width: .85rem; height: .85rem; border-radius: 50%; background: #fff; margin-right: .55rem; vertical-align: middle; }
+  .ampel-headline { font-family: "Space Grotesk", sans-serif; font-size: 1.9rem; font-weight: 700; line-height: 1.1; }
+
+  .ziel-bar { height: 14px; border-radius: 999px; background: rgba(255, 255, 255, .28); overflow: hidden; }
+  .ziel-bar > span { display: block; height: 100%; background: #fff; border-radius: 999px; }
+
+  .month-pill { font-family: "Space Grotesk", sans-serif; font-size: 1.05rem; font-weight: 700; white-space: nowrap; }
+  .trend-up { color: var(--good); font-weight: 700; }
+  .trend-down { color: var(--brand); font-weight: 700; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="section-title mb-4">
+  <div>
+    <div class="badge-soft mb-3">Controlling · Zahlen</div>
+    <h1 class="mb-2">Umsatz-Ziel &amp; Tendenz</h1>
+    <p class="mb-0">Einnahmen, Ausgaben und Monatsziel auf einen Blick — direkt aus deinen Lexware-Daten.</p>
+  </div>
+  <div class="d-flex align-items-center gap-2 flex-wrap">
+    <a class="btn btn-soft" href="{{ url_for('admin_zahlen', jahr=z.prev_jahr, monat=z.prev_monat) }}" title="{{ z.vormonat_label }}">&larr;</a>
+    <span class="month-pill px-1">{{ z.monat_label }}</span>
+    <a class="btn btn-soft" href="{{ url_for('admin_zahlen', jahr=z.next_jahr, monat=z.next_monat) }}" title="{{ z.nachmonat_label }}">&rarr;</a>
+  </div>
+</div>
+
+<div class="ampel-hero ampel-{{ z.ampel }} mb-4">
+  <div class="row align-items-center g-3">
+    <div class="col-lg-7">
+      <div class="text-uppercase small" style="letter-spacing: .08em; opacity: .85;">
+        {% if z.ist_aktueller_monat %}Stand heute, {{ z.heute_label }} · Tag {{ z.as_of }} von {{ z.tage_im_monat }}{% elif z.ist_zukunft %}Ausblick {{ z.monat_label }}{% else %}Monatsergebnis {{ z.monat_label }}{% endif %}
+      </div>
+      <div class="ampel-headline mt-1">
+        <span class="ampel-dot"></span>
+        {% if z.ampel == 'gruen' %}Auf Kurs
+        {% elif z.ampel == 'gelb' %}Knapp — Druck machen
+        {% elif z.ampel == 'rot' %}Unter Ziel
+        {% elif z.ist_zukunft %}Noch nicht begonnen
+        {% elif z.ziel_gesetzt %}Startphase — Prognose folgt
+        {% else %}Noch kein Auto-Ziel{% endif %}
+      </div>
+      {% if z.ziel_gesetzt and z.ist_aktueller_monat %}
+      <div class="mt-2" style="opacity: .92;">Hochrechnung Monatsende: <strong>{{ z.hochrechnung_label }}</strong> &middot; Auto-Ziel {{ z.ziel_label }}</div>
+      {% elif z.ziel_gesetzt %}
+      <div class="mt-2" style="opacity: .92;">Einnahmen: <strong>{{ z.einnahmen_bisher_label }}</strong> &middot; Auto-Ziel {{ z.ziel_label }}</div>
+      {% else %}
+      <div class="mt-2" style="opacity: .92;">{{ z.ziel_erklaerung }}</div>
+      {% endif %}
+    </div>
+    <div class="col-lg-5">
+      {% if z.ziel_gesetzt %}
+      <div class="d-flex justify-content-between small mb-1" style="opacity: .9;">
+        <span>Ziel-Fortschritt</span><span>{{ z.fortschritt_pct }} %</span>
+      </div>
+      <div class="ziel-bar"><span style="width: {{ z.fortschritt_capped }}%;"></span></div>
+      <div class="small mt-1" style="opacity: .85;">{{ z.einnahmen_bisher_label }} von {{ z.ziel_label }}</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="zahlen-grid mb-4">
+  <div class="card metric-card metric-green">
+    <div class="metric-label">Einnahmen{% if z.ist_aktueller_monat %} bisher{% endif %}</div>
+    <div class="metric-value">{{ z.einnahmen_bisher_label }}</div>
+  </div>
+  <div class="card metric-card metric-warm">
+    <div class="metric-label">Ausgaben{% if z.ist_aktueller_monat %} bisher{% endif %}</div>
+    <div class="metric-value">{{ z.ausgaben_bisher_label }}</div>
+  </div>
+  <div class="card metric-card metric-blue">
+    <div class="metric-label">Differenz</div>
+    <div class="metric-value">{{ z.differenz_bisher_label }}</div>
+  </div>
+  <div class="card metric-card metric-gold">
+    <div class="metric-label">{% if z.ist_aktueller_monat %}Hochrechnung{% else %}Ziel{% endif %}</div>
+    <div class="metric-value">{% if z.ist_aktueller_monat %}{{ z.hochrechnung_label }}{% else %}{{ z.ziel_label }}{% endif %}</div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-lg-6">
+    <div class="page-card p-4 h-100">
+      <h2 class="h5 mb-2">Tendenz gegenüber Vormonat</h2>
+      <p class="text-muted mb-3">
+        {{ z.monat_label }} vs. {{ z.vormonat_label }} —
+        {% if z.ist_aktueller_monat %}jeweils bis Tag {{ z.as_of }}{% else %}ganzer Monat{% endif %}.
+      </p>
+      {% if z.tendenz_pct is not none %}
+        <div style="font-size: 1.5rem;">
+          {% if z.tendenz_up %}<span class="trend-up">&#9650; +{{ z.tendenz_delta_label }} ({{ z.tendenz_pct }} %)</span>
+          {% else %}<span class="trend-down">&#9660; &minus;{{ z.tendenz_delta_label }} ({{ z.tendenz_pct | abs }} %)</span>{% endif %}
+        </div>
+        <div class="text-muted small mt-2">
+          {{ z.monat_label }}: {{ z.einnahmen_bisher_label }} &middot; {{ z.vormonat_label }}: {{ z.vormonat_einnahmen_bisher_label }}
+        </div>
+      {% else %}
+        <div class="text-muted">Für {{ z.vormonat_label }} liegen (noch) keine Vergleichszahlen vor.</div>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="page-card p-4 h-100">
+      <h2 class="h5 mb-2">Auto-Ziel{% if z.ziel_gesetzt %}: {{ z.ziel_label }}{% endif %}</h2>
+      <p class="mb-2">{{ z.ziel_erklaerung }}</p>
+      <p class="text-muted small mb-0">
+        Das Ziel berechnet sich bei jedem Aufruf neu aus den Lexware-Zahlen — kein Eintragen nötig.
+        Regel: Vormonat schlagen; läuft der Monat stärker, kommt die Hälfte des Vorsprungs (max. +15&nbsp;%) obendrauf.
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="section-title mb-3">
+    <div>
+      <h2 class="h5 mb-1">Monatsübersicht</h2>
+      <p class="mb-0 text-muted small">Nach Belegdatum, Bruttowerte — wie in Lexware. Klick einen Monat für Details.</p>
+    </div>
+  </div>
+  {% if z.uebersicht %}
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Monat</th>
+          <th class="text-end">Einnahmen</th>
+          <th class="text-end">Ausgaben</th>
+          <th class="text-end">Differenz</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in z.uebersicht %}
+        <tr {% if m.ist_aktiv %}style="background: rgba(20, 93, 102, .06);"{% endif %}>
+          <td>
+            <a class="fw-bold text-decoration-none" style="color: var(--ink);" href="{{ url_for('admin_zahlen', jahr=m.jahr, monat=m.monat) }}">{{ m.label }}</a>
+            {% if m.vormonat_geschlagen %}<span class="badge text-bg-success ms-1" title="Stärker als der Vormonat">&#9650; Vormonat</span>{% endif %}
+          </td>
+          <td class="text-end">{{ m.einnahmen_label }}</td>
+          <td class="text-end">{{ m.ausgaben_label }}</td>
+          <td class="text-end {% if m.differenz_positiv %}trend-up{% else %}trend-down{% endif %}">{{ m.differenz_label }}</td>
+          <td class="text-end"><a class="btn btn-sm btn-soft" href="{{ url_for('admin_zahlen', jahr=m.jahr, monat=m.monat) }}">Öffnen</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-muted">Noch keine Lexware-Rechnungen in der Datenbank.</div>
+  {% endif %}
+</div>
+
+<div class="text-muted small">
+  {% if z.lexware_verbunden %}
+    Quelle: Lexware-Rechnungen &middot; letzter Abgleich: {{ z.last_sync or 'noch nie' }}
+  {% else %}
+    Lexware ist nicht verbunden — sobald der API-Schlüssel gesetzt ist, erscheinen automatisch die aktuellen Zahlen.
+  {% endif %}
+  &middot; {{ z.eintraege }} Belege berücksichtigt.
+</div>
+
+{% endblock %}

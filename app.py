@@ -20601,6 +20601,305 @@ def admin_zugaenge():
     )
 
 
+# --- Zahlen / Umsatz-Ziel (Cockpit-Kachel) ---------------------------------
+# Liest die echten Einnahmen/Ausgaben aus den synchronisierten Lexware-Rechnungen
+# (Tabelle lexware_rechnungen) und stellt sie als Monatsziel mit Tendenz/Ampel dar.
+# Das Ziel berechnet sich automatisch: Vormonat schlagen; liegt der Monat vor dem
+# Vormonats-Tempo, kommt die Haelfte des Vorsprungs (max. +15 %) obendrauf.
+UMSATZ_MONATE = (
+    "", "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+)
+
+
+def umsatz_euro_label(value):
+    try:
+        amount = float(value or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    return f"{amount:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def umsatz_parse_voucher_date(value):
+    text = clean_text(value)[:10]
+    if not text:
+        return None
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def umsatz_ziel_daten(jahr=None, monat=None):
+    heute = datetime.now().date()
+    if not jahr or not monat:
+        jahr, monat = heute.year, heute.month
+    try:
+        jahr = int(jahr)
+        monat = int(monat)
+    except (TypeError, ValueError):
+        jahr, monat = heute.year, heute.month
+    if monat < 1 or monat > 12 or jahr < 2000 or jahr > 2100:
+        jahr, monat = heute.year, heute.month
+
+    def days_in_month(y, m):
+        nxt = datetime(y + 1, 1, 1) if m == 12 else datetime(y, m + 1, 1)
+        return (nxt - timedelta(days=1)).day
+
+    def prev_month(y, m):
+        return (y - 1, 12) if m == 1 else (y, m - 1)
+
+    def next_month(y, m):
+        return (y + 1, 1) if m == 12 else (y, m + 1)
+
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT voucher_date, total_amount, richtung FROM lexware_rechnungen"
+        ).fetchall()
+    except Exception:
+        rows = []
+    finally:
+        db.close()
+
+    monats_summen = {}
+    tages_summen = {}
+    eintraege = 0
+    for row in rows:
+        datum = umsatz_parse_voucher_date(row["voucher_date"])
+        if not datum:
+            continue
+        try:
+            betrag = float(row["total_amount"] or 0)
+        except (TypeError, ValueError):
+            continue
+        richtung = clean_text(row["richtung"])
+        if richtung == "Einnahme":
+            key = "einnahmen"
+        elif richtung == "Ausgabe":
+            key = "ausgaben"
+        else:
+            continue
+        eintraege += 1
+        ym = (datum.year, datum.month)
+        monats_summen.setdefault(ym, {"einnahmen": 0.0, "ausgaben": 0.0})[key] += betrag
+        tag_dict = tages_summen.setdefault(ym, {"einnahmen": {}, "ausgaben": {}})
+        tag_dict[key][datum.day] = tag_dict[key].get(datum.day, 0.0) + betrag
+
+    cur = (jahr, monat)
+    ist_aktueller_monat = cur == (heute.year, heute.month)
+    ist_zukunft = cur > (heute.year, heute.month)
+    tage_im_monat = days_in_month(jahr, monat)
+    if ist_aktueller_monat:
+        as_of = heute.day
+    elif cur < (heute.year, heute.month):
+        as_of = tage_im_monat
+    else:
+        as_of = 0
+
+    def bisher(ym, schluessel, bis_tag):
+        werte = tages_summen.get(ym, {}).get(schluessel, {})
+        return sum(amt for tag, amt in werte.items() if tag <= bis_tag)
+
+    einnahmen_bisher = bisher(cur, "einnahmen", as_of)
+    ausgaben_bisher = bisher(cur, "ausgaben", as_of)
+    einnahmen_monat_total = monats_summen.get(cur, {}).get("einnahmen", 0.0)
+    ausgaben_monat_total = monats_summen.get(cur, {}).get("ausgaben", 0.0)
+    differenz_bisher = einnahmen_bisher - ausgaben_bisher
+
+    prev_y, prev_m = prev_month(jahr, monat)
+    vm = (prev_y, prev_m)
+    vormonat_einnahmen_bisher = bisher(vm, "einnahmen", as_of)
+    vormonat_einnahmen_total = monats_summen.get(vm, {}).get("einnahmen", 0.0)
+    tendenz_delta = einnahmen_bisher - vormonat_einnahmen_bisher
+    if vormonat_einnahmen_bisher > 0:
+        tendenz_pct = round(tendenz_delta / vormonat_einnahmen_bisher * 100)
+    else:
+        tendenz_pct = None
+
+    # Auto-Ziel: Vormonat schlagen; laeuft der Monat staerker als der Vormonat
+    # (gleicher Stichtag), kommt die Haelfte des Vorsprungs als Aufschlag dazu,
+    # gedeckelt bei +15 %. In den ersten 2 Tagen kein Aufschlag (zu wenig Daten).
+    bump_pct = 0
+    if vormonat_einnahmen_total > 0 and not ist_zukunft:
+        if (
+            ist_aktueller_monat
+            and as_of >= 3
+            and tendenz_pct is not None
+            and tendenz_pct > 0
+        ):
+            bump_pct = min(tendenz_pct // 2, 15)
+        ziel_raw = vormonat_einnahmen_total * (1 + bump_pct / 100)
+        ziel_cents = int(round(ziel_raw * 100))
+        ziel = float(-(-ziel_cents // 100000) * 1000)
+    else:
+        ziel = 0.0
+
+    if ist_zukunft:
+        ziel_erklaerung = (
+            "Der Monat hat noch nicht begonnen — das Auto-Ziel berechnet sich, "
+            "sobald der Vormonat abgeschlossen ist."
+        )
+    elif ziel <= 0:
+        ziel_erklaerung = (
+            "Noch keine Vormonats-Zahlen vorhanden — sobald ein voller Monat in "
+            "Lexware steht, setzt sich das Ziel von selbst."
+        )
+    elif bump_pct > 0:
+        ziel_erklaerung = (
+            f"Vormonat {umsatz_euro_label(vormonat_einnahmen_total)} + {bump_pct} % Aufschlag, "
+            f"weil ihr aktuell {tendenz_pct} % vor dem Vormonats-Tempo liegt — aufgerundet."
+        )
+    elif ist_aktueller_monat:
+        ziel_erklaerung = (
+            f"Vormonat schlagen: {umsatz_euro_label(vormonat_einnahmen_total)} aufgerundet. "
+            "Sobald ihr vor dem Vormonats-Tempo liegt, steigt das Ziel automatisch mit."
+        )
+    else:
+        ziel_erklaerung = (
+            f"Maßstab für diesen Monat: den Vormonat ({umsatz_euro_label(vormonat_einnahmen_total)}) schlagen."
+        )
+
+    fortschritt_pct = round(einnahmen_bisher / ziel * 100) if ziel > 0 else 0
+
+    if ist_aktueller_monat and as_of > 0:
+        hochrechnung = einnahmen_bisher / as_of * tage_im_monat
+    else:
+        hochrechnung = einnahmen_bisher
+
+    if ziel <= 0:
+        ampel = "neutral"
+    elif hochrechnung >= ziel:
+        ampel = "gruen"
+    elif hochrechnung >= ziel * 0.85:
+        ampel = "gelb"
+    else:
+        ampel = "rot"
+    if ziel > 0 and ist_aktueller_monat and as_of < 3:
+        ampel = "neutral"
+
+    uebersicht = []
+    for ym in sorted(monats_summen.keys()):
+        e = monats_summen[ym].get("einnahmen", 0.0)
+        a = monats_summen[ym].get("ausgaben", 0.0)
+        vm_von_ym = prev_month(ym[0], ym[1])
+        vm_einnahmen = monats_summen.get(vm_von_ym, {}).get("einnahmen", 0.0)
+        uebersicht.append({
+            "jahr": ym[0],
+            "monat": ym[1],
+            "label": f"{UMSATZ_MONATE[ym[1]]} {ym[0]}",
+            "einnahmen_label": umsatz_euro_label(e),
+            "ausgaben_label": umsatz_euro_label(a),
+            "differenz_label": umsatz_euro_label(e - a),
+            "differenz_positiv": (e - a) >= 0,
+            "ist_aktiv": ym == cur,
+            "vormonat_geschlagen": vm_einnahmen > 0 and e > vm_einnahmen and ym != cur,
+        })
+    uebersicht.reverse()
+
+    next_y, next_m = next_month(jahr, monat)
+
+    return {
+        "jahr": jahr,
+        "monat": monat,
+        "monat_label": f"{UMSATZ_MONATE[monat]} {jahr}",
+        "ist_aktueller_monat": ist_aktueller_monat,
+        "ist_zukunft": ist_zukunft,
+        "as_of": as_of,
+        "tage_im_monat": tage_im_monat,
+        "heute_label": heute.strftime("%d.%m.%Y"),
+        "hat_daten": eintraege > 0,
+        "eintraege": eintraege,
+        "lexware_verbunden": bool(LEXWARE_API_KEY),
+        "last_sync": get_app_setting("LEXWARE_LAST_SYNC", ""),
+        "einnahmen_bisher_label": umsatz_euro_label(einnahmen_bisher),
+        "ausgaben_bisher_label": umsatz_euro_label(ausgaben_bisher),
+        "differenz_bisher_label": umsatz_euro_label(differenz_bisher),
+        "differenz_positiv": differenz_bisher >= 0,
+        "einnahmen_monat_total_label": umsatz_euro_label(einnahmen_monat_total),
+        "ausgaben_monat_total_label": umsatz_euro_label(ausgaben_monat_total),
+        "ziel": ziel,
+        "ziel_label": umsatz_euro_label(ziel),
+        "ziel_gesetzt": ziel > 0,
+        "ziel_erklaerung": ziel_erklaerung,
+        "bump_pct": bump_pct,
+        "fortschritt_pct": fortschritt_pct,
+        "fortschritt_capped": max(0, min(fortschritt_pct, 100)),
+        "hochrechnung_label": umsatz_euro_label(hochrechnung),
+        "ampel": ampel,
+        "vormonat_label": f"{UMSATZ_MONATE[prev_m]} {prev_y}",
+        "nachmonat_label": f"{UMSATZ_MONATE[next_m]} {next_y}",
+        "vormonat_einnahmen_bisher_label": umsatz_euro_label(vormonat_einnahmen_bisher),
+        "vormonat_einnahmen_total_label": umsatz_euro_label(vormonat_einnahmen_total),
+        "tendenz_delta_label": umsatz_euro_label(abs(tendenz_delta)),
+        "tendenz_pct": tendenz_pct,
+        "tendenz_up": tendenz_delta >= 0,
+        "uebersicht": uebersicht,
+        "prev_jahr": prev_y,
+        "prev_monat": prev_m,
+        "next_jahr": next_y,
+        "next_monat": next_m,
+    }
+
+
+_LEXWARE_HINTERGRUND_SYNC_LOCK = threading.Lock()
+_lexware_hintergrund_sync_laeuft = False
+
+
+def lexware_sync_im_hintergrund_starten():
+    # Wie maybe_sync_lexware_rechnungen, aber ohne die Seite zu blockieren:
+    # der Abgleich laeuft in einem Hintergrund-Thread, die Seite rendert sofort
+    # aus den lokal gespeicherten Zahlen. Fehler (Netz, Lexware, DB) bleiben im
+    # Thread und werden nur als LEXWARE_LAST_SYNC_ERROR vermerkt.
+    global _lexware_hintergrund_sync_laeuft
+    if app.config.get("TESTING") or not LEXWARE_API_KEY:
+        return
+    last_sync = get_app_setting("LEXWARE_LAST_SYNC", "")
+    try:
+        last_dt = datetime.strptime(last_sync, DATETIME_FMT)
+    except ValueError:
+        last_dt = None
+    if last_dt and datetime.now() - last_dt < timedelta(minutes=LEXWARE_AUTO_SYNC_MINUTES):
+        return
+    with _LEXWARE_HINTERGRUND_SYNC_LOCK:
+        if _lexware_hintergrund_sync_laeuft:
+            return
+        _lexware_hintergrund_sync_laeuft = True
+
+    def _laufen():
+        global _lexware_hintergrund_sync_laeuft
+        try:
+            sync_lexware_rechnungen()
+        except Exception as exc:
+            try:
+                set_app_setting("LEXWARE_LAST_SYNC_ERROR", clean_text(str(exc))[:1000])
+            except Exception:
+                pass
+        finally:
+            _lexware_hintergrund_sync_laeuft = False
+
+    threading.Thread(target=_laufen, daemon=True).start()
+
+
+@app.route("/admin/zahlen")
+@admin_required
+def admin_zahlen():
+    lexware_sync_im_hintergrund_starten()
+    try:
+        jahr = int(request.args.get("jahr") or 0)
+    except (TypeError, ValueError):
+        jahr = 0
+    try:
+        monat = int(request.args.get("monat") or 0)
+    except (TypeError, ValueError):
+        monat = 0
+    daten = umsatz_ziel_daten(jahr or None, monat or None)
+    return render_template("zahlen_admin.html", z=daten)
+
+
+
 @app.route("/admin/versicherung")
 @admin_required
 def admin_versicherung():
