@@ -9109,6 +9109,7 @@ def init_db():
     ensure_column(db, "lexware_rechnungen", "zuletzt_synced_am", "TEXT DEFAULT ''")
     ensure_column(db, "lexware_rechnungen", "erstellt_am", "TEXT DEFAULT ''")
     ensure_column(db, "lexware_rechnungen", "geaendert_am", "TEXT DEFAULT ''")
+    ensure_column(db, "lexware_rechnungen", "investition", "INTEGER DEFAULT 0")
     ensure_index(db, "idx_lexware_rechnungen_voucher", "lexware_rechnungen", ("voucher_id",))
     ensure_index(
         db,
@@ -32051,7 +32052,8 @@ def umsatz_ziel_daten(jahr=None, monat=None):
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT voucher_date, total_amount, richtung FROM lexware_rechnungen "
+            "SELECT id, voucher_number, contact_name, voucher_date, total_amount, richtung, "
+            "COALESCE(investition, 0) AS investition FROM lexware_rechnungen "
             "WHERE COALESCE(status, '') NOT IN ('storniert', 'geloescht')"
         ).fetchall()
     except Exception:
@@ -32061,6 +32063,7 @@ def umsatz_ziel_daten(jahr=None, monat=None):
 
     monats_summen = {}
     tages_summen = {}
+    ausgaben_belege = {}
     eintraege = 0
     for row in rows:
         datum = umsatz_parse_voucher_date(row["voucher_date"])
@@ -32074,14 +32077,18 @@ def umsatz_ziel_daten(jahr=None, monat=None):
         if richtung == "Einnahme":
             key = "einnahmen"
         elif richtung == "Ausgabe":
-            key = "ausgaben"
+            # Als Investition markierte Belege (Auto, Maschine, Anlage) laufen
+            # getrennt und verzerren die laufenden Ausgaben nicht.
+            key = "investitionen" if int(row["investition"] or 0) else "ausgaben"
         else:
             continue
         eintraege += 1
         ym = (datum.year, datum.month)
-        monats_summen.setdefault(ym, {"einnahmen": 0.0, "ausgaben": 0.0})[key] += betrag
-        tag_dict = tages_summen.setdefault(ym, {"einnahmen": {}, "ausgaben": {}})
+        monats_summen.setdefault(ym, {"einnahmen": 0.0, "ausgaben": 0.0, "investitionen": 0.0})[key] += betrag
+        tag_dict = tages_summen.setdefault(ym, {"einnahmen": {}, "ausgaben": {}, "investitionen": {}})
         tag_dict[key][datum.day] = tag_dict[key].get(datum.day, 0.0) + betrag
+        if key != "einnahmen":
+            ausgaben_belege.setdefault(ym, []).append(row)
 
     cur = (jahr, monat)
     ist_aktueller_monat = cur == (heute.year, heute.month)
@@ -32100,9 +32107,22 @@ def umsatz_ziel_daten(jahr=None, monat=None):
 
     einnahmen_bisher = bisher(cur, "einnahmen", as_of)
     ausgaben_bisher = bisher(cur, "ausgaben", as_of)
+    investitionen_bisher = bisher(cur, "investitionen", as_of)
     einnahmen_monat_total = monats_summen.get(cur, {}).get("einnahmen", 0.0)
     ausgaben_monat_total = monats_summen.get(cur, {}).get("ausgaben", 0.0)
+    investitionen_monat_total = monats_summen.get(cur, {}).get("investitionen", 0.0)
     differenz_bisher = einnahmen_bisher - ausgaben_bisher
+
+    top_ausgaben = []
+    for beleg in sorted(ausgaben_belege.get(cur, []), key=lambda r: -float(r["total_amount"] or 0))[:6]:
+        top_ausgaben.append({
+            "id": beleg["id"],
+            "kontakt": clean_text(beleg["contact_name"]) or "Unbekannter Lieferant",
+            "nummer": clean_text(beleg["voucher_number"]),
+            "datum": clean_text(beleg["voucher_date"])[:10],
+            "betrag_label": umsatz_euro_label(beleg["total_amount"]),
+            "ist_investition": bool(int(beleg["investition"] or 0)),
+        })
 
     prev_y, prev_m = prev_month(jahr, monat)
     vm = (prev_y, prev_m)
@@ -32179,6 +32199,7 @@ def umsatz_ziel_daten(jahr=None, monat=None):
     for ym in sorted(monats_summen.keys()):
         e = monats_summen[ym].get("einnahmen", 0.0)
         a = monats_summen[ym].get("ausgaben", 0.0)
+        inv = monats_summen[ym].get("investitionen", 0.0)
         vm_von_ym = prev_month(ym[0], ym[1])
         vm_einnahmen = monats_summen.get(vm_von_ym, {}).get("einnahmen", 0.0)
         uebersicht.append({
@@ -32187,6 +32208,7 @@ def umsatz_ziel_daten(jahr=None, monat=None):
             "label": f"{UMSATZ_MONATE[ym[1]]} {ym[0]}",
             "einnahmen_label": umsatz_euro_label(e),
             "ausgaben_label": umsatz_euro_label(a),
+            "investitionen_label": umsatz_euro_label(inv) if inv > 0 else "",
             "differenz_label": umsatz_euro_label(e - a),
             "differenz_positiv": (e - a) >= 0,
             "ist_aktiv": ym == cur,
@@ -32211,6 +32233,10 @@ def umsatz_ziel_daten(jahr=None, monat=None):
         "last_sync": get_app_setting("LEXWARE_LAST_SYNC", ""),
         "einnahmen_bisher_label": umsatz_euro_label(einnahmen_bisher),
         "ausgaben_bisher_label": umsatz_euro_label(ausgaben_bisher),
+        "investitionen_bisher_label": umsatz_euro_label(investitionen_bisher),
+        "investitionen_monat_total_label": umsatz_euro_label(investitionen_monat_total),
+        "hat_investitionen": investitionen_bisher > 0,
+        "top_ausgaben": top_ausgaben,
         "differenz_bisher_label": umsatz_euro_label(differenz_bisher),
         "differenz_positiv": differenz_bisher >= 0,
         "einnahmen_monat_total_label": umsatz_euro_label(einnahmen_monat_total),
@@ -32292,6 +32318,39 @@ def admin_zahlen():
         monat = 0
     daten = umsatz_ziel_daten(jahr or None, monat or None)
     return render_template("zahlen_admin.html", z=daten)
+
+
+@app.route("/admin/zahlen/investition/<int:beleg_id>", methods=["POST"])
+@admin_required
+def admin_zahlen_investition(beleg_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT COALESCE(investition, 0) AS investition FROM lexware_rechnungen WHERE id=?",
+        (beleg_id,),
+    ).fetchone()
+    if not row:
+        db.close()
+        abort(404)
+    neu = 0 if int(row["investition"] or 0) else 1
+    db.execute(
+        "UPDATE lexware_rechnungen SET investition=?, geaendert_am=? WHERE id=?",
+        (neu, now_str(), beleg_id),
+    )
+    db.commit()
+    db.close()
+    flash(
+        "Beleg zählt jetzt als Investition (läuft getrennt von den laufenden Ausgaben)." if neu
+        else "Beleg zählt wieder als laufende Ausgabe.",
+        "success",
+    )
+    try:
+        jahr = int(request.form.get("jahr") or 0)
+        monat = int(request.form.get("monat") or 0)
+    except (TypeError, ValueError):
+        jahr = monat = 0
+    if jahr and monat:
+        return redirect(url_for("admin_zahlen", jahr=jahr, monat=monat))
+    return redirect(url_for("admin_zahlen"))
 
 
 @app.route("/admin/versicherungsschaden")

@@ -82,6 +82,7 @@
   <div class="card metric-card metric-warm">
     <div class="metric-label">Ausgaben{% if z.ist_aktueller_monat %} bisher{% endif %}</div>
     <div class="metric-value">{{ z.ausgaben_bisher_label }}</div>
+    {% if z.hat_investitionen %}<div class="small mt-1" style="color: rgba(255,255,255,.85); position: relative; z-index: 1;">+ {{ z.investitionen_bisher_label }} Investitionen</div>{% endif %}
   </div>
   <div class="card metric-card metric-blue">
     <div class="metric-label">Differenz</div>
@@ -126,6 +127,44 @@
   </div>
 </div>
 
+{% if z.top_ausgaben %}
+<div class="page-card p-4 mb-4">
+  <div class="section-title mb-3">
+    <div>
+      <h2 class="h5 mb-1">Größte Ausgaben im {{ z.monat_label }}</h2>
+      <p class="mb-0 text-muted small">Einmalige Anschaffungen (Auto, Maschine, Anlage) als Investition markieren — sie zählen dann nicht mehr in die laufenden Ausgaben und die Differenz.</p>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr><th>Beleg</th><th class="text-end">Betrag</th><th>Zählt als</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for b in z.top_ausgaben %}
+        <tr>
+          <td>
+            <div class="fw-bold">{{ b.kontakt }}</div>
+            <div class="text-muted small">{% if b.nummer %}Nr. {{ b.nummer }} · {% endif %}{{ b.datum }}</div>
+          </td>
+          <td class="text-end">{{ b.betrag_label }}</td>
+          <td>{% if b.ist_investition %}<span class="badge text-bg-info">Investition</span>{% else %}<span class="badge text-bg-secondary">laufende Ausgabe</span>{% endif %}</td>
+          <td class="text-end">
+            <form method="POST" action="{{ url_for('admin_zahlen_investition', beleg_id=b.id) }}" class="m-0 d-inline">
+              {{ csrf_field()|safe }}
+              <input type="hidden" name="jahr" value="{{ z.jahr }}">
+              <input type="hidden" name="monat" value="{{ z.monat }}">
+              <button type="submit" class="btn btn-sm btn-soft" data-no-loading="true">{% if b.ist_investition %}Doch laufende Ausgabe{% else %}Als Investition markieren{% endif %}</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 <div class="page-card p-4 mb-4">
   <div class="section-title mb-3">
     <div>
@@ -153,7 +192,7 @@
             {% if m.vormonat_geschlagen %}<span class="badge text-bg-success ms-1" title="Stärker als der Vormonat">&#9650; Vormonat</span>{% endif %}
           </td>
           <td class="text-end">{{ m.einnahmen_label }}</td>
-          <td class="text-end">{{ m.ausgaben_label }}</td>
+          <td class="text-end">{{ m.ausgaben_label }}{% if m.investitionen_label %}<div class="text-muted small">+ {{ m.investitionen_label }} Invest</div>{% endif %}</td>
           <td class="text-end {% if m.differenz_positiv %}trend-up{% else %}trend-down{% endif %}">{{ m.differenz_label }}</td>
           <td class="text-end"><a class="btn btn-sm btn-soft" href="{{ url_for('admin_zahlen', jahr=m.jahr, monat=m.monat) }}">Öffnen</a></td>
         </tr>
