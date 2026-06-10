@@ -373,7 +373,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "Neuwiesenweg 19",
         "plz": "74834",
         "ort": "Elztal-Dallau",
-        "zugangscode": "PFAFF2026",
+        "zugangscode": "",
         "portal_titel": "Portal Auto Pfaff",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Auto Pfaff.",
         "notiz": "Aus Kundenordner angelegt und mit öffentlichem Impressum ergänzt am 26.04.2026.",
@@ -388,7 +388,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "Ortsstraße 7",
         "plz": "74847",
         "ort": "Obrigheim-Asbach",
-        "zugangscode": "MUELLER2026",
+        "zugangscode": "",
         "portal_titel": "Portal Autohaus Müller",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Autohaus Müller.",
         "notiz": "Aus Rechnungen im Kundenordner übernommen am 26.04.2026.",
@@ -403,7 +403,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "Langenelzer Str. 45",
         "plz": "69427",
         "ort": "Mudau",
-        "zugangscode": "HSE2026",
+        "zugangscode": "",
         "portal_titel": "Portal HSE Autowelt",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von HSE Autowelt.",
         "notiz": "Aus Kundenordner/Partnermappe ergänzt am 26.04.2026. Ansprechpartner bitte bei Gelegenheit final prüfen.",
@@ -418,7 +418,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "Hohlweg 24",
         "plz": "74821",
         "ort": "Mosbach",
-        "zugangscode": "DOLD2026",
+        "zugangscode": "",
         "portal_titel": "Portal Dold & Deisling",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Dold & Deisling.",
         "notiz": "Adresse aus vorhandenen Rechnungen im Kundenordner übernommen am 26.04.2026.",
@@ -433,7 +433,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "Mosbacher Straße 67",
         "plz": "74821",
         "ort": "Mosbach",
-        "zugangscode": "KAES2026",
+        "zugangscode": "",
         "portal_titel": "Portal Käsmann",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Käsmann.",
         "notiz": "Stammdaten ergänzt am 26.04.2026. Quelle: Käsmann-Impressum; Audi-Standort zusätzlich Industriestraße 1a, 74821 Mosbach.",
@@ -448,7 +448,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "An der Autobahn 12-16",
         "plz": "27404",
         "ort": "Gyhum/Bockel",
-        "zugangscode": "MHC2026",
+        "zugangscode": "",
         "portal_titel": "Portal MHC Mobility",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von MHC Mobility.",
         "notiz": "Aus Kundenordner und MHC-Impressum ergänzt am 26.04.2026.",
@@ -463,7 +463,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "",
         "plz": "",
         "ort": "",
-        "zugangscode": "LOCK2026",
+        "zugangscode": "",
         "portal_titel": "Portal Kraftfahrzeugtechnik Lock",
         "willkommen_text": "",
         "notiz": "",
@@ -478,7 +478,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "",
         "plz": "",
         "ort": "",
-        "zugangscode": "GUENTHER2026",
+        "zugangscode": "",
         "portal_titel": "Portal Autohaus Günther",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Autohaus Günther.",
         "notiz": "Gebrauchtwagenkoordinator. Fax: 06282/6345. Webseite: www.wolfert-gruppe.de",
@@ -491,21 +491,21 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "aachener-muenchener-generali",
         "portal_key": "aachenermuenchener2026",
         "email": "service@generali.de",
-        "zugangscode": "AACHENER2026",
+        "zugangscode": "",
         "notiz": "Altname der Generali. Offizieller Generali Kontakt: https://www.generali.de/service-kontakt/kontakt",
     },
     {
         "name": "ADAC Autoversicherung",
         "slug": "adac-autoversicherung",
         "portal_key": "adacauto2026",
-        "zugangscode": "ADAC2026",
+        "zugangscode": "",
         "notiz": "Offiziell bevorzugt online/Telefon. Kontakt: https://www.adac.de/produkte/versicherungen/autoversicherung/kontakt/",
     },
     {
         "name": "AdmiralDirekt",
         "slug": "admiraldirekt",
         "portal_key": "admiraldirekt2026",
-        "zugangscode": "ADMIRAL2026",
+        "zugangscode": "",
         "notiz": "Offizielle Schadenmeldung online/Telefon: https://www.admiraldirekt.de/schadenservice/",
     },
     {
@@ -513,21 +513,21 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "allianz",
         "portal_key": "allianz2026",
         "email": "sachschaden@allianz.de",
-        "zugangscode": "ALLIANZ2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schaden-E-Mail laut Allianz Unfall-Checkliste.",
     },
     {
         "name": "Allianz Direct",
         "slug": "allianz-direct",
         "portal_key": "allianzdirect2026",
-        "zugangscode": "ALLIANZD2026",
+        "zugangscode": "",
         "notiz": "Offizielle Schadenmeldung online/Telefon: https://www.allianzdirect.de/service/",
     },
     {
         "name": "AllSecur (Allianz Direct)",
         "slug": "allsecur-allianz-direct",
         "portal_key": "allsecur2026",
-        "zugangscode": "ALLSECUR2026",
+        "zugangscode": "",
         "notiz": "Ehemalige Marke, heute Allianz Direct.",
     },
     {
@@ -535,7 +535,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "alte-leipziger",
         "portal_key": "alteleipziger2026",
         "email": "schaden@alte-leipziger.de",
-        "zugangscode": "ALTELEIPZIGER2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.alte-leipziger.de/service/schaden-melden/kfz-schaden-melden/kfz-schaden-online-melden",
     },
     {
@@ -543,7 +543,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "axa",
         "portal_key": "axa2026",
         "email": "schaden@axa.de",
-        "zugangscode": "AXA2026",
+        "zugangscode": "",
         "notiz": "AXA nennt online/Telefon als Standard; Maklerkontakt führt schaden@axa.de.",
     },
     {
@@ -551,7 +551,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "baloise",
         "portal_key": "baloise2026",
         "email": "schaden@baloise.de",
-        "zugangscode": "BALOISE2026",
+        "zugangscode": "",
         "notiz": "Kfz-Kaskoschaden: https://www.baloise.de/de/kontakt-service/schadenservice/kfz-kasko.html",
     },
     {
@@ -559,7 +559,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "barmenia",
         "portal_key": "barmenia2026",
         "email": "schaden@barmenia.de",
-        "zugangscode": "BARMENIA2026",
+        "zugangscode": "",
         "notiz": "BarmeniaGothaer Partnerportal Schadenkontakt.",
     },
     {
@@ -567,7 +567,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "bavariadirekt",
         "portal_key": "bavariadirekt2026",
         "email": "schaden@bavariadirekt.de",
-        "zugangscode": "BAVARIA2026",
+        "zugangscode": "",
         "notiz": "FAQ Schadenunterlagen: https://www.bavariadirekt.de/kontakt/entry/711/",
     },
     {
@@ -576,7 +576,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "bgv2026",
         "email": "kfz-schaden@bgv.de",
         "telefon": "0721 660-4444",
-        "zugangscode": "BGV2026",
+        "zugangscode": "",
         "notiz": "Kraftfahrt Schaden Fachbereich: https://makler.bgv.de/makler/infos/infocenter/kontaktcenter/fachbereiche/",
     },
     {
@@ -584,7 +584,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "concordia",
         "portal_key": "concordia2026",
         "email": "schaden@concordia.de",
-        "zugangscode": "CONCORDIA2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.concordia.de/service/schaeden-aenderungen/schaden-melden/schaden-kfz/",
     },
     {
@@ -592,7 +592,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "condor-versicherungen",
         "portal_key": "condor2026",
         "email": "ruv@ruv.de",
-        "zugangscode": "CONDOR2026",
+        "zugangscode": "",
         "notiz": "Condor Komposit/Kfz wird über R+V Service geführt: https://www.condor-versicherungen.de/service/fuer-kunden",
     },
     {
@@ -601,7 +601,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "continentale2026",
         "email": "schaden@continentale.de",
         "telefon": "0231 12010-10",
-        "zugangscode": "CONTINENTALE2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenabteilung: https://www.continentale.de/schadenservice",
     },
     {
@@ -609,7 +609,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "cosmosdirekt",
         "portal_key": "cosmosdirekt2026",
         "telefon": "0681 966 6815",
-        "zugangscode": "COSMOS2026",
+        "zugangscode": "",
         "notiz": "Offizielle Kfz-Schadenmeldung online/Telefon: https://www.cosmosdirekt.de/schaden-melden/kfz-versicherung/",
     },
     {
@@ -617,7 +617,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "da-direkt",
         "portal_key": "dadirekt2026",
         "telefon": "0221 7715 7766",
-        "zugangscode": "DADIREKT2026",
+        "zugangscode": "",
         "notiz": "Offizieller Schadenservice online/Telefon: https://www.da-direkt.de/schadenservice/autoschaden",
     },
     {
@@ -625,7 +625,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "debeka",
         "portal_key": "debeka2026",
         "email": "kundenservice@debeka.de",
-        "zugangscode": "DEBEKA2026",
+        "zugangscode": "",
         "notiz": "Allgemeiner offizieller Kontakt: https://www.debeka.de/impressum.html",
     },
     {
@@ -634,7 +634,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "devk2026",
         "email": "info@devk.de",
         "telefon": "0800 4 757 757",
-        "zugangscode": "DEVK2026",
+        "zugangscode": "",
         "notiz": "Schadenmeldung bevorzugt online/Telefon: https://www.devk.de/service/schadenmeldung/",
     },
     {
@@ -643,7 +643,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "dialog2026",
         "email": "schaden@dialog-versicherung.de",
         "telefon": "089 5121-5404",
-        "zugangscode": "DIALOG2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.dialog-versicherung.de/produkte/privatkunden-komposit/kraftfahrt/pkw",
     },
     {
@@ -652,7 +652,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "diebayerische2026",
         "email": "schaden@diebayerische.de",
         "telefon": "089 6787-5050",
-        "zugangscode": "BAYERISCHE2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenformular/Schadenanzeige der Bayerischen.",
     },
     {
@@ -660,7 +660,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "ergo",
         "portal_key": "ergo2026",
         "telefon": "0800 3746 310",
-        "zugangscode": "ERGO2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenmeldung online/Telefon: https://www.ergo.de/de/Service/ereignis-melden/schadenfall-melden/kfz",
     },
     {
@@ -669,7 +669,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "europa2026",
         "email": "schaden@europa.de",
         "telefon": "0221 606070-70",
-        "zugangscode": "EUROPA2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.europa.de/service/schadenmeldung/",
     },
     {
@@ -678,7 +678,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "generali2026",
         "email": "service@generali.de",
         "telefon": "089 5121-4477",
-        "zugangscode": "GENERALI2026",
+        "zugangscode": "",
         "notiz": "Offizieller Kontakt: https://www.generali.de/service-kontakt/kontakt",
     },
     {
@@ -687,14 +687,14 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "gothaer2026",
         "email": "schaden@gothaer.de",
         "telefon": "030 5508-81508",
-        "zugangscode": "GOTHAER2026",
+        "zugangscode": "",
         "notiz": "Schadenmeldung Partnerportal: https://partner.gothaer.de/service/schadenmeldung.htm",
     },
     {
         "name": "GVV Direktversicherung",
         "slug": "gvv-direktversicherung",
         "portal_key": "gvv2026",
-        "zugangscode": "GVV2026",
+        "zugangscode": "",
         "notiz": "In Partnerwerkstattlisten üblich; E-Mail vor erster Meldung prüfen.",
     },
     {
@@ -703,7 +703,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "hansemerkur2026",
         "email": "hma-schaden@hansemerkur.de",
         "telefon": "040 4119-4333",
-        "zugangscode": "HANSE2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.hansemerkur.de/kontakt/service-telefon",
     },
     {
@@ -712,7 +712,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "hdi2026",
         "email": "info@hdi.de",
         "telefon": "0511 645-46160",
-        "zugangscode": "HDI2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenmeldung online/Telefon; offizielle Kontaktmail info@hdi.de: https://www.hdi.de/service/hdi-services/schaden-melden/schadenmeldung-kfz-versicherung/schaden-melden-kfz-verteiler/",
     },
     {
@@ -720,7 +720,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "helvetia",
         "portal_key": "helvetia2026",
         "telefon": "069 58 00 55 704",
-        "zugangscode": "HELVETIA2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schaden online/Telefon: https://www.helvetia.com/redirects/helvetia.de/service/schadenmeldung.html",
     },
     {
@@ -728,7 +728,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "huk-coburg",
         "portal_key": "huk2026",
         "email": "info@huk-coburg.de",
-        "zugangscode": "HUK2026",
+        "zugangscode": "",
         "notiz": "Fotos/Belege per E-Mail mit Schadennummer: https://www.huk.de/service/schaden.html",
     },
     {
@@ -736,7 +736,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "huk24",
         "portal_key": "huk242026",
         "email": "info@huk-coburg.de",
-        "zugangscode": "HUK242026",
+        "zugangscode": "",
         "notiz": "HUK24 Schadenkanal läuft über HUK-COBURG/online.",
     },
     {
@@ -745,7 +745,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "itzehoer2026",
         "email": "schaden@itzehoer.de",
         "telefon": "04821 773-680",
-        "zugangscode": "ITZEHOER2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.itzehoer.de/service/ratgeber/rund-ums-fahrzeug/tipps-rund-um-den-kfz-schadenfall/",
     },
     {
@@ -754,7 +754,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "janitos2026",
         "email": "schadenservice@janitos.de",
         "telefon": "06221 709 1570",
-        "zugangscode": "JANITOS2026",
+        "zugangscode": "",
         "notiz": "Schadenservice: https://www.janitos.de/services/adresse-aendern/",
     },
     {
@@ -763,14 +763,14 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "kravag2026",
         "email": "k-schaden@kravag.de",
         "telefon": "0800 533-1131",
-        "zugangscode": "KRAVAG2026",
+        "zugangscode": "",
         "notiz": "KRAVAG-online Handbuch nennt k-schaden@kravag.de; allgemeiner Kontakt: https://www.kravag.de/kundenservice/kontakt",
     },
     {
         "name": "Lippische Landesbrandversicherung",
         "slug": "lippische-landesbrandversicherung",
         "portal_key": "lippische2026",
-        "zugangscode": "LIPPISCHE2026",
+        "zugangscode": "",
         "notiz": "In Partnerwerkstattlisten üblich; E-Mail vor erster Meldung prüfen.",
     },
     {
@@ -779,7 +779,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "lvm2026",
         "email": "post@lvm.de",
         "telefon": "0251 702-4765",
-        "zugangscode": "LVM2026",
+        "zugangscode": "",
         "notiz": "Schaden online/Telefon, E-Mail post@lvm.de für Unterlagen: https://www.lvm.de/service-angebote/schaden-melden",
     },
     {
@@ -787,14 +787,14 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "mecklenburgische",
         "portal_key": "mecklenburgische2026",
         "email": "service@mecklenburgische.de",
-        "zugangscode": "MECKLENBURG2026",
+        "zugangscode": "",
         "notiz": "Offizieller Kontakt: https://www.mecklenburgische.de/service/kontakt",
     },
     {
         "name": "Neodigital",
         "slug": "neodigital",
         "portal_key": "neodigital2026",
-        "zugangscode": "NEODIGITAL2026",
+        "zugangscode": "",
         "notiz": "Digitalversicherer; E-Mail/Portal vor erster Meldung prüfen.",
     },
     {
@@ -802,7 +802,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "nuernberger",
         "portal_key": "nuernberger2026",
         "telefon": "0911 531-666 610",
-        "zugangscode": "NUERNBERGER2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt telefonisch/Formular: https://www.nuernberger.de/beratung-service/kontakt/kontaktmoeglichkeiten/",
     },
     {
@@ -811,7 +811,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "oeffentlichebs2026",
         "email": "service@oeffentliche.de",
         "telefon": "0531 202 235",
-        "zugangscode": "OEFFENTLICHE2026",
+        "zugangscode": "",
         "notiz": "Kraftfahrt Schaden/Service: https://www.oeffentliche.de/content/service/kontakt/ihre-mitteilung-an-uns/",
     },
     {
@@ -820,7 +820,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "provinzial2026",
         "email": "kfz-versicherung@provinzial.com",
         "telefon": "0211 978-5511",
-        "zugangscode": "PROVINZIAL2026",
+        "zugangscode": "",
         "notiz": "Kraftfahrt Kontakt: https://www.provinzial.de/suedwest/services/kontakt.html",
     },
     {
@@ -829,7 +829,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "rv2026",
         "email": "ruv@ruv.de",
         "telefon": "0800 533-1111",
-        "zugangscode": "RV2026",
+        "zugangscode": "",
         "notiz": "Schadenservice/Kontakt: https://www.ruv.de/service/schadenservice",
     },
     {
@@ -837,7 +837,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "rheinland-versicherungen",
         "portal_key": "rheinland2026",
         "telefon": "02131 290-2501",
-        "zugangscode": "RHEINLAND2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schaden online/Telefon: https://www.rheinland-versicherungen.de/service/formulare/schaden-melden/",
     },
     {
@@ -845,7 +845,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "rhion-digital",
         "portal_key": "rhion2026",
         "email": "schaden@rhion.digital",
-        "zugangscode": "RHION2026",
+        "zugangscode": "",
         "notiz": "Makler-Fachabteilung Schadenbearbeitung Kfz: https://rhion.digital/makler-service/ansprechpartner/fachabteilungen",
     },
     {
@@ -854,7 +854,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "signaliduna2026",
         "email": "kraftfahrt-schaden@signal-iduna.de",
         "telefon": "0800 6001200",
-        "zugangscode": "SIGNAL2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schaden online/Telefon; Maklerunterlagen nennen kraftfahrt-schaden@signal-iduna.de.",
     },
     {
@@ -863,7 +863,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "sparkassendirekt2026",
         "email": "schadenservice@sparkassen-direkt.de",
         "telefon": "0211 729-8833",
-        "zugangscode": "SDIREKT2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.sparkassen-direkt.de/schaden-melden/schadenmeldung-kfz-versicherung",
     },
     {
@@ -871,7 +871,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "vgh",
         "portal_key": "vgh2026",
         "email": "schaden-kfz@vgh.de",
-        "zugangscode": "VGH2026",
+        "zugangscode": "",
         "notiz": "VGH Werkstattservice PDF nennt schaden-kfz@vgh.de.",
     },
     {
@@ -880,7 +880,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "vhv2026",
         "email": "Schaden@vhv.de",
         "telefon": "0511 65 50 50 20",
-        "zugangscode": "VHV2026",
+        "zugangscode": "",
         "notiz": "Kraftfahrt-Schadenmeldung VHV PDF nennt Schaden@vhv.de.",
     },
     {
@@ -889,7 +889,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "verti2026",
         "email": "schaden@verti.de",
         "telefon": "030 890 003 001",
-        "zugangscode": "VERTI2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schaden FAQ: https://www.verti.de/faqs/schaden/",
     },
     {
@@ -897,14 +897,14 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "wgv-versicherung",
         "portal_key": "wgv2026",
         "telefon": "0711 1695-1500",
-        "zugangscode": "WGV2026",
+        "zugangscode": "",
         "notiz": "Schaden online/Service: https://www.wgv.de/kundenservice/",
     },
     {
         "name": "Württembergische",
         "slug": "wuerttembergische",
         "portal_key": "wuerttembergische2026",
-        "zugangscode": "WUERTT2026",
+        "zugangscode": "",
         "notiz": "In Kfz-Partnerwerkstattlisten üblich; E-Mail vor erster Meldung prüfen.",
     },
     {
@@ -912,7 +912,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "zurich",
         "portal_key": "zurich2026",
         "email": "schaden@zurich.com",
-        "zugangscode": "ZURICH2026",
+        "zugangscode": "",
     },
 ]
 
@@ -1523,6 +1523,12 @@ app.config.update(
         RUNNING_ON_RENDER,
     ),
 )
+if RUNNING_ON_RENDER:
+    # Hinter dem Render-Proxy steht in REMOTE_ADDR sonst nur die Proxy-IP:
+    # Login-Rate-Limit und Lokal-Erkennung brauchen die echte Client-IP.
+    from werkzeug.middleware.proxy_fix import ProxyFix
+
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 
 @app.teardown_appcontext
@@ -6961,7 +6967,7 @@ def seed_default_autohaeuser(db):
             "SELECT id FROM autohaeuser WHERE slug=? OR portal_key=?",
             (autohaus["slug"], autohaus["portal_key"]),
         ).fetchone()
-        values = (
+        stammdaten = (
             autohaus["name"],
             autohaus["slug"],
             autohaus["portal_key"],
@@ -6971,23 +6977,25 @@ def seed_default_autohaeuser(db):
             autohaus["strasse"],
             autohaus["plz"],
             autohaus["ort"],
-            autohaus["zugangscode"],
             autohaus["portal_titel"],
             autohaus["willkommen_text"],
             clean_text(autohaus.get("notiz")),
         )
         if existing:
+            # Zugangscode bewusst NICHT anfassen: sonst setzt jeder Neustart
+            # einen im Admin geaenderten/rotierten Code wieder zurueck.
             db.execute(
                 """
                 UPDATE autohaeuser
                 SET name=?, slug=?, portal_key=?, kontakt_name=?, email=?, telefon=?,
-                    strasse=?, plz=?, ort=?, zugangscode=?, portal_titel=?,
+                    strasse=?, plz=?, ort=?, portal_titel=?,
                     willkommen_text=?, notiz=?
                 WHERE id=?
                 """,
-                values + (existing["id"],),
+                stammdaten + (existing["id"],),
             )
             continue
+        zugangscode = clean_text(autohaus.get("zugangscode")) or secrets.token_urlsafe(9)
         db.execute(
             """
             INSERT INTO autohaeuser
@@ -6995,7 +7003,7 @@ def seed_default_autohaeuser(db):
              zugangscode, portal_titel, willkommen_text, notiz, erstellt_am)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            values + (now,),
+            stammdaten[:9] + (zugangscode,) + stammdaten[9:] + (now,),
         )
 
 
@@ -7013,7 +7021,7 @@ def seed_default_versicherungen(db):
             clean_text(versicherung.get("kontakt_name")),
             clean_text(versicherung.get("email")),
             clean_text(versicherung.get("telefon")),
-            versicherung["zugangscode"],
+            clean_text(versicherung.get("zugangscode")) or secrets.token_urlsafe(9),
             clean_text(versicherung.get("notiz")),
         )
         if existing:
@@ -9745,7 +9753,9 @@ def normalize_lexware_rechnung_status(voucher_status="", payment_status="", due_
         amount_open = float(open_amount or 0)
     except (TypeError, ValueError):
         amount_open = 0
-    if voucher_status in {"paid", "paidoff", "voided"} or payment_status == "balanced" or amount_open <= 0:
+    if voucher_status == "voided":
+        return "storniert"
+    if voucher_status in {"paid", "paidoff"} or payment_status == "balanced" or amount_open <= 0:
         return "bezahlt"
     if voucher_status == "unchecked":
         return "pruefen"
@@ -9764,6 +9774,8 @@ def lexware_rechnung_status_label(status):
         "ueberfaellig": "ueberfaellig",
         "in_zahlung": "in Zahlung",
         "pruefen": "zu pruefen",
+        "storniert": "storniert",
+        "geloescht": "in Lexware geloescht",
     }.get(clean_text(status), clean_text(status) or "offen")
 
 
@@ -9786,13 +9798,25 @@ def lexware_rechnung_permalink(voucher_id, voucher_type):
     return f"{LEXWARE_APP_BASE_URL}/permalink/{path}/view/{voucher_id}"
 
 
-def fetch_lexware_voucherlist(voucher_types, voucher_status, size=100):
-    query = (
-        f"?voucherType={quote(voucher_types)}"
-        f"&voucherStatus={quote(voucher_status)}"
-        f"&archived=false&size={int(size)}&page=0&sort=updatedDate,DESC"
-    )
-    return lexware_request("GET", "/v1/voucherlist", query=query).get("content", [])
+def fetch_lexware_voucherlist(voucher_types, voucher_status, size=100, max_pages=25):
+    # Alle Seiten holen, nicht nur die erste: sonst fehlen aeltere Belege
+    # (z. B. laengst bezahlte Rechnungen) und die Monatszahlen sind unvollstaendig.
+    items = []
+    page = 0
+    while page < max_pages:
+        query = (
+            f"?voucherType={quote(voucher_types)}"
+            f"&voucherStatus={quote(voucher_status)}"
+            f"&archived=false&size={int(size)}&page={page}&sort=updatedDate,DESC"
+        )
+        data = lexware_request("GET", "/v1/voucherlist", query=query)
+        content = data.get("content", [])
+        items.extend(content)
+        if not content or data.get("last", True):
+            break
+        page += 1
+        time.sleep(0.3)
+    return items
 
 
 def fetch_lexware_payment(voucher_id):
@@ -9878,17 +9902,38 @@ def sync_lexware_rechnungen():
         return {"ok": False, "message": "LEXWARE_API_KEY fehlt.", "synced": 0}
     synced = 0
     errors = []
-    for voucher_status in ("open", "overdue", "transferred", "sepadebit", "paid"):
+    seen_voucher_ids = set()
+    for voucher_status in ("open", "overdue", "transferred", "sepadebit", "paid", "voided"):
         try:
             vouchers = fetch_lexware_voucherlist("invoice,salesinvoice,purchaseinvoice,downpaymentinvoice", voucher_status)
         except RuntimeError as exc:
             errors.append(str(exc))
             continue
         for voucher in vouchers:
-            payment = fetch_lexware_payment(voucher.get("id"))
-            upsert_lexware_rechnung(voucher, payment)
+            if voucher_status == "voided":
+                # Stornierte Belege ohne Payment-Abruf uebernehmen; der Status
+                # wird ueber voucherStatus=voided als 'storniert' gespeichert.
+                upsert_lexware_rechnung(voucher)
+            else:
+                payment = fetch_lexware_payment(voucher.get("id"))
+                upsert_lexware_rechnung(voucher, payment)
+            seen_voucher_ids.add(clean_text(voucher.get("id")))
             synced += 1
             time.sleep(0.55)
+    if not errors and seen_voucher_ids:
+        # Belege, die Lexware gar nicht mehr liefert (geloescht), nicht weiter
+        # als gueltig mitzaehlen. Nur nach komplettem, fehlerfreiem Abgleich.
+        db = get_db()
+        try:
+            platzhalter = ",".join("?" for _ in seen_voucher_ids)
+            db.execute(
+                f"UPDATE lexware_rechnungen SET status='geloescht', geaendert_am=? "
+                f"WHERE voucher_id NOT IN ({platzhalter}) AND status != 'geloescht'",
+                (now_str(), *seen_voucher_ids),
+            )
+            db.commit()
+        finally:
+            db.close()
     set_app_setting("LEXWARE_LAST_SYNC", now_str())
     set_app_setting("LEXWARE_LAST_SYNC_ERROR", "\n".join(errors)[:1000])
     schedule_change_backup("lexware-rechnungen")
@@ -20657,7 +20702,8 @@ def umsatz_ziel_daten(jahr=None, monat=None):
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT voucher_date, total_amount, richtung FROM lexware_rechnungen"
+            "SELECT voucher_date, total_amount, richtung FROM lexware_rechnungen "
+            "WHERE COALESCE(status, '') NOT IN ('storniert', 'geloescht')"
         ).fetchall()
     except Exception:
         rows = []
@@ -24912,6 +24958,32 @@ def partner_reklamation(slug, auftrag_id):
         reklamation_id=reklamation_id,
     )
     flash("Reklamation als Alarm an die Werkstatt gemeldet.", "danger")
+    return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+
+
+@app.route("/partner/<slug>/reklamation/<int:reklamation_id>/loeschen", methods=["POST"])
+def partner_reklamation_loeschen(slug, reklamation_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    reklamation = get_reklamation(reklamation_id)
+    if (
+        not reklamation
+        or int(reklamation.get("autohaus_id") or 0) != int(autohaus["id"] or 0)
+        or clean_text(reklamation.get("quelle")) != "autohaus"
+    ):
+        abort(404)
+    auftrag_id = reklamation["auftrag_id"]
+    for datei in list_dateien_by_reklamation(reklamation_id):
+        if clean_text(datei.get("quelle")) == "autohaus":
+            delete_partner_datei(autohaus["id"], datei["id"])
+    db = get_db()
+    db.execute("UPDATE dateien SET reklamation_id=0 WHERE reklamation_id=?", (reklamation_id,))
+    db.execute("DELETE FROM reklamationen WHERE id=?", (reklamation_id,))
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag_id))
+    db.commit()
+    db.close()
+    flash("Reklamation samt Anhängen gelöscht.", "info")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
 
