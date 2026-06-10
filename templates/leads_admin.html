@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}Leads / Anfragen{% endblock %}
+
+{% block extra_css %}
+<style>
+  .lead-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .lead-kpi {
+    border: 1px solid #e4d6c3;
+    border-radius: 16px;
+    background: #fffdf9;
+    padding: 1rem;
+  }
+
+  .lead-kpi span {
+    color: var(--muted);
+    display: block;
+    font-size: .82rem;
+  }
+
+  .lead-kpi strong {
+    display: block;
+    font-size: 1.35rem;
+  }
+
+  .lead-row-due {
+    box-shadow: inset 4px 0 0 #c74b32;
+  }
+
+  @media (max-width: 900px) {
+    .lead-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 560px) {
+    .lead-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="section-title">
+  <div>
+    <div class="badge-soft mb-3">Lead-Management</div>
+    <h1 class="mb-2">Leads / Anfragen</h1>
+    <p>Neue Anfragen sammeln, nachfassen und bei Zusage in einen Auftrag umwandeln.</p>
+  </div>
+  <a href="{{ url_for('dashboard') }}#auftraege" class="btn btn-soft">Zu Aufträgen</a>
+</div>
+
+<div class="lead-grid mb-4">
+  <div class="lead-kpi">
+    <span>Aktive Leads</span>
+    <strong>{{ pipeline_counts['neu'] + pipeline_counts['kontakt_offen'] + pipeline_counts['unterlagen_fehlen'] + pipeline_counts['besichtigung_geplant'] + pipeline_counts['angebot_offen'] }}</strong>
+  </div>
+  <div class="lead-kpi">
+    <span>Kontakt offen</span>
+    <strong>{{ pipeline_counts['kontakt_offen'] + pipeline_counts['neu'] }}</strong>
+  </div>
+  <div class="lead-kpi">
+    <span>Angebot / Besichtigung</span>
+    <strong>{{ pipeline_counts['besichtigung_geplant'] + pipeline_counts['angebot_offen'] }}</strong>
+  </div>
+  <div class="lead-kpi">
+    <span>Potenzial</span>
+    <strong>{{ active_value_label or 'offen' }}</strong>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <h2 class="h4 mb-3">Neue Anfrage erfassen</h2>
+  <form method="POST" class="row g-3">
+    {{ csrf_field()|safe }}
+    <div class="col-md-3">
+      <label class="form-label">Quelle</label>
+      <select name="quelle" class="form-select">
+        {% for key, meta in lead_quellen.items() %}
+        <option value="{{ key }}">{{ meta['label'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Status</label>
+      <select name="status" class="form-select">
+        {% for key, meta in lead_status.items() %}
+        <option value="{{ key }}" {% if key == 'neu' %}selected{% endif %}>{{ meta['label'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Autohaus</label>
+      <select name="autohaus_id" class="form-select">
+        <option value="">Ohne Autohaus</option>
+        {% for h in autohaeuser %}
+        <option value="{{ h['id'] }}">{{ h['name'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Nächster Kontakt</label>
+      <input type="date" name="naechster_kontakt_am" class="form-control">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Kunde</label>
+      <input type="text" name="kunde_name" class="form-control" placeholder="Name oder Firma">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Handy / WhatsApp</label>
+      <input type="text" name="kontakt_telefon" class="form-control" placeholder="z.B. 0171 1234567">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">E-Mail</label>
+      <input type="email" name="kunde_email" class="form-control">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Fahrzeug</label>
+      <input type="text" name="fahrzeug" class="form-control" placeholder="z.B. VW Golf">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Kennzeichen</label>
+      <input type="text" name="kennzeichen" class="form-control" style="text-transform:uppercase;">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Schadenart</label>
+      <select name="schadenart" class="form-select">
+        {% for key, label in schadenarten %}
+        <option value="{{ key }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Potenzial</label>
+      <input type="text" name="geschaetzter_wert" class="form-control" placeholder="z.B. 2500">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Nächste Aktion</label>
+      <input type="text" name="naechste_aktion" class="form-control" placeholder="z.B. Fotos per WhatsApp anfordern">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Kurzbeschreibung</label>
+      <input type="text" name="beschreibung" class="form-control" placeholder="z.B. Frontschaden, Kunde möchte Angebot">
+    </div>
+    <div class="col-12">
+      <button type="submit" class="btn btn-brand">Lead anlegen</button>
+    </div>
+  </form>
+</div>
+
+<div class="page-card p-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+    <div>
+      <h2 class="h4 mb-1">Pipeline</h2>
+      <div class="text-muted small">Überfällige Kontakte stehen oben.</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-sm {{ 'btn-dark' if status_filter == 'aktiv' else 'btn-soft' }}" href="{{ url_for('admin_leads', status='aktiv', quelle=quelle_filter) }}">Aktiv</a>
+      <a class="btn btn-sm {{ 'btn-dark' if status_filter == 'alle' else 'btn-soft' }}" href="{{ url_for('admin_leads', status='alle', quelle=quelle_filter) }}">Alle</a>
+      {% for key, meta in lead_status.items() %}
+      <a class="btn btn-sm {{ 'btn-dark' if status_filter == key else 'btn-soft' }}" href="{{ url_for('admin_leads', status=key, quelle=quelle_filter) }}">{{ meta['label'] }}</a>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if leads %}
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Lead</th>
+          <th>Status</th>
+          <th>Kontakt</th>
+          <th>Nächste Aktion</th>
+          <th>Potenzial</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for lead in leads %}
+        <tr class="{% if lead['is_due'] %}lead-row-due{% endif %}">
+          <td>
+            <div class="fw-bold">{{ lead['kunde_name'] or 'Unbekannter Kunde' }}</div>
+            <div class="text-muted small">{{ lead['fahrzeug'] or 'Fahrzeug offen' }}{% if lead['kennzeichen'] %} · {{ lead['kennzeichen'] }}{% endif %}</div>
+            <div class="d-flex gap-2 flex-wrap mt-1">
+              <span class="badge text-bg-{{ lead['quelle_meta']['farbe'] }}">{{ lead['quelle_meta']['label'] }}</span>
+              {% if lead['autohaus_name'] %}<span class="badge text-bg-light text-dark border">{{ lead['autohaus_name'] }}</span>{% endif %}
+              {% if lead['source_email_id'] %}<span class="badge text-bg-success">E-Mail #{{ lead['source_email_id'] }}</span>{% endif %}
+            </div>
+          </td>
+          <td><span class="badge text-bg-{{ lead['status_meta']['farbe'] }}">{{ lead['status_meta']['label'] }}</span></td>
+          <td>
+            <div>{{ lead['kontakt_telefon'] or 'Telefon offen' }}</div>
+            <div class="text-muted small">{{ lead['kunde_email'] or '' }}</div>
+          </td>
+          <td>
+            <div>{{ lead['naechste_aktion'] or 'Nachfassen festlegen' }}</div>
+            <div class="{{ 'text-danger fw-bold' if lead['is_due'] else 'text-muted' }} small">{{ lead['naechster_kontakt_am'] or 'kein Datum' }}</div>
+          </td>
+          <td>{{ lead['geschaetzter_wert_label'] or 'offen' }}</td>
+          <td class="text-end">
+            <a href="{{ url_for('admin_lead_detail', lead_id=lead['id']) }}" class="btn btn-sm btn-brand">Öffnen</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-muted">Noch keine Leads in dieser Ansicht.</div>
+  {% endif %}
+</div>
+{% endblock %}

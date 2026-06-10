@@ -1,0 +1,359 @@
+{% extends "base.html" %}
+{% block title %}Kalkulation{% endblock %}
+
+{% block extra_css %}
+<style>
+  .calc-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr);
+    gap: 1rem;
+    align-items: stretch;
+  }
+
+  .calc-total {
+    background: linear-gradient(135deg, #132635, #145d66);
+    color: #fff;
+    border-radius: 18px;
+    padding: 1.25rem;
+    box-shadow: 0 16px 36px rgba(19, 38, 53, .16);
+  }
+
+  .calc-total .label {
+    color: rgba(255, 255, 255, .72);
+    font-size: .82rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    font-weight: 700;
+  }
+
+  .calc-total .value {
+    font-size: 2rem;
+    font-weight: 800;
+    line-height: 1.05;
+  }
+
+  .calc-source-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .75rem;
+  }
+
+  .calc-source {
+    border: 1px solid #d8dfdd;
+    border-radius: 14px;
+    background: #f8fbfa;
+    padding: .9rem;
+    min-height: 118px;
+  }
+
+  .calc-table {
+    min-width: 1120px;
+  }
+
+  .calc-table input,
+  .calc-table select {
+    min-width: 0;
+  }
+
+  .calc-money {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .calc-muted {
+    color: var(--muted);
+    font-size: .9rem;
+  }
+
+  .calc-add-grid {
+    display: grid;
+    grid-template-columns: .8fr 1fr 1.4fr .6fr .6fr .7fr .7fr 1.2fr;
+    gap: .75rem;
+    align-items: end;
+  }
+
+  @media (max-width: 992px) {
+    .calc-header,
+    .calc-source-grid,
+    .calc-add-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
+  <div>
+    <div class="badge-soft mb-3">Eigene Vorkalkulation</div>
+    <h1 class="mb-2">{{ auftrag['fahrzeug'] }}</h1>
+    <div class="text-muted">
+      Auftrag #{{ auftrag['id'] }}
+      {% if auftrag['kennzeichen'] %} · {{ auftrag['kennzeichen'] }}{% endif %}
+      {% if auftrag['fin_nummer'] %} · FIN {{ auftrag['fin_nummer'] }}{% endif %}
+      {% if auftrag['hsn_nummer'] or auftrag['tsn_nummer'] %} · HSN/TSN {{ auftrag['hsn_nummer'] }}{% if auftrag['hsn_nummer'] and auftrag['tsn_nummer'] %}/{% endif %}{{ auftrag['tsn_nummer'] }}{% endif %}
+    </div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ detail_url }}" class="btn btn-soft">Zurück zum Auftrag</a>
+  </div>
+</div>
+
+<form method="POST" data-loading-message="Kalkulation wird gespeichert.">
+  {{ csrf_field()|safe }}
+  <div class="calc-header mb-4">
+    <div class="page-card p-4">
+      <div class="section-title">
+        <div>
+          <h2 class="h4 mb-1">Analysebasis</h2>
+          <p>Bauteile und Reparaturumfang kommen aus Gutachten, Kalkulation, Fotos oder manueller Prüfung. Ein Eintrag pro Zeile reicht für den Kalkulationsvorschlag.</p>
+        </div>
+        <span class="badge text-bg-{{ kalkulation['status_meta']['farbe'] }}">{{ kalkulation['status_meta']['label'] }}</span>
+      </div>
+      <label class="form-label">Erkannte / manuelle Bauteile</label>
+      <textarea name="bauteile_override" class="form-control" rows="8" placeholder="z.B. Stoßfänger vorne&#10;Kotflügel links&#10;Scheinwerferhalter prüfen">{{ auftrag['bauteile_override'] }}</textarea>
+      <div class="form-text">Uploads und Dokumentanalyse füllen diese Liste automatisch vor. Du kannst sie hier korrigieren und dann den Vorschlag neu aufbauen.</div>
+      {% if auftrag['analyse_text'] %}
+      <div class="alert alert-light border small mt-3 mb-0">
+        <strong>Kurzanalyse:</strong> {{ auftrag['analyse_text'] }}
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="calc-total">
+      <div class="label mb-2">Aktuelle Summe</div>
+      <div class="value mb-1">{{ kalkulation['summen']['netto_label'] }}</div>
+      <div class="text-white-50 mb-3">Brutto {{ kalkulation['summen']['brutto_label'] }} inkl. {{ '%.0f'|format(kalkulation['mwst_satz']) }} % MwSt.</div>
+      <div class="d-grid gap-2">
+        <button type="submit" name="aktion" value="speichern" class="btn btn-light">Kalkulation speichern</button>
+        {% if auftrag['angebotsphase'] %}
+        <button type="submit" name="aktion" value="angebot_uebernehmen" class="btn btn-outline-light">Als Angebot übernehmen</button>
+        {% endif %}
+        <button type="submit" name="aktion" value="neu_vorschlagen" class="btn btn-outline-light" formnovalidate>Vorschlag neu aufbauen</button>
+      </div>
+      {% if auftrag['kalkulation_aktualisiert_am'] %}
+      <div class="small text-white-50 mt-3">Zuletzt gespeichert: {{ auftrag['kalkulation_aktualisiert_am'] }}</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="page-card p-4 mb-4">
+    <div class="section-title">
+      <div>
+        <h2 class="h4 mb-1">Datenquellen</h2>
+        <p>Heute intern gerechnet, später sauber an Teile-/Kataloganbieter anschließbar.</p>
+      </div>
+    </div>
+    <div class="calc-source-grid">
+      <div class="calc-source">
+        <div class="fw-bold mb-1">Interne Regeln</div>
+        <div class="calc-muted">Arbeitswerte, Lackstunden und Materialansätze kommen aus unserem eigenen Regelwerk und bleiben manuell änderbar.</div>
+      </div>
+      <div class="calc-source">
+        <div class="fw-bold mb-1">partslink24 vorbereitet</div>
+        <div class="calc-muted">Ersatzteilpositionen bleiben bei 0,00 €, bis OEM-Preis und Verfügbarkeit aus partslink24, Händlerangebot oder CSV eingetragen sind.</div>
+      </div>
+      <div class="calc-source">
+        <div class="fw-bold mb-1">Fahrzeugdaten-Status</div>
+        <div class="calc-muted">
+          {% if auftrag['fin_nummer'] and (auftrag['hsn_nummer'] or auftrag['tsn_nummer']) %}
+            FIN und HSN/TSN vorhanden. Das ist die beste Basis für Teile-, KBA- und Kalkulationsdaten.
+          {% elif auftrag['fin_nummer'] %}
+            FIN vorhanden. Für deutsche Fahrzeugdaten bitte zusätzlich HSN/TSN aus dem Fahrzeugschein ergänzen.
+          {% elif auftrag['hsn_nummer'] or auftrag['tsn_nummer'] %}
+            HSN/TSN vorhanden. Für Teilezuordnung bitte nach Möglichkeit auch FIN ergänzen.
+          {% else %}
+            Noch keine FIN/HSN/TSN. Für echte Teilezuordnung bitte FIN oder Fahrzeugschein ergänzen.
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-card p-4 mb-4">
+    <div class="section-title">
+      <div>
+        <h2 class="h4 mb-1">Parameter</h2>
+        <p>Diese Werte steuern die Positionsberechnung. Jede Position kann trotzdem einzeln überschrieben werden.</p>
+      </div>
+    </div>
+    <div class="row g-3">
+      <div class="col-md-3">
+        <label class="form-label">Arbeitslohn €/h</label>
+        <input type="text" inputmode="decimal" name="arbeitslohn_satz" class="form-control" value="{{ '%.2f'|format(kalkulation['arbeitslohn_satz']) }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Lacklohn €/h</label>
+        <input type="text" inputmode="decimal" name="lacklohn_satz" class="form-control" value="{{ '%.2f'|format(kalkulation['lacklohn_satz']) }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Material €/Lackstunde</label>
+        <input type="text" inputmode="decimal" name="material_je_lackstunde" class="form-control" value="{{ '%.2f'|format(kalkulation['material_je_lackstunde']) }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">MwSt. %</label>
+        <input type="text" inputmode="decimal" name="mwst_satz" class="form-control" value="{{ '%.2f'|format(kalkulation['mwst_satz']) }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Status</label>
+        <select name="kalkulation_status" class="form-select">
+          {% for key, meta in status_optionen.items() %}
+          <option value="{{ key }}" {% if kalkulation['status'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-8">
+        <label class="form-label">Interne Notiz</label>
+        <input type="text" name="kalkulation_notiz" class="form-control" value="{{ kalkulation['notiz'] }}" placeholder="z.B. Teilepreis noch bei Audi anfragen">
+      </div>
+    </div>
+  </div>
+
+  <div class="page-card p-4 mb-4">
+    <div class="section-title">
+      <div>
+        <h2 class="h4 mb-1">Positionen</h2>
+        <p>Arbeits- und Lackpositionen rechnen Menge × Stunden × Satz. Material, Ersatzteile und Fremdleistung rechnen Menge × Einzelpreis.</p>
+      </div>
+    </div>
+    <div class="table-shell">
+      <table class="table align-middle calc-table">
+        <thead>
+          <tr>
+            <th>Aktiv</th>
+            <th>Gruppe</th>
+            <th>Bauteil</th>
+            <th>Arbeit</th>
+            <th>Menge</th>
+            <th>Std.</th>
+            <th>Satz</th>
+            <th>Einzelpreis</th>
+            <th>Summe</th>
+            <th>Notiz</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for position in kalkulation['positionen'] %}
+          {% set idx = loop.index0 %}
+          <tr>
+            <td>
+              <input type="hidden" name="position_index" value="{{ idx }}">
+              <input type="hidden" name="position_id_{{ idx }}" value="{{ position['id'] }}">
+              <input type="hidden" name="quelle_{{ idx }}" value="{{ position['quelle'] }}">
+              <input class="form-check-input" type="checkbox" name="aktiv_{{ idx }}" value="1" {% if position['aktiv'] %}checked{% endif %}>
+            </td>
+            <td>
+              <select name="gruppe_{{ idx }}" class="form-select form-select-sm">
+                {% for key, meta in gruppen.items() %}
+                <option value="{{ key }}" {% if position['gruppe'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td><input type="text" name="bauteil_{{ idx }}" class="form-control form-control-sm" value="{{ position['bauteil'] }}"></td>
+            <td><input type="text" name="arbeit_{{ idx }}" class="form-control form-control-sm" value="{{ position['arbeit'] }}"></td>
+            <td><input type="text" inputmode="decimal" name="menge_{{ idx }}" class="form-control form-control-sm" value="{{ '%.2f'|format(position['menge']) }}"></td>
+            <td><input type="text" inputmode="decimal" name="stunden_{{ idx }}" class="form-control form-control-sm" value="{{ '%.2f'|format(position['stunden']) }}"></td>
+            <td><input type="text" inputmode="decimal" name="satz_{{ idx }}" class="form-control form-control-sm" value="{{ '%.2f'|format(position['satz']) }}"></td>
+            <td><input type="text" inputmode="decimal" name="einzelpreis_{{ idx }}" class="form-control form-control-sm" value="{{ '%.2f'|format(position['einzelpreis']) }}"></td>
+            <td class="fw-bold calc-money">{{ position['summe_label'] }}</td>
+            <td><input type="text" name="notiz_{{ idx }}" class="form-control form-control-sm" value="{{ position['notiz'] }}" title="{{ position['quelle'] }}"></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="page-card p-4 mb-4">
+    <h2 class="h4 mb-3">Neue Position hinzufügen</h2>
+    <div class="calc-add-grid">
+      <div>
+        <label class="form-label">Gruppe</label>
+        <select name="new_gruppe" class="form-select">
+          {% for key, meta in gruppen.items() %}
+          <option value="{{ key }}">{{ meta['label'] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Bauteil</label>
+        <input type="text" name="new_bauteil" class="form-control" placeholder="z.B. Halter links">
+      </div>
+      <div>
+        <label class="form-label">Arbeit</label>
+        <input type="text" name="new_arbeit" class="form-control" placeholder="z.B. Ersatzteil laut Händlerangebot">
+      </div>
+      <div>
+        <label class="form-label">Menge</label>
+        <input type="text" inputmode="decimal" name="new_menge" class="form-control" value="1">
+      </div>
+      <div>
+        <label class="form-label">Std.</label>
+        <input type="text" inputmode="decimal" name="new_stunden" class="form-control" value="0">
+      </div>
+      <div>
+        <label class="form-label">Satz</label>
+        <input type="text" inputmode="decimal" name="new_satz" class="form-control" value="">
+      </div>
+      <div>
+        <label class="form-label">Einzelpreis</label>
+        <input type="text" inputmode="decimal" name="new_einzelpreis" class="form-control" value="">
+      </div>
+      <div>
+        <label class="form-label">Notiz</label>
+        <input type="text" name="new_notiz" class="form-control" placeholder="Quelle / Rückfrage">
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 mb-4">
+    <div class="col-lg-7">
+      <div class="page-card p-4 h-100">
+        <h2 class="h4 mb-3">Hinweise</h2>
+        {% if kalkulation['hinweise'] %}
+        <div class="d-grid gap-2">
+          {% for hinweis in kalkulation['hinweise'] %}
+          <div class="alert alert-warning py-2 mb-0">{{ hinweis }}</div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-muted">Keine Hinweise hinterlegt.</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="page-card p-4 h-100">
+        <h2 class="h4 mb-3">Summen</h2>
+        <div class="d-grid gap-2">
+          {% for key, item in kalkulation['gruppen_summen'].items() %}
+          <div class="d-flex justify-content-between gap-3 border-bottom pb-2">
+            <span>{{ item['meta']['label'] }}</span>
+            <strong class="calc-money">{{ item['label'] }}</strong>
+          </div>
+          {% endfor %}
+          <div class="d-flex justify-content-between gap-3 pt-2">
+            <span>Netto</span>
+            <strong class="calc-money">{{ kalkulation['summen']['netto_label'] }}</strong>
+          </div>
+          <div class="d-flex justify-content-between gap-3">
+            <span>MwSt.</span>
+            <strong class="calc-money">{{ kalkulation['summen']['mwst_label'] }}</strong>
+          </div>
+          <div class="d-flex justify-content-between gap-3 fs-5 border-top pt-2">
+            <span>Brutto</span>
+            <strong class="calc-money">{{ kalkulation['summen']['brutto_label'] }}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2 flex-wrap justify-content-end mb-4">
+    <a href="{{ detail_url }}" class="btn btn-soft btn-lg">Zurück</a>
+    <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Kalkulation speichern</button>
+    {% if auftrag['angebotsphase'] %}
+    <button type="submit" name="aktion" value="angebot_uebernehmen" class="btn btn-outline-dark btn-lg">Als Angebot übernehmen</button>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

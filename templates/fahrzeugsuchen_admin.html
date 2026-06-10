@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Auktion / Fahrzeugsuche{% endblock %}
+
+{% block extra_css %}
+<style>
+  .search-kpis {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .search-kpi {
+    border: 1px solid #e4d6c3;
+    border-radius: 16px;
+    background: #fffdf9;
+    padding: 1rem;
+  }
+  .search-kpi span {
+    color: var(--muted);
+    display: block;
+    font-size: .82rem;
+  }
+  .search-kpi strong {
+    display: block;
+    font-size: 1.35rem;
+  }
+  .vehicle-search-row-due {
+    box-shadow: inset 4px 0 0 #c74b32;
+  }
+  @media (max-width: 900px) {
+    .search-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 560px) {
+    .search-kpis { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="section-title">
+  <div>
+    <div class="badge-soft mb-3">Aus Auktion</div>
+    <h1 class="mb-2">Auktion / Fahrzeugsuche</h1>
+    <p>Kundenwunsch erfassen, Copart- und Auktionsfahrzeuge sammeln, Risiko prüfen und ein Komplettangebot vorbereiten.</p>
+  </div>
+  <a href="{{ url_for('admin_leads') }}" class="btn btn-soft">Zu Leads</a>
+</div>
+
+<div class="search-kpis mb-4">
+  <div class="search-kpi">
+    <span>Aktiv</span>
+    <strong>{{ counts['neu'] + counts['suche_laeuft'] + counts['kandidaten_pruefen'] + counts['angebot_vorbereiten'] + counts['angebot_gesendet'] }}</strong>
+  </div>
+  <div class="search-kpi">
+    <span>Kandidaten prüfen</span>
+    <strong>{{ counts['kandidaten_pruefen'] }}</strong>
+  </div>
+  <div class="search-kpi">
+    <span>Angebot</span>
+    <strong>{{ counts['angebot_vorbereiten'] + counts['angebot_gesendet'] }}</strong>
+  </div>
+  <div class="search-kpi">
+    <span>Gekauft</span>
+    <strong>{{ counts['gekauft'] }}</strong>
+  </div>
+</div>
+
+{% if auktion_alerts %}
+<div class="alert alert-warning page-card mb-4" role="alert">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div>
+      <div class="fw-bold">Copart-Auktionsalarm</div>
+      <div class="small">Diese Auktion läuft jetzt oder startet innerhalb der nächsten Stunde.</div>
+    </div>
+    <span class="badge text-bg-warning">{{ auktion_alerts|length }}</span>
+  </div>
+  <div class="d-grid gap-2 mt-3">
+    {% for alert in auktion_alerts %}
+    <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap">
+      <div>
+        <div class="fw-bold">{{ alert['alarm_label'] }} · {{ alert['titel'] }}</div>
+        <div class="small">{{ alert['kunde_name'] }} · {{ alert['auktion_label'] }}{% if alert['lot_nummer'] %} · Lot {{ alert['lot_nummer'] }}{% endif %}</div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a href="{{ url_for('admin_fahrzeugsuche_detail', suche_id=alert['suche_id']) }}#kandidat-{{ alert['kandidat_id'] }}" class="btn btn-sm btn-soft">Prüfen</a>
+        {% if alert['copart_bid_url'] %}
+        <a href="{{ alert['copart_bid_url'] }}" class="btn btn-sm btn-brand">Bei Copart bieten</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="page-card p-4 mb-4">
+  <h2 class="h4 mb-3">Neue Auktionssuche erfassen</h2>
+  <form method="POST" class="row g-3">
+    {{ csrf_field()|safe }}
+    <input type="hidden" name="status" value="neu">
+    <div class="col-md-4">
+      <label class="form-label">Kunde</label>
+      <input type="text" name="kunde_name" class="form-control" placeholder="Name oder Firma">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Handy / WhatsApp</label>
+      <input type="text" name="kontakt_telefon" class="form-control" placeholder="z.B. 0171 1234567">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">E-Mail</label>
+      <input type="email" name="kunde_email" class="form-control">
+    </div>
+    <div class="col-12">
+      <label class="form-label">Kundennachricht / Auktionsauftrag</label>
+      <textarea name="suchauftrag_text" class="form-control" rows="4" placeholder="Kundentext einfügen, z.B. BMW X3, Mercedes GLC oder V-Klasse, Allrad, Standheizung, ab Baujahr 2022/23."></textarea>
+      <div class="form-text">Modelle, Baujahr und Pflichtausstattung werden beim Speichern soweit möglich vorbefüllt.</div>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Modelle</label>
+      <input type="text" name="marken_modelle" class="form-control" placeholder="BMW X3, Mercedes GLC, V-Klasse">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Ab Baujahr</label>
+      <input type="number" name="baujahr_min" class="form-control" min="1900" max="2100">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Kilometer von</label>
+      <input type="number" name="kilometer_min" class="form-control" min="0" max="1000000" step="1000" placeholder="0">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Kilometer bis</label>
+      <input type="number" name="kilometer_max" class="form-control" min="0" max="1000000" step="1000" placeholder="100000">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Budget</label>
+      <input type="text" name="budget" class="form-control" placeholder="offen">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Abholort</label>
+      <input type="text" name="abholort" class="form-control" value="74821 Mosbach">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Radius</label>
+      <div class="input-group">
+        <input type="number" name="max_entfernung_km" class="form-control" value="400" min="0" max="1000">
+        <span class="input-group-text">km</span>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Nächste Aktion</label>
+      <input type="text" name="naechste_aktion" class="form-control" placeholder="Copart-Kandidaten suchen">
+    </div>
+    <div class="col-12">
+      <label class="form-label">Bevorzugte Copart-Standorte</label>
+      <input type="text" name="bevorzugte_standorte" class="form-control" value="Mannheim, Stuttgart, Frankfurt, München-Ost, Aachen, Dortmund">
+    </div>
+    <div class="col-12">
+      <button type="submit" class="btn btn-brand">Auktionssuche anlegen</button>
+    </div>
+  </form>
+</div>
+
+<div class="page-card p-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+    <div>
+      <h2 class="h4 mb-1">Suchaufgaben</h2>
+      <div class="text-muted small">Überfällige Nachfass-Aufgaben stehen oben.</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-sm {{ 'btn-dark' if status_filter == 'aktiv' else 'btn-soft' }}" href="{{ url_for('admin_fahrzeugsuche', status='aktiv') }}">Aktiv</a>
+      <a class="btn btn-sm {{ 'btn-dark' if status_filter == 'alle' else 'btn-soft' }}" href="{{ url_for('admin_fahrzeugsuche', status='alle') }}">Alle</a>
+      {% for key, meta in status_options.items() %}
+      <a class="btn btn-sm {{ 'btn-dark' if status_filter == key else 'btn-soft' }}" href="{{ url_for('admin_fahrzeugsuche', status=key) }}">{{ meta['label'] }}</a>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if suchen %}
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Auktionssuche</th>
+          <th>Status</th>
+          <th>Wunsch</th>
+          <th>Kandidaten</th>
+          <th>Nächste Aktion</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for suche in suchen %}
+        <tr class="{% if suche['is_due'] %}vehicle-search-row-due{% endif %}">
+          <td>
+            <div class="fw-bold">{{ suche['kunde_name'] or 'Unbekannter Kunde' }}</div>
+            <div class="text-muted small">{{ suche['kontakt_telefon'] or suche['kunde_email'] or 'Kontakt offen' }}</div>
+          </td>
+          <td><span class="badge text-bg-{{ suche['status_meta']['farbe'] }}">{{ suche['status_meta']['label'] }}</span></td>
+          <td>
+            <div>{{ suche['marken_modelle'] or suche['fahrzeugwuensche'] or 'Fahrzeug offen' }}</div>
+            <div class="text-muted small">
+              {% if suche['baujahr_min'] %}ab {{ suche['baujahr_min'] }}{% endif %}
+              {% if suche['budget_label'] %}{% if suche['baujahr_min'] %} · {% endif %}{{ suche['budget_label'] }}{% endif %}
+              {% if suche['kilometer_filter_label'] %}{% if suche['baujahr_min'] or suche['budget_label'] %} · {% endif %}{{ suche['kilometer_filter_label'] }}{% endif %}
+            </div>
+          </td>
+          <td>
+            <div>{{ suche['kandidaten_count'] }} erfasst</div>
+            <div class="text-muted small">{{ suche['aktive_kandidaten_count'] }} aktiv</div>
+          </td>
+          <td>
+            <div>{{ suche['naechste_aktion'] or 'Suche starten' }}</div>
+            <div class="{{ 'text-danger fw-bold' if suche['is_due'] else 'text-muted' }} small">{{ suche['naechster_kontakt_am'] or 'kein Datum' }}</div>
+          </td>
+          <td class="text-end">
+            <a href="{{ url_for('admin_fahrzeugsuche_detail', suche_id=suche['id']) }}" class="btn btn-sm btn-brand">Öffnen</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-muted">Noch keine Auktionssuche in dieser Ansicht.</div>
+  {% endif %}
+</div>
+{% endblock %}

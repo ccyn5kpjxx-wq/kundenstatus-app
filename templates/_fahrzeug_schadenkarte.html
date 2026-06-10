@@ -95,22 +95,155 @@
       .vehicle-zone-shell {
         --zone-accent: #b23b2a;
         --zone-ink: #17212a;
-        --zone-line: #d7e0e4;
-        --zone-panel: #f8fafb;
+        --zone-line: #cbd2d7;
+        --zone-soft-line: #e4e8eb;
+        --zone-panel: #fbfcfc;
         position: relative;
       }
       .vehicle-zone-map {
         position: relative;
         width: 100%;
         min-height: 0;
-        border: 1px solid var(--zone-line);
-        border-radius: 16px;
-        background: #f8fafb;
+        border: 1px solid #dfe6ea;
+        border-radius: 14px;
+        background: #fff;
         overflow: hidden;
-        box-shadow: inset 0 1px 0 rgba(255,255,255,.8);
-        padding: 14px;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.9);
+        padding: clamp(10px, 2vw, 18px);
       }
-      .vehicle-zone-form-title {
+      .vehicle-zone-diagram {
+        position: relative;
+        width: min(980px, 100%);
+        margin: 0 auto;
+        aspect-ratio: 16 / 8.4;
+        min-height: 390px;
+      }
+      .vehicle-zone-diagram svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .vehicle-zone-svg-panel {
+        fill: #fff;
+      }
+      .vehicle-zone-svg-surface {
+        fill: #fdfefe;
+        stroke: #c7d0d6;
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .vehicle-zone-svg-line {
+        fill: none;
+        stroke: #c7d0d6;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .vehicle-zone-svg-soft {
+        fill: none;
+        stroke: #e2e8ec;
+        stroke-width: 1.7;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .vehicle-zone-svg-glass {
+        fill: #f6fbfe;
+        stroke: #c8d3da;
+        stroke-width: 2;
+      }
+      .vehicle-zone-svg-wheel {
+        fill: #fff;
+        stroke: #b8c0c7;
+        stroke-width: 2;
+      }
+      .vehicle-zone-svg-wheel-line {
+        stroke: #c8d0d6;
+        stroke-width: 1.5;
+        stroke-linecap: round;
+      }
+      .vehicle-zone-hotspot {
+        position: absolute;
+        z-index: 2;
+        border: 1px solid transparent;
+        border-radius: 14px;
+        background: rgba(178, 59, 42, 0);
+        cursor: pointer;
+        transition: background .16s ease, border-color .16s ease, box-shadow .16s ease;
+      }
+      .vehicle-zone-hotspot:hover {
+        border-color: rgba(178, 59, 42, .48);
+        background: rgba(178, 59, 42, .07);
+      }
+      .vehicle-zone-hotspot.is-selected {
+        border-color: var(--zone-accent);
+        background: rgba(178, 59, 42, .16);
+        box-shadow: 0 0 0 2px rgba(178, 59, 42, .1);
+      }
+      .vehicle-zone-hotspot::after {
+        content: attr(data-label);
+        position: absolute;
+        left: 50%;
+        top: -8px;
+        transform: translate(-50%, -100%);
+        display: none;
+        max-width: 190px;
+        padding: 4px 7px;
+        border: 1px solid #d6c7b4;
+        border-radius: 999px;
+        background: #fffdf9;
+        color: var(--zone-ink);
+        font-size: .74rem;
+        font-weight: 800;
+        white-space: nowrap;
+        box-shadow: 0 8px 20px rgba(22, 32, 42, .12);
+        pointer-events: none;
+        z-index: 5;
+      }
+      .vehicle-zone-hotspot:hover::after,
+      .vehicle-zone-hotspot.is-selected::after {
+        display: block;
+      }
+      .vehicle-zone-hotspot--stossfaenger_vorne { left: 8%; top: 38%; width: 12%; height: 24%; }
+      .vehicle-zone-hotspot--frontblech { left: 21%; top: 40%; width: 7%; height: 20%; }
+      .vehicle-zone-hotspot--motorhaube { left: 29%; top: 38%; width: 16%; height: 24%; }
+      .vehicle-zone-hotspot--kotfluegel_links { left: 29%; top: 21%; width: 10%; height: 14%; }
+      .vehicle-zone-hotspot--kotfluegel_rechts { left: 29%; top: 65%; width: 10%; height: 14%; }
+      .vehicle-zone-hotspot--spoiler_vorne { left: 9%; top: 32%; width: 11%; height: 7%; }
+      .vehicle-zone-hotspot--parksensor_vorne { left: 9%; top: 61%; width: 11%; height: 7%; }
+      .vehicle-zone-hotspot--tuer_vorne_links { left: 42%; top: 20%; width: 11%; height: 14%; }
+      .vehicle-zone-hotspot--tuer_hinten_links { left: 53%; top: 20%; width: 11%; height: 14%; }
+      .vehicle-zone-hotspot--seitenteil_links { left: 64%; top: 22%; width: 10%; height: 13%; }
+      .vehicle-zone-hotspot--einstieg_links { left: 42%; top: 34%; width: 25%; height: 5%; }
+      .vehicle-zone-hotspot--schweller_links { left: 40%; top: 37%; width: 29%; height: 5%; }
+      .vehicle-zone-hotspot--aussenspiegel_links { left: 38%; top: 32%; width: 5%; height: 6%; }
+      .vehicle-zone-hotspot--felge_links { left: 31%; top: 13%; width: 45%; height: 10%; }
+      .vehicle-zone-hotspot--tuer_vorne_rechts { left: 42%; top: 66%; width: 11%; height: 14%; }
+      .vehicle-zone-hotspot--tuer_hinten_rechts { left: 53%; top: 66%; width: 11%; height: 14%; }
+      .vehicle-zone-hotspot--seitenteil_rechts { left: 64%; top: 65%; width: 10%; height: 13%; }
+      .vehicle-zone-hotspot--einstieg_rechts { left: 42%; top: 61%; width: 25%; height: 5%; }
+      .vehicle-zone-hotspot--schweller_rechts { left: 40%; top: 58%; width: 29%; height: 5%; }
+      .vehicle-zone-hotspot--aussenspiegel_rechts { left: 38%; top: 62%; width: 5%; height: 6%; }
+      .vehicle-zone-hotspot--felge_rechts { left: 31%; top: 78%; width: 45%; height: 10%; }
+      .vehicle-zone-hotspot--stossfaenger_hinten { left: 80%; top: 38%; width: 12%; height: 24%; }
+      .vehicle-zone-hotspot--heckklappe { left: 62%; top: 38%; width: 14%; height: 24%; }
+      .vehicle-zone-hotspot--abschlussblech { left: 76%; top: 42%; width: 6%; height: 16%; }
+      .vehicle-zone-hotspot--spoiler_hinten { left: 80%; top: 32%; width: 11%; height: 7%; }
+      .vehicle-zone-hotspot--parksensor_hinten { left: 80%; top: 61%; width: 11%; height: 7%; }
+      .vehicle-zone-hotspot--dach { left: 46%; top: 40%; width: 13%; height: 20%; }
+      .vehicle-zone-hotspot--frontscheibe { left: 36%; top: 40%; width: 9%; height: 20%; }
+      .vehicle-zone-hotspot--heckscheibe { left: 60%; top: 40%; width: 8%; height: 20%; }
+      .vehicle-zone-hotspot--seitenscheibe_links { left: 45%; top: 24%; width: 17%; height: 8%; }
+      .vehicle-zone-hotspot--seitenscheibe_rechts { left: 45%; top: 68%; width: 17%; height: 8%; }
+      .vehicle-zone-hotspot--felge { display: none; }
+      .vehicle-zone-hotspot--radlauf_links { left: 29%; top: 13%; width: 47%; height: 22%; }
+      .vehicle-zone-hotspot--radlauf_rechts { left: 29%; top: 65%; width: 47%; height: 22%; }
+      .vehicle-zone-check {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .vehicle-zone-summary {
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -121,89 +254,77 @@
         margin-bottom: 10px;
         text-transform: uppercase;
       }
-      .vehicle-zone-form-title span:last-child {
+      .vehicle-zone-summary span:last-child {
         color: #8a98a2;
         font-weight: 700;
         text-transform: none;
       }
-      .vehicle-zone-check {
-        position: absolute;
-        opacity: 0;
-        pointer-events: none;
+      .vehicle-zone-choices {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
       }
-      .vehicle-zone-chip {
-        border: 0;
-        border-top: 1px solid #e3ebef;
-        border-radius: 0;
+      .vehicle-zone-choices-wrap {
+        margin-top: 12px;
+      }
+      .vehicle-zone-choices-wrap summary {
+        color: #56636d;
+        cursor: pointer;
+        font-size: .84rem;
+        font-weight: 800;
+        list-style-position: inside;
+      }
+      .vehicle-zone-choice {
+        border: 1px solid #dce4e8;
+        border-radius: 999px;
         background: #fff;
         color: var(--zone-ink);
         cursor: pointer;
-        display: flex;
+        display: inline-flex;
         align-items: center;
         gap: 8px;
-        min-height: 36px;
-        padding: 7px 4px;
-        font-size: .9rem;
-        font-weight: 650;
+        min-height: 34px;
+        padding: 6px 10px;
+        font-size: .82rem;
+        font-weight: 750;
         transition: background .16s ease, border-color .16s ease, color .16s ease;
       }
-      .vehicle-zone-chip:first-of-type {
-        border-top: 0;
-      }
-      .vehicle-zone-chip span {
-        width: 16px;
-        height: 16px;
+      .vehicle-zone-choice span {
+        width: 12px;
+        height: 12px;
         border-radius: 4px;
         background: #eef4f6;
         border: 1px solid #cbd8de;
-        flex: 0 0 16px;
+        flex: 0 0 12px;
       }
-      .vehicle-zone-chip.is-selected {
+      .vehicle-zone-choice.is-selected {
         background: #fff7f5;
-        border-color: #e3ebef;
+        border-color: #d46f61;
         color: var(--zone-accent);
       }
-      .vehicle-zone-chip.is-selected span {
+      .vehicle-zone-choice.is-selected span {
         background: var(--zone-accent);
         border-color: var(--zone-accent);
-        box-shadow: inset 0 0 0 3px #fff;
-      }
-      .vehicle-zone-groups {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 10px;
-      }
-      .vehicle-zone-group {
-        border: 1px solid #d8e1e5;
-        border-radius: 12px;
-        background: #fff;
-        padding: 12px;
-      }
-      .vehicle-zone-group-title {
-        color: #40505a;
-        font-size: .78rem;
-        font-weight: 800;
-        margin-bottom: 8px;
-        text-transform: uppercase;
-      }
-      .vehicle-zone-group .vehicle-zone-chip {
-        margin-bottom: 8px;
-      }
-      .vehicle-zone-group .vehicle-zone-chip:last-child {
-        margin-bottom: 0;
+        box-shadow: inset 0 0 0 2px #fff;
       }
       @media (max-width: 575.98px) {
-        .vehicle-zone-groups {
-          grid-template-columns: 1fr;
+        .vehicle-zone-map {
+          padding: 10px;
+        }
+        .vehicle-zone-diagram {
+          min-height: 250px;
+        }
+        .vehicle-zone-hotspot::after {
+          font-size: .68rem;
+          white-space: normal;
+          min-width: 110px;
+          text-align: center;
         }
       }
     </style>
     <div class="vehicle-zone-shell mb-3">
-      <div class="vehicle-zone-map" aria-label="Fahrzeugbereiche">
-        <div class="vehicle-zone-form-title">
-          <span>Karosserieteil / Anbauteil</span>
-          <span>Mehrfachauswahl möglich</span>
-        </div>
+      <div class="vehicle-zone-map" aria-label="Fahrzeugbereiche" data-zone-map>
         {% for zone in schaden_zonen %}
           {% set is_selected = zone['key'] in selected_zone_keys %}
           {% if editable_map %}
@@ -219,79 +340,88 @@
           {% elif is_selected %}
           {% endif %}
         {% endfor %}
-      {% if editable_map %}
-      <div class="vehicle-zone-groups" data-zone-controls>
-        <div class="vehicle-zone-group">
-          <div class="vehicle-zone-group-title">Front</div>
-          {% for zone in schaden_zonen if zone['gruppe'] == 'Front' %}
+        <div class="vehicle-zone-summary">
+          <span>Lokale Fahrzeugskizze</span>
+          <span>{{ 'Bereiche anklicken' if editable_map else 'Gespeicherte Markierung' }}</span>
+        </div>
+        <div class="vehicle-zone-diagram">
+          <svg viewBox="0 0 900 470" role="img" aria-label="Fahrzeugskizze mit Karosserie- und Anbauteilen">
+            <rect class="vehicle-zone-svg-panel" x="0" y="0" width="900" height="525" rx="10"></rect>
+
+            <path class="vehicle-zone-svg-surface" d="M222 146 C252 101 321 80 451 80 C580 80 649 101 678 146 L700 217 C704 230 704 241 700 254 L678 324 C648 369 579 390 451 390 C322 390 252 369 222 324 L200 254 C196 241 196 230 200 217 Z"></path>
+            <path class="vehicle-zone-svg-line" d="M239 166 C292 137 358 124 451 124 C544 124 609 137 662 166"></path>
+            <path class="vehicle-zone-svg-line" d="M239 304 C292 333 358 346 451 346 C544 346 609 333 662 304"></path>
+            <path class="vehicle-zone-svg-line" d="M226 206 L303 234 L303 236 L226 264"></path>
+            <path class="vehicle-zone-svg-line" d="M674 206 L597 234 L597 236 L674 264"></path>
+
+            <path class="vehicle-zone-svg-glass" d="M326 146 C360 134 406 128 451 128 C496 128 541 134 575 146 L553 205 C486 198 415 198 348 205 Z"></path>
+            <path class="vehicle-zone-svg-glass" d="M348 265 C415 272 486 272 553 265 L575 324 C541 336 496 342 451 342 C406 342 360 336 326 324 Z"></path>
+            <path class="vehicle-zone-svg-line" d="M348 214 C415 207 486 207 553 214 L553 256 C486 263 415 263 348 256 Z"></path>
+            <path class="vehicle-zone-svg-soft" d="M451 128 L451 342"></path>
+            <path class="vehicle-zone-svg-soft" d="M388 135 L388 203 M512 135 L512 203"></path>
+            <path class="vehicle-zone-svg-soft" d="M388 267 L388 335 M512 267 L512 335"></path>
+            <path class="vehicle-zone-svg-soft" d="M385 216 L385 254 M420 213 L420 257 M480 213 L480 257 M515 216 L515 254"></path>
+            <path class="vehicle-zone-svg-soft" d="M250 178 C281 156 327 142 376 137"></path>
+            <path class="vehicle-zone-svg-soft" d="M250 292 C281 314 327 328 376 333"></path>
+            <path class="vehicle-zone-svg-soft" d="M650 178 C619 156 573 142 524 137"></path>
+            <path class="vehicle-zone-svg-soft" d="M650 292 C619 314 573 328 524 333"></path>
+
+            <path class="vehicle-zone-svg-surface" d="M78 169 L152 145 C171 172 181 203 181 235 C181 267 171 298 152 325 L78 301 C91 260 91 210 78 169 Z"></path>
+            <path class="vehicle-zone-svg-soft" d="M102 179 C114 216 114 254 102 291"></path>
+            <path class="vehicle-zone-svg-soft" d="M142 153 C155 205 155 265 142 317"></path>
+            <path class="vehicle-zone-svg-soft" d="M82 212 L103 212 M82 258 L103 258 M158 188 L174 188 M158 282 L174 282"></path>
+
+            <path class="vehicle-zone-svg-surface" d="M822 169 L748 145 C729 172 719 203 719 235 C719 267 729 298 748 325 L822 301 C809 260 809 210 822 169 Z"></path>
+            <path class="vehicle-zone-svg-soft" d="M798 179 C786 216 786 254 798 291"></path>
+            <path class="vehicle-zone-svg-soft" d="M758 153 C745 205 745 265 758 317"></path>
+            <path class="vehicle-zone-svg-soft" d="M818 212 L797 212 M818 258 L797 258 M742 188 L726 188 M742 282 L726 282"></path>
+
+            <circle class="vehicle-zone-svg-wheel" cx="312" cy="105" r="30"></circle>
+            <circle class="vehicle-zone-svg-wheel" cx="588" cy="105" r="30"></circle>
+            <circle class="vehicle-zone-svg-wheel" cx="312" cy="365" r="30"></circle>
+            <circle class="vehicle-zone-svg-wheel" cx="588" cy="365" r="30"></circle>
+            <path class="vehicle-zone-svg-wheel-line" d="M312 79 L312 131 M286 105 L338 105 M293 86 L331 124 M331 86 L293 124"></path>
+            <path class="vehicle-zone-svg-wheel-line" d="M588 79 L588 131 M562 105 L614 105 M569 86 L607 124 M607 86 L569 124"></path>
+            <path class="vehicle-zone-svg-wheel-line" d="M312 339 L312 391 M286 365 L338 365 M293 346 L331 384 M331 346 L293 384"></path>
+            <path class="vehicle-zone-svg-wheel-line" d="M588 339 L588 391 M562 365 L614 365 M569 346 L607 384 M607 346 L569 384"></path>
+          </svg>
+          {% for zone in schaden_zonen %}
             {% set is_selected = zone['key'] in selected_zone_keys %}
-            <label class="vehicle-zone-chip {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
-              <span aria-hidden="true"></span>{{ zone['label'] }}
-            </label>
+            <label
+              class="vehicle-zone-hotspot vehicle-zone-hotspot--{{ zone['key'] }} {% if is_selected %}is-selected{% endif %}"
+              for="schaden-zone-{{ zone['key'] }}"
+              title="{{ zone['label'] }}"
+              data-label="{{ zone['label'] }}"
+              aria-label="{{ zone['label'] }}"
+            ></label>
           {% endfor %}
         </div>
-        <div class="vehicle-zone-group">
-          <div class="vehicle-zone-group-title">Linke Seite</div>
-          {% for zone in schaden_zonen if zone['gruppe'] == 'Linke Seite' %}
-            {% set is_selected = zone['key'] in selected_zone_keys %}
-            <label class="vehicle-zone-chip {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
-              <span aria-hidden="true"></span>{{ zone['label'] }}
-            </label>
-          {% endfor %}
-        </div>
-        <div class="vehicle-zone-group">
-          <div class="vehicle-zone-group-title">Rechte Seite</div>
-          {% for zone in schaden_zonen if zone['gruppe'] == 'Rechte Seite' %}
-            {% set is_selected = zone['key'] in selected_zone_keys %}
-            <label class="vehicle-zone-chip {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
-              <span aria-hidden="true"></span>{{ zone['label'] }}
-            </label>
-          {% endfor %}
-        </div>
-        <div class="vehicle-zone-group">
-          <div class="vehicle-zone-group-title">Heck</div>
-          {% for zone in schaden_zonen if zone['gruppe'] == 'Heck' %}
-            {% set is_selected = zone['key'] in selected_zone_keys %}
-            <label class="vehicle-zone-chip {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
-              <span aria-hidden="true"></span>{{ zone['label'] }}
-            </label>
-          {% endfor %}
-        </div>
-        <div class="vehicle-zone-group">
-          <div class="vehicle-zone-group-title">Dach / Glas</div>
-          {% for zone in schaden_zonen if zone['gruppe'] == 'Dach / Glas' %}
-            {% set is_selected = zone['key'] in selected_zone_keys %}
-            <label class="vehicle-zone-chip {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
-              <span aria-hidden="true"></span>{{ zone['label'] }}
-            </label>
-          {% endfor %}
-        </div>
-        <div class="vehicle-zone-group">
-          <div class="vehicle-zone-group-title">Räder / Zubehör</div>
-          {% for zone in schaden_zonen if zone['gruppe'] == 'Räder / Zubehör' %}
-            {% set is_selected = zone['key'] in selected_zone_keys %}
-            <label class="vehicle-zone-chip {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
-              <span aria-hidden="true"></span>{{ zone['label'] }}
-            </label>
-          {% endfor %}
-        </div>
-      </div>
       <script>
-        document.querySelectorAll('[data-zone-controls]').forEach((controls) => {
-          const shell = controls.closest('.vehicle-zone-shell');
-          if (!shell) return;
+        document.querySelectorAll('[data-zone-map]').forEach((map) => {
           const sync = () => {
-            controls.querySelectorAll('.vehicle-zone-chip').forEach((chip) => {
-              const input = shell.querySelector('#' + CSS.escape(chip.getAttribute('for')));
-              chip.classList.toggle('is-selected', Boolean(input && input.checked));
+            map.querySelectorAll('.vehicle-zone-hotspot, .vehicle-zone-choice').forEach((item) => {
+              const input = map.querySelector('#' + CSS.escape(item.getAttribute('for')));
+              item.classList.toggle('is-selected', Boolean(input && input.checked));
             });
           };
-          shell.querySelectorAll('.vehicle-zone-check').forEach((input) => {
+          map.querySelectorAll('.vehicle-zone-check').forEach((input) => {
             input.addEventListener('change', sync);
           });
           sync();
         });
       </script>
+      {% if editable_map %}
+        <details class="vehicle-zone-choices-wrap">
+          <summary>Bauteile als Liste anzeigen</summary>
+          <div class="vehicle-zone-choices">
+            {% for zone in schaden_zonen %}
+              {% set is_selected = zone['key'] in selected_zone_keys %}
+              <label class="vehicle-zone-choice {% if is_selected %}is-selected{% endif %}" for="schaden-zone-{{ zone['key'] }}">
+                <span aria-hidden="true"></span>{{ zone['label'] }}
+              </label>
+            {% endfor %}
+          </div>
+        </details>
       {% endif %}
       </div>
     </div>

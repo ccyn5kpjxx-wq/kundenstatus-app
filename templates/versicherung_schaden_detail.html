@@ -3,11 +3,6 @@
 
 {% block extra_css %}
 <style>
-  .damage-map { position:relative; width:100%; aspect-ratio:13/7; min-height:260px; border:1px solid #e4d6c3; border-radius:18px; background:#f7f1e8; overflow:hidden; }
-  .damage-car { position:absolute; inset:5% 4%; width:92%; height:90%; }
-  .damage-zone-check { position:absolute; opacity:0; pointer-events:none; }
-  .damage-zone-label { position:absolute; transform:translate(-50%,-50%); border:1px solid #cdbda8; border-radius:999px; background:rgba(255,253,249,.94); color:#21303b; padding:.42rem .65rem; font-size:.82rem; font-weight:700; cursor:pointer; box-shadow:0 8px 18px rgba(64,47,25,.12); white-space:nowrap; }
-  .damage-zone-check:checked + .damage-zone-label { background:#a23f2d; border-color:#a23f2d; color:#fff; }
   .insurance-side { display:grid; gap:1rem; }
   .info-box { border:1px solid #e4d6c3; border-radius:16px; background:#fffaf2; padding:1rem; }
   .info-box code { white-space:normal; overflow-wrap:anywhere; }
@@ -19,22 +14,369 @@
   .chat-message.is-autohaus { background:#eef5f1; border-color:#bdd7c8; }
   .chat-message.is-werkstatt { background:#f8f2e8; border-color:#d8c4a6; }
   textarea.mail-draft { min-height:360px; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:.92rem; }
+  .source-lock-banner { border:1px solid #c9d7e8; border-radius:14px; background:#f2f7ff; color:#23364d; padding:.85rem 1rem; display:flex; gap:1rem; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; }
+  .source-lock-banner strong { display:block; }
+  .source-lock-note { max-width:680px; }
+  .is-source-locked [data-source-locked] { background:#f4f0e8; color:#6d6256; border-color:#ddd1c0; opacity:1; cursor:not-allowed; pointer-events:none; }
+  .claim-steps { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.65rem; }
+  .claim-step-tab { border:1px solid #e4d6c3; border-radius:8px; background:#fffdf9; color:#17212a; text-decoration:none; padding:.8rem .85rem; min-height:86px; }
+  .claim-step-tab:hover, .claim-step-tab:focus { border-color:#17212a; color:#17212a; box-shadow:0 8px 22px rgba(23,33,42,.10); }
+  .claim-step-tab.is-active { border-color:#17212a; background:#fff7e8; box-shadow:0 8px 22px rgba(23,33,42,.08); }
+  .claim-step-tab span { display:block; color:#8b5e2e; font-size:.76rem; font-weight:800; text-transform:uppercase; }
+  .claim-step-tab strong { display:block; line-height:1.18; margin-top:.15rem; }
+  .claim-step-tab small { display:block; color:#6f6253; line-height:1.25; margin-top:.25rem; }
+  .claim-step-note { border:1px solid #e4d6c3; border-radius:8px; background:#fffaf2; padding:.85rem 1rem; }
+  .step-card { position:relative; transition:box-shadow .18s ease, opacity .18s ease; }
+  .step-card.is-collapsed { opacity:.94; }
+  .step-card.is-collapsed > :not(.section-title):not(.step-fold-toggle) { display:none !important; }
+  .step-fold-toggle { position:absolute; top:1rem; right:1rem; z-index:2; }
+  .step-card > .section-title { padding-right:7.5rem; }
+  .source-summary-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.65rem; }
+  .source-summary-item { border:1px solid #eadfce; border-radius:8px; background:#fffdf9; padding:.75rem; min-width:0; }
+  .source-summary-item span { display:block; color:#746958; font-size:.76rem; font-weight:800; text-transform:uppercase; }
+  .source-summary-item strong { display:block; overflow-wrap:anywhere; }
+  .source-summary-item.is-wide { grid-column:span 2; }
+  .source-editor { border-top:1px solid #eadfce; margin-top:1rem; padding-top:1rem; }
+  .source-edit-actions { border-top:1px solid #eadfce; margin-top:1rem; padding-top:1rem; }
+  .step-card:target { scroll-margin-top:110px; outline:3px solid rgba(255,193,7,.55); outline-offset:8px; }
+  .offer-save-grid { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; }
+  .parts-offer-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.65rem; }
+  .parts-offer-tile { border:1px solid #eadfce; border-radius:8px; background:#fffdf9; padding:.75rem; min-width:0; }
+  .parts-offer-tile span { display:block; color:#746958; font-size:.76rem; font-weight:800; text-transform:uppercase; }
+  .parts-offer-tile strong { overflow-wrap:anywhere; }
+  .parts-table { display:grid; gap:.55rem; }
+  .parts-row { display:grid; grid-template-columns:minmax(150px,1.1fr) minmax(105px,.7fr) minmax(120px,.8fr) minmax(140px,1fr); gap:.55rem; align-items:end; border:1px solid #eadfce; border-radius:8px; background:#fff; padding:.65rem; }
+  .parts-row.is-head { align-items:center; background:#f8f2e8; color:#746958; font-size:.76rem; font-weight:800; text-transform:uppercase; }
+  .parts-row.is-head > div:last-child { display:none; }
+  .parts-row:not(.is-head) > div:last-child { grid-column:1 / -1; justify-content:flex-end; }
+  .supplier-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.65rem; }
+  .supplier-card { border:1px solid #eadfce; border-radius:8px; background:#fffdf9; padding:.75rem; min-width:0; }
+  .supplier-card.is-recommended { border-color:#b9d7c2; background:#f7fbf8; }
+  .supplier-access { border-top:1px solid #eadfce; margin-top:.65rem; padding-top:.65rem; }
+  .supplier-access code { display:block; border:1px solid #eadfce; border-radius:6px; background:#fff; padding:.35rem .45rem; font-size:.76rem; white-space:normal; overflow-wrap:anywhere; }
+  .offer-automation { border:1px solid #d8e6dc; border-radius:8px; background:#f7fbf8; padding:.85rem; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.75rem; align-items:start; }
+  .offer-automation.status-warning { border-color:#ead39a; background:#fff9e6; }
+  .offer-automation.status-secondary { border-color:#d7dbe1; background:#f7f8fa; }
+  .mail-copy-card { border:1px solid #eadfce; border-radius:8px; background:#fffdf9; padding:.85rem; }
+  .mail-copy-card textarea { min-height:260px; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:.88rem; }
+  .mail-inbox-list { display:grid; gap:.75rem; }
+  .mail-inbox-card { border:1px solid #d8e6dc; border-radius:8px; background:#f8fbf9; padding:.85rem; }
+  .mail-inbox-card.status-neu { border-color:#b8cce8; background:#f2f7ff; }
+  .mail-inbox-body { white-space:pre-wrap; max-height:320px; overflow:auto; background:#fff; border:1px solid #e5e9ee; border-radius:8px; padding:.75rem; }
+  .return-checklist { display:grid; gap:.45rem; margin-top:.75rem; }
+  .return-check { border:1px solid #eadfce; border-radius:8px; background:#fff; padding:.55rem .65rem; display:grid; grid-template-columns:auto minmax(0,1fr); gap:.55rem; align-items:start; }
+  .return-check .check-dot { width:1.45rem; height:1.45rem; border-radius:50%; display:grid; place-items:center; font-size:.82rem; font-weight:850; background:#eef0f2; color:#56616b; }
+  .return-check.status-success { border-color:#cfe3d3; background:#f6fbf7; }
+  .return-check.status-success .check-dot { background:#1f7a3a; color:#fff; }
+  .return-check.status-warning { border-color:#ead39a; background:#fff9e6; }
+  .return-check.status-warning .check-dot { background:#d99b12; color:#fff; }
+  .freigabe-hero { border:1px solid #d8e6dc; border-radius:12px; background:#f7fbf8; padding:1.1rem; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1rem; align-items:start; }
+  .freigabe-hero.status-warning { border-color:#ead39a; background:#fff9e6; }
+  .freigabe-hero.status-danger { border-color:#efb5bd; background:#fff3f4; }
+  .freigabe-hero.status-info, .freigabe-hero.status-secondary { border-color:#c7d7eb; background:#f3f8ff; }
+  .freigabe-title { font-size:1.45rem; font-weight:850; line-height:1.15; }
+  .freigabe-actions-grid { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; }
+  .freigabe-action-card { border:1px solid #eadfce; border-radius:8px; background:#fffdf9; padding:.85rem; }
+  .supplement-alert { border:1px solid #ead39a; border-radius:8px; background:#fff9e6; padding:.85rem; }
+  .compact-doc-list { display:flex; gap:.35rem; flex-wrap:wrap; }
+  .damage-type-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; }
+  .damage-type-card { border:1px solid #e4d6c3; border-radius:12px; background:#fffaf2; padding:.85rem; }
+  .damage-type-card span { display:block; color:#8b5e2e; font-size:.76rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .claim-money-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.65rem; }
+  .claim-legal-panel { border:1px solid #d6e3f0; border-radius:12px; background:#f7fbff; padding:1rem; }
+  .identity-check { border:1px solid #b9d7c2; border-radius:8px; background:#f7fbf8; color:#24442d; padding:.65rem .75rem; font-size:.88rem; }
+  .identity-check.status-warning { border-color:#ead39a; background:#fff9e6; color:#6d4d09; }
+  .autopilot-panel { border:1px solid #cfded4; border-radius:12px; background:#f7fbf8; padding:1.1rem; }
+  .autopilot-head { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1rem; align-items:start; }
+  .autopilot-head h2 { font-size:1.45rem; line-height:1.15; margin:0; }
+  .autopilot-score { min-width:126px; border:1px solid #d9e5de; border-radius:10px; background:#fff; padding:.8rem; text-align:center; }
+  .autopilot-score strong { display:block; font-size:1.7rem; line-height:1; }
+  .autopilot-score span { display:block; color:#5d6a61; font-size:.8rem; font-weight:800; margin-top:.25rem; }
+  .autopilot-score.status-success { border-color:#b9d7c2; background:#eff8f1; }
+  .autopilot-score.status-info { border-color:#b9cfe8; background:#f1f7ff; }
+  .autopilot-score.status-warning { border-color:#ead39a; background:#fff9e6; }
+  .autopilot-score.status-danger { border-color:#efb5bd; background:#fff3f4; }
+  .autopilot-next { border:1px solid #d9e5de; border-left:5px solid #5f8d6a; border-radius:10px; background:#fff; padding:.85rem; }
+  .autopilot-next.status-warning { border-left-color:#d99b12; }
+  .autopilot-next.status-danger { border-left-color:#b42335; }
+  .autopilot-next.status-info { border-left-color:#2f6fae; }
+  .autopilot-next.status-success { border-left-color:#1f7a3a; }
+  .autopilot-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; }
+  .autopilot-block { border-top:1px solid #d9e5de; padding-top:.85rem; min-width:0; }
+  .autopilot-block-title { display:flex; justify-content:space-between; gap:.75rem; align-items:center; font-weight:850; margin-bottom:.55rem; }
+  .autopilot-list { display:grid; gap:.55rem; }
+  .autopilot-item { display:grid; grid-template-columns:auto minmax(0,1fr); gap:.55rem; align-items:start; border:1px solid #e2ebe5; border-radius:8px; background:#fff; padding:.65rem; }
+  .autopilot-dot { width:1.35rem; height:1.35rem; border-radius:50%; display:grid; place-items:center; font-size:.75rem; font-weight:900; color:#fff; background:#6c757d; margin-top:.1rem; }
+  .autopilot-item.status-success .autopilot-dot { background:#1f7a3a; }
+  .autopilot-item.status-info .autopilot-dot { background:#2f6fae; }
+  .autopilot-item.status-warning .autopilot-dot { background:#d99b12; }
+  .autopilot-item.status-danger .autopilot-dot { background:#b42335; }
+  .autopilot-item.status-primary .autopilot-dot { background:#2458a6; }
+  .autopilot-meta { display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.3rem; }
+  .autopilot-risk-list { margin:0; padding-left:1.05rem; display:grid; gap:.35rem; }
+  .fallakte-summary-grid { display:grid; grid-template-columns:1fr 1fr 1.2fr 1.2fr; gap:.75rem; margin-bottom:1rem; }
+  .fallakte-kpi { border:1px solid #dbe8df; border-radius:8px; background:#fff; padding:.8rem; min-width:0; }
+  .fallakte-kpi span { display:block; color:#647269; font-size:.74rem; font-weight:850; text-transform:uppercase; }
+  .fallakte-kpi strong { display:block; line-height:1.18; margin-top:.15rem; overflow-wrap:anywhere; }
+  .fallakte-kpi small { display:block; color:#68756d; margin-top:.25rem; line-height:1.25; }
+  .fallakte-kpi.status-warning { border-color:#ead39a; background:#fff9e6; }
+  .fallakte-kpi.status-danger { border-color:#efb5bd; background:#fff3f4; }
+  .fallakte-kpi.status-success { border-color:#cfe3d3; background:#f6fbf7; }
+  .process-rail { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.55rem; margin-top:1rem; }
+  .process-step { border:1px solid #dfe8e2; border-radius:8px; background:#fff; color:#17212a; text-decoration:none; padding:.65rem; min-height:118px; display:flex; flex-direction:column; gap:.35rem; }
+  .process-step:hover, .process-step:focus { color:#17212a; border-color:#17212a; box-shadow:0 8px 20px rgba(23,33,42,.10); }
+  .process-step.is-current { outline:3px solid rgba(217,155,18,.28); border-color:#d99b12; }
+  .process-step-num { width:1.55rem; height:1.55rem; border-radius:50%; display:grid; place-items:center; background:#eef1f0; color:#516057; font-size:.78rem; font-weight:900; flex:none; }
+  .process-step.status-success .process-step-num { background:#1f7a3a; color:#fff; }
+  .process-step.status-info .process-step-num { background:#2f6fae; color:#fff; }
+  .process-step.status-warning .process-step-num { background:#d99b12; color:#fff; }
+  .process-step.status-danger .process-step-num { background:#b42335; color:#fff; }
+  .process-step.status-primary .process-step-num { background:#2458a6; color:#fff; }
+  .process-step strong { line-height:1.15; }
+  .process-step small { color:#68756d; line-height:1.25; }
+  .autopilot-details { border-top:1px solid #d9e5de; margin-top:1rem; padding-top:.85rem; }
+  .autopilot-details summary { cursor:pointer; font-weight:850; }
+  @media (max-width:991.98px) {
+    .claim-steps { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .source-summary-grid,
+    .offer-save-grid,
+    .parts-offer-grid,
+    .supplier-grid,
+    .offer-automation,
+    .freigabe-actions-grid,
+    .fallakte-summary-grid,
+    .autopilot-grid { grid-template-columns:1fr 1fr; }
+    .process-rail { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .parts-row { grid-template-columns:1fr 1fr; }
+    .claim-money-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .source-summary-item.is-wide { grid-column:auto; }
+  }
   @media (max-width:575.98px) {
-    .damage-map { min-height:360px; aspect-ratio:3/4; }
-    .damage-zone-label { font-size:.76rem; padding:.36rem .5rem; }
     .file-item { grid-template-columns:1fr; }
+    .claim-steps,
+    .source-summary-grid,
+    .offer-save-grid,
+    .parts-offer-grid,
+    .supplier-grid,
+    .offer-automation,
+    .freigabe-actions-grid,
+    .autopilot-head,
+    .fallakte-summary-grid,
+    .autopilot-grid,
+    .process-rail,
+    .parts-row,
+    .claim-money-grid,
+    .freigabe-hero { grid-template-columns:1fr; }
+    .parts-row.is-head { display:none; }
+    .damage-type-grid { grid-template-columns:1fr; }
+    .step-fold-toggle { position:static; margin-bottom:.75rem; }
+    .step-card > .section-title { padding-right:0; }
   }
 </style>
 {% endblock %}
 
 {% block content %}
-<form method="POST" enctype="multipart/form-data" data-upload-form>
+{% set source_locked = versicherung_quellfelder_gesperrt|default(false) %}
+{% set active_step_anchor = schaden_autopilot['leitstand']['hauptaktion_anchor'] if schaden_autopilot and schaden_autopilot['leitstand'] else 'step-schaden' %}
+<form method="POST" enctype="multipart/form-data" data-upload-form data-active-step="{{ active_step_anchor }}">
+<input type="hidden" name="source_edit_unlocked" value="0" data-source-edit-unlocked>
+<nav class="claim-steps mb-4" aria-label="Werkstatt-Ablauf Versicherungsschaden">
+  <a href="#step-schaden" class="claim-step-tab {% if active_step_anchor == 'step-schaden' %}is-active{% endif %}">
+    <span>Schritt 1</span>
+    <strong>Schadenaufnahme</strong>
+    <small>Daten sammeln und an Versicherung senden</small>
+  </a>
+  <a href="#step-angebot" class="claim-step-tab {% if active_step_anchor == 'step-angebot' %}is-active{% endif %}">
+    <span>Schritt 2</span>
+    <strong>Angebotsanfrage</strong>
+    <small>Vorab Angebot und Lieferzeit klären</small>
+  </a>
+  <a href="#step-freigabe" class="claim-step-tab {% if active_step_anchor == 'step-freigabe' %}is-active{% endif %}">
+    <span>Schritt 3</span>
+    <strong>Freigabe & Teile</strong>
+    <small>Freigabe erhalten und Teile bestellen</small>
+  </a>
+  <a href="#step-reparatur" class="claim-step-tab {% if active_step_anchor == 'step-reparatur' %}is-active{% endif %}">
+    <span>Schritt 4</span>
+    <strong>Reparaturablauf</strong>
+    <small>Durchlauf, Bilder und Nachtrag</small>
+  </a>
+  <a href="#step-abschluss" class="claim-step-tab {% if active_step_anchor == 'step-abschluss' %}is-active{% endif %}">
+    <span>Schritt 5</span>
+    <strong>Fertig melden</strong>
+    <small>Rechnung, Lexware und Abschluss</small>
+  </a>
+</nav>
+{% if schaden_autopilot %}
+<section class="autopilot-panel mb-4" id="schaden-autopilot" aria-label="Schaden-Autopilot">
+  <div class="autopilot-head mb-3">
+    <div>
+      <div class="badge-soft mb-2">Fallakte V2</div>
+      <h2>Schadenleitstand</h2>
+      <p class="text-muted mb-0">
+        Die Akte zeigt zuerst den aktuellen Stand, wer dran ist, was blockiert und welche eine Aktion jetzt zählt.
+      </p>
+    </div>
+    <div class="autopilot-score status-{{ schaden_autopilot['score_status'] }}">
+      <strong>{{ schaden_autopilot['score'] }}%</strong>
+      <span>{{ schaden_autopilot['score_label'] }}</span>
+    </div>
+  </div>
+
+  <div class="fallakte-summary-grid">
+    <div class="fallakte-kpi">
+      <span>Stand</span>
+      <strong>{{ schaden_autopilot['leitstand']['stand_label'] }}</strong>
+      <small>{{ schaden_autopilot['leitstand']['stand_detail'] }}</small>
+    </div>
+    <div class="fallakte-kpi">
+      <span>Jetzt dran</span>
+      <strong>{{ schaden_autopilot['leitstand']['owner'] }}</strong>
+      <small>Nächster Prozesshalter</small>
+    </div>
+    <div class="fallakte-kpi status-{{ schaden_autopilot['leitstand']['blocker_status'] }}">
+      <span>Blocker</span>
+      <strong>{{ schaden_autopilot['leitstand']['blocker'] }}</strong>
+    </div>
+    <div class="fallakte-kpi status-{{ schaden_autopilot['leitstand']['hauptaktion_status'] }}">
+      <span>Hauptaktion</span>
+      <strong>{{ schaden_autopilot['leitstand']['hauptaktion'] }}</strong>
+      <small>{{ schaden_autopilot['leitstand']['hauptaktion_detail'] }}</small>
+    </div>
+  </div>
+
+  <div class="autopilot-next status-{{ schaden_autopilot['leitstand']['hauptaktion_status'] }} mb-3">
+    <div class="d-flex justify-content-between gap-3 flex-wrap align-items-center">
+      <div>
+        <div class="text-muted small fw-semibold text-uppercase">Jetzt öffnen</div>
+        <div class="h5 mb-1">{{ schaden_autopilot['leitstand']['hauptaktion'] }}</div>
+        <div>{{ schaden_autopilot['leitstand']['hauptaktion_detail'] }}</div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-dark" href="#{{ schaden_autopilot['leitstand']['hauptaktion_anchor'] }}">Zur Hauptaktion</a>
+        {% if schaden_autopilot['tasks_count'] %}
+        <button
+          type="submit"
+          class="btn btn-sm btn-outline-dark"
+          formaction="{{ url_for('admin_versicherung_autopilot_aufgaben', auftrag_id=auftrag['id']) }}"
+          formmethod="post"
+        >Aufgaben anlegen</button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="process-rail" aria-label="Chronologische Fallakte">
+    {% for step in schaden_autopilot['prozessschritte'] %}
+    <a href="#{{ step['anchor'] }}" class="process-step status-{{ step['status'] }} {% if step['current'] %}is-current{% endif %}">
+      <div class="process-step-num">{{ step['nr'] }}</div>
+      <strong>{{ step['titel'] }}</strong>
+      <small>{{ step['detail'] }}</small>
+      {% if step['current'] %}<span class="badge text-bg-warning mt-auto align-self-start">Aktiv</span>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+
+  <details class="autopilot-details">
+    <summary>Autopilot-Details anzeigen</summary>
+    <div class="autopilot-grid mt-3">
+      <div class="autopilot-block">
+        <div class="autopilot-block-title">
+          <span>Automationen</span>
+          <span class="badge text-bg-light border text-dark">{{ schaden_autopilot['automationen']|length }}</span>
+        </div>
+        <div class="autopilot-list">
+          {% for item in schaden_autopilot['automationen'] %}
+          <div class="autopilot-item status-{{ item['status'] }}">
+            <div class="autopilot-dot">✓</div>
+            <div>
+              <div class="fw-semibold">{{ item['titel'] }}</div>
+              <div class="small text-muted">{{ item['text'] }}</div>
+              <div class="autopilot-meta">
+                {% if item['rolle'] %}<span class="badge text-bg-light border text-dark">{{ item['rolle'] }}</span>{% endif %}
+                {% if item['anchor'] %}<a class="badge text-bg-light border text-dark text-decoration-none" href="#{{ item['anchor'] }}">{{ item['action'] or 'Öffnen' }}</a>{% endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="autopilot-block">
+        <div class="autopilot-block-title">
+          <span>E-Mail-Queue</span>
+          <span class="badge text-bg-light border text-dark">{{ schaden_autopilot['email_queue']|length }}</span>
+        </div>
+        <div class="autopilot-list">
+          {% for item in schaden_autopilot['email_queue'] %}
+          <div class="autopilot-item status-{{ item['status'] }}">
+            <div class="autopilot-dot">✉</div>
+            <div>
+              <div class="fw-semibold">{{ item['titel'] }}</div>
+              <div class="small text-muted">{{ item['text'] }}</div>
+              {% if item['anchor'] %}
+              <div class="autopilot-meta"><a class="badge text-bg-light border text-dark text-decoration-none" href="#{{ item['anchor'] }}">{{ item['action'] or 'Vorbereiten' }}</a></div>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="autopilot-block">
+        <div class="autopilot-block-title">
+          <span>Wirtschaftlich sauber prüfen</span>
+          <span class="badge text-bg-light border text-dark">{{ schaden_autopilot['wirtschaft']|length }}</span>
+        </div>
+        <div class="autopilot-list">
+          {% for item in schaden_autopilot['wirtschaft'] %}
+          <div class="autopilot-item status-{{ item['status'] }}">
+            <div class="autopilot-dot">€</div>
+            <div>
+              <div class="fw-semibold">{{ item['titel'] }}</div>
+              <div class="small text-muted">{{ item['text'] }}</div>
+              <div class="autopilot-meta">
+                {% if item['rolle'] %}<span class="badge text-bg-light border text-dark">{{ item['rolle'] }}</span>{% endif %}
+                {% if item['anchor'] %}<a class="badge text-bg-light border text-dark text-decoration-none" href="#{{ item['anchor'] }}">{{ item['action'] or 'Prüfen' }}</a>{% endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="autopilot-block">
+        <div class="autopilot-block-title">
+          <span>Sperren & Risiken</span>
+          <span class="badge text-bg-light border text-dark">lokal</span>
+        </div>
+        <div class="mb-3">
+          <div class="fw-semibold small mb-1">Sperren</div>
+          <ul class="autopilot-risk-list small text-muted">
+            {% for text in schaden_autopilot['sperren'] %}
+            <li>{{ text }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+        <div>
+          <div class="fw-semibold small mb-1">Risiken</div>
+          <ul class="autopilot-risk-list small text-muted">
+            {% for text in schaden_autopilot['risiken'] %}
+            <li>{{ text }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </details>
+</section>
+{% endif %}
 <div class="row g-4">
   <div class="col-xl-8">
-    <div class="page-card p-4 p-lg-5 mb-4">
+    <div class="page-card p-4 p-lg-5 mb-4 step-card {% if source_locked %}is-source-locked{% endif %}" id="step-schaden" data-source-fields>
       <div class="section-title align-items-start">
         <div>
-          <div class="badge-soft mb-3">Versicherungsschaden</div>
+          <div class="badge-soft mb-3">Schritt 1 · Versicherungsschaden</div>
           <h1 class="mb-2">{{ auftrag['fahrzeug'] }}</h1>
           <p>
             {{ versicherung['name'] if versicherung else 'Versicherung offen' }}
@@ -42,216 +384,786 @@
             {% if auftrag['schaden_nummer'] %} · Schaden {{ auftrag['schaden_nummer'] }}{% endif %}
           </p>
         </div>
-        <span class="badge text-bg-{{ auftrag['versicherung_freigabe_meta']['farbe'] }}">{{ auftrag['versicherung_freigabe_meta']['label'] }}</span>
+        <div class="text-end">
+          <span class="badge text-bg-{{ auftrag['versicherung_freigabe_meta']['farbe'] }} mb-2">{{ auftrag['versicherung_freigabe_meta']['label'] }}</span>
+          <div><button type="button" class="btn btn-sm btn-outline-dark" data-unlock-source>Ändern</button></div>
+        </div>
+      </div>
+
+      <div class="claim-step-note mb-3">
+        <strong>Von der Versicherung übernommen</strong>
+        <div class="small text-muted">Diese Angaben stehen erstmal fest. Die Werkstatt prüft sie nur und öffnet die Bearbeitung erst, wenn bewusst etwas korrigiert werden muss.</div>
+      </div>
+
+      <div class="source-summary-grid">
+        <div class="source-summary-item">
+          <span>Versicherung</span>
+          <strong>{{ versicherung['name'] if versicherung else 'offen' }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Schadenart</span>
+          <strong>{{ auftrag['schadenart_label'] or 'offen' }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Schaden-Nr.</span>
+          <strong>{{ auftrag['schaden_nummer'] or 'offen' }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Kunde / Halter</span>
+          <strong>{{ auftrag['kunde_name'] or 'offen' }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Versicherungsnehmer</span>
+          <strong>{{ auftrag['versicherungsnehmer'] or 'offen' }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Kunde / Versicherung</span>
+          <strong>{{ auftrag['kontakt_telefon'] or 'Telefon offen' }}{% if auftrag['versicherung_email'] or (versicherung and versicherung['email']) %} · {{ auftrag['versicherung_email'] or versicherung['email'] }}{% endif %}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Kennzeichen</span>
+          <strong>{{ auftrag['kennzeichen'] or 'offen' }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>FIN</span>
+          <strong>{{ auftrag['fin_nummer'] or 'offen' }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>HSN/TSN</span>
+          <strong>{% if auftrag['hsn_nummer'] or auftrag['tsn_nummer'] %}{{ auftrag['hsn_nummer'] }}{% if auftrag['hsn_nummer'] and auftrag['tsn_nummer'] %} / {% endif %}{{ auftrag['tsn_nummer'] }}{% else %}offen{% endif %}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Kilometerstand</span>
+          <strong>{{ auftrag['kilometerstand'] or 'offen' }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Police / Vertrag</span>
+          <strong>{{ auftrag['versicherung_police'] or 'offen' }}</strong>
+        </div>
+        <div class="source-summary-item is-wide">
+          <span>Schadenbeschreibung</span>
+          <strong>{{ auftrag['beschreibung'] or auftrag['analyse_text'] or 'offen' }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Selbstbeteiligung</span>
+          <strong>{{ auftrag['schaden_selbstbeteiligung'] or 'offen / prüfen' }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Abrechnung</span>
+          <strong>{{ auftrag['schaden_abrechnungsart_meta']['label'] }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Forderung</span>
+          <strong>{{ auftrag['schaden_forderung_betrag_label'] or 'offen' }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Anspruch / Konto</span>
+          <strong>{{ 'geprüft' if auftrag['schaden_identitaet_ok'] else 'prüfen' }}</strong>
+          <small>{{ auftrag['anspruchsteller_name'] or 'Anspruchsteller offen' }}</small>
+        </div>
+      </div>
+
+      <div class="source-editor {% if source_locked %}is-source-locked{% endif %}" data-source-editor hidden>
+      <div class="source-lock-banner mb-3" data-source-lock-banner>
+        <div class="source-lock-note">
+          <strong>Bearbeitung der Versicherungsdaten</strong>
+          Bitte nur ändern, wenn ein gelieferter Wert falsch oder unvollständig ist.
+        </div>
       </div>
 
       <div class="row g-3">
         <div class="col-md-6">
           <label class="form-label">Versicherung</label>
-          <select name="versicherung_id" class="form-select" data-insurance-select>
+          <select name="versicherung_id" class="form-select" data-insurance-select {% if source_locked and auftrag['versicherung_id'] %}data-source-locked readonly tabindex="-1"{% endif %}>
             {% for item in versicherungen %}
             <option value="{{ item['id'] }}" data-email="{{ item['email'] }}" {% if item['id'] == auftrag['versicherung_id'] %}selected{% endif %}>{{ item['name'] }}</option>
             {% endfor %}
           </select>
         </div>
         <div class="col-md-3">
-          <label class="form-label">Freigabe</label>
-          <select name="versicherung_freigabe_status" class="form-select">
-            {% for key, meta in freigabe_status.items() %}
-            <option value="{{ key }}" {% if key == auftrag['versicherung_freigabe_status'] %}selected{% endif %}>{{ meta['label'] }}</option>
-            {% endfor %}
-          </select>
+          <label class="form-label">Versicherungsstatus</label>
+          <div class="form-control bg-light">
+            {{ auftrag['versicherung_freigabe_meta']['label'] }}
+          </div>
+          <div class="form-text">Wird automatisch aus Versand, Prüfung, Rückfrage und Freigabe gesetzt.</div>
         </div>
         <div class="col-md-3">
           <label class="form-label">Schadenart</label>
-          <select name="schadenart" class="form-select">
+          <select name="schadenart" class="form-select" {% if source_locked and auftrag['schadenart'] != 'unbekannt' %}data-source-locked readonly tabindex="-1"{% endif %}>
             {% for key, label in schadenarten %}
             <option value="{{ key }}" {% if key == auftrag['schadenart'] %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
         </div>
-        <div class="col-md-6" id="pflicht-kunde">
-          <label class="form-label">Kunde / Halter</label>
-          <input type="text" name="kunde_name" value="{{ auftrag['kunde_name'] }}" class="form-control">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Versicherungsnehmer</label>
-          <input type="text" name="versicherungsnehmer" value="{{ auftrag['versicherungsnehmer'] }}" class="form-control">
-        </div>
-        <div class="col-md-5">
-          <label class="form-label">Fahrzeug</label>
-          <input type="text" name="fahrzeug" value="{{ auftrag['fahrzeug'] }}" class="form-control">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Kennzeichen</label>
-          <input type="text" name="kennzeichen" value="{{ auftrag['kennzeichen'] }}" class="form-control" style="text-transform:uppercase;">
-        </div>
-        <div class="col-md-4" id="pflicht-fahrzeugdaten">
-          <label class="form-label">FIN</label>
-          <input type="text" name="fin_nummer" value="{{ auftrag['fin_nummer'] }}" class="form-control" style="text-transform:uppercase;">
-        </div>
-        <div class="col-md-4" id="pflicht-schadennummer">
-          <label class="form-label">Schaden-Nr.</label>
-          <input type="text" name="schaden_nummer" value="{{ auftrag['schaden_nummer'] }}" class="form-control">
-        </div>
         <div class="col-md-4">
-          <label class="form-label">Police / Vertrag</label>
-          <input type="text" name="versicherung_police" value="{{ auftrag['versicherung_police'] }}" class="form-control">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Telefon Kunde</label>
-          <input type="text" name="kontakt_telefon" value="{{ auftrag['kontakt_telefon'] }}" class="form-control">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">E-Mail Versicherung / An</label>
-          <input type="email" name="versicherung_email" value="{{ auftrag['versicherung_email'] or (versicherung['email'] if versicherung else '') }}" class="form-control" data-insurance-email>
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">CC an</label>
-          <input type="text" name="versicherung_email_cc" value="{{ auftrag['versicherung_email_cc'] }}" class="form-control" placeholder="optional">
+          <label class="form-label">Selbstbeteiligung / Kundenerklärung</label>
+          <input type="text" name="schaden_selbstbeteiligung" value="{{ auftrag['schaden_selbstbeteiligung'] }}" class="form-control" placeholder="z.B. Vollkasko, SB 300 EUR" {% if source_locked and auftrag['schaden_selbstbeteiligung'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+          <div class="form-text">Vor Ort transparent erklären: Selbstbeteiligung, mögliche SF-/Beitragswirkung und Unterschied zwischen Vollkasko, Teilkasko/Sturm und Fremdverschulden.</div>
         </div>
         <div class="col-12">
-          <label class="form-label">Fahrzeugdarstellung</label>
-          {% set editable = true %}
-          {% set show_gt_technical = true %}
-          {% set selected_zones = auftrag['schaden_zonen'] %}
-          {% include "_fahrzeug_schadenkarte.html" %}
-        </div>
-        <div class="col-12">
-          <label class="form-label">Notiz zu den markierten Bereichen</label>
-          <textarea name="schaden_zonen_notiz" class="form-control" rows="2">{{ auftrag['schaden_zonen_notiz'] }}</textarea>
-        </div>
-        <div class="col-12">
-          <label class="form-label">Schadenbeschreibung</label>
-          <textarea name="beschreibung" class="form-control" rows="4">{{ auftrag['beschreibung'] }}</textarea>
-        </div>
-        <div class="col-12">
-          <label class="form-label">Analyse / Kurztext</label>
-          <input type="text" name="analyse_text" value="{{ auftrag['analyse_text'] }}" class="form-control">
-        </div>
-        <div class="col-12">
-          <div class="border rounded-3 p-3 bg-light">
-            <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
-              <div>
-                <div class="fw-bold">GT Estimate API</div>
-                <div class="text-muted small">VehicleRepresentation abrufen: Modellcode und Zone werden direkt an GT übergeben.</div>
-                {% if auftrag['gt_motive_vehicle_representation_loaded_at'] %}
-                <div class="text-success small mt-1">
-                  Geladen am {{ auftrag['gt_motive_vehicle_representation_loaded_at'] }}{% if auftrag['gt_motive_vehicle_items'] %} · {{ auftrag['gt_motive_vehicle_items']|length }} Bauteile{% endif %}{% if auftrag['gt_motive_kalkulation_betrag'] %} · {{ auftrag['gt_motive_kalkulation_betrag'] }}{% endif %}
-                </div>
-                {% endif %}
-              </div>
-              <button
-                type="submit"
-                formaction="{{ url_for('admin_versicherung_gt_motive_fahrzeugdarstellung', auftrag_id=auftrag['id']) }}"
-                formmethod="post"
-                formenctype="application/x-www-form-urlencoded"
-                class="btn btn-dark"
-                data-loading-message="GT Estimate wird abgefragt. Bitte kurz warten."
-                data-loading-title="GT API"
-              >GT-Fahrzeugdarstellung laden</button>
+          <div class="damage-type-grid mb-3">
+            {% for hinweis in schadenart_hinweise %}
+            <div class="damage-type-card">
+              <span>{{ hinweis['deckung'] }}</span>
+              <strong>{{ hinweis['titel'] }}</strong>
+              <div class="small text-muted">{{ hinweis['beispiele'] }}</div>
+              <div class="small mt-2">{{ hinweis['hinweis'] }}</div>
             </div>
+            {% endfor %}
+          </div>
+          <div class="alert alert-info py-2 small mb-0">
+            <strong>Kunden-Transparenz:</strong>
+            Wenn der Kunde das Fahrzeug bringt oder zur Besichtigung kommt, kurz festhalten und erklären: Wer reguliert den Schaden, fällt eine Selbstbeteiligung an, und kann der Vertrag durch Rückstufung oder Beitragserhöhung teurer werden? Bei Fremdverschulden und vielen Teilkaskofällen wie Sturm/Hagel/Wild bitte trotzdem immer Police und Freigabe prüfen.
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="claim-legal-panel">
+            <div class="fw-bold mb-1">Abrechnung & Erstkontakt-Logik</div>
+            <div class="text-muted small mb-3">Diese Werte steuern das Anschreiben: fiktiv = netto + Pauschale ohne USt, konkret = brutto, Kasko = brutto abzüglich Selbstbeteiligung.</div>
             <div class="row g-3">
-              <div class="col-md-4">
-                <label class="form-label">GT-Motive Vorgangs-ID</label>
-                <input type="text" name="gt_motive_vorgang_id" value="{{ auftrag['gt_motive_vorgang_id'] }}" class="form-control">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">GT-Status</label>
-                <input type="text" name="gt_motive_status" value="{{ auftrag['gt_motive_status'] }}" class="form-control">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Kalkulation</label>
-                <input type="text" name="gt_motive_kalkulation_betrag" value="{{ auftrag['gt_motive_kalkulation_betrag'] }}" class="form-control" placeholder="2.450 EUR">
-              </div>
-              <div class="col-md-4">
-                <label class="form-label">GT Modellcode</label>
-                <input type="text" name="gt_motive_model_code" value="{{ auftrag['gt_motive_model_code'] }}" class="form-control" placeholder="z.B. CI02301">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">GT Zone</label>
-                <input type="text" name="gt_motive_zone" value="{{ auftrag['gt_motive_zone'] }}" class="form-control" placeholder="11000">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">JobType</label>
-                <select name="gt_motive_job_type" class="form-select">
-                  {% for job in ['All', 'Mechanic', 'Forecasting'] %}
-                  <option value="{{ job }}" {% if auftrag['gt_motive_job_type'] == job %}selected{% endif %}>{{ job }}</option>
+              <div class="col-lg-4">
+                <label class="form-label">Abrechnungsart</label>
+                <select name="schaden_abrechnungsart" class="form-select">
+                  {% for key, meta in abrechnungsarten.items() %}
+                  <option value="{{ key }}" {% if key == auftrag['schaden_abrechnungsart'] %}selected{% endif %}>{{ meta['label'] }}</option>
                   {% endfor %}
                 </select>
               </div>
-              <div class="col-md-2">
-                <label class="form-label">Sprache</label>
-                <input type="text" name="gt_motive_language" value="{{ auftrag['gt_motive_language'] }}" class="form-control">
+              <div class="col-lg-8">
+                <div class="claim-money-grid">
+                  <div>
+                    <label class="form-label">Netto</label>
+                    <input type="text" name="schaden_reparatur_netto" value="{{ auftrag['schaden_reparatur_netto'] }}" class="form-control" placeholder="2.460,75">
+                  </div>
+                  <div>
+                    <label class="form-label">USt</label>
+                    <input type="text" name="schaden_reparatur_ust" value="{{ auftrag['schaden_reparatur_ust'] }}" class="form-control" placeholder="467,54">
+                  </div>
+                  <div>
+                    <label class="form-label">Brutto</label>
+                    <input type="text" name="schaden_reparatur_brutto" value="{{ auftrag['schaden_reparatur_brutto'] }}" class="form-control" placeholder="2.928,29">
+                  </div>
+                  <div>
+                    <label class="form-label">Pauschale</label>
+                    <input type="text" name="schaden_kostenpauschale" value="{{ auftrag['schaden_kostenpauschale'] }}" class="form-control" placeholder="25">
+                  </div>
+                  <div>
+                    <label class="form-label">Forderung</label>
+                    <input type="text" name="schaden_forderung_betrag" value="{{ auftrag['schaden_forderung_betrag'] }}" class="form-control" placeholder="wird berechnet">
+                  </div>
+                </div>
               </div>
-              <div class="col-md-3">
-                <label class="form-label">GT Model-ID</label>
-                <input type="text" name="gt_motive_model_id" value="{{ auftrag['gt_motive_model_id'] }}" class="form-control" placeholder="optional">
+              <div class="col-md-4">
+                <label class="form-label">Anspruchsteller</label>
+                <input type="text" name="anspruchsteller_name" value="{{ auftrag['anspruchsteller_name'] }}" class="form-control">
               </div>
-              <div class="col-md-6">
-                <label class="form-label">Equipments</label>
-                <input type="text" name="gt_motive_equipments" value="{{ auftrag['gt_motive_equipments'] }}" class="form-control" placeholder="z.B. AT30,CB03">
+              <div class="col-md-4">
+                <label class="form-label">Eigentümer</label>
+                <input type="text" name="eigentuemer_name" value="{{ auftrag['eigentuemer_name'] }}" class="form-control">
               </div>
-              <div class="col-md-6">
-                <label class="form-label">Manufacturing Values</label>
-                <input type="text" name="gt_motive_manufacturing_values" value="{{ auftrag['gt_motive_manufacturing_values'] }}" class="form-control" placeholder="z.B. FEC 2020-01-01">
+              <div class="col-md-4">
+                <label class="form-label">Kontoinhaber</label>
+                <input type="text" name="kontoinhaber_name" value="{{ auftrag['kontoinhaber_name'] }}" class="form-control">
+              </div>
+              <div class="col-md-7">
+                <label class="form-label">IBAN für Auszahlung</label>
+                <input type="text" name="auszahlung_iban" value="{{ auftrag['auszahlung_iban'] }}" class="form-control" placeholder="DE...">
+              </div>
+              <div class="col-md-5">
+                <label class="form-label">Portal-Zugangscode</label>
+                <input type="text" name="versicherung_portal_code" value="{{ auftrag['versicherung_portal_code'] }}" class="form-control">
+              </div>
+              <div class="col-12">
+                <div class="identity-check {{ '' if auftrag['schaden_identitaet_ok'] else 'status-warning' }}">
+                  Anspruchsteller = Eigentümer = Kontoinhaber. Aktuell: {{ 'passt' if auftrag['schaden_identitaet_ok'] else 'bitte vor Versand prüfen' }}.
+                </div>
               </div>
             </div>
+          </div>
+        </div>
+        <div class="col-md-6" id="pflicht-kunde">
+          <label class="form-label">Kunde / Halter</label>
+          <input type="text" name="kunde_name" value="{{ auftrag['kunde_name'] }}" class="form-control" {% if source_locked and auftrag['kunde_name'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Versicherungsnehmer</label>
+          <input type="text" name="versicherungsnehmer" value="{{ auftrag['versicherungsnehmer'] }}" class="form-control" {% if source_locked and auftrag['versicherungsnehmer'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+        </div>
+        <div class="col-md-5">
+          <label class="form-label">Fahrzeug</label>
+          <input type="text" name="fahrzeug" value="{{ auftrag['fahrzeug'] }}" class="form-control" data-vehicle-input {% if source_locked and auftrag['fahrzeug'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Kennzeichen</label>
+          <input type="text" name="kennzeichen" value="{{ auftrag['kennzeichen'] }}" class="form-control" style="text-transform:uppercase;" {% if source_locked and auftrag['kennzeichen'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+        </div>
+        <div class="col-md-4" id="pflicht-fahrzeugdaten">
+          <label class="form-label">FIN</label>
+          <div class="input-group" data-fin-widget>
+            <input type="text" name="fin_nummer" value="{{ auftrag['fin_nummer'] }}" class="form-control" style="text-transform:uppercase;" data-fin-input {% if source_locked and auftrag['fin_nummer'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+            <button class="btn btn-outline-dark" type="button" data-fin-analyze {% if source_locked and auftrag['fin_nummer'] %}data-source-locked disabled{% endif %}>FIN analysieren</button>
+          </div>
+          <div class="form-text" data-fin-result></div>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">HSN</label>
+          <input type="text" name="hsn_nummer" value="{{ auftrag['hsn_nummer'] }}" class="form-control" placeholder="2.1" {% if source_locked and auftrag['hsn_nummer'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">TSN</label>
+          <input type="text" name="tsn_nummer" value="{{ auftrag['tsn_nummer'] }}" class="form-control" placeholder="2.2" style="text-transform:uppercase;" {% if source_locked and auftrag['tsn_nummer'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Kilometerstand</label>
+          <input type="text" name="kilometerstand" value="{{ auftrag['kilometerstand'] }}" class="form-control" placeholder="z.B. 84.500" {% if source_locked and auftrag['kilometerstand'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+        </div>
+        <div class="col-md-4" id="pflicht-schadennummer">
+          <label class="form-label">Schaden-Nr.</label>
+          <input type="text" name="schaden_nummer" value="{{ auftrag['schaden_nummer'] }}" class="form-control" {% if source_locked and auftrag['schaden_nummer'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Police / Vertrag</label>
+          <input type="text" name="versicherung_police" value="{{ auftrag['versicherung_police'] }}" class="form-control" {% if source_locked and auftrag['versicherung_police'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Handy / WhatsApp Kunde</label>
+          <input type="text" name="kontakt_telefon" value="{{ auftrag['kontakt_telefon'] }}" class="form-control" placeholder="z.B. 0171 1234567" {% if source_locked and auftrag['kontakt_telefon'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+          <div class="form-text">Für QR-Link und vorbereitete WhatsApp-Statusnachrichten.</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">E-Mail Versicherung / An</label>
+          <input type="email" name="versicherung_email" value="{{ auftrag['versicherung_email'] or (versicherung['email'] if versicherung else '') }}" class="form-control" data-insurance-email {% if source_locked and (auftrag['versicherung_email'] or (versicherung['email'] if versicherung else '')) %}data-source-locked readonly tabindex="-1"{% endif %}>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">CC an</label>
+          <input type="text" name="versicherung_email_cc" value="{{ auftrag['versicherung_email_cc'] }}" class="form-control" placeholder="optional" {% if source_locked and auftrag['versicherung_email_cc'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Schadenbeschreibung</label>
+          <textarea name="beschreibung" class="form-control" rows="4" {% if source_locked and auftrag['beschreibung'] %}data-source-locked readonly tabindex="-1"{% endif %}>{{ auftrag['beschreibung'] }}</textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Analyse / Kurztext</label>
+          <input type="text" name="analyse_text" value="{{ auftrag['analyse_text'] }}" class="form-control" {% if source_locked and auftrag['analyse_text'] %}data-source-locked readonly tabindex="-1"{% endif %}>
+        </div>
+      </div>
+      <div class="source-edit-actions d-flex gap-2 flex-wrap align-items-center">
+        <button type="submit" name="aktion" value="save_source" class="btn btn-brand">Änderungen speichern</button>
+        <span class="text-muted small">Speichert nur Korrekturen an den Falldaten. Der Versicherungsstatus bleibt davon unberührt.</span>
+      </div>
+      </div>
+    </div>
+
+    <div class="page-card p-4 mb-4 step-card" id="step-versand">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Daten sammeln und an Versicherung senden</h4>
+          <p>Das ist das erste Paket: Grunddaten, Fotos, Fahrzeugschein, Kalkulation und Abtretung.</p>
+        </div>
+      </div>
+      {% set versicherung_prozess_standalone = false %}
+      {% set versicherung_prozess_phase = 'send_vorbereitung' %}
+      {% include "_versicherung_prozess_assistent.html" %}
+      {% set versicherung_prozess_phase = 'full' %}
+      <div class="border-top pt-3 mt-3">
+        <div class="mail-copy-card">
+          <div class="d-flex justify-content-between gap-2 flex-wrap mb-2">
+            <div>
+              <div class="fw-bold">Versicherungspaket per E-Mail</div>
+              <div class="text-muted small">Grunddaten, Fotos, Fahrzeugschein, Kalkulation, Abtretung und Anschreiben werden direkt aus der Fallakte gesendet.</div>
+            </div>
+            <div class="d-flex gap-1 align-items-start flex-wrap">
+              <span class="badge text-bg-{{ 'success' if schaden_mail and schaden_mail.smtp_configured else 'secondary' }}">{{ schaden_mail.smtp_badge if schaden_mail else 'SMTP fehlt' }}</span>
+              <span class="badge text-bg-{{ 'success' if schaden_mail and schaden_mail.imap_configured else 'secondary' }}">{{ schaden_mail.imap_badge if schaden_mail else 'IMAP fehlt' }}</span>
+            </div>
+          </div>
+          <textarea name="versicherung_anschreiben" class="form-control mail-draft">{{ anschreiben }}</textarea>
+          {% set anschreiben_empfaenger = auftrag['versicherung_email'] or (versicherung['email'] if versicherung else '') %}
+          <div class="text-muted small mt-2">
+            Von: {{ schaden_mail.address if schaden_mail and schaden_mail.address else 'Schaden-Mailbox offen' }} ·
+            An: {{ anschreiben_empfaenger or 'offen' }}
+            {% if auftrag['versicherung_email_cc'] %} · CC: {{ auftrag['versicherung_email_cc'] }}{% endif %}
+            {% if auftrag['versicherung_sendefreigabe_am'] %} · zuletzt gesendet am {{ auftrag['versicherung_sendefreigabe_am'] }}{% endif %}
+          </div>
+          <div class="d-flex gap-2 flex-wrap mt-3">
+            <button type="submit" name="aktion" value="save_mail" class="btn btn-brand">Speichern</button>
+            <button type="submit" formaction="{{ url_for('admin_versicherung_schaden_melden', auftrag_id=auftrag['id']) }}" formmethod="post" class="btn btn-soft">Versicherungspaket per E-Mail senden</button>
+            <button
+              type="submit"
+              formaction="{{ url_for('admin_versicherung_abtretungserklaerung_pdf') }}"
+              formmethod="post"
+              formenctype="application/x-www-form-urlencoded"
+              data-no-loading="true"
+              class="btn btn-soft"
+              id="pflicht-abtretung"
+            >Abtretungserklärung herunterladen</button>
+          </div>
+        </div>
+
+        <div class="mail-copy-card mt-3" id="nachrichten-versicherung">
+          <div class="fw-bold mb-1">Nachricht an die Versicherung</div>
+          <div class="text-muted small mb-3">Rückfragen, kurze Hinweise oder fehlende Unterlagen direkt aus dem Portal senden.</div>
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label small">Betreff</label>
+              <input type="text" name="versicherung_mail_betreff" class="form-control" value="Nachricht zum Schaden {{ auftrag['schaden_nummer'] or auftrag['id'] }} - {{ auftrag['fahrzeug'] }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Nachricht</label>
+              <textarea name="versicherung_mail_text" class="form-control" rows="5" placeholder="Nachricht an die Versicherung schreiben..."></textarea>
+            </div>
+          </div>
+          <div class="d-flex justify-content-between gap-3 flex-wrap align-items-center mt-3">
+            <label class="form-check m-0">
+              <input class="form-check-input" type="checkbox" name="versicherung_mail_anhaenge" value="1">
+              <span class="form-check-label">Fallunterlagen anhängen</span>
+            </label>
+            <button type="submit" formaction="{{ url_for('admin_versicherung_mail_senden', auftrag_id=auftrag['id']) }}" formmethod="post" class="btn btn-brand">Nachricht per E-Mail senden</button>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="page-card p-4 mb-4">
+    <div class="page-card p-4 mb-4 step-card" id="step-angebot">
       <div class="section-title">
         <div>
-          <h4 class="mb-1">Prüfung und Aufgaben</h4>
-          <p>Pflichtunterlagen, Rückfragen und Freigabe auf einen Blick.</p>
+          <div class="badge-soft mb-2">Schritt 2</div>
+          <h4 class="mb-1">Angebotsanfrage & Lieferzeit</h4>
+          <p>Aus KVA/Gutachten wird die Teileanfrage vorbereitet. Angebot und Lieferzeit können hier hochgeladen werden, bevor nach Freigabe bestellt wird.</p>
         </div>
       </div>
+      <div class="parts-offer-grid mb-3">
+        <div class="parts-offer-tile">
+          <span>Marke</span>
+          <strong>{{ teileangebot['marke']['label'] }}</strong>
+        </div>
+        <div class="parts-offer-tile">
+          <span>Fahrzeug</span>
+          <strong>{{ teileangebot['fahrzeug'] }}</strong>
+        </div>
+        <div class="parts-offer-tile">
+          <span>FIN</span>
+          <strong>{{ teileangebot['fin'] }}</strong>
+        </div>
+        <div class="parts-offer-tile">
+          <span>Kennzeichen / Schaden</span>
+          <strong>{{ teileangebot['kennzeichen'] }} · {{ teileangebot['schaden_nummer'] }}</strong>
+        </div>
+      </div>
+
+      <div class="border-top pt-3 mb-3">
+        <div class="d-flex justify-content-between gap-2 flex-wrap align-items-start mb-2">
+          <div>
+            <div class="fw-bold">Ersatzteile aus der Kalkulation</div>
+            <div class="text-muted small">Teilenummern werden nicht geraten. Wenn sie fehlen, fordert die E-Mail die OE-Nummer anhand der FIN an.</div>
+          </div>
+          <span class="badge text-bg-light border text-dark">{{ teileangebot['parts']|length }} Position(en)</span>
+        </div>
+        <div class="parts-table">
+          <div class="parts-row is-head">
+            <div>Teil</div>
+            <div>Teilenummer</div>
+            <div>Status</div>
+            <div>Lieferant / Info</div>
+            <div></div>
+          </div>
+          {% for teil in teileangebot['parts'] %}
+          <div class="parts-row">
+            <div>
+              <div class="fw-semibold">{{ teil['bezeichnung'] }}</div>
+              <div class="text-muted small">OE/Teilenummer: {{ teil['teilenummer_label'] }}</div>
+            </div>
+            <div>
+              <span class="badge text-bg-light border text-dark">{{ teil['teilenummer_label'] }}</span>
+            </div>
+            <div>
+              {% if teil['id'] %}
+              <select name="teil_status_{{ teil['id'] }}" class="form-select form-select-sm">
+                {% for key, meta in teile_status.items() %}
+                <option value="{{ key }}" {% if teil['status'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+                {% endfor %}
+              </select>
+              <input type="date" name="teil_liefertermin_{{ teil['id'] }}" value="{{ teil['liefertermin']|iso_date }}" class="form-control form-control-sm mt-1">
+              {% else %}
+              <span class="badge text-bg-{{ teil['status_meta']['farbe'] }}">{{ teil['status_meta']['label'] }}</span>
+              {% endif %}
+            </div>
+            <div>
+              {% if teil['id'] %}
+              <input type="text" name="teil_notiz_{{ teil['id'] }}" value="{{ teil['notiz'] }}" class="form-control form-control-sm" placeholder="Lieferant, Angebot, Rückstand">
+              {% else %}
+              <div class="small text-muted">{{ teil['notiz'] }}</div>
+              {% endif %}
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              {% if teil['id'] %}
+              <button type="submit" class="btn btn-sm btn-outline-dark" formaction="{{ url_for('admin_versicherung_teil_update', auftrag_id=auftrag['id'], teil_id=teil['id'], anchor='step-angebot') }}" formmethod="post">Speichern</button>
+              <button type="submit" name="aktion" value="loeschen" class="btn btn-sm btn-outline-danger" formaction="{{ url_for('admin_versicherung_teil_update', auftrag_id=auftrag['id'], teil_id=teil['id'], anchor='step-angebot') }}" formmethod="post">Löschen</button>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="parts-row mt-2">
+          <div>
+            <label class="form-label small">Teil ergänzen</label>
+            <input type="text" name="teil_bezeichnung" class="form-control form-control-sm" placeholder="z.B. Stoßfänger vorne grundiert">
+          </div>
+          <div>
+            <label class="form-label small">Status</label>
+            <select name="teil_status" class="form-select form-select-sm">
+              <option value="angefragt">Angefragt</option>
+              <option value="offen">Offen</option>
+              <option value="rueckstand">Rückstand</option>
+              <option value="nicht_noetig">Nicht nötig</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label small">Liefertermin</label>
+            <input type="date" name="teil_liefertermin" class="form-control form-control-sm">
+          </div>
+          <div>
+            <label class="form-label small">Lieferant / Info</label>
+            <input type="text" name="teil_notiz" class="form-control form-control-sm" placeholder="z.B. Käsmann, OE-Nr., Angebot">
+          </div>
+          <div>
+            <button type="submit" class="btn btn-sm btn-dark" formaction="{{ url_for('admin_versicherung_teil_add', auftrag_id=auftrag['id'], anchor='step-angebot') }}" formmethod="post">Zur Anfrage hinzufügen</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="border-top pt-3 mb-3">
+        <div class="fw-bold mb-2">Regionale Lieferantenvorschläge</div>
+        <div class="supplier-grid">
+          {% for lieferant in teileangebot['lieferanten'] %}
+          <div class="supplier-card {% if lieferant['empfohlen'] %}is-recommended{% endif %}">
+            <div class="d-flex justify-content-between gap-2 align-items-start">
+              <strong>{{ lieferant['name'] }}</strong>
+              <span class="badge text-bg-{{ lieferant['anfrage_status']['farbe'] }}">{{ lieferant['anfrage_status']['label'] }}</span>
+            </div>
+            <div class="mt-1"><span class="badge text-bg-{{ 'success' if lieferant['empfohlen'] else 'secondary' }}">{{ lieferant['typ'] }}</span></div>
+            <div class="text-muted small mt-1">{{ lieferant['ort'] }}</div>
+            <div class="small mt-2">{{ lieferant['hinweis'] }}</div>
+            {% if lieferant['kontakt'] or lieferant['telefon'] %}
+            <div class="small text-muted mt-2">{{ lieferant['kontakt'] }}{% if lieferant['telefon'] %} · {{ lieferant['telefon'] }}{% endif %}</div>
+            {% endif %}
+            {% if lieferant['portal_url'] %}
+            <div class="supplier-access">
+              <div class="small fw-bold mb-1">Lieferanten-Zugang</div>
+              <code>{{ lieferant['portal_url'] }}</code>
+              <div class="d-flex gap-2 flex-wrap mt-2">
+                <a href="{{ lieferant['portal_url'] }}" class="btn btn-sm btn-outline-dark" target="_blank">Portal öffnen</a>
+                {% if lieferant['mailto_url'] %}
+                <a href="{{ lieferant['mailto_url'] }}" class="btn btn-sm btn-dark">E-Mail mit Link</a>
+                {% endif %}
+              </div>
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="offer-automation status-{{ teileangebot['vorpruefung']['farbe'] }} mb-3">
+        <div>
+          <div class="fw-bold">Automatischer Rücklauf</div>
+          <div class="small">{{ teileangebot['vorpruefung']['detail'] }}</div>
+          <div class="return-checklist">
+            {% for item in teileangebot['vorpruefung']['checklist'] %}
+            <div class="return-check status-{{ item['farbe'] }}">
+              <span class="check-dot">{{ '✓' if item['done'] else '!' if item['farbe'] == 'warning' else '·' }}</span>
+              <div>
+                <div class="fw-semibold">{{ item['label'] }}</div>
+                <div class="small text-muted">{{ item['detail'] }}</div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% if teileangebot['vorpruefung']['evidence'] or teileangebot['vorpruefung']['warnings'] %}
+          <div class="mt-2">
+            {% for item in teileangebot['vorpruefung']['evidence'] %}
+            <span class="badge text-bg-success me-1">{{ item }}</span>
+            {% endfor %}
+            {% for item in teileangebot['vorpruefung']['warnings'] %}
+            <span class="badge text-bg-warning me-1">{{ item }}</span>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        <span class="badge text-bg-{{ teileangebot['vorpruefung']['farbe'] }}">{{ teileangebot['vorpruefung']['label'] }}</span>
+      </div>
+
+      {% if teileangebot['haupt_lieferant'] %}
+      <div class="mail-copy-card mb-3">
+        <div class="d-flex justify-content-between gap-2 flex-wrap align-items-start mb-2">
+          <div>
+            <div class="fw-bold">E-Mail zum Kopieren an {{ teileangebot['haupt_lieferant']['name'] }}</div>
+            <div class="text-muted small">Dieser Text enthält den Upload-Link. Einfach kopieren und an den Lieferanten senden.</div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-sm btn-outline-dark" data-copy-target="#lieferanten-mail-copy">E-Mail-Text kopieren</button>
+            {% if teileangebot['haupt_lieferant']['mailto_url'] %}
+            <a href="{{ teileangebot['haupt_lieferant']['mailto_url'] }}" class="btn btn-sm btn-dark">E-Mail öffnen</a>
+            {% endif %}
+          </div>
+        </div>
+        <input type="text" class="form-control form-control-sm mb-2" value="{{ teileangebot['haupt_lieferant']['email_subject'] }}" readonly>
+        <textarea id="lieferanten-mail-copy" class="form-control" readonly>{{ teileangebot['haupt_lieferant']['email_body'] }}</textarea>
+      </div>
+      {% endif %}
+
+      <div class="border-top pt-3 mb-3">
+        <div class="d-flex justify-content-between gap-2 flex-wrap align-items-start mb-2">
+          <div>
+            <div class="fw-bold">E-Mail-Entwurf für Teileangebot</div>
+            <div class="text-muted small">Enthält Fahrzeug, FIN, Kennzeichen, Schaden-Nr. und alle Teilepositionen.</div>
+          </div>
+          {% if teileangebot['mailto_url'] %}
+          <a href="{{ teileangebot['mailto_url'] }}" class="btn btn-sm btn-outline-dark">E-Mail öffnen</a>
+          {% endif %}
+        </div>
+        <input type="text" class="form-control mb-2" value="{{ teileangebot['email_subject'] }}" readonly>
+        <textarea class="form-control mail-draft" rows="12" readonly>{{ teileangebot['email_body'] }}</textarea>
+      </div>
+
+      <div class="offer-save-grid">
+        <div>
+          <label class="form-label">Angebotsanfrage / Rückmeldung</label>
+          <textarea name="versicherung_angebotsanfrage" class="form-control" rows="4" placeholder="z.B. KVA angefragt, Rückmeldung vom Teilelieferanten, Rückfrage an Versicherung">{{ auftrag['versicherung_angebotsanfrage'] }}</textarea>
+        </div>
+        <div>
+          <label class="form-label">Lieferzeit / Teilehinweis</label>
+          <textarea name="versicherung_lieferzeit_hinweis" class="form-control" rows="4" placeholder="z.B. Stoßfänger 3-5 Werktage, Scheinwerfer im Rückstand">{{ auftrag['versicherung_lieferzeit_hinweis'] }}</textarea>
+        </div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap align-items-center mt-3">
+        <button type="submit" class="btn btn-brand">Angebot & Lieferzeit speichern</button>
+        <span class="text-muted small">Die eigentliche Bestellung wird erst in Schritt 3 nach der Versicherungsfreigabe ausgelöst.</span>
+      </div>
+      <div class="border-top pt-3 mt-3">
+        <div class="fw-bold mb-2">Angebot / Lieferzeit-Dokument hochladen</div>
+        <div class="row g-2 align-items-end">
+          <div class="col-md-5">
+            <label class="form-label small">Datei</label>
+            <input type="file" name="prozess_dateien_teile_lieferschein" class="form-control form-control-sm">
+          </div>
+          <div class="col-md-5">
+            <label class="form-label small">Hinweis</label>
+            <input type="text" name="prozess_notiz_teile_lieferschein" class="form-control form-control-sm" placeholder="z.B. Angebot Käsmann, Lieferzeit 2-3 Tage">
+          </div>
+          <div class="col-md-2">
+            <button type="submit" class="btn btn-sm btn-dark w-100" formaction="{{ url_for('admin_versicherung_prozess_upload', auftrag_id=auftrag['id'], prozess_key='teile_lieferschein', anchor='step-angebot') }}" formmethod="post" formenctype="multipart/form-data">Hochladen</button>
+          </div>
+        </div>
+        {% if teileangebot['dokumente'] %}
+        <div class="compact-doc-list mt-2">
+          {% for datei in teileangebot['dokumente'] %}
+          <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" class="badge text-bg-light border text-dark" target="_blank">{{ datei['original_name'] }}</a>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="page-card p-4 mb-4 step-card" id="step-freigabe">
+      <div class="section-title">
+        <div>
+          <div class="badge-soft mb-2">Schritt 3</div>
+          <h4 class="mb-1">Freigabe & Teilebestellung</h4>
+          <p>Hier zählt nur die Entscheidung: freigegeben oder nicht. Danach wird aus den vorbereiteten Angeboten bestellt.</p>
+        </div>
+      </div>
+      <div class="freigabe-hero status-{{ freigabe_entscheidung['farbe'] }} mb-3">
+        <div>
+          <div class="badge text-bg-{{ freigabe_entscheidung['farbe'] }} mb-2">{{ freigabe_entscheidung['label'] }}</div>
+          <div class="freigabe-title">{{ freigabe_entscheidung['titel'] }}</div>
+          <div class="mt-2">{{ freigabe_entscheidung['detail'] }}</div>
+          {% if freigabe_entscheidung['freigabe_betrag'] %}
+          <div class="small text-muted mt-2">Freigegebener Betrag: {{ freigabe_entscheidung['freigabe_betrag'] }}</div>
+          {% endif %}
+        </div>
+        <div class="text-end">
+          <div class="fw-bold">{{ freigabe_entscheidung['aktion'] }}</div>
+          <div class="text-muted small">{{ freigabe_entscheidung['offene_teile_count'] }} offene Teile</div>
+        </div>
+      </div>
+
+      <div class="freigabe-actions-grid mb-3">
+        <div class="freigabe-action-card">
+          <div class="fw-bold mb-1">Wenn freigegeben</div>
+          <div class="text-muted small">Vorbereitete Teile aus Schritt 2 auf „Bestellt“ setzen, Liefertermin prüfen und Kunde erst danach sauber einplanen.</div>
+        </div>
+        <div class="freigabe-action-card">
+          <div class="fw-bold mb-1">Wenn nicht freigegeben</div>
+          <div class="text-muted small">Keine Bestellung auslösen. Rückfrage, Sperre oder Nachtrag dokumentieren und zurück in Schritt 1/2.</div>
+        </div>
+      </div>
+
+      {% if freigabe_entscheidung['can_order'] %}
+      <div class="border-top pt-3">
+        <div class="d-flex justify-content-between gap-2 flex-wrap align-items-start mb-2">
+          <div>
+            <div class="fw-bold">Teile bestellen</div>
+            <div class="text-muted small">Status nach Freigabe auf „Bestellt“ oder „Geliefert“ setzen. Rückstand bleibt sichtbar, bis die Terminplanung wirklich sicher ist.</div>
+          </div>
+          <span class="badge text-bg-success">Freigabe liegt vor</span>
+        </div>
+        <div class="parts-table">
+          {% for teil in versicherung_teile %}
+          <div class="parts-row">
+            <div>
+              <div class="fw-semibold">{{ teil['bezeichnung'] }}</div>
+              <span class="badge text-bg-{{ teil['status_meta']['farbe'] }}">{{ teil['status_meta']['label'] }}</span>
+            </div>
+            <div>
+              <label class="form-label small">Status</label>
+              <select name="teil_status_{{ teil['id'] }}" class="form-select form-select-sm">
+                {% for key, meta in teile_status.items() %}
+                <option value="{{ key }}" {% if teil['status'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="form-label small">Liefertermin</label>
+              <input type="date" name="teil_liefertermin_{{ teil['id'] }}" value="{{ teil['liefertermin']|iso_date }}" class="form-control form-control-sm">
+            </div>
+            <div>
+              <label class="form-label small">Lieferant / Info</label>
+              <input type="text" name="teil_notiz_{{ teil['id'] }}" value="{{ teil['notiz'] }}" class="form-control form-control-sm">
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="submit" class="btn btn-sm btn-outline-dark" formaction="{{ url_for('admin_versicherung_teil_update', auftrag_id=auftrag['id'], teil_id=teil['id'], anchor='step-freigabe') }}" formmethod="post">Speichern</button>
+              <button type="submit" name="aktion" value="loeschen" class="btn btn-sm btn-outline-danger" formaction="{{ url_for('admin_versicherung_teil_update', auftrag_id=auftrag['id'], teil_id=teil['id'], anchor='step-freigabe') }}" formmethod="post">Löschen</button>
+            </div>
+          </div>
+          {% endfor %}
+          <div class="parts-row">
+            <div>
+              <label class="form-label small">Weiteres Teil</label>
+              <input type="text" name="teil_bezeichnung" class="form-control form-control-sm" placeholder="z.B. Clip-/Befestigungssatz">
+            </div>
+            <div>
+              <label class="form-label small">Status</label>
+              <select name="teil_status" class="form-select form-select-sm">
+                <option value="bestellt">Bestellt</option>
+                <option value="angefragt">Angefragt</option>
+                <option value="geliefert">Geliefert</option>
+                <option value="rueckstand">Rückstand</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label small">Liefertermin</label>
+              <input type="date" name="teil_liefertermin" class="form-control form-control-sm">
+            </div>
+            <div>
+              <label class="form-label small">Lieferant / Info</label>
+              <input type="text" name="teil_notiz" class="form-control form-control-sm" placeholder="Bestellnummer, Lieferant">
+            </div>
+            <div>
+              <button type="submit" class="btn btn-sm btn-dark" formaction="{{ url_for('admin_versicherung_teil_add', auftrag_id=auftrag['id'], anchor='step-freigabe') }}" formmethod="post">Teil speichern</button>
+            </div>
+          </div>
+        </div>
+        <div class="alert alert-info py-2 small mt-3 mb-0">
+          Termin Kunde: {{ freigabe_entscheidung['termin_status']['label'] }} · {{ freigabe_entscheidung['termin_status']['detail'] }}
+        </div>
+      </div>
+      {% else %}
+      <div class="alert alert-warning mb-0">
+        Teilebestellung ist gesperrt, bis die Freigabe erteilt ist. Angebot und Lieferzeit bleiben in Schritt 2 vorbereitet.
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="page-card p-4 mb-4 step-card" id="step-reparatur">
+      <div class="section-title">
+        <div>
+          <div class="badge-soft mb-2">Schritt 4</div>
+          <h4 class="mb-1">Reparaturablauf</h4>
+          <p>Nachtrag, verdeckte Schäden, Werkstattbilder und Reparaturdokumentation gehören hier rein.</p>
+        </div>
+      </div>
+      <div class="supplement-alert mb-3">
+        <div class="fw-bold">Nachtrag während der Reparatur</div>
+        <div class="small text-muted">
+          Wenn nach der Demontage ein Zusatzschaden sichtbar wird, Nachtragsfotos/Kalkulation hier hochladen. Der Fall wird als Rückfrage markiert; danach den Nachtrag über die Schaden-Mailbox an die Versicherung senden.
+        </div>
+      </div>
+      {% set versicherung_prozess_phase = 'reparatur' %}
+      {% include "_versicherung_prozess_assistent.html" %}
+      {% set versicherung_prozess_phase = 'full' %}
       {% include "_versicherung_workflow_panel.html" %}
     </div>
 
-    <div class="page-card p-4 mb-4">
+    <div class="page-card p-4 mb-4 step-card" id="step-abschluss">
       <div class="section-title">
         <div>
-          <h4 class="mb-1">Anschreiben an die Versicherung</h4>
-          <p>Automatisch vorbereitet, vor dem Senden kurz prüfen.</p>
+          <div class="badge-soft mb-2">Schritt 5</div>
+          <h4 class="mb-1">Fertig melden & abrechnen</h4>
+          <p>Fertigbilder, Rechnung, Lexware-Entwurf und Zahlungsfreigabe schließen den Fall ab.</p>
         </div>
       </div>
-      <textarea name="versicherung_anschreiben" class="form-control mail-draft">{{ anschreiben }}</textarea>
-      {% set anschreiben_empfaenger = auftrag['versicherung_email'] or (versicherung['email'] if versicherung else '') %}
-      <div class="text-muted small mt-2">
-        An: {{ anschreiben_empfaenger or 'offen' }}
-        {% if auftrag['versicherung_email_cc'] %} · CC: {{ auftrag['versicherung_email_cc'] }}{% endif %}
-        {% if auftrag['versicherung_sendefreigabe_am'] %} · Freigegeben am {{ auftrag['versicherung_sendefreigabe_am'] }}{% endif %}
-      </div>
+      {% set versicherung_prozess_phase = 'abschluss' %}
+      {% include "_versicherung_prozess_assistent.html" %}
+      {% set versicherung_prozess_phase = 'full' %}
       <div class="d-flex gap-2 flex-wrap mt-3">
-        <button type="submit" class="btn btn-brand">Speichern</button>
-        <button type="submit" formaction="{{ url_for('admin_versicherung_schaden_melden', auftrag_id=auftrag['id']) }}" formmethod="post" class="btn btn-soft">Als gemeldet markieren</button>
-        <button
-          type="submit"
-          formaction="{{ url_for('admin_versicherung_abtretungserklaerung_pdf') }}"
-          formmethod="post"
-          formenctype="application/x-www-form-urlencoded"
-          data-no-loading="true"
-          class="btn btn-soft"
-          id="pflicht-abtretung"
-        >Abtretungserklärung herunterladen</button>
-        <a href="{{ url_for('admin_versicherung_gt_motive_payload', auftrag_id=auftrag['id']) }}" class="btn btn-soft" target="_blank">GT-Motive Paket ansehen</a>
+        <a href="{{ url_for('rechnung_schreiben', auftrag_id=auftrag['id']) }}" class="btn btn-brand">Rechnung / Lexware öffnen</a>
+        <a href="{{ url_for('auftrag_detail', auftrag_id=auftrag['id']) }}" class="btn btn-soft">Werkstattauftrag öffnen</a>
       </div>
     </div>
 
-    <div class="page-card p-4 mb-4">
+    <div class="page-card p-4 mb-4" id="versicherung-mail-verlauf">
       <div class="section-title">
         <div>
-          <h4 class="mb-1">Nachrichten zur Versicherung</h4>
-          <p>Rückfragen, Freigaben und Antworten aus der App.</p>
+          <h4 class="mb-1">E-Mail-Verlauf Versicherung</h4>
+          <p>Gesendete Nachrichten, eingelesene Antworten und interne Statusnotizen bleiben in der Fallakte.</p>
         </div>
-        {% if chat_nachrichten %}
-        <span class="badge text-bg-warning">{{ chat_nachrichten|length }} Nachricht(en)</span>
+        <div class="d-flex gap-2 flex-wrap justify-content-end">
+          <button type="submit" formaction="{{ url_for('admin_versicherung_schaden_emails_sync', auftrag_id=auftrag['id']) }}" formmethod="post" class="btn btn-sm btn-brand">Schaden-Mailbox abrufen</button>
+          <span class="badge text-bg-{{ 'success' if schaden_mail and schaden_mail.imap_configured else 'secondary' }}">{{ schaden_mail.imap_badge if schaden_mail else 'IMAP fehlt' }}</span>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <div class="fw-bold mb-2">Eingegangene E-Mails</div>
+        {% if versicherung_emails %}
+        <div class="mail-inbox-list">
+          {% for email in versicherung_emails %}
+          <div class="mail-inbox-card status-{{ email['status'] }}">
+            <div class="d-flex justify-content-between gap-3 flex-wrap mb-2">
+              <div>
+                <div class="fw-bold">{{ email['betreff'] }}</div>
+                <div class="text-muted small">
+                  Von {{ email['absender_display'] }} · {{ email['empfangen_am'] }}
+                  {% if email['attachments_count'] %} · {{ email['attachments_count'] }} Anhang/Anhänge{% endif %}
+                </div>
+                <div class="text-muted small">
+                  Zuordnung: {{ email['zuordnung_hinweis'] or email['zuordnung_label'] }}
+                  {% if email['zuordnung_manuell'] %} · manuell gesetzt{% endif %}
+                </div>
+              </div>
+              <span class="badge text-bg-{{ 'warning' if email['status'] == 'neu' else 'light border text-dark' }}">{{ email['status'] }}</span>
+            </div>
+            <details>
+              <summary>Lesen</summary>
+              <div class="mail-inbox-body mt-2">{{ email['nachricht'] or 'Kein Nachrichtentext erkannt.' }}</div>
+            </details>
+            <div class="d-flex gap-2 flex-wrap mt-3">
+              {% if email['status'] == 'neu' %}
+              <button type="submit" name="status" value="gelesen" formaction="{{ url_for('admin_versicherung_email_status', auftrag_id=auftrag['id'], email_id=email['id']) }}" formmethod="post" class="btn btn-sm btn-soft">Als gelesen markieren</button>
+              {% endif %}
+              <button type="submit" name="status" value="erledigt" formaction="{{ url_for('admin_versicherung_email_status', auftrag_id=auftrag['id'], email_id=email['id']) }}" formmethod="post" class="btn btn-sm btn-soft">Erledigt</button>
+              <button type="submit" name="status" value="archiviert" formaction="{{ url_for('admin_versicherung_email_status', auftrag_id=auftrag['id'], email_id=email['id']) }}" formmethod="post" class="btn btn-sm btn-outline-danger">Aus Portal entfernen</button>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-muted">Noch keine eingegangene E-Mail ist dieser Fallakte zugeordnet.</div>
         {% endif %}
       </div>
+
+      <div class="fw-bold mb-2">Portalnotizen und gesendete Mails</div>
       {% if chat_nachrichten %}
       <div class="chat-thread">
         {% for chat in chat_nachrichten %}
@@ -280,32 +1192,37 @@
         <textarea name="upload_notiz" class="form-control mb-3" rows="3" placeholder="Notiz zum Upload"></textarea>
         <button type="submit" class="btn btn-brand w-100" data-loading-message="Bitte kurz warten. Unterlagen werden gelesen.">Hochladen & speichern</button>
       </div>
-      <div class="page-card p-4">
+      <div class="page-card p-4" id="kundenkommunikation">
         <h5 class="mb-3">Kundenstatus</h5>
         {% if auftrag['kunden_status_url'] %}
           <div class="info-box">
             <div class="text-muted small mb-1">Status-Link für QR-Code</div>
-            <code>{{ auftrag['kunden_status_url'] }}</code>
+            <img src="{{ url_for('kunden_status_qr', token=auftrag['kunden_status_token'], target='local') if auftrag['kunden_status_public_warning'] else url_for('kunden_status_qr', token=auftrag['kunden_status_token']) }}" alt="Kundenstatus QR-Code" style="width:148px;height:148px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;margin-bottom:.75rem;">
+            <code>{{ auftrag['kunden_status_local_url'] if auftrag['kunden_status_public_warning'] else auftrag['kunden_status_url'] }}</code>
+            <div class="d-flex gap-2 flex-wrap mt-2">
+              <a href="{{ auftrag['kunden_status_local_url'] }}" class="btn btn-sm btn-soft" target="_blank">Lokal testen</a>
+              {% if auftrag['kunden_status_public_warning'] %}
+              <a href="{{ auftrag['kunden_status_url'] }}" class="btn btn-sm btn-soft" target="_blank">Öffentlichen Link testen</a>
+              {% endif %}
+              {% if auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
+              <a href="{{ auftrag['kunden_whatsapp_status']['whatsapp_url'] }}" class="btn btn-sm btn-success" target="_blank" rel="noopener">QR-Link per WhatsApp</a>
+              <a href="{{ auftrag['kunden_whatsapp_status']['status_update_whatsapp_url'] }}" class="btn btn-sm btn-outline-success" target="_blank" rel="noopener">Statusupdate WhatsApp</a>
+              {% endif %}
+            </div>
+            {% if auftrag['kontakt_telefon'] and not auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
+            <div class="text-muted small mt-2">Für WhatsApp bitte eine gültige Handynummer hinterlegen.</div>
+            {% elif auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
+            <div class="text-muted small mt-2">Kein automatischer Versand: WhatsApp öffnet mit vorbereitetem Text. Bitte nur senden, wenn der Kunde den Kanal wünscht.</div>
+            {% else %}
+            <div class="text-muted small mt-2">Noch keine Kundennummer hinterlegt. Danach kann der Link per WhatsApp vorbereitet werden.</div>
+            {% endif %}
+            {% if auftrag['kunden_status_public_warning'] %}
+            <div class="alert alert-warning small mt-3 mb-0">Der öffentliche QR-Link nutzt aktuell einen Tunnel. Für echte Kunden bitte prüfen, ob diese Adresse erreichbar ist.</div>
+            {% endif %}
           </div>
         {% else %}
           <div class="text-muted">Noch kein Kundenstatus-Link vorhanden.</div>
         {% endif %}
-      </div>
-      <div class="page-card p-4">
-        <h5 class="mb-3">GT Motive</h5>
-        <div class="info-box">
-          <div class="fw-bold">{{ 'API-Daten gesetzt' if gt_motive_payload['gt_motive']['configured'] else 'API vorbereitet' }}</div>
-          <div class="text-muted small">
-            Modellcode: {{ auftrag['gt_motive_model_code'] or 'offen' }} · Zone: {{ auftrag['gt_motive_zone'] or '11000' }}
-          </div>
-          {% if auftrag['gt_motive_vehicle_representation_loaded_at'] %}
-            <div class="text-success small mt-2">Fahrzeugdarstellung geladen: {{ auftrag['gt_motive_vehicle_representation_loaded_at'] }}</div>
-          {% elif auftrag['gt_motive_vehicle_representation_error'] %}
-            <div class="text-warning small mt-2">{{ auftrag['gt_motive_vehicle_representation_error'] }}</div>
-          {% else %}
-            <div class="text-muted small mt-2">Noch keine GT-Fahrzeugdarstellung geladen.</div>
-          {% endif %}
-        </div>
       </div>
       <div class="page-card p-4">
         <h5 class="mb-3">Dateien</h5>
@@ -317,7 +1234,16 @@
                 <div class="fw-bold">{{ datei['original_name'] }}</div>
                 <div class="text-muted small">{{ datei['dokument_typ'] or datei['kategorie'] }} · {{ datei['hochgeladen_am'] }}</div>
               </div>
-              <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" class="btn btn-soft btn-sm" target="_blank">Öffnen</a>
+              <div class="d-flex gap-2 flex-wrap justify-content-end">
+                <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" class="btn btn-soft btn-sm" target="_blank">Öffnen</a>
+                <button
+                  type="submit"
+                  class="btn btn-outline-danger btn-sm"
+                  formaction="{{ url_for('admin_datei_loeschen', datei_id=datei['id'], next=request.full_path) }}"
+                  formmethod="post"
+                  data-no-loading="true"
+                >Löschen</button>
+              </div>
             </div>
             {% endfor %}
           </div>
@@ -328,6 +1254,7 @@
       <div class="d-flex gap-2 flex-wrap">
         <a href="{{ url_for('admin_versicherung') }}" class="btn btn-soft">Zur Übersicht</a>
         <a href="{{ url_for('auftrag_detail', auftrag_id=auftrag['id']) }}" class="btn btn-soft">Werkstattauftrag</a>
+        <a href="{{ url_for('admin_versicherung_schaden_vorschau_versicherung', auftrag_id=auftrag['id']) }}" class="btn btn-soft" target="_blank">Versicherungsansicht</a>
       </div>
     </div>
   </div>
@@ -338,6 +1265,90 @@
 
 {% block extra_js %}
 <script>
+  (() => {
+    const cards = Array.from(document.querySelectorAll('.step-card'));
+    if (!cards.length) return;
+    const form = document.querySelector('[data-upload-form]');
+    const defaultStepId = form?.dataset.activeStep || cards[0]?.id || '';
+    const stepLinks = Array.from(document.querySelectorAll('.claim-step-tab'));
+
+    const setCardState = (card, collapsed) => {
+      const button = card.querySelector('[data-step-toggle]');
+      card.classList.toggle('is-collapsed', collapsed);
+      if (button) {
+        button.textContent = collapsed ? 'Ausklappen' : 'Einklappen';
+        button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      }
+    };
+
+    cards.forEach((card, index) => {
+      const title = card.querySelector('.section-title h1, .section-title h4')?.textContent?.trim() || `Abschnitt ${index + 1}`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-sm btn-outline-dark step-fold-toggle';
+      button.dataset.stepToggle = 'true';
+      button.dataset.noLoading = 'true';
+      button.setAttribute('aria-label', `${title} ein- oder ausklappen`);
+      button.addEventListener('click', () => {
+        setCardState(card, !card.classList.contains('is-collapsed'));
+      });
+      card.prepend(button);
+    });
+
+    const openFromHash = () => {
+      const hash = window.location.hash;
+      let target = null;
+      try {
+        target = hash ? document.querySelector(hash) : document.getElementById(defaultStepId);
+      } catch (error) {
+        target = null;
+      }
+      target = target || cards[0];
+      const targetCard = target?.closest?.('.step-card') || cards[0];
+      cards.forEach((card) => setCardState(card, card !== targetCard));
+      stepLinks.forEach((link) => {
+        link.classList.toggle('is-active', link.getAttribute('href') === `#${targetCard.id}`);
+      });
+      if (target) target.scrollIntoView({ block: 'start' });
+    };
+
+    openFromHash();
+    window.addEventListener('hashchange', openFromHash);
+  })();
+
+  (() => {
+    const unlockButton = document.querySelector('[data-unlock-source]');
+    const unlockInput = document.querySelector('[data-source-edit-unlocked]');
+    const sourceCard = document.querySelector('[data-source-fields]');
+    const sourceEditor = document.querySelector('[data-source-editor]');
+    if (!unlockButton || !unlockInput || !sourceCard || !sourceEditor) return;
+    unlockButton.addEventListener('click', () => {
+      sourceCard.classList.remove('is-collapsed');
+      const stepButton = sourceCard.querySelector('[data-step-toggle]');
+      if (stepButton) {
+        stepButton.textContent = 'Einklappen';
+        stepButton.setAttribute('aria-expanded', 'true');
+      }
+      sourceEditor.hidden = false;
+      sourceCard.querySelectorAll('[data-source-locked]').forEach((field) => {
+        field.disabled = false;
+        field.removeAttribute('readonly');
+        field.removeAttribute('tabindex');
+      });
+      unlockInput.value = '1';
+      sourceCard.classList.remove('is-source-locked');
+      sourceEditor.classList.remove('is-source-locked');
+      unlockButton.textContent = 'Bearbeitung aktiv';
+      unlockButton.classList.remove('btn-outline-dark');
+      unlockButton.classList.add('btn-dark');
+      const banner = document.querySelector('[data-source-lock-banner]');
+      if (banner) {
+        banner.classList.remove('source-lock-banner');
+        banner.classList.add('alert', 'alert-warning');
+      }
+    });
+  })();
+
   (() => {
     const select = document.querySelector('[data-insurance-select]');
     const emailInput = document.querySelector('[data-insurance-email]');
@@ -356,6 +1367,65 @@
     });
     select.addEventListener('change', applyInsuranceEmail);
     applyInsuranceEmail();
+  })();
+
+  (() => {
+    document.querySelectorAll('[data-copy-target]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const target = document.querySelector(button.dataset.copyTarget);
+        if (!target) return;
+        const text = target.value || target.textContent || '';
+        try {
+          await navigator.clipboard.writeText(text);
+          button.textContent = 'Kopiert';
+          setTimeout(() => { button.textContent = 'E-Mail-Text kopieren'; }, 1800);
+        } catch (error) {
+          target.focus();
+          if (target.select) target.select();
+        }
+      });
+    });
+  })();
+
+  (() => {
+    const form = document.querySelector('form[data-upload-form]');
+    if (!form) return;
+    const field = (name) => form.querySelector(`[name="${name}"]`);
+    const parseMoney = (value) => {
+      const text = String(value || '').replace(/\s/g, '');
+      if (!text) return 0;
+      const normalized = text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text;
+      const amount = Number.parseFloat(normalized.replace(/[^\d.-]/g, ''));
+      return Number.isFinite(amount) ? amount : 0;
+    };
+    const formatMoney = (amount) => amount
+      ? amount.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : '';
+    const updateClaimAmount = () => {
+      const mode = field('schaden_abrechnungsart')?.value || 'fiktiv';
+      const netto = parseMoney(field('schaden_reparatur_netto')?.value);
+      const brutto = parseMoney(field('schaden_reparatur_brutto')?.value);
+      const pauschale = parseMoney(field('schaden_kostenpauschale')?.value) || 25;
+      const sb = parseMoney(field('schaden_selbstbeteiligung')?.value);
+      let amount = 0;
+      if (mode === 'kasko') amount = Math.max(brutto - sb, 0);
+      else if (mode === 'konkret') amount = brutto;
+      else amount = netto + pauschale;
+      const target = field('schaden_forderung_betrag');
+      if (target && amount) target.value = formatMoney(amount);
+    };
+    const syncModeFromDamageType = () => {
+      const schadenart = field('schadenart')?.value || '';
+      if (['vollkasko', 'teilkasko', 'glasschaden', 'wildschaden', 'hagel_unwetter', 'vandalismus'].includes(schadenart) && field('schaden_abrechnungsart')) {
+        field('schaden_abrechnungsart').value = 'kasko';
+      }
+      updateClaimAmount();
+    };
+    ['schaden_abrechnungsart', 'schaden_reparatur_netto', 'schaden_reparatur_brutto', 'schaden_kostenpauschale', 'schaden_selbstbeteiligung'].forEach((name) => {
+      field(name)?.addEventListener('input', updateClaimAmount);
+      field(name)?.addEventListener('change', updateClaimAmount);
+    });
+    field('schadenart')?.addEventListener('change', syncModeFromDamageType);
   })();
 </script>
 {% endblock %}

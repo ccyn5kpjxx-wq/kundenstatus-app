@@ -1,0 +1,1414 @@
+{% extends "base.html" %}
+{% block title %}Auktion / Fahrzeugsuche #{{ suche['id'] }}{% endblock %}
+
+{% block extra_css %}
+<style>
+  .vehicle-status-grid {
+    display: grid;
+    gap: .75rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .vehicle-status-grid form { margin: 0; }
+  .vehicle-status-btn {
+    border: 1px solid #e4d6c3;
+    border-radius: 16px;
+    background: #fffdf9;
+    color: var(--ink);
+    padding: .85rem;
+    width: 100%;
+    text-align: left;
+  }
+  .vehicle-status-btn.is-active {
+    border-color: rgba(162, 63, 45, .5);
+    background: rgba(162, 63, 45, .1);
+    font-weight: 800;
+  }
+  .candidate-grid {
+    display: grid;
+    gap: 1rem;
+  }
+  .candidate-panel {
+    border: 1px solid #e4d6c3;
+    border-radius: 16px;
+    background: #fffdf9;
+    padding: 1rem;
+  }
+  .candidate-image {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border-radius: 12px;
+    border: 1px solid #e4d6c3;
+    background: #f7f1e8;
+  }
+  .risk-list {
+    margin: 0;
+    padding-left: 1.1rem;
+  }
+  .calc-strip {
+    display: grid;
+    gap: .75rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .calc-box {
+    border: 1px solid #e4d6c3;
+    border-radius: 12px;
+    background: #fffaf2;
+    padding: .75rem;
+  }
+  .calc-box span {
+    display: block;
+    color: var(--muted);
+    font-size: .78rem;
+  }
+  .calc-box strong {
+    display: block;
+    font-size: 1rem;
+  }
+  .candidate-sheet {
+    border: 1px solid #e4d6c3;
+    border-radius: 12px;
+    background: #fffaf2;
+    padding: .85rem;
+  }
+  .candidate-sheet-title {
+    font-weight: 800;
+    margin-bottom: .7rem;
+  }
+  .candidate-sheet-grid {
+    display: grid;
+    gap: .55rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .candidate-sheet-item span {
+    color: var(--muted);
+    display: block;
+    font-size: .76rem;
+  }
+  .candidate-sheet-item strong {
+    display: block;
+    font-size: .92rem;
+  }
+  .candidate-forward-text {
+    min-height: 170px;
+    resize: vertical;
+    font-size: .88rem;
+  }
+  .candidate-longtext {
+    min-height: 116px;
+  }
+  .candidate-edit-details {
+    border: 1px solid #e4d6c3;
+    border-radius: 12px;
+    background: #fff;
+    padding: .85rem;
+  }
+  .candidate-edit-details > summary {
+    cursor: pointer;
+    font-weight: 800;
+  }
+  .excluded-candidate {
+    border: 1px solid #e4d6c3;
+    border-radius: 12px;
+    background: #fffdf9;
+    padding: .85rem;
+  }
+  .process-strip {
+    display: grid;
+    gap: .75rem;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .process-step {
+    border: 1px solid #e4d6c3;
+    border-radius: 14px;
+    background: #fffdf9;
+    padding: .9rem;
+    min-height: 108px;
+  }
+  .process-step.is-done {
+    border-color: rgba(27, 127, 83, .35);
+    background: rgba(27, 127, 83, .08);
+  }
+  .process-step strong {
+    display: block;
+    margin-bottom: .35rem;
+  }
+  .upload-list {
+    display: grid;
+    gap: .75rem;
+  }
+  .upload-item {
+    border: 1px solid #e4d6c3;
+    border-radius: 12px;
+    background: #fffdf9;
+    padding: .85rem;
+  }
+  .voice-status {
+    min-height: 1.2rem;
+    color: var(--muted);
+    font-size: .86rem;
+  }
+  .work-panel-summary {
+    cursor: pointer;
+    font-weight: 800;
+    list-style: none;
+  }
+  .work-panel-summary::-webkit-details-marker {
+    display: none;
+  }
+  .customer-package-text {
+    min-height: 420px;
+    font-size: .92rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+  .deal-list,
+  .customer-candidate-list {
+    display: grid;
+    gap: .75rem;
+  }
+  .deal-item,
+  .customer-candidate-item {
+    border: 1px solid #e4d6c3;
+    border-radius: 12px;
+    background: #fffdf9;
+    padding: .85rem;
+  }
+  .deal-rank {
+    width: 2.2rem;
+    height: 2.2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: #1f2937;
+    color: #fff;
+    font-weight: 800;
+    flex: 0 0 auto;
+  }
+  @media (max-width: 900px) {
+    .vehicle-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .calc-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .process-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 560px) {
+    .vehicle-status-grid, .calc-strip, .process-strip, .candidate-sheet-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="section-title">
+  <div>
+    <div class="badge-soft mb-3">Aus Auktion · Fahrzeugsuche #{{ suche['id'] }}</div>
+    <h1 class="mb-2">{{ suche['kunde_name'] or 'Neue Auktionssuche' }}</h1>
+    <p>{{ suche['marken_modelle'] or suche['fahrzeugwuensche'] or 'Fahrzeugwunsch offen' }}</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('admin_fahrzeugsuche') }}" class="btn btn-soft">Zur Liste</a>
+    <a href="#kundenpaket" class="btn btn-brand">Kundenpaket</a>
+  </div>
+</div>
+
+{% if auktion_alerts %}
+<div class="alert alert-warning page-card mb-4" role="alert">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div>
+      <div class="fw-bold">Copart-Auktionsalarm</div>
+      <div class="small">Diese Auktion läuft jetzt oder startet innerhalb der nächsten Stunde.</div>
+    </div>
+    <span class="badge text-bg-warning">{{ auktion_alerts|length }}</span>
+  </div>
+  <div class="d-grid gap-2 mt-3">
+    {% for alert in auktion_alerts %}
+    <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap">
+      <div>
+        <div class="fw-bold">{{ alert['alarm_label'] }} · {{ alert['titel'] }}</div>
+        <div class="small">{{ alert['auktion_label'] }}{% if alert['lot_nummer'] %} · Lot {{ alert['lot_nummer'] }}{% endif %}</div>
+      </div>
+      {% if alert['copart_bid_url'] %}
+      <a href="{{ alert['copart_bid_url'] }}" class="btn btn-sm btn-brand">Bei Copart bieten</a>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="page-card p-4 mb-4" id="suchassistent">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+    <div>
+      <h2 class="h4 mb-1">Angebote analysieren</h2>
+      <div class="text-muted small">Kundenprofil, Marktpreis, Reparatur und Wirtschaftlichkeit im Hintergrund prüfen.</div>
+    </div>
+    <form method="POST" action="{{ url_for('admin_fahrzeugsuche_autoanalyse', suche_id=suche['id']) }}">
+      {{ csrf_field()|safe }}
+      <button type="submit" class="btn btn-brand">Analyse starten</button>
+    </form>
+  </div>
+  <div class="calc-strip mb-3">
+    <div class="calc-box">
+      <span>Suchläufe</span>
+      <strong>{{ such_assistent['terms']|length }}</strong>
+    </div>
+    <div class="calc-box">
+      <span>Aktive Kandidaten</span>
+      <strong>{{ such_assistent['aktive_count'] }}</strong>
+    </div>
+    <div class="calc-box">
+      <span>Rentabel vorne</span>
+      <strong>{{ such_assistent['rentable_count'] }}</strong>
+    </div>
+    <div class="calc-box">
+      <span>Budget</span>
+      <strong>{{ suche['budget_label'] or 'offen' }}</strong>
+    </div>
+    <div class="calc-box">
+      <span>Kilometer</span>
+      <strong>{{ suche['kilometer_filter_label'] or 'offen' }}</strong>
+    </div>
+  </div>
+  <details>
+    <summary class="work-panel-summary">Recherchequellen öffnen</summary>
+  {% if such_assistent['portal_rows'] %}
+  <div class="table-responsive mt-3">
+    <table class="table align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Suchlauf</th>
+          <th>Unfall suchen</th>
+          <th>Marktpreis</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in such_assistent['portal_rows'] %}
+        <tr>
+          <td>
+            <div class="fw-bold">{{ row['term'] }}</div>
+            <div class="text-muted small">ab {{ suche['baujahr_min'] or 'offen' }}{% if suche['kilometer_filter_label'] %} · {{ suche['kilometer_filter_label'] }}{% endif %} · {{ suche['entfernung_filter_label'] }}</div>
+          </td>
+          <td>
+            <div class="d-flex gap-2 flex-wrap">
+              <a href="{{ row['copart_url'] }}" class="btn btn-sm btn-brand">Copart</a>
+              <a href="{{ row['kleinanzeigen_unfall_url'] }}" class="btn btn-sm btn-soft">Kleinanzeigen Unfall</a>
+              <a href="{{ row['mobile_unfall_url'] }}" class="btn btn-sm btn-soft">mobile Unfall</a>
+              <a href="{{ row['autoscout_unfall_url'] }}" class="btn btn-sm btn-soft">AutoScout Unfall</a>
+            </div>
+          </td>
+          <td>
+            <div class="d-flex gap-2 flex-wrap">
+              <a href="{{ row['mobile_url'] }}" class="btn btn-sm btn-soft">mobile.de</a>
+              <a href="{{ row['autoscout_url'] }}" class="btn btn-sm btn-soft">AutoScout24</a>
+              <a href="{{ row['kleinanzeigen_url'] }}" class="btn btn-sm btn-soft">Kleinanzeigen</a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-muted mt-3">Noch keine Suchläufe. Bitte Kundenvorgabe analysieren oder Modellwunsch ergänzen.</div>
+  {% endif %}
+  </details>
+</div>
+
+<div class="page-card p-4 mb-4" id="topangebote">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+    <div>
+      <h2 class="h4 mb-1">Top-Angebote Rang 1-10</h2>
+      <div class="text-muted small">Vorne stehen nur passende, offene Angebote mit sauberem Kilometerprofil und Werkstatt-Prüfung.</div>
+    </div>
+    <a href="#kundenpaket" class="btn btn-soft">Kundennachricht</a>
+  </div>
+  <div class="deal-list">
+    {% for kandidat in kundenpaket['kandidaten'] %}
+    <div class="deal-item">
+      <div class="d-flex gap-3 align-items-start">
+        <div class="deal-rank">{{ loop.index }}</div>
+        <div class="flex-grow-1">
+          <div class="d-flex justify-content-between gap-2 flex-wrap mb-2">
+            <div>
+              <div class="fw-bold">{{ kandidat['titel'] or kandidat['lot_nummer'] }}</div>
+              <div class="small text-muted">{{ kandidat['angebot_info']['quelle'] }} · {{ kandidat['angebot_info']['kurz'] }}</div>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <span class="badge text-bg-{{ kandidat['profil_check']['farbe'] }}">{{ kandidat['profil_check']['label'] }}</span>
+              <span class="badge text-bg-{{ kandidat['rendite_check']['farbe'] }}">Rendite {{ kandidat['rendite_check']['label'] }}</span>
+            </div>
+          </div>
+          <div class="candidate-sheet-grid mb-3">
+            <div class="candidate-sheet-item">
+              <span>Kilometer / Standort</span>
+              <strong>{{ kandidat['kilometerstand'] or 'offen' }} · {{ kandidat['standort'] or 'offen' }}</strong>
+            </div>
+            <div class="candidate-sheet-item">
+              <span>Ausstattung</span>
+              <strong>{{ kandidat['ausstattung_kurz'] }}</strong>
+            </div>
+            <div class="candidate-sheet-item">
+              <span>Marktpreis repariert</span>
+              <strong>{{ kandidat['marktwert_repariert_label'] or 'offen' }}</strong>
+            </div>
+            <div class="candidate-sheet-item">
+              <span>Reparatur grob</span>
+              <strong>{{ kandidat['reparatur_kosten_label'] or 'offen' }}</strong>
+            </div>
+            <div class="candidate-sheet-item">
+              <span>Max. Gebot</span>
+              <strong>{{ kandidat['gebot_empfehlung_label'] or 'offen' }}</strong>
+            </div>
+            <div class="candidate-sheet-item">
+              <span>Bei Kauf fällig</span>
+              <strong>{{ kandidat['kauf_faellig_summe_label'] or 'offen' }}</strong>
+            </div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            {% if kandidat['copart_bid_url'] %}
+            <a href="{{ kandidat['copart_bid_url'] }}" class="btn btn-sm btn-brand">{{ kandidat['angebot_info']['cta'] }}</a>
+            {% elif kandidat['fahrzeug_url'] %}
+            <a href="{{ kandidat['fahrzeug_url'] }}" class="btn btn-sm btn-brand">{{ kandidat['angebot_info']['cta'] }}</a>
+            {% endif %}
+            <a href="#kandidat-{{ kandidat['id'] }}" class="btn btn-sm btn-soft">Details prüfen</a>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="text-muted">Noch keine Top-Angebote. Erst Analyse starten oder Kandidaten erfassen.</div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4" id="kundenpaket">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+    <div>
+      <h2 class="h4 mb-1">Kundenpaket</h2>
+      <div class="text-muted small">Fertige, transparente Nachricht mit bis zu zehn Kandidaten.</div>
+    </div>
+    <button type="button" class="btn btn-brand" data-copy-target="kundenpaket-text">Nachricht kopieren</button>
+  </div>
+  <div class="row g-4">
+    <div class="col-lg-7">
+      <textarea id="kundenpaket-text" class="form-control customer-package-text" readonly>{{ kundenpaket['text'] }}</textarea>
+    </div>
+    <div class="col-lg-5">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="fw-bold">Empfohlene Kandidaten</div>
+        <span class="badge text-bg-dark">{{ kundenpaket['count'] }} / 10</span>
+      </div>
+      <div class="customer-candidate-list">
+        {% for kandidat in kundenpaket['kandidaten'] %}
+        <div class="customer-candidate-item">
+          <div class="d-flex justify-content-between gap-2 flex-wrap mb-2">
+            <div class="fw-bold">{{ kandidat['titel'] or kandidat['lot_nummer'] }}</div>
+            <span class="badge text-bg-{{ kandidat['profil_check']['farbe'] }}">{{ kandidat['profil_check']['label'] }}</span>
+          </div>
+          <div class="small text-muted mb-2">
+            {{ kandidat['angebot_info']['quelle'] }} · {{ kandidat['angebot_info']['kurz'] }} · {{ kandidat['standort'] or 'Standort offen' }} · {{ kandidat['kilometerstand'] or 'km offen' }}
+          </div>
+          <div class="small">
+            Marktwert {{ kandidat['marktwert_repariert_label'] or 'offen' }} · Max. Gebot {{ kandidat['gebot_empfehlung_label'] or 'offen' }} · Reparatur {{ kandidat['reparatur_kosten_label'] or 'offen' }}
+          </div>
+          {% if kandidat['copart_bid_url'] %}
+          <a href="{{ kandidat['copart_bid_url'] }}" class="btn btn-sm btn-soft mt-2">Copart öffnen</a>
+          {% endif %}
+        </div>
+        {% else %}
+        <div class="text-muted">Noch kein Kandidat gut genug für ein Kundenpaket.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <div class="page-card p-4 mb-4">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="h4 mb-1">Status</h2>
+          <div class="text-muted small">Auktionsauftrag weiterziehen, bis Angebot, Kauf oder Abschluss klar sind.</div>
+        </div>
+        <span class="badge text-bg-{{ suche['status_meta']['farbe'] }}">{{ suche['status_meta']['label'] }}</span>
+      </div>
+      <div class="vehicle-status-grid">
+        {% for key, meta in status_options.items() %}
+        <form method="POST" action="{{ url_for('admin_fahrzeugsuche_status', suche_id=suche['id'], status=key) }}">
+          {{ csrf_field()|safe }}
+          <button type="submit" class="vehicle-status-btn {% if suche['status'] == key %}is-active{% endif %}" {% if suche['status'] == key %}disabled{% endif %}>
+            {{ meta['label'] }}
+          </button>
+        </form>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="page-card p-4 mb-4" id="prozess">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="h4 mb-1">Prozess</h2>
+          <div class="text-muted small">Vom Kundenwunsch über Gebot und Kauf bis zur Reparaturrechnung.</div>
+        </div>
+        {% if suche['auftrag_id'] %}
+        <a href="{{ url_for('auftrag_detail', auftrag_id=suche['auftrag_id']) }}" class="btn btn-brand btn-sm">Auftrag öffnen</a>
+        {% endif %}
+      </div>
+      <div class="process-strip">
+        <div class="process-step is-done">
+          <strong>1. Kunde</strong>
+          <div class="small text-muted">{{ suche['kunde_name'] or 'Kunde offen' }}</div>
+        </div>
+        <div class="process-step {% if suche['kandidaten_count'] %}is-done{% endif %}">
+          <strong>2. Auktion</strong>
+          <div class="small text-muted">{{ suche['kandidaten_count'] }} Kandidat(en)</div>
+        </div>
+        <div class="process-step {% if suche['gekaufter_kandidat_id'] %}is-done{% endif %}">
+          <strong>3. Kauf</strong>
+          <div class="small text-muted">{{ suche['kauf_gesamt_betrag_label'] or 'Kaufpreis offen' }}</div>
+        </div>
+        <div class="process-step {% if suche['zahlung_fahrzeug_status'] == 'bezahlt' %}is-done{% endif %}">
+          <strong>4. Auto-Zahlung</strong>
+          <span class="badge text-bg-{{ suche['zahlung_fahrzeug_meta']['farbe'] }}">{{ suche['zahlung_fahrzeug_meta']['label'] }}</span>
+        </div>
+        <div class="process-step {% if suche['zahlung_reparatur_status'] == 'bezahlt' %}is-done{% endif %}">
+          <strong>5. Reparatur</strong>
+          <span class="badge text-bg-{{ suche['zahlung_reparatur_meta']['farbe'] }}">{{ suche['zahlung_reparatur_meta']['label'] }}</span>
+        </div>
+      </div>
+    </div>
+
+    <details class="page-card p-4 mb-4" id="kundenvorgabe">
+      <summary class="work-panel-summary">Kundenvorgabe, Sprache und Dateien</summary>
+      <div class="mt-3">
+      <form method="POST" action="{{ url_for('admin_fahrzeugsuche_text_auswerten', suche_id=suche['id']) }}" class="row g-3 mb-4" data-vehicle-search-voice-form data-speech-url="{{ url_for('admin_ki_sprache') }}" data-csrf-token="{{ csrf_token() }}">
+        {{ csrf_field()|safe }}
+        <div class="col-12">
+          <label class="form-label">WhatsApp-Text oder Diktat</label>
+          <textarea name="quelltext" class="form-control" rows="4" data-vehicle-search-voice-text placeholder="Kundennachricht einfügen oder lokal diktieren"></textarea>
+        </div>
+        <div class="col-12 d-flex gap-2 flex-wrap align-items-center">
+          <button type="button" class="btn btn-soft" data-vehicle-search-voice-button>Sprechen</button>
+          <button type="submit" class="btn btn-brand">Text auswerten</button>
+          <span class="voice-status" data-vehicle-search-voice-status></span>
+        </div>
+      </form>
+      <form method="POST" action="{{ url_for('admin_fahrzeugsuche_upload', suche_id=suche['id']) }}" enctype="multipart/form-data" class="row g-3">
+        {{ csrf_field()|safe }}
+        <input type="hidden" name="quelle" value="kunde">
+        <div class="col-md-8">
+          <label class="form-label">Dateien / WhatsApp-Screenshots / WAV-Sprachmemo</label>
+          <input type="file" name="dateien" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,.wav,.mp3,.m4a,.ogg,.webm,image/*,application/pdf">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Hinweis</label>
+          <input type="text" name="upload_notiz" class="form-control" placeholder="z.B. WhatsApp vom Kunden">
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-brand">Hochladen und auswerten</button>
+        </div>
+      </form>
+      {% if dateien %}
+      <div class="upload-list mt-4">
+        {% for datei in dateien %}
+        <div class="upload-item">
+          <div class="d-flex justify-content-between gap-2 flex-wrap">
+            <div>
+              <div class="fw-bold">{{ datei['original_name'] }}</div>
+              <div class="text-muted small">{{ datei['hochgeladen_am'] }}{% if datei['analyse_quelle'] %} · {{ datei['analyse_quelle'] }}{% endif %}</div>
+            </div>
+            <a href="{{ url_for('admin_fahrzeugsuche_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Öffnen</a>
+          </div>
+          {% if datei['extrakt_kurz'] %}<div class="mt-2 small">{{ datei['extrakt_kurz'] }}</div>{% endif %}
+          {% if datei['analyse_hinweis'] %}<div class="mt-2 small text-warning">{{ datei['analyse_hinweis'] }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      </div>
+    </details>
+
+    <details class="page-card p-4 mb-4">
+      <summary class="work-panel-summary">Suchprofil und Prozessdaten bearbeiten</summary>
+      <div class="mt-3">
+      <form method="POST" class="row g-3">
+        {{ csrf_field()|safe }}
+        <input type="hidden" name="gekaufter_kandidat_id" value="{{ suche['gekaufter_kandidat_id'] or '' }}">
+        <input type="hidden" name="auftrag_id" value="{{ suche['auftrag_id'] or '' }}">
+        <div class="col-md-3">
+          <label class="form-label">Status</label>
+          <select name="status" class="form-select">
+            {% for key, meta in status_options.items() %}
+            <option value="{{ key }}" {% if suche['status'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Kunde</label>
+          <input type="text" name="kunde_name" class="form-control" value="{{ suche['kunde_name'] }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Handy / WhatsApp</label>
+          <input type="text" name="kontakt_telefon" class="form-control" value="{{ suche['kontakt_telefon'] }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">E-Mail</label>
+          <input type="email" name="kunde_email" class="form-control" value="{{ suche['kunde_email'] }}">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Kundennachricht / Auktionsauftrag</label>
+          <textarea name="suchauftrag_text" class="form-control" rows="4">{{ suche['suchauftrag_text'] }}</textarea>
+        </div>
+        <div class="col-md-5">
+          <label class="form-label">Modelle</label>
+          <input type="text" name="marken_modelle" class="form-control" value="{{ suche['marken_modelle'] }}" placeholder="BMW X3, Mercedes GLC, V-Klasse">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Allgemeiner Wunsch</label>
+          <input type="text" name="fahrzeugwuensche" class="form-control" value="{{ suche['fahrzeugwuensche'] }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Ab Baujahr</label>
+          <input type="number" name="baujahr_min" class="form-control" value="{{ suche['baujahr_min'] or '' }}" min="1900" max="2100">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Bis Baujahr</label>
+          <input type="number" name="baujahr_max" class="form-control" value="{{ suche['baujahr_max'] or '' }}" min="1900" max="2100">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Kilometer von</label>
+          <div class="input-group">
+            <input type="number" name="kilometer_min" class="form-control" value="{{ suche['kilometer_min'] or '' }}" min="0" max="1000000" step="1000">
+            <span class="input-group-text">km</span>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Kilometer bis</label>
+          <div class="input-group">
+            <input type="number" name="kilometer_max" class="form-control" value="{{ suche['kilometer_max'] or '' }}" min="0" max="1000000" step="1000">
+            <span class="input-group-text">km</span>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Budget</label>
+          <input type="text" name="budget" class="form-control" value="{{ suche['budget_label'] }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Abholort</label>
+          <input type="text" name="abholort" class="form-control" value="{{ suche['abholort'] }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Max. Entfernung</label>
+          <div class="input-group">
+            <input type="number" name="max_entfernung_km" class="form-control" value="{{ suche['max_entfernung_km'] }}" min="0" max="1000">
+            <span class="input-group-text">km</span>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Bevorzugte Copart-Standorte</label>
+          <input type="text" name="bevorzugte_standorte" class="form-control" value="{{ suche['bevorzugte_standorte'] }}" placeholder="Mannheim, Stuttgart, Frankfurt">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Pflichtausstattung</label>
+          <input type="text" name="pflichtausstattung" class="form-control" value="{{ suche['pflichtausstattung'] }}" placeholder="Allrad, Standheizung">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Wünsche</label>
+          <input type="text" name="wuensche" class="form-control" value="{{ suche['wuensche'] }}" placeholder="Vollausstattung, Farbe, AHK">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Ausschlusskriterien</label>
+          <input type="text" name="ausschlusskriterien" class="form-control" value="{{ suche['ausschlusskriterien'] }}" placeholder="keine Airbags, kein Wasser, kein Brand">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Nächste Aktion</label>
+          <input type="text" name="naechste_aktion" class="form-control" value="{{ suche['naechste_aktion'] }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Datum</label>
+          <input type="date" name="naechster_kontakt_am" class="form-control" value="{{ suche['naechster_kontakt_am']|iso_date }}">
+        </div>
+        <div class="col-12"><hr class="my-2"></div>
+        <div class="col-md-3">
+          <label class="form-label">Kaufpreis Fahrzeug</label>
+          <input type="text" name="kaufpreis_final" class="form-control" value="{{ suche['kaufpreis_final_label'] }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Gebühren / Transport</label>
+          <input type="text" name="kauf_nebenkosten" class="form-control" value="{{ suche['kauf_nebenkosten_label'] }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Auto-Zahlung</label>
+          <select name="zahlung_fahrzeug_status" class="form-select">
+            {% for key, meta in zahlung_status.items() %}
+            <option value="{{ key }}" {% if suche['zahlung_fahrzeug_status'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Bezahlt am</label>
+          <input type="date" name="zahlung_fahrzeug_am" class="form-control" value="{{ suche['zahlung_fahrzeug_am']|iso_date }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Auto bezahlt Betrag</label>
+          <input type="text" name="zahlung_fahrzeug_betrag" class="form-control" value="{{ suche['zahlung_fahrzeug_betrag_label'] }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Reparaturkalkulation</label>
+          <input type="text" name="reparatur_kalkulation_betrag" class="form-control" value="{{ suche['reparatur_kalkulation_betrag_label'] }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Reparatur-Zahlung</label>
+          <select name="zahlung_reparatur_status" class="form-select">
+            {% for key, meta in zahlung_status.items() %}
+            <option value="{{ key }}" {% if suche['zahlung_reparatur_status'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Reparatur bezahlt am</label>
+          <input type="date" name="zahlung_reparatur_am" class="form-control" value="{{ suche['zahlung_reparatur_am']|iso_date }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Reparatur bezahlt Betrag</label>
+          <input type="text" name="zahlung_reparatur_betrag" class="form-control" value="{{ suche['zahlung_reparatur_betrag_label'] }}">
+        </div>
+        <div class="col-md-9">
+          <label class="form-label">Prozessnotiz</label>
+          <input type="text" name="prozess_notiz" class="form-control" value="{{ suche['prozess_notiz'] }}" placeholder="z.B. Kunde zahlt Fahrzeug sofort, Reparatur nach Fertigstellung">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Angebotstext</label>
+          <textarea name="angebot_text" class="form-control" rows="8">{{ suche['angebot_text'] or angebot_vorschlag }}</textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Interne Notiz</label>
+          <textarea name="notiz" class="form-control" rows="4">{{ suche['notiz'] }}</textarea>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-brand">Auktionsauftrag speichern</button>
+        </div>
+      </form>
+      </div>
+    </details>
+
+    <details class="page-card p-4 mb-4" id="kandidaten">
+      <summary class="work-panel-summary">Manuell Kandidat erfassen</summary>
+      <div class="mt-3">
+      <form method="POST" action="{{ url_for('admin_fahrzeug_kandidat_neu', suche_id=suche['id']) }}" class="row g-3">
+        {{ csrf_field()|safe }}
+        <input type="hidden" name="status" value="neu">
+        <input type="hidden" name="quelle" value="Copart">
+        <div class="col-md-5">
+          <label class="form-label">Titel</label>
+          <input type="text" name="titel" class="form-control" placeholder="z.B. 2023 Mercedes GLC 300 4MATIC">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Copart-/Auktionslink</label>
+          <input type="url" name="fahrzeug_url" class="form-control" placeholder="https://...">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Lot / Referenz</label>
+          <input type="text" name="lot_nummer" class="form-control">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Baujahr</label>
+          <input type="number" name="baujahr" class="form-control" min="1900" max="2100">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Kilometer</label>
+          <input type="text" name="kilometerstand" class="form-control">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Standort</label>
+          <input type="text" name="standort" class="form-control">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Auktion</label>
+          <input type="date" name="auktion_datum" class="form-control">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Auktionszeit</label>
+          <input type="time" name="auktion_uhrzeit" class="form-control">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Online seit</label>
+          <input type="date" name="angebot_online_seit" class="form-control">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Max. Gebot</label>
+          <input type="text" name="gebot_max" class="form-control">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Wert repariert</label>
+          <input type="text" name="marktwert_repariert" class="form-control">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Gebühren / Puffer</label>
+          <input type="text" name="nebenkosten_kalkulation" class="form-control">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Zielgewinn</label>
+          <input type="text" name="ziel_gewinn" class="form-control">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Airbags</label>
+          <select name="airbags_status" class="form-select">
+            {% for key, meta in airbags_options.items() %}
+            <option value="{{ key }}">{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Fahrbarkeit</label>
+          <select name="fahrbereit_status" class="form-select">
+            {% for key, meta in fahrbereit_options.items() %}
+            <option value="{{ key }}">{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Transport</label>
+          <input type="text" name="transport_kosten" class="form-control">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Reparatur grob</label>
+          <input type="text" name="reparatur_kosten" class="form-control">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Schaden / Prüfung</label>
+          <textarea name="schaden_beschreibung" class="form-control" rows="3" placeholder="Schadenbild, Teile, Airbag-Hinweise, Struktur, Papiere"></textarea>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Kaufempfehlung</label>
+          <input type="text" name="kaufempfehlung" class="form-control" placeholder="z.B. bis 26.500 EUR interessant">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Marktvergleich</label>
+          <input type="text" name="marktvergleich_text" class="form-control" placeholder="vergleichbare Angebote / Quelle">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Vorteile</label>
+          <textarea name="vorteile" class="form-control" rows="2"></textarea>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Nachteile</label>
+          <textarea name="nachteile" class="form-control" rows="2"></textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Kundenblatt</label>
+          <textarea name="kundenblatt_text" class="form-control" rows="4" placeholder="Kurzer Text, den du dem Kunden direkt schicken kannst."></textarea>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-brand">Kandidat speichern</button>
+        </div>
+      </form>
+      </div>
+    </details>
+
+    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3" id="kandidatenliste">
+      <div>
+        <h2 class="h4 mb-1">Interne Kandidatenprüfung</h2>
+        <div class="text-muted small">Abgelaufene Auktionen, alte Treffer und Fahrzeuge über dem Kilometerlimit werden aus der Empfehlung entfernt.</div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <span class="badge text-bg-success">{{ kandidaten|length }} rentabel</span>
+        {% if ausgeschlossene_kandidaten %}<span class="badge text-bg-danger">{{ ausgeschlossene_kandidaten|length }} rausgefiltert</span>{% endif %}
+      </div>
+    </div>
+
+    <div class="candidate-grid">
+      {% for kandidat in kandidaten %}
+      <div class="candidate-panel" id="kandidat-{{ kandidat['id'] }}">
+        <form method="POST" action="{{ url_for('admin_fahrzeug_kandidat_update', suche_id=suche['id'], kandidat_id=kandidat['id']) }}" class="row g-3">
+          {{ csrf_field()|safe }}
+          <div class="col-lg-5">
+            {% if kandidat['bild_url'] %}
+            <img src="{{ kandidat['bild_url'] }}" alt="{{ kandidat['titel'] or 'Fahrzeug' }}" class="candidate-image mb-3">
+            {% endif %}
+            <div class="d-flex gap-2 flex-wrap mb-2">
+              <span class="badge text-bg-{{ kandidat['status_meta']['farbe'] }}">{{ kandidat['status_meta']['label'] }}</span>
+              <span class="badge text-bg-{{ kandidat['profil_check']['farbe'] }}">{{ kandidat['profil_check']['label'] }}</span>
+              <span class="badge text-bg-{{ kandidat['assessment']['farbe'] }}">Score {{ kandidat['assessment']['score'] }} · {{ kandidat['assessment']['label'] }}</span>
+              <span class="badge text-bg-{{ kandidat['rendite_check']['farbe'] }}">Rendite {{ kandidat['rendite_check']['label'] }}</span>
+              {% if kandidat['auktion_info']['alarm_active'] %}
+              <span class="badge text-bg-{{ kandidat['auktion_info']['farbe'] }}">{{ kandidat['auktion_info']['alarm_label'] }}</span>
+              {% endif %}
+              <span class="badge text-bg-{{ kandidat['airbags_meta']['farbe'] }}">{{ kandidat['airbags_meta']['label'] }}</span>
+              <span class="badge text-bg-{{ 'success' if kandidat['standort_in_radius'] else 'warning' }}">{{ kandidat['standort'] or 'Standort offen' }} · {{ kandidat['standort_entfernung_label'] }}</span>
+            </div>
+            {% if kandidat['assessment']['reasons'] %}
+            <ul class="risk-list small text-muted">
+              {% for reason in kandidat['assessment']['reasons'] %}
+              <li>{{ reason }}</li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+            {% if kandidat['profil_check']['reasons'] or kandidat['profil_check']['warnings'] %}
+            <ul class="risk-list small text-muted">
+              {% for reason in kandidat['profil_check']['reasons'] %}
+              <li>Profil: {{ reason }}</li>
+              {% endfor %}
+              {% for warning in kandidat['profil_check']['warnings'] %}
+              <li>Profil: {{ warning }}</li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+            <div class="candidate-sheet mt-3">
+              <div class="candidate-sheet-title">Auktionsblatt</div>
+              <div class="candidate-sheet-grid">
+                <div class="candidate-sheet-item">
+                  <span>Auktionsdatum</span>
+                  <strong>{{ kandidat['auktion_info']['kurz'] or kandidat['auktion_datum'] or 'offen' }}</strong>
+                </div>
+                <div class="candidate-sheet-item">
+                  <span>Kilometer</span>
+                  <strong>{{ kandidat['kilometerstand'] or 'offen' }}</strong>
+                </div>
+                <div class="candidate-sheet-item">
+                  <span>Marktwert repariert</span>
+                  <strong>{{ kandidat['marktwert_repariert_label'] or 'offen' }}</strong>
+                </div>
+                <div class="candidate-sheet-item">
+                  <span>Reparaturkosten grob</span>
+                  <strong>{{ kandidat['reparatur_kosten_label'] or 'offen' }}</strong>
+                </div>
+                <div class="candidate-sheet-item">
+                  <span>Gebühren / Transport</span>
+                  <strong>{{ kandidat['transport_nebenkosten_summe_label'] or 'offen' }}</strong>
+                </div>
+                <div class="candidate-sheet-item">
+                  <span>Max. Gebot</span>
+                  <strong>{{ kandidat['gebot_empfehlung_label'] or 'offen' }}</strong>
+                </div>
+                <div class="candidate-sheet-item">
+                  <span>Bei Kauf fällig</span>
+                  <strong>{{ kandidat['kauf_faellig_summe_label'] or 'offen' }}</strong>
+                </div>
+                <div class="candidate-sheet-item">
+                  <span>Puffer nach Reparatur</span>
+                  <strong class="{% if kandidat['puffer_nach_reparatur'] < 0 %}text-danger{% elif kandidat['puffer_nach_reparatur_label'] %}text-success{% endif %}">{{ kandidat['puffer_nach_reparatur_label'] or 'offen' }}</strong>
+                </div>
+              </div>
+              {% if kandidat['marktvergleich_text'] %}
+              <div class="mt-3 small text-muted">
+                <strong>Marktcheck:</strong> {{ kandidat['marktvergleich_text'] }}
+              </div>
+              {% endif %}
+              {% if kandidat['kaufempfehlung'] %}
+              <div class="mt-3 fw-bold">{{ kandidat['kaufempfehlung'] }}</div>
+              {% endif %}
+              {% if kandidat['copart_bid_url'] %}
+              <a href="{{ kandidat['copart_bid_url'] }}" class="btn btn-brand btn-sm w-100 mt-3">Bei Copart bieten</a>
+              {% elif kandidat['fahrzeug_url'] %}
+              <a href="{{ kandidat['fahrzeug_url'] }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm w-100 mt-3">Quelle öffnen</a>
+              {% endif %}
+              {% if kandidat['kundenblatt_text'] %}
+              <div class="mt-3">
+                <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                  <span class="fw-bold small">Text für Kunde</span>
+                  <button type="button" class="btn btn-soft btn-sm" data-copy-target="kundenblatt-{{ kandidat['id'] }}">Kopieren</button>
+                </div>
+                <textarea id="kundenblatt-{{ kandidat['id'] }}" class="form-control candidate-forward-text" readonly>{{ kandidat['kundenblatt_text'] }}</textarea>
+              </div>
+              {% endif %}
+              {% if kandidat['rendite_check']['warnings'] %}
+              <ul class="risk-list small text-muted mt-2">
+                {% for warning in kandidat['rendite_check']['warnings'] %}
+                <li>{{ warning }}</li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <details class="candidate-edit-details">
+              <summary>Interne Daten bearbeiten</summary>
+              <div class="row g-3 mt-2">
+              <div class="col-md-4">
+                <label class="form-label">Status</label>
+                <select name="status" class="form-select">
+                  {% for key, meta in kandidat_status.items() %}
+                  <option value="{{ key }}" {% if kandidat['status'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Quelle</label>
+                <input type="text" name="quelle" class="form-control" value="{{ kandidat['quelle'] }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Lot / Referenz</label>
+                <input type="text" name="lot_nummer" class="form-control" value="{{ kandidat['lot_nummer'] }}">
+              </div>
+              <div class="col-md-8">
+                <label class="form-label">Titel</label>
+                <input type="text" name="titel" class="form-control" value="{{ kandidat['titel'] }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Baujahr</label>
+                <input type="number" name="baujahr" class="form-control" value="{{ kandidat['baujahr'] or '' }}" min="1900" max="2100">
+              </div>
+              <div class="col-md-8">
+                <label class="form-label">Link</label>
+                <input type="url" name="fahrzeug_url" class="form-control" value="{{ kandidat['fahrzeug_url'] }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">FIN</label>
+                <input type="text" name="fin_nummer" class="form-control" value="{{ kandidat['fin_nummer'] }}" style="text-transform:uppercase;">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Kilometer</label>
+                <input type="text" name="kilometerstand" class="form-control" value="{{ kandidat['kilometerstand'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Standort</label>
+                <input type="text" name="standort" class="form-control" value="{{ kandidat['standort'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Auktion</label>
+                <input type="date" name="auktion_datum" class="form-control" value="{{ kandidat['auktion_datum']|iso_date }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Auktionszeit</label>
+                <input type="time" name="auktion_uhrzeit" class="form-control" value="{{ kandidat['auktion_uhrzeit'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Online seit</label>
+                <input type="date" name="angebot_online_seit" class="form-control" value="{{ kandidat['angebot_online_seit']|iso_date }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Titelstatus</label>
+                <input type="text" name="titelstatus" class="form-control" value="{{ kandidat['titelstatus'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Aktuelles Gebot</label>
+                <input type="text" name="kaufpreis_aktuell" class="form-control" value="{{ kandidat['kaufpreis_aktuell_label'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Sofortkauf</label>
+                <input type="text" name="sofortkauf_preis" class="form-control" value="{{ kandidat['sofortkauf_preis_label'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Max. Gebot</label>
+                <input type="text" name="gebot_max" class="form-control" value="{{ kandidat['gebot_max_label'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Gesamt nach Reparatur</label>
+                <input type="text" name="gesamt_kalkulation" class="form-control" value="{{ kandidat['gesamt_kalkulation_label'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Wert repariert</label>
+                <input type="text" name="marktwert_repariert" class="form-control" value="{{ kandidat['marktwert_repariert_label'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Gebühren / Puffer</label>
+                <input type="text" name="nebenkosten_kalkulation" class="form-control" value="{{ kandidat['nebenkosten_kalkulation_label'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Zielgewinn</label>
+                <input type="text" name="ziel_gewinn" class="form-control" value="{{ kandidat['ziel_gewinn_label'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Rechnerisch max.</label>
+                <input type="text" class="form-control" value="{{ kandidat['rechnerisches_max_gebot_label'] }}" readonly>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Transport</label>
+                <input type="text" name="transport_kosten" class="form-control" value="{{ kandidat['transport_kosten_label'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Reparatur grob</label>
+                <input type="text" name="reparatur_kosten" class="form-control" value="{{ kandidat['reparatur_kosten_label'] }}">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Airbags</label>
+                <select name="airbags_status" class="form-select">
+                  {% for key, meta in airbags_options.items() %}
+                  <option value="{{ key }}" {% if kandidat['airbags_status'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Fahrbarkeit</label>
+                <select name="fahrbereit_status" class="form-select">
+                  {% for key, meta in fahrbereit_options.items() %}
+                  <option value="{{ key }}" {% if kandidat['fahrbereit_status'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-12">
+                <label class="form-label">Bild-URL</label>
+                <input type="url" name="bild_url" class="form-control" value="{{ kandidat['bild_url'] }}">
+              </div>
+              <div class="col-12">
+                <label class="form-label">Schaden / Prüfung</label>
+                <textarea name="schaden_beschreibung" class="form-control" rows="3">{{ kandidat['schaden_beschreibung'] }}</textarea>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Bewertung</label>
+                <input type="text" name="bewertung" class="form-control" value="{{ kandidat['bewertung'] }}" placeholder="z.B. nur Karosserie, gute Basis">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Notiz</label>
+                <input type="text" name="notiz" class="form-control" value="{{ kandidat['notiz'] }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Kaufempfehlung</label>
+                <input type="text" name="kaufempfehlung" class="form-control" value="{{ kandidat['kaufempfehlung'] }}" placeholder="z.B. sinnvoll bis 26.500 EUR">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Marktvergleich</label>
+                <textarea name="marktvergleich_text" class="form-control candidate-longtext" rows="3">{{ kandidat['marktvergleich_text'] }}</textarea>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Typische Mängel</label>
+                <textarea name="typische_maengel" class="form-control candidate-longtext" rows="3">{{ kandidat['typische_maengel'] }}</textarea>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Vorteile</label>
+                <textarea name="vorteile" class="form-control candidate-longtext" rows="3">{{ kandidat['vorteile'] }}</textarea>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Nachteile</label>
+                <textarea name="nachteile" class="form-control candidate-longtext" rows="3">{{ kandidat['nachteile'] }}</textarea>
+              </div>
+              <div class="col-12">
+                <label class="form-label">Kundenblatt</label>
+                <textarea name="kundenblatt_text" class="form-control" rows="5">{{ kandidat['kundenblatt_text'] }}</textarea>
+              </div>
+              <div class="col-12 d-flex gap-2 flex-wrap justify-content-between">
+                <div class="d-flex gap-2 flex-wrap">
+                  {% if kandidat['copart_bid_url'] %}
+                  <a href="{{ kandidat['copart_bid_url'] }}" class="btn btn-brand">Bei Copart bieten</a>
+                  {% elif kandidat['fahrzeug_url'] %}
+                  <a href="{{ kandidat['fahrzeug_url'] }}" target="_blank" rel="noopener" class="btn btn-soft">Quelle öffnen</a>
+                  {% endif %}
+                  <button type="submit" class="btn btn-brand">Kandidat speichern</button>
+                  {% if suche['gekaufter_kandidat_id'] == kandidat['id'] %}
+                  <a href="{{ url_for('auftrag_detail', auftrag_id=suche['auftrag_id']) }}" class="btn btn-success">Gekaufter Auftrag</a>
+                  {% elif not suche['gekaufter_kandidat_id'] %}
+                  <button type="submit" class="btn btn-success" formaction="{{ url_for('admin_fahrzeug_kandidat_kauf', suche_id=suche['id'], kandidat_id=kandidat['id']) }}" data-confirm="Diesen Kandidaten als gekauft übernehmen und einen normalen Auftrag anlegen?">Als gekauft übernehmen</button>
+                  {% endif %}
+                </div>
+                <button type="submit" name="aktion" value="loeschen" class="btn btn-outline-danger" data-confirm="Kandidat wirklich löschen?">Löschen</button>
+              </div>
+              </div>
+            </details>
+          </div>
+        </form>
+      </div>
+      {% else %}
+      <div class="page-card p-4">
+        <div class="text-muted">Keine rentablen Kandidaten in dieser Suche. Copart-Link oder Lot-Nummer oben eintragen, danach werden unsinnige Treffer automatisch rausgefiltert.</div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if ausgeschlossene_kandidaten %}
+    <details class="page-card p-4 mt-4">
+      <summary class="fw-bold">Ausgeschlossen / nicht anzeigen ({{ ausgeschlossene_kandidaten|length }})</summary>
+      <div class="d-grid gap-2 mt-3">
+        {% for kandidat in ausgeschlossene_kandidaten %}
+        <div class="excluded-candidate">
+          <div class="d-flex justify-content-between gap-2 flex-wrap">
+            <div>
+              <div class="fw-bold">{{ kandidat['titel'] or kandidat['lot_nummer'] }}</div>
+              <div class="text-muted small">
+                {{ kandidat['lot_nummer'] or 'ohne Lot' }}
+                {% if kandidat['standort'] %} · {{ kandidat['standort'] }}{% endif %}
+                {% if kandidat['reparatur_kosten_label'] %} · Reparatur {{ kandidat['reparatur_kosten_label'] }}{% endif %}
+              </div>
+            </div>
+            <span class="badge text-bg-{{ kandidat['rendite_check']['farbe'] }}">Rendite {{ kandidat['rendite_check']['label'] }}</span>
+          </div>
+          {% if kandidat['rendite_check']['reasons'] %}
+          <div class="small text-muted mt-2">Grund: {{ kandidat['rendite_check']['reasons']|join(', ') }}</div>
+          {% endif %}
+          <div class="d-flex gap-2 flex-wrap mt-2">
+            {% if kandidat['copart_bid_url'] %}
+            <a href="{{ kandidat['copart_bid_url'] }}" class="btn btn-soft btn-sm">Bei Copart ansehen</a>
+            {% elif kandidat['fahrzeug_url'] %}
+            <a href="{{ kandidat['fahrzeug_url'] }}" target="_blank" rel="noopener" class="btn btn-soft btn-sm">Quelle öffnen</a>
+            {% endif %}
+            <span class="small text-muted">Marktwert {{ kandidat['marktwert_repariert_label'] or 'offen' }} · Puffer {{ kandidat['puffer_nach_reparatur_label'] or 'offen' }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
+  </div>
+
+  <div class="col-xl-4">
+    <div class="page-card p-4 mb-4">
+      <h2 class="h4 mb-3">Suchprofil</h2>
+      <div class="d-flex gap-2 flex-wrap mb-3">
+        {% for model in suche['modelle_liste'] %}
+        <span class="badge text-bg-light text-dark border">{{ model }}</span>
+        {% endfor %}
+        {% if suche['baujahr_min'] %}<span class="badge text-bg-light text-dark border">ab {{ suche['baujahr_min'] }}</span>{% endif %}
+        {% if suche['kilometer_filter_label'] %}<span class="badge text-bg-light text-dark border">{{ suche['kilometer_filter_label'] }}</span>{% endif %}
+        {% if suche['budget_label'] %}<span class="badge text-bg-light text-dark border">{{ suche['budget_label'] }}</span>{% endif %}
+        <span class="badge text-bg-light text-dark border">{{ suche['entfernung_filter_label'] }}</span>
+      </div>
+      {% if suche['standorte_liste'] %}
+      <div class="mb-3">
+        <div class="fw-bold mb-1">Nahe Standorte</div>
+        <div class="d-flex gap-2 flex-wrap">
+          {% for item in suche['standorte_liste'] %}<span class="badge text-bg-info">{{ item }}</span>{% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      {% if suche['pflicht_liste'] %}
+      <div class="mb-3">
+        <div class="fw-bold mb-1">Pflicht</div>
+        <div class="d-flex gap-2 flex-wrap">
+          {% for item in suche['pflicht_liste'] %}<span class="badge text-bg-success">{{ item }}</span>{% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      {% if suche['ausschluss_liste'] %}
+      <div class="mb-3">
+        <div class="fw-bold mb-1">Ausschluss</div>
+        <div class="d-flex gap-2 flex-wrap">
+          {% for item in suche['ausschluss_liste'] %}<span class="badge text-bg-danger">{{ item }}</span>{% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      <div class="{{ 'text-danger fw-bold' if suche['is_due'] else 'text-muted' }} mb-2">
+        {{ suche['naechster_kontakt_am'] or 'Kein Datum gesetzt' }}
+      </div>
+      <div>{{ suche['naechste_aktion'] or 'Nächste Aktion festlegen.' }}</div>
+    </div>
+
+    <div class="page-card p-4 mb-4">
+      <h2 class="h4 mb-3">Prüfliste</h2>
+      <div class="d-grid gap-2">
+        <div class="border rounded-3 p-2 bg-white">Airbags laut Bildern und Beschreibung nicht ausgelöst</div>
+        <div class="border rounded-3 p-2 bg-white">Schaden überwiegend Karosserie/Lack, keine Strukturwarnung</div>
+        <div class="border rounded-3 p-2 bg-white">Fahrbarkeit, Schlüssel, Papiere und Titelstatus geprüft</div>
+        <div class="border rounded-3 p-2 bg-white">Copart-Gebühren, Transport und Reparatur grob kalkuliert</div>
+        <div class="border rounded-3 p-2 bg-white">Maximalgebot mit Puffer festgelegt</div>
+      </div>
+    </div>
+
+    <div class="page-card p-4">
+      <h2 class="h4 mb-3">Info</h2>
+      <div class="text-muted small">
+        Erstellt: {{ suche['erstellt_am'] }}<br>
+        Geändert: {{ suche['geaendert_am'] }}<br>
+        Kandidaten: {{ suche['kandidaten_count'] }}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+  const form = document.querySelector('[data-vehicle-search-voice-form]');
+  if (!form) return;
+
+  const button = form.querySelector('[data-vehicle-search-voice-button]');
+  const textarea = form.querySelector('[data-vehicle-search-voice-text]');
+  const status = form.querySelector('[data-vehicle-search-voice-status]');
+  const speechUrl = form.dataset.speechUrl || '';
+  const csrfToken = form.dataset.csrfToken || '';
+  const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+  const canRecord = Boolean(button && textarea && speechUrl && navigator.mediaDevices && AudioContextConstructor);
+
+  let mediaStream = null;
+  let audioContext = null;
+  let sourceNode = null;
+  let processorNode = null;
+  let recordingBuffers = [];
+  let recordingLength = 0;
+  let recordingTimer = null;
+  let recording = false;
+
+  const setStatus = (message) => {
+    if (status) status.textContent = message || '';
+  };
+
+  const mergeBuffers = (buffers, length) => {
+    const result = new Float32Array(length);
+    let offset = 0;
+    buffers.forEach((buffer) => {
+      result.set(buffer, offset);
+      offset += buffer.length;
+    });
+    return result;
+  };
+
+  const downsampleBuffer = (buffer, inputRate, outputRate) => {
+    if (inputRate === outputRate) return buffer;
+    const ratio = inputRate / outputRate;
+    const newLength = Math.round(buffer.length / ratio);
+    const result = new Float32Array(newLength);
+    let offsetResult = 0;
+    let offsetBuffer = 0;
+    while (offsetResult < result.length) {
+      const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+      let accumulator = 0;
+      let count = 0;
+      for (let index = offsetBuffer; index < nextOffsetBuffer && index < buffer.length; index += 1) {
+        accumulator += buffer[index];
+        count += 1;
+      }
+      result[offsetResult] = count ? accumulator / count : 0;
+      offsetResult += 1;
+      offsetBuffer = nextOffsetBuffer;
+    }
+    return result;
+  };
+
+  const encodeWav = (samples, sampleRate) => {
+    const dataLength = samples.length * 2;
+    const buffer = new ArrayBuffer(44 + dataLength);
+    const view = new DataView(buffer);
+    const writeString = (offset, value) => {
+      for (let index = 0; index < value.length; index += 1) {
+        view.setUint8(offset + index, value.charCodeAt(index));
+      }
+    };
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataLength, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataLength, true);
+    let offset = 44;
+    samples.forEach((sample) => {
+      const clamped = Math.max(-1, Math.min(1, sample));
+      view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+      offset += 2;
+    });
+    return new Blob([view], { type: 'audio/wav' });
+  };
+
+  const cleanup = async () => {
+    if (recordingTimer) {
+      window.clearTimeout(recordingTimer);
+      recordingTimer = null;
+    }
+    if (processorNode) {
+      processorNode.disconnect();
+      processorNode.onaudioprocess = null;
+      processorNode = null;
+    }
+    if (sourceNode) {
+      sourceNode.disconnect();
+      sourceNode = null;
+    }
+    if (mediaStream) {
+      mediaStream.getTracks().forEach((track) => track.stop());
+      mediaStream = null;
+    }
+    if (audioContext) {
+      await audioContext.close().catch(() => {});
+      audioContext = null;
+    }
+  };
+
+  const stopRecording = async () => {
+    if (!recording) return;
+    const sampleRate = audioContext ? audioContext.sampleRate : 48000;
+    recording = false;
+    button.textContent = 'Sprechen';
+    await cleanup();
+    const merged = mergeBuffers(recordingBuffers, recordingLength);
+    recordingBuffers = [];
+    recordingLength = 0;
+    if (!merged.length) {
+      setStatus('Keine Aufnahme erkannt.');
+      return;
+    }
+    setStatus('Diktat wird lokal ausgewertet...');
+    const wavBlob = encodeWav(downsampleBuffer(merged, sampleRate, 16000), 16000);
+    const formData = new FormData();
+    formData.append('audio', wavBlob, 'fahrzeugsuche-diktat.wav');
+    try {
+      const response = await fetch(speechUrl, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken },
+        body: formData
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.text) {
+        setStatus(payload.error || 'Sprache konnte nicht erkannt werden.');
+        return;
+      }
+      textarea.value = [textarea.value.trim(), payload.text].filter(Boolean).join('\n');
+      setStatus('Diktat eingefügt. Danach Text auswerten.');
+      textarea.focus();
+    } catch (error) {
+      setStatus('Spracheingabe konnte nicht abgeschlossen werden.');
+    }
+  };
+
+  const startRecording = async () => {
+    if (!canRecord) {
+      setStatus('Spracheingabe ist lokal im Browser nicht verfügbar.');
+      return;
+    }
+    if (recording) {
+      await stopRecording();
+      return;
+    }
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioContext = new AudioContextConstructor();
+      sourceNode = audioContext.createMediaStreamSource(mediaStream);
+      processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+      recordingBuffers = [];
+      recordingLength = 0;
+      processorNode.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0);
+        recordingBuffers.push(new Float32Array(input));
+        recordingLength += input.length;
+      };
+      sourceNode.connect(processorNode);
+      processorNode.connect(audioContext.destination);
+      recording = true;
+      button.textContent = 'Stopp';
+      setStatus('Ich höre zu...');
+      recordingTimer = window.setTimeout(stopRecording, 12000);
+    } catch (error) {
+      await cleanup();
+      setStatus('Mikrofon konnte nicht gestartet werden.');
+    }
+  };
+
+  button.addEventListener('click', startRecording);
+})();
+
+(() => {
+  const buttons = document.querySelectorAll('[data-copy-target]');
+  buttons.forEach((button) => {
+    button.addEventListener('click', async () => {
+      const target = document.getElementById(button.dataset.copyTarget || '');
+      if (!target) return;
+      const text = target.value || target.textContent || '';
+      try {
+        await navigator.clipboard.writeText(text);
+        const original = button.textContent;
+        button.textContent = 'Kopiert';
+        window.setTimeout(() => { button.textContent = original; }, 1400);
+      } catch (error) {
+        target.focus();
+        target.select();
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

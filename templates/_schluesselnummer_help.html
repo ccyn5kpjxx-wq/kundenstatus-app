@@ -1,0 +1,401 @@
+<style>
+  .schluesselnummer-help-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    margin-left: .35rem;
+    border: 2px solid #0f3a68;
+    border-radius: 50%;
+    background: transparent;
+    color: #0f3a68;
+    font-size: .88rem;
+    font-weight: 800;
+    line-height: 1;
+    vertical-align: middle;
+  }
+  .schluesselnummer-help-button:hover,
+  .schluesselnummer-help-button:focus {
+    background: #0f3a68;
+    color: #fff;
+    outline: none;
+    box-shadow: 0 0 0 .18rem rgba(15, 58, 104, .18);
+  }
+  .schluesselnummer-help-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 4500;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(14, 20, 29, .52);
+    padding: 1rem;
+  }
+  .schluesselnummer-help-modal.is-open {
+    display: flex;
+  }
+  .schluesselnummer-help-dialog {
+    width: min(520px, 100%);
+    max-height: min(92vh, 720px);
+    overflow: auto;
+    background: #fff;
+    color: #121820;
+    border-radius: 8px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .32);
+  }
+  .schluesselnummer-help-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .95rem 1.15rem;
+    border-bottom: 1px solid #e6e9ee;
+  }
+  .schluesselnummer-help-header h2 {
+    margin: 0;
+    font: 700 1.15rem/1.25 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: 0;
+  }
+  .schluesselnummer-help-close {
+    width: 2rem;
+    height: 2rem;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: #536070;
+    font-size: 1.45rem;
+    line-height: 1;
+  }
+  .schluesselnummer-help-close:hover,
+  .schluesselnummer-help-close:focus {
+    background: #eef2f7;
+    color: #16202a;
+    outline: none;
+  }
+  .schluesselnummer-help-body {
+    padding: 1.05rem;
+    background: #f7f8fa;
+  }
+  .schluesselnummer-help-intro {
+    margin: 0 0 1rem;
+    color: #374151;
+    line-height: 1.45;
+  }
+  .schluesselnummer-example {
+    position: relative;
+    background: #fff;
+    border: 1px solid #e3e8ef;
+    border-radius: 8px;
+    padding: 1rem;
+    overflow: hidden;
+  }
+  .schluesselnummer-document-title {
+    margin-bottom: .75rem;
+    color: #111827;
+    font-weight: 800;
+  }
+  .schluesselnummer-document {
+    position: relative;
+    min-height: 165px;
+    border: 1px solid #c9d0d8;
+    background:
+      repeating-linear-gradient(0deg, rgba(201, 208, 216, .45), rgba(201, 208, 216, .45) 1px, transparent 1px, transparent 25px),
+      repeating-linear-gradient(90deg, rgba(201, 208, 216, .35), rgba(201, 208, 216, .35) 1px, transparent 1px, transparent 76px),
+      linear-gradient(135deg, #f9fbfd, #eef2f5);
+  }
+  .schluesselnummer-doc-line {
+    position: absolute;
+    left: 1.2rem;
+    height: .75rem;
+    background: rgba(20, 31, 42, .12);
+  }
+  .schluesselnummer-doc-line:nth-child(1) { top: 1.25rem; width: 70%; }
+  .schluesselnummer-doc-line:nth-child(2) { top: 3.45rem; width: 46%; }
+  .schluesselnummer-doc-line:nth-child(3) { top: 5.65rem; width: 66%; }
+  .schluesselnummer-doc-line:nth-child(4) { top: 7.85rem; width: 52%; }
+  .schluesselnummer-highlight {
+    position: absolute;
+    top: 2.55rem;
+    left: 39%;
+    display: flex;
+    align-items: stretch;
+    border: 2px solid #e11d48;
+    background: rgba(255, 255, 255, .88);
+    font-weight: 800;
+  }
+  .schluesselnummer-highlight-item {
+    display: flex;
+    align-items: center;
+    min-height: 2.55rem;
+    border-right: 1px solid #d4d9df;
+  }
+  .schluesselnummer-highlight-item:last-child {
+    border-right: 0;
+  }
+  .schluesselnummer-highlight small {
+    display: grid;
+    place-items: center;
+    width: 2.25rem;
+    height: 100%;
+    color: #657385;
+    font-size: .82rem;
+  }
+  .schluesselnummer-highlight strong {
+    min-width: 4rem;
+    padding: 0 .65rem;
+    font-size: 1rem;
+    letter-spacing: .04em;
+  }
+  .schluesselnummer-callouts {
+    position: absolute;
+    left: 6%;
+    right: 6%;
+    bottom: 1rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .7rem;
+  }
+  .schluesselnummer-callout {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    border: 1px solid #222;
+    background: #fff;
+    box-shadow: 0 .3rem .55rem rgba(0, 0, 0, .08);
+  }
+  .schluesselnummer-callout::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 100%;
+    width: 1px;
+    height: 2.2rem;
+    background: #111;
+  }
+  .schluesselnummer-callout span {
+    padding: .6rem .75rem;
+    border-right: 1px solid #111;
+    color: #6b7280;
+    font-size: .95rem;
+    font-weight: 800;
+  }
+  .schluesselnummer-callout strong {
+    padding: .55rem .85rem;
+    color: #111827;
+    font-size: 1.25rem;
+    letter-spacing: .03em;
+  }
+  .schluesselnummer-help-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .75rem;
+    margin-top: .85rem;
+  }
+  .schluesselnummer-help-card {
+    border: 1px solid #dde5ef;
+    border-radius: 8px;
+    background: #fff;
+    padding: .85rem;
+  }
+  .schluesselnummer-help-card strong {
+    display: block;
+    margin-bottom: .25rem;
+    color: #111827;
+  }
+  .schluesselnummer-help-card span {
+    color: #4b5563;
+    font-size: .92rem;
+    line-height: 1.35;
+  }
+  .schluesselnummer-help-note {
+    margin: .9rem .1rem 0;
+    color: #4b5563;
+    font-size: .92rem;
+    line-height: 1.45;
+  }
+  @media (max-width: 520px) {
+    .schluesselnummer-help-body { padding: .75rem; }
+    .schluesselnummer-document { min-height: 185px; }
+    .schluesselnummer-highlight { left: 26%; }
+    .schluesselnummer-highlight small { width: 1.85rem; }
+    .schluesselnummer-highlight strong {
+      min-width: 3.2rem;
+      padding: 0 .4rem;
+    }
+    .schluesselnummer-callouts,
+    .schluesselnummer-help-grid {
+      grid-template-columns: 1fr;
+    }
+    .schluesselnummer-callout::before { height: 1.3rem; }
+  }
+</style>
+
+<div class="schluesselnummer-help-modal" data-schluesselnummer-help-modal hidden>
+  <div class="schluesselnummer-help-dialog" role="dialog" aria-modal="true" aria-labelledby="schluesselnummer-help-title">
+    <div class="schluesselnummer-help-header">
+      <h2 id="schluesselnummer-help-title">Wo finde ich HSN und TSN?</h2>
+      <button type="button" class="schluesselnummer-help-close" data-schluesselnummer-help-close aria-label="Schließen">&times;</button>
+    </div>
+    <div class="schluesselnummer-help-body">
+      <p class="schluesselnummer-help-intro">
+        HSN und TSN sind die Schlüsselnummern aus dem Fahrzeugschein. Damit können wir Marke,
+        Fahrzeugtyp und passende Fahrzeugdaten genauer zuordnen.
+      </p>
+
+      <div class="schluesselnummer-example">
+        <div class="schluesselnummer-document-title">Fahrzeugschein / Zulassungsbescheinigung Teil I</div>
+        <div class="schluesselnummer-document" aria-hidden="true">
+          <div class="schluesselnummer-doc-line"></div>
+          <div class="schluesselnummer-doc-line"></div>
+          <div class="schluesselnummer-doc-line"></div>
+          <div class="schluesselnummer-doc-line"></div>
+          <div class="schluesselnummer-highlight">
+            <div class="schluesselnummer-highlight-item"><small>2.1</small><strong>0588</strong></div>
+            <div class="schluesselnummer-highlight-item"><small>2.2</small><strong>748</strong></div>
+          </div>
+          <div class="schluesselnummer-callouts">
+            <div class="schluesselnummer-callout"><span>HSN: Feld 2.1</span><strong>0588</strong></div>
+            <div class="schluesselnummer-callout"><span>TSN: Feld 2.2</span><strong>748</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="schluesselnummer-help-grid">
+        <div class="schluesselnummer-help-card">
+          <strong>HSN eintragen</strong>
+          <span>Die 4-stellige Nummer aus Feld 2.1, zum Beispiel <b>0588</b>.</span>
+        </div>
+        <div class="schluesselnummer-help-card">
+          <strong>TSN eintragen</strong>
+          <span>Die Nummer aus Feld 2.2. Meist reichen die ersten 3 Zeichen, zum Beispiel <b>748</b>.</span>
+        </div>
+      </div>
+
+      <div class="schluesselnummer-help-note">
+        Falls ein sehr alter Fahrzeugschein vorliegt: HSN steht dort oft bei <strong>zu 2</strong>,
+        TSN bei <strong>zu 3</strong>. Wenn du unsicher bist, einfach den Fahrzeugschein hochladen.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="schluesselnummer-help-modal" data-fin-help-modal hidden>
+  <div class="schluesselnummer-help-dialog" role="dialog" aria-modal="true" aria-labelledby="fin-help-title">
+    <div class="schluesselnummer-help-header">
+      <h2 id="fin-help-title">Was ist die FIN?</h2>
+      <button type="button" class="schluesselnummer-help-close" data-fin-help-close aria-label="Schließen">&times;</button>
+    </div>
+    <div class="schluesselnummer-help-body">
+      <p class="schluesselnummer-help-intro">
+        Die FIN ist die Fahrzeug-Identifizierungsnummer. Sie steht im Fahrzeugschein und ist normalerweise
+        17 Zeichen lang.
+      </p>
+      <div class="schluesselnummer-help-grid">
+        <div class="schluesselnummer-help-card">
+          <strong>Wo steht sie?</strong>
+          <span>In der Zulassungsbescheinigung Teil I im Feld <b>E</b>.</span>
+        </div>
+        <div class="schluesselnummer-help-card">
+          <strong>Was prüfen wir?</strong>
+          <span>Format, Herstellerhinweise und bekannte Modelljahr-Codes.</span>
+        </div>
+      </div>
+      <div class="schluesselnummer-help-note">
+        Die Buchstaben I, O und Q kommen in FINs normalerweise nicht vor. Wenn du unsicher bist,
+        einfach den Fahrzeugschein hochladen.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  if (window.__schluesselnummerHelpLoaded) return;
+  window.__schluesselnummerHelpLoaded = true;
+
+  const modal = document.querySelector('[data-schluesselnummer-help-modal]');
+  const finModal = document.querySelector('[data-fin-help-modal]');
+  const closeButton = document.querySelector('[data-schluesselnummer-help-close]');
+  const finCloseButton = document.querySelector('[data-fin-help-close]');
+  let lastFocus = null;
+
+  const openModal = (targetModal, targetCloseButton) => {
+    if (!targetModal) return;
+    lastFocus = document.activeElement;
+    targetModal.hidden = false;
+    targetModal.classList.add('is-open');
+    targetCloseButton?.focus();
+  };
+
+  const closeModal = (targetModal) => {
+    if (!targetModal) return;
+    targetModal.classList.remove('is-open');
+    targetModal.hidden = true;
+    if (lastFocus && typeof lastFocus.focus === 'function') {
+      lastFocus.focus();
+    }
+  };
+
+  const openHelp = () => openModal(modal, closeButton);
+  const openFinHelp = () => openModal(finModal, finCloseButton);
+  const closeHelp = () => closeModal(modal);
+  const closeFinHelp = () => closeModal(finModal);
+
+  const addHelpButton = (input, options = {}) => {
+    const field = input.closest('.col, [class*="col-"], .mb-3, .form-group, .field')
+      || input.parentElement?.closest('.col, [class*="col-"], .mb-3, .form-group, .field')
+      || input.parentElement;
+    const label = field?.querySelector('label');
+    if (!label || label.querySelector(options.selector || '[data-schluesselnummer-help-open]')) return false;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'schluesselnummer-help-button';
+    if (options.datasetName) {
+      button.dataset[options.datasetName] = '1';
+    } else {
+      button.dataset.schluesselnummerHelpOpen = '1';
+    }
+    button.title = options.title || 'Wo finde ich HSN und TSN?';
+    button.setAttribute('aria-label', options.ariaLabel || 'Erklärung zu HSN und TSN öffnen');
+    button.textContent = 'i';
+    button.addEventListener('click', options.onClick || openHelp);
+    label.appendChild(button);
+    return true;
+  };
+
+  const finInputs = Array.from(document.querySelectorAll('input[name="fin_nummer"]'));
+  const hsnInputs = Array.from(document.querySelectorAll('input[name="hsn_nummer"]'));
+  const tsnInputs = Array.from(document.querySelectorAll('input[name="tsn_nummer"]'));
+  finInputs.forEach((input) => addHelpButton(input, {
+    selector: '[data-fin-help-open]',
+    datasetName: 'finHelpOpen',
+    title: 'Was ist die FIN?',
+    ariaLabel: 'Erklärung zur FIN öffnen',
+    onClick: openFinHelp,
+  }));
+  if (hsnInputs.length) {
+    hsnInputs.forEach(addHelpButton);
+  } else {
+    tsnInputs.forEach(addHelpButton);
+  }
+
+  closeButton?.addEventListener('click', closeHelp);
+  finCloseButton?.addEventListener('click', closeFinHelp);
+  modal?.addEventListener('click', (event) => {
+    if (event.target === modal) closeHelp();
+  });
+  finModal?.addEventListener('click', (event) => {
+    if (event.target === finModal) closeFinHelp();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && modal?.classList.contains('is-open')) {
+      closeHelp();
+    }
+    if (event.key === 'Escape' && finModal?.classList.contains('is-open')) {
+      closeFinHelp();
+    }
+  });
+})();
+</script>

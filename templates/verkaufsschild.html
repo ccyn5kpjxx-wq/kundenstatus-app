@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verkaufsschild {{ auftrag['fahrzeug'] }}</title>
+  <style>
+    :root {
+      --ink: #1f2528;
+      --muted: #69747b;
+      --line: #d8ded8;
+      --brand: #123d30;
+      --accent: #b32b2b;
+      --paper: #fbfcf8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #e9ece8;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: .75rem;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .toolbar a,
+    .toolbar button {
+      border: 1px solid #cfd6cf;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 700;
+      padding: .65rem 1rem;
+      text-decoration: none;
+    }
+
+    .sheet {
+      width: min(210mm, calc(100vw - 24px));
+      min-height: 297mm;
+      margin: 0 auto 2rem;
+      padding: 16mm;
+      background: #fff;
+      box-shadow: 0 18px 60px rgba(31, 37, 40, .22);
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 7mm;
+    }
+
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+      border-bottom: 3px solid var(--brand);
+      padding-bottom: 5mm;
+    }
+
+    .brand {
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--brand);
+    }
+
+    .brand small {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      margin-top: 3px;
+      text-transform: uppercase;
+    }
+
+    .status {
+      border: 2px solid var(--accent);
+      background: #fff6f6;
+      color: var(--accent);
+      font-weight: 900;
+      letter-spacing: .08em;
+      padding: .35rem .6rem;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 8mm;
+      align-items: stretch;
+    }
+
+    .photo {
+      min-height: 105mm;
+      border: 1px solid var(--line);
+      background: #eef1ec;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    .photo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .photo-empty {
+      color: var(--muted);
+      font-size: 20px;
+      font-weight: 800;
+      text-align: center;
+      padding: 1rem;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 36px;
+      line-height: 1.05;
+    }
+
+    .price {
+      margin-top: 10mm;
+      color: var(--accent);
+      font-size: 48px;
+      line-height: 1;
+      font-weight: 900;
+    }
+
+    .price-note {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 3mm;
+    }
+
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 3mm;
+      margin-top: 10mm;
+    }
+
+    .fact {
+      border: 1px solid var(--line);
+      padding: 3mm;
+      background: #fff;
+    }
+
+    .fact span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .fact strong {
+      display: block;
+      font-size: 18px;
+      margin-top: 2mm;
+      overflow-wrap: anywhere;
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8mm;
+      align-content: start;
+    }
+
+    h2 {
+      border-bottom: 2px solid var(--brand);
+      color: var(--brand);
+      font-size: 20px;
+      margin: 0 0 4mm;
+      padding-bottom: 2mm;
+    }
+
+    .features {
+      display: grid;
+      gap: 2.5mm;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .features li {
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      padding: 2.5mm 3mm;
+    }
+
+    .description {
+      white-space: pre-wrap;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+
+    .legal-note {
+      margin-top: 5mm;
+      border: 1px solid var(--line);
+      background: var(--paper);
+      padding: 3mm 4mm;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .contact {
+      border-top: 3px solid var(--brand);
+      padding-top: 5mm;
+      display: flex;
+      justify-content: space-between;
+      gap: 8mm;
+      align-items: flex-end;
+    }
+
+    .contact strong {
+      display: block;
+      font-size: 22px;
+      color: var(--brand);
+    }
+
+    .contact span {
+      display: block;
+      color: var(--muted);
+      margin-top: 1.5mm;
+    }
+
+    .phone {
+      color: var(--accent);
+      font-size: 30px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      .toolbar {
+        display: none;
+      }
+
+      .sheet {
+        width: 210mm;
+        min-height: 297mm;
+        margin: 0;
+        box-shadow: none;
+        page-break-after: avoid;
+      }
+    }
+
+    @page {
+      size: A4;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button type="button" onclick="window.print()">Drucken</button>
+    <a href="{{ detail_url }}">{{ detail_label or 'Zurück zum Fahrzeugverkauf' }}</a>
+  </div>
+
+  <main class="sheet">
+    <header class="topline">
+      <div class="brand">
+        Gärtner Karosserie &amp; Lack GmbH
+        <small>Fahrzeugverkauf im Kundenauftrag</small>
+      </div>
+      <div class="status">{{ auftrag['verkauf_preis_basis'] or 'VB' }}</div>
+    </header>
+
+    <section class="hero">
+      <div class="photo">
+        {% if verkauf_bild %}
+        <img src="{{ verkauf_bild['url'] if verkauf_bild.get('url') else url_for('admin_datei', datei_id=verkauf_bild['id']) }}" alt="{{ auftrag['fahrzeug'] }}">
+        {% else %}
+        <div class="photo-empty">Fahrzeugfoto folgt</div>
+        {% endif %}
+      </div>
+      <div>
+        <h1>{{ auftrag['fahrzeug'] }}</h1>
+        <div class="price">{{ auftrag['verkauf_preis_label'] }}</div>
+        <div class="price-note">Verhandlungsbasis im Kundenauftrag</div>
+        <div class="facts">
+          <div class="fact">
+            <span>Baujahr / EZ</span>
+            <strong>{{ auftrag['verkauf_baujahr'] or 'auf Anfrage' }}</strong>
+          </div>
+          <div class="fact">
+            <span>Kilometerstand</span>
+            <strong>{{ auftrag['kilometerstand'] or 'auf Anfrage' }}</strong>
+          </div>
+          <div class="fact">
+            <span>Standort</span>
+            <strong>Mosbach</strong>
+          </div>
+          <div class="fact">
+            <span>Status</span>
+            <strong>{{ 'Verkauft' if auftrag['verkauf_status'] == 'verkauft' else 'Verfügbar' }}</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="content">
+      <div>
+        <h2>Ausstattung</h2>
+        {% if auftrag['verkauf_ausstattung_liste'] %}
+        <ul class="features">
+          {% for item in auftrag['verkauf_ausstattung_liste'][:12] %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <div class="description">Ausstattung wird ergänzt.</div>
+        {% endif %}
+      </div>
+      <div>
+        <h2>Beschreibung</h2>
+        <div class="description">{{ auftrag['verkauf_beschreibung'] or 'Weitere Fahrzeugdaten und Besichtigung nach Absprache.' }}</div>
+        <div class="legal-note">
+          Hinweis: Angaben zu Zustand, Vorschäden und Unfallschäden erfolgen im Kundenauftrag nach Auskunft des Auftraggebers und vorliegenden Unterlagen, soweit bekannt.
+          Eine Beschaffenheitsgarantie oder Zusicherung der Unfallfreiheit ist damit nicht verbunden.
+        </div>
+      </div>
+    </section>
+
+    <footer class="contact">
+      <div>
+        <strong>{{ werkstatt_kontakt['name'] }}</strong>
+        <span>{{ werkstatt_kontakt['adresse'] }}</span>
+      </div>
+      <div class="phone">{{ auftrag['verkauf_kontakt'] or werkstatt_kontakt['telefon'] }}</div>
+    </footer>
+  </main>
+</body>
+</html>

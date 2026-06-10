@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}Lead #{{ lead['id'] }}{% endblock %}
+
+{% block extra_css %}
+<style>
+  .lead-status-grid {
+    display: grid;
+    gap: .75rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .lead-status-grid form {
+    margin: 0;
+  }
+
+  .lead-status-btn {
+    border: 1px solid #e4d6c3;
+    border-radius: 16px;
+    background: #fffdf9;
+    color: var(--ink);
+    padding: .85rem;
+    width: 100%;
+    text-align: left;
+  }
+
+  .lead-status-btn.is-active {
+    border-color: rgba(162, 63, 45, .5);
+    background: rgba(162, 63, 45, .1);
+    font-weight: 800;
+  }
+
+  @media (max-width: 900px) {
+    .lead-status-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 560px) {
+    .lead-status-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="section-title">
+  <div>
+    <div class="badge-soft mb-3">Lead #{{ lead['id'] }}</div>
+    <h1 class="mb-2">{{ lead['kunde_name'] or 'Neue Anfrage' }}</h1>
+    <p>{{ lead['fahrzeug'] or 'Fahrzeug offen' }}{% if lead['kennzeichen'] %} · {{ lead['kennzeichen'] }}{% endif %}</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('admin_leads') }}" class="btn btn-soft">Zur Lead-Liste</a>
+    {% if lead['auftrag_id'] %}
+    <a href="{{ url_for('auftrag_detail', auftrag_id=lead['auftrag_id']) }}" class="btn btn-brand">Auftrag öffnen</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <div class="page-card p-4 mb-4">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="h4 mb-1">Pipeline</h2>
+          <div class="text-muted small">Lead weiterziehen, bis daraus ein Auftrag wird oder die Anfrage verloren ist.</div>
+        </div>
+        <span class="badge text-bg-{{ lead['status_meta']['farbe'] }}">{{ lead['status_meta']['label'] }}</span>
+      </div>
+      <div class="lead-status-grid">
+        {% for key, meta in lead_status.items() %}
+        <form method="POST" action="{{ url_for('admin_lead_status', lead_id=lead['id'], status=key) }}">
+          {{ csrf_field()|safe }}
+          <button type="submit" class="lead-status-btn {% if lead['status'] == key %}is-active{% endif %}" {% if lead['status'] == key %}disabled{% endif %}>
+            {{ meta['label'] }}
+          </button>
+        </form>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="page-card p-4">
+      <h2 class="h4 mb-3">Lead bearbeiten</h2>
+      <form method="POST" class="row g-3">
+        {{ csrf_field()|safe }}
+        <div class="col-md-3">
+          <label class="form-label">Quelle</label>
+          <select name="quelle" class="form-select">
+            {% for key, meta in lead_quellen.items() %}
+            <option value="{{ key }}" {% if lead['quelle'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Status</label>
+          <select name="status" class="form-select">
+            {% for key, meta in lead_status.items() %}
+            <option value="{{ key }}" {% if lead['status'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Autohaus</label>
+          <select name="autohaus_id" class="form-select">
+            <option value="">Ohne Autohaus</option>
+            {% for h in autohaeuser %}
+            <option value="{{ h['id'] }}" {% if lead['autohaus_id'] == h['id'] %}selected{% endif %}>{{ h['name'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Potenzial</label>
+          <input type="text" name="geschaetzter_wert" class="form-control" value="{{ lead['geschaetzter_wert_label'] }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Kunde</label>
+          <input type="text" name="kunde_name" class="form-control" value="{{ lead['kunde_name'] }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Handy / WhatsApp</label>
+          <input type="text" name="kontakt_telefon" class="form-control" value="{{ lead['kontakt_telefon'] }}" placeholder="z.B. 0171 1234567">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">E-Mail</label>
+          <input type="email" name="kunde_email" class="form-control" value="{{ lead['kunde_email'] }}">
+        </div>
+        <div class="col-md-5">
+          <label class="form-label">Fahrzeug</label>
+          <input type="text" name="fahrzeug" class="form-control" value="{{ lead['fahrzeug'] }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Kennzeichen</label>
+          <input type="text" name="kennzeichen" class="form-control" value="{{ lead['kennzeichen'] }}" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Schadenart</label>
+          <select name="schadenart" class="form-select">
+            {% for key, label in schadenarten %}
+            <option value="{{ key }}" {% if lead['schadenart'] == key %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Nächste Aktion</label>
+          <input type="text" name="naechste_aktion" class="form-control" value="{{ lead['naechste_aktion'] }}" placeholder="z.B. Rückruf, Bilder anfordern, Besichtigung planen">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Nächster Kontakt</label>
+          <input type="date" name="naechster_kontakt_am" class="form-control" value="{{ lead['naechster_kontakt_am']|iso_date }}">
+        </div>
+        <div class="col-12">
+          <label class="form-label">Kurzbeschreibung</label>
+          <textarea name="beschreibung" class="form-control" rows="3">{{ lead['beschreibung'] }}</textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Interne Notiz</label>
+          <textarea name="notiz" class="form-control" rows="4">{{ lead['notiz'] }}</textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Grund verloren</label>
+          <input type="text" name="verloren_grund" class="form-control" value="{{ lead['verloren_grund'] }}" placeholder="optional, wenn verloren">
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-brand">Lead speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-xl-4">
+    <div class="page-card p-4 mb-4">
+      <h2 class="h4 mb-3">Nächste Aktion</h2>
+      <div class="{{ 'text-danger fw-bold' if lead['is_due'] else 'text-muted' }} mb-2">
+        {{ lead['naechster_kontakt_am'] or 'Kein Datum gesetzt' }}
+      </div>
+      <div class="mb-3">{{ lead['naechste_aktion'] or 'Noch keine konkrete Aktion festgelegt.' }}</div>
+      <div class="d-grid gap-2">
+        {% if lead['whatsapp_url'] %}
+        <a href="{{ lead['whatsapp_url'] }}" target="_blank" rel="noopener" class="btn btn-success">WhatsApp vorbereiten</a>
+        {% endif %}
+        {% if lead['mailto_url'] %}
+        <a href="{{ lead['mailto_url'] }}" class="btn btn-outline-dark">E-Mail vorbereiten</a>
+        {% endif %}
+        {% if not lead['whatsapp_url'] and not lead['mailto_url'] %}
+        <div class="text-muted small">Handynummer oder E-Mail eintragen, dann kann direkt aus dem Lead kommuniziert werden.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="page-card p-4 mb-4">
+      <h2 class="h4 mb-3">Auftrag</h2>
+      {% if lead['auftrag_id'] %}
+      <p class="text-muted">Dieser Lead wurde bereits gewonnen und ist mit einem Auftrag verbunden.</p>
+      <a href="{{ url_for('auftrag_detail', auftrag_id=lead['auftrag_id']) }}" class="btn btn-brand w-100">Auftrag öffnen</a>
+      {% else %}
+      <p class="text-muted">Wenn der Kunde zusagt, wird daraus ein normaler Auftrag mit Kundenstatus, WhatsApp und Dokumenten.</p>
+      <form method="POST" action="{{ url_for('admin_lead_to_auftrag', lead_id=lead['id']) }}">
+        {{ csrf_field()|safe }}
+        <button type="submit" class="btn btn-brand w-100">In Auftrag umwandeln</button>
+      </form>
+      {% endif %}
+    </div>
+
+    <div class="page-card p-4">
+      <h2 class="h4 mb-3">Info</h2>
+      <div class="d-flex gap-2 flex-wrap mb-2">
+        <span class="badge text-bg-{{ lead['quelle_meta']['farbe'] }}">{{ lead['quelle_meta']['label'] }}</span>
+        {% if lead['autohaus_name'] %}<span class="badge text-bg-light text-dark border">{{ lead['autohaus_name'] }}</span>{% endif %}
+        {% if lead['source_email_id'] %}<span class="badge text-bg-success">E-Mail #{{ lead['source_email_id'] }}</span>{% endif %}
+      </div>
+      <div class="text-muted small">
+        Erstellt: {{ lead['erstellt_am'] }}<br>
+        Geändert: {{ lead['geaendert_am'] }}
+      </div>
+      {% if lead['source_email_url'] %}
+      <a href="{{ lead['source_email_url'] }}" class="btn btn-soft w-100 mt-3">Quell-E-Mail öffnen</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}Fahrzeugverkauf {{ verkauf['fahrzeug'] }}{% endblock %}
+
+{% block content %}
+{% set dat_status = dat_api_status() %}
+<div class="section-title">
+  <div>
+    <div class="badge-soft mb-3">Fahrzeugverkauf</div>
+    <h1 class="mb-2">{{ verkauf['fahrzeug'] }}</h1>
+    <p>Eigener Verkaufsdatensatz. Kein Lackierstatus, keine Termine, keine Reparaturakte.</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('admin_fahrzeugverkauf') }}" class="btn btn-soft">Zur Verkaufsliste</a>
+    <form method="POST" action="{{ url_for('admin_fahrzeugverkauf_preis_analyse', verkauf_id=verkauf['id']) }}" class="m-0">
+      {{ csrf_field()|safe }}
+      <button type="submit" class="btn btn-outline-dark">Preis analysieren</button>
+    </form>
+    <a href="{{ url_for('admin_fahrzeugverkauf_schild', verkauf_id=verkauf['id']) }}" class="btn btn-brand">Verkaufsschild</a>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div>
+      <h2 class="h5 mb-1">Preisvergleich</h2>
+      <div class="text-muted small">{{ verkauf['verkauf_preischeck_meta']['detail'] }}</div>
+    </div>
+    <span class="badge text-bg-{{ verkauf['verkauf_preischeck_meta']['farbe'] }}">{{ verkauf['verkauf_preischeck_meta']['label'] }}</span>
+  </div>
+  <div class="d-flex gap-2 flex-wrap mt-3">
+    {% for link in verkauf['verkauf_recherche_links'] %}
+    <a href="{{ link['url'] }}" class="btn btn-sm btn-soft" target="_blank" rel="noopener">{{ link['label'] }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+    <div>
+      <h2 class="h4 mb-1">Verkaufsdaten</h2>
+      <div class="text-muted small">Ausstattung, Preis und Schilddaten für den reinen Fahrzeugverkauf.</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <span class="badge text-bg-{{ verkauf['verkauf_status_meta']['farbe'] }}">{{ verkauf['verkauf_status_meta']['label'] }}</span>
+      <span class="badge text-bg-{{ verkauf['verkauf_preischeck_meta']['farbe'] }}">{{ verkauf['verkauf_preischeck_meta']['label'] }}</span>
+    </div>
+  </div>
+
+  <form method="POST" enctype="multipart/form-data" class="row g-3" data-upload-form>
+    {{ csrf_field()|safe }}
+    <div class="col-md-4">
+      <label class="form-label">Kunde / Auftraggeber</label>
+      <input type="text" name="kunde_name" class="form-control" value="{{ verkauf['kunde_name'] }}">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Kontakt</label>
+      <input type="text" name="kontakt_telefon" class="form-control" value="{{ verkauf['kontakt_telefon'] }}">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Fahrzeug</label>
+      <input type="text" name="fahrzeug" class="form-control" value="{{ verkauf['fahrzeug'] }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">FIN</label>
+      <input type="text" name="fin_nummer" class="form-control" value="{{ verkauf['fin_nummer'] }}" style="text-transform:uppercase;">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Kilometer</label>
+      <input type="text" name="kilometerstand" class="form-control" value="{{ verkauf['kilometerstand'] }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Baujahr / EZ</label>
+      <input type="text" name="verkauf_baujahr" class="form-control" value="{{ verkauf['verkauf_baujahr'] }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Verkaufsstatus</label>
+      <select name="verkauf_status" class="form-select">
+        {% for key, meta in status_options.items() %}
+        <option value="{{ key }}" {% if verkauf['verkauf_status'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Verkaufspreis</label>
+      <input type="text" name="verkauf_preis" class="form-control" value="{{ verkauf['verkauf_preis'] }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Preisbasis</label>
+      <input type="text" name="verkauf_preis_basis" class="form-control" value="{{ verkauf['verkauf_preis_basis'] }}">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Kontakt auf dem Schild</label>
+      <input type="text" name="verkauf_kontakt" class="form-control" value="{{ verkauf['verkauf_kontakt'] }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Dokumente analysieren</label>
+      <input type="file" name="verkaufsunterlagen" class="form-control" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.txt,.docx,.xlsx">
+      <div class="form-text">Fahrzeugschein, Zulassungsbescheinigung, Brief, SilverDAT, PDF, Screenshot oder Export. Erkannte Felder werden nur in diesen Fahrzeugverkauf übernommen.</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Verkaufsbild</label>
+      <input type="file" name="verkaufsbilder" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif">
+    </div>
+    <div class="col-12">
+      <button type="submit" class="btn btn-outline-dark" formaction="{{ url_for('admin_fahrzeugverkauf_dat_ausstattung', verkauf_id=verkauf['id']) }}" formmethod="post">Ausstattung per DAT-API holen</button>
+      <button type="submit" class="btn btn-outline-dark" formaction="{{ url_for('admin_fahrzeugverkauf_preis_analyse', verkauf_id=verkauf['id']) }}" formmethod="post">Verkaufspreis analysieren</button>
+      <a href="{{ url_for('admin_fahrzeugverkauf_schild', verkauf_id=verkauf['id']) }}" class="btn btn-brand">Verkaufsschild öffnen</a>
+      <span class="text-muted small ms-2">{{ dat_status['detail'] }}</span>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Ausstattung</label>
+      <textarea name="verkauf_ausstattung" class="form-control" rows="7">{{ verkauf['verkauf_ausstattung'] }}</textarea>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Verkaufstext / Zustand</label>
+      <textarea name="verkauf_beschreibung" class="form-control" rows="7">{{ verkauf['verkauf_beschreibung'] }}</textarea>
+      <div class="form-text">Rechtlich vorsichtig formulieren: keine unbelegten Aussagen wie "unfallfrei" oder "keine Schäden". Schäden/Vorschäden nur angeben, wenn sie bekannt oder belegt sind; sonst "soweit bekannt".</div>
+    </div>
+    <div class="col-12">
+      <label class="form-label">Marktvergleich / Preisbegründung</label>
+      <textarea name="verkauf_markt_recherche" class="form-control" rows="6">{{ verkauf['verkauf_markt_recherche'] }}</textarea>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Verkauft am</label>
+      <input type="date" name="verkauf_verkauft_am" class="form-control" value="{{ verkauf['verkauf_verkauft_am']|iso_date }}">
+    </div>
+    <div class="col-md-8">
+      <label class="form-label">Käufer / Abschlussnotiz</label>
+      <input type="text" name="verkauf_kaeufer" class="form-control" value="{{ verkauf['verkauf_kaeufer'] }}">
+    </div>
+    <div class="col-12">
+      <label class="form-label">Interne Notiz</label>
+      <textarea name="verkauf_notiz" class="form-control" rows="2">{{ verkauf['verkauf_notiz'] }}</textarea>
+    </div>
+    <div class="col-12 d-flex gap-2 flex-wrap">
+      <button type="submit" name="aktion" value="speichern" class="btn btn-brand">Verkaufsdaten speichern</button>
+      <button type="submit" name="aktion" value="dateien_analyse" class="btn btn-outline-dark">Dateien analysieren und Felder füllen</button>
+      <button type="submit" name="aktion" value="preis_analyse" formaction="{{ url_for('admin_fahrzeugverkauf_preis_analyse', verkauf_id=verkauf['id']) }}" formmethod="post" class="btn btn-outline-dark">Preis analysieren</button>
+      {% if verkauf['verkauf_status'] == 'verkauft' %}
+      <button type="submit" name="aktion" value="reaktivieren" class="btn btn-soft">Verkauf wieder öffnen</button>
+      {% else %}
+      <button type="submit" name="aktion" value="verkauft" class="btn btn-outline-success">Als verkauft markieren</button>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+<div class="page-card p-4">
+  <h2 class="h4 mb-3">Verkaufsdateien</h2>
+  {% if verkauf_bild %}
+  <div class="mb-3">
+    <div class="text-muted small mb-1">Bild für Verkaufsschild</div>
+    <img src="{{ verkauf_bild['url'] }}" alt="{{ verkauf['fahrzeug'] }}" style="max-width:260px;border:1px solid #e4d6c3;border-radius:8px;">
+  </div>
+  {% endif %}
+  {% if dateien %}
+  <div class="d-grid gap-2">
+    {% for datei in dateien %}
+    <div class="border rounded-3 bg-white p-3">
+      <div class="d-flex justify-content-between gap-2 flex-wrap align-items-center">
+        <div>
+          <div class="fw-semibold breakable-text">{{ datei['original_name'] }}</div>
+          <div class="text-muted small">{{ 'Bild' if datei['kategorie'] == 'bild' else 'Analysedokument' }}{% if datei['hochgeladen_am'] %} · {{ datei['hochgeladen_am'] }}{% endif %}</div>
+        </div>
+        <a href="{{ datei['url'] }}" target="_blank" rel="noopener" class="btn btn-sm btn-soft">Öffnen</a>
+      </div>
+      {% if datei['extrakt_kurz'] %}
+      <div class="small text-muted mt-2">{{ datei['extrakt_kurz'] }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-muted">Noch keine Dateien für diesen Fahrzeugverkauf.</div>
+  {% endif %}
+</div>
+{% endblock %}

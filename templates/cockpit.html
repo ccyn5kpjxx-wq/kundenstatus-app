@@ -535,6 +535,34 @@
     font-size: .88rem;
     font-weight: 600;
   }
+  .source-mix {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .75rem;
+    margin-bottom: 1rem;
+  }
+  .source-mix-item {
+    border: 1px solid #e4d6c3;
+    border-left-width: 6px;
+    border-radius: 16px;
+    background: #fffaf2;
+    padding: .95rem 1rem;
+  }
+  .source-mix-versicherung { border-left-color: #1f6feb; }
+  .source-mix-autohaus { border-left-color: #198754; }
+  .source-mix-privat { border-left-color: #6c757d; }
+  .source-mix-item span {
+    display: block;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .source-mix-item strong {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 1.6rem;
+    line-height: 1.1;
+  }
   .news-list, .purchase-mini-list {
     display: grid;
     gap: .75rem;
@@ -579,6 +607,7 @@
   }
   @media (max-width: 575.98px) {
     .start-counter-grid,
+    .source-mix,
     .start-day-counts {
       grid-template-columns: 1fr;
     }
@@ -651,7 +680,7 @@
         <div class="d-flex gap-2 flex-wrap justify-content-lg-end">
           <a href="{{ url_for('dashboard') }}#auftraege" class="btn btn-brand btn-lg">Lackierportal</a>
           <a href="{{ url_for('neuer_auftrag') }}" class="btn btn-outline-light btn-lg">Fahrzeug neu</a>
-          <a href="{{ url_for('admin_versicherung_schaden_neu') }}" class="btn btn-outline-light btn-lg">Versicherungsschaden</a>
+          <a href="{{ url_for('admin_versicherungsschaden') }}" class="btn btn-outline-light btn-lg">Versicherungsschaden</a>
           <a href="{{ url_for('admin_postfach') }}" class="btn btn-outline-light btn-lg">Postfach</a>
           <a href="{{ url_for('admin_zugaenge') }}" class="btn btn-outline-light btn-lg">Zugänge</a>
         </div>
@@ -661,6 +690,16 @@
 </div>
 
 {% include "_mini_month_calendar.html" %}
+
+<div class="source-mix">
+  {% for item in cockpit['quelle_mix'] %}
+  <div class="source-mix-item source-mix-{{ item['key'] }}">
+    <span>{{ item['label'] }}</span>
+    <strong>{{ item['percent'] }}%</strong>
+    <div class="text-muted small">{{ item['count'] }} Fahrzeug(e) im Werkstattportal</div>
+  </div>
+  {% endfor %}
+</div>
 
 <div class="row g-4 mb-4 start-focus-grid">
   <div class="col-12">
@@ -753,6 +792,41 @@
     </div>
   </div>
 
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-6 col-xl-3">
+    <a class="page-card module-tile" href="{{ url_for('admin_leads') }}">
+      <span class="module-kicker">Anfragen</span>
+      <h5 class="mb-0">Leads</h5>
+      <p class="text-muted mb-0">Neue Anfragen, Rückrufe und nächste Aktionen bündeln.</p>
+      <span class="module-count">{{ admin_leads_count() }}</span>
+    </a>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <a class="page-card module-tile" href="{{ url_for('admin_fahrzeugsuche') }}">
+      <span class="module-kicker">Auktion</span>
+      <h5 class="mb-0">Fahrzeugsuche</h5>
+      <p class="text-muted mb-0">Suchprofile, Kandidaten und Auktionsalarme prüfen.</p>
+      <span class="module-count">{{ fahrzeugsuche_auktion_alert_count() or fahrzeugsuche_count() }}</span>
+    </a>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <a class="page-card module-tile" href="{{ url_for('admin_fahrzeugverkauf') }}">
+      <span class="module-kicker">Verkauf</span>
+      <h5 class="mb-0">Fahrzeugverkauf</h5>
+      <p class="text-muted mb-0">Verkaufsfahrzeuge, Preisprüfung und Verkaufsschild vorbereiten.</p>
+      <span class="module-count">{{ fahrzeugverkauf_count() }}</span>
+    </a>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <a class="page-card module-tile" href="{{ url_for('admin_versicherung') }}">
+      <span class="module-kicker">Schadenportal</span>
+      <h5 class="mb-0">Versicherungsportal</h5>
+      <p class="text-muted mb-0">Versicherungsschäden, Freigaben und Zuteilungen steuern.</p>
+      <span class="module-count">{{ admin_versicherung_count() }}</span>
+    </a>
+  </div>
 </div>
 
 {#
@@ -876,6 +950,16 @@
       <div class="mt-2 text-white-50">offene Reklamationen</div>
     </div>
   </div>
+</div>
+
+<div class="source-mix">
+  {% for item in cockpit['quelle_mix'] %}
+  <div class="source-mix-item source-mix-{{ item['key'] }}">
+    <span>{{ item['label'] }}</span>
+    <strong>{{ item['percent'] }}%</strong>
+    <div class="text-muted small">{{ item['count'] }} Fahrzeug(e) im Werkstattportal</div>
+  </div>
+  {% endfor %}
 </div>
 
 <div class="row g-4 mb-4">

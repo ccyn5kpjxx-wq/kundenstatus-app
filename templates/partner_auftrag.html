@@ -499,12 +499,12 @@
               <input type="text" name="versicherungsnehmer" class="form-control form-control-lg" value="{{ auftrag['versicherungsnehmer'] }}" placeholder="falls abweichend">
             </div>
             <div class="col-md-4">
-              <label class="form-label">Telefon</label>
-              <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ auftrag['kontakt_telefon'] }}">
+              <label class="form-label">Handy / WhatsApp Kunde</label>
+              <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ auftrag['kontakt_telefon'] }}" placeholder="z.B. 0171 1234567">
             </div>
             <div class="col-md-4">
               <label class="form-label">Fahrzeug</label>
-              <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ auftrag['fahrzeug'] }}" required>
+              <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ auftrag['fahrzeug'] }}" required data-vehicle-input>
             </div>
             <div class="col-md-4">
               <label class="form-label">Kennzeichen</label>
@@ -512,7 +512,23 @@
             </div>
             <div class="col-md-4" id="pflicht-fahrzeugdaten">
               <label class="form-label">FIN-Nummer</label>
-              <input type="text" name="fin_nummer" class="form-control form-control-lg" value="{{ auftrag['fin_nummer'] }}" style="text-transform:uppercase;">
+              <div class="input-group input-group-lg" data-fin-widget>
+                <input type="text" name="fin_nummer" class="form-control" value="{{ auftrag['fin_nummer'] }}" style="text-transform:uppercase;" data-fin-input>
+                <button class="btn btn-outline-dark" type="button" data-fin-analyze>FIN analysieren</button>
+              </div>
+              <div class="form-text" data-fin-result></div>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">HSN</label>
+              <input type="text" name="hsn_nummer" class="form-control form-control-lg" value="{{ auftrag['hsn_nummer'] }}" placeholder="2.1">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">TSN</label>
+              <input type="text" name="tsn_nummer" class="form-control form-control-lg" value="{{ auftrag['tsn_nummer'] }}" placeholder="2.2" style="text-transform:uppercase;">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Kilometerstand</label>
+              <input type="text" name="kilometerstand" class="form-control form-control-lg" value="{{ auftrag['kilometerstand'] }}" placeholder="z.B. 84.500">
             </div>
             <div class="col-md-4">
               <label class="form-label">Auftrag / Vorgangsnummer</label>
@@ -592,6 +608,25 @@
             {% if auftrag['annahme_datum'] %}<span class="chip">{{ auftrag['partner_annahme_label'] }} {{ auftrag['annahme_datum'] }}</span>{% endif %}
             {% if auftrag['abholtermin'] %}<span class="chip">{{ auftrag['partner_abholung_label'] }} {{ auftrag['abholtermin'] }}</span>{% endif %}
           </div>
+          {% if auftrag['kunden_status_url'] %}
+          <div class="mt-3 pt-3 border-top">
+            <div class="fw-bold mb-1">Kundenstatus weitergeben</div>
+            <div class="text-muted small mb-2">Der Link zeigt dem Kunden den aktuellen Fahrzeugstatus.</div>
+            <div class="d-flex gap-2 flex-wrap">
+              <a class="btn btn-outline-dark btn-sm" href="{{ auftrag['kunden_status_url'] }}" target="_blank" rel="noopener">Statuslink öffnen</a>
+              {% if auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
+              <a class="btn btn-success btn-sm" href="{{ auftrag['kunden_whatsapp_status']['status_update_whatsapp_url'] }}" target="_blank" rel="noopener">Statusupdate WhatsApp</a>
+              {% endif %}
+            </div>
+            {% if auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
+            <div class="text-muted small mt-2">WhatsApp wird nur vorbereitet und erst im geöffneten Chat versendet.</div>
+            {% elif auftrag['kontakt_telefon'] %}
+            <div class="text-muted small mt-2">Für WhatsApp bitte eine Mobilnummer hinterlegen.</div>
+            {% else %}
+            <div class="text-muted small mt-2">Mit einer Handynummer kann der Status später per WhatsApp vorbereitet werden.</div>
+            {% endif %}
+          </div>
+          {% endif %}
         </div>
 
         <div class="panel mb-4 document-summary">
@@ -615,6 +650,11 @@
             {% if auftrag['schaden_nummer'] %}Schaden {{ auftrag['schaden_nummer'] }}{% else %}Schadenfall im Portal erfasst{% endif %}
             {% if auftrag['versicherung_gemeldet_am'] %} · gemeldet am {{ auftrag['versicherung_gemeldet_am'] }}{% endif %}
           </div>
+          {% include "_versicherung_pruefung_status.html" %}
+          {% set versicherung_prozess_standalone = true %}
+          {% include "_versicherung_prozess_assistent.html" %}
+          {% set steuerung_editable = false %}
+          {% include "_versicherung_steuerung_panel.html" %}
           {% include "_versicherung_workflow_panel.html" %}
           <a href="{{ url_for('partner_versicherung_auftrag_abtretungserklaerung_pdf', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="btn btn-outline-dark mb-3" id="pflicht-abtretung">Abtretungserklärung herunterladen</a>
           <form method="POST" enctype="multipart/form-data" action="{{ url_for('partner_versicherung_antwort', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="d-grid gap-2 mb-3" data-upload-form>
@@ -627,7 +667,7 @@
           {% if auftrag['versicherung_freigabe_status'] == 'freigegeben' %}
           <form method="POST" action="{{ url_for('partner_versicherung_freigabe_einplanen', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}">
             {{ csrf_field()|safe }}
-            <button type="submit" class="btn btn-dark">Freigabe übernehmen</button>
+            <button type="submit" class="btn btn-dark">Freigabe übernehmen und bei Lackierzentrum Gärtner Karosserie & Lack GmbH einplanen</button>
           </form>
           {% else %}
           <div class="text-muted">Sobald die Freigabe vorliegt, kann der Auftrag hier weiter eingeplant werden.</div>
@@ -911,6 +951,7 @@
       updateTransportLabels();
     }
   </script>
+  {% include "_fin_analyse_script.html" %}
   {% include "ki_assistent_widget.html" %}
   {% include "_session_keepalive.html" %}
 </body>

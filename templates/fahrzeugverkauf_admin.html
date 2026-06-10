@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% block title %}Fahrzeugverkauf{% endblock %}
+
+{% block extra_css %}
+<style>
+  .sale-kpis {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .sale-kpi {
+    border: 1px solid #e4d6c3;
+    border-radius: 16px;
+    background: #fffdf9;
+    padding: 1rem;
+  }
+  .sale-kpi span {
+    color: var(--muted);
+    display: block;
+    font-size: .82rem;
+  }
+  .sale-kpi strong {
+    display: block;
+    font-size: 1.35rem;
+  }
+  .sale-thumb {
+    width: 88px;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border: 1px solid #e4d6c3;
+    border-radius: 10px;
+    background: #f7f1e8;
+  }
+  .sale-thumb-empty {
+    width: 88px;
+    aspect-ratio: 4 / 3;
+    border: 1px dashed #d7c6ae;
+    border-radius: 10px;
+    color: var(--muted);
+    display: grid;
+    font-size: .75rem;
+    place-items: center;
+    text-align: center;
+  }
+  @media (max-width: 900px) {
+    .sale-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 560px) {
+    .sale-kpis { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set aktiv_count = counts['offen'] + counts['daten_sammeln'] + counts['preis_recherchieren'] + counts['schild_fertig'] + counts['inseriert'] %}
+<div class="section-title">
+  <div>
+    <div class="badge-soft mb-3">Eigene Rubrik</div>
+    <h1 class="mb-2">Fahrzeugverkauf</h1>
+    <p>Kundenfahrzeuge unabhängig vom Lackierprozess erfassen, Ausstattung übernehmen, Marktpreis begründen und Verkaufsschild erstellen.</p>
+  </div>
+</div>
+
+<div class="sale-kpis mb-4">
+  <div class="sale-kpi">
+    <span>Aktive Verkäufe</span>
+    <strong>{{ aktiv_count }}</strong>
+  </div>
+  <div class="sale-kpi">
+    <span>Daten sammeln</span>
+    <strong>{{ counts['daten_sammeln'] + counts['offen'] }}</strong>
+  </div>
+  <div class="sale-kpi">
+    <span>Preis prüfen</span>
+    <strong>{{ counts['preis_recherchieren'] }}</strong>
+  </div>
+  <div class="sale-kpi">
+    <span>Verkauft</span>
+    <strong>{{ counts['verkauft'] }}</strong>
+  </div>
+</div>
+
+{% set dat_status = dat_api_status() %}
+<div class="page-card p-4 mb-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div>
+      <h2 class="h5 mb-2">Dokumente / SilverDAT analysieren</h2>
+      <p class="mb-2">Fahrzeugschein, Zulassungsbescheinigung, SilverDAT, PDF, Screenshot oder Export hochladen. Erkannte Fahrzeugdaten werden in den Fahrzeugverkauf übernommen.</p>
+      <div class="text-muted small">Eine direkte API-Anbindung ist vorbereitet, braucht aber die DAT-Schnittstellenfreigabe und Zugangsdaten.</div>
+    </div>
+    <span class="badge text-bg-{{ dat_status['farbe'] }}">{{ dat_status['label'] }}</span>
+  </div>
+  <div class="text-muted small mt-2">{{ dat_status['detail'] }}</div>
+  <form method="POST" action="{{ url_for('admin_fahrzeugverkauf_dat_api_test') }}" class="row g-2 align-items-end mt-3">
+    {{ csrf_field()|safe }}
+    <div class="col-md-5">
+      <label class="form-label">FIN für DAT-API-Test</label>
+      <input type="text" name="fin_nummer" class="form-control" placeholder="WDB..." style="text-transform:uppercase;">
+    </div>
+    <div class="col-md-auto">
+      <button type="submit" class="btn btn-outline-dark">DAT-API testen</button>
+    </div>
+  </form>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <h2 class="h4 mb-3">Neues Verkaufsfahrzeug anlegen</h2>
+  <form method="POST" enctype="multipart/form-data" class="row g-3" data-upload-form>
+    {{ csrf_field()|safe }}
+    <div class="col-md-4">
+      <label class="form-label">Kunde / Auftraggeber</label>
+      <input type="text" name="kunde_name" class="form-control" placeholder="Name oder Firma">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Kontakt</label>
+      <input type="text" name="kontakt_telefon" class="form-control" placeholder="Telefon / WhatsApp">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Fahrzeug</label>
+      <input type="text" name="fahrzeug" class="form-control" placeholder="z.B. Mercedes Sprinter 216 CDI">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">FIN</label>
+      <input type="text" name="fin_nummer" class="form-control" style="text-transform:uppercase;">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Kilometer</label>
+      <input type="text" name="kilometerstand" class="form-control" placeholder="z.B. 84.500">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Baujahr / EZ</label>
+      <input type="text" name="verkauf_baujahr" class="form-control" placeholder="z.B. 2018">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Zielpreis</label>
+      <input type="text" name="verkauf_preis" class="form-control" placeholder="z.B. 18.900 €">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Preisbasis</label>
+      <input type="text" name="verkauf_preis_basis" class="form-control" value="VB">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Dokumente analysieren</label>
+      <input type="file" name="verkaufsunterlagen" class="form-control" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.txt,.docx,.xlsx">
+      <div class="form-text">Fahrzeugschein, Brief, SilverDAT, PDF, Bild oder Textdatei.</div>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Verkaufsbild</label>
+      <input type="file" name="verkaufsbilder" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Ausstattung</label>
+      <textarea name="verkauf_ausstattung" class="form-control" rows="4" placeholder="Kann automatisch aus DAT-Ausdruck, Screenshot oder Export ergänzt werden."></textarea>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Verkaufstext / Zustand</label>
+      <textarea name="verkauf_beschreibung" class="form-control" rows="4" placeholder="Zustand, Besonderheiten, Wartung, Schäden oder Verkaufsargumente."></textarea>
+      <div class="form-text">Keine unbelegten Aussagen wie "unfallfrei" oder "keine Schäden". Bekannte Schäden oder Vorschäden nur konkret und belegbar beschreiben; sonst mit "soweit bekannt" arbeiten.</div>
+    </div>
+    <div class="col-12">
+      <label class="form-label">Marktvergleich / Preisbegründung</label>
+      <textarea name="verkauf_markt_recherche" class="form-control" rows="2" placeholder="Vergleichsangebote, DAT/DHT-Wert, Zielpreis und Verhandlungsspielraum."></textarea>
+    </div>
+    <div class="col-12">
+      <button type="submit" class="btn btn-brand" data-loading-message="Dateien werden analysiert und Verkaufsfahrzeug wird angelegt.">Verkaufsfahrzeug anlegen und Datei analysieren</button>
+    </div>
+  </form>
+</div>
+
+<div class="page-card p-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+    <div>
+      <h2 class="h4 mb-1">Verkaufsfahrzeuge</h2>
+      <div class="text-muted small">Reine Verkaufsliste ohne Lackierstatus, Termine oder Reparaturakte.</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-sm {{ 'btn-dark' if status_filter == 'aktiv' else 'btn-soft' }}" href="{{ url_for('admin_fahrzeugverkauf', status='aktiv') }}">Aktiv</a>
+      <a class="btn btn-sm {{ 'btn-dark' if status_filter == 'alle' else 'btn-soft' }}" href="{{ url_for('admin_fahrzeugverkauf', status='alle') }}">Alle</a>
+      {% for key, meta in status_options.items() %}
+      <a class="btn btn-sm {{ 'btn-dark' if status_filter == key else 'btn-soft' }}" href="{{ url_for('admin_fahrzeugverkauf', status=key) }}">{{ meta['label'] }}</a>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if verkaeufe %}
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Fahrzeug</th>
+          <th>Status</th>
+          <th>Preischeck</th>
+          <th>Ausstattung</th>
+          <th>Aktion</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for verkauf in verkaeufe %}
+        <tr>
+          <td>
+            <div class="d-flex gap-3 align-items-center">
+              {% if verkauf['verkauf_bild'] %}
+              <img src="{{ verkauf['verkauf_bild']['url'] }}" alt="{{ verkauf['fahrzeug'] }}" class="sale-thumb">
+              {% else %}
+              <div class="sale-thumb-empty">kein Bild</div>
+              {% endif %}
+              <div>
+                <div class="fw-bold">{{ verkauf['fahrzeug'] }}</div>
+                <div class="text-muted small">
+                  {{ verkauf['kunde_name'] or 'Kunde offen' }}
+                </div>
+              </div>
+            </div>
+          </td>
+          <td><span class="badge text-bg-{{ verkauf['verkauf_status_meta']['farbe'] }}">{{ verkauf['verkauf_status_meta']['label'] }}</span></td>
+          <td>
+            <div class="fw-bold">{{ verkauf['verkauf_preis_label'] }}</div>
+            <span class="badge text-bg-{{ verkauf['verkauf_preischeck_meta']['farbe'] }}">{{ verkauf['verkauf_preischeck_meta']['label'] }}</span>
+          </td>
+          <td>
+            <div>{{ verkauf['verkauf_ausstattung_liste']|length }} Punkte</div>
+            <div class="text-muted small">{{ verkauf['verkaufsunterlagen_count'] }} Unterlage(n)</div>
+          </td>
+          <td>
+            <div class="d-flex gap-2 flex-wrap justify-content-end">
+              <a href="{{ url_for('admin_fahrzeugverkauf_detail', verkauf_id=verkauf['id']) }}" class="btn btn-sm btn-brand">Öffnen</a>
+              <form method="POST" action="{{ url_for('admin_fahrzeugverkauf_preis_analyse', verkauf_id=verkauf['id']) }}" class="m-0">
+                {{ csrf_field()|safe }}
+                <button type="submit" class="btn btn-sm btn-outline-dark">Preis</button>
+              </form>
+              <a href="{{ url_for('admin_fahrzeugverkauf_schild', verkauf_id=verkauf['id']) }}" class="btn btn-sm btn-soft">Schild</a>
+              {% for link in verkauf['verkauf_recherche_links'][:2] %}
+              <a href="{{ link['url'] }}" class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener">{{ link['label'] }}</a>
+              {% endfor %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-muted">Noch kein Fahrzeugverkauf in dieser Ansicht.</div>
+  {% endif %}
+</div>
+{% endblock %}

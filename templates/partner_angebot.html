@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ autohaus['portal_label'] }} — Angebotsanfrage</title>
+  <title>{{ autohaus['portal_label'] }} — {{ 'Versicherungsfall melden' if angebot and angebot['versicherung_id'] else 'Angebotsanfrage' }}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -33,6 +33,11 @@
     .insurance-message.is-autohaus { background: #eef5f1; border-color: #bdd7c8; }
     .insurance-message.is-versicherung { background: #eef5ff; border-color: #b8cce8; }
     .insurance-message.is-werkstatt { background: #f8f2e8; border-color: #d8c4a6; }
+    .damage-type-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+    .damage-type-card { border:1px solid #e4d6c3; border-radius:14px; background:#fffaf2; padding:12px; height:100%; }
+    .damage-type-card strong { display:block; margin-bottom:4px; }
+    .damage-type-card span { display:inline-flex; margin-bottom:6px; padding:.2rem .45rem; border-radius:999px; background:#132635; color:#fff; font-size:.76rem; font-weight:700; }
+    .insurance-picker { border:1px solid #e4d6c3; border-radius:18px; background:#fffaf2; padding:16px; }
     .quick-upload-panel {
       border:2px solid #c88b24;
       background:linear-gradient(135deg,#fff6df,#f8e3bd 55%,#e9c77e);
@@ -63,7 +68,11 @@
     }
     @media (max-width: 992px) {
       .quick-upload-grid { grid-template-columns:1fr; }
+      .damage-type-grid { grid-template-columns:1fr 1fr; }
       .quick-upload-panel .btn { width:100%; }
+    }
+    @media (max-width: 575.98px) {
+      .damage-type-grid { grid-template-columns:1fr; }
     }
     .loading-overlay {
       position: fixed;
@@ -179,22 +188,37 @@
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
         <div>
           <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
-          <h1 class="mb-1">{{ 'Angebotsanfrage bearbeiten' if angebot else 'Angebot anfordern' }}</h1>
-          <div class="text-muted">Schaden einreichen, Werkstatt-Angebot erhalten und danach bewusst annehmen.</div>
+          <h1 class="mb-1">{{ 'Versicherungsfall melden' if angebot and angebot['versicherung_id'] else ('Angebotsanfrage bearbeiten' if angebot else 'Angebot anfordern') }}</h1>
+          <div class="text-muted">
+            {% if angebot and angebot['versicherung_id'] %}
+              Schaden aufnehmen, Unterlagen bündeln, an die Versicherung übergeben und den Status verfolgen.
+            {% else %}
+              Schaden einreichen, Werkstatt-Angebot erhalten und danach bewusst annehmen.
+            {% endif %}
+          </div>
         </div>
         <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zurück</a>
       </div>
 
       <div class="process-card mb-4">
-        <div class="fw-bold mb-2">So läuft die Anfrage ab</div>
+        <div class="fw-bold mb-2">{{ 'So läuft der Versicherungsfall ab' if angebot and angebot['versicherung_id'] else 'So läuft die Anfrage ab' }}</div>
         <div class="status-track">
+          {% if angebot and angebot['versicherung_id'] %}
+          <span class="track-step {{ 'is-done' if angebot['kunde_name'] and angebot['fahrzeug'] else 'is-active' }}">1. Kundendaten</span>
+          <span class="track-step {{ 'is-done' if versicherung_prozess and versicherung_prozess['ready_for_send'] else 'is-active' }}">2. Unterlagen & Bilder</span>
+          <span class="track-step {{ 'is-done' if angebot['versicherung_text_geprueft'] else ('is-active' if versicherung_prozess and versicherung_prozess['ready_for_send'] else '') }}">3. Analyse prüfen</span>
+          <span class="track-step {{ 'is-done' if angebot['versicherung_sendefreigabe_am'] else '' }}">4. An Versicherung senden</span>
+          <span class="track-step {{ 'is-active' if angebot['versicherung_freigabe_status'] in ['gemeldet','in_pruefung','rueckfrage'] else ('is-done' if angebot['versicherung_freigabe_status'] == 'freigegeben' else '') }}">5. Status verfolgen</span>
+          {% else %}
           <span class="track-step {{ 'is-done' if angebot else 'is-active' }}">1. Daten erfassen</span>
           <span class="track-step {{ 'is-done' if angebot and angebot['angebot_abgesendet'] else ('is-active' if angebot else '') }}">2. Anfrage absenden</span>
           <span class="track-step {{ 'is-done' if angebot and angebot['angebot_status'] in ['angebot_abgegeben', 'abgelehnt'] else ('is-active' if angebot and angebot['angebot_abgesendet'] else '') }}">3. Werkstatt prüft</span>
           <span class="track-step {{ 'is-active' if angebot and angebot['angebot_status'] in ['angebot_abgegeben', 'abgelehnt'] else '' }}">4. Angebot entscheiden</span>
+          {% endif %}
         </div>
       </div>
 
+      {% if not (angebot and angebot['versicherung_id']) %}
       <div class="process-card mb-4">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
           <div>
@@ -207,94 +231,9 @@
           </div>
         </div>
       </div>
-
-      {% if angebot and angebot['versicherung_id'] %}
-      <div class="process-card mb-4">
-        <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
-          <div>
-            <div class="fw-bold mb-1">Vorlage an die Versicherung</div>
-            <div class="text-muted small">
-              {{ angebot['versicherung_name'] or 'Versicherung' }}{% if angebot['schaden_nummer'] %} · Schaden {{ angebot['schaden_nummer'] }}{% endif %}
-            </div>
-          </div>
-          <span class="badge text-bg-{{ angebot['versicherung_freigabe_meta']['farbe'] }}">{{ angebot['versicherung_freigabe_meta']['label'] }}</span>
-        </div>
-        <div class="mt-3">
-          {% include "_versicherung_workflow_panel.html" %}
-        </div>
-        <form method="POST" action="{{ url_for('partner_versicherung_sendefreigabe', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="mt-3">
-          {{ csrf_field()|safe }}
-          <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label">An Versicherung</label>
-              <input type="email" name="versicherung_email" class="form-control" value="{{ angebot['versicherung_email'] }}" placeholder="schaden@versicherung.de">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">CC</label>
-              <input type="text" name="versicherung_email_cc" class="form-control" value="{{ angebot['versicherung_email_cc'] }}" placeholder="optional">
-            </div>
-            <div class="col-12">
-              <label class="form-label">Anschreiben und Zusammenfassung</label>
-              <textarea name="versicherung_anschreiben" class="form-control insurance-mail-preview">{{ versicherung_anschreiben }}</textarea>
-            </div>
-          </div>
-          <div class="d-flex gap-2 flex-wrap mt-3">
-            <button type="submit" class="btn btn-dark">Freigabe zum Senden erteilen</button>
-            <a href="{{ url_for('partner_versicherung_auftrag_abtretungserklaerung_pdf', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="btn btn-outline-dark" id="pflicht-abtretung">Abtretungserklärung herunterladen</a>
-          </div>
-          {% if angebot['versicherung_sendefreigabe_am'] %}
-          <div class="text-success small mt-2">Freigegeben am {{ angebot['versicherung_sendefreigabe_am'] }}{% if angebot['versicherung_email'] %} an {{ angebot['versicherung_email'] }}{% endif %}.</div>
-          {% else %}
-          <div class="text-muted small mt-2">Bitte die Vorlage prüfen. Erst nach der Freigabe wird der Fall als versandbereit für die Versicherung markiert.</div>
-          {% endif %}
-        </form>
-        <div class="border rounded-4 p-3 mt-4" style="background:#fffdf9;border-color:#e4d6c3 !important;">
-          <div class="d-flex justify-content-between gap-3 align-items-start flex-wrap mb-3">
-            <div>
-              <div class="fw-bold">Kontakt mit der Versicherung</div>
-              <div class="text-muted small">Rückfragen, Freigaben und Unterlagen bleiben in dieser Akte.</div>
-            </div>
-            {% if chat_nachrichten %}
-            <span class="badge text-bg-warning">{{ chat_nachrichten|length }} Nachricht(en)</span>
-            {% endif %}
-          </div>
-          {% if chat_nachrichten %}
-          <div class="insurance-thread mb-3">
-            {% for chat in chat_nachrichten %}
-            {% set chat_class = 'is-versicherung' if chat['absender'] == 'versicherung' else ('is-autohaus' if chat['absender'] == 'autohaus' else 'is-werkstatt') %}
-            {% set chat_label = 'Versicherung' if chat['absender'] == 'versicherung' else ('Sie' if chat['absender'] == 'autohaus' else 'Werkstatt') %}
-            <div class="insurance-message {{ chat_class }}">
-              <div class="d-flex justify-content-between gap-2 flex-wrap mb-1">
-                <div class="fw-bold">{{ chat_label }}</div>
-                <div class="text-muted small">{{ chat['erstellt_am'] }}</div>
-              </div>
-              <div style="white-space:pre-wrap;">{{ chat['nachricht'] }}</div>
-            </div>
-            {% endfor %}
-          </div>
-          {% else %}
-          <div class="text-muted mb-3">Noch keine Rückmeldung der Versicherung.</div>
-          {% endif %}
-          <form method="POST" enctype="multipart/form-data" action="{{ url_for('partner_versicherung_antwort', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="d-grid gap-2" data-upload-form>
-            {{ csrf_field()|safe }}
-            <label class="form-label mb-0">Antwort an die Versicherung</label>
-            <textarea name="nachricht" class="form-control" rows="3" placeholder="Antwort oder fehlende Angaben ergänzen"></textarea>
-            <input type="file" name="dateien" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
-            <button type="submit" class="btn btn-outline-dark" data-loading-message="Antwort wird gespeichert und Unterlagen werden analysiert. Bitte kurz warten.">Antwort senden</button>
-          </form>
-        </div>
-        {% if angebot['versicherung_freigabe_status'] == 'freigegeben' %}
-        <form method="POST" action="{{ url_for('partner_versicherung_freigabe_einplanen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="mt-3">
-          {{ csrf_field()|safe }}
-          <button type="submit" class="btn btn-dark">Freigabe liegt vor - Fahrzeug bei Werkstatt einplanen</button>
-        </form>
-        {% else %}
-        <div class="text-muted small mt-3">Nach der Rückmeldung der Versicherung kann das Fahrzeug hier bei Gärtner eingeplant werden.</div>
-        {% endif %}
-      </div>
       {% endif %}
 
-      {% if angebot %}
+      {% if angebot and not angebot['versicherung_id'] %}
       <form method="POST" enctype="multipart/form-data" class="quick-upload-panel mb-4" data-upload-form id="pflicht-upload">
         <div class="quick-upload-grid">
           <div>
@@ -318,7 +257,68 @@
       </form>
       {% endif %}
 
+      {% if angebot and angebot['versicherung_id'] %}
+      <div class="process-card mb-3" id="kundendaten">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+          <div>
+            <div class="fw-bold">1. Kunde/Werkstatt meldet Schaden</div>
+            <div class="text-muted small">Wenn der Kunde direkt kommt, entfällt „Versicherung meldet an Gärtner“. Erst Kundendaten speichern, dann Unterlagen sammeln und an die Versicherung senden.</div>
+          </div>
+          <span class="badge text-bg-{{ angebot['versicherung_freigabe_meta']['farbe'] }}">{{ angebot['versicherung_freigabe_meta']['label'] }}</span>
+        </div>
+      </div>
+      {% endif %}
+
       <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
+        {% if angebot and angebot['versicherung_id'] %}
+        <div class="col-12">
+          <div class="insurance-picker">
+            <div class="row g-3 align-items-end">
+              <div class="col-lg-4">
+                <label class="form-label fw-bold">Schadenart / Deckung</label>
+                <select name="schadenart" class="form-select form-select-lg">
+                  {% for key, label in schadenarten %}
+                  <option value="{{ key }}" {% if angebot['schadenart'] == key %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-lg-4">
+                <label class="form-label fw-bold">Versicherung</label>
+                <select name="versicherung_id" class="form-select form-select-lg" data-insurance-select>
+                  <option value="">Bitte auswählen</option>
+                  {% for item in versicherungen %}
+                  <option value="{{ item['id'] }}" data-email="{{ item['email'] }}" {% if angebot['versicherung_id'] == item['id'] %}selected{% endif %}>{{ item['name'] }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-lg-4">
+                <label class="form-label fw-bold">E-Mail Versicherung</label>
+                <input type="email" name="versicherung_email" class="form-control form-control-lg" value="{{ angebot['versicherung_email'] }}" placeholder="wird aus Stammdaten vorgeschlagen" data-insurance-email>
+                <input type="hidden" name="versicherung_email_cc" value="{{ angebot['versicherung_email_cc'] }}">
+              </div>
+              <div class="col-12">
+                <div class="form-text">Die Adresse kommt aus den Versicherungs-Stammdaten und muss vor dem Versand kurz geprüft werden. Beim Wechsel der Versicherung wird eine hinterlegte E-Mail vorgeschlagen.</div>
+              </div>
+            </div>
+            <div class="damage-type-grid mt-3">
+              {% for hinweis in schadenart_hinweise %}
+              <div class="damage-type-card">
+                <span>{{ hinweis['deckung'] }}</span>
+                <strong>{{ hinweis['titel'] }}</strong>
+                <div class="small text-muted">{{ hinweis['beispiele'] }}</div>
+                <div class="small mt-2">{{ hinweis['hinweis'] }}</div>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="alert alert-info py-2 small mt-3 mb-0">
+              <strong>Kundenhinweis:</strong>
+              Haftpflicht/Fremdverschulden verursacht normalerweise keine eigene Selbstbeteiligung oder SF-Rückstufung.
+              Teilkasko bei Sturm, Hagel, Wild oder Glas kann eine Selbstbeteiligung haben, meist ohne SF-Rückstufung.
+              Vollkasko kann durch Selbstbeteiligung und Rückstufung später teurer werden. Bitte Vertrag, Rabattschutz und Police prüfen.
+            </div>
+          </div>
+        </div>
+        {% endif %}
         <div class="col-md-4" id="pflicht-kunde">
           <label class="form-label">Endkunde / Referenz</label>
           <input type="text" name="kunde_name" class="form-control form-control-lg" value="{{ angebot['kunde_name'] if angebot else '' }}">
@@ -328,12 +328,12 @@
           <input type="text" name="versicherungsnehmer" class="form-control form-control-lg" value="{{ angebot['versicherungsnehmer'] if angebot else '' }}" placeholder="falls abweichend">
         </div>
         <div class="col-md-4">
-          <label class="form-label">Telefon</label>
-          <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ angebot['kontakt_telefon'] if angebot else '' }}">
+          <label class="form-label">Handy / WhatsApp Kunde</label>
+          <input type="text" name="kontakt_telefon" class="form-control form-control-lg" value="{{ angebot['kontakt_telefon'] if angebot else '' }}" placeholder="z.B. 0171 1234567">
         </div>
         <div class="col-md-4">
           <label class="form-label">Typ / Fahrzeug</label>
-          <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ angebot['fahrzeug'] if angebot else '' }}" placeholder="z.B. Audi Q7">
+          <input type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ angebot['fahrzeug'] if angebot else '' }}" placeholder="z.B. Audi Q7" data-vehicle-input>
         </div>
         <div class="col-md-4">
           <label class="form-label">Kennzeichen</label>
@@ -341,7 +341,23 @@
         </div>
         <div class="col-md-4" id="pflicht-fahrzeugdaten">
           <label class="form-label">FIN-Nummer</label>
-          <input type="text" name="fin_nummer" class="form-control form-control-lg" value="{{ angebot['fin_nummer'] if angebot else '' }}" style="text-transform:uppercase;">
+          <div class="input-group input-group-lg" data-fin-widget>
+            <input type="text" name="fin_nummer" class="form-control" value="{{ angebot['fin_nummer'] if angebot else '' }}" style="text-transform:uppercase;" data-fin-input>
+            <button class="btn btn-outline-dark" type="button" data-fin-analyze>FIN analysieren</button>
+          </div>
+          <div class="form-text" data-fin-result>Lokale Prüfung erkennt Hersteller, Modellcode und Baujahr-/Modelljahr-Hinweis, wenn der Code bekannt ist. Exakte Ausstattung braucht eine FIN-Datenquelle.</div>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">HSN</label>
+          <input type="text" name="hsn_nummer" class="form-control form-control-lg" value="{{ angebot['hsn_nummer'] if angebot else '' }}" placeholder="2.1">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">TSN</label>
+          <input type="text" name="tsn_nummer" class="form-control form-control-lg" value="{{ angebot['tsn_nummer'] if angebot else '' }}" placeholder="2.2" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Kilometerstand</label>
+          <input type="text" name="kilometerstand" class="form-control form-control-lg" value="{{ angebot['kilometerstand'] if angebot else '' }}" placeholder="z.B. 84.500">
         </div>
         <div class="col-md-4">
           <label class="form-label">Auftrag / Vorgangsnummer</label>
@@ -355,6 +371,7 @@
           <label class="form-label">Police / Vertrag</label>
           <input type="text" name="versicherung_police" class="form-control form-control-lg" value="{{ angebot['versicherung_police'] if angebot else '' }}">
         </div>
+        {% if not (angebot and angebot['versicherung_id']) %}
         <div class="col-md-8">
           <label class="form-label">Kurze Schadensbeschreibung</label>
           <input type="text" name="analyse_text" class="form-control form-control-lg" value="{{ angebot['analyse_text'] if angebot else '' }}" placeholder="z.B. Stoßfänger hinten verkratzt">
@@ -363,7 +380,47 @@
           <label class="form-label">Freitext / Zusatzinfo</label>
           <textarea name="beschreibung" class="form-control" rows="5" placeholder="Hier kann das Autohaus alles frei eingeben.">{{ angebot['beschreibung'] if angebot else '' }}</textarea>
         </div>
-        {% if angebot %}
+        {% endif %}
+        {% if angebot and angebot['versicherung_id'] %}
+        <div class="col-12">
+          <div class="insurance-picker">
+            <h3 class="h5 mb-2">Mobilität und Erstplanung</h3>
+            <div class="text-muted small mb-3">Noch kein Reparaturtermin. Hier geht es nur darum, ob das Auto bewegt werden kann und was für die Freigabe vorbereitet werden muss.</div>
+            <div class="row g-3">
+              <div class="col-md-3">
+                <label class="form-label">Fahrzeug fahrbereit?</label>
+                <select name="schaden_fahrbereit" class="form-select">
+                  <option value="unbekannt" {% if angebot['schaden_fahrbereit'] == 'unbekannt' %}selected{% endif %}>Noch offen</option>
+                  <option value="ja" {% if angebot['schaden_fahrbereit'] == 'ja' %}selected{% endif %}>Ja</option>
+                  <option value="nein" {% if angebot['schaden_fahrbereit'] == 'nein' %}selected{% endif %}>Nein</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Abholung / Abschlepper?</label>
+                <select name="schaden_abschleppen" class="form-select">
+                  <option value="unbekannt" {% if angebot['schaden_abschleppen'] == 'unbekannt' %}selected{% endif %}>Noch offen</option>
+                  <option value="ja" {% if angebot['schaden_abschleppen'] == 'ja' %}selected{% endif %}>Ja</option>
+                  <option value="nein" {% if angebot['schaden_abschleppen'] == 'nein' %}selected{% endif %}>Nein</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Mietwagen gewünscht?</label>
+                <select name="schaden_mietwagen" class="form-select">
+                  <option value="unbekannt" {% if angebot['schaden_mietwagen'] == 'unbekannt' %}selected{% endif %}>Noch offen</option>
+                  <option value="ja" {% if angebot['schaden_mietwagen'] == 'ja' %}selected{% endif %}>Ja</option>
+                  <option value="nein" {% if angebot['schaden_mietwagen'] == 'nein' %}selected{% endif %}>Nein</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Selbstbeteiligung</label>
+                <input type="text" name="schaden_selbstbeteiligung" class="form-control" value="{{ angebot['schaden_selbstbeteiligung'] }}" placeholder="z.B. Vollkasko, SB 300 EUR">
+                <div class="form-text">Für das Kundengespräch transparent eintragen.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+        {% if angebot and not angebot['versicherung_id'] %}
         <div class="col-12">
           <div class="border rounded-4 p-3" style="background:#f8f2e8;border-color:#e4d6c3 !important;">
             <div class="fw-semibold mb-3">Aus dem Beleg erkannt</div>
@@ -384,6 +441,7 @@
           </div>
         </div>
         {% endif %}
+        {% if not (angebot and angebot['versicherung_id']) %}
         <div class="col-md-4">
           <label class="form-label">Transportart</label>
           <select name="transport_art" class="form-select form-select-lg" data-transport-select>
@@ -400,6 +458,8 @@
           <label class="form-label" data-angebot-abholung-label>{{ angebot['angebot_abholung_label'] if angebot else transport_arten['standard']['angebot_abholung_label'] }}</label>
           <input type="date" name="abholtermin" class="form-control form-control-lg" value="{{ angebot['abholtermin']|iso_date if angebot else '' }}">
         </div>
+        {% endif %}
+        {% if not (angebot and angebot['versicherung_id']) %}
         <div class="col-12">
           <label class="form-label">Bilder oder Dokumente</label>
           <input type="file" name="dateien" class="form-control form-control-lg" multiple>
@@ -410,8 +470,9 @@
           <input type="text" name="upload_notiz" class="form-control form-control-lg" placeholder="z.B. Kotflügel links Kratzer, Stoßstange vorne gerissen">
           <div class="form-text">Bei Schadensfotos reichen kurze Schlagwörter. Die Werkstatt sieht den Hinweis direkt mit der Datei.</div>
         </div>
+        {% endif %}
         <div class="col-12 d-flex gap-2 flex-wrap">
-          <button type="submit" name="aktion" value="analyze" class="btn btn-outline-dark btn-lg" data-loading-message="Angebotsanfrage wird analysiert und aufbereitet. Bitte kurz warten.">Angebotsanfrage analysieren</button>
+          <button type="submit" name="aktion" value="analyze" class="btn btn-outline-dark btn-lg" data-loading-message="{{ 'Kundendaten werden gespeichert. Bitte kurz warten.' if angebot and angebot['versicherung_id'] else 'Angebotsanfrage wird analysiert und aufbereitet. Bitte kurz warten.' }}">{{ 'Kundendaten speichern' if angebot and angebot['versicherung_id'] else 'Angebotsanfrage analysieren' }}</button>
           {% if angebot and angebot['angebot_status'] != 'angebot_abgegeben' %}
           {% if not angebot['versicherung_id'] %}
           <button type="submit" name="aktion" value="submit_offer" class="btn btn-dark btn-lg" data-loading-message="Angebotsanfrage wird abgesendet. Bitte kurz warten.">Angebotsanfrage absenden</button>
@@ -420,16 +481,207 @@
         </div>
       </form>
 
+      {% if angebot and angebot['versicherung_id'] %}
+      {% set unterlagen_bereit = versicherung_prozess and versicherung_prozess['ready_for_send'] %}
+      {% set versand_bereit = unterlagen_bereit and angebot['versicherung_text_geprueft'] %}
+      <div class="process-card mt-4 mb-4">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
+          <div>
+            <div class="fw-bold">Versicherungsfall</div>
+            <div class="text-muted small">
+              {{ angebot['versicherung_name'] or 'Versicherung' }}{% if angebot['schaden_nummer'] %} · Schaden {{ angebot['schaden_nummer'] }}{% endif %}
+            </div>
+          </div>
+          <span class="badge text-bg-{{ angebot['versicherung_freigabe_meta']['farbe'] }}">{{ angebot['versicherung_freigabe_meta']['label'] }}</span>
+        </div>
+
+        <div class="fw-bold mb-2">2. Unterlagen und Schadenbilder</div>
+        {% set versicherung_prozess_standalone = true %}
+        {% set versicherung_prozess_phase = 'send_vorbereitung' %}
+        {% include "_versicherung_prozess_assistent.html" %}
+        {% set versicherung_prozess_phase = 'full' %}
+
+        <div class="border rounded-4 p-3 mt-4" id="schadentext-pruefen" style="background:#fffdf9;border-color:#e4d6c3 !important;">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
+            <div>
+              <div class="fw-bold">3. Analyse und Schadensbeschreibung prüfen</div>
+              <div class="text-muted small">Aus Kundendaten, Fotos, Gutachten und Notizen entsteht der fachliche Schadentext. Vor dem Versand bitte lesen, korrigieren und abhaken.</div>
+            </div>
+            <span class="badge text-bg-{{ 'success' if angebot['versicherung_text_geprueft'] else 'warning' }}">{{ 'Geprüft' if angebot['versicherung_text_geprueft'] else 'Prüfen' }}</span>
+          </div>
+          {% if dokument_pruefung %}
+          <div class="alert alert-warning py-2 small">Erkannte Felder aus Unterlagen bitte gegen die Originaldateien prüfen. Details stehen weiter unten in der Prüfansicht.</div>
+          {% endif %}
+          <form method="POST" enctype="multipart/form-data" class="row g-3" data-upload-form>
+            {{ csrf_field()|safe }}
+            <input type="hidden" name="aktion" value="review_damage">
+            <div class="col-12">
+              <label class="form-label">Kurze Schadensbeschreibung</label>
+              <input type="text" name="analyse_text" class="form-control form-control-lg" value="{{ angebot['analyse_text'] }}" placeholder="z.B. Frontschaden links, Stoßfänger und Kotflügel">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Fachlicher Text für die Versicherung</label>
+              <textarea name="beschreibung" class="form-control" rows="5" placeholder="Schadenbild, sichtbare Bereiche, Besonderheiten und Hinweise aus Gutachten/Fotos.">{{ angebot['beschreibung'] }}</textarea>
+              <div class="form-text">Dieser Text fließt in das Anschreiben an die Versicherung ein.</div>
+            </div>
+            <div class="col-12 d-flex gap-2 flex-wrap">
+              <button type="submit" class="btn btn-outline-dark" data-loading-message="Schadensbeschreibung wird gespeichert. Bitte kurz warten.">Schadentext speichern</button>
+              <button type="submit" name="versicherung_text_geprueft" value="1" class="btn btn-dark" data-loading-message="Schadensbeschreibung wird gespeichert und geprüft markiert.">Schadentext ist geprüft</button>
+            </div>
+          </form>
+        </div>
+
+        <form method="POST" action="{{ url_for('partner_versicherung_sendefreigabe', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="border rounded-4 p-3 mt-4" id="versicherung-senden" style="background:#fffdf9;border-color:#e4d6c3 !important;">
+          {{ csrf_field()|safe }}
+          {% set mail = schaden_mail|default({}) %}
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
+            <div>
+              <div class="fw-bold">4. An Versicherung senden</div>
+              <div class="text-muted small">Erst aktiv, wenn Unterlagen vollständig sind und der Schadentext geprüft wurde.</div>
+            </div>
+            <span class="badge text-bg-{{ 'success' if versand_bereit else 'warning' }}">{{ 'Bereit' if versand_bereit else 'Noch offen' }}</span>
+          </div>
+          {% if not versand_bereit %}
+          <div class="alert alert-warning py-2 small">
+            Noch offen:
+            {% if not unterlagen_bereit and versicherung_prozess %}{{ versicherung_prozess['send_blocker']|join(', ') }}{% endif %}
+            {% if not angebot['versicherung_text_geprueft'] %}{% if not unterlagen_bereit %}, {% endif %}Schadentext prüfen{% endif %}.
+          </div>
+          {% endif %}
+          <div class="border rounded-3 bg-white p-2 mb-3">
+            <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+              <div>
+                <div class="fw-semibold small">Absender Schadenregulierung</div>
+                <div class="text-muted small">
+                  {{ mail.get('address') or 'Noch keine Schaden-Mailadresse hinterlegt' }}
+                  {% if mail.get('smtp_configured') %}
+                    · E-Mail wird beim Klick wirklich versendet
+                  {% else %}
+                    · bis zur SMTP-Konfiguration wird nur der Status gesetzt
+                  {% endif %}
+                </div>
+              </div>
+              <div class="d-flex gap-1 flex-wrap">
+                <span class="badge text-bg-{{ 'success' if mail.get('smtp_configured') else 'secondary' }}">{{ mail.get('smtp_badge') or 'SMTP fehlt' }}</span>
+                <span class="badge text-bg-{{ 'success' if mail.get('imap_configured') else 'secondary' }}">{{ mail.get('imap_badge') or 'IMAP fehlt' }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">An Versicherung</label>
+              <input type="email" name="versicherung_email" class="form-control" value="{{ angebot['versicherung_email'] }}" placeholder="schaden@versicherung.de">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">CC</label>
+              <input type="text" name="versicherung_email_cc" class="form-control" value="{{ angebot['versicherung_email_cc'] }}" placeholder="optional">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Anschreiben und Zusammenfassung</label>
+              <textarea name="versicherung_anschreiben" class="form-control insurance-mail-preview">{{ versicherung_anschreiben }}</textarea>
+            </div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap mt-3">
+            <button type="submit" class="btn btn-dark" {% if not versand_bereit %}disabled{% endif %}>{{ 'Per E-Mail an Versicherung senden' if mail.get('smtp_configured') else 'Als an Versicherung übergeben markieren' }}</button>
+          </div>
+          {% if angebot['versicherung_sendefreigabe_am'] %}
+          <div class="text-success small mt-2">An Versicherung übergeben am {{ angebot['versicherung_sendefreigabe_am'] }}{% if angebot['versicherung_email'] %} für {{ angebot['versicherung_email'] }}{% endif %}.</div>
+          {% endif %}
+        </form>
+
+        <div class="border rounded-4 p-3 mt-4" id="versicherung-status" style="background:#fffdf9;border-color:#e4d6c3 !important;">
+          <div class="d-flex justify-content-between gap-3 align-items-start flex-wrap mb-3">
+            <div>
+              <div class="fw-bold">5. Status der Versicherung</div>
+              {% if angebot['versicherung_freigabe_status'] in ['gemeldet', 'in_pruefung'] %}
+              <div class="text-muted small">Wird von der Versicherung geprüft.</div>
+              {% elif angebot['versicherung_freigabe_status'] == 'rueckfrage' %}
+              <div class="text-muted small">Die Versicherung hat eine Rückfrage. Bitte Antwort oder Unterlagen ergänzen.</div>
+              {% elif angebot['versicherung_freigabe_status'] == 'freigegeben' %}
+              <div class="text-muted small">Versicherung hat den Schaden freigegeben. Nächster Schritt: Teile bestellen und Reparatur einplanen.</div>
+              {% elif angebot['versicherung_freigabe_status'] == 'abgelehnt' %}
+              <div class="text-muted small">Der Fall wurde nicht freigegeben oder abgelehnt.</div>
+              {% else %}
+              <div class="text-muted small">Noch nicht an die Versicherung übergeben.</div>
+              {% endif %}
+            </div>
+            <span class="badge text-bg-{{ angebot['versicherung_freigabe_meta']['farbe'] }}">{{ angebot['versicherung_freigabe_meta']['label'] }}</span>
+          </div>
+          {% include "_versicherung_pruefung_status.html" %}
+
+          {% if chat_nachrichten %}
+          <div class="insurance-thread mb-3">
+            {% for chat in chat_nachrichten %}
+            {% set chat_class = 'is-versicherung' if chat['absender'] == 'versicherung' else ('is-autohaus' if chat['absender'] == 'autohaus' else 'is-werkstatt') %}
+            {% set chat_label = 'Versicherung' if chat['absender'] == 'versicherung' else ('Sie' if chat['absender'] == 'autohaus' else 'Werkstatt') %}
+            <div class="insurance-message {{ chat_class }}">
+              <div class="d-flex justify-content-between gap-2 flex-wrap mb-1">
+                <div class="fw-bold">{{ chat_label }}</div>
+                <div class="text-muted small">{{ chat['erstellt_am'] }}</div>
+              </div>
+              <div style="white-space:pre-wrap;">{{ chat['nachricht'] }}</div>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="text-muted mb-3">Noch keine Rückmeldung der Versicherung.</div>
+          {% endif %}
+
+          <div class="row g-2 mb-3">
+            <div class="col-md-4">
+              <div class="border rounded-3 p-2 h-100 bg-white">
+                <div class="fw-semibold small">Posteingang Versicherung</div>
+                <div class="text-muted small">Antworten an {{ mail.get('address') or 'die Schaden-Mailbox' }} werden der Schadenakte zugeordnet und hier als kurzer Status sichtbar.</div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="border rounded-3 p-2 h-100 bg-white">
+                <div class="fw-semibold small">Rückfrage / Nacharbeit</div>
+                <div class="text-muted small">Fehlende Bilder, Gutachten oder Angaben ergänzen und den Fall wieder in Prüfung geben.</div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="border rounded-3 p-2 h-100 bg-white">
+                <div class="fw-semibold small">{{ 'Teile bestellen' if angebot['versicherung_freigabe_status'] == 'freigegeben' else 'Eskalation prüfen' }}</div>
+                {% if angebot['versicherung_freigabe_status'] == 'freigegeben' %}
+                <div class="text-muted small">Freigabe liegt vor. Jetzt Teilebedarf und Lieferzeit erfassen, danach Termin planen.</div>
+                {% else %}
+                <div class="text-muted small">Bei Kürzung oder Ablehnung fachliche Antwort vorbereiten oder Verkehrsrecht-Anwalt einschalten.</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <form method="POST" enctype="multipart/form-data" action="{{ url_for('partner_versicherung_antwort', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="d-grid gap-2" data-upload-form>
+            {{ csrf_field()|safe }}
+            <label class="form-label mb-0">Antwort oder Rückfrage ergänzen</label>
+            <textarea name="nachricht" class="form-control" rows="3" placeholder="Antwort oder fehlende Angaben ergänzen"></textarea>
+            <input type="file" name="dateien" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
+            <button type="submit" class="btn btn-outline-dark" data-loading-message="Antwort wird gespeichert und Unterlagen werden analysiert. Bitte kurz warten.">Antwort speichern</button>
+          </form>
+
+          {% if angebot['versicherung_freigabe_status'] == 'freigegeben' %}
+          <form method="POST" action="{{ url_for('partner_versicherung_freigabe_einplanen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="mt-3">
+            {{ csrf_field()|safe }}
+            <button type="submit" class="btn btn-dark">Freigabe liegt vor - Fahrzeug bei Gärtner einplanen</button>
+          </form>
+          {% else %}
+          <div class="text-muted small mt-3">Nach der Rückmeldung der Versicherung kann das Fahrzeug hier bei Gärtner eingeplant werden, dem Lackierzentrum Gärtner Karosserie &amp; Lack GmbH.</div>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
       {% if angebot %}
+      {% if not angebot['versicherung_id'] %}
       <div class="alert {{ 'alert-success' if angebot['angebot_abgesendet'] else 'alert-warning' }} mt-4 mb-0">
-        {% if angebot['versicherung_id'] %}
-          Dieser Fall liegt zuerst bei der Versicherung. Die Werkstatt wird erst nach Freigabe und Einplanung aktiv.
-        {% elif angebot['angebot_abgesendet'] %}
+        {% if angebot['angebot_abgesendet'] %}
           Die Angebotsanfrage wurde an die Werkstatt abgesendet.
         {% else %}
           Die Analyse ist vorbereitet. Bitte prüfen Sie die Felder und senden Sie die Angebotsanfrage danach ab.
         {% endif %}
       </div>
+      {% endif %}
       {% if angebot['analyse_pruefen'] or angebot['analyse_hinweis'] %}
       <div class="alert alert-warning mt-4 mb-0">
         <strong>Bitte kurz prüfen:</strong>
@@ -502,6 +754,7 @@
         </div>
       </div>
       {% endif %}
+      {% if not angebot['versicherung_id'] %}
       <div class="mt-4">
         <h4 class="mb-3">Status</h4>
         {% if angebot['angebot_status'] == 'angebot_abgegeben' %}
@@ -519,6 +772,26 @@
         {% if angebot['annahme_datum'] %}<span class="chip">{{ angebot['angebot_annahme_label'] }} {{ angebot['annahme_datum'] }}</span>{% endif %}
         {% if angebot['abholtermin'] %}<span class="chip">{{ angebot['angebot_abholung_label'] }} {{ angebot['abholtermin'] }}</span>{% endif %}
       </div>
+      {% endif %}
+      {% if angebot['kunden_status_url'] %}
+      <div class="border rounded-4 p-4 mt-4" style="background:#fffdf9;border-color:#e4d6c3 !important;">
+        <div class="fw-bold mb-1">Kundenstatus weitergeben</div>
+        <div class="text-muted small mb-3">Der Kunde sieht den aktuellen Stand und spätere Termine über den Statuslink.</div>
+        <div class="d-flex gap-2 flex-wrap">
+          <a class="btn btn-outline-dark btn-sm" href="{{ angebot['kunden_status_url'] }}" target="_blank" rel="noopener">Statuslink öffnen</a>
+          {% if angebot['kunden_whatsapp_status']['can_whatsapp'] %}
+          <a class="btn btn-success btn-sm" href="{{ angebot['kunden_whatsapp_status']['status_update_whatsapp_url'] }}" target="_blank" rel="noopener">Statusupdate WhatsApp</a>
+          {% endif %}
+        </div>
+        {% if angebot['kunden_whatsapp_status']['can_whatsapp'] %}
+        <div class="text-muted small mt-2">WhatsApp wird nur vorbereitet und erst im geöffneten Chat versendet.</div>
+        {% elif angebot['kontakt_telefon'] %}
+        <div class="text-muted small mt-2">Für WhatsApp bitte eine Mobilnummer hinterlegen.</div>
+        {% else %}
+        <div class="text-muted small mt-2">Mit einer Handynummer kann der Status später per WhatsApp vorbereitet werden.</div>
+        {% endif %}
+      </div>
+      {% endif %}
       {% if angebot['angebot_status'] in ['angebot_abgegeben', 'abgelehnt'] %}
       <div class="border rounded-4 p-4 mt-4" style="background:#f8f2e8;border-color:#e4d6c3 !important;">
         <div class="fw-bold mb-2">Angebot der Werkstatt</div>
@@ -659,7 +932,24 @@
       transportSelect.addEventListener('change', updateTransportLabels);
       updateTransportLabels();
     }
+    const insuranceSelect = document.querySelector('[data-insurance-select]');
+    const insuranceEmail = document.querySelector('[data-insurance-email]');
+    if (insuranceSelect && insuranceEmail) {
+      let insuranceEmailWasSuggested = !insuranceEmail.value;
+      insuranceEmail.addEventListener('input', () => {
+        insuranceEmailWasSuggested = false;
+      });
+      insuranceSelect.addEventListener('change', () => {
+        const option = insuranceSelect.options[insuranceSelect.selectedIndex];
+        const suggestion = option ? (option.dataset.email || '') : '';
+        if (!insuranceEmail.value || insuranceEmailWasSuggested) {
+          insuranceEmail.value = suggestion;
+          insuranceEmailWasSuggested = Boolean(suggestion);
+        }
+      });
+    }
   </script>
+  {% include "_fin_analyse_script.html" %}
   {% include "ki_assistent_widget.html" %}
   {% include "_session_keepalive.html" %}
 </body>

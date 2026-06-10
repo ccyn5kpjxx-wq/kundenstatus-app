@@ -169,16 +169,36 @@
           <input type="text" name="kunde_name" class="form-control form-control-lg">
         </div>
         <div class="col-md-6">
-          <label class="form-label">Telefon</label>
-          <input type="text" name="kontakt_telefon" class="form-control form-control-lg">
+          <label class="form-label">Handy / WhatsApp Kunde</label>
+          <input type="text" name="kontakt_telefon" class="form-control form-control-lg" placeholder="z.B. 0171 1234567">
         </div>
         <div class="col-md-8">
           <label class="form-label">Fahrzeug</label>
-          <input type="text" name="fahrzeug" class="form-control form-control-lg" placeholder="Wird beim Upload, wenn möglich, automatisch erkannt">
+          <input type="text" name="fahrzeug" class="form-control form-control-lg" placeholder="Wird beim Upload, wenn möglich, automatisch erkannt" data-vehicle-input>
         </div>
         <div class="col-md-4">
           <label class="form-label">Kennzeichen</label>
           <input type="text" name="kennzeichen" class="form-control form-control-lg" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">FIN</label>
+          <div class="input-group input-group-lg" data-fin-widget>
+            <input type="text" name="fin_nummer" class="form-control" style="text-transform:uppercase;" data-fin-input>
+            <button class="btn btn-outline-dark" type="button" data-fin-analyze>FIN analysieren</button>
+          </div>
+          <div class="form-text" data-fin-result>Lokale Prüfung erkennt Hersteller und Modelljahr-Hinweise. Für deutsche Daten bitte zusätzlich HSN/TSN aus dem Fahrzeugschein eintragen.</div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Kilometerstand</label>
+          <input type="text" name="kilometerstand" class="form-control form-control-lg" placeholder="z.B. 84.500">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">HSN</label>
+          <input type="text" name="hsn_nummer" class="form-control form-control-lg" placeholder="2.1">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">TSN</label>
+          <input type="text" name="tsn_nummer" class="form-control form-control-lg" placeholder="2.2" style="text-transform:uppercase;">
         </div>
         <div class="col-md-6">
           <label class="form-label">Analyse</label>
@@ -222,6 +242,7 @@
     </div>
   </div>
   {% include "ki_assistent_widget.html" %}
+  {% include "_fin_analyse_script.html" %}
   <script>
     const form = document.querySelector('[data-upload-form]');
     const overlay = document.querySelector('[data-loading-overlay]');

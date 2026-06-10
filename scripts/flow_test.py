@@ -26,7 +26,8 @@ def check(label, condition, detail=""):
 
 
 def extract_id_from_location(location):
-    last = (location or "").rstrip("/").split("/")[-1]
+    target = (location or "").split("#", 1)[0].split("?", 1)[0].rstrip("/")
+    last = target.split("/")[-1]
     return int(last) if last.isdigit() else 0
 
 
@@ -230,6 +231,406 @@ def main():
         for label, client, url in route_checks:
             response = client.get(url)
             check(label, response.status_code == 200, f"Status {response.status_code}")
+
+        partner_dashboard_html = partner.get("/partner/kaesmann/dashboard").get_data(as_text=True)
+        check(
+            "Partner-Dashboard bietet Versicherungsfall-Einstieg",
+            "Versicherungsfall melden" in partner_dashboard_html
+            and "/partner/kaesmann/versicherung/neu" in partner_dashboard_html,
+        )
+
+        admin_claim_response = admin.post(
+            "/admin/versicherung/schaden/neu",
+            data=with_csrf(
+                admin,
+                {
+                    "kunde_name": "",
+                    "fahrzeug": "",
+                    "kennzeichen": "",
+                    "schadenart": "unbekannt",
+                    "beschreibung": "",
+                    "dateien": (
+                        BytesIO(
+                            b"Fahrzeugschein Smoke Schaden\n"
+                            b"Fahrzeug: VW Golf\n"
+                            b"Kennzeichen: MOS FS 42\n"
+                            b"FIN: WVWZZZ1KZ6W000001\n"
+                            b"HSN: 0603\n"
+                            b"TSN: ABC\n"
+                            b"Schadenbeschreibung: Stossstange vorne beschaedigt\n"
+                        ),
+                        "admin-schaden-fahrzeugschein.txt",
+                    ),
+                },
+            ),
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        check(
+            "Admin-Schadenanlage analysiert Upload vor Versicherungs-Pflicht",
+            admin_claim_response.status_code == 302,
+            f"Status {admin_claim_response.status_code}",
+        )
+        admin_claim_id = extract_id_from_location(admin_claim_response.headers.get("Location"))
+        admin_claim = portal.get_auftrag(admin_claim_id)
+        offene_versicherung = portal.get_versicherung(admin_claim.get("versicherung_id")) if admin_claim else None
+        admin_claim_files = portal.list_dateien(admin_claim_id) if admin_claim else []
+        check(
+            "Admin-Schadenanlage legt Fall mit offener Versicherung und erkannten Daten an",
+            bool(
+                admin_claim
+                and offene_versicherung
+                and offene_versicherung.get("name") == "Versicherung noch offen"
+                and admin_claim.get("fahrzeug") == "VW Golf"
+                and admin_claim.get("kennzeichen") == "MOS FS 42"
+                and admin_claim.get("fin_nummer") == "WVWZZZ1KZ6W000001"
+                and len(admin_claim_files) == 1
+                and admin_claim_files[0].get("extrahierter_text")
+            ),
+            (
+                f"id={admin_claim_id}, "
+                f"versicherung={offene_versicherung.get('name') if offene_versicherung else None}, "
+                f"fahrzeug={admin_claim.get('fahrzeug') if admin_claim else None}, "
+                f"kennzeichen={admin_claim.get('kennzeichen') if admin_claim else None}, "
+                f"fin={admin_claim.get('fin_nummer') if admin_claim else None}, "
+                f"dateien={len(admin_claim_files)}"
+            ),
+        )
+        if admin_claim_id:
+            portal.delete_auftrag(admin_claim_id)
+
+        versicherungen = portal.list_versicherungen()
+        check("Versicherungen fuer Schadenprozess vorhanden", bool(versicherungen))
+        flow_versicherung = versicherungen[0]
+        partner_case_get = partner.get("/partner/kaesmann/versicherung/neu")
+        check("Autohaus kann Versicherungsfall-Formular öffnen", partner_case_get.status_code == 200, f"Status {partner_case_get.status_code}")
+        partner_case_response = partner.post(
+            "/partner/kaesmann/versicherung/neu",
+            data=with_csrf(
+                partner,
+                {
+                    "versicherung_id": str(flow_versicherung["id"]),
+                    "kunde_name": "Flow Autohaus Kunde",
+                    "versicherungsnehmer": "Flow Autohaus Kunde",
+                    "kontakt_telefon": "0171 100200",
+                    "fahrzeug": "Skoda Octavia Flow",
+                    "kennzeichen": "MOS-F 170",
+                    "fin_nummer": "TMBFLOWAUTOHAUS01",
+                    "schaden_nummer": "FLOW-AH-170",
+                    "versicherung_police": "POL-FLOW-AH",
+                    "versicherung_email": flow_versicherung.get("email") or "schaden@example.test",
+                    "schadenart": "haftpflicht",
+                    "analyse_text": "Seitenschaden links",
+                    "beschreibung": "Kunde meldet Unfall im Autohaus. Autohaus bereitet Meldung an Versicherung vor.",
+                },
+            ),
+        )
+        check(
+            "Autohaus legt Versicherungsfall an",
+            partner_case_response.status_code == 302,
+            f"Status {partner_case_response.status_code}",
+        )
+        partner_case_id = extract_id_from_location(partner_case_response.headers.get("Location"))
+        partner_case = portal.get_auftrag(partner_case_id)
+        check(
+            "Autohaus-Versicherungsfall bleibt vor Freigabe beim Autohaus",
+            partner_case
+            and int(partner_case.get("autohaus_id") or 0) == int(autohaus["id"])
+            and int(partner_case.get("versicherung_id") or 0) == int(flow_versicherung["id"])
+            and partner_case.get("quelle") == "autohaus"
+            and partner_case.get("angebotsphase")
+            and partner_case.get("versicherung_freigabe_status") == "vorbereitet",
+            (
+                f"id={partner_case_id}, "
+                f"autohaus={partner_case.get('autohaus_id') if partner_case else None}, "
+                f"versicherung={partner_case.get('versicherung_id') if partner_case else None}, "
+                f"quelle={partner_case.get('quelle') if partner_case else None}, "
+                f"angebotsphase={partner_case.get('angebotsphase') if partner_case else None}, "
+                f"freigabe={partner_case.get('versicherung_freigabe_status') if partner_case else None}"
+            ),
+        )
+        partner_case_html = partner.get(f"/partner/kaesmann/angebot/{partner_case_id}").get_data(as_text=True)
+        check(
+            "Autohaus-Fall zeigt Versicherungsversand und spätere Einplanung",
+            "An Versicherung senden" in partner_case_html
+            and "bei Gärtner eingeplant" in partner_case_html,
+        )
+
+        versicherung_client = portal.app.test_client()
+        with versicherung_client.session_transaction() as session:
+            session["versicherung_id"] = flow_versicherung["id"]
+        versicherung_dashboard = versicherung_client.get(f"/versicherung/{flow_versicherung['slug']}/dashboard")
+        versicherung_dashboard_html = versicherung_dashboard.get_data(as_text=True)
+        check(
+            "Versicherung sieht Zuteilung nur an Gärtner",
+            versicherung_dashboard.status_code == 200
+            and "An Gärtner zuteilen" in versicherung_dashboard_html,
+            f"Status {versicherung_dashboard.status_code}",
+        )
+        check(
+            "Versicherungsportal zeigt Cockpit mit Wetter, Uhr und Statusgruppen",
+            "data-weather-widget" in versicherung_dashboard_html
+            and "data-live-clock" in versicherung_dashboard_html
+            and "Neue Meldungen" in versicherung_dashboard_html
+            and "In Prüfung" in versicherung_dashboard_html
+            and "Freigegeben / in Arbeit" in versicherung_dashboard_html
+            and "Archivierte Schadenakten" in versicherung_dashboard_html,
+        )
+        zuteilung_form = versicherung_client.get(f"/versicherung/{flow_versicherung['slug']}/zuteilung/neu")
+        zuteilung_html = zuteilung_form.get_data(as_text=True)
+        check(
+            "Versicherungs-Zuteilung nennt Gärtner statt andere Werkstatt",
+            zuteilung_form.status_code == 200
+            and "Fahrzeug an Gärtner zuteilen" in zuteilung_html
+            and "Dokumente analysieren" in zuteilung_html
+            and "Unterlagen hochladen und automatisch auslesen" in zuteilung_html
+            and "Beschädigtes Fahrzeug" in zuteilung_html
+            and "Zulassungsbescheinigung Teil I" in zuteilung_html
+            and "gegnerisches Kennzeichen" in zuteilung_html
+            and "Fahrzeugschein" in zuteilung_html
+            and "Partnerwerkstatt" not in zuteilung_html,
+            f"Status {zuteilung_form.status_code}",
+        )
+        zuteilung_doc_bytes = (
+            b"Versicherungsschein-Nr.: POL-FLOW-DOC\n"
+            b"Schaden-Nr.: FLOW-DOC-170\n"
+            b"Versicherungsnehmer: Flow Versicherungs Kunde\n"
+            b"Kennzeichen: MOS-V 170\n"
+            b"FIN: WVWFLOWVERSICH01\n"
+            b"Selbstbeteiligung 300 EUR\n"
+            b"Haftpflicht Fremdverschulden"
+        )
+        analyse_response = versicherung_client.post(
+            f"/versicherung/{flow_versicherung['slug']}/zuteilung/analyse",
+            data=with_csrf(
+                versicherung_client,
+                {
+                    "dateien": (BytesIO(zuteilung_doc_bytes), "flow-police.txt"),
+                    "document_role": "auto",
+                    "upload_notiz": "Flow-Test Police und Fahrzeugschein",
+                },
+            ),
+            content_type="multipart/form-data",
+        )
+        analyse_json = analyse_response.get_json() or {}
+        analyse_fields = analyse_json.get("fields") or {}
+        check(
+            "Versicherungs-Zuteilung analysiert Police/Fahrzeugschein vorab",
+            analyse_response.status_code == 200
+            and analyse_json.get("ok")
+            and analyse_fields.get("versicherung_police") == "POL-FLOW-DOC"
+            and analyse_fields.get("schaden_nummer") == "FLOW-DOC-170"
+            and analyse_fields.get("fin_nummer") == "WVWFLOWVERSICH01"
+            and analyse_fields.get("kennzeichen") == "MOS-V 170",
+            f"Status {analyse_response.status_code}, {analyse_json}",
+        )
+        gegner_doc_bytes = (
+            b"Unfallgegner / Schaediger\n"
+            b"Versicherungsnehmer: Gegner Max\n"
+            b"Kennzeichen: MOS-G 999\n"
+            b"Schaden-Nr.: GEGNER-170"
+        )
+        gegner_analyse_response = versicherung_client.post(
+            f"/versicherung/{flow_versicherung['slug']}/zuteilung/analyse",
+            data=with_csrf(
+                versicherung_client,
+                {
+                    "dateien": (BytesIO(gegner_doc_bytes), "flow-gegner.txt"),
+                    "document_role": "auto",
+                    "upload_notiz": "Flow-Test Gegnerdaten",
+                },
+            ),
+            content_type="multipart/form-data",
+        )
+        gegner_analyse_json = gegner_analyse_response.get_json() or {}
+        gegner_analyse_fields = gegner_analyse_json.get("fields") or {}
+        check(
+            "Versicherungs-Zuteilung trennt Gegnerdaten vom beschädigten Fahrzeug",
+            gegner_analyse_response.status_code == 200
+            and gegner_analyse_json.get("ok")
+            and gegner_analyse_fields.get("haftpflicht_gegner_name") == "Gegner Max"
+            and gegner_analyse_fields.get("haftpflicht_gegner_kennzeichen") == "MOS-G 999"
+            and gegner_analyse_fields.get("haftpflicht_schaden_nummer") == "GEGNER-170"
+            and not gegner_analyse_fields.get("kennzeichen"),
+            f"Status {gegner_analyse_response.status_code}, {gegner_analyse_json}",
+        )
+        zuteilung_response = versicherung_client.post(
+            f"/versicherung/{flow_versicherung['slug']}/zuteilung/neu",
+            data=with_csrf(
+                versicherung_client,
+                {
+                    "kunde_name": "Flow Versicherungs Kunde",
+                    "versicherungsnehmer": "Flow Versicherungs Kunde",
+                    "kontakt_telefon": "0171 300400",
+                    "kundenkontakt_kanal": "qr",
+                    "besichtigung_datum": "2026-05-18",
+                    "transport_art": "standard",
+                    "schaden_fahrbereit": "ja",
+                    "schaden_abschleppen": "nein",
+                    "schaden_mietwagen": "ja",
+                    "schaden_gutachter": "ja",
+                    "schadenart": "haftpflicht",
+                    "fahrzeug": "VW Golf Flow",
+                    "kennzeichen": "MOS-V 170",
+                    "fin_nummer": "WVWFLOWVERSICH01",
+                    "schaden_nummer": "FLOW-VS-170",
+                    "versicherung_police": "POL-FLOW-VS",
+                    "beschreibung": "Versicherung steuert den Schaden direkt an Gärtner.",
+                    "hinweis": "Kunde soll zur Begutachtung kontaktiert werden.",
+                    "upload_notiz": "Flow-Test Police und Fahrzeugschein",
+                    "dateien": (BytesIO(zuteilung_doc_bytes), "flow-police.txt"),
+                },
+            ),
+            content_type="multipart/form-data",
+        )
+        check(
+            "Versicherung legt Zuteilung an Gärtner an",
+            zuteilung_response.status_code == 302,
+            f"Status {zuteilung_response.status_code}",
+        )
+        zuteilung_id = extract_id_from_location(zuteilung_response.headers.get("Location"))
+        zuteilung = portal.get_auftrag(zuteilung_id)
+        check(
+            "Versicherungs-Zuteilung bleibt direkt bei Gärtner ohne Fremdwerkstatt",
+            zuteilung
+            and zuteilung.get("quelle") == "versicherung"
+            and int(zuteilung.get("autohaus_id") or 0) == 0
+            and int(zuteilung.get("versicherung_id") or 0) == int(flow_versicherung["id"])
+            and zuteilung.get("versicherung_freigabe_status") == "zugeteilt"
+            and zuteilung.get("angebotsphase")
+            and "Gärtner" in zuteilung.get("netzwerk_zuteilung_status", ""),
+            (
+                f"id={zuteilung_id}, "
+                f"autohaus={zuteilung.get('autohaus_id') if zuteilung else None}, "
+                f"versicherung={zuteilung.get('versicherung_id') if zuteilung else None}, "
+                f"quelle={zuteilung.get('quelle') if zuteilung else None}, "
+                f"angebotsphase={zuteilung.get('angebotsphase') if zuteilung else None}, "
+                f"freigabe={zuteilung.get('versicherung_freigabe_status') if zuteilung else None}, "
+                f"zuteilung={zuteilung.get('netzwerk_zuteilung_status') if zuteilung else None}"
+            ),
+        )
+        zuteilung_dateien = portal.list_dateien(zuteilung_id)
+        check(
+            "Versicherungs-Zuteilung speichert hochgeladene Dokumente in der Akte",
+            any(
+                datei.get("original_name") == "flow-police.txt"
+                and datei.get("quelle") == "versicherung"
+                and datei.get("kategorie") == "standard"
+                and "POL-FLOW-DOC" in (datei.get("extrahierter_text") or "")
+                for datei in zuteilung_dateien
+            ),
+            str(zuteilung_dateien),
+        )
+        zuteilung_detail = versicherung_client.get(f"/versicherung/{flow_versicherung['slug']}/auftrag/{zuteilung_id}")
+        zuteilung_detail_html = zuteilung_detail.get_data(as_text=True)
+        check(
+            "Versicherungsakte bietet kurze Nachricht an Gärtner",
+            zuteilung_detail.status_code == 200
+            and "Kurze Nachricht an Gärtner" in zuteilung_detail_html
+            and "Nachricht senden" in zuteilung_detail_html,
+            f"Status {zuteilung_detail.status_code}",
+        )
+        rueckfrage_response = versicherung_client.post(
+            f"/versicherung/{flow_versicherung['slug']}/auftrag/{zuteilung_id}/freigabe",
+            data=with_csrf(
+                versicherung_client,
+                {
+                    "versicherung_freigabe_status": "zugeteilt",
+                    "freigabe_hinweis": "Bitte Rückruf mit dem Kunden abstimmen.",
+                },
+            ),
+        )
+        check(
+            "Versicherung kann kurze Rückfrage an Gärtner senden",
+            rueckfrage_response.status_code == 302,
+            f"Status {rueckfrage_response.status_code}",
+        )
+        zuteilung_chat = portal.list_chat_nachrichten(zuteilung_id)
+        zuteilung_hinweise = portal.list_benachrichtigungen(zuteilung_id, nur_ungelesen=True)
+        check(
+            "Versicherungs-Rückfrage landet im Chat und als Hinweis",
+            any(
+                item.get("absender") == "versicherung"
+                and "Rückruf" in item.get("nachricht", "")
+                for item in zuteilung_chat
+            )
+            and any("Rückruf" in item.get("nachricht", "") for item in zuteilung_hinweise),
+            f"chat={zuteilung_chat}, hinweise={zuteilung_hinweise}",
+        )
+        zuteilung_nachricht_status = portal.get_auftrag(zuteilung_id)
+        check(
+            "Versicherungsnachricht setzt Status automatisch auf Pruefung",
+            zuteilung_nachricht_status.get("versicherung_freigabe_status") == "in_pruefung",
+            zuteilung_nachricht_status.get("versicherung_freigabe_status"),
+        )
+        for prozess_key in ("grunddaten", "fahrzeugschein", "schadenfotos", "abtretung", "gutachten"):
+            portal.set_versicherung_checkpunkt(
+                zuteilung_id,
+                prozess_key,
+                "erledigt",
+                "Flow-Test Unterlage vorbereitet",
+                quelle="werkstatt",
+            )
+        zuteilung_vor_pruefung = portal.get_auftrag(zuteilung_id)
+        with portal.app.test_request_context():
+            zuteilung_prozess = portal.build_versicherung_prozess(zuteilung_vor_pruefung, context="admin")
+            pruefung_vor_haken = portal.build_versicherung_pruefung_checkliste(
+                zuteilung_vor_pruefung,
+                prozess=zuteilung_prozess,
+            )
+        check(
+            "Vorbereitete Unterlagen gelten noch nicht als Versicherungspruefung",
+            pruefung_vor_haken["checked_count"] == 0
+            and any(item["can_check"] for item in pruefung_vor_haken["items"]),
+            pruefung_vor_haken,
+        )
+        pruefung_speichern = versicherung_client.post(
+            f"/versicherung/{flow_versicherung['slug']}/auftrag/{zuteilung_id}/pruefung",
+            data=with_csrf(
+                versicherung_client,
+                {
+                    "aktion": "speichern",
+                    "pruefung": ["unterlagen"],
+                    "freigabe_hinweis": "Unterlagen plausibel, Kalkulation folgt.",
+                },
+            ),
+        )
+        check(
+            "Versicherung kann einzelne Pruefpunkte abhaken",
+            pruefung_speichern.status_code == 302,
+            f"Status {pruefung_speichern.status_code}",
+        )
+        with portal.app.test_request_context():
+            zuteilung_geprueft = portal.get_auftrag(zuteilung_id)
+            pruefung_nach_haken = portal.build_versicherung_pruefung_checkliste(
+                zuteilung_geprueft,
+                prozess=portal.build_versicherung_prozess(zuteilung_geprueft, context="admin"),
+            )
+        check(
+            "Pruefprozent steigt nach einzelner Versicherungspruefung",
+            pruefung_nach_haken["checked_count"] == 1
+            and 0 < pruefung_nach_haken["percent"] < 100
+            and not pruefung_nach_haken["can_release"],
+            pruefung_nach_haken,
+        )
+        freigabe_response = versicherung_client.post(
+            f"/versicherung/{flow_versicherung['slug']}/auftrag/{zuteilung_id}/pruefung",
+            data=with_csrf(
+                versicherung_client,
+                {
+                    "aktion": "freigeben",
+                    "pruefung": ["unterlagen", "kalkulation"],
+                    "freigabe_hinweis": "Unterlagen und KV sind freigegeben.",
+                },
+            ),
+        )
+        zuteilung_freigegeben = portal.get_auftrag(zuteilung_id)
+        check(
+            "Freigabe entsteht aus geprueften Pflichtpunkten",
+            freigabe_response.status_code == 302
+            and zuteilung_freigegeben.get("versicherung_freigabe_status") == "freigegeben",
+            f"Status {freigabe_response.status_code}, Freigabe {zuteilung_freigegeben.get('versicherung_freigabe_status')}",
+        )
 
         sparkasse_csv = (
             "Kontonummer;DEMO\n"
@@ -986,6 +1387,85 @@ def main():
             "Partner sieht Angebotsbild mit Öffnen-Link",
             partner_hat_angebotsbild,
             "" if partner_hat_angebotsbild else "Angebotsbild fehlt",
+        )
+
+        response = partner.get("/partner/kaesmann/dashboard")
+        dashboard_html = response.get_data(as_text=True)
+        dashboard_hat_angebot = (
+            response.status_code == 200
+            and "Werkstatt-Angebote zur Entscheidung" in dashboard_html
+            and "Angebot abgegeben von der Werkstatt" in dashboard_html
+            and "210 € netto" in dashboard_html
+            and f"/partner/kaesmann/angebot/{angebot_id}/annehmen" in dashboard_html
+            and f"/partner/kaesmann/angebot/{angebot_id}/ablehnen" in dashboard_html
+        )
+        check(
+            "Partner-Dashboard zeigt Werkstattangebot mit Entscheidung",
+            dashboard_hat_angebot,
+            "" if dashboard_hat_angebot else f"Status {response.status_code}",
+        )
+
+        ablehn_angebot_id = portal.create_auftrag(
+            "autohaus",
+            autohaus_id=autohaus["id"],
+            kunde_name="Ablehnkunde Codex",
+            fahrzeug="VW Golf",
+            kennzeichen="MOS-A 321",
+            auftragsnummer="TEST-ANGEBOT-ABLEHNEN",
+            beschreibung="Stoßfänger prüfen. Bitte Angebot erstellen.",
+            analyse="Stoßfänger vorne prüfen",
+            angebotsphase=1,
+            angebot_abgesendet=1,
+        )
+        portal.send_workshop_offer(
+            ablehn_angebot_id,
+            "Reparatur gemäß Anfrage: Stoßfänger vorne instandsetzen.",
+            "520",
+            "Preis netto, vorbehaltlich Prüfung der Unterlagen.",
+        )
+        response = partner.get("/partner/kaesmann/dashboard")
+        dashboard_html = response.get_data(as_text=True)
+        dashboard_hat_ablehnung = (
+            response.status_code == 200
+            and f"/partner/kaesmann/angebot/{ablehn_angebot_id}/ablehnen" in dashboard_html
+            and "520,00 €" in dashboard_html
+        )
+        check(
+            "Partner-Dashboard bietet Ablehnen an",
+            dashboard_hat_ablehnung,
+            "" if dashboard_hat_ablehnung else f"Status {response.status_code}",
+        )
+        response = partner.post(
+            f"/partner/kaesmann/angebot/{ablehn_angebot_id}/ablehnen",
+            data=with_csrf(partner, {"next": "/partner/kaesmann/dashboard#werkstattangebote"}),
+            follow_redirects=False,
+        )
+        check("Kunde lehnt Angebot ab", response.status_code in {302, 303})
+        abgelehntes_angebot = portal.get_auftrag(ablehn_angebot_id)
+        check(
+            "Ablehnung bleibt Angebotsanfrage",
+            abgelehntes_angebot["angebotsphase"]
+            and abgelehntes_angebot["angebot_status"] == "abgelehnt"
+            and abgelehntes_angebot["werkstatt_angebot_preis"] == "520",
+            abgelehntes_angebot["angebot_status"],
+        )
+        response = partner.get(f"/partner/kaesmann/angebot/{ablehn_angebot_id}")
+        detail_html = response.get_data(as_text=True)
+        check(
+            "Abgelehntes Angebot zeigt Status ohne Annahmebutton",
+            response.status_code == 200
+            and "Werkstatt-Angebot abgelehnt" in detail_html
+            and "520,00 €" in detail_html
+            and f"/partner/kaesmann/angebot/{ablehn_angebot_id}/annehmen" not in detail_html,
+            f"Status {response.status_code}",
+        )
+        response = partner.get("/partner/kaesmann/dashboard")
+        dashboard_html = response.get_data(as_text=True)
+        check(
+            "Abgelehntes Angebot verschwindet aus Entscheidungsbox",
+            response.status_code == 200
+            and f"/partner/kaesmann/angebot/{ablehn_angebot_id}/ablehnen" not in dashboard_html,
+            f"Status {response.status_code}",
         )
 
         response = partner.post(

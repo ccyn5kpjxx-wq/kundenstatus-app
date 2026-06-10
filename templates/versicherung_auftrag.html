@@ -8,34 +8,101 @@
   <style>
     body { background:#f3efe6; color:#16202a; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
     .shell { max-width:1160px; margin:0 auto; padding:28px 16px; }
-    .panel { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); }
-    .damage-map { position:relative; width:100%; aspect-ratio:13/7; min-height:260px; border:1px solid #e4d6c3; border-radius:18px; background:#f7f1e8; overflow:hidden; }
-    .damage-car { position:absolute; inset:5% 4%; width:92%; height:90%; }
-    .damage-zone-label { position:absolute; transform:translate(-50%,-50%); border:1px solid #cdbda8; border-radius:999px; background:rgba(255,253,249,.8); color:#69747c; padding:.42rem .65rem; font-size:.82rem; font-weight:700; white-space:nowrap; }
-    .damage-zone-label.is-selected { background:#a23f2d; border-color:#a23f2d; color:#fff; box-shadow:0 8px 18px rgba(64,47,25,.12); }
-    .file-list { display:grid; gap:.65rem; }
-    .file-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.75rem; align-items:center; border:1px solid #e4d6c3; border-radius:14px; padding:.75rem .9rem; background:#fffaf2; }
-    .timeline-item { border-left:3px solid #dbc8af; padding-left:1rem; margin-left:.35rem; }
+    .panel { background:#fffdf9; border:1px solid #ddd1c0; border-radius:12px; padding:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); }
+    .top-nav { display:flex; gap:.55rem; flex-wrap:wrap; margin-bottom:1rem; }
+    .top-nav a { border:1px solid #d6c8b5; background:#fffdf9; color:#16202a; text-decoration:none; border-radius:8px; padding:.62rem .78rem; font-weight:800; font-size:.92rem; }
+    .top-nav a:hover, .top-nav a:focus { border-color:#16202a; box-shadow:0 8px 22px rgba(22,32,42,.10); }
+    .portal-icon { width:1.25rem; height:1.25rem; stroke:currentColor; fill:none; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+    .portal-icon-fill { fill:currentColor; stroke:none; }
+    .process-calendar-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; }
+    .process-calendar-item { --event-accent:#64748b; position:relative; border:1px solid #e4d6c3; border-top:4px solid var(--event-accent); border-radius:10px; background:#fffaf2; padding:.9rem; min-width:0; }
+    .process-calendar-item-success { --event-accent:#198754; }
+    .process-calendar-item-primary { --event-accent:#0d6efd; }
+    .process-calendar-item-info { --event-accent:#0aa2c0; }
+    .process-calendar-item-warning { --event-accent:#b7791f; }
+    .process-calendar-item-danger { --event-accent:#b02a37; }
+    .process-calendar-item-dark { --event-accent:#16202a; }
+    .process-calendar-item-secondary { --event-accent:#64748b; }
+    .process-calendar-head { display:flex; align-items:center; gap:.65rem; margin-bottom:.7rem; }
+    .process-calendar-icon { width:2.75rem; height:2.75rem; border-radius:14px; display:grid; place-items:center; flex:0 0 auto; background:var(--event-accent); color:#fff; border:2px solid rgba(255,255,255,.85); box-shadow:0 10px 22px rgba(22,32,42,.16), inset 0 0 0 1px rgba(255,255,255,.22); }
+    .process-calendar-icon .portal-icon { width:1.45rem; height:1.45rem; stroke-width:2.2; }
+    .process-calendar-date { display:inline-flex; align-items:center; border:1px solid #d7c8b4; background:#fff; color:#2d3742; border-radius:999px; padding:.25rem .62rem; font-weight:850; font-size:.82rem; box-shadow:0 4px 12px rgba(64,47,25,.07); }
+    .process-calendar-title { font-weight:800; line-height:1.2; }
+    .process-calendar-owner { color:#6b5f53; font-size:.84rem; margin:.18rem 0 .35rem; }
+    .process-calendar-detail { color:#414b54; font-size:.9rem; line-height:1.38; }
+    .requirement-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.85rem; }
+    .requirement-card { border:1px solid #e4d6c3; border-radius:10px; background:#fffaf2; padding:.95rem; min-width:0; }
+    .requirement-card.is-checked { border-color:#bdd7c8; background:#eef9f2; }
+    .requirement-head { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:.7rem; align-items:start; }
+    .requirement-icon { width:2.55rem; height:2.55rem; border-radius:14px; display:grid; place-items:center; background:#16202a; color:#fff; box-shadow:0 8px 18px rgba(22,32,42,.16); }
+    .requirement-icon .portal-icon { width:1.35rem; height:1.35rem; stroke-width:2.15; }
+    .requirement-title { font-weight:850; line-height:1.18; }
+    .requirement-detail { color:#5f6b76; font-size:.9rem; line-height:1.42; }
+    .requirement-files { display:flex; gap:.45rem; flex-wrap:wrap; margin:.7rem 0; }
+    .requirement-check { display:flex; gap:.5rem; align-items:center; border:1px solid #d8ccba; background:#fff; border-radius:8px; padding:.55rem .65rem; width:max-content; max-width:100%; }
+    .requirement-check input { width:1.15rem; height:1.15rem; accent-color:#198754; }
+    .requirement-note { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.5rem; align-items:end; margin-top:.7rem; }
+    .status-summary { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1rem; align-items:start; border:1px solid #d7e2d9; background:#f8fbf8; border-radius:10px; padding:.9rem; }
     .chat-thread { max-height:360px; overflow-y:auto; display:grid; gap:.75rem; }
-    .chat-message { border:1px solid #e4d6c3; border-radius:16px; padding:.85rem .95rem; background:#fffdf9; }
+    .chat-message { border:1px solid #e4d6c3; border-radius:10px; padding:.85rem .95rem; background:#fffdf9; }
     .chat-message.is-versicherung { background:#eef5ff; border-color:#b8cce8; }
     .chat-message.is-autohaus { background:#eef5f1; border-color:#bdd7c8; }
     .chat-message.is-werkstatt { background:#f8f2e8; border-color:#d8c4a6; }
-    @media (max-width:760px) { .file-item { grid-template-columns:1fr; } .damage-map { min-height:360px; aspect-ratio:3/4; } }
+    .info-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; }
+    .info-tile { border:1px solid #e4d6c3; background:#fffaf2; border-radius:10px; padding:.85rem; }
+    .info-tile span { display:block; color:#6b5f53; font-size:.78rem; font-weight:800; text-transform:uppercase; }
+    .timeline-item { border-left:3px solid #dbc8af; padding-left:1rem; margin-left:.35rem; }
+    @media (max-width:1000px) {
+      .process-calendar-grid, .requirement-grid, .info-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    }
+    @media (max-width:760px) {
+      .process-calendar-grid, .requirement-grid, .info-grid, .requirement-note, .status-summary { grid-template-columns:1fr; }
+      .requirement-head { grid-template-columns:auto minmax(0,1fr); }
+      .requirement-head .badge { grid-column:2; width:max-content; }
+    }
   </style>
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="portal-icon-calendar" viewBox="0 0 24 24"><path d="M7 3v4M17 3v4M4 9h16M5 5h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/></symbol>
+    <symbol id="portal-icon-assignment" viewBox="0 0 24 24"><path d="M9 5h6M9 3h6v4H9zM7 5H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2M8 12h8M8 16h6"/></symbol>
+    <symbol id="portal-icon-file-send" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h5M9 13h5M9 17h3M15 13l4 2-4 2v-4Z"/></symbol>
+    <symbol id="portal-icon-glasses" viewBox="0 0 24 24"><path d="M4 13a4 4 0 1 0 8 0 4 4 0 0 0-8 0ZM12 13h0M12 13a4 4 0 1 0 8 0 4 4 0 0 0-8 0ZM4 13l1-6M20 13l-1-6M10.5 13h3"/></symbol>
+    <symbol id="portal-icon-inspection" viewBox="0 0 24 24"><path d="M10.5 18a7.5 7.5 0 1 1 5.3-2.2L21 21M8 10h5M8 13h3"/></symbol>
+    <symbol id="portal-icon-cart" viewBox="0 0 24 24"><path d="M4 4h2l2 11h9l2-7H7M9 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM17 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/></symbol>
+    <symbol id="portal-icon-car" viewBox="0 0 24 24"><path d="M5 17h14M6 17v2M18 17v2M7 13l2-5h6l2 5M6 13h12a2 2 0 0 1 2 2v2H4v-2a2 2 0 0 1 2-2Z"/></symbol>
+    <symbol id="portal-icon-wrench" viewBox="0 0 24 24"><path d="M14 6a5 5 0 0 0 6 6L10 22l-4-4 10-10a5 5 0 0 0-2-2Z"/></symbol>
+    <symbol id="portal-icon-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="portal-icon-key" viewBox="0 0 24 24"><path d="M14 8a5 5 0 1 0-2 4l8 8 2-2-2-2 2-2-2-2-2 2-4-4Z"/></symbol>
+    <symbol id="portal-icon-calculator" viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1ZM8 7h8M8 11h2M12 11h2M16 11h0M8 15h2M12 15h2M16 15h0M8 19h2M12 19h4"/></symbol>
+    <symbol id="portal-icon-camera" viewBox="0 0 24 24"><path d="M5 7h3l1.5-2h5L16 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2ZM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/></symbol>
+    <symbol id="portal-icon-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h5M9 13h6M9 17h6"/></symbol>
+    <symbol id="portal-icon-signature" viewBox="0 0 24 24"><path d="M4 18c3 0 3-8 6-8 2 0 1 4 3 4s2-3 4-3c1.5 0 2.5 1 3 2M4 21h16"/></symbol>
+    <symbol id="portal-icon-invoice" viewBox="0 0 24 24"><path d="M7 3h10v18l-2-1-2 1-2-1-2 1-2-1zM9 8h6M9 12h6M9 16h3"/></symbol>
+  </svg>
+
   <main class="shell">
+    {% set is_preview = rollen_vorschau is defined and rollen_vorschau %}
+    {% if is_preview %}
+    <div class="alert alert-info mb-4">
+      Rollenvorschau Versicherung: So sieht die Versicherung diese Schadenakte. Aktionen sind in der Vorschau nicht aktiv.
+      <a href="{{ url_for('admin_versicherung_schaden_detail', auftrag_id=auftrag['id']) }}" class="alert-link">Zur internen Akte</a>
+    </div>
+    {% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
       <div class="alert alert-{{ cat }} mb-4">{{ msg }}</div>
       {% endfor %}
     {% endwith %}
 
-    <div class="panel mb-4">
+    <section class="panel mb-3">
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
         <div>
+          {% if is_preview %}
+          <a href="{{ url_for('admin_versicherung_schaden_detail', auftrag_id=auftrag['id']) }}" class="btn btn-outline-dark btn-sm mb-3">Zur internen Akte</a>
+          {% else %}
           <a href="{{ url_for('versicherung_dashboard', slug=versicherung['slug']) }}" class="btn btn-outline-dark btn-sm mb-3">Zurück</a>
+          {% endif %}
           <h1 class="mb-1">{{ auftrag['fahrzeug'] }}</h1>
           <div class="text-muted">
             {% if auftrag['kennzeichen'] %}{{ auftrag['kennzeichen'] }}{% endif %}
@@ -48,67 +115,170 @@
           <div class="mt-2"><span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }}">{{ auftrag['status_meta']['label'] }}</span></div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="row g-4">
-      <div class="col-lg-7">
-        <div class="panel mb-4">
-          <h2 class="h4 mb-3">Fahrzeugdarstellung</h2>
-          {% set editable = false %}
-          {% set selected_zones = auftrag['schaden_zonen'] %}
-          {% include "_fahrzeug_schadenkarte.html" %}
-          {% if auftrag['schaden_zonen_notiz'] %}
-            <div class="mt-3 text-muted">{{ auftrag['schaden_zonen_notiz'] }}</div>
-          {% endif %}
+    <nav class="top-nav" aria-label="Schadenakte">
+      <a href="#kalender">Kalender & Ablauf</a>
+      <a href="#pflichtunterlagen">Pflichtunterlagen</a>
+      <a href="#kundenverbindung">Kundenverbindung</a>
+      <a href="#nachrichten">Nachrichten</a>
+      <a href="#schadenprotokoll">Schadenprotokoll</a>
+      <a href="#schadensdaten">Schadensdaten</a>
+    </nav>
+
+    {% if prozesskalender %}
+    <section class="panel mb-4" id="kalender">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="h4 mb-1">Kalender und Ablauf</h2>
+          <div class="text-muted">Termine und Meilensteine dieses Schadenfalls, von Zuteilung bis Rückgabe.</div>
         </div>
-        <div class="panel">
-          <h2 class="h4 mb-3">Statusverlauf</h2>
-          {% for item in log %}
-            <div class="timeline-item mb-3">
-              <div class="fw-bold">{{ item['zeitstempel'] }}</div>
-              <div class="text-muted">{{ item['label'] if item['label'] is defined else item['status'] }}</div>
+        <span class="badge text-bg-dark">{{ prozesskalender['dated_count'] }} Termine</span>
+      </div>
+      <div class="process-calendar-grid">
+        {% for item in prozesskalender['events'] %}
+        <div class="process-calendar-item process-calendar-item-{{ item['farbe'] }}">
+          <div class="process-calendar-head">
+            <div class="process-calendar-icon process-calendar-icon-{{ item['farbe'] }}">
+              <svg class="portal-icon"><use href="#portal-icon-{{ item['icon'] or 'calendar' }}"></use></svg>
             </div>
-          {% else %}
-            <div class="text-muted">Noch kein Verlauf vorhanden.</div>
-          {% endfor %}
+            <div class="process-calendar-date">{{ item['datum_text'] }}</div>
+          </div>
+          <div class="process-calendar-title">{{ item['label'] }}</div>
+          <div class="process-calendar-owner">{{ item['owner'] }}</div>
+          <div class="process-calendar-detail">{{ item['detail'] }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="panel mb-4" id="pflichtunterlagen">
+      <div class="d-flex justify-content-between gap-3 align-items-start flex-wrap mb-3">
+        <div>
+          <h2 class="h4 mb-1">Pflichtunterlagen und Freigabe</h2>
+          <div class="text-muted">Datei öffnen, Inhalt prüfen, abhaken oder direkt eine Rückfrage an die Werkstatt senden.</div>
+        </div>
+        {% if versicherung_pruefung %}
+        <span class="badge text-bg-{{ 'success' if versicherung_pruefung['can_release'] else 'warning' }}">{{ versicherung_pruefung['percent'] }}%</span>
+        {% endif %}
+      </div>
+      {% if versicherung_pruefung %}
+      <div class="status-summary mb-3">
+        <div>
+          <div class="fw-bold">Prüfstand</div>
+          <div class="text-muted small">
+            {{ versicherung_pruefung['checked_count'] }} von {{ versicherung_pruefung['total'] }} Punkten geprüft.
+            {% if versicherung_pruefung['release_blocker'] %}
+            Für die Freigabe offen: {{ versicherung_pruefung['release_blocker']|join(', ') }}.
+            {% endif %}
+          </div>
+        </div>
+        <div class="text-end">
+          <span class="badge text-bg-{{ 'success' if versicherung_pruefung['can_release'] else 'info' }}">Freigabe {{ versicherung_pruefung['release_checked_count'] }} / {{ versicherung_pruefung['release_total'] }}</span>
         </div>
       </div>
+      {% endif %}
+
+      <form method="POST" action="{{ '#' if is_preview else url_for('versicherung_pruefung_speichern', slug=versicherung['slug'], auftrag_id=auftrag['id']) }}" class="d-grid gap-3">
+        {{ csrf_field()|safe }}
+        <div class="requirement-grid">
+          {% for card in versicherung_pruefkarten %}
+          <div class="requirement-card {% if card['checked'] %}is-checked{% endif %}">
+            <div class="requirement-head">
+              <div class="requirement-icon">
+                <svg class="portal-icon"><use href="#portal-icon-{{ card['icon'] }}"></use></svg>
+              </div>
+              <div>
+                <div class="requirement-title">{{ card['label'] }}</div>
+                <div class="requirement-detail">{{ card['detail'] }}</div>
+              </div>
+              <span class="badge text-bg-{{ card['status_farbe'] }}">{{ card['status_label'] }}</span>
+            </div>
+            <div class="requirement-files">
+              {% if card['files'] %}
+                {% for datei in card['files'][:4] %}
+                <a
+                  class="btn btn-sm btn-outline-dark"
+                  href="{{ url_for('admin_datei', datei_id=datei['id']) if is_preview else url_for('versicherung_datei', slug=versicherung['slug'], datei_id=datei['id']) }}"
+                  target="_blank"
+                >Öffnen</a>
+                <span class="badge text-bg-light border text-dark">{{ datei['original_name'] }}</span>
+                {% endfor %}
+                {% if card['file_count'] > 4 %}<span class="badge text-bg-light border text-dark">+{{ card['file_count'] - 4 }}</span>{% endif %}
+              {% else %}
+                <span class="text-muted small">{{ card['missing'] }}</span>
+              {% endif %}
+            </div>
+            <label class="requirement-check">
+              <input type="checkbox" name="pruefung" value="{{ card['check_key'] }}" {% if card['checked'] %}checked{% endif %} {% if is_preview or not card['can_check'] %}disabled{% endif %}>
+              <span>Geprüft</span>
+            </label>
+            {% if card['open_labels'] and not card['checked'] %}
+            <div class="text-muted small mt-2">Offen: {{ card['open_labels']|join(', ') }}</div>
+            {% endif %}
+            <div class="requirement-note">
+              <textarea name="freigabe_hinweis_{{ card['key'] }}" class="form-control form-control-sm" rows="2" placeholder="Rückfrage oder Prüfnotiz zu {{ card['label'] }}" {% if is_preview %}disabled{% endif %}></textarea>
+              <button type="submit" name="aktion" value="rueckfrage:{{ card['key'] }}" class="btn btn-sm btn-outline-warning" {% if is_preview %}disabled{% endif %}>Rückfrage erstellen</button>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="border-top pt-3">
+          <label class="form-label">Freigabehinweis</label>
+          <textarea name="freigabe_hinweis" class="form-control" rows="3" placeholder="Freigabehinweis, Kürzung, Rückfrage oder Prüfvermerk" {% if is_preview %}disabled{% endif %}></textarea>
+          <div class="d-flex gap-2 flex-wrap mt-3">
+            <button type="submit" name="aktion" value="speichern" class="btn btn-outline-dark" {% if is_preview %}disabled{% endif %}>Prüfung speichern</button>
+            <button type="submit" name="aktion" value="rueckfrage" class="btn btn-outline-warning" {% if is_preview %}disabled{% endif %}>Rückfrage an Werkstatt</button>
+            <button type="submit" name="aktion" value="freigeben" class="btn btn-dark" {% if is_preview %}disabled{% endif %}>Freigabe erteilen</button>
+            <button type="submit" name="aktion" value="ablehnen" class="btn btn-outline-danger" {% if is_preview %}disabled{% endif %}>Sperre dokumentieren</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <div class="row g-4">
       <div class="col-lg-5">
-        <div class="panel mb-4">
-          <h2 class="h4 mb-3">Schadendaten</h2>
-          <dl class="row mb-0">
-            <dt class="col-sm-5">Schadenart</dt><dd class="col-sm-7">{{ auftrag['schadenart_label'] }}</dd>
-            <dt class="col-sm-5">FIN</dt><dd class="col-sm-7">{{ auftrag['fin_nummer'] or 'offen' }}</dd>
-            <dt class="col-sm-5">Kalkulation</dt><dd class="col-sm-7">{{ auftrag['gt_motive_kalkulation_betrag'] or 'offen' }}</dd>
-            <dt class="col-sm-5">Beschreibung</dt><dd class="col-sm-7">{{ auftrag['beschreibung'] or auftrag['analyse_text'] or 'offen' }}</dd>
-          </dl>
-        </div>
-        <div class="panel mb-4">
-          {% include "_versicherung_workflow_panel.html" %}
-        </div>
-        <div class="panel mb-4">
-          <h2 class="h4 mb-3">Freigabe</h2>
-          <form method="POST" enctype="multipart/form-data" action="{{ url_for('versicherung_freigabe_status', slug=versicherung['slug'], auftrag_id=auftrag['id']) }}" class="d-grid gap-3">
-            {{ csrf_field()|safe }}
-            <label class="form-label mb-0">Status</label>
-            <select name="versicherung_freigabe_status" class="form-select">
-              <option value="gemeldet" {% if auftrag['versicherung_freigabe_status'] == 'gemeldet' %}selected{% endif %}>Gemeldet</option>
-              <option value="in_pruefung" {% if auftrag['versicherung_freigabe_status'] == 'in_pruefung' %}selected{% endif %}>In Prüfung</option>
-              <option value="rueckfrage" {% if auftrag['versicherung_freigabe_status'] == 'rueckfrage' %}selected{% endif %}>Rückfrage</option>
-              <option value="freigegeben" {% if auftrag['versicherung_freigabe_status'] == 'freigegeben' %}selected{% endif %}>Freigegeben</option>
-              <option value="abgelehnt" {% if auftrag['versicherung_freigabe_status'] == 'abgelehnt' %}selected{% endif %}>Abgelehnt</option>
-            </select>
-            <label class="form-label mb-0">Nachricht / Rückfrage</label>
-            <textarea name="freigabe_hinweis" class="form-control" rows="4" placeholder="Rückfrage, Freigabehinweis oder Begründung an Autohaus und Werkstatt"></textarea>
-            <label class="form-label mb-0">Unterlagen</label>
-            <input type="file" name="dateien" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
-            <button type="submit" class="btn btn-dark">Antwort speichern</button>
-          </form>
-        </div>
-        <div class="panel mb-4">
+        <section class="panel mb-4" id="kundenverbindung">
+          <h2 class="h4 mb-3">Kundenverbindung</h2>
+          <div class="border rounded-3 p-3 mb-3 bg-white">
+            <div class="d-flex justify-content-between gap-3 flex-wrap">
+              <div>
+                <div class="fw-bold">Kunden-QR-Code sofort aktiv</div>
+                <div class="text-muted small">Der Kunde sieht Status, Besichtigung und Termine direkt über den QR-Code.</div>
+              </div>
+              {% if auftrag['kontakt_telefon'] %}
+              <span class="badge text-bg-light border text-dark">{{ auftrag['kontakt_telefon'] }}</span>
+              {% endif %}
+            </div>
+          </div>
+          {% if auftrag['kunden_status_url'] %}
+          <div class="d-flex gap-3 align-items-start flex-wrap">
+            <img src="{{ url_for('kunden_status_qr', token=auftrag['kunden_status_token'], target='local') if auftrag['kunden_status_public_warning'] else url_for('kunden_status_qr', token=auftrag['kunden_status_token']) }}" alt="Kundenstatus QR-Code" style="width:132px;height:132px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;">
+            <div class="flex-grow-1">
+              <div class="fw-bold">QR-Code für den Kunden</div>
+              <div class="text-muted small mb-2">Wenn ein Besichtigungstermin hinterlegt ist, sieht der Kunde ihn dort.</div>
+              <code class="small">{{ auftrag['kunden_status_local_url'] if auftrag['kunden_status_public_warning'] else auftrag['kunden_status_url'] }}</code>
+            </div>
+          </div>
+          {% else %}
+          <div class="text-muted">Noch kein Kundenstatus-Link vorhanden.</div>
+          {% endif %}
+        </section>
+      </div>
+      <div class="col-lg-7">
+        <section class="panel mb-4" id="nachrichten">
           <div class="d-flex justify-content-between gap-3 align-items-start flex-wrap mb-3">
-            <h2 class="h4 mb-0">Nachrichten</h2>
-            {% if chat_nachrichten %}<span class="badge text-bg-warning">{{ chat_nachrichten|length }}</span>{% endif %}
+            <div>
+              <h2 class="h4 mb-1">Nachrichten</h2>
+              <div class="text-muted small">Rückfragen, Freigaben und Abstimmung mit der Werkstatt.</div>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              {% if chat_nachrichten %}<span class="badge text-bg-warning">{{ chat_nachrichten|length }}</span>{% endif %}
+              {% if werkstatt_kontakt and werkstatt_kontakt['whatsapp_url'] %}
+              <a class="btn btn-sm btn-success" href="{{ werkstatt_kontakt['whatsapp_url'] }}" target="_blank">WhatsApp</a>
+              {% endif %}
+            </div>
           </div>
           {% if chat_nachrichten %}
           <div class="chat-thread">
@@ -127,27 +297,63 @@
           {% else %}
           <div class="text-muted">Noch keine Nachrichten vorhanden.</div>
           {% endif %}
-        </div>
-        <div class="panel">
-          <h2 class="h4 mb-3">Unterlagen</h2>
-          {% if dateien %}
-            <div class="file-list">
-              {% for datei in dateien %}
-              <div class="file-item">
-                <div>
-                  <div class="fw-bold">{{ datei['original_name'] }}</div>
-                  <div class="text-muted small">{{ datei['dokument_typ'] or datei['kategorie'] }} · {{ datei['hochgeladen_am'] }}</div>
-                </div>
-                <a href="{{ url_for('versicherung_datei', slug=versicherung['slug'], datei_id=datei['id']) }}" class="btn btn-outline-dark btn-sm" target="_blank">Öffnen</a>
-              </div>
-              {% endfor %}
+          <form method="POST" enctype="multipart/form-data" action="{{ '#' if is_preview else url_for('versicherung_freigabe_status', slug=versicherung['slug'], auftrag_id=auftrag['id']) }}" class="d-grid gap-2 mt-3">
+            {{ csrf_field()|safe }}
+            <label class="form-label mb-0">Kurze Nachricht an Gärtner</label>
+            <textarea name="freigabe_hinweis" class="form-control" rows="3" placeholder="Rückfrage, Hinweis oder kurze Abstimmung zu diesem Schadenfall" {% if is_preview %}disabled{% endif %}></textarea>
+            <input type="file" name="dateien" class="form-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf" {% if is_preview %}disabled{% endif %}>
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="submit" name="aktion" value="nachricht" class="btn btn-outline-dark" {% if is_preview %}disabled{% endif %}>Nachricht senden</button>
+              <button type="submit" name="aktion" value="rueckfrage" class="btn btn-outline-warning" {% if is_preview %}disabled{% endif %}>Als Rückfrage senden</button>
             </div>
-          {% else %}
-            <div class="text-muted">Noch keine Unterlagen sichtbar.</div>
-          {% endif %}
-        </div>
+          </form>
+        </section>
       </div>
     </div>
+
+    <section class="panel mb-4" id="schadenprotokoll">
+      {% include "_versicherung_schadenprotokoll.html" %}
+    </section>
+
+    <section class="panel mb-4" id="schadensdaten">
+      <h2 class="h4 mb-3">Schadensdaten</h2>
+      <div class="info-grid">
+        <div class="info-tile"><span>Schadenart</span><strong>{{ auftrag['schadenart_label'] }}</strong></div>
+        <div class="info-tile"><span>FIN</span><strong>{{ auftrag['fin_nummer'] or 'offen' }}</strong></div>
+        <div class="info-tile"><span>HSN/TSN</span><strong>{% if auftrag['hsn_nummer'] or auftrag['tsn_nummer'] %}{{ auftrag['hsn_nummer'] }}{% if auftrag['hsn_nummer'] and auftrag['tsn_nummer'] %} / {% endif %}{{ auftrag['tsn_nummer'] }}{% else %}offen{% endif %}</strong></div>
+        <div class="info-tile"><span>Begutachtung</span><strong>{{ auftrag['schaden_besichtigung_datum'] or 'offen' }}</strong></div>
+        <div class="info-tile"><span>Kalkulation</span><strong>{{ auftrag['gt_motive_kalkulation_betrag'] or auftrag['kosten_gutachten_betrag'] or 'offen' }}</strong></div>
+        <div class="info-tile"><span>Selbstbeteiligung</span><strong>{{ auftrag['schaden_selbstbeteiligung'] or 'offen' }}</strong></div>
+        <div class="info-tile"><span>Abrechnung</span><strong>{{ auftrag['schaden_abrechnungsart_meta']['label'] }}</strong></div>
+        <div class="info-tile"><span>Forderung</span><strong>{{ auftrag['schaden_forderung_betrag_label'] or 'offen' }}</strong></div>
+        <div class="info-tile"><span>Anspruchsteller</span><strong>{{ auftrag['anspruchsteller_name'] or 'offen' }}</strong></div>
+        <div class="info-tile"><span>Fahrbereit</span><strong>{{ auftrag['schaden_fahrbereit_label'] }}</strong></div>
+      </div>
+      <div class="mt-3">
+        <div class="text-muted small">Beschreibung</div>
+        <div>{{ auftrag['beschreibung'] or auftrag['analyse_text'] or 'offen' }}</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="h4 mb-3">Statusverlauf</h2>
+      {% for item in log %}
+        <div class="timeline-item mb-3">
+          <div class="fw-bold">{{ item['zeitstempel'] }}</div>
+          <div class="text-muted">{{ item['label'] if item['label'] is defined else item['status'] }}</div>
+        </div>
+      {% else %}
+        <div class="text-muted">Noch kein Verlauf vorhanden.</div>
+      {% endfor %}
+    </section>
   </main>
+  <script>
+    document.querySelectorAll('.requirement-check input[type="checkbox"]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const item = input.closest('.requirement-card');
+        if (item) item.classList.toggle('is-checked', input.checked);
+      });
+    });
+  </script>
 </body>
 </html>

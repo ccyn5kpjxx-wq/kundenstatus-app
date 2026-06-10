@@ -39,6 +39,19 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
+Agenten-Hub lokal starten:
+
+```powershell
+cd "C:\Users\info\OneDrive\Desktop\Arbeit\Kundenstatus-App"
+python agent_hub.py
+```
+
+Agenten-Hub öffnen:
+
+```text
+http://localhost:5055
+```
+
 Admin öffnen:
 
 ```text
@@ -124,12 +137,38 @@ Noch offen / nächste Meilensteine:
 Projektstruktur:
 
 - `app.py`: zentrale Flask-App, Routen, Datenbanklogik, OCR/KI-Analyse
+- `agent_hub.py`: lokale Koordinations-App fuer Codex/Claude unter `http://localhost:5055`
 - `templates/`: Jinja2-Seiten
 - `static/`: Bilder und statische Dateien
 - `data/auftraege.db`: lokale SQLite-Datenbank, nicht committen
 - `data/uploads/`: hochgeladene Kunden-/Auftragsdateien, nicht committen
+- `.agent-hub/`: lokaler Agenten-Kontext, Uebergaben, Aufgaben, Entscheidungen; nicht committen
 - `.env.local`: lokale Secrets und API-Konfiguration, nicht committen
 - `KI_SETUP.md`: Anleitung für Google Document AI + OpenAI
+
+## Zusammenarbeit Codex/Claude
+
+Es gibt eine lokale Koordinations-App unter `agent_hub.py`. Sie ist keine Cloud-Komponente und speichert ihren Zustand lokal unter `.agent-hub/`.
+
+Ziel:
+
+- Codex und Claude sollen denselben aktuellen Arbeitsstand sehen.
+- Uebergaben, offene Aufgaben und Entscheidungen sollen nicht nur im Chat stehen.
+- Konflikte wie mehrere laufende `app.py`-Prozesse oder divergierende Git-Staende sollen frueh sichtbar sein.
+- Beide Agenten duerfen produktiv Dateien aendern; der Hub ist kein Testmodus, sondern die gemeinsame Arbeitsroutine.
+
+Pflichtablauf fuer beide Agenten:
+
+1. Vor jeder Arbeit mit Datei-Aenderungen `AGENTS.md`, `CLAUDE.md` und `.agent-hub/context.md` lesen, falls vorhanden.
+2. `git status --short --branch` pruefen, bevor Dateien geaendert werden.
+3. Letzte Uebergaben in `.agent-hub/handoff.md`, Aufgaben in `.agent-hub/tasks.md` und Entscheidungen in `.agent-hub/decisions.md` beachten.
+4. Vor Aenderungen an Dateien pruefen, ob die letzte Uebergabe oder Aufgabe dieselben Dateien betrifft.
+5. Bei groesseren Arbeiten den Agenten-Hub starten oder den Nutzer darauf hinweisen: `python agent_hub.py`.
+6. Nach relevanten Aenderungen eine kurze Uebergabe im Hub oder direkt in `.agent-hub/handoff.md` erfassen.
+7. Neue dauerhafte Entscheidungen in `.agent-hub/decisions.md` dokumentieren.
+8. Neue Aufgaben in `.agent-hub/tasks.md` notieren.
+
+Die Hub-Dateien koennen Betriebs- oder Kundendetails enthalten und bleiben deshalb lokal. Sie werden ueber `.gitignore` nicht committet.
 
 Naming:
 
@@ -165,6 +204,7 @@ Commits:
 - OCR von Fotos, Tabellen und Handschrift ist nicht zuverlässig genug für blinde Übernahme.
 - Upload-Kategorien beachten: nur `standard`-Unterlagen sollen Fahrzeugdaten verändern.
 - `.env.local` enthält aktuell auch `ADMIN_PASS` und `FLASK_SECRET_KEY`.
+- `.agent-hub/` enthaelt lokalen Agenten-Arbeitskontext und gehoert nicht nach GitHub.
 - Wenn neue Datenbankspalten nötig sind, `ensure_column(...)` in `init_db()` ergänzen.
 - Git ist lokal initialisiert auf Branch `main`.
 - GitHub-Remote ist verbunden: `https://github.com/ccyn5kpjxx-wq/kundenstatus-app.git`.
@@ -185,7 +225,9 @@ Lokale Projekt-Helfer liegen unter `.claude/skills/`:
 Beim Start einer neuen Session:
 
 1. Diese Datei lesen.
-2. `git status` prüfen.
-3. Prüfen, ob der Server läuft und ob mehrere `app.py`-Prozesse aktiv sind.
-4. Wichtige Routen testen: `/admin`, `/partner/kaesmann/dashboard`, `/partner/kaesmann/angebot/38`.
-5. Vor Änderungen an Upload-/Analyse-Logik besonders auf Seiteneffekte achten.
+2. Falls vorhanden `.agent-hub/context.md`, `.agent-hub/handoff.md`, `.agent-hub/tasks.md` und `.agent-hub/decisions.md` lesen.
+3. `git status` prüfen.
+4. Prüfen, ob der Server läuft und ob mehrere `app.py`-Prozesse aktiv sind.
+5. Wichtige Routen testen: `/admin`, `/partner/kaesmann/dashboard`, `/partner/kaesmann/angebot/38`.
+6. Vor Änderungen an Upload-/Analyse-Logik besonders auf Seiteneffekte achten.
+7. Nach relevanten Änderungen eine Uebergabe im Agenten-Hub oder in `.agent-hub/handoff.md` schreiben.

@@ -3,14 +3,40 @@
 
 {% block extra_css %}
 <style>
-  .damage-map { position:relative; width:100%; aspect-ratio:13/7; min-height:260px; border:1px solid #e4d6c3; border-radius:18px; background:#f7f1e8; overflow:hidden; }
-  .damage-car { position:absolute; inset:5% 4%; width:92%; height:90%; }
-  .damage-zone-check { position:absolute; opacity:0; pointer-events:none; }
-  .damage-zone-label { position:absolute; transform:translate(-50%,-50%); border:1px solid #cdbda8; border-radius:999px; background:rgba(255,253,249,.94); color:#21303b; padding:.42rem .65rem; font-size:.82rem; font-weight:700; cursor:pointer; box-shadow:0 8px 18px rgba(64,47,25,.12); white-space:nowrap; }
-  .damage-zone-check:checked + .damage-zone-label { background:#a23f2d; border-color:#a23f2d; color:#fff; }
+  .damage-type-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; }
+  .damage-type-card { border:1px solid #e4d6c3; border-radius:14px; background:#fffaf2; padding:.9rem; }
+  .damage-type-card span { display:block; color:#8b5e2e; font-size:.76rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .claim-breadcrumb { display:flex; align-items:center; gap:.5rem; color:#6c7485; font-size:.92rem; margin-bottom:1rem; flex-wrap:wrap; }
+  .claim-breadcrumb a { color:#304c79; text-decoration:none; font-weight:700; }
+  .claim-breadcrumb span { color:#98a1b2; }
+  .claim-flow { border:1px solid #dde5f0; border-radius:16px; background:#f8fbff; padding:1rem; margin-bottom:1.25rem; }
+  .claim-stepper { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:.5rem; }
+  .claim-step { border:1px solid #dce5ef; background:#fff; border-radius:10px; padding:.55rem .65rem; color:#627088; font-size:.82rem; font-weight:700; min-height:42px; display:flex; align-items:center; gap:.45rem; }
+  .claim-step-number { width:22px; height:22px; border-radius:999px; background:#edf2f8; color:#63758f; display:inline-flex; align-items:center; justify-content:center; font-size:.75rem; flex:0 0 auto; }
+  .claim-step.is-active { border-color:#ff5b1a; box-shadow:0 0 0 1px rgba(255,91,26,.18); color:#0f1b2d; }
+  .claim-step.is-active .claim-step-number { background:#ff5b1a; color:#fff; }
+  .claim-stage-label { display:inline-flex; align-items:center; border-radius:999px; background:#fff3c9; color:#77520a; padding:.35rem .7rem; font-size:.78rem; font-weight:800; margin-bottom:.75rem; }
+  .claim-upload-panel { border:2px dashed #c8d6e8; border-radius:16px; background:#f8fbff; padding:1.2rem; text-align:center; cursor:pointer; transition:border-color .15s ease, background .15s ease; }
+  .claim-upload-panel:hover { border-color:#7b94b6; background:#f2f7ff; }
+  .claim-upload-title { font-weight:800; color:#425b7e; }
+  .claim-upload-hint { color:#5d6d86; font-size:.9rem; margin-top:.25rem; }
+  .claim-file-list { display:grid; gap:.55rem; margin-top:.85rem; }
+  .claim-file-item { border:1px solid #dde5f0; border-radius:10px; background:#fff; padding:.65rem .8rem; display:flex; align-items:center; justify-content:space-between; gap:.75rem; color:#0f1b2d; }
+  .claim-file-status { color:#0c8a3d; font-size:.82rem; font-weight:800; white-space:nowrap; }
+  .claim-form-section-title { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin:1.25rem 0 .35rem; }
+  .claim-view-switch { display:flex; gap:.4rem; flex-wrap:wrap; }
+  .claim-view-switch .btn { border-radius:999px; }
+  .claim-legal-panel { border:1px solid #d6e3f0; border-radius:16px; background:#f7fbff; padding:1rem; }
+  .claim-legal-panel .form-text strong { color:#16345c; }
+  .claim-money-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.75rem; }
+  .identity-check { border:1px solid #b9d7c2; border-radius:12px; background:#f7fbf8; color:#24442d; padding:.75rem .85rem; font-size:.9rem; }
+  @media (max-width:991.98px) { .claim-money-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  @media (max-width:575.98px) { .claim-money-grid { grid-template-columns:1fr; } }
+  @media (max-width:575.98px) { .damage-type-grid { grid-template-columns:1fr; } }
+  @media (max-width:991.98px) { .claim-stepper { grid-template-columns:repeat(2,minmax(0,1fr)); } }
   @media (max-width:575.98px) {
-    .damage-map { min-height:360px; aspect-ratio:3/4; }
-    .damage-zone-label { font-size:.76rem; padding:.36rem .5rem; }
+    .claim-stepper { grid-template-columns:1fr; }
+    .claim-file-item { align-items:flex-start; flex-direction:column; }
   }
 </style>
 {% endblock %}
@@ -19,106 +45,250 @@
 <div class="row justify-content-center">
   <div class="col-xl-11">
     <div class="page-card p-4 p-lg-5">
+      <div class="claim-breadcrumb">
+        <a href="{{ url_for('betriebs_cockpit') }}">Betriebs-Cockpit</a>
+        <span>/</span>
+        <a href="{{ url_for('admin_versicherung') }}">Versicherungsportal</a>
+        <span>/</span>
+        <strong>Versicherungsschaden</strong>
+      </div>
+
+      <div class="claim-flow">
+        <div class="claim-stepper" aria-label="Schadenprozess">
+          <div class="claim-step is-active"><span class="claim-step-number">1</span> Anlegen</div>
+          <div class="claim-step"><span class="claim-step-number">2</span> Akte</div>
+          <div class="claim-step"><span class="claim-step-number">3</span> E-Mail</div>
+          <div class="claim-step"><span class="claim-step-number">4</span> Versicherung</div>
+          <div class="claim-step"><span class="claim-step-number">5</span> Freigabe</div>
+          <div class="claim-step"><span class="claim-step-number">6</span> Bestellung</div>
+          <div class="claim-step"><span class="claim-step-number">7</span> Lieferung</div>
+          <div class="claim-step"><span class="claim-step-number">8</span> Reparatur</div>
+        </div>
+      </div>
+
       <div class="section-title align-items-start">
         <div>
-          <div class="badge-soft mb-3">Rundum-sorglos</div>
-          <h1 class="mb-2">Versicherungsschaden aufnehmen</h1>
-          <p>Bilder und Unterlagen hochladen, Schadenbereiche markieren und die Meldung automatisch vorbereiten.</p>
+          <div class="claim-stage-label">Schritt 1</div>
+          <h1 class="mb-2">Schaden neu melden</h1>
+          <p>Unterlagen einziehen oder hochladen. Die App liest Fahrzeug, Kennzeichen, Halter, Versicherung und Schadenhinweise aus; du prüfst und korrigierst vor dem Anlegen.</p>
         </div>
-        <a href="{{ url_for('admin_versicherung') }}" class="btn btn-soft">Zur Übersicht</a>
+        <div class="claim-view-switch">
+          <span class="btn btn-brand btn-sm disabled">Meine Sicht</span>
+          <a href="{{ url_for('admin_versicherung') }}" class="btn btn-soft btn-sm">Alle Versicherungsschäden</a>
+        </div>
       </div>
 
       <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
+        {{ csrf_field()|safe }}
+        <div class="col-12">
+          <label class="claim-upload-panel" for="versicherung-dateien">
+            <div class="claim-upload-title">Dateien hier reinziehen oder klicken</div>
+            <div class="claim-upload-hint">Kalkulation, Polizei-Unfallkarte, Fahrzeugschein, Fotos, Gutachten oder Versicherungsschreiben</div>
+            <input id="versicherung-dateien" type="file" name="dateien" class="visually-hidden" multiple data-claim-files>
+          </label>
+          <div class="claim-file-list" data-claim-file-list>
+            <div class="claim-file-item">
+              <span>Bereit für Unterlagen und Bilder</span>
+              <span class="claim-file-status">Wird nach Auswahl geprüft</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <div class="alert alert-success mb-0">Automatisch erkannte Daten werden nur als Vorschlag übernommen. Bitte vor dem Speichern prüfen.</div>
+        </div>
+
+        <div class="col-12 claim-form-section-title">
+          <div>
+            <h4 class="mb-1">Erkannte Daten prüfen</h4>
+            <div class="text-muted small">Pflicht sind mindestens Versicherung, Kunde und Fahrzeug.</div>
+          </div>
+        </div>
+
         <div class="col-lg-6">
           <label class="form-label">Versicherung</label>
           <select name="versicherung_id" class="form-select form-select-lg" data-insurance-select>
             <option value="">Neue Versicherung unten eintragen</option>
             {% for versicherung in versicherungen %}
-            <option value="{{ versicherung['id'] }}" data-email="{{ versicherung['email'] }}">{{ versicherung['name'] }}</option>
+            <option value="{{ versicherung['id'] }}" data-email="{{ versicherung['email'] }}" {% if request.form.get('versicherung_id')|int == versicherung['id'] %}selected{% endif %}>{{ versicherung['name'] }}</option>
             {% endfor %}
           </select>
         </div>
         <div class="col-lg-6">
           <label class="form-label">Neue Versicherung</label>
-          <input type="text" name="versicherung_name" class="form-control form-control-lg" placeholder="z.B. HUK, Allianz, R+V">
+          <input type="text" name="versicherung_name" value="{{ request.form.get('versicherung_name', '') }}" class="form-control form-control-lg" placeholder="z.B. HUK, Allianz, R+V">
         </div>
         <div class="col-md-4">
           <label class="form-label">Kontakt Versicherung</label>
-          <input type="text" name="versicherung_kontakt_name" class="form-control">
+          <input type="text" name="versicherung_kontakt_name" value="{{ request.form.get('versicherung_kontakt_name', '') }}" class="form-control">
         </div>
         <div class="col-md-4">
           <label class="form-label">E-Mail Versicherung / An</label>
-          <input type="email" name="versicherung_email" class="form-control" data-insurance-email>
+          <input type="email" name="versicherung_email" value="{{ request.form.get('versicherung_email', '') }}" class="form-control" data-insurance-email>
         </div>
         <div class="col-md-4">
           <label class="form-label">Zugangscode</label>
-          <input type="text" name="versicherung_zugangscode" class="form-control" placeholder="leer = automatisch">
+          <input type="text" name="versicherung_zugangscode" value="{{ request.form.get('versicherung_zugangscode', '') }}" class="form-control" placeholder="leer = automatisch">
         </div>
         <div class="col-md-4">
           <label class="form-label">CC an</label>
-          <input type="text" name="versicherung_email_cc" class="form-control" placeholder="optional">
+          <input type="text" name="versicherung_email_cc" value="{{ request.form.get('versicherung_email_cc', '') }}" class="form-control" placeholder="optional">
         </div>
 
         <div class="col-md-6">
           <label class="form-label">Kunde / Halter</label>
-          <input type="text" name="kunde_name" class="form-control form-control-lg">
+          <input type="text" name="kunde_name" value="{{ request.form.get('kunde_name', '') }}" class="form-control form-control-lg">
         </div>
         <div class="col-md-6">
-          <label class="form-label">Telefon Kunde</label>
-          <input type="text" name="kontakt_telefon" class="form-control form-control-lg">
+          <label class="form-label">Handy / WhatsApp Kunde</label>
+          <input type="text" name="kontakt_telefon" value="{{ request.form.get('kontakt_telefon', '') }}" class="form-control form-control-lg" placeholder="z.B. 0171 1234567">
+          <div class="form-text">Wenn der Kunde WhatsApp nutzt, kann der QR-/Statuslink direkt aus der Fallakte vorbereitet werden.</div>
         </div>
         <div class="col-md-5">
           <label class="form-label">Fahrzeug</label>
-          <input type="text" name="fahrzeug" class="form-control form-control-lg" placeholder="z.B. VW Golf">
+          <input type="text" name="fahrzeug" value="{{ request.form.get('fahrzeug', '') }}" class="form-control form-control-lg" placeholder="z.B. VW Golf" data-vehicle-input>
         </div>
         <div class="col-md-3">
           <label class="form-label">Kennzeichen</label>
-          <input type="text" name="kennzeichen" class="form-control form-control-lg" style="text-transform:uppercase;">
+          <input type="text" name="kennzeichen" value="{{ request.form.get('kennzeichen', '') }}" class="form-control form-control-lg" style="text-transform:uppercase;">
         </div>
         <div class="col-md-4">
           <label class="form-label">FIN</label>
-          <input type="text" name="fin_nummer" class="form-control form-control-lg" style="text-transform:uppercase;">
+          <div class="input-group input-group-lg" data-fin-widget>
+            <input type="text" name="fin_nummer" value="{{ request.form.get('fin_nummer', '') }}" class="form-control" style="text-transform:uppercase;" data-fin-input>
+            <button class="btn btn-outline-dark" type="button" data-fin-analyze>FIN analysieren</button>
+          </div>
+          <div class="form-text" data-fin-result></div>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">HSN</label>
+          <input type="text" name="hsn_nummer" value="{{ request.form.get('hsn_nummer', '') }}" class="form-control form-control-lg" placeholder="z.B. 0588" inputmode="numeric">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">TSN</label>
+          <input type="text" name="tsn_nummer" value="{{ request.form.get('tsn_nummer', '') }}" class="form-control form-control-lg" placeholder="z.B. 748" style="text-transform:uppercase;">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Kilometerstand</label>
+          <input type="text" name="kilometerstand" value="{{ request.form.get('kilometerstand', '') }}" class="form-control form-control-lg" placeholder="z.B. 84.500">
         </div>
         <div class="col-md-4">
           <label class="form-label">Schaden-Nr.</label>
-          <input type="text" name="schaden_nummer" class="form-control">
+          <input type="text" name="schaden_nummer" value="{{ request.form.get('schaden_nummer', '') }}" class="form-control">
         </div>
         <div class="col-md-4">
           <label class="form-label">Police / Vertrag</label>
-          <input type="text" name="versicherung_police" class="form-control">
+          <input type="text" name="versicherung_police" value="{{ request.form.get('versicherung_police', '') }}" class="form-control">
         </div>
         <div class="col-md-4">
           <label class="form-label">Schadenart</label>
           <select name="schadenart" class="form-select">
+            {% set selected_schadenart = request.form.get('schadenart', '') %}
             {% for key, label in schadenarten %}
-            <option value="{{ key }}">{{ label }}</option>
+            <option value="{{ key }}" {% if key == selected_schadenart %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
         </div>
+        <div class="col-md-8">
+          <label class="form-label">Selbstbeteiligung / Hinweis zur Deckung</label>
+          <input type="text" name="schaden_selbstbeteiligung" value="{{ request.form.get('schaden_selbstbeteiligung', '') }}" class="form-control" placeholder="z.B. Vollkaskoversicherung, Selbstbeteiligung 300 EUR">
+          <div class="form-text">Für das Kundengespräch mit erfassen: Vollkasko oft mit SB und möglicher Rückstufung, Teilkasko/Sturm meist ohne SF-Rückstufung, Haftpflicht/Fremdverschulden meist ohne eigene SB.</div>
+        </div>
+        <div class="col-12">
+          <div class="damage-type-grid">
+            {% for hinweis in schadenart_hinweise %}
+            <div class="damage-type-card">
+              <span>{{ hinweis['deckung'] }}</span>
+              <strong>{{ hinweis['titel'] }}</strong>
+              <div class="small text-muted">{{ hinweis['beispiele'] }}</div>
+              <div class="small mt-2">{{ hinweis['hinweis'] }}</div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
 
         <div class="col-12">
-          <label class="form-label">Beschädigte Bereiche</label>
-          {% set editable = true %}
-          {% set show_gt_technical = false %}
-          {% set selected_zones = [] %}
-          {% include "_fahrzeug_schadenkarte.html" %}
+          <div class="claim-legal-panel">
+            <div class="claim-form-section-title mt-0">
+              <div>
+                <h4 class="mb-1">Abrechnung & Fachlogik</h4>
+                <div class="text-muted small">Fiktiv, konkret oder Kasko korrekt vorbereiten, bevor die E-Mail erzeugt wird.</div>
+              </div>
+            </div>
+            <div class="row g-3">
+              <div class="col-lg-4">
+                <label class="form-label">Abrechnungsart</label>
+                {% set selected_abrechnung = request.form.get('schaden_abrechnungsart', 'fiktiv') %}
+                <select name="schaden_abrechnungsart" class="form-select">
+                  {% for key, meta in abrechnungsarten.items() %}
+                  <option value="{{ key }}" {% if key == selected_abrechnung %}selected{% endif %}>{{ meta['label'] }}</option>
+                  {% endfor %}
+                </select>
+                <div class="form-text"><strong>Fiktiv:</strong> netto + Pauschale, keine USt (§ 249 Abs. 2 S. 2 BGB).</div>
+              </div>
+              <div class="col-lg-8">
+                <div class="claim-money-grid">
+                  <div>
+                    <label class="form-label">Netto</label>
+                    <input type="text" name="schaden_reparatur_netto" value="{{ request.form.get('schaden_reparatur_netto', '') }}" class="form-control" placeholder="2.460,75">
+                  </div>
+                  <div>
+                    <label class="form-label">USt</label>
+                    <input type="text" name="schaden_reparatur_ust" value="{{ request.form.get('schaden_reparatur_ust', '') }}" class="form-control" placeholder="467,54">
+                  </div>
+                  <div>
+                    <label class="form-label">Brutto</label>
+                    <input type="text" name="schaden_reparatur_brutto" value="{{ request.form.get('schaden_reparatur_brutto', '') }}" class="form-control" placeholder="2.928,29">
+                  </div>
+                  <div>
+                    <label class="form-label">Pauschale</label>
+                    <input type="text" name="schaden_kostenpauschale" value="{{ request.form.get('schaden_kostenpauschale', '25') }}" class="form-control" placeholder="25">
+                  </div>
+                  <div>
+                    <label class="form-label">Forderung</label>
+                    <input type="text" name="schaden_forderung_betrag" value="{{ request.form.get('schaden_forderung_betrag', '') }}" class="form-control" placeholder="wird berechnet">
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Anspruchsteller</label>
+                <input type="text" name="anspruchsteller_name" value="{{ request.form.get('anspruchsteller_name', request.form.get('kunde_name', '')) }}" class="form-control">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Eigentümer</label>
+                <input type="text" name="eigentuemer_name" value="{{ request.form.get('eigentuemer_name', request.form.get('kunde_name', '')) }}" class="form-control">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Kontoinhaber</label>
+                <input type="text" name="kontoinhaber_name" value="{{ request.form.get('kontoinhaber_name', request.form.get('kunde_name', '')) }}" class="form-control">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">IBAN für Auszahlung</label>
+                <input type="text" name="auszahlung_iban" value="{{ request.form.get('auszahlung_iban', '') }}" class="form-control" placeholder="DE...">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Portal-Zugangscode</label>
+                <input type="text" name="versicherung_portal_code" value="{{ request.form.get('versicherung_portal_code', '') }}" class="form-control" placeholder="leer = automatisch">
+              </div>
+              <div class="col-12">
+                <div class="identity-check">Anspruchsteller = Eigentümer = Kontoinhaber. Wenn das nicht stimmt, bitte vor Versand klären und nicht blind an die Versicherung schicken.</div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="col-12">
-          <label class="form-label">Notiz zu den markierten Bereichen</label>
-          <textarea name="schaden_zonen_notiz" class="form-control" rows="2"></textarea>
-        </div>
+
         <div class="col-12">
           <label class="form-label">Schadenbeschreibung</label>
-          <textarea name="beschreibung" class="form-control" rows="4" placeholder="Was ist passiert, welche Stellen sind sichtbar beschädigt?"></textarea>
+          <textarea name="beschreibung" class="form-control" rows="4" placeholder="Was ist passiert, welche Stellen sind sichtbar beschädigt?">{{ request.form.get('beschreibung', '') }}</textarea>
         </div>
         <div class="col-md-7">
-          <label class="form-label">Bilder und Unterlagen</label>
-          <input type="file" name="dateien" class="form-control form-control-lg" multiple>
-          <div class="form-text">Fotos, Fahrzeugschein, Versicherungsschreiben, Gutachten oder Kalkulation hochladen.</div>
+          <label class="form-label">Weitere Unterlagen nachreichen</label>
+          <input type="file" name="dateien_zusatz" class="form-control form-control-lg" multiple>
+          <div class="form-text">Optional, falls nach der ersten Auswahl noch weitere Fotos oder Dokumente dazukommen.</div>
         </div>
         <div class="col-md-5">
           <label class="form-label">Upload-Notiz</label>
-          <textarea name="upload_notiz" class="form-control" rows="3"></textarea>
+          <textarea name="upload_notiz" class="form-control" rows="3">{{ request.form.get('upload_notiz', '') }}</textarea>
         </div>
         <div class="col-12 d-flex gap-2 flex-wrap">
           <button
@@ -141,6 +311,37 @@
 {% block extra_js %}
 <script>
   (() => {
+    const fileInput = document.querySelector('[data-claim-files]');
+    const fileList = document.querySelector('[data-claim-file-list]');
+    if (fileInput && fileList) {
+      const escapeHtml = (value) => String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+      fileInput.addEventListener('change', () => {
+        const files = Array.from(fileInput.files || []);
+        if (!files.length) {
+          fileList.innerHTML = `
+            <div class="claim-file-item">
+              <span>Bereit für Unterlagen und Bilder</span>
+              <span class="claim-file-status">Wird nach Auswahl geprüft</span>
+            </div>
+          `;
+          return;
+        }
+        fileList.innerHTML = files.map((file) => `
+          <div class="claim-file-item">
+            <span>${escapeHtml(file.name)}</span>
+            <span class="claim-file-status">Für Auslese vorgemerkt</span>
+          </div>
+        `).join('');
+      });
+    }
+  })();
+
+  (() => {
     const select = document.querySelector('[data-insurance-select]');
     const emailInput = document.querySelector('[data-insurance-email]');
     if (!select || !emailInput) return;
@@ -158,6 +359,48 @@
     });
     select.addEventListener('change', applyInsuranceEmail);
     applyInsuranceEmail();
+  })();
+
+  (() => {
+    const form = document.querySelector('form[data-upload-form]');
+    if (!form) return;
+    const field = (name) => form.querySelector(`[name="${name}"]`);
+    const parseMoney = (value) => {
+      const text = String(value || '').replace(/\s/g, '');
+      if (!text) return 0;
+      const normalized = text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text;
+      const amount = Number.parseFloat(normalized.replace(/[^\d.-]/g, ''));
+      return Number.isFinite(amount) ? amount : 0;
+    };
+    const formatMoney = (amount) => amount
+      ? amount.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : '';
+    const updateClaimAmount = () => {
+      const mode = field('schaden_abrechnungsart')?.value || 'fiktiv';
+      const netto = parseMoney(field('schaden_reparatur_netto')?.value);
+      const brutto = parseMoney(field('schaden_reparatur_brutto')?.value);
+      const pauschale = parseMoney(field('schaden_kostenpauschale')?.value) || 25;
+      const sb = parseMoney(field('schaden_selbstbeteiligung')?.value);
+      let amount = 0;
+      if (mode === 'kasko') amount = Math.max(brutto - sb, 0);
+      else if (mode === 'konkret') amount = brutto;
+      else amount = netto + pauschale;
+      const target = field('schaden_forderung_betrag');
+      if (target && amount) target.value = formatMoney(amount);
+    };
+    const syncModeFromDamageType = () => {
+      const schadenart = field('schadenart')?.value || '';
+      if (['vollkasko', 'teilkasko', 'glasschaden', 'wildschaden', 'hagel_unwetter', 'vandalismus'].includes(schadenart) && field('schaden_abrechnungsart')) {
+        field('schaden_abrechnungsart').value = 'kasko';
+      }
+      updateClaimAmount();
+    };
+    ['schaden_abrechnungsart', 'schaden_reparatur_netto', 'schaden_reparatur_brutto', 'schaden_kostenpauschale', 'schaden_selbstbeteiligung'].forEach((name) => {
+      field(name)?.addEventListener('input', updateClaimAmount);
+      field(name)?.addEventListener('change', updateClaimAmount);
+    });
+    field('schadenart')?.addEventListener('change', syncModeFromDamageType);
+    updateClaimAmount();
   })();
 </script>
 {% endblock %}

@@ -99,3 +99,59 @@ Binauer Hoehe 4
 74821 Mosbach-Lohrbach
 info@auto-lackierzentrum.de
 0152 / 27706694
+
+---
+
+## Zusatzanfrage: partslink24 / LexCom
+
+Stand: 16.05.2026
+
+Warum interessant:
+
+- partslink24 ist fuer Originalteile spannend, weil VIN-Abfrage, Herstellerkataloge, Bild-Text-Seiten und Bestelluebergabe im System vorgesehen sind.
+- In der partslink24-Datenschutzerklaerung wird "OrderBridge" als Schnittstelle zu externen Systemen wie Shop-Management- oder Schadenskalkulationssystemen beschrieben.
+- Es gibt ausserdem kostenpflichtige Teile-Datenlisten je VIN als CSV/TXT fuer bestimmte Marken/Bundles.
+- Automatisiertes Abgreifen/Scraping ist laut partslink24-AGB verboten; daher nur offizieller Zugang, OrderBridge, Datenliste oder abgestimmter Export.
+
+Offizielle Kontaktpunkte:
+
+- partslink24 Support: contact@partslink24.com
+- Telefon Support: +49 (0) 89 54715 111
+- pl24connect / LexCom: pl24connect@lexcom.de
+
+### Mailvorlage partslink24 / LexCom
+
+Betreff: Anfrage zu partslink24 OrderBridge / VIN-Teilelisten fuer Werkstatt-Kalkulationsportal
+
+Hallo partslink24-/LexCom-Team,
+
+wir betreiben und entwickeln fuer unsere Karosserie- und Lackierwerkstatt ein eigenes digitales Werkstatt- und Schadenportal.
+
+Gaertner Karosserie & Lack GmbH
+Binauer Hoehe 4
+74821 Mosbach-Lohrbach
+
+Unser Ziel ist ein sauberer Prozess fuer Schadenaufnahme, Kalkulation, Teilepruefung und Bestellung. Im Portal werden FIN/VIN, Fahrzeugdaten, Schadenbereiche, Gutachten/Kalkulationen, Bilder und interne Arbeitspositionen zusammengefuehrt. Die finale Entscheidung und Bestellung erfolgt immer manuell durch die Werkstatt.
+
+Wir moechten partslink24 nicht automatisiert auslesen, sondern eine offizielle und lizenzkonforme Anbindung pruefen. Besonders interessant waeren fuer uns:
+
+1. OrderBridge als Schnittstelle zwischen unserem Portal und partslink24
+2. Uebergabe einer VIN und einer vorbereiteten Teileliste an partslink24
+3. Rueckuebergabe gepruefter/ergaenzter Teilelisten an unser Portal
+4. Abruf oder Export von VIN-bezogenen Teile-Datenlisten, z. B. CSV/TXT
+5. Moeglichkeiten fuer Originalteilnummern, Bild-/Textseiten, Verfuegbarkeit, Preislisten oder Warenkorb-Uebergabe
+6. Technische Dokumentation, Testzugang oder Pilotmoeglichkeit fuer eine kleine Werkstattloesung
+
+Koennen Sie uns bitte mitteilen, welcher Integrationsweg fuer diesen Fall vorgesehen ist und wer der richtige technische/kaufmaennische Ansprechpartner waere?
+
+Wichtig fuer uns:
+
+- Wir suchen eine rechtlich saubere Schnittstelle, kein Scraping.
+- Wir starten klein mit unserer eigenen Werkstatt.
+- Bei erfolgreichem Einsatz soll das System spaeter fuer weitere Karosserie- und Lackierbetriebe skalierbar werden.
+
+Vielen Dank und freundliche Gruesse
+
+Gaertner Karosserie & Lack GmbH
+info@auto-lackierzentrum.de
+0152 / 27706694
