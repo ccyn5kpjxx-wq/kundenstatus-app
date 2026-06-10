@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Versicherungsschäden{% endblock %}
+{% block title %}Versicherungsportal{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -12,6 +12,11 @@
   .cockpit-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; }
   .cockpit-box { border:1px solid #e4d6c3; border-radius:14px; background:#fffdf9; padding:.9rem; min-height:120px; }
   .cockpit-box strong { font-family:"Space Grotesk",sans-serif; font-size:1.55rem; line-height:1; }
+  .portal-toggle { display:inline-flex; border:1px solid #e4d6c3; border-radius:999px; background:#fffdf9; padding:.2rem; gap:.2rem; flex-wrap:wrap; }
+  .portal-toggle button { border:0; background:transparent; border-radius:999px; padding:.55rem .9rem; font-weight:800; color:#6f6253; }
+  .portal-toggle button.is-active { background:#17212a; color:#fff; }
+  .portal-view[hidden] { display:none !important; }
+  .portal-demo-banner { border:1px solid #bfd7f4; border-radius:14px; background:#f3f8ff; color:#1f416a; padding:.9rem 1rem; }
   @media (max-width: 900px) {
     .insurance-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .cockpit-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -25,17 +30,86 @@
 <div class="page-card p-4 p-lg-5 mb-4">
   <div class="section-title align-items-start">
     <div>
-      <div class="badge-soft mb-3">Versicherungen</div>
-      <h1 class="mb-2">Schadenportal</h1>
-      <p>Eigene Schadenfälle für Versicherungen, ohne den Autohausbereich zu verändern.</p>
+      <div class="badge-soft mb-3">Schadenportal</div>
+      <h1 class="mb-2">Versicherungsportal</h1>
+      <p>Eigene Schadenfälle, Zuteilungen, Rückfragen und Freigaben für Versicherungen, ohne den Autohausbereich zu verändern.</p>
     </div>
-    <a href="{{ url_for('admin_versicherung_schaden_neu') }}" class="btn btn-brand btn-lg">Schaden aufnehmen</a>
+    <a href="{{ url_for('admin_versicherungsschaden') }}" class="btn btn-brand btn-lg">Schadenfall aufnehmen</a>
   </div>
   <div class="insurance-grid">
     <div class="insurance-metric"><span>Aktive Fälle</span><strong>{{ schadenfaelle|length }}</strong></div>
     <div class="insurance-metric"><span>Versicherungen</span><strong>{{ versicherungen|length }}</strong></div>
     <div class="insurance-metric"><span>Freigegeben</span><strong>{{ schadenfaelle|selectattr('versicherung_freigabe_status', 'equalto', 'freigegeben')|list|length }}</strong></div>
     <div class="insurance-metric"><span>Rückfragen</span><strong>{{ schadenfaelle|selectattr('versicherung_freigabe_status', 'equalto', 'rueckfrage')|list|length }}</strong></div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4" id="versicherungsschaden">
+  <div class="section-title align-items-start">
+    <div>
+      <h4 class="mb-1">Versicherungsschaden</h4>
+      <p>Jeder Schaden ist ein Auftrag. Der Status läuft vom Erstkontakt bis zur Reparatur mit und erscheint als Herkunft „Versicherung“ im Lackierportal.</p>
+    </div>
+    <div class="portal-toggle" role="group" aria-label="Portalansicht">
+      <button type="button" class="is-active" data-portal-toggle="werkstatt">Meine Sicht (Werkstatt)</button>
+      <button type="button" data-portal-toggle="versicherung">Sicht der Versicherung</button>
+    </div>
+  </div>
+  <div class="portal-demo-banner mb-3">
+    Betriebs-Cockpit / Versicherung / Versicherungsschaden: Schaden aufnehmen, Unterlagen auslesen, Erstkontakt-E-Mail erzeugen, Portalzugang teilen, Freigabe und Reparatur steuern.
+  </div>
+  <div class="portal-view" data-portal-view="werkstatt">
+    <div class="d-flex justify-content-between gap-2 flex-wrap align-items-center mb-3">
+      <div class="fw-bold">Meine Aufträge</div>
+      <a href="{{ url_for('admin_versicherungsschaden') }}" class="btn btn-brand">+ Schaden neu melden</a>
+    </div>
+    {% if schadenfaelle %}
+      <div class="case-list">
+        {% for fall in schadenfaelle[:3] %}
+        <a href="{{ url_for('admin_versicherung_schaden_detail', auftrag_id=fall['id']) }}" class="case-row text-decoration-none text-dark">
+          <div>
+            <div class="fw-bold">{{ fall['fahrzeug'] }}{% if fall['kennzeichen'] %} · {{ fall['kennzeichen'] }}{% endif %}</div>
+            <div class="text-muted small">{{ fall['versicherung_name'] or 'Versicherung offen' }}{% if fall['schaden_nummer'] %} · Az. {{ fall['schaden_nummer'] }}{% endif %}</div>
+          </div>
+          <div><span class="badge text-bg-{{ fall['versicherung_freigabe_meta']['farbe'] }}">{{ fall['versicherung_freigabe_meta']['label'] }}</span></div>
+          <div class="small">{{ fall['schaden_abrechnungsart_meta']['label'] }}</div>
+          <div class="text-end"><span class="btn btn-soft btn-sm">Akte</span></div>
+        </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="text-muted">Noch kein Versicherungsschaden angelegt.</div>
+    {% endif %}
+  </div>
+  <div class="portal-view" data-portal-view="versicherung" hidden>
+    <div class="d-flex justify-content-between gap-2 flex-wrap align-items-center mb-3">
+      <div>
+        <div class="fw-bold">Schadensportal · Versicherung</div>
+        <div class="text-muted small">So sieht die Versicherung ihre Vorgänge, Unterlagen, Rückfragen und Freigaben.</div>
+      </div>
+      {% if versicherungen %}
+      <a href="{{ url_for('admin_versicherung_dashboard_vorschau', slug=versicherungen[0]['slug']) }}" class="btn btn-brand">+ Schaden anlegen &amp; zuweisen</a>
+      {% else %}
+      <a href="{{ url_for('admin_zugaenge') }}" class="btn btn-brand">Versicherung anlegen</a>
+      {% endif %}
+    </div>
+    {% if schadenfaelle %}
+      <div class="case-list">
+        {% for fall in schadenfaelle[:3] %}
+        <a href="{{ url_for('admin_versicherung_schaden_vorschau_versicherung', auftrag_id=fall['id']) }}" class="case-row text-decoration-none text-dark">
+          <div>
+            <div class="fw-bold">Schaden {{ fall['schaden_nummer'] or fall['id'] }} · {{ fall['fahrzeug'] }}</div>
+            <div class="text-muted small">Karosserie & Lack Gärtner{% if fall['schaden_forderung_betrag_label'] %} · Forderung {{ fall['schaden_forderung_betrag_label'] }}{% endif %}</div>
+          </div>
+          <div><span class="badge text-bg-{{ fall['versicherung_freigabe_meta']['farbe'] }}">{{ fall['versicherung_freigabe_meta']['label'] }}</span></div>
+          <div class="small">{{ fall['schaden_station_label'] }}</div>
+          <div class="text-end"><span class="btn btn-soft btn-sm">Versicherungssicht</span></div>
+        </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="text-muted">In der Versicherungssicht erscheinen neu gemeldete oder zugewiesene Schäden.</div>
+    {% endif %}
   </div>
 </div>
 
@@ -106,4 +180,22 @@
     <div class="text-muted">Noch kein Versicherungsschaden angelegt.</div>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (() => {
+    const buttons = Array.from(document.querySelectorAll('[data-portal-toggle]'));
+    const views = Array.from(document.querySelectorAll('[data-portal-view]'));
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        const target = button.dataset.portalToggle;
+        buttons.forEach((item) => item.classList.toggle('is-active', item === button));
+        views.forEach((view) => {
+          view.hidden = view.dataset.portalView !== target;
+        });
+      });
+    });
+  })();
+</script>
 {% endblock %}

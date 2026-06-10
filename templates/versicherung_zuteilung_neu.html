@@ -3,28 +3,84 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ versicherung['name'] }} - Fahrzeug zuteilen</title>
+  <title>{{ versicherung['name'] }} - Neuer Schadenauftrag</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    body { background:#f3efe6; color:#16202a; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-    .shell { max-width:980px; margin:0 auto; padding:28px 16px; }
-    .panel { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); }
-    .hint { border:1px solid #cddcca; border-radius:14px; background:#f7fbf6; padding:1rem; }
-    .doc-analyzer { border:1px solid #d8cbbb; border-radius:16px; background:#fffaf2; padding:1rem; }
-    .doc-analyzer-title { font-weight:850; font-size:1.08rem; margin-bottom:.2rem; }
-    .doc-required { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.55rem .9rem; margin:0; padding:0; list-style:none; }
-    .doc-required li { border:1px solid #e0d3c1; border-radius:10px; background:#fffdf8; padding:.65rem .75rem; font-size:.9rem; }
-    .analysis-result { border-radius:12px; background:#f4f9fd; border:1px solid #d7e3ef; padding:.75rem .9rem; font-size:.92rem; color:#334155; }
+    :root {
+      --ink:#16202a;
+      --muted:#637181;
+      --line:#d8e0e7;
+      --soft:#f7fafc;
+      --soft-blue:#eef6fb;
+      --soft-green:#f2fbf8;
+      --accent:#0f766e;
+      --accent-dark:#0f2f42;
+      --warn:#b7791f;
+    }
+    body { background:#eef3f6; color:var(--ink); font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    .shell { max-width:1120px; margin:0 auto; padding:28px 16px; }
+    .panel { background:#fff; border:1px solid var(--line); border-radius:14px; padding:24px; box-shadow:0 16px 40px rgba(15,35,50,.10); }
+    .topbar { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; }
+    .kicker { display:inline-flex; align-items:center; gap:.45rem; border:1px solid #b8d7d4; border-radius:999px; background:#f5fbfa; color:var(--accent); font-size:.78rem; font-weight:850; text-transform:uppercase; letter-spacing:.04em; padding:.35rem .7rem; }
+    .lead-text { color:var(--muted); max-width:760px; }
+    .workflow { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.65rem; margin-top:18px; }
+    .workflow-step { border:1px solid var(--line); border-radius:10px; background:#fff; padding:.85rem; min-height:112px; }
+    .workflow-step span { display:inline-grid; place-items:center; width:28px; height:28px; border-radius:999px; background:var(--accent-dark); color:#fff; font-weight:850; margin-bottom:.55rem; }
+    .workflow-step strong { display:block; line-height:1.15; }
+    .workflow-step small { color:var(--muted); display:block; margin-top:.35rem; line-height:1.3; }
+    .case-form { display:grid; gap:18px; }
+    .case-section { border:1px solid var(--line); border-radius:14px; background:#fff; padding:20px; }
+    .case-section.is-primary { border-color:#b8d7d4; background:linear-gradient(135deg,#f3fbf9,#fff); }
+    .section-head { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; margin-bottom:16px; }
+    .section-number { width:32px; height:32px; border-radius:999px; display:inline-grid; place-items:center; background:var(--accent-dark); color:#fff; font-weight:850; flex:0 0 auto; }
+    .section-title { display:flex; gap:.75rem; align-items:flex-start; }
+    .section-title h2 { margin:0; font-size:1.22rem; }
+    .section-title p { margin:.2rem 0 0; color:var(--muted); }
+    .workshop-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.65fr); gap:16px; }
+    .workshop-card { border:1px solid #c9d6e0; border-radius:12px; background:#fff; padding:16px; }
+    .workshop-card strong { display:block; font-size:1.08rem; }
+    .decision-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+    .decision-option { position:relative; }
+    .decision-option input { position:absolute; opacity:0; pointer-events:none; }
+    .decision-card { border:1px solid var(--line); border-radius:12px; background:#fff; padding:14px; min-height:132px; cursor:pointer; transition:.15s ease; }
+    .decision-card strong { display:block; font-size:1rem; }
+    .decision-card small { color:var(--muted); display:block; margin-top:.35rem; line-height:1.35; }
+    .decision-option input:checked + .decision-card { border-color:var(--accent); background:#f1fbf8; box-shadow:0 0 0 3px rgba(15,118,110,.10); }
+    .doc-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .doc-lane { border:1px solid var(--line); border-radius:12px; background:var(--soft); padding:14px; display:grid; gap:.65rem; }
+    .doc-lane.is-required { border-color:#b8d7d4; background:var(--soft-green); }
+    .doc-head { display:flex; justify-content:space-between; gap:.75rem; align-items:flex-start; }
+    .doc-head strong { display:block; line-height:1.2; }
+    .doc-head small { color:var(--muted); display:block; margin-top:.25rem; }
+    .doc-status { border:1px solid #cad6df; border-radius:999px; background:#fff; padding:.2rem .55rem; font-size:.78rem; color:#506070; white-space:nowrap; }
+    .doc-status.is-ready { border-color:#b7d9c7; color:#0f6b46; background:#fff; font-weight:800; }
+    .analysis-box { border:1px solid #cfe0ee; border-radius:12px; background:var(--soft-blue); padding:14px; display:grid; gap:.75rem; }
+    .analysis-result { border-radius:10px; border:1px solid transparent; padding:.75rem .85rem; color:#334155; background:#fff; min-height:44px; }
     .analysis-result:empty { display:none; }
-    .form-section-title { display:flex; align-items:center; gap:.6rem; margin:.2rem 0 .2rem; font-weight:800; font-size:1.05rem; }
-    .form-section-title::before { content:""; width:8px; height:24px; border-radius:999px; background:#a23f2d; display:inline-block; }
-    .section-note { border:1px solid #d7e3ef; border-radius:14px; background:#f4f9fd; padding:.9rem 1rem; color:#334155; }
-    .pickup-block[hidden] { display:none !important; }
-    .liability-extra[hidden] { display:none !important; }
-    .damage-type-note[hidden] { display:none !important; }
-    .damage-type-note { border:1px solid #d7e3ef; border-radius:14px; background:#f4f9fd; padding:.9rem 1rem; color:#334155; }
-    .damage-type-note strong { color:#16202a; }
-    @media (max-width:760px) { .doc-required { grid-template-columns:1fr; } }
+    .analysis-result.border-success { border-color:#badbcc; background:#f2fbf6; }
+    .analysis-result.border-warning { border-color:#ffe0a3; background:#fff8e8; }
+    .field-grid { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:14px; }
+    .span-2 { grid-column:span 2; }
+    .span-3 { grid-column:span 3; }
+    .span-4 { grid-column:span 4; }
+    .span-5 { grid-column:span 5; }
+    .span-6 { grid-column:span 6; }
+    .span-7 { grid-column:span 7; }
+    .span-8 { grid-column:span 8; }
+    .span-12 { grid-column:1 / -1; }
+    .form-label { font-weight:750; color:#263542; }
+    .form-text { color:var(--muted); }
+    .helper-note { border:1px solid #cfe0ee; border-radius:12px; background:var(--soft-blue); padding:.85rem 1rem; color:#334155; }
+    .helper-note strong { color:var(--ink); }
+    .liability-extra[hidden], .pickup-block[hidden], .damage-type-note[hidden] { display:none !important; }
+    .damage-type-note { border:1px solid #cfe0ee; border-radius:12px; background:var(--soft-blue); padding:.85rem 1rem; color:#334155; }
+    .pickup-block { border:1px solid #ffe0a3; border-radius:12px; background:#fff8e8; padding:14px; }
+    .submit-bar { position:sticky; bottom:0; z-index:2; margin-top:18px; border:1px solid var(--line); border-radius:14px; background:rgba(255,255,255,.96); backdrop-filter:blur(10px); padding:14px; display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; box-shadow:0 -12px 32px rgba(15,35,50,.08); }
+    @media (max-width:980px) {
+      .workflow, .workshop-grid, .decision-grid, .doc-grid { grid-template-columns:1fr; }
+      .field-grid { grid-template-columns:1fr; }
+      .span-2, .span-3, .span-4, .span-5, .span-6, .span-7, .span-8, .span-12 { grid-column:1; }
+    }
   </style>
 </head>
 <body>
@@ -32,6 +88,7 @@
     {% set is_preview = rollen_vorschau is defined and rollen_vorschau %}
     {% set vorschau = vorschau_daten if vorschau_daten is defined else {} %}
     {% set werkstatt_name = "Lackierzentrum Gärtner Karosserie & Lack GmbH" %}
+    {% set selected_werkstatt = request.args.get('werkstatt', 'gaertner') %}
     {% set back_url = url_for('admin_versicherung') if is_preview else url_for('versicherung_dashboard', slug=versicherung['slug']) %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
@@ -41,281 +98,385 @@
 
     {% if is_preview %}
     <div class="alert alert-info border-0 shadow-sm mb-4">
-      <strong>Rollenvorschau:</strong> So sieht die Zuteilungsmaske fuer die Versicherung aus. Speichern ist in dieser Vorschau deaktiviert.
+      <strong>Rollenvorschau:</strong> So sieht die geführte Schadenanlage fuer die Versicherung aus. Speichern ist in der Vorschau deaktiviert.
     </div>
     {% endif %}
 
-    <div class="panel mb-4">
-      <a href="{{ back_url }}" class="btn btn-outline-dark btn-sm mb-3">Zurück</a>
-      <div class="badge text-bg-dark mb-3">Versicherungsportal</div>
-      <h1 class="mb-2">Fahrzeug an Gärtner zuteilen</h1>
-      <div class="text-muted">{{ werkstatt_name }} bekommt eine Meldung, der Kunde kann zur Besichtigung kontaktiert werden und erhält den Kundenstatus-QR aus der Schadenakte.</div>
-    </div>
+    <section class="panel mb-4">
+      <div class="topbar">
+        <div>
+          <a href="{{ back_url }}" class="btn btn-outline-dark btn-sm mb-3">Zurück</a>
+          <div class="kicker">Geführtes Schadensmanagement</div>
+          <h1 class="mt-3 mb-2">Neuen Schadenauftrag anlegen</h1>
+          <div class="lead-text">
+            Der Auftrag wird zuerst einer Werkstatt zugewiesen. Danach werden Police, Fahrzeugdaten,
+            Schadenbilder und Unfallunterlagen strukturiert gesammelt, per KI voranalysiert und als
+            saubere Schadenakte an Gärtner übergeben.
+          </div>
+        </div>
+        <div class="text-end">
+          <div class="badge text-bg-dark mb-2">{{ versicherung['name'] }}</div>
+          <div class="text-muted small">Kein E-Mail-Chaos: alles landet in einer Akte.</div>
+        </div>
+      </div>
+      <div class="workflow">
+        <div class="workflow-step"><span>1</span><strong>Werkstatt</strong><small>Zielbetrieb und Steuerung festlegen.</small></div>
+        <div class="workflow-step"><span>2</span><strong>Schadenart</strong><small>Haftpflicht, Vollkasko oder Teilkasko einordnen.</small></div>
+        <div class="workflow-step"><span>3</span><strong>Unterlagen</strong><small>Police, Fotos, Fahrzeug- und Unfallbelege sammeln.</small></div>
+        <div class="workflow-step"><span>4</span><strong>KI-Analyse</strong><small>Felder vorfüllen und Unsicheres prüfen.</small></div>
+        <div class="workflow-step"><span>5</span><strong>Zuteilen</strong><small>Gärtner bekommt Auftrag, Akte und Kundenstatus.</small></div>
+      </div>
+    </section>
 
     {% set analyse_url = url_for('admin_versicherung_zuteilung_analyse_vorschau', slug=versicherung['slug']) if is_preview else url_for('versicherung_zuteilung_analyse', slug=versicherung['slug']) %}
-    <form method="POST" enctype="multipart/form-data" action="{{ '#' if is_preview else url_for('versicherung_zuteilung_neu', slug=versicherung['slug']) }}" class="panel" data-zuteilung-form data-analysis-url="{{ analyse_url }}">
+    <form method="POST" enctype="multipart/form-data" action="{{ '#' if is_preview else url_for('versicherung_zuteilung_neu', slug=versicherung['slug']) }}" class="case-form" data-zuteilung-form data-analysis-url="{{ analyse_url }}">
       {{ csrf_field()|safe }}
-      <div class="hint mb-4">
-        <div class="fw-bold">Ablauf</div>
-        <div class="text-muted small">Unterlagen einmal hochladen, kurz dazuschreiben was dabei ist, analysieren lassen und danach die automatisch gefüllten Felder prüfen. Die KI trennt im Hintergrund beschädigtes Fahrzeug, Gegnerdaten, Police und Polizei-/Unfallbericht.</div>
-      </div>
+      <input type="hidden" name="kundenkontakt_kanal" value="qr">
 
-      <div class="doc-analyzer mb-4">
-        <div class="doc-analyzer-title">Unterlagen hochladen und automatisch auslesen</div>
-        <div class="text-muted small mb-3">Bitte nur hochladen, was schon vorliegt. Fehlende Unterlagen kann Gärtner später nachfordern oder in der Schadenakte ergänzen.</div>
-        <ul class="doc-required mb-3">
-          <li><strong>Fahrzeugschein / Zulassungsbescheinigung Teil I</strong><br><span class="text-muted">für das beschädigte Fahrzeug.</span></li>
-          <li><strong>Schaden-Nr. / Aktenzeichen</strong><br><span class="text-muted">falls die Versicherung schon eine Vorgangsnummer hat.</span></li>
-          <li><strong>Police / Vertrag</strong><br><span class="text-muted">wichtig bei Kasko, Selbstbeteiligung oder unklarer Deckung.</span></li>
-          <li><strong>Bei Haftpflicht</strong><br><span class="text-muted">gegnerisches Kennzeichen, Unfalltag, gegnerische Versicherung/Schaden-Nr. und Polizeibericht, soweit vorhanden.</span></li>
-        </ul>
-        <div class="row g-3 align-items-end">
-          <div class="col-lg-8">
-            <label class="form-label">Unterlagen</label>
-            <input type="file" name="dateien" class="form-control" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.txt,.docx,.xlsx" data-document-files>
+      <section class="case-section is-primary">
+        <div class="section-head">
+          <div class="section-title">
+            <span class="section-number">1</span>
+            <div>
+              <h2>Werkstatt auswählen</h2>
+              <p>Der Versicherer startet einen neuen Schaden und legt zuerst fest, wohin der Fall geht.</p>
+            </div>
           </div>
-          <div class="col-lg-4">
-            <button type="button" class="btn btn-outline-dark w-100" data-analyze-documents>Dokumente analysieren</button>
+          <span class="badge text-bg-success">gewählt</span>
+        </div>
+        <div class="workshop-grid">
+          <div>
+            <label class="form-label" for="werkstatt_ziel">Werkstatt</label>
+            <select id="werkstatt_ziel" class="form-select form-select-lg" name="werkstatt_ziel">
+              <option value="gaertner" {% if selected_werkstatt == 'gaertner' %}selected{% endif %}>{{ werkstatt_name }}</option>
+            </select>
+            <div class="form-text">Weitere Partnerwerkstätten können später als Optionen ergänzt werden.</div>
           </div>
-          <div class="col-12">
-            <label class="form-label">Kurzer Hinweis zu den Unterlagen</label>
-            <input type="text" name="upload_notiz" class="form-control" placeholder="z.B. Fahrzeugschein, Police, Polizeibericht, Gegnerdaten">
-          </div>
-          <div class="col-12">
-            <div class="analysis-result" data-analysis-result></div>
+          <div class="workshop-card">
+            <strong>{{ werkstatt_name }}</strong>
+            <div class="text-muted small mt-1">Schadenaufnahme, Bilder, Kalkulation, Reparaturstatus und Kommunikation mit Kunde/Werkstatt.</div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div class="row g-3">
-        <div class="col-12">
-          <div class="form-section-title">Geschädigter / Kunde</div>
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Kunde / Geschädigter</label>
-          <input type="text" name="kunde_name" class="form-control" value="{{ vorschau.get('kunde_name', '') }}" required>
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Fahrzeughalter / Versicherungsnehmer</label>
-          <input type="text" name="versicherungsnehmer" class="form-control" value="{{ vorschau.get('versicherungsnehmer', '') }}" placeholder="falls abweichend">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Handy / WhatsApp Kunde</label>
-          <input type="text" name="kontakt_telefon" class="form-control" value="{{ vorschau.get('kontakt_telefon', '') }}" placeholder="z.B. 0171 1234567">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">E-Mail Kunde</label>
-          <input type="email" name="kunde_email" class="form-control" value="{{ vorschau.get('kunde_email', '') }}">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Adresse Kunde</label>
-          <input type="text" name="kunde_adresse" class="form-control" value="{{ vorschau.get('kunde_adresse', '') }}" placeholder="Straße, PLZ Ort">
-        </div>
-        <div class="col-md-4">
-          <input type="hidden" name="kundenkontakt_kanal" value="qr">
-          <label class="form-label">Kunden-QR-Code</label>
-          <div class="section-note small py-2">
-            Wird beim Anlegen automatisch erzeugt und kann sofort an den Kunden gegeben werden.
-          </div>
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Besichtigung/Gutachten am</label>
-          <input type="date" name="besichtigung_datum" class="form-control" value="{{ vorschau.get('besichtigung_datum', '') }}">
-        </div>
-        <div class="col-12">
-          <div class="form-section-title mt-2">Fahrzeug des Geschädigten / Schaden</div>
-        </div>
-        <div class="col-md-5">
-          <label class="form-label">Beschädigtes Fahrzeug</label>
-          <input type="text" name="fahrzeug" class="form-control" value="{{ vorschau.get('fahrzeug', '') }}" placeholder="z.B. VW Golf 8" required data-vehicle-input>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Kennzeichen Geschädigter</label>
-          <input type="text" name="kennzeichen" class="form-control" value="{{ vorschau.get('kennzeichen', '') }}">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">FIN beschädigtes Fahrzeug</label>
-          <div class="input-group" data-fin-widget>
-            <input type="text" name="fin_nummer" class="form-control" value="{{ vorschau.get('fin_nummer', '') }}" style="text-transform:uppercase;" data-fin-input>
-            <button class="btn btn-outline-dark" type="button" data-fin-analyze>FIN analysieren</button>
-          </div>
-          <div class="form-text" data-fin-result></div>
-        </div>
-        <div class="col-md-2">
-          <label class="form-label">HSN</label>
-          <input type="text" name="hsn_nummer" class="form-control" value="{{ vorschau.get('hsn_nummer', '') }}" placeholder="2.1">
-        </div>
-        <div class="col-md-2">
-          <label class="form-label">TSN</label>
-          <input type="text" name="tsn_nummer" class="form-control" value="{{ vorschau.get('tsn_nummer', '') }}" placeholder="2.2" style="text-transform:uppercase;">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Kilometerstand</label>
-          <input type="text" name="kilometerstand" class="form-control" value="{{ vorschau.get('kilometerstand', '') }}" placeholder="z.B. 84.500">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Schadenart</label>
-          <select name="schadenart" class="form-select" data-schadenart-select>
-            {% for key, label in schadenarten %}
-            <option value="{{ key }}" {% if vorschau.get('schadenart') == key %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-12">
-          <div class="damage-type-note" data-damage-hint="unbekannt" {% if vorschau.get('schadenart', 'unbekannt') != 'unbekannt' %}hidden{% endif %}>
-            <strong>Deckung noch offen:</strong> Police/Vertrag prüfen. Wichtig ist, ob eine Selbstbeteiligung anfällt und ob Haftpflicht, Vollkasko oder Teilkasko zuständig ist.
-          </div>
-          {% for item in schadenart_hinweise %}
-          <div class="damage-type-note" data-damage-hint="{{ item.key }}" {% if vorschau.get('schadenart') != item.key %}hidden{% endif %}>
-            <strong>{{ item.titel }}:</strong> {{ item.deckung }}<br>
-            <span class="small">{{ item.hinweis }} Beispiele: {{ item.beispiele }}.</span>
-          </div>
-          {% endfor %}
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Schaden-Nr. / Aktenzeichen</label>
-          <input type="text" name="schaden_nummer" class="form-control" value="{{ vorschau.get('schaden_nummer', '') }}">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Police / Vertrag</label>
-          <input type="text" name="versicherung_police" class="form-control" value="{{ vorschau.get('versicherung_police', '') }}">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Selbstbeteiligung / Deckung</label>
-          <input
-            type="text"
-            name="schaden_selbstbeteiligung"
-            class="form-control"
-            value="{{ vorschau.get('schaden_selbstbeteiligung', '') }}"
-            placeholder="z.B. 300 EUR oder keine bekannt"
-          >
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Schadenbeschreibung</label>
-          <input type="text" name="beschreibung" class="form-control" value="{{ vorschau.get('beschreibung', '') }}" placeholder="z.B. Frontschaden, Fahrzeug nicht fahrbereit">
-        </div>
-        <div class="col-12 liability-extra">
-          <div class="form-section-title mt-2">Nur bei Haftpflicht / Fremdverschulden</div>
-          <div class="section-note small">Optional: nur eintragen, was zur gegnerischen Haftpflicht schon bekannt ist.</div>
-        </div>
-        <div class="col-md-4 liability-extra">
-          <label class="form-label">Unfalltag</label>
-          <input type="date" name="haftpflicht_unfalltag" class="form-control" value="{{ vorschau.get('haftpflicht_unfalltag', '') }}">
-        </div>
-        <div class="col-md-4 liability-extra">
-          <label class="form-label">Gegnerisches Kennzeichen</label>
-          <input type="text" name="haftpflicht_gegner_kennzeichen" class="form-control" value="{{ vorschau.get('haftpflicht_gegner_kennzeichen', '') }}" style="text-transform:uppercase;">
-        </div>
-        <div class="col-md-4 liability-extra">
-          <label class="form-label">Polizei-Aktenzeichen</label>
-          <input type="text" name="haftpflicht_polizei_aktenzeichen" class="form-control" value="{{ vorschau.get('haftpflicht_polizei_aktenzeichen', '') }}">
-        </div>
-        <div class="col-md-4 liability-extra">
-          <label class="form-label">Unfallgegner / Schädiger</label>
-          <input type="text" name="haftpflicht_gegner_name" class="form-control" value="{{ vorschau.get('haftpflicht_gegner_name', '') }}" placeholder="Name Fahrer/Halter, wenn bekannt">
-        </div>
-        <div class="col-md-4 liability-extra">
-          <label class="form-label">Gegnerisches Fahrzeug</label>
-          <input type="text" name="haftpflicht_gegner_fahrzeug" class="form-control" value="{{ vorschau.get('haftpflicht_gegner_fahrzeug', '') }}" placeholder="z.B. Audi A4">
-        </div>
-        <div class="col-md-4 liability-extra">
-          <label class="form-label">Gegnerische Versicherung</label>
-          <input type="text" name="haftpflicht_versicherung_name" class="form-control" value="{{ vorschau.get('haftpflicht_versicherung_name', '') }}" placeholder="falls schon bekannt">
-        </div>
-        <div class="col-md-6 liability-extra">
-          <label class="form-label">Schaden-Nr. gegnerische Versicherung</label>
-          <input type="text" name="haftpflicht_schaden_nummer" class="form-control" value="{{ vorschau.get('haftpflicht_schaden_nummer', '') }}">
-        </div>
-        <div class="col-md-6 liability-extra">
-          <label class="form-label">Kurzer Hinweis</label>
-          <input type="text" name="haftpflicht_hinweis" class="form-control" value="{{ vorschau.get('haftpflicht_hinweis', '') }}" placeholder="z.B. Auffahrunfall, Gegnerdaten liegen vor">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Übergabe zur Begutachtung</label>
-          <select name="transport_art" class="form-select">
-            {% for key, meta in transport_arten.items() %}
-            <option value="{{ key }}" {% if vorschau.get('transport_art', 'standard') == key %}selected{% endif %}>{{ meta['label'] }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Fahrzeug fahrbereit?</label>
-          <select name="schaden_fahrbereit" class="form-select">
-            {% for key, label in steuerung_optionen.items() %}
-            <option value="{{ key }}" {% if vorschau.get('schaden_fahrbereit', 'unbekannt') == key %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Abholung / Abschleppen?</label>
-          <select name="schaden_abschleppen" class="form-select" data-pickup-trigger>
-            {% for key, label in steuerung_optionen.items() %}
-            <option value="{{ key }}" {% if vorschau.get('schaden_abschleppen', 'unbekannt') == key %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-12 pickup-block" data-pickup-block>
-          <div class="form-section-title mt-2">Abholort / Standort Fahrzeug</div>
-          <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label">Straße / genauer Standort</label>
-              <input type="text" name="abholung_strasse" class="form-control" value="{{ vorschau.get('abholung_strasse', '') }}" placeholder="z.B. Hauptstraße 12 oder A6 Parkplatz">
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">PLZ</label>
-              <input type="text" name="abholung_plz" class="form-control" value="{{ vorschau.get('abholung_plz', '') }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Ort</label>
-              <input type="text" name="abholung_ort" class="form-control" value="{{ vorschau.get('abholung_ort', '') }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Kontakt vor Ort</label>
-              <input type="text" name="abholung_kontakt" class="form-control" value="{{ vorschau.get('abholung_kontakt', '') }}">
-            </div>
-            <div class="col-md-8">
-              <label class="form-label">Zusatzhinweis zur Abholung</label>
-              <textarea name="abholung_hinweis" class="form-control" rows="2" placeholder="z.B. Fahrzeug steht auf Hof, Schlüssel bei Annahme, Autobahnkilometer, Abschleppdienst informiert">{{ vorschau.get('abholung_hinweis', '') }}</textarea>
+      <section class="case-section">
+        <div class="section-head">
+          <div class="section-title">
+            <span class="section-number">2</span>
+            <div>
+              <h2>Schadenart und Steuerung</h2>
+              <p>Erst Deckung und Ablauf klären, dann Daten sammeln. Das hält die Schadenanlage ruhig.</p>
             </div>
           </div>
         </div>
-        <div class="col-md-4">
-          <label class="form-label">Mietwagen / Ersatzfahrzeug?</label>
-          <select name="schaden_mietwagen" class="form-select">
-            {% for key, label in steuerung_optionen.items() %}
-            <option value="{{ key }}" {% if vorschau.get('schaden_mietwagen', 'unbekannt') == key %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
+        {% set current_schadenart = vorschau.get('schadenart', 'vollkasko') %}
+        <div class="decision-grid mb-3">
+          <label class="decision-option">
+            <input type="radio" name="schadenart" value="vollkasko" data-schadenart-radio {% if current_schadenart == 'vollkasko' %}checked{% endif %}>
+            <span class="decision-card">
+              <strong>Vollkasko</strong>
+              <small>Eigene Police, Selbstbeteiligung und Reparatursteuerung prüfen. Typisch bei selbst verursachtem Unfall oder Vandalismus.</small>
+            </span>
+          </label>
+          <label class="decision-option">
+            <input type="radio" name="schadenart" value="teilkasko" data-schadenart-radio {% if current_schadenart == 'teilkasko' %}checked{% endif %}>
+            <span class="decision-card">
+              <strong>Teilkasko</strong>
+              <small>Police, Ereignisart und Selbstbeteiligung prüfen. Typisch bei Glas, Wild, Sturm, Hagel oder Diebstahl.</small>
+            </span>
+          </label>
+          <label class="decision-option">
+            <input type="radio" name="schadenart" value="haftpflicht" data-schadenart-radio {% if current_schadenart == 'haftpflicht' %}checked{% endif %}>
+            <span class="decision-card">
+              <strong>Haftpflicht</strong>
+              <small>Gegnerdaten, gegnerische Versicherung, Unfallbericht und ggf. Polizeizeichen sauber erfassen.</small>
+            </span>
+          </label>
         </div>
-        <div class="col-md-4">
-          <label class="form-label">Gutachter / Dienstleister?</label>
-          <select name="schaden_gutachter" class="form-select">
-            {% for key, label in steuerung_optionen.items() %}
-            <option value="{{ key }}" {% if vorschau.get('schaden_gutachter', 'unbekannt') == key %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
+        <div class="damage-type-note" data-damage-hint="vollkasko" {% if current_schadenart != 'vollkasko' %}hidden{% endif %}>
+          <strong>Vollkasko:</strong> eigene Police und Selbstbeteiligung sind zentral. Die Werkstatt braucht eine klare Reparatursteuerung und Deckungsinfo.
         </div>
-        <div class="col-12">
-          <label class="form-label">Hinweis an {{ werkstatt_name }}</label>
-          <textarea name="hinweis" class="form-control" rows="3" placeholder="z.B. Kunde soll zur Besichtigung kontaktiert werden, Mietwagen offen, Fahrzeug fahrbereit">{{ vorschau.get('hinweis', '') }}</textarea>
+        <div class="damage-type-note" data-damage-hint="teilkasko" {% if current_schadenart != 'teilkasko' %}hidden{% endif %}>
+          <strong>Teilkasko:</strong> Ereignisart und Nachweise sind wichtig, zum Beispiel Glasbruch, Hagel, Wildschaden oder Diebstahl.
         </div>
-      </div>
+        <div class="damage-type-note" data-damage-hint="haftpflicht" {% if current_schadenart != 'haftpflicht' %}hidden{% endif %}>
+          <strong>Haftpflicht:</strong> Gegnerische Daten und Unfallhergang trennen. Die Police des Geschädigten ist hier nicht die Hauptfreigabe.
+        </div>
+        <div class="field-grid mt-3">
+          <div class="span-4">
+            <label class="form-label">Schaden-Nr. / Aktenzeichen</label>
+            <input type="text" name="schaden_nummer" class="form-control" value="{{ vorschau.get('schaden_nummer', '') }}" placeholder="z.B. ADAC-S-2026-0142">
+          </div>
+          <div class="span-4">
+            <label class="form-label">Police / Vertrag</label>
+            <input type="text" name="versicherung_police" class="form-control" value="{{ vorschau.get('versicherung_police', '') }}" placeholder="Police oder Vertragsnummer">
+          </div>
+          <div class="span-4">
+            <label class="form-label">Selbstbeteiligung / Deckung</label>
+            <input type="text" name="schaden_selbstbeteiligung" class="form-control" value="{{ vorschau.get('schaden_selbstbeteiligung', '') }}" placeholder="z.B. 300 EUR, keine oder offen">
+          </div>
+          <div class="span-4">
+            <label class="form-label">Fahrzeug fahrbereit?</label>
+            <select name="schaden_fahrbereit" class="form-select">
+              {% for key, label in steuerung_optionen.items() %}
+              <option value="{{ key }}" {% if vorschau.get('schaden_fahrbereit', 'unbekannt') == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="span-4">
+            <label class="form-label">Abholung / Abschleppen?</label>
+            <select name="schaden_abschleppen" class="form-select">
+              {% for key, label in steuerung_optionen.items() %}
+              <option value="{{ key }}" {% if vorschau.get('schaden_abschleppen', 'unbekannt') == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="span-4">
+            <label class="form-label">Übergabe zur Begutachtung</label>
+            <select name="transport_art" class="form-select">
+              {% for key, meta in transport_arten.items() %}
+              <option value="{{ key }}" {% if vorschau.get('transport_art', 'standard') == key %}selected{% endif %}>{{ meta['label'] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="span-4">
+            <label class="form-label">Mietwagen / Ersatzfahrzeug?</label>
+            <select name="schaden_mietwagen" class="form-select">
+              {% for key, label in steuerung_optionen.items() %}
+              <option value="{{ key }}" {% if vorschau.get('schaden_mietwagen', 'unbekannt') == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="span-4">
+            <label class="form-label">Gutachter / Dienstleister?</label>
+            <select name="schaden_gutachter" class="form-select">
+              {% for key, label in steuerung_optionen.items() %}
+              <option value="{{ key }}" {% if vorschau.get('schaden_gutachter', 'unbekannt') == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="span-12 pickup-block" data-pickup-block hidden>
+            <div class="fw-bold mb-2">Abholort / Standort Fahrzeug</div>
+            <div class="field-grid">
+              <div class="span-6"><label class="form-label">Straße / genauer Standort</label><input type="text" name="abholung_strasse" class="form-control" value="{{ vorschau.get('abholung_strasse', '') }}"></div>
+              <div class="span-2"><label class="form-label">PLZ</label><input type="text" name="abholung_plz" class="form-control" value="{{ vorschau.get('abholung_plz', '') }}"></div>
+              <div class="span-4"><label class="form-label">Ort</label><input type="text" name="abholung_ort" class="form-control" value="{{ vorschau.get('abholung_ort', '') }}"></div>
+              <div class="span-4"><label class="form-label">Kontakt vor Ort</label><input type="text" name="abholung_kontakt" class="form-control" value="{{ vorschau.get('abholung_kontakt', '') }}"></div>
+              <div class="span-8"><label class="form-label">Zusatzhinweis</label><input type="text" name="abholung_hinweis" class="form-control" value="{{ vorschau.get('abholung_hinweis', '') }}" placeholder="z.B. Fahrzeug steht auf Hof, Schlüssel bei Annahme"></div>
+            </div>
+          </div>
+        </div>
+      </section>
 
-      <div class="d-flex justify-content-end gap-2 mt-4">
-        <a href="{{ back_url }}" class="btn btn-outline-dark">Abbrechen</a>
-        <button type="submit" class="btn btn-dark" {% if is_preview %}disabled{% endif %}>Zuteilung anlegen</button>
-      </div>
+      <section class="case-section">
+        <div class="section-head">
+          <div class="section-title">
+            <span class="section-number">3</span>
+            <div>
+              <h2>Unterlagen strukturiert hochladen</h2>
+              <p>Nur das hochladen, was vorliegt. Fehlendes kann Gärtner später in der Akte nachfordern.</p>
+            </div>
+          </div>
+        </div>
+        <div class="doc-grid">
+          <div class="doc-lane is-required">
+            <div class="doc-head">
+              <div><strong>Police / Deckung</strong><small>Pflicht bei Kasko, empfohlen bei unklarer Deckung oder Selbstbeteiligung.</small></div>
+              <span class="doc-status" data-doc-status>offen</span>
+            </div>
+            <input type="file" name="dateien_eigene_kasko" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.txt,.docx,image/*,application/pdf" multiple data-document-files {% if is_preview %}disabled{% endif %}>
+          </div>
+          <div class="doc-lane is-required">
+            <div class="doc-head">
+              <div><strong>Fahrzeugschein / Zulassung</strong><small>Füllt Fahrzeug, Kennzeichen, FIN, Halterdaten und Plausibilität.</small></div>
+              <span class="doc-status" data-doc-status>offen</span>
+            </div>
+            <input type="file" name="dateien_geschaedigter" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,image/*,application/pdf" multiple data-document-files {% if is_preview %}disabled{% endif %}>
+          </div>
+          <div class="doc-lane">
+            <div class="doc-head">
+              <div><strong>Schadenbilder</strong><small>Gesamtansicht, Schadenbereich und Detailfotos, falls vorhanden.</small></div>
+              <span class="doc-status" data-doc-status>optional</span>
+            </div>
+            <input type="file" name="dateien" class="form-control" accept=".jpg,.jpeg,.png,.webp,.heic,image/*" multiple data-document-files {% if is_preview %}disabled{% endif %}>
+          </div>
+          <div class="doc-lane">
+            <div class="doc-head">
+              <div><strong>Unfallbericht / Polizei / Schriftliches</strong><small>Unfallhergang, Polizeizeichen, Notiz oder Mail des Kunden.</small></div>
+              <span class="doc-status" data-doc-status>optional</span>
+            </div>
+            <input type="file" name="dateien_unfall_polizei" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.txt,.docx,image/*,application/pdf" multiple data-document-files {% if is_preview %}disabled{% endif %}>
+          </div>
+          <div class="doc-lane">
+            <div class="doc-head">
+              <div><strong>Gegnerdaten</strong><small>Bei Haftpflicht: gegnerisches Fahrzeug, Kennzeichen, Versicherung.</small></div>
+              <span class="doc-status" data-doc-status>optional</span>
+            </div>
+            <input type="file" name="dateien_gegner" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.txt,.docx,image/*,application/pdf" multiple data-document-files {% if is_preview %}disabled{% endif %}>
+          </div>
+          <div class="doc-lane">
+            <div class="doc-head">
+              <div><strong>Kalkulation / Gutachten / KVA</strong><small>Falls schon vorhanden, direkt mitsenden. Sonst erstellt Gärtner die Basis.</small></div>
+              <span class="doc-status" data-doc-status>optional</span>
+            </div>
+            <input type="file" name="dateien" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.txt,.docx,.xlsx,image/*,application/pdf" multiple data-document-files {% if is_preview %}disabled{% endif %}>
+          </div>
+        </div>
+        <div class="mt-3">
+          <label class="form-label">Kurzer Hinweis zu den Unterlagen</label>
+          <textarea name="upload_notiz" class="form-control" rows="2" placeholder="z.B. Police und Fahrzeugschein liegen vor; Schadenbilder folgen vom Kunden.">{{ vorschau.get('upload_notiz', '') }}</textarea>
+        </div>
+      </section>
+
+      <section class="case-section">
+        <div class="section-head">
+          <div class="section-title">
+            <span class="section-number">4</span>
+            <div>
+              <h2>KI-Analyse und erkannte Daten prüfen</h2>
+              <p>Die Analyse füllt nur leere Felder vor. Bereits eingetragene Werte bleiben stehen.</p>
+            </div>
+          </div>
+        </div>
+        <div class="analysis-box mb-3">
+          <div class="d-flex justify-content-between gap-3 align-items-center flex-wrap">
+            <div>
+              <div class="fw-bold">Dokumente lesen und Vorschläge übernehmen</div>
+              <div class="text-muted small">Police, Fahrzeugschein, Unfallbericht und Fotos werden als Eingangsprüfung zusammen analysiert.</div>
+            </div>
+            <button type="button" class="btn btn-outline-dark" data-analyze-documents {% if is_preview %}disabled{% endif %}>KI-Analyse starten</button>
+          </div>
+          <div class="analysis-result" data-analysis-result></div>
+        </div>
+
+        <div class="field-grid">
+          <div class="span-4">
+            <label class="form-label">Kunde / Geschädigter</label>
+            <input type="text" name="kunde_name" class="form-control" value="{{ vorschau.get('kunde_name', '') }}" required>
+          </div>
+          <div class="span-4">
+            <label class="form-label">Fahrzeughalter / Versicherungsnehmer</label>
+            <input type="text" name="versicherungsnehmer" class="form-control" value="{{ vorschau.get('versicherungsnehmer', '') }}" placeholder="falls abweichend">
+          </div>
+          <div class="span-4">
+            <label class="form-label">Handy / WhatsApp Kunde</label>
+            <input type="text" name="kontakt_telefon" class="form-control" value="{{ vorschau.get('kontakt_telefon', '') }}" placeholder="z.B. 0171 1234567">
+          </div>
+          <div class="span-4">
+            <label class="form-label">E-Mail Kunde</label>
+            <input type="email" name="kunde_email" class="form-control" value="{{ vorschau.get('kunde_email', '') }}">
+          </div>
+          <div class="span-8">
+            <label class="form-label">Adresse Kunde</label>
+            <input type="text" name="kunde_adresse" class="form-control" value="{{ vorschau.get('kunde_adresse', '') }}" placeholder="Straße, PLZ Ort">
+          </div>
+          <div class="span-5">
+            <label class="form-label">Beschädigtes Fahrzeug</label>
+            <input type="text" name="fahrzeug" class="form-control" value="{{ vorschau.get('fahrzeug', '') }}" placeholder="z.B. VW Golf 8" required data-vehicle-input>
+          </div>
+          <div class="span-3">
+            <label class="form-label">Kennzeichen</label>
+            <input type="text" name="kennzeichen" class="form-control" value="{{ vorschau.get('kennzeichen', '') }}" style="text-transform:uppercase;">
+          </div>
+          <div class="span-4">
+            <label class="form-label">FIN</label>
+            <div class="input-group" data-fin-widget>
+              <input type="text" name="fin_nummer" class="form-control" value="{{ vorschau.get('fin_nummer', '') }}" style="text-transform:uppercase;" data-fin-input>
+              <button class="btn btn-outline-dark" type="button" data-fin-analyze>FIN prüfen</button>
+            </div>
+            <div class="form-text" data-fin-result></div>
+          </div>
+          <div class="span-2">
+            <label class="form-label">HSN</label>
+            <input type="text" name="hsn_nummer" class="form-control" value="{{ vorschau.get('hsn_nummer', '') }}" placeholder="2.1">
+          </div>
+          <div class="span-2">
+            <label class="form-label">TSN</label>
+            <input type="text" name="tsn_nummer" class="form-control" value="{{ vorschau.get('tsn_nummer', '') }}" placeholder="2.2" style="text-transform:uppercase;">
+          </div>
+          <div class="span-3">
+            <label class="form-label">Kilometerstand</label>
+            <input type="text" name="kilometerstand" class="form-control" value="{{ vorschau.get('kilometerstand', '') }}" placeholder="z.B. 84.500">
+          </div>
+          <div class="span-5">
+            <label class="form-label">Kurze Fahrzeug-/Schadenbeschreibung</label>
+            <input type="text" name="beschreibung" class="form-control" value="{{ vorschau.get('beschreibung', '') }}" placeholder="z.B. Heckschaden links, Stoßfänger und PDC betroffen">
+          </div>
+          <div class="span-12 liability-extra">
+            <div class="helper-note">
+              <strong>Haftpflichtdaten:</strong> Nur sichtbar, wenn Haftpflicht gewählt ist. Eintragen, was schon bekannt ist; fehlende Angaben bleiben in der Akte offen.
+            </div>
+          </div>
+          <div class="span-3 liability-extra">
+            <label class="form-label">Unfalltag</label>
+            <input type="date" name="haftpflicht_unfalltag" class="form-control" value="{{ vorschau.get('haftpflicht_unfalltag', '') }}">
+          </div>
+          <div class="span-3 liability-extra">
+            <label class="form-label">Gegnerisches Kennzeichen</label>
+            <input type="text" name="haftpflicht_gegner_kennzeichen" class="form-control" value="{{ vorschau.get('haftpflicht_gegner_kennzeichen', '') }}" style="text-transform:uppercase;">
+          </div>
+          <div class="span-3 liability-extra">
+            <label class="form-label">Polizei-Aktenzeichen</label>
+            <input type="text" name="haftpflicht_polizei_aktenzeichen" class="form-control" value="{{ vorschau.get('haftpflicht_polizei_aktenzeichen', '') }}">
+          </div>
+          <div class="span-3 liability-extra">
+            <label class="form-label">Unfallgegner / Schädiger</label>
+            <input type="text" name="haftpflicht_gegner_name" class="form-control" value="{{ vorschau.get('haftpflicht_gegner_name', '') }}">
+          </div>
+          <div class="span-4 liability-extra">
+            <label class="form-label">Gegnerisches Fahrzeug</label>
+            <input type="text" name="haftpflicht_gegner_fahrzeug" class="form-control" value="{{ vorschau.get('haftpflicht_gegner_fahrzeug', '') }}">
+          </div>
+          <div class="span-4 liability-extra">
+            <label class="form-label">Gegnerische Versicherung</label>
+            <input type="text" name="haftpflicht_versicherung_name" class="form-control" value="{{ vorschau.get('haftpflicht_versicherung_name', '') }}">
+          </div>
+          <div class="span-4 liability-extra">
+            <label class="form-label">Schaden-Nr. gegnerische Versicherung</label>
+            <input type="text" name="haftpflicht_schaden_nummer" class="form-control" value="{{ vorschau.get('haftpflicht_schaden_nummer', '') }}">
+          </div>
+          <div class="span-12 liability-extra">
+            <label class="form-label">Kurzer Hinweis zur Haftpflicht</label>
+            <input type="text" name="haftpflicht_hinweis" class="form-control" value="{{ vorschau.get('haftpflicht_hinweis', '') }}" placeholder="z.B. Auffahrunfall, Gegnerdaten liegen vor">
+          </div>
+        </div>
+      </section>
+
+      <section class="case-section">
+        <div class="section-head">
+          <div class="section-title">
+            <span class="section-number">5</span>
+            <div>
+              <h2>Übergabe an Gärtner</h2>
+              <p>Die Werkstatt bekommt Auftrag, Unterlagen, offene Punkte und Kundenstatus-QR in einer Akte.</p>
+            </div>
+          </div>
+        </div>
+        <label class="form-label">Hinweis an {{ werkstatt_name }}</label>
+        <textarea name="hinweis" class="form-control" rows="4" placeholder="z.B. Kunde bitte zur Besichtigung kontaktieren, Schadenbilder folgen, Fahrzeug fahrbereit, Mietwagen offen">{{ vorschau.get('hinweis', '') }}</textarea>
+        <div class="submit-bar">
+          <div>
+            <div class="fw-bold">Bereit zur Zuteilung</div>
+            <div class="text-muted small">Pflicht: Kunde und Fahrzeug. Unterlagen können auch später in der Akte ergänzt werden.</div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <a href="{{ back_url }}" class="btn btn-outline-dark">Abbrechen</a>
+            <button type="submit" class="btn btn-dark btn-lg" {% if is_preview %}disabled{% endif %}>Schaden an Gärtner zuteilen</button>
+          </div>
+        </div>
+      </section>
     </form>
   </main>
+
   <script>
     (() => {
+      const form = document.querySelector('[data-zuteilung-form]');
       const fahrbereit = document.querySelector('[name="schaden_fahrbereit"]');
       const abschleppen = document.querySelector('[name="schaden_abschleppen"]');
       const transport = document.querySelector('[name="transport_art"]');
-      const block = document.querySelector('[data-pickup-block]');
-      const schadenart = document.querySelector('[data-schadenart-select]');
+      const pickupBlock = document.querySelector('[data-pickup-block]');
+      const schadenartRadios = Array.from(document.querySelectorAll('[data-schadenart-radio]'));
       const liabilityBlocks = Array.from(document.querySelectorAll('.liability-extra'));
-      const damageHints = Array.from(document.querySelectorAll('[data-damage-hint]'));
       const liabilityFields = [
         'haftpflicht_unfalltag',
         'haftpflicht_gegner_kennzeichen',
@@ -326,47 +487,47 @@
         'haftpflicht_schaden_nummer',
         'haftpflicht_hinweis'
       ].map((name) => document.querySelector(`[name="${name}"]`)).filter(Boolean);
+      const damageHints = Array.from(document.querySelectorAll('[data-damage-hint]'));
+      const fileInputs = Array.from(document.querySelectorAll('[data-document-files]'));
+      const analyzeButton = document.querySelector('[data-analyze-documents]');
+      const resultBox = document.querySelector('[data-analysis-result]');
+
+      const selectedSchadenart = () => {
+        const checked = schadenartRadios.find((item) => item.checked);
+        return checked ? checked.value : 'vollkasko';
+      };
       const updatePickupBlock = () => {
-        if (!block) return;
+        if (!pickupBlock) return;
         const show = (fahrbereit && fahrbereit.value === 'nein')
           || (abschleppen && abschleppen.value === 'ja')
           || (transport && transport.value === 'hol_und_bring');
-        block.hidden = !show;
+        pickupBlock.hidden = !show;
+      };
+      const updateDamageType = () => {
+        const value = selectedSchadenart();
+        liabilityBlocks.forEach((item) => { item.hidden = value !== 'haftpflicht'; });
+        liabilityFields.forEach((field) => { field.disabled = value !== 'haftpflicht'; });
+        damageHints.forEach((item) => { item.hidden = item.dataset.damageHint !== value; });
+      };
+      const updateDocStatus = (input) => {
+        const lane = input.closest('.doc-lane');
+        const status = lane ? lane.querySelector('[data-doc-status]') : null;
+        if (!status) return;
+        const count = input.files ? input.files.length : 0;
+        status.textContent = count ? `${count} Datei${count === 1 ? '' : 'en'}` : (lane.classList.contains('is-required') ? 'offen' : 'optional');
+        status.classList.toggle('is-ready', count > 0);
       };
       [fahrbereit, abschleppen, transport].forEach((field) => {
         if (field) field.addEventListener('change', updatePickupBlock);
       });
+      schadenartRadios.forEach((field) => field.addEventListener('change', updateDamageType));
+      fileInputs.forEach((input) => {
+        input.addEventListener('change', () => updateDocStatus(input));
+        updateDocStatus(input);
+      });
       updatePickupBlock();
-      const updateLiabilityBlock = () => {
-        if (!liabilityBlocks.length) return;
-        const show = schadenart && schadenart.value === 'haftpflicht';
-        liabilityBlocks.forEach((item) => { item.hidden = !show; });
-        liabilityFields.forEach((field) => { field.disabled = !show; });
-      };
-      if (schadenart) schadenart.addEventListener('change', updateLiabilityBlock);
-      liabilityFields.forEach((field) => field.addEventListener('input', updateLiabilityBlock));
-      updateLiabilityBlock();
-      const updateDamageHint = () => {
-        if (!damageHints.length) return;
-        const selected = schadenart && schadenart.value ? schadenart.value : 'unbekannt';
-        let hasMatch = false;
-        damageHints.forEach((item) => {
-          const show = item.dataset.damageHint === selected;
-          if (show) hasMatch = true;
-          item.hidden = !show;
-        });
-        if (!hasMatch) {
-          const fallback = damageHints.find((item) => item.dataset.damageHint === 'unbekannt');
-          if (fallback) fallback.hidden = false;
-        }
-      };
-      if (schadenart) schadenart.addEventListener('change', updateDamageHint);
-      updateDamageHint();
+      updateDamageType();
 
-      const form = document.querySelector('[data-zuteilung-form]');
-      const fileInput = document.querySelector('[data-document-files]');
-      const analyzeButton = document.querySelector('[data-analyze-documents]');
-      const resultBox = document.querySelector('[data-analysis-result]');
       const setResult = (message, variant = 'info') => {
         if (!resultBox) return;
         resultBox.className = `analysis-result border-${variant}`;
@@ -375,7 +536,16 @@
       const setFieldValue = (name, value) => {
         if (!form || !value) return false;
         const field = form.elements[name];
-        if (!field || typeof field.value === 'undefined') return false;
+        if (!field) return false;
+        if (field instanceof RadioNodeList) {
+          const target = Array.from(field).find((item) => item.value === value);
+          if (!target) return false;
+          if (Array.from(field).some((item) => item.checked && item.value !== 'unbekannt')) return false;
+          target.checked = true;
+          target.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        }
+        if (typeof field.value === 'undefined') return false;
         const currentValue = (field.value || '').trim();
         const isDefaultSelect = field.tagName === 'SELECT' && (!currentValue || currentValue === 'unbekannt');
         if (currentValue && field.type !== 'hidden' && !isDefaultSelect) return false;
@@ -384,22 +554,23 @@
         field.dispatchEvent(new Event('input', { bubbles: true }));
         return true;
       };
-      if (form && fileInput && analyzeButton) {
+      if (form && analyzeButton) {
         const defaultButtonText = analyzeButton.textContent;
         analyzeButton.addEventListener('click', async () => {
-          if (!fileInput.files || !fileInput.files.length) {
-            setResult('Bitte zuerst Unterlagen auswählen.', 'warning');
+          const selectedFiles = fileInputs.flatMap((input) => Array.from(input.files || []));
+          if (!selectedFiles.length) {
+            setResult('Bitte zuerst Unterlagen oder Bilder auswählen.', 'warning');
             return;
           }
           const csrf = form.querySelector('[name="csrf_token"]')?.value || '';
           const payload = new FormData();
           payload.append('csrf_token', csrf);
-          Array.from(fileInput.files).forEach((file) => payload.append('dateien', file));
+          selectedFiles.forEach((file) => payload.append('dateien', file));
           payload.append('document_role', 'auto');
           payload.append('upload_notiz', form.elements.upload_notiz?.value || '');
           analyzeButton.disabled = true;
           analyzeButton.textContent = 'Analyse läuft...';
-          setResult('Dokumente werden gelesen. Das kann bei Fotos oder PDFs kurz dauern.');
+          setResult('Dokumente werden gelesen. Bitte danach die Vorschläge prüfen.');
           try {
             const response = await fetch(form.dataset.analysisUrl, {
               method: 'POST',
@@ -415,12 +586,12 @@
             Object.entries(data.fields || {}).forEach(([name, value]) => {
               if (setFieldValue(name, value)) filled += 1;
             });
-            updateLiabilityBlock();
-            updateDamageHint();
+            updateDamageType();
+            updatePickupBlock();
             const summary = data.summary ? ` Erkannt: ${data.summary}` : '';
-            setResult(`${filled} passende Feld(er) wurden vorgefüllt. Bereits ausgefüllte Felder bleiben unverändert.${summary}`, 'success');
+            setResult(`${filled} Feld(er) wurden vorgefüllt. Bitte Werte prüfen und dann zuteilen.${summary}`, 'success');
           } catch (_error) {
-            setResult('Die Analyse konnte nicht gestartet werden. Bitte Unterlagen später in der Akte hochladen oder die Felder manuell eintragen.', 'warning');
+            setResult('Die Analyse konnte nicht gestartet werden. Felder können manuell ausgefüllt und Unterlagen trotzdem mitgegeben werden.', 'warning');
           } finally {
             analyzeButton.disabled = false;
             analyzeButton.textContent = defaultButtonText;

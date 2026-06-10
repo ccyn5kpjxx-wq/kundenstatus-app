@@ -6,43 +6,53 @@
   <title>{{ versicherung['name'] }} - Schadenfälle</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    body { background:#f3efe6; color:#16202a; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    body { background:#eef3f6; color:#16202a; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
     .shell { max-width:1180px; margin:0 auto; padding:28px 16px; }
-    .panel { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); }
+    .panel { background:#fff; border:1px solid #d8e0e7; border-radius:14px; padding:24px; box-shadow:0 16px 40px rgba(15,35,50,.10); }
     .hero-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,360px); gap:18px; align-items:stretch; }
     .portal-tools { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-    .weather-card, .clock-card { border:1px solid #ddd1c0; border-radius:16px; background:#fffaf2; padding:16px; min-height:132px; }
+    .weather-card, .clock-card { border:1px solid #d8e0e7; border-radius:12px; background:#fff; padding:16px; min-height:132px; }
     .weather-label, .clock-label { color:#6b5f53; font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
     .weather-main { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-top:8px; }
     .weather-temp, .clock-time { font-size:2rem; line-height:1; font-weight:800; }
     .weather-meta, .clock-date { color:#6b5f53; font-size:.92rem; margin-top:8px; }
     .weather-hours { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
-    .weather-hour { border-top:1px solid #e4d6c3; padding-top:7px; font-size:.78rem; color:#51483e; }
+    .weather-hour { border-top:1px solid #d8e0e7; padding-top:7px; font-size:.78rem; color:#51483e; }
+    .guided-start { border:1px solid #b9d8d4; border-radius:14px; background:linear-gradient(135deg,#f4fbf9,#fff); padding:20px; margin-bottom:24px; display:grid; grid-template-columns:minmax(0,1.4fr) minmax(300px,.8fr); gap:18px; align-items:stretch; box-shadow:0 14px 36px rgba(15,76,92,.08); }
+    .guided-kicker { color:#0f766e; font-weight:850; letter-spacing:.04em; text-transform:uppercase; font-size:.78rem; }
+    .guided-title { font-size:1.65rem; line-height:1.08; font-weight:850; margin:.25rem 0 .5rem; }
+    .guided-flow { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:16px; }
+    .guided-step { border:1px solid #d8e0e7; border-radius:10px; background:#fff; padding:12px; min-height:104px; }
+    .guided-step span { display:inline-flex; width:26px; height:26px; border-radius:999px; background:#0f2f42; color:#fff; align-items:center; justify-content:center; font-weight:850; margin-bottom:8px; }
+    .guided-step strong { display:block; line-height:1.15; }
+    .guided-step small { color:#647482; display:block; margin-top:5px; line-height:1.3; }
+    .workshop-start { border:1px solid #d8e0e7; border-radius:12px; background:#f8fafc; padding:16px; display:grid; gap:12px; }
+    .workshop-selected { border:1px solid #c9d6e0; border-radius:10px; background:#fff; padding:12px; }
     .action-panel { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1rem; align-items:center; border:1px solid #cddcca; border-radius:14px; background:#f7fbf6; padding:1rem; }
     .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
-    .metric { border:1px solid #ddd1c0; border-radius:16px; background:#fffaf2; padding:16px; }
+    .metric { border:1px solid #d8e0e7; border-radius:12px; background:#fff; padding:16px; }
     .metric span { color:#6b5f53; font-size:.82rem; font-weight:700; text-transform:uppercase; }
     .metric strong { display:block; font-size:2rem; line-height:1; margin-top:8px; }
     .case-section { display:grid; gap:.75rem; }
-    .case-row { display:grid; grid-template-columns:minmax(220px,1fr) auto auto; gap:1rem; align-items:center; border:1px solid #e4d6c3; border-radius:14px; background:#fffaf2; padding:1rem; color:#16202a; text-decoration:none; }
-    .case-row:hover { color:#16202a; border-color:#a23f2d; background:#fff7eb; }
+    .case-row { display:grid; grid-template-columns:minmax(220px,1fr) auto auto; gap:1rem; align-items:center; border:1px solid #d8e0e7; border-radius:10px; background:#fff; padding:1rem; color:#16202a; text-decoration:none; }
+    .case-row:hover { color:#16202a; border-color:#0f766e; background:#f4fbf9; }
     .case-meta { color:#6b5f53; font-size:.88rem; }
     .section-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:14px; }
     .portal-start-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; margin-bottom:24px; }
-    .portal-card { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:20px; box-shadow:0 12px 30px rgba(64,47,25,.08); }
+    .portal-card { background:#fff; border:1px solid #d8e0e7; border-radius:12px; padding:20px; box-shadow:0 12px 30px rgba(15,35,50,.07); }
     .portal-card h2 { font-size:1.15rem; margin-bottom:.6rem; }
     .portal-card-list { display:grid; gap:.7rem; }
     .portal-news-item, .portal-mail-item, .portal-event-item {
-      border:1px solid #e4d6c3;
-      border-radius:14px;
-      background:#fffaf2;
+      border:1px solid #d8e0e7;
+      border-radius:10px;
+      background:#f8fafc;
       padding:.85rem .9rem;
     }
     .portal-event-item { display:grid; grid-template-columns:auto minmax(0,1fr); gap:.75rem; }
     .portal-event-date {
       min-width:4.8rem;
       border-radius:12px;
-      background:#16202a;
+      background:#0f2f42;
       color:#fff;
       text-align:center;
       padding:.5rem .45rem;
@@ -59,17 +69,17 @@
       grid-template-columns:minmax(220px,1fr) auto auto;
       gap:1rem;
       align-items:center;
-      border:1px solid #e4d6c3;
-      border-radius:14px;
-      background:#fffaf2;
+      border:1px solid #d8e0e7;
+      border-radius:10px;
+      background:#fff;
       padding:1rem;
       color:#16202a;
       text-decoration:none;
     }
-    .case-row-compact:hover { color:#16202a; border-color:#a23f2d; background:#fff7eb; }
+    .case-row-compact:hover { color:#16202a; border-color:#0f766e; background:#f4fbf9; }
     .case-title { font-weight:800; }
     .case-subline { color:#6b5f53; font-size:.88rem; }
-    @media (max-width:900px) { .hero-grid, .action-panel, .portal-start-grid, .case-dashboard-grid, .overview-grid { grid-template-columns:1fr; } .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media (max-width:900px) { .hero-grid, .action-panel, .portal-start-grid, .case-dashboard-grid, .overview-grid, .guided-start, .guided-flow { grid-template-columns:1fr; } .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
     @media (max-width:640px) { .portal-tools, .metric-grid, .case-row, .case-row-compact { grid-template-columns:1fr; } }
   </style>
 </head>
@@ -138,9 +148,52 @@
       </div>
     </div>
 
+    <section class="guided-start">
+      <div>
+        <div class="guided-kicker">Geführtes Schadensmanagement</div>
+        <div class="guided-title">Neuen Schadenauftrag sauber anlegen und an die Werkstatt steuern.</div>
+        <div class="text-muted">
+          Erst Werkstatt wählen, dann Unterlagen strukturiert hochladen. Die KI liest Police,
+          Fahrzeugschein, Unfallunterlagen und Bilder vor, bevor der Auftrag an Gärtner geht.
+        </div>
+        <div class="guided-flow">
+          <div class="guided-step">
+            <span>1</span>
+            <strong>Werkstatt auswählen</strong>
+            <small>Gärtner oder später weitere Partnerbetriebe als Ziel festlegen.</small>
+          </div>
+          <div class="guided-step">
+            <span>2</span>
+            <strong>Schaden erfassen</strong>
+            <small>Schadenart, Kunde, Fahrzeug, Police und Schadenbeschreibung prüfen.</small>
+          </div>
+          <div class="guided-step">
+            <span>3</span>
+            <strong>KI-Analyse & Zuteilung</strong>
+            <small>Dokumente auslesen lassen und den Auftrag getaktet übergeben.</small>
+          </div>
+        </div>
+      </div>
+      <form class="workshop-start" action="{{ url_for('versicherung_zuteilung_neu', slug=versicherung['slug']) }}" method="GET">
+        <div>
+          <h2 class="h5 mb-1">Neuer Auftrag</h2>
+          <div class="text-muted small">Schadenfall für eine Partnerwerkstatt starten.</div>
+        </div>
+        <label class="form-label mb-0" for="werkstatt_ziel_top">Werkstatt auswählen</label>
+        <select id="werkstatt_ziel_top" class="form-select" name="werkstatt">
+          <option value="gaertner">{{ werkstatt_name }}</option>
+        </select>
+        <div class="workshop-selected">
+          <div class="fw-bold">{{ werkstatt_name }}</div>
+          <div class="text-muted small">Karosserie, Lack, Schadenaufnahme, Bilder, Kalkulation und Reparaturstatus.</div>
+        </div>
+        <button type="submit" class="btn btn-dark btn-lg">Neuen Schaden anlegen</button>
+      </form>
+    </section>
+
     <div class="portal-start-grid">
       <section class="portal-card">
-        <h2>Lackierportal-News</h2>
+        <h2>Versicherungsportal-News</h2>
         <div class="portal-card-list">
           <div class="portal-news-item">
             <div class="fw-bold">Digitale Schadenakte aktiv</div>
@@ -171,14 +224,14 @@
       </section>
 
       <section class="portal-card">
-        <h2>Schaden an Gärtner zuteilen</h2>
+        <h2>Schnellstart Werkstatt</h2>
         <form class="portal-workshop-form" action="{{ url_for('versicherung_zuteilung_neu', slug=versicherung['slug']) }}" method="GET">
           <label class="form-label mb-0" for="werkstatt_ziel">Werkstatt auswählen</label>
           <select id="werkstatt_ziel" class="form-select" name="werkstatt">
             <option value="gaertner">{{ werkstatt_name }}</option>
           </select>
-          <div class="text-muted small">Nach der Auswahl öffnet sich Schritt 1: Zuteilung an die gewählte Werkstatt.</div>
-          <button type="submit" class="btn btn-dark">An Gärtner zuteilen</button>
+          <div class="text-muted small">Öffnet die geführte Schadenanlage mit Unterlagen-Check und KI-Analyse.</div>
+          <button type="submit" class="btn btn-dark">Schadenauftrag starten</button>
         </form>
       </section>
     </div>

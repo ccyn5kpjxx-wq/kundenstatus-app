@@ -1,0 +1,66 @@
+{% if versicherung_pruefung %}
+{% set review_mode = versicherung_pruefung_mode|default('full') %}
+<style>
+  .insurance-review-panel { border:1px solid #d9c9b4; border-radius:8px; background:#fffdf9; padding:1rem; }
+  .insurance-review-head { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1rem; align-items:start; }
+  .insurance-review-progress { height:.55rem; background:#efe4d5; border-radius:999px; overflow:hidden; }
+  .insurance-review-progress span { display:block; height:100%; background:#2374ab; }
+  .insurance-review-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.65rem; }
+  .insurance-review-item { border:1px solid #eadfce; border-radius:8px; background:#fff; padding:.75rem; min-width:0; }
+  .insurance-review-item.is-checked { border-color:#b9d7c2; background:#f7fbf8; }
+  .insurance-review-title { font-weight:800; line-height:1.2; }
+  .insurance-review-detail { color:#5f6b76; font-size:.88rem; line-height:1.38; }
+  @media (max-width: 760px) {
+    .insurance-review-head,
+    .insurance-review-grid { grid-template-columns:1fr; }
+  }
+</style>
+
+<div class="insurance-review-panel mb-3" id="versicherung-pruefstand">
+  <div class="insurance-review-head mb-3">
+    <div>
+      <div class="fw-bold">Versicherungsprüfung</div>
+      <div class="text-muted small">
+        {{ versicherung_pruefung['checked_count'] }} von {{ versicherung_pruefung['total'] }} Prüfpunkten sind durch die Versicherung bestätigt.
+        {% if versicherung_pruefung['next_open'] %}
+        Hängt aktuell an: {{ versicherung_pruefung['next_open']['label'] }}.
+        {% endif %}
+      </div>
+    </div>
+    <div class="text-end">
+      <span class="badge text-bg-{{ 'success' if versicherung_pruefung['can_release'] else 'info' }}">{{ versicherung_pruefung['percent'] }}%</span>
+      <div class="text-muted small mt-1">
+        Freigabe {{ versicherung_pruefung['release_checked_count'] }} / {{ versicherung_pruefung['release_total'] }}
+      </div>
+    </div>
+  </div>
+  <div class="insurance-review-progress mb-3" aria-hidden="true">
+    <span style="width:{{ versicherung_pruefung['percent'] }}%;"></span>
+  </div>
+  {% if versicherung_pruefung['can_release'] %}
+  <div class="alert alert-success py-2 small mb-3">Die Pflichtpunkte für die Reparaturfreigabe sind geprüft.</div>
+  {% elif versicherung_pruefung['release_blocker'] %}
+  <div class="alert alert-warning py-2 small mb-3">Für die Freigabe offen: {{ versicherung_pruefung['release_blocker']|join(', ') }}.</div>
+  {% endif %}
+
+  {% if review_mode != 'compact' %}
+  <div class="insurance-review-grid">
+    {% for item in versicherung_pruefung['items'] %}
+    <div class="insurance-review-item {% if item['checked'] %}is-checked{% endif %}">
+      <div class="d-flex justify-content-between gap-2 align-items-start flex-wrap mb-2">
+        <div class="insurance-review-title">{{ item['label'] }}</div>
+        <span class="badge text-bg-{{ item['status_farbe'] }}">{{ item['status_label'] }}</span>
+      </div>
+      <div class="insurance-review-detail">{{ item['detail'] }}</div>
+      {% if item['open_labels'] %}
+      <div class="text-muted small mt-2">Noch offen: {{ item['open_labels']|join(', ') }}</div>
+      {% endif %}
+      {% if item['checked_at'] %}
+      <div class="text-muted small mt-2">Geprüft am {{ item['checked_at'] }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}

@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schadenportal – Demo</title>
+<style>
+  :root{--slate:#0f172a;--line:#e2e8f0;--bg:#f1f5f9;--accent:#ea580c;--accent2:#c2410c;--green:#16a34a;--red:#dc2626;--muted:#64748b;--card:#fff}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--slate);line-height:1.5}
+  header{background:var(--slate);color:#fff;padding:14px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:10}
+  header .logo{font-weight:700;font-size:18px;display:flex;align-items:center;gap:8px}
+  header .badge{margin-left:auto;background:var(--accent);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;letter-spacing:.5px}
+  .wrap{max-width:880px;margin:0 auto;padding:18px}
+  .steps{display:flex;gap:5px;flex-wrap:wrap;margin:6px 0 18px}
+  .step{flex:1;min-width:84px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:7px 9px;font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .step .num{width:20px;height:20px;border-radius:50%;background:#e2e8f0;color:#475569;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex:0 0 auto}
+  .step.active{border-color:var(--accent);color:var(--slate);font-weight:600}
+  .step.active .num{background:var(--accent);color:#fff}
+  .step.done .num{background:var(--green);color:#fff}
+  .screen{display:none;animation:f .2s ease}
+  .screen.active{display:block}
+  @keyframes f{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  h1{font-size:21px;margin:2px 0}
+  h2{font-size:16px;margin:0 0 12px}
+  .sub{color:var(--muted);font-size:13.5px;margin-top:0}
+  .btn{appearance:none;border:0;cursor:pointer;font-size:15px;font-weight:600;padding:12px 18px;border-radius:10px;background:var(--accent);color:#fff}
+  .btn:hover{background:var(--accent2)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.sec{background:#fff;color:var(--slate);border:1px solid var(--line)}
+  .btn.sec:hover{background:#f8fafc}
+  .btn.green{background:var(--green)}
+  .btn.red{background:var(--red)}
+  .btn.big{width:100%;padding:15px;font-size:16px;margin-top:6px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 22px}
+  .grid div b{display:block;font-size:11.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+  label{display:block;font-size:12.5px;color:var(--muted);font-weight:600;margin:10px 0 4px}
+  input,textarea,select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:14px;font-family:inherit;background:#fff}
+  textarea{resize:vertical}
+  .drop{border:2px dashed #cbd5e1;border-radius:12px;padding:22px;text-align:center;color:var(--muted);background:#f8fafc;cursor:pointer}
+  .drop:hover{border-color:var(--accent);color:var(--accent)}
+  .drop.big{padding:30px;font-size:15px}
+  .files{margin:12px 0 0;padding:0;list-style:none}
+  .files li{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;font-size:14px;background:#fff}
+  .files li .ok{margin-left:auto;color:var(--green);font-weight:700;font-size:12.5px}
+  .photos{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:6px}
+  .photo{aspect-ratio:4/3;border-radius:10px;background:linear-gradient(135deg,#e2e8f0,#cbd5e1);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#475569;font-size:12.5px;font-weight:600;border:1px solid var(--line)}
+  .photo span{font-size:24px}
+  .photo{position:relative}
+  .photo .del{position:absolute;top:5px;right:5px;width:22px;height:22px;border:0;border-radius:50%;background:rgba(15,23,42,.65);color:#fff;cursor:pointer;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center}
+  .photo .del:hover{background:var(--red)}
+  .addtile{background:#f8fafc !important;border:2px dashed #cbd5e1 !important;color:var(--accent) !important;cursor:pointer;font-weight:600}
+  .lidel{margin-left:auto;border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:7px;padding:4px 9px;font-size:12px;cursor:pointer}
+  .lidel:hover{border-color:var(--red);color:var(--red)}
+  .timeline{list-style:none;margin:0;padding:0}
+  .timeline li{display:flex;gap:12px;padding:5px 0;font-size:14px;align-items:center}
+  .timeline .dot{width:13px;height:13px;border-radius:50%;background:#cbd5e1;flex:0 0 auto}
+  .timeline li.done .dot{background:var(--green)}
+  .timeline li.now .dot{background:var(--accent);box-shadow:0 0 0 4px #fde4d3}
+  .timeline li.now{font-weight:700}
+  .timeline .muted{color:var(--muted)}
+  .mail{font-family:ui-monospace,Consolas,Menlo,monospace;font-size:12.6px;white-space:pre-wrap;background:#fbfdff;border:1px solid var(--line);border-radius:10px;padding:14px;color:#0b1324}
+  .pill{display:inline-block;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:#fef3c7;color:#92400e}
+  .statuspill{display:inline-block;font-size:12px;font-weight:700;color:var(--accent);background:#fff7ed;padding:5px 11px;border-radius:999px;margin-left:6px}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px}
+  .toggle button{border:0;background:#fff;padding:9px 16px;font-weight:600;cursor:pointer;font-size:14px;color:var(--muted)}
+  .toggle button.on{background:var(--accent);color:#fff}
+  .banner{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:10px;padding:11px 14px;font-size:13.5px;margin-bottom:14px}
+  .banner.green{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+  .banner.red{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+  .spin{display:inline-block;width:15px;height:15px;border:2px solid #bfdbfe;border-top-color:#1e40af;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .case{display:flex;align-items:center;gap:14px;padding:14px;border:1px solid var(--line);border-radius:12px;cursor:pointer;background:#fff;margin-top:10px}
+  .case:hover{border-color:var(--accent);box-shadow:0 2px 8px rgba(234,88,12,.08)}
+  .case .av{width:46px;height:46px;border-radius:10px;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;flex:0 0 auto}
+  .case .meta{flex:1}
+  .case .meta b{font-size:15px}
+  .case .meta div{font-size:13px;color:var(--muted)}
+  .case .st{font-size:12px;font-weight:700;color:var(--accent);background:#fff7ed;padding:5px 10px;border-radius:999px;white-space:nowrap}
+  .case .st.blue{color:#1e40af;background:#eff6ff}
+  .chat{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow:auto;padding:4px}
+  .msg{max-width:82%;padding:9px 12px;border-radius:12px;font-size:13.5px;white-space:pre-wrap}
+  .msg.kout{align-self:flex-end;background:#dcf8c6;border:1px solid #c5e9a5;border-bottom-right-radius:3px}
+  .msg.kin{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:3px}
+  .msg.vs{align-self:flex-start;background:#eff6ff;border:1px solid #bfdbfe;border-bottom-left-radius:3px}
+  .msg.ws{align-self:flex-end;background:#fff7ed;border:1px solid #fed7aa;border-bottom-right-radius:3px}
+  .msg .who{font-size:11px;font-weight:700;color:var(--muted);margin-bottom:2px}
+  .msg .att{display:inline-flex;gap:6px;align-items:center;margin-top:6px;font-size:12px;color:var(--accent2);background:#fff;border:1px dashed #fdba74;border-radius:7px;padding:4px 8px}
+  .chatbar{display:flex;gap:8px;align-items:flex-end;margin-top:10px}
+  .chatbar textarea{flex:1;min-height:42px}
+  .iconbtn{border:1px solid var(--line);background:#fff;border-radius:9px;padding:11px 13px;cursor:pointer;font-size:16px}
+  .iconbtn:hover{border-color:var(--accent)}
+  .chip{display:none;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--accent2);background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:5px 10px;width:fit-content}
+  .chip b{cursor:pointer}
+  .qr{flex:0 0 auto;border:1px solid var(--line);border-radius:10px;padding:8px;background:#fff;line-height:0}
+  .wa{white-space:pre-wrap;background:#dcf8c6;border:1px solid #c5e9a5;border-radius:12px;border-top-right-radius:3px;padding:12px 14px;font-size:13.5px;color:#0b1324;max-width:460px}
+  .foot{color:var(--muted);font-size:12px;text-align:center;margin:8px 0 30px}
+  #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:#0f172a;color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:.25s;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90%;text-align:center}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}.photos{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🔧 Schadenportal</div>
+  <div style="font-size:13px;opacity:.8">Karosserie &amp; Lack Gärtner</div>
+  <div class="badge">DEMO v3</div>
+</header>
+
+<div style="background:#fff;border-bottom:1px solid var(--line);padding:8px 20px;font-size:12.5px;color:var(--muted)">
+  🏠 Betriebs-Cockpit › Versicherung › <b style="color:var(--slate)">Versicherungsschaden</b>
+  <span style="float:right;opacity:.7">Modul im Werkstatt-Cockpit</span>
+</div>
+
+<div class="wrap">
+  <div class="steps" id="stepbar">
+    <div class="step" data-step="1"><span class="num">1</span>Anlegen</div>
+    <div class="step" data-step="2"><span class="num">2</span>Akte</div>
+    <div class="step" data-step="3"><span class="num">3</span>E-Mail</div>
+    <div class="step" data-step="4"><span class="num">4</span>Versich.</div>
+    <div class="step" data-step="5"><span class="num">5</span>Freigabe</div>
+    <div class="step" data-step="6"><span class="num">6</span>Bestellung</div>
+    <div class="step" data-step="7"><span class="num">7</span>Lieferung</div>
+    <div class="step" data-step="8"><span class="num">8</span>Reparatur</div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <section id="dash" class="screen active">
+    <div class="card">
+      <div class="banner">👋 Das ist das <b>Versicherungsschaden-Portal</b> – im Cockpit erreichbar über <b>Versicherung → Versicherungsschaden</b>. Hier laufen die Versicherungs-Aufträge; sobald repariert wird, erscheint das Auto in <b>„Alle Aufträge" / Lackierportal</b>. Oben umschalten zwischen <b>deiner Sicht</b> und der <b>Sicht der Versicherung</b>.</div>
+      <div class="toggle" style="margin-bottom:16px">
+        <button id="dv-w" class="on" onclick="dashView('w')">🔧 Meine Sicht (Werkstatt)</button>
+        <button id="dv-v" onclick="dashView('v')">🏢 Sicht der Versicherung</button>
+      </div>
+
+      <div id="dash-werkstatt">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h1 style="margin:0">Meine Aufträge</h1>
+          <button class="btn" onclick="go('anlegen')">+ Schaden neu melden</button>
+        </div>
+        <p class="sub">Jedes Fahrzeug = ein Auftrag. Der Status läuft live mit – vom Erstkontakt bis zur Abholung.</p>
+        <div id="assigned"></div>
+        <div class="case" id="case1" onclick="go('akte')">
+          <div class="av">🚗</div>
+          <div class="meta">
+            <b>BMW 116d · MOS PG 707</b>
+            <div>Az. VUV/0952416/2026 · Heckschaden · VHV</div>
+          </div>
+          <div class="st" id="case1-status">Neu angelegt</div>
+        </div>
+        <div class="case" onclick="toast('Weg B (Demo): von Versicherung zugewiesen → Besichtigungstermin planen')">
+          <div class="av" style="background:#1e3a8a">🚐</div>
+          <div class="meta">
+            <b>VW Crafter · HD-AB 1234</b>
+            <div>Seitenschaden · zugewiesen von Allianz</div>
+          </div>
+          <div class="st blue">Von Versicherung zugewiesen</div>
+        </div>
+      </div>
+
+      <div id="dash-vers" style="display:none">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h1 style="margin:0">Schadensportal · Versicherung</h1>
+          <button class="btn" onclick="go('vneu')">+ Schaden anlegen &amp; zuweisen</button>
+        </div>
+        <p class="sub">So sieht die Versicherung ihre eingegangenen Schäden – Übersicht aller Vorgänge mit Status. Sie kann auch selbst einen Schaden anlegen und einer Werkstatt zuweisen.</p>
+        <div class="case" onclick="go('vers')">
+          <div class="av" style="background:#1e3a8a">🏢</div>
+          <div class="meta">
+            <b>Schaden 0952416/2026 · BMW 116d</b>
+            <div>Karosserie &amp; Lack Gärtner · Forderung 2.485,75 €</div>
+          </div>
+          <div class="st blue" id="vcase-status">Neu angelegt</div>
+        </div>
+        <div class="case" onclick="toast('Demo: weiterer Vorgang einer anderen Werkstatt')">
+          <div class="av" style="background:#1e3a8a">🏢</div>
+          <div class="meta">
+            <b>Schaden 0951877/2026 · Audi A4</b>
+            <div>Autohaus Müller · Forderung 4.120,00 €</div>
+          </div>
+          <div class="st">In Prüfung</div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">Demo · es werden keine echten E-Mails/Nachrichten versendet</div>
+  </section>
+
+  <!-- ANLEGEN -->
+  <section id="anlegen" class="screen">
+    <div class="card">
+      <span class="pill">Schritt 1</span>
+      <h1>Schaden neu melden</h1>
+      <p class="sub">Einfach die <b>Unterlagen reinziehen</b> – das Portal liest sie automatisch aus und füllt die Felder. Du prüfst nur noch.</p>
+      <div class="drop big" id="dropzone" onclick="analyze()">📎 <b>Dateien hier reinziehen</b> oder klicken<br><small>Kalkulation, Polizei-Unfallkarte, Fahrzeugschein, Fotos …</small></div>
+      <div id="analyzing" class="banner" style="display:none"><span class="spin"></span> Dokumente werden analysiert und ausgelesen …</div>
+      <div id="recognized" style="display:none">
+        <ul class="files">
+          <li>📄 Polizei-Unfallservicekarte.pdf <span class="ok">→ Unfall · Az. · Verursacher ✓</span></li>
+          <li>📄 Reparaturkostenkalkulation.pdf <span class="ok">→ Fahrzeug · FIN · Beträge ✓</span></li>
+          <li>🪪 Fahrzeugschein.jpg <span class="ok">→ Kennzeichen · Halter ✓</span></li>
+          <li>🖼️ 3 Fotos (Heckschaden) <span class="ok">✓</span></li>
+        </ul>
+        <div class="banner green">✓ Automatisch erkannt – bitte nur prüfen und ggf. korrigieren.</div>
+      </div>
+      <div id="formfields" style="opacity:.45;pointer-events:none;transition:opacity .3s">
+        <div class="grid">
+          <div><label>Fahrzeug</label><input id="f_fzg" placeholder="wird erkannt …"></div>
+          <div><label>Kennzeichen</label><input id="f_kz" placeholder="wird erkannt …"></div>
+          <div><label>Kunde</label><input id="f_kunde" placeholder="wird erkannt …"></div>
+          <div><label>Versicherung (Gegner)</label><input id="f_vers" placeholder="wird erkannt …"></div>
+          <div><label>Polizei-Aktenzeichen</label><input id="f_az" placeholder="wird erkannt …"></div>
+          <div><label>FIN</label><input id="f_fin" placeholder="wird erkannt …"></div>
+        </div>
+        <label>Kurzbeschreibung</label>
+        <input id="f_besch" placeholder="wird erkannt …">
+        <label>Schadenart</label>
+        <div class="toggle" id="sa-toggle">
+          <button id="sa-hp-b" class="on" onclick="setSchadenart('hp')">Haftpflicht</button>
+          <button id="sa-vk-b" onclick="setSchadenart('vk')">Vollkasko</button>
+          <button id="sa-tk-b" onclick="setSchadenart('tk')">Teilkasko</button>
+        </div>
+        <div id="sa-info" class="banner" style="margin-top:4px"></div>
+        <div id="sa-kasko" style="display:none">
+          <div class="grid">
+            <div><label>Eigene Versicherung</label><input value="VHV"></div>
+            <div><label>Selbstbeteiligung (€)</label><input value="300"></div>
+          </div>
+          <div class="drop" style="margin-top:10px" onclick="toast('📄 Police hochgeladen – Selbstbeteiligung wird ausgelesen (Demo: 300 €)')">📄 Versicherungspolice hochladen → Selbstbeteiligung wird ausgelesen</div>
+          <div class="banner" style="margin-top:10px">ℹ️ Bei Kasko trägt der Kunde die Selbstbeteiligung (lt. Police). Die Police kann auch die Versicherung im Portal hinterlegen.</div>
+        </div>
+      </div>
+      <button class="btn big" id="anlegen-btn" disabled onclick="go('akte')">Anlegen &amp; weiter →</button>
+    </div>
+  </section>
+
+  <!-- AKTE -->
+  <section id="akte" class="screen">
+    <div class="card">
+      <span class="pill">Schritt 2 · Werkstatt-Ansicht</span>
+      <h1>Schaden-Akte · BMW 116d <span class="statuspill" id="ak-status"></span></h1>
+      <div class="grid">
+        <div><b>Geschädigter</b>Paul Philipp Gärtner, 74834 Elztal</div>
+        <div><b>Fahrzeug / FIN</b>BMW 116d · WBA1C71070P840316</div>
+        <div><b>Verursacher</b>Mercedes Sprinter · M-AZ 5552</div>
+        <div><b>Versicherung</b>VHV</div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>📷 Fotos &amp; 📁 Dokumente</h2>
+      <p class="sub">Hier kannst du jederzeit weitere Fotos/Dokumente hochladen oder falsche wieder löschen.</p>
+      <div class="photos" id="akte-photos"></div>
+      <ul class="files" id="akte-docs" style="margin-top:12px"></ul>
+    </div>
+    <div class="card" id="komm-card" style="display:none">
+      <h2>💬 Kommunikation mit der Versicherung</h2>
+      <div class="banner red" id="akte-banner" style="display:none"></div>
+      <div class="chat" id="chat-akte"></div>
+      <div class="chip" id="ws-chip">📎 <span></span> <b onclick="clearWsChip()">✕</b></div>
+      <div class="chatbar">
+        <textarea id="ws-input" placeholder="Stellungnahme / Antwort an die Versicherung schreiben …"></textarea>
+        <button class="iconbtn" title="Unterlage anhängen" onclick="attachWs()">📎</button>
+        <button class="btn" onclick="wsReply()">Senden</button>
+      </div>
+      <p class="sub" style="margin-top:8px">Beim Senden geht automatisch eine E-Mail mit Portal-Link an die Versicherung.</p>
+    </div>
+    <div class="card">
+      <h2>Status</h2>
+      <ul class="timeline">
+        <li class="done"><span class="dot"></span>Angelegt</li>
+        <li class="now"><span class="dot"></span>Erstkontakt / Kommunikation</li>
+        <li class="muted"><span class="dot"></span>Freigabe / Auszahlung</li>
+        <li class="muted"><span class="dot"></span>Bestellung &amp; Reparatur</li>
+      </ul>
+      <button class="btn big" onclick="go('email')">✉️ E-Mail an Versicherung erstellen →</button>
+    </div>
+  </section>
+
+  <!-- EMAIL -->
+  <section id="email" class="screen">
+    <div class="card">
+      <span class="pill">Schritt 3</span>
+      <h1>Erstkontakt-E-Mail</h1>
+      <p class="sub">Automatisch aus den Unterlagen geschrieben – inkl. Zugangslink zum Schaden. Du prüfst nur und gibst frei.</p>
+      <div class="toggle" id="email-toggle">
+        <button id="tg-f" class="on" onclick="setMode('fiktiv')">Fiktive Abrechnung</button>
+        <button id="tg-k" onclick="setMode('konkret')">Reparatur (konkret)</button>
+      </div>
+      <div class="mail" id="mailbox"></div>
+      <div class="row" style="margin-top:14px">
+        <button class="btn" onclick="sendMail()">✓ Freigeben &amp; an Versicherung senden</button>
+        <button class="btn sec" onclick="go('akte')">← Zurück</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- VERSICHERUNG -->
+  <section id="vers" class="screen">
+    <div class="card">
+      <span class="pill">Schritt 4 · Versicherungs-Ansicht</span>
+      <h1>VHV · Schaden 0952416/2026 <span class="statuspill" id="vs-status"></span></h1>
+      <div class="banner">🔗 Das sieht die VHV nach Klick auf den Link in der E-Mail. Sie kann alles ansehen, schreiben und Dateien hochladen.</div>
+      <div class="grid">
+        <div><b>Fahrzeug</b>BMW 116d · MOS PG 707</div>
+        <div><b>Forderung</b><span id="vers-betrag">2.485,75 € (fiktiv)</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>📷 Fotos &amp; 📁 Dokumente</h2>
+      <div class="photos">
+        <div class="photo"><span>📷</span>Heck links</div>
+        <div class="photo"><span>📷</span>Stoßfänger</div>
+        <div class="photo"><span>📷</span>Übersicht</div>
+      </div>
+      <ul class="files" style="margin-top:12px">
+        <li>📄 Reparaturkostenkalkulation.pdf <span class="ok">Ansehen</span></li>
+        <li>📄 Polizei-Unfallservicekarte.pdf <span class="ok">Ansehen</span></li>
+      </ul>
+      <div class="drop" style="margin-top:12px" onclick="toast('Versicherung lädt z. B. Prüfbericht hoch ✓')">⬆️ Versicherung: eigene Dateien hinzufügen</div>
+    </div>
+    <div class="card">
+      <h2>💬 Kommunikation</h2>
+      <div class="chat" id="chat-vers"></div>
+      <div class="chatbar">
+        <textarea id="vs-input" placeholder="Nachricht / Nachfrage an die Werkstatt …"></textarea>
+        <button class="btn" onclick="vsAsk()">Senden</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Entscheidung der Versicherung</h2>
+      <div class="row">
+        <button class="btn green" onclick="vsApprove('pay')">✓ Auszahlung bestätigen</button>
+        <button class="btn" onclick="vsApprove('repair')">✓ Reparatur freigeben</button>
+        <button class="btn red" onclick="toggleReason()">✕ Ablehnen / Nachfrage</button>
+      </div>
+      <div id="reasonbox" style="display:none;margin-top:12px">
+        <label>Begründung (was muss nachgebessert/belegt werden?)</label>
+        <textarea id="vs-reason" placeholder="z. B. Bitte aktuelle Fotos der Schadenstelle und Reparaturnachweis nachreichen."></textarea>
+        <button class="btn red" style="margin-top:8px" onclick="vsReject()">Ablehnung mit Begründung senden</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- FREIGABE -->
+  <section id="freigabe" class="screen">
+    <div class="card" style="text-align:center">
+      <div style="font-size:52px">✅</div>
+      <h1 id="freigabe-text">Freigabe erteilt</h1>
+      <div class="banner green">🔔 Du wurdest automatisch benachrichtigt: „VHV – Schaden 0952416/2026: geprüft &amp; freigegeben."</div>
+      <button class="btn big" onclick="go('bestellung')">→ Weiter zur Teilebestellung</button>
+      <button class="btn sec" style="margin-top:8px" onclick="go('dash')">Zur Übersicht</button>
+    </div>
+  </section>
+
+  <!-- BESTELLUNG -->
+  <section id="bestellung" class="screen">
+    <div class="card">
+      <span class="pill">Schritt 6</span>
+      <h1>Teilebestellung</h1>
+      <p class="sub">Teile automatisch aus der Kalkulation übernommen, passender Lieferant vorgeschlagen.</p>
+      <div class="banner">🏭 Passender Lieferant: <b>Stahlgruber, NL Heilbronn</b> · bester Preis &amp; Verfügbarkeit</div>
+      <ul class="files">
+        <li>🔩 Verkleidung Stoßfänger hinten, grundiert <span class="ok">ETN 51127293557 · 1×</span></li>
+        <li>🔩 Träger Stoßfänger hinten <span class="ok">ETN 51127240912 · 1×</span></li>
+        <li>🔩 Führung Stoßfänger hinten links <span class="ok">ETN 51127240955 · 1×</span></li>
+        <li>🔩 Führung Stoßfänger hinten rechts <span class="ok">ETN 51127240956 · 1×</span></li>
+        <li>🔩 Führung Stoßfänger hinten Mitte <span class="ok">ETN 51127240953 · 1×</span></li>
+        <li>🔩 Reparatursatz Halter PDC hinten <span class="ok">ETN 51127391940 · 1×</span></li>
+        <li>🔩 Klebeset <span class="ok">ETN 83195A547C4 · 1×</span></li>
+      </ul>
+      <div id="best-flow"></div>
+    </div>
+  </section>
+
+  <!-- LIEFERTERMINE -->
+  <section id="liefertermin" class="screen">
+    <div class="card">
+      <span class="pill">Schritt 7</span>
+      <h1>Liefertermine</h1>
+      <div class="banner green">📦 Komplett lieferbar ab: <b id="liefer-max"></b></div>
+      <p class="sub">Kommt ein Teil später, ändere den Termin einzeln – die Werkstatt sieht jederzeit, <b>wann was kommt</b>, und kann planen.</p>
+      <ul class="files" id="parts-list"></ul>
+      <button class="btn big" onclick="go('termin')">→ Reparaturtermin festlegen</button>
+    </div>
+  </section>
+
+  <!-- TERMIN / REPARATUR -->
+  <section id="termin" class="screen">
+    <div class="card">
+      <span class="pill">Schritt 8</span>
+      <h1>Reparatur &amp; Kundentermin</h1>
+      <div class="banner green">🔧 Werkstatttermin: <b>05.06.2026, 08:00</b> (nach Lieferung der Teile)</div>
+      <p class="sub">Kunde bringt das Fahrzeug, kurze Beratung (z. B. Zusatzleistungen), dann Reparaturstart.</p>
+      <div class="grid">
+        <div><b>Kunde</b>Paul Philipp Gärtner</div>
+        <div><b>Fahrzeug</b>BMW 116d · MOS PG 707</div>
+      </div>
+      <button class="btn" style="margin-top:14px" id="wa-btn" onclick="showWa()">📲 Terminvorschlag per WhatsApp vorbereiten</button>
+      <div id="wa-preview" style="display:none;margin-top:14px">
+        <div class="sub" style="margin-bottom:6px">Vorschau – diese WhatsApp geht an den Kunden (0151 23456789):</div>
+        <div class="wa" id="wa-text"></div>
+        <button class="btn green" style="margin-top:12px" onclick="sendWa()">✓ WhatsApp senden</button>
+      </div>
+      <div id="kunde-note" class="banner green" style="display:none;margin-top:14px"></div>
+      <div class="chat" id="chat-kunde" style="display:none;margin-top:8px"></div>
+      <div id="kunde-actions" style="margin-top:6px"></div>
+    </div>
+    <div class="card">
+      <h2>📱 Status-Tracking für den Kunden</h2>
+      <p class="sub">Kunde gibt seine Nummer an – ab dann bekommt er nach jedem Status eine WhatsApp. Oder er scannt den QR-Code (ohne App).</p>
+      <div class="row" style="align-items:flex-end">
+        <div style="flex:1;min-width:200px"><label>WhatsApp-Nummer Kunde</label><input value="0151 23456789"></div>
+        <button class="btn" onclick="toast('📱 WhatsApp-Status aktiviert – Kunde wird ab jetzt informiert')">Aktivieren</button>
+      </div>
+      <div style="display:flex;gap:18px;align-items:center;margin-top:16px;flex-wrap:wrap">
+        <div class="qr"></div>
+        <div style="flex:1;min-width:200px"><b style="font-size:15px">QR-Code</b><div class="sub">An die Rechnung / ins Fahrzeug. Kunde scannt und sieht jederzeit live den Reparaturstatus.</div></div>
+      </div>
+      <button class="btn big" style="margin-top:14px" onclick="go('status')">👁️ Status-Ansicht des Kunden öffnen →</button>
+    </div>
+  </section>
+
+  <!-- KUNDEN-STATUS -->
+  <section id="status" class="screen">
+    <div class="card" style="max-width:430px;margin:0 auto">
+      <div style="text-align:center">
+        <div class="sub">Karosserie &amp; Lack Gärtner · Status Ihres Fahrzeugs</div>
+        <h1 style="margin:6px 0">BMW 116d · MOS PG 707</h1>
+        <div id="status-big" style="font-size:18px;font-weight:700;color:var(--accent)"></div>
+        <div class="sub" id="status-eta">voraussichtlich abholbereit: 06.06.2026</div>
+      </div>
+      <ul class="timeline" id="status-steps" style="margin-top:16px"></ul>
+      <button class="btn big" onclick="advanceRepair()">▶ (Demo) Nächster Schritt in der Werkstatt</button>
+      <button class="btn sec" style="margin-top:8px;width:100%" onclick="go('dash')">Zur Übersicht</button>
+    </div>
+    <div class="foot">So sieht es der Kunde auf dem Handy – per QR-Code oder WhatsApp-Link</div>
+  </section>
+
+  <!-- VERSICHERUNG: SCHADEN ANLEGEN & ZUWEISEN (Weg B) -->
+  <section id="vneu" class="screen">
+    <div class="card">
+      <span class="pill">Versicherung · Weg B</span>
+      <h1>Schaden anlegen &amp; Werkstatt zuweisen</h1>
+      <p class="sub">Die Versicherung legt den Schaden an, lädt ihre Unterlagen hoch und weist ihn einer Werkstatt zu. Der Kunde wird zur Werkstatt geschickt.</p>
+      <div class="grid">
+        <div><label>Kunde</label><input value="Paul Philipp Gärtner"></div>
+        <div><label>Fahrzeug / Kennzeichen</label><input value="BMW 116d · MOS PG 707"></div>
+        <div><label>Schadenart</label><input value="Kaskoschaden (Vollkasko)"></div>
+        <div><label>Schadenssumme (geschätzt)</label><input value="2.928,29 €"></div>
+      </div>
+      <label>Unterlagen der Versicherung</label>
+      <div class="drop" onclick="vAnalyzePolice()">📄 Police + Versicherungsnachweis hochladen<br><small>Selbstbeteiligung wird automatisch ausgelesen</small></div>
+      <div id="v-sb" class="banner green" style="display:none"></div>
+      <div class="grid" style="margin-top:6px">
+        <div><label>Werkstatt</label><input value="Karosserie & Lack Gärtner, Mosbach" readonly></div>
+        <div><label>Fahrzeug bringt</label><input value="Kunde bringt am 04.06.2026"></div>
+      </div>
+      <div class="banner">ℹ️ Der Kunde wird automatisch informiert, dass er das Fahrzeug zur Werkstatt Gärtner bringt.</div>
+      <button class="btn big" onclick="assignToWorkshop()">✓ An Werkstatt Gärtner zuweisen</button>
+    </div>
+  </section>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  var SUPPLIER='Stahlgruber, NL Heilbronn';
+  var REPAIR=['Fahrzeug angenommen','Demontage','Karosserie / Richten','Lackierung','Endmontage','Qualitätskontrolle','Abholbereit'];
+  var state={status:'Neu angelegt',mode:'fiktiv',messages:[],lastReason:null,needsResponse:false,pendingWs:null,
+    photos:['Heck links','Stoßfänger','Übersicht'],
+    docs:['Reparaturkostenkalkulation.pdf','Polizei-Unfallservicekarte.pdf'],
+    supplier:{stage:'idle'},
+    parts:[
+      {name:'Verkleidung Stoßfänger hinten, grundiert',etn:'51127293557',qty:1,eta:'03.06.2026'},
+      {name:'Träger Stoßfänger hinten',etn:'51127240912',qty:1,eta:'03.06.2026'},
+      {name:'Führung Stoßfänger hinten links',etn:'51127240955',qty:1,eta:'05.06.2026'},
+      {name:'Führung Stoßfänger hinten rechts',etn:'51127240956',qty:1,eta:'05.06.2026'},
+      {name:'Führung Stoßfänger hinten Mitte',etn:'51127240953',qty:1,eta:'05.06.2026'},
+      {name:'Reparatursatz Halter PDC hinten',etn:'51127391940',qty:1,eta:'04.06.2026'},
+      {name:'Klebeset',etn:'83195A547C4',qty:1,eta:'03.06.2026'}
+    ],
+    editIdx:-1, repairStep:0, kundeMsgs:[], kundeStage:'idle', schadenart:'hp', assignment:null, assignSb:''};
+
+  function escapeHtml(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
+
+  function go(id){
+    document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
+    var el=document.getElementById(id); if(el) el.classList.add('active');
+    var map={anlegen:1,akte:2,email:3,vers:4,freigabe:5,bestellung:6,liefertermin:7,termin:8,status:8};
+    var cur=map[id]||0;
+    document.querySelectorAll('.step').forEach(function(s){var n=+s.dataset.step;s.classList.toggle('active',n===cur);s.classList.toggle('done',cur>0&&n<cur);});
+    render(); window.scrollTo(0,0);
+  }
+
+  function render(){
+    var html=state.messages.map(function(m){
+      var who=m.from==='vs'?'Versicherung (VHV)':'Werkstatt';
+      var att=m.att?'<div class="att">📎 '+escapeHtml(m.att)+'</div>':'';
+      return '<div class="msg '+m.from+'"><div class="who">'+who+'</div>'+escapeHtml(m.text)+att+'</div>';
+    }).join('');
+    if(!html) html='<div style="font-size:13px;color:var(--muted)">Noch keine Nachrichten.</div>';
+    ['chat-akte','chat-vers'].forEach(function(id){var el=document.getElementById(id);if(el){el.innerHTML=html;el.scrollTop=el.scrollHeight;}});
+    ['ak-status','vs-status'].forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=state.status;});
+    var c1=document.getElementById('case1-status'); if(c1)c1.textContent=state.status;
+    var vc=document.getElementById('vcase-status'); if(vc)vc.textContent=state.status;
+    var b=document.getElementById('akte-banner');
+    if(b){ if(state.needsResponse){b.style.display='block';b.innerHTML='🔔 <b>Neue Meldung von der Versicherung:</b> '+escapeHtml(state.lastReason||'');} else {b.style.display='none';} }
+    var kc=document.getElementById('komm-card'); if(kc) kc.style.display=(state.messages.length>0)?'block':'none';
+    var vb=document.getElementById('vers-betrag'); if(vb){var kasko=(state.schadenart==='vk'||state.schadenart==='tk'); vb.textContent=kasko?'2.628,29 € (Kasko, abzgl. 300 € SB)':(state.mode==='fiktiv'?'2.485,75 € (fiktiv)':'2.928,29 € (Reparatur)');}
+    renderAkteFiles(); renderBestellung(); renderParts(); renderStatus(); renderKunde(); renderAssigned(); refreshMail(); updatePendingWs();
+  }
+
+  var T;
+  function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(T);T=setTimeout(function(){t.classList.remove('show');},2400);}
+
+  /* ---- Akte: Fotos/Dokumente hochladen & löschen ---- */
+  function renderAkteFiles(){
+    var pc=document.getElementById('akte-photos');
+    if(pc){pc.innerHTML=state.photos.map(function(p,i){return '<div class="photo"><button class="del" onclick="delPhoto('+i+')" title="Löschen">✕</button><span>📷</span>'+escapeHtml(p)+'</div>';}).join('')+'<div class="photo addtile" onclick="addPhoto()"><span>＋</span>Foto</div>';}
+    var dc=document.getElementById('akte-docs');
+    if(dc){dc.innerHTML=state.docs.map(function(d,i){return '<li>📄 '+escapeHtml(d)+'<button class="lidel" onclick="delDoc('+i+')">✕ löschen</button></li>';}).join('')+'<li class="addtile" style="justify-content:center;cursor:pointer" onclick="addDoc()">＋ Dokument hochladen</li>';}
+  }
+  function addPhoto(){state.photos.push('Foto '+(state.photos.length+1));renderAkteFiles();toast('📷 Foto hochgeladen ✓');}
+  function delPhoto(i){state.photos.splice(i,1);renderAkteFiles();toast('Foto gelöscht');}
+  function addDoc(){state.docs.push('Dokument_'+(state.docs.length+1)+'.pdf');renderAkteFiles();toast('📄 Dokument hochgeladen ✓');}
+  function delDoc(i){state.docs.splice(i,1);renderAkteFiles();toast('Dokument gelöscht');}
+
+  /* ---- Anlegen: Auto-Auslesen ---- */
+  function analyze(){
+    var az=document.getElementById('analyzing'); az.style.display='block';
+    document.getElementById('recognized').style.display='none';
+    setTimeout(function(){
+      az.style.display='none';
+      document.getElementById('recognized').style.display='block';
+      var data={f_fzg:'BMW 116d',f_kz:'MOS PG 707',f_kunde:'Paul Philipp Gärtner',f_vers:'VHV',f_az:'VUV/0952416/2026',f_fin:'WBA1C71070P840316',f_besch:'Heckschaden – Stoßfänger hinten, PDC'};
+      Object.keys(data).forEach(function(k){var el=document.getElementById(k);if(el)el.value=data[k];});
+      var ff=document.getElementById('formfields'); ff.style.opacity='1'; ff.style.pointerEvents='auto';
+      document.getElementById('anlegen-btn').disabled=false;
+      toast('✓ 4 Dokumente analysiert – Felder automatisch ausgefüllt');
+    },1300);
+  }
+
+  /* ---- E-Mail ---- */
+  var MAILS={
+    fiktiv:
+"An:        VHV Versicherung – Schaden  ·  [Schadennummer einsetzen]\n"+
+"Betreff:   Haftpflichtschaden / fiktive Abrechnung – Unfall 20.05.2026 –\n"+
+"           Verursacher M-AZ 5552 – Polizei-Az. VUV/0952416/2026\n\n"+
+"Sehr geehrte Damen und Herren,\n\n"+
+"namens und im Auftrag unseres Kunden – des Geschädigten – zeigen wir Ihnen\n"+
+"den Haftpflichtschaden an und machen die Ansprüche geltend. Ausweislich der\n"+
+"polizeilichen Unfallaufnahme ist Ihr Versicherungsnehmer Unfallverursacher.\n\n"+
+"Verursacher:  Mercedes Sprinter, M-AZ 5552 · Halter Arval Deutschland GmbH\n"+
+"Geschädigter: Paul Philipp Gärtner · BMW 116d, MOS PG 707 · FIN WBA1C71070P840316\n\n"+
+"Abrechnung (fiktiv, auf Kalkulationsbasis):\n"+
+"  Reparaturkosten netto ........ 2.460,75 EUR\n"+
+"  Allgemeine Kostenpauschale ...    25,00 EUR\n"+
+"  Gesamtforderung .............. 2.485,75 EUR\n"+
+"Die USt wird – fiktive Abrechnung – nicht geltend gemacht (§ 249 II 2 BGB).\n\n"+
+"Volle Transparenz – keine Nachforderungen nötig:\n"+
+"Alle Fotos, die Kalkulation und sämtliche Unterlagen liegen bereits\n"+
+"vollständig im Schaden-Portal – Sie müssen nichts nachfordern. Sie prüfen,\n"+
+"stellen Rückfragen bei Bedarf direkt im Portal und bestätigen die Auszahlung\n"+
+"mit einem Klick. Mehr ist nicht nötig – je schneller Ihre Freigabe, desto\n"+
+"schneller ist der Fall für alle erledigt.\n"+
+"  Zugang:      https://portal.lack-gaertner.de/s/0952416\n"+
+"  Zugangscode: 4827-VHV\n\n"+
+"Bitte überweisen Sie 2.485,75 EUR auf das Konto des Geschädigten:\n"+
+"  Kontoinhaber: Paul Philipp Gärtner · IBAN DE88 6745 0048 1001 6109 12\n\n"+
+"Mit freundlichen Grüßen\n"+
+"Christopher Gärtner · Karosserie & Lack Gärtner GmbH",
+    konkret:
+"An:        VHV Versicherung – Schaden  ·  [Schadennummer einsetzen]\n"+
+"Betreff:   Haftpflichtschaden / Reparaturauftrag – Unfall 20.05.2026 –\n"+
+"           Verursacher M-AZ 5552 – Polizei-Az. VUV/0952416/2026\n\n"+
+"Sehr geehrte Damen und Herren,\n\n"+
+"namens und im Auftrag unseres Kunden – des Geschädigten – zeigen wir Ihnen\n"+
+"den Haftpflichtschaden an und machen die Ansprüche geltend. Ausweislich der\n"+
+"polizeilichen Unfallaufnahme ist Ihr Versicherungsnehmer Unfallverursacher.\n\n"+
+"Verursacher:  Mercedes Sprinter, M-AZ 5552 · Halter Arval Deutschland GmbH\n"+
+"Geschädigter: Paul Philipp Gärtner · BMW 116d, MOS PG 707 · FIN WBA1C71070P840316\n\n"+
+"Abrechnung (konkrete Reparatur in unserem Betrieb):\n"+
+"  Reparaturkosten netto ........ 2.460,75 EUR\n"+
+"  zzgl. 19 % MwSt. .............   467,54 EUR\n"+
+"  Reparaturkosten brutto ....... 2.928,29 EUR\n\n"+
+"So läuft die Abwicklung – volle Transparenz, keine Nachforderungen nötig:\n"+
+"Alle Fotos, die Kalkulation und sämtliche Unterlagen liegen bereits\n"+
+"vollständig im Schaden-Portal – Sie müssen nichts nachfordern. Nach Ihrer\n"+
+"Freigabe bestellen wir die Teile, reparieren das Fahrzeug und dokumentieren\n"+
+"jeden Schritt; den Fortschritt verfolgen Sie jederzeit live im Portal – vom\n"+
+"Reparaturbeginn bis zur Fertigstellung. Rückfragen stellen Sie direkt im\n"+
+"Portal, die Freigabe erteilen Sie mit einem Klick.\n"+
+"  Zugang:      https://portal.lack-gaertner.de/s/0952416\n"+
+"  Zugangscode: 4827-VHV\n\n"+
+"Die Reparatur erfolgt in unserem Betrieb; Zahlung an die Werkstatt.\n\n"+
+"Mit freundlichen Grüßen\n"+
+"Christopher Gärtner · Karosserie & Lack Gärtner GmbH"
+  };
+  var MAILS_KASKO=
+"An:        VHV Versicherung – Kaskoschaden  ·  [Versicherungs-/Schadennummer]\n"+
+"Betreff:   Kaskoschaden – BMW 116d (MOS PG 707) – Schadenmeldung & Reparatur\n\n"+
+"Sehr geehrte Damen und Herren,\n\n"+
+"wir melden Ihnen einen Kaskoschaden Ihres Versicherungsnehmers und bitten um\n"+
+"Übernahme der Reparaturkosten abzüglich der vereinbarten Selbstbeteiligung.\n\n"+
+"Versicherungsnehmer: Paul Philipp Gärtner\n"+
+"Fahrzeug:            BMW 116d, MOS PG 707 · FIN WBA1C71070P840316\n"+
+"Schaden:             Heckschaden (Stoßfänger hinten, PDC)\n\n"+
+"  Reparaturkosten brutto ....... 2.928,29 EUR\n"+
+"  abzgl. Selbstbeteiligung ......  300,00 EUR  (lt. Police, vom Kunden zu tragen)\n"+
+"  Erstattung Versicherung ...... 2.628,29 EUR\n\n"+
+"Die Police liegt im Portal bereit; gerne können Sie sie dort auch selbst\n"+
+"hinterlegen – wir lesen die Selbstbeteiligung aus und weisen sie transparent aus.\n"+
+"  Zugang:      https://portal.lack-gaertner.de/s/0952416\n"+
+"  Zugangscode: 4827-VHV\n\n"+
+"Mit freundlichen Grüßen\n"+
+"Christopher Gärtner · Karosserie & Lack Gärtner GmbH";
+  function setMode(m){state.mode=m;document.getElementById('tg-f').classList.toggle('on',m==='fiktiv');document.getElementById('tg-k').classList.toggle('on',m==='konkret');render();}
+  function refreshMail(){var tg=document.getElementById('email-toggle');var mb=document.getElementById('mailbox');if(!mb)return;var kasko=(state.schadenart==='vk'||state.schadenart==='tk');if(kasko){if(tg)tg.style.display='none';mb.textContent=MAILS_KASKO;}else{if(tg)tg.style.display='inline-flex';mb.textContent=MAILS[state.mode];}}
+  function setSchadenart(t){state.schadenart=t;
+    var info={hp:'<b>Haftpflicht – Gegner ist schuld:</b> z. B. anderer fährt auf, Parkrempler durch Dritte, Vorfahrt missachtet. → Gegnerische Haftpflicht zahlt, fiktive Abrechnung möglich.',vk:'<b>Vollkasko – eigene Versicherung:</b> z. B. selbst verschuldeter Unfall, Vandalismus, Fahrerflucht (Gegner unbekannt). → Eigene Vollkasko zahlt, abzgl. Selbstbeteiligung.',tk:'<b>Teilkasko – eigene Versicherung:</b> z. B. Sturm/Hagel, Wildunfall, Diebstahl, Glasbruch, Marderbiss, Brand. → Eigene Teilkasko zahlt, abzgl. Selbstbeteiligung.'};
+    var el=document.getElementById('sa-info'); if(el) el.innerHTML=info[t]||'';
+    var ka=document.getElementById('sa-kasko'); if(ka) ka.style.display=(t==='vk'||t==='tk')?'block':'none';
+    [['sa-hp-b','hp'],['sa-vk-b','vk'],['sa-tk-b','tk']].forEach(function(p){var b=document.getElementById(p[0]);if(b)b.classList.toggle('on',t===p[1]);});
+    render();}
+  function sendMail(){if(state.messages.length===0){state.messages.push({from:'ws',text:'Schadenmeldung übermittelt. Unterlagen und Fotos liegen im Portal bereit.'});}state.status='In Prüfung bei der Versicherung';toast('📧 E-Mail an VHV gesendet – mit Zugangslink zum Portal');render();setTimeout(function(){go('vers');},800);}
+
+  /* ---- Kommunikation ---- */
+  function attachWs(){state.pendingWs='Nachweis_Reparaturweg.pdf';updatePendingWs();toast('Datei angehängt (Demo)');}
+  function updatePendingWs(){var c=document.getElementById('ws-chip');if(!c)return;if(state.pendingWs){c.style.display='inline-flex';c.querySelector('span').textContent=state.pendingWs;}else{c.style.display='none';}}
+  function clearWsChip(){state.pendingWs=null;updatePendingWs();}
+  function wsReply(){var i=document.getElementById('ws-input');var t=(i.value||'').trim();if(!t&&!state.pendingWs){toast('Bitte Nachricht schreiben oder Unterlage anhängen');return;}state.messages.push({from:'ws',text:t||'Fehlende Unterlage nachgereicht.',att:state.pendingWs});state.pendingWs=null;i.value='';state.status='In Prüfung bei der Versicherung';state.needsResponse=false;state.lastReason=null;render();toast('📧 E-Mail an VHV: neue Nachricht/Unterlage – mit Portal-Link');setTimeout(function(){go('vers');},800);}
+  function vsAsk(){var i=document.getElementById('vs-input');var t=(i.value||'').trim();if(!t){toast('Bitte Nachricht eingeben');return;}state.messages.push({from:'vs',text:t});state.status='Nachfrage offen';state.lastReason=t;state.needsResponse=true;i.value='';render();toast('📧 E-Mail an Werkstatt: neue Nachricht – mit Portal-Link');setTimeout(function(){go('akte');},800);}
+  function toggleReason(){var r=document.getElementById('reasonbox');r.style.display=(r.style.display==='block')?'none':'block';}
+  function vsReject(){var i=document.getElementById('vs-reason');var t=(i.value||'').trim();if(!t){toast('Bitte Begründung eingeben');return;}state.messages.push({from:'vs',text:'Abgelehnt – Nachbesserung nötig. Begründung: '+t});state.status='Abgelehnt – Nachbesserung nötig';state.lastReason=t;state.needsResponse=true;i.value='';document.getElementById('reasonbox').style.display='none';render();toast('📧 E-Mail an Werkstatt: Ablehnung mit Begründung – mit Portal-Link');setTimeout(function(){go('akte');},800);}
+  function vsApprove(kind){state.status=(kind==='pay')?'Auszahlung bestätigt':'Reparatur freigegeben';state.needsResponse=false;state.messages.push({from:'vs',text:(kind==='pay')?'Unterlagen geprüft – Auszahlung wird veranlasst.':'Unterlagen geprüft – Reparatur freigegeben.'});var ft=document.getElementById('freigabe-text');if(ft)ft.textContent=state.status;render();go('freigabe');}
+
+  /* ---- Teilebestellung (Lieferant) ---- */
+  var SUP_ANFRAGE=
+"An:        Stahlgruber, NL Heilbronn – Teilevertrieb\n"+
+"Betreff:   Angebotsanfrage Ersatzteile – BMW 116d (MOS PG 707) – Schaden 0952416/2026\n\n"+
+"Sehr geehrte Damen und Herren,\n\n"+
+"für das folgende Fahrzeug benötigen wir ein Angebot über die unten\n"+
+"aufgeführten Ersatzteile (Teilenummern lt. DAT-Kalkulation):\n\n"+
+"Fahrzeug:      BMW 116d (F20)\n"+
+"Kennzeichen:   MOS PG 707\n"+
+"FIN:           WBA1C71070P840316\n"+
+"Erstzulassung: 15.05.2014\n"+
+"Rückfragen:    Karosserie & Lack Gärtner GmbH · Tel. 0152 27706694\n\n"+
+"Ersatzteile:\n"+
+"  Verkleidung Stoßfänger hinten, grundiert   ETN 51127293557   1x\n"+
+"  Träger Stoßfänger hinten                   ETN 51127240912   1x\n"+
+"  Führung Stoßfänger hinten links            ETN 51127240955   1x\n"+
+"  Führung Stoßfänger hinten rechts           ETN 51127240956   1x\n"+
+"  Führung Stoßfänger hinten Mitte            ETN 51127240953   1x\n"+
+"  Reparatursatz Halter PDC hinten            ETN 51127391940   1x\n"+
+"  Klebeset                                   ETN 83195A547C4   1x\n\n"+
+"So einfach geht's – alles über unser Portal:\n"+
+"Über den folgenden Zugang sehen Sie die komplette Teileliste. Bitte hinterlegen\n"+
+"Sie dort Ihr Angebot bzw. den Bestellbeleg und tragen Sie die Lieferzeit je Teil\n"+
+"ein (oder laden Sie Ihren Lieferschein hoch – wir lesen die Termine aus). So\n"+
+"sehen wir sofort transparent, wann welches Teil verfügbar ist. Senden Sie uns\n"+
+"das Angebot anschließend direkt über das Portal zurück.\n"+
+"  Zugang:      https://portal.lack-gaertner.de/t/0952416\n"+
+"  Zugangscode: 4827-STG\n\n"+
+"Mit freundlichen Grüßen\n"+
+"Karosserie & Lack Gärtner GmbH";
+  var SUP_BESTELLUNG=
+"An:        Stahlgruber, NL Heilbronn – Teilevertrieb\n"+
+"Betreff:   Verbindliche Bestellung – BMW 116d (MOS PG 707) – Schaden 0952416/2026\n\n"+
+"Sehr geehrte Damen und Herren,\n\n"+
+"vielen Dank für Ihr Angebot. Wir bestellen die genannten Teile hiermit\n"+
+"verbindlich zu den im Portal hinterlegten Lieferterminen. Bitte bestätigen\n"+
+"Sie den Versand im Portal.\n\n"+
+"Mit freundlichen Grüßen\n"+
+"Karosserie & Lack Gärtner GmbH";
+
+  function renderBestellung(){
+    var c=document.getElementById('best-flow'); if(!c)return;
+    var st=state.supplier.stage, h='';
+    if(st==='idle'){
+      h='<button class="btn big" onclick="supStage(\'compose\')">📧 Angebotsanfrage an Lieferant erstellen</button>';
+    }else if(st==='compose'){
+      h='<div class="mail">'+escapeHtml(SUP_ANFRAGE)+'</div>'+
+        '<div class="row" style="margin-top:12px"><button class="btn" onclick="supStage(\'requested\',\'📧 Anfrage an Lieferant gesendet – mit Portal-Link\')">✓ Anfrage an Lieferant senden</button><button class="btn sec" onclick="supStage(\'idle\')">← Zurück</button></div>';
+    }else if(st==='requested'){
+      h='<div class="banner">⏳ <b>'+SUPPLIER+'</b> hat per Link Zugang zur Teileliste – Angebot ausstehend.</div>'+
+        '<button class="btn sec big" onclick="supStage(\'received\',\'📨 Angebot des Lieferanten eingegangen\')">▶ (Demo) Angebot des Lieferanten eintreffen lassen</button>';
+    }else if(st==='received'){
+      h='<div class="banner green">📨 Angebot von <b>'+SUPPLIER+'</b> eingegangen – Lieferzeit je Teil:</div>'+
+        '<ul class="files">'+state.parts.map(function(p){return '<li>🔩 '+escapeHtml(p.name)+' <span style="color:var(--muted);margin-left:4px">ETN '+escapeHtml(p.etn||'')+'</span><span class="ok">lieferbar '+p.eta+'</span></li>';}).join('')+'</ul>'+
+        '<button class="btn big" onclick="supStage(\'ordering\')">✓ Teile verbindlich bestellen</button>';
+    }else if(st==='ordering'){
+      h='<div class="mail">'+escapeHtml(SUP_BESTELLUNG)+'</div>'+
+        '<div class="row" style="margin-top:12px"><button class="btn" onclick="placeOrder()">✓ Bestellung senden</button><button class="btn sec" onclick="supStage(\'received\')">← Zurück</button></div>';
+    }else{
+      h='<div class="banner green">✓ Bestellung verbindlich an '+SUPPLIER+' ausgelöst.</div>'+
+        '<button class="btn big" onclick="go(\'liefertermin\')">→ Weiter zu den Lieferterminen</button>';
+    }
+    c.innerHTML=h;
+  }
+  function supStage(s,msg){state.supplier.stage=s;if(msg)toast(msg);render();}
+  function placeOrder(){state.supplier.stage='ordered';state.status='Teile bestellt';toast('📧 Bestell-E-Mail an Lieferant gesendet – Teile verbindlich bestellt');render();}
+
+  /* ---- Liefertermine ---- */
+  function parseDE(s){var m=String(s).split('.');return (m[2]||'')+(m[1]||'').padStart(2,'0')+(m[0]||'').padStart(2,'0');}
+  function maxDate(){var best=state.parts[0].eta;state.parts.forEach(function(p){if(parseDE(p.eta)>parseDE(best))best=p.eta;});return best;}
+  function renderParts(){
+    var c=document.getElementById('parts-list'); if(!c)return;
+    c.innerHTML=state.parts.map(function(p,i){
+      var right=(state.editIdx===i)
+        ? '<span style="margin-left:auto;display:flex;gap:6px;align-items:center"><input id="editdate" value="'+escapeHtml(p.eta)+'" style="width:118px;padding:6px 8px"><button class="btn" style="padding:7px 12px;font-size:13px" onclick="savePart('+i+')">Speichern</button></span>'
+        : '<span style="margin-left:auto;display:flex;gap:10px;align-items:center"><b>'+escapeHtml(p.eta)+'</b><button class="lidel" onclick="editPart('+i+')">Termin ändern</button></span>';
+      return '<li>🔩 '+escapeHtml(p.name)+' <span style="color:var(--muted)">ETN '+escapeHtml(p.etn||'')+' · '+p.qty+'×</span>'+right+'</li>';
+    }).join('');
+    var md=document.getElementById('liefer-max'); if(md) md.textContent=maxDate();
+  }
+  function editPart(i){state.editIdx=i;renderParts();}
+  function savePart(i){var inp=document.getElementById('editdate');if(inp)state.parts[i].eta=inp.value.trim()||state.parts[i].eta;state.editIdx=-1;renderParts();toast('Liefertermin gespeichert ✓');}
+
+  /* ---- Reparatur-Status (Kunde) ---- */
+  function renderStatus(){
+    var big=document.getElementById('status-big'); if(big)big.textContent=REPAIR[state.repairStep];
+    var c=document.getElementById('status-steps');
+    if(c){c.innerHTML=REPAIR.map(function(s,i){var cls=i<state.repairStep?'done':(i===state.repairStep?'now':'muted');return '<li class="'+cls+'"><span class="dot"></span>'+s+'</li>';}).join('');}
+    var eta=document.getElementById('status-eta'); if(eta) eta.textContent=(state.repairStep>=REPAIR.length-1)?'🎉 Fahrzeug ist abholbereit!':'voraussichtlich abholbereit: 06.06.2026';
+  }
+  function advanceRepair(){
+    if(state.repairStep<REPAIR.length-1){
+      state.repairStep++;
+      state.status=(state.repairStep===REPAIR.length-1)?'Abholbereit':('In Reparatur – '+REPAIR[state.repairStep]);
+      render();
+      toast('📱 WhatsApp an Kunde: „'+REPAIR[state.repairStep]+'\"');
+    }else{toast('Fahrzeug ist bereits abholbereit');}
+  }
+
+  /* ---- QR-Code (Pseudo) ---- */
+  function makeQR(){
+    var N=29,cell=4,S=N*cell,svg='<svg width="120" height="120" viewBox="0 0 '+S+' '+S+'" xmlns="http://www.w3.org/2000/svg"><rect width="'+S+'" height="'+S+'" fill="#fff"/>';
+    function inFinder(x,y){return (x<8&&y<8)||(x>N-9&&y<8)||(x<8&&y>N-9);}
+    for(var y=0;y<N;y++){for(var x=0;x<N;x++){ if(inFinder(x,y))continue; if(((x*7+y*3)%5)===0){svg+='<rect x="'+(x*cell)+'" y="'+(y*cell)+'" width="'+cell+'" height="'+cell+'" fill="#0f172a"/>';} }}
+    function finder(ox,oy){svg+='<rect x="'+(ox*cell)+'" y="'+(oy*cell)+'" width="'+(7*cell)+'" height="'+(7*cell)+'" fill="#0f172a"/><rect x="'+((ox+1)*cell)+'" y="'+((oy+1)*cell)+'" width="'+(5*cell)+'" height="'+(5*cell)+'" fill="#fff"/><rect x="'+((ox+2)*cell)+'" y="'+((oy+2)*cell)+'" width="'+(3*cell)+'" height="'+(3*cell)+'" fill="#0f172a"/>';}
+    finder(0,0);finder(N-7,0);finder(0,N-7);
+    return svg+'</svg>';
+  }
+
+  var WA_MSG=
+"Hallo Herr Gärtner 👋\n\n"+
+"Ihr BMW (MOS PG 707) ist startklar für die Reparatur – die Ersatzteile sind\n"+
+"bestellt und treffen bis 05.06.2026 bei uns ein.\n\n"+
+"Unser Terminvorschlag:\n"+
+"📅 Donnerstag, 05.06.2026, 08:00 Uhr\n"+
+"📍 Karosserie & Lack Gärtner, Binauer Höhe 4, 74821 Mosbach\n\n"+
+"Bitte bringen Sie den Fahrzeugschein mit; planen Sie ca. 1 Tag ein. Gerne\n"+
+"besprechen wir vor Ort mögliche Zusatzleistungen.\n\n"+
+"Passt der Termin? Antworten Sie einfach mit JA – oder schlagen Sie uns eine\n"+
+"Alternative vor. 🚗🔧\n\n"+
+"Viele Grüße\n"+
+"Ihr Team von Karosserie & Lack Gärtner";
+  function showWa(){document.getElementById('wa-text').textContent=WA_MSG;document.getElementById('wa-preview').style.display='block';}
+  function sendWa(){state.kundeMsgs.push({from:'ws',text:WA_MSG});state.kundeStage='sent';document.getElementById('wa-preview').style.display='none';renderKunde();toast('📲 WhatsApp an den Kunden gesendet ✓');}
+  function kundeReply(){state.kundeMsgs.push({from:'ku',text:'Hallo, ja – der Termin am 05.06. um 08:00 passt mir gut 👍 Ich bringe den BMW vorbei.'});state.kundeStage='confirmed';renderKunde();toast('🔔 Der Kunde hat geantwortet – Termin bestätigt');}
+  function startRepair(){state.repairStep=0;state.status='In Reparatur – Fahrzeug angenommen';render();go('status');toast('🔧 Reparatur gestartet – der Kunde wird bei jedem Schritt per WhatsApp informiert');}
+  function renderKunde(){
+    var c=document.getElementById('chat-kunde');
+    if(c){ if(state.kundeMsgs.length){c.style.display='flex';c.innerHTML=state.kundeMsgs.map(function(m){var who=m.from==='ku'?'Kunde':'Werkstatt (WhatsApp)';return '<div class="msg '+(m.from==='ku'?'kin':'kout')+'"><div class="who">'+who+'</div>'+escapeHtml(m.text)+'</div>';}).join('');}else{c.style.display='none';} }
+    var n=document.getElementById('kunde-note'); if(n){ if(state.kundeStage==='confirmed'){n.style.display='block';n.innerHTML='🔔 <b>Der Kunde hat geantwortet:</b> Termin bestätigt ✓';}else{n.style.display='none';} }
+    var b=document.getElementById('wa-btn'); if(b) b.style.display=(state.kundeStage==='idle')?'inline-block':'none';
+    var a=document.getElementById('kunde-actions');
+    if(a){ if(state.kundeStage==='sent'){a.innerHTML='<button class="btn sec" onclick="kundeReply()">▶ (Demo) Antwort des Kunden eintreffen lassen</button>';}else if(state.kundeStage==='confirmed'){a.innerHTML='<button class="btn big" onclick="startRepair()">🔧 Reparatur starten →</button>';}else{a.innerHTML='';} }
+  }
+
+  /* ---- Init ---- */
+  document.querySelectorAll('.qr').forEach(function(el){el.innerHTML=makeQR();});
+  function dashView(v){
+    document.getElementById('dash-werkstatt').style.display=(v==='w')?'block':'none';
+    document.getElementById('dash-vers').style.display=(v==='v')?'block':'none';
+    document.getElementById('dv-w').classList.toggle('on',v==='w');
+    document.getElementById('dv-v').classList.toggle('on',v==='v');
+  }
+  function vAnalyzePolice(){state.assignSb='300 €';var el=document.getElementById('v-sb');if(el){el.style.display='block';el.innerHTML='✓ Police analysiert – <b>Selbstbeteiligung lt. Police: 300 €</b> (vom Kunden zu tragen).';}toast('📄 Police analysiert – Selbstbeteiligung erkannt: 300 €');}
+  function assignToWorkshop(){state.assignment={fahrzeug:'BMW 116d · MOS PG 707',art:'Kaskoschaden',bring:'04.06.2026'};state.status='Neu zugeteilt (von Versicherung)';toast('✓ Der Werkstatt Gärtner zugewiesen – erscheint im Werkstatt-Cockpit');dashView('w');go('dash');}
+  function renderAssigned(){var c=document.getElementById('assigned');if(!c)return;if(state.assignment){var a=state.assignment;c.innerHTML='<div class="case" style="border-color:var(--accent);background:#fff7ed" onclick="go(\'akte\')"><div class="av" style="background:var(--accent)">🆕</div><div class="meta"><b>Neu zugeteilt: '+a.fahrzeug+'</b><div>von Versicherung · '+a.art+' · Kunde bringt '+a.bring+' · SB '+(state.assignSb||'lt. Police')+'</div></div><div class="st">Holen/Bringen klären</div></div>';}else{c.innerHTML='';}}
+  setMode('fiktiv');
+  setSchadenart('hp');
+  dashView('w');
+  go('dash');
+</script>
+</body>
+</html>

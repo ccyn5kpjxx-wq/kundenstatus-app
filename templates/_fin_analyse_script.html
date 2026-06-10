@@ -1,0 +1,273 @@
+<script>
+(() => {
+  if (window.__finAnalyseLoaded) return;
+  window.__finAnalyseLoaded = true;
+  const endpoint = '{{ url_for("api_fin_analysieren") }}';
+  const hsnTsnEndpoint = '{{ url_for("api_hsn_tsn_analysieren") }}';
+
+  const csrfTokenFor = (element) => (
+    element?.closest('form')?.querySelector('input[name="csrf_token"]')?.value
+    || document.querySelector('input[name="csrf_token"]')?.value
+    || ''
+  );
+
+  const requestFinAnalysis = (fin, externalLookup = false, token = '') => new Promise((resolve, reject) => {
+    const payload = JSON.stringify({ fin_nummer: fin, external_lookup: externalLookup ? '1' : '' });
+    const handleResponse = (status, text) => {
+      let data = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (error) {
+        reject(new Error('ungueltige_antwort'));
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        reject(new Error(data.error || 'fin_pruefung_fehler'));
+        return;
+      }
+      resolve(data);
+    };
+    if (window.fetch) {
+      window.fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': token
+        },
+        body: payload
+      }).then((response) => response.text().then((text) => handleResponse(response.status, text))).catch(reject);
+      return;
+    }
+    if (!window.XMLHttpRequest) {
+      const frameName = `fin-analyse-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const iframe = document.createElement('iframe');
+      iframe.name = frameName;
+      iframe.hidden = true;
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = endpoint;
+      form.target = frameName;
+      form.hidden = true;
+      [
+        ['csrf_token', token],
+        ['fin_nummer', fin],
+        ['external_lookup', externalLookup ? '1' : '']
+      ].forEach(([name, value]) => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = value;
+        form.appendChild(input);
+      });
+      iframe.addEventListener('load', () => {
+        try {
+          const text = iframe.contentDocument?.body?.textContent || '';
+          handleResponse(200, text);
+        } catch (error) {
+          reject(error);
+        } finally {
+          form.remove();
+          iframe.remove();
+        }
+      }, { once: true });
+      document.body.appendChild(iframe);
+      document.body.appendChild(form);
+      form.submit();
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', endpoint, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.setRequestHeader('X-CSRF-Token', token);
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState === 4) {
+        handleResponse(xhr.status, xhr.responseText || '');
+      }
+    };
+    xhr.onerror = () => reject(new Error('netzwerkfehler'));
+    xhr.send(payload);
+  });
+
+  const requestHsnTsnAnalysis = (hsn, tsn, token = '') => new Promise((resolve, reject) => {
+    const payload = JSON.stringify({ hsn_nummer: hsn, tsn_nummer: tsn });
+    const handleResponse = (status, text) => {
+      let data = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (error) {
+        reject(new Error('ungueltige_antwort'));
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        reject(new Error(data.error || 'hsn_tsn_pruefung_fehler'));
+        return;
+      }
+      resolve(data);
+    };
+    if (window.fetch) {
+      window.fetch(hsnTsnEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': token
+        },
+        body: payload
+      }).then((response) => response.text().then((text) => handleResponse(response.status, text))).catch(reject);
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', hsnTsnEndpoint, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.setRequestHeader('X-CSRF-Token', token);
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState === 4) {
+        handleResponse(xhr.status, xhr.responseText || '');
+      }
+    };
+    xhr.onerror = () => reject(new Error('netzwerkfehler'));
+    xhr.send(payload);
+  });
+
+  const vehicleInputFor = (widget) => {
+    const selector = widget.dataset.finVehicleTarget || '';
+    if (selector) {
+      const target = document.querySelector(selector);
+      if (target) return target;
+    }
+    const form = widget.closest('form');
+    return form?.querySelector('[data-vehicle-input], input[name="fahrzeug"]')
+      || document.querySelector('[data-vehicle-input], input[name="fahrzeug"]');
+  };
+
+  const shouldReplaceVehicle = (vehicleInput, data) => {
+    if (!vehicleInput || !data.vehicle_hint) return false;
+    const current = (vehicleInput.value || '').trim();
+    const genericValues = ['', 'fahrzeug', 'neues fahrzeug', 'unbekannt', 'offen'];
+    if (vehicleInput.dataset.finSuggested === '1') return true;
+    if (genericValues.includes(current.toLowerCase())) return true;
+    return data.manufacturer && current.toLowerCase() === String(data.manufacturer).toLowerCase();
+  };
+
+  document.querySelectorAll('[data-fin-widget]').forEach((widget) => {
+    const finInput = widget.querySelector('[data-fin-input]');
+    const finButton = widget.querySelector('[data-fin-analyze]');
+    const finResult = widget.parentElement?.querySelector('[data-fin-result]') || widget.querySelector('[data-fin-result]');
+    if (!finInput || !finButton || !finResult || finButton.dataset.finBound === '1') return;
+    finButton.dataset.finBound = '1';
+    const runAnalysis = async (externalLookup = false) => {
+      const fin = (finInput.value || '').trim().toUpperCase();
+      if (!fin) {
+        finResult.textContent = 'Bitte zuerst eine FIN eingeben.';
+        finResult.className = 'form-text text-danger';
+        return;
+      }
+      const oldFinDisabled = finButton.disabled;
+      finButton.disabled = true;
+      if (externalLookup) {
+        finResult.textContent = 'Externe Fahrzeugdaten werden abgefragt. Das kann ein paar Sekunden dauern.';
+        finResult.className = 'form-text text-muted';
+      }
+      const oldText = finButton.textContent;
+      finButton.textContent = 'Prüfe...';
+      try {
+        const data = await requestFinAnalysis(fin, externalLookup, csrfTokenFor(widget));
+        finInput.value = data.fin || fin;
+        const warningText = data.warnings && data.warnings.length ? ` Hinweis: ${data.warnings.join(' ')}` : '';
+        finResult.textContent = `${data.summary || 'Keine lokale Zuordnung gefunden.'}${warningText}`;
+        finResult.className = `form-text ${data.ok ? 'text-success' : 'text-warning'}`;
+        const vehicleInput = vehicleInputFor(widget);
+        if (shouldReplaceVehicle(vehicleInput, data)) {
+          vehicleInput.value = data.vehicle_hint;
+          vehicleInput.dataset.finSuggested = '1';
+        }
+      } catch (error) {
+        finResult.textContent = externalLookup
+          ? 'Externe Fahrzeugdaten konnten gerade nicht abgefragt werden.'
+          : 'FIN konnte gerade nicht geprüft werden.';
+        finResult.className = 'form-text text-danger';
+      } finally {
+        finButton.disabled = oldFinDisabled;
+        finButton.textContent = oldText;
+      }
+    };
+    finButton.addEventListener('click', () => runAnalysis(false));
+  });
+
+  document.querySelectorAll('form').forEach((form) => {
+    const hsnInput = form.querySelector('input[name="hsn_nummer"]');
+    const tsnInput = form.querySelector('input[name="tsn_nummer"]');
+    if (!hsnInput || !tsnInput || hsnInput.dataset.hsnTsnBound === '1') return;
+    hsnInput.dataset.hsnTsnBound = '1';
+    const tsnColumn = tsnInput.closest('[class*="col-"]') || tsnInput.parentElement;
+    const actions = document.createElement('div');
+    actions.className = 'mt-2 d-flex gap-2 flex-wrap';
+    actions.dataset.hsnTsnWidget = '1';
+    const analyzeButton = document.createElement('button');
+    analyzeButton.type = 'button';
+    analyzeButton.className = 'btn btn-outline-dark btn-sm';
+    analyzeButton.dataset.hsnTsnAnalyze = '1';
+    analyzeButton.textContent = 'HSN/TSN analysieren';
+    const result = document.createElement('div');
+    result.className = 'form-text';
+    result.dataset.hsnTsnResult = '1';
+    actions.appendChild(analyzeButton);
+    tsnColumn.appendChild(actions);
+    tsnColumn.appendChild(result);
+    let autoTimer = null;
+    let lastAutoKey = '';
+
+    const runHsnTsnAnalysis = async (isAutomatic = false) => {
+      const hsn = (hsnInput.value || '').trim().toUpperCase();
+      const tsn = (tsnInput.value || '').trim().toUpperCase();
+      if (!hsn || !tsn) {
+        if (!isAutomatic) {
+          result.textContent = 'Bitte HSN und TSN eintragen, dann gemeinsam analysieren.';
+          result.className = 'form-text text-danger';
+        }
+        return;
+      }
+      const key = `${hsn}|${tsn}`;
+      if (isAutomatic && key === lastAutoKey) return;
+      if (isAutomatic) lastAutoKey = key;
+      const oldText = analyzeButton.textContent;
+      analyzeButton.disabled = true;
+      analyzeButton.textContent = 'Prüfe...';
+      result.textContent = 'HSN und TSN werden geprüft.';
+      result.className = 'form-text text-muted';
+      try {
+        const data = await requestHsnTsnAnalysis(hsn, tsn, csrfTokenFor(form));
+        const warningText = data.warnings && data.warnings.length ? ` Hinweis: ${data.warnings.join(' ')}` : '';
+        result.textContent = `${data.summary || 'HSN/TSN geprüft.'}${warningText}`;
+        result.className = `form-text ${data.ok ? 'text-success' : 'text-warning'}`;
+        if (data.ok) {
+          hsnInput.value = data.hsn || hsn;
+          tsnInput.value = data.tsn || tsn;
+        }
+      } catch (error) {
+        result.textContent = 'HSN/TSN konnte gerade nicht geprüft werden.';
+        result.className = 'form-text text-danger';
+      } finally {
+        analyzeButton.disabled = false;
+        analyzeButton.textContent = oldText;
+      }
+    };
+
+    const scheduleHsnTsnAnalysis = () => {
+      window.clearTimeout(autoTimer);
+      const hsn = (hsnInput.value || '').trim();
+      const tsn = (tsnInput.value || '').trim();
+      if (!hsn || !tsn) {
+        result.textContent = '';
+        result.className = 'form-text';
+        return;
+      }
+      autoTimer = window.setTimeout(() => runHsnTsnAnalysis(true), 450);
+    };
+
+    analyzeButton.addEventListener('click', () => runHsnTsnAnalysis(false));
+    hsnInput.addEventListener('input', scheduleHsnTsnAnalysis);
+    tsnInput.addEventListener('input', scheduleHsnTsnAnalysis);
+  });
+})();
+</script>
+{% include "_schluesselnummer_help.html" %}

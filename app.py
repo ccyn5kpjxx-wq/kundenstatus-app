@@ -452,7 +452,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "Neuwiesenweg 19",
         "plz": "74834",
         "ort": "Elztal-Dallau",
-        "zugangscode": "PFAFF2026",
+        "zugangscode": "",
         "portal_titel": "Portal Auto Pfaff",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Auto Pfaff.",
         "notiz": "Aus Kundenordner angelegt und mit öffentlichem Impressum ergänzt am 26.04.2026.",
@@ -467,7 +467,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "Ortsstraße 7",
         "plz": "74847",
         "ort": "Obrigheim-Asbach",
-        "zugangscode": "MUELLER2026",
+        "zugangscode": "",
         "portal_titel": "Portal Autohaus Müller",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Autohaus Müller.",
         "notiz": "Aus Rechnungen im Kundenordner übernommen am 26.04.2026.",
@@ -482,7 +482,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "Langenelzer Str. 45",
         "plz": "69427",
         "ort": "Mudau",
-        "zugangscode": "HSE2026",
+        "zugangscode": "",
         "portal_titel": "Portal HSE Autowelt",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von HSE Autowelt.",
         "notiz": "Aus Kundenordner/Partnermappe ergänzt am 26.04.2026. Ansprechpartner bitte bei Gelegenheit final prüfen.",
@@ -497,7 +497,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "Hohlweg 24",
         "plz": "74821",
         "ort": "Mosbach",
-        "zugangscode": "DOLD2026",
+        "zugangscode": "",
         "portal_titel": "Portal Dold & Deisling",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Dold & Deisling.",
         "notiz": "Adresse aus vorhandenen Rechnungen im Kundenordner übernommen am 26.04.2026.",
@@ -512,7 +512,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "Mosbacher Straße 67",
         "plz": "74821",
         "ort": "Mosbach",
-        "zugangscode": "KAES2026",
+        "zugangscode": "",
         "portal_titel": "Portal Käsmann",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Käsmann.",
         "notiz": "Stammdaten ergänzt am 26.04.2026. Quelle: Käsmann-Impressum; Audi-Standort zusätzlich Industriestraße 1a, 74821 Mosbach.",
@@ -527,7 +527,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "An der Autobahn 12-16",
         "plz": "27404",
         "ort": "Gyhum/Bockel",
-        "zugangscode": "MHC2026",
+        "zugangscode": "",
         "portal_titel": "Portal MHC Mobility",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von MHC Mobility.",
         "notiz": "Aus Kundenordner und MHC-Impressum ergänzt am 26.04.2026.",
@@ -542,7 +542,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "",
         "plz": "",
         "ort": "",
-        "zugangscode": "LOCK2026",
+        "zugangscode": "",
         "portal_titel": "Portal Kraftfahrzeugtechnik Lock",
         "willkommen_text": "",
         "notiz": "",
@@ -557,7 +557,7 @@ DEFAULT_AUTOHAEUSER = [
         "strasse": "",
         "plz": "",
         "ort": "",
-        "zugangscode": "GUENTHER2026",
+        "zugangscode": "",
         "portal_titel": "Portal Autohaus Günther",
         "willkommen_text": "Willkommen im persönlichen Terminbereich von Autohaus Günther.",
         "notiz": "Gebrauchtwagenkoordinator. Fax: 06282/6345. Webseite: www.wolfert-gruppe.de",
@@ -570,21 +570,21 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "aachener-muenchener-generali",
         "portal_key": "aachenermuenchener2026",
         "email": "service@generali.de",
-        "zugangscode": "AACHENER2026",
+        "zugangscode": "",
         "notiz": "Altname der Generali. Offizieller Generali Kontakt: https://www.generali.de/service-kontakt/kontakt",
     },
     {
         "name": "ADAC Autoversicherung",
         "slug": "adac-autoversicherung",
         "portal_key": "adacauto2026",
-        "zugangscode": "ADAC2026",
+        "zugangscode": "",
         "notiz": "Offiziell bevorzugt online/Telefon. Kontakt: https://www.adac.de/produkte/versicherungen/autoversicherung/kontakt/",
     },
     {
         "name": "AdmiralDirekt",
         "slug": "admiraldirekt",
         "portal_key": "admiraldirekt2026",
-        "zugangscode": "ADMIRAL2026",
+        "zugangscode": "",
         "notiz": "Offizielle Schadenmeldung online/Telefon: https://www.admiraldirekt.de/schadenservice/",
     },
     {
@@ -592,21 +592,21 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "allianz",
         "portal_key": "allianz2026",
         "email": "sachschaden@allianz.de",
-        "zugangscode": "ALLIANZ2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schaden-E-Mail laut Allianz Unfall-Checkliste.",
     },
     {
         "name": "Allianz Direct",
         "slug": "allianz-direct",
         "portal_key": "allianzdirect2026",
-        "zugangscode": "ALLIANZD2026",
+        "zugangscode": "",
         "notiz": "Offizielle Schadenmeldung online/Telefon: https://www.allianzdirect.de/service/",
     },
     {
         "name": "AllSecur (Allianz Direct)",
         "slug": "allsecur-allianz-direct",
         "portal_key": "allsecur2026",
-        "zugangscode": "ALLSECUR2026",
+        "zugangscode": "",
         "notiz": "Ehemalige Marke, heute Allianz Direct.",
     },
     {
@@ -614,7 +614,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "alte-leipziger",
         "portal_key": "alteleipziger2026",
         "email": "schaden@alte-leipziger.de",
-        "zugangscode": "ALTELEIPZIGER2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.alte-leipziger.de/service/schaden-melden/kfz-schaden-melden/kfz-schaden-online-melden",
     },
     {
@@ -622,7 +622,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "axa",
         "portal_key": "axa2026",
         "email": "schaden@axa.de",
-        "zugangscode": "AXA2026",
+        "zugangscode": "",
         "notiz": "AXA nennt online/Telefon als Standard; Maklerkontakt führt schaden@axa.de.",
     },
     {
@@ -630,7 +630,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "baloise",
         "portal_key": "baloise2026",
         "email": "schaden@baloise.de",
-        "zugangscode": "BALOISE2026",
+        "zugangscode": "",
         "notiz": "Kfz-Kaskoschaden: https://www.baloise.de/de/kontakt-service/schadenservice/kfz-kasko.html",
     },
     {
@@ -638,7 +638,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "barmenia",
         "portal_key": "barmenia2026",
         "email": "schaden@barmenia.de",
-        "zugangscode": "BARMENIA2026",
+        "zugangscode": "",
         "notiz": "BarmeniaGothaer Partnerportal Schadenkontakt.",
     },
     {
@@ -646,7 +646,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "bavariadirekt",
         "portal_key": "bavariadirekt2026",
         "email": "schaden@bavariadirekt.de",
-        "zugangscode": "BAVARIA2026",
+        "zugangscode": "",
         "notiz": "FAQ Schadenunterlagen: https://www.bavariadirekt.de/kontakt/entry/711/",
     },
     {
@@ -655,7 +655,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "bgv2026",
         "email": "kfz-schaden@bgv.de",
         "telefon": "0721 660-4444",
-        "zugangscode": "BGV2026",
+        "zugangscode": "",
         "notiz": "Kraftfahrt Schaden Fachbereich: https://makler.bgv.de/makler/infos/infocenter/kontaktcenter/fachbereiche/",
     },
     {
@@ -663,7 +663,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "concordia",
         "portal_key": "concordia2026",
         "email": "schaden@concordia.de",
-        "zugangscode": "CONCORDIA2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.concordia.de/service/schaeden-aenderungen/schaden-melden/schaden-kfz/",
     },
     {
@@ -671,7 +671,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "condor-versicherungen",
         "portal_key": "condor2026",
         "email": "ruv@ruv.de",
-        "zugangscode": "CONDOR2026",
+        "zugangscode": "",
         "notiz": "Condor Komposit/Kfz wird über R+V Service geführt: https://www.condor-versicherungen.de/service/fuer-kunden",
     },
     {
@@ -680,7 +680,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "continentale2026",
         "email": "schaden@continentale.de",
         "telefon": "0231 12010-10",
-        "zugangscode": "CONTINENTALE2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenabteilung: https://www.continentale.de/schadenservice",
     },
     {
@@ -688,7 +688,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "cosmosdirekt",
         "portal_key": "cosmosdirekt2026",
         "telefon": "0681 966 6815",
-        "zugangscode": "COSMOS2026",
+        "zugangscode": "",
         "notiz": "Offizielle Kfz-Schadenmeldung online/Telefon: https://www.cosmosdirekt.de/schaden-melden/kfz-versicherung/",
     },
     {
@@ -696,7 +696,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "da-direkt",
         "portal_key": "dadirekt2026",
         "telefon": "0221 7715 7766",
-        "zugangscode": "DADIREKT2026",
+        "zugangscode": "",
         "notiz": "Offizieller Schadenservice online/Telefon: https://www.da-direkt.de/schadenservice/autoschaden",
     },
     {
@@ -704,7 +704,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "debeka",
         "portal_key": "debeka2026",
         "email": "kundenservice@debeka.de",
-        "zugangscode": "DEBEKA2026",
+        "zugangscode": "",
         "notiz": "Allgemeiner offizieller Kontakt: https://www.debeka.de/impressum.html",
     },
     {
@@ -713,7 +713,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "devk2026",
         "email": "info@devk.de",
         "telefon": "0800 4 757 757",
-        "zugangscode": "DEVK2026",
+        "zugangscode": "",
         "notiz": "Schadenmeldung bevorzugt online/Telefon: https://www.devk.de/service/schadenmeldung/",
     },
     {
@@ -722,7 +722,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "dialog2026",
         "email": "schaden@dialog-versicherung.de",
         "telefon": "089 5121-5404",
-        "zugangscode": "DIALOG2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.dialog-versicherung.de/produkte/privatkunden-komposit/kraftfahrt/pkw",
     },
     {
@@ -731,7 +731,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "diebayerische2026",
         "email": "schaden@diebayerische.de",
         "telefon": "089 6787-5050",
-        "zugangscode": "BAYERISCHE2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenformular/Schadenanzeige der Bayerischen.",
     },
     {
@@ -739,7 +739,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "ergo",
         "portal_key": "ergo2026",
         "telefon": "0800 3746 310",
-        "zugangscode": "ERGO2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenmeldung online/Telefon: https://www.ergo.de/de/Service/ereignis-melden/schadenfall-melden/kfz",
     },
     {
@@ -748,7 +748,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "europa2026",
         "email": "schaden@europa.de",
         "telefon": "0221 606070-70",
-        "zugangscode": "EUROPA2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.europa.de/service/schadenmeldung/",
     },
     {
@@ -757,7 +757,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "generali2026",
         "email": "service@generali.de",
         "telefon": "089 5121-4477",
-        "zugangscode": "GENERALI2026",
+        "zugangscode": "",
         "notiz": "Offizieller Kontakt: https://www.generali.de/service-kontakt/kontakt",
     },
     {
@@ -766,14 +766,14 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "gothaer2026",
         "email": "schaden@gothaer.de",
         "telefon": "030 5508-81508",
-        "zugangscode": "GOTHAER2026",
+        "zugangscode": "",
         "notiz": "Schadenmeldung Partnerportal: https://partner.gothaer.de/service/schadenmeldung.htm",
     },
     {
         "name": "GVV Direktversicherung",
         "slug": "gvv-direktversicherung",
         "portal_key": "gvv2026",
-        "zugangscode": "GVV2026",
+        "zugangscode": "",
         "notiz": "In Partnerwerkstattlisten üblich; E-Mail vor erster Meldung prüfen.",
     },
     {
@@ -782,7 +782,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "hansemerkur2026",
         "email": "hma-schaden@hansemerkur.de",
         "telefon": "040 4119-4333",
-        "zugangscode": "HANSE2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.hansemerkur.de/kontakt/service-telefon",
     },
     {
@@ -791,7 +791,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "hdi2026",
         "email": "info@hdi.de",
         "telefon": "0511 645-46160",
-        "zugangscode": "HDI2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenmeldung online/Telefon; offizielle Kontaktmail info@hdi.de: https://www.hdi.de/service/hdi-services/schaden-melden/schadenmeldung-kfz-versicherung/schaden-melden-kfz-verteiler/",
     },
     {
@@ -799,7 +799,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "helvetia",
         "portal_key": "helvetia2026",
         "telefon": "069 58 00 55 704",
-        "zugangscode": "HELVETIA2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schaden online/Telefon: https://www.helvetia.com/redirects/helvetia.de/service/schadenmeldung.html",
     },
     {
@@ -807,7 +807,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "huk-coburg",
         "portal_key": "huk2026",
         "email": "info@huk-coburg.de",
-        "zugangscode": "HUK2026",
+        "zugangscode": "",
         "notiz": "Fotos/Belege per E-Mail mit Schadennummer: https://www.huk.de/service/schaden.html",
     },
     {
@@ -815,7 +815,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "huk24",
         "portal_key": "huk242026",
         "email": "info@huk-coburg.de",
-        "zugangscode": "HUK242026",
+        "zugangscode": "",
         "notiz": "HUK24 Schadenkanal läuft über HUK-COBURG/online.",
     },
     {
@@ -824,7 +824,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "itzehoer2026",
         "email": "schaden@itzehoer.de",
         "telefon": "04821 773-680",
-        "zugangscode": "ITZEHOER2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.itzehoer.de/service/ratgeber/rund-ums-fahrzeug/tipps-rund-um-den-kfz-schadenfall/",
     },
     {
@@ -833,7 +833,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "janitos2026",
         "email": "schadenservice@janitos.de",
         "telefon": "06221 709 1570",
-        "zugangscode": "JANITOS2026",
+        "zugangscode": "",
         "notiz": "Schadenservice: https://www.janitos.de/services/adresse-aendern/",
     },
     {
@@ -842,14 +842,14 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "kravag2026",
         "email": "k-schaden@kravag.de",
         "telefon": "0800 533-1131",
-        "zugangscode": "KRAVAG2026",
+        "zugangscode": "",
         "notiz": "KRAVAG-online Handbuch nennt k-schaden@kravag.de; allgemeiner Kontakt: https://www.kravag.de/kundenservice/kontakt",
     },
     {
         "name": "Lippische Landesbrandversicherung",
         "slug": "lippische-landesbrandversicherung",
         "portal_key": "lippische2026",
-        "zugangscode": "LIPPISCHE2026",
+        "zugangscode": "",
         "notiz": "In Partnerwerkstattlisten üblich; E-Mail vor erster Meldung prüfen.",
     },
     {
@@ -858,7 +858,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "lvm2026",
         "email": "post@lvm.de",
         "telefon": "0251 702-4765",
-        "zugangscode": "LVM2026",
+        "zugangscode": "",
         "notiz": "Schaden online/Telefon, E-Mail post@lvm.de für Unterlagen: https://www.lvm.de/service-angebote/schaden-melden",
     },
     {
@@ -866,14 +866,14 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "mecklenburgische",
         "portal_key": "mecklenburgische2026",
         "email": "service@mecklenburgische.de",
-        "zugangscode": "MECKLENBURG2026",
+        "zugangscode": "",
         "notiz": "Offizieller Kontakt: https://www.mecklenburgische.de/service/kontakt",
     },
     {
         "name": "Neodigital",
         "slug": "neodigital",
         "portal_key": "neodigital2026",
-        "zugangscode": "NEODIGITAL2026",
+        "zugangscode": "",
         "notiz": "Digitalversicherer; E-Mail/Portal vor erster Meldung prüfen.",
     },
     {
@@ -881,7 +881,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "nuernberger",
         "portal_key": "nuernberger2026",
         "telefon": "0911 531-666 610",
-        "zugangscode": "NUERNBERGER2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt telefonisch/Formular: https://www.nuernberger.de/beratung-service/kontakt/kontaktmoeglichkeiten/",
     },
     {
@@ -890,7 +890,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "oeffentlichebs2026",
         "email": "service@oeffentliche.de",
         "telefon": "0531 202 235",
-        "zugangscode": "OEFFENTLICHE2026",
+        "zugangscode": "",
         "notiz": "Kraftfahrt Schaden/Service: https://www.oeffentliche.de/content/service/kontakt/ihre-mitteilung-an-uns/",
     },
     {
@@ -899,7 +899,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "provinzial2026",
         "email": "kfz-versicherung@provinzial.com",
         "telefon": "0211 978-5511",
-        "zugangscode": "PROVINZIAL2026",
+        "zugangscode": "",
         "notiz": "Kraftfahrt Kontakt: https://www.provinzial.de/suedwest/services/kontakt.html",
     },
     {
@@ -908,7 +908,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "rv2026",
         "email": "ruv@ruv.de",
         "telefon": "0800 533-1111",
-        "zugangscode": "RV2026",
+        "zugangscode": "",
         "notiz": "Schadenservice/Kontakt: https://www.ruv.de/service/schadenservice",
     },
     {
@@ -916,7 +916,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "rheinland-versicherungen",
         "portal_key": "rheinland2026",
         "telefon": "02131 290-2501",
-        "zugangscode": "RHEINLAND2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schaden online/Telefon: https://www.rheinland-versicherungen.de/service/formulare/schaden-melden/",
     },
     {
@@ -924,7 +924,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "rhion-digital",
         "portal_key": "rhion2026",
         "email": "schaden@rhion.digital",
-        "zugangscode": "RHION2026",
+        "zugangscode": "",
         "notiz": "Makler-Fachabteilung Schadenbearbeitung Kfz: https://rhion.digital/makler-service/ansprechpartner/fachabteilungen",
     },
     {
@@ -933,7 +933,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "signaliduna2026",
         "email": "kraftfahrt-schaden@signal-iduna.de",
         "telefon": "0800 6001200",
-        "zugangscode": "SIGNAL2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schaden online/Telefon; Maklerunterlagen nennen kraftfahrt-schaden@signal-iduna.de.",
     },
     {
@@ -942,7 +942,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "sparkassendirekt2026",
         "email": "schadenservice@sparkassen-direkt.de",
         "telefon": "0211 729-8833",
-        "zugangscode": "SDIREKT2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schadenkontakt: https://www.sparkassen-direkt.de/schaden-melden/schadenmeldung-kfz-versicherung",
     },
     {
@@ -950,7 +950,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "vgh",
         "portal_key": "vgh2026",
         "email": "schaden-kfz@vgh.de",
-        "zugangscode": "VGH2026",
+        "zugangscode": "",
         "notiz": "VGH Werkstattservice PDF nennt schaden-kfz@vgh.de.",
     },
     {
@@ -959,7 +959,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "vhv2026",
         "email": "Schaden@vhv.de",
         "telefon": "0511 65 50 50 20",
-        "zugangscode": "VHV2026",
+        "zugangscode": "",
         "notiz": "Kraftfahrt-Schadenmeldung VHV PDF nennt Schaden@vhv.de.",
     },
     {
@@ -968,7 +968,7 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "verti2026",
         "email": "schaden@verti.de",
         "telefon": "030 890 003 001",
-        "zugangscode": "VERTI2026",
+        "zugangscode": "",
         "notiz": "Kfz-Schaden FAQ: https://www.verti.de/faqs/schaden/",
     },
     {
@@ -976,14 +976,14 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "wgv-versicherung",
         "portal_key": "wgv2026",
         "telefon": "0711 1695-1500",
-        "zugangscode": "WGV2026",
+        "zugangscode": "",
         "notiz": "Schaden online/Service: https://www.wgv.de/kundenservice/",
     },
     {
         "name": "Württembergische",
         "slug": "wuerttembergische",
         "portal_key": "wuerttembergische2026",
-        "zugangscode": "WUERTT2026",
+        "zugangscode": "",
         "notiz": "In Kfz-Partnerwerkstattlisten üblich; E-Mail vor erster Meldung prüfen.",
     },
     {
@@ -991,7 +991,7 @@ DEFAULT_VERSICHERUNGEN = [
         "slug": "zurich",
         "portal_key": "zurich2026",
         "email": "schaden@zurich.com",
-        "zugangscode": "ZURICH2026",
+        "zugangscode": "",
     },
 ]
 
@@ -1927,6 +1927,21 @@ SCHADEN_ABRECHNUNG_STATUS = {
     "nachforderung": "Nachforderung läuft",
 }
 
+SCHADEN_ABRECHNUNGSARTEN = {
+    "fiktiv": {
+        "label": "Haftpflicht - fiktive Abrechnung",
+        "hint": "Netto-Reparaturkosten plus Kostenpauschale, ohne USt. Auszahlung an den Geschädigten.",
+    },
+    "konkret": {
+        "label": "Haftpflicht - Reparatur konkret",
+        "hint": "Reparatur im Betrieb, Abrechnung brutto nach Freigabe.",
+    },
+    "kasko": {
+        "label": "Kasko - Reparatur abzüglich Selbstbeteiligung",
+        "hint": "Vollkasko oder Teilkasko, brutto abzüglich vertraglicher Selbstbeteiligung.",
+    },
+}
+
 FAHRZEUG_SCHADEN_ZONEN = (
     {"key": "stossfaenger_vorne", "label": "Stoßfänger vorne", "gruppe": "Front"},
     {"key": "frontblech", "label": "Frontblech", "gruppe": "Front"},
@@ -2529,6 +2544,12 @@ app.config.update(
         RUNNING_ON_RENDER,
     ),
 )
+if RUNNING_ON_RENDER:
+    # Hinter dem Render-Proxy steht in REMOTE_ADDR sonst nur die Proxy-IP:
+    # Login-Rate-Limit und Lokal-Erkennung brauchen die echte Client-IP.
+    from werkzeug.middleware.proxy_fix import ProxyFix
+
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 
 @app.teardown_appcontext
@@ -2620,6 +2641,7 @@ def inject_csrf_helpers():
         "fahrzeugsuche_count": fahrzeugsuche_count,
         "fahrzeugsuche_auktion_alert_count": fahrzeugsuche_auktion_alert_count,
         "fahrzeugverkauf_count": fahrzeugverkauf_count,
+        "admin_versicherung_count": admin_versicherung_count,
         "admin_einkauf_count": admin_einkauf_count,
         "admin_rechnungen_count": admin_rechnungen_count,
         "admin_email_count": admin_email_count,
@@ -2840,7 +2862,7 @@ def csrf_recovery_response():
     if endpoint in {"admin_versicherung_schaden_neu", "admin_versicherung_abtretungserklaerung_pdf"}:
         session.pop(CSRF_FIELD_NAME, None)
         flash("Die Seite war veraltet. Bitte Schadenfall noch einmal prüfen und anlegen.", "warning")
-        return redirect(url_for("admin_versicherung_schaden_neu"))
+        return redirect(url_for("admin_versicherungsschaden"))
     return None
 
 
@@ -8676,6 +8698,17 @@ def init_db():
     ensure_column(db, "auftraege", "schaden_abschleppen", "TEXT DEFAULT 'unbekannt'")
     ensure_column(db, "auftraege", "schaden_vorsteuerabzug", "TEXT DEFAULT 'unbekannt'")
     ensure_column(db, "auftraege", "schaden_selbstbeteiligung", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "schaden_abrechnungsart", "TEXT DEFAULT 'fiktiv'")
+    ensure_column(db, "auftraege", "schaden_reparatur_netto", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "schaden_reparatur_ust", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "schaden_reparatur_brutto", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "schaden_kostenpauschale", "TEXT DEFAULT '25'")
+    ensure_column(db, "auftraege", "schaden_forderung_betrag", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "anspruchsteller_name", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "eigentuemer_name", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "kontoinhaber_name", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "auszahlung_iban", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "versicherung_portal_code", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "schaden_eigenauftrag", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "schaden_besichtigung_datum", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "schaden_station", "TEXT DEFAULT 'aufnahme'")
@@ -9161,7 +9194,7 @@ def seed_default_autohaeuser(db):
             "SELECT id FROM autohaeuser WHERE slug=? OR portal_key=?",
             (autohaus["slug"], autohaus["portal_key"]),
         ).fetchone()
-        values = (
+        stammdaten = (
             autohaus["name"],
             autohaus["slug"],
             autohaus["portal_key"],
@@ -9171,23 +9204,25 @@ def seed_default_autohaeuser(db):
             autohaus["strasse"],
             autohaus["plz"],
             autohaus["ort"],
-            autohaus["zugangscode"],
             autohaus["portal_titel"],
             autohaus["willkommen_text"],
             clean_text(autohaus.get("notiz")),
         )
         if existing:
+            # Zugangscode bewusst NICHT anfassen: sonst setzt jeder Neustart
+            # einen im Admin geaenderten/rotierten Code wieder zurueck.
             db.execute(
                 """
                 UPDATE autohaeuser
                 SET name=?, slug=?, portal_key=?, kontakt_name=?, email=?, telefon=?,
-                    strasse=?, plz=?, ort=?, zugangscode=?, portal_titel=?,
+                    strasse=?, plz=?, ort=?, portal_titel=?,
                     willkommen_text=?, notiz=?
                 WHERE id=?
                 """,
-                values + (existing["id"],),
+                stammdaten + (existing["id"],),
             )
             continue
+        zugangscode = clean_text(autohaus.get("zugangscode")) or secrets.token_urlsafe(9)
         db.execute(
             """
             INSERT INTO autohaeuser
@@ -9195,7 +9230,7 @@ def seed_default_autohaeuser(db):
              zugangscode, portal_titel, willkommen_text, notiz, erstellt_am)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            values + (now,),
+            stammdaten[:9] + (zugangscode,) + stammdaten[9:] + (now,),
         )
 
 
@@ -9213,7 +9248,7 @@ def seed_default_versicherungen(db):
             clean_text(versicherung.get("kontakt_name")),
             clean_text(versicherung.get("email")),
             clean_text(versicherung.get("telefon")),
-            versicherung["zugangscode"],
+            clean_text(versicherung.get("zugangscode")) or secrets.token_urlsafe(9),
             clean_text(versicherung.get("notiz")),
         )
         if existing:
@@ -9401,6 +9436,69 @@ def normalize_schadenart(value):
 def schadenart_label(value):
     key = normalize_schadenart(value)
     return dict(SCHADENARTEN).get(key, "Noch offen")
+
+
+def normalize_schaden_abrechnungsart(value, schadenart=""):
+    value = clean_text(value).lower()
+    art = normalize_schadenart(schadenart)
+    if art in {"vollkasko", "teilkasko", "glasschaden", "wildschaden", "hagel_unwetter", "vandalismus"}:
+        return "kasko"
+    return value if value in SCHADEN_ABRECHNUNGSARTEN else "fiktiv"
+
+
+def schaden_betrag_label(value):
+    amount = positive_money_amount(value)
+    return format_bonus_money(amount) if amount else clean_text(value)
+
+
+def normalize_name_key(value):
+    return re.sub(r"[^a-z0-9]", "", clean_text(value).lower())
+
+
+def schaden_fachlogik_from_form(form, fallback=None):
+    fallback = fallback or {}
+    schadenart = normalize_schadenart(form.get("schadenart") if "schadenart" in form else fallback.get("schadenart"))
+    abrechnungsart = normalize_schaden_abrechnungsart(
+        form.get("schaden_abrechnungsart") if "schaden_abrechnungsart" in form else fallback.get("schaden_abrechnungsart"),
+        schadenart,
+    )
+    netto = clean_text(form.get("schaden_reparatur_netto") if "schaden_reparatur_netto" in form else fallback.get("schaden_reparatur_netto"))
+    ust = clean_text(form.get("schaden_reparatur_ust") if "schaden_reparatur_ust" in form else fallback.get("schaden_reparatur_ust"))
+    brutto = clean_text(form.get("schaden_reparatur_brutto") if "schaden_reparatur_brutto" in form else fallback.get("schaden_reparatur_brutto"))
+    pauschale = clean_text(form.get("schaden_kostenpauschale") if "schaden_kostenpauschale" in form else fallback.get("schaden_kostenpauschale")) or "25"
+    selbstbeteiligung = clean_text(form.get("schaden_selbstbeteiligung") if "schaden_selbstbeteiligung" in form else fallback.get("schaden_selbstbeteiligung"))
+
+    netto_amount = positive_money_amount(netto)
+    ust_amount = positive_money_amount(ust)
+    brutto_amount = positive_money_amount(brutto)
+    pauschale_amount = positive_money_amount(pauschale) or 0.0
+    sb_amount = positive_money_amount(selbstbeteiligung) or 0.0
+
+    if abrechnungsart == "fiktiv":
+        claim_amount = (netto_amount or 0.0) + pauschale_amount if netto_amount or pauschale_amount else 0.0
+    elif abrechnungsart == "kasko":
+        claim_amount = max((brutto_amount or 0.0) - sb_amount, 0.0) if brutto_amount else 0.0
+    else:
+        claim_amount = brutto_amount or 0.0
+
+    names_fallback = clean_text(fallback.get("kunde_name") or fallback.get("versicherungsnehmer"))
+    anspruchsteller = clean_text(form.get("anspruchsteller_name") if "anspruchsteller_name" in form else fallback.get("anspruchsteller_name")) or names_fallback
+    eigentuemer = clean_text(form.get("eigentuemer_name") if "eigentuemer_name" in form else fallback.get("eigentuemer_name")) or anspruchsteller
+    kontoinhaber = clean_text(form.get("kontoinhaber_name") if "kontoinhaber_name" in form else fallback.get("kontoinhaber_name")) or anspruchsteller
+
+    return {
+        "schaden_abrechnungsart": abrechnungsart,
+        "schaden_reparatur_netto": netto,
+        "schaden_reparatur_ust": ust,
+        "schaden_reparatur_brutto": brutto,
+        "schaden_kostenpauschale": pauschale,
+        "schaden_forderung_betrag": format_bonus_money(claim_amount) if claim_amount else clean_text(form.get("schaden_forderung_betrag") if "schaden_forderung_betrag" in form else fallback.get("schaden_forderung_betrag")),
+        "anspruchsteller_name": anspruchsteller,
+        "eigentuemer_name": eigentuemer,
+        "kontoinhaber_name": kontoinhaber,
+        "auszahlung_iban": clean_text(form.get("auszahlung_iban") if "auszahlung_iban" in form else fallback.get("auszahlung_iban")).replace(" ", "").upper(),
+        "versicherung_portal_code": clean_text(form.get("versicherung_portal_code") if "versicherung_portal_code" in form else fallback.get("versicherung_portal_code")) or uuid.uuid4().hex[:4].upper(),
+    }
 
 
 def normalize_fin(value):
@@ -12389,6 +12487,27 @@ def fahrzeugverkauf_count():
         return 0
 
 
+def admin_versicherung_count():
+    try:
+        db = get_db()
+        row = db.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM auftraege
+            WHERE COALESCE(versicherung_id, 0) > 0
+              AND COALESCE(archiviert, 0) = 0
+              AND NOT (
+                COALESCE(quelle, '') = 'autohaus'
+                AND COALESCE(angebotsphase, 0) != 0
+              )
+            """
+        ).fetchone()
+        db.close()
+        return int(row["count"] or 0)
+    except Exception:
+        return 0
+
+
 def gt_motive_ready_payload(auftrag, versicherung=None):
     selected_zones = parse_schaden_zonen((auftrag or {}).get("schaden_zonen_json"))
     return {
@@ -13420,6 +13539,39 @@ def row_to_auftrag(row):
         auftrag[feld] = value if value in SCHADEN_STEUERUNG_OPTIONEN else "unbekannt"
         auftrag[f"{feld}_label"] = SCHADEN_STEUERUNG_OPTIONEN[auftrag[feld]]
     auftrag["schaden_selbstbeteiligung"] = clean_text(auftrag.get("schaden_selbstbeteiligung"))
+    auftrag["schaden_abrechnungsart"] = normalize_schaden_abrechnungsart(
+        auftrag.get("schaden_abrechnungsart"),
+        auftrag.get("schadenart"),
+    )
+    auftrag["schaden_abrechnungsart_meta"] = SCHADEN_ABRECHNUNGSARTEN[auftrag["schaden_abrechnungsart"]]
+    for feld in (
+        "schaden_reparatur_netto",
+        "schaden_reparatur_ust",
+        "schaden_reparatur_brutto",
+        "schaden_kostenpauschale",
+        "schaden_forderung_betrag",
+    ):
+        auftrag[feld] = clean_text(auftrag.get(feld))
+        auftrag[f"{feld}_label"] = schaden_betrag_label(auftrag[feld])
+    if not auftrag["schaden_kostenpauschale"]:
+        auftrag["schaden_kostenpauschale"] = "25"
+        auftrag["schaden_kostenpauschale_label"] = "25,00 €"
+    for feld in ("anspruchsteller_name", "eigentuemer_name", "kontoinhaber_name", "auszahlung_iban", "versicherung_portal_code"):
+        auftrag[feld] = clean_text(auftrag.get(feld))
+    if not auftrag["anspruchsteller_name"]:
+        auftrag["anspruchsteller_name"] = clean_text(auftrag.get("kunde_name") or auftrag.get("versicherungsnehmer"))
+    if not auftrag["eigentuemer_name"]:
+        auftrag["eigentuemer_name"] = auftrag["anspruchsteller_name"]
+    if not auftrag["kontoinhaber_name"]:
+        auftrag["kontoinhaber_name"] = auftrag["anspruchsteller_name"]
+    if not auftrag["versicherung_portal_code"] and auftrag.get("versicherung_id"):
+        auftrag["versicherung_portal_code"] = f"{int(auftrag.get('id') or 0):04d}"[-4:]
+    identity_names = [
+        normalize_name_key(auftrag.get("anspruchsteller_name")),
+        normalize_name_key(auftrag.get("eigentuemer_name")),
+        normalize_name_key(auftrag.get("kontoinhaber_name")),
+    ]
+    auftrag["schaden_identitaet_ok"] = bool(identity_names[0] and len(set(identity_names)) == 1)
     auftrag["schaden_eigenauftrag"] = bool(auftrag.get("schaden_eigenauftrag"))
     station_keys = {key for key, _ in SCHADEN_KANBAN_STATIONEN}
     station = clean_text(auftrag.get("schaden_station")) or "aufnahme"
@@ -16123,7 +16275,9 @@ def normalize_lexware_rechnung_status(voucher_status="", payment_status="", due_
         amount_open = float(open_amount or 0)
     except (TypeError, ValueError):
         amount_open = 0
-    if voucher_status in {"paid", "paidoff", "voided"} or payment_status == "balanced" or amount_open <= 0:
+    if voucher_status == "voided":
+        return "storniert"
+    if voucher_status in {"paid", "paidoff"} or payment_status == "balanced" or amount_open <= 0:
         return "bezahlt"
     if voucher_status == "unchecked":
         return "pruefen"
@@ -16142,6 +16296,8 @@ def lexware_rechnung_status_label(status):
         "ueberfaellig": "ueberfaellig",
         "in_zahlung": "in Zahlung",
         "pruefen": "zu pruefen",
+        "storniert": "storniert",
+        "geloescht": "in Lexware geloescht",
     }.get(clean_text(status), clean_text(status) or "offen")
 
 
@@ -16164,13 +16320,25 @@ def lexware_rechnung_permalink(voucher_id, voucher_type):
     return f"{LEXWARE_APP_BASE_URL}/permalink/{path}/view/{voucher_id}"
 
 
-def fetch_lexware_voucherlist(voucher_types, voucher_status, size=100):
-    query = (
-        f"?voucherType={quote(voucher_types)}"
-        f"&voucherStatus={quote(voucher_status)}"
-        f"&archived=false&size={int(size)}&page=0&sort=updatedDate,DESC"
-    )
-    return lexware_request("GET", "/v1/voucherlist", query=query).get("content", [])
+def fetch_lexware_voucherlist(voucher_types, voucher_status, size=100, max_pages=25):
+    # Alle Seiten holen, nicht nur die erste: sonst fehlen aeltere Belege
+    # (z. B. laengst bezahlte Rechnungen) und die Monatszahlen sind unvollstaendig.
+    items = []
+    page = 0
+    while page < max_pages:
+        query = (
+            f"?voucherType={quote(voucher_types)}"
+            f"&voucherStatus={quote(voucher_status)}"
+            f"&archived=false&size={int(size)}&page={page}&sort=updatedDate,DESC"
+        )
+        data = lexware_request("GET", "/v1/voucherlist", query=query)
+        content = data.get("content", [])
+        items.extend(content)
+        if not content or data.get("last", True):
+            break
+        page += 1
+        time.sleep(0.3)
+    return items
 
 
 def fetch_lexware_payment(voucher_id):
@@ -16256,17 +16424,38 @@ def sync_lexware_rechnungen():
         return {"ok": False, "message": "LEXWARE_API_KEY fehlt.", "synced": 0}
     synced = 0
     errors = []
-    for voucher_status in ("open", "overdue", "transferred", "sepadebit", "paid"):
+    seen_voucher_ids = set()
+    for voucher_status in ("open", "overdue", "transferred", "sepadebit", "paid", "voided"):
         try:
             vouchers = fetch_lexware_voucherlist("invoice,salesinvoice,purchaseinvoice,downpaymentinvoice", voucher_status)
         except RuntimeError as exc:
             errors.append(str(exc))
             continue
         for voucher in vouchers:
-            payment = fetch_lexware_payment(voucher.get("id"))
-            upsert_lexware_rechnung(voucher, payment)
+            if voucher_status == "voided":
+                # Stornierte Belege ohne Payment-Abruf uebernehmen; der Status
+                # wird ueber voucherStatus=voided als 'storniert' gespeichert.
+                upsert_lexware_rechnung(voucher)
+            else:
+                payment = fetch_lexware_payment(voucher.get("id"))
+                upsert_lexware_rechnung(voucher, payment)
+            seen_voucher_ids.add(clean_text(voucher.get("id")))
             synced += 1
             time.sleep(0.55)
+    if not errors and seen_voucher_ids:
+        # Belege, die Lexware gar nicht mehr liefert (geloescht), nicht weiter
+        # als gueltig mitzaehlen. Nur nach komplettem, fehlerfreiem Abgleich.
+        db = get_db()
+        try:
+            platzhalter = ",".join("?" for _ in seen_voucher_ids)
+            db.execute(
+                f"UPDATE lexware_rechnungen SET status='geloescht', geaendert_am=? "
+                f"WHERE voucher_id NOT IN ({platzhalter}) AND status != 'geloescht'",
+                (now_str(), *seen_voucher_ids),
+            )
+            db.commit()
+        finally:
+            db.close()
     set_app_setting("LEXWARE_LAST_SYNC", now_str())
     set_app_setting("LEXWARE_LAST_SYNC_ERROR", "\n".join(errors)[:1000])
     schedule_change_backup("lexware-rechnungen")
@@ -25922,6 +26111,19 @@ def build_versicherung_anschreiben(auftrag, versicherung=None, dateien=None):
     bauteile = parse_manual_parts(auftrag.get("bauteile_override"))
     empfaenger = clean_text(auftrag.get("versicherung_email")) or clean_text(versicherung.get("email"))
     cc = clean_text(auftrag.get("versicherung_email_cc"))
+    schadenart = normalize_schadenart(auftrag.get("schadenart"))
+    abrechnungsart = normalize_schaden_abrechnungsart(auftrag.get("schaden_abrechnungsart"), schadenart)
+    netto = schaden_betrag_label(auftrag.get("schaden_reparatur_netto")) or "offen"
+    ust = schaden_betrag_label(auftrag.get("schaden_reparatur_ust")) or "offen"
+    brutto = schaden_betrag_label(auftrag.get("schaden_reparatur_brutto")) or "offen"
+    pauschale = schaden_betrag_label(auftrag.get("schaden_kostenpauschale")) or "25,00 €"
+    sb = schaden_betrag_label(auftrag.get("schaden_selbstbeteiligung")) or "laut Police"
+    forderung = schaden_betrag_label(auftrag.get("schaden_forderung_betrag")) or "offen"
+    anspruchsteller = clean_text(auftrag.get("anspruchsteller_name")) or kunde
+    eigentuemer = clean_text(auftrag.get("eigentuemer_name")) or anspruchsteller
+    kontoinhaber = clean_text(auftrag.get("kontoinhaber_name")) or anspruchsteller
+    iban = clean_text(auftrag.get("auszahlung_iban"))
+    portal_code = clean_text(auftrag.get("versicherung_portal_code")) or f"{int(auftrag.get('id') or 0):04d}"[-4:]
     gt_details = []
     if clean_text(auftrag.get("gt_motive_model_code")):
         gt_details.append(f"GT-Modellcode: {clean_text(auftrag.get('gt_motive_model_code'))}")
@@ -25933,8 +26135,24 @@ def build_versicherung_anschreiben(auftrag, versicherung=None, dateien=None):
         doc_type = clean_text(datei.get("dokument_typ"))
         datei_labels.append(f"{label}{f' ({doc_type})' if doc_type else ''}")
 
+    try:
+        portal_link = url_for(
+            "admin_versicherung_schaden_vorschau_versicherung",
+            auftrag_id=int(auftrag.get("id") or 0),
+            _external=True,
+        )
+    except Exception:
+        portal_link = f"/admin/versicherung/schaden/{int(auftrag.get('id') or 0)}/vorschau/versicherung"
+
+    if abrechnungsart == "kasko":
+        betreff = f"Kaskoschaden - {fahrzeug}{f' ({kennzeichen})' if kennzeichen else ''} - Schadenmeldung & Reparatur"
+    elif abrechnungsart == "konkret":
+        betreff = f"Haftpflichtschaden / Reparaturauftrag - {fahrzeug}{f' ({kennzeichen})' if kennzeichen else ''}"
+    else:
+        betreff = f"Haftpflichtschaden / fiktive Abrechnung - {fahrzeug}{f' ({kennzeichen})' if kennzeichen else ''}"
+
     lines = [
-        f"Betreff: Schadenmeldung / Bitte um Reparaturfreigabe - {fahrzeug}{f' - {kennzeichen}' if kennzeichen else ''}",
+        f"Betreff: {betreff}",
         "",
         f"An: {empfaenger or 'bitte Empfaengeradresse ergaenzen'}",
     ]
@@ -25945,12 +26163,13 @@ def build_versicherung_anschreiben(auftrag, versicherung=None, dateien=None):
             "",
             "Sehr geehrte Damen und Herren,",
             "",
-            "wir zeigen hiermit den nachfolgend beschriebenen Kfz-Schaden an und bitten um zeitnahe Pruefung sowie Reparaturfreigabe.",
-            "Die Unterlagen wurden durch uns fachlich vorsortiert. Die Einschaetzung erfolgt vorbehaltlich einer weitergehenden Demontage, Vermessung und finalen Kalkulation.",
+            "wir zeigen hiermit den nachfolgend beschriebenen Kfz-Schaden an und bitten um zeitnahe Pruefung.",
+            "Die Unterlagen wurden durch uns fachlich vorsortiert. Fotos, Kalkulation und Belege liegen im Schadenportal bereit.",
             "",
             "Zusammenfassung des Schadenfalls:",
             f"- Versicherung: {clean_text(versicherung.get('name')) or clean_text(auftrag.get('versicherung_name')) or 'bitte ergaenzen'}",
             f"- Schadenart: {schadenart_label(auftrag.get('schadenart'))}",
+            f"- Abrechnung: {SCHADEN_ABRECHNUNGSARTEN[abrechnungsart]['label']}",
             f"- Fahrzeug: {fahrzeug}",
         ]
     )
@@ -25972,6 +26191,13 @@ def build_versicherung_anschreiben(auftrag, versicherung=None, dateien=None):
         lines.append(f"- Schaden-Nr.: {schaden_nummer}")
     if bauteile:
         lines.append(f"- Reparaturumfang laut Analyse: {', '.join(bauteile[:8])}")
+    lines.extend(
+        [
+            f"- Anspruchsteller: {anspruchsteller or 'offen'}",
+            f"- Eigentuemer: {eigentuemer or 'offen'}",
+            f"- Kontoinhaber: {kontoinhaber or 'offen'}",
+        ]
+    )
     if clean_text(auftrag.get("schaden_fahrbereit")) and auftrag.get("schaden_fahrbereit") != "unbekannt":
         lines.append(f"- Fahrbereitschaft: {clean_text(auftrag.get('schaden_fahrbereit_label')) or SCHADEN_STEUERUNG_OPTIONEN.get(auftrag.get('schaden_fahrbereit'), '')}")
     if clean_text(auftrag.get("schaden_abschleppen")) and auftrag.get("schaden_abschleppen") != "unbekannt":
@@ -25988,18 +26214,62 @@ def build_versicherung_anschreiben(auftrag, versicherung=None, dateien=None):
         lines.append("- Beigefuegte Unterlagen: werden bei Bedarf nachgereicht")
     if beschreibung:
         lines.extend(["", "Schadenbild / Kundenangaben:", beschreibung])
+
+    if abrechnungsart == "fiktiv":
+        lines.extend(
+            [
+                "",
+                "Abrechnung (fiktiv, auf Kalkulationsbasis):",
+                f"  Reparaturkosten netto ........ {netto}",
+                f"  Allgemeine Kostenpauschale ... {pauschale}",
+                f"  Gesamtforderung .............. {forderung}",
+                "Die USt wird - fiktive Abrechnung - nicht geltend gemacht (§ 249 Abs. 2 S. 2 BGB).",
+                "",
+                "Bitte ueberweisen Sie die Gesamtforderung auf das Konto des Geschaedigten:",
+                f"  Kontoinhaber: {kontoinhaber or 'offen'}",
+                f"  IBAN: {iban or 'bitte ergaenzen'}",
+            ]
+        )
+    elif abrechnungsart == "kasko":
+        lines.extend(
+            [
+                "",
+                "Abrechnung (Kasko):",
+                f"  Reparaturkosten brutto ....... {brutto}",
+                f"  abzgl. Selbstbeteiligung ..... {sb}",
+                f"  Erstattung Versicherung ...... {forderung}",
+                "Die Selbstbeteiligung traegt der Kunde laut Police; Police und Deckung sind im Portal nachvollziehbar.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "Abrechnung (konkrete Reparatur in unserem Betrieb):",
+                f"  Reparaturkosten netto ........ {netto}",
+                f"  zzgl. 19 % USt. .............. {ust}",
+                f"  Reparaturkosten brutto ....... {brutto}",
+                "Die Reparatur erfolgt in unserem Betrieb; Zahlung nach Freigabe/Rechnung an die Werkstatt.",
+            ]
+        )
+
     lines.extend(
         [
             "",
+            "Volle Transparenz - keine Nachforderungen noetig:",
+            "Alle Fotos, die Kalkulation und saemtliche Unterlagen liegen bereits vollstaendig im Schadenportal. Sie koennen direkt pruefen, Rueckfragen im Portal stellen und Freigabe oder Auszahlung mit einem Klick bestaetigen.",
+            f"  Zugang:      {portal_link}",
+            f"  Zugangscode: {portal_code}",
+            "",
             "Fachliche Ersteinschaetzung:",
             "Nach Sichtung der vorliegenden Angaben und Bilder ist eine karosserie- und lackiertechnische Instandsetzung zu erwarten. Verdeckte Beschaedigungen an Haltern, Fuehrungen, Befestigungspunkten oder angrenzenden Bauteilen koennen erst nach Demontage belastbar beurteilt werden.",
-            "Soweit angrenzende Bauteile oder Flaechen in der Kalkulation enthalten sind, dient dies der fachgerechten Wiederherstellung von Farbton, Verlauf und Oberflaechenbild. Erforderliche Beilackierungen, De-/Montagearbeiten und Materialpositionen werden mit Gutachten/Kalkulation und Schadenfotos dokumentiert.",
             "Wir dokumentieren den gesamten Ablauf mit Bildern, Unterlagen und Statusverlauf, damit die Regulierung nachvollziehbar bleibt.",
             "",
-            "Bitte teilen Sie uns mit, ob weitere Unterlagen benoetigt werden. Nach Ihrer Freigabe kann das Autohaus die Einplanung bei Lackierzentrum Gärtner Karosserie & Lack GmbH veranlassen.",
+            "Bitte bestaetigen Sie die Freigabe, Auszahlung oder eventuelle Rueckfrage direkt im Portal.",
             "",
             "Mit freundlichen Grüßen",
-            "Gärtner Karosserie & Lack",
+            "Christopher Gärtner",
+            "Karosserie & Lack Gärtner GmbH",
         ]
     )
     return "\n".join(lines)
@@ -26023,6 +26293,47 @@ def refresh_versicherung_anschreiben(auftrag_id):
     db.commit()
     db.close()
     return anschreiben
+
+
+def update_auftrag_schaden_fachlogik(auftrag_id, form, fallback=None):
+    data = schaden_fachlogik_from_form(form, fallback)
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET schaden_abrechnungsart=?,
+            schaden_reparatur_netto=?,
+            schaden_reparatur_ust=?,
+            schaden_reparatur_brutto=?,
+            schaden_kostenpauschale=?,
+            schaden_forderung_betrag=?,
+            anspruchsteller_name=?,
+            eigentuemer_name=?,
+            kontoinhaber_name=?,
+            auszahlung_iban=?,
+            versicherung_portal_code=?,
+            geaendert_am=?
+        WHERE id=?
+        """,
+        (
+            data["schaden_abrechnungsart"],
+            data["schaden_reparatur_netto"],
+            data["schaden_reparatur_ust"],
+            data["schaden_reparatur_brutto"],
+            data["schaden_kostenpauschale"],
+            data["schaden_forderung_betrag"],
+            data["anspruchsteller_name"],
+            data["eigentuemer_name"],
+            data["kontoinhaber_name"],
+            data["auszahlung_iban"],
+            data["versicherung_portal_code"],
+            now_str(),
+            auftrag_id,
+        ),
+    )
+    db.commit()
+    db.close()
+    return data
 
 
 def datei_match_text(datei):
@@ -31642,6 +31953,311 @@ def admin_zugaenge():
     )
 
 
+# --- Zahlen / Umsatz-Ziel (Cockpit-Kachel) ---------------------------------
+# Liest die echten Einnahmen/Ausgaben aus den synchronisierten Lexware-Rechnungen
+# (Tabelle lexware_rechnungen) und stellt sie als Monatsziel mit Tendenz/Ampel dar.
+# Das Ziel berechnet sich automatisch: Vormonat schlagen; liegt der Monat vor dem
+# Vormonats-Tempo, kommt die Haelfte des Vorsprungs (max. +15 %) obendrauf.
+UMSATZ_MONATE = (
+    "", "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+)
+
+
+def umsatz_euro_label(value):
+    try:
+        amount = float(value or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    return f"{amount:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def umsatz_parse_voucher_date(value):
+    text = clean_text(value)[:10]
+    if not text:
+        return None
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def umsatz_ziel_daten(jahr=None, monat=None):
+    heute = datetime.now().date()
+    if not jahr or not monat:
+        jahr, monat = heute.year, heute.month
+    try:
+        jahr = int(jahr)
+        monat = int(monat)
+    except (TypeError, ValueError):
+        jahr, monat = heute.year, heute.month
+    if monat < 1 or monat > 12 or jahr < 2000 or jahr > 2100:
+        jahr, monat = heute.year, heute.month
+
+    def days_in_month(y, m):
+        nxt = datetime(y + 1, 1, 1) if m == 12 else datetime(y, m + 1, 1)
+        return (nxt - timedelta(days=1)).day
+
+    def prev_month(y, m):
+        return (y - 1, 12) if m == 1 else (y, m - 1)
+
+    def next_month(y, m):
+        return (y + 1, 1) if m == 12 else (y, m + 1)
+
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT voucher_date, total_amount, richtung FROM lexware_rechnungen "
+            "WHERE COALESCE(status, '') NOT IN ('storniert', 'geloescht')"
+        ).fetchall()
+    except Exception:
+        rows = []
+    finally:
+        db.close()
+
+    monats_summen = {}
+    tages_summen = {}
+    eintraege = 0
+    for row in rows:
+        datum = umsatz_parse_voucher_date(row["voucher_date"])
+        if not datum:
+            continue
+        try:
+            betrag = float(row["total_amount"] or 0)
+        except (TypeError, ValueError):
+            continue
+        richtung = clean_text(row["richtung"])
+        if richtung == "Einnahme":
+            key = "einnahmen"
+        elif richtung == "Ausgabe":
+            key = "ausgaben"
+        else:
+            continue
+        eintraege += 1
+        ym = (datum.year, datum.month)
+        monats_summen.setdefault(ym, {"einnahmen": 0.0, "ausgaben": 0.0})[key] += betrag
+        tag_dict = tages_summen.setdefault(ym, {"einnahmen": {}, "ausgaben": {}})
+        tag_dict[key][datum.day] = tag_dict[key].get(datum.day, 0.0) + betrag
+
+    cur = (jahr, monat)
+    ist_aktueller_monat = cur == (heute.year, heute.month)
+    ist_zukunft = cur > (heute.year, heute.month)
+    tage_im_monat = days_in_month(jahr, monat)
+    if ist_aktueller_monat:
+        as_of = heute.day
+    elif cur < (heute.year, heute.month):
+        as_of = tage_im_monat
+    else:
+        as_of = 0
+
+    def bisher(ym, schluessel, bis_tag):
+        werte = tages_summen.get(ym, {}).get(schluessel, {})
+        return sum(amt for tag, amt in werte.items() if tag <= bis_tag)
+
+    einnahmen_bisher = bisher(cur, "einnahmen", as_of)
+    ausgaben_bisher = bisher(cur, "ausgaben", as_of)
+    einnahmen_monat_total = monats_summen.get(cur, {}).get("einnahmen", 0.0)
+    ausgaben_monat_total = monats_summen.get(cur, {}).get("ausgaben", 0.0)
+    differenz_bisher = einnahmen_bisher - ausgaben_bisher
+
+    prev_y, prev_m = prev_month(jahr, monat)
+    vm = (prev_y, prev_m)
+    vormonat_einnahmen_bisher = bisher(vm, "einnahmen", as_of)
+    vormonat_einnahmen_total = monats_summen.get(vm, {}).get("einnahmen", 0.0)
+    tendenz_delta = einnahmen_bisher - vormonat_einnahmen_bisher
+    if vormonat_einnahmen_bisher > 0:
+        tendenz_pct = round(tendenz_delta / vormonat_einnahmen_bisher * 100)
+    else:
+        tendenz_pct = None
+
+    # Auto-Ziel: Vormonat schlagen; laeuft der Monat staerker als der Vormonat
+    # (gleicher Stichtag), kommt die Haelfte des Vorsprungs als Aufschlag dazu,
+    # gedeckelt bei +15 %. In den ersten 2 Tagen kein Aufschlag (zu wenig Daten).
+    bump_pct = 0
+    if vormonat_einnahmen_total > 0 and not ist_zukunft:
+        if (
+            ist_aktueller_monat
+            and as_of >= 3
+            and tendenz_pct is not None
+            and tendenz_pct > 0
+        ):
+            bump_pct = min(tendenz_pct // 2, 15)
+        ziel_raw = vormonat_einnahmen_total * (1 + bump_pct / 100)
+        ziel_cents = int(round(ziel_raw * 100))
+        ziel = float(-(-ziel_cents // 100000) * 1000)
+    else:
+        ziel = 0.0
+
+    if ist_zukunft:
+        ziel_erklaerung = (
+            "Der Monat hat noch nicht begonnen — das Auto-Ziel berechnet sich, "
+            "sobald der Vormonat abgeschlossen ist."
+        )
+    elif ziel <= 0:
+        ziel_erklaerung = (
+            "Noch keine Vormonats-Zahlen vorhanden — sobald ein voller Monat in "
+            "Lexware steht, setzt sich das Ziel von selbst."
+        )
+    elif bump_pct > 0:
+        ziel_erklaerung = (
+            f"Vormonat {umsatz_euro_label(vormonat_einnahmen_total)} + {bump_pct} % Aufschlag, "
+            f"weil ihr aktuell {tendenz_pct} % vor dem Vormonats-Tempo liegt — aufgerundet."
+        )
+    elif ist_aktueller_monat:
+        ziel_erklaerung = (
+            f"Vormonat schlagen: {umsatz_euro_label(vormonat_einnahmen_total)} aufgerundet. "
+            "Sobald ihr vor dem Vormonats-Tempo liegt, steigt das Ziel automatisch mit."
+        )
+    else:
+        ziel_erklaerung = (
+            f"Maßstab für diesen Monat: den Vormonat ({umsatz_euro_label(vormonat_einnahmen_total)}) schlagen."
+        )
+
+    fortschritt_pct = round(einnahmen_bisher / ziel * 100) if ziel > 0 else 0
+
+    if ist_aktueller_monat and as_of > 0:
+        hochrechnung = einnahmen_bisher / as_of * tage_im_monat
+    else:
+        hochrechnung = einnahmen_bisher
+
+    if ziel <= 0:
+        ampel = "neutral"
+    elif hochrechnung >= ziel:
+        ampel = "gruen"
+    elif hochrechnung >= ziel * 0.85:
+        ampel = "gelb"
+    else:
+        ampel = "rot"
+    if ziel > 0 and ist_aktueller_monat and as_of < 3:
+        ampel = "neutral"
+
+    uebersicht = []
+    for ym in sorted(monats_summen.keys()):
+        e = monats_summen[ym].get("einnahmen", 0.0)
+        a = monats_summen[ym].get("ausgaben", 0.0)
+        vm_von_ym = prev_month(ym[0], ym[1])
+        vm_einnahmen = monats_summen.get(vm_von_ym, {}).get("einnahmen", 0.0)
+        uebersicht.append({
+            "jahr": ym[0],
+            "monat": ym[1],
+            "label": f"{UMSATZ_MONATE[ym[1]]} {ym[0]}",
+            "einnahmen_label": umsatz_euro_label(e),
+            "ausgaben_label": umsatz_euro_label(a),
+            "differenz_label": umsatz_euro_label(e - a),
+            "differenz_positiv": (e - a) >= 0,
+            "ist_aktiv": ym == cur,
+            "vormonat_geschlagen": vm_einnahmen > 0 and e > vm_einnahmen and ym != cur,
+        })
+    uebersicht.reverse()
+
+    next_y, next_m = next_month(jahr, monat)
+
+    return {
+        "jahr": jahr,
+        "monat": monat,
+        "monat_label": f"{UMSATZ_MONATE[monat]} {jahr}",
+        "ist_aktueller_monat": ist_aktueller_monat,
+        "ist_zukunft": ist_zukunft,
+        "as_of": as_of,
+        "tage_im_monat": tage_im_monat,
+        "heute_label": heute.strftime("%d.%m.%Y"),
+        "hat_daten": eintraege > 0,
+        "eintraege": eintraege,
+        "lexware_verbunden": bool(LEXWARE_API_KEY),
+        "last_sync": get_app_setting("LEXWARE_LAST_SYNC", ""),
+        "einnahmen_bisher_label": umsatz_euro_label(einnahmen_bisher),
+        "ausgaben_bisher_label": umsatz_euro_label(ausgaben_bisher),
+        "differenz_bisher_label": umsatz_euro_label(differenz_bisher),
+        "differenz_positiv": differenz_bisher >= 0,
+        "einnahmen_monat_total_label": umsatz_euro_label(einnahmen_monat_total),
+        "ausgaben_monat_total_label": umsatz_euro_label(ausgaben_monat_total),
+        "ziel": ziel,
+        "ziel_label": umsatz_euro_label(ziel),
+        "ziel_gesetzt": ziel > 0,
+        "ziel_erklaerung": ziel_erklaerung,
+        "bump_pct": bump_pct,
+        "fortschritt_pct": fortschritt_pct,
+        "fortschritt_capped": max(0, min(fortschritt_pct, 100)),
+        "hochrechnung_label": umsatz_euro_label(hochrechnung),
+        "ampel": ampel,
+        "vormonat_label": f"{UMSATZ_MONATE[prev_m]} {prev_y}",
+        "nachmonat_label": f"{UMSATZ_MONATE[next_m]} {next_y}",
+        "vormonat_einnahmen_bisher_label": umsatz_euro_label(vormonat_einnahmen_bisher),
+        "vormonat_einnahmen_total_label": umsatz_euro_label(vormonat_einnahmen_total),
+        "tendenz_delta_label": umsatz_euro_label(abs(tendenz_delta)),
+        "tendenz_pct": tendenz_pct,
+        "tendenz_up": tendenz_delta >= 0,
+        "uebersicht": uebersicht,
+        "prev_jahr": prev_y,
+        "prev_monat": prev_m,
+        "next_jahr": next_y,
+        "next_monat": next_m,
+    }
+
+
+_LEXWARE_HINTERGRUND_SYNC_LOCK = threading.Lock()
+_lexware_hintergrund_sync_laeuft = False
+
+
+def lexware_sync_im_hintergrund_starten():
+    # Wie maybe_sync_lexware_rechnungen, aber ohne die Seite zu blockieren:
+    # der Abgleich laeuft in einem Hintergrund-Thread, die Seite rendert sofort
+    # aus den lokal gespeicherten Zahlen. Fehler (Netz, Lexware, DB) bleiben im
+    # Thread und werden nur als LEXWARE_LAST_SYNC_ERROR vermerkt.
+    global _lexware_hintergrund_sync_laeuft
+    if app.config.get("TESTING") or not LEXWARE_API_KEY:
+        return
+    last_sync = get_app_setting("LEXWARE_LAST_SYNC", "")
+    try:
+        last_dt = datetime.strptime(last_sync, DATETIME_FMT)
+    except ValueError:
+        last_dt = None
+    if last_dt and datetime.now() - last_dt < timedelta(minutes=LEXWARE_AUTO_SYNC_MINUTES):
+        return
+    with _LEXWARE_HINTERGRUND_SYNC_LOCK:
+        if _lexware_hintergrund_sync_laeuft:
+            return
+        _lexware_hintergrund_sync_laeuft = True
+
+    def _laufen():
+        global _lexware_hintergrund_sync_laeuft
+        try:
+            sync_lexware_rechnungen()
+        except Exception as exc:
+            try:
+                set_app_setting("LEXWARE_LAST_SYNC_ERROR", clean_text(str(exc))[:1000])
+            except Exception:
+                pass
+        finally:
+            _lexware_hintergrund_sync_laeuft = False
+
+    threading.Thread(target=_laufen, daemon=True).start()
+
+
+@app.route("/admin/zahlen")
+@admin_required
+def admin_zahlen():
+    lexware_sync_im_hintergrund_starten()
+    try:
+        jahr = int(request.args.get("jahr") or 0)
+    except (TypeError, ValueError):
+        jahr = 0
+    try:
+        monat = int(request.args.get("monat") or 0)
+    except (TypeError, ValueError):
+        monat = 0
+    daten = umsatz_ziel_daten(jahr or None, monat or None)
+    return render_template("zahlen_admin.html", z=daten)
+
+
+@app.route("/admin/versicherungsschaden")
+@admin_required
+def admin_versicherungsschaden():
+    return send_file(BASE / "templates" / "versicherungsschaden.html", mimetype="text/html")
+
+
 @app.route("/admin/versicherung")
 @admin_required
 def admin_versicherung():
@@ -31694,10 +32310,14 @@ def admin_versicherung_abtretungserklaerung_pdf():
 @app.route("/admin/versicherung/schaden/neu", methods=["GET", "POST"])
 @admin_required
 def admin_versicherung_schaden_neu():
+    if request.method == "GET":
+        return redirect(url_for("admin_versicherungsschaden"))
+
     versicherungen = list_versicherungen()
     if request.method == "POST":
         form = request.form
-        files = get_allowed_uploads(request.files.getlist("dateien"))
+        uploaded_files = request.files.getlist("dateien") + request.files.getlist("dateien_zusatz")
+        files = get_allowed_uploads(uploaded_files)
         versicherung_aus_upload_offen = False
         versicherung_id = int(form.get("versicherung_id") or 0)
         if not versicherung_id and clean_text(form.get("versicherung_name")):
@@ -31719,6 +32339,7 @@ def admin_versicherung_schaden_neu():
                 "versicherung_schaden_neu.html",
                 versicherungen=versicherungen,
                 schadenarten=SCHADENARTEN,
+                abrechnungsarten=SCHADEN_ABRECHNUNGSARTEN,
                 schadenart_hinweise=VERSICHERUNG_SCHADENART_HINTS,
                 schaden_zonen=FAHRZEUG_SCHADEN_ZONEN,
             )
@@ -31763,6 +32384,15 @@ def admin_versicherung_schaden_neu():
             )
             db.commit()
             db.close()
+        update_auftrag_schaden_fachlogik(
+            auftrag_id,
+            form,
+            fallback={
+                "kunde_name": clean_text(form.get("kunde_name")),
+                "versicherungsnehmer": clean_text(form.get("versicherungsnehmer")),
+                "schadenart": normalize_schadenart(form.get("schadenart")),
+            },
+        )
         if files:
             upload_result = save_uploads(auftrag_id, files, "intern", "standard", upload_note=form.get("upload_notiz"))
             flash_upload_analysis_result(upload_result, "Schadenunterlagen hochgeladen und analysiert.")
@@ -31781,6 +32411,7 @@ def admin_versicherung_schaden_neu():
         "versicherung_schaden_neu.html",
         versicherungen=versicherungen,
         schadenarten=SCHADENARTEN,
+        abrechnungsarten=SCHADEN_ABRECHNUNGSARTEN,
         schadenart_hinweise=VERSICHERUNG_SCHADENART_HINTS,
         schaden_zonen=FAHRZEUG_SCHADEN_ZONEN,
     )
@@ -32367,13 +32998,14 @@ def admin_versicherung_schaden_detail(auftrag_id):
         )
         db.commit()
         db.close()
+        update_auftrag_schaden_fachlogik(auftrag_id, form, fallback=auftrag)
         files = get_allowed_uploads(request.files.getlist("dateien"))
         if files:
             upload_result = save_uploads(auftrag_id, files, "intern", "standard", upload_note=form.get("upload_notiz"))
             flash_upload_analysis_result(upload_result, "Schadenunterlagen hochgeladen und analysiert.")
         else:
             flash("Schadenfall gespeichert.", "success")
-        if not clean_text(form.get("versicherung_anschreiben")):
+        if clean_text(form.get("aktion")) != "save_mail" or not clean_text(form.get("versicherung_anschreiben")):
             refresh_versicherung_anschreiben(auftrag_id)
         schedule_change_backup("versicherung-schaden-update")
         return redirect(url_for("admin_versicherung_schaden_detail", auftrag_id=auftrag_id))
@@ -32404,17 +33036,16 @@ def admin_versicherung_schaden_detail(auftrag_id):
     )
     mark_chat_gelesen(auftrag_id, "admin")
     versicherung = get_versicherung(auftrag.get("versicherung_id"))
-    anschreiben = clean_text(auftrag.get("versicherung_anschreiben")) or build_versicherung_anschreiben(
-        auftrag,
-        versicherung,
-        dateien,
-    )
+    anschreiben = clean_text(auftrag.get("versicherung_anschreiben"))
+    if not anschreiben or "Volle Transparenz" not in anschreiben:
+        anschreiben = build_versicherung_anschreiben(auftrag, versicherung, dateien)
     return render_template(
         "versicherung_schaden_detail.html",
         auftrag=auftrag,
         versicherung=versicherung,
         versicherungen=list_versicherungen(),
         schadenarten=SCHADENARTEN,
+        abrechnungsarten=SCHADEN_ABRECHNUNGSARTEN,
         schadenart_hinweise=VERSICHERUNG_SCHADENART_HINTS,
         freigabe_status=VERSICHERUNG_FREIGABE_STATUS,
         schaden_zonen=FAHRZEUG_SCHADEN_ZONEN,
@@ -38043,6 +38674,32 @@ def partner_reklamation(slug, auftrag_id):
         reklamation_id=reklamation_id,
     )
     flash("Reklamation als Alarm an die Werkstatt gemeldet.", "danger")
+    return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+
+
+@app.route("/partner/<slug>/reklamation/<int:reklamation_id>/loeschen", methods=["POST"])
+def partner_reklamation_loeschen(slug, reklamation_id):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+    reklamation = get_reklamation(reklamation_id)
+    if (
+        not reklamation
+        or int(reklamation.get("autohaus_id") or 0) != int(autohaus["id"] or 0)
+        or clean_text(reklamation.get("quelle")) != "autohaus"
+    ):
+        abort(404)
+    auftrag_id = reklamation["auftrag_id"]
+    for datei in list_dateien_by_reklamation(reklamation_id):
+        if clean_text(datei.get("quelle")) == "autohaus":
+            delete_partner_datei(autohaus["id"], datei["id"])
+    db = get_db()
+    db.execute("UPDATE dateien SET reklamation_id=0 WHERE reklamation_id=?", (reklamation_id,))
+    db.execute("DELETE FROM reklamationen WHERE id=?", (reklamation_id,))
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag_id))
+    db.commit()
+    db.close()
+    flash("Reklamation samt Anhängen gelöscht.", "info")
     return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
 

@@ -324,6 +324,9 @@
         <div class="info-tile"><span>Begutachtung</span><strong>{{ auftrag['schaden_besichtigung_datum'] or 'offen' }}</strong></div>
         <div class="info-tile"><span>Kalkulation</span><strong>{{ auftrag['gt_motive_kalkulation_betrag'] or auftrag['kosten_gutachten_betrag'] or 'offen' }}</strong></div>
         <div class="info-tile"><span>Selbstbeteiligung</span><strong>{{ auftrag['schaden_selbstbeteiligung'] or 'offen' }}</strong></div>
+        <div class="info-tile"><span>Abrechnung</span><strong>{{ auftrag['schaden_abrechnungsart_meta']['label'] }}</strong></div>
+        <div class="info-tile"><span>Forderung</span><strong>{{ auftrag['schaden_forderung_betrag_label'] or 'offen' }}</strong></div>
+        <div class="info-tile"><span>Anspruchsteller</span><strong>{{ auftrag['anspruchsteller_name'] or 'offen' }}</strong></div>
         <div class="info-tile"><span>Fahrbereit</span><strong>{{ auftrag['schaden_fahrbereit_label'] }}</strong></div>
       </div>
       <div class="mt-3">

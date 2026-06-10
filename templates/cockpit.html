@@ -680,7 +680,7 @@
         <div class="d-flex gap-2 flex-wrap justify-content-lg-end">
           <a href="{{ url_for('dashboard') }}#auftraege" class="btn btn-brand btn-lg">Lackierportal</a>
           <a href="{{ url_for('neuer_auftrag') }}" class="btn btn-outline-light btn-lg">Fahrzeug neu</a>
-          <a href="{{ url_for('admin_versicherung_schaden_neu') }}" class="btn btn-outline-light btn-lg">Versicherungsschaden</a>
+          <a href="{{ url_for('admin_versicherungsschaden') }}" class="btn btn-outline-light btn-lg">Versicherungsschaden</a>
           <a href="{{ url_for('admin_postfach') }}" class="btn btn-outline-light btn-lg">Postfach</a>
           <a href="{{ url_for('admin_zugaenge') }}" class="btn btn-outline-light btn-lg">Zugänge</a>
         </div>
@@ -792,6 +792,41 @@
     </div>
   </div>
 
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-6 col-xl-3">
+    <a class="page-card module-tile" href="{{ url_for('admin_leads') }}">
+      <span class="module-kicker">Anfragen</span>
+      <h5 class="mb-0">Leads</h5>
+      <p class="text-muted mb-0">Neue Anfragen, Rückrufe und nächste Aktionen bündeln.</p>
+      <span class="module-count">{{ admin_leads_count() }}</span>
+    </a>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <a class="page-card module-tile" href="{{ url_for('admin_fahrzeugsuche') }}">
+      <span class="module-kicker">Auktion</span>
+      <h5 class="mb-0">Fahrzeugsuche</h5>
+      <p class="text-muted mb-0">Suchprofile, Kandidaten und Auktionsalarme prüfen.</p>
+      <span class="module-count">{{ fahrzeugsuche_auktion_alert_count() or fahrzeugsuche_count() }}</span>
+    </a>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <a class="page-card module-tile" href="{{ url_for('admin_fahrzeugverkauf') }}">
+      <span class="module-kicker">Verkauf</span>
+      <h5 class="mb-0">Fahrzeugverkauf</h5>
+      <p class="text-muted mb-0">Verkaufsfahrzeuge, Preisprüfung und Verkaufsschild vorbereiten.</p>
+      <span class="module-count">{{ fahrzeugverkauf_count() }}</span>
+    </a>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <a class="page-card module-tile" href="{{ url_for('admin_versicherung') }}">
+      <span class="module-kicker">Schadenportal</span>
+      <h5 class="mb-0">Versicherungsportal</h5>
+      <p class="text-muted mb-0">Versicherungsschäden, Freigaben und Zuteilungen steuern.</p>
+      <span class="module-count">{{ admin_versicherung_count() }}</span>
+    </a>
+  </div>
 </div>
 
 {#

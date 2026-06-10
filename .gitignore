@@ -11,6 +11,7 @@ env/
 # Flask / local runtime
 instance/
 .webassets-cache/
+.agent-hub/
 
 # Secrets and local config
 .env
@@ -37,4 +38,3 @@ logs/
 Thumbs.db
 .idea/
 .vscode/
-

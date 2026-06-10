@@ -133,21 +133,8 @@ https://kundenstatus-app.onrender.com/partner
 
 Der Kunde waehlt sein Autohaus aus und meldet sich mit dem Zugangscode an. Einzelne Autohaus-Links funktionieren weiter, sind aber nicht mehr zwingend noetig.
 
-Beispiele:
-
-```text
-Autohaus Mueller:
-https://kundenstatus-app.onrender.com/portal/9847b961ecdf4387
-Passwort/Zugangscode: MUELLER2026
-
-Auto Pfaff:
-https://kundenstatus-app.onrender.com/portal/b900b7d3d54f4afa
-Passwort/Zugangscode: PFAFF2026
-
-HSE Autowelt:
-https://kundenstatus-app.onrender.com/portal/ecd6b48321124e96
-Passwort/Zugangscode: HSE2026
-```
+Die Portal-Links und Zugangscodes stehen im Admin unter "Zugänge".
+Zugangscodes gehören nicht in dieses Dokument und nicht ins Repository.
 
 ## Nach dem Deploy testen
 

@@ -82,6 +82,10 @@
   .damage-type-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; }
   .damage-type-card { border:1px solid #e4d6c3; border-radius:12px; background:#fffaf2; padding:.85rem; }
   .damage-type-card span { display:block; color:#8b5e2e; font-size:.76rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .claim-money-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.65rem; }
+  .claim-legal-panel { border:1px solid #d6e3f0; border-radius:12px; background:#f7fbff; padding:1rem; }
+  .identity-check { border:1px solid #b9d7c2; border-radius:8px; background:#f7fbf8; color:#24442d; padding:.65rem .75rem; font-size:.88rem; }
+  .identity-check.status-warning { border-color:#ead39a; background:#fff9e6; color:#6d4d09; }
   .autopilot-panel { border:1px solid #cfded4; border-radius:12px; background:#f7fbf8; padding:1.1rem; }
   .autopilot-head { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1rem; align-items:start; }
   .autopilot-head h2 { font-size:1.45rem; line-height:1.15; margin:0; }
@@ -144,6 +148,7 @@
     .autopilot-grid { grid-template-columns:1fr 1fr; }
     .process-rail { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .parts-row { grid-template-columns:1fr 1fr; }
+    .claim-money-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .source-summary-item.is-wide { grid-column:auto; }
   }
   @media (max-width:575.98px) {
@@ -160,6 +165,7 @@
     .autopilot-grid,
     .process-rail,
     .parts-row,
+    .claim-money-grid,
     .freigabe-hero { grid-template-columns:1fr; }
     .parts-row.is-head { display:none; }
     .damage-type-grid { grid-template-columns:1fr; }
@@ -442,6 +448,19 @@
           <span>Selbstbeteiligung</span>
           <strong>{{ auftrag['schaden_selbstbeteiligung'] or 'offen / prüfen' }}</strong>
         </div>
+        <div class="source-summary-item">
+          <span>Abrechnung</span>
+          <strong>{{ auftrag['schaden_abrechnungsart_meta']['label'] }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Forderung</span>
+          <strong>{{ auftrag['schaden_forderung_betrag_label'] or 'offen' }}</strong>
+        </div>
+        <div class="source-summary-item">
+          <span>Anspruch / Konto</span>
+          <strong>{{ 'geprüft' if auftrag['schaden_identitaet_ok'] else 'prüfen' }}</strong>
+          <small>{{ auftrag['anspruchsteller_name'] or 'Anspruchsteller offen' }}</small>
+        </div>
       </div>
 
       <div class="source-editor {% if source_locked %}is-source-locked{% endif %}" data-source-editor hidden>
@@ -495,6 +514,71 @@
           <div class="alert alert-info py-2 small mb-0">
             <strong>Kunden-Transparenz:</strong>
             Wenn der Kunde das Fahrzeug bringt oder zur Besichtigung kommt, kurz festhalten und erklären: Wer reguliert den Schaden, fällt eine Selbstbeteiligung an, und kann der Vertrag durch Rückstufung oder Beitragserhöhung teurer werden? Bei Fremdverschulden und vielen Teilkaskofällen wie Sturm/Hagel/Wild bitte trotzdem immer Police und Freigabe prüfen.
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="claim-legal-panel">
+            <div class="fw-bold mb-1">Abrechnung & Erstkontakt-Logik</div>
+            <div class="text-muted small mb-3">Diese Werte steuern das Anschreiben: fiktiv = netto + Pauschale ohne USt, konkret = brutto, Kasko = brutto abzüglich Selbstbeteiligung.</div>
+            <div class="row g-3">
+              <div class="col-lg-4">
+                <label class="form-label">Abrechnungsart</label>
+                <select name="schaden_abrechnungsart" class="form-select">
+                  {% for key, meta in abrechnungsarten.items() %}
+                  <option value="{{ key }}" {% if key == auftrag['schaden_abrechnungsart'] %}selected{% endif %}>{{ meta['label'] }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-lg-8">
+                <div class="claim-money-grid">
+                  <div>
+                    <label class="form-label">Netto</label>
+                    <input type="text" name="schaden_reparatur_netto" value="{{ auftrag['schaden_reparatur_netto'] }}" class="form-control" placeholder="2.460,75">
+                  </div>
+                  <div>
+                    <label class="form-label">USt</label>
+                    <input type="text" name="schaden_reparatur_ust" value="{{ auftrag['schaden_reparatur_ust'] }}" class="form-control" placeholder="467,54">
+                  </div>
+                  <div>
+                    <label class="form-label">Brutto</label>
+                    <input type="text" name="schaden_reparatur_brutto" value="{{ auftrag['schaden_reparatur_brutto'] }}" class="form-control" placeholder="2.928,29">
+                  </div>
+                  <div>
+                    <label class="form-label">Pauschale</label>
+                    <input type="text" name="schaden_kostenpauschale" value="{{ auftrag['schaden_kostenpauschale'] }}" class="form-control" placeholder="25">
+                  </div>
+                  <div>
+                    <label class="form-label">Forderung</label>
+                    <input type="text" name="schaden_forderung_betrag" value="{{ auftrag['schaden_forderung_betrag'] }}" class="form-control" placeholder="wird berechnet">
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Anspruchsteller</label>
+                <input type="text" name="anspruchsteller_name" value="{{ auftrag['anspruchsteller_name'] }}" class="form-control">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Eigentümer</label>
+                <input type="text" name="eigentuemer_name" value="{{ auftrag['eigentuemer_name'] }}" class="form-control">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Kontoinhaber</label>
+                <input type="text" name="kontoinhaber_name" value="{{ auftrag['kontoinhaber_name'] }}" class="form-control">
+              </div>
+              <div class="col-md-7">
+                <label class="form-label">IBAN für Auszahlung</label>
+                <input type="text" name="auszahlung_iban" value="{{ auftrag['auszahlung_iban'] }}" class="form-control" placeholder="DE...">
+              </div>
+              <div class="col-md-5">
+                <label class="form-label">Portal-Zugangscode</label>
+                <input type="text" name="versicherung_portal_code" value="{{ auftrag['versicherung_portal_code'] }}" class="form-control">
+              </div>
+              <div class="col-12">
+                <div class="identity-check {{ '' if auftrag['schaden_identitaet_ok'] else 'status-warning' }}">
+                  Anspruchsteller = Eigentümer = Kontoinhaber. Aktuell: {{ 'passt' if auftrag['schaden_identitaet_ok'] else 'bitte vor Versand prüfen' }}.
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="col-md-6" id="pflicht-kunde">
@@ -564,7 +648,7 @@
         </div>
       </div>
       <div class="source-edit-actions d-flex gap-2 flex-wrap align-items-center">
-        <button type="submit" class="btn btn-brand">Änderungen speichern</button>
+        <button type="submit" name="aktion" value="save_source" class="btn btn-brand">Änderungen speichern</button>
         <span class="text-muted small">Speichert nur Korrekturen an den Falldaten. Der Versicherungsstatus bleibt davon unberührt.</span>
       </div>
       </div>
@@ -602,7 +686,7 @@
             {% if auftrag['versicherung_sendefreigabe_am'] %} · zuletzt gesendet am {{ auftrag['versicherung_sendefreigabe_am'] }}{% endif %}
           </div>
           <div class="d-flex gap-2 flex-wrap mt-3">
-            <button type="submit" class="btn btn-brand">Speichern</button>
+            <button type="submit" name="aktion" value="save_mail" class="btn btn-brand">Speichern</button>
             <button type="submit" formaction="{{ url_for('admin_versicherung_schaden_melden', auftrag_id=auftrag['id']) }}" formmethod="post" class="btn btn-soft">Versicherungspaket per E-Mail senden</button>
             <button
               type="submit"
@@ -1301,6 +1385,47 @@
         }
       });
     });
+  })();
+
+  (() => {
+    const form = document.querySelector('form[data-upload-form]');
+    if (!form) return;
+    const field = (name) => form.querySelector(`[name="${name}"]`);
+    const parseMoney = (value) => {
+      const text = String(value || '').replace(/\s/g, '');
+      if (!text) return 0;
+      const normalized = text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text;
+      const amount = Number.parseFloat(normalized.replace(/[^\d.-]/g, ''));
+      return Number.isFinite(amount) ? amount : 0;
+    };
+    const formatMoney = (amount) => amount
+      ? amount.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : '';
+    const updateClaimAmount = () => {
+      const mode = field('schaden_abrechnungsart')?.value || 'fiktiv';
+      const netto = parseMoney(field('schaden_reparatur_netto')?.value);
+      const brutto = parseMoney(field('schaden_reparatur_brutto')?.value);
+      const pauschale = parseMoney(field('schaden_kostenpauschale')?.value) || 25;
+      const sb = parseMoney(field('schaden_selbstbeteiligung')?.value);
+      let amount = 0;
+      if (mode === 'kasko') amount = Math.max(brutto - sb, 0);
+      else if (mode === 'konkret') amount = brutto;
+      else amount = netto + pauschale;
+      const target = field('schaden_forderung_betrag');
+      if (target && amount) target.value = formatMoney(amount);
+    };
+    const syncModeFromDamageType = () => {
+      const schadenart = field('schadenart')?.value || '';
+      if (['vollkasko', 'teilkasko', 'glasschaden', 'wildschaden', 'hagel_unwetter', 'vandalismus'].includes(schadenart) && field('schaden_abrechnungsart')) {
+        field('schaden_abrechnungsart').value = 'kasko';
+      }
+      updateClaimAmount();
+    };
+    ['schaden_abrechnungsart', 'schaden_reparatur_netto', 'schaden_reparatur_brutto', 'schaden_kostenpauschale', 'schaden_selbstbeteiligung'].forEach((name) => {
+      field(name)?.addEventListener('input', updateClaimAmount);
+      field(name)?.addEventListener('change', updateClaimAmount);
+    });
+    field('schadenart')?.addEventListener('change', syncModeFromDamageType);
   })();
 </script>
 {% endblock %}
