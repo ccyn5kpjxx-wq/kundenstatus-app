@@ -8888,6 +8888,7 @@ def init_db():
     ensure_column(db, "autohaeuser", "strasse", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "plz", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "ort", "TEXT DEFAULT ''")
+    ensure_column(db, "autohaeuser", "koordinator_email", "TEXT DEFAULT ''")
     ensure_column(db, "versicherungen", "portal_key", "TEXT DEFAULT ''")
     ensure_column(db, "versicherungen", "kontakt_name", "TEXT DEFAULT ''")
     ensure_column(db, "versicherungen", "email", "TEXT DEFAULT ''")
@@ -20015,6 +20016,11 @@ def handle_whatsapp_inbound_message(message):
         "Neue Chat-Nachricht",
         "Die Werkstatt hat per WhatsApp geantwortet.",
     )
+    sende_autohaus_benachrichtigung_mail(
+        auftrag_id,
+        "Neue Nachricht der Werkstatt",
+        f"Die Werkstatt hat im Auftrag geantwortet:\n\n{clean_text(text)[:500]}",
+    )
     record_whatsapp_message(
         auftrag_id,
         chat_id=chat_id,
@@ -24186,6 +24192,81 @@ def send_versicherung_nachtragmail(auftrag_id, prozess_key, note=""):
         "cc": cc,
         "dateien": dateien,
     }
+
+
+AUTOHAUS_MAIL_TESTLOG = []
+
+
+def sende_autohaus_benachrichtigung_mail(auftrag_id, betreff, text):
+    # Automatische Hinweis-Mail an die Koordinator-Adresse des Autohauses.
+    # Bewusst still: ohne Koordinator-E-Mail oder SMTP-Konfiguration passiert
+    # nichts (insbesondere KEIN Rueckfall auf die Rechnungs-E-Mail), und der
+    # Versand laeuft im Hintergrund-Thread, damit kein Klick am Mailserver haengt.
+    try:
+        auftrag = get_auftrag(auftrag_id)
+        if not auftrag or not auftrag.get("autohaus_id"):
+            return
+        autohaus = get_autohaus(auftrag["autohaus_id"])
+        if not autohaus:
+            return
+        empfaenger = parse_email_recipients(autohaus.get("koordinator_email"))
+        if not empfaenger:
+            return
+        if app.config.get("TESTING"):
+            AUTOHAUS_MAIL_TESTLOG.append(
+                {"auftrag_id": auftrag_id, "betreff": betreff, "empfaenger": empfaenger}
+            )
+            return
+        config = get_schaden_mail_config()
+        if not config["smtp_configured"]:
+            print(f"WARNUNG: Autohaus-Mail nicht gesendet (SMTP fehlt): {betreff}")
+            return
+        kennzeichen = clean_text(auftrag.get("kennzeichen"))
+        fahrzeug = clean_text(auftrag.get("fahrzeug"))
+        betreff_voll = f"{betreff} – {kennzeichen}" if kennzeichen else betreff
+        portal_link = ""
+        try:
+            if PUBLIC_BASE_URL:
+                portal_link = f"{PUBLIC_BASE_URL}/partner/{autohaus['slug']}/auftrag/{auftrag_id}"
+            elif has_request_context():
+                portal_link = url_for(
+                    "partner_auftrag", slug=autohaus["slug"], auftrag_id=auftrag_id, _external=True
+                )
+        except Exception:
+            portal_link = ""
+        zeilen = [text, ""]
+        if fahrzeug or kennzeichen:
+            zeilen.append("Fahrzeug: " + " ".join(teil for teil in (fahrzeug, kennzeichen) if teil))
+        if portal_link:
+            zeilen.append(f"Direkt zum Auftrag: {portal_link}")
+        zeilen += ["", "Diese Nachricht wurde automatisch vom Werkstatt-Portal gesendet."]
+        message = EmailMessage()
+        message["Subject"] = betreff_voll
+        message["From"] = formataddr((config["display_name"], config["from_address"]))
+        message["To"] = ", ".join(empfaenger)
+        if clean_text(config.get("reply_to")):
+            message["Reply-To"] = clean_text(config.get("reply_to"))
+        message["X-Gaertner-Auftrag-ID"] = str(auftrag_id)
+        message.set_content("\n".join(zeilen))
+
+        def _senden():
+            try:
+                if config["smtp_ssl"]:
+                    with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], timeout=30) as smtp:
+                        smtp.login(config["smtp_user"], config["_smtp_password"])
+                        smtp.send_message(message)
+                else:
+                    with smtplib.SMTP(config["smtp_host"], config["smtp_port"], timeout=30) as smtp:
+                        if config["smtp_tls"]:
+                            smtp.starttls()
+                        smtp.login(config["smtp_user"], config["_smtp_password"])
+                        smtp.send_message(message)
+            except Exception as exc:
+                print(f"WARNUNG: Autohaus-Mail konnte nicht gesendet werden: {clean_text(str(exc))[:300]}")
+
+        threading.Thread(target=_senden, daemon=True).start()
+    except Exception as exc:
+        print(f"WARNUNG: Autohaus-Mail-Vorbereitung fehlgeschlagen: {clean_text(str(exc))[:300]}")
 
 
 def save_versicherung_mail_draft(auftrag_id, empfaenger="", cc="", anschreiben=None):
@@ -29400,6 +29481,11 @@ def set_versicherung_freigabe_status(auftrag_id, status, hinweis="", quelle="ver
             text,
             quelle=clean_text(quelle) or "versicherung",
         )
+        sende_autohaus_benachrichtigung_mail(
+            auftrag_id,
+            f"Versicherungsfall: {meta['label']}",
+            text,
+        )
         if clean_text(quelle) == "versicherung":
             add_chat_nachricht(auftrag_id, "versicherung", f"{meta['label']}: {text}")
         if status == "rueckfrage":
@@ -31994,6 +32080,29 @@ def admin_zugaenge():
         autohaeuser=list_autohaeuser(),
         versicherungen=list_versicherungen(),
     )
+
+
+@app.route("/admin/autohaus/<int:autohaus_id>/koordinator-email", methods=["POST"])
+@admin_required
+def admin_autohaus_koordinator_email(autohaus_id):
+    autohaus = get_autohaus(autohaus_id)
+    if not autohaus:
+        abort(404)
+    wert = clean_text(request.form.get("koordinator_email"))
+    if wert and "@" not in wert:
+        flash("Bitte eine gültige E-Mail-Adresse eintragen.", "warning")
+        return redirect(url_for("admin_zugaenge"))
+    db = get_db()
+    db.execute("UPDATE autohaeuser SET koordinator_email=? WHERE id=?", (wert, autohaus_id))
+    db.commit()
+    db.close()
+    flash(
+        "Koordinator-E-Mail gespeichert. Benachrichtigungen gehen ab jetzt an diese Adresse."
+        if wert
+        else "Koordinator-E-Mail entfernt — dieses Autohaus bekommt keine automatischen E-Mails.",
+        "success",
+    )
+    return redirect(url_for("admin_zugaenge"))
 
 
 # --- Zahlen / Umsatz-Ziel (Cockpit-Kachel) ---------------------------------
@@ -34920,6 +35029,11 @@ def admin_chat_nachricht(auftrag_id):
         "Neue Chat-Nachricht",
         "Die Werkstatt hat im Auftrag geantwortet.",
     )
+    sende_autohaus_benachrichtigung_mail(
+        auftrag_id,
+        "Neue Nachricht der Werkstatt",
+        f"Die Werkstatt hat im Auftrag geantwortet:\n\n{nachricht[:500]}",
+    )
     flash("Nachricht an das Autohaus gesendet.", "success")
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
@@ -35038,6 +35152,11 @@ def admin_auftrag_kalkulation(auftrag_id):
                 auftrag_id,
                 "Kalkulation übernommen",
                 f"Die Werkstatt hat eine Vorkalkulation über {angebot_preis} als Angebot vorbereitet.",
+            )
+            sende_autohaus_benachrichtigung_mail(
+                auftrag_id,
+                "Werkstatt-Angebot liegt vor",
+                f"Die Werkstatt hat ein Angebot über {angebot_preis} vorbereitet. Sie können es im Portal prüfen und annehmen.",
             )
             flash("Kalkulation gespeichert und als Werkstatt-Angebot übernommen.", "success")
         else:
@@ -35714,6 +35833,12 @@ def status_update(auftrag_id, neuer_status):
         "Status geändert",
         f"Die Werkstatt hat den Status auf „{STATUSLISTE[neuer_status]['label']}“ gesetzt.",
     )
+    if neuer_status == 4:
+        sende_autohaus_benachrichtigung_mail(
+            auftrag_id,
+            "Fahrzeug ist fertig",
+            "Die Werkstatt hat das Fahrzeug fertiggestellt. Es kann abgeholt werden.",
+        )
     aktualisierter_auftrag = get_auftrag(auftrag_id)
     whatsapp_share = (aktualisierter_auftrag or {}).get("kunden_whatsapp_status") or {}
     if neuer_status >= 5 and not auftrag_bonus_preis(auftrag)[0]:
@@ -35993,6 +36118,7 @@ def angebot_senden_route(auftrag_id):
         titel,
         nachricht,
     )
+    sende_autohaus_benachrichtigung_mail(auftrag_id, titel, nachricht)
     flash(
         "Angebot aktualisiert und an das Autohaus gesendet."
         if angebot_war_vorhanden

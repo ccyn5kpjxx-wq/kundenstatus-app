@@ -20,6 +20,13 @@
           <div class="small text-muted">Code: <strong>{{ h['zugangscode'] }}</strong></div>
         </div>
         <a href="{{ h['portal_url'] }}" target="_blank" class="btn btn-soft btn-sm">Lokal öffnen</a>
+        <form method="POST" action="{{ url_for('admin_autohaus_koordinator_email', autohaus_id=h['id']) }}" class="d-flex gap-2 align-items-center flex-wrap w-100 m-0">
+          {{ csrf_field()|safe }}
+          <span class="small text-muted">Koordinator-E-Mail (Benachrichtigungen):</span>
+          <input type="email" name="koordinator_email" class="form-control form-control-sm" style="max-width: 280px;" value="{{ h['koordinator_email'] }}" placeholder="z.B. gw-koordinator@autohaus.de">
+          <button type="submit" class="btn btn-soft btn-sm" data-no-loading="true">Speichern</button>
+          {% if not h['koordinator_email'] %}<span class="small text-muted">leer = keine automatischen E-Mails</span>{% endif %}
+        </form>
       </div>
       {% endfor %}
     </div>
