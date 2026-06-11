@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Auftrag {{ auftrag['kennzeichen'] or auftrag['fahrzeug'] }} — Werkstatt-Tafel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f1922;
+      --panel: #18242f;
+      --panel-soft: #1f2d3a;
+      --line: #2c3d4c;
+      --ink: #f2f5f7;
+      --muted: #93a4b3;
+      --danger: #e5484d;
+      --success: #3dd68c;
+      --primary: #5aa9ff;
+      --warning: #f5a524;
+      --info: #4cc9f0;
+      --secondary: #8d9aa7;
+      --dark: #6b7785;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "DM Sans", sans-serif;
+      min-height: 100vh;
+      padding-bottom: 2rem;
+    }
+
+    h1, h2, h3 { font-family: "Space Grotesk", sans-serif; letter-spacing: -0.02em; }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      padding: clamp(.7rem, 1.5vw, 1.2rem) clamp(.9rem, 2vw, 1.8rem);
+      border-bottom: 1px solid var(--line);
+      background: rgba(15, 25, 34, .9);
+    }
+
+    .zurueck {
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--ink);
+      text-decoration: none;
+      font-weight: 700;
+      font-size: clamp(1rem, 1.8vw, 1.3rem);
+      padding: .55em 1em;
+    }
+
+    .zurueck:active, .zurueck:hover { border-color: var(--primary); }
+
+    .kennzeichen {
+      display: inline-block;
+      background: #fff;
+      color: #111;
+      font-family: "Space Grotesk", sans-serif;
+      font-weight: 700;
+      font-size: clamp(1.3rem, 2.6vw, 2rem);
+      letter-spacing: .06em;
+      border-radius: 8px;
+      border-left: 12px solid #1d4ed8;
+      padding: .12em .55em;
+      white-space: nowrap;
+    }
+
+    .status-badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: .3em .85em;
+      font-weight: 700;
+      font-size: clamp(.95rem, 1.7vw, 1.25rem);
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+    }
+
+    .inhalt {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: clamp(.7rem, 1.4vw, 1.3rem);
+      padding: clamp(.7rem, 1.4vw, 1.3rem) clamp(.9rem, 2vw, 1.8rem);
+      align-items: start;
+    }
+
+    @media (max-width: 900px) {
+      .inhalt { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: clamp(.9rem, 1.6vw, 1.4rem);
+      margin-bottom: clamp(.7rem, 1.4vw, 1.3rem);
+    }
+
+    .panel h2 {
+      margin: 0 0 .7rem;
+      font-size: clamp(1.05rem, 1.9vw, 1.4rem);
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      font-size: clamp(.85rem, 1.5vw, 1.05rem);
+    }
+
+    .arbeit-text {
+      font-size: clamp(1.05rem, 1.9vw, 1.45rem);
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+
+    .arbeit-text.leer { color: var(--muted); }
+
+    .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .7rem; }
+
+    .chip {
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: .25em .8em;
+      font-size: clamp(.85rem, 1.4vw, 1.05rem);
+    }
+
+    .notiz {
+      margin-top: .9rem;
+      background: rgba(245, 165, 36, .12);
+      border: 1px solid rgba(245, 165, 36, .4);
+      border-radius: 12px;
+      padding: .7rem .9rem;
+      font-size: clamp(.92rem, 1.5vw, 1.15rem);
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    .fakten { display: grid; grid-template-columns: 1fr 1fr; gap: .55rem .9rem; }
+
+    .fakt .label {
+      color: var(--muted);
+      font-size: clamp(.78rem, 1.3vw, .95rem);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+
+    .fakt .wert {
+      font-weight: 600;
+      font-size: clamp(.98rem, 1.6vw, 1.2rem);
+      overflow-wrap: anywhere;
+    }
+
+    .termin {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: .8rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: .55rem .8rem;
+      margin-bottom: .5rem;
+      background: var(--panel-soft);
+    }
+
+    .termin.relevant { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+    .termin .t-label { color: var(--muted); font-size: clamp(.88rem, 1.4vw, 1.05rem); }
+    .termin .t-datum { font-weight: 700; font-size: clamp(1rem, 1.7vw, 1.3rem); white-space: nowrap; }
+    .termin.heute .t-datum { color: var(--success); }
+    .termin.vorbei .t-datum { color: var(--danger); }
+
+    .status-leiste { display: flex; flex-wrap: wrap; gap: .4rem; }
+
+    .status-schritt {
+      flex: 1 1 0;
+      min-width: 110px;
+      text-align: center;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: .45rem .3rem;
+      color: var(--muted);
+      font-size: clamp(.8rem, 1.35vw, 1rem);
+      background: var(--panel-soft);
+    }
+
+    .status-schritt.erledigt { border-color: var(--success); color: var(--ink); }
+    .status-schritt.aktuell {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 1px var(--primary);
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .fotos {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: .6rem;
+    }
+
+    .fotos a {
+      display: block;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      aspect-ratio: 4 / 3;
+      background: var(--panel-soft);
+    }
+
+    .fotos img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+    .hinweis-leer { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <a class="zurueck" href="{{ url_for('werkstatt_tafel') }}">← Zur Tafel</a>
+    {% if auftrag['kennzeichen'] %}
+      <span class="kennzeichen">{{ auftrag['kennzeichen'] }}</span>
+    {% endif %}
+    <h1 style="margin:0; font-size:clamp(1.1rem, 2.2vw, 1.7rem); flex:1;">{{ auftrag['fahrzeug'] }}</h1>
+    <span class="status-badge">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
+  </div>
+
+  <div class="inhalt">
+    <div>
+      <div class="panel">
+        <h2>Was zu machen ist</h2>
+        {% if auftrag['werkstatt_angebot_text_display'] %}
+          <div class="arbeit-text">{{ auftrag['werkstatt_angebot_text_display'] }}</div>
+        {% else %}
+          <div class="arbeit-text leer">Keine Arbeitsbeschreibung hinterlegt — bitte im Büro nachfragen.</div>
+        {% endif %}
+        {% if auftrag['schaden_zonen_labels'] %}
+          <div class="chips">
+            {% for zone in auftrag['schaden_zonen_labels'] %}
+              <span class="chip">📍 {{ zone }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if auftrag['schaden_zonen_notiz'] %}
+          <div class="notiz">📍 {{ auftrag['schaden_zonen_notiz'] }}</div>
+        {% endif %}
+        {% if auftrag['notiz_intern'] %}
+          <div class="notiz">📌 Interne Notiz: {{ auftrag['notiz_intern'] }}</div>
+        {% endif %}
+      </div>
+
+      <div class="panel">
+        <h2>Status</h2>
+        <div class="status-leiste">
+          {% for nummer, meta in statusliste.items() %}
+            <div class="status-schritt {% if nummer < auftrag['status'] %}erledigt{% elif nummer == auftrag['status'] %}aktuell{% endif %}">
+              {{ meta['icon'] }} {{ meta['label'] }}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Fotos ({{ bilder | length }})</h2>
+        {% if bilder %}
+          <div class="fotos">
+            {% for bild in bilder %}
+              <a href="{{ url_for('werkstatt_datei', datei_id=bild['id']) }}" target="_blank" rel="noopener">
+                <img src="{{ url_for('werkstatt_datei', datei_id=bild['id']) }}" alt="{{ bild['original_name'] }}" loading="lazy">
+              </a>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="hinweis-leer">Keine Fotos hochgeladen.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Termine</h2>
+        {% set events = auftrag['planung']['events'] %}
+        {% if events %}
+          {% for event in events %}
+            <div class="termin {% if event['is_relevant'] %}relevant{% endif %} {% if event['is_today'] %}heute{% elif event['is_past'] %}vorbei{% endif %}">
+              <span class="t-label">{{ event['label'] }}</span>
+              <span class="t-datum">{{ event['datum_text'] }}</span>
+            </div>
+          {% endfor %}
+          <div style="color:var(--muted); font-size:clamp(.82rem,1.3vw,.98rem); margin-top:.4rem;">
+            {{ auftrag['planung']['hinweis'] }}
+          </div>
+        {% else %}
+          <div class="hinweis-leer">Keine Termine gesetzt.</div>
+        {% endif %}
+      </div>
+
+      <div class="panel">
+        <h2>Fahrzeug &amp; Auftrag</h2>
+        <div class="fakten">
+          <div class="fakt">
+            <div class="label">Fahrzeug</div>
+            <div class="wert">{{ auftrag['fahrzeug'] }}</div>
+          </div>
+          {% if auftrag['kennzeichen'] %}
+          <div class="fakt">
+            <div class="label">Kennzeichen</div>
+            <div class="wert">{{ auftrag['kennzeichen'] }}</div>
+          </div>
+          {% endif %}
+          {% if auftrag['fin_nummer'] %}
+          <div class="fakt">
+            <div class="label">FIN</div>
+            <div class="wert">{{ auftrag['fin_nummer'] }}</div>
+          </div>
+          {% endif %}
+          {% if auftrag['kilometerstand'] %}
+          <div class="fakt">
+            <div class="label">Kilometerstand</div>
+            <div class="wert">{{ auftrag['kilometerstand'] }}</div>
+          </div>
+          {% endif %}
+          {% if auftrag['auftragsnummer'] %}
+          <div class="fakt">
+            <div class="label">Auftragsnummer</div>
+            <div class="wert">{{ auftrag['auftragsnummer'] }}</div>
+          </div>
+          {% endif %}
+          {% if auftrag['schaden_nummer'] %}
+          <div class="fakt">
+            <div class="label">Schadennummer</div>
+            <div class="wert">{{ auftrag['schaden_nummer'] }}</div>
+          </div>
+          {% endif %}
+          {% if auftrag['versicherung_id'] %}
+          <div class="fakt">
+            <div class="label">Schadenart</div>
+            <div class="wert">{{ auftrag['schadenart_label'] or 'Versicherung' }}</div>
+          </div>
+          <div class="fakt">
+            <div class="label">Schaden-Station</div>
+            <div class="wert">{{ auftrag['schaden_station_label'] }}</div>
+          </div>
+          {% endif %}
+          {% if auftrag['kunde_name'] %}
+          <div class="fakt">
+            <div class="label">Kunde</div>
+            <div class="wert">{{ auftrag['kunde_name'] }}</div>
+          </div>
+          {% endif %}
+          {% if auftrag['kontakt_telefon'] %}
+          <div class="fakt">
+            <div class="label">Telefon</div>
+            <div class="wert">{{ auftrag['kontakt_telefon'] }}</div>
+          </div>
+          {% endif %}
+          {% if auftrag['autohaus_name'] %}
+          <div class="fakt">
+            <div class="label">Autohaus / Partner</div>
+            <div class="wert">{{ auftrag['autohaus_name'] }}</div>
+          </div>
+          {% endif %}
+          <div class="fakt">
+            <div class="label">Anlieferung</div>
+            <div class="wert">{{ auftrag['transport_meta']['label'] }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Nach 4 Minuten ohne Interaktion zurueck zur Tafel (Kiosk-Betrieb)
+    (() => {
+      let timer = null;
+      const zurueck = () => { window.location.href = "{{ url_for('werkstatt_tafel') }}"; };
+      const reset = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(zurueck, 240000);
+      };
+      ['click', 'touchstart', 'scroll', 'keydown'].forEach((ev) =>
+        document.addEventListener(ev, reset, { passive: true })
+      );
+      reset();
+    })();
+  </script>
+</body>
+</html>

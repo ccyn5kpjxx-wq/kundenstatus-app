@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Werkstatt-Tafel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f1922;
+      --panel: #18242f;
+      --panel-soft: #1f2d3a;
+      --line: #2c3d4c;
+      --ink: #f2f5f7;
+      --muted: #93a4b3;
+      --danger: #e5484d;
+      --success: #3dd68c;
+      --primary: #5aa9ff;
+      --warning: #f5a524;
+      --info: #4cc9f0;
+      --secondary: #8d9aa7;
+      --dark: #6b7785;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "DM Sans", sans-serif;
+      min-height: 100vh;
+    }
+
+    h1, h2, h3 { font-family: "Space Grotesk", sans-serif; letter-spacing: -0.02em; }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: clamp(.7rem, 1.5vw, 1.2rem) clamp(.9rem, 2vw, 1.8rem);
+      border-bottom: 1px solid var(--line);
+      background: rgba(15, 25, 34, .9);
+    }
+
+    .topbar .titel {
+      display: flex;
+      align-items: center;
+      gap: .8rem;
+    }
+
+    .topbar img { height: clamp(30px, 3.4vw, 44px); }
+
+    .topbar h1 {
+      margin: 0;
+      font-size: clamp(1.15rem, 2.4vw, 1.8rem);
+    }
+
+    .topbar .meta {
+      text-align: right;
+      color: var(--muted);
+      font-size: clamp(.85rem, 1.4vw, 1.05rem);
+      line-height: 1.4;
+    }
+
+    .topbar .uhr {
+      color: var(--ink);
+      font-family: "Space Grotesk", sans-serif;
+      font-size: clamp(1.3rem, 2.6vw, 2rem);
+      font-weight: 700;
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: clamp(.7rem, 1.4vw, 1.3rem);
+      padding: clamp(.7rem, 1.4vw, 1.3rem) clamp(.9rem, 2vw, 1.8rem) 2.5rem;
+      align-items: start;
+    }
+
+    @media (max-width: 980px) {
+      .board { grid-template-columns: 1fr; }
+    }
+
+    .spalte {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: clamp(.7rem, 1.2vw, 1.1rem);
+      min-height: 30vh;
+    }
+
+    .spalte-kopf {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .6rem;
+      margin-bottom: clamp(.6rem, 1vw, 1rem);
+      padding: 0 .25rem;
+    }
+
+    .spalte-kopf h2 {
+      margin: 0;
+      font-size: clamp(1rem, 1.9vw, 1.45rem);
+    }
+
+    .spalte-kopf .zaehler {
+      min-width: 2.2em;
+      text-align: center;
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: .2em .55em;
+      font-weight: 700;
+      font-size: clamp(.95rem, 1.6vw, 1.3rem);
+    }
+
+    .spalte.s-in_arbeit { border-top: 4px solid var(--info); }
+    .spalte.s-geplant { border-top: 4px solid var(--primary); }
+    .spalte.s-fertig { border-top: 4px solid var(--success); }
+
+    .karte {
+      display: block;
+      text-decoration: none;
+      color: var(--ink);
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: clamp(.7rem, 1.1vw, 1rem);
+      margin-bottom: clamp(.55rem, 1vw, .9rem);
+      transition: transform .12s ease, border-color .12s ease;
+    }
+
+    .karte:active, .karte:hover {
+      transform: scale(1.012);
+      border-color: var(--primary);
+    }
+
+    .karte-kopf {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .6rem;
+      flex-wrap: wrap;
+      margin-bottom: .35rem;
+    }
+
+    .kennzeichen {
+      display: inline-block;
+      background: #fff;
+      color: #111;
+      font-family: "Space Grotesk", sans-serif;
+      font-weight: 700;
+      font-size: clamp(1.05rem, 1.9vw, 1.5rem);
+      letter-spacing: .06em;
+      border-radius: 6px;
+      border-left: 10px solid #1d4ed8;
+      padding: .12em .5em;
+      white-space: nowrap;
+    }
+
+    .kennzeichen.leer {
+      background: var(--panel);
+      color: var(--muted);
+      border-left-color: var(--line);
+      font-size: clamp(.9rem, 1.5vw, 1.15rem);
+    }
+
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: .25em .7em;
+      font-size: clamp(.78rem, 1.3vw, 1rem);
+      font-weight: 700;
+      white-space: nowrap;
+      color: #0d1117;
+    }
+
+    .badge.b-danger { background: var(--danger); color: #fff; }
+    .badge.b-success { background: var(--success); }
+    .badge.b-primary { background: var(--primary); }
+    .badge.b-warning { background: var(--warning); }
+    .badge.b-info { background: var(--info); }
+    .badge.b-secondary { background: var(--secondary); }
+    .badge.b-dark { background: var(--dark); color: #fff; }
+
+    .fahrzeug {
+      font-weight: 700;
+      font-size: clamp(.98rem, 1.7vw, 1.3rem);
+      margin-bottom: .25rem;
+    }
+
+    .arbeit {
+      color: var(--muted);
+      font-size: clamp(.88rem, 1.45vw, 1.1rem);
+      line-height: 1.4;
+      margin-bottom: .4rem;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .35rem;
+    }
+
+    .chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      padding: .18em .65em;
+      font-size: clamp(.76rem, 1.25vw, .95rem);
+      white-space: nowrap;
+    }
+
+    .chip strong { color: var(--ink); font-weight: 600; }
+
+    .leer-hinweis {
+      color: var(--muted);
+      text-align: center;
+      padding: 1.6rem .5rem;
+      font-size: clamp(.9rem, 1.5vw, 1.1rem);
+    }
+
+    footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: .4rem 1.2rem;
+      background: rgba(15, 25, 34, .92);
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: .85rem;
+    }
+
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="titel">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
+      <h1>Werkstatt-Tafel <span style="color:var(--muted); font-weight:500;">· {{ anzahl }} Aufträge</span></h1>
+    </div>
+    <div class="meta">
+      <div class="uhr" data-uhr>{{ stand_label }}</div>
+      <div>{{ datum_label }}</div>
+    </div>
+  </div>
+
+  <div class="board">
+    {% for spalte in spalten %}
+    <div class="spalte s-{{ spalte.key }}">
+      <div class="spalte-kopf">
+        <h2>{{ spalte.icon }} {{ spalte.titel }}</h2>
+        <span class="zaehler">{{ spalte.auftraege | length }}</span>
+      </div>
+      {% for auftrag in spalte.auftraege %}
+      <a class="karte" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}">
+        <div class="karte-kopf">
+          {% if auftrag['kennzeichen'] %}
+            <span class="kennzeichen">{{ auftrag['kennzeichen'] }}</span>
+          {% else %}
+            <span class="kennzeichen leer">ohne Kennzeichen</span>
+          {% endif %}
+          {% if auftrag['planung']['badge'] %}
+            <span class="badge b-{{ auftrag['planung']['badge_farbe'] }}">
+              {{ auftrag['planung']['hinweis'] }}
+            </span>
+          {% endif %}
+        </div>
+        <div class="fahrzeug">{{ auftrag['fahrzeug'] }}</div>
+        {% if auftrag['werkstatt_angebot_text_display'] %}
+          <div class="arbeit">{{ auftrag['werkstatt_angebot_text_display'] }}</div>
+        {% endif %}
+        <div class="chips">
+          {% if auftrag['autohaus_name'] %}
+            <span class="chip">🏠 <strong>{{ auftrag['autohaus_name'] }}</strong></span>
+          {% endif %}
+          {% if auftrag['versicherung_id'] %}
+            <span class="chip">🛡️ {{ auftrag['schadenart_label'] or 'Versicherung' }} · {{ auftrag['schaden_station_label'] }}</span>
+          {% endif %}
+          {% if auftrag['status'] <= 2 and auftrag['annahme_datum'] %}
+            <span class="chip">{{ auftrag['annahme_label'] }}: <strong>{{ auftrag['annahme_datum'] }}</strong></span>
+          {% endif %}
+          {% if auftrag['status'] == 3 and auftrag['fertig_datum'] %}
+            <span class="chip">Fertig bis: <strong>{{ auftrag['fertig_datum'] }}</strong></span>
+          {% endif %}
+          {% if auftrag['status'] >= 3 and auftrag['abholtermin'] %}
+            <span class="chip">{{ auftrag['abholung_label'] }}: <strong>{{ auftrag['abholtermin'] }}</strong></span>
+          {% endif %}
+        </div>
+      </a>
+      {% else %}
+      <div class="leer-hinweis">Nichts in dieser Spalte.</div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <footer>
+    <span>Aktualisiert sich automatisch jede Minute · Stand {{ stand_label }} Uhr</span>
+    <a href="{{ url_for('werkstatt_logout') }}">Abmelden</a>
+  </footer>
+
+  <script>
+    (() => {
+      // Live-Uhr
+      const uhr = document.querySelector('[data-uhr]');
+      const tick = () => {
+        if (!uhr) return;
+        const now = new Date();
+        uhr.textContent = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+      };
+      tick();
+      setInterval(tick, 10000);
+      // Tafel jede Minute neu laden, damit der Bildschirm aktuell bleibt
+      setTimeout(() => window.location.reload(), 60000);
+    })();
+  </script>
+</body>
+</html>

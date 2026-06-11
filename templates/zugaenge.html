@@ -2,6 +2,31 @@
 {% block title %}Autohaus-Zugänge{% endblock %}
 
 {% block content %}
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
+      <div class="badge-soft mb-2">Zugänge</div>
+      <h4 class="mb-1">Werkstatt-Tafel</h4>
+      <p>Bildschirm in der Werkstatt: alle offenen Aufträge auf einen Blick, Antippen zeigt die Auftrags-Details (ohne Preise). Ein gemeinsamer Code für alle Mitarbeiter.</p>
+    </div>
+    <a href="{{ url_for('werkstatt_tafel') }}" target="_blank" class="btn btn-soft btn-sm">Tafel öffnen</a>
+  </div>
+  <div class="border rounded-3 p-3 bg-white d-flex justify-content-between align-items-center gap-3 flex-wrap">
+    <div>
+      <div class="fw-bold">Werkstatt-Bildschirm</div>
+      <div class="text-muted small">Am Bildschirm/Tablet diese Adresse öffnen und den Code eingeben. Die Tafel aktualisiert sich danach von selbst.</div>
+    </div>
+    <div class="text-lg-end">
+      <code>{{ werkstatt_tafel_url }}</code>
+      <div class="small text-muted">Code: <strong>{{ werkstatt_tafel_code }}</strong></div>
+    </div>
+    <form method="POST" action="{{ url_for('admin_werkstatt_tafel_zugang') }}" class="d-flex align-items-center gap-2 flex-wrap">
+      <input type="text" name="zugangscode" class="form-control form-control-sm" style="max-width: 160px;" placeholder="Neuer Code (leer = auto)">
+      <button type="submit" class="btn btn-soft btn-sm">Code ändern</button>
+    </form>
+  </div>
+</div>
+
 {% include "autohaus_zugaenge_section.html" %}
 
 <div class="page-card p-4 mb-4">
