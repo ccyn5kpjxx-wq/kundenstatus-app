@@ -9214,6 +9214,7 @@ def init_db():
     )
 
     seed_default_autohaeuser(db)
+    seed_akquise_autohaeuser(db)
     seed_default_versicherungen(db)
     seed_default_auftraege(db)
     seed_default_werkstatt_news(db)
@@ -9240,6 +9241,73 @@ def init_db():
 
     db.commit()
     db.close()
+
+
+# Akquise-Kandidaten aus der Markt-Recherche vom 11.06.2026 (Quelle: jeweils
+# Impressum/Kontaktseite der Haendler-Website). Werden einmalig angelegt und
+# danach NIE durch den Seed ueberschrieben — Admin-Aenderungen bleiben erhalten.
+AKQUISE_AUTOHAEUSER = [
+    {"name": "Autohaus Kurt Bingler", "slug": "bingler-buchen", "email": "info@bingler.com", "telefon": "06281 5215-0", "strasse": "Bödigheimer Str. 24", "plz": "74722", "ort": "Buchen (Odenwald)", "notiz": "Akquise-Kandidat (11.06.2026). Opel+Ford, Familienbetrieb seit 1952. DER Opel-Händler bei Buchen. ACHTUNG: E-Mail unbestätigt — vor Versand anrufen!"},
+    {"name": "Autohaus Lademann", "slug": "autohaus-lademann-buchen", "email": "info@autohaus-lademann.de", "telefon": "0800 52336266", "strasse": "Hettinger Straße 26", "plz": "74722", "ort": "Buchen (Odenwald)", "notiz": "Akquise-Kandidat (11.06.2026). VW-Vertragshändler, 2 Standorte."},
+    {"name": "Autohaus Wetterauer", "slug": "autohaus-wetterauer-seckach", "email": "info@auto-wetterauer.de", "telefon": "06293 285", "strasse": "Hauptstraße 34", "plz": "74743", "ort": "Seckach-Großeicholzheim", "notiz": "Akquise-Kandidat (11.06.2026). Opel, Familienbetrieb. ACHTUNG: bewirbt eigene Unfallinstandsetzung — Ansprache anpassen."},
+    {"name": "Autohaus am Limes Golderer", "slug": "golderer-wallduern", "email": "info@golderer.de", "telefon": "06282 9244-0", "strasse": "Daimlerstraße 3", "plz": "74731", "ort": "Walldürn", "notiz": "Akquise-Kandidat (11.06.2026). Seat/Cupra/Skoda/Nissan, 40+ Jahre, einer der größeren im Ostkreis."},
+    {"name": "Autohaus Günther (Wolfert Gruppe)", "slug": "guenther-wallduern", "email": "info@guenther-dasautohaus.de", "telefon": "06282 9230-0", "strasse": "Würzburger Straße 67", "plz": "74731", "ort": "Walldürn", "notiz": "Akquise-Kandidat (11.06.2026). Audi + Skoda (Hardheim), ~161 Lagerfahrzeuge — größter Händler im Gebiet."},
+    {"name": "Auto Biber", "slug": "auto-biber-adelsheim", "email": "Ursula.Biber@auto-biber.de", "telefon": "06291 1323", "strasse": "Torgasse 6", "plz": "74740", "ort": "Adelsheim", "notiz": "Akquise-Kandidat (11.06.2026). Ford-Partner + Opel-Service, kleiner Familienbetrieb."},
+    {"name": "BMW Autohaus Krauth", "slug": "bmw-krauth-mosbach", "email": "info@bmw-krauth.de", "telefon": "", "strasse": "", "plz": "74821", "ort": "Mosbach", "notiz": "Akquise-Kandidat (11.06.2026). BMW/MINI-Vertragshändler, Krauth-Gruppe — größter Markenhändler in Mosbach."},
+    {"name": "CUPRA Garage Mosbach (von der Weppen)", "slug": "cupra-von-der-weppen-mosbach", "email": "mosbach@von-der-weppen.de", "telefon": "", "strasse": "", "plz": "74821", "ort": "Mosbach", "notiz": "Akquise-Kandidat (11.06.2026). Seat/Cupra, Teil der von-der-Weppen-Gruppe."},
+    {"name": "AUTOflex24", "slug": "autoflex24-gundelsheim", "email": "info@autoflex24.de", "telefon": "", "strasse": "", "plz": "74831", "ort": "Gundelsheim", "notiz": "Akquise-Kandidat (11.06.2026). EU-Neuwagen-Importeur + Gebrauchtwagen, mittelgroß."},
+    {"name": "Autohaus Hans Gross", "slug": "renault-gross-schwarzach", "email": "info@renault-gross.de", "telefon": "", "strasse": "", "plz": "74869", "ort": "Schwarzach-Unterschwarzach", "notiz": "Akquise-Kandidat (11.06.2026). Renault/Dacia, kleiner Familienbetrieb."},
+    {"name": "Autoshop Stiehl", "slug": "autoshop-stiehl-neckarzimmern", "email": "stiehl-neckarzimmern@t-online.de", "telefon": "", "strasse": "", "plz": "74865", "ort": "Neckarzimmern", "notiz": "Akquise-Kandidat (11.06.2026). Freier Mehrmarkenhändler, 2. Standort Bad Wimpfen."},
+    {"name": "Auto-Service Rüdinger", "slug": "auto-ruedinger-aglasterhausen", "email": "info@auto-ruedinger.de", "telefon": "", "strasse": "", "plz": "74858", "ort": "Aglasterhausen", "notiz": "Akquise-Kandidat (11.06.2026). Familienbetrieb 70+ Jahre. ACHTUNG: bietet selbst Karosserie/Smart-Repair — klären, ob Lack fremdvergeben wird."},
+    {"name": "Ralf Grimm Automobile", "slug": "grimm-automobile-fahrenbach", "email": "info@grimm-automobile.de", "telefon": "", "strasse": "", "plz": "74864", "ort": "Fahrenbach", "notiz": "Akquise-Kandidat (11.06.2026). EU-Neuwagen/Jahreswagen, KEINE eigene Werkstatt — Top-Zielprofil."},
+    {"name": "Autohaus Philipp", "slug": "opel-philipp-eberbach", "email": "info@opel-philipp.de", "telefon": "", "strasse": "", "plz": "69412", "ort": "Eberbach", "notiz": "Akquise-Kandidat (11.06.2026). Opel-Vertragshändler, familiengeführt, keine eigene Lackiererei erkennbar — Top-Zielprofil."},
+    {"name": "Auto- und Reifenservice Hufnagel", "slug": "hufnagel-eberbach", "email": "info@hufnagel-eberbach.de", "telefon": "", "strasse": "", "plz": "69412", "ort": "Eberbach", "notiz": "Akquise-Kandidat (11.06.2026). Renault/Dacia, kleiner Familienbetrieb ohne Lackiererei — Top-Zielprofil."},
+    {"name": "Autowelt Ebert (Standort Eberbach)", "slug": "autowelt-ebert-eberbach", "email": "info.ebert.automobile@autowelt-ebert.de", "telefon": "", "strasse": "", "plz": "69412", "ort": "Eberbach", "notiz": "Akquise-Kandidat (11.06.2026). Skoda. ACHTUNG: Gruppe hat eigene Lackiererei in Weinheim (~50 km) — Chance nur für lokalen Überlauf."},
+    {"name": "Autohaus Koch Möckmühl", "slug": "koch-moeckmuehl", "email": "vw-moeck@koch-autogruppe.de", "telefon": "", "strasse": "", "plz": "74219", "ort": "Möckmühl", "notiz": "Akquise-Kandidat (11.06.2026). VW, Koch-Gruppe. ACHTUNG: Gruppe wirbt als Unfallspezialist — Bedarf vorab klären."},
+    {"name": "Autohaus Metzger Widdern", "slug": "toyota-metzger-widdern", "email": "widdern@auto-metzger.de", "telefon": "", "strasse": "", "plz": "74259", "ort": "Widdern", "notiz": "Akquise-Kandidat (11.06.2026). Toyota/Hybrid-Spezialist, familiengeführt, ~78 Fahrzeuge."},
+    {"name": "Auto-Speicher", "slug": "auto-speicher-billigheim", "email": "info@auto-speicher.de", "telefon": "", "strasse": "", "plz": "74842", "ort": "Billigheim", "notiz": "Akquise-Kandidat (11.06.2026). Opel/Isuzu, Familienbetrieb seit 1927, ~50 Fahrzeuge, keine Lackiererei — Top-Zielprofil."},
+    {"name": "AUTO AMEND", "slug": "auto-amend-schefflenz", "email": "info@auto-amend.com", "telefon": "", "strasse": "", "plz": "74850", "ort": "Schefflenz", "notiz": "Akquise-Kandidat (11.06.2026). VW-Konzernmarken frei, Meisterwerkstatt ohne Lackiererei — Top-Zielprofil."},
+    {"name": "CMR Automobile", "slug": "cmr-automobile-roigheim", "email": "info@cmr-automobile.de", "telefon": "", "strasse": "", "plz": "74255", "ort": "Roigheim", "notiz": "Akquise-Kandidat (11.06.2026). Premium-Gebrauchte (BMW M, Porsche) — Aufbereitungs-/Smart-Repair-Bedarf wahrscheinlich."},
+    {"name": "Autohaus Joachim Essig", "slug": "autohaus-essig-krautheim", "email": "auto.essig@t-online.de", "telefon": "", "strasse": "", "plz": "74238", "ort": "Krautheim-Gommersdorf", "notiz": "Akquise-Kandidat (11.06.2026). Ford-Partner seit 1948, Familienbetrieb."},
+    {"name": "Autohaus MAT", "slug": "autohaus-mat-waibstadt", "email": "info@autohausmat.de", "telefon": "", "strasse": "", "plz": "74915", "ort": "Waibstadt", "notiz": "Akquise-Kandidat (11.06.2026). Transporter/Nutzfahrzeuge + Pkw — Nutzfahrzeug-Lackierungen als Zusatzgeschäft."},
+]
+
+
+def seed_akquise_autohaeuser(db):
+    # Nur INSERT, nie UPDATE: spaetere Aenderungen im Admin (Adresse, E-Mail,
+    # Loeschen) werden von diesem Seed nicht wieder ueberschrieben.
+    now = now_str()
+    for kandidat in AKQUISE_AUTOHAEUSER:
+        existing = db.execute(
+            "SELECT id FROM autohaeuser WHERE slug=?",
+            (kandidat["slug"],),
+        ).fetchone()
+        if existing:
+            continue
+        db.execute(
+            """
+            INSERT INTO autohaeuser
+            (name, slug, portal_key, kontakt_name, email, telefon, strasse, plz, ort,
+             zugangscode, portal_titel, willkommen_text, notiz, erstellt_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                kandidat["name"],
+                kandidat["slug"],
+                uuid.uuid4().hex[:16],
+                clean_text(kandidat.get("kontakt_name")),
+                clean_text(kandidat.get("email")),
+                clean_text(kandidat.get("telefon")),
+                clean_text(kandidat.get("strasse")),
+                clean_text(kandidat.get("plz")),
+                clean_text(kandidat.get("ort")),
+                secrets.token_urlsafe(9),
+                f"Portal {kandidat['name']}",
+                f"Willkommen im persönlichen Terminbereich von {kandidat['name']}.",
+                clean_text(kandidat.get("notiz")),
+                now,
+            ),
+        )
 
 
 def seed_default_autohaeuser(db):
