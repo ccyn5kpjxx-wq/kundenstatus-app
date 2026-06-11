@@ -2653,7 +2653,12 @@ def inject_csrf_helpers():
 
 
 def session_is_authenticated():
-    return bool(session.get("admin") or session.get("partner_autohaus_id") or session.get("versicherung_id"))
+    return bool(
+        session.get("admin")
+        or session.get("partner_autohaus_id")
+        or session.get("versicherung_id")
+        or session.get("werkstatt_tafel")
+    )
 
 
 def mark_authenticated_session_active():
@@ -2835,7 +2840,7 @@ def protect_csrf():
         recovery = csrf_recovery_response()
         if recovery is not None:
             return recovery
-        if request.endpoint in {"login", "partner_login", "partner_login_key", "versicherung_login", "versicherung_login_key"}:
+        if request.endpoint in {"login", "partner_login", "partner_login_key", "versicherung_login", "versicherung_login_key", "werkstatt_login"}:
             session.pop(CSRF_FIELD_NAME, None)
             flash("Die Login-Seite war veraltet. Bitte Passwort noch einmal eingeben.", "warning")
             return redirect(request.path)
@@ -3131,6 +3136,54 @@ def versicherung_access_code_matches(submitted, versicherung):
     submitted = clean_secret_value(submitted)
     expected = clean_secret_value((versicherung or {}).get("zugangscode"))
     return bool(submitted and expected and hmac.compare_digest(submitted, expected))
+
+
+# --- Werkstatt-Tafel: gemeinsamer Zugangscode fuer den Werkstatt-Bildschirm ---
+WERKSTATT_TAFEL_CODE_SETTING = "WERKSTATT_TAFEL_CODE"
+WERKSTATT_TAFEL_CODE_ALPHABET = "23456789ACDEFGHJKMNPRSTUVWXYZ"
+
+
+def generate_werkstatt_tafel_code():
+    return "".join(secrets.choice(WERKSTATT_TAFEL_CODE_ALPHABET) for _ in range(6))
+
+
+def get_werkstatt_tafel_code():
+    return clean_secret_value(
+        get_app_setting(WERKSTATT_TAFEL_CODE_SETTING)
+        or os.environ.get("WERKSTATT_TAFEL_CODE")
+    )
+
+
+def ensure_werkstatt_tafel_code():
+    code = get_werkstatt_tafel_code()
+    if code:
+        return code
+    code = generate_werkstatt_tafel_code()
+    set_app_setting(WERKSTATT_TAFEL_CODE_SETTING, code)
+    return code
+
+
+def werkstatt_tafel_code_matches(submitted):
+    submitted = clean_secret_value(submitted)
+    expected = get_werkstatt_tafel_code()
+    return bool(submitted and expected and hmac.compare_digest(submitted, expected))
+
+
+def werkstatt_tafel_session_token(code=None):
+    # In der Session liegt nur ein Hash des Codes: aendert der GF den Code,
+    # verlieren bereits angemeldete Bildschirme automatisch den Zugriff.
+    code = clean_secret_value(code if code is not None else get_werkstatt_tafel_code())
+    if not code:
+        return ""
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()[:24]
+
+
+def werkstatt_tafel_session_ok():
+    if session.get("admin"):
+        return True
+    token = clean_text(session.get("werkstatt_tafel"))
+    expected = werkstatt_tafel_session_token()
+    return bool(token and expected and hmac.compare_digest(token, expected))
 
 
 def login_attempt_key(scope, identifier=""):
@@ -24036,6 +24089,19 @@ def versicherung_mail_attachments(dateien, limit_mb=None):
     return attachments, skipped, total
 
 
+def smtp_lokaler_hostname():
+    # smtplib stellt sich dem Server mit dem Rechnernamen vor (EHLO). Enthaelt
+    # der Computername Umlaute (z. B. "GärtnerundRacz"), bricht der Versand mit
+    # UnicodeEncodeError ab. Dann stattdessen eine neutrale Adresse verwenden.
+    import socket
+
+    try:
+        socket.getfqdn().encode("ascii")
+        return None
+    except (UnicodeEncodeError, OSError):
+        return "[127.0.0.1]"
+
+
 def send_versicherung_schadenmail(auftrag, empfaenger, cc, anschreiben, dateien=None):
     config = get_schaden_mail_config()
     if not config["smtp_configured"]:
@@ -24082,11 +24148,11 @@ def send_versicherung_schadenmail(auftrag, empfaenger, cc, anschreiben, dateien=
         )
 
     if config["smtp_ssl"]:
-        with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], timeout=30) as smtp:
+        with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30) as smtp:
             smtp.login(config["smtp_user"], config["_smtp_password"])
             smtp.send_message(message)
     else:
-        with smtplib.SMTP(config["smtp_host"], config["smtp_port"], timeout=30) as smtp:
+        with smtplib.SMTP(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30) as smtp:
             if config["smtp_tls"]:
                 smtp.starttls()
             smtp.login(config["smtp_user"], config["_smtp_password"])
@@ -24252,11 +24318,11 @@ def sende_autohaus_benachrichtigung_mail(auftrag_id, betreff, text):
         def _senden():
             try:
                 if config["smtp_ssl"]:
-                    with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], timeout=30) as smtp:
+                    with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30) as smtp:
                         smtp.login(config["smtp_user"], config["_smtp_password"])
                         smtp.send_message(message)
                 else:
-                    with smtplib.SMTP(config["smtp_host"], config["smtp_port"], timeout=30) as smtp:
+                    with smtplib.SMTP(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30) as smtp:
                         if config["smtp_tls"]:
                             smtp.starttls()
                         smtp.login(config["smtp_user"], config["_smtp_password"])
@@ -32079,7 +32145,20 @@ def admin_zugaenge():
         "zugaenge.html",
         autohaeuser=list_autohaeuser(),
         versicherungen=list_versicherungen(),
+        werkstatt_tafel_code=ensure_werkstatt_tafel_code(),
+        werkstatt_tafel_url=url_for("werkstatt_login", _external=True),
     )
+
+
+@app.route("/admin/werkstatt-tafel/zugang", methods=["POST"])
+@admin_required
+def admin_werkstatt_tafel_zugang():
+    code = clean_text(request.form.get("zugangscode")).upper()
+    if not code:
+        code = generate_werkstatt_tafel_code()
+    set_app_setting(WERKSTATT_TAFEL_CODE_SETTING, code[:40])
+    flash(f"Werkstatt-Code aktualisiert: {code[:40]} — angemeldete Bildschirme müssen sich neu anmelden.", "success")
+    return redirect(url_for("admin_zugaenge"))
 
 
 @app.route("/admin/autohaus/<int:autohaus_id>/koordinator-email", methods=["POST"])
@@ -37246,6 +37325,122 @@ def versicherung_datei(slug, datei_id):
         datei,
         as_attachment=False,
         missing_back_url=url_for("versicherung_auftrag", slug=slug, auftrag_id=auftrag["id"]),
+    )
+
+
+# --- Werkstatt-Tafel ---------------------------------------------------------
+# Bildschirm in der Werkstatt: zeigt den Mitarbeitern alle offenen Auftraege
+# als Tafel; Antippen oeffnet die Auftrags-Details (ohne Preise/Kalkulation).
+# Zugang ueber den gemeinsamen Werkstatt-Code (Admin -> Zugaenge);
+# Admins sehen die Tafel ohne extra Anmeldung.
+
+
+def werkstatt_tafel_guard():
+    if werkstatt_tafel_session_ok():
+        return None
+    return redirect(url_for("werkstatt_login"))
+
+
+@app.route("/werkstatt", methods=["GET", "POST"])
+def werkstatt_login():
+    if request.method == "POST":
+        limited, wait_seconds = login_rate_limit_status("werkstatt", "tafel")
+        if limited:
+            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen.", "danger")
+            return render_template("werkstatt_login.html", code_konfiguriert=bool(get_werkstatt_tafel_code())), 429
+        submitted = request.form.get("password") or request.form.get("zugangscode")
+        if werkstatt_tafel_code_matches(submitted):
+            clear_login_attempts("werkstatt", "tafel")
+            session.permanent = True
+            session["werkstatt_tafel"] = werkstatt_tafel_session_token()
+            return redirect(url_for("werkstatt_tafel"))
+        record_failed_login("werkstatt", "tafel")
+        flash("Falscher Werkstatt-Code.", "danger")
+    elif werkstatt_tafel_session_ok():
+        return redirect(url_for("werkstatt_tafel"))
+    return render_template("werkstatt_login.html", code_konfiguriert=bool(get_werkstatt_tafel_code()))
+
+
+@app.route("/werkstatt/logout")
+def werkstatt_logout():
+    session.pop("werkstatt_tafel", None)
+    return redirect(url_for("werkstatt_login"))
+
+
+@app.route("/werkstatt/tafel")
+def werkstatt_tafel():
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    auftraege = [
+        auftrag
+        for auftrag in list_auftraege()
+        if int(auftrag.get("status") or 1) <= 4
+    ]
+    spalten = (
+        {
+            "key": "geplant",
+            "titel": "Geplant / Angenommen",
+            "icon": "📅",
+            "auftraege": [a for a in auftraege if a["status"] <= 2],
+        },
+        {
+            "key": "in_arbeit",
+            "titel": "In Arbeit",
+            "icon": "🔧",
+            "auftraege": [a for a in auftraege if a["status"] == 3],
+        },
+        {
+            "key": "fertig",
+            "titel": "Fertig — wartet auf Abholung",
+            "icon": "✅",
+            "auftraege": [a for a in auftraege if a["status"] == 4],
+        },
+    )
+    jetzt = datetime.now()
+    return render_template(
+        "werkstatt_tafel.html",
+        spalten=spalten,
+        anzahl=len(auftraege),
+        stand_label=jetzt.strftime("%H:%M"),
+        datum_label=f"{WOCHENTAGE[jetzt.weekday()]}, {jetzt.strftime(DATE_FMT)}",
+    )
+
+
+@app.route("/werkstatt/auftrag/<int:auftrag_id>")
+def werkstatt_auftrag(auftrag_id):
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("archiviert"):
+        abort(404)
+    dateien = list_dateien(auftrag_id)
+    bilder = [
+        datei
+        for datei in dateien
+        if datei.get("is_browser_image") and datei.get("original_available")
+    ]
+    return render_template(
+        "werkstatt_auftrag.html",
+        auftrag=auftrag,
+        bilder=bilder,
+        statusliste=STATUSLISTE,
+    )
+
+
+@app.route("/werkstatt/datei/<int:datei_id>")
+def werkstatt_datei(datei_id):
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    datei = get_datei(datei_id)
+    if not datei:
+        abort(404)
+    return send_upload_file(
+        datei,
+        as_attachment=False,
+        missing_back_url=url_for("werkstatt_tafel"),
     )
 
 
