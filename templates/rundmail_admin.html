@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Rundmail an Autohäuser{% endblock %}
+
+{% block content %}
+
+<div class="section-title mb-4">
+  <div>
+    <div class="badge-soft mb-3">Partner-Kommunikation</div>
+    <h1 class="mb-2">Rundmail an Autohäuser</h1>
+    <p class="mb-0">Betriebsurlaub ankündigen, Neuigkeiten teilen oder inaktive Partner erinnern: „Wir sind da."</p>
+  </div>
+  <a href="{{ url_for('admin_zugaenge') }}" class="btn btn-soft">Zu den Zugängen</a>
+</div>
+
+{% if letztes_ergebnis %}
+<div class="alert alert-info page-card mb-4">Letzter Versand: {{ letztes_ergebnis }}</div>
+{% endif %}
+
+<form method="POST" action="{{ url_for('admin_rundmail_senden') }}" onsubmit="return confirm('Rundmail jetzt an die ausgewählten Autohäuser senden?')">
+  {{ csrf_field()|safe }}
+
+  <div class="page-card p-4 mb-4">
+    <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-3">
+      <div>
+        <h2 class="h5 mb-1">1. Empfänger wählen</h2>
+        <p class="text-muted small mb-0">Aktiv = Auftrag in den letzten 60 Tagen. Gesendet wird an die Koordinator-Adresse, sonst an die Kontaktadresse.</p>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-soft btn-sm" data-auswahl="alle">Alle</button>
+        <button type="button" class="btn btn-soft btn-sm" data-auswahl="aktive">Nur Aktive</button>
+        <button type="button" class="btn btn-soft btn-sm" data-auswahl="inaktive">Nur Inaktive</button>
+        <button type="button" class="btn btn-soft btn-sm" data-auswahl="keine">Keine</button>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead>
+          <tr><th style="width: 3rem;"></th><th>Autohaus</th><th>Status</th><th>E-Mail geht an</th></tr>
+        </thead>
+        <tbody>
+          {% for e in eintraege %}
+          <tr>
+            <td>
+              <input type="checkbox" class="form-check-input" name="autohaus_ids" value="{{ e.id }}"
+                     data-aktiv="{{ '1' if e.aktiv else '0' }}" {% if e.adresse %}checked{% else %}disabled{% endif %}>
+            </td>
+            <td><div class="fw-bold">{{ e.name }}</div></td>
+            <td>
+              {% if e.aktiv %}<span class="badge text-bg-success">aktiv</span>
+              {% else %}<span class="badge text-bg-secondary">inaktiv</span>{% endif %}
+              {% if e.letzter_auftrag %}<div class="text-muted small">letzter Auftrag: {{ e.letzter_auftrag }}</div>{% endif %}
+            </td>
+            <td>
+              {% if e.adresse %}
+                {{ e.adresse }} <span class="badge badge-soft">{{ e.adresse_quelle }}</span>
+              {% else %}
+                <span class="text-danger small">keine Adresse hinterlegt — wird übersprungen</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="page-card p-4 mb-4">
+    <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-3">
+      <div>
+        <h2 class="h5 mb-1">2. Nachricht schreiben</h2>
+        <p class="text-muted small mb-0">
+          Platzhalter werden pro Autohaus ersetzt:
+          <code>{{ '{kontakt_name}' }}</code> <code>{{ '{name}' }}</code> <code>{{ '{portal_link}' }}</code> <code>{{ '{zugangscode}' }}</code>
+        </p>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-soft btn-sm" data-vorlage="urlaub">Vorlage: Betriebsurlaub</button>
+        <button type="button" class="btn btn-soft btn-sm" data-vorlage="news">Vorlage: Neuigkeiten</button>
+        <button type="button" class="btn btn-soft btn-sm" data-vorlage="portal">Vorlage: Portal-Vorstellung</button>
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Betreff</label>
+      <input type="text" name="betreff" id="rundmail-betreff" class="form-control form-control-lg" placeholder="z.B. Betriebsurlaub vom 19.08. bis 04.09.2026">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Text</label>
+      <textarea name="text" id="rundmail-text" class="form-control" rows="12" placeholder="Nachricht an die Autohäuser …"></textarea>
+    </div>
+    <button type="submit" class="btn btn-brand btn-lg" data-no-loading="true">Rundmail senden</button>
+    <div class="text-muted small mt-2">Der Versand läuft im Hintergrund. Antworten gehen an info@auto-lackierzentrum.de.</div>
+  </div>
+</form>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (() => {
+    document.querySelectorAll('[data-auswahl]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const modus = button.dataset.auswahl;
+        document.querySelectorAll('input[name="autohaus_ids"]').forEach((box) => {
+          if (box.disabled) { box.checked = false; return; }
+          if (modus === 'alle') box.checked = true;
+          else if (modus === 'keine') box.checked = false;
+          else if (modus === 'aktive') box.checked = box.dataset.aktiv === '1';
+          else if (modus === 'inaktive') box.checked = box.dataset.aktiv === '0';
+        });
+      });
+    });
+
+    const vorlagen = {
+      urlaub: {
+        betreff: 'Betriebsurlaub vom 19.08. bis 04.09.2026 – bitte vormerken',
+        text: 'Hallo {kontakt_name},\n\n' +
+          'kurze Erinnerung aus Ihrer Partnerwerkstatt: Wir sind vom 19.08.2026 bis einschließlich 04.09.2026 im Betriebsurlaub.\n\n' +
+          'Damit alles rechtzeitig fertig wird, planen Sie Lackier- und Karosseriearbeiten bitte entsprechend ein. ' +
+          'Fahrzeuge, die vor dem Urlaub fertig sein sollen, melden Sie uns am besten bis zum 07.08.2026.\n\n' +
+          'Über Ihr Portal geht das jederzeit in zwei Minuten:\n{portal_link}\n\n' +
+          'Vielen Dank und beste Grüße\nIhr Team von Gärtner Karosserie & Lack'
+      },
+      news: {
+        betreff: 'Neuigkeiten aus Ihrer Partnerwerkstatt',
+        text: 'Hallo {kontakt_name},\n\n' +
+          'ein kurzes Update aus der Werkstatt:\n\n' +
+          '- (Neuigkeit 1 hier eintragen)\n' +
+          '- (Neuigkeit 2 hier eintragen)\n\n' +
+          'Wie immer gilt: Fahrzeug melden, Fotos hochladen, Status verfolgen – alles über Ihr Portal:\n{portal_link}\n\n' +
+          'Beste Grüße\nIhr Team von Gärtner Karosserie & Lack'
+      },
+      portal: {
+        betreff: 'Ihr direkter Draht zu Gärtner Karosserie & Lack – unser Partner-Portal',
+        text: 'Hallo {kontakt_name},\n\n' +
+          'wir möchten uns kurz in Erinnerung bringen: Als Partnerwerkstatt für Karosserie und Lack übernehmen wir für Sie ' +
+          'Unfallinstandsetzung, Lackierungen und die komplette Schadensteuerung mit der Versicherung.\n\n' +
+          'Damit das so einfach wie möglich ist, gibt es Ihr persönliches Portal:\n\n' +
+          'Portal-Adresse: {portal_link}\nZugangscode: {zugangscode}\n\n' +
+          'Damit können Sie:\n' +
+          '- Fahrzeuge in zwei Minuten melden (Unterlagen hochladen, der Rest füllt sich automatisch)\n' +
+          '- den Reparatur-Status jederzeit live verfolgen\n' +
+          '- Angebote erhalten und direkt annehmen\n' +
+          '- Versicherungsfälle komplett digital abwickeln\n\n' +
+          'Probieren Sie es einfach aus – wir freuen uns auf Ihre Fahrzeuge!\n\n' +
+          'Beste Grüße\nIhr Team von Gärtner Karosserie & Lack'
+      }
+    };
+    document.querySelectorAll('[data-vorlage]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const vorlage = vorlagen[button.dataset.vorlage];
+        if (!vorlage) return;
+        document.getElementById('rundmail-betreff').value = vorlage.betreff;
+        document.getElementById('rundmail-text').value = vorlage.text;
+      });
+    });
+  })();
+</script>
+{% endblock %}

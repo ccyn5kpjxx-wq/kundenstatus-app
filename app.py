@@ -32129,6 +32129,173 @@ UMSATZ_MONATE = (
 )
 
 
+# --- Rundmail an Autohaeuser (Betriebsurlaub, Neuigkeiten, Portal-Vorstellung) ---
+RUNDMAIL_TESTLOG = []
+
+
+def rundmail_empfaenger_adresse(autohaus):
+    # Koordinator-Adresse bevorzugt, sonst die allgemeine Kontaktadresse.
+    return clean_text(autohaus.get("koordinator_email")) or clean_text(autohaus.get("email"))
+
+
+def rundmail_personalisieren(vorlage, autohaus, portal_basis):
+    text = str(vorlage or "")
+    ersetzungen = {
+        "{name}": clean_text(autohaus.get("name")),
+        "{kontakt_name}": clean_text(autohaus.get("kontakt_name")) or clean_text(autohaus.get("name")),
+        "{portal_link}": f"{portal_basis}{clean_text(autohaus.get('portal_url'))}",
+        "{zugangscode}": clean_text(autohaus.get("zugangscode")),
+    }
+    for platzhalter, wert in ersetzungen.items():
+        text = text.replace(platzhalter, wert)
+    return text
+
+
+def letzter_auftrag_je_autohaus():
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT autohaus_id, erstellt_am FROM auftraege WHERE COALESCE(autohaus_id, 0) > 0"
+        ).fetchall()
+    finally:
+        db.close()
+    letzte = {}
+    for row in rows:
+        try:
+            zeitpunkt = datetime.strptime(clean_text(row["erstellt_am"])[:16], DATETIME_FMT)
+        except ValueError:
+            continue
+        aid = int(row["autohaus_id"] or 0)
+        if aid and (aid not in letzte or zeitpunkt > letzte[aid]):
+            letzte[aid] = zeitpunkt
+    return letzte
+
+
+@app.route("/admin/rundmail")
+@admin_required
+def admin_rundmail():
+    autohaeuser = list_autohaeuser()
+    letzte = letzter_auftrag_je_autohaus()
+    grenze = datetime.now() - timedelta(days=60)
+    eintraege = []
+    for autohaus in autohaeuser:
+        zeitpunkt = letzte.get(int(autohaus["id"]))
+        adresse = rundmail_empfaenger_adresse(autohaus)
+        eintraege.append({
+            "id": autohaus["id"],
+            "name": autohaus["name"],
+            "adresse": adresse,
+            "adresse_quelle": "Koordinator" if clean_text(autohaus.get("koordinator_email")) else ("Kontakt" if adresse else ""),
+            "letzter_auftrag": zeitpunkt.strftime(DATE_FMT) if zeitpunkt else "",
+            "aktiv": bool(zeitpunkt and zeitpunkt >= grenze),
+        })
+    return render_template(
+        "rundmail_admin.html",
+        eintraege=eintraege,
+        letztes_ergebnis=get_app_setting("RUNDMAIL_LAST_RESULT", ""),
+    )
+
+
+@app.route("/admin/rundmail/senden", methods=["POST"])
+@admin_required
+def admin_rundmail_senden():
+    betreff = clean_text(request.form.get("betreff"))
+    text = str(request.form.get("text") or "").strip()
+    ids = [int(wert) for wert in request.form.getlist("autohaus_ids") if str(wert).isdigit()]
+    if not betreff or not text:
+        flash("Bitte Betreff und Text eintragen.", "warning")
+        return redirect(url_for("admin_rundmail"))
+    if not ids:
+        flash("Bitte mindestens ein Autohaus auswählen.", "warning")
+        return redirect(url_for("admin_rundmail"))
+    portal_basis = PUBLIC_BASE_URL or request.url_root.rstrip("/")
+    empfaenger_pakete = []
+    uebersprungen = []
+    for autohaus_id in ids:
+        autohaus = get_autohaus(autohaus_id)
+        if not autohaus:
+            continue
+        adresse = rundmail_empfaenger_adresse(autohaus)
+        if not adresse or "@" not in adresse:
+            uebersprungen.append(autohaus["name"])
+            continue
+        empfaenger_pakete.append({
+            "adresse": adresse,
+            "betreff": rundmail_personalisieren(betreff, autohaus, portal_basis),
+            "text": rundmail_personalisieren(text, autohaus, portal_basis),
+            "name": autohaus["name"],
+        })
+    if not empfaenger_pakete:
+        flash("Keines der gewählten Autohäuser hat eine E-Mail-Adresse hinterlegt.", "warning")
+        return redirect(url_for("admin_rundmail"))
+    if app.config.get("TESTING"):
+        RUNDMAIL_TESTLOG.extend(empfaenger_pakete)
+        flash(f"TEST: Rundmail an {len(empfaenger_pakete)} Autohäuser vorbereitet.", "success")
+        return redirect(url_for("admin_rundmail"))
+    config = get_schaden_mail_config()
+    if not config["smtp_configured"]:
+        flash("SMTP ist nicht konfiguriert — es kann keine Rundmail gesendet werden.", "warning")
+        return redirect(url_for("admin_rundmail"))
+
+    def _senden():
+        ok = 0
+        fehler = 0
+        try:
+            if config["smtp_ssl"]:
+                smtp = smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30)
+            else:
+                smtp = smtplib.SMTP(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30)
+                if config["smtp_tls"]:
+                    smtp.starttls()
+            smtp.login(config["smtp_user"], config["_smtp_password"])
+            try:
+                for paket in empfaenger_pakete:
+                    try:
+                        message = EmailMessage()
+                        message["Subject"] = paket["betreff"]
+                        message["From"] = formataddr(("Gärtner Karosserie & Lack", config["from_address"]))
+                        message["To"] = paket["adresse"]
+                        message["Reply-To"] = config["smtp_user"]
+                        message.set_content(
+                            paket["text"]
+                            + "\n\n--\nGärtner Karosserie & Lack GmbH\nBinauer Höhe 4, 74821 Mosbach\nTelefon +49 1522 7706694"
+                        )
+                        smtp.send_message(message)
+                        ok += 1
+                    except Exception as exc:
+                        fehler += 1
+                        print(f"WARNUNG: Rundmail an {paket['adresse']} fehlgeschlagen: {clean_text(str(exc))[:200]}")
+            finally:
+                try:
+                    smtp.quit()
+                except Exception:
+                    pass
+        except Exception as exc:
+            fehler = len(empfaenger_pakete) - ok
+            print(f"WARNUNG: Rundmail-Versand abgebrochen: {clean_text(str(exc))[:300]}")
+        try:
+            set_app_setting("RUNDMAIL_LAST_RESULT", f"{now_str()}: {ok} gesendet, {fehler} Fehler")
+        except Exception:
+            pass
+
+    threading.Thread(target=_senden, daemon=True).start()
+    hinweis = f" Übersprungen (keine Adresse): {', '.join(uebersprungen)}." if uebersprungen else ""
+    flash(f"Rundmail wird im Hintergrund an {len(empfaenger_pakete)} Autohäuser gesendet.{hinweis}", "success")
+    return redirect(url_for("admin_rundmail"))
+
+
+# --- Zahlen / Umsatz-Ziel (Cockpit-Kachel) ---------------------------------
+# Liest die echten Einnahmen/Ausgaben aus den synchronisierten Lexware-Rechnungen
+# (Tabelle lexware_rechnungen) und stellt sie als Monatsziel mit Tendenz/Ampel dar.
+# Das Ziel berechnet sich automatisch: Vormonat schlagen; liegt der Monat vor dem
+# Vormonats-Tempo, kommt die Haelfte des Vorsprungs (max. +15 %) obendrauf.
+UMSATZ_MONATE = (
+    "", "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+)
+
+
+
 def umsatz_euro_label(value):
     try:
         amount = float(value or 0)
