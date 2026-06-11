@@ -84,6 +84,13 @@ def main():
         check("Tafel hat Drop-Ziele", 'data-ziel-status="3"' in tafel_html)
         check("Tafel hat Schnell-Knoepfe", "data-status-knopf" in tafel_html)
 
+        # Startzustand deterministisch setzen (Wiederholungslaeufe auf derselben DB:
+        # der Idempotenz-Check wuerde einen POST auf den bereits aktiven Status zum No-Op machen)
+        db = portal.get_db()
+        db.execute("UPDATE auftraege SET status=2 WHERE id=?", (auftrag_id,))
+        db.commit()
+        db.close()
+
         # Statuswechsel: Formular-Weg (wie Detail-Seite) auf "In Arbeit"
         response = client.post(
             f"/werkstatt/auftrag/{auftrag_id}/status/3",
