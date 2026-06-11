@@ -339,6 +339,7 @@
           <label class="form-label">Kennzeichen</label>
           <input type="text" name="kennzeichen" class="form-control form-control-lg" value="{{ angebot['kennzeichen'] if angebot else '' }}" style="text-transform:uppercase;">
         </div>
+        {% if angebot and angebot['versicherung_id'] %}
         <div class="col-md-4" id="pflicht-fahrzeugdaten">
           <label class="form-label">FIN-Nummer</label>
           <div class="input-group input-group-lg" data-fin-widget>
@@ -359,6 +360,12 @@
           <label class="form-label">Kilometerstand</label>
           <input type="text" name="kilometerstand" class="form-control form-control-lg" value="{{ angebot['kilometerstand'] if angebot else '' }}" placeholder="z.B. 84.500">
         </div>
+        {% else %}
+        <div class="col-md-4" id="pflicht-fahrzeugdaten">
+          <label class="form-label">FIN-Nummer</label>
+          <input type="text" name="fin_nummer" class="form-control form-control-lg" value="{{ angebot['fin_nummer'] if angebot else '' }}" style="text-transform:uppercase;">
+        </div>
+        {% endif %}
         <div class="col-md-4">
           <label class="form-label">Auftrag / Vorgangsnummer</label>
           <input type="text" name="auftragsnummer" class="form-control form-control-lg" value="{{ angebot['auftragsnummer'] if angebot else '' }}">
@@ -949,7 +956,7 @@
       });
     }
   </script>
-  {% include "_fin_analyse_script.html" %}
+  {% if angebot and angebot['versicherung_id'] %}{% include "_fin_analyse_script.html" %}{% endif %}
   {% include "ki_assistent_widget.html" %}
   {% include "_session_keepalive.html" %}
 </body>
