@@ -77,6 +77,8 @@
         <button type="button" class="btn btn-soft btn-sm" data-vorlage="urlaub">Vorlage: Betriebsurlaub</button>
         <button type="button" class="btn btn-soft btn-sm" data-vorlage="news">Vorlage: Neuigkeiten</button>
         <button type="button" class="btn btn-soft btn-sm" data-vorlage="portal">Vorlage: Portal-Vorstellung</button>
+        <button type="button" class="btn btn-soft btn-sm" data-vorlage="benachrichtigung">Vorlage: Neu — E-Mail-Service</button>
+        <button type="button" class="btn btn-soft btn-sm" data-vorlage="akquise">Vorlage: Neukunden-Akquise</button>
       </div>
     </div>
     <div class="mb-3">
@@ -143,6 +145,38 @@
           '- Versicherungsfälle komplett digital abwickeln\n\n' +
           'Probieren Sie es einfach aus – wir freuen uns auf Ihre Fahrzeuge!\n\n' +
           'Beste Grüße\nIhr Team von Gärtner Karosserie & Lack'
+      },
+      benachrichtigung: {
+        betreff: 'Neu für Sie: Wir melden uns automatisch – Sie müssen nicht mehr nachschauen',
+        text: 'Hallo {kontakt_name},\n\n' +
+          'eine Neuigkeit, die Ihnen Zeit spart: Ab sofort meldet sich unser Portal automatisch per E-Mail bei Ihnen.\n\n' +
+          'Das heißt für Sie: Fahrzeug einmal anlegen – fertig. Sie müssen nicht mehr ins Portal schauen, ' +
+          'denn Sie bekommen automatisch eine E-Mail, sobald:\n\n' +
+          '- unser Angebot für Sie vorliegt\n' +
+          '- Ihr Fahrzeug fertig und abholbereit ist\n' +
+          '- es Neuigkeiten zu einem Versicherungsfall gibt\n' +
+          '- wir Ihnen eine Nachricht zum Auftrag schreiben\n\n' +
+          'In jeder E-Mail ist ein Link, der Sie mit einem Klick direkt zum richtigen Auftrag bringt.\n\n' +
+          'Damit die E-Mails beim richtigen Ansprechpartner landen: Sagen Sie uns kurz, wer bei Ihnen die Fahrzeuge ' +
+          'koordiniert (Name + E-Mail-Adresse) – einfach auf diese E-Mail antworten.\n\n' +
+          'Ihr Portal wie gewohnt: {portal_link}\n\n' +
+          'Beste Grüße\nIhr Team von Gärtner Karosserie & Lack'
+      },
+      akquise: {
+        betreff: 'Unfallschäden ohne Hinterhertelefonieren – darf ich Ihnen kurz unser Partner-Portal zeigen?',
+        text: 'Guten Tag {kontakt_name},\n\n' +
+          'wenn bei Ihnen ein Kundenfahrzeug mit Unfall- oder Lackschaden steht, kostet das heute meist: ' +
+          'Telefonate, E-Mails, Nachfragen – und am Ende weiß doch keiner genau, wann das Auto fertig ist.\n\n' +
+          'Genau dafür haben wir als Karosserie- und Lackier-Fachbetrieb hier aus Mosbach etwas gebaut, ' +
+          'mit dem bereits mehrere Autohäuser der Region arbeiten – unser Partner-Portal:\n\n' +
+          '- Fahrzeug in 2 Minuten melden: Unterlagen oder Fotos hochladen, die Felder füllen sich automatisch\n' +
+          '- Live-Status statt Nachtelefonieren: Sie sehen jederzeit, wo das Fahrzeug steht – und werden automatisch per E-Mail informiert\n' +
+          '- Versicherungsfälle komplett digital: von der Schadenmeldung bis zur Freigabe, wir übernehmen die Steuerung\n' +
+          '- Angebote schwarz auf weiß im Portal: prüfen, annehmen, fertig\n\n' +
+          'Ich würde Ihnen das Ganze gerne einmal persönlich zeigen – dauert keine 20 Minuten, gerne bei Ihnen im Haus. ' +
+          'Wann passt es Ihnen in den nächsten zwei Wochen?\n\n' +
+          'Mit besten Grüßen aus Mosbach-Lohrbach\n' +
+          'Christopher Gärtner\nGärtner Karosserie & Lack GmbH\nTelefon +49 1522 7706694'
       }
     };
     document.querySelectorAll('[data-vorlage]').forEach((button) => {

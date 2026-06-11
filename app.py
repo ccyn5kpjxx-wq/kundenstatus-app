@@ -31783,7 +31783,9 @@ def partner_session_required(slug):
     if not autohaus:
         abort(404)
     if session.get("partner_autohaus_id") != autohaus["id"]:
-        return None, redirect(url_for("partner_login_slug", slug=slug))
+        # Ziel merken, damit z. B. der Auftrags-Link aus einer E-Mail nach dem
+        # Login direkt auf dem Auftrag landet statt auf der Startseite.
+        return None, redirect(url_for("partner_login_slug", slug=slug, next=request.path))
     return autohaus, None
 
 
@@ -37657,13 +37659,20 @@ def partner_login_key(portal_key):
             session.clear()
             session.permanent = True
             session["partner_autohaus_id"] = autohaus["id"]
-            response = redirect(url_for("partner_dashboard_key", portal_key=portal_key))
+            next_url = clean_text(request.args.get("next") or request.form.get("next"))
+            if next_url.startswith("/partner/") or next_url.startswith("/portal/"):
+                response = redirect(next_url)
+            else:
+                response = redirect(url_for("partner_dashboard_key", portal_key=portal_key))
             remember_authenticated_login(response, "partner", autohaus_id=autohaus["id"])
             return response
         record_failed_login("partner", portal_key)
         flash("Falscher Zugangscode.", "danger")
 
     if session.get("partner_autohaus_id") == autohaus["id"]:
+        next_url = clean_text(request.args.get("next"))
+        if next_url.startswith("/partner/") or next_url.startswith("/portal/"):
+            return redirect(next_url)
         return redirect(url_for("partner_dashboard_key", portal_key=portal_key))
 
     return render_template("partner_login.html", autohaus=autohaus)
@@ -37682,6 +37691,9 @@ def partner_login_slug(slug):
     autohaus = get_autohaus_by_slug(slug)
     if not autohaus:
         abort(404)
+    next_url = clean_text(request.args.get("next"))
+    if next_url:
+        return redirect(url_for("partner_login_key", portal_key=autohaus["portal_key"], next=next_url))
     return redirect(url_for("partner_login_key", portal_key=autohaus["portal_key"]))
 
 
