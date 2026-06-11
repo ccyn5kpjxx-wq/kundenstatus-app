@@ -218,6 +218,81 @@
     .fotos img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
     .hinweis-leer { color: var(--muted); }
+
+    .verschieben-leiste {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .6rem;
+    }
+
+    .verschieben-leiste form { flex: 1 1 0; min-width: 150px; display: flex; }
+
+    .verschieben-knopf {
+      flex: 1;
+      border: 1px solid var(--line);
+      background: var(--panel-soft);
+      color: var(--ink);
+      border-radius: 12px;
+      padding: .85em .6em;
+      font-family: inherit;
+      font-weight: 700;
+      font-size: clamp(1rem, 1.8vw, 1.3rem);
+      cursor: pointer;
+    }
+
+    .verschieben-knopf:active { transform: scale(.98); }
+    .verschieben-knopf.k-in_arbeit:hover, .verschieben-knopf.k-in_arbeit:focus { border-color: var(--info); }
+    .verschieben-knopf.k-fertig:hover, .verschieben-knopf.k-fertig:focus { border-color: var(--success); }
+
+    .verschieben-knopf.aktuell {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 1px var(--primary);
+      cursor: default;
+      opacity: .9;
+    }
+
+    .unterlagen { display: grid; gap: .5rem; }
+
+    .unterlage {
+      display: flex;
+      align-items: center;
+      gap: .7rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel-soft);
+      padding: .6rem .8rem;
+      color: var(--ink);
+      text-decoration: none;
+      font-size: clamp(.95rem, 1.5vw, 1.15rem);
+    }
+
+    .unterlage:hover, .unterlage:active { border-color: var(--primary); }
+    .unterlage .u-icon { font-size: 1.4em; }
+    .unterlage .u-name { font-weight: 600; overflow-wrap: anywhere; }
+    .unterlage .u-meta { color: var(--muted); font-size: .85em; }
+
+    .toast-leiste {
+      position: fixed;
+      top: .8rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+      display: grid;
+      gap: .4rem;
+      max-width: min(92vw, 560px);
+    }
+
+    .toast-leiste .toast {
+      background: var(--panel-soft);
+      border: 1px solid var(--success);
+      color: var(--ink);
+      border-radius: 12px;
+      padding: .6rem 1rem;
+      font-weight: 600;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, .4);
+    }
+
+    .toast-leiste .toast.t-danger, .toast-leiste .toast.t-warning { border-color: var(--warning); }
   </style>
 </head>
 <body>
@@ -230,8 +305,39 @@
     <span class="status-badge">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
   </div>
 
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="toast-leiste" data-toast-leiste>
+      {% for cat, msg in messages %}
+      <div class="toast t-{{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
   <div class="inhalt">
     <div>
+      {% if auftrag['status'] < 5 %}
+      <div class="panel">
+        <h2>Auftrag verschieben</h2>
+        <div class="verschieben-leiste">
+          {% for ziel in erlaubte_status %}
+          {% set meta = statusliste[ziel] %}
+          {% if auftrag['status'] == ziel %}
+          <form>
+            <button type="button" class="verschieben-knopf aktuell" disabled>{{ meta['icon'] }} {{ meta['label'] }} — aktuell</button>
+          </form>
+          {% else %}
+          <form method="POST" action="{{ url_for('werkstatt_status_update', auftrag_id=auftrag['id'], neuer_status=ziel) }}">
+            <input type="hidden" name="next" value="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}">
+            <button type="submit" class="verschieben-knopf k-{{ meta['key'] }}">{{ meta['icon'] }} {{ meta['label'] }}</button>
+          </form>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
       <div class="panel">
         <h2>Was zu machen ist</h2>
         {% if auftrag['werkstatt_angebot_text_display'] %}
@@ -263,6 +369,27 @@
             </div>
           {% endfor %}
         </div>
+      </div>
+
+      <div class="panel">
+        <h2>Auftragsunterlagen ({{ unterlagen | length }})</h2>
+        {% if unterlagen %}
+        <div class="unterlagen">
+          {% for datei in unterlagen %}
+          <a class="unterlage" href="{{ url_for('werkstatt_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener">
+            <span class="u-icon">{% if datei['is_pdf'] %}📄{% elif datei['is_image'] %}🖼️{% else %}📎{% endif %}</span>
+            <span>
+              <span class="u-name">{{ datei['original_name'] }}</span>
+              {% if datei['dokument_typ'] or datei['notiz'] %}
+              <br><span class="u-meta">{{ datei['dokument_typ'] }}{% if datei['dokument_typ'] and datei['notiz'] %} · {% endif %}{{ datei['notiz'] }}</span>
+              {% endif %}
+            </span>
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="hinweis-leer">Keine weiteren Unterlagen hochgeladen.</div>
+        {% endif %}
       </div>
 
       <div class="panel">
@@ -377,6 +504,8 @@
   <script>
     // Nach 4 Minuten ohne Interaktion zurueck zur Tafel (Kiosk-Betrieb)
     (() => {
+      const toastLeiste = document.querySelector('[data-toast-leiste]');
+      if (toastLeiste) setTimeout(() => toastLeiste.remove(), 6000);
       let timer = null;
       const zurueck = () => { window.location.href = "{{ url_for('werkstatt_tafel') }}"; };
       const reset = () => {

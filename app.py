@@ -36047,15 +36047,13 @@ def admin_lead_to_auftrag(lead_id):
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
 
 
-@app.route("/admin/status/<int:auftrag_id>/<int:neuer_status>", methods=["POST"])
-@admin_required
-def status_update(auftrag_id, neuer_status):
-    if neuer_status not in STATUSLISTE:
-        abort(400)
-    auftrag = get_auftrag(auftrag_id)
-    if not auftrag:
-        abort(404)
+def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status):
+    """Setzt den Auftragsstatus inkl. Datums-Autofill, Status-Log und Benachrichtigungen.
 
+    Gemeinsame Logik fuer Admin-Dashboard und Werkstatt-Tafel, damit beide Wege
+    identisch wirken (gleiche Termin-Befuellung, gleiches Log, gleiche Autohaus-Mail).
+    """
+    auftrag_id = auftrag["id"]
     heute = format_date(date.today().strftime("%Y-%m-%d"))
     start_datum = auftrag["start_datum"] or heute if neuer_status >= 2 else auftrag["start_datum"]
     fertig_datum = auftrag["fertig_datum"] or heute if neuer_status >= 4 else auftrag["fertig_datum"]
@@ -36087,6 +36085,17 @@ def status_update(auftrag_id, neuer_status):
             "Fahrzeug ist fertig",
             "Die Werkstatt hat das Fahrzeug fertiggestellt. Es kann abgeholt werden.",
         )
+
+
+@app.route("/admin/status/<int:auftrag_id>/<int:neuer_status>", methods=["POST"])
+@admin_required
+def status_update(auftrag_id, neuer_status):
+    if neuer_status not in STATUSLISTE:
+        abort(400)
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+    fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status)
     aktualisierter_auftrag = get_auftrag(auftrag_id)
     whatsapp_share = (aktualisierter_auftrag or {}).get("kunden_whatsapp_status") or {}
     if neuer_status >= 5 and not auftrag_bonus_preis(auftrag)[0]:
@@ -37499,9 +37508,31 @@ def versicherung_datei(slug, datei_id):
 
 # --- Werkstatt-Tafel ---------------------------------------------------------
 # Bildschirm in der Werkstatt: zeigt den Mitarbeitern alle offenen Auftraege
-# als Tafel; Antippen oeffnet die Auftrags-Details (ohne Preise/Kalkulation).
+# als Tafel; Antippen oeffnet die Auftrags-Details mit Arbeitsbeschreibung,
+# Terminen, Fotos und Auftragsunterlagen (inkl. KVA/Kalkulation/Gutachten,
+# aber OHNE Rechnungen und ohne Preisfelder der App — GF-Entscheidung 11.06.2026).
+# Mitarbeiter verschieben Auftraege selbst (eingeplant -> in Arbeit -> fertig).
 # Zugang ueber den gemeinsamen Werkstatt-Code (Admin -> Zugaenge);
 # Admins sehen die Tafel ohne extra Anmeldung.
+
+
+WERKSTATT_TAFEL_ERLAUBTE_STATUS = (2, 3, 4)
+
+
+def werkstatt_datei_sichtbar(datei):
+    """Kaufmaennische Belege (Rechnungen) gehoeren nicht auf den Hallen-Bildschirm.
+
+    Arbeitsunterlagen wie Reparaturauftrag, Kostenvoranschlag, DAT-Kalkulation und
+    Gutachten bleiben sichtbar — die Mitarbeiter sollen den Auftrag lesen koennen
+    (GF-Entscheidung 11.06.2026).
+    """
+    if not datei:
+        return False
+    if clean_text(datei.get("kategorie")).lower() in {"rechnung", "bonusrechnung"}:
+        return False
+    if "rechnung" in clean_text(datei.get("dokument_typ")).lower():
+        return False
+    return True
 
 
 def werkstatt_tafel_guard():
@@ -37551,18 +37582,21 @@ def werkstatt_tafel():
             "key": "geplant",
             "titel": "Geplant / Angenommen",
             "icon": "📅",
+            "ziel_status": 2,
             "auftraege": [a for a in auftraege if a["status"] <= 2],
         },
         {
             "key": "in_arbeit",
             "titel": "In Arbeit",
             "icon": "🔧",
+            "ziel_status": 3,
             "auftraege": [a for a in auftraege if a["status"] == 3],
         },
         {
             "key": "fertig",
             "titel": "Fertig — wartet auf Abholung",
             "icon": "✅",
+            "ziel_status": 4,
             "auftraege": [a for a in auftraege if a["status"] == 4],
         },
     )
@@ -37584,18 +37618,54 @@ def werkstatt_auftrag(auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag or auftrag.get("archiviert"):
         abort(404)
-    dateien = list_dateien(auftrag_id)
-    bilder = [
-        datei
-        for datei in dateien
-        if datei.get("is_browser_image") and datei.get("original_available")
-    ]
+    # Kein original_available-Filter: send_upload_file stellt fehlende Dateien
+    # beim Abruf aus dem Datenbank-Backup wieder her (Render-Speicher ist fluechtig).
+    dateien = [datei for datei in list_dateien(auftrag_id) if werkstatt_datei_sichtbar(datei)]
+    bilder = [datei for datei in dateien if datei.get("is_browser_image")]
+    unterlagen = [datei for datei in dateien if not datei.get("is_browser_image")]
     return render_template(
         "werkstatt_auftrag.html",
         auftrag=auftrag,
         bilder=bilder,
+        unterlagen=unterlagen,
         statusliste=STATUSLISTE,
+        erlaubte_status=WERKSTATT_TAFEL_ERLAUBTE_STATUS,
     )
+
+
+@app.route("/werkstatt/auftrag/<int:auftrag_id>/status/<int:neuer_status>", methods=["POST"])
+def werkstatt_status_update(auftrag_id, neuer_status):
+    # Mitarbeiter verschieben Auftraege selbst: Eingeplant (2) -> In Arbeit (3) -> Fertig (4).
+    # "Angelegt" und "Zurueckgegeben" bleiben dem Buero/Admin vorbehalten.
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    if neuer_status not in WERKSTATT_TAFEL_ERLAUBTE_STATUS:
+        abort(400)
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("archiviert"):
+        abort(404)
+    aktueller_status = int(auftrag.get("status") or 1)
+    if aktueller_status >= 5:
+        # Zurueckgegebene Auftraege darf nur das Buero/Admin wieder anfassen —
+        # sonst koennte ein veralteter Bildschirm einen abgeschlossenen Auftrag reaktivieren.
+        abort(409)
+    kennung = auftrag.get("kennzeichen") or auftrag.get("fahrzeug") or f"Auftrag {auftrag_id}"
+    ziel = clean_text(request.form.get("next"))
+    if aktueller_status == neuer_status:
+        # Stale Bildschirm (zweiter Monitor, alter Reload): nichts tun, sonst gehen
+        # doppelte Kunden-Benachrichtigungen und Autohaus-Mails raus.
+        if request.headers.get("X-Requested-With") == "fetch":
+            return jsonify({"ok": True, "status": neuer_status, "unveraendert": True})
+        flash(f"{kennung} ist bereits „{STATUSLISTE[neuer_status]['label']}“.", "info")
+        return redirect(ziel if ziel.startswith("/werkstatt") else url_for("werkstatt_tafel"))
+    fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status)
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify({"ok": True, "status": neuer_status})
+    flash(f"{kennung}: jetzt „{STATUSLISTE[neuer_status]['label']}“.", "success")
+    if ziel.startswith("/werkstatt"):
+        return redirect(ziel)
+    return redirect(url_for("werkstatt_tafel"))
 
 
 @app.route("/werkstatt/datei/<int:datei_id>")
@@ -37604,7 +37674,7 @@ def werkstatt_datei(datei_id):
     if guard:
         return guard
     datei = get_datei(datei_id)
-    if not datei:
+    if not datei or not werkstatt_datei_sichtbar(datei):
         abort(404)
     return send_upload_file(
         datei,

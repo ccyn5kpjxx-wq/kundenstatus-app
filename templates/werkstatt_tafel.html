@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>Werkstatt-Tafel</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -229,6 +230,59 @@
       font-size: clamp(.9rem, 1.5vw, 1.1rem);
     }
 
+    .schnell-knopf {
+      display: block;
+      width: 100%;
+      margin-top: .55rem;
+      border: 1px solid var(--info);
+      background: rgba(76, 201, 240, .12);
+      color: var(--ink);
+      border-radius: 10px;
+      padding: .5em .8em;
+      font-family: inherit;
+      font-weight: 700;
+      font-size: clamp(.88rem, 1.45vw, 1.1rem);
+      cursor: pointer;
+    }
+
+    .schnell-knopf.fertig {
+      border-color: var(--success);
+      background: rgba(61, 214, 140, .12);
+    }
+
+    .schnell-knopf:active { transform: scale(.98); }
+    .schnell-knopf:disabled { opacity: .55; cursor: wait; }
+
+    .karte.dragging { opacity: .45; }
+
+    .spalte.drop-ziel {
+      border-color: var(--primary);
+      box-shadow: inset 0 0 0 2px var(--primary);
+    }
+
+    .toast-leiste {
+      position: fixed;
+      top: .8rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+      display: grid;
+      gap: .4rem;
+      max-width: min(92vw, 560px);
+    }
+
+    .toast-leiste .toast {
+      background: var(--panel-soft);
+      border: 1px solid var(--success);
+      color: var(--ink);
+      border-radius: 12px;
+      padding: .6rem 1rem;
+      font-weight: 600;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, .4);
+    }
+
+    .toast-leiste .toast.t-danger, .toast-leiste .toast.t-warning { border-color: var(--warning); }
+
     footer {
       position: fixed;
       bottom: 0;
@@ -259,15 +313,26 @@
     </div>
   </div>
 
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="toast-leiste" data-toast-leiste>
+      {% for cat, msg in messages %}
+      <div class="toast t-{{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
   <div class="board">
     {% for spalte in spalten %}
-    <div class="spalte s-{{ spalte.key }}">
+    <div class="spalte s-{{ spalte.key }}" data-ziel-status="{{ spalte.ziel_status }}">
       <div class="spalte-kopf">
         <h2>{{ spalte.icon }} {{ spalte.titel }}</h2>
         <span class="zaehler">{{ spalte.auftraege | length }}</span>
       </div>
       {% for auftrag in spalte.auftraege %}
-      <a class="karte" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}">
+      <a class="karte" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}"
+         draggable="true" data-auftrag="{{ auftrag['id'] }}" data-status="{{ auftrag['status'] }}">
         <div class="karte-kopf">
           {% if auftrag['kennzeichen'] %}
             <span class="kennzeichen">{{ auftrag['kennzeichen'] }}</span>
@@ -301,6 +366,11 @@
             <span class="chip">{{ auftrag['abholung_label'] }}: <strong>{{ auftrag['abholtermin'] }}</strong></span>
           {% endif %}
         </div>
+        {% if auftrag['status'] <= 2 %}
+        <button type="button" class="schnell-knopf" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="3">🔧 In Arbeit nehmen</button>
+        {% elif auftrag['status'] == 3 %}
+        <button type="button" class="schnell-knopf fertig" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="4">✅ Fertig melden</button>
+        {% endif %}
       </a>
       {% else %}
       <div class="leer-hinweis">Nichts in dieser Spalte.</div>
@@ -325,8 +395,89 @@
       };
       tick();
       setInterval(tick, 10000);
-      // Tafel jede Minute neu laden, damit der Bildschirm aktuell bleibt
-      setTimeout(() => window.location.reload(), 60000);
+
+      // Tafel jede Minute neu laden — aber nie mitten in einem Drag-Vorgang
+      let dragAktiv = false;
+      const reloadAb = Date.now() + 60000;
+      setInterval(() => {
+        if (!dragAktiv && Date.now() >= reloadAb) window.location.reload();
+      }, 5000);
+
+      // Status-Meldungen kurz zeigen, dann ausblenden
+      const toastLeiste = document.querySelector('[data-toast-leiste]');
+      if (toastLeiste) setTimeout(() => toastLeiste.remove(), 6000);
+
+      // Auftrag verschieben (gemeinsam fuer Knopf + Drag&Drop)
+      const csrf = document.querySelector('meta[name="csrf-token"]').content;
+      let wechselLaeuft = false;
+      const statusSetzen = async (auftragId, zielStatus) => {
+        if (wechselLaeuft) return;
+        wechselLaeuft = true;
+        try {
+          const resp = await fetch(`/werkstatt/auftrag/${auftragId}/status/${zielStatus}`, {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrf, 'X-Requested-With': 'fetch' },
+          });
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          window.location.reload();
+        } catch (fehler) {
+          wechselLaeuft = false;
+          alert('Verschieben hat nicht geklappt. Die Tafel wird neu geladen.');
+          window.location.reload();
+        }
+      };
+
+      // Schnell-Knoepfe auf den Karten
+      document.querySelectorAll('[data-status-knopf]').forEach((knopf) => {
+        knopf.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          knopf.disabled = true;
+          knopf.textContent = 'Wird verschoben …';
+          statusSetzen(knopf.dataset.auftrag, knopf.dataset.ziel);
+        });
+      });
+
+      // Drag & Drop zwischen den Spalten (Desktop / Maus)
+      document.querySelectorAll('.karte').forEach((karte) => {
+        karte.addEventListener('dragstart', (e) => {
+          dragAktiv = true;
+          karte.classList.add('dragging');
+          e.dataTransfer.setData('text/plain', JSON.stringify({
+            id: karte.dataset.auftrag,
+            status: karte.dataset.status,
+          }));
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        karte.addEventListener('dragend', () => {
+          dragAktiv = false;
+          karte.classList.remove('dragging');
+          document.querySelectorAll('.spalte').forEach((s) => s.classList.remove('drop-ziel'));
+        });
+      });
+
+      document.querySelectorAll('.spalte').forEach((spalte) => {
+        const ziel = parseInt(spalte.dataset.zielStatus, 10);
+        if (!ziel) return;
+        spalte.addEventListener('dragover', (e) => {
+          if (!dragAktiv) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          spalte.classList.add('drop-ziel');
+        });
+        spalte.addEventListener('dragleave', () => spalte.classList.remove('drop-ziel'));
+        spalte.addEventListener('drop', (e) => {
+          e.preventDefault();
+          spalte.classList.remove('drop-ziel');
+          let daten = null;
+          try { daten = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (fehler) { return; }
+          if (!daten || !daten.id) return;
+          const aktuell = parseInt(daten.status, 10);
+          if (aktuell === ziel) return;
+          if (ziel === 2 && aktuell <= 2) return; // schon in der Spalte "Geplant"
+          statusSetzen(daten.id, ziel);
+        });
+      });
     })();
   </script>
 </body>
