@@ -9164,6 +9164,17 @@ def init_db():
     ensure_column(db, "lexware_rechnungen", "erstellt_am", "TEXT DEFAULT ''")
     ensure_column(db, "lexware_rechnungen", "geaendert_am", "TEXT DEFAULT ''")
     ensure_column(db, "lexware_rechnungen", "investition", "INTEGER DEFAULT 0")
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mahnungen_log (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            voucher_id   TEXT NOT NULL,
+            stufe        INTEGER NOT NULL,
+            gesendet_am  TEXT NOT NULL,
+            erstellt_am  TEXT NOT NULL
+        )
+        """
+    )
     ensure_index(db, "idx_lexware_rechnungen_voucher", "lexware_rechnungen", ("voucher_id",))
     ensure_index(
         db,
@@ -32432,6 +32443,247 @@ UMSATZ_MONATE = (
 
 
 
+# --- Mahnwesen: ueberwacht ueberfaellige Lexware-Rechnungen nach den Mahnregeln
+# aus _Shared/Stammdaten/mahnregeln.json (Stufen/Tage/Gebuehren dort gepflegt,
+# hier gespiegelt). Kein automatischer Versand: die App bereitet den Text vor,
+# der GF prueft, versendet selbst und markiert die Mahnung als versendet.
+MAHNSTUFEN = [
+    {"stufe": 0, "name": "Zahlungserinnerung", "tage": 14, "gebuehr": 0.0, "frist_tage": 10},
+    {"stufe": 1, "name": "1. Mahnung", "tage": 30, "gebuehr": 5.0, "frist_tage": 10},
+    {"stufe": 2, "name": "2. Mahnung", "tage": 45, "gebuehr": 10.0, "frist_tage": 7},
+    {"stufe": 3, "name": "Letzte Mahnung", "tage": 60, "gebuehr": 15.0, "frist_tage": 7},
+]
+
+
+def mahn_basiszinssatz():
+    try:
+        return float(get_app_setting("MAHN_BASISZINSSATZ", "1.27").replace(",", "."))
+    except (TypeError, ValueError):
+        return 1.27
+
+
+def mahn_letzte_stufe_je_voucher():
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT voucher_id, MAX(stufe) AS stufe, MAX(gesendet_am) AS gesendet_am "
+            "FROM mahnungen_log GROUP BY voucher_id"
+        ).fetchall()
+    finally:
+        db.close()
+    return {clean_text(r["voucher_id"]): {"stufe": int(r["stufe"]), "gesendet_am": clean_text(r["gesendet_am"])} for r in rows}
+
+
+def baue_mahntext(stufe_meta, kontakt, nummer, betrag, faellig_label, tage_ueber, zinsen, frist_label):
+    anrede = f"Sehr geehrte Damen und Herren ({kontakt})," if kontakt else "Sehr geehrte Damen und Herren,"
+    betrag_label = umsatz_euro_label(betrag)
+    gebuehr = stufe_meta["gebuehr"]
+    gesamt = betrag + gebuehr + (zinsen or 0.0)
+    if stufe_meta["stufe"] == 0:
+        return (
+            f"Betreff: Zahlungserinnerung — Rechnung {nummer}\n\n{anrede}\n\n"
+            f"bestimmt ist es im Tagesgeschäft untergegangen: Unsere Rechnung {nummer} über {betrag_label} "
+            f"war am {faellig_label} fällig. Wir bitten freundlich um Überweisung bis zum {frist_label}.\n\n"
+            "Falls sich die Zahlung mit diesem Schreiben überschnitten hat, betrachten Sie es bitte als gegenstandslos.\n\n"
+            "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner Karosserie & Lack GmbH"
+        )
+    if stufe_meta["stufe"] == 1:
+        return (
+            f"Betreff: 1. Mahnung — Rechnung {nummer}\n\n{anrede}\n\n"
+            f"unsere Rechnung {nummer} über {betrag_label}, fällig am {faellig_label}, ist weiterhin offen.\n\n"
+            f"Wir mahnen den Betrag hiermit an und bitten um Zahlung bis zum {frist_label}.\n\n"
+            f"Hauptforderung: {betrag_label}\nMahngebühr: {umsatz_euro_label(gebuehr)}\n"
+            f"Gesamt offen: {umsatz_euro_label(gesamt)}\n\n"
+            "Bei Rückfragen zur Zahlung wenden Sie sich bitte umgehend an uns.\n\n"
+            "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner Karosserie & Lack GmbH"
+        )
+    if stufe_meta["stufe"] == 2:
+        return (
+            f"Betreff: 2. Mahnung — Rechnung {nummer}\n\n{anrede}\n\n"
+            f"unsere Rechnung {nummer} über {betrag_label}, fällig am {faellig_label}, ist trotz Erinnerung "
+            f"und 1. Mahnung weiterhin nicht beglichen ({tage_ueber} Tage Verzug).\n\n"
+            f"Wir fordern Sie auf, den offenen Gesamtbetrag bis zum {frist_label} zu begleichen:\n\n"
+            f"Hauptforderung: {betrag_label}\nMahngebühr: {umsatz_euro_label(gebuehr)}\n"
+            f"Verzugszinsen (§ 288 BGB): {umsatz_euro_label(zinsen)}\n"
+            f"Gesamt offen: {umsatz_euro_label(gesamt)}\n\n"
+            "Sollte bis zum Fristende keine Zahlung eingehen, behalten wir uns weitere Schritte vor.\n\n"
+            "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner Karosserie & Lack GmbH"
+        )
+    return (
+        f"Betreff: Letzte Mahnung vor Übergabe an Inkasso — Rechnung {nummer}\n\n{anrede}\n\n"
+        f"unsere Rechnung {nummer} über {betrag_label}, fällig am {faellig_label}, ist trotz mehrfacher "
+        f"Mahnungen weiterhin offen ({tage_ueber} Tage Verzug).\n\n"
+        f"Wir fordern Sie letztmalig außergerichtlich auf, den offenen Gesamtbetrag bis zum {frist_label} zu begleichen:\n\n"
+        f"Hauptforderung: {betrag_label}\nMahngebühren: {umsatz_euro_label(gebuehr)}\n"
+        f"Verzugszinsen (§ 288 BGB): {umsatz_euro_label(zinsen)}\n"
+        f"Gesamt offen: {umsatz_euro_label(gesamt)}\n\n"
+        "Nach fruchtlosem Fristablauf übergeben wir die Forderung ohne weitere Ankündigung an ein "
+        "Inkassounternehmen bzw. leiten das gerichtliche Mahnverfahren ein. Die dadurch entstehenden "
+        "Kosten gehen zu Ihren Lasten.\n\n"
+        "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner Karosserie & Lack GmbH"
+    )
+
+
+def mahnungen_uebersicht():
+    heute = datetime.now().date()
+    zinssatz = mahn_basiszinssatz() + 9.0
+    letzte = mahn_letzte_stufe_je_voucher()
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT voucher_id, voucher_number, contact_name, open_amount, voucher_date, due_date "
+            "FROM lexware_rechnungen "
+            "WHERE richtung='Einnahme' AND status='ueberfaellig' AND COALESCE(open_amount, 0) >= 10 "
+            "ORDER BY due_date ASC"
+        ).fetchall()
+    finally:
+        db.close()
+    faellig, spaeter = [], []
+    for row in rows:
+        faellig_datum = umsatz_parse_voucher_date(row["due_date"])
+        if not faellig_datum:
+            continue
+        tage_ueber = (heute - faellig_datum).days
+        if tage_ueber < 0:
+            continue
+        passend = None
+        for stufe_meta in MAHNSTUFEN:
+            if tage_ueber >= stufe_meta["tage"]:
+                passend = stufe_meta
+        bereits = letzte.get(clean_text(row["voucher_id"]))
+        betrag = float(row["open_amount"] or 0)
+        zinsen = round(betrag * zinssatz / 100 * tage_ueber / 365, 2)
+        eintrag = {
+            "voucher_id": clean_text(row["voucher_id"]),
+            "nummer": clean_text(row["voucher_number"]) or "-",
+            "kontakt": clean_text(row["contact_name"]),
+            "betrag": betrag,
+            "betrag_label": umsatz_euro_label(betrag),
+            "faellig_label": clean_text(row["due_date"])[:10],
+            "tage_ueber": tage_ueber,
+            "bereits_stufe": bereits["stufe"] if bereits else None,
+            "bereits_name": MAHNSTUFEN[bereits["stufe"]]["name"] if bereits else "",
+            "bereits_am": bereits["gesendet_am"][:16] if bereits else "",
+        }
+        if passend and (bereits is None or passend["stufe"] > bereits["stufe"]):
+            frist_label = (heute + timedelta(days=passend["frist_tage"])).strftime(DATE_FMT)
+            eintrag.update({
+                "stufe": passend["stufe"],
+                "stufe_name": passend["name"],
+                "gebuehr_label": umsatz_euro_label(passend["gebuehr"]),
+                "zinsen_label": umsatz_euro_label(zinsen) if passend["stufe"] >= 2 else "",
+                "gesamt_label": umsatz_euro_label(betrag + passend["gebuehr"] + (zinsen if passend["stufe"] >= 2 else 0.0)),
+                "frist_label": frist_label,
+                "text": baue_mahntext(
+                    passend, eintrag["kontakt"], eintrag["nummer"], betrag,
+                    eintrag["faellig_label"], tage_ueber,
+                    zinsen if passend["stufe"] >= 2 else 0.0, frist_label,
+                ),
+            })
+            faellig.append(eintrag)
+        else:
+            naechste = None
+            for stufe_meta in MAHNSTUFEN:
+                if bereits is not None and stufe_meta["stufe"] <= bereits["stufe"]:
+                    continue
+                if tage_ueber < stufe_meta["tage"]:
+                    naechste = stufe_meta
+                    break
+            if naechste:
+                eintrag["naechste_name"] = naechste["name"]
+                eintrag["naechste_in_tagen"] = naechste["tage"] - tage_ueber
+            spaeter.append(eintrag)
+    faellig.sort(key=lambda e: (-e["stufe"], -e["betrag"]))
+    return faellig, spaeter
+
+
+def mahnungen_faellig_anzahl():
+    try:
+        faellig, _ = mahnungen_uebersicht()
+        return len(faellig)
+    except Exception:
+        return 0
+
+
+@app.route("/admin/mahnungen")
+@admin_required
+def admin_mahnungen():
+    faellig, spaeter = mahnungen_uebersicht()
+    db = get_db()
+    try:
+        log = db.execute(
+            "SELECT m.voucher_id, m.stufe, m.gesendet_am, r.voucher_number, r.contact_name, r.open_amount, r.status "
+            "FROM mahnungen_log m LEFT JOIN lexware_rechnungen r ON r.voucher_id = m.voucher_id "
+            "ORDER BY m.id DESC LIMIT 30"
+        ).fetchall()
+    finally:
+        db.close()
+    historie = [
+        {
+            "nummer": clean_text(r["voucher_number"]) or "-",
+            "kontakt": clean_text(r["contact_name"]),
+            "stufe_name": MAHNSTUFEN[int(r["stufe"])]["name"] if 0 <= int(r["stufe"]) < len(MAHNSTUFEN) else f"Stufe {r['stufe']}",
+            "gesendet_am": clean_text(r["gesendet_am"])[:16],
+            "bezahlt": clean_text(r["status"] or "") == "bezahlt",
+        }
+        for r in log
+    ]
+    return render_template(
+        "mahnungen_admin.html",
+        faellig=faellig,
+        spaeter=spaeter,
+        historie=historie,
+        basiszinssatz=mahn_basiszinssatz(),
+    )
+
+
+@app.route("/admin/mahnungen/<voucher_id>/versendet", methods=["POST"])
+@admin_required
+def admin_mahnung_versendet(voucher_id):
+    voucher_id = clean_text(voucher_id)
+    try:
+        stufe = int(request.form.get("stufe"))
+    except (TypeError, ValueError):
+        abort(400)
+    if not voucher_id or stufe < 0 or stufe >= len(MAHNSTUFEN):
+        abort(400)
+    db = get_db()
+    db.execute(
+        "INSERT INTO mahnungen_log (voucher_id, stufe, gesendet_am, erstellt_am) VALUES (?, ?, ?, ?)",
+        (voucher_id, stufe, now_str(), now_str()),
+    )
+    db.commit()
+    db.close()
+    flash(f"{MAHNSTUFEN[stufe]['name']} als versendet vermerkt — die nächste Stufe zählt ab heute.", "success")
+    return redirect(url_for("admin_mahnungen"))
+
+
+@app.route("/admin/mahnungen/basiszins", methods=["POST"])
+@admin_required
+def admin_mahnungen_basiszins():
+    wert = clean_text(request.form.get("basiszinssatz")).replace(",", ".")
+    try:
+        zins = float(wert)
+    except (TypeError, ValueError):
+        flash("Bitte einen gültigen Zinssatz eintragen (z. B. 1,27).", "warning")
+        return redirect(url_for("admin_mahnungen"))
+    set_app_setting("MAHN_BASISZINSSATZ", f"{zins:.2f}")
+    flash("Basiszinssatz gespeichert.", "success")
+    return redirect(url_for("admin_mahnungen"))
+
+
+# --- Zahlen / Umsatz-Ziel (Cockpit-Kachel) ---------------------------------
+# Liest die echten Einnahmen/Ausgaben aus den synchronisierten Lexware-Rechnungen
+# (Tabelle lexware_rechnungen) und stellt sie als Monatsziel mit Tendenz/Ampel dar.
+# Das Ziel berechnet sich automatisch: Vormonat schlagen; liegt der Monat vor dem
+# Vormonats-Tempo, kommt die Haelfte des Vorsprungs (max. +15 %) obendrauf.
+UMSATZ_MONATE = (
+    "", "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+)
+
+
+
 def umsatz_euro_label(value):
     try:
         amount = float(value or 0)
@@ -32742,7 +32994,11 @@ def admin_zahlen():
     except (TypeError, ValueError):
         monat = 0
     daten = umsatz_ziel_daten(jahr or None, monat or None)
-    return render_template("zahlen_admin.html", z=daten)
+    return render_template(
+        "zahlen_admin.html",
+        z=daten,
+        mahnungen_anzahl=mahnungen_faellig_anzahl(),
+    )
 
 
 @app.route("/admin/zahlen/investition/<int:beleg_id>", methods=["POST"])

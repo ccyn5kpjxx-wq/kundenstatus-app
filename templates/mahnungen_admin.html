@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Mahnungen{% endblock %}
+
+{% block extra_css %}
+<style>
+  .mahn-text { font-family: var(--bs-font-monospace, monospace); font-size: .85rem; white-space: pre-wrap; background: #f8f2e8; border: 1px solid #e4d6c3; border-radius: 12px; padding: 1rem; max-height: 300px; overflow-y: auto; }
+  .stufe-badge-0 { background: #e7f1ff; color: #0a4d8c; }
+  .stufe-badge-1 { background: #fff3cd; color: #664d03; }
+  .stufe-badge-2 { background: #ffe5d0; color: #8a3b00; }
+  .stufe-badge-3 { background: #f8d7da; color: #842029; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="section-title mb-4">
+  <div>
+    <div class="badge-soft mb-3">Forderungsmanagement</div>
+    <h1 class="mb-2">Mahnungen</h1>
+    <p class="mb-0">Die App überwacht die Fälligkeiten und schreibt die Mahnung vor — du prüfst, sendest und hakst ab.</p>
+  </div>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <a href="{{ url_for('admin_zahlen') }}" class="btn btn-soft">Zu den Zahlen</a>
+    <a href="{{ url_for('admin_rechnungen') }}" class="btn btn-soft">Rechnungskontrolle</a>
+  </div>
+</div>
+
+{% if faellig %}
+<div class="page-card p-4 mb-4" style="border-left: 6px solid #a23f2d; border-radius: 0 22px 22px 0;">
+  <h2 class="h5 mb-3">🔔 Jetzt fällig: {{ faellig|length }} Mahnung{{ 'en' if faellig|length != 1 else '' }}</h2>
+  <div class="d-grid gap-3">
+    {% for m in faellig %}
+    <div class="border rounded-3 p-3 bg-white">
+      <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-2">
+        <div>
+          <span class="badge stufe-badge-{{ m.stufe }}">{{ m.stufe_name }}</span>
+          <strong class="ms-2">{{ m.kontakt or 'Unbekannter Kunde' }}</strong>
+          <span class="text-muted">· Rechnung {{ m.nummer }}</span>
+        </div>
+        <div class="text-end">
+          <strong>{{ m.betrag_label }}</strong>
+          <div class="text-muted small">fällig {{ m.faellig_label }} · <span class="text-danger fw-bold">{{ m.tage_ueber }} Tage drüber</span></div>
+        </div>
+      </div>
+      <div class="text-muted small mb-2">
+        Zahlungsfrist im Schreiben: <strong>{{ m.frist_label }}</strong>
+        {% if m.gebuehr_label != '0,00 €' %} · Mahngebühr {{ m.gebuehr_label }}{% endif %}
+        {% if m.zinsen_label %} · Verzugszinsen {{ m.zinsen_label }}{% endif %}
+        · Gesamt <strong>{{ m.gesamt_label }}</strong>
+        {% if m.bereits_stufe is not none %} · zuletzt: {{ m.bereits_name }} am {{ m.bereits_am }}{% endif %}
+      </div>
+      <details class="mb-2">
+        <summary class="text-muted small" style="cursor: pointer;">Mahntext anzeigen</summary>
+        <div class="mahn-text mt-2">{{ m.text }}</div>
+      </details>
+      <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-brand btn-sm" data-copy-link="{{ m.text }}">Mahntext kopieren</button>
+        <form method="POST" action="{{ url_for('admin_mahnung_versendet', voucher_id=m.voucher_id) }}" class="m-0" onsubmit="return confirm('{{ m.stufe_name }} an {{ m.kontakt }} wirklich als versendet markieren?')">
+          {{ csrf_field()|safe }}
+          <input type="hidden" name="stufe" value="{{ m.stufe }}">
+          <button type="submit" class="btn btn-soft btn-sm" data-no-loading="true">✓ Als versendet markieren</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+<div class="page-card p-4 mb-4">
+  <h2 class="h5 mb-1">✅ Aktuell keine Mahnung fällig</h2>
+  <p class="text-muted mb-0">Sobald eine überfällige Rechnung eine Mahnstufe erreicht (14/30/45/60 Tage), erscheint sie hier mit fertigem Text — und im Zahlen-Dashboard leuchtet ein Hinweis.</p>
+</div>
+{% endif %}
+
+{% if spaeter %}
+<div class="page-card p-4 mb-4">
+  <h2 class="h5 mb-3">Demnächst fällig (noch nichts zu tun)</h2>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead><tr><th>Kunde</th><th>Rechnung</th><th class="text-end">Offen</th><th>Überfällig seit</th><th>Nächste Stufe</th></tr></thead>
+      <tbody>
+        {% for m in spaeter %}
+        <tr>
+          <td>{{ m.kontakt or 'Unbekannt' }}</td>
+          <td>{{ m.nummer }}</td>
+          <td class="text-end">{{ m.betrag_label }}</td>
+          <td>{{ m.tage_ueber }} Tag{{ 'e' if m.tage_ueber != 1 else '' }}</td>
+          <td>{% if m.naechste_name %}{{ m.naechste_name }} in {{ m.naechste_in_tagen }} Tag{{ 'en' if m.naechste_in_tagen != 1 else '' }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if historie %}
+<div class="page-card p-4 mb-4">
+  <h2 class="h5 mb-3">Versendete Mahnungen</h2>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead><tr><th>Wann</th><th>Kunde</th><th>Rechnung</th><th>Stufe</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for h in historie %}
+        <tr>
+          <td>{{ h.gesendet_am }}</td>
+          <td>{{ h.kontakt or 'Unbekannt' }}</td>
+          <td>{{ h.nummer }}</td>
+          <td>{{ h.stufe_name }}</td>
+          <td>{% if h.bezahlt %}<span class="badge text-bg-success">bezahlt 🎉</span>{% else %}<span class="badge text-bg-secondary">offen</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="page-card p-4 mb-4">
+  <h2 class="h6 mb-2">Einstellungen</h2>
+  <form method="POST" action="{{ url_for('admin_mahnungen_basiszins') }}" class="d-flex gap-2 align-items-center flex-wrap">
+    {{ csrf_field()|safe }}
+    <label class="small text-muted m-0">Basiszinssatz (§ 247 BGB, für Verzugszinsen B2B = Basis + 9 %):</label>
+    <input type="text" name="basiszinssatz" class="form-control form-control-sm" style="max-width: 100px;" value="{{ '%.2f'|format(basiszinssatz) }}" inputmode="decimal">
+    <span class="small text-muted">%</span>
+    <button type="submit" class="btn btn-soft btn-sm" data-no-loading="true">Speichern</button>
+    <a href="https://www.bundesbank.de/de/bundesbank/organisation/agb-und-regelungen/basiszinssatz-607820" target="_blank" rel="noopener" class="small">aktuellen Satz prüfen</a>
+  </form>
+  <p class="text-muted small mb-0 mt-2">Regeln: Zahlungserinnerung ab 14 Tagen, 1. Mahnung ab 30, 2. Mahnung ab 45 (mit Zinsen), letzte Mahnung ab 60 Tagen. Kein automatischer Versand — jede Mahnung geht erst raus, wenn du sie verschickst.</p>
+</div>
+
+{% endblock %}

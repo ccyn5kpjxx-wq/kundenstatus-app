@@ -39,6 +39,13 @@
   </div>
 </div>
 
+{% if mahnungen_anzahl %}
+<a href="{{ url_for('admin_mahnungen') }}" class="d-block page-card p-3 mb-4 text-decoration-none" style="border-left: 6px solid #a23f2d; border-radius: 0 22px 22px 0; color: var(--ink);">
+  <strong>🔔 {{ mahnungen_anzahl }} Mahnung{{ 'en' if mahnungen_anzahl != 1 else '' }} fällig</strong>
+  <span class="text-muted">— Texte liegen fertig vor, nur prüfen und senden →</span>
+</a>
+{% endif %}
+
 <div class="ampel-hero ampel-{{ z.ampel }} mb-4">
   <div class="row align-items-center g-3">
     <div class="col-lg-7">
