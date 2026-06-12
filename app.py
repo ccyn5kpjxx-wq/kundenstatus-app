@@ -32715,6 +32715,46 @@ def admin_mahnung_versendet(voucher_id):
     return redirect(url_for("admin_mahnungen"))
 
 
+@app.route("/admin/mahnungen/<voucher_id>/vorschau", methods=["POST"])
+@admin_required
+def admin_mahnung_vorschau(voucher_id):
+    # Pflicht-Zwischenschritt: die fertige E-Mail wird exakt so angezeigt,
+    # wie sie rausgeht — gesendet wird erst auf der Vorschau-Seite.
+    voucher_id = clean_text(voucher_id)
+    try:
+        stufe = int(request.form.get("stufe"))
+    except (TypeError, ValueError):
+        abort(400)
+    if not voucher_id or stufe < 0 or stufe >= len(MAHNSTUFEN):
+        abort(400)
+    empfaenger = clean_text(request.form.get("empfaenger")).lower()
+    betreff = clean_text(request.form.get("betreff"))
+    text = str(request.form.get("text") or "").strip()
+    if not empfaenger or "@" not in empfaenger:
+        flash("Bitte zuerst eine gültige Empfänger-E-Mail eintragen.", "warning")
+        return redirect(url_for("admin_mahnungen"))
+    if not betreff or not text:
+        flash("Betreff und Mahntext dürfen nicht leer sein.", "warning")
+        return redirect(url_for("admin_mahnungen"))
+    config = get_schaden_mail_config()
+    absender = (
+        f"{config['display_name']} <{config['from_address']}>"
+        if config.get("from_address")
+        else "(SMTP nicht konfiguriert — Versand wird fehlschlagen)"
+    )
+    return render_template(
+        "mahnung_vorschau.html",
+        voucher_id=voucher_id,
+        stufe=stufe,
+        stufe_name=MAHNSTUFEN[stufe]["name"],
+        empfaenger=empfaenger,
+        betreff=betreff,
+        text=text,
+        absender=absender,
+        antwort_an=clean_text(config.get("smtp_user")),
+    )
+
+
 @app.route("/admin/mahnungen/<voucher_id>/senden", methods=["POST"])
 @admin_required
 def admin_mahnung_senden(voucher_id):
@@ -34483,7 +34523,10 @@ def admin_einkauf():
 @app.route("/admin/rechnungen")
 @admin_required
 def admin_rechnungen():
-    sync_result = maybe_sync_lexware_rechnungen()
+    # Abgleich laeuft im Hintergrund: die Seite rendert sofort aus den lokal
+    # gespeicherten Zahlen, statt minutenlang am Lexware-Abruf zu haengen.
+    lexware_sync_im_hintergrund_starten()
+    sync_result = None
     summary = lexware_rechnungen_summary()
     return render_template(
         "rechnungen_admin.html",
@@ -34503,10 +34546,11 @@ def admin_rechnungen():
 @app.route("/admin/rechnungen/sync", methods=["POST"])
 @admin_required
 def admin_rechnungen_sync():
-    result = sync_lexware_rechnungen()
-    flash(result["message"], "success" if result.get("ok") else "warning")
-    if result.get("errors"):
-        flash(result["errors"][0], "warning")
+    # Manueller Abgleich ebenfalls im Hintergrund — der komplette Durchlauf
+    # dauert bei vielen Belegen mehrere Minuten und wuerde die Seite blockieren.
+    set_app_setting("LEXWARE_LAST_SYNC", "")
+    lexware_sync_im_hintergrund_starten()
+    flash("Lexware-Abgleich läuft im Hintergrund. Die Zahlen aktualisieren sich in wenigen Minuten — Seite später neu laden.", "info")
     return redirect(url_for("admin_rechnungen"))
 
 
@@ -40006,8 +40050,27 @@ def partner_datei_loeschen(slug, datei_id):
     return redirect(url_for("partner_dashboard", slug=slug))
 
 
+def start_lexware_auto_sync():
+    # Haelt die Lexware-Zahlen (bezahlt/offen/ueberfaellig) rund um die Uhr
+    # aktuell — auch wenn niemand eine Seite oeffnet. Der eigentliche Abgleich
+    # drosselt sich selbst ueber LEXWARE_AUTO_SYNC_MINUTES.
+    if app.config.get("TESTING") or not LEXWARE_API_KEY:
+        return
+
+    def _woerker():
+        while True:
+            time.sleep(1800)
+            try:
+                lexware_sync_im_hintergrund_starten()
+            except Exception as exc:
+                print(f"WARNUNG: Lexware-Auto-Abgleich fehlgeschlagen: {clean_text(str(exc))[:200]}")
+
+    threading.Thread(target=_woerker, daemon=True).start()
+
+
 init_db()
 start_hourly_backups()
+start_lexware_auto_sync()
 
 
 if __name__ == "__main__":

@@ -49,7 +49,7 @@
         · Gesamt <strong>{{ m.gesamt_label }}</strong>
         {% if m.bereits_stufe is not none %} · zuletzt: {{ m.bereits_name }} am {{ m.bereits_am }}{% endif %}
       </div>
-      <form method="POST" action="{{ url_for('admin_mahnung_senden', voucher_id=m.voucher_id) }}" onsubmit="return confirm('{{ m.stufe_name }} jetzt per E-Mail an {{ m.kontakt }} senden?')">
+      <form method="POST" action="{{ url_for('admin_mahnung_vorschau', voucher_id=m.voucher_id) }}">
         {{ csrf_field()|safe }}
         <input type="hidden" name="stufe" value="{{ m.stufe }}">
         <div class="row g-2 mb-2">
@@ -67,7 +67,7 @@
           <textarea name="text" class="form-control mt-2" rows="10" style="font-size: .85rem;">{{ m.text }}</textarea>
         </details>
         <div class="d-flex gap-2 flex-wrap">
-          <button type="submit" class="btn btn-brand btn-sm" data-no-loading="true">📨 Jetzt per E-Mail senden</button>
+          <button type="submit" class="btn btn-brand btn-sm" data-no-loading="true">👁 E-Mail ansehen & senden</button>
           <button type="button" class="btn btn-soft btn-sm" data-copy-link="{{ m.text_komplett }}">Text kopieren</button>
         </div>
       </form>

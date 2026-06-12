@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Mahnung prüfen{% endblock %}
+
+{% block content %}
+
+<div class="section-title mb-4">
+  <div>
+    <div class="badge-soft mb-3">Forderungsmanagement · Vorschau</div>
+    <h1 class="mb-2">So geht die E-Mail raus</h1>
+    <p class="mb-0">Letzter Blick vor dem Versand — noch ist nichts gesendet.</p>
+  </div>
+  <a href="{{ url_for('admin_mahnungen') }}" class="btn btn-soft">← Zurück & bearbeiten</a>
+</div>
+
+<div class="page-card p-0 mb-4" style="max-width: 860px; overflow: hidden;">
+  <div class="p-3" style="background: #f7f1e8; border-bottom: 1px solid #e4d6c3;">
+    <table class="m-0" style="font-size: .92rem;">
+      <tr><td class="text-muted pe-3">Von:</td><td><strong>{{ absender }}</strong></td></tr>
+      <tr><td class="text-muted pe-3">An:</td><td><strong>{{ empfaenger }}</strong></td></tr>
+      {% if antwort_an %}<tr><td class="text-muted pe-3">Antwort an:</td><td>{{ antwort_an }}</td></tr>{% endif %}
+      <tr><td class="text-muted pe-3">Betreff:</td><td><strong>{{ betreff }}</strong></td></tr>
+    </table>
+  </div>
+  <div class="p-4" style="white-space: pre-wrap; font-size: .95rem; line-height: 1.6;">{{ text }}</div>
+</div>
+
+<div class="d-flex gap-2 flex-wrap align-items-center">
+  <form method="POST" action="{{ url_for('admin_mahnung_senden', voucher_id=voucher_id) }}" class="m-0">
+    {{ csrf_field()|safe }}
+    <input type="hidden" name="stufe" value="{{ stufe }}">
+    <input type="hidden" name="empfaenger" value="{{ empfaenger }}">
+    <input type="hidden" name="betreff" value="{{ betreff }}">
+    <input type="hidden" name="text" value="{{ text }}">
+    <button type="submit" class="btn btn-brand btn-lg" data-no-loading="true">📨 Jetzt absenden ({{ stufe_name }})</button>
+  </form>
+  <a href="{{ url_for('admin_mahnungen') }}" class="btn btn-soft btn-lg">Abbrechen</a>
+</div>
+
+{% endblock %}
