@@ -53,6 +53,7 @@
             <td>
               {% if e.adresse %}
                 {{ e.adresse }} <span class="badge badge-soft">{{ e.adresse_quelle }}</span>
+                {% if e.zuletzt_angeschrieben %}<div class="small text-muted">zuletzt angeschrieben: {{ e.zuletzt_angeschrieben }}</div>{% endif %}
               {% else %}
                 <span class="text-danger small">keine Adresse hinterlegt — wird übersprungen</span>
               {% endif %}

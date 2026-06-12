@@ -9193,6 +9193,16 @@ def init_db():
         )
         """
     )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rundmail_log (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            autohaus_id  INTEGER NOT NULL,
+            betreff      TEXT DEFAULT '',
+            gesendet_am  TEXT NOT NULL
+        )
+        """
+    )
     ensure_index(db, "idx_lexware_rechnungen_voucher", "lexware_rechnungen", ("voucher_id",))
     ensure_index(
         db,
@@ -24432,6 +24442,122 @@ def sende_autohaus_benachrichtigung_mail(auftrag_id, betreff, text):
         print(f"WARNUNG: Autohaus-Mail-Vorbereitung fehlgeschlagen: {clean_text(str(exc))[:300]}")
 
 
+ENDKUNDEN_MAIL_TESTLOG = []
+
+
+def sende_endkunden_mail(auftrag_id, betreff, text):
+    # Automatische Mail an den Endkunden (Fahrzeug fertig, Danke nach Abholung).
+    # Ohne Kunden-E-Mail am Auftrag passiert bewusst nichts.
+    try:
+        auftrag = get_auftrag(auftrag_id)
+        if not auftrag:
+            return
+        empfaenger = parse_email_recipients(auftrag.get("kunde_email"))
+        if not empfaenger:
+            return
+        if app.config.get("TESTING"):
+            ENDKUNDEN_MAIL_TESTLOG.append({"auftrag_id": auftrag_id, "betreff": betreff, "empfaenger": empfaenger, "text": text})
+            return
+        config = get_schaden_mail_config()
+        if not config["smtp_configured"]:
+            print(f"WARNUNG: Endkunden-Mail nicht gesendet (SMTP fehlt): {betreff}")
+            return
+        kennzeichen = clean_text(auftrag.get("kennzeichen"))
+        betreff_voll = f"{betreff} – {kennzeichen}" if kennzeichen else betreff
+        message = EmailMessage()
+        message["Subject"] = betreff_voll
+        message["From"] = formataddr(("Gärtner Karosserie & Lack", config["from_address"]))
+        message["To"] = ", ".join(empfaenger)
+        message["Reply-To"] = config["smtp_user"]
+        message.set_content(text)
+
+        def _senden():
+            try:
+                if config["smtp_ssl"]:
+                    with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30) as smtp:
+                        smtp.login(config["smtp_user"], config["_smtp_password"])
+                        smtp.send_message(message)
+                else:
+                    with smtplib.SMTP(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30) as smtp:
+                        if config["smtp_tls"]:
+                            smtp.starttls()
+                        smtp.login(config["smtp_user"], config["_smtp_password"])
+                        smtp.send_message(message)
+            except Exception as exc:
+                print(f"WARNUNG: Endkunden-Mail konnte nicht gesendet werden: {clean_text(str(exc))[:300]}")
+
+        threading.Thread(target=_senden, daemon=True).start()
+    except Exception as exc:
+        print(f"WARNUNG: Endkunden-Mail-Vorbereitung fehlgeschlagen: {clean_text(str(exc))[:300]}")
+
+
+def endkunden_status_mail_noetig(auftrag_id, schwelle):
+    # Schutz vor Doppel-Mails beim Hin- und Herschieben des Status: nur beim
+    # ERSTEN Erreichen der Stufe mailen (Status-Log inkl. des neuen Eintrags).
+    try:
+        db = get_db()
+        row = db.execute(
+            "SELECT COUNT(*) AS count FROM status_log WHERE auftrag_id=? AND status >= ?",
+            (auftrag_id, schwelle),
+        ).fetchone()
+        db.close()
+        return int(row["count"] or 0) <= 1
+    except Exception:
+        return False
+
+
+def baue_endkunden_fertig_mail(auftrag):
+    kunde = clean_text(auftrag.get("kunde_name")) or "liebe Kundin, lieber Kunde"
+    fahrzeug = " ".join(t for t in (clean_text(auftrag.get("fahrzeug")), clean_text(auftrag.get("kennzeichen"))) if t)
+    try:
+        link = kunden_status_url(auftrag)
+    except Exception:
+        link = ""
+    zeilen = [
+        f"Guten Tag {kunde},",
+        "",
+        f"gute Nachrichten: Ihr Fahrzeug{(' (' + fahrzeug + ')') if fahrzeug else ''} ist fertig und kann abgeholt werden.",
+        "",
+    ]
+    if link:
+        zeilen += ["Alle Details finden Sie wie gewohnt unter Ihrem persönlichen Status-Link:", link, ""]
+    zeilen += [
+        "Wir freuen uns auf Ihren Besuch!",
+        "",
+        "Mit besten Grüßen",
+        "Ihr Team von Gärtner Karosserie & Lack",
+        "Binauer Höhe 4, 74821 Mosbach · Telefon +49 1522 7706694",
+    ]
+    return "\n".join(zeilen)
+
+
+def baue_endkunden_danke_mail(auftrag):
+    kunde = clean_text(auftrag.get("kunde_name")) or "liebe Kundin, lieber Kunde"
+    bewertung_url = clean_text(get_app_setting("GOOGLE_BEWERTUNG_URL", ""))
+    zeilen = [
+        f"Guten Tag {kunde},",
+        "",
+        "vielen Dank für Ihr Vertrauen — wir hoffen, Sie sind rundum zufrieden mit unserer Arbeit.",
+        "",
+    ]
+    if bewertung_url:
+        zeilen += [
+            "Wenn Sie einen kurzen Moment Zeit haben: Über eine Google-Bewertung freuen wir uns riesig —",
+            bewertung_url,
+            "",
+        ]
+    else:
+        zeilen += ["Wenn Sie zufrieden waren, empfehlen Sie uns gerne weiter — das ist das schönste Dankeschön.", ""]
+    zeilen += [
+        "Bis zum nächsten Mal!",
+        "",
+        "Mit besten Grüßen",
+        "Ihr Team von Gärtner Karosserie & Lack",
+        "Binauer Höhe 4, 74821 Mosbach · Telefon +49 1522 7706694",
+    ]
+    return "\n".join(zeilen)
+
+
 def save_versicherung_mail_draft(auftrag_id, empfaenger="", cc="", anschreiben=None):
     db = get_db()
     fields = ["versicherung_email=?", "versicherung_email_cc=?", "geaendert_am=?"]
@@ -32246,7 +32372,30 @@ def admin_zugaenge():
         versicherungen=list_versicherungen(),
         werkstatt_tafel_code=ensure_werkstatt_tafel_code(),
         werkstatt_tafel_url=url_for("werkstatt_login", _external=True),
+        bewertung_url=get_app_setting("GOOGLE_BEWERTUNG_URL", ""),
     )
+
+
+@app.route("/impressum")
+def impressum_seite():
+    return render_template("impressum.html")
+
+
+@app.route("/datenschutz")
+def datenschutz_seite():
+    return render_template("datenschutz.html")
+
+
+@app.route("/admin/bewertung-url", methods=["POST"])
+@admin_required
+def admin_bewertung_url_speichern():
+    wert = clean_text(request.form.get("bewertung_url"))
+    if wert and not wert.startswith("http"):
+        flash("Bitte einen vollständigen Link eintragen (beginnt mit https://).", "warning")
+        return redirect(url_for("admin_zugaenge"))
+    set_app_setting("GOOGLE_BEWERTUNG_URL", wert)
+    flash("Bewertungs-Link gespeichert — er steht ab sofort in der Danke-Mail an Endkunden." if wert else "Bewertungs-Link entfernt.", "success")
+    return redirect(url_for("admin_zugaenge"))
 
 
 @app.route("/admin/werkstatt-tafel/zugang", methods=["POST"])
@@ -32354,6 +32503,17 @@ def admin_rundmail():
             "letzter_auftrag": zeitpunkt.strftime(DATE_FMT) if zeitpunkt else "",
             "aktiv": bool(zeitpunkt and zeitpunkt >= grenze),
         })
+    try:
+        db = get_db()
+        log_rows = db.execute(
+            "SELECT autohaus_id, MAX(gesendet_am) AS gesendet_am FROM rundmail_log GROUP BY autohaus_id"
+        ).fetchall()
+        db.close()
+        log_map = {int(r["autohaus_id"]): clean_text(r["gesendet_am"])[:10] for r in log_rows}
+    except Exception:
+        log_map = {}
+    for eintrag in eintraege:
+        eintrag["zuletzt_angeschrieben"] = log_map.get(int(eintrag["id"]), "")
     return render_template(
         "rundmail_admin.html",
         eintraege=eintraege,
@@ -32386,6 +32546,7 @@ def admin_rundmail_senden():
             continue
         empfaenger_pakete.append({
             "adresse": adresse,
+            "autohaus_id": autohaus["id"],
             "betreff": rundmail_personalisieren(betreff, autohaus, portal_basis),
             "text": rundmail_personalisieren(text, autohaus, portal_basis),
             "name": autohaus["name"],
@@ -32395,6 +32556,14 @@ def admin_rundmail_senden():
         return redirect(url_for("admin_rundmail"))
     if app.config.get("TESTING"):
         RUNDMAIL_TESTLOG.extend(empfaenger_pakete)
+        db = get_db()
+        for paket in empfaenger_pakete:
+            db.execute(
+                "INSERT INTO rundmail_log (autohaus_id, betreff, gesendet_am) VALUES (?, ?, ?)",
+                (paket["autohaus_id"], paket["betreff"][:120], now_str()),
+            )
+        db.commit()
+        db.close()
         flash(f"TEST: Rundmail an {len(empfaenger_pakete)} Autohäuser vorbereitet.", "success")
         return redirect(url_for("admin_rundmail"))
     config = get_schaden_mail_config()
@@ -32405,6 +32574,7 @@ def admin_rundmail_senden():
     def _senden():
         ok = 0
         fehler = 0
+        erfolgreich = []
         try:
             if config["smtp_ssl"]:
                 smtp = smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30)
@@ -32427,6 +32597,7 @@ def admin_rundmail_senden():
                         )
                         smtp.send_message(message)
                         ok += 1
+                        erfolgreich.append(paket)
                     except Exception as exc:
                         fehler += 1
                         print(f"WARNUNG: Rundmail an {paket['adresse']} fehlgeschlagen: {clean_text(str(exc))[:200]}")
@@ -32438,6 +32609,18 @@ def admin_rundmail_senden():
         except Exception as exc:
             fehler = len(empfaenger_pakete) - ok
             print(f"WARNUNG: Rundmail-Versand abgebrochen: {clean_text(str(exc))[:300]}")
+        try:
+            if erfolgreich:
+                log_db = get_db()
+                for paket in erfolgreich:
+                    log_db.execute(
+                        "INSERT INTO rundmail_log (autohaus_id, betreff, gesendet_am) VALUES (?, ?, ?)",
+                        (paket["autohaus_id"], paket["betreff"][:120], now_str()),
+                    )
+                log_db.commit()
+                log_db.close()
+        except Exception:
+            pass
         try:
             set_app_setting("RUNDMAIL_LAST_RESULT", f"{now_str()}: {ok} gesendet, {fehler} Fehler")
         except Exception:
@@ -36816,6 +36999,14 @@ def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status):
             "Fahrzeug ist fertig",
             "Die Werkstatt hat das Fahrzeug fertiggestellt. Es kann abgeholt werden.",
         )
+    if neuer_status == 4 and endkunden_status_mail_noetig(auftrag_id, 4):
+        frisch = get_auftrag(auftrag_id)
+        if frisch:
+            sende_endkunden_mail(auftrag_id, "Ihr Fahrzeug ist fertig", baue_endkunden_fertig_mail(frisch))
+    if neuer_status >= 5 and endkunden_status_mail_noetig(auftrag_id, 5):
+        frisch = get_auftrag(auftrag_id)
+        if frisch:
+            sende_endkunden_mail(auftrag_id, "Vielen Dank für Ihr Vertrauen", baue_endkunden_danke_mail(frisch))
 
 
 @app.route("/admin/status/<int:auftrag_id>/<int:neuer_status>", methods=["POST"])

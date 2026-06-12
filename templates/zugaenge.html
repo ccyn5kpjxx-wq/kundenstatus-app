@@ -27,6 +27,22 @@
   </div>
 </div>
 
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
+      <div class="badge-soft mb-2">Endkunden</div>
+      <h4 class="mb-1">Google-Bewertungs-Link</h4>
+      <p>Nach der Fahrzeug-Abholung bekommt der Endkunde automatisch eine Danke-Mail — mit diesem Link bittet sie um eine Google-Bewertung.</p>
+    </div>
+  </div>
+  <form method="POST" action="{{ url_for('admin_bewertung_url_speichern') }}" class="d-flex gap-2 align-items-center flex-wrap">
+    {{ csrf_field()|safe }}
+    <input type="url" name="bewertung_url" class="form-control" style="max-width: 460px;" value="{{ bewertung_url }}" placeholder="https://g.page/r/… (Google-Unternehmensprofil → Rezensionslink)">
+    <button type="submit" class="btn btn-soft" data-no-loading="true">Speichern</button>
+    {% if not bewertung_url %}<span class="small text-muted">leer = Danke-Mail ohne Bewertungs-Bitte</span>{% endif %}
+  </form>
+</div>
+
 {% include "autohaus_zugaenge_section.html" %}
 
 <div class="page-card p-4 mb-4">
