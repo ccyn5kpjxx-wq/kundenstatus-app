@@ -9165,6 +9165,7 @@ def init_db():
     ensure_column(db, "lexware_rechnungen", "erstellt_am", "TEXT DEFAULT ''")
     ensure_column(db, "lexware_rechnungen", "geaendert_am", "TEXT DEFAULT ''")
     ensure_column(db, "lexware_rechnungen", "investition", "INTEGER DEFAULT 0")
+    ensure_column(db, "lexware_rechnungen", "kontakt_email", "TEXT DEFAULT ''")
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS mahnungen_log (
@@ -32463,6 +32464,46 @@ def mahn_basiszinssatz():
         return 1.27
 
 
+MAHNMAIL_TESTLOG = []
+
+
+def lexware_kontakt_email(contact_id):
+    # Holt die E-Mail-Adresse des Kunden aus den Lexware-Kontakten.
+    contact_id = clean_text(contact_id)
+    if not contact_id or not LEXWARE_API_KEY:
+        return ""
+    try:
+        daten = lexware_request("GET", f"/v1/contacts/{quote(contact_id)}")
+    except Exception:
+        return ""
+    adressen = daten.get("emailAddresses") or {}
+    for schluessel in ("business", "office", "private", "other"):
+        liste = adressen.get(schluessel) or []
+        for eintrag in liste:
+            adresse = clean_text(eintrag).lower()
+            if "@" in adresse:
+                return adresse
+    return ""
+
+
+def mahn_kontakt_email_speichern(voucher_id, email):
+    db = get_db()
+    db.execute(
+        "UPDATE lexware_rechnungen SET kontakt_email=? WHERE voucher_id=?",
+        (clean_text(email).lower(), clean_text(voucher_id)),
+    )
+    db.commit()
+    db.close()
+
+
+def mahn_betreff(stufe_meta, nummer):
+    if stufe_meta["stufe"] == 0:
+        return f"Zahlungserinnerung — Rechnung {nummer}"
+    if stufe_meta["stufe"] == 3:
+        return f"Letzte Mahnung vor Übergabe an Inkasso — Rechnung {nummer}"
+    return f"{stufe_meta['name']} — Rechnung {nummer}"
+
+
 def mahn_letzte_stufe_je_voucher():
     db = get_db()
     try:
@@ -32482,7 +32523,7 @@ def baue_mahntext(stufe_meta, kontakt, nummer, betrag, faellig_label, tage_ueber
     gesamt = betrag + gebuehr + (zinsen or 0.0)
     if stufe_meta["stufe"] == 0:
         return (
-            f"Betreff: Zahlungserinnerung — Rechnung {nummer}\n\n{anrede}\n\n"
+            f"{anrede}\n\n"
             f"bestimmt ist es im Tagesgeschäft untergegangen: Unsere Rechnung {nummer} über {betrag_label} "
             f"war am {faellig_label} fällig. Wir bitten freundlich um Überweisung bis zum {frist_label}.\n\n"
             "Falls sich die Zahlung mit diesem Schreiben überschnitten hat, betrachten Sie es bitte als gegenstandslos.\n\n"
@@ -32490,7 +32531,7 @@ def baue_mahntext(stufe_meta, kontakt, nummer, betrag, faellig_label, tage_ueber
         )
     if stufe_meta["stufe"] == 1:
         return (
-            f"Betreff: 1. Mahnung — Rechnung {nummer}\n\n{anrede}\n\n"
+            f"{anrede}\n\n"
             f"unsere Rechnung {nummer} über {betrag_label}, fällig am {faellig_label}, ist weiterhin offen.\n\n"
             f"Wir mahnen den Betrag hiermit an und bitten um Zahlung bis zum {frist_label}.\n\n"
             f"Hauptforderung: {betrag_label}\nMahngebühr: {umsatz_euro_label(gebuehr)}\n"
@@ -32500,7 +32541,7 @@ def baue_mahntext(stufe_meta, kontakt, nummer, betrag, faellig_label, tage_ueber
         )
     if stufe_meta["stufe"] == 2:
         return (
-            f"Betreff: 2. Mahnung — Rechnung {nummer}\n\n{anrede}\n\n"
+            f"{anrede}\n\n"
             f"unsere Rechnung {nummer} über {betrag_label}, fällig am {faellig_label}, ist trotz Erinnerung "
             f"und 1. Mahnung weiterhin nicht beglichen ({tage_ueber} Tage Verzug).\n\n"
             f"Wir fordern Sie auf, den offenen Gesamtbetrag bis zum {frist_label} zu begleichen:\n\n"
@@ -32511,7 +32552,7 @@ def baue_mahntext(stufe_meta, kontakt, nummer, betrag, faellig_label, tage_ueber
             "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner Karosserie & Lack GmbH"
         )
     return (
-        f"Betreff: Letzte Mahnung vor Übergabe an Inkasso — Rechnung {nummer}\n\n{anrede}\n\n"
+        f"{anrede}\n\n"
         f"unsere Rechnung {nummer} über {betrag_label}, fällig am {faellig_label}, ist trotz mehrfacher "
         f"Mahnungen weiterhin offen ({tage_ueber} Tage Verzug).\n\n"
         f"Wir fordern Sie letztmalig außergerichtlich auf, den offenen Gesamtbetrag bis zum {frist_label} zu begleichen:\n\n"
@@ -32532,7 +32573,7 @@ def mahnungen_uebersicht():
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT voucher_id, voucher_number, contact_name, open_amount, voucher_date, due_date "
+            "SELECT voucher_id, voucher_number, contact_name, contact_id, kontakt_email, open_amount, voucher_date, due_date "
             "FROM lexware_rechnungen "
             "WHERE richtung='Einnahme' AND status='ueberfaellig' AND COALESCE(open_amount, 0) >= 10 "
             "ORDER BY due_date ASC"
@@ -32565,6 +32606,8 @@ def mahnungen_uebersicht():
             "bereits_stufe": bereits["stufe"] if bereits else None,
             "bereits_name": MAHNSTUFEN[bereits["stufe"]]["name"] if bereits else "",
             "bereits_am": bereits["gesendet_am"][:16] if bereits else "",
+            "contact_id": clean_text(row["contact_id"]),
+            "empfaenger": clean_text(row["kontakt_email"]).lower(),
         }
         if passend and (bereits is None or passend["stufe"] > bereits["stufe"]):
             frist_label = (heute + timedelta(days=passend["frist_tage"])).strftime(DATE_FMT)
@@ -32575,12 +32618,14 @@ def mahnungen_uebersicht():
                 "zinsen_label": umsatz_euro_label(zinsen) if passend["stufe"] >= 2 else "",
                 "gesamt_label": umsatz_euro_label(betrag + passend["gebuehr"] + (zinsen if passend["stufe"] >= 2 else 0.0)),
                 "frist_label": frist_label,
+                "betreff_mail": mahn_betreff(passend, eintrag["nummer"]),
                 "text": baue_mahntext(
                     passend, eintrag["kontakt"], eintrag["nummer"], betrag,
                     eintrag["faellig_label"], tage_ueber,
                     zinsen if passend["stufe"] >= 2 else 0.0, frist_label,
                 ),
             })
+            eintrag["text_komplett"] = f"Betreff: {eintrag['betreff_mail']}\n\n{eintrag['text']}"
             faellig.append(eintrag)
         else:
             naechste = None
@@ -32610,6 +32655,17 @@ def mahnungen_faellig_anzahl():
 @admin_required
 def admin_mahnungen():
     faellig, spaeter = mahnungen_uebersicht()
+    if not app.config.get("TESTING"):
+        for eintrag in faellig:
+            if not eintrag["empfaenger"] and eintrag.get("contact_id"):
+                gefunden = lexware_kontakt_email(eintrag["contact_id"])
+                if gefunden:
+                    eintrag["empfaenger"] = gefunden
+                    try:
+                        mahn_kontakt_email_speichern(eintrag["voucher_id"], gefunden)
+                    except Exception:
+                        pass
+
     db = get_db()
     try:
         log = db.execute(
@@ -32656,6 +32712,70 @@ def admin_mahnung_versendet(voucher_id):
     db.commit()
     db.close()
     flash(f"{MAHNSTUFEN[stufe]['name']} als versendet vermerkt — die nächste Stufe zählt ab heute.", "success")
+    return redirect(url_for("admin_mahnungen"))
+
+
+@app.route("/admin/mahnungen/<voucher_id>/senden", methods=["POST"])
+@admin_required
+def admin_mahnung_senden(voucher_id):
+    voucher_id = clean_text(voucher_id)
+    try:
+        stufe = int(request.form.get("stufe"))
+    except (TypeError, ValueError):
+        abort(400)
+    if not voucher_id or stufe < 0 or stufe >= len(MAHNSTUFEN):
+        abort(400)
+    empfaenger = clean_text(request.form.get("empfaenger")).lower()
+    betreff = clean_text(request.form.get("betreff"))
+    text = str(request.form.get("text") or "").strip()
+    if not empfaenger or "@" not in empfaenger:
+        flash("Bitte eine gültige Empfänger-E-Mail eintragen — dann klappt der Direktversand.", "warning")
+        return redirect(url_for("admin_mahnungen"))
+    if not betreff or not text:
+        flash("Betreff und Mahntext dürfen nicht leer sein.", "warning")
+        return redirect(url_for("admin_mahnungen"))
+
+    if app.config.get("TESTING"):
+        MAHNMAIL_TESTLOG.append({"voucher_id": voucher_id, "stufe": stufe, "empfaenger": empfaenger, "betreff": betreff})
+    else:
+        config = get_schaden_mail_config()
+        if not config["smtp_configured"]:
+            flash("SMTP ist nicht konfiguriert — Mahnung konnte nicht gesendet werden.", "danger")
+            return redirect(url_for("admin_mahnungen"))
+        message = EmailMessage()
+        message["Subject"] = betreff
+        message["From"] = formataddr((config["display_name"], config["from_address"]))
+        message["To"] = empfaenger
+        message["Reply-To"] = config["smtp_user"]
+        message["X-Gaertner-Mahnung"] = f"{voucher_id}:{stufe}"
+        message.set_content(text)
+        try:
+            if config["smtp_ssl"]:
+                with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30) as smtp:
+                    smtp.login(config["smtp_user"], config["_smtp_password"])
+                    smtp.send_message(message)
+            else:
+                with smtplib.SMTP(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30) as smtp:
+                    if config["smtp_tls"]:
+                        smtp.starttls()
+                    smtp.login(config["smtp_user"], config["_smtp_password"])
+                    smtp.send_message(message)
+        except Exception as exc:
+            flash(f"Versand fehlgeschlagen: {clean_text(str(exc))[:200]} — Mahnung wurde NICHT als versendet vermerkt.", "danger")
+            return redirect(url_for("admin_mahnungen"))
+
+    try:
+        mahn_kontakt_email_speichern(voucher_id, empfaenger)
+    except Exception:
+        pass
+    db = get_db()
+    db.execute(
+        "INSERT INTO mahnungen_log (voucher_id, stufe, gesendet_am, erstellt_am) VALUES (?, ?, ?, ?)",
+        (voucher_id, stufe, now_str(), now_str()),
+    )
+    db.commit()
+    db.close()
+    flash(f"{MAHNSTUFEN[stufe]['name']} per E-Mail an {empfaenger} gesendet und vermerkt. ✓", "success")
     return redirect(url_for("admin_mahnungen"))
 
 

@@ -49,18 +49,33 @@
         · Gesamt <strong>{{ m.gesamt_label }}</strong>
         {% if m.bereits_stufe is not none %} · zuletzt: {{ m.bereits_name }} am {{ m.bereits_am }}{% endif %}
       </div>
-      <details class="mb-2">
-        <summary class="text-muted small" style="cursor: pointer;">Mahntext anzeigen</summary>
-        <div class="mahn-text mt-2">{{ m.text }}</div>
-      </details>
-      <div class="d-flex gap-2 flex-wrap">
-        <button type="button" class="btn btn-brand btn-sm" data-copy-link="{{ m.text }}">Mahntext kopieren</button>
-        <form method="POST" action="{{ url_for('admin_mahnung_versendet', voucher_id=m.voucher_id) }}" class="m-0" onsubmit="return confirm('{{ m.stufe_name }} an {{ m.kontakt }} wirklich als versendet markieren?')">
-          {{ csrf_field()|safe }}
-          <input type="hidden" name="stufe" value="{{ m.stufe }}">
-          <button type="submit" class="btn btn-soft btn-sm" data-no-loading="true">✓ Als versendet markieren</button>
-        </form>
-      </div>
+      <form method="POST" action="{{ url_for('admin_mahnung_senden', voucher_id=m.voucher_id) }}" onsubmit="return confirm('{{ m.stufe_name }} jetzt per E-Mail an {{ m.kontakt }} senden?')">
+        {{ csrf_field()|safe }}
+        <input type="hidden" name="stufe" value="{{ m.stufe }}">
+        <div class="row g-2 mb-2">
+          <div class="col-md-5">
+            <label class="form-label small text-muted mb-1">Empfänger-E-Mail{% if not m.empfaenger %} <span class="text-danger">(bitte eintragen — wird gemerkt)</span>{% endif %}</label>
+            <input type="email" name="empfaenger" class="form-control form-control-sm" value="{{ m.empfaenger }}" placeholder="kunde@firma.de" required>
+          </div>
+          <div class="col-md-7">
+            <label class="form-label small text-muted mb-1">Betreff</label>
+            <input type="text" name="betreff" class="form-control form-control-sm" value="{{ m.betreff_mail }}">
+          </div>
+        </div>
+        <details class="mb-2" open>
+          <summary class="text-muted small" style="cursor: pointer;">Mahntext (vor dem Senden anpassbar)</summary>
+          <textarea name="text" class="form-control mt-2" rows="10" style="font-size: .85rem;">{{ m.text }}</textarea>
+        </details>
+        <div class="d-flex gap-2 flex-wrap">
+          <button type="submit" class="btn btn-brand btn-sm" data-no-loading="true">📨 Jetzt per E-Mail senden</button>
+          <button type="button" class="btn btn-soft btn-sm" data-copy-link="{{ m.text_komplett }}">Text kopieren</button>
+        </div>
+      </form>
+      <form method="POST" action="{{ url_for('admin_mahnung_versendet', voucher_id=m.voucher_id) }}" class="m-0 mt-2" onsubmit="return confirm('{{ m.stufe_name }} an {{ m.kontakt }} als anderweitig versendet markieren (z. B. per Brief)?')">
+        {{ csrf_field()|safe }}
+        <input type="hidden" name="stufe" value="{{ m.stufe }}">
+        <button type="submit" class="btn btn-link btn-sm text-muted p-0" data-no-loading="true">… oder nur als versendet markieren (Brief/anderer Weg)</button>
+      </form>
     </div>
     {% endfor %}
   </div>
