@@ -364,7 +364,8 @@ def main():
         check(
             "Versicherung sieht Zuteilung nur an Gärtner",
             versicherung_dashboard.status_code == 200
-            and "An Gärtner zuteilen" in versicherung_dashboard_html,
+            and "Neuen Schaden anlegen" in versicherung_dashboard_html
+            and 'value="gaertner"' in versicherung_dashboard_html,
             f"Status {versicherung_dashboard.status_code}",
         )
         check(
@@ -381,13 +382,11 @@ def main():
         check(
             "Versicherungs-Zuteilung nennt Gärtner statt andere Werkstatt",
             zuteilung_form.status_code == 200
-            and "Fahrzeug an Gärtner zuteilen" in zuteilung_html
-            and "Dokumente analysieren" in zuteilung_html
-            and "Unterlagen hochladen und automatisch auslesen" in zuteilung_html
+            and "Schaden an Gärtner zuteilen" in zuteilung_html
+            and "Unterlagen strukturiert hochladen" in zuteilung_html
             and "Beschädigtes Fahrzeug" in zuteilung_html
-            and "Zulassungsbescheinigung Teil I" in zuteilung_html
-            and "gegnerisches Kennzeichen" in zuteilung_html
-            and "Fahrzeugschein" in zuteilung_html
+            and "Fahrzeugschein / Zulassung" in zuteilung_html
+            and "Gegnerisches Kennzeichen" in zuteilung_html
             and "Partnerwerkstatt" not in zuteilung_html,
             f"Status {zuteilung_form.status_code}",
         )
@@ -396,7 +395,7 @@ def main():
             b"Schaden-Nr.: FLOW-DOC-170\n"
             b"Versicherungsnehmer: Flow Versicherungs Kunde\n"
             b"Kennzeichen: MOS-V 170\n"
-            b"FIN: WVWFLOWVERSICH01\n"
+            b"FIN: WVWZZZFL0WTEST017\n"
             b"Selbstbeteiligung 300 EUR\n"
             b"Haftpflicht Fremdverschulden"
         )
@@ -420,7 +419,7 @@ def main():
             and analyse_json.get("ok")
             and analyse_fields.get("versicherung_police") == "POL-FLOW-DOC"
             and analyse_fields.get("schaden_nummer") == "FLOW-DOC-170"
-            and analyse_fields.get("fin_nummer") == "WVWFLOWVERSICH01"
+            and analyse_fields.get("fin_nummer") == "WVWZZZFL0WTEST017"
             and analyse_fields.get("kennzeichen") == "MOS-V 170",
             f"Status {analyse_response.status_code}, {analyse_json}",
         )
@@ -472,7 +471,7 @@ def main():
                     "schadenart": "haftpflicht",
                     "fahrzeug": "VW Golf Flow",
                     "kennzeichen": "MOS-V 170",
-                    "fin_nummer": "WVWFLOWVERSICH01",
+                    "fin_nummer": "WVWZZZFL0WTEST017",
                     "schaden_nummer": "FLOW-VS-170",
                     "versicherung_police": "POL-FLOW-VS",
                     "beschreibung": "Versicherung steuert den Schaden direkt an Gärtner.",
