@@ -2647,6 +2647,7 @@ def inject_csrf_helpers():
         "admin_email_count": admin_email_count,
         "admin_mitarbeiter_urlaub_count": admin_mitarbeiter_urlaub_count,
         "mahnungen_faellig_count": mahnungen_faellig_anzahl,
+        "aufgaben_offen_heute_count": aufgaben_offen_heute_anzahl,
         "analysis_loading_news": analysis_loading_news,
         "gt_motive_configured": bool(GT_MOTIVE_API_KEY or GT_MOTIVE_CLIENT_ID),
         "dat_api_status": dat_api_status_meta,
@@ -9174,6 +9175,21 @@ def init_db():
             stufe        INTEGER NOT NULL,
             gesendet_am  TEXT NOT NULL,
             erstellt_am  TEXT NOT NULL
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mitarbeiter_aufgaben (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            auftrag_id        INTEGER DEFAULT 0,
+            mitarbeiter_id    INTEGER NOT NULL,
+            beschreibung      TEXT NOT NULL,
+            richtwert_minuten INTEGER DEFAULT 0,
+            datum             TEXT NOT NULL,
+            status            TEXT DEFAULT 'offen',
+            erledigt_am       TEXT DEFAULT '',
+            erstellt_am       TEXT NOT NULL
         )
         """
     )
@@ -32831,6 +32847,232 @@ def admin_mahnungen_basiszins():
     set_app_setting("MAHN_BASISZINSSATZ", f"{zins:.2f}")
     flash("Basiszinssatz gespeichert.", "success")
     return redirect(url_for("admin_mahnungen"))
+
+# --- Aufgabenplanung: Chef teilt morgens Arbeitsgaenge zu, Mitarbeiter sieht
+# seine Tagesliste mit Zeit-Richtwert am Werkstatt-Tablet (gleicher Code-Login
+# wie die Werkstatt-Tafel) und hakt erledigte Aufgaben ab.
+def richtwert_label(minuten):
+    try:
+        minuten = int(minuten or 0)
+    except (TypeError, ValueError):
+        minuten = 0
+    if minuten <= 0:
+        return ""
+    if minuten < 60:
+        return f"{minuten} Min."
+    stunden = minuten / 60
+    label = f"{stunden:.1f}".replace(".", ",").rstrip("0").rstrip(",")
+    return f"{label} Std."
+
+
+def parse_richtwert_stunden(wert):
+    text = clean_text(wert).replace(",", ".").replace("Std.", "").replace("h", "").strip()
+    if not text:
+        return 0
+    try:
+        return max(0, int(round(float(text) * 60)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def aufgaben_fuer_datum(datum_label):
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT g.*, m.name AS mitarbeiter_name,
+                   a.fahrzeug AS auftrag_fahrzeug, a.kennzeichen AS auftrag_kennzeichen
+            FROM mitarbeiter_aufgaben g
+            LEFT JOIN mitarbeiter m ON m.id = g.mitarbeiter_id
+            LEFT JOIN auftraege a ON a.id = g.auftrag_id
+            WHERE g.datum = ?
+            ORDER BY g.mitarbeiter_id ASC, g.id ASC
+            """,
+            (clean_text(datum_label),),
+        ).fetchall()
+    finally:
+        db.close()
+    aufgaben = []
+    for row in rows:
+        eintrag = dict(row)
+        eintrag["richtwert_label"] = richtwert_label(eintrag.get("richtwert_minuten"))
+        fahrzeug_teile = [clean_text(eintrag.get("auftrag_fahrzeug")), clean_text(eintrag.get("auftrag_kennzeichen"))]
+        eintrag["auftrag_label"] = " ".join(teil for teil in fahrzeug_teile if teil)
+        aufgaben.append(eintrag)
+    return aufgaben
+
+
+def aufgaben_offen_heute_anzahl():
+    try:
+        db = get_db()
+        row = db.execute(
+            "SELECT COUNT(*) AS count FROM mitarbeiter_aufgaben "
+            "WHERE datum=? AND COALESCE(status, '') != 'erledigt'",
+            (datetime.now().strftime(DATE_FMT),),
+        ).fetchone()
+        db.close()
+        return int(row["count"] or 0)
+    except Exception:
+        return 0
+
+
+def aufgaben_datum_oder_heute(wert):
+    text = clean_text(wert)
+    try:
+        return datetime.strptime(text, DATE_FMT).date()
+    except (TypeError, ValueError):
+        return datetime.now().date()
+
+
+@app.route("/admin/aufgaben")
+@admin_required
+def admin_aufgaben():
+    tag = aufgaben_datum_oder_heute(request.args.get("datum"))
+    datum_label = tag.strftime(DATE_FMT)
+    mitarbeiter = [m for m in list_mitarbeiter(include_inactive=False)]
+    aufgaben = aufgaben_fuer_datum(datum_label)
+    je_mitarbeiter = {}
+    for eintrag in aufgaben:
+        je_mitarbeiter.setdefault(eintrag["mitarbeiter_id"], []).append(eintrag)
+    plaene = []
+    for m in mitarbeiter:
+        liste = je_mitarbeiter.get(m["id"], [])
+        gesamt = sum(int(e.get("richtwert_minuten") or 0) for e in liste)
+        plaene.append({
+            "mitarbeiter": m,
+            "aufgaben": liste,
+            "summe_label": richtwert_label(gesamt),
+            "summe_minuten": gesamt,
+        })
+    auftraege_aktiv = [
+        a for a in list_auftraege()
+        if int(a.get("status") or 1) <= 4 and not a.get("angebotsphase")
+    ]
+    return render_template(
+        "aufgaben_admin.html",
+        datum_label=datum_label,
+        gestern_label=(tag - timedelta(days=1)).strftime(DATE_FMT),
+        morgen_label=(tag + timedelta(days=1)).strftime(DATE_FMT),
+        ist_heute=tag == datetime.now().date(),
+        plaene=plaene,
+        auftraege=auftraege_aktiv,
+        wochentag=WOCHENTAGE[tag.weekday()],
+    )
+
+
+@app.route("/admin/aufgaben/neu", methods=["POST"])
+@admin_required
+def admin_aufgabe_neu():
+    datum_label = aufgaben_datum_oder_heute(request.form.get("datum")).strftime(DATE_FMT)
+    try:
+        mitarbeiter_id = int(request.form.get("mitarbeiter_id") or 0)
+    except (TypeError, ValueError):
+        mitarbeiter_id = 0
+    beschreibung = clean_text(request.form.get("beschreibung"))
+    try:
+        auftrag_id = int(request.form.get("auftrag_id") or 0)
+    except (TypeError, ValueError):
+        auftrag_id = 0
+    richtwert = parse_richtwert_stunden(request.form.get("richtwert"))
+    if not mitarbeiter_id or not beschreibung:
+        flash("Bitte Mitarbeiter wählen und die Aufgabe kurz beschreiben.", "warning")
+        return redirect(url_for("admin_aufgaben", datum=datum_label))
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO mitarbeiter_aufgaben
+        (auftrag_id, mitarbeiter_id, beschreibung, richtwert_minuten, datum, status, erledigt_am, erstellt_am)
+        VALUES (?, ?, ?, ?, ?, 'offen', '', ?)
+        """,
+        (auftrag_id, mitarbeiter_id, beschreibung, richtwert, datum_label, now_str()),
+    )
+    db.commit()
+    db.close()
+    flash("Aufgabe zugeteilt.", "success")
+    return redirect(url_for("admin_aufgaben", datum=datum_label))
+
+
+@app.route("/admin/aufgaben/<int:aufgabe_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_aufgabe_loeschen(aufgabe_id):
+    datum_label = clean_text(request.form.get("datum"))
+    db = get_db()
+    db.execute("DELETE FROM mitarbeiter_aufgaben WHERE id=?", (aufgabe_id,))
+    db.commit()
+    db.close()
+    flash("Aufgabe gelöscht.", "info")
+    return redirect(url_for("admin_aufgaben", datum=datum_label or None))
+
+
+@app.route("/werkstatt/aufgaben")
+def werkstatt_aufgaben():
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    heute = datetime.now().date()
+    datum_label = heute.strftime(DATE_FMT)
+    mitarbeiter = [m for m in list_mitarbeiter(include_inactive=False)]
+    try:
+        gewaehlt_id = int(request.args.get("mitarbeiter") or 0)
+    except (TypeError, ValueError):
+        gewaehlt_id = 0
+    gewaehlt = next((m for m in mitarbeiter if m["id"] == gewaehlt_id), None)
+    aufgaben = []
+    summe_offen = 0
+    if gewaehlt:
+        aufgaben = [
+            eintrag for eintrag in aufgaben_fuer_datum(datum_label)
+            if eintrag["mitarbeiter_id"] == gewaehlt["id"]
+        ]
+        summe_offen = sum(
+            int(eintrag.get("richtwert_minuten") or 0)
+            for eintrag in aufgaben
+            if eintrag.get("status") != "erledigt"
+        )
+    return render_template(
+        "werkstatt_aufgaben.html",
+        mitarbeiter=mitarbeiter,
+        gewaehlt=gewaehlt,
+        aufgaben=aufgaben,
+        datum_label=datum_label,
+        wochentag=WOCHENTAGE[heute.weekday()],
+        summe_offen_label=richtwert_label(summe_offen),
+    )
+
+
+@app.route("/werkstatt/aufgaben/<int:aufgabe_id>/erledigt", methods=["POST"])
+def werkstatt_aufgabe_erledigt(aufgabe_id):
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    db = get_db()
+    row = db.execute(
+        "SELECT mitarbeiter_id, status FROM mitarbeiter_aufgaben WHERE id=?",
+        (aufgabe_id,),
+    ).fetchone()
+    if not row:
+        db.close()
+        abort(404)
+    neu_erledigt = clean_text(row["status"]) != "erledigt"
+    db.execute(
+        "UPDATE mitarbeiter_aufgaben SET status=?, erledigt_am=? WHERE id=?",
+        ("erledigt" if neu_erledigt else "offen", now_str() if neu_erledigt else "", aufgabe_id),
+    )
+    db.commit()
+    db.close()
+    return redirect(url_for("werkstatt_aufgaben", mitarbeiter=row["mitarbeiter_id"]))
+
+
+# --- Zahlen / Umsatz-Ziel (Cockpit-Kachel) ---------------------------------
+# Liest die echten Einnahmen/Ausgaben aus den synchronisierten Lexware-Rechnungen
+# (Tabelle lexware_rechnungen) und stellt sie als Monatsziel mit Tendenz/Ampel dar.
+# Das Ziel berechnet sich automatisch: Vormonat schlagen; liegt der Monat vor dem
+# Vormonats-Tempo, kommt die Haelfte des Vorsprungs (max. +15 %) obendrauf.
+UMSATZ_MONATE = (
+    "", "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+)
+
 
 
 # --- Zahlen / Umsatz-Ziel (Cockpit-Kachel) ---------------------------------

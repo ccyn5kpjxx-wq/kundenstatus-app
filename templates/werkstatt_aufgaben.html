@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Meine Aufgaben</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f3efe6; color: #16202a; font-family: system-ui, sans-serif; }
+    .shell { max-width: 760px; margin: 0 auto; padding: 1.2rem; }
+    .karte { background: #fffdf9; border: 1px solid #ddd1c0; border-radius: 18px; box-shadow: 0 10px 28px rgba(64,47,25,.10); }
+    .person-btn { font-size: 1.15rem; padding: .9rem 1.3rem; border-radius: 14px; border: 1px solid #ddd1c0; background: #fffdf9; }
+    .person-btn.aktiv { background: #145d66; color: #fff; border-color: #145d66; }
+    .aufgabe { padding: 1rem 1.1rem; border-bottom: 1px solid #efe5d7; display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+    .aufgabe:last-child { border-bottom: 0; }
+    .haken-btn { min-width: 64px; height: 64px; border-radius: 16px; border: 2px solid #1b7f53; background: #fff; font-size: 1.7rem; color: #1b7f53; }
+    .haken-btn.erledigt { background: #1b7f53; color: #fff; }
+    .richtwert { font-size: 1.05rem; font-weight: 700; color: #145d66; white-space: nowrap; }
+    .erledigt-text { text-decoration: line-through; color: #6f7a83; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+      <div>
+        <h1 class="h3 mb-0">Meine Aufgaben</h1>
+        <div class="text-muted">{{ wochentag }}, {{ datum_label }}</div>
+      </div>
+      <div class="d-flex gap-2">
+        <a href="{{ url_for('werkstatt_tafel') }}" class="btn btn-outline-dark">Zur Tafel</a>
+      </div>
+    </div>
+
+    <div class="karte p-3 mb-3">
+      <div class="text-muted mb-2">Wer bist du?</div>
+      <div class="d-flex gap-2 flex-wrap">
+        {% for m in mitarbeiter %}
+        <a href="{{ url_for('werkstatt_aufgaben', mitarbeiter=m['id']) }}" class="person-btn text-decoration-none {% if gewaehlt and gewaehlt['id'] == m['id'] %}aktiv{% else %}text-dark{% endif %}">{{ m['name'] }}</a>
+        {% endfor %}
+        {% if not mitarbeiter %}<span class="text-muted">Noch keine Mitarbeiter angelegt.</span>{% endif %}
+      </div>
+    </div>
+
+    {% if gewaehlt %}
+    <div class="karte mb-3">
+      <div class="p-3 d-flex justify-content-between align-items-center" style="border-bottom: 1px solid #efe5d7;">
+        <strong style="font-size: 1.2rem;">{{ gewaehlt['name'] }}</strong>
+        {% if summe_offen_label %}<span class="richtwert">noch ⏱ {{ summe_offen_label }}</span>{% else %}<span class="text-success fw-bold">Alles erledigt 🎉</span>{% endif %}
+      </div>
+      {% if aufgaben %}
+        {% for g in aufgaben %}
+        <div class="aufgabe">
+          <div>
+            <div style="font-size: 1.15rem;" class="{% if g['status'] == 'erledigt' %}erledigt-text{% endif %}">
+              {{ g['beschreibung'] }}
+            </div>
+            <div class="text-muted">
+              {% if g['auftrag_label'] %}🚗 {{ g['auftrag_label'] }}{% endif %}
+              {% if g['richtwert_label'] %} · <span class="richtwert">⏱ {{ g['richtwert_label'] }}</span>{% endif %}
+            </div>
+          </div>
+          <form method="POST" action="{{ url_for('werkstatt_aufgabe_erledigt', aufgabe_id=g['id']) }}" class="m-0">
+            {{ csrf_field()|safe }}
+            <button type="submit" class="haken-btn {% if g['status'] == 'erledigt' %}erledigt{% endif %}" title="Erledigt umschalten">✓</button>
+          </form>
+        </div>
+        {% endfor %}
+      {% else %}
+      <div class="p-4 text-muted">Heute keine Aufgaben zugeteilt. 👍</div>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="karte p-4 text-muted">Tipp deinen Namen an — dann siehst du deine Aufgaben für heute.</div>
+    {% endif %}
+  </div>
+</body>
+</html>

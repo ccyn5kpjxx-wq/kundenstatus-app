@@ -834,6 +834,14 @@
       <span class="module-count">{{ admin_versicherung_count() }}</span>
     </a>
   </div>
+  <div class="col-md-6 col-xl-3">
+    <a class="page-card module-tile" href="{{ url_for('admin_aufgaben') }}">
+      <span class="module-kicker">Werkstatt</span>
+      <h5 class="mb-0">Aufgabenplanung</h5>
+      <p class="text-muted mb-0">Tagesaufgaben mit Zeit-Richtwert ans Team verteilen.</p>
+      <span class="module-count">{{ aufgaben_offen_heute_count() }}</span>
+    </a>
+  </div>
 </div>
 
 {#

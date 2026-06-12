@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Aufgabenplanung{% endblock %}
+
+{% block content %}
+
+<div class="section-title mb-4">
+  <div>
+    <div class="badge-soft mb-3">Werkstatt · Tagesplanung</div>
+    <h1 class="mb-2">Aufgaben zuteilen</h1>
+    <p class="mb-0">Morgens verteilen — jeder Mitarbeiter sieht seine Liste mit Zeit-Richtwert am Werkstatt-Tablet.</p>
+  </div>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <a class="btn btn-soft" href="{{ url_for('admin_aufgaben', datum=gestern_label) }}">&larr;</a>
+    <span class="fw-bold" style="font-family: 'Space Grotesk', sans-serif;">{{ wochentag }}, {{ datum_label }}{% if ist_heute %} (heute){% endif %}</span>
+    <a class="btn btn-soft" href="{{ url_for('admin_aufgaben', datum=morgen_label) }}">&rarr;</a>
+    <a class="btn btn-soft" href="{{ url_for('werkstatt_aufgaben') }}" target="_blank">Tablet-Ansicht öffnen</a>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <h2 class="h5 mb-3">Neue Aufgabe für den {{ datum_label }}</h2>
+  <form method="POST" action="{{ url_for('admin_aufgabe_neu') }}" class="row g-2 align-items-end">
+    {{ csrf_field()|safe }}
+    <input type="hidden" name="datum" value="{{ datum_label }}">
+    <div class="col-md-2">
+      <label class="form-label">Mitarbeiter</label>
+      <select name="mitarbeiter_id" class="form-select">
+        <option value="">– wählen –</option>
+        {% for plan in plaene %}
+        <option value="{{ plan.mitarbeiter['id'] }}">{{ plan.mitarbeiter['name'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Aufgabe</label>
+      <input type="text" name="beschreibung" class="form-control" placeholder="z. B. Tür hinten links spachteln + schleifen">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Fahrzeug (optional)</label>
+      <select name="auftrag_id" class="form-select">
+        <option value="">– ohne Auftrag –</option>
+        {% for a in auftraege %}
+        <option value="{{ a['id'] }}">{{ a['kennzeichen'] or '?' }} · {{ a['fahrzeug'] or 'Fahrzeug' }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Richtwert (Std.)</label>
+      <input type="text" name="richtwert" class="form-control" placeholder="z. B. 2,5" inputmode="decimal">
+    </div>
+    <div class="col-md-1">
+      <button type="submit" class="btn btn-brand w-100" data-no-loading="true">+</button>
+    </div>
+  </form>
+</div>
+
+<div class="row g-3">
+  {% for plan in plaene %}
+  <div class="col-lg-6">
+    <div class="page-card p-4 h-100">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="h5 mb-0">{{ plan.mitarbeiter['name'] }}</h2>
+        <span class="badge badge-soft">
+          {% if plan.summe_minuten %}{{ plan.summe_label }} verplant{% else %}noch nichts verplant{% endif %}
+        </span>
+      </div>
+      {% if plan.aufgaben %}
+      <div class="d-grid gap-2">
+        {% for g in plan.aufgaben %}
+        <div class="border rounded-3 p-2 d-flex justify-content-between align-items-center gap-2 {% if g['status'] == 'erledigt' %}bg-light{% endif %}">
+          <div>
+            <div class="{% if g['status'] == 'erledigt' %}text-decoration-line-through text-muted{% endif %}">
+              {{ g['beschreibung'] }}
+              {% if g['auftrag_label'] %}<span class="text-muted small">· {{ g['auftrag_label'] }}</span>{% endif %}
+            </div>
+            <div class="small text-muted">
+              {% if g['richtwert_label'] %}⏱ {{ g['richtwert_label'] }}{% endif %}
+              {% if g['status'] == 'erledigt' %} · ✅ erledigt {{ g['erledigt_am'][:16] }}{% endif %}
+            </div>
+          </div>
+          <form method="POST" action="{{ url_for('admin_aufgabe_loeschen', aufgabe_id=g['id']) }}" class="m-0" onsubmit="return confirm('Aufgabe löschen?')">
+            {{ csrf_field()|safe }}
+            <input type="hidden" name="datum" value="{{ datum_label }}">
+            <button type="submit" class="btn btn-sm btn-soft" data-no-loading="true">✕</button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-muted">Keine Aufgaben für diesen Tag.</div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+  {% if not plaene %}
+  <div class="col-12"><div class="page-card p-4">Noch keine aktiven Mitarbeiter angelegt — unter <a href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter</a> anlegen.</div></div>
+  {% endif %}
+</div>
+
+{% endblock %}
