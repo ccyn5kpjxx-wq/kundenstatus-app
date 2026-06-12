@@ -2646,6 +2646,7 @@ def inject_csrf_helpers():
         "admin_rechnungen_count": admin_rechnungen_count,
         "admin_email_count": admin_email_count,
         "admin_mitarbeiter_urlaub_count": admin_mitarbeiter_urlaub_count,
+        "mahnungen_faellig_count": mahnungen_faellig_anzahl,
         "analysis_loading_news": analysis_loading_news,
         "gt_motive_configured": bool(GT_MOTIVE_API_KEY or GT_MOTIVE_CLIENT_ID),
         "dat_api_status": dat_api_status_meta,

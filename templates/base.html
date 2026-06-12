@@ -365,7 +365,7 @@
     </a>
     <div class="d-flex align-items-center gap-2 flex-wrap">
       <a class="nav-link" href="{{ url_for('betriebs_cockpit') }}">Start</a>
-      <a class="nav-link" href="{{ url_for('admin_zahlen') }}">Zahlen</a>
+      <a class="nav-link" href="{{ url_for('admin_zahlen') }}">Zahlen{% set mahn_badge = mahnungen_faellig_count() %}{% if mahn_badge %}<span class="nav-badge" title="Fällige Mahnungen — Klick und dann auf den roten Balken">{{ mahn_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('admin_news') }}">News</a>
       <a class="nav-link" href="{{ url_for('admin_leads') }}">Leads{% set leads_badge = admin_leads_count() %}{% if leads_badge %}<span class="nav-badge">{{ leads_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('admin_fahrzeugsuche') }}">Auktion{% set fs_alert_badge = fahrzeugsuche_auktion_alert_count() %}{% set fs_badge = fs_alert_badge or fahrzeugsuche_count() %}{% if fs_badge %}<span class="nav-badge {% if fs_alert_badge %}is-alert{% endif %}" title="{% if fs_alert_badge %}Auktion startet in Kürze{% else %}Aktive Auktionssuchen{% endif %}">{{ fs_badge }}</span>{% endif %}</a>

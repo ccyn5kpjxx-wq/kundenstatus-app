@@ -644,6 +644,13 @@
 {% endblock %}
 
 {% block content %}
+{% set mahn_cockpit_badge = mahnungen_faellig_count() %}
+{% if mahn_cockpit_badge %}
+<a href="{{ url_for('admin_mahnungen') }}" class="d-block page-card p-3 mb-4 text-decoration-none" style="border-left: 6px solid #a23f2d; border-radius: 0 22px 22px 0; color: var(--ink);">
+  <strong>🔔 {{ mahn_cockpit_badge }} Mahnung{{ 'en' if mahn_cockpit_badge != 1 else '' }} fällig</strong>
+  <span class="text-muted">— Mahntexte liegen fertig vor: prüfen, kopieren, senden →</span>
+</a>
+{% endif %}
 <div class="page-card cockpit-hero p-4 p-lg-5 mb-4">
   <div class="row g-4 align-items-center">
     <div class="col-lg-7">
