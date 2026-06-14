@@ -117,7 +117,7 @@ def main():
         "start_datum": heute.isoformat(),
     }), follow_redirects=True)
     report("Doppelvergabe wird abgelehnt",
-           "bereits an" in r.get_data(as_text=True))
+           "bereits belegt" in r.get_data(as_text=True))
     report("Trotz Versuch nur 1 aktiver Vorgang",
            len([v for v in portal.list_mietvorgaenge(fid) if not v["abgeschlossen"]]) == 1)
 

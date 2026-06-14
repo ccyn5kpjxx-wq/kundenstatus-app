@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Ersatzfahrzeug wählen{% endblock %}
+
+{% block content %}
+
+<div class="section-title mb-4">
+  <div>
+    <div class="badge-soft mb-3">Mietfahrzeuge · Ersatzfahrzeug</div>
+    <h1 class="mb-2">Ersatzfahrzeug wählen</h1>
+    <p class="mb-0">Reparaturzeitraum eingeben → freie Fahrzeuge je Klasse mit Preis ansehen → buchen. Die Buchung blockt das Fahrzeug für den Zeitraum.</p>
+  </div>
+  <a class="btn btn-soft" href="{{ url_for('admin_mietfahrzeuge') }}">← Zur Flotte</a>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <form method="get" action="{{ url_for('admin_ersatzfahrzeug') }}" class="row g-3 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label">Zu Reparatur-Auftrag (optional)</label>
+      <select name="auftrag_id" class="form-select">
+        <option value="">– reine Vermietung (ohne Auftrag) –</option>
+        {% for a in auftraege %}
+        <option value="{{ a['id'] }}" {% if a['id'] == auftrag_id %}selected{% endif %}>{{ a['kennzeichen'] or '?' }} · {{ a['kunde_name'] or a['fahrzeug'] or 'Auftrag' }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Bei verknüpftem Auftrag bekommt der Kunde im Vertrag den Status-QR-Code.</div>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Reparatur-Start</label>
+      <input type="date" name="start" class="form-control" value="{{ start or heute_iso }}" required>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Reparatur-Ende</label>
+      <input type="date" name="end" class="form-control" value="{{ end or '' }}">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Kunde (falls ohne Auftrag)</label>
+      <input type="text" name="kunde_name" class="form-control" value="{{ kunde_name or '' }}" placeholder="Name">
+    </div>
+    <div class="col-md-4">
+      <input type="text" name="kunde_telefon" class="form-control" value="{{ kunde_telefon or '' }}" placeholder="Telefon (für WhatsApp)">
+    </div>
+    <div class="col-md-4">
+      <input type="email" name="kunde_email" class="form-control" value="{{ kunde_email or '' }}" placeholder="E-Mail (für Vertragsversand)">
+    </div>
+    <div class="col-md-4">
+      <button type="submit" class="btn btn-brand w-100">Freie Fahrzeuge anzeigen</button>
+    </div>
+  </form>
+</div>
+
+{% if gesucht %}
+  {% if gruppen %}
+  <p class="text-muted mb-3">Freie Fahrzeuge im Zeitraum <strong>{{ start }}{% if end %} – {{ end }}{% endif %}</strong>, günstigste Klasse zuerst:</p>
+  {% for g in gruppen %}
+  <div class="mb-4">
+    <div class="d-flex align-items-center gap-2 mb-2">
+      <h2 class="h6 mb-0 text-uppercase text-muted" style="letter-spacing:.06em;">{{ g.klasse }}</h2>
+      {% if g.ab_preis_label %}<span class="badge badge-soft">ab {{ g.ab_preis_label }}/Tag</span>{% endif %}
+    </div>
+    <div class="row g-3">
+      {% for f in g.fahrzeuge %}
+      <div class="col-lg-4 col-md-6">
+        <div class="page-card p-3 h-100">
+          {% if f.titelbild %}
+          <img src="{{ url_for('admin_mietfahrzeug_bild', bild_id=f.titelbild.id) }}" alt="{{ f.kennzeichen }}"
+               style="width:100%; height:120px; object-fit:cover; border-radius:10px; margin-bottom:8px;">
+          {% else %}
+          <div class="d-flex align-items-center justify-content-center text-muted mb-2"
+               style="height:90px; border-radius:10px; border:1px dashed #cbb89b; background:#faf5ec;">📷 kein Foto</div>
+          {% endif %}
+          <div class="d-flex justify-content-between align-items-start gap-2">
+            <div>
+              <div class="fw-bold">{{ f.kennzeichen }}</div>
+              <div class="small text-muted">{{ f.bezeichnung or '—' }}{% if f.kraftstoff %} · {{ f.kraftstoff }}{% endif %}</div>
+            </div>
+            <div class="text-end">
+              <span class="badge text-bg-success">frei</span>
+              {% if f.tagessatz_label %}<div class="fw-bold mt-1">{{ f.tagessatz_label }}<span class="small text-muted">/Tag</span></div>{% endif %}
+            </div>
+          </div>
+          <form method="POST" action="{{ url_for('admin_ersatzfahrzeug_buchen') }}" class="mt-2">
+            {{ csrf_field()|safe }}
+            <input type="hidden" name="fahrzeug_id" value="{{ f.id }}">
+            <input type="hidden" name="start_datum" value="{{ start }}">
+            <input type="hidden" name="end_datum" value="{{ end }}">
+            <input type="hidden" name="auftrag_id" value="{{ auftrag_id or '' }}">
+            <input type="hidden" name="kunde_name" value="{{ kunde_name or '' }}">
+            <input type="hidden" name="kunde_telefon" value="{{ kunde_telefon or '' }}">
+            <input type="hidden" name="kunde_email" value="{{ kunde_email or '' }}">
+            <button type="submit" class="btn btn-brand btn-sm w-100">Buchen &amp; Vertrag</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="page-card p-4 text-muted">Im Zeitraum <strong>{{ start }}{% if end %} – {{ end }}{% endif %}</strong> ist kein Fahrzeug frei. Anderen Zeitraum wählen oder Flotte erweitern.</div>
+  {% endif %}
+{% else %}
+<div class="page-card p-4 text-muted">Bitte oben den Reparaturzeitraum eingeben und „Freie Fahrzeuge anzeigen" klicken.</div>
+{% endif %}
+
+{% endblock %}

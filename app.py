@@ -33676,6 +33676,56 @@ def mietfahrzeug_kennzahlen(fahrzeuge):
     return kennzahlen
 
 
+def mietfahrzeug_zeitraum_frei(fahrzeug_id, start, end, exclude_vorgang_id=None):
+    """True, wenn das Fahrzeug im Zeitraum [start, end] durch keinen offenen
+    Mietvorgang belegt ist (Überschneidung). Offene Enden blocken unbegrenzt."""
+    s = parse_date(start)
+    if not s:
+        return True  # ohne Startdatum keine Zeitraum-Aussage -> nicht blockieren
+    e = parse_date(end) or date.max
+    for v in list_mietvorgaenge(fahrzeug_id):
+        if v["abgeschlossen"]:
+            continue
+        if exclude_vorgang_id and v["id"] == int(exclude_vorgang_id):
+            continue
+        vs = v["start_obj"] or date.min
+        ve = v["end_obj"] or date.max
+        if s <= ve and vs <= e:  # Überschneidung
+            return False
+    return True
+
+
+def verfuegbare_mietfahrzeuge_nach_klasse(start, end):
+    """Im Zeitraum freie, aktive Fahrzeuge gruppiert nach Klasse, Klassen nach
+    Ab-Preis aufsteigend (höhere Klasse = höherer Preis weiter unten)."""
+    klassen_map = {}
+    for f in list_mietfahrzeuge(include_inactive=False):
+        if f["basis_status"] in ("wartung", "inaktiv"):
+            continue
+        if not mietfahrzeug_zeitraum_frei(f["id"], start, end):
+            continue
+        klassen_map.setdefault(clean_text(f.get("fahrzeugklasse")) or "Ohne Klasse", []).append(f)
+
+    def fahrzeug_preis(f):
+        try:
+            return float(f.get("tagessatz") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    gruppen = []
+    for klasse, fahrzeuge in klassen_map.items():
+        fahrzeuge.sort(key=fahrzeug_preis)
+        preise = [fahrzeug_preis(x) for x in fahrzeuge if fahrzeug_preis(x) > 0]
+        gruppen.append({
+            "klasse": klasse,
+            "fahrzeuge": fahrzeuge,
+            "ab_preis": min(preise) if preise else 0.0,
+            "ab_preis_label": tagessatz_label(min(preise)) if preise else "",
+        })
+    gruppen.sort(key=lambda g: g["ab_preis"])
+    return gruppen
+
+
 # ---------------------------------------------------------------------------
 # Mietvertrag (digitale Unterschrift, QR im Reparaturfall, Versand)
 # ENTWURF — Vertragstext vor Echteinsatz durch GF/Syndikus freigeben lassen.
@@ -34373,11 +34423,10 @@ def admin_mietfahrzeug_vermieten(fahrzeug_id):
     fahrzeug = get_mietfahrzeug(fahrzeug_id)
     if not fahrzeug:
         abort(404)
-    if fahrzeug["aktiver_vorgang"]:
+    if not mietfahrzeug_zeitraum_frei(fahrzeug_id, request.form.get("start_datum"), request.form.get("end_datum")):
         flash(
-            f"{fahrzeug['kennzeichen']} ist bereits an "
-            f"{fahrzeug['aktiver_vorgang']['kunde_name'] or 'einen Kunden'} vergeben. "
-            "Bitte zuerst zurücknehmen.",
+            f"{fahrzeug['kennzeichen']} ist im gewählten Zeitraum bereits belegt. "
+            "Bitte anderen Zeitraum oder anderes Fahrzeug wählen.",
             "warning",
         )
         return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{fahrzeug_id}")
@@ -34673,6 +34722,83 @@ def admin_mietvertrag_senden(vorgang_id):
     else:
         flash("Keine E-Mail/Handynummer hinterlegt — bitte den Vertrag herunterladen und dem Kunden aushändigen.", "info")
     return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+
+
+# --- Ersatzfahrzeug-Auswahl (Klassen + Preise + Verfügbarkeit) -------------
+
+
+@app.route("/admin/ersatzfahrzeug")
+@admin_required
+def admin_ersatzfahrzeug():
+    start = clean_text(request.args.get("start"))
+    end = clean_text(request.args.get("end"))
+    try:
+        auftrag_id = int(request.args.get("auftrag_id") or 0)
+    except (TypeError, ValueError):
+        auftrag_id = 0
+    auftrag = get_auftrag(auftrag_id) if auftrag_id else None
+    # Kundendaten aus Reparaturauftrag vorbelegen, sonst aus den Parametern
+    kunde_name = clean_text(request.args.get("kunde_name")) or (clean_text(auftrag.get("kunde_name")) if auftrag else "")
+    kunde_telefon = clean_text(request.args.get("kunde_telefon")) or (clean_text(auftrag.get("kontakt_telefon")) if auftrag else "")
+    kunde_email = clean_text(request.args.get("kunde_email")) or (clean_text(auftrag.get("kunde_email")) if auftrag else "")
+    gruppen = verfuegbare_mietfahrzeuge_nach_klasse(start, end) if start else []
+    auftraege_aktiv = [
+        a for a in list_auftraege()
+        if int(a.get("status") or 1) <= 4 and not a.get("angebotsphase")
+    ]
+    return render_template(
+        "ersatzfahrzeug_auswahl.html",
+        start=start, end=end, auftrag_id=auftrag_id, auftrag=auftrag,
+        kunde_name=kunde_name, kunde_telefon=kunde_telefon, kunde_email=kunde_email,
+        gruppen=gruppen, auftraege=auftraege_aktiv,
+        gesucht=bool(start), heute_iso=date.today().isoformat(),
+    )
+
+
+@app.route("/admin/ersatzfahrzeug/buchen", methods=["POST"])
+@admin_required
+def admin_ersatzfahrzeug_buchen():
+    try:
+        fahrzeug_id = int(request.form.get("fahrzeug_id") or 0)
+    except (TypeError, ValueError):
+        fahrzeug_id = 0
+    fahrzeug = get_mietfahrzeug(fahrzeug_id)
+    if not fahrzeug:
+        abort(404)
+    start = request.form.get("start_datum")
+    end = request.form.get("end_datum")
+    try:
+        auftrag_id = int(request.form.get("auftrag_id") or 0)
+    except (TypeError, ValueError):
+        auftrag_id = 0
+    auftrag = get_auftrag(auftrag_id) if auftrag_id else None
+    zurueck = url_for("admin_ersatzfahrzeug", start=clean_text(start), end=clean_text(end),
+                      auftrag_id=auftrag_id or None,
+                      kunde_name=clean_text(request.form.get("kunde_name")) or None,
+                      kunde_telefon=clean_text(request.form.get("kunde_telefon")) or None,
+                      kunde_email=clean_text(request.form.get("kunde_email")) or None)
+    if not mietfahrzeug_zeitraum_frei(fahrzeug_id, start, end):
+        flash(f"{fahrzeug['kennzeichen']} ist im Zeitraum nicht mehr frei — bitte ein anderes wählen.", "warning")
+        return redirect(zurueck)
+    kunde_name = clean_text(request.form.get("kunde_name")) or (clean_text(auftrag.get("kunde_name")) if auftrag else "")
+    kunde_telefon = clean_text(request.form.get("kunde_telefon")) or (clean_text(auftrag.get("kontakt_telefon")) if auftrag else "")
+    kunde_email = clean_text(request.form.get("kunde_email")) or (clean_text(auftrag.get("kunde_email")) if auftrag else "")
+    try:
+        vid = create_mietvorgang(
+            fahrzeug_id,
+            kunde_name=kunde_name,
+            kunde_telefon=kunde_telefon,
+            kunde_email=kunde_email,
+            auftrag_id=auftrag_id,
+            start_datum=start,
+            end_datum=end,
+            notiz="Ersatzfahrzeug" + (f" zu {clean_text(auftrag.get('kennzeichen'))}" if auftrag else ""),
+        )
+    except ValueError as exc:
+        flash(str(exc), "warning")
+        return redirect(zurueck)
+    flash(f"{fahrzeug['kennzeichen']} als Ersatzfahrzeug gebucht und blockiert. Jetzt Vertrag erstellen.", "success")
+    return redirect(url_for("admin_mietvertrag", vorgang_id=vid))
 
 
 # --- Zahlen / Umsatz-Ziel (Cockpit-Kachel) ---------------------------------
