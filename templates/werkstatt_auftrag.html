@@ -473,6 +473,18 @@
             <div class="wert">{{ auftrag['fin_nummer'] }}</div>
           </div>
           {% endif %}
+          {% if auftrag['baujahr'] %}
+          <div class="fakt">
+            <div class="label">Baujahr</div>
+            <div class="wert">{{ auftrag['baujahr'] }}</div>
+          </div>
+          {% endif %}
+          {% if auftrag['farbcode'] %}
+          <div class="fakt">
+            <div class="label">Farbcode</div>
+            <div class="wert">{{ auftrag['farbcode'] }}</div>
+          </div>
+          {% endif %}
           {% if auftrag['kilometerstand'] %}
           <div class="fakt">
             <div class="label">Kilometerstand</div>

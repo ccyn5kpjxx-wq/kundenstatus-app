@@ -8674,6 +8674,8 @@ def init_db():
     ensure_column(db, "auftraege", "versicherung_id", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "token", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kunde_email", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "baujahr", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "farbcode", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "analyse_text", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "fin_nummer", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kilometerstand", "TEXT DEFAULT ''")
@@ -37698,6 +37700,8 @@ def auftrag_detail(auftrag_id):
                 kilometerstand=?,
                 hsn_nummer=?,
                 tsn_nummer=?,
+                baujahr=?,
+                farbcode=?,
                 auftragsnummer=?,
                 bauteile_override=?,
                 kennzeichen=?,
@@ -37723,6 +37727,8 @@ def auftrag_detail(auftrag_id):
                 clean_text(form.get("kilometerstand")),
                 normalize_hsn(form.get("hsn_nummer")),
                 normalize_tsn(form.get("tsn_nummer")),
+                clean_text(form.get("baujahr")),
+                clean_text(form.get("farbcode")),
                 clean_text(form.get("auftragsnummer")),
                 clean_text(form.get("bauteile_override")),
                 clean_text(form.get("kennzeichen")).upper(),
