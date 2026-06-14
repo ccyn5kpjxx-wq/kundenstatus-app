@@ -1,0 +1,443 @@
+{% extends "base.html" %}
+{% block title %}Mietfahrzeuge{% endblock %}
+
+{% macro status_badge(status, label) %}
+  {% if status == 'verfuegbar' %}<span class="badge text-bg-success">{{ label }}</span>
+  {% elif status == 'vermietet' %}<span class="badge text-bg-warning">{{ label }}</span>
+  {% elif status == 'reserviert' %}<span class="badge text-bg-info">{{ label }}</span>
+  {% elif status == 'wartung' %}<span class="badge text-bg-secondary">{{ label }}</span>
+  {% else %}<span class="badge text-bg-light border">{{ label }}</span>{% endif %}
+{% endmacro %}
+
+{% block content %}
+
+<div class="section-title mb-4">
+  <div>
+    <div class="badge-soft mb-3">Fuhrpark · Vermietung</div>
+    <h1 class="mb-2">Mietfahrzeuge</h1>
+    <p class="mb-0">Eigene Miet- und Ersatzfahrzeuge: wo steht welches Auto, wer hat es bis wann, und welche Klasse ist frei, wenn ein Kunde ein gleichwertiges Fahrzeug braucht.</p>
+  </div>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <a class="btn btn-soft" href="#flotte">Flotte</a>
+    <a class="btn btn-soft" href="#belegung">Belegung</a>
+    <a class="btn btn-brand" href="#neu">+ Fahrzeug</a>
+  </div>
+</div>
+
+<!-- Kennzahlen -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3">
+    <div class="page-card metric-card metric-blue">
+      <div class="metric-label">Im Fuhrpark</div>
+      <div class="metric-value">{{ kennzahlen.gesamt }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="page-card metric-card metric-green">
+      <div class="metric-label">Verfügbar</div>
+      <div class="metric-value">{{ kennzahlen.verfuegbar }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="page-card metric-card metric-warm">
+      <div class="metric-label">Vermietet</div>
+      <div class="metric-value">{{ kennzahlen.vermietet }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="page-card metric-card metric-gold">
+      <div class="metric-label">Reserviert / Wartung</div>
+      <div class="metric-value">{{ kennzahlen.reserviert + kennzahlen.wartung }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- Belegungsplanung -->
+<div id="belegung" class="page-card p-4 mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h2 class="h5 mb-0">Aktuell unterwegs &amp; geplante Rückgaben</h2>
+    <span class="badge badge-soft">{{ belegung|length }} offene Vorgänge</span>
+  </div>
+  {% if belegung %}
+  <div class="table-shell">
+    <table class="table align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Fahrzeug</th>
+          <th>Kunde</th>
+          <th>Von</th>
+          <th>Geplante Rückgabe</th>
+          <th>Status</th>
+          <th class="text-end">Aktion</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in belegung %}
+        <tr {% if e.ueberfaellig %}class="table-danger"{% endif %}>
+          <td>
+            <a href="#fahrzeug-{{ e.fahrzeug.id }}" class="fw-bold text-decoration-none">{{ e.fahrzeug.kennzeichen }}</a>
+            <div class="small text-muted">{{ e.fahrzeug.bezeichnung or e.fahrzeug.fahrzeugklasse or '—' }}</div>
+          </td>
+          <td>
+            {{ e.kunde_name or '—' }}
+            {% if e.kunde_telefon %}<div class="small text-muted">{{ e.kunde_telefon }}</div>{% endif %}
+          </td>
+          <td>{{ e.start_label or '—' }}</td>
+          <td>
+            {% if e.end_label %}{{ e.end_label }}{% else %}<span class="text-muted">offen</span>{% endif %}
+            {% if e.ueberfaellig %}<div class="small text-danger fw-bold">überfällig</div>
+            {% elif e.tage_bis_rueckgabe is not none and e.phase == 'aktiv' %}<div class="small text-muted">noch {{ e.tage_bis_rueckgabe }} Tg.</div>{% endif %}
+          </td>
+          <td>{{ status_badge(e.phase if e.phase != 'aktiv' else 'vermietet', 'Reserviert' if e.phase == 'reserviert' else 'Unterwegs') }}</td>
+          <td class="text-end">
+            <form method="POST" action="{{ url_for('admin_mietvorgang_zurueck', vorgang_id=e.id) }}" class="d-inline">
+              {{ csrf_field()|safe }}
+              <button type="submit" class="btn btn-sm btn-brand" data-no-loading="true">Zurückgenommen</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-muted">Aktuell ist kein Fahrzeug vergeben — alle stehen bereit.</div>
+  {% endif %}
+</div>
+
+<!-- Neues Fahrzeug -->
+<details id="neu" class="page-card p-4 mb-4">
+  <summary class="h5 mb-0" style="cursor:pointer;">+ Neues Mietfahrzeug anlegen</summary>
+  <form method="POST" action="{{ url_for('admin_mietfahrzeug_neu') }}" class="row g-3 mt-1">
+    {{ csrf_field()|safe }}
+    <div class="col-md-3">
+      <label class="form-label">Kennzeichen *</label>
+      <input type="text" name="kennzeichen" class="form-control" placeholder="MOS-GK 100" style="text-transform:uppercase;" required>
+    </div>
+    <div class="col-md-5">
+      <label class="form-label">Fahrzeug / Modell</label>
+      <input type="text" name="bezeichnung" class="form-control" placeholder="VW Polo 1.0 TSI">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Fahrzeugklasse</label>
+      <select name="fahrzeugklasse" class="form-select">
+        <option value="">– wählen –</option>
+        {% for k in klassen %}<option value="{{ k }}">{{ k }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Farbe</label>
+      <input type="text" name="farbe" class="form-control" placeholder="Weiß">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Baujahr</label>
+      <input type="text" name="baujahr" class="form-control" placeholder="2023" inputmode="numeric">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Kraftstoff</label>
+      <input type="text" name="kraftstoff" class="form-control" placeholder="Benzin / Diesel / Elektro">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Tagessatz (€)</label>
+      <input type="text" name="tagessatz" class="form-control" placeholder="z. B. 39,00" inputmode="decimal">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">FIN (optional)</label>
+      <input type="text" name="fin_nummer" class="form-control" placeholder="WVWZZZ…" style="text-transform:uppercase;">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Standort</label>
+      <input type="text" name="standort" class="form-control" placeholder="Hof / Halle">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Grundzustand</label>
+      <select name="status" class="form-select">
+        {% for key, label in status_optionen.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-12">
+      <label class="form-label">Notiz</label>
+      <input type="text" name="notiz" class="form-control" placeholder="z. B. Winterreifen, kleiner Kratzer hinten rechts">
+    </div>
+    <div class="col-12">
+      <button type="submit" class="btn btn-brand">Fahrzeug anlegen</button>
+    </div>
+  </form>
+</details>
+
+<!-- Flotte nach Klasse -->
+<h2 id="flotte" class="h4 mb-3" style="font-family:'Space Grotesk',sans-serif;">Flotte nach Fahrzeugklasse</h2>
+
+{% if not gruppen %}
+<div class="page-card p-4 mb-4 text-muted">Noch keine Mietfahrzeuge angelegt. Oben unter „+ Neues Mietfahrzeug" das erste Fahrzeug eintragen.</div>
+{% endif %}
+
+{% for gruppe in gruppen %}
+<div class="mb-4">
+  <div class="d-flex align-items-center gap-2 mb-2">
+    <h3 class="h6 mb-0 text-uppercase text-muted" style="letter-spacing:.06em;">{{ gruppe.klasse }}</h3>
+    <span class="badge badge-soft">{{ gruppe.fahrzeuge|length }}</span>
+  </div>
+  <div class="row g-3">
+    {% for f in gruppe.fahrzeuge %}
+    <div class="col-lg-6" id="fahrzeug-{{ f.id }}">
+      <div class="page-card p-4 h-100 {% if not f.aktiv %}opacity-75{% endif %}">
+
+        <!-- Titelbild / Fotostrecke -->
+        {% if f.titelbild %}
+        <a href="{{ url_for('admin_mietfahrzeug_bild', bild_id=f.titelbild.id) }}" target="_blank" class="d-block mb-3">
+          <img src="{{ url_for('admin_mietfahrzeug_bild', bild_id=f.titelbild.id) }}" alt="{{ f.kennzeichen }}"
+               style="width:100%; height:180px; object-fit:cover; border-radius:14px; border:1px solid rgba(221,209,192,0.9);">
+        </a>
+        {% else %}
+        <div class="mb-3 d-flex align-items-center justify-content-center text-muted"
+             style="width:100%; height:120px; border-radius:14px; border:1px dashed #cbb89b; background:#faf5ec;">
+          <span>📷 Noch keine Fotos</span>
+        </div>
+        {% endif %}
+        {% if f.bilder|length > 1 %}
+        <div class="d-flex gap-2 flex-wrap mb-3">
+          {% for b in f.bilder %}
+          <a href="{{ url_for('admin_mietfahrzeug_bild', bild_id=b.id) }}" target="_blank">
+            <img src="{{ url_for('admin_mietfahrzeug_bild', bild_id=b.id) }}" alt="Foto"
+                 style="width:60px; height:46px; object-fit:cover; border-radius:8px; border:2px solid {% if b.ist_titelbild %}var(--brand){% else %}transparent{% endif %};">
+          </a>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+          <div>
+            <div class="h5 mb-1" style="font-family:'Space Grotesk',sans-serif;">{{ f.kennzeichen }}</div>
+            <div class="text-muted">{{ f.bezeichnung or '—' }}{% if f.farbe %} · {{ f.farbe }}{% endif %}{% if f.baujahr %} · {{ f.baujahr }}{% endif %}</div>
+          </div>
+          <div class="text-end">
+            {{ status_badge(f.effektiver_status, f.effektiver_status_label) }}
+            {% if f.tagessatz_label %}<div class="small text-muted mt-1">{{ f.tagessatz_label }}/Tag</div>{% endif %}
+          </div>
+        </div>
+
+        <div class="small text-muted mb-2">
+          {% if f.standort %}📍 {{ f.standort }}{% endif %}
+          {% if f.kraftstoff %} · {{ f.kraftstoff }}{% endif %}
+        </div>
+
+        {% if f.aktiver_vorgang %}
+        {% set v = f.aktiver_vorgang %}
+        <div class="border rounded-3 p-3 mb-2 {% if v.ueberfaellig %}border-danger bg-danger-subtle{% else %}bg-light{% endif %}">
+          <div class="fw-bold">Unterwegs bei {{ v.kunde_name or 'Kunde' }}</div>
+          <div class="small text-muted">
+            seit {{ v.start_label or '—' }}
+            {% if v.end_label %} · zurück geplant {{ v.end_label }}{% endif %}
+            {% if v.kunde_telefon %} · ☎ {{ v.kunde_telefon }}{% endif %}
+          </div>
+          {% if v.ueberfaellig %}<div class="small text-danger fw-bold mt-1">Rückgabe überfällig!</div>{% endif %}
+          {% if v.notiz %}<div class="small text-muted mt-1">{{ v.notiz }}</div>{% endif %}
+          <div class="d-flex gap-2 align-items-center flex-wrap mt-2">
+            <a class="btn btn-sm btn-soft" href="{{ url_for('admin_mietvertrag', vorgang_id=v.id) }}">
+              Mietvertrag
+              {% if v.vertrag_status == 'bestaetigt' %}<span class="badge text-bg-success ms-1">✓</span>
+              {% elif v.vertrag_status == 'unterschrieben' %}<span class="badge text-bg-warning ms-1">signiert</span>
+              {% elif v.vertrag_status == 'entwurf' %}<span class="badge text-bg-info ms-1">Entwurf</span>{% endif %}
+            </a>
+            {% if v.auftrag_id %}<span class="badge badge-soft" title="Reparaturfall — Status-QR im Vertrag">Reparaturfall</span>{% endif %}
+          </div>
+          <form method="POST" action="{{ url_for('admin_mietvorgang_zurueck', vorgang_id=v.id) }}" class="d-flex gap-2 align-items-end mt-2">
+            {{ csrf_field()|safe }}
+            <div>
+              <label class="form-label small mb-0">Rückgabe am</label>
+              <input type="date" name="rueckgabe_datum" class="form-control form-control-sm" value="{{ heute_iso }}">
+            </div>
+            <button type="submit" class="btn btn-sm btn-brand" data-no-loading="true">Zurücknehmen</button>
+          </form>
+        </div>
+        {% elif f.naechste_reservierung %}
+        {% set r = f.naechste_reservierung %}
+        <div class="border rounded-3 p-3 mb-2 bg-light">
+          <div class="fw-bold">Reserviert für {{ r.kunde_name or 'Kunde' }}</div>
+          <div class="small text-muted">ab {{ r.start_label }}{% if r.end_label %} bis {{ r.end_label }}{% endif %}</div>
+          <form method="POST" action="{{ url_for('admin_mietvorgang_loeschen', vorgang_id=r.id) }}" class="m-0 mt-2" onsubmit="return confirm('Reservierung löschen?')">
+            {{ csrf_field()|safe }}
+            <button type="submit" class="btn btn-sm btn-soft" data-no-loading="true">Reservierung entfernen</button>
+          </form>
+        </div>
+        {% endif %}
+
+        <!-- Vermieten -->
+        {% if not f.aktiver_vorgang and f.basis_status != 'inaktiv' %}
+        <details class="mb-2">
+          <summary class="btn btn-brand btn-sm" style="list-style:none;">Vergeben / vermieten</summary>
+          <form method="POST" action="{{ url_for('admin_mietfahrzeug_vermieten', fahrzeug_id=f.id) }}" class="row g-2 mt-1">
+            {{ csrf_field()|safe }}
+            <div class="col-7">
+              <label class="form-label small mb-0">Kunde *</label>
+              <input type="text" name="kunde_name" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-5">
+              <label class="form-label small mb-0">Telefon</label>
+              <input type="text" name="kunde_telefon" class="form-control form-control-sm" placeholder="für WhatsApp">
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-0">E-Mail (für Vertragsversand)</label>
+              <input type="email" name="kunde_email" class="form-control form-control-sm" placeholder="kunde@example.de">
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-0">Zu Werkstatt-Auftrag (optional)</label>
+              <select name="auftrag_id" class="form-select form-select-sm">
+                <option value="">– ohne Auftrag –</option>
+                {% for a in auftraege %}
+                <option value="{{ a['id'] }}">{{ a['kennzeichen'] or '?' }} · {{ a['kunde_name'] or a['fahrzeug'] or 'Auftrag' }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-0">Von</label>
+              <input type="date" name="start_datum" class="form-control form-control-sm" value="{{ heute_iso }}">
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-0">Geplante Rückgabe</label>
+              <input type="date" name="end_datum" class="form-control form-control-sm">
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-0">Notiz</label>
+              <input type="text" name="notiz" class="form-control form-control-sm" placeholder="z. B. Ersatzwagen während Lackierung">
+            </div>
+            <div class="col-12">
+              <button type="submit" class="btn btn-sm btn-brand">Fahrzeug vergeben</button>
+            </div>
+          </form>
+        </details>
+        {% endif %}
+
+        <!-- Fotos verwalten -->
+        <details class="mb-2">
+          <summary class="btn btn-soft btn-sm" style="list-style:none;">Fotos ({{ f.bilder|length }})</summary>
+          <form method="POST" action="{{ url_for('admin_mietfahrzeug_bilder_upload', fahrzeug_id=f.id) }}"
+                enctype="multipart/form-data" class="mt-2">
+            {{ csrf_field()|safe }}
+            <label class="form-label small mb-1">Bilder hinzufügen (mehrere möglich)</label>
+            <div class="d-flex gap-2">
+              <input type="file" name="bilder" class="form-control form-control-sm" accept="image/*" multiple required>
+              <button type="submit" class="btn btn-sm btn-brand" style="white-space:nowrap;">Hochladen</button>
+            </div>
+          </form>
+          {% if f.bilder %}
+          <div class="row g-2 mt-1">
+            {% for b in f.bilder %}
+            <div class="col-4">
+              <div class="border rounded-3 p-1 text-center">
+                <a href="{{ url_for('admin_mietfahrzeug_bild', bild_id=b.id) }}" target="_blank">
+                  <img src="{{ url_for('admin_mietfahrzeug_bild', bild_id=b.id) }}" alt="Foto"
+                       style="width:100%; height:60px; object-fit:cover; border-radius:6px;">
+                </a>
+                <div class="d-flex justify-content-center gap-1 mt-1">
+                  {% if not b.ist_titelbild %}
+                  <form method="POST" action="{{ url_for('admin_mietfahrzeug_bild_titelbild', bild_id=b.id) }}" class="m-0">
+                    {{ csrf_field()|safe }}
+                    <button type="submit" class="btn btn-sm btn-soft py-0 px-1" title="Als Titelbild" data-no-loading="true">★</button>
+                  </form>
+                  {% else %}
+                  <span class="small text-muted" title="Titelbild">★</span>
+                  {% endif %}
+                  <form method="POST" action="{{ url_for('admin_mietfahrzeug_bild_loeschen', bild_id=b.id) }}" class="m-0" onsubmit="return confirm('Bild löschen?')">
+                    {{ csrf_field()|safe }}
+                    <button type="submit" class="btn btn-sm btn-soft py-0 px-1" title="Löschen" data-no-loading="true">✕</button>
+                  </form>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </details>
+
+        <!-- Bearbeiten -->
+        <details>
+          <summary class="btn btn-soft btn-sm" style="list-style:none;">Bearbeiten</summary>
+          <form method="POST" action="{{ url_for('admin_mietfahrzeug_bearbeiten', fahrzeug_id=f.id) }}" class="row g-2 mt-1">
+            {{ csrf_field()|safe }}
+            <div class="col-6">
+              <label class="form-label small mb-0">Kennzeichen *</label>
+              <input type="text" name="kennzeichen" class="form-control form-control-sm" value="{{ f.kennzeichen }}" style="text-transform:uppercase;" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-0">Fahrzeug / Modell</label>
+              <input type="text" name="bezeichnung" class="form-control form-control-sm" value="{{ f.bezeichnung }}">
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-0">Fahrzeugklasse</label>
+              <select name="fahrzeugklasse" class="form-select form-select-sm">
+                <option value="">– wählen –</option>
+                {% for k in klassen %}<option value="{{ k }}" {% if k == f.fahrzeugklasse %}selected{% endif %}>{{ k }}</option>{% endfor %}
+                {% if f.fahrzeugklasse and f.fahrzeugklasse not in klassen %}<option value="{{ f.fahrzeugklasse }}" selected>{{ f.fahrzeugklasse }}</option>{% endif %}
+              </select>
+            </div>
+            <div class="col-3">
+              <label class="form-label small mb-0">Farbe</label>
+              <input type="text" name="farbe" class="form-control form-control-sm" value="{{ f.farbe }}">
+            </div>
+            <div class="col-3">
+              <label class="form-label small mb-0">Baujahr</label>
+              <input type="text" name="baujahr" class="form-control form-control-sm" value="{{ f.baujahr }}">
+            </div>
+            <div class="col-4">
+              <label class="form-label small mb-0">Kraftstoff</label>
+              <input type="text" name="kraftstoff" class="form-control form-control-sm" value="{{ f.kraftstoff }}">
+            </div>
+            <div class="col-4">
+              <label class="form-label small mb-0">Tagessatz (€)</label>
+              <input type="text" name="tagessatz" class="form-control form-control-sm" value="{{ '%.2f'|format(f.tagessatz or 0)|replace('.', ',') }}">
+            </div>
+            <div class="col-4">
+              <label class="form-label small mb-0">Standort</label>
+              <input type="text" name="standort" class="form-control form-control-sm" value="{{ f.standort }}">
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-0">Grundzustand</label>
+              <select name="status" class="form-select form-select-sm">
+                {% for key, label in status_optionen.items() %}<option value="{{ key }}" {% if key == f.basis_status %}selected{% endif %}>{{ label }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-0">Im Fuhrpark</label>
+              <select name="aktiv" class="form-select form-select-sm">
+                <option value="1" {% if f.aktiv %}selected{% endif %}>aktiv</option>
+                <option value="0" {% if not f.aktiv %}selected{% endif %}>ausgemustert</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-0">FIN</label>
+              <input type="text" name="fin_nummer" class="form-control form-control-sm" value="{{ f.fin_nummer }}" style="text-transform:uppercase;">
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-0">Notiz</label>
+              <input type="text" name="notiz" class="form-control form-control-sm" value="{{ f.notiz }}">
+            </div>
+            <div class="col-12 d-flex justify-content-between">
+              <button type="submit" class="btn btn-sm btn-brand">Speichern</button>
+            </div>
+          </form>
+          <form method="POST" action="{{ url_for('admin_mietfahrzeug_loeschen', fahrzeug_id=f.id) }}" class="mt-2" onsubmit="return confirm('Fahrzeug {{ f.kennzeichen }} und alle Vorgänge wirklich löschen?')">
+            {{ csrf_field()|safe }}
+            <button type="submit" class="btn btn-sm btn-outline-danger" data-no-loading="true">Fahrzeug löschen</button>
+          </form>
+        </details>
+
+        {% if f.historie %}
+        <details class="mt-2">
+          <summary class="small text-muted" style="cursor:pointer;">Verlauf ({{ f.historie|length }})</summary>
+          <ul class="small text-muted mb-0 mt-1">
+            {% for h in f.historie %}
+            <li>{{ h.kunde_name or 'Kunde' }}: {{ h.start_label or '?' }} – {{ h.rueckgabe_label or h.end_label or '?' }}</li>
+            {% endfor %}
+          </ul>
+        </details>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+
+{% endblock %}

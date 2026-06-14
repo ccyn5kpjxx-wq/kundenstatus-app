@@ -2648,6 +2648,7 @@ def inject_csrf_helpers():
         "admin_mitarbeiter_urlaub_count": admin_mitarbeiter_urlaub_count,
         "mahnungen_faellig_count": mahnungen_faellig_anzahl,
         "aufgaben_offen_heute_count": aufgaben_offen_heute_anzahl,
+        "mietfahrzeuge_unterwegs_count": mietfahrzeuge_unterwegs_anzahl,
         "analysis_loading_news": analysis_loading_news,
         "gt_motive_configured": bool(GT_MOTIVE_API_KEY or GT_MOTIVE_CLIENT_ID),
         "dat_api_status": dat_api_status_meta,
@@ -9203,6 +9204,73 @@ def init_db():
         )
         """
     )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mietfahrzeuge (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            kennzeichen    TEXT NOT NULL,
+            bezeichnung    TEXT DEFAULT '',
+            fahrzeugklasse TEXT DEFAULT '',
+            farbe          TEXT DEFAULT '',
+            fin_nummer     TEXT DEFAULT '',
+            baujahr        TEXT DEFAULT '',
+            kraftstoff     TEXT DEFAULT '',
+            tagessatz      REAL DEFAULT 0,
+            standort       TEXT DEFAULT '',
+            status         TEXT DEFAULT 'verfuegbar',
+            notiz          TEXT DEFAULT '',
+            aktiv          INTEGER DEFAULT 1,
+            erstellt_am    TEXT NOT NULL,
+            geaendert_am   TEXT NOT NULL
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mietvorgaenge (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            mietfahrzeug_id INTEGER NOT NULL,
+            auftrag_id      INTEGER DEFAULT 0,
+            kunde_name      TEXT DEFAULT '',
+            kunde_telefon   TEXT DEFAULT '',
+            start_datum     TEXT DEFAULT '',
+            end_datum       TEXT DEFAULT '',
+            rueckgabe_datum TEXT DEFAULT '',
+            status          TEXT DEFAULT 'aktiv',
+            notiz           TEXT DEFAULT '',
+            erstellt_am     TEXT NOT NULL,
+            geaendert_am    TEXT NOT NULL
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mietfahrzeug_bilder (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            mietfahrzeug_id INTEGER NOT NULL,
+            original_name   TEXT DEFAULT '',
+            stored_name     TEXT NOT NULL,
+            mime_type       TEXT DEFAULT '',
+            size            INTEGER DEFAULT 0,
+            ist_titelbild   INTEGER DEFAULT 0,
+            erstellt_am     TEXT NOT NULL
+        )
+        """
+    )
+    ensure_index(db, "idx_mietvorgaenge_fahrzeug", "mietvorgaenge", ("mietfahrzeug_id", "status"))
+    ensure_index(db, "idx_mietfahrzeug_bilder_fahrzeug", "mietfahrzeug_bilder", ("mietfahrzeug_id",))
+    # Mietvertrag-Felder am Mietvorgang (digitale Unterschrift, Versand, Kontaktweg)
+    ensure_column(db, "mietvorgaenge", "kunde_email", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "vertrag_status", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "vertrag_felder_json", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "vertrag_snapshot_json", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "unterschrift_stored", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "unterschrift_name", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "unterschrift_ort", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "unterschrift_am", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "vertrag_bestaetigt_am", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "vertrag_gesendet_am", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "vertrag_versandweg", "TEXT DEFAULT ''")
     ensure_index(db, "idx_lexware_rechnungen_voucher", "lexware_rechnungen", ("voucher_id",))
     ensure_index(
         db,
@@ -33107,6 +33175,947 @@ def aufgaben_datum_oder_heute(wert):
         return datetime.now().date()
 
 
+# ---------------------------------------------------------------------------
+# Mietfahrzeuge / Ersatzfahrzeuge — eigener Fuhrpark zum Vermieten
+# ---------------------------------------------------------------------------
+
+MIETFAHRZEUG_KLASSEN = [
+    "Kleinwagen",
+    "Kompaktklasse",
+    "Mittelklasse",
+    "Oberklasse",
+    "Kombi",
+    "SUV / Geländewagen",
+    "Transporter",
+    "Sonstige",
+]
+
+# Manuell setzbare Grundzustände. „vermietet" wird NICHT gespeichert, sondern
+# aus einem laufenden Mietvorgang abgeleitet (siehe hydrate_mietfahrzeug).
+MIETFAHRZEUG_BASIS_STATUS = {
+    "verfuegbar": "Verfügbar",
+    "wartung": "In Wartung",
+    "inaktiv": "Stillgelegt",
+}
+
+MIETFAHRZEUG_STATUS_LABEL = dict(MIETFAHRZEUG_BASIS_STATUS)
+MIETFAHRZEUG_STATUS_LABEL["vermietet"] = "Vermietet"
+MIETFAHRZEUG_STATUS_LABEL["reserviert"] = "Reserviert"
+
+
+def normalize_mietfahrzeug_status(value):
+    text = clean_text(value).lower()
+    return text if text in MIETFAHRZEUG_BASIS_STATUS else "verfuegbar"
+
+
+def parse_tagessatz(value):
+    raw = clean_text(value).replace("€", "").replace(",", ".").strip()
+    if not raw:
+        return 0.0
+    try:
+        return max(0.0, round(float(raw), 2))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def tagessatz_label(value):
+    try:
+        betrag = float(value or 0)
+    except (TypeError, ValueError):
+        betrag = 0.0
+    if betrag <= 0:
+        return ""
+    return f"{betrag:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def hydrate_mietvorgang(row):
+    if row is None:
+        return None
+    vorgang = dict(row)
+    start_obj = parse_date(vorgang.get("start_datum"))
+    end_obj = parse_date(vorgang.get("end_datum"))
+    rueck_obj = parse_date(vorgang.get("rueckgabe_datum"))
+    heute = date.today()
+    vorgang["start_obj"] = start_obj
+    vorgang["end_obj"] = end_obj
+    vorgang["rueckgabe_obj"] = rueck_obj
+    vorgang["start_label"] = start_obj.strftime(DATE_FMT) if start_obj else clean_text(vorgang.get("start_datum"))
+    vorgang["end_label"] = end_obj.strftime(DATE_FMT) if end_obj else clean_text(vorgang.get("end_datum"))
+    vorgang["rueckgabe_label"] = rueck_obj.strftime(DATE_FMT) if rueck_obj else ""
+    abgeschlossen = clean_text(vorgang.get("status")) == "zurueck" or bool(rueck_obj)
+    vorgang["abgeschlossen"] = abgeschlossen
+    if abgeschlossen:
+        vorgang["phase"] = "zurueck"
+    elif start_obj and start_obj > heute:
+        vorgang["phase"] = "reserviert"
+    else:
+        vorgang["phase"] = "aktiv"
+    if not abgeschlossen and end_obj:
+        vorgang["tage_bis_rueckgabe"] = (end_obj - heute).days
+        vorgang["ueberfaellig"] = end_obj < heute
+    else:
+        vorgang["tage_bis_rueckgabe"] = None
+        vorgang["ueberfaellig"] = False
+    return vorgang
+
+
+def list_mietvorgaenge(mietfahrzeug_id=None, only_open=False):
+    db = get_db()
+    try:
+        sql = "SELECT * FROM mietvorgaenge"
+        params = []
+        bedingungen = []
+        if mietfahrzeug_id is not None:
+            bedingungen.append("mietfahrzeug_id=?")
+            params.append(int(mietfahrzeug_id))
+        if only_open:
+            bedingungen.append("COALESCE(status,'') != 'zurueck' AND COALESCE(rueckgabe_datum,'')=''")
+        if bedingungen:
+            sql += " WHERE " + " AND ".join(bedingungen)
+        sql += " ORDER BY id DESC"
+        rows = db.execute(sql, params).fetchall()
+    finally:
+        db.close()
+    return [hydrate_mietvorgang(row) for row in rows]
+
+
+def get_mietvorgang(vorgang_id):
+    db = get_db()
+    try:
+        row = db.execute("SELECT * FROM mietvorgaenge WHERE id=?", (int(vorgang_id),)).fetchone()
+    finally:
+        db.close()
+    return hydrate_mietvorgang(row)
+
+
+def aktiver_mietvorgang(vorgaenge):
+    """Laufender Vorgang (heute unterwegs), sonst None."""
+    offen = [v for v in vorgaenge if not v["abgeschlossen"]]
+    laufend = [v for v in offen if v["phase"] == "aktiv"]
+    if laufend:
+        return sorted(laufend, key=lambda v: v["start_obj"] or date.min)[0]
+    return None
+
+
+def naechste_reservierung(vorgaenge):
+    reservierungen = [v for v in vorgaenge if not v["abgeschlossen"] and v["phase"] == "reserviert"]
+    if reservierungen:
+        return sorted(reservierungen, key=lambda v: v["start_obj"] or date.max)[0]
+    return None
+
+
+def hydrate_mietfahrzeug(row, vorgaenge=None, bilder=None):
+    if row is None:
+        return None
+    fahrzeug = dict(row)
+    fahrzeug["basis_status"] = normalize_mietfahrzeug_status(fahrzeug.get("status"))
+    fahrzeug["tagessatz_label"] = tagessatz_label(fahrzeug.get("tagessatz"))
+    bilder = bilder if bilder is not None else list_mietfahrzeug_bilder(fahrzeug["id"])
+    fahrzeug["bilder"] = bilder
+    fahrzeug["titelbild"] = next((b for b in bilder if b["ist_titelbild"]), bilder[0] if bilder else None)
+    vorgaenge = vorgaenge if vorgaenge is not None else list_mietvorgaenge(fahrzeug["id"])
+    fahrzeug["vorgaenge"] = vorgaenge
+    fahrzeug["historie"] = [v for v in vorgaenge if v["abgeschlossen"]]
+    laufend = aktiver_mietvorgang(vorgaenge)
+    reserviert = naechste_reservierung(vorgaenge)
+    fahrzeug["aktiver_vorgang"] = laufend
+    fahrzeug["naechste_reservierung"] = reserviert
+    if fahrzeug["basis_status"] == "inaktiv":
+        effektiv = "inaktiv"
+    elif laufend:
+        effektiv = "vermietet"
+    elif fahrzeug["basis_status"] == "wartung":
+        effektiv = "wartung"
+    elif reserviert:
+        effektiv = "reserviert"
+    else:
+        effektiv = "verfuegbar"
+    fahrzeug["effektiver_status"] = effektiv
+    fahrzeug["effektiver_status_label"] = MIETFAHRZEUG_STATUS_LABEL.get(effektiv, "Verfügbar")
+    fahrzeug["ist_verfuegbar"] = effektiv == "verfuegbar"
+    return fahrzeug
+
+
+def list_mietfahrzeuge(include_inactive=True):
+    db = get_db()
+    try:
+        if include_inactive:
+            rows = db.execute("SELECT * FROM mietfahrzeuge ORDER BY aktiv DESC, fahrzeugklasse ASC, kennzeichen ASC").fetchall()
+        else:
+            rows = db.execute("SELECT * FROM mietfahrzeuge WHERE aktiv=1 ORDER BY fahrzeugklasse ASC, kennzeichen ASC").fetchall()
+        vorgang_rows = db.execute("SELECT * FROM mietvorgaenge ORDER BY id DESC").fetchall()
+        bild_rows = db.execute(
+            "SELECT * FROM mietfahrzeug_bilder ORDER BY ist_titelbild DESC, id ASC"
+        ).fetchall()
+    finally:
+        db.close()
+    vorgaenge_by_fahrzeug = defaultdict(list)
+    for v in vorgang_rows:
+        vorgaenge_by_fahrzeug[v["mietfahrzeug_id"]].append(hydrate_mietvorgang(v))
+    bilder_by_fahrzeug = defaultdict(list)
+    for b in bild_rows:
+        bilder_by_fahrzeug[b["mietfahrzeug_id"]].append(dict(b))
+    return [
+        hydrate_mietfahrzeug(
+            row,
+            vorgaenge_by_fahrzeug.get(row["id"], []),
+            bilder_by_fahrzeug.get(row["id"], []),
+        )
+        for row in rows
+    ]
+
+
+def get_mietfahrzeug(fahrzeug_id):
+    db = get_db()
+    try:
+        row = db.execute("SELECT * FROM mietfahrzeuge WHERE id=?", (int(fahrzeug_id),)).fetchone()
+    finally:
+        db.close()
+    if row is None:
+        return None
+    return hydrate_mietfahrzeug(row)
+
+
+def list_mietfahrzeug_bilder(fahrzeug_id):
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT * FROM mietfahrzeug_bilder WHERE mietfahrzeug_id=? ORDER BY ist_titelbild DESC, id ASC",
+            (int(fahrzeug_id),),
+        ).fetchall()
+    finally:
+        db.close()
+    return [dict(r) for r in rows]
+
+
+def get_mietfahrzeug_bild(bild_id):
+    db = get_db()
+    try:
+        row = db.execute("SELECT * FROM mietfahrzeug_bilder WHERE id=?", (int(bild_id),)).fetchone()
+    finally:
+        db.close()
+    return dict(row) if row else None
+
+
+def save_mietfahrzeug_bilder(fahrzeug_id, files):
+    """Speichert hochgeladene Bilddateien zum Fahrzeug. Gibt die Anzahl zurück."""
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return 0
+    db = get_db()
+    try:
+        vorhandene = db.execute(
+            "SELECT COUNT(*) AS c FROM mietfahrzeug_bilder WHERE mietfahrzeug_id=?",
+            (int(fahrzeug_id),),
+        ).fetchone()["c"]
+        gespeichert = 0
+        for file in files or []:
+            if not file or not file.filename:
+                continue
+            original_name = secure_filename(file.filename)
+            if not original_name:
+                continue
+            suffix = pathlib.Path(original_name).suffix.lower()
+            if suffix not in IMAGE_EXTENSIONS:
+                continue
+            stored_name = f"{uuid.uuid4().hex}{suffix}"
+            target = UPLOAD_DIR / stored_name
+            try:
+                file.save(target)
+            except Exception:
+                continue
+            mime_type = file.mimetype or mimetypes.guess_type(original_name)[0] or "image/jpeg"
+            try:
+                size = target.stat().st_size
+            except OSError:
+                size = 0
+            ist_titelbild = 1 if (vorhandene == 0 and gespeichert == 0) else 0
+            db.execute(
+                """
+                INSERT INTO mietfahrzeug_bilder
+                (mietfahrzeug_id, original_name, stored_name, mime_type, size, ist_titelbild, erstellt_am)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (int(fahrzeug_id), original_name, stored_name, mime_type, size, ist_titelbild, now_str()),
+            )
+            gespeichert += 1
+        db.commit()
+        return gespeichert
+    finally:
+        db.close()
+
+
+def delete_mietfahrzeug_bild(bild_id):
+    bild = get_mietfahrzeug_bild(bild_id)
+    if not bild:
+        return
+    path = upload_file_path(bild)
+    if path:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    db = get_db()
+    try:
+        db.execute("DELETE FROM mietfahrzeug_bilder WHERE id=?", (int(bild_id),))
+        # Falls das Titelbild gelöscht wurde: das nächste Bild zum Titelbild machen
+        if bild.get("ist_titelbild"):
+            naechstes = db.execute(
+                "SELECT id FROM mietfahrzeug_bilder WHERE mietfahrzeug_id=? ORDER BY id ASC LIMIT 1",
+                (bild["mietfahrzeug_id"],),
+            ).fetchone()
+            if naechstes:
+                db.execute("UPDATE mietfahrzeug_bilder SET ist_titelbild=1 WHERE id=?", (naechstes["id"],))
+        db.commit()
+    finally:
+        db.close()
+
+
+def set_mietfahrzeug_titelbild(bild_id):
+    bild = get_mietfahrzeug_bild(bild_id)
+    if not bild:
+        return
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE mietfahrzeug_bilder SET ist_titelbild=0 WHERE mietfahrzeug_id=?",
+            (bild["mietfahrzeug_id"],),
+        )
+        db.execute("UPDATE mietfahrzeug_bilder SET ist_titelbild=1 WHERE id=?", (int(bild_id),))
+        db.commit()
+    finally:
+        db.close()
+
+
+def create_mietfahrzeug(**felder):
+    kennzeichen = clean_text(felder.get("kennzeichen")).upper()
+    if not kennzeichen:
+        raise ValueError("Bitte ein Kennzeichen angeben.")
+    jetzt = now_str()
+    db = get_db()
+    try:
+        cur = db.execute(
+            """
+            INSERT INTO mietfahrzeuge
+            (kennzeichen, bezeichnung, fahrzeugklasse, farbe, fin_nummer, baujahr,
+             kraftstoff, tagessatz, standort, status, notiz, aktiv, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            """,
+            (
+                kennzeichen,
+                clean_text(felder.get("bezeichnung")),
+                clean_text(felder.get("fahrzeugklasse")),
+                clean_text(felder.get("farbe")),
+                normalize_fin(felder.get("fin_nummer")),
+                clean_text(felder.get("baujahr")),
+                clean_text(felder.get("kraftstoff")),
+                parse_tagessatz(felder.get("tagessatz")),
+                clean_text(felder.get("standort")),
+                normalize_mietfahrzeug_status(felder.get("status")),
+                clean_text(felder.get("notiz")),
+                jetzt,
+                jetzt,
+            ),
+        )
+        db.commit()
+        return cur.lastrowid
+    finally:
+        db.close()
+
+
+def update_mietfahrzeug(fahrzeug_id, **felder):
+    kennzeichen = clean_text(felder.get("kennzeichen")).upper()
+    if not kennzeichen:
+        raise ValueError("Bitte ein Kennzeichen angeben.")
+    db = get_db()
+    try:
+        db.execute(
+            """
+            UPDATE mietfahrzeuge
+            SET kennzeichen=?, bezeichnung=?, fahrzeugklasse=?, farbe=?, fin_nummer=?,
+                baujahr=?, kraftstoff=?, tagessatz=?, standort=?, status=?, notiz=?, aktiv=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                kennzeichen,
+                clean_text(felder.get("bezeichnung")),
+                clean_text(felder.get("fahrzeugklasse")),
+                clean_text(felder.get("farbe")),
+                normalize_fin(felder.get("fin_nummer")),
+                clean_text(felder.get("baujahr")),
+                clean_text(felder.get("kraftstoff")),
+                parse_tagessatz(felder.get("tagessatz")),
+                clean_text(felder.get("standort")),
+                normalize_mietfahrzeug_status(felder.get("status")),
+                clean_text(felder.get("notiz")),
+                1 if felder.get("aktiv", True) else 0,
+                now_str(),
+                int(fahrzeug_id),
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _unlink_unterschrift(vorgang):
+    sig = clean_text((vorgang or {}).get("unterschrift_stored"))
+    if not sig:
+        return
+    pfad = upload_file_path({"stored_name": sig})
+    if pfad:
+        try:
+            pfad.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def delete_mietfahrzeug(fahrzeug_id):
+    # Bild- und Unterschrift-Dateien zuerst von der Platte entfernen
+    for bild in list_mietfahrzeug_bilder(fahrzeug_id):
+        path = upload_file_path(bild)
+        if path:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    for vorgang in list_mietvorgaenge(fahrzeug_id):
+        _unlink_unterschrift(vorgang)
+    db = get_db()
+    try:
+        db.execute("DELETE FROM mietfahrzeug_bilder WHERE mietfahrzeug_id=?", (int(fahrzeug_id),))
+        db.execute("DELETE FROM mietvorgaenge WHERE mietfahrzeug_id=?", (int(fahrzeug_id),))
+        db.execute("DELETE FROM mietfahrzeuge WHERE id=?", (int(fahrzeug_id),))
+        db.commit()
+    finally:
+        db.close()
+
+
+def create_mietvorgang(mietfahrzeug_id, **felder):
+    kunde = clean_text(felder.get("kunde_name"))
+    if not kunde:
+        raise ValueError("Bitte den Kundennamen angeben.")
+    start_iso = iso_date(felder.get("start_datum")) or date.today().isoformat()
+    start_label = datetime.strptime(start_iso, "%Y-%m-%d").strftime(DATE_FMT)
+    end_label = format_date(felder.get("end_datum"))
+    try:
+        auftrag_id = int(felder.get("auftrag_id") or 0)
+    except (TypeError, ValueError):
+        auftrag_id = 0
+    jetzt = now_str()
+    db = get_db()
+    try:
+        cur = db.execute(
+            """
+            INSERT INTO mietvorgaenge
+            (mietfahrzeug_id, auftrag_id, kunde_name, kunde_telefon, kunde_email, start_datum,
+             end_datum, rueckgabe_datum, status, notiz, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, '', 'aktiv', ?, ?, ?)
+            """,
+            (
+                int(mietfahrzeug_id),
+                auftrag_id,
+                kunde,
+                clean_text(felder.get("kunde_telefon")),
+                clean_text(felder.get("kunde_email")),
+                start_label,
+                end_label,
+                clean_text(felder.get("notiz")),
+                jetzt,
+                jetzt,
+            ),
+        )
+        db.commit()
+        return cur.lastrowid
+    finally:
+        db.close()
+
+
+def mietvorgang_zuruecknehmen(vorgang_id, rueckgabe_datum=None):
+    rueck_label = format_date(rueckgabe_datum) or date.today().strftime(DATE_FMT)
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE mietvorgaenge SET status='zurueck', rueckgabe_datum=?, geaendert_am=? WHERE id=?",
+            (rueck_label, now_str(), int(vorgang_id)),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def delete_mietvorgang(vorgang_id):
+    _unlink_unterschrift(get_mietvorgang(vorgang_id))
+    db = get_db()
+    try:
+        db.execute("DELETE FROM mietvorgaenge WHERE id=?", (int(vorgang_id),))
+        db.commit()
+    finally:
+        db.close()
+
+
+def mietfahrzeuge_unterwegs_anzahl():
+    """Aktuell vermietete Fahrzeuge (für das Nav-Badge)."""
+    try:
+        heute = date.today()
+        anzahl = 0
+        for v in list_mietvorgaenge(only_open=True):
+            if v["phase"] == "aktiv":
+                anzahl += 1
+        return anzahl
+    except Exception:
+        return 0
+
+
+def mietfahrzeug_kennzahlen(fahrzeuge):
+    kennzahlen = {"gesamt": 0, "verfuegbar": 0, "vermietet": 0, "wartung": 0, "reserviert": 0, "inaktiv": 0}
+    for f in fahrzeuge:
+        kennzahlen["gesamt"] += 1
+        kennzahlen[f["effektiver_status"]] = kennzahlen.get(f["effektiver_status"], 0) + 1
+    return kennzahlen
+
+
+# ---------------------------------------------------------------------------
+# Mietvertrag (digitale Unterschrift, QR im Reparaturfall, Versand)
+# ENTWURF — Vertragstext vor Echteinsatz durch GF/Syndikus freigeben lassen.
+# ---------------------------------------------------------------------------
+
+MIETVERTRAG_VERMIETER_NAME = "Gärtner Karosserie & Lack GmbH"
+MIETVERTRAG_VERMIETER_ADRESSE = "Binauer Höhe 4, 74821 Mosbach-Lohrbach"
+
+MIETVERTRAG_FELDER = [
+    {"name": "kunde_adresse", "label": "Anschrift des Mieters", "typ": "text", "default": ""},
+    {"name": "geburtsdatum", "label": "Geburtsdatum des Mieters", "typ": "datum", "default": ""},
+    {"name": "ausweis_nr", "label": "Personalausweis-/Reisepass-Nr.", "typ": "text", "default": ""},
+    {"name": "fuehrerschein_nr", "label": "Führerschein-Nummer", "typ": "text", "default": ""},
+    {"name": "fuehrerschein_klasse", "label": "Führerscheinklasse", "typ": "text", "default": "B"},
+    {"name": "fuehrerschein_ausstellungsdatum", "label": "Führerschein ausgestellt am", "typ": "datum", "default": ""},
+    {"name": "fuehrerschein_behoerde", "label": "ausstellende Behörde", "typ": "text", "default": ""},
+    {"name": "mindestalter", "label": "Mindestalter Fahrer (Jahre)", "typ": "zahl", "default": "21"},
+    {"name": "mindestbesitzdauer_monate", "label": "Mindestbesitzdauer FS (Monate)", "typ": "zahl", "default": "12"},
+    {"name": "zugelassene_fahrer", "label": "Zusätzlich zugelassene Fahrer", "typ": "text", "default": "keine; nur der Mieter"},
+    {"name": "erstzulassung", "label": "Erstzulassung des Fahrzeugs", "typ": "text", "default": ""},
+    {"name": "km_stand_uebergabe", "label": "Kilometerstand bei Übergabe", "typ": "zahl", "default": ""},
+    {"name": "tankfuellung_uebergabe", "label": "Tankfüllung bei Übergabe", "typ": "text", "default": "voll"},
+    {"name": "mietpreis_tag", "label": "Mietpreis pro Tag (brutto, EUR)", "typ": "euro", "default": ""},
+    {"name": "km_limit", "label": "Freikilometer pro Tag", "typ": "zahl", "default": "150"},
+    {"name": "mehrkm_preis", "label": "Preis je Mehrkilometer (EUR)", "typ": "euro", "default": "0,25"},
+    {"name": "kaution_euro", "label": "Kaution (EUR)", "typ": "euro", "default": "500,00"},
+    {"name": "selbstbeteiligung_euro", "label": "Selbstbeteiligung Vollkasko (EUR)", "typ": "euro", "default": "1.000,00"},
+    {"name": "selbstbeteiligung_teilkasko_euro", "label": "Selbstbeteiligung Teilkasko (EUR)", "typ": "euro", "default": "500,00"},
+    {"name": "zahlungsweise", "label": "Zahlungsweise", "typ": "text", "default": "Überweisung / EC-Karte"},
+    {"name": "reinigungspauschale_euro", "label": "Reinigungspauschale (EUR)", "typ": "euro", "default": "50,00"},
+    {"name": "rauchpauschale_euro", "label": "Pauschale Rauchverbot (EUR)", "typ": "euro", "default": "100,00"},
+    {"name": "tank_nachfuell_pauschale_euro", "label": "Betankungszuschlag je Liter (EUR)", "typ": "euro", "default": "2,50"},
+    {"name": "bearbeitungsgebuehr_owi_euro", "label": "Bearbeitungsgebühr je Bußgeld (EUR)", "typ": "euro", "default": "25,00"},
+    {"name": "verspaetungspauschale_euro", "label": "Zuschlag je Std. Verspätung (EUR)", "typ": "euro", "default": "15,00"},
+    {"name": "uebergabeort", "label": "Übergabe-/Rückgabeort", "typ": "text", "default": "Betriebsgelände des Vermieters, 74821 Mosbach-Lohrbach"},
+    {"name": "anlass_reparatur", "label": "Anlass (Reparaturauftrag / Kennzeichen)", "typ": "text", "default": ""},
+    {"name": "abrechnung_versicherung", "label": "Abrechnung mit gegnerischer Versicherung", "typ": "text", "default": "nein, Mieter zahlt selbst"},
+    {"name": "auslandsfahrt_erlaubt", "label": "Auslandsfahrten erlaubt", "typ": "text", "default": "nein"},
+]
+
+MIETVERTRAG_ABSCHNITTE = [
+    {"nummer": "Präambel", "titel": "Vertragsgegenstand und Anlass", "text": (
+        "Dieser Mietvertrag wird zwischen dem nachstehend genannten Vermieter und dem Mieter über die entgeltliche "
+        "Überlassung eines Kraftfahrzeugs geschlossen. Das Fahrzeug wird als Ersatz-/Mietfahrzeug überlassen, Anlass "
+        "der Anmietung: {anlass_reparatur}. Die Abrechnung der Mietwagenkosten mit der gegnerischen bzw. eintritts"
+        "pflichtigen Versicherung ist vereinbart: {abrechnung_versicherung}. Eine etwaige Abtretung von Erstattungs"
+        "ansprüchen an den Vermieter bedarf einer gesonderten schriftlichen Vereinbarung; unabhängig davon bleibt der "
+        "Mieter dem Vermieter gegenüber zur Zahlung des Mietzinses verpflichtet.")},
+    {"nummer": "§ 1", "titel": "Vertragsparteien", "text": (
+        "Vermieter: {vermieter_name}, {vermieter_adresse} (im Folgenden \"Vermieter\").\n"
+        "Mieter: {kunde_name}, {kunde_adresse}, Telefon: {kunde_telefon}, Geburtsdatum: {geburtsdatum}, "
+        "Ausweis-/Pass-Nr.: {ausweis_nr}, Führerschein-Nr.: {fuehrerschein_nr}, Klasse: {fuehrerschein_klasse}, "
+        "ausgestellt am {fuehrerschein_ausstellungsdatum} durch {fuehrerschein_behoerde} (im Folgenden \"Mieter\").\n"
+        "Der Mieter versichert, dass die vorstehenden Angaben zutreffend sind. Identität und Fahrerlaubnis wurden bei "
+        "Vertragsschluss durch Vorlage des amtlichen Lichtbildausweises und des Führerscheins im Original geprüft.")},
+    {"nummer": "§ 2", "titel": "Mietgegenstand", "text": (
+        "Vermietet wird folgendes Fahrzeug: {fahrzeug_bezeichnung}, amtliches Kennzeichen {kennzeichen}, "
+        "Fahrzeug-Identifizierungsnummer (FIN) {fin}, Erstzulassung {erstzulassung}. Kilometerstand bei Übergabe: "
+        "{km_stand_uebergabe} km, Tankfüllung bei Übergabe: {tankfuellung_uebergabe}.\n"
+        "Fahrzeugschein/Zulassungsbescheinigung Teil I verbleibt im Fahrzeug. Zubehör (Warndreieck, Warnweste, "
+        "Verbandkasten, Reserverad bzw. Reifenreparaturset) ist vorhanden. Der Zustand des Fahrzeugs bei Übergabe "
+        "wird in einem gesonderten Übergabeprotokoll festgehalten, das Bestandteil dieses Vertrages ist.")},
+    {"nummer": "§ 3", "titel": "Mietzeit, Verlängerung und Rückgabe", "text": (
+        "Die Mietzeit beginnt am {start_datum} und endet am {end_datum}. Übergabe- und Rückgabeort ist: "
+        "{uebergabeort}.\nAbgerechnet wird je angefangene 24 Stunden als ein Miettag. Eine Verlängerung der Mietzeit "
+        "bedarf der vorherigen Zustimmung des Vermieters in Textform. Wird das Fahrzeug ohne vereinbarte Verlängerung "
+        "nicht rechtzeitig zurückgegeben, schuldet der Mieter für jede angefangene Stunde der verspäteten Rückgabe "
+        "einen Zuschlag von {verspaetungspauschale_euro} EUR, längstens bis zur Höhe eines weiteren Tagessatzes je "
+        "angefangenem Tag; weitergehende Schadensersatzansprüche bleiben unberührt. Bei Rückgabe wird ein Rückgabe"
+        "protokoll mit Kilometerstand, Tankfüllung und Schadensaufnahme erstellt.")},
+    {"nummer": "§ 4", "titel": "Mietpreis und Zahlung", "text": (
+        "Der Mietpreis beträgt {tagessatz} EUR pro Tag (brutto, inkl. gesetzlicher Umsatzsteuer). Im Mietpreis "
+        "enthalten sind {km_limit} Freikilometer je Miettag sowie Wartung und Verschleiß im Rahmen des bestimmungs"
+        "gemäßen Gebrauchs. Jeder über die Freikilometer hinaus gefahrene Kilometer wird mit {mehrkm_preis} EUR "
+        "(brutto) berechnet.\nNicht im Mietpreis enthalten sind insbesondere Kraftstoff, AdBlue, Maut- und Parkgebühren "
+        "sowie etwaige Bußgelder; diese trägt der Mieter. Die Zahlung erfolgt per {zahlungsweise}. Der Mietpreis ist "
+        "mit Rückgabe des Fahrzeugs zur Zahlung fällig, soweit nicht Vorauszahlung vereinbart ist.")},
+    {"nummer": "§ 5", "titel": "Kaution / Sicherheitsleistung", "text": (
+        "Der Mieter hinterlegt vor Übergabe eine Kaution in Höhe von {kaution_euro} EUR. Die Kaution dient der "
+        "Absicherung der Ansprüche des Vermieters aus diesem Vertrag, insbesondere für die vereinbarte Selbst"
+        "beteiligung, fehlenden Kraftstoff, Reinigungskosten, Bußgeld-Bearbeitungsgebühren sowie sonstige berechtigte "
+        "Forderungen. Die Kaution wird nach beanstandungsfreier Rückgabe unverzüglich zurückerstattet, abzüglich "
+        "berechtigter Abzüge. Sind im Zeitpunkt der Rückgabe Ansprüche noch nicht abschließend bezifferbar (z. B. noch "
+        "nicht eingegangene Bußgeldbescheide), darf der Vermieter einen angemessenen Teil bis zur Klärung einbehalten.")},
+    {"nummer": "§ 6", "titel": "Pflichten des Mieters und zulässige Nutzung", "text": (
+        "Der Mieter verpflichtet sich, das Fahrzeug schonend, verkehrssicher und ausschließlich zu privaten Zwecken im "
+        "öffentlichen Straßenverkehr zu nutzen sowie die StVO und die Bedienungs-/Wartungshinweise (insbesondere Öl-, "
+        "Kühlwasser- und Reifendruckkontrolle) zu beachten.\nUntersagt sind insbesondere: die Überlassung an nicht "
+        "eingetragene Fahrer; die Weitervermietung oder gewerbliche Nutzung; die Teilnahme an motorsportlichen "
+        "Veranstaltungen, Fahrsicherheits-/Renntrainings sowie Gelände-/Testfahrten; der Transport gefährlicher Güter "
+        "und die entgeltliche Beförderung; das Rauchen im Fahrzeug (Pauschale {rauchpauschale_euro} EUR); Auslands"
+        "fahrten ohne vorherige Zustimmung in Textform (erlaubt: {auslandsfahrt_erlaubt}). Eine über den vertrags"
+        "gemäßen Gebrauch hinausgehende Verschmutzung berechtigt zur Berechnung einer Reinigungspauschale von "
+        "{reinigungspauschale_euro} EUR; dem Mieter bleibt der Nachweis geringerer Kosten vorbehalten.")},
+    {"nummer": "§ 7", "titel": "Berechtigte Fahrer", "text": (
+        "Das Fahrzeug darf nur vom Mieter selbst sowie von ausdrücklich eingetragenen weiteren Fahrern geführt werden. "
+        "Zusätzlich zugelassene Fahrer: {zugelassene_fahrer}.\nJeder Fahrer muss eine gültige, im Inland anerkannte "
+        "Fahrerlaubnis der erforderlichen Klasse besitzen, das Mindestalter von {mindestalter} Jahren erreicht haben "
+        "und die Fahrerlaubnis seit mindestens {mindestbesitzdauer_monate} Monaten besitzen. Der Mieter haftet für das "
+        "Verhalten der von ihm zugelassenen Fahrer wie für eigenes Verhalten.")},
+    {"nummer": "§ 8", "titel": "Übergabe und Rückgabe des Fahrzeugs", "text": (
+        "Das Fahrzeug wird gereinigt und vollgetankt übergeben und ist im selben Zustand zurückzugeben (Tankregelung "
+        "voll/voll). Wird das Fahrzeug nicht vollgetankt zurückgegeben, berechnet der Vermieter den fehlenden Kraftstoff "
+        "zuzüglich eines Betankungszuschlags von {tank_nachfuell_pauschale_euro} EUR je Liter.\nDer Mieter hat den "
+        "Zustand bei Übergabe zu prüfen und Mängel/Vorschäden unverzüglich im Übergabeprotokoll zu vermerken. "
+        "Unterbleibt eine Beanstandung, gilt das Fahrzeug als im protokollierten Zustand mangelfrei übernommen.")},
+    {"nummer": "§ 9", "titel": "Haftung des Mieters und Selbstbeteiligung", "text": (
+        "Der Mieter haftet grundsätzlich für alle während der Mietzeit am Fahrzeug entstehenden Schäden sowie für den "
+        "Verlust des Fahrzeugs, soweit nicht die nachstehende Haftungsreduzierung eingreift.\nGegen das im Mietpreis "
+        "enthaltene bzw. gesondert vereinbarte Entgelt wird die Haftung des Mieters für Schäden am Mietfahrzeug nach "
+        "Art einer Vollkaskoversicherung auf eine Selbstbeteiligung von {selbstbeteiligung_euro} EUR je Schadenereignis "
+        "reduziert. Für Schäden, die typischerweise einer Teilkaskoversicherung unterfallen (insbesondere Glasbruch, "
+        "Diebstahl, Brand, Wildunfall), beträgt die Selbstbeteiligung {selbstbeteiligung_teilkasko_euro} EUR je "
+        "Schadenereignis.\nBei grob fahrlässiger Herbeiführung des Schadens ist der Vermieter berechtigt, die Haftungs"
+        "befreiung in einem der Schwere des Verschuldens entsprechenden Verhältnis zu kürzen (Grundgedanke des § 81 "
+        "Abs. 2 VVG). Bei vorsätzlicher Herbeiführung haftet der Mieter in voller Höhe.")},
+    {"nummer": "§ 10", "titel": "Wegfall der Haftungsreduzierung; Bußgelder", "text": (
+        "Die Haftungsreduzierung nach § 9 entfällt und der Mieter haftet voll, soweit ein von ihm zu vertretendes Fehl"
+        "verhalten den Schaden verursacht hat, insbesondere bei Vorsatz, bei Einfluss von Alkohol oder berauschenden "
+        "Mitteln, durch einen nicht eingetragenen Fahrer, durch vertragswidrige Nutzung oder durch unerlaubtes Entfernen "
+        "vom Unfallort. Bei grober Fahrlässigkeit gilt die anteilige Kürzung nach § 9, nicht der vollständige Wegfall.\n"
+        "Sämtliche während der Mietzeit verursachten Bußgelder, Verwarnungs- und Verfahrenskosten trägt der jeweilige "
+        "Fahrer. Für den Bearbeitungsaufwand erhebt der Vermieter je Vorgang eine Bearbeitungsgebühr von "
+        "{bearbeitungsgebuehr_owi_euro} EUR; der Nachweis geringeren Aufwands bleibt vorbehalten.")},
+    {"nummer": "§ 11", "titel": "Versicherung", "text": (
+        "Das Fahrzeug ist mit einer gesetzlichen Kfz-Haftpflichtversicherung ausgestattet. Ein Kaskoschutz für das "
+        "Mietfahrzeug besteht ausschließlich in Form der vertraglich vereinbarten Haftungsreduzierung nach § 9 und "
+        "nicht als eigene Versicherung des Mieters.\nDer Mieter ist verpflichtet, im Schadenfall sämtliche Obliegen"
+        "heiten zu erfüllen, insbesondere die unverzügliche Meldung, die Hinzuziehung der Polizei bei Personen-, Wild- "
+        "und größeren Sachschäden, die Erstellung eines Unfallberichts und den Verzicht auf ein Schuldanerkenntnis.")},
+    {"nummer": "§ 12", "titel": "Verhalten bei Unfall, Panne oder Diebstahl", "text": (
+        "Bei einem Unfall, einer Panne, einem Diebstahl oder einer sonstigen Beschädigung hat der Mieter den Vermieter "
+        "unverzüglich zu benachrichtigen. Bei Unfall und Diebstahl ist stets die Polizei hinzuzuziehen, auch bei "
+        "augenscheinlich geringfügigen Schäden. Der Mieter hat den Unfall vollständig aufzunehmen (Beteiligte, Zeugen, "
+        "Kennzeichen, Hergang, Skizze), darf kein Schuldanerkenntnis abgeben und hat das Fahrzeug gegen weitere Schäden "
+        "zu sichern. Reparaturaufträge an Dritte darf der Mieter nur mit vorheriger Zustimmung des Vermieters erteilen.")},
+    {"nummer": "§ 13", "titel": "Haftung des Vermieters", "text": (
+        "Der Vermieter haftet unbeschränkt für Schäden aus der Verletzung des Lebens, des Körpers oder der Gesundheit "
+        "sowie für Schäden, die auf Vorsatz oder grober Fahrlässigkeit beruhen. Bei einfacher Fahrlässigkeit haftet der "
+        "Vermieter nur bei Verletzung einer wesentlichen Vertragspflicht (Kardinalpflicht), begrenzt auf den vertrags"
+        "typischen, vorhersehbaren Schaden. Eine darüber hinausgehende Haftung ist ausgeschlossen. Zwingende gesetzliche "
+        "Haftungsregelungen, insbesondere nach dem Produkthaftungsgesetz, bleiben unberührt.")},
+    {"nummer": "§ 14", "titel": "Kündigung und vorzeitige Beendigung", "text": (
+        "Der Vertrag endet mit Ablauf der vereinbarten Mietzeit. Der Vermieter ist zur außerordentlichen Kündigung aus "
+        "wichtigem Grund und zur sofortigen Rücknahme des Fahrzeugs berechtigt, insbesondere bei erheblichem Zahlungs"
+        "verzug, vertragswidriger Nutzung, unrichtigen Angaben des Mieters oder sonstiger schwerwiegender Vertrags"
+        "verletzung. Das Kündigungsrecht des Mieters aus wichtigem Grund bleibt unberührt. Bei berechtigter "
+        "außerordentlicher Kündigung bleibt der Anspruch auf den bis zur Rückgabe entstandenen Mietzins bestehen.")},
+    {"nummer": "§ 15", "titel": "Datenschutz", "text": (
+        "Der Vermieter verarbeitet die personenbezogenen Daten des Mieters (insbesondere Identitäts-, Führerschein-, "
+        "Kontakt-, Zahlungs- und Schadensdaten) zum Zweck der Durchführung und Abwicklung dieses Mietvertrags. "
+        "Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung) sowie, soweit gesetzliche Pflichten "
+        "betroffen sind, Art. 6 Abs. 1 lit. c DSGVO. Eine Weitergabe erfolgt nur, soweit zur Vertragsabwicklung oder zur "
+        "Erfüllung gesetzlicher Pflichten erforderlich, insbesondere an die Kfz-Versicherung sowie an Behörden im Rahmen "
+        "von Halterauskünften. Die Daten werden für die Dauer der gesetzlichen Aufbewahrungsfristen gespeichert. Dem "
+        "Mieter stehen die Rechte auf Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit und "
+        "Widerspruch sowie ein Beschwerderecht bei der Aufsichtsbehörde zu.")},
+    {"nummer": "§ 16", "titel": "Schlussbestimmungen", "text": (
+        "Änderungen und Ergänzungen dieses Vertrags bedürfen der Textform. Sollte eine Bestimmung unwirksam sein oder "
+        "werden, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt; an die Stelle der unwirksamen Bestimmung "
+        "tritt die gesetzliche Regelung. Es gilt das Recht der Bundesrepublik Deutschland. Erfüllungsort ist der Sitz "
+        "des Vermieters. Ein Gerichtsstand wird nur vereinbart, soweit der Mieter Kaufmann, juristische Person des "
+        "öffentlichen Rechts oder öffentlich-rechtliches Sondervermögen ist oder keinen allgemeinen Gerichtsstand im "
+        "Inland hat; in diesem Fall ist Gerichtsstand der Sitz des Vermieters.")},
+]
+
+MIETVERTRAG_STATUS_LABEL = {
+    "": "Kein Vertrag",
+    "entwurf": "Entwurf gespeichert",
+    "unterschrieben": "Unterschrieben",
+    "bestaetigt": "Bestätigt / abgeschlossen",
+}
+
+
+def mietvertrag_felder_defaults():
+    return {f["name"]: f["default"] for f in MIETVERTRAG_FELDER}
+
+
+def mietvertrag_felder_werte(vorgang, fahrzeug=None):
+    werte = mietvertrag_felder_defaults()
+    gespeichert = {}
+    roh = clean_text((vorgang or {}).get("vertrag_felder_json"))
+    if roh:
+        try:
+            data = json.loads(roh)
+            if isinstance(data, dict):
+                gespeichert = {k: clean_text(v) for k, v in data.items()}
+        except (ValueError, TypeError):
+            gespeichert = {}
+    werte.update({k: v for k, v in gespeichert.items() if k in werte})
+    # Mietpreis pro Tag aus dem Fahrzeug vorbelegen, wenn nicht gesetzt
+    if not werte.get("mietpreis_tag") and fahrzeug:
+        werte["mietpreis_tag"] = tagessatz_label(fahrzeug.get("tagessatz")).replace(" €", "")
+    return werte
+
+
+def mietvertrag_kontext(vorgang, fahrzeug, auftrag=None):
+    werte = mietvertrag_felder_werte(vorgang, fahrzeug)
+    tagessatz = werte.get("mietpreis_tag") or tagessatz_label((fahrzeug or {}).get("tagessatz")).replace(" €", "") or "—"
+    kontext = {
+        "vermieter_name": MIETVERTRAG_VERMIETER_NAME,
+        "vermieter_adresse": MIETVERTRAG_VERMIETER_ADRESSE,
+        "kunde_name": clean_text((vorgang or {}).get("kunde_name")) or "—",
+        "kunde_telefon": clean_text((vorgang or {}).get("kunde_telefon")) or "—",
+        "fahrzeug_bezeichnung": clean_text((fahrzeug or {}).get("bezeichnung")) or clean_text((fahrzeug or {}).get("kennzeichen")) or "—",
+        "kennzeichen": clean_text((fahrzeug or {}).get("kennzeichen")) or "—",
+        "fin": clean_text((fahrzeug or {}).get("fin_nummer")) or "—",
+        "start_datum": clean_text((vorgang or {}).get("start_label")) or clean_text((vorgang or {}).get("start_datum")) or "—",
+        "end_datum": clean_text((vorgang or {}).get("end_label")) or clean_text((vorgang or {}).get("end_datum")) or "—",
+        "tagessatz": tagessatz,
+    }
+    for name, wert in werte.items():
+        kontext[name] = clean_text(wert) or "—"
+    return kontext
+
+
+def mietvertrag_fill(text, kontext):
+    out = clean_text(text)
+    for key, value in kontext.items():
+        out = out.replace("{" + key + "}", str(value))
+    return out
+
+
+def mietvertrag_abschnitte_gefuellt(kontext):
+    return [
+        {"nummer": a["nummer"], "titel": a["titel"], "text": mietvertrag_fill(a["text"], kontext)}
+        for a in MIETVERTRAG_ABSCHNITTE
+    ]
+
+
+def mietvertrag_auftrag(vorgang):
+    """Verknüpfter Reparatur-Auftrag (Reparaturfall) oder None bei reiner Vermietung."""
+    try:
+        auftrag_id = int((vorgang or {}).get("auftrag_id") or 0)
+    except (TypeError, ValueError):
+        auftrag_id = 0
+    if auftrag_id <= 0:
+        return None
+    return get_auftrag(auftrag_id)
+
+
+def mietvertrag_statuslink(auftrag):
+    """QR/Statuslink NUR im Reparaturfall (Auftrag mit aktivem Kunden-Status-Token)."""
+    if not auftrag:
+        return ""
+    if not int(auftrag.get("kunden_status_aktiv") if auftrag.get("kunden_status_aktiv") is not None else 1):
+        return ""
+    return kunden_status_url(auftrag)
+
+
+def save_mietvertrag_unterschrift(vorgang_id, dataurl):
+    roh = clean_text(dataurl)
+    if not roh.startswith("data:image/png;base64,"):
+        return ""
+    b64 = roh.split(",", 1)[1]
+    try:
+        rohdaten = base64.b64decode(b64, validate=True)
+    except (ValueError, TypeError):
+        return ""
+    if not rohdaten or len(rohdaten) > 2_000_000:
+        return ""
+    # Echte PNG-Datei? (Magic Bytes) — keine beliebigen Bytes als .png ablegen
+    if not rohdaten.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ""
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return ""
+    stored_name = f"mvsig_{uuid.uuid4().hex}.png"
+    try:
+        (UPLOAD_DIR / stored_name).write_bytes(rohdaten)
+    except OSError:
+        return ""
+    return stored_name
+
+
+def mietvertrag_qr_drawing(url, size_px=86):
+    if not url:
+        return None
+    try:
+        from reportlab.graphics.barcode import qr
+        from reportlab.graphics.shapes import Drawing
+    except Exception:
+        return None
+    widget = qr.QrCodeWidget(url)
+    bounds = widget.getBounds()
+    width = bounds[2] - bounds[0]
+    height = bounds[3] - bounds[1]
+    scale = size_px / max(width, height, 1)
+    drawing = Drawing(size_px, size_px, transform=[scale, 0, 0, scale, -bounds[0] * scale, -bounds[1] * scale])
+    drawing.add(widget)
+    return drawing
+
+
+def make_mietvertrag_pdf(vorgang, fahrzeug, auftrag=None):
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import Image as RLImage, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    dark = colors.HexColor("#17212A")
+    red = colors.HexColor("#A23F2D")
+    light = colors.HexColor("#F7F1E8")
+    border = colors.HexColor("#D9CAB4")
+    muted = colors.HexColor("#5E6470")
+
+    def style(name, size=9, bold=False, color=None, align=TA_LEFT, space=0):
+        return ParagraphStyle(name, fontName="Helvetica-Bold" if bold else "Helvetica", fontSize=size,
+                              textColor=color or dark, alignment=align, spaceAfter=space, leading=size * 1.35)
+
+    title = style("title", 18, bold=True)
+    subtitle = style("subtitle", 8, color=muted, align=TA_RIGHT)
+    heading = style("h", 9.5, bold=True)
+    body = style("b", 8.6)
+    small = style("s", 7.5, color=muted)
+    label = style("l", 8, color=muted)
+    value = style("v", 8.5, bold=True)
+
+    kontext = mietvertrag_kontext(vorgang, fahrzeug, auftrag)
+    statuslink = mietvertrag_statuslink(auftrag)
+
+    def p(text, st):
+        return Paragraph(escape(clean_text(text) or "-").replace("\n", "<br/>"), st)
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=1.6 * cm, rightMargin=1.6 * cm,
+                            topMargin=1.4 * cm, bottomMargin=1.4 * cm)
+    story = [
+        Table([[Paragraph("Mietvertrag Ersatz-/Mietfahrzeug", title),
+                Paragraph(f"{escape(MIETVERTRAG_VERMIETER_NAME)}<br/>{escape(MIETVERTRAG_VERMIETER_ADRESSE)}<br/>info@auto-lackierzentrum.de", subtitle)]],
+              colWidths=[10 * cm, 7.8 * cm],
+              style=TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LINEBELOW", (0, 0), (-1, 0), 2, red), ("BOTTOMPADDING", (0, 0), (-1, 0), 8)])),
+        Spacer(1, 6),
+        Table([[p("ENTWURF / MUSTER – Vertragstext vor Echteinsatz durch GF/Syndikus freigeben lassen.", small)]],
+              colWidths=[17.8 * cm], style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), light), ("BOX", (0, 0), (-1, -1), 0.5, border), ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4), ("LEFTPADDING", (0, 0), (-1, -1), 6)])),
+        Spacer(1, 8),
+    ]
+
+    info_rows = [
+        [p("Mieter", heading), p("Fahrzeug & Konditionen", heading)],
+        [p(f"{kontext['kunde_name']}\n{kontext['kunde_adresse']}\nTel.: {kontext['kunde_telefon']}", body),
+         p(f"{kontext['fahrzeug_bezeichnung']} · {kontext['kennzeichen']}\nMietzeit: {kontext['start_datum']} – {kontext['end_datum']}\nTagespreis: {kontext['tagessatz']} EUR · Kaution: {kontext['kaution_euro']} EUR\nSB Vollkasko: {kontext['selbstbeteiligung_euro']} EUR / Teilkasko: {kontext['selbstbeteiligung_teilkasko_euro']} EUR", body)],
+    ]
+    story.append(Table(info_rows, colWidths=[8.9 * cm, 8.9 * cm],
+                       style=TableStyle([("BACKGROUND", (0, 0), (-1, 0), light), ("GRID", (0, 0), (-1, -1), 0.5, border),
+                                         ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                                         ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)])))
+
+    qr_drawing = mietvertrag_qr_drawing(statuslink) if statuslink else None
+    if qr_drawing is not None:
+        story.append(Spacer(1, 6))
+        story.append(Table([[qr_drawing, p(f"Reparaturstatus Ihres Fahrzeugs jederzeit abrufbar:\n{statuslink}\n(QR-Code scannen)", body)]],
+                           colWidths=[3 * cm, 14.8 * cm],
+                           style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), light), ("BOX", (0, 0), (-1, -1), 0.5, border),
+                                             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 6), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)])))
+    story.append(Spacer(1, 8))
+
+    for abschnitt in mietvertrag_abschnitte_gefuellt(kontext):
+        story.append(p(f"{abschnitt['nummer']} {abschnitt['titel']}", heading))
+        story.append(p(abschnitt["text"], body))
+        story.append(Spacer(1, 5))
+
+    story.append(Spacer(1, 8))
+    sig_stored = clean_text((vorgang or {}).get("unterschrift_stored"))
+    sig_cell = ""
+    if sig_stored:
+        sig_path = upload_file_path({"stored_name": sig_stored})
+        if sig_path and sig_path.exists():
+            try:
+                sig_cell = RLImage(str(sig_path), width=5.5 * cm, height=1.8 * cm, kind="proportional")
+            except Exception:
+                sig_cell = ""
+    unter_meta = ""
+    if clean_text((vorgang or {}).get("unterschrift_am")):
+        unter_meta = f"{clean_text(vorgang.get('unterschrift_ort'))}, {clean_text(vorgang.get('unterschrift_am'))} · digital signiert"
+    story.append(Table(
+        [[sig_cell or "", ""],
+         [p("Mieter (digitale Unterschrift)", small), p("Vermieter", small)],
+         [p(unter_meta, small), p(MIETVERTRAG_VERMIETER_NAME, small)]],
+        colWidths=[8.9 * cm, 8.9 * cm], rowHeights=[1.9 * cm, 0.5 * cm, 0.5 * cm],
+        style=TableStyle([("LINEABOVE", (0, 1), (0, 1), 0.8, dark), ("LINEABOVE", (1, 1), (1, 1), 0.8, dark),
+                          ("VALIGN", (0, 0), (-1, 0), "BOTTOM"), ("LEFTPADDING", (0, 0), (-1, -1), 0)])))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+def mietvertrag_pdf_filename(vorgang, fahrzeug):
+    kennz = re.sub(r"[^A-Za-z0-9]+", "-", clean_text((fahrzeug or {}).get("kennzeichen")) or "Fahrzeug")
+    return f"Mietvertrag_{kennz}_{(vorgang or {}).get('id', '')}.pdf"
+
+
+def send_mietvertrag_mail(empfaenger, betreff, body, pdf_bytes, filename):
+    config = get_schaden_mail_config()
+    if not config["smtp_configured"]:
+        return {"sent": False, "message": "E-Mail-Versand ist nicht konfiguriert (SMTP fehlt)."}
+    to_recipients = parse_email_recipients(empfaenger)
+    if not to_recipients:
+        return {"sent": False, "message": "Keine gültige E-Mail-Adresse hinterlegt."}
+    message = EmailMessage()
+    message["Subject"] = betreff
+    message["From"] = formataddr((config["display_name"], config["from_address"]))
+    message["To"] = ", ".join(to_recipients)
+    if config["reply_to"]:
+        message["Reply-To"] = config["reply_to"]
+    message.set_content(body)
+    if pdf_bytes:
+        message.add_attachment(pdf_bytes, maintype="application", subtype="pdf", filename=filename)
+    try:
+        if config["smtp_ssl"]:
+            with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30) as smtp:
+                smtp.login(config["smtp_user"], config["_smtp_password"])
+                smtp.send_message(message)
+        else:
+            with smtplib.SMTP(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30) as smtp:
+                if config["smtp_tls"]:
+                    smtp.starttls()
+                smtp.login(config["smtp_user"], config["_smtp_password"])
+                smtp.send_message(message)
+    except Exception as exc:
+        return {"sent": False, "message": f"Versand fehlgeschlagen: {clean_text(str(exc))[:200]}"}
+    return {"sent": True, "to": to_recipients}
+
+
+def mietvertrag_versandweg(vorgang, auftrag=None):
+    """Bestimmt den bevorzugten Kontaktweg: E-Mail -> WhatsApp -> Dashboard."""
+    email = clean_text((vorgang or {}).get("kunde_email"))
+    if not email and auftrag:
+        email = clean_text(auftrag.get("kunde_email"))
+    if email and parse_email_recipients(email):
+        return ("email", parse_email_recipients(email)[0])
+    telefon = clean_text((vorgang or {}).get("kunde_telefon"))
+    if telefon and is_probable_mobile_number(telefon):
+        return ("whatsapp", whatsapp_number_key(telefon))
+    return ("dashboard", "")
+
+
 @app.route("/admin/aufgaben")
 @admin_required
 def admin_aufgaben():
@@ -33244,6 +34253,426 @@ def werkstatt_aufgabe_erledigt(aufgabe_id):
     db.commit()
     db.close()
     return redirect(url_for("werkstatt_aufgaben", mitarbeiter=row["mitarbeiter_id"]))
+
+
+# --- Mietfahrzeuge / Ersatzfahrzeuge ---------------------------------------
+
+
+@app.route("/admin/mietfahrzeuge")
+@admin_required
+def admin_mietfahrzeuge():
+    fahrzeuge = list_mietfahrzeuge(include_inactive=True)
+    aktive_fahrzeuge = [f for f in fahrzeuge if f["aktiv"]]
+    kennzahlen = mietfahrzeug_kennzahlen(aktive_fahrzeuge)
+
+    # Flotte nach Fahrzeugklasse gruppieren (links→rechts lesbar)
+    gruppen_map = {}
+    for f in fahrzeuge:
+        schluessel = clean_text(f.get("fahrzeugklasse")) or "Ohne Klasse"
+        gruppen_map.setdefault(schluessel, []).append(f)
+    reihenfolge = MIETFAHRZEUG_KLASSEN + ["Ohne Klasse"]
+    gruppen = []
+    for klasse in reihenfolge:
+        if klasse in gruppen_map:
+            gruppen.append({"klasse": klasse, "fahrzeuge": gruppen_map.pop(klasse)})
+    for klasse in sorted(gruppen_map.keys()):
+        gruppen.append({"klasse": klasse, "fahrzeuge": gruppen_map[klasse]})
+
+    # Belegungsplanung: alle offenen Vorgänge, nach geplanter Rückgabe sortiert
+    fahrzeug_nach_id = {f["id"]: f for f in fahrzeuge}
+    belegung = []
+    for f in fahrzeuge:
+        for v in f["vorgaenge"]:
+            if v["abgeschlossen"]:
+                continue
+            eintrag = dict(v)
+            eintrag["fahrzeug"] = f
+            belegung.append(eintrag)
+    belegung.sort(key=lambda e: (e["end_obj"] or date.max, e["start_obj"] or date.max))
+
+    auftraege_aktiv = [
+        a for a in list_auftraege()
+        if int(a.get("status") or 1) <= 4 and not a.get("angebotsphase")
+    ]
+    return render_template(
+        "mietfahrzeuge_admin.html",
+        gruppen=gruppen,
+        kennzahlen=kennzahlen,
+        belegung=belegung,
+        auftraege=auftraege_aktiv,
+        klassen=MIETFAHRZEUG_KLASSEN,
+        status_optionen=MIETFAHRZEUG_BASIS_STATUS,
+        heute_iso=date.today().isoformat(),
+    )
+
+
+@app.route("/admin/mietfahrzeuge/neu", methods=["POST"])
+@admin_required
+def admin_mietfahrzeug_neu():
+    try:
+        fahrzeug_id = create_mietfahrzeug(
+            kennzeichen=request.form.get("kennzeichen"),
+            bezeichnung=request.form.get("bezeichnung"),
+            fahrzeugklasse=request.form.get("fahrzeugklasse"),
+            farbe=request.form.get("farbe"),
+            fin_nummer=request.form.get("fin_nummer"),
+            baujahr=request.form.get("baujahr"),
+            kraftstoff=request.form.get("kraftstoff"),
+            tagessatz=request.form.get("tagessatz"),
+            standort=request.form.get("standort"),
+            status=request.form.get("status"),
+            notiz=request.form.get("notiz"),
+        )
+        flash("Mietfahrzeug angelegt.", "success")
+        return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{fahrzeug_id}")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("admin_mietfahrzeuge"))
+
+
+@app.route("/admin/mietfahrzeuge/<int:fahrzeug_id>/bearbeiten", methods=["POST"])
+@admin_required
+def admin_mietfahrzeug_bearbeiten(fahrzeug_id):
+    if not get_mietfahrzeug(fahrzeug_id):
+        abort(404)
+    try:
+        update_mietfahrzeug(
+            fahrzeug_id,
+            kennzeichen=request.form.get("kennzeichen"),
+            bezeichnung=request.form.get("bezeichnung"),
+            fahrzeugklasse=request.form.get("fahrzeugklasse"),
+            farbe=request.form.get("farbe"),
+            fin_nummer=request.form.get("fin_nummer"),
+            baujahr=request.form.get("baujahr"),
+            kraftstoff=request.form.get("kraftstoff"),
+            tagessatz=request.form.get("tagessatz"),
+            standort=request.form.get("standort"),
+            status=request.form.get("status"),
+            notiz=request.form.get("notiz"),
+            aktiv=request.form.get("aktiv") != "0",
+        )
+        flash("Mietfahrzeug aktualisiert.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{fahrzeug_id}")
+
+
+@app.route("/admin/mietfahrzeuge/<int:fahrzeug_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_mietfahrzeug_loeschen(fahrzeug_id):
+    if not get_mietfahrzeug(fahrzeug_id):
+        abort(404)
+    delete_mietfahrzeug(fahrzeug_id)
+    flash("Mietfahrzeug und zugehörige Vorgänge gelöscht.", "info")
+    return redirect(url_for("admin_mietfahrzeuge"))
+
+
+@app.route("/admin/mietfahrzeuge/<int:fahrzeug_id>/vermieten", methods=["POST"])
+@admin_required
+def admin_mietfahrzeug_vermieten(fahrzeug_id):
+    fahrzeug = get_mietfahrzeug(fahrzeug_id)
+    if not fahrzeug:
+        abort(404)
+    if fahrzeug["aktiver_vorgang"]:
+        flash(
+            f"{fahrzeug['kennzeichen']} ist bereits an "
+            f"{fahrzeug['aktiver_vorgang']['kunde_name'] or 'einen Kunden'} vergeben. "
+            "Bitte zuerst zurücknehmen.",
+            "warning",
+        )
+        return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{fahrzeug_id}")
+    try:
+        create_mietvorgang(
+            fahrzeug_id,
+            kunde_name=request.form.get("kunde_name"),
+            kunde_telefon=request.form.get("kunde_telefon"),
+            kunde_email=request.form.get("kunde_email"),
+            auftrag_id=request.form.get("auftrag_id"),
+            start_datum=request.form.get("start_datum"),
+            end_datum=request.form.get("end_datum"),
+            notiz=request.form.get("notiz"),
+        )
+        flash("Fahrzeug vergeben.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{fahrzeug_id}")
+
+
+@app.route("/admin/mietvorgang/<int:vorgang_id>/zurueck", methods=["POST"])
+@admin_required
+def admin_mietvorgang_zurueck(vorgang_id):
+    vorgang = get_mietvorgang(vorgang_id)
+    if not vorgang:
+        abort(404)
+    mietvorgang_zuruecknehmen(vorgang_id, request.form.get("rueckgabe_datum"))
+    flash("Fahrzeug als zurückgegeben gebucht.", "success")
+    return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{vorgang['mietfahrzeug_id']}")
+
+
+@app.route("/admin/mietvorgang/<int:vorgang_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_mietvorgang_loeschen(vorgang_id):
+    vorgang = get_mietvorgang(vorgang_id)
+    if not vorgang:
+        abort(404)
+    delete_mietvorgang(vorgang_id)
+    flash("Mietvorgang gelöscht.", "info")
+    return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{vorgang['mietfahrzeug_id']}")
+
+
+@app.route("/admin/mietfahrzeuge/<int:fahrzeug_id>/bilder", methods=["POST"])
+@admin_required
+def admin_mietfahrzeug_bilder_upload(fahrzeug_id):
+    if not get_mietfahrzeug(fahrzeug_id):
+        abort(404)
+    dateien = request.files.getlist("bilder")
+    if not any(f and f.filename for f in dateien):
+        flash("Bitte zuerst ein Bild auswählen.", "warning")
+        return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{fahrzeug_id}")
+    anzahl = save_mietfahrzeug_bilder(fahrzeug_id, dateien)
+    if anzahl:
+        flash(f"{anzahl} Bild(er) hochgeladen.", "success")
+    else:
+        flash("Es wurde kein Bild gespeichert. Bitte JPG, PNG, WEBP, GIF oder HEIC verwenden.", "warning")
+    return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{fahrzeug_id}")
+
+
+@app.route("/admin/mietfahrzeuge/bild/<int:bild_id>")
+@admin_required
+def admin_mietfahrzeug_bild(bild_id):
+    bild = get_mietfahrzeug_bild(bild_id)
+    if not bild:
+        abort(404)
+    path = upload_file_path(bild)
+    if not path or not path.exists():
+        abort(404)
+    return send_file(
+        path,
+        mimetype=bild.get("mime_type") or "image/jpeg",
+        download_name=bild.get("original_name") or path.name,
+    )
+
+
+@app.route("/admin/mietfahrzeuge/bild/<int:bild_id>/titelbild", methods=["POST"])
+@admin_required
+def admin_mietfahrzeug_bild_titelbild(bild_id):
+    bild = get_mietfahrzeug_bild(bild_id)
+    if not bild:
+        abort(404)
+    set_mietfahrzeug_titelbild(bild_id)
+    flash("Titelbild gesetzt.", "success")
+    return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{bild['mietfahrzeug_id']}")
+
+
+@app.route("/admin/mietfahrzeuge/bild/<int:bild_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_mietfahrzeug_bild_loeschen(bild_id):
+    bild = get_mietfahrzeug_bild(bild_id)
+    if not bild:
+        abort(404)
+    fahrzeug_id = bild["mietfahrzeug_id"]
+    delete_mietfahrzeug_bild(bild_id)
+    flash("Bild gelöscht.", "info")
+    return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{fahrzeug_id}")
+
+
+# --- Mietvertrag (Routen) --------------------------------------------------
+
+MIETVORGANG_VERTRAG_SPALTEN = {
+    "kunde_email", "vertrag_status", "vertrag_felder_json", "vertrag_snapshot_json",
+    "unterschrift_stored", "unterschrift_name", "unterschrift_ort", "unterschrift_am",
+    "vertrag_bestaetigt_am", "vertrag_gesendet_am", "vertrag_versandweg",
+}
+
+
+def set_mietvorgang_felder(vorgang_id, **felder):
+    spalten = {k: v for k, v in felder.items() if k in MIETVORGANG_VERTRAG_SPALTEN}
+    if not spalten:
+        return
+    sets = ", ".join(f"{k}=?" for k in spalten) + ", geaendert_am=?"
+    werte = list(spalten.values()) + [now_str(), int(vorgang_id)]
+    db = get_db()
+    try:
+        db.execute(f"UPDATE mietvorgaenge SET {sets} WHERE id=?", werte)
+        db.commit()
+    finally:
+        db.close()
+
+
+def lade_mietvorgang_kontext(vorgang_id):
+    vorgang = get_mietvorgang(vorgang_id)
+    if not vorgang:
+        return None, None, None
+    fahrzeug = get_mietfahrzeug(vorgang["mietfahrzeug_id"])
+    auftrag = mietvertrag_auftrag(vorgang)
+    return vorgang, fahrzeug, auftrag
+
+
+@app.route("/admin/mietvorgang/<int:vorgang_id>/vertrag")
+@admin_required
+def admin_mietvertrag(vorgang_id):
+    vorgang, fahrzeug, auftrag = lade_mietvorgang_kontext(vorgang_id)
+    if not vorgang or not fahrzeug:
+        abort(404)
+    kontext = mietvertrag_kontext(vorgang, fahrzeug, auftrag)
+    statuslink = mietvertrag_statuslink(auftrag)
+    weg, ziel = mietvertrag_versandweg(vorgang, auftrag)
+    return render_template(
+        "mietvertrag.html",
+        vorgang=vorgang,
+        fahrzeug=fahrzeug,
+        auftrag=auftrag,
+        statuslink=statuslink,
+        abschnitte=mietvertrag_abschnitte_gefuellt(kontext),
+        felder_def=MIETVERTRAG_FELDER,
+        felder_werte=mietvertrag_felder_werte(vorgang, fahrzeug),
+        kontext=kontext,
+        status=clean_text(vorgang.get("vertrag_status")),
+        status_label=MIETVERTRAG_STATUS_LABEL.get(clean_text(vorgang.get("vertrag_status")), "Kein Vertrag"),
+        versandweg=weg,
+        versandziel=ziel,
+        vermieter_name=MIETVERTRAG_VERMIETER_NAME,
+        vermieter_adresse=MIETVERTRAG_VERMIETER_ADRESSE,
+        heute_iso=date.today().isoformat(),
+    )
+
+
+@app.route("/admin/mietvorgang/<int:vorgang_id>/vertrag/speichern", methods=["POST"])
+@admin_required
+def admin_mietvertrag_speichern(vorgang_id):
+    vorgang = get_mietvorgang(vorgang_id)
+    if not vorgang:
+        abort(404)
+    email = clean_text(request.form.get("kunde_email"))
+    if email and not parse_email_recipients(email):
+        flash("Die E-Mail-Adresse ist ungültig — bitte korrigieren.", "warning")
+        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+    werte = {f["name"]: clean_text(request.form.get(f["name"])) for f in MIETVERTRAG_FELDER}
+    felder = {
+        "kunde_email": email,
+        "vertrag_felder_json": json.dumps(werte, ensure_ascii=False),
+    }
+    # Status nur initial auf 'entwurf' setzen; bereits unterschriebene/bestätigte
+    # Verträge behalten ihren Status (reine Datenpflege ändert ihn nicht).
+    if not clean_text(vorgang.get("vertrag_status")):
+        felder["vertrag_status"] = "entwurf"
+    set_mietvorgang_felder(vorgang_id, **felder)
+    flash("Vertragsdaten gespeichert.", "success")
+    return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+
+
+@app.route("/admin/mietvorgang/<int:vorgang_id>/vertrag/unterschrift", methods=["POST"])
+@admin_required
+def admin_mietvertrag_unterschrift(vorgang_id):
+    vorgang, fahrzeug, auftrag = lade_mietvorgang_kontext(vorgang_id)
+    if not vorgang or not fahrzeug:
+        abort(404)
+    stored = save_mietvertrag_unterschrift(vorgang_id, request.form.get("unterschrift_data"))
+    if not stored:
+        flash("Es wurde keine gültige Unterschrift empfangen. Bitte im Feld unterschreiben.", "warning")
+        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+    kontext = mietvertrag_kontext(vorgang, fahrzeug, auftrag)
+    snapshot = {
+        "kontext": kontext,
+        "abschnitte": mietvertrag_abschnitte_gefuellt(kontext),
+        "statuslink": mietvertrag_statuslink(auftrag),
+    }
+    set_mietvorgang_felder(
+        vorgang_id,
+        unterschrift_stored=stored,
+        unterschrift_name=clean_text(request.form.get("unterschrift_name")) or clean_text(vorgang.get("kunde_name")),
+        unterschrift_ort=clean_text(request.form.get("unterschrift_ort")) or "Mosbach",
+        unterschrift_am=now_str(),
+        vertrag_snapshot_json=json.dumps(snapshot, ensure_ascii=False),
+        vertrag_status="unterschrieben",
+    )
+    # Erst nach erfolgreichem DB-Update die alte Unterschrift entfernen (atomar)
+    alt = clean_text(vorgang.get("unterschrift_stored"))
+    if alt and alt != stored:
+        altpfad = upload_file_path({"stored_name": alt})
+        if altpfad:
+            try:
+                altpfad.unlink(missing_ok=True)
+            except OSError:
+                pass
+    flash("Unterschrift gespeichert. Bitte noch bestätigen.", "success")
+    return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+
+
+@app.route("/admin/mietvorgang/<int:vorgang_id>/vertrag/bestaetigen", methods=["POST"])
+@admin_required
+def admin_mietvertrag_bestaetigen(vorgang_id):
+    vorgang = get_mietvorgang(vorgang_id)
+    if not vorgang:
+        abort(404)
+    if clean_text(vorgang.get("vertrag_status")) != "unterschrieben":
+        flash("Der Vertrag muss zuerst vom Kunden unterschrieben werden.", "warning")
+        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+    set_mietvorgang_felder(vorgang_id, vertrag_status="bestaetigt", vertrag_bestaetigt_am=now_str())
+    flash("Vertrag bestätigt und abgeschlossen.", "success")
+    return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+
+
+@app.route("/admin/mietvorgang/<int:vorgang_id>/vertrag.pdf")
+@admin_required
+def admin_mietvertrag_pdf(vorgang_id):
+    vorgang, fahrzeug, auftrag = lade_mietvorgang_kontext(vorgang_id)
+    if not vorgang or not fahrzeug:
+        abort(404)
+    buffer = make_mietvertrag_pdf(vorgang, fahrzeug, auftrag)
+    return send_file(buffer, mimetype="application/pdf", as_attachment=False,
+                     download_name=mietvertrag_pdf_filename(vorgang, fahrzeug))
+
+
+@app.route("/admin/mietvorgang/<int:vorgang_id>/unterschrift.png")
+@admin_required
+def admin_mietvertrag_unterschrift_bild(vorgang_id):
+    vorgang = get_mietvorgang(vorgang_id)
+    if not vorgang:
+        abort(404)
+    stored = clean_text(vorgang.get("unterschrift_stored"))
+    if not stored:
+        abort(404)
+    path = upload_file_path({"stored_name": stored})
+    if not path or not path.exists():
+        abort(404)
+    return send_file(path, mimetype="image/png")
+
+
+@app.route("/admin/mietvorgang/<int:vorgang_id>/vertrag/senden", methods=["POST"])
+@admin_required
+def admin_mietvertrag_senden(vorgang_id):
+    vorgang, fahrzeug, auftrag = lade_mietvorgang_kontext(vorgang_id)
+    if not vorgang or not fahrzeug:
+        abort(404)
+    weg, ziel = mietvertrag_versandweg(vorgang, auftrag)
+    statuslink = mietvertrag_statuslink(auftrag)
+    if weg == "email":
+        pdf = make_mietvertrag_pdf(vorgang, fahrzeug, auftrag)
+        betreff = f"Ihr Mietvertrag – {clean_text(fahrzeug.get('kennzeichen'))}"
+        body = (
+            f"Hallo {clean_text(vorgang.get('kunde_name')) or 'zusammen'},\n\n"
+            "im Anhang finden Sie Ihren Mietvertrag für das Ersatz-/Mietfahrzeug.\n"
+        )
+        if statuslink:
+            body += f"\nDen Reparaturstatus Ihres Fahrzeugs sehen Sie jederzeit hier:\n{statuslink}\n"
+        body += "\nViele Grüße\nGärtner Karosserie & Lack"
+        ergebnis = send_mietvertrag_mail(ziel, betreff, body, pdf.getvalue(), mietvertrag_pdf_filename(vorgang, fahrzeug))
+        if ergebnis.get("sent"):
+            set_mietvorgang_felder(vorgang_id, vertrag_gesendet_am=now_str(), vertrag_versandweg="email")
+            flash(f"Mietvertrag per E-Mail an {ziel} gesendet.", "success")
+        else:
+            flash(ergebnis.get("message") or "E-Mail-Versand nicht möglich.", "warning")
+    elif weg == "whatsapp":
+        nachricht = "Ihr Mietvertrag liegt bereit."
+        if statuslink:
+            nachricht += f" Reparaturstatus: {statuslink}"
+        wa_url = f"https://wa.me/{ziel}?text={quote(nachricht)}"
+        set_mietvorgang_felder(vorgang_id, vertrag_gesendet_am=now_str(), vertrag_versandweg="whatsapp")
+        flash(f"WhatsApp ist vorbereitet: {wa_url} — Link öffnen und Nachricht senden. (PDF separat aushändigen/per Mail.)", "info")
+    else:
+        flash("Keine E-Mail/Handynummer hinterlegt — bitte den Vertrag herunterladen und dem Kunden aushändigen.", "info")
+    return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
 
 
 # --- Zahlen / Umsatz-Ziel (Cockpit-Kachel) ---------------------------------

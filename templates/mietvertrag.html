@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Mietvertrag{% endblock %}
+
+{% block content %}
+
+<div class="section-title mb-4">
+  <div>
+    <div class="badge-soft mb-3">Mietfahrzeuge · Vertrag</div>
+    <h1 class="mb-2">Mietvertrag</h1>
+    <p class="mb-0">{{ fahrzeug.bezeichnung or fahrzeug.kennzeichen }} · {{ fahrzeug.kennzeichen }} → {{ vorgang.kunde_name or 'Kunde' }}</p>
+  </div>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    {% if status == 'bestaetigt' %}<span class="badge text-bg-success">{{ status_label }}</span>
+    {% elif status == 'unterschrieben' %}<span class="badge text-bg-warning">{{ status_label }}</span>
+    {% elif status == 'entwurf' %}<span class="badge text-bg-info">{{ status_label }}</span>
+    {% else %}<span class="badge text-bg-light border">Noch kein Vertrag</span>{% endif %}
+    <a class="btn btn-soft" href="{{ url_for('admin_mietfahrzeuge') }}#fahrzeug-{{ fahrzeug.id }}">← Zur Flotte</a>
+  </div>
+</div>
+
+<div class="page-card p-3 mb-4" style="background:#faf3e6;">
+  <div class="small text-muted"><strong>Entwurf / Muster.</strong> Der Vertragstext ist noch nicht rechtlich freigegeben — vor dem echten Einsatz einmal durch GF/Syndikus prüfen lassen.</div>
+</div>
+
+<!-- Ablauf: 1 Daten → 2 Unterschrift → 3 Bestätigen -->
+<div class="d-flex align-items-center gap-2 mb-4 flex-wrap">
+  <span class="badge {% if status %}text-bg-success{% else %}badge-soft{% endif %}">1 · Daten</span>
+  <span style="color:var(--brand);">→</span>
+  <span class="badge {% if status in ['unterschrieben','bestaetigt'] %}text-bg-success{% else %}badge-soft{% endif %}">2 · Unterschrift</span>
+  <span style="color:var(--brand);">→</span>
+  <span class="badge {% if status == 'bestaetigt' %}text-bg-success{% else %}badge-soft{% endif %}">3 · Bestätigt</span>
+</div>
+
+<div class="row g-4">
+  <!-- Linke Spalte: Daten + Vorschau -->
+  <div class="col-lg-7">
+    <details class="page-card p-4 mb-3" {% if status in ['', 'entwurf'] %}open{% endif %}>
+      <summary class="h5 mb-0" style="cursor:pointer;">Vertragsdaten ausfüllen</summary>
+      <form method="POST" action="{{ url_for('admin_mietvertrag_speichern', vorgang_id=vorgang.id) }}" class="row g-2 mt-1">
+        {{ csrf_field()|safe }}
+        <div class="col-md-6">
+          <label class="form-label small mb-0">E-Mail des Kunden</label>
+          <input type="email" name="kunde_email" class="form-control form-control-sm" value="{{ vorgang.kunde_email or '' }}" placeholder="kunde@example.de">
+        </div>
+        {% for f in felder_def %}
+        <div class="col-md-6">
+          <label class="form-label small mb-0">{{ f.label }}</label>
+          <input type="{% if f.typ == 'datum' %}text{% else %}text{% endif %}" name="{{ f.name }}" class="form-control form-control-sm"
+                 value="{{ felder_werte.get(f.name, '') }}"
+                 {% if f.typ in ['euro','zahl'] %}inputmode="decimal"{% endif %}>
+        </div>
+        {% endfor %}
+        <div class="col-12 mt-2">
+          <button type="submit" class="btn btn-sm btn-brand">Vertragsdaten speichern</button>
+          <span class="small text-muted ms-2">Leere Felder nutzen die Standardwerte.</span>
+        </div>
+      </form>
+    </details>
+
+    <div class="page-card p-4">
+      <h2 class="h5 mb-3">Vertragsvorschau</h2>
+      <div style="max-height:420px; overflow:auto; border:1px solid var(--line); border-radius:10px; padding:14px; background:#fffdf8;">
+        <div class="fw-bold mb-1">Mietvertrag Ersatz-/Mietfahrzeug</div>
+        <div class="small text-muted mb-3">{{ vermieter_name }} · {{ vermieter_adresse }}</div>
+        {% for a in abschnitte %}
+        <div class="mb-3">
+          <div class="fw-bold small">{{ a.nummer }} {{ a.titel }}</div>
+          <div class="small text-muted" style="white-space:pre-line;">{{ a.text }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      <a class="btn btn-soft btn-sm mt-3" href="{{ url_for('admin_mietvertrag_pdf', vorgang_id=vorgang.id) }}" target="_blank">📄 Als PDF öffnen / drucken</a>
+    </div>
+  </div>
+
+  <!-- Rechte Spalte: QR + Unterschrift + Versand -->
+  <div class="col-lg-5">
+    {% if statuslink %}
+    <div class="page-card p-4 mb-3 text-center">
+      <h2 class="h6 mb-2">Reparaturstatus für den Kunden</h2>
+      <img src="{{ url_for('kunden_status_qr', token=auftrag.kunden_status_token) }}" alt="QR Status" style="width:150px; height:150px;">
+      <div class="small text-muted mt-2" style="word-break:break-all;">{{ statuslink }}</div>
+      <div class="small text-muted">QR scannen → der Kunde sieht den Stand seiner Reparatur.</div>
+    </div>
+    {% else %}
+    <div class="page-card p-4 mb-3">
+      <div class="small text-muted">Reine Vermietung (kein Reparaturauftrag verknüpft) — es wird kein Status-QR-Code erzeugt.</div>
+    </div>
+    {% endif %}
+
+    <div class="page-card p-4 mb-3">
+      <h2 class="h6 mb-2">Unterschrift des Kunden</h2>
+      {% if vorgang.unterschrift_stored %}
+      <img src="{{ url_for('admin_mietvertrag_unterschrift_bild', vorgang_id=vorgang.id) }}" alt="Unterschrift"
+           style="width:100%; max-height:130px; object-fit:contain; border:1px solid var(--line); border-radius:8px; background:#fff;">
+      <div class="small text-muted mt-1">{{ vorgang.unterschrift_name }} · {{ vorgang.unterschrift_ort }}, {{ vorgang.unterschrift_am }}</div>
+      <form method="POST" action="{{ url_for('admin_mietvertrag_unterschrift', vorgang_id=vorgang.id) }}" class="mt-2" id="resignForm">
+        {{ csrf_field()|safe }}
+        <input type="hidden" name="unterschrift_data" id="resignData">
+        <input type="hidden" name="unterschrift_name" value="{{ vorgang.kunde_name }}">
+        <input type="hidden" name="unterschrift_ort" value="{{ vorgang.unterschrift_ort or 'Mosbach' }}">
+      </form>
+      <button class="btn btn-soft btn-sm mt-1" onclick="document.getElementById('sigBox').style.display='block'; this.style.display='none';">Neu unterschreiben</button>
+      {% endif %}
+
+      <div id="sigBox" {% if vorgang.unterschrift_stored %}style="display:none;"{% endif %}>
+        <p class="small text-muted mb-2">Der Kunde unterschreibt mit dem Finger/der Maus im Feld:</p>
+        <canvas id="sigPad" width="360" height="150" style="width:100%; height:150px; border:1px dashed #cbb89b; border-radius:10px; background:#fff; touch-action:none;"></canvas>
+        <form method="POST" action="{{ url_for('admin_mietvertrag_unterschrift', vorgang_id=vorgang.id) }}" id="sigForm" class="row g-2 mt-1">
+          {{ csrf_field()|safe }}
+          <input type="hidden" name="unterschrift_data" id="sigData">
+          <div class="col-7">
+            <input type="text" name="unterschrift_name" class="form-control form-control-sm" value="{{ vorgang.kunde_name or '' }}" placeholder="Name">
+          </div>
+          <div class="col-5">
+            <input type="text" name="unterschrift_ort" class="form-control form-control-sm" value="Mosbach" placeholder="Ort">
+          </div>
+          <div class="col-12 d-flex gap-2">
+            <button type="button" class="btn btn-soft btn-sm" id="sigClear" data-no-loading="true">Löschen</button>
+            <button type="submit" class="btn btn-brand btn-sm" id="sigSubmit">Unterschrift übernehmen</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    {% if status == 'unterschrieben' %}
+    <div class="page-card p-4 mb-3">
+      <form method="POST" action="{{ url_for('admin_mietvertrag_bestaetigen', vorgang_id=vorgang.id) }}">
+        {{ csrf_field()|safe }}
+        <button type="submit" class="btn btn-brand w-100"><i></i>Vertrag bestätigen &amp; abschließen</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if status in ['unterschrieben','bestaetigt'] %}
+    <div class="page-card p-4">
+      <h2 class="h6 mb-2">An Kunden senden</h2>
+      <div class="small text-muted mb-2">
+        Bevorzugter Weg:
+        {% if versandweg == 'email' %}<strong>E-Mail</strong> ({{ versandziel }})
+        {% elif versandweg == 'whatsapp' %}<strong>WhatsApp</strong>
+        {% else %}<strong>Dashboard / Aushändigen</strong> (keine E-Mail/Handynummer hinterlegt){% endif %}
+      </div>
+      <form method="POST" action="{{ url_for('admin_mietvertrag_senden', vorgang_id=vorgang.id) }}">
+        {{ csrf_field()|safe }}
+        <button type="submit" class="btn btn-soft btn-sm">Vertrag jetzt senden</button>
+      </form>
+      {% if vorgang.vertrag_gesendet_am %}<div class="small text-success mt-2">Zuletzt gesendet: {{ vorgang.vertrag_gesendet_am }} ({{ vorgang.vertrag_versandweg }})</div>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('sigPad');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#102033';
+  var drawing = false, dirty = false, last = null;
+  function pos(e) {
+    var r = canvas.getBoundingClientRect();
+    var t = (e.touches && e.touches[0]) ? e.touches[0] : e;
+    return { x: (t.clientX - r.left) * (canvas.width / r.width), y: (t.clientY - r.top) * (canvas.height / r.height) };
+  }
+  function start(e) { drawing = true; last = pos(e); e.preventDefault(); }
+  function move(e) {
+    if (!drawing) return;
+    var p = pos(e);
+    ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+    last = p; dirty = true; e.preventDefault();
+  }
+  function end() { drawing = false; }
+  canvas.addEventListener('mousedown', start); canvas.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', end);
+  canvas.addEventListener('touchstart', start, { passive: false });
+  canvas.addEventListener('touchmove', move, { passive: false });
+  canvas.addEventListener('touchend', end);
+  var clearBtn = document.getElementById('sigClear');
+  if (clearBtn) clearBtn.addEventListener('click', function () { ctx.clearRect(0, 0, canvas.width, canvas.height); dirty = false; });
+  var form = document.getElementById('sigForm');
+  if (form) form.addEventListener('submit', function (e) {
+    if (!dirty) { e.preventDefault(); alert('Bitte zuerst im Feld unterschreiben.'); return; }
+    document.getElementById('sigData').value = canvas.toDataURL('image/png');
+  });
+})();
+</script>
+
+{% endblock %}
