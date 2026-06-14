@@ -9257,6 +9257,23 @@ def init_db():
         )
         """
     )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS lieferanten (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT NOT NULL,
+            kategorie    TEXT DEFAULT '',
+            email        TEXT DEFAULT '',
+            telefon      TEXT DEFAULT '',
+            ort          TEXT DEFAULT '',
+            adresse      TEXT DEFAULT '',
+            notiz        TEXT DEFAULT '',
+            aktiv        INTEGER DEFAULT 1,
+            erstellt_am  TEXT NOT NULL,
+            geaendert_am TEXT NOT NULL
+        )
+        """
+    )
     ensure_index(db, "idx_mietvorgaenge_fahrzeug", "mietvorgaenge", ("mietfahrzeug_id", "status"))
     ensure_index(db, "idx_mietfahrzeug_bilder_fahrzeug", "mietfahrzeug_bilder", ("mietfahrzeug_id",))
     # Mietvertrag-Felder am Mietvorgang (digitale Unterschrift, Versand, Kontaktweg)
@@ -27337,6 +27354,23 @@ def versicherung_regionale_lieferanten(marke):
             "empfohlen": False,
         }
     )
+    # Gepflegte Lieferanten-Stammdaten anhängen (Admin → Lieferanten), ohne Dubletten
+    try:
+        vorhandene = {clean_text(l.get("name")).lower() for l in lieferanten}
+        for lf in list_lieferanten(include_inactive=False):
+            if clean_text(lf.get("name")).lower() in vorhandene:
+                continue
+            lieferanten.append({
+                "name": lf.get("name"),
+                "typ": lf.get("kategorie") or "Lieferant",
+                "ort": lf.get("ort") or "",
+                "kontakt": lf.get("email") or "",
+                "telefon": lf.get("telefon") or "",
+                "hinweis": lf.get("notiz") or "Gepflegter Lieferant aus der Lieferanten-Verwaltung.",
+                "empfohlen": False,
+            })
+    except Exception:
+        pass
     lieferanten.append(
         {
             "name": "Manueller Lieferant",
@@ -34799,6 +34833,180 @@ def admin_ersatzfahrzeug_buchen():
         return redirect(zurueck)
     flash(f"{fahrzeug['kennzeichen']} als Ersatzfahrzeug gebucht und blockiert. Jetzt Vertrag erstellen.", "success")
     return redirect(url_for("admin_mietvertrag", vorgang_id=vid))
+
+
+# --- Lieferanten-Verwaltung (Stammdaten mit E-Mail) ------------------------
+
+LIEFERANTEN_KATEGORIEN = [
+    "Originalteile",
+    "Freie Teile / Aftermarket",
+    "Lack & Farben",
+    "Karosserieteile",
+    "Reifen & Felgen",
+    "Zubehör / Werkstattbedarf",
+    "Sonstige",
+]
+
+
+def list_lieferanten(include_inactive=True):
+    db = get_db()
+    try:
+        if include_inactive:
+            rows = db.execute("SELECT * FROM lieferanten ORDER BY aktiv DESC, name ASC").fetchall()
+        else:
+            rows = db.execute("SELECT * FROM lieferanten WHERE aktiv=1 ORDER BY name ASC").fetchall()
+    finally:
+        db.close()
+    return [dict(r) for r in rows]
+
+
+def get_lieferant(lieferant_id):
+    db = get_db()
+    try:
+        row = db.execute("SELECT * FROM lieferanten WHERE id=?", (int(lieferant_id),)).fetchone()
+    finally:
+        db.close()
+    return dict(row) if row else None
+
+
+def create_lieferant(**felder):
+    name = clean_text(felder.get("name"))
+    if not name:
+        raise ValueError("Bitte einen Lieferantennamen angeben.")
+    jetzt = now_str()
+    db = get_db()
+    try:
+        cur = db.execute(
+            """
+            INSERT INTO lieferanten (name, kategorie, email, telefon, ort, adresse, notiz, aktiv, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            """,
+            (
+                name,
+                clean_text(felder.get("kategorie")),
+                clean_text(felder.get("email")),
+                clean_text(felder.get("telefon")),
+                clean_text(felder.get("ort")),
+                clean_text(felder.get("adresse")),
+                clean_text(felder.get("notiz")),
+                jetzt,
+                jetzt,
+            ),
+        )
+        db.commit()
+        return cur.lastrowid
+    finally:
+        db.close()
+
+
+def update_lieferant(lieferant_id, **felder):
+    name = clean_text(felder.get("name"))
+    if not name:
+        raise ValueError("Bitte einen Lieferantennamen angeben.")
+    db = get_db()
+    try:
+        db.execute(
+            """
+            UPDATE lieferanten
+            SET name=?, kategorie=?, email=?, telefon=?, ort=?, adresse=?, notiz=?, aktiv=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                name,
+                clean_text(felder.get("kategorie")),
+                clean_text(felder.get("email")),
+                clean_text(felder.get("telefon")),
+                clean_text(felder.get("ort")),
+                clean_text(felder.get("adresse")),
+                clean_text(felder.get("notiz")),
+                1 if felder.get("aktiv", True) else 0,
+                now_str(),
+                int(lieferant_id),
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def delete_lieferant(lieferant_id):
+    db = get_db()
+    try:
+        db.execute("DELETE FROM lieferanten WHERE id=?", (int(lieferant_id),))
+        db.commit()
+    finally:
+        db.close()
+
+
+@app.route("/admin/lieferanten")
+@admin_required
+def admin_lieferanten():
+    return render_template(
+        "lieferanten_admin.html",
+        lieferanten=list_lieferanten(include_inactive=True),
+        kategorien=LIEFERANTEN_KATEGORIEN,
+    )
+
+
+@app.route("/admin/lieferanten/neu", methods=["POST"])
+@admin_required
+def admin_lieferant_neu():
+    email = clean_text(request.form.get("email"))
+    if email and not parse_email_recipients(email):
+        flash("Die E-Mail-Adresse ist ungültig.", "warning")
+        return redirect(url_for("admin_lieferanten"))
+    try:
+        lid = create_lieferant(
+            name=request.form.get("name"),
+            kategorie=request.form.get("kategorie"),
+            email=email,
+            telefon=request.form.get("telefon"),
+            ort=request.form.get("ort"),
+            adresse=request.form.get("adresse"),
+            notiz=request.form.get("notiz"),
+        )
+        flash("Lieferant angelegt.", "success")
+        return redirect(url_for("admin_lieferanten") + f"#lieferant-{lid}")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("admin_lieferanten"))
+
+
+@app.route("/admin/lieferanten/<int:lieferant_id>/bearbeiten", methods=["POST"])
+@admin_required
+def admin_lieferant_bearbeiten(lieferant_id):
+    if not get_lieferant(lieferant_id):
+        abort(404)
+    email = clean_text(request.form.get("email"))
+    if email and not parse_email_recipients(email):
+        flash("Die E-Mail-Adresse ist ungültig.", "warning")
+        return redirect(url_for("admin_lieferanten") + f"#lieferant-{lieferant_id}")
+    try:
+        update_lieferant(
+            lieferant_id,
+            name=request.form.get("name"),
+            kategorie=request.form.get("kategorie"),
+            email=email,
+            telefon=request.form.get("telefon"),
+            ort=request.form.get("ort"),
+            adresse=request.form.get("adresse"),
+            notiz=request.form.get("notiz"),
+            aktiv=request.form.get("aktiv") != "0",
+        )
+        flash("Lieferant aktualisiert.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("admin_lieferanten") + f"#lieferant-{lieferant_id}")
+
+
+@app.route("/admin/lieferanten/<int:lieferant_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_lieferant_loeschen(lieferant_id):
+    if not get_lieferant(lieferant_id):
+        abort(404)
+    delete_lieferant(lieferant_id)
+    flash("Lieferant gelöscht.", "info")
+    return redirect(url_for("admin_lieferanten"))
 
 
 # --- Zahlen / Umsatz-Ziel (Cockpit-Kachel) ---------------------------------

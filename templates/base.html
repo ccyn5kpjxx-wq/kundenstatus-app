@@ -372,6 +372,7 @@
       <a class="nav-link" href="{{ url_for('admin_fahrzeugsuche') }}">Auktion{% set fs_alert_badge = fahrzeugsuche_auktion_alert_count() %}{% set fs_badge = fs_alert_badge or fahrzeugsuche_count() %}{% if fs_badge %}<span class="nav-badge {% if fs_alert_badge %}is-alert{% endif %}" title="{% if fs_alert_badge %}Auktion startet in Kürze{% else %}Aktive Auktionssuchen{% endif %}">{{ fs_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('admin_fahrzeugverkauf') }}">Fahrzeugverkauf{% set fv_badge = fahrzeugverkauf_count() %}{% if fv_badge %}<span class="nav-badge">{{ fv_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('admin_mietfahrzeuge') }}">Mietfahrzeuge{% set miet_badge = mietfahrzeuge_unterwegs_count() %}{% if miet_badge %}<span class="nav-badge" title="Aktuell vermietete Fahrzeuge">{{ miet_badge }}</span>{% endif %}</a>
+      <a class="nav-link" href="{{ url_for('admin_lieferanten') }}">Lieferanten</a>
       <a class="nav-link" href="{{ url_for('dashboard') }}#auftraege">Lackierportal</a>
       <a class="nav-link" href="{{ url_for('neuer_auftrag') }}">Fahrzeug neu</a>
       <a class="nav-link" href="{{ url_for('admin_versicherung') }}">Versicherungsportal{% set versicherung_badge = admin_versicherung_count() %}{% if versicherung_badge %}<span class="nav-badge">{{ versicherung_badge }}</span>{% endif %}</a>

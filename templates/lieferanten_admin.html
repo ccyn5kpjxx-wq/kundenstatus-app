@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Lieferanten{% endblock %}
+
+{% block content %}
+
+<div class="section-title mb-4">
+  <div>
+    <div class="badge-soft mb-3">Einkauf · Stammdaten</div>
+    <h1 class="mb-2">Lieferanten</h1>
+    <p class="mb-0">Lieferanten mit E-Mail anlegen und pflegen. Sie erscheinen als Vorschlag bei der Teile-Angebotsanfrage im Auftrag.</p>
+  </div>
+  <span class="badge badge-soft">{{ lieferanten|length }} Lieferant(en)</span>
+</div>
+
+<details id="neu" class="page-card p-4 mb-4" open>
+  <summary class="h5 mb-0" style="cursor:pointer;">+ Neuen Lieferanten anlegen</summary>
+  <form method="POST" action="{{ url_for('admin_lieferant_neu') }}" class="row g-2 mt-1">
+    {{ csrf_field()|safe }}
+    <div class="col-md-5">
+      <label class="form-label small mb-0">Name *</label>
+      <input type="text" name="name" class="form-control form-control-sm" placeholder="z. B. Autohaus Käsmann" required>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small mb-0">Kategorie</label>
+      <select name="kategorie" class="form-select form-select-sm">
+        <option value="">– wählen –</option>
+        {% for k in kategorien %}<option value="{{ k }}">{{ k }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small mb-0">Ort</label>
+      <input type="text" name="ort" class="form-control form-control-sm" placeholder="Mosbach">
+    </div>
+    <div class="col-md-5">
+      <label class="form-label small mb-0">E-Mail</label>
+      <input type="email" name="email" class="form-control form-control-sm" placeholder="info@lieferant.de">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small mb-0">Telefon</label>
+      <input type="text" name="telefon" class="form-control form-control-sm">
+    </div>
+    <div class="col-md-3 d-flex align-items-end">
+      <button type="submit" class="btn btn-brand btn-sm w-100">Anlegen</button>
+    </div>
+    <div class="col-12">
+      <label class="form-label small mb-0">Anschrift / Notiz</label>
+      <input type="text" name="notiz" class="form-control form-control-sm" placeholder="z. B. Originalteile VW/Audi, Lieferzeit 1–2 Tage">
+    </div>
+  </form>
+</details>
+
+{% if not lieferanten %}
+<div class="page-card p-4 text-muted">Noch keine Lieferanten angelegt. Oben den ersten anlegen.</div>
+{% endif %}
+
+<div class="row g-3">
+  {% for l in lieferanten %}
+  <div class="col-lg-6" id="lieferant-{{ l.id }}">
+    <div class="page-card p-4 h-100 {% if not l.aktiv %}opacity-75{% endif %}">
+      <div class="d-flex justify-content-between align-items-start gap-2 mb-1">
+        <div>
+          <div class="h6 mb-1">{{ l.name }}{% if not l.aktiv %} <span class="badge text-bg-light border">inaktiv</span>{% endif %}</div>
+          <div class="text-muted small">{{ l.kategorie or '—' }}{% if l.ort %} · {{ l.ort }}{% endif %}</div>
+        </div>
+      </div>
+      <div class="small mb-2">
+        {% if l.email %}<div><i></i>✉ <a href="mailto:{{ l.email }}">{{ l.email }}</a></div>{% endif %}
+        {% if l.telefon %}<div>☎ {{ l.telefon }}</div>{% endif %}
+        {% if l.notiz %}<div class="text-muted mt-1">{{ l.notiz }}</div>{% endif %}
+      </div>
+
+      <details>
+        <summary class="btn btn-soft btn-sm" style="list-style:none;">Bearbeiten</summary>
+        <form method="POST" action="{{ url_for('admin_lieferant_bearbeiten', lieferant_id=l.id) }}" class="row g-2 mt-1">
+          {{ csrf_field()|safe }}
+          <div class="col-12">
+            <label class="form-label small mb-0">Name *</label>
+            <input type="text" name="name" class="form-control form-control-sm" value="{{ l.name }}" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label small mb-0">Kategorie</label>
+            <select name="kategorie" class="form-select form-select-sm">
+              <option value="">– wählen –</option>
+              {% for k in kategorien %}<option value="{{ k }}" {% if k == l.kategorie %}selected{% endif %}>{{ k }}</option>{% endfor %}
+              {% if l.kategorie and l.kategorie not in kategorien %}<option value="{{ l.kategorie }}" selected>{{ l.kategorie }}</option>{% endif %}
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label small mb-0">Ort</label>
+            <input type="text" name="ort" class="form-control form-control-sm" value="{{ l.ort }}">
+          </div>
+          <div class="col-7">
+            <label class="form-label small mb-0">E-Mail</label>
+            <input type="email" name="email" class="form-control form-control-sm" value="{{ l.email }}">
+          </div>
+          <div class="col-5">
+            <label class="form-label small mb-0">Telefon</label>
+            <input type="text" name="telefon" class="form-control form-control-sm" value="{{ l.telefon }}">
+          </div>
+          <div class="col-12">
+            <label class="form-label small mb-0">Anschrift / Notiz</label>
+            <input type="text" name="notiz" class="form-control form-control-sm" value="{{ l.notiz }}">
+          </div>
+          <div class="col-6">
+            <label class="form-label small mb-0">Status</label>
+            <select name="aktiv" class="form-select form-select-sm">
+              <option value="1" {% if l.aktiv %}selected{% endif %}>aktiv</option>
+              <option value="0" {% if not l.aktiv %}selected{% endif %}>inaktiv</option>
+            </select>
+          </div>
+          <div class="col-6 d-flex align-items-end">
+            <button type="submit" class="btn btn-brand btn-sm w-100">Speichern</button>
+          </div>
+        </form>
+        <form method="POST" action="{{ url_for('admin_lieferant_loeschen', lieferant_id=l.id) }}" class="mt-2" onsubmit="return confirm('Lieferant {{ l.name }} wirklich löschen?')">
+          {{ csrf_field()|safe }}
+          <button type="submit" class="btn btn-sm btn-outline-danger" data-no-loading="true">Löschen</button>
+        </form>
+      </details>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% endblock %}
