@@ -40346,6 +40346,31 @@ def werkstatt_auftrag(auftrag_id):
     )
 
 
+@app.route("/werkstatt/auftrag/<int:auftrag_id>/fotos", methods=["POST"])
+def werkstatt_auftrag_fotos(auftrag_id):
+    # Mitarbeiter kann am Hallen-Bildschirm/Handy direkt Fotos zum Auftrag aufnehmen + hochladen.
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("archiviert"):
+        abort(404)
+    files = request.files.getlist("fotos")
+    if not any(f and f.filename for f in files):
+        flash("Bitte zuerst ein Foto aufnehmen oder auswählen.", "warning")
+        return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
+    erlaubt = get_allowed_finish_uploads(files)
+    if not erlaubt:
+        flash("Nur Fotos (JPG, PNG, HEIC, WEBP) oder PDF möglich.", "warning")
+        return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
+    saved, _ = save_uploads(auftrag_id, erlaubt, "werkstatt", "fertigbild", analyze=False)
+    if saved:
+        flash(f"{saved} Foto(s) zum Auftrag hinzugefügt.", "success")
+    else:
+        flash("Es wurde kein Foto gespeichert.", "warning")
+    return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
+
+
 @app.route("/werkstatt/auftrag/<int:auftrag_id>/status/<int:neuer_status>", methods=["POST"])
 def werkstatt_status_update(auftrag_id, neuer_status):
     # Mitarbeiter verschieben Auftraege selbst: Eingeplant (2) -> In Arbeit (3) -> Fertig (4).
