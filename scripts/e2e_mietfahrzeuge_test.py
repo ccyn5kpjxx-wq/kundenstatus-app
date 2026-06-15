@@ -98,7 +98,10 @@ def main():
         "end_datum": in_5_tagen,
         "notiz": "Ersatzwagen während Lackierung",
     }), follow_redirects=True)
-    seite = r.get_data(as_text=True)
+    # Vergeben leitet jetzt DIREKT zum Mietvertrag (gewollt) — Flotte separat nachladen
+    report("Vergeben leitet direkt zum Mietvertrag",
+           "Mietvertrag" in r.get_data(as_text=True))
+    seite = client.get("/admin/mietfahrzeuge").get_data(as_text=True)
     report("Fahrzeug vergeben -> Status Vermietet",
            "Erika Muster-TEST" in seite and "Vermietet" in seite)
     report("Geplante Rückgabe sichtbar im Belegungsplan",

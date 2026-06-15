@@ -235,11 +235,12 @@
           {% if v.ueberfaellig %}<div class="small text-danger fw-bold mt-1">Rückgabe überfällig!</div>{% endif %}
           {% if v.notiz %}<div class="small text-muted mt-1">{{ v.notiz }}</div>{% endif %}
           <div class="d-flex gap-2 align-items-center flex-wrap mt-2">
-            <a class="btn btn-sm btn-soft" href="{{ url_for('admin_mietvertrag', vorgang_id=v.id) }}">
-              Mietvertrag
-              {% if v.vertrag_status == 'bestaetigt' %}<span class="badge text-bg-success ms-1">✓</span>
-              {% elif v.vertrag_status == 'unterschrieben' %}<span class="badge text-bg-warning ms-1">signiert</span>
-              {% elif v.vertrag_status == 'entwurf' %}<span class="badge text-bg-info ms-1">Entwurf</span>{% endif %}
+            <a class="btn btn-sm btn-brand" href="{{ url_for('admin_mietvertrag', vorgang_id=v.id) }}">
+              📄 Mietvertrag
+              {% if v.vertrag_status == 'bestaetigt' %}<span class="badge text-bg-light ms-1">✓ abgeschlossen</span>
+              {% elif v.vertrag_status == 'unterschrieben' %}<span class="badge text-bg-light ms-1">signiert</span>
+              {% elif v.vertrag_status == 'entwurf' %}<span class="badge text-bg-light ms-1">Entwurf</span>
+              {% else %}<span class="badge text-bg-light ms-1">erstellen</span>{% endif %}
             </a>
             {% if v.auftrag_id %}<span class="badge badge-soft" title="Reparaturfall — Status-QR im Vertrag">Reparaturfall</span>{% endif %}
           </div>

@@ -34467,7 +34467,7 @@ def admin_mietfahrzeug_vermieten(fahrzeug_id):
         )
         return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{fahrzeug_id}")
     try:
-        create_mietvorgang(
+        vid = create_mietvorgang(
             fahrzeug_id,
             kunde_name=request.form.get("kunde_name"),
             kunde_telefon=request.form.get("kunde_telefon"),
@@ -34477,7 +34477,9 @@ def admin_mietfahrzeug_vermieten(fahrzeug_id):
             end_datum=request.form.get("end_datum"),
             notiz=request.form.get("notiz"),
         )
-        flash("Fahrzeug vergeben.", "success")
+        # Direkt zum Mietvertrag — beim Zuteilen soll der Vertrag gleich kommen
+        flash("Fahrzeug vergeben. Hier den Mietvertrag erstellen und vom Kunden unterschreiben lassen.", "success")
+        return redirect(url_for("admin_mietvertrag", vorgang_id=vid))
     except ValueError as exc:
         flash(str(exc), "warning")
     return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{fahrzeug_id}")
