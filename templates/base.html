@@ -472,6 +472,44 @@
         }, 0);
       });
     });
+    // Mobil: "Foto aufnehmen" (Kamera) neben jedem Bild-Upload — direkt fotografieren + hochladen
+    const __isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    if (__isTouch) {
+      document.querySelectorAll('input[type="file"]').forEach((input) => {
+        if (input.dataset.cameraEnhanced) return;
+        if (input.classList.contains('visually-hidden')) return;
+        const accept = (input.getAttribute('accept') || '').toLowerCase();
+        const imageCapable = !accept || accept.includes('image') || accept.includes('.jpg')
+          || accept.includes('.jpeg') || accept.includes('.png') || accept.includes('.heic') || accept.includes('.webp');
+        if (!imageCapable) return;
+        input.dataset.cameraEnhanced = '1';
+        const cam = document.createElement('input');
+        cam.type = 'file';
+        cam.accept = 'image/*';
+        cam.setAttribute('capture', 'environment');
+        if (input.multiple) cam.multiple = true;
+        cam.style.display = 'none';
+        cam.addEventListener('change', () => {
+          if (!cam.files || !cam.files.length) return;
+          try {
+            const dt = new DataTransfer();
+            if (input.files) { Array.from(input.files).forEach((f) => dt.items.add(f)); }
+            Array.from(cam.files).forEach((f) => dt.items.add(f));
+            input.files = dt.files;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          } catch (e) { /* DataTransfer nicht unterstützt — Aufnahme verbleibt im Kamerafeld */ }
+          cam.value = '';
+        });
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-soft btn-sm mt-2';
+        btn.textContent = '📷 Foto aufnehmen';
+        btn.dataset.noLoading = 'true';
+        btn.addEventListener('click', () => cam.click());
+        input.insertAdjacentElement('afterend', cam);
+        cam.insertAdjacentElement('afterend', btn);
+      });
+    }
     document.querySelectorAll('[data-copy-link]').forEach((button) => {
       button.addEventListener('click', async () => {
         const value = button.dataset.copyLink || '';
