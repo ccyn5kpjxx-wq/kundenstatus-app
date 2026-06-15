@@ -318,6 +318,31 @@
     }
 
     .toast-leiste .toast.t-danger, .toast-leiste .toast.t-warning { border-color: var(--warning); }
+
+    /* --- Handy-Ansicht: kompakter, weniger Stapeln (steht am Ende, damit es greift) --- */
+    @media (max-width: 640px) {
+      body { padding-bottom: 1rem; }
+      .inhalt { padding: .6rem .6rem; gap: .6rem; }
+      .panel { border-radius: 16px; padding: .8rem .85rem; margin-bottom: .6rem; }
+      .panel h2 { margin-bottom: .5rem; }
+      .topbar { gap: .5rem .7rem; padding: .6rem .75rem; }
+      .topbar h1 { font-size: 1.02rem; flex-basis: 100%; order: 3; }
+      .kennzeichen { font-size: 1.15rem; border-left-width: 8px; }
+
+      /* "Auftrag verschieben": drei kompakte Buttons nebeneinander statt untereinander */
+      .verschieben-leiste { display: grid; grid-template-columns: repeat(3, 1fr); gap: .45rem; }
+      .verschieben-leiste form { min-width: 0; }
+      .verschieben-knopf { padding: .7em .3em; border-radius: 12px; font-size: .9rem; line-height: 1.15; }
+
+      /* Status-Kette: eine Zeile, horizontal scrollbar statt mehrzeilig umzubrechen */
+      .status-leiste { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: .3rem; }
+      .status-schritt { flex: 0 0 auto; min-width: 84px; font-size: .76rem; padding: .4rem .35rem; }
+
+      /* Fahrzeug & Auftrag: Werte gut lesbar untereinander */
+      .fakten { grid-template-columns: 1fr; gap: .45rem .9rem; }
+      .arbeit-text { font-size: 1.05rem; }
+      .fotos { grid-template-columns: 1fr 1fr; }
+    }
   </style>
 </head>
 <body>
