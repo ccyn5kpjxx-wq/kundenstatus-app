@@ -16,7 +16,7 @@ from email import policy
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.parser import BytesParser
-from email.utils import formataddr, getaddresses, parsedate_to_datetime
+from email.utils import formataddr, getaddresses, parsedate_to_datetime, formatdate, make_msgid
 from functools import wraps
 from html import escape, unescape
 import hmac
@@ -24191,6 +24191,20 @@ def get_schaden_mail_config():
     }
 
 
+def add_standard_mail_headers(message):
+    """Ergänzt Date + Message-ID, falls fehlend. Ihr Fehlen ist ein häufiger
+    Grund, warum Mails (z. B. die Endkunden-Status-Mail) im Spam landen."""
+    try:
+        if not message["Date"]:
+            message["Date"] = formatdate(localtime=True)
+        if not message["Message-ID"]:
+            from_hdr = clean_text(message["From"])
+            domain = from_hdr.rsplit("@", 1)[1].strip(" >\"'") if "@" in from_hdr else ""
+            message["Message-ID"] = make_msgid(domain=domain or None)
+    except Exception:
+        pass
+
+
 def schaden_mail_status():
     config = get_schaden_mail_config()
     missing = []
@@ -24332,6 +24346,7 @@ def send_versicherung_schadenmail(auftrag, empfaenger, cc, anschreiben, dateien=
     if auftrag and auftrag.get("id"):
         message["X-Gaertner-Auftrag-ID"] = str(auftrag.get("id"))
     message.set_content(body)
+    add_standard_mail_headers(message)
 
     for attachment in attachments:
         message.add_attachment(
@@ -24508,6 +24523,7 @@ def sende_autohaus_benachrichtigung_mail(auftrag_id, betreff, text):
             message["Reply-To"] = clean_text(config.get("reply_to"))
         message["X-Gaertner-Auftrag-ID"] = str(auftrag_id)
         message.set_content("\n".join(zeilen))
+        add_standard_mail_headers(message)
 
         def _senden():
             try:
@@ -24557,6 +24573,7 @@ def sende_endkunden_mail(auftrag_id, betreff, text):
         message["To"] = ", ".join(empfaenger)
         message["Reply-To"] = config["smtp_user"]
         message.set_content(text)
+        add_standard_mail_headers(message)
 
         def _senden():
             try:
@@ -32699,6 +32716,7 @@ def admin_rundmail_senden():
                             paket["text"]
                             + "\n\n--\nGärtner Karosserie & Lack GmbH\nBinauer Höhe 4, 74821 Mosbach\nTelefon +49 1522 7706694"
                         )
+                        add_standard_mail_headers(message)
                         smtp.send_message(message)
                         ok += 1
                         erfolgreich.append(paket)
@@ -33092,6 +33110,7 @@ def admin_mahnung_senden(voucher_id):
         message["Reply-To"] = config["smtp_user"]
         message["X-Gaertner-Mahnung"] = f"{voucher_id}:{stufe}"
         message.set_content(text)
+        add_standard_mail_headers(message)
         try:
             if config["smtp_ssl"]:
                 with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"], local_hostname=smtp_lokaler_hostname(), timeout=30) as smtp:
@@ -34171,6 +34190,7 @@ def send_mietvertrag_mail(empfaenger, betreff, body, pdf_bytes, filename):
     if config["reply_to"]:
         message["Reply-To"] = config["reply_to"]
     message.set_content(body)
+    add_standard_mail_headers(message)
     if pdf_bytes:
         message.add_attachment(pdf_bytes, maintype="application", subtype="pdf", filename=filename)
     try:
