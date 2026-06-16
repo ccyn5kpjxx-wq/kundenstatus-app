@@ -37,6 +37,9 @@
     .timeline-step.is-active .timeline-dot { background:#1f3557; border-color:#1f3557; color:#fff; }
     .timeline-card { border:1px solid #e4d6c3; border-radius:14px; background:#fffdf9; padding:.85rem 1rem; }
     .timeline-step.is-active .timeline-card { border-color:#b9c8dc; background:#eef5ff; }
+    .bilder-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:.6rem; }
+    .bild-kachel { display:block; border:1px solid #e4d6c3; border-radius:12px; overflow:hidden; background:#fff; aspect-ratio:4/3; }
+    .bild-kachel img { width:100%; height:100%; object-fit:cover; display:block; }
     @media (max-width: 767.98px) {
       .shell { padding:14px 10px 22px; }
       .panel { border-radius:16px; padding:18px; }
@@ -161,6 +164,20 @@
         {% endfor %}
       </div>
     </div>
+
+    {% if kunden_bilder %}
+    <div class="panel mb-4" id="bilder">
+      <h2 class="h4 mb-1">Bilder vom Fortschritt</h2>
+      <div class="text-muted small mb-3">Aktuelle Fotos Ihres Fahrzeugs aus unserer Werkstatt.</div>
+      <div class="bilder-grid">
+        {% for bild in kunden_bilder %}
+        <a class="bild-kachel" href="{{ url_for('kunden_status_bild', token=auftrag['kunden_status_token'], datei_id=bild['id']) }}" target="_blank" rel="noopener">
+          <img src="{{ url_for('kunden_status_bild', token=auftrag['kunden_status_token'], datei_id=bild['id']) }}" alt="Fortschrittsfoto" loading="lazy">
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
 
     <footer style="color: #6f7a83; text-align: center; padding: 1.5rem; font-size: .85rem;">Gärtner GmbH Karosserie + Lack · Binauer Höhe 4, 74821 Mosbach · <a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
   </main>

@@ -8917,6 +8917,7 @@ def init_db():
     ensure_column(db, "fahrzeug_kandidaten", "geaendert_am", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "quelle", "TEXT DEFAULT 'intern'")
     ensure_column(db, "dateien", "kategorie", "TEXT DEFAULT 'standard'")
+    ensure_column(db, "dateien", "kunde_sichtbar", "INTEGER DEFAULT 0")
     ensure_column(db, "dateien", "reklamation_id", "INTEGER")
     ensure_column(db, "dateien", "dokument_typ", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "notiz", "TEXT DEFAULT ''")
@@ -18854,6 +18855,7 @@ def hydrate_datei(datei):
     datei["is_browser_image"] = suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}
     datei["kategorie"] = clean_text(datei.get("kategorie")) or "standard"
     datei["prozess_key"] = clean_text(datei.get("prozess_key"))
+    datei["kunde_sichtbar"] = int(datei.get("kunde_sichtbar") or 0)
     datei["notiz"] = clean_text(datei.get("notiz"))
     datei["has_analysis"] = bool(
         clean_text(datei.get("extrakt_kurz"))
@@ -39157,6 +39159,28 @@ def admin_datei_loeschen(datei_id):
     return redirect(url_for("dashboard"))
 
 
+@app.route("/admin/datei/<int:datei_id>/kunde-sichtbar", methods=["POST"])
+@admin_required
+def admin_datei_kunde_sichtbar(datei_id):
+    datei = get_datei(datei_id)
+    if not datei:
+        abort(404)
+    neuer_wert = 0 if int(datei.get("kunde_sichtbar") or 0) else 1
+    db = get_db()
+    db.execute("UPDATE dateien SET kunde_sichtbar=? WHERE id=?", (neuer_wert, datei_id))
+    db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), datei["auftrag_id"]))
+    db.commit()
+    db.close()
+    flash(
+        "Bild ist jetzt für den Kunden sichtbar." if neuer_wert else "Bild ist für den Kunden ausgeblendet.",
+        "info",
+    )
+    next_url = clean_text(request.form.get("next"))
+    if next_url.startswith("/admin/"):
+        return redirect(next_url)
+    return redirect(url_for("auftrag_detail", auftrag_id=datei["auftrag_id"]))
+
+
 @app.route("/admin/loeschen/<int:auftrag_id>", methods=["POST"])
 @admin_required
 def loeschen(auftrag_id):
@@ -39467,6 +39491,7 @@ def kunden_status(token):
     versicherung_prozess = build_versicherung_prozess(auftrag, dateien, context="kunde") if auftrag.get("versicherung_id") else None
     versicherung_teile = list_versicherung_teile(auftrag["id"]) if auftrag.get("versicherung_id") else []
     terminfreigabe = kunden_terminfreigabe_info(auftrag, teile=versicherung_teile, prozess=versicherung_prozess)
+    kunden_bilder = [d for d in dateien if d.get("kunde_sichtbar") and d.get("is_browser_image")]
     return render_template(
         "kunden_status.html",
         auftrag=auftrag,
@@ -39480,9 +39505,25 @@ def kunden_status(token):
         kunden_termine=kunden_termine,
         kunden_nachrichten=list_benachrichtigungen(auftrag["id"], limit=5),
         werkstatt_kontakt=werkstatt_kundenkontakt(auftrag),
+        kunden_bilder=kunden_bilder,
         kunden_status_link=request.url,
         kunden_status_qr_url=url_for("kunden_status_qr", token=token),
     )
+
+
+@app.route("/status/<token>/bild/<int:datei_id>")
+def kunden_status_bild(token, datei_id):
+    auftrag = get_auftrag_by_kunden_status_token(token)
+    if not auftrag:
+        abort(404)
+    datei = get_datei(datei_id)
+    if (
+        not datei
+        or int(datei.get("auftrag_id") or 0) != int(auftrag["id"])
+        or not int(datei.get("kunde_sichtbar") or 0)
+    ):
+        abort(404)
+    return send_upload_file(datei, as_attachment=False)
 
 
 @app.route("/status/<token>/termin", methods=["POST"])
@@ -40363,9 +40404,20 @@ def werkstatt_auftrag_fotos(auftrag_id):
     if not erlaubt:
         flash("Nur Fotos (JPG, PNG, HEIC, WEBP) oder PDF möglich.", "warning")
         return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
+    db = get_db()
+    vor_row = db.execute("SELECT COALESCE(MAX(id), 0) AS m FROM dateien").fetchone()
+    db.close()
+    vor_max = int(vor_row["m"]) if vor_row else 0
     saved, _ = save_uploads(auftrag_id, erlaubt, "werkstatt", "fertigbild", analyze=False)
     if saved:
-        flash(f"{saved} Foto(s) zum Auftrag hinzugefügt.", "success")
+        db = get_db()
+        db.execute(
+            "UPDATE dateien SET kunde_sichtbar=1 WHERE auftrag_id=? AND id>?",
+            (auftrag_id, vor_max),
+        )
+        db.commit()
+        db.close()
+        flash(f"{saved} Foto(s) zum Auftrag hinzugefügt. Der Kunde sieht sie auf seiner Status-Seite.", "success")
     else:
         flash("Es wurde kein Foto gespeichert.", "warning")
     return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
