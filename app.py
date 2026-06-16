@@ -13194,6 +13194,42 @@ def save_lackierauftrag_entwurf(autohaus, data):
     return normalized
 
 
+def lackierauftrag_beschreibung_aus_positionen(daten):
+    zeilen = []
+    for index in range(1, LACKIERAUFTRAG_POSITION_COUNT + 1):
+        teil = clean_text((daten or {}).get(f"position_{index}_teil"))
+        if not teil:
+            continue
+        seite = clean_text((daten or {}).get(f"position_{index}_seite"))
+        bemerkung = clean_text((daten or {}).get(f"position_{index}_bemerkung"))
+        status = clean_text((daten or {}).get(f"position_{index}_status"))
+        teil_text = f"{teil} ({seite})" if seite else teil
+        rest = " – ".join(part for part in (bemerkung, status) if part)
+        zeilen.append(f"{teil_text}: {rest}" if rest else teil_text)
+    return "\n".join(zeilen)
+
+
+def create_auftrag_aus_lackierauftrag(autohaus, daten):
+    beschreibung = lackierauftrag_beschreibung_aus_positionen(daten)
+    return create_auftrag(
+        "autohaus",
+        autohaus_id=autohaus["id"],
+        kunde_name=clean_text((daten or {}).get("versicherungsnehmer")),
+        fahrzeug=clean_text((daten or {}).get("typ")),
+        fin_nummer=normalize_fin((daten or {}).get("fg_nr")),
+        kilometerstand=clean_text((daten or {}).get("km_stand")),
+        kennzeichen=clean_text((daten or {}).get("kennzeichen")).upper(),
+        schaden_nummer=clean_text((daten or {}).get("versicherung_schaden_nr")),
+        beschreibung=beschreibung,
+        analyse=analyse_text(beschreibung),
+        annahme_datum=clean_text((daten or {}).get("auftrags_datum")),
+        fertig_datum=clean_text((daten or {}).get("fertig_bis")),
+        kontakt_telefon=clean_text((daten or {}).get("kontakt")),
+        transport_art="standard",
+        notiz_intern="Aus Online-Lackierauftrag übernommen.",
+    )
+
+
 def lackierauftrag_filename(autohaus):
     slug = clean_text(autohaus.get("slug")) or slugify(autohaus.get("name")) or "autohaus"
     return f"Lackierauftrag_{slug}.pdf"
@@ -40824,6 +40860,19 @@ def partner_lackierauftrag_bearbeiten(slug):
     if request.method == "POST":
         daten = parse_lackierauftrag_form(request.form, autohaus)
         daten = save_lackierauftrag_entwurf(autohaus, daten)
+        if request.form.get("aktion") == "fahrzeug_anlegen":
+            auftrag_id = create_auftrag_aus_lackierauftrag(autohaus, daten)
+            whatsapp_sent, whatsapp_errors = notify_workshop_whatsapp_for_new_order(
+                auftrag_id,
+                absender_label=autohaus.get("name") or autohaus.get("portal_label") or "Autohaus",
+                return_errors=True,
+            )
+            if not whatsapp_sent:
+                detail = whatsapp_error_summary(whatsapp_errors)
+                suffix = f" Grund: {detail}" if detail else ""
+                flash(f"WhatsApp-Hinweis an die Werkstatt wurde nicht gesendet.{suffix}", "warning")
+            flash("Lackierauftrag übernommen – das Fahrzeug ist jetzt im Dashboard gespeichert.", "success")
+            return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
         if request.form.get("aktion") == "download":
             return send_lackierauftrag_pdf(autohaus, daten)
         flash("Lackierauftrag gespeichert. Sie können ihn später weiterbearbeiten oder als PDF herunterladen.", "success")
