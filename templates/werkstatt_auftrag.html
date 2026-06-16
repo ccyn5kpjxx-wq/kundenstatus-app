@@ -367,6 +367,47 @@
 
   <div class="inhalt">
     <div>
+      <div class="panel" style="border:2px solid {% if auftrag['messung_erforderlich'] == 'ja' %}var(--danger){% else %}var(--line){% endif %};">
+        <h2>🎨 Farbton &amp; Lackmessung</h2>
+
+        {% if auftrag['messung_erforderlich'] == 'ja' %}
+        <div style="background:#fdecec; border:1px solid var(--danger); color:#7a1f1f; border-radius:14px; padding:.85rem 1rem; margin-bottom:1rem;">
+          <div style="font-weight:700; font-size:1.05rem;">⚠ Achtung: Messung erforderlich</div>
+          <div style="margin-top:.4rem; color:#5e2b2b;">Wichtig: Messstelle <strong>aufpolieren</strong> und mit <strong>Silikonentferner reinigen</strong>, dann messen — für eine bestmögliche Lackmessung.</div>
+        </div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('werkstatt_auftrag_farbton', auftrag_id=auftrag['id']) }}" style="display:grid; gap:.5rem; margin-bottom:1rem;">
+          <label style="font-weight:600;">Farbton</label>
+          <input type="text" name="farbton" value="{{ auftrag['farbton'] or '' }}" placeholder="z.B. Brillantsilber LY7W" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:#fff;">
+          <label style="font-weight:600;">2. Farbton <span style="color:var(--muted); font-weight:400;">(optional, bei Zweiton / Sonderlack)</span></label>
+          <input type="text" name="farbton_2" value="{{ auftrag['farbton_2'] or '' }}" placeholder="zweiter Farbton" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:#fff;">
+          <button type="submit" style="justify-self:start; background:var(--accent); color:#fff; border:none; border-radius:12px; padding:.55rem 1.2rem; font-weight:600; cursor:pointer; font-size:1rem;">Farbton speichern</button>
+        </form>
+
+        <div style="border-top:1px solid var(--line); padding-top:.9rem;">
+          <div style="font-weight:600; margin-bottom:.5rem;">Lackmessung nötig? <span style="color:var(--muted); font-weight:400;">— entscheidet der Werkstattleiter</span></div>
+          <div style="display:flex; gap:.5rem; flex-wrap:wrap;">
+            <form method="POST" action="{{ url_for('werkstatt_auftrag_messung', auftrag_id=auftrag['id'], wert='ja') }}">
+              <button type="submit" style="border:1px solid var(--danger); border-radius:12px; padding:.5rem 1.1rem; font-weight:600; cursor:pointer; font-size:1rem; {% if auftrag['messung_erforderlich'] == 'ja' %}background:var(--danger); color:#fff;{% else %}background:#fff; color:var(--danger);{% endif %}">Messung erforderlich</button>
+            </form>
+            <form method="POST" action="{{ url_for('werkstatt_auftrag_messung', auftrag_id=auftrag['id'], wert='nein') }}">
+              <button type="submit" style="border:1px solid var(--good); border-radius:12px; padding:.5rem 1.1rem; font-weight:600; cursor:pointer; font-size:1rem; {% if auftrag['messung_erforderlich'] == 'nein' %}background:var(--good); color:#fff;{% else %}background:#fff; color:var(--good);{% endif %}">Nicht erforderlich</button>
+            </form>
+          </div>
+        </div>
+
+        {% if auftrag['messung_erforderlich'] == 'ja' %}
+        <form method="POST" action="{{ url_for('werkstatt_auftrag_variante', auftrag_id=auftrag['id']) }}" style="display:grid; gap:.5rem; border-top:1px solid var(--line); padding-top:.9rem; margin-top:.9rem;">
+          <label style="font-weight:600;">Variantencode <span style="color:var(--muted); font-weight:400;">— nach der Messung eintragen</span></label>
+          <input type="text" name="variantencode" value="{{ auftrag['variantencode'] or '' }}" placeholder="gemessener Variantencode" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:#fff;">
+          <button type="submit" style="justify-self:start; background:var(--brand); color:#fff; border:none; border-radius:12px; padding:.55rem 1.2rem; font-weight:600; cursor:pointer; font-size:1rem;">Variante speichern</button>
+        </form>
+        {% elif auftrag['variantencode'] %}
+        <div class="notiz" style="margin-top:.9rem;">🎯 Variante: {{ auftrag['variantencode'] }}</div>
+        {% endif %}
+      </div>
+
       {% if auftrag['status'] < 5 %}
       <div class="panel">
         <h2>Auftrag verschieben</h2>

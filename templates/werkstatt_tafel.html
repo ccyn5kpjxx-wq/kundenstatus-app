@@ -404,6 +404,12 @@
           {% endif %}
         </div>
         <div class="fahrzeug">{{ auftrag['fahrzeug'] }}</div>
+        {% if auftrag['messung_erforderlich'] == 'ja' %}
+          <div style="margin-top:.35rem; display:inline-block; background:#d64545; color:#fff; border-radius:8px; padding:.2rem .55rem; font-size:.78rem; font-weight:700;">⚠ Messung erforderlich</div>
+        {% endif %}
+        {% if auftrag['farbton'] %}
+          <div style="margin-top:.35rem; font-size:.82rem; opacity:.9;">🎨 {{ auftrag['farbton'] }}{% if auftrag['farbton_2'] %} / {{ auftrag['farbton_2'] }}{% endif %}</div>
+        {% endif %}
         {% if auftrag['werkstatt_angebot_text_display'] %}
           <div class="arbeit">{{ auftrag['werkstatt_angebot_text_display'] }}</div>
         {% endif %}

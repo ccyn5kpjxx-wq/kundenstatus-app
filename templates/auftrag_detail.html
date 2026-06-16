@@ -619,6 +619,21 @@
           <label class="form-label">Farbcode</label>
           <input type="text" name="farbcode" class="form-control form-control-lg" value="{{ auftrag['farbcode'] }}" placeholder="z.B. LB9A / Z5Z5">
         </div>
+        <div class="col-md-3">
+          <label class="form-label">Farbton</label>
+          <input type="text" name="farbton" class="form-control form-control-lg" value="{{ auftrag['farbton'] }}" placeholder="z.B. Brillantsilber LY7W">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">2. Farbton (Zweiton)</label>
+          <input type="text" name="farbton_2" class="form-control form-control-lg" value="{{ auftrag['farbton_2'] }}" placeholder="bei Sonderlackierung">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Lackmessung</label>
+          <div class="form-text" style="font-size:.95rem;">
+            {% if auftrag['messung_erforderlich'] == 'ja' %}<span style="color:#b02a2a; font-weight:600;">⚠ Messung erforderlich</span>{% elif auftrag['messung_erforderlich'] == 'nein' %}Nicht erforderlich{% else %}Noch nicht entschieden{% endif %}{% if auftrag['variantencode'] %} · Variante: <strong>{{ auftrag['variantencode'] }}</strong>{% endif %}
+            <br><span class="text-muted">Messung-Entscheidung und Variantencode trägt die Werkstatt in der Tafel ein.</span>
+          </div>
+        </div>
         <div class="col-md-6">
           <label class="form-label">Auftrag / Vorgangsnummer</label>
           <input type="text" name="auftragsnummer" class="form-control form-control-lg" value="{{ auftrag['auftragsnummer'] }}">

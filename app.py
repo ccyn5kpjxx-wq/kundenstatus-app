@@ -8676,6 +8676,10 @@ def init_db():
     ensure_column(db, "auftraege", "kunde_email", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "baujahr", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "farbcode", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "farbton", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "farbton_2", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "messung_erforderlich", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "variantencode", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "analyse_text", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "fin_nummer", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kilometerstand", "TEXT DEFAULT ''")
@@ -37794,6 +37798,8 @@ def auftrag_detail(auftrag_id):
                 tsn_nummer=?,
                 baujahr=?,
                 farbcode=?,
+                farbton=?,
+                farbton_2=?,
                 auftragsnummer=?,
                 bauteile_override=?,
                 kennzeichen=?,
@@ -37821,6 +37827,8 @@ def auftrag_detail(auftrag_id):
                 normalize_tsn(form.get("tsn_nummer")),
                 clean_text(form.get("baujahr")),
                 clean_text(form.get("farbcode")),
+                clean_text(form.get("farbton")),
+                clean_text(form.get("farbton_2")),
                 clean_text(form.get("auftragsnummer")),
                 clean_text(form.get("bauteile_override")),
                 clean_text(form.get("kennzeichen")).upper(),
@@ -40524,6 +40532,76 @@ def werkstatt_status_update(auftrag_id, neuer_status):
     if ziel.startswith("/werkstatt"):
         return redirect(ziel)
     return redirect(url_for("werkstatt_tafel"))
+
+
+@app.route("/werkstatt/auftrag/<int:auftrag_id>/farbton", methods=["POST"])
+def werkstatt_auftrag_farbton(auftrag_id):
+    # Farbton (1-2 Toene) am Auftrag hinterlegen, damit der Mitarbeiter ihn in der Tafel sieht.
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("archiviert"):
+        abort(404)
+    db = get_db()
+    db.execute(
+        "UPDATE auftraege SET farbton=?, farbton_2=?, geaendert_am=? WHERE id=?",
+        (
+            clean_text(request.form.get("farbton")),
+            clean_text(request.form.get("farbton_2")),
+            now_str(),
+            auftrag_id,
+        ),
+    )
+    db.commit()
+    db.close()
+    flash("Farbton gespeichert.", "success")
+    return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
+
+
+@app.route("/werkstatt/auftrag/<int:auftrag_id>/messung/<wert>", methods=["POST"])
+def werkstatt_auftrag_messung(auftrag_id, wert):
+    # Werkstattleiter entscheidet, ob bei diesem Farbton eine Lackmessung noetig ist.
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    if wert not in {"ja", "nein"}:
+        abort(400)
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("archiviert"):
+        abort(404)
+    db = get_db()
+    db.execute(
+        "UPDATE auftraege SET messung_erforderlich=?, geaendert_am=? WHERE id=?",
+        (wert, now_str(), auftrag_id),
+    )
+    db.commit()
+    db.close()
+    if wert == "ja":
+        flash("Messung als erforderlich markiert — der Mitarbeiter sieht den Hinweis im Auftrag.", "success")
+    else:
+        flash("Messung als nicht erforderlich markiert.", "success")
+    return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
+
+
+@app.route("/werkstatt/auftrag/<int:auftrag_id>/variante", methods=["POST"])
+def werkstatt_auftrag_variante(auftrag_id):
+    # Mitarbeiter traegt nach der Messung den ermittelten Variantencode ein (am Auftrag dokumentiert).
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("archiviert"):
+        abort(404)
+    db = get_db()
+    db.execute(
+        "UPDATE auftraege SET variantencode=?, geaendert_am=? WHERE id=?",
+        (clean_text(request.form.get("variantencode")), now_str(), auftrag_id),
+    )
+    db.commit()
+    db.close()
+    flash("Variantencode gespeichert.", "success")
+    return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
 
 
 @app.route("/werkstatt/datei/<int:datei_id>")
