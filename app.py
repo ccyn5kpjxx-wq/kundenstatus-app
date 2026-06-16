@@ -8680,6 +8680,7 @@ def init_db():
     ensure_column(db, "auftraege", "farbton_2", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "messung_erforderlich", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "variantencode", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "angemischte_menge", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "analyse_text", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "fin_nummer", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kilometerstand", "TEXT DEFAULT ''")
@@ -40563,7 +40564,8 @@ def werkstatt_auftrag_farbton(auftrag_id):
 
 @app.route("/werkstatt/auftrag/<int:auftrag_id>/variante", methods=["POST"])
 def werkstatt_auftrag_variante(auftrag_id):
-    # Mitarbeiter traegt nach der Messung den ermittelten Variantencode ein (am Auftrag dokumentiert).
+    # Mitarbeiter traegt die Lackdaten ein: Variantencode (nach Messung) + angemischte Menge
+    # (fuer eine spaetere Durchschnittsverbrauchs-Auswertung pro Bauteil).
     guard = werkstatt_tafel_guard()
     if guard:
         return guard
@@ -40572,12 +40574,17 @@ def werkstatt_auftrag_variante(auftrag_id):
         abort(404)
     db = get_db()
     db.execute(
-        "UPDATE auftraege SET variantencode=?, geaendert_am=? WHERE id=?",
-        (clean_text(request.form.get("variantencode")), now_str(), auftrag_id),
+        "UPDATE auftraege SET variantencode=?, angemischte_menge=?, geaendert_am=? WHERE id=?",
+        (
+            clean_text(request.form.get("variantencode")),
+            clean_text(request.form.get("angemischte_menge")),
+            now_str(),
+            auftrag_id,
+        ),
     )
     db.commit()
     db.close()
-    flash("Variantencode gespeichert.", "success")
+    flash("Lackdaten gespeichert.", "success")
     return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
 
 

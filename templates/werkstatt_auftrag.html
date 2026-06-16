@@ -396,15 +396,18 @@
           {% endif %}
         </div>
 
-        {% if auftrag['messung_erforderlich'] == 'ja' %}
         <form method="POST" action="{{ url_for('werkstatt_auftrag_variante', auftrag_id=auftrag['id']) }}" style="display:grid; gap:.5rem; border-top:1px solid var(--line); padding-top:.9rem; margin-top:.9rem;">
+          <div style="font-weight:600;">Lackdaten <span style="color:var(--muted); font-weight:400;">— trägt der Mitarbeiter ein</span></div>
+          {% if auftrag['messung_erforderlich'] == 'ja' %}
           <label style="font-weight:600;">Variantencode <span style="color:var(--muted); font-weight:400;">— nach der Messung eintragen</span></label>
           <input type="text" name="variantencode" value="{{ auftrag['variantencode'] or '' }}" placeholder="gemessener Variantencode" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:#fff;">
-          <button type="submit" style="justify-self:start; background:var(--brand); color:#fff; border:none; border-radius:12px; padding:.55rem 1.2rem; font-weight:600; cursor:pointer; font-size:1rem;">Variante speichern</button>
+          {% else %}
+          <input type="hidden" name="variantencode" value="{{ auftrag['variantencode'] or '' }}">
+          {% endif %}
+          <label style="font-weight:600;">Angemischte Menge <span style="color:var(--muted); font-weight:400;">— z.B. 350 ml Basislack</span></label>
+          <input type="text" name="angemischte_menge" value="{{ auftrag['angemischte_menge'] or '' }}" placeholder="z.B. 350 ml Basislack" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:#fff;">
+          <button type="submit" style="justify-self:start; background:var(--brand); color:#fff; border:none; border-radius:12px; padding:.55rem 1.2rem; font-weight:600; cursor:pointer; font-size:1rem;">Lackdaten speichern</button>
         </form>
-        {% elif auftrag['variantencode'] %}
-        <div class="notiz" style="margin-top:.9rem;">🎯 Variante: {{ auftrag['variantencode'] }}</div>
-        {% endif %}
       </div>
 
       {% if auftrag['status'] < 5 %}

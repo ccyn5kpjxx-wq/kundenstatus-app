@@ -635,7 +635,7 @@
             <option value="nein" {% if auftrag['messung_erforderlich'] == 'nein' %}selected{% endif %}>Nicht erforderlich</option>
           </select>
           <div class="form-text">
-            Der Mitarbeiter sieht diese Vorgabe in der Tafel; den Variantencode trägt die Werkstatt dort ein{% if auftrag['variantencode'] %} · Variante: <strong>{{ auftrag['variantencode'] }}</strong>{% endif %}.
+            Der Mitarbeiter sieht diese Vorgabe in der Tafel; Variantencode und angemischte Menge trägt die Werkstatt dort ein{% if auftrag['variantencode'] %} · Variante: <strong>{{ auftrag['variantencode'] }}</strong>{% endif %}{% if auftrag['angemischte_menge'] %} · Menge: <strong>{{ auftrag['angemischte_menge'] }}</strong>{% endif %}.
           </div>
         </div>
         <div class="col-md-6">
