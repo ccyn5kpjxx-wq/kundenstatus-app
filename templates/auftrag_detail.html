@@ -628,10 +628,14 @@
           <input type="text" name="farbton_2" class="form-control form-control-lg" value="{{ auftrag['farbton_2'] }}" placeholder="bei Sonderlackierung">
         </div>
         <div class="col-md-6">
-          <label class="form-label">Lackmessung</label>
-          <div class="form-text" style="font-size:.95rem;">
-            {% if auftrag['messung_erforderlich'] == 'ja' %}<span style="color:#b02a2a; font-weight:600;">⚠ Messung erforderlich</span>{% elif auftrag['messung_erforderlich'] == 'nein' %}Nicht erforderlich{% else %}Noch nicht entschieden{% endif %}{% if auftrag['variantencode'] %} · Variante: <strong>{{ auftrag['variantencode'] }}</strong>{% endif %}
-            <br><span class="text-muted">Messung-Entscheidung und Variantencode trägt die Werkstatt in der Tafel ein.</span>
+          <label class="form-label">Lackmessung <span class="text-muted">— Entscheidung Werkstattleiter</span></label>
+          <select name="messung_erforderlich" class="form-select form-select-lg">
+            <option value="" {% if auftrag['messung_erforderlich'] not in ['ja', 'nein'] %}selected{% endif %}>Noch nicht entschieden</option>
+            <option value="ja" {% if auftrag['messung_erforderlich'] == 'ja' %}selected{% endif %}>⚠ Messung erforderlich</option>
+            <option value="nein" {% if auftrag['messung_erforderlich'] == 'nein' %}selected{% endif %}>Nicht erforderlich</option>
+          </select>
+          <div class="form-text">
+            Der Mitarbeiter sieht diese Vorgabe in der Tafel; den Variantencode trägt die Werkstatt dort ein{% if auftrag['variantencode'] %} · Variante: <strong>{{ auftrag['variantencode'] }}</strong>{% endif %}.
           </div>
         </div>
         <div class="col-md-6">

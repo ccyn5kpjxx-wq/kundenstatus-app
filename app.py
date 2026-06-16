@@ -37800,6 +37800,7 @@ def auftrag_detail(auftrag_id):
                 farbcode=?,
                 farbton=?,
                 farbton_2=?,
+                messung_erforderlich=?,
                 auftragsnummer=?,
                 bauteile_override=?,
                 kennzeichen=?,
@@ -37829,6 +37830,7 @@ def auftrag_detail(auftrag_id):
                 clean_text(form.get("farbcode")),
                 clean_text(form.get("farbton")),
                 clean_text(form.get("farbton_2")),
+                clean_text(form.get("messung_erforderlich")) if clean_text(form.get("messung_erforderlich")) in ("ja", "nein") else "",
                 clean_text(form.get("auftragsnummer")),
                 clean_text(form.get("bauteile_override")),
                 clean_text(form.get("kennzeichen")).upper(),
@@ -40556,31 +40558,6 @@ def werkstatt_auftrag_farbton(auftrag_id):
     db.commit()
     db.close()
     flash("Farbton gespeichert.", "success")
-    return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
-
-
-@app.route("/werkstatt/auftrag/<int:auftrag_id>/messung/<wert>", methods=["POST"])
-def werkstatt_auftrag_messung(auftrag_id, wert):
-    # Werkstattleiter entscheidet, ob bei diesem Farbton eine Lackmessung noetig ist.
-    guard = werkstatt_tafel_guard()
-    if guard:
-        return guard
-    if wert not in {"ja", "nein"}:
-        abort(400)
-    auftrag = get_auftrag(auftrag_id)
-    if not auftrag or auftrag.get("archiviert"):
-        abort(404)
-    db = get_db()
-    db.execute(
-        "UPDATE auftraege SET messung_erforderlich=?, geaendert_am=? WHERE id=?",
-        (wert, now_str(), auftrag_id),
-    )
-    db.commit()
-    db.close()
-    if wert == "ja":
-        flash("Messung als erforderlich markiert — der Mitarbeiter sieht den Hinweis im Auftrag.", "success")
-    else:
-        flash("Messung als nicht erforderlich markiert.", "success")
     return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
 
 

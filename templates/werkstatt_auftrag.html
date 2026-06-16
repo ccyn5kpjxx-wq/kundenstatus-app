@@ -386,15 +386,14 @@
         </form>
 
         <div style="border-top:1px solid var(--line); padding-top:.9rem;">
-          <div style="font-weight:600; margin-bottom:.5rem;">Lackmessung nötig? <span style="color:var(--muted); font-weight:400;">— entscheidet der Werkstattleiter</span></div>
-          <div style="display:flex; gap:.5rem; flex-wrap:wrap;">
-            <form method="POST" action="{{ url_for('werkstatt_auftrag_messung', auftrag_id=auftrag['id'], wert='ja') }}">
-              <button type="submit" style="border:1px solid var(--danger); border-radius:12px; padding:.5rem 1.1rem; font-weight:600; cursor:pointer; font-size:1rem; {% if auftrag['messung_erforderlich'] == 'ja' %}background:var(--danger); color:#fff;{% else %}background:#fff; color:var(--danger);{% endif %}">Messung erforderlich</button>
-            </form>
-            <form method="POST" action="{{ url_for('werkstatt_auftrag_messung', auftrag_id=auftrag['id'], wert='nein') }}">
-              <button type="submit" style="border:1px solid var(--good); border-radius:12px; padding:.5rem 1.1rem; font-weight:600; cursor:pointer; font-size:1rem; {% if auftrag['messung_erforderlich'] == 'nein' %}background:var(--good); color:#fff;{% else %}background:#fff; color:var(--good);{% endif %}">Nicht erforderlich</button>
-            </form>
-          </div>
+          <div style="font-weight:600; margin-bottom:.35rem;">Lackmessung</div>
+          {% if auftrag['messung_erforderlich'] == 'ja' %}
+          <div style="color:var(--danger); font-weight:600;">⚠ Messung erforderlich — Vorgabe vom Büro</div>
+          {% elif auftrag['messung_erforderlich'] == 'nein' %}
+          <div style="color:var(--good); font-weight:600;">✓ Keine Lackmessung nötig</div>
+          {% else %}
+          <div style="color:var(--muted);">Entscheidung steht noch aus — wird vom Werkstattleiter im Büro/Cockpit festgelegt.</div>
+          {% endif %}
         </div>
 
         {% if auftrag['messung_erforderlich'] == 'ja' %}
