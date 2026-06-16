@@ -391,10 +391,14 @@
 
       <div class="panel">
         <h2>Was zu machen ist</h2>
-        {% if auftrag['werkstatt_angebot_text_display'] %}
-          <div class="arbeit-text">{{ auftrag['werkstatt_angebot_text_display'] }}</div>
+        {% set arbeit = auftrag['analyse_text'] or auftrag['werkstatt_angebot_text'] or auftrag['beschreibung'] %}
+        {% if arbeit %}
+          <div class="arbeit-text">{{ arbeit }}</div>
         {% else %}
           <div class="arbeit-text leer">Keine Arbeitsbeschreibung hinterlegt — bitte im Büro nachfragen.</div>
+        {% endif %}
+        {% if auftrag['bauteile_override'] and auftrag['bauteile_override'] != arbeit %}
+          <div class="notiz">🔧 Bauteile: {{ auftrag['bauteile_override'] }}</div>
         {% endif %}
         {% if auftrag['schaden_zonen_labels'] %}
           <div class="chips">
