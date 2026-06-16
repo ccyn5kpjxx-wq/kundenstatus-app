@@ -29737,8 +29737,40 @@ def build_versicherung_schadenprotokoll(auftrag, dateien=None, prozess=None, tei
     }
 
 
+def kunden_status_timeline_kurz(auftrag):
+    auftrag = auftrag or {}
+    status = int(auftrag.get("status") or 1)
+    beschreibungen = {
+        1: "Ihr Fahrzeug ist bei uns erfasst.",
+        2: "Der Termin ist eingeplant.",
+        3: "Ihr Fahrzeug ist in der Werkstatt in Bearbeitung.",
+        4: "Die Arbeiten sind abgeschlossen, Ihr Fahrzeug ist abholbereit.",
+        5: "Ihr Fahrzeug wurde an Sie übergeben.",
+    }
+    steps = []
+    for rang in range(1, 6):
+        if status > rang or status >= 5:
+            state = "done"
+        elif status == rang:
+            state = "active"
+        else:
+            state = "waiting"
+        steps.append(
+            {
+                "label": STATUSLISTE[rang]["label"],
+                "detail": beschreibungen[rang],
+                "state": state,
+            }
+        )
+    return steps
+
+
 def kunden_status_timeline(auftrag, log=None, prozess=None, teile=None):
     auftrag = auftrag or {}
+    # Versicherungsfälle behalten die ausführliche Timeline; Autohaus/Privat sehen nur die 5 Status-Stufen.
+    ist_versicherungsfall = bool(auftrag.get("versicherung_id")) or clean_text(auftrag.get("quelle")) == "versicherung"
+    if not ist_versicherungsfall:
+        return kunden_status_timeline_kurz(auftrag)
     freigabe = normalize_freigabe_status(auftrag.get("versicherung_freigabe_status"))
     status = int(auftrag.get("status") or 1)
     has_insurance = bool(auftrag.get("versicherung_id"))
