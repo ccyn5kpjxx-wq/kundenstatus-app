@@ -37873,12 +37873,26 @@ def auftrag_detail(auftrag_id):
             flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.", "warning")
             return redirect(detail_self_url)
         upload_result = save_uploads(auftrag_id, erlaubte_dateien, "intern", "standard")
+        db = get_db()
+        vor_fertig_row = db.execute("SELECT COALESCE(MAX(id), 0) AS m FROM dateien").fetchone()
+        db.close()
+        vor_fertig_max = int(vor_fertig_row["m"]) if vor_fertig_row else 0
         fertigbilder_result = save_uploads(
             auftrag_id,
             get_allowed_finish_uploads(request.files.getlist("fertigbilder")),
             "intern",
             "fertigbild",
         )
+        if fertigbilder_result and fertigbilder_result[0]:
+            # Neu hochgeladene Fertigbilder sind standardmaessig fuer den Kunden sichtbar
+            # (konsistent mit Werkstatt-Tafel + "Bilder fuer das Autohaus").
+            db = get_db()
+            db.execute(
+                "UPDATE dateien SET kunde_sichtbar=1 WHERE auftrag_id=? AND id>? AND kategorie='fertigbild'",
+                (auftrag_id, vor_fertig_max),
+            )
+            db.commit()
+            db.close()
         if aktion == "upload_analyze":
             flash_upload_analysis_result(
                 upload_result,
@@ -38111,9 +38125,19 @@ def admin_fertigbilder_upload(auftrag_id):
         flash("Bitte ein Bild oder PDF als Fertigbild auswählen.", "warning")
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
+    db = get_db()
+    vor_row = db.execute("SELECT COALESCE(MAX(id), 0) AS m FROM dateien").fetchone()
+    db.close()
+    vor_max = int(vor_row["m"]) if vor_row else 0
     gespeichert, _ = save_uploads(auftrag_id, erlaubte_dateien, "intern", "fertigbild")
     if gespeichert:
         db = get_db()
+        # Neu hochgeladene Fertigbilder sind standardmaessig fuer den Kunden sichtbar
+        # (wie beim Werkstatt-Tafel-Upload). Pro Bild kann das im Auftrag wieder ausgeblendet werden.
+        db.execute(
+            "UPDATE dateien SET kunde_sichtbar=1 WHERE auftrag_id=? AND id>?",
+            (auftrag_id, vor_max),
+        )
         db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), auftrag_id))
         db.commit()
         db.close()
@@ -38122,7 +38146,7 @@ def admin_fertigbilder_upload(auftrag_id):
             "Neue Fertigbilder",
             f"Die Werkstatt hat {gespeichert} Fertigbild(er) hochgeladen.",
         )
-        flash(f"{gespeichert} Fertigbild(er) hochgeladen. Das Autohaus sieht sie im Portal.", "success")
+        flash(f"{gespeichert} Fertigbild(er) hochgeladen. Autohaus und Kunde sehen sie.", "success")
     else:
         flash("Es wurde kein Fertigbild gespeichert.", "warning")
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
