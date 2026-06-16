@@ -8740,6 +8740,8 @@ def init_db():
     ensure_column(db, "auftraege", "bonus_preis_aktualisiert_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "annahme_datum", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "start_datum", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "start_uhrzeit", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "fertig_uhrzeit", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "abholtermin", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "transport_art", "TEXT DEFAULT 'standard'")
     ensure_column(db, "auftraege", "archiviert", "INTEGER DEFAULT 0")
@@ -13978,12 +13980,16 @@ def build_auftrag_planung(auftrag, reference_date=None):
         if not event_date:
             continue
         label = auftrag_planung_label(auftrag, feld)
+        datum_text = clean_text(auftrag.get(feld))
+        uhrzeit = clean_text(auftrag.get({"start_datum": "start_uhrzeit", "fertig_datum": "fertig_uhrzeit"}.get(feld, "")))
+        if uhrzeit:
+            datum_text = f"{datum_text} · {uhrzeit} Uhr"
         events.append(
             {
                 "feld": feld,
                 "label": label,
                 "datum": event_date,
-                "datum_text": auftrag.get(feld),
+                "datum_text": datum_text,
                 "farbe": farbe,
                 "priority": priority,
                 "is_today": event_date == heute,
@@ -37809,7 +37815,9 @@ def auftrag_detail(auftrag_id):
                 analyse_text=?,
                 annahme_datum=?,
                 start_datum=?,
+                start_uhrzeit=?,
                 fertig_datum=?,
+                fertig_uhrzeit=?,
                 abholtermin=?,
                 transport_art=?,
                 bonus_netto_betrag=?,
@@ -37839,7 +37847,9 @@ def auftrag_detail(auftrag_id):
                 analyse,
                 format_date(form.get("annahme_datum")),
                 format_date(form.get("start_datum")),
+                format_time_value(form.get("start_uhrzeit")),
                 format_date(form.get("fertig_datum")),
+                format_time_value(form.get("fertig_uhrzeit")),
                 format_date(form.get("abholtermin")),
                 clean_text(form.get("transport_art")) or "standard",
                 bonus_netto_betrag,
