@@ -442,6 +442,7 @@
       <div class="uhr" data-uhr>{{ stand_label }}</div>
       <div>{{ datum_label }}</div>
     </div>
+    <button type="button" data-vollbild title="Vollbild ein/aus" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center;">⛶ Vollbild</button>
   </div>
 
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -561,6 +562,26 @@
         };
         ucTick();
         setInterval(ucTick, 1000);
+      }
+
+      // Vollbild-Umschalter fuer den Hallen-Bildschirm
+      const vollbildBtn = document.querySelector('[data-vollbild]');
+      if (vollbildBtn) {
+        const istVollbild = () => document.fullscreenElement || document.webkitFullscreenElement;
+        const setVollbildLabel = () => { vollbildBtn.textContent = istVollbild() ? '⛶ Vollbild beenden' : '⛶ Vollbild'; };
+        vollbildBtn.addEventListener('click', () => {
+          try {
+            if (istVollbild()) {
+              (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+            } else {
+              const el = document.documentElement;
+              (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+            }
+          } catch (e) {}
+        });
+        document.addEventListener('fullscreenchange', setVollbildLabel);
+        document.addEventListener('webkitfullscreenchange', setVollbildLabel);
+        setVollbildLabel();
       }
 
       // Wetter Mosbach (Open-Meteo, kein API-Key noetig; laedt bei jedem Reload neu)
