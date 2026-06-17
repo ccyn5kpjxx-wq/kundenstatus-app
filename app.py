@@ -13984,7 +13984,7 @@ def build_auftrag_planung(auftrag, reference_date=None):
             continue
         label = auftrag_planung_label(auftrag, feld)
         datum_text = clean_text(auftrag.get(feld))
-        uhrzeit = clean_text(auftrag.get({"annahme_datum": "annahme_uhrzeit", "start_datum": "start_uhrzeit", "fertig_datum": "fertig_uhrzeit", "abholtermin": "abhol_uhrzeit"}.get(feld, "")))
+        uhrzeit = clean_text(auftrag.get({"annahme_datum": "annahme_uhrzeit", "abholtermin": "abhol_uhrzeit"}.get(feld, "")))
         if uhrzeit:
             datum_text = f"{datum_text} · {uhrzeit} Uhr"
         events.append(
@@ -37817,11 +37817,11 @@ def auftrag_detail(auftrag_id):
                 beschreibung=?,
                 analyse_text=?,
                 annahme_datum=?,
+                annahme_uhrzeit=?,
                 start_datum=?,
-                start_uhrzeit=?,
                 fertig_datum=?,
-                fertig_uhrzeit=?,
                 abholtermin=?,
+                abhol_uhrzeit=?,
                 transport_art=?,
                 abhol_adresse=?,
                 bonus_netto_betrag=?,
@@ -37850,11 +37850,11 @@ def auftrag_detail(auftrag_id):
                 clean_text(form.get("beschreibung")),
                 analyse,
                 format_date(form.get("annahme_datum")),
+                format_time_value(form.get("annahme_uhrzeit")),
                 format_date(form.get("start_datum")),
-                format_time_value(form.get("start_uhrzeit")),
                 format_date(form.get("fertig_datum")),
-                format_time_value(form.get("fertig_uhrzeit")),
                 format_date(form.get("abholtermin")),
+                format_time_value(form.get("abhol_uhrzeit")),
                 clean_text(form.get("transport_art")) or "standard",
                 clean_text(form.get("abhol_adresse")),
                 bonus_netto_betrag,

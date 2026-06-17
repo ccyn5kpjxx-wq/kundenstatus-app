@@ -688,20 +688,20 @@
         <div class="col-md-2">
           <label class="form-label">{{ auftrag['annahme_label'] }}</label>
           <input type="date" name="annahme_datum" class="form-control form-control-lg" value="{{ auftrag['annahme_datum']|iso_date }}">
+          <input type="time" name="annahme_uhrzeit" class="form-control mt-1" value="{{ auftrag['annahme_uhrzeit'] }}" aria-label="Uhrzeit Anlieferung">
         </div>
         <div class="col-md-2">
           <label class="form-label">Start</label>
           <input type="date" name="start_datum" class="form-control form-control-lg" value="{{ auftrag['start_datum']|iso_date }}">
-          <input type="time" name="start_uhrzeit" class="form-control mt-1" value="{{ auftrag['start_uhrzeit'] }}" aria-label="Uhrzeit Reparaturstart">
         </div>
         <div class="col-md-2">
           <label class="form-label">Fertig</label>
           <input type="date" name="fertig_datum" class="form-control form-control-lg" value="{{ auftrag['fertig_datum']|iso_date }}">
-          <input type="time" name="fertig_uhrzeit" class="form-control mt-1" value="{{ auftrag['fertig_uhrzeit'] }}" aria-label="Uhrzeit Fertigstellung">
         </div>
         <div class="col-md-2">
           <label class="form-label">{{ auftrag['abholung_label'] }}</label>
           <input type="date" name="abholtermin" class="form-control form-control-lg" value="{{ auftrag['abholtermin']|iso_date }}">
+          <input type="time" name="abhol_uhrzeit" class="form-control mt-1" value="{{ auftrag['abhol_uhrzeit'] }}" aria-label="Uhrzeit Abholung">
         </div>
         <div class="col-md-6">
           <label class="form-label">Neue Unterlagen</label>
