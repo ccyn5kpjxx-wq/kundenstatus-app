@@ -8742,6 +8742,8 @@ def init_db():
     ensure_column(db, "auftraege", "start_datum", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "start_uhrzeit", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "fertig_uhrzeit", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "annahme_uhrzeit", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "abhol_uhrzeit", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "abholtermin", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "transport_art", "TEXT DEFAULT 'standard'")
     ensure_column(db, "auftraege", "archiviert", "INTEGER DEFAULT 0")
@@ -13981,7 +13983,7 @@ def build_auftrag_planung(auftrag, reference_date=None):
             continue
         label = auftrag_planung_label(auftrag, feld)
         datum_text = clean_text(auftrag.get(feld))
-        uhrzeit = clean_text(auftrag.get({"start_datum": "start_uhrzeit", "fertig_datum": "fertig_uhrzeit"}.get(feld, "")))
+        uhrzeit = clean_text(auftrag.get({"annahme_datum": "annahme_uhrzeit", "start_datum": "start_uhrzeit", "fertig_datum": "fertig_uhrzeit", "abholtermin": "abhol_uhrzeit"}.get(feld, "")))
         if uhrzeit:
             datum_text = f"{datum_text} · {uhrzeit} Uhr"
         events.append(
@@ -41343,6 +41345,13 @@ def partner_neuer_auftrag(slug):
             transport_art=clean_text(form.get("transport_art")) or "standard",
             kontakt_telefon=clean_text(form.get("kontakt_telefon")),
         )
+        _au = format_time_value(form.get("annahme_uhrzeit"))
+        _ab = format_time_value(form.get("abhol_uhrzeit"))
+        if _au or _ab:
+            _db = get_db()
+            _db.execute("UPDATE auftraege SET annahme_uhrzeit=?, abhol_uhrzeit=? WHERE id=?", (_au, _ab, auftrag_id))
+            _db.commit()
+            _db.close()
         try:
             upload_result = save_uploads(
                 auftrag_id,
