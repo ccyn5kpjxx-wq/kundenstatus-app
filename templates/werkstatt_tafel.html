@@ -422,6 +422,12 @@
       <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
       <h1>Werkstatt-Tafel</h1>
     </div>
+    {% if betriebsurlaub_start %}
+    <div data-urlaub-ziel="{{ betriebsurlaub_start }}" style="flex:1 1 auto; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.12rem; line-height:1.1; color:#fff;">
+      <span data-uc-zeit style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(.95rem,1.9vw,1.4rem); letter-spacing:.01em; white-space:nowrap;">…</span>
+      <span style="font-size:clamp(.58rem,1vw,.74rem); text-transform:uppercase; letter-spacing:.16em; color:rgba(255,255,255,.6);">bis Betriebsurlaub</span>
+    </div>
+    {% endif %}
     <div class="wetter" data-wetter hidden>
       <div class="wetter-jetzt">
         <span class="wetter-ikon" data-w-ikon>–</span>
@@ -534,6 +540,28 @@
       };
       tick();
       setInterval(tick, 10000);
+
+      // Live-Countdown bis zum Betriebsurlaub
+      const ucBox = document.querySelector('[data-urlaub-ziel]');
+      if (ucBox) {
+        const zielStr = ucBox.getAttribute('data-urlaub-ziel');
+        const zielZeit = zielStr ? new Date(zielStr + 'T00:00:00').getTime() : 0;
+        const ucOut = ucBox.querySelector('[data-uc-zeit]');
+        const pad = (n) => String(n).padStart(2, '0');
+        const ucTick = () => {
+          if (!zielZeit || !ucOut) return;
+          const diff = zielZeit - Date.now();
+          if (diff <= 0) { ucOut.textContent = 'Betriebsurlaub läuft'; return; }
+          let s = Math.floor(diff / 1000);
+          const w = Math.floor(s / 604800); s -= w * 604800;
+          const t = Math.floor(s / 86400); s -= t * 86400;
+          const h = Math.floor(s / 3600); s -= h * 3600;
+          const m = Math.floor(s / 60); s -= m * 60;
+          ucOut.textContent = `${w} ${w === 1 ? 'Woche' : 'Wochen'} · ${t} ${t === 1 ? 'Tag' : 'Tage'} · ${pad(h)}:${pad(m)}:${pad(s)}`;
+        };
+        ucTick();
+        setInterval(ucTick, 1000);
+      }
 
       // Wetter Mosbach (Open-Meteo, kein API-Key noetig; laedt bei jedem Reload neu)
       const wetterBox = document.querySelector('[data-wetter]');

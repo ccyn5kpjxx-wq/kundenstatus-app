@@ -31099,6 +31099,23 @@ def flash_betriebsurlaub_planungshinweis(*date_values):
         )
 
 
+def naechster_betriebsurlaub_start():
+    # Startdatum des naechsten (zukuenftigen) Betriebsurlaubs aus den Werkstatt-News.
+    try:
+        news_items = list_werkstatt_news(limit=200)
+    except Exception:
+        return None
+    heute = date.today()
+    starts = []
+    for news in news_items:
+        if not is_betriebsurlaub_news(news):
+            continue
+        start = parse_date(news.get("start_datum"))
+        if start and start >= heute:
+            starts.append(start)
+    return min(starts) if starts else None
+
+
 def analysis_loading_news(limit=6):
     items = []
     try:
@@ -40532,12 +40549,14 @@ def werkstatt_tafel():
         },
     )
     jetzt = datetime.now()
+    urlaub_start = naechster_betriebsurlaub_start()
     return render_template(
         "werkstatt_tafel.html",
         spalten=spalten,
         anzahl=len(auftraege),
         stand_label=jetzt.strftime("%H:%M"),
         datum_label=f"{WOCHENTAGE[jetzt.weekday()]}, {jetzt.strftime(DATE_FMT)}",
+        betriebsurlaub_start=urlaub_start.strftime("%Y-%m-%d") if urlaub_start else "",
     )
 
 
