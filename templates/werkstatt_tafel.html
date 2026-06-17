@@ -89,6 +89,64 @@
       font-weight: 700;
     }
 
+    /* Wetter Mosbach – sitzt mittig in der dunklen Navbar */
+    .wetter {
+      display: flex;
+      align-items: center;
+      gap: clamp(.8rem, 1.8vw, 1.6rem);
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    .wetter[hidden] { display: none; }
+
+    .wetter-jetzt {
+      display: flex;
+      align-items: center;
+      gap: .55rem;
+    }
+
+    .wetter-ikon {
+      font-size: clamp(1.7rem, 3.2vw, 2.6rem);
+      line-height: 1;
+    }
+
+    .wetter-temp {
+      font-family: "Space Grotesk", sans-serif;
+      font-weight: 700;
+      font-size: clamp(1.15rem, 2.2vw, 1.7rem);
+      line-height: 1.1;
+    }
+
+    .wetter-ort {
+      font-size: clamp(.7rem, 1.2vw, .9rem);
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .wetter-stunden {
+      display: flex;
+      gap: clamp(.4rem, 1vw, .8rem);
+    }
+
+    .wetter-std {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: .1rem;
+      padding: .3rem .6rem;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      min-width: 3.2em;
+    }
+
+    .wetter-std .zeit { font-size: clamp(.66rem, 1.1vw, .82rem); color: rgba(255, 255, 255, 0.6); }
+    .wetter-std .ikon { font-size: clamp(1rem, 1.8vw, 1.45rem); line-height: 1; }
+    .wetter-std .grad { font-size: clamp(.8rem, 1.3vw, 1rem); font-weight: 600; }
+    .wetter-std .regen { font-size: clamp(.6rem, 1vw, .76rem); color: #7fc7ff; white-space: nowrap; }
+
+    @media (max-width: 1180px) { .wetter-stunden { display: none; } }
+    @media (max-width: 820px) { .wetter { display: none; } }
+
     /* Flussdiagramm: Spalten von links nach rechts, Pfeile dazwischen */
     .board {
       display: grid;
@@ -363,6 +421,16 @@
       <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
       <h1>Werkstatt-Tafel</h1>
     </div>
+    <div class="wetter" data-wetter hidden>
+      <div class="wetter-jetzt">
+        <span class="wetter-ikon" data-w-ikon>–</span>
+        <div>
+          <div class="wetter-temp" data-w-temp>–</div>
+          <div class="wetter-ort" data-w-ort>Mosbach</div>
+        </div>
+      </div>
+      <div class="wetter-stunden" data-w-stunden></div>
+    </div>
     <div class="meta">
       <div class="uhr" data-uhr>{{ stand_label }}</div>
       <div>{{ datum_label }}</div>
@@ -462,6 +530,64 @@
       };
       tick();
       setInterval(tick, 10000);
+
+      // Wetter Mosbach (Open-Meteo, kein API-Key noetig; laedt bei jedem Reload neu)
+      const wetterBox = document.querySelector('[data-wetter]');
+      const wmo = (c) => {
+        if (c === 0) return ['☀️', 'Klar'];
+        if (c === 1) return ['🌤️', 'Heiter'];
+        if (c === 2) return ['⛅', 'Wolkig'];
+        if (c === 3) return ['☁️', 'Bedeckt'];
+        if (c === 45 || c === 48) return ['🌫️', 'Nebel'];
+        if (c >= 51 && c <= 57) return ['🌦️', 'Niesel'];
+        if (c >= 61 && c <= 67) return ['🌧️', 'Regen'];
+        if (c >= 71 && c <= 77) return ['🌨️', 'Schnee'];
+        if (c >= 80 && c <= 82) return ['🌦️', 'Schauer'];
+        if (c === 85 || c === 86) return ['🌨️', 'Schneeschauer'];
+        if (c >= 95) return ['⛈️', 'Gewitter'];
+        return ['🌡️', '—'];
+      };
+      const wetterLaden = async () => {
+        if (!wetterBox) return;
+        try {
+          const url = 'https://api.open-meteo.com/v1/forecast'
+            + '?latitude=49.353&longitude=9.145'
+            + '&current=temperature_2m,weather_code'
+            + '&hourly=temperature_2m,weather_code,precipitation_probability'
+            + '&timezone=Europe%2FBerlin&forecast_days=2';
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const d = await resp.json();
+          const [ikon, text] = wmo(d.current.weather_code);
+          wetterBox.querySelector('[data-w-ikon]').textContent = ikon;
+          wetterBox.querySelector('[data-w-temp]').textContent = Math.round(d.current.temperature_2m) + '°';
+          wetterBox.querySelector('[data-w-ort]').textContent = 'Mosbach · ' + text;
+          // naechste drei Stunden
+          const h = d.hourly;
+          const jetzt = new Date();
+          let start = h.time.findIndex((t) => new Date(t) > jetzt);
+          if (start < 0) start = 0;
+          const stundenBox = wetterBox.querySelector('[data-w-stunden]');
+          stundenBox.innerHTML = '';
+          for (let i = start; i < start + 3 && i < h.time.length; i++) {
+            const [si] = wmo(h.weather_code[i]);
+            const std = new Date(h.time[i]).getHours();
+            const pop = h.precipitation_probability ? h.precipitation_probability[i] : null;
+            const el = document.createElement('div');
+            el.className = 'wetter-std';
+            el.innerHTML =
+              '<span class="zeit">' + std + ' Uhr</span>'
+              + '<span class="ikon">' + si + '</span>'
+              + '<span class="grad">' + Math.round(h.temperature_2m[i]) + '°</span>'
+              + (pop != null && pop >= 20 ? '<span class="regen">💧 ' + pop + '%</span>' : '');
+            stundenBox.appendChild(el);
+          }
+          wetterBox.hidden = false;
+        } catch (fehler) {
+          wetterBox.hidden = true;
+        }
+      };
+      wetterLaden();
 
       // Tafel jede Minute neu laden — aber nie mitten in einem Drag-Vorgang
       let dragAktiv = false;
