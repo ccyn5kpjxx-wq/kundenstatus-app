@@ -87,6 +87,11 @@
           <label class="form-label">Rückgabe</label>
           <input type="date" name="abholtermin" class="form-control form-control-lg">
         </div>
+        <div class="col-12" id="abhol-adresse-wrap" style="display:none;">
+          <label class="form-label">📍 Abhol-/Lieferadresse</label>
+          <input type="text" name="abhol_adresse" class="form-control form-control-lg" placeholder="z.B. Unteres Lohhaus 5, 74915 Waibstadt">
+          <div class="form-text">Beim Hol- und Bringservice: erscheint auf der Werkstatt-Tafel, damit der Mitarbeiter weiss, wo das Auto zu holen/bringen ist.</div>
+        </div>
         <div class="col-md-6">
           <label class="form-label">Anhänge</label>
           <input type="file" name="dateien" class="form-control form-control-lg" multiple>
@@ -105,4 +110,14 @@
     </div>
   </div>
 </div>
+<script>
+  (function(){
+    var sel = document.querySelector('select[name="transport_art"]');
+    var wrap = document.getElementById('abhol-adresse-wrap');
+    if (!sel || !wrap) return;
+    function toggle(){ wrap.style.display = (sel.value === 'hol_und_bring') ? '' : 'none'; }
+    sel.addEventListener('change', toggle);
+    toggle();
+  })();
+</script>
 {% endblock %}

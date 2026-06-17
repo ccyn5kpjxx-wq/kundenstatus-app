@@ -37781,6 +37781,12 @@ def neuer_auftrag():
             kontakt_telefon=clean_text(form.get("kontakt_telefon")),
             notiz_intern=clean_text(form.get("notiz_intern")),
         )
+        _adr = clean_text(form.get("abhol_adresse"))
+        if _adr:
+            _db = get_db()
+            _db.execute("UPDATE auftraege SET abhol_adresse=? WHERE id=?", (_adr, auftrag_id))
+            _db.commit()
+            _db.close()
         upload_result = save_uploads(auftrag_id, erlaubte_dateien, "intern", "standard")
         if aktion == "upload_analyze":
             flash_upload_analysis_result(
@@ -41399,9 +41405,10 @@ def partner_neuer_auftrag(slug):
         )
         _au = format_time_value(form.get("annahme_uhrzeit"))
         _ab = format_time_value(form.get("abhol_uhrzeit"))
-        if _au or _ab:
+        _adr = clean_text(form.get("abhol_adresse"))
+        if _au or _ab or _adr:
             _db = get_db()
-            _db.execute("UPDATE auftraege SET annahme_uhrzeit=?, abhol_uhrzeit=? WHERE id=?", (_au, _ab, auftrag_id))
+            _db.execute("UPDATE auftraege SET annahme_uhrzeit=?, abhol_uhrzeit=?, abhol_adresse=? WHERE id=?", (_au, _ab, _adr, auftrag_id))
             _db.commit()
             _db.close()
         try:

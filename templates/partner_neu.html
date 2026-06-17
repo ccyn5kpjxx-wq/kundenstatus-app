@@ -216,6 +216,11 @@
           <input type="date" name="abholtermin" class="form-control form-control-lg">
           <input type="time" name="abhol_uhrzeit" class="form-control form-control-lg mt-1" aria-label="Uhrzeit Abholung">
         </div>
+        <div class="col-12" id="abhol-adresse-wrap" style="display:none;">
+          <label class="form-label">📍 Abhol-/Lieferadresse</label>
+          <input type="text" name="abhol_adresse" class="form-control form-control-lg" placeholder="z.B. Unteres Lohhaus 5, 74915 Waibstadt">
+          <div class="form-text">Beim Hol- und Bringservice: erscheint auf der Werkstatt-Tafel, damit der Mitarbeiter weiss, wo das Auto zu holen/bringen ist.</div>
+        </div>
         <div class="col-12 mobile-actions">
           <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark btn-lg" data-loading-message="Datei wird analysiert. Bitte kurz warten.">Hochladen & analysieren</button>
           <button type="submit" name="aktion" value="speichern" class="btn btn-dark btn-lg" data-loading-message="Auftrag wird gespeichert. Bitte kurz warten.">Fahrzeug speichern</button>
@@ -234,6 +239,7 @@
     const transportSelect = document.querySelector('[data-transport-select]');
     const annahmeLabel = document.querySelector('[data-annahme-label]');
     const abholungLabel = document.querySelector('[data-abholung-label]');
+    const abholAdresseWrap = document.getElementById('abhol-adresse-wrap');
     const loadingNewsItems = {{ analysis_loading_news() | tojson }};
     let loadingNewsIndex = 0;
     let loadingNewsTimer = null;
@@ -277,6 +283,9 @@
       }
       if (abholungLabel) {
         abholungLabel.textContent = selected.partner_abholung_label || 'Fahrzeug wird von Ihnen geholt';
+      }
+      if (abholAdresseWrap) {
+        abholAdresseWrap.style.display = (transportSelect.value === 'hol_und_bring') ? '' : 'none';
       }
     };
     if (transportSelect) {
