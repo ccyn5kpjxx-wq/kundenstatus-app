@@ -20000,20 +20000,21 @@ def notify_workshop_whatsapp_for_new_order(auftrag_id, absender_label="Autohaus"
 def notify_customer_whatsapp_fertig(auftrag):
     # Schickt dem Endkunden per WhatsApp Bescheid, dass sein Fahrzeug fertig ist.
     # Nutzt die vorhandene Benachrichtigungs-Vorlage (Template) mit Free-Text-Fallback im 24-h-Fenster.
+    # Rueckgabe: (ok, grund) — grund erklaert bei Misserfolg, warum nichts gesendet wurde.
     if not auftrag:
-        return False
+        return False, ""
     if whatsapp_bridge_config_errors():
-        return False
+        return False, "WhatsApp-Bridge ist nicht vollständig konfiguriert."
     telefon = clean_text(auftrag.get("kontakt_telefon"))
     if not telefon:
-        return False
+        return False, "Keine Handynummer beim Kunden hinterlegt."
     auftrag_id = int(auftrag.get("id") or 0)
     fahrzeug = clean_text(auftrag.get("fahrzeug")) or "Ihr Fahrzeug"
     nachricht = (
         f"Guten Tag, {fahrzeug} ist fertig und kann abgeholt werden. "
         "Ihr Team von Gärtner Karosserie & Lack, Binauer Höhe 4, 74821 Mosbach, Tel. +49 1522 7706694."
     )
-    ok, _ = send_whatsapp_notice_with_fallback(
+    ok, errors = send_whatsapp_notice_with_fallback(
         auftrag_id,
         chat_id=0,
         target_number=telefon,
@@ -20022,7 +20023,16 @@ def notify_customer_whatsapp_fertig(auftrag):
         auftrag=auftrag,
         absender_label="Gärtner Karosserie & Lack",
     )
-    return ok
+    if ok:
+        return True, ""
+    grund = whatsapp_error_summary(errors)
+    if not whatsapp_message_template_enabled():
+        hinweis = (
+            "Kein freigegebenes WhatsApp-Template hinterlegt (WHATSAPP_NOTIFICATION_TEMPLATE). "
+            "WhatsApp lässt vom Betrieb gestartete Nachrichten an Kunden außerhalb des 24-Stunden-Fensters nur per Template zu."
+        )
+        grund = f"{grund} — {hinweis}" if grund else hinweis
+    return False, grund
 
 
 def build_whatsapp_template_payload(to_phone, auftrag, nachricht, absender_label="Autohaus"):
@@ -38948,7 +38958,9 @@ def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status):
         frisch = get_auftrag(auftrag_id)
         if frisch:
             sende_endkunden_mail(auftrag_id, "Ihr Fahrzeug ist fertig", baue_endkunden_fertig_mail(frisch))
-            notify_customer_whatsapp_fertig(frisch)
+            wa_ok, wa_grund = notify_customer_whatsapp_fertig(frisch)
+            if not wa_ok and wa_grund and has_request_context():
+                flash(f"Hinweis: WhatsApp an den Kunden wurde nicht gesendet. {wa_grund}", "warning")
     if neuer_status >= 5 and endkunden_status_mail_noetig(auftrag_id, 5):
         frisch = get_auftrag(auftrag_id)
         if frisch:
