@@ -656,6 +656,11 @@
           <input type="text" name="kontakt_telefon" class="form-control" value="{{ auftrag['kontakt_telefon'] }}" placeholder="z.B. 0171 1234567">
         </div>
         <div class="col-md-6">
+          <label class="form-label">Abhol-/Lieferadresse</label>
+          <input type="text" name="abhol_adresse" class="form-control" value="{{ auftrag['abhol_adresse'] }}" placeholder="z.B. Unteres Lohhaus 5, 74915 Waibstadt">
+          <div class="form-text">Beim Hol- und Bringservice in der Werkstatt-Tafel sichtbar.</div>
+        </div>
+        <div class="col-md-6">
           <label class="form-label">Analyse</label>
           <input type="text" name="analyse_text" class="form-control" value="{{ auftrag['analyse_text'] }}">
         </div>

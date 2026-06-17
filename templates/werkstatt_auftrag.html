@@ -523,6 +523,18 @@
 
     <div>
       <div class="panel">
+        <h2>📍 Abhol-/Lieferadresse</h2>
+        {% if auftrag['abhol_adresse'] %}
+        <div style="font-size:clamp(1rem,1.6vw,1.2rem); font-weight:600; margin-bottom:.5rem;">{{ auftrag['abhol_adresse'] }}</div>
+        <a href="https://www.google.com/maps/search/?api=1&query={{ auftrag['abhol_adresse']|urlencode }}" target="_blank" rel="noopener" style="display:inline-block; background:var(--accent); color:#fff; text-decoration:none; border-radius:12px; padding:.45rem 1rem; font-weight:600; margin-bottom:.8rem;">🗺 Route öffnen</a>
+        {% endif %}
+        <form method="POST" action="{{ url_for('werkstatt_auftrag_adresse', auftrag_id=auftrag['id']) }}" style="display:grid; gap:.5rem;">
+          <input type="text" name="abhol_adresse" value="{{ auftrag['abhol_adresse'] or '' }}" placeholder="z.B. Unteres Lohhaus 5, 74915 Waibstadt" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:#fff;">
+          <button type="submit" style="justify-self:start; background:var(--brand); color:#fff; border:none; border-radius:12px; padding:.5rem 1.1rem; font-weight:600; cursor:pointer;">Adresse speichern</button>
+        </form>
+      </div>
+
+      <div class="panel">
         <h2>Termine</h2>
         {% set events = auftrag['planung']['events'] %}
         {% if events %}

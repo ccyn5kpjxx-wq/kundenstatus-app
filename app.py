@@ -8681,6 +8681,7 @@ def init_db():
     ensure_column(db, "auftraege", "messung_erforderlich", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "variantencode", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "angemischte_menge", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "abhol_adresse", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "analyse_text", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "fin_nummer", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kilometerstand", "TEXT DEFAULT ''")
@@ -37822,6 +37823,7 @@ def auftrag_detail(auftrag_id):
                 fertig_uhrzeit=?,
                 abholtermin=?,
                 transport_art=?,
+                abhol_adresse=?,
                 bonus_netto_betrag=?,
                 bonus_preis_aktualisiert_am=?,
                 kontakt_telefon=?,
@@ -37854,6 +37856,7 @@ def auftrag_detail(auftrag_id):
                 format_time_value(form.get("fertig_uhrzeit")),
                 format_date(form.get("abholtermin")),
                 clean_text(form.get("transport_art")) or "standard",
+                clean_text(form.get("abhol_adresse")),
                 bonus_netto_betrag,
                 bonus_preis_aktualisiert_am,
                 clean_text(form.get("kontakt_telefon")),
@@ -40621,6 +40624,26 @@ def werkstatt_auftrag_variante(auftrag_id):
     db.commit()
     db.close()
     flash("Lackdaten gespeichert.", "success")
+    return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
+
+
+@app.route("/werkstatt/auftrag/<int:auftrag_id>/adresse", methods=["POST"])
+def werkstatt_auftrag_adresse(auftrag_id):
+    # Abhol-/Lieferadresse fuer den Hol- und Bringservice am Auftrag hinterlegen.
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("archiviert"):
+        abort(404)
+    db = get_db()
+    db.execute(
+        "UPDATE auftraege SET abhol_adresse=?, geaendert_am=? WHERE id=?",
+        (clean_text(request.form.get("abhol_adresse")), now_str(), auftrag_id),
+    )
+    db.commit()
+    db.close()
+    flash("Adresse gespeichert.", "success")
     return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
 
 
