@@ -301,6 +301,7 @@
     }
 
     .badge.b-danger { background: var(--danger); }
+    .neu-badge { flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; min-width:1.55rem; height:1.55rem; background:var(--danger); color:#fff; border-radius:999px; font-weight:800; font-size:.95rem; padding:0 .4rem; box-shadow:0 1px 4px rgba(0,0,0,.25); }
     .badge.b-success { background: var(--good); }
     .badge.b-primary { background: var(--accent); }
     .badge.b-warning { background: var(--warning); }
@@ -460,6 +461,9 @@
       <a class="karte" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}"
          draggable="true" data-auftrag="{{ auftrag['id'] }}" data-status="{{ auftrag['status'] }}">
         <div class="karte-kopf">
+          {% if auftrag['werkstatt_neu'] %}
+            <span class="neu-badge" title="Neu vom Autohaus eingeplant">1</span>
+          {% endif %}
           {% if auftrag['kennzeichen'] %}
             <span class="kennzeichen">{{ auftrag['kennzeichen'] }}</span>
           {% else %}

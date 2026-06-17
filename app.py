@@ -8682,6 +8682,7 @@ def init_db():
     ensure_column(db, "auftraege", "variantencode", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "angemischte_menge", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "abhol_adresse", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "werkstatt_neu", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "analyse_text", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "fin_nummer", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kilometerstand", "TEXT DEFAULT ''")
@@ -26627,6 +26628,8 @@ def create_auftrag(
         "INSERT INTO status_log (auftrag_id, status, zeitstempel) VALUES (?, 1, ?)",
         (auftrag_id, jetzt),
     )
+    if clean_text(quelle) == "autohaus":
+        db.execute("UPDATE auftraege SET werkstatt_neu=1 WHERE id=?", (auftrag_id,))
     db.commit()
     db.close()
     return auftrag_id
@@ -40546,6 +40549,12 @@ def werkstatt_auftrag(auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag or auftrag.get("archiviert"):
         abort(404)
+    if auftrag.get("werkstatt_neu"):
+        db = get_db()
+        db.execute("UPDATE auftraege SET werkstatt_neu=0 WHERE id=?", (auftrag_id,))
+        db.commit()
+        db.close()
+        auftrag["werkstatt_neu"] = 0
     # Kein original_available-Filter: send_upload_file stellt fehlende Dateien
     # beim Abruf aus dem Datenbank-Backup wieder her (Render-Speicher ist fluechtig).
     dateien = [datei for datei in list_dateien(auftrag_id) if werkstatt_datei_sichtbar(datei)]
