@@ -10286,6 +10286,15 @@ def customer_status_share_message(auftrag, status_update=False):
     )
 
 
+def customer_fertig_whatsapp_message(auftrag):
+    name = clean_text((auftrag or {}).get("kunde_name")) or "zusammen"
+    fahrzeug = clean_text((auftrag or {}).get("fahrzeug")) or "Ihr Fahrzeug"
+    return (
+        f"Hallo {name}, {fahrzeug} ist fertig und kann abgeholt werden. "
+        "Viele Grüße, Gärtner Karosserie & Lack, Tel. +49 1522 7706694."
+    )
+
+
 def customer_whatsapp_url(auftrag, message=None):
     phone_key = whatsapp_number_key((auftrag or {}).get("kontakt_telefon"))
     body = clean_text(message) or customer_status_share_message(auftrag)
@@ -40549,6 +40558,7 @@ def werkstatt_auftrag(auftrag_id):
         unterlagen=unterlagen,
         statusliste=STATUSLISTE,
         erlaubte_status=WERKSTATT_TAFEL_ERLAUBTE_STATUS,
+        kunde_whatsapp_url=customer_whatsapp_url(auftrag, customer_fertig_whatsapp_message(auftrag)),
     )
 
 

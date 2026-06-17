@@ -432,6 +432,14 @@
       </div>
       {% endif %}
 
+      {% if kunde_whatsapp_url %}
+      <div class="panel">
+        <h2>📲 Kunde benachrichtigen</h2>
+        <a href="{{ kunde_whatsapp_url }}" target="_blank" rel="noopener" style="display:inline-flex; align-items:center; gap:.5rem; background:#25D366; color:#fff; text-decoration:none; border-radius:14px; padding:.75rem 1.4rem; font-weight:700; font-size:1.05rem;">WhatsApp: „Fahrzeug fertig" senden</a>
+        <div style="color:var(--muted); margin-top:.6rem; font-size:.92rem;">Öffnet WhatsApp mit fertiger Nachricht an den Kunden — nur noch auf „Senden" tippen.</div>
+      </div>
+      {% endif %}
+
       <div class="panel">
         <h2>Was zu machen ist</h2>
         {% set arbeit = auftrag['analyse_text'] or auftrag['werkstatt_angebot_text'] or auftrag['beschreibung'] %}
