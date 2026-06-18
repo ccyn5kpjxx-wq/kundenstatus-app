@@ -49,7 +49,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 1rem;
-      padding: clamp(.7rem, 1.5vw, 1.1rem) clamp(.9rem, 2vw, 1.8rem);
+      padding: clamp(.35rem, .9vw, .65rem) clamp(.6rem, 1.5vw, 1.2rem);
       background: rgba(18, 30, 43, 0.94);
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       box-shadow: 0 12px 30px rgba(18, 30, 43, 0.18);
@@ -85,7 +85,7 @@
     .topbar .uhr {
       color: #fff;
       font-family: "Space Grotesk", sans-serif;
-      font-size: clamp(1.3rem, 2.5vw, 1.9rem);
+      font-size: clamp(1.05rem, 1.9vw, 1.45rem);
       font-weight: 700;
     }
 
@@ -150,9 +150,9 @@
     /* Flussdiagramm: Spalten von links nach rechts, Pfeile dazwischen */
     .board {
       display: grid;
-      grid-template-columns: 1fr 44px 1fr 44px 1fr 44px 1fr;
-      gap: clamp(.5rem, 1vw, .9rem);
-      padding: clamp(.8rem, 1.6vw, 1.5rem) clamp(.9rem, 2vw, 1.8rem) 3rem;
+      grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr) 24px minmax(0, 1fr) 24px minmax(0, 1fr);
+      gap: clamp(.3rem, .6vw, .55rem);
+      padding: clamp(.45rem, .9vw, .8rem) clamp(.5rem, 1vw, .9rem) 2rem;
       align-items: start;
     }
 
@@ -160,9 +160,9 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-top: clamp(3.2rem, 6vw, 4.6rem);
+      margin-top: clamp(1.8rem, 3.5vw, 2.6rem);
       color: var(--brand);
-      font-size: clamp(1.6rem, 3vw, 2.4rem);
+      font-size: clamp(1rem, 1.8vw, 1.4rem);
       font-weight: 700;
       user-select: none;
     }
@@ -177,8 +177,9 @@
       border: 1px solid var(--line);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
-      padding: clamp(.7rem, 1.2vw, 1.1rem);
-      min-height: 32vh;
+      padding: clamp(.4rem, .7vw, .65rem);
+      min-height: 22vh;
+      min-width: 0;
     }
 
     .spalte.s-angelegt { border-top: 5px solid var(--muted); }
@@ -197,8 +198,8 @@
 
     .schritt-nr {
       flex: 0 0 auto;
-      width: 2em;
-      height: 2em;
+      width: 1.7em;
+      height: 1.7em;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -206,7 +207,7 @@
       color: #fff;
       font-family: "Space Grotesk", sans-serif;
       font-weight: 700;
-      font-size: clamp(.95rem, 1.6vw, 1.25rem);
+      font-size: clamp(.78rem, 1.1vw, .95rem);
     }
 
     .s-angelegt .schritt-nr { background: var(--muted); }
@@ -218,7 +219,7 @@
     .spalte-kopf h2 {
       margin: 0;
       flex: 1;
-      font-size: clamp(1rem, 1.9vw, 1.4rem);
+      font-size: clamp(.82rem, 1.2vw, 1.02rem);
     }
 
     .spalte-kopf .zaehler {
@@ -229,7 +230,7 @@
       border-radius: 999px;
       padding: .2em .55em;
       font-weight: 700;
-      font-size: clamp(.95rem, 1.6vw, 1.25rem);
+      font-size: clamp(.78rem, 1.1vw, .95rem);
     }
 
     .spalte-hinweis {
@@ -245,8 +246,9 @@
       background: #fff;
       border: 1px solid var(--line);
       border-radius: 16px;
-      padding: clamp(.7rem, 1.1vw, 1rem);
-      margin-bottom: clamp(.55rem, 1vw, .9rem);
+      padding: clamp(.4rem, .75vw, .65rem);
+      margin-bottom: clamp(.35rem, .6vw, .55rem);
+      overflow-wrap: anywhere;
       transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
     }
 
@@ -278,8 +280,8 @@
       color: #111;
       font-family: "Space Grotesk", sans-serif;
       font-weight: 700;
-      font-size: clamp(1.05rem, 1.9vw, 1.5rem);
-      letter-spacing: .06em;
+      font-size: clamp(.85rem, 1.3vw, 1.1rem);
+      letter-spacing: .04em;
       border: 1.5px solid #1d293a;
       border-left: 10px solid #1d4ed8;
       border-radius: 6px;
@@ -315,13 +317,13 @@
 
     .fahrzeug {
       font-weight: 700;
-      font-size: clamp(.98rem, 1.7vw, 1.3rem);
-      margin-bottom: .25rem;
+      font-size: clamp(.82rem, 1.15vw, 1.02rem);
+      margin-bottom: .2rem;
     }
 
     .arbeit {
       color: var(--muted);
-      font-size: clamp(.88rem, 1.45vw, 1.08rem);
+      font-size: clamp(.74rem, 1vw, .88rem);
       line-height: 1.4;
       margin-bottom: .4rem;
       display: -webkit-box;
@@ -341,8 +343,8 @@
       border: 1px solid var(--line);
       border-radius: 999px;
       color: var(--muted);
-      padding: .18em .65em;
-      font-size: clamp(.76rem, 1.25vw, .95rem);
+      padding: .14em .5em;
+      font-size: clamp(.66rem, .9vw, .78rem);
       white-space: nowrap;
     }
 
@@ -351,15 +353,15 @@
     .schnell-knopf {
       display: block;
       width: 100%;
-      margin-top: .55rem;
+      margin-top: .4rem;
       border: 1.5px solid var(--accent);
       background: rgba(20, 93, 102, .07);
       color: var(--accent);
       border-radius: 12px;
-      padding: .5em .8em;
+      padding: .4em .65em;
       font-family: inherit;
       font-weight: 700;
-      font-size: clamp(.88rem, 1.45vw, 1.08rem);
+      font-size: clamp(.74rem, 1vw, .88rem);
       cursor: pointer;
     }
 
