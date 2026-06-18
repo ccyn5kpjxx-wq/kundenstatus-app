@@ -325,6 +325,11 @@ LEXWARE_MIN_DATE = date(2014, 1, 1)
 DATE_FMT = "%d.%m.%Y"
 DATETIME_FMT = "%d.%m.%Y %H:%M"
 MAX_UPLOAD_MB = 25
+# Speicherschutz fuer die lokale OCR: das Arbeitsbild (nach dem Hochskalieren)
+# nie ueber diese Kantenlaenge (laengste Seite, px) wachsen lassen. Verhindert
+# RAM-Spitzen von mehreren hundert MB bei grossen Handyfotos/Scans. Per Env
+# (OCR_MAX_DIM) anpassbar.
+OCR_MAX_DIM = env_int("OCR_MAX_DIM", 2200)
 BACKUP_DIR = pathlib.Path(
     os.environ.get(
         "BACKUP_DIR",
@@ -6147,7 +6152,16 @@ def preprocess_cv_image(image):
         return image
     try:
         gray = cv2_module.cvtColor(image, cv2_module.COLOR_BGR2GRAY)
-        scaled = cv2_module.resize(gray, None, fx=2, fy=2, interpolation=cv2_module.INTER_CUBIC)
+        longest = max(gray.shape[:2])
+        # Kleine Belege weiter 2x hochskalieren (bessere OCR); grosse Bilder aber
+        # auf OCR_MAX_DIM begrenzen statt zu vervierfachen -> beschraenkt den RAM.
+        if longest * 2 <= OCR_MAX_DIM:
+            scaled = cv2_module.resize(gray, None, fx=2, fy=2, interpolation=cv2_module.INTER_CUBIC)
+        elif longest > OCR_MAX_DIM:
+            factor = OCR_MAX_DIM / float(longest)
+            scaled = cv2_module.resize(gray, None, fx=factor, fy=factor, interpolation=cv2_module.INTER_AREA)
+        else:
+            scaled = gray
         _, threshold = cv2_module.threshold(
             scaled, 0, 255, cv2_module.THRESH_BINARY + cv2_module.THRESH_OTSU
         )
