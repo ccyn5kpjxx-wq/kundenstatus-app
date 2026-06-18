@@ -150,7 +150,7 @@
     /* Flussdiagramm: Spalten von links nach rechts, Pfeile dazwischen */
     .board {
       display: grid;
-      grid-template-columns: 1fr 44px 1fr 44px 1fr;
+      grid-template-columns: 1fr 44px 1fr 44px 1fr 44px 1fr;
       gap: clamp(.5rem, 1vw, .9rem);
       padding: clamp(.8rem, 1.6vw, 1.5rem) clamp(.9rem, 2vw, 1.8rem) 3rem;
       align-items: start;
@@ -181,6 +181,8 @@
       min-height: 32vh;
     }
 
+    .spalte.s-angelegt { border-top: 5px solid var(--muted); }
+    .spalte.s-eingeplant { border-top: 5px solid var(--accent); }
     .spalte.s-geplant { border-top: 5px solid var(--accent); }
     .spalte.s-in_arbeit { border-top: 5px solid var(--warning); }
     .spalte.s-fertig { border-top: 5px solid var(--good); }
@@ -207,6 +209,8 @@
       font-size: clamp(.95rem, 1.6vw, 1.25rem);
     }
 
+    .s-angelegt .schritt-nr { background: var(--muted); }
+    .s-eingeplant .schritt-nr { background: var(--accent); }
     .s-geplant .schritt-nr { background: var(--accent); }
     .s-in_arbeit .schritt-nr { background: var(--warning); }
     .s-fertig .schritt-nr { background: var(--good); }
@@ -509,7 +513,9 @@
             <span class="chip">{{ auftrag['abholung_label'] }}: <strong>{{ auftrag['abholtermin'] }}</strong></span>
           {% endif %}
         </div>
-        {% if auftrag['status'] <= 2 %}
+        {% if auftrag['status'] == 1 %}
+        <button type="button" class="schnell-knopf" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="2">📅 Einplanen →</button>
+        {% elif auftrag['status'] == 2 %}
         <button type="button" class="schnell-knopf" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="3">🔧 In Arbeit nehmen →</button>
         {% elif auftrag['status'] == 3 %}
         <button type="button" class="schnell-knopf fertig" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="4">✅ Fertig melden →</button>

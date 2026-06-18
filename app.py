@@ -40464,7 +40464,7 @@ def versicherung_datei(slug, datei_id):
 # Admins sehen die Tafel ohne extra Anmeldung.
 
 
-WERKSTATT_TAFEL_ERLAUBTE_STATUS = (2, 3, 4)
+WERKSTATT_TAFEL_ERLAUBTE_STATUS = (1, 2, 3, 4)
 
 
 def werkstatt_datei_sichtbar(datei):
@@ -40527,11 +40527,18 @@ def werkstatt_tafel():
     ]
     spalten = (
         {
-            "key": "geplant",
-            "titel": "Geplant / Angenommen",
+            "key": "angelegt",
+            "titel": "Angelegt — neu gemeldet",
+            "icon": "📝",
+            "ziel_status": 1,
+            "auftraege": [a for a in auftraege if a["status"] == 1],
+        },
+        {
+            "key": "eingeplant",
+            "titel": "Eingeplant",
             "icon": "📅",
             "ziel_status": 2,
-            "auftraege": [a for a in auftraege if a["status"] <= 2],
+            "auftraege": [a for a in auftraege if a["status"] == 2],
         },
         {
             "key": "in_arbeit",
