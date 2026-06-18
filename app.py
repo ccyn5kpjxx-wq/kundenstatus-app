@@ -14024,7 +14024,7 @@ def build_auftrag_planung(auftrag, reference_date=None):
     elif status >= 3:
         relevante_felder = ("fertig_datum", "abholtermin")
     elif status >= 2:
-        relevante_felder = ("start_datum", "fertig_datum", "abholtermin")
+        relevante_felder = ("annahme_datum", "start_datum", "fertig_datum", "abholtermin")
     else:
         relevante_felder = ("annahme_datum", "start_datum", "fertig_datum", "abholtermin")
 
@@ -38953,7 +38953,9 @@ def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status):
     """
     auftrag_id = auftrag["id"]
     heute = format_date(date.today().strftime("%Y-%m-%d"))
-    start_datum = auftrag["start_datum"] or heute if neuer_status >= 2 else auftrag["start_datum"]
+    # Reparaturstart erst ab "In Arbeit" (3) setzen; bei Angelegt/Eingeplant bleibt die
+    # Anlieferung (Holen/Kunde bringt) das relevante Datum, kein voreiliges "Start heute".
+    start_datum = (auftrag["start_datum"] or heute) if neuer_status >= 3 else ""
     fertig_datum = auftrag["fertig_datum"] or heute if neuer_status >= 4 else auftrag["fertig_datum"]
     abholtermin = auftrag["abholtermin"] or heute if neuer_status >= 5 else auftrag["abholtermin"]
 
