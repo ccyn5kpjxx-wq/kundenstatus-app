@@ -3150,6 +3150,11 @@ def generate_werkstatt_tafel_code():
     return "".join(secrets.choice(WERKSTATT_TAFEL_CODE_ALPHABET) for _ in range(6))
 
 
+def generate_autohaus_zugangscode():
+    # 8 Zeichen aus eindeutigem Alphabet (keine 0/O/1/I-Verwechsler) — gut diktierbar
+    return "".join(secrets.choice(WERKSTATT_TAFEL_CODE_ALPHABET) for _ in range(8))
+
+
 def get_werkstatt_tafel_code():
     return clean_secret_value(
         get_app_setting(WERKSTATT_TAFEL_CODE_SETTING)
@@ -32701,6 +32706,27 @@ def admin_autohaus_koordinator_email(autohaus_id):
         else "Koordinator-E-Mail entfernt — dieses Autohaus bekommt keine automatischen E-Mails.",
         "success",
     )
+    return redirect(url_for("admin_zugaenge"))
+
+
+@app.route("/admin/autohaus/<int:autohaus_id>/zugangscode", methods=["POST"])
+@admin_required
+def admin_autohaus_zugangscode(autohaus_id):
+    autohaus = get_autohaus(autohaus_id)
+    if not autohaus:
+        abort(404)
+    code = clean_text(request.form.get("zugangscode"))
+    if code and len(code) < 4:
+        flash("Zugangscode zu kurz — bitte mindestens 4 Zeichen.", "warning")
+        return redirect(url_for("admin_zugaenge"))
+    if not code:
+        code = generate_autohaus_zugangscode()
+    code = code[:40]
+    db = get_db()
+    db.execute("UPDATE autohaeuser SET zugangscode=? WHERE id=?", (code, autohaus_id))
+    db.commit()
+    db.close()
+    flash(f"Zugangscode für {autohaus['name']} geändert: {code}", "success")
     return redirect(url_for("admin_zugaenge"))
 
 

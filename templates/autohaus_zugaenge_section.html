@@ -28,6 +28,14 @@
           <button type="submit" class="btn btn-soft btn-sm" data-no-loading="true">Speichern</button>
           {% if not h['koordinator_email'] %}<span class="small text-muted">leer = keine automatischen E-Mails</span>{% endif %}
         </form>
+        <form method="POST" action="{{ url_for('admin_autohaus_zugangscode', autohaus_id=h['id']) }}" class="d-flex gap-2 align-items-center flex-wrap w-100 m-0">
+          {{ csrf_field()|safe }}
+          <span class="small text-muted">Zugangscode (Passwort fürs Portal):</span>
+          <input type="text" name="zugangscode" class="form-control form-control-sm" style="max-width: 220px;" placeholder="Neuer Code (leer = automatisch)">
+          <button type="submit" class="btn btn-soft btn-sm" data-no-loading="true">Code ändern</button>
+          <span class="small text-muted">aktuell: <strong>{{ h['zugangscode'] or '— (kein Login möglich)' }}</strong></span>
+          <span class="small text-muted w-100">Neuer Code gilt sofort — der bisherige wird ungültig. Leer lassen = sicherer 8-Zeichen-Code.</span>
+        </form>
       </div>
       {% endfor %}
     </div>
