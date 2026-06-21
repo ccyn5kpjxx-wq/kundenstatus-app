@@ -9375,6 +9375,7 @@ def init_db():
     seed_default_versicherungen(db)
     seed_default_auftraege(db)
     seed_default_werkstatt_news(db)
+    seed_standard_mitarbeiter(db)
     merge_duplicate_einkauf_artikel(db)
 
     rows = db.execute("SELECT id, portal_key FROM autohaeuser").fetchall()
@@ -9464,6 +9465,36 @@ def seed_akquise_autohaeuser(db):
                 clean_text(kandidat.get("notiz")),
                 now,
             ),
+        )
+
+
+STANDARD_MITARBEITER = [
+    {"name": "Ntaniel Mala", "rolle": "Stellv. Standortleiter"},
+    {"name": "Hannes Häberle", "rolle": "Auszubildender Fahrzeuglackierer"},
+    {"name": "Abdoul Alsamman", "rolle": "Fahrzeuglackierer"},
+    {"name": "Sven Nagel", "rolle": "Mitarbeiter"},
+]
+
+
+def seed_standard_mitarbeiter(db):
+    # Nur INSERT, nie UPDATE: spaetere Aenderungen/Loeschungen im Admin bleiben
+    # erhalten. Legt die Stamm-Belegschaft an, falls noch nicht vorhanden
+    # (Namensabgleich case-insensitive), damit die Werkstatt-Abwesenheits- und
+    # Aufgabenauswahl sofort befuellt ist.
+    now = now_str()
+    for person in STANDARD_MITARBEITER:
+        existing = db.execute(
+            "SELECT id FROM mitarbeiter WHERE LOWER(TRIM(name))=LOWER(TRIM(?))",
+            (person["name"],),
+        ).fetchone()
+        if existing:
+            continue
+        db.execute(
+            """
+            INSERT INTO mitarbeiter (name, rolle, aktiv, erstellt_am, geaendert_am)
+            VALUES (?, ?, 1, ?, ?)
+            """,
+            (person["name"], person["rolle"], now, now),
         )
 
 
@@ -34527,6 +34558,53 @@ def werkstatt_aufgaben():
         wochentag=WOCHENTAGE[heute.weekday()],
         summe_offen_label=richtwert_label(summe_offen),
     )
+
+
+@app.route("/werkstatt/abwesenheit", methods=["GET", "POST"])
+def werkstatt_abwesenheit():
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    mitarbeiter = [m for m in list_mitarbeiter(include_inactive=False)]
+    if request.method == "POST":
+        try:
+            mitarbeiter_id = int(request.form.get("mitarbeiter_id") or 0)
+        except (TypeError, ValueError):
+            mitarbeiter_id = 0
+        if not mitarbeiter_id:
+            flash("Bitte zuerst deinen Namen auswählen.", "warning")
+            return redirect(url_for("werkstatt_abwesenheit"))
+        start = parse_date(request.form.get("von_datum"))
+        end = parse_date(request.form.get("bis_datum")) or start
+        if not start:
+            flash("Bitte ein gültiges Startdatum (von) wählen.", "warning")
+            return redirect(url_for("werkstatt_abwesenheit"))
+        if end and end < start:
+            start, end = end, start
+        tage = (end - start).days + 1
+        grund = clean_text(request.form.get("grund") or "")
+        person = get_mitarbeiter(mitarbeiter_id)
+        name = person["name"] if person else "Mitarbeiter"
+        notiz = f"Über Werkstatt-Tafel beantragt am {datetime.now().strftime(DATE_FMT)} · {tage} Tag(e)"
+        if grund:
+            notiz = f"{grund} · {notiz}"
+        try:
+            create_mitarbeiter_urlaub(
+                mitarbeiter_id,
+                start_datum=start.strftime(DATE_FMT),
+                end_datum=end.strftime(DATE_FMT),
+                notiz=notiz,
+            )
+        except ValueError as exc:
+            flash(str(exc), "warning")
+            return redirect(url_for("werkstatt_abwesenheit"))
+        flash(
+            f"Danke {name}! Deine Abwesenheit ({start.strftime(DATE_FMT)} bis "
+            f"{end.strftime(DATE_FMT)}, {tage} Tag(e)) ist gespeichert und liegt im Büro-Kalender.",
+            "success",
+        )
+        return redirect(url_for("werkstatt_tafel"))
+    return render_template("werkstatt_abwesenheit.html", mitarbeiter=mitarbeiter)
 
 
 @app.route("/werkstatt/aufgaben/<int:aufgabe_id>/erledigt", methods=["POST"])
