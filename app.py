@@ -40584,7 +40584,7 @@ def versicherung_datei(slug, datei_id):
 # Admins sehen die Tafel ohne extra Anmeldung.
 
 
-WERKSTATT_TAFEL_ERLAUBTE_STATUS = (1, 2, 3, 4)
+WERKSTATT_TAFEL_ERLAUBTE_STATUS = (2, 3, 4)  # Tafel: nur Eingeplant(2)->In Arbeit(3)->Fertig(4); Angelegt(1)/Zurueckgegeben(5) nur Buero
 
 
 def werkstatt_datei_sichtbar(datei):
@@ -40766,6 +40766,11 @@ def werkstatt_status_update(auftrag_id, neuer_status):
     if not auftrag or auftrag.get("archiviert"):
         abort(404)
     aktueller_status = int(auftrag.get("status") or 1)
+    if aktueller_status == 1:
+        # "Angelegt" ist die Wareneingangs-/Pruefstufe des Bueros. Erst nach dessen
+        # Freigabe wandert der Auftrag nach "Eingeplant" (1 -> 2). Die Werkstatt-Tafel
+        # darf diesen Schritt nicht ausloesen.
+        abort(400)
     if aktueller_status >= 5:
         # Zurueckgegebene Auftraege darf nur das Buero/Admin wieder anfassen —
         # sonst koennte ein veralteter Bildschirm einen abgeschlossenen Auftrag reaktivieren.

@@ -410,7 +410,12 @@
         </form>
       </div>
 
-      {% if auftrag['status'] < 5 %}
+      {% if auftrag['status'] == 1 %}
+      <div class="panel">
+        <h2>Auftrag verschieben</h2>
+        <div class="fluss-hinweis">🔒 Dieser Auftrag wird zuerst vom Büro geprüft und eingeplant. Danach kannst du ihn hier auf „In Arbeit" und „Fertig" setzen.</div>
+      </div>
+      {% elif auftrag['status'] < 5 %}
       <div class="panel">
         <h2>Auftrag verschieben</h2>
         <div class="verschieben-leiste">

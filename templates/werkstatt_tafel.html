@@ -473,7 +473,7 @@
       <div class="spalte-hinweis">Dringendste zuerst ↓</div>
       {% for auftrag in spalte.auftraege %}
       <a class="karte" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}"
-         draggable="true" data-auftrag="{{ auftrag['id'] }}" data-status="{{ auftrag['status'] }}">
+         draggable="{{ 'false' if auftrag['status'] == 1 else 'true' }}" data-auftrag="{{ auftrag['id'] }}" data-status="{{ auftrag['status'] }}">
         <div class="karte-kopf">
           {% if auftrag['werkstatt_neu'] %}
             <span class="neu-badge" title="Neu vom Autohaus eingeplant">1</span>
@@ -517,7 +517,7 @@
           {% endif %}
         </div>
         {% if auftrag['status'] == 1 %}
-        <button type="button" class="schnell-knopf" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="2">📅 Einplanen →</button>
+        <div class="buero-hinweis" style="margin-top:.6rem; padding:.5rem .7rem; border-radius:10px; background:rgba(0,0,0,.05); color:#6f7a83; font-size:.85rem; font-weight:600; text-align:center;">🔒 Wird vom Büro geprüft &amp; eingeplant</div>
         {% elif auftrag['status'] == 2 %}
         <button type="button" class="schnell-knopf" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="3">🔧 In Arbeit nehmen →</button>
         {% elif auftrag['status'] == 3 %}
@@ -714,6 +714,7 @@
       document.querySelectorAll('.spalte').forEach((spalte) => {
         const ziel = parseInt(spalte.dataset.zielStatus, 10);
         if (!ziel) return;
+        if (ziel === 1) return; // "Angelegt" gibt nur das Buero frei - kein Drop-Ziel
         spalte.addEventListener('dragover', (e) => {
           if (!dragAktiv) return;
           e.preventDefault();
