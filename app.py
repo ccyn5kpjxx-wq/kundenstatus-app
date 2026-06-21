@@ -32012,6 +32012,38 @@ def build_mini_monatskalender(
             betriebsurlaub_dates[current].append(clean_text(news.get("titel")) or "Betriebsurlaub")
             current += timedelta(days=1)
 
+    # Mitarbeiter-Urlaub/Abwesenheit nur im internen (Admin-)Kontext einblenden,
+    # damit Autohaus-Partner die Personal-Abwesenheiten NICHT sehen.
+    urlaub_dates = defaultdict(list)
+    abwesenheiten = []
+    if include_internal_notes:
+        for row in list_mitarbeiter_urlaub_raw(active_only=True):
+            u_start = parse_date(row.get("start_datum"))
+            u_end = parse_date(row.get("end_datum")) or u_start
+            if not u_start:
+                continue
+            if u_end < u_start:
+                u_start, u_end = u_end, u_start
+            if u_end < month_start or u_start > month_end:
+                continue
+            name = clean_text(row.get("mitarbeiter_name")) or "Mitarbeiter"
+            abwesenheiten.append({
+                "urlaub_id": row.get("id"),
+                "name": name,
+                "rolle": clean_text(row.get("mitarbeiter_rolle")),
+                "von": u_start.strftime(DATE_FMT),
+                "bis": u_end.strftime(DATE_FMT),
+                "tage": (u_end - u_start).days + 1,
+                "vorbei": u_end < today,
+                "start_obj": u_start,
+            })
+            current = max(u_start, month_start)
+            last_day = min(u_end, month_end)
+            while current <= last_day:
+                urlaub_dates[current].append(name)
+                current += timedelta(days=1)
+        abwesenheiten.sort(key=lambda a: (a["start_obj"], a["name"]))
+
     note_dates = defaultdict(list)
     note_day_items = defaultdict(list)
     if include_internal_notes:
@@ -32039,6 +32071,7 @@ def build_mini_monatskalender(
             if holiday_title:
                 labels.append(holiday_title)
             labels.extend(betriebsurlaub_dates.get(current, []))
+            labels.extend(name + " im Urlaub" for name in urlaub_dates.get(current, []))
             labels.extend(event_dates.get(current, [])[:3])
             labels.extend(note_dates.get(current, [])[:3])
             day_items = []
@@ -32062,6 +32095,16 @@ def build_mini_monatskalender(
                         "url": "",
                     }
                 )
+            for name in urlaub_dates.get(current, []):
+                day_items.append(
+                    {
+                        "label": "Urlaub",
+                        "farbe": "danger",
+                        "title": f"{name} im Urlaub",
+                        "subtitle": "",
+                        "url": "",
+                    }
+                )
             day_items.extend(event_day_items.get(current, []))
             day_items.extend(note_day_items.get(current, []))
             row.append(
@@ -32076,6 +32119,7 @@ def build_mini_monatskalender(
                     "is_weekend": current.weekday() >= 5,
                     "is_holiday": bool(holiday_title),
                     "has_betriebsurlaub": bool(betriebsurlaub_dates.get(current)),
+                    "has_mitarbeiter_urlaub": bool(urlaub_dates.get(current)),
                     "has_events": bool(event_dates.get(current)),
                     "has_notes": bool(note_dates.get(current)),
                     "tooltip": " | ".join(labels),
@@ -32144,6 +32188,7 @@ def build_mini_monatskalender(
         "event_count": sum(len(items) for items in event_dates.values()),
         "holiday_count": sum(1 for day in holidays if day.month == month_start.month),
         "betriebsurlaub_count": len(betriebsurlaub_dates),
+        "abwesenheiten": abwesenheiten,
         "show_notes": include_internal_notes,
         "event_label": "Anlieferung" if only_arrival_events else "Fahrzeugtermin",
     }
@@ -39645,7 +39690,7 @@ def admin_mitarbeiter_urlaub_loeschen(urlaub_id):
     delete_mitarbeiter_urlaub(urlaub_id)
     flash("Urlaubseintrag gelöscht.", "info")
     next_url = clean_text(request.form.get("next"))
-    if next_url.startswith("/admin/mitarbeiter"):
+    if next_url.startswith("/admin/"):
         return redirect(next_url)
     return redirect(url_for("admin_mitarbeiter"))
 

@@ -80,6 +80,16 @@
   .mini-day.has-vacation.is-selected {
     box-shadow:inset 0 -4px 0 #145d66, 0 0 0 3px rgba(162,63,45,.18);
   }
+  .mini-day.has-abwesenheit:not(.is-today) {
+    background:#fdecec;
+    border-color:#e2868a;
+    color:#8a1c1c;
+  }
+  .mini-day.has-abwesenheit:not(.is-today):hover,
+  .mini-day.has-abwesenheit:not(.is-today):focus-visible {
+    border-color:#dc3545;
+    color:#8a1c1c;
+  }
   .mini-day.has-holiday.is-open {
     box-shadow:inset 0 -4px 0 #dc3545, 0 0 0 3px rgba(162,63,45,.18), 0 8px 18px rgba(64,47,25,.12);
   }
@@ -228,7 +238,7 @@
       {% set week_index = loop.index %}
       {% for day in week %}
         {% set day_popover_id = "mini-day-popover-" ~ mini_calendar['month_param'] ~ "-" ~ day['datum_text']|replace(".", "") ~ "-" ~ week_index ~ "-" ~ loop.index %}
-        {% set day_classes = "mini-day " ~ ('' if day['in_month'] else 'is-other-month') ~ " " ~ ('is-selected' if day['is_selected'] else '') ~ " " ~ ('is-today' if day['is_today'] else '') ~ " " ~ ('has-holiday' if day['is_holiday'] else '') ~ " " ~ ('has-vacation' if day['has_betriebsurlaub'] else '') ~ " " ~ ('has-events' if day['has_events'] else '') ~ " " ~ ('has-notes' if day['has_notes'] else '') %}
+        {% set day_classes = "mini-day " ~ ('' if day['in_month'] else 'is-other-month') ~ " " ~ ('is-selected' if day['is_selected'] else '') ~ " " ~ ('is-today' if day['is_today'] else '') ~ " " ~ ('has-holiday' if day['is_holiday'] else '') ~ " " ~ ('has-vacation' if day['has_betriebsurlaub'] else '') ~ " " ~ ('has-abwesenheit' if day['has_mitarbeiter_urlaub'] or day['has_betriebsurlaub'] else '') ~ " " ~ ('has-events' if day['has_events'] else '') ~ " " ~ ('has-notes' if day['has_notes'] else '') %}
         <div class="mini-day-wrap">
           <button
             type="button"
@@ -279,9 +289,29 @@
   <div class="mini-legend mt-3">
     <span><i class="mini-dot holiday"></i>Feiertag</span>
     <span><i class="mini-dot vacation"></i>Betriebsurlaub</span>
+    <span><i class="mini-dot" style="background:#dc3545;border-radius:3px;"></i>Urlaub / abwesend</span>
     <span><i class="mini-dot"></i>{{ mini_calendar.get('event_label', 'Fahrzeugtermin') }}</span>
     {% if mini_calendar['show_notes'] %}<span><i class="mini-dot note"></i>Notiz</span>{% endif %}
   </div>
+  {% if mini_calendar.get('abwesenheiten') %}
+  <div class="mini-abwesenheiten mt-3">
+    <div class="mini-selected-kicker mb-2">Abwesenheiten in {{ mini_calendar['title'] }}</div>
+    {% for a in mini_calendar['abwesenheiten'] %}
+    <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap" style="border:1px solid #f0c9cc; background:#fdecec; border-radius:12px; padding:8px 12px; margin-bottom:8px;">
+      <div>
+        <span class="badge text-bg-danger me-1">Urlaub</span>
+        <strong>{{ a['name'] }}</strong> ist von {{ a['von'] }} bis {{ a['bis'] }} nicht da
+        <span class="text-muted small">· {{ a['tage'] }} Tag{{ '' if a['tage'] == 1 else 'e' }}{% if a['vorbei'] %} · vorbei{% endif %}</span>
+      </div>
+      <form method="POST" action="{{ url_for('admin_mitarbeiter_urlaub_loeschen', urlaub_id=a['urlaub_id']) }}" class="m-0" onsubmit="return confirm('Diesen Abwesenheits-Eintrag wirklich löschen?');">
+        {{ csrf_field()|safe }}
+        <input type="hidden" name="next" value="{{ url_for('betriebs_cockpit', monat=mini_calendar['month_param']) }}">
+        <button type="submit" class="btn btn-sm btn-outline-danger">Löschen</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 </div>
 <script>
   (function () {
