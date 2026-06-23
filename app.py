@@ -7753,14 +7753,20 @@ _change_backup_pending = False
 _change_backup_running = False
 
 
-def list_table_rows_for_backup(db, table_name):
+def list_table_rows_for_backup(db, table_name, exclude_columns=()):
     try:
         columns = get_table_columns(db, table_name)
     except Exception:
         return []
     if not columns:
         return []
-    return [dict(row) for row in db.execute(f"SELECT * FROM {table_name}").fetchall()]
+    # Schwere Spalten (z. B. base64-Dateiinhalte) gar nicht erst in den RAM holen –
+    # sonst sprengt fetchall() + json.dumps den Worker (OOM/Timeout -> 502).
+    use_columns = [c for c in columns if c not in set(exclude_columns)]
+    if not use_columns:
+        return []
+    column_sql = ", ".join(use_columns)
+    return [dict(row) for row in db.execute(f"SELECT {column_sql} FROM {table_name}").fetchall()]
 
 
 def write_uploads_to_backup(archive):
@@ -7790,7 +7796,13 @@ def create_backup_package(reason="auto"):
                 "tables": {},
             }
             for table_name in BACKUP_TABLES:
-                export["tables"][table_name] = list_table_rows_for_backup(db, table_name)
+                # datei_backups hält base64-Kopien JEDER Datei aller Auftraege; die echten
+                # Dateien liegen ohnehin via write_uploads_to_backup im ZIP. Das base64 hier
+                # mitzudumpen ist Doppelung und der eigentliche RAM-/Zeit-Fresser -> weglassen.
+                exclude = ("file_base64",) if table_name == "datei_backups" else ()
+                export["tables"][table_name] = list_table_rows_for_backup(
+                    db, table_name, exclude_columns=exclude
+                )
 
             with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr(
