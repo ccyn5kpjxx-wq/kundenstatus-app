@@ -26549,6 +26549,8 @@ def delete_auftrag(auftrag_id, safety_backup=True):
     db.execute("DELETE FROM versicherung_teile WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM chat_nachrichten WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM whatsapp_nachrichten WHERE auftrag_id=?", (auftrag_id,))
+    db.execute("DELETE FROM lieferanten_anfragen WHERE auftrag_id=?", (auftrag_id,))
+    db.execute("UPDATE leads SET auftrag_id=NULL WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM auftraege WHERE id=?", (auftrag_id,))
     db.commit()
     db.close()
