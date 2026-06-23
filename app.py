@@ -7542,6 +7542,23 @@ def get_db():
     return conn
 
 
+def open_fresh_db():
+    """Eigene, vom Request UNABHÄNGIGE DB-Verbindung (z. B. fürs Backup).
+    Muss vom Aufrufer geschlossen werden. Wichtig auf Postgres: ein Fehler in einer
+    Backup-Query darf NICHT die geteilte Request-Transaktion vergiften (sonst scheitern
+    danach alle DELETEs/commit -> Internal Server Error). Backups laufen daher isoliert."""
+    if USE_POSTGRES:
+        if psycopg is None:
+            raise RuntimeError(
+                "DATABASE_URL ist gesetzt, aber psycopg ist nicht installiert."
+            )
+        return PostgresConnection(psycopg.connect(DATABASE_URL))
+    conn = sqlite3.connect(DB, timeout=SQLITE_BUSY_TIMEOUT_SECONDS)
+    conn.row_factory = sqlite3.Row
+    configure_sqlite_connection(conn)
+    return conn
+
+
 def configure_sqlite_connection(conn):
     global _sqlite_wal_configured
     busy_timeout_ms = SQLITE_BUSY_TIMEOUT_SECONDS * 1000
@@ -7753,20 +7770,14 @@ _change_backup_pending = False
 _change_backup_running = False
 
 
-def list_table_rows_for_backup(db, table_name, exclude_columns=()):
+def list_table_rows_for_backup(db, table_name):
     try:
         columns = get_table_columns(db, table_name)
     except Exception:
         return []
     if not columns:
         return []
-    # Schwere Spalten (z. B. base64-Dateiinhalte) gar nicht erst in den RAM holen –
-    # sonst sprengt fetchall() + json.dumps den Worker (OOM/Timeout -> 502).
-    use_columns = [c for c in columns if c not in set(exclude_columns)]
-    if not use_columns:
-        return []
-    column_sql = ", ".join(use_columns)
-    return [dict(row) for row in db.execute(f"SELECT {column_sql} FROM {table_name}").fetchall()]
+    return [dict(row) for row in db.execute(f"SELECT * FROM {table_name}").fetchall()]
 
 
 def write_uploads_to_backup(archive):
@@ -7787,7 +7798,8 @@ def create_backup_package(reason="auto"):
     backup_path = BACKUP_DIR / f"kundenstatus-backup-{timestamp}.zip"
 
     with _backup_lock:
-        db = get_db()
+        # Eigene Verbindung: ein Backup-Fehler darf NIE die Request-Transaktion vergiften.
+        db = open_fresh_db()
         try:
             export = {
                 "created_at": now_str(),
@@ -7798,11 +7810,11 @@ def create_backup_package(reason="auto"):
             for table_name in BACKUP_TABLES:
                 # datei_backups hält base64-Kopien JEDER Datei aller Auftraege; die echten
                 # Dateien liegen ohnehin via write_uploads_to_backup im ZIP. Das base64 hier
-                # mitzudumpen ist Doppelung und der eigentliche RAM-/Zeit-Fresser -> weglassen.
-                exclude = ("file_base64",) if table_name == "datei_backups" else ()
-                export["tables"][table_name] = list_table_rows_for_backup(
-                    db, table_name, exclude_columns=exclude
-                )
+                # mitzudumpen ist Doppelung und der eigentliche RAM-/Zeit-Fresser (OOM/502)
+                # -> komplett auslassen.
+                if table_name == "datei_backups":
+                    continue
+                export["tables"][table_name] = list_table_rows_for_backup(db, table_name)
 
             with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr(
@@ -7843,8 +7855,7 @@ def create_backup_package(reason="auto"):
                     ),
                 )
         finally:
-            if not has_request_context():
-                db.close()
+            db.close()
 
     prune_old_backups()
     return backup_path
@@ -26531,6 +26542,12 @@ def delete_auftrag(auftrag_id, safety_backup=True):
     if safety_backup:
         create_safety_backup(f"before-delete-auftrag-{auftrag_id}")
     db = get_db()
+    # Sauberer Start: eine evtl. von einem fehlgeschlagenen Vor-Schritt aborted Transaktion
+    # zuruecksetzen, damit die folgenden DELETEs + commit auf Postgres garantiert durchgehen.
+    try:
+        db.rollback()
+    except Exception:
+        pass
     dateien = db.execute(
         "SELECT id, stored_name FROM dateien WHERE auftrag_id=?",
         (auftrag_id,),
