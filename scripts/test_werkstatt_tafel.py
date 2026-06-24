@@ -293,6 +293,20 @@ def main():
         )
         check("Kunde: aktive Stufe = In der Lackierung", aktiv == ["In der Lackierung"])
 
+        # Recycling: faellt der Auftrag unter "In Arbeit" zurueck, darf kein veralteter Schritt bleiben
+        db = portal.get_db()
+        db.execute("UPDATE auftraege SET status=3, produktion_schritt='finish' WHERE id=?", (auftrag_id,))
+        db.commit()
+        db.close()
+        response = client.post(
+            f"/werkstatt/auftrag/{auftrag_id}/status/2",
+            headers={"X-CSRF-Token": csrf, "X-Requested-With": "fetch"},
+        )
+        check(
+            "Zurueck auf Eingeplant setzt Produktionsschritt zurueck",
+            response.status_code == 200 and portal.get_auftrag(auftrag_id)["produktion_schritt"] == "",
+        )
+
         kein_login = portal.app.test_client()
         response = kein_login.post(f"/werkstatt/auftrag/{auftrag_id}/produktion/vorarbeit")
         check("Produktionsschritt ohne Login abgewiesen", response.status_code in (302, 400))

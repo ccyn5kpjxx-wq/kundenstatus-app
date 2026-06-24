@@ -1022,7 +1022,10 @@
                 {% if a['annahme_datum'] %}<div class="chip">{{ a['partner_annahme_label'] }} {{ a['annahme_datum'] }}</div>{% endif %}
                 {% if a['abholtermin'] %}<div class="chip">{{ a['partner_abholung_label'] }} {{ a['abholtermin'] }}</div>{% endif %}
               </td>
-              <td data-label="Status"><span class="badge text-bg-{{ a['status_meta']['farbe'] }}">{{ a['status_meta']['icon'] }} {{ a['status_meta']['label'] }}</span></td>
+              <td data-label="Status">
+                <span class="badge text-bg-{{ a['status_meta']['farbe'] }}">{{ a['status_meta']['icon'] }} {{ a['status_meta']['label'] }}</span>
+                {% if a['status'] == 3 and a['produktion_schritt_label'] %}<div class="mt-1"><span class="badge text-bg-light border text-dark prod-schritt-badge">{{ a['produktion_schritt_label'] }}</span></div>{% endif %}
+              </td>
               <td data-label="Aktion"><a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=a['id']) }}" class="btn btn-outline-dark btn-sm">Öffnen</a></td>
             </tr>
             {% endfor %}

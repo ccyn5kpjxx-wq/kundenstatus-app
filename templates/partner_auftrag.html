@@ -415,6 +415,7 @@
         </div>
         <div class="d-flex gap-2 flex-wrap align-items-center">
           <span class="hero-badge">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
+          {% if auftrag['status'] == 3 and auftrag['produktion_schritt_label'] %}<span class="badge text-bg-light border text-dark align-self-center prod-schritt-badge">{{ auftrag['produktion_schritt_label'] }}</span>{% endif %}
           <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-light">Zurück</a>
         </div>
       </div>
@@ -620,6 +621,7 @@
         <div class="panel mb-4">
           <h4 class="mb-3">Status</h4>
           <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }}">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
+          {% if auftrag['status'] == 3 and auftrag['produktion_schritt_label'] %}<div class="mt-2"><span class="badge text-bg-light border text-dark prod-schritt-badge">{{ auftrag['produktion_schritt_label'] }}</span></div>{% endif %}
           {% if auftrag['analyse_pruefen'] or auftrag['analyse_hinweis'] or auftrag['analyse_confidence'] %}
           <div class="alert {{ 'alert-warning' if auftrag['analyse_pruefen'] else 'alert-success' }} mt-3 mb-0">
             <strong>{{ 'Bitte Originaldatei kurz prüfen' if auftrag['analyse_pruefen'] else 'Analyse wirkt plausibel' }}</strong>

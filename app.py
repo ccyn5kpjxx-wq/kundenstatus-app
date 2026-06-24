@@ -39291,6 +39291,14 @@ def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status):
             "UPDATE auftraege SET fahrzeug_abholbereit=0, fahrzeug_abholbereit_am='' WHERE id=?",
             (auftrag_id,),
         )
+    else:
+        # Faellt der Auftrag unter "In Arbeit" zurueck (z.B. zurueck auf Eingeplant), ist der
+        # Produktionsschritt einer evtl. frueheren Runde veraltet. Zuruecksetzen, damit Tafel,
+        # Kundenseite und Partner-Liste beim Wiederanlauf nicht den alten Schritt zeigen.
+        db.execute(
+            "UPDATE auftraege SET produktion_schritt='' WHERE id=?",
+            (auftrag_id,),
+        )
     db.execute(
         "INSERT INTO status_log (auftrag_id, status, zeitstempel) VALUES (?, ?, ?)",
         (auftrag_id, neuer_status, now_str()),
@@ -39375,6 +39383,7 @@ def reklamation_neu_planen(auftrag_id):
             fertig_datum=?,
             abholtermin='',
             archiviert=0,
+            produktion_schritt='',
             geaendert_am=?
         WHERE id=?
         """,
