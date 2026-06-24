@@ -8790,6 +8790,8 @@ def init_db():
     ensure_column(db, "auftraege", "abhol_uhrzeit", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "abholtermin", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "transport_art", "TEXT DEFAULT 'standard'")
+    ensure_column(db, "auftraege", "fahrzeug_abholbereit", "INTEGER DEFAULT 0")
+    ensure_column(db, "auftraege", "fahrzeug_abholbereit_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "archiviert", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "lexware_kunde_angelegt", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "lexware_contact_id", "TEXT DEFAULT ''")
@@ -13858,6 +13860,8 @@ def row_to_auftrag(row):
     auftrag["transport_art"] = transport_art
     auftrag["transport_meta"] = transport_meta
     auftrag["archiviert"] = bool(auftrag.get("archiviert"))
+    auftrag["fahrzeug_abholbereit"] = bool(auftrag.get("fahrzeug_abholbereit"))
+    auftrag["fahrzeug_abholbereit_am"] = clean_text(auftrag.get("fahrzeug_abholbereit_am"))
     auftrag["angebotsphase"] = bool(auftrag.get("angebotsphase"))
     auftrag["quelle"] = clean_text(auftrag.get("quelle")) or "intern"
     quelle_key = auftrag_quelle_key(auftrag)
@@ -20078,6 +20082,44 @@ def notify_workshop_whatsapp_for_new_order(auftrag_id, absender_label="Autohaus"
         if not ok:
             errors.extend(send_errors)
     return (sent_any, errors) if return_errors else sent_any
+
+
+def notify_workshop_whatsapp_abholbereit(auftrag_id, autohaus=None):
+    """Meldet der Werkstatt per WhatsApp, dass ein Autohaus ein Fahrzeug als abholbereit markiert hat.
+
+    Nutzt denselben Versandweg wie die Neuauftrag-Benachrichtigung (Free-Text im 24-h-Fenster,
+    Template-Fallback). Schlaegt der Versand fehl oder ist die Bridge aus, bleibt der Hinweis auf
+    der Werkstatt-Tafel und im Portal trotzdem bestehen.
+    """
+    if whatsapp_bridge_config_errors():
+        return False
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        return False
+    fahrzeug = clean_text(auftrag.get("fahrzeug")) or "Fahrzeug"
+    kennzeichen = clean_text(auftrag.get("kennzeichen"))
+    haus = ""
+    if isinstance(autohaus, dict):
+        haus = clean_text(autohaus.get("name")) or clean_text(autohaus.get("portal_label"))
+    haus = haus or clean_text(auftrag.get("autohaus_name")) or "Ein Autohaus"
+    bezeichnung = " · ".join(teil for teil in (fahrzeug, kennzeichen) if teil)
+    body = (
+        f"🚗 Abholbereit: {haus} meldet, dass {bezeichnung} jetzt abgeholt werden kann. "
+        "Details stehen in der Werkstatt-Tafel."
+    )
+    sent_any = False
+    for target_number in whatsapp_workshop_numbers():
+        ok, _errors = send_whatsapp_notice_with_fallback(
+            auftrag_id,
+            chat_id=0,
+            target_number=target_number,
+            body=body,
+            template_text=body,
+            auftrag=auftrag,
+            absender_label=haus,
+        )
+        sent_any = sent_any or ok
+    return sent_any
 
 
 def notify_customer_whatsapp_fertig(auftrag):
@@ -39162,6 +39204,13 @@ def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status):
         """,
         (neuer_status, start_datum, fertig_datum, abholtermin, now_str(), auftrag_id),
     )
+    if neuer_status >= 3:
+        # Sobald das Fahrzeug in Arbeit geht (oder weiter ist), ist die "abholbereit"-Meldung
+        # erledigt. Flag zuruecksetzen, damit der Hinweis von der Werkstatt-Tafel verschwindet.
+        db.execute(
+            "UPDATE auftraege SET fahrzeug_abholbereit=0, fahrzeug_abholbereit_am='' WHERE id=?",
+            (auftrag_id,),
+        )
     db.execute(
         "INSERT INTO status_log (auftrag_id, status, zeitstempel) VALUES (?, ?, ?)",
         (auftrag_id, neuer_status, now_str()),
@@ -42331,6 +42380,32 @@ def partner_auftrag(slug, auftrag_id):
                 success_message="Unterlage hochgeladen. Es wurde keine Analyse gestartet und der Auftrag wurde nicht automatisch verändert.",
                 analyze=False,
             )
+            return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+        if aktion == "abholbereit":
+            # Eigene, schlanke Aktion: NICHT in das grosse Felder-UPDATE unten fallen lassen
+            # (das wuerde alle nicht mitgesendeten Felder leeren). Nur das Flag setzen + melden.
+            if int(auftrag.get("status") or 1) >= 3:
+                flash("Das Fahrzeug ist bereits in Arbeit — die Werkstatt ist informiert.", "info")
+                return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+            if auftrag.get("fahrzeug_abholbereit"):
+                flash("Das Fahrzeug ist bereits als abholbereit gemeldet. Die Werkstatt holt es ab.", "info")
+                return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+            db = get_db()
+            db.execute(
+                "UPDATE auftraege SET fahrzeug_abholbereit=1, fahrzeug_abholbereit_am=?, geaendert_am=? WHERE id=? AND autohaus_id=?",
+                (now_str(), now_str(), auftrag_id, autohaus["id"]),
+            )
+            db.commit()
+            db.close()
+            haus_name = clean_text(autohaus.get("name")) or clean_text(autohaus.get("portal_label")) or "Das Autohaus"
+            add_benachrichtigung(
+                auftrag_id,
+                "Fahrzeug ist abholbereit",
+                f"{haus_name} meldet: Das Fahrzeug kann jetzt von der Werkstatt abgeholt werden.",
+                quelle="autohaus",
+            )
+            notify_workshop_whatsapp_abholbereit(auftrag_id, autohaus)
+            flash("Danke! Die Werkstatt wurde benachrichtigt, dass das Fahrzeug abholbereit ist.", "success")
             return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
         analyse = clean_text(form.get("analyse_text")) or analyse_text(form.get("beschreibung"))
         start_datum = format_date(form.get("start_datum")) if "start_datum" in form else auftrag["start_datum"]

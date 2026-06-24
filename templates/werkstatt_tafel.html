@@ -490,6 +490,9 @@
           {% endif %}
         </div>
         <div class="fahrzeug">{{ auftrag['fahrzeug'] }}</div>
+        {% if auftrag['fahrzeug_abholbereit'] and auftrag['status'] <= 2 %}
+        <div style="margin-top:.5rem; padding:.5rem .7rem; border-radius:10px; background:#1f9d57; color:#fff; font-weight:800; text-align:center; font-size:clamp(.9rem,1.5vw,1.12rem); box-shadow:0 0 0 2px rgba(61,214,140,.45);">🚗 Fahrzeug ist abholbereit – jetzt abholen</div>
+        {% endif %}
         {% if auftrag['messung_erforderlich'] == 'ja' %}
           <div style="margin-top:.35rem; display:inline-block; background:#d64545; color:#fff; border-radius:8px; padding:.2rem .55rem; font-size:.78rem; font-weight:700;">⚠ Messung erforderlich</div>
         {% endif %}

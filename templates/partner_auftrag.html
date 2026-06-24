@@ -434,6 +434,33 @@
       </div>
     </div>
 
+    {% if auftrag['status'] == 2 and auftrag['transport_art'] == 'hol_und_bring' %}
+    <div class="panel mb-4" style="border:2px solid #1f9d57; background:#f1fbf5;">
+      {% if auftrag['fahrzeug_abholbereit'] %}
+      <div class="d-flex align-items-start gap-3 flex-wrap">
+        <span class="whatsapp-mark" aria-hidden="true" style="background:#1f9d57;">OK</span>
+        <div>
+          <h4 class="mb-1" style="color:#136b3a;">Als abholbereit gemeldet</h4>
+          <div class="text-muted">Die Werkstatt wurde benachrichtigt{% if auftrag['fahrzeug_abholbereit_am'] %} ({{ auftrag['fahrzeug_abholbereit_am'] }}){% endif %} und holt das Fahrzeug ab. Sobald wir es abgeholt haben, wechselt der Status automatisch auf „In Arbeit".</div>
+        </div>
+      </div>
+      {% else %}
+      <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap">
+        <div>
+          <div class="section-kicker" style="color:#136b3a;">Fahrzeug steht bei Ihnen bereit?</div>
+          <h4 class="mb-1">Der Werkstatt melden: Fahrzeug ist abholbereit</h4>
+          <div class="text-muted">Ein Klick benachrichtigt die Werkstatt sofort (WhatsApp + Werkstatt-Tafel), dass das Fahrzeug jetzt abgeholt werden kann — keine Rückfrage mehr nötig.</div>
+        </div>
+        <form method="POST" class="m-0">
+          {{ csrf_field()|safe }}
+          <input type="hidden" name="aktion" value="abholbereit">
+          <button type="submit" class="btn btn-lg" style="background:#1f9d57; color:#fff; font-weight:700; white-space:nowrap;">🚗 Fahrzeug ist abholbereit</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
     {% if auftrag['angebot_status'] == 'angenommen' and (auftrag['werkstatt_angebot_preis'] or auftrag['werkstatt_angebot_text_display'] or auftrag['werkstatt_angebot_notiz']) %}
     <div class="panel mb-4 border border-success-subtle">
       <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
