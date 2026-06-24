@@ -374,6 +374,61 @@
     .schnell-knopf:active { transform: scale(.98); }
     .schnell-knopf:disabled { opacity: .55; cursor: wait; }
 
+    /* Produktionsschritte (Vorarbeit -> Karosserie -> Lackierung -> Finish) auf der In-Arbeit-Karte */
+    .prod-schritte {
+      display: flex;
+      align-items: stretch;
+      gap: .1rem;
+      margin-top: .5rem;
+    }
+    .prod-knopf {
+      flex: 1 1 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: .1rem;
+      border: 1.4px solid rgba(0, 0, 0, .14);
+      background: rgba(0, 0, 0, .02);
+      color: var(--muted);
+      border-radius: 10px;
+      padding: .3rem .12rem;
+      font-family: inherit;
+      font-weight: 700;
+      font-size: clamp(.58rem, .78vw, .7rem);
+      line-height: 1.05;
+      cursor: pointer;
+    }
+    .prod-knopf .prod-punkt { font-size: .95em; }
+    .prod-knopf.is-erledigt { border-color: var(--good); background: rgba(27, 127, 83, .08); color: var(--good); }
+    .prod-knopf.is-aktiv { border-color: var(--accent); background: rgba(20, 93, 102, .12); color: var(--accent); }
+    .prod-knopf:active { transform: scale(.97); }
+    .prod-knopf:disabled { opacity: .55; cursor: wait; }
+    .prod-pfeil { align-self: center; color: var(--muted); font-size: .72rem; padding: 0 .02rem; }
+
+    /* Einklappbarer Schritt-Bereich: Karte bleibt schlank, Stepper erst beim Ausklappen */
+    .prod-box { margin-top: .5rem; }
+    .prod-schritte[hidden] { display: none; }
+    .prod-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .4rem;
+      width: 100%;
+      border: 1.2px dashed rgba(0, 0, 0, .2);
+      background: rgba(0, 0, 0, .015);
+      color: var(--muted);
+      border-radius: 10px;
+      padding: .34rem .6rem;
+      font-family: inherit;
+      font-weight: 700;
+      font-size: clamp(.66rem, .9vw, .78rem);
+      cursor: pointer;
+    }
+    .prod-toggle strong { color: var(--accent); }
+    .prod-toggle .prod-chevron { transition: transform .15s ease; font-size: .82em; }
+    .prod-toggle[aria-expanded="true"] { border-style: solid; border-color: var(--accent); color: var(--accent); }
+    .prod-toggle[aria-expanded="true"] .prod-chevron { transform: rotate(180deg); }
+
     .leer-hinweis {
       color: var(--muted);
       text-align: center;
@@ -524,6 +579,23 @@
         {% elif auftrag['status'] == 2 %}
         <button type="button" class="schnell-knopf" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="3">🔧 In Arbeit nehmen →</button>
         {% elif auftrag['status'] == 3 %}
+        <div class="prod-box" data-prod-box>
+          <button type="button" class="prod-toggle" data-prod-toggle aria-expanded="false">
+            <span class="prod-toggle-label">{% if auftrag['produktion_schritt_label'] %}Schritt: <strong>{{ auftrag['produktion_schritt_label'] }}</strong>{% else %}Arbeitsschritt setzen{% endif %}</span>
+            <span class="prod-chevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="prod-schritte" data-prod-panel hidden>
+            {% for ps in auftrag['produktion_schritte'] %}
+            <button type="button" class="prod-knopf is-{{ ps['state'] }}" data-prod-knopf
+                    data-auftrag="{{ auftrag['id'] }}" data-schritt="{{ ps['key'] }}"
+                    title="{{ ps['label'] }} – antippen zum Setzen">
+              <span class="prod-punkt">{% if ps['state'] == 'erledigt' %}✓{% elif ps['state'] == 'aktiv' %}●{% else %}○{% endif %}</span>
+              <span class="prod-text">{{ ps['label'] }}</span>
+            </button>
+            {% if not loop.last %}<span class="prod-pfeil" aria-hidden="true">›</span>{% endif %}
+            {% endfor %}
+          </div>
+        </div>
         <button type="button" class="schnell-knopf fertig" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="4">✅ Fertig melden →</button>
         {% endif %}
       </a>
@@ -693,6 +765,45 @@
           knopf.disabled = true;
           knopf.textContent = 'Wird verschoben …';
           statusSetzen(knopf.dataset.auftrag, knopf.dataset.ziel);
+        });
+      });
+
+      // Schritt-Bereich aus-/einklappen (Karte bleibt sonst schlank). Karte ist ein <a> -> stopPropagation.
+      document.querySelectorAll('[data-prod-toggle]').forEach((tg) => {
+        tg.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const box = tg.closest('[data-prod-box]');
+          const panel = box && box.querySelector('[data-prod-panel]');
+          const offen = tg.getAttribute('aria-expanded') === 'true';
+          tg.setAttribute('aria-expanded', offen ? 'false' : 'true');
+          if (panel) panel.hidden = offen;
+        });
+      });
+
+      // Produktionsschritt auf der Karte weiterschalten (Vorarbeit -> Karosserie -> Lackierung -> Finish).
+      // Aendert nur die Anzeige-Stufe, NICHT den Spalten-Status. Karte ist ein <a> -> stopPropagation.
+      let prodLaeuft = false;
+      document.querySelectorAll('[data-prod-knopf]').forEach((knopf) => {
+        knopf.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (prodLaeuft) return;
+          prodLaeuft = true;
+          knopf.disabled = true;
+          try {
+            const resp = await fetch(`/werkstatt/auftrag/${knopf.dataset.auftrag}/produktion/${knopf.dataset.schritt}`, {
+              method: 'POST',
+              headers: { 'X-CSRF-Token': csrf, 'X-Requested-With': 'fetch' },
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            window.location.reload();
+          } catch (fehler) {
+            prodLaeuft = false;
+            knopf.disabled = false;
+            alert('Schritt konnte nicht gesetzt werden. Die Tafel wird neu geladen.');
+            window.location.reload();
+          }
         });
       });
 

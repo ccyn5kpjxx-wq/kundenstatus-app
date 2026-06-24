@@ -229,6 +229,73 @@ def main():
             and response.get_json().get("unveraendert") is True
             and len(portal.get_status_log(auftrag_id)) == log_vorher,
         )
+
+        # --- Produktionsschritte (Vorarbeit -> Karosserie -> Lackierung -> Finish) ---
+        db = portal.get_db()
+        db.execute("UPDATE auftraege SET status=3, produktion_schritt='' WHERE id=?", (auftrag_id,))
+        db.commit()
+        db.close()
+        check("Spalte produktion_schritt existiert", "produktion_schritt" in portal.get_auftrag(auftrag_id))
+
+        tafel_html = client.get("/werkstatt/tafel").get_data(as_text=True)
+        check(
+            "Tafel zeigt Produktions-Stepper",
+            "data-prod-knopf" in tafel_html and "Vorarbeit" in tafel_html and "Lackierung" in tafel_html,
+        )
+
+        response = client.post(
+            f"/werkstatt/auftrag/{auftrag_id}/produktion/lackierung",
+            headers={"X-CSRF-Token": csrf, "X-Requested-With": "fetch"},
+        )
+        check(
+            "Produktionsschritt auf Lackierung gesetzt",
+            response.status_code == 200
+            and response.get_json().get("produktion_schritt") == "lackierung"
+            and portal.get_auftrag(auftrag_id)["produktion_schritt"] == "lackierung",
+        )
+
+        steps = portal.produktion_schritt_steps(portal.get_auftrag(auftrag_id))
+        zustand = {s["key"]: s["state"] for s in steps}
+        check(
+            "Stepper-Zustaende stimmen (vor erledigt, lack aktiv, finish offen)",
+            zustand.get("vorarbeit") == "erledigt"
+            and zustand.get("karosserie") == "erledigt"
+            and zustand.get("lackierung") == "aktiv"
+            and zustand.get("finish") == "offen",
+        )
+
+        response = client.post(
+            f"/werkstatt/auftrag/{auftrag_id}/produktion/lackierung",
+            headers={"X-CSRF-Token": csrf, "X-Requested-With": "fetch"},
+        )
+        check(
+            "Toggle nimmt aktuellen Schritt zurueck",
+            response.status_code == 200 and portal.get_auftrag(auftrag_id)["produktion_schritt"] == "",
+        )
+
+        response = client.post(
+            f"/werkstatt/auftrag/{auftrag_id}/produktion/quatsch",
+            headers={"X-CSRF-Token": csrf, "X-Requested-With": "fetch"},
+        )
+        check("Ungueltiger Schritt abgelehnt (400)", response.status_code == 400)
+
+        # Schlanke Kundenansicht: Status 3 + Lackierung -> "In der Lackierung" aktiv
+        db = portal.get_db()
+        db.execute("UPDATE auftraege SET status=3, produktion_schritt='lackierung' WHERE id=?", (auftrag_id,))
+        db.commit()
+        db.close()
+        kunde_steps = portal.kunden_status_timeline_kurz(portal.get_auftrag(auftrag_id))
+        labels = [s["label"] for s in kunde_steps]
+        aktiv = [s["label"] for s in kunde_steps if s["state"] == "active"]
+        check(
+            "Kunde sieht schlanke Werkstatt-Schritte",
+            "In Vorbereitung" in labels and "In der Lackierung" in labels and "Endkontrolle & Politur" in labels,
+        )
+        check("Kunde: aktive Stufe = In der Lackierung", aktiv == ["In der Lackierung"])
+
+        kein_login = portal.app.test_client()
+        response = kein_login.post(f"/werkstatt/auftrag/{auftrag_id}/produktion/vorarbeit")
+        check("Produktionsschritt ohne Login abgewiesen", response.status_code in (302, 400))
     else:
         print("[HINWEIS] Keine offenen Auftraege in der Test-DB — Detail-/Status-Tests uebersprungen")
 

@@ -1913,6 +1913,18 @@ SCHADEN_KANBAN_STATIONEN = (
     ("abgeschlossen", "Abgeschlossen"),
 )
 
+# Produktionsschritte innerhalb von "In Arbeit" auf der Werkstatt-Tafel-Karte (+ schlanke
+# Spiegelung in der Kundenansicht). Bewusst ENTKOPPELT von der Versicherungs-Station
+# (schaden_station), damit auch normale Autohaus-/Privataufträge diese Feinstufen nutzen,
+# ohne die Versicherungslogik (Freigabe/Abrechnung/Timeline) zu berühren.
+# (key, Werkstatt-Label, Kunden-Label schlank)
+PRODUKTION_SCHRITTE = (
+    ("vorarbeit", "Vorarbeit", "In Vorbereitung"),
+    ("karosserie", "Karosserie", "In Vorbereitung"),
+    ("lackierung", "Lackierung", "In der Lackierung"),
+    ("finish", "Finish", "Endkontrolle & Politur"),
+)
+
 SCHADEN_TEILE_STATUS = {
     "offen": {"label": "Offen", "farbe": "secondary"},
     "angefragt": {"label": "Angefragt", "farbe": "info"},
@@ -8825,6 +8837,7 @@ def init_db():
     ensure_column(db, "auftraege", "schaden_eigenauftrag", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "schaden_besichtigung_datum", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "schaden_station", "TEXT DEFAULT 'aufnahme'")
+    ensure_column(db, "auftraege", "produktion_schritt", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kosten_gutachten_betrag", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kosten_werkstatt_betrag", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kosten_freigabe_betrag", "TEXT DEFAULT ''")
@@ -13967,6 +13980,12 @@ def row_to_auftrag(row):
     station = clean_text(auftrag.get("schaden_station")) or "aufnahme"
     auftrag["schaden_station"] = station if station in station_keys else "aufnahme"
     auftrag["schaden_station_label"] = dict(SCHADEN_KANBAN_STATIONEN).get(auftrag["schaden_station"], "Aufnahme")
+    auftrag["produktion_schritt"] = normalize_produktion_schritt(auftrag.get("produktion_schritt"))
+    auftrag["produktion_schritt_label"] = next(
+        (label for key, label, _ in PRODUKTION_SCHRITTE if key == auftrag["produktion_schritt"]),
+        "",
+    )
+    auftrag["produktion_schritte"] = produktion_schritt_steps(auftrag)
     auftrag["kosten_gutachten_betrag"] = clean_text(auftrag.get("kosten_gutachten_betrag"))
     auftrag["kosten_werkstatt_betrag"] = clean_text(auftrag.get("kosten_werkstatt_betrag"))
     auftrag["kosten_freigabe_betrag"] = clean_text(auftrag.get("kosten_freigabe_betrag"))
@@ -27427,6 +27446,63 @@ def normalize_schaden_station(value):
     return value if value in allowed else "aufnahme"
 
 
+def normalize_produktion_schritt(value):
+    value = clean_text(value).lower()
+    allowed = {key for key, _, _ in PRODUKTION_SCHRITTE}
+    return value if value in allowed else ""
+
+
+def produktion_schritt_index(value):
+    value = normalize_produktion_schritt(value)
+    keys = [key for key, _, _ in PRODUKTION_SCHRITTE]
+    return keys.index(value) if value in keys else -1
+
+
+def produktion_schritt_steps(auftrag):
+    # Werkstatt-Stepper auf der Tafel-Karte: 4 Schritte mit Zustand erledigt/aktiv/offen.
+    aktuell_index = produktion_schritt_index((auftrag or {}).get("produktion_schritt"))
+    steps = []
+    for i, (key, label, _kunde) in enumerate(PRODUKTION_SCHRITTE):
+        if aktuell_index < 0 or i > aktuell_index:
+            state = "offen"
+        elif i < aktuell_index:
+            state = "erledigt"
+        else:
+            state = "aktiv"
+        steps.append({"key": key, "label": label, "state": state})
+    return steps
+
+
+def kunden_produktion_steps(auftrag):
+    # Schlanke Kundenansicht der Werkstatt-Phase (Status 3): Vorbereitung -> Lackierung -> Endkontrolle.
+    # Karosserie wird bewusst unter "In Vorbereitung" gefaltet (kein "übersprungen" beim Kunden).
+    auftrag = auftrag or {}
+    status = int(auftrag.get("status") or 1)
+    schritt = normalize_produktion_schritt(auftrag.get("produktion_schritt"))
+    aktiv_map = {"vorarbeit": 0, "karosserie": 0, "lackierung": 1, "finish": 2}
+    stufen = (
+        ("In Vorbereitung", "Demontage und Vorbereitung für die Lackierung."),
+        ("In der Lackierung", "Ihr Fahrzeug ist in der Lackierung."),
+        ("Endkontrolle & Politur", "Endkontrolle, Politur und Fertigstellung."),
+    )
+    if status >= 4:
+        aktiv_index = len(stufen)
+    elif status < 3:
+        aktiv_index = -1
+    else:
+        aktiv_index = aktiv_map.get(schritt, 0)
+    steps = []
+    for i, (label, detail) in enumerate(stufen):
+        if aktiv_index < 0 or i > aktiv_index:
+            state = "waiting"
+        elif i < aktiv_index:
+            state = "done"
+        else:
+            state = "active"
+        steps.append({"label": label, "detail": detail, "state": state})
+    return steps
+
+
 def normalize_teil_status(value):
     value = clean_text(value).lower()
     return value if value in SCHADEN_TEILE_STATUS else "offen"
@@ -29930,25 +30006,30 @@ def kunden_status_timeline_kurz(auftrag):
     beschreibungen = {
         1: "Ihr Fahrzeug ist bei uns erfasst.",
         2: "Der Termin ist eingeplant.",
-        3: "Ihr Fahrzeug ist in der Werkstatt in Bearbeitung.",
         4: "Die Arbeiten sind abgeschlossen, Ihr Fahrzeug ist abholbereit.",
         5: "Ihr Fahrzeug wurde an Sie übergeben.",
     }
-    steps = []
-    for rang in range(1, 6):
+
+    def status_step(rang):
         if status > rang or status >= 5:
             state = "done"
         elif status == rang:
             state = "active"
         else:
             state = "waiting"
-        steps.append(
-            {
-                "label": STATUSLISTE[rang]["label"],
-                "detail": beschreibungen[rang],
-                "state": state,
-            }
-        )
+        return {
+            "label": STATUSLISTE[rang]["label"],
+            "detail": beschreibungen[rang],
+            "state": state,
+        }
+
+    # Status 3 ("In Arbeit") wird in die schlanken Produktionsschritte aufgefächert,
+    # damit der Kunde Vorbereitung -> Lackierung -> Endkontrolle sieht (eine Datenquelle:
+    # derselbe produktion_schritt wie auf der Werkstatt-Tafel).
+    steps = [status_step(1), status_step(2)]
+    steps.extend(kunden_produktion_steps(auftrag))
+    steps.append(status_step(4))
+    steps.append(status_step(5))
     return steps
 
 
@@ -30017,11 +30098,10 @@ def kunden_status_timeline(auftrag, log=None, prozess=None, teile=None):
         add("Termin vereinbaren", terminfreigabe["detail"], "waiting")
 
     werkstatt_started = status >= 3 or station_rank >= schaden_station_rank("fahrzeug_in_werkstatt")
-    add(
-        "Fahrzeug in der Werkstatt",
-        f"Aktuelle Station: {auftrag.get('schaden_station_label', 'Schadensaufnahme')}.",
-        "done" if status >= 4 else ("active" if werkstatt_started else "waiting"),
-    )
+    # Werkstatt-Phase als schlanke Produktionsschritte (Vorbereitung -> Lackierung -> Endkontrolle),
+    # gespeist aus demselben produktion_schritt wie die Werkstatt-Tafel.
+    for ps in kunden_produktion_steps(auftrag):
+        add(ps["label"], ps["detail"], ps["state"])
     add(
         "Reparatur dokumentiert",
         "Instandsetzung, Teilebelege, Endkontrolle und Fertigbilder werden für die Abrechnung festgehalten.",
@@ -40986,6 +41066,37 @@ def werkstatt_auftrag_adresse(auftrag_id):
     db.commit()
     db.close()
     flash("Adresse gespeichert.", "success")
+    return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
+
+
+@app.route("/werkstatt/auftrag/<int:auftrag_id>/produktion/<schritt>", methods=["POST"])
+def werkstatt_auftrag_produktion(auftrag_id, schritt):
+    # Mitarbeiter schaltet den Produktionsschritt der Karte weiter (Vorarbeit -> Karosserie ->
+    # Lackierung -> Finish). Reine Fortschrittsstufe innerhalb von "In Arbeit"; aendert NICHT
+    # den Spalten-Status — "Fertig melden" bleibt ein eigener, bewusster Schritt (sonst gingen
+    # ungewollte Kunden-/Autohaus-Benachrichtigungen raus).
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or auftrag.get("archiviert"):
+        abort(404)
+    ziel_schritt = normalize_produktion_schritt(schritt)
+    if not ziel_schritt:
+        abort(400)
+    if ziel_schritt == normalize_produktion_schritt(auftrag.get("produktion_schritt")):
+        # Toggle: nochmaliges Tippen des aktuellen Schritts nimmt ihn zurueck.
+        ziel_schritt = ""
+    db = get_db()
+    db.execute(
+        "UPDATE auftraege SET produktion_schritt=?, geaendert_am=? WHERE id=?",
+        (ziel_schritt, now_str(), auftrag_id),
+    )
+    db.commit()
+    db.close()
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify({"ok": True, "produktion_schritt": ziel_schritt})
+    flash("Schritt aktualisiert.", "success")
     return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
 
 
