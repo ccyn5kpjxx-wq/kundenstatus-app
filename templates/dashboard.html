@@ -193,6 +193,7 @@
           </td>
           <td>
             <span class="badge text-bg-{{ a['status_meta']['farbe'] }}">{{ a['status_meta']['icon'] }} {{ a['status_meta']['label'] }}</span>
+            {% if a['status'] == 3 and a['produktion_schritt_label'] %}<div class="mt-1"><span class="badge text-bg-light border text-dark prod-schritt-badge">{{ a['produktion_schritt_label'] }}</span></div>{% endif %}
             {% if a['hat_offene_reklamation'] %}
               <div class="small text-danger mt-1">Reklamation offen: neu mit Start und Fertig planen.</div>
             {% elif a['archivierbar_zurueckgegeben'] %}
