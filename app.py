@@ -35630,9 +35630,9 @@ def umsatz_ziel_daten(jahr=None, monat=None):
     investitionen_monat_total = monats_summen.get(cur, {}).get("investitionen", 0.0)
     differenz_bisher = einnahmen_bisher - ausgaben_bisher
 
-    top_ausgaben = []
-    for beleg in sorted(ausgaben_belege.get(cur, []), key=lambda r: -float(r["total_amount"] or 0))[:6]:
-        top_ausgaben.append({
+    alle_ausgaben = []
+    for beleg in sorted(ausgaben_belege.get(cur, []), key=lambda r: -float(r["total_amount"] or 0)):
+        alle_ausgaben.append({
             "id": beleg["id"],
             "kontakt": clean_text(beleg["contact_name"]) or "Unbekannter Lieferant",
             "nummer": clean_text(beleg["voucher_number"]),
@@ -35640,6 +35640,7 @@ def umsatz_ziel_daten(jahr=None, monat=None):
             "betrag_label": umsatz_euro_label(beleg["total_amount"]),
             "ist_investition": bool(int(beleg["investition"] or 0)),
         })
+    top_ausgaben = alle_ausgaben[:6]
 
     prev_y, prev_m = prev_month(jahr, monat)
     vm = (prev_y, prev_m)
@@ -35754,6 +35755,7 @@ def umsatz_ziel_daten(jahr=None, monat=None):
         "investitionen_monat_total_label": umsatz_euro_label(investitionen_monat_total),
         "hat_investitionen": investitionen_bisher > 0,
         "top_ausgaben": top_ausgaben,
+        "alle_ausgaben": alle_ausgaben,
         "differenz_bisher_label": umsatz_euro_label(differenz_bisher),
         "differenz_positiv": differenz_bisher >= 0,
         "einnahmen_monat_total_label": umsatz_euro_label(einnahmen_monat_total),

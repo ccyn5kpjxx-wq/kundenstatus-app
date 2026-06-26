@@ -139,7 +139,7 @@
   <div class="section-title mb-3">
     <div>
       <h2 class="h5 mb-1">Größte Ausgaben im {{ z.monat_label }}</h2>
-      <p class="mb-0 text-muted small">Einmalige Anschaffungen (Auto, Maschine, Anlage) als Investition markieren — sie zählen dann nicht mehr in die laufenden Ausgaben und die Differenz.</p>
+      <p class="mb-0 text-muted small">Einmalige Anschaffungen (Auto, Maschine, Anlage) als Investition markieren — sie zählen dann nicht mehr in die laufenden Ausgaben und die Differenz. Investitionen laufen getrennt, darum kann die laufende Summe von der Lexware-Übersicht abweichen.</p>
     </div>
   </div>
   <div class="table-responsive">
@@ -169,6 +169,36 @@
       </tbody>
     </table>
   </div>
+</div>
+{% endif %}
+
+{% if z.alle_ausgaben and z.alle_ausgaben|length > 6 %}
+<div class="page-card p-4 mb-4">
+  <details>
+    <summary style="cursor:pointer;" class="h6 mb-0">Alle Ausgaben im {{ z.monat_label }} anzeigen ({{ z.alle_ausgaben|length }}) — auch hier als Investition markierbar</summary>
+    <div class="table-responsive mt-3">
+      <table class="table align-middle">
+        <thead><tr><th>Beleg</th><th class="text-end">Betrag</th><th>Zählt als</th><th></th></tr></thead>
+        <tbody>
+          {% for b in z.alle_ausgaben %}
+          <tr>
+            <td><div class="fw-bold">{{ b.kontakt }}</div><div class="text-muted small">{% if b.nummer %}Nr. {{ b.nummer }} · {% endif %}{{ b.datum }}</div></td>
+            <td class="text-end">{{ b.betrag_label }}</td>
+            <td>{% if b.ist_investition %}<span class="badge text-bg-info">Investition</span>{% else %}<span class="badge text-bg-secondary">laufende Ausgabe</span>{% endif %}</td>
+            <td class="text-end">
+              <form method="POST" action="{{ url_for('admin_zahlen_investition', beleg_id=b.id) }}" class="m-0 d-inline">
+                {{ csrf_field()|safe }}
+                <input type="hidden" name="jahr" value="{{ z.jahr }}">
+                <input type="hidden" name="monat" value="{{ z.monat }}">
+                <button type="submit" class="btn btn-sm btn-soft" data-no-loading="true">{% if b.ist_investition %}Doch laufende Ausgabe{% else %}Als Investition markieren{% endif %}</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
 </div>
 {% endif %}
 
