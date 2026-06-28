@@ -19627,7 +19627,7 @@ def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
 def get_status_log(auftrag_id):
     db = get_db()
     rows = db.execute(
-        "SELECT * FROM status_log WHERE auftrag_id=? ORDER BY zeitstempel ASC, id ASC",
+        "SELECT * FROM status_log WHERE auftrag_id=? ORDER BY id ASC",
         (auftrag_id,),
     ).fetchall()
     db.close()
@@ -39312,7 +39312,7 @@ def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status):
         "Status geändert",
         f"Die Werkstatt hat den Status auf „{STATUSLISTE[neuer_status]['label']}“ gesetzt.",
     )
-    if neuer_status == 4:
+    if neuer_status == 4 and auftrag["status"] != 4:
         sende_autohaus_benachrichtigung_mail(
             auftrag_id,
             "Fahrzeug ist fertig",
@@ -40268,6 +40268,7 @@ def versicherung_login():
             return render_template("versicherung_index.html", versicherungen=versicherungen), 429
         if versicherung and versicherung_access_code_matches(zugangscode, versicherung):
             clear_login_attempts("versicherung", portal_key)
+            session.clear()
             session.permanent = True
             session["versicherung_id"] = versicherung["id"]
             return redirect(url_for("versicherung_dashboard", slug=versicherung["slug"]))
@@ -40289,6 +40290,7 @@ def versicherung_login_key(portal_key):
             return render_template("versicherung_login.html", versicherung=versicherung), 429
         if versicherung_access_code_matches(submitted_code, versicherung):
             clear_login_attempts("versicherung", portal_key)
+            session.clear()
             session.permanent = True
             session["versicherung_id"] = versicherung["id"]
             return redirect(url_for("versicherung_dashboard", slug=versicherung["slug"]))
