@@ -9026,6 +9026,7 @@ def init_db():
     ensure_column(db, "fahrzeugeinkauf_fahrzeuge", "verkaeufer_name", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeugeinkauf_fahrzeuge", "verkaeufer_telefon", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeugeinkauf_fahrzeuge", "verkaeufer_email", "TEXT DEFAULT ''")
+    ensure_column(db, "mietwagen_anfragen", "mietfahrzeug_id", "INTEGER DEFAULT 0")
     ensure_column(db, "fahrzeugverkauf_dateien", "hochgeladen_am", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeug_kandidaten", "suche_id", "INTEGER DEFAULT 0")
     ensure_column(db, "fahrzeug_kandidaten", "status", "TEXT DEFAULT 'neu'")
@@ -9422,6 +9423,7 @@ def init_db():
             end_datum      TEXT DEFAULT '',
             nachricht      TEXT DEFAULT '',
             quelle         TEXT DEFAULT 'homepage',
+            mietfahrzeug_id INTEGER DEFAULT 0,
             mietvorgang_id INTEGER DEFAULT 0,
             erstellt_am    TEXT NOT NULL,
             erledigt_am    TEXT DEFAULT ''
@@ -32025,6 +32027,38 @@ def kalender_daten(auftraege):
     for item in kalender_systemeintraege(years):
         tage[item["datum"]]["system"].append(item)
 
+    # Mietwagen: Übergabe- und Rückgabetermine offener Mietvorgänge
+    try:
+        for fahrzeug in list_mietfahrzeuge(include_inactive=True):
+            for vorgang in fahrzeug.get("vorgaenge", []):
+                if vorgang.get("abgeschlossen"):
+                    continue
+                kunde = clean_text(vorgang.get("kunde_name")) or "Kunde"
+                fzg_label = clean_text(fahrzeug.get("kennzeichen"))
+                if clean_text(fahrzeug.get("bezeichnung")):
+                    fzg_label += f" ({clean_text(fahrzeug.get('bezeichnung'))})"
+                zeitraum = f"{clean_text(vorgang.get('start_datum'))} – {clean_text(vorgang.get('end_datum')) or 'offen'}"
+                for datum, titel in (
+                    (vorgang.get("start_obj"), f"Mietwagen-Übergabe: {kunde}"),
+                    (vorgang.get("end_obj"), f"Mietwagen-Rückgabe: {kunde}"),
+                ):
+                    if not datum:
+                        continue
+                    tage[datum]["system"].append(
+                        {
+                            "datum": datum,
+                            "datum_text": datum.strftime(DATE_FMT),
+                            "titel": titel,
+                            "notiz": f"{fzg_label} · {zeitraum} · Tel. {clean_text(vorgang.get('kunde_telefon')) or '—'}",
+                            "kategorie": "mietwagen",
+                            "kategorie_label": "Mietwagen",
+                            "farbe": "#145d66",
+                            "system": True,
+                        }
+                    )
+    except Exception:
+        pass
+
     kalender = []
     for tag in sorted(tage.keys()):
         day_data = tage[tag]
@@ -43247,10 +43281,39 @@ def start_lexware_auto_sync():
 # ==========================================================================
 
 
+def mietwagen_public_fahrzeuge():
+    """Aktive Mietfahrzeuge mit Titelbild und belegten Zeiträumen für die öffentliche Seite."""
+    fahrzeuge = []
+    for f in list_mietfahrzeuge(include_inactive=False):
+        belegt = []
+        for v in f.get("vorgaenge", []):
+            if v.get("abgeschlossen"):
+                continue
+            belegt.append(
+                f"{clean_text(v.get('start_datum'))} – {clean_text(v.get('end_datum')) or 'offen'}"
+            )
+        titelbild_id = 0
+        for bild in f.get("bilder", []) or []:
+            titelbild_id = bild["id"]
+            break
+        fahrzeuge.append(
+            {
+                "id": f["id"],
+                "bezeichnung": clean_text(f.get("bezeichnung")) or clean_text(f.get("fahrzeugklasse")) or "Mietwagen",
+                "fahrzeugklasse": clean_text(f.get("fahrzeugklasse")),
+                "tagessatz": clean_text(str(f.get("tagessatz") or "")),
+                "titelbild_id": titelbild_id,
+                "belegt": belegt,
+            }
+        )
+    return fahrzeuge
+
+
 @app.route("/mietwagen", methods=["GET", "POST"])
 def mietwagen_anfrage():
     """Öffentliches Anfrageformular (ohne Login) — Handy ist Pflicht für den WhatsApp-Versand."""
     klassen = MIETFAHRZEUG_KLASSEN
+    fahrzeuge = mietwagen_public_fahrzeuge()
     if request.method == "POST":
         # Honeypot gegen Spam-Bots: echtes Feld bleibt leer
         if clean_text(request.form.get("website")):
@@ -43258,15 +43321,23 @@ def mietwagen_anfrage():
         name = clean_text(request.form.get("name"))
         telefon = clean_text(request.form.get("telefon"))
         start_datum = clean_text(request.form.get("start_datum"))
+        try:
+            wunsch_fahrzeug_id = int(request.form.get("mietfahrzeug_id") or 0)
+        except (TypeError, ValueError):
+            wunsch_fahrzeug_id = 0
         if not name or not telefon or not start_datum:
             flash("Bitte Name, Handynummer und Abholdatum angeben — die Handynummer brauchen wir, um Ihnen den Mietvertrag per WhatsApp zu schicken.", "warning")
+        elif wunsch_fahrzeug_id and not mietfahrzeug_zeitraum_frei(
+            wunsch_fahrzeug_id, start_datum, clean_text(request.form.get("end_datum"))
+        ):
+            flash("Dieses Fahrzeug ist im gewünschten Zeitraum leider schon vergeben. Bitte anderes Datum oder anderes Fahrzeug wählen — oder 'Egal / Beratung' auswählen, wir finden etwas Passendes.", "warning")
         else:
             db = get_db()
             db.execute(
                 """
                 INSERT INTO mietwagen_anfragen
-                    (status, name, telefon, email, klasse_wunsch, start_datum, end_datum, nachricht, quelle, erstellt_am)
-                VALUES ('offen', ?, ?, ?, ?, ?, ?, ?, 'homepage', ?)
+                    (status, name, telefon, email, klasse_wunsch, start_datum, end_datum, nachricht, quelle, mietfahrzeug_id, erstellt_am)
+                VALUES ('offen', ?, ?, ?, ?, ?, ?, ?, 'homepage', ?, ?)
                 """,
                 (
                     name,
@@ -43276,6 +43347,7 @@ def mietwagen_anfrage():
                     start_datum,
                     clean_text(request.form.get("end_datum")),
                     clean_text(request.form.get("nachricht")),
+                    wunsch_fahrzeug_id,
                     now_str(),
                 ),
             )
@@ -43285,9 +43357,25 @@ def mietwagen_anfrage():
     return render_template(
         "mietwagen_anfrage.html",
         klassen=klassen,
+        fahrzeuge=fahrzeuge,
         gesendet=bool(request.args.get("ok")),
         heute_iso=date.today().isoformat(),
     )
+
+
+@app.route("/mietwagen/bild/<int:bild_id>")
+def mietwagen_public_bild(bild_id):
+    """Fahrzeugfoto für die öffentliche Mietwagen-Seite (nur Bilder aktiver Fahrzeuge)."""
+    bild = get_mietfahrzeug_bild(bild_id)
+    if not bild:
+        abort(404)
+    fahrzeug = get_mietfahrzeug(bild["mietfahrzeug_id"])
+    if not fahrzeug or not fahrzeug.get("aktiv"):
+        abort(404)
+    path = UPLOAD_DIR / pathlib.Path(bild["stored_name"]).name
+    if not path.exists():
+        abort(404)
+    return send_file(path, mimetype=bild.get("mime_type") or "image/jpeg")
 
 
 @app.route("/admin/mietanfrage/<int:anfrage_id>/uebernehmen", methods=["POST"])

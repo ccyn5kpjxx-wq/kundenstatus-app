@@ -82,7 +82,7 @@
         <select class="form-select form-select-sm" name="mietfahrzeug_id" required>
           <option value="">— wählen —</option>
           {% for gruppe in gruppen %}{% for f in gruppe.fahrzeuge %}{% if f.aktiv %}
-          <option value="{{ f.id }}">{{ f.kennzeichen }} — {{ f.bezeichnung or gruppe.klasse }}</option>
+          <option value="{{ f.id }}" {% if anfrage.mietfahrzeug_id == f.id %}selected{% endif %}>{{ f.kennzeichen }} — {{ f.bezeichnung or gruppe.klasse }}{% if anfrage.mietfahrzeug_id == f.id %} (Kundenwunsch){% endif %}</option>
           {% endif %}{% endfor %}{% endfor %}
         </select>
       </div>
