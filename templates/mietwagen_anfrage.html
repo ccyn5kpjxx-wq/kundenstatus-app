@@ -87,7 +87,7 @@
             <div class="info">
               <div class="name">{{ f.bezeichnung }}</div>
               <div class="preis">{% if f.tagessatz %}ab {{ f.tagessatz }} €/Tag{% else %}{{ f.fahrzeugklasse }}{% endif %}</div>
-              {% if f.belegt %}<div class="belegt">belegt: {{ f.belegt|join(' · ') }}</div>{% endif %}
+              {% if f.bald %}<div class="belegt" style="color:#8a5b00;">In Kürze verfügbar — vormerken</div>{% elif f.belegt %}<div class="belegt">belegt: {{ f.belegt|join(' · ') }}</div>{% endif %}
             </div>
           </label>
           {% endfor %}

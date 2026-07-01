@@ -34011,6 +34011,7 @@ MIETFAHRZEUG_KLASSEN = [
 # aus einem laufenden Mietvorgang abgeleitet (siehe hydrate_mietfahrzeug).
 MIETFAHRZEUG_BASIS_STATUS = {
     "verfuegbar": "Verfügbar",
+    "bald": "In Kürze verfügbar",
     "wartung": "In Wartung",
     "inaktiv": "Stillgelegt",
 }
@@ -43533,6 +43534,7 @@ def mietwagen_public_fahrzeuge():
                 "tagessatz": tagessatz,
                 "titelbild_id": titelbild_id,
                 "belegt": belegt,
+                "bald": clean_text(f.get("status")) == "bald",
             }
         )
     return fahrzeuge

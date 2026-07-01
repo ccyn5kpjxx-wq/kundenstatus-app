@@ -48,6 +48,7 @@
   .car .preis small { font-size: .85rem; color: #666; font-weight: 400; }
   .car .belegt { background: #fdecea; color: #b3261e; border-radius: 8px; padding: 7px 11px; font-size: .84rem; margin: 10px 0 0; }
   .car .frei { background: #eaf6ee; color: #1b7f53; border-radius: 8px; padding: 7px 11px; font-size: .84rem; margin: 10px 0 0; font-weight: 700; }
+  .car .bald { background: #fdf3dd; color: #8a5b00; border-radius: 8px; padding: 7px 11px; font-size: .84rem; margin: 10px 0 0; font-weight: 700; }
   .car a.buchen { margin-top: 16px; text-align: center; background: var(--dunkel); color: #fff; text-decoration: none; font-weight: 700; padding: 12px; border-radius: 10px; }
   .car a.buchen:hover { background: var(--akzent); }
   .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px; counter-reset: schritt; }
@@ -110,8 +111,8 @@
           <h3>{{ f.bezeichnung }}</h3>
           <div class="klasse">{{ f.fahrzeugklasse }}</div>
           {% if f.tagessatz %}<div class="preis">ab {{ f.tagessatz }} € <small>/ Tag inkl. MwSt.</small></div>{% endif %}
-          {% if f.belegt %}<div class="belegt">Belegt: {{ f.belegt|join(' · ') }}</div>{% else %}<div class="frei">Aktuell verfügbar</div>{% endif %}
-          <a class="buchen" href="{{ url_for('mietwagen_anfrage', fahrzeug=f.id) }}">Dieses Fahrzeug anfragen</a>
+          {% if f.bald %}<div class="bald">In Kürze verfügbar — jetzt vormerken</div>{% elif f.belegt %}<div class="belegt">Belegt: {{ f.belegt|join(' · ') }}</div>{% else %}<div class="frei">Aktuell verfügbar</div>{% endif %}
+          <a class="buchen" href="{{ url_for('mietwagen_anfrage', fahrzeug=f.id) }}">{% if f.bald %}Jetzt vormerken{% else %}Dieses Fahrzeug anfragen{% endif %}</a>
         </div>
       </div>
       {% endfor %}
