@@ -78,6 +78,10 @@
   .fein-form { flex: 0 1 280px; background: var(--panel-soft); border: 1px solid var(--line); border-radius: 8px; padding: 0.7rem; }
   .fein-form label { font-size: 0.78rem; font-weight: 700; color: var(--muted); margin-bottom: 0.1rem; }
   .fein-form .form-control, .fein-form .form-select { font-size: 0.88rem; }
+  .fein-kontakt { font-size: 0.9rem; background: #f0f7f2; border: 1px solid #cfe3d5; border-radius: 7px; padding: 0.4rem 0.7rem; }
+  .fein-kontakt a { font-weight: 700; text-decoration: none; }
+  .fein-copybtn { border: 1px solid var(--line); background: #fff; border-radius: 5px; font-size: 0.75rem; padding: 0.1rem 0.45rem; margin-left: 0.2rem; }
+  .fein-wabtn { display: inline-block; background: #25d366; color: #fff !important; font-weight: 700; font-size: 0.78rem; padding: 0.15rem 0.55rem; border-radius: 6px; text-decoration: none; margin-left: 0.2rem; }
   .fein-sternbtn {
     border: 1px solid var(--line);
     background: #fff;
@@ -135,6 +139,23 @@
       {% if fz.schaden %}<div class="mt-1"><strong>Schaden:</strong> {{ fz.schaden }}</div>{% endif %}
       {% if fz.verhandlungsziel %}<div class="mt-1"><strong>Verhandlungsziel:</strong> {{ fz.verhandlungsziel }}</div>{% endif %}
       {% if fz.marge %}<div class="fein-marge mt-1">Marge: {{ fz.marge }}</div>{% endif %}
+      {% if fz.verkaeufer_name or fz.verkaeufer_telefon or fz.verkaeufer_email %}
+      <div class="fein-kontakt mt-2">
+        <strong>Verk&auml;ufer:</strong>
+        {% if fz.verkaeufer_name %}{{ fz.verkaeufer_name }}{% endif %}
+        {% if fz.verkaeufer_telefon %}
+          &middot; <a href="{{ fz.kontakt_tel_url }}">&#128222; {{ fz.verkaeufer_telefon }}</a>
+          <button type="button" class="fein-copybtn" onclick="navigator.clipboard.writeText('{{ fz.verkaeufer_telefon }}');this.textContent='&#10003; kopiert';setTimeout(()=>this.textContent='Kopieren',1500)">Kopieren</button>
+          {% if fz.kontakt_wa_url %}<a class="fein-wabtn" href="{{ fz.kontakt_wa_url }}" target="_blank" rel="noopener">WhatsApp</a>{% endif %}
+        {% endif %}
+        {% if fz.verkaeufer_email %}
+          &middot; <a href="{{ fz.kontakt_mail_url }}">&#9993; E-Mail vorbereiten</a>
+          <button type="button" class="fein-copybtn" onclick="navigator.clipboard.writeText('{{ fz.verkaeufer_email }}');this.textContent='&#10003; kopiert';setTimeout(()=>this.textContent='Kopieren',1500)">Kopieren</button>
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="text-muted mt-2" style="font-size:0.83rem;">Kein direkter Kontakt im Inserat &mdash; &uuml;ber den orangen Button anfragen.</div>
+      {% endif %}
       <div class="mt-2 d-flex gap-2 flex-wrap align-items-center">
         {% if fz.inserat_url %}<a class="fein-linkbtn" href="{{ fz.inserat_url }}" target="_blank" rel="noopener">&raquo; Inserat ansehen</a>{% endif %}
         <form method="post" action="{{ url_for('admin_fahrzeugeinkauf_fahrzeug_update', fz_id=fz.id) }}">

@@ -8249,6 +8249,9 @@ def init_db():
             schaden          TEXT DEFAULT '',
             inserat_url      TEXT DEFAULT '',
             bild_url         TEXT DEFAULT '',
+            verkaeufer_name    TEXT DEFAULT '',
+            verkaeufer_telefon TEXT DEFAULT '',
+            verkaeufer_email   TEXT DEFAULT '',
             interessant      INTEGER DEFAULT 0,
             notiz            TEXT DEFAULT '',
             geboten          TEXT DEFAULT '',
@@ -9018,6 +9021,9 @@ def init_db():
     ensure_column(db, "fahrzeugverkauf_dateien", "analyse_quelle", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeugverkauf_dateien", "analyse_hinweis", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeugverkauf_dateien", "analyse_json", "TEXT DEFAULT ''")
+    ensure_column(db, "fahrzeugeinkauf_fahrzeuge", "verkaeufer_name", "TEXT DEFAULT ''")
+    ensure_column(db, "fahrzeugeinkauf_fahrzeuge", "verkaeufer_telefon", "TEXT DEFAULT ''")
+    ensure_column(db, "fahrzeugeinkauf_fahrzeuge", "verkaeufer_email", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeugverkauf_dateien", "hochgeladen_am", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeug_kandidaten", "suche_id", "INTEGER DEFAULT 0")
     ensure_column(db, "fahrzeug_kandidaten", "status", "TEXT DEFAULT 'neu'")
@@ -43168,13 +43174,37 @@ def start_lexware_auto_sync():
 FAHRZEUGEINKAUF_STATUS = ["neu", "beobachten", "geboten", "besichtigung", "gekauft", "verworfen"]
 
 
+def fahrzeugeinkauf_kontakt_anreichern(fz):
+    """Ergänzt tel:/wa.me/mailto-Links für die Verkäufer-Kontaktaufnahme (Entwürfe — senden tut der GF)."""
+    name = clean_text(fz.get("verkaeufer_name"))
+    telefon = clean_text(fz.get("verkaeufer_telefon"))
+    email = clean_text(fz.get("verkaeufer_email"))
+    titel = clean_text(fz.get("titel")) or "Ihr Fahrzeug"
+    preis = clean_text(fz.get("preis"))
+    anrede = f"Guten Tag{' ' + name if name else ''},"
+    nachricht = (
+        f"{anrede} ich interessiere mich für Ihr Fahrzeug \"{titel}\""
+        f"{' (' + preis + ')' if preis else ''} aus Ihrem Inserat. "
+        "Ist es noch verfügbar? Wann könnte ich es besichtigen? "
+        "Mit freundlichen Grüßen, Christopher Gärtner, Gärtner Karosserie & Lack GmbH, Tel. +49 1522 7706694"
+    )
+    fz["kontakt_tel_url"] = f"tel:{re.sub(r'[^0-9+]', '', telefon)}" if telefon else ""
+    wa_key = whatsapp_number_key(telefon) if telefon else ""
+    fz["kontakt_wa_url"] = f"https://wa.me/{wa_key}?text={quote(nachricht)}" if wa_key else ""
+    fz["kontakt_mail_url"] = (
+        f"mailto:{email}?subject={quote('Anfrage zu Ihrem Fahrzeug: ' + titel)}&body={quote(nachricht)}"
+        if email else ""
+    )
+    return fz
+
+
 def fahrzeugeinkauf_scan_liste(limit=30):
     db = get_db()
     scans = [dict(row) for row in db.execute(
         "SELECT * FROM fahrzeugeinkauf_scans ORDER BY id DESC LIMIT ?", (limit,)
     ).fetchall()]
     for scan in scans:
-        scan["fahrzeuge"] = [dict(row) for row in db.execute(
+        scan["fahrzeuge"] = [fahrzeugeinkauf_kontakt_anreichern(dict(row)) for row in db.execute(
             "SELECT * FROM fahrzeugeinkauf_fahrzeuge WHERE scan_id = ? ORDER BY CASE ampel WHEN 'gruen' THEN 0 WHEN 'gelb' THEN 1 ELSE 2 END, id",
             (scan["id"],),
         ).fetchall()]
@@ -43186,7 +43216,7 @@ def fahrzeugeinkauf_scan_liste(limit=30):
 @admin_required
 def admin_fahrzeugeinkauf():
     db = get_db()
-    interessante = [dict(row) for row in db.execute(
+    interessante = [fahrzeugeinkauf_kontakt_anreichern(dict(row)) for row in db.execute(
         """
         SELECT f.*, s.scan_datum AS scan_datum
         FROM fahrzeugeinkauf_fahrzeuge f
@@ -43346,18 +43376,53 @@ def api_fahrzeugeinkauf_import():
     )
     scan_id = cursor.lastrowid
     angelegt = 0
+    aktualisiert = 0
     for fz in fahrzeuge:
         if not isinstance(fz, dict):
             continue
         ampel = clean_text(fz.get("ampel")).lower()
         if ampel not in ("gruen", "gelb", "rot"):
             ampel = "gelb"
+        inserat_url = clean_text(fz.get("inserat_url"))
+        bestehendes = None
+        if inserat_url:
+            bestehendes = db.execute(
+                "SELECT id FROM fahrzeugeinkauf_fahrzeuge WHERE inserat_url = ? ORDER BY id LIMIT 1",
+                (inserat_url,),
+            ).fetchone()
+        if bestehendes:
+            db.execute(
+                """
+                UPDATE fahrzeugeinkauf_fahrzeuge
+                SET preis = ?, verhandlungsziel = ?, marge = ?, ampel = ?, schaden = ?,
+                    bild_url = ?, verkaeufer_name = ?, verkaeufer_telefon = ?, verkaeufer_email = ?,
+                    geaendert_am = ?
+                WHERE id = ?
+                """,
+                (
+                    clean_text(fz.get("preis")),
+                    clean_text(fz.get("verhandlungsziel")),
+                    clean_text(fz.get("marge")),
+                    ampel,
+                    clean_text(fz.get("schaden")),
+                    clean_text(fz.get("bild_url")),
+                    clean_text(fz.get("verkaeufer_name")),
+                    clean_text(fz.get("verkaeufer_telefon")),
+                    clean_text(fz.get("verkaeufer_email")),
+                    now_str(),
+                    bestehendes["id"],
+                ),
+            )
+            aktualisiert += 1
+            continue
         db.execute(
             """
             INSERT INTO fahrzeugeinkauf_fahrzeuge
                 (scan_id, titel, preis, verhandlungsziel, marge, ampel, ez, km, ps,
-                 ort, schaden, inserat_url, bild_url, erstellt_am, geaendert_am)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ort, schaden, inserat_url, bild_url,
+                 verkaeufer_name, verkaeufer_telefon, verkaeufer_email,
+                 erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 scan_id,
@@ -43371,8 +43436,11 @@ def api_fahrzeugeinkauf_import():
                 clean_text(fz.get("ps")),
                 clean_text(fz.get("ort")),
                 clean_text(fz.get("schaden")),
-                clean_text(fz.get("inserat_url")),
+                inserat_url,
                 clean_text(fz.get("bild_url")),
+                clean_text(fz.get("verkaeufer_name")),
+                clean_text(fz.get("verkaeufer_telefon")),
+                clean_text(fz.get("verkaeufer_email")),
                 now_str(),
                 now_str(),
             ),
@@ -43384,7 +43452,7 @@ def api_fahrzeugeinkauf_import():
     )
     db.commit()
     db.close()
-    return jsonify({"ok": True, "scan_id": scan_id, "fahrzeuge_angelegt": angelegt})
+    return jsonify({"ok": True, "scan_id": scan_id, "fahrzeuge_angelegt": angelegt, "fahrzeuge_aktualisiert": aktualisiert})
 
 
 init_db()
