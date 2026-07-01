@@ -2232,6 +2232,32 @@ DEFAULT_WERKSTATT_NEWS = [
         "kategorie": "betrieb",
         "pinned": 1,
     },
+    {
+        "news_key": "felgen-service-2026",
+        "titel": "Neu: Felgen abdrehen & Pulverbeschichten",
+        "nachricht": (
+            "Wir bereiten jetzt auch Felgen auf: Abdrehen bei Bordsteinkratzern und Randschäden "
+            "sowie Pulverbeschichtung in Wunschfarbe — für einzelne Felgen oder komplette Sätze. "
+            "Gerne direkt zum Auftrag dazubuchen."
+        ),
+        "start_datum": "",
+        "end_datum": "",
+        "kategorie": "betrieb",
+        "pinned": 1,
+    },
+    {
+        "news_key": "ppg-digimatch-farbtonmessung",
+        "titel": "Digitale Farbtonmessung mit PPG DigiMatch",
+        "nachricht": (
+            "Unser neues PPG-DigiMatch-Messgerät (Spektralfotometer) misst den Farbton digital direkt "
+            "am Fahrzeug und ermittelt die exakte Mischformel — für noch präzisere Farbtontreffer "
+            "und weniger Nacharbeit."
+        ),
+        "start_datum": "",
+        "end_datum": "",
+        "kategorie": "betrieb",
+        "pinned": 1,
+    },
 ]
 
 EVENT_FELDER = (
