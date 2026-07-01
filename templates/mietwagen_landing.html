@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mietwagen Mosbach — Auto mieten beim Meisterbetrieb | Gärtner Karosserie + Lack</title>
+<meta name="description" content="Mietwagen &amp; Ersatzwagen in Mosbach direkt vom Meisterbetrieb. Online anfragen, digital unterschreiben, losfahren.">
+<style>
+  :root { --akzent: #e8650d; --dunkel: #131313; --dunkel2: #1d1d1d; --hell: #f7f6f4; --text: #222; }
+  * { box-sizing: border-box; margin: 0; }
+  html { scroll-behavior: smooth; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); line-height: 1.65; background: #fff; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 22px; }
+  img { max-width: 100%; display: block; }
+  nav { position: sticky; top: 0; z-index: 50; background: rgba(19,19,19,.94); backdrop-filter: blur(6px); color: #fff; }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; padding: 12px 22px; }
+  nav .logo { font-weight: 800; letter-spacing: .4px; font-size: 1.02rem; }
+  nav .logo span { color: var(--akzent); }
+  nav a.telbtn { color: #fff; text-decoration: none; font-weight: 700; background: var(--akzent); padding: 8px 16px; border-radius: 8px; font-size: .95rem; }
+  .hero { position: relative; color: #fff; min-height: 480px; display: flex; align-items: center;
+          background: linear-gradient(100deg, rgba(10,10,10,.93) 0%, rgba(10,10,10,.72) 45%, rgba(10,10,10,.38) 100%), var(--dunkel2); }
+  .hero .inner { padding: 80px 0; max-width: 640px; }
+  .hero .eyebrow { color: var(--akzent); font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; font-size: .82rem; }
+  .hero h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.12; margin: 14px 0 18px; font-weight: 800; }
+  .hero p.sub { font-size: 1.1rem; color: #e6e6e6; max-width: 540px; }
+  .cta { display: inline-block; margin: 24px 12px 0 0; padding: 14px 24px; border-radius: 10px; text-decoration: none; font-weight: 700; font-size: 1rem; }
+  .cta.haupt { background: var(--akzent); color: #fff; }
+  .cta.wa { background: #25d366; color: #fff; }
+  .cta.ghost { border: 2px solid #fff; color: #fff; }
+  .chips { margin-top: 26px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .chip { border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 6px 14px; font-size: .85rem; color: #ddd; }
+  .usps { background: var(--dunkel2); color: #fff; padding: 30px 0; }
+  .usps .wrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
+  .usp b { display: block; color: var(--akzent); font-size: 1rem; margin-bottom: 4px; }
+  .usp span { color: #ccc; font-size: .9rem; }
+  section { padding: 56px 0; }
+  section.alt { background: var(--hell); }
+  h2 { font-size: 1.6rem; margin-bottom: 8px; font-weight: 800; }
+  p.lead { color: #555; margin-bottom: 30px; max-width: 640px; }
+  .cars { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 26px; }
+  .car { background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.10); display: flex; flex-direction: column; }
+  .car .foto { position: relative; height: 210px; overflow: hidden; background: #e9e6e0; display: flex; align-items: center; justify-content: center; color: #999; }
+  .car .foto img { width: 100%; height: 100%; object-fit: cover; }
+  .car .body { padding: 20px 22px 24px; display: flex; flex-direction: column; flex: 1; }
+  .car h3 { font-size: 1.2rem; font-weight: 800; }
+  .car .klasse { color: #777; font-size: .9rem; margin: 2px 0 8px; }
+  .car .preis { font-size: 1.6rem; font-weight: 800; color: var(--akzent); }
+  .car .preis small { font-size: .85rem; color: #666; font-weight: 400; }
+  .car .belegt { background: #fdecea; color: #b3261e; border-radius: 8px; padding: 7px 11px; font-size: .84rem; margin: 10px 0 0; }
+  .car .frei { background: #eaf6ee; color: #1b7f53; border-radius: 8px; padding: 7px 11px; font-size: .84rem; margin: 10px 0 0; font-weight: 700; }
+  .car a.buchen { margin-top: 16px; text-align: center; background: var(--dunkel); color: #fff; text-decoration: none; font-weight: 700; padding: 12px; border-radius: 10px; }
+  .car a.buchen:hover { background: var(--akzent); }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px; counter-reset: schritt; }
+  .step { background: #fff; border-radius: 14px; padding: 24px 20px 20px; box-shadow: 0 6px 20px rgba(0,0,0,.07); position: relative; }
+  .step::before { counter-increment: schritt; content: counter(schritt); position: absolute; top: -16px; left: 20px; background: var(--akzent); color: #fff; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; }
+  .step b { display: block; margin-bottom: 4px; padding-top: 6px; }
+  .step span { font-size: .92rem; color: #555; }
+  .kontakt { background: var(--dunkel); color: #fff; }
+  .kontakt h2 { color: #fff; }
+  .kontakt .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; margin-top: 24px; }
+  .kontakt b { color: var(--akzent); display: block; margin-bottom: 6px; }
+  .kontakt a { color: #fff; }
+  footer { background: #0c0c0c; color: #999; padding: 24px 0; font-size: .88rem; }
+  footer a { color: #ccc; }
+  .wa-float { position: fixed; right: 18px; bottom: 18px; background: #25d366; color: #fff; text-decoration: none; font-weight: 700; padding: 12px 18px; border-radius: 999px; box-shadow: 0 8px 24px rgba(0,0,0,.28); z-index: 60; }
+</style>
+</head>
+<body>
+<nav>
+  <div class="wrap">
+    <div class="logo">GÄRTNER <span>KAROSSERIE + LACK</span> · MIETWAGEN</div>
+    <a class="telbtn" href="tel:+4915227706694">0152 277 066 94</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap"><div class="inner">
+    <div class="eyebrow">Autovermietung in Mosbach</div>
+    <h1>Einsteigen.<br>Losfahren.<br>Fertig.</h1>
+    <p class="sub">Mietwagen &amp; Ersatzwagen direkt vom Meisterbetrieb in Mosbach-Lohrbach. Faire Tagespreise, Vertrag digital unterschrieben — in 5 Minuten sitzen Sie am Steuer.</p>
+    <a class="cta haupt" href="{{ url_for('mietwagen_anfrage') }}">Jetzt online anfragen</a>
+    <a class="cta wa" href="https://wa.me/4915227706694?text=Hallo%2C%20ich%20interessiere%20mich%20f%C3%BCr%20einen%20Mietwagen.">Per WhatsApp</a>
+    <a class="cta ghost" href="#fahrzeuge">Fahrzeuge ansehen</a>
+    <div class="chips">
+      <span class="chip">✓ Meisterbetrieb</span>
+      <span class="chip">✓ Digitaler Mietvertrag</span>
+      <span class="chip">✓ Direkte Versicherungsabrechnung</span>
+    </div>
+  </div></div>
+</header>
+
+<div class="usps">
+  <div class="wrap">
+    <div class="usp"><b>Ohne Station-Bürokratie</b><span>Kein Schalter, keine Warteschlange — Übergabe direkt auf unserem Hof.</span></div>
+    <div class="usp"><b>Digital in 5 Minuten</b><span>Mietvertrag auf dem Bildschirm unterschreiben, Schlüssel mitnehmen.</span></div>
+    <div class="usp"><b>Unfall? Wir regeln das.</b><span>Bei unverschuldetem Unfall rechnen wir direkt mit der gegnerischen Versicherung ab.</span></div>
+    <div class="usp"><b>Vom Fachbetrieb gewartet</b><span>Moderne, gepflegte Fahrzeuge — gewartet im eigenen Meisterbetrieb.</span></div>
+  </div>
+</div>
+
+<section id="fahrzeuge">
+  <div class="wrap">
+    <h2>Unsere Mietfahrzeuge</h2>
+    <p class="lead">Live aus unserem Fuhrpark — rote Zeiträume sind bereits vergeben. Fahrzeug antippen, Wunschtermin angeben, fertig.</p>
+    <div class="cars">
+      {% for f in fahrzeuge %}
+      <div class="car">
+        <div class="foto">{% if f.titelbild_id %}<img src="{{ url_for('mietwagen_public_bild', bild_id=f.titelbild_id) }}" alt="{{ f.bezeichnung }}" loading="lazy">{% else %}Foto folgt in Kürze{% endif %}</div>
+        <div class="body">
+          <h3>{{ f.bezeichnung }}</h3>
+          <div class="klasse">{{ f.fahrzeugklasse }}</div>
+          {% if f.tagessatz %}<div class="preis">ab {{ f.tagessatz }} € <small>/ Tag inkl. MwSt.</small></div>{% endif %}
+          {% if f.belegt %}<div class="belegt">Belegt: {{ f.belegt|join(' · ') }}</div>{% else %}<div class="frei">Aktuell verfügbar</div>{% endif %}
+          <a class="buchen" href="{{ url_for('mietwagen_anfrage', fahrzeug=f.id) }}">Dieses Fahrzeug anfragen</a>
+        </div>
+      </div>
+      {% endfor %}
+      {% if not fahrzeuge %}
+      <p>Unsere Flotte wird gerade eingepflegt — rufen Sie uns an: <a href="tel:+4915227706694">0152 277 066 94</a></p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="alt">
+  <div class="wrap">
+    <h2>So einfach geht's</h2>
+    <p class="lead">Vom Klick bis zum Schlüssel — ohne Papierkram.</p>
+    <div class="steps">
+      <div class="step"><b>Online anfragen</b><span>Fahrzeug &amp; Wunschtermin wählen, Handynummer angeben — dauert 2 Minuten.</span></div>
+      <div class="step"><b>Wir bestätigen</b><span>Wir melden uns per WhatsApp oder Anruf und stellen alles bereit.</span></div>
+      <div class="step"><b>Digital unterschreiben</b><span>Bei Abholung unterschreiben Sie den Mietvertrag direkt auf dem Bildschirm.</span></div>
+      <div class="step"><b>Losfahren</b><span>Vertrag kommt aufs Handy (WhatsApp/E-Mail) — Schlüssel rein, fertig.</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="kontakt">
+  <div class="wrap">
+    <h2>Kontakt &amp; Abholung</h2>
+    <div class="grid">
+      <div><b>WhatsApp / Telefon</b><a href="tel:+4915227706694">0152 277 066 94</a><br><a href="https://wa.me/4915227706694">WhatsApp öffnen →</a></div>
+      <div><b>Online-Anfrage</b><a href="{{ url_for('mietwagen_anfrage') }}">Anfrageformular öffnen →</a><br><span style="opacity:.75">Wunschtermin angeben — wir bereiten alles vor.</span></div>
+      <div><b>E-Mail</b><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></div>
+      <div><b>Adresse</b>Gärtner GmbH Karosserie + Lack<br>Binauer Höhe 4 · 74821 Mosbach</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    © Gärtner GmbH Karosserie + Lack · Mosbach
+    <p style="margin-top:4px;"><a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a> · Alle Preise inkl. gesetzl. MwSt.</p>
+  </div>
+</footer>
+
+<a class="wa-float" href="https://wa.me/4915227706694?text=Hallo%2C%20ich%20interessiere%20mich%20f%C3%BCr%20einen%20Mietwagen.">💬 WhatsApp</a>
+</body>
+</html>

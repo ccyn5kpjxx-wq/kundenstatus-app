@@ -76,13 +76,13 @@
         <label class="form-label">Wunschfahrzeug aussuchen</label>
         <div class="mw-cars">
           <label class="mw-car">
-            <input type="radio" name="mietfahrzeug_id" value="" checked>
+            <input type="radio" name="mietfahrzeug_id" value="" {% if not vorauswahl %}checked{% endif %}>
             <div class="foto">&#129300;</div>
             <div class="info"><div class="name">Egal / beraten lassen</div><div class="preis">Wir schlagen vor</div></div>
           </label>
           {% for f in fahrzeuge %}
           <label class="mw-car">
-            <input type="radio" name="mietfahrzeug_id" value="{{ f.id }}">
+            <input type="radio" name="mietfahrzeug_id" value="{{ f.id }}" {% if vorauswahl == f.id %}checked{% endif %}>
             <div class="foto">{% if f.titelbild_id %}<img src="{{ url_for('mietwagen_public_bild', bild_id=f.titelbild_id) }}" alt="{{ f.bezeichnung }}" loading="lazy">{% else %}Foto folgt{% endif %}</div>
             <div class="info">
               <div class="name">{{ f.bezeichnung }}</div>

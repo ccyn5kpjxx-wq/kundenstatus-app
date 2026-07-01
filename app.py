@@ -43473,6 +43473,33 @@ def start_lexware_auto_sync():
 # ==========================================================================
 
 
+def notify_workshop_whatsapp_mietanfrage(name, telefon, zeitraum, fahrzeug_label=""):
+    """Meldet der Werkstatt per WhatsApp eine neue Mietwagen-Anfrage von der Homepage.
+    Gleicher Versandweg wie die Abholbereit-Meldung; scheitert der Versand,
+    bleibt die Anfrage trotzdem im Cockpit-Eingang sichtbar."""
+    try:
+        if whatsapp_bridge_config_errors():
+            return False
+        details = " · ".join(teil for teil in (fahrzeug_label, zeitraum, telefon) if teil)
+        body = (
+            f"🚙 Neue Mietwagen-Anfrage: {name} ({details}). "
+            "Übernehmen im Cockpit unter Mietfahrzeuge."
+        )
+        sent_any = False
+        for target_number in whatsapp_workshop_numbers():
+            ok, _errors = send_whatsapp_notice_with_fallback(
+                0,
+                chat_id=0,
+                target_number=target_number,
+                body=body,
+                template_text=body,
+            )
+            sent_any = sent_any or ok
+        return sent_any
+    except Exception:
+        return False
+
+
 def mietwagen_public_fahrzeuge():
     """Aktive Mietfahrzeuge mit Titelbild und belegten Zeiträumen für die öffentliche Seite."""
     fahrzeuge = []
@@ -43499,6 +43526,12 @@ def mietwagen_public_fahrzeuge():
             }
         )
     return fahrzeuge
+
+
+@app.route("/mietwagen-info")
+def mietwagen_landing():
+    """Öffentliche Mietwagen-Landingpage — Fahrzeuge live aus dem Fuhrpark (eine Datenquelle, kein Sync nötig)."""
+    return render_template("mietwagen_landing.html", fahrzeuge=mietwagen_public_fahrzeuge())
 
 
 @app.route("/mietwagen", methods=["GET", "POST"])
@@ -43545,11 +43578,25 @@ def mietwagen_anfrage():
             )
             db.commit()
             db.close()
+            fahrzeug_label = ""
+            for f in fahrzeuge:
+                if f["id"] == wunsch_fahrzeug_id:
+                    fahrzeug_label = f["bezeichnung"]
+                    break
+            zeitraum = start_datum + (
+                f" bis {clean_text(request.form.get('end_datum'))}" if clean_text(request.form.get("end_datum")) else ""
+            )
+            notify_workshop_whatsapp_mietanfrage(name, telefon, zeitraum, fahrzeug_label)
             return redirect(url_for("mietwagen_anfrage", ok=1))
+    try:
+        vorauswahl = int(request.args.get("fahrzeug") or 0)
+    except (TypeError, ValueError):
+        vorauswahl = 0
     return render_template(
         "mietwagen_anfrage.html",
         klassen=klassen,
         fahrzeuge=fahrzeuge,
+        vorauswahl=vorauswahl,
         gesendet=bool(request.args.get("ok")),
         heute_iso=date.today().isoformat(),
     )
