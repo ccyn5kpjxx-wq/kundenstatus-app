@@ -31931,6 +31931,38 @@ def build_autohaus_uebersicht(autohaeuser, auftraege, angebotsanfragen=None, lim
 def start_inbox_daten(postfach_items, email_items, limit=6, email_count_total=None):
     fahrzeuge = [item for item in postfach_items if item.get("typ") == "Fahrzeug"]
     anfragen = [item for item in postfach_items if item.get("typ") == "Anfrage"]
+
+    # Mietwagen-Anfragen von der Homepage klopfen ebenfalls im Eingang an
+    miet_items = []
+    try:
+        db = get_db()
+        miet_rows = db.execute(
+            "SELECT * FROM mietwagen_anfragen WHERE status = 'offen' ORDER BY id DESC"
+        ).fetchall()
+        db.close()
+        for row in miet_rows:
+            zeitraum = clean_text(row["start_datum"])
+            if clean_text(row["end_datum"]):
+                zeitraum += f" bis {clean_text(row['end_datum'])}"
+            details = " · ".join(
+                teil for teil in [zeitraum, clean_text(row["telefon"]), clean_text(row["klasse_wunsch"])] if teil
+            )
+            miet_items.append(
+                {
+                    "item_key": f"mietanfrage-{row['id']}",
+                    "typ": "Anfrage",
+                    "titel": f"Mietwagen-Anfrage: {clean_text(row['name'])}",
+                    "nachricht": details or "Neue Mietwagen-Anfrage von der Homepage.",
+                    "erstellt_am": row["erstellt_am"],
+                    "autohaus_name": "Homepage",
+                    "fahrzeug": clean_text(row["klasse_wunsch"]),
+                    "kennzeichen": "",
+                    "ziel_url": url_for("admin_mietfahrzeuge") + "#anfragen",
+                }
+            )
+    except Exception:
+        miet_items = []
+    anfragen = miet_items + anfragen
     sonstige_aufgaben = [
         item for item in postfach_items if item.get("typ") not in {"Fahrzeug", "Anfrage"}
     ]
@@ -31953,7 +31985,7 @@ def start_inbox_daten(postfach_items, email_items, limit=6, email_count_total=No
         )
 
     email_count = len(email_aufgaben) if email_count_total is None else int(email_count_total or 0)
-    alle_eingaenge = list(postfach_items) + email_aufgaben
+    alle_eingaenge = miet_items + list(postfach_items) + email_aufgaben
     return {
         "fahrzeuge": fahrzeuge,
         "anfragen": anfragen,
