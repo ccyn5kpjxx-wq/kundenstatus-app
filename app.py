@@ -43515,12 +43515,22 @@ def mietwagen_public_fahrzeuge():
         for bild in f.get("bilder", []) or []:
             titelbild_id = bild["id"]
             break
+        tagessatz = ""
+        try:
+            satz = float(str(f.get("tagessatz") or "0").replace(",", "."))
+            if satz > 0:
+                if satz == int(satz):
+                    tagessatz = str(int(satz))
+                else:
+                    tagessatz = f"{satz:.2f}".replace(".", ",")
+        except (TypeError, ValueError):
+            tagessatz = clean_text(str(f.get("tagessatz") or ""))
         fahrzeuge.append(
             {
                 "id": f["id"],
                 "bezeichnung": clean_text(f.get("bezeichnung")) or clean_text(f.get("fahrzeugklasse")) or "Mietwagen",
                 "fahrzeugklasse": clean_text(f.get("fahrzeugklasse")),
-                "tagessatz": clean_text(str(f.get("tagessatz") or "")),
+                "tagessatz": tagessatz,
                 "titelbild_id": titelbild_id,
                 "belegt": belegt,
             }
@@ -43611,8 +43621,8 @@ def mietwagen_public_bild(bild_id):
     fahrzeug = get_mietfahrzeug(bild["mietfahrzeug_id"])
     if not fahrzeug or not fahrzeug.get("aktiv"):
         abort(404)
-    path = UPLOAD_DIR / pathlib.Path(bild["stored_name"]).name
-    if not path.exists():
+    path = upload_file_path(bild)
+    if not path or not path.exists():
         abort(404)
     return send_file(path, mimetype=bild.get("mime_type") or "image/jpeg")
 
