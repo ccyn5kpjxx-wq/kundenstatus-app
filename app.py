@@ -2684,6 +2684,7 @@ def inject_csrf_helpers():
         "fahrzeugsuche_count": fahrzeugsuche_count,
         "fahrzeugsuche_auktion_alert_count": fahrzeugsuche_auktion_alert_count,
         "fahrzeugverkauf_count": fahrzeugverkauf_count,
+        "fahrzeugeinkauf_count": fahrzeugeinkauf_count,
         "admin_versicherung_count": admin_versicherung_count,
         "admin_einkauf_count": admin_einkauf_count,
         "admin_rechnungen_count": admin_rechnungen_count,
@@ -7790,6 +7791,9 @@ BACKUP_TABLES = (
     "einkaufsliste",
     "einkauf_belege",
     "einkauf_artikel",
+    "fahrzeugeinkauf_scans",
+    "fahrzeugeinkauf_fahrzeuge",
+    "fahrzeugeinkauf_scan_anfragen",
     "werkstatt_news",
     "werkstatt_emails",
     "lexware_rechnungen",
@@ -8217,6 +8221,49 @@ def init_db():
             analyse_json        TEXT DEFAULT '',
             hochgeladen_am      TEXT NOT NULL,
             FOREIGN KEY (verkauf_id) REFERENCES fahrzeugverkaeufe(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS fahrzeugeinkauf_scans (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            titel             TEXT DEFAULT '',
+            scan_datum        TEXT DEFAULT '',
+            quelle            TEXT DEFAULT 'unfall-auto-scout',
+            pdf_original_name TEXT DEFAULT '',
+            pdf_stored_name   TEXT DEFAULT '',
+            notiz             TEXT DEFAULT '',
+            erstellt_am       TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS fahrzeugeinkauf_fahrzeuge (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id          INTEGER DEFAULT 0,
+            titel            TEXT DEFAULT '',
+            preis            TEXT DEFAULT '',
+            verhandlungsziel TEXT DEFAULT '',
+            marge            TEXT DEFAULT '',
+            ampel            TEXT DEFAULT 'gelb',
+            ez               TEXT DEFAULT '',
+            km               TEXT DEFAULT '',
+            ps               TEXT DEFAULT '',
+            ort              TEXT DEFAULT '',
+            schaden          TEXT DEFAULT '',
+            inserat_url      TEXT DEFAULT '',
+            bild_url         TEXT DEFAULT '',
+            interessant      INTEGER DEFAULT 0,
+            notiz            TEXT DEFAULT '',
+            geboten          TEXT DEFAULT '',
+            besichtigung_am  TEXT DEFAULT '',
+            status           TEXT DEFAULT 'neu',
+            erstellt_am      TEXT NOT NULL,
+            geaendert_am     TEXT NOT NULL,
+            FOREIGN KEY (scan_id) REFERENCES fahrzeugeinkauf_scans(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS fahrzeugeinkauf_scan_anfragen (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            status          TEXT DEFAULT 'offen',
+            angefordert_am  TEXT NOT NULL,
+            erledigt_am     TEXT DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS fahrzeug_kandidaten (
@@ -12853,6 +12900,23 @@ def list_fahrzeugsuche_auktion_alerts(limit=20, suche_id=None):
 
 def fahrzeugsuche_auktion_alert_count():
     return len(list_fahrzeugsuche_auktion_alerts(limit=100))
+
+
+def fahrzeugeinkauf_count():
+    try:
+        db = get_db()
+        row = db.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM fahrzeugeinkauf_fahrzeuge
+            WHERE interessant = 1
+              AND COALESCE(status, 'neu') NOT IN ('gekauft', 'verworfen')
+            """
+        ).fetchone()
+        db.close()
+        return int(row["count"] or 0)
+    except Exception:
+        return 0
 
 
 def fahrzeugverkauf_count():
@@ -43095,6 +43159,232 @@ def start_lexware_auto_sync():
                 print(f"WARNUNG: Lexware-Auto-Abgleich fehlgeschlagen: {clean_text(str(exc))[:200]}")
 
     threading.Thread(target=_woerker, daemon=True).start()
+
+
+# ==========================================================================
+# FAHRZEUGEINKAUF — Unfall-Ankauf-Scout (PDF-Archiv, Merkliste, Gebote)
+# ==========================================================================
+
+FAHRZEUGEINKAUF_STATUS = ["neu", "beobachten", "geboten", "besichtigung", "gekauft", "verworfen"]
+
+
+def fahrzeugeinkauf_scan_liste(limit=30):
+    db = get_db()
+    scans = [dict(row) for row in db.execute(
+        "SELECT * FROM fahrzeugeinkauf_scans ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()]
+    for scan in scans:
+        scan["fahrzeuge"] = [dict(row) for row in db.execute(
+            "SELECT * FROM fahrzeugeinkauf_fahrzeuge WHERE scan_id = ? ORDER BY CASE ampel WHEN 'gruen' THEN 0 WHEN 'gelb' THEN 1 ELSE 2 END, id",
+            (scan["id"],),
+        ).fetchall()]
+    db.close()
+    return scans
+
+
+@app.route("/admin/fahrzeugeinkauf")
+@admin_required
+def admin_fahrzeugeinkauf():
+    db = get_db()
+    interessante = [dict(row) for row in db.execute(
+        """
+        SELECT f.*, s.scan_datum AS scan_datum
+        FROM fahrzeugeinkauf_fahrzeuge f
+        LEFT JOIN fahrzeugeinkauf_scans s ON s.id = f.scan_id
+        WHERE f.interessant = 1 AND COALESCE(f.status, 'neu') NOT IN ('gekauft', 'verworfen')
+        ORDER BY f.geaendert_am DESC
+        """
+    ).fetchall()]
+    offene_anfrage = db.execute(
+        "SELECT * FROM fahrzeugeinkauf_scan_anfragen WHERE status = 'offen' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    db.close()
+    scans = fahrzeugeinkauf_scan_liste()
+    return render_template(
+        "fahrzeugeinkauf_admin.html",
+        interessante=interessante,
+        scans=scans,
+        offene_anfrage=dict(offene_anfrage) if offene_anfrage else None,
+        status_liste=FAHRZEUGEINKAUF_STATUS,
+    )
+
+
+@app.route("/admin/fahrzeugeinkauf/scan-anfordern", methods=["POST"])
+@admin_required
+def admin_fahrzeugeinkauf_scan_anfordern():
+    db = get_db()
+    offen = db.execute(
+        "SELECT id FROM fahrzeugeinkauf_scan_anfragen WHERE status = 'offen'"
+    ).fetchone()
+    if offen:
+        flash("Es liegt bereits eine offene Scan-Anforderung vor — die Werkstatt-Routine holt sie beim nächsten Lauf ab.", "warning")
+    else:
+        db.execute(
+            "INSERT INTO fahrzeugeinkauf_scan_anfragen (status, angefordert_am) VALUES ('offen', ?)",
+            (now_str(),),
+        )
+        db.commit()
+        flash("Scan angefordert. Die Werkstatt-Routine erstellt beim nächsten Lauf (spätestens übermorgen 07:30) die PDF mit den besten Fahrzeugen — für sofort: in der Claude-App bei 'unfall-auto-scout' auf 'Run now' drücken.", "success")
+    db.close()
+    return redirect(url_for("admin_fahrzeugeinkauf"))
+
+
+@app.route("/admin/fahrzeugeinkauf/fahrzeug/<int:fz_id>", methods=["POST"])
+@admin_required
+def admin_fahrzeugeinkauf_fahrzeug_update(fz_id):
+    db = get_db()
+    fahrzeug = db.execute(
+        "SELECT * FROM fahrzeugeinkauf_fahrzeuge WHERE id = ?", (fz_id,)
+    ).fetchone()
+    if not fahrzeug:
+        db.close()
+        abort(404)
+    aktion = clean_text(request.form.get("aktion"))
+    if aktion == "interessant_toggle":
+        neu = 0 if int(fahrzeug["interessant"] or 0) else 1
+        db.execute(
+            "UPDATE fahrzeugeinkauf_fahrzeuge SET interessant = ?, geaendert_am = ? WHERE id = ?",
+            (neu, now_str(), fz_id),
+        )
+        flash("Fahrzeug markiert." if neu else "Markierung entfernt.", "success")
+    else:
+        status = clean_text(request.form.get("status")) or "neu"
+        if status not in FAHRZEUGEINKAUF_STATUS:
+            status = "neu"
+        db.execute(
+            """
+            UPDATE fahrzeugeinkauf_fahrzeuge
+            SET notiz = ?, geboten = ?, besichtigung_am = ?, status = ?, geaendert_am = ?
+            WHERE id = ?
+            """,
+            (
+                clean_text(request.form.get("notiz")),
+                clean_text(request.form.get("geboten")),
+                clean_text(request.form.get("besichtigung_am")),
+                status,
+                now_str(),
+                fz_id,
+            ),
+        )
+        flash("Fahrzeug aktualisiert.", "success")
+    db.commit()
+    db.close()
+    return redirect(url_for("admin_fahrzeugeinkauf") + f"#fz-{fz_id}")
+
+
+@app.route("/admin/fahrzeugeinkauf/pdf/<int:scan_id>")
+@admin_required
+def admin_fahrzeugeinkauf_pdf(scan_id):
+    db = get_db()
+    scan = db.execute(
+        "SELECT * FROM fahrzeugeinkauf_scans WHERE id = ?", (scan_id,)
+    ).fetchone()
+    db.close()
+    if not scan or not scan["pdf_stored_name"]:
+        abort(404)
+    path = UPLOAD_DIR / pathlib.Path(scan["pdf_stored_name"]).name
+    if not path.exists():
+        abort(404)
+    return send_file(
+        path,
+        download_name=scan["pdf_original_name"] or f"Fahrzeugeinkauf_{scan_id}.pdf",
+        mimetype="application/pdf",
+        as_attachment=False,
+    )
+
+
+@app.route("/api/werkstatt/fahrzeugeinkauf/scan-anfragen")
+def api_fahrzeugeinkauf_scan_anfragen():
+    if not werkstatt_api_token_valid():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    db = get_db()
+    anfragen = [dict(row) for row in db.execute(
+        "SELECT * FROM fahrzeugeinkauf_scan_anfragen WHERE status = 'offen' ORDER BY id"
+    ).fetchall()]
+    db.close()
+    return jsonify({"ok": True, "anfragen": anfragen})
+
+
+@app.route("/api/werkstatt/fahrzeugeinkauf/import", methods=["POST"])
+def api_fahrzeugeinkauf_import():
+    if not werkstatt_api_token_valid():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    try:
+        payload = json.loads(request.form.get("payload") or "{}")
+    except Exception:
+        return jsonify({"ok": False, "error": "payload ist kein gültiges JSON"}), 400
+    fahrzeuge = payload.get("fahrzeuge") or []
+    if not isinstance(fahrzeuge, list):
+        return jsonify({"ok": False, "error": "fahrzeuge muss eine Liste sein"}), 400
+
+    pdf_stored_name = ""
+    pdf_original_name = ""
+    pdf_file = request.files.get("pdf")
+    if pdf_file and pdf_file.filename:
+        safe_name = f"fahrzeugeinkauf_{secrets.token_hex(8)}.pdf"
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        pdf_file.save(UPLOAD_DIR / safe_name)
+        pdf_stored_name = safe_name
+        pdf_original_name = pathlib.Path(pdf_file.filename).name
+
+    db = get_db()
+    cursor = db.execute(
+        """
+        INSERT INTO fahrzeugeinkauf_scans
+            (titel, scan_datum, quelle, pdf_original_name, pdf_stored_name, notiz, erstellt_am)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            clean_text(payload.get("titel")) or "Unfall-Fahrzeug-Scan",
+            clean_text(payload.get("scan_datum")) or now_str(),
+            clean_text(payload.get("quelle")) or "unfall-auto-scout",
+            pdf_original_name,
+            pdf_stored_name,
+            clean_text(payload.get("notiz")),
+            now_str(),
+        ),
+    )
+    scan_id = cursor.lastrowid
+    angelegt = 0
+    for fz in fahrzeuge:
+        if not isinstance(fz, dict):
+            continue
+        ampel = clean_text(fz.get("ampel")).lower()
+        if ampel not in ("gruen", "gelb", "rot"):
+            ampel = "gelb"
+        db.execute(
+            """
+            INSERT INTO fahrzeugeinkauf_fahrzeuge
+                (scan_id, titel, preis, verhandlungsziel, marge, ampel, ez, km, ps,
+                 ort, schaden, inserat_url, bild_url, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                scan_id,
+                clean_text(fz.get("titel")),
+                clean_text(fz.get("preis")),
+                clean_text(fz.get("verhandlungsziel")),
+                clean_text(fz.get("marge")),
+                ampel,
+                clean_text(fz.get("ez")),
+                clean_text(fz.get("km")),
+                clean_text(fz.get("ps")),
+                clean_text(fz.get("ort")),
+                clean_text(fz.get("schaden")),
+                clean_text(fz.get("inserat_url")),
+                clean_text(fz.get("bild_url")),
+                now_str(),
+                now_str(),
+            ),
+        )
+        angelegt += 1
+    db.execute(
+        "UPDATE fahrzeugeinkauf_scan_anfragen SET status = 'erledigt', erledigt_am = ? WHERE status = 'offen'",
+        (now_str(),),
+    )
+    db.commit()
+    db.close()
+    return jsonify({"ok": True, "scan_id": scan_id, "fahrzeuge_angelegt": angelegt})
 
 
 init_db()

@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}Fahrzeugeinkauf{% endblock %}
+{% block extra_css %}
+<style>
+  .fein-kopf {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .fein-scanbtn {
+    background: var(--brand);
+    border: none;
+    color: #fff;
+    font-weight: 700;
+    padding: 0.55rem 1.1rem;
+    border-radius: 8px;
+  }
+  .fein-scanbtn:hover { background: var(--brand-dark); color: #fff; }
+  .fein-anfrage-hinweis {
+    background: #fdf3dd;
+    border: 1px solid #ecd9a8;
+    border-radius: 8px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.9rem;
+  }
+  .fein-karte {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+  .fein-karte.ist-interessant { border: 2px solid var(--warning); box-shadow: 0 2px 10px rgba(204, 138, 22, 0.18); }
+  .fein-ampelleiste {
+    padding: 0.3rem 0.9rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #fff;
+    text-transform: uppercase;
+  }
+  .fein-ampelleiste.gruen { background: var(--good); }
+  .fein-ampelleiste.gelb { background: var(--warning); }
+  .fein-ampelleiste.rot { background: #c0392b; }
+  .fein-body { display: flex; gap: 1rem; padding: 0.9rem; flex-wrap: wrap; }
+  .fein-foto {
+    width: 220px;
+    min-width: 180px;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel-soft);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    aspect-ratio: 4 / 3;
+  }
+  .fein-foto img { width: 100%; height: 100%; object-fit: cover; }
+  .fein-info { flex: 1 1 300px; min-width: 0; }
+  .fein-titel { font-weight: 700; font-size: 1.05rem; margin-bottom: 0.15rem; }
+  .fein-preis { color: var(--brand); font-weight: 800; font-size: 1.2rem; }
+  .fein-marge { color: var(--good); font-weight: 700; }
+  .fein-daten { color: var(--muted); font-size: 0.9rem; }
+  .fein-linkbtn {
+    display: inline-block;
+    background: #e8631a;
+    color: #fff !important;
+    font-weight: 700;
+    padding: 0.4rem 0.9rem;
+    border-radius: 7px;
+    text-decoration: none;
+    font-size: 0.9rem;
+  }
+  .fein-linkbtn:hover { background: #c95312; }
+  .fein-form { flex: 0 1 280px; background: var(--panel-soft); border: 1px solid var(--line); border-radius: 8px; padding: 0.7rem; }
+  .fein-form label { font-size: 0.78rem; font-weight: 700; color: var(--muted); margin-bottom: 0.1rem; }
+  .fein-form .form-control, .fein-form .form-select { font-size: 0.88rem; }
+  .fein-sternbtn {
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 7px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.9rem;
+  }
+  .fein-sternbtn.aktiv { background: #fdf3dd; border-color: var(--warning); }
+  .fein-scan-kopf {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.8rem;
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-card">
+  <div class="fein-kopf">
+    <div>
+      <h1 class="mb-1">Fahrzeugeinkauf</h1>
+      <div class="text-muted">Unfall-Fahrzeuge zum Ankauf — gefunden von der Werkstatt-Routine, mit PDF, Marge und Direktlink zum Inserat.</div>
+    </div>
+    <form method="post" action="{{ url_for('admin_fahrzeugeinkauf_scan_anfordern') }}">
+      <button type="submit" class="fein-scanbtn">&#128269; Scan jetzt anfordern</button>
+    </form>
+  </div>
+  {% if offene_anfrage %}
+  <div class="fein-anfrage-hinweis mt-3">
+    &#9203; Scan-Anforderung offen (angefordert {{ offene_anfrage.angefordert_am }}) — die Werkstatt-Routine holt sie beim n&auml;chsten Lauf ab. F&uuml;r sofort: in der Claude-App bei <strong>unfall-auto-scout</strong> auf <strong>Run now</strong> dr&uuml;cken.
+  </div>
+  {% endif %}
+</div>
+
+{% macro fahrzeug_karte(fz, status_liste) %}
+<div class="fein-karte {% if fz.interessant %}ist-interessant{% endif %}" id="fz-{{ fz.id }}">
+  <div class="fein-ampelleiste {{ fz.ampel }}">
+    {% if fz.ampel == 'gruen' %}Kaufen{% elif fz.ampel == 'gelb' %}Pr&uuml;fen / Verhandeln{% else %}Meiden{% endif %}
+    {% if fz.interessant %} &nbsp;&#11088; interessant{% endif %}
+  </div>
+  <div class="fein-body">
+    <div class="fein-foto">
+      {% if fz.bild_url %}
+      <a href="{{ fz.inserat_url }}" target="_blank" rel="noopener"><img src="{{ fz.bild_url }}" alt="Fahrzeugfoto" loading="lazy"></a>
+      {% else %}<span class="text-muted">kein Foto</span>{% endif %}
+    </div>
+    <div class="fein-info">
+      <div class="fein-titel">{{ fz.titel }}</div>
+      <div class="fein-preis">{{ fz.preis }}</div>
+      <div class="fein-daten">{{ fz.ez }}{% if fz.km %} &middot; {{ fz.km }} km{% endif %}{% if fz.ps %} &middot; {{ fz.ps }} PS{% endif %}{% if fz.ort %} &middot; {{ fz.ort }}{% endif %}</div>
+      {% if fz.schaden %}<div class="mt-1"><strong>Schaden:</strong> {{ fz.schaden }}</div>{% endif %}
+      {% if fz.verhandlungsziel %}<div class="mt-1"><strong>Verhandlungsziel:</strong> {{ fz.verhandlungsziel }}</div>{% endif %}
+      {% if fz.marge %}<div class="fein-marge mt-1">Marge: {{ fz.marge }}</div>{% endif %}
+      <div class="mt-2 d-flex gap-2 flex-wrap align-items-center">
+        {% if fz.inserat_url %}<a class="fein-linkbtn" href="{{ fz.inserat_url }}" target="_blank" rel="noopener">&raquo; Inserat ansehen</a>{% endif %}
+        <form method="post" action="{{ url_for('admin_fahrzeugeinkauf_fahrzeug_update', fz_id=fz.id) }}">
+          <input type="hidden" name="aktion" value="interessant_toggle">
+          <button type="submit" class="fein-sternbtn {% if fz.interessant %}aktiv{% endif %}">{% if fz.interessant %}&#11088; markiert{% else %}&#9734; interessant{% endif %}</button>
+        </form>
+      </div>
+    </div>
+    <form class="fein-form" method="post" action="{{ url_for('admin_fahrzeugeinkauf_fahrzeug_update', fz_id=fz.id) }}">
+      <input type="hidden" name="aktion" value="speichern">
+      <div class="mb-2">
+        <label>Status</label>
+        <select class="form-select form-select-sm" name="status">
+          {% for st in status_liste %}<option value="{{ st }}" {% if fz.status == st %}selected{% endif %}>{{ st|capitalize }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="mb-2">
+        <label>Geboten (&euro;)</label>
+        <input class="form-control form-control-sm" type="text" name="geboten" value="{{ fz.geboten }}" placeholder="z. B. 12.500">
+      </div>
+      <div class="mb-2">
+        <label>Besichtigung am</label>
+        <input class="form-control form-control-sm" type="datetime-local" name="besichtigung_am" value="{{ fz.besichtigung_am }}">
+      </div>
+      <div class="mb-2">
+        <label>Notiz</label>
+        <textarea class="form-control form-control-sm" name="notiz" rows="2" placeholder="z. B. Verk&auml;ufer angerufen, will 13.000">{{ fz.notiz }}</textarea>
+      </div>
+      <button type="submit" class="btn btn-sm btn-outline-secondary w-100">Speichern</button>
+    </form>
+  </div>
+</div>
+{% endmacro %}
+
+{% if interessante %}
+<div class="page-card mt-3">
+  <h2>&#11088; Interessante Fahrzeuge</h2>
+  <div class="text-muted mb-3">Deine markierten Kandidaten — hier verhandeln, bieten, Besichtigung planen.</div>
+  {% for fz in interessante %}{{ fahrzeug_karte(fz, status_liste) }}{% endfor %}
+</div>
+{% endif %}
+
+<div class="page-card mt-3">
+  <h2>Scans &amp; PDF-Archiv</h2>
+  {% if not scans %}
+  <div class="text-muted">Noch keine Scans. Fordere oben einen Scan an — die Werkstatt-Routine liefert die PDF mit den besten Fahrzeugen hierher.</div>
+  {% endif %}
+  {% for scan in scans %}
+  <div class="mb-4">
+    <div class="fein-scan-kopf">
+      <div>
+        <strong>{{ scan.titel }}</strong>
+        <span class="text-muted">&middot; {{ scan.scan_datum }}</span>
+        <span class="text-muted">&middot; {{ scan.fahrzeuge|length }} Fahrzeuge</span>
+      </div>
+      {% if scan.pdf_stored_name %}
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_fahrzeugeinkauf_pdf', scan_id=scan.id) }}" target="_blank">&#128196; PDF &ouml;ffnen</a>
+      {% endif %}
+    </div>
+    {% for fz in scan.fahrzeuge %}{{ fahrzeug_karte(fz, status_liste) }}{% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
