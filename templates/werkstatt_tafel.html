@@ -344,7 +344,7 @@
       border-radius: 999px;
       color: var(--muted);
       padding: .14em .5em;
-      font-size: clamp(.66rem, .9vw, .78rem);
+      font-size: clamp(.8rem, .95vw, .88rem);
       white-space: nowrap;
     }
 
@@ -371,14 +371,24 @@
       color: var(--good);
     }
 
+    /* Dezenter Rueckweg auf Fertig-Karten (Drag&Drop feuert auf Touch nicht) */
+    .schnell-knopf.zurueck {
+      border: 1.5px dashed var(--line);
+      background: rgba(0, 0, 0, .03);
+      color: var(--muted);
+      font-weight: 600;
+    }
+
     .schnell-knopf:active { transform: scale(.98); }
     .schnell-knopf:disabled { opacity: .55; cursor: wait; }
 
     /* Produktionsschritte (Vorarbeit -> Karosserie -> Lackierung -> Finish) auf der In-Arbeit-Karte */
+    /* Touch-Ziele: keine Luecken (gap) zwischen den Knoepfen — Tipp daneben darf nicht
+       auf den umschliessenden Karten-Link durchschlagen; Abstand kommt vom Button-Padding. */
     .prod-schritte {
       display: flex;
       align-items: stretch;
-      gap: .1rem;
+      gap: 0;
       margin-top: .5rem;
     }
     .prod-knopf {
@@ -386,15 +396,17 @@
       display: flex;
       flex-direction: column;
       align-items: center;
+      justify-content: center;
       gap: .1rem;
+      min-height: 44px;
       border: 1.4px solid rgba(0, 0, 0, .14);
       background: rgba(0, 0, 0, .02);
       color: var(--muted);
       border-radius: 10px;
-      padding: .3rem .12rem;
+      padding: .3rem .18rem;
       font-family: inherit;
       font-weight: 700;
-      font-size: clamp(.58rem, .78vw, .7rem);
+      font-size: clamp(.8rem, 1vw, .9rem);
       line-height: 1.05;
       cursor: pointer;
     }
@@ -403,7 +415,7 @@
     .prod-knopf.is-aktiv { border-color: var(--accent); background: rgba(20, 93, 102, .12); color: var(--accent); }
     .prod-knopf:active { transform: scale(.97); }
     .prod-knopf:disabled { opacity: .55; cursor: wait; }
-    .prod-pfeil { align-self: center; color: var(--muted); font-size: .72rem; padding: 0 .02rem; }
+    .prod-pfeil { align-self: center; color: var(--muted); font-size: .72rem; padding: 0 .1rem; pointer-events: none; }
 
     /* Einklappbarer Schritt-Bereich: Karte bleibt schlank, Stepper erst beim Ausklappen */
     .prod-box { margin-top: .5rem; }
@@ -504,6 +516,7 @@
       <div>{{ datum_label }}</div>
     </div>
     <a href="{{ url_for('werkstatt_abwesenheit') }}" title="Abwesenheit / Urlaub beantragen" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">🌴 Abwesenheit</a>
+    <a href="{{ url_for('werkstatt_aufgaben') }}" title="Tagesaufgaben der Werkstatt" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">📋 Aufgaben</a>
     <button type="button" data-vollbild title="Vollbild ein/aus" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center;">⛶ Vollbild</button>
   </div>
 
@@ -597,6 +610,8 @@
           </div>
         </div>
         <button type="button" class="schnell-knopf fertig" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="4">✅ Fertig melden →</button>
+        {% elif auftrag['status'] == 4 %}
+        <button type="button" class="schnell-knopf zurueck" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="3">↩ Zurück in Arbeit</button>
         {% endif %}
       </a>
       {% else %}
@@ -726,11 +741,44 @@
       };
       wetterLaden();
 
-      // Tafel jede Minute neu laden — aber nie mitten in einem Drag-Vorgang
+      // Tafel jede Minute neu laden — aber nie mitten in einem Drag-Vorgang,
+      // nie waehrend jemand tippt/scrollt und nie solange ein Schritt-Panel offen ist.
       let dragAktiv = false;
-      const reloadAb = Date.now() + 60000;
+      let reloadAb = Date.now() + 60000;
+      let reloadLaeuft = false;
+      const reloadVerschieben = () => { reloadAb = Date.now() + 60000; };
+      ['click', 'touchstart', 'scroll'].forEach((ev) => {
+        document.addEventListener(ev, reloadVerschieben, { passive: true, capture: true });
+      });
+      const panelOffen = () => !!document.querySelector('[data-prod-toggle][aria-expanded="true"]');
+      const verbindungsHinweisZeigen = () => {
+        if (document.querySelector('[data-verbindungs-hinweis]')) return;
+        const leiste = document.createElement('div');
+        leiste.className = 'toast-leiste';
+        leiste.setAttribute('data-verbindungs-hinweis', '');
+        const toast = document.createElement('div');
+        toast.className = 'toast t-warning';
+        toast.textContent = 'Verbindung unterbrochen — neuer Versuch gleich …';
+        leiste.appendChild(toast);
+        document.body.appendChild(leiste);
+      };
+      const tafelNeuLaden = async () => {
+        if (reloadLaeuft) return;
+        reloadLaeuft = true;
+        try {
+          // Erst pruefen, ob der Server antwortet — sonst bleibt der Hallen-Bildschirm
+          // nach einem 502/Deploy auf einer Fehlerseite haengen.
+          const resp = await fetch(window.location.href, { method: 'HEAD' });
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          window.location.reload();
+        } catch (fehler) {
+          reloadLaeuft = false;
+          reloadAb = Date.now() + 30000; // in 30 s erneut versuchen
+          verbindungsHinweisZeigen();
+        }
+      };
       setInterval(() => {
-        if (!dragAktiv && Date.now() >= reloadAb) window.location.reload();
+        if (!dragAktiv && !panelOffen() && Date.now() >= reloadAb) tafelNeuLaden();
       }, 5000);
 
       // Status-Meldungen kurz zeigen, dann ausblenden
@@ -757,14 +805,38 @@
         }
       };
 
-      // Schnell-Knoepfe auf den Karten
+      // Schnell-Knoepfe auf den Karten.
+      // "Fertig melden" (Ziel 4) loest Kunden-Mail/WhatsApp aus -> Zwei-Schritt-Bestaetigung:
+      // erster Tipp fragt nach, erst der zweite Tipp fuehrt aus (nach 4 s faellt der Knopf zurueck).
       document.querySelectorAll('[data-status-knopf]').forEach((knopf) => {
+        const originalText = knopf.textContent;
+        let bestaetigungTimer = null;
         knopf.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
+          if (knopf.dataset.ziel === '4' && knopf.dataset.bestaetigt !== '1') {
+            knopf.dataset.bestaetigt = '1';
+            knopf.textContent = 'Wirklich fertig? Nochmal tippen';
+            clearTimeout(bestaetigungTimer);
+            bestaetigungTimer = setTimeout(() => {
+              delete knopf.dataset.bestaetigt;
+              knopf.textContent = originalText;
+            }, 4000);
+            return;
+          }
+          clearTimeout(bestaetigungTimer);
           knopf.disabled = true;
           knopf.textContent = 'Wird verschoben …';
           statusSetzen(knopf.dataset.auftrag, knopf.dataset.ziel);
+        });
+      });
+
+      // Tipp in eine Luecke oder auf einen Trennpfeil im Schritt-Bereich darf nicht
+      // auf den umschliessenden Karten-Link durchschlagen (Touchscreen, Handschuhe).
+      document.querySelectorAll('[data-prod-box]').forEach((box) => {
+        box.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
         });
       });
 
@@ -788,6 +860,10 @@
         knopf.addEventListener('click', async (e) => {
           e.preventDefault();
           e.stopPropagation();
+          if (knopf.classList.contains('is-aktiv')) {
+            const schrittLabel = ((knopf.querySelector('.prod-text') || knopf).textContent || '').trim();
+            if (!window.confirm('Schritt "' + schrittLabel + '" wirklich zurücknehmen? Das Autohaus sieht dann wieder den vorherigen Stand.')) return;
+          }
           if (prodLaeuft) return;
           prodLaeuft = true;
           knopf.disabled = true;

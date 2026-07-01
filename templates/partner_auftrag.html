@@ -421,7 +421,7 @@
       </div>
       <div class="summary-grid">
         <div class="summary-card">
-          <div class="label">Erkannte Arbeit</div>
+          <div class="label">Kurze Schadensbeschreibung</div>
           <div class="value">{{ auftrag['analyse_text'] or 'Noch keine Analyse vorhanden' }}</div>
         </div>
         <div class="summary-card">
@@ -747,10 +747,12 @@
                 <div class="fw-bold">{{ chat_label }}</div>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                   <div class="text-muted small">{{ chat['erstellt_am'] }}</div>
+                  {% if chat['absender'] == 'autohaus' %}
                   <form method="POST" action="{{ url_for('partner_chat_nachricht_loeschen', slug=autohaus['slug'], auftrag_id=auftrag['id'], chat_id=chat['id']) }}" class="chat-delete-form" onsubmit="return confirm('Diese Nachricht wirklich löschen?')">
                     {{ csrf_field()|safe }}
                     <button type="submit" class="chat-delete-btn">Löschen</button>
                   </form>
+                  {% endif %}
                 </div>
               </div>
               <div style="white-space:pre-wrap;">{{ chat['nachricht'] }}</div>
@@ -905,8 +907,8 @@
             <form method="POST" action="{{ url_for('partner_archivieren', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}">
               <button type="submit" class="btn btn-outline-secondary w-100">{{ 'Auftrag wieder aktivieren' if auftrag['archiviert'] else 'Auftrag archivieren' }}</button>
             </form>
-            <form method="POST" action="{{ url_for('partner_loeschen', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" onsubmit="return confirm('Fahrzeug wirklich löschen?')">
-              <button type="submit" class="btn btn-outline-danger w-100">Fahrzeug löschen</button>
+            <form method="POST" action="{{ url_for('partner_loeschen', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" onsubmit="return confirm('Auftrag samt Fotos, Unterlagen und Status-Link wirklich löschen?')">
+              <button type="submit" class="btn btn-outline-danger w-100">Auftrag löschen</button>
             </form>
           </div>
         </div>
@@ -981,7 +983,6 @@
     }
   </script>
   {% include "_fin_analyse_script.html" %}
-  {% include "ki_assistent_widget.html" %}
   {% include "_session_keepalive.html" %}
 </body>
 </html>

@@ -56,6 +56,8 @@
 </head>
 <body>
   <main class="shell">
+    {# Flash-Meldungen EINMAL abholen (get_flashed_messages konsumiert beim ersten Aufruf) und mehrfach rendern #}
+    {% set meldungen = get_flashed_messages(with_categories=true) %}
     <div class="panel mb-4">
       <div class="hero-grid">
         <div>
@@ -84,6 +86,7 @@
             <div class="fw-bold">{{ werkstatt_kontakt.name }}</div>
             <div class="text-muted small">{{ werkstatt_kontakt.adresse }}</div>
             <div class="small mt-1">Bei Fragen gerne anrufen: <a href="{{ werkstatt_kontakt.telefon_url }}">{{ werkstatt_kontakt.telefon }}</a></div>
+            {% if werkstatt_kontakt.oeffnungszeiten %}<div class="text-muted small mt-1">Öffnungszeiten: {{ werkstatt_kontakt.oeffnungszeiten }}</div>{% endif %}
             <div class="quick-actions mt-3">
               <a class="btn btn-dark btn-sm" href="{{ werkstatt_kontakt.telefon_url }}">Anrufen</a>
               <a class="btn btn-success btn-sm" href="{{ werkstatt_kontakt.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>
@@ -100,18 +103,25 @@
         </div>
       </div>
 
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-          <div class="mt-3">
-            {% for category, message in messages %}
-            <div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else 'success') }} mb-2">{{ message }}</div>
-            {% endfor %}
-          </div>
-        {% endif %}
-      {% endwith %}
+      {% if meldungen %}
+        <div class="mt-3">
+          {% for category, message in meldungen %}
+          <div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else 'success') }} mb-2">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
     </div>
 
     <div class="panel mb-4" id="termine">
+      {# Meldung auch hier zeigen: nach Termin-Submits landet man per Anker in diesem Panel, nicht oben. #}
+      {# Wenn das Wunschtermin-Formular sichtbar ist, zeigt es die Meldung selbst (sonst doppelt). #}
+      {% if meldungen and not terminfreigabe['can_request'] %}
+        <div class="mb-3">
+          {% for category, message in meldungen %}
+          <div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else 'success') }} mb-2">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
       <div class="section-head">
         <div>
           <h2 class="h4 mb-1">Termine</h2>
@@ -121,10 +131,40 @@
           <div class="text-muted">Termine werden von Versicherung oder Werkstatt eingetragen. Wenn ein Termin nicht passt, kann er hier geändert werden.</div>
           {% endif %}
         </div>
-        <span class="badge text-bg-{{ 'success' if terminfreigabe['can_request'] or terminfreigabe['termin_gesetzt'] else 'secondary' }}">
-          {{ 'bereit' if terminfreigabe['can_request'] else ('gesetzt' if terminfreigabe['termin_gesetzt'] else 'wartet') }}
-        </span>
+        <div>
+          <span class="badge text-bg-{{ 'success' if terminfreigabe['can_request'] or terminfreigabe['termin_gesetzt'] else 'secondary' }}">
+            {{ terminfreigabe['label'] }}
+          </span>
+          {% if terminfreigabe['detail'] %}
+          <div class="small text-muted mt-1" style="max-width:280px;">{{ terminfreigabe['detail'] }}</div>
+          {% endif %}
+        </div>
       </div>
+
+      {% if terminfreigabe['can_request'] %}
+      <div class="appointment-panel mb-3" id="terminvereinbarung">
+        {% if meldungen %}
+          {% for category, message in meldungen %}
+          <div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else 'success') }} mb-2">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+        <div class="fw-bold mb-1">{{ 'Besichtigungstermin vorschlagen' if terminfreigabe['termin_art'] == 'besichtigung' else 'Wunschtermin senden' }}</div>
+        <div class="text-muted small mb-2">Einfach ein Datum auswählen und absenden – wir melden uns und bestätigen den Termin.</div>
+        <form method="POST" action="{{ url_for('kunden_status_terminwunsch', token=auftrag['kunden_status_token']) }}">
+          <div class="row g-2">
+            <div class="col-12 col-sm-4">
+              <label class="form-label small mb-1" for="wunschtermin-datum">Wunschtermin</label>
+              <input type="date" id="wunschtermin-datum" name="wunschtermin" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-12 col-sm-8">
+              <label class="form-label small mb-1" for="wunschtermin-hinweis">Hinweis (optional)</label>
+              <input type="text" id="wunschtermin-hinweis" name="nachricht" maxlength="600" class="form-control form-control-sm" placeholder="z. B. lieber vormittags">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-dark btn-sm mt-2">Wunschtermin senden</button>
+        </form>
+      </div>
+      {% endif %}
 
       <div class="schedule-grid mb-3">
         {% for termin in kunden_termine['items'] %}
@@ -171,9 +211,14 @@
       <div class="text-muted small mb-3">Aktuelle Fotos Ihres Fahrzeugs aus unserer Werkstatt.</div>
       <div class="bilder-grid">
         {% for bild in kunden_bilder %}
-        <a class="bild-kachel" href="{{ url_for('kunden_status_bild', token=auftrag['kunden_status_token'], datei_id=bild['id']) }}" target="_blank" rel="noopener">
-          <img src="{{ url_for('kunden_status_bild', token=auftrag['kunden_status_token'], datei_id=bild['id']) }}" alt="Fortschrittsfoto" loading="lazy">
-        </a>
+        <div>
+          <a class="bild-kachel" href="{{ url_for('kunden_status_bild', token=auftrag['kunden_status_token'], datei_id=bild['id']) }}" target="_blank" rel="noopener">
+            <img src="{{ url_for('kunden_status_bild', token=auftrag['kunden_status_token'], datei_id=bild['id']) }}" alt="Fortschrittsfoto" loading="lazy">
+          </a>
+          {% if bild['hochgeladen_am'] %}
+          <div class="small text-muted text-center mt-1">{{ bild['hochgeladen_am'].split(' ')[0] }}</div>
+          {% endif %}
+        </div>
         {% endfor %}
       </div>
     </div>
@@ -181,5 +226,34 @@
 
     <footer style="color: #6f7a83; text-align: center; padding: 1.5rem; font-size: .85rem;">Gärtner GmbH Karosserie + Lack · Binauer Höhe 4, 74821 Mosbach · <a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
   </main>
+
+  <div id="bild-lightbox" hidden
+       style="position:fixed; inset:0; z-index:1000; background:rgba(22,32,42,.88); display:flex; align-items:center; justify-content:center; padding:1rem; cursor:zoom-out;">
+    <img src="" alt="Foto in Großansicht" style="max-width:96vw; max-height:88vh; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.45);">
+    <button type="button" aria-label="Schließen"
+            style="position:absolute; top:14px; right:14px; width:44px; height:44px; border-radius:999px; border:0; background:rgba(255,253,249,.92); color:#16202a; font-size:1.3rem; font-weight:700; cursor:pointer;">✕</button>
+  </div>
+  <script>
+    (function () {
+      const lightbox = document.getElementById('bild-lightbox');
+      if (!lightbox) return;
+      const grossbild = lightbox.querySelector('img');
+      function schliessen() {
+        lightbox.hidden = true;
+        grossbild.src = '';
+      }
+      document.querySelectorAll('.bild-kachel').forEach(function (kachel) {
+        kachel.addEventListener('click', function (e) {
+          e.preventDefault();
+          grossbild.src = kachel.getAttribute('href');
+          lightbox.hidden = false;
+        });
+      });
+      lightbox.addEventListener('click', schliessen);
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !lightbox.hidden) schliessen();
+      });
+    })();
+  </script>
 </body>
 </html>

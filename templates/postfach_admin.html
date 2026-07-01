@@ -46,7 +46,7 @@
             <form method="POST" action="{{ url_for('admin_postfach_loeschen', item_key=item['item_key']) }}" class="m-0">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="next" value="{{ request.path }}">
-              <button type="submit" class="btn btn-soft btn-sm">Löschen</button>
+              <button type="submit" class="btn btn-soft btn-sm" title="Blendet die Nachricht im Postfach aus">Erledigt</button>
             </form>
           </div>
         </div>

@@ -3014,6 +3014,93 @@ def internal_server_error(error):
     ), 500
 
 
+FEHLERSEITE_PORTAL_TEMPLATE = """
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ titel }}</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(180deg, #f7f2ea 0%, #f3efe6 100%);
+      color: #16202a;
+      font-family: "DM Sans", "Segoe UI", sans-serif;
+      padding: 1.25rem;
+    }
+    .karte {
+      width: min(480px, 100%);
+      background: #fffdf9;
+      border: 1px solid #ddd1c0;
+      border-radius: 22px;
+      box-shadow: 0 16px 40px rgba(64, 47, 25, .12);
+      padding: 1.75rem;
+      text-align: center;
+    }
+    h1 { font-size: 1.3rem; margin: 0 0 .6rem; }
+    p { color: #6f7a83; margin: 0 0 1.1rem; }
+    .knoepfe { display: flex; gap: .6rem; justify-content: center; flex-wrap: wrap; }
+    a.knopf {
+      display: inline-block;
+      padding: .6rem 1.1rem;
+      border-radius: 999px;
+      text-decoration: none;
+      font-weight: 600;
+      border: 1px solid #ddd1c0;
+      color: #16202a;
+      background: #f7f1e8;
+    }
+    a.knopf.brand { background: #a23f2d; border-color: #a23f2d; color: #fff; }
+  </style>
+</head>
+<body>
+  <main class="karte">
+    <h1>{{ titel }}</h1>
+    <p>{{ text }}</p>
+    <div class="knoepfe">
+      <a class="knopf brand" href="tel:+4915227706694">Anrufen</a>
+      <a class="knopf" href="https://wa.me/4915227706694">WhatsApp</a>
+      {% if zurueck_url %}<a class="knopf" href="{{ zurueck_url }}">Zurück</a>{% endif %}
+    </div>
+  </main>
+</body>
+</html>
+"""
+
+
+@app.errorhandler(404)
+def seite_nicht_gefunden(error):
+    return render_template_string(
+        FEHLERSEITE_PORTAL_TEMPLATE,
+        titel="Diese Seite oder dieser Link ist nicht mehr gültig.",
+        text=(
+            "Vielleicht wurde der Link erneuert oder der Vorgang ist abgeschlossen. "
+            "Rufen Sie uns einfach kurz an oder schreiben Sie per WhatsApp — "
+            "wir helfen sofort weiter. Gärtner Karosserie & Lack, Mosbach."
+        ),
+        zurueck_url=request.referrer or "",
+    ), 404
+
+
+@app.errorhandler(413)
+def upload_zu_gross(error):
+    return render_template_string(
+        FEHLERSEITE_PORTAL_TEMPLATE,
+        titel="Die Dateien sind zusammen zu groß.",
+        text=(
+            f"Bitte laden Sie die Fotos in kleineren Gruppen hoch "
+            f"(zusammen höchstens {MAX_UPLOAD_MB} MB pro Vorgang). "
+            "Die bisherige Auswahl wurde nicht gespeichert."
+        ),
+        zurueck_url=request.referrer or "",
+    ), 413
+
+
 def get_startup_warnings():
     warnings = []
     if get_admin_pass() in {"", "change-me", DEFAULT_ADMIN_PASS}:
@@ -5180,7 +5267,7 @@ def build_document_analysis_bundle(path, filename=""):
         else:
             bundle["source"] = "local_ocr+openai"
         if structured.get("analyse_pruefen"):
-            bundle["hint"] = structured.get("analyse_hinweis") or "Bitte kurz pruefen"
+            bundle["hint"] = structured.get("analyse_hinweis") or "Bitte kurz prüfen"
             bundle["status"] = "review"
     elif ai_result.get("error") and not clean_text(bundle.get("text")):
         bundle["hint"] = friendly_analysis_error(ai_result["error"], "OpenAI")
@@ -9821,15 +9908,8 @@ def seed_default_werkstatt_news(db):
             now,
         )
         if existing:
-            db.execute(
-                """
-                UPDATE werkstatt_news
-                SET news_key=?, titel=?, nachricht=?, start_datum=?, end_datum=?,
-                    kategorie=?, sichtbar=?, pinned=?, geaendert_am=?
-                WHERE id=?
-                """,
-                values + (existing["id"],),
-            )
+            # Bestehende Seed-News NICHT überschreiben: Admin-Änderungen (Bearbeiten,
+            # Archivieren) sollen App-Neustarts und Deploys überleben.
             continue
         db.execute(
             """
@@ -18105,7 +18185,7 @@ def import_kontoauszug(file_storage):
             rechnung_id = 0
             duplicate_rows += 1
         elif not row_ok:
-            rechnung, score, hint = None, 0, f"Bitte pruefen: {row_hint}"
+            rechnung, score, hint = None, 0, f"Bitte prüfen: {row_hint}"
             status = "pruefen"
             rechnung_id = 0
             pruefen += 1
@@ -23388,7 +23468,7 @@ def build_supplier_api_request_draft(topcolor_email=""):
         "",
         "Wenn spaeter weitere Lackierbetriebe das Portal nutzen, koennte Topcolor als integrierter Lieferant direkt in deren Einkauf sichtbar sein. Das waere fuer beide Seiten eine Win-win-Situation: weniger Rueckfragen, sauberere Bestellungen und bessere Bindung ueber feste Konditionen.",
         "",
-        "Bitte senden Sie uns technische Unterlagen, Preise und den passenden Ansprechpartner fuer API/Preisliste/Konditionen.",
+        "Bitte senden Sie uns technische Unterlagen, Preise und den passenden Ansprechpartner für API/Preisliste/Konditionen.",
         "",
         "Vielen Dank.",
         "",
@@ -24975,6 +25055,13 @@ def endkunden_status_mail_noetig(auftrag_id, schwelle):
         return False
 
 
+def get_oeffnungszeiten_text():
+    try:
+        return clean_text(get_app_setting("OEFFNUNGSZEITEN_TEXT", ""))
+    except Exception:
+        return ""
+
+
 def baue_endkunden_fertig_mail(auftrag):
     kunde = clean_text(auftrag.get("kunde_name")) or "liebe Kundin, lieber Kunde"
     fahrzeug = " ".join(t for t in (clean_text(auftrag.get("fahrzeug")), clean_text(auftrag.get("kennzeichen"))) if t)
@@ -24990,7 +25077,12 @@ def baue_endkunden_fertig_mail(auftrag):
     ]
     if link:
         zeilen += ["Alle Details finden Sie wie gewohnt unter Ihrem persönlichen Status-Link:", link, ""]
+    oeffnungszeiten = get_oeffnungszeiten_text()
+    if oeffnungszeiten:
+        zeilen += [f"Abholung möglich: {oeffnungszeiten}", ""]
     zeilen += [
+        "Sagen Sie uns gerne kurz per Telefon oder WhatsApp Bescheid, wann Sie vorbeikommen.",
+        "",
         "Wir freuen uns auf Ihren Besuch!",
         "",
         "Mit besten Grüßen",
@@ -30187,12 +30279,12 @@ def kunden_status_timeline(auftrag, log=None, prozess=None, teile=None):
     )
     add(
         "Schaden aufgenommen",
-        "Fahrzeug, Schaden, Mobilität, Fotos und QR-Status werden in einer Akte geführt.",
+        "Wir haben Ihr Fahrzeug und den Schaden aufgenommen. Auf dieser Seite bleiben Sie immer auf dem Laufenden.",
         "done" if aufnahme_ok else "active",
     )
     add(
-        "Kalkulation in Aufnahme",
-        "Gutachten, DAT/GT-Kalkulation oder Kostenvoranschlag bilden direkt die Grundlage für die Versicherung.",
+        "Kostenvoranschlag erstellen",
+        "Wir erstellen die Kostenaufstellung für Ihre Versicherung — sie ist die Grundlage für die Freigabe.",
         "done" if prozess_items.get("gutachten", {}).get("resolved") else ("active" if aufnahme_ok else "waiting"),
     )
     if has_insurance:
@@ -30202,7 +30294,7 @@ def kunden_status_timeline(auftrag, log=None, prozess=None, teile=None):
             add("Versicherung prüft", "Die Prüfung ist abgeschlossen.", "done")
             add("Freigabe erteilt", "Die Reparaturfreigabe liegt vor.", "done")
         elif freigabe == "abgelehnt":
-            add("Freigabe / Sperre", "Der Fall ist noch gesperrt oder nicht freigegeben.", "active")
+            add("Freigabe der Versicherung", "Die Versicherung hat die Freigabe noch nicht erteilt — wir klären das für Sie und melden uns.", "active")
         elif freigabe in {"gemeldet", "in_pruefung"}:
             add("Versicherung prüft", "Die Versicherung prüft die Unterlagen.", "active")
         else:
@@ -30235,7 +30327,7 @@ def kunden_status_timeline(auftrag, log=None, prozess=None, teile=None):
         add(ps["label"], ps["detail"], ps["state"])
     add(
         "Reparatur dokumentiert",
-        "Instandsetzung, Teilebelege, Endkontrolle und Fertigbilder werden für die Abrechnung festgehalten.",
+        "Wir dokumentieren die Reparatur mit Fotos und Endkontrolle, damit alles sauber belegt ist.",
         "done" if (prozess_item_resolved(prozess, "reparatur_doku") and prozess_item_resolved(prozess, "fertigbilder")) or status >= 4 else ("active" if werkstatt_started else "waiting"),
     )
     add(
@@ -30261,6 +30353,7 @@ def werkstatt_kundenkontakt(auftrag=None):
         "telefon": phone,
         "telefon_url": phone_href,
         "whatsapp_url": f"https://wa.me/{whatsapp_number}?text={whatsapp_text}",
+        "oeffnungszeiten": get_oeffnungszeiten_text(),
     }
 
 
@@ -31528,6 +31621,42 @@ def create_werkstatt_news(titel, nachricht="", start_datum="", end_datum="", kat
         db.close()
 
 
+def update_werkstatt_news(news_id, titel, nachricht="", start_datum="", end_datum="", kategorie="betrieb", pinned=1):
+    titel = clean_text(titel)
+    if not titel:
+        raise ValueError("Bitte einen Titel für die Werkstatt-News eintragen.")
+    start = parse_date(start_datum)
+    end = parse_date(end_datum) or start
+    if start and end and end < start:
+        start, end = end, start
+    kategorie = clean_text(kategorie) or "betrieb"
+    if kategorie not in KALENDER_KATEGORIEN:
+        kategorie = "betrieb"
+    db = get_db()
+    try:
+        db.execute(
+            """
+            UPDATE werkstatt_news
+            SET titel=?, nachricht=?, start_datum=?, end_datum=?, kategorie=?, pinned=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                titel,
+                clean_text(nachricht),
+                start.strftime(DATE_FMT) if start else "",
+                end.strftime(DATE_FMT) if end else "",
+                kategorie,
+                1 if pinned else 0,
+                now_str(),
+                int(news_id),
+            ),
+        )
+        db.commit()
+        schedule_change_backup("werkstatt-news")
+    finally:
+        db.close()
+
+
 def archive_werkstatt_news(news_id):
     db = get_db()
     try:
@@ -32754,12 +32883,13 @@ def versicherung_session_required_by_key(portal_key):
     return versicherung, None
 
 
-def render_partner_new_form(autohaus):
+def render_partner_new_form(autohaus, form=None):
     try:
         return render_template(
             "partner_neu.html",
             autohaus=autohaus,
             transport_arten=TRANSPORT_ARTEN,
+            form=form or {},
         )
     except Exception as exc:
         print(f"FEHLER partner_neu.html: {exc}")
@@ -32861,7 +32991,7 @@ def login():
     if request.method == "POST":
         limited, wait_seconds = login_rate_limit_status("admin", "admin")
         if limited:
-            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen.", "danger")
+            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen. Zugang verloren? Tel. +49 1522 7706694 oder info@auto-lackierzentrum.de.", "danger")
             return render_template("login.html"), 429
         submitted_password = request.form.get("password") or request.form.get("passwort")
         if admin_password_matches(submitted_password):
@@ -33088,6 +33218,7 @@ def admin_zugaenge():
         werkstatt_tafel_code=ensure_werkstatt_tafel_code(),
         werkstatt_tafel_url=url_for("werkstatt_login", _external=True),
         bewertung_url=get_app_setting("GOOGLE_BEWERTUNG_URL", ""),
+        oeffnungszeiten_text=get_app_setting("OEFFNUNGSZEITEN_TEXT", ""),
     )
 
 
@@ -33110,6 +33241,20 @@ def admin_bewertung_url_speichern():
         return redirect(url_for("admin_zugaenge"))
     set_app_setting("GOOGLE_BEWERTUNG_URL", wert)
     flash("Bewertungs-Link gespeichert — er steht ab sofort in der Danke-Mail an Endkunden." if wert else "Bewertungs-Link entfernt.", "success")
+    return redirect(url_for("admin_zugaenge"))
+
+
+@app.route("/admin/oeffnungszeiten", methods=["POST"])
+@admin_required
+def admin_oeffnungszeiten_speichern():
+    wert = clean_text(request.form.get("oeffnungszeiten_text"))
+    set_app_setting("OEFFNUNGSZEITEN_TEXT", wert)
+    flash(
+        "Öffnungszeiten gespeichert — sie erscheinen in der Fertig-Mail und auf der Kunden-Status-Seite."
+        if wert
+        else "Öffnungszeiten entfernt.",
+        "success",
+    )
     return redirect(url_for("admin_zugaenge"))
 
 
@@ -36020,6 +36165,9 @@ def lexware_sync_im_hintergrund_starten():
         except Exception as exc:
             try:
                 set_app_setting("LEXWARE_LAST_SYNC_ERROR", clean_text(str(exc))[:1000])
+                # Auch im Fehlerfall den Zeitstempel setzen, damit der Auto-Sync-Backoff
+                # greift und die Rechnungsseite nicht endlos neu startet/neu lädt.
+                set_app_setting("LEXWARE_LAST_SYNC", now_str())
             except Exception:
                 pass
         finally:
@@ -37291,7 +37439,7 @@ def admin_ki_sprache():
 @admin_required
 def admin_postfach_loeschen(item_key):
     hide_postfach_item("admin", item_key, 0)
-    flash("Nachricht aus dem Werkstatt-Postfach gelöscht.", "info")
+    flash("Hinweis erledigt — er wird im Postfach nicht mehr angezeigt.", "info")
     next_url = clean_text(request.form.get("next"))
     if next_url.startswith("/"):
         return redirect(next_url)
@@ -37423,6 +37571,7 @@ def admin_rechnungen():
         lexware_api_ready=bool(LEXWARE_API_KEY),
         lexware_api_base_url=LEXWARE_API_BASE_URL,
         auto_sync_minutes=LEXWARE_AUTO_SYNC_MINUTES,
+        sync_laeuft=_lexware_hintergrund_sync_laeuft,
         kontoauszug_importe=list_kontoauszug_importe(limit=8),
         kontoauszug_buchungen=list_kontoauszug_buchungen(limit=80),
         kontoauszug_auswertung=kontoauszug_auswertung(),
@@ -37620,7 +37769,7 @@ def admin_einkauf_rechnung_upload():
     for error in errors:
         flash(error, "warning")
     if saved and not imported:
-        flash("Die Rechnung wurde nur fuer die Produktanlage gespeichert. Bitte Artikel manuell ergaenzen, falls nichts erkannt wurde.", "info")
+        flash("Die Rechnung wurde nur für die Produktanlage gespeichert. Bitte Artikel manuell ergänzen, falls nichts erkannt wurde.", "info")
     elif imported:
         flash(f"{imported} Produktposition(en) warten auf Artikel anlegen.", "success")
     return redirect(target_url)
@@ -37636,7 +37785,7 @@ def admin_einkauf_artikel_anlegen(item_id):
         abort(404)
     artikel_id = sync_einkauf_item_to_artikel(item_id, increment_count=1)
     if not artikel_id:
-        flash("Artikel konnte nicht angelegt werden. Bitte Produktname oder Artikelnummer pruefen.", "warning")
+        flash("Artikel konnte nicht angelegt werden. Bitte Produktname oder Artikelnummer prüfen.", "warning")
         return redirect(url_for("admin_einkauf") + "#produktanlage")
     db = get_db()
     try:
@@ -39920,7 +40069,7 @@ def admin_datei_kunde_sichtbar(datei_id):
 @admin_required
 def loeschen(auftrag_id):
     delete_auftrag(auftrag_id)
-    flash("Fahrzeug gelöscht.", "info")
+    flash("Auftrag gelöscht.", "info")
     return redirect(url_for("dashboard"))
 
 
@@ -39951,7 +40100,7 @@ def admin_sammelaktion():
         flash(f"{anzahl} Auftrag/Aufträge wieder aktiviert.", "info")
     elif aktion == "loeschen":
         anzahl = delete_auftraege(auftrag_ids)
-        flash(f"{anzahl} Auftrag/Aufträge gelöscht.", "info")
+        flash(f"{anzahl} {'Auftrag' if anzahl == 1 else 'Aufträge'} gelöscht.", "info")
     else:
         flash("Unbekannte Sammelaktion.", "warning")
     return redirect(request.referrer or url_for("dashboard"))
@@ -40094,6 +40243,27 @@ def admin_news_neu():
             pinned=bool(request.form.get("pinned")),
         )
         flash("Werkstatt-News gespeichert.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("admin_news"))
+
+
+@app.route("/admin/news/<int:news_id>/bearbeiten", methods=["POST"])
+@admin_required
+def admin_news_bearbeiten(news_id):
+    if not get_werkstatt_news(news_id):
+        abort(404)
+    try:
+        update_werkstatt_news(
+            news_id,
+            titel=request.form.get("titel"),
+            nachricht=request.form.get("nachricht"),
+            start_datum=request.form.get("start_datum"),
+            end_datum=request.form.get("end_datum"),
+            kategorie=request.form.get("kategorie") or "betrieb",
+            pinned=bool(request.form.get("pinned")),
+        )
+        flash("Werkstatt-News aktualisiert.", "success")
     except ValueError as exc:
         flash(str(exc), "warning")
     return redirect(url_for("admin_news"))
@@ -41037,7 +41207,7 @@ def werkstatt_login():
     if request.method == "POST":
         limited, wait_seconds = login_rate_limit_status("werkstatt", "tafel")
         if limited:
-            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen.", "danger")
+            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen. Zugang verloren? Tel. +49 1522 7706694 oder info@auto-lackierzentrum.de.", "danger")
             return render_template("werkstatt_login.html", code_konfiguriert=bool(get_werkstatt_tafel_code())), 429
         submitted = request.form.get("password") or request.form.get("zugangscode")
         if werkstatt_tafel_code_matches(submitted):
@@ -41347,7 +41517,7 @@ def partner_login():
         limit_identifier = portal_key or "zentral"
         limited, wait_seconds = login_rate_limit_status("partner", limit_identifier)
         if limited:
-            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen.", "danger")
+            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen. Zugang verloren? Tel. +49 1522 7706694 oder info@auto-lackierzentrum.de.", "danger")
             return render_template("partner_index.html", autohaeuser=autohaeuser), 429
         if autohaus and partner_access_code_matches(zugangscode, autohaus):
             clear_login_attempts("partner", limit_identifier)
@@ -41371,7 +41541,7 @@ def partner_login_key(portal_key):
     if request.method == "POST":
         limited, wait_seconds = login_rate_limit_status("partner", portal_key)
         if limited:
-            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen.", "danger")
+            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen. Zugang verloren? Tel. +49 1522 7706694 oder info@auto-lackierzentrum.de.", "danger")
             return render_template("partner_login.html", autohaus=autohaus), 429
         submitted_code = request.form.get("password") or request.form.get("zugangscode")
         if partner_access_code_matches(submitted_code, autohaus):
@@ -41618,7 +41788,7 @@ def partner_postfach_loeschen(slug, item_key):
     if redirect_response:
         return redirect_response
     mark_autohaus_postfach_item_erledigt(autohaus["id"], item_key)
-    flash("Nachricht aus dem Postfach gelöscht.", "info")
+    flash("Hinweis erledigt — er wird im Postfach nicht mehr angezeigt.", "info")
     next_url = clean_text(request.form.get("next"))
     if next_url.startswith("/"):
         return redirect(next_url)
@@ -42014,10 +42184,18 @@ def partner_neuer_auftrag(slug):
         erlaubte_dateien = get_allowed_uploads(dateien)
         if aktion == "upload_analyze" and not any(file and file.filename for file in dateien):
             flash("Bitte zuerst eine Datei auswählen.", "warning")
-            return render_partner_new_form(autohaus)
+            return render_partner_new_form(autohaus, form=form)
         if aktion == "upload_analyze" and not erlaubte_dateien:
             flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.", "warning")
-            return render_partner_new_form(autohaus)
+            return render_partner_new_form(autohaus, form=form)
+        if aktion != "upload_analyze" and not (
+            clean_text(form.get("fahrzeug")) or clean_text(form.get("kennzeichen"))
+        ):
+            flash("Bitte mindestens Fahrzeug oder Kennzeichen angeben, damit die Werkstatt den Auftrag zuordnen kann.", "warning")
+            return render_partner_new_form(autohaus, form=form)
+        gewaehlte_dateien = [file for file in dateien if file and file.filename]
+        if gewaehlte_dateien and len(erlaubte_dateien) < len(gewaehlte_dateien):
+            flash("Hinweis: Mindestens eine Datei hatte einen nicht unterstützten Typ und wurde nicht gespeichert (PDF, JPG, PNG, HEIC, DOCX oder XLSX).", "warning")
         beschreibung = clean_text(form.get("beschreibung"))
         analyse = clean_text(form.get("analyse_text")) or analyse_text(beschreibung)
         auftrag_id = create_auftrag(
@@ -43043,7 +43221,7 @@ def partner_loeschen(slug, auftrag_id):
         abort(404)
 
     delete_auftrag(auftrag_id)
-    flash("Fahrzeug gelöscht.", "info")
+    flash("Auftrag gelöscht.", "info")
     return redirect(url_for("partner_dashboard", slug=slug))
 
 
@@ -43108,6 +43286,18 @@ def partner_chat_nachricht_loeschen(slug, auftrag_id, chat_id):
     if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
         abort(404)
 
+    db = get_db()
+    chat_row = db.execute(
+        "SELECT absender FROM chat_nachrichten WHERE id=? AND auftrag_id=?",
+        (int(chat_id), int(auftrag_id)),
+    ).fetchone()
+    db.close()
+    if not chat_row:
+        flash("Nachricht wurde nicht gefunden.", "warning")
+        return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+    if clean_text(chat_row["absender"]) != "autohaus":
+        flash("Nur eigene Nachrichten können gelöscht werden — Antworten von Werkstatt und Versicherung bleiben als Verlauf erhalten.", "warning")
+        return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
     if delete_chat_nachricht(auftrag_id, chat_id):
         flash("Nachricht gelöscht.", "success")
     else:

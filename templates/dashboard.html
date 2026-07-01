@@ -130,6 +130,11 @@
     </button>
   </form>
   {% endif %}
+  <div class="mb-3">
+    <input type="search" id="auftraege-suche" class="form-control"
+           placeholder="Suchen (Kennzeichen, Fahrzeug, Kunde, Autohaus)…"
+           aria-label="Aufträge durchsuchen" autocomplete="off">
+  </div>
   <form method="POST" action="{{ url_for('admin_sammelaktion') }}" data-bulk-form>
   <div class="bulk-bar">
     <div class="d-flex align-items-center gap-3 flex-wrap">
@@ -137,7 +142,7 @@
         <input type="checkbox" class="row-check" data-select-all>
         <span>Alle markieren</span>
       </label>
-      <span class="text-muted" data-selected-count>0 Fahrzeuge ausgewählt</span>
+      <span class="text-muted" data-selected-count>0 Aufträge ausgewählt</span>
     </div>
     <div class="d-flex gap-2 flex-wrap">
       <button type="submit" name="aktion" value="archivieren" class="btn btn-soft btn-sm">Ausgewählte archivieren</button>
@@ -175,6 +180,10 @@
           </td>
           <td class="analysis-cell">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
           <td>
+            {% set planung = a.get('planung') or {} %}
+            {% if planung.get('group_key') == 'overdue' and planung.get('hinweis') %}
+              <div class="mb-1"><span class="badge text-bg-danger">⚠ {{ planung['hinweis'] }}</span></div>
+            {% endif %}
             <div class="d-flex gap-2 flex-wrap">
               {% if a.get('annahme_datum') %}
                 <span class="schedule-pill">{{ a.get('annahme_label') or 'Annahme' }} {{ a['annahme_datum'] }}</span>
@@ -229,7 +238,7 @@
         <input type="checkbox" class="row-check" data-select-all>
         <span>Alle markieren</span>
       </label>
-      <span class="text-muted" data-selected-count>0 Fahrzeuge ausgewählt</span>
+      <span class="text-muted" data-selected-count>0 Aufträge ausgewählt</span>
     </div>
     <div class="d-flex gap-2 flex-wrap">
       <button type="submit" name="aktion" value="aktivieren" class="btn btn-soft btn-sm">Ausgewählte aktivieren</button>
@@ -297,7 +306,7 @@
       const currentVisibleItems = visibleItems();
       const selected = currentVisibleItems.filter((item) => item.checked).length;
       if (counter) {
-        counter.textContent = `${selected} von ${currentVisibleItems.length} Fahrzeugen ausgewählt`;
+        counter.textContent = `${selected} von ${currentVisibleItems.length} Aufträgen ausgewählt`;
       }
       if (selectAll) {
         selectAll.checked = selected > 0 && selected === currentVisibleItems.length;
@@ -343,5 +352,30 @@
     });
     refresh();
   });
+
+  const suchfeld = document.getElementById('auftraege-suche');
+  if (suchfeld) {
+    const suchForm = document.querySelector('#auftraege [data-bulk-form]');
+    const suchZeilen = suchForm ? Array.from(suchForm.querySelectorAll('tbody [data-select-row]')) : [];
+    suchfeld.addEventListener('input', () => {
+      const begriff = suchfeld.value.trim().toLowerCase();
+      suchZeilen.forEach((row) => {
+        row.hidden = !!begriff && !row.textContent.toLowerCase().includes(begriff);
+        if (row.hidden) {
+          const kasten = row.querySelector('[data-select-item]');
+          if (kasten && kasten.checked) {
+            kasten.checked = false;
+            kasten.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+      });
+      const filterEvent = new CustomEvent('workshop:filters-changed', { bubbles: true });
+      if (suchForm) {
+        suchForm.dispatchEvent(filterEvent);
+      } else {
+        document.dispatchEvent(filterEvent);
+      }
+    });
+  }
 </script>
 {% endblock %}

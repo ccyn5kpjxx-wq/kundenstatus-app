@@ -88,6 +88,31 @@
       box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.25);
     }
 
+    .navbar-toggler {
+      min-width: 44px;
+      min-height: 44px;
+      padding: .35rem .7rem;
+      font-size: 1.4rem;
+      line-height: 1;
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 12px;
+    }
+
+    .navbar-toggler:focus {
+      box-shadow: 0 0 0 .2rem rgba(255, 255, 255, 0.18);
+    }
+
+    @media (max-width: 991.98px) {
+      .navbar .navbar-collapse {
+        padding: .5rem 0 .75rem;
+      }
+
+      .navbar .navbar-collapse .nav-link {
+        padding: .7rem 1rem !important;
+      }
+    }
+
     .hero-shell {
       padding: 2rem 0 1rem;
     }
@@ -363,9 +388,12 @@
       <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
       <span>Werkstatt-Cockpit</span>
     </a>
-    <div class="d-flex align-items-center gap-2 flex-wrap">
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#hauptNavigation" aria-controls="hauptNavigation" aria-expanded="false" aria-label="Navigation umschalten">&#9776;</button>
+    <div class="collapse navbar-collapse justify-content-lg-end" id="hauptNavigation">
+    <div class="d-flex flex-column flex-lg-row align-items-lg-center gap-2 flex-wrap">
       <a class="nav-link" href="{{ url_for('betriebs_cockpit') }}">Start</a>
-      <a class="nav-link" href="{{ url_for('admin_zahlen') }}">Zahlen{% set mahn_badge = mahnungen_faellig_count() %}{% if mahn_badge %}<span class="nav-badge" title="Fällige Mahnungen — Klick und dann auf den roten Balken">{{ mahn_badge }}</span>{% endif %}</a>
+      <a class="nav-link" href="{{ url_for('admin_zahlen') }}">Zahlen</a>
+      <a class="nav-link" href="{{ url_for('admin_mahnungen') }}">Mahnungen{% set mahn_badge = mahnungen_faellig_count() %}{% if mahn_badge %}<span class="nav-badge" title="Fällige Mahnungen">{{ mahn_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('admin_aufgaben') }}">Aufgaben{% set aufgaben_badge = aufgaben_offen_heute_count() %}{% if aufgaben_badge %}<span class="nav-badge is-alert" title="Offene Aufgaben heute">{{ aufgaben_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('admin_news') }}">News</a>
       <a class="nav-link" href="{{ url_for('admin_leads') }}">Leads{% set leads_badge = admin_leads_count() %}{% if leads_badge %}<span class="nav-badge">{{ leads_badge }}</span>{% endif %}</a>
@@ -381,6 +409,7 @@
       <a class="nav-link" href="{{ url_for('admin_zugaenge') }}">Zugänge</a>
       <a class="nav-link" href="{{ url_for('partner_login') }}" target="_blank">Autohaus-Portal</a>
       <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+    </div>
     </div>
   </div>
 </nav>
@@ -448,6 +477,9 @@
     };
     document.querySelectorAll('form').forEach((form) => {
       form.addEventListener('submit', (event) => {
+        if (event.defaultPrevented) {
+          return;
+        }
         const submitter = event.submitter || document.activeElement;
         if (submitter && submitter.dataset && submitter.dataset.noLoading === 'true') {
           return;

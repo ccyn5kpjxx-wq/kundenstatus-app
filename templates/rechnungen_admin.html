@@ -155,17 +155,38 @@
 
 <div class="page-card p-4 mb-4">
   <div class="sync-box">
+    {% if sync_laeuft %}
+      <div class="alert alert-warning py-2 px-3 mb-3 d-flex justify-content-between align-items-center gap-3 flex-wrap">
+        <span>⏳ Lexware-Abgleich läuft im Hintergrund — die Zahlen aktualisieren sich gleich automatisch.</span>
+        <a href="{{ url_for('admin_rechnungen') }}" class="btn btn-sm btn-soft">Jetzt aktualisieren</a>
+      </div>
+      <script>
+        (function () {
+          function reloadWennFrei() {
+            const aktiv = document.activeElement;
+            const tippt = aktiv && ['INPUT', 'TEXTAREA', 'SELECT'].includes(aktiv.tagName);
+            const dateiGewaehlt = Array.from(document.querySelectorAll('input[type="file"]')).some(function (f) { return f.files && f.files.length; });
+            if (tippt || dateiGewaehlt) {
+              setTimeout(reloadWennFrei, 20000);
+              return;
+            }
+            window.location.reload();
+          }
+          setTimeout(reloadWennFrei, 20000);
+        })();
+      </script>
+    {% endif %}
     <div class="d-flex justify-content-between gap-3 flex-wrap">
       <div>
         <strong>Status der Anbindung</strong>
         <div class="text-muted small">
-          API: {{ lexware_api_base_url }} · Auto-Prüfung alle {{ auto_sync_minutes }} Minuten beim Öffnen der Seite.
+          Verbindung zu Lexware Office · Auto-Prüfung alle {{ auto_sync_minutes }} Minuten beim Öffnen der Seite.
         </div>
       </div>
       {% if lexware_api_ready %}
-        <span class="badge text-bg-success align-self-start">LEXWARE_API_KEY gesetzt</span>
+        <span class="badge text-bg-success align-self-start">Lexware verbunden</span>
       {% else %}
-        <span class="badge text-bg-secondary align-self-start">LEXWARE_API_KEY fehlt</span>
+        <span class="badge text-bg-secondary align-self-start" title="Zugangsschlüssel (API-Key) fehlt — Einrichtung nötig">Lexware nicht verbunden</span>
       {% endif %}
     </div>
     {% if summary['last_sync'] %}

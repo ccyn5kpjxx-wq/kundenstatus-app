@@ -1,3 +1,4 @@
+{% set form = form if form is defined else {} %}
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -165,60 +166,61 @@
       </div>
       <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
         <div class="col-md-6">
-          <label class="form-label">Endkunde / Referenz</label>
-          <input type="text" name="kunde_name" class="form-control form-control-lg">
+          <label class="form-label" for="kunde_name">Endkunde / Referenz</label>
+          <input type="text" id="kunde_name" name="kunde_name" class="form-control form-control-lg" value="{{ form.get('kunde_name', '') }}">
         </div>
         <div class="col-md-6">
-          <label class="form-label">Handy / WhatsApp Kunde</label>
-          <input type="text" name="kontakt_telefon" class="form-control form-control-lg" placeholder="z.B. 0171 1234567">
+          <label class="form-label" for="kontakt_telefon">Handy / WhatsApp Kunde</label>
+          <input type="tel" inputmode="tel" autocomplete="tel" id="kontakt_telefon" name="kontakt_telefon" class="form-control form-control-lg" placeholder="z.B. 0171 1234567" value="{{ form.get('kontakt_telefon', '') }}">
         </div>
         <div class="col-md-8">
-          <label class="form-label">Fahrzeug</label>
-          <input type="text" name="fahrzeug" class="form-control form-control-lg" placeholder="Wird beim Upload, wenn möglich, automatisch erkannt">
+          <label class="form-label" for="fahrzeug">Fahrzeug</label>
+          <input type="text" id="fahrzeug" name="fahrzeug" class="form-control form-control-lg" placeholder="Wird beim Upload, wenn möglich, automatisch erkannt" value="{{ form.get('fahrzeug', '') }}">
         </div>
         <div class="col-md-4">
-          <label class="form-label">Kennzeichen</label>
-          <input type="text" name="kennzeichen" class="form-control form-control-lg" style="text-transform:uppercase;">
+          <label class="form-label" for="kennzeichen">Kennzeichen</label>
+          <input type="text" id="kennzeichen" name="kennzeichen" class="form-control form-control-lg" style="text-transform:uppercase;" autocapitalize="characters" spellcheck="false" value="{{ form.get('kennzeichen', '') }}">
         </div>
         <div class="col-md-6">
-          <label class="form-label">Analyse</label>
-          <input type="text" name="analyse_text" class="form-control" placeholder="z.B. Stoßstange hinten instandsetzen">
+          <label class="form-label" for="analyse_text">Kurze Schadensbeschreibung</label>
+          <input type="text" id="analyse_text" name="analyse_text" class="form-control" placeholder="z.B. Stoßstange hinten instandsetzen" value="{{ form.get('analyse_text', '') }}">
         </div>
         <div class="col-md-6">
-          <label class="form-label">Anhänge</label>
-          <input type="file" name="dateien" class="form-control form-control-lg file-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
+          <label class="form-label" for="dateien">Anhänge</label>
+          <input type="file" id="dateien" name="dateien" class="form-control form-control-lg file-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
+          <div class="text-danger small mt-1" data-file-error style="display:none;">Bitte zuerst eine Datei auswählen.</div>
           <div class="form-text">Mit dem Upload-Button wird die Datei sofort gelesen und der Auftrag automatisch vorbefüllt. Bei Gutachten kann das ein paar Sekunden dauern.</div>
         </div>
         <div class="col-12">
-          <label class="form-label">Hinweis zum Bild oder Dokument (optional)</label>
-          <input type="text" name="upload_notiz" class="form-control form-control-lg" placeholder="z.B. Kotflügel links Kratzer, Tür hinten rechts Delle">
+          <label class="form-label" for="upload_notiz">Hinweis zum Bild oder Dokument (optional)</label>
+          <input type="text" id="upload_notiz" name="upload_notiz" class="form-control form-control-lg" placeholder="z.B. Kotflügel links Kratzer, Tür hinten rechts Delle" value="{{ form.get('upload_notiz', '') }}">
           <div class="form-text">Bei Schadensfotos reichen kurze Schlagwörter. Die Werkstatt sieht den Hinweis direkt im Auftrag.</div>
         </div>
         <div class="col-12">
-          <label class="form-label">Beschreibung</label>
-          <textarea name="beschreibung" class="form-control" rows="4"></textarea>
+          <label class="form-label" for="beschreibung">Beschreibung</label>
+          <textarea id="beschreibung" name="beschreibung" class="form-control" rows="4">{{ form.get('beschreibung', '') }}</textarea>
         </div>
         <div class="col-md-4">
-          <label class="form-label">Transport</label>
-          <select name="transport_art" class="form-select form-select-lg" data-transport-select>
+          <label class="form-label" for="transport_art">Transport</label>
+          <select id="transport_art" name="transport_art" class="form-select form-select-lg" data-transport-select>
             {% for key, meta in transport_arten.items() %}
-            <option value="{{ key }}">{{ meta['label'] }}</option>
+            <option value="{{ key }}" {% if form.get('transport_art') == key %}selected{% endif %}>{{ meta['label'] }}</option>
             {% endfor %}
           </select>
         </div>
         <div class="col-md-4">
-          <label class="form-label" data-annahme-label>Fahrzeug wird von Ihnen angeliefert</label>
-          <input type="date" name="annahme_datum" class="form-control form-control-lg">
-          <input type="time" name="annahme_uhrzeit" class="form-control form-control-lg mt-1" aria-label="Uhrzeit Anlieferung">
+          <label class="form-label" for="annahme_datum" data-annahme-label>Fahrzeug wird von Ihnen angeliefert</label>
+          <input type="date" id="annahme_datum" name="annahme_datum" class="form-control form-control-lg" value="{{ form.get('annahme_datum', '') }}">
+          <input type="time" id="annahme_uhrzeit" name="annahme_uhrzeit" class="form-control form-control-lg mt-1" aria-label="Uhrzeit Anlieferung" value="{{ form.get('annahme_uhrzeit', '') }}">
         </div>
         <div class="col-md-4">
-          <label class="form-label" data-abholung-label>Fahrzeug wird von Ihnen geholt</label>
-          <input type="date" name="abholtermin" class="form-control form-control-lg">
-          <input type="time" name="abhol_uhrzeit" class="form-control form-control-lg mt-1" aria-label="Uhrzeit Abholung">
+          <label class="form-label" for="abholtermin" data-abholung-label>Fahrzeug wird von Ihnen geholt</label>
+          <input type="date" id="abholtermin" name="abholtermin" class="form-control form-control-lg" value="{{ form.get('abholtermin', '') }}">
+          <input type="time" id="abhol_uhrzeit" name="abhol_uhrzeit" class="form-control form-control-lg mt-1" aria-label="Uhrzeit Abholung" value="{{ form.get('abhol_uhrzeit', '') }}">
         </div>
         <div class="col-12" id="abhol-adresse-wrap" style="display:none;">
-          <label class="form-label">📍 Abhol-/Lieferadresse</label>
-          <input type="text" name="abhol_adresse" class="form-control form-control-lg" placeholder="z.B. Unteres Lohhaus 5, 74915 Waibstadt">
+          <label class="form-label" for="abhol_adresse">📍 Abhol-/Lieferadresse</label>
+          <input type="text" id="abhol_adresse" name="abhol_adresse" class="form-control form-control-lg" placeholder="z.B. Unteres Lohhaus 5, 74915 Waibstadt" value="{{ form.get('abhol_adresse', '') }}">
           <div class="form-text">Beim Hol- und Bringservice: erscheint auf der Werkstatt-Tafel, damit der Mitarbeiter weiss, wo das Auto zu holen/bringen ist.</div>
         </div>
         <div class="col-12 mobile-actions">
@@ -244,6 +246,9 @@
     let loadingNewsIndex = 0;
     let loadingNewsTimer = null;
     let submitterMessage = '';
+    let submitterAction = '';
+    const fileInput = document.querySelector('input[name="dateien"]');
+    const fileError = document.querySelector('[data-file-error]');
     const updateLoadingNews = () => {
       if (!loadingNewsTitle || !loadingNewsText) {
         return;
@@ -265,12 +270,34 @@
         const button = event.target.closest('button[type="submit"]');
         if (button) {
           submitterMessage = button.dataset.loadingMessage || '';
+          submitterAction = (button.name === 'aktion') ? (button.value || '') : '';
         }
       });
-      form.addEventListener('submit', () => {
+      form.addEventListener('submit', (event) => {
+        const action = (event.submitter && event.submitter.name === 'aktion')
+          ? (event.submitter.value || '')
+          : submitterAction;
+        if (action === 'upload_analyze' && fileInput && fileInput.files.length === 0) {
+          event.preventDefault();
+          if (fileError) {
+            fileError.style.display = '';
+          }
+          fileInput.focus();
+          return;
+        }
+        if (fileError) {
+          fileError.style.display = 'none';
+        }
         loadingText.textContent = submitterMessage || 'Bitte kurz warten. Der Auftrag wird jetzt automatisch aus der Datei vorbereitet.';
         startLoadingNews();
         overlay.classList.add('show');
+      });
+    }
+    if (fileInput && fileError) {
+      fileInput.addEventListener('change', () => {
+        if (fileInput.files.length > 0) {
+          fileError.style.display = 'none';
+        }
       });
     }
     const updateTransportLabels = () => {
@@ -293,7 +320,6 @@
       updateTransportLabels();
     }
   </script>
-  {% include "ki_assistent_widget.html" %}
   {% include "_session_keepalive.html" %}
 </body>
 </html>

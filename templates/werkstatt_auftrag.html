@@ -319,6 +319,47 @@
 
     .toast-leiste .toast.t-danger, .toast-leiste .toast.t-warning { border-color: var(--warning); }
 
+    /* Upload-Overlay — gleiches Muster wie .analysis-overlay/.analysis-spinner in base.html */
+    .upload-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(22, 32, 42, .58);
+      backdrop-filter: blur(4px);
+      z-index: 200;
+      padding: 1.25rem;
+    }
+
+    .upload-overlay.show { display: flex; }
+
+    .upload-karte {
+      width: min(420px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      padding: 1.5rem 1.6rem;
+      text-align: center;
+      font-weight: 700;
+      font-size: clamp(1rem, 1.8vw, 1.15rem);
+    }
+
+    .upload-spinner {
+      width: 46px;
+      height: 46px;
+      margin: 0 auto .9rem;
+      border-radius: 50%;
+      border: 5px solid var(--line);
+      border-top-color: var(--accent);
+      animation: upload-drehen 1s linear infinite;
+    }
+
+    @keyframes upload-drehen { to { transform: rotate(360deg); } }
+
+    .foto-upload-knopf.gesperrt { pointer-events: none; opacity: .45; }
+
     /* --- Handy-Ansicht: kompakter, weniger Stapeln (steht am Ende, damit es greift) --- */
     @media (max-width: 640px) {
       body { padding-bottom: 1rem; }
@@ -540,13 +581,13 @@
               enctype="multipart/form-data"
               style="margin-top:1.1rem; display:flex; gap:.7rem; flex-wrap:wrap; align-items:center;">
           {{ csrf_field()|safe }}
-          <label style="cursor:pointer; display:inline-flex; align-items:center; gap:.45rem; background:#17212a; color:#fff; padding:.75rem 1.15rem; border-radius:.85rem; font-weight:700; font-size:clamp(.92rem,1.5vw,1.08rem);">
+          <label class="foto-upload-knopf" style="cursor:pointer; display:inline-flex; align-items:center; gap:.45rem; background:#17212a; color:#fff; padding:.75rem 1.15rem; border-radius:.85rem; font-weight:700; font-size:clamp(.92rem,1.5vw,1.08rem);">
             📷 Foto aufnehmen
-            <input type="file" name="fotos" accept="image/*" capture="environment" multiple hidden onchange="this.form.submit()">
+            <input type="file" name="fotos" accept="image/*" capture="environment" multiple hidden onchange="fotoUploadStarten(this)">
           </label>
-          <label style="cursor:pointer; display:inline-flex; align-items:center; gap:.45rem; background:#fffdf9; color:#17212a; border:1px solid #ddd1c0; padding:.75rem 1.15rem; border-radius:.85rem; font-weight:500; font-size:clamp(.92rem,1.5vw,1.08rem);">
+          <label class="foto-upload-knopf" style="cursor:pointer; display:inline-flex; align-items:center; gap:.45rem; background:#fffdf9; color:#17212a; border:1px solid #ddd1c0; padding:.75rem 1.15rem; border-radius:.85rem; font-weight:500; font-size:clamp(.92rem,1.5vw,1.08rem);">
             🖼 Aus Galerie
-            <input type="file" name="fotos" accept="image/*" multiple hidden onchange="this.form.submit()">
+            <input type="file" name="fotos" accept="image/*" multiple hidden onchange="fotoUploadStarten(this)">
           </label>
         </form>
       </div>
@@ -669,7 +710,28 @@
     </div>
   </div>
 
+  <div class="upload-overlay" data-upload-overlay>
+    <div class="upload-karte">
+      <div class="upload-spinner"></div>
+      ⏳ Fotos werden hochgeladen — bitte warten…
+    </div>
+  </div>
+
   <script>
+    // Foto-Upload: Overlay einblenden + Upload-Knoepfe sperren, damit niemand doppelt tippt
+    function fotoUploadStarten(input) {
+      if (!input.files || !input.files.length) return; // Auswahl abgebrochen
+      document.querySelector('[data-upload-overlay]').classList.add('show');
+      document.querySelectorAll('.foto-upload-knopf').forEach((l) => l.classList.add('gesperrt'));
+      input.form.submit();
+    }
+    // Falls die Seite aus dem Back-Cache zurueckkommt: Overlay/Sperre wieder aufheben
+    window.addEventListener('pageshow', (e) => {
+      if (!e.persisted) return;
+      document.querySelector('[data-upload-overlay]').classList.remove('show');
+      document.querySelectorAll('.foto-upload-knopf.gesperrt').forEach((l) => l.classList.remove('gesperrt'));
+    });
+
     // Nach 4 Minuten ohne Interaktion zurueck zur Tafel (Kiosk-Betrieb)
     (() => {
       const toastLeiste = document.querySelector('[data-toast-leiste]');

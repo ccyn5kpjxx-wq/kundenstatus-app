@@ -60,7 +60,7 @@
                 <form method="POST" action="{{ url_for('partner_postfach_loeschen', slug=autohaus['slug'], item_key=item['item_key']) }}" class="m-0">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="next" value="{{ request.path }}">
-                  <button type="submit" class="btn btn-outline-dark btn-sm">Löschen</button>
+                  <button type="submit" class="btn btn-outline-dark btn-sm" title="Blendet den Hinweis im Postfach aus">Erledigt</button>
                 </form>
               </div>
             </div>

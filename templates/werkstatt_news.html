@@ -43,43 +43,46 @@
     <div class="page-card p-4 h-100">
       <div class="section-title">
         <div>
-          <h4 class="mb-1">Neue News</h4>
+          <h4 class="mb-1" data-news-form-titel>Neue News</h4>
           <p>Für längere Zeiträume Start und Ende eintragen.</p>
         </div>
       </div>
-      <form method="POST" action="{{ url_for('admin_news_neu') }}" class="news-form">
+      <form method="POST" action="{{ url_for('admin_news_neu') }}" class="news-form" data-news-form data-neu-action="{{ url_for('admin_news_neu') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="mb-3">
-          <label class="form-label">Titel</label>
-          <input type="text" name="titel" class="form-control" placeholder="z. B. Betriebsurlaub" required>
+          <label class="form-label" for="news_titel">Titel</label>
+          <input type="text" name="titel" id="news_titel" class="form-control" placeholder="z. B. Betriebsurlaub" required>
         </div>
         <div class="row g-3">
           <div class="col-md-6">
-            <label class="form-label">Von</label>
-            <input type="date" name="start_datum" class="form-control">
+            <label class="form-label" for="news_start">Von</label>
+            <input type="date" name="start_datum" id="news_start" class="form-control">
           </div>
           <div class="col-md-6">
-            <label class="form-label">Bis</label>
-            <input type="date" name="end_datum" class="form-control">
+            <label class="form-label" for="news_end">Bis</label>
+            <input type="date" name="end_datum" id="news_end" class="form-control">
           </div>
         </div>
         <div class="mt-3">
-          <label class="form-label">Kategorie</label>
-          <select name="kategorie" class="form-select">
+          <label class="form-label" for="news_kategorie">Kategorie</label>
+          <select name="kategorie" id="news_kategorie" class="form-select">
             {% for key, meta in kalender_kategorien.items() if key not in ['feiertag', 'hinweis'] %}
               <option value="{{ key }}" {% if key == 'betrieb' %}selected{% endif %}>{{ meta['label'] }}</option>
             {% endfor %}
           </select>
         </div>
         <div class="mt-3">
-          <label class="form-label">Text</label>
-          <textarea name="nachricht" rows="5" class="form-control" placeholder="Kurze Nachricht für die Werkstatt"></textarea>
+          <label class="form-label" for="news_nachricht">Text</label>
+          <textarea name="nachricht" rows="5" id="news_nachricht" class="form-control" placeholder="Kurze Nachricht für die Werkstatt"></textarea>
         </div>
         <div class="form-check mt-3">
           <input class="form-check-input" type="checkbox" name="pinned" id="pinned" checked>
           <label class="form-check-label" for="pinned">Oben halten</label>
         </div>
-        <button type="submit" class="btn btn-brand mt-3">News speichern</button>
+        <div class="d-flex gap-2 mt-3">
+          <button type="submit" class="btn btn-brand" data-news-submit>News speichern</button>
+          <button type="button" class="btn btn-soft" data-news-abbrechen hidden>Abbrechen</button>
+        </div>
       </form>
     </div>
   </div>
@@ -105,10 +108,20 @@
                 <h4 class="mb-1">{{ news['titel'] }}</h4>
                 {% if news['zeitraum_text'] %}<div class="text-muted">{{ news['zeitraum_text'] }}</div>{% endif %}
               </div>
-              <form method="POST" action="{{ url_for('admin_news_archivieren', news_id=news['id']) }}" class="m-0">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-soft btn-sm">Archivieren</button>
-              </form>
+              <div class="d-flex gap-2 align-items-start">
+                <button type="button" class="btn btn-soft btn-sm" data-news-bearbeiten
+                        data-action="{{ url_for('admin_news_bearbeiten', news_id=news['id']) }}"
+                        data-titel="{{ news['titel'] }}"
+                        data-nachricht="{{ news['nachricht'] }}"
+                        data-start="{{ news['start_datum_iso'] }}"
+                        data-end="{{ news['end_datum_iso'] }}"
+                        data-kategorie="{{ news['kategorie'] }}"
+                        data-pinned="{{ 1 if news['pinned'] else 0 }}">Bearbeiten</button>
+                <form method="POST" action="{{ url_for('admin_news_archivieren', news_id=news['id']) }}" class="m-0">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="btn btn-soft btn-sm">Archivieren</button>
+                </form>
+              </div>
             </div>
             {% if news['nachricht'] %}
               <div class="news-copy text-muted">{{ news['nachricht'] }}</div>
@@ -122,4 +135,47 @@
     </div>
   </div>
 </div>
+
+<script>
+  (function () {
+    const form = document.querySelector('[data-news-form]');
+    if (!form) return;
+    const titelFeld = form.querySelector('[name="titel"]');
+    const startFeld = form.querySelector('[name="start_datum"]');
+    const endFeld = form.querySelector('[name="end_datum"]');
+    const kategorieFeld = form.querySelector('[name="kategorie"]');
+    const nachrichtFeld = form.querySelector('[name="nachricht"]');
+    const pinnedFeld = form.querySelector('[name="pinned"]');
+    const submitKnopf = form.querySelector('[data-news-submit]');
+    const abbrechenKnopf = form.querySelector('[data-news-abbrechen]');
+    const ueberschrift = document.querySelector('[data-news-form-titel]');
+    const neuAction = form.getAttribute('data-neu-action');
+
+    function zuruecksetzen() {
+      form.action = neuAction;
+      form.reset();
+      submitKnopf.textContent = 'News speichern';
+      abbrechenKnopf.hidden = true;
+      if (ueberschrift) ueberschrift.textContent = 'Neue News';
+    }
+
+    document.querySelectorAll('[data-news-bearbeiten]').forEach(function (knopf) {
+      knopf.addEventListener('click', function () {
+        form.action = knopf.getAttribute('data-action');
+        titelFeld.value = knopf.getAttribute('data-titel') || '';
+        startFeld.value = knopf.getAttribute('data-start') || '';
+        endFeld.value = knopf.getAttribute('data-end') || '';
+        kategorieFeld.value = knopf.getAttribute('data-kategorie') || 'betrieb';
+        nachrichtFeld.value = knopf.getAttribute('data-nachricht') || '';
+        pinnedFeld.checked = knopf.getAttribute('data-pinned') === '1';
+        submitKnopf.textContent = 'News aktualisieren';
+        abbrechenKnopf.hidden = false;
+        if (ueberschrift) ueberschrift.textContent = 'News bearbeiten';
+        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        titelFeld.focus();
+      });
+    });
+    abbrechenKnopf.addEventListener('click', zuruecksetzen);
+  })();
+</script>
 {% endblock %}

@@ -522,7 +522,7 @@
             <td class="text-end">
               <div class="d-flex gap-2 justify-content-end flex-wrap">
                 <a href="{{ item['detail_url'] }}" class="btn btn-soft btn-sm">Prüfen</a>
-                <form method="POST" action="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}" class="m-0">
+                <form method="POST" action="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}" class="m-0" onsubmit="return confirm('Diese Einkaufsposition wirklich löschen?')">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button type="submit" class="btn btn-soft btn-sm">Entfernen</button>
                 </form>
@@ -688,7 +688,7 @@
             {% endif %}
             <div class="d-flex gap-2 flex-wrap">
               <button type="submit" class="btn btn-brand btn-sm">Artikel anlegen</button>
-              <button type="submit" class="btn btn-soft btn-sm" formaction="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}">Verwerfen</button>
+              <button type="submit" class="btn btn-soft btn-sm" formaction="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}" onclick="return confirm('Diese Einkaufsposition wirklich löschen?')">Verwerfen</button>
             </div>
           </div>
         </form>
@@ -753,7 +753,7 @@
                 <td class="text-end">
                   <div class="d-flex gap-2 justify-content-end flex-wrap">
                     <a href="{{ item['detail_url'] }}" class="btn btn-soft btn-sm">Öffnen</a>
-                    <form method="POST" action="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}" class="m-0">
+                    <form method="POST" action="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}" class="m-0" onsubmit="return confirm('Diese Einkaufsposition wirklich löschen?')">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                       <button type="submit" class="btn btn-soft btn-sm">Entfernen</button>
                     </form>
@@ -1014,7 +1014,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-brand btn-sm">Bestellt</button>
           </form>
-          <form method="POST" action="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}" class="m-0">
+          <form method="POST" action="{{ url_for('admin_einkauf_loeschen', item_id=item['id']) }}" class="m-0" onsubmit="return confirm('Diese Einkaufsposition wirklich löschen?')">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-soft btn-sm">Entfernen</button>
           </form>

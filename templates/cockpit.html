@@ -205,63 +205,6 @@
     font-weight: 700;
     text-align: center;
   }
-  .quick-entry {
-    background: rgba(255,255,255,.08);
-    border: 1px solid rgba(255,255,255,.18);
-    border-radius: 18px;
-    padding: 1rem;
-  }
-  .quick-entry .form-control {
-    border-color: rgba(255,255,255,.2);
-  }
-  .quick-search-results {
-    display: grid;
-    gap: .5rem;
-    margin-top: .8rem;
-  }
-  .quick-search-results[hidden] {
-    display: none;
-  }
-  .quick-search-result,
-  .quick-search-empty {
-    display: block;
-    border: 1px solid rgba(255,255,255,.18);
-    border-radius: 12px;
-    background: rgba(255,255,255,.1);
-    padding: .65rem .75rem;
-    color: #fff;
-    text-decoration: none;
-  }
-  .quick-search-result:hover {
-    color: #fff;
-    border-color: rgba(255,255,255,.4);
-    background: rgba(255,255,255,.16);
-  }
-  .quick-search-title {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: .6rem;
-    flex-wrap: wrap;
-    font-weight: 700;
-  }
-  .quick-search-meta {
-    margin-top: .16rem;
-    color: rgba(255,255,255,.72);
-    font-size: .88rem;
-    overflow-wrap: anywhere;
-  }
-  .quick-search-empty {
-    color: rgba(255,255,255,.76);
-  }
-  .quick-search-status {
-    border-radius: 999px;
-    background: rgba(255,255,255,.88);
-    color: #16202a;
-    padding: .18rem .55rem;
-    font-size: .78rem;
-    font-weight: 700;
-  }
   .start-focus-grid {
     align-items: stretch;
   }
@@ -439,6 +382,7 @@
   }
   .cockpit-today-list {
     display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: .7rem;
   }
   .cockpit-today-item {
@@ -604,11 +548,13 @@
   }
   @media (max-width: 1199.98px) {
     .start-week-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cockpit-today-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
   @media (max-width: 575.98px) {
     .start-counter-grid,
     .source-mix,
-    .start-day-counts {
+    .start-day-counts,
+    .cockpit-today-list {
       grid-template-columns: 1fr;
     }
     .partner-overview-item {
@@ -651,6 +597,49 @@
   <span class="text-muted">— Mahntexte liegen fertig vor: prüfen, kopieren, senden →</span>
 </a>
 {% endif %}
+<div class="page-card p-4 mb-4">
+  <div class="section-title align-items-start">
+    <div>
+      <h4 class="mb-1">Betriebs-Cockpit heute</h4>
+      <p>Schneller Blick auf den Tagesablauf.</p>
+    </div>
+    <span class="badge-soft">Heute {{ cockpit['heute_text'] }}</span>
+  </div>
+  <div class="cockpit-today-list">
+    <div class="cockpit-today-item">
+      <div>
+        <div class="fw-bold">Übernehmen</div>
+        <div class="text-muted small">Anlieferung und Holservice</div>
+      </div>
+      <strong>{{ cockpit['heute_bringen']|length }}</strong>
+    </div>
+    <div class="cockpit-today-item">
+      <div>
+        <div class="fw-bold">Starten</div>
+        <div class="text-muted small">Heute geplanter Arbeitsstart</div>
+      </div>
+      <strong>{{ cockpit['heute_starten']|length }}</strong>
+    </div>
+    <div class="cockpit-today-item">
+      <div>
+        <div class="fw-bold">Fertig</div>
+        <div class="text-muted small">Fertigstellung oder Status heute</div>
+      </div>
+      <strong>{{ cockpit['heute_fertig']|length }}</strong>
+    </div>
+    <div class="cockpit-today-item">
+      <div>
+        <div class="fw-bold">Zurückgeben</div>
+        <div class="text-muted small">Abholung oder Rückbringung</div>
+      </div>
+      <strong>{{ cockpit['heute_abholen']|length }}</strong>
+    </div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap mt-3">
+    <a href="{{ url_for('dashboard') }}#auftraege" class="btn btn-brand">Lackierportal öffnen</a>
+    <a href="{{ url_for('admin_postfach') }}" class="btn btn-soft">Postfach</a>
+  </div>
+</div>
 <div class="page-card cockpit-hero p-4 p-lg-5 mb-4">
   <div class="row g-4 align-items-center">
     <div class="col-lg-7">
@@ -843,354 +832,6 @@
     </a>
   </div>
 </div>
-
-{#
-<div class="row g-4 mb-4 start-overview-grid">
-  <div class="col-xl-4">
-    <div class="page-card p-4 h-100">
-      <div class="section-title align-items-start">
-        <div>
-          <h4 class="mb-1">Betriebs-Cockpit heute</h4>
-          <p>Schneller Blick auf den Tagesablauf.</p>
-        </div>
-        <span class="badge-soft">Heute {{ cockpit['heute_text'] }}</span>
-      </div>
-      <div class="cockpit-today-list">
-        <div class="cockpit-today-item">
-          <div>
-            <div class="fw-bold">Übernehmen</div>
-            <div class="text-muted small">Anlieferung und Holservice</div>
-          </div>
-          <strong>{{ cockpit['heute_bringen']|length }}</strong>
-        </div>
-        <div class="cockpit-today-item">
-          <div>
-            <div class="fw-bold">Starten</div>
-            <div class="text-muted small">Heute geplanter Arbeitsstart</div>
-          </div>
-          <strong>{{ cockpit['heute_starten']|length }}</strong>
-        </div>
-        <div class="cockpit-today-item">
-          <div>
-            <div class="fw-bold">Fertig</div>
-            <div class="text-muted small">Fertigstellung oder Status heute</div>
-          </div>
-          <strong>{{ cockpit['heute_fertig']|length }}</strong>
-        </div>
-        <div class="cockpit-today-item">
-          <div>
-            <div class="fw-bold">Zurückgeben</div>
-            <div class="text-muted small">Abholung oder Rückbringung</div>
-          </div>
-          <strong>{{ cockpit['heute_abholen']|length }}</strong>
-        </div>
-      </div>
-      <div class="d-flex gap-2 flex-wrap mt-3">
-        <a href="{{ url_for('dashboard') }}#auftraege" class="btn btn-brand">Lackierportal öffnen</a>
-        <a href="{{ url_for('admin_postfach') }}" class="btn btn-soft">Postfach</a>
-      </div>
-    </div>
-  </div>
-  <div class="col-xl-8">
-    <div class="page-card p-4 h-100">
-      <div class="section-title align-items-start">
-        <div>
-          <h4 class="mb-1">Kalender dieser Woche</h4>
-          <p>KW {{ kalender_woche['kw'] }} · {{ kalender_woche['total_tasks'] }} Werkstattaufgaben · {{ kalender_woche['total_calendar_points'] }} Kalenderpunkte</p>
-        </div>
-        <a href="{{ url_for('kalender') }}" class="btn btn-soft">Kalender öffnen</a>
-      </div>
-      <div class="start-week-grid">
-        {% for day in kalender_woche['days'] %}
-        <div class="start-week-day {{ 'is-today' if day['is_today'] else '' }} {{ 'is-weekend' if day['is_weekend'] else '' }}">
-          <div class="start-week-date">
-            <div>
-              <strong>{{ day['wochentag_kurz'] }}</strong>
-              {% if day['is_today'] %}<span class="badge text-bg-danger ms-1">Heute</span>{% endif %}
-            </div>
-            <span>{{ day['datum_text'] }}</span>
-          </div>
-          <div class="start-week-events">
-            {% for point in day['calendar_points'][:2] %}
-              <span class="start-week-chip">
-                <span class="badge text-bg-{{ point['farbe'] }} me-1">{{ point['kategorie_label'] }}</span>
-                {{ point['titel'] }}
-              </span>
-            {% endfor %}
-            {% for task in day['tasks'][:2] %}
-              <a href="{{ url_for('auftrag_detail', auftrag_id=task['auftrag_id'], back='kalender') }}" class="start-week-chip">
-                <span class="badge text-bg-{{ task['farbe'] }} me-1">{{ task['label'] }}</span>
-                {{ task['fahrzeug'] }}{% if task['kennzeichen'] %} · {{ task['kennzeichen'] }}{% endif %}
-              </a>
-            {% endfor %}
-            {% if not day['calendar_points'] and not day['tasks'] %}
-              <span class="start-week-empty">Nichts geplant.</span>
-            {% elif day['gesamt_count'] > 4 %}
-              <a href="{{ url_for('kalender') }}" class="start-week-chip">Weitere Einträge öffnen</a>
-            {% endif %}
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="row g-3 mb-4">
-  <div class="col-sm-6 col-xl-3">
-    <div class="metric-card metric-warm page-card">
-      <div class="metric-label">Aktive Fahrzeuge</div>
-      <div class="metric-value mt-2">{{ auftraege|length }}</div>
-      <div class="mt-2 text-white-50">im Lackierportal</div>
-    </div>
-  </div>
-  <div class="col-sm-6 col-xl-3">
-    <div class="metric-card metric-blue page-card">
-      <div class="metric-label">Partner</div>
-      <div class="metric-value mt-2">{{ autohaeuser|length }}</div>
-      <div class="mt-2 text-white-50">Partnerbetriebe</div>
-    </div>
-  </div>
-  <div class="col-sm-6 col-xl-3">
-    <div class="metric-card metric-green page-card">
-      <div class="metric-label">Offene Angebote</div>
-      <div class="metric-value mt-2">{{ angebotsanfragen|length }}</div>
-      <div class="mt-2 text-white-50">zur Werkstatt-Freigabe</div>
-    </div>
-  </div>
-  <div class="col-sm-6 col-xl-3">
-    <div class="metric-card metric-gold page-card">
-      <div class="metric-label">Alarme</div>
-      <div class="metric-value mt-2">{{ cockpit['offene_reklamationen']|length }}</div>
-      <div class="mt-2 text-white-50">offene Reklamationen</div>
-    </div>
-  </div>
-</div>
-
-<div class="source-mix">
-  {% for item in cockpit['quelle_mix'] %}
-  <div class="source-mix-item source-mix-{{ item['key'] }}">
-    <span>{{ item['label'] }}</span>
-    <strong>{{ item['percent'] }}%</strong>
-    <div class="text-muted small">{{ item['count'] }} Fahrzeug(e) im Werkstattportal</div>
-  </div>
-  {% endfor %}
-</div>
-
-<div class="row g-4 mb-4">
-  <div class="col-xl-8">
-    <div class="page-card p-4 h-100">
-      <div class="section-title">
-        <div>
-          <h4 class="mb-1">News und Aufgaben</h4>
-          <p>Neue Angebote, Aufträge, Chats und Prüfungen landen hier als Erinnerung.</p>
-        </div>
-        <a href="{{ url_for('admin_postfach') }}" class="btn btn-soft btn-sm">Postfach öffnen</a>
-      </div>
-      {% if cockpit['postfach_items'] %}
-        <div class="news-list">
-          {% for item in cockpit['postfach_items'][:5] %}
-          <a href="{{ url_for('admin_postfach_oeffnen', item_key=item['item_key']) }}" class="news-item">
-            <div>
-              <div class="d-flex gap-2 align-items-center flex-wrap mb-1">
-                <span class="badge text-bg-warning">{{ item['typ'] }}</span>
-                <strong>{{ item['titel'] }}</strong>
-              </div>
-              <div class="text-muted small news-meta">
-                {{ item['autohaus_name'] or 'Autohaus' }} · {{ item['fahrzeug'] or 'Fahrzeug' }}{% if item['kennzeichen'] %} · {{ item['kennzeichen'] }}{% endif %}
-              </div>
-            </div>
-            <span class="text-muted small text-nowrap">{{ item['erstellt_am'] }}</span>
-          </a>
-          {% endfor %}
-        </div>
-      {% else %}
-        <div class="news-empty">Alles ruhig. Neue Anfragen und Aufträge erscheinen automatisch hier.</div>
-      {% endif %}
-    </div>
-  </div>
-  <div class="col-xl-4">
-    <div class="page-card p-4">
-      <div class="section-title">
-        <div>
-          <h4 class="mb-1">Einkauf-News</h4>
-          <p>Lieferantenangebote, Preisprüfung und Bestellfreigaben.</p>
-        </div>
-        <a href="{{ url_for('admin_einkauf') }}" class="btn btn-brand btn-sm">Öffnen</a>
-      </div>
-      <form method="POST" action="{{ url_for('admin_einkauf_rechnung_upload') }}" enctype="multipart/form-data" class="row g-2 align-items-end mb-3">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}">
-        <div class="col-12">
-          <label class="form-label small text-muted">Rechnung oder Angebot hochladen</label>
-          <input type="file" name="rechnung_dateien" class="form-control" accept=".pdf,.txt,.jpg,.jpeg,.png,.webp,.gif,.heic,image/*,application/pdf,text/plain" multiple>
-        </div>
-        <div class="col-8">
-          <input type="text" name="lieferant" class="form-control" value="Auto-Color / Topcolor" aria-label="Lieferant">
-        </div>
-        <div class="col-4 d-grid">
-          <button type="submit" class="btn btn-soft">Hochladen</button>
-        </div>
-        <div class="col-12 small text-muted">{{ einkauf_artikel_count }} Artikel im Stamm gespeichert.</div>
-      </form>
-      {% if einkauf_news %}
-        <div class="purchase-mini-list">
-          {% for news in einkauf_news %}
-          <a href="{{ news['ziel_url'] or url_for('admin_einkauf') }}" class="purchase-mini-item">
-            <div>
-              <strong>{{ news['titel'] }}</strong>
-              <div class="text-muted small">
-                {{ news['lieferant'] }} · {{ news['count'] }} Artikel{% if news['preis_summe_label'] %} · ca. {{ news['preis_summe_label'] }}{% endif %}
-              </div>
-              {% if news['preview'] %}
-                <div class="text-muted small news-meta">{{ news['preview'] }}</div>
-              {% endif %}
-            </div>
-            <span class="status-chip">Angebot</span>
-          </a>
-          {% endfor %}
-        </div>
-      {% elif einkauf_belege %}
-        <div class="purchase-mini-list">
-          {% for beleg in einkauf_belege %}
-          <a href="{{ url_for('admin_einkauf') }}#rechnungen" class="purchase-mini-item">
-            <div>
-              <strong>{{ beleg['original_name'] }}</strong>
-              <div class="text-muted small">{{ beleg['lieferant'] }} · {{ beleg['positionen_count'] }} Artikel · {{ beleg['erstellt_am'] }}</div>
-            </div>
-            <span class="status-chip">{{ beleg['status'] }}</span>
-          </a>
-          {% endfor %}
-        </div>
-      {% else %}
-        <div class="news-empty">Keine neuen Lieferantenangebote. Offene Einkaufspositionen: {{ einkauf_offen_count }}.</div>
-      {% endif %}
-    </div>
-    <div class="page-card p-4 email-mini">
-      <div class="section-title">
-        <div>
-          <h4 class="mb-1">E-Mail-Zentrale</h4>
-          <p>Werkstatt-Mails und API-Eingänge an einem Ort.</p>
-        </div>
-        <a href="{{ url_for('admin_emails') }}" class="btn btn-brand btn-sm">Öffnen</a>
-      </div>
-      {% if email_items %}
-        <div class="purchase-mini-list">
-          {% for email in email_items %}
-          <a href="{{ url_for('admin_emails') }}" class="purchase-mini-item">
-            <div>
-              <strong>{{ email['betreff'] }}</strong>
-              <div class="text-muted small">{{ email['absender_display'] }} · {{ email['empfangen_am'] }}</div>
-            </div>
-            {% if email['is_neu'] %}<span class="status-chip">neu</span>{% endif %}
-          </a>
-          {% endfor %}
-        </div>
-      {% else %}
-        <div class="news-empty">Noch keine E-Mails im Portal.</div>
-      {% endif %}
-    </div>
-  </div>
-</div>
-
-<div class="row g-4 mb-4">
-  <div class="col-xl-8">
-    <div class="section-title">
-      <div>
-        <h4 class="mb-1">Module</h4>
-        <p>Die Kacheln sind der erste lokale Prototyp für die spätere Plattform-Struktur.</p>
-      </div>
-    </div>
-    <div class="row g-3">
-      <div class="col-md-6 col-xxl-4">
-        <a class="page-card module-tile" href="{{ url_for('dashboard') }}#auftraege">
-          <span class="module-kicker">Werkstatt</span>
-          <h5 class="mb-0">Lackierportal</h5>
-          <p class="text-muted mb-0">Fahrzeuge, Status, Angebote, Dokumente und Reklamationen.</p>
-          <span class="module-count">{{ auftraege|length }}</span>
-        </a>
-      </div>
-      <div class="col-md-6 col-xxl-4">
-        <a class="page-card module-tile" href="{{ url_for('kalender') }}">
-          <span class="module-kicker">Planung</span>
-          <h5 class="mb-0">Kalender</h5>
-          <p class="text-muted mb-0">Termine, Urlaub, Feiertage, Brückentage und freie Notizen.</p>
-          <span class="module-count">{{ kalender_vorschau|length }}</span>
-        </a>
-      </div>
-      <div class="col-md-6 col-xxl-4">
-        <a class="page-card module-tile" href="{{ url_for('admin_mitarbeiter') }}">
-          <span class="module-kicker">Team</span>
-          <h5 class="mb-0">Mitarbeiter</h5>
-          <p class="text-muted mb-0">Teamdaten und Urlaub zentral pflegen.</p>
-          <span class="module-count">{{ admin_mitarbeiter_urlaub_count() }}</span>
-        </a>
-      </div>
-      <div class="col-md-6 col-xxl-4">
-        <a class="page-card module-tile" href="{{ url_for('admin_postfach') }}">
-          <span class="module-kicker">Kommunikation</span>
-          <h5 class="mb-0">Postfach</h5>
-          <p class="text-muted mb-0">Neue Nachrichten und Partner-Rückfragen gesammelt prüfen.</p>
-          <span class="module-count">{{ cockpit['offene_chat_nachrichten']|length }}</span>
-        </a>
-      </div>
-      <div class="col-md-6 col-xxl-4">
-        <a class="page-card module-tile" href="{{ url_for('admin_emails') }}">
-          <span class="module-kicker">E-Mail</span>
-          <h5 class="mb-0">E-Mail-Zentrale</h5>
-          <p class="text-muted mb-0">Mails, Notizen und spätere Postfach-API zentral sammeln.</p>
-          <span class="module-count">{{ email_count }}</span>
-        </a>
-      </div>
-      <div class="col-md-6 col-xxl-4">
-        <a class="page-card module-tile" href="{{ url_for('admin_einkauf') }}">
-          <span class="module-kicker">Einkauf</span>
-          <h5 class="mb-0">Einkauf</h5>
-          <p class="text-muted mb-0">Lieferantenangebote, Preisprüfung und Bestellfreigaben.</p>
-          <span class="module-count">{{ einkauf_offen_count }}</span>
-        </a>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-xl-4">
-    <div class="page-card p-4 h-100">
-      <div class="section-title">
-        <div>
-          <h4 class="mb-1">Nächste Termine</h4>
-          <p>Fahrzeuge, Urlaub, Geburtstage und eigene Notizen.</p>
-        </div>
-      </div>
-      {% if kalender_vorschau %}
-        <div class="calendar-compact">
-          {% for day in kalender_vorschau %}
-          <div class="calendar-compact-item">
-            <div class="d-flex justify-content-between gap-2 mb-2">
-              <div class="fw-bold">{{ day['datum_lang'] }}</div>
-              <span class="status-chip">{{ day['gesamt_count'] }}</span>
-            </div>
-            <div class="d-flex gap-2 flex-wrap">
-              {% for item in day['system'][:2] %}
-                <span class="badge text-bg-{{ item['farbe'] }}">{{ item['titel'] }}</span>
-              {% endfor %}
-              {% for item in day['notizen'][:2] %}
-                <span class="badge text-bg-{{ item['farbe'] }}">{{ item['titel'] }}</span>
-              {% endfor %}
-              {% for event in day['events'][:2] %}
-                {% set a = event['auftrag'] %}
-                <a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="badge text-bg-secondary text-decoration-none">{{ a['fahrzeug'] or 'Fahrzeug' }}</a>
-              {% endfor %}
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-      {% else %}
-        <div class="text-muted">Noch keine kommenden Termine.</div>
-      {% endif %}
-    </div>
-  </div>
-</div>
-#}
 {% endblock %}
 
 {% block extra_js %}
@@ -1399,99 +1040,6 @@
     locationSelect.addEventListener('change', loadWeather);
     loadWeather();
     window.setInterval(loadWeather, 10 * 60 * 1000);
-  })();
-
-  (() => {
-    const form = document.querySelector('[data-quick-search-form]');
-    if (!form) {
-      return;
-    }
-    const input = form.querySelector('[data-quick-search-input]');
-    const results = form.querySelector('[data-quick-search-results]');
-    const endpoint = form.dataset.searchUrl;
-    if (!input || !results || !endpoint) {
-      return;
-    }
-
-    let debounceTimer = null;
-    let controller = null;
-
-    const clearResults = () => {
-      results.replaceChildren();
-      results.hidden = true;
-    };
-
-    const renderEmpty = () => {
-      const empty = document.createElement('div');
-      empty.className = 'quick-search-empty';
-      empty.textContent = 'Kein Fahrzeug gefunden.';
-      results.replaceChildren(empty);
-      results.hidden = false;
-    };
-
-    const renderItems = (items) => {
-      if (!items.length) {
-        renderEmpty();
-        return;
-      }
-      const fragment = document.createDocumentFragment();
-      items.forEach((item) => {
-        const link = document.createElement('a');
-        link.className = 'quick-search-result';
-        link.href = item.url;
-
-        const title = document.createElement('div');
-        title.className = 'quick-search-title';
-        const name = document.createElement('span');
-        name.textContent = `${item.fahrzeug || 'Fahrzeug'}${item.kennzeichen ? ` · ${item.kennzeichen}` : ''}`;
-        const status = document.createElement('span');
-        status.className = 'quick-search-status';
-        status.textContent = item.status || 'Offen';
-        title.append(name, status);
-
-        const meta = document.createElement('div');
-        meta.className = 'quick-search-meta';
-        meta.textContent = item.meta || item.autohaus || '';
-
-        link.append(title, meta);
-        fragment.append(link);
-      });
-      results.replaceChildren(fragment);
-      results.hidden = false;
-    };
-
-    const search = async () => {
-      const query = input.value.trim();
-      if (query.length < 2) {
-        clearResults();
-        return;
-      }
-      if (controller) {
-        controller.abort();
-      }
-      controller = new AbortController();
-      try {
-        const response = await fetch(`${endpoint}?q=${encodeURIComponent(query)}`, {
-          headers: { Accept: 'application/json' },
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          clearResults();
-          return;
-        }
-        const data = await response.json();
-        renderItems(Array.isArray(data.items) ? data.items : []);
-      } catch (error) {
-        if (error.name !== 'AbortError') {
-          clearResults();
-        }
-      }
-    };
-
-    input.addEventListener('input', () => {
-      window.clearTimeout(debounceTimer);
-      debounceTimer = window.setTimeout(search, 160);
-    });
   })();
 </script>
 {% endblock %}

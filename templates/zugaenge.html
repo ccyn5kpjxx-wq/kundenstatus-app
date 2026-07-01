@@ -43,6 +43,22 @@
   </form>
 </div>
 
+<div class="page-card p-4 mb-4">
+  <div class="section-title">
+    <div>
+      <div class="badge-soft mb-2">Endkunden</div>
+      <h4 class="mb-1">Öffnungszeiten</h4>
+      <p>Erscheinen in der „Fahrzeug ist fertig"-Mail und auf der Kunden-Status-Seite, damit niemand vor verschlossener Tür steht.</p>
+    </div>
+  </div>
+  <form method="POST" action="{{ url_for('admin_oeffnungszeiten_speichern') }}" class="d-flex gap-2 align-items-center flex-wrap">
+    {{ csrf_field()|safe }}
+    <input type="text" name="oeffnungszeiten_text" class="form-control" style="max-width: 460px;" value="{{ oeffnungszeiten_text }}" placeholder="z. B. Mo–Fr 8:00–17:00 Uhr, Sa nach Absprache">
+    <button type="submit" class="btn btn-soft" data-no-loading="true">Speichern</button>
+    {% if not oeffnungszeiten_text %}<span class="small text-muted">leer = kein Öffnungszeiten-Hinweis in Mail und Statusseite</span>{% endif %}
+  </form>
+</div>
+
 {% include "autohaus_zugaenge_section.html" %}
 
 <div class="page-card p-4 mb-4">

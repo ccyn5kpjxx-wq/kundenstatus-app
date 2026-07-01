@@ -281,7 +281,7 @@
         </div>
         <div class="process-steps">
           {% for nummer, meta in statusliste.items() %}
-          <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=nummer) }}">
+          <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=nummer) }}"{% if nummer < auftrag['status'] %} onsubmit="return confirm('Status wirklich zurücksetzen? Der Kunde sieht die Änderung auf seiner Status-Seite.')"{% endif %}>
             <input type="hidden" name="next" value="{{ detail_self_url }}">
             <button type="submit" class="process-step {% if nummer < auftrag['status'] %}is-done{% elif nummer == auftrag['status'] %}is-active{% endif %}" {% if nummer == auftrag['status'] %}disabled{% endif %}>
               <span class="process-icon">{{ meta['icon'] }}</span>
@@ -313,7 +313,7 @@
             </a>
             {% if auftrag['status'] > 1 %}
             {% set previous_status = auftrag['status'] - 1 %}
-            <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=previous_status) }}">
+            <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=previous_status) }}" onsubmit="return confirm('Status wirklich zurücksetzen? Der Kunde sieht die Änderung auf seiner Status-Seite.')">
               <input type="hidden" name="next" value="{{ detail_self_url }}">
               <button type="submit" class="btn btn-soft">Zurück zu {{ statusliste[previous_status]['label'] }}</button>
             </form>
@@ -570,6 +570,9 @@
       {% endif %}
 
       <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
+        <div class="col-12 d-flex gap-2 flex-wrap">
+          <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Änderungen speichern</button>
+        </div>
         <div class="col-md-6">
           <label class="form-label">Autohaus</label>
           <select name="autohaus_id" class="form-select form-select-lg">
@@ -661,7 +664,7 @@
           <div class="form-text">Beim Hol- und Bringservice in der Werkstatt-Tafel sichtbar.</div>
         </div>
         <div class="col-md-6">
-          <label class="form-label">Analyse</label>
+          <label class="form-label">Kurze Schadensbeschreibung</label>
           <input type="text" name="analyse_text" class="form-control" value="{{ auftrag['analyse_text'] }}">
         </div>
         <div class="col-12">
@@ -1086,8 +1089,8 @@
         <form method="POST" action="{{ url_for('archivieren', auftrag_id=auftrag['id']) }}">
           <button type="submit" class="btn btn-outline-secondary w-100">{{ 'Auftrag wieder aktivieren' if auftrag['archiviert'] else 'Auftrag archivieren' }}</button>
         </form>
-        <form method="POST" action="{{ url_for('loeschen', auftrag_id=auftrag['id']) }}" onsubmit="return confirm('Fahrzeug wirklich löschen?')">
-          <button type="submit" class="btn btn-outline-danger w-100">Fahrzeug löschen</button>
+        <form method="POST" action="{{ url_for('loeschen', auftrag_id=auftrag['id']) }}" onsubmit="return confirm('Auftrag samt Fotos, Unterlagen, Chat und Kunden-Statuslink löschen? Der Kunden-Link funktioniert danach nicht mehr.')">
+          <button type="submit" class="btn btn-outline-danger w-100">Auftrag löschen</button>
         </form>
       </div>
     </div>
@@ -1103,5 +1106,51 @@
       }
     });
   });
+
+  // Schutz vor Datenverlust: Warnen, wenn ungespeicherte Änderungen im Hauptformular liegen.
+  const mainForm = document.querySelector('form[data-upload-form]');
+  if (mainForm) {
+    let hasUnsavedChanges = false;
+    ['input', 'change'].forEach((eventName) => {
+      mainForm.addEventListener(eventName, () => {
+        hasUnsavedChanges = true;
+      });
+    });
+    mainForm.addEventListener('submit', () => {
+      hasUnsavedChanges = false;
+    });
+    window.addEventListener('beforeunload', (event) => {
+      if (!hasUnsavedChanges) {
+        return;
+      }
+      event.preventDefault();
+      event.returnValue = '';
+    });
+    document.querySelectorAll('form').forEach((form) => {
+      if (form === mainForm) {
+        return;
+      }
+      form.addEventListener('submit', (event) => {
+        if (event.defaultPrevented || !hasUnsavedChanges) {
+          return;
+        }
+        if (confirm('Ungespeicherte Änderungen im Formular gehen verloren. Trotzdem fortfahren?')) {
+          hasUnsavedChanges = false;
+        } else {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          const analyseOverlay = document.querySelector('[data-analysis-overlay]');
+          if (analyseOverlay) {
+            analyseOverlay.classList.remove('show');
+          }
+          window.setTimeout(() => {
+            form.querySelectorAll('button[type="submit"], input[type="submit"]').forEach((button) => {
+              button.disabled = false;
+            });
+          }, 10);
+        }
+      });
+    });
+  }
 </script>
 {% endblock %}

@@ -308,6 +308,39 @@
     .portal-weather-error {
       color:#8a4d12;
     }
+    .portal-logout {
+      text-align:right;
+      margin-bottom:4px;
+    }
+    .portal-logout-link {
+      color:#6c6255;
+      font-size:.9rem;
+      text-decoration:none;
+    }
+    .portal-logout-link:hover {
+      color:#132635;
+      text-decoration:underline;
+    }
+    .metric-link {
+      display:block;
+      color:#fff;
+      text-decoration:none;
+      cursor:pointer;
+      transition:.18s ease;
+    }
+    .metric-link:hover,
+    .metric-link:focus {
+      color:#fff;
+      transform:translateY(-2px);
+      box-shadow:0 10px 24px rgba(64,47,25,.22);
+    }
+    .metric-link.is-active-filter {
+      outline:3px solid rgba(19,38,53,.4);
+      outline-offset:2px;
+    }
+    .metric-filter-hidden {
+      display:none !important;
+    }
     .portal-action-row {
       display:flex;
       flex-wrap:wrap;
@@ -722,6 +755,9 @@
     {% endwith %}
 
     <div class="panel mb-4">
+      <div class="portal-logout">
+        <a href="{{ url_for('partner_logout') }}" class="portal-logout-link">Logout</a>
+      </div>
       <div class="portal-hero">
         <div class="portal-hero-copy">
           <div>
@@ -774,16 +810,11 @@
             </div>
           </div>
           <div class="portal-action-row">
-            <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Lackierauftrag ausfüllen</a>
+            <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}" class="btn btn-dark btn-lg">Neues Fahrzeug</a>
             <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Angebot anfordern</a>
             <a href="{{ url_for('partner_versicherung_schaden_neu', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Versicherungsfall melden</a>
-            <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Bonusmodell</a>
-            {% if not rahmenvertrag['aktiv'] %}
-            <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Rahmenvertrag vereinbaren</a>
-            {% endif %}
-            <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}" class="btn btn-dark btn-lg">Neues Fahrzeug</a>
+            <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg" title="Rahmenvertrag und Bonusmodell ansehen">{{ rahmenvertrag['button_label'] }}</a>
             <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
-            <a href="{{ url_for('partner_logout') }}" class="btn btn-outline-dark btn-lg">Logout</a>
             <div class="whatsapp-quick-status" role="status" aria-label="WhatsApp Verbindung aktiv">
               <span class="whatsapp-mark" aria-hidden="true">WA</span>
               <div>
@@ -881,7 +912,7 @@
           <form method="POST" action="{{ url_for('partner_postfach_loeschen', slug=autohaus['slug'], item_key=item['item_key']) }}" class="m-0">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="next" value="{{ request.path }}">
-            <button type="submit" class="btn btn-outline-dark btn-sm">Löschen</button>
+            <button type="submit" class="btn btn-outline-dark btn-sm" title="Blendet den Hinweis im Postfach aus">Erledigt</button>
           </form>
         </div>
         {% endfor %}
@@ -922,28 +953,28 @@
 
     <div class="row g-3 mb-4">
       <div class="col-md-6 col-xl-3">
-        <div class="metric metric-blue">
-          <div class="text-uppercase small">Wird heute geholt</div>
+        <a class="metric metric-blue metric-link" href="#fahrzeuge-tabelle" data-metric-filter data-filter-label="Annahme heute" data-filter-ids="{{ cockpit['heute_bringen']|map(attribute='id')|join(',') }}">
+          <div class="text-uppercase small">Annahme heute</div>
           <div class="display-5 fw-bold">{{ cockpit['heute_bringen']|length }}</div>
-        </div>
+        </a>
       </div>
       <div class="col-md-6 col-xl-3">
-        <div class="metric metric-warm">
+        <a class="metric metric-warm metric-link" href="#fahrzeuge-tabelle" data-metric-filter data-filter-label="In Arbeit" data-filter-ids="{{ cockpit['in_arbeit']|map(attribute='id')|join(',') }}">
           <div class="text-uppercase small">In Arbeit</div>
           <div class="display-5 fw-bold">{{ cockpit['in_arbeit']|length }}</div>
-        </div>
+        </a>
       </div>
       <div class="col-md-6 col-xl-3">
-        <div class="metric metric-green">
+        <a class="metric metric-green metric-link" href="#fahrzeuge-tabelle" data-metric-filter data-filter-label="Heute fertig" data-filter-ids="{{ cockpit['heute_fertig']|map(attribute='id')|join(',') }}">
           <div class="text-uppercase small">Heute fertig</div>
           <div class="display-5 fw-bold">{{ cockpit['heute_fertig']|length }}</div>
-        </div>
+        </a>
       </div>
       <div class="col-md-6 col-xl-3">
-        <div class="metric metric-gold">
-          <div class="text-uppercase small">Ist zurückgegeben</div>
+        <a class="metric metric-gold metric-link" href="#fahrzeuge-tabelle" data-metric-filter data-filter-label="Zurückgegeben gesamt" data-filter-ids="{{ cockpit['zurueckgegeben']|map(attribute='id')|join(',') }}">
+          <div class="text-uppercase small">Zurückgegeben gesamt</div>
           <div class="display-5 fw-bold">{{ cockpit['zurueckgegeben']|length }}</div>
-        </div>
+        </a>
       </div>
     </div>
 
@@ -970,11 +1001,15 @@
     </div>
     {% endif %}
 
-    <div class="panel mb-4">
+    <div class="panel mb-4" id="fahrzeuge-tabelle">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
         <div>
           <h4 class="mb-1">Ihre Fahrzeuge</h4>
           <div class="text-muted">Aktive Aufträge Ihres Autohauses.</div>
+        </div>
+        <div class="text-muted small" data-metric-filter-status hidden>
+          <span data-metric-filter-text></span>
+          <a href="#fahrzeuge-tabelle" data-metric-filter-reset>Filter zurücksetzen</a>
         </div>
       </div>
       {% if auftraege %}
@@ -998,7 +1033,7 @@
             <tr>
               <th class="row-select-cell">Auswahl</th>
               <th>Fahrzeug</th>
-              <th>Analyse</th>
+              <th>Schadensbeschreibung</th>
               <th>Termine</th>
               <th>Status</th>
               <th>Aktion</th>
@@ -1006,7 +1041,7 @@
           </thead>
           <tbody>
             {% for a in auftraege %}
-            <tr data-select-row>
+            <tr data-select-row data-auftrag-id="{{ a['id'] }}">
               <td class="row-select-cell" data-label="Auswahl">
                 <label class="selection-badge mb-0">
                   <input type="checkbox" class="row-check" name="auftrag_ids" value="{{ a['id'] }}" data-select-item>
@@ -1018,7 +1053,7 @@
                 {% if a['kennzeichen'] %}<div class="small text-muted">{{ a['kennzeichen'] }}</div>{% endif %}
                 {% if a['kunde_name'] %}<div class="small text-muted">{{ a['kunde_name'] }}</div>{% endif %}
               </td>
-              <td data-label="Analyse">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
+              <td data-label="Schadensbeschreibung">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
               <td data-label="Termine">
                 {% if a['annahme_datum'] %}<div class="chip">{{ a['partner_annahme_label'] }} {{ a['annahme_datum'] }}</div>{% endif %}
                 {% if a['abholtermin'] %}<div class="chip">{{ a['partner_abholung_label'] }} {{ a['abholtermin'] }}</div>{% endif %}
@@ -1067,7 +1102,7 @@
             <tr>
               <th class="row-select-cell">Auswahl</th>
               <th>Fahrzeug</th>
-              <th>Analyse</th>
+              <th>Schadensbeschreibung</th>
               <th>Letzte Termine</th>
               <th>Aktion</th>
             </tr>
@@ -1085,7 +1120,7 @@
                 <div class="fw-bold">{{ a['fahrzeug'] }}</div>
                 {% if a['kennzeichen'] %}<div class="small text-muted">{{ a['kennzeichen'] }}</div>{% endif %}
               </td>
-              <td data-label="Analyse">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
+              <td data-label="Schadensbeschreibung">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
               <td data-label="Letzte Termine">
                 {% if a['abholtermin'] %}<div class="chip">{{ a['partner_abholung_label'] }} {{ a['abholtermin'] }}</div>{% endif %}
               </td>
@@ -1401,6 +1436,70 @@
       });
     })();
 
+    (() => {
+      const tiles = Array.from(document.querySelectorAll('[data-metric-filter]'));
+      const tableRoot = document.getElementById('fahrzeuge-tabelle');
+      if (!tiles.length || !tableRoot) {
+        return;
+      }
+      const rows = Array.from(tableRoot.querySelectorAll('tr[data-auftrag-id]'));
+      const status = tableRoot.querySelector('[data-metric-filter-status]');
+      const statusText = tableRoot.querySelector('[data-metric-filter-text]');
+      const resetLink = tableRoot.querySelector('[data-metric-filter-reset]');
+      let activeTile = null;
+
+      const clearFilter = () => {
+        activeTile = null;
+        tiles.forEach((tile) => tile.classList.remove('is-active-filter'));
+        rows.forEach((row) => row.classList.remove('metric-filter-hidden'));
+        if (status) {
+          status.hidden = true;
+        }
+      };
+
+      const applyFilter = (tile) => {
+        const ids = new Set((tile.dataset.filterIds || '').split(',').filter(Boolean));
+        let sichtbar = 0;
+        rows.forEach((row) => {
+          const treffer = ids.has(row.dataset.auftragId);
+          row.classList.toggle('metric-filter-hidden', !treffer);
+          if (treffer) {
+            sichtbar += 1;
+          } else {
+            const checkbox = row.querySelector('[data-select-item]');
+            if (checkbox && checkbox.checked) {
+              checkbox.checked = false;
+              checkbox.dispatchEvent(new Event('change'));
+            }
+          }
+        });
+        activeTile = tile;
+        tiles.forEach((item) => item.classList.toggle('is-active-filter', item === tile));
+        if (status && statusText) {
+          statusText.textContent = `Gefiltert nach „${tile.dataset.filterLabel || ''}“ (${sichtbar} Fahrzeuge) — `;
+          status.hidden = false;
+        }
+      };
+
+      tiles.forEach((tile) => {
+        tile.addEventListener('click', (event) => {
+          event.preventDefault();
+          if (activeTile === tile) {
+            clearFilter();
+          } else {
+            applyFilter(tile);
+          }
+          tableRoot.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      });
+      if (resetLink) {
+        resetLink.addEventListener('click', (event) => {
+          event.preventDefault();
+          clearFilter();
+        });
+      }
+    })();
+
     document.querySelectorAll('[data-bulk-form]').forEach((form) => {
       const selectAll = form.querySelector('[data-select-all]');
       const items = Array.from(form.querySelectorAll('[data-select-item]'));
@@ -1421,7 +1520,11 @@
       };
       if (selectAll) {
         selectAll.addEventListener('change', () => {
-          items.forEach((item) => { item.checked = selectAll.checked; });
+          items.forEach((item) => {
+            const row = item.closest('tr');
+            const weggefiltert = !!row && row.classList.contains('metric-filter-hidden');
+            item.checked = selectAll.checked && !weggefiltert;
+          });
           refresh();
         });
       }
