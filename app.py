@@ -2685,6 +2685,7 @@ def inject_csrf_helpers():
         "fahrzeugsuche_auktion_alert_count": fahrzeugsuche_auktion_alert_count,
         "fahrzeugverkauf_count": fahrzeugverkauf_count,
         "fahrzeugeinkauf_count": fahrzeugeinkauf_count,
+        "mietwagen_anfragen_count": mietwagen_anfragen_count,
         "admin_versicherung_count": admin_versicherung_count,
         "admin_einkauf_count": admin_einkauf_count,
         "admin_rechnungen_count": admin_rechnungen_count,
@@ -7794,6 +7795,7 @@ BACKUP_TABLES = (
     "fahrzeugeinkauf_scans",
     "fahrzeugeinkauf_fahrzeuge",
     "fahrzeugeinkauf_scan_anfragen",
+    "mietwagen_anfragen",
     "werkstatt_news",
     "werkstatt_emails",
     "lexware_rechnungen",
@@ -9404,6 +9406,25 @@ def init_db():
             size            INTEGER DEFAULT 0,
             ist_titelbild   INTEGER DEFAULT 0,
             erstellt_am     TEXT NOT NULL
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mietwagen_anfragen (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            status         TEXT DEFAULT 'offen',
+            name           TEXT DEFAULT '',
+            telefon        TEXT DEFAULT '',
+            email          TEXT DEFAULT '',
+            klasse_wunsch  TEXT DEFAULT '',
+            start_datum    TEXT DEFAULT '',
+            end_datum      TEXT DEFAULT '',
+            nachricht      TEXT DEFAULT '',
+            quelle         TEXT DEFAULT 'homepage',
+            mietvorgang_id INTEGER DEFAULT 0,
+            erstellt_am    TEXT NOT NULL,
+            erledigt_am    TEXT DEFAULT ''
         )
         """
     )
@@ -12906,6 +12927,18 @@ def list_fahrzeugsuche_auktion_alerts(limit=20, suche_id=None):
 
 def fahrzeugsuche_auktion_alert_count():
     return len(list_fahrzeugsuche_auktion_alerts(limit=100))
+
+
+def mietwagen_anfragen_count():
+    try:
+        db = get_db()
+        row = db.execute(
+            "SELECT COUNT(*) AS count FROM mietwagen_anfragen WHERE status = 'offen'"
+        ).fetchone()
+        db.close()
+        return int(row["count"] or 0)
+    except Exception:
+        return 0
 
 
 def fahrzeugeinkauf_count():
@@ -34963,6 +34996,15 @@ def admin_mietfahrzeuge():
         a for a in list_auftraege()
         if int(a.get("status") or 1) <= 4 and not a.get("angebotsphase")
     ]
+    db = get_db()
+    miet_anfragen = [dict(row) for row in db.execute(
+        "SELECT * FROM mietwagen_anfragen WHERE status = 'offen' ORDER BY id"
+    ).fetchall()]
+    db.close()
+    for anfrage in miet_anfragen:
+        wa_key = whatsapp_number_key(anfrage.get("telefon"))
+        anfrage["wa_url"] = f"https://wa.me/{wa_key}" if wa_key else ""
+
     return render_template(
         "mietfahrzeuge_admin.html",
         gruppen=gruppen,
@@ -34972,6 +35014,7 @@ def admin_mietfahrzeuge():
         klassen=MIETFAHRZEUG_KLASSEN,
         status_optionen=MIETFAHRZEUG_BASIS_STATUS,
         heute_iso=date.today().isoformat(),
+        miet_anfragen=miet_anfragen,
     )
 
 
@@ -43165,6 +43208,115 @@ def start_lexware_auto_sync():
                 print(f"WARNUNG: Lexware-Auto-Abgleich fehlgeschlagen: {clean_text(str(exc))[:200]}")
 
     threading.Thread(target=_woerker, daemon=True).start()
+
+
+# ==========================================================================
+# MIETWAGEN-ANFRAGEN — öffentliches Homepage-Formular → Cockpit → Vertrag
+# ==========================================================================
+
+
+@app.route("/mietwagen", methods=["GET", "POST"])
+def mietwagen_anfrage():
+    """Öffentliches Anfrageformular (ohne Login) — Handy ist Pflicht für den WhatsApp-Versand."""
+    klassen = MIETFAHRZEUG_KLASSEN
+    if request.method == "POST":
+        # Honeypot gegen Spam-Bots: echtes Feld bleibt leer
+        if clean_text(request.form.get("website")):
+            return redirect(url_for("mietwagen_anfrage", ok=1))
+        name = clean_text(request.form.get("name"))
+        telefon = clean_text(request.form.get("telefon"))
+        start_datum = clean_text(request.form.get("start_datum"))
+        if not name or not telefon or not start_datum:
+            flash("Bitte Name, Handynummer und Abholdatum angeben — die Handynummer brauchen wir, um Ihnen den Mietvertrag per WhatsApp zu schicken.", "warning")
+        else:
+            db = get_db()
+            db.execute(
+                """
+                INSERT INTO mietwagen_anfragen
+                    (status, name, telefon, email, klasse_wunsch, start_datum, end_datum, nachricht, quelle, erstellt_am)
+                VALUES ('offen', ?, ?, ?, ?, ?, ?, ?, 'homepage', ?)
+                """,
+                (
+                    name,
+                    telefon,
+                    clean_text(request.form.get("email")),
+                    clean_text(request.form.get("klasse_wunsch")),
+                    start_datum,
+                    clean_text(request.form.get("end_datum")),
+                    clean_text(request.form.get("nachricht")),
+                    now_str(),
+                ),
+            )
+            db.commit()
+            db.close()
+            return redirect(url_for("mietwagen_anfrage", ok=1))
+    return render_template(
+        "mietwagen_anfrage.html",
+        klassen=klassen,
+        gesendet=bool(request.args.get("ok")),
+        heute_iso=date.today().isoformat(),
+    )
+
+
+@app.route("/admin/mietanfrage/<int:anfrage_id>/uebernehmen", methods=["POST"])
+@admin_required
+def admin_mietanfrage_uebernehmen(anfrage_id):
+    db = get_db()
+    anfrage = db.execute(
+        "SELECT * FROM mietwagen_anfragen WHERE id = ?", (anfrage_id,)
+    ).fetchone()
+    db.close()
+    if not anfrage:
+        abort(404)
+    fahrzeug_id = request.form.get("mietfahrzeug_id")
+    if not fahrzeug_id:
+        flash("Bitte ein Mietfahrzeug für diese Anfrage auswählen.", "warning")
+        return redirect(url_for("admin_mietfahrzeuge") + "#anfragen")
+    start_datum = request.form.get("start_datum") or anfrage["start_datum"]
+    end_datum = request.form.get("end_datum") or anfrage["end_datum"]
+    if not mietfahrzeug_zeitraum_frei(fahrzeug_id, start_datum, end_datum):
+        flash("Das gewählte Fahrzeug ist im Zeitraum bereits belegt — bitte anderes Fahrzeug wählen.", "warning")
+        return redirect(url_for("admin_mietfahrzeuge") + "#anfragen")
+    try:
+        vid = create_mietvorgang(
+            fahrzeug_id,
+            kunde_name=anfrage["name"],
+            kunde_telefon=anfrage["telefon"],
+            kunde_email=anfrage["email"],
+            start_datum=start_datum,
+            end_datum=end_datum,
+            notiz=clean_text(
+                f"Homepage-Anfrage vom {anfrage['erstellt_am']}"
+                + (f" · Wunsch: {anfrage['klasse_wunsch']}" if anfrage["klasse_wunsch"] else "")
+                + (f" · {anfrage['nachricht']}" if anfrage["nachricht"] else "")
+            ),
+        )
+    except ValueError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("admin_mietfahrzeuge") + "#anfragen")
+    db = get_db()
+    db.execute(
+        "UPDATE mietwagen_anfragen SET status = 'uebernommen', mietvorgang_id = ?, erledigt_am = ? WHERE id = ?",
+        (vid, now_str(), anfrage_id),
+    )
+    db.commit()
+    db.close()
+    flash("Anfrage übernommen — hier ist der Mietvertrag: Daten prüfen, Kunde unterschreibt digital, dann per WhatsApp/E-Mail senden.", "success")
+    return redirect(url_for("admin_mietvertrag", vorgang_id=vid))
+
+
+@app.route("/admin/mietanfrage/<int:anfrage_id>/ablehnen", methods=["POST"])
+@admin_required
+def admin_mietanfrage_ablehnen(anfrage_id):
+    db = get_db()
+    db.execute(
+        "UPDATE mietwagen_anfragen SET status = 'abgelehnt', erledigt_am = ? WHERE id = ? AND status = 'offen'",
+        (now_str(), anfrage_id),
+    )
+    db.commit()
+    db.close()
+    flash("Anfrage abgelehnt.", "success")
+    return redirect(url_for("admin_mietfahrzeuge") + "#anfragen")
 
 
 # ==========================================================================

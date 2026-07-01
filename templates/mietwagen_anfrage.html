@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Mietwagen anfragen — Gärtner Karosserie & Lack{% endblock %}
+{% block navbar %}{% endblock %}
+{% block extra_css %}
+<style>
+  .mw-wrap { max-width: 620px; margin: 2.5rem auto; }
+  .mw-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1.6rem;
+    box-shadow: 0 8px 26px rgba(22, 32, 42, 0.08);
+  }
+  .mw-card h1 { font-size: 1.5rem; }
+  .mw-pflicht { color: var(--brand); }
+  .mw-hinweis { background: var(--panel-soft); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.9rem; font-size: 0.88rem; }
+  .mw-sendbtn { background: var(--brand); border: none; color: #fff; font-weight: 700; padding: 0.6rem 1.4rem; border-radius: 8px; }
+  .mw-sendbtn:hover { background: var(--brand-dark); color: #fff; }
+  .mw-ok { text-align: center; padding: 2rem 1rem; }
+  .mw-ok .mw-check { font-size: 3rem; color: var(--good); }
+  .mw-honey { position: absolute; left: -9999px; opacity: 0; height: 0; overflow: hidden; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="mw-wrap">
+  <div class="mw-card">
+    {% if gesendet %}
+    <div class="mw-ok">
+      <div class="mw-check">&#10004;</div>
+      <h1>Anfrage angekommen!</h1>
+      <p class="text-muted">Vielen Dank — wir melden uns schnellstmöglich bei Ihnen (per WhatsApp oder Anruf) und bestätigen Ihren Mietwagen.</p>
+      <p class="text-muted">Gärtner Karosserie &amp; Lack GmbH &middot; Binauer Höhe 4, 74821 Mosbach &middot; +49 1522 7706694</p>
+    </div>
+    {% else %}
+    <h1>Mietwagen anfragen</h1>
+    <p class="text-muted">Kurz ausfüllen — wir bestätigen Ihnen den Wagen und bereiten alles vor. Bei Abholung unterschreiben Sie bequem digital und bekommen den Vertrag direkt aufs Handy.</p>
+    <form method="post" action="{{ url_for('mietwagen_anfrage') }}">
+      <div class="mw-honey"><label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+      <div class="mb-2">
+        <label class="form-label">Ihr Name <span class="mw-pflicht">*</span></label>
+        <input class="form-control" type="text" name="name" required>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-2">
+          <label class="form-label">Handynummer (WhatsApp) <span class="mw-pflicht">*</span></label>
+          <input class="form-control" type="tel" name="telefon" placeholder="z. B. 0152 12345678" required>
+          <div class="form-text">Darüber erhalten Sie Ihren Mietvertrag.</div>
+        </div>
+        <div class="col-md-6 mb-2">
+          <label class="form-label">E-Mail (falls kein WhatsApp)</label>
+          <input class="form-control" type="email" name="email">
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-2">
+          <label class="form-label">Abholung am <span class="mw-pflicht">*</span></label>
+          <input class="form-control" type="date" name="start_datum" min="{{ heute_iso }}" required>
+        </div>
+        <div class="col-md-6 mb-2">
+          <label class="form-label">Rückgabe am</label>
+          <input class="form-control" type="date" name="end_datum" min="{{ heute_iso }}">
+        </div>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Fahrzeugklasse</label>
+        <select class="form-select" name="klasse_wunsch">
+          <option value="">Egal / Beratung gewünscht</option>
+          {% for klasse in klassen %}<option value="{{ klasse }}">{{ klasse }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Nachricht (optional)</label>
+        <textarea class="form-control" name="nachricht" rows="2" placeholder="z. B. Anhängerkupplung benötigt, Abholung nach 17 Uhr …"></textarea>
+      </div>
+      <button type="submit" class="mw-sendbtn">Anfrage senden</button>
+      <div class="mw-hinweis mt-3">Mit dem Absenden stimmen Sie zu, dass wir Ihre Angaben zur Bearbeitung der Mietwagen-Anfrage verwenden. Es entstehen keine Kosten — der Vertrag kommt erst bei Abholung mit Ihrer Unterschrift zustande.</div>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -53,6 +53,57 @@
   </div>
 </div>
 
+{% if miet_anfragen %}
+<!-- Neue Mietwagen-Anfragen von der Homepage -->
+<div id="anfragen" class="page-card p-4 mb-4" style="border: 2px solid var(--warning);">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h2 class="h5 mb-0">&#128276; Neue Mietwagen-Anfragen</h2>
+    <span class="badge badge-soft">{{ miet_anfragen|length }} offen</span>
+  </div>
+  {% for anfrage in miet_anfragen %}
+  <div class="mb-3 p-3" style="background: var(--panel-soft); border: 1px solid var(--line); border-radius: 8px;">
+    <div class="d-flex justify-content-between flex-wrap gap-2">
+      <div>
+        <strong>{{ anfrage.name }}</strong>
+        &middot; <a href="tel:{{ anfrage.telefon }}">&#128222; {{ anfrage.telefon }}</a>
+        {% if anfrage.wa_url %}<a class="badge text-bg-success text-decoration-none" href="{{ anfrage.wa_url }}" target="_blank" rel="noopener">WhatsApp</a>{% endif %}
+        {% if anfrage.email %}&middot; <a href="mailto:{{ anfrage.email }}">{{ anfrage.email }}</a>{% endif %}
+        <div class="text-muted" style="font-size: 0.88rem;">
+          Zeitraum: <strong>{{ anfrage.start_datum }}</strong>{% if anfrage.end_datum %} bis <strong>{{ anfrage.end_datum }}</strong>{% endif %}
+          {% if anfrage.klasse_wunsch %} &middot; Wunsch: {{ anfrage.klasse_wunsch }}{% endif %}
+          &middot; eingegangen {{ anfrage.erstellt_am }}
+        </div>
+        {% if anfrage.nachricht %}<div style="font-size: 0.9rem;">&#8222;{{ anfrage.nachricht }}&#8220;</div>{% endif %}
+      </div>
+    </div>
+    <form class="d-flex flex-wrap gap-2 align-items-end mt-2" method="post" action="{{ url_for('admin_mietanfrage_uebernehmen', anfrage_id=anfrage.id) }}">
+      <div>
+        <label class="form-label mb-0" style="font-size: 0.78rem;">Fahrzeug zuteilen</label>
+        <select class="form-select form-select-sm" name="mietfahrzeug_id" required>
+          <option value="">— wählen —</option>
+          {% for gruppe in gruppen %}{% for f in gruppe.fahrzeuge %}{% if f.aktiv %}
+          <option value="{{ f.id }}">{{ f.kennzeichen }} — {{ f.bezeichnung or gruppe.klasse }}</option>
+          {% endif %}{% endfor %}{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label mb-0" style="font-size: 0.78rem;">Von</label>
+        <input class="form-control form-control-sm" type="date" name="start_datum" value="{{ anfrage.start_datum }}">
+      </div>
+      <div>
+        <label class="form-label mb-0" style="font-size: 0.78rem;">Bis</label>
+        <input class="form-control form-control-sm" type="date" name="end_datum" value="{{ anfrage.end_datum }}">
+      </div>
+      <button type="submit" class="btn btn-sm btn-success">&#10003; Übernehmen &rarr; Mietvertrag</button>
+    </form>
+    <form class="mt-1" method="post" action="{{ url_for('admin_mietanfrage_ablehnen', anfrage_id=anfrage.id) }}" onsubmit="return confirm('Anfrage von {{ anfrage.name }} wirklich ablehnen?');">
+      <button type="submit" class="btn btn-sm btn-outline-secondary">Ablehnen</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 <!-- Belegungsplanung -->
 <div id="belegung" class="page-card p-4 mb-4">
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
