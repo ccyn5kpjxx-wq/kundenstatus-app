@@ -9113,7 +9113,6 @@ def init_db():
     ensure_column(db, "fahrzeugeinkauf_fahrzeuge", "verkaeufer_name", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeugeinkauf_fahrzeuge", "verkaeufer_telefon", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeugeinkauf_fahrzeuge", "verkaeufer_email", "TEXT DEFAULT ''")
-    ensure_column(db, "mietwagen_anfragen", "mietfahrzeug_id", "INTEGER DEFAULT 0")
     ensure_column(db, "fahrzeugverkauf_dateien", "hochgeladen_am", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeug_kandidaten", "suche_id", "INTEGER DEFAULT 0")
     ensure_column(db, "fahrzeug_kandidaten", "status", "TEXT DEFAULT 'neu'")
@@ -9517,6 +9516,9 @@ def init_db():
         )
         """
     )
+    # Migration für Alt-Datenbanken ohne mietfahrzeug_id — muss NACH dem
+    # CREATE TABLE laufen, sonst crasht init_db auf frischen Datenbanken.
+    ensure_column(db, "mietwagen_anfragen", "mietfahrzeug_id", "INTEGER DEFAULT 0")
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS lieferanten (
