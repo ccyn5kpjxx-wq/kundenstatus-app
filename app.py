@@ -9521,6 +9521,15 @@ def init_db():
     ensure_column(db, "mietwagen_anfragen", "mietfahrzeug_id", "INTEGER DEFAULT 0")
     db.execute(
         """
+        CREATE TABLE IF NOT EXISTS mietbild_backups (
+            bild_id      INTEGER PRIMARY KEY,
+            file_base64  TEXT NOT NULL,
+            erstellt_am  TEXT NOT NULL
+        )
+        """
+    )
+    db.execute(
+        """
         CREATE TABLE IF NOT EXISTS lieferanten (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             name         TEXT NOT NULL,
@@ -34215,6 +34224,31 @@ def get_mietfahrzeug_bild(bild_id):
     return dict(row) if row else None
 
 
+def ensure_mietbild_file(bild):
+    """Stellt eine Mietfahrzeug-Bilddatei aus dem DB-Backup wieder her, falls sie fehlt (z. B. nach Deploy)."""
+    if not bild:
+        return None
+    try:
+        path = UPLOAD_DIR / pathlib.Path(bild["stored_name"]).name
+    except Exception:
+        return None
+    if path.exists():
+        return path
+    try:
+        db = get_db()
+        row = db.execute(
+            "SELECT file_base64 FROM mietbild_backups WHERE bild_id = ?", (bild["id"],)
+        ).fetchone()
+        db.close()
+        if not row or not row["file_base64"]:
+            return None
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(base64.b64decode(row["file_base64"]))
+        return path
+    except Exception:
+        return None
+
+
 def save_mietfahrzeug_bilder(fahrzeug_id, files):
     """Speichert hochgeladene Bilddateien zum Fahrzeug. Gibt die Anzahl zurück."""
     try:
@@ -34249,7 +34283,7 @@ def save_mietfahrzeug_bilder(fahrzeug_id, files):
             except OSError:
                 size = 0
             ist_titelbild = 1 if (vorhandene == 0 and gespeichert == 0) else 0
-            db.execute(
+            cur = db.execute(
                 """
                 INSERT INTO mietfahrzeug_bilder
                 (mietfahrzeug_id, original_name, stored_name, mime_type, size, ist_titelbild, erstellt_am)
@@ -34257,6 +34291,16 @@ def save_mietfahrzeug_bilder(fahrzeug_id, files):
                 """,
                 (int(fahrzeug_id), original_name, stored_name, mime_type, size, ist_titelbild, now_str()),
             )
+            # Base64-Netz: Bild überlebt Deploys/Disk-Resets (wird beim Abruf wiederhergestellt)
+            try:
+                file_base64, _sha, _size = upload_backup_payload(target)
+                if file_base64:
+                    db.execute(
+                        "INSERT OR REPLACE INTO mietbild_backups (bild_id, file_base64, erstellt_am) VALUES (?, ?, ?)",
+                        (cur.lastrowid, file_base64, now_str()),
+                    )
+            except Exception:
+                pass
             gespeichert += 1
         db.commit()
         return gespeichert
@@ -35372,6 +35416,8 @@ def admin_mietfahrzeug_bild(bild_id):
         abort(404)
     path = upload_file_path(bild)
     if not path or not path.exists():
+        path = ensure_mietbild_file(bild)
+    if not path:
         abort(404)
     return send_file(
         path,
@@ -43625,6 +43671,8 @@ def mietwagen_public_bild(bild_id):
         abort(404)
     path = upload_file_path(bild)
     if not path or not path.exists():
+        path = ensure_mietbild_file(bild)
+    if not path:
         abort(404)
     return send_file(path, mimetype=bild.get("mime_type") or "image/jpeg")
 
