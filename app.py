@@ -43613,10 +43613,13 @@ def notify_workshop_whatsapp_mietanfrage(name, telefon, zeitraum, fahrzeug_label
                 target_number=target_number,
                 body=body,
                 template_text=body,
+                auftrag=None,
+                absender_label="Homepage",
             )
             sent_any = sent_any or ok
         return sent_any
-    except Exception:
+    except Exception as exc:
+        print(f"WARNUNG: Mietanfrage-WhatsApp fehlgeschlagen: {exc}")
         return False
 
 
@@ -44046,6 +44049,33 @@ def api_mietfahrzeug_bild_upload(fahrzeug_id):
         return jsonify({"ok": False, "error": "Keine Bilddatei im Feld 'bilder'"}), 400
     anzahl = save_mietfahrzeug_bilder(fahrzeug_id, dateien)
     return jsonify({"ok": True, "fahrzeug_id": fahrzeug_id, "gespeichert": anzahl})
+
+
+@app.route("/api/werkstatt/whatsapp/status")
+def api_whatsapp_status():
+    """Diagnose: Bridge-Konfiguration + letzte Sendeversuche (Telefonnummern maskiert)."""
+    if not werkstatt_api_token_valid():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    db = get_db()
+    letzte = [dict(row) for row in db.execute(
+        """
+        SELECT id, auftrag_id, telefon, status, fehler, erstellt_am
+        FROM whatsapp_nachrichten
+        WHERE richtung = 'outbound'
+        ORDER BY id DESC LIMIT 8
+        """
+    ).fetchall()]
+    db.close()
+    for eintrag in letzte:
+        tel = clean_text(eintrag.get("telefon"))
+        eintrag["telefon"] = (tel[:6] + "…" + tel[-2:]) if len(tel) > 8 else "…"
+    return jsonify({
+        "ok": True,
+        "bridge_errors": whatsapp_bridge_config_errors(),
+        "template_aktiv": whatsapp_message_template_enabled(),
+        "workshop_nummern": len(whatsapp_workshop_numbers()),
+        "letzte_versuche": letzte,
+    })
 
 
 @app.route("/api/werkstatt/fahrzeugeinkauf/scan-anfragen")
