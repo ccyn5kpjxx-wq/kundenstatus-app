@@ -34669,8 +34669,7 @@ MIETVERTRAG_FELDER = [
     {"name": "km_limit", "label": "Freikilometer pro Tag", "typ": "zahl", "default": "150"},
     {"name": "mehrkm_preis", "label": "Preis je Mehrkilometer (EUR)", "typ": "euro", "default": "0,25"},
     {"name": "kaution_euro", "label": "Kaution (EUR)", "typ": "euro", "default": "500,00"},
-    {"name": "selbstbeteiligung_euro", "label": "Selbstbeteiligung Vollkasko (EUR)", "typ": "euro", "default": "1.000,00"},
-    {"name": "selbstbeteiligung_teilkasko_euro", "label": "Selbstbeteiligung Teilkasko (EUR)", "typ": "euro", "default": "500,00"},
+    {"name": "selbstbeteiligung_euro", "label": "Selbstbeteiligung Vollkasko je Schadenfall (EUR)", "typ": "euro", "default": "1.000,00"},
     {"name": "zahlungsweise", "label": "Zahlungsweise", "typ": "text", "default": "Überweisung / EC-Karte"},
     {"name": "reinigungspauschale_euro", "label": "Reinigungspauschale (EUR)", "typ": "euro", "default": "50,00"},
     {"name": "rauchpauschale_euro", "label": "Pauschale Rauchverbot (EUR)", "typ": "euro", "default": "100,00"},
@@ -34713,13 +34712,18 @@ MIETVERTRAG_ABSCHNITTE = [
         "einen Zuschlag von {verspaetungspauschale_euro} EUR, längstens bis zur Höhe eines weiteren Tagessatzes je "
         "angefangenem Tag; weitergehende Schadensersatzansprüche bleiben unberührt. Bei Rückgabe wird ein Rückgabe"
         "protokoll mit Kilometerstand, Tankfüllung und Schadensaufnahme erstellt.")},
-    {"nummer": "§ 4", "titel": "Mietpreis und Zahlung", "text": (
+    {"nummer": "§ 4", "titel": "Mietpreis, Gesamtbetrag und Zahlung", "text": (
         "Der Mietpreis beträgt {tagessatz} EUR pro Tag (brutto, inkl. gesetzlicher Umsatzsteuer). Im Mietpreis "
         "enthalten sind {km_limit} Freikilometer je Miettag sowie Wartung und Verschleiß im Rahmen des bestimmungs"
         "gemäßen Gebrauchs. Jeder über die Freikilometer hinaus gefahrene Kilometer wird mit {mehrkm_preis} EUR "
-        "(brutto) berechnet.\nNicht im Mietpreis enthalten sind insbesondere Kraftstoff, AdBlue, Maut- und Parkgebühren "
-        "sowie etwaige Bußgelder; diese trägt der Mieter. Die Zahlung erfolgt per {zahlungsweise}. Der Mietpreis ist "
-        "mit Rückgabe des Fahrzeugs zur Zahlung fällig, soweit nicht Vorauszahlung vereinbart ist.")},
+        "(brutto) berechnet.\n"
+        "Vereinbarte Mietzeit: {miettage_text} zu je {tagessatz} EUR = Mietpreis gesamt {mietsumme_euro} EUR. "
+        "Zuzüglich der Kaution nach § 5 in Höhe von {kaution_euro} EUR ergibt sich ein Gesamtbetrag von "
+        "{gesamtbetrag_euro} EUR. Der Gesamtbetrag ist vor Fahrzeugübergabe zur Zahlung fällig (Vorkasse); ohne "
+        "vollständigen Zahlungseingang besteht kein Anspruch auf Übergabe des Fahrzeugs. Etwaige Verlängerungen sowie "
+        "nutzungsabhängige Kosten (Mehrkilometer, fehlender Kraftstoff, Pauschalen) werden bei Rückgabe abgerechnet.\n"
+        "Nicht im Mietpreis enthalten sind insbesondere Kraftstoff, AdBlue, Maut- und Parkgebühren "
+        "sowie etwaige Bußgelder; diese trägt der Mieter. Die Zahlung erfolgt per {zahlungsweise}.")},
     {"nummer": "§ 5", "titel": "Kaution / Sicherheitsleistung", "text": (
         "Der Mieter hinterlegt vor Übergabe eine Kaution in Höhe von {kaution_euro} EUR. Die Kaution dient der "
         "Absicherung der Ansprüche des Vermieters aus diesem Vertrag, insbesondere für die vereinbarte Selbst"
@@ -34754,9 +34758,10 @@ MIETVERTRAG_ABSCHNITTE = [
         "Verlust des Fahrzeugs, soweit nicht die nachstehende Haftungsreduzierung eingreift.\nGegen das im Mietpreis "
         "enthaltene bzw. gesondert vereinbarte Entgelt wird die Haftung des Mieters für Schäden am Mietfahrzeug nach "
         "Art einer Vollkaskoversicherung auf eine Selbstbeteiligung von {selbstbeteiligung_euro} EUR je Schadenereignis "
-        "reduziert. Für Schäden, die typischerweise einer Teilkaskoversicherung unterfallen (insbesondere Glasbruch, "
-        "Diebstahl, Brand, Wildunfall), beträgt die Selbstbeteiligung {selbstbeteiligung_teilkasko_euro} EUR je "
-        "Schadenereignis.\nBei grob fahrlässiger Herbeiführung des Schadens ist der Vermieter berechtigt, die Haftungs"
+        "reduziert. Diese Haftungsreduzierung umfasst auch Schäden, die typischerweise einer Teilkaskoversicherung "
+        "unterfallen (insbesondere Glasbruch, Diebstahl, Brand, Wildunfall); auch für solche Schäden gilt einheitlich "
+        "die Selbstbeteiligung von {selbstbeteiligung_euro} EUR je Schadenereignis. Ein gesonderter Teilkaskoschutz "
+        "mit abweichender Selbstbeteiligung wird nicht angeboten.\nBei grob fahrlässiger Herbeiführung des Schadens ist der Vermieter berechtigt, die Haftungs"
         "befreiung in einem der Schwere des Verschuldens entsprechenden Verhältnis zu kürzen (Grundgedanke des § 81 "
         "Abs. 2 VVG). Bei vorsätzlicher Herbeiführung haftet der Mieter in voller Höhe.")},
     {"nummer": "§ 10", "titel": "Wegfall der Haftungsreduzierung; Bußgelder", "text": (
@@ -34839,6 +34844,53 @@ def mietvertrag_felder_werte(vorgang, fahrzeug=None):
     return werte
 
 
+def parse_euro_de(value):
+    """Deutschen Euro-Text ('1.234,56', '30', '30,00 €') in float wandeln."""
+    raw = clean_text(value).replace("€", "").replace(" ", "").replace(" ", "")
+    if not raw:
+        return 0.0
+    raw = raw.replace(".", "").replace(",", ".")
+    try:
+        return max(0.0, round(float(raw), 2))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def euro_de_label(betrag):
+    return f"{float(betrag):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def mietvertrag_miettage(vorgang):
+    """Miettage aus dem Vorgang: je angefangene 24 Stunden = 1 Tag, mindestens 1."""
+    start = (vorgang or {}).get("start_obj") or parse_date((vorgang or {}).get("start_datum"))
+    ende = (vorgang or {}).get("end_obj") or parse_date((vorgang or {}).get("end_datum"))
+    if not start or not ende or ende <= start:
+        return 1
+    return max(1, (ende - start).days)
+
+
+def mietvertrag_kosten(vorgang, fahrzeug, werte=None):
+    """Kostenübersicht: Miettage × Tagespreis + Kaution = vor Übergabe fälliger Gesamtbetrag."""
+    werte = werte if werte is not None else mietvertrag_felder_werte(vorgang, fahrzeug)
+    tagessatz_text = werte.get("mietpreis_tag") or tagessatz_label((fahrzeug or {}).get("tagessatz")).replace(" €", "")
+    tagessatz_val = parse_euro_de(tagessatz_text)
+    kaution_val = parse_euro_de(werte.get("kaution_euro"))
+    miettage = mietvertrag_miettage(vorgang)
+    berechenbar = tagessatz_val > 0
+    mietsumme = round(miettage * tagessatz_val, 2) if berechenbar else 0.0
+    gesamt = round(mietsumme + kaution_val, 2) if berechenbar else 0.0
+    return {
+        "miettage": miettage,
+        "miettage_text": f"{miettage} Miettag" + ("" if miettage == 1 else "e"),
+        "tagessatz_val": tagessatz_val,
+        "kaution_val": kaution_val,
+        "kaution_label": euro_de_label(kaution_val),
+        "berechenbar": berechenbar,
+        "mietsumme_label": euro_de_label(mietsumme) if berechenbar else "—",
+        "gesamt_label": euro_de_label(gesamt) if berechenbar else "—",
+    }
+
+
 def mietvertrag_kontext(vorgang, fahrzeug, auftrag=None):
     werte = mietvertrag_felder_werte(vorgang, fahrzeug)
     tagessatz = werte.get("mietpreis_tag") or tagessatz_label((fahrzeug or {}).get("tagessatz")).replace(" €", "") or "—"
@@ -34854,6 +34906,10 @@ def mietvertrag_kontext(vorgang, fahrzeug, auftrag=None):
         "end_datum": clean_text((vorgang or {}).get("end_label")) or clean_text((vorgang or {}).get("end_datum")) or "—",
         "tagessatz": tagessatz,
     }
+    kosten = mietvertrag_kosten(vorgang, fahrzeug, werte)
+    kontext["miettage_text"] = kosten["miettage_text"]
+    kontext["mietsumme_euro"] = kosten["mietsumme_label"]
+    kontext["gesamtbetrag_euro"] = kosten["gesamt_label"]
     for name, wert in werte.items():
         kontext[name] = clean_text(wert) or "—"
     return kontext
@@ -34986,7 +35042,7 @@ def make_mietvertrag_pdf(vorgang, fahrzeug, auftrag=None):
     info_rows = [
         [p("Mieter", heading), p("Fahrzeug & Konditionen", heading)],
         [p(f"{kontext['kunde_name']}\n{kontext['kunde_adresse']}\nTel.: {kontext['kunde_telefon']}", body),
-         p(f"{kontext['fahrzeug_bezeichnung']} · {kontext['kennzeichen']}\nMietzeit: {kontext['start_datum']} – {kontext['end_datum']}\nTagespreis: {kontext['tagessatz']} EUR · Kaution: {kontext['kaution_euro']} EUR\nSB Vollkasko: {kontext['selbstbeteiligung_euro']} EUR / Teilkasko: {kontext['selbstbeteiligung_teilkasko_euro']} EUR", body)],
+         p(f"{kontext['fahrzeug_bezeichnung']} · {kontext['kennzeichen']}\nMietzeit: {kontext['start_datum']} – {kontext['end_datum']} ({kontext['miettage_text']})\nTagespreis: {kontext['tagessatz']} EUR · Kaution: {kontext['kaution_euro']} EUR · SB Vollkasko: {kontext['selbstbeteiligung_euro']} EUR\nVor Übergabe zu zahlen (Miete + Kaution): {kontext['gesamtbetrag_euro']} EUR", body)],
     ]
     story.append(Table(info_rows, colWidths=[8.9 * cm, 8.9 * cm],
                        style=TableStyle([("BACKGROUND", (0, 0), (-1, 0), light), ("GRID", (0, 0), (-1, -1), 0.5, border),
@@ -35580,6 +35636,7 @@ def admin_mietvertrag(vorgang_id):
         versandziel=ziel,
         vermieter_name=MIETVERTRAG_VERMIETER_NAME,
         vermieter_adresse=MIETVERTRAG_VERMIETER_ADRESSE,
+        kosten=mietvertrag_kosten(vorgang, fahrzeug),
         heute_iso=date.today().isoformat(),
     )
 

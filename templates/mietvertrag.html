@@ -31,6 +31,31 @@
   <span class="badge {% if status == 'bestaetigt' %}text-bg-success{% else %}badge-soft{% endif %}">3 · Bestätigt</span>
 </div>
 
+<!-- Kostenübersicht: der Kunde zahlt den Gesamtbetrag VOR der Übergabe -->
+<div class="page-card p-4 mb-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div>
+      <h2 class="h5 mb-1">Vor Fahrzeugübergabe zu zahlen</h2>
+      <div class="small text-muted">Mietzeit {{ vorgang.start_label or '—' }} – {{ vorgang.end_label or 'offen' }} · rechnet sich beim Tippen unten automatisch neu</div>
+    </div>
+    <table class="mb-0" style="min-width:280px;">
+      <tr>
+        <td class="small text-muted pe-3">Miete (<span id="kbTage">{{ kosten.miettage }}</span> Tag{{ '' if kosten.miettage == 1 else 'e' }} × <span id="kbSatz">{{ '%.2f'|format(kosten.tagessatz_val)|replace('.', ',') }}</span> €)</td>
+        <td class="text-end fw-bold"><span id="kbMiete">{{ kosten.mietsumme_label }}</span> €</td>
+      </tr>
+      <tr>
+        <td class="small text-muted pe-3">+ Kaution</td>
+        <td class="text-end fw-bold"><span id="kbKaution">{{ kosten.kaution_label }}</span> €</td>
+      </tr>
+      <tr style="border-top:2px solid var(--line);">
+        <td class="pe-3 pt-1"><strong>Gesamtbetrag (Vorkasse)</strong></td>
+        <td class="text-end pt-1" style="color:var(--brand); font-size:1.25rem; font-weight:800;"><span id="kbGesamt">{{ kosten.gesamt_label }}</span> €</td>
+      </tr>
+    </table>
+  </div>
+  <div class="small text-muted mt-2">Kaution wird nach beanstandungsfreier Rückgabe erstattet. Haftungsreduzierung nur als Vollkasko mit Selbstbeteiligung — kein separater Teilkasko-Tarif.</div>
+</div>
+
 <div class="row g-4">
   <!-- Linke Spalte: Daten + Vorschau -->
   <div class="col-lg-7">
@@ -152,6 +177,34 @@
 </div>
 
 <script>
+(function () {
+  // Live-Kostenrechnung: Miettage × Tagespreis + Kaution = Gesamtbetrag (Vorkasse)
+  var tage = parseInt('{{ kosten.miettage }}', 10) || 1;
+  var preisFeld = document.querySelector('input[name="mietpreis_tag"]');
+  var kautionFeld = document.querySelector('input[name="kaution_euro"]');
+  function euroParse(text) {
+    text = (text || '').replace(/€/g, '').replace(/\s/g, '');
+    if (!text) return 0;
+    text = text.replace(/\./g, '').replace(',', '.');
+    var wert = parseFloat(text);
+    return isNaN(wert) || wert < 0 ? 0 : wert;
+  }
+  function euroFormat(wert) {
+    return wert.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  }
+  function neuRechnen() {
+    var satz = euroParse(preisFeld && preisFeld.value);
+    var kaution = euroParse(kautionFeld && kautionFeld.value);
+    var miete = tage * satz;
+    document.getElementById('kbSatz').textContent = euroFormat(satz);
+    document.getElementById('kbMiete').textContent = satz > 0 ? euroFormat(miete) : '—';
+    document.getElementById('kbKaution').textContent = euroFormat(kaution);
+    document.getElementById('kbGesamt').textContent = satz > 0 ? euroFormat(miete + kaution) : '—';
+  }
+  if (preisFeld) preisFeld.addEventListener('input', neuRechnen);
+  if (kautionFeld) kautionFeld.addEventListener('input', neuRechnen);
+})();
+
 (function () {
   var canvas = document.getElementById('sigPad');
   if (!canvas) return;
