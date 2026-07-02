@@ -242,9 +242,10 @@
                style="width:100%; height:180px; object-fit:cover; border-radius:14px; border:1px solid rgba(221,209,192,0.9);">
         </a>
         {% else %}
-        <div class="mb-3 d-flex align-items-center justify-content-center text-muted"
-             style="width:100%; height:120px; border-radius:14px; border:1px dashed #cbb89b; background:#faf5ec;">
-          <span>📷 Noch keine Fotos</span>
+        <div class="mb-3 position-relative">
+          <img src="{{ url_for('admin_mietfahrzeug_symbolfoto', fahrzeug_id=f.id) }}" alt="{{ f.kennzeichen }} (Symbolfoto)"
+               style="width:100%; height:180px; object-fit:cover; border-radius:14px; border:1px solid rgba(221,209,192,0.9);">
+          <span class="position-absolute small" style="right:10px; bottom:10px; background:rgba(250,245,236,0.92); border:1px solid #cbb89b; border-radius:8px; padding:2px 8px;">Symbolfoto — eigene Fotos unten hochladen</span>
         </div>
         {% endif %}
         {% if f.bilder|length > 1 %}

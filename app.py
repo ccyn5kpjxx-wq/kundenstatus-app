@@ -35471,13 +35471,32 @@ def admin_mietfahrzeug_bild(bild_id):
     path = upload_file_path(bild)
     if not path or not path.exists():
         path = ensure_mietbild_file(bild)
-    if not path:
+    if not path or not pathlib.Path(path).exists():
+        # Original weder auf Disk noch im DB-Backup (Altbestand vor
+        # mietbild_backups) — Symbolfoto wie auf der öffentlichen Seite.
+        fahrzeug = get_mietfahrzeug(bild["mietfahrzeug_id"])
+        path = mietwagen_symbolfoto_pfad(fahrzeug)
+        if path:
+            return send_file(path, mimetype="image/jpeg")
         abort(404)
     return send_file(
         path,
         mimetype=bild.get("mime_type") or "image/jpeg",
         download_name=bild.get("original_name") or path.name,
     )
+
+
+@app.route("/admin/mietfahrzeuge/<int:fahrzeug_id>/symbolfoto")
+@admin_required
+def admin_mietfahrzeug_symbolfoto(fahrzeug_id):
+    """Symbolfoto für Fahrzeuge ohne eigene Fotos (Karte soll nie leer sein)."""
+    fahrzeug = get_mietfahrzeug(fahrzeug_id)
+    if not fahrzeug:
+        abort(404)
+    path = mietwagen_symbolfoto_pfad(fahrzeug)
+    if not path:
+        abort(404)
+    return send_file(path, mimetype="image/jpeg")
 
 
 @app.route("/admin/mietfahrzeuge/bild/<int:bild_id>/titelbild", methods=["POST"])
