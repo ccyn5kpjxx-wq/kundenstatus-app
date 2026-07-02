@@ -9519,6 +9519,7 @@ def init_db():
     # Migration für Alt-Datenbanken ohne mietfahrzeug_id — muss NACH dem
     # CREATE TABLE laufen, sonst crasht init_db auf frischen Datenbanken.
     ensure_column(db, "mietwagen_anfragen", "mietfahrzeug_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "mietwagen_anfragen", "whatsapp_status", "TEXT DEFAULT ''")
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS mietbild_backups (
@@ -43598,16 +43599,18 @@ def notify_workshop_whatsapp_mietanfrage(name, telefon, zeitraum, fahrzeug_label
     Gleicher Versandweg wie die Abholbereit-Meldung; scheitert der Versand,
     bleibt die Anfrage trotzdem im Cockpit-Eingang sichtbar."""
     try:
-        if whatsapp_bridge_config_errors():
-            return False
+        konfig_fehler = whatsapp_bridge_config_errors()
+        if konfig_fehler:
+            return False, konfig_fehler
         details = " · ".join(teil for teil in (fahrzeug_label, zeitraum, telefon) if teil)
         body = (
             f"🚙 Neue Mietwagen-Anfrage: {name} ({details}). "
             "Übernehmen im Cockpit unter Mietfahrzeuge."
         )
         sent_any = False
+        fehler_gesamt = []
         for target_number in whatsapp_workshop_numbers():
-            ok, _errors = send_whatsapp_notice_with_fallback(
+            ok, fehler = send_whatsapp_notice_with_fallback(
                 0,
                 chat_id=0,
                 target_number=target_number,
@@ -43617,10 +43620,11 @@ def notify_workshop_whatsapp_mietanfrage(name, telefon, zeitraum, fahrzeug_label
                 absender_label="Homepage",
             )
             sent_any = sent_any or ok
-        return sent_any
+            fehler_gesamt.extend(fehler or [])
+        return sent_any, fehler_gesamt
     except Exception as exc:
         print(f"WARNUNG: Mietanfrage-WhatsApp fehlgeschlagen: {exc}")
-        return False
+        return False, [f"Ausnahme: {exc}"]
 
 
 def mietwagen_public_fahrzeuge():
@@ -43692,7 +43696,7 @@ def mietwagen_anfrage():
             flash("Dieses Fahrzeug ist im gewünschten Zeitraum leider schon vergeben. Bitte anderes Datum oder anderes Fahrzeug wählen — oder 'Egal / Beratung' auswählen, wir finden etwas Passendes.", "warning")
         else:
             db = get_db()
-            db.execute(
+            cursor = db.execute(
                 """
                 INSERT INTO mietwagen_anfragen
                     (status, name, telefon, email, klasse_wunsch, start_datum, end_datum, nachricht, quelle, mietfahrzeug_id, erstellt_am)
@@ -43710,6 +43714,7 @@ def mietwagen_anfrage():
                     now_str(),
                 ),
             )
+            anfrage_id = cursor.lastrowid
             db.commit()
             db.close()
             fahrzeug_label = ""
@@ -43720,7 +43725,18 @@ def mietwagen_anfrage():
             zeitraum = start_datum + (
                 f" bis {clean_text(request.form.get('end_datum'))}" if clean_text(request.form.get("end_datum")) else ""
             )
-            notify_workshop_whatsapp_mietanfrage(name, telefon, zeitraum, fahrzeug_label)
+            wa_ok, wa_fehler = notify_workshop_whatsapp_mietanfrage(name, telefon, zeitraum, fahrzeug_label)
+            wa_status = "gesendet" if wa_ok else ("; ".join(wa_fehler)[:400] or "fehlgeschlagen")
+            try:
+                db = get_db()
+                db.execute(
+                    "UPDATE mietwagen_anfragen SET whatsapp_status = ? WHERE id = ?",
+                    (wa_status, anfrage_id),
+                )
+                db.commit()
+                db.close()
+            except Exception:
+                pass
             return redirect(url_for("mietwagen_anfrage", ok=1))
     try:
         vorauswahl = int(request.form.get("mietfahrzeug_id") or request.args.get("fahrzeug") or 0)
@@ -44069,12 +44085,18 @@ def api_whatsapp_status():
     for eintrag in letzte:
         tel = clean_text(eintrag.get("telefon"))
         eintrag["telefon"] = (tel[:6] + "…" + tel[-2:]) if len(tel) > 8 else "…"
+    db = get_db()
+    anfragen_status = [dict(row) for row in db.execute(
+        "SELECT id, name, whatsapp_status, erstellt_am FROM mietwagen_anfragen ORDER BY id DESC LIMIT 5"
+    ).fetchall()]
+    db.close()
     return jsonify({
         "ok": True,
         "bridge_errors": whatsapp_bridge_config_errors(),
         "template_aktiv": whatsapp_message_template_enabled(),
         "workshop_nummern": len(whatsapp_workshop_numbers()),
         "letzte_versuche": letzte,
+        "mietanfragen_whatsapp": anfragen_status,
     })
 
 
