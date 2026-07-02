@@ -32532,6 +32532,54 @@ def build_mini_monatskalender(
                 current += timedelta(days=1)
         abwesenheiten.sort(key=lambda a: (a["start_obj"], a["name"]))
 
+    # Mietwagen: vermietete/reservierte Zeiträume nur intern (Admin) einblenden —
+    # Kundennamen gehören nicht ins Partner-Dashboard.
+    miete_dates = defaultdict(list)
+    miete_day_items = defaultdict(list)
+    if include_internal_notes:
+        try:
+            miet_fahrzeuge = list_mietfahrzeuge(include_inactive=True)
+        except Exception:
+            miet_fahrzeuge = []
+        for fahrzeug in miet_fahrzeuge:
+            fzg_label = clean_text(fahrzeug.get("kennzeichen")) or "Mietfahrzeug"
+            if clean_text(fahrzeug.get("bezeichnung")):
+                fzg_label += f" ({clean_text(fahrzeug.get('bezeichnung'))})"
+            for vorgang in fahrzeug.get("vorgaenge", []):
+                if vorgang.get("abgeschlossen"):
+                    continue
+                m_start = vorgang.get("start_obj")
+                if not m_start:
+                    continue
+                m_end = vorgang.get("end_obj") or max(m_start, today)
+                if m_end < m_start:
+                    m_start, m_end = m_end, m_start
+                if m_end < month_start or m_start > month_end:
+                    continue
+                status_label = "reserviert" if vorgang.get("phase") == "reserviert" else "vermietet"
+                titel = f"Mietwagen {fzg_label} {status_label}"
+                subtitle_parts = []
+                if clean_text(vorgang.get("kunde_name")):
+                    subtitle_parts.append(f"Kunde: {clean_text(vorgang.get('kunde_name'))}")
+                subtitle_parts.append(f"{vorgang.get('start_label')} – {vorgang.get('end_label') or 'offen'}")
+                item_url = ""
+                if has_request_context() and endpoint == "betriebs_cockpit":
+                    item_url = url_for("admin_mietfahrzeuge")
+                current = max(m_start, month_start)
+                last_day = min(m_end, month_end)
+                while current <= last_day:
+                    miete_dates[current].append(titel)
+                    miete_day_items[current].append(
+                        {
+                            "label": "Mietwagen",
+                            "farbe": "primary",
+                            "title": titel,
+                            "subtitle": " · ".join(subtitle_parts),
+                            "url": item_url,
+                        }
+                    )
+                    current += timedelta(days=1)
+
     note_dates = defaultdict(list)
     note_day_items = defaultdict(list)
     if include_internal_notes:
@@ -32560,6 +32608,7 @@ def build_mini_monatskalender(
                 labels.append(holiday_title)
             labels.extend(betriebsurlaub_dates.get(current, []))
             labels.extend(name + " im Urlaub" for name in urlaub_dates.get(current, []))
+            labels.extend(miete_dates.get(current, [])[:3])
             labels.extend(event_dates.get(current, [])[:3])
             labels.extend(note_dates.get(current, [])[:3])
             day_items = []
@@ -32593,6 +32642,7 @@ def build_mini_monatskalender(
                         "url": "",
                     }
                 )
+            day_items.extend(miete_day_items.get(current, []))
             day_items.extend(event_day_items.get(current, []))
             day_items.extend(note_day_items.get(current, []))
             row.append(
@@ -32610,6 +32660,7 @@ def build_mini_monatskalender(
                     "has_mitarbeiter_urlaub": bool(urlaub_dates.get(current)),
                     "has_events": bool(event_dates.get(current)),
                     "has_notes": bool(note_dates.get(current)),
+                    "has_miete": bool(miete_dates.get(current)),
                     "tooltip": " | ".join(labels),
                     "items": day_items,
                     "url": (
@@ -32656,6 +32707,7 @@ def build_mini_monatskalender(
                     "url": "",
                 }
             )
+        selected_items.extend(miete_day_items.get(selected_day, []))
         selected_items.extend(event_day_items.get(selected_day, []))
         selected_items.extend(note_day_items.get(selected_day, []))
         selected_day_data = {
@@ -32678,6 +32730,8 @@ def build_mini_monatskalender(
         "betriebsurlaub_count": len(betriebsurlaub_dates),
         "abwesenheiten": abwesenheiten,
         "show_notes": include_internal_notes,
+        "show_miete": include_internal_notes,
+        "miete_count": len(miete_dates),
         "event_label": "Anlieferung" if only_arrival_events else "Fahrzeugtermin",
     }
 
