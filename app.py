@@ -43660,6 +43660,36 @@ def mietwagen_anfrage():
     )
 
 
+# Statische Symbolfotos (im Repo, überleben jeden Deploy) als letzter Fallback,
+# wenn ein hochgeladenes Fahrzeugfoto weder auf der Disk noch im DB-Backup existiert
+# (Altbestand vor Einführung von mietbild_backups). Kennzeichnung „Symbolfoto"
+# übernimmt die öffentliche Seite. Zuordnung über Bezeichnung/Klasse, spezifischste zuerst.
+MIETWAGEN_SYMBOLFOTOS = (
+    ("maxi", "doblo-maxi.jpg"),
+    ("doblo", "doblo.jpg"),
+    ("caddy", "doblo.jpg"),
+    ("i10", "i10.jpg"),
+    ("swift", "swift.jpg"),
+    ("kona", "kona.jpg"),
+)
+
+
+def mietwagen_symbolfoto_pfad(fahrzeug):
+    text = " ".join(
+        [clean_text((fahrzeug or {}).get("bezeichnung")), clean_text((fahrzeug or {}).get("fahrzeugklasse"))]
+    ).lower()
+    name = "default.jpg"
+    for schluessel, datei in MIETWAGEN_SYMBOLFOTOS:
+        if schluessel in text:
+            name = datei
+            break
+    basis = pathlib.Path(app.static_folder) / "mietwagen"
+    for kandidat in (basis / name, basis / "default.jpg"):
+        if kandidat.exists():
+            return kandidat
+    return None
+
+
 @app.route("/mietwagen/bild/<int:bild_id>")
 def mietwagen_public_bild(bild_id):
     """Fahrzeugfoto für die öffentliche Mietwagen-Seite (nur Bilder aktiver Fahrzeuge)."""
@@ -43672,7 +43702,10 @@ def mietwagen_public_bild(bild_id):
     path = upload_file_path(bild)
     if not path or not path.exists():
         path = ensure_mietbild_file(bild)
-    if not path:
+    if not path or not pathlib.Path(path).exists():
+        path = mietwagen_symbolfoto_pfad(fahrzeug)
+        if path:
+            return send_file(path, mimetype="image/jpeg")
         abort(404)
     return send_file(path, mimetype=bild.get("mime_type") or "image/jpeg")
 
