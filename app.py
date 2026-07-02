@@ -43846,6 +43846,20 @@ def admin_fahrzeugeinkauf_pdf(scan_id):
     )
 
 
+@app.route("/api/werkstatt/mietfahrzeuge/<int:fahrzeug_id>/bild", methods=["POST"])
+def api_mietfahrzeug_bild_upload(fahrzeug_id):
+    """Fahrzeugfoto per Werkstatt-Token einspielen (z. B. durch die Werkstatt-Routine)."""
+    if not werkstatt_api_token_valid():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    if not get_mietfahrzeug(fahrzeug_id):
+        return jsonify({"ok": False, "error": "Fahrzeug nicht gefunden"}), 404
+    dateien = request.files.getlist("bilder")
+    if not any(f and f.filename for f in dateien):
+        return jsonify({"ok": False, "error": "Keine Bilddatei im Feld 'bilder'"}), 400
+    anzahl = save_mietfahrzeug_bilder(fahrzeug_id, dateien)
+    return jsonify({"ok": True, "fahrzeug_id": fahrzeug_id, "gespeichert": anzahl})
+
+
 @app.route("/api/werkstatt/fahrzeugeinkauf/scan-anfragen")
 def api_fahrzeugeinkauf_scan_anfragen():
     if not werkstatt_api_token_valid():
