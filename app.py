@@ -43799,7 +43799,19 @@ def fahrzeugeinkauf_kontakt_anreichern(fz):
         f"mailto:{email}?subject={quote('Anfrage zu Ihrem Fahrzeug: ' + titel)}&body={quote(nachricht)}"
         if email else ""
     )
+    fz["ist_neu"] = fahrzeugeinkauf_ist_neu(fz)
     return fz
+
+
+def fahrzeugeinkauf_ist_neu(fz, stunden=48):
+    """Frisch eingetroffen = Status noch 'neu' und jünger als <stunden> Stunden."""
+    if (clean_text(fz.get("status")) or "neu") != "neu":
+        return False
+    try:
+        erstellt = datetime.strptime(clean_text(fz.get("erstellt_am")), DATETIME_FMT)
+        return (datetime.now() - erstellt).total_seconds() <= stunden * 3600
+    except Exception:
+        return False
 
 
 def fahrzeugeinkauf_scan_liste(limit=30):
@@ -43851,16 +43863,35 @@ def admin_fahrzeugeinkauf_scan_anfordern():
         "SELECT id FROM fahrzeugeinkauf_scan_anfragen WHERE status = 'offen'"
     ).fetchone()
     if offen:
-        flash("Es liegt bereits eine offene Scan-Anforderung vor — die Werkstatt-Routine holt sie beim nächsten Lauf ab.", "warning")
+        flash("Es liegt bereits eine offene Scan-Anforderung vor — die Scan-Bereitschaft holt sie in Kürze ab. Diese Seite aktualisiert sich automatisch, sobald die Ergebnisse eintreffen.", "warning")
     else:
         db.execute(
             "INSERT INTO fahrzeugeinkauf_scan_anfragen (status, angefordert_am) VALUES ('offen', ?)",
             (now_str(),),
         )
         db.commit()
-        flash("Scan angefordert. Die Werkstatt-Routine erstellt beim nächsten Lauf (spätestens übermorgen 07:30) die PDF mit den besten Fahrzeugen — für sofort: in der Claude-App bei 'unfall-auto-scout' auf 'Run now' drücken.", "success")
+        flash("Scan angefordert — die Scan-Bereitschaft prüft alle 15 Minuten und lädt neue Fahrzeuge automatisch hierher. Diese Seite aktualisiert sich von selbst, sobald die Ergebnisse da sind.", "success")
     db.close()
     return redirect(url_for("admin_fahrzeugeinkauf"))
+
+
+@app.route("/admin/fahrzeugeinkauf/status")
+@admin_required
+def admin_fahrzeugeinkauf_status():
+    """Leichtes Polling-Ziel der Fahrzeugeinkauf-Seite: offene Anforderung + neuester Scan."""
+    db = get_db()
+    offen = db.execute(
+        "SELECT COUNT(*) AS count FROM fahrzeugeinkauf_scan_anfragen WHERE status = 'offen'"
+    ).fetchone()
+    letzter = db.execute(
+        "SELECT id FROM fahrzeugeinkauf_scans ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    db.close()
+    return jsonify({
+        "ok": True,
+        "anfrage_offen": bool(offen and offen["count"]),
+        "letzter_scan_id": int(letzter["id"]) if letzter else 0,
+    })
 
 
 @app.route("/admin/fahrzeugeinkauf/fahrzeug/<int:fz_id>", methods=["POST"])

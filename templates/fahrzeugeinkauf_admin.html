@@ -25,6 +25,38 @@
     padding: 0.5rem 0.9rem;
     font-size: 0.9rem;
   }
+  .fein-scan-fertig {
+    background: #e9f6ee;
+    border: 1px solid #bfe0cb;
+    border-radius: 8px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+  .fein-neubadge {
+    float: right;
+    background: #fff;
+    color: #e8631a;
+    border-radius: 999px;
+    padding: 0 0.55rem;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    animation: fein-neu-puls 1.6s ease-in-out infinite;
+  }
+  @keyframes fein-neu-puls {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  .fein-lauf-punkt {
+    display: inline-block;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: #cc8a16;
+    margin-right: 0.35rem;
+    animation: fein-neu-puls 1.2s ease-in-out infinite;
+  }
   .fein-karte {
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -115,7 +147,11 @@
   </div>
   {% if offene_anfrage %}
   <div class="fein-anfrage-hinweis mt-3">
-    &#9203; Scan-Anforderung offen (angefordert {{ offene_anfrage.angefordert_am }}) — die Werkstatt-Routine holt sie beim n&auml;chsten Lauf ab. F&uuml;r sofort: in der Claude-App bei <strong>unfall-auto-scout</strong> auf <strong>Run now</strong> dr&uuml;cken.
+    <span class="fein-lauf-punkt"></span><strong>Scan l&auml;uft</strong> (angefordert {{ offene_anfrage.angefordert_am }}) — die Scan-Bereitschaft pr&uuml;ft alle 15 Minuten und liefert die Ergebnisse hierher. Diese Seite aktualisiert sich automatisch, sobald neue Fahrzeuge da sind.
+  </div>
+  {% elif request.args.get('scan_fertig') %}
+  <div class="fein-scan-fertig mt-3">
+    &#9989; Scan eingetroffen — frisch gefundene Fahrzeuge sind unten mit <span class="fein-neubadge" style="float:none;">NEU</span> markiert.
   </div>
   {% endif %}
 </div>
@@ -125,6 +161,7 @@
   <div class="fein-ampelleiste {{ fz.ampel }}">
     {% if fz.ampel == 'gruen' %}Kaufen{% elif fz.ampel == 'gelb' %}Pr&uuml;fen / Verhandeln{% else %}Meiden{% endif %}
     {% if fz.interessant %} &nbsp;&#11088; interessant{% endif %}
+    {% if fz.ist_neu %}<span class="fein-neubadge">NEU</span>{% endif %}
   </div>
   <div class="fein-body">
     <div class="fein-foto">
@@ -219,4 +256,27 @@
   </div>
   {% endfor %}
 </div>
+
+{% if offene_anfrage %}
+<script>
+(function () {
+  var start = Date.now();
+  var scanIdBeimLaden = {{ scans[0].id if scans else 0 }};
+  function pruefen() {
+    if (Date.now() - start > 60 * 60 * 1000) return; // nach 1 Stunde aufhören zu fragen
+    fetch("{{ url_for('admin_fahrzeugeinkauf_status') }}", { credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.ok && (!d.anfrage_offen || d.letzter_scan_id > scanIdBeimLaden)) {
+          window.location.href = "{{ url_for('admin_fahrzeugeinkauf') }}?scan_fertig=1";
+        } else {
+          setTimeout(pruefen, 20000);
+        }
+      })
+      .catch(function () { setTimeout(pruefen, 30000); });
+  }
+  setTimeout(pruefen, 20000);
+})();
+</script>
+{% endif %}
 {% endblock %}
