@@ -17,9 +17,12 @@
   nav .logo { font-weight: 800; letter-spacing: .4px; font-size: 1.02rem; }
   nav .logo span { color: var(--akzent); }
   nav a.telbtn { color: #fff; text-decoration: none; font-weight: 700; background: var(--akzent); padding: 8px 16px; border-radius: 8px; font-size: .95rem; }
-  .hero { position: relative; color: #fff; min-height: 480px; display: flex; align-items: center;
-          background: linear-gradient(100deg, rgba(10,10,10,.93) 0%, rgba(10,10,10,.72) 45%, rgba(10,10,10,.38) 100%), var(--dunkel2); }
-  .hero .inner { padding: 80px 0; max-width: 640px; }
+  .hero { position: relative; color: #fff; min-height: 560px; display: flex; align-items: center; background: #0a0a0a; overflow: hidden; }
+  /* Symbolfoto: weißes Auto in dunkler Halle — gespiegelt, damit das Auto rechts vom Text steht */
+  .hero::before { content: ""; position: absolute; inset: 0; background: url('{{ url_for('static', filename='mietwagen_hero.jpg') }}') center 65%/cover no-repeat; transform: scaleX(-1); }
+  .hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, rgba(10,10,10,.93) 0%, rgba(10,10,10,.70) 45%, rgba(10,10,10,.30) 100%); }
+  .hero .inner { padding: 80px 0; max-width: 640px; position: relative; z-index: 2; }
+  .hero .symbolfoto { position: absolute; right: 10px; bottom: 8px; font-size: .68rem; color: rgba(255,255,255,.55); z-index: 2; }
   .hero .eyebrow { color: var(--akzent); font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; font-size: .82rem; }
   .hero h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.12; margin: 14px 0 18px; font-weight: 800; }
   .hero p.sub { font-size: 1.1rem; color: #e6e6e6; max-width: 540px; }
@@ -88,6 +91,7 @@
       <span class="chip">✓ Direkte Versicherungsabrechnung</span>
     </div>
   </div></div>
+  <span class="symbolfoto">Symbolfoto</span>
 </header>
 
 <div class="usps">
