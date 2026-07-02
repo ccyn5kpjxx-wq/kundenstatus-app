@@ -43647,14 +43647,17 @@ def mietwagen_anfrage():
             notify_workshop_whatsapp_mietanfrage(name, telefon, zeitraum, fahrzeug_label)
             return redirect(url_for("mietwagen_anfrage", ok=1))
     try:
-        vorauswahl = int(request.args.get("fahrzeug") or 0)
+        vorauswahl = int(request.form.get("mietfahrzeug_id") or request.args.get("fahrzeug") or 0)
     except (TypeError, ValueError):
         vorauswahl = 0
+    # Bei Fehlversuch (POST landet wieder hier) bleiben die Eingaben erhalten
+    formdata = request.form if request.method == "POST" else {}
     return render_template(
         "mietwagen_anfrage.html",
         klassen=klassen,
         fahrzeuge=fahrzeuge,
         vorauswahl=vorauswahl,
+        formdata=formdata,
         gesendet=bool(request.args.get("ok")),
         heute_iso=date.today().isoformat(),
     )
