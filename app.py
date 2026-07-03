@@ -72,6 +72,7 @@ from flask import (
     render_template_string,
     request,
     send_file,
+    send_from_directory,
     session,
     url_for,
 )
@@ -43727,6 +43728,17 @@ def mietwagen_public_fahrzeuge():
 def mietwagen_landing():
     """Öffentliche Mietwagen-Landingpage — Fahrzeuge live aus dem Fuhrpark (eine Datenquelle, kein Sync nötig)."""
     return render_template("mietwagen_landing.html", fahrzeuge=mietwagen_public_fahrzeuge())
+
+
+@app.route("/mietwagen-vorschau/")
+def mietwagen_vorschau():
+    """Unverlinkte Vorschau (noindex) der Marketing-Landingpage für auto-lackierzentrum.de/mietwagen — nur zur GF-Sichtung."""
+    return send_from_directory(os.path.join(app.static_folder, "mietwagen_vorschau"), "index.html")
+
+
+@app.route("/mietwagen-vorschau/<path:dateiname>")
+def mietwagen_vorschau_datei(dateiname):
+    return send_from_directory(os.path.join(app.static_folder, "mietwagen_vorschau"), dateiname)
 
 
 @app.route("/mietwagen", methods=["GET", "POST"])
