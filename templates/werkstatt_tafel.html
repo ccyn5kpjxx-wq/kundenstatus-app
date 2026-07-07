@@ -46,9 +46,10 @@
 
     .topbar {
       display: flex;
+      flex-wrap: wrap; /* zu wenig Platz (TV/Zoom): Countdown rutscht in eigene Zeile statt unter den Titel */
       align-items: center;
       justify-content: space-between;
-      gap: 1rem;
+      gap: .35rem 1rem;
       padding: clamp(.35rem, .9vw, .65rem) clamp(.6rem, 1.5vw, 1.2rem);
       background: rgba(18, 30, 43, 0.94);
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -60,6 +61,7 @@
       display: flex;
       align-items: center;
       gap: .8rem;
+      flex-shrink: 0;
     }
 
     .topbar img {
@@ -71,6 +73,7 @@
       margin: 0;
       font-size: clamp(1.1rem, 2.3vw, 1.7rem);
       color: #fff;
+      white-space: nowrap;
     }
 
     .topbar h1 span { color: rgba(255, 255, 255, 0.6); font-weight: 500; }
@@ -496,7 +499,7 @@
       <h1>Werkstatt-Tafel</h1>
     </div>
     {% if betriebsurlaub_start %}
-    <div data-urlaub-ziel="{{ betriebsurlaub_start }}" style="flex:1 1 auto; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.12rem; line-height:1.1; color:#fff;">
+    <div data-urlaub-ziel="{{ betriebsurlaub_start }}" style="flex:1 1 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.12rem; line-height:1.1; color:#fff;">
       <span data-uc-zeit style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(.95rem,1.9vw,1.4rem); letter-spacing:.01em; white-space:nowrap;">…</span>
       <span style="font-size:clamp(.58rem,1vw,.74rem); text-transform:uppercase; letter-spacing:.16em; color:rgba(255,255,255,.6);">bis Betriebsurlaub</span>
     </div>
