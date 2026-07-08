@@ -1,0 +1,38 @@
+<script>
+(() => {
+  const send = (payload) => {
+    try {
+      const body = JSON.stringify(payload);
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/api/klick', new Blob([body], { type: 'application/json' }));
+      } else {
+        fetch('/api/klick', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          keepalive: true,
+        }).catch(() => {});
+      }
+    } catch (error) {
+      /* Klick-Tracking darf die Seite nie stoeren. */
+    }
+  };
+  document.addEventListener('click', (event) => {
+    const el = event.target.closest('a, button, [data-track]');
+    if (!el) {
+      return;
+    }
+    const key = el.getAttribute('data-track') || '';
+    const label = (el.getAttribute('data-track-label') || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (!key && !label) {
+      return;
+    }
+    send({
+      seite: window.location.pathname,
+      label,
+      key,
+      href: el.getAttribute('href') || '',
+    });
+  }, true);
+})();
+</script>

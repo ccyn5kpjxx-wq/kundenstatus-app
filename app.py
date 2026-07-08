@@ -2881,6 +2881,8 @@ def protect_csrf():
         return None
     if request.path.startswith("/webhooks/whatsapp"):
         return None
+    if request.path == "/api/klick":
+        return None
     if request.path.startswith("/api/werkstatt/") and werkstatt_api_token_valid():
         return None
     expected = session.get(CSRF_FIELD_NAME)
@@ -8828,8 +8830,22 @@ def init_db():
             zuordnung_hinweis TEXT DEFAULT '',
             zuordnung_manuell INTEGER DEFAULT 0,
             original_payload TEXT DEFAULT '',
+            ki_analyse_text TEXT DEFAULT '',
+            ki_analyse_am  TEXT DEFAULT '',
             erstellt_am    TEXT NOT NULL,
             geaendert_am   TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS klick_events (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            erstellt_am    TEXT NOT NULL,
+            bereich        TEXT DEFAULT '',
+            seite          TEXT DEFAULT '',
+            element_label  TEXT DEFAULT '',
+            element_key    TEXT DEFAULT '',
+            ziel_url       TEXT DEFAULT '',
+            autohaus_id    INTEGER DEFAULT 0,
+            ist_admin      INTEGER DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS lexware_rechnungen (
@@ -9382,6 +9398,8 @@ def init_db():
     ensure_column(db, "werkstatt_emails", "zuordnung_score", "INTEGER DEFAULT 0")
     ensure_column(db, "werkstatt_emails", "zuordnung_hinweis", "TEXT DEFAULT ''")
     ensure_column(db, "werkstatt_emails", "zuordnung_manuell", "INTEGER DEFAULT 0")
+    ensure_column(db, "werkstatt_emails", "ki_analyse_text", "TEXT DEFAULT ''")
+    ensure_column(db, "werkstatt_emails", "ki_analyse_am", "TEXT DEFAULT ''")
     ensure_index(db, "idx_werkstatt_emails_message_id", "werkstatt_emails", ("message_id",))
     ensure_index(db, "idx_werkstatt_emails_source_uid", "werkstatt_emails", ("source_uid",))
     ensure_index(db, "idx_werkstatt_emails_raw_hash", "werkstatt_emails", ("raw_hash",))
@@ -26092,6 +26110,142 @@ def update_werkstatt_email_status(email_id, status):
         db.close()
 
 
+def analysiere_email_mit_ki(email_id, force=False):
+    email_item = get_werkstatt_email(email_id)
+    if not email_item:
+        return {"ok": False, "error": "E-Mail nicht gefunden."}
+    if not force and clean_text(email_item.get("ki_analyse_text")):
+        return {
+            "ok": True,
+            "analyse": email_item["ki_analyse_text"],
+            "erstellt_am": email_item.get("ki_analyse_am"),
+            "cached": True,
+        }
+    config = get_ai_config()
+    requests_module = get_requests()
+    if not config["openai_ready"] or requests_module is None:
+        return {"ok": False, "error": "OpenAI ist noch nicht konfiguriert."}
+
+    betreff = clean_text(email_item.get("betreff"))
+    nachricht = clean_text(email_item.get("nachricht"))[:4000]
+    absender = clean_text(email_item.get("absender_name")) or clean_text(email_item.get("absender_email"))
+    payload = {
+        "model": config["openai_chat_model"],
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Du unterstuetzt die Buero-Sachbearbeitung von Gaertner Karosserie & Lack beim "
+                    "schnellen Ueberblick ueber eingehende Werkstatt-E-Mails. Antworte auf Deutsch, "
+                    "maximal 3 kurze Saetze: (1) worum es geht, (2) welcher Ton/welche Dringlichkeit, "
+                    "(3) ein konkreter Vorschlag fuer die naechste Handlung. Erfinde keine Preise, "
+                    "Termine oder Zusagen, die nicht im Text stehen. Keine Anrede, keine Grussformel."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Absender: {absender}\nBetreff: {betreff}\n\nText:\n{nachricht or '(kein Text)'}",
+            },
+        ],
+        "temperature": 0.2,
+        "max_tokens": 220,
+    }
+    response, request_error = post_openai_chat_completion(requests_module, payload)
+    if request_error:
+        return {"ok": False, "error": friendly_analysis_error(request_error, "OpenAI")}
+    if response.status_code >= 400:
+        return {"ok": False, "error": extract_openai_error_message(response)}
+    try:
+        data = response.json()
+        analyse = clean_text(data["choices"][0]["message"]["content"])[:1200]
+    except Exception:
+        analyse = ""
+    if not analyse:
+        return {"ok": False, "error": "Keine Antwort von der KI erhalten."}
+
+    erstellt_am = now_str()
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE werkstatt_emails SET ki_analyse_text=?, ki_analyse_am=? WHERE id=?",
+            (analyse, erstellt_am, int(email_id)),
+        )
+        db.commit()
+        schedule_change_backup("werkstatt-email-ki-analyse")
+    finally:
+        db.close()
+    return {"ok": True, "analyse": analyse, "erstellt_am": erstellt_am, "cached": False}
+
+
+def log_klick_event(bereich, seite, element_label, element_key="", ziel_url="", autohaus_id=0, ist_admin=False):
+    bereich = clean_text(bereich)[:20] or "unbekannt"
+    seite = clean_text(seite)[:300]
+    element_label = clean_text(element_label)[:200]
+    element_key = clean_text(element_key)[:200]
+    ziel_url = clean_text(ziel_url)[:300]
+    try:
+        autohaus_id = int(autohaus_id or 0)
+    except (TypeError, ValueError):
+        autohaus_id = 0
+    if not element_label and not element_key:
+        return False
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT INTO klick_events (erstellt_am, bereich, seite, element_label, element_key, ziel_url, autohaus_id, ist_admin)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (db_datetime_str(), bereich, seite, element_label, element_key, ziel_url, autohaus_id, 1 if ist_admin else 0),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return True
+
+
+def list_klick_statistik(tage=30, limit=40):
+    tage = max(1, min(int(tage or 30), 365))
+    limit = max(1, min(int(limit or 40), 200))
+    cutoff = db_datetime_str(datetime.now() - timedelta(days=tage))
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT bereich,
+                   COALESCE(NULLIF(element_key, ''), element_label) AS gruppe,
+                   element_label,
+                   COUNT(*) AS anzahl,
+                   MAX(erstellt_am) AS zuletzt
+            FROM klick_events
+            WHERE erstellt_am >= ?
+            GROUP BY bereich, gruppe, element_label
+            ORDER BY anzahl DESC
+            LIMIT ?
+            """,
+            (cutoff, limit),
+        ).fetchall()
+        gesamt_row = db.execute(
+            "SELECT COUNT(*) AS n FROM klick_events WHERE erstellt_am >= ?",
+            (cutoff,),
+        ).fetchone()
+    finally:
+        db.close()
+    items = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["zuletzt"] = datetime.strptime(item["zuletzt"], "%Y-%m-%d %H:%M:%S").strftime(DATETIME_FMT)
+        except (TypeError, ValueError):
+            pass
+        items.append(item)
+    return {
+        "tage": tage,
+        "gesamt": int(gesamt_row["n"]) if gesamt_row else 0,
+        "items": items,
+    }
+
+
 def update_werkstatt_email_zuordnung(email_id, auftrag_id=0, ziel_modul="", kategorie="", hinweis="", manuell=True):
     try:
         auftrag_id = int(auftrag_id or 0)
@@ -33185,6 +33339,41 @@ def wetter_mosbach():
     return response, status_code
 
 
+@app.route("/api/klick", methods=["POST"])
+def api_klick_event():
+    payload = request.get_json(silent=True) or {}
+    if session.get("admin"):
+        bereich = "admin"
+        ist_admin = True
+        autohaus_id = 0
+    elif session.get("partner_autohaus_id"):
+        bereich = "partner"
+        ist_admin = False
+        autohaus_id = session.get("partner_autohaus_id") or 0
+    else:
+        bereich = "oeffentlich"
+        ist_admin = False
+        autohaus_id = 0
+    logged = log_klick_event(
+        bereich=bereich,
+        seite=payload.get("seite") or request.referrer or "",
+        element_label=payload.get("label") or "",
+        element_key=payload.get("key") or "",
+        ziel_url=payload.get("href") or "",
+        autohaus_id=autohaus_id,
+        ist_admin=ist_admin,
+    )
+    return jsonify({"ok": bool(logged)})
+
+
+@app.route("/admin/klickstatistik")
+@admin_required
+def admin_klickstatistik():
+    tage = request.args.get("tage", 30)
+    statistik = list_klick_statistik(tage=tage, limit=60)
+    return render_template("klickstatistik_admin.html", statistik=statistik)
+
+
 @app.route("/")
 @app.route("/admin")
 @admin_required
@@ -33222,6 +33411,7 @@ def betriebs_cockpit():
         include_internal_notes=True,
     )
     mini_calendar["full_url"] = url_for("kalender")
+    neue_emails = list_werkstatt_emails(status="neu", limit=5)
     return render_template(
         "cockpit.html",
         auftraege=auftraege,
@@ -33231,8 +33421,7 @@ def betriebs_cockpit():
         cockpit=cockpit_data,
         start_inbox=start_inbox_daten(
             cockpit_data["postfach_items"],
-            [],
-            email_count_total=0,
+            neue_emails,
         ),
         erinnerungen=list_erinnerungen(limit=8),
         ki_status=get_ai_status(),
@@ -38204,6 +38393,16 @@ def admin_email_einkauf_analysieren(email_id):
         return redirect(url_for("admin_einkauf") + f"#{einkauf_offer_anchor(anchor_key)}")
     flash("Ich konnte aus dieser E-Mail noch keine Preispositionen erkennen. Bitte Text/Preise prüfen.", "warning")
     return redirect(url_for("admin_emails"))
+
+
+@app.route("/admin/emails/<int:email_id>/ki-analysieren", methods=["POST"])
+@admin_required
+def admin_email_ki_analysieren(email_id):
+    payload = request.get_json(silent=True) if request.is_json else request.form
+    force = str((payload or {}).get("force") or "").strip().lower() in {"1", "true", "yes"}
+    result = analysiere_email_mit_ki(email_id, force=force)
+    status_code = 200 if result.get("ok") else 422
+    return jsonify(result), status_code
 
 
 @app.route("/admin/emails/<int:email_id>/lead", methods=["POST"])

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Klickstatistik{% endblock %}
+{% block extra_css %}
+<style>
+  .klick-filter { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .klick-filter a { padding: .4rem .85rem; }
+  .klick-table-shell { overflow-x: auto; }
+  .bereich-pill {
+    display: inline-flex; align-items: center; border-radius: 999px; padding: .28rem .65rem;
+    font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .bereich-admin { background: #eef5f6; color: #145d66; }
+  .bereich-partner { background: #eef7ee; color: #1b7f53; }
+  .bereich-oeffentlich { background: #f4ede4; color: #7a6039; }
+  .klick-bar-track { background: #eee2cd; border-radius: 999px; height: 8px; overflow: hidden; min-width: 90px; }
+  .klick-bar-fill { background: linear-gradient(90deg, var(--accent), var(--brand)); height: 100%; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-card p-4 mb-4">
+  <div class="section-title align-items-start">
+    <div>
+      <h4 class="mb-1">Klickstatistik</h4>
+      <p>Welche Links und Buttons werden intern und im Autohaus-Partnerportal wirklich genutzt — als Grundlage, um Platzierungen zu überdenken.</p>
+    </div>
+    <span class="badge-soft">{{ statistik['gesamt'] }} Klicks in {{ statistik['tage'] }} Tagen</span>
+  </div>
+  <div class="klick-filter">
+    <a class="btn btn-soft btn-sm {{ 'btn-brand' if statistik['tage'] == 7 else '' }}" href="{{ url_for('admin_klickstatistik', tage=7) }}">7 Tage</a>
+    <a class="btn btn-soft btn-sm {{ 'btn-brand' if statistik['tage'] == 30 else '' }}" href="{{ url_for('admin_klickstatistik', tage=30) }}">30 Tage</a>
+    <a class="btn btn-soft btn-sm {{ 'btn-brand' if statistik['tage'] == 90 else '' }}" href="{{ url_for('admin_klickstatistik', tage=90) }}">90 Tage</a>
+  </div>
+</div>
+
+<div class="page-card p-4">
+  {% if statistik['items'] %}
+  {% set max_anzahl = statistik['items']|map(attribute='anzahl')|max %}
+  <div class="klick-table-shell">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Bereich</th>
+          <th>Element</th>
+          <th>Klicks</th>
+          <th></th>
+          <th>Zuletzt</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in statistik['items'] %}
+        <tr>
+          <td><span class="bereich-pill bereich-{{ row['bereich'] }}">{{ row['bereich'] }}</span></td>
+          <td>{{ row['element_label'] or row['gruppe'] }}</td>
+          <td class="fw-bold">{{ row['anzahl'] }}</td>
+          <td style="width:140px;">
+            <div class="klick-bar-track">
+              <div class="klick-bar-fill" style="width: {{ (row['anzahl'] / max_anzahl * 100) | round(0, 'floor') }}%;"></div>
+            </div>
+          </td>
+          <td class="text-muted small">{{ row['zuletzt'] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="news-empty">Noch keine Klicks im gewählten Zeitraum aufgezeichnet. Das Tracking läuft seit dem Rollout dieser Funktion — mit der Zeit füllt sich die Liste.</div>
+  {% endif %}
+</div>
+{% endblock %}
