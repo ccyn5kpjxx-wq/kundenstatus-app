@@ -33412,6 +33412,12 @@ def betriebs_cockpit():
     )
     mini_calendar["full_url"] = url_for("kalender")
     neue_emails = list_werkstatt_emails(status="neu", limit=5)
+    if current_datetime.hour < 11:
+        tages_gruss = "Guten Morgen"
+    elif current_datetime.hour < 18:
+        tages_gruss = "Guten Tag"
+    else:
+        tages_gruss = "Guten Abend"
     return render_template(
         "cockpit.html",
         auftraege=auftraege,
@@ -33423,6 +33429,8 @@ def betriebs_cockpit():
             cockpit_data["postfach_items"],
             neue_emails,
         ),
+        mietwagen_heute=mietwagen_heute_uebersicht(),
+        tages_gruss=tages_gruss,
         erinnerungen=list_erinnerungen(limit=8),
         ki_status=get_ai_status(),
         database_status=get_database_status(),
@@ -34435,6 +34443,27 @@ def list_mietfahrzeuge(include_inactive=True):
         )
         for row in rows
     ]
+
+
+def mietwagen_heute_uebersicht():
+    heute = date.today()
+    heute_start = []
+    heute_rueckgabe = []
+    for fahrzeug in list_mietfahrzeuge(include_inactive=False):
+        for vorgang in fahrzeug.get("vorgaenge", []):
+            if vorgang["abgeschlossen"]:
+                continue
+            eintrag = {
+                "fahrzeug_id": fahrzeug["id"],
+                "kennzeichen": fahrzeug["kennzeichen"],
+                "bezeichnung": clean_text(fahrzeug.get("bezeichnung")) or clean_text(fahrzeug.get("fahrzeugklasse")),
+                "kunde_name": clean_text(vorgang.get("kunde_name")),
+            }
+            if vorgang["start_obj"] == heute:
+                heute_start.append(eintrag)
+            if vorgang["end_obj"] == heute:
+                heute_rueckgabe.append(eintrag)
+    return {"heute_start": heute_start, "heute_rueckgabe": heute_rueckgabe}
 
 
 def get_mietfahrzeug(fahrzeug_id):
