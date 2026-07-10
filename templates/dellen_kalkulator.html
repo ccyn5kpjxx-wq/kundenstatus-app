@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+{% block title %}Dellen-Kalkulator{% endblock %}
+{% block extra_css %}
+<style>
+  .dellen-tabelle-shell { overflow-x: auto; }
+  .dellen-tabelle { width: 100%; border-collapse: separate; border-spacing: 0 .45rem; }
+  .dellen-tabelle th {
+    color: var(--muted);
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    font-weight: 700;
+    padding: 0 .6rem .2rem;
+    text-align: center;
+  }
+  .dellen-tabelle th:first-child { text-align: left; }
+  .dellen-zeile td {
+    background: #fffaf2;
+    border-top: 1px solid #e4d6c3;
+    border-bottom: 1px solid #e4d6c3;
+    padding: .5rem .6rem;
+    vertical-align: middle;
+    text-align: center;
+  }
+  .dellen-zeile td:first-child {
+    border-left: 1px solid #e4d6c3;
+    border-radius: 12px 0 0 12px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .dellen-zeile td:last-child {
+    border-right: 1px solid #e4d6c3;
+    border-radius: 0 12px 12px 0;
+    font-weight: 700;
+    font-family: "Space Grotesk", sans-serif;
+    white-space: nowrap;
+  }
+  .dellen-anzahl {
+    width: 74px;
+    text-align: center;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: .35rem .3rem;
+    background: #fffdf9;
+  }
+  .dellen-summe-panel {
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: #132635;
+    color: #fff;
+    padding: 1.2rem 1.4rem;
+  }
+  .dellen-summe-panel .netto {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 2.2rem;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+  .dellen-summe-panel .brutto { color: rgba(255,255,255,.75); }
+  .dellen-summe-panel .rabatt-hinweis { color: #ffd479; font-size: .88rem; }
+  .preis-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: .75rem;
+  }
+  .preis-form-grid label {
+    display: block;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 700;
+    margin-bottom: .2rem;
+  }
+  .richtwert-hinweis {
+    border: 1px solid #f0d9a8;
+    background: #fdf6e3;
+    border-radius: 14px;
+    padding: .8rem 1rem;
+    color: #7a6039;
+    font-size: .9rem;
+  }
+  @media (max-width: 575.98px) {
+    .dellen-zeile td:first-child { white-space: normal; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-card p-4 mb-4">
+  <div class="section-title align-items-start">
+    <div>
+      <h4 class="mb-1">Dellen-Kalkulator</h4>
+      <p>Hagel- und Parkdellen schnell durchkalkulieren — Anzahl je Bauteil und Größe eintragen, Preis entsteht live.</p>
+    </div>
+    <span class="badge-soft">{{ 'Eigene Preise aktiv' if preise_angepasst else 'Richtwerte aktiv' }}</span>
+  </div>
+  {% if not preise_angepasst %}
+  <div class="richtwert-hinweis mb-3">
+    Die hinterlegten Preise sind <strong>Richtwerte</strong> (markt&uuml;blich für Dellendrücken/PDR) und unten anpassbar.
+    Für Angebote nach außen gilt weiterhin die GF-Freigabe und die Festpreis-Regel (Umfang fotodokumentiert deckeln).
+  </div>
+  {% endif %}
+
+  <div class="dellen-tabelle-shell mb-3">
+    <table class="dellen-tabelle" data-dellen-tabelle>
+      <thead>
+        <tr>
+          <th>Bauteil</th>
+          <th>klein<br>&le; 10 mm</th>
+          <th>mittel<br>10&ndash;25 mm</th>
+          <th>groß<br>25&ndash;50 mm</th>
+          <th>Alu</th>
+          <th>Klebetechnik</th>
+          <th>Summe</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for bauteil in bauteile %}
+        <tr class="dellen-zeile" data-dellen-zeile>
+          <td>{{ bauteil }}</td>
+          <td><input type="number" min="0" max="99" value="0" class="dellen-anzahl" data-anzahl="s" aria-label="{{ bauteil }}: kleine Dellen"></td>
+          <td><input type="number" min="0" max="99" value="0" class="dellen-anzahl" data-anzahl="m" aria-label="{{ bauteil }}: mittlere Dellen"></td>
+          <td><input type="number" min="0" max="99" value="0" class="dellen-anzahl" data-anzahl="l" aria-label="{{ bauteil }}: große Dellen"></td>
+          <td><input type="checkbox" data-zuschlag="alu" aria-label="{{ bauteil }}: Aluminium"></td>
+          <td><input type="checkbox" data-zuschlag="kleben" aria-label="{{ bauteil }}: Klebetechnik"></td>
+          <td data-zeile-summe>—</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="row g-3 align-items-stretch">
+    <div class="col-lg-5">
+      <div class="dellen-summe-panel h-100">
+        <div class="text-uppercase" style="font-size:.76rem; letter-spacing:.08em; color:rgba(255,255,255,.7); font-weight:700;">Kalkulation</div>
+        <div class="netto" data-summe-netto>0,00 €</div>
+        <div class="brutto" data-summe-brutto>inkl. 19% MwSt.: 0,00 €</div>
+        <div class="rabatt-hinweis mt-2" data-rabatt-hinweis></div>
+        <div class="mt-2 small" style="color:rgba(255,255,255,.65);" data-dellen-gesamt>0 Dellen erfasst</div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="reminder-panel h-100" style="border:1px solid #e4d6c3; border-radius:14px; background:#fffdf9; padding:1rem;">
+        <div class="fw-bold mb-2">Text für Angebot / Notiz</div>
+        <textarea class="form-control mb-2" rows="6" readonly data-angebot-text placeholder="Positionen eintragen — der Text entsteht automatisch."></textarea>
+        <div class="d-flex gap-2 flex-wrap">
+          <button type="button" class="btn btn-brand btn-sm" data-copy-angebot>Text kopieren</button>
+          <button type="button" class="btn btn-soft btn-sm" data-dellen-reset>Alles zurücksetzen</button>
+        </div>
+        <div class="text-muted small mt-2">Der Text ist ein interner Kalkulations-Vermerk — kein fertiges Angebot (GF-Freigabe!).</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="page-card p-4 mb-4">
+  <div class="section-title align-items-start">
+    <div>
+      <h4 class="mb-1">Preise anpassen</h4>
+      <p>Gilt sofort für alle künftigen Kalkulationen. Rabatt greift gestaffelt nach Gesamtzahl der Dellen (Hagel).</p>
+    </div>
+  </div>
+  <form method="POST" action="{{ url_for('admin_dellen_preise_speichern') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="preis-form-grid mb-3">
+      <div><label>Delle klein (&le;10 mm) €</label><input type="number" step="0.01" min="0" name="preis_s" class="form-control" value="{{ preismatrix['preis_s'] }}"></div>
+      <div><label>Delle mittel (10&ndash;25 mm) €</label><input type="number" step="0.01" min="0" name="preis_m" class="form-control" value="{{ preismatrix['preis_m'] }}"></div>
+      <div><label>Delle groß (25&ndash;50 mm) €</label><input type="number" step="0.01" min="0" name="preis_l" class="form-control" value="{{ preismatrix['preis_l'] }}"></div>
+      <div><label>Mindestpreis Auftrag €</label><input type="number" step="0.01" min="0" name="mindestpreis" class="form-control" value="{{ preismatrix['mindestpreis'] }}"></div>
+      <div><label>Rabatt ab 5 Dellen %</label><input type="number" step="0.1" min="0" name="rabatt_ab_5" class="form-control" value="{{ preismatrix['rabatt_ab_5'] }}"></div>
+      <div><label>Rabatt ab 10 Dellen %</label><input type="number" step="0.1" min="0" name="rabatt_ab_10" class="form-control" value="{{ preismatrix['rabatt_ab_10'] }}"></div>
+      <div><label>Rabatt ab 20 Dellen %</label><input type="number" step="0.1" min="0" name="rabatt_ab_20" class="form-control" value="{{ preismatrix['rabatt_ab_20'] }}"></div>
+      <div><label>Zuschlag Aluminium %</label><input type="number" step="0.1" min="0" name="zuschlag_alu" class="form-control" value="{{ preismatrix['zuschlag_alu'] }}"></div>
+      <div><label>Zuschlag Klebetechnik %</label><input type="number" step="0.1" min="0" name="zuschlag_kleben" class="form-control" value="{{ preismatrix['zuschlag_kleben'] }}"></div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <button type="submit" class="btn btn-brand">Preise speichern</button>
+    </div>
+  </form>
+  <form method="POST" action="{{ url_for('admin_dellen_preise_zuruecksetzen') }}" class="mt-2">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-soft btn-sm">Auf Richtwerte zurücksetzen</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (() => {
+    const preise = {{ preismatrix | tojson }};
+    const zeilen = Array.from(document.querySelectorAll('[data-dellen-zeile]'));
+    const summeNetto = document.querySelector('[data-summe-netto]');
+    const summeBrutto = document.querySelector('[data-summe-brutto]');
+    const rabattHinweis = document.querySelector('[data-rabatt-hinweis]');
+    const gesamtLabel = document.querySelector('[data-dellen-gesamt]');
+    const angebotText = document.querySelector('[data-angebot-text]');
+
+    const euro = (wert) => wert.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+
+    const berechne = () => {
+      let zwischensumme = 0;
+      let dellenGesamt = 0;
+      const positionen = [];
+      zeilen.forEach((zeile) => {
+        const bauteil = zeile.querySelector('td').textContent.trim();
+        const s = Math.max(0, parseInt(zeile.querySelector('[data-anzahl="s"]').value, 10) || 0);
+        const m = Math.max(0, parseInt(zeile.querySelector('[data-anzahl="m"]').value, 10) || 0);
+        const l = Math.max(0, parseInt(zeile.querySelector('[data-anzahl="l"]').value, 10) || 0);
+        const alu = zeile.querySelector('[data-zuschlag="alu"]').checked;
+        const kleben = zeile.querySelector('[data-zuschlag="kleben"]').checked;
+        const anzahl = s + m + l;
+        const zelle = zeile.querySelector('[data-zeile-summe]');
+        if (!anzahl) {
+          zelle.textContent = '—';
+          return;
+        }
+        let summe = s * preise.preis_s + m * preise.preis_m + l * preise.preis_l;
+        if (alu) summe *= 1 + preise.zuschlag_alu / 100;
+        if (kleben) summe *= 1 + preise.zuschlag_kleben / 100;
+        zelle.textContent = euro(summe);
+        zwischensumme += summe;
+        dellenGesamt += anzahl;
+        const details = [];
+        if (s) details.push(s + '× klein');
+        if (m) details.push(m + '× mittel');
+        if (l) details.push(l + '× groß');
+        if (alu) details.push('Alu');
+        if (kleben) details.push('Klebetechnik');
+        positionen.push(`- ${bauteil}: ${details.join(', ')} = ${euro(summe)}`);
+      });
+
+      let rabattProzent = 0;
+      if (dellenGesamt >= 20) rabattProzent = preise.rabatt_ab_20;
+      else if (dellenGesamt >= 10) rabattProzent = preise.rabatt_ab_10;
+      else if (dellenGesamt >= 5) rabattProzent = preise.rabatt_ab_5;
+
+      let netto = zwischensumme * (1 - rabattProzent / 100);
+      let mindestpreisAktiv = false;
+      if (dellenGesamt > 0 && netto < preise.mindestpreis) {
+        netto = preise.mindestpreis;
+        mindestpreisAktiv = true;
+      }
+
+      summeNetto.textContent = euro(netto) + ' netto';
+      summeBrutto.textContent = 'inkl. 19% MwSt.: ' + euro(netto * 1.19);
+      gesamtLabel.textContent = dellenGesamt + (dellenGesamt === 1 ? ' Delle erfasst' : ' Dellen erfasst');
+      if (mindestpreisAktiv) {
+        rabattHinweis.textContent = 'Mindestpreis greift (' + euro(preise.mindestpreis) + ').';
+      } else if (rabattProzent > 0) {
+        rabattHinweis.textContent = 'Mengenrabatt ' + rabattProzent.toLocaleString('de-DE') + '% ab ' + (dellenGesamt >= 20 ? 20 : dellenGesamt >= 10 ? 10 : 5) + ' Dellen abgezogen.';
+      } else {
+        rabattHinweis.textContent = '';
+      }
+
+      if (positionen.length) {
+        const kopf = ['Dellen-Kalkulation (intern, Richtwerte — GF-Freigabe vor Angebot):'];
+        const fuss = [];
+        if (rabattProzent > 0 && !mindestpreisAktiv) fuss.push(`Mengenrabatt: -${rabattProzent.toLocaleString('de-DE')}%`);
+        if (mindestpreisAktiv) fuss.push('Mindestpreis angewendet');
+        fuss.push(`Gesamt: ${euro(netto)} netto / ${euro(netto * 1.19)} brutto (${dellenGesamt} Dellen)`);
+        angebotText.value = kopf.concat(positionen, fuss).join('\n');
+      } else {
+        angebotText.value = '';
+      }
+    };
+
+    zeilen.forEach((zeile) => {
+      zeile.querySelectorAll('input').forEach((input) => {
+        input.addEventListener('input', berechne);
+        input.addEventListener('change', berechne);
+      });
+    });
+
+    document.querySelector('[data-copy-angebot]').addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      const original = button.textContent;
+      try {
+        await navigator.clipboard.writeText(angebotText.value);
+      } catch (error) {
+        angebotText.select();
+        document.execCommand('copy');
+      }
+      button.textContent = 'Kopiert';
+      window.setTimeout(() => { button.textContent = original; }, 1600);
+    });
+
+    document.querySelector('[data-dellen-reset]').addEventListener('click', () => {
+      zeilen.forEach((zeile) => {
+        zeile.querySelectorAll('[data-anzahl]').forEach((input) => { input.value = 0; });
+        zeile.querySelectorAll('[data-zuschlag]').forEach((input) => { input.checked = false; });
+      });
+      berechne();
+    });
+
+    berechne();
+  })();
+</script>
+{% endblock %}

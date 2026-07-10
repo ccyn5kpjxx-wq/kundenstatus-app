@@ -33544,6 +33544,85 @@ def admin_oeffnungszeiten_speichern():
     return redirect(url_for("admin_zugaenge"))
 
 
+# --- Dellen-Kalkulator (Hagel-/Parkdellen, smart-repair) ------------------
+# Preise sind RICHTWERTE und im Modul editierbar; Freigabe fuer echte
+# Angebote liegt beim GF (Festpreis-Regel: Umfang fotodokumentiert deckeln).
+
+DELLEN_PREISMATRIX_DEFAULT = {
+    "preis_s": 35.0,
+    "preis_m": 55.0,
+    "preis_l": 85.0,
+    "mindestpreis": 49.0,
+    "rabatt_ab_5": 10.0,
+    "rabatt_ab_10": 20.0,
+    "rabatt_ab_20": 30.0,
+    "zuschlag_alu": 30.0,
+    "zuschlag_kleben": 20.0,
+}
+
+DELLEN_BAUTEILE = (
+    "Motorhaube",
+    "Dach",
+    "Kotflügel vorn links",
+    "Kotflügel vorn rechts",
+    "Tür vorn links",
+    "Tür vorn rechts",
+    "Tür hinten links",
+    "Tür hinten rechts",
+    "Seitenwand hinten links",
+    "Seitenwand hinten rechts",
+    "Heckklappe / Heckdeckel",
+)
+
+
+def get_dellen_preismatrix():
+    matrix = dict(DELLEN_PREISMATRIX_DEFAULT)
+    raw = get_app_setting("DELLEN_PREISMATRIX", "")
+    if raw:
+        try:
+            gespeichert = json.loads(raw)
+            for key in matrix:
+                if key in gespeichert:
+                    matrix[key] = round(max(0.0, float(gespeichert[key])), 2)
+        except (ValueError, TypeError):
+            pass
+    return matrix
+
+
+@app.route("/admin/dellen-kalkulator")
+@admin_required
+def admin_dellen_kalkulator():
+    return render_template(
+        "dellen_kalkulator.html",
+        preismatrix=get_dellen_preismatrix(),
+        bauteile=DELLEN_BAUTEILE,
+        preise_angepasst=bool(get_app_setting("DELLEN_PREISMATRIX", "")),
+    )
+
+
+@app.route("/admin/dellen-kalkulator/preise", methods=["POST"])
+@admin_required
+def admin_dellen_preise_speichern():
+    matrix = {}
+    for key, default in DELLEN_PREISMATRIX_DEFAULT.items():
+        raw = clean_text(request.form.get(key)).replace(",", ".")
+        try:
+            matrix[key] = round(max(0.0, float(raw)), 2)
+        except (ValueError, TypeError):
+            matrix[key] = default
+    set_app_setting("DELLEN_PREISMATRIX", json.dumps(matrix))
+    flash("Dellen-Preise gespeichert. Hinweis: Für Angebote nach außen gilt weiter die GF-Freigabe.", "success")
+    return redirect(url_for("admin_dellen_kalkulator"))
+
+
+@app.route("/admin/dellen-kalkulator/preise-zuruecksetzen", methods=["POST"])
+@admin_required
+def admin_dellen_preise_zuruecksetzen():
+    set_app_setting("DELLEN_PREISMATRIX", "")
+    flash("Dellen-Preise auf die Richtwerte zurückgesetzt.", "success")
+    return redirect(url_for("admin_dellen_kalkulator"))
+
+
 @app.route("/admin/werkstatt-tafel/zugang", methods=["POST"])
 @admin_required
 def admin_werkstatt_tafel_zugang():
