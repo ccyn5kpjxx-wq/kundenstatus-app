@@ -10591,8 +10591,15 @@ def customer_status_share_message(auftrag, status_update=False):
 def customer_fertig_whatsapp_message(auftrag):
     name = clean_text((auftrag or {}).get("kunde_name")) or "zusammen"
     fahrzeug = clean_text((auftrag or {}).get("fahrzeug")) or "Ihr Fahrzeug"
+    bewertung_url = clean_text(get_app_setting("GOOGLE_BEWERTUNG_URL", ""))
+    bewertung_satz = (
+        f" Wenn Sie zufrieden sind, freuen wir uns riesig über eine Google-Bewertung: {bewertung_url}"
+        if bewertung_url
+        else ""
+    )
     return (
-        f"Hallo {name}, {fahrzeug} ist fertig und kann abgeholt werden. "
+        f"Hallo {name}, {fahrzeug} ist fertig und kann abgeholt werden."
+        f"{bewertung_satz} "
         "Viele Grüße, Gärtner Karosserie & Lack, Tel. +49 1522 7706694."
     )
 
@@ -20396,8 +20403,14 @@ def notify_customer_whatsapp_fertig(auftrag):
         return False, "Keine Handynummer beim Kunden hinterlegt."
     auftrag_id = int(auftrag.get("id") or 0)
     fahrzeug = clean_text(auftrag.get("fahrzeug")) or "Ihr Fahrzeug"
+    bewertung_url = clean_text(get_app_setting("GOOGLE_BEWERTUNG_URL", ""))
+    bewertung_satz = (
+        f" Wenn Sie zufrieden sind, freuen wir uns riesig über eine Google-Bewertung: {bewertung_url}"
+        if bewertung_url
+        else ""
+    )
     nachricht = (
-        f"Guten Tag, {fahrzeug} ist fertig und kann abgeholt werden. "
+        f"Guten Tag, {fahrzeug} ist fertig und kann abgeholt werden.{bewertung_satz} "
         "Ihr Team von Gärtner Karosserie & Lack, Binauer Höhe 4, 74821 Mosbach, Tel. +49 1522 7706694."
     )
     ok, errors = send_whatsapp_notice_with_fallback(
@@ -25114,6 +25127,15 @@ def baue_endkunden_fertig_mail(auftrag):
     zeilen += [
         "Sagen Sie uns gerne kurz per Telefon oder WhatsApp Bescheid, wann Sie vorbeikommen.",
         "",
+    ]
+    bewertung_url = clean_text(get_app_setting("GOOGLE_BEWERTUNG_URL", ""))
+    if bewertung_url:
+        zeilen += [
+            "Wenn Sie mit unserer Arbeit zufrieden sind, freuen wir uns riesig über eine kurze Google-Bewertung:",
+            bewertung_url,
+            "",
+        ]
+    zeilen += [
         "Wir freuen uns auf Ihren Besuch!",
         "",
         "Mit besten Grüßen",
