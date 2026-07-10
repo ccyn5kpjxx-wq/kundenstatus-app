@@ -577,6 +577,121 @@
       min-height:44px;
       font-size:16px;
     }
+    html { scroll-behavior:smooth; }
+    .portal-quicknav {
+      position:sticky;
+      top:10px;
+      z-index:1030;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      overflow-x:auto;
+      padding:8px 12px;
+      margin-bottom:16px;
+      border:1px solid #e4d6c3;
+      border-radius:999px;
+      background:rgba(255,253,249,.94);
+      backdrop-filter:blur(6px);
+      box-shadow:0 10px 24px rgba(64,47,25,.14);
+    }
+    .portal-quicknav-link {
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:.4rem .8rem;
+      border-radius:999px;
+      border:1px solid transparent;
+      color:#132635;
+      font-weight:600;
+      font-size:.92rem;
+      text-decoration:none;
+      white-space:nowrap;
+    }
+    .portal-quicknav-link:hover {
+      background:#f4ede4;
+      border-color:#e4d6c3;
+      color:#132635;
+    }
+    .portal-quicknav-cta {
+      margin-left:auto;
+      white-space:nowrap;
+    }
+    #werkstattangebote, #kalender, #fahrzeuge-tabelle, #archiv, #kontakt { scroll-margin-top:76px; }
+    .status-flow {
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:6px 8px;
+      margin-bottom:14px;
+      padding:10px 14px;
+      border:1px dashed #dfceb6;
+      border-radius:14px;
+      background:#fffaf2;
+      color:#4b5560;
+      font-size:.88rem;
+    }
+    .status-flow-intro { color:#7d7163; font-weight:700; margin-right:2px; }
+    .status-flow-step { display:inline-flex; align-items:center; gap:4px; font-weight:600; color:#132635; white-space:nowrap; }
+    .status-flow-arrow { color:#b39f83; font-weight:700; }
+    a.whatsapp-quick-status { text-decoration:none; transition:.18s ease; }
+    a.whatsapp-quick-status:hover {
+      background:#def3e6;
+      border-color:#8fcfa6;
+      color:#173f2b;
+      transform:translateY(-1px);
+    }
+    .contact-panel { margin-top:24px; }
+    .contact-grid {
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:14px;
+      margin-top:16px;
+    }
+    .contact-card {
+      display:flex;
+      align-items:flex-start;
+      gap:12px;
+      min-width:0;
+      border:1px solid #e4d6c3;
+      border-radius:18px;
+      background:#fffaf2;
+      padding:16px;
+      color:#132635;
+      text-decoration:none;
+      transition:.18s ease;
+    }
+    a.contact-card:hover {
+      background:#f4ede4;
+      border-color:#d0bda2;
+      color:#132635;
+      transform:translateY(-2px);
+    }
+    .contact-icon {
+      display:inline-flex;
+      width:40px;
+      height:40px;
+      flex:0 0 40px;
+      align-items:center;
+      justify-content:center;
+      border-radius:12px;
+      background:#132635;
+      color:#fff;
+      font-size:1.15rem;
+    }
+    .contact-icon.is-wa { background:#1fae62; }
+    .contact-card span.contact-label {
+      display:block;
+      color:#7d7163;
+      font-size:.72rem;
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:.08em;
+    }
+    .contact-card strong { display:block; font-size:1.02rem; line-height:1.25; overflow-wrap:anywhere; }
+    .contact-card small { display:block; color:#6c6255; margin-top:2px; }
+    @media (max-width: 991.98px) {
+      .contact-grid { grid-template-columns:1fr; }
+    }
     @media (max-width: 1199.98px) {
       .portal-hero {
         grid-template-columns:1fr;
@@ -754,6 +869,18 @@
       {% endfor %}
     {% endwith %}
 
+    <nav class="portal-quicknav" aria-label="Schnellnavigation">
+      {% if werkstattangebote %}
+      <a class="portal-quicknav-link" href="#werkstattangebote">💶 Angebote<span class="mail-badge">{{ werkstattangebote|length }}</span></a>
+      {% endif %}
+      <a class="portal-quicknav-link" href="#fahrzeuge-tabelle">🚗 Fahrzeuge ({{ auftraege|length }})</a>
+      <a class="portal-quicknav-link" href="#kalender">📅 Kalender</a>
+      <a class="portal-quicknav-link" href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}">📨 Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
+      <a class="portal-quicknav-link" href="#archiv">🗂 Archiv</a>
+      <a class="portal-quicknav-link" href="#kontakt">📞 Kontakt</a>
+      <a class="btn btn-dark btn-sm portal-quicknav-cta" href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}">+ Neues Fahrzeug</a>
+    </nav>
+
     <div class="panel mb-4">
       <div class="portal-logout">
         <a href="{{ url_for('partner_logout') }}" class="portal-logout-link">Logout</a>
@@ -815,13 +942,13 @@
             <a href="{{ url_for('partner_versicherung_schaden_neu', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Versicherungsfall melden</a>
             <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg" title="Rahmenvertrag und Bonusmodell ansehen">{{ rahmenvertrag['button_label'] }}</a>
             <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
-            <div class="whatsapp-quick-status" role="status" aria-label="WhatsApp Verbindung aktiv">
+            <a class="whatsapp-quick-status" href="{{ kontakt['whatsapp_url'] }}" target="_blank" rel="noopener" aria-label="WhatsApp-Chat mit der Werkstatt öffnen">
               <span class="whatsapp-mark" aria-hidden="true">WA</span>
               <div>
                 <strong>WhatsApp aktiv</strong>
-                <small>Schnelle Antwort</small>
+                <small>Frage senden — Chat öffnen ›</small>
               </div>
-            </div>
+            </a>
           </div>
           <div class="portal-search" data-portal-search data-search-url="{{ url_for('partner_auftraege_suche', slug=autohaus['slug']) }}">
             <label class="form-label fw-bold mb-2">Fahrzeug suchen</label>
@@ -877,7 +1004,9 @@
     </div>
     {% endif %}
 
-    {% include "_mini_month_calendar.html" %}
+    <div id="kalender">
+      {% include "_mini_month_calendar.html" %}
+    </div>
 
     <div class="panel mb-4">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
@@ -1004,13 +1133,20 @@
     <div class="panel mb-4" id="fahrzeuge-tabelle">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
         <div>
-          <h4 class="mb-1">Ihre Fahrzeuge</h4>
+          <h4 class="mb-1">Ihre Fahrzeuge{% if auftraege %} ({{ auftraege|length }}){% endif %}</h4>
           <div class="text-muted">Aktive Aufträge Ihres Autohauses.</div>
         </div>
         <div class="text-muted small" data-metric-filter-status hidden>
           <span data-metric-filter-text></span>
           <a href="#fahrzeuge-tabelle" data-metric-filter-reset>Filter zurücksetzen</a>
         </div>
+      </div>
+      <div class="status-flow" aria-label="So läuft ein Auftrag ab">
+        <span class="status-flow-intro">So läuft Ihr Auftrag:</span>
+        {% for nr, s in statusliste.items() %}
+        <span class="status-flow-step">{{ s['icon'] }} {{ s['label'] }}</span>
+        {% if not loop.last %}<span class="status-flow-arrow" aria-hidden="true">→</span>{% endif %}
+        {% endfor %}
       </div>
       {% if auftraege %}
       <form method="POST" action="{{ url_for('partner_sammelaktion', slug=autohaus['slug']) }}" data-bulk-form>
@@ -1070,14 +1206,15 @@
       </div>
       </form>
       {% else %}
-        <div class="text-muted">Noch keine Fahrzeuge vorhanden.</div>
+        <div class="text-muted mb-3">Noch keine Fahrzeuge vorhanden — legen Sie das erste Fahrzeug an, wir kümmern uns um den Rest.</div>
+        <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}" class="btn btn-dark">Erstes Fahrzeug anlegen</a>
       {% endif %}
     </div>
 
-    <div class="panel">
+    <div class="panel" id="archiv">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
         <div>
-          <h4 class="mb-1">Archiv</h4>
+          <h4 class="mb-1">Archiv{% if archivierte_auftraege %} ({{ archivierte_auftraege|length }}){% endif %}</h4>
           <div class="text-muted">Abgeschlossene oder ausgeblendete Aufträge.</div>
         </div>
       </div>
@@ -1134,6 +1271,37 @@
       {% else %}
         <div class="text-muted">Noch keine archivierten Aufträge.</div>
       {% endif %}
+    </div>
+
+    <div class="panel contact-panel" id="kontakt">
+      <h4 class="mb-1">Direkter Draht zur Werkstatt</h4>
+      <div class="text-muted">Fragen zu einem Fahrzeug oder Termin? Wir sind sofort erreichbar.</div>
+      <div class="contact-grid">
+        <a class="contact-card" href="{{ kontakt['telefon_url'] }}">
+          <span class="contact-icon" aria-hidden="true">📞</span>
+          <div>
+            <span class="contact-label">Telefon</span>
+            <strong>{{ kontakt['telefon'] }}</strong>
+            <small>Direkt anrufen</small>
+          </div>
+        </a>
+        <a class="contact-card" href="{{ kontakt['whatsapp_url'] }}" target="_blank" rel="noopener">
+          <span class="contact-icon is-wa" aria-hidden="true">💬</span>
+          <div>
+            <span class="contact-label">WhatsApp</span>
+            <strong>Chat öffnen</strong>
+            <small>Schnellste Antwort auf kurze Fragen</small>
+          </div>
+        </a>
+        <div class="contact-card">
+          <span class="contact-icon" aria-hidden="true">📍</span>
+          <div>
+            <span class="contact-label">Werkstatt</span>
+            <strong>{{ kontakt['name'] }}</strong>
+            <small>{{ kontakt['adresse'] }}{% if kontakt['oeffnungszeiten'] %} · {{ kontakt['oeffnungszeiten'] }}{% endif %}</small>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   {% include "ki_assistent_widget.html" %}
@@ -1433,6 +1601,18 @@
       input.addEventListener('input', () => {
         window.clearTimeout(debounceTimer);
         debounceTimer = window.setTimeout(search, 160);
+      });
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          const first = results.querySelector('.portal-search-result');
+          if (first) {
+            event.preventDefault();
+            window.location.href = first.href;
+          }
+        } else if (event.key === 'Escape') {
+          input.value = '';
+          clearResults();
+        }
       });
     })();
 

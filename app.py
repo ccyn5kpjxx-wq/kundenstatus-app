@@ -42120,9 +42120,14 @@ def partner_dashboard(slug):
     ]
     attach_versicherung_pruefung_status(versicherungsfaelle)
     postfach_items = list_partner_postfach_items(autohaus["id"], autohaus["slug"], limit=8)
+    kontakt = werkstatt_kundenkontakt()
+    partner_name = clean_text(autohaus["portal_label"]) or "Ihr Autohaus-Partner"
+    wa_nummer = whatsapp_number_key(WHATSAPP_WORKSHOP_NUMBERS) or "4915227706694"
+    kontakt["whatsapp_url"] = f"https://wa.me/{wa_nummer}?text={quote(f'Hallo Gärtner-Team, hier {partner_name} — wir haben eine Frage.')}"
     return render_template(
         "partner_dashboard.html",
         autohaus=autohaus,
+        kontakt=kontakt,
         auftraege=auftraege,
         archivierte_auftraege=archivierte_auftraege,
         werkstattangebote=werkstattangebote,
