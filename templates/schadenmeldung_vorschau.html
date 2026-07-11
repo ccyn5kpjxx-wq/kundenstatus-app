@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>{% if cockpit_mode %}Versicherungsschaden aufnehmen{% else %}Schaden online melden{% endif %} · Gärtner Karosserie &amp; Lack</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f3efe6;
+      --panel: #fffdf9;
+      --panel-soft: #f7f1e8;
+      --ink: #16202a;
+      --muted: #68747e;
+      --line: #ddd1c0;
+      --brand: #a23f2d;
+      --brand-dark: #7f2a1b;
+      --teal: #145d66;
+      --teal-soft: #e7f1f1;
+      --good: #1b7f53;
+      --good-soft: #e8f5ee;
+      --warning: #a66b00;
+      --warning-soft: #fff6de;
+      --danger-soft: #fff0ec;
+      --shadow: 0 20px 55px rgba(64, 47, 25, .13);
+      --radius: 24px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: "DM Sans", system-ui, sans-serif;
+      background:
+        radial-gradient(circle at 5% 0%, rgba(162, 63, 45, .1), transparent 30rem),
+        radial-gradient(circle at 100% 10%, rgba(20, 93, 102, .1), transparent 34rem),
+        linear-gradient(180deg, #f8f4ed 0, var(--bg) 100%);
+    }
+    button, input, select, textarea { font: inherit; }
+    button, label, input[type="radio"], input[type="checkbox"] { -webkit-tap-highlight-color: transparent; }
+    button { cursor: pointer; }
+    [hidden] { display: none !important; }
+    a { color: inherit; }
+
+    .preview-bar {
+      min-height: 42px;
+      padding: 9px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      color: #fff;
+      background: #8b321f;
+      font-size: .84rem;
+      font-weight: 700;
+      letter-spacing: .01em;
+      text-align: center;
+    }
+    .preview-dot { width: 8px; height: 8px; border-radius: 50%; background: #ffd6b7; box-shadow: 0 0 0 4px rgba(255, 214, 183, .16); }
+
+    .topbar {
+      background: rgba(22, 32, 42, .96);
+      color: #fff;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      box-shadow: 0 14px 36px rgba(22,32,42,.2);
+    }
+    .topbar-inner {
+      width: min(1180px, calc(100% - 36px));
+      min-height: 82px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .brand-lockup { display: flex; align-items: center; gap: 14px; min-width: 0; }
+    .logo-card { width: 92px; height: 48px; border-radius: 8px; background: #fff; display: grid; place-items: center; overflow: hidden; flex: 0 0 auto; }
+    .logo-card img { width: 86px; height: 44px; object-fit: contain; }
+    .brand-copy strong { display: block; font-family: "Space Grotesk", sans-serif; font-size: 1.05rem; }
+    .brand-copy span { display: block; margin-top: 2px; color: rgba(255,255,255,.66); font-size: .82rem; }
+    .top-actions { display: flex; align-items: center; gap: 10px; }
+    .top-phone, .top-status, .top-back {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 9px 14px;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 999px;
+      background: rgba(255,255,255,.08);
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+    }
+    .top-status { border: 0; background: var(--brand); }
+
+    .page-shell {
+      width: min(1180px, calc(100% - 36px));
+      margin: 34px auto 54px;
+      display: grid;
+      grid-template-columns: 290px minmax(0, 1fr);
+      gap: 24px;
+      align-items: start;
+    }
+    .side-stack { display: grid; gap: 16px; position: sticky; top: 20px; }
+    .side-card {
+      border: 1px solid rgba(221,209,192,.95);
+      border-radius: 22px;
+      background: rgba(255,253,249,.94);
+      box-shadow: 0 14px 38px rgba(64,47,25,.08);
+      padding: 22px;
+    }
+    .side-card.is-dark { color: #fff; background: linear-gradient(145deg, #16202a, #203440); border-color: transparent; }
+    .eyebrow { color: var(--brand); font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; }
+    .side-card.is-dark .eyebrow { color: #efb39f; }
+    .side-card h2 { margin: 8px 0 8px; font: 700 1.35rem/1.16 "Space Grotesk", sans-serif; }
+    .side-card p { margin: 0; color: var(--muted); line-height: 1.55; }
+    .side-card.is-dark p { color: rgba(255,255,255,.68); }
+    .trust-list { display: grid; gap: 12px; margin: 20px 0 0; padding: 0; list-style: none; }
+    .trust-list li { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start; font-size: .9rem; }
+    .trust-check { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; background: rgba(255,255,255,.1); color: #d7f7e5; font-weight: 800; }
+    .trust-list small { display: block; margin-top: 2px; color: rgba(255,255,255,.6); line-height: 1.35; }
+    .need-list { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }
+    .need-list li { display: flex; align-items: center; gap: 10px; font-size: .9rem; color: #4f5c65; }
+    .need-list span { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: var(--panel-soft); color: var(--teal); font-weight: 800; }
+    .side-help { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.13); }
+    .side-help-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; background: rgba(255,255,255,.1); font-size: 1.15rem; }
+    .side-help a { display: block; margin-top: 2px; color: #fff; text-decoration: none; font-weight: 700; }
+
+    .main-card {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid rgba(221,209,192,.95);
+      border-radius: var(--radius);
+      background: rgba(255,253,249,.97);
+      box-shadow: var(--shadow);
+    }
+    .wizard-head { padding: 28px 32px 22px; border-bottom: 1px solid var(--line); }
+    .wizard-title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+    .wizard-title-row h1 { margin: 7px 0 7px; font: 700 clamp(1.75rem, 3vw, 2.55rem)/1.05 "Space Grotesk", sans-serif; letter-spacing: -.035em; }
+    .wizard-title-row p { margin: 0; max-width: 650px; color: var(--muted); line-height: 1.55; }
+    .time-pill { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #c6ddd9; border-radius: 999px; background: #f0f8f6; color: #235f57; font-size: .82rem; font-weight: 800; }
+
+    .progress-mobile { display: none; margin-top: 20px; }
+    .progress-mobile-copy { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: var(--muted); font-size: .82rem; font-weight: 700; }
+    .progress-track { height: 7px; border-radius: 999px; background: #e8dfd2; overflow: hidden; }
+    .progress-fill { height: 100%; width: 20%; border-radius: inherit; background: linear-gradient(90deg, var(--brand), #c76845); transition: width .25s ease; }
+    .stepper { display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 24px; }
+    .step-indicator { position: relative; display: grid; justify-items: center; gap: 7px; border: 0; padding: 0 5px; color: #89929a; background: transparent; font-size: .77rem; font-weight: 700; text-align: center; }
+    .step-indicator::before { content: ""; position: absolute; z-index: 0; top: 17px; left: -50%; width: 100%; height: 2px; background: #e4dacb; }
+    .step-indicator:first-child::before { display: none; }
+    .step-number { position: relative; z-index: 1; width: 35px; height: 35px; display: grid; place-items: center; border: 2px solid #ded3c5; border-radius: 50%; background: var(--panel); color: #7a858d; transition: .2s ease; }
+    .step-indicator.is-active { color: var(--ink); }
+    .step-indicator.is-active .step-number { border-color: var(--brand); background: var(--brand); color: #fff; box-shadow: 0 0 0 5px rgba(162,63,45,.12); }
+    .step-indicator.is-done { color: #3f695e; }
+    .step-indicator.is-done::before { background: #77b49d; }
+    .step-indicator.is-done .step-number { border-color: var(--good); background: var(--good-soft); color: var(--good); }
+
+    .wizard-body { padding: 30px 32px 20px; }
+    .step-panel { animation: reveal .24s ease; }
+    @keyframes reveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+    .step-kicker { color: var(--brand); font-size: .75rem; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; }
+    .step-panel h2 { margin: 7px 0 7px; font: 700 clamp(1.45rem, 2.6vw, 2rem)/1.14 "Space Grotesk", sans-serif; letter-spacing: -.025em; }
+    .step-intro { margin: 0 0 24px; color: var(--muted); line-height: 1.55; }
+
+    .type-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .type-card { position: relative; display: block; min-height: 150px; padding: 19px; border: 2px solid var(--line); border-radius: 18px; background: #fff; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; cursor: pointer; }
+    .type-card:hover { transform: translateY(-2px); border-color: #c8b5a3; box-shadow: 0 10px 25px rgba(64,47,25,.08); }
+    .type-card:has(input:focus-visible) { outline: 3px solid rgba(11,110,253,.38); outline-offset: 3px; }
+    .type-card:has(input:checked) { border-color: var(--brand); background: #fff9f6; box-shadow: 0 0 0 4px rgba(162,63,45,.1); }
+    .type-card input { position: absolute; opacity: 0; pointer-events: none; }
+    .type-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .type-icon { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 15px; background: var(--panel-soft); color: var(--teal); font: 700 .88rem "Space Grotesk", sans-serif; }
+    .type-radio { width: 23px; height: 23px; border: 2px solid #c6bbaa; border-radius: 50%; background: #fff; }
+    .type-card:has(input:checked) .type-radio { border: 7px solid var(--brand); }
+    .type-card strong { display: block; margin-top: 15px; font: 700 1.05rem "Space Grotesk", sans-serif; }
+    .type-card p { margin: 6px 0 0; color: var(--muted); font-size: .87rem; line-height: 1.42; }
+    .type-badge { display: inline-flex; margin-top: 11px; padding: 5px 8px; border-radius: 999px; background: var(--teal-soft); color: var(--teal); font-size: .72rem; font-weight: 800; }
+
+    .form-section { margin-top: 24px; padding-top: 23px; border-top: 1px solid #eadfd1; }
+    .form-section:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
+    .section-label { margin-bottom: 13px; font: 700 1.02rem "Space Grotesk", sans-serif; }
+    .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .field-grid.three { grid-template-columns: 1fr .75fr 1.25fr; }
+    .field.full { grid-column: 1 / -1; }
+    .field label, .field-label { display: block; margin-bottom: 7px; font-size: .86rem; font-weight: 800; }
+    .required { color: var(--brand); }
+    .field input, .field select, .field textarea {
+      width: 100%;
+      min-height: 50px;
+      border: 1px solid #cfc4b5;
+      border-radius: 12px;
+      background: #fff;
+      color: var(--ink);
+      padding: 12px 13px;
+      outline: none;
+      transition: border-color .18s, box-shadow .18s;
+    }
+    .field textarea { min-height: 118px; resize: vertical; line-height: 1.45; }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--teal); box-shadow: 0 0 0 4px rgba(20,93,102,.12); }
+    .field-hint { margin-top: 6px; color: var(--muted); font-size: .78rem; line-height: 1.4; }
+    .choice-row { display: flex; flex-wrap: wrap; gap: 9px; }
+    .choice-chip { position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 10px 13px; border: 1px solid #cfc4b5; border-radius: 999px; background: #fff; font-size: .86rem; font-weight: 700; cursor: pointer; }
+    .choice-chip input { position: absolute; opacity: 0; }
+    .choice-chip:has(input:checked) { border-color: var(--teal); background: var(--teal-soft); color: var(--teal); box-shadow: 0 0 0 3px rgba(20,93,102,.08); }
+    .choice-dot { width: 10px; height: 10px; border-radius: 50%; background: #d2c8ba; }
+    .choice-chip:has(input:checked) .choice-dot { background: var(--teal); box-shadow: 0 0 0 4px rgba(20,93,102,.13); }
+
+    .soft-note { margin-top: 16px; padding: 14px 15px; border: 1px solid #c9dedc; border-radius: 14px; background: #f0f8f7; color: #2b5d59; font-size: .86rem; line-height: 1.5; }
+    .soft-note strong { color: #164b47; }
+    .soft-note.is-warm { border-color: #ecd4b5; background: var(--warning-soft); color: #71531d; }
+    .unknown-toggle { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0; padding: 13px 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel-soft); }
+    .unknown-toggle input { width: 19px; height: 19px; margin-top: 1px; accent-color: var(--brand); }
+    .unknown-toggle label { font-size: .88rem; line-height: 1.4; cursor: pointer; }
+
+    .upload-zone { position: relative; min-height: 190px; display: grid; place-items: center; padding: 24px; border: 2px dashed #c6b6a3; border-radius: 18px; background: linear-gradient(145deg, #fff, #fbf6ee); text-align: center; transition: .2s ease; }
+    .upload-zone.is-dragging { border-color: var(--teal); background: var(--teal-soft); }
+    .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .upload-icon { width: 54px; height: 54px; display: grid; place-items: center; margin: 0 auto 11px; border-radius: 17px; background: var(--teal-soft); color: var(--teal); font-size: 1.45rem; }
+    .upload-zone strong { display: block; font: 700 1rem "Space Grotesk", sans-serif; }
+    .upload-zone span { display: block; margin-top: 6px; color: var(--muted); font-size: .82rem; }
+    .upload-file-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .file-chip { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 7px 10px; border: 1px solid #c9dedc; border-radius: 999px; background: var(--teal-soft); color: #245b56; font-size: .78rem; font-weight: 700; }
+    .file-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .photo-guide { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
+    .photo-tip { padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: #fff; color: var(--muted); font-size: .78rem; text-align: center; }
+    .photo-tip b { display: block; margin-bottom: 5px; color: var(--ink); font-size: .83rem; }
+    .mobility-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .mobility-card { position: relative; display: grid; justify-items: center; gap: 5px; min-height: 92px; padding: 14px; border: 2px solid var(--line); border-radius: 15px; background: #fff; text-align: center; cursor: pointer; }
+    .mobility-card input { position: absolute; opacity: 0; }
+    .mobility-card:has(input:checked) { border-color: var(--brand); background: #fff8f5; }
+    .mobility-card strong { font-size: .9rem; }
+    .mobility-card span { color: var(--muted); font-size: .73rem; }
+
+    .review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+    .review-card { padding: 16px; border: 1px solid var(--line); border-radius: 15px; background: #fff; }
+    .review-card small { display: block; margin-bottom: 5px; color: var(--muted); font-size: .74rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+    .review-card strong { display: block; line-height: 1.4; }
+    .review-card span { display: block; margin-top: 4px; color: var(--muted); font-size: .84rem; line-height: 1.42; }
+    .review-card.full { grid-column: 1 / -1; }
+    .consent { display: flex; gap: 11px; align-items: flex-start; margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-soft); }
+    .consent input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--brand); flex: 0 0 auto; }
+    .consent label { font-size: .84rem; line-height: 1.5; cursor: pointer; }
+    .consent a { color: var(--brand-dark); font-weight: 700; }
+
+    .wizard-footer { position: sticky; z-index: 5; bottom: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 82px; padding: 16px 32px calc(16px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: rgba(255,253,249,.96); backdrop-filter: blur(14px); }
+    .footer-copy { color: var(--muted); font-size: .78rem; }
+    .footer-actions { display: flex; gap: 10px; margin-left: auto; }
+    .btn { min-height: 49px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 12px; padding: 11px 18px; font-weight: 800; text-decoration: none; transition: .18s ease; }
+    .btn-primary { border: 1px solid var(--brand); background: var(--brand); color: #fff; box-shadow: 0 9px 20px rgba(162,63,45,.2); }
+    .btn-primary:hover { background: var(--brand-dark); border-color: var(--brand-dark); transform: translateY(-1px); }
+    .btn-secondary { border: 1px solid #cfc4b5; background: #fff; color: var(--ink); }
+    .btn-secondary:hover { border-color: #ab9d8a; background: #fbf7f1; }
+    .btn-teal { border: 1px solid var(--teal); background: var(--teal); color: #fff; }
+    .btn-link { border: 0; background: transparent; color: var(--brand-dark); padding-inline: 5px; }
+    .btn[disabled] { opacity: .48; cursor: not-allowed; transform: none; }
+
+    .result-view { padding: 42px 36px; animation: reveal .3s ease; }
+    .result-hero { max-width: 690px; margin: 0 auto; text-align: center; }
+    .success-icon { width: 76px; height: 76px; display: grid; place-items: center; margin: 0 auto 18px; border-radius: 25px; background: var(--good-soft); color: var(--good); font-size: 2.1rem; box-shadow: 0 0 0 9px rgba(27,127,83,.07); }
+    .result-hero h1 { margin: 0 0 9px; font: 700 clamp(1.8rem, 4vw, 2.6rem)/1.1 "Space Grotesk", sans-serif; }
+    .result-hero p { margin: 0 auto; color: var(--muted); line-height: 1.55; }
+    .reference-box { display: inline-flex; align-items: center; gap: 10px; margin-top: 19px; padding: 11px 15px; border: 1px solid #b9d7cc; border-radius: 12px; background: var(--good-soft); color: #135b3a; }
+    .reference-box small { font-weight: 700; }
+    .reference-box strong { font: 700 1.02rem "Space Grotesk", sans-serif; letter-spacing: .02em; }
+    .next-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; margin: 30px 0; text-align: left; }
+    .next-card { padding: 17px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+    .next-card span { width: 31px; height: 31px; display: grid; place-items: center; margin-bottom: 12px; border-radius: 10px; background: var(--panel-soft); color: var(--brand); font-weight: 800; }
+    .next-card strong { display: block; font-size: .92rem; }
+    .next-card p { margin: 5px 0 0; font-size: .8rem; line-height: 1.42; }
+    .result-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; }
+
+    .status-view { padding: 28px 32px 34px; animation: reveal .3s ease; }
+    .status-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding-bottom: 23px; border-bottom: 1px solid var(--line); }
+    .status-top h1 { margin: 7px 0 5px; font: 700 clamp(1.65rem, 3vw, 2.25rem)/1.1 "Space Grotesk", sans-serif; }
+    .status-top p { margin: 0; color: var(--muted); }
+    .status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 9px 13px; border-radius: 999px; background: var(--warning-soft); color: #78530c; font-size: .8rem; font-weight: 800; white-space: nowrap; }
+    .status-pulse { width: 8px; height: 8px; border-radius: 50%; background: #d59012; box-shadow: 0 0 0 5px rgba(213,144,18,.13); }
+    .status-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(260px, .7fr); gap: 18px; margin-top: 22px; }
+    .status-card { border: 1px solid var(--line); border-radius: 17px; background: #fff; padding: 20px; }
+    .status-card h2 { margin: 0 0 4px; font: 700 1.08rem "Space Grotesk", sans-serif; }
+    .status-card > p { margin: 0; color: var(--muted); font-size: .84rem; line-height: 1.45; }
+    .timeline { margin: 19px 0 0; padding: 0; list-style: none; }
+    .timeline li { position: relative; display: grid; grid-template-columns: 34px 1fr; gap: 11px; min-height: 70px; }
+    .timeline li:not(:last-child)::after { content: ""; position: absolute; top: 30px; bottom: 0; left: 15px; width: 2px; background: #e3d9cb; }
+    .timeline-dot { position: relative; z-index: 1; width: 31px; height: 31px; display: grid; place-items: center; border: 2px solid #d8cdbc; border-radius: 50%; background: #fff; color: #89939a; font-size: .73rem; font-weight: 800; }
+    .timeline li.is-done .timeline-dot { border-color: var(--good); background: var(--good-soft); color: var(--good); }
+    .timeline li.is-current .timeline-dot { border-color: var(--brand); background: var(--brand); color: #fff; box-shadow: 0 0 0 5px rgba(162,63,45,.1); }
+    .timeline-content strong { display: block; padding-top: 3px; font-size: .91rem; }
+    .timeline-content span { display: block; margin-top: 4px; color: var(--muted); font-size: .79rem; line-height: 1.35; }
+    .timeline li:not(.is-done):not(.is-current) .timeline-content { opacity: .62; }
+    .attention-card { border-color: #ecd6b7; background: var(--warning-soft); }
+    .attention-card .btn { width: 100%; margin-top: 15px; }
+    .mini-list { display: grid; gap: 10px; margin-top: 15px; }
+    .mini-row { display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid rgba(113,83,29,.14); font-size: .83rem; }
+    .mini-row span { color: var(--muted); }
+    .mini-row b { text-align: right; }
+    .message-box { margin-top: 14px; padding: 13px; border-radius: 13px; background: var(--panel-soft); font-size: .83rem; line-height: 1.45; }
+    .message-box strong { display: block; margin-bottom: 4px; }
+    .status-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
+
+    .page-footer { width: min(1180px, calc(100% - 36px)); margin: -20px auto 34px; display: flex; justify-content: space-between; gap: 20px; color: #68747e; font-size: .78rem; }
+    .page-footer div:last-child { text-align: right; }
+    .page-footer a { color: #46535c; font-weight: 700; }
+
+    .toast { position: fixed; z-index: 50; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px); max-width: min(430px, calc(100% - 32px)); padding: 12px 15px; border-radius: 12px; background: #16202a; color: #fff; box-shadow: 0 16px 40px rgba(22,32,42,.3); font-size: .84rem; font-weight: 700; opacity: 0; pointer-events: none; transition: .2s ease; }
+    .toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+
+    @media (max-width: 900px) {
+      .page-shell { grid-template-columns: 1fr; margin-top: 22px; }
+      .side-stack { position: static; grid-template-columns: 1fr 1fr; }
+      .side-card.is-dark { grid-column: 1 / -1; }
+      .status-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 680px) {
+      body { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+      .preview-bar { align-items: flex-start; font-size: .76rem; }
+      .topbar-inner { width: calc(100% - 26px); min-height: 70px; }
+      .logo-card { width: 72px; height: 42px; }
+      .logo-card img { width: 69px; height: 38px; }
+      .brand-copy strong { font-size: .92rem; }
+      .brand-copy span { display: none; }
+      .top-phone { width: 44px; padding: 0; font-size: 0; }
+      .top-phone::before { content: "☎"; font-size: 1rem; }
+      .top-back { min-width: 44px; padding-inline: 12px; font-size: .78rem; }
+      .top-status { display: none; }
+      .page-shell { width: calc(100% - 20px); margin: 12px auto 40px; }
+      .side-stack { display: none; }
+      .main-card { border-radius: 18px; }
+      .wizard-head { padding: 22px 18px 17px; }
+      .wizard-title-row { display: block; }
+      .wizard-title-row h1 { font-size: 1.75rem; }
+      .time-pill { display: inline-flex; margin-top: 14px; }
+      .stepper { display: none; }
+      .progress-mobile { display: block; }
+      .wizard-body { padding: 23px 18px 15px; }
+      .type-grid, .field-grid, .field-grid.three, .review-grid, .next-grid { grid-template-columns: 1fr; }
+      .type-card { min-height: 132px; }
+      .field.full, .review-card.full { grid-column: auto; }
+      .photo-guide { grid-template-columns: repeat(2, 1fr); }
+      .mobility-grid { grid-template-columns: 1fr; }
+      .mobility-card { min-height: 72px; grid-template-columns: 32px 1fr; justify-items: start; align-items: center; text-align: left; }
+      .mobility-card span { grid-column: 2; margin-top: -8px; }
+      .wizard-footer {
+        position: fixed;
+        left: 10px;
+        right: 10px;
+        bottom: 0;
+        min-height: 76px;
+        padding: 13px 18px calc(13px + env(safe-area-inset-bottom));
+        border: 1px solid var(--line);
+        border-bottom: 0;
+        border-radius: 17px 17px 0 0;
+        box-shadow: 0 -12px 30px rgba(22,32,42,.12);
+      }
+      .footer-copy { display: none; }
+      .footer-actions { width: 100%; }
+      .footer-actions .btn { flex: 1; }
+      .result-view, .status-view { padding: 29px 18px; }
+      .status-top { display: block; }
+      .status-pill { margin-top: 15px; }
+      .page-footer { width: calc(100% - 28px); margin-top: -18px; display: block; line-height: 1.6; }
+      .page-footer div:last-child { margin-top: 5px; text-align: left; }
+    }
+  </style>
+</head>
+<body{% if cockpit_mode %} class="cockpit-mode"{% endif %}>
+  <div class="preview-bar"><span class="preview-dot"></span>{% if cockpit_mode %}Werkstatt-Cockpit · Versicherungsschaden aufnehmen · lokale Arbeitsversion ohne Speicherung{% else %}Lokale Designvorschau · Es werden keine Daten oder Dateien gespeichert{% endif %}</div>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-lockup">
+        <div class="logo-card"><img src="{{ url_for('static', filename='logo.png') }}" alt="Gärtner Karosserie & Lack"></div>
+        <div class="brand-copy"><strong>Gärtner Schadenservice</strong><span>Karosserie, Lack, Versicherung und Ersatzmobilität</span></div>
+      </div>
+      <div class="top-actions">
+        {% if cockpit_mode %}
+        <a class="top-back" href="{{ url_for('betriebs_cockpit') }}">← Cockpit</a>
+        <a class="top-status" href="{{ url_for('admin_versicherung') }}">Alle Versicherungsfälle</a>
+        {% else %}
+        <a class="top-phone" href="tel:+4915227706694">☎ 0152 277 066 94</a>
+        <button class="top-status" type="button" data-show-status>Status ansehen</button>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <aside class="side-stack" aria-label="Hinweise zur Schadenmeldung">
+      <section class="side-card is-dark">
+        <div class="eyebrow">Wir kümmern uns</div>
+        <h2>Ein Schaden.<br>Ein Ansprechpartner.</h2>
+        <p>Sie melden uns kurz, was passiert ist. Wir prüfen alles persönlich und besprechen danach den nächsten Schritt.</p>
+        <ul class="trust-list">
+          <li><span class="trust-check">✓</span><div><b>Ohne Login starten</b><small>Die Vorgangsnummer erhalten Sie direkt nach der Meldung.</small></div></li>
+          <li><span class="trust-check">✓</span><div><b>Fehlende Daten nachreichen</b><small>Angaben zum Unfallgegner dürfen zunächst unbekannt bleiben.</small></div></li>
+          <li><span class="trust-check">✓</span><div><b>Persönlich geprüft</b><small>Keine automatische Reparaturfreigabe oder Abtretung.</small></div></li>
+        </ul>
+        <div class="side-help"><div class="side-help-icon">☎</div><div><small>Unsicher oder nicht fahrbereit?</small><a href="tel:+4915227706694">Direkt Werkstatt anrufen</a></div></div>
+      </section>
+      <section class="side-card">
+        <div class="eyebrow">Wenn vorhanden</div>
+        <h2>Das hilft uns</h2>
+        <p>Sie können Unterlagen auch später ergänzen.</p>
+        <ul class="need-list">
+          <li><span>1</span>Fahrzeugschein oder Kennzeichen</li>
+          <li><span>2</span>Übersichts- und Detailfotos</li>
+          <li><span>3</span>Unfallbericht oder Polizeidaten</li>
+          <li><span>4</span>Versicherung und Schadennummer</li>
+        </ul>
+      </section>
+    </aside>
+
+    <section class="main-card">
+      <div id="wizard-view">
+        <header class="wizard-head">
+          <div class="wizard-title-row">
+            <div>
+              <div class="eyebrow">Schaden online melden</div>
+              <h1>Unfall oder Fahrzeugschaden?</h1>
+              <p>In etwa fünf Minuten ist alles bei uns. Unbekannte Angaben können Sie überspringen und später im Kundenstatus ergänzen.</p>
+            </div>
+            <div class="time-pill">ca. 5 Minuten</div>
+          </div>
+          <div class="progress-mobile">
+            <div class="progress-mobile-copy"><span id="mobile-step-copy">Schritt 1 von 5</span><span id="mobile-step-label">Schadenart</span></div>
+            <div class="progress-track" role="progressbar" aria-valuemin="1" aria-valuemax="5" aria-valuenow="1"><div class="progress-fill" id="progress-fill"></div></div>
+          </div>
+          <nav class="stepper" aria-label="Fortschritt">
+            <button class="step-indicator is-active" type="button" data-step-button="1"><span class="step-number">1</span><span>Schadenart</span></button>
+            <button class="step-indicator" type="button" data-step-button="2"><span class="step-number">2</span><span>Kontakt &amp; Fahrzeug</span></button>
+            <button class="step-indicator" type="button" data-step-button="3"><span class="step-number">3</span><span>Unfall &amp; Versicherung</span></button>
+            <button class="step-indicator" type="button" data-step-button="4"><span class="step-number">4</span><span>Fotos &amp; Mobilität</span></button>
+            <button class="step-indicator" type="button" data-step-button="5"><span class="step-number">5</span><span>Prüfen &amp; senden</span></button>
+          </nav>
+        </header>
+
+        <form id="damage-form" novalidate>
+          <div class="wizard-body">
+            <section class="step-panel" data-step="1">
+              <div class="step-kicker">Schritt 1</div>
+              <h2>Was ist passiert?</h2>
+              <p class="step-intro">Wählen Sie die Beschreibung, die am besten passt. Wenn Sie unsicher sind, klären wir die Schadenart gemeinsam.</p>
+              <div class="type-grid">
+                <label class="type-card">
+                  <input type="radio" name="schadenart" value="haftpflicht" required>
+                  <span class="type-card-top"><span class="type-icon">HP</span><span class="type-radio"></span></span>
+                  <strong>Jemand anderes ist schuld</strong>
+                  <p>Auffahrunfall, Parkrempler oder Vorfahrtverletzung durch einen anderen.</p>
+                  <span class="type-badge">Haftpflichtschaden</span>
+                </label>
+                <label class="type-card">
+                  <input type="radio" name="schadenart" value="kasko" required>
+                  <span class="type-card-top"><span class="type-icon">VK</span><span class="type-radio"></span></span>
+                  <strong>Selbst verursacht oder Vandalismus</strong>
+                  <p>Eigener Unfall, unbekannter Verursacher oder mutwillige Beschädigung.</p>
+                  <span class="type-badge">Vollkasko</span>
+                </label>
+                <label class="type-card">
+                  <input type="radio" name="schadenart" value="teilkasko" required>
+                  <span class="type-card-top"><span class="type-icon">TK</span><span class="type-radio"></span></span>
+                  <strong>Glas, Hagel, Wild oder Sturm</strong>
+                  <p>Glasschaden, Unwetter, Wildunfall, Diebstahl, Brand oder Marder.</p>
+                  <span class="type-badge">Teilkasko</span>
+                </label>
+                <label class="type-card">
+                  <input type="radio" name="schadenart" value="unklar" required>
+                  <span class="type-card-top"><span class="type-icon">?</span><span class="type-radio"></span></span>
+                  <strong>Ich bin nicht sicher</strong>
+                  <p>Beschreiben Sie kurz den Schaden. Wir rufen zurück und ordnen ihn richtig ein.</p>
+                  <span class="type-badge">Beratung gewünscht</span>
+                </label>
+              </div>
+              <div class="soft-note"><strong>Gut zu wissen:</strong> Diese erste Meldung ist noch kein Reparaturauftrag und keine Abtretung. Beides erfolgt erst nach unserer Prüfung und Ihrem ausdrücklichen Einverständnis.</div>
+            </section>
+
+            <section class="step-panel" data-step="2" hidden>
+              <div class="step-kicker">Schritt 2</div>
+              <h2>Wie erreichen wir Sie?</h2>
+              <p class="step-intro">Wir benötigen nur die Angaben, mit denen wir den Schaden eindeutig zuordnen und Sie persönlich erreichen können.</p>
+              <div class="form-section">
+                <div class="section-label">Ihre Kontaktdaten</div>
+                <div class="field-grid">
+                  <div class="field"><label for="kunde-name">Vor- und Nachname <span class="required">*</span></label><input id="kunde-name" name="kunde_name" autocomplete="name" required placeholder="z. B. Anna Schneider"></div>
+                  <div class="field"><label for="kunde-telefon">Telefonnummer <span class="required">*</span></label><input id="kunde-telefon" name="telefon" type="tel" autocomplete="tel" required placeholder="z. B. 0171 1234567"></div>
+                  <div class="field full"><label for="kunde-email">E-Mail-Adresse <span class="field-hint">(optional)</span></label><input id="kunde-email" name="email" type="email" autocomplete="email" placeholder="anna@beispiel.de"></div>
+                </div>
+                <div class="field-label" style="margin-top:15px">Bevorzugter Kontaktweg</div>
+                <div class="choice-row">
+                  <label class="choice-chip"><input type="radio" name="kontaktweg" value="telefon" checked><span class="choice-dot"></span>Telefon</label>
+                  <label class="choice-chip"><input type="radio" name="kontaktweg" value="email"><span class="choice-dot"></span>E-Mail</label>
+                  <label class="choice-chip"><input type="radio" name="kontaktweg" value="whatsapp"><span class="choice-dot"></span>WhatsApp</label>
+                </div>
+                <div class="field-hint" id="contact-hint">Wir melden uns telefonisch. WhatsApp wird nur nach dieser freiwilligen Auswahl genutzt.</div>
+              </div>
+              <div class="form-section">
+                <div class="section-label">Ihr Fahrzeug</div>
+                <div class="field-grid">
+                  <div class="field"><label for="kennzeichen">Kennzeichen <span class="required">*</span></label><input id="kennzeichen" name="kennzeichen" required autocapitalize="characters" placeholder="MOS · AB 123"></div>
+                  <div class="field"><label for="fahrzeug">Marke und Modell <span class="required">*</span></label><input id="fahrzeug" name="fahrzeug" required placeholder="z. B. BMW 3er Touring"></div>
+                  <div class="field full"><label for="fin">Fahrgestellnummer <span class="field-hint">(optional)</span></label><input id="fin" name="fin" maxlength="17" autocapitalize="characters" placeholder="17-stellige FIN oder später nachreichen"><div class="field-hint">Ein Foto des Fahrzeugscheins reicht ebenfalls. Wir übernehmen erkannte Daten erst nach Ihrer Kontrolle.</div></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-panel" data-step="3" hidden>
+              <div class="step-kicker">Schritt 3</div>
+              <h2>Wann und wo ist der Schaden entstanden?</h2>
+              <p class="step-intro">Eine kurze, sachliche Beschreibung genügt. Sie müssen hier keine rechtliche Bewertung abgeben.</p>
+              <div class="form-section">
+                <div class="field-grid three">
+                  <div class="field"><label for="unfall-datum">Datum <span class="required">*</span></label><input id="unfall-datum" name="unfall_datum" type="date" max="{{ heute_iso }}" required></div>
+                  <div class="field"><label for="unfall-zeit">Uhrzeit</label><input id="unfall-zeit" name="unfall_zeit" type="time"></div>
+                  <div class="field"><label for="unfall-ort">Ort <span class="required">*</span></label><input id="unfall-ort" name="unfall_ort" required placeholder="Straße, Parkplatz oder Ort"></div>
+                  <div class="field full"><label for="beschreibung">Was ist passiert? <span class="required">*</span></label><textarea id="beschreibung" name="beschreibung" required placeholder="Beschreiben Sie den Ablauf in wenigen Sätzen …"></textarea><div class="field-hint">Keine Sorge: Sie können den Text vor dem Absenden noch einmal prüfen.</div></div>
+                </div>
+              </div>
+              <div class="form-section">
+                <div class="section-label" id="insurance-heading">Versicherungsdaten</div>
+                <div class="field-grid">
+                  <div class="field"><label for="versicherung">Versicherung</label><input id="versicherung" name="versicherung" placeholder="z. B. HUK, Allianz, VHV"></div>
+                  <div class="field"><label for="police">Police / Vertragsnummer</label><input id="police" name="police" placeholder="Falls zur Hand"></div>
+                  <div class="field full"><label for="schadennummer">Schadennummer</label><input id="schadennummer" name="schadennummer" placeholder="Falls bereits von der Versicherung vergeben"></div>
+                </div>
+              </div>
+              <div class="form-section" id="opponent-section">
+                <div class="section-label">Angaben zum Unfallgegner</div>
+                <div class="unknown-toggle"><input id="gegner-unbekannt" type="checkbox" name="gegner_unbekannt" checked><label for="gegner-unbekannt"><b>Daten fehlen oder sind noch nicht vollständig.</b><br>Kein Problem – ich reiche sie später nach.</label></div>
+                <div class="field-grid" id="opponent-fields" hidden>
+                  <div class="field"><label for="gegner-name">Name</label><input id="gegner-name" name="gegner_name"></div>
+                  <div class="field"><label for="gegner-kennzeichen">Kennzeichen</label><input id="gegner-kennzeichen" name="gegner_kennzeichen" autocapitalize="characters"></div>
+                  <div class="field"><label for="gegner-versicherung">Versicherung</label><input id="gegner-versicherung" name="gegner_versicherung"></div>
+                  <div class="field"><label for="gegner-schadennummer">Schadennummer</label><input id="gegner-schadennummer" name="gegner_schadennummer"></div>
+                </div>
+                <div class="soft-note"><strong>Keine Gegnerunterschrift nötig:</strong> Für die erste Meldung verlangen wir keine E-Mail, Police oder Unterschrift des Unfallgegners.</div>
+              </div>
+            </section>
+
+            <section class="step-panel" data-step="4" hidden>
+              <div class="step-kicker">Schritt 4</div>
+              <h2>Zeigen Sie uns den Schaden</h2>
+              <p class="step-intro">Mehrere Fotos, Videos und PDFs dürfen gemeinsam ausgewählt werden. In dieser Designvorschau bleiben sie ausschließlich auf Ihrem Gerät.</p>
+              <div class="upload-zone" id="upload-zone">
+                <input id="dateien" type="file" multiple accept="image/*,video/*,.pdf,application/pdf" aria-describedby="upload-copy">
+                <div><div class="upload-icon">＋</div><strong>Fotos oder Unterlagen auswählen</strong><span id="upload-copy">Antippen oder Dateien hierher ziehen · Bilder, Video oder PDF</span></div>
+              </div>
+              <div class="upload-file-list" id="upload-files" aria-live="polite"></div>
+              <div class="photo-guide">
+                <div class="photo-tip"><b>Übersicht</b>Ganzes Fahrzeug</div>
+                <div class="photo-tip"><b>Nahaufnahme</b>Beschädigtes Teil</div>
+                <div class="photo-tip"><b>Weitere Seite</b>Umfeld zeigen</div>
+                <div class="photo-tip"><b>Unterlagen</b>Schein / Bericht</div>
+              </div>
+              <div class="form-section">
+                <div class="section-label">Benötigen Sie Ersatzmobilität?</div>
+                <div class="mobility-grid">
+                  <label class="mobility-card"><input type="radio" name="mobilitaet" value="ja"><strong>Ja</strong><span>Ersatzwagen benötigt</span></label>
+                  <label class="mobility-card"><input type="radio" name="mobilitaet" value="nein"><strong>Nein</strong><span>Kein Fahrzeug nötig</span></label>
+                  <label class="mobility-card"><input type="radio" name="mobilitaet" value="unklar" checked><strong>Noch unklar</strong><span>Bitte mit mir klären</span></label>
+                </div>
+                <div class="soft-note is-warm"><strong>Direkt verbunden:</strong> Wenn Sie einen Ersatzwagen wünschen, prüfen wir den Zeitraum gemeinsam mit Schaden, Reparaturtermin und Versicherung – ohne zweite Anfrage.</div>
+              </div>
+            </section>
+
+            <section class="step-panel" data-step="5" hidden>
+              <div class="step-kicker">Schritt 5</div>
+              <h2>Bitte kurz prüfen</h2>
+              <p class="step-intro">Aus Ihrer Meldung entsteht zunächst eine Werkstattprüfung. Sie erteilen damit noch keinen Reparaturauftrag.</p>
+              <div class="review-grid">
+                <div class="review-card"><small>Schadenart</small><strong id="review-type">–</strong><span id="review-date">–</span></div>
+                <div class="review-card"><small>Kontakt</small><strong id="review-customer">–</strong><span id="review-contact">–</span></div>
+                <div class="review-card"><small>Fahrzeug</small><strong id="review-car">–</strong><span id="review-insurance">–</span></div>
+                <div class="review-card"><small>Ersatzmobilität</small><strong id="review-mobility">–</strong><span id="review-files">Keine Dateien ausgewählt</span></div>
+                <div class="review-card full"><small>Ihre Beschreibung</small><strong id="review-description">–</strong><span>Kann nach dem Absenden im Kundenstatus ergänzt werden.</span></div>
+              </div>
+              <div class="soft-note"><strong>Was nach dem Absenden passiert:</strong> Wir prüfen Schaden, Unterlagen und Versicherungsweg. Erst danach erhalten Sie separat einen Reparaturauftrag beziehungsweise – falls erforderlich – eine Abtretung zur Prüfung und Unterschrift.</div>
+              <div class="consent"><input id="datenschutz-ok" type="checkbox" required><label for="datenschutz-ok">Ich bestätige, dass die Angaben nach meinem Wissen richtig sind, und stimme der Verarbeitung zur Bearbeitung dieser Schadenmeldung zu. Hinweise dazu stehen in der <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>. <span class="required">*</span></label></div>
+            </section>
+          </div>
+
+          <footer class="wizard-footer">
+            <div class="footer-copy">Pflichtfelder sind mit <span class="required">*</span> markiert.</div>
+            <div class="footer-actions">
+              <button class="btn btn-secondary" type="button" id="back-button" hidden>Zurück</button>
+              <button class="btn btn-primary" type="button" id="next-button">Weiter</button>
+              <button class="btn btn-primary" type="button" id="submit-button" hidden>Meldung unverbindlich senden</button>
+            </div>
+          </footer>
+        </form>
+      </div>
+
+      <section class="result-view" id="success-view" hidden>
+        <div class="result-hero">
+          <div class="success-icon">✓</div>
+          <h1>Ihre Schadenmeldung ist angekommen</h1>
+          <p>Wir prüfen Ihre Angaben persönlich und melden uns über den gewählten Kontaktweg. Fehlende Unterlagen können Sie jederzeit im Kundenstatus ergänzen.</p>
+          <div class="reference-box"><small>Vorgangsnummer</small><strong>{{ demo_ref }}</strong></div>
+          <div class="next-grid">
+            <div class="next-card"><span>1</span><strong>Werkstatt prüft</strong><p>Wir sichten Schadenart, Fahrzeugdaten und Unterlagen.</p></div>
+            <div class="next-card"><span>2</span><strong>Wir melden uns</strong><p>Offene Fragen, Besichtigung und Mobilität klären wir persönlich.</p></div>
+            <div class="next-card"><span>3</span><strong>Alles im Status</strong><p>Freigabe, Termin und Reparaturfortschritt bleiben sichtbar.</p></div>
+          </div>
+          <div class="soft-note is-warm" style="text-align:left;margin-bottom:20px"><strong>Wichtig:</strong> Dies ist noch keine Reparatur- oder Versicherungsfreigabe. Es wurde in dieser lokalen Vorschau nichts übertragen oder gespeichert.</div>
+          <div class="result-actions">
+            <button class="btn btn-primary" type="button" data-show-status>Kundenstatus öffnen</button>
+            <button class="btn btn-secondary" type="button" id="restart-button">Neue Meldung ansehen</button>
+            <a class="btn btn-secondary" href="tel:+4915227706694">Werkstatt anrufen</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="status-view" id="status-view" hidden>
+        <div class="status-top">
+          <div><div class="eyebrow">Ihr Kundenstatus · {{ demo_ref }}</div><h1>Wir prüfen Ihre Unterlagen</h1><p id="status-car-copy">BMW 320d Touring · MOS AB 123</p></div>
+          <div class="status-pill"><span class="status-pulse"></span>Unterlagenprüfung läuft</div>
+        </div>
+        <div class="status-grid">
+          <article class="status-card">
+            <h2>So geht es weiter</h2><p>Sie sehen jederzeit, wer gerade am Zug ist.</p>
+            <ol class="timeline">
+              <li class="is-done"><span class="timeline-dot">✓</span><div class="timeline-content"><strong>Schaden aufgenommen</strong><span>Ihre Meldung und vorhandene Dateien sind eingegangen.</span></div></li>
+              <li class="is-current"><span class="timeline-dot">2</span><div class="timeline-content"><strong>Unterlagen werden geprüft</strong><span>Wir ordnen Schadenart, Versicherung und benötigte Nachweise zu.</span></div></li>
+              <li><span class="timeline-dot">3</span><div class="timeline-content"><strong>Kostenvoranschlag / Gutachten</strong><span>Schadenumfang und Reparaturweg werden abgestimmt.</span></div></li>
+              <li><span class="timeline-dot">4</span><div class="timeline-content"><strong>Versicherung prüft</strong><span>Unterlagen, Rückfragen und Freigabe bleiben sichtbar.</span></div></li>
+              <li><span class="timeline-dot">5</span><div class="timeline-content"><strong>Teile und Termin</strong><span>Ersatzmobilität und Werkstatttermin werden gemeinsam geplant.</span></div></li>
+              <li><span class="timeline-dot">6</span><div class="timeline-content"><strong>Fahrzeug in Reparatur</strong><span>Fortschritt und voraussichtliche Fertigstellung folgen hier.</span></div></li>
+              <li><span class="timeline-dot">7</span><div class="timeline-content"><strong>Fertig zur Abholung</strong><span>Sie erhalten eine persönliche Nachricht.</span></div></li>
+            </ol>
+          </article>
+          <div style="display:grid;gap:18px;align-content:start">
+            <article class="status-card attention-card">
+              <h2>Was wir noch benötigen</h2><p>Sie dürfen alles später ergänzen.</p>
+              <div class="mini-list">
+                <div class="mini-row"><span>Unfallbericht</span><b>Noch offen</b></div>
+                <div class="mini-row"><span>Gegnerische Versicherung</span><b>Wird geklärt</b></div>
+              </div>
+              <button class="btn btn-teal" type="button" id="status-upload">Unterlagen ergänzen</button>
+            </article>
+            <article class="status-card">
+              <h2>Ersatzmobilität</h2><p>Ihr Wunsch wird zusammen mit dem Reparaturtermin geprüft.</p>
+              <div class="mini-list"><div class="mini-row"><span>Bedarf</span><b id="status-mobility">Bitte klären</b></div><div class="mini-row"><span>Reservierung</span><b>Noch nicht bestätigt</b></div></div>
+            </article>
+            <article class="status-card">
+              <h2>Nachrichten</h2><p>Werkstatt und Kunde bleiben an einem Ort im Gespräch.</p>
+              <div class="message-box"><strong>Gärtner Schadenservice</strong>Wir prüfen Ihre Meldung. Falls uns noch etwas fehlt, melden wir uns persönlich.</div>
+              <div class="status-actions"><button class="btn btn-secondary" type="button" id="status-message">Nachricht schreiben</button><a class="btn btn-link" href="tel:+4915227706694">Anrufen</a></div>
+            </article>
+          </div>
+        </div>
+        <div class="status-actions" style="margin-top:22px"><button class="btn btn-secondary" type="button" data-back-to-form>Zur Schadenmeldung</button><button class="btn btn-primary" type="button" data-demo-fill>Beispieldaten neu einsetzen</button></div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="page-footer"><div>Gärtner GmbH Karosserie + Lack · Binauer Höhe 4 · 74821 Mosbach</div><div><a href="{{ url_for('impressum_seite') }}" target="_blank" rel="noopener">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutz</a></div></footer>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      const labels = ["Schadenart", "Kontakt & Fahrzeug", "Unfall & Versicherung", "Fotos & Mobilität", "Prüfen & senden"];
+      const typeLabels = {
+        haftpflicht: "Haftpflicht · Gegner ist verantwortlich",
+        kasko: "Vollkasko · eigener Schaden",
+        teilkasko: "Teilkasko · Glas, Hagel, Wild oder Sturm",
+        unklar: "Schadenart noch unklar · Beratung gewünscht"
+      };
+      const mobilityLabels = { ja: "Ersatzwagen gewünscht", nein: "Kein Ersatzwagen benötigt", unklar: "Ersatzmobilität bitte klären" };
+      const form = document.getElementById("damage-form");
+      const wizardView = document.getElementById("wizard-view");
+      const successView = document.getElementById("success-view");
+      const statusView = document.getElementById("status-view");
+      const panels = Array.from(document.querySelectorAll("[data-step]"));
+      const indicators = Array.from(document.querySelectorAll("[data-step-button]"));
+      const nextButton = document.getElementById("next-button");
+      const backButton = document.getElementById("back-button");
+      const submitButton = document.getElementById("submit-button");
+      const progress = document.getElementById("progress-fill");
+      const progressTrack = progress.parentElement;
+      const mobileStepCopy = document.getElementById("mobile-step-copy");
+      const mobileStepLabel = document.getElementById("mobile-step-label");
+      const opponentSection = document.getElementById("opponent-section");
+      const opponentUnknown = document.getElementById("gegner-unbekannt");
+      const opponentFields = document.getElementById("opponent-fields");
+      const uploadZone = document.getElementById("upload-zone");
+      const uploadInput = document.getElementById("dateien");
+      const uploadFiles = document.getElementById("upload-files");
+      const toast = document.getElementById("toast");
+      let currentStep = 1;
+      let selectedFiles = [];
+      let toastTimer = null;
+
+      const value = (name) => {
+        const field = form.elements[name];
+        if (!field) return "";
+        if (field instanceof RadioNodeList) return field.value || "";
+        return (field.value || "").trim();
+      };
+
+      const showToast = (message) => {
+        toast.textContent = message;
+        toast.classList.add("is-visible");
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(() => toast.classList.remove("is-visible"), 2600);
+      };
+
+      const scrollTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
+
+      const updateDamageType = () => {
+        const selected = value("schadenart");
+        const isLiability = selected === "haftpflicht";
+        opponentSection.hidden = !isLiability;
+        document.getElementById("insurance-heading").textContent = isLiability
+          ? "Versicherung des Unfallgegners (wenn bekannt)"
+          : "Ihre Versicherung (wenn bekannt)";
+      };
+
+      const updateContactHint = () => {
+        const contact = value("kontaktweg");
+        const hint = document.getElementById("contact-hint");
+        hint.textContent = contact === "whatsapp"
+          ? "Freiwillig gewählt: Wir dürfen Sie zu diesem Vorgang per WhatsApp kontaktieren."
+          : contact === "email"
+            ? "Wir melden uns bevorzugt per E-Mail; bei dringenden Rückfragen gegebenenfalls telefonisch."
+            : "Wir melden uns telefonisch. WhatsApp wird nur nach einer freiwilligen Auswahl genutzt.";
+      };
+
+      const validateStep = (stepNumber) => {
+        const panel = panels.find((item) => Number(item.dataset.step) === stepNumber);
+        if (!panel) return true;
+        const fields = Array.from(panel.querySelectorAll("input[required], select[required], textarea[required]"));
+        for (const field of fields) {
+          if (!field.checkValidity()) {
+            field.reportValidity();
+            field.focus({ preventScroll: false });
+            return false;
+          }
+        }
+        return true;
+      };
+
+      const refreshSummary = () => {
+        const type = value("schadenart");
+        const contact = value("kontaktweg");
+        const mobility = value("mobilitaet");
+        document.getElementById("review-type").textContent = typeLabels[type] || "Noch nicht ausgewählt";
+        document.getElementById("review-date").textContent = [value("unfall_datum"), value("unfall_ort")].filter(Boolean).join(" · ") || "Zeit und Ort noch offen";
+        document.getElementById("review-customer").textContent = value("kunde_name") || "Name fehlt";
+        document.getElementById("review-contact").textContent = [value("telefon"), value("email"), contact ? `Kontakt: ${contact}` : ""].filter(Boolean).join(" · ");
+        document.getElementById("review-car").textContent = [value("fahrzeug"), value("kennzeichen")].filter(Boolean).join(" · ") || "Fahrzeug fehlt";
+        document.getElementById("review-insurance").textContent = [value("versicherung"), value("schadennummer")].filter(Boolean).join(" · ") || "Versicherung wird geklärt";
+        document.getElementById("review-mobility").textContent = mobilityLabels[mobility] || "Bitte klären";
+        document.getElementById("review-files").textContent = selectedFiles.length ? `${selectedFiles.length} Datei${selectedFiles.length === 1 ? "" : "en"} ausgewählt` : "Keine Dateien ausgewählt";
+        document.getElementById("review-description").textContent = value("beschreibung") || "Beschreibung fehlt";
+        document.getElementById("status-car-copy").textContent = [value("fahrzeug"), value("kennzeichen")].filter(Boolean).join(" · ") || "BMW 320d Touring · MOS AB 123";
+        document.getElementById("status-mobility").textContent = mobilityLabels[mobility] || "Bitte klären";
+      };
+
+      const goToStep = (stepNumber) => {
+        currentStep = Math.max(1, Math.min(5, stepNumber));
+        panels.forEach((panel) => { panel.hidden = Number(panel.dataset.step) !== currentStep; });
+        indicators.forEach((indicator) => {
+          const number = Number(indicator.dataset.stepButton);
+          indicator.classList.toggle("is-active", number === currentStep);
+          indicator.classList.toggle("is-done", number < currentStep);
+          const numberNode = indicator.querySelector(".step-number");
+          numberNode.textContent = number < currentStep ? "✓" : number;
+        });
+        progress.style.width = `${currentStep * 20}%`;
+        progressTrack.setAttribute("aria-valuenow", String(currentStep));
+        mobileStepCopy.textContent = `Schritt ${currentStep} von 5`;
+        mobileStepLabel.textContent = labels[currentStep - 1];
+        backButton.hidden = currentStep === 1;
+        nextButton.hidden = currentStep === 5;
+        submitButton.hidden = currentStep !== 5;
+        if (currentStep === 5) refreshSummary();
+        updateDamageType();
+        scrollTop();
+      };
+
+      const showView = (view) => {
+        wizardView.hidden = view !== "wizard";
+        successView.hidden = view !== "success";
+        statusView.hidden = view !== "status";
+        refreshSummary();
+        scrollTop();
+      };
+
+      const renderFiles = (files) => {
+        selectedFiles = Array.from(files || []).slice(0, 12);
+        uploadFiles.innerHTML = selectedFiles.map((file) => `<span class="file-chip">✓ <span>${file.name.replace(/[<>&"]/g, "")}</span></span>`).join("");
+        if (selectedFiles.length) showToast(`${selectedFiles.length} Datei${selectedFiles.length === 1 ? "" : "en"} für die Vorschau ausgewählt`);
+      };
+
+      const fillDemo = () => {
+        const set = (name, entry) => { const field = form.elements[name]; if (field && !(field instanceof RadioNodeList)) field.value = entry; };
+        const selectRadio = (name, entry) => {
+          const radio = form.querySelector(`input[name="${name}"][value="${entry}"]`);
+          if (radio) { radio.checked = true; radio.dispatchEvent(new Event("change", { bubbles: true })); }
+        };
+        selectRadio("schadenart", "haftpflicht");
+        set("kunde_name", "Anna Schneider");
+        set("telefon", "0171 2345678");
+        set("email", "anna.schneider@beispiel.de");
+        selectRadio("kontaktweg", "telefon");
+        set("kennzeichen", "MOS AB 123");
+        set("fahrzeug", "BMW 320d Touring");
+        set("unfall_datum", "{{ heute_iso }}");
+        set("unfall_zeit", "09:40");
+        set("unfall_ort", "Mosbach, Parkplatz am Bahnhof");
+        set("beschreibung", "Beim Ausparken ist ein anderes Fahrzeug gegen die linke hintere Stoßfängerecke gefahren. Das Fahrzeug ist weiterhin fahrbereit.");
+        set("versicherung", "VHV Versicherung");
+        set("schadennummer", "wird nachgereicht");
+        selectRadio("mobilitaet", "ja");
+        updateContactHint();
+        refreshSummary();
+        goToStep(5);
+        showView("wizard");
+        showToast("Beispieldaten eingesetzt – es wurde nichts gespeichert");
+      };
+
+      form.addEventListener("submit", (event) => event.preventDefault());
+      form.addEventListener("change", (event) => {
+        if (event.target.name === "schadenart") updateDamageType();
+        if (event.target.name === "kontaktweg") updateContactHint();
+      });
+      opponentUnknown.addEventListener("change", () => { opponentFields.hidden = opponentUnknown.checked; });
+      nextButton.addEventListener("click", () => { if (validateStep(currentStep)) goToStep(currentStep + 1); });
+      backButton.addEventListener("click", () => goToStep(currentStep - 1));
+      submitButton.addEventListener("click", () => {
+        if (!validateStep(5)) return;
+        refreshSummary();
+        showView("success");
+      });
+      indicators.forEach((indicator) => indicator.addEventListener("click", () => {
+        const target = Number(indicator.dataset.stepButton);
+        if (target <= currentStep || Array.from({ length: target - currentStep }, (_, index) => currentStep + index).every(validateStep)) goToStep(target);
+      }));
+      uploadInput.addEventListener("change", () => renderFiles(uploadInput.files));
+      ["dragenter", "dragover"].forEach((name) => uploadZone.addEventListener(name, (event) => { event.preventDefault(); uploadZone.classList.add("is-dragging"); }));
+      ["dragleave", "drop"].forEach((name) => uploadZone.addEventListener(name, (event) => { event.preventDefault(); uploadZone.classList.remove("is-dragging"); }));
+      uploadZone.addEventListener("drop", (event) => renderFiles(event.dataTransfer.files));
+      document.querySelectorAll("[data-show-status]").forEach((button) => button.addEventListener("click", () => showView("status")));
+      document.querySelectorAll("[data-back-to-form]").forEach((button) => button.addEventListener("click", () => { showView("wizard"); goToStep(1); }));
+      document.querySelectorAll("[data-demo-fill]").forEach((button) => button.addEventListener("click", fillDemo));
+      document.getElementById("restart-button").addEventListener("click", () => { form.reset(); selectedFiles = []; uploadFiles.innerHTML = ""; opponentUnknown.checked = true; opponentFields.hidden = true; showView("wizard"); goToStep(1); });
+      document.getElementById("status-upload").addEventListener("click", () => showToast("In der echten Version öffnet sich hier der geschützte Mehrfach-Upload."));
+      document.getElementById("status-message").addEventListener("click", () => showToast("In der echten Version kann der Kunde hier sicher antworten."));
+      goToStep(1);
+      updateContactHint();
+    })();
+  </script>
+</body>
+</html>

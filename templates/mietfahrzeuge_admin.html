@@ -66,7 +66,7 @@
       <div>
         <strong>{{ anfrage.name }}</strong>
         &middot; <a href="tel:{{ anfrage.telefon }}">&#128222; {{ anfrage.telefon }}</a>
-        {% if anfrage.wa_url %}<a class="badge text-bg-success text-decoration-none" href="{{ anfrage.wa_url }}" target="_blank" rel="noopener">WhatsApp</a>{% endif %}
+        {% if anfrage.wa_url %}<a class="badge text-bg-success text-decoration-none" href="{{ anfrage.wa_url }}" target="_blank" rel="noopener">WhatsApp gewünscht</a>{% else %}<span class="badge text-bg-light border">kein WhatsApp-Wunsch</span>{% endif %}
         {% if anfrage.email %}&middot; <a href="mailto:{{ anfrage.email }}">{{ anfrage.email }}</a>{% endif %}
         <div class="text-muted" style="font-size: 0.88rem;">
           Zeitraum: <strong>{{ anfrage.start_datum }}</strong>{% if anfrage.end_datum %} bis <strong>{{ anfrage.end_datum }}</strong>{% endif %}
@@ -76,27 +76,30 @@
         {% if anfrage.nachricht %}<div style="font-size: 0.9rem;">&#8222;{{ anfrage.nachricht }}&#8220;</div>{% endif %}
       </div>
     </div>
-    <form class="d-flex flex-wrap gap-2 align-items-end mt-2" method="post" action="{{ url_for('admin_mietanfrage_uebernehmen', anfrage_id=anfrage.id) }}">
+    <form class="d-flex flex-wrap gap-2 align-items-end mt-2" method="post" action="{{ url_for('admin_mietanfrage_uebernehmen', anfrage_id=anfrage.id) }}" data-mietzeitraum>
+      {{ csrf_field()|safe }}
       <div>
-        <label class="form-label mb-0" style="font-size: 0.78rem;">Fahrzeug zuteilen</label>
-        <select class="form-select form-select-sm" name="mietfahrzeug_id" required>
+        <label class="form-label mb-0" style="font-size: 0.78rem;" for="anfrage-fahrzeug-{{ anfrage.id }}">Fahrzeug zuteilen</label>
+        <select id="anfrage-fahrzeug-{{ anfrage.id }}" class="form-select form-select-sm" name="mietfahrzeug_id" required>
           <option value="">— wählen —</option>
-          {% for gruppe in gruppen %}{% for f in gruppe.fahrzeuge %}{% if f.aktiv %}
+          {% for gruppe in gruppen %}{% for f in gruppe.fahrzeuge %}{% if f.aktiv and f.basis_status not in ['wartung', 'inaktiv'] %}
           <option value="{{ f.id }}" {% if anfrage.mietfahrzeug_id == f.id %}selected{% endif %}>{{ f.kennzeichen }} — {{ f.bezeichnung or gruppe.klasse }}{% if anfrage.mietfahrzeug_id == f.id %} (Kundenwunsch){% endif %}</option>
           {% endif %}{% endfor %}{% endfor %}
         </select>
       </div>
       <div>
-        <label class="form-label mb-0" style="font-size: 0.78rem;">Von</label>
-        <input class="form-control form-control-sm" type="date" name="start_datum" value="{{ anfrage.start_datum }}">
+        <label class="form-label mb-0" style="font-size: 0.78rem;" for="anfrage-start-{{ anfrage.id }}">Von (Anfrage) *</label>
+        <input id="anfrage-start-{{ anfrage.id }}" class="form-control form-control-sm" type="date" name="start_datum" value="{{ anfrage.start_datum or '' }}" required>
       </div>
       <div>
-        <label class="form-label mb-0" style="font-size: 0.78rem;">Bis</label>
-        <input class="form-control form-control-sm" type="date" name="end_datum" value="{{ anfrage.end_datum }}">
+        <label class="form-label mb-0" style="font-size: 0.78rem;" for="anfrage-ende-{{ anfrage.id }}">Bis (Anfrage) *</label>
+        <input id="anfrage-ende-{{ anfrage.id }}" class="form-control form-control-sm" type="date" name="end_datum" value="{{ anfrage.end_datum or '' }}" required>
       </div>
       <button type="submit" class="btn btn-sm btn-success">&#10003; Übernehmen &rarr; Mietvertrag</button>
+      <div class="small text-muted w-100">Der gespeicherte Anfragezeitraum ist vorausgefüllt und kann vor der Übernahme geprüft werden.</div>
     </form>
-    <form class="mt-1" method="post" action="{{ url_for('admin_mietanfrage_ablehnen', anfrage_id=anfrage.id) }}" onsubmit="return confirm('Anfrage von {{ anfrage.name }} wirklich ablehnen?');">
+    <form class="mt-1" method="post" action="{{ url_for('admin_mietanfrage_ablehnen', anfrage_id=anfrage.id) }}" onsubmit="return confirm('Diese Mietwagen-Anfrage wirklich ablehnen?');">
+      {{ csrf_field()|safe }}
       <button type="submit" class="btn btn-sm btn-outline-secondary">Ablehnen</button>
     </form>
   </div>
@@ -142,10 +145,22 @@
           </td>
           <td>{{ status_badge(e.phase if e.phase != 'aktiv' else 'vermietet', 'Reserviert' if e.phase == 'reserviert' else 'Unterwegs') }}</td>
           <td class="text-end">
+            {% if e.phase == 'reserviert' %}
+            <details class="text-start" style="min-width:220px;">
+              <summary class="btn btn-sm btn-outline-danger" style="list-style:none;">Reservierung stornieren</summary>
+              <form method="POST" action="{{ url_for('admin_mietvorgang_loeschen', vorgang_id=e.id) }}" class="mt-2" onsubmit="return confirm('Diese Reservierung stornieren? Der Vorgang bleibt im Verlauf erhalten.');">
+                {{ csrf_field()|safe }}
+                <label class="form-label small mb-0" for="belegung-storno-grund-{{ e.id }}">Stornogrund *</label>
+                <input id="belegung-storno-grund-{{ e.id }}" type="text" name="storno_grund" class="form-control form-control-sm" minlength="3" required placeholder="z. B. Kunde hat abgesagt">
+                <button type="submit" class="btn btn-sm btn-outline-danger mt-2" data-no-loading="true">Stornierung bestätigen</button>
+              </form>
+            </details>
+            {% else %}
             <form method="POST" action="{{ url_for('admin_mietvorgang_zurueck', vorgang_id=e.id) }}" class="d-inline">
               {{ csrf_field()|safe }}
               <button type="submit" class="btn btn-sm btn-brand" data-no-loading="true">Zurückgenommen</button>
             </form>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -275,6 +290,14 @@
           {% if f.kraftstoff %} · {{ f.kraftstoff }}{% endif %}
         </div>
 
+        {% if not f.aktiv %}
+        <div class="alert alert-secondary py-2 px-3 mb-2" role="status">
+          <div class="fw-bold">Fahrzeug archiviert{% if f.archiviert_am %} am {{ f.archiviert_am }}{% endif %}</div>
+          {% if f.archivgrund %}<div class="small">Grund: {{ f.archivgrund }}</div>{% endif %}
+          <div class="small mt-1">Vorgänge, Bilder und Verträge bleiben erhalten. Zum Reaktivieren „Bearbeiten / reaktivieren“ öffnen, den Grundzustand „Verfügbar“ und „Im Fuhrpark: aktiv“ wählen und speichern.</div>
+        </div>
+        {% endif %}
+
         {% if f.aktiver_vorgang %}
         {% set v = f.aktiver_vorgang %}
         <div class="border rounded-3 p-3 mb-2 {% if v.ueberfaellig %}border-danger bg-danger-subtle{% else %}bg-light{% endif %}">
@@ -310,34 +333,46 @@
         <div class="border rounded-3 p-3 mb-2 bg-light">
           <div class="fw-bold">Reserviert für {{ r.kunde_name or 'Kunde' }}</div>
           <div class="small text-muted">ab {{ r.start_label }}{% if r.end_label %} bis {{ r.end_label }}{% endif %}</div>
-          <form method="POST" action="{{ url_for('admin_mietvorgang_loeschen', vorgang_id=r.id) }}" class="m-0 mt-2" onsubmit="return confirm('Reservierung löschen?')">
-            {{ csrf_field()|safe }}
-            <button type="submit" class="btn btn-sm btn-soft" data-no-loading="true">Reservierung entfernen</button>
-          </form>
+          <details class="mt-2">
+            <summary class="btn btn-sm btn-soft" style="list-style:none;">Reservierung stornieren</summary>
+            <form method="POST" action="{{ url_for('admin_mietvorgang_loeschen', vorgang_id=r.id) }}" class="mt-2" onsubmit="return confirm('Diese Reservierung wirklich stornieren? Der Vorgang und seine Nachweisdaten bleiben im Verlauf erhalten.');">
+              {{ csrf_field()|safe }}
+              <label class="form-label small mb-0" for="storno-grund-{{ r.id }}">Stornogrund *</label>
+              <input id="storno-grund-{{ r.id }}" type="text" name="storno_grund" class="form-control form-control-sm" minlength="3" required aria-describedby="storno-hinweis-{{ r.id }}" placeholder="z. B. Kunde hat abgesagt">
+              <div id="storno-hinweis-{{ r.id }}" class="form-text">Es wird nichts gelöscht. Vertrag und Nachweise bleiben nachvollziehbar gespeichert.</div>
+              <button type="submit" class="btn btn-sm btn-outline-danger mt-2" data-no-loading="true">Stornierung bestätigen</button>
+            </form>
+          </details>
         </div>
         {% endif %}
 
         <!-- Vermieten -->
-        {% if not f.aktiver_vorgang and f.basis_status != 'inaktiv' %}
+        {% if f.aktiv and not f.aktiver_vorgang and f.basis_status != 'inaktiv' %}
         <details class="mb-2">
           <summary class="btn btn-brand btn-sm" style="list-style:none;">Vergeben / vermieten</summary>
-          <form method="POST" action="{{ url_for('admin_mietfahrzeug_vermieten', fahrzeug_id=f.id) }}" class="row g-2 mt-1">
+          <form method="POST" action="{{ url_for('admin_mietfahrzeug_vermieten', fahrzeug_id=f.id) }}" class="row g-2 mt-1" data-mietzeitraum>
             {{ csrf_field()|safe }}
             <div class="col-7">
-              <label class="form-label small mb-0">Kunde *</label>
-              <input type="text" name="kunde_name" class="form-control form-control-sm" required>
+              <label class="form-label small mb-0" for="vermietung-kunde-{{ f.id }}">Kunde *</label>
+              <input id="vermietung-kunde-{{ f.id }}" type="text" name="kunde_name" class="form-control form-control-sm" required autocomplete="name">
             </div>
             <div class="col-5">
-              <label class="form-label small mb-0">Telefon</label>
-              <input type="text" name="kunde_telefon" class="form-control form-control-sm" placeholder="für WhatsApp">
+              <label class="form-label small mb-0" for="vermietung-telefon-{{ f.id }}">Telefon</label>
+              <input id="vermietung-telefon-{{ f.id }}" type="tel" name="kunde_telefon" class="form-control form-control-sm" autocomplete="tel">
             </div>
             <div class="col-12">
-              <label class="form-label small mb-0">E-Mail (für Vertragsversand)</label>
-              <input type="email" name="kunde_email" class="form-control form-control-sm" placeholder="kunde@example.de">
+              <label class="form-label small mb-0" for="vermietung-email-{{ f.id }}">E-Mail (für Vertragsversand)</label>
+              <input id="vermietung-email-{{ f.id }}" type="email" name="kunde_email" class="form-control form-control-sm" placeholder="kunde@example.de" autocomplete="email">
             </div>
             <div class="col-12">
-              <label class="form-label small mb-0">Zu Werkstatt-Auftrag (optional)</label>
-              <select name="auftrag_id" class="form-select form-select-sm">
+              <div class="form-check">
+                <input id="vermietung-whatsapp-{{ f.id }}" class="form-check-input" type="checkbox" name="whatsapp_erlaubt" value="1">
+                <label class="form-check-label small" for="vermietung-whatsapp-{{ f.id }}">Kunde wünscht Kontakt per WhatsApp</label>
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-0" for="vermietung-auftrag-{{ f.id }}">Zu Werkstatt-Auftrag (optional)</label>
+              <select id="vermietung-auftrag-{{ f.id }}" name="auftrag_id" class="form-select form-select-sm">
                 <option value="">– ohne Auftrag –</option>
                 {% for a in auftraege %}
                 <option value="{{ a['id'] }}">{{ a['kennzeichen'] or '?' }} · {{ a['kunde_name'] or a['fahrzeug'] or 'Auftrag' }}</option>
@@ -345,16 +380,16 @@
               </select>
             </div>
             <div class="col-6">
-              <label class="form-label small mb-0">Von</label>
-              <input type="date" name="start_datum" class="form-control form-control-sm" value="{{ heute_iso }}">
+              <label class="form-label small mb-0" for="vermietung-start-{{ f.id }}">Von *</label>
+              <input id="vermietung-start-{{ f.id }}" type="date" name="start_datum" class="form-control form-control-sm" value="{{ heute_iso }}" min="{{ heute_iso }}" required>
             </div>
             <div class="col-6">
-              <label class="form-label small mb-0">Geplante Rückgabe</label>
-              <input type="date" name="end_datum" class="form-control form-control-sm">
+              <label class="form-label small mb-0" for="vermietung-ende-{{ f.id }}">Bis / geplante Rückgabe *</label>
+              <input id="vermietung-ende-{{ f.id }}" type="date" name="end_datum" class="form-control form-control-sm" min="{{ heute_iso }}" required>
             </div>
             <div class="col-12">
-              <label class="form-label small mb-0">Notiz</label>
-              <input type="text" name="notiz" class="form-control form-control-sm" placeholder="z. B. Ersatzwagen während Lackierung">
+              <label class="form-label small mb-0" for="vermietung-notiz-{{ f.id }}">Notiz</label>
+              <input id="vermietung-notiz-{{ f.id }}" type="text" name="notiz" class="form-control form-control-sm" placeholder="z. B. Ersatzwagen während Lackierung">
             </div>
             <div class="col-12">
               <button type="submit" class="btn btn-sm btn-brand">Fahrzeug vergeben</button>
@@ -407,7 +442,7 @@
 
         <!-- Bearbeiten -->
         <details>
-          <summary class="btn btn-soft btn-sm" style="list-style:none;">Bearbeiten</summary>
+          <summary class="btn btn-soft btn-sm" style="list-style:none;">{% if f.aktiv %}Bearbeiten{% else %}Bearbeiten / reaktivieren{% endif %}</summary>
           <form method="POST" action="{{ url_for('admin_mietfahrzeug_bearbeiten', fahrzeug_id=f.id) }}" class="row g-2 mt-1">
             {{ csrf_field()|safe }}
             <div class="col-6">
@@ -449,15 +484,20 @@
             <div class="col-6">
               <label class="form-label small mb-0">Grundzustand</label>
               <select name="status" class="form-select form-select-sm">
-                {% for key, label in status_optionen.items() %}<option value="{{ key }}" {% if key == f.basis_status %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                {% for key, label in status_optionen.items() %}{% if key != 'inaktiv' or not f.aktiv %}<option value="{{ key }}" {% if key == f.basis_status %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}
               </select>
             </div>
             <div class="col-6">
               <label class="form-label small mb-0">Im Fuhrpark</label>
-              <select name="aktiv" class="form-select form-select-sm">
-                <option value="1" {% if f.aktiv %}selected{% endif %}>aktiv</option>
-                <option value="0" {% if not f.aktiv %}selected{% endif %}>ausgemustert</option>
+              <select name="aktiv" class="form-select form-select-sm" {% if not f.aktiv %}aria-describedby="reaktivieren-hinweis-{{ f.id }}"{% endif %}>
+                {% if f.aktiv %}
+                <option value="1" selected>aktiv</option>
+                {% else %}
+                <option value="0" selected>archiviert</option>
+                <option value="1">aktivieren</option>
+                {% endif %}
               </select>
+              {% if f.aktiv %}<div class="form-text">Zum Herausnehmen bitte unten mit Grund archivieren.</div>{% endif %}
             </div>
             <div class="col-12">
               <label class="form-label small mb-0">FIN</label>
@@ -470,11 +510,19 @@
             <div class="col-12 d-flex justify-content-between">
               <button type="submit" class="btn btn-sm btn-brand">Speichern</button>
             </div>
+            {% if not f.aktiv %}
+            <div id="reaktivieren-hinweis-{{ f.id }}" class="col-12 form-text">Für die Reaktivierung zusätzlich den Grundzustand auf „Verfügbar“ stellen.</div>
+            {% endif %}
           </form>
-          <form method="POST" action="{{ url_for('admin_mietfahrzeug_loeschen', fahrzeug_id=f.id) }}" class="mt-2" onsubmit="return confirm('Fahrzeug {{ f.kennzeichen }} und alle Vorgänge wirklich löschen?')">
+          {% if f.aktiv %}
+          <form method="POST" action="{{ url_for('admin_mietfahrzeug_loeschen', fahrzeug_id=f.id) }}" class="mt-3 border-top pt-3" onsubmit="return confirm('Dieses Fahrzeug wirklich archivieren? Vorgänge, Bilder und Verträge bleiben erhalten.');">
             {{ csrf_field()|safe }}
-            <button type="submit" class="btn btn-sm btn-outline-danger" data-no-loading="true">Fahrzeug löschen</button>
+            <label class="form-label small mb-0" for="archivgrund-{{ f.id }}">Archivierungsgrund *</label>
+            <input id="archivgrund-{{ f.id }}" type="text" name="archivgrund" class="form-control form-control-sm" minlength="3" required aria-describedby="archiv-hinweis-{{ f.id }}" placeholder="z. B. verkauft, Leasing beendet, dauerhaft stillgelegt">
+            <div id="archiv-hinweis-{{ f.id }}" class="form-text">Das Fahrzeug wird aus der aktiven Flotte genommen. Vorgänge, Bilder und Verträge werden nicht gelöscht.</div>
+            <button type="submit" class="btn btn-sm btn-outline-danger mt-2" data-no-loading="true">Fahrzeug archivieren</button>
           </form>
+          {% endif %}
         </details>
 
         {% if f.historie %}
@@ -482,7 +530,15 @@
           <summary class="small text-muted" style="cursor:pointer;">Verlauf ({{ f.historie|length }})</summary>
           <ul class="small text-muted mb-0 mt-1">
             {% for h in f.historie %}
-            <li>{{ h.kunde_name or 'Kunde' }}: {{ h.start_label or '?' }} – {{ h.rueckgabe_label or h.end_label or '?' }}</li>
+            <li>
+              {{ h.kunde_name or 'Kunde' }}: {{ h.start_label or '?' }} – {{ h.rueckgabe_label or h.end_label or '?' }}
+              {% if h.status == 'storniert' %}
+              · <strong>storniert{% if h.storniert_am %} am {{ h.storniert_am }}{% endif %}</strong>{% if h.storno_grund %}: {{ h.storno_grund }}{% endif %}
+              {% else %}
+              · zurückgegeben
+              {% endif %}
+              · <a href="{{ url_for('admin_mietvertrag', vorgang_id=h.id) }}">Vertrag / Nachweise</a>
+            </li>
             {% endfor %}
           </ul>
         </details>
@@ -493,5 +549,25 @@
   </div>
 </div>
 {% endfor %}
+
+<script>
+  (() => {
+    document.querySelectorAll('[data-mietzeitraum]').forEach((form) => {
+      const start = form.querySelector('[name="start_datum"]');
+      const ende = form.querySelector('[name="end_datum"]');
+      if (!start || !ende) return;
+      const mindestdatum = ende.getAttribute('min') || '';
+      const abgleichen = () => {
+        ende.min = start.value || mindestdatum;
+        ende.setCustomValidity(start.value && ende.value && ende.value < start.value
+          ? 'Das Enddatum darf nicht vor dem Startdatum liegen.'
+          : '');
+      };
+      start.addEventListener('change', abgleichen);
+      ende.addEventListener('change', abgleichen);
+      abgleichen();
+    });
+  })();
+</script>
 
 {% endblock %}

@@ -17,8 +17,19 @@
 <body>
   <div class="shell">
     <div class="karte">
+      <!--
+        Arbeitsfassung für die lokale Phase 1. Vor einer Veröffentlichung müssen insbesondere
+        die tatsächlich aktivierten Anbieter, Auftragsverarbeitungsverträge, Garantien für
+        Drittlandübermittlungen und betrieblich umgesetzten Löschfristen geprüft werden.
+      -->
       <h1>Datenschutzerklärung</h1>
-      <p class="text-muted">Stand: Juni 2026</p>
+      <p class="text-muted">Stand: Juli 2026</p>
+      {% if not rechtlich_freigegeben %}
+      <div class="alert alert-danger" role="alert">
+        <strong>Prüffassung – noch nicht zur Veröffentlichung freigegeben.</strong><br>
+        Anbieter, Auftragsverarbeitung, Drittlandübermittlungen und betriebliche Löschfristen müssen vor dem Live-Einsatz abgeglichen und dokumentiert werden.
+      </div>
+      {% endif %}
 
       <h2>1. Verantwortlicher</h2>
       <p>Gärtner GmbH Karosserie + Lack<br>
@@ -26,58 +37,139 @@
       Telefon: +49 1522 7706694 · E-Mail: info@auto-lackierzentrum.de<br>
       Geschäftsführer: Christopher Gärtner</p>
 
-      <h2>2. Zweck dieses Portals</h2>
-      <p>Dieses Portal dient der Abwicklung von Karosserie- und Lackieraufträgen: Partnerbetriebe
-      (Autohäuser) und Versicherungen melden Fahrzeuge und Schäden, verfolgen den Bearbeitungsstand
-      und tauschen auftragsbezogene Unterlagen mit uns aus. Fahrzeughalter können über einen
-      persönlichen Status-Link den Stand ihres Auftrags einsehen.</p>
+      <h2>2. Zwecke und Rechtsgrundlagen</h2>
+      <p>Dieses Portal dient der Anbahnung und Abwicklung von Karosserie- und Lackieraufträgen,
+      Versicherungsfällen und Fahrzeugvermietungen. Partnerbetriebe und Versicherungen können
+      Fahrzeuge und Schäden melden, Bearbeitungsstände verfolgen und auftragsbezogene Unterlagen
+      austauschen. Fahrzeughalter können über einen persönlichen Status-Link den Stand ihres
+      Auftrags einsehen. Interessenten können Mietwagen anfragen; bestätigte Vermietungen werden
+      einschließlich des digitalen Mietvertrags im Portal bearbeitet.</p>
+      <p>Wir verarbeiten personenbezogene Daten insbesondere zur Durchführung vorvertraglicher
+      Maßnahmen und zur Vertragserfüllung (Art. 6 Abs. 1 lit. b DSGVO), zur Erfüllung gesetzlicher
+      Pflichten (Art. 6 Abs. 1 lit. c DSGVO) sowie auf Grundlage unserer berechtigten Interessen an
+      einem sicheren, nachvollziehbaren und wirtschaftlichen Portalbetrieb (Art. 6 Abs. 1 lit. f
+      DSGVO). Soweit für einen freiwilligen Kommunikationsweg oder eine einzelne Funktion eine
+      Einwilligung erforderlich ist, ist Art. 6 Abs. 1 lit. a DSGVO die Rechtsgrundlage.</p>
 
       <h2>3. Verarbeitete Daten</h2>
-      <p>Im Rahmen der Auftragsabwicklung verarbeiten wir insbesondere: Name und Kontaktdaten des
-      Fahrzeughalters, Fahrzeugdaten (z. B. Kennzeichen, Fahrgestellnummer), Schadensbeschreibungen
-      und Fotos, hochgeladene Unterlagen (z. B. Gutachten, Kalkulationen) sowie Termin- und
-      Statusinformationen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung bzw.
-      vorvertragliche Maßnahmen) sowie Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an einer
-      effizienten Auftragsabwicklung).</p>
+      <p>Je nach Vorgang verarbeiten wir insbesondere folgende Daten:</p>
+      <ul>
+        <li>Stamm- und Kontaktdaten, etwa Name, Anschrift, Telefon- und E-Mail-Adresse,</li>
+        <li>Fahrzeug- und Auftragsdaten, etwa Kennzeichen, Fahrgestellnummer, Termine und Status,</li>
+        <li>Schadensbeschreibungen, Fotos und hochgeladene Unterlagen, etwa Gutachten und
+        Kalkulationen,</li>
+        <li>Kommunikations-, Freigabe- und Versandinformationen sowie technische Zeitstempel.</li>
+      </ul>
 
-      <h2>4. E-Mail-Benachrichtigungen</h2>
-      <p>Wir versenden auftragsbezogene E-Mails (z. B. „Fahrzeug ist fertig") an die im Auftrag
-      hinterlegten Ansprechpartner. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO. Werbliche
-      Mitteilungen an Geschäftspartner erfolgen im Rahmen des § 7 Abs. 3 UWG bzw. mit Einwilligung.</p>
+      <h2>4. Mietwagenanfragen und Mietverträge</h2>
+      <p>Bei einer Mietwagenanfrage verarbeiten wir Name, Telefon- und gegebenenfalls E-Mail-Adresse,
+      gewünschten Zeitraum, Fahrzeug beziehungsweise Fahrzeugklasse sowie freiwillige Angaben in
+      der Nachricht. Wird eine Vermietung vereinbart, kommen die für Reservierung, Übergabe,
+      Abrechnung und Vertragsnachweis erforderlichen Angaben hinzu. Dazu können insbesondere
+      Anschrift und Geburtsdatum, Ausweis- und Führerscheindaten, Mietfahrzeug und Mietzeitraum,
+      Preise, Kaution, Kilometer- und Kraftstoffangaben, Vertragsstatus, Versandinformationen und
+      die digitale Unterschrift gehören. Die Verarbeitung erfolgt zur Bearbeitung der Anfrage und
+      zur Durchführung des Mietvertrags (Art. 6 Abs. 1 lit. b DSGVO) sowie, soweit einschlägig, zur
+      Erfüllung gesetzlicher Nachweis- und Aufbewahrungspflichten (Art. 6 Abs. 1 lit. c DSGVO).</p>
 
-      <h2>5. Weitergabe von Daten</h2>
-      <p>Eine Weitergabe erfolgt nur, soweit dies zur Auftragsabwicklung erforderlich ist:
-      an die zuständige Versicherung (bei Versicherungsschäden), an den beauftragenden
-      Partnerbetrieb sowie an unsere Buchhaltung (Lexware). Eine Weitergabe zu Werbezwecken
-      an Dritte findet nicht statt.</p>
+      <h2>5. E-Mail, Telefon und freiwillige WhatsApp-Kommunikation</h2>
+      <p>Wir verwenden die hinterlegten Kontaktdaten für auftrags- und vertragsbezogene Nachrichten,
+      beispielsweise Terminabsprachen, Statusmeldungen oder den Versand eines Mietvertrags.
+      WhatsApp ist ein freiwilliger Kommunikationsweg. Sie können stattdessen Telefon oder E-Mail
+      nutzen, ohne dass Ihnen daraus ein Nachteil für die Bearbeitung Ihrer Anfrage entsteht.</p>
+      <p>Wenn Sie einen WhatsApp-Link aufrufen oder WhatsApp als Kommunikationsweg wählen, können
+      Telefonnummer, Nachrichteninhalt, Zustellstatus und technische Metadaten an WhatsApp
+      beziehungsweise Unternehmen der Meta-Gruppe übermittelt werden. Bei aktivierter
+      Portal-Anbindung können Nachrichten, Anbieter-Kennungen, Versandstatus und technische
+      Protokolldaten auch im Portal gespeichert werden. Die weitere Verarbeitung durch WhatsApp
+      richtet sich nach den
+      <a href="https://www.whatsapp.com/legal/privacy-policy-eea" target="_blank" rel="noopener">Datenschutzhinweisen von WhatsApp</a>.
+      Eine erteilte Einwilligung kann jederzeit mit Wirkung für die Zukunft widerrufen werden;
+      die bis dahin erfolgte Verarbeitung bleibt unberührt.</p>
 
-      <h2>6. Hosting</h2>
-      <p>Dieses Portal wird bei Render Services, Inc. (USA) betrieben. Mit dem Anbieter besteht
-      ein Vertrag zur Auftragsverarbeitung; die Übermittlung in die USA erfolgt auf Grundlage
-      der EU-Standardvertragsklauseln (Art. 46 DSGVO). Beim Aufruf der Seiten werden technisch
-      notwendige Daten (IP-Adresse, Zeitpunkt, aufgerufene Seite) in Server-Protokollen verarbeitet
-      (Art. 6 Abs. 1 lit. f DSGVO — Betriebssicherheit).</p>
+      <h2>6. Empfänger und Dienstleister</h2>
+      <p>Personenbezogene Daten erhalten nur die Stellen, die sie für den jeweiligen Vorgang
+      benötigen. Dazu können der beauftragende Partnerbetrieb, die zuständige Versicherung,
+      Buchhaltungs- und Versanddienstleister sowie technische Auftragsverarbeiter gehören. Für die
+      Buchhaltung kann Lexware eingesetzt werden. Für WhatsApp-Kommunikation können WhatsApp und
+      Unternehmen der Meta-Gruppe eingebunden sein. Eine Weitergabe personenbezogener Daten an
+      Dritte zu deren eigenen Werbezwecken findet nicht statt.</p>
 
-      <h2>7. Cookies</h2>
+      <h2>7. Hosting und externe Inhalte</h2>
+      <p>Das Portal wird bei Render Services, Inc. betrieben. Beim Seitenaufruf verarbeitet der
+      Hosting-Anbieter technisch erforderliche Verbindungsdaten, insbesondere IP-Adresse, Zeitpunkt,
+      angeforderte Seite, Browserinformationen und gegebenenfalls Fehlerdaten. Dies dient der
+      Auslieferung, Stabilität und Sicherheit des Portals (Art. 6 Abs. 1 lit. f DSGVO).</p>
+      <p>Auf einzelnen Seiten werden technische Bibliotheken über das Content Delivery Network
+      jsDelivr und Schriftarten von Google Fonts geladen. Dabei kann die IP-Adresse an den jeweiligen
+      Anbieter übertragen werden. Diese Einbindung dient einer einheitlichen und sicheren
+      Darstellung des Portals (Art. 6 Abs. 1 lit. f DSGVO). Soweit Anbieter Daten außerhalb der EU
+      beziehungsweise des EWR verarbeiten, werden die jeweils erforderlichen Garantien für die
+      Übermittlung zugrunde gelegt, insbesondere ein anwendbarer Angemessenheitsbeschluss oder
+      EU-Standardvertragsklauseln.</p>
+
+      <h2>8. Dokumentanalyse mit OCR und KI</h2>
+      <p>Hochgeladene Bilder und Dokumente können zur Texterkennung und strukturierten Übernahme von
+      Auftragsdaten analysiert werden. Je nach Konfiguration erfolgt dies lokal mit OCR-Software oder
+      unter Einbindung externer Dienste, insbesondere Google Document AI und OpenAI. Bei einer
+      externen Analyse können die in den Unterlagen enthaltenen personenbezogenen Daten an den
+      jeweiligen Anbieter übermittelt werden. Die Analyse dient der schnelleren und fehlerärmeren
+      Auftragsbearbeitung (Art. 6 Abs. 1 lit. b und lit. f DSGVO). Automatisch erkannte Angaben sind
+      Arbeitshilfen; unsichere Ergebnisse sollen gekennzeichnet und vor einer verbindlichen
+      Verwendung geprüft werden. Es erfolgt keine ausschließlich automatisierte Entscheidung mit
+      rechtlicher oder vergleichbar erheblicher Wirkung.</p>
+
+      <h2>9. Technische Protokolle und interne Nutzungsstatistik</h2>
+      <p>Zur Sicherheit, Fehleranalyse und Verbesserung der Bedienung verarbeitet das Portal
+      Server-Protokolle sowie interne Klickereignisse. Bei Klickereignissen können Zeitpunkt,
+      Seitenpfad, Bezeichnung beziehungsweise technische Kennung des angeklickten Elements,
+      Zieladresse und die Zuordnung zum öffentlichen, Partner- oder Admin-Bereich gespeichert
+      werden. Bei angemeldeten Partnern kann eine Zuordnung zum Partnerbetrieb erfolgen. Diese Daten
+      werden nicht für personalisierte Werbung oder ein seitenübergreifendes Nutzerprofil verwendet.
+      Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO.</p>
+
+      <h2>10. Cookies</h2>
       <p>Wir verwenden ausschließlich technisch notwendige Cookies (Sitzungs-Cookies für die
       Anmeldung). Es findet kein Tracking zu Werbezwecken statt; eine Einwilligung ist hierfür
       nicht erforderlich (§ 25 Abs. 2 TDDDG).</p>
 
-      <h2>8. Speicherdauer</h2>
-      <p>Auftragsdaten und Belege bewahren wir im Rahmen der gesetzlichen Aufbewahrungspflichten
-      (6 bzw. 10 Jahre, §§ 147 AO, 257 HGB) auf. Danach werden die Daten gelöscht, sofern keine
-      berechtigten Gründe für eine weitere Speicherung bestehen.</p>
+      <h2>11. Speicherdauer und Löschung</h2>
+      <p>Wir speichern personenbezogene Daten nur so lange, wie sie für den jeweiligen Zweck,
+      gesetzliche Pflichten oder die Geltendmachung, Ausübung beziehungsweise Verteidigung von
+      Rechtsansprüchen erforderlich sind. Dabei gelten insbesondere folgende Kategorien:</p>
+      <ul>
+        <li>Für Anfragen, die nicht zu einem Vertrag führen, muss vor der rechtlichen Freigabe dieser
+        Seite eine konkrete betriebliche Löschfrist festgelegt und technisch umgesetzt werden. Bis
+        dahin bleibt diese Datenschutzerklärung sichtbar als Prüffassung gesperrt.</li>
+        <li>Auftrags-, Mietvertrags-, Rechnungs- und Buchungsunterlagen werden entsprechend der
+        jeweils anwendbaren handels- und steuerrechtlichen Fristen aufbewahrt; je nach Unterlagenart
+        können dies insbesondere sechs, acht oder zehn Jahre sein.</li>
+        <li>Kommunikationsdaten werden gelöscht, wenn der Vorgang abgeschlossen ist und keine
+        Aufbewahrungs- oder Nachweisgründe mehr bestehen.</li>
+        <li>Server- und Klickprotokolle werden gelöscht oder zusammengefasst, sobald sie für
+        Sicherheit, Fehleranalyse und interne Auswertung nicht mehr erforderlich sind.</li>
+        <li>Sicherungskopien werden nach dem betrieblichen Sicherungszyklus überschrieben; bis dahin
+        werden darin enthaltene Daten nicht mehr aktiv verwendet.</li>
+      </ul>
+      <p>Gesetzliche Aufbewahrungspflichten, Rechtsstreitigkeiten oder konkrete Sicherheitsvorfälle
+      können im Einzelfall eine längere Speicherung erfordern.</p>
 
-      <h2>9. Ihre Rechte</h2>
+      <h2>12. Schutz persönlicher Status-Links</h2>
+      <p>Persönliche Status-Links ermöglichen den Zugriff auf auftragsbezogene Informationen ohne
+      zusätzliche Anmeldung. Bitte behandeln Sie einen solchen Link vertraulich und geben Sie ihn
+      nur an berechtigte Personen weiter. Informieren Sie uns, wenn ein Link versehentlich an Dritte
+      gelangt ist.</p>
+
+      <h2>13. Ihre Rechte</h2>
       <p>Sie haben das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16), Löschung
       (Art. 17), Einschränkung der Verarbeitung (Art. 18), Datenübertragbarkeit (Art. 20) sowie
       Widerspruch gegen Verarbeitungen auf Grundlage berechtigter Interessen (Art. 21 DSGVO).
       Wenden Sie sich dazu einfach an die oben genannten Kontaktdaten.</p>
 
-      <h2>10. Beschwerderecht</h2>
+      <h2>14. Beschwerderecht</h2>
       <p>Sie haben das Recht, sich bei einer Datenschutz-Aufsichtsbehörde zu beschweren —
       zuständig für uns: Landesbeauftragter für den Datenschutz und die Informationsfreiheit
-      Baden-Württemberg, Lautenschlagerstraße 20, 70173 Stuttgart.</p>
+      Baden-Württemberg, Heilbronner Straße 35, 70191 Stuttgart.</p>
     </div>
     <footer>
       <a href="{{ url_for('impressum_seite') }}">Impressum</a> ·

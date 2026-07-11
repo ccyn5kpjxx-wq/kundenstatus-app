@@ -414,12 +414,27 @@ LOGIN_RATE_LIMIT_ENABLED = env_flag("LOGIN_RATE_LIMIT_ENABLED", False)
 LOGIN_RATE_LIMIT_MAX = max(3, env_int("LOGIN_RATE_LIMIT_MAX", 8))
 LOGIN_RATE_LIMIT_WINDOW_SECONDS = max(60, env_int("LOGIN_RATE_LIMIT_WINDOW_SECONDS", 15 * 60))
 LOGIN_RATE_LIMIT_LOCK_SECONDS = max(60, env_int("LOGIN_RATE_LIMIT_LOCK_SECONDS", 10 * 60))
+PUBLIC_FORM_RATE_LIMIT_MAX = max(3, env_int("PUBLIC_FORM_RATE_LIMIT_MAX", 6))
+PUBLIC_FORM_RATE_LIMIT_WINDOW_SECONDS = max(
+    60, env_int("PUBLIC_FORM_RATE_LIMIT_WINDOW_SECONDS", 15 * 60)
+)
+MIETVERTRAG_RECHTLICH_FREIGEGEBEN = env_flag(
+    "MIETVERTRAG_RECHTLICH_FREIGEGEBEN", False
+)
+MIETVERTRAG_TEXT_VERSION = (
+    os.environ.get("MIETVERTRAG_TEXT_VERSION") or ""
+).strip()
+DATENSCHUTZ_RECHTLICH_FREIGEGEBEN = env_flag(
+    "DATENSCHUTZ_RECHTLICH_FREIGEGEBEN", False
+)
 SESSION_IDLE_TIMEOUT_MINUTES = max(5, env_int("SESSION_IDLE_TIMEOUT_MINUTES", 8 * 60))
 REMEMBER_LOGIN_DAYS = max(1, env_int("REMEMBER_LOGIN_DAYS", 30))
 ADMIN_REMEMBER_COOKIE = "gaertner_admin_remember"
 PARTNER_REMEMBER_COOKIE = "gaertner_partner_remember"
 LOGIN_ATTEMPTS = {}
 LOGIN_ATTEMPTS_LOCK = threading.Lock()
+PUBLIC_FORM_ATTEMPTS = {}
+PUBLIC_FORM_ATTEMPTS_LOCK = threading.Lock()
 _sqlite_wal_configured = False
 _sqlite_wal_lock = threading.Lock()
 
@@ -1231,7 +1246,7 @@ COPART_STANDORT_ENTFERNUNG_KM = {
 VERSICHERUNG_FREIGABE_STATUS = {
     "offen": {"label": "Offen", "farbe": "secondary"},
     "vorbereitet": {"label": "Vorbereitet", "farbe": "info"},
-    "zugeteilt": {"label": "Zugewiesen an Lackierzentrum Gärtner Karosserie & Lack GmbH", "farbe": "primary"},
+    "zugeteilt": {"label": "Zugewiesen an Lackierzentrum Gärtner GmbH Karosserie + Lack", "farbe": "primary"},
     "gemeldet": {"label": "Gemeldet", "farbe": "primary"},
     "in_pruefung": {"label": "Versicherung prüft", "farbe": "info"},
     "rueckfrage": {"label": "Rückfrage", "farbe": "warning"},
@@ -3130,6 +3145,14 @@ def get_startup_warnings():
         warnings.append(
             "WHATSAPP_APP_SECRET fehlt. Eingehende WhatsApp-Webhooks werden ohne Signaturprüfung angenommen."
         )
+    if not MIETVERTRAG_RECHTLICH_FREIGEGEBEN or not MIETVERTRAG_TEXT_VERSION:
+        warnings.append(
+            "Mietvertrag ist im sicheren Entwurfsmodus: Signatur, Bestätigung und Versand sind bis zur rechtlichen Freigabe gesperrt."
+        )
+    if not DATENSCHUTZ_RECHTLICH_FREIGEGEBEN:
+        warnings.append(
+            "Datenschutzerklärung ist als Prüffassung markiert: Anbieter, Drittlandtransfers und Löschfristen vor Veröffentlichung rechtlich prüfen."
+        )
     return warnings
 
 
@@ -3377,6 +3400,40 @@ def login_wait_label(seconds):
     seconds = max(1, int(seconds or 1))
     minutes = max(1, (seconds + 59) // 60)
     return f"{minutes} Minute" if minutes == 1 else f"{minutes} Minuten"
+
+
+def public_form_rate_limit_status(scope):
+    """Kleines, absichtlich personenbezogenes IP-Fenster gegen Formular-Spam.
+
+    Es werden keine IP-Adressen dauerhaft gespeichert; der Schlüssel lebt nur
+    im Arbeitsspeicher des Webprozesses und verfällt nach dem Zeitfenster.
+    """
+    remote = clean_text(request.remote_addr) if has_request_context() else "unknown"
+    key = f"{clean_text(scope)}:{remote}"
+    now_ts = time.time()
+    with PUBLIC_FORM_ATTEMPTS_LOCK:
+        state = PUBLIC_FORM_ATTEMPTS.get(key)
+        if not state or now_ts - float(state.get("started_at") or 0) >= PUBLIC_FORM_RATE_LIMIT_WINDOW_SECONDS:
+            if state:
+                PUBLIC_FORM_ATTEMPTS.pop(key, None)
+            return False, 0
+        if int(state.get("count") or 0) < PUBLIC_FORM_RATE_LIMIT_MAX:
+            return False, 0
+        rest = PUBLIC_FORM_RATE_LIMIT_WINDOW_SECONDS - (now_ts - float(state.get("started_at") or now_ts))
+        return True, max(1, int(rest) + 1)
+
+
+def record_public_form_attempt(scope):
+    remote = clean_text(request.remote_addr) if has_request_context() else "unknown"
+    key = f"{clean_text(scope)}:{remote}"
+    now_ts = time.time()
+    with PUBLIC_FORM_ATTEMPTS_LOCK:
+        state = PUBLIC_FORM_ATTEMPTS.get(key)
+        if not state or now_ts - float(state.get("started_at") or 0) >= PUBLIC_FORM_RATE_LIMIT_WINDOW_SECONDS:
+            state = {"count": 0, "started_at": now_ts}
+        state["count"] = int(state.get("count") or 0) + 1
+        PUBLIC_FORM_ATTEMPTS[key] = state
+        return state["count"]
 
 
 def parse_date(value):
@@ -7865,6 +7922,11 @@ BACKUP_TABLES = (
     "fahrzeugverkaeufe",
     "fahrzeugverkauf_dateien",
     "auftraege",
+    "mietfahrzeuge",
+    "mietvorgaenge",
+    "mietvertrag_versionen",
+    "mietfahrzeug_bilder",
+    "mietbild_backups",
     "dateien",
     "datei_backups",
     "versicherung_checkpunkte",
@@ -7897,6 +7959,20 @@ BACKUP_TABLES = (
     "mitarbeiter",
     "mitarbeiter_urlaub",
 )
+BACKUP_FORMAT_VERSION = 2
+BACKUP_BINARY_FIELDS = {
+    "mietvertrag_versionen": {
+        "pdf_base64": {
+            "suffix": ".pdf",
+            "max_bytes": 100 * 1024 * 1024,
+        },
+        "unterschrift_base64": {
+            "suffix": ".png",
+            "max_bytes": 2 * 1024 * 1024,
+        },
+    },
+}
+BACKUP_BINARY_PREFIX = "database_blobs"
 _backup_lock = threading.Lock()
 _backup_thread_started = False
 _change_backup_lock = threading.Lock()
@@ -7904,14 +7980,115 @@ _change_backup_pending = False
 _change_backup_running = False
 
 
-def list_table_rows_for_backup(db, table_name):
+def list_table_rows_for_backup(db, table_name, exclude_columns=()):
     try:
         columns = get_table_columns(db, table_name)
     except Exception:
         return []
     if not columns:
         return []
-    return [dict(row) for row in db.execute(f"SELECT * FROM {table_name}").fetchall()]
+    excluded = set(exclude_columns or ())
+    selected = sorted(column for column in columns if column not in excluded)
+    if not selected:
+        return []
+    column_sql = ", ".join(selected)
+    return [
+        dict(row)
+        for row in db.execute(f"SELECT {column_sql} FROM {table_name}").fetchall()
+    ]
+
+
+def backup_binary_zip_path(table_name, row_id, column_name, suffix):
+    return (
+        f"{BACKUP_BINARY_PREFIX}/{table_name}/{int(row_id)}/"
+        f"{column_name}{clean_text(suffix)}"
+    )
+
+
+def write_table_rows_and_binary_blobs(db, archive, table_name):
+    binary_fields = BACKUP_BINARY_FIELDS.get(table_name, {})
+    rows = list_table_rows_for_backup(db, table_name, binary_fields.keys())
+    references = []
+    total_bytes = 0
+    if not binary_fields or not rows:
+        return rows, references, total_bytes
+
+    field_names = list(binary_fields)
+    field_sql = ", ".join(field_names)
+    for row in rows:
+        try:
+            row_id = int(row.get("id") or 0)
+        except (TypeError, ValueError):
+            row_id = 0
+        if row_id <= 0:
+            raise ValueError(
+                f"Backup abgebrochen: {table_name} enthält eine Zeile ohne gültige ID."
+            )
+        blob_row = db.execute(
+            f"SELECT {field_sql} FROM {table_name} WHERE id=?",
+            (row_id,),
+        ).fetchone()
+        if not blob_row:
+            raise ValueError(
+                f"Backup abgebrochen: {table_name} #{row_id} wurde während des Exports verändert."
+            )
+        for column_name, config in binary_fields.items():
+            # Die Spalte bleibt im JSON-Schema sichtbar, enthält dort aber nie
+            # die große Base64-Nutzlast. Diese liegt genau einmal als Rohdatei im ZIP.
+            row[column_name] = ""
+            encoded = clean_text(blob_row[column_name])
+            if not encoded:
+                continue
+            try:
+                raw = base64.b64decode(encoded, validate=True)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Backup abgebrochen: {table_name} #{row_id}, {column_name} enthält kein gültiges Base64."
+                ) from exc
+            max_bytes = int(config.get("max_bytes") or 0)
+            if max_bytes and len(raw) > max_bytes:
+                raise ValueError(
+                    f"Backup abgebrochen: {table_name} #{row_id}, {column_name} ist unerwartet groß."
+                )
+            zip_path = backup_binary_zip_path(
+                table_name,
+                row_id,
+                column_name,
+                config.get("suffix") or ".bin",
+            )
+            archive.writestr(zip_path, raw)
+            references.append(
+                {
+                    "table": table_name,
+                    "row_id": row_id,
+                    "column": column_name,
+                    "zip_path": zip_path,
+                    "restore_encoding": "base64",
+                    "sha256": sha256_bytes(raw),
+                    "size": len(raw),
+                }
+            )
+            total_bytes += len(raw)
+    return rows, references, total_bytes
+
+
+def strip_externalized_blobs_from_sqlite_snapshot(conn):
+    for table_name, field_config in BACKUP_BINARY_FIELDS.items():
+        columns = {
+            row[1]
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        fields = [field for field in field_config if field in columns]
+        if not fields:
+            continue
+        set_sql = ", ".join(f"{field}=''" for field in fields)
+        conn.execute(f"UPDATE {table_name} SET {set_sql}")
+    conn.commit()
+    # UPDATE allein lässt die alten Base64-Seiten in der SQLite-Datei zurück.
+    # VACUUM schreibt eine kompakte Kopie, damit das ZIP die Bytes wirklich nur
+    # in database_blobs/ enthält und keine gelöschten Vertragsdaten mitschleppt.
+    conn.execute("VACUUM")
+    conn.commit()
 
 
 def write_uploads_to_backup(archive):
@@ -7930,27 +8107,42 @@ def create_backup_package(reason="auto"):
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_path = BACKUP_DIR / f"kundenstatus-backup-{timestamp}.zip"
+    partial_path = BACKUP_DIR / f".{backup_path.name}.{uuid.uuid4().hex}.part"
 
     with _backup_lock:
         # Eigene Verbindung: ein Backup-Fehler darf NIE die Request-Transaktion vergiften.
         db = open_fresh_db()
         try:
+            if USE_POSTGRES:
+                db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            else:
+                # JSON, externe Binärdateien und auftraege.db müssen exakt
+                # denselben SQLite-Snapshot abbilden.
+                db.execute("BEGIN")
             export = {
+                "format_version": BACKUP_FORMAT_VERSION,
                 "created_at": now_str(),
                 "reason": reason,
                 "database": "postgres" if USE_POSTGRES else "sqlite",
                 "tables": {},
+                "binary_blobs": [],
             }
-            for table_name in BACKUP_TABLES:
-                # datei_backups hält base64-Kopien JEDER Datei aller Auftraege; die echten
-                # Dateien liegen ohnehin via write_uploads_to_backup im ZIP. Das base64 hier
-                # mitzudumpen ist Doppelung und der eigentliche RAM-/Zeit-Fresser (OOM/502)
-                # -> komplett auslassen.
-                if table_name == "datei_backups":
-                    continue
-                export["tables"][table_name] = list_table_rows_for_backup(db, table_name)
+            binary_blob_bytes = 0
+            with zipfile.ZipFile(partial_path, "w", zipfile.ZIP_DEFLATED) as archive:
+                for table_name in BACKUP_TABLES:
+                    # datei_backups hält base64-Kopien JEDER Datei aller Auftraege; die echten
+                    # Dateien liegen ohnehin via write_uploads_to_backup im ZIP. Das base64 hier
+                    # mitzudumpen ist Doppelung und der eigentliche RAM-/Zeit-Fresser (OOM/502)
+                    # -> komplett auslassen.
+                    if table_name == "datei_backups":
+                        continue
+                    rows, references, blob_bytes = write_table_rows_and_binary_blobs(
+                        db, archive, table_name
+                    )
+                    export["tables"][table_name] = rows
+                    export["binary_blobs"].extend(references)
+                    binary_blob_bytes += blob_bytes
 
-            with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr(
                     "backup.json",
                     json.dumps(export, ensure_ascii=False, indent=2, default=str),
@@ -7959,14 +8151,12 @@ def create_backup_package(reason="auto"):
                     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
                         tmp_path = pathlib.Path(tmp.name)
                     try:
-                        sqlite_source = sqlite3.connect(DB, timeout=SQLITE_BUSY_TIMEOUT_SECONDS)
                         sqlite_target = sqlite3.connect(tmp_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS)
                         try:
-                            configure_sqlite_connection(sqlite_source)
-                            sqlite_source.backup(sqlite_target)
+                            db.backup(sqlite_target)
+                            strip_externalized_blobs_from_sqlite_snapshot(sqlite_target)
                         finally:
                             sqlite_target.close()
-                            sqlite_source.close()
                         archive.write(tmp_path, "auftraege.db")
                     finally:
                         try:
@@ -7978,16 +8168,26 @@ def create_backup_package(reason="auto"):
                     "manifest.json",
                     json.dumps(
                         {
+                            "format_version": BACKUP_FORMAT_VERSION,
                             "created_at": now_str(),
                             "reason": reason,
                             "backup_file": backup_path.name,
                             "upload_count": upload_count,
+                            "binary_blob_count": len(export["binary_blobs"]),
+                            "binary_blob_bytes": binary_blob_bytes,
                             "keep": AUTO_BACKUP_KEEP,
                         },
                         ensure_ascii=False,
                         indent=2,
                     ),
                 )
+            partial_path.replace(backup_path)
+        except Exception:
+            try:
+                partial_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
         finally:
             db.close()
 
@@ -8043,6 +8243,7 @@ DATA_CHANGE_ENDPOINT_EXCLUDES = {
     "partner_login_key",
     "partner_login_slug",
     "partner_logout",
+    "mietwagen_anfrage",
 }
 
 
@@ -9491,6 +9692,7 @@ def init_db():
             auftrag_id      INTEGER DEFAULT 0,
             kunde_name      TEXT DEFAULT '',
             kunde_telefon   TEXT DEFAULT '',
+            whatsapp_erlaubt INTEGER DEFAULT 0,
             start_datum     TEXT DEFAULT '',
             end_datum       TEXT DEFAULT '',
             rueckgabe_datum TEXT DEFAULT '',
@@ -9498,6 +9700,35 @@ def init_db():
             notiz           TEXT DEFAULT '',
             erstellt_am     TEXT NOT NULL,
             geaendert_am    TEXT NOT NULL
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mietvertrag_versionen (
+            id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+            mietvorgang_id           INTEGER NOT NULL,
+            version                  INTEGER NOT NULL,
+            text_version             TEXT DEFAULT '',
+            status                   TEXT DEFAULT 'unterschrieben',
+            snapshot_json            TEXT NOT NULL,
+            snapshot_sha256          TEXT NOT NULL,
+            pdf_base64               TEXT DEFAULT '',
+            pdf_sha256               TEXT DEFAULT '',
+            unterschrift_base64      TEXT DEFAULT '',
+            unterschrift_sha256      TEXT DEFAULT '',
+            unterschrift_name        TEXT DEFAULT '',
+            unterschrift_ort         TEXT DEFAULT '',
+            unterschrift_am          TEXT DEFAULT '',
+            bestaetigt_am            TEXT DEFAULT '',
+            versendet_am             TEXT DEFAULT '',
+            versandweg               TEXT DEFAULT '',
+            versandziel              TEXT DEFAULT '',
+            aenderungsgrund          TEXT DEFAULT '',
+            quelle                   TEXT DEFAULT 'normal',
+            rechtlich_freigegeben    INTEGER DEFAULT 0,
+            erstellt_am              TEXT NOT NULL,
+            UNIQUE (mietvorgang_id, version)
         )
         """
     )
@@ -9522,6 +9753,7 @@ def init_db():
             status         TEXT DEFAULT 'offen',
             name           TEXT DEFAULT '',
             telefon        TEXT DEFAULT '',
+            whatsapp_erlaubt INTEGER DEFAULT 0,
             email          TEXT DEFAULT '',
             klasse_wunsch  TEXT DEFAULT '',
             start_datum    TEXT DEFAULT '',
@@ -9539,6 +9771,9 @@ def init_db():
     # CREATE TABLE laufen, sonst crasht init_db auf frischen Datenbanken.
     ensure_column(db, "mietwagen_anfragen", "mietfahrzeug_id", "INTEGER DEFAULT 0")
     ensure_column(db, "mietwagen_anfragen", "whatsapp_status", "TEXT DEFAULT ''")
+    ensure_column(db, "mietwagen_anfragen", "whatsapp_erlaubt", "INTEGER DEFAULT 0")
+    ensure_column(db, "mietfahrzeuge", "archiviert_am", "TEXT DEFAULT ''")
+    ensure_column(db, "mietfahrzeuge", "archivgrund", "TEXT DEFAULT ''")
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS mietbild_backups (
@@ -9569,6 +9804,7 @@ def init_db():
     ensure_index(db, "idx_mietfahrzeug_bilder_fahrzeug", "mietfahrzeug_bilder", ("mietfahrzeug_id",))
     # Mietvertrag-Felder am Mietvorgang (digitale Unterschrift, Versand, Kontaktweg)
     ensure_column(db, "mietvorgaenge", "kunde_email", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "whatsapp_erlaubt", "INTEGER DEFAULT 0")
     ensure_column(db, "mietvorgaenge", "vertrag_status", "TEXT DEFAULT ''")
     ensure_column(db, "mietvorgaenge", "vertrag_felder_json", "TEXT DEFAULT ''")
     ensure_column(db, "mietvorgaenge", "vertrag_snapshot_json", "TEXT DEFAULT ''")
@@ -9579,6 +9815,22 @@ def init_db():
     ensure_column(db, "mietvorgaenge", "vertrag_bestaetigt_am", "TEXT DEFAULT ''")
     ensure_column(db, "mietvorgaenge", "vertrag_gesendet_am", "TEXT DEFAULT ''")
     ensure_column(db, "mietvorgaenge", "vertrag_versandweg", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "vertrag_version", "INTEGER DEFAULT 1")
+    ensure_column(db, "mietvorgaenge", "vertrag_snapshot_hash", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "vertrag_pdf_hash", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "vertrag_text_version", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "vertrag_aenderungsgrund", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "storniert_am", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvorgaenge", "storno_grund", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvertrag_versionen", "versendet_am", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvertrag_versionen", "versandweg", "TEXT DEFAULT ''")
+    ensure_column(db, "mietvertrag_versionen", "versandziel", "TEXT DEFAULT ''")
+    ensure_index(
+        db,
+        "idx_mietvertrag_versionen_vorgang",
+        "mietvertrag_versionen",
+        ("mietvorgang_id", "version"),
+    )
     ensure_index(db, "idx_lexware_rechnungen_voucher", "lexware_rechnungen", ("voucher_id",))
     ensure_index(
         db,
@@ -9654,6 +9906,7 @@ def init_db():
     )
 
     backfill_existing_upload_backups(db)
+    backfill_legacy_mietvertrag_versionen(db)
 
     db.commit()
     db.close()
@@ -13653,7 +13906,7 @@ def make_lackierauftrag_pdf(autohaus, data=None):
                 [
                     Paragraph("Lackierauftrag", hdr),
                     Paragraph(
-                        "Gärtner Karosserie &amp; Lack GmbH<br/>"
+                        "Gärtner GmbH Karosserie + Lack<br/>"
                         "Binauer Höhe 4 · 74821 Mosbach-Lohrbach<br/>"
                         "Tel. +49 1522 770 66 94 · info@auto-lackierzentrum.de",
                         sub,
@@ -13955,7 +14208,7 @@ def make_abtretungserklaerung_pdf(data):
                 [
                     Paragraph("Abtretungserklärung", title),
                     Paragraph(
-                        "Gärtner Karosserie &amp; Lack GmbH<br/>"
+                        "Gärtner GmbH Karosserie + Lack<br/>"
                         "Binauer Höhe 4 · 74821 Mosbach-Lohrbach<br/>"
                         "info@auto-lackierzentrum.de",
                         subtitle,
@@ -14049,7 +14302,7 @@ def make_abtretungserklaerung_pdf(data):
     assignment_text = (
         "Hiermit trete ich meine Ansprüche aus dem oben genannten Schadenfall auf Erstattung der "
         "Reparaturkosten, Lackier- und Karosseriearbeiten sowie damit zusammenhängender Nebenforderungen "
-        "in Höhe der jeweiligen Werkstattrechnung erfüllungshalber an die Gärtner Karosserie & Lack GmbH ab. "
+        "in Höhe der jeweiligen Werkstattrechnung erfüllungshalber an die Gärtner GmbH Karosserie + Lack ab. "
         "Die Werkstatt ist berechtigt, die Forderung direkt gegenüber der Versicherung oder dem ersatzpflichtigen "
         "Dritten geltend zu machen, Auskünfte zum Schadenfall einzuholen und abrechnungsrelevante Unterlagen "
         "einzureichen."
@@ -28307,10 +28560,10 @@ def build_teileanfrage_email_body(marke, fahrzeug, fin, kennzeichen, schaden, pa
     lines.extend(
         [
             "",
-            "Lieferadresse: Gärtner Karosserie & Lack GmbH, Mosbach",
+            "Lieferadresse: Gärtner GmbH Karosserie + Lack, Mosbach",
             "",
             "Vielen Dank.",
-            "Gärtner Karosserie & Lack GmbH",
+            "Gärtner GmbH Karosserie + Lack",
         ]
     )
     return "\n".join(lines)
@@ -30268,7 +30521,7 @@ def build_versicherung_schadenprotokoll(auftrag, dateien=None, prozess=None, tei
         erster_schritt_titel = "1. Zuteilung durch Versicherung"
         erster_schritt_detail = (
             clean_text(auftrag.get("netzwerk_zuteilung_status"))
-            or "Versicherung kann den Schadenfall direkt an Lackierzentrum Gärtner Karosserie & Lack GmbH weiterleiten."
+            or "Versicherung kann den Schadenfall direkt an Lackierzentrum Gärtner GmbH Karosserie + Lack weiterleiten."
         )
         erster_schritt_owner = "Versicherung"
     else:
@@ -30537,7 +30790,7 @@ def werkstatt_kundenkontakt(auftrag=None):
     reference = " ".join(part for part in (fahrzeug, kennzeichen) if part)
     whatsapp_text = quote(f"Hallo Gärtner, ich habe eine Frage zu {reference}.")
     return {
-        "name": "Gärtner Karosserie & Lack GmbH",
+        "name": "Gärtner GmbH Karosserie + Lack",
         "adresse": "Binauer Höhe 4, 74821 Mosbach-Lohrbach",
         "telefon": phone,
         "telefon_url": phone_href,
@@ -30626,7 +30879,7 @@ def set_versicherung_freigabe_status(auftrag_id, status, hinweis="", quelle="ver
         text = clean_text(hinweis)
         if not text:
             if status == "freigegeben":
-                text = "Die Versicherung hat den Schaden freigegeben. Das Fahrzeug kann jetzt bei Lackierzentrum Gärtner Karosserie & Lack GmbH eingeplant werden."
+                text = "Die Versicherung hat den Schaden freigegeben. Das Fahrzeug kann jetzt bei Lackierzentrum Gärtner GmbH Karosserie + Lack eingeplant werden."
             elif status == "rueckfrage":
                 text = "Die Versicherung hat eine Rückfrage zum Schadenfall gestellt."
             elif status == "in_pruefung":
@@ -33515,7 +33768,10 @@ def impressum_seite():
 
 @app.route("/datenschutz")
 def datenschutz_seite():
-    return render_template("datenschutz.html")
+    return render_template(
+        "datenschutz.html",
+        rechtlich_freigegeben=DATENSCHUTZ_RECHTLICH_FREIGEGEBEN,
+    )
 
 
 @app.route("/admin/bewertung-url", methods=["POST"])
@@ -33664,8 +33920,12 @@ def admin_autohaus_zugangscode(autohaus_id):
     if not autohaus:
         abort(404)
     code = clean_text(request.form.get("zugangscode"))
+    bestaetigung = clean_text(request.form.get("zugangscode_bestaetigung"))
     if code and len(code) < 4:
         flash("Zugangscode zu kurz — bitte mindestens 4 Zeichen.", "warning")
+        return redirect(url_for("admin_zugaenge"))
+    if code and not hmac.compare_digest(code, bestaetigung):
+        flash("Die beiden Zugangscode-Eingaben stimmen nicht überein.", "warning")
         return redirect(url_for("admin_zugaenge"))
     if not code:
         code = generate_autohaus_zugangscode()
@@ -33839,7 +34099,7 @@ def admin_rundmail_senden():
                         message["Reply-To"] = config["smtp_user"]
                         message.set_content(
                             paket["text"]
-                            + "\n\n--\nGärtner Karosserie & Lack GmbH\nBinauer Höhe 4, 74821 Mosbach\nTelefon +49 1522 7706694"
+                            + "\n\n--\nGärtner GmbH Karosserie + Lack\nBinauer Höhe 4, 74821 Mosbach\nTelefon +49 1522 7706694"
                         )
                         add_standard_mail_headers(message)
                         smtp.send_message(message)
@@ -33973,7 +34233,7 @@ def baue_mahntext(stufe_meta, kontakt, nummer, betrag, faellig_label, tage_ueber
             f"bestimmt ist es im Tagesgeschäft untergegangen: Unsere Rechnung {nummer} über {betrag_label} "
             f"war am {faellig_label} fällig. Wir bitten freundlich um Überweisung bis zum {frist_label}.\n\n"
             "Falls sich die Zahlung mit diesem Schreiben überschnitten hat, betrachten Sie es bitte als gegenstandslos.\n\n"
-            "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner Karosserie & Lack GmbH"
+            "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner GmbH Karosserie + Lack"
         )
     if stufe_meta["stufe"] == 1:
         return (
@@ -33983,7 +34243,7 @@ def baue_mahntext(stufe_meta, kontakt, nummer, betrag, faellig_label, tage_ueber
             f"Hauptforderung: {betrag_label}\nMahngebühr: {umsatz_euro_label(gebuehr)}\n"
             f"Gesamt offen: {umsatz_euro_label(gesamt)}\n\n"
             "Bei Rückfragen zur Zahlung wenden Sie sich bitte umgehend an uns.\n\n"
-            "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner Karosserie & Lack GmbH"
+            "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner GmbH Karosserie + Lack"
         )
     if stufe_meta["stufe"] == 2:
         return (
@@ -33995,7 +34255,7 @@ def baue_mahntext(stufe_meta, kontakt, nummer, betrag, faellig_label, tage_ueber
             f"Verzugszinsen (§ 288 BGB): {umsatz_euro_label(zinsen)}\n"
             f"Gesamt offen: {umsatz_euro_label(gesamt)}\n\n"
             "Sollte bis zum Fristende keine Zahlung eingehen, behalten wir uns weitere Schritte vor.\n\n"
-            "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner Karosserie & Lack GmbH"
+            "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner GmbH Karosserie + Lack"
         )
     return (
         f"{anrede}\n\n"
@@ -34008,7 +34268,7 @@ def baue_mahntext(stufe_meta, kontakt, nummer, betrag, faellig_label, tage_ueber
         "Nach fruchtlosem Fristablauf übergeben wir die Forderung ohne weitere Ankündigung an ein "
         "Inkassounternehmen bzw. leiten das gerichtliche Mahnverfahren ein. Die dadurch entstehenden "
         "Kosten gehen zu Ihren Lasten.\n\n"
-        "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner Karosserie & Lack GmbH"
+        "Mit freundlichen Grüßen\nChristopher Gärtner\nGärtner GmbH Karosserie + Lack"
     )
 
 
@@ -34420,12 +34680,16 @@ def hydrate_mietvorgang(row):
     vorgang["start_obj"] = start_obj
     vorgang["end_obj"] = end_obj
     vorgang["rueckgabe_obj"] = rueck_obj
+    vorgang["whatsapp_erlaubt"] = bool(vorgang.get("whatsapp_erlaubt"))
     vorgang["start_label"] = start_obj.strftime(DATE_FMT) if start_obj else clean_text(vorgang.get("start_datum"))
     vorgang["end_label"] = end_obj.strftime(DATE_FMT) if end_obj else clean_text(vorgang.get("end_datum"))
     vorgang["rueckgabe_label"] = rueck_obj.strftime(DATE_FMT) if rueck_obj else ""
-    abgeschlossen = clean_text(vorgang.get("status")) == "zurueck" or bool(rueck_obj)
+    status = clean_text(vorgang.get("status"))
+    abgeschlossen = status in {"zurueck", "storniert"} or bool(rueck_obj)
     vorgang["abgeschlossen"] = abgeschlossen
-    if abgeschlossen:
+    if status == "storniert":
+        vorgang["phase"] = "storniert"
+    elif abgeschlossen:
         vorgang["phase"] = "zurueck"
     elif start_obj and start_obj > heute:
         vorgang["phase"] = "reserviert"
@@ -34450,7 +34714,10 @@ def list_mietvorgaenge(mietfahrzeug_id=None, only_open=False):
             bedingungen.append("mietfahrzeug_id=?")
             params.append(int(mietfahrzeug_id))
         if only_open:
-            bedingungen.append("COALESCE(status,'') != 'zurueck' AND COALESCE(rueckgabe_datum,'')=''")
+            bedingungen.append(
+                "COALESCE(status,'') NOT IN ('zurueck','storniert') "
+                "AND COALESCE(rueckgabe_datum,'')=''"
+            )
         if bedingungen:
             sql += " WHERE " + " AND ".join(bedingungen)
         sql += " ORDER BY id DESC"
@@ -34501,7 +34768,7 @@ def hydrate_mietfahrzeug(row, vorgaenge=None, bilder=None):
     reserviert = naechste_reservierung(vorgaenge)
     fahrzeug["aktiver_vorgang"] = laufend
     fahrzeug["naechste_reservierung"] = reserviert
-    if fahrzeug["basis_status"] == "inaktiv":
+    if not bool(fahrzeug.get("aktiv")) or fahrzeug["basis_status"] == "inaktiv":
         effektiv = "inaktiv"
     elif laufend:
         effektiv = "vermietet"
@@ -34765,8 +35032,32 @@ def update_mietfahrzeug(fahrzeug_id, **felder):
     kennzeichen = clean_text(felder.get("kennzeichen")).upper()
     if not kennzeichen:
         raise ValueError("Bitte ein Kennzeichen angeben.")
+    aktiv = bool(felder.get("aktiv", True))
+    status = normalize_mietfahrzeug_status(felder.get("status"))
     db = get_db()
     try:
+        if USE_POSTGRES:
+            aktuell = db.execute(
+                "SELECT aktiv FROM mietfahrzeuge WHERE id=? FOR UPDATE",
+                (int(fahrzeug_id),),
+            ).fetchone()
+        else:
+            db.execute("BEGIN IMMEDIATE")
+            aktuell = db.execute(
+                "SELECT aktiv FROM mietfahrzeuge WHERE id=?",
+                (int(fahrzeug_id),),
+            ).fetchone()
+        if not aktuell:
+            raise ValueError("Das Mietfahrzeug wurde nicht gefunden.")
+        if int(aktuell["aktiv"] or 0) and (not aktiv or status == "inaktiv"):
+            raise ValueError(
+                "Aktive Fahrzeuge bitte über die Archivierung mit Begründung "
+                "aus dem Fuhrpark nehmen."
+            )
+        if aktiv and status == "inaktiv":
+            raise ValueError(
+                "Zum Reaktivieren bitte einen verfügbaren oder Wartungs-Status wählen."
+            )
         db.execute(
             """
             UPDATE mietfahrzeuge
@@ -34784,9 +35075,9 @@ def update_mietfahrzeug(fahrzeug_id, **felder):
                 clean_text(felder.get("kraftstoff")),
                 parse_tagessatz(felder.get("tagessatz")),
                 clean_text(felder.get("standort")),
-                normalize_mietfahrzeug_status(felder.get("status")),
+                status,
                 clean_text(felder.get("notiz")),
-                1 if felder.get("aktiv", True) else 0,
+                1 if aktiv else 0,
                 now_str(),
                 int(fahrzeug_id),
             ),
@@ -34808,34 +35099,116 @@ def _unlink_unterschrift(vorgang):
             pass
 
 
-def delete_mietfahrzeug(fahrzeug_id):
-    # Bild- und Unterschrift-Dateien zuerst von der Platte entfernen
-    for bild in list_mietfahrzeug_bilder(fahrzeug_id):
-        path = upload_file_path(bild)
-        if path:
-            try:
-                path.unlink(missing_ok=True)
-            except OSError:
-                pass
-    for vorgang in list_mietvorgaenge(fahrzeug_id):
-        _unlink_unterschrift(vorgang)
+def archiviere_mietfahrzeug(fahrzeug_id, grund):
+    grund = clean_text(grund)
+    if len(grund) < 3:
+        raise ValueError("Bitte einen kurzen Archivierungsgrund angeben.")
     db = get_db()
     try:
-        db.execute("DELETE FROM mietfahrzeug_bilder WHERE mietfahrzeug_id=?", (int(fahrzeug_id),))
-        db.execute("DELETE FROM mietvorgaenge WHERE mietfahrzeug_id=?", (int(fahrzeug_id),))
-        db.execute("DELETE FROM mietfahrzeuge WHERE id=?", (int(fahrzeug_id),))
+        if USE_POSTGRES:
+            fahrzeug = db.execute(
+                "SELECT id, aktiv FROM mietfahrzeuge WHERE id=? FOR UPDATE",
+                (int(fahrzeug_id),),
+            ).fetchone()
+        else:
+            db.execute("BEGIN IMMEDIATE")
+            fahrzeug = db.execute(
+                "SELECT id, aktiv FROM mietfahrzeuge WHERE id=?",
+                (int(fahrzeug_id),),
+            ).fetchone()
+        if not fahrzeug:
+            raise ValueError("Das Mietfahrzeug wurde nicht gefunden.")
+        if not int(fahrzeug["aktiv"] or 0):
+            raise ValueError("Das Mietfahrzeug ist bereits archiviert.")
+        offener_vorgang = db.execute(
+            """
+            SELECT id FROM mietvorgaenge
+            WHERE mietfahrzeug_id=?
+              AND COALESCE(status,'') NOT IN ('zurueck','storniert')
+              AND COALESCE(rueckgabe_datum,'')=''
+            LIMIT 1
+            """,
+            (int(fahrzeug_id),),
+        ).fetchone()
+        if offener_vorgang:
+            raise ValueError(
+                "Das Fahrzeug hat noch eine laufende Vermietung oder Reservierung. "
+                "Bitte den Vorgang zuerst zurückgeben oder stornieren."
+            )
+        db.execute(
+            """
+            UPDATE mietfahrzeuge
+            SET aktiv=0, status='inaktiv', archiviert_am=?, archivgrund=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (now_str(), grund, now_str(), int(fahrzeug_id)),
+        )
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
+
+
+def delete_mietfahrzeug(fahrzeug_id, grund="Manuell archiviert"):
+    """Kompatibilitätsname: Mietfahrzeuge werden nicht mehr physisch gelöscht."""
+    return archiviere_mietfahrzeug(fahrzeug_id, grund)
+
+
+def validiere_mietzeitraum(start, end, *, enddatum_erforderlich=True):
+    start_obj = parse_date(start)
+    end_obj = parse_date(end)
+    if not start_obj:
+        raise ValueError("Bitte ein gültiges Abholdatum angeben.")
+    if enddatum_erforderlich and not end_obj:
+        raise ValueError("Bitte ein gültiges Rückgabedatum angeben.")
+    if end_obj and end_obj < start_obj:
+        raise ValueError("Das Rückgabedatum darf nicht vor dem Abholdatum liegen.")
+    return start_obj, end_obj
+
+
+def validiere_mietkontakt(telefon="", email=""):
+    telefon = clean_text(telefon)
+    email = clean_text(email)
+    if telefon and len(re.sub(r"\D", "", telefon)) < 7:
+        raise ValueError("Bitte eine gültige Telefonnummer angeben.")
+    if email and not parse_email_recipients(email):
+        raise ValueError("Bitte eine gültige E-Mail-Adresse angeben.")
+
+
+def mietfahrzeug_zeitraum_frei_db(db, fahrzeug_id, start_obj, end_obj, exclude_vorgang_id=None):
+    rows = db.execute(
+        """
+        SELECT id, start_datum, end_datum
+        FROM mietvorgaenge
+        WHERE mietfahrzeug_id=?
+          AND COALESCE(status,'') NOT IN ('zurueck','storniert')
+          AND COALESCE(rueckgabe_datum,'')=''
+        """,
+        (int(fahrzeug_id),),
+    ).fetchall()
+    ende = end_obj or date.max
+    for row in rows:
+        if exclude_vorgang_id and int(row["id"]) == int(exclude_vorgang_id):
+            continue
+        vorhanden_start = parse_date(row["start_datum"]) or date.min
+        vorhanden_ende = parse_date(row["end_datum"]) or date.max
+        if start_obj <= vorhanden_ende and vorhanden_start <= ende:
+            return False
+    return True
 
 
 def create_mietvorgang(mietfahrzeug_id, **felder):
     kunde = clean_text(felder.get("kunde_name"))
     if not kunde:
         raise ValueError("Bitte den Kundennamen angeben.")
-    start_iso = iso_date(felder.get("start_datum")) or date.today().isoformat()
-    start_label = datetime.strptime(start_iso, "%Y-%m-%d").strftime(DATE_FMT)
-    end_label = format_date(felder.get("end_datum"))
+    start_obj, end_obj = validiere_mietzeitraum(
+        felder.get("start_datum"), felder.get("end_datum")
+    )
+    validiere_mietkontakt(felder.get("kunde_telefon"), felder.get("kunde_email"))
+    start_label = start_obj.strftime(DATE_FMT)
+    end_label = end_obj.strftime(DATE_FMT)
     try:
         auftrag_id = int(felder.get("auftrag_id") or 0)
     except (TypeError, ValueError):
@@ -34843,12 +35216,30 @@ def create_mietvorgang(mietfahrzeug_id, **felder):
     jetzt = now_str()
     db = get_db()
     try:
+        if USE_POSTGRES:
+            fahrzeug = db.execute(
+                "SELECT id, aktiv, status FROM mietfahrzeuge WHERE id=? FOR UPDATE",
+                (int(mietfahrzeug_id),),
+            ).fetchone()
+        else:
+            db.execute("BEGIN IMMEDIATE")
+            fahrzeug = db.execute(
+                "SELECT id, aktiv, status FROM mietfahrzeuge WHERE id=?",
+                (int(mietfahrzeug_id),),
+            ).fetchone()
+        if not fahrzeug:
+            raise ValueError("Das Mietfahrzeug wurde nicht gefunden.")
+        if not int(fahrzeug["aktiv"] or 0) or normalize_mietfahrzeug_status(fahrzeug["status"]) in {"wartung", "inaktiv"}:
+            raise ValueError("Das Mietfahrzeug ist aktuell nicht für eine Vermietung freigegeben.")
+        if not mietfahrzeug_zeitraum_frei_db(db, mietfahrzeug_id, start_obj, end_obj):
+            raise ValueError("Das Mietfahrzeug ist im gewählten Zeitraum bereits belegt.")
         cur = db.execute(
             """
             INSERT INTO mietvorgaenge
-            (mietfahrzeug_id, auftrag_id, kunde_name, kunde_telefon, kunde_email, start_datum,
-             end_datum, rueckgabe_datum, status, notiz, erstellt_am, geaendert_am)
-            VALUES (?, ?, ?, ?, ?, ?, ?, '', 'aktiv', ?, ?, ?)
+            (mietfahrzeug_id, auftrag_id, kunde_name, kunde_telefon, kunde_email,
+             whatsapp_erlaubt, start_datum, end_datum, rueckgabe_datum, status,
+             notiz, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', 'aktiv', ?, ?, ?)
             """,
             (
                 int(mietfahrzeug_id),
@@ -34856,6 +35247,7 @@ def create_mietvorgang(mietfahrzeug_id, **felder):
                 kunde,
                 clean_text(felder.get("kunde_telefon")),
                 clean_text(felder.get("kunde_email")),
+                1 if felder.get("whatsapp_erlaubt") else 0,
                 start_label,
                 end_label,
                 clean_text(felder.get("notiz")),
@@ -34865,31 +35257,94 @@ def create_mietvorgang(mietfahrzeug_id, **felder):
         )
         db.commit()
         return cur.lastrowid
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
 
 def mietvorgang_zuruecknehmen(vorgang_id, rueckgabe_datum=None):
-    rueck_label = format_date(rueckgabe_datum) or date.today().strftime(DATE_FMT)
     db = get_db()
     try:
+        if USE_POSTGRES:
+            row = db.execute(
+                "SELECT * FROM mietvorgaenge WHERE id=? FOR UPDATE", (int(vorgang_id),)
+            ).fetchone()
+        else:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM mietvorgaenge WHERE id=?", (int(vorgang_id),)
+            ).fetchone()
+        if not row:
+            raise ValueError("Der Mietvorgang wurde nicht gefunden.")
+        status = clean_text(row["status"])
+        if status == "storniert":
+            raise ValueError("Ein stornierter Mietvorgang kann nicht als zurückgegeben gebucht werden.")
+        if status == "zurueck" or clean_text(row["rueckgabe_datum"]):
+            raise ValueError("Der Mietvorgang wurde bereits als zurückgegeben gebucht.")
+        rueckgabe_raw = clean_text(rueckgabe_datum)
+        rueck_obj = parse_date(rueckgabe_raw) if rueckgabe_raw else date.today()
+        if rueckgabe_raw and not rueck_obj:
+            raise ValueError("Bitte ein gültiges tatsächliches Rückgabedatum angeben.")
+        if rueck_obj > date.today():
+            raise ValueError("Das tatsächliche Rückgabedatum darf nicht in der Zukunft liegen.")
+        start_obj = parse_date(row["start_datum"])
+        if start_obj and rueck_obj < start_obj:
+            raise ValueError("Das Rückgabedatum darf nicht vor dem Abholdatum liegen.")
+        rueck_label = rueck_obj.strftime(DATE_FMT)
         db.execute(
             "UPDATE mietvorgaenge SET status='zurueck', rueckgabe_datum=?, geaendert_am=? WHERE id=?",
             (rueck_label, now_str(), int(vorgang_id)),
         )
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
 
-def delete_mietvorgang(vorgang_id):
-    _unlink_unterschrift(get_mietvorgang(vorgang_id))
+def storniere_mietvorgang(vorgang_id, grund):
+    grund = clean_text(grund)
+    if len(grund) < 3:
+        raise ValueError("Bitte einen kurzen Stornogrund angeben.")
     db = get_db()
     try:
-        db.execute("DELETE FROM mietvorgaenge WHERE id=?", (int(vorgang_id),))
+        if USE_POSTGRES:
+            row = db.execute(
+                "SELECT status FROM mietvorgaenge WHERE id=? FOR UPDATE", (int(vorgang_id),)
+            ).fetchone()
+        else:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT status FROM mietvorgaenge WHERE id=?", (int(vorgang_id),)
+            ).fetchone()
+        if not row:
+            raise ValueError("Der Mietvorgang wurde nicht gefunden.")
+        if clean_text(row["status"]) == "zurueck":
+            raise ValueError("Ein bereits zurückgegebener Mietvorgang kann nicht storniert werden.")
+        if clean_text(row["status"]) == "storniert":
+            raise ValueError("Der Mietvorgang wurde bereits storniert; Zeitpunkt und Grund bleiben unverändert.")
+        db.execute(
+            """
+            UPDATE mietvorgaenge
+            SET status='storniert', storniert_am=?, storno_grund=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (now_str(), grund, now_str(), int(vorgang_id)),
+        )
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
+
+
+def delete_mietvorgang(vorgang_id, grund="Manuell storniert"):
+    """Kompatibilitätsname: Vorgänge werden aus Nachweisgründen nur storniert."""
+    return storniere_mietvorgang(vorgang_id, grund)
 
 
 def mietfahrzeuge_unterwegs_anzahl():
@@ -34915,21 +35370,16 @@ def mietfahrzeug_kennzahlen(fahrzeuge):
 
 def mietfahrzeug_zeitraum_frei(fahrzeug_id, start, end, exclude_vorgang_id=None):
     """True, wenn das Fahrzeug im Zeitraum [start, end] durch keinen offenen
-    Mietvorgang belegt ist (Überschneidung). Offene Enden blocken unbegrenzt."""
-    s = parse_date(start)
-    if not s:
-        return True  # ohne Startdatum keine Zeitraum-Aussage -> nicht blockieren
-    e = parse_date(end) or date.max
-    for v in list_mietvorgaenge(fahrzeug_id):
-        if v["abgeschlossen"]:
-            continue
-        if exclude_vorgang_id and v["id"] == int(exclude_vorgang_id):
-            continue
-        vs = v["start_obj"] or date.min
-        ve = v["end_obj"] or date.max
-        if s <= ve and vs <= e:  # Überschneidung
-            return False
-    return True
+    Mietvorgang belegt ist. Ungültige oder unvollständige Zeiträume sind nie frei."""
+    try:
+        s, e = validiere_mietzeitraum(start, end)
+    except ValueError:
+        return False
+    db = get_db()
+    try:
+        return mietfahrzeug_zeitraum_frei_db(db, fahrzeug_id, s, e, exclude_vorgang_id)
+    finally:
+        db.close()
 
 
 def verfuegbare_mietfahrzeuge_nach_klasse(start, end):
@@ -34968,7 +35418,7 @@ def verfuegbare_mietfahrzeuge_nach_klasse(start, end):
 # ENTWURF — Vertragstext vor Echteinsatz durch GF/Syndikus freigeben lassen.
 # ---------------------------------------------------------------------------
 
-MIETVERTRAG_VERMIETER_NAME = "Gärtner Karosserie & Lack GmbH"
+MIETVERTRAG_VERMIETER_NAME = "Gärtner GmbH Karosserie + Lack"
 MIETVERTRAG_VERMIETER_ADRESSE = "Binauer Höhe 4, 74821 Mosbach-Lohrbach"
 
 MIETVERTRAG_FELDER = [
@@ -35141,6 +35591,177 @@ MIETVERTRAG_STATUS_LABEL = {
     "bestaetigt": "Bestätigt / abgeschlossen",
 }
 
+MIETVERTRAG_SIGNATUR_PFLICHTFELDER = {
+    "kunde_adresse": "Anschrift des Mieters",
+    "geburtsdatum": "Geburtsdatum",
+    "ausweis_nr": "Ausweis-/Passnummer",
+    "fuehrerschein_nr": "Führerscheinnummer",
+    "fuehrerschein_klasse": "Führerscheinklasse",
+    "fuehrerschein_ausstellungsdatum": "Ausstellungsdatum des Führerscheins",
+    "fuehrerschein_behoerde": "ausstellende Führerscheinbehörde",
+    "km_stand_uebergabe": "Kilometerstand bei Übergabe",
+    "mietpreis_tag": "Mietpreis pro Tag",
+    "kaution_euro": "Kaution",
+    "selbstbeteiligung_euro": "Selbstbeteiligung",
+}
+
+
+def mietvertrag_rechtlich_freigegeben():
+    return bool(MIETVERTRAG_RECHTLICH_FREIGEGEBEN and MIETVERTRAG_TEXT_VERSION)
+
+
+def mietvertrag_ist_fixiert(vorgang):
+    return clean_text((vorgang or {}).get("vertrag_status")) in {"unterschrieben", "bestaetigt"}
+
+
+def canonical_json(data):
+    return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def sha256_bytes(data):
+    return hashlib.sha256(data or b"").hexdigest()
+
+
+def sha256_text(value):
+    return sha256_bytes(str(value or "").encode("utf-8"))
+
+
+def list_mietvertrag_versionen(vorgang_id):
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT * FROM mietvertrag_versionen
+            WHERE mietvorgang_id=?
+            ORDER BY version DESC
+            """,
+            (int(vorgang_id),),
+        ).fetchall()
+    finally:
+        db.close()
+    return [dict(row) for row in rows]
+
+
+def get_mietvertrag_version(vorgang_id, version=None):
+    db = get_db()
+    try:
+        if version is None:
+            row = db.execute(
+                """
+                SELECT * FROM mietvertrag_versionen
+                WHERE mietvorgang_id=?
+                ORDER BY version DESC LIMIT 1
+                """,
+                (int(vorgang_id),),
+            ).fetchone()
+        else:
+            row = db.execute(
+                "SELECT * FROM mietvertrag_versionen WHERE mietvorgang_id=? AND version=?",
+                (int(vorgang_id), int(version)),
+            ).fetchone()
+    finally:
+        db.close()
+    return dict(row) if row else None
+
+
+def mietvertrag_version_snapshot(version):
+    raw = clean_text((version or {}).get("snapshot_json"))
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def mietvertrag_version_pdf_bytes(version):
+    raw = clean_text((version or {}).get("pdf_base64"))
+    expected = clean_text((version or {}).get("pdf_sha256"))
+    if not raw or not expected:
+        return b""
+    try:
+        data = base64.b64decode(raw, validate=True)
+    except (TypeError, ValueError):
+        return b""
+    if not data.startswith(b"%PDF") or not hmac.compare_digest(sha256_bytes(data), expected):
+        return b""
+    return data
+
+
+def backfill_legacy_mietvertrag_versionen(db):
+    """Bewahrt vorhandene Signaturen/Snapshots, ohne ihnen nachträglich
+    eine rechtliche Freigabe oder einen validierbaren PDF-Nachweis zuzuschreiben."""
+    rows = db.execute(
+        """
+        SELECT * FROM mietvorgaenge
+        WHERE COALESCE(vertrag_status,'') IN ('unterschrieben','bestaetigt')
+          AND COALESCE(vertrag_snapshot_json,'')<>''
+        """
+    ).fetchall()
+    for row in rows:
+        version = max(1, int(row["vertrag_version"] or 1))
+        exists = db.execute(
+            "SELECT id FROM mietvertrag_versionen WHERE mietvorgang_id=? AND version=?",
+            (int(row["id"]), version),
+        ).fetchone()
+        if exists:
+            continue
+        snapshot_raw = clean_text(row["vertrag_snapshot_json"])
+        try:
+            parsed = json.loads(snapshot_raw)
+            snapshot_raw = canonical_json(parsed if isinstance(parsed, dict) else {"legacy": snapshot_raw})
+        except (TypeError, ValueError):
+            snapshot_raw = canonical_json({"legacy": snapshot_raw})
+        snapshot_hash = sha256_text(snapshot_raw)
+        signature_bytes = b""
+        stored = clean_text(row["unterschrift_stored"])
+        if stored:
+            path = upload_file_path({"stored_name": stored})
+            if path and path.exists():
+                try:
+                    signature_bytes = path.read_bytes()
+                except OSError:
+                    signature_bytes = b""
+        db.execute(
+            """
+            INSERT INTO mietvertrag_versionen
+            (mietvorgang_id, version, text_version, status, snapshot_json, snapshot_sha256,
+             pdf_base64, pdf_sha256, unterschrift_base64, unterschrift_sha256,
+             unterschrift_name, unterschrift_ort, unterschrift_am, bestaetigt_am,
+             versendet_am, versandweg, versandziel, aenderungsgrund, quelle,
+             rechtlich_freigegeben, erstellt_am)
+            VALUES (?, ?, 'legacy-unbekannt', ?, ?, ?, '', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, '',
+                    'legacy_backfill', 0, ?)
+            """,
+            (
+                int(row["id"]),
+                version,
+                clean_text(row["vertrag_status"]),
+                snapshot_raw,
+                snapshot_hash,
+                base64.b64encode(signature_bytes).decode("ascii") if signature_bytes else "",
+                sha256_bytes(signature_bytes) if signature_bytes else "",
+                clean_text(row["unterschrift_name"]),
+                clean_text(row["unterschrift_ort"]),
+                clean_text(row["unterschrift_am"]),
+                clean_text(row["vertrag_bestaetigt_am"]),
+                clean_text(row["vertrag_gesendet_am"]),
+                clean_text(row["vertrag_versandweg"]),
+                clean_text(row["kunde_email"] or row["kunde_telefon"]),
+                clean_text(row["unterschrift_am"]) or now_str(),
+            ),
+        )
+        db.execute(
+            """
+            UPDATE mietvorgaenge
+            SET vertrag_version=?, vertrag_snapshot_hash=?,
+                vertrag_text_version='legacy-unbekannt'
+            WHERE id=?
+            """,
+            (version, snapshot_hash, int(row["id"])),
+        )
+
 
 def mietvertrag_felder_defaults():
     return {f["name"]: f["default"] for f in MIETVERTRAG_FELDER}
@@ -35174,6 +35795,16 @@ def parse_euro_de(value):
         return max(0.0, round(float(raw), 2))
     except (TypeError, ValueError):
         return 0.0
+
+
+def validiere_euro_de(value, label, *, groesser_null=False):
+    raw = clean_text(value).replace("€", "").replace(" ", "").replace(" ", "")
+    if not raw or not re.fullmatch(r"(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d{1,2})?", raw):
+        return f"{label}: ungültiger Euro-Betrag"
+    betrag = parse_euro_de(raw)
+    if groesser_null and betrag <= 0:
+        return f"{label}: Betrag muss größer als 0 sein"
+    return ""
 
 
 def euro_de_label(betrag):
@@ -35219,6 +35850,8 @@ def mietvertrag_kontext(vorgang, fahrzeug, auftrag=None):
         "vermieter_adresse": MIETVERTRAG_VERMIETER_ADRESSE,
         "kunde_name": clean_text((vorgang or {}).get("kunde_name")) or "—",
         "kunde_telefon": clean_text((vorgang or {}).get("kunde_telefon")) or "—",
+        "kunde_email": clean_text((vorgang or {}).get("kunde_email")) or "—",
+        "whatsapp_erlaubt": bool((vorgang or {}).get("whatsapp_erlaubt")),
         "fahrzeug_bezeichnung": clean_text((fahrzeug or {}).get("bezeichnung")) or clean_text((fahrzeug or {}).get("kennzeichen")) or "—",
         "kennzeichen": clean_text((fahrzeug or {}).get("kennzeichen")) or "—",
         "fin": clean_text((fahrzeug or {}).get("fin_nummer")) or "—",
@@ -35269,19 +35902,198 @@ def mietvertrag_statuslink(auftrag):
     return kunden_status_url(auftrag)
 
 
-def save_mietvertrag_unterschrift(vorgang_id, dataurl):
+def mietvertrag_signatur_fehler(vorgang, fahrzeug):
+    fehler = []
+    vorgang_status = clean_text((vorgang or {}).get("status"))
+    if vorgang_status == "storniert":
+        fehler.append("Mietvorgang ist storniert")
+    elif vorgang_status == "zurueck" or clean_text((vorgang or {}).get("rueckgabe_datum")):
+        fehler.append("Mietvorgang ist bereits zurückgegeben")
+    if not clean_text((vorgang or {}).get("kunde_name")):
+        fehler.append("Kundenname")
+    telefon = clean_text((vorgang or {}).get("kunde_telefon"))
+    email = clean_text((vorgang or {}).get("kunde_email"))
+    if not telefon and not email:
+        fehler.append("Telefon oder E-Mail")
+    try:
+        validiere_mietkontakt(telefon, email)
+    except ValueError as exc:
+        fehler.append(str(exc))
+    try:
+        validiere_mietzeitraum(
+            (vorgang or {}).get("start_datum"), (vorgang or {}).get("end_datum")
+        )
+    except ValueError as exc:
+        fehler.append(str(exc))
+    werte = mietvertrag_felder_werte(vorgang, fahrzeug)
+    for name, label in MIETVERTRAG_SIGNATUR_PFLICHTFELDER.items():
+        if not clean_text(werte.get(name)):
+            fehler.append(label)
+    for feld in MIETVERTRAG_FELDER:
+        wert = clean_text(werte.get(feld["name"]))
+        if not wert:
+            continue
+        if feld.get("typ") == "zahl" and not wert.isdigit():
+            fehler.append(f"{feld['label']}: nur eine nichtnegative ganze Zahl eingeben")
+        elif feld.get("typ") == "euro":
+            euro_fehler = validiere_euro_de(
+                wert,
+                feld["label"],
+                groesser_null=feld["name"] == "mietpreis_tag",
+            )
+            if euro_fehler:
+                fehler.append(euro_fehler)
+
+    geburtsdatum = parse_date(werte.get("geburtsdatum"))
+    mindestalter_raw = clean_text(werte.get("mindestalter"))
+    if clean_text(werte.get("geburtsdatum")) and not geburtsdatum:
+        fehler.append("Geburtsdatum: ungültiges Datum")
+    elif geburtsdatum:
+        heute = date.today()
+        alter = heute.year - geburtsdatum.year - (
+            (heute.month, heute.day) < (geburtsdatum.month, geburtsdatum.day)
+        )
+        try:
+            mindestalter = int(mindestalter_raw or 0)
+        except (TypeError, ValueError):
+            mindestalter = 0
+        if geburtsdatum >= heute:
+            fehler.append("Geburtsdatum muss in der Vergangenheit liegen")
+        elif mindestalter > 0 and alter < mindestalter:
+            fehler.append(f"Mindestalter von {mindestalter} Jahren nicht erreicht")
+
+    ausstellung = parse_date(werte.get("fuehrerschein_ausstellungsdatum"))
+    mindestmonate_raw = clean_text(werte.get("mindestbesitzdauer_monate"))
+    if clean_text(werte.get("fuehrerschein_ausstellungsdatum")) and not ausstellung:
+        fehler.append("Führerschein-Ausstellungsdatum: ungültiges Datum")
+    elif ausstellung:
+        if ausstellung > date.today():
+            fehler.append("Führerschein-Ausstellungsdatum darf nicht in der Zukunft liegen")
+        try:
+            mindestmonate = int(mindestmonate_raw or 0)
+        except (TypeError, ValueError):
+            mindestmonate = 0
+        besitzmonate = (date.today().year - ausstellung.year) * 12 + date.today().month - ausstellung.month
+        if date.today().day < ausstellung.day:
+            besitzmonate -= 1
+        if mindestmonate > 0 and besitzmonate < mindestmonate:
+            fehler.append(f"Führerschein noch keine {mindestmonate} Monate im Besitz")
+
+    if clean_text(werte.get("ausweis_nr")) and len(clean_text(werte.get("ausweis_nr"))) < 4:
+        fehler.append("Ausweis-/Passnummer: mindestens 4 Zeichen")
+    if clean_text(werte.get("fuehrerschein_nr")) and len(clean_text(werte.get("fuehrerschein_nr"))) < 4:
+        fehler.append("Führerscheinnummer: mindestens 4 Zeichen")
+    if clean_text(werte.get("fuehrerschein_behoerde")) and len(clean_text(werte.get("fuehrerschein_behoerde"))) < 2:
+        fehler.append("ausstellende Führerscheinbehörde: mindestens 2 Zeichen")
+    return list(dict.fromkeys(fehler))
+
+
+def mietvertrag_snapshot_erstellen(vorgang, fahrzeug, auftrag, unterschrift, entwurf_hash=""):
+    kontext = mietvertrag_kontext(vorgang, fahrzeug, auftrag)
+    kosten = mietvertrag_kosten(vorgang, fahrzeug)
+    return {
+        "schema_version": 1,
+        "vorgang_id": int((vorgang or {}).get("id") or 0),
+        "fahrzeug_id": int((fahrzeug or {}).get("id") or 0),
+        "version": max(1, int((vorgang or {}).get("vertrag_version") or 1)),
+        "text_version": MIETVERTRAG_TEXT_VERSION,
+        "rechtlich_freigegeben": True,
+        "angezeigter_entwurf_sha256": clean_text(entwurf_hash),
+        "erstellt_am": clean_text(unterschrift.get("am")) or now_str(),
+        "kontext": kontext,
+        "kosten": kosten,
+        "abschnitte": mietvertrag_abschnitte_gefuellt(kontext),
+        "statuslink": mietvertrag_statuslink(auftrag),
+        "unterschrift": {
+            "stored_name": clean_text(unterschrift.get("stored_name")),
+            "sha256": clean_text(unterschrift.get("sha256")),
+            "name": clean_text(unterschrift.get("name")),
+            "ort": clean_text(unterschrift.get("ort")),
+            "am": clean_text(unterschrift.get("am")),
+        },
+    }
+
+
+def mietvertrag_entwurf_hash(vorgang, fahrzeug, auftrag=None):
+    """Hash des Vertragsstands, den der Kunde auf der Signaturseite sieht.
+
+    Der Wert ist kein externer Zeitstempel. Er verhindert aber, dass ein alter
+    Browser-Tab unbemerkt einen inzwischen geänderten Entwurf unterschreibt.
+    """
+    kontext = mietvertrag_kontext(vorgang, fahrzeug, auftrag)
+    status_token = ""
+    if auftrag and int(
+        auftrag.get("kunden_status_aktiv")
+        if auftrag.get("kunden_status_aktiv") is not None
+        else 1
+    ):
+        status_token = clean_text(auftrag.get("kunden_status_token"))
+    payload = {
+        "schema_version": 1,
+        "vorgang_id": int((vorgang or {}).get("id") or 0),
+        "fahrzeug_id": int((fahrzeug or {}).get("id") or 0),
+        "vertrag_version": max(1, int((vorgang or {}).get("vertrag_version") or 1)),
+        "vertrag_status": clean_text((vorgang or {}).get("vertrag_status")),
+        "mietvorgang_status": clean_text((vorgang or {}).get("status")),
+        "text_version": MIETVERTRAG_TEXT_VERSION,
+        "rechtlich_freigegeben": mietvertrag_rechtlich_freigegeben(),
+        "aenderungsgrund": clean_text((vorgang or {}).get("vertrag_aenderungsgrund")),
+        "kontext": kontext,
+        "kosten": mietvertrag_kosten(vorgang, fahrzeug),
+        "abschnitte": mietvertrag_abschnitte_gefuellt(kontext),
+        # Der öffentliche Host kann je nach Request-/Proxy-Kontext variieren.
+        # Vertragsrelevant ist hier der unverwechselbare Statuspfad samt Token.
+        "statuslink": f"/status/{status_token}" if status_token else "",
+    }
+    return sha256_text(canonical_json(payload))
+
+
+def decode_mietvertrag_unterschrift(dataurl):
     roh = clean_text(dataurl)
     if not roh.startswith("data:image/png;base64,"):
-        return ""
+        return b""
     b64 = roh.split(",", 1)[1]
     try:
         rohdaten = base64.b64decode(b64, validate=True)
     except (ValueError, TypeError):
-        return ""
+        return b""
     if not rohdaten or len(rohdaten) > 2_000_000:
-        return ""
-    # Echte PNG-Datei? (Magic Bytes) — keine beliebigen Bytes als .png ablegen
+        return b""
+    # Echte, dekodierbare PNG-Datei mit sichtbarer "Tinte"? So werden weder
+    # beliebige Bytes noch ein leeres/transparentes Zeichenfeld akzeptiert.
     if not rohdaten.startswith(b"\x89PNG\r\n\x1a\n"):
+        return b""
+    try:
+        from PIL import Image
+
+        with Image.open(BytesIO(rohdaten)) as bild:
+            if bild.format != "PNG" or bild.width < 40 or bild.height < 20:
+                return b""
+            if bild.width * bild.height > 4_000_000:
+                return b""
+            rgba = bild.convert("RGBA")
+            sichtbare_pixel = sum(
+                1
+                for rot, gruen, blau, alpha in rgba.getdata()
+                if alpha >= 32 and min(rot, gruen, blau) < 240
+            )
+            mindest_pixel = max(20, int(bild.width * bild.height * 0.0005))
+            if sichtbare_pixel < mindest_pixel:
+                return b""
+    except Exception:
+        return b""
+    return rohdaten
+
+
+def save_mietvertrag_unterschrift(vorgang_id, dataurl):
+    rohdaten = decode_mietvertrag_unterschrift(dataurl)
+    if not rohdaten:
+        return ""
+    return store_mietvertrag_unterschrift_bytes(rohdaten)
+
+
+def store_mietvertrag_unterschrift_bytes(rohdaten):
+    if not rohdaten or not rohdaten.startswith(b"\x89PNG\r\n\x1a\n"):
         return ""
     try:
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -35313,7 +36125,7 @@ def mietvertrag_qr_drawing(url, size_px=86):
     return drawing
 
 
-def make_mietvertrag_pdf(vorgang, fahrzeug, auftrag=None):
+def make_mietvertrag_pdf(vorgang, fahrzeug, auftrag=None, snapshot=None, dokument_hash=""):
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     from reportlab.lib.pagesizes import A4
@@ -35339,8 +36151,18 @@ def make_mietvertrag_pdf(vorgang, fahrzeug, auftrag=None):
     label = style("l", 8, color=muted)
     value = style("v", 8.5, bold=True)
 
-    kontext = mietvertrag_kontext(vorgang, fahrzeug, auftrag)
-    statuslink = mietvertrag_statuslink(auftrag)
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    kontext = snapshot.get("kontext") if isinstance(snapshot.get("kontext"), dict) else None
+    kontext = kontext or mietvertrag_kontext(vorgang, fahrzeug, auftrag)
+    statuslink = snapshot.get("statuslink") if "statuslink" in snapshot else mietvertrag_statuslink(auftrag)
+    abschnitte = snapshot.get("abschnitte") if isinstance(snapshot.get("abschnitte"), list) else None
+    abschnitte = abschnitte or mietvertrag_abschnitte_gefuellt(kontext)
+    unterschrift = snapshot.get("unterschrift") if isinstance(snapshot.get("unterschrift"), dict) else {}
+    version = max(1, int(snapshot.get("version") or (vorgang or {}).get("vertrag_version") or 1))
+    text_version = clean_text(snapshot.get("text_version")) or MIETVERTRAG_TEXT_VERSION or "nicht freigegeben"
+    ist_fixierte_version = bool(snapshot and snapshot.get("rechtlich_freigegeben"))
+    vermieter_name = clean_text(kontext.get("vermieter_name")) or MIETVERTRAG_VERMIETER_NAME
+    vermieter_adresse = clean_text(kontext.get("vermieter_adresse")) or MIETVERTRAG_VERMIETER_ADRESSE
 
     def p(text, st):
         return Paragraph(escape(clean_text(text) or "-").replace("\n", "<br/>"), st)
@@ -35349,12 +36171,24 @@ def make_mietvertrag_pdf(vorgang, fahrzeug, auftrag=None):
     doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=1.6 * cm, rightMargin=1.6 * cm,
                             topMargin=1.4 * cm, bottomMargin=1.4 * cm)
     story = [
-        Table([[Paragraph("Mietvertrag Ersatz-/Mietfahrzeug", title),
-                Paragraph(f"{escape(MIETVERTRAG_VERMIETER_NAME)}<br/>{escape(MIETVERTRAG_VERMIETER_ADRESSE)}<br/>info@auto-lackierzentrum.de", subtitle)]],
+        Table([[Paragraph(f"Mietvertrag Ersatz-/Mietfahrzeug · Version {version}", title),
+                Paragraph(f"{escape(vermieter_name)}<br/>{escape(vermieter_adresse)}<br/>info@auto-lackierzentrum.de", subtitle)]],
               colWidths=[10 * cm, 7.8 * cm],
               style=TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LINEBELOW", (0, 0), (-1, 0), 2, red), ("BOTTOMPADDING", (0, 0), (-1, 0), 8)])),
         Spacer(1, 6),
-        Table([[p("ENTWURF / MUSTER – Vertragstext vor Echteinsatz durch GF/Syndikus freigeben lassen.", small)]],
+        Table([[p(
+            (
+                f"Fixierte Vertragsversion {version} · Textstand {text_version} · "
+                f"Dokument-ID {(clean_text(dokument_hash) or 'wird bei Signatur vergeben')[:16]}"
+                if ist_fixierte_version
+                else (
+                    "ENTWURF / MUSTER – rechtlicher Textstand freigegeben, aber noch nicht unterschrieben oder bestätigt."
+                    if mietvertrag_rechtlich_freigegeben()
+                    else "ENTWURF / MUSTER – nicht unterschrifts- oder versandfähig; rechtliche Freigabe fehlt."
+                )
+            ),
+            small,
+        )]],
               colWidths=[17.8 * cm], style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), light), ("BOX", (0, 0), (-1, -1), 0.5, border), ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4), ("LEFTPADDING", (0, 0), (-1, -1), 6)])),
         Spacer(1, 8),
     ]
@@ -35378,13 +36212,13 @@ def make_mietvertrag_pdf(vorgang, fahrzeug, auftrag=None):
                                              ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 6), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)])))
     story.append(Spacer(1, 8))
 
-    for abschnitt in mietvertrag_abschnitte_gefuellt(kontext):
+    for abschnitt in abschnitte:
         story.append(p(f"{abschnitt['nummer']} {abschnitt['titel']}", heading))
         story.append(p(abschnitt["text"], body))
         story.append(Spacer(1, 5))
 
     story.append(Spacer(1, 8))
-    sig_stored = clean_text((vorgang or {}).get("unterschrift_stored"))
+    sig_stored = clean_text(unterschrift.get("stored_name")) or clean_text((vorgang or {}).get("unterschrift_stored"))
     sig_cell = ""
     if sig_stored:
         sig_path = upload_file_path({"stored_name": sig_stored})
@@ -35394,12 +36228,14 @@ def make_mietvertrag_pdf(vorgang, fahrzeug, auftrag=None):
             except Exception:
                 sig_cell = ""
     unter_meta = ""
-    if clean_text((vorgang or {}).get("unterschrift_am")):
-        unter_meta = f"{clean_text(vorgang.get('unterschrift_ort'))}, {clean_text(vorgang.get('unterschrift_am'))} · digital signiert"
+    unterschrift_am = clean_text(unterschrift.get("am")) or clean_text((vorgang or {}).get("unterschrift_am"))
+    unterschrift_ort = clean_text(unterschrift.get("ort")) or clean_text((vorgang or {}).get("unterschrift_ort"))
+    if unterschrift_am:
+        unter_meta = f"{unterschrift_ort}, {unterschrift_am} · digital signiert"
     story.append(Table(
         [[sig_cell or "", ""],
          [p("Mieter (digitale Unterschrift)", small), p("Vermieter", small)],
-         [p(unter_meta, small), p(MIETVERTRAG_VERMIETER_NAME, small)]],
+         [p(unter_meta, small), p(vermieter_name, small)]],
         colWidths=[8.9 * cm, 8.9 * cm], rowHeights=[1.9 * cm, 0.5 * cm, 0.5 * cm],
         style=TableStyle([("LINEABOVE", (0, 1), (0, 1), 0.8, dark), ("LINEABOVE", (1, 1), (1, 1), 0.8, dark),
                           ("VALIGN", (0, 0), (-1, 0), "BOTTOM"), ("LEFTPADDING", (0, 0), (-1, -1), 0)])))
@@ -35409,9 +36245,10 @@ def make_mietvertrag_pdf(vorgang, fahrzeug, auftrag=None):
     return buffer
 
 
-def mietvertrag_pdf_filename(vorgang, fahrzeug):
+def mietvertrag_pdf_filename(vorgang, fahrzeug, version=None):
     kennz = re.sub(r"[^A-Za-z0-9]+", "-", clean_text((fahrzeug or {}).get("kennzeichen")) or "Fahrzeug")
-    return f"Mietvertrag_{kennz}_{(vorgang or {}).get('id', '')}.pdf"
+    suffix = f"_v{int(version)}" if version else ""
+    return f"Mietvertrag_{kennz}_{(vorgang or {}).get('id', '')}{suffix}.pdf"
 
 
 def send_mietvertrag_mail(empfaenger, betreff, body, pdf_bytes, filename):
@@ -35448,14 +36285,14 @@ def send_mietvertrag_mail(empfaenger, betreff, body, pdf_bytes, filename):
 
 
 def mietvertrag_versandweg(vorgang, auftrag=None):
-    """Bestimmt den bevorzugten Kontaktweg: E-Mail -> WhatsApp -> Dashboard."""
+    """Bestimmt den Kontaktweg: E-Mail oder ausdrücklich erlaubtes WhatsApp."""
     email = clean_text((vorgang or {}).get("kunde_email"))
     if not email and auftrag:
         email = clean_text(auftrag.get("kunde_email"))
     if email and parse_email_recipients(email):
         return ("email", parse_email_recipients(email)[0])
     telefon = clean_text((vorgang or {}).get("kunde_telefon"))
-    if telefon and is_probable_mobile_number(telefon):
+    if bool((vorgang or {}).get("whatsapp_erlaubt")) and telefon and is_probable_mobile_number(telefon):
         return ("whatsapp", whatsapp_number_key(telefon))
     return ("dashboard", "")
 
@@ -35691,8 +36528,11 @@ def admin_mietfahrzeuge():
     ).fetchall()]
     db.close()
     for anfrage in miet_anfragen:
+        anfrage["whatsapp_erlaubt"] = bool(anfrage.get("whatsapp_erlaubt"))
         wa_key = whatsapp_number_key(anfrage.get("telefon"))
-        anfrage["wa_url"] = f"https://wa.me/{wa_key}" if wa_key else ""
+        anfrage["wa_url"] = (
+            f"https://wa.me/{wa_key}" if wa_key and anfrage["whatsapp_erlaubt"] else ""
+        )
 
     return render_template(
         "mietfahrzeuge_admin.html",
@@ -35734,9 +36574,16 @@ def admin_mietfahrzeug_neu():
 @app.route("/admin/mietfahrzeuge/<int:fahrzeug_id>/bearbeiten", methods=["POST"])
 @admin_required
 def admin_mietfahrzeug_bearbeiten(fahrzeug_id):
-    if not get_mietfahrzeug(fahrzeug_id):
+    fahrzeug = get_mietfahrzeug(fahrzeug_id)
+    if not fahrzeug:
         abort(404)
     try:
+        aktiv = request.form.get("aktiv") != "0"
+        if fahrzeug.get("aktiv") and not aktiv:
+            raise ValueError(
+                "Aktive Fahrzeuge bitte über die Archivierung mit Begründung "
+                "aus dem Fuhrpark nehmen."
+            )
         update_mietfahrzeug(
             fahrzeug_id,
             kennzeichen=request.form.get("kennzeichen"),
@@ -35750,7 +36597,7 @@ def admin_mietfahrzeug_bearbeiten(fahrzeug_id):
             standort=request.form.get("standort"),
             status=request.form.get("status"),
             notiz=request.form.get("notiz"),
-            aktiv=request.form.get("aktiv") != "0",
+            aktiv=aktiv,
         )
         flash("Mietfahrzeug aktualisiert.", "success")
     except ValueError as exc:
@@ -35763,8 +36610,11 @@ def admin_mietfahrzeug_bearbeiten(fahrzeug_id):
 def admin_mietfahrzeug_loeschen(fahrzeug_id):
     if not get_mietfahrzeug(fahrzeug_id):
         abort(404)
-    delete_mietfahrzeug(fahrzeug_id)
-    flash("Mietfahrzeug und zugehörige Vorgänge gelöscht.", "info")
+    try:
+        archiviere_mietfahrzeug(fahrzeug_id, request.form.get("archivgrund"))
+        flash("Mietfahrzeug archiviert. Vorgänge, Bilder und Verträge bleiben erhalten.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
     return redirect(url_for("admin_mietfahrzeuge"))
 
 
@@ -35774,19 +36624,13 @@ def admin_mietfahrzeug_vermieten(fahrzeug_id):
     fahrzeug = get_mietfahrzeug(fahrzeug_id)
     if not fahrzeug:
         abort(404)
-    if not mietfahrzeug_zeitraum_frei(fahrzeug_id, request.form.get("start_datum"), request.form.get("end_datum")):
-        flash(
-            f"{fahrzeug['kennzeichen']} ist im gewählten Zeitraum bereits belegt. "
-            "Bitte anderen Zeitraum oder anderes Fahrzeug wählen.",
-            "warning",
-        )
-        return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{fahrzeug_id}")
     try:
         vid = create_mietvorgang(
             fahrzeug_id,
             kunde_name=request.form.get("kunde_name"),
             kunde_telefon=request.form.get("kunde_telefon"),
             kunde_email=request.form.get("kunde_email"),
+            whatsapp_erlaubt=request.form.get("whatsapp_erlaubt") == "1",
             auftrag_id=request.form.get("auftrag_id"),
             start_datum=request.form.get("start_datum"),
             end_datum=request.form.get("end_datum"),
@@ -35806,8 +36650,11 @@ def admin_mietvorgang_zurueck(vorgang_id):
     vorgang = get_mietvorgang(vorgang_id)
     if not vorgang:
         abort(404)
-    mietvorgang_zuruecknehmen(vorgang_id, request.form.get("rueckgabe_datum"))
-    flash("Fahrzeug als zurückgegeben gebucht.", "success")
+    try:
+        mietvorgang_zuruecknehmen(vorgang_id, request.form.get("rueckgabe_datum"))
+        flash("Fahrzeug als zurückgegeben gebucht.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
     return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{vorgang['mietfahrzeug_id']}")
 
 
@@ -35817,8 +36664,11 @@ def admin_mietvorgang_loeschen(vorgang_id):
     vorgang = get_mietvorgang(vorgang_id)
     if not vorgang:
         abort(404)
-    delete_mietvorgang(vorgang_id)
-    flash("Mietvorgang gelöscht.", "info")
+    try:
+        storniere_mietvorgang(vorgang_id, request.form.get("storno_grund"))
+        flash("Mietvorgang storniert. Vertrags- und Nachweisdaten bleiben erhalten.", "success")
+    except ValueError as exc:
+        flash(str(exc), "warning")
     return redirect(url_for("admin_mietfahrzeuge") + f"#fahrzeug-{vorgang['mietfahrzeug_id']}")
 
 
@@ -35902,9 +36752,11 @@ def admin_mietfahrzeug_bild_loeschen(bild_id):
 # --- Mietvertrag (Routen) --------------------------------------------------
 
 MIETVORGANG_VERTRAG_SPALTEN = {
-    "kunde_email", "vertrag_status", "vertrag_felder_json", "vertrag_snapshot_json",
+    "kunde_email", "whatsapp_erlaubt", "vertrag_status", "vertrag_felder_json", "vertrag_snapshot_json",
     "unterschrift_stored", "unterschrift_name", "unterschrift_ort", "unterschrift_am",
     "vertrag_bestaetigt_am", "vertrag_gesendet_am", "vertrag_versandweg",
+    "vertrag_version", "vertrag_snapshot_hash", "vertrag_pdf_hash", "vertrag_text_version",
+    "vertrag_aenderungsgrund",
 }
 
 
@@ -35918,6 +36770,326 @@ def set_mietvorgang_felder(vorgang_id, **felder):
     try:
         db.execute(f"UPDATE mietvorgaenge SET {sets} WHERE id=?", werte)
         db.commit()
+    finally:
+        db.close()
+
+
+def mietvertrag_version_integritaetsfehler(version):
+    if not version:
+        return "Es wurde keine fixierte Vertragsversion mit Prüfnachweis gefunden."
+    if clean_text(version.get("quelle")) != "normal" or not int(version.get("rechtlich_freigegeben") or 0):
+        return "Diese Altversion besitzt keinen rechtlich freigegebenen PDF-Nachweis mit Prüfsumme."
+    snapshot_raw = clean_text(version.get("snapshot_json"))
+    snapshot_hash = clean_text(version.get("snapshot_sha256"))
+    if not snapshot_raw or not snapshot_hash or not hmac.compare_digest(sha256_text(snapshot_raw), snapshot_hash):
+        return "Der Vertrags-Snapshot ist unvollständig oder beschädigt."
+    snapshot = mietvertrag_version_snapshot(version)
+    try:
+        snapshot_vorgang_id = int(snapshot.get("vorgang_id") or 0)
+        snapshot_version = int(snapshot.get("version") or 0)
+        zeilen_vorgang_id = int(version.get("mietvorgang_id") or 0)
+        zeilen_version = int(version.get("version") or 0)
+    except (TypeError, ValueError):
+        return "Der Vertrags-Snapshot ist keiner gültigen Vertragsversion zugeordnet."
+    if (
+        snapshot_vorgang_id != zeilen_vorgang_id
+        or snapshot_version != zeilen_version
+        or not hmac.compare_digest(
+            clean_text(snapshot.get("text_version")), clean_text(version.get("text_version"))
+        )
+        or not bool(snapshot.get("rechtlich_freigegeben"))
+    ):
+        return "Snapshot und Versionszeile gehören nicht zur selben Vertragsfassung."
+    signature_raw = clean_text(version.get("unterschrift_base64"))
+    signature_hash = clean_text(version.get("unterschrift_sha256"))
+    try:
+        signature_bytes = base64.b64decode(signature_raw, validate=True)
+    except (TypeError, ValueError):
+        signature_bytes = b""
+    if not signature_bytes or not signature_hash or not hmac.compare_digest(sha256_bytes(signature_bytes), signature_hash):
+        return "Der Unterschriftsnachweis ist unvollständig oder beschädigt."
+    snapshot_signature_hash = clean_text((snapshot.get("unterschrift") or {}).get("sha256"))
+    if not snapshot_signature_hash or not hmac.compare_digest(snapshot_signature_hash, signature_hash):
+        return "Snapshot und Unterschriftsnachweis gehören nicht zur selben Vertragsversion."
+    snapshot_unterschrift = snapshot.get("unterschrift") or {}
+    for snapshot_feld, versions_feld in (
+        ("name", "unterschrift_name"),
+        ("ort", "unterschrift_ort"),
+        ("am", "unterschrift_am"),
+    ):
+        if not hmac.compare_digest(
+            clean_text(snapshot_unterschrift.get(snapshot_feld)),
+            clean_text(version.get(versions_feld)),
+        ):
+            return "Snapshot und Unterschriftsmetadaten gehören nicht zur selben Vertragsversion."
+    if not mietvertrag_version_pdf_bytes(version):
+        return "Das signierte Vertrags-PDF ist unvollständig oder beschädigt."
+    return ""
+
+
+def persistiere_mietvertrag_unterschrift(
+    vorgang_id,
+    dataurl,
+    name="",
+    ort="",
+    expected_draft_hash="",
+    expected_version=None,
+    expected_text_version="",
+):
+    if not mietvertrag_rechtlich_freigegeben():
+        raise ValueError(
+            "Signieren ist gesperrt: Der Vertragstext ist noch nicht rechtlich freigegeben "
+            "oder es fehlt eine Textversionsnummer."
+        )
+    signature_bytes = decode_mietvertrag_unterschrift(dataurl)
+    if not signature_bytes:
+        raise ValueError("Es wurde keine gültige, sichtbare PNG-Unterschrift empfangen.")
+    stored_name = ""
+    db = get_db()
+    try:
+        if USE_POSTGRES:
+            row = db.execute(
+                "SELECT * FROM mietvorgaenge WHERE id=? FOR UPDATE",
+                (int(vorgang_id),),
+            ).fetchone()
+        else:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM mietvorgaenge WHERE id=?",
+                (int(vorgang_id),),
+            ).fetchone()
+        if not row:
+            raise ValueError("Der Mietvorgang wurde nicht gefunden.")
+        vorgang = hydrate_mietvorgang(row)
+        if mietvertrag_ist_fixiert(vorgang):
+            raise ValueError(
+                "Diese Vertragsversion ist bereits fixiert. Für Änderungen zuerst eine neue Version anlegen."
+            )
+        fahrzeug_row = db.execute(
+            "SELECT * FROM mietfahrzeuge WHERE id=?",
+            (int(vorgang["mietfahrzeug_id"]),),
+        ).fetchone()
+        if not fahrzeug_row:
+            raise ValueError("Das zugehörige Mietfahrzeug wurde nicht gefunden.")
+        fahrzeug = dict(fahrzeug_row)
+        fehler = mietvertrag_signatur_fehler(vorgang, fahrzeug)
+        if fehler:
+            raise ValueError("Vor der Unterschrift fehlen: " + ", ".join(fehler) + ".")
+        version = max(1, int(vorgang.get("vertrag_version") or 1))
+        try:
+            erwartete_version = int(expected_version)
+        except (TypeError, ValueError):
+            erwartete_version = 0
+        erwarteter_hash = clean_text(expected_draft_hash)
+        erwarteter_textstand = clean_text(expected_text_version)
+        if not erwarteter_hash or erwartete_version <= 0 or not erwarteter_textstand:
+            raise ValueError("Die Signaturseite ist unvollständig. Bitte neu laden und erneut unterschreiben.")
+        if erwartete_version != version or not hmac.compare_digest(
+            erwarteter_textstand, MIETVERTRAG_TEXT_VERSION
+        ):
+            raise ValueError("Der Vertragstext oder die Vertragsversion hat sich geändert. Bitte Seite neu laden.")
+        auftrag = mietvertrag_auftrag(vorgang)
+        aktueller_entwurf_hash = mietvertrag_entwurf_hash(vorgang, fahrzeug, auftrag)
+        if not hmac.compare_digest(erwarteter_hash, aktueller_entwurf_hash):
+            raise ValueError("Die angezeigten Vertragsdaten haben sich geändert. Bitte Seite neu laden und erneut prüfen.")
+        if db.execute(
+            "SELECT id FROM mietvertrag_versionen WHERE mietvorgang_id=? AND version=?",
+            (int(vorgang_id), version),
+        ).fetchone():
+            raise ValueError("Diese Vertragsversion wurde bereits als fixierte Fassung gespeichert.")
+        unterschrift_name = clean_text(name) or clean_text(vorgang.get("kunde_name"))
+        unterschrift_ort = clean_text(ort) or "Mosbach"
+        if not unterschrift_name or not unterschrift_ort:
+            raise ValueError("Bitte Name und Ort der Unterschrift angeben.")
+        stored_name = store_mietvertrag_unterschrift_bytes(signature_bytes)
+        if not stored_name:
+            raise ValueError("Die Unterschrift konnte nicht sicher gespeichert werden.")
+        unterschrift_am = now_str()
+        signature_hash = sha256_bytes(signature_bytes)
+        snapshot = mietvertrag_snapshot_erstellen(
+            vorgang,
+            fahrzeug,
+            auftrag,
+            {
+                "stored_name": stored_name,
+                "sha256": signature_hash,
+                "name": unterschrift_name,
+                "ort": unterschrift_ort,
+                "am": unterschrift_am,
+            },
+            entwurf_hash=aktueller_entwurf_hash,
+        )
+        snapshot_raw = canonical_json(snapshot)
+        snapshot_hash = sha256_text(snapshot_raw)
+        pdf_buffer = make_mietvertrag_pdf(
+            vorgang, fahrzeug, auftrag, snapshot=snapshot, dokument_hash=snapshot_hash
+        )
+        pdf_bytes = pdf_buffer.getvalue()
+        pdf_hash = sha256_bytes(pdf_bytes)
+        if not pdf_bytes.startswith(b"%PDF"):
+            raise ValueError("Das signierte Vertrags-PDF konnte nicht erzeugt werden.")
+        db.execute(
+            """
+            INSERT INTO mietvertrag_versionen
+            (mietvorgang_id, version, text_version, status, snapshot_json, snapshot_sha256,
+             pdf_base64, pdf_sha256, unterschrift_base64, unterschrift_sha256,
+             unterschrift_name, unterschrift_ort, unterschrift_am, bestaetigt_am,
+             aenderungsgrund, quelle, rechtlich_freigegeben, erstellt_am)
+            VALUES (?, ?, ?, 'unterschrieben', ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, 'normal', 1, ?)
+            """,
+            (
+                int(vorgang_id),
+                version,
+                MIETVERTRAG_TEXT_VERSION,
+                snapshot_raw,
+                snapshot_hash,
+                base64.b64encode(pdf_bytes).decode("ascii"),
+                pdf_hash,
+                base64.b64encode(signature_bytes).decode("ascii"),
+                signature_hash,
+                unterschrift_name,
+                unterschrift_ort,
+                unterschrift_am,
+                clean_text(vorgang.get("vertrag_aenderungsgrund")),
+                unterschrift_am,
+            ),
+        )
+        db.execute(
+            """
+            UPDATE mietvorgaenge
+            SET unterschrift_stored=?, unterschrift_name=?, unterschrift_ort=?, unterschrift_am=?,
+                vertrag_snapshot_json=?, vertrag_snapshot_hash=?, vertrag_pdf_hash=?,
+                vertrag_text_version=?, vertrag_status='unterschrieben', geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                stored_name,
+                unterschrift_name,
+                unterschrift_ort,
+                unterschrift_am,
+                snapshot_raw,
+                snapshot_hash,
+                pdf_hash,
+                MIETVERTRAG_TEXT_VERSION,
+                unterschrift_am,
+                int(vorgang_id),
+            ),
+        )
+        db.commit()
+        return version
+    except Exception:
+        db.rollback()
+        if stored_name:
+            path = upload_file_path({"stored_name": stored_name})
+            if path:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        raise
+    finally:
+        db.close()
+
+
+def protokolliere_mietvertrag_versand(vorgang_id, version_nummer, weg, ziel, versendet_am=None):
+    """Ordnet einen tatsächlich erfolgten Versand der versendeten Version zu.
+
+    Der Hauptvorgang wird nur aktualisiert, wenn dieselbe bestätigte Version noch
+    aktuell ist. So überschreibt ein paralleler Versionswechsel keinen Auditstand.
+    """
+    zeitpunkt = clean_text(versendet_am) or now_str()
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            UPDATE mietvertrag_versionen
+            SET versendet_am=?, versandweg=?, versandziel=?
+            WHERE mietvorgang_id=? AND version=? AND status='bestaetigt'
+            """,
+            (
+                zeitpunkt,
+                clean_text(weg),
+                clean_text(ziel),
+                int(vorgang_id),
+                int(version_nummer),
+            ),
+        )
+        if int(cursor.rowcount or 0) != 1:
+            raise ValueError("Der Versand konnte keiner bestätigten Vertragsversion zugeordnet werden.")
+        db.execute(
+            """
+            UPDATE mietvorgaenge
+            SET vertrag_gesendet_am=?, vertrag_versandweg=?, geaendert_am=?
+            WHERE id=? AND vertrag_version=? AND vertrag_status='bestaetigt'
+            """,
+            (zeitpunkt, clean_text(weg), zeitpunkt, int(vorgang_id), int(version_nummer)),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def neue_mietvertrag_version(vorgang_id, grund, expected_version=None, expected_snapshot_hash=""):
+    grund = clean_text(grund)
+    if len(grund) < 3:
+        raise ValueError("Bitte einen kurzen Änderungsgrund angeben.")
+    db = get_db()
+    try:
+        if USE_POSTGRES:
+            row = db.execute(
+                "SELECT * FROM mietvorgaenge WHERE id=? FOR UPDATE",
+                (int(vorgang_id),),
+            ).fetchone()
+        else:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM mietvorgaenge WHERE id=?", (int(vorgang_id),)).fetchone()
+        if not row:
+            raise ValueError("Der Mietvorgang wurde nicht gefunden.")
+        vorgang = dict(row)
+        if clean_text(vorgang.get("status")) in {"storniert", "zurueck"} or clean_text(vorgang.get("rueckgabe_datum")):
+            raise ValueError("Für stornierte oder zurückgegebene Mietvorgänge kann keine neue Vertragsversion angelegt werden.")
+        if not mietvertrag_ist_fixiert(vorgang):
+            raise ValueError("Eine neue Version ist erst nach einer Unterschrift erforderlich.")
+        bisher = max(1, int(vorgang.get("vertrag_version") or 1))
+        bisherige_version = db.execute(
+            "SELECT * FROM mietvertrag_versionen WHERE mietvorgang_id=? AND version=?",
+            (int(vorgang_id), bisher),
+        ).fetchone()
+        if not bisherige_version:
+            raise ValueError("Die bisherige Vertragsversion besitzt keinen vollständigen Versionsnachweis.")
+        try:
+            erwartete_version = int(expected_version)
+        except (TypeError, ValueError):
+            erwartete_version = 0
+        if (
+            erwartete_version != bisher
+            or not clean_text(expected_snapshot_hash)
+            or not hmac.compare_digest(
+                clean_text(expected_snapshot_hash), clean_text(bisherige_version["snapshot_sha256"])
+            )
+        ):
+            raise ValueError("Die Vertragsversion hat sich in einem anderen Tab geändert. Bitte Seite neu laden.")
+        neu = bisher + 1
+        db.execute(
+            """
+            UPDATE mietvorgaenge
+            SET vertrag_version=?, vertrag_status='entwurf', vertrag_snapshot_json='',
+                vertrag_snapshot_hash='', vertrag_pdf_hash='', vertrag_text_version=?,
+                vertrag_aenderungsgrund=?, unterschrift_stored='', unterschrift_name='',
+                unterschrift_ort='', unterschrift_am='', vertrag_bestaetigt_am='',
+                vertrag_gesendet_am='', vertrag_versandweg='', geaendert_am=?
+            WHERE id=?
+            """,
+            (neu, MIETVERTRAG_TEXT_VERSION, grund, now_str(), int(vorgang_id)),
+        )
+        db.commit()
+        return neu
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -35937,26 +37109,69 @@ def admin_mietvertrag(vorgang_id):
     vorgang, fahrzeug, auftrag = lade_mietvorgang_kontext(vorgang_id)
     if not vorgang or not fahrzeug:
         abort(404)
-    kontext = mietvertrag_kontext(vorgang, fahrzeug, auftrag)
-    statuslink = mietvertrag_statuslink(auftrag)
+    status = clean_text(vorgang.get("vertrag_status"))
+    fixiert = mietvertrag_ist_fixiert(vorgang)
+    aktuelle_version = get_mietvertrag_version(
+        vorgang_id, int(vorgang.get("vertrag_version") or 1)
+    ) if fixiert else None
+    snapshot = mietvertrag_version_snapshot(aktuelle_version)
+    kontext = snapshot.get("kontext") if isinstance(snapshot.get("kontext"), dict) else None
+    kontext = kontext or mietvertrag_kontext(vorgang, fahrzeug, auftrag)
+    statuslink = snapshot.get("statuslink") if "statuslink" in snapshot else mietvertrag_statuslink(auftrag)
+    abschnitte = snapshot.get("abschnitte") if isinstance(snapshot.get("abschnitte"), list) else None
+    abschnitte = abschnitte or mietvertrag_abschnitte_gefuellt(kontext)
+    felder_werte = mietvertrag_felder_werte(vorgang, fahrzeug)
+    if fixiert:
+        felder_werte = {
+            f["name"]: clean_text(kontext.get(f["name"]))
+            for f in MIETVERTRAG_FELDER
+        }
+    for feld in MIETVERTRAG_FELDER:
+        if feld.get("typ") == "datum" and felder_werte.get(feld["name"]):
+            felder_werte[feld["name"]] = iso_date(felder_werte[feld["name"]])
+    kosten = snapshot.get("kosten") if isinstance(snapshot.get("kosten"), dict) else None
+    kosten = kosten or mietvertrag_kosten(vorgang, fahrzeug)
     weg, ziel = mietvertrag_versandweg(vorgang, auftrag)
+    entwurf_hash = "" if fixiert else mietvertrag_entwurf_hash(vorgang, fahrzeug, auftrag)
+    kernfelder_werte = {
+        "kunde_name": clean_text(kontext.get("kunde_name")) if fixiert else clean_text(vorgang.get("kunde_name")),
+        "kunde_telefon": clean_text(kontext.get("kunde_telefon")) if fixiert else clean_text(vorgang.get("kunde_telefon")),
+        "start_datum": iso_date(kontext.get("start_datum")) if fixiert else iso_date(vorgang.get("start_datum")),
+        "end_datum": iso_date(kontext.get("end_datum")) if fixiert else iso_date(vorgang.get("end_datum")),
+    }
+    versionen = list_mietvertrag_versionen(vorgang_id)
+    version_integritaetsfehler_map = {
+        int(version["version"]): mietvertrag_version_integritaetsfehler(version)
+        for version in versionen
+    }
     return render_template(
         "mietvertrag.html",
         vorgang=vorgang,
         fahrzeug=fahrzeug,
         auftrag=auftrag,
         statuslink=statuslink,
-        abschnitte=mietvertrag_abschnitte_gefuellt(kontext),
+        abschnitte=abschnitte,
         felder_def=MIETVERTRAG_FELDER,
-        felder_werte=mietvertrag_felder_werte(vorgang, fahrzeug),
+        pflichtfelder=MIETVERTRAG_SIGNATUR_PFLICHTFELDER,
+        felder_werte=felder_werte,
         kontext=kontext,
-        status=clean_text(vorgang.get("vertrag_status")),
-        status_label=MIETVERTRAG_STATUS_LABEL.get(clean_text(vorgang.get("vertrag_status")), "Kein Vertrag"),
+        kernfelder_werte=kernfelder_werte,
+        entwurf_hash=entwurf_hash,
+        status=status,
+        status_label=MIETVERTRAG_STATUS_LABEL.get(status, "Kein Vertrag"),
         versandweg=weg,
         versandziel=ziel,
         vermieter_name=MIETVERTRAG_VERMIETER_NAME,
         vermieter_adresse=MIETVERTRAG_VERMIETER_ADRESSE,
-        kosten=mietvertrag_kosten(vorgang, fahrzeug),
+        kosten=kosten,
+        fixiert=fixiert,
+        rechtlich_freigegeben=mietvertrag_rechtlich_freigegeben(),
+        vertrag_text_version=MIETVERTRAG_TEXT_VERSION,
+        signatur_fehler=mietvertrag_signatur_fehler(vorgang, fahrzeug) if not fixiert else [],
+        aktuelle_version=aktuelle_version,
+        version_integritaetsfehler=mietvertrag_version_integritaetsfehler(aktuelle_version) if fixiert else "",
+        versionen=versionen,
+        version_integritaetsfehler_map=version_integritaetsfehler_map,
         heute_iso=date.today().isoformat(),
     )
 
@@ -35964,23 +37179,105 @@ def admin_mietvertrag(vorgang_id):
 @app.route("/admin/mietvorgang/<int:vorgang_id>/vertrag/speichern", methods=["POST"])
 @admin_required
 def admin_mietvertrag_speichern(vorgang_id):
-    vorgang = get_mietvorgang(vorgang_id)
-    if not vorgang:
-        abort(404)
+    name = clean_text(request.form.get("kunde_name"))
+    telefon = clean_text(request.form.get("kunde_telefon"))
     email = clean_text(request.form.get("kunde_email"))
-    if email and not parse_email_recipients(email):
-        flash("Die E-Mail-Adresse ist ungültig — bitte korrigieren.", "warning")
-        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
     werte = {f["name"]: clean_text(request.form.get(f["name"])) for f in MIETVERTRAG_FELDER}
-    felder = {
-        "kunde_email": email,
-        "vertrag_felder_json": json.dumps(werte, ensure_ascii=False),
-    }
-    # Status nur initial auf 'entwurf' setzen; bereits unterschriebene/bestätigte
-    # Verträge behalten ihren Status (reine Datenpflege ändert ihn nicht).
-    if not clean_text(vorgang.get("vertrag_status")):
-        felder["vertrag_status"] = "entwurf"
-    set_mietvorgang_felder(vorgang_id, **felder)
+    try:
+        expected_version = int(request.form.get("expected_version") or 0)
+    except (TypeError, ValueError):
+        expected_version = 0
+    expected_hash = clean_text(request.form.get("expected_draft_hash"))
+    expected_text_version = clean_text(request.form.get("expected_text_version"))
+    db = get_db()
+    try:
+        if USE_POSTGRES:
+            vorab = db.execute(
+                "SELECT mietfahrzeug_id FROM mietvorgaenge WHERE id=?", (int(vorgang_id),)
+            ).fetchone()
+            if not vorab:
+                abort(404)
+            fahrzeug_row = db.execute(
+                "SELECT * FROM mietfahrzeuge WHERE id=? FOR UPDATE",
+                (int(vorab["mietfahrzeug_id"]),),
+            ).fetchone()
+            row = db.execute(
+                "SELECT * FROM mietvorgaenge WHERE id=? FOR UPDATE", (int(vorgang_id),)
+            ).fetchone()
+        else:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM mietvorgaenge WHERE id=?", (int(vorgang_id),)
+            ).fetchone()
+            fahrzeug_row = db.execute(
+                "SELECT * FROM mietfahrzeuge WHERE id=?",
+                (int(row["mietfahrzeug_id"]),),
+            ).fetchone() if row else None
+        if not row or not fahrzeug_row:
+            abort(404)
+        vorgang = hydrate_mietvorgang(row)
+        fahrzeug = dict(fahrzeug_row)
+        if mietvertrag_ist_fixiert(vorgang):
+            raise ValueError(
+                "Die unterschriebene Vertragsversion ist in der Anwendung zur Bearbeitung gesperrt. "
+                "Für Korrekturen bitte ausdrücklich eine neue Version anlegen."
+            )
+        if clean_text(vorgang.get("status")) in {"storniert", "zurueck"} or clean_text(vorgang.get("rueckgabe_datum")):
+            raise ValueError("Stornierte oder zurückgegebene Mietvorgänge können nicht mehr geändert werden.")
+        auftrag = mietvertrag_auftrag(vorgang)
+        aktueller_hash = mietvertrag_entwurf_hash(vorgang, fahrzeug, auftrag)
+        aktuelle_version = max(1, int(vorgang.get("vertrag_version") or 1))
+        if expected_version != aktuelle_version or not expected_hash:
+            raise ValueError("Der Vertragsentwurf hat sich in einem anderen Tab geändert. Bitte Seite neu laden.")
+        if not hmac.compare_digest(expected_hash, aktueller_hash):
+            raise ValueError("Die angezeigten Vertragsdaten sind nicht mehr aktuell. Bitte Seite neu laden.")
+        if not hmac.compare_digest(expected_text_version, MIETVERTRAG_TEXT_VERSION):
+            raise ValueError("Der rechtliche Vertragstext hat sich geändert. Bitte Seite neu laden.")
+        if not name:
+            raise ValueError("Bitte den Kundennamen angeben.")
+        start_obj, end_obj = validiere_mietzeitraum(
+            request.form.get("start_datum"), request.form.get("end_datum")
+        )
+        validiere_mietkontakt(telefon, email)
+        if not mietfahrzeug_zeitraum_frei_db(
+            db,
+            int(vorgang["mietfahrzeug_id"]),
+            start_obj,
+            end_obj,
+            exclude_vorgang_id=vorgang_id,
+        ):
+            raise ValueError("Das Mietfahrzeug ist im korrigierten Zeitraum bereits belegt.")
+        db.execute(
+            """
+            UPDATE mietvorgaenge
+            SET kunde_name=?, kunde_telefon=?, kunde_email=?, whatsapp_erlaubt=?,
+                start_datum=?, end_datum=?, vertrag_felder_json=?,
+                vertrag_status='entwurf', vertrag_text_version=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                name,
+                telefon,
+                email,
+                1 if request.form.get("whatsapp_erlaubt") == "1" else 0,
+                start_obj.strftime(DATE_FMT),
+                end_obj.strftime(DATE_FMT),
+                json.dumps(werte, ensure_ascii=False),
+                MIETVERTRAG_TEXT_VERSION,
+                now_str(),
+                int(vorgang_id),
+            ),
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        flash(str(exc), "warning")
+        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
     flash("Vertragsdaten gespeichert.", "success")
     return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
 
@@ -35988,51 +37285,133 @@ def admin_mietvertrag_speichern(vorgang_id):
 @app.route("/admin/mietvorgang/<int:vorgang_id>/vertrag/unterschrift", methods=["POST"])
 @admin_required
 def admin_mietvertrag_unterschrift(vorgang_id):
-    vorgang, fahrzeug, auftrag = lade_mietvorgang_kontext(vorgang_id)
-    if not vorgang or not fahrzeug:
+    if not get_mietvorgang(vorgang_id):
         abort(404)
-    stored = save_mietvertrag_unterschrift(vorgang_id, request.form.get("unterschrift_data"))
-    if not stored:
-        flash("Es wurde keine gültige Unterschrift empfangen. Bitte im Feld unterschreiben.", "warning")
-        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
-    kontext = mietvertrag_kontext(vorgang, fahrzeug, auftrag)
-    snapshot = {
-        "kontext": kontext,
-        "abschnitte": mietvertrag_abschnitte_gefuellt(kontext),
-        "statuslink": mietvertrag_statuslink(auftrag),
-    }
-    set_mietvorgang_felder(
-        vorgang_id,
-        unterschrift_stored=stored,
-        unterschrift_name=clean_text(request.form.get("unterschrift_name")) or clean_text(vorgang.get("kunde_name")),
-        unterschrift_ort=clean_text(request.form.get("unterschrift_ort")) or "Mosbach",
-        unterschrift_am=now_str(),
-        vertrag_snapshot_json=json.dumps(snapshot, ensure_ascii=False),
-        vertrag_status="unterschrieben",
-    )
-    # Erst nach erfolgreichem DB-Update die alte Unterschrift entfernen (atomar)
-    alt = clean_text(vorgang.get("unterschrift_stored"))
-    if alt and alt != stored:
-        altpfad = upload_file_path({"stored_name": alt})
-        if altpfad:
-            try:
-                altpfad.unlink(missing_ok=True)
-            except OSError:
-                pass
-    flash("Unterschrift gespeichert. Bitte noch bestätigen.", "success")
+    try:
+        version = persistiere_mietvertrag_unterschrift(
+            vorgang_id,
+            request.form.get("unterschrift_data"),
+            request.form.get("unterschrift_name"),
+            request.form.get("unterschrift_ort"),
+            request.form.get("expected_draft_hash"),
+            request.form.get("expected_version"),
+            request.form.get("expected_text_version"),
+        )
+        flash(
+            f"Unterschrift gespeichert. Vertragsversion {version} und das zugehörige PDF sind jetzt als fixierte Fassung mit Prüfsummen dokumentiert.",
+            "success",
+        )
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+
+
+@app.route("/admin/mietvorgang/<int:vorgang_id>/vertrag/neue-version", methods=["POST"])
+@admin_required
+def admin_mietvertrag_neue_version(vorgang_id):
+    if not get_mietvorgang(vorgang_id):
+        abort(404)
+    try:
+        version = neue_mietvertrag_version(
+            vorgang_id,
+            request.form.get("aenderungsgrund"),
+            request.form.get("expected_version"),
+            request.form.get("expected_snapshot_hash"),
+        )
+        flash(
+            f"Vertragsversion {version} als Änderungsentwurf angelegt. Die bisherige Fassung bleibt im Versionsverlauf erhalten.",
+            "success",
+        )
+    except ValueError as exc:
+        flash(str(exc), "warning")
     return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
 
 
 @app.route("/admin/mietvorgang/<int:vorgang_id>/vertrag/bestaetigen", methods=["POST"])
 @admin_required
 def admin_mietvertrag_bestaetigen(vorgang_id):
-    vorgang = get_mietvorgang(vorgang_id)
-    if not vorgang:
-        abort(404)
-    if clean_text(vorgang.get("vertrag_status")) != "unterschrieben":
-        flash("Der Vertrag muss zuerst vom Kunden unterschrieben werden.", "warning")
+    if not mietvertrag_rechtlich_freigegeben():
+        flash("Bestätigen ist gesperrt, solange die rechtliche Freigabe fehlt.", "warning")
         return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
-    set_mietvorgang_felder(vorgang_id, vertrag_status="bestaetigt", vertrag_bestaetigt_am=now_str())
+    db = get_db()
+    try:
+        try:
+            expected_version = int(request.form.get("expected_version") or 0)
+        except (TypeError, ValueError):
+            expected_version = 0
+        expected_snapshot_hash = clean_text(request.form.get("expected_snapshot_hash"))
+        expected_pdf_hash = clean_text(request.form.get("expected_pdf_hash"))
+        if USE_POSTGRES:
+            vorgang_row = db.execute(
+                "SELECT * FROM mietvorgaenge WHERE id=? FOR UPDATE",
+                (int(vorgang_id),),
+            ).fetchone()
+        else:
+            db.execute("BEGIN IMMEDIATE")
+            vorgang_row = db.execute(
+                "SELECT * FROM mietvorgaenge WHERE id=?",
+                (int(vorgang_id),),
+            ).fetchone()
+        if not vorgang_row:
+            abort(404)
+        vorgang = dict(vorgang_row)
+        if clean_text(vorgang.get("status")) in {"storniert", "zurueck"} or clean_text(vorgang.get("rueckgabe_datum")):
+            raise ValueError("Ein stornierter oder zurückgegebener Mietvorgang kann nicht bestätigt werden.")
+        if clean_text(vorgang.get("vertrag_status")) != "unterschrieben":
+            raise ValueError("Der Vertrag muss zuerst vom Kunden unterschrieben werden.")
+        version_nummer = max(1, int(vorgang.get("vertrag_version") or 1))
+        version_sql = (
+            "SELECT * FROM mietvertrag_versionen WHERE mietvorgang_id=? AND version=? FOR UPDATE"
+            if USE_POSTGRES
+            else "SELECT * FROM mietvertrag_versionen WHERE mietvorgang_id=? AND version=?"
+        )
+        version_row = db.execute(
+            version_sql, (int(vorgang_id), version_nummer)
+        ).fetchone()
+        version = dict(version_row) if version_row else None
+        if (
+            expected_version != version_nummer
+            or not version
+            or not expected_snapshot_hash
+            or not expected_pdf_hash
+            or not hmac.compare_digest(expected_snapshot_hash, clean_text(version.get("snapshot_sha256")))
+            or not hmac.compare_digest(expected_pdf_hash, clean_text(version.get("pdf_sha256")))
+        ):
+            raise ValueError("Die angezeigte Vertragsversion ist nicht mehr aktuell. Bitte Seite neu laden.")
+        integritaetsfehler = mietvertrag_version_integritaetsfehler(version)
+        if integritaetsfehler:
+            raise ValueError(integritaetsfehler)
+        bestaetigt_am = now_str()
+        cursor = db.execute(
+            """
+            UPDATE mietvorgaenge
+            SET vertrag_status='bestaetigt', vertrag_bestaetigt_am=?, geaendert_am=?
+            WHERE id=? AND vertrag_status='unterschrieben' AND vertrag_version=?
+            """,
+            (bestaetigt_am, bestaetigt_am, int(vorgang_id), version_nummer),
+        )
+        if int(cursor.rowcount or 0) != 1:
+            raise ValueError("Der Vertragsstand hat sich parallel geändert. Bitte Seite neu laden.")
+        version_cursor = db.execute(
+            """
+            UPDATE mietvertrag_versionen
+            SET status='bestaetigt', bestaetigt_am=?
+            WHERE mietvorgang_id=? AND version=?
+            """,
+            (bestaetigt_am, int(vorgang_id), version_nummer),
+        )
+        if int(version_cursor.rowcount or 0) != 1:
+            raise ValueError("Die Vertragsversion konnte nicht bestätigt werden.")
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        flash(str(exc), "danger")
+        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
     flash("Vertrag bestätigt und abgeschlossen.", "success")
     return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
 
@@ -36043,9 +37422,43 @@ def admin_mietvertrag_pdf(vorgang_id):
     vorgang, fahrzeug, auftrag = lade_mietvorgang_kontext(vorgang_id)
     if not vorgang or not fahrzeug:
         abort(404)
-    buffer = make_mietvertrag_pdf(vorgang, fahrzeug, auftrag)
+    if mietvertrag_ist_fixiert(vorgang):
+        version_nummer = max(1, int(vorgang.get("vertrag_version") or 1))
+        version = get_mietvertrag_version(vorgang_id, version_nummer)
+        pdf_bytes = mietvertrag_version_pdf_bytes(version)
+        if not pdf_bytes:
+            return (
+                "Für diese ältere Vertragsversion existiert kein versioniertes PDF mit gültiger Prüfsumme. "
+                "Bitte eine neue Vertragsversion erstellen und erneut unterschreiben.",
+                409,
+            )
+        buffer = BytesIO(pdf_bytes)
+        filename = mietvertrag_pdf_filename(vorgang, fahrzeug, version_nummer)
+    else:
+        buffer = make_mietvertrag_pdf(vorgang, fahrzeug, auftrag)
+        filename = mietvertrag_pdf_filename(vorgang, fahrzeug)
     return send_file(buffer, mimetype="application/pdf", as_attachment=False,
-                     download_name=mietvertrag_pdf_filename(vorgang, fahrzeug))
+                     download_name=filename)
+
+
+@app.route("/admin/mietvorgang/<int:vorgang_id>/vertrag/version/<int:version_nummer>.pdf")
+@admin_required
+def admin_mietvertrag_version_pdf(vorgang_id, version_nummer):
+    vorgang, fahrzeug, _auftrag = lade_mietvorgang_kontext(vorgang_id)
+    if not vorgang or not fahrzeug:
+        abort(404)
+    version = get_mietvertrag_version(vorgang_id, version_nummer)
+    if not version:
+        abort(404)
+    pdf_bytes = mietvertrag_version_pdf_bytes(version)
+    if not pdf_bytes:
+        return "Diese Altversion enthält kein versioniertes PDF mit gültiger Prüfsumme.", 409
+    return send_file(
+        BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=False,
+        download_name=mietvertrag_pdf_filename(vorgang, fahrzeug, version_nummer),
+    )
 
 
 @app.route("/admin/mietvorgang/<int:vorgang_id>/unterschrift.png")
@@ -36058,9 +37471,16 @@ def admin_mietvertrag_unterschrift_bild(vorgang_id):
     if not stored:
         abort(404)
     path = upload_file_path({"stored_name": stored})
-    if not path or not path.exists():
+    if path and path.exists():
+        return send_file(path, mimetype="image/png")
+    version = get_mietvertrag_version(vorgang_id, int(vorgang.get("vertrag_version") or 1))
+    try:
+        data = base64.b64decode(clean_text((version or {}).get("unterschrift_base64")), validate=True)
+    except (TypeError, ValueError):
+        data = b""
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
         abort(404)
-    return send_file(path, mimetype="image/png")
+    return send_file(BytesIO(data), mimetype="image/png")
 
 
 @app.route("/admin/mietvorgang/<int:vorgang_id>/vertrag/senden", methods=["POST"])
@@ -36069,10 +37489,53 @@ def admin_mietvertrag_senden(vorgang_id):
     vorgang, fahrzeug, auftrag = lade_mietvorgang_kontext(vorgang_id)
     if not vorgang or not fahrzeug:
         abort(404)
+    if clean_text(vorgang.get("status")) == "storniert":
+        flash("Ein stornierter Mietvorgang kann nicht versendet werden.", "warning")
+        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+    if not mietvertrag_rechtlich_freigegeben():
+        flash("Versand ist gesperrt, solange die rechtliche Freigabe fehlt.", "warning")
+        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+    if clean_text(vorgang.get("vertrag_status")) != "bestaetigt":
+        flash("Versand ist erst nach Unterschrift und ausdrücklicher Bestätigung möglich.", "warning")
+        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+    version_nummer = max(1, int(vorgang.get("vertrag_version") or 1))
+    version = get_mietvertrag_version(vorgang_id, version_nummer)
+    try:
+        expected_version = int(request.form.get("expected_version") or 0)
+    except (TypeError, ValueError):
+        expected_version = 0
+    expected_snapshot_hash = clean_text(request.form.get("expected_snapshot_hash"))
+    expected_pdf_hash = clean_text(request.form.get("expected_pdf_hash"))
+    expected_versandweg = clean_text(request.form.get("expected_versandweg"))
+    expected_versandziel = clean_text(request.form.get("expected_versandziel"))
+    if (
+        expected_version != version_nummer
+        or not version
+        or not expected_snapshot_hash
+        or not expected_pdf_hash
+        or not hmac.compare_digest(expected_snapshot_hash, clean_text(version.get("snapshot_sha256")))
+        or not hmac.compare_digest(expected_pdf_hash, clean_text(version.get("pdf_sha256")))
+    ):
+        flash("Die angezeigte Vertragsversion ist nicht mehr aktuell. Bitte Seite neu laden.", "warning")
+        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+    integritaetsfehler = mietvertrag_version_integritaetsfehler(version)
+    if integritaetsfehler:
+        flash(integritaetsfehler, "danger")
+        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
+    pdf_bytes = mietvertrag_version_pdf_bytes(version)
     weg, ziel = mietvertrag_versandweg(vorgang, auftrag)
+    if (
+        not expected_versandweg
+        or not hmac.compare_digest(expected_versandweg, clean_text(weg))
+        or not hmac.compare_digest(expected_versandziel, clean_text(ziel))
+    ):
+        flash(
+            "Der angezeigte Versandweg oder Empfänger hat sich geändert. Bitte Seite neu laden und das Ziel erneut prüfen.",
+            "warning",
+        )
+        return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
     statuslink = mietvertrag_statuslink(auftrag)
     if weg == "email":
-        pdf = make_mietvertrag_pdf(vorgang, fahrzeug, auftrag)
         betreff = f"Ihr Mietvertrag – {clean_text(fahrzeug.get('kennzeichen'))}"
         body = (
             f"Hallo {clean_text(vorgang.get('kunde_name')) or 'zusammen'},\n\n"
@@ -36081,19 +37544,32 @@ def admin_mietvertrag_senden(vorgang_id):
         if statuslink:
             body += f"\nDen Reparaturstatus Ihres Fahrzeugs sehen Sie jederzeit hier:\n{statuslink}\n"
         body += "\nViele Grüße\nGärtner Karosserie & Lack"
-        ergebnis = send_mietvertrag_mail(ziel, betreff, body, pdf.getvalue(), mietvertrag_pdf_filename(vorgang, fahrzeug))
+        ergebnis = send_mietvertrag_mail(
+            ziel,
+            betreff,
+            body,
+            pdf_bytes,
+            mietvertrag_pdf_filename(vorgang, fahrzeug, version_nummer),
+        )
         if ergebnis.get("sent"):
-            set_mietvorgang_felder(vorgang_id, vertrag_gesendet_am=now_str(), vertrag_versandweg="email")
-            flash(f"Mietvertrag per E-Mail an {ziel} gesendet.", "success")
+            try:
+                protokolliere_mietvertrag_versand(
+                    vorgang_id, version_nummer, "email", ziel
+                )
+                flash(f"Mietvertrag per E-Mail an {ziel} gesendet und bei Version {version_nummer} protokolliert.", "success")
+            except ValueError as exc:
+                flash(
+                    f"Die E-Mail wurde versendet, aber der Versandnachweis konnte nicht gespeichert werden: {exc}",
+                    "danger",
+                )
         else:
             flash(ergebnis.get("message") or "E-Mail-Versand nicht möglich.", "warning")
     elif weg == "whatsapp":
-        nachricht = "Ihr Mietvertrag liegt bereit."
+        nachricht = "Ihr Mietvertrag liegt bei Gärtner zur Abholung beziehungsweise separaten Übermittlung bereit."
         if statuslink:
             nachricht += f" Reparaturstatus: {statuslink}"
         wa_url = f"https://wa.me/{ziel}?text={quote(nachricht)}"
-        set_mietvorgang_felder(vorgang_id, vertrag_gesendet_am=now_str(), vertrag_versandweg="whatsapp")
-        flash(f"WhatsApp ist vorbereitet: {wa_url} — Link öffnen und Nachricht senden. (PDF separat aushändigen/per Mail.)", "info")
+        return redirect(wa_url)
     else:
         flash("Keine E-Mail/Handynummer hinterlegt — bitte den Vertrag herunterladen und dem Kunden aushändigen.", "info")
     return redirect(url_for("admin_mietvertrag", vorgang_id=vorgang_id))
@@ -36102,21 +37578,35 @@ def admin_mietvertrag_senden(vorgang_id):
 # --- Ersatzfahrzeug-Auswahl (Klassen + Preise + Verfügbarkeit) -------------
 
 
-@app.route("/admin/ersatzfahrzeug")
+@app.route("/admin/ersatzfahrzeug", methods=["GET", "POST"])
 @admin_required
 def admin_ersatzfahrzeug():
-    start = clean_text(request.args.get("start"))
-    end = clean_text(request.args.get("end"))
+    quelle = request.form if request.method == "POST" else request.args
+    start = clean_text(quelle.get("start"))
+    end = clean_text(quelle.get("end"))
     try:
-        auftrag_id = int(request.args.get("auftrag_id") or 0)
+        auftrag_id = int(quelle.get("auftrag_id") or 0)
     except (TypeError, ValueError):
         auftrag_id = 0
     auftrag = get_auftrag(auftrag_id) if auftrag_id else None
-    # Kundendaten aus Reparaturauftrag vorbelegen, sonst aus den Parametern
-    kunde_name = clean_text(request.args.get("kunde_name")) or (clean_text(auftrag.get("kunde_name")) if auftrag else "")
-    kunde_telefon = clean_text(request.args.get("kunde_telefon")) or (clean_text(auftrag.get("kontakt_telefon")) if auftrag else "")
-    kunde_email = clean_text(request.args.get("kunde_email")) or (clean_text(auftrag.get("kunde_email")) if auftrag else "")
-    gruppen = verfuegbare_mietfahrzeuge_nach_klasse(start, end) if start else []
+    # Personenbezogene Kundendaten werden ausschließlich aus POST-Daten oder dem
+    # intern verknüpften Auftrag gelesen, niemals aus URL-Parametern.
+    kunde_name = clean_text(request.form.get("kunde_name")) if request.method == "POST" else ""
+    kunde_telefon = clean_text(request.form.get("kunde_telefon")) if request.method == "POST" else ""
+    kunde_email = clean_text(request.form.get("kunde_email")) if request.method == "POST" else ""
+    whatsapp_erlaubt = request.form.get("whatsapp_erlaubt") == "1" if request.method == "POST" else False
+    kunde_name = kunde_name or (clean_text(auftrag.get("kunde_name")) if auftrag else "")
+    kunde_telefon = kunde_telefon or (clean_text(auftrag.get("kontakt_telefon")) if auftrag else "")
+    kunde_email = kunde_email or (clean_text(auftrag.get("kunde_email")) if auftrag else "")
+    gesucht = False
+    gruppen = []
+    if start or end:
+        try:
+            validiere_mietzeitraum(start, end)
+            gesucht = True
+            gruppen = verfuegbare_mietfahrzeuge_nach_klasse(start, end)
+        except ValueError as exc:
+            flash(str(exc), "warning")
     auftraege_aktiv = [
         a for a in list_auftraege()
         if int(a.get("status") or 1) <= 4 and not a.get("angebotsphase")
@@ -36125,8 +37615,9 @@ def admin_ersatzfahrzeug():
         "ersatzfahrzeug_auswahl.html",
         start=start, end=end, auftrag_id=auftrag_id, auftrag=auftrag,
         kunde_name=kunde_name, kunde_telefon=kunde_telefon, kunde_email=kunde_email,
+        whatsapp_erlaubt=whatsapp_erlaubt,
         gruppen=gruppen, auftraege=auftraege_aktiv,
-        gesucht=bool(start), heute_iso=date.today().isoformat(),
+        gesucht=gesucht, heute_iso=date.today().isoformat(),
     )
 
 
@@ -36147,14 +37638,12 @@ def admin_ersatzfahrzeug_buchen():
     except (TypeError, ValueError):
         auftrag_id = 0
     auftrag = get_auftrag(auftrag_id) if auftrag_id else None
-    zurueck = url_for("admin_ersatzfahrzeug", start=clean_text(start), end=clean_text(end),
-                      auftrag_id=auftrag_id or None,
-                      kunde_name=clean_text(request.form.get("kunde_name")) or None,
-                      kunde_telefon=clean_text(request.form.get("kunde_telefon")) or None,
-                      kunde_email=clean_text(request.form.get("kunde_email")) or None)
-    if not mietfahrzeug_zeitraum_frei(fahrzeug_id, start, end):
-        flash(f"{fahrzeug['kennzeichen']} ist im Zeitraum nicht mehr frei — bitte ein anderes wählen.", "warning")
-        return redirect(zurueck)
+    zurueck = url_for(
+        "admin_ersatzfahrzeug",
+        start=clean_text(start),
+        end=clean_text(end),
+        auftrag_id=auftrag_id or None,
+    )
     kunde_name = clean_text(request.form.get("kunde_name")) or (clean_text(auftrag.get("kunde_name")) if auftrag else "")
     kunde_telefon = clean_text(request.form.get("kunde_telefon")) or (clean_text(auftrag.get("kontakt_telefon")) if auftrag else "")
     kunde_email = clean_text(request.form.get("kunde_email")) or (clean_text(auftrag.get("kunde_email")) if auftrag else "")
@@ -36164,6 +37653,7 @@ def admin_ersatzfahrzeug_buchen():
             kunde_name=kunde_name,
             kunde_telefon=kunde_telefon,
             kunde_email=kunde_email,
+            whatsapp_erlaubt=request.form.get("whatsapp_erlaubt") == "1",
             auftrag_id=auftrag_id,
             start_datum=start,
             end_datum=end,
@@ -36266,6 +37756,9 @@ def update_lieferant(lieferant_id, **felder):
             ),
         )
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -36732,10 +38225,21 @@ def admin_zahlen_investition(beleg_id):
 @app.route("/admin/versicherungsschaden")
 @admin_required
 def admin_versicherungsschaden():
-    return send_file(BASE / "templates" / "versicherungsschaden.html", mimetype="text/html")
+    return render_template(
+        "schadenmeldung_vorschau.html",
+        demo_ref=f"VS-{date.today().strftime('%Y%m%d')}-A24",
+        heute_iso=date.today().isoformat(),
+        cockpit_mode=True,
+    )
 
 
 @app.route("/admin/versicherung")
+@admin_required
+def admin_versicherung_start():
+    return redirect(url_for("admin_versicherungsschaden"))
+
+
+@app.route("/admin/versicherung/faelle")
 @admin_required
 def admin_versicherung():
     schadenfaelle = [
@@ -36756,6 +38260,7 @@ def admin_versicherung():
         versicherung_cockpit=build_versicherung_tages_cockpit(aktive),
         versicherungen=list_versicherungen(),
         freigabe_status=VERSICHERUNG_FREIGABE_STATUS,
+        schaden_vorschau_aktiv=schaden_vorschau_is_enabled(),
     )
 
 
@@ -38615,20 +40120,194 @@ def api_werkstatt_emails():
     return jsonify({"ok": True, "id": email_id}), 201
 
 
-def extract_import_package_files(archive, names, tmp_path):
-    if "auftraege.db" not in names:
-        raise ValueError("Datenpaket ungültig: auftraege.db fehlt.")
-
-    imported_db = tmp_path / "auftraege.db"
-    with archive.open("auftraege.db") as source, imported_db.open("wb") as target:
-        shutil.copyfileobj(source, target)
-
-    probe = sqlite3.connect(imported_db)
+def read_backup_json_from_archive(archive, names):
+    if "backup.json" not in names:
+        return None
     try:
-        probe.execute("SELECT COUNT(*) FROM auftraege").fetchone()
-        probe.execute("SELECT COUNT(*) FROM autohaeuser").fetchone()
+        data = json.loads(archive.read("backup.json").decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, KeyError) as exc:
+        raise ValueError("Datenpaket ungültig: backup.json ist nicht lesbar.") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("tables"), dict):
+        raise ValueError("Datenpaket ungültig: backup.json enthält keine Tabellen.")
+    return data
+
+
+def read_backup_manifest_from_archive(archive, names):
+    if "manifest.json" not in names:
+        return {}
+    try:
+        data = json.loads(archive.read("manifest.json").decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, KeyError) as exc:
+        raise ValueError("Datenpaket ungültig: manifest.json ist nicht lesbar.") from exc
+    return data if isinstance(data, dict) else {}
+
+
+def backup_binary_reference_map(export):
+    references = (export or {}).get("binary_blobs") or []
+    if not isinstance(references, list):
+        raise ValueError("Datenpaket ungültig: binary_blobs muss eine Liste sein.")
+    result = {}
+    for reference in references:
+        if not isinstance(reference, dict):
+            raise ValueError("Datenpaket ungültig: Binärreferenz ist fehlerhaft.")
+        table_name = clean_text(reference.get("table"))
+        column_name = clean_text(reference.get("column"))
+        config = BACKUP_BINARY_FIELDS.get(table_name, {}).get(column_name)
+        if not config:
+            raise ValueError("Datenpaket ungültig: unbekannte Binärreferenz.")
+        try:
+            row_id = int(reference.get("row_id") or 0)
+            size = int(reference.get("size") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Datenpaket ungültig: Binärreferenz ohne gültige ID/Größe.") from exc
+        if row_id <= 0 or size < 0:
+            raise ValueError("Datenpaket ungültig: Binärreferenz ohne gültige ID/Größe.")
+        zip_path = clean_text(reference.get("zip_path")).replace("\\", "/")
+        expected_path = backup_binary_zip_path(
+            table_name, row_id, column_name, config.get("suffix") or ".bin"
+        )
+        if zip_path != expected_path:
+            raise ValueError("Datenpaket ungültig: unsicherer Pfad in Binärreferenz.")
+        if clean_text(reference.get("restore_encoding")) != "base64":
+            raise ValueError("Datenpaket ungültig: unbekannte Binärcodierung.")
+        digest = clean_text(reference.get("sha256")).lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("Datenpaket ungültig: Binärreferenz ohne gültige Prüfsumme.")
+        max_bytes = int(config.get("max_bytes") or 0)
+        if max_bytes and size > max_bytes:
+            raise ValueError("Datenpaket ungültig: Binärreferenz ist unerwartet groß.")
+        key = (table_name, row_id, column_name)
+        if key in result:
+            raise ValueError("Datenpaket ungültig: doppelte Binärreferenz.")
+        result[key] = dict(reference, row_id=row_id, size=size, zip_path=zip_path, sha256=digest)
+    return result
+
+
+def validate_backup_binary_reference_completeness(export, reference_map):
+    try:
+        format_version = int((export or {}).get("format_version") or 1)
+    except (TypeError, ValueError):
+        format_version = 1
+    if format_version < BACKUP_FORMAT_VERSION:
+        return
+    tables = export.get("tables") or {}
+    required_tables = set(BACKUP_TABLES) - {"datei_backups"}
+    missing_tables = sorted(required_tables - set(tables))
+    if missing_tables:
+        raise ValueError(
+            "Datenpaket unvollständig: Tabellen fehlen: "
+            + ", ".join(missing_tables[:8])
+        )
+    for table_name, field_config in BACKUP_BINARY_FIELDS.items():
+        rows = tables.get(table_name) or []
+        if not isinstance(rows, list):
+            raise ValueError(f"Datenpaket ungültig: Tabelle {table_name} ist keine Liste.")
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError(f"Datenpaket ungültig: Tabelle {table_name} enthält eine fehlerhafte Zeile.")
+            try:
+                row_id = int(row.get("id") or 0)
+            except (TypeError, ValueError):
+                row_id = 0
+            if row_id <= 0:
+                raise ValueError(f"Datenpaket ungültig: Tabelle {table_name} enthält eine Zeile ohne ID.")
+            for column_name in field_config:
+                if clean_text(row.get(column_name)):
+                    raise ValueError(
+                        f"Datenpaket ungültig: {table_name}.{column_name} ist in Format v2 nicht externalisiert."
+                    )
+
+
+def read_backup_binary_blob(archive, names, reference):
+    zip_path = reference["zip_path"]
+    if zip_path not in names:
+        raise ValueError(f"Datenpaket unvollständig: {zip_path} fehlt.")
+    config = BACKUP_BINARY_FIELDS[reference["table"]][reference["column"]]
+    max_bytes = int(config.get("max_bytes") or 0)
+    info = archive.getinfo(zip_path)
+    if info.is_dir() or info.file_size != int(reference["size"]):
+        raise ValueError(f"Datenpaket beschädigt: Größe von {zip_path} stimmt nicht.")
+    if max_bytes and info.file_size > max_bytes:
+        raise ValueError(f"Datenpaket beschädigt: {zip_path} ist unerwartet groß.")
+    with archive.open(zip_path) as source:
+        raw = source.read((max_bytes or info.file_size) + 1)
+    if max_bytes and len(raw) > max_bytes:
+        raise ValueError(f"Datenpaket beschädigt: {zip_path} ist unerwartet groß.")
+    if len(raw) != info.file_size:
+        raise ValueError(f"Datenpaket beschädigt: {zip_path} ist unvollständig.")
+    if not hmac.compare_digest(sha256_bytes(raw), reference["sha256"]):
+        raise ValueError(f"Datenpaket beschädigt: Prüfsumme von {zip_path} stimmt nicht.")
+    return raw
+
+
+def hydrate_imported_sqlite_backup_blobs(imported_db, archive, names, export):
+    reference_map = backup_binary_reference_map(export)
+    validate_backup_binary_reference_completeness(export, reference_map)
+    if not reference_map:
+        return
+    conn = sqlite3.connect(imported_db)
+    try:
+        for (table_name, row_id, column_name), reference in reference_map.items():
+            raw = read_backup_binary_blob(archive, names, reference)
+            cursor = conn.execute(
+                f"UPDATE {table_name} SET {column_name}=? WHERE id=?",
+                (base64.b64encode(raw).decode("ascii"), row_id),
+            )
+            if int(cursor.rowcount or 0) != 1:
+                raise ValueError(
+                    f"Datenpaket unvollständig: Zielzeile {table_name} #{row_id} fehlt."
+                )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        probe.close()
+        conn.close()
+
+
+def extract_import_package_files(archive, names, tmp_path):
+    export = read_backup_json_from_archive(archive, names)
+    manifest = read_backup_manifest_from_archive(archive, names)
+    try:
+        manifest_version = int(manifest.get("format_version") or 1)
+    except (TypeError, ValueError):
+        manifest_version = 1
+    if manifest_version >= BACKUP_FORMAT_VERSION and export is None:
+        raise ValueError("Datenpaket unvollständig: backup.json mit Binärreferenzen fehlt.")
+    if "auftraege.db" not in names and export is None:
+        raise ValueError("Datenpaket ungültig: auftraege.db und backup.json fehlen.")
+    if export is not None:
+        reference_map = backup_binary_reference_map(export)
+        validate_backup_binary_reference_completeness(export, reference_map)
+        if "binary_blob_count" in manifest:
+            try:
+                expected_count = int(manifest.get("binary_blob_count") or 0)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Datenpaket ungültig: Binäranzahl im Manifest ist fehlerhaft.") from exc
+            if expected_count != len(reference_map):
+                raise ValueError("Datenpaket unvollständig: Anzahl der Binärdateien stimmt nicht.")
+        if "binary_blob_bytes" in manifest:
+            try:
+                expected_bytes = int(manifest.get("binary_blob_bytes") or 0)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Datenpaket ungültig: Binärgröße im Manifest ist fehlerhaft.") from exc
+            if expected_bytes != sum(int(ref["size"]) for ref in reference_map.values()):
+                raise ValueError("Datenpaket unvollständig: Gesamtgröße der Binärdateien stimmt nicht.")
+
+    imported_db = None
+    if "auftraege.db" in names:
+        imported_db = tmp_path / "auftraege.db"
+        with archive.open("auftraege.db") as source, imported_db.open("wb") as target:
+            shutil.copyfileobj(source, target)
+        if export is not None:
+            hydrate_imported_sqlite_backup_blobs(imported_db, archive, names, export)
+
+        probe = sqlite3.connect(imported_db)
+        try:
+            probe.execute("SELECT COUNT(*) FROM auftraege").fetchone()
+            probe.execute("SELECT COUNT(*) FROM autohaeuser").fetchone()
+        finally:
+            probe.close()
 
     imported_uploads = tmp_path / "uploads"
     imported_uploads.mkdir(exist_ok=True)
@@ -38641,7 +40320,7 @@ def extract_import_package_files(archive, names, tmp_path):
         with archive.open(name) as source, (imported_uploads / stored_name).open("wb") as target:
             shutil.copyfileobj(source, target)
 
-    return imported_db, imported_uploads
+    return imported_db, imported_uploads, export
 
 
 def replace_uploads_from_import(imported_uploads):
@@ -38710,6 +40389,84 @@ def normalize_import_value(value, column_type):
     return value
 
 
+def import_backup_json_rows_into_current_database(export, archive, names):
+    tables = (export or {}).get("tables")
+    if not isinstance(tables, dict):
+        raise ValueError("Datenpaket ungültig: backup.json enthält keine Tabellen.")
+    reference_map = backup_binary_reference_map(export)
+    validate_backup_binary_reference_completeness(export, reference_map)
+    remaining_references = set(reference_map)
+    target = get_db()
+    try:
+        for table_name in reversed(BACKUP_TABLES):
+            target.execute(f"DELETE FROM {table_name}")
+
+        for table_name in BACKUP_TABLES:
+            rows = tables.get(table_name)
+            if rows is None:
+                continue
+            if not isinstance(rows, list):
+                raise ValueError(f"Datenpaket ungültig: Tabelle {table_name} ist keine Liste.")
+            target_columns = get_table_columns(target, table_name)
+            target_types = get_table_column_types(target, table_name)
+            if not target_columns:
+                continue
+            for source_row in rows:
+                if not isinstance(source_row, dict):
+                    raise ValueError(
+                        f"Datenpaket ungültig: Tabelle {table_name} enthält eine fehlerhafte Zeile."
+                    )
+                row = dict(source_row)
+                try:
+                    row_id = int(row.get("id") or 0)
+                except (TypeError, ValueError):
+                    row_id = 0
+                for column_name in BACKUP_BINARY_FIELDS.get(table_name, {}):
+                    key = (table_name, row_id, column_name)
+                    reference = reference_map.get(key)
+                    if reference is None:
+                        continue
+                    raw = read_backup_binary_blob(archive, names, reference)
+                    row[column_name] = base64.b64encode(raw).decode("ascii")
+                    remaining_references.discard(key)
+                data = {
+                    key: normalize_import_value(value, target_types.get(key, ""))
+                    for key, value in row.items()
+                    if key in target_columns
+                }
+                if not data:
+                    continue
+                columns = list(data.keys())
+                placeholders = ", ".join("?" for _ in columns)
+                column_sql = ", ".join(columns)
+                insert_sql = f"INSERT INTO {table_name} ({column_sql}) VALUES ({placeholders})"
+                if USE_POSTGRES:
+                    # Der allgemeine Postgres-Adapter ergänzt sonst pauschal
+                    # "RETURNING id". Backup-Tabellen wie mietbild_backups
+                    # besitzen jedoch bewusst nur bild_id als Primärschlüssel.
+                    returning_column = "id" if "id" in target_columns else columns[0]
+                    insert_sql += f" RETURNING {returning_column}"
+                target.execute(
+                    insert_sql,
+                    tuple(data[column] for column in columns),
+                )
+
+        if remaining_references:
+            table_name, row_id, column_name = sorted(remaining_references)[0]
+            raise ValueError(
+                f"Datenpaket unvollständig: Referenzziel {table_name} #{row_id}, {column_name} fehlt."
+            )
+        if USE_POSTGRES:
+            reset_postgres_id_sequences(target)
+        target.commit()
+    except Exception:
+        if hasattr(target, "rollback"):
+            target.rollback()
+        raise
+    finally:
+        target.close()
+
+
 def import_sqlite_rows_into_current_database(imported_db):
     source = sqlite3.connect(imported_db)
     source.row_factory = sqlite3.Row
@@ -38743,8 +40500,12 @@ def import_sqlite_rows_into_current_database(imported_db):
                 columns = list(data.keys())
                 placeholders = ", ".join("?" for _ in columns)
                 column_sql = ", ".join(columns)
+                insert_sql = f"INSERT INTO {table_name} ({column_sql}) VALUES ({placeholders})"
+                if USE_POSTGRES:
+                    returning_column = "id" if "id" in target_columns else columns[0]
+                    insert_sql += f" RETURNING {returning_column}"
                 target.execute(
-                    f"INSERT INTO {table_name} ({column_sql}) VALUES ({placeholders})",
+                    insert_sql,
                     tuple(data[column] for column in columns),
                 )
 
@@ -38776,14 +40537,18 @@ def admin_daten_import():
 
             with zipfile.ZipFile(archive_path) as archive:
                 names = set(archive.namelist())
-                imported_db, imported_uploads = extract_import_package_files(
+                imported_db, imported_uploads, backup_export = extract_import_package_files(
                     archive,
                     names,
                     tmp_path,
                 )
 
                 create_safety_backup("before-data-import")
-                if USE_POSTGRES:
+                if imported_db is None:
+                    import_backup_json_rows_into_current_database(
+                        backup_export, archive, names
+                    )
+                elif USE_POSTGRES:
                     import_sqlite_rows_into_current_database(imported_db)
                 else:
                     DATA_DIR.mkdir(exist_ok=True)
@@ -41328,7 +43093,7 @@ def versicherung_zuteilung_neu(slug):
                 hinweise.append("Haftpflicht/Fremdverschulden: Gegnerdaten noch offen.")
         if clean_text(form.get("hinweis")):
             hinweise.append(clean_text(form.get("hinweis")))
-        beschreibung = clean_text(form.get("beschreibung")) or "Versicherung hat den Kunden zur Schadenbesichtigung an Lackierzentrum Gärtner Karosserie & Lack GmbH zugeteilt."
+        beschreibung = clean_text(form.get("beschreibung")) or "Versicherung hat den Kunden zur Schadenbesichtigung an Lackierzentrum Gärtner GmbH Karosserie + Lack zugeteilt."
         if hinweise:
             beschreibung = "\n".join([beschreibung, *hinweise])
         auftrag_id = create_auftrag(
@@ -41372,7 +43137,7 @@ def versicherung_zuteilung_neu(slug):
             WHERE id=?
             """,
             (
-                "Von Versicherung an Lackierzentrum Gärtner Karosserie & Lack GmbH zugeteilt - Erstkontakt/Begutachtung abstimmen",
+                "Von Versicherung an Lackierzentrum Gärtner GmbH Karosserie + Lack zugeteilt - Erstkontakt/Begutachtung abstimmen",
                 schaden_fahrbereit,
                 schaden_abschleppen,
                 schaden_mietwagen,
@@ -44018,6 +45783,8 @@ def mietwagen_public_fahrzeuge():
     """Aktive Mietfahrzeuge mit Titelbild und belegten Zeiträumen für die öffentliche Seite."""
     fahrzeuge = []
     for f in list_mietfahrzeuge(include_inactive=False):
+        if clean_text(f.get("basis_status")) in {"wartung", "inaktiv"}:
+            continue
         belegt = []
         for v in f.get("vorgaenge", []):
             if v.get("abgeschlossen"):
@@ -44059,6 +45826,36 @@ def mietwagen_landing():
     return render_template("mietwagen_landing.html", fahrzeuge=mietwagen_public_fahrzeuge())
 
 
+def schaden_vorschau_is_enabled():
+    return clean_text(os.environ.get("SCHADEN_VORSCHAU_AKTIV")).lower() in {
+        "1",
+        "true",
+        "ja",
+        "yes",
+        "on",
+    }
+
+
+@app.route("/schaden-vorschau")
+def schadenmeldung_vorschau():
+    """Lokale, nicht speichernde Designvorschau der öffentlichen Kundenschadenmeldung."""
+    if not schaden_vorschau_is_enabled():
+        abort(404)
+    return (
+        render_template(
+            "schadenmeldung_vorschau.html",
+            demo_ref=f"VS-{date.today().strftime('%Y%m%d')}-A24",
+            heute_iso=date.today().isoformat(),
+            cockpit_mode=False,
+        ),
+        200,
+        {
+            "Cache-Control": "no-store",
+            "X-Robots-Tag": "noindex, nofollow, noarchive",
+        },
+    )
+
+
 @app.route("/mietwagen-vorschau/")
 def mietwagen_vorschau():
     """Unverlinkte Vorschau (noindex) der Marketing-Landingpage für auto-lackierzentrum.de/mietwagen — nur zur GF-Sichtung."""
@@ -44076,20 +45873,59 @@ def mietwagen_anfrage():
     klassen = MIETFAHRZEUG_KLASSEN
     fahrzeuge = mietwagen_public_fahrzeuge()
     if request.method == "POST":
+        limited, wait_seconds = public_form_rate_limit_status("mietwagen")
+        if limited:
+            flash(
+                f"Zu viele Anfragen in kurzer Zeit. Bitte in {login_wait_label(wait_seconds)} erneut versuchen oder uns anrufen.",
+                "warning",
+            )
+            try:
+                vorauswahl = int(request.form.get("mietfahrzeug_id") or 0)
+            except (TypeError, ValueError):
+                vorauswahl = 0
+            return render_template(
+                "mietwagen_anfrage.html",
+                klassen=klassen,
+                fahrzeuge=fahrzeuge,
+                vorauswahl=vorauswahl,
+                formdata=request.form,
+                gesendet=False,
+                anfrage_ref="",
+                heute_iso=date.today().isoformat(),
+            ), 429
+        record_public_form_attempt("mietwagen")
         # Honeypot gegen Spam-Bots: echtes Feld bleibt leer
         if clean_text(request.form.get("website")):
-            return redirect(url_for("mietwagen_anfrage", ok=1))
+            return redirect(url_for("mietwagen_anfrage"))
         name = clean_text(request.form.get("name"))
         telefon = clean_text(request.form.get("telefon"))
+        email = clean_text(request.form.get("email"))
+        whatsapp_erlaubt = request.form.get("whatsapp_erlaubt") == "1"
         start_datum = clean_text(request.form.get("start_datum"))
+        end_datum = clean_text(request.form.get("end_datum"))
         try:
             wunsch_fahrzeug_id = int(request.form.get("mietfahrzeug_id") or 0)
         except (TypeError, ValueError):
             wunsch_fahrzeug_id = 0
-        if not name or not telefon or not start_datum:
-            flash("Bitte Name, Handynummer und Abholdatum angeben — die Handynummer brauchen wir, um Ihnen den Mietvertrag per WhatsApp zu schicken.", "warning")
+        zeitraum_fehler = ""
+        try:
+            start_obj, _end_obj = validiere_mietzeitraum(start_datum, end_datum)
+            if start_obj < date.today():
+                zeitraum_fehler = "Das Abholdatum darf nicht in der Vergangenheit liegen."
+        except ValueError as exc:
+            zeitraum_fehler = str(exc)
+        if len(name) < 2:
+            flash("Bitte Ihren vollständigen Namen angeben.", "warning")
+        elif len(re.sub(r"\D", "", telefon)) < 7:
+            flash("Bitte eine gültige Telefonnummer angeben.", "warning")
+        elif email and not parse_email_recipients(email):
+            flash("Bitte eine gültige E-Mail-Adresse angeben oder das Feld leer lassen.", "warning")
+        elif zeitraum_fehler:
+            flash(zeitraum_fehler, "warning")
+        elif wunsch_fahrzeug_id and not any(f["id"] == wunsch_fahrzeug_id for f in fahrzeuge):
+            flash("Das ausgewählte Fahrzeug ist nicht mehr öffentlich verfügbar.", "warning")
         elif wunsch_fahrzeug_id and not mietfahrzeug_zeitraum_frei(
-            wunsch_fahrzeug_id, start_datum, clean_text(request.form.get("end_datum"))
+            wunsch_fahrzeug_id, start_datum, end_datum
         ):
             flash("Dieses Fahrzeug ist im gewünschten Zeitraum leider schon vergeben. Bitte anderes Datum oder anderes Fahrzeug wählen — oder 'Egal / Beratung' auswählen, wir finden etwas Passendes.", "warning")
         else:
@@ -44097,16 +45933,18 @@ def mietwagen_anfrage():
             cursor = db.execute(
                 """
                 INSERT INTO mietwagen_anfragen
-                    (status, name, telefon, email, klasse_wunsch, start_datum, end_datum, nachricht, quelle, mietfahrzeug_id, erstellt_am)
-                VALUES ('offen', ?, ?, ?, ?, ?, ?, ?, 'homepage', ?, ?)
+                    (status, name, telefon, whatsapp_erlaubt, email, klasse_wunsch,
+                     start_datum, end_datum, nachricht, quelle, mietfahrzeug_id, erstellt_am)
+                VALUES ('offen', ?, ?, ?, ?, ?, ?, ?, ?, 'homepage', ?, ?)
                 """,
                 (
                     name,
                     telefon,
-                    clean_text(request.form.get("email")),
+                    1 if whatsapp_erlaubt else 0,
+                    email,
                     clean_text(request.form.get("klasse_wunsch")),
                     start_datum,
-                    clean_text(request.form.get("end_datum")),
+                    end_datum,
                     clean_text(request.form.get("nachricht")),
                     wunsch_fahrzeug_id,
                     now_str(),
@@ -44123,8 +45961,13 @@ def mietwagen_anfrage():
             zeitraum = start_datum + (
                 f" bis {clean_text(request.form.get('end_datum'))}" if clean_text(request.form.get("end_datum")) else ""
             )
-            wa_ok, wa_fehler = notify_workshop_whatsapp_mietanfrage(name, telefon, zeitraum, fahrzeug_label)
-            wa_status = "gesendet" if wa_ok else ("; ".join(wa_fehler)[:400] or "fehlgeschlagen")
+            if whatsapp_erlaubt:
+                wa_ok, wa_fehler = notify_workshop_whatsapp_mietanfrage(
+                    name, telefon, zeitraum, fahrzeug_label
+                )
+                wa_status = "gesendet" if wa_ok else ("; ".join(wa_fehler)[:400] or "fehlgeschlagen")
+            else:
+                wa_status = "nicht angefordert"
             try:
                 db = get_db()
                 db.execute(
@@ -44135,20 +45978,29 @@ def mietwagen_anfrage():
                 db.close()
             except Exception:
                 pass
-            return redirect(url_for("mietwagen_anfrage", ok=1))
+            session["mietwagen_anfrage_ref"] = int(anfrage_id)
+            schedule_change_backup("mietwagen-anfrage-erfolgreich")
+            return redirect(url_for("mietwagen_anfrage", ok=1, anfrage=anfrage_id))
     try:
         vorauswahl = int(request.form.get("mietfahrzeug_id") or request.args.get("fahrzeug") or 0)
     except (TypeError, ValueError):
         vorauswahl = 0
     # Bei Fehlversuch (POST landet wieder hier) bleiben die Eingaben erhalten
     formdata = request.form if request.method == "POST" else {}
+    try:
+        angefragte_ref = int(request.args.get("anfrage") or 0)
+    except (TypeError, ValueError):
+        angefragte_ref = 0
+    bestaetigte_ref = int(session.get("mietwagen_anfrage_ref") or 0)
+    gesendet = bool(request.args.get("ok")) and angefragte_ref > 0 and angefragte_ref == bestaetigte_ref
     return render_template(
         "mietwagen_anfrage.html",
         klassen=klassen,
         fahrzeuge=fahrzeuge,
         vorauswahl=vorauswahl,
         formdata=formdata,
-        gesendet=bool(request.args.get("ok")),
+        gesendet=gesendet,
+        anfrage_ref=str(angefragte_ref) if gesendet else "",
         heute_iso=date.today().isoformat(),
     )
 
@@ -44206,46 +46058,98 @@ def mietwagen_public_bild(bild_id):
 @app.route("/admin/mietanfrage/<int:anfrage_id>/uebernehmen", methods=["POST"])
 @admin_required
 def admin_mietanfrage_uebernehmen(anfrage_id):
-    db = get_db()
-    anfrage = db.execute(
-        "SELECT * FROM mietwagen_anfragen WHERE id = ?", (anfrage_id,)
-    ).fetchone()
-    db.close()
-    if not anfrage:
-        abort(404)
-    fahrzeug_id = request.form.get("mietfahrzeug_id")
-    if not fahrzeug_id:
+    try:
+        fahrzeug_id = int(request.form.get("mietfahrzeug_id") or 0)
+    except (TypeError, ValueError):
+        fahrzeug_id = 0
+    if fahrzeug_id <= 0:
         flash("Bitte ein Mietfahrzeug für diese Anfrage auswählen.", "warning")
         return redirect(url_for("admin_mietfahrzeuge") + "#anfragen")
-    start_datum = request.form.get("start_datum") or anfrage["start_datum"]
-    end_datum = request.form.get("end_datum") or anfrage["end_datum"]
-    if not mietfahrzeug_zeitraum_frei(fahrzeug_id, start_datum, end_datum):
-        flash("Das gewählte Fahrzeug ist im Zeitraum bereits belegt — bitte anderes Fahrzeug wählen.", "warning")
-        return redirect(url_for("admin_mietfahrzeuge") + "#anfragen")
+    db = get_db()
     try:
-        vid = create_mietvorgang(
-            fahrzeug_id,
-            kunde_name=anfrage["name"],
-            kunde_telefon=anfrage["telefon"],
-            kunde_email=anfrage["email"],
-            start_datum=start_datum,
-            end_datum=end_datum,
-            notiz=clean_text(
-                f"Homepage-Anfrage vom {anfrage['erstellt_am']}"
-                + (f" · Wunsch: {anfrage['klasse_wunsch']}" if anfrage["klasse_wunsch"] else "")
-                + (f" · {anfrage['nachricht']}" if anfrage["nachricht"] else "")
+        if USE_POSTGRES:
+            anfrage = db.execute(
+                "SELECT * FROM mietwagen_anfragen WHERE id=? FOR UPDATE",
+                (int(anfrage_id),),
+            ).fetchone()
+        else:
+            db.execute("BEGIN IMMEDIATE")
+            anfrage = db.execute(
+                "SELECT * FROM mietwagen_anfragen WHERE id=?", (int(anfrage_id),)
+            ).fetchone()
+        if not anfrage:
+            abort(404)
+        if clean_text(anfrage["status"]) != "offen" or int(anfrage["mietvorgang_id"] or 0):
+            raise ValueError("Diese Mietwagenanfrage wurde bereits bearbeitet.")
+
+        start_obj, end_obj = validiere_mietzeitraum(
+            request.form.get("start_datum") or anfrage["start_datum"],
+            request.form.get("end_datum") or anfrage["end_datum"],
+        )
+        validiere_mietkontakt(anfrage["telefon"], anfrage["email"])
+        if USE_POSTGRES:
+            fahrzeug = db.execute(
+                "SELECT id, aktiv, status FROM mietfahrzeuge WHERE id=? FOR UPDATE",
+                (fahrzeug_id,),
+            ).fetchone()
+        else:
+            fahrzeug = db.execute(
+                "SELECT id, aktiv, status FROM mietfahrzeuge WHERE id=?", (fahrzeug_id,)
+            ).fetchone()
+        if not fahrzeug:
+            raise ValueError("Das ausgewählte Mietfahrzeug wurde nicht gefunden.")
+        if not int(fahrzeug["aktiv"] or 0) or normalize_mietfahrzeug_status(fahrzeug["status"]) in {"wartung", "inaktiv"}:
+            raise ValueError("Das ausgewählte Mietfahrzeug ist aktuell nicht freigegeben.")
+        if not mietfahrzeug_zeitraum_frei_db(db, fahrzeug_id, start_obj, end_obj):
+            raise ValueError("Das Mietfahrzeug ist im gewählten Zeitraum bereits belegt.")
+
+        zeitpunkt = now_str()
+        cursor = db.execute(
+            """
+            INSERT INTO mietvorgaenge
+            (mietfahrzeug_id, auftrag_id, kunde_name, kunde_telefon, kunde_email,
+             whatsapp_erlaubt, start_datum, end_datum, rueckgabe_datum, status,
+             notiz, erstellt_am, geaendert_am)
+            VALUES (?, 0, ?, ?, ?, ?, ?, ?, '', 'aktiv', ?, ?, ?)
+            """,
+            (
+                fahrzeug_id,
+                clean_text(anfrage["name"]),
+                clean_text(anfrage["telefon"]),
+                clean_text(anfrage["email"]),
+                1 if int(anfrage["whatsapp_erlaubt"] or 0) else 0,
+                start_obj.strftime(DATE_FMT),
+                end_obj.strftime(DATE_FMT),
+                clean_text(
+                    f"Homepage-Anfrage vom {anfrage['erstellt_am']}"
+                    + (f" · Wunsch: {anfrage['klasse_wunsch']}" if anfrage["klasse_wunsch"] else "")
+                    + (f" · {anfrage['nachricht']}" if anfrage["nachricht"] else "")
+                ),
+                zeitpunkt,
+                zeitpunkt,
             ),
         )
+        vid = cursor.lastrowid
+        update_cursor = db.execute(
+            """
+            UPDATE mietwagen_anfragen
+            SET status='uebernommen', mietvorgang_id=?, erledigt_am=?
+            WHERE id=? AND status='offen' AND COALESCE(mietvorgang_id,0)=0
+            """,
+            (vid, zeitpunkt, int(anfrage_id)),
+        )
+        if int(update_cursor.rowcount or 0) != 1:
+            raise ValueError("Die Anfrage wurde parallel bereits übernommen. Bitte Seite neu laden.")
+        db.commit()
     except ValueError as exc:
+        db.rollback()
         flash(str(exc), "warning")
         return redirect(url_for("admin_mietfahrzeuge") + "#anfragen")
-    db = get_db()
-    db.execute(
-        "UPDATE mietwagen_anfragen SET status = 'uebernommen', mietvorgang_id = ?, erledigt_am = ? WHERE id = ?",
-        (vid, now_str(), anfrage_id),
-    )
-    db.commit()
-    db.close()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
     flash("Anfrage übernommen — hier ist der Mietvertrag: Daten prüfen, Kunde unterschreibt digital, dann per WhatsApp/E-Mail senden.", "success")
     return redirect(url_for("admin_mietvertrag", vorgang_id=vid))
 
@@ -44283,7 +46187,7 @@ def fahrzeugeinkauf_kontakt_anreichern(fz):
         f"{anrede} ich interessiere mich für Ihr Fahrzeug \"{titel}\""
         f"{' (' + preis + ')' if preis else ''} aus Ihrem Inserat. "
         "Ist es noch verfügbar? Wann könnte ich es besichtigen? "
-        "Mit freundlichen Grüßen, Christopher Gärtner, Gärtner Karosserie & Lack GmbH, Tel. +49 1522 7706694"
+        "Mit freundlichen Grüßen, Christopher Gärtner, Gärtner GmbH Karosserie + Lack, Tel. +49 1522 7706694"
     )
     fz["kontakt_tel_url"] = f"tel:{re.sub(r'[^0-9+]', '', telefon)}" if telefon else ""
     wa_key = whatsapp_number_key(telefon) if telefon else ""

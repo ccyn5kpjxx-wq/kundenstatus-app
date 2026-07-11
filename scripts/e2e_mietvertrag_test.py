@@ -38,14 +38,56 @@ def with_csrf(client, data=None):
 
 
 def png_dataurl():
-    from PIL import Image
+    from PIL import Image, ImageDraw
     buf = io.BytesIO()
-    Image.new("RGB", (200, 80), (255, 255, 255)).save(buf, "PNG")
+    bild = Image.new("RGB", (200, 80), (255, 255, 255))
+    zeichner = ImageDraw.Draw(bild)
+    zeichner.line([(20, 55), (55, 25), (90, 60), (135, 22), (180, 50)], fill=(20, 32, 48), width=4)
+    bild.save(buf, "PNG")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def draft_meta(vorgang_id):
+    vorgang = portal.get_mietvorgang(vorgang_id)
+    fahrzeug = portal.get_mietfahrzeug(vorgang["mietfahrzeug_id"])
+    auftrag = portal.mietvertrag_auftrag(vorgang)
+    return {
+        "expected_draft_hash": portal.mietvertrag_entwurf_hash(vorgang, fahrzeug, auftrag),
+        "expected_version": str(max(1, int(vorgang.get("vertrag_version") or 1))),
+        "expected_text_version": portal.MIETVERTRAG_TEXT_VERSION,
+        "kunde_name": str(vorgang.get("kunde_name") or ""),
+        "kunde_telefon": str(vorgang.get("kunde_telefon") or ""),
+        "start_datum": portal.iso_date(vorgang.get("start_datum")),
+        "end_datum": portal.iso_date(vorgang.get("end_datum")),
+    }
+
+
+def version_meta(vorgang_id, include_target=False):
+    vorgang = portal.get_mietvorgang(vorgang_id)
+    version_nummer = max(1, int(vorgang.get("vertrag_version") or 1))
+    version = portal.get_mietvertrag_version(vorgang_id, version_nummer)
+    meta = {
+        "expected_version": str(version_nummer),
+        "expected_snapshot_hash": str((version or {}).get("snapshot_sha256") or ""),
+        "expected_pdf_hash": str((version or {}).get("pdf_sha256") or ""),
+    }
+    if include_target:
+        weg, ziel = portal.mietvertrag_versandweg(vorgang, portal.mietvertrag_auftrag(vorgang))
+        meta.update(
+            {
+                "expected_versandweg": str(weg or ""),
+                "expected_versandziel": str(ziel or ""),
+            }
+        )
+    return meta
 
 
 def main():
     portal.app.config["TESTING"] = True
+    # Produktionsstandard bleibt gesperrt. Für den isolierten E2E-Test wird ein
+    # ausdrücklich versionierter, rechtlich freigegebener Testtext simuliert.
+    portal.MIETVERTRAG_RECHTLICH_FREIGEGEBEN = True
+    portal.MIETVERTRAG_TEXT_VERSION = "phase1-e2e-v1"
     portal.init_db()
     client = portal.app.test_client()
     with client.session_transaction() as s:
@@ -88,33 +130,50 @@ def main():
     felder = {f["name"]: f["default"] for f in portal.MIETVERTRAG_FELDER}
     felder["selbstbeteiligung_euro"] = "1.500,00"
     felder["kunde_adresse"] = "Musterstr. 12, 74821 Mosbach"
+    felder["geburtsdatum"] = "1985-04-12"
+    felder["ausweis_nr"] = "T22000129"
+    felder["fuehrerschein_nr"] = "MUST85ABC123"
+    felder["fuehrerschein_ausstellungsdatum"] = "2010-06-15"
+    felder["fuehrerschein_behoerde"] = "Landratsamt Neckar-Odenwald-Kreis"
+    felder["km_stand_uebergabe"] = "42150"
+    felder["mietpreis_tag"] = "35,00"
     r = client.post(f"/admin/mietvorgang/{vid}/vertrag/speichern",
-                    data=with_csrf(client, dict(felder, kunde_email="max@example.de")), follow_redirects=True)
+                    data=with_csrf(client, {
+                        **draft_meta(vid), **felder, "kunde_email": "max@example.de"
+                    }), follow_redirects=True)
     gespeichert = json.loads(portal.get_mietvorgang(vid)["vertrag_felder_json"] or "{}")
     report("Vertragsdaten gespeichert (SB 1.500)", gespeichert.get("selbstbeteiligung_euro") == "1.500,00")
     report("Status jetzt 'entwurf'", portal.get_mietvorgang(vid)["vertrag_status"] == "entwurf")
 
     # --- Security-Fix: ungültige E-Mail wird abgelehnt (alter Wert bleibt) ---
     client.post(f"/admin/mietvorgang/{vid}/vertrag/speichern",
-                data=with_csrf(client, dict(felder, kunde_email="kein-at-zeichen")), follow_redirects=True)
+                data=with_csrf(client, {
+                    **draft_meta(vid), **felder, "kunde_email": "kein-at-zeichen"
+                }), follow_redirects=True)
     report("Ungültige E-Mail wird abgelehnt", portal.get_mietvorgang(vid)["kunde_email"] == "max@example.de")
 
     # --- Security-Fix: Nicht-PNG-Unterschrift wird abgelehnt ---
     client.post(f"/admin/mietvorgang/{vid}/vertrag/unterschrift",
-                data=with_csrf(client, {"unterschrift_data": "data:image/png;base64,Zm9vYmFy"}), follow_redirects=True)
+                data=with_csrf(client, {
+                    **draft_meta(vid), "unterschrift_data": "data:image/png;base64,Zm9vYmFy"
+                }), follow_redirects=True)
     v_nope = portal.get_mietvorgang(vid)
     report("Nicht-PNG-Unterschrift abgelehnt (Status bleibt entwurf)",
            not v_nope["unterschrift_stored"] and v_nope["vertrag_status"] == "entwurf")
 
     # --- Unterschrift speichern ---
     r = client.post(f"/admin/mietvorgang/{vid}/vertrag/unterschrift",
-                    data=with_csrf(client, {"unterschrift_data": png_dataurl(),
+                    data=with_csrf(client, {**draft_meta(vid), "unterschrift_data": png_dataurl(),
                                             "unterschrift_name": "Max Mustermann", "unterschrift_ort": "Mosbach"}),
                     follow_redirects=True)
     v = portal.get_mietvorgang(vid)
     report("Unterschrift gespeichert + Status 'unterschrieben'",
            bool(v["unterschrift_stored"]) and v["vertrag_status"] == "unterschrieben")
     report("Snapshot eingefroren", bool(v["vertrag_snapshot_json"]))
+    versionen = portal.list_mietvertrag_versionen(vid)
+    report("Fixierte Vertragsversion mit Prüfsummen gespeichert",
+           len(versionen) == 1 and bool(versionen[0]["snapshot_sha256"])
+           and bool(versionen[0]["pdf_sha256"]) and bool(versionen[0]["pdf_base64"]))
 
     rimg = client.get(f"/admin/mietvorgang/{vid}/unterschrift.png")
     report("Unterschrift-Bild wird ausgeliefert",
@@ -131,25 +190,28 @@ def main():
     rpdf.close()
 
     # --- Bestätigen ---
-    r = client.post(f"/admin/mietvorgang/{vid}/vertrag/bestaetigen", data=with_csrf(client), follow_redirects=True)
+    r = client.post(f"/admin/mietvorgang/{vid}/vertrag/bestaetigen",
+                    data=with_csrf(client, version_meta(vid)), follow_redirects=True)
     report("Vertrag bestätigt", portal.get_mietvorgang(vid)["vertrag_status"] == "bestaetigt")
 
     # --- Versandweg E-Mail (SMTP nicht konfiguriert -> Warnung, kein Crash) ---
     weg, ziel = portal.mietvertrag_versandweg(portal.get_mietvorgang(vid), portal.get_auftrag(aid))
     report("Versandweg = E-Mail (E-Mail hinterlegt)", weg == "email" and ziel == "max@example.de")
-    r = client.post(f"/admin/mietvorgang/{vid}/vertrag/senden", data=with_csrf(client), follow_redirects=True)
+    r = client.post(f"/admin/mietvorgang/{vid}/vertrag/senden",
+                    data=with_csrf(client, version_meta(vid, include_target=True)), follow_redirects=True)
     report("Senden-Route ohne Crash (SMTP aus)", r.status_code == 200)
 
     # --- Reine Vermietung: kein Auftrag, nur Handynummer ---
     fid2 = portal.create_mietfahrzeug(kennzeichen="MOS-GR 91", bezeichnung="VW Up", fahrzeugklasse="Kleinwagen", tagessatz="30")
     client.post(f"/admin/mietfahrzeuge/{fid2}/vermieten", data=with_csrf(client, {
-        "kunde_name": "Erika Beispiel", "kunde_telefon": "0151 99887766", "start_datum": heute,
+        "kunde_name": "Erika Beispiel", "kunde_telefon": "0151 99887766",
+        "whatsapp_erlaubt": "1", "start_datum": heute, "end_datum": heute,
     }), follow_redirects=True)
     vid2 = portal.get_mietfahrzeug(fid2)["aktiver_vorgang"]["id"]
     seite2 = client.get(f"/admin/mietvorgang/{vid2}/vertrag").get_data(as_text=True)
     report("Reine Vermietung: kein QR/Statuslink", "qr.svg" not in seite2 and "Reine Vermietung" in seite2)
     weg2, _ = portal.mietvertrag_versandweg(portal.get_mietvorgang(vid2), None)
-    report("Versandweg = WhatsApp (nur Handynummer)", weg2 == "whatsapp")
+    report("Versandweg = WhatsApp (Handynummer + ausdrücklicher Wunsch)", weg2 == "whatsapp")
     rpdf2 = client.get(f"/admin/mietvorgang/{vid2}/vertrag.pdf")
     pb2 = rpdf2.get_data()
     report("Vertrag-PDF (reine Vermietung, ohne QR) erzeugt",

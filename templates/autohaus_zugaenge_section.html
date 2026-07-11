@@ -3,7 +3,7 @@
     <div>
       <div class="badge-soft mb-2">Zugänge</div>
       <h4 class="mb-1">Autohaus-Zugänge</h4>
-      <p>Portalpfad und Zugangscode für bestehende Autohäuser.</p>
+      <p>Portalpfad und Zugangscode für bestehende Autohäuser. Bei den Codes wird zwischen Groß- und Kleinschreibung unterschieden.</p>
     </div>
     <a href="{{ url_for('admin_rundmail') }}" class="btn btn-soft btn-sm">Rundmail an Autohäuser</a>
   </div>
@@ -18,7 +18,7 @@
         </div>
         <div class="text-lg-end">
           <code>{{ h['portal_url'] }}</code>
-          <div class="small text-muted">Code: <strong>{{ h['zugangscode'] }}</strong></div>
+          <div class="small text-muted">Zugangscode: <strong>{{ 'eingerichtet' if h['zugangscode'] else 'nicht eingerichtet' }}</strong></div>
         </div>
         <a href="{{ h['portal_url'] }}" target="_blank" class="btn btn-soft btn-sm">Lokal öffnen</a>
         <form method="POST" action="{{ url_for('admin_autohaus_koordinator_email', autohaus_id=h['id']) }}" class="d-flex gap-2 align-items-center flex-wrap w-100 m-0">
@@ -31,10 +31,13 @@
         <form method="POST" action="{{ url_for('admin_autohaus_zugangscode', autohaus_id=h['id']) }}" class="d-flex gap-2 align-items-center flex-wrap w-100 m-0">
           {{ csrf_field()|safe }}
           <span class="small text-muted">Zugangscode (Passwort fürs Portal):</span>
-          <input type="text" name="zugangscode" class="form-control form-control-sm" style="max-width: 220px;" placeholder="Neuer Code (leer = automatisch)">
+          <label class="visually-hidden" for="zugangscode-{{ h['id'] }}">Neuer Zugangscode</label>
+          <input id="zugangscode-{{ h['id'] }}" type="password" name="zugangscode" class="form-control form-control-sm" style="max-width: 220px;" placeholder="Neuer Code (leer = automatisch)" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" aria-describedby="zugangscode-hinweis-{{ h['id'] }}">
+          <label class="visually-hidden" for="zugangscode-bestaetigung-{{ h['id'] }}">Neuen Zugangscode bestätigen</label>
+          <input id="zugangscode-bestaetigung-{{ h['id'] }}" type="password" name="zugangscode_bestaetigung" class="form-control form-control-sm" style="max-width: 220px;" placeholder="Code wiederholen" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false">
           <button type="submit" class="btn btn-soft btn-sm" data-no-loading="true">Code ändern</button>
-          <span class="small text-muted">aktuell: <strong>{{ h['zugangscode'] or '— (kein Login möglich)' }}</strong></span>
-          <span class="small text-muted w-100">Neuer Code gilt sofort — der bisherige wird ungültig. Leer lassen = sicherer 8-Zeichen-Code.</span>
+          <span class="small text-muted">Status: <strong>{{ 'Code eingerichtet' if h['zugangscode'] else 'kein Login möglich' }}</strong></span>
+          <span id="zugangscode-hinweis-{{ h['id'] }}" class="small text-muted w-100">Ein manuell eingegebener Code muss zweimal exakt übereinstimmen. Nach dem Speichern wird er nur einmal in der Erfolgsmeldung gezeigt. Leer lassen = automatisch erzeugter 8-Zeichen-Code.</span>
         </form>
       </div>
       {% endfor %}

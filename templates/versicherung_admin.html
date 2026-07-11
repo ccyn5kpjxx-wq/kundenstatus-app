@@ -34,7 +34,10 @@
       <h1 class="mb-2">Versicherungsportal</h1>
       <p>Eigene Schadenfälle, Zuteilungen, Rückfragen und Freigaben für Versicherungen, ohne den Autohausbereich zu verändern.</p>
     </div>
-    <a href="{{ url_for('admin_versicherungsschaden') }}" class="btn btn-brand btn-lg">Schadenfall aufnehmen</a>
+    <div class="d-flex gap-2 flex-wrap">
+      {% if schaden_vorschau_aktiv %}<a href="{{ url_for('schadenmeldung_vorschau') }}" class="btn btn-soft btn-lg" target="_blank" rel="noopener">Lokale Kundenvorschau</a>{% endif %}
+      <a href="{{ url_for('admin_versicherungsschaden') }}" class="btn btn-brand btn-lg">Schadenfall aufnehmen</a>
+    </div>
   </div>
   <div class="insurance-grid">
     <div class="insurance-metric"><span>Aktive Fälle</span><strong>{{ schadenfaelle|length }}</strong></div>

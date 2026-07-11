@@ -13,10 +13,11 @@
 </div>
 
 <div class="page-card p-4 mb-4">
-  <form method="get" action="{{ url_for('admin_ersatzfahrzeug') }}" class="row g-3 align-items-end">
+  <form method="post" action="{{ url_for('admin_ersatzfahrzeug') }}" class="row g-3 align-items-end" data-mietzeitraum>
+    {{ csrf_field()|safe }}
     <div class="col-md-4">
-      <label class="form-label">Zu Reparatur-Auftrag (optional)</label>
-      <select name="auftrag_id" class="form-select">
+      <label class="form-label" for="ersatz-auftrag">Zu Reparatur-Auftrag (optional)</label>
+      <select id="ersatz-auftrag" name="auftrag_id" class="form-select">
         <option value="">– reine Vermietung (ohne Auftrag) –</option>
         {% for a in auftraege %}
         <option value="{{ a['id'] }}" {% if a['id'] == auftrag_id %}selected{% endif %}>{{ a['kennzeichen'] or '?' }} · {{ a['kunde_name'] or a['fahrzeug'] or 'Auftrag' }}</option>
@@ -25,22 +26,30 @@
       <div class="form-text">Bei verknüpftem Auftrag bekommt der Kunde im Vertrag den Status-QR-Code.</div>
     </div>
     <div class="col-md-2">
-      <label class="form-label">Reparatur-Start</label>
-      <input type="date" name="start" class="form-control" value="{{ start or heute_iso }}" required>
+      <label class="form-label" for="ersatz-start">Reparatur-Start *</label>
+      <input id="ersatz-start" type="date" name="start" class="form-control" value="{{ start or heute_iso }}" min="{{ heute_iso }}" required>
     </div>
     <div class="col-md-2">
-      <label class="form-label">Reparatur-Ende</label>
-      <input type="date" name="end" class="form-control" value="{{ end or '' }}">
+      <label class="form-label" for="ersatz-ende">Reparatur-Ende *</label>
+      <input id="ersatz-ende" type="date" name="end" class="form-control" value="{{ end or '' }}" min="{{ start or heute_iso }}" required>
     </div>
     <div class="col-md-4">
-      <label class="form-label">Kunde (falls ohne Auftrag)</label>
-      <input type="text" name="kunde_name" class="form-control" value="{{ kunde_name or '' }}" placeholder="Name">
+      <label class="form-label" for="ersatz-kunde-name">Kunde (falls ohne Auftrag)</label>
+      <input id="ersatz-kunde-name" type="text" name="kunde_name" class="form-control" value="{{ kunde_name or '' }}" autocomplete="name">
     </div>
     <div class="col-md-4">
-      <input type="text" name="kunde_telefon" class="form-control" value="{{ kunde_telefon or '' }}" placeholder="Telefon (für WhatsApp)">
+      <label class="form-label" for="ersatz-kunde-telefon">Telefon</label>
+      <input id="ersatz-kunde-telefon" type="tel" name="kunde_telefon" class="form-control" value="{{ kunde_telefon or '' }}" autocomplete="tel">
     </div>
     <div class="col-md-4">
-      <input type="email" name="kunde_email" class="form-control" value="{{ kunde_email or '' }}" placeholder="E-Mail (für Vertragsversand)">
+      <label class="form-label" for="ersatz-kunde-email">E-Mail</label>
+      <input id="ersatz-kunde-email" type="email" name="kunde_email" class="form-control" value="{{ kunde_email or '' }}" autocomplete="email">
+    </div>
+    <div class="col-md-4 d-flex align-items-end">
+      <div class="form-check mb-2">
+        <input id="ersatz-whatsapp" class="form-check-input" type="checkbox" name="whatsapp_erlaubt" value="1" {% if whatsapp_erlaubt %}checked{% endif %}>
+        <label class="form-check-label" for="ersatz-whatsapp">Kunde wünscht Kontakt per WhatsApp</label>
+      </div>
     </div>
     <div class="col-md-4">
       <button type="submit" class="btn btn-brand w-100">Freie Fahrzeuge anzeigen</button>
@@ -87,6 +96,7 @@
             <input type="hidden" name="kunde_name" value="{{ kunde_name or '' }}">
             <input type="hidden" name="kunde_telefon" value="{{ kunde_telefon or '' }}">
             <input type="hidden" name="kunde_email" value="{{ kunde_email or '' }}">
+            <input type="hidden" name="whatsapp_erlaubt" value="{{ '1' if whatsapp_erlaubt else '0' }}">
             <button type="submit" class="btn btn-brand btn-sm w-100">Buchen &amp; Vertrag</button>
           </form>
         </div>
@@ -101,5 +111,23 @@
 {% else %}
 <div class="page-card p-4 text-muted">Bitte oben den Reparaturzeitraum eingeben und „Freie Fahrzeuge anzeigen" klicken.</div>
 {% endif %}
+
+<script>
+  (() => {
+    const form = document.querySelector('[data-mietzeitraum]');
+    const start = form?.querySelector('[name="start"]');
+    const ende = form?.querySelector('[name="end"]');
+    if (!start || !ende) return;
+    const abgleichen = () => {
+      ende.min = start.value || '{{ heute_iso }}';
+      ende.setCustomValidity(start.value && ende.value && ende.value < start.value
+        ? 'Das Reparatur-Ende darf nicht vor dem Reparatur-Start liegen.'
+        : '');
+    };
+    start.addEventListener('change', abgleichen);
+    ende.addEventListener('change', abgleichen);
+    abgleichen();
+  })();
+</script>
 
 {% endblock %}

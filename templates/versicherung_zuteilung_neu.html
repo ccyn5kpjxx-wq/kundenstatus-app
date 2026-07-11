@@ -87,7 +87,7 @@
   <main class="shell">
     {% set is_preview = rollen_vorschau is defined and rollen_vorschau %}
     {% set vorschau = vorschau_daten if vorschau_daten is defined else {} %}
-    {% set werkstatt_name = "Lackierzentrum Gärtner Karosserie & Lack GmbH" %}
+    {% set werkstatt_name = "Lackierzentrum Gärtner GmbH Karosserie + Lack" %}
     {% set selected_werkstatt = request.args.get('werkstatt', 'gaertner') %}
     {% set back_url = url_for('admin_versicherung') if is_preview else url_for('versicherung_dashboard', slug=versicherung['slug']) %}
     {% with messages = get_flashed_messages(with_categories=true) %}

@@ -4,7 +4,7 @@
 Spielt den kompletten Admin-Ablauf gegen einen Flask-Testclient durch:
 Fahrzeug anlegen -> in der Liste sehen -> an Kunden vergeben ->
 Status/Belegung pruefen -> Doppelvergabe verhindern -> zuruecknehmen ->
-wieder verfuegbar -> bearbeiten -> Nav-Badge -> loeschen.
+wieder verfuegbar -> bearbeiten -> Nav-Badge -> stornieren/archivieren.
 
 Laeuft auf einer eigenen Test-DB, keine Live-Daten.
 """
@@ -118,6 +118,7 @@ def main():
     r = client.post(f"/admin/mietfahrzeuge/{fid}/vermieten", data=with_csrf(client, {
         "kunde_name": "Zweiter Kunde",
         "start_datum": heute.isoformat(),
+        "end_datum": in_5_tagen,
     }), follow_redirects=True)
     report("Doppelvergabe wird abgelehnt",
            "bereits belegt" in r.get_data(as_text=True))
@@ -148,9 +149,16 @@ def main():
            fz["effektiver_status"] == "reserviert", fz["effektiver_status"])
     report("Reservierung zählt NICHT als unterwegs",
            portal.mietfahrzeuge_unterwegs_anzahl() == 0)
-    # Reservierung wieder entfernen
+    # Reservierung stornieren — Datensatz bleibt als Nachweis erhalten
     res_id = fz["naechste_reservierung"]["id"]
-    client.post(f"/admin/mietvorgang/{res_id}/loeschen", data=with_csrf(client), follow_redirects=True)
+    client.post(
+        f"/admin/mietvorgang/{res_id}/loeschen",
+        data=with_csrf(client, {"storno_grund": "Testreservierung aufgehoben"}),
+        follow_redirects=True,
+    )
+    storniert = portal.get_mietvorgang(res_id)
+    report("Reservierung bleibt storniert erhalten",
+           storniert is not None and storniert["status"] == "storniert")
 
     # 8) Bearbeiten
     r = client.post(f"/admin/mietfahrzeuge/{fid}/bearbeiten", data=with_csrf(client, {
@@ -221,21 +229,26 @@ def main():
     report("Bilddatei physisch entfernt", not (pfad_del and pfad_del.exists()))
     report("Verbleibendes Bild ist Titelbild", rest and rest[0]["ist_titelbild"] == 1)
 
-    # Merke die Datei des verbleibenden Bildes -> muss beim Fahrzeug-Loeschen mit weg
+    # Merke die Datei des verbleibenden Bildes -> muss beim Archivieren erhalten bleiben
     rest_pfad = portal.upload_file_path(rest[0])
 
-    # 9) Loeschen (Anker-Karte muss verschwinden; Kennzeichen steht auch als
-    #    Formular-Platzhalter auf der Seite -> deshalb auf die Karte pruefen)
-    r = client.post(f"/admin/mietfahrzeuge/{fid}/loeschen", data=with_csrf(client), follow_redirects=True)
+    # 9) Archivieren: Fahrzeug, Bilder und Vorgänge bleiben revisionssicher erhalten
+    r = client.post(
+        f"/admin/mietfahrzeuge/{fid}/loeschen",
+        data=with_csrf(client, {"archivgrund": "Testfahrzeug ausgemustert"}),
+        follow_redirects=True,
+    )
     seite = r.get_data(as_text=True)
-    report("Fahrzeug-Karte gelöscht",
-           f'id="fahrzeug-{fid}"' not in seite and "Comfortline" not in seite)
-    report("DB wieder leer", len(portal.list_mietfahrzeuge()) == 0)
+    archiviert = portal.get_mietfahrzeug(fid)
+    report("Fahrzeug archiviert statt gelöscht",
+           archiviert is not None and not archiviert["aktiv"] and archiviert["basis_status"] == "inaktiv")
+    report("Archivgrund sichtbar", "Testfahrzeug ausgemustert" in seite)
+    report("Vorgänge bleiben erhalten", len(portal.list_mietvorgaenge(fid)) >= 2)
     rest_bilder_n = len(portal.list_mietfahrzeug_bilder(fid))
-    datei_weg = not (rest_pfad and rest_pfad.exists())
-    report("Bilder mit dem Fahrzeug entfernt (DB + Platte)",
-           rest_bilder_n == 0 and datei_weg,
-           f"DB-Bilder={rest_bilder_n}, Datei-weg={datei_weg}, Pfad={rest_pfad}")
+    datei_da = bool(rest_pfad and rest_pfad.exists())
+    report("Bilder bleiben beim Archivieren erhalten",
+           rest_bilder_n == 1 and datei_da,
+           f"DB-Bilder={rest_bilder_n}, Datei-da={datei_da}, Pfad={rest_pfad}")
 
     # Abschluss
     print()

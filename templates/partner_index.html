@@ -73,8 +73,13 @@
             name="password"
             class="form-control form-control-lg"
             autocomplete="current-password"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            aria-describedby="partner-code-hinweis"
             required
           >
+          <div id="partner-code-hinweis" class="form-text mt-2">Bitte exakt wie mitgeteilt eingeben; Groß- und Kleinschreibung werden unterschieden.</div>
         </div>
         <button type="submit" class="btn btn-dark w-100 btn-lg">Einloggen</button>
       </form>

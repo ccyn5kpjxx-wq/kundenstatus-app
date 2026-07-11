@@ -208,19 +208,29 @@
   }
   @media (max-width: 575.98px) {
     .ki-assistent {
-      left: 14px;
-      right: 14px;
-      bottom: 14px;
+      left: auto;
+      right: 12px;
+      bottom: 12px;
     }
     .ki-assistent-toggle {
-      width: 100%;
+      width: 52px;
+      min-width: 52px;
+      padding: 0 8px;
       justify-content: center;
     }
+    .ki-assistent-toggle > span:last-child {
+      display: none;
+    }
     .ki-assistent-panel {
-      left: 0;
-      right: 0;
-      width: 100%;
-      bottom: 64px;
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      width: auto;
+      bottom: 76px;
+      max-height: calc(100dvh - 100px);
+    }
+    .ki-assistent-history {
+      max-height: min(280px, calc(100dvh - 410px));
     }
   }
 </style>
@@ -276,7 +286,7 @@
       <div class="ki-assistent-voice-status" data-ki-voice-status hidden></div>
     </form>
   </div>
-  <button type="button" class="ki-assistent-toggle" data-ki-toggle aria-expanded="false">
+  <button type="button" class="ki-assistent-toggle" data-ki-toggle aria-expanded="false" aria-label="KI-Helfer öffnen">
     <span class="ki-assistent-toggle-mark">KI</span>
     <span>Wie kann ich Ihnen helfen?</span>
   </button>

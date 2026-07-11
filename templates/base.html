@@ -404,7 +404,7 @@
       <a class="nav-link" href="{{ url_for('admin_lieferanten') }}">Lieferanten</a>
       <a class="nav-link" href="{{ url_for('dashboard') }}#auftraege">Lackierportal</a>
       <a class="nav-link" href="{{ url_for('neuer_auftrag') }}">Fahrzeug neu</a>
-      <a class="nav-link" href="{{ url_for('admin_versicherung') }}">Versicherungsportal{% set versicherung_badge = admin_versicherung_count() %}{% if versicherung_badge %}<span class="nav-badge">{{ versicherung_badge }}</span>{% endif %}</a>
+      <a class="nav-link" href="{{ url_for('admin_versicherungsschaden') }}">Versicherungsportal{% set versicherung_badge = admin_versicherung_count() %}{% if versicherung_badge %}<span class="nav-badge">{{ versicherung_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('admin_postfach') }}">Postfach{% set postfach_badge = admin_postfach_count() %}{% if postfach_badge %}<span class="nav-badge">{{ postfach_badge }}</span>{% endif %}</a>
       <a class="nav-link" href="{{ url_for('admin_zugaenge') }}">Zugänge</a>
       <a class="nav-link" href="{{ url_for('partner_login') }}" target="_blank">Autohaus-Portal</a>

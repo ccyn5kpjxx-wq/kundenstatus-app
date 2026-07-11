@@ -7,9 +7,10 @@
   <div>
     <div class="badge-soft mb-3">Mietfahrzeuge · Vertrag</div>
     <h1 class="mb-2">Mietvertrag</h1>
-    <p class="mb-0">{{ fahrzeug.bezeichnung or fahrzeug.kennzeichen }} · {{ fahrzeug.kennzeichen }} → {{ vorgang.kunde_name or 'Kunde' }}</p>
+    <p class="mb-0">{{ kontext.fahrzeug_bezeichnung }} · {{ kontext.kennzeichen }} → {{ kontext.kunde_name }}</p>
   </div>
   <div class="d-flex gap-2 align-items-center flex-wrap">
+    <span class="badge text-bg-dark">Version {{ vorgang.vertrag_version or 1 }}</span>
     {% if status == 'bestaetigt' %}<span class="badge text-bg-success">{{ status_label }}</span>
     {% elif status == 'unterschrieben' %}<span class="badge text-bg-warning">{{ status_label }}</span>
     {% elif status == 'entwurf' %}<span class="badge text-bg-info">{{ status_label }}</span>
@@ -18,9 +19,46 @@
   </div>
 </div>
 
-<div class="page-card p-3 mb-4" style="background:#faf3e6;">
-  <div class="small text-muted"><strong>Entwurf / Muster.</strong> Der Vertragstext ist noch nicht rechtlich freigegeben — vor dem echten Einsatz einmal durch GF/Syndikus prüfen lassen.</div>
+{% if not rechtlich_freigegeben %}
+<div class="page-card p-3 mb-4 border border-danger" style="background:#fff1f0;" role="alert">
+  <div class="fw-bold text-danger mb-1">Rechtliche Sperre aktiv</div>
+  <div class="small">
+    Dieser Vertragstext ist noch nicht für den echten Einsatz freigegeben. Unterschrift, Bestätigung und Versand sind technisch gesperrt.
+    Der PDF-Ausdruck bleibt ein Entwurf/Muster.
+  </div>
+  <div class="small text-muted mt-2">Konfigurierter Textstand: <code>{{ vertrag_text_version or 'nicht gesetzt' }}</code></div>
+  {% if aktuelle_version %}
+  <div class="small text-muted mt-1">
+    Gespeicherte Version {{ aktuelle_version.version }} · Textstand <code>{{ aktuelle_version.text_version or 'unbekannt' }}</code>
+    {% if aktuelle_version.pdf_sha256 %}· PDF-Hash <code title="{{ aktuelle_version.pdf_sha256 }}">{{ aktuelle_version.pdf_sha256[:16] }}…</code>{% endif %}
+  </div>
+  {% endif %}
 </div>
+{% elif version_integritaetsfehler %}
+<div class="page-card p-3 mb-4 border border-danger" style="background:#fff1f0;" role="alert">
+  <div class="fw-bold text-danger mb-1">Integritätsprüfung fehlgeschlagen</div>
+  <div class="small">{{ version_integritaetsfehler }}</div>
+  <div class="small text-muted mt-2">Diese Version darf weder bestätigt noch versendet werden. Legen Sie für eine Korrektur eine neue Vertragsversion an.</div>
+</div>
+{% elif fixiert and aktuelle_version %}
+<div class="page-card p-3 mb-4 border border-success" style="background:#edf8f1;">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div>
+      <div class="fw-bold text-success mb-1">Fixierte Vertragsversion {{ aktuelle_version.version }}</div>
+      <div class="small">Die Anwendung sperrt Vertragsdaten, Unterschrift und PDF gegen nachträgliches Bearbeiten. Prüfsummen helfen, unbeabsichtigte Änderungen zu erkennen; sie ersetzen kein externes, manipulationssicheres Archiv.</div>
+    </div>
+    <div class="small text-muted text-md-end">
+      <div>Textstand: <code>{{ aktuelle_version.text_version or vorgang.vertrag_text_version or '—' }}</code></div>
+      {% if aktuelle_version.pdf_sha256 %}<div>PDF-Hash: <code title="{{ aktuelle_version.pdf_sha256 }}">{{ aktuelle_version.pdf_sha256[:16] }}…</code></div>{% endif %}
+      {% if aktuelle_version.snapshot_sha256 %}<div>Snapshot-Hash: <code title="{{ aktuelle_version.snapshot_sha256 }}">{{ aktuelle_version.snapshot_sha256[:16] }}…</code></div>{% endif %}
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="page-card p-3 mb-4 border border-success" style="background:#edf8f1;">
+  <div class="small"><strong>Rechtlich freigegebener Textstand:</strong> <code>{{ vertrag_text_version }}</code>. Nach der Unterschrift wird Version {{ vorgang.vertrag_version or 1 }} in der Anwendung fixiert und einschließlich PDF und Prüfsummen dokumentiert.</div>
+</div>
+{% endif %}
 
 <!-- Ablauf: 1 Daten → 2 Unterschrift → 3 Bestätigen -->
 <div class="d-flex align-items-center gap-2 mb-4 flex-wrap">
@@ -36,7 +74,10 @@
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
     <div>
       <h2 class="h5 mb-1">Vor Fahrzeugübergabe zu zahlen</h2>
-      <div class="small text-muted">Mietzeit {{ vorgang.start_label or '—' }} – {{ vorgang.end_label or 'offen' }} · rechnet sich beim Tippen unten automatisch neu</div>
+      <div class="small text-muted">
+        Mietzeit {{ kontext.start_datum or '—' }} – {{ kontext.end_datum or 'offen' }}
+        {% if fixiert %}· Werte aus der fixierten Vertragsversion{% else %}· rechnet sich beim Tippen unten automatisch neu{% endif %}
+      </div>
     </div>
     <table class="mb-0" style="min-width:280px;">
       <tr>
@@ -59,26 +100,61 @@
 <div class="row g-4">
   <!-- Linke Spalte: Daten + Vorschau -->
   <div class="col-lg-7">
-    <details class="page-card p-4 mb-3" {% if status in ['', 'entwurf'] %}open{% endif %}>
-      <summary class="h5 mb-0" style="cursor:pointer;">Vertragsdaten ausfüllen</summary>
-      <form method="POST" action="{{ url_for('admin_mietvertrag_speichern', vorgang_id=vorgang.id) }}" class="row g-2 mt-1">
+    <details class="page-card p-4 mb-3" {% if status in ['', 'entwurf'] or fixiert %}open{% endif %}>
+      <summary class="h5 mb-0" style="cursor:pointer;">{{ 'Fixierte Vertragsdaten' if fixiert else 'Vertragsdaten ausfüllen' }}</summary>
+      {% if fixiert %}
+      <div class="small text-muted mt-2">Diese Angaben gehören zur unterschriebenen Version {{ vorgang.vertrag_version or 1 }} und können nicht mehr bearbeitet werden.</div>
+      {% endif %}
+      <form method="POST" action="{{ url_for('admin_mietvertrag_speichern', vorgang_id=vorgang.id) }}" class="row g-2 mt-1" id="vertragDatenForm">
         {{ csrf_field()|safe }}
-        <div class="col-md-6">
-          <label class="form-label small mb-0">E-Mail des Kunden</label>
-          <input type="email" name="kunde_email" class="form-control form-control-sm" value="{{ vorgang.kunde_email or '' }}" placeholder="kunde@example.de">
-        </div>
-        {% for f in felder_def %}
-        <div class="col-md-6">
-          <label class="form-label small mb-0">{{ f.label }}</label>
-          <input type="{% if f.typ == 'datum' %}text{% else %}text{% endif %}" name="{{ f.name }}" class="form-control form-control-sm"
-                 value="{{ felder_werte.get(f.name, '') }}"
-                 {% if f.typ in ['euro','zahl'] %}inputmode="decimal"{% endif %}>
-        </div>
-        {% endfor %}
-        <div class="col-12 mt-2">
-          <button type="submit" class="btn btn-sm btn-brand">Vertragsdaten speichern</button>
-          <span class="small text-muted ms-2">Leere Felder nutzen die Standardwerte.</span>
-        </div>
+        <input type="hidden" name="expected_draft_hash" value="{{ entwurf_hash }}">
+        <input type="hidden" name="expected_version" value="{{ vorgang.vertrag_version or 1 }}">
+        <input type="hidden" name="expected_text_version" value="{{ vertrag_text_version }}">
+        <fieldset class="row g-2 m-0 p-0 border-0" {% if fixiert %}disabled{% endif %}>
+          <div class="col-md-6">
+            <label for="vertrag_kunde_name" class="form-label small mb-0">Name des Kunden *</label>
+            <input id="vertrag_kunde_name" type="text" name="kunde_name" class="form-control form-control-sm" value="{{ kernfelder_werte.kunde_name }}" required autocomplete="name">
+          </div>
+          <div class="col-md-6">
+            <label for="vertrag_kunde_telefon" class="form-label small mb-0">Telefon</label>
+            <input id="vertrag_kunde_telefon" type="tel" name="kunde_telefon" class="form-control form-control-sm" value="{{ kernfelder_werte.kunde_telefon }}" autocomplete="tel">
+          </div>
+          <div class="col-md-6">
+            <label for="vertrag_start_datum" class="form-label small mb-0">Mietbeginn *</label>
+            <input id="vertrag_start_datum" type="date" name="start_datum" class="form-control form-control-sm" value="{{ kernfelder_werte.start_datum }}" required>
+          </div>
+          <div class="col-md-6">
+            <label for="vertrag_end_datum" class="form-label small mb-0">Geplante Rückgabe *</label>
+            <input id="vertrag_end_datum" type="date" name="end_datum" class="form-control form-control-sm" value="{{ kernfelder_werte.end_datum }}" min="{{ kernfelder_werte.start_datum }}" required>
+          </div>
+          <div class="col-md-6">
+            <label for="vertrag_kunde_email" class="form-label small mb-0">E-Mail des Kunden</label>
+            <input id="vertrag_kunde_email" type="email" name="kunde_email" class="form-control form-control-sm" value="{{ kontext.kunde_email if fixiert else (vorgang.kunde_email or '') }}" placeholder="kunde@example.de" {% if fixiert %}aria-readonly="true"{% endif %}>
+          </div>
+          <div class="col-md-6 d-flex align-items-end">
+            <div class="form-check mb-1">
+              <input id="vertrag_whatsapp_erlaubt" class="form-check-input" type="checkbox" name="whatsapp_erlaubt" value="1" {% if (kontext.whatsapp_erlaubt if fixiert else vorgang.whatsapp_erlaubt) %}checked{% endif %}>
+              <label class="form-check-label small" for="vertrag_whatsapp_erlaubt">Kunde wünscht Kontakt per WhatsApp</label>
+              <div class="form-text">Ohne diese ausdrückliche Auswahl wird kein WhatsApp-Kontakt vorbereitet.</div>
+            </div>
+          </div>
+          {% for f in felder_def %}
+          <div class="col-md-6">
+            <label for="vertrag_{{ f.name }}" class="form-label small mb-0">{{ f.label }}{% if f.name in pflichtfelder %} *{% endif %}</label>
+            <input id="vertrag_{{ f.name }}" type="{{ 'date' if f.typ == 'datum' else ('number' if f.typ == 'zahl' else 'text') }}" name="{{ f.name }}" class="form-control form-control-sm"
+                   value="{{ felder_werte.get(f.name, '') }}"
+                   {% if f.typ == 'euro' %}inputmode="decimal" placeholder="z. B. 500,00"{% elif f.typ == 'zahl' %}min="0" step="1" inputmode="numeric"{% endif %}
+                   {% if f.name in pflichtfelder %}required{% endif %}
+                   {% if fixiert %}aria-readonly="true"{% endif %}>
+          </div>
+          {% endfor %}
+          {% if not fixiert %}
+          <div class="col-12 mt-2">
+            <button type="submit" class="btn btn-sm btn-brand">Vertragsdaten speichern</button>
+            <span class="small text-muted ms-2">Mit * markierte Angaben müssen vor der Unterschrift vollständig und plausibel sein.</span>
+          </div>
+          {% endif %}
+        </fieldset>
       </form>
     </details>
 
@@ -94,7 +170,11 @@
         </div>
         {% endfor %}
       </div>
-      <a class="btn btn-soft btn-sm mt-3" href="{{ url_for('admin_mietvertrag_pdf', vorgang_id=vorgang.id) }}" target="_blank">📄 Als PDF öffnen / drucken</a>
+      {% if not fixiert or (aktuelle_version and aktuelle_version.pdf_base64 and aktuelle_version.pdf_sha256) %}
+      <a class="btn btn-soft btn-sm mt-3" href="{{ url_for('admin_mietvertrag_pdf', vorgang_id=vorgang.id) }}" target="_blank" rel="noopener">📄 {{ 'Fixiertes PDF öffnen' if fixiert else 'Entwurfs-PDF öffnen / drucken' }}</a>
+      {% elif fixiert %}
+      <div class="small text-danger mt-3">Für diese Altversion ist kein versioniertes PDF mit gültiger Prüfsumme vorhanden.</div>
+      {% endif %}
     </div>
   </div>
 
@@ -115,30 +195,51 @@
 
     <div class="page-card p-4 mb-3">
       <h2 class="h6 mb-2">Unterschrift des Kunden</h2>
-      {% if vorgang.unterschrift_stored %}
-      <img src="{{ url_for('admin_mietvertrag_unterschrift_bild', vorgang_id=vorgang.id) }}" alt="Unterschrift"
-           style="width:100%; max-height:130px; object-fit:contain; border:1px solid var(--line); border-radius:8px; background:#fff;">
-      <div class="small text-muted mt-1">{{ vorgang.unterschrift_name }} · {{ vorgang.unterschrift_ort }}, {{ vorgang.unterschrift_am }}</div>
-      <form method="POST" action="{{ url_for('admin_mietvertrag_unterschrift', vorgang_id=vorgang.id) }}" class="mt-2" id="resignForm">
-        {{ csrf_field()|safe }}
-        <input type="hidden" name="unterschrift_data" id="resignData">
-        <input type="hidden" name="unterschrift_name" value="{{ vorgang.kunde_name }}">
-        <input type="hidden" name="unterschrift_ort" value="{{ vorgang.unterschrift_ort or 'Mosbach' }}">
-      </form>
-      <button class="btn btn-soft btn-sm mt-1" onclick="document.getElementById('sigBox').style.display='block'; this.style.display='none';">Neu unterschreiben</button>
-      {% endif %}
-
-      <div id="sigBox" {% if vorgang.unterschrift_stored %}style="display:none;"{% endif %}>
-        <p class="small text-muted mb-2">Der Kunde unterschreibt mit dem Finger/der Maus im Feld:</p>
-        <canvas id="sigPad" width="360" height="150" style="width:100%; height:150px; border:1px dashed #cbb89b; border-radius:10px; background:#fff; touch-action:none;"></canvas>
+      {% if fixiert %}
+        {% if vorgang.unterschrift_stored %}
+        <img src="{{ url_for('admin_mietvertrag_unterschrift_bild', vorgang_id=vorgang.id) }}" alt="Gesicherte Unterschrift des Kunden"
+             style="width:100%; max-height:130px; object-fit:contain; border:1px solid var(--line); border-radius:8px; background:#fff;">
+        <div class="small text-muted mt-1">
+          {{ aktuelle_version.unterschrift_name if aktuelle_version else vorgang.unterschrift_name }} ·
+          {{ aktuelle_version.unterschrift_ort if aktuelle_version else vorgang.unterschrift_ort }},
+          {{ aktuelle_version.unterschrift_am if aktuelle_version else vorgang.unterschrift_am }}
+        </div>
+        <div class="small text-success mt-2">✓ Unterschrift und Vertragsversion sind fixiert. Eine erneute Unterschrift ist nur in einer neuen Version möglich.</div>
+        {% else %}
+        <div class="small text-danger">Für diese Altversion ist keine auslieferbare Unterschriftsdatei vorhanden. Bitte eine neue Vertragsversion anlegen.</div>
+        {% endif %}
+      {% elif not rechtlich_freigegeben %}
+      <div class="small text-danger">Das Unterschriftsfeld ist bis zur rechtlichen Freigabe des Vertragstextes gesperrt.</div>
+      {% elif signatur_fehler %}
+      <div class="small text-danger fw-semibold mb-1">Vor der Unterschrift fehlen noch:</div>
+      <ul class="small text-danger mb-0 ps-3">
+        {% for fehler in signatur_fehler %}<li>{{ fehler }}</li>{% endfor %}
+      </ul>
+      <div class="small text-muted mt-2">Angaben ergänzen und speichern; danach wird das Unterschriftsfeld freigeschaltet.</div>
+      {% else %}
+      <div id="sigBox">
+        <p id="sigHinweis" class="small text-muted mb-2">Der Kunde unterschreibt mit Finger oder Maus. Als Tastatur-Alternative kann eine gut lesbare PNG-Datei der Unterschrift ausgewählt werden.</p>
+        <div id="sigUngespeichert" class="alert alert-warning py-2 small" role="alert" hidden>
+          Vertragsdaten wurden geändert, aber noch nicht gespeichert. Bitte zuerst „Vertragsdaten speichern“ wählen und die aktualisierte Vorschau prüfen.
+        </div>
+        <canvas id="sigPad" width="360" height="150" aria-label="Zeichenfeld für die Kundenunterschrift" aria-describedby="sigHinweis" style="width:100%; height:150px; border:1px dashed #cbb89b; border-radius:10px; background:#fff; touch-action:none;"></canvas>
         <form method="POST" action="{{ url_for('admin_mietvertrag_unterschrift', vorgang_id=vorgang.id) }}" id="sigForm" class="row g-2 mt-1">
           {{ csrf_field()|safe }}
           <input type="hidden" name="unterschrift_data" id="sigData">
+          <input type="hidden" name="expected_draft_hash" value="{{ entwurf_hash }}">
+          <input type="hidden" name="expected_version" value="{{ vorgang.vertrag_version or 1 }}">
+          <input type="hidden" name="expected_text_version" value="{{ vertrag_text_version }}">
+          <div class="col-12">
+            <label for="sigDatei" class="form-label small mb-0">PNG-Unterschrift auswählen (Alternative zum Zeichenfeld)</label>
+            <input id="sigDatei" type="file" class="form-control form-control-sm" accept="image/png">
+          </div>
           <div class="col-7">
-            <input type="text" name="unterschrift_name" class="form-control form-control-sm" value="{{ vorgang.kunde_name or '' }}" placeholder="Name">
+            <label for="sigName" class="form-label small mb-0">Name der unterschreibenden Person *</label>
+            <input id="sigName" type="text" name="unterschrift_name" class="form-control form-control-sm" value="{{ vorgang.kunde_name or '' }}" required autocomplete="name">
           </div>
           <div class="col-5">
-            <input type="text" name="unterschrift_ort" class="form-control form-control-sm" value="Mosbach" placeholder="Ort">
+            <label for="sigOrt" class="form-label small mb-0">Ort *</label>
+            <input id="sigOrt" type="text" name="unterschrift_ort" class="form-control form-control-sm" value="Mosbach" required autocomplete="address-level2">
           </div>
           <div class="col-12 d-flex gap-2">
             <button type="button" class="btn btn-soft btn-sm" id="sigClear" data-no-loading="true">Löschen</button>
@@ -146,37 +247,193 @@
           </div>
         </form>
       </div>
+      {% endif %}
     </div>
 
     {% if status == 'unterschrieben' %}
     <div class="page-card p-4 mb-3">
+      <h2 class="h6 mb-2">Vertrag abschließen</h2>
+      {% if not rechtlich_freigegeben %}
+      <button type="button" class="btn btn-brand w-100" disabled>Bestätigung gesperrt</button>
+      <div class="small text-danger mt-2">Die rechtliche Freigabe fehlt.</div>
+      {% elif version_integritaetsfehler %}
+      <button type="button" class="btn btn-brand w-100" disabled>Bestätigung gesperrt</button>
+      <div class="small text-danger mt-2">{{ version_integritaetsfehler }}</div>
+      {% else %}
       <form method="POST" action="{{ url_for('admin_mietvertrag_bestaetigen', vorgang_id=vorgang.id) }}">
         {{ csrf_field()|safe }}
-        <button type="submit" class="btn btn-brand w-100"><i></i>Vertrag bestätigen &amp; abschließen</button>
+        <input type="hidden" name="expected_version" value="{{ aktuelle_version.version }}">
+        <input type="hidden" name="expected_snapshot_hash" value="{{ aktuelle_version.snapshot_sha256 }}">
+        <input type="hidden" name="expected_pdf_hash" value="{{ aktuelle_version.pdf_sha256 }}">
+        <button type="submit" class="btn btn-brand w-100">Vertrag bestätigen &amp; abschließen</button>
       </form>
+      {% endif %}
     </div>
     {% endif %}
 
-    {% if status in ['unterschrieben','bestaetigt'] %}
-    <div class="page-card p-4">
+    {% if status == 'bestaetigt' %}
+    <div class="page-card p-4 mb-3">
       <h2 class="h6 mb-2">An Kunden senden</h2>
       <div class="small text-muted mb-2">
         Bevorzugter Weg:
         {% if versandweg == 'email' %}<strong>E-Mail</strong> ({{ versandziel }})
-        {% elif versandweg == 'whatsapp' %}<strong>WhatsApp</strong>
-        {% else %}<strong>Dashboard / Aushändigen</strong> (keine E-Mail/Handynummer hinterlegt){% endif %}
+        {% elif versandweg == 'whatsapp' %}<strong>WhatsApp-Text vorbereiten</strong> (PDF muss separat übermittelt oder ausgehändigt werden)
+        {% else %}<strong>PDF herunterladen und aushändigen</strong> (keine E-Mail/Handynummer hinterlegt){% endif %}
       </div>
-      <form method="POST" action="{{ url_for('admin_mietvertrag_senden', vorgang_id=vorgang.id) }}">
+      {% if rechtlich_freigegeben and not version_integritaetsfehler %}
+      {% if versandweg in ['email', 'whatsapp'] %}
+      <form method="POST" action="{{ url_for('admin_mietvertrag_senden', vorgang_id=vorgang.id) }}" {% if versandweg == 'whatsapp' %}target="_blank"{% endif %}>
         {{ csrf_field()|safe }}
-        <button type="submit" class="btn btn-soft btn-sm">Vertrag jetzt senden</button>
+        <input type="hidden" name="expected_version" value="{{ aktuelle_version.version }}">
+        <input type="hidden" name="expected_snapshot_hash" value="{{ aktuelle_version.snapshot_sha256 }}">
+        <input type="hidden" name="expected_pdf_hash" value="{{ aktuelle_version.pdf_sha256 }}">
+        <input type="hidden" name="expected_versandweg" value="{{ versandweg }}">
+        <input type="hidden" name="expected_versandziel" value="{{ versandziel }}">
+        <button type="submit" class="btn btn-soft btn-sm">{% if versandweg == 'email' %}PDF jetzt per E-Mail senden{% else %}WhatsApp-Text öffnen (kein PDF-Versand){% endif %}</button>
       </form>
-      {% if vorgang.vertrag_gesendet_am %}<div class="small text-success mt-2">Zuletzt gesendet: {{ vorgang.vertrag_gesendet_am }} ({{ vorgang.vertrag_versandweg }})</div>{% endif %}
+      {% else %}
+      <a class="btn btn-soft btn-sm" href="{{ url_for('admin_mietvertrag_pdf', vorgang_id=vorgang.id) }}" target="_blank" rel="noopener">PDF öffnen / herunterladen</a>
+      {% endif %}
+      {% else %}
+      <button type="button" class="btn btn-soft btn-sm" disabled>Versand gesperrt</button>
+      <div class="small text-danger mt-2">{{ version_integritaetsfehler or 'Die rechtliche Freigabe fehlt.' }}</div>
+      {% endif %}
+      {% if vorgang.vertrag_gesendet_am and vorgang.vertrag_versandweg == 'email' %}<div class="small text-success mt-2">Zuletzt tatsächlich per E-Mail gesendet: {{ vorgang.vertrag_gesendet_am }}</div>{% endif %}
+    </div>
+    {% endif %}
+
+    {% if fixiert %}
+    <div class="page-card p-4">
+      <h2 class="h6 mb-2">Vertrag korrigieren</h2>
+      <p class="small text-muted mb-3">Die bestehende Fassung bleibt im Versionsverlauf erhalten und ist in der Anwendung nicht mehr bearbeitbar. Für jede Korrektur wird ein begründeter neuer Entwurf angelegt und erneut unterschrieben.</p>
+      <form method="POST" action="{{ url_for('admin_mietvertrag_neue_version', vorgang_id=vorgang.id) }}"
+            onsubmit="return confirm('Neue Vertragsversion anlegen? Die bisherige Fassung bleibt im Versionsverlauf erhalten.');">
+        {{ csrf_field()|safe }}
+        <input type="hidden" name="expected_version" value="{{ aktuelle_version.version if aktuelle_version else (vorgang.vertrag_version or 1) }}">
+        <input type="hidden" name="expected_snapshot_hash" value="{{ aktuelle_version.snapshot_sha256 if aktuelle_version else '' }}">
+        <label for="aenderungsgrund" class="form-label small fw-semibold">Änderungsgrund</label>
+        <textarea id="aenderungsgrund" name="aenderungsgrund" class="form-control form-control-sm" rows="2" minlength="3" maxlength="500" required placeholder="z. B. Mietzeitraum auf Kundenwunsch korrigiert"></textarea>
+        <button type="submit" class="btn btn-outline-danger btn-sm mt-2">Neue Version als Änderungsentwurf</button>
+      </form>
     </div>
     {% endif %}
   </div>
 </div>
 
+<div class="page-card p-4 mt-4">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+    <div>
+      <h2 class="h5 mb-1">Versionshistorie</h2>
+      <div class="small text-muted">Unterschriebene Fassungen bleiben mit Textstand, Änderungsgrund, PDF-Prüfsumme und tatsächlichem E-Mail-Versand im Verlauf. Die Sperre wirkt innerhalb der Anwendung; sie ist kein externes manipulationssicheres Archiv.</div>
+    </div>
+    <span class="badge badge-soft">{{ versionen|length }} gespeicherte Version{{ '' if versionen|length == 1 else 'en' }}</span>
+  </div>
+
+  {% if versionen %}
+  <div class="row g-3">
+    {% for version in versionen %}
+    {% set historie_integritaetsfehler = version_integritaetsfehler_map.get(version.version) %}
+    <div class="col-lg-6">
+      <div class="border rounded-3 p-3 h-100 {% if version.version == (vorgang.vertrag_version or 1) %}border-success{% endif %}">
+        <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap mb-2">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <strong>Version {{ version.version }}</strong>
+            {% if version.version == (vorgang.vertrag_version or 1) %}<span class="badge text-bg-success">Aktuell</span>{% endif %}
+            {% if version.status == 'bestaetigt' %}<span class="badge text-bg-success">Bestätigt</span>
+            {% elif version.status == 'unterschrieben' %}<span class="badge text-bg-warning">Unterschrieben</span>
+            {% else %}<span class="badge text-bg-light border">{{ version.status or 'Archiv' }}</span>{% endif %}
+          </div>
+          {% if version.pdf_base64 and version.pdf_sha256 %}
+          <a class="btn btn-soft btn-sm" href="{{ url_for('admin_mietvertrag_version_pdf', vorgang_id=vorgang.id, version_nummer=version.version) }}" target="_blank" rel="noopener" aria-label="PDF der Vertragsversion {{ version.version }} öffnen">PDF öffnen</a>
+          {% else %}
+          <span class="badge text-bg-light border">Kein fixes PDF</span>
+          {% endif %}
+        </div>
+
+        <dl class="row small mb-2">
+          <dt class="col-4 text-muted fw-normal">Textstand</dt>
+          <dd class="col-8 mb-1"><code>{{ version.text_version or 'unbekannt' }}</code></dd>
+          <dt class="col-4 text-muted fw-normal">Unterschrift</dt>
+          <dd class="col-8 mb-1">{{ version.unterschrift_name or '—' }}{% if version.unterschrift_am %} · {{ version.unterschrift_am }}{% endif %}</dd>
+          <dt class="col-4 text-muted fw-normal">Erstellt</dt>
+          <dd class="col-8 mb-1">{{ version.erstellt_am or '—' }}</dd>
+          {% if version.bestaetigt_am %}
+          <dt class="col-4 text-muted fw-normal">Bestätigt</dt>
+          <dd class="col-8 mb-1">{{ version.bestaetigt_am }}</dd>
+          {% endif %}
+          {% if version.versendet_am %}
+          <dt class="col-4 text-muted fw-normal">Versand</dt>
+          <dd class="col-8 mb-1">
+            {{ version.versendet_am }} · {{ version.versandweg or 'unbekannt' }}
+            {% if version.versandziel %}<br><span class="text-muted">Ziel: {{ version.versandziel }}</span>{% endif %}
+            {% if version.versandweg == 'whatsapp' %}<br><span class="text-danger">Alt-Eintrag: tatsächlicher PDF-Versand ist damit nicht belegt.</span>{% endif %}
+          </dd>
+          {% endif %}
+        </dl>
+
+        {% if version.aenderungsgrund %}
+        <div class="small mb-2"><span class="text-muted">Änderungsgrund:</span> {{ version.aenderungsgrund }}</div>
+        {% endif %}
+
+        {% if version.pdf_sha256 %}
+        <div class="small text-muted" style="word-break:break-all;">PDF-SHA256: <code title="{{ version.pdf_sha256 }}">{{ version.pdf_sha256[:24] }}…</code></div>
+        {% endif %}
+        {% if version.snapshot_sha256 %}
+        <div class="small text-muted" style="word-break:break-all;">Snapshot-SHA256: <code title="{{ version.snapshot_sha256 }}">{{ version.snapshot_sha256[:24] }}…</code></div>
+        {% endif %}
+
+        {% if version.quelle != 'normal' or not version.rechtlich_freigegeben %}
+        <div class="small text-danger mt-2">
+          <strong>Altversion:</strong> Diese Fassung wurde aus dem Altbestand übernommen und besitzt keinen vollständig nachgewiesenen, rechtlich freigegebenen PDF-Stand.
+        </div>
+        {% elif historie_integritaetsfehler %}
+        <div class="small text-danger mt-2"><strong>Integritätsprüfung fehlgeschlagen:</strong> {{ historie_integritaetsfehler }}</div>
+        {% else %}
+        <div class="small text-success mt-2">✓ Fixierte PDF-Fassung mit gültiger Prüfsumme gespeichert</div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-muted small">Noch keine unterschriebene Vertragsversion gespeichert. Der aktuelle Stand ist ein bearbeitbarer Entwurf.</div>
+  {% endif %}
+</div>
+
 <script>
+(function () {
+  var datenForm = document.getElementById('vertragDatenForm');
+  var sigForm = document.getElementById('sigForm');
+  if (!datenForm || !sigForm) return;
+  var warnung = document.getElementById('sigUngespeichert');
+  var sigButton = document.getElementById('sigSubmit');
+  var startFeld = document.getElementById('vertrag_start_datum');
+  var endeFeld = document.getElementById('vertrag_end_datum');
+  var ungespeichert = false;
+
+  function alsUngespeichertMarkieren() {
+    ungespeichert = true;
+    if (warnung) warnung.hidden = false;
+    if (sigButton) {
+      sigButton.disabled = true;
+      sigButton.setAttribute('aria-describedby', 'sigUngespeichert');
+    }
+    if (startFeld && endeFeld) endeFeld.min = startFeld.value || '';
+  }
+
+  datenForm.querySelectorAll('input:not([type="hidden"]), select, textarea').forEach(function (feld) {
+    feld.addEventListener('input', alsUngespeichertMarkieren);
+    feld.addEventListener('change', alsUngespeichertMarkieren);
+  });
+  sigForm.addEventListener('submit', function (event) {
+    if (!ungespeichert) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (warnung) warnung.hidden = false;
+    alert('Bitte die geänderten Vertragsdaten zuerst speichern und danach die aktualisierte Vertragsvorschau prüfen.');
+  }, true);
+})();
+
 (function () {
   // Live-Kostenrechnung: Miettage × Tagespreis + Kaution = Gesamtbetrag (Vorkasse)
   var tage = parseInt('{{ kosten.miettage }}', 10) || 1;
@@ -211,6 +468,7 @@
   var ctx = canvas.getContext('2d');
   ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#102033';
   var drawing = false, dirty = false, last = null;
+  var uploadedData = '';
   function pos(e) {
     var r = canvas.getBoundingClientRect();
     var t = (e.touches && e.touches[0]) ? e.touches[0] : e;
@@ -229,12 +487,31 @@
   canvas.addEventListener('touchstart', start, { passive: false });
   canvas.addEventListener('touchmove', move, { passive: false });
   canvas.addEventListener('touchend', end);
+  var fileInput = document.getElementById('sigDatei');
+  if (fileInput) fileInput.addEventListener('change', function () {
+    uploadedData = '';
+    var datei = fileInput.files && fileInput.files[0];
+    if (!datei) return;
+    if (datei.type !== 'image/png' || datei.size > 2000000) {
+      fileInput.value = '';
+      alert('Bitte eine PNG-Datei bis maximal 2 MB auswählen.');
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function () { uploadedData = String(reader.result || ''); };
+    reader.readAsDataURL(datei);
+  });
   var clearBtn = document.getElementById('sigClear');
-  if (clearBtn) clearBtn.addEventListener('click', function () { ctx.clearRect(0, 0, canvas.width, canvas.height); dirty = false; });
+  if (clearBtn) clearBtn.addEventListener('click', function () {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    dirty = false;
+    uploadedData = '';
+    if (fileInput) fileInput.value = '';
+  });
   var form = document.getElementById('sigForm');
   if (form) form.addEventListener('submit', function (e) {
-    if (!dirty) { e.preventDefault(); alert('Bitte zuerst im Feld unterschreiben.'); return; }
-    document.getElementById('sigData').value = canvas.toDataURL('image/png');
+    if (!dirty && !uploadedData) { e.preventDefault(); alert('Bitte im Feld unterschreiben oder eine PNG-Unterschrift auswählen.'); return; }
+    document.getElementById('sigData').value = uploadedData || canvas.toDataURL('image/png');
   });
 })();
 </script>

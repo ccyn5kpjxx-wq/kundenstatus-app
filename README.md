@@ -61,6 +61,13 @@ Wichtige Variablen:
 - `OPENAI_API_KEY`
 - `OPENAI_EXTRACTION_MODEL`
 - `OPENAI_CHAT_MODEL`
+- `MIETVERTRAG_RECHTLICH_FREIGEGEBEN` (standardmäßig `0`; Signatur/Bestätigung/Versand gesperrt)
+- `MIETVERTRAG_TEXT_VERSION` (erst nach juristischer Freigabe setzen)
+- `DATENSCHUTZ_RECHTLICH_FREIGEGEBEN` (standardmäßig `0`; kennzeichnet die Datenschutzerklärung sichtbar als Prüffassung)
+
+Mietverträge bleiben im sicheren Entwurfsmodus, bis beide Mietvertragsvariablen
+bewusst gesetzt sind. Eine Freigabe ist eine betriebliche/juristische Entscheidung
+und darf nicht nur zum Testen in der Live-Umgebung aktiviert werden.
 
 ## Daten
 

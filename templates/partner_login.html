@@ -31,10 +31,6 @@
       min-height:48px;
       font-size:16px;
     }
-    .access-code-input {
-      text-transform:uppercase;
-      letter-spacing:.04em;
-    }
     @media (max-width: 575.98px) {
       body { align-items:flex-start; padding:14px; }
       .container { padding:0; }
@@ -71,14 +67,17 @@
             type="password"
             id="zugangscode"
             name="password"
-            class="form-control form-control-lg access-code-input"
+            class="form-control form-control-lg"
             autocomplete="current-password"
-            autocapitalize="characters"
+            autocapitalize="none"
+            autocorrect="off"
             spellcheck="false"
+            aria-describedby="zugangscode-hinweis"
             required
             autofocus
           >
-          <div class="form-text mt-2">
+          <div id="zugangscode-hinweis" class="form-text mt-2">
+            Bitte geben Sie den Code exakt wie mitgeteilt ein. Es wird zwischen Groß- und Kleinschreibung unterschieden.<br>
             Den Zugangscode erhalten Sie von Gärtner Karosserie &amp; Lack.
             Code vergessen? Rufen Sie uns an unter
             <a href="tel:+4915227706694">+49&nbsp;1522&nbsp;7706694</a>
@@ -96,13 +95,6 @@
       if (!input) return;
       const focusInput = () => input.focus({ preventScroll: true });
       window.addEventListener('load', focusInput);
-      document.querySelector('.login-card')?.addEventListener('click', focusInput);
-      input.addEventListener('input', () => {
-        const start = input.selectionStart;
-        const end = input.selectionEnd;
-        input.value = input.value.toUpperCase().trim();
-        input.setSelectionRange(start, end);
-      });
     })();
   </script>
   <footer style="color: #6f7a83; text-align: center; padding: 1rem; font-size: .85rem;"><a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
