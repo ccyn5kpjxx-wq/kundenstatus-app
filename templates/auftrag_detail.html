@@ -374,6 +374,24 @@
             {% endif %}
           </div>
         </div>
+        {% elif auftrag['quelle'] == 'privat' and not auftrag['kunden_status_aktiv'] %}
+        <div class="alert alert-warning mb-3">
+          Der öffentliche Privatkunden-Fall ist angelegt, aber der persönliche Statuslink bleibt bis zur Kontaktprüfung gesperrt.
+        </div>
+        <form method="POST" action="{{ url_for('admin_kundenstatus_freigeben', auftrag_id=auftrag['id']) }}" class="d-grid gap-3">
+          <input type="hidden" name="ansicht" value="auftrag">
+          <label class="form-check">
+            <input class="form-check-input" type="checkbox" name="kontakt_geprueft" value="1" required>
+            <span class="form-check-label"><strong>Kontakt persönlich geprüft</strong><br><small class="text-muted">Rufnummer beziehungsweise E-Mail gehört zum Kunden und wurde bestätigt.</small></span>
+          </label>
+          {% if auftrag['schaden_aufnahme'].get('whatsapp_kontakt_gewuenscht') %}
+          <label class="form-check">
+            <input class="form-check-input" type="checkbox" name="whatsapp_einwilligung" value="1">
+            <span class="form-check-label"><strong>WhatsApp-Einwilligung ebenfalls bestätigt</strong><br><small class="text-muted">Nur markieren, wenn der Kunde WhatsApp für {{ auftrag['kontakt_telefon'] }} persönlich bestätigt hat.</small></span>
+          </label>
+          {% endif %}
+          <button type="submit" class="btn btn-brand">Kontakt bestätigen &amp; Status sicher freigeben</button>
+        </form>
         {% else %}
         <div class="text-muted">Noch kein Kundenstatus-Link vorhanden.</div>
         {% endif %}

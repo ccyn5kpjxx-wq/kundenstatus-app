@@ -424,7 +424,7 @@
         <div class="source-summary-item">
           <span>Kundenkontakt</span>
           <strong>{{ auftrag['kontakt_telefon'] or 'Telefon offen' }}{% if auftrag['kunde_email'] %} · {{ auftrag['kunde_email'] }}{% endif %}</strong>
-          {% if aufnahme['kontaktweg'] %}<small>Gewünscht: {{ aufnahme['kontaktweg_label'] }}{% if aufnahme['whatsapp_einwilligung'] %} · WhatsApp ausdrücklich gewählt{% endif %}</small>{% endif %}
+          {% if aufnahme['kontaktweg'] %}<small>Gewünscht: {{ aufnahme['kontaktweg_label'] }}{% if aufnahme['whatsapp_einwilligung'] %} · WhatsApp-Einwilligung dokumentiert{% elif aufnahme.get('whatsapp_kontakt_gewuenscht') %} · Rufnummer und Einwilligung noch persönlich bestätigen{% endif %}</small>{% endif %}
         </div>
         <div class="source-summary-item">
           <span>Kennzeichen</span>
@@ -1249,6 +1249,24 @@
             <div class="alert alert-warning small mt-3 mb-0">Der öffentliche QR-Link nutzt aktuell einen Tunnel. Für echte Kunden bitte prüfen, ob diese Adresse erreichbar ist.</div>
             {% endif %}
           </div>
+        {% elif auftrag['quelle'] == 'privat' and not auftrag['kunden_status_aktiv'] %}
+          <div class="alert alert-warning small">
+            Der persönliche Statuslink bleibt gesperrt, bis Rufnummer oder E-Mail des Privatkunden persönlich geprüft wurden.
+          </div>
+          <div class="d-grid gap-3">
+            <input type="hidden" name="ansicht" value="versicherung" form="kundenstatus-freigabe-form">
+            <label class="form-check">
+              <input class="form-check-input" type="checkbox" name="kontakt_geprueft" value="1" required form="kundenstatus-freigabe-form">
+              <span class="form-check-label"><strong>Kontakt persönlich geprüft</strong><br><small class="text-muted">Rufnummer beziehungsweise E-Mail gehört zum Kunden und wurde bestätigt.</small></span>
+            </label>
+            {% if aufnahme.get('whatsapp_kontakt_gewuenscht') %}
+            <label class="form-check">
+              <input class="form-check-input" type="checkbox" name="whatsapp_einwilligung" value="1" form="kundenstatus-freigabe-form">
+              <span class="form-check-label"><strong>WhatsApp-Einwilligung ebenfalls bestätigt</strong><br><small class="text-muted">Nur markieren, wenn der Kunde WhatsApp für {{ auftrag['kontakt_telefon'] }} persönlich bestätigt hat.</small></span>
+            </label>
+            {% endif %}
+            <button type="submit" class="btn btn-brand" form="kundenstatus-freigabe-form">Kontakt bestätigen &amp; Status sicher freigeben</button>
+          </div>
         {% else %}
           <div class="text-muted">Noch kein Kundenstatus-Link vorhanden.</div>
         {% endif %}
@@ -1289,6 +1307,9 @@
   </div>
 </div>
 </form>
+{% if auftrag['quelle'] == 'privat' and not auftrag['kunden_status_aktiv'] %}
+<form id="kundenstatus-freigabe-form" method="POST" action="{{ url_for('admin_kundenstatus_freigeben', auftrag_id=auftrag['id']) }}"></form>
+{% endif %}
 
 {% endblock %}
 

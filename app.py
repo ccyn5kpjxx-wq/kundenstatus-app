@@ -2944,6 +2944,11 @@ def csrf_recovery_response():
             session.pop(f"partner_schadenaufnahme_form_token_{autohaus_id}", None)
             flash("Die Seite war veraltet. Bitte Schadenfall noch einmal prüfen und anlegen.", "warning")
             return redirect(url_for("partner_versicherung_schaden_neu", slug=slug))
+    if endpoint == "privat_schadenaufnahme":
+        session.pop(CSRF_FIELD_NAME, None)
+        session.pop("privat_schadenaufnahme_form_token", None)
+        flash("Die Seite war veraltet. Bitte Schadenmeldung noch einmal prüfen und senden.", "warning")
+        return redirect(url_for("privat_schadenaufnahme"))
     if endpoint in {"partner_chat_nachricht", "partner_chat_nachricht_loeschen"}:
         slug = clean_text(view_args.get("slug"))
         auftrag_id = view_args.get("auftrag_id")
@@ -3022,7 +3027,20 @@ def add_security_headers(response):
             ]
         ),
     )
-    response.headers.setdefault("Cache-Control", "no-store" if session.get("admin") else "private, no-cache")
+    if request.path.startswith("/status/"):
+        # Der Kundenstatus ist ein Bearer-Link. Auch Bild-, QR-, Fehler- und
+        # Redirect-Antworten unter diesem Pfad duerfen weder im Browsercache
+        # verbleiben noch von Suchmaschinen aufgenommen werden. send_file()
+        # setzt selbst "no-cache"; deshalb hier bewusst ueberschreiben.
+        response.headers["Cache-Control"] = "private, no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    else:
+        response.headers.setdefault(
+            "Cache-Control",
+            "no-store" if session.get("admin") else "private, no-cache",
+        )
     return response
 
 
@@ -10873,6 +10891,9 @@ def schaden_zonen_labels(selected):
 
 
 def kunden_status_url(auftrag, force_request_host=False):
+    aktiv = (auftrag or {}).get("kunden_status_aktiv")
+    if aktiv is not None and not strict_bool(aktiv):
+        return ""
     token = clean_text((auftrag or {}).get("kunden_status_token"))
     if not token:
         return ""
@@ -10954,18 +10975,25 @@ def customer_whatsapp_consent_state(auftrag):
         return {"required": False, "allowed": True, "reason": ""}
     current_phone_key = whatsapp_number_key(auftrag.get("kontakt_telefon"))
     consent_phone_key = clean_text(intake.get("whatsapp_einwilligung_telefon_key"))
+    public_intake = clean_text(intake.get("erfasst_von")) == "privatkunden-portal"
+    contact_verified = bool(clean_text(intake.get("kontakt_verifiziert_am")))
     allowed = bool(
         clean_text(intake.get("kontaktweg")).lower() == "whatsapp"
         and strict_bool(intake.get("whatsapp_einwilligung"))
         and clean_text(intake.get("whatsapp_einwilligung_am"))
+        and (not public_intake or contact_verified)
         and consent_phone_key
         and current_phone_key
         and hmac.compare_digest(consent_phone_key, current_phone_key)
     )
+    if public_intake and not contact_verified:
+        reason = "Der Kundenkontakt wurde noch nicht persönlich bestätigt."
+    else:
+        reason = "Keine gültige WhatsApp-Einwilligung für die aktuelle Mobilnummer dokumentiert."
     return {
         "required": True,
         "allowed": allowed,
-        "reason": "" if allowed else "Keine gültige WhatsApp-Einwilligung für die aktuelle Mobilnummer dokumentiert.",
+        "reason": "" if allowed else reason,
     }
 
 
@@ -14582,10 +14610,16 @@ def row_to_auftrag(row):
         "whatsapp_einwilligung_am",
         "whatsapp_einwilligung_telefon_key",
         "whatsapp_einwilligung_quelle",
+        "whatsapp_verifizierung_status",
+        "kontakt_verifiziert_am",
+        "kontakt_verifiziert_quelle",
     ):
         aufnahme[key] = clean_text(aufnahme.get(key))
     aufnahme["gegner_unbekannt"] = bool(aufnahme.get("gegner_unbekannt", True))
     aufnahme["whatsapp_einwilligung"] = strict_bool(aufnahme.get("whatsapp_einwilligung"))
+    aufnahme["whatsapp_kontakt_gewuenscht"] = strict_bool(
+        aufnahme.get("whatsapp_kontakt_gewuenscht")
+    )
     aufnahme["unfall_datum_label"] = format_date(aufnahme.get("unfall_datum"))
     aufnahme["kontaktweg_label"] = {
         "telefon": "Telefon",
@@ -27265,6 +27299,7 @@ def reanalyze_existing_documents(auftrag_id):
         WHERE auftrag_id=?
           AND kategorie='standard'
           AND reklamation_id IS NULL
+          AND COALESCE(quelle, '')!='kunde'
         ORDER BY id ASC
         """,
         (auftrag_id,),
@@ -28433,7 +28468,7 @@ def build_versicherung_prozess(auftrag, dateien=None, context="admin", autohaus=
         if key == "kunden_qr":
             item["link_url"] = kunden_status_url(auftrag)
             item["link_label"] = "Kundenstatus öffnen"
-            if clean_text(auftrag.get("kunden_status_token")):
+            if item["link_url"] and clean_text(auftrag.get("kunden_status_token")):
                 item["qr_url"] = url_for("kunden_status_qr", token=auftrag["kunden_status_token"])
         items.append(item)
 
@@ -38592,7 +38627,7 @@ def admin_zahlen_investition(beleg_id):
     return redirect(url_for("admin_zahlen"))
 
 
-def schadenaufnahme_payload_from_form(form):
+def schadenaufnahme_payload_from_form(form, require_address=False):
     schadenart_raw = clean_text(form.get("schadenart")).lower()
     schadenart = {
         "haftpflicht": "haftpflicht",
@@ -38614,6 +38649,9 @@ def schadenaufnahme_payload_from_form(form):
         "schadenart": schadenart,
         "schadenart_eingabe": schadenart_raw,
         "kunde_name": clean_text(form.get("kunde_name"))[:180],
+        "kunde_strasse": clean_text(form.get("kunde_strasse"))[:220],
+        "kunde_plz": clean_text(form.get("kunde_plz"))[:20],
+        "kunde_ort": clean_text(form.get("kunde_ort"))[:180],
         "kontakt_telefon": clean_text(form.get("kontakt_telefon") or form.get("telefon"))[:120],
         "kunde_email": clean_text(form.get("kunde_email") or form.get("email")).lower()[:180],
         "kontaktweg": kontaktweg,
@@ -38645,6 +38683,13 @@ def schadenaufnahme_payload_from_form(form):
         errors.append("Bitte eine Schadenart auswählen.")
     if len(payload["kunde_name"]) < 2:
         errors.append("Bitte den Namen des Kunden eintragen.")
+    if require_address:
+        if len(payload["kunde_strasse"]) < 3:
+            errors.append("Bitte Straße und Hausnummer eintragen.")
+        if len(payload["kunde_plz"]) < 4:
+            errors.append("Bitte eine gültige Postleitzahl eintragen.")
+        if len(payload["kunde_ort"]) < 2:
+            errors.append("Bitte den Wohnort eintragen.")
     if not payload["kontakt_telefon"]:
         errors.append("Bitte eine Telefonnummer eintragen.")
     else:
@@ -38718,6 +38763,16 @@ def schadenaufnahme_beschreibung(payload):
         f"- Kontaktwunsch: {payload.get('kontaktweg_label') or payload.get('kontaktweg') or 'Telefon'}",
         f"- Ersatzmobilität: {SCHADEN_STEUERUNG_OPTIONEN.get(payload.get('schaden_mietwagen'), 'Noch offen')}",
     ]
+    anschrift = " ".join(
+        value
+        for value in (
+            payload.get("kunde_strasse"),
+            " ".join(value for value in (payload.get("kunde_plz"), payload.get("kunde_ort")) if value),
+        )
+        if value
+    )
+    if anschrift:
+        lines.append(f"- Kundenanschrift: {anschrift}")
     if payload.get("versicherung_name"):
         lines.append(f"- Angegebene Versicherung: {payload['versicherung_name']}")
     if payload.get("schadenart") == "haftpflicht":
@@ -38734,29 +38789,59 @@ def schadenaufnahme_beschreibung(payload):
     return "\n".join(lines)
 
 
-def create_schadenaufnahme_from_assistent(payload, files, autohaus=None):
+def create_schadenaufnahme_from_assistent(payload, files, autohaus=None, public_mode=False):
     payload = dict(payload or {})
     partner_mode = bool(autohaus)
+    public_mode = bool(public_mode and not partner_mode)
     autohaus_id = int((autohaus or {}).get("id") or 0)
     autohaus_name = clean_text((autohaus or {}).get("name") or (autohaus or {}).get("portal_label"))
-    versicherung, versicherung_matched = resolve_schadenaufnahme_versicherung(
-        payload.get("versicherung_name") or payload.get("gegner_versicherung")
-    )
+    if public_mode:
+        # Eine freie Eingabe aus dem Internet darf niemals selbst einen
+        # Versicherungs-Portalzugriff auslösen. Die Werkstatt ordnet erst nach
+        # persönlicher Prüfung den richtigen Versicherer zu.
+        versicherung = get_or_create_offene_versicherung()
+        versicherung_matched = False
+    else:
+        versicherung, versicherung_matched = resolve_schadenaufnahme_versicherung(
+            payload.get("versicherung_name") or payload.get("gegner_versicherung")
+        )
     consent_at = now_str()
     intake_record = dict(payload)
-    intake_record["erfasst_von"] = "autohaus-portal" if partner_mode else "werkstatt-cockpit"
+    intake_record["erfasst_von"] = (
+        "autohaus-portal"
+        if partner_mode
+        else ("privatkunden-portal" if public_mode else "werkstatt-cockpit")
+    )
     if partner_mode:
         intake_record["autohaus_id"] = autohaus_id
         intake_record["autohaus_name"] = autohaus_name
     intake_record["erfasst_am"] = consent_at
     intake_record["datenschutz_bestaetigt_am"] = consent_at
-    if strict_bool(payload.get("whatsapp_einwilligung")):
+    whatsapp_requested = strict_bool(payload.get("whatsapp_einwilligung"))
+    if public_mode:
+        # Im offenen Portal ist die Auswahl "WhatsApp" zunächst nur ein
+        # Kontaktwunsch. Erst nach persönlicher Bestätigung der Rufnummer darf
+        # daraus eine Einwilligung für Statusnachrichten werden. So kann niemand
+        # eine fremde Nummer eintragen und Nachrichten für diese freischalten.
+        intake_record["whatsapp_kontakt_gewuenscht"] = whatsapp_requested
+        intake_record["whatsapp_einwilligung"] = False
+        intake_record["whatsapp_einwilligung_am"] = ""
+        intake_record["whatsapp_einwilligung_telefon_key"] = ""
+        intake_record["whatsapp_einwilligung_quelle"] = ""
+        intake_record["whatsapp_verifizierung_status"] = (
+            "ausstehend" if whatsapp_requested else ""
+        )
+        intake_record["kontakt_verifiziert_am"] = ""
+        intake_record["kontakt_verifiziert_quelle"] = ""
+    elif whatsapp_requested:
         intake_record["whatsapp_einwilligung_am"] = consent_at
         intake_record["whatsapp_einwilligung_telefon_key"] = whatsapp_number_key(
             payload.get("kontakt_telefon")
         )
         intake_record["whatsapp_einwilligung_quelle"] = (
-            "autohaus-portal" if partner_mode else "werkstatt-cockpit"
+            "autohaus-portal"
+            if partner_mode
+            else ("privatkunden-portal" if public_mode else "werkstatt-cockpit")
         )
     else:
         intake_record["whatsapp_einwilligung_am"] = ""
@@ -38772,7 +38857,11 @@ def create_schadenaufnahme_from_assistent(payload, files, autohaus=None):
         (
             f"Über den verbundenen Schadenassistenten im Autohaus-Portal {autohaus_name or autohaus_id} aufgenommen."
             if partner_mode
-            else "Über den verbundenen Schadenassistenten im Werkstatt-Cockpit aufgenommen."
+            else (
+                "Über das öffentliche Privatkunden-Portal aufgenommen."
+                if public_mode
+                else "Über den verbundenen Schadenassistenten im Werkstatt-Cockpit aufgenommen."
+            )
         ),
         f"Kontaktweg: {intake_record['kontaktweg_label']}.",
         f"Datenschutz-Nachweis: {SCHADENAUFNAHME_DATENSCHUTZ_VERSION} am {consent_at}.",
@@ -38782,7 +38871,7 @@ def create_schadenaufnahme_from_assistent(payload, files, autohaus=None):
             f"Versicherungsangabe '{payload['versicherung_name']}' noch dem richtigen Portalzugang zuordnen."
         )
     auftrag_id = create_auftrag(
-        "autohaus" if partner_mode else "intern",
+        "autohaus" if partner_mode else ("privat" if public_mode else "intern"),
         autohaus_id=autohaus_id if partner_mode else None,
         versicherung_id=int((versicherung or {}).get("id") or 0),
         kunde_name=payload["kunde_name"],
@@ -38807,20 +38896,34 @@ def create_schadenaufnahme_from_assistent(payload, files, autohaus=None):
         angebotsphase=1 if partner_mode else 0,
         angebot_abgesendet=0,
     )
+    if public_mode:
+        # Der geheime Bearer-Link wird erst nach persoenlicher Kontaktpruefung
+        # durch die Werkstatt aktiviert und dabei noch einmal rotiert.
+        db = get_db()
+        db.execute(
+            "UPDATE auftraege SET kunden_status_aktiv=0, geaendert_am=? WHERE id=?",
+            (now_str(), auftrag_id),
+        )
+        db.commit()
+        db.close()
     warnings = []
     if files:
         try:
+            analyze_uploads = not public_mode
             upload_result = save_uploads(
                 auftrag_id,
                 files,
                 "autohaus" if partner_mode else "kunde",
                 "standard",
                 upload_note=f"Erstaufnahme {schadenaufnahme_referenz(auftrag_id)}",
-                analyze=True,
+                # Offene Internet-Uploads werden zunächst nur gespeichert. Das
+                # verhindert, dass komprimierte Bild-/PDF-Bomben im öffentlichen
+                # Request synchron durch OCR oder PDF-Rendering dekodiert werden.
+                analyze=analyze_uploads,
                 apply_analysis=False,
             )
             saved, updates = upload_result if isinstance(upload_result, tuple) else (int(upload_result or 0), {})
-            if saved:
+            if saved and analyze_uploads:
                 reset_document_review_checks(
                     auftrag_id,
                     "Schadenunterlagen wurden analysiert. Erkannte Werte sind nur Vorschläge und müssen gegen die Originaldateien geprüft werden.",
@@ -38837,15 +38940,23 @@ def create_schadenaufnahme_from_assistent(payload, files, autohaus=None):
         auftrag_id,
         "Neue Schadenaufnahme prüfen",
         "Kundendaten, Schadenhergang, Versicherung und Unterlagen prüfen; erkannte Dokumentwerte nicht ungeprüft übernehmen.",
-        quelle="autohaus" if partner_mode else "werkstatt",
+        quelle="autohaus" if partner_mode else ("kunde" if public_mode else "werkstatt"),
         typ="schadenaufnahme",
     )
+    if public_mode:
+        add_versicherung_aufgabe(
+            auftrag_id,
+            "Kundenkontakt prüfen und Status freigeben",
+            "Rufnummer oder E-Mail persönlich bestätigen; erst danach den persönlichen Statuszugang und gegebenenfalls WhatsApp freigeben.",
+            quelle="kunde",
+            typ="kundenkontakt_pruefen",
+        )
     if not versicherung_matched:
         add_versicherung_aufgabe(
             auftrag_id,
             "Versicherung zuordnen",
             f"Angegebene Versicherung: {payload.get('versicherung_name') or payload.get('gegner_versicherung') or 'noch unbekannt'}.",
-            quelle="autohaus" if partner_mode else "werkstatt",
+            quelle="autohaus" if partner_mode else ("kunde" if public_mode else "werkstatt"),
             typ="versicherung_zuordnen",
         )
     if payload.get("schaden_mietwagen") == "ja":
@@ -38853,7 +38964,7 @@ def create_schadenaufnahme_from_assistent(payload, files, autohaus=None):
             auftrag_id,
             "Ersatzmobilität klären",
             "Zeitraum, Fahrzeugklasse, Kostenträger und tatsächliche Verfügbarkeit mit dem Kunden abstimmen.",
-            quelle="autohaus" if partner_mode else "werkstatt",
+            quelle="autohaus" if partner_mode else ("kunde" if public_mode else "werkstatt"),
             typ="mobilitaet",
         )
     add_benachrichtigung(
@@ -38864,18 +38975,26 @@ def create_schadenaufnahme_from_assistent(payload, files, autohaus=None):
     )
     refresh_versicherung_anschreiben(auftrag_id)
     schedule_change_backup(
-        "partner-schadenaufnahme-assistent" if partner_mode else "schadenaufnahme-assistent"
+        "partner-schadenaufnahme-assistent"
+        if partner_mode
+        else ("privat-schadenaufnahme-assistent" if public_mode else "schadenaufnahme-assistent")
     )
     return auftrag_id, warnings
 
 
-def schadenaufnahme_session_keys(autohaus=None):
+def schadenaufnahme_session_keys(autohaus=None, public_mode=False):
     if autohaus:
         suffix = int(autohaus["id"])
         return {
             "form": f"partner_schadenaufnahme_form_token_{suffix}",
             "success": f"partner_schadenaufnahme_success_id_{suffix}",
             "warnings": f"partner_schadenaufnahme_hinweise_{suffix}",
+        }
+    if public_mode:
+        return {
+            "form": "privat_schadenaufnahme_form_token",
+            "success": "privat_schadenaufnahme_success_id",
+            "warnings": "privat_schadenaufnahme_hinweise",
         }
     return {
         "form": "schadenaufnahme_form_token",
@@ -38890,16 +39009,31 @@ def render_schadenaufnahme_assistent(
     created_auftrag=None,
     status_code=200,
     autohaus=None,
+    public_mode=False,
 ):
     partner_mode = bool(autohaus)
-    session_keys = schadenaufnahme_session_keys(autohaus)
+    public_mode = bool(public_mode and not partner_mode)
+    session_keys = schadenaufnahme_session_keys(autohaus, public_mode=public_mode)
     form_token = session.get(session_keys["form"])
     if not form_token:
         form_token = secrets.token_urlsafe(24)
         session[session_keys["form"]] = form_token
     created_auftrag = created_auftrag or None
-    share = customer_status_share(created_auftrag) if created_auftrag else {}
-    if partner_mode:
+    share = (
+        customer_status_share(created_auftrag)
+        if created_auftrag and not public_mode
+        else {}
+    )
+    if public_mode:
+        form_action = url_for("privat_schadenaufnahme")
+        back_url = url_for("privat_portal")
+        back_label = "Privatkunden-Portal"
+        overview_url = url_for("privat_status_zugang")
+        case_detail_url = ""
+        case_detail_label = ""
+        new_case_url = url_for("privat_schadenaufnahme", neu=1)
+        mobility_url = url_for("mietwagen_anfrage")
+    elif partner_mode:
         slug = autohaus["slug"]
         form_action = url_for("partner_versicherung_schaden_neu", slug=slug)
         back_url = url_for("partner_dashboard", slug=slug)
@@ -38927,38 +39061,47 @@ def render_schadenaufnahme_assistent(
         case_detail_label = "Fallakte öffnen"
         new_case_url = url_for("admin_versicherungsschaden", neu=1)
         mobility_url = url_for("admin_mietfahrzeuge")
-    return (
-        render_template(
-            "schadenmeldung_vorschau.html",
-            demo_ref=created_auftrag.get("schaden_aufnahme_ref") if created_auftrag else "",
-            heute_iso=date.today().isoformat(),
-            cockpit_mode=True,
-            partner_mode=partner_mode,
-            portal_label=autohaus["portal_label"] if partner_mode else "",
-            form_token=form_token,
-            form_action=form_action,
-            back_url=back_url,
-            back_label=back_label,
-            overview_url=overview_url,
-            case_detail_url=case_detail_url,
-            case_detail_label=case_detail_label,
-            new_case_url=new_case_url,
-            mobility_url=mobility_url,
-            form_data=form_data or {},
-            form_errors=form_errors or [],
-            created_auftrag=created_auftrag,
-            created_dateien=list_dateien(created_auftrag["id"]) if created_auftrag else [],
-            kunden_status_link=created_auftrag.get("kunden_status_local_url") if created_auftrag else "",
-            kunden_status_share=share,
-            success_hinweise=session.pop(session_keys["warnings"], []) if created_auftrag else [],
-            versicherungen=[
-                item for item in list_versicherungen() if not versicherung_ist_platzhalter(item)
-            ],
-            max_dateien=SCHADENAUFNAHME_MAX_DATEIEN,
-            max_upload_mb=MAX_UPLOAD_MB,
+    rendered = render_template(
+        "schadenmeldung_vorschau.html",
+        demo_ref=created_auftrag.get("schaden_aufnahme_ref") if created_auftrag else "",
+        heute_iso=date.today().isoformat(),
+        cockpit_mode=not public_mode,
+        partner_mode=partner_mode,
+        public_mode=public_mode,
+        portal_label=autohaus["portal_label"] if partner_mode else "",
+        form_token=form_token,
+        form_action=form_action,
+        back_url=back_url,
+        back_label=back_label,
+        overview_url=overview_url,
+        case_detail_url=case_detail_url,
+        case_detail_label=case_detail_label,
+        new_case_url=new_case_url,
+        mobility_url=mobility_url,
+        form_data=form_data or {},
+        form_errors=form_errors or [],
+        created_auftrag=created_auftrag,
+        created_dateien=list_dateien(created_auftrag["id"]) if created_auftrag else [],
+        # Der Bearer-Link wird nach einer offenen Meldung niemals im Browser
+        # ausgegeben. Die Werkstatt versendet ihn erst nach Kontaktprüfung.
+        kunden_status_link=(
+            created_auftrag.get("kunden_status_local_url")
+            if created_auftrag and not public_mode
+            else ""
         ),
-        status_code,
+        kunden_status_share=share,
+        success_hinweise=(
+            session.pop(session_keys["warnings"], []) if created_auftrag else []
+        ),
+        versicherungen=[
+            item for item in list_versicherungen() if not versicherung_ist_platzhalter(item)
+        ],
+        max_dateien=SCHADENAUFNAHME_MAX_DATEIEN,
+        max_upload_mb=MAX_UPLOAD_MB,
     )
+    if public_mode:
+        return rendered, status_code, {"Cache-Control": "no-store"}
+    return rendered, status_code
 
 
 def render_admin_schadenaufnahme(form_data=None, form_errors=None, created_auftrag=None, status_code=200):
@@ -38967,6 +39110,137 @@ def render_admin_schadenaufnahme(form_data=None, form_errors=None, created_auftr
         form_errors=form_errors,
         created_auftrag=created_auftrag,
         status_code=status_code,
+    )
+
+
+@app.route("/privat")
+@app.route("/privat/")
+def privat_portal():
+    return render_template("privat_portal.html")
+
+
+def privat_status_token_from_input(value):
+    raw = clean_text(value)[:500]
+    match = re.search(r"/status/([A-Za-z0-9_-]{8,200})", raw)
+    token = match.group(1) if match else raw
+    token = re.sub(r"[^A-Za-z0-9_-]", "", token)
+    return token[:200]
+
+
+@app.route("/privat/status", methods=["GET", "POST"])
+def privat_status_zugang():
+    if request.method == "POST":
+        limited, wait_seconds = public_form_rate_limit_status("privat-status")
+        if limited:
+            flash(
+                f"Zu viele Versuche. Bitte in {login_wait_label(wait_seconds)} erneut probieren oder uns anrufen.",
+                "warning",
+            )
+            return (
+                render_template("privat_status_zugang.html", eingegebener_code=""),
+                429,
+                {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
+            )
+        record_public_form_attempt("privat-status")
+        if clean_text(request.form.get("website")):
+            return redirect(url_for("privat_status_zugang"))
+        token = privat_status_token_from_input(request.form.get("zugangscode"))
+        auftrag = get_auftrag_by_kunden_status_token(token) if token else None
+        if auftrag:
+            return redirect(url_for("kunden_status", token=token))
+        flash(
+            "Der Zugang konnte nicht geöffnet werden. Bitte Code prüfen oder den persönlichen Link aus unserer Nachricht verwenden.",
+            "warning",
+        )
+        return (
+            render_template("privat_status_zugang.html", eingegebener_code=""),
+            200,
+            {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
+        )
+    return (
+        render_template("privat_status_zugang.html", eingegebener_code=""),
+        200,
+        {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
+    )
+
+
+@app.route("/privat/schaden", methods=["GET", "POST"])
+def privat_schadenaufnahme():
+    session_keys = schadenaufnahme_session_keys(public_mode=True)
+    if request.method == "POST":
+        limited, wait_seconds = public_form_rate_limit_status("privat-schaden")
+        if limited:
+            return render_schadenaufnahme_assistent(
+                form_data=request.form,
+                form_errors=[
+                    f"Zu viele Meldungen in kurzer Zeit. Bitte in {login_wait_label(wait_seconds)} erneut versuchen oder uns anrufen."
+                ],
+                status_code=429,
+                public_mode=True,
+            )
+        record_public_form_attempt("privat-schaden")
+        if clean_text(request.form.get("website")):
+            return redirect(url_for("privat_portal"))
+        expected_token = clean_text(session.get(session_keys["form"]))
+        submitted_token = clean_text(request.form.get("schadenaufnahme_form_token"))
+        if (
+            not expected_token
+            or not submitted_token
+            or not hmac.compare_digest(expected_token, submitted_token)
+        ):
+            session[session_keys["form"]] = secrets.token_urlsafe(24)
+            return render_schadenaufnahme_assistent(
+                form_data=request.form,
+                form_errors=[
+                    "Das Formular war nicht mehr aktuell. Bitte Angaben prüfen und erneut senden."
+                ],
+                status_code=400,
+                public_mode=True,
+            )
+        payload, errors = schadenaufnahme_payload_from_form(
+            request.form,
+            require_address=True,
+        )
+        files, upload_errors = validate_schadenaufnahme_uploads(
+            request.files.getlist("dateien")
+        )
+        errors.extend(upload_errors)
+        if errors:
+            return render_schadenaufnahme_assistent(
+                form_data=request.form,
+                form_errors=errors,
+                status_code=400,
+                public_mode=True,
+            )
+        session.pop(session_keys["form"], None)
+        auftrag_id, warnings = create_schadenaufnahme_from_assistent(
+            payload,
+            files,
+            public_mode=True,
+        )
+        session[session_keys["success"]] = int(auftrag_id)
+        session[session_keys["warnings"]] = warnings
+        return redirect(url_for("privat_schadenaufnahme", erstellt=auftrag_id))
+
+    if request.args.get("neu"):
+        session.pop(session_keys["success"], None)
+        session.pop(session_keys["warnings"], None)
+    created_raw = clean_text(request.args.get("erstellt"))
+    created_id = int(created_raw) if created_raw.isdigit() else 0
+    allowed_created_id = int(session.get(session_keys["success"]) or 0)
+    created_auftrag = (
+        get_auftrag(created_id)
+        if created_id and created_id == allowed_created_id
+        else None
+    )
+    if created_auftrag and (
+        clean_text(created_auftrag.get("quelle")) != "privat"
+        or int(created_auftrag.get("autohaus_id") or 0)
+    ):
+        created_auftrag = None
+    return render_schadenaufnahme_assistent(
+        created_auftrag=created_auftrag,
+        public_mode=True,
     )
 
 
@@ -40303,6 +40577,113 @@ def admin_auftrag_whatsapp_hinweis(auftrag_id):
     if next_url.startswith("/admin"):
         return redirect(next_url)
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
+
+
+@app.route(
+    "/admin/auftrag/<int:auftrag_id>/kundenstatus-freigeben",
+    methods=["POST"],
+)
+@admin_required
+def admin_kundenstatus_freigeben(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+
+    ansicht = clean_text(request.form.get("ansicht"))
+    if ansicht == "auftrag":
+        redirect_url = url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation"
+    else:
+        redirect_url = (
+            url_for("admin_versicherung_schaden_detail", auftrag_id=auftrag_id)
+            + "#kundenkommunikation"
+        )
+
+    intake = parse_schadenaufnahme_json(auftrag.get("schaden_aufnahme_json"))
+    if (
+        clean_text(auftrag.get("quelle")) != "privat"
+        or int(auftrag.get("autohaus_id") or 0)
+        or clean_text(intake.get("erfasst_von")) != "privatkunden-portal"
+    ):
+        flash("Diese Freigabe ist nur für ungeprüfte Privatkunden-Meldungen vorgesehen.", "warning")
+        return redirect(redirect_url)
+    if auftrag.get("kunden_status_aktiv"):
+        flash("Der Kundenstatus ist bereits freigegeben.", "info")
+        return redirect(redirect_url)
+    if clean_text(request.form.get("kontakt_geprueft")) != "1":
+        flash("Bitte zuerst bestätigen, dass der Kundenkontakt persönlich geprüft wurde.", "warning")
+        return redirect(redirect_url)
+
+    whatsapp_requested = bool(
+        clean_text(intake.get("kontaktweg")).lower() == "whatsapp"
+        and strict_bool(intake.get("whatsapp_kontakt_gewuenscht"))
+    )
+    whatsapp_confirmed = clean_text(request.form.get("whatsapp_einwilligung")) == "1"
+    if whatsapp_confirmed and not whatsapp_requested:
+        flash(
+            "WhatsApp kann hier nur bestätigt werden, wenn der Kunde diesen Kanal in der Meldung gewählt hat.",
+            "warning",
+        )
+        return redirect(redirect_url)
+    if whatsapp_confirmed and not is_probable_mobile_number(auftrag.get("kontakt_telefon")):
+        flash("Für die WhatsApp-Freigabe ist eine gültige Mobilnummer erforderlich.", "warning")
+        return redirect(redirect_url)
+
+    jetzt = now_str()
+    intake["kontakt_verifiziert_am"] = jetzt
+    intake["kontakt_verifiziert_quelle"] = "werkstatt-kontaktpruefung"
+    intake["whatsapp_einwilligung"] = whatsapp_confirmed
+    intake["whatsapp_verifizierung_status"] = (
+        "bestaetigt" if whatsapp_confirmed else ("nicht_bestaetigt" if whatsapp_requested else "")
+    )
+    if whatsapp_confirmed:
+        intake["whatsapp_einwilligung_am"] = jetzt
+        intake["whatsapp_einwilligung_telefon_key"] = whatsapp_number_key(
+            auftrag.get("kontakt_telefon")
+        )
+        intake["whatsapp_einwilligung_quelle"] = "werkstatt-kontaktpruefung"
+    else:
+        intake["whatsapp_einwilligung_am"] = ""
+        intake["whatsapp_einwilligung_telefon_key"] = ""
+        intake["whatsapp_einwilligung_quelle"] = ""
+
+    neuer_token = secrets.token_urlsafe(18)
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET kunden_status_aktiv=1,
+            kunden_status_token=?,
+            schaden_aufnahme_json=?,
+            geaendert_am=?
+        WHERE id=?
+        """,
+        (
+            neuer_token,
+            json.dumps(intake, ensure_ascii=False),
+            jetzt,
+            auftrag_id,
+        ),
+    )
+    db.commit()
+    db.close()
+    add_benachrichtigung(
+        auftrag_id,
+        "Kundenstatus freigegeben",
+        (
+            "Der Kundenkontakt wurde persönlich geprüft. Statuszugang und WhatsApp wurden freigegeben."
+            if whatsapp_confirmed
+            else "Der Kundenkontakt wurde persönlich geprüft. Der Statuszugang wurde ohne WhatsApp freigegeben."
+        ),
+        quelle="werkstatt",
+    )
+    schedule_change_backup("admin-kundenstatus-freigeben")
+    flash(
+        "Kundenkontakt bestätigt und Statuszugang sicher freigegeben."
+        + (" WhatsApp-Einwilligung wurde dokumentiert." if whatsapp_confirmed else ""),
+        "success",
+    )
+    return redirect(redirect_url)
+
 
 @app.route("/admin/cockpit/eingang/<path:item_key>/oeffnen")
 @admin_required
@@ -43504,25 +43885,44 @@ def kunden_status(token):
         and clean_text(d.get("kategorie")) == "standard"
         and not d.get("reklamation_id")
     ]
-    return render_template(
-        "kunden_status.html",
-        auftrag=auftrag,
-        log=get_status_log(auftrag["id"]),
-        kunden_timeline=kunden_status_timeline(auftrag, prozess=versicherung_prozess, teile=versicherung_teile),
-        pflichtunterlagen=versicherung_pflichtunterlagen_status(auftrag, dateien) if auftrag.get("versicherung_id") else None,
-        freigabe_zusammenfassung=build_versicherung_freigabe_zusammenfassung(auftrag, dateien, chat_nachrichten),
-        versicherung_prozess=versicherung_prozess,
-        versicherung_teile=versicherung_teile,
-        terminfreigabe=terminfreigabe,
-        kunden_termine=kunden_termine,
-        kunden_nachrichten=list_benachrichtigungen(auftrag["id"], limit=5),
-        werkstatt_kontakt=werkstatt_kundenkontakt(auftrag),
-        kunden_bilder=kunden_bilder,
-        kunden_unterlagen=kunden_unterlagen,
-        schadenaufnahme_max_dateien=SCHADENAUFNAHME_MAX_DATEIEN,
-        schadenaufnahme_max_upload_mb=MAX_UPLOAD_MB,
-        kunden_status_link=request.url,
-        kunden_status_qr_url=url_for("kunden_status_qr", token=token),
+    return (
+        render_template(
+            "kunden_status.html",
+            auftrag=auftrag,
+            log=get_status_log(auftrag["id"]),
+            kunden_timeline=kunden_status_timeline(
+                auftrag,
+                prozess=versicherung_prozess,
+                teile=versicherung_teile,
+            ),
+            pflichtunterlagen=(
+                versicherung_pflichtunterlagen_status(auftrag, dateien)
+                if auftrag.get("versicherung_id")
+                else None
+            ),
+            freigabe_zusammenfassung=build_versicherung_freigabe_zusammenfassung(
+                auftrag,
+                dateien,
+                chat_nachrichten,
+            ),
+            versicherung_prozess=versicherung_prozess,
+            versicherung_teile=versicherung_teile,
+            terminfreigabe=terminfreigabe,
+            kunden_termine=kunden_termine,
+            kunden_nachrichten=list_benachrichtigungen(auftrag["id"], limit=5),
+            werkstatt_kontakt=werkstatt_kundenkontakt(auftrag),
+            kunden_bilder=kunden_bilder,
+            kunden_unterlagen=kunden_unterlagen,
+            schadenaufnahme_max_dateien=SCHADENAUFNAHME_MAX_DATEIEN,
+            schadenaufnahme_max_upload_mb=MAX_UPLOAD_MB,
+            kunden_status_link=request.url,
+            kunden_status_qr_url=url_for("kunden_status_qr", token=token),
+        ),
+        200,
+        {
+            "Cache-Control": "private, no-store, max-age=0",
+            "X-Robots-Tag": "noindex, nofollow, noarchive",
+        },
     )
 
 
@@ -43538,7 +43938,10 @@ def kunden_status_bild(token, datei_id):
         or not int(datei.get("kunde_sichtbar") or 0)
     ):
         abort(404)
-    return send_upload_file(datei, as_attachment=False)
+    response = app.make_response(send_upload_file(datei, as_attachment=False))
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
 
 
 @app.route("/status/<token>/termin", methods=["POST"])
@@ -43691,7 +44094,10 @@ def kunden_status_unterlagen(token):
         "kunde",
         "standard",
         upload_note=note,
-        analyze=True,
+        # Kunden-Uploads werden nur gespeichert. Unvertrauenswuerdige Bilder
+        # oder PDFs duerfen niemals im oeffentlichen Request durch OCR/PDF-
+        # Renderer dekodiert werden.
+        analyze=False,
         apply_analysis=False,
     )
     saved, updates = upload_result if isinstance(upload_result, tuple) else (int(upload_result or 0), {})
@@ -43700,7 +44106,7 @@ def kunden_status_unterlagen(token):
         return redirect(url_for("kunden_status", token=token) + "#unterlagen")
     reset_document_review_checks(
         auftrag["id"],
-        "Der Kunde hat neue Unterlagen nachgereicht. Erkannte Werte sind nur Vorschläge und müssen geprüft werden.",
+        "Der Kunde hat neue, noch nicht automatisch analysierte Unterlagen nachgereicht. Bitte Originaldateien prüfen.",
     )
     add_benachrichtigung(
         auftrag["id"],
@@ -43712,16 +44118,12 @@ def kunden_status_unterlagen(token):
         add_versicherung_aufgabe(
             auftrag["id"],
             "Unterlagen vom Kunden prüfen",
-            f"{saved} neue Datei(en) über den Kundenstatus; OCR-Ergebnisse nicht ungeprüft übernehmen.",
+            f"{saved} neue, bewusst nicht automatisch analysierte Datei(en) über den Kundenstatus prüfen.",
             quelle="kunde",
             typ="kunde_upload",
         )
     schedule_change_backup("kunden-status-unterlagen")
-    analysis_error = clean_text((updates or {}).get("_analysis_error"))
-    if analysis_error:
-        flash(f"{saved} Datei(en) gespeichert. Die automatische Auslese wird intern geprüft.", "warning")
-    else:
-        flash(f"{saved} Datei(en) sicher gespeichert. Die Werkstatt wurde informiert.", "success")
+    flash(f"{saved} Datei(en) sicher gespeichert. Die Werkstatt wurde informiert.", "success")
     return redirect(url_for("kunden_status", token=token) + "#unterlagen")
 
 

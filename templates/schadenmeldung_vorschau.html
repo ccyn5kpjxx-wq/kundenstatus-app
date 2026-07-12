@@ -372,8 +372,8 @@
   </style>
 </head>
 {% set form_data = form_data|default({}) %}
-<body{% if cockpit_mode %} class="cockpit-mode{% if partner_mode %} partner-mode{% endif %}"{% endif %} data-portal-mode="{% if partner_mode %}autohaus{% elif cockpit_mode %}werkstatt{% else %}vorschau{% endif %}">
-  <div class="preview-bar"><span class="preview-dot"></span>{% if partner_mode %}Autohaus-Portal · {{ portal_label }} · sicher mit Gärtner verbunden{% elif cockpit_mode %}Werkstatt-Cockpit · Schadenaufnahme, Fallakte und Kundenstatus direkt verbunden{% else %}Lokale Designvorschau · Es werden keine Daten oder Dateien gespeichert{% endif %}</div>
+<body{% if cockpit_mode or public_mode %} class="cockpit-mode{% if partner_mode %} partner-mode{% elif public_mode %} public-mode{% endif %}"{% endif %} data-portal-mode="{% if partner_mode %}autohaus{% elif public_mode %}privat{% elif cockpit_mode %}werkstatt{% else %}vorschau{% endif %}">
+  <div class="preview-bar"><span class="preview-dot"></span>{% if partner_mode %}Autohaus-Portal · {{ portal_label }} · sicher mit Gärtner verbunden{% elif public_mode %}Privatkunden-Portal · persönliche Schadenmeldung sicher mit Gärtner verbunden{% elif cockpit_mode %}Werkstatt-Cockpit · Schadenaufnahme, Fallakte und Kundenstatus direkt verbunden{% else %}Lokale Designvorschau · Es werden keine Daten oder Dateien gespeichert{% endif %}</div>
 
   <header class="topbar">
     <div class="topbar-inner">
@@ -382,9 +382,9 @@
         <div class="brand-copy"><strong>Gärtner Schadenservice</strong><span>Karosserie, Lack, Versicherung und Ersatzmobilität</span></div>
       </div>
       <div class="top-actions">
-        {% if cockpit_mode %}
+        {% if cockpit_mode or public_mode %}
         <a class="top-back" href="{{ back_url }}">← {{ back_label }}</a>
-        {% if not partner_mode %}<a class="top-status" href="{{ overview_url }}">Alle Versicherungsfälle</a>{% endif %}
+        {% if public_mode %}<a class="top-status" href="{{ overview_url }}">Reparaturstatus öffnen</a>{% elif not partner_mode %}<a class="top-status" href="{{ overview_url }}">Alle Versicherungsfälle</a>{% endif %}
         {% else %}
         <a class="top-phone" href="tel:+4915227706694">☎ 0152 277 066 94</a>
         <button class="top-status" type="button" data-show-status>Status ansehen</button>
@@ -400,7 +400,7 @@
         <h2>Ein Schaden.<br>Ein Ansprechpartner.</h2>
         <p>Sie melden uns kurz, was passiert ist. Wir prüfen alles persönlich und besprechen danach den nächsten Schritt.</p>
         <ul class="trust-list">
-          <li><span class="trust-check">✓</span><div><b>{% if partner_mode %}Direkt an Gärtner{% elif cockpit_mode %}Direkt als Fallakte{% else %}Ohne Login starten{% endif %}</b><small>{% if partner_mode %}Der Fall bleibt Ihrem Autohaus zugeordnet und erscheint sofort bei Gärtner zur Prüfung.{% elif cockpit_mode %}Nach dem Speichern stehen Vorgangsnummer, Fallakte und Kundenstatus sofort bereit.{% else %}Die Vorgangsnummer erhalten Sie direkt nach der Meldung.{% endif %}</small></div></li>
+          <li><span class="trust-check">✓</span><div><b>{% if partner_mode %}Direkt an Gärtner{% elif public_mode %}Ohne gemeinsames Passwort{% elif cockpit_mode %}Direkt als Fallakte{% else %}Ohne Login starten{% endif %}</b><small>{% if partner_mode %}Der Fall bleibt Ihrem Autohaus zugeordnet und erscheint sofort bei Gärtner zur Prüfung.{% elif public_mode %}Nach persönlicher Kontaktprüfung senden wir Ihnen Ihren geschützten Statuszugang.{% elif cockpit_mode %}Nach dem Speichern stehen Vorgangsnummer, Fallakte und Kundenstatus sofort bereit.{% else %}Die Vorgangsnummer erhalten Sie direkt nach der Meldung.{% endif %}</small></div></li>
           <li><span class="trust-check">✓</span><div><b>Fehlende Daten nachreichen</b><small>Angaben zum Unfallgegner dürfen zunächst unbekannt bleiben.</small></div></li>
           <li><span class="trust-check">✓</span><div><b>Persönlich geprüft</b><small>Keine automatische Reparaturfreigabe oder Abtretung.</small></div></li>
         </ul>
@@ -424,9 +424,9 @@
         <header class="wizard-head">
           <div class="wizard-title-row">
             <div>
-              <div class="eyebrow">{% if partner_mode %}Versicherungsfall für Kunden melden{% elif cockpit_mode %}Versicherungsschaden erfassen{% else %}Schaden online melden{% endif %}</div>
+              <div class="eyebrow">{% if partner_mode %}Versicherungsfall für Kunden melden{% elif public_mode %}Privaten Fahrzeugschaden melden{% elif cockpit_mode %}Versicherungsschaden erfassen{% else %}Schaden online melden{% endif %}</div>
               <h1>Unfall oder Fahrzeugschaden?</h1>
-              <p>{% if cockpit_mode %}In etwa fünf Minuten entsteht eine echte Fallakte mit sicherem Kundenstatus. Unbekannte Angaben können später ergänzt werden.{% else %}In etwa fünf Minuten ist alles bei uns. Unbekannte Angaben können Sie überspringen und später im Kundenstatus ergänzen.{% endif %}</p>
+              <p>{% if public_mode %}In etwa fünf Minuten ist Ihre Meldung sicher bei uns. Nach unserer persönlichen Kontaktprüfung senden wir Ihnen den geschützten Statuszugang zum Nachreichen und Mitverfolgen.{% elif cockpit_mode %}In etwa fünf Minuten entsteht eine echte Fallakte mit sicherem Kundenstatus. Unbekannte Angaben können später ergänzt werden.{% else %}In etwa fünf Minuten ist alles bei uns. Unbekannte Angaben können Sie überspringen und später im Kundenstatus ergänzen.{% endif %}</p>
             </div>
             <div class="time-pill">ca. 5 Minuten</div>
           </div>
@@ -443,8 +443,8 @@
           </nav>
         </header>
 
-        <form id="damage-form" {% if cockpit_mode %}method="POST" action="{{ form_action }}" enctype="multipart/form-data"{% endif %} novalidate>
-          {% if cockpit_mode %}
+        <form id="damage-form" {% if cockpit_mode or public_mode %}method="POST" action="{{ form_action }}" enctype="multipart/form-data"{% endif %} novalidate>
+          {% if cockpit_mode or public_mode %}
           <input type="hidden" name="schadenaufnahme_form_token" value="{{ form_token }}">
           <div style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden" aria-hidden="true"><label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
           {% endif %}
@@ -504,6 +504,11 @@
                   <div class="field"><label for="kunde-name">Vor- und Nachname <span class="required">*</span></label><input id="kunde-name" name="kunde_name" autocomplete="name" required maxlength="180" value="{{ form_data.get('kunde_name', '') }}" placeholder="z. B. Anna Schneider"></div>
                   <div class="field"><label for="kunde-telefon">Telefonnummer <span class="required">*</span></label><input id="kunde-telefon" name="kontakt_telefon" type="tel" autocomplete="tel" required maxlength="120" value="{{ form_data.get('kontakt_telefon', form_data.get('telefon', '')) }}" placeholder="z. B. 0171 1234567"></div>
                   <div class="field full"><label for="kunde-email">E-Mail-Adresse <span class="field-hint">(optional)</span></label><input id="kunde-email" name="kunde_email" type="email" autocomplete="email" maxlength="180" value="{{ form_data.get('kunde_email', form_data.get('email', '')) }}" placeholder="anna@beispiel.de"></div>
+                  {% if public_mode %}
+                  <div class="field full"><label for="kunde-strasse">Straße und Hausnummer <span class="required">*</span></label><input id="kunde-strasse" name="kunde_strasse" autocomplete="street-address" required maxlength="220" value="{{ form_data.get('kunde_strasse', '') }}" placeholder="z. B. Musterstraße 12"></div>
+                  <div class="field"><label for="kunde-plz">Postleitzahl <span class="required">*</span></label><input id="kunde-plz" name="kunde_plz" autocomplete="postal-code" inputmode="numeric" required maxlength="20" value="{{ form_data.get('kunde_plz', '') }}" placeholder="74821"></div>
+                  <div class="field"><label for="kunde-ort">Ort <span class="required">*</span></label><input id="kunde-ort" name="kunde_ort" autocomplete="address-level2" required maxlength="180" value="{{ form_data.get('kunde_ort', '') }}" placeholder="Mosbach"></div>
+                  {% endif %}
                 </div>
                 <div class="field-label" style="margin-top:15px">Bevorzugter Kontaktweg</div>
                 <div class="choice-row">
@@ -511,7 +516,7 @@
                   <label class="choice-chip"><input type="radio" name="kontaktweg" value="email" {% if form_data.get('kontaktweg') == 'email' %}checked{% endif %}><span class="choice-dot"></span>E-Mail</label>
                   <label class="choice-chip"><input type="radio" name="kontaktweg" value="whatsapp" {% if form_data.get('kontaktweg') == 'whatsapp' %}checked{% endif %}><span class="choice-dot"></span>WhatsApp</label>
                 </div>
-                <div class="field-hint" id="contact-hint">Wir melden uns telefonisch. WhatsApp wird nur nach dieser freiwilligen Auswahl genutzt.</div>
+                <div class="field-hint" id="contact-hint">{% if public_mode %}WhatsApp wird nur vorgemerkt und erst nach persönlicher Bestätigung Ihrer Rufnummer freigegeben.{% else %}Wir melden uns telefonisch. WhatsApp wird nur nach dieser freiwilligen Auswahl genutzt.{% endif %}</div>
               </div>
               <div class="form-section">
                 <div class="section-label">Ihr Fahrzeug</div>
@@ -603,7 +608,7 @@
             <div class="footer-actions">
               <button class="btn btn-secondary" type="button" id="back-button" hidden>Zurück</button>
               <button class="btn btn-primary" type="button" id="next-button">Weiter</button>
-              <button class="btn btn-primary" type="button" id="submit-button" hidden>{% if partner_mode %}Versicherungsfall sicher melden{% elif cockpit_mode %}Schadenfall sicher speichern{% else %}Meldung unverbindlich senden{% endif %}</button>
+              <button class="btn btn-primary" type="button" id="submit-button" hidden>{% if partner_mode %}Versicherungsfall sicher melden{% elif public_mode %}Schadenmeldung sicher senden{% elif cockpit_mode %}Schadenfall sicher speichern{% else %}Meldung unverbindlich senden{% endif %}</button>
             </div>
           </footer>
         </form>
@@ -612,22 +617,27 @@
       <section class="result-view" id="success-view" hidden>
         <div class="result-hero">
           <div class="success-icon">✓</div>
-          <h1>{% if partner_mode and created_auftrag %}Versicherungsfall wurde an Gärtner übergeben{% elif cockpit_mode and created_auftrag %}Schadenfall wurde angelegt{% else %}Ihre Schadenmeldung ist angekommen{% endif %}</h1>
-          <p>{% if partner_mode and created_auftrag %}Der Fall ist Ihrem Autohaus zugeordnet und liegt bei Gärtner zur Prüfung vor. Es wurde noch keine Reparatur oder Versicherungsfreigabe ausgelöst.{% elif cockpit_mode and created_auftrag %}Fallakte, Versicherungsübersicht und Kundenstatus sind jetzt mit demselben Vorgang verbunden. Es wurde noch keine Reparatur oder Versicherungsfreigabe ausgelöst.{% else %}Wir prüfen Ihre Angaben persönlich und melden uns über den gewählten Kontaktweg. Fehlende Unterlagen können Sie jederzeit im Kundenstatus ergänzen.{% endif %}</p>
+          <h1>{% if partner_mode and created_auftrag %}Versicherungsfall wurde an Gärtner übergeben{% elif public_mode and created_auftrag %}Ihre Schadenmeldung ist angekommen{% elif cockpit_mode and created_auftrag %}Schadenfall wurde angelegt{% else %}Ihre Schadenmeldung ist angekommen{% endif %}</h1>
+          <p>{% if partner_mode and created_auftrag %}Der Fall ist Ihrem Autohaus zugeordnet und liegt bei Gärtner zur Prüfung vor. Es wurde noch keine Reparatur oder Versicherungsfreigabe ausgelöst.{% elif public_mode and created_auftrag %}Wir prüfen Ihre Angaben und den angegebenen Kontakt persönlich. Danach senden wir Ihnen Ihren geschützten Statuszugang; erst dort können Unterlagen ergänzt und der weitere Ablauf verfolgt werden.{% elif cockpit_mode and created_auftrag %}Fallakte, Versicherungsübersicht und Kundenstatus sind jetzt mit demselben Vorgang verbunden. Es wurde noch keine Reparatur oder Versicherungsfreigabe ausgelöst.{% else %}Wir prüfen Ihre Angaben persönlich und melden uns über den gewählten Kontaktweg. Fehlende Unterlagen können Sie jederzeit im Kundenstatus ergänzen.{% endif %}</p>
           <div class="reference-box"><small>Vorgangsnummer</small><strong>{{ demo_ref }}</strong></div>
           <div class="next-grid">
             <div class="next-card"><span>1</span><strong>Werkstatt prüft</strong><p>Wir sichten Schadenart, Fahrzeugdaten und Unterlagen.</p></div>
             <div class="next-card"><span>2</span><strong>Wir melden uns</strong><p>Offene Fragen, Besichtigung und Mobilität klären wir persönlich.</p></div>
             <div class="next-card"><span>3</span><strong>Alles im Status</strong><p>Freigabe, Termin und Reparaturfortschritt bleiben sichtbar.</p></div>
           </div>
-          {% if cockpit_mode and created_auftrag %}
-          <div class="soft-note" style="text-align:left;margin-bottom:20px"><strong>Gespeichert:</strong> {{ created_auftrag['kunde_name'] }} · {{ created_auftrag['fahrzeug'] }} · {{ created_auftrag['kennzeichen'] }}{% if created_dateien %} · {{ created_dateien|length }} Datei(en){% endif %}. Erkannte Dokumentwerte bleiben bis zur Werkstattprüfung unverbindliche Vorschläge.</div>
+          {% if (cockpit_mode or public_mode) and created_auftrag %}
+          <div class="soft-note" style="text-align:left;margin-bottom:20px"><strong>Gespeichert:</strong> {{ created_auftrag['kunde_name'] }} · {{ created_auftrag['fahrzeug'] }} · {{ created_auftrag['kennzeichen'] }}{% if created_dateien %} · {{ created_dateien|length }} Datei(en){% endif %}. {% if public_mode %}Öffentlich hochgeladene Unterlagen werden bewusst nicht automatisch ausgelesen und von der Werkstatt geprüft.{% else %}Erkannte Dokumentwerte bleiben bis zur Werkstattprüfung unverbindliche Vorschläge.{% endif %}</div>
           {% for hinweis in success_hinweise %}<div class="soft-note is-warm" style="text-align:left;margin-bottom:12px"><strong>Hinweis:</strong> {{ hinweis }}</div>{% endfor %}
           {% else %}
           <div class="soft-note is-warm" style="text-align:left;margin-bottom:20px"><strong>Wichtig:</strong> Dies ist noch keine Reparatur- oder Versicherungsfreigabe. Es wurde in dieser lokalen Vorschau nichts übertragen oder gespeichert.</div>
           {% endif %}
           <div class="result-actions">
-            {% if cockpit_mode and created_auftrag %}
+            {% if public_mode and created_auftrag %}
+            <a class="btn btn-primary" href="tel:+4915227706694">Werkstatt anrufen</a>
+            <a class="btn btn-secondary" href="{{ mobility_url }}">Mietwagen anfragen</a>
+            <a class="btn btn-secondary" href="{{ new_case_url }}">Neue Schadenmeldung</a>
+            <a class="btn btn-secondary" href="{{ back_url }}">Zum Privatkunden-Portal</a>
+            {% elif cockpit_mode and created_auftrag %}
             <a class="btn btn-primary" href="{{ case_detail_url }}">{{ case_detail_label }}</a>
             {% if kunden_status_link %}<a class="btn btn-secondary" href="{{ kunden_status_link }}" target="_blank" rel="noopener">Kundenstatus öffnen</a>{% endif %}
             {% if kunden_status_share['can_whatsapp'] %}<a class="btn btn-secondary" href="{{ kunden_status_share['whatsapp_url'] }}" target="_blank" rel="noopener">Status per WhatsApp teilen</a>{% endif %}
@@ -643,7 +653,7 @@
         </div>
       </section>
 
-      {% if not cockpit_mode %}
+      {% if not cockpit_mode and not public_mode %}
       <section class="status-view" id="status-view" hidden>
         <div class="status-top">
           <div><div class="eyebrow">Ihr Kundenstatus · {{ demo_ref }}</div><h1>Wir prüfen Ihre Unterlagen</h1><p id="status-car-copy">BMW 320d Touring · MOS AB 123</p></div>
@@ -693,8 +703,8 @@
 
   <script>
     (() => {
-      const liveSubmit = {{ 'true' if cockpit_mode else 'false' }};
-      const hasCreatedCase = {{ 'true' if cockpit_mode and created_auftrag else 'false' }};
+      const liveSubmit = {{ 'true' if cockpit_mode or public_mode else 'false' }};
+      const hasCreatedCase = {{ 'true' if (cockpit_mode or public_mode) and created_auftrag else 'false' }};
       const maxFiles = {{ max_dateien|default(10) }};
       const labels = ["Schadenart", "Kontakt & Fahrzeug", "Unfall & Versicherung", "Fotos & Mobilität", "Prüfen & senden"];
       const typeLabels = {
@@ -784,7 +794,7 @@
         document.getElementById("review-type").textContent = typeLabels[type] || "Noch nicht ausgewählt";
         document.getElementById("review-date").textContent = [value("unfall_datum"), value("unfall_ort")].filter(Boolean).join(" · ") || "Zeit und Ort noch offen";
         document.getElementById("review-customer").textContent = value("kunde_name") || "Name fehlt";
-        document.getElementById("review-contact").textContent = [value("kontakt_telefon"), value("kunde_email"), contact ? `Kontakt: ${contact}` : ""].filter(Boolean).join(" · ");
+        document.getElementById("review-contact").textContent = [value("kontakt_telefon"), value("kunde_email"), [value("kunde_strasse"), value("kunde_plz"), value("kunde_ort")].filter(Boolean).join(" "), contact ? `Kontakt: ${contact}` : ""].filter(Boolean).join(" · ");
         document.getElementById("review-car").textContent = [value("fahrzeug"), value("kennzeichen")].filter(Boolean).join(" · ") || "Fahrzeug fehlt";
         document.getElementById("review-insurance").textContent = [value("versicherung_name"), value("schaden_nummer")].filter(Boolean).join(" · ") || "Versicherung wird geklärt";
         document.getElementById("review-mobility").textContent = mobilityLabels[mobility] || "Bitte klären";
@@ -854,6 +864,9 @@
         set("kunde_name", "Anna Schneider");
         set("kontakt_telefon", "0171 2345678");
         set("kunde_email", "anna.schneider@beispiel.de");
+        set("kunde_strasse", "Musterstraße 12");
+        set("kunde_plz", "74821");
+        set("kunde_ort", "Mosbach");
         selectRadio("kontaktweg", "telefon");
         set("kennzeichen", "MOS AB 123");
         set("fahrzeug", "BMW 320d Touring");

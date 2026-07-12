@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gärtner Privatkunden-Portal</title>
+  <meta name="description" content="Schaden melden, Mietwagen anfragen und den persönlichen Reparaturstatus bei Gärtner Karosserie & Lack öffnen.">
+  <style>
+    :root {
+      --ink: #16202a;
+      --ink-2: #0e1821;
+      --paper: #fffdf9;
+      --cream: #f3efe6;
+      --line: #ddd1c0;
+      --muted: #68747e;
+      --red: #e01000;
+      --red-dark: #a92a1b;
+      --soft-red: #f9e6e1;
+      --green: #1b7f53;
+      --shadow: 0 24px 70px rgba(22,32,42,.11);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: var(--cream); font-family: Arial, Helvetica, sans-serif; }
+    a { color: inherit; }
+    .shell { width: min(1180px, calc(100% - 34px)); margin: 0 auto; }
+    .topbar { background: rgba(255,253,249,.96); border-bottom: 1px solid var(--line); }
+    .topbar-inner { min-height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+    .logo { display: block; width: min(310px, 44vw); height: auto; }
+    .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .top-actions a { text-decoration: none; font-size: 14px; font-weight: 700; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); }
+    .top-actions .wa { color: #0e6d43; border-color: #b9dec9; background: #eef9f2; }
+    .hero { padding: 58px 0 34px; }
+    .hero-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(330px, .92fr); gap: 38px; align-items: stretch; }
+    .eyebrow { color: var(--red-dark); font-weight: 800; font-size: 13px; letter-spacing: .09em; text-transform: uppercase; }
+    h1 { margin: 15px 0 17px; max-width: 760px; color: var(--ink-2); font-size: clamp(38px, 5.4vw, 68px); line-height: .99; letter-spacing: -.045em; }
+    .lead { margin: 0; max-width: 680px; color: var(--muted); font-size: clamp(18px, 2vw, 22px); line-height: 1.55; }
+    .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 30px; }
+    .btn { display: inline-flex; justify-content: center; align-items: center; min-height: 52px; padding: 0 22px; border-radius: 14px; text-decoration: none; font-weight: 800; border: 1px solid transparent; }
+    .btn-primary { color: white; background: var(--red); box-shadow: 0 12px 25px rgba(224,16,0,.2); }
+    .btn-secondary { color: var(--ink); background: var(--paper); border-color: var(--line); }
+    .hero-note { margin-top: 17px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .portal-card { position: relative; overflow: hidden; padding: 30px; border-radius: 28px; color: white; background: var(--ink); box-shadow: var(--shadow); }
+    .portal-card::before { content: ""; position: absolute; width: 270px; height: 270px; right: -115px; top: -105px; border: 30px solid var(--red); border-radius: 50%; opacity: .75; }
+    .portal-card > * { position: relative; z-index: 1; }
+    .portal-card small { display: block; color: #bac4cb; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .portal-card h2 { margin: 12px 0 9px; font-size: 29px; line-height: 1.05; }
+    .portal-card p { color: #d7dde1; line-height: 1.55; margin: 0; }
+    .digital-list { display: grid; gap: 11px; margin-top: 25px; }
+    .digital-item { display: grid; grid-template-columns: 38px 1fr; gap: 12px; align-items: center; padding: 12px; border: 1px solid rgba(255,255,255,.13); border-radius: 14px; background: rgba(255,255,255,.055); }
+    .digital-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; color: white; background: var(--red); font-weight: 900; }
+    .digital-item b { display: block; font-size: 14px; }
+    .digital-item span { display: block; margin-top: 3px; color: #bfc9cf; font-size: 12px; line-height: 1.35; }
+    .section { padding: 26px 0 56px; }
+    .section-head { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+    .section-head h2 { margin: 7px 0 0; font-size: clamp(26px, 3.4vw, 39px); letter-spacing: -.03em; }
+    .section-head p { max-width: 530px; color: var(--muted); line-height: 1.55; margin: 0; }
+    .choice-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .choice { display: flex; flex-direction: column; min-height: 280px; padding: 25px; border: 1px solid var(--line); border-radius: 23px; background: var(--paper); text-decoration: none; box-shadow: 0 12px 35px rgba(22,32,42,.055); transition: transform .18s ease, box-shadow .18s ease; }
+    .choice:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+    .choice-number { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; color: white; background: var(--red); font-weight: 900; }
+    .choice h3 { margin: 23px 0 10px; font-size: 25px; line-height: 1.08; }
+    .choice p { margin: 0; color: var(--muted); line-height: 1.55; }
+    .choice strong { margin-top: auto; padding-top: 24px; color: var(--red-dark); }
+    .choice.is-dark { color: white; background: var(--ink); border-color: var(--ink); }
+    .choice.is-dark p { color: #c8d1d6; }
+    .choice.is-dark strong { color: #ff8b80; }
+    .service-bar { margin-top: 18px; padding: 18px 22px; color: white; background: var(--ink); border-radius: 18px; text-align: center; font-size: 13px; font-weight: 800; letter-spacing: .055em; }
+    footer { padding: 28px 0 35px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+    .footer-grid { display: flex; justify-content: space-between; gap: 22px; flex-wrap: wrap; line-height: 1.6; }
+    @media (max-width: 850px) {
+      .hero-grid, .choice-grid { grid-template-columns: 1fr; }
+      .portal-card { min-height: auto; }
+      .section-head { align-items: start; flex-direction: column; }
+    }
+    @media (max-width: 620px) {
+      .shell { width: min(100% - 22px, 1180px); }
+      .topbar-inner { min-height: 74px; }
+      .logo { width: 205px; }
+      .top-actions a:not(.wa) { display: none; }
+      .hero { padding-top: 38px; }
+      .hero-actions .btn { width: 100%; }
+      .portal-card, .choice { border-radius: 20px; }
+      .service-bar { line-height: 1.8; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a href="{{ url_for('privat_portal') }}" aria-label="Gärtner Privatkunden-Portal"><img class="logo" src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack"></a>
+      <nav class="top-actions" aria-label="Schnellkontakt">
+        <a href="tel:+4915227706694">0152 277 066 94</a>
+        <a class="wa" href="https://wa.me/4915227706694" target="_blank" rel="noopener">WhatsApp</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="shell hero-grid">
+        <div>
+          <div class="eyebrow">Privatkunden-Portal</div>
+          <h1>Ihr Fahrzeug.<br>Ein klarer digitaler Ablauf.</h1>
+          <p class="lead">Schaden melden, Mietwagen anfragen oder Ihren persönlichen Reparaturstatus öffnen - direkt, sicher und ohne Umwege.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="{{ url_for('privat_schadenaufnahme') }}">Schaden jetzt melden</a>
+            <a class="btn btn-secondary" href="{{ url_for('privat_status_zugang') }}">Reparaturstatus öffnen</a>
+          </div>
+          <div class="hero-note">Die erste Schadenmeldung ist noch kein Reparaturauftrag und keine Versicherungsfreigabe. Wir prüfen alles persönlich.</div>
+        </div>
+        <aside class="portal-card" aria-label="Digitale Vorteile">
+          <small>Digitaler Schadenservice</small>
+          <h2>Sie bleiben jederzeit informiert.</h2>
+          <p>Nach persönlicher Kontaktprüfung erhalten Sie Ihren geschützten Statuszugang.</p>
+          <div class="digital-list">
+            <div class="digital-item"><div class="digital-icon">1</div><div><b>Persönlicher Status</b><span>Fortschritt, Termine und nächste Schritte sehen.</span></div></div>
+            <div class="digital-item"><div class="digital-icon">2</div><div><b>Unterlagen nachreichen</b><span>Fotos und Dokumente sicher zum Vorgang ergänzen.</span></div></div>
+            <div class="digital-item"><div class="digital-icon">3</div><div><b>WhatsApp auf Wunsch</b><span>Statuslink teilen und bei Fertigstellung informiert werden.</span></div></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="eyebrow">Was möchten Sie erledigen?</div><h2>Direkt zum richtigen Bereich</h2></div>
+          <p>Jeder Einstieg führt in einen eigenen, klaren Ablauf. Persönliche Reparaturdaten bleiben nur mit Ihrem individuellen Statuscode erreichbar.</p>
+        </div>
+        <div class="choice-grid">
+          <a class="choice" href="{{ url_for('privat_schadenaufnahme') }}">
+            <span class="choice-number">01</span>
+            <h3>Unfall oder Schaden melden</h3>
+            <p>Kontaktdaten, Fahrzeug, Schadenhergang und Fotos in etwa fünf Minuten übermitteln.</p>
+            <strong>Schadenmeldung starten →</strong>
+          </a>
+          <a class="choice is-dark" href="{{ url_for('mietwagen_anfrage') }}">
+            <span class="choice-number">02</span>
+            <h3>Mietwagen anfragen</h3>
+            <p>Wunschtermin und Fahrzeugklasse angeben. Wir prüfen die Verfügbarkeit und melden uns.</p>
+            <strong>Mietwagen auswählen →</strong>
+          </a>
+          <a class="choice" href="{{ url_for('privat_status_zugang') }}">
+            <span class="choice-number">03</span>
+            <h3>Reparatur verfolgen</h3>
+            <p>Persönlichen Statuscode eingeben oder den individuellen QR-Code aus unserer Nachricht verwenden.</p>
+            <strong>Status sicher öffnen →</strong>
+          </a>
+        </div>
+        <div class="service-bar">KAROSSERIE · LACK · FAHRZEUGGLAS · AUTOMECHANIK · SCHADENSERVICE</div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell footer-grid">
+      <div><strong>Gärtner Karosserie & Lack GmbH</strong><br>Binauer Höhe 4 · 74821 Mosbach-Lohrbach</div>
+      <div><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a><br><a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div>
+    </div>
+  </footer>
+</body>
+</html>
