@@ -365,6 +365,8 @@
             </div>
             {% if auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
             <div class="text-muted small mt-2">Kein automatischer Versand: WhatsApp öffnet mit vorbereitetem Text. Bitte nur senden, wenn der Kunde den Kanal wünscht.</div>
+            {% elif auftrag['kunden_whatsapp_status']['whatsapp_consent_required'] and not auftrag['kunden_whatsapp_status']['whatsapp_consent_allowed'] %}
+            <div class="text-muted small mt-2">Keine gültige WhatsApp-Einwilligung für die aktuelle Mobilnummer dokumentiert.</div>
             {% elif auftrag['kontakt_telefon'] %}
             <div class="text-muted small mt-2">Die hinterlegte Nummer wirkt nicht wie eine Handynummer. Für WhatsApp bitte eine Mobilnummer eintragen.</div>
             {% else %}

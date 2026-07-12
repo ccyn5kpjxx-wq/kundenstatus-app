@@ -155,7 +155,7 @@
       {% for fall in schadenfaelle %}
       <div class="case-row">
         <div>
-          <div class="fw-bold">{{ fall['fahrzeug'] }}</div>
+          <div class="fw-bold">{{ fall['schaden_aufnahme_ref'] }} · {{ fall['fahrzeug'] }}</div>
           <div class="text-muted small">
             {{ fall['versicherung_name'] or 'Versicherung offen' }}
             {% if fall['kennzeichen'] %} · {{ fall['kennzeichen'] }}{% endif %}

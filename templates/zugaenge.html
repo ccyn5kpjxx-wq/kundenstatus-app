@@ -103,10 +103,16 @@
           <div class="text-muted small">{{ versicherung['kontakt_kompakt'] or 'Kein Kontakt hinterlegt' }}</div>
         </div>
         <div class="text-lg-end">
+          {% if versicherung['portal_aktiv'] %}
           <code>{{ versicherung['portal_url'] }}</code>
           <div class="small text-muted">Code: <strong>{{ versicherung['zugangscode'] }}</strong></div>
+          {% else %}
+          <span class="badge text-bg-secondary">Interner Platzhalter · kein Portalzugang</span>
+          {% endif %}
         </div>
+        {% if versicherung['portal_aktiv'] %}
         <a href="{{ versicherung['portal_url'] }}" target="_blank" class="btn btn-soft btn-sm">Lokal öffnen</a>
+        {% endif %}
       </div>
       {% endfor %}
     </div>

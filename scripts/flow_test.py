@@ -7,6 +7,7 @@ import sys
 import tempfile
 import uuid
 import zipfile
+from urllib.parse import parse_qs, urlsplit
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,7 +27,11 @@ def check(label, condition, detail=""):
 
 
 def extract_id_from_location(location):
-    target = (location or "").split("#", 1)[0].split("?", 1)[0].rstrip("/")
+    parsed = urlsplit(location or "")
+    erstellt = (parse_qs(parsed.query).get("erstellt") or [""])[0]
+    if erstellt.isdigit():
+        return int(erstellt)
+    target = parsed.path.rstrip("/")
     last = target.split("/")[-1]
     return int(last) if last.isdigit() else 0
 
@@ -299,29 +304,43 @@ def main():
         if admin_claim_id:
             portal.delete_auftrag(admin_claim_id)
 
-        versicherungen = portal.list_versicherungen()
+        versicherungen = [
+            item
+            for item in portal.list_versicherungen()
+            if not portal.versicherung_ist_platzhalter(item)
+        ]
         check("Versicherungen fuer Schadenprozess vorhanden", bool(versicherungen))
         flow_versicherung = versicherungen[0]
         partner_case_get = partner.get("/partner/kaesmann/versicherung/neu")
         check("Autohaus kann Versicherungsfall-Formular öffnen", partner_case_get.status_code == 200, f"Status {partner_case_get.status_code}")
+        with partner.session_transaction() as session:
+            partner_form_token = session.get(
+                f"partner_schadenaufnahme_form_token_{autohaus['id']}"
+            )
         partner_case_response = partner.post(
             "/partner/kaesmann/versicherung/neu",
             data=with_csrf(
                 partner,
                 {
-                    "versicherung_id": str(flow_versicherung["id"]),
+                    "schadenaufnahme_form_token": partner_form_token,
+                    "versicherung_name": flow_versicherung["name"],
                     "kunde_name": "Flow Autohaus Kunde",
-                    "versicherungsnehmer": "Flow Autohaus Kunde",
                     "kontakt_telefon": "0171 100200",
+                    "kunde_email": "flow-autohaus@example.test",
+                    "kontaktweg": "telefon",
                     "fahrzeug": "Skoda Octavia Flow",
                     "kennzeichen": "MOS-F 170",
-                    "fin_nummer": "TMBFLOWAUTOHAUS01",
+                    "fin_nummer": "TMB12345678901234",
+                    "unfall_datum": portal.date.today().isoformat(),
+                    "unfall_zeit": "10:30",
+                    "unfall_ort": "Mosbach",
                     "schaden_nummer": "FLOW-AH-170",
                     "versicherung_police": "POL-FLOW-AH",
-                    "versicherung_email": flow_versicherung.get("email") or "schaden@example.test",
                     "schadenart": "haftpflicht",
-                    "analyse_text": "Seitenschaden links",
                     "beschreibung": "Kunde meldet Unfall im Autohaus. Autohaus bereitet Meldung an Versicherung vor.",
+                    "gegner_unbekannt": "1",
+                    "mobilitaet": "unklar",
+                    "datenschutz_bestaetigt": "1",
                 },
             ),
         )

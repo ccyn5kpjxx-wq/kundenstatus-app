@@ -67,7 +67,12 @@ def main():
         admin_response = client.get("/admin/versicherungsschaden")
         admin_html = admin_response.get_data(as_text=True)
         assert admin_response.status_code == 200
-        assert "Werkstatt-Cockpit · Versicherungsschaden aufnehmen" in admin_html
+        assert "Werkstatt-Cockpit · Schadenaufnahme, Fallakte und Kundenstatus direkt verbunden" in admin_html
+        assert 'method="POST"' in admin_html
+        assert 'enctype="multipart/form-data"' in admin_html
+        assert 'name="dateien"' in admin_html
+        assert "Schadenfall sicher speichern" in admin_html
+        assert "lokale Arbeitsversion ohne Speicherung" not in admin_html
         assert "Alle Versicherungsfälle" in admin_html
         assert 'href="/admin/versicherung/faelle"' in admin_html
 
@@ -84,7 +89,7 @@ def main():
         assert cockpit_html.count('href="/admin/versicherungsschaden"') >= 2
         assert "Versicherungsschaden aufnehmen und danach im Portal weiterbearbeiten." in cockpit_html
 
-    print("Schadenvorschau/Cockpit-Einbau: 24/24 Pruefungen erfolgreich")
+    print("Schadenvorschau/Cockpit-Einbau: alle Pruefungen erfolgreich")
 
 
 if __name__ == "__main__":

@@ -649,7 +649,9 @@
             </div>
             {% if auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
             <div class="text-muted small mt-2">WhatsApp wird nur vorbereitet und erst im geöffneten Chat versendet.</div>
-            {% elif auftrag['kontakt_telefon'] %}
+          {% elif auftrag['kunden_whatsapp_status']['whatsapp_consent_required'] and not auftrag['kunden_whatsapp_status']['whatsapp_consent_allowed'] %}
+          <div class="text-muted small mt-2">Keine gültige WhatsApp-Einwilligung für die aktuelle Mobilnummer dokumentiert.</div>
+          {% elif auftrag['kontakt_telefon'] %}
             <div class="text-muted small mt-2">Für WhatsApp bitte eine Mobilnummer hinterlegen.</div>
             {% else %}
             <div class="text-muted small mt-2">Mit einer Handynummer kann der Status später per WhatsApp vorbereitet werden.</div>

@@ -1,10 +1,11 @@
+{% set partner_mode = partner_mode|default(false) %}
 <!DOCTYPE html>
 <html lang="de">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex,nofollow,noarchive">
-  <title>{% if cockpit_mode %}Versicherungsschaden aufnehmen{% else %}Schaden online melden{% endif %} · Gärtner Karosserie &amp; Lack</title>
+  <title>{% if partner_mode %}Versicherungsfall melden{% elif cockpit_mode %}Versicherungsschaden aufnehmen{% else %}Schaden online melden{% endif %} · Gärtner Karosserie &amp; Lack</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
@@ -370,8 +371,9 @@
     }
   </style>
 </head>
-<body{% if cockpit_mode %} class="cockpit-mode"{% endif %}>
-  <div class="preview-bar"><span class="preview-dot"></span>{% if cockpit_mode %}Werkstatt-Cockpit · Versicherungsschaden aufnehmen · lokale Arbeitsversion ohne Speicherung{% else %}Lokale Designvorschau · Es werden keine Daten oder Dateien gespeichert{% endif %}</div>
+{% set form_data = form_data|default({}) %}
+<body{% if cockpit_mode %} class="cockpit-mode{% if partner_mode %} partner-mode{% endif %}"{% endif %} data-portal-mode="{% if partner_mode %}autohaus{% elif cockpit_mode %}werkstatt{% else %}vorschau{% endif %}">
+  <div class="preview-bar"><span class="preview-dot"></span>{% if partner_mode %}Autohaus-Portal · {{ portal_label }} · sicher mit Gärtner verbunden{% elif cockpit_mode %}Werkstatt-Cockpit · Schadenaufnahme, Fallakte und Kundenstatus direkt verbunden{% else %}Lokale Designvorschau · Es werden keine Daten oder Dateien gespeichert{% endif %}</div>
 
   <header class="topbar">
     <div class="topbar-inner">
@@ -381,8 +383,8 @@
       </div>
       <div class="top-actions">
         {% if cockpit_mode %}
-        <a class="top-back" href="{{ url_for('betriebs_cockpit') }}">← Cockpit</a>
-        <a class="top-status" href="{{ url_for('admin_versicherung') }}">Alle Versicherungsfälle</a>
+        <a class="top-back" href="{{ back_url }}">← {{ back_label }}</a>
+        {% if not partner_mode %}<a class="top-status" href="{{ overview_url }}">Alle Versicherungsfälle</a>{% endif %}
         {% else %}
         <a class="top-phone" href="tel:+4915227706694">☎ 0152 277 066 94</a>
         <button class="top-status" type="button" data-show-status>Status ansehen</button>
@@ -398,7 +400,7 @@
         <h2>Ein Schaden.<br>Ein Ansprechpartner.</h2>
         <p>Sie melden uns kurz, was passiert ist. Wir prüfen alles persönlich und besprechen danach den nächsten Schritt.</p>
         <ul class="trust-list">
-          <li><span class="trust-check">✓</span><div><b>Ohne Login starten</b><small>Die Vorgangsnummer erhalten Sie direkt nach der Meldung.</small></div></li>
+          <li><span class="trust-check">✓</span><div><b>{% if partner_mode %}Direkt an Gärtner{% elif cockpit_mode %}Direkt als Fallakte{% else %}Ohne Login starten{% endif %}</b><small>{% if partner_mode %}Der Fall bleibt Ihrem Autohaus zugeordnet und erscheint sofort bei Gärtner zur Prüfung.{% elif cockpit_mode %}Nach dem Speichern stehen Vorgangsnummer, Fallakte und Kundenstatus sofort bereit.{% else %}Die Vorgangsnummer erhalten Sie direkt nach der Meldung.{% endif %}</small></div></li>
           <li><span class="trust-check">✓</span><div><b>Fehlende Daten nachreichen</b><small>Angaben zum Unfallgegner dürfen zunächst unbekannt bleiben.</small></div></li>
           <li><span class="trust-check">✓</span><div><b>Persönlich geprüft</b><small>Keine automatische Reparaturfreigabe oder Abtretung.</small></div></li>
         </ul>
@@ -422,9 +424,9 @@
         <header class="wizard-head">
           <div class="wizard-title-row">
             <div>
-              <div class="eyebrow">Schaden online melden</div>
+              <div class="eyebrow">{% if partner_mode %}Versicherungsfall für Kunden melden{% elif cockpit_mode %}Versicherungsschaden erfassen{% else %}Schaden online melden{% endif %}</div>
               <h1>Unfall oder Fahrzeugschaden?</h1>
-              <p>In etwa fünf Minuten ist alles bei uns. Unbekannte Angaben können Sie überspringen und später im Kundenstatus ergänzen.</p>
+              <p>{% if cockpit_mode %}In etwa fünf Minuten entsteht eine echte Fallakte mit sicherem Kundenstatus. Unbekannte Angaben können später ergänzt werden.{% else %}In etwa fünf Minuten ist alles bei uns. Unbekannte Angaben können Sie überspringen und später im Kundenstatus ergänzen.{% endif %}</p>
             </div>
             <div class="time-pill">ca. 5 Minuten</div>
           </div>
@@ -441,36 +443,48 @@
           </nav>
         </header>
 
-        <form id="damage-form" novalidate>
+        <form id="damage-form" {% if cockpit_mode %}method="POST" action="{{ form_action }}" enctype="multipart/form-data"{% endif %} novalidate>
+          {% if cockpit_mode %}
+          <input type="hidden" name="schadenaufnahme_form_token" value="{{ form_token }}">
+          <div style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden" aria-hidden="true"><label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+          {% endif %}
           <div class="wizard-body">
+            {% if form_errors %}
+            <div class="soft-note is-warm" role="alert" style="margin-bottom:20px">
+              <strong>Bitte prüfen:</strong>
+              <ul style="margin:8px 0 0;padding-left:20px">
+                {% for error in form_errors %}<li>{{ error }}</li>{% endfor %}
+              </ul>
+            </div>
+            {% endif %}
             <section class="step-panel" data-step="1">
               <div class="step-kicker">Schritt 1</div>
               <h2>Was ist passiert?</h2>
               <p class="step-intro">Wählen Sie die Beschreibung, die am besten passt. Wenn Sie unsicher sind, klären wir die Schadenart gemeinsam.</p>
               <div class="type-grid">
                 <label class="type-card">
-                  <input type="radio" name="schadenart" value="haftpflicht" required>
+                  <input type="radio" name="schadenart" value="haftpflicht" required {% if form_data.get('schadenart') == 'haftpflicht' %}checked{% endif %}>
                   <span class="type-card-top"><span class="type-icon">HP</span><span class="type-radio"></span></span>
                   <strong>Jemand anderes ist schuld</strong>
                   <p>Auffahrunfall, Parkrempler oder Vorfahrtverletzung durch einen anderen.</p>
                   <span class="type-badge">Haftpflichtschaden</span>
                 </label>
                 <label class="type-card">
-                  <input type="radio" name="schadenart" value="kasko" required>
+                  <input type="radio" name="schadenart" value="kasko" required {% if form_data.get('schadenart') in ['kasko', 'vollkasko'] %}checked{% endif %}>
                   <span class="type-card-top"><span class="type-icon">VK</span><span class="type-radio"></span></span>
                   <strong>Selbst verursacht oder Vandalismus</strong>
                   <p>Eigener Unfall, unbekannter Verursacher oder mutwillige Beschädigung.</p>
                   <span class="type-badge">Vollkasko</span>
                 </label>
                 <label class="type-card">
-                  <input type="radio" name="schadenart" value="teilkasko" required>
+                  <input type="radio" name="schadenart" value="teilkasko" required {% if form_data.get('schadenart') == 'teilkasko' %}checked{% endif %}>
                   <span class="type-card-top"><span class="type-icon">TK</span><span class="type-radio"></span></span>
                   <strong>Glas, Hagel, Wild oder Sturm</strong>
                   <p>Glasschaden, Unwetter, Wildunfall, Diebstahl, Brand oder Marder.</p>
                   <span class="type-badge">Teilkasko</span>
                 </label>
                 <label class="type-card">
-                  <input type="radio" name="schadenart" value="unklar" required>
+                  <input type="radio" name="schadenart" value="unklar" required {% if form_data.get('schadenart') in ['unklar', 'unbekannt'] %}checked{% endif %}>
                   <span class="type-card-top"><span class="type-icon">?</span><span class="type-radio"></span></span>
                   <strong>Ich bin nicht sicher</strong>
                   <p>Beschreiben Sie kurz den Schaden. Wir rufen zurück und ordnen ihn richtig ein.</p>
@@ -487,24 +501,24 @@
               <div class="form-section">
                 <div class="section-label">Ihre Kontaktdaten</div>
                 <div class="field-grid">
-                  <div class="field"><label for="kunde-name">Vor- und Nachname <span class="required">*</span></label><input id="kunde-name" name="kunde_name" autocomplete="name" required placeholder="z. B. Anna Schneider"></div>
-                  <div class="field"><label for="kunde-telefon">Telefonnummer <span class="required">*</span></label><input id="kunde-telefon" name="telefon" type="tel" autocomplete="tel" required placeholder="z. B. 0171 1234567"></div>
-                  <div class="field full"><label for="kunde-email">E-Mail-Adresse <span class="field-hint">(optional)</span></label><input id="kunde-email" name="email" type="email" autocomplete="email" placeholder="anna@beispiel.de"></div>
+                  <div class="field"><label for="kunde-name">Vor- und Nachname <span class="required">*</span></label><input id="kunde-name" name="kunde_name" autocomplete="name" required maxlength="180" value="{{ form_data.get('kunde_name', '') }}" placeholder="z. B. Anna Schneider"></div>
+                  <div class="field"><label for="kunde-telefon">Telefonnummer <span class="required">*</span></label><input id="kunde-telefon" name="kontakt_telefon" type="tel" autocomplete="tel" required maxlength="120" value="{{ form_data.get('kontakt_telefon', form_data.get('telefon', '')) }}" placeholder="z. B. 0171 1234567"></div>
+                  <div class="field full"><label for="kunde-email">E-Mail-Adresse <span class="field-hint">(optional)</span></label><input id="kunde-email" name="kunde_email" type="email" autocomplete="email" maxlength="180" value="{{ form_data.get('kunde_email', form_data.get('email', '')) }}" placeholder="anna@beispiel.de"></div>
                 </div>
                 <div class="field-label" style="margin-top:15px">Bevorzugter Kontaktweg</div>
                 <div class="choice-row">
-                  <label class="choice-chip"><input type="radio" name="kontaktweg" value="telefon" checked><span class="choice-dot"></span>Telefon</label>
-                  <label class="choice-chip"><input type="radio" name="kontaktweg" value="email"><span class="choice-dot"></span>E-Mail</label>
-                  <label class="choice-chip"><input type="radio" name="kontaktweg" value="whatsapp"><span class="choice-dot"></span>WhatsApp</label>
+                  <label class="choice-chip"><input type="radio" name="kontaktweg" value="telefon" {% if not form_data or form_data.get('kontaktweg', 'telefon') == 'telefon' %}checked{% endif %}><span class="choice-dot"></span>Telefon</label>
+                  <label class="choice-chip"><input type="radio" name="kontaktweg" value="email" {% if form_data.get('kontaktweg') == 'email' %}checked{% endif %}><span class="choice-dot"></span>E-Mail</label>
+                  <label class="choice-chip"><input type="radio" name="kontaktweg" value="whatsapp" {% if form_data.get('kontaktweg') == 'whatsapp' %}checked{% endif %}><span class="choice-dot"></span>WhatsApp</label>
                 </div>
                 <div class="field-hint" id="contact-hint">Wir melden uns telefonisch. WhatsApp wird nur nach dieser freiwilligen Auswahl genutzt.</div>
               </div>
               <div class="form-section">
                 <div class="section-label">Ihr Fahrzeug</div>
                 <div class="field-grid">
-                  <div class="field"><label for="kennzeichen">Kennzeichen <span class="required">*</span></label><input id="kennzeichen" name="kennzeichen" required autocapitalize="characters" placeholder="MOS · AB 123"></div>
-                  <div class="field"><label for="fahrzeug">Marke und Modell <span class="required">*</span></label><input id="fahrzeug" name="fahrzeug" required placeholder="z. B. BMW 3er Touring"></div>
-                  <div class="field full"><label for="fin">Fahrgestellnummer <span class="field-hint">(optional)</span></label><input id="fin" name="fin" maxlength="17" autocapitalize="characters" placeholder="17-stellige FIN oder später nachreichen"><div class="field-hint">Ein Foto des Fahrzeugscheins reicht ebenfalls. Wir übernehmen erkannte Daten erst nach Ihrer Kontrolle.</div></div>
+                  <div class="field"><label for="kennzeichen">Kennzeichen <span class="required">*</span></label><input id="kennzeichen" name="kennzeichen" required maxlength="40" autocapitalize="characters" value="{{ form_data.get('kennzeichen', '') }}" placeholder="MOS · AB 123"></div>
+                  <div class="field"><label for="fahrzeug">Marke und Modell <span class="required">*</span></label><input id="fahrzeug" name="fahrzeug" required maxlength="220" value="{{ form_data.get('fahrzeug', '') }}" placeholder="z. B. BMW 3er Touring"></div>
+                  <div class="field full"><label for="fin">Fahrgestellnummer <span class="field-hint">(optional)</span></label><input id="fin" name="fin_nummer" maxlength="17" autocapitalize="characters" value="{{ form_data.get('fin_nummer', form_data.get('fin', '')) }}" placeholder="17-stellige FIN oder später nachreichen"><div class="field-hint">Ein Foto des Fahrzeugscheins reicht ebenfalls. Erkannte Daten erscheinen nur als Prüfvorschlag und überschreiben Ihre Eingabe nicht.</div></div>
                 </div>
               </div>
             </section>
@@ -515,28 +529,28 @@
               <p class="step-intro">Eine kurze, sachliche Beschreibung genügt. Sie müssen hier keine rechtliche Bewertung abgeben.</p>
               <div class="form-section">
                 <div class="field-grid three">
-                  <div class="field"><label for="unfall-datum">Datum <span class="required">*</span></label><input id="unfall-datum" name="unfall_datum" type="date" max="{{ heute_iso }}" required></div>
-                  <div class="field"><label for="unfall-zeit">Uhrzeit</label><input id="unfall-zeit" name="unfall_zeit" type="time"></div>
-                  <div class="field"><label for="unfall-ort">Ort <span class="required">*</span></label><input id="unfall-ort" name="unfall_ort" required placeholder="Straße, Parkplatz oder Ort"></div>
-                  <div class="field full"><label for="beschreibung">Was ist passiert? <span class="required">*</span></label><textarea id="beschreibung" name="beschreibung" required placeholder="Beschreiben Sie den Ablauf in wenigen Sätzen …"></textarea><div class="field-hint">Keine Sorge: Sie können den Text vor dem Absenden noch einmal prüfen.</div></div>
+                  <div class="field"><label for="unfall-datum">Datum <span class="required">*</span></label><input id="unfall-datum" name="unfall_datum" type="date" max="{{ heute_iso }}" required value="{{ form_data.get('unfall_datum', '') }}"></div>
+                  <div class="field"><label for="unfall-zeit">Uhrzeit</label><input id="unfall-zeit" name="unfall_zeit" type="time" value="{{ form_data.get('unfall_zeit', '') }}"></div>
+                  <div class="field"><label for="unfall-ort">Ort <span class="required">*</span></label><input id="unfall-ort" name="unfall_ort" required maxlength="300" value="{{ form_data.get('unfall_ort', '') }}" placeholder="Straße, Parkplatz oder Ort"></div>
+                  <div class="field full"><label for="beschreibung">Was ist passiert? <span class="required">*</span></label><textarea id="beschreibung" name="beschreibung" required maxlength="4000" placeholder="Beschreiben Sie den Ablauf in wenigen Sätzen …">{{ form_data.get('beschreibung', '') }}</textarea><div class="field-hint">Keine Sorge: Sie können den Text vor dem Absenden noch einmal prüfen.</div></div>
                 </div>
               </div>
               <div class="form-section">
                 <div class="section-label" id="insurance-heading">Versicherungsdaten</div>
                 <div class="field-grid">
-                  <div class="field"><label for="versicherung">Versicherung</label><input id="versicherung" name="versicherung" placeholder="z. B. HUK, Allianz, VHV"></div>
-                  <div class="field"><label for="police">Police / Vertragsnummer</label><input id="police" name="police" placeholder="Falls zur Hand"></div>
-                  <div class="field full"><label for="schadennummer">Schadennummer</label><input id="schadennummer" name="schadennummer" placeholder="Falls bereits von der Versicherung vergeben"></div>
+                  <div class="field"><label for="versicherung">Versicherung</label><input id="versicherung" name="versicherung_name" list="versicherung-liste" maxlength="180" value="{{ form_data.get('versicherung_name', form_data.get('versicherung', '')) }}" placeholder="z. B. HUK, Allianz, VHV"><datalist id="versicherung-liste">{% for item in versicherungen|default([]) %}<option value="{{ item['name'] }}">{% endfor %}</datalist></div>
+                  <div class="field"><label for="police">Police / Vertragsnummer</label><input id="police" name="versicherung_police" maxlength="180" value="{{ form_data.get('versicherung_police', form_data.get('police', '')) }}" placeholder="Falls zur Hand"></div>
+                  <div class="field full"><label for="schadennummer">Schadennummer</label><input id="schadennummer" name="schaden_nummer" maxlength="180" value="{{ form_data.get('schaden_nummer', form_data.get('schadennummer', '')) }}" placeholder="Falls bereits von der Versicherung vergeben"></div>
                 </div>
               </div>
               <div class="form-section" id="opponent-section">
                 <div class="section-label">Angaben zum Unfallgegner</div>
-                <div class="unknown-toggle"><input id="gegner-unbekannt" type="checkbox" name="gegner_unbekannt" checked><label for="gegner-unbekannt"><b>Daten fehlen oder sind noch nicht vollständig.</b><br>Kein Problem – ich reiche sie später nach.</label></div>
+                <div class="unknown-toggle"><input id="gegner-unbekannt" type="checkbox" name="gegner_unbekannt" value="1" {% if not form_data or form_data.get('gegner_unbekannt') %}checked{% endif %}><label for="gegner-unbekannt"><b>Daten fehlen oder sind noch nicht vollständig.</b><br>Kein Problem – ich reiche sie später nach.</label></div>
                 <div class="field-grid" id="opponent-fields" hidden>
-                  <div class="field"><label for="gegner-name">Name</label><input id="gegner-name" name="gegner_name"></div>
-                  <div class="field"><label for="gegner-kennzeichen">Kennzeichen</label><input id="gegner-kennzeichen" name="gegner_kennzeichen" autocapitalize="characters"></div>
-                  <div class="field"><label for="gegner-versicherung">Versicherung</label><input id="gegner-versicherung" name="gegner_versicherung"></div>
-                  <div class="field"><label for="gegner-schadennummer">Schadennummer</label><input id="gegner-schadennummer" name="gegner_schadennummer"></div>
+                  <div class="field"><label for="gegner-name">Name</label><input id="gegner-name" name="haftpflicht_gegner_name" maxlength="180" value="{{ form_data.get('haftpflicht_gegner_name', form_data.get('gegner_name', '')) }}"></div>
+                  <div class="field"><label for="gegner-kennzeichen">Kennzeichen</label><input id="gegner-kennzeichen" name="haftpflicht_gegner_kennzeichen" maxlength="40" value="{{ form_data.get('haftpflicht_gegner_kennzeichen', form_data.get('gegner_kennzeichen', '')) }}" autocapitalize="characters"></div>
+                  <div class="field"><label for="gegner-versicherung">Versicherung</label><input id="gegner-versicherung" name="haftpflicht_versicherung_name" maxlength="180" value="{{ form_data.get('haftpflicht_versicherung_name', form_data.get('gegner_versicherung', '')) }}"></div>
+                  <div class="field"><label for="gegner-schadennummer">Schadennummer</label><input id="gegner-schadennummer" name="haftpflicht_schaden_nummer" maxlength="180" value="{{ form_data.get('haftpflicht_schaden_nummer', form_data.get('gegner_schadennummer', '')) }}"></div>
                 </div>
                 <div class="soft-note"><strong>Keine Gegnerunterschrift nötig:</strong> Für die erste Meldung verlangen wir keine E-Mail, Police oder Unterschrift des Unfallgegners.</div>
               </div>
@@ -545,10 +559,10 @@
             <section class="step-panel" data-step="4" hidden>
               <div class="step-kicker">Schritt 4</div>
               <h2>Zeigen Sie uns den Schaden</h2>
-              <p class="step-intro">Mehrere Fotos, Videos und PDFs dürfen gemeinsam ausgewählt werden. In dieser Designvorschau bleiben sie ausschließlich auf Ihrem Gerät.</p>
+              <p class="step-intro">{% if cockpit_mode %}Mehrere Fotos und PDFs werden sicher in derselben Fallakte gespeichert. Die Auslese liefert nur Prüfvorschläge und ändert keine bestätigten Eingaben.{% else %}Mehrere Fotos und PDFs dürfen gemeinsam ausgewählt werden. In dieser Designvorschau bleiben sie ausschließlich auf Ihrem Gerät.{% endif %}</p>
               <div class="upload-zone" id="upload-zone">
-                <input id="dateien" type="file" multiple accept="image/*,video/*,.pdf,application/pdf" aria-describedby="upload-copy">
-                <div><div class="upload-icon">＋</div><strong>Fotos oder Unterlagen auswählen</strong><span id="upload-copy">Antippen oder Dateien hierher ziehen · Bilder, Video oder PDF</span></div>
+                <input id="dateien" name="dateien" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,image/jpeg,image/png,image/webp,image/heic,application/pdf" aria-describedby="upload-copy">
+                <div><div class="upload-icon">＋</div><strong>Fotos oder Unterlagen auswählen</strong><span id="upload-copy">Antippen oder hierher ziehen · JPG, PNG, WebP, HEIC oder PDF · max. {{ max_dateien|default(10) }} Dateien / {{ max_upload_mb|default(25) }} MB gesamt</span></div>
               </div>
               <div class="upload-file-list" id="upload-files" aria-live="polite"></div>
               <div class="photo-guide">
@@ -560,9 +574,9 @@
               <div class="form-section">
                 <div class="section-label">Benötigen Sie Ersatzmobilität?</div>
                 <div class="mobility-grid">
-                  <label class="mobility-card"><input type="radio" name="mobilitaet" value="ja"><strong>Ja</strong><span>Ersatzwagen benötigt</span></label>
-                  <label class="mobility-card"><input type="radio" name="mobilitaet" value="nein"><strong>Nein</strong><span>Kein Fahrzeug nötig</span></label>
-                  <label class="mobility-card"><input type="radio" name="mobilitaet" value="unklar" checked><strong>Noch unklar</strong><span>Bitte mit mir klären</span></label>
+                  <label class="mobility-card"><input type="radio" name="mobilitaet" value="ja" {% if form_data.get('mobilitaet') == 'ja' %}checked{% endif %}><strong>Ja</strong><span>Ersatzwagen benötigt</span></label>
+                  <label class="mobility-card"><input type="radio" name="mobilitaet" value="nein" {% if form_data.get('mobilitaet') == 'nein' %}checked{% endif %}><strong>Nein</strong><span>Kein Fahrzeug nötig</span></label>
+                  <label class="mobility-card"><input type="radio" name="mobilitaet" value="unklar" {% if not form_data or form_data.get('mobilitaet', 'unklar') in ['unklar', 'unbekannt'] %}checked{% endif %}><strong>Noch unklar</strong><span>Bitte mit mir klären</span></label>
                 </div>
                 <div class="soft-note is-warm"><strong>Direkt verbunden:</strong> Wenn Sie einen Ersatzwagen wünschen, prüfen wir den Zeitraum gemeinsam mit Schaden, Reparaturtermin und Versicherung – ohne zweite Anfrage.</div>
               </div>
@@ -580,7 +594,7 @@
                 <div class="review-card full"><small>Ihre Beschreibung</small><strong id="review-description">–</strong><span>Kann nach dem Absenden im Kundenstatus ergänzt werden.</span></div>
               </div>
               <div class="soft-note"><strong>Was nach dem Absenden passiert:</strong> Wir prüfen Schaden, Unterlagen und Versicherungsweg. Erst danach erhalten Sie separat einen Reparaturauftrag beziehungsweise – falls erforderlich – eine Abtretung zur Prüfung und Unterschrift.</div>
-              <div class="consent"><input id="datenschutz-ok" type="checkbox" required><label for="datenschutz-ok">Ich bestätige, dass die Angaben nach meinem Wissen richtig sind, und stimme der Verarbeitung zur Bearbeitung dieser Schadenmeldung zu. Hinweise dazu stehen in der <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>. <span class="required">*</span></label></div>
+              <div class="consent"><input id="datenschutz-ok" name="datenschutz_bestaetigt" value="1" type="checkbox" required {% if form_data.get('datenschutz_bestaetigt') == '1' %}checked{% endif %}><label for="datenschutz-ok">{% if partner_mode %}Wir bestätigen, dass wir die Angaben im Auftrag des Kunden aufgenommen und die Datenschutzinformation zur Schadenbearbeitung dokumentiert haben.{% elif cockpit_mode %}Ich bestätige, dass ich die Angaben im Auftrag des Kunden aufgenommen und die Datenschutzinformation zur Schadenbearbeitung dokumentiert habe.{% else %}Ich bestätige, dass die Angaben nach meinem Wissen richtig sind, und stimme der Verarbeitung zur Bearbeitung dieser Schadenmeldung zu.{% endif %} Hinweise dazu stehen in der <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>. <span class="required">*</span></label></div>
             </section>
           </div>
 
@@ -589,7 +603,7 @@
             <div class="footer-actions">
               <button class="btn btn-secondary" type="button" id="back-button" hidden>Zurück</button>
               <button class="btn btn-primary" type="button" id="next-button">Weiter</button>
-              <button class="btn btn-primary" type="button" id="submit-button" hidden>Meldung unverbindlich senden</button>
+              <button class="btn btn-primary" type="button" id="submit-button" hidden>{% if partner_mode %}Versicherungsfall sicher melden{% elif cockpit_mode %}Schadenfall sicher speichern{% else %}Meldung unverbindlich senden{% endif %}</button>
             </div>
           </footer>
         </form>
@@ -598,23 +612,38 @@
       <section class="result-view" id="success-view" hidden>
         <div class="result-hero">
           <div class="success-icon">✓</div>
-          <h1>Ihre Schadenmeldung ist angekommen</h1>
-          <p>Wir prüfen Ihre Angaben persönlich und melden uns über den gewählten Kontaktweg. Fehlende Unterlagen können Sie jederzeit im Kundenstatus ergänzen.</p>
+          <h1>{% if partner_mode and created_auftrag %}Versicherungsfall wurde an Gärtner übergeben{% elif cockpit_mode and created_auftrag %}Schadenfall wurde angelegt{% else %}Ihre Schadenmeldung ist angekommen{% endif %}</h1>
+          <p>{% if partner_mode and created_auftrag %}Der Fall ist Ihrem Autohaus zugeordnet und liegt bei Gärtner zur Prüfung vor. Es wurde noch keine Reparatur oder Versicherungsfreigabe ausgelöst.{% elif cockpit_mode and created_auftrag %}Fallakte, Versicherungsübersicht und Kundenstatus sind jetzt mit demselben Vorgang verbunden. Es wurde noch keine Reparatur oder Versicherungsfreigabe ausgelöst.{% else %}Wir prüfen Ihre Angaben persönlich und melden uns über den gewählten Kontaktweg. Fehlende Unterlagen können Sie jederzeit im Kundenstatus ergänzen.{% endif %}</p>
           <div class="reference-box"><small>Vorgangsnummer</small><strong>{{ demo_ref }}</strong></div>
           <div class="next-grid">
             <div class="next-card"><span>1</span><strong>Werkstatt prüft</strong><p>Wir sichten Schadenart, Fahrzeugdaten und Unterlagen.</p></div>
             <div class="next-card"><span>2</span><strong>Wir melden uns</strong><p>Offene Fragen, Besichtigung und Mobilität klären wir persönlich.</p></div>
             <div class="next-card"><span>3</span><strong>Alles im Status</strong><p>Freigabe, Termin und Reparaturfortschritt bleiben sichtbar.</p></div>
           </div>
+          {% if cockpit_mode and created_auftrag %}
+          <div class="soft-note" style="text-align:left;margin-bottom:20px"><strong>Gespeichert:</strong> {{ created_auftrag['kunde_name'] }} · {{ created_auftrag['fahrzeug'] }} · {{ created_auftrag['kennzeichen'] }}{% if created_dateien %} · {{ created_dateien|length }} Datei(en){% endif %}. Erkannte Dokumentwerte bleiben bis zur Werkstattprüfung unverbindliche Vorschläge.</div>
+          {% for hinweis in success_hinweise %}<div class="soft-note is-warm" style="text-align:left;margin-bottom:12px"><strong>Hinweis:</strong> {{ hinweis }}</div>{% endfor %}
+          {% else %}
           <div class="soft-note is-warm" style="text-align:left;margin-bottom:20px"><strong>Wichtig:</strong> Dies ist noch keine Reparatur- oder Versicherungsfreigabe. Es wurde in dieser lokalen Vorschau nichts übertragen oder gespeichert.</div>
+          {% endif %}
           <div class="result-actions">
+            {% if cockpit_mode and created_auftrag %}
+            <a class="btn btn-primary" href="{{ case_detail_url }}">{{ case_detail_label }}</a>
+            {% if kunden_status_link %}<a class="btn btn-secondary" href="{{ kunden_status_link }}" target="_blank" rel="noopener">Kundenstatus öffnen</a>{% endif %}
+            {% if kunden_status_share['can_whatsapp'] %}<a class="btn btn-secondary" href="{{ kunden_status_share['whatsapp_url'] }}" target="_blank" rel="noopener">Status per WhatsApp teilen</a>{% endif %}
+            {% if created_auftrag['schaden_mietwagen'] == 'ja' and mobility_url %}<a class="btn btn-secondary" href="{{ mobility_url }}">Ersatzmobilität öffnen</a>{% endif %}
+            <a class="btn btn-secondary" href="{{ new_case_url }}">Neuen Schaden aufnehmen</a>
+            {% if partner_mode %}<a class="btn btn-secondary" href="{{ overview_url }}">Zurück zum Autohaus-Portal</a>{% endif %}
+            {% else %}
             <button class="btn btn-primary" type="button" data-show-status>Kundenstatus öffnen</button>
             <button class="btn btn-secondary" type="button" id="restart-button">Neue Meldung ansehen</button>
             <a class="btn btn-secondary" href="tel:+4915227706694">Werkstatt anrufen</a>
+            {% endif %}
           </div>
         </div>
       </section>
 
+      {% if not cockpit_mode %}
       <section class="status-view" id="status-view" hidden>
         <div class="status-top">
           <div><div class="eyebrow">Ihr Kundenstatus · {{ demo_ref }}</div><h1>Wir prüfen Ihre Unterlagen</h1><p id="status-car-copy">BMW 320d Touring · MOS AB 123</p></div>
@@ -655,6 +684,7 @@
         </div>
         <div class="status-actions" style="margin-top:22px"><button class="btn btn-secondary" type="button" data-back-to-form>Zur Schadenmeldung</button><button class="btn btn-primary" type="button" data-demo-fill>Beispieldaten neu einsetzen</button></div>
       </section>
+      {% endif %}
     </section>
   </main>
 
@@ -663,6 +693,9 @@
 
   <script>
     (() => {
+      const liveSubmit = {{ 'true' if cockpit_mode else 'false' }};
+      const hasCreatedCase = {{ 'true' if cockpit_mode and created_auftrag else 'false' }};
+      const maxFiles = {{ max_dateien|default(10) }};
       const labels = ["Schadenart", "Kontakt & Fahrzeug", "Unfall & Versicherung", "Fotos & Mobilität", "Prüfen & senden"];
       const typeLabels = {
         haftpflicht: "Haftpflicht · Gegner ist verantwortlich",
@@ -751,14 +784,16 @@
         document.getElementById("review-type").textContent = typeLabels[type] || "Noch nicht ausgewählt";
         document.getElementById("review-date").textContent = [value("unfall_datum"), value("unfall_ort")].filter(Boolean).join(" · ") || "Zeit und Ort noch offen";
         document.getElementById("review-customer").textContent = value("kunde_name") || "Name fehlt";
-        document.getElementById("review-contact").textContent = [value("telefon"), value("email"), contact ? `Kontakt: ${contact}` : ""].filter(Boolean).join(" · ");
+        document.getElementById("review-contact").textContent = [value("kontakt_telefon"), value("kunde_email"), contact ? `Kontakt: ${contact}` : ""].filter(Boolean).join(" · ");
         document.getElementById("review-car").textContent = [value("fahrzeug"), value("kennzeichen")].filter(Boolean).join(" · ") || "Fahrzeug fehlt";
-        document.getElementById("review-insurance").textContent = [value("versicherung"), value("schadennummer")].filter(Boolean).join(" · ") || "Versicherung wird geklärt";
+        document.getElementById("review-insurance").textContent = [value("versicherung_name"), value("schaden_nummer")].filter(Boolean).join(" · ") || "Versicherung wird geklärt";
         document.getElementById("review-mobility").textContent = mobilityLabels[mobility] || "Bitte klären";
         document.getElementById("review-files").textContent = selectedFiles.length ? `${selectedFiles.length} Datei${selectedFiles.length === 1 ? "" : "en"} ausgewählt` : "Keine Dateien ausgewählt";
         document.getElementById("review-description").textContent = value("beschreibung") || "Beschreibung fehlt";
-        document.getElementById("status-car-copy").textContent = [value("fahrzeug"), value("kennzeichen")].filter(Boolean).join(" · ") || "BMW 320d Touring · MOS AB 123";
-        document.getElementById("status-mobility").textContent = mobilityLabels[mobility] || "Bitte klären";
+        const statusCarCopy = document.getElementById("status-car-copy");
+        const statusMobility = document.getElementById("status-mobility");
+        if (statusCarCopy) statusCarCopy.textContent = [value("fahrzeug"), value("kennzeichen")].filter(Boolean).join(" · ") || "BMW 320d Touring · MOS AB 123";
+        if (statusMobility) statusMobility.textContent = mobilityLabels[mobility] || "Bitte klären";
       };
 
       const goToStep = (stepNumber) => {
@@ -786,15 +821,27 @@
       const showView = (view) => {
         wizardView.hidden = view !== "wizard";
         successView.hidden = view !== "success";
-        statusView.hidden = view !== "status";
+        if (statusView) statusView.hidden = view !== "status";
         refreshSummary();
         scrollTop();
       };
 
       const renderFiles = (files) => {
-        selectedFiles = Array.from(files || []).slice(0, 12);
+        const incoming = Array.from(files || []);
+        selectedFiles = incoming.slice(0, maxFiles);
+        if (incoming.length > maxFiles) showToast(`Bitte höchstens ${maxFiles} Dateien auswählen`);
         uploadFiles.innerHTML = selectedFiles.map((file) => `<span class="file-chip">✓ <span>${file.name.replace(/[<>&"]/g, "")}</span></span>`).join("");
-        if (selectedFiles.length) showToast(`${selectedFiles.length} Datei${selectedFiles.length === 1 ? "" : "en"} für die Vorschau ausgewählt`);
+        if (selectedFiles.length && incoming.length <= maxFiles) showToast(`${selectedFiles.length} Datei${selectedFiles.length === 1 ? "" : "en"} ausgewählt`);
+      };
+
+      const setUploadFiles = (files) => {
+        const selected = Array.from(files || []).slice(0, maxFiles);
+        if (typeof DataTransfer !== "undefined") {
+          const transfer = new DataTransfer();
+          selected.forEach((file) => transfer.items.add(file));
+          uploadInput.files = transfer.files;
+        }
+        renderFiles(uploadInput.files && uploadInput.files.length ? uploadInput.files : selected);
       };
 
       const fillDemo = () => {
@@ -805,8 +852,8 @@
         };
         selectRadio("schadenart", "haftpflicht");
         set("kunde_name", "Anna Schneider");
-        set("telefon", "0171 2345678");
-        set("email", "anna.schneider@beispiel.de");
+        set("kontakt_telefon", "0171 2345678");
+        set("kunde_email", "anna.schneider@beispiel.de");
         selectRadio("kontaktweg", "telefon");
         set("kennzeichen", "MOS AB 123");
         set("fahrzeug", "BMW 320d Touring");
@@ -814,8 +861,8 @@
         set("unfall_zeit", "09:40");
         set("unfall_ort", "Mosbach, Parkplatz am Bahnhof");
         set("beschreibung", "Beim Ausparken ist ein anderes Fahrzeug gegen die linke hintere Stoßfängerecke gefahren. Das Fahrzeug ist weiterhin fahrbereit.");
-        set("versicherung", "VHV Versicherung");
-        set("schadennummer", "wird nachgereicht");
+        set("versicherung_name", "VHV Versicherung");
+        set("schaden_nummer", "wird nachgereicht");
         selectRadio("mobilitaet", "ja");
         updateContactHint();
         refreshSummary();
@@ -824,7 +871,9 @@
         showToast("Beispieldaten eingesetzt – es wurde nichts gespeichert");
       };
 
-      form.addEventListener("submit", (event) => event.preventDefault());
+      form.addEventListener("submit", (event) => {
+        if (!liveSubmit) event.preventDefault();
+      });
       form.addEventListener("change", (event) => {
         if (event.target.name === "schadenart") updateDamageType();
         if (event.target.name === "kontaktweg") updateContactHint();
@@ -835,23 +884,33 @@
       submitButton.addEventListener("click", () => {
         if (!validateStep(5)) return;
         refreshSummary();
+        if (liveSubmit) {
+          submitButton.disabled = true;
+          submitButton.textContent = "Fallakte wird angelegt …";
+          form.submit();
+          return;
+        }
         showView("success");
       });
       indicators.forEach((indicator) => indicator.addEventListener("click", () => {
         const target = Number(indicator.dataset.stepButton);
         if (target <= currentStep || Array.from({ length: target - currentStep }, (_, index) => currentStep + index).every(validateStep)) goToStep(target);
       }));
-      uploadInput.addEventListener("change", () => renderFiles(uploadInput.files));
+      uploadInput.addEventListener("change", () => setUploadFiles(uploadInput.files));
       ["dragenter", "dragover"].forEach((name) => uploadZone.addEventListener(name, (event) => { event.preventDefault(); uploadZone.classList.add("is-dragging"); }));
       ["dragleave", "drop"].forEach((name) => uploadZone.addEventListener(name, (event) => { event.preventDefault(); uploadZone.classList.remove("is-dragging"); }));
-      uploadZone.addEventListener("drop", (event) => renderFiles(event.dataTransfer.files));
+      uploadZone.addEventListener("drop", (event) => setUploadFiles(event.dataTransfer.files));
       document.querySelectorAll("[data-show-status]").forEach((button) => button.addEventListener("click", () => showView("status")));
       document.querySelectorAll("[data-back-to-form]").forEach((button) => button.addEventListener("click", () => { showView("wizard"); goToStep(1); }));
       document.querySelectorAll("[data-demo-fill]").forEach((button) => button.addEventListener("click", fillDemo));
-      document.getElementById("restart-button").addEventListener("click", () => { form.reset(); selectedFiles = []; uploadFiles.innerHTML = ""; opponentUnknown.checked = true; opponentFields.hidden = true; showView("wizard"); goToStep(1); });
-      document.getElementById("status-upload").addEventListener("click", () => showToast("In der echten Version öffnet sich hier der geschützte Mehrfach-Upload."));
-      document.getElementById("status-message").addEventListener("click", () => showToast("In der echten Version kann der Kunde hier sicher antworten."));
-      goToStep(1);
+      const restartButton = document.getElementById("restart-button");
+      if (restartButton) restartButton.addEventListener("click", () => { form.reset(); selectedFiles = []; uploadFiles.innerHTML = ""; opponentUnknown.checked = true; opponentFields.hidden = true; showView("wizard"); goToStep(1); });
+      const statusUpload = document.getElementById("status-upload");
+      if (statusUpload) statusUpload.addEventListener("click", () => showToast("In der echten Version öffnet sich hier der geschützte Mehrfach-Upload."));
+      const statusMessage = document.getElementById("status-message");
+      if (statusMessage) statusMessage.addEventListener("click", () => showToast("In der echten Version kann der Kunde hier sicher antworten."));
+      opponentFields.hidden = opponentUnknown.checked;
+      if (hasCreatedCase) showView("success"); else goToStep(1);
       updateContactHint();
     })();
   </script>

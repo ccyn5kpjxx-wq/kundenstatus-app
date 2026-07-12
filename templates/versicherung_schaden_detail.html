@@ -177,6 +177,7 @@
 
 {% block content %}
 {% set source_locked = versicherung_quellfelder_gesperrt|default(false) %}
+{% set aufnahme = auftrag['schaden_aufnahme'] %}
 {% set active_step_anchor = schaden_autopilot['leitstand']['hauptaktion_anchor'] if schaden_autopilot and schaden_autopilot['leitstand'] else 'step-schaden' %}
 <form method="POST" enctype="multipart/form-data" data-upload-form data-active-step="{{ active_step_anchor }}">
 <input type="hidden" name="source_edit_unlocked" value="0" data-source-edit-unlocked>
@@ -397,6 +398,10 @@
 
       <div class="source-summary-grid">
         <div class="source-summary-item">
+          <span>Vorgang</span>
+          <strong>{{ auftrag['schaden_aufnahme_ref'] }}</strong>
+        </div>
+        <div class="source-summary-item">
           <span>Versicherung</span>
           <strong>{{ versicherung['name'] if versicherung else 'offen' }}</strong>
         </div>
@@ -417,8 +422,9 @@
           <strong>{{ auftrag['versicherungsnehmer'] or 'offen' }}</strong>
         </div>
         <div class="source-summary-item">
-          <span>Kunde / Versicherung</span>
-          <strong>{{ auftrag['kontakt_telefon'] or 'Telefon offen' }}{% if auftrag['versicherung_email'] or (versicherung and versicherung['email']) %} · {{ auftrag['versicherung_email'] or versicherung['email'] }}{% endif %}</strong>
+          <span>Kundenkontakt</span>
+          <strong>{{ auftrag['kontakt_telefon'] or 'Telefon offen' }}{% if auftrag['kunde_email'] %} · {{ auftrag['kunde_email'] }}{% endif %}</strong>
+          {% if aufnahme['kontaktweg'] %}<small>Gewünscht: {{ aufnahme['kontaktweg_label'] }}{% if aufnahme['whatsapp_einwilligung'] %} · WhatsApp ausdrücklich gewählt{% endif %}</small>{% endif %}
         </div>
         <div class="source-summary-item">
           <span>Kennzeichen</span>
@@ -444,6 +450,27 @@
           <span>Schadenbeschreibung</span>
           <strong>{{ auftrag['beschreibung'] or auftrag['analyse_text'] or 'offen' }}</strong>
         </div>
+        {% if aufnahme %}
+        <div class="source-summary-item">
+          <span>Unfallzeit</span>
+          <strong>{{ aufnahme['unfall_datum_label'] or 'offen' }}{% if aufnahme['unfall_zeit'] %} · {{ aufnahme['unfall_zeit'] }} Uhr{% endif %}</strong>
+          <small>{{ aufnahme['unfall_ort'] or 'Ort offen' }}</small>
+        </div>
+        <div class="source-summary-item is-wide">
+          <span>Unfallgegner</span>
+          {% if aufnahme['gegner_unbekannt'] %}
+          <strong>Daten werden nachgereicht</strong>
+          {% else %}
+          <strong>{{ aufnahme['gegner_name'] or 'Name offen' }}{% if aufnahme['gegner_kennzeichen'] %} · {{ aufnahme['gegner_kennzeichen'] }}{% endif %}</strong>
+          <small>{{ aufnahme['gegner_versicherung'] or 'Versicherung offen' }}{% if aufnahme['gegner_schaden_nummer'] %} · Schaden {{ aufnahme['gegner_schaden_nummer'] }}{% endif %}</small>
+          {% endif %}
+        </div>
+        <div class="source-summary-item">
+          <span>Aufnahmenachweis</span>
+          <strong>{{ auftrag['schaden_datenschutz_bestaetigt_am'] or 'offen' }}</strong>
+          <small>{{ aufnahme['datenschutz_version'] or 'Textversion offen' }}</small>
+        </div>
+        {% endif %}
         <div class="source-summary-item">
           <span>Selbstbeteiligung</span>
           <strong>{{ auftrag['schaden_selbstbeteiligung'] or 'offen / prüfen' }}</strong>
@@ -1209,7 +1236,9 @@
               <a href="{{ auftrag['kunden_whatsapp_status']['status_update_whatsapp_url'] }}" class="btn btn-sm btn-outline-success" target="_blank" rel="noopener">Statusupdate WhatsApp</a>
               {% endif %}
             </div>
-            {% if auftrag['kontakt_telefon'] and not auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
+            {% if auftrag['kunden_whatsapp_status']['whatsapp_consent_required'] and not auftrag['kunden_whatsapp_status']['whatsapp_consent_allowed'] %}
+            <div class="text-muted small mt-2">Keine gültige WhatsApp-Einwilligung für die aktuelle Mobilnummer dokumentiert. Der Kundenstatus kann weiterhin als Link oder QR-Code weitergegeben werden.</div>
+            {% elif auftrag['kontakt_telefon'] and not auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
             <div class="text-muted small mt-2">Für WhatsApp bitte eine gültige Handynummer hinterlegen.</div>
             {% elif auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
             <div class="text-muted small mt-2">Kein automatischer Versand: WhatsApp öffnet mit vorbereitetem Text. Bitte nur senden, wenn der Kunde den Kanal wünscht.</div>

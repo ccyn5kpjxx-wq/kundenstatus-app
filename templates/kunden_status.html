@@ -40,6 +40,10 @@
     .bilder-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:.6rem; }
     .bild-kachel { display:block; border:1px solid #e4d6c3; border-radius:12px; overflow:hidden; background:#fff; aspect-ratio:4/3; }
     .bild-kachel img { width:100%; height:100%; object-fit:cover; display:block; }
+    .document-list { display:grid; gap:.5rem; }
+    .document-row { display:flex; justify-content:space-between; gap:.75rem; align-items:center; border:1px solid #e4d6c3; border-radius:12px; background:#fffdf9; padding:.65rem .75rem; }
+    .document-row span { overflow-wrap:anywhere; min-width:0; }
+    .hp-field { position:absolute !important; left:-10000px !important; width:1px !important; height:1px !important; overflow:hidden !important; }
     @media (max-width: 767.98px) {
       .shell { padding:14px 10px 22px; }
       .panel { border-radius:16px; padding:18px; }
@@ -203,6 +207,54 @@
         </div>
         {% endfor %}
       </div>
+    </div>
+
+    <div class="panel mb-4" id="unterlagen">
+      <div class="section-head">
+        <div>
+          <h2 class="h4 mb-1">Unterlagen nachreichen</h2>
+          <div class="text-muted">Fotos, Fahrzeugschein, Unfallbericht oder PDF sicher zur bestehenden Fallakte ergänzen.</div>
+        </div>
+        <span class="badge text-bg-light border text-dark">max. {{ schadenaufnahme_max_dateien }} Dateien · {{ schadenaufnahme_max_upload_mb }} MB gesamt</span>
+      </div>
+      {% if meldungen %}
+      <div class="mb-3">
+        {% for category, message in meldungen %}
+        <div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else 'success') }} mb-2">{{ message }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if kunden_unterlagen %}
+      <div class="document-list mb-3">
+        {% for datei in kunden_unterlagen[:8] %}
+        <div class="document-row">
+          <span><strong>{{ datei['original_name'] }}</strong><br><small class="text-muted">Sicher in der Fallakte gespeichert</small></span>
+          <span class="badge text-bg-success">Vorhanden</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      <form method="POST" enctype="multipart/form-data" action="{{ url_for('kunden_status_unterlagen', token=auftrag['kunden_status_token']) }}">
+        <div class="hp-field" aria-hidden="true"><label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+        <label class="form-label fw-semibold" for="kundenstatus-dateien">Bilder oder PDF auswählen</label>
+        <input id="kundenstatus-dateien" class="form-control" type="file" name="dateien" multiple required accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,image/jpeg,image/png,image/webp,image/heic,application/pdf">
+        <div class="form-text">JPG, PNG, WebP, HEIC oder PDF. Erkannte Dokumentwerte werden erst nach Werkstattprüfung übernommen.</div>
+        <label class="form-label fw-semibold mt-3" for="kundenstatus-upload-notiz">Kurzer Hinweis (optional)</label>
+        <textarea id="kundenstatus-upload-notiz" class="form-control" name="upload_notiz" rows="2" maxlength="350" placeholder="z. B. Fahrzeugschein und zwei Detailfotos"></textarea>
+        <button type="submit" class="btn btn-dark mt-3">Unterlagen sicher senden</button>
+      </form>
+    </div>
+
+    <div class="panel mb-4" id="nachrichten">
+      <h2 class="h4 mb-1">Nachricht an die Werkstatt</h2>
+      <div class="text-muted mb-3">Rückfrage oder Ergänzung direkt an die bestehende Fallakte senden.</div>
+      <form method="POST" action="{{ url_for('kunden_status_nachricht', token=auftrag['kunden_status_token']) }}">
+        <label class="form-label fw-semibold" for="kundenstatus-nachricht">Ihre Nachricht</label>
+        <textarea id="kundenstatus-nachricht" class="form-control" name="nachricht" rows="3" maxlength="900" required placeholder="Was möchten Sie ergänzen oder fragen?"></textarea>
+        <label class="form-label fw-semibold mt-3" for="kundenstatus-kontakt">Rückrufnummer oder E-Mail (optional)</label>
+        <input id="kundenstatus-kontakt" class="form-control" name="kontakt" maxlength="160" value="{{ auftrag['kontakt_telefon'] or auftrag['kunde_email'] }}">
+        <button type="submit" class="btn btn-dark mt-3">Nachricht senden</button>
+      </form>
     </div>
 
     {% if kunden_bilder %}
