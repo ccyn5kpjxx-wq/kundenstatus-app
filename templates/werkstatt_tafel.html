@@ -628,12 +628,41 @@
   </div>
 
   <footer>
-    <span>Aufträge wandern von links nach rechts · Aktualisiert sich automatisch jede Minute · Stand {{ stand_label }} Uhr</span>
+    <span>Aufträge wandern von links nach rechts · Aktualisiert sich automatisch jede Minute · Stand {{ stand_label }} Uhr · <span data-wake-status>Bildschirm wird wach gehalten</span></span>
     <a href="{{ url_for('werkstatt_logout') }}">Abmelden</a>
   </footer>
 
   <script>
     (() => {
+      // Bildschirm wach halten, solange die Werkstatt-Tafel sichtbar ist.
+      let wakeLock = null;
+      const wakeStatus = document.querySelector('[data-wake-status]');
+
+      const requestWakeLock = async () => {
+        if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') {
+          if (wakeStatus && !('wakeLock' in navigator)) {
+            wakeStatus.textContent = 'Wachhalten wird von diesem Browser nicht unterstützt';
+          }
+          return;
+        }
+
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+          if (wakeStatus) wakeStatus.textContent = 'Bildschirm bleibt an';
+          wakeLock.addEventListener('release', () => {
+            wakeLock = null;
+          });
+        } catch (error) {
+          if (wakeStatus) wakeStatus.textContent = 'Wachhalten konnte nicht aktiviert werden';
+          console.warn('Bildschirm-Wachhalten nicht verfügbar:', error);
+        }
+      };
+
+      requestWakeLock();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && !wakeLock) requestWakeLock();
+      });
+
       // Live-Uhr
       const uhr = document.querySelector('[data-uhr]');
       const tick = () => {
