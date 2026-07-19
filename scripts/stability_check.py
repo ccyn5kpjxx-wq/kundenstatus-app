@@ -52,6 +52,7 @@ def main():
     ok &= check_gitignore()
     ok &= check_backup_config()
     ok &= run_step("Smoke-Test", [sys.executable, "scripts/smoke_test.py"])
+    ok &= run_step("Fahrzeugeinkauf-Scanner-Test", [sys.executable, "scripts/test_scan_sofort.py"])
     ok &= run_step("Ablauf-Test", [sys.executable, "scripts/flow_test.py"])
 
     if not ok:

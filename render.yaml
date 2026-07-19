@@ -21,6 +21,8 @@ services:
         value: true
       - key: OPENAI_API_KEY
         sync: false
+      - key: FAHRZEUGEINKAUF_SCANNER_API_TOKEN
+        sync: false
       - key: OPENAI_EXTRACTION_MODEL
         value: gpt-4o
       - key: AUTO_BACKUP_ON_STARTUP

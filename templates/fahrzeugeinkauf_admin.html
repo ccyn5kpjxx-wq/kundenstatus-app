@@ -18,6 +18,7 @@
     border-radius: 8px;
   }
   .fein-scanbtn:hover { background: var(--brand-dark); color: #fff; }
+  .fein-scanbtn:disabled { background: #8b949e; cursor: not-allowed; opacity: 0.85; }
   .fein-anfrage-hinweis {
     background: #fdf3dd;
     border: 1px solid #ecd9a8;
@@ -25,15 +26,11 @@
     padding: 0.5rem 0.9rem;
     font-size: 0.9rem;
   }
-  .fein-scan-fertig {
-    background: #e9f6ee;
-    border: 1px solid #bfe0cb;
-    border-radius: 8px;
-    padding: 0.5rem 0.9rem;
-    font-size: 0.9rem;
-    font-weight: 600;
-  }
-  .fein-neubadge {
+  .fein-anfrage-hinweis.success { background: #e9f6ee; border-color: #bfe0cb; }
+  .fein-anfrage-hinweis.danger { background: #fbeaea; border-color: #e5b7b7; }
+  .fein-anfrage-hinweis.secondary { background: #f0f1f2; border-color: #d5d8dc; }
+  .fein-anfrage-hinweis.info { background: #eaf4fb; border-color: #bfd8ea; }
+  .fein-trefferbadge {
     float: right;
     background: #fff;
     color: #e8631a;
@@ -44,6 +41,7 @@
     letter-spacing: 0.06em;
     animation: fein-neu-puls 1.6s ease-in-out infinite;
   }
+  .fein-trefferbadge.aktualisiert { color: #136b45; animation: none; }
   @keyframes fein-neu-puls {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.55; }
@@ -57,6 +55,7 @@
     margin-right: 0.35rem;
     animation: fein-neu-puls 1.2s ease-in-out infinite;
   }
+  .fein-lauf-punkt[hidden] { display: none !important; }
   .fein-karte {
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -142,16 +141,25 @@
       <div class="text-muted">Unfall-Fahrzeuge zum Ankauf — gefunden von der Werkstatt-Routine, mit PDF, Marge und Direktlink zum Inserat.</div>
     </div>
     <form method="post" action="{{ url_for('admin_fahrzeugeinkauf_scan_anfordern') }}">
-      <button type="submit" class="fein-scanbtn">&#128269; Scan jetzt anfordern</button>
+      <button type="submit" class="fein-scanbtn" {% if scan_anfrage and scan_anfrage.aktiv and not scan_anfrage.ueberfaellig %}disabled{% endif %}>
+        &#128269;
+        {% if scan_anfrage and scan_anfrage.ueberfaellig %}Scan erneut anfordern
+        {% elif scan_anfrage and scan_anfrage.aktiv %}Scan ist angefordert
+        {% else %}Scan jetzt anfordern{% endif %}
+      </button>
     </form>
   </div>
-  {% if offene_anfrage %}
-  <div class="fein-anfrage-hinweis mt-3">
-    <span class="fein-lauf-punkt"></span><strong>Scan l&auml;uft</strong> (angefordert {{ offene_anfrage.angefordert_am }}) — die Scan-Bereitschaft pr&uuml;ft alle 15 Minuten und liefert die Ergebnisse hierher. Diese Seite aktualisiert sich automatisch, sobald neue Fahrzeuge da sind.
+  {% if scan_anfrage %}
+  <div class="fein-anfrage-hinweis {{ scan_anfrage.status_class }} mt-3" id="scan-status-box">
+    <span class="fein-lauf-punkt" id="scan-status-spinner" {% if scan_anfrage.status_raw != 'laeuft' or scan_anfrage.ueberfaellig or not scan_anfrage.scanner_online %}hidden{% endif %}></span>
+    <strong id="scan-status-label">{{ scan_anfrage.status_label }}</strong>
+    <span class="text-muted">(angefordert {{ scan_anfrage.angefordert_label }})</span>
+    <span id="scan-status-text"> — {{ scan_anfrage.message }}</span>
+    <div class="text-muted mt-1" id="scan-last-seen" style="font-size:0.8rem;" {% if not scan_anfrage.scanner_last_seen_label %}hidden{% endif %}>Scanner zuletzt erreichbar: <span>{{ scan_anfrage.scanner_last_seen_label }}</span></div>
   </div>
-  {% elif request.args.get('scan_fertig') %}
-  <div class="fein-scan-fertig mt-3">
-    &#9989; Scan eingetroffen — frisch gefundene Fahrzeuge sind unten mit <span class="fein-neubadge" style="float:none;">NEU</span> markiert.
+  {% elif not scanner_status.online %}
+  <div class="fein-anfrage-hinweis secondary mt-3">
+    <strong>Scanner offline.</strong> Eine neue Anfrage bleibt sicher gespeichert und startet, sobald die lokale Scan-Automation wieder aktiv ist.
   </div>
   {% endif %}
 </div>
@@ -161,12 +169,15 @@
   <div class="fein-ampelleiste {{ fz.ampel }}">
     {% if fz.ampel == 'gruen' %}Kaufen{% elif fz.ampel == 'gelb' %}Pr&uuml;fen / Verhandeln{% else %}Meiden{% endif %}
     {% if fz.interessant %} &nbsp;&#11088; interessant{% endif %}
-    {% if fz.ist_neu %}<span class="fein-neubadge">NEU</span>{% endif %}
+    {% if fz.scan_treffer_art == 'aktualisiert' %}<span class="fein-trefferbadge aktualisiert">AKTUALISIERT</span>
+    {% elif fz.scan_treffer_art == 'neu' %}<span class="fein-trefferbadge">NEUER TREFFER</span>
+    {% elif fz.ist_neu %}<span class="fein-trefferbadge">NEU</span>{% endif %}
   </div>
   <div class="fein-body">
     <div class="fein-foto">
       {% if fz.bild_url %}
-      <a href="{{ fz.inserat_url }}" target="_blank" rel="noopener"><img src="{{ fz.bild_url }}" alt="Fahrzeugfoto" loading="lazy"></a>
+      {% if fz.inserat_url %}<a href="{{ fz.inserat_url }}" target="_blank" rel="noopener"><img src="{{ fz.bild_url }}" alt="Fahrzeugfoto" loading="lazy"></a>
+      {% else %}<img src="{{ fz.bild_url }}" alt="Fahrzeugfoto" loading="lazy">{% endif %}
       {% else %}<span class="text-muted">kein Foto</span>{% endif %}
     </div>
     <div class="fein-info">
@@ -182,12 +193,12 @@
         {% if fz.verkaeufer_name %}{{ fz.verkaeufer_name }}{% endif %}
         {% if fz.verkaeufer_telefon %}
           &middot; <a href="{{ fz.kontakt_tel_url }}">&#128222; {{ fz.verkaeufer_telefon }}</a>
-          <button type="button" class="fein-copybtn" onclick="navigator.clipboard.writeText('{{ fz.verkaeufer_telefon }}');this.textContent='&#10003; kopiert';setTimeout(()=>this.textContent='Kopieren',1500)">Kopieren</button>
+          <button type="button" class="fein-copybtn" data-copy-value="{{ fz.verkaeufer_telefon }}">Kopieren</button>
           {% if fz.kontakt_wa_url %}<a class="fein-wabtn" href="{{ fz.kontakt_wa_url }}" target="_blank" rel="noopener">WhatsApp</a>{% endif %}
         {% endif %}
         {% if fz.verkaeufer_email %}
           &middot; <a href="{{ fz.kontakt_mail_url }}">&#9993; E-Mail vorbereiten</a>
-          <button type="button" class="fein-copybtn" onclick="navigator.clipboard.writeText('{{ fz.verkaeufer_email }}');this.textContent='&#10003; kopiert';setTimeout(()=>this.textContent='Kopieren',1500)">Kopieren</button>
+          <button type="button" class="fein-copybtn" data-copy-value="{{ fz.verkaeufer_email }}">Kopieren</button>
         {% endif %}
       </div>
       {% else %}
@@ -246,7 +257,11 @@
       <div>
         <strong>{{ scan.titel }}</strong>
         <span class="text-muted">&middot; {{ scan.scan_datum }}</span>
+        {% if scan.anfrage_id or scan.fahrzeuge_angelegt or scan.fahrzeuge_aktualisiert %}
+        <span class="text-muted">&middot; {{ scan.fahrzeuge_angelegt }} neu &middot; {{ scan.fahrzeuge_aktualisiert }} aktualisiert</span>
+        {% else %}
         <span class="text-muted">&middot; {{ scan.fahrzeuge|length }} Fahrzeuge</span>
+        {% endif %}
       </div>
       {% if scan.pdf_stored_name %}
       <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_fahrzeugeinkauf_pdf', scan_id=scan.id) }}" target="_blank">&#128196; PDF &ouml;ffnen</a>
@@ -257,26 +272,63 @@
   {% endfor %}
 </div>
 
-{% if offene_anfrage %}
 <script>
 (function () {
-  var start = Date.now();
-  var scanIdBeimLaden = {{ scans[0].id if scans else 0 }};
+  document.querySelectorAll(".fein-copybtn[data-copy-value]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      navigator.clipboard.writeText(button.dataset.copyValue || "").then(function () {
+        button.textContent = "✓ kopiert";
+        setTimeout(function () { button.textContent = "Kopieren"; }, 1500);
+      });
+    });
+  });
+
+  {% if scan_anfrage and scan_anfrage.aktiv and not scan_anfrage.ueberfaellig %}
+  var fehlerInFolge = 0;
+  var statusUrl = {{ url_for('admin_fahrzeugeinkauf_status', anfrage_id=scan_anfrage.id)|tojson }};
+  var zielUrl = {{ url_for('admin_fahrzeugeinkauf', anfrage_id=scan_anfrage.id)|tojson }};
+  var statusBox = document.getElementById("scan-status-box");
+  var statusText = document.getElementById("scan-status-text");
+  var statusLabel = document.getElementById("scan-status-label");
+  var statusSpinner = document.getElementById("scan-status-spinner");
+  var lastSeen = document.getElementById("scan-last-seen");
   function pruefen() {
-    if (Date.now() - start > 60 * 60 * 1000) return; // nach 1 Stunde aufhören zu fragen
-    fetch("{{ url_for('admin_fahrzeugeinkauf_status') }}", { credentials: "same-origin" })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (d && d.ok && (!d.anfrage_offen || d.letzter_scan_id > scanIdBeimLaden)) {
-          window.location.href = "{{ url_for('admin_fahrzeugeinkauf') }}?scan_fertig=1";
-        } else {
-          setTimeout(pruefen, 20000);
-        }
+    var controller = new AbortController();
+    var timeout = setTimeout(function () { controller.abort(); }, 10000);
+    fetch(statusUrl, { credentials: "same-origin", cache: "no-store", signal: controller.signal })
+      .then(function (r) {
+        if (!r.ok) throw new Error("Status " + r.status);
+        return r.json();
       })
-      .catch(function () { setTimeout(pruefen, 30000); });
+      .then(function (d) {
+        fehlerInFolge = 0;
+        if (!d || !d.ok) throw new Error("Ungültige Statusantwort");
+        if (statusBox) statusBox.className = "fein-anfrage-hinweis " + (d.status_class || "secondary") + " mt-3";
+        if (statusLabel && d.status_label) statusLabel.textContent = d.status_label;
+        if (statusText && d.message) statusText.textContent = " — " + d.message;
+        if (statusSpinner) statusSpinner.hidden = !(d.status_raw === "laeuft" && !d.ueberfaellig && d.scanner_online);
+        if (lastSeen) {
+          var lastSeenValue = lastSeen.querySelector("span");
+          lastSeen.hidden = !d.scanner_last_seen;
+          if (lastSeenValue && d.scanner_last_seen) lastSeenValue.textContent = d.scanner_last_seen;
+        }
+        if (d.terminal || d.ueberfaellig) {
+          window.location.href = zielUrl;
+          return;
+        }
+        setTimeout(pruefen, 15000);
+      })
+      .catch(function () {
+        fehlerInFolge += 1;
+        if (statusText && fehlerInFolge >= 3) {
+          statusText.textContent = " — Status-Verbindung unterbrochen. Wir versuchen es automatisch weiter.";
+        }
+        setTimeout(pruefen, 30000);
+      })
+      .finally(function () { clearTimeout(timeout); });
   }
-  setTimeout(pruefen, 20000);
+  setTimeout(pruefen, 2000);
+  {% endif %}
 })();
 </script>
-{% endif %}
 {% endblock %}
