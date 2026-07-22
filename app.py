@@ -41960,6 +41960,16 @@ def autohaus_neu():
         flash("Bitte einen Autohaus-Namen eintragen.", "warning")
         return redirect(redirect_url)
 
+    db = get_db()
+    vorhandenes_autohaus = db.execute(
+        "SELECT id FROM autohaeuser WHERE LOWER(TRIM(name))=LOWER(TRIM(?))",
+        (name,),
+    ).fetchone()
+    db.close()
+    if vorhandenes_autohaus:
+        flash("Dieses Autohaus ist bereits angelegt.", "warning")
+        return redirect(redirect_url)
+
     slug = get_unique_slug(name)
     zugangscode = clean_text(request.form.get("zugangscode")) or uuid.uuid4().hex[:8].upper()
     portal_key = uuid.uuid4().hex[:16]

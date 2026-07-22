@@ -8,6 +8,63 @@
     <a href="{{ url_for('admin_rundmail') }}" class="btn btn-soft btn-sm">Rundmail an Autohäuser</a>
   </div>
 
+  <details class="border rounded-3 p-3 bg-white mb-3">
+    <summary class="fw-bold" style="cursor: pointer;">Neues Autohaus anlegen</summary>
+    <p class="small text-muted mt-2 mb-0">Stammdaten und persönlichen Portalzugang gemeinsam einrichten.</p>
+    <form method="POST" action="{{ url_for('autohaus_neu') }}" class="row g-3 mt-1">
+      {{ csrf_field()|safe }}
+      <input type="hidden" name="next" value="{{ url_for('admin_zugaenge') }}">
+      <div class="col-lg-5">
+        <label class="form-label" for="autohaus-neu-name">Firma</label>
+        <input id="autohaus-neu-name" type="text" name="name" class="form-control" required>
+      </div>
+      <div class="col-lg-4">
+        <label class="form-label" for="autohaus-neu-kontakt">Ansprechpartner</label>
+        <input id="autohaus-neu-kontakt" type="text" name="kontakt_name" class="form-control">
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="autohaus-neu-email">E-Mail</label>
+        <input id="autohaus-neu-email" type="email" name="email" class="form-control">
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="autohaus-neu-telefon">Telefon / Mobil</label>
+        <input id="autohaus-neu-telefon" type="tel" name="telefon" class="form-control">
+      </div>
+      <div class="col-lg-4">
+        <label class="form-label" for="autohaus-neu-strasse">Straße</label>
+        <input id="autohaus-neu-strasse" type="text" name="strasse" class="form-control">
+      </div>
+      <div class="col-lg-2">
+        <label class="form-label" for="autohaus-neu-plz">PLZ</label>
+        <input id="autohaus-neu-plz" type="text" name="plz" class="form-control" inputmode="numeric">
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="autohaus-neu-ort">Ort</label>
+        <input id="autohaus-neu-ort" type="text" name="ort" class="form-control">
+      </div>
+      <div class="col-lg-4">
+        <label class="form-label" for="autohaus-neu-code">Zugangscode</label>
+        <input id="autohaus-neu-code" type="password" name="zugangscode" class="form-control" placeholder="Mindestens 8 Zeichen" minlength="8" required autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false">
+      </div>
+      <div class="col-lg-4">
+        <label class="form-label" for="autohaus-neu-titel">Portal-Titel</label>
+        <input id="autohaus-neu-titel" type="text" name="portal_titel" class="form-control" placeholder="z. B. Portal Autohaus Muster">
+      </div>
+      <div class="col-lg-8">
+        <label class="form-label" for="autohaus-neu-willkommen">Willkommenstext</label>
+        <input id="autohaus-neu-willkommen" type="text" name="willkommen_text" class="form-control">
+      </div>
+      <div class="col-12">
+        <label class="form-label" for="autohaus-neu-notiz">Interne Notiz</label>
+        <textarea id="autohaus-neu-notiz" name="notiz" class="form-control" rows="2"></textarea>
+      </div>
+      <div class="col-12 d-flex align-items-center gap-3 flex-wrap">
+        <button type="submit" class="btn btn-brand">Autohaus anlegen</button>
+        <span class="small text-muted">Der persönliche Portalpfad wird beim Speichern automatisch erstellt.</span>
+      </div>
+    </form>
+  </details>
+
   {% if autohaeuser %}
     <div class="d-grid gap-2">
       {% for h in autohaeuser %}
