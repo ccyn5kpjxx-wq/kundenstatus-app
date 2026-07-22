@@ -1,485 +1,147 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="de">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex, nofollow">
-<!-- VORSCHAU-KOPIE auf Render (/mietwagen-vorschau) — nur zur GF-Sichtung, nicht verlinken.
-     Finale Veröffentlichung: auto-lackierzentrum.de/mietwagen (Webjoker-Upload, ohne noindex). -->
-<title>Mietwagen Mosbach — Auto mieten beim Meisterbetrieb | Gärtner Karosserie + Lack</title>
-<meta name="description" content="Mietwagen &amp; Ersatzwagen in Mosbach: Hyundai i10 ab 29 €/Tag für Werkstattkunden. Hyundai Kona SUV &amp; Fiat Doblo in Kürze. Digital unterschreiben, losfahren.">
-<!-- ================================================================
-     ENTWURF 02.07.2026 — GO-LIVE ERST NACH:
-     (1) Allane-Zustimmung Vermietung  (2) BGV-Versicherungsklärung
-     (3) GF-Preisfreigabe (Preise = Empfehlung Preisempfehlung_Mietwagen_2026-07.md)
-     BILDER: Beispielfotos von Unsplash (lizenzfrei, als "Symbolfoto"
-     gekennzeichnet). Nach Fahrzeug-Übergabe durch ECHTE Fotos ersetzen —
-     alle Stellen mit  data-echtes-foto  markiert. [SB] nach BGV-Antwort.
-     ================================================================ -->
-<style>
-  :root { --akzent: #e8650d; --dunkel: #131313; --dunkel2: #1d1d1d; --hell: #f7f6f4; --text: #222; }
-  * { box-sizing: border-box; margin: 0; }
-  html { scroll-behavior: smooth; }
-  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); line-height: 1.65; background: #fff; }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 22px; }
-  img { max-width: 100%; display: block; }
-
-  /* Top-Leiste */
-  nav { position: sticky; top: 0; z-index: 50; background: rgba(19,19,19,.94); backdrop-filter: blur(6px); color: #fff; }
-  nav .wrap { display: flex; align-items: center; justify-content: space-between; padding-top: 12px; padding-bottom: 12px; }
-  nav .logo { font-weight: 800; letter-spacing: .4px; font-size: 1.02rem; }
-  nav .logo span { color: var(--akzent); }
-  nav a.telbtn { color: #fff; text-decoration: none; font-weight: 700; background: var(--akzent); padding: 8px 16px; border-radius: 8px; font-size: .95rem; }
-
-  /* Hero — dunkle Bühne links (Text), Kona-Foto rechts IMMER voll sichtbar (GF-Wunsch) */
-  .hero { position: relative; color: #fff; background: #0a0a0a; overflow: hidden; }
-  .hero .wrap.hero-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 36px; align-items: center; min-height: 620px; }
-  .hero .inner { padding: 70px 0; max-width: 640px; }
-  /* data-echtes-foto: nach Übergabe eigenes Foto vom weißen Kona (3/4-Front) hier einsetzen */
-  .hero-foto { position: relative; height: 460px; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 70px rgba(0,0,0,.55); }
-  .hero-foto img { width: 100%; height: 100%; object-fit: cover; object-position: center 62%; display: block; }
-  .hero-foto .fahrzeug-tag { position: absolute; left: 16px; bottom: 14px; background: rgba(10,10,10,.78); color: #fff; padding: 8px 16px; border-radius: 999px; font-size: .9rem; font-weight: 700; }
-  .hero-foto .fahrzeug-tag span { color: var(--akzent); }
-  @media (max-width: 900px) {
-    .hero .wrap.hero-grid { grid-template-columns: 1fr; gap: 0; min-height: 0; }
-    .hero .inner { padding: 56px 0 28px; }
-    .hero-foto { height: 260px; margin-bottom: 34px; }
-  }
-  .hero .eyebrow { color: var(--akzent); font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; font-size: .82rem; }
-  .hero h1 { font-size: clamp(2rem, 5vw, 3.1rem); line-height: 1.12; margin: 14px 0 18px; font-weight: 800; }
-  .hero p.sub { font-size: 1.13rem; color: #e6e6e6; max-width: 540px; }
-  .cta { display: inline-block; margin: 26px 14px 0 0; padding: 15px 26px; border-radius: 10px; text-decoration: none; font-weight: 700; font-size: 1.02rem; }
-  .cta.wa { background: #25d366; color: #fff; }
-  .cta.ghost { border: 2px solid #fff; color: #fff; }
-  .chips { margin-top: 30px; display: flex; flex-wrap: wrap; gap: 10px; }
-  .chip { border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 6px 14px; font-size: .85rem; color: #ddd; }
-  .symbolfoto { position: absolute; right: 10px; bottom: 8px; font-size: .68rem; color: rgba(255,255,255,.55); }
-
-  /* USP-Band */
-  .usps { background: var(--dunkel2); color: #fff; padding: 34px 0; }
-  .usps .wrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 22px; }
-  .usp b { display: block; color: var(--akzent); font-size: 1.02rem; margin-bottom: 4px; }
-  .usp span { color: #ccc; font-size: .92rem; }
-
-  section { padding: 64px 0; }
-  section.alt { background: var(--hell); }
-  h2 { font-size: 1.7rem; margin-bottom: 8px; font-weight: 800; }
-  p.lead { color: #555; margin-bottom: 34px; max-width: 640px; }
-
-  /* Fahrzeugkarten */
-  .cars { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 28px; }
-  .car { background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 34px rgba(0,0,0,.10); display: flex; flex-direction: column; }
-  .car .foto { position: relative; height: 230px; overflow: hidden; }
-  .car .foto img { width: 100%; height: 100%; object-fit: cover; transition: transform .4s; }
-  .car:hover .foto img { transform: scale(1.04); }
-  .car .foto .badge { position: absolute; top: 14px; left: 14px; background: var(--akzent); color: #fff; font-size: .78rem; font-weight: 700; padding: 5px 13px; border-radius: 999px; }
-  .car .foto .badge.bald { background: #555; }
-  .car .foto .symbolfoto { color: rgba(255,255,255,.75); text-shadow: 0 0 4px rgba(0,0,0,.8); }
-  .car .body { padding: 22px 24px 26px; display: flex; flex-direction: column; flex: 1; }
-  .car h3 { font-size: 1.25rem; font-weight: 800; }
-  .car .preisrow { display: flex; align-items: baseline; gap: 8px; margin: 10px 0 2px; }
-  .car .preis { font-size: 1.9rem; font-weight: 800; color: var(--akzent); }
-  .car .preis-einheit { color: #666; font-size: .9rem; }
-  .car .staffel { color: #666; font-size: .88rem; margin-bottom: 12px; }
-  .car ul { list-style: none; padding: 0; margin: 0 0 18px; }
-  .car li { padding-left: 24px; position: relative; font-size: .95rem; color: #444; margin: 5px 0; }
-  .car li::before { content: "✓"; position: absolute; left: 0; color: var(--akzent); font-weight: 800; }
-  .car .hint { background: var(--hell); border-radius: 10px; padding: 10px 14px; font-size: .9rem; margin-bottom: 18px; }
-  .car a.buchen { margin-top: auto; text-align: center; background: var(--dunkel); color: #fff; text-decoration: none; font-weight: 700; padding: 13px; border-radius: 10px; }
-  .car a.buchen:hover { background: var(--akzent); }
-  .preisfussnote { margin-top: 18px; font-size: .87rem; color: #777; }
-
-  /* Ersatzwagen Split */
-  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
-  .split .foto { position: relative; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 34px rgba(0,0,0,.12); }
-  @media (max-width: 800px) { .split { grid-template-columns: 1fr; } }
-  .split h2 { margin-bottom: 14px; }
-  .split p { margin-bottom: 12px; }
-  .split .orange { color: var(--akzent); font-weight: 700; }
-
-  /* Ablauf */
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px; counter-reset: schritt; }
-  .step { background: #fff; border-radius: 14px; padding: 24px 20px 20px; box-shadow: 0 6px 22px rgba(0,0,0,.07); position: relative; }
-  .step::before { counter-increment: schritt; content: counter(schritt); position: absolute; top: -16px; left: 20px; background: var(--akzent); color: #fff; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; }
-  .step b { display: block; margin-bottom: 4px; padding-top: 6px; }
-  .step span { font-size: .92rem; color: #555; }
-
-  /* FAQ */
-  details { background: #fff; border: 1px solid #e8e8e8; border-radius: 12px; padding: 16px 20px; margin-bottom: 12px; }
-  summary { font-weight: 700; cursor: pointer; }
-  details p { margin-top: 8px; color: #444; }
-
-  /* Kontakt-Band */
-  .kontakt { background: var(--dunkel); color: #fff; }
-  .kontakt h2 { color: #fff; }
-  .kontakt .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 26px; margin-top: 26px; }
-  .kontakt b { color: var(--akzent); display: block; margin-bottom: 6px; }
-  .kontakt a { color: #fff; }
-
-  footer { background: #0c0c0c; color: #999; padding: 26px 0; font-size: .88rem; }
-  footer a { color: #ccc; }
-
-  /* Floating WhatsApp */
-  .wa-float { position: fixed; right: 18px; bottom: 18px; z-index: 60; background: #25d366; color: #fff; text-decoration: none; font-weight: 700; padding: 14px 20px; border-radius: 999px; box-shadow: 0 8px 24px rgba(0,0,0,.3); }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="index, follow">
+  <base href="/mietwagen-vorschau/">
+  <link rel="canonical" href="https://www.autovermietung-mos.de/">
+  <title>Autovermietung MOS | Mieten, Auto-Abo & Ersatzmobilität</title>
+  <meta name="description" content="Mietwagen, Auto-Abo und Ersatzmobilität in Mosbach. Flexible Laufzeiten, moderne Fahrzeuge und persönliche Beratung vor Ort.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink:#101114; --ink-soft:#191b20; --paper:#f5f5f2; --white:#fff;
+      --orange:#ff641e; --orange-dark:#df4e0a; --green:#20c86a;
+      --muted:#696b72; --line:#deded9; --radius:24px; --shadow:0 24px 70px rgba(16,17,20,.11);
+    }
+    *{box-sizing:border-box} html{scroll-behavior:smooth} body{margin:0;background:var(--paper);color:var(--ink);font-family:Manrope,system-ui,sans-serif;line-height:1.55}
+    body.menu-open{overflow:hidden} a{color:inherit} img{display:block;width:100%} button,input,select{font:inherit}
+    .shell{width:min(1180px,calc(100% - 40px));margin:auto}
+    .topnote{background:var(--orange);color:#fff;text-align:center;font-size:.78rem;font-weight:800;letter-spacing:.08em;padding:8px 20px;text-transform:uppercase}
+    .nav{position:sticky;top:0;z-index:80;background:rgba(16,17,20,.92);backdrop-filter:blur(18px);color:#fff;border-bottom:1px solid rgba(255,255,255,.08)}
+    .navrow{height:76px;display:flex;align-items:center;justify-content:space-between;gap:24px}.brand{text-decoration:none;font-weight:800;letter-spacing:-.03em;font-size:1.05rem;white-space:nowrap}.brand em{font-style:normal;color:var(--orange)}
+    .navlinks{display:flex;align-items:center;gap:28px}.navlinks>a:not(.navcta){text-decoration:none;color:#d6d6d7;font-size:.9rem;font-weight:700}.navlinks>a:hover{color:#fff}
+    .navcta,.button{display:inline-flex;justify-content:center;align-items:center;gap:9px;text-decoration:none;border:0;border-radius:999px;padding:14px 21px;font-weight:800;cursor:pointer;transition:.2s ease}
+    .navcta{background:#fff;color:var(--ink)}.navcta:hover,.button.primary:hover{transform:translateY(-2px)}
+    .hero{background:var(--ink);color:#fff;padding:58px 0 92px;overflow:hidden;position:relative}.hero:before{content:"";position:absolute;width:520px;height:520px;border-radius:50%;background:rgba(255,100,30,.18);filter:blur(120px);right:-160px;top:-180px}
+    .hero-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(440px,1.1fr);gap:56px;align-items:center;position:relative}.eyebrow{display:flex;align-items:center;gap:10px;color:#ff9867;text-transform:uppercase;font-weight:800;font-size:.76rem;letter-spacing:.15em}.eyebrow:before{content:"";width:32px;height:2px;background:var(--orange)}
+    h1,h2,h3,p{margin-top:0}.hero h1{font-size:clamp(3rem,6vw,5.7rem);line-height:.96;letter-spacing:-.065em;margin:22px 0 25px;max-width:680px}.hero h1 span{color:var(--orange)}.hero-copy{font-size:1.08rem;color:#c7c8cb;max-width:590px;margin-bottom:28px}.hero-actions{display:flex;gap:12px;flex-wrap:wrap}.button.primary{background:var(--orange);color:#fff}.button.secondary{border:1px solid #484a50;color:#fff;background:#202227}.button.secondary:hover{border-color:#fff}
+    .hero-trust{display:flex;gap:18px 28px;flex-wrap:wrap;margin-top:30px;color:#d6d7da;font-size:.82rem;font-weight:700}.hero-trust span:before{content:"✓";color:#55dc8e;margin-right:8px}
+    .vehicle-stage{min-height:500px;border-radius:36px;position:relative;overflow:hidden;background:#ecece9;box-shadow:0 34px 90px rgba(0,0,0,.38)}.vehicle-stage img{height:100%;position:absolute;object-fit:cover}.vehicle-stage:after{content:"";position:absolute;inset:auto 0 0;height:45%;background:linear-gradient(transparent,rgba(0,0,0,.68))}
+    .vehicle-label{position:absolute;z-index:2;left:26px;right:26px;bottom:24px;display:flex;align-items:end;justify-content:space-between;gap:18px}.vehicle-label strong{font-size:1.35rem;letter-spacing:-.03em}.vehicle-label small{display:block;color:#d5d5d5;margin-top:3px}.availability{background:var(--green);color:#fff;border-radius:999px;padding:8px 13px;font-size:.75rem;font-weight:800;white-space:nowrap}.symbol{position:absolute;right:16px;top:14px;background:rgba(0,0,0,.55);color:#ddd;border-radius:999px;padding:6px 10px;font-size:.68rem;z-index:2}
+    .quick-wrap{margin-top:-43px;position:relative;z-index:5}.quick{background:#fff;border-radius:22px;padding:18px;display:grid;grid-template-columns:1.2fr 1fr 1fr auto;gap:10px;box-shadow:var(--shadow)}.field{background:#f5f5f3;border:1px solid transparent;border-radius:15px;padding:9px 14px}.field:focus-within{border-color:var(--orange)}.field label{display:block;font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:var(--muted);margin-bottom:3px}.field input,.field select{width:100%;border:0;background:transparent;outline:0;color:var(--ink);font-weight:700;min-height:25px}.quick .button{border-radius:15px;padding-inline:25px}
+    section{padding:100px 0}.section-head{display:flex;justify-content:space-between;align-items:end;gap:30px;margin-bottom:42px}.kicker{color:var(--orange-dark);text-transform:uppercase;letter-spacing:.14em;font-weight:800;font-size:.74rem;margin-bottom:12px}.section-head h2,.split h2,.final h2{font-size:clamp(2.15rem,4vw,3.7rem);line-height:1.02;letter-spacing:-.055em;margin-bottom:0}.section-head p{max-width:440px;color:var(--muted);margin-bottom:3px}
+    .offer-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:42px}.offer{background:#fff;border:1px solid #e7e7e2;border-radius:22px;padding:27px}.offer.featured{background:var(--ink);color:#fff;border-color:var(--ink)}.offer-badge{display:inline-block;background:#fff0e9;color:var(--orange-dark);border-radius:999px;padding:6px 10px;font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em}.offer.featured .offer-badge{background:var(--orange);color:#fff}.offer h3{font-size:1.3rem;letter-spacing:-.04em;margin:22px 0 8px}.offer p{color:var(--muted);font-size:.88rem;min-height:67px}.offer.featured p{color:#bfc1c6}.offer ul{list-style:none;padding:0;margin:20px 0 25px;display:grid;gap:9px;font-size:.8rem;font-weight:700}.offer li:before{content:"✓";color:var(--green);margin-right:9px}
+    .abo-section{background:#e9e9e5}.abo-grid{display:grid;grid-template-columns:.92fr 1.08fr;gap:65px;align-items:center}.abo-copy>p{color:var(--muted);max-width:570px}.abo-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:28px}.abo-steps div{background:#fff;border-radius:16px;padding:16px;font-size:.76rem}.abo-steps strong{display:block;font-size:.86rem;margin-bottom:3px}.abo-form{background:#fff;border-radius:28px;padding:30px;box-shadow:var(--shadow)}.abo-form h3{font-size:1.35rem;margin-bottom:5px}.abo-form>p{color:var(--muted);font-size:.82rem}.abo-fields{display:grid;grid-template-columns:1fr 1fr;gap:11px}.abo-fields .field.full{grid-column:1/-1}.abo-form .button{width:100%;margin-top:13px;border-radius:15px}.legal-note{font-size:.7rem;color:var(--muted);margin:12px 2px 0}
+    .model-catalog{margin-top:58px;padding-top:50px;border-top:1px solid #d3d3cd}.model-catalog-head{display:flex;justify-content:space-between;gap:25px;align-items:end;margin-bottom:25px}.model-catalog h3{font-size:1.65rem;letter-spacing:-.045em;margin-bottom:4px}.model-catalog-head p{color:var(--muted);font-size:.82rem;margin:0;max-width:500px}.model-group{margin-top:25px}.model-group h4{font-size:.75rem;text-transform:uppercase;letter-spacing:.13em;color:var(--orange-dark);margin:0 0 11px}.model-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.model-button{border:1px solid #d9d9d3;background:#fff;border-radius:14px;padding:14px;text-align:left;cursor:pointer;transition:.18s}.model-button:hover{border-color:var(--orange);transform:translateY(-2px)}.model-button strong{display:block;font-size:.83rem}.model-button span{display:block;color:var(--muted);font-size:.69rem;margin-top:3px}.model-button.upcoming{background:#f3f3ef}.model-button.upcoming strong:after{content:"Neu";color:var(--orange-dark);font-size:.58rem;margin-left:6px;text-transform:uppercase}
+    .fleet{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}.car{background:#fff;border-radius:var(--radius);overflow:hidden;border:1px solid #e8e8e4;transition:.25s}.car:hover{transform:translateY(-5px);box-shadow:var(--shadow)}.car-media{height:320px;position:relative;background:#e6e6e2;overflow:hidden}.car-media img{height:100%;object-fit:cover;transition:.5s}.car:hover img{transform:scale(1.025)}.tag{position:absolute;left:18px;top:18px;padding:8px 12px;border-radius:999px;background:var(--green);color:#fff;font-size:.72rem;font-weight:800}.tag.soon{background:#36383e}.photo-note{position:absolute;right:15px;bottom:12px;color:#fff;background:rgba(0,0,0,.52);padding:5px 9px;border-radius:999px;font-size:.65rem}.car-body{padding:25px 26px 28px}.car-title{display:flex;justify-content:space-between;gap:18px;align-items:start}.car h3{font-size:1.45rem;letter-spacing:-.04em;margin-bottom:4px}.type{color:var(--muted);font-size:.84rem}.price{text-align:right;white-space:nowrap}.price strong{display:block;color:var(--orange-dark);font-size:1.65rem;line-height:1}.price span{font-size:.72rem;color:var(--muted)}.features{display:flex;flex-wrap:wrap;gap:8px;margin:22px 0}.features span{background:#f2f2ef;border-radius:999px;padding:7px 10px;font-size:.75rem;font-weight:700}.card-foot{border-top:1px solid #ecece8;padding-top:20px;display:flex;align-items:center;justify-content:space-between;gap:15px}.card-foot small{color:var(--muted)}.textlink{color:var(--orange-dark);font-weight:800;text-decoration:none}.textlink:hover{text-decoration:underline}
+    .benefit-section{background:#fff}.benefits{display:grid;grid-template-columns:1.05fr .95fr;gap:72px;align-items:center}.split-photo{height:600px;border-radius:30px;overflow:hidden;position:relative}.split-photo img{height:100%;object-fit:cover}.split-photo .quote{position:absolute;left:22px;right:22px;bottom:22px;background:rgba(16,17,20,.88);backdrop-filter:blur(14px);color:#fff;padding:20px 22px;border-radius:17px;font-size:.95rem}.points{display:grid;gap:25px;margin-top:36px}.point{display:grid;grid-template-columns:48px 1fr;gap:15px}.point i{font-style:normal;background:#fff0e9;color:var(--orange-dark);border-radius:14px;width:48px;height:48px;display:grid;place-items:center;font-size:1.2rem}.point h3{margin:0 0 4px;font-size:1rem}.point p{margin:0;color:var(--muted);font-size:.9rem}
+    .process{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:42px}.process article{background:var(--ink-soft);color:#fff;border-radius:20px;padding:25px;min-height:190px}.num{color:var(--orange);font-size:.76rem;font-weight:800;letter-spacing:.1em}.process h3{font-size:1.1rem;margin:42px 0 7px}.process p{font-size:.84rem;color:#bcbec3;margin:0}
+    .faq{max-width:900px;margin:auto}.faq details{border-bottom:1px solid var(--line);padding:22px 0}.faq summary{list-style:none;cursor:pointer;font-weight:800;padding-right:45px;position:relative}.faq summary::-webkit-details-marker{display:none}.faq summary:after{content:"+";position:absolute;right:5px;top:-5px;font-size:1.7rem;color:var(--orange)}.faq details[open] summary:after{content:"–"}.faq details p{color:var(--muted);max-width:760px;padding-top:12px;margin-bottom:0}
+    .final{background:var(--orange);color:#fff;padding:75px 0}.final-grid{display:flex;align-items:center;justify-content:space-between;gap:40px}.final p{margin:15px 0 0;color:#ffe5d8}.final .button{background:#fff;color:var(--ink)}
+    footer{background:var(--ink);color:#9fa1a6;padding:36px 0;font-size:.8rem}.footer-row{display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap}.footer-links{display:flex;gap:20px}.footer-links a{color:#d7d7d9}.wa-float{position:fixed;right:18px;bottom:18px;z-index:70;background:var(--green);color:#fff;text-decoration:none;border-radius:999px;padding:14px 19px;font-weight:800;box-shadow:0 12px 35px rgba(0,0,0,.24)}
+    @media(max-width:900px){.navlinks>a:not(.navcta){display:none}.hero-grid,.benefits,.abo-grid{grid-template-columns:1fr}.hero{padding-top:42px}.hero-grid{gap:35px}.vehicle-stage{min-height:420px}.quick{grid-template-columns:1fr 1fr}.quick .button{grid-column:1/-1}.offer-grid{grid-template-columns:1fr}.offer p{min-height:0}.model-grid{grid-template-columns:repeat(3,1fr)}.process{grid-template-columns:1fr 1fr}.split-photo{height:440px}.fleet{gap:16px}}
+    @media(max-width:620px){.shell{width:min(100% - 28px,1180px)}.topnote{font-size:.65rem}.navrow{height:66px}.brand{font-size:.85rem}.navcta{padding:11px 14px;font-size:.78rem}.hero{padding-bottom:78px}.hero h1{font-size:3.25rem}.hero-copy{font-size:.98rem}.hero-actions .button{width:100%}.vehicle-stage{min-height:330px;border-radius:24px}.vehicle-label{left:18px;right:18px;bottom:17px}.vehicle-label strong{font-size:1.05rem}.availability{font-size:.64rem}.quick-wrap{margin-top:-29px}.quick{grid-template-columns:1fr;padding:13px;border-radius:18px}.quick .button{grid-column:auto}section{padding:72px 0}.section-head,.model-catalog-head{display:block}.section-head p,.model-catalog-head p{margin-top:16px}.fleet{grid-template-columns:1fr}.car-media{height:245px}.car-body{padding:21px}.benefits{gap:38px}.split-photo{height:350px}.abo-fields,.abo-steps,.model-grid{grid-template-columns:1fr}.abo-fields .field.full{grid-column:auto}.abo-form{padding:22px}.process{grid-template-columns:1fr}.process article{min-height:155px}.process h3{margin-top:24px}.final-grid{display:block}.final .button{margin-top:26px;width:100%}.wa-float{font-size:0;width:54px;height:54px;padding:0;display:grid;place-items:center}.wa-float:after{content:"✆";font-size:1.35rem}}
+  </style>
 </head>
 <body>
+  <div class="topnote">Mieten · Auto-Abo · Ersatzmobilität in Mosbach</div>
+  <nav class="nav" aria-label="Hauptnavigation"><div class="shell navrow">
+    <a class="brand" href="#top"><em>AUTOVERMIETUNG</em> MOS</a>
+    <div class="navlinks"><a href="#angebote">Angebote</a><a href="#flotte">Flotte</a><a href="#auto-abo">Auto-Abo</a><a href="#ablauf">So geht's</a><a class="navcta" href="tel:+4915227706694">0152 277 066 94</a></div>
+  </div></nav>
 
-<nav>
-  <div class="wrap">
-    <div class="logo">GÄRTNER <span>KAROSSERIE + LACK</span> · MIETWAGEN</div>
-    <a class="telbtn" href="tel:+4915227706694">0152 277 066 94</a>
-  </div>
-</nav>
-
-<header class="hero">
-  <div class="wrap hero-grid">
-    <div class="inner">
-      <div class="eyebrow">Autovermietung in Mosbach</div>
-      <h1>Einsteigen.<br>Losfahren.<br>Fertig.</h1>
-      <p class="sub">Mietwagen &amp; Ersatzwagen direkt vom Meisterbetrieb in Mosbach-Lohrbach. Faire Tagespreise, Vertrag digital unterschrieben — in 5 Minuten sitzen Sie am Steuer.</p>
-      <a class="cta wa" href="https://wa.me/4915227706694?text=Hallo%2C%20ich%20interessiere%20mich%20f%C3%BCr%20einen%20Mietwagen.">Per WhatsApp anfragen</a>
-      <a class="cta ghost" href="https://kundenstatus-app.onrender.com/mietwagen">Online anfragen (2&nbsp;Min)</a>
-      <a class="cta ghost" href="#fahrzeuge">Fahrzeuge ansehen</a>
-      <div class="chips">
-        <span class="chip">✓ Meisterbetrieb</span>
-        <span class="chip">✓ Digitaler Mietvertrag</span>
-        <span class="chip">✓ Direkte Versicherungs&shy;abrechnung</span>
+  <main id="top">
+    <header class="hero"><div class="shell hero-grid">
+      <div>
+        <div class="eyebrow">Mobil in Mosbach</div>
+        <h1>Mieten.<br>Abonnieren.<br><span>Mobil bleiben.</span></h1>
+        <p class="hero-copy">Vom Mietwagen für ein Wochenende bis zur planbaren Mobilität über mehrere Monate: modern, persönlich und passend zu deinem Bedarf.</p>
+        <div class="hero-actions"><a class="button primary" href="#anfrage">Verfügbarkeit prüfen</a><a class="button secondary" href="#flotte">Fahrzeuge entdecken</a></div>
+        <div class="hero-trust"><span>150 km pro Tag inklusive</span><span>Digitaler Mietvertrag</span><span>Direkter Ansprechpartner</span></div>
       </div>
-    </div>
-    <div class="hero-foto">
-      <img src="bilder/kona_symbolfoto.jpg" alt="Hyundai Kona — Neuwagen in unserer Mietflotte in Mosbach">
-      <span class="fahrzeug-tag">Hyundai Kona <span>· Neu 2026 in der Flotte</span></span>
-      <span class="symbolfoto">Symbolfoto</span>
-    </div>
-  </div>
-</header>
+      <div class="vehicle-stage"><img src="bilder/kona_symbolfoto.jpg" alt="Hyundai Kona Mietwagen in Mosbach"><span class="symbol">Symbolfoto</span><div class="vehicle-label"><div><strong>Hyundai Kona N Line X</strong><small>Automatik · 180 PS · Premium-Ausstattung</small></div><span class="availability">Jetzt verfügbar</span></div></div>
+    </div></header>
 
-<div class="usps">
-  <div class="wrap">
-    <div class="usp"><b>Ohne Station-Bürokratie</b><span>Kein Schalter, keine Warteschlange — Übergabe direkt auf unserem Hof.</span></div>
-    <div class="usp"><b>Digital in 5 Minuten</b><span>Mietvertrag auf dem Bildschirm unterschreiben, Schlüssel mitnehmen.</span></div>
-    <div class="usp"><b>Unfall? Wir regeln das.</b><span>Bei unverschuldetem Unfall rechnen wir direkt mit der gegnerischen Versicherung ab.</span></div>
-    <div class="usp"><b>Neuwagen-Flotte</b><span>Moderne, gepflegte Fahrzeuge — gewartet vom eigenen Fachbetrieb.</span></div>
-  </div>
-</div>
+    <div class="shell quick-wrap" id="anfrage"><form class="quick" onsubmit="return starteAnfrage(event)">
+      <div class="field"><label for="quick-car">Wunschfahrzeug</label><select id="quick-car"><option>Hyundai Kona N Line X</option><option>Hyundai i10</option><option>Fiat Doblo</option><option>Fiat Doblo Maxi</option></select></div>
+      <div class="field"><label for="quick-from">Abholung</label><input id="quick-from" type="date" required></div>
+      <div class="field"><label for="quick-to">Rückgabe</label><input id="quick-to" type="date" required></div>
+      <button class="button primary" type="submit">Jetzt anfragen</button>
+    </form></div>
 
-<section id="fahrzeuge">
-  <div class="wrap">
-    <h2>Unsere Mietfahrzeuge</h2>
-    <p class="lead">Klein aber fein: eine handverlesene Flotte, top gepflegt. Und sie wächst.</p>
-    <div class="cars">
-
-      <div class="car">
-        <div class="foto">
-          <!-- data-echtes-foto: i10 (weiß) nach Aufbereitung fotografieren (3/4-Front vor der Halle) -->
-          <img src="bilder/i10_symbolfoto.jpg" alt="Hyundai i10 Kleinwagen mieten in Mosbach" loading="lazy">
-          <span class="badge">Sofort verfügbar</span>
-          <span class="symbolfoto">Symbolfoto</span>
-        </div>
-        <div class="body">
-          <h3>Hyundai i10</h3>
-          <div class="preisrow"><span class="preis">39 €</span><span class="preis-einheit">/ Tag inkl. 150 km</span></div>
-          <div class="staffel">ab 3 Tagen 33 €/Tag · Woche 199 €</div>
-          <ul>
-            <li>Sparsamer, wendiger Kleinwagen</li>
-            <li>Perfekt für Stadt, Alltag &amp; Pendeln</li>
-            <li>Leicht zu parken, günstig im Verbrauch</li>
-          </ul>
-          <div class="hint">🔧 <b>Werkstattkunden:</b> nur <b>29 €/Tag</b>, solange Ihr Auto bei uns ist</div>
-          <a class="buchen" href="#buchen" onclick="waehleFahrzeug('Hyundai i10')">i10 buchen</a>
-        </div>
+    <section id="angebote"><div class="shell">
+      <div class="section-head"><div><div class="kicker">Drei Wege zum passenden Auto</div><h2>So flexibel wie<br>dein Alltag.</h2></div><p>Du entscheidest, ob du ein Fahrzeug kurz mietest, während einer Reparatur mobil bleibst oder mehrere Monate planbar fahren möchtest.</p></div>
+      <div class="offer-grid">
+        <article class="offer"><span class="offer-badge">Ab 1 Tag</span><h3>Tages- & Wochenmiete</h3><p>Für Ausflug, Urlaub, Termin oder Transport – kurzfristig und persönlich buchbar.</p><ul><li>Transparente Tagestarife</li><li>150 Kilometer pro Miettag</li><li>Direkte Übergabe vor Ort</li></ul><a class="textlink" href="#flotte">Mietwagen ansehen →</a></article>
+        <article class="offer"><span class="offer-badge">Werkstattservice</span><h3>Ersatzmobilität</h3><p>Fahrzeug zur Reparatur abgeben und ohne Umweg mobil bleiben.</p><ul><li>Sondertarife für Werkstattkunden</li><li>Kurze Wege, ein Ansprechpartner</li><li>Prüfung möglicher Versicherungsabrechnung</li></ul><a class="textlink" href="#anfrage">Ersatzwagen anfragen →</a></article>
+        <article class="offer featured"><span class="offer-badge">Neu im Aufbau</span><h3>Auto-Abo & Langzeitmiete</h3><p>Planbare Mobilität über mehrere Monate – individuell nach Laufzeit und Kilometerbedarf.</p><ul><li>Für Privat- und Geschäftskunden</li><li>Flexible Wunschlaufzeit</li><li>Persönlich kalkuliertes Angebot</li></ul><a class="textlink" href="#auto-abo" style="color:#ff9867">Auto-Abo anfragen →</a></article>
       </div>
+    </div></section>
 
-      <!-- Suzuki Swift entfernt (GF 02.07.: Kauf hat sich erledigt) -->
-      <div class="car">
-        <div class="foto">
-          <!-- data-echtes-foto: Kona Atlas White nach Übergabe fotografieren (3/4-Front, vor der Halle, goldene Stunde). Symbolfoto = aktuelles Kona-Modell (Hyundai-Pressefoto via Unsplash) -->
-          <img src="bilder/kona_symbolfoto.jpg" alt="Hyundai Kona Kompakt-SUV mieten in Mosbach" loading="lazy">
-          <span class="badge bald">In Kürze</span>
-          <span class="symbolfoto">Symbolfoto</span>
-        </div>
-        <div class="body">
-          <h3>Hyundai Kona N Line X</h3>
-          <div class="preisrow"><span class="preis">59 €</span><span class="preis-einheit">/ Tag inkl. 150 km</span></div>
-          <div class="staffel">ab 3 Tagen 49 €/Tag · Woche 289 €</div>
-          <ul>
-            <li>Kompakt-SUV, 180 PS, Automatik (DCT)</li>
-            <li>Voll-LED, Navi, Rückfahrkamera</li>
-            <li>Alcantara-Sportsitze, N Line X-Ausstattung</li>
-          </ul>
-          <div class="hint">📅 Neuwagen 2026 — in Kürze in unserer Flotte</div>
-          <a class="buchen" href="#buchen" onclick="waehleFahrzeug('Hyundai Kona N Line X')">Kona vormerken</a>
-        </div>
+    <section id="flotte" style="padding-top:20px"><div class="shell">
+      <div class="section-head"><div><div class="kicker">Unsere Flotte</div><h2>Für Alltag, Auszeit<br>und Transport.</h2></div><p>Wähle das Fahrzeug, das zu deinem Tag passt. Alle Preise inklusive Mehrwertsteuer und 150 Freikilometern pro Miettag.</p></div>
+      <div class="fleet">
+        <article class="car"><div class="car-media"><img src="bilder/kona_symbolfoto.jpg" alt="Hyundai Kona N Line X" loading="lazy"><span class="tag">Jetzt verfügbar</span><span class="photo-note">Symbolfoto</span></div><div class="car-body"><div class="car-title"><div><h3>Hyundai Kona N Line X</h3><div class="type">Kompakt-SUV · Automatik</div></div><div class="price"><strong>59 €</strong><span>pro Tag</span></div></div><div class="features"><span>180 PS</span><span>Voll-LED</span><span>Navi</span><span>Rückfahrkamera</span></div><div class="card-foot"><small>ab 3 Tagen 49 € / Tag</small><a class="textlink" href="#anfrage" data-car="Hyundai Kona N Line X">Kona anfragen →</a></div></div></article>
+        <article class="car"><div class="car-media"><img src="bilder/i10_symbolfoto.jpg" alt="Hyundai i10" loading="lazy"><span class="tag">Jetzt verfügbar</span><span class="photo-note">Symbolfoto</span></div><div class="car-body"><div class="car-title"><div><h3>Hyundai i10</h3><div class="type">City-Car · sparsam</div></div><div class="price"><strong>39 €</strong><span>pro Tag</span></div></div><div class="features"><span>Wendig</span><span>5 Sitze</span><span>Ideal für den Alltag</span></div><div class="card-foot"><small>Werkstattkunden ab 29 € / Tag</small><a class="textlink" href="#anfrage" data-car="Hyundai i10">i10 anfragen →</a></div></div></article>
+        <article class="car"><div class="car-media"><img src="bilder/doblo_symbolfoto.jpg" alt="Fiat Doblo" loading="lazy"><span class="tag soon">In Kürze</span><span class="photo-note">Symbolfoto</span></div><div class="car-body"><div class="car-title"><div><h3>Fiat Doblo</h3><div class="type">Hochdachkombi · 5 Sitze</div></div><div class="price"><strong>55 €</strong><span>pro Tag</span></div></div><div class="features"><span>Viel Stauraum</span><span>Familie</span><span>Handwerk</span></div><div class="card-foot"><small>ab 3 Tagen 45 € / Tag</small><a class="textlink" href="#anfrage" data-car="Fiat Doblo">Vormerken →</a></div></div></article>
+        <article class="car"><div class="car-media"><img src="bilder/doblo_maxi_symbolfoto.jpg" alt="Fiat Doblo Maxi" loading="lazy"><span class="tag soon">In Kürze</span><span class="photo-note">Symbolfoto</span></div><div class="car-body"><div class="car-title"><div><h3>Fiat Doblo Maxi</h3><div class="type">Langversion · maximal flexibel</div></div><div class="price"><strong>59 €</strong><span>pro Tag</span></div></div><div class="features"><span>Extra Laderaum</span><span>Bis zu 5 Sitze</span><span>Umzug</span></div><div class="card-foot"><small>ab 3 Tagen 49 € / Tag</small><a class="textlink" href="#anfrage" data-car="Fiat Doblo Maxi">Vormerken →</a></div></div></article>
       </div>
+      <p style="color:var(--muted);font-size:.76rem;margin:20px 2px 0">Preise inkl. MwSt. und 150 km/Tag. Mehrkilometer 0,25 €/km. Mindestalter 21 Jahre, Führerschein Klasse B. Verfügbarkeit und endgültige Konditionen werden vor Vertragsabschluss bestätigt.</p>
+    </div></section>
 
-      <div class="car">
-        <div class="foto">
-          <!-- data-echtes-foto: Fiat Doblo (weiß, klein) nach Beschaffung fotografieren. Symbol: baugleicher Stellantis-Hochdachkombi -->
-          <img src="bilder/doblo_symbolfoto.jpg" alt="Fiat Doblo mieten in Mosbach — Hochdachkombi" loading="lazy">
-          <span class="badge bald">In Kürze</span>
-          <span class="symbolfoto">Symbolfoto</span>
-        </div>
-        <div class="body">
-          <h3>Fiat Doblo</h3>
-          <div class="preisrow"><span class="preis">55 €</span><span class="preis-einheit">/ Tag inkl. 150 km</span></div>
-          <div class="staffel">ab 3 Tagen 45 €/Tag · Woche 269 €</div>
-          <ul>
-            <li>Der Praktische — Transport, Umzug, Familie</li>
-            <li>Großer Laderaum, 5 Sitze</li>
-            <li>Ideal für Handwerk &amp; Wochenendprojekte</li>
-          </ul>
-          <div class="hint">📅 Jetzt unverbindlich vormerken — wir melden uns, sobald er da ist</div>
-          <a class="buchen" href="#buchen" onclick="waehleFahrzeug('Fiat Doblo')">Doblo vormerken</a>
-        </div>
+    <section class="abo-section" id="auto-abo"><div class="shell abo-grid">
+      <div class="abo-copy"><div class="kicker">Auto-Abo & Langzeitmiete</div><h2>Monate fahren.<br>Flexibel bleiben.</h2><p>Du brauchst ein Auto länger als ein paar Tage, möchtest dich aber noch nicht langfristig festlegen? Wir erstellen dir ein individuelles Mobilitätsangebot passend zu Fahrzeugklasse, Wunschlaufzeit und Monatskilometern.</p><div class="abo-steps"><div><strong>01 Fahrzeug</strong>Klasse oder Wunschmodell wählen.</div><div><strong>02 Bedarf</strong>Laufzeit und Kilometer angeben.</div><div><strong>03 Angebot</strong>Leistungen und Monatsrate erhalten.</div></div></div>
+      <form class="abo-form" onsubmit="return starteAboAnfrage(event)"><h3>Unverbindlich vormerken</h3><p>Wir prüfen passende Fahrzeuge und melden uns mit einem persönlichen Angebot.</p><div class="abo-fields">
+        <div class="field"><label for="abo-kind">Kundengruppe</label><select id="abo-kind"><option>Privatkunde</option><option>Geschäftskunde</option></select></div><div class="field"><label for="abo-car">Hyundai Wunschmodell</label><select id="abo-car"><option>Noch offen</option><option>Hyundai i20</option><option>Hyundai i30</option><option>Hyundai i30 Kombi</option><option>Hyundai BAYON</option><option>Hyundai KONA</option><option>Hyundai KONA Hybrid</option><option>Hyundai KONA Elektro</option><option>Hyundai TUCSON</option><option>Hyundai TUCSON Hybrid</option><option>Hyundai TUCSON Plug-in-Hybrid</option><option>Hyundai SANTA FE Hybrid</option><option>Hyundai SANTA FE Plug-in-Hybrid</option><option>Hyundai STARIA Hybrid 7-Sitzer</option><option>Hyundai STARIA Hybrid 9-Sitzer</option><option>Hyundai INSTER</option><option>Hyundai IONIQ 5</option><option>Hyundai IONIQ 5 N</option><option>Hyundai IONIQ 6</option><option>Hyundai IONIQ 6 N</option><option>Hyundai IONIQ 9</option><option>Hyundai NEXO</option><option>Hyundai IONIQ 3 (angekündigt)</option><option>Hyundai STARIA Elektro (angekündigt)</option></select></div>
+        <div class="field"><label for="abo-term">Wunschlaufzeit</label><select id="abo-term"><option>3 Monate</option><option>6 Monate</option><option>12 Monate</option><option>Andere Laufzeit</option></select></div><div class="field"><label for="abo-km">Kilometer pro Monat</label><select id="abo-km"><option>ca. 500 km</option><option>ca. 1.000 km</option><option>ca. 1.500 km</option><option>mehr als 1.500 km</option></select></div>
+        <div class="field full"><label for="abo-name">Name</label><input id="abo-name" type="text" placeholder="Vor- und Nachname" required></div>
+      </div><button class="button primary" type="submit">Auto-Abo-Angebot anfordern</button><p class="legal-note">Unverbindliche Interessentenanfrage, keine Fahrzeugbestellung. Fahrzeug, Lieferzeit, Monatsrate, Verfügbarkeit und enthaltener Leistungsumfang werden individuell angeboten. Eine Beschaffung erfolgt erst nach gesonderter Prüfung und verbindlichem Vertrag.</p></form>
+      <div class="model-catalog" style="grid-column:1/-1"><div class="model-catalog-head"><div><div class="kicker">Hyundai Modellprogramm</div><h3>Wunschmodell auswählen</h3></div><p>Die Auswahl basiert auf dem aktuellen deutschen Hyundai-Modellprogramm. Ausstattung, Antrieb und Lieferzeit werden nach deiner Anfrage beim Handel geprüft.</p></div>
+        <div class="model-group"><h4>Benzin & kompakte Alltagsmodelle</h4><div class="model-grid"><button class="model-button" data-abo-model="Hyundai i20"><strong>i20</strong><span>Kleinwagen</span></button><button class="model-button" data-abo-model="Hyundai i30"><strong>i30</strong><span>Kompaktklasse</span></button><button class="model-button" data-abo-model="Hyundai i30 Kombi"><strong>i30 Kombi</strong><span>Kombi</span></button><button class="model-button" data-abo-model="Hyundai BAYON"><strong>BAYON</strong><span>Kompakt-SUV</span></button><button class="model-button" data-abo-model="Hyundai KONA"><strong>KONA</strong><span>SUV</span></button><button class="model-button" data-abo-model="Hyundai TUCSON"><strong>TUCSON</strong><span>SUV</span></button></div></div>
+        <div class="model-group"><h4>Hybrid & Plug-in-Hybrid</h4><div class="model-grid"><button class="model-button" data-abo-model="Hyundai KONA Hybrid"><strong>KONA Hybrid</strong><span>Hybrid-SUV</span></button><button class="model-button" data-abo-model="Hyundai TUCSON Hybrid"><strong>TUCSON Hybrid</strong><span>Hybrid-SUV</span></button><button class="model-button" data-abo-model="Hyundai TUCSON Plug-in-Hybrid"><strong>TUCSON Plug-in</strong><span>Plug-in-Hybrid</span></button><button class="model-button" data-abo-model="Hyundai SANTA FE Hybrid"><strong>SANTA FE Hybrid</strong><span>Familien-SUV</span></button><button class="model-button" data-abo-model="Hyundai SANTA FE Plug-in-Hybrid"><strong>SANTA FE Plug-in</strong><span>Plug-in-Hybrid</span></button><button class="model-button" data-abo-model="Hyundai STARIA Hybrid 7-Sitzer"><strong>STARIA Hybrid 7</strong><span>7-Sitzer</span></button><button class="model-button" data-abo-model="Hyundai STARIA Hybrid 9-Sitzer"><strong>STARIA Hybrid 9</strong><span>9-Sitzer</span></button></div></div>
+        <div class="model-group"><h4>Elektro & alternative Antriebe</h4><div class="model-grid"><button class="model-button" data-abo-model="Hyundai INSTER"><strong>INSTER</strong><span>Elektro-City-SUV</span></button><button class="model-button" data-abo-model="Hyundai KONA Elektro"><strong>KONA Elektro</strong><span>Elektro-SUV</span></button><button class="model-button" data-abo-model="Hyundai IONIQ 5"><strong>IONIQ 5</strong><span>Elektro-Crossover</span></button><button class="model-button" data-abo-model="Hyundai IONIQ 5 N"><strong>IONIQ 5 N</strong><span>Elektro-Performance</span></button><button class="model-button" data-abo-model="Hyundai IONIQ 6"><strong>IONIQ 6</strong><span>Elektro-Limousine</span></button><button class="model-button" data-abo-model="Hyundai IONIQ 6 N"><strong>IONIQ 6 N</strong><span>Elektro-Performance</span></button><button class="model-button" data-abo-model="Hyundai IONIQ 9"><strong>IONIQ 9</strong><span>Elektro-Großraum-SUV</span></button><button class="model-button" data-abo-model="Hyundai NEXO"><strong>NEXO</strong><span>Wasserstoff</span></button><button class="model-button upcoming" data-abo-model="Hyundai IONIQ 3 (angekündigt)"><strong>IONIQ 3</strong><span>Angekündigt</span></button><button class="model-button upcoming" data-abo-model="Hyundai STARIA Elektro (angekündigt)"><strong>STARIA Elektro</strong><span>Angekündigt</span></button></div></div>
+        <p class="legal-note">Autovermietung MOS ist derzeit kein Hyundai-Vertragshändler. Modellnamen dienen der Beschreibung des Kundenwunsches. Verfügbarkeit nur nach Händlerprüfung.</p>
       </div>
+    </div></section>
 
-      <div class="car">
-        <div class="foto">
-          <!-- data-echtes-foto: Fiat Doblo Maxi (weiß, lange Version) nach Zulauf fotografieren -->
-          <img src="bilder/doblo_maxi_symbolfoto.jpg" alt="Fiat Doblo Maxi mieten in Mosbach — großer Hochdachkombi" loading="lazy">
-          <span class="badge bald">In Kürze</span>
-          <span class="symbolfoto">Symbolfoto</span>
-        </div>
-        <div class="body">
-          <h3>Fiat Doblo Maxi <span style="font-weight:400;font-size:.8rem;color:#888;">(groß)</span></h3>
-          <div class="preisrow"><span class="preis">59 €</span><span class="preis-einheit">/ Tag inkl. 150 km</span></div>
-          <div class="staffel">ab 3 Tagen 49 €/Tag · Woche 289 €</div>
-          <ul>
-            <li>Die lange Version — noch mehr Laderaum</li>
-            <li>Perfekt für große Transporte &amp; Umzüge</li>
-            <li>Bis zu 5 Sitze plus riesiger Kofferraum</li>
-          </ul>
-          <div class="hint">📅 In Kürze verfügbar — jetzt vormerken</div>
-          <a class="buchen" href="#buchen" onclick="waehleFahrzeug('Fiat Doblo Maxi')">Doblo Maxi vormerken</a>
-        </div>
-      </div>
+    <section class="benefit-section" id="vorteile"><div class="shell benefits">
+      <div class="split-photo"><img src="bilder/ersatzwagen_symbolfoto.jpg" alt="Ersatzwagen der Autovermietung MOS" loading="lazy"><div class="quote">Werkstatt, Mietwagen und persönliche Übergabe an einem Ort.</div></div>
+      <div><div class="kicker">Mehr als nur ein Schlüssel</div><h2>Mobil bleiben.<br>Wir kümmern uns.</h2><div class="points">
+        <div class="point"><i>01</i><div><h3>Kein anonymer Mietwagenschalter</h3><p>Ein fester Ansprechpartner, kurze Wege und Übergabe direkt bei uns in Mosbach-Lohrbach.</p></div></div>
+        <div class="point"><i>02</i><div><h3>Für Werkstattkunden besonders einfach</h3><p>Reparatur abgeben und im Mietwagen weiterfahren – ohne zusätzlichen Termin an einer anderen Station.</p></div></div>
+        <div class="point"><i>03</i><div><h3>Unfallschaden? Wir prüfen die Abrechnung.</h3><p>Bei unverschuldeten Schäden klären wir mit dir, ob eine direkte Abrechnung mit der gegnerischen Versicherung möglich ist.</p></div></div>
+      </div></div>
+    </div></section>
 
-    </div>
-    <p class="preisfussnote">Alle Preise inkl. MwSt. · Mehrkilometer 0,25 €/km · Selbstbeteiligung im Schadenfall [SB] € (Reduzierung gegen Aufpreis möglich) · Führerschein Klasse B, Mindestalter 21 Jahre</p>
-  </div>
-</section>
+    <section id="ablauf" style="background:var(--ink);color:#fff"><div class="shell"><div class="kicker">Einfacher Ablauf</div><div class="section-head"><h2>Vier Schritte.<br>Dann fährt's.</h2><p style="color:#bcbec3">Deine Anfrage ist unverbindlich. Wir bestätigen Fahrzeug, Zeitraum und Konditionen persönlich.</p></div><div class="process">
+      <article><span class="num">SCHRITT 01</span><h3>Zeitraum senden</h3><p>Fahrzeug sowie Abhol- und Rückgabetag auswählen.</p></article><article><span class="num">SCHRITT 02</span><h3>Bestätigung erhalten</h3><p>Wir prüfen die Verfügbarkeit und melden uns direkt.</p></article><article><span class="num">SCHRITT 03</span><h3>Digital vorbereiten</h3><p>Daten und Mietvertrag werden vor der Übergabe vorbereitet.</p></article><article><span class="num">SCHRITT 04</span><h3>Einsteigen</h3><p>Führerschein zeigen, Fahrzeug übernehmen und losfahren.</p></article>
+    </div></div></section>
 
-<section class="alt">
-  <div class="wrap split">
-    <div class="foto">
-      <!-- data-echtes-foto: Werkstatt-Szene — Kundenauto auf der Bühne, Ersatzwagen davor mit Schlüsselübergabe -->
-      <img src="bilder/ersatzwagen_symbolfoto.jpg" alt="Ersatzwagen während der Reparatur bei Gärtner Karosserie + Lack Mosbach" loading="lazy">
-      <span class="symbolfoto">Symbolfoto</span>
-    </div>
-    <div>
-      <h2>Ihr Auto bei uns — Sie bleiben mobil</h2>
-      <p>Ihr Fahrzeug steht bei uns in der Karosserie- oder Lackabteilung? Dann übernehmen Sie den Ersatzwagen <span class="orange">direkt auf unserem Hof</span> — kein Umweg, kein zweiter Termin.</p>
-      <p>Und nach einem <b>unverschuldeten Unfall</b> gilt: Die gegnerische Haftpflicht trägt in der Regel die Mietwagenkosten für die Reparaturdauer. <span class="orange">Wir rechnen direkt mit der Versicherung ab</span> — Sie fahren, wir machen den Papierkram.</p>
-      <p><a class="cta wa" style="margin-top:6px" href="https://wa.me/4915227706694?text=Hallo%2C%20ich%20brauche%20einen%20Ersatzwagen%20w%C3%A4hrend%20meiner%20Reparatur.">Ersatzwagen sichern</a></p>
-    </div>
-  </div>
-</section>
+    <section><div class="shell faq"><div class="kicker">Häufig gefragt</div><h2 style="font-size:clamp(2rem,4vw,3.5rem);letter-spacing:-.05em">Gut zu wissen.</h2>
+      <details><summary>Was brauche ich für die Anmietung?</summary><p>Einen gültigen Führerschein Klasse B und deinen Personalausweis. Das Mindestalter beträgt 21 Jahre. Weitere Bedingungen bestätigen wir mit dem konkreten Angebot.</p></details>
+      <details><summary>Wie viele Kilometer sind enthalten?</summary><p>Pro Miettag sind 150 Kilometer inklusive. Weitere Kilometer werden mit 0,25 € je Kilometer berechnet.</p></details>
+      <details><summary>Kann ich einen Ersatzwagen für meine Reparatur bekommen?</summary><p>Ja. Wenn dein Fahrzeug bei uns repariert wird, kannst du den Mietwagen direkt bei der Abgabe übernehmen. Für Werkstattkunden gelten reduzierte Tarife.</p></details>
+      <details><summary>Was ist der Unterschied zwischen Miete und Auto-Abo?</summary><p>Die klassische Miete eignet sich für einzelne Tage oder Wochen. Auto-Abo und Langzeitmiete sind für einen planbaren Zeitraum von mehreren Monaten gedacht. Laufzeit, Kilometerpaket, Monatsrate und enthaltene Leistungen stimmen wir individuell mit dir ab.</p></details>
+      <details><summary>Übernimmt die Versicherung die Mietwagenkosten?</summary><p>Bei einem unverschuldeten Unfall kann grundsätzlich ein Anspruch bestehen. Ob und in welcher Höhe Kosten übernommen werden, hängt vom Einzelfall ab. Wir unterstützen dich bei der Klärung.</p></details>
+      <details><summary>Wo findet die Übergabe statt?</summary><p>Bei Gärtner Karosserie + Lack, Binauer Höhe 4, 74821 Mosbach-Lohrbach. Parkplätze befinden sich direkt am Betrieb.</p></details>
+    </div></section>
 
-<section>
-  <div class="wrap">
-    <h2>So einfach geht's</h2>
-    <p class="lead">Vom ersten Klick bis zur Schlüsselübergabe — meist am selben Tag.</p>
-    <div class="steps">
-      <div class="step"><b>Anfragen</b><span>Per WhatsApp oder Anruf — Wunschzeitraum nennen, wir bestätigen sofort die Verfügbarkeit.</span></div>
-      <div class="step"><b>Reservieren</b><span>Fahrzeug und Zeitraum sind für Sie geblockt.</span></div>
-      <div class="step"><b>Digital unterschreiben</b><span>Mietvertrag auf dem Bildschirm — dauert 5 Minuten, kein Papierkram.</span></div>
-      <div class="step"><b>Losfahren</b><span>Schlüssel übernehmen und gute Fahrt!</span></div>
-    </div>
-  </div>
-</section>
+    <section class="final"><div class="shell final-grid"><div><h2>Welche Mobilität<br>passt zu dir?</h2><p>Mietwagen, Ersatzmobilität oder Auto-Abo – wir beraten dich persönlich.</p></div><a class="button" href="https://wa.me/4915227706694?text=Hallo%2C%20ich%20interessiere%20mich%20f%C3%BCr%20ein%20Mobilit%C3%A4tsangebot.">Per WhatsApp anfragen</a></div></section>
+  </main>
 
-<section class="alt">
-  <div class="wrap">
-    <h2>Häufige Fragen</h2>
-    <p class="lead">Kurz und ehrlich beantwortet.</p>
-    <details><summary>Was kostet ein Mietwagen in Mosbach?</summary><p>Bei uns ab 55 € pro Tag inkl. Versicherung und 150 Freikilometern — Werkstattkunden fahren während ihrer Reparatur schon ab 35 €/Tag. Ab 3 Miettagen sinkt der Tagespreis.</p></details>
-    <details><summary>Was brauche ich zum Anmieten?</summary><p>Gültiger Führerschein (Klasse B) und Personalausweis, Mindestalter 21 Jahre. Der Vertrag wird bei uns digital unterschrieben — in 5 Minuten erledigt.</p></details>
-    <details><summary>Welche Selbstbeteiligung gilt im Schadenfall?</summary><p>Selbstbeteiligung [SB] € pro Schadenfall (Vollkasko inklusive). Auf Wunsch reduzieren Sie die Selbstbeteiligung gegen einen kleinen Aufpreis pro Tag.</p></details>
-    <details><summary>Zahlt die Versicherung meinen Ersatzwagen nach einem Unfall?</summary><p>Bei unverschuldetem Unfall in der Regel ja — die gegnerische Haftpflicht übernimmt die Mietwagenkosten für die Dauer der Reparatur. Wir kümmern uns um die direkte Abrechnung.</p></details>
-    <details><summary>Wo hole ich das Fahrzeug ab?</summary><p>Binauer Höhe 4, 74821 Mosbach (Lohrbach) — schnell erreichbar aus Elztal, Obrigheim, Neckarelz, Neckarzimmern, Aglasterhausen und Buchen. Parkplätze direkt am Betrieb.</p></details>
-  </div>
-</section>
-
-<section id="buchen">
-  <style>
-    .bform { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px 20px; max-width: 820px; }
-    .bform .full { grid-column: 1 / -1; }
-    @media (max-width: 640px) { .bform { grid-template-columns: 1fr; } }
-    .bform label { display: block; font-size: .85rem; font-weight: 600; margin-bottom: 5px; color: #333; }
-    .bform input, .bform select, .bform textarea { width: 100%; padding: 11px 12px; border: 1px solid #ccc; border-radius: 9px; font-size: .95rem; font-family: inherit; }
-    .bform input:focus, .bform select:focus, .bform textarea:focus { outline: 2px solid var(--akzent); border-color: var(--akzent); }
-    .bform .consent { display: flex; gap: 10px; align-items: flex-start; font-size: .85rem; color: #444; font-weight: 400; }
-    .bform .consent input { width: auto; margin-top: 3px; }
-    .bform .btns { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; }
-    .bform button, .bform .wabtn { border: none; border-radius: 10px; padding: 14px 26px; font-weight: 700; font-size: 1rem; cursor: pointer; text-decoration: none; display: inline-block; }
-    .bform button.primary { background: var(--akzent); color: #fff; }
-    .bform .wabtn { background: #25d366; color: #fff; }
-    .preisbox { grid-column: 1 / -1; background: var(--dunkel); color: #fff; border-radius: 12px; padding: 16px 20px; display: none; }
-    .preisbox b { color: var(--akzent); font-size: 1.5rem; }
-    #vertragBox { display: none; max-width: 820px; margin-top: 30px; background: #fff; border: 1px solid #ddd; border-radius: 14px; padding: 32px; box-shadow: 0 10px 34px rgba(0,0,0,.1); }
-    #vertragBox h3 { font-size: 1.3rem; margin-bottom: 4px; }
-    #vertragBox .vzeile { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #eee; font-size: .95rem; }
-    #vertragBox .vzeile span:first-child { color: #666; }
-    #vertragBox .unterschrift { display: flex; justify-content: space-between; gap: 40px; margin-top: 50px; }
-    #vertragBox .unterschrift div { flex: 1; border-top: 1px solid #333; padding-top: 6px; font-size: .8rem; color: #666; }
-    @media print { body > *:not(#buchen) { display: none; } #buchen > .wrap > *:not(#vertragBox) { display: none; } #buchen { padding: 0; } #vertragBox { box-shadow: none; border: none; } .noprint { display: none !important; } }
-  </style>
-  <div class="wrap">
-    <h2>Jetzt online buchen</h2>
-    <p class="lead">Fahrzeug wählen, Ihre Daten eingeben — Ihr Mietvertrag wird direkt vorausgefüllt. Ausweis &amp; Führerschein werden bei der Abholung geprüft, dann unterschreiben Sie vor Ort.</p>
-    <form id="buchungsform" class="bform" onsubmit="return vertragErstellen(event)">
-      <div class="full">
-        <label for="f_fahrzeug">Fahrzeug *</label>
-        <select id="f_fahrzeug" required>
-          <option value="">Bitte wählen …</option>
-          <option value="Hyundai i10">Hyundai i10 — 39 €/Tag (Werkstattkunde 29 €)</option>
-          <option value="Hyundai Kona N Line X">Hyundai Kona N Line X — 59 €/Tag (Werkstattkunde 39 €)</option>
-          <option value="Fiat Doblo">Fiat Doblo — 55 €/Tag (Werkstattkunde 35 €)</option>
-          <option value="Fiat Doblo Maxi">Fiat Doblo Maxi — 59 €/Tag (Werkstattkunde 39 €)</option>
-        </select>
-      </div>
-      <div><label for="f_von">Mietbeginn *</label><input type="date" id="f_von" required></div>
-      <div><label for="f_bis">Mietende *</label><input type="date" id="f_bis" required></div>
-      <div class="full"><label class="consent" style="font-weight:400"><input type="checkbox" id="f_werkstatt"> Ich bin Werkstattkunde (mein Fahrzeug ist bei Gärtner in Reparatur) — reduzierter Tagespreis</label></div>
-      <div><label for="f_vorname">Vorname *</label><input type="text" id="f_vorname" required></div>
-      <div><label for="f_nachname">Nachname *</label><input type="text" id="f_nachname" required></div>
-      <div class="full"><label for="f_strasse">Straße &amp; Hausnummer *</label><input type="text" id="f_strasse" required></div>
-      <div><label for="f_plz">PLZ *</label><input type="text" id="f_plz" inputmode="numeric" required></div>
-      <div><label for="f_ort">Ort *</label><input type="text" id="f_ort" required></div>
-      <div><label for="f_gebdatum">Geburtsdatum *</label><input type="date" id="f_gebdatum" required></div>
-      <div><label for="f_telefon">Telefon *</label><input type="tel" id="f_telefon" required></div>
-      <div><label for="f_email">E-Mail</label><input type="email" id="f_email"></div>
-      <div><label for="f_fsklasse">Führerschein-Klasse *</label><input type="text" id="f_fsklasse" value="B" required></div>
-      <div class="full"><label for="f_anmerkung">Anmerkung (optional)</label><textarea id="f_anmerkung" rows="2"></textarea></div>
-      <div class="full consent"><input type="checkbox" id="f_consent" required> <span>Ich habe die <a href="/datenschutz">Datenschutzhinweise</a> gelesen und willige ein, dass meine Angaben zur Bearbeitung der Mietanfrage verarbeitet werden. *</span></div>
-      <div class="preisbox" id="preisbox"></div>
-      <div class="full btns">
-        <button type="submit" class="primary">Mietvertrag vorausfüllen</button>
-        <a href="#" class="wabtn" onclick="return whatsappAnfrage()">Stattdessen kurz per WhatsApp anfragen</a>
-      </div>
-      <p class="full" style="font-size:.8rem;color:#888;margin:0">* Pflichtfeld. Ihre Daten bleiben in Ihrem Browser, bis Sie den Vertrag ausdrucken oder absenden. Endgültiger Preis &amp; Selbstbeteiligung werden bei Abholung bestätigt.</p>
-    </form>
-
-    <div id="vertragBox"></div>
-  </div>
-</section>
-
-<section class="kontakt">
-  <div class="wrap">
-    <h2>Jetzt Fahrzeug sichern</h2>
-    <div class="grid">
-      <div><b>WhatsApp / Telefon</b><a href="tel:+4915227706694">0152 277 066 94</a><br><a href="https://wa.me/4915227706694">WhatsApp öffnen →</a></div>
-      <div><b>Abholung</b>Gärtner GmbH Karosserie + Lack<br>Binauer Höhe 4<br>74821 Mosbach (Lohrbach)</div>
-      <div><b>E-Mail</b><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></div>
-      <div><b>Online-Anfrage</b><a href="https://kundenstatus-app.onrender.com/mietwagen">Anfrageformular öffnen →</a><br><span style="opacity:.75">Wunschtermin angeben — wir bereiten alles vor, Sie unterschreiben digital.</span></div>
-    </div>
-  </div>
-</section>
-
-<footer>
-  <div class="wrap">
-    <p><b>Gärtner GmbH Karosserie + Lack</b> · Binauer Höhe 4 · 74821 Mosbach · HRB 754425, AG Mannheim</p>
-    <p style="margin-top:4px;"><a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a> · Alle Preise inkl. gesetzl. MwSt. · Fahrzeugbilder teils Symbolfotos</p>
-  </div>
-</footer>
-
-<a class="wa-float" href="https://wa.me/4915227706694?text=Hallo%2C%20ich%20interessiere%20mich%20f%C3%BCr%20einen%20Mietwagen.">💬 WhatsApp</a>
-
-<script>
-// Preistabelle je Fahrzeug (brutto/Tag). staffel3 = ab 3 Tagen, werkstatt = Werkstattkunden-Tarif.
-var PREISE = {
-  "Hyundai i10":            { tag: 39, staffel3: 33, woche: 199, werkstatt: 29 },
-  "Hyundai Kona N Line X": { tag: 59, staffel3: 49, woche: 289, werkstatt: 39 },
-  "Fiat Doblo":            { tag: 55, staffel3: 45, woche: 269, werkstatt: 35 },
-  "Fiat Doblo Maxi":       { tag: 59, staffel3: 49, woche: 289, werkstatt: 39 }
-};
-var MEHR_KM = 0.25, FREI_KM = 150;
-
-function waehleFahrzeug(name){
-  var sel = document.getElementById('f_fahrzeug');
-  if (sel){ sel.value = name; }
-  var ziel = document.getElementById('buchen');
-  if (ziel){ ziel.scrollIntoView({behavior:'smooth'}); }
-}
-
-function berechne(){
-  var fz = document.getElementById('f_fahrzeug').value;
-  var von = document.getElementById('f_von').value;
-  var bis = document.getElementById('f_bis').value;
-  var werkstatt = document.getElementById('f_werkstatt').checked;
-  if(!fz || !von || !bis || !PREISE[fz]) return null;
-  var d1 = new Date(von), d2 = new Date(bis);
-  var tage = Math.round((d2 - d1) / 86400000) + 1; // inklusive
-  if(tage < 1) return null;
-  var p = PREISE[fz], satz;
-  if(werkstatt) satz = p.werkstatt;
-  else if(tage >= 3) satz = p.staffel3;
-  else satz = p.tag;
-  var frei = FREI_KM * tage;
-  return { fz:fz, von:von, bis:bis, tage:tage, satz:satz, gesamt: satz*tage, werkstatt:werkstatt, frei:frei };
-}
-
-function zeigePreis(){
-  var r = berechne(), box = document.getElementById('preisbox');
-  if(!r){ box.style.display='none'; return; }
-  box.style.display = 'block';
-  box.innerHTML = r.tage + ' Tag(e) × ' + r.satz + ' € = <b>' + r.gesamt + ' €</b>'
-    + '<span style="opacity:.8;font-size:.85rem"> (inkl. ' + r.frei + ' km, dann ' + MEHR_KM.toFixed(2).replace('.',',') + ' €/km · '
-    + (r.werkstatt ? 'Werkstattkunden-Tarif' : (r.tage>=3?'Staffelpreis ab 3 Tagen':'Tagespreis')) + ')</span>';
-}
-['f_fahrzeug','f_von','f_bis','f_werkstatt'].forEach(function(id){
-  var el = document.getElementById(id); if(el) el.addEventListener('change', zeigePreis);
-});
-
-function fmtDatum(iso){ if(!iso) return ''; var t=iso.split('-'); return t[2]+'.'+t[1]+'.'+t[0]; }
-function esc(s){ return (s||'').replace(/[<>&]/g, function(c){return {'<':'&lt;','>':'&gt;','&':'&amp;'}[c];}); }
-
-function vertragErstellen(e){
-  e.preventDefault();
-  var r = berechne();
-  if(!r){ alert('Bitte Fahrzeug, Mietbeginn und Mietende korrekt angeben (Mietende darf nicht vor Mietbeginn liegen).'); return false; }
-  var g = function(id){ return esc(document.getElementById(id).value); };
-  var v = document.getElementById('vertragBox');
-  var heute = document.getElementById('f_von').value; // Vertragsdatum = heute nicht verfügbar (kein Date.now im Statik ok via new Date im Browser)
-  var jetzt = new Date();
-  var datum = ('0'+jetzt.getDate()).slice(-2)+'.'+('0'+(jetzt.getMonth()+1)).slice(-2)+'.'+jetzt.getFullYear();
-  v.innerHTML =
-    '<div class="noprint" style="text-align:right;margin-bottom:10px">'
-      + '<button onclick="window.print()" style="background:var(--dunkel);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer">Vertrag drucken / als PDF speichern</button></div>'
-    + '<h3>Mietvertrag <span style="color:#e8650d">(Entwurf)</span></h3>'
-    + '<p style="color:#666;font-size:.9rem;margin-bottom:18px">Gärtner GmbH Karosserie + Lack · Binauer Höhe 4 · 74821 Mosbach · HRB 754425 (AG Mannheim) · erstellt am '+datum+'</p>'
-    + '<div class="vzeile"><span>Mieter/in</span><span>'+g('f_vorname')+' '+g('f_nachname')+'</span></div>'
-    + '<div class="vzeile"><span>Anschrift</span><span>'+g('f_strasse')+', '+g('f_plz')+' '+g('f_ort')+'</span></div>'
-    + '<div class="vzeile"><span>Geburtsdatum</span><span>'+fmtDatum(document.getElementById('f_gebdatum').value)+'</span></div>'
-    + '<div class="vzeile"><span>Telefon / E-Mail</span><span>'+g('f_telefon')+(document.getElementById('f_email').value?' · '+g('f_email'):'')+'</span></div>'
-    + '<div class="vzeile"><span>Führerschein-Klasse</span><span>'+g('f_fsklasse')+' (Ausweis + Führerschein bei Abholung geprüft)</span></div>'
-    + '<div class="vzeile" style="margin-top:14px"><span>Fahrzeug</span><span><b>'+r.fz+'</b></span></div>'
-    + '<div class="vzeile"><span>Mietzeitraum</span><span>'+fmtDatum(r.von)+' – '+fmtDatum(r.bis)+' ('+r.tage+' Tag(e))</span></div>'
-    + '<div class="vzeile"><span>Tagespreis</span><span>'+r.satz+' €'+(r.werkstatt?' (Werkstattkunden-Tarif)':'')+'</span></div>'
-    + '<div class="vzeile"><span>Freikilometer</span><span>'+r.frei+' km inkl., danach '+MEHR_KM.toFixed(2).replace('.',',')+' €/km</span></div>'
-    + '<div class="vzeile"><span>Selbstbeteiligung</span><span>[SB] € pro Schadenfall (Vollkasko)</span></div>'
-    + '<div class="vzeile" style="font-size:1.1rem;font-weight:700"><span>Mietpreis gesamt (ca.)</span><span style="color:#e8650d">'+r.gesamt+' € inkl. MwSt.</span></div>'
-    + (document.getElementById('f_anmerkung').value ? '<div class="vzeile"><span>Anmerkung</span><span>'+g('f_anmerkung')+'</span></div>' : '')
-    + '<p style="font-size:.8rem;color:#777;margin-top:18px">Es gelten die Allgemeinen Vermietbedingungen der Gärtner GmbH Karosserie + Lack (Entwurf – rechtliche Freigabe ausstehend). Der endgültige Mietpreis, die Selbstbeteiligung und die Kaution werden bei der Fahrzeugübergabe verbindlich festgelegt. Mindestalter 21 Jahre.</p>'
-    + '<div class="unterschrift"><div>Ort, Datum</div><div>Unterschrift Mieter/in</div><div>Unterschrift Vermieter (Gärtner GmbH)</div></div>';
-  v.style.display = 'block';
-  v.scrollIntoView({behavior:'smooth'});
-  return false;
-}
-
-function whatsappAnfrage(){
-  var fz = document.getElementById('f_fahrzeug').value || 'einen Mietwagen';
-  var von = document.getElementById('f_von').value, bis = document.getElementById('f_bis').value;
-  var name = (document.getElementById('f_vorname').value+' '+document.getElementById('f_nachname').value).trim();
-  var txt = 'Hallo, ich möchte '+fz+' mieten';
-  if(von && bis) txt += ' vom '+fmtDatum(von)+' bis '+fmtDatum(bis);
-  if(name) txt += '. Mein Name: '+name;
-  txt += '. Bitte um Rückmeldung.';
-  window.open('https://wa.me/4915227706694?text='+encodeURIComponent(txt), '_blank');
-  return false;
-}
-</script>
-
+  <footer><div class="shell footer-row"><div><strong style="color:#fff">Autovermietung MOS</strong><br>Ein Angebot der Gärtner GmbH Karosserie + Lack<br>Binauer Höhe 4 · 74821 Mosbach-Lohrbach</div><div class="footer-links"><a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a><a href="mailto:info@autovermietung-mos.de">E-Mail</a></div></div></footer>
+  <a class="wa-float" href="https://wa.me/4915227706694?text=Hallo%2C%20ich%20interessiere%20mich%20f%C3%BCr%20einen%20Mietwagen." aria-label="Mietwagen per WhatsApp anfragen">WhatsApp</a>
+  <script>
+    const carSelect=document.getElementById('quick-car');
+    document.querySelectorAll('[data-car]').forEach(link=>link.addEventListener('click',()=>{carSelect.value=link.dataset.car;}));
+    const aboCarSelect=document.getElementById('abo-car');document.querySelectorAll('[data-abo-model]').forEach(button=>button.addEventListener('click',()=>{aboCarSelect.value=button.dataset.aboModel;document.getElementById('auto-abo').scrollIntoView({behavior:'smooth'});setTimeout(()=>aboCarSelect.focus(),450);}));
+    function deDate(value){if(!value)return '';const p=value.split('-');return p[2]+'.'+p[1]+'.'+p[0];}
+    function starteAnfrage(event){event.preventDefault();const car=carSelect.value,from=document.getElementById('quick-from').value,to=document.getElementById('quick-to').value;if(!from||!to)return false;if(new Date(to)<new Date(from)){alert('Bitte wähle ein Rückgabedatum nach der Abholung.');return false;}const text=`Hallo, ich interessiere mich für den ${car} vom ${deDate(from)} bis ${deDate(to)}. Ist das Fahrzeug verfügbar?`;window.open('https://wa.me/4915227706694?text='+encodeURIComponent(text),'_blank','noopener');return false;}
+    function starteAboAnfrage(event){event.preventDefault();const kind=document.getElementById('abo-kind').value,car=document.getElementById('abo-car').value,term=document.getElementById('abo-term').value,km=document.getElementById('abo-km').value,name=document.getElementById('abo-name').value;const text=`Hallo, mein Name ist ${name}. Ich interessiere mich als ${kind} für ein Auto-Abo / eine Langzeitmiete. Fahrzeugwunsch: ${car}, Laufzeit: ${term}, Fahrleistung: ${km}. Bitte senden Sie mir weitere Informationen.`;window.open('https://wa.me/4915227706694?text='+encodeURIComponent(text),'_blank','noopener');return false;}
+  </script>
 </body>
 </html>
