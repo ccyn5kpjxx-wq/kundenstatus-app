@@ -244,6 +244,15 @@ PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL)
 PUBLIC_SITE_ONLY = env_flag("PUBLIC_SITE_ONLY", False)
 PUBLIC_SITE_INDEXABLE = env_flag("PUBLIC_SITE_INDEXABLE", False)
 PUBLIC_SITE_VARIANT = clean_text(os.environ.get("PUBLIC_SITE_VARIANT") or "company").lower()
+PUBLIC_HOSTS = {
+    host.strip().lower()
+    for host in clean_text(os.environ.get("PUBLIC_HOSTS")).split(",")
+    if host.strip()
+}
+if PUBLIC_BASE_URL:
+    public_base_hostname = clean_text(urlsplit(PUBLIC_BASE_URL).hostname).lower()
+    if public_base_hostname:
+        PUBLIC_HOSTS.add(public_base_hostname)
 PORTAL_BASE_URL = (os.environ.get("PORTAL_BASE_URL") or "").strip().rstrip("/")
 LEXWARE_KUNDEN_URL = (os.environ.get("LEXWARE_KUNDEN_URL") or "").strip()
 LEXWARE_RECHNUNGEN_URL = (os.environ.get("LEXWARE_RECHNUNGEN_URL") or "").strip()
@@ -2771,9 +2780,16 @@ def restore_remember_login_session():
             return
 
 
+def is_public_site_request():
+    if PUBLIC_SITE_ONLY:
+        return True
+    request_hostname = clean_text(request.host).split(":", 1)[0].lower()
+    return bool(request_hostname and request_hostname in PUBLIC_HOSTS)
+
+
 @app.before_request
 def restrict_public_site_service():
-    if not PUBLIC_SITE_ONLY:
+    if not is_public_site_request():
         return None
     allowed_endpoints = {
         "static",
@@ -39101,7 +39117,7 @@ def render_admin_schadenaufnahme(form_data=None, form_errors=None, created_auftr
 
 @app.route("/")
 def public_root():
-    if PUBLIC_SITE_ONLY:
+    if is_public_site_request():
         if PUBLIC_SITE_VARIANT == "rental":
             return mietwagen_vorschau()
         return oeffentliche_homepage()

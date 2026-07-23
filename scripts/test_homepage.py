@@ -135,11 +135,13 @@ def main():
     original_indexable = portal.PUBLIC_SITE_INDEXABLE
     original_portal_base = portal.PORTAL_BASE_URL
     original_public_base = portal.PUBLIC_BASE_URL
+    original_public_hosts = portal.PUBLIC_HOSTS.copy()
     try:
         portal.PUBLIC_SITE_ONLY = True
         portal.PUBLIC_SITE_INDEXABLE = False
         portal.PORTAL_BASE_URL = "https://portal.example.test"
         portal.PUBLIC_BASE_URL = "https://www.example.test"
+        portal.PUBLIC_HOSTS = {"example.test", "www.example.test"}
         public_client = portal.app.test_client()
         public_home = public_client.get("/")
         public_html = public_home.get_data(as_text=True)
@@ -155,11 +157,20 @@ def main():
             public_client.get("/sitemap.xml").status_code == 200
             and "https://www.example.test/team" in public_client.get("/sitemap.xml").get_data(as_text=True)
         )
+        portal.PUBLIC_SITE_ONLY = False
+        shared_client = portal.app.test_client()
+        public_host_root = shared_client.get("/", base_url="https://www.example.test")
+        portal_host_root = shared_client.get("/", base_url="https://portal.example.test")
+        public_host_admin = shared_client.get("/admin", base_url="https://www.example.test")
+        public_checks["Hauptdomain zeigt Homepage"] = public_host_root.status_code == 200 and "Karosserie, Lack" in public_host_root.get_data(as_text=True)
+        public_checks["Portalhost behaelt Portal-Start"] = portal_host_root.status_code == 302 and "/admin" in portal_host_root.headers.get("Location", "")
+        public_checks["Hauptdomain sperrt interne Routen"] = public_host_admin.status_code == 404
     finally:
         portal.PUBLIC_SITE_ONLY = original_public_only
         portal.PUBLIC_SITE_INDEXABLE = original_indexable
         portal.PORTAL_BASE_URL = original_portal_base
         portal.PUBLIC_BASE_URL = original_public_base
+        portal.PUBLIC_HOSTS = original_public_hosts
     print_checks(public_checks)
 
     all_checks = (checks, form_checks, category_checks, public_checks)
