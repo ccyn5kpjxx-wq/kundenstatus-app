@@ -10,7 +10,7 @@ from collections import defaultdict
 import base64
 import calendar
 import csv
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from email import policy
 from email.header import decode_header, make_header
@@ -36,7 +36,8 @@ import sqlite3
 import tempfile
 import threading
 import time
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
+from zoneinfo import ZoneInfo
 import uuid
 import wave
 import zipfile
@@ -270,6 +271,27 @@ NHTSA_VPIC_API_BASE_URL = (
     os.environ.get("NHTSA_VPIC_API_BASE_URL") or "https://vpic.nhtsa.dot.gov/api"
 ).strip().rstrip("/")
 WERKSTATT_EMAIL_API_TOKEN = (os.environ.get("WERKSTATT_EMAIL_API_TOKEN") or "").strip()
+FAHRZEUGEINKAUF_SCANNER_API_TOKEN = (
+    os.environ.get("FAHRZEUGEINKAUF_SCANNER_API_TOKEN") or ""
+).strip()
+FAHRZEUGEINKAUF_ERLAUBTE_INSERAT_HOSTS = tuple(
+    host.strip().lower().lstrip(".")
+    for host in (
+        os.environ.get("FAHRZEUGEINKAUF_ERLAUBTE_INSERAT_HOSTS")
+        or "kleinanzeigen.de,mobile.de,autoscout24.de,copart.de"
+    ).split(",")
+    if host.strip()
+)
+FAHRZEUGEINKAUF_SCANNER_OFFLINE_MINUTES = max(
+    5, env_int("FAHRZEUGEINKAUF_SCANNER_OFFLINE_MINUTES", 20)
+)
+FAHRZEUGEINKAUF_SCAN_TIMEOUT_MINUTES = max(
+    15, env_int("FAHRZEUGEINKAUF_SCAN_TIMEOUT_MINUTES", 45)
+)
+FAHRZEUGEINKAUF_SCAN_MAX_RUNTIME_MINUTES = max(
+    FAHRZEUGEINKAUF_SCAN_TIMEOUT_MINUTES,
+    env_int("FAHRZEUGEINKAUF_SCAN_MAX_RUNTIME_MINUTES", 120),
+)
 WHATSAPP_ENABLED = env_flag("WHATSAPP_ENABLED", False)
 WHATSAPP_ACCESS_TOKEN = (os.environ.get("WHATSAPP_ACCESS_TOKEN") or "").strip()
 WHATSAPP_PHONE_NUMBER_ID = (os.environ.get("WHATSAPP_PHONE_NUMBER_ID") or "").strip()
@@ -2788,6 +2810,11 @@ def protect_csrf():
     if request.path.startswith("/webhooks/whatsapp"):
         return None
     if request.path == "/api/klick":
+        return None
+    if (
+        request.path.startswith("/api/werkstatt/fahrzeugeinkauf/")
+        and fahrzeugeinkauf_scanner_api_token_valid()
+    ):
         return None
     if request.path.startswith("/api/werkstatt/") and werkstatt_api_token_valid():
         return None
@@ -7876,6 +7903,7 @@ BACKUP_TABLES = (
     "einkauf_artikel",
     "fahrzeugeinkauf_scans",
     "fahrzeugeinkauf_fahrzeuge",
+    "fahrzeugeinkauf_scan_treffer",
     "fahrzeugeinkauf_scan_anfragen",
     "mietwagen_anfragen",
     "werkstatt_news",
@@ -7889,7 +7917,8 @@ BACKUP_TABLES = (
     "mitarbeiter",
     "mitarbeiter_urlaub",
 )
-BACKUP_FORMAT_VERSION = 2
+BACKUP_FORMAT_VERSION = 3
+BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
 BACKUP_BINARY_FIELDS = {
     "mietvertrag_versionen": {
         "pdf_base64": {
@@ -8448,12 +8477,15 @@ def init_db():
 
         CREATE TABLE IF NOT EXISTS fahrzeugeinkauf_scans (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            anfrage_id        INTEGER DEFAULT 0,
             titel             TEXT DEFAULT '',
             scan_datum        TEXT DEFAULT '',
             quelle            TEXT DEFAULT 'unfall-auto-scout',
             pdf_original_name TEXT DEFAULT '',
             pdf_stored_name   TEXT DEFAULT '',
             notiz             TEXT DEFAULT '',
+            fahrzeuge_angelegt INTEGER DEFAULT 0,
+            fahrzeuge_aktualisiert INTEGER DEFAULT 0,
             erstellt_am       TEXT NOT NULL
         );
 
@@ -8486,10 +8518,28 @@ def init_db():
         );
 
         CREATE TABLE IF NOT EXISTS fahrzeugeinkauf_scan_anfragen (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            status          TEXT DEFAULT 'offen',
-            angefordert_am  TEXT NOT NULL,
-            erledigt_am     TEXT DEFAULT ''
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            status                TEXT DEFAULT 'offen',
+            angefordert_am        TEXT NOT NULL,
+            gestartet_am          TEXT DEFAULT '',
+            letztes_lebenszeichen TEXT DEFAULT '',
+            erledigt_am           TEXT DEFAULT '',
+            fehler                TEXT DEFAULT '',
+            scan_id               INTEGER DEFAULT 0,
+            fahrzeuge_angelegt    INTEGER DEFAULT 0,
+            fahrzeuge_aktualisiert INTEGER DEFAULT 0,
+            versuche              INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS fahrzeugeinkauf_scan_treffer (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id       INTEGER NOT NULL,
+            fahrzeug_id   INTEGER NOT NULL,
+            art           TEXT DEFAULT 'neu',
+            erstellt_am   TEXT NOT NULL,
+            UNIQUE (scan_id, fahrzeug_id),
+            FOREIGN KEY (scan_id) REFERENCES fahrzeugeinkauf_scans(id),
+            FOREIGN KEY (fahrzeug_id) REFERENCES fahrzeugeinkauf_fahrzeuge(id)
         );
 
         CREATE TABLE IF NOT EXISTS fahrzeug_kandidaten (
@@ -9281,6 +9331,58 @@ def init_db():
     ensure_column(db, "fahrzeugeinkauf_fahrzeuge", "verkaeufer_name", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeugeinkauf_fahrzeuge", "verkaeufer_telefon", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeugeinkauf_fahrzeuge", "verkaeufer_email", "TEXT DEFAULT ''")
+    ensure_column(db, "fahrzeugeinkauf_scans", "anfrage_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "fahrzeugeinkauf_scans", "fahrzeuge_angelegt", "INTEGER DEFAULT 0")
+    ensure_column(db, "fahrzeugeinkauf_scans", "fahrzeuge_aktualisiert", "INTEGER DEFAULT 0")
+    ensure_column(db, "fahrzeugeinkauf_scan_anfragen", "gestartet_am", "TEXT DEFAULT ''")
+    ensure_column(db, "fahrzeugeinkauf_scan_anfragen", "letztes_lebenszeichen", "TEXT DEFAULT ''")
+    ensure_column(db, "fahrzeugeinkauf_scan_anfragen", "fehler", "TEXT DEFAULT ''")
+    ensure_column(db, "fahrzeugeinkauf_scan_anfragen", "scan_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "fahrzeugeinkauf_scan_anfragen", "fahrzeuge_angelegt", "INTEGER DEFAULT 0")
+    ensure_column(db, "fahrzeugeinkauf_scan_anfragen", "fahrzeuge_aktualisiert", "INTEGER DEFAULT 0")
+    ensure_column(db, "fahrzeugeinkauf_scan_anfragen", "versuche", "INTEGER DEFAULT 0")
+    ensure_index(
+        db,
+        "idx_fahrzeugeinkauf_scan_anfragen_status",
+        "fahrzeugeinkauf_scan_anfragen",
+        ("status", "id"),
+    )
+    ensure_index(
+        db,
+        "idx_fahrzeugeinkauf_scan_treffer_scan",
+        "fahrzeugeinkauf_scan_treffer",
+        ("scan_id", "fahrzeug_id"),
+    )
+    # Vor der Eindeutigkeit alte Doppel-Anfragen aus möglichen Parallelklicks
+    # auflösen. Die jüngste Anfrage bildet den tatsächlichen Nutzerwunsch ab.
+    aktive_scan_anfragen = db.execute(
+        "SELECT id FROM fahrzeugeinkauf_scan_anfragen "
+        "WHERE status IN ('offen', 'laeuft') ORDER BY id DESC"
+    ).fetchall()
+    for veraltete_anfrage in aktive_scan_anfragen[1:]:
+        db.execute(
+            """
+            UPDATE fahrzeugeinkauf_scan_anfragen
+            SET status='abgebrochen', erledigt_am=?,
+                fehler='Durch neuere Scan-Anfrage ersetzt.'
+            WHERE id=? AND status IN ('offen', 'laeuft')
+            """,
+            (now_str(), veraltete_anfrage["id"]),
+        )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_fahrzeugeinkauf_eine_aktive_anfrage
+        ON fahrzeugeinkauf_scan_anfragen ((1))
+        WHERE status IN ('offen', 'laeuft')
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_fahrzeugeinkauf_scan_anfrage
+        ON fahrzeugeinkauf_scans (anfrage_id)
+        WHERE anfrage_id > 0
+        """
+    )
     ensure_column(db, "fahrzeugverkauf_dateien", "hochgeladen_am", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeug_kandidaten", "suche_id", "INTEGER DEFAULT 0")
     ensure_column(db, "fahrzeug_kandidaten", "status", "TEXT DEFAULT 'neu'")
@@ -24199,6 +24301,10 @@ def get_werkstatt_email_api_token():
 
 def werkstatt_api_token_valid():
     token = get_werkstatt_email_api_token()
+    return api_request_token_valid(token)
+
+
+def api_request_token_valid(token):
     if not token:
         return False
     provided = clean_secret_value(request.headers.get("X-Werkstatt-Token"))
@@ -24206,6 +24312,17 @@ def werkstatt_api_token_valid():
     if auth_header.lower().startswith("bearer "):
         provided = clean_secret_value(auth_header[7:])
     return bool(provided and hmac.compare_digest(provided, token))
+
+
+def get_fahrzeugeinkauf_scanner_api_token():
+    """Eigener Scanner-Schlüssel; breiter Alt-Schlüssel bleibt Übergangs-Fallback."""
+    return clean_secret_value(
+        FAHRZEUGEINKAUF_SCANNER_API_TOKEN or get_werkstatt_email_api_token()
+    )
+
+
+def fahrzeugeinkauf_scanner_api_token_valid():
+    return api_request_token_valid(get_fahrzeugeinkauf_scanner_api_token())
 
 
 def email_sender_display(email_item):
@@ -41594,10 +41711,15 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         format_version = int((export or {}).get("format_version") or 1)
     except (TypeError, ValueError):
         format_version = 1
-    if format_version < BACKUP_FORMAT_VERSION:
+    if format_version < BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION:
         return
     tables = export.get("tables") or {}
-    required_tables = set(BACKUP_TABLES) - {"datei_backups"}
+    required_tables = set(BACKUP_TABLES) - {
+        "datei_backups",
+        "fahrzeugeinkauf_scan_treffer",
+    }
+    if format_version >= 3:
+        required_tables.add("fahrzeugeinkauf_scan_treffer")
     missing_tables = sorted(required_tables - set(tables))
     if missing_tables:
         raise ValueError(
@@ -41678,7 +41800,7 @@ def extract_import_package_files(archive, names, tmp_path):
         manifest_version = int(manifest.get("format_version") or 1)
     except (TypeError, ValueError):
         manifest_version = 1
-    if manifest_version >= BACKUP_FORMAT_VERSION and export is None:
+    if manifest_version >= BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION and export is None:
         raise ValueError("Datenpaket unvollständig: backup.json mit Binärreferenzen fehlt.")
     if "auftraege.db" not in names and export is None:
         raise ValueError("Datenpaket ungültig: auftraege.db und backup.json fehlen.")
@@ -42036,6 +42158,16 @@ def autohaus_neu():
     redirect_url = next_url if next_url.startswith("/admin") else url_for("betriebs_cockpit")
     if not name:
         flash("Bitte einen Autohaus-Namen eintragen.", "warning")
+        return redirect(redirect_url)
+
+    db = get_db()
+    vorhandenes_autohaus = db.execute(
+        "SELECT id FROM autohaeuser WHERE LOWER(TRIM(name))=LOWER(TRIM(?))",
+        (name,),
+    ).fetchone()
+    db.close()
+    if vorhandenes_autohaus:
+        flash("Dieses Autohaus ist bereits angelegt.", "warning")
         return redirect(redirect_url)
 
     slug = get_unique_slug(name)
@@ -47608,13 +47740,59 @@ def admin_mietanfrage_ablehnen(anfrage_id):
 FAHRZEUGEINKAUF_STATUS = ["neu", "beobachten", "geboten", "besichtigung", "gekauft", "verworfen"]
 
 
+def fahrzeugeinkauf_https_url(value, erlaubte_hosts=()):
+    """Nur absolute HTTPS-Links ohne eingebettete Zugangsdaten übernehmen."""
+    value = clean_text(value)[:2048]
+    if not value:
+        return ""
+    try:
+        parsed = urlsplit(value)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if (
+            parsed.scheme.lower() != "https"
+            or not host
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            return ""
+        if erlaubte_hosts and not any(
+            host == erlaubter_host or host.endswith(f".{erlaubter_host}")
+            for erlaubter_host in erlaubte_hosts
+        ):
+            return ""
+    except (TypeError, ValueError):
+        return ""
+    return value.rstrip("/")
+
+
+def fahrzeugeinkauf_email(value):
+    value = clean_text(value)[:254]
+    if not re.fullmatch(r"[^\s<>\"']+@[^\s<>\"']+\.[^\s<>\"']+", value):
+        return ""
+    return value
+
+
+def fahrzeugeinkauf_telefon(value):
+    value = clean_text(value)[:80]
+    ziffern = re.sub(r"\D", "", value)
+    if not 7 <= len(ziffern) <= 16:
+        return ""
+    return value
+
+
 def fahrzeugeinkauf_kontakt_anreichern(fz):
     """Ergänzt tel:/wa.me/mailto-Links für die Verkäufer-Kontaktaufnahme (Entwürfe — senden tut der GF)."""
     name = clean_text(fz.get("verkaeufer_name"))
-    telefon = clean_text(fz.get("verkaeufer_telefon"))
-    email = clean_text(fz.get("verkaeufer_email"))
+    telefon = fahrzeugeinkauf_telefon(fz.get("verkaeufer_telefon"))
+    email = fahrzeugeinkauf_email(fz.get("verkaeufer_email"))
     titel = clean_text(fz.get("titel")) or "Ihr Fahrzeug"
     preis = clean_text(fz.get("preis"))
+    fz["inserat_url"] = fahrzeugeinkauf_https_url(
+        fz.get("inserat_url"), FAHRZEUGEINKAUF_ERLAUBTE_INSERAT_HOSTS
+    )
+    fz["bild_url"] = fahrzeugeinkauf_https_url(fz.get("bild_url"))
+    fz["verkaeufer_telefon"] = telefon
+    fz["verkaeufer_email"] = email
     anrede = f"Guten Tag{' ' + name if name else ''},"
     nachricht = (
         f"{anrede} ich interessiere mich für Ihr Fahrzeug \"{titel}\""
@@ -47626,7 +47804,7 @@ def fahrzeugeinkauf_kontakt_anreichern(fz):
     wa_key = whatsapp_number_key(telefon) if telefon else ""
     fz["kontakt_wa_url"] = f"https://wa.me/{wa_key}?text={quote(nachricht)}" if wa_key else ""
     fz["kontakt_mail_url"] = (
-        f"mailto:{email}?subject={quote('Anfrage zu Ihrem Fahrzeug: ' + titel)}&body={quote(nachricht)}"
+        f"mailto:{quote(email, safe='@._+-')}?subject={quote('Anfrage zu Ihrem Fahrzeug: ' + titel)}&body={quote(nachricht)}"
         if email else ""
     )
     fz["ist_neu"] = fahrzeugeinkauf_ist_neu(fz)
@@ -47644,16 +47822,220 @@ def fahrzeugeinkauf_ist_neu(fz, stunden=48):
         return False
 
 
+FAHRZEUGEINKAUF_AKTIVE_SCAN_STATUS = {"offen", "laeuft"}
+FAHRZEUGEINKAUF_ABGESCHLOSSENE_SCAN_STATUS = {
+    "erledigt",
+    "leer",
+    "fehlgeschlagen",
+    "abgebrochen",
+}
+FAHRZEUGEINKAUF_SCANNER_LAST_SEEN_SETTING = "FAHRZEUGEINKAUF_SCANNER_LAST_SEEN"
+
+
+def fahrzeugeinkauf_zeitstempel():
+    """Zeitzonenfester Zeitstempel für neue Scanner-Ereignisse."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def fahrzeugeinkauf_zeitpunkt(value):
+    cleaned = clean_text(value)
+    if not cleaned:
+        return None
+    try:
+        parsed = datetime.fromisoformat(cleaned.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+    if parsed is None:
+        for fmt in (DATETIME_FMT, "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                parsed = datetime.strptime(cleaned, fmt)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        # Render speichert historische now_str()-Werte in UTC. Lokal stammen sie
+        # dagegen aus der Zeitzone des Büro-PCs.
+        legacy_tz = timezone.utc if RUNNING_ON_RENDER else datetime.now().astimezone().tzinfo
+        parsed = parsed.replace(tzinfo=legacy_tz or timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def fahrzeugeinkauf_zeit_label(value):
+    parsed = fahrzeugeinkauf_zeitpunkt(value)
+    if not parsed:
+        return clean_text(value)
+    try:
+        berlin = ZoneInfo("Europe/Berlin")
+    except Exception:
+        berlin = datetime.now().astimezone().tzinfo or timezone.utc
+    return parsed.astimezone(berlin).strftime(DATETIME_FMT)
+
+
+def fahrzeugeinkauf_minuten_seit(value):
+    parsed = fahrzeugeinkauf_zeitpunkt(value)
+    if not parsed:
+        return None
+    return max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds() / 60.0)
+
+
+def fahrzeugeinkauf_scanner_status():
+    last_seen = get_app_setting(FAHRZEUGEINKAUF_SCANNER_LAST_SEEN_SETTING, "")
+    minuten = fahrzeugeinkauf_minuten_seit(last_seen)
+    online = minuten is not None and minuten <= FAHRZEUGEINKAUF_SCANNER_OFFLINE_MINUTES
+    return {
+        "online": bool(online),
+        "last_seen": last_seen,
+        "last_seen_label": fahrzeugeinkauf_zeit_label(last_seen),
+        "offline_minuten": FAHRZEUGEINKAUF_SCANNER_OFFLINE_MINUTES,
+    }
+
+
+def fahrzeugeinkauf_anfrage_status(row, scanner_status=None):
+    item = dict(row) if row else {}
+    scanner = scanner_status or fahrzeugeinkauf_scanner_status()
+    status_raw = clean_text(item.get("status")) or "offen"
+    aktiv = status_raw in FAHRZEUGEINKAUF_AKTIVE_SCAN_STATUS
+    terminal = status_raw in FAHRZEUGEINKAUF_ABGESCHLOSSENE_SCAN_STATUS
+    heartbeat_wert = (
+        item.get("letztes_lebenszeichen")
+        if status_raw == "laeuft"
+        else item.get("angefordert_am")
+    ) or item.get("gestartet_am") or item.get("angefordert_am")
+    ohne_rueckmeldung_minuten = fahrzeugeinkauf_minuten_seit(heartbeat_wert)
+    absolute_laufzeit_minuten = fahrzeugeinkauf_minuten_seit(
+        item.get("gestartet_am") or item.get("angefordert_am")
+    )
+    scanner_online = bool(scanner.get("online"))
+    if status_raw == "laeuft":
+        scanner_online = bool(
+            scanner_online
+            and ohne_rueckmeldung_minuten is not None
+            and ohne_rueckmeldung_minuten <= FAHRZEUGEINKAUF_SCANNER_OFFLINE_MINUTES
+        )
+    ohne_rueckmeldung_ueberfaellig = bool(
+        aktiv
+        and ohne_rueckmeldung_minuten is not None
+        and ohne_rueckmeldung_minuten >= FAHRZEUGEINKAUF_SCAN_TIMEOUT_MINUTES
+    )
+    absolute_laufzeit_ueberfaellig = bool(
+        aktiv
+        and status_raw == "laeuft"
+        and absolute_laufzeit_minuten is not None
+        and absolute_laufzeit_minuten >= FAHRZEUGEINKAUF_SCAN_MAX_RUNTIME_MINUTES
+    )
+    ueberfaellig = ohne_rueckmeldung_ueberfaellig or absolute_laufzeit_ueberfaellig
+    angelegt = int(item.get("fahrzeuge_angelegt") or 0)
+    aktualisiert = int(item.get("fahrzeuge_aktualisiert") or 0)
+
+    if ueberfaellig:
+        status = "ueberfaellig"
+        label = "Keine Rückmeldung"
+        css_class = "danger"
+        if absolute_laufzeit_ueberfaellig and not ohne_rueckmeldung_ueberfaellig:
+            message = (
+                f"Der Scan hat die maximale Gesamtlaufzeit von "
+                f"{FAHRZEUGEINKAUF_SCAN_MAX_RUNTIME_MINUTES} Minuten erreicht. "
+                "Du kannst ihn jetzt erneut anfordern."
+            )
+        else:
+            message = (
+                f"Der Scan hat seit {FAHRZEUGEINKAUF_SCAN_TIMEOUT_MINUTES} Minuten "
+                "kein Ergebnis oder Lebenszeichen geliefert. Du kannst ihn jetzt erneut anfordern."
+            )
+    elif status_raw == "laeuft" and not scanner_online:
+        status = status_raw
+        label = "Scanner ohne Rückmeldung"
+        css_class = "secondary"
+        message = (
+            "Die Anfrage wurde abgeholt, aber der Scanner sendet gerade kein aktuelles "
+            "Lebenszeichen. Ein erneuter Versuch wird nach Ablauf der Wartezeit freigegeben."
+        )
+    elif status_raw == "laeuft":
+        status = status_raw
+        label = "Anfrage vom Scanner abgeholt"
+        css_class = "warning"
+        message = "Der Scanner hat die Anfrage übernommen und führt die Fahrzeugsuche aus."
+    elif status_raw == "offen":
+        status = status_raw
+        label = "Scan wartet"
+        css_class = "warning" if scanner.get("online") else "secondary"
+        message = (
+            "Die Anfrage ist gespeichert. Der Scanner übernimmt sie beim nächsten Lauf."
+            if scanner.get("online")
+            else "Die Anfrage ist gespeichert, aber der Scanner ist derzeit offline. Die Suche startet, sobald die lokale Scan-Automation wieder aktiv ist."
+        )
+    elif status_raw == "erledigt":
+        status = status_raw
+        label = "Scan abgeschlossen"
+        css_class = "success"
+        message = f"Ergebnis eingetroffen: {angelegt} neu, {aktualisiert} aktualisiert."
+    elif status_raw == "leer":
+        status = status_raw
+        label = "Scan abgeschlossen"
+        css_class = "info"
+        message = "Der Scan ist sauber durchgelaufen, hat diesmal aber keine passenden Treffer gefunden."
+    elif status_raw == "abgebrochen":
+        status = status_raw
+        label = "Scan abgebrochen"
+        css_class = "secondary"
+        message = clean_text(item.get("fehler")) or "Der Scan wurde abgebrochen."
+    else:
+        status = "fehlgeschlagen"
+        label = "Scan fehlgeschlagen"
+        css_class = "danger"
+        message = clean_text(item.get("fehler")) or "Der Scanner hat einen Fehler gemeldet. Du kannst den Scan erneut anfordern."
+
+    item.update(
+        {
+            "status": status,
+            "status_raw": status_raw,
+            "status_label": label,
+            "status_class": css_class,
+            "message": message,
+            "aktiv": aktiv,
+            "terminal": terminal,
+            "ueberfaellig": ueberfaellig,
+            "scanner_online": scanner_online,
+            "scanner_last_seen_label": scanner.get("last_seen_label") or "",
+            "angefordert_label": fahrzeugeinkauf_zeit_label(item.get("angefordert_am")),
+            "gestartet_label": fahrzeugeinkauf_zeit_label(item.get("gestartet_am")),
+            "erledigt_label": fahrzeugeinkauf_zeit_label(item.get("erledigt_am")),
+            "fahrzeuge_angelegt": angelegt,
+            "fahrzeuge_aktualisiert": aktualisiert,
+            "timeout_minuten": FAHRZEUGEINKAUF_SCAN_TIMEOUT_MINUTES,
+            "max_laufzeit_minuten": FAHRZEUGEINKAUF_SCAN_MAX_RUNTIME_MINUTES,
+        }
+    )
+    return item
+
+
 def fahrzeugeinkauf_scan_liste(limit=30):
     db = get_db()
     scans = [dict(row) for row in db.execute(
         "SELECT * FROM fahrzeugeinkauf_scans ORDER BY id DESC LIMIT ?", (limit,)
     ).fetchall()]
     for scan in scans:
-        scan["fahrzeuge"] = [fahrzeugeinkauf_kontakt_anreichern(dict(row)) for row in db.execute(
-            "SELECT * FROM fahrzeugeinkauf_fahrzeuge WHERE scan_id = ? ORDER BY CASE ampel WHEN 'gruen' THEN 0 WHEN 'gelb' THEN 1 ELSE 2 END, id",
+        treffer = db.execute(
+            """
+            SELECT f.*, t.art AS scan_treffer_art
+            FROM fahrzeugeinkauf_scan_treffer t
+            JOIN fahrzeugeinkauf_fahrzeuge f ON f.id = t.fahrzeug_id
+            WHERE t.scan_id = ?
+            ORDER BY CASE f.ampel WHEN 'gruen' THEN 0 WHEN 'gelb' THEN 1 ELSE 2 END, t.id
+            """,
             (scan["id"],),
-        ).fetchall()]
+        ).fetchall()
+        if not treffer:
+            # Rückwärtskompatibilität für Scans vor Einführung der Treffer-Tabelle.
+            treffer = db.execute(
+                "SELECT f.*, '' AS scan_treffer_art FROM fahrzeugeinkauf_fahrzeuge f WHERE f.scan_id = ? ORDER BY CASE f.ampel WHEN 'gruen' THEN 0 WHEN 'gelb' THEN 1 ELSE 2 END, f.id",
+                (scan["id"],),
+            ).fetchall()
+        scan["fahrzeuge"] = [
+            fahrzeugeinkauf_kontakt_anreichern(dict(row)) for row in treffer
+        ]
     db.close()
     return scans
 
@@ -47671,16 +48053,29 @@ def admin_fahrzeugeinkauf():
         ORDER BY f.geaendert_am DESC
         """
     ).fetchall()]
-    offene_anfrage = db.execute(
-        "SELECT * FROM fahrzeugeinkauf_scan_anfragen WHERE status = 'offen' ORDER BY id DESC LIMIT 1"
-    ).fetchone()
+    try:
+        anfrage_id = int(request.args.get("anfrage_id") or 0)
+    except (TypeError, ValueError):
+        anfrage_id = 0
+    scan_anfrage = None
+    if anfrage_id > 0:
+        scan_anfrage = db.execute(
+            "SELECT * FROM fahrzeugeinkauf_scan_anfragen WHERE id = ?",
+            (anfrage_id,),
+        ).fetchone()
+    if not scan_anfrage:
+        scan_anfrage = db.execute(
+            "SELECT * FROM fahrzeugeinkauf_scan_anfragen WHERE status IN ('offen', 'laeuft') ORDER BY id DESC LIMIT 1"
+        ).fetchone()
     db.close()
     scans = fahrzeugeinkauf_scan_liste()
+    scanner_status = fahrzeugeinkauf_scanner_status()
     return render_template(
         "fahrzeugeinkauf_admin.html",
         interessante=interessante,
         scans=scans,
-        offene_anfrage=dict(offene_anfrage) if offene_anfrage else None,
+        scan_anfrage=fahrzeugeinkauf_anfrage_status(scan_anfrage, scanner_status) if scan_anfrage else None,
+        scanner_status=scanner_status,
         status_liste=FAHRZEUGEINKAUF_STATUS,
     )
 
@@ -47688,40 +48083,121 @@ def admin_fahrzeugeinkauf():
 @app.route("/admin/fahrzeugeinkauf/scan-anfordern", methods=["POST"])
 @admin_required
 def admin_fahrzeugeinkauf_scan_anfordern():
+    scanner_status = fahrzeugeinkauf_scanner_status()
     db = get_db()
-    offen = db.execute(
-        "SELECT id FROM fahrzeugeinkauf_scan_anfragen WHERE status = 'offen'"
-    ).fetchone()
-    if offen:
-        flash("Es liegt bereits eine offene Scan-Anforderung vor — die Scan-Bereitschaft holt sie in Kürze ab. Diese Seite aktualisiert sich automatisch, sobald die Ergebnisse eintreffen.", "warning")
-    else:
-        db.execute(
-            "INSERT INTO fahrzeugeinkauf_scan_anfragen (status, angefordert_am) VALUES ('offen', ?)",
-            (now_str(),),
+    try:
+        if not USE_POSTGRES:
+            db.execute("BEGIN IMMEDIATE")
+        offen_sql = (
+            "SELECT * FROM fahrzeugeinkauf_scan_anfragen "
+            "WHERE status IN ('offen', 'laeuft') ORDER BY id DESC LIMIT 1"
         )
+        if USE_POSTGRES:
+            offen_sql += " FOR UPDATE"
+        offen = db.execute(offen_sql).fetchone()
+        if offen:
+            status = fahrzeugeinkauf_anfrage_status(offen, scanner_status)
+            if not status["ueberfaellig"]:
+                db.rollback()
+                db.close()
+                flash(status["message"], "warning")
+                return redirect(url_for("admin_fahrzeugeinkauf", anfrage_id=offen["id"]))
+            db.execute(
+                """
+                UPDATE fahrzeugeinkauf_scan_anfragen
+                SET status='fehlgeschlagen', erledigt_am=?, fehler=?
+                WHERE id=? AND status IN ('offen', 'laeuft')
+                """,
+                (
+                    fahrzeugeinkauf_zeitstempel(),
+                    f"Keine Rückmeldung innerhalb von {FAHRZEUGEINKAUF_SCAN_TIMEOUT_MINUTES} Minuten.",
+                    offen["id"],
+                ),
+            )
+        cursor = db.execute(
+            "INSERT INTO fahrzeugeinkauf_scan_anfragen (status, angefordert_am) VALUES ('offen', ?)",
+            (fahrzeugeinkauf_zeitstempel(),),
+        )
+        anfrage_id = int(cursor.lastrowid)
         db.commit()
-        flash("Scan angefordert — die Scan-Bereitschaft prüft alle 15 Minuten und lädt neue Fahrzeuge automatisch hierher. Diese Seite aktualisiert sich von selbst, sobald die Ergebnisse da sind.", "success")
+    except Exception:
+        db.rollback()
+        # Der partielle UNIQUE-Index entscheidet auch bei zwei parallelen Klicks.
+        concurrent = db.execute(
+            "SELECT id FROM fahrzeugeinkauf_scan_anfragen "
+            "WHERE status IN ('offen', 'laeuft') ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        db.close()
+        if concurrent:
+            flash("Eine Scan-Anfrage ist bereits aktiv.", "warning")
+            return redirect(url_for("admin_fahrzeugeinkauf", anfrage_id=concurrent["id"]))
+        raise
     db.close()
-    return redirect(url_for("admin_fahrzeugeinkauf"))
+    if scanner_status["online"]:
+        flash("Scan angefordert — der Scanner übernimmt die Anfrage beim nächsten Lauf. Der Status aktualisiert sich hier automatisch.", "success")
+    else:
+        flash("Scan-Anfrage gespeichert. Der Scanner ist gerade offline; die Suche startet, sobald die lokale Scan-Automation wieder aktiv ist.", "warning")
+    return redirect(url_for("admin_fahrzeugeinkauf", anfrage_id=anfrage_id))
 
 
 @app.route("/admin/fahrzeugeinkauf/status")
+@app.route("/admin/fahrzeugeinkauf/status/<int:anfrage_id>")
 @admin_required
-def admin_fahrzeugeinkauf_status():
-    """Leichtes Polling-Ziel der Fahrzeugeinkauf-Seite: offene Anforderung + neuester Scan."""
+def admin_fahrzeugeinkauf_status(anfrage_id=0):
+    """Anfragespezifischer Status statt globaler, manipulierbarer Scan-Erkennung."""
+    if not anfrage_id:
+        try:
+            anfrage_id = int(request.args.get("anfrage_id") or 0)
+        except (TypeError, ValueError):
+            anfrage_id = 0
     db = get_db()
-    offen = db.execute(
-        "SELECT COUNT(*) AS count FROM fahrzeugeinkauf_scan_anfragen WHERE status = 'offen'"
-    ).fetchone()
+    if anfrage_id > 0:
+        anfrage = db.execute(
+            "SELECT * FROM fahrzeugeinkauf_scan_anfragen WHERE id = ?",
+            (anfrage_id,),
+        ).fetchone()
+    else:
+        anfrage = db.execute(
+            "SELECT * FROM fahrzeugeinkauf_scan_anfragen WHERE status IN ('offen', 'laeuft') ORDER BY id DESC LIMIT 1"
+        ).fetchone()
     letzter = db.execute(
         "SELECT id FROM fahrzeugeinkauf_scans ORDER BY id DESC LIMIT 1"
     ).fetchone()
     db.close()
-    return jsonify({
+    if anfrage_id > 0 and not anfrage:
+        return jsonify({"ok": False, "error": "Scan-Anfrage nicht gefunden"}), 404
+    scanner_status = fahrzeugeinkauf_scanner_status()
+    status = fahrzeugeinkauf_anfrage_status(anfrage, scanner_status) if anfrage else None
+    payload = {
         "ok": True,
-        "anfrage_offen": bool(offen and offen["count"]),
+        "anfrage_offen": bool(status and status["aktiv"]),
         "letzter_scan_id": int(letzter["id"]) if letzter else 0,
-    })
+        "scanner_online": scanner_status["online"],
+        "scanner_last_seen": scanner_status["last_seen_label"],
+    }
+    if status:
+        payload.update(
+            {
+                "anfrage_id": int(status.get("id") or 0),
+                "status": status["status"],
+                "status_raw": status["status_raw"],
+                "status_label": status["status_label"],
+                "status_class": status["status_class"],
+                "message": status["message"],
+                "aktiv": status["aktiv"],
+                "terminal": status["terminal"],
+                "ueberfaellig": status["ueberfaellig"],
+                "scanner_online": status["scanner_online"],
+                "scanner_last_seen": status["scanner_last_seen_label"],
+                "scan_id": int(status.get("scan_id") or 0),
+                "fahrzeuge_angelegt": status["fahrzeuge_angelegt"],
+                "fahrzeuge_aktualisiert": status["fahrzeuge_aktualisiert"],
+                "versuch": int(status.get("versuche") or 0),
+            }
+        )
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/admin/fahrzeugeinkauf/fahrzeug/<int:fz_id>", methods=["POST"])
@@ -47837,134 +48313,404 @@ def api_whatsapp_status():
 
 @app.route("/api/werkstatt/fahrzeugeinkauf/scan-anfragen")
 def api_fahrzeugeinkauf_scan_anfragen():
-    if not werkstatt_api_token_valid():
+    if not fahrzeugeinkauf_scanner_api_token_valid():
         return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    zeitpunkt = fahrzeugeinkauf_zeitstempel()
+    set_app_setting(FAHRZEUGEINKAUF_SCANNER_LAST_SEEN_SETTING, zeitpunkt)
     db = get_db()
-    anfragen = [dict(row) for row in db.execute(
-        "SELECT * FROM fahrzeugeinkauf_scan_anfragen WHERE status = 'offen' ORDER BY id"
-    ).fetchall()]
-    db.close()
+    try:
+        if not USE_POSTGRES:
+            db.execute("BEGIN IMMEDIATE")
+        claim_sql = (
+            "SELECT * FROM fahrzeugeinkauf_scan_anfragen "
+            "WHERE status IN ('offen', 'laeuft') "
+            "ORDER BY CASE status WHEN 'laeuft' THEN 0 ELSE 1 END, id LIMIT 1"
+        )
+        if USE_POSTGRES:
+            claim_sql += " FOR UPDATE SKIP LOCKED"
+        anfrage = db.execute(claim_sql).fetchone()
+        claimbar = bool(anfrage)
+        if anfrage and fahrzeugeinkauf_anfrage_status(
+            anfrage, {"online": True, "last_seen_label": ""}
+        )["ueberfaellig"]:
+            claimbar = False
+        if claimbar and anfrage and clean_text(anfrage["status"]) == "laeuft":
+            lease_minuten = fahrzeugeinkauf_minuten_seit(
+                anfrage["letztes_lebenszeichen"] or anfrage["gestartet_am"]
+            )
+            claimbar = bool(
+                lease_minuten is None
+                or lease_minuten > FAHRZEUGEINKAUF_SCANNER_OFFLINE_MINUTES
+            )
+        anfragen = []
+        if claimbar:
+            cursor = db.execute(
+                """
+                UPDATE fahrzeugeinkauf_scan_anfragen
+                SET status='laeuft',
+                    gestartet_am=CASE
+                        WHEN COALESCE(gestartet_am, '')='' THEN ? ELSE gestartet_am END,
+                    letztes_lebenszeichen=?,
+                    versuche=COALESCE(versuche, 0) + 1
+                WHERE id=? AND status IN ('offen', 'laeuft')
+                """,
+                (zeitpunkt, zeitpunkt, anfrage["id"]),
+            )
+            if int(cursor.rowcount or 0) == 1:
+                claimed = db.execute(
+                    "SELECT * FROM fahrzeugeinkauf_scan_anfragen WHERE id=?",
+                    (anfrage["id"],),
+                ).fetchone()
+                if claimed:
+                    anfragen = [dict(claimed)]
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
     return jsonify({"ok": True, "anfragen": anfragen})
+
+
+@app.route("/api/werkstatt/fahrzeugeinkauf/scan-anfragen/<int:anfrage_id>/lebenszeichen", methods=["POST"])
+def api_fahrzeugeinkauf_scan_lebenszeichen(anfrage_id):
+    if not fahrzeugeinkauf_scanner_api_token_valid():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = request.form.to_dict()
+    try:
+        versuch = int(payload.get("versuch") or payload.get("lease_version") or 0)
+    except (TypeError, ValueError):
+        versuch = 0
+    if versuch <= 0:
+        return jsonify({"ok": False, "error": "versuch fehlt oder ist ungültig"}), 400
+    zeitpunkt = fahrzeugeinkauf_zeitstempel()
+    db = get_db()
+    cursor = db.execute(
+        """
+        UPDATE fahrzeugeinkauf_scan_anfragen
+        SET letztes_lebenszeichen=?
+        WHERE id=? AND status='laeuft' AND versuche=?
+        """,
+        (zeitpunkt, anfrage_id, versuch),
+    )
+    if int(cursor.rowcount or 0) != 1:
+        db.rollback()
+        vorhanden = db.execute(
+            "SELECT id FROM fahrzeugeinkauf_scan_anfragen WHERE id=?", (anfrage_id,)
+        ).fetchone()
+        db.close()
+        if not vorhanden:
+            return jsonify({"ok": False, "error": "Scan-Anfrage nicht gefunden"}), 404
+        return jsonify({"ok": False, "error": "Scan-Anfrage ist nicht mehr aktiv"}), 409
+    db.commit()
+    db.close()
+    set_app_setting(FAHRZEUGEINKAUF_SCANNER_LAST_SEEN_SETTING, zeitpunkt)
+    return jsonify({"ok": True, "anfrage_id": anfrage_id, "versuch": versuch, "status": "laeuft"})
+
+
+@app.route("/api/werkstatt/fahrzeugeinkauf/scan-anfragen/<int:anfrage_id>/fehlgeschlagen", methods=["POST"])
+def api_fahrzeugeinkauf_scan_fehlgeschlagen(anfrage_id):
+    if not fahrzeugeinkauf_scanner_api_token_valid():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = request.form.to_dict()
+    try:
+        versuch = int(payload.get("versuch") or payload.get("lease_version") or 0)
+    except (TypeError, ValueError):
+        versuch = 0
+    if versuch <= 0:
+        return jsonify({"ok": False, "error": "versuch fehlt oder ist ungültig"}), 400
+    fehler = clean_text(payload.get("fehler") or payload.get("error"))[:1000]
+    if not fehler:
+        fehler = "Der Scanner hat den Auftrag ohne Ergebnis abgebrochen."
+    db = get_db()
+    zeitpunkt = fahrzeugeinkauf_zeitstempel()
+    cursor = db.execute(
+        """
+        UPDATE fahrzeugeinkauf_scan_anfragen
+        SET status='fehlgeschlagen', fehler=?, erledigt_am=?, letztes_lebenszeichen=?
+        WHERE id=? AND status IN ('offen', 'laeuft') AND versuche=?
+        """,
+        (fehler, zeitpunkt, zeitpunkt, anfrage_id, versuch),
+    )
+    if int(cursor.rowcount or 0) != 1:
+        db.rollback()
+        vorhanden = db.execute(
+            "SELECT id FROM fahrzeugeinkauf_scan_anfragen WHERE id=?", (anfrage_id,)
+        ).fetchone()
+        db.close()
+        if not vorhanden:
+            return jsonify({"ok": False, "error": "Scan-Anfrage nicht gefunden"}), 404
+        return jsonify({"ok": False, "error": "Scan-Anfrage ist bereits abgeschlossen"}), 409
+    db.commit()
+    db.close()
+    return jsonify({"ok": True, "anfrage_id": anfrage_id, "versuch": versuch, "status": "fehlgeschlagen"})
 
 
 @app.route("/api/werkstatt/fahrzeugeinkauf/import", methods=["POST"])
 def api_fahrzeugeinkauf_import():
-    if not werkstatt_api_token_valid():
+    if not fahrzeugeinkauf_scanner_api_token_valid():
         return jsonify({"ok": False, "error": "Unauthorized"}), 401
     try:
         payload = json.loads(request.form.get("payload") or "{}")
     except Exception:
         return jsonify({"ok": False, "error": "payload ist kein gültiges JSON"}), 400
+    if not isinstance(payload, dict):
+        return jsonify({"ok": False, "error": "payload muss ein JSON-Objekt sein"}), 400
     fahrzeuge = payload.get("fahrzeuge") or []
     if not isinstance(fahrzeuge, list):
         return jsonify({"ok": False, "error": "fahrzeuge muss eine Liste sein"}), 400
+    if any(not isinstance(fz, dict) for fz in fahrzeuge):
+        return jsonify({"ok": False, "error": "Jedes Fahrzeug muss ein JSON-Objekt sein"}), 400
+    try:
+        anfrage_id = int(payload.get("anfrage_id") or payload.get("request_id") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "anfrage_id ist ungültig"}), 400
+    try:
+        versuch = int(payload.get("versuch") or payload.get("lease_version") or 0)
+    except (TypeError, ValueError):
+        versuch = 0
+    if anfrage_id > 0 and versuch <= 0:
+        return jsonify({"ok": False, "error": "versuch fehlt oder ist ungültig"}), 400
 
     pdf_stored_name = ""
     pdf_original_name = ""
+    pdf_path = None
+    pdf_temp_path = None
     pdf_file = request.files.get("pdf")
     if pdf_file and pdf_file.filename:
+        header = pdf_file.stream.read(5)
+        pdf_file.stream.seek(0)
+        if pathlib.Path(pdf_file.filename).suffix.lower() != ".pdf" or not header.startswith(b"%PDF"):
+            return jsonify({"ok": False, "error": "Die Scan-Datei ist keine gültige PDF-Datei"}), 400
         safe_name = f"fahrzeugeinkauf_{secrets.token_hex(8)}.pdf"
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        pdf_file.save(UPLOAD_DIR / safe_name)
+        pdf_path = UPLOAD_DIR / safe_name
+        pdf_temp_path = UPLOAD_DIR / f".{safe_name}.{secrets.token_hex(4)}.part"
         pdf_stored_name = safe_name
         pdf_original_name = pathlib.Path(pdf_file.filename).name
 
     db = get_db()
-    cursor = db.execute(
-        """
-        INSERT INTO fahrzeugeinkauf_scans
-            (titel, scan_datum, quelle, pdf_original_name, pdf_stored_name, notiz, erstellt_am)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            clean_text(payload.get("titel")) or "Unfall-Fahrzeug-Scan",
-            clean_text(payload.get("scan_datum")) or now_str(),
-            clean_text(payload.get("quelle")) or "unfall-auto-scout",
-            pdf_original_name,
-            pdf_stored_name,
-            clean_text(payload.get("notiz")),
-            now_str(),
-        ),
-    )
-    scan_id = cursor.lastrowid
-    angelegt = 0
-    aktualisiert = 0
-    for fz in fahrzeuge:
-        if not isinstance(fz, dict):
-            continue
-        ampel = clean_text(fz.get("ampel")).lower()
-        if ampel not in ("gruen", "gelb", "rot"):
-            ampel = "gelb"
-        inserat_url = clean_text(fz.get("inserat_url"))
-        bestehendes = None
-        if inserat_url:
-            bestehendes = db.execute(
-                "SELECT id FROM fahrzeugeinkauf_fahrzeuge WHERE inserat_url = ? ORDER BY id LIMIT 1",
-                (inserat_url,),
-            ).fetchone()
-        if bestehendes:
-            db.execute(
-                """
-                UPDATE fahrzeugeinkauf_fahrzeuge
-                SET preis = ?, verhandlungsziel = ?, marge = ?, ampel = ?, schaden = ?,
-                    bild_url = ?, verkaeufer_name = ?, verkaeufer_telefon = ?, verkaeufer_email = ?,
-                    geaendert_am = ?
-                WHERE id = ?
-                """,
-                (
-                    clean_text(fz.get("preis")),
-                    clean_text(fz.get("verhandlungsziel")),
-                    clean_text(fz.get("marge")),
-                    ampel,
-                    clean_text(fz.get("schaden")),
-                    clean_text(fz.get("bild_url")),
-                    clean_text(fz.get("verkaeufer_name")),
-                    clean_text(fz.get("verkaeufer_telefon")),
-                    clean_text(fz.get("verkaeufer_email")),
-                    now_str(),
-                    bestehendes["id"],
-                ),
-            )
-            aktualisiert += 1
-            continue
-        db.execute(
+    try:
+        if not USE_POSTGRES:
+            db.execute("BEGIN IMMEDIATE")
+        if anfrage_id > 0:
+            anfrage_sql = "SELECT * FROM fahrzeugeinkauf_scan_anfragen WHERE id=?"
+            if USE_POSTGRES:
+                anfrage_sql += " FOR UPDATE"
+            anfrage = db.execute(anfrage_sql, (anfrage_id,)).fetchone()
+            if not anfrage:
+                db.rollback()
+                db.close()
+                return jsonify({"ok": False, "error": "Scan-Anfrage nicht gefunden"}), 404
+            status = clean_text(anfrage["status"])
+            if int(anfrage["versuche"] or 0) != versuch:
+                db.rollback()
+                db.close()
+                return jsonify({"ok": False, "error": "Scanner-Lease ist veraltet"}), 409
+            if status in {"erledigt", "leer"} and int(anfrage["scan_id"] or 0):
+                response = {
+                    "ok": True,
+                    "idempotent": True,
+                    "anfrage_id": anfrage_id,
+                    "versuch": versuch,
+                    "scan_id": int(anfrage["scan_id"] or 0),
+                    "fahrzeuge_angelegt": int(anfrage["fahrzeuge_angelegt"] or 0),
+                    "fahrzeuge_aktualisiert": int(anfrage["fahrzeuge_aktualisiert"] or 0),
+                }
+                db.rollback()
+                db.close()
+                return jsonify(response)
+            if status not in FAHRZEUGEINKAUF_AKTIVE_SCAN_STATUS:
+                db.rollback()
+                db.close()
+                return jsonify({"ok": False, "error": "Scan-Anfrage ist bereits abgeschlossen"}), 409
+        # Ohne anfrage_id ist dies bewusst ein unabhängiger Tageslauf. Er darf
+        # niemals eine möglicherweise jüngere Button-Anfrage abschließen.
+
+        if pdf_file and pdf_file.filename:
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            pdf_file.save(pdf_temp_path)
+            pdf_temp_path.replace(pdf_path)
+
+        cursor = db.execute(
             """
-            INSERT INTO fahrzeugeinkauf_fahrzeuge
-                (scan_id, titel, preis, verhandlungsziel, marge, ampel, ez, km, ps,
-                 ort, schaden, inserat_url, bild_url,
-                 verkaeufer_name, verkaeufer_telefon, verkaeufer_email,
-                 erstellt_am, geaendert_am)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO fahrzeugeinkauf_scans
+                (anfrage_id, titel, scan_datum, quelle, pdf_original_name, pdf_stored_name,
+                 notiz, fahrzeuge_angelegt, fahrzeuge_aktualisiert, erstellt_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
             """,
             (
-                scan_id,
-                clean_text(fz.get("titel")),
-                clean_text(fz.get("preis")),
-                clean_text(fz.get("verhandlungsziel")),
-                clean_text(fz.get("marge")),
-                ampel,
-                clean_text(fz.get("ez")),
-                clean_text(fz.get("km")),
-                clean_text(fz.get("ps")),
-                clean_text(fz.get("ort")),
-                clean_text(fz.get("schaden")),
-                inserat_url,
-                clean_text(fz.get("bild_url")),
-                clean_text(fz.get("verkaeufer_name")),
-                clean_text(fz.get("verkaeufer_telefon")),
-                clean_text(fz.get("verkaeufer_email")),
-                now_str(),
-                now_str(),
+                anfrage_id,
+                clean_text(payload.get("titel")) or "Unfall-Fahrzeug-Scan",
+                clean_text(payload.get("scan_datum")) or fahrzeugeinkauf_zeit_label(fahrzeugeinkauf_zeitstempel()),
+                clean_text(payload.get("quelle")) or "unfall-auto-scout",
+                pdf_original_name,
+                pdf_stored_name,
+                clean_text(payload.get("notiz")),
+                fahrzeugeinkauf_zeitstempel(),
             ),
         )
-        angelegt += 1
-    db.execute(
-        "UPDATE fahrzeugeinkauf_scan_anfragen SET status = 'erledigt', erledigt_am = ? WHERE status = 'offen'",
-        (now_str(),),
-    )
-    db.commit()
+        scan_id = int(cursor.lastrowid)
+        angelegt = 0
+        aktualisiert = 0
+        verarbeitete_urls = set()
+        for fz in fahrzeuge:
+            ampel = clean_text(fz.get("ampel")).lower()
+            if ampel not in ("gruen", "gelb", "rot"):
+                ampel = "gelb"
+            inserat_url = fahrzeugeinkauf_https_url(
+                fz.get("inserat_url"), FAHRZEUGEINKAUF_ERLAUBTE_INSERAT_HOSTS
+            )
+            bild_url = fahrzeugeinkauf_https_url(fz.get("bild_url"))
+            verkaeufer_email = fahrzeugeinkauf_email(fz.get("verkaeufer_email"))
+            if not inserat_url or inserat_url in verarbeitete_urls:
+                continue
+            verarbeitete_urls.add(inserat_url)
+            bestehendes = db.execute(
+                "SELECT id FROM fahrzeugeinkauf_fahrzeuge "
+                "WHERE RTRIM(inserat_url, '/') = ? ORDER BY id LIMIT 1",
+                (inserat_url,),
+            ).fetchone()
+            if bestehendes:
+                fahrzeug_id = int(bestehendes["id"])
+                db.execute(
+                    """
+                    UPDATE fahrzeugeinkauf_fahrzeuge
+                    SET titel=COALESCE(NULLIF(?, ''), titel),
+                        preis=COALESCE(NULLIF(?, ''), preis),
+                        verhandlungsziel=COALESCE(NULLIF(?, ''), verhandlungsziel),
+                        marge=COALESCE(NULLIF(?, ''), marge), ampel=?,
+                        ez=COALESCE(NULLIF(?, ''), ez), km=COALESCE(NULLIF(?, ''), km),
+                        ps=COALESCE(NULLIF(?, ''), ps), ort=COALESCE(NULLIF(?, ''), ort),
+                        schaden=COALESCE(NULLIF(?, ''), schaden),
+                        bild_url=COALESCE(NULLIF(?, ''), bild_url),
+                        verkaeufer_name=COALESCE(NULLIF(?, ''), verkaeufer_name),
+                        verkaeufer_telefon=COALESCE(NULLIF(?, ''), verkaeufer_telefon),
+                        verkaeufer_email=COALESCE(NULLIF(?, ''), verkaeufer_email),
+                        geaendert_am=?
+                    WHERE id=?
+                    """,
+                    (
+                        clean_text(fz.get("titel")), clean_text(fz.get("preis")),
+                        clean_text(fz.get("verhandlungsziel")), clean_text(fz.get("marge")),
+                        ampel, clean_text(fz.get("ez")), clean_text(fz.get("km")),
+                        clean_text(fz.get("ps")), clean_text(fz.get("ort")),
+                        clean_text(fz.get("schaden")), bild_url,
+                        clean_text(fz.get("verkaeufer_name")), clean_text(fz.get("verkaeufer_telefon")),
+                        verkaeufer_email, now_str(), fahrzeug_id,
+                    ),
+                )
+                treffer_art = "aktualisiert"
+                aktualisiert += 1
+            else:
+                cursor = db.execute(
+                    """
+                    INSERT INTO fahrzeugeinkauf_fahrzeuge
+                        (scan_id, titel, preis, verhandlungsziel, marge, ampel, ez, km, ps,
+                         ort, schaden, inserat_url, bild_url,
+                         verkaeufer_name, verkaeufer_telefon, verkaeufer_email,
+                         erstellt_am, geaendert_am)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        scan_id, clean_text(fz.get("titel")), clean_text(fz.get("preis")),
+                        clean_text(fz.get("verhandlungsziel")), clean_text(fz.get("marge")),
+                        ampel, clean_text(fz.get("ez")), clean_text(fz.get("km")),
+                        clean_text(fz.get("ps")), clean_text(fz.get("ort")),
+                        clean_text(fz.get("schaden")), inserat_url, bild_url,
+                        clean_text(fz.get("verkaeufer_name")), clean_text(fz.get("verkaeufer_telefon")),
+                        verkaeufer_email, now_str(), now_str(),
+                    ),
+                )
+                fahrzeug_id = int(cursor.lastrowid)
+                treffer_art = "neu"
+                angelegt += 1
+            vorhandener_treffer = db.execute(
+                "SELECT id FROM fahrzeugeinkauf_scan_treffer WHERE scan_id=? AND fahrzeug_id=?",
+                (scan_id, fahrzeug_id),
+            ).fetchone()
+            if not vorhandener_treffer:
+                db.execute(
+                    """
+                    INSERT INTO fahrzeugeinkauf_scan_treffer
+                        (scan_id, fahrzeug_id, art, erstellt_am)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (scan_id, fahrzeug_id, treffer_art, fahrzeugeinkauf_zeitstempel()),
+                )
+        db.execute(
+            """
+            UPDATE fahrzeugeinkauf_scans
+            SET fahrzeuge_angelegt=?, fahrzeuge_aktualisiert=?
+            WHERE id=?
+            """,
+            (angelegt, aktualisiert, scan_id),
+        )
+        if anfrage_id > 0:
+            abschluss_status = "leer" if angelegt + aktualisiert == 0 else "erledigt"
+            zeitpunkt = fahrzeugeinkauf_zeitstempel()
+            abschluss_cursor = db.execute(
+                """
+                UPDATE fahrzeugeinkauf_scan_anfragen
+                SET status=?, erledigt_am=?, letztes_lebenszeichen=?, fehler='', scan_id=?,
+                    fahrzeuge_angelegt=?, fahrzeuge_aktualisiert=?
+                WHERE id=? AND status IN ('offen', 'laeuft') AND versuche=?
+                """,
+                (
+                    abschluss_status,
+                    zeitpunkt,
+                    zeitpunkt,
+                    scan_id,
+                    angelegt,
+                    aktualisiert,
+                    anfrage_id,
+                    versuch,
+                ),
+            )
+            if int(abschluss_cursor.rowcount or 0) != 1:
+                raise RuntimeError("Scan-Anfrage wurde parallel bereits abgeschlossen.")
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        db.close()
+        for cleanup_path in (pdf_temp_path, pdf_path):
+            if cleanup_path and cleanup_path.exists():
+                try:
+                    cleanup_path.unlink()
+                except OSError:
+                    pass
+        if anfrage_id > 0:
+            try:
+                fehler_db = get_db()
+                zeitpunkt = fahrzeugeinkauf_zeitstempel()
+                fehler_db.execute(
+                    """
+                    UPDATE fahrzeugeinkauf_scan_anfragen
+                    SET status='fehlgeschlagen', fehler=?, erledigt_am=?, letztes_lebenszeichen=?
+                    WHERE id=? AND status IN ('offen', 'laeuft') AND versuche=?
+                    """,
+                    (clean_text(str(exc))[:1000], zeitpunkt, zeitpunkt, anfrage_id, versuch),
+                )
+                fehler_db.commit()
+                fehler_db.close()
+            except Exception:
+                pass
+        return jsonify({"ok": False, "error": f"Import fehlgeschlagen: {clean_text(str(exc))[:240]}"}), 500
     db.close()
-    return jsonify({"ok": True, "scan_id": scan_id, "fahrzeuge_angelegt": angelegt, "fahrzeuge_aktualisiert": aktualisiert})
+    return jsonify(
+        {
+            "ok": True,
+            "anfrage_id": anfrage_id,
+            "versuch": versuch,
+            "scan_id": scan_id,
+            "status": "leer" if angelegt + aktualisiert == 0 else "erledigt",
+            "fahrzeuge_angelegt": angelegt,
+            "fahrzeuge_aktualisiert": aktualisiert,
+        }
+    )
 
 
 init_db()
