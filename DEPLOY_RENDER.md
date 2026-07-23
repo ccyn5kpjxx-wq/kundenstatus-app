@@ -1,5 +1,23 @@
 # Deployment auf Render
 
+## Getrennte Produktionsarchitektur
+
+`render.yaml` bereitet zwei voneinander getrennte Webdienste vor:
+
+- `gaertner-homepage`: öffentliche Website ohne Zugriff auf Admin-, Kunden- oder Partnerrouten (`PUBLIC_SITE_ONLY=true`).
+- `kundenstatus-portal`: geschütztes Portal mit PostgreSQL und persistenter Upload-/Backup-Disk.
+
+Die Hauptdomain zeigt später auf den Homepage-Dienst. `PORTAL_BASE_URL` verweist von dort auf die separate Portal-Subdomain. `PUBLIC_SITE_INDEXABLE` bleibt bis zur vollständig getesteten Domainumschaltung `false`.
+
+Vor jedem Livegang ausführen:
+
+```powershell
+python scripts/production_readiness.py --profile public --env-file .env.production-public
+python scripts/production_readiness.py --profile portal --env-file .env.production-portal
+```
+
+Die Dateien mit echten Werten dürfen nicht committed werden.
+
 Diese App kann aus GitHub als Render Web Service gestartet werden.
 
 ## Vorbereitung

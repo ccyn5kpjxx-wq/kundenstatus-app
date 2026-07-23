@@ -67,6 +67,7 @@ from flask import (
     g,
     has_request_context,
     jsonify,
+    make_response,
     redirect,
     render_template,
     render_template_string,
@@ -77,6 +78,10 @@ from flask import (
     url_for,
 )
 from werkzeug.utils import secure_filename
+
+
+def clean_text(value):
+    return str(value or "").strip()
 
 
 BASE = pathlib.Path(__file__).parent
@@ -235,6 +240,10 @@ ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ""
 DEFAULT_PUBLIC_BASE_URL = ""
 PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
+PUBLIC_SITE_ONLY = env_flag("PUBLIC_SITE_ONLY", False)
+PUBLIC_SITE_INDEXABLE = env_flag("PUBLIC_SITE_INDEXABLE", False)
+PUBLIC_SITE_VARIANT = clean_text(os.environ.get("PUBLIC_SITE_VARIANT") or "company").lower()
+PORTAL_BASE_URL = (os.environ.get("PORTAL_BASE_URL") or "").strip().rstrip("/")
 LEXWARE_KUNDEN_URL = (os.environ.get("LEXWARE_KUNDEN_URL") or "").strip()
 LEXWARE_RECHNUNGEN_URL = (os.environ.get("LEXWARE_RECHNUNGEN_URL") or "").strip()
 LEXWARE_API_KEY = (os.environ.get("LEXWARE_API_KEY") or "").strip()
@@ -600,168 +609,6 @@ DEFAULT_VERSICHERUNGEN = [
         "portal_key": "adacauto2026",
         "zugangscode": "",
         "notiz": "Offiziell bevorzugt online/Telefon. Kontakt: https://www.adac.de/produkte/versicherungen/autoversicherung/kontakt/",
-    },
-    {
-        "name": "AdmiralDirekt",
-        "slug": "admiraldirekt",
-        "portal_key": "admiraldirekt2026",
-        "zugangscode": "",
-        "notiz": "Offizielle Schadenmeldung online/Telefon: https://www.admiraldirekt.de/schadenservice/",
-    },
-    {
-        "name": "Allianz",
-        "slug": "allianz",
-        "portal_key": "allianz2026",
-        "email": "sachschaden@allianz.de",
-        "zugangscode": "",
-        "notiz": "Kfz-Schaden-E-Mail laut Allianz Unfall-Checkliste.",
-    },
-    {
-        "name": "Allianz Direct",
-        "slug": "allianz-direct",
-        "portal_key": "allianzdirect2026",
-        "zugangscode": "",
-        "notiz": "Offizielle Schadenmeldung online/Telefon: https://www.allianzdirect.de/service/",
-    },
-    {
-        "name": "AllSecur (Allianz Direct)",
-        "slug": "allsecur-allianz-direct",
-        "portal_key": "allsecur2026",
-        "zugangscode": "",
-        "notiz": "Ehemalige Marke, heute Allianz Direct.",
-    },
-    {
-        "name": "Alte Leipziger",
-        "slug": "alte-leipziger",
-        "portal_key": "alteleipziger2026",
-        "email": "schaden@alte-leipziger.de",
-        "zugangscode": "",
-        "notiz": "Kfz-Schadenkontakt: https://www.alte-leipziger.de/service/schaden-melden/kfz-schaden-melden/kfz-schaden-online-melden",
-    },
-    {
-        "name": "AXA",
-        "slug": "axa",
-        "portal_key": "axa2026",
-        "email": "schaden@axa.de",
-        "zugangscode": "",
-        "notiz": "AXA nennt online/Telefon als Standard; Maklerkontakt führt schaden@axa.de.",
-    },
-    {
-        "name": "Baloise",
-        "slug": "baloise",
-        "portal_key": "baloise2026",
-        "email": "schaden@baloise.de",
-        "zugangscode": "",
-        "notiz": "Kfz-Kaskoschaden: https://www.baloise.de/de/kontakt-service/schadenservice/kfz-kasko.html",
-    },
-    {
-        "name": "Barmenia",
-        "slug": "barmenia",
-        "portal_key": "barmenia2026",
-        "email": "schaden@barmenia.de",
-        "zugangscode": "",
-        "notiz": "BarmeniaGothaer Partnerportal Schadenkontakt.",
-    },
-    {
-        "name": "BavariaDirekt",
-        "slug": "bavariadirekt",
-        "portal_key": "bavariadirekt2026",
-        "email": "schaden@bavariadirekt.de",
-        "zugangscode": "",
-        "notiz": "FAQ Schadenunterlagen: https://www.bavariadirekt.de/kontakt/entry/711/",
-    },
-    {
-        "name": "BGV Versicherung",
-        "slug": "bgv-versicherung",
-        "portal_key": "bgv2026",
-        "email": "kfz-schaden@bgv.de",
-        "telefon": "0721 660-4444",
-        "zugangscode": "",
-        "notiz": "Kraftfahrt Schaden Fachbereich: https://makler.bgv.de/makler/infos/infocenter/kontaktcenter/fachbereiche/",
-    },
-    {
-        "name": "Concordia",
-        "slug": "concordia",
-        "portal_key": "concordia2026",
-        "email": "schaden@concordia.de",
-        "zugangscode": "",
-        "notiz": "Kfz-Schadenkontakt: https://www.concordia.de/service/schaeden-aenderungen/schaden-melden/schaden-kfz/",
-    },
-    {
-        "name": "Condor Versicherungen",
-        "slug": "condor-versicherungen",
-        "portal_key": "condor2026",
-        "email": "ruv@ruv.de",
-        "zugangscode": "",
-        "notiz": "Condor Komposit/Kfz wird über R+V Service geführt: https://www.condor-versicherungen.de/service/fuer-kunden",
-    },
-    {
-        "name": "Continentale",
-        "slug": "continentale",
-        "portal_key": "continentale2026",
-        "email": "schaden@continentale.de",
-        "telefon": "0231 12010-10",
-        "zugangscode": "",
-        "notiz": "Kfz-Schadenabteilung: https://www.continentale.de/schadenservice",
-    },
-    {
-        "name": "CosmosDirekt",
-        "slug": "cosmosdirekt",
-        "portal_key": "cosmosdirekt2026",
-        "telefon": "0681 966 6815",
-        "zugangscode": "",
-        "notiz": "Offizielle Kfz-Schadenmeldung online/Telefon: https://www.cosmosdirekt.de/schaden-melden/kfz-versicherung/",
-    },
-    {
-        "name": "DA Direkt",
-        "slug": "da-direkt",
-        "portal_key": "dadirekt2026",
-        "telefon": "0221 7715 7766",
-        "zugangscode": "",
-        "notiz": "Offizieller Schadenservice online/Telefon: https://www.da-direkt.de/schadenservice/autoschaden",
-    },
-    {
-        "name": "Debeka",
-        "slug": "debeka",
-        "portal_key": "debeka2026",
-        "email": "kundenservice@debeka.de",
-        "zugangscode": "",
-        "notiz": "Allgemeiner offizieller Kontakt: https://www.debeka.de/impressum.html",
-    },
-    {
-        "name": "DEVK",
-        "slug": "devk",
-        "portal_key": "devk2026",
-        "email": "info@devk.de",
-        "telefon": "0800 4 757 757",
-        "zugangscode": "",
-        "notiz": "Schadenmeldung bevorzugt online/Telefon: https://www.devk.de/service/schadenmeldung/",
-    },
-    {
-        "name": "Dialog Versicherung",
-        "slug": "dialog-versicherung",
-        "portal_key": "dialog2026",
-        "email": "schaden@dialog-versicherung.de",
-        "telefon": "089 5121-5404",
-        "zugangscode": "",
-        "notiz": "Kfz-Schadenkontakt: https://www.dialog-versicherung.de/produkte/privatkunden-komposit/kraftfahrt/pkw",
-    },
-    {
-        "name": "die Bayerische",
-        "slug": "die-bayerische",
-        "portal_key": "diebayerische2026",
-        "email": "schaden@diebayerische.de",
-        "telefon": "089 6787-5050",
-        "zugangscode": "",
-        "notiz": "Kfz-Schadenformular/Schadenanzeige der Bayerischen.",
-    },
-    {
-        "name": "ERGO",
-        "slug": "ergo",
-        "portal_key": "ergo2026",
-        "telefon": "0800 3746 310",
-        "zugangscode": "",
-        "notiz": "Kfz-Schadenmeldung online/Telefon: https://www.ergo.de/de/Service/ereignis-melden/schadenfall-melden/kfz",
     },
     {
         "name": "EUROPA Versicherung",
@@ -2903,6 +2750,31 @@ def restore_remember_login_session():
 
 
 @app.before_request
+def restrict_public_site_service():
+    if not PUBLIC_SITE_ONLY:
+        return None
+    allowed_endpoints = {
+        "static",
+        "oeffentliche_homepage",
+        "public_root",
+        "mietwagen_vorschau",
+        "mietwagen_vorschau_datei",
+        "oeffentliche_leistungen",
+        "oeffentliche_portale",
+        "oeffentliches_team",
+        "impressum_seite",
+        "datenschutz_seite",
+        "healthz",
+        "public_robots",
+        "public_sitemap",
+        "legacy_public_redirect",
+    }
+    if request.endpoint not in allowed_endpoints:
+        abort(404)
+    return None
+
+
+@app.before_request
 def refresh_authenticated_session():
     restore_remember_login_session()
     mark_authenticated_session_active()
@@ -3229,10 +3101,6 @@ def get_database_status():
         "database_url_present": bool(DATABASE_URL),
         "require_postgres": REQUIRE_POSTGRES_ON_RENDER,
     }
-
-
-def clean_text(value):
-    return str(value or "").strip()
 
 
 def strict_bool(value):
@@ -11101,8 +10969,10 @@ def hydrate_lead(row):
     )
     lead["is_closed"] = lead["status"] in {"gewonnen", "verloren"}
     lead["is_due"] = bool(lead["naechster_kontakt_obj"] and lead["naechster_kontakt_obj"] <= date.today() and not lead["is_closed"])
-    lead["can_whatsapp"] = bool(lead_whatsapp_url(lead))
-    lead["whatsapp_url"] = lead_whatsapp_url(lead)
+    # Öffentliche Website-Anfragen erlauben einen Rückruf, aber ohne
+    # dokumentiertes Opt-in keine Kontaktaufnahme über WhatsApp.
+    lead["can_whatsapp"] = bool(lead_whatsapp_url(lead)) and lead["quelle"] != "website"
+    lead["whatsapp_url"] = lead_whatsapp_url(lead) if lead["can_whatsapp"] else ""
     lead["mailto_url"] = (
         f"mailto:{quote(lead['kunde_email'], safe='@.+-_')}?subject={quote('Ihre Anfrage bei Gaertner Karosserie & Lack')}"
         f"&body={quote(lead_whatsapp_message(lead))}"
@@ -34054,7 +33924,6 @@ def admin_klickstatistik():
     return render_template("klickstatistik_admin.html", statistik=statistik)
 
 
-@app.route("/")
 @app.route("/admin")
 @admin_required
 def dashboard():
@@ -39110,6 +38979,337 @@ def render_admin_schadenaufnahme(form_data=None, form_errors=None, created_auftr
         form_errors=form_errors,
         created_auftrag=created_auftrag,
         status_code=status_code,
+    )
+
+
+@app.route("/")
+def public_root():
+    if PUBLIC_SITE_ONLY:
+        if PUBLIC_SITE_VARIANT == "rental":
+            return mietwagen_vorschau()
+        return oeffentliche_homepage()
+    return redirect(url_for("dashboard"))
+
+
+GOOGLE_REVIEWS_CACHE = {"payload": None, "expires_at": 0}
+GOOGLE_REVIEWS_CACHE_LOCK = threading.Lock()
+GOOGLE_MAPS_FALLBACK_URL = (
+    "https://www.google.com/maps/search/?api=1&query="
+    "G%C3%A4rtner+Karosserie+%26+Lack+GmbH+Binauer+H%C3%B6he+4+74821+Mosbach"
+)
+
+
+def get_google_reviews():
+    """Load public Google reviews via Places API, with a safe linked fallback."""
+    place_id = clean_text(os.environ.get("GOOGLE_PLACES_PLACE_ID"))
+    api_key = clean_text(os.environ.get("GOOGLE_PLACES_API_KEY"))
+    fallback = {
+        "available": False,
+        "rating": None,
+        "count": None,
+        "reviews": [],
+        "maps_url": GOOGLE_MAPS_FALLBACK_URL,
+    }
+    if not place_id or not api_key:
+        return fallback
+
+    now = time.time()
+    with GOOGLE_REVIEWS_CACHE_LOCK:
+        cached = GOOGLE_REVIEWS_CACHE.get("payload")
+        if cached and GOOGLE_REVIEWS_CACHE.get("expires_at", 0) > now:
+            return cached
+
+    requests_module = load_optional_module("requests", "requests")
+    if requests_module is None:
+        return fallback
+    try:
+        response = requests_module.get(
+            f"https://places.googleapis.com/v1/places/{quote(place_id, safe='')}",
+            params={"languageCode": "de"},
+            headers={
+                "X-Goog-Api-Key": api_key,
+                "X-Goog-FieldMask": "displayName,rating,userRatingCount,reviews,googleMapsUri",
+            },
+            timeout=5,
+        )
+        response.raise_for_status()
+        data = response.json()
+        reviews = []
+        for item in (data.get("reviews") or [])[:3]:
+            author = item.get("authorAttribution") or {}
+            text_value = item.get("text") or {}
+            reviews.append(
+                {
+                    "author": clean_text(author.get("displayName")) or "Google-Nutzer",
+                    "author_url": clean_text(author.get("uri")),
+                    "rating": max(1, min(5, int(item.get("rating") or 5))),
+                    "text": clean_text(text_value.get("text"))[:700],
+                    "relative_time": clean_text(item.get("relativePublishTimeDescription")),
+                }
+            )
+        payload = {
+            "available": bool(data.get("rating") is not None),
+            "rating": data.get("rating"),
+            "count": data.get("userRatingCount"),
+            "reviews": reviews,
+            "maps_url": clean_text(data.get("googleMapsUri")) or GOOGLE_MAPS_FALLBACK_URL,
+        }
+        with GOOGLE_REVIEWS_CACHE_LOCK:
+            GOOGLE_REVIEWS_CACHE["payload"] = payload
+            GOOGLE_REVIEWS_CACHE["expires_at"] = now + 21600
+        return payload
+    except Exception:
+        return fallback
+
+
+def homepage_portal_links():
+    def link(endpoint, path):
+        if PORTAL_BASE_URL:
+            return f"{PORTAL_BASE_URL}{path}"
+        return url_for(endpoint)
+
+    return {
+        "schaden": link("privat_schadenaufnahme", "/privat/schaden"),
+        "status": link("privat_status_zugang", "/privat/status"),
+        "privat": link("privat_portal", "/privat/"),
+        "mietwagen": link("mietwagen_anfrage", "/mietwagen"),
+        "anfrage": link("website_anfrage", "/anfrage"),
+        "partner": link("partner_login", "/partner"),
+        "versicherung": link("versicherung_login", "/versicherung"),
+    }
+
+
+WEBSITE_ANLIEGEN = {
+    "allgemein": "Allgemeine Beratung",
+    "werkstatt": "Werkstatttermin",
+    "kaufberatung": "Gebrauchtwagen-Kaufcheck",
+    "leasingrueckgabe": "Leasingrückgabe-Check",
+    "farbton": "Farbton- und Lackberatung",
+    "felgenservice": "Felgenservice",
+    "dellenreparatur": "Dellenreparatur",
+}
+
+WEBSITE_BESICHTIGUNGSARTEN = {
+    "werkstatt": "Prüfung bei Gärtner in Mosbach-Lohrbach",
+    "vor_ort": "Besichtigung beim Verkäufer oder Fahrzeugstandort gegen Aufpreis",
+}
+
+
+def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_code=200):
+    response = make_response(
+        render_template(
+            "homepage_anfrage.html",
+            formdata=formdata or {},
+            errors=errors or [],
+            gesendet=bool(gesendet),
+            anliegen_optionen=WEBSITE_ANLIEGEN,
+            besichtigungsarten=WEBSITE_BESICHTIGUNGSARTEN,
+            today_iso=date.today().isoformat(),
+        ),
+        status_code,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
+
+
+@app.route("/anfrage", methods=["GET", "POST"])
+def website_anfrage():
+    """Zentrales Anfrageformular des Portals für Homepage-Kontakte."""
+    if request.method == "POST":
+        limited, wait_seconds = public_form_rate_limit_status("homepage-anfrage")
+        if limited:
+            return render_website_anfrage(
+                formdata=request.form,
+                errors=[
+                    f"Zu viele Anfragen in kurzer Zeit. Bitte in {login_wait_label(wait_seconds)} erneut versuchen oder uns anrufen."
+                ],
+                status_code=429,
+            )
+        record_public_form_attempt("homepage-anfrage")
+        if clean_text(request.form.get("website")):
+            return redirect(url_for("website_anfrage"))
+
+        anliegen = clean_text(request.form.get("anliegen"))
+        besichtigungsart = clean_text(request.form.get("besichtigungsart")) or "werkstatt"
+        name = clean_text(request.form.get("name"))[:120]
+        telefon = clean_text(request.form.get("telefon"))[:80]
+        email = clean_text(request.form.get("email")).lower()[:200]
+        fahrzeug = clean_text(request.form.get("fahrzeug"))[:160]
+        wunschdatum = clean_text(request.form.get("wunschdatum"))[:10]
+        fahrzeug_link = clean_text(request.form.get("fahrzeug_link"))[:1000]
+        nachricht = clean_text(request.form.get("nachricht"))[:2000]
+        errors = []
+
+        if anliegen not in WEBSITE_ANLIEGEN:
+            errors.append("Bitte ein Anliegen auswählen.")
+        if besichtigungsart not in WEBSITE_BESICHTIGUNGSARTEN:
+            errors.append("Bitte eine gültige Besichtigungsart auswählen.")
+        if len(name) < 2:
+            errors.append("Bitte Ihren vollständigen Namen angeben.")
+        if not telefon and not email:
+            errors.append("Bitte eine Telefonnummer oder E-Mail-Adresse angeben.")
+        elif telefon and len(re.sub(r"\D", "", telefon)) < 7:
+            errors.append("Bitte eine gültige Telefonnummer angeben.")
+        if email:
+            email_empfaenger = parse_email_recipients(email)
+            if len(email_empfaenger) != 1 or clean_text(email_empfaenger[0]).lower() != email:
+                errors.append("Bitte genau eine gültige E-Mail-Adresse angeben.")
+        if anliegen in {"kaufberatung", "leasingrueckgabe"} and len(fahrzeug) < 2:
+            errors.append("Bitte Marke und Modell des Fahrzeugs angeben.")
+        if wunschdatum:
+            try:
+                wunschdatum_obj = date.fromisoformat(wunschdatum)
+                if wunschdatum_obj < date.today():
+                    errors.append("Das Wunschdatum darf nicht in der Vergangenheit liegen.")
+            except ValueError:
+                errors.append("Bitte ein gültiges Wunschdatum angeben.")
+        if fahrzeug_link and not re.match(r"^https?://", fahrzeug_link, flags=re.IGNORECASE):
+            errors.append("Der Link zur Fahrzeuganzeige muss mit http:// oder https:// beginnen.")
+        if errors:
+            return render_website_anfrage(formdata=request.form, errors=errors, status_code=400)
+
+        anliegen_label = WEBSITE_ANLIEGEN[anliegen]
+        besichtigung_label = WEBSITE_BESICHTIGUNGSARTEN[besichtigungsart]
+        beschreibungsteile = [anliegen_label]
+        if fahrzeug:
+            beschreibungsteile.append(f"Fahrzeug: {fahrzeug}")
+        if wunschdatum:
+            beschreibungsteile.append(f"Wunschdatum: {wunschdatum}")
+        if anliegen in {"kaufberatung", "leasingrueckgabe"}:
+            beschreibungsteile.append(f"Prüfort: {besichtigung_label}")
+        if fahrzeug_link:
+            beschreibungsteile.append(f"Fahrzeuganzeige: {fahrzeug_link}")
+        if nachricht:
+            beschreibungsteile.append(f"Nachricht: {nachricht}")
+
+        naechste_aktion = {
+            "kaufberatung": "Kaufcheck besprechen und Termin abstimmen",
+            "leasingrueckgabe": "Leasingrückgabe-Check terminieren",
+            "werkstatt": "Werkstattanliegen telefonisch klären",
+            "farbton": "Farbtonprüfung abstimmen",
+            "felgenservice": "Felgenumfang und Termin klären",
+            "dellenreparatur": "Dellenreparatur mit mobilem Dienstleister abstimmen",
+        }.get(anliegen, "Kundenanfrage persönlich beantworten")
+        lead_id = create_lead(
+            {
+                "quelle": "website",
+                "status": "neu",
+                "kunde_name": name,
+                "kontakt_telefon": telefon,
+                "kunde_email": email,
+                "fahrzeug": fahrzeug,
+                "schadenart": "unbekannt",
+                "beschreibung": " · ".join(beschreibungsteile),
+                "naechste_aktion": naechste_aktion,
+                "naechster_kontakt_am": "",
+                "notiz": "Öffentliches Anfrageformular. Rückruf oder E-Mail gewünscht; keine WhatsApp-Einwilligung erfasst.",
+            }
+        )
+        schedule_change_backup("website-anfrage-erfolgreich")
+        session["website_anfrage_gesendet"] = int(lead_id)
+        return redirect(url_for("website_anfrage", gesendet=1))
+
+    vorauswahl = clean_text(request.args.get("anliegen"))
+    if vorauswahl not in WEBSITE_ANLIEGEN:
+        vorauswahl = "allgemein"
+    besichtigungsart = clean_text(request.args.get("besichtigungsart"))
+    if besichtigungsart not in WEBSITE_BESICHTIGUNGSARTEN:
+        besichtigungsart = "werkstatt"
+    bestaetigt = bool(request.args.get("gesendet")) and bool(
+        session.pop("website_anfrage_gesendet", 0)
+    )
+    return render_website_anfrage(
+        formdata={"anliegen": vorauswahl, "besichtigungsart": besichtigungsart},
+        gesendet=bestaetigt,
+    )
+
+
+@app.route("/healthz")
+def healthz():
+    return jsonify({"ok": True, "mode": "public" if PUBLIC_SITE_ONLY else "portal"})
+
+
+@app.route("/robots.txt")
+def public_robots():
+    if not PUBLIC_SITE_INDEXABLE or not PUBLIC_BASE_URL:
+        body = "User-agent: *\nDisallow: /\n"
+    else:
+        body = f"User-agent: *\nAllow: /\nDisallow: /admin\nSitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
+    return body, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/sitemap.xml")
+def public_sitemap():
+    if not PUBLIC_SITE_INDEXABLE or not PUBLIC_BASE_URL:
+        abort(404)
+    urls = ("", "/leistungen", "/team", "/portale", "/impressum", "/datenschutz")
+    entries = "".join(f"<url><loc>{escape(PUBLIC_BASE_URL + path)}</loc></url>" for path in urls)
+    body = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{entries}</urlset>'
+    return body, 200, {"Content-Type": "application/xml; charset=utf-8"}
+
+
+@app.route("/kontakt/")
+@app.route("/ueber-uns/")
+@app.route("/industrielackierung/")
+@app.route("/fahrzeugpflege/")
+@app.route("/dellendoktor/")
+@app.route("/unfallinstandsetzung-und-smart-repair/")
+@app.route("/lackiererei-und-fahrzeuglackierung/")
+def legacy_public_redirect():
+    if request.path in {"/kontakt/", "/ueber-uns/"}:
+        target = url_for("oeffentliche_homepage", _anchor="kontakt")
+    else:
+        target = url_for("oeffentliche_leistungen")
+    return redirect(target, code=301)
+
+
+@app.route("/homepage")
+def oeffentliche_homepage():
+    return (
+        render_template(
+            "homepage.html",
+            google_reviews=get_google_reviews(),
+            portal_links=homepage_portal_links(),
+            site_indexable=PUBLIC_SITE_INDEXABLE,
+            canonical_url=f"{PUBLIC_BASE_URL}/" if PUBLIC_BASE_URL else "",
+        ),
+        200,
+        {
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.route("/leistungen")
+def oeffentliche_leistungen():
+    return render_template(
+        "homepage_leistungen.html",
+        portal_links=homepage_portal_links(),
+        site_indexable=PUBLIC_SITE_INDEXABLE,
+        canonical_url=f"{PUBLIC_BASE_URL}/leistungen" if PUBLIC_BASE_URL else "",
+    )
+
+
+@app.route("/portale")
+def oeffentliche_portale():
+    return render_template(
+        "homepage_portale.html",
+        portal_links=homepage_portal_links(),
+        site_indexable=PUBLIC_SITE_INDEXABLE,
+        canonical_url=f"{PUBLIC_BASE_URL}/portale" if PUBLIC_BASE_URL else "",
+    )
+
+
+@app.route("/team")
+def oeffentliches_team():
+    return render_template(
+        "homepage_team.html",
+        portal_links=homepage_portal_links(),
+        site_indexable=PUBLIC_SITE_INDEXABLE,
+        canonical_url=f"{PUBLIC_BASE_URL}/team" if PUBLIC_BASE_URL else "",
     )
 
 

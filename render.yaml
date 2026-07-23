@@ -1,18 +1,57 @@
 services:
   - type: web
-    name: kundenstatus-app
+    name: gaertner-homepage
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn --workers 1 --threads 4 --timeout 180 --max-requests 300 --max-requests-jitter 60 app:app
+    healthCheckPath: /healthz
+    envVars:
+      - key: PUBLIC_SITE_ONLY
+        value: true
+      - key: PUBLIC_SITE_INDEXABLE
+        value: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: PORTAL_BASE_URL
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: SESSION_COOKIE_SECURE
+        value: true
+      - key: REQUIRE_POSTGRES_ON_RENDER
+        value: false
+      - key: DATA_DIR
+        value: /tmp/gaertner-public
+      - key: UPLOAD_DIR
+        value: /tmp/gaertner-public/uploads
+      - key: GOOGLE_PLACES_API_KEY
+        sync: false
+      - key: GOOGLE_PLACES_PLACE_ID
+        sync: false
+
+  - type: web
+    name: kundenstatus-portal
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 180 --max-requests 300 --max-requests-jitter 60 app:app
+    healthCheckPath: /healthz
     disk:
       name: kundenstatus-uploads
       mountPath: /var/data
       sizeGB: 1
     envVars:
+      - key: PUBLIC_SITE_ONLY
+        value: false
+      - key: PUBLIC_SITE_INDEXABLE
+        value: false
+      - key: PUBLIC_BASE_URL
+        sync: false
       - key: ADMIN_PASS
         sync: false
       - key: FLASK_SECRET_KEY
         generateValue: true
+      - key: SESSION_COOKIE_SECURE
+        value: true
       - key: DATABASE_URL
         fromDatabase:
           name: kundenstatus-db
@@ -24,7 +63,7 @@ services:
       - key: OPENAI_EXTRACTION_MODEL
         value: gpt-4o
       - key: AUTO_BACKUP_ON_STARTUP
-        value: false
+        value: true
       - key: DATA_DIR
         value: /var/data
       - key: SQLITE_DB_PATH
