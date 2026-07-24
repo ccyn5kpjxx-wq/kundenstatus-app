@@ -298,6 +298,11 @@
     font-weight: 700;
     text-align: center;
   }
+  .module-count.is-alert {
+    background: #d64545;
+    color: #fff;
+    box-shadow: 0 0 0 3px rgba(214, 69, 69, .16);
+  }
   .module-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -674,11 +679,12 @@
     {% endif %}
 
     <div class="module-grid mb-4">
+      {% set leads_count = admin_leads_count() %}
       <a class="page-card module-tile" href="{{ url_for('admin_leads') }}">
         <span class="module-kicker">Anfragen</span>
         <h5 class="mb-0">Leads</h5>
         <p class="text-muted mb-0">Neue Anfragen, Rückrufe und nächste Aktionen bündeln.</p>
-        <span class="module-count">{{ admin_leads_count() }}</span>
+        <span class="module-count {% if leads_count %}is-alert{% endif %}" title="{% if leads_count %}{{ leads_count }} aktive Lead-Anfrage{% if leads_count != 1 %}n{% endif %}{% else %}Keine aktiven Leads{% endif %}">{{ leads_count }}</span>
       </a>
       <a class="page-card module-tile" href="{{ url_for('admin_fahrzeugsuche') }}">
         <span class="module-kicker">Auktion</span>

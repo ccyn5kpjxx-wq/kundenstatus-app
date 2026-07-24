@@ -66,12 +66,21 @@ def main():
     captured = {}
     original_create_lead = portal.create_lead
     original_backup = portal.schedule_change_backup
+    original_lead_mail = portal.sende_website_lead_benachrichtigung
     def fake_create_lead(payload):
         captured["payload"] = payload
         return 991
 
+    def fake_lead_mail(lead_id, payload, anliegen_label=""):
+        captured["mail"] = {
+            "lead_id": lead_id,
+            "payload": payload,
+            "anliegen_label": anliegen_label,
+        }
+
     portal.create_lead = fake_create_lead
     portal.schedule_change_backup = lambda _reason: None
+    portal.sende_website_lead_benachrichtigung = fake_lead_mail
     try:
         form_get = client.get("/anfrage?anliegen=leasingrueckgabe")
         form_html = form_get.get_data(as_text=True)
@@ -101,6 +110,8 @@ def main():
             "CSRF und Honeypot": 'name="csrf_token"' in form_html and 'name="website"' in form_html,
             "Anfrage PRG": form_post.status_code == 302 and "gesendet=1" in form_post.headers.get("Location", ""),
             "Website-Lead gespeichert": captured.get("payload", {}).get("quelle") == "website",
+            "Werkstatt per E-Mail benachrichtigt": captured.get("mail", {}).get("lead_id") == 991
+            and captured.get("mail", {}).get("payload", {}).get("kunde_email") == "kunde@example.test",
             "Vor-Ort-Aufpreis dokumentiert": "gegen Aufpreis" in captured.get("payload", {}).get("beschreibung", ""),
             "Keine WhatsApp-Einwilligung behauptet": "keine WhatsApp-Einwilligung" in captured.get("payload", {}).get("notiz", ""),
             "Bestaetigung ohne Lead-ID": success is not None and success.status_code == 200 and "Ihre Anfrage ist angekommen" in success.get_data(as_text=True) and "991" not in success.get_data(as_text=True),
@@ -108,6 +119,7 @@ def main():
     finally:
         portal.create_lead = original_create_lead
         portal.schedule_change_backup = original_backup
+        portal.sende_website_lead_benachrichtigung = original_lead_mail
     print_checks(form_checks)
 
     team_html = client.get("/team").get_data(as_text=True)

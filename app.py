@@ -335,6 +335,9 @@ SCHADEN_MAIL_ADDRESS = (
     or os.environ.get("SCHADEN_EMAIL_ADDRESS")
     or ""
 ).strip()
+WEBSITE_LEAD_NOTIFICATION_EMAIL = (
+    os.environ.get("WEBSITE_LEAD_NOTIFICATION_EMAIL") or ""
+).strip()
 SCHADEN_MAIL_DISPLAY_NAME = (
     os.environ.get("SCHADEN_MAIL_DISPLAY_NAME")
     or "Gärtner Karosserie & Lack - Schadenregulierung"
@@ -25486,6 +25489,99 @@ def send_versicherung_nachtragmail(auftrag_id, prozess_key, note=""):
 
 
 AUTOHAUS_MAIL_TESTLOG = []
+WEBSITE_LEAD_MAIL_TESTLOG = []
+
+
+def sende_website_lead_benachrichtigung(lead_id, payload, anliegen_label=""):
+    """Benachrichtigt die Werkstatt still im Hintergrund über Homepage-Leads."""
+    try:
+        config = get_schaden_mail_config()
+        empfaenger = parse_email_recipients(
+            WEBSITE_LEAD_NOTIFICATION_EMAIL or config.get("address")
+        )
+        betreff = f"Neue Homepage-Anfrage: {clean_text(anliegen_label) or 'Allgemein'}"
+        kunde_name = clean_text(payload.get("kunde_name")) or "Ohne Namen"
+        if app.config.get("TESTING"):
+            WEBSITE_LEAD_MAIL_TESTLOG.append(
+                {
+                    "lead_id": int(lead_id),
+                    "betreff": betreff,
+                    "empfaenger": empfaenger,
+                    "kunde_name": kunde_name,
+                }
+            )
+            return
+        if not empfaenger:
+            print(f"WARNUNG: Homepage-Lead-Mail ohne Empfänger: Lead {lead_id}")
+            return
+        if not config["smtp_configured"]:
+            print(f"WARNUNG: Homepage-Lead-Mail nicht gesendet (SMTP fehlt): Lead {lead_id}")
+            return
+
+        lead_link = ""
+        if PORTAL_BASE_URL:
+            lead_link = f"{PORTAL_BASE_URL}/admin/leads/{int(lead_id)}"
+        elif has_request_context():
+            lead_link = url_for("admin_lead_detail", lead_id=lead_id, _external=True)
+
+        zeilen = [
+            "Eine neue Anfrage ist über die Homepage eingegangen.",
+            "",
+            f"Anliegen: {clean_text(anliegen_label) or 'Allgemein'}",
+            f"Name: {kunde_name}",
+            f"Telefon: {clean_text(payload.get('kontakt_telefon')) or '-'}",
+            f"E-Mail: {clean_text(payload.get('kunde_email')) or '-'}",
+            f"Fahrzeug: {clean_text(payload.get('fahrzeug')) or '-'}",
+            f"Angaben: {clean_text(payload.get('beschreibung')) or '-'}",
+        ]
+        if lead_link:
+            zeilen += ["", f"Direkt zum Lead: {lead_link}"]
+        zeilen += ["", "Diese Nachricht wurde automatisch vom Homepage-Formular gesendet."]
+
+        message = EmailMessage()
+        message["Subject"] = f"{betreff} – {kunde_name}"
+        message["From"] = formataddr((config["display_name"], config["from_address"]))
+        message["To"] = ", ".join(empfaenger)
+        kunden_email = clean_text(payload.get("kunde_email")).lower()
+        message["Reply-To"] = kunden_email or clean_text(config.get("reply_to"))
+        message["X-Gaertner-Lead-ID"] = str(int(lead_id))
+        message.set_content("\n".join(zeilen))
+        add_standard_mail_headers(message)
+
+        def _senden():
+            try:
+                if config["smtp_ssl"]:
+                    with smtplib.SMTP_SSL(
+                        config["smtp_host"],
+                        config["smtp_port"],
+                        local_hostname=smtp_lokaler_hostname(),
+                        timeout=30,
+                    ) as smtp:
+                        smtp.login(config["smtp_user"], config["_smtp_password"])
+                        smtp.send_message(message)
+                else:
+                    with smtplib.SMTP(
+                        config["smtp_host"],
+                        config["smtp_port"],
+                        local_hostname=smtp_lokaler_hostname(),
+                        timeout=30,
+                    ) as smtp:
+                        if config["smtp_tls"]:
+                            smtp.starttls()
+                        smtp.login(config["smtp_user"], config["_smtp_password"])
+                        smtp.send_message(message)
+            except Exception as exc:
+                print(
+                    "WARNUNG: Homepage-Lead-Mail konnte nicht gesendet werden: "
+                    f"{clean_text(str(exc))[:300]}"
+                )
+
+        threading.Thread(target=_senden, daemon=True).start()
+    except Exception as exc:
+        print(
+            "WARNUNG: Homepage-Lead-Mail-Vorbereitung fehlgeschlagen: "
+            f"{clean_text(str(exc))[:300]}"
+        )
 
 
 def sende_autohaus_benachrichtigung_mail(auftrag_id, betreff, text):
@@ -39340,6 +39436,17 @@ def website_anfrage():
             }
         )
         schedule_change_backup("website-anfrage-erfolgreich")
+        sende_website_lead_benachrichtigung(
+            lead_id,
+            {
+                "kunde_name": name,
+                "kontakt_telefon": telefon,
+                "kunde_email": email,
+                "fahrzeug": fahrzeug,
+                "beschreibung": " · ".join(beschreibungsteile),
+            },
+            anliegen_label,
+        )
         session["website_anfrage_gesendet"] = int(lead_id)
         return redirect(url_for("website_anfrage", gesendet=1))
 
