@@ -47692,14 +47692,22 @@ def mietwagen_public_fahrzeuge():
     def bild_von_vermietungsseite(bezeichnung):
         name = clean_text(bezeichnung).lower().replace("ò", "o")
         if "hyundai i10" in name:
-            return "https://dmassets.hyundai.com/is/image/hyundaiautoever/HME_AC3_ICE_EViz_EXT_PM2_MetaBluePearl_52910K7500_SHOT4-1:16x9?wid=1600&hei=900&fmt=webp&qlt=85&fit=wrap,1"
+            return "/static/mietwagen/i10-white.webp"
         if "hyundai kona" in name:
-            return "https://dmassets.hyundai.com/is/image/hyundaiautoever/HYU_SX2_HEV-NLine_EViz_Env_R2P-Ultimate_Red_Metallic_C02:16x9?wid=1600&hei=900&fmt=webp&qlt=85&fit=wrap,1"
+            return "/static/mietwagen/kona-white.webp"
         if "fiat doblo maxi" in name:
-            return "/static/mietwagen_vorschau/fiat/qubo-l.jpg"
+            return "/static/mietwagen/doblo-maxi-white.webp"
         if "fiat doblo" in name:
-            return "/static/mietwagen_vorschau/fiat/qubo-l.jpg"
+            return "/static/mietwagen/doblo-maxi-white.webp"
         return ""
+
+    def ist_demnaechst_verfuegbar(bezeichnung, gespeicherter_status):
+        name = clean_text(bezeichnung).lower().replace("ò", "o")
+        if "hyundai i10" in name or "hyundai kona" in name:
+            return False
+        if "fiat doblo" in name:
+            return True
+        return clean_text(gespeicherter_status) == "bald"
     fahrzeuge = []
     for f in list_mietfahrzeuge(include_inactive=False):
         if clean_text(f.get("basis_status")) in {"wartung", "inaktiv"}:
@@ -47736,7 +47744,7 @@ def mietwagen_public_fahrzeuge():
                 "titelbild_id": titelbild_id,
                 "bild_url": bild_url,
                 "belegt": belegt,
-                "bald": clean_text(f.get("status")) == "bald",
+                "bald": ist_demnaechst_verfuegbar(bezeichnung, f.get("status")),
             }
         )
     return fahrzeuge
