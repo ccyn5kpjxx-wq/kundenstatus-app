@@ -204,7 +204,13 @@
           </td>
           <td>{{ lead['geschaetzter_wert_label'] or 'offen' }}</td>
           <td class="text-end">
-            <a href="{{ url_for('admin_lead_detail', lead_id=lead['id']) }}" class="btn btn-sm btn-brand">Öffnen</a>
+            <div class="d-flex justify-content-end gap-2 flex-wrap">
+              <a href="{{ url_for('admin_lead_detail', lead_id=lead['id']) }}" class="btn btn-sm btn-brand">Öffnen</a>
+              <form method="POST" action="{{ url_for('admin_lead_loeschen', lead_id=lead['id']) }}" class="m-0" onsubmit="return confirm('Diesen Lead wirklich löschen? Ein bereits erstellter Auftrag bleibt erhalten.');">
+                {{ csrf_field()|safe }}
+                <button type="submit" class="btn btn-sm btn-outline-danger" data-no-loading="true">Löschen</button>
+              </form>
+            </div>
           </td>
         </tr>
         {% endfor %}

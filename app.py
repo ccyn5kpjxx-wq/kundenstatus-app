@@ -11295,6 +11295,16 @@ def set_lead_status(lead_id, status):
     return status
 
 
+def delete_lead(lead_id):
+    """Löscht nur den Lead; ein bereits erzeugter Auftrag bleibt erhalten."""
+    db = get_db()
+    cursor = db.execute("DELETE FROM leads WHERE id=?", (int(lead_id),))
+    db.commit()
+    deleted = int(cursor.rowcount or 0) > 0
+    db.close()
+    return deleted
+
+
 def lead_pipeline_counts():
     counts = {key: 0 for key in LEAD_STATUS}
     db = get_db()
@@ -43623,6 +43633,22 @@ def admin_lead_status(lead_id, status):
     schedule_change_backup("lead-status")
     flash(f"Lead-Status auf {LEAD_STATUS[new_status]['label']} gesetzt.", "success")
     return redirect(url_for("admin_lead_detail", lead_id=lead_id))
+
+
+@app.route("/admin/leads/<int:lead_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_lead_loeschen(lead_id):
+    lead = get_lead(lead_id)
+    if not lead:
+        abort(404)
+    lead_name = lead["kunde_name"] or f"Lead #{lead_id}"
+    delete_lead(lead_id)
+    schedule_change_backup("lead-deleted")
+    flash(
+        f"{lead_name} wurde aus den Leads gelöscht. Ein eventuell verbundener Auftrag bleibt erhalten.",
+        "success",
+    )
+    return redirect(url_for("admin_leads"))
 
 
 @app.route("/admin/leads/<int:lead_id>/auftrag", methods=["POST"])

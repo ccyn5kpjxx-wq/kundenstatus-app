@@ -217,6 +217,15 @@
       <a href="{{ lead['source_email_url'] }}" class="btn btn-soft w-100 mt-3">Quell-E-Mail öffnen</a>
       {% endif %}
     </div>
+
+    <div class="page-card p-4 mt-4 border-danger">
+      <h2 class="h4 mb-2 text-danger">Lead löschen</h2>
+      <p class="text-muted small">Der Lead wird aus der Liste entfernt. Ein bereits verbundener Auftrag und die ursprüngliche E-Mail bleiben erhalten.</p>
+      <form method="POST" action="{{ url_for('admin_lead_loeschen', lead_id=lead['id']) }}" onsubmit="return confirm('Diesen Lead wirklich endgültig löschen? Ein bereits erstellter Auftrag bleibt erhalten.');">
+        {{ csrf_field()|safe }}
+        <button type="submit" class="btn btn-outline-danger w-100" data-no-loading="true">Lead endgültig löschen</button>
+      </form>
+    </div>
   </div>
 </div>
 {% endblock %}
