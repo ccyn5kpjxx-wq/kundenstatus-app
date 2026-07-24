@@ -10943,15 +10943,14 @@ def customer_status_share_message(auftrag, status_update=False):
 def customer_fertig_whatsapp_message(auftrag):
     name = clean_text((auftrag or {}).get("kunde_name")) or "zusammen"
     fahrzeug = clean_text((auftrag or {}).get("fahrzeug")) or "Ihr Fahrzeug"
-    bewertung_url = clean_text(get_app_setting("GOOGLE_BEWERTUNG_URL", ""))
-    bewertung_satz = (
-        f" Wenn Sie zufrieden sind, freuen wir uns riesig über eine Google-Bewertung: {bewertung_url}"
-        if bewertung_url
-        else ""
+    bewertung_url = clean_text(get_app_setting("GOOGLE_BEWERTUNG_URL", "")) or (
+        "https://www.google.com/maps/search/?api=1&query="
+        "G%C3%A4rtner+Karosserie+%26+Lack+GmbH+Binauer+H%C3%B6he+4+74821+Mosbach"
     )
     return (
-        f"Hallo {name}, {fahrzeug} ist fertig und kann abgeholt werden."
-        f"{bewertung_satz} "
+        f"Hallo {name}, {fahrzeug} ist fertig und kann abgeholt werden. "
+        "Ein kleines Feedback würde uns sehr helfen. Wenn Sie zufrieden sind, "
+        f"freuen wir uns über Ihre Google-Bewertung: {bewertung_url} "
         "Viele Grüße, Gärtner Karosserie & Lack, Tel. +49 1522 7706694."
     )
 
@@ -20977,14 +20976,14 @@ def notify_customer_whatsapp_fertig(auftrag):
         return False, "Keine gültige Mobilnummer beim Kunden hinterlegt."
     auftrag_id = int(auftrag.get("id") or 0)
     fahrzeug = clean_text(auftrag.get("fahrzeug")) or "Ihr Fahrzeug"
-    bewertung_url = clean_text(get_app_setting("GOOGLE_BEWERTUNG_URL", ""))
-    bewertung_satz = (
-        f" Wenn Sie zufrieden sind, freuen wir uns riesig über eine Google-Bewertung: {bewertung_url}"
-        if bewertung_url
-        else ""
+    bewertung_url = clean_text(get_app_setting("GOOGLE_BEWERTUNG_URL", "")) or (
+        "https://www.google.com/maps/search/?api=1&query="
+        "G%C3%A4rtner+Karosserie+%26+Lack+GmbH+Binauer+H%C3%B6he+4+74821+Mosbach"
     )
     nachricht = (
-        f"Guten Tag, {fahrzeug} ist fertig und kann abgeholt werden.{bewertung_satz} "
+        f"Guten Tag, {fahrzeug} ist fertig und kann abgeholt werden. "
+        "Ein kleines Feedback würde uns sehr helfen. Wenn Sie zufrieden sind, "
+        f"freuen wir uns über Ihre Google-Bewertung: {bewertung_url} "
         "Ihr Team von Gärtner Karosserie & Lack, Binauer Höhe 4, 74821 Mosbach, Tel. +49 1522 7706694."
     )
     ok, errors = send_whatsapp_notice_with_fallback(
