@@ -367,6 +367,16 @@
             <div class="text-muted small mt-2">Kein automatischer Versand: WhatsApp öffnet mit vorbereitetem Text. Bitte nur senden, wenn der Kunde den Kanal wünscht.</div>
             {% elif auftrag['kunden_whatsapp_status']['whatsapp_consent_required'] and not auftrag['kunden_whatsapp_status']['whatsapp_consent_allowed'] %}
             <div class="text-muted small mt-2">Keine gültige WhatsApp-Einwilligung für die aktuelle Mobilnummer dokumentiert.</div>
+            {% if auftrag['kunden_whatsapp_status']['is_mobile'] %}
+            <form method="POST" action="{{ url_for('admin_whatsapp_einwilligung_bestaetigen', auftrag_id=auftrag['id']) }}" class="mt-3 p-3 rounded-3 border bg-light">
+              {{ csrf_field()|safe }}
+              <label class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" name="whatsapp_einwilligung_bestaetigt" value="1" required>
+                <span class="form-check-label small">Der Kunde hat WhatsApp für <strong>{{ auftrag['kontakt_telefon'] }}</strong> persönlich erlaubt.</span>
+              </label>
+              <button type="submit" class="btn btn-sm btn-success">WhatsApp für diese Nummer freigeben</button>
+            </form>
+            {% endif %}
             {% elif auftrag['kontakt_telefon'] %}
             <div class="text-muted small mt-2">Die hinterlegte Nummer wirkt nicht wie eine Handynummer. Für WhatsApp bitte eine Mobilnummer eintragen.</div>
             {% else %}

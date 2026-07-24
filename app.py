@@ -10989,6 +10989,36 @@ def customer_whatsapp_consent_state(auftrag):
     }
 
 
+def bestaetige_customer_whatsapp_einwilligung(auftrag_id):
+    """Dokumentiert eine persönlich bestätigte Einwilligung für die aktuelle Mobilnummer."""
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        raise ValueError("Auftrag wurde nicht gefunden.")
+    telefon = clean_text(auftrag.get("kontakt_telefon"))
+    if not is_probable_mobile_number(telefon):
+        raise ValueError("Für WhatsApp ist eine gültige Mobilnummer erforderlich.")
+    intake = parse_schadenaufnahme_json(auftrag.get("schaden_aufnahme_json"))
+    jetzt = now_str()
+    intake["kontaktweg"] = "whatsapp"
+    intake["kontaktweg_label"] = "WhatsApp"
+    intake["whatsapp_kontakt_gewuenscht"] = True
+    intake["whatsapp_einwilligung"] = True
+    intake["whatsapp_einwilligung_am"] = jetzt
+    intake["whatsapp_einwilligung_telefon_key"] = whatsapp_number_key(telefon)
+    intake["whatsapp_einwilligung_quelle"] = "werkstatt-nachtraeglich-bestaetigt"
+    intake["whatsapp_verifizierung_status"] = "bestaetigt"
+    intake["kontakt_verifiziert_am"] = jetzt
+    intake["kontakt_verifiziert_quelle"] = "werkstatt-nachtraeglich-bestaetigt"
+    db = get_db()
+    db.execute(
+        "UPDATE auftraege SET schaden_aufnahme_json=?, geaendert_am=? WHERE id=?",
+        (json.dumps(intake, ensure_ascii=False), jetzt, int(auftrag_id)),
+    )
+    db.commit()
+    db.close()
+    return telefon
+
+
 def customer_whatsapp_url(auftrag, message=None):
     consent = customer_whatsapp_consent_state(auftrag)
     phone_key = whatsapp_number_key((auftrag or {}).get("kontakt_telefon"))
@@ -43803,6 +43833,31 @@ def status_update(auftrag_id, neuer_status):
             ziel = f"{ziel.split('#', 1)[0]}#kundenkommunikation"
         return redirect(ziel)
     return redirect(request.referrer or url_for("auftrag_detail", auftrag_id=auftrag_id))
+
+
+@app.route("/admin/auftrag/<int:auftrag_id>/whatsapp-einwilligung", methods=["POST"])
+@admin_required
+def admin_whatsapp_einwilligung_bestaetigen(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+    if clean_text(request.form.get("whatsapp_einwilligung_bestaetigt")) != "1":
+        flash("Bitte die persönliche WhatsApp-Einwilligung zuerst bestätigen.", "warning")
+        return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
+    try:
+        telefon = bestaetige_customer_whatsapp_einwilligung(auftrag_id)
+    except ValueError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
+    add_benachrichtigung(
+        auftrag_id,
+        "WhatsApp-Einwilligung bestätigt",
+        f"Die persönliche Einwilligung für {telefon} wurde durch die Werkstatt dokumentiert.",
+        quelle="werkstatt",
+    )
+    schedule_change_backup("customer-whatsapp-consent-confirmed")
+    flash("WhatsApp ist für die aktuelle Mobilnummer freigegeben.", "success")
+    return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
 
 
 @app.route("/admin/auftrag/<int:auftrag_id>/reklamation-neu-planen", methods=["POST"])
