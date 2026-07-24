@@ -336,7 +336,8 @@ SCHADEN_MAIL_ADDRESS = (
     or ""
 ).strip()
 WEBSITE_LEAD_NOTIFICATION_EMAIL = (
-    os.environ.get("WEBSITE_LEAD_NOTIFICATION_EMAIL") or ""
+    os.environ.get("WEBSITE_LEAD_NOTIFICATION_EMAIL")
+    or "info@auto-lackierzentrum.de"
 ).strip()
 SCHADEN_MAIL_DISPLAY_NAME = (
     os.environ.get("SCHADEN_MAIL_DISPLAY_NAME")
@@ -25490,11 +25491,110 @@ def send_versicherung_nachtragmail(auftrag_id, prozess_key, note=""):
 
 AUTOHAUS_MAIL_TESTLOG = []
 WEBSITE_LEAD_MAIL_TESTLOG = []
+PUBLIC_REQUEST_MAIL_TESTLOG = []
+
+
+def sende_oeffentliche_anfrage_benachrichtigung(
+    kategorie,
+    vorgang_id,
+    betreff,
+    zeilen,
+    kunden_email="",
+    admin_pfad="",
+):
+    """Benachrichtigt die zentrale Werkstatt-Adresse über öffentliche Formulare.
+
+    Die Daten sind zu diesem Zeitpunkt bereits gespeichert. Ein Mailfehler wird
+    deshalb nur protokolliert und kann niemals die Anfrage zurückrollen.
+    """
+    try:
+        config = get_schaden_mail_config()
+        empfaenger = parse_email_recipients(WEBSITE_LEAD_NOTIFICATION_EMAIL)
+        test_eintrag = {
+            "kategorie": clean_text(kategorie),
+            "vorgang_id": int(vorgang_id),
+            "betreff": clean_text(betreff),
+            "empfaenger": empfaenger,
+        }
+        if app.config.get("TESTING"):
+            PUBLIC_REQUEST_MAIL_TESTLOG.append(test_eintrag)
+            return
+        if not empfaenger:
+            print(f"WARNUNG: Öffentliche Anfrage ohne Mail-Empfänger: {kategorie} {vorgang_id}")
+            return
+        if not config["smtp_configured"]:
+            print(f"WARNUNG: Öffentliche Anfrage-Mail nicht gesendet (SMTP fehlt): {kategorie} {vorgang_id}")
+            return
+
+        admin_link = f"{PORTAL_BASE_URL}{admin_pfad}" if PORTAL_BASE_URL and admin_pfad else ""
+        inhalt = list(zeilen or [])
+        if admin_link:
+            inhalt += ["", f"Direkt im Cockpit öffnen: {admin_link}"]
+        inhalt += ["", "Diese Nachricht wurde automatisch von der Homepage gesendet."]
+
+        message = EmailMessage()
+        message["Subject"] = clean_text(betreff)
+        message["From"] = formataddr((config["display_name"], config["from_address"]))
+        message["To"] = ", ".join(empfaenger)
+        reply_to = clean_text(kunden_email).lower()
+        message["Reply-To"] = reply_to or clean_text(config.get("reply_to"))
+        message["X-Gaertner-Public-Request"] = f"{clean_text(kategorie)}-{int(vorgang_id)}"
+        message.set_content("\n".join(clean_text(zeile) for zeile in inhalt))
+        add_standard_mail_headers(message)
+
+        def _senden():
+            try:
+                if config["smtp_ssl"]:
+                    smtp_context = smtplib.SMTP_SSL(
+                        config["smtp_host"], config["smtp_port"],
+                        local_hostname=smtp_lokaler_hostname(), timeout=30,
+                    )
+                else:
+                    smtp_context = smtplib.SMTP(
+                        config["smtp_host"], config["smtp_port"],
+                        local_hostname=smtp_lokaler_hostname(), timeout=30,
+                    )
+                with smtp_context as smtp:
+                    if not config["smtp_ssl"] and config["smtp_tls"]:
+                        smtp.starttls()
+                    smtp.login(config["smtp_user"], config["_smtp_password"])
+                    smtp.send_message(message)
+            except Exception as exc:
+                print(
+                    "WARNUNG: Öffentliche Anfrage-Mail konnte nicht gesendet werden: "
+                    f"{clean_text(str(exc))[:300]}"
+                )
+
+        threading.Thread(target=_senden, daemon=True).start()
+    except Exception as exc:
+        print(
+            "WARNUNG: Öffentliche Anfrage-Mail-Vorbereitung fehlgeschlagen: "
+            f"{clean_text(str(exc))[:300]}"
+        )
 
 
 def sende_website_lead_benachrichtigung(lead_id, payload, anliegen_label=""):
     """Benachrichtigt die Werkstatt still im Hintergrund über Homepage-Leads."""
     try:
+        if not app.config.get("TESTING"):
+            sende_oeffentliche_anfrage_benachrichtigung(
+                "homepage-lead",
+                lead_id,
+                f"Neue Homepage-Anfrage: {clean_text(anliegen_label) or 'Allgemein'} – {clean_text(payload.get('kunde_name')) or 'Ohne Namen'}",
+                [
+                    "Eine neue Anfrage ist über die Homepage eingegangen.",
+                    "",
+                    f"Anliegen: {clean_text(anliegen_label) or 'Allgemein'}",
+                    f"Name: {clean_text(payload.get('kunde_name')) or 'Ohne Namen'}",
+                    f"Telefon: {clean_text(payload.get('kontakt_telefon')) or '-'}",
+                    f"E-Mail: {clean_text(payload.get('kunde_email')) or '-'}",
+                    f"Fahrzeug: {clean_text(payload.get('fahrzeug')) or '-'}",
+                    f"Angaben: {clean_text(payload.get('beschreibung')) or '-'}",
+                ],
+                kunden_email=payload.get("kunde_email"),
+                admin_pfad=f"/admin/leads/{int(lead_id)}",
+            )
+            return
         config = get_schaden_mail_config()
         empfaenger = parse_email_recipients(
             WEBSITE_LEAD_NOTIFICATION_EMAIL or config.get("address")
@@ -39077,6 +39177,26 @@ def create_schadenaufnahme_from_assistent(payload, files, autohaus=None, public_
         if partner_mode
         else ("privat-schadenaufnahme-assistent" if public_mode else "schadenaufnahme-assistent")
     )
+    if public_mode:
+        sende_oeffentliche_anfrage_benachrichtigung(
+            "schadenmeldung",
+            auftrag_id,
+            f"Neue Schadenmeldung – {clean_text(payload.get('kunde_name')) or 'Ohne Namen'}",
+            [
+                "Eine neue Schadenmeldung ist über die Homepage eingegangen.",
+                "",
+                f"Vorgang: {schadenaufnahme_referenz(auftrag_id)}",
+                f"Name: {clean_text(payload.get('kunde_name')) or '-'}",
+                f"Telefon: {clean_text(payload.get('kontakt_telefon')) or '-'}",
+                f"E-Mail: {clean_text(payload.get('kunde_email')) or '-'}",
+                f"Fahrzeug: {clean_text(payload.get('fahrzeug')) or '-'}",
+                f"Kennzeichen: {clean_text(payload.get('kennzeichen')) or '-'}",
+                f"Schadenart: {clean_text(payload.get('schadenart')) or '-'}",
+                f"Beschreibung: {clean_text(payload.get('beschreibung')) or '-'}",
+            ],
+            kunden_email=payload.get("kunde_email"),
+            admin_pfad=f"/admin/auftrag/{int(auftrag_id)}",
+        )
     return auftrag_id, warnings
 
 
@@ -47668,6 +47788,24 @@ def mietwagen_anfrage():
                 pass
             session["mietwagen_anfrage_ref"] = int(anfrage_id)
             schedule_change_backup("mietwagen-anfrage-erfolgreich")
+            sende_oeffentliche_anfrage_benachrichtigung(
+                "mietwagenanfrage",
+                anfrage_id,
+                f"Neue Mietwagenanfrage – {name}",
+                [
+                    "Eine neue Mietwagenanfrage ist über die Homepage eingegangen.",
+                    "",
+                    f"Anfrage: MW-{int(anfrage_id)}",
+                    f"Name: {name}",
+                    f"Telefon: {telefon}",
+                    f"E-Mail: {email or '-'}",
+                    f"Zeitraum: {zeitraum or '-'}",
+                    f"Wunschfahrzeug: {fahrzeug_label or clean_text(request.form.get('klasse_wunsch')) or 'Beratung'}",
+                    f"Nachricht: {clean_text(request.form.get('nachricht')) or '-'}",
+                ],
+                kunden_email=email,
+                admin_pfad="/admin/mietfahrzeuge",
+            )
             return redirect(url_for("mietwagen_anfrage", ok=1, anfrage=anfrage_id))
     try:
         vorauswahl = int(request.form.get("mietfahrzeug_id") or request.args.get("fahrzeug") or 0)
