@@ -10889,7 +10889,14 @@ def kunden_status_url(auftrag, force_request_host=False):
     token = clean_text((auftrag or {}).get("kunden_status_token"))
     if not token:
         return ""
-    base = get_request_base_url() if force_request_host else get_public_base_url()
+    # Kundenstatus und QR-Code müssen auf dem persistenten Portal-Dienst
+    # liegen. Die getrennte Homepage besitzt keine Auftragsdatenbank und kann
+    # einen gültigen Bearer-Token deshalb nicht selbst auflösen.
+    base = (
+        get_request_base_url()
+        if force_request_host
+        else (PORTAL_BASE_URL or get_public_base_url())
+    )
     path = url_for("kunden_status", token=token) if has_request_context() else f"/status/{token}"
     return f"{base}{path}" if base and path.startswith("/") else path
 
