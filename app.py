@@ -16675,6 +16675,17 @@ def prepare_archivierte_bonus_auftraege(auftraege):
             auftrag["letzter_termin_obj"] = date.min
             auftrag["letzter_termin_label"] = ""
         archivierte.append(auftrag)
+
+    dateien_by_auftrag = list_dateien_for_auftraege(
+        [auftrag.get("id") for auftrag in archivierte]
+    )
+    for auftrag in archivierte:
+        auftrag["rechnungsdateien"] = [
+            datei
+            for datei in dateien_by_auftrag.get(int(auftrag.get("id") or 0), [])
+            if clean_text(datei.get("kategorie")) in {"rechnung", "bonusrechnung"}
+        ]
+
     archivierte.sort(
         key=lambda item: (
             item.get("letzter_termin_obj") or date.min,

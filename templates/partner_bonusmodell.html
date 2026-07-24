@@ -254,6 +254,19 @@
                 <div class="small text-muted">Nach dem Upload aktualisiert sich der Bonus.</div>
                 {% endif %}
                 {% if a['rechnung_nummer'] %}<div class="archive-bonus-note">Rechnung {{ a['rechnung_nummer'] }}</div>{% endif %}
+                {% if a['rechnungsdateien'] %}
+                <div class="d-grid gap-2 mt-2">
+                  {% for rechnung in a['rechnungsdateien'] %}
+                  <div>
+                    <div class="archive-bonus-note text-truncate" title="{{ rechnung['original_name'] }}">{{ rechnung['original_name'] }}</div>
+                    <div class="d-flex gap-2 flex-wrap mt-1">
+                      <a href="{{ url_for('partner_datei', slug=autohaus['slug'], datei_id=rechnung['id']) }}" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Ansehen</a>
+                      <a href="{{ url_for('partner_datei_download', slug=autohaus['slug'], datei_id=rechnung['id']) }}" class="btn btn-outline-dark btn-sm">Herunterladen</a>
+                    </div>
+                  </div>
+                  {% endfor %}
+                </div>
+                {% endif %}
               </td>
               <td>
                 <form method="POST" action="{{ url_for('partner_bonusrechnung_upload', slug=autohaus['slug'], auftrag_id=a['id']) }}" enctype="multipart/form-data" class="archive-invoice-form">
