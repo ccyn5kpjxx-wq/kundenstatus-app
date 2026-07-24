@@ -9830,6 +9830,7 @@ def init_db():
             klasse_wunsch  TEXT DEFAULT '',
             start_datum    TEXT DEFAULT '',
             end_datum      TEXT DEFAULT '',
+            geplante_km    INTEGER DEFAULT 0,
             nachricht      TEXT DEFAULT '',
             quelle         TEXT DEFAULT 'homepage',
             mietfahrzeug_id INTEGER DEFAULT 0,
@@ -9844,6 +9845,7 @@ def init_db():
     ensure_column(db, "mietwagen_anfragen", "mietfahrzeug_id", "INTEGER DEFAULT 0")
     ensure_column(db, "mietwagen_anfragen", "whatsapp_status", "TEXT DEFAULT ''")
     ensure_column(db, "mietwagen_anfragen", "whatsapp_erlaubt", "INTEGER DEFAULT 0")
+    ensure_column(db, "mietwagen_anfragen", "geplante_km", "INTEGER DEFAULT 0")
     ensure_column(db, "mietfahrzeuge", "archiviert_am", "TEXT DEFAULT ''")
     ensure_column(db, "mietfahrzeuge", "archivgrund", "TEXT DEFAULT ''")
     db.execute(
@@ -47763,6 +47765,10 @@ def mietwagen_anfrage():
         start_datum = clean_text(request.form.get("start_datum"))
         end_datum = clean_text(request.form.get("end_datum"))
         try:
+            geplante_km = int(request.form.get("geplante_km") or 0)
+        except (TypeError, ValueError):
+            geplante_km = 0
+        try:
             wunsch_fahrzeug_id = int(request.form.get("mietfahrzeug_id") or 0)
         except (TypeError, ValueError):
             wunsch_fahrzeug_id = 0
@@ -47781,6 +47787,8 @@ def mietwagen_anfrage():
             flash("Bitte eine gültige E-Mail-Adresse angeben oder das Feld leer lassen.", "warning")
         elif zeitraum_fehler:
             flash(zeitraum_fehler, "warning")
+        elif geplante_km < 1 or geplante_km > 100000:
+            flash("Bitte die ungefähr geplanten Kilometer im Mietzeitraum angeben.", "warning")
         elif wunsch_fahrzeug_id and not any(f["id"] == wunsch_fahrzeug_id for f in fahrzeuge):
             flash("Das ausgewählte Fahrzeug ist nicht mehr öffentlich verfügbar.", "warning")
         elif wunsch_fahrzeug_id and not mietfahrzeug_zeitraum_frei(
@@ -47793,8 +47801,8 @@ def mietwagen_anfrage():
                 """
                 INSERT INTO mietwagen_anfragen
                     (status, name, telefon, whatsapp_erlaubt, email, klasse_wunsch,
-                     start_datum, end_datum, nachricht, quelle, mietfahrzeug_id, erstellt_am)
-                VALUES ('offen', ?, ?, ?, ?, ?, ?, ?, ?, 'homepage', ?, ?)
+                     start_datum, end_datum, geplante_km, nachricht, quelle, mietfahrzeug_id, erstellt_am)
+                VALUES ('offen', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'homepage', ?, ?)
                 """,
                 (
                     name,
@@ -47804,6 +47812,7 @@ def mietwagen_anfrage():
                     clean_text(request.form.get("klasse_wunsch")),
                     start_datum,
                     end_datum,
+                    geplante_km,
                     clean_text(request.form.get("nachricht")),
                     wunsch_fahrzeug_id,
                     now_str(),
@@ -47820,9 +47829,10 @@ def mietwagen_anfrage():
             zeitraum = start_datum + (
                 f" bis {clean_text(request.form.get('end_datum'))}" if clean_text(request.form.get("end_datum")) else ""
             )
+            zeitraum_mit_km = f"{zeitraum} · ca. {geplante_km:,} km".replace(",", ".")
             if whatsapp_erlaubt:
                 wa_ok, wa_fehler = notify_workshop_whatsapp_mietanfrage(
-                    name, telefon, zeitraum, fahrzeug_label
+                    name, telefon, zeitraum_mit_km, fahrzeug_label
                 )
                 wa_status = "gesendet" if wa_ok else ("; ".join(wa_fehler)[:400] or "fehlgeschlagen")
             else:
@@ -47851,6 +47861,7 @@ def mietwagen_anfrage():
                     f"Telefon: {telefon}",
                     f"E-Mail: {email or '-'}",
                     f"Zeitraum: {zeitraum or '-'}",
+                    f"Geplante Fahrleistung: ca. {geplante_km:,} km".replace(",", "."),
                     f"Wunschfahrzeug: {fahrzeug_label or clean_text(request.form.get('klasse_wunsch')) or 'Beratung'}",
                     f"Nachricht: {clean_text(request.form.get('nachricht')) or '-'}",
                 ],
@@ -47999,6 +48010,7 @@ def admin_mietanfrage_uebernehmen(anfrage_id):
                 end_obj.strftime(DATE_FMT),
                 clean_text(
                     f"Homepage-Anfrage vom {anfrage['erstellt_am']}"
+                    + (f" · Geplant: ca. {int(anfrage['geplante_km'] or 0):,} km".replace(",", ".") if int(anfrage["geplante_km"] or 0) else "")
                     + (f" · Wunsch: {anfrage['klasse_wunsch']}" if anfrage["klasse_wunsch"] else "")
                     + (f" · {anfrage['nachricht']}" if anfrage["nachricht"] else "")
                 ),

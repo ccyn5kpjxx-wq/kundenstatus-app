@@ -124,6 +124,11 @@
           <label class="form-label" for="end_datum">Rückgabe am <span class="mw-pflicht">*</span></label>
           <input id="end_datum" class="form-control" type="date" name="end_datum" value="{{ formdata.get('end_datum', '') }}" min="{{ heute_iso }}" required>
         </div>
+        <div class="col-12 mt-2 mb-2">
+          <label class="form-label" for="geplante_km">Ungefähr geplante Kilometer im Zeitraum <span class="mw-pflicht">*</span></label>
+          <input id="geplante_km" class="form-control" type="number" name="geplante_km" value="{{ formdata.get('geplante_km', '') }}" min="1" max="100000" step="1" inputmode="numeric" placeholder="z. B. 500" aria-describedby="geplante-km-hinweis" required>
+          <div id="geplante-km-hinweis" class="form-text">Bitte schätzen Sie, wie viele Kilometer Sie während der gesamten Mietdauer fahren werden.</div>
+        </div>
       </div>
       </section>
       {% if fahrzeuge %}

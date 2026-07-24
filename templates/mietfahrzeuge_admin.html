@@ -70,6 +70,7 @@
         {% if anfrage.email %}&middot; <a href="mailto:{{ anfrage.email }}">{{ anfrage.email }}</a>{% endif %}
         <div class="text-muted" style="font-size: 0.88rem;">
           Zeitraum: <strong>{{ anfrage.start_datum }}</strong>{% if anfrage.end_datum %} bis <strong>{{ anfrage.end_datum }}</strong>{% endif %}
+          {% if anfrage.geplante_km %} &middot; geplant: <strong>ca. {{ '{:,.0f}'.format(anfrage.geplante_km).replace(',', '.') }} km</strong>{% endif %}
           {% if anfrage.klasse_wunsch %} &middot; Wunsch: {{ anfrage.klasse_wunsch }}{% endif %}
           &middot; eingegangen {{ anfrage.erstellt_am }}
         </div>

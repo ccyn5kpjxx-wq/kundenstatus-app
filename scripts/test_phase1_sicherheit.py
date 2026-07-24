@@ -526,6 +526,7 @@ def test_anfrage_backup_und_datenschutz(suite: Suite) -> None:
                 "email": "anfrage@example.test",
                 "start_datum": start.isoformat(),
                 "end_datum": ende.isoformat(),
+                "geplante_km": "600",
                 "klasse_wunsch": "Kleinwagen",
                 "nachricht": "Bitte telefonisch melden.",
             },
@@ -554,6 +555,11 @@ def test_anfrage_backup_und_datenschutz(suite: Suite) -> None:
         anfrage is not None
         and not int(anfrage["whatsapp_erlaubt"] or 0)
         and anfrage["whatsapp_status"] == "nicht angefordert",
+    )
+    suite.check(
+        "Geplante Kilometer werden mit der Mietwagenanfrage gespeichert",
+        anfrage is not None and int(anfrage.get("geplante_km") or 0) == 600,
+        f"gespeichert: {(anfrage or {}).get('geplante_km')}",
     )
 
     fahrzeug_id = portal.create_mietfahrzeug(
