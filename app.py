@@ -47615,6 +47615,17 @@ def notify_workshop_whatsapp_mietanfrage(name, telefon, zeitraum, fahrzeug_label
 
 def mietwagen_public_fahrzeuge():
     """Aktive Mietfahrzeuge mit Titelbild und belegten Zeiträumen für die öffentliche Seite."""
+    def bild_von_vermietungsseite(bezeichnung):
+        name = clean_text(bezeichnung).lower().replace("ò", "o")
+        if "hyundai i10" in name:
+            return "https://dmassets.hyundai.com/is/image/hyundaiautoever/HME_AC3_ICE_EViz_EXT_PM2_MetaBluePearl_52910K7500_SHOT4-1:16x9?wid=1600&hei=900&fmt=webp&qlt=85&fit=wrap,1"
+        if "hyundai kona" in name:
+            return "https://dmassets.hyundai.com/is/image/hyundaiautoever/HYU_SX2_HEV-NLine_EViz_Env_R2P-Ultimate_Red_Metallic_C02:16x9?wid=1600&hei=900&fmt=webp&qlt=85&fit=wrap,1"
+        if "fiat doblo maxi" in name:
+            return "/static/mietwagen_vorschau/fiat/qubo-l.jpg"
+        if "fiat doblo" in name:
+            return "/static/mietwagen_vorschau/fiat/qubo-l.jpg"
+        return ""
     fahrzeuge = []
     for f in list_mietfahrzeuge(include_inactive=False):
         if clean_text(f.get("basis_status")) in {"wartung", "inaktiv"}:
@@ -47640,13 +47651,16 @@ def mietwagen_public_fahrzeuge():
                     tagessatz = f"{satz:.2f}".replace(".", ",")
         except (TypeError, ValueError):
             tagessatz = clean_text(str(f.get("tagessatz") or ""))
+        bezeichnung = clean_text(f.get("bezeichnung")) or clean_text(f.get("fahrzeugklasse")) or "Mietwagen"
+        bild_url = bild_von_vermietungsseite(bezeichnung)
         fahrzeuge.append(
             {
                 "id": f["id"],
-                "bezeichnung": clean_text(f.get("bezeichnung")) or clean_text(f.get("fahrzeugklasse")) or "Mietwagen",
+                "bezeichnung": bezeichnung,
                 "fahrzeugklasse": clean_text(f.get("fahrzeugklasse")),
                 "tagessatz": tagessatz,
                 "titelbild_id": titelbild_id,
+                "bild_url": bild_url,
                 "belegt": belegt,
                 "bald": clean_text(f.get("status")) == "bald",
             }
