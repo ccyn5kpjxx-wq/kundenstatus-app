@@ -3,33 +3,69 @@
 {% block navbar %}{% endblock %}
 {% block extra_css %}
 <style>
-  .mw-wrap { max-width: 620px; margin: 2.5rem auto; }
+  .mw-wrap { max-width: 1080px; margin: 3rem auto 4rem; padding: 0 1rem; }
   .mw-card {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 1.6rem;
-    box-shadow: 0 8px 26px rgba(22, 32, 42, 0.08);
+    background: #fffdf9;
+    border: 1px solid rgba(81, 58, 38, .14);
+    border-radius: 28px;
+    padding: clamp(1.35rem, 4vw, 3.25rem);
+    box-shadow: 0 24px 70px rgba(45, 31, 20, .11);
   }
-  .mw-card h1 { font-size: 1.5rem; }
+  .mw-intro { max-width: 760px; margin-bottom: 2rem; }
+  .mw-kicker { color: var(--brand); font-size: .78rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; margin-bottom: .55rem; }
+  .mw-card h1 { font-size: clamp(2rem, 5vw, 3.55rem); line-height: .98; letter-spacing: -.045em; margin-bottom: .85rem; }
+  .mw-lead { max-width: 720px; color: #675e56; font-size: 1.05rem; line-height: 1.65; }
+  .mw-benefits { display: flex; gap: .65rem; flex-wrap: wrap; margin-top: 1.25rem; }
+  .mw-benefit { display: inline-flex; align-items: center; gap: .45rem; border: 1px solid #e7d9ca; background: #f8f2ea; border-radius: 999px; padding: .55rem .8rem; color: #493f36; font-size: .82rem; font-weight: 700; }
+  .mw-benefit::before { content: "✓"; display: grid; place-items: center; width: 1.2rem; height: 1.2rem; border-radius: 50%; background: var(--brand); color: #fff; font-size: .7rem; }
+  .mw-section { border-top: 1px solid #eadfd3; padding-top: 1.65rem; margin-top: 1.65rem; }
+  .mw-section-title { display: flex; align-items: center; gap: .7rem; margin: 0 0 1rem; font-size: 1.15rem; font-weight: 800; color: #2c2722; }
+  .mw-step { display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: #28231f; color: white; font-size: .78rem; }
   .mw-pflicht { color: var(--brand); }
-  .mw-hinweis { background: var(--panel-soft); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.9rem; font-size: 0.88rem; }
-  .mw-sendbtn { background: var(--brand); border: none; color: #fff; font-weight: 700; padding: 0.6rem 1.4rem; border-radius: 8px; }
+  .mw-card .form-label { font-weight: 750; margin-bottom: .45rem; color: #302a25; }
+  .mw-card .form-control, .mw-card .form-select { min-height: 50px; border: 1px solid #ded4ca; border-radius: 12px; background-color: #fff; padding: .7rem .85rem; box-shadow: none; }
+  .mw-card textarea.form-control { min-height: 105px; resize: vertical; }
+  .mw-card .form-control:focus, .mw-card .form-select:focus { border-color: var(--brand); box-shadow: 0 0 0 4px rgba(162, 63, 45, .11); }
+  .mw-card .form-text { color: #796f67; line-height: 1.45; }
+  .mw-hinweis { background: #f8f2ea; border: 1px solid #e7d9ca; border-radius: 14px; padding: .9rem 1rem; font-size: .86rem; line-height: 1.5; }
+  .mw-sendbtn { width: 100%; background: var(--brand); border: none; color: #fff; font-weight: 800; padding: .95rem 1.4rem; border-radius: 13px; box-shadow: 0 10px 24px rgba(162, 63, 45, .22); }
   .mw-sendbtn:hover { background: var(--brand-dark); color: #fff; }
   .mw-ok { text-align: center; padding: 2rem 1rem; }
   .mw-ok .mw-check { font-size: 3rem; color: var(--good); }
   .mw-honey { position: absolute; left: -9999px; opacity: 0; height: 0; overflow: hidden; }
-  .mw-cars { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.7rem; margin-bottom: 0.6rem; }
-  .mw-car { position: relative; border: 2px solid var(--line); border-radius: 10px; background: #fff; overflow: hidden; cursor: pointer; display: block; }
+  .mw-cars { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-bottom: .8rem; }
+  .mw-car { position: relative; min-height: 100%; border: 1px solid #ded3c7; border-radius: 18px; background: #fff; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+  .mw-car:hover { transform: translateY(-3px); border-color: #bda997; box-shadow: 0 14px 30px rgba(54, 38, 25, .1); }
   .mw-car input { position: absolute; opacity: 0; }
-  .mw-car .foto { aspect-ratio: 4 / 3; background: var(--panel-soft); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 0.8rem; }
-  .mw-car .foto img { width: 100%; height: 100%; object-fit: cover; }
-  .mw-car .info { padding: 0.45rem 0.6rem 0.55rem; }
-  .mw-car .name { font-weight: 700; font-size: 0.88rem; line-height: 1.15; }
-  .mw-car .preis { color: var(--brand); font-weight: 800; font-size: 0.85rem; }
-  .mw-car .belegt { color: #b3261e; font-size: 0.72rem; line-height: 1.25; }
-  .mw-car:has(input:checked) { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(162, 63, 45, 0.18); }
+  .mw-car .foto { position: relative; aspect-ratio: 16 / 10; background: linear-gradient(145deg, #f5f0e9, #ebe3d9); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: .8rem; overflow: hidden; }
+  .mw-car .foto img { width: 100%; height: 100%; object-fit: contain; padding: .25rem; transition: transform .25s ease; }
+  .mw-car:hover .foto img { transform: scale(1.025); }
+  .mw-car .info { flex: 1; padding: .9rem 1rem 1rem; }
+  .mw-car .name { font-weight: 800; font-size: .94rem; line-height: 1.28; color: #26211d; }
+  .mw-car .preis { color: var(--brand); font-weight: 850; font-size: .88rem; margin-top: .25rem; }
+  .mw-car .belegt { color: #a02f22; font-size: .76rem; line-height: 1.35; margin-top: .3rem; }
+  .mw-car:has(input:checked) { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(162, 63, 45, .16), 0 16px 32px rgba(54, 38, 25, .1); }
+  .mw-car:has(input:checked)::after { content: "✓"; position: absolute; top: .7rem; right: .7rem; display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 900; box-shadow: 0 4px 12px rgba(0,0,0,.18); }
   .mw-car:focus-within { outline: 3px solid #0b6efd; outline-offset: 3px; }
+  .mw-advice .foto { padding: 1.2rem; text-align: center; }
+  .mw-advice-mark { display: grid; place-items: center; width: 3.4rem; height: 3.4rem; border-radius: 18px; background: #2c2722; color: white; font-size: 1.45rem; font-weight: 800; }
+  .mw-submit-area { max-width: 660px; margin: 1.5rem auto 0; }
+
+  @media (max-width: 820px) {
+    .mw-wrap { margin-top: 1.25rem; }
+    .mw-card { border-radius: 20px; }
+    .mw-cars { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 560px) {
+    .mw-wrap { padding: 0 .55rem; }
+    .mw-card { padding: 1.15rem; border-radius: 16px; }
+    .mw-card h1 { font-size: 2.15rem; }
+    .mw-benefit { width: 100%; }
+    .mw-cars { grid-template-columns: 1fr; }
+    .mw-car { display: grid; grid-template-columns: 42% 58%; min-height: 132px; }
+    .mw-car .foto { aspect-ratio: auto; min-height: 132px; }
+    .mw-car .info { display: flex; flex-direction: column; justify-content: center; }
+  }
 </style>
 {% endblock %}
 {% block content %}
@@ -46,11 +82,21 @@
       <p class="text-muted">Gärtner GmbH Karosserie + Lack &middot; Binauer Höhe 4, 74821 Mosbach &middot; +49 1522 7706694</p>
     </div>
     {% else %}
-    <h1>Mietwagen anfragen</h1>
-    <p class="text-muted">Kurz ausfüllen — wir prüfen Fahrzeug und Zeitraum und melden uns mit einer gesonderten Rückmeldung zu Verfügbarkeit, Preis und weiterem Ablauf.</p>
+    <div class="mw-intro">
+      <div class="mw-kicker">Mobil bleiben in Mosbach</div>
+      <h1>Mietwagen einfach anfragen.</h1>
+      <p class="mw-lead">Fahrzeug und Zeitraum auswählen – wir prüfen die Verfügbarkeit persönlich und melden uns mit Preis und den nächsten Schritten.</p>
+      <div class="mw-benefits" aria-label="Vorteile">
+        <span class="mw-benefit">Unverbindliche Anfrage</span>
+        <span class="mw-benefit">Persönliche Rückmeldung</span>
+        <span class="mw-benefit">Keine Online-Zahlung</span>
+      </div>
+    </div>
     <form method="post" action="{{ url_for('mietwagen_anfrage') }}" data-mietzeitraum>
       {{ csrf_field()|safe }}
       <div class="mw-honey" aria-hidden="true"><label for="website">Website</label><input id="website" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"></div>
+      <section class="mw-section" aria-labelledby="mw-kontakt-title">
+      <h2 class="mw-section-title" id="mw-kontakt-title"><span class="mw-step">1</span> Kontaktdaten</h2>
       <div class="mb-2">
         <label class="form-label" for="name">Ihr Name <span class="mw-pflicht">*</span></label>
         <input id="name" class="form-control" type="text" name="name" value="{{ formdata.get('name', '') }}" autocomplete="name" required>
@@ -66,6 +112,9 @@
           <input id="email" class="form-control" type="email" name="email" value="{{ formdata.get('email', '') }}" autocomplete="email">
         </div>
       </div>
+      </section>
+      <section class="mw-section" aria-labelledby="mw-zeitraum-title">
+      <h2 class="mw-section-title" id="mw-zeitraum-title"><span class="mw-step">2</span> Zeitraum</h2>
       <div class="row">
         <div class="col-md-6 mb-2">
           <label class="form-label" for="start_datum">Abholung am <span class="mw-pflicht">*</span></label>
@@ -76,14 +125,15 @@
           <input id="end_datum" class="form-control" type="date" name="end_datum" value="{{ formdata.get('end_datum', '') }}" min="{{ heute_iso }}" required>
         </div>
       </div>
+      </section>
       {% if fahrzeuge %}
-      <fieldset class="mb-2">
-        <legend class="form-label">Wunschfahrzeug aussuchen</legend>
+      <fieldset class="mw-section mb-2">
+        <legend class="mw-section-title"><span class="mw-step">3</span> Wunschfahrzeug auswählen</legend>
         <div class="mw-cars">
-          <label class="mw-car" for="mietfahrzeug-egal">
+          <label class="mw-car mw-advice" for="mietfahrzeug-egal">
             <input id="mietfahrzeug-egal" type="radio" name="mietfahrzeug_id" value="" {% if not vorauswahl %}checked{% endif %}>
-            <div class="foto">&#129300;</div>
-            <div class="info"><div class="name">Egal / beraten lassen</div><div class="preis">Wir schlagen vor</div></div>
+            <div class="foto"><span class="mw-advice-mark">?</span></div>
+            <div class="info"><div class="name">Beraten lassen</div><div class="preis">Wir schlagen das passende Fahrzeug vor</div></div>
           </label>
           {% for f in fahrzeuge %}
           <label class="mw-car" for="mietfahrzeug-{{ f.id }}">
@@ -100,6 +150,8 @@
         <div class="form-text">Rote Zeiträume sind schon vergeben — Ihr Wunschtermin muss außerhalb liegen.</div>
       </fieldset>
       {% endif %}
+      <section class="mw-section" aria-labelledby="mw-details-title">
+      <h2 class="mw-section-title" id="mw-details-title"><span class="mw-step">4</span> Wünsche &amp; Kontaktweg</h2>
       <div class="mb-2">
         <label class="form-label" for="klasse_wunsch">Fahrzeugklasse (falls „Egal")</label>
         <select id="klasse_wunsch" class="form-select" name="klasse_wunsch">
@@ -116,8 +168,11 @@
         <label class="form-check-label" for="whatsapp_erlaubt">Ich wünsche Kontakt zu dieser Anfrage per WhatsApp.</label>
         <div class="form-text">Freiwillig. Ohne Häkchen kontaktieren wir Sie telefonisch oder – falls angegeben – per E-Mail und übermitteln Ihre Anfragedaten nicht für die WhatsApp-Benachrichtigung.</div>
       </div>
-      <button type="submit" class="mw-sendbtn">Anfrage senden</button>
-      <div class="mw-hinweis mt-3">Wir verarbeiten Ihre Angaben, um diese Mietwagenanfrage zu prüfen und Sie dazu zu kontaktieren. Mehr dazu in unserer <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>. Das Absenden allein ist noch keine Buchungsbestätigung; die weiteren Bedingungen stimmen wir gesondert mit Ihnen ab.</div>
+      </section>
+      <div class="mw-submit-area">
+        <button type="submit" class="mw-sendbtn">Verfügbarkeit unverbindlich anfragen</button>
+        <div class="mw-hinweis mt-3">Wir verarbeiten Ihre Angaben, um diese Mietwagenanfrage zu prüfen und Sie dazu zu kontaktieren. Mehr dazu in unserer <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>. Das Absenden allein ist noch keine Buchungsbestätigung; die weiteren Bedingungen stimmen wir gesondert mit Ihnen ab.</div>
+      </div>
     </form>
     {% endif %}
   </div>
