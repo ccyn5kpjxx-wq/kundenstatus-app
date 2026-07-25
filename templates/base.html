@@ -35,6 +35,27 @@
       min-height: 100vh;
     }
 
+    :focus-visible {
+      outline: 3px solid rgba(20, 93, 102, .48);
+      outline-offset: 3px;
+    }
+
+    .skip-link {
+      position: fixed;
+      z-index: 3000;
+      top: 10px;
+      left: 10px;
+      padding: .7rem 1rem;
+      border-radius: 10px;
+      color: #fff;
+      background: #16202a;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, .24);
+      transform: translateY(-150%);
+      transition: transform .15s ease;
+    }
+
+    .skip-link:focus { transform: translateY(0); }
+
     h1, h2, h3, h4, h5, h6, .navbar-brand span {
       font-family: "Space Grotesk", sans-serif;
       letter-spacing: -0.02em;
@@ -64,6 +85,13 @@
     .nav-link:hover {
       color: #fff !important;
       background: rgba(255, 255, 255, 0.1);
+    }
+
+    .nav-link.is-active,
+    .nav-link[aria-current="page"] {
+      color: #fff !important;
+      background: rgba(255, 255, 255, .14);
+      box-shadow: inset 0 -2px 0 #f1c232;
     }
 
     .nav-badge {
@@ -362,6 +390,7 @@
   {% block extra_css %}{% endblock %}
 </head>
 <body>
+<a class="skip-link" href="#hauptinhalt">Direkt zum Inhalt</a>
 {% set show_customer_news_overlay = not session.get('admin') %}
 <div class="analysis-overlay" data-analysis-overlay>
   <div class="analysis-card">
@@ -382,32 +411,36 @@
   </div>
 </div>
 {% block navbar %}
-<nav class="navbar navbar-expand-lg">
+{% set current_endpoint = request.endpoint or '' %}
+{% macro nav_class(endpoints) -%}nav-link{% if current_endpoint in endpoints %} is-active{% endif %}{%- endmacro %}
+{% macro nav_current(endpoints) -%}{% if current_endpoint in endpoints %} aria-current="page"{% endif %}{%- endmacro %}
+<nav class="navbar navbar-expand-lg" aria-label="Hauptnavigation">
   <div class="container py-2">
-    <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('betriebs_cockpit') }}">
-      <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
+    <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('betriebs_cockpit') }}" aria-label="Werkstatt-Cockpit Startseite">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Gärtner Karosserie &amp; Lack">
       <span>Werkstatt-Cockpit</span>
     </a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#hauptNavigation" aria-controls="hauptNavigation" aria-expanded="false" aria-label="Navigation umschalten">&#9776;</button>
     <div class="collapse navbar-collapse justify-content-lg-end" id="hauptNavigation">
     <div class="d-flex flex-column flex-lg-row align-items-lg-center gap-2 flex-wrap">
-      <a class="nav-link" href="{{ url_for('betriebs_cockpit') }}">Start</a>
-      <a class="nav-link" href="{{ url_for('admin_zahlen') }}">Zahlen</a>
-      <a class="nav-link" href="{{ url_for('admin_mahnungen') }}">Mahnungen{% set mahn_badge = mahnungen_faellig_count() %}{% if mahn_badge %}<span class="nav-badge" title="Fällige Mahnungen">{{ mahn_badge }}</span>{% endif %}</a>
-      <a class="nav-link" href="{{ url_for('admin_aufgaben') }}">Aufgaben{% set aufgaben_badge = aufgaben_offen_heute_count() %}{% if aufgaben_badge %}<span class="nav-badge is-alert" title="Offene Aufgaben heute">{{ aufgaben_badge }}</span>{% endif %}</a>
-      <a class="nav-link" href="{{ url_for('admin_news') }}">News</a>
-      <a class="nav-link" href="{{ url_for('admin_leads') }}">Leads{% set leads_badge = admin_leads_count() %}{% if leads_badge %}<span class="nav-badge is-alert" title="Neue oder aktive Leads">{{ leads_badge }}</span>{% endif %}</a>
-      <a class="nav-link" href="{{ url_for('admin_fahrzeugsuche') }}">Auktion{% set fs_alert_badge = fahrzeugsuche_auktion_alert_count() %}{% set fs_badge = fs_alert_badge or fahrzeugsuche_count() %}{% if fs_badge %}<span class="nav-badge {% if fs_alert_badge %}is-alert{% endif %}" title="{% if fs_alert_badge %}Auktion startet in Kürze{% else %}Aktive Auktionssuchen{% endif %}">{{ fs_badge }}</span>{% endif %}</a>
-      <a class="nav-link" href="{{ url_for('admin_fahrzeugverkauf') }}">Fahrzeugverkauf{% set fv_badge = fahrzeugverkauf_count() %}{% if fv_badge %}<span class="nav-badge">{{ fv_badge }}</span>{% endif %}</a>
-      <a class="nav-link" href="{{ url_for('admin_fahrzeugeinkauf') }}">Fahrzeugeinkauf{% set fein_badge = fahrzeugeinkauf_count() %}{% if fein_badge %}<span class="nav-badge" title="Interessant markierte Fahrzeuge">{{ fein_badge }}</span>{% endif %}</a>
-      <a class="nav-link" href="{{ url_for('admin_mietfahrzeuge') }}">Mietfahrzeuge{% set miet_anfr_badge = mietwagen_anfragen_count() %}{% set miet_badge = miet_anfr_badge or mietfahrzeuge_unterwegs_count() %}{% if miet_badge %}<span class="nav-badge {% if miet_anfr_badge %}is-alert{% endif %}" title="{% if miet_anfr_badge %}Neue Mietwagen-Anfragen von der Homepage{% else %}Aktuell vermietete Fahrzeuge{% endif %}">{{ miet_badge }}</span>{% endif %}</a>
-      <a class="nav-link" href="{{ url_for('admin_lieferanten') }}">Lieferanten</a>
-      <a class="nav-link" href="{{ url_for('dashboard') }}#auftraege">Lackierportal</a>
-      <a class="nav-link" href="{{ url_for('neuer_auftrag') }}">Fahrzeug neu</a>
-      <a class="nav-link" href="{{ url_for('admin_versicherungsschaden') }}">Versicherungsportal{% set versicherung_badge = admin_versicherung_count() %}{% if versicherung_badge %}<span class="nav-badge">{{ versicherung_badge }}</span>{% endif %}</a>
-      <a class="nav-link" href="{{ url_for('admin_postfach') }}">Postfach{% set postfach_badge = admin_postfach_count() %}{% if postfach_badge %}<span class="nav-badge">{{ postfach_badge }}</span>{% endif %}</a>
-      <a class="nav-link" href="{{ url_for('admin_zugaenge') }}">Zugänge</a>
-      <a class="nav-link" href="{{ url_for('partner_login') }}" target="_blank">Autohaus-Portal</a>
+      <a class="{{ nav_class(['betriebs_cockpit']) }}"{{ nav_current(['betriebs_cockpit']) }} href="{{ url_for('betriebs_cockpit') }}">Start</a>
+      <a class="{{ nav_class(['admin_zahlen']) }}"{{ nav_current(['admin_zahlen']) }} href="{{ url_for('admin_zahlen') }}">Zahlen</a>
+      <a class="{{ nav_class(['admin_besucherstatistik', 'admin_klickstatistik']) }}"{{ nav_current(['admin_besucherstatistik', 'admin_klickstatistik']) }} href="{{ url_for('admin_besucherstatistik') }}">Analytics</a>
+      <a class="{{ nav_class(['admin_mahnungen']) }}"{{ nav_current(['admin_mahnungen']) }} href="{{ url_for('admin_mahnungen') }}">Mahnungen{% set mahn_badge = mahnungen_faellig_count() %}{% if mahn_badge %}<span class="nav-badge" title="Fällige Mahnungen">{{ mahn_badge }}</span>{% endif %}</a>
+      <a class="{{ nav_class(['admin_aufgaben']) }}"{{ nav_current(['admin_aufgaben']) }} href="{{ url_for('admin_aufgaben') }}">Aufgaben{% set aufgaben_badge = aufgaben_offen_heute_count() %}{% if aufgaben_badge %}<span class="nav-badge is-alert" title="Offene Aufgaben heute">{{ aufgaben_badge }}</span>{% endif %}</a>
+      <a class="{{ nav_class(['admin_news']) }}"{{ nav_current(['admin_news']) }} href="{{ url_for('admin_news') }}">News</a>
+      <a class="{{ nav_class(['admin_leads']) }}"{{ nav_current(['admin_leads']) }} href="{{ url_for('admin_leads') }}">Leads{% set leads_badge = admin_leads_count() %}{% if leads_badge %}<span class="nav-badge is-alert" title="Neue oder aktive Leads">{{ leads_badge }}</span>{% endif %}</a>
+      <a class="{{ nav_class(['admin_fahrzeugsuche']) }}"{{ nav_current(['admin_fahrzeugsuche']) }} href="{{ url_for('admin_fahrzeugsuche') }}">Auktion{% set fs_alert_badge = fahrzeugsuche_auktion_alert_count() %}{% set fs_badge = fs_alert_badge or fahrzeugsuche_count() %}{% if fs_badge %}<span class="nav-badge {% if fs_alert_badge %}is-alert{% endif %}" title="{% if fs_alert_badge %}Auktion startet in Kürze{% else %}Aktive Auktionssuchen{% endif %}">{{ fs_badge }}</span>{% endif %}</a>
+      <a class="{{ nav_class(['admin_fahrzeugverkauf']) }}"{{ nav_current(['admin_fahrzeugverkauf']) }} href="{{ url_for('admin_fahrzeugverkauf') }}">Fahrzeugverkauf{% set fv_badge = fahrzeugverkauf_count() %}{% if fv_badge %}<span class="nav-badge">{{ fv_badge }}</span>{% endif %}</a>
+      <a class="{{ nav_class(['admin_fahrzeugeinkauf']) }}"{{ nav_current(['admin_fahrzeugeinkauf']) }} href="{{ url_for('admin_fahrzeugeinkauf') }}">Fahrzeugeinkauf{% set fein_badge = fahrzeugeinkauf_count() %}{% if fein_badge %}<span class="nav-badge" title="Interessant markierte Fahrzeuge">{{ fein_badge }}</span>{% endif %}</a>
+      <a class="{{ nav_class(['admin_mietfahrzeuge']) }}"{{ nav_current(['admin_mietfahrzeuge']) }} href="{{ url_for('admin_mietfahrzeuge') }}">Mietfahrzeuge{% set miet_anfr_badge = mietwagen_anfragen_count() %}{% set miet_badge = miet_anfr_badge or mietfahrzeuge_unterwegs_count() %}{% if miet_badge %}<span class="nav-badge {% if miet_anfr_badge %}is-alert{% endif %}" title="{% if miet_anfr_badge %}Neue Mietwagen-Anfragen von der Homepage{% else %}Aktuell vermietete Fahrzeuge{% endif %}">{{ miet_badge }}</span>{% endif %}</a>
+      <a class="{{ nav_class(['admin_lieferanten']) }}"{{ nav_current(['admin_lieferanten']) }} href="{{ url_for('admin_lieferanten') }}">Lieferanten</a>
+      <a class="{{ nav_class(['dashboard', 'auftrag_detail']) }}"{{ nav_current(['dashboard']) }} href="{{ url_for('dashboard') }}#auftraege">Lackierportal</a>
+      <a class="{{ nav_class(['neuer_auftrag']) }}"{{ nav_current(['neuer_auftrag']) }} href="{{ url_for('neuer_auftrag') }}">Fahrzeug neu</a>
+      <a class="{{ nav_class(['admin_versicherungsschaden']) }}"{{ nav_current(['admin_versicherungsschaden']) }} href="{{ url_for('admin_versicherungsschaden') }}">Versicherungsportal{% set versicherung_badge = admin_versicherung_count() %}{% if versicherung_badge %}<span class="nav-badge">{{ versicherung_badge }}</span>{% endif %}</a>
+      <a class="{{ nav_class(['admin_postfach']) }}"{{ nav_current(['admin_postfach']) }} href="{{ url_for('admin_postfach') }}">Postfach{% set postfach_badge = admin_postfach_count() %}{% if postfach_badge %}<span class="nav-badge">{{ postfach_badge }}</span>{% endif %}</a>
+      <a class="{{ nav_class(['admin_zugaenge']) }}"{{ nav_current(['admin_zugaenge']) }} href="{{ url_for('admin_zugaenge') }}">Zugänge</a>
+      <a class="nav-link" href="{{ url_for('partner_login') }}" target="_blank" rel="noopener">Autohaus-Portal</a>
       <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
     </div>
     </div>
@@ -415,13 +448,13 @@
 </nav>
 {% endblock %}
 
-<main class="hero-shell">
+<main class="hero-shell" id="hauptinhalt" tabindex="-1">
   <div class="container">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
         <div class="alert alert-{{ cat }} alert-dismissible fade show page-card mb-4" role="alert">
           {{ msg }}
-          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Meldung schließen"></button>
         </div>
       {% endfor %}
     {% endwith %}

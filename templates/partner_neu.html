@@ -1,4 +1,5 @@
 {% set form = form if form is defined else {} %}
+{% set selected_transport = form.get('transport_art', 'standard') %}
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -10,35 +11,242 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    body { background:#f4f1ea; font-family:"DM Sans",sans-serif; }
-    h1,h2,h3,h4,h5 { font-family:"Space Grotesk",sans-serif; }
-    .shell { max-width:1100px; margin:0 auto; padding:32px 16px; }
-    .panel { background:#fffdf9; border-radius:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
+    :root {
+      --ink: #17232e;
+      --muted: #66717a;
+      --paper: #fffdf9;
+      --canvas: #f4f1ea;
+      --soft: #faf6ef;
+      --line: #e2d6c5;
+      --line-strong: #c9b79f;
+      --accent: #b74432;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: "DM Sans", sans-serif;
+    }
+    h1, h2, h3, h4, h5 { font-family: "Space Grotesk", sans-serif; }
+    .skip-link {
+      position: fixed;
+      z-index: 1200;
+      top: 10px;
+      left: 10px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      color: #fff;
+      background: var(--ink);
+      transform: translateY(-160%);
+    }
+    .skip-link:focus { transform: translateY(0); }
+    :focus-visible {
+      outline: 3px solid rgba(183, 68, 50, .42);
+      outline-offset: 3px;
+    }
+    .shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 48px;
+    }
+    .panel {
+      padding: clamp(20px, 4vw, 42px);
+      overflow: visible;
+      border: 1px solid rgba(226, 214, 197, .82);
+      border-radius: 25px;
+      background: var(--paper);
+      box-shadow: 0 16px 40px rgba(64, 47, 25, .12);
+    }
+    .partner-form-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 22px;
+    }
+    .partner-form-header-copy { max-width: 760px; }
+    .eyebrow {
+      display: inline-flex;
+      margin-bottom: 10px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      color: #7b372c;
+      background: #f7e4df;
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .partner-form-header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(1.8rem, 4vw, 2.65rem);
+      line-height: 1.08;
+    }
+    .partner-form-header p { margin: 0; color: var(--muted); }
+    .template-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 26px;
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      background: var(--soft);
+    }
+    .template-card p { margin: 3px 0 0; color: var(--muted); font-size: .9rem; }
+    .template-actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .form-control,
     .form-select,
     .btn {
-      min-height:48px;
-      font-size:16px;
+      min-height: 48px;
+      font-size: 16px;
     }
-    textarea.form-control { min-height:112px; }
-    .mobile-actions { display:flex; gap:.75rem; flex-wrap:wrap; }
+    textarea.form-control { min-height: 118px; }
+    .vehicle-progress {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin: 0 0 28px;
+    }
+    .vehicle-progress-button {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 10px 13px;
+      border: 1px solid #ded1bf;
+      border-radius: 15px;
+      color: #5f6b74;
+      background: var(--soft);
+      text-align: left;
+      transition: border-color .18s ease, background .18s ease, color .18s ease;
+    }
+    .vehicle-progress-button:hover { border-color: #bcae9a; }
+    .vehicle-progress-button.is-active {
+      color: #fff;
+      border-color: var(--ink);
+      background: var(--ink);
+    }
+    .vehicle-progress-number {
+      width: 34px;
+      height: 34px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font-weight: 700;
+    }
+    .vehicle-progress-copy strong { display: block; line-height: 1.1; }
+    .vehicle-progress-copy span {
+      display: block;
+      margin-top: 3px;
+      font-size: .78rem;
+      opacity: .78;
+    }
+    .vehicle-wizard.is-enhanced .vehicle-step { display: none; }
+    .vehicle-wizard.is-enhanced .vehicle-step.is-active { display: block; }
+    .vehicle-step {
+      scroll-margin-top: 18px;
+      margin-bottom: 20px;
+      padding: clamp(18px, 3vw, 28px);
+      border: 1px solid var(--line);
+      border-radius: 19px;
+      background: var(--paper);
+    }
+    .vehicle-step-title {
+      margin-bottom: 22px;
+      padding-bottom: 17px;
+      border-bottom: 1px solid #eadfce;
+    }
+    .vehicle-step-title h2 {
+      margin: 0 0 5px;
+      font-size: clamp(1.35rem, 3vw, 1.75rem);
+    }
+    .vehicle-step-title p { margin: 0; color: var(--muted); }
+    .vehicle-upload-card {
+      height: 100%;
+      padding: 18px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 15px;
+      background: var(--soft);
+    }
+    .vehicle-upload-card .form-control { background: #fff; }
+    .vehicle-upload-status {
+      min-height: 1.3em;
+      margin-top: 8px;
+      color: #5c6871;
+      font-size: .84rem;
+    }
+    .vehicle-error {
+      display: none;
+      margin-top: 8px;
+      color: #a23528;
+      font-size: .86rem;
+      font-weight: 700;
+    }
+    .vehicle-error.is-visible { display: block; }
+    .transport-note {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: .86rem;
+    }
+    .sticky-form-actions {
+      position: sticky;
+      z-index: 25;
+      bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 22px;
+      padding: 12px;
+      border: 1px solid rgba(221, 209, 192, .95);
+      border-radius: 17px;
+      background: rgba(255, 253, 249, .96);
+      box-shadow: 0 14px 34px rgba(64, 47, 25, .16);
+      backdrop-filter: blur(14px);
+    }
+    .vehicle-action-group {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      flex-wrap: wrap;
+    }
+    .vehicle-step-status {
+      color: var(--muted);
+      font-size: .88rem;
+      font-weight: 700;
+    }
+    .btn-primary {
+      border-color: var(--ink);
+      background: var(--ink);
+    }
+    .btn-primary:hover,
+    .btn-primary:focus {
+      border-color: #263746;
+      background: #263746;
+    }
     .loading-overlay {
       position: fixed;
+      z-index: 1000;
       inset: 0;
       display: none;
       align-items: center;
       justify-content: center;
+      padding: 20px;
       background: rgba(24, 20, 14, .52);
       backdrop-filter: blur(3px);
-      z-index: 1000;
-      padding: 20px;
     }
     .loading-overlay.show { display: flex; }
     .loading-card {
       width: min(500px, 100%);
-      background: #fffdf9;
-      border-radius: 28px;
       padding: 28px;
+      border-radius: 28px;
+      background: var(--paper);
       box-shadow: 0 22px 60px rgba(24, 20, 14, .24);
       text-align: center;
     }
@@ -46,21 +254,19 @@
       width: 54px;
       height: 54px;
       margin: 0 auto 18px;
-      border-radius: 50%;
       border: 5px solid #e4d6c3;
       border-top-color: #1f3557;
+      border-radius: 50%;
       animation: spin 1s linear infinite;
     }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .loading-progress {
       width: 100%;
       height: 8px;
+      margin: 18px 0 22px;
+      overflow: hidden;
       border-radius: 999px;
       background: #eee2cf;
-      overflow: hidden;
-      margin: 18px 0 22px;
     }
     .loading-progress-bar {
       width: 42%;
@@ -75,62 +281,86 @@
       50% { transform: translateX(105%) scaleX(1.08); opacity: 1; }
       100% { transform: translateX(230%) scaleX(.72); opacity: .72; }
     }
-    .loading-status {
-      font-size: .95rem;
-      color: #6b6257;
-      margin-bottom: 18px;
-    }
+    .loading-status { margin-bottom: 18px; color: #6b6257; font-size: .95rem; }
     .loading-news {
-      text-align: left;
-      border: 1px solid #e4d6c3;
-      background: #f8f2e8;
-      border-radius: 18px;
       padding: 16px 18px;
+      border: 1px solid #e4d6c3;
+      border-radius: 18px;
+      background: #f8f2e8;
+      text-align: left;
     }
     .loading-news-kicker {
+      margin-bottom: 8px;
+      color: #8a6e46;
       font-size: .78rem;
       letter-spacing: .08em;
       text-transform: uppercase;
-      color: #8a6e46;
-      margin-bottom: 8px;
     }
     .loading-news-title {
-      font-family: "Space Grotesk", sans-serif;
-      font-size: 1rem;
       margin-bottom: 6px;
       color: #1f3557;
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 1rem;
     }
-    .loading-news-text {
-      color: #51463b;
-      line-height: 1.45;
-      min-height: 3.2em;
+    .loading-news-text { min-height: 3.2em; color: #51463b; line-height: 1.45; }
+    @media (min-width: 1050px) {
+      .partner-form-header { padding-right: 120px; }
+    }
+    @media (max-width: 767.98px) {
+      .shell { width: min(100% - 20px, 1120px); padding: 12px 0 28px; }
+      .panel { padding: 18px 14px; border-radius: 19px; }
+      .partner-form-header { display: block; }
+      .partner-form-header .btn { width: 100%; margin-top: 16px; }
+      .template-card { align-items: stretch; flex-direction: column; }
+      .template-actions,
+      .template-actions .btn { width: 100%; }
+      .vehicle-progress { grid-template-columns: 1fr; gap: 7px; margin-bottom: 22px; }
+      .vehicle-progress-button { min-height: 50px; }
+      .vehicle-progress-copy span { display: none; }
+      .vehicle-step { padding: 18px 14px; border-radius: 16px; }
+      .sticky-form-actions {
+        align-items: stretch;
+        flex-flow: row wrap;
+        bottom: 8px;
+      }
+      .vehicle-action-group { width: auto; flex: 1 1 0; }
+      .vehicle-action-group .btn { flex: 1 1 120px; }
+      .vehicle-step-status { order: -1; width: 100%; text-align: center; }
+      .loading-overlay { align-items: flex-start; overflow-y: auto; }
+      .loading-card { margin-top: 22px; padding: 22px 18px; border-radius: 20px; }
     }
     @media (max-width: 575.98px) {
-      .shell { padding:14px; }
-      .panel { padding:20px 16px; border-radius:18px; box-shadow:0 10px 28px rgba(64,47,25,.1); }
-      h1 { font-size:1.75rem; line-height:1.12; }
-      .loading-overlay { align-items:flex-start; overflow-y:auto; }
-      .loading-card { padding:22px 18px; border-radius:20px; margin-top:22px; }
-      .mobile-actions,
-      .mobile-actions .btn,
-      .panel .btn {
-        width:100%;
+      body .live-clock-widget {
+        position: static;
+        left: auto;
+        right: auto;
+        width: calc(100% - 20px);
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 10px auto 0;
+        padding: 9px 12px;
+        text-align: left;
       }
-      .file-control { padding-top:.75rem; padding-bottom:.75rem; }
+      body .live-clock-widget-label { display: none; }
+      body .live-clock-widget-time { margin: 0; font-size: 1.15rem; }
+      body .live-clock-widget-date { margin: 0; font-size: .78rem; text-align: right; }
     }
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#hauptinhalt">Direkt zur Fahrzeugerfassung</a>
   {% include "_live_clock_widget.html" %}
-  <div class="loading-overlay" data-loading-overlay>
+
+  <div class="loading-overlay" data-loading-overlay role="dialog" aria-modal="true" aria-labelledby="loading-title">
     <div class="loading-card">
-      <div class="spinner-ring"></div>
-      <h4 class="mb-2">Datei wird analysiert</h4>
-      <div class="text-muted" data-loading-text>Bitte kurz warten. Der Auftrag wird jetzt automatisch aus der Datei vorbereitet.</div>
-      <div class="loading-progress" aria-hidden="true">
-        <div class="loading-progress-bar"></div>
-      </div>
-      <div class="loading-status">Analyse läuft. Je nach PDF oder Bild kann das ein paar Sekunden dauern.</div>
+      <div class="spinner-ring" aria-hidden="true"></div>
+      <h2 class="h4 mb-2" id="loading-title">Daten werden verarbeitet</h2>
+      <div class="text-muted" data-loading-text>Bitte kurz warten. Der Auftrag wird vorbereitet.</div>
+      <div class="loading-progress" aria-hidden="true"><div class="loading-progress-bar"></div></div>
+      <div class="loading-status">Je nach PDF oder Bild kann die Analyse ein paar Sekunden dauern.</div>
       <div class="loading-news">
         <div class="loading-news-kicker">Werkstatt-News</div>
         <div class="loading-news-title" data-loading-news-title>Ab 27.04.2026: neue ION-7 im Einsatz</div>
@@ -138,189 +368,314 @@
       </div>
     </div>
   </div>
-  <div class="shell">
+
+  <main class="shell" id="hauptinhalt" tabindex="-1">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
-      <div class="alert alert-{{ cat }} mb-4">{{ msg }}</div>
+      <div class="alert alert-{{ cat }} mb-3" role="alert">{{ msg }}</div>
       {% endfor %}
     {% endwith %}
-    <div class="panel">
-      <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+
+    <section class="panel" aria-labelledby="partner-vehicle-title">
+      <header class="partner-form-header">
+        <div class="partner-form-header-copy">
+          <div class="eyebrow">Fahrzeug übermitteln</div>
+          <h1 id="partner-vehicle-title">Neues Fahrzeug für {{ autohaus['portal_label'] }}</h1>
+          <p>{{ autohaus['portal_welcome'] }} Tragen Sie nur ein, was bereits bekannt ist. Fehlende Angaben können später ergänzt werden.</p>
+        </div>
+        <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zur Übersicht</a>
+      </header>
+
+      <aside class="template-card" aria-label="Lackierauftrag als Vorlage">
         <div>
-          <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
-          <h1 class="mb-0">Neues Fahrzeug für {{ autohaus['portal_label'] }}</h1>
+          <strong>Lieber mit dem Lackierauftrag starten?</strong>
+          <p>Online ausfüllen oder die PDF-Vorlage herunterladen.</p>
         </div>
-        <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zurück</a>
-      </div>
-      <div class="border rounded-4 p-3 mb-4" style="background:#f8f2e8;border-color:#e4d6c3 !important;">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
-          <div>
-            <div class="fw-semibold">Vorausgefüllten Lackierauftrag verwenden</div>
-            <div class="text-muted small">Online ausfüllen, speichern und danach als fertiges PDF herunterladen.</div>
+        <div class="template-actions">
+          <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-dark">Online ausfüllen</a>
+          <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
+        </div>
+      </aside>
+
+      <form method="POST" enctype="multipart/form-data" class="vehicle-wizard" data-upload-form data-vehicle-wizard novalidate>
+        <nav class="vehicle-progress" aria-label="Schritte der Fahrzeugerfassung">
+          <button type="button" class="vehicle-progress-button is-active" data-step-target="1" aria-controls="partner-step-1" aria-current="step">
+            <span class="vehicle-progress-number">1</span>
+            <span class="vehicle-progress-copy"><strong>Fahrzeug</strong><span>Grunddaten und Unterlagen</span></span>
+          </button>
+          <button type="button" class="vehicle-progress-button" data-step-target="2" aria-controls="partner-step-2">
+            <span class="vehicle-progress-number">2</span>
+            <span class="vehicle-progress-copy"><strong>Schaden</strong><span>Arbeiten und Hinweise</span></span>
+          </button>
+          <button type="button" class="vehicle-progress-button" data-step-target="3" aria-controls="partner-step-3">
+            <span class="vehicle-progress-number">3</span>
+            <span class="vehicle-progress-copy"><strong>Transport</strong><span>Termine prüfen und senden</span></span>
+          </button>
+        </nav>
+
+        <section class="vehicle-step is-active" id="partner-step-1" data-form-step="1" aria-labelledby="partner-step-title-1">
+          <div class="vehicle-step-title">
+            <h2 id="partner-step-title-1" tabindex="-1">Fahrzeug und Ansprechpartner</h2>
+            <p>Fahrzeug oder Kennzeichen genügt. Eine Unterlage kann die Angaben automatisch vorbereiten.</p>
           </div>
-          <div class="d-flex gap-2 flex-wrap">
-            <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-dark">Online ausfüllen</a>
-            <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
+          <div class="row g-4">
+            <div class="col-lg-5">
+              <div class="vehicle-upload-card">
+                <label class="form-label" for="dateien">Unterlagen oder Schadensfotos</label>
+                <input type="file" id="dateien" name="dateien" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf" aria-describedby="dateien-hinweis dateien-status">
+                <div id="dateien-hinweis" class="form-text">PDF, Foto oder Dokument auswählen. Mit der Analyse wird direkt ein Auftrag vorbereitet.</div>
+                <div id="dateien-status" class="vehicle-upload-status" data-upload-status aria-live="polite">Noch keine Datei ausgewählt.</div>
+                <div class="vehicle-error" data-file-error role="alert">Bitte zuerst eine Datei auswählen.</div>
+                <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark w-100 mt-2" data-upload-analyze disabled data-loading-message="Bitte kurz warten. Die Datei wird gelesen und der Auftrag wird vorbereitet.">Datei hochladen &amp; analysieren</button>
+              </div>
+            </div>
+            <div class="col-lg-7">
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label" for="kunde_name">Endkunde / Referenz</label>
+                  <input type="text" id="kunde_name" name="kunde_name" class="form-control form-control-lg" value="{{ form.get('kunde_name', '') }}" autocomplete="name">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label" for="kontakt_telefon">Handy / WhatsApp Kunde</label>
+                  <input type="tel" inputmode="tel" autocomplete="tel" id="kontakt_telefon" name="kontakt_telefon" class="form-control form-control-lg" placeholder="z. B. 0171 1234567" value="{{ form.get('kontakt_telefon', '') }}">
+                </div>
+                <div class="col-md-8">
+                  <label class="form-label" for="fahrzeug">Fahrzeug</label>
+                  <input type="text" id="fahrzeug" name="fahrzeug" class="form-control form-control-lg" placeholder="z. B. Hyundai Tucson" value="{{ form.get('fahrzeug', '') }}" aria-describedby="vehicle-minimum-error">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label" for="kennzeichen">Kennzeichen</label>
+                  <input type="text" id="kennzeichen" name="kennzeichen" class="form-control form-control-lg text-uppercase" autocapitalize="characters" autocomplete="off" spellcheck="false" value="{{ form.get('kennzeichen', '') }}" aria-describedby="vehicle-minimum-error">
+                </div>
+                <div class="col-12">
+                  <div id="vehicle-minimum-error" class="vehicle-error" data-vehicle-error role="alert">Bitte mindestens Fahrzeug oder Kennzeichen angeben.</div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-      <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
-        <div class="col-md-6">
-          <label class="form-label" for="kunde_name">Endkunde / Referenz</label>
-          <input type="text" id="kunde_name" name="kunde_name" class="form-control form-control-lg" value="{{ form.get('kunde_name', '') }}">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="kontakt_telefon">Handy / WhatsApp Kunde</label>
-          <input type="tel" inputmode="tel" autocomplete="tel" id="kontakt_telefon" name="kontakt_telefon" class="form-control form-control-lg" placeholder="z.B. 0171 1234567" value="{{ form.get('kontakt_telefon', '') }}">
-        </div>
-        <div class="col-md-8">
-          <label class="form-label" for="fahrzeug">Fahrzeug</label>
-          <input type="text" id="fahrzeug" name="fahrzeug" class="form-control form-control-lg" placeholder="Wird beim Upload, wenn möglich, automatisch erkannt" value="{{ form.get('fahrzeug', '') }}">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label" for="kennzeichen">Kennzeichen</label>
-          <input type="text" id="kennzeichen" name="kennzeichen" class="form-control form-control-lg" style="text-transform:uppercase;" autocapitalize="characters" spellcheck="false" value="{{ form.get('kennzeichen', '') }}">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="analyse_text">Kurze Schadensbeschreibung</label>
-          <input type="text" id="analyse_text" name="analyse_text" class="form-control" placeholder="z.B. Stoßstange hinten instandsetzen" value="{{ form.get('analyse_text', '') }}">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="dateien">Anhänge</label>
-          <input type="file" id="dateien" name="dateien" class="form-control form-control-lg file-control" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
-          <div class="text-danger small mt-1" data-file-error style="display:none;">Bitte zuerst eine Datei auswählen.</div>
-          <div class="form-text">Mit dem Upload-Button wird die Datei sofort gelesen und der Auftrag automatisch vorbefüllt. Bei Gutachten kann das ein paar Sekunden dauern.</div>
-        </div>
-        <div class="col-12">
-          <label class="form-label" for="upload_notiz">Hinweis zum Bild oder Dokument (optional)</label>
-          <input type="text" id="upload_notiz" name="upload_notiz" class="form-control form-control-lg" placeholder="z.B. Kotflügel links Kratzer, Tür hinten rechts Delle" value="{{ form.get('upload_notiz', '') }}">
-          <div class="form-text">Bei Schadensfotos reichen kurze Schlagwörter. Die Werkstatt sieht den Hinweis direkt im Auftrag.</div>
-        </div>
-        <div class="col-12">
-          <label class="form-label" for="beschreibung">Beschreibung</label>
-          <textarea id="beschreibung" name="beschreibung" class="form-control" rows="4">{{ form.get('beschreibung', '') }}</textarea>
-        </div>
-        <div class="col-md-4">
-          <label class="form-label" for="transport_art">Transport</label>
-          <select id="transport_art" name="transport_art" class="form-select form-select-lg" data-transport-select>
-            {% for key, meta in transport_arten.items() %}
-            <option value="{{ key }}" {% if form.get('transport_art') == key %}selected{% endif %}>{{ meta['label'] }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-md-4">
-          <label class="form-label" for="annahme_datum" data-annahme-label>Fahrzeug wird von Ihnen angeliefert</label>
-          <input type="date" id="annahme_datum" name="annahme_datum" class="form-control form-control-lg" value="{{ form.get('annahme_datum', '') }}">
-          <input type="time" id="annahme_uhrzeit" name="annahme_uhrzeit" class="form-control form-control-lg mt-1" aria-label="Uhrzeit Anlieferung" value="{{ form.get('annahme_uhrzeit', '') }}">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label" for="abholtermin" data-abholung-label>Fahrzeug wird von Ihnen geholt</label>
-          <input type="date" id="abholtermin" name="abholtermin" class="form-control form-control-lg" value="{{ form.get('abholtermin', '') }}">
-          <input type="time" id="abhol_uhrzeit" name="abhol_uhrzeit" class="form-control form-control-lg mt-1" aria-label="Uhrzeit Abholung" value="{{ form.get('abhol_uhrzeit', '') }}">
-        </div>
-        <div class="col-12" id="abhol-adresse-wrap" style="display:none;">
-          <label class="form-label" for="abhol_adresse">📍 Abhol-/Lieferadresse</label>
-          <input type="text" id="abhol_adresse" name="abhol_adresse" class="form-control form-control-lg" placeholder="z.B. Unteres Lohhaus 5, 74915 Waibstadt" value="{{ form.get('abhol_adresse', '') }}">
-          <div class="form-text">Beim Hol- und Bringservice: erscheint auf der Werkstatt-Tafel, damit der Mitarbeiter weiss, wo das Auto zu holen/bringen ist.</div>
-        </div>
-        <div class="col-12 mobile-actions">
-          <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark btn-lg" data-loading-message="Datei wird analysiert. Bitte kurz warten.">Hochladen & analysieren</button>
-          <button type="submit" name="aktion" value="speichern" class="btn btn-dark btn-lg" data-loading-message="Auftrag wird gespeichert. Bitte kurz warten.">Fahrzeug speichern</button>
+        </section>
+
+        <section class="vehicle-step" id="partner-step-2" data-form-step="2" aria-labelledby="partner-step-title-2">
+          <div class="vehicle-step-title">
+            <h2 id="partner-step-title-2" tabindex="-1">Schaden und gewünschte Arbeiten</h2>
+            <p>Eine kurze Beschreibung genügt. Die Werkstatt klärt offene Details anschließend mit Ihnen.</p>
+          </div>
+          <div class="row g-4">
+            <div class="col-md-6">
+              <label class="form-label" for="analyse_text">Kurze Schadensbeschreibung</label>
+              <input type="text" id="analyse_text" name="analyse_text" class="form-control form-control-lg" placeholder="z. B. Stoßstange hinten instandsetzen" value="{{ form.get('analyse_text', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="upload_notiz">Hinweis zu Fotos oder Dokumenten <span class="text-muted">(optional)</span></label>
+              <input type="text" id="upload_notiz" name="upload_notiz" class="form-control form-control-lg" placeholder="z. B. Kotflügel links, Kratzer" value="{{ form.get('upload_notiz', '') }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="beschreibung">Weitere Beschreibung <span class="text-muted">(optional)</span></label>
+              <textarea id="beschreibung" name="beschreibung" class="form-control" rows="4" placeholder="Gewünschte Arbeiten, Besonderheiten oder Rückfragen">{{ form.get('beschreibung', '') }}</textarea>
+            </div>
+          </div>
+        </section>
+
+        <section class="vehicle-step" id="partner-step-3" data-form-step="3" aria-labelledby="partner-step-title-3">
+          <div class="vehicle-step-title">
+            <h2 id="partner-step-title-3" tabindex="-1">Transport und Termine</h2>
+            <p>Nur bereits abgestimmte Termine eintragen. Alles andere kann später mit der Werkstatt geplant werden.</p>
+          </div>
+          <div class="row g-4">
+            <div class="col-lg-4">
+              <label class="form-label" for="transport_art">Transport</label>
+              <select id="transport_art" name="transport_art" class="form-select form-select-lg" data-transport-select>
+                {% for key, meta in transport_arten.items() %}
+                <option value="{{ key }}" {% if selected_transport == key %}selected{% endif %}>{{ meta['label'] }}</option>
+                {% endfor %}
+              </select>
+              <div class="transport-note">Die Bezeichnungen der Termine passen sich der Transportart an.</div>
+            </div>
+            <div class="col-lg-4">
+              <label class="form-label" for="annahme_datum" data-annahme-label>Fahrzeug wird von Ihnen angeliefert</label>
+              <div class="row g-2">
+                <div class="col-7">
+                  <input type="date" id="annahme_datum" name="annahme_datum" class="form-control form-control-lg" value="{{ form.get('annahme_datum', '') }}" aria-label="Datum der Fahrzeugübergabe">
+                </div>
+                <div class="col-5">
+                  <input type="time" id="annahme_uhrzeit" name="annahme_uhrzeit" class="form-control form-control-lg" value="{{ form.get('annahme_uhrzeit', '') }}" aria-label="Uhrzeit der Fahrzeugübergabe">
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-4">
+              <label class="form-label" for="abholtermin" data-abholung-label>Fahrzeug wird von Ihnen geholt</label>
+              <div class="row g-2">
+                <div class="col-7">
+                  <input type="date" id="abholtermin" name="abholtermin" class="form-control form-control-lg" value="{{ form.get('abholtermin', '') }}" aria-label="Datum der Fahrzeugrückgabe">
+                </div>
+                <div class="col-5">
+                  <input type="time" id="abhol_uhrzeit" name="abhol_uhrzeit" class="form-control form-control-lg" value="{{ form.get('abhol_uhrzeit', '') }}" aria-label="Uhrzeit der Fahrzeugrückgabe">
+                </div>
+              </div>
+            </div>
+            <div class="col-12" id="abhol-adresse-wrap" hidden>
+              <label class="form-label" for="abhol_adresse">Abhol-/Lieferadresse</label>
+              <input type="text" id="abhol_adresse" name="abhol_adresse" class="form-control form-control-lg" placeholder="z. B. Unteres Lohhaus 5, 74915 Waibstadt" value="{{ form.get('abhol_adresse', '') }}" autocomplete="street-address">
+              <div class="form-text">Die Adresse erscheint beim Hol- und Bringservice auf der Werkstatt-Tafel.</div>
+            </div>
+            <div class="col-12 text-muted small">Nach dem Absenden öffnet sich die Auftragsansicht. Dort können Sie Unterlagen und Angaben weiter ergänzen.</div>
+          </div>
+        </section>
+
+        <div class="sticky-form-actions">
+          <div class="vehicle-action-group">
+            <button type="button" class="btn btn-outline-dark" data-step-back hidden>Zurück</button>
+            <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark" data-step-cancel>Abbrechen</a>
+          </div>
+          <div class="vehicle-step-status" data-step-status aria-live="polite">Schritt 1 von 3</div>
+          <div class="vehicle-action-group">
+            <button type="button" class="btn btn-primary" data-step-next hidden>Weiter</button>
+            <button type="submit" name="aktion" value="speichern" class="btn btn-primary" data-save-vehicle data-loading-message="Bitte kurz warten. Das Fahrzeug wird gespeichert.">Fahrzeug senden</button>
+          </div>
         </div>
       </form>
-    </div>
-  </div>
-  {% include "ki_assistent_widget.html" %}
+    </section>
+  </main>
+
   <script>
-    const form = document.querySelector('[data-upload-form]');
-    const overlay = document.querySelector('[data-loading-overlay]');
-    const loadingText = document.querySelector('[data-loading-text]');
-    const loadingNewsTitle = document.querySelector('[data-loading-news-title]');
-    const loadingNewsText = document.querySelector('[data-loading-news-text]');
-    const transportLabels = {{ transport_arten | tojson }};
-    const transportSelect = document.querySelector('[data-transport-select]');
-    const annahmeLabel = document.querySelector('[data-annahme-label]');
-    const abholungLabel = document.querySelector('[data-abholung-label]');
-    const abholAdresseWrap = document.getElementById('abhol-adresse-wrap');
-    const loadingNewsItems = {{ analysis_loading_news() | tojson }};
-    let loadingNewsIndex = 0;
-    let loadingNewsTimer = null;
-    let submitterMessage = '';
-    let submitterAction = '';
-    const fileInput = document.querySelector('input[name="dateien"]');
-    const fileError = document.querySelector('[data-file-error]');
-    const updateLoadingNews = () => {
-      if (!loadingNewsTitle || !loadingNewsText) {
-        return;
-      }
-      const item = loadingNewsItems[loadingNewsIndex % loadingNewsItems.length];
-      loadingNewsTitle.textContent = item.title;
-      loadingNewsText.textContent = item.text;
-      loadingNewsIndex += 1;
-    };
-    const startLoadingNews = () => {
-      updateLoadingNews();
-      if (loadingNewsTimer) {
-        window.clearInterval(loadingNewsTimer);
-      }
-      loadingNewsTimer = window.setInterval(updateLoadingNews, 3200);
-    };
-    if (form && overlay && loadingText) {
+    (() => {
+      const form = document.querySelector('[data-vehicle-wizard]');
+      if (!form) return;
+
+      form.classList.add('is-enhanced');
+      const steps = Array.from(form.querySelectorAll('[data-form-step]'));
+      const stepButtons = Array.from(form.querySelectorAll('[data-step-target]'));
+      const backButton = form.querySelector('[data-step-back]');
+      const cancelButton = form.querySelector('[data-step-cancel]');
+      const nextButton = form.querySelector('[data-step-next]');
+      const saveButton = form.querySelector('[data-save-vehicle]');
+      const stepStatus = form.querySelector('[data-step-status]');
+      const fileInput = form.querySelector('#dateien');
+      const uploadButton = form.querySelector('[data-upload-analyze]');
+      const uploadStatus = form.querySelector('[data-upload-status]');
+      const fileError = form.querySelector('[data-file-error]');
+      const vehicleError = form.querySelector('[data-vehicle-error]');
+      const vehicleInput = form.querySelector('#fahrzeug');
+      const plateInput = form.querySelector('#kennzeichen');
+      const transportSelect = form.querySelector('[data-transport-select]');
+      const annahmeLabel = form.querySelector('[data-annahme-label]');
+      const abholungLabel = form.querySelector('[data-abholung-label]');
+      const addressWrap = form.querySelector('#abhol-adresse-wrap');
+      const transportLabels = {{ transport_arten | tojson }};
+      const overlay = document.querySelector('[data-loading-overlay]');
+      const loadingText = document.querySelector('[data-loading-text]');
+      const loadingNewsTitle = document.querySelector('[data-loading-news-title]');
+      const loadingNewsText = document.querySelector('[data-loading-news-text]');
+      const loadingNewsItems = {{ analysis_loading_news() | tojson }};
+      let currentStep = 1;
+      let loadingNewsIndex = 0;
+      let loadingNewsTimer = null;
+      let submitterMessage = '';
+      let submitterAction = '';
+
+      const showStep = (stepNumber, focusHeading = true) => {
+        currentStep = Math.min(3, Math.max(1, Number(stepNumber) || 1));
+        steps.forEach((step) => {
+          const active = Number(step.dataset.formStep) === currentStep;
+          step.classList.toggle('is-active', active);
+          step.hidden = !active;
+        });
+        stepButtons.forEach((button) => {
+          const active = Number(button.dataset.stepTarget) === currentStep;
+          button.classList.toggle('is-active', active);
+          if (active) button.setAttribute('aria-current', 'step');
+          else button.removeAttribute('aria-current');
+        });
+        backButton.hidden = currentStep === 1;
+        cancelButton.hidden = currentStep !== 1;
+        nextButton.hidden = currentStep === 3;
+        saveButton.hidden = currentStep !== 3;
+        stepStatus.textContent = `Schritt ${currentStep} von 3`;
+        if (focusHeading) {
+          form.querySelector('.vehicle-progress')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      };
+
+      const updateUpload = () => {
+        const files = Array.from(fileInput?.files || []);
+        uploadButton.disabled = files.length === 0;
+        uploadStatus.textContent = files.length
+          ? `${files.length} Datei${files.length === 1 ? '' : 'en'} ausgewählt: ${files.map((file) => file.name).join(', ')}`
+          : 'Noch keine Datei ausgewählt.';
+        if (files.length) fileError.classList.remove('is-visible');
+      };
+
+      const updateTransport = () => {
+        const selected = transportLabels[transportSelect.value] || transportLabels.standard || {};
+        annahmeLabel.textContent = selected.partner_annahme_label || 'Fahrzeug wird von Ihnen angeliefert';
+        abholungLabel.textContent = selected.partner_abholung_label || 'Fahrzeug wird von Ihnen geholt';
+        addressWrap.hidden = transportSelect.value !== 'hol_und_bring';
+      };
+
+      const hasVehicleReference = () => Boolean(vehicleInput.value.trim() || plateInput.value.trim());
+
+      const updateLoadingNews = () => {
+        if (!loadingNewsItems.length || !loadingNewsTitle || !loadingNewsText) return;
+        const item = loadingNewsItems[loadingNewsIndex % loadingNewsItems.length];
+        loadingNewsTitle.textContent = item.title;
+        loadingNewsText.textContent = item.text;
+        loadingNewsIndex += 1;
+      };
+
+      const startLoadingNews = () => {
+        updateLoadingNews();
+        if (loadingNewsTimer) window.clearInterval(loadingNewsTimer);
+        loadingNewsTimer = window.setInterval(updateLoadingNews, 3200);
+      };
+
+      stepButtons.forEach((button) => button.addEventListener('click', () => showStep(button.dataset.stepTarget)));
+      backButton.addEventListener('click', () => showStep(currentStep - 1));
+      nextButton.addEventListener('click', () => showStep(currentStep + 1));
+      fileInput.addEventListener('change', updateUpload);
+      transportSelect.addEventListener('change', updateTransport);
+      [vehicleInput, plateInput].forEach((input) => input.addEventListener('input', () => {
+        if (hasVehicleReference()) vehicleError.classList.remove('is-visible');
+      }));
+
       form.addEventListener('click', (event) => {
         const button = event.target.closest('button[type="submit"]');
-        if (button) {
-          submitterMessage = button.dataset.loadingMessage || '';
-          submitterAction = (button.name === 'aktion') ? (button.value || '') : '';
-        }
+        if (!button) return;
+        submitterMessage = button.dataset.loadingMessage || '';
+        submitterAction = button.name === 'aktion' ? (button.value || '') : '';
       });
+
       form.addEventListener('submit', (event) => {
-        const action = (event.submitter && event.submitter.name === 'aktion')
+        const action = event.submitter?.name === 'aktion'
           ? (event.submitter.value || '')
           : submitterAction;
-        if (action === 'upload_analyze' && fileInput && fileInput.files.length === 0) {
+        if (action === 'upload_analyze' && fileInput.files.length === 0) {
           event.preventDefault();
-          if (fileError) {
-            fileError.style.display = '';
-          }
+          fileError.classList.add('is-visible');
           fileInput.focus();
           return;
         }
-        if (fileError) {
-          fileError.style.display = 'none';
+        if (action !== 'upload_analyze' && !hasVehicleReference()) {
+          event.preventDefault();
+          showStep(1);
+          vehicleError.classList.add('is-visible');
+          vehicleInput.focus();
+          return;
         }
-        loadingText.textContent = submitterMessage || 'Bitte kurz warten. Der Auftrag wird jetzt automatisch aus der Datei vorbereitet.';
-        startLoadingNews();
-        overlay.classList.add('show');
-      });
-    }
-    if (fileInput && fileError) {
-      fileInput.addEventListener('change', () => {
-        if (fileInput.files.length > 0) {
-          fileError.style.display = 'none';
+        fileError.classList.remove('is-visible');
+        vehicleError.classList.remove('is-visible');
+        if (overlay && loadingText) {
+          loadingText.textContent = submitterMessage || 'Bitte kurz warten. Der Auftrag wird vorbereitet.';
+          startLoadingNews();
+          overlay.classList.add('show');
         }
       });
-    }
-    const updateTransportLabels = () => {
-      if (!transportSelect) {
-        return;
-      }
-      const selected = transportLabels[transportSelect.value] || transportLabels.standard || {};
-      if (annahmeLabel) {
-        annahmeLabel.textContent = selected.partner_annahme_label || 'Fahrzeug wird von Ihnen angeliefert';
-      }
-      if (abholungLabel) {
-        abholungLabel.textContent = selected.partner_abholung_label || 'Fahrzeug wird von Ihnen geholt';
-      }
-      if (abholAdresseWrap) {
-        abholAdresseWrap.style.display = (transportSelect.value === 'hol_und_bring') ? '' : 'none';
-      }
-    };
-    if (transportSelect) {
-      transportSelect.addEventListener('change', updateTransportLabels);
-      updateTransportLabels();
-    }
+
+      updateUpload();
+      updateTransport();
+      showStep(1, false);
+    })();
   </script>
   {% include "_session_keepalive.html" %}
-{% include "_klick_tracking.html" %}
+  {% include "_klick_tracking.html" %}
 </body>
 </html>

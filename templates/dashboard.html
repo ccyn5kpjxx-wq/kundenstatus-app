@@ -23,6 +23,69 @@
     max-width: 340px;
     line-height: 1.35;
   }
+  .bulk-actions .btn:disabled { opacity: .48; }
+  @media (max-width: 767.98px) {
+    .bulk-bar { align-items: stretch; flex-direction: column; padding: 12px; }
+    .bulk-actions { display: none !important; width: 100%; }
+    .bulk-bar.has-selection .bulk-actions { display: flex !important; }
+    .bulk-actions .btn { flex: 1 1 130px; min-height: 44px; }
+    .auftrag-table-shell { overflow: visible; border: 0; background: transparent; }
+    .auftrag-table { display: block; }
+    .auftrag-table thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .auftrag-table tbody { display: grid; gap: 12px; }
+    .auftrag-table tr[data-select-row] {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 13px 12px;
+      padding: 17px;
+      border: 1px solid #e0d4c3;
+      border-radius: 16px;
+      background: #fffdf9;
+      box-shadow: 0 10px 24px rgba(64, 47, 25, .08);
+    }
+    .auftrag-table tr[data-select-row].is-selected { border-color: #a99172; background: #fff8ee; }
+    .auftrag-table td {
+      display: block;
+      min-width: 0;
+      padding: 0;
+      border: 0;
+    }
+    .auftrag-table td[data-mobile-label]::before {
+      content: attr(data-mobile-label);
+      display: block;
+      margin-bottom: 5px;
+      color: #786b5d;
+      font-size: .7rem;
+      font-weight: 800;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .auftrag-table .row-select-cell {
+      width: auto;
+      grid-column: 2;
+      grid-row: 1;
+      align-self: start;
+    }
+    .auftrag-table .row-select-cell .selection-badge { padding: 8px; }
+    .auftrag-table .row-select-cell .selection-badge span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+    .auftrag-table .auftrag-vehicle-cell { grid-column: 1; grid-row: 1; padding-right: 6px; }
+    .auftrag-table .analysis-cell { grid-column: 1 / -1; max-width: none; }
+    .auftrag-table .auftrag-date-cell,
+    .auftrag-table .auftrag-status-cell { grid-column: 1 / -1; }
+    .auftrag-table .auftrag-action-cell { grid-column: 1 / -1; }
+    .auftrag-table .auftrag-action-cell .btn { width: 100%; min-height: 44px; }
+  }
 </style>
 {% endblock %}
 
@@ -31,7 +94,7 @@
 <div class="page-card p-4 mb-4" id="chat-nachrichten">
   <div class="section-title">
     <div>
-      <h4 class="mb-1">Neue Chat-Nachrichten</h4>
+      <h2 class="h4 mb-1">Neue Chat-Nachrichten</h2>
       <p>Ungelesene Rückfragen aus den Partnerportalen.</p>
     </div>
     <a href="{{ url_for('admin_postfach') }}" class="btn btn-soft btn-sm">Postfach öffnen</a>
@@ -61,7 +124,7 @@
 <div class="page-card p-4 mb-4" id="angebote">
   <div class="section-title">
     <div>
-      <h4 class="mb-1">Offene Angebotsanfragen</h4>
+      <h2 class="h4 mb-1">Offene Angebotsanfragen</h2>
       <p>Neue Anfragen aus den Partnerportalen, inklusive Unterlagen und Bilder.</p>
     </div>
   </div>
@@ -108,7 +171,7 @@
 <div class="page-card p-4 mb-4" id="auftraege">
   <div class="section-title">
     <div>
-      <h4 class="mb-1">Alle Aufträge</h4>
+      <h1 class="h4 mb-1">Alle Aufträge</h1>
       <p>Alle aktiven Fahrzeuge in einer einfachen Liste, nach Herkunft markiert.</p>
     </div>
   </div>
@@ -131,6 +194,7 @@
   </form>
   {% endif %}
   <div class="mb-3">
+    <label for="auftraege-suche" class="visually-hidden">Aufträge durchsuchen</label>
     <input type="search" id="auftraege-suche" class="form-control"
            placeholder="Suchen (Kennzeichen, Fahrzeug, Kunde, Autohaus)…"
            aria-label="Aufträge durchsuchen" autocomplete="off">
@@ -139,18 +203,19 @@
   <div class="bulk-bar">
     <div class="d-flex align-items-center gap-3 flex-wrap">
       <label class="selection-badge mb-0">
-        <input type="checkbox" class="row-check" data-select-all>
+        <input type="checkbox" class="row-check" data-select-all aria-label="Alle sichtbaren Aufträge auswählen">
         <span>Alle markieren</span>
       </label>
-      <span class="text-muted" data-selected-count>0 Aufträge ausgewählt</span>
+      <span class="text-muted" data-selected-count aria-live="polite">0 Aufträge ausgewählt</span>
     </div>
-    <div class="d-flex gap-2 flex-wrap">
-      <button type="submit" name="aktion" value="archivieren" class="btn btn-soft btn-sm">Ausgewählte archivieren</button>
-      <button type="submit" name="aktion" value="loeschen" class="btn btn-outline-danger btn-sm" data-confirm="Ausgewählte Fahrzeuge wirklich löschen?">Ausgewählte löschen</button>
+    <div class="d-flex gap-2 flex-wrap bulk-actions" data-bulk-actions>
+      <button type="submit" name="aktion" value="archivieren" class="btn btn-soft btn-sm" data-bulk-action disabled>Ausgewählte archivieren</button>
+      <button type="submit" name="aktion" value="loeschen" class="btn btn-outline-danger btn-sm" data-bulk-action data-confirm="Ausgewählte Fahrzeuge wirklich löschen?" disabled>Ausgewählte löschen</button>
     </div>
   </div>
-  <div class="table-shell">
-    <table class="table align-middle mb-0">
+  <div class="table-shell auftrag-table-shell">
+    <table class="table align-middle mb-0 auftrag-table">
+      <caption class="visually-hidden">Aktive Werkstattaufträge mit Fahrzeug, Analyse, Terminen und Status</caption>
       <thead>
         <tr>
           <th class="row-select-cell">Auswahl</th>
@@ -166,11 +231,11 @@
         <tr data-select-row class="{{ a['quelle_meta']['row_class'] }}">
           <td class="row-select-cell">
             <label class="selection-badge mb-0">
-              <input type="checkbox" class="row-check" name="auftrag_ids" value="{{ a['id'] }}" data-select-item>
+              <input type="checkbox" class="row-check" name="auftrag_ids" value="{{ a['id'] }}" data-select-item aria-label="{{ a['fahrzeug'] or 'Fahrzeug' }} auswählen">
               <span>Wählen</span>
             </label>
           </td>
-          <td>
+          <td class="auftrag-vehicle-cell" data-mobile-label="Fahrzeug">
             <div class="fw-bold">{{ a['fahrzeug'] }}</div>
             <span class="badge text-bg-{{ a['quelle_meta']['farbe'] }}">{{ a['quelle_meta']['label'] }}</span>
             {% if a['versicherung_name'] %}<span class="badge text-bg-light border text-dark">{{ a['versicherung_name'] }}</span>{% endif %}
@@ -178,8 +243,8 @@
             {% if a['autohaus_name'] %}<div class="text-muted small">{{ a['autohaus_name'] }}</div>{% endif %}
             {% if a['kunde_name'] %}<div class="text-muted small">{{ a['kunde_name'] }}</div>{% endif %}
           </td>
-          <td class="analysis-cell">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
-          <td>
+          <td class="analysis-cell" data-mobile-label="Arbeiten">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
+          <td class="auftrag-date-cell" data-mobile-label="Termine">
             {% set planung = a.get('planung') or {} %}
             {% if planung.get('group_key') == 'overdue' and planung.get('hinweis') %}
               <div class="mb-1"><span class="badge text-bg-danger">⚠ {{ planung['hinweis'] }}</span></div>
@@ -200,7 +265,7 @@
               {% endif %}
             </div>
           </td>
-          <td>
+          <td class="auftrag-status-cell" data-mobile-label="Status">
             <span class="badge text-bg-{{ a['status_meta']['farbe'] }}">{{ a['status_meta']['icon'] }} {{ a['status_meta']['label'] }}</span>
             {% if a['status'] == 3 and a['produktion_schritt_label'] %}<div class="mt-1"><span class="badge text-bg-light border text-dark prod-schritt-badge">{{ a['produktion_schritt_label'] }}</span></div>{% endif %}
             {% if a['hat_offene_reklamation'] %}
@@ -209,7 +274,7 @@
               <div class="small text-muted mt-1">Rückgabe erledigt, kann ins Archiv.</div>
             {% endif %}
           </td>
-          <td>
+          <td class="auftrag-action-cell">
             <a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Öffnen</a>
           </td>
         </tr>
@@ -226,7 +291,7 @@
 <div class="page-card p-4">
   <div class="section-title">
     <div>
-      <h4 class="mb-1">Archiv</h4>
+      <h2 class="h4 mb-1">Archiv</h2>
       <p>Hier liegen abgeschlossene oder ausgeblendete Aufträge.</p>
     </div>
   </div>
@@ -235,18 +300,19 @@
   <div class="bulk-bar">
     <div class="d-flex align-items-center gap-3 flex-wrap">
       <label class="selection-badge mb-0">
-        <input type="checkbox" class="row-check" data-select-all>
+        <input type="checkbox" class="row-check" data-select-all aria-label="Alle sichtbaren archivierten Aufträge auswählen">
         <span>Alle markieren</span>
       </label>
-      <span class="text-muted" data-selected-count>0 Aufträge ausgewählt</span>
+      <span class="text-muted" data-selected-count aria-live="polite">0 Aufträge ausgewählt</span>
     </div>
-    <div class="d-flex gap-2 flex-wrap">
-      <button type="submit" name="aktion" value="aktivieren" class="btn btn-soft btn-sm">Ausgewählte aktivieren</button>
-      <button type="submit" name="aktion" value="loeschen" class="btn btn-outline-danger btn-sm" data-confirm="Ausgewählte Fahrzeuge wirklich löschen?">Ausgewählte löschen</button>
+    <div class="d-flex gap-2 flex-wrap bulk-actions" data-bulk-actions>
+      <button type="submit" name="aktion" value="aktivieren" class="btn btn-soft btn-sm" data-bulk-action disabled>Ausgewählte aktivieren</button>
+      <button type="submit" name="aktion" value="loeschen" class="btn btn-outline-danger btn-sm" data-bulk-action data-confirm="Ausgewählte Fahrzeuge wirklich löschen?" disabled>Ausgewählte löschen</button>
     </div>
   </div>
-  <div class="table-shell">
-    <table class="table align-middle mb-0">
+  <div class="table-shell auftrag-table-shell">
+    <table class="table align-middle mb-0 auftrag-table">
+      <caption class="visually-hidden">Archivierte Werkstattaufträge</caption>
       <thead>
         <tr>
           <th class="row-select-cell">Auswahl</th>
@@ -262,23 +328,23 @@
         <tr data-select-row>
           <td class="row-select-cell">
             <label class="selection-badge mb-0">
-              <input type="checkbox" class="row-check" name="auftrag_ids" value="{{ a['id'] }}" data-select-item>
+              <input type="checkbox" class="row-check" name="auftrag_ids" value="{{ a['id'] }}" data-select-item aria-label="{{ a['fahrzeug'] or 'Fahrzeug' }} auswählen">
               <span>Wählen</span>
             </label>
           </td>
-          <td>{{ a['autohaus_name'] or 'Ohne Autohaus' }}</td>
-          <td>
+          <td data-mobile-label="Autohaus">{{ a['autohaus_name'] or 'Ohne Autohaus' }}</td>
+          <td class="auftrag-vehicle-cell" data-mobile-label="Fahrzeug">
             <div>{{ a['fahrzeug'] }}</div>
             {% if a['kennzeichen'] %}<div class="small"><code>{{ a['kennzeichen'] }}</code></div>{% endif %}
           </td>
-          <td>{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
-          <td>
+          <td class="analysis-cell" data-mobile-label="Arbeiten">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
+          <td class="auftrag-date-cell" data-mobile-label="Letzte Termine">
             <div class="d-flex gap-2 flex-wrap">
               {% if a['fertig_datum'] %}<span class="schedule-pill">Fertig {{ a['fertig_datum'] }}</span>{% endif %}
               {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['abholung_label'] }} {{ a['abholtermin'] }}</span>{% endif %}
             </div>
           </td>
-          <td><a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Öffnen</a></td>
+          <td class="auftrag-action-cell"><a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Öffnen</a></td>
         </tr>
         {% endfor %}
       </tbody>
@@ -296,6 +362,8 @@
     const selectAll = form.querySelector('[data-select-all]');
     const items = Array.from(form.querySelectorAll('[data-select-item]'));
     const counter = form.querySelector('[data-selected-count]');
+    const bulkBar = form.querySelector('.bulk-bar');
+    const actionButtons = Array.from(form.querySelectorAll('[data-bulk-action]'));
     const rows = Array.from(form.querySelectorAll('[data-select-row]'));
     let submitter = null;
     const visibleRows = () => rows.filter((row) => !row.hidden);
@@ -312,6 +380,8 @@
         selectAll.checked = selected > 0 && selected === currentVisibleItems.length;
         selectAll.indeterminate = selected > 0 && selected < currentVisibleItems.length;
       }
+      bulkBar?.classList.toggle('has-selection', selected > 0);
+      actionButtons.forEach((button) => { button.disabled = selected === 0; });
       rows.forEach((row) => {
         const checkbox = row.querySelector('[data-select-item]');
         row.classList.toggle('is-selected', !!checkbox?.checked);

@@ -28,19 +28,27 @@
     bottom: 22px;
     z-index: 1100;
     font-family: "DM Sans", sans-serif;
+    transition: opacity .18s ease, transform .18s ease;
   }
   .ki-assistent-toggle {
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: center;
     border: 0;
-    border-radius: 999px;
+    width: 54px;
+    min-width: 54px;
+    min-height: 54px;
+    padding: 0;
+    border-radius: 50%;
     background: #132635;
     color: #fff;
-    min-height: 52px;
-    padding: 0 18px 0 10px;
     box-shadow: 0 16px 34px rgba(18, 38, 53, .26);
     font-weight: 700;
+  }
+  .ki-assistent-toggle:hover,
+  .ki-assistent-toggle:focus-visible {
+    background: #1b3548;
+    box-shadow: 0 18px 38px rgba(18, 38, 53, .32);
   }
   .ki-assistent-toggle-mark {
     display: grid;
@@ -52,6 +60,9 @@
     color: #fff;
     font-size: .9rem;
   }
+  .ki-assistent-toggle-copy { display: none; }
+  body:has(.sticky-form-actions) .ki-assistent { bottom: 104px; }
+  body:has([data-vehicle-wizard]) .ki-assistent { display: none; }
   .ki-assistent-panel {
     position: absolute;
     right: 0;
@@ -215,11 +226,11 @@
     .ki-assistent-toggle {
       width: 52px;
       min-width: 52px;
-      padding: 0 8px;
-      justify-content: center;
     }
-    .ki-assistent-toggle > span:last-child {
-      display: none;
+    .ki-assistent.is-field-active:not(.is-open) {
+      opacity: 0;
+      transform: translateY(170px);
+      pointer-events: none;
     }
     .ki-assistent-panel {
       position: fixed;
@@ -288,7 +299,7 @@
   </div>
   <button type="button" class="ki-assistent-toggle" data-ki-toggle aria-expanded="false" aria-label="KI-Helfer öffnen">
     <span class="ki-assistent-toggle-mark">KI</span>
-    <span>Wie kann ich Ihnen helfen?</span>
+    <span class="ki-assistent-toggle-copy">Wie kann ich Ihnen helfen?</span>
   </button>
 </div>
 <script>
@@ -599,11 +610,25 @@
       const setOpen = (open) => {
         root.classList.toggle('is-open', open);
         toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        toggle.setAttribute('aria-label', open ? 'KI-Helfer schließen' : 'KI-Helfer öffnen');
         if (open) {
           focusInput();
           window.requestAnimationFrame(focusInput);
         }
       };
+
+      const syncExternalFieldFocus = () => {
+        const active = document.activeElement;
+        const externalFieldActive = Boolean(
+          active &&
+          !root.contains(active) &&
+          active.matches('input, textarea, select, [contenteditable="true"]')
+        );
+        root.classList.toggle('is-field-active', externalFieldActive);
+      };
+
+      document.addEventListener('focusin', syncExternalFieldFocus);
+      document.addEventListener('focusout', () => window.setTimeout(syncExternalFieldFocus, 0));
 
       toggle.addEventListener('click', () => {
         setOpen(!root.classList.contains('is-open'));

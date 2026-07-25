@@ -4,50 +4,186 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ autohaus['portal_label'] }} — Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
+    :root {
+      --portal-bg: #f3efe6;
+      --portal-panel: #fffdf9;
+      --portal-ink: #16202a;
+      --portal-muted: #6f7a83;
+      --portal-line: #ddd1c0;
+      --portal-brand: #a23f2d;
+      --portal-accent: #145d66;
+    }
+    * { box-sizing: border-box; }
+    html { min-height: 100%; }
     body {
-      /* Heller Portal-Hintergrund wie base.html */
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      color: var(--portal-ink);
       background:
-        radial-gradient(circle at top left, rgba(162, 63, 45, 0.08), transparent 28%),
-        radial-gradient(circle at top right, rgba(20, 93, 102, 0.08), transparent 32%),
-        linear-gradient(180deg, #f7f2ea 0%, #f3efe6 100%);
-      min-height:100vh;
-      display:flex;
-      align-items:center;
-      padding:18px;
-      color:#3d3428;
+        radial-gradient(circle at top left, rgba(162, 63, 45, 0.1), transparent 30%),
+        radial-gradient(circle at top right, rgba(20, 93, 102, 0.09), transparent 34%),
+        linear-gradient(180deg, #f8f4ed 0%, var(--portal-bg) 100%);
+      font-family: "DM Sans", sans-serif;
+    }
+    :focus-visible {
+      outline: 3px solid rgba(20, 93, 102, .45);
+      outline-offset: 3px;
+    }
+    .login-main {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: clamp(24px, 5vw, 64px) 18px 28px;
     }
     .login-card {
-      max-width:460px;
-      width:100%;
-      border-radius:24px;
-      padding:32px;
-      border:1px solid #ddd1c0;
-      box-shadow:0 16px 40px rgba(64, 47, 25, 0.12) !important;
+      width: min(100%, 480px);
+      padding: clamp(24px, 4vw, 36px);
+      border: 1px solid var(--portal-line);
+      border-radius: 26px;
+      background: rgba(255, 253, 249, .97);
+      box-shadow: 0 22px 58px rgba(64, 47, 25, .14);
     }
-    .form-control,
-    .btn {
-      min-height:48px;
-      font-size:16px;
+    .login-brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 28px;
     }
+    .login-logo {
+      width: 82px;
+      height: 54px;
+      flex: 0 0 auto;
+      object-fit: contain;
+      padding: 7px;
+      border: 1px solid #eadfce;
+      border-radius: 12px;
+      background: #fff;
+    }
+    .login-kicker {
+      margin-bottom: 3px;
+      color: var(--portal-brand);
+      font-size: .73rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-family: "Space Grotesk", sans-serif;
+      font-size: clamp(1.7rem, 5vw, 2.15rem);
+      line-height: 1.05;
+      letter-spacing: -.03em;
+    }
+    .login-welcome {
+      margin: 0 0 28px;
+      color: var(--portal-muted);
+      line-height: 1.55;
+    }
+    .form-label { font-weight: 700; }
+    .password-field { position: relative; }
+    .password-field .form-control {
+      min-height: 54px;
+      padding-right: 92px;
+      border-color: #d8cbb8;
+      border-radius: 13px;
+      background: #fff;
+      font-size: 16px;
+    }
+    .password-field .form-control:focus {
+      border-color: var(--portal-accent);
+      box-shadow: 0 0 0 .22rem rgba(20, 93, 102, .14);
+    }
+    .password-toggle {
+      position: absolute;
+      top: 50%;
+      right: 8px;
+      min-height: 38px;
+      padding: 0 11px;
+      transform: translateY(-50%);
+      border: 0;
+      border-radius: 9px;
+      color: #31404c;
+      background: #f2ece3;
+      font-size: .83rem;
+      font-weight: 700;
+    }
+    .login-hint {
+      margin-top: 9px;
+      color: var(--portal-muted);
+      font-size: .84rem;
+      line-height: 1.45;
+    }
+    .login-help {
+      margin: 18px 0;
+      border: 1px solid #e5d9c8;
+      border-radius: 13px;
+      background: #faf6ef;
+    }
+    .login-help summary {
+      padding: 12px 14px;
+      cursor: pointer;
+      color: #31404c;
+      font-weight: 700;
+    }
+    .login-help-copy {
+      padding: 0 14px 14px;
+      color: var(--portal-muted);
+      font-size: .88rem;
+      line-height: 1.55;
+    }
+    .login-help a { color: var(--portal-accent); font-weight: 700; }
+    .login-submit {
+      min-height: 54px;
+      border: 0;
+      border-radius: 13px;
+      background: var(--portal-ink);
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .login-submit:hover,
+    .login-submit:focus { background: #253746; }
+    .login-footer {
+      width: 100%;
+      padding: 18px 16px 24px;
+      color: var(--portal-muted);
+      text-align: center;
+      font-size: .85rem;
+    }
+    .login-footer a { color: #53616c; }
     @media (max-width: 575.98px) {
-      body { align-items:flex-start; padding:14px; }
-      .container { padding:0; }
-      .login-card { padding:24px 18px; border-radius:18px; margin-top:24px; }
+      body { grid-template-rows: auto auto; }
+      .login-main { align-items: flex-start; padding: 18px 14px 12px; }
+      .login-card { padding: 24px 18px; border-radius: 20px; }
+      .login-brand { margin-bottom: 22px; }
+      .login-logo { width: 72px; height: 48px; }
+      .login-welcome { margin-bottom: 24px; }
+      .login-footer { padding-top: 10px; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="mx-auto bg-white shadow login-card">
-      <div class="text-center mb-4">
-        <h1 class="h3 mb-2">{{ autohaus['portal_label'] }}</h1>
-        <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
+  <main class="login-main">
+    <section class="login-card" aria-labelledby="partner-login-title">
+      <div class="login-brand">
+        <img class="login-logo" src="{{ url_for('static', filename='logo.png') }}" alt="Gärtner Karosserie &amp; Lack">
+        <div>
+          <div class="login-kicker">Geschützter Partnerzugang</div>
+          <strong>Autohaus-Portal</strong>
+        </div>
       </div>
+      <h1 id="partner-login-title">{{ autohaus['portal_label'] }}</h1>
+      <p class="login-welcome">{{ autohaus['portal_welcome'] }}</p>
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% for cat, msg in messages %}
-          <div class="alert alert-{{ cat }}">{{ msg }}</div>
+          <div class="alert alert-{{ cat }}" role="alert">{{ msg }}</div>
         {% endfor %}
       {% endwith %}
       <form method="POST" autocomplete="on">
@@ -61,43 +197,60 @@
           aria-hidden="true"
           readonly
         >
-        <div class="mb-3">
-          <label class="form-label" for="zugangscode">Zugangscode</label>
-          <input
-            type="password"
-            id="zugangscode"
-            name="password"
-            class="form-control form-control-lg"
-            autocomplete="current-password"
-            autocapitalize="none"
-            autocorrect="off"
-            spellcheck="false"
-            aria-describedby="zugangscode-hinweis"
-            required
-            autofocus
-          >
-          <div id="zugangscode-hinweis" class="form-text mt-2">
-            Bitte geben Sie den Code exakt wie mitgeteilt ein. Es wird zwischen Groß- und Kleinschreibung unterschieden.<br>
-            Den Zugangscode erhalten Sie von Gärtner Karosserie &amp; Lack.
-            Code vergessen? Rufen Sie uns an unter
-            <a href="tel:+4915227706694">+49&nbsp;1522&nbsp;7706694</a>
-            oder schreiben Sie an
-            <a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a>.
+        <div>
+          <label class="form-label" for="zugangscode">Persönlicher Zugangscode</label>
+          <div class="password-field">
+            <input
+              type="password"
+              id="zugangscode"
+              name="password"
+              class="form-control form-control-lg"
+              autocomplete="current-password"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck="false"
+              aria-describedby="zugangscode-hinweis"
+              required
+              autofocus
+            >
+            <button class="password-toggle" type="button" data-password-toggle aria-controls="zugangscode" aria-pressed="false">Anzeigen</button>
           </div>
+          <div id="zugangscode-hinweis" class="login-hint">Bitte exakt wie mitgeteilt eingeben. Groß- und Kleinschreibung werden unterschieden.</div>
         </div>
-        <button type="submit" class="btn btn-dark w-100 btn-lg">Einloggen</button>
+        <details class="login-help">
+          <summary>Code vergessen?</summary>
+          <div class="login-help-copy">
+            Den Zugangscode erhalten Sie von Gärtner Karosserie &amp; Lack.<br>
+            <a href="tel:+4915227706694">0152 277 066 94 anrufen</a><br>
+            <a href="mailto:info@auto-lackierzentrum.de">E-Mail an die Werkstatt senden</a>
+          </div>
+        </details>
+        <button type="submit" class="btn btn-dark w-100 login-submit">Sicher einloggen</button>
       </form>
-    </div>
-  </div>
+    </section>
+  </main>
+  <footer class="login-footer">
+    Gärtner Karosserie &amp; Lack · <a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a>
+  </footer>
   <script>
     (() => {
       const input = document.getElementById('zugangscode');
-      if (!input) return;
-      const focusInput = () => input.focus({ preventScroll: true });
-      window.addEventListener('load', focusInput);
+      const toggle = document.querySelector('[data-password-toggle]');
+      if (input) {
+        const focusInput = () => input.focus({ preventScroll: true });
+        window.addEventListener('load', focusInput);
+      }
+      if (input && toggle) {
+        toggle.addEventListener('click', () => {
+          const show = input.type === 'password';
+          input.type = show ? 'text' : 'password';
+          toggle.textContent = show ? 'Verbergen' : 'Anzeigen';
+          toggle.setAttribute('aria-pressed', show ? 'true' : 'false');
+          input.focus({ preventScroll: true });
+        });
+      }
     })();
   </script>
-  <footer style="color: #6f7a83; text-align: center; padding: 1rem; font-size: .85rem;"><a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
-{% include "_klick_tracking.html" %}
+  {% include "_klick_tracking.html" %}
 </body>
 </html>

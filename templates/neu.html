@@ -1,123 +1,359 @@
 {% extends "base.html" %}
 {% block title %}Neues Fahrzeug{% endblock %}
 
+{% block extra_css %}
+<style>
+  .vehicle-wizard-card { overflow: visible; }
+  .vehicle-wizard-intro { max-width: 760px; }
+  .vehicle-progress {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin: 28px 0 30px;
+  }
+  .vehicle-progress-button {
+    min-height: 62px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 10px 13px;
+    border: 1px solid #ded1bf;
+    border-radius: 15px;
+    color: #5f6b74;
+    background: #faf6ef;
+    text-align: left;
+    transition: border-color .18s ease, background .18s ease, color .18s ease;
+  }
+  .vehicle-progress-button:hover { border-color: #bcae9a; }
+  .vehicle-progress-button.is-active {
+    color: #fff;
+    border-color: #16202a;
+    background: #16202a;
+  }
+  .vehicle-progress-number {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-weight: 700;
+  }
+  .vehicle-progress-copy strong { display: block; line-height: 1.1; }
+  .vehicle-progress-copy span { display: block; margin-top: 3px; font-size: .78rem; opacity: .78; }
+  .vehicle-wizard.is-enhanced .vehicle-step { display: none; }
+  .vehicle-wizard.is-enhanced .vehicle-step.is-active { display: block; }
+  .vehicle-step {
+    padding: clamp(18px, 3vw, 28px);
+    border: 1px solid #e2d6c5;
+    border-radius: 19px;
+    background: #fffdf9;
+  }
+  .vehicle-step-title {
+    margin-bottom: 22px;
+    padding-bottom: 17px;
+    border-bottom: 1px solid #eadfce;
+  }
+  .vehicle-step-title h2 { margin: 0 0 5px; font-size: clamp(1.35rem, 3vw, 1.75rem); }
+  .vehicle-step-title p { margin: 0; color: var(--muted); }
+  .vehicle-upload-card {
+    height: 100%;
+    padding: 18px;
+    border: 1px dashed #c9b79f;
+    border-radius: 15px;
+    background: #faf6ef;
+  }
+  .vehicle-upload-card .form-control { background: #fff; }
+  .vehicle-upload-status { min-height: 1.3em; margin-top: 8px; color: #5c6871; font-size: .84rem; }
+  .vehicle-advanced {
+    border: 1px solid #dfd3c1;
+    border-radius: 15px;
+    background: #faf6ef;
+  }
+  .vehicle-advanced summary {
+    padding: 15px 17px;
+    cursor: pointer;
+    color: #31404c;
+    font-weight: 700;
+  }
+  .vehicle-advanced-body { padding: 2px 17px 17px; }
+  .sticky-form-actions {
+    position: sticky;
+    z-index: 25;
+    bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 22px;
+    padding: 12px;
+    border: 1px solid rgba(221, 209, 192, .95);
+    border-radius: 17px;
+    background: rgba(255, 253, 249, .95);
+    box-shadow: 0 14px 34px rgba(64, 47, 25, .16);
+    backdrop-filter: blur(14px);
+  }
+  .vehicle-action-group { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .vehicle-step-status { color: var(--muted); font-size: .88rem; font-weight: 700; }
+  .vehicle-required-note { color: var(--muted); font-size: .85rem; }
+  @media (max-width: 767.98px) {
+    .vehicle-progress { grid-template-columns: 1fr; gap: 7px; margin: 22px 0; }
+    .vehicle-progress-button { min-height: 50px; }
+    .vehicle-progress-copy span { display: none; }
+    .vehicle-step { padding: 18px 14px; border-radius: 16px; }
+    .sticky-form-actions { align-items: stretch; flex-direction: row; flex-wrap: wrap; bottom: 8px; }
+    .vehicle-action-group { width: auto; flex: 1 1 0; }
+    .vehicle-action-group .btn { flex: 1 1 120px; }
+    .vehicle-step-status { order: -1; width: 100%; text-align: center; }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
+{% set selected_autohaus = request.form.get('autohaus_id', '') %}
+{% set selected_transport = request.form.get('transport_art', 'standard') %}
 <div class="row justify-content-center">
   <div class="col-xl-11">
-    <div class="page-card p-4 p-lg-5">
-      <div class="section-title">
-        <div>
-          <div class="badge-soft mb-3">Neues Fahrzeug</div>
-          <h1 class="mb-2">Fahrzeug manuell für ein Autohaus anlegen</h1>
-          <p>Du kannst intern jederzeit Fahrzeuge direkt einem Autohaus zuordnen.</p>
-        </div>
+    <div class="page-card p-3 p-lg-5 vehicle-wizard-card">
+      <div class="vehicle-wizard-intro">
+        <div class="badge-soft mb-3">Neues Fahrzeug</div>
+        <h1 class="mb-2">Fahrzeug anlegen</h1>
+        <p class="mb-0 text-muted">Nur die Angaben eintragen, die bereits bekannt sind. Fahrzeugdetails und Termine lassen sich später jederzeit ergänzen.</p>
       </div>
 
-      <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
-        <div class="col-md-6">
-          <label class="form-label">Autohaus</label>
-          <select name="autohaus_id" class="form-select form-select-lg">
-            <option value="">Ohne Autohaus</option>
-            {% for h in autohaeuser %}
-            <option value="{{ h['id'] }}">{{ h['name'] }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Endkunde / Referenz</label>
-          <input type="text" name="kunde_name" class="form-control form-control-lg">
-        </div>
-        <div class="col-md-8">
-          <label class="form-label">Fahrzeug</label>
-          <input type="text" name="fahrzeug" class="form-control form-control-lg" placeholder="Wird beim Upload, wenn möglich, automatisch erkannt" data-vehicle-input>
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Kennzeichen</label>
-          <input type="text" name="kennzeichen" class="form-control form-control-lg" style="text-transform:uppercase;">
-        </div>
-        <div class="col-md-5">
-          <label class="form-label">FIN</label>
-          <div class="input-group input-group-lg" data-fin-widget>
-            <input type="text" name="fin_nummer" class="form-control" style="text-transform:uppercase;" data-fin-input>
-            <button class="btn btn-outline-dark" type="button" data-fin-analyze>FIN analysieren</button>
+      <form method="POST" enctype="multipart/form-data" class="vehicle-wizard" data-upload-form data-vehicle-wizard novalidate>
+        <nav class="vehicle-progress" aria-label="Schritte der Fahrzeugerfassung">
+          <button type="button" class="vehicle-progress-button is-active" data-step-target="1" aria-controls="vehicle-step-1" aria-current="step">
+            <span class="vehicle-progress-number">1</span>
+            <span class="vehicle-progress-copy"><strong>Grunddaten</strong><span>Autohaus, Kunde und Fahrzeug</span></span>
+          </button>
+          <button type="button" class="vehicle-progress-button" data-step-target="2" aria-controls="vehicle-step-2">
+            <span class="vehicle-progress-number">2</span>
+            <span class="vehicle-progress-copy"><strong>Schaden &amp; Details</strong><span>Beschreibung und Fahrzeugdaten</span></span>
+          </button>
+          <button type="button" class="vehicle-progress-button" data-step-target="3" aria-controls="vehicle-step-3">
+            <span class="vehicle-progress-number">3</span>
+            <span class="vehicle-progress-copy"><strong>Termine &amp; Speichern</strong><span>Transport, Planung und Notiz</span></span>
+          </button>
+        </nav>
+
+        <section class="vehicle-step is-active" id="vehicle-step-1" data-form-step="1" aria-labelledby="vehicle-step-title-1">
+          <div class="vehicle-step-title">
+            <h2 id="vehicle-step-title-1" tabindex="-1">Grunddaten</h2>
+            <p>Mit wenigen Angaben starten oder eine Unterlage direkt analysieren lassen.</p>
           </div>
-          <div class="form-text" data-fin-result></div>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">HSN</label>
-          <input type="text" name="hsn_nummer" class="form-control form-control-lg" placeholder="2.1">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">TSN</label>
-          <input type="text" name="tsn_nummer" class="form-control form-control-lg" placeholder="2.2" style="text-transform:uppercase;">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Handy / WhatsApp Kunde</label>
-          <input type="text" name="kontakt_telefon" class="form-control" placeholder="z.B. 0171 1234567">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Analyse</label>
-          <input type="text" name="analyse_text" class="form-control" placeholder="z.B. Stoßstange hinten instandsetzen">
-        </div>
-        <div class="col-12">
-          <label class="form-label">Beschreibung</label>
-          <textarea name="beschreibung" class="form-control" rows="4"></textarea>
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Transport</label>
-          <select name="transport_art" class="form-select form-select-lg">
-            {% for key, meta in transport_arten.items() %}
-            <option value="{{ key }}">{{ meta['label'] }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Übernahme</label>
-          <input type="date" name="annahme_datum" class="form-control form-control-lg">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Start</label>
-          <input type="date" name="start_datum" class="form-control form-control-lg">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Fertig</label>
-          <input type="date" name="fertig_datum" class="form-control form-control-lg">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Rückgabe</label>
-          <input type="date" name="abholtermin" class="form-control form-control-lg">
-        </div>
-        <div class="col-12" id="abhol-adresse-wrap" style="display:none;">
-          <label class="form-label">📍 Abhol-/Lieferadresse</label>
-          <input type="text" name="abhol_adresse" class="form-control form-control-lg" placeholder="z.B. Unteres Lohhaus 5, 74915 Waibstadt">
-          <div class="form-text">Beim Hol- und Bringservice: erscheint auf der Werkstatt-Tafel, damit der Mitarbeiter weiss, wo das Auto zu holen/bringen ist.</div>
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Anhänge</label>
-          <input type="file" name="dateien" class="form-control form-control-lg" multiple>
-          <div class="form-text">Mit dem Upload-Button wird die Datei sofort gelesen und der Auftrag automatisch vorbefüllt. Bei Gutachten kann das ein paar Sekunden dauern.</div>
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Interne Notiz</label>
-          <textarea name="notiz_intern" class="form-control" rows="4"></textarea>
-        </div>
-        <div class="col-12 d-flex gap-2 flex-wrap">
-          <button type="submit" name="aktion" value="upload_analyze" class="btn btn-soft btn-lg" data-loading-message="Bitte kurz warten. Die Datei wird gelesen und das Fahrzeug wird vorbereitet.">Hochladen & analysieren</button>
-          <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Fahrzeug speichern</button>
-          <a href="{{ url_for('dashboard') }}" class="btn btn-soft btn-lg">Zurück</a>
+          <div class="row g-4">
+            <div class="col-lg-5">
+              <div class="vehicle-upload-card">
+                <label class="form-label" for="dateien">Unterlage oder Foto</label>
+                <input id="dateien" type="file" name="dateien" class="form-control form-control-lg" multiple accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.docx,.xlsx">
+                <div id="dateien-hinweis" class="form-text">PDF, Foto oder Dokument auswählen. Die Analyse legt den Auftrag an und öffnet anschließend die Detailansicht.</div>
+                <div class="vehicle-upload-status" data-upload-status aria-live="polite">Noch keine Datei ausgewählt.</div>
+                <button type="submit" name="aktion" value="upload_analyze" class="btn btn-soft w-100 mt-2" data-upload-analyze disabled data-loading-message="Bitte kurz warten. Die Datei wird gelesen und der Auftrag wird vorbereitet.">Datei hochladen &amp; analysieren</button>
+              </div>
+            </div>
+            <div class="col-lg-7">
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label" for="autohaus_id">Autohaus</label>
+                  <select id="autohaus_id" name="autohaus_id" class="form-select form-select-lg">
+                    <option value="">Ohne Autohaus</option>
+                    {% for h in autohaeuser %}
+                    <option value="{{ h['id'] }}" {% if selected_autohaus == h['id']|string %}selected{% endif %}>{{ h['name'] }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label" for="kunde_name">Endkunde / Referenz</label>
+                  <input id="kunde_name" type="text" name="kunde_name" class="form-control form-control-lg" value="{{ request.form.get('kunde_name', '') }}" autocomplete="name">
+                </div>
+                <div class="col-md-8">
+                  <label class="form-label" for="fahrzeug">Fahrzeug</label>
+                  <input id="fahrzeug" type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ request.form.get('fahrzeug', '') }}" placeholder="z. B. Hyundai Tucson" data-vehicle-input>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label" for="kennzeichen">Kennzeichen</label>
+                  <input id="kennzeichen" type="text" name="kennzeichen" class="form-control form-control-lg text-uppercase" value="{{ request.form.get('kennzeichen', '') }}" autocomplete="off">
+                </div>
+                <div class="col-12">
+                  <label class="form-label" for="kontakt_telefon">Handy / WhatsApp Kunde</label>
+                  <input id="kontakt_telefon" type="tel" name="kontakt_telefon" class="form-control form-control-lg" value="{{ request.form.get('kontakt_telefon', '') }}" placeholder="z. B. 0171 1234567" autocomplete="tel">
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="vehicle-step" id="vehicle-step-2" data-form-step="2" aria-labelledby="vehicle-step-title-2">
+          <div class="vehicle-step-title">
+            <h2 id="vehicle-step-title-2" tabindex="-1">Schaden und Fahrzeugdetails</h2>
+            <p>Eine kurze Beschreibung genügt. Technische Daten bleiben optional.</p>
+          </div>
+          <div class="row g-4">
+            <div class="col-md-6">
+              <label class="form-label" for="analyse_text">Kurzanalyse</label>
+              <input id="analyse_text" type="text" name="analyse_text" class="form-control form-control-lg" value="{{ request.form.get('analyse_text', '') }}" placeholder="z. B. Stoßstange hinten instandsetzen">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="beschreibung">Beschreibung</label>
+              <textarea id="beschreibung" name="beschreibung" class="form-control" rows="4" placeholder="Schaden, gewünschte Arbeiten oder wichtige Hinweise">{{ request.form.get('beschreibung', '') }}</textarea>
+            </div>
+            <div class="col-12">
+              <details class="vehicle-advanced" {% if request.form.get('fin_nummer') or request.form.get('hsn_nummer') or request.form.get('tsn_nummer') %}open{% endif %}>
+                <summary>FIN, HSN und TSN ergänzen</summary>
+                <div class="vehicle-advanced-body">
+                  <div class="row g-3">
+                    <div class="col-lg-6">
+                      <label class="form-label" for="fin_nummer">Fahrzeug-Identifizierungsnummer (FIN)</label>
+                      <div class="input-group input-group-lg" data-fin-widget>
+                        <input id="fin_nummer" type="text" name="fin_nummer" class="form-control text-uppercase" value="{{ request.form.get('fin_nummer', '') }}" autocomplete="off" data-fin-input aria-describedby="fin-result">
+                        <button class="btn btn-outline-dark" type="button" data-fin-analyze>FIN analysieren</button>
+                      </div>
+                      <div id="fin-result" class="form-text" data-fin-result aria-live="polite"></div>
+                    </div>
+                    <div class="col-md-3">
+                      <label class="form-label" for="hsn_nummer">HSN</label>
+                      <input id="hsn_nummer" type="text" name="hsn_nummer" class="form-control form-control-lg" value="{{ request.form.get('hsn_nummer', '') }}" placeholder="2.1" autocomplete="off">
+                    </div>
+                    <div class="col-md-3">
+                      <label class="form-label" for="tsn_nummer">TSN</label>
+                      <input id="tsn_nummer" type="text" name="tsn_nummer" class="form-control form-control-lg text-uppercase" value="{{ request.form.get('tsn_nummer', '') }}" placeholder="2.2" autocomplete="off">
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </section>
+
+        <section class="vehicle-step" id="vehicle-step-3" data-form-step="3" aria-labelledby="vehicle-step-title-3">
+          <div class="vehicle-step-title">
+            <h2 id="vehicle-step-title-3" tabindex="-1">Transport und Termine</h2>
+            <p>Nur bereits abgestimmte Termine eintragen. Alles andere kann später geplant werden.</p>
+          </div>
+          <div class="row g-4">
+            <div class="col-md-4">
+              <label class="form-label" for="transport_art">Transport</label>
+              <select id="transport_art" name="transport_art" class="form-select form-select-lg">
+                {% for key, meta in transport_arten.items() %}
+                <option value="{{ key }}" {% if selected_transport == key %}selected{% endif %}>{{ meta['label'] }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-2 col-6">
+              <label class="form-label" for="annahme_datum">Übernahme</label>
+              <input id="annahme_datum" type="date" name="annahme_datum" class="form-control form-control-lg" value="{{ request.form.get('annahme_datum', '') }}">
+            </div>
+            <div class="col-md-2 col-6">
+              <label class="form-label" for="start_datum">Start</label>
+              <input id="start_datum" type="date" name="start_datum" class="form-control form-control-lg" value="{{ request.form.get('start_datum', '') }}">
+            </div>
+            <div class="col-md-2 col-6">
+              <label class="form-label" for="fertig_datum">Fertig</label>
+              <input id="fertig_datum" type="date" name="fertig_datum" class="form-control form-control-lg" value="{{ request.form.get('fertig_datum', '') }}">
+            </div>
+            <div class="col-md-2 col-6">
+              <label class="form-label" for="abholtermin">Rückgabe</label>
+              <input id="abholtermin" type="date" name="abholtermin" class="form-control form-control-lg" value="{{ request.form.get('abholtermin', '') }}">
+            </div>
+            <div class="col-12" id="abhol-adresse-wrap" hidden>
+              <label class="form-label" for="abhol_adresse">Abhol-/Lieferadresse</label>
+              <input id="abhol_adresse" type="text" name="abhol_adresse" class="form-control form-control-lg" value="{{ request.form.get('abhol_adresse', '') }}" placeholder="z. B. Unteres Lohhaus 5, 74915 Waibstadt" autocomplete="street-address">
+              <div class="form-text">Die Adresse erscheint beim Hol- und Bringservice auf der Werkstatt-Tafel.</div>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="notiz_intern">Interne Notiz</label>
+              <textarea id="notiz_intern" name="notiz_intern" class="form-control" rows="4" placeholder="Nur Hinweise für die Werkstatt">{{ request.form.get('notiz_intern', '') }}</textarea>
+            </div>
+            <div class="col-12 vehicle-required-note">Alle Angaben können nach dem Speichern in der Auftragsansicht ergänzt oder korrigiert werden.</div>
+          </div>
+        </section>
+
+        <div class="sticky-form-actions">
+          <div class="vehicle-action-group">
+            <button type="button" class="btn btn-soft" data-step-back hidden>Zurück</button>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-soft" data-step-cancel>Abbrechen</a>
+          </div>
+          <div class="vehicle-step-status" data-step-status aria-live="polite">Schritt 1 von 3</div>
+          <div class="vehicle-action-group">
+            <button type="button" class="btn btn-brand" data-step-next>Weiter</button>
+            <button type="submit" name="aktion" value="speichern" class="btn btn-brand" data-save-vehicle hidden>Fahrzeug speichern</button>
+          </div>
         </div>
       </form>
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
 <script>
-  (function(){
-    var sel = document.querySelector('select[name="transport_art"]');
-    var wrap = document.getElementById('abhol-adresse-wrap');
-    if (!sel || !wrap) return;
-    function toggle(){ wrap.style.display = (sel.value === 'hol_und_bring') ? '' : 'none'; }
-    sel.addEventListener('change', toggle);
-    toggle();
+  (() => {
+    const form = document.querySelector('[data-vehicle-wizard]');
+    if (!form) return;
+    form.classList.add('is-enhanced');
+    const steps = Array.from(form.querySelectorAll('[data-form-step]'));
+    const stepButtons = Array.from(form.querySelectorAll('[data-step-target]'));
+    const backButton = form.querySelector('[data-step-back]');
+    const cancelButton = form.querySelector('[data-step-cancel]');
+    const nextButton = form.querySelector('[data-step-next]');
+    const saveButton = form.querySelector('[data-save-vehicle]');
+    const stepStatus = form.querySelector('[data-step-status]');
+    const fileInput = form.querySelector('#dateien');
+    const uploadButton = form.querySelector('[data-upload-analyze]');
+    const uploadStatus = form.querySelector('[data-upload-status]');
+    const transportSelect = form.querySelector('#transport_art');
+    const addressWrap = form.querySelector('#abhol-adresse-wrap');
+    let currentStep = 1;
+
+    const showStep = (stepNumber, focusHeading = true) => {
+      currentStep = Math.min(3, Math.max(1, Number(stepNumber) || 1));
+      steps.forEach((step) => {
+        const active = Number(step.dataset.formStep) === currentStep;
+        step.classList.toggle('is-active', active);
+        step.hidden = !active;
+      });
+      stepButtons.forEach((button) => {
+        const active = Number(button.dataset.stepTarget) === currentStep;
+        button.classList.toggle('is-active', active);
+        if (active) button.setAttribute('aria-current', 'step');
+        else button.removeAttribute('aria-current');
+      });
+      backButton.hidden = currentStep === 1;
+      cancelButton.hidden = currentStep !== 1;
+      nextButton.hidden = currentStep === 3;
+      saveButton.hidden = currentStep !== 3;
+      stepStatus.textContent = `Schritt ${currentStep} von 3`;
+      if (focusHeading) {
+        form.querySelector('.vehicle-progress')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+
+    stepButtons.forEach((button) => button.addEventListener('click', () => showStep(button.dataset.stepTarget)));
+    backButton.addEventListener('click', () => showStep(currentStep - 1));
+    nextButton.addEventListener('click', () => showStep(currentStep + 1));
+
+    const updateUpload = () => {
+      const files = Array.from(fileInput?.files || []);
+      if (uploadButton) uploadButton.disabled = files.length === 0;
+      if (uploadStatus) {
+        uploadStatus.textContent = files.length
+          ? `${files.length} Datei${files.length === 1 ? '' : 'en'} ausgewählt: ${files.map((file) => file.name).join(', ')}`
+          : 'Noch keine Datei ausgewählt.';
+      }
+    };
+    fileInput?.addEventListener('change', updateUpload);
+    updateUpload();
+
+    const updateTransport = () => {
+      if (!transportSelect || !addressWrap) return;
+      const showAddress = transportSelect.value === 'hol_und_bring';
+      addressWrap.hidden = !showAddress;
+    };
+    transportSelect?.addEventListener('change', updateTransport);
+    updateTransport();
+    showStep(1, false);
   })();
 </script>
 {% endblock %}
