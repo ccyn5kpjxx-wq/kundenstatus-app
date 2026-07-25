@@ -173,5 +173,6 @@
     function starteAnfrage(event){event.preventDefault();const car=carSelect.value,from=document.getElementById('quick-from').value,to=document.getElementById('quick-to').value;if(!from||!to)return false;if(new Date(to)<new Date(from)){alert('Bitte wähle ein Rückgabedatum nach der Abholung.');return false;}const text=`Hallo, ich interessiere mich für den ${car} vom ${deDate(from)} bis ${deDate(to)}. Ist das Fahrzeug verfügbar?`;window.open('https://wa.me/4915227706694?text='+encodeURIComponent(text),'_blank','noopener');return false;}
     function starteAboAnfrage(event){event.preventDefault();const kind=document.getElementById('abo-kind').value,car=document.getElementById('abo-car').value,term=document.getElementById('abo-term').value,km=document.getElementById('abo-km').value,name=document.getElementById('abo-name').value;const text=`Hallo, mein Name ist ${name}. Ich interessiere mich als ${kind} für ein Auto-Abo / eine Langzeitmiete. Fahrzeugwunsch: ${car}, Laufzeit: ${term}, Fahrleistung: ${km}. Bitte senden Sie mir weitere Informationen.`;window.open('https://wa.me/4915227706694?text='+encodeURIComponent(text),'_blank','noopener');return false;}
   </script>
+  <script src="analytics.js?v=1" defer></script>
 </body>
 </html>

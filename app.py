@@ -21,6 +21,7 @@ from functools import wraps
 from html import escape, unescape
 import hmac
 import hashlib
+import ipaddress
 import imaplib
 import importlib
 from io import BytesIO
@@ -254,6 +255,14 @@ if PUBLIC_BASE_URL:
     if public_base_hostname:
         PUBLIC_HOSTS.add(public_base_hostname)
 PORTAL_BASE_URL = (os.environ.get("PORTAL_BASE_URL") or "").strip().rstrip("/")
+DEFAULT_ANALYTICS_INGEST_URL = (
+    "https://kundenstatus-app.onrender.com/api/besucher" if RUNNING_ON_RENDER else ""
+)
+ANALYTICS_INGEST_URL = (
+    os.environ.get("ANALYTICS_INGEST_URL")
+    or (f"{PORTAL_BASE_URL}/api/besucher" if PORTAL_BASE_URL else "")
+    or DEFAULT_ANALYTICS_INGEST_URL
+).strip()
 LEXWARE_KUNDEN_URL = (os.environ.get("LEXWARE_KUNDEN_URL") or "").strip()
 LEXWARE_RECHNUNGEN_URL = (os.environ.get("LEXWARE_RECHNUNGEN_URL") or "").strip()
 LEXWARE_API_KEY = (os.environ.get("LEXWARE_API_KEY") or "").strip()
@@ -2503,6 +2512,7 @@ app.config.update(
         "SESSION_COOKIE_SECURE",
         RUNNING_ON_RENDER,
     ),
+    ANALYTICS_INGEST_URL=ANALYTICS_INGEST_URL,
 )
 if RUNNING_ON_RENDER:
     # Hinter dem Render-Proxy steht in REMOTE_ADDR sonst nur die Proxy-IP:
@@ -2806,6 +2816,7 @@ def restrict_public_site_service():
         "oeffentliches_team",
         "impressum_seite",
         "datenschutz_seite",
+        "api_besucher_event",
         "healthz",
         "public_robots",
         "public_sitemap",
@@ -2830,6 +2841,8 @@ def protect_csrf():
     if request.path.startswith("/webhooks/whatsapp"):
         return None
     if request.path == "/api/klick":
+        return None
+    if request.path == "/api/besucher":
         return None
     if (
         request.path.startswith("/api/werkstatt/fahrzeugeinkauf/")
@@ -9052,6 +9065,22 @@ def init_db():
             ist_admin      INTEGER DEFAULT 0
         );
 
+        CREATE TABLE IF NOT EXISTS besucher_events (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            erstellt_am      TEXT NOT NULL,
+            visitor_hash     TEXT NOT NULL,
+            website          TEXT DEFAULT 'auto-lackierzentrum',
+            seite            TEXT DEFAULT '',
+            referrer_domain  TEXT DEFAULT '',
+            geraet           TEXT DEFAULT '',
+            browser          TEXT DEFAULT '',
+            ist_bot          INTEGER DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_besucher_events_erstellt_am
+            ON besucher_events (erstellt_am);
+        CREATE INDEX IF NOT EXISTS idx_besucher_events_visitor_hash
+            ON besucher_events (visitor_hash);
         CREATE TABLE IF NOT EXISTS lexware_rechnungen (
             id                 INTEGER PRIMARY KEY AUTOINCREMENT,
             voucher_id         TEXT UNIQUE NOT NULL,
@@ -9110,6 +9139,11 @@ def init_db():
         """
     )
 
+    ensure_column(db, "besucher_events", "website", "TEXT DEFAULT 'auto-lackierzentrum'")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_besucher_events_website_erstellt_am "
+        "ON besucher_events (website, erstellt_am)"
+    )
     ensure_column(db, "auftraege", "autohaus_id", "INTEGER")
     ensure_column(db, "auftraege", "versicherung_id", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "token", "TEXT DEFAULT ''")
@@ -27050,6 +27084,374 @@ def list_klick_statistik(tage=30, limit=40):
     }
 
 
+BESUCHER_WEBSITES = {
+    "auto-lackierzentrum": {
+        "label": "Auto-Lackierzentrum",
+        "domain": "auto-lackierzentrum.de",
+        "hosts": {"auto-lackierzentrum.de", "www.auto-lackierzentrum.de"},
+        "seiten": {
+            "/": "Homepage",
+            "/homepage": "Homepage",
+            "/leistungen": "Leistungen",
+            "/portale": "Portale",
+            "/team": "Team",
+            "/anfrage": "Anfrage",
+            "/mietwagen-info": "Mietwagen-Übersicht",
+            "/mietwagen": "Mietwagen-Anfrage",
+            "/impressum": "Impressum",
+            "/datenschutz": "Datenschutz",
+        },
+    },
+    "tomorrowworks": {
+        "label": "Tomorrowworks",
+        "domain": "tomorrowworks-agentur.de",
+        "hosts": {"tomorrowworks-agentur.de", "www.tomorrowworks-agentur.de"},
+        "seiten": {
+            "/": "Homepage",
+            "/index.html": "Homepage",
+            "/websites.html": "Websites",
+            "/apps.html": "Apps",
+            "/ki-einstieg.html": "KI-Einstieg",
+            "/projekte.html": "Projekte",
+            "/preise.html": "Preise",
+            "/visitenkarten.html": "Visitenkarten",
+            "/datenschutz.html": "Datenschutz",
+            "/impressum.html": "Impressum",
+        },
+    },
+    "autovermietung-mos": {
+        "label": "Autovermietung MOS",
+        "domain": "autovermietung-mos.de",
+        "hosts": {"autovermietung-mos.de", "www.autovermietung-mos.de"},
+        "seiten": {"/": "Homepage"},
+    },
+}
+BESUCHER_WEBSITE_ALIASES = {
+    "auto-verkehrszentrum": "auto-lackierzentrum",
+    "auto-lackierzentrum.de": "auto-lackierzentrum",
+    "www.auto-lackierzentrum.de": "auto-lackierzentrum",
+    "tomorrowworks-agentur.de": "tomorrowworks",
+    "www.tomorrowworks-agentur.de": "tomorrowworks",
+    "autovermietung-mos.de": "autovermietung-mos",
+    "www.autovermietung-mos.de": "autovermietung-mos",
+}
+BESUCHER_BOT_PATTERN = re.compile(
+    r"bot|spider|crawl|slurp|headless|preview|facebookexternalhit|meta-externalagent|"
+    r"whatsapp|telegrambot|discordbot|bingpreview|google-inspectiontool|lighthouse|"
+    r"pagespeed|uptime|monitor|curl|wget|python-requests|go-http-client|dataprovider",
+    re.IGNORECASE,
+)
+
+
+def normalize_besucher_website(value):
+    website = clean_text(value).lower().strip().rstrip("/")
+    website = BESUCHER_WEBSITE_ALIASES.get(website, website)
+    return website if website in BESUCHER_WEBSITES else ""
+
+
+def normalize_besucher_seite(value, website="auto-lackierzentrum"):
+    path = clean_text(value).split("?", 1)[0].split("#", 1)[0]
+    if not path.startswith("/"):
+        try:
+            path = urlsplit(path).path
+        except ValueError:
+            return ""
+    path = re.sub(r"/{2,}", "/", path)[:240]
+    if website == "auto-lackierzentrum" and path == "/homepage":
+        return "/"
+    return path.rstrip("/") or "/"
+
+
+def besucher_seiten_label(website, seite):
+    config = BESUCHER_WEBSITES.get(website, {})
+    label = config.get("seiten", {}).get(seite)
+    if label:
+        return label
+    slug = seite.strip("/").rsplit("/", 1)[-1].removesuffix(".html")
+    return slug.replace("-", " ").replace("_", " ").title() or "Homepage"
+
+
+def besucher_ip_address():
+    candidates = [request.headers.get("CF-Connecting-IP", "")]
+    candidates.extend(clean_text(request.headers.get("X-Forwarded-For")).split(","))
+    candidates.append(request.remote_addr or "")
+    for candidate in candidates:
+        candidate = clean_text(candidate)
+        if not candidate:
+            continue
+        try:
+            return ipaddress.ip_address(candidate).compressed
+        except ValueError:
+            continue
+    return "unbekannt"
+
+
+def besucher_referrer_domain(value, website="auto-lackierzentrum"):
+    raw_value = clean_text(value)
+    try:
+        hostname = clean_text(urlsplit(raw_value).hostname).lower().rstrip(".")
+    except ValueError:
+        hostname = ""
+    if not hostname and re.fullmatch(r"[a-z0-9.-]{1,200}", raw_value, re.IGNORECASE):
+        hostname = raw_value.lower().rstrip(".")
+    if not hostname:
+        return "Direkt / unbekannt"
+    website_hosts = BESUCHER_WEBSITES.get(website, {}).get("hosts", set())
+    if hostname in website_hosts:
+        return "Intern"
+    return hostname[:200]
+
+
+def besucher_request_origin(website=""):
+    origin = clean_text(request.headers.get("Origin"))
+    if not origin:
+        if app.config.get("TESTING") and request.remote_addr in {"127.0.0.1", "::1"}:
+            return ""
+        return None
+    try:
+        parsed = urlsplit(origin)
+        hostname = clean_text(parsed.hostname).lower().rstrip(".")
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        return None
+    if app.config.get("TESTING") and hostname in {"127.0.0.1", "localhost"}:
+        return origin
+    websites = [website] if website else list(BESUCHER_WEBSITES)
+    if any(hostname in BESUCHER_WEBSITES[key]["hosts"] for key in websites):
+        return origin
+    return None
+
+
+def besucher_cors_response(origin=""):
+    response = make_response("", 204)
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+        response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return response
+
+
+def besucher_client_klassen(user_agent):
+    user_agent = clean_text(user_agent)
+    lower = user_agent.lower()
+    ist_bot = not user_agent or bool(BESUCHER_BOT_PATTERN.search(user_agent))
+    if "ipad" in lower or "tablet" in lower:
+        geraet = "Tablet"
+    elif any(marker in lower for marker in ("mobile", "iphone", "android")):
+        geraet = "Mobil"
+    else:
+        geraet = "Desktop"
+    if "edg/" in lower or "edgios" in lower or "edga/" in lower:
+        browser = "Edge"
+    elif "firefox/" in lower or "fxios/" in lower:
+        browser = "Firefox"
+    elif "opr/" in lower or "opera" in lower:
+        browser = "Opera"
+    elif "chrome/" in lower or "crios/" in lower:
+        browser = "Chrome"
+    elif "safari/" in lower:
+        browser = "Safari"
+    else:
+        browser = "Sonstiges"
+    return geraet, browser, ist_bot
+
+
+def log_besucher_event(seite, referrer="", user_agent="", ip_address="", website="auto-lackierzentrum"):
+    website = normalize_besucher_website(website)
+    seite = normalize_besucher_seite(seite, website=website)
+    if not website or not seite:
+        return False
+    user_agent = clean_text(user_agent)[:600]
+    ip_address = clean_text(ip_address) or "unbekannt"
+    geraet, browser, ist_bot = besucher_client_klassen(user_agent)
+    secret = str(app.secret_key or "").encode("utf-8")
+    fingerprint = f"besucher-v2|{website}|{ip_address}|{user_agent}".encode("utf-8")
+    visitor_hash = hmac.new(secret, fingerprint, hashlib.sha256).hexdigest()[:32]
+    cutoff = db_datetime_str(datetime.now() - timedelta(days=90))
+    db = get_db()
+    try:
+        db.execute("DELETE FROM besucher_events WHERE erstellt_am < ?", (cutoff,))
+        db.execute(
+            """
+            INSERT INTO besucher_events
+                (erstellt_am, visitor_hash, website, seite, referrer_domain, geraet, browser, ist_bot)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                db_datetime_str(),
+                visitor_hash,
+                website,
+                seite,
+                besucher_referrer_domain(referrer, website=website),
+                geraet,
+                browser,
+                1 if ist_bot else 0,
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return True
+
+
+def list_besucher_statistik(tage=30, website="alle"):
+    try:
+        tage = int(tage or 30)
+    except (TypeError, ValueError):
+        tage = 30
+    tage = max(1, min(tage, 90))
+    website = clean_text(website).lower()
+    if website != "alle":
+        website = normalize_besucher_website(website) or "alle"
+    website_filter = " AND website=?" if website != "alle" else ""
+
+    def filter_params(cutoff_value):
+        return (cutoff_value, website) if website != "alle" else (cutoff_value,)
+
+    erster_tag = date.today() - timedelta(days=tage - 1)
+    cutoff = f"{erster_tag.isoformat()} 00:00:00"
+    heute_cutoff = f"{date.today().isoformat()} 00:00:00"
+    db = get_db()
+    try:
+        gesamt = db.execute(
+            f"""
+            SELECT COUNT(*) AS aufrufe,
+                   COUNT(DISTINCT visitor_hash) AS besucher,
+                   MAX(erstellt_am) AS zuletzt
+            FROM besucher_events
+            WHERE erstellt_am >= ? AND ist_bot=0{website_filter}
+            """,
+            filter_params(cutoff),
+        ).fetchone()
+        heute = db.execute(
+            f"""
+            SELECT COUNT(*) AS aufrufe, COUNT(DISTINCT visitor_hash) AS besucher
+            FROM besucher_events
+            WHERE erstellt_am >= ? AND ist_bot=0{website_filter}
+            """,
+            filter_params(heute_cutoff),
+        ).fetchone()
+        bot_row = db.execute(
+            f"SELECT COUNT(*) AS anzahl FROM besucher_events WHERE erstellt_am >= ? AND ist_bot=1{website_filter}",
+            filter_params(cutoff),
+        ).fetchone()
+        tage_rows = db.execute(
+            f"""
+            SELECT SUBSTR(erstellt_am, 1, 10) AS tag,
+                   COUNT(*) AS aufrufe,
+                   COUNT(DISTINCT visitor_hash) AS besucher
+            FROM besucher_events
+            WHERE erstellt_am >= ? AND ist_bot=0{website_filter}
+            GROUP BY tag ORDER BY tag
+            """,
+            filter_params(cutoff),
+        ).fetchall()
+        seiten_rows = db.execute(
+            f"""
+            SELECT website, seite, COUNT(*) AS aufrufe, COUNT(DISTINCT visitor_hash) AS besucher
+            FROM besucher_events
+            WHERE erstellt_am >= ? AND ist_bot=0{website_filter}
+            GROUP BY website, seite ORDER BY aufrufe DESC, website, seite
+            """,
+            filter_params(cutoff),
+        ).fetchall()
+        quellen_rows = db.execute(
+            f"""
+            SELECT referrer_domain AS quelle, COUNT(*) AS aufrufe
+            FROM besucher_events
+            WHERE erstellt_am >= ? AND ist_bot=0{website_filter}
+            GROUP BY referrer_domain ORDER BY aufrufe DESC, quelle LIMIT 10
+            """,
+            filter_params(cutoff),
+        ).fetchall()
+        geraete_rows = db.execute(
+            f"""
+            SELECT geraet, COUNT(*) AS aufrufe
+            FROM besucher_events
+            WHERE erstellt_am >= ? AND ist_bot=0{website_filter}
+            GROUP BY geraet ORDER BY aufrufe DESC, geraet
+            """,
+            filter_params(cutoff),
+        ).fetchall()
+        browser_rows = db.execute(
+            f"""
+            SELECT browser, COUNT(*) AS aufrufe
+            FROM besucher_events
+            WHERE erstellt_am >= ? AND ist_bot=0{website_filter}
+            GROUP BY browser ORDER BY aufrufe DESC, browser
+            """,
+            filter_params(cutoff),
+        ).fetchall()
+        website_rows = db.execute(
+            """
+            SELECT website, COUNT(*) AS aufrufe, COUNT(DISTINCT visitor_hash) AS besucher
+            FROM besucher_events
+            WHERE erstellt_am >= ? AND ist_bot=0
+            GROUP BY website ORDER BY aufrufe DESC, website
+            """,
+            (cutoff,),
+        ).fetchall()
+    finally:
+        db.close()
+
+    tage_lookup = {row["tag"]: dict(row) for row in tage_rows}
+    verlauf = []
+    for offset in range(tage):
+        tag = erster_tag + timedelta(days=offset)
+        row = tage_lookup.get(tag.isoformat(), {})
+        verlauf.append({
+            "tag": tag.isoformat(),
+            "label": tag.strftime("%d.%m."),
+            "aufrufe": int(row.get("aufrufe") or 0),
+            "besucher": int(row.get("besucher") or 0),
+        })
+    seiten = []
+    for row in seiten_rows:
+        item = dict(row)
+        item["label"] = besucher_seiten_label(item["website"], item["seite"])
+        item["website_label"] = BESUCHER_WEBSITES.get(item["website"], {}).get(
+            "label", item["website"] or "Unbekannt"
+        )
+        seiten.append(item)
+    website_lookup = {row["website"]: dict(row) for row in website_rows}
+    websites = []
+    for key, config in BESUCHER_WEBSITES.items():
+        row = website_lookup.get(key, {})
+        websites.append({
+            "key": key,
+            "label": config["label"],
+            "domain": config["domain"],
+            "aufrufe": int(row.get("aufrufe") or 0),
+            "besucher": int(row.get("besucher") or 0),
+        })
+    zuletzt = gesamt["zuletzt"] if gesamt else ""
+    try:
+        zuletzt = datetime.strptime(zuletzt, "%Y-%m-%d %H:%M:%S").strftime(DATETIME_FMT)
+    except (TypeError, ValueError):
+        zuletzt = "Noch kein Besuch"
+    return {
+        "tage": tage,
+        "website": website,
+        "website_label": (
+            "Alle Websites" if website == "alle" else BESUCHER_WEBSITES[website]["label"]
+        ),
+        "aufrufe": int(gesamt["aufrufe"] or 0) if gesamt else 0,
+        "besucher": int(gesamt["besucher"] or 0) if gesamt else 0,
+        "heute_aufrufe": int(heute["aufrufe"] or 0) if heute else 0,
+        "heute_besucher": int(heute["besucher"] or 0) if heute else 0,
+        "bot_aufrufe": int(bot_row["anzahl"] or 0) if bot_row else 0,
+        "zuletzt": zuletzt,
+        "verlauf": verlauf,
+        "seiten": seiten,
+        "quellen": [dict(row) for row in quellen_rows],
+        "geraete": [dict(row) for row in geraete_rows],
+        "browser": [dict(row) for row in browser_rows],
+        "websites": websites,
+    }
+
+
 def update_werkstatt_email_zuordnung(email_id, auftrag_id=0, ziel_modul="", kategorie="", hinweis="", manuell=True):
     try:
         auftrag_id = int(auftrag_id or 0)
@@ -34302,6 +34704,47 @@ def api_klick_event():
         ist_admin=ist_admin,
     )
     return jsonify({"ok": bool(logged)})
+
+
+@app.route("/api/besucher", methods=["POST", "OPTIONS"])
+def api_besucher_event():
+    if request.method == "OPTIONS":
+        origin = besucher_request_origin()
+        return besucher_cors_response(origin or "")
+    if session.get("admin") or session.get("partner_autohaus_id") or session.get("versicherung_id"):
+        return "", 204
+    if request.content_length and request.content_length > 4096:
+        return "", 204
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        try:
+            payload = json.loads(request.get_data(as_text=True) or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    website = normalize_besucher_website(payload.get("website") or "auto-lackierzentrum")
+    origin = besucher_request_origin(website)
+    if not website or origin is None:
+        return "", 204
+    log_besucher_event(
+        website=website,
+        seite=payload.get("seite") or "",
+        referrer=payload.get("referrer") or request.referrer or "",
+        user_agent=request.headers.get("User-Agent", ""),
+        ip_address=besucher_ip_address(),
+    )
+    return besucher_cors_response(origin)
+
+
+@app.route("/admin/besucherstatistik")
+@admin_required
+def admin_besucherstatistik():
+    statistik = list_besucher_statistik(
+        tage=request.args.get("tage", 30),
+        website=request.args.get("website", "alle"),
+    )
+    return render_template("besucherstatistik_admin.html", statistik=statistik)
 
 
 @app.route("/admin/klickstatistik")

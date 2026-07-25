@@ -59,6 +59,8 @@ def main():
         "Optimiertes Hero eingebunden": '/static/homepage/werkstatt-hero-v3.webp' in html
         and (ROOT / "static" / "homepage" / "werkstatt-hero-v3.webp").stat().st_size < 200_000,
         "Lazy Loading": html.count('loading="lazy"') >= 7,
+        "Cookielose Besucherstatistik eingebunden": "/api/besucher" in html
+        and "localStorage" not in html and "document.cookie" not in html,
         "Vorschau nicht indexierbar": 'name="robots" content="noindex, nofollow"' in html,
     }
     print_checks(checks)

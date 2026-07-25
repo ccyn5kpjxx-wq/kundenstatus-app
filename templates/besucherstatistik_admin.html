@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Besucher-Analytics{% endblock %}
+{% block extra_css %}
+<style>
+  .analytics-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
+  .analytics-filter { display:flex; gap:.5rem; flex-wrap:wrap; }
+  .analytics-site-picker { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.7rem; margin-top:1.25rem; }
+  .analytics-site-link { display:block; padding:.85rem 1rem; border:1px solid rgba(24,56,63,.12); border-radius:14px; color:var(--ink); text-decoration:none; background:#fffdf9; }
+  .analytics-site-link:hover { color:var(--ink); border-color:var(--accent); }
+  .analytics-site-link.is-active { color:#fff; border-color:var(--brand); background:linear-gradient(135deg,var(--brand),#244e57); }
+  .analytics-site-link strong,.analytics-site-link small { display:block; }
+  .analytics-site-link small { margin-top:.15rem; color:inherit; opacity:.72; }
+  .analytics-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1rem; }
+  .analytics-kpi { border:1px solid rgba(24,56,63,.1); border-radius:18px; padding:1.15rem; background:linear-gradient(145deg,#fffdf9,#f7f2e9); }
+  .analytics-kpi span { display:block; color:var(--muted); font-size:.82rem; font-weight:700; }
+  .analytics-kpi strong { display:block; margin:.2rem 0; color:var(--ink); font-size:clamp(1.6rem,3vw,2.35rem); line-height:1; }
+  .analytics-kpi small { color:var(--muted); }
+  .analytics-grid { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(280px,.7fr); gap:1rem; }
+  .analytics-panel { min-width:0; }
+  .analytics-chart { display:flex; align-items:flex-end; gap:4px; min-height:190px; padding-top:1rem; overflow-x:auto; }
+  .analytics-day { min-width:18px; flex:1 0 18px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:.35rem; height:165px; }
+  .analytics-day-bar { width:100%; min-height:2px; height:var(--bar); border-radius:5px 5px 2px 2px; background:linear-gradient(180deg,var(--accent),var(--brand)); }
+  .analytics-day-value { min-height:18px; color:var(--ink); font-size:.7rem; font-weight:800; }
+  .analytics-day-label { color:var(--muted); font-size:.63rem; writing-mode:vertical-rl; transform:rotate(180deg); }
+  .analytics-table-shell { overflow-x:auto; }
+  .analytics-table { margin:0; }
+  .analytics-table th { color:var(--muted); font-size:.76rem; text-transform:uppercase; letter-spacing:.04em; }
+  .analytics-note { color:var(--muted); font-size:.86rem; line-height:1.5; }
+  .analytics-empty { padding:2rem; border:1px dashed rgba(24,56,63,.18); border-radius:16px; color:var(--muted); text-align:center; }
+  .analytics-websites { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1rem; }
+  .analytics-website-card { display:block; color:var(--ink); text-decoration:none; }
+  .analytics-website-card:hover { color:var(--ink); transform:translateY(-1px); }
+  .analytics-website-card .domain { color:var(--muted); font-size:.8rem; }
+  .analytics-website-values { display:flex; gap:1.4rem; margin-top:.75rem; }
+  .analytics-website-values strong { display:block; font-size:1.45rem; line-height:1; }
+  .analytics-website-values small { color:var(--muted); }
+  @media(max-width:1050px){.analytics-site-picker{grid-template-columns:repeat(2,1fr)}.analytics-kpis{grid-template-columns:repeat(2,1fr)}.analytics-grid{grid-template-columns:1fr}.analytics-websites{grid-template-columns:1fr}}
+  @media(max-width:620px){.analytics-site-picker{grid-template-columns:1fr}.analytics-kpis{grid-template-columns:1fr 1fr}.analytics-kpi{padding:.9rem}.analytics-kpi strong{font-size:1.7rem}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-card p-4 mb-4">
+  <div class="analytics-head">
+    <div>
+      <h4 class="mb-1">Besucher-Analytics</h4>
+      <p class="mb-0">Cookielose Auswertung für Auto-Lackierzentrum, Tomorrowworks und Autovermietung MOS. Bots sind herausgerechnet.</p>
+    </div>
+    <div class="analytics-filter" aria-label="Zeitraum auswählen">
+      {% for tage in (7, 30, 90) %}
+        <a class="btn btn-soft btn-sm {{ 'btn-brand' if statistik['tage'] == tage else '' }}" href="{{ url_for('admin_besucherstatistik', tage=tage, website=statistik['website']) }}">{{ tage }} Tage</a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="analytics-site-picker" aria-label="Website auswählen">
+    <a class="analytics-site-link {{ 'is-active' if statistik['website'] == 'alle' else '' }}" href="{{ url_for('admin_besucherstatistik', tage=statistik['tage'], website='alle') }}"><strong>Alle Websites</strong><small>Gemeinsame Übersicht</small></a>
+    {% for site in statistik['websites'] %}
+      <a class="analytics-site-link {{ 'is-active' if statistik['website'] == site['key'] else '' }}" href="{{ url_for('admin_besucherstatistik', tage=statistik['tage'], website=site['key']) }}"><strong>{{ site['label'] }}</strong><small>{{ site['domain'] }}</small></a>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="analytics-kpis mb-4">
+  <div class="analytics-kpi"><span>{{ 'Besucher-Summe' if statistik['website'] == 'alle' else 'Eindeutige Besucher' }}</span><strong>{{ statistik['besucher'] }}</strong><small>{{ statistik['website_label'] }} · {{ statistik['tage'] }} Tage</small></div>
+  <div class="analytics-kpi"><span>Seitenaufrufe</span><strong>{{ statistik['aufrufe'] }}</strong><small>echte Aufrufe ohne Bots</small></div>
+  <div class="analytics-kpi"><span>Heute</span><strong>{{ statistik['heute_besucher'] }}</strong><small>{{ statistik['heute_aufrufe'] }} Seitenaufrufe</small></div>
+  <div class="analytics-kpi"><span>Erkannte Bots</span><strong>{{ statistik['bot_aufrufe'] }}</strong><small>separat herausgefiltert</small></div>
+</div>
+
+<div class="analytics-websites mb-4">
+  {% for site in statistik['websites'] %}
+    <a class="page-card p-4 analytics-website-card" href="{{ url_for('admin_besucherstatistik', tage=statistik['tage'], website=site['key']) }}">
+      <h5 class="mb-1">{{ site['label'] }}</h5><span class="domain">{{ site['domain'] }}</span>
+      <span class="analytics-website-values"><span><strong>{{ site['besucher'] }}</strong><small>Besucher</small></span><span><strong>{{ site['aufrufe'] }}</strong><small>Aufrufe</small></span></span>
+    </a>
+  {% endfor %}
+</div>
+
+<div class="analytics-grid mb-4">
+  <section class="page-card p-4 analytics-panel" aria-labelledby="analytics-verlauf">
+    <div class="section-title"><div><h5 id="analytics-verlauf" class="mb-1">Verlauf</h5><p class="mb-0">Seitenaufrufe pro Kalendertag</p></div><span class="badge-soft">Zuletzt: {{ statistik['zuletzt'] }}</span></div>
+    {% if statistik['aufrufe'] %}
+      {% set max_aufrufe = statistik['verlauf']|map(attribute='aufrufe')|max %}
+      <div class="analytics-chart" aria-label="Tägliche Seitenaufrufe">
+        {% for tag in statistik['verlauf'] %}
+          <div class="analytics-day" title="{{ tag['label'] }}: {{ tag['aufrufe'] }} Aufrufe, {{ tag['besucher'] }} Besucher">
+            <span class="analytics-day-value">{{ tag['aufrufe'] if tag['aufrufe'] else '' }}</span>
+            <span class="analytics-day-bar" style="--bar:{{ ((tag['aufrufe'] / max_aufrufe) * 110 + 2)|round(0, 'floor') if max_aufrufe else 2 }}px"></span>
+            <span class="analytics-day-label">{{ tag['label'] }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="analytics-empty">Noch keine Besuche im gewählten Zeitraum. Die Statistik beginnt mit dem Rollout dieser Funktion.</div>
+    {% endif %}
+  </section>
+
+  <section class="page-card p-4 analytics-panel" aria-labelledby="analytics-seiten">
+    <h5 id="analytics-seiten" class="mb-3">Beliebte Seiten</h5>
+    {% if statistik['seiten'] %}
+      <div class="analytics-table-shell"><table class="table analytics-table align-middle"><thead><tr>{% if statistik['website'] == 'alle' %}<th>Website</th>{% endif %}<th>Seite</th><th>Besucher</th><th>Aufrufe</th></tr></thead><tbody>
+      {% for row in statistik['seiten'] %}<tr>{% if statistik['website'] == 'alle' %}<td><small>{{ row['website_label'] }}</small></td>{% endif %}<td>{{ row['label'] }}<br><small class="text-muted">{{ row['seite'] }}</small></td><td>{{ row['besucher'] }}</td><td class="fw-bold">{{ row['aufrufe'] }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    {% else %}<p class="analytics-note mb-0">Noch keine Daten.</p>{% endif %}
+  </section>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-4"><section class="page-card p-4 h-100"><h5 class="mb-3">Herkunft</h5>
+    {% if statistik['quellen'] %}<table class="table analytics-table align-middle"><tbody>{% for row in statistik['quellen'] %}<tr><td>{{ row['quelle'] }}</td><td class="fw-bold text-end">{{ row['aufrufe'] }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="analytics-note mb-0">Noch keine Daten.</p>{% endif %}
+  </section></div>
+  <div class="col-lg-4"><section class="page-card p-4 h-100"><h5 class="mb-3">Geräte</h5>
+    {% if statistik['geraete'] %}<table class="table analytics-table align-middle"><tbody>{% for row in statistik['geraete'] %}<tr><td>{{ row['geraet'] }}</td><td class="fw-bold text-end">{{ row['aufrufe'] }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="analytics-note mb-0">Noch keine Daten.</p>{% endif %}
+  </section></div>
+  <div class="col-lg-4"><section class="page-card p-4 h-100"><h5 class="mb-3">Browser</h5>
+    {% if statistik['browser'] %}<table class="table analytics-table align-middle"><tbody>{% for row in statistik['browser'] %}<tr><td>{{ row['browser'] }}</td><td class="fw-bold text-end">{{ row['aufrufe'] }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="analytics-note mb-0">Noch keine Daten.</p>{% endif %}
+  </section></div>
+</div>
+
+<p class="analytics-note mt-4 mb-0">Die Besucherzahl ist eine datensparsame Näherung aus einem websitebezogenen pseudonymen Hash und kann bei wechselnder IP-Adresse oder Browserkennung abweichen. Es entsteht kein domainübergreifendes Besucherprofil. Roh-IP-Adressen werden nicht gespeichert; Einträge werden nach 90 Tagen gelöscht.</p>
+{% endblock %}
