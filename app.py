@@ -45536,15 +45536,17 @@ def werkstatt_tafel():
             "auftraege": [a for a in auftraege if a["status"] == 4],
         },
     )
-    jetzt = datetime.now()
-    urlaub_start = naechster_betriebsurlaub_start()
+    jetzt = datetime.now(ZoneInfo("Europe/Berlin"))
+    # Abflug Frankfurt -> Doha laut Reiseunterlagen: 19.08.2026, 09:35 Uhr.
+    abflug = datetime(2026, 8, 19, 9, 35, tzinfo=ZoneInfo("Europe/Berlin"))
     return render_template(
         "werkstatt_tafel.html",
         spalten=spalten,
         anzahl=len(auftraege),
         stand_label=jetzt.strftime("%H:%M"),
         datum_label=f"{WOCHENTAGE[jetzt.weekday()]}, {jetzt.strftime(DATE_FMT)}",
-        betriebsurlaub_start=urlaub_start.strftime("%Y-%m-%d") if urlaub_start else "",
+        server_now_iso=jetzt.isoformat(timespec="seconds"),
+        countdown_ziel_iso=abflug.isoformat(timespec="seconds"),
     )
 
 

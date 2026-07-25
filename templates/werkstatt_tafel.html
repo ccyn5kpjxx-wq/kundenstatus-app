@@ -498,10 +498,10 @@
       <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
       <h1>Werkstatt-Tafel</h1>
     </div>
-    {% if betriebsurlaub_start %}
-    <div data-urlaub-ziel="{{ betriebsurlaub_start }}" style="flex:1 1 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.12rem; line-height:1.1; color:#fff;">
+    {% if countdown_ziel_iso %}
+    <div data-countdown-ziel="{{ countdown_ziel_iso }}" style="flex:1 1 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.12rem; line-height:1.1; color:#fff;">
       <span data-uc-zeit style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(.95rem,1.9vw,1.4rem); letter-spacing:.01em; white-space:nowrap;">…</span>
-      <span style="font-size:clamp(.58rem,1vw,.74rem); text-transform:uppercase; letter-spacing:.16em; color:rgba(255,255,255,.6);">bis Betriebsurlaub</span>
+      <span style="font-size:clamp(.58rem,1vw,.74rem); text-transform:uppercase; letter-spacing:.16em; color:rgba(255,255,255,.6);">bis Abflug · 19.08.2026 · 09:35 Uhr</span>
     </div>
     {% endif %}
     <div class="wetter" data-wetter hidden>
@@ -515,8 +515,8 @@
       <div class="wetter-stunden" data-w-stunden></div>
     </div>
     <div class="meta">
-      <div class="uhr" data-uhr>{{ stand_label }}</div>
-      <div>{{ datum_label }}</div>
+      <div class="uhr" data-uhr data-server-now="{{ server_now_iso }}">{{ stand_label }}</div>
+      <div data-datum>{{ datum_label }}</div>
     </div>
     <a href="{{ url_for('werkstatt_abwesenheit') }}" title="Abwesenheit / Urlaub beantragen" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">🌴 Abwesenheit</a>
     <a href="{{ url_for('werkstatt_aufgaben') }}" title="Tagesaufgaben der Werkstatt" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">📋 Aufgaben</a>
@@ -628,7 +628,7 @@
   </div>
 
   <footer>
-    <span>Aufträge wandern von links nach rechts · Aktualisiert sich automatisch jede Minute · Stand {{ stand_label }} Uhr · <span data-wake-status>Bildschirm wird wach gehalten</span></span>
+    <span>Aufträge wandern von links nach rechts · Aktualisiert sich automatisch jede Minute · Stand <span data-stand>{{ stand_label }}</span> Uhr · <span data-wake-status>Bildschirm wird wach gehalten</span></span>
     <a href="{{ url_for('werkstatt_logout') }}">Abmelden</a>
   </footer>
 
@@ -663,27 +663,49 @@
         if (document.visibilityState === 'visible' && !wakeLock) requestWakeLock();
       });
 
-      // Live-Uhr
+      // Live-Uhr anhand der Serverzeit. So bleibt die Anzeige auch korrekt,
+      // wenn die Windows-Uhr des Hallen-Bildschirms falsch eingestellt ist.
       const uhr = document.querySelector('[data-uhr]');
+      const datum = document.querySelector('[data-datum]');
+      const stand = document.querySelector('[data-stand]');
+      const serverStart = uhr ? Date.parse(uhr.dataset.serverNow) : NaN;
+      const browserStart = performance.now();
+      const aktuelleServerzeit = () => new Date(serverStart + (performance.now() - browserStart));
       const tick = () => {
-        if (!uhr) return;
-        const now = new Date();
-        uhr.textContent = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+        if (!uhr || !Number.isFinite(serverStart)) return;
+        const now = aktuelleServerzeit();
+        const zeitText = now.toLocaleTimeString('de-DE', {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'Europe/Berlin'
+        });
+        uhr.textContent = zeitText;
+        if (stand) stand.textContent = zeitText;
+        if (datum) {
+          datum.textContent = now.toLocaleDateString('de-DE', {
+            weekday: 'long',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            timeZone: 'Europe/Berlin'
+          });
+        }
       };
       tick();
       setInterval(tick, 10000);
 
-      // Live-Countdown bis zum Betriebsurlaub
-      const ucBox = document.querySelector('[data-urlaub-ziel]');
+      // Live-Countdown bis zum Abflug in Frankfurt.
+      const ucBox = document.querySelector('[data-countdown-ziel]');
       if (ucBox) {
-        const zielStr = ucBox.getAttribute('data-urlaub-ziel');
-        const zielZeit = zielStr ? new Date(zielStr + 'T00:00:00').getTime() : 0;
+        const zielStr = ucBox.getAttribute('data-countdown-ziel');
+        const zielZeit = zielStr ? Date.parse(zielStr) : 0;
         const ucOut = ucBox.querySelector('[data-uc-zeit]');
         const pad = (n) => String(n).padStart(2, '0');
         const ucTick = () => {
           if (!zielZeit || !ucOut) return;
-          const diff = zielZeit - Date.now();
-          if (diff <= 0) { ucOut.textContent = 'Betriebsurlaub läuft'; return; }
+          const jetztMs = Number.isFinite(serverStart) ? aktuelleServerzeit().getTime() : Date.now();
+          const diff = zielZeit - jetztMs;
+          if (diff <= 0) { ucOut.textContent = 'Guten Flug!'; return; }
           let s = Math.floor(diff / 1000);
           const w = Math.floor(s / 604800); s -= w * 604800;
           const t = Math.floor(s / 86400); s -= t * 86400;
