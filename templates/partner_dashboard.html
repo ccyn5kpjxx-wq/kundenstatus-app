@@ -106,17 +106,56 @@
     .portal-brand-stage {
       display:flex;
       align-items:center;
-      min-height:300px;
+      min-height:304px;
       min-width:0;
-      margin-top:28px;
-      overflow:hidden;
+      margin-top:24px;
     }
-    .portal-brand-stage img {
-      display:block;
+    .portal-brand-lockup {
+      display:grid;
+      grid-template-columns:minmax(0,1fr);
+      align-items:stretch;
+      gap:12px;
       width:100%;
       max-width:680px;
       min-width:0;
-      height:auto;
+    }
+    .portal-brand-card {
+      display:flex;
+      min-width:0;
+      min-height:146px;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      padding:10px 22px;
+      text-align:center;
+    }
+    .portal-brand-eyebrow {
+      color:#7a6b58;
+      font-size:.68rem;
+      line-height:1;
+      font-weight:800;
+      letter-spacing:.1em;
+      text-transform:uppercase;
+    }
+    .portal-brand-card img {
+      display:block;
+      width:auto;
+      max-width:100%;
+      object-fit:contain;
+    }
+    .portal-gaertner-logo {
+      max-height:95px;
+    }
+    .portal-partner-logo {
+      max-height:78px;
+    }
+    .portal-partner-caption,
+    .portal-partner-name {
+      color:#182533;
+      font-size:.82rem;
+      line-height:1.2;
+      font-weight:800;
     }
     .portal-header-actions {
       display:contents;
@@ -727,7 +766,20 @@
       .portal-hero { grid-template-columns:1fr; }
       .portal-side-stack,
       .portal-header-top { width:100%; }
-      .portal-brand-stage img { width:100%; }
+      .portal-brand-stage { min-height:0; }
+      .portal-brand-lockup {
+        grid-template-columns:minmax(0,1fr);
+        gap:10px;
+      }
+      .portal-brand-card {
+        min-height:112px;
+        gap:8px;
+        padding:10px 14px;
+      }
+      .portal-gaertner-logo { max-height:72px; }
+      .portal-partner-logo { max-height:58px; }
+      .portal-partner-caption,
+      .portal-partner-name { font-size:.7rem; }
       .portal-clock-panel { width:100%; text-align:left; }
       .portal-weather-panel { min-width:0; width:100%; }
       .portal-weather-hours { grid-template-columns:1fr; gap:8px; }
@@ -766,7 +818,21 @@
             <div class="text-muted">Fahrzeuge suchen, neue Aufträge anlegen und Hinweise im Blick behalten.</div>
           </div>
           <div class="portal-brand-stage">
-            <img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack">
+            <div class="portal-brand-lockup" aria-label="Gärtner Karosserie und Lack in Zusammenarbeit mit {{ autohaus['name'] }}">
+              <div class="portal-brand-card">
+                <span class="portal-brand-eyebrow">Werkstatt</span>
+                <img class="portal-gaertner-logo" src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie &amp; Lack">
+              </div>
+              <div class="portal-brand-card portal-brand-card--partner">
+                <span class="portal-brand-eyebrow">Partnerbetrieb</span>
+                {% if autohaus['partner_logo'] %}
+                <img class="portal-partner-logo" src="{{ url_for('static', filename=autohaus['partner_logo']) }}" alt="{{ autohaus['partner_logo_alt'] }}">
+                {% else %}
+                <strong class="portal-partner-name">{{ autohaus['name'] }}</strong>
+                {% endif %}
+                {% if autohaus['partner_logo_caption'] %}<span class="portal-partner-caption">{{ autohaus['partner_logo_caption'] }}</span>{% endif %}
+              </div>
+            </div>
           </div>
         </div>
         <div class="portal-header-actions">

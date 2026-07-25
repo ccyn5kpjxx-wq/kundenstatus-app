@@ -515,6 +515,55 @@ def get_request_base_url():
         return request.url_root.rstrip("/")
     return ""
 
+PARTNER_LOGO_CONFIG = {
+    "autohaus-pfaff": {
+        "filename": "partner_logos/auto-pfaff.png",
+        "alt": "Logo Auto Pfaff GmbH",
+        "caption": "",
+    },
+    "autohaus-mueller": {
+        "filename": "partner_logos/autohaus-mueller-suzuki.svg",
+        "alt": "Suzuki Logo des Autohauses Ralph Müller",
+        "caption": "Autohaus Ralph Müller OHG",
+    },
+    "kaesmann": {
+        "filename": "partner_logos/kaesmann.png",
+        "alt": "Logo Autohaus Käsmann",
+        "caption": "",
+    },
+    "hse-autowelt": {
+        "filename": "partner_logos/hse-autowelt.png",
+        "alt": "Logo HSE Autowelt GmbH",
+        "caption": "HSE Autowelt GmbH",
+    },
+    "johnatan-dold-und-marcel-deisling-gbr": {
+        "filename": "partner_logos/die-autogesellschaft.png",
+        "alt": "Logo Die Autogesellschaft",
+        "caption": "Johnatan Dold & Marcel Deisling GbR",
+    },
+    "mhc-mobility": {
+        "filename": "partner_logos/mhc-mobility.svg",
+        "alt": "Logo MHC Mobility GmbH",
+        "caption": "",
+    },
+    "kraftfahrzeugtechnik-lock": {
+        "filename": "partner_logos/kraftfahrzeugtechnik-lock.png",
+        "alt": "Logo Kraftfahrzeugtechnik Lock",
+        "caption": "Kraftfahrzeugtechnik Lock",
+    },
+    "autohaus-guenther-gmbh": {
+        "filename": "partner_logos/autohaus-guenther.svg",
+        "alt": "Logo Autohaus Günther GmbH",
+        "caption": "",
+    },
+    "autohaus-wetterauer-seckach": {
+        "filename": "partner_logos/autohaus-wetterauer.svg",
+        "alt": "Logo Autohaus Wetterauer GmbH",
+        "caption": "",
+    },
+}
+
+
 DEFAULT_AUTOHAEUSER = [
     {
         "name": "Auto Pfaff GmbH",
@@ -10331,6 +10380,12 @@ def row_to_autohaus(row):
     autohaus["portal_welcome"] = clean_text(autohaus.get("willkommen_text")) or (
         f"Willkommen im Portal von {autohaus['name']}."
     )
+    logo_config = PARTNER_LOGO_CONFIG.get(clean_text(autohaus.get("slug")), {})
+    autohaus["partner_logo"] = clean_text(logo_config.get("filename"))
+    autohaus["partner_logo_alt"] = clean_text(logo_config.get("alt")) or (
+        f"Logo {autohaus['name']}"
+    )
+    autohaus["partner_logo_caption"] = clean_text(logo_config.get("caption"))
     autohaus["portal_url"] = f"/portal/{clean_text(autohaus.get('portal_key'))}"
     return autohaus
 
