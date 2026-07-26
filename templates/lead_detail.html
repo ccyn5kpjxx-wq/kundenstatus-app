@@ -29,6 +29,34 @@
     font-weight: 800;
   }
 
+  .lead-file-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .lead-file-card {
+    min-width: 0;
+    padding: .85rem;
+    border: 1px solid #e4d6c3;
+    border-radius: 14px;
+    background: #fffdf9;
+  }
+
+  .lead-file-card img,
+  .lead-file-placeholder {
+    width: 100%;
+    height: 145px;
+    margin-bottom: .75rem;
+    object-fit: cover;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    background: #f1ebe2;
+    color: #6c655d;
+    font-weight: 800;
+  }
+
   @media (max-width: 900px) {
     .lead-status-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -79,6 +107,33 @@
         {% endfor %}
       </div>
     </div>
+
+    {% if lead_dateien %}
+    <div class="page-card p-4 mb-4">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="h4 mb-1">Bilder zur Anfrage</h2>
+          <div class="text-muted small">Vom Kunden vor dem Absenden der unverbindlichen Anfrage übermittelt.</div>
+        </div>
+        <span class="badge text-bg-light text-dark border">{{ lead_dateien|length }} Bild{% if lead_dateien|length != 1 %}er{% endif %}</span>
+      </div>
+      <div class="lead-file-grid">
+        {% for datei in lead_dateien %}
+        <div class="lead-file-card">
+          {% if datei['is_browser_image'] %}
+          <a href="{{ datei['url'] }}" target="_blank" rel="noopener"><img src="{{ datei['url'] }}" alt="Anfragebild {{ loop.index }}"></a>
+          {% else %}
+          <div class="lead-file-placeholder">HEIC-Bild</div>
+          {% endif %}
+          <div class="fw-semibold text-truncate" title="{{ datei['original_name'] }}">{{ datei['original_name'] }}</div>
+          <div class="text-muted small mb-2">{% if datei['size'] %}{{ (datei['size'] / 1024 / 1024)|round(1) }} MB{% endif %}</div>
+          <a class="btn btn-sm btn-soft" href="{{ datei['url'] }}" target="_blank" rel="noopener">Öffnen</a>
+          <a class="btn btn-sm btn-outline-dark" href="{{ datei['url'] }}?download=1">Download</a>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
 
     <div class="page-card p-4">
       <h2 class="h4 mb-3">Lead bearbeiten</h2>

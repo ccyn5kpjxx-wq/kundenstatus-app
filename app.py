@@ -2307,6 +2307,9 @@ ALLOWED_EXTENSIONS = {
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"}
 SCHADENAUFNAHME_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".pdf"}
+WEBSITE_LEAD_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
+WEBSITE_LEAD_MAX_BILDER = 5
+WEBSITE_LEAD_MAX_GESAMT_MB = 24
 SCHADENAUFNAHME_MAX_DATEIEN = 10
 SCHADENAUFNAHME_MAX_DATEI_MB = 12
 SCHADENAUFNAHME_DATENSCHUTZ_VERSION = "2026-07-werkstatt-v1"
@@ -7956,6 +7959,7 @@ BACKUP_TABLES = (
     "autohaeuser",
     "versicherungen",
     "leads",
+    "lead_dateien",
     "fahrzeugsuchen",
     "fahrzeugsuche_dateien",
     "fahrzeug_kandidaten",
@@ -8455,6 +8459,18 @@ def init_db():
             geaendert_am         TEXT NOT NULL,
             FOREIGN KEY (autohaus_id) REFERENCES autohaeuser(id),
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS lead_dateien (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id       INTEGER NOT NULL,
+            original_name TEXT NOT NULL,
+            stored_name   TEXT NOT NULL UNIQUE,
+            mime_type     TEXT DEFAULT '',
+            size          INTEGER DEFAULT 0,
+            quelle        TEXT DEFAULT 'website_formular',
+            erstellt_am   TEXT NOT NULL,
+            FOREIGN KEY (lead_id) REFERENCES leads(id)
         );
 
         CREATE TABLE IF NOT EXISTS fahrzeugsuchen (
@@ -9594,6 +9610,7 @@ def init_db():
     ensure_index(db, "idx_leads_autohaus", "leads", ("autohaus_id", "status"))
     ensure_index(db, "idx_leads_auftrag", "leads", ("auftrag_id",))
     ensure_index(db, "idx_leads_source_email", "leads", ("source_email_id",))
+    ensure_index(db, "idx_lead_dateien_lead_id", "lead_dateien", ("lead_id", "id"))
     ensure_index(db, "idx_fahrzeugsuchen_status", "fahrzeugsuchen", ("status", "naechster_kontakt_am", "geaendert_am"))
     ensure_index(db, "idx_fahrzeugsuchen_auftrag", "fahrzeugsuchen", ("auftrag_id", "gekaufter_kandidat_id"))
     ensure_index(db, "idx_fahrzeugsuche_dateien_suche", "fahrzeugsuche_dateien", ("suche_id", "hochgeladen_am"))
@@ -11445,6 +11462,31 @@ def update_lead(lead_id, payload):
     db.close()
 
 
+def list_lead_dateien(lead_id):
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM lead_dateien WHERE lead_id=? ORDER BY id",
+        (int(lead_id),),
+    ).fetchall()
+    db.close()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["stored_name"] = pathlib.Path(clean_text(item.get("stored_name"))).name
+        item["mime_type"] = clean_text(item.get("mime_type")) or canonical_upload_mime_type(
+            item.get("original_name")
+        )
+        item["size"] = max(0, int(item.get("size") or 0))
+        item["is_browser_image"] = pathlib.Path(item["stored_name"]).suffix.lower() in SAFE_INLINE_UPLOAD_EXTENSIONS
+        item["url"] = (
+            url_for("admin_lead_anhang", lead_id=int(lead_id), datei_id=int(item["id"]))
+            if has_request_context()
+            else ""
+        )
+        items.append(item)
+    return items
+
+
 def set_lead_status(lead_id, status):
     status = normalize_lead_status(status)
     db = get_db()
@@ -11460,10 +11502,24 @@ def set_lead_status(lead_id, status):
 def delete_lead(lead_id):
     """Löscht nur den Lead; ein bereits erzeugter Auftrag bleibt erhalten."""
     db = get_db()
+    dateien = db.execute(
+        "SELECT stored_name FROM lead_dateien WHERE lead_id=?",
+        (int(lead_id),),
+    ).fetchall()
+    db.execute("DELETE FROM lead_dateien WHERE lead_id=?", (int(lead_id),))
     cursor = db.execute("DELETE FROM leads WHERE id=?", (int(lead_id),))
     db.commit()
     deleted = int(cursor.rowcount or 0) > 0
     db.close()
+    if deleted:
+        for row in dateien:
+            stored_name = pathlib.Path(clean_text(row["stored_name"])).name
+            if not stored_name:
+                continue
+            try:
+                (UPLOAD_DIR / stored_name).unlink(missing_ok=True)
+            except OSError:
+                pass
     return deleted
 
 
@@ -25818,6 +25874,8 @@ def sende_oeffentliche_anfrage_benachrichtigung(
 
 def sende_website_lead_benachrichtigung(lead_id, payload, anliegen_label=""):
     """Benachrichtigt die Werkstatt still im Hintergrund über Homepage-Leads."""
+    bilder_anzahl = max(0, int(payload.get("bilder_anzahl") or 0))
+    bilder_info = str(bilder_anzahl) if bilder_anzahl else "nicht mitgesendet"
     try:
         if not app.config.get("TESTING"):
             sende_oeffentliche_anfrage_benachrichtigung(
@@ -25833,6 +25891,7 @@ def sende_website_lead_benachrichtigung(lead_id, payload, anliegen_label=""):
                     f"E-Mail: {clean_text(payload.get('kunde_email')) or '-'}",
                     f"Fahrzeug: {clean_text(payload.get('fahrzeug')) or '-'}",
                     f"Angaben: {clean_text(payload.get('beschreibung')) or '-'}",
+                    f"Bilder: {bilder_info}",
                 ],
                 kunden_email=payload.get("kunde_email"),
                 admin_pfad=f"/admin/leads/{int(lead_id)}",
@@ -25876,6 +25935,7 @@ def sende_website_lead_benachrichtigung(lead_id, payload, anliegen_label=""):
             f"E-Mail: {clean_text(payload.get('kunde_email')) or '-'}",
             f"Fahrzeug: {clean_text(payload.get('fahrzeug')) or '-'}",
             f"Angaben: {clean_text(payload.get('beschreibung')) or '-'}",
+            f"Bilder: {bilder_info}",
         ]
         if lead_link:
             zeilen += ["", f"Direkt zum Lead: {lead_link}"]
@@ -28508,6 +28568,92 @@ def validate_schadenaufnahme_uploads(files, require_file=False):
     if total_size > MAX_UPLOAD_MB * 1024 * 1024:
         errors.append(f"Alle Dateien zusammen dürfen höchstens {MAX_UPLOAD_MB} MB groß sein.")
     return (valid if not errors else []), errors
+
+
+def validate_website_lead_uploads(files):
+    """Prüft optionale Bilder einer öffentlichen Anfrage ohne Inhaltsanalyse."""
+    selected = [file for file in (files or []) if file and file.filename]
+    if not selected:
+        return [], []
+
+    errors = []
+    if len(selected) > WEBSITE_LEAD_MAX_BILDER:
+        errors.append(f"Bitte höchstens {WEBSITE_LEAD_MAX_BILDER} Bilder auswählen.")
+
+    valid = []
+    total_size = 0
+    max_file_bytes = SCHADENAUFNAHME_MAX_DATEI_MB * 1024 * 1024
+    for file in selected[:WEBSITE_LEAD_MAX_BILDER]:
+        original_name = secure_filename(file.filename or "")
+        suffix = pathlib.Path(original_name).suffix.lower()
+        if not original_name or suffix not in WEBSITE_LEAD_IMAGE_EXTENSIONS:
+            errors.append(
+                f"{clean_text(file.filename) or 'Datei'}: nur JPG, PNG, WebP oder HEIC sind erlaubt."
+            )
+            continue
+        size = schadenaufnahme_upload_size(file)
+        total_size += size
+        if size <= 0:
+            errors.append(f"{original_name}: Das Bild ist leer.")
+            continue
+        if size > max_file_bytes:
+            errors.append(
+                f"{original_name}: Ein Bild darf höchstens {SCHADENAUFNAHME_MAX_DATEI_MB} MB groß sein."
+            )
+            continue
+        if not schadenaufnahme_upload_signature_ok(file, suffix):
+            errors.append(f"{original_name}: Dateityp und Dateiinhalt passen nicht zusammen.")
+            continue
+        valid.append(file)
+
+    if total_size > WEBSITE_LEAD_MAX_GESAMT_MB * 1024 * 1024:
+        errors.append(
+            f"Alle Bilder zusammen dürfen höchstens {WEBSITE_LEAD_MAX_GESAMT_MB} MB groß sein."
+        )
+    return (valid if not errors else []), errors
+
+
+def save_website_lead_bilder(lead_id, files):
+    """Speichert geprüfte Anfragebilder als geschützte Lead-Anhänge, ohne OCR."""
+    saved = []
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    for file in files or []:
+        original_name = secure_filename(file.filename or "")
+        suffix = pathlib.Path(original_name).suffix.lower()
+        if not original_name or suffix not in WEBSITE_LEAD_IMAGE_EXTENSIONS:
+            raise ValueError("Nicht erlaubter Bildtyp.")
+        stored_name = f"lead-{int(lead_id)}-{uuid.uuid4().hex}{suffix}"
+        target = UPLOAD_DIR / stored_name
+        try:
+            file.stream.seek(0)
+            file.save(target)
+            size = target.stat().st_size
+            if size <= 0:
+                raise ValueError("Das Bild ist leer.")
+            db = get_db()
+            try:
+                db.execute(
+                    """
+                    INSERT INTO lead_dateien
+                        (lead_id, original_name, stored_name, mime_type, size, quelle, erstellt_am)
+                    VALUES (?, ?, ?, ?, ?, 'website_formular', ?)
+                    """,
+                    (
+                        int(lead_id), original_name, stored_name,
+                        canonical_upload_mime_type(original_name), size, now_str(),
+                    ),
+                )
+                db.commit()
+            finally:
+                db.close()
+        except Exception:
+            try:
+                target.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+        saved.append(original_name)
+    return saved
 
 
 def save_partner_standard_uploads(
@@ -40459,6 +40605,7 @@ def website_anfrage():
             else ""
         )
         nachricht = clean_text(request.form.get("nachricht"))[:2000]
+        bilder = request.files.getlist("bilder")
         errors = []
 
         if anliegen not in WEBSITE_ANLIEGEN:
@@ -40486,6 +40633,8 @@ def website_anfrage():
                 errors.append("Bitte ein gültiges Wunschdatum angeben.")
         if fahrzeug_link and not re.match(r"^https?://", fahrzeug_link, flags=re.IGNORECASE):
             errors.append("Der Link zur Fahrzeuganzeige muss mit http:// oder https:// beginnen.")
+        valid_bilder, bilder_errors = validate_website_lead_uploads(bilder)
+        errors.extend(bilder_errors)
         if errors:
             return render_website_anfrage(formdata=request.form, errors=errors, status_code=400)
 
@@ -40526,6 +40675,22 @@ def website_anfrage():
                 "notiz": "Öffentliches Anfrageformular. Rückruf oder E-Mail gewünscht; keine WhatsApp-Einwilligung erfasst.",
             }
         )
+        try:
+            gespeicherte_bilder = save_website_lead_bilder(lead_id, valid_bilder)
+        except Exception as exc:
+            delete_lead(lead_id)
+            print(
+                "WARNUNG: Bilder einer Homepage-Anfrage konnten nicht gespeichert werden: "
+                f"{clean_text(str(exc))[:240]}"
+            )
+            return render_website_anfrage(
+                formdata=request.form,
+                errors=[
+                    "Die Bilder konnten gerade nicht vollständig gespeichert werden. "
+                    "Bitte erneut auswählen und die Anfrage noch einmal senden."
+                ],
+                status_code=503,
+            )
         schedule_change_backup("website-anfrage-erfolgreich")
         sende_website_lead_benachrichtigung(
             lead_id,
@@ -40535,6 +40700,7 @@ def website_anfrage():
                 "kunde_email": email,
                 "fahrzeug": fahrzeug,
                 "beschreibung": " · ".join(beschreibungsteile),
+                "bilder_anzahl": len(gespeicherte_bilder),
             },
             anliegen_label,
         )
@@ -44585,6 +44751,7 @@ def admin_lead_detail(lead_id):
         lead_quellen=LEAD_QUELLEN,
         schadenarten=SCHADENARTEN,
         autohaeuser=list_autohaeuser(),
+        lead_dateien=list_lead_dateien(lead_id),
         lead_mail={
             "address": mail_config["from_address"],
             "display_name": mail_config["display_name"] or "Gärtner Karosserie & Lack",
@@ -44592,6 +44759,33 @@ def admin_lead_detail(lead_id):
         },
         lead_mail_entwurf=lead_email_draft(lead),
     )
+
+
+@app.route("/admin/leads/<int:lead_id>/anhaenge/<int:datei_id>")
+@admin_required
+def admin_lead_anhang(lead_id, datei_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM lead_dateien WHERE id=? AND lead_id=?",
+        (int(datei_id), int(lead_id)),
+    ).fetchone()
+    db.close()
+    if not row:
+        abort(404)
+    item = dict(row)
+    path = UPLOAD_DIR / pathlib.Path(clean_text(item.get("stored_name"))).name
+    if not path.exists() or not path.is_file():
+        abort(404)
+    suffix = path.suffix.lower()
+    response = send_file(
+        path,
+        mimetype=clean_text(item.get("mime_type")) or canonical_upload_mime_type(item.get("original_name")),
+        as_attachment=request.args.get("download") == "1" or suffix not in SAFE_INLINE_UPLOAD_EXTENSIONS,
+        download_name=clean_text(item.get("original_name")) or path.name,
+        conditional=True,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @app.route("/admin/leads/<int:lead_id>/mail-senden", methods=["POST"])
@@ -44671,13 +44865,55 @@ def admin_lead_to_auftrag(lead_id):
             if line
         ),
     )
+    lead_dateien = list_lead_dateien(lead_id)
     db = get_db()
-    db.execute(
-        "UPDATE leads SET status='gewonnen', auftrag_id=?, geaendert_am=? WHERE id=?",
-        (auftrag_id, now_str(), lead_id),
-    )
-    db.commit()
-    db.close()
+    auftrag_kopien = []
+    try:
+        for item in lead_dateien:
+            source_name = pathlib.Path(clean_text(item.get("stored_name"))).name
+            source_path = UPLOAD_DIR / source_name
+            if not source_name or not source_path.exists() or not source_path.is_file():
+                continue
+            suffix = source_path.suffix.lower()
+            stored_name = f"auftrag-{int(auftrag_id)}-lead-{uuid.uuid4().hex}{suffix}"
+            target_path = UPLOAD_DIR / stored_name
+            shutil.copy2(source_path, target_path)
+            auftrag_kopien.append(target_path)
+            original_name = clean_text(item.get("original_name")) or source_name
+            cursor = db.execute(
+                """
+                INSERT INTO dateien
+                    (auftrag_id, original_name, stored_name, mime_type, size, quelle, kategorie,
+                     dokument_typ, notiz, extrahierter_text, extrakt_kurz, analyse_quelle,
+                     analyse_json, analyse_hinweis, hochgeladen_am)
+                VALUES (?, ?, ?, ?, ?, 'privat', 'leadbild', '', 'Mit der Anfrage hochgeladen.',
+                        '', '', '', '', '', ?)
+                """,
+                (
+                    auftrag_id,
+                    original_name,
+                    stored_name,
+                    clean_text(item.get("mime_type")) or canonical_upload_mime_type(original_name),
+                    int(item.get("size") or target_path.stat().st_size),
+                    now_str(),
+                ),
+            )
+            store_datei_backup(db, cursor.lastrowid, target_path)
+        db.execute(
+            "UPDATE leads SET status='gewonnen', auftrag_id=?, geaendert_am=? WHERE id=?",
+            (auftrag_id, now_str(), lead_id),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        for target_path in auftrag_kopien:
+            try:
+                target_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
+    finally:
+        db.close()
     add_benachrichtigung(
         auftrag_id,
         "Aus Lead erstellt",

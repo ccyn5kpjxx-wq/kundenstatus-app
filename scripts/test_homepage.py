@@ -130,6 +130,9 @@ def main():
             "Anfrageformular Status 200": form_get.status_code == 200,
             "Leasing vorausgewaehlt": 'value="leasingrueckgabe" selected' in form_html,
             "CSRF und Honeypot": 'name="csrf_token"' in form_html and 'name="website"' in form_html,
+            "Mehrfachbild-Upload im Standardformular": all(marker in form_html for marker in (
+                'enctype="multipart/form-data"', 'name="bilder"', 'multiple', "Bis zu 5 Bilder",
+            )),
             "Prueffelder nur fuer Fahrzeugchecks": 'data-anliegen-visible="kaufberatung leasingrueckgabe"' in form_html
             and 'data-anliegen-visible="kaufberatung"' in form_html
             and 'data-anliegen-visible="kaufberatung" hidden' in farbton_html

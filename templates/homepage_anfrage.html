@@ -48,6 +48,20 @@
     .choice { display:flex; gap:10px; align-items:flex-start; padding:13px; border:1px solid var(--line); border-radius:12px; background:#faf7f1; cursor:pointer; }
     .choice input { width:18px; min-height:18px; margin:2px 0 0; }
     .choice span { font-size:13px; line-height:1.45; }
+    .upload-box { grid-column:1/-1; position:relative; display:grid; grid-template-columns:60px 1fr; gap:14px; align-items:center; min-height:108px; padding:17px; border:1.5px dashed #bcb0a1; border-radius:15px; background:#faf7f1; cursor:pointer; }
+    .upload-box:hover { border-color:var(--red); background:#fff8f6; }
+    .upload-icon { width:54px; height:54px; display:grid; place-items:center; border-radius:14px; color:var(--red); background:white; box-shadow:0 8px 24px rgba(49,42,33,.08); }
+    .upload-icon svg { width:28px; height:28px; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; fill:none; }
+    .upload-copy strong { display:block; margin-bottom:5px; font-size:15px; }
+    .upload-copy span { display:block; color:var(--muted); font-size:12px; line-height:1.45; }
+    .upload-box input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+    .photo-preview { grid-column:1/-1; display:none; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:10px; padding:12px; border:1px solid var(--line); border-radius:13px; background:white; }
+    .photo-preview.is-visible { display:grid; }
+    .photo-preview-item { min-width:0; padding:8px; border:1px solid var(--line); border-radius:11px; background:#faf7f1; }
+    .photo-preview-item img,.photo-preview-placeholder { width:100%; aspect-ratio:4/3; object-fit:cover; display:grid; place-items:center; border-radius:8px; background:#eee7dd; color:var(--muted); font-size:12px; font-weight:900; }
+    .photo-preview-name { display:block; margin-top:7px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:800; }
+    .photo-preview-status { grid-column:1/-1; margin:0; color:var(--muted); font-size:12px; font-weight:750; }
+    .photo-preview-status.is-error { color:#a1261f; }
     .privacy { margin:24px 0 18px; color:var(--muted); font-size:12px; line-height:1.55; }
     .button { width:100%; min-height:54px; border:0; border-radius:999px; color:white; background:linear-gradient(135deg,var(--red),var(--red-dark)); box-shadow:0 13px 28px rgba(227,34,25,.23); font:inherit; font-weight:900; cursor:pointer; }
     .button:hover { transform:translateY(-1px); }
@@ -63,7 +77,7 @@
     .honeypot { position:absolute!important; left:-10000px!important; width:1px!important; height:1px!important; overflow:hidden!important; }
     [hidden] { display:none!important; }
     @media (max-width:780px) { .layout { grid-template-columns:1fr; } .form-card { order:1; } .info { position:static; order:2; } }
-    @media (max-width:560px) { .wrap { width:min(100% - 22px,1080px); } .nav { min-height:66px; } .brand span { display:none; } .hero { padding:44px 0 24px; } h1 { font-size:clamp(39px,12vw,52px); } .layout { padding-bottom:36px; } .grid { grid-template-columns:1fr; } .field.full,fieldset { grid-column:auto; } .form-card { border-radius:17px; } }
+    @media (max-width:560px) { .wrap { width:min(100% - 22px,1080px); } .nav { min-height:66px; } .brand span { display:none; } .hero { padding:44px 0 24px; } h1 { font-size:clamp(39px,12vw,52px); } .layout { padding-bottom:36px; } .grid { grid-template-columns:1fr; } .field.full,fieldset,.upload-box,.photo-preview { grid-column:auto; } .form-card { border-radius:17px; } .upload-box { grid-template-columns:52px 1fr; } .upload-icon { width:48px; height:48px; } }
   </style>
 </head>
 <body>
@@ -99,7 +113,7 @@
           <p class="info-note" data-anliegen-visible="kaufberatung" {% if ausgewaehltes_anliegen != 'kaufberatung' %}hidden{% endif %}>Beim Kaufcheck können Sie zusätzlich die Fahrzeuganzeige verlinken und zwischen einer Prüfung bei Gärtner oder einer Besichtigung vor Ort wählen.</p>
           <p class="info-note" data-anliegen-visible="leasingrueckgabe" {% if ausgewaehltes_anliegen != 'leasingrueckgabe' %}hidden{% endif %}>Bei einem Leasing-Check zeigen wir mögliche Aufbereitungs- und Reparaturmaßnahmen. Die endgültige Bewertung bleibt bei der Leasinggesellschaft.</p>
         </aside>
-        <form class="form-card" method="post" action="{{ url_for('website_anfrage') }}" novalidate>
+        <form class="form-card" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data" novalidate>
           {{ csrf_field()|safe }}
           <div class="honeypot" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
           <h2>Was können wir für Sie tun?</h2>
@@ -115,8 +129,14 @@
             <div class="field" data-anliegen-visible="kaufberatung" {% if ausgewaehltes_anliegen != 'kaufberatung' %}hidden{% endif %}><label for="fahrzeug_link">Link zur Fahrzeuganzeige</label><input id="fahrzeug_link" name="fahrzeug_link" maxlength="1000" type="url" placeholder="https://…" value="{{ formdata.get('fahrzeug_link','') }}"><p class="hint">Hilfreich beim Gebrauchtwagen-Kaufcheck.</p></div>
             <fieldset data-anliegen-visible="kaufberatung leasingrueckgabe" {% if ausgewaehltes_anliegen not in ('kaufberatung','leasingrueckgabe') %}hidden{% endif %}><legend>Wo soll das Fahrzeug geprüft werden?</legend>{% for key,label in besichtigungsarten.items() %}<label class="choice"><input type="radio" name="besichtigungsart" value="{{ key }}" {% if formdata.get('besichtigungsart','werkstatt') == key %}checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</fieldset>
             <div class="field full"><label for="nachricht">Kurze Beschreibung</label><textarea id="nachricht" name="nachricht" maxlength="2000" placeholder="Was sollen wir prüfen oder vorbereiten?">{{ formdata.get('nachricht','') }}</textarea></div>
+            <label class="upload-box" for="bilder">
+              <span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 11h5l2-3h8l2 3h5v14H5z"/><circle cx="16" cy="18" r="5"/><path d="M25 14h.01"/></svg></span>
+              <span class="upload-copy"><strong>Bilder hinzufügen <span class="hint">(optional)</span></strong><span>Bis zu 5 Bilder · JPG, PNG, WebP oder HEIC · je max. 12 MB, zusammen max. 24 MB</span></span>
+              <input id="bilder" name="bilder" type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,.heic">
+            </label>
+            <div class="photo-preview" id="photo-preview" aria-live="polite"></div>
           </div>
-          <p class="privacy">Wir verwenden Ihre Angaben ausschließlich zur Bearbeitung dieser Anfrage und zur persönlichen Kontaktaufnahme. Mehr dazu in der <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>. Die Anfrage ist unverbindlich.</p>
+          <p class="privacy">Wir verwenden Ihre Angaben und die optionalen Bilder ausschließlich zur Bearbeitung dieser Anfrage und zur persönlichen Kontaktaufnahme. Mehr dazu in der <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>. Die Anfrage ist unverbindlich.</p>
           <button class="button" type="submit">Anfrage unverbindlich senden</button>
           <p class="photo-link">Schadenbilder direkt übermitteln? <a href="{{ url_for('privat_schadenaufnahme') }}">Digitale Schadenmeldung öffnen</a></p>
         </form>
@@ -124,6 +144,72 @@
     </section>
   </main>
   {% include "_besucher_tracking.html" %}
+  <script>
+    (() => {
+      const input = document.getElementById('bilder');
+      const preview = document.getElementById('photo-preview');
+      const form = input && input.closest('form');
+      if (!input || !preview || !form) return;
+      let objectUrls = [];
+
+      const clearPreview = () => {
+        objectUrls.forEach((url) => URL.revokeObjectURL(url));
+        objectUrls = [];
+        preview.replaceChildren();
+      };
+
+      input.addEventListener('change', () => {
+        clearPreview();
+        const files = Array.from(input.files || []);
+        if (!files.length) { preview.classList.remove('is-visible'); return; }
+
+        const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+        const problems = [];
+        if (files.length > 5) problems.push('Bitte höchstens 5 Bilder auswählen.');
+        if (files.some((file) => file.size > 12 * 1024 * 1024)) problems.push('Ein einzelnes Bild darf höchstens 12 MB groß sein.');
+        if (totalBytes > 24 * 1024 * 1024) problems.push('Alle Bilder zusammen dürfen höchstens 24 MB groß sein.');
+
+        files.slice(0, 5).forEach((file) => {
+          const item = document.createElement('div');
+          item.className = 'photo-preview-item';
+          if (file.type && file.type !== 'image/heic') {
+            const image = document.createElement('img');
+            const objectUrl = URL.createObjectURL(file);
+            objectUrls.push(objectUrl);
+            image.src = objectUrl;
+            image.alt = '';
+            item.appendChild(image);
+          } else {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'photo-preview-placeholder';
+            placeholder.textContent = 'HEIC';
+            item.appendChild(placeholder);
+          }
+          const name = document.createElement('span');
+          name.className = 'photo-preview-name';
+          name.textContent = file.name;
+          item.appendChild(name);
+          preview.appendChild(item);
+        });
+
+        const status = document.createElement('p');
+        status.className = `photo-preview-status${problems.length ? ' is-error' : ''}`;
+        status.textContent = problems.length
+          ? problems.join(' ')
+          : `${files.length} Bild${files.length === 1 ? '' : 'er'} ausgewählt.`;
+        preview.appendChild(status);
+        preview.dataset.invalid = problems.length ? '1' : '';
+        preview.classList.add('is-visible');
+      });
+
+      form.addEventListener('submit', (event) => {
+        if (preview.dataset.invalid === '1') {
+          event.preventDefault();
+          input.focus();
+        }
+      });
+    })();
+  </script>
   <script>
     (() => {
       const anliegen = document.getElementById('anliegen');
