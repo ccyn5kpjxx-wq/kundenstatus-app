@@ -11207,6 +11207,24 @@ def lead_whatsapp_url(lead):
     return f"https://wa.me/{phone_key}?text={quote(lead_whatsapp_message(lead))}"
 
 
+def lead_email_draft(lead):
+    name = clean_text((lead or {}).get("kunde_name"))
+    anrede = f"Guten Tag {name}," if name else "Guten Tag,"
+    fahrzeug = clean_text((lead or {}).get("fahrzeug"))
+    fahrzeug_hinweis = f" zu Ihrem Fahrzeug {fahrzeug}" if fahrzeug else ""
+    return {
+        "betreff": "Ihre Anfrage bei Gärtner Karosserie & Lack",
+        "nachricht": (
+            f"{anrede}\n\n"
+            f"vielen Dank für Ihre Anfrage{fahrzeug_hinweis}. Wir haben Ihre Angaben erhalten und prüfen "
+            "den gewünschten Umfang. Falls wir noch Informationen oder Bilder benötigen, melden wir uns "
+            "kurz bei Ihnen.\n\n"
+            "Freundliche Grüße\n"
+            "Gärtner Karosserie & Lack"
+        ),
+    }
+
+
 def hydrate_lead(row):
     lead = dict(row or {})
     lead["status"] = normalize_lead_status(lead.get("status"))
@@ -11242,12 +11260,9 @@ def hydrate_lead(row):
     # nach der bewussten Bestätigung durch die Werkstatt in WhatsApp.
     lead["whatsapp_url"] = lead_whatsapp_url(lead)
     lead["can_whatsapp"] = bool(lead["whatsapp_url"])
-    lead["mailto_url"] = (
-        f"mailto:{quote(lead['kunde_email'], safe='@.+-_')}?subject={quote('Ihre Anfrage bei Gaertner Karosserie & Lack')}"
-        f"&body={quote(lead_whatsapp_message(lead))}"
-        if lead["kunde_email"]
-        else ""
-    )
+    # E-Mail-Antworten laufen über den internen Lead-Composer. Ein mailto:-Link
+    # würde das lokale Standardprogramm und eventuell das falsche Konto öffnen.
+    lead["can_email"] = bool(lead["kunde_email"])
     return lead
 
 
@@ -25375,6 +25390,66 @@ def get_schaden_mail_config():
         "attachment_limit_mb": SCHADEN_SMTP_ATTACHMENT_LIMIT_MB,
         "_smtp_password": smtp_password,
     }
+
+
+LEAD_MAIL_TESTLOG = []
+
+
+def send_lead_email(lead, empfaenger, betreff, nachricht):
+    recipients = parse_email_recipients(empfaenger)
+    if len(recipients) != 1:
+        raise ValueError("Bitte genau eine gültige Empfängeradresse eintragen.")
+    betreff = clean_text(betreff)[:300]
+    nachricht = clean_text(nachricht)[:12000]
+    if not betreff or len(nachricht) < 10:
+        raise ValueError("Bitte Betreff und einen vollständigen Nachrichtentext eintragen.")
+
+    config = get_schaden_mail_config()
+    if not config["smtp_configured"]:
+        raise ValueError("Jonas' E-Mail-Postfach ist für den Versand noch nicht vollständig eingerichtet.")
+
+    absender = config["from_address"]
+    display_name = config["display_name"] or "Gärtner Karosserie & Lack"
+    message = EmailMessage()
+    message["Subject"] = betreff
+    message["From"] = formataddr((display_name, absender))
+    message["To"] = recipients[0]
+    message["Reply-To"] = config["reply_to"] or absender
+    message["X-Gaertner-Lead-ID"] = str(int((lead or {}).get("id") or 0))
+    message.set_content(nachricht)
+    add_standard_mail_headers(message)
+
+    if app.config.get("TESTING"):
+        LEAD_MAIL_TESTLOG.append(
+            {
+                "lead_id": int((lead or {}).get("id") or 0),
+                "absender": absender,
+                "empfaenger": recipients[0],
+                "betreff": betreff,
+                "nachricht": nachricht,
+            }
+        )
+        return absender
+
+    try:
+        if config["smtp_ssl"]:
+            smtp_context = smtplib.SMTP_SSL(
+                config["smtp_host"], config["smtp_port"],
+                local_hostname=smtp_lokaler_hostname(), timeout=30,
+            )
+        else:
+            smtp_context = smtplib.SMTP(
+                config["smtp_host"], config["smtp_port"],
+                local_hostname=smtp_lokaler_hostname(), timeout=30,
+            )
+        with smtp_context as smtp:
+            if config["smtp_tls"] and not config["smtp_ssl"]:
+                smtp.starttls()
+            smtp.login(config["smtp_user"], config["_smtp_password"])
+            smtp.send_message(message)
+    except Exception as exc:
+        raise RuntimeError(f"E-Mail konnte nicht versendet werden: {clean_text(str(exc))[:240]}") from exc
+    return absender
 
 
 def add_standard_mail_headers(message):
@@ -44502,6 +44577,7 @@ def admin_lead_detail(lead_id):
         schedule_change_backup("lead-updated")
         flash("Lead gespeichert.", "success")
         return redirect(url_for("admin_lead_detail", lead_id=lead_id))
+    mail_config = get_schaden_mail_config()
     return render_template(
         "lead_detail.html",
         lead=lead,
@@ -44509,7 +44585,31 @@ def admin_lead_detail(lead_id):
         lead_quellen=LEAD_QUELLEN,
         schadenarten=SCHADENARTEN,
         autohaeuser=list_autohaeuser(),
+        lead_mail={
+            "address": mail_config["from_address"],
+            "display_name": mail_config["display_name"] or "Gärtner Karosserie & Lack",
+            "configured": mail_config["smtp_configured"],
+        },
+        lead_mail_entwurf=lead_email_draft(lead),
     )
+
+
+@app.route("/admin/leads/<int:lead_id>/mail-senden", methods=["POST"])
+@admin_required
+def admin_lead_mail_senden(lead_id):
+    lead = get_lead(lead_id)
+    if not lead:
+        abort(404)
+    empfaenger = clean_text(lead["kunde_email"]).lower()
+    betreff = clean_text(request.form.get("betreff"))
+    nachricht = clean_text(request.form.get("nachricht"))
+    try:
+        absender = send_lead_email(lead, empfaenger, betreff, nachricht)
+    except (ValueError, RuntimeError) as exc:
+        flash(str(exc), "danger")
+    else:
+        flash(f"E-Mail wurde als {absender} an {empfaenger} gesendet.", "success")
+    return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#email-antwort")
 
 
 @app.route("/admin/leads/<int:lead_id>/status/<status>", methods=["POST"])

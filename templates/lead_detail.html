@@ -166,6 +166,58 @@
         </div>
       </form>
     </div>
+
+    {% if lead['can_email'] %}
+    <div class="page-card p-4 mt-4" id="email-antwort">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="h4 mb-1">Per E-Mail antworten</h2>
+          <div class="text-muted small">
+            Die Antwort wird direkt im Portal über das für Jonas hinterlegte Postfach
+            <strong>{{ lead_mail['address'] }}</strong> versendet. Outlook wird nicht geöffnet.
+          </div>
+        </div>
+        <span class="badge text-bg-{{ 'success' if lead_mail['configured'] else 'warning' }}">
+          {{ 'Postfach bereit' if lead_mail['configured'] else 'Postfach noch nicht verbunden' }}
+        </span>
+      </div>
+
+      {% if not lead_mail['configured'] %}
+      <div class="alert alert-warning" role="alert">
+        Jonas' Absenderpostfach muss noch mit seinen SMTP-Zugangsdaten verbunden werden.
+        Bis dahin bleibt der Versand gesperrt und es öffnet sich bewusst kein fremdes E-Mail-Programm.
+      </div>
+      {% endif %}
+
+      <form method="POST" action="{{ url_for('admin_lead_mail_senden', lead_id=lead['id']) }}" onsubmit="return confirm('Die geprüfte E-Mail jetzt wirklich an den Kunden senden?');">
+        {{ csrf_field()|safe }}
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Von</label>
+            <input type="text" class="form-control" value="{{ lead_mail['display_name'] }} &lt;{{ lead_mail['address'] }}&gt;" readonly>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">An</label>
+            <input type="email" class="form-control" value="{{ lead['kunde_email'] }}" readonly>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Betreff</label>
+            <input type="text" name="betreff" class="form-control" value="{{ lead_mail_entwurf['betreff'] }}" maxlength="300" required>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Nachricht</label>
+            <textarea name="nachricht" class="form-control" rows="10" required>{{ lead_mail_entwurf['nachricht'] }}</textarea>
+            <div class="form-text">Der Text bleibt bearbeitbar. Versand erfolgt erst nach Ihrer Bestätigung.</div>
+          </div>
+          <div class="col-12 d-grid d-md-flex justify-content-md-end">
+            <button type="submit" class="btn btn-brand" {% if not lead_mail['configured'] %}disabled{% endif %}>
+              Antwort über {{ lead_mail['address'] }} senden
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+    {% endif %}
   </div>
 
   <div class="col-xl-4">
@@ -179,10 +231,10 @@
         {% if lead['whatsapp_url'] %}
         <a href="{{ lead['whatsapp_url'] }}" target="_blank" rel="noopener" class="btn btn-success">Per WhatsApp antworten</a>
         {% endif %}
-        {% if lead['mailto_url'] %}
-        <a href="{{ lead['mailto_url'] }}" class="btn btn-outline-dark">Per E-Mail antworten</a>
+        {% if lead['can_email'] %}
+        <a href="#email-antwort" class="btn btn-outline-dark">Per E-Mail antworten</a>
         {% endif %}
-        {% if not lead['whatsapp_url'] and not lead['mailto_url'] %}
+        {% if not lead['whatsapp_url'] and not lead['can_email'] %}
         <div class="text-muted small">Handynummer oder E-Mail eintragen, dann kann direkt aus dem Lead kommuniziert werden.</div>
         {% endif %}
       </div>

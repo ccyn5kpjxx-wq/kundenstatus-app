@@ -51,8 +51,8 @@ def main():
             and website_lead["whatsapp_url"].startswith("https://wa.me/4915123456789?text="),
         )
         check(
-            "Lead mit E-Mail bietet E-Mail-Antwort",
-            website_lead["mailto_url"].startswith("mailto:kunde@example.test?"),
+            "Lead mit E-Mail bietet interne E-Mail-Antwort",
+            website_lead["can_email"],
         )
 
         landline_lead = portal.hydrate_lead(lead_row(kontakt_telefon="06261 12345"))
@@ -64,12 +64,68 @@ def main():
         phone_only_lead = portal.hydrate_lead(lead_row(kunde_email=""))
         check(
             "Fehlende E-Mail blendet E-Mail-Antwort aus",
-            not phone_only_lead["mailto_url"],
+            not phone_only_lead["can_email"],
         )
+
+        rendered = portal.render_template(
+            "lead_detail.html",
+            lead=website_lead,
+            lead_status=portal.LEAD_STATUS,
+            lead_quellen=portal.LEAD_QUELLEN,
+            schadenarten=portal.SCHADENARTEN,
+            autohaeuser=[],
+            lead_mail={
+                "address": "jonas@example.test",
+                "display_name": "Jonas",
+                "configured": True,
+            },
+            lead_mail_entwurf={
+                "betreff": "Ihre Anfrage",
+                "nachricht": "Guten Tag,\n\nvielen Dank für Ihre Anfrage.",
+            },
+        )
+        check("Gerenderter Button führt zum Portal-Composer", 'href="#email-antwort"' in rendered)
+        check("Gerenderte Lead-Seite enthält keinen mailto-Aufruf", "mailto:" not in rendered)
+        check("Gerenderte Antwort zeigt Jonas als Absender", "Jonas &lt;jonas@example.test&gt;" in rendered)
+
+        original_config = portal.get_schaden_mail_config
+        original_testing = portal.app.config.get("TESTING")
+        try:
+            portal.get_schaden_mail_config = lambda: {
+                "from_address": "jonas@example.test",
+                "display_name": "Jonas",
+                "reply_to": "jonas@example.test",
+                "smtp_configured": True,
+                "smtp_host": "smtp.example.test",
+                "smtp_port": 465,
+                "smtp_user": "jonas@example.test",
+                "smtp_ssl": True,
+                "smtp_tls": False,
+                "_smtp_password": "nur-testwert",
+            }
+            portal.app.config["TESTING"] = True
+            portal.LEAD_MAIL_TESTLOG.clear()
+            absender = portal.send_lead_email(
+                website_lead,
+                website_lead["kunde_email"],
+                "Ihre Anfrage",
+                "Guten Tag, vielen Dank für Ihre Anfrage.",
+            )
+            check("Interner Versand nutzt Jonas als Absender", absender == "jonas@example.test")
+            check(
+                "Interner Versand adressiert genau die Lead-E-Mail",
+                len(portal.LEAD_MAIL_TESTLOG) == 1
+                and portal.LEAD_MAIL_TESTLOG[0]["empfaenger"] == "kunde@example.test",
+            )
+        finally:
+            portal.get_schaden_mail_config = original_config
+            portal.app.config["TESTING"] = original_testing
 
     template = (ROOT / "templates" / "lead_detail.html").read_text(encoding="utf-8")
     check("WhatsApp-Aktion ist eindeutig beschriftet", "Per WhatsApp antworten" in template)
     check("E-Mail-Aktion ist eindeutig beschriftet", "Per E-Mail antworten" in template)
+    check("E-Mail-Aktion öffnet den internen Composer", 'href="#email-antwort"' in template)
+    check("Lead-Antwort verwendet keinen mailto-Link", "lead['mailto_url']" not in template)
 
     if FEHLER:
         raise SystemExit(1)
