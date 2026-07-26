@@ -57,6 +57,13 @@ def main():
     client = portal.app.test_client()
     checks = []
 
+    app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+    checks.append(check(
+        "Lead-Mail-Migration nutzt PostgreSQL-sichere Parameter",
+        "LIKE '%@tomorrowworks-agentur.de%'" not in app_source
+        and "LIKE '%@autovermietung-mos.de%'" not in app_source,
+    ))
+
     lack_id = portal.create_lead(
         {
             "website": "auto-lackierzentrum",

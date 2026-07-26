@@ -9454,16 +9454,16 @@ def init_db():
         UPDATE leads SET website='tomorrowworks'
         WHERE COALESCE(source_email_id, 0) IN (
             SELECT id FROM werkstatt_emails
-            WHERE LOWER(COALESCE(empfaenger, '')) LIKE '%@tomorrowworks-agentur.de%'
+            WHERE LOWER(COALESCE(empfaenger, '')) LIKE ?
         )
-    """)
+    """, ("%@tomorrowworks-agentur.de%",))
     db.execute("""
         UPDATE leads SET website='autovermietung-mos'
         WHERE COALESCE(source_email_id, 0) IN (
             SELECT id FROM werkstatt_emails
-            WHERE LOWER(COALESCE(empfaenger, '')) LIKE '%@autovermietung-mos.de%'
+            WHERE LOWER(COALESCE(empfaenger, '')) LIKE ?
         )
-    """)
+    """, ("%@autovermietung-mos.de%",))
     ensure_column(db, "fahrzeugsuchen", "status", "TEXT DEFAULT 'neu'")
     ensure_column(db, "fahrzeugsuchen", "kunde_name", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeugsuchen", "kontakt_telefon", "TEXT DEFAULT ''")
