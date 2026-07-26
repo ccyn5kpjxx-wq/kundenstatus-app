@@ -394,45 +394,62 @@
       <h2 class="h4 mb-3">Kundenportal</h2>
       {% if lead['website'] != 'auto-lackierzentrum' %}
       <p class="text-muted mb-0">Dieser Lead bleibt in der {{ lead['website_meta']['kurz'] }}-Pipeline. Angebot und Kommunikation erfolgen direkt oben im Lead.</p>
-      {% elif lead_auftrag is defined and lead_auftrag %}
+      {% else %}
       <div class="d-flex gap-2 flex-wrap mb-3">
-        {% if lead_auftrag['angebot_status'] == 'angenommen' %}
+        {% if lead['angebot_status'] == 'angenommen' %}
         <span class="badge text-bg-success">Angebot angenommen</span>
-        {% elif lead_auftrag['angebot_status'] == 'angebot_abgegeben' %}
+        {% elif lead['angebot_status'] == 'angebot_abgegeben' %}
         <span class="badge text-bg-primary">Angebot liegt beim Kunden</span>
         {% else %}
-        <span class="badge text-bg-warning">Anfrage-Akte aktiv</span>
+        <span class="badge text-bg-warning">Lead-Portal aktiv</span>
         {% endif %}
+        {% if not lead['auftrag_id'] %}<span class="badge text-bg-light text-dark border">Noch kein Auftrag</span>{% endif %}
       </div>
-      <p class="text-muted small">Der Lead bleibt bis zur Angebotsannahme offen. Der Kunde kann über denselben geschützten Link Bilder nachreichen, einen Terminwunsch senden, das Angebot annehmen und später den Reparaturstatus verfolgen.</p>
+      <p class="text-muted small">Der Lead bleibt bis zur Angebotsannahme ein Lead. Über diesen geschützten Link kann der Kunde Bilder, Nachrichten und Terminwünsche senden sowie das Angebot annehmen. Erst dann entsteht automatisch der Auftrag in der Werkstatttafel.</p>
       <div class="text-center mb-3">
-        <img src="{{ url_for('kunden_status_qr', token=lead_auftrag['kunden_status_token'], target='local') if lead_auftrag['kunden_status_public_warning'] else url_for('kunden_status_qr', token=lead_auftrag['kunden_status_token']) }}" alt="QR-Code zum Kundenportal" style="width:132px;height:132px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;">
+        <img src="{{ url_for('kunden_status_qr', token=lead['kunden_status_token'], target='local') if lead['kunden_status_public_warning'] else url_for('kunden_status_qr', token=lead['kunden_status_token']) }}" alt="QR-Code zum Kundenportal" style="width:132px;height:132px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;">
       </div>
-      <code class="d-block small mb-3" style="overflow-wrap:anywhere;">{{ lead_auftrag['kunden_status_local_url'] if lead_auftrag['kunden_status_public_warning'] else lead_auftrag['kunden_status_url'] }}</code>
+      <code class="d-block small mb-3" style="overflow-wrap:anywhere;">{{ lead['kunden_status_local_url'] if lead['kunden_status_public_warning'] else lead['kunden_status_url'] }}</code>
       <div class="d-grid gap-2">
-        <a href="{{ lead_auftrag['kunden_status_local_url'] }}" target="_blank" rel="noopener" class="btn btn-soft">Kundenportal öffnen</a>
-        {% if lead_auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
-        <a href="{{ lead_auftrag['kunden_whatsapp_status']['whatsapp_url'] }}" target="_blank" rel="noopener" class="btn btn-success">Kundenlink per WhatsApp</a>
-        {% elif lead_auftrag['kunden_whatsapp_status']['whatsapp_consent_required'] and lead_auftrag['kunden_whatsapp_status']['is_mobile'] %}
-        <form method="POST" action="{{ url_for('admin_whatsapp_einwilligung_bestaetigen', auftrag_id=lead_auftrag['id']) }}" class="p-3 rounded-3 border bg-light">
-          {{ csrf_field()|safe }}
-          <input type="hidden" name="next" value="{{ url_for('admin_lead_detail', lead_id=lead['id']) }}#kundenportal">
-          <label class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" name="whatsapp_einwilligung_bestaetigt" value="1" required>
-            <span class="form-check-label small">Der Kunde hat WhatsApp für <strong>{{ lead_auftrag['kontakt_telefon'] }}</strong> persönlich erlaubt.</span>
-          </label>
-          <button type="submit" class="btn btn-sm btn-success w-100">WhatsApp freigeben</button>
-        </form>
-        {% endif %}
+        <a href="{{ lead['kunden_status_local_url'] }}" target="_blank" rel="noopener" class="btn btn-soft">Kundenportal öffnen</a>
+        {% if lead['whatsapp_url'] %}<a href="{{ lead['whatsapp_url'] }}" target="_blank" rel="noopener" class="btn btn-success">Kundenlink per WhatsApp</a>{% endif %}
         {% if lead['can_email'] %}<a href="#ki-antwort" class="btn btn-brand">Kundenlink per E-Mail vorbereiten</a>{% endif %}
-        <a href="{{ url_for('auftrag_detail', auftrag_id=lead_auftrag['id']) }}" class="btn btn-outline-dark">Anfrage-Akte intern öffnen</a>
+        {% if lead_auftrag is defined and lead_auftrag %}<a href="{{ url_for('auftrag_detail', auftrag_id=lead_auftrag['id']) }}" class="btn btn-outline-dark">Erstellten Auftrag öffnen</a>{% endif %}
       </div>
-      {% else %}
-      <p class="text-muted">Jetzt schon eine Anfrage-Akte anlegen: Der Kunde erhält einen dauerhaften Link für Bilder, Terminwunsch, Angebot und späteren Reparaturstatus. Der Lead wird dadurch noch nicht als gewonnen markiert.</p>
-      <form method="POST" action="{{ url_for('admin_lead_to_auftrag', lead_id=lead['id']) }}">
+
+      {% if not lead['auftrag_id'] %}
+      <hr class="my-4">
+      <h3 class="h5 mb-3">Angebot im Lead bereitstellen</h3>
+      <form method="POST" action="{{ url_for('admin_lead_angebot_senden', lead_id=lead['id']) }}" class="vstack gap-3">
         {{ csrf_field()|safe }}
-        <button type="submit" class="btn btn-brand w-100">Kundenakte &amp; Link anlegen</button>
+        <div><label class="form-label">Leistung / Angebotsumfang</label><textarea name="angebot_text" rows="5" class="form-control" required>{{ lead['angebot_text'] or lead['beschreibung'] }}</textarea></div>
+        <div><label class="form-label">Preis</label><input type="text" name="angebot_preis" value="{{ lead['angebot_preis'] }}" class="form-control" placeholder="z. B. 1.250,00 € brutto" required></div>
+        <div><label class="form-label">Hinweis / Vorbehalt</label><textarea name="angebot_notiz" rows="3" class="form-control">{{ lead['angebot_notiz'] }}</textarea></div>
+        {% if lead['kunde_email'] %}<label class="form-check"><input class="form-check-input" type="checkbox" name="email_senden" value="1" checked><span class="form-check-label">Kunden zusätzlich per E-Mail über das Angebot informieren</span></label>{% endif %}
+        <button type="submit" class="btn btn-brand w-100">Angebot im Kundenportal bereitstellen</button>
       </form>
+
+      <hr class="my-4">
+      <h3 class="h5 mb-3">Nachricht im Portal</h3>
+      <form method="POST" action="{{ url_for('admin_lead_portal_nachricht', lead_id=lead['id']) }}" class="vstack gap-2">
+        {{ csrf_field()|safe }}
+        <textarea name="nachricht" rows="3" maxlength="2000" class="form-control" placeholder="Rückfrage oder Information für den Kunden" required></textarea>
+        <button type="submit" class="btn btn-outline-dark">Im Kundenportal veröffentlichen</button>
+      </form>
+      {% endif %}
+
+      {% if lead_portal_log %}
+      <hr class="my-4">
+      <h3 class="h5 mb-3">Portal-Aktivität</h3>
+      <div class="vstack gap-2">
+        {% for event in lead_portal_log %}
+        <div class="border rounded-3 p-2 bg-light">
+          <div class="d-flex justify-content-between gap-2"><strong class="small">{{ event['titel'] }}</strong><span class="text-muted small">{{ event['erstellt_am'] }}</span></div>
+          {% if event['nachricht'] %}<div class="small mt-1" style="white-space:pre-wrap;">{{ event['nachricht'] }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
       {% endif %}
     </div>
 

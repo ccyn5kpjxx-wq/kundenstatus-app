@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ihre Anfrage – {{ lead['fahrzeug'] or 'Gärtner Karosserie & Lack' }}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background:#f3efe6; color:#16202a; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    .shell { max-width:980px; margin:0 auto; padding:24px 14px; }
+    .panel { background:#fffdf9; border:1px solid #ddd1c0; border-radius:18px; padding:22px; box-shadow:0 16px 40px rgba(64,47,25,.10); }
+    .hero-grid { display:grid; grid-template-columns:minmax(0,1fr) 170px; gap:1rem; align-items:start; }
+    .brand-row { display:flex; align-items:center; gap:.75rem; margin-bottom:.9rem; }
+    .brand-logo { width:54px; height:54px; object-fit:contain; border-radius:12px; background:#fff; border:1px solid #eadcc9; padding:6px; }
+    .meta-line, .status-link { color:#66717a; overflow-wrap:anywhere; }
+    .contact-card { border:1px solid #dbe4ef; border-radius:14px; background:#f4f8fd; padding:.9rem 1rem; }
+    .qr-box { border:1px solid #e4d6c3; border-radius:14px; background:#fff; padding:10px; text-align:center; }
+    .qr-box img { width:126px; height:126px; max-width:100%; }
+    .status-link { font-size:.76rem; }
+    .timeline { display:grid; gap:.75rem; }
+    .timeline-step { display:grid; grid-template-columns:34px minmax(0,1fr); gap:.75rem; align-items:start; }
+    .timeline-dot { width:34px; height:34px; border-radius:999px; display:flex; align-items:center; justify-content:center; border:1px solid #d7c7b0; background:#f7f1e8; font-weight:800; }
+    .timeline-step.is-done .timeline-dot { background:#1f7a4d; border-color:#1f7a4d; color:#fff; }
+    .timeline-step.is-active .timeline-dot { background:#1f3557; border-color:#1f3557; color:#fff; }
+    .timeline-card { border:1px solid #e4d6c3; border-radius:14px; background:#fffdf9; padding:.85rem 1rem; }
+    .timeline-step.is-active .timeline-card { border-color:#b9c8dc; background:#eef5ff; }
+    .offer-card { border:1px solid #b9c8dc; border-radius:16px; background:#f4f8fd; padding:1.1rem; }
+    .file-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:.65rem; }
+    .file-card { border:1px solid #e4d6c3; border-radius:12px; background:#fff; overflow:hidden; color:inherit; text-decoration:none; }
+    .file-card img { display:block; width:100%; aspect-ratio:4/3; object-fit:cover; }
+    .file-card div { padding:.65rem; overflow-wrap:anywhere; }
+    .activity { display:grid; gap:.6rem; }
+    .activity-row { border-left:4px solid #d8c4a7; border-radius:8px; background:#faf6ef; padding:.75rem .9rem; }
+    .activity-row.is-customer { border-left-color:#1f7a4d; }
+    .hp-field { position:absolute !important; left:-10000px !important; width:1px !important; height:1px !important; overflow:hidden !important; }
+    @media (max-width:767.98px) {
+      .shell { padding:12px 9px 22px; }
+      .panel { padding:17px; border-radius:15px; }
+      .hero-grid { grid-template-columns:1fr; }
+      .qr-box { display:flex; gap:.75rem; align-items:center; text-align:left; }
+      .qr-box img { width:92px; height:92px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    {% set meldungen = get_flashed_messages(with_categories=true) %}
+    {% set angebot_offen = lead['angebot_status'] == 'angebot_abgegeben' %}
+
+    <section class="panel mb-4">
+      <div class="hero-grid">
+        <div>
+          <div class="brand-row">
+            <img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack" class="brand-logo">
+            <div><span class="badge text-bg-dark mb-1">Ihre Anfrage</span><div class="small text-muted">{{ werkstatt_kontakt.name }}</div></div>
+          </div>
+          <h1 class="h2 mb-2">{{ lead['fahrzeug'] or 'Ihre Fahrzeuganfrage' }}</h1>
+          <div class="meta-line">{% if lead['kennzeichen'] %}{{ lead['kennzeichen'] }}{% endif %}{% if lead['kunde_name'] %} · {{ lead['kunde_name'] }}{% endif %}</div>
+          <div class="mt-3"><span class="badge text-bg-{{ 'primary' if angebot_offen else 'warning' }} fs-6">{{ 'Angebot liegt vor' if angebot_offen else 'Anfrage wird geprüft' }}</span></div>
+          <div class="contact-card mt-3">
+            <div class="fw-bold">{{ werkstatt_kontakt.name }}</div>
+            <div class="text-muted small">{{ werkstatt_kontakt.adresse }}</div>
+            <div class="d-flex gap-2 flex-wrap mt-3">
+              <a class="btn btn-dark btn-sm" href="{{ werkstatt_kontakt.telefon_url }}">Anrufen</a>
+              <a class="btn btn-success btn-sm" href="{{ werkstatt_kontakt.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>
+            </div>
+          </div>
+        </div>
+        <div class="qr-box">
+          <img src="{{ kunden_status_qr_url }}" alt="QR-Code zum Kundenportal">
+          <div><div class="small fw-semibold">Dieser Link bleibt gültig</div><div class="small text-muted">Anfrage, Angebot, Termine und später Reparaturstatus.</div><div class="status-link mt-2">{{ kunden_status_link }}</div></div>
+        </div>
+      </div>
+      {% if meldungen %}<div class="mt-3">{% for category, message in meldungen %}<div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else ('info' if category == 'info' else 'success')) }} mb-2">{{ message }}</div>{% endfor %}</div>{% endif %}
+    </section>
+
+    <section class="panel mb-4">
+      <div class="d-flex justify-content-between gap-2 flex-wrap mb-3"><div><h2 class="h4 mb-1">Von der Anfrage bis zur Reparatur</h2><div class="text-muted">Noch ist kein Auftrag angelegt. Das geschieht automatisch, sobald Sie das Angebot annehmen.</div></div></div>
+      <div class="timeline">
+        <div class="timeline-step is-done"><div class="timeline-dot">✓</div><div class="timeline-card"><strong>Anfrage aufgenommen</strong><div class="small text-muted">Ihre Angaben sind sicher bei der Werkstatt eingegangen.</div></div></div>
+        <div class="timeline-step {{ 'is-done' if angebot_offen else 'is-active' }}"><div class="timeline-dot">{{ '✓' if angebot_offen else '2' }}</div><div class="timeline-card"><strong>Prüfung und Rückfragen</strong><div class="small text-muted">Bilder, Unterlagen, Nachrichten und ein erster Terminwunsch können hier ergänzt werden.</div></div></div>
+        <div class="timeline-step {{ 'is-active' if angebot_offen else '' }}"><div class="timeline-dot">3</div><div class="timeline-card"><strong>Angebot prüfen und annehmen</strong><div class="small text-muted">Mit der Annahme geben Sie auch Bring-/Abholwunsch und Mobilitätsbedarf an.</div></div></div>
+        <div class="timeline-step"><div class="timeline-dot">4</div><div class="timeline-card"><strong>Auftrag und Werkstatttafel</strong><div class="small text-muted">Erst nach Ihrer Annahme wird der Auftrag angelegt und in die Werkstattplanung übernommen.</div></div></div>
+        <div class="timeline-step"><div class="timeline-dot">5</div><div class="timeline-card"><strong>Reparaturstatus verfolgen</strong><div class="small text-muted">Danach zeigt derselbe Link den Fortschritt bis zur Fahrzeugrückgabe.</div></div></div>
+      </div>
+    </section>
+
+    {% if angebot_offen %}
+    <section class="panel mb-4" id="angebot">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div><h2 class="h4 mb-1">Ihr Werkstatt-Angebot</h2><div class="text-muted">Bitte prüfen Sie Leistung und Preis in Ruhe.</div></div>
+        {% if lead['angebot_preis_label'] %}<div class="h3 mb-0">{{ lead['angebot_preis_label'] }}</div>{% endif %}
+      </div>
+      <div class="offer-card mb-3">
+        <div style="white-space:pre-wrap;">{{ lead['angebot_text_display'] }}</div>
+        {% if lead['angebot_notiz'] %}<div class="border-top mt-3 pt-3 text-muted" style="white-space:pre-wrap;">{{ lead['angebot_notiz'] }}</div>{% endif %}
+      </div>
+      <form method="POST" action="{{ url_for('kunden_status_angebot_annehmen', token=lead['kunden_status_token']) }}" class="row g-3">
+        {{ csrf_field()|safe }}
+        <div class="hp-field" aria-hidden="true"><label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+        <div class="col-md-6"><label class="form-label fw-semibold">Gewünschter Bring-/Abholtermin</label><input type="date" name="wunsch_annahme_datum" min="{{ kunden_heute }}" value="{{ kunden_wunsch_annahme_iso }}" class="form-control" required></div>
+        <div class="col-md-6"><label class="form-label fw-semibold">Gewünschte Rückgabe/Abholung</label><input type="date" name="wunsch_abholung_datum" min="{{ kunden_heute }}" value="{{ kunden_wunsch_abholung_iso }}" class="form-control"></div>
+        <div class="col-md-6"><label class="form-label fw-semibold">Fahrzeugübergabe</label><select name="transport_art" class="form-select" required>{% for key, item in transport_arten.items() %}<option value="{{ key }}" {{ 'selected' if lead['portal_data'].get('kunden_wunsch_transport_art', 'standard') == key else '' }}>{{ item['label'] }}</option>{% endfor %}</select></div>
+        <div class="col-md-6"><label class="form-label fw-semibold">Ersatzfahrzeug gewünscht?</label><select name="ersatzfahrzeug" class="form-select" required><option value="">Bitte auswählen</option><option value="ja">Ja</option><option value="nein">Nein</option></select></div>
+        <div class="col-12"><label class="form-label fw-semibold">Abholadresse bei Hol- und Bringservice</label><input type="text" name="abhol_adresse" value="{{ lead['portal_data'].get('kunden_wunsch_abhol_adresse', '') }}" maxlength="300" class="form-control"></div>
+        <div class="col-12"><label class="form-label fw-semibold">Hinweis an die Werkstatt</label><textarea name="kunden_wunsch_hinweis" rows="3" maxlength="600" class="form-control">{{ lead['portal_data'].get('kunden_wunsch_hinweis', '') }}</textarea></div>
+        <div class="col-12"><label class="form-check p-3 border rounded-3 bg-white"><input class="form-check-input" type="checkbox" name="angebot_annehmen_bestaetigt" value="1" required><span class="form-check-label ms-1">Ich nehme das oben dargestellte Angebot verbindlich an. Die Termine sind zunächst Wünsche und werden von der Werkstatt bestätigt.</span></label></div>
+        <div class="col-12"><button class="btn btn-success btn-lg w-100" type="submit">Angebot annehmen und Auftrag erteilen</button></div>
+      </form>
+    </section>
+    {% else %}
+    <section class="panel mb-4"><h2 class="h4">Angebot wird vorbereitet</h2><p class="text-muted mb-0">Sobald die Werkstatt das Angebot bereitstellt, sehen Sie es hier. Bei einer wichtigen Änderung erhalten Sie zusätzlich eine Nachricht über den vereinbarten Kontaktweg.</p></section>
+    {% endif %}
+
+    <section class="panel mb-4" id="terminwunsch">
+      <h2 class="h4 mb-2">Wunschtermin vorab mitteilen</h2>
+      <p class="text-muted">Der Termin ist noch nicht verbindlich. Die Werkstatt berücksichtigt ihn bei Angebot und Planung.</p>
+      <form method="POST" action="{{ url_for('kunden_status_terminwunsch', token=lead['kunden_status_token']) }}" class="row g-3">
+        {{ csrf_field()|safe }}
+        <div class="col-md-6"><label class="form-label">Wunschtermin</label><input type="date" name="wunschtermin" min="{{ kunden_heute }}" value="{{ kunden_wunsch_annahme_iso }}" class="form-control" required></div>
+        <div class="col-md-6"><label class="form-label">Bevorzugtes Zeitfenster</label><input type="text" name="zeitfenster" maxlength="80" value="{{ lead['portal_data'].get('kunden_wunsch_zeitfenster', '') }}" class="form-control" placeholder="z. B. vormittags"></div>
+        <div class="col-12"><label class="form-label">Hinweis</label><textarea name="nachricht" rows="2" maxlength="600" class="form-control"></textarea></div>
+        <div class="col-12"><button type="submit" class="btn btn-outline-dark">Terminwunsch senden</button></div>
+      </form>
+    </section>
+
+    <section class="panel mb-4" id="unterlagen">
+      <h2 class="h4 mb-2">Bilder und Unterlagen nachreichen</h2>
+      <p class="text-muted">Zum Beispiel Schadenfotos, Fahrzeugschein oder weitere Ansichten. Maximal {{ schadenaufnahme_max_dateien }} Dateien je Übermittlung, jeweils bis {{ schadenaufnahme_max_upload_mb }} MB.</p>
+      <form method="POST" action="{{ url_for('kunden_status_unterlagen', token=lead['kunden_status_token']) }}" enctype="multipart/form-data" class="row g-3">
+        {{ csrf_field()|safe }}
+        <div class="hp-field" aria-hidden="true"><label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+        <div class="col-12"><input type="file" name="dateien" class="form-control" accept="image/*,.pdf" multiple required></div>
+        <div class="col-12"><input type="text" name="upload_notiz" maxlength="350" class="form-control" placeholder="Kurzer Hinweis zu den Dateien"></div>
+        <div class="col-12"><button type="submit" class="btn btn-dark">Sicher hochladen</button></div>
+      </form>
+      {% if lead_dateien %}<div class="file-grid mt-4">{% for datei in lead_dateien %}<a class="file-card" href="{{ datei['customer_url'] }}" target="_blank" rel="noopener">{% if datei['is_browser_image'] %}<img src="{{ datei['customer_url'] }}" alt="Hochgeladene Datei">{% endif %}<div class="small fw-semibold">{{ datei['original_name'] }}</div></a>{% endfor %}</div>{% endif %}
+    </section>
+
+    <section class="panel mb-4" id="nachrichten">
+      <h2 class="h4 mb-2">Nachricht senden</h2>
+      <form method="POST" action="{{ url_for('kunden_status_nachricht', token=lead['kunden_status_token']) }}" class="row g-3">
+        {{ csrf_field()|safe }}
+        <div class="col-12"><textarea name="nachricht" rows="3" maxlength="900" class="form-control" placeholder="Ihre Frage oder Rückmeldung" required></textarea></div>
+        <div class="col-12"><input type="text" name="kontakt" maxlength="160" class="form-control" placeholder="Bevorzugter Rückkontakt (optional)"></div>
+        <div class="col-12"><button type="submit" class="btn btn-outline-dark">Nachricht an Werkstatt senden</button></div>
+      </form>
+      {% if portal_events %}<div class="activity mt-4">{% for event in portal_events %}<div class="activity-row {{ 'is-customer' if event['quelle'] == 'kunde' else '' }}"><div class="d-flex justify-content-between gap-2 flex-wrap"><strong>{{ event['titel'] }}</strong><span class="small text-muted">{{ event['erstellt_am'] }}</span></div>{% if event['nachricht'] %}<div class="small mt-1" style="white-space:pre-wrap;">{{ event['nachricht'] }}</div>{% endif %}</div>{% endfor %}</div>{% endif %}
+    </section>
+  </main>
+</body>
+</html>

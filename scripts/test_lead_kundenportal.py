@@ -80,18 +80,10 @@ def main():
         session["admin"] = True
     admin.get("/admin/leads")
     admin_csrf = csrf_token(admin)
-    create_case = admin.post(
-        f"/admin/leads/{lead_id}/auftrag",
-        data={portal.CSRF_FIELD_NAME: admin_csrf},
-        follow_redirects=False,
-    )
     lead = portal.get_lead(lead_id)
-    auftrag = portal.get_auftrag(lead["auftrag_id"])
     checks += [
-        check("Fruehe Anfrage-Akte wurde angelegt", create_case.status_code == 302 and auftrag["quelle"] == "lead"),
-        check("Lead bleibt offen", lead["status"] == "unterlagen_fehlen" and not lead["is_closed"]),
-        check("Anfrage-Akte startet in Angebotsphase", auftrag["angebotsphase"] and auftrag["angebot_status"] == "angefragt"),
-        check("Kontaktdaten und starker Kundenlink wurden uebernommen", auftrag["kunde_email"] == "klara@example.test" and len(auftrag["kunden_status_token"]) >= 18),
+        check("Lead besitzt sofort einen starken Kundenlink", not lead["auftrag_id"] and len(lead["kunden_status_token"]) >= 18),
+        check("Vor Angebotsannahme existiert kein Auftrag", not lead["auftrag_id"] and not lead["is_closed"]),
     ]
 
     lead_page = admin.get(f"/admin/leads/{lead_id}")
@@ -100,13 +92,13 @@ def main():
         check(
             "Lead-Detail zeigt Kundenportal und E-Mail-Linktext",
             lead_page.status_code == 200
-            and "Anfrage-Akte aktiv" in lead_html
-            and auftrag["kunden_status_url"] in lead_html
-            and "Bilder und Unterlagen nachreichen" in lead_html,
+            and "Lead-Portal aktiv" in lead_html
+            and lead["kunden_status_url"] in lead_html
+            and "Noch kein Auftrag" in lead_html,
         )
     )
 
-    token = auftrag["kunden_status_token"]
+    token = lead["kunden_status_token"]
     start_page = kunde.get(f"/status/{token}")
     start_html = start_page.get_data(as_text=True)
     customer_csrf = csrf_token(kunde)
@@ -120,7 +112,8 @@ def main():
             start_page.status_code == 200
             and "Von der Anfrage bis zur Reparatur" in start_html
             and "Angebot wird vorbereitet" in start_html
-            and "Unterlagen nachreichen" in start_html,
+            and "Bilder und Unterlagen nachreichen" in start_html
+            and "Noch ist kein Auftrag angelegt" in start_html,
         )
     )
 
@@ -140,7 +133,7 @@ def main():
             "Kundenbild wird sicher gespeichert und am Lead signalisiert",
             upload.status_code == 302
             and "Kundenunterlage" in lead["naechste_aktion"]
-            and any(item["quelle"] == "kunde" for item in portal.list_dateien(auftrag["id"])),
+            and any(item["quelle"] == "kunde_portal" for item in portal.list_lead_dateien(lead_id)),
         )
     )
 
@@ -153,31 +146,30 @@ def main():
         },
         follow_redirects=False,
     )
-    auftrag = portal.get_auftrag(auftrag["id"])
+    lead = portal.get_lead(lead_id)
     checks.append(
         check(
-            "Frueher Terminwunsch bleibt fuer die spaetere Angebotsannahme gespeichert",
+            "Frueher Terminwunsch bleibt direkt am Lead gespeichert",
             terminwunsch.status_code == 302
-            and auftrag["schaden_aufnahme"].get("kunden_wunsch_annahme_datum") == wunsch_annahme_db,
+            and lead["portal_data"].get("kunden_wunsch_annahme_datum") == wunsch_annahme_db,
         )
     )
 
     offer = admin.post(
-        f"/admin/angebot/{auftrag['id']}/senden",
+        f"/admin/leads/{lead_id}/angebot",
         data={
             portal.CSRF_FIELD_NAME: admin_csrf,
-            "werkstatt_angebot_preis": "1.250,00 EUR brutto",
-            "werkstatt_angebot_text": "Instandsetzung und Lackierung der Beifahrertuer",
-            "werkstatt_angebot_notiz": "Vorbehaltlich Sichtpruefung vor Ort.",
+            "angebot_preis": "1.250,00 EUR brutto",
+            "angebot_text": "Instandsetzung und Lackierung der Beifahrertuer",
+            "angebot_notiz": "Vorbehaltlich Sichtpruefung vor Ort.",
         },
         follow_redirects=False,
     )
-    auftrag = portal.get_auftrag(auftrag["id"])
     lead = portal.get_lead(lead_id)
     offer_page = kunde.get(f"/status/{token}")
     offer_html = offer_page.get_data(as_text=True)
     checks += [
-        check("Werkstatt-Angebot wird im Kundenportal bereitgestellt", offer.status_code == 302 and auftrag["angebot_status"] == "angebot_abgegeben" and "Ihr Werkstatt-Angebot" in offer_html),
+        check("Werkstatt-Angebot wird am Lead im Kundenportal bereitgestellt", offer.status_code == 302 and not lead["auftrag_id"] and lead["angebot_status"] == "angebot_abgegeben" and "Ihr Werkstatt-Angebot" in offer_html),
         check("Bereits gesendeter Terminwunsch ist im Annahmeformular vorausgefuellt", f'value="{wunsch_annahme}"' in offer_html),
         check("Lead wechselt automatisch auf Angebot offen", lead["status"] == "angebot_offen"),
     ]
@@ -196,7 +188,8 @@ def main():
         check(
             "Angebot kann nicht ohne ausdrueckliche Bestaetigung angenommen werden",
             missing_confirmation.status_code == 302
-            and portal.get_auftrag(auftrag["id"])["angebot_status"] == "angebot_abgegeben",
+            and not portal.get_lead(lead_id)["auftrag_id"]
+            and portal.get_lead(lead_id)["angebot_status"] == "angebot_abgegeben",
         )
     )
 
@@ -214,12 +207,13 @@ def main():
         },
         follow_redirects=False,
     )
-    auftrag = portal.get_auftrag(auftrag["id"])
     lead = portal.get_lead(lead_id)
+    auftrag = portal.get_auftrag(lead["auftrag_id"])
     intake = auftrag["schaden_aufnahme"]
     checks += [
-        check("Kunde nimmt Angebot verbindlich an", accept.status_code == 302 and auftrag["angebot_status"] == "angenommen" and not auftrag["angebotsphase"]),
-        check("Lead wird erst jetzt automatisch gewonnen", lead["status"] == "gewonnen"),
+        check("Kunde nimmt Angebot verbindlich an und erzeugt erst jetzt den Auftrag", accept.status_code == 302 and lead["auftrag_id"] > 0 and auftrag["angebot_status"] == "angenommen" and not auftrag["angebotsphase"]),
+        check("Lead wird erst bei Annahme automatisch gewonnen", lead["status"] == "gewonnen"),
+        check("Derselbe Kundenlink bleibt nach der Umwandlung gueltig", auftrag["kunden_status_token"] == token),
         check(
             "Termin, Transport und Ersatzfahrzeug bleiben bis Werkstattbestaetigung Wuensche",
             intake.get("kunden_wunsch_annahme_datum") == wunsch_annahme_db

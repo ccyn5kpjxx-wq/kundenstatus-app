@@ -155,20 +155,9 @@ def main():
         follow_redirects=False,
     )
     lack_after = portal.get_lead(lack_id)
-    db = portal.get_db()
-    try:
-        transfer_count = db.execute(
-            "SELECT COUNT(*) FROM dateien WHERE auftrag_id=? AND kategorie='leadbild'",
-            (lack_after["auftrag_id"],),
-        ).fetchone()[0]
-        remaining_lead_files = db.execute(
-            "SELECT COUNT(*) FROM lead_dateien WHERE lead_id=?", (lack_id,)
-        ).fetchone()[0]
-    finally:
-        db.close()
     checks += [
-        check("Lackierzentrum-Lead wird Auftrag", convert.status_code == 302 and lack_after["auftrag_id"] > 0),
-        check("Lead-Anhaenge bleiben am Lead und liegen auch am Auftrag", transfer_count == 1 and remaining_lead_files == 1),
+        check("Lackierzentrum-Lead wird nicht manuell vorzeitig zum Auftrag", convert.status_code == 302 and not lack_after["auftrag_id"]),
+        check("Lackierzentrum-Lead besitzt stattdessen sofort Kundenlink und Anhang", len(lack_after["kunden_status_token"]) >= 18 and len(portal.list_lead_dateien(lack_id)) == 1),
     ]
 
     print(f"Temporaere Testdaten: {TEMP_DIR}")
