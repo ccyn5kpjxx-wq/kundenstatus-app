@@ -4,36 +4,52 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Anfrage & Beratung | Gärtner Karosserie & Lack</title>
-  <meta name="description" content="Unverbindliche Anfrage für Werkstatt, Kaufberatung und Leasingrückgabe-Check bei Gärtner Karosserie & Lack in Mosbach.">
+  <title>{% if kurzanfrage %}Schnelle Anfrage senden{% else %}Anfrage & Beratung{% endif %} | Gärtner Karosserie & Lack</title>
+  <meta name="description" content="Unverbindliche Anfrage für Lack, Reparatur, Fahrzeugpflege, Mietwagen oder Fahrzeugcheck bei Gärtner in Mosbach.">
   <style>
-    :root { --ink:#252624; --ink-soft:#343532; --cream:#f2ede5; --paper:#fffdf9; --muted:#676660; --red:#e32219; --red-dark:#bd1c16; --line:#ded5c8; --shadow:0 26px 70px rgba(49,42,33,.14); }
+    :root { --ink:#252624; --ink-soft:#343532; --cream:#f2ede5; --paper:#fffdf9; --muted:#676660; --red:#e32219; --red-dark:#bd1c16; --line:#ded5c8; --teal:#0b6b67; --shadow:0 26px 70px rgba(49,42,33,.14); }
     * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
     body { margin:0; color:var(--ink); background:radial-gradient(circle at 100% 0,rgba(227,34,25,.09),transparent 30%),var(--cream); font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
     a { color:inherit; }
     :focus-visible { outline:3px solid var(--red); outline-offset:3px; }
     .wrap { width:min(1080px,calc(100% - 38px)); margin:0 auto; }
-    .top { border-bottom:1px solid rgba(255,255,255,.1); background:rgba(35,36,34,.96); }
+    .top { border-bottom:1px solid rgba(255,255,255,.1); background:rgba(35,36,34,.97); }
     .nav { min-height:74px; display:flex; align-items:center; justify-content:space-between; gap:24px; }
     .brand { display:flex; align-items:center; gap:13px; color:white; text-decoration:none; font-weight:850; }
     .brand img { width:104px; padding:5px 9px; border-radius:9px; background:white; }
     .back { min-height:44px; display:inline-flex; align-items:center; padding:0 17px; border:1px solid rgba(255,255,255,.25); border-radius:999px; color:white; text-decoration:none; font-size:13px; font-weight:800; }
-    .hero { padding:64px 0 34px; }
-    .eyebrow { color:var(--red); font-size:13px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
-    h1 { max-width:820px; margin:17px 0 18px; font-size:clamp(43px,6vw,72px); line-height:.96; letter-spacing:-.05em; }
-    .hero p { max-width:740px; margin:0; color:var(--muted); font-size:clamp(17px,2vw,21px); line-height:1.6; }
-    .layout { display:grid; grid-template-columns:.78fr 1.22fr; gap:22px; align-items:start; padding:20px 0 72px; }
-    .info,.form-card,.success { border:1px solid var(--line); border-radius:22px; background:rgba(255,253,249,.9); box-shadow:var(--shadow); }
+    .hero { padding:58px 0 28px; }
+    .eyebrow { color:var(--red); font-size:12px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; }
+    .time-pill { display:inline-flex; align-items:center; gap:7px; margin-bottom:14px; padding:8px 12px; border:1px solid rgba(11,107,103,.2); border-radius:999px; color:var(--teal); background:#edf8f6; font-size:12px; font-weight:850; }
+    h1 { max-width:850px; margin:14px 0 17px; font-size:clamp(41px,6vw,68px); line-height:.97; letter-spacing:-.05em; }
+    .hero p { max-width:760px; margin:0; color:var(--muted); font-size:clamp(17px,2vw,20px); line-height:1.6; }
+    .intent-wrap { padding:12px 0 28px; }
+    .intent-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:15px; }
+    .intent-card { min-height:205px; display:flex; flex-direction:column; gap:12px; padding:23px; border:1px solid var(--line); border-radius:20px; background:rgba(255,253,249,.9); box-shadow:0 13px 38px rgba(49,42,33,.09); text-decoration:none; transition:.18s ease; }
+    .intent-card:hover,.intent-card.is-selected { transform:translateY(-3px); border-color:rgba(227,34,25,.55); box-shadow:0 20px 45px rgba(49,42,33,.14); }
+    .intent-card.is-selected { box-shadow:inset 0 0 0 2px var(--red),0 20px 45px rgba(49,42,33,.14); }
+    .intent-icon { width:54px; height:54px; display:grid; place-items:center; border-radius:16px; color:var(--red); background:#fff0ee; }
+    .intent-icon svg { width:29px; height:29px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+    .intent-card.insurance .intent-icon { color:var(--teal); background:#edf8f6; }
+    .intent-kicker { color:var(--red-dark); font-size:11px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+    .intent-card.insurance .intent-kicker { color:var(--teal); }
+    .intent-card h2 { margin:0; font-size:23px; line-height:1.08; letter-spacing:-.025em; }
+    .intent-card p { margin:0; color:var(--muted); font-size:14px; line-height:1.45; }
+    .intent-link { margin-top:auto; font-size:13px; font-weight:900; }
+    .selection-note { max-width:720px; margin:18px auto 0; color:var(--muted); text-align:center; font-size:14px; line-height:1.5; }
+    .layout { display:grid; grid-template-columns:.72fr 1.28fr; gap:22px; align-items:start; padding:15px 0 72px; }
+    .info,.form-card,.success { border:1px solid var(--line); border-radius:22px; background:rgba(255,253,249,.94); box-shadow:var(--shadow); }
     .info { position:sticky; top:22px; padding:30px; }
     .info h2 { margin:13px 0 14px; font-size:28px; line-height:1.06; letter-spacing:-.03em; }
     .info p { margin:0; color:var(--muted); line-height:1.6; }
-    .info ul { display:grid; gap:15px; margin:27px 0 0; padding:0; list-style:none; }
+    .info ul { display:grid; gap:15px; margin:25px 0 0; padding:0; list-style:none; }
     .info li { position:relative; padding-left:27px; line-height:1.45; }
     .info li::before { content:"✓"; position:absolute; left:0; color:var(--red); font-weight:900; }
-    .info-note { margin-top:25px!important; padding-top:22px; border-top:1px solid var(--line); font-size:13px; }
+    .info-note { margin-top:24px!important; padding-top:20px; border-top:1px solid var(--line); font-size:13px; }
     .form-card { padding:clamp(25px,4vw,42px); }
-    .form-card h2 { margin:0 0 8px; font-size:30px; letter-spacing:-.03em; }
-    .form-intro { margin:0 0 26px; color:var(--muted); line-height:1.5; }
+    .form-card h2 { margin:0 0 8px; font-size:31px; letter-spacing:-.03em; }
+    .form-intro { margin:0 0 25px; color:var(--muted); line-height:1.5; }
     .errors { margin:0 0 22px; padding:17px 19px 17px 38px; border:1px solid #f0aaa5; border-radius:13px; color:#8c1c16; background:#fff0ee; }
     .errors li + li { margin-top:6px; }
     .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
@@ -41,17 +57,45 @@
     .field.full { grid-column:1/-1; }
     label,legend { font-size:13px; font-weight:850; }
     input,select,textarea { width:100%; min-height:48px; padding:11px 13px; border:1px solid #cfc5b8; border-radius:11px; color:var(--ink); background:white; font:inherit; }
-    textarea { min-height:125px; resize:vertical; }
+    textarea { min-height:115px; resize:vertical; }
     input:focus,select:focus,textarea:focus { border-color:var(--red); outline:2px solid rgba(227,34,25,.13); }
     .hint { margin:0; color:#77736d; font-size:12px; line-height:1.45; }
     fieldset { grid-column:1/-1; display:grid; gap:10px; margin:2px 0 0; padding:0; border:0; }
     .choice { display:flex; gap:10px; align-items:flex-start; padding:13px; border:1px solid var(--line); border-radius:12px; background:#faf7f1; cursor:pointer; }
     .choice input { width:18px; min-height:18px; margin:2px 0 0; }
     .choice span { font-size:13px; line-height:1.45; }
-    .upload-box { grid-column:1/-1; position:relative; display:grid; grid-template-columns:60px 1fr; gap:14px; align-items:center; min-height:108px; padding:17px; border:1.5px dashed #bcb0a1; border-radius:15px; background:#faf7f1; cursor:pointer; }
+    .choice-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .rental-fleet { gap:14px; }
+    .rental-fleet > .hint { margin-top:-4px; }
+    .rental-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px; }
+    .rental-card { position:relative; min-width:0; overflow:hidden; border:1px solid var(--line); border-radius:16px; background:white; box-shadow:0 10px 26px rgba(49,42,33,.07); cursor:pointer; transition:.18s ease; }
+    .rental-card:hover { transform:translateY(-2px); border-color:#c7b8a6; box-shadow:0 15px 30px rgba(49,42,33,.11); }
+    .rental-card:has(input:checked) { border-color:var(--red); box-shadow:inset 0 0 0 2px var(--red),0 15px 30px rgba(227,34,25,.13); }
+    .rental-card > input { position:absolute; z-index:2; top:12px; right:12px; width:20px; min-height:20px; margin:0; accent-color:var(--red); }
+    .rental-photo { position:relative; display:block; aspect-ratio:16/9; overflow:hidden; background:#ece7de; }
+    .rental-photo img { width:100%; height:100%; display:block; object-fit:cover; }
+    .rental-status,.rental-photo-note { position:absolute; left:10px; display:inline-flex; align-items:center; min-height:25px; padding:0 9px; border-radius:999px; font-size:10px; font-weight:900; }
+    .rental-status { top:10px; color:#07564d; background:#e6f6f1; }
+    .rental-status.is-bald { color:#7e4c08; background:#fff1d8; }
+    .rental-photo-note { bottom:9px; color:white; background:rgba(37,38,36,.72); }
+    .rental-body { display:grid; gap:8px; padding:15px; }
+    .rental-title { display:flex; justify-content:space-between; gap:12px; align-items:start; }
+    .rental-title strong { font-size:17px; line-height:1.15; }
+    .rental-price { color:var(--red-dark); white-space:nowrap; font-size:15px; font-weight:900; }
+    .rental-type { color:var(--muted); font-size:12px; font-weight:800; }
+    .rental-description { min-height:38px; color:var(--muted); font-size:12px; line-height:1.45; }
+    .rental-features { display:flex; flex-wrap:wrap; gap:6px; }
+    .rental-features span { padding:5px 7px; border-radius:999px; color:#504d48; background:#f3eee7; font-size:10px; font-weight:800; }
+    .rental-rate-note { padding-top:8px; border-top:1px solid #eee6dc; color:#55514b; font-size:11px; font-weight:850; }
+    .rental-other { display:flex; gap:11px; align-items:flex-start; padding:14px; border:1px solid var(--line); border-radius:13px; background:#faf7f1; cursor:pointer; }
+    .rental-other:has(input:checked) { border-color:var(--red); box-shadow:inset 0 0 0 1px var(--red); background:#fff8f6; }
+    .rental-other input { width:19px; min-height:19px; margin:2px 0 0; accent-color:var(--red); }
+    .rental-other strong,.rental-other small { display:block; }
+    .rental-other small { margin-top:3px; color:var(--muted); font-size:12px; line-height:1.4; }
+    .rental-terms { padding:12px 14px; border-radius:12px; color:#625e57; background:#f5f0e8; font-size:11px; line-height:1.5; }
+    .upload-box { grid-column:1/-1; position:relative; display:grid; grid-template-columns:68px 1fr; gap:15px; align-items:center; min-height:112px; padding:18px; border:1.5px dashed #bcb0a1; border-radius:15px; background:#faf7f1; cursor:pointer; }
     .upload-box:hover { border-color:var(--red); background:#fff8f6; }
-    .upload-icon { width:54px; height:54px; display:grid; place-items:center; border-radius:14px; color:var(--red); background:white; box-shadow:0 8px 24px rgba(49,42,33,.08); }
-    .upload-icon svg { width:28px; height:28px; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; fill:none; }
+    .upload-icon { width:58px; height:58px; display:grid; place-items:center; border-radius:15px; color:var(--red); background:white; box-shadow:0 8px 24px rgba(49,42,33,.08); font-size:27px; }
     .upload-copy strong { display:block; margin-bottom:5px; font-size:15px; }
     .upload-copy span { display:block; color:var(--muted); font-size:12px; line-height:1.45; }
     .upload-box input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
@@ -63,7 +107,7 @@
     .photo-preview-status { grid-column:1/-1; margin:0; color:var(--muted); font-size:12px; font-weight:750; }
     .photo-preview-status.is-error { color:#a1261f; }
     .privacy { margin:24px 0 18px; color:var(--muted); font-size:12px; line-height:1.55; }
-    .button { width:100%; min-height:54px; border:0; border-radius:999px; color:white; background:linear-gradient(135deg,var(--red),var(--red-dark)); box-shadow:0 13px 28px rgba(227,34,25,.23); font:inherit; font-weight:900; cursor:pointer; }
+    .button { width:100%; min-height:55px; border:0; border-radius:999px; color:white; background:linear-gradient(135deg,var(--red),var(--red-dark)); box-shadow:0 13px 28px rgba(227,34,25,.23); font:inherit; font-weight:900; cursor:pointer; }
     .button:hover { transform:translateY(-1px); }
     .photo-link { margin-top:17px; text-align:center; color:var(--muted); font-size:13px; }
     .photo-link a { color:var(--red-dark); font-weight:850; }
@@ -76,8 +120,8 @@
     .success-actions .primary { color:white; border-color:var(--red); background:var(--red); }
     .honeypot { position:absolute!important; left:-10000px!important; width:1px!important; height:1px!important; overflow:hidden!important; }
     [hidden] { display:none!important; }
-    @media (max-width:780px) { .layout { grid-template-columns:1fr; } .form-card { order:1; } .info { position:static; order:2; } }
-    @media (max-width:560px) { .wrap { width:min(100% - 22px,1080px); } .nav { min-height:66px; } .brand span { display:none; } .hero { padding:44px 0 24px; } h1 { font-size:clamp(39px,12vw,52px); } .layout { padding-bottom:36px; } .grid { grid-template-columns:1fr; } .field.full,fieldset,.upload-box,.photo-preview { grid-column:auto; } .form-card { border-radius:17px; } .upload-box { grid-template-columns:52px 1fr; } .upload-icon { width:48px; height:48px; } }
+    @media (max-width:820px) { .intent-grid { grid-template-columns:1fr; } .intent-card { min-height:0; } .layout { grid-template-columns:1fr; } .form-card { order:1; } .info { position:static; order:2; } }
+    @media (max-width:560px) { .wrap { width:min(100% - 22px,1080px); } .nav { min-height:66px; } .brand span { display:none; } .hero { padding:42px 0 22px; } h1 { font-size:clamp(38px,12vw,50px); } .intent-wrap { padding-top:5px; } .intent-card { padding:19px; border-radius:17px; } .layout { padding-bottom:36px; } .grid,.choice-grid,.rental-grid { grid-template-columns:1fr; } .field.full,fieldset,.upload-box,.photo-preview { grid-column:auto; } .form-card { border-radius:17px; } .upload-box { grid-template-columns:52px 1fr; } .upload-icon { width:48px; height:48px; } .rental-description { min-height:0; } }
   </style>
 </head>
 <body>
@@ -90,20 +134,178 @@
   <main>
     <section class="hero">
       <div class="wrap">
+        {% if kurzanfrage %}
+        <div class="time-pill">● Schnell &amp; unverbindlich</div>
+        <div class="eyebrow">Alle Anfragen an einem Ort</div>
+        <h1>Was möchten Sie anfragen?</h1>
+        <p>Wählen Sie den passenden Bereich und senden Sie uns in etwa einer Minute die wichtigsten Angaben und optional Bilder. Einen Versicherungsschaden erfassen Sie separat und ausführlicher.</p>
+        {% else %}
         <div class="eyebrow">Unverbindlich anfragen</div>
         <h1>Ihr Anliegen. Direkt bei uns.</h1>
         <p>Wählen Sie den gewünschten Service und senden Sie uns die wichtigsten Angaben. Wir melden uns persönlich zur Abstimmung von Umfang, Termin und Kosten.</p>
+        {% endif %}
       </div>
     </section>
-    <section class="wrap layout" aria-label="Anfrageformular">
+
+    {% if kurzanfrage and not gesendet %}
+    <section class="wrap intent-wrap" aria-label="Anliegen auswählen">
+      <div class="intent-grid">
+        <a class="intent-card {% if formdata.get('anliegen') == 'lackanfrage' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='lackanfrage') }}#kurzanfrage">
+          <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6 21c5-7 9-10 18-13l2 5c-8 3-12 6-17 12z"/><path d="m21 9 3 7M8 24l-2 3h5l2-4"/></svg></span>
+          <span class="intent-kicker">Ca. 1 Minute</span>
+          <h2>Lackanfrage</h2>
+          <p>Kratzer, Lackschaden, Farbton oder einzelne Bauteile lackieren lassen.</p>
+          <span class="intent-link">Kurzanfrage öffnen →</span>
+        </a>
+        <a class="intent-card {% if formdata.get('anliegen') == 'reparaturanfrage' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='reparaturanfrage') }}#kurzanfrage">
+          <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="m19 6 7 7-4 4-7-7z"/><path d="M17 12 7 22a3 3 0 0 0 4 4l10-10"/><path d="m8 21 3 3"/></svg></span>
+          <span class="intent-kicker">Ca. 1 Minute</span>
+          <h2>Reparaturanfrage</h2>
+          <p>Delle, Karosserieschaden, Anbauteil oder ein anderes Werkstattthema.</p>
+          <span class="intent-link">Kurzanfrage öffnen →</span>
+        </a>
+        <a class="intent-card {% if formdata.get('anliegen') == 'mechanikanfrage' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='mechanikanfrage') }}#kurzanfrage">
+          <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="5"/><path d="M16 4v4M16 24v4M4 16h4M24 16h4M7.5 7.5l3 3M21.5 21.5l3 3M24.5 7.5l-3 3M10.5 21.5l-3 3"/></svg></span>
+          <span class="intent-kicker">Ca. 1 Minute</span>
+          <h2>Mechanik &amp; Wartung</h2>
+          <p>Bremsen, Ölwechsel, Inspektion oder ein anderes technisches Problem.</p>
+          <span class="intent-link">Mechanik anfragen →</span>
+        </a>
+        <a class="intent-card {% if formdata.get('anliegen') == 'fahrzeugpflege' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='fahrzeugpflege') }}#kurzanfrage">
+          <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 5v5M16 22v5M5 16h5M22 16h5M9 9l3 3M20 20l3 3M23 9l-3 3M12 20l-3 3"/><circle cx="16" cy="16" r="5"/></svg></span>
+          <span class="intent-kicker">Ca. 1 Minute</span>
+          <h2>Fahrzeugpflege</h2>
+          <p>Innenaufbereitung, Außenpflege, Polieren, 1-Step, 2-Step oder komplett.</p>
+          <span class="intent-link">Pflege anfragen →</span>
+        </a>
+        <a class="intent-card {% if formdata.get('anliegen') == 'mietwagenanfrage' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='mietwagenanfrage') }}#kurzanfrage">
+          <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6 20h20l-2-7H8z"/><path d="M8 20v4M24 20v4M10 24h12"/><circle cx="10" cy="20" r="2"/><circle cx="22" cy="20" r="2"/></svg></span>
+          <span class="intent-kicker">Schnell anfragen</span>
+          <h2>Mietwagen</h2>
+          <p>Zeitraum und Fahrzeugwunsch senden; wir prüfen die Verfügbarkeit persönlich.</p>
+          <span class="intent-link">Mietwagen anfragen →</span>
+        </a>
+        <a class="intent-card {% if formdata.get('anliegen') == 'fahrzeugcheck' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='fahrzeugcheck') }}#kurzanfrage">
+          <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><circle cx="14" cy="14" r="8"/><path d="m20 20 7 7M10 14l3 3 5-6"/></svg></span>
+          <span class="intent-kicker">Schnell anfragen</span>
+          <h2>Fahrzeugcheck</h2>
+          <p>Gebrauchtwagenkauf, Leasingrückgabe oder allgemeine Fahrzeugprüfung.</p>
+          <span class="intent-link">Check anfragen →</span>
+        </a>
+        <a class="intent-card {% if formdata.get('anliegen') == 'weitere_anfrage' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='weitere_anfrage') }}#kurzanfrage">
+          <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 7h22v15H13l-6 5v-5H5z"/><path d="M10 12h12M10 17h8"/></svg></span>
+          <span class="intent-kicker">Direkt zu uns</span>
+          <h2>Weitere Anfrage</h2>
+          <p>Felgen, Dellen, Farbton, Werkstatttermin oder ein anderes Anliegen.</p>
+          <span class="intent-link">Anfrage öffnen →</span>
+        </a>
+        <a class="intent-card insurance" href="{{ url_for('privat_schadenaufnahme') }}">
+          <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 4 26 8v7c0 7-4 11-10 14C10 26 6 22 6 15V8z"/><path d="m11 16 3 3 7-8"/></svg></span>
+          <span class="intent-kicker">Ausführliche Meldung</span>
+          <h2>Versicherungsschaden</h2>
+          <p>Unfall, Haftpflicht, Kasko oder ein Schaden mit Versicherungsdaten und Unterlagen.</p>
+          <span class="intent-link">Versicherungsschaden melden →</span>
+        </a>
+      </div>
+      {% if formdata.get('anliegen') == 'schaden' %}<p class="selection-note">Für alle normalen Anliegen genügt die jeweilige Kurzanfrage. Nur wenn eine Versicherung beteiligt ist, nutzen Sie die ausführliche Schadenmeldung.</p>{% endif %}
+    </section>
+    {% endif %}
+
+    <section class="wrap layout" id="kurzanfrage" aria-label="Anfrageformular">
       {% if gesendet %}
         <div class="success" role="status">
           <div class="success-mark" aria-hidden="true">✓</div>
           <h2>Ihre Anfrage ist angekommen.</h2>
-          <p>Vielen Dank. Wir prüfen Ihre Angaben und melden uns persönlich. Das Absenden ist noch keine Termin-, Preis- oder Auftragsbestätigung.</p>
+          <p>Vielen Dank. Wir sehen uns Ihre Angaben an und melden uns persönlich. Das Absenden ist noch keine Termin-, Preis- oder Auftragsbestätigung.</p>
           <div class="success-actions"><a class="primary" href="tel:+4915227706694">0152 277 066 94</a><a href="{{ url_for('oeffentliche_homepage') }}">Zur Homepage</a></div>
         </div>
-      {% else %}
+      {% elif kurzanfrage and formdata.get('anliegen') in kurzanfrage_optionen %}
+        <aside class="info">
+          <div class="eyebrow">Ganz einfach</div>
+          <h2>Kurz schildern. Wir kümmern uns.</h2>
+          <p>Sie müssen noch keine Versicherungsdaten, Termine oder langen Fahrzeugangaben zusammensuchen.</p>
+          <ul><li>Name und Rückrufmöglichkeit</li><li>Kurze Beschreibung</li><li>Bis zu fünf Bilder, wenn Sie möchten</li></ul>
+          <p class="info-note">Wir prüfen die Anfrage persönlich und klären alles Weitere direkt mit Ihnen.</p>
+        </aside>
+        <form class="form-card" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data" novalidate>
+          {{ csrf_field()|safe }}
+          <input type="hidden" name="anliegen" value="{{ formdata.get('anliegen') }}">
+          <input type="hidden" name="besichtigungsart" value="werkstatt">
+          <div class="honeypot" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
+          <h2>{{ kurzanfrage_optionen[formdata.get('anliegen')]['label'] }}</h2>
+          <p class="form-intro">Nur das Nötigste – in etwa einer Minute erledigt.</p>
+          {% if errors %}<ul class="errors" role="alert">{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+          <div class="grid">
+            <div class="field"><label for="name">Name *</label><input id="name" name="name" maxlength="120" autocomplete="name" value="{{ formdata.get('name','') }}" required></div>
+            <div class="field"><label for="telefon">Telefon</label><input id="telefon" name="telefon" maxlength="80" inputmode="tel" autocomplete="tel" value="{{ formdata.get('telefon','') }}" placeholder="z. B. 0171 1234567"><p class="hint">Telefon oder E-Mail genügt.</p></div>
+            <div class="field"><label for="email">E-Mail</label><input id="email" name="email" maxlength="200" type="email" autocomplete="email" value="{{ formdata.get('email','') }}"></div>
+            {% if formdata.get('anliegen') != 'mietwagenanfrage' %}<div class="field"><label for="fahrzeug">Fahrzeug <span class="hint">(optional)</span></label><input id="fahrzeug" name="fahrzeug" maxlength="160" placeholder="z. B. VW Golf 8" value="{{ formdata.get('fahrzeug','') }}"></div>{% endif %}
+            {% if formdata.get('anliegen') == 'mechanikanfrage' %}
+            <fieldset>
+              <legend>Was soll geprüft oder gemacht werden? *</legend>
+              <div class="choice-grid">
+                {% for key,label in mechanik_kategorien.items() %}
+                <label class="choice"><input type="checkbox" name="mechanik_kategorie" value="{{ key }}" {% if key in mechanik_auswahl %}checked{% endif %}><span>{{ label }}</span></label>
+                {% endfor %}
+              </div>
+              <p class="hint">Mehrfachauswahl möglich.</p>
+            </fieldset>
+            {% elif formdata.get('anliegen') == 'fahrzeugpflege' %}
+            <fieldset>
+              <legend>Welche Fahrzeugpflege wünschen Sie? *</legend>
+              <div class="choice-grid">
+                {% for key,label in pflege_kategorien.items() %}
+                <label class="choice"><input type="checkbox" name="pflege_kategorie" value="{{ key }}" {% if key in pflege_auswahl %}checked{% endif %}><span>{{ label }}</span></label>
+                {% endfor %}
+              </div>
+              <p class="hint">Mehrfachauswahl möglich.</p>
+            </fieldset>
+            {% elif formdata.get('anliegen') == 'fahrzeugcheck' %}
+            <div class="field full"><label for="fahrzeugcheck_art">Welche Prüfung wünschen Sie? *</label><select id="fahrzeugcheck_art" name="fahrzeugcheck_art" required>{% for key,label in fahrzeugcheck_arten.items() %}<option value="{{ key }}" {% if formdata.get('fahrzeugcheck_art','allgemein') == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+            {% elif formdata.get('anliegen') == 'mietwagenanfrage' %}
+            <fieldset class="rental-fleet">
+              <legend>Welches Fahrzeug möchten Sie anfragen? *</legend>
+              <p class="hint">Fahrzeug auswählen – wir prüfen Zeitraum und Verfügbarkeit persönlich.</p>
+              <div class="rental-grid">
+                {% for key,auto in mietwagen_flotte.items() %}
+                <label class="rental-card">
+                  <input type="radio" name="mietwagen_fahrzeug" value="{{ key }}" {% if formdata.get('mietwagen_fahrzeug') == key %}checked{% endif %} required>
+                  <span class="rental-photo">
+                    <img src="{{ url_for('static', filename=auto['bild']) }}" alt="Symbolfoto {{ auto['name'] }}" loading="lazy">
+                    <span class="rental-status {% if auto['status_typ'] == 'bald' %}is-bald{% endif %}">{{ auto['status'] }}</span>
+                    <span class="rental-photo-note">Symbolfoto</span>
+                  </span>
+                  <span class="rental-body">
+                    <span class="rental-title"><strong>{{ auto['name'] }}</strong><span class="rental-price">{{ auto['preis'] }}</span></span>
+                    <span class="rental-type">{{ auto['typ'] }}</span>
+                    <span class="rental-description">{{ auto['beschreibung'] }}</span>
+                    <span class="rental-features">{% for merkmal in auto['merkmale'] %}<span>{{ merkmal }}</span>{% endfor %}</span>
+                    <span class="rental-rate-note">{{ auto['preis_hinweis'] }}</span>
+                  </span>
+                </label>
+                {% endfor %}
+              </div>
+              <label class="rental-other"><input id="mietwagen-offen" type="radio" name="mietwagen_fahrzeug" value="offen" {% if formdata.get('mietwagen_fahrzeug') == 'offen' %}checked{% endif %} required><span><strong>Noch unsicher oder anderer Fahrzeugwunsch</strong><small>Wir beraten Sie und prüfen eine passende Alternative.</small></span></label>
+              <div class="field full"><label for="fahrzeug">Anderer Fahrzeugwunsch <span class="hint">(optional)</span></label><input id="fahrzeug" name="fahrzeug" maxlength="160" placeholder="z. B. Automatik, Transporter oder möglichst günstig" value="{{ formdata.get('fahrzeug','') }}"></div>
+              <div class="rental-terms">Preise inklusive Mehrwertsteuer und 150 km pro Miettag. Mehrkilometer 0,25 €/km. Mindestalter 21 Jahre und Führerschein Klasse B. Fahrzeug, Verfügbarkeit und endgültige Konditionen bestätigen wir persönlich.</div>
+            </fieldset>
+            <div class="field"><label for="mietbeginn">Mietbeginn <span class="hint">(optional)</span></label><input id="mietbeginn" name="mietbeginn" type="date" min="{{ today_iso }}" value="{{ formdata.get('mietbeginn','') }}"></div>
+            <div class="field"><label for="mietende">Mietende <span class="hint">(optional)</span></label><input id="mietende" name="mietende" type="date" min="{{ today_iso }}" value="{{ formdata.get('mietende','') }}"></div>
+            {% elif formdata.get('anliegen') == 'weitere_anfrage' %}
+            <div class="field full"><label for="weitere_anfrage_art">Welche Anfrage passt am besten? *</label><select id="weitere_anfrage_art" name="weitere_anfrage_art" required>{% for key,label in weitere_anfrage_arten.items() %}<option value="{{ key }}" {% if formdata.get('weitere_anfrage_art','allgemein') == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+            {% endif %}
+            <div class="field full"><label for="nachricht">{{ kurzanfrage_optionen[formdata.get('anliegen')]['frage'] }} *</label><textarea id="nachricht" name="nachricht" maxlength="2000" placeholder="{{ kurzanfrage_optionen[formdata.get('anliegen')]['placeholder'] }}" required>{{ formdata.get('nachricht','') }}</textarea></div>
+            <label class="upload-box" for="bilder">
+              <span class="upload-icon" aria-hidden="true">＋📷</span>
+              <span class="upload-copy"><strong>Bilder hinzufügen <span class="hint">(optional)</span></strong><span>Bis zu 5 Bilder · JPG, PNG, WebP oder HEIC · je max. 12 MB, zusammen max. 24 MB</span></span>
+              <input id="bilder" name="bilder" type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,.heic">
+            </label>
+            <div class="photo-preview" id="photo-preview" aria-live="polite"></div>
+          </div>
+          <p class="privacy">Wir verwenden Ihre Angaben und die optionalen Bilder ausschließlich zur Bearbeitung dieser Anfrage und zur persönlichen Kontaktaufnahme. Mehr dazu in der <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>.</p>
+          <button class="button" type="submit">Kurzanfrage senden</button>
+        </form>
+      {% elif not kurzanfrage %}
         {% set ausgewaehltes_anliegen = formdata.get('anliegen','allgemein') %}
         <aside class="info">
           <div class="eyebrow">So geht es weiter</div>
@@ -120,7 +322,7 @@
           <p class="form-intro">Pflichtfelder sind mit * gekennzeichnet.</p>
           {% if errors %}<ul class="errors" role="alert">{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
           <div class="grid">
-            <div class="field full"><label for="anliegen">Anliegen *</label><select id="anliegen" name="anliegen" required>{% for key,label in anliegen_optionen.items() %}<option value="{{ key }}" {% if formdata.get('anliegen','allgemein') == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+            <div class="field full"><label for="anliegen">Anliegen *</label><select id="anliegen" name="anliegen" required>{% for key,label in anliegen_optionen.items() %}{% if key not in kurzanfrage_optionen %}<option value="{{ key }}" {% if formdata.get('anliegen','allgemein') == key %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}</select></div>
             <div class="field"><label for="name">Name *</label><input id="name" name="name" maxlength="120" autocomplete="name" value="{{ formdata.get('name','') }}" required></div>
             <div class="field"><label for="fahrzeug">Fahrzeug</label><input id="fahrzeug" name="fahrzeug" maxlength="160" placeholder="z. B. VW Golf 8" value="{{ formdata.get('fahrzeug','') }}"></div>
             <div class="field"><label for="telefon">Telefon</label><input id="telefon" name="telefon" maxlength="80" inputmode="tel" autocomplete="tel" value="{{ formdata.get('telefon','') }}"><p class="hint">Telefon oder E-Mail ist erforderlich.</p></div>
@@ -130,7 +332,7 @@
             <fieldset data-anliegen-visible="kaufberatung leasingrueckgabe" {% if ausgewaehltes_anliegen not in ('kaufberatung','leasingrueckgabe') %}hidden{% endif %}><legend>Wo soll das Fahrzeug geprüft werden?</legend>{% for key,label in besichtigungsarten.items() %}<label class="choice"><input type="radio" name="besichtigungsart" value="{{ key }}" {% if formdata.get('besichtigungsart','werkstatt') == key %}checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</fieldset>
             <div class="field full"><label for="nachricht">Kurze Beschreibung</label><textarea id="nachricht" name="nachricht" maxlength="2000" placeholder="Was sollen wir prüfen oder vorbereiten?">{{ formdata.get('nachricht','') }}</textarea></div>
             <label class="upload-box" for="bilder">
-              <span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 11h5l2-3h8l2 3h5v14H5z"/><circle cx="16" cy="18" r="5"/><path d="M25 14h.01"/></svg></span>
+              <span class="upload-icon" aria-hidden="true">＋📷</span>
               <span class="upload-copy"><strong>Bilder hinzufügen <span class="hint">(optional)</span></strong><span>Bis zu 5 Bilder · JPG, PNG, WebP oder HEIC · je max. 12 MB, zusammen max. 24 MB</span></span>
               <input id="bilder" name="bilder" type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,.heic">
             </label>
@@ -138,7 +340,7 @@
           </div>
           <p class="privacy">Wir verwenden Ihre Angaben und die optionalen Bilder ausschließlich zur Bearbeitung dieser Anfrage und zur persönlichen Kontaktaufnahme. Mehr dazu in der <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>. Die Anfrage ist unverbindlich.</p>
           <button class="button" type="submit">Anfrage unverbindlich senden</button>
-          <p class="photo-link">Schadenbilder direkt übermitteln? <a href="{{ url_for('privat_schadenaufnahme') }}">Digitale Schadenmeldung öffnen</a></p>
+          <p class="photo-link">Lack- oder Reparaturschaden? <a href="{{ url_for('website_anfrage', anliegen='schaden') }}">Kurzanfrage öffnen</a></p>
         </form>
       {% endif %}
     </section>
@@ -230,6 +432,16 @@
 
       anliegen.addEventListener('change', felderAktualisieren);
       felderAktualisieren();
+    })();
+  </script>
+  <script>
+    (() => {
+      const freierWunsch = document.getElementById('fahrzeug');
+      const offeneAuswahl = document.getElementById('mietwagen-offen');
+      if (!freierWunsch || !offeneAuswahl) return;
+      freierWunsch.addEventListener('input', () => {
+        if (freierWunsch.value.trim()) offeneAuswahl.checked = true;
+      });
     })();
   </script>
 </body>

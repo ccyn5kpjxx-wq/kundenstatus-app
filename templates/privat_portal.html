@@ -125,13 +125,13 @@
       <div class="hero-grid">
         <div class="hero-copy">
           <div class="label">Privatkunden-Portal</div>
-          <h1>Schaden melden.<br>Alles im Blick.</h1>
-          <p class="lead">Ein klarer digitaler Weg von der ersten Meldung bis zum persönlichen Reparaturstatus.</p>
+          <h1>Kurz anfragen.<br>Passend starten.</h1>
+          <p class="lead">Lack, Reparatur, Mechanik, Wartung, Fahrzeugpflege, Mietwagen, Fahrzeugcheck oder Versicherungsschaden: Sie wählen den passenden Weg und geben nur die dafür nötigen Daten an.</p>
           <div class="hero-cta">
-            <a class="button primary" href="{{ url_for('privat_schadenaufnahme') }}">Schadenmeldung starten</a>
+            <a class="button primary" href="{{ url_for('website_anfrage', anliegen='schaden') }}">Anfrage starten</a>
             <a class="button" href="{{ url_for('privat_status_zugang') }}">Status öffnen</a>
           </div>
-          <div class="hero-note">Die erste Meldung ist unverbindlich. Auftrag und Versicherungsfreigabe erfolgen erst nach persönlicher Prüfung.</div>
+          <div class="hero-note">Normale Serviceanfragen dauern etwa eine Minute. Die ausführliche Meldung brauchen Sie nur bei einem Versicherungsschaden.</div>
         </div>
         <div class="hero-image" role="img" aria-label="Professionelle Fahrzeuglackierung">
           <span class="image-tag">Karosserie · Lack · Schadenservice</span>
@@ -148,9 +148,9 @@
         <div class="steps">
           <article class="step is-active">
             <span class="step-number">01</span>
-            <h3>Schaden melden</h3>
-            <p>Fahrzeug, Hergang, Fotos und Unterlagen sicher übermitteln.</p>
-            <a class="step-link" href="{{ url_for('privat_schadenaufnahme') }}">Jetzt starten</a>
+            <h3>Anliegen auswählen</h3>
+            <p>Werkstatt- und Servicewunsch kurz anfragen – Versicherungsschäden getrennt erfassen.</p>
+            <a class="step-link" href="{{ url_for('website_anfrage', anliegen='schaden') }}">Jetzt starten</a>
           </article>
           <article class="step">
             <span class="step-number">02</span>

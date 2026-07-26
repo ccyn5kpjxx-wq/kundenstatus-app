@@ -430,7 +430,7 @@
       <a class="nav-brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt=""><span>Gärtner</span></a>
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="hauptmenue"><span class="nav-toggle-bars" aria-hidden="true"><i></i><i></i><i></i></span><span>Menü</span></button>
       <div class="nav-menu" id="hauptmenue"><a href="#schaden">Schaden</a><a href="#mietwagen">Mietwagen</a><a href="#fahrzeugcheck">Fahrzeugcheck</a><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a href="{{ url_for('oeffentliches_team') }}">Team</a><a href="{{ url_for('oeffentliche_portale') }}">Portale</a><a href="#kontakt">Kontakt</a></div>
-      <a class="nav-cta" href="{{ portal_links.schaden }}">Schaden melden</a>
+      <a class="nav-cta" href="{{ portal_links.schaden }}">Anfrage senden</a>
     </nav>
   </header>
 
@@ -438,7 +438,7 @@
     <section class="hero-image" aria-label="Werkstatt und Unfallinstandsetzung bei Gärtner">
       <div class="hero-work" role="img" aria-label="Fahrzeug in der Gärtner-Werkstatt"></div>
       <a class="hero-logo" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack"></a>
-      <div class="hero-message"><span>Gärtner Karosserie &amp; Lack</span><h1>Karosserie, Lack &amp; Schadenservice in Mosbach.</h1><p>Vom ersten Foto bis zur fertigen Reparatur: persönlich betreut, digital unterstützt und klar abgestimmt.</p><div class="hero-actions"><a class="btn primary" href="{{ portal_links.schaden }}">Schaden melden</a><a class="btn" href="{{ portal_links.anfrage }}?anliegen=allgemein">Termin &amp; Beratung</a></div></div>
+      <div class="hero-message"><span>Gärtner Karosserie &amp; Lack</span><h1>Karosserie, Lack &amp; Schadenservice in Mosbach.</h1><p>Vom ersten Foto bis zur fertigen Reparatur: persönlich betreut, digital unterstützt und klar abgestimmt.</p><div class="hero-actions"><a class="btn primary" href="{{ portal_links.schaden }}">Anfrage senden</a><a class="btn" href="{{ portal_links.anfrage }}?anliegen=allgemein">Termin &amp; Beratung</a></div></div>
       <div class="hero-badge">Persönlich · Präzise · Partnerschaftlich</div>
     </section>
 
@@ -455,7 +455,7 @@
       <div class="wrap">
         <div class="section-title"><h2>Was möchten Sie erledigen?</h2><p>Vier klare Wege führen Sie direkt zu den passenden Möglichkeiten.</p></div>
         <div class="route-grid">
-          <a class="route-card is-yellow" href="#schaden"><span class="route-number">01 / SCHADEN</span><h3>Schaden &amp; Reparatur</h3><p>Digital melden · persönlich prüfen · Status verfolgen</p><strong>Möglichkeiten ansehen</strong></a>
+          <a class="route-card is-yellow" href="#schaden"><span class="route-number">01 / ANFRAGE</span><h3>Werkstatt &amp; Fahrzeugservice</h3><p>Kurz anfragen · Bilder senden · persönlich klären</p><strong>Möglichkeiten ansehen</strong></a>
           <a class="route-card" href="#mietwagen"><span class="route-number">02 / MOBILITÄT</span><h3>Mietwagen &amp; Ersatzfahrzeug</h3><p>Zeitraum wählen · Verfügbarkeit anfragen</p><strong>Möglichkeiten ansehen</strong></a>
           <a class="route-card" href="#fahrzeugcheck"><span class="route-number">03 / FAHRZEUGCHECK</span><h3>Kaufcheck &amp; Leasingrückgabe</h3><p>Vor dem Kauf oder der Rückgabe Klarheit gewinnen</p><strong>Check auswählen</strong></a>
           <a class="route-card" href="#werkstatt"><span class="route-number">04 / WERKSTATT</span><h3>Werkstattleistungen</h3><p>Karosserie · Lack · Autoglas · Mechanik · Pflege</p><strong>Leistungen ansehen</strong></a>
@@ -467,7 +467,7 @@
       <div class="wrap"><details class="category-disclosure"><summary><span>Leistungen und Möglichkeiten im Detail</span><strong>Aufklappen</strong></summary><div class="category-stack">
         <article class="category-row" id="schaden">
           <img src="{{ url_for('static', filename='homepage/unfallinstandsetzung.webp') }}" alt="Fachgerechte Unfallinstandsetzung bei Gärtner" loading="lazy" decoding="async">
-          <div class="category-copy"><div class="eyebrow">01 / SCHADENSERVICE</div><h2>Schaden melden und Reparatur verfolgen.</h2><p>Sie starten digital, wir prüfen persönlich und halten Sie über die nächsten Schritte auf dem Laufenden.</p><ul><li>Unfall-, Park- oder Glasschaden online melden</li><li>Fotos und Unterlagen sicher übermitteln</li><li>Termin, Reparatur und Ersatzmobilität abstimmen</li><li>Persönlichen Reparaturstatus öffnen</li></ul><div class="category-actions"><a class="category-action primary" href="{{ portal_links.schaden }}">Schaden melden</a><a class="category-action" href="{{ portal_links.status }}">Reparaturstatus öffnen</a></div></div>
+          <div class="category-copy"><div class="eyebrow">01 / SCHNELLE ANFRAGE</div><h2>Einfach den passenden Weg wählen.</h2><p>Lack, Reparatur, Mechanik, Wartung, Fahrzeugpflege, Mietwagen und Fahrzeugcheck können Sie in etwa einer Minute anfragen. Nur bei einem Versicherungsschaden fragen wir die ausführlicheren Angaben ab.</p><ul><li>Passenden Service auswählen und kurz beschreiben</li><li>Bei Mechanik oder Fahrzeugpflege die gewünschten Leistungen markieren</li><li>Optional bis zu fünf Bilder für den ersten Eindruck hochladen</li><li>Versicherungsschaden separat und vollständig melden</li></ul><div class="category-actions"><a class="category-action primary" href="{{ portal_links.schaden }}">Anfrage auswählen</a><a class="category-action" href="{{ portal_links.status }}">Reparaturstatus öffnen</a></div></div>
         </article>
         <article class="category-row reverse" id="mietwagen">
           <img src="{{ url_for('static', filename='homepage/fahrzeugpflege.webp') }}" alt="Sauberes Fahrzeug für Mietwagen und Ersatzmobilität" loading="lazy" decoding="async">
@@ -508,7 +508,7 @@
   </main>
 
   <footer><div class="wrap footer-grid"><div><h3>Gärtner Karosserie & Lack GmbH</h3>Binauer Höhe 4<br>74821 Mosbach-Lohrbach<br><a href="tel:+4915227706694">0152 277 066 94</a><br><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></div><div><h3>Leistungen</h3><div class="footer-links"><a href="#schaden">Schaden &amp; Reparatur</a><a href="{{ portal_links.mietwagen }}">Mietwagen</a><a href="{{ portal_links.anfrage }}?anliegen=kaufberatung">Kaufcheck</a><a href="{{ portal_links.anfrage }}?anliegen=leasingrueckgabe">Leasingrückgabe</a><a href="{{ url_for('oeffentliche_leistungen') }}">Alle Werkstattleistungen</a></div></div><div><h3>Service</h3><div class="footer-links"><a href="{{ url_for('oeffentliches_team') }}">Team</a><a href="{{ url_for('oeffentliche_portale') }}">Portale</a><a href="{{ portal_links.privat }}">Privatkundenportal</a><a href="{{ portal_links.partner }}">Autohaus-Portal</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></div></div></footer>
-  <nav class="mobile-actions" aria-label="Mobile Schnellaktionen"><a class="primary" href="{{ portal_links.schaden }}">Schaden melden</a><a class="outline" href="tel:+4915227706694">Anrufen</a></nav>
+  <nav class="mobile-actions" aria-label="Mobile Schnellaktionen"><a class="primary" href="{{ portal_links.schaden }}">Anfrage senden</a><a class="outline" href="tel:+4915227706694">Anrufen</a></nav>
   <script>
     (() => {
       const disclosure = document.querySelector('.category-disclosure');

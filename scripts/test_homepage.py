@@ -22,7 +22,7 @@ def main():
         "Status 200": response.status_code == 200,
         "Homepage nicht veraltet cachen": "no-store" in response.headers.get("Cache-Control", ""),
         "Eine Hauptueberschrift im Hero": html.count("<h1") == 1 and "Karosserie, Lack &amp; Schadenservice in Mosbach." in html,
-        "Hero hat zwei klare Aktionen": "Schaden melden" in html and "Termin &amp; Beratung" in html,
+        "Hero hat zwei klare Aktionen": "Anfrage senden" in html and "Termin &amp; Beratung" in html,
         "Vier Hauptkategorien": html.count('class="route-card') == 4 and all(
             f'href="#{anchor}"' in html for anchor in ("schaden", "mietwagen", "fahrzeugcheck", "werkstatt")
         ),

@@ -40520,13 +40520,13 @@ def get_google_reviews():
 
 
 def homepage_portal_links():
-    def link(endpoint, path):
+    def link(endpoint, path, **values):
         if PORTAL_BASE_URL:
             return f"{PORTAL_BASE_URL}{path}"
-        return url_for(endpoint)
+        return url_for(endpoint, **values)
 
     return {
-        "schaden": link("privat_schadenaufnahme", "/privat/schaden"),
+        "schaden": link("website_anfrage", "/anfrage?anliegen=schaden", anliegen="schaden"),
         "status": link("privat_status_zugang", "/privat/status"),
         "privat": link("privat_portal", "/privat/"),
         "mietwagen": link("mietwagen_anfrage", "/mietwagen"),
@@ -40537,10 +40537,143 @@ def homepage_portal_links():
 
 
 WEBSITE_ANLIEGEN = {
+    "lackanfrage": "Lackanfrage",
+    "reparaturanfrage": "Reparaturanfrage",
+    "mechanikanfrage": "Mechanik & Wartung",
+    "fahrzeugpflege": "Fahrzeugpflege & Aufbereitung",
+    "mietwagenanfrage": "Mietwagenanfrage",
+    "fahrzeugcheck": "Fahrzeugcheck",
+    "weitere_anfrage": "Weitere Anfrage",
     "allgemein": "Allgemeine Beratung",
     "werkstatt": "Werkstatttermin",
     "kaufberatung": "Gebrauchtwagen-Kaufcheck",
     "leasingrueckgabe": "Leasingrückgabe-Check",
+    "farbton": "Farbton- und Lackberatung",
+    "felgenservice": "Felgenservice",
+    "dellenreparatur": "Dellenreparatur",
+}
+
+WEBSITE_KURZANFRAGEN = {
+    "lackanfrage": {
+        "label": "Lackanfrage",
+        "kurz": "Kratzer, Lackschaden oder Farbproblem",
+        "frage": "Was sollen wir uns ansehen?",
+        "placeholder": "z. B. Kratzer an der hinteren Tür oder Lackschaden am Kotflügel",
+    },
+    "reparaturanfrage": {
+        "label": "Reparaturanfrage",
+        "kurz": "Delle, Karosserie- oder Werkstattthema",
+        "frage": "Was sollen wir reparieren oder prüfen?",
+        "placeholder": "z. B. Delle am Kotflügel oder beschädigtes Anbauteil",
+    },
+    "mechanikanfrage": {
+        "label": "Mechanik & Wartung",
+        "kurz": "Bremsen, Ölwechsel, Service oder technisches Problem",
+        "frage": "Welches Mechanikproblem oder welche Wartung steht an?",
+        "placeholder": "z. B. Bremsen quietschen, Warnleuchte ist an oder Ölwechsel ist fällig",
+    },
+    "fahrzeugpflege": {
+        "label": "Fahrzeugpflege & Aufbereitung",
+        "kurz": "Innen, außen, Politur oder Komplettpflege",
+        "frage": "Was ist Ihnen bei der Aufbereitung wichtig?",
+        "placeholder": "z. B. starke Verschmutzung im Innenraum, feine Kratzer oder Verkaufsvorbereitung",
+    },
+    "mietwagenanfrage": {
+        "label": "Mietwagenanfrage",
+        "kurz": "Zeitraum und Fahrzeugwunsch anfragen",
+        "frage": "Was benötigen Sie?",
+        "placeholder": "z. B. Mietwagen für drei Tage oder Ersatzmobilität während der Reparatur",
+    },
+    "fahrzeugcheck": {
+        "label": "Fahrzeugcheck",
+        "kurz": "Kauf, Leasingrückgabe oder allgemeine Prüfung",
+        "frage": "Was sollen wir am Fahrzeug prüfen?",
+        "placeholder": "z. B. Leasingrückgabe vorbereiten oder Gebrauchtwagen vor dem Kauf prüfen",
+    },
+    "weitere_anfrage": {
+        "label": "Weitere Anfrage",
+        "kurz": "Alles, was nicht in die anderen Bereiche passt",
+        "frage": "Worum geht es?",
+        "placeholder": "Beschreiben Sie Ihr Anliegen bitte in wenigen Sätzen",
+    },
+}
+
+WEBSITE_PFLEGE_KATEGORIEN = {
+    "innen": "Innenaufbereitung",
+    "aussen": "Außenaufbereitung",
+    "polieren": "Politur / Glanzauffrischung",
+    "1-step": "1-Step-Politur",
+    "2-step": "2-Step-Politur",
+    "komplett": "Komplettaufbereitung",
+}
+
+WEBSITE_MECHANIK_KATEGORIEN = {
+    "bremsen": "Bremsen prüfen / wechseln",
+    "oelwechsel": "Ölwechsel",
+    "inspektion": "Inspektion / Wartung",
+    "motor_antrieb": "Motor / Antrieb",
+    "fahrwerk_lenkung": "Fahrwerk / Lenkung",
+    "elektrik_batterie": "Elektrik / Batterie",
+    "klima": "Klimaanlage",
+    "sonstiges": "Sonstiges Mechanikproblem",
+}
+
+WEBSITE_MIETWAGEN_FLOTTE = {
+    "hyundai-i10": {
+        "name": "Hyundai i10",
+        "typ": "City-Car · sparsam",
+        "beschreibung": "Wendiger Fünfsitzer für Alltag, Stadt und Werkstattmobilität.",
+        "merkmale": ("5 Sitze", "Wendig", "Alltag"),
+        "bild": "mietwagen_vorschau/bilder/i10_symbolfoto.jpg",
+        "status": "Jetzt verfügbar",
+        "status_typ": "verfuegbar",
+        "preis": "39 € / Tag",
+        "preis_hinweis": "Werkstattkunden ab 29 € / Tag",
+    },
+    "hyundai-kona": {
+        "name": "Hyundai KONA N Line X",
+        "typ": "Kompakt-SUV · Automatik",
+        "beschreibung": "Komfortabler SUV mit 180 PS, Voll-LED, Navi und Rückfahrkamera.",
+        "merkmale": ("Automatik", "180 PS", "Navi"),
+        "bild": "mietwagen_vorschau/bilder/kona_symbolfoto.jpg",
+        "status": "Jetzt verfügbar",
+        "status_typ": "verfuegbar",
+        "preis": "59 € / Tag",
+        "preis_hinweis": "Ab 3 Tagen 49 € / Tag",
+    },
+    "fiat-doblo": {
+        "name": "Fiat Doblò",
+        "typ": "Hochdachkombi · 5 Sitze",
+        "beschreibung": "Viel Stauraum für Familie, Freizeit oder kleinere Transporte.",
+        "merkmale": ("5 Sitze", "Viel Stauraum", "Flexibel"),
+        "bild": "mietwagen_vorschau/bilder/doblo_symbolfoto.jpg",
+        "status": "In Kürze",
+        "status_typ": "bald",
+        "preis": "55 € / Tag",
+        "preis_hinweis": "Ab 3 Tagen 45 € / Tag",
+    },
+    "fiat-doblo-maxi": {
+        "name": "Fiat Doblò Maxi",
+        "typ": "Langversion · maximal flexibel",
+        "beschreibung": "Extra Laderaum für größere Transporte, Handwerk oder Umzug.",
+        "merkmale": ("Extra Laderaum", "Bis zu 5 Sitze", "Transport"),
+        "bild": "mietwagen_vorschau/bilder/doblo_maxi_symbolfoto.jpg",
+        "status": "In Kürze",
+        "status_typ": "bald",
+        "preis": "59 € / Tag",
+        "preis_hinweis": "Ab 3 Tagen 49 € / Tag",
+    },
+}
+
+WEBSITE_FAHRZEUGCHECK_ARTEN = {
+    "allgemein": "Allgemeiner Fahrzeugcheck",
+    "kauf": "Gebrauchtwagen-Kaufcheck",
+    "leasing": "Leasingrückgabe-Check",
+}
+
+WEBSITE_WEITERE_ANFRAGE_ARTEN = {
+    "allgemein": "Allgemeine Beratung",
+    "werkstatt": "Werkstatttermin",
     "farbton": "Farbton- und Lackberatung",
     "felgenservice": "Felgenservice",
     "dellenreparatur": "Dellenreparatur",
@@ -40553,13 +40686,35 @@ WEBSITE_BESICHTIGUNGSARTEN = {
 
 
 def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_code=200):
+    formdata = formdata or {}
+    ausgewaehltes_anliegen = clean_text(formdata.get("anliegen")) or "allgemein"
+    pflege_auswahl = (
+        [clean_text(value) for value in formdata.getlist("pflege_kategorie")]
+        if hasattr(formdata, "getlist")
+        else list(formdata.get("pflege_kategorie") or [])
+    )
+    mechanik_auswahl = (
+        [clean_text(value) for value in formdata.getlist("mechanik_kategorie")]
+        if hasattr(formdata, "getlist")
+        else list(formdata.get("mechanik_kategorie") or [])
+    )
     response = make_response(
         render_template(
             "homepage_anfrage.html",
-            formdata=formdata or {},
+            formdata=formdata,
             errors=errors or [],
             gesendet=bool(gesendet),
             anliegen_optionen=WEBSITE_ANLIEGEN,
+            kurzanfrage_optionen=WEBSITE_KURZANFRAGEN,
+            pflege_kategorien=WEBSITE_PFLEGE_KATEGORIEN,
+            pflege_auswahl=pflege_auswahl,
+            mechanik_kategorien=WEBSITE_MECHANIK_KATEGORIEN,
+            mechanik_auswahl=mechanik_auswahl,
+            mietwagen_flotte=WEBSITE_MIETWAGEN_FLOTTE,
+            fahrzeugcheck_arten=WEBSITE_FAHRZEUGCHECK_ARTEN,
+            weitere_anfrage_arten=WEBSITE_WEITERE_ANFRAGE_ARTEN,
+            kurzanfrage=ausgewaehltes_anliegen in {*WEBSITE_KURZANFRAGEN, "schaden"},
+            ausgewaehltes_anliegen=ausgewaehltes_anliegen,
             besichtigungsarten=WEBSITE_BESICHTIGUNGSARTEN,
             today_iso=date.today().isoformat(),
         ),
@@ -40605,7 +40760,30 @@ def website_anfrage():
             else ""
         )
         nachricht = clean_text(request.form.get("nachricht"))[:2000]
-        bilder = request.files.getlist("bilder")
+        pflege_kategorien = list(dict.fromkeys(
+            clean_text(value)
+            for value in request.form.getlist("pflege_kategorie")
+            if clean_text(value)
+        ))
+        mechanik_kategorien = list(dict.fromkeys(
+            clean_text(value)
+            for value in request.form.getlist("mechanik_kategorie")
+            if clean_text(value)
+        ))
+        fahrzeugcheck_art = clean_text(request.form.get("fahrzeugcheck_art"))
+        weitere_anfrage_art = clean_text(request.form.get("weitere_anfrage_art"))
+        mietwagen_fahrzeug = clean_text(request.form.get("mietwagen_fahrzeug"))
+        if anliegen == "mietwagenanfrage" and not mietwagen_fahrzeug and fahrzeug:
+            mietwagen_fahrzeug = "offen"
+        mietwagen_fahrzeug_info = WEBSITE_MIETWAGEN_FLOTTE.get(mietwagen_fahrzeug)
+        mietbeginn = clean_text(request.form.get("mietbeginn"))[:10]
+        mietende = clean_text(request.form.get("mietende"))[:10]
+        if anliegen == "mietwagenanfrage":
+            if mietwagen_fahrzeug_info:
+                fahrzeug = mietwagen_fahrzeug_info["name"]
+            elif mietwagen_fahrzeug == "offen":
+                fahrzeug = fahrzeug or "Noch offen / Beratung gewünscht"
+        bilder = request.files.getlist("bilder") + request.files.getlist("bild")
         errors = []
 
         if anliegen not in WEBSITE_ANLIEGEN:
@@ -40624,6 +40802,40 @@ def website_anfrage():
                 errors.append("Bitte genau eine gültige E-Mail-Adresse angeben.")
         if anliegen in {"kaufberatung", "leasingrueckgabe"} and len(fahrzeug) < 2:
             errors.append("Bitte Marke und Modell des Fahrzeugs angeben.")
+        if anliegen in WEBSITE_KURZANFRAGEN and len(nachricht) < 5:
+            errors.append("Bitte Ihr Anliegen kurz beschreiben.")
+        if anliegen == "fahrzeugpflege":
+            if any(value not in WEBSITE_PFLEGE_KATEGORIEN for value in pflege_kategorien):
+                errors.append("Bitte nur gültige Aufbereitungskategorien auswählen.")
+            elif not pflege_kategorien:
+                errors.append("Bitte mindestens eine gewünschte Aufbereitung auswählen.")
+        if anliegen == "mechanikanfrage":
+            if any(value not in WEBSITE_MECHANIK_KATEGORIEN for value in mechanik_kategorien):
+                errors.append("Bitte nur gültige Mechanik- oder Wartungskategorien auswählen.")
+            elif not mechanik_kategorien:
+                errors.append("Bitte mindestens eine Mechanik- oder Wartungskategorie auswählen.")
+        if anliegen == "fahrzeugcheck" and fahrzeugcheck_art not in WEBSITE_FAHRZEUGCHECK_ARTEN:
+            errors.append("Bitte die gewünschte Art des Fahrzeugchecks auswählen.")
+        if anliegen == "weitere_anfrage" and weitere_anfrage_art not in WEBSITE_WEITERE_ANFRAGE_ARTEN:
+            errors.append("Bitte die passende Anfragekategorie auswählen.")
+        if anliegen == "mietwagenanfrage":
+            if mietwagen_fahrzeug not in {*WEBSITE_MIETWAGEN_FLOTTE, "offen"}:
+                errors.append("Bitte ein Mietfahrzeug auswählen oder Beratung wählen.")
+            mietdaten = []
+            for feldname, wert in (("Mietbeginn", mietbeginn), ("Mietende", mietende)):
+                if not wert:
+                    mietdaten.append(None)
+                    continue
+                try:
+                    datum = date.fromisoformat(wert)
+                    if datum < date.today():
+                        errors.append(f"{feldname} darf nicht in der Vergangenheit liegen.")
+                    mietdaten.append(datum)
+                except ValueError:
+                    errors.append(f"Bitte für {feldname} ein gültiges Datum angeben.")
+                    mietdaten.append(None)
+            if all(mietdaten) and mietdaten[1] < mietdaten[0]:
+                errors.append("Das Mietende darf nicht vor dem Mietbeginn liegen.")
         if wunschdatum:
             try:
                 wunschdatum_obj = date.fromisoformat(wunschdatum)
@@ -40642,17 +40854,64 @@ def website_anfrage():
         besichtigung_label = WEBSITE_BESICHTIGUNGSARTEN.get(besichtigungsart, "")
         beschreibungsteile = [anliegen_label]
         if fahrzeug:
-            beschreibungsteile.append(f"Fahrzeug: {fahrzeug}")
+            fahrzeug_label = "Gewünschtes Mietfahrzeug" if anliegen == "mietwagenanfrage" else "Fahrzeug"
+            beschreibungsteile.append(f"{fahrzeug_label}: {fahrzeug}")
         if wunschdatum:
             beschreibungsteile.append(f"Wunschdatum: {wunschdatum}")
         if ist_fahrzeugcheck:
             beschreibungsteile.append(f"Prüfort: {besichtigung_label}")
         if fahrzeug_link:
             beschreibungsteile.append(f"Fahrzeuganzeige: {fahrzeug_link}")
+        if anliegen == "fahrzeugpflege" and pflege_kategorien:
+            beschreibungsteile.append(
+                "Gewünschte Aufbereitung: "
+                + ", ".join(WEBSITE_PFLEGE_KATEGORIEN[value] for value in pflege_kategorien)
+            )
+        if anliegen == "mechanikanfrage" and mechanik_kategorien:
+            beschreibungsteile.append(
+                "Mechanik / Wartung: "
+                + ", ".join(WEBSITE_MECHANIK_KATEGORIEN[value] for value in mechanik_kategorien)
+            )
+        if anliegen == "fahrzeugcheck" and fahrzeugcheck_art:
+            beschreibungsteile.append(
+                f"Check-Art: {WEBSITE_FAHRZEUGCHECK_ARTEN.get(fahrzeugcheck_art, fahrzeugcheck_art)}"
+            )
+        if anliegen == "weitere_anfrage" and weitere_anfrage_art:
+            beschreibungsteile.append(
+                f"Kategorie: {WEBSITE_WEITERE_ANFRAGE_ARTEN.get(weitere_anfrage_art, weitere_anfrage_art)}"
+            )
+        if anliegen == "mietwagenanfrage":
+            if mietwagen_fahrzeug_info:
+                beschreibungsteile.append(
+                    "Fahrzeugprofil: "
+                    + mietwagen_fahrzeug_info["typ"]
+                    + " – "
+                    + mietwagen_fahrzeug_info["beschreibung"]
+                )
+                beschreibungsteile.append(
+                    "Tarifhinweis: "
+                    + mietwagen_fahrzeug_info["preis"]
+                    + "; "
+                    + mietwagen_fahrzeug_info["preis_hinweis"]
+                )
+                beschreibungsteile.append(
+                    f"Verfügbarkeitsstatus: {mietwagen_fahrzeug_info['status']}"
+                )
+            if mietbeginn:
+                beschreibungsteile.append(f"Mietbeginn: {mietbeginn}")
+            if mietende:
+                beschreibungsteile.append(f"Mietende: {mietende}")
         if nachricht:
             beschreibungsteile.append(f"Nachricht: {nachricht}")
 
         naechste_aktion = {
+            "lackanfrage": "Lackanfrage prüfen und Kunden zurückrufen",
+            "reparaturanfrage": "Reparaturumfang prüfen und Kunden zurückrufen",
+            "mechanikanfrage": "Mechanik- oder Wartungsbedarf prüfen und Kunden zurückrufen",
+            "fahrzeugpflege": "Aufbereitungsumfang prüfen und Kunden zurückrufen",
+            "mietwagenanfrage": "Mietwagen-Verfügbarkeit prüfen und Kunden kontaktieren",
+            "fahrzeugcheck": "Gewünschten Fahrzeugcheck besprechen und Termin abstimmen",
+            "weitere_anfrage": "Kundenanfrage persönlich prüfen und beantworten",
             "kaufberatung": "Kaufcheck besprechen und Termin abstimmen",
             "leasingrueckgabe": "Leasingrückgabe-Check terminieren",
             "werkstatt": "Werkstattanliegen telefonisch klären",
@@ -40708,7 +40967,7 @@ def website_anfrage():
         return redirect(url_for("website_anfrage", gesendet=1))
 
     vorauswahl = clean_text(request.args.get("anliegen"))
-    if vorauswahl not in WEBSITE_ANLIEGEN:
+    if vorauswahl not in {*WEBSITE_ANLIEGEN, "schaden"}:
         vorauswahl = "allgemein"
     besichtigungsart = clean_text(request.args.get("besichtigungsart"))
     if besichtigungsart not in WEBSITE_BESICHTIGUNGSARTEN:
