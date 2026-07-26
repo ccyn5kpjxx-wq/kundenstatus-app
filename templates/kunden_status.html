@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Status - {{ auftrag['fahrzeug'] }}</title>
+  <title>{{ 'Anfrage' if auftrag['quelle'] == 'lead' else 'Status' }} - {{ auftrag['fahrzeug'] }}</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     body { background:#f3efe6; color:#16202a; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
@@ -37,6 +37,9 @@
     .timeline-step.is-active .timeline-dot { background:#1f3557; border-color:#1f3557; color:#fff; }
     .timeline-card { border:1px solid #e4d6c3; border-radius:14px; background:#fffdf9; padding:.85rem 1rem; }
     .timeline-step.is-active .timeline-card { border-color:#b9c8dc; background:#eef5ff; }
+    .offer-card { border:1px solid #b9c8dc; border-radius:16px; background:#f4f8fd; padding:1.1rem; }
+    .confirmation-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.65rem; }
+    .confirmation-item { border:1px solid #e4d6c3; border-radius:12px; background:#fffdf9; padding:.75rem .85rem; }
     .bilder-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:.6rem; }
     .bild-kachel { display:block; border:1px solid #e4d6c3; border-radius:12px; overflow:hidden; background:#fff; aspect-ratio:4/3; }
     .bild-kachel img { width:100%; height:100%; object-fit:cover; display:block; }
@@ -51,6 +54,7 @@
       .qr-box { display:flex; align-items:center; gap:.85rem; text-align:left; }
       .qr-box img { width:92px; height:92px; }
       .schedule-grid { grid-template-columns:1fr 1fr; }
+      .confirmation-grid { grid-template-columns:1fr; }
       .quick-actions .btn { flex:1 1 130px; }
     }
     @media (max-width: 420px) {
@@ -60,6 +64,9 @@
 </head>
 <body>
   <main class="shell">
+    {% set intake = auftrag['schaden_aufnahme'] %}
+    {% set angebot_status = auftrag['angebot_status'] %}
+    {% set ist_anfrage = auftrag['quelle'] == 'lead' %}
     {# Flash-Meldungen EINMAL abholen (get_flashed_messages konsumiert beim ersten Aufruf) und mehrfach rendern #}
     {% set meldungen = get_flashed_messages(with_categories=true) %}
     <div class="panel mb-4">
@@ -68,7 +75,7 @@
           <div class="brand-row">
             <img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack" class="brand-logo">
             <div>
-              <div class="badge text-bg-dark mb-2">Fahrzeugstatus</div>
+              <div class="badge text-bg-dark mb-2">{{ 'Ihre Anfrage' if ist_anfrage and angebot_status != 'angenommen' else 'Fahrzeugstatus' }}</div>
               <div class="small text-muted">{{ werkstatt_kontakt.name }}</div>
             </div>
           </div>
@@ -101,7 +108,7 @@
           <img src="{{ kunden_status_qr_url }}" alt="Status-QR-Code">
           <div>
             <div class="small fw-semibold">QR-Code oder Link</div>
-            <div class="small text-muted">Status und Termine direkt wieder öffnen.</div>
+            <div class="small text-muted">Anfrage, Angebot, Termine und Status direkt wieder öffnen.</div>
             <div class="status-link mt-2">{{ kunden_status_link }}</div>
           </div>
         </div>
@@ -115,6 +122,130 @@
         </div>
       {% endif %}
     </div>
+
+    {% if ist_anfrage %}
+    <div class="panel mb-4" id="ablauf">
+      <div class="section-head">
+        <div>
+          <h2 class="h4 mb-1">Von der Anfrage bis zur Reparatur</h2>
+          <div class="text-muted">Dieser eine Link bleibt für den gesamten Vorgang gültig.</div>
+        </div>
+        {% if angebot_status == 'angenommen' %}<span class="badge text-bg-success">Auftrag bestätigt</span>{% elif angebot_status == 'angebot_abgegeben' %}<span class="badge text-bg-primary">Angebot liegt vor</span>{% else %}<span class="badge text-bg-warning">Anfrage wird geprüft</span>{% endif %}
+      </div>
+      <div class="timeline">
+        <div class="timeline-step is-done">
+          <div class="timeline-dot">&#10003;</div>
+          <div class="timeline-card"><div class="fw-bold">Anfrage aufgenommen</div><div class="text-muted small">Ihre Fahrzeug- und Kontaktdaten sind sicher bei uns angelegt.</div></div>
+        </div>
+        <div class="timeline-step is-{{ 'done' if angebot_status in ['angebot_abgegeben', 'angenommen'] else 'active' }}">
+          <div class="timeline-dot">{% if angebot_status in ['angebot_abgegeben', 'angenommen'] %}&#10003;{% else %}2{% endif %}</div>
+          <div class="timeline-card"><div class="fw-bold">Unterlagen und Terminwunsch</div><div class="text-muted small">Bilder und Unterlagen können jederzeit über diesen Link ergänzt werden.</div></div>
+        </div>
+        <div class="timeline-step is-{{ 'done' if angebot_status == 'angenommen' else ('active' if angebot_status == 'angebot_abgegeben' else 'waiting') }}">
+          <div class="timeline-dot">{% if angebot_status == 'angenommen' %}&#10003;{% else %}3{% endif %}</div>
+          <div class="timeline-card"><div class="fw-bold">Angebot prüfen</div><div class="text-muted small">Sobald die Werkstatt das Angebot bereitstellt, können Sie es hier prüfen und annehmen.</div></div>
+        </div>
+        <div class="timeline-step is-{{ 'done' if intake['kunden_wunsch_bestaetigt_am'] else ('active' if angebot_status == 'angenommen' else 'waiting') }}">
+          <div class="timeline-dot">{% if intake['kunden_wunsch_bestaetigt_am'] %}&#10003;{% else %}4{% endif %}</div>
+          <div class="timeline-card"><div class="fw-bold">Termin und Mobilität bestätigen</div><div class="text-muted small">Bring-/Abholwunsch, Hol- und Bringservice sowie Ersatzfahrzeug werden verbindlich abgestimmt.</div></div>
+        </div>
+        <div class="timeline-step is-{{ 'done' if auftrag['status']|int >= 5 else ('active' if angebot_status == 'angenommen' and auftrag['status']|int >= 2 else 'waiting') }}">
+          <div class="timeline-dot">{% if auftrag['status']|int >= 5 %}&#10003;{% else %}5{% endif %}</div>
+          <div class="timeline-card"><div class="fw-bold">Reparaturstatus verfolgen</div><div class="text-muted small">Nach der Einplanung sehen Sie hier den Fortschritt bis zur Rückgabe.</div></div>
+        </div>
+      </div>
+    </div>
+
+    {% if angebot_status == 'angebot_abgegeben' %}
+    <div class="panel mb-4" id="angebot">
+      <div class="section-head">
+        <div>
+          <h2 class="h4 mb-1">Ihr Werkstatt-Angebot</h2>
+          <div class="text-muted">Bitte prüfen Sie Leistung und Preis. Die Annahme wird erst mit Ihrer Bestätigung verbindlich.</div>
+        </div>
+        {% if auftrag['werkstatt_angebot_preis_label'] %}<div class="h3 mb-0">{{ auftrag['werkstatt_angebot_preis_label'] }}</div>{% endif %}
+      </div>
+      <div class="offer-card mb-3">
+        {% if auftrag['werkstatt_angebot_text_display'] %}<div style="white-space:pre-wrap;">{{ auftrag['werkstatt_angebot_text_display'] }}</div>{% endif %}
+        {% if auftrag['werkstatt_angebot_notiz'] %}<div class="border-top mt-3 pt-3 text-muted" style="white-space:pre-wrap;">{{ auftrag['werkstatt_angebot_notiz'] }}</div>{% endif %}
+      </div>
+      <form method="POST" action="{{ url_for('kunden_status_angebot_annehmen', token=auftrag['kunden_status_token']) }}" class="row g-3">
+        <div class="hp-field" aria-hidden="true"><label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="angebot-annahme">Gewünschter Bring-/Abholtermin</label>
+          <input id="angebot-annahme" type="date" name="wunsch_annahme_datum" min="{{ kunden_heute }}" value="{{ kunden_wunsch_annahme_iso }}" class="form-control" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="angebot-abholung">Gewünschte Rückgabe/Abholung (optional)</label>
+          <input id="angebot-abholung" type="date" name="wunsch_abholung_datum" min="{{ kunden_heute }}" value="{{ kunden_wunsch_abholung_iso }}" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="angebot-transport">Fahrzeugübergabe</label>
+          <select id="angebot-transport" name="transport_art" class="form-select" required>
+            {% for key, meta in transport_arten.items() %}<option value="{{ key }}">{{ meta['label'] }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="angebot-ersatz">Ersatzfahrzeug gewünscht?</label>
+          <select id="angebot-ersatz" name="ersatzfahrzeug" class="form-select" required>
+            <option value="">Bitte auswählen</option>
+            <option value="ja">Ja, bitte prüfen</option>
+            <option value="nein">Nein</option>
+          </select>
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold" for="angebot-adresse">Abholadresse bei Hol- und Bringservice</label>
+          <input id="angebot-adresse" type="text" name="abhol_adresse" maxlength="300" class="form-control" placeholder="Straße, Hausnummer, PLZ und Ort">
+          <div class="form-text">Nur erforderlich, wenn das Fahrzeug von uns geholt und zurückgebracht werden soll.</div>
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold" for="angebot-hinweis">Hinweis zur Terminplanung (optional)</label>
+          <textarea id="angebot-hinweis" name="kunden_wunsch_hinweis" maxlength="600" rows="2" class="form-control" placeholder="z. B. bevorzugt vormittags">{{ intake['kunden_wunsch_hinweis'] }}</textarea>
+        </div>
+        <div class="col-12">
+          <div class="alert alert-info mb-3">Die eingegebenen Daten sind zunächst Terminwünsche. Die Werkstatt bestätigt sie separat; anschließend erscheint hier Ihre vollständige Auftragsbestätigung.</div>
+          <label class="form-check">
+            <input class="form-check-input" type="checkbox" name="angebot_annehmen_bestaetigt" value="1" required>
+            <span class="form-check-label">Ich habe das Angebot geprüft und nehme es verbindlich an.</span>
+          </label>
+          <button type="submit" class="btn btn-success btn-lg mt-3">Angebot annehmen &amp; Wünsche senden</button>
+        </div>
+      </form>
+    </div>
+    {% elif angebot_status in ['entwurf', 'angefragt'] %}
+    <div class="panel mb-4" id="angebot">
+      <h2 class="h4 mb-1">Angebot wird vorbereitet</h2>
+      <div class="text-muted">Wir prüfen Ihre Angaben und Unterlagen persönlich. Sobald das Angebot vorliegt, können Sie es über denselben Link ansehen und annehmen.</div>
+    </div>
+    {% elif angebot_status == 'angenommen' %}
+    <div class="panel mb-4" id="auftragsbestaetigung">
+      <div class="section-head">
+        <div>
+          <h2 class="h4 mb-1">Auftragsbestätigung</h2>
+          <div class="text-muted">Das Angebot wurde am {{ intake['kunden_angebot_angenommen_am'] or 'hinterlegten Zeitpunkt' }} angenommen.</div>
+        </div>
+        <span class="badge text-bg-{{ 'success' if intake['kunden_wunsch_bestaetigt_am'] else 'warning' }} fs-6">{{ 'Termine bestätigt' if intake['kunden_wunsch_bestaetigt_am'] else 'Terminbestätigung folgt' }}</span>
+      </div>
+      {% if intake['kunden_wunsch_bestaetigt_am'] %}
+      <div class="alert alert-success">Die Werkstatt hat Ihre Termin-, Übergabe- und Mobilitätsdaten bestätigt. Diese Auftragsbestätigung bleibt über den Link jederzeit abrufbar.</div>
+      {% else %}
+      <div class="alert alert-info">Ihr Auftrag ist angenommen. Wir prüfen jetzt die Terminwünsche und bestätigen sie separat.</div>
+      {% endif %}
+      <div class="confirmation-grid mb-3">
+        <div class="confirmation-item"><div class="small text-muted">Erster Termin</div><div class="fw-bold">{{ auftrag['annahme_datum'] if intake['kunden_wunsch_bestaetigt_am'] else intake['kunden_wunsch_annahme_datum'] }}</div></div>
+        <div class="confirmation-item"><div class="small text-muted">Rückgabe/Abholung</div><div class="fw-bold">{{ (auftrag['abholtermin'] if intake['kunden_wunsch_bestaetigt_am'] else intake['kunden_wunsch_abholung_datum']) or 'wird abgestimmt' }}</div></div>
+        <div class="confirmation-item"><div class="small text-muted">Fahrzeugübergabe</div><div class="fw-bold">{{ auftrag['transport_meta']['label'] }}</div></div>
+        <div class="confirmation-item"><div class="small text-muted">Ersatzfahrzeug</div><div class="fw-bold">{{ auftrag['schaden_mietwagen_label'] }}</div></div>
+      </div>
+      {% if auftrag['abhol_adresse'] %}<div class="readonly-note mb-3"><strong>Abholadresse:</strong> {{ auftrag['abhol_adresse'] }}</div>{% endif %}
+      {% if intake['kunden_wunsch_hinweis'] %}<div class="readonly-note mb-3"><strong>Ihr Hinweis:</strong> {{ intake['kunden_wunsch_hinweis'] }}</div>{% endif %}
+      <div class="offer-card">
+        <div class="d-flex justify-content-between gap-3 flex-wrap"><strong>Angenommenes Angebot</strong>{% if auftrag['werkstatt_angebot_preis_label'] %}<strong>{{ auftrag['werkstatt_angebot_preis_label'] }}</strong>{% endif %}</div>
+        {% if auftrag['werkstatt_angebot_text_display'] %}<div class="mt-2" style="white-space:pre-wrap;">{{ auftrag['werkstatt_angebot_text_display'] }}</div>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+    {% endif %}
 
     <div class="panel mb-4" id="termine">
       {# Meldung auch hier zeigen: nach Termin-Submits landet man per Anker in diesem Panel, nicht oben. #}
@@ -145,7 +276,7 @@
         </div>
       </div>
 
-      {% if terminfreigabe['can_request'] %}
+      {% if terminfreigabe['can_request'] and not intake['kunden_angebot_angenommen_am'] %}
       <div class="appointment-panel mb-3" id="terminvereinbarung">
         {% if meldungen %}
           {% for category, message in meldungen %}
@@ -158,7 +289,7 @@
           <div class="row g-2">
             <div class="col-12 col-sm-4">
               <label class="form-label small mb-1" for="wunschtermin-datum">Wunschtermin</label>
-              <input type="date" id="wunschtermin-datum" name="wunschtermin" class="form-control form-control-sm" required>
+              <input type="date" id="wunschtermin-datum" name="wunschtermin" value="{{ kunden_wunsch_annahme_iso }}" class="form-control form-control-sm" required>
             </div>
             <div class="col-12 col-sm-8">
               <label class="form-label small mb-1" for="wunschtermin-hinweis">Hinweis (optional)</label>
@@ -194,6 +325,7 @@
       </div>
     </div>
 
+    {% if not ist_anfrage or angebot_status == 'angenommen' %}
     <div class="panel mb-4">
       <h2 class="h4 mb-3">Fortschritt</h2>
       <div class="timeline">
@@ -208,6 +340,7 @@
         {% endfor %}
       </div>
     </div>
+    {% endif %}
 
     <div class="panel mb-4" id="unterlagen">
       <div class="section-head">

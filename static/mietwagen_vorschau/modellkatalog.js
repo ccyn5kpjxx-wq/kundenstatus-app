@@ -14,7 +14,7 @@
       brand: 'Audi',
       title: 'Audi Wunschmodell auswählen',
       intro: 'Das aktuelle deutsche Audi-Modellprogramm – vom kompakten A1 bis zum elektrischen Gran Turismo. Ausstattung, Antrieb, Lieferzeit und Monatsrate werden individuell beim Handel geprüft.',
-      open: true,
+      open: false,
       source: 'Audi Deutschland',
       groups: [
         {

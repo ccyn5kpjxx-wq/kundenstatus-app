@@ -29,32 +29,47 @@
     font-weight: 800;
   }
 
+  .lead-photo {
+    width: 100%;
+    max-height: 280px;
+    object-fit: cover;
+    border: 1px solid #e4d6c3;
+    border-radius: 14px;
+    background: #f7f2ea;
+  }
+
   .lead-file-grid {
     display: grid;
-    gap: 1rem;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: .75rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .lead-file-card {
-    min-width: 0;
-    padding: .85rem;
     border: 1px solid #e4d6c3;
     border-radius: 14px;
     background: #fffdf9;
+    overflow: hidden;
+    padding: .8rem;
   }
 
-  .lead-file-card img,
-  .lead-file-placeholder {
+  .lead-file-card img {
     width: 100%;
-    height: 145px;
-    margin-bottom: .75rem;
+    height: 150px;
     object-fit: cover;
-    display: grid;
-    place-items: center;
     border-radius: 10px;
-    background: #f1ebe2;
-    color: #6c655d;
-    font-weight: 800;
+    margin-bottom: .65rem;
+  }
+
+  .ai-result {
+    border-left: 4px solid #a23f2d;
+    background: #f8f2e9;
+    border-radius: 12px;
+    padding: 1rem;
+  }
+
+  .mail-draft-text {
+    min-height: 330px;
+    white-space: pre-wrap;
   }
 
   @media (max-width: 900px) {
@@ -67,6 +82,10 @@
     .lead-status-grid {
       grid-template-columns: 1fr;
     }
+
+    .lead-file-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
 {% endblock %}
@@ -74,9 +93,12 @@
 {% block content %}
 <div class="section-title">
   <div>
-    <div class="badge-soft mb-3">Lead #{{ lead['id'] }}</div>
+    <div class="d-flex gap-2 flex-wrap mb-3">
+      <span class="badge-soft">{{ lead['reference'] }}</span>
+      <span class="badge text-bg-{{ lead['website_meta']['farbe'] }}">{{ lead['website_meta']['label'] }}</span>
+    </div>
     <h1 class="mb-2">{{ lead['kunde_name'] or 'Neue Anfrage' }}</h1>
-    <p>{{ lead['fahrzeug'] or 'Fahrzeug offen' }}{% if lead['kennzeichen'] %} · {{ lead['kennzeichen'] }}{% endif %}</p>
+    <p>{{ lead['fahrzeug'] or 'Projekt/Fahrzeug offen' }}{% if lead['kennzeichen'] %} · {{ lead['kennzeichen'] }}{% endif %} · {{ lead['website_meta']['domain'] }}</p>
   </div>
   <div class="d-flex gap-2 flex-wrap">
     <a href="{{ url_for('admin_leads') }}" class="btn btn-soft">Zur Lead-Liste</a>
@@ -108,37 +130,20 @@
       </div>
     </div>
 
-    {% if lead_dateien %}
-    <div class="page-card p-4 mb-4">
-      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
-        <div>
-          <h2 class="h4 mb-1">Bilder zur Anfrage</h2>
-          <div class="text-muted small">Vom Kunden vor dem Absenden der unverbindlichen Anfrage übermittelt.</div>
-        </div>
-        <span class="badge text-bg-light text-dark border">{{ lead_dateien|length }} Bild{% if lead_dateien|length != 1 %}er{% endif %}</span>
-      </div>
-      <div class="lead-file-grid">
-        {% for datei in lead_dateien %}
-        <div class="lead-file-card">
-          {% if datei['is_browser_image'] %}
-          <a href="{{ datei['url'] }}" target="_blank" rel="noopener"><img src="{{ datei['url'] }}" alt="Anfragebild {{ loop.index }}"></a>
-          {% else %}
-          <div class="lead-file-placeholder">HEIC-Bild</div>
-          {% endif %}
-          <div class="fw-semibold text-truncate" title="{{ datei['original_name'] }}">{{ datei['original_name'] }}</div>
-          <div class="text-muted small mb-2">{% if datei['size'] %}{{ (datei['size'] / 1024 / 1024)|round(1) }} MB{% endif %}</div>
-          <a class="btn btn-sm btn-soft" href="{{ datei['url'] }}" target="_blank" rel="noopener">Öffnen</a>
-          <a class="btn btn-sm btn-outline-dark" href="{{ datei['url'] }}?download=1">Download</a>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-
     <div class="page-card p-4">
       <h2 class="h4 mb-3">Lead bearbeiten</h2>
       <form method="POST" class="row g-3">
         {{ csrf_field()|safe }}
+        <input type="hidden" name="herkunft_typ" value="{{ lead['herkunft_typ'] }}">
+        <input type="hidden" name="herkunft_id" value="{{ lead['herkunft_id'] }}">
+        <div class="col-md-4">
+          <label class="form-label">Website / Geschäftsbereich</label>
+          <select name="website" class="form-select">
+            {% for key, meta in lead_websites.items() %}
+            <option value="{{ key }}" {% if lead['website'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
         <div class="col-md-3">
           <label class="form-label">Quelle</label>
           <select name="quelle" class="form-select">
@@ -222,26 +227,84 @@
       </form>
     </div>
 
-    {% if lead['can_email'] %}
-    <div class="page-card p-4 mt-4" id="email-antwort">
+    <div class="page-card p-4 mt-4" id="ki-antwort">
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
         <div>
-          <h2 class="h4 mb-1">Per E-Mail antworten</h2>
+          <div class="badge-soft mb-2">KI-Assistent · immer mit Freigabe</div>
+          <h2 class="h4 mb-1">Anfrage analysieren und Antwort vorbereiten</h2>
           <div class="text-muted small">
             Die Antwort wird direkt im Portal über das für Jonas hinterlegte Postfach
             <strong>{{ lead_mail['address'] }}</strong> versendet. Outlook wird nicht geöffnet.
+            Preise, Verfügbarkeit und Leistungsumfang müssen vor dem Versand persönlich geprüft werden.
           </div>
         </div>
-        <span class="badge text-bg-{{ 'success' if lead_mail['configured'] else 'warning' }}">
-          {{ 'Postfach bereit' if lead_mail['configured'] else 'Postfach noch nicht verbunden' }}
-        </span>
+        <span class="badge text-bg-{{ lead['website_meta']['farbe'] }}">Absender: {{ lead_mail['address'] }}</span>
       </div>
 
-      {% if not lead_mail['configured'] %}
-      <div class="alert alert-warning" role="alert">
-        Jonas' Absenderpostfach muss noch mit seinen SMTP-Zugangsdaten verbunden werden.
-        Bis dahin bleibt der Versand gesperrt und es öffnet sich bewusst kein fremdes E-Mail-Programm.
+      <div class="mb-4">
+        <h3 class="h6 mb-2">Bilder und Unterlagen</h3>
+        {% if lead['datei_url'] or lead_dateien %}
+        <div class="lead-file-grid mb-3">
+          {% if lead['datei_url'] %}
+          <div class="lead-file-card">
+            {% if lead['datei_mime_type'].startswith('image/') and lead['datei_mime_type'] != 'image/heic' %}
+            <a href="{{ lead['datei_url'] }}" target="_blank" rel="noopener"><img src="{{ lead['datei_url'] }}" alt="Anhang zur Anfrage"></a>
+            {% endif %}
+            <div class="fw-semibold text-truncate">{{ lead['datei_original_name'] or 'Anhang' }}</div>
+            <div class="text-muted small mb-2">Website-Formular{% if lead['datei_size'] %} · {{ (lead['datei_size'] / 1024 / 1024)|round(1) }} MB{% endif %}</div>
+            <a class="btn btn-sm btn-soft" href="{{ lead['datei_url'] }}" target="_blank" rel="noopener">Öffnen</a>
+          </div>
+          {% endif %}
+          {% for datei in lead_dateien %}
+          <div class="lead-file-card">
+            {% if datei['mime_type'].startswith('image/') and datei['mime_type'] != 'image/heic' %}
+            <a href="{{ datei['url'] }}" target="_blank" rel="noopener"><img src="{{ datei['url'] }}" alt="Anhang {{ datei['original_name'] }}"></a>
+            {% endif %}
+            <div class="fw-semibold text-truncate">{{ datei['original_name'] or 'Anhang' }}</div>
+            <div class="text-muted small mb-2">{{ datei['quelle'] }}{% if datei['size'] %} · {{ (datei['size'] / 1024 / 1024)|round(1) }} MB{% endif %}</div>
+            <a class="btn btn-sm btn-soft" href="{{ datei['url'] }}" target="_blank" rel="noopener">Öffnen</a>
+            <a class="btn btn-sm btn-outline-dark" href="{{ datei['url'] }}?download=1">Download</a>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-muted small mb-3">Noch keine Bilder oder Unterlagen vorhanden.</div>
+        {% endif %}
+        <form method="POST" enctype="multipart/form-data" action="{{ url_for('admin_lead_anhaenge_upload', lead_id=lead['id']) }}" class="row g-2 align-items-end">
+          {{ csrf_field()|safe }}
+          <div class="col-md-8">
+            <label class="form-label">Anhänge ergänzen (max. 5)</label>
+            <input type="file" name="dateien" class="form-control" multiple accept="image/*,.pdf,.doc,.docx,.txt">
+          </div>
+          <div class="col-md-4 d-grid">
+            <button type="submit" class="btn btn-soft">Dateien hochladen</button>
+          </div>
+        </form>
       </div>
+
+      <div class="d-flex gap-2 flex-wrap mb-3">
+        <form method="POST" action="{{ url_for('admin_lead_ki_entwurf', lead_id=lead['id']) }}">
+          {{ csrf_field()|safe }}
+          <button type="submit" class="btn btn-brand">KI-Analyse &amp; Entwurf erstellen</button>
+        </form>
+        {% if lead['ki_entwurf_am'] %}<span class="align-self-center text-muted small">Zuletzt vorbereitet: {{ lead['ki_entwurf_am'] }}</span>{% endif %}
+      </div>
+
+      {% if lead['ki_analyse_text'] %}
+      <div class="ai-result mb-4">
+        <h3 class="h6">Analyse</h3>
+        <div class="mb-3" style="white-space: pre-wrap;">{{ lead['ki_analyse_text'] }}</div>
+        {% if lead['ki_fehlende_angaben'] %}
+        <h3 class="h6">Vor Angebot noch prüfen</h3>
+        <div style="white-space: pre-wrap;">{{ lead['ki_fehlende_angaben'] }}</div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if not lead_mail['configured'] %}
+      <div class="alert alert-warning">Der SMTP-Versand für {{ lead['website_meta']['label'] }} ist noch nicht vollständig eingerichtet. Der Entwurf kann trotzdem erstellt und kopiert werden.</div>
+      {% elif lead_mail['uses_shared_login'] %}
+      <div class="alert alert-info">Der Absender {{ lead_mail['address'] }} nutzt aktuell den gemeinsamen IONOS-SMTP-Zugang. Falls IONOS diesen Absender nicht erlaubt, müssen eigene SMTP-Zugangsdaten für diese Website hinterlegt werden.</div>
       {% endif %}
 
       <form method="POST" action="{{ url_for('admin_lead_mail_senden', lead_id=lead['id']) }}" onsubmit="return confirm('Die geprüfte E-Mail jetzt wirklich an den Kunden senden?');">
@@ -249,30 +312,44 @@
         <div class="row g-3">
           <div class="col-md-6">
             <label class="form-label">Von</label>
-            <input type="text" class="form-control" value="{{ lead_mail['display_name'] }} &lt;{{ lead_mail['address'] }}&gt;" readonly>
+            <input class="form-control" value="{{ lead_mail['display_name'] }} &lt;{{ lead_mail['address'] }}&gt;" readonly>
           </div>
           <div class="col-md-6">
             <label class="form-label">An</label>
-            <input type="email" class="form-control" value="{{ lead['kunde_email'] }}" readonly>
+            <input type="email" name="empfaenger" class="form-control" value="{{ lead['kunde_email'] }}" required>
           </div>
           <div class="col-12">
             <label class="form-label">Betreff</label>
-            <input type="text" name="betreff" class="form-control" value="{{ lead_mail_entwurf['betreff'] }}" maxlength="300" required>
+            <input type="text" name="betreff" class="form-control" value="{{ lead_mail_entwurf['betreff'] }}" required>
           </div>
           <div class="col-12">
-            <label class="form-label">Nachricht</label>
-            <textarea name="nachricht" class="form-control" rows="10" required>{{ lead_mail_entwurf['nachricht'] }}</textarea>
-            <div class="form-text">Der Text bleibt bearbeitbar. Versand erfolgt erst nach Ihrer Bestätigung.</div>
+            <label class="form-label">Antwort / Angebot</label>
+            <textarea name="nachricht" class="form-control mail-draft-text" required>{{ lead_mail_entwurf['email_text'] }}</textarea>
+            <div class="form-text">Der Text bleibt vollständig bearbeitbar. Versand erfolgt erst nach Ihrer Bestätigung.</div>
           </div>
           <div class="col-12 d-grid d-md-flex justify-content-md-end">
-            <button type="submit" class="btn btn-brand" {% if not lead_mail['configured'] %}disabled{% endif %}>
-              Antwort über {{ lead_mail['address'] }} senden
-            </button>
+            <button type="submit" class="btn btn-brand" {% if not lead_mail['configured'] or not lead['kunde_email'] %}disabled{% endif %}>Geprüfte E-Mail jetzt senden</button>
           </div>
         </div>
       </form>
+
+      {% if lead_mail_log %}
+      <hr class="my-4">
+      <h3 class="h6 mb-3">Versandprotokoll</h3>
+      <div class="list-group list-group-flush">
+        {% for mail in lead_mail_log %}
+        <div class="list-group-item px-0">
+          <div class="d-flex justify-content-between gap-3">
+            <strong>{{ mail['betreff'] }}</strong>
+            <span class="badge text-bg-{{ 'success' if mail['status'] == 'gesendet' else 'danger' }}">{{ mail['status'] }}</span>
+          </div>
+          <div class="text-muted small">{{ mail['erstellt_am'] }} · {{ mail['absender'] }} → {{ mail['empfaenger'] }}</div>
+          {% if mail['fehler'] %}<div class="text-danger small mt-1">{{ mail['fehler'] }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
   </div>
 
   <div class="col-xl-4">
@@ -287,7 +364,7 @@
         <a href="{{ lead['whatsapp_url'] }}" target="_blank" rel="noopener" class="btn btn-success">Per WhatsApp antworten</a>
         {% endif %}
         {% if lead['can_email'] %}
-        <a href="#email-antwort" class="btn btn-outline-dark">Per E-Mail antworten</a>
+        <a href="#ki-antwort" class="btn btn-brand">Per E-Mail antworten</a>
         {% endif %}
         {% if not lead['whatsapp_url'] and not lead['can_email'] %}
         <div class="text-muted small">Handynummer oder E-Mail eintragen, dann kann direkt aus dem Lead kommuniziert werden.</div>
@@ -295,16 +372,66 @@
       </div>
     </div>
 
+    {% if lead['datei_url'] %}
     <div class="page-card p-4 mb-4">
-      <h2 class="h4 mb-3">Auftrag</h2>
-      {% if lead['auftrag_id'] %}
-      <p class="text-muted">Dieser Lead wurde bereits gewonnen und ist mit einem Auftrag verbunden.</p>
-      <a href="{{ url_for('auftrag_detail', auftrag_id=lead['auftrag_id']) }}" class="btn btn-brand w-100">Auftrag öffnen</a>
+      <h2 class="h4 mb-3">Foto zur Anfrage</h2>
+      {% if lead['datei_mime_type'] != 'image/heic' %}
+      <a href="{{ lead['datei_url'] }}" target="_blank" rel="noopener">
+        <img class="lead-photo mb-3" src="{{ lead['datei_url'] }}" alt="Vom Kunden hochgeladenes Foto zur Anfrage">
+      </a>
+      {% endif %}
+      <div class="small text-muted mb-3">
+        {{ lead['datei_original_name'] }}{% if lead['datei_size'] %} · {{ (lead['datei_size'] / 1024 / 1024)|round(1) }} MB{% endif %}
+      </div>
+      <div class="d-grid gap-2">
+        <a class="btn btn-soft" href="{{ lead['datei_url'] }}" target="_blank" rel="noopener">Foto öffnen</a>
+        <a class="btn btn-outline-dark" href="{{ lead['datei_url'] }}?download=1">Herunterladen</a>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="page-card p-4 mb-4" id="kundenportal">
+      <h2 class="h4 mb-3">Kundenportal</h2>
+      {% if lead['website'] != 'auto-lackierzentrum' %}
+      <p class="text-muted mb-0">Dieser Lead bleibt in der {{ lead['website_meta']['kurz'] }}-Pipeline. Angebot und Kommunikation erfolgen direkt oben im Lead.</p>
+      {% elif lead_auftrag is defined and lead_auftrag %}
+      <div class="d-flex gap-2 flex-wrap mb-3">
+        {% if lead_auftrag['angebot_status'] == 'angenommen' %}
+        <span class="badge text-bg-success">Angebot angenommen</span>
+        {% elif lead_auftrag['angebot_status'] == 'angebot_abgegeben' %}
+        <span class="badge text-bg-primary">Angebot liegt beim Kunden</span>
+        {% else %}
+        <span class="badge text-bg-warning">Anfrage-Akte aktiv</span>
+        {% endif %}
+      </div>
+      <p class="text-muted small">Der Lead bleibt bis zur Angebotsannahme offen. Der Kunde kann über denselben geschützten Link Bilder nachreichen, einen Terminwunsch senden, das Angebot annehmen und später den Reparaturstatus verfolgen.</p>
+      <div class="text-center mb-3">
+        <img src="{{ url_for('kunden_status_qr', token=lead_auftrag['kunden_status_token'], target='local') if lead_auftrag['kunden_status_public_warning'] else url_for('kunden_status_qr', token=lead_auftrag['kunden_status_token']) }}" alt="QR-Code zum Kundenportal" style="width:132px;height:132px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;">
+      </div>
+      <code class="d-block small mb-3" style="overflow-wrap:anywhere;">{{ lead_auftrag['kunden_status_local_url'] if lead_auftrag['kunden_status_public_warning'] else lead_auftrag['kunden_status_url'] }}</code>
+      <div class="d-grid gap-2">
+        <a href="{{ lead_auftrag['kunden_status_local_url'] }}" target="_blank" rel="noopener" class="btn btn-soft">Kundenportal öffnen</a>
+        {% if lead_auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
+        <a href="{{ lead_auftrag['kunden_whatsapp_status']['whatsapp_url'] }}" target="_blank" rel="noopener" class="btn btn-success">Kundenlink per WhatsApp</a>
+        {% elif lead_auftrag['kunden_whatsapp_status']['whatsapp_consent_required'] and lead_auftrag['kunden_whatsapp_status']['is_mobile'] %}
+        <form method="POST" action="{{ url_for('admin_whatsapp_einwilligung_bestaetigen', auftrag_id=lead_auftrag['id']) }}" class="p-3 rounded-3 border bg-light">
+          {{ csrf_field()|safe }}
+          <input type="hidden" name="next" value="{{ url_for('admin_lead_detail', lead_id=lead['id']) }}#kundenportal">
+          <label class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="whatsapp_einwilligung_bestaetigt" value="1" required>
+            <span class="form-check-label small">Der Kunde hat WhatsApp für <strong>{{ lead_auftrag['kontakt_telefon'] }}</strong> persönlich erlaubt.</span>
+          </label>
+          <button type="submit" class="btn btn-sm btn-success w-100">WhatsApp freigeben</button>
+        </form>
+        {% endif %}
+        {% if lead['can_email'] %}<a href="#ki-antwort" class="btn btn-brand">Kundenlink per E-Mail vorbereiten</a>{% endif %}
+        <a href="{{ url_for('auftrag_detail', auftrag_id=lead_auftrag['id']) }}" class="btn btn-outline-dark">Anfrage-Akte intern öffnen</a>
+      </div>
       {% else %}
-      <p class="text-muted">Wenn der Kunde zusagt, wird daraus ein normaler Auftrag mit Kundenstatus, WhatsApp und Dokumenten.</p>
+      <p class="text-muted">Jetzt schon eine Anfrage-Akte anlegen: Der Kunde erhält einen dauerhaften Link für Bilder, Terminwunsch, Angebot und späteren Reparaturstatus. Der Lead wird dadurch noch nicht als gewonnen markiert.</p>
       <form method="POST" action="{{ url_for('admin_lead_to_auftrag', lead_id=lead['id']) }}">
         {{ csrf_field()|safe }}
-        <button type="submit" class="btn btn-brand w-100">In Auftrag umwandeln</button>
+        <button type="submit" class="btn btn-brand w-100">Kundenakte &amp; Link anlegen</button>
       </form>
       {% endif %}
     </div>
@@ -312,11 +439,14 @@
     <div class="page-card p-4">
       <h2 class="h4 mb-3">Info</h2>
       <div class="d-flex gap-2 flex-wrap mb-2">
+        <span class="badge text-bg-{{ lead['website_meta']['farbe'] }}">{{ lead['website_meta']['label'] }}</span>
         <span class="badge text-bg-{{ lead['quelle_meta']['farbe'] }}">{{ lead['quelle_meta']['label'] }}</span>
         {% if lead['autohaus_name'] %}<span class="badge text-bg-light text-dark border">{{ lead['autohaus_name'] }}</span>{% endif %}
         {% if lead['source_email_id'] %}<span class="badge text-bg-success">E-Mail #{{ lead['source_email_id'] }}</span>{% endif %}
       </div>
       <div class="text-muted small">
+        Referenz: {{ lead['reference'] }}<br>
+        Herkunft: {{ lead['herkunft_label'] }}{% if lead['herkunft_id'] %} #{{ lead['herkunft_id'] }}{% endif %}<br>
         Erstellt: {{ lead['erstellt_am'] }}<br>
         Geändert: {{ lead['geaendert_am'] }}
       </div>

@@ -343,7 +343,7 @@
         <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
           <div>
             <h4 class="mb-1">Kundenkommunikation</h4>
-            <div class="text-muted small">QR-Code, Statuslink und WhatsApp-Entwurf für den Fahrzeughalter.</div>
+            <div class="text-muted small">Ein Link für Anfrage, Unterlagen, Angebot, Termine und späteren Reparaturstatus.</div>
           </div>
           {% if auftrag['kontakt_telefon'] %}
           <span class="badge text-bg-light border text-dark">{{ auftrag['kontakt_telefon'] }}</span>
@@ -404,6 +404,32 @@
         </form>
         {% else %}
         <div class="text-muted">Noch kein Kundenstatus-Link vorhanden.</div>
+        {% endif %}
+
+        {% set kundenwunsch = auftrag['schaden_aufnahme'] %}
+        {% if kundenwunsch.get('kunden_angebot_angenommen_am') %}
+        <hr class="my-4">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+          <div>
+            <div class="fw-bold">Angebot vom Kunden angenommen</div>
+            <div class="text-muted small">Angenommen am {{ kundenwunsch.get('kunden_angebot_angenommen_am') }}. Termin- und Mobilitätswünsche bitte fachlich bestätigen.</div>
+          </div>
+          <span class="badge text-bg-{{ 'success' if kundenwunsch.get('kunden_wunsch_bestaetigt_am') else 'warning' }}">{{ 'Bestätigt & eingeplant' if kundenwunsch.get('kunden_wunsch_bestaetigt_am') else 'Bestätigung offen' }}</span>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-6"><div class="border rounded-3 p-2 h-100"><small class="text-muted d-block">Erster Terminwunsch</small><strong>{{ kundenwunsch.get('kunden_wunsch_annahme_datum') or 'offen' }}</strong></div></div>
+          <div class="col-md-6"><div class="border rounded-3 p-2 h-100"><small class="text-muted d-block">Rückgabe-/Abholwunsch</small><strong>{{ kundenwunsch.get('kunden_wunsch_abholung_datum') or 'offen' }}</strong></div></div>
+          <div class="col-md-6"><div class="border rounded-3 p-2 h-100"><small class="text-muted d-block">Übergabe</small><strong>{{ auftrag['transport_meta']['label'] }}</strong></div></div>
+          <div class="col-md-6"><div class="border rounded-3 p-2 h-100"><small class="text-muted d-block">Ersatzfahrzeug</small><strong>{{ auftrag['schaden_mietwagen_label'] }}</strong></div></div>
+        </div>
+        {% if kundenwunsch.get('kunden_wunsch_abhol_adresse') %}<div class="small mb-2"><strong>Abholadresse:</strong> {{ kundenwunsch.get('kunden_wunsch_abhol_adresse') }}</div>{% endif %}
+        {% if kundenwunsch.get('kunden_wunsch_hinweis') %}<div class="small mb-3"><strong>Kundenhinweis:</strong> {{ kundenwunsch.get('kunden_wunsch_hinweis') }}</div>{% endif %}
+        {% if not kundenwunsch.get('kunden_wunsch_bestaetigt_am') %}
+        <form method="POST" action="{{ url_for('admin_kundenwuensche_bestaetigen', auftrag_id=auftrag['id']) }}" onsubmit="return confirm('Die Kundenwünsche als verbindliche Termine übernehmen und den Auftrag einplanen?');">
+          {{ csrf_field()|safe }}
+          <button type="submit" class="btn btn-success">Wünsche als Termine bestätigen &amp; einplanen</button>
+        </form>
+        {% endif %}
         {% endif %}
       </div>
 
@@ -481,15 +507,15 @@
 
       {% if auftrag['angebotsphase'] %}
       <div class="alert alert-primary">
-        <div class="fw-bold mb-1">Angebotsanfrage</div>
+        <div class="fw-bold mb-1">{{ 'Kundenanfrage' if auftrag['quelle'] == 'lead' else 'Angebotsanfrage' }}</div>
         <div>
           Status:
           {% if auftrag['angebot_status'] == 'angebot_abgegeben' %}
-            Angebot wurde an das Autohaus gesendet.
+            {{ 'Angebot wurde im Kundenportal bereitgestellt.' if auftrag['quelle'] == 'lead' else 'Angebot wurde an das Autohaus gesendet.' }}
           {% elif auftrag['angebot_abgesendet'] %}
-            Autohaus wartet auf dein Werkstatt-Angebot.
+            {{ 'Kunde wartet auf das Werkstatt-Angebot.' if auftrag['quelle'] == 'lead' else 'Autohaus wartet auf dein Werkstatt-Angebot.' }}
           {% else %}
-            Autohaus bereitet die Anfrage noch vor.
+            {{ 'Anfrage wird noch vorbereitet.' if auftrag['quelle'] == 'lead' else 'Autohaus bereitet die Anfrage noch vor.' }}
           {% endif %}
         </div>
       </div>
@@ -500,7 +526,7 @@
         <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
           <div>
             <div class="fw-bold mb-1">Angenommenes Werkstatt-Angebot</div>
-            <div>Dieses Angebot wurde vom Autohaus angenommen und läuft jetzt als Auftrag weiter.</div>
+            <div>Dieses Angebot wurde {{ 'vom Kunden' if auftrag['quelle'] == 'lead' else 'vom Autohaus' }} angenommen und läuft jetzt als Auftrag weiter.</div>
           </div>
           {% if auftrag['werkstatt_angebot_preis_label'] %}
           <div class="h4 mb-0">{{ auftrag['werkstatt_angebot_preis_label'] }}</div>
@@ -761,8 +787,8 @@
 
       {% if auftrag['angebotsphase'] and auftrag['angebot_abgesendet'] %}
       <div class="page-card p-4 mt-4 border border-primary-subtle">
-        <h4 class="mb-2">{{ 'Angebot bearbeiten' if auftrag['angebot_status'] == 'angebot_abgegeben' else 'Angebot an Autohaus senden' }}</h4>
-        <p class="text-muted mb-3">Preis, Leistungsbeschreibung und Notiz sind im Autohaus-Portal sichtbar.</p>
+        <h4 class="mb-2">{{ 'Angebot bearbeiten' if auftrag['angebot_status'] == 'angebot_abgegeben' else ('Angebot im Kundenportal bereitstellen' if auftrag['quelle'] == 'lead' else 'Angebot an Autohaus senden') }}</h4>
+        <p class="text-muted mb-3">Preis, Leistungsbeschreibung und Notiz sind im {{ 'persönlichen Kundenportal' if auftrag['quelle'] == 'lead' else 'Autohaus-Portal' }} sichtbar.</p>
         <form method="POST" action="{{ url_for('angebot_senden_route', auftrag_id=auftrag['id']) }}" class="row g-3">
           {% if auftrag['preisvorschlag']['hat_vorschlag'] or auftrag['preisvorschlag']['hinweise'] %}
           <div class="col-12">
@@ -818,7 +844,7 @@
           </div>
           {% endif %}
           <div class="col-12">
-            <button type="submit" class="btn btn-brand btn-lg">{{ 'Angebot aktualisieren' if auftrag['angebot_status'] == 'angebot_abgegeben' else 'Angebot an Autohaus senden' }}</button>
+            <button type="submit" class="btn btn-brand btn-lg">{{ 'Angebot aktualisieren' if auftrag['angebot_status'] == 'angebot_abgegeben' else ('Angebot im Kundenportal bereitstellen' if auftrag['quelle'] == 'lead' else 'Angebot an Autohaus senden') }}</button>
           </div>
         </form>
       </div>

@@ -31,14 +31,50 @@
     box-shadow: inset 4px 0 0 #c74b32;
   }
 
+  .website-filter-grid {
+    display: grid;
+    gap: .75rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .website-filter-card {
+    border: 1px solid #e4d6c3;
+    border-radius: 16px;
+    background: #fffdf9;
+    color: var(--ink);
+    display: block;
+    padding: .9rem 1rem;
+    text-decoration: none;
+  }
+
+  .website-filter-card:hover,
+  .website-filter-card.is-active {
+    border-color: rgba(162, 63, 45, .55);
+    background: rgba(162, 63, 45, .09);
+    color: var(--ink);
+  }
+
+  .website-filter-card strong,
+  .website-filter-card span {
+    display: block;
+  }
+
+  .website-filter-card span {
+    color: var(--muted);
+    font-size: .8rem;
+    margin-top: .2rem;
+  }
+
   @media (max-width: 900px) {
-    .lead-grid {
+    .lead-grid,
+    .website-filter-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
   @media (max-width: 560px) {
-    .lead-grid {
+    .lead-grid,
+    .website-filter-grid {
       grid-template-columns: 1fr;
     }
   }
@@ -50,9 +86,26 @@
   <div>
     <div class="badge-soft mb-3">Lead-Management</div>
     <h1 class="mb-2">Leads / Anfragen</h1>
-    <p>Neue Anfragen sammeln, nachfassen und bei Zusage in einen Auftrag umwandeln.</p>
+    <p>Alle Anfragen aus Lackierzentrum, TomorrowWorks und Autovermietung an einem Ort bearbeiten.</p>
   </div>
   <a href="{{ url_for('dashboard') }}#auftraege" class="btn btn-soft">Zu Aufträgen</a>
+</div>
+
+<div class="page-card p-3 mb-4">
+  <div class="website-filter-grid">
+    <a class="website-filter-card {% if website_filter == 'alle' %}is-active{% endif %}"
+       href="{{ url_for('admin_leads', website='alle', status=status_filter, quelle=quelle_filter) }}">
+      <strong>Alle Websites</strong>
+      <span>Gemeinsame Lead-Zentrale</span>
+    </a>
+    {% for key, meta in lead_websites.items() %}
+    <a class="website-filter-card {% if website_filter == key %}is-active{% endif %}"
+       href="{{ url_for('admin_leads', website=key, status=status_filter, quelle=quelle_filter) }}">
+      <strong>{{ meta['kurz'] }}</strong>
+      <span>{{ meta['domain'] }}</span>
+    </a>
+    {% endfor %}
+  </div>
 </div>
 
 <div class="lead-grid mb-4">
@@ -78,6 +131,14 @@
   <h2 class="h4 mb-3">Neue Anfrage erfassen</h2>
   <form method="POST" class="row g-3">
     {{ csrf_field()|safe }}
+    <div class="col-md-3">
+      <label class="form-label">Website / Geschäftsbereich</label>
+      <select name="website" class="form-select">
+        {% for key, meta in lead_websites.items() %}
+        <option value="{{ key }}" {% if website_filter == key %}selected{% endif %}>{{ meta['label'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
     <div class="col-md-3">
       <label class="form-label">Quelle</label>
       <select name="quelle" class="form-select">
@@ -160,10 +221,10 @@
       <div class="text-muted small">Überfällige Kontakte stehen oben.</div>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-      <a class="btn btn-sm {{ 'btn-dark' if status_filter == 'aktiv' else 'btn-soft' }}" href="{{ url_for('admin_leads', status='aktiv', quelle=quelle_filter) }}">Aktiv</a>
-      <a class="btn btn-sm {{ 'btn-dark' if status_filter == 'alle' else 'btn-soft' }}" href="{{ url_for('admin_leads', status='alle', quelle=quelle_filter) }}">Alle</a>
+      <a class="btn btn-sm {{ 'btn-dark' if status_filter == 'aktiv' else 'btn-soft' }}" href="{{ url_for('admin_leads', status='aktiv', quelle=quelle_filter, website=website_filter) }}">Aktiv</a>
+      <a class="btn btn-sm {{ 'btn-dark' if status_filter == 'alle' else 'btn-soft' }}" href="{{ url_for('admin_leads', status='alle', quelle=quelle_filter, website=website_filter) }}">Alle</a>
       {% for key, meta in lead_status.items() %}
-      <a class="btn btn-sm {{ 'btn-dark' if status_filter == key else 'btn-soft' }}" href="{{ url_for('admin_leads', status=key, quelle=quelle_filter) }}">{{ meta['label'] }}</a>
+      <a class="btn btn-sm {{ 'btn-dark' if status_filter == key else 'btn-soft' }}" href="{{ url_for('admin_leads', status=key, quelle=quelle_filter, website=website_filter) }}">{{ meta['label'] }}</a>
       {% endfor %}
     </div>
   </div>
@@ -188,6 +249,7 @@
             <div class="fw-bold">{{ lead['kunde_name'] or 'Unbekannter Kunde' }}</div>
             <div class="text-muted small">{{ lead['fahrzeug'] or 'Fahrzeug offen' }}{% if lead['kennzeichen'] %} · {{ lead['kennzeichen'] }}{% endif %}</div>
             <div class="d-flex gap-2 flex-wrap mt-1">
+              <span class="badge text-bg-{{ lead['website_meta']['farbe'] }}">{{ lead['website_meta']['kurz'] }}</span>
               <span class="badge text-bg-{{ lead['quelle_meta']['farbe'] }}">{{ lead['quelle_meta']['label'] }}</span>
               {% if lead['autohaus_name'] %}<span class="badge text-bg-light text-dark border">{{ lead['autohaus_name'] }}</span>{% endif %}
               {% if lead['source_email_id'] %}<span class="badge text-bg-success">E-Mail #{{ lead['source_email_id'] }}</span>{% endif %}

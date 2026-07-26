@@ -1118,6 +1118,37 @@ LEAD_QUELLEN = {
     "website": {"label": "Website", "farbe": "dark"},
 }
 
+LEAD_WEBSITES = {
+    "auto-lackierzentrum": {
+        "label": "Auto-Lackierzentrum", "kurz": "Lackierzentrum", "domain": "auto-lackierzentrum.de",
+        "farbe": "danger", "mail_address": "info@auto-lackierzentrum.de",
+        "mail_display_name": "Gärtner Karosserie & Lack", "reference_prefix": "ALZ",
+    },
+    "tomorrowworks": {
+        "label": "TomorrowWorks", "kurz": "TomorrowWorks", "domain": "tomorrowworks-agentur.de",
+        "farbe": "primary", "mail_address": "info@tomorrowworks-agentur.de",
+        "mail_display_name": "TomorrowWorks", "reference_prefix": "TW",
+    },
+    "autovermietung-mos": {
+        "label": "Autovermietung MOS", "kurz": "Autovermietung", "domain": "autovermietung-mos.de",
+        "farbe": "success", "mail_address": "info@autovermietung-mos.de",
+        "mail_display_name": "Autovermietung MOS", "reference_prefix": "MW",
+    },
+}
+
+LEAD_WEBSITE_ALIASES = {
+    "auto-lackierzentrum.de": "auto-lackierzentrum", "www.auto-lackierzentrum.de": "auto-lackierzentrum",
+    "lackierzentrum": "auto-lackierzentrum", "tomorrowworks-agentur.de": "tomorrowworks",
+    "www.tomorrowworks-agentur.de": "tomorrowworks", "tomorrowworks-agentur": "tomorrowworks",
+    "autovermietung-mos.de": "autovermietung-mos", "www.autovermietung-mos.de": "autovermietung-mos",
+    "autovermietung": "autovermietung-mos",
+}
+
+LEAD_HERKUNFT_TYPEN = {
+    "manuell": "Manuell erfasst", "website_formular": "Website-Formular",
+    "email": "E-Mail", "mietwagen_anfrage": "Mietwagen-Formular",
+}
+
 FAHRZEUGSUCHE_STATUS = {
     "neu": {"label": "Neu", "farbe": "primary"},
     "suche_laeuft": {"label": "Suche läuft", "farbe": "info"},
@@ -2896,6 +2927,8 @@ def protect_csrf():
     if request.path == "/api/klick":
         return None
     if request.path == "/api/besucher":
+        return None
+    if request.path == "/api/leads":
         return None
     if (
         request.path.startswith("/api/werkstatt/fahrzeugeinkauf/")
@@ -7960,6 +7993,7 @@ BACKUP_TABLES = (
     "versicherungen",
     "leads",
     "lead_dateien",
+    "lead_mail_log",
     "fahrzeugsuchen",
     "fahrzeugsuche_dateien",
     "fahrzeug_kandidaten",
@@ -8443,6 +8477,9 @@ def init_db():
             autohaus_id          INTEGER,
             auftrag_id           INTEGER,
             source_email_id      INTEGER DEFAULT 0,
+            website              TEXT DEFAULT 'auto-lackierzentrum',
+            herkunft_typ         TEXT DEFAULT 'manuell',
+            herkunft_id          INTEGER DEFAULT 0,
             kunde_name           TEXT DEFAULT '',
             kontakt_telefon      TEXT DEFAULT '',
             kunde_email          TEXT DEFAULT '',
@@ -8455,6 +8492,16 @@ def init_db():
             geschaetzter_wert    REAL DEFAULT 0,
             notiz                TEXT DEFAULT '',
             verloren_grund       TEXT DEFAULT '',
+            datei_original_name  TEXT DEFAULT '',
+            datei_stored_name    TEXT DEFAULT '',
+            datei_mime_type      TEXT DEFAULT '',
+            datei_size           INTEGER DEFAULT 0,
+            ki_analyse_text      TEXT DEFAULT '',
+            ki_fehlende_angaben  TEXT DEFAULT '',
+            mail_betreff_entwurf TEXT DEFAULT '',
+            mail_text_entwurf    TEXT DEFAULT '',
+            ki_entwurf_am        TEXT DEFAULT '',
+            mail_gesendet_am     TEXT DEFAULT '',
             erstellt_am          TEXT NOT NULL,
             geaendert_am         TEXT NOT NULL,
             FOREIGN KEY (autohaus_id) REFERENCES autohaeuser(id),
@@ -8462,15 +8509,17 @@ def init_db():
         );
 
         CREATE TABLE IF NOT EXISTS lead_dateien (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            lead_id       INTEGER NOT NULL,
-            original_name TEXT NOT NULL,
-            stored_name   TEXT NOT NULL UNIQUE,
-            mime_type     TEXT DEFAULT '',
-            size          INTEGER DEFAULT 0,
-            quelle        TEXT DEFAULT 'website_formular',
-            erstellt_am   TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER NOT NULL,
+            original_name TEXT DEFAULT '', stored_name TEXT DEFAULT '', mime_type TEXT DEFAULT '',
+            size INTEGER DEFAULT 0, quelle TEXT DEFAULT 'upload', erstellt_am TEXT NOT NULL,
             FOREIGN KEY (lead_id) REFERENCES leads(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS lead_mail_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER NOT NULL,
+            absender TEXT DEFAULT '', empfaenger TEXT DEFAULT '', betreff TEXT DEFAULT '',
+            nachricht TEXT DEFAULT '', status TEXT DEFAULT 'gesendet', fehler TEXT DEFAULT '',
+            erstellt_am TEXT NOT NULL, FOREIGN KEY (lead_id) REFERENCES leads(id)
         );
 
         CREATE TABLE IF NOT EXISTS fahrzeugsuchen (
@@ -9372,6 +9421,9 @@ def init_db():
     ensure_column(db, "leads", "autohaus_id", "INTEGER")
     ensure_column(db, "leads", "auftrag_id", "INTEGER")
     ensure_column(db, "leads", "source_email_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "leads", "website", "TEXT DEFAULT 'auto-lackierzentrum'")
+    ensure_column(db, "leads", "herkunft_typ", "TEXT DEFAULT 'manuell'")
+    ensure_column(db, "leads", "herkunft_id", "INTEGER DEFAULT 0")
     ensure_column(db, "leads", "kunde_name", "TEXT DEFAULT ''")
     ensure_column(db, "leads", "kontakt_telefon", "TEXT DEFAULT ''")
     ensure_column(db, "leads", "kunde_email", "TEXT DEFAULT ''")
@@ -9384,6 +9436,34 @@ def init_db():
     ensure_column(db, "leads", "geschaetzter_wert", "REAL DEFAULT 0")
     ensure_column(db, "leads", "notiz", "TEXT DEFAULT ''")
     ensure_column(db, "leads", "verloren_grund", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "datei_original_name", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "datei_stored_name", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "datei_mime_type", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "datei_size", "INTEGER DEFAULT 0")
+    ensure_column(db, "leads", "ki_analyse_text", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "ki_fehlende_angaben", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "mail_betreff_entwurf", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "mail_text_entwurf", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "ki_entwurf_am", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "mail_gesendet_am", "TEXT DEFAULT ''")
+    ensure_index(db, "idx_leads_website_status", "leads", ("website", "status", "id"))
+    ensure_index(db, "idx_leads_herkunft", "leads", ("herkunft_typ", "herkunft_id"))
+    ensure_index(db, "idx_lead_dateien_lead_id", "lead_dateien", ("lead_id", "id"))
+    ensure_index(db, "idx_lead_mail_log_lead_id", "lead_mail_log", ("lead_id", "id"))
+    db.execute("""
+        UPDATE leads SET website='tomorrowworks'
+        WHERE COALESCE(source_email_id, 0) IN (
+            SELECT id FROM werkstatt_emails
+            WHERE LOWER(COALESCE(empfaenger, '')) LIKE '%@tomorrowworks-agentur.de%'
+        )
+    """)
+    db.execute("""
+        UPDATE leads SET website='autovermietung-mos'
+        WHERE COALESCE(source_email_id, 0) IN (
+            SELECT id FROM werkstatt_emails
+            WHERE LOWER(COALESCE(empfaenger, '')) LIKE '%@autovermietung-mos.de%'
+        )
+    """)
     ensure_column(db, "fahrzeugsuchen", "status", "TEXT DEFAULT 'neu'")
     ensure_column(db, "fahrzeugsuchen", "kunde_name", "TEXT DEFAULT ''")
     ensure_column(db, "fahrzeugsuchen", "kontakt_telefon", "TEXT DEFAULT ''")
@@ -9610,7 +9690,6 @@ def init_db():
     ensure_index(db, "idx_leads_autohaus", "leads", ("autohaus_id", "status"))
     ensure_index(db, "idx_leads_auftrag", "leads", ("auftrag_id",))
     ensure_index(db, "idx_leads_source_email", "leads", ("source_email_id",))
-    ensure_index(db, "idx_lead_dateien_lead_id", "lead_dateien", ("lead_id", "id"))
     ensure_index(db, "idx_fahrzeugsuchen_status", "fahrzeugsuchen", ("status", "naechster_kontakt_am", "geaendert_am"))
     ensure_index(db, "idx_fahrzeugsuchen_auftrag", "fahrzeugsuchen", ("auftrag_id", "gekaufter_kandidat_id"))
     ensure_index(db, "idx_fahrzeugsuche_dateien_suche", "fahrzeugsuche_dateien", ("suche_id", "hochgeladen_am"))
@@ -11053,10 +11132,24 @@ def customer_status_share_message(auftrag, status_update=False):
     freigabe_label = VERSICHERUNG_FREIGABE_STATUS[freigabe_status]["label"] if freigabe_status not in ("offen", "vorbereitet") else ""
     update_status_label = f"Versicherung: {freigabe_label}; Reparaturstatus: {status_label}" if freigabe_label else status_label
 
+    angebot_status = clean_text((auftrag or {}).get("angebot_status"))
+    ist_anfrage = bool((auftrag or {}).get("angebotsphase")) or angebot_status in {
+        "entwurf",
+        "angefragt",
+        "angebot_abgegeben",
+    }
+
     if status_update:
         return (
             f"Hallo {name}, kurzer Status zu {vehicle_label}: {update_status_label}. "
             f"Den aktuellen Stand sehen Sie jederzeit hier: {status_url} "
+            "Viele Gruesse, Gaertner Karosserie & Lack"
+        )
+    if ist_anfrage:
+        return (
+            f"Hallo {name}, hier ist Ihr persoenlicher Link zu Ihrer Anfrage fuer {vehicle_label}: {status_url} "
+            "Dort koennen Sie Bilder und Unterlagen nachreichen, einen Wunschtermin senden, "
+            "Ihr Angebot pruefen und spaeter den Reparaturstatus verfolgen. "
             "Viele Gruesse, Gaertner Karosserie & Lack"
         )
     return (
@@ -11199,6 +11292,32 @@ def normalize_lead_quelle(value):
     return value if value in LEAD_QUELLEN else "privat"
 
 
+def normalize_lead_website(value):
+    value = clean_text(value).lower().strip().rstrip("/")
+    value = LEAD_WEBSITE_ALIASES.get(value, value)
+    return value if value in LEAD_WEBSITES else "auto-lackierzentrum"
+
+
+def normalize_lead_herkunft_typ(value):
+    value = clean_text(value).lower()
+    return value if value in LEAD_HERKUNFT_TYPEN else "manuell"
+
+
+def lead_website_from_email(email_item):
+    recipients = " ".join(parse_email_recipients((email_item or {}).get("empfaenger"))).lower()
+    if "@tomorrowworks-agentur.de" in recipients:
+        return "tomorrowworks"
+    if "@autovermietung-mos.de" in recipients:
+        return "autovermietung-mos"
+    return "auto-lackierzentrum"
+
+
+def lead_reference(lead):
+    website = normalize_lead_website((lead or {}).get("website"))
+    prefix = LEAD_WEBSITES[website]["reference_prefix"]
+    return f"{prefix}-{int((lead or {}).get('id') or 0):05d}"
+
+
 def lead_whatsapp_message(lead):
     name = clean_text((lead or {}).get("kunde_name")) or "zusammen"
     fahrzeug = clean_text((lead or {}).get("fahrzeug"))
@@ -11206,7 +11325,13 @@ def lead_whatsapp_message(lead):
     vehicle_bits = [bit for bit in (fahrzeug, kennzeichen) if bit]
     vehicle_label = " / ".join(vehicle_bits) if vehicle_bits else "Ihr Fahrzeug"
     next_action = clean_text((lead or {}).get("naechste_aktion"))
-    if next_action:
+    kundenportal_url = clean_text((lead or {}).get("kunden_status_url"))
+    if kundenportal_url:
+        action_text = (
+            "Hier ist Ihr persoenlicher Anfragelink. Dort koennen Sie Bilder nachreichen, "
+            f"einen Wunschtermin senden und spaeter das Angebot pruefen: {kundenportal_url}"
+        )
+    elif next_action:
         action_text = f"Naechster Schritt: {next_action}."
     else:
         action_text = "Wir melden uns wegen der naechsten Schritte."
@@ -11224,30 +11349,17 @@ def lead_whatsapp_url(lead):
     return f"https://wa.me/{phone_key}?text={quote(lead_whatsapp_message(lead))}"
 
 
-def lead_email_draft(lead):
-    name = clean_text((lead or {}).get("kunde_name"))
-    anrede = f"Guten Tag {name}," if name else "Guten Tag,"
-    fahrzeug = clean_text((lead or {}).get("fahrzeug"))
-    fahrzeug_hinweis = f" zu Ihrem Fahrzeug {fahrzeug}" if fahrzeug else ""
-    return {
-        "betreff": "Ihre Anfrage bei Gärtner Karosserie & Lack",
-        "nachricht": (
-            f"{anrede}\n\n"
-            f"vielen Dank für Ihre Anfrage{fahrzeug_hinweis}. Wir haben Ihre Angaben erhalten und prüfen "
-            "den gewünschten Umfang. Falls wir noch Informationen oder Bilder benötigen, melden wir uns "
-            "kurz bei Ihnen.\n\n"
-            "Freundliche Grüße\n"
-            "Gärtner Karosserie & Lack"
-        ),
-    }
-
-
 def hydrate_lead(row):
     lead = dict(row or {})
     lead["status"] = normalize_lead_status(lead.get("status"))
     lead["status_meta"] = LEAD_STATUS[lead["status"]]
     lead["quelle"] = normalize_lead_quelle(lead.get("quelle"))
     lead["quelle_meta"] = LEAD_QUELLEN[lead["quelle"]]
+    lead["website"] = normalize_lead_website(lead.get("website"))
+    lead["website_meta"] = LEAD_WEBSITES[lead["website"]]
+    lead["herkunft_typ"] = normalize_lead_herkunft_typ(lead.get("herkunft_typ"))
+    lead["herkunft_label"] = LEAD_HERKUNFT_TYPEN[lead["herkunft_typ"]]
+    lead["herkunft_id"] = int(lead.get("herkunft_id") or 0)
     lead["kunde_name"] = clean_text(lead.get("kunde_name"))
     lead["kontakt_telefon"] = clean_text(lead.get("kontakt_telefon"))
     lead["kunde_email"] = clean_text(lead.get("kunde_email")).lower()
@@ -11263,6 +11375,20 @@ def hydrate_lead(row):
     lead["geschaetzter_wert_label"] = format_bonus_money(lead["geschaetzter_wert"]) if lead["geschaetzter_wert"] else ""
     lead["notiz"] = clean_text(lead.get("notiz"))
     lead["verloren_grund"] = clean_text(lead.get("verloren_grund"))
+    lead["datei_original_name"] = clean_text(lead.get("datei_original_name"))
+    lead["datei_stored_name"] = pathlib.Path(clean_text(lead.get("datei_stored_name"))).name
+    lead["datei_mime_type"] = clean_text(lead.get("datei_mime_type"))
+    lead["datei_size"] = int(lead.get("datei_size") or 0)
+    lead["datei_url"] = (
+        url_for("admin_lead_datei", lead_id=int(lead.get("id") or 0))
+        if has_request_context() and lead["datei_stored_name"] else ""
+    )
+    lead["ki_analyse_text"] = clean_text(lead.get("ki_analyse_text"))
+    lead["ki_fehlende_angaben"] = clean_text(lead.get("ki_fehlende_angaben"))
+    lead["mail_betreff_entwurf"] = clean_text(lead.get("mail_betreff_entwurf"))
+    lead["mail_text_entwurf"] = clean_text(lead.get("mail_text_entwurf"))
+    lead["ki_entwurf_am"] = clean_text(lead.get("ki_entwurf_am"))
+    lead["mail_gesendet_am"] = clean_text(lead.get("mail_gesendet_am"))
     lead["autohaus_id"] = int(lead.get("autohaus_id") or 0)
     lead["auftrag_id"] = int(lead.get("auftrag_id") or 0)
     lead["source_email_id"] = int(lead.get("source_email_id") or 0)
@@ -11277,15 +11403,19 @@ def hydrate_lead(row):
     # nach der bewussten Bestätigung durch die Werkstatt in WhatsApp.
     lead["whatsapp_url"] = lead_whatsapp_url(lead)
     lead["can_whatsapp"] = bool(lead["whatsapp_url"])
-    # E-Mail-Antworten laufen über den internen Lead-Composer. Ein mailto:-Link
-    # würde das lokale Standardprogramm und eventuell das falsche Konto öffnen.
+    # E-Mail-Antworten laufen bewusst über den internen Lead-Composer. Ein
+    # mailto:-Link würde das lokale Standardprogramm (z. B. Outlook) öffnen
+    # und damit unter Umständen das falsche Mitarbeiterkonto verwenden.
     lead["can_email"] = bool(lead["kunde_email"])
+    lead["reference"] = lead_reference(lead)
     return lead
 
 
-def list_leads(status_filter="aktiv", quelle_filter="", limit=300):
+def list_leads(status_filter="aktiv", quelle_filter="", website_filter="alle", limit=300):
+    sync_mietwagen_anfragen_to_leads()
     status_filter = clean_text(status_filter) or "aktiv"
     quelle_filter = clean_text(quelle_filter)
+    website_filter = clean_text(website_filter) or "alle"
     where = []
     params = []
     if status_filter == "aktiv":
@@ -11296,6 +11426,10 @@ def list_leads(status_filter="aktiv", quelle_filter="", limit=300):
     if quelle_filter in LEAD_QUELLEN:
         where.append("l.quelle=?")
         params.append(quelle_filter)
+    if website_filter != "alle":
+        website_filter = normalize_lead_website(website_filter)
+        where.append("l.website=?")
+        params.append(website_filter)
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
     db = get_db()
     rows = db.execute(
@@ -11366,10 +11500,30 @@ def get_lead_by_source_email_id(email_id):
     return hydrate_lead(row) if row else None
 
 
+def get_lead_by_herkunft(herkunft_typ, herkunft_id):
+    herkunft_typ = normalize_lead_herkunft_typ(herkunft_typ)
+    try:
+        herkunft_id = int(herkunft_id or 0)
+    except (TypeError, ValueError):
+        return None
+    if not herkunft_id:
+        return None
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM leads WHERE herkunft_typ=? AND herkunft_id=? ORDER BY id DESC LIMIT 1",
+        (herkunft_typ, herkunft_id),
+    ).fetchone()
+    db.close()
+    return hydrate_lead(row) if row else None
+
+
 def lead_payload_from_form(form):
     return {
         "quelle": normalize_lead_quelle(form.get("quelle")),
         "status": normalize_lead_status(form.get("status")),
+        "website": normalize_lead_website(form.get("website")),
+        "herkunft_typ": normalize_lead_herkunft_typ(form.get("herkunft_typ")),
+        "herkunft_id": int(form.get("herkunft_id") or 0),
         "autohaus_id": int(form.get("autohaus_id") or 0),
         "source_email_id": int(form.get("source_email_id") or 0),
         "kunde_name": clean_text(form.get("kunde_name")),
@@ -11387,7 +11541,7 @@ def lead_payload_from_form(form):
     }
 
 
-def create_lead(payload):
+def create_lead(payload, attachments=None):
     jetzt = now_str()
     db = get_db()
     cursor = db.execute(
@@ -11396,8 +11550,9 @@ def create_lead(payload):
         (quelle, status, autohaus_id, auftrag_id, source_email_id, kunde_name, kontakt_telefon, kunde_email,
          fahrzeug, kennzeichen, schadenart, beschreibung, naechste_aktion,
          naechster_kontakt_am, geschaetzter_wert, notiz, verloren_grund,
+         datei_original_name, datei_stored_name, datei_mime_type, datei_size,
          erstellt_am, geaendert_am)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             normalize_lead_quelle(payload.get("quelle")),
@@ -11417,11 +11572,40 @@ def create_lead(payload):
             positive_money_amount(payload.get("geschaetzter_wert")) or 0.0,
             clean_text(payload.get("notiz")),
             clean_text(payload.get("verloren_grund")),
+            clean_text(payload.get("datei_original_name")),
+            pathlib.Path(clean_text(payload.get("datei_stored_name"))).name,
+            clean_text(payload.get("datei_mime_type")),
+            max(0, int(payload.get("datei_size") or 0)),
             jetzt,
             jetzt,
         ),
     )
     lead_id = cursor.lastrowid
+    db.execute(
+        "UPDATE leads SET website=?, herkunft_typ=?, herkunft_id=? WHERE id=?",
+        (
+            normalize_lead_website(payload.get("website")),
+            normalize_lead_herkunft_typ(payload.get("herkunft_typ")),
+            int(payload.get("herkunft_id") or 0),
+            int(lead_id),
+        ),
+    )
+    for item in attachments or []:
+        db.execute(
+            """
+            INSERT INTO lead_dateien
+            (lead_id, original_name, stored_name, mime_type, size, quelle, erstellt_am)
+            VALUES (?, ?, ?, ?, ?, 'website_formular', ?)
+            """,
+            (
+                int(lead_id),
+                clean_text(item.get("datei_original_name")),
+                pathlib.Path(clean_text(item.get("datei_stored_name"))).name,
+                clean_text(item.get("datei_mime_type")),
+                max(0, int(item.get("datei_size") or 0)),
+                jetzt,
+            ),
+        )
     db.commit()
     db.close()
     return lead_id
@@ -11473,18 +11657,130 @@ def list_lead_dateien(lead_id):
     for row in rows:
         item = dict(row)
         item["stored_name"] = pathlib.Path(clean_text(item.get("stored_name"))).name
-        item["mime_type"] = clean_text(item.get("mime_type")) or canonical_upload_mime_type(
-            item.get("original_name")
-        )
-        item["size"] = max(0, int(item.get("size") or 0))
-        item["is_browser_image"] = pathlib.Path(item["stored_name"]).suffix.lower() in SAFE_INLINE_UPLOAD_EXTENSIONS
         item["url"] = (
             url_for("admin_lead_anhang", lead_id=int(lead_id), datei_id=int(item["id"]))
-            if has_request_context()
-            else ""
+            if has_request_context() else ""
         )
         items.append(item)
     return items
+
+
+def list_lead_mail_log(lead_id, limit=20):
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM lead_mail_log WHERE lead_id=? ORDER BY id DESC LIMIT ?",
+        (int(lead_id), max(1, min(int(limit or 20), 100))),
+    ).fetchall()
+    db.close()
+    return [dict(row) for row in rows]
+
+
+def save_lead_attachment_bytes(lead_id, original_name, payload, mime_type="", quelle="upload"):
+    original_name = secure_filename(original_name or "")
+    suffix = pathlib.Path(original_name).suffix.lower()
+    payload = bytes(payload or b"")
+    if not original_name or not allowed_file(original_name):
+        raise ValueError("Dieser Dateityp ist für Lead-Anhänge nicht erlaubt.")
+    if not payload:
+        raise ValueError("Die Datei ist leer.")
+    if len(payload) > SCHADENAUFNAHME_MAX_DATEI_MB * 1024 * 1024:
+        raise ValueError(f"Die Datei darf höchstens {SCHADENAUFNAHME_MAX_DATEI_MB} MB groß sein.")
+    stored_name = f"lead-{int(lead_id)}-{uuid.uuid4().hex}{suffix}"
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    target = UPLOAD_DIR / stored_name
+    target.write_bytes(payload)
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO lead_dateien
+            (lead_id, original_name, stored_name, mime_type, size, quelle, erstellt_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(lead_id), original_name, stored_name,
+                clean_text(mime_type) or mimetypes.guess_type(original_name)[0] or "application/octet-stream",
+                len(payload), clean_text(quelle) or "upload", now_str(),
+            ),
+        )
+        db.commit()
+        return int(cursor.lastrowid)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    finally:
+        db.close()
+
+
+def save_lead_upload_file(lead_id, file, quelle="upload"):
+    if not file or not file.filename:
+        return 0
+    return save_lead_attachment_bytes(
+        lead_id,
+        file.filename,
+        file.read(),
+        file.mimetype or "",
+        quelle=quelle,
+    )
+
+
+def sync_mietwagen_anfragen_to_leads():
+    """Spiegelt bestehende Mietwagenanfragen einmalig in die gemeinsame Lead-Pipeline."""
+    db = get_db()
+    created = 0
+    try:
+        rows = db.execute(
+            """
+            SELECT m.*, f.bezeichnung AS fahrzeug_name
+            FROM mietwagen_anfragen m
+            LEFT JOIN mietfahrzeuge f ON f.id=m.mietfahrzeug_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM leads l
+                WHERE l.herkunft_typ='mietwagen_anfrage' AND l.herkunft_id=m.id
+            )
+            ORDER BY m.id
+            """
+        ).fetchall()
+        for row in rows:
+            status_raw = clean_text(row["status"])
+            status = "gewonnen" if status_raw == "uebernommen" else ("verloren" if status_raw == "abgelehnt" else "neu")
+            fahrzeug = clean_text(row["fahrzeug_name"] or row["klasse_wunsch"]) or "Mietwagen / Beratung"
+            zeitraum = " bis ".join(part for part in (clean_text(row["start_datum"]), clean_text(row["end_datum"])) if part)
+            beschreibung = "\n".join(
+                part for part in (
+                    f"Mietwagenwunsch: {fahrzeug}",
+                    f"Zeitraum: {zeitraum}" if zeitraum else "",
+                    f"Geplante Fahrleistung: ca. {int(row['geplante_km'] or 0)} km" if int(row["geplante_km"] or 0) else "",
+                    clean_text(row["nachricht"]),
+                ) if part
+            )
+            zeitpunkt = clean_text(row["erstellt_am"]) or now_str()
+            db.execute(
+                """
+                INSERT INTO leads
+                (quelle, status, autohaus_id, auftrag_id, source_email_id, website, herkunft_typ, herkunft_id,
+                 kunde_name, kontakt_telefon, kunde_email, fahrzeug, kennzeichen, schadenart, beschreibung,
+                 naechste_aktion, naechster_kontakt_am, geschaetzter_wert, notiz, verloren_grund,
+                 erstellt_am, geaendert_am)
+                VALUES ('website', ?, NULL, NULL, 0, 'autovermietung-mos', 'mietwagen_anfrage', ?,
+                        ?, ?, ?, ?, '', 'unbekannt', ?, ?, '', 0, ?, '', ?, ?)
+                """,
+                (
+                    status, int(row["id"]), clean_text(row["name"]), clean_text(row["telefon"]),
+                    clean_text(row["email"]).lower(), fahrzeug, beschreibung,
+                    "Verfügbarkeit prüfen und persönliches Mietangebot vorbereiten",
+                    f"Aus Mietwagenanfrage MW-{int(row['id'])} übernommen.", zeitpunkt, zeitpunkt,
+                ),
+            )
+            created += 1
+        if created:
+            db.commit()
+    except Exception:
+        db.rollback()
+        return 0
+    finally:
+        db.close()
+    return created
 
 
 def set_lead_status(lead_id, status):
@@ -11502,31 +11798,46 @@ def set_lead_status(lead_id, status):
 def delete_lead(lead_id):
     """Löscht nur den Lead; ein bereits erzeugter Auftrag bleibt erhalten."""
     db = get_db()
-    dateien = db.execute(
-        "SELECT stored_name FROM lead_dateien WHERE lead_id=?",
-        (int(lead_id),),
-    ).fetchall()
+    legacy = db.execute("SELECT datei_stored_name FROM leads WHERE id=?", (int(lead_id),)).fetchone()
+    dateien = db.execute("SELECT stored_name FROM lead_dateien WHERE lead_id=?", (int(lead_id),)).fetchall()
+    stored_names = [clean_text(legacy["datei_stored_name"] if legacy else "")]
+    stored_names.extend(clean_text(row["stored_name"]) for row in dateien)
+    auftrag_referenzen = {
+        stored_name
+        for stored_name in stored_names
+        if stored_name
+        and db.execute(
+            "SELECT 1 FROM dateien WHERE stored_name=? LIMIT 1", (stored_name,)
+        ).fetchone()
+    }
     db.execute("DELETE FROM lead_dateien WHERE lead_id=?", (int(lead_id),))
+    db.execute("DELETE FROM lead_mail_log WHERE lead_id=?", (int(lead_id),))
     cursor = db.execute("DELETE FROM leads WHERE id=?", (int(lead_id),))
     db.commit()
     deleted = int(cursor.rowcount or 0) > 0
     db.close()
     if deleted:
-        for row in dateien:
-            stored_name = pathlib.Path(clean_text(row["stored_name"])).name
-            if not stored_name:
-                continue
-            try:
-                (UPLOAD_DIR / stored_name).unlink(missing_ok=True)
-            except OSError:
-                pass
+        for stored_name in stored_names:
+            safe_name = pathlib.Path(stored_name).name
+            if safe_name and stored_name not in auftrag_referenzen:
+                try:
+                    (UPLOAD_DIR / safe_name).unlink(missing_ok=True)
+                except OSError:
+                    pass
     return deleted
 
 
-def lead_pipeline_counts():
+def lead_pipeline_counts(website_filter="alle"):
+    sync_mietwagen_anfragen_to_leads()
     counts = {key: 0 for key in LEAD_STATUS}
     db = get_db()
-    rows = db.execute("SELECT status, COUNT(*) AS count FROM leads GROUP BY status").fetchall()
+    if clean_text(website_filter) and clean_text(website_filter) != "alle":
+        rows = db.execute(
+            "SELECT status, COUNT(*) AS count FROM leads WHERE website=? GROUP BY status",
+            (normalize_lead_website(website_filter),),
+        ).fetchall()
+    else:
+        rows = db.execute("SELECT status, COUNT(*) AS count FROM leads GROUP BY status").fetchall()
     db.close()
     for row in rows:
         status = normalize_lead_status(row["status"])
@@ -11536,6 +11847,7 @@ def lead_pipeline_counts():
 
 def admin_leads_count():
     try:
+        sync_mietwagen_anfragen_to_leads()
         db = get_db()
         row = db.execute(
             "SELECT COUNT(*) AS count FROM leads WHERE status NOT IN ('gewonnen', 'verloren')"
@@ -25165,8 +25477,18 @@ def email_looks_like_lead(email_item):
         "stossstange",
         "stoßstange",
         "versicherung",
+        "mietwagen",
+        "auto-abo",
+        "langzeitmiete",
+        "relaunch",
+        "webprojekt",
+        "automatisierung",
     )
-    weak_tokens = ("anfrage", "angebot", "termin", "fahrzeug", "auto", "bilder")
+    weak_tokens = (
+        "anfrage", "angebot", "termin", "fahrzeug", "auto", "bilder",
+        "website", "webseite", "projekt", "app", "portal", "beratung",
+        "miete", "abholung", "rückgabe", "rueckgabe",
+    )
     if any(token in blob for token in hard_excludes) and not any(token in blob for token in strong_tokens):
         return False
     if clean_text(email_item.get("ziel_modul")) in {"rechnungen"}:
@@ -25216,6 +25538,9 @@ def lead_payload_from_email(email_item, automatic=False):
     return {
         "quelle": "email",
         "status": "neu",
+        "website": lead_website_from_email(email_item),
+        "herkunft_typ": "email",
+        "herkunft_id": int((email_item or {}).get("id") or 0),
         "autohaus_id": int((email_item or {}).get("autohaus_id") or 0),
         "source_email_id": int((email_item or {}).get("id") or 0),
         "kunde_name": lead_customer_name_from_email(email_item),
@@ -25448,66 +25773,6 @@ def get_schaden_mail_config():
     }
 
 
-LEAD_MAIL_TESTLOG = []
-
-
-def send_lead_email(lead, empfaenger, betreff, nachricht):
-    recipients = parse_email_recipients(empfaenger)
-    if len(recipients) != 1:
-        raise ValueError("Bitte genau eine gültige Empfängeradresse eintragen.")
-    betreff = clean_text(betreff)[:300]
-    nachricht = clean_text(nachricht)[:12000]
-    if not betreff or len(nachricht) < 10:
-        raise ValueError("Bitte Betreff und einen vollständigen Nachrichtentext eintragen.")
-
-    config = get_schaden_mail_config()
-    if not config["smtp_configured"]:
-        raise ValueError("Jonas' E-Mail-Postfach ist für den Versand noch nicht vollständig eingerichtet.")
-
-    absender = config["from_address"]
-    display_name = config["display_name"] or "Gärtner Karosserie & Lack"
-    message = EmailMessage()
-    message["Subject"] = betreff
-    message["From"] = formataddr((display_name, absender))
-    message["To"] = recipients[0]
-    message["Reply-To"] = config["reply_to"] or absender
-    message["X-Gaertner-Lead-ID"] = str(int((lead or {}).get("id") or 0))
-    message.set_content(nachricht)
-    add_standard_mail_headers(message)
-
-    if app.config.get("TESTING"):
-        LEAD_MAIL_TESTLOG.append(
-            {
-                "lead_id": int((lead or {}).get("id") or 0),
-                "absender": absender,
-                "empfaenger": recipients[0],
-                "betreff": betreff,
-                "nachricht": nachricht,
-            }
-        )
-        return absender
-
-    try:
-        if config["smtp_ssl"]:
-            smtp_context = smtplib.SMTP_SSL(
-                config["smtp_host"], config["smtp_port"],
-                local_hostname=smtp_lokaler_hostname(), timeout=30,
-            )
-        else:
-            smtp_context = smtplib.SMTP(
-                config["smtp_host"], config["smtp_port"],
-                local_hostname=smtp_lokaler_hostname(), timeout=30,
-            )
-        with smtp_context as smtp:
-            if config["smtp_tls"] and not config["smtp_ssl"]:
-                smtp.starttls()
-            smtp.login(config["smtp_user"], config["_smtp_password"])
-            smtp.send_message(message)
-    except Exception as exc:
-        raise RuntimeError(f"E-Mail konnte nicht versendet werden: {clean_text(str(exc))[:240]}") from exc
-    return absender
-
-
 def add_standard_mail_headers(message):
     """Ergänzt Date + Message-ID, falls fehlend. Ihr Fehlen ist ein häufiger
     Grund, warum Mails (z. B. die Endkunden-Status-Mail) im Spam landen."""
@@ -25549,6 +25814,253 @@ def schaden_mail_status():
         "smtp_badge": "SMTP bereit" if config["smtp_configured"] else "SMTP fehlt",
         "imap_badge": "IMAP bereit" if config["imap_configured"] else "IMAP fehlt",
     }
+
+
+def get_lead_mail_config(website):
+    website = normalize_lead_website(website)
+    site = LEAD_WEBSITES[website]
+    base = get_schaden_mail_config()
+    prefix = {
+        "tomorrowworks": "TOMORROWWORKS",
+        "autovermietung-mos": "MIETWAGEN",
+    }.get(website, "SCHADEN")
+    default_address = base["address"] or site["mail_address"]
+    address = clean_text(os.environ.get(f"{prefix}_MAIL_ADDRESS") or default_address).lower()
+    display_name = clean_text(os.environ.get(f"{prefix}_MAIL_DISPLAY_NAME") or site["mail_display_name"])
+    host = clean_text(os.environ.get(f"{prefix}_SMTP_HOST") or base["smtp_host"])
+    port = max(1, env_int(f"{prefix}_SMTP_PORT", int(base["smtp_port"] or 465)))
+    user = clean_text(os.environ.get(f"{prefix}_SMTP_USER") or base["smtp_user"] or address)
+    password = clean_secret_value(os.environ.get(f"{prefix}_SMTP_PASS") or base["_smtp_password"])
+    use_ssl = env_flag(f"{prefix}_SMTP_SSL", bool(base["smtp_ssl"]))
+    use_tls = env_flag(f"{prefix}_SMTP_TLS", bool(base["smtp_tls"]))
+    return {
+        "website": website,
+        "address": address,
+        "display_name": display_name,
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password,
+        "ssl": use_ssl,
+        "tls": use_tls,
+        "configured": bool(address and host and user and password),
+        "uses_shared_login": bool(
+            website != "auto-lackierzentrum" and base["smtp_user"] and user == base["smtp_user"]
+        ),
+    }
+
+
+def lead_mail_status(website):
+    config = get_lead_mail_config(website)
+    return {
+        key: value for key, value in config.items() if key != "password"
+    }
+
+
+def log_lead_mail(lead_id, absender, empfaenger, betreff, nachricht, status, fehler=""):
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO lead_mail_log
+        (lead_id, absender, empfaenger, betreff, nachricht, status, fehler, erstellt_am)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            int(lead_id), clean_text(absender)[:220], clean_text(empfaenger)[:220],
+            clean_text(betreff)[:300], clean_text(nachricht)[:12000],
+            clean_text(status) or "fehler", clean_text(fehler)[:1000], now_str(),
+        ),
+    )
+    db.commit()
+    db.close()
+
+
+def send_lead_email(lead, empfaenger, betreff, nachricht):
+    recipients = parse_email_recipients(empfaenger)
+    if len(recipients) != 1:
+        raise ValueError("Bitte genau eine gültige Empfängeradresse eintragen.")
+    betreff = clean_text(betreff)[:300]
+    nachricht = clean_text(nachricht)[:12000]
+    if not betreff or len(nachricht) < 10:
+        raise ValueError("Bitte Betreff und einen vollständigen Nachrichtentext eintragen.")
+    config = get_lead_mail_config((lead or {}).get("website"))
+    if not config["configured"]:
+        raise ValueError(f"Der E-Mail-Versand für {LEAD_WEBSITES[config['website']]['label']} ist noch nicht eingerichtet.")
+    message = EmailMessage()
+    message["Subject"] = betreff
+    message["From"] = formataddr((config["display_name"], config["address"]))
+    message["To"] = recipients[0]
+    message["Reply-To"] = config["address"]
+    message["X-Gaertner-Lead-ID"] = str(int((lead or {}).get("id") or 0))
+    message.set_content(nachricht)
+    add_standard_mail_headers(message)
+    try:
+        if config["ssl"]:
+            smtp_context = smtplib.SMTP_SSL(
+                config["host"], config["port"], local_hostname=smtp_lokaler_hostname(), timeout=30
+            )
+        else:
+            smtp_context = smtplib.SMTP(
+                config["host"], config["port"], local_hostname=smtp_lokaler_hostname(), timeout=30
+            )
+        with smtp_context as smtp:
+            if config["tls"] and not config["ssl"]:
+                smtp.starttls()
+            smtp.login(config["user"], config["password"])
+            smtp.send_message(message)
+    except Exception as exc:
+        log_lead_mail(
+            lead["id"], config["address"], recipients[0], betreff, nachricht, "fehler", str(exc)
+        )
+        raise RuntimeError(f"E-Mail konnte nicht versendet werden: {clean_text(str(exc))[:240]}") from exc
+    log_lead_mail(lead["id"], config["address"], recipients[0], betreff, nachricht, "gesendet")
+    db = get_db()
+    db.execute(
+        """
+        UPDATE leads SET mail_betreff_entwurf=?, mail_text_entwurf=?, mail_gesendet_am=?,
+                         status=CASE WHEN status='neu' THEN 'angebot_offen' ELSE status END,
+                         geaendert_am=? WHERE id=?
+        """,
+        (betreff, nachricht, now_str(), now_str(), int(lead["id"])),
+    )
+    db.commit()
+    db.close()
+    return config["address"]
+
+
+def fallback_lead_mail_draft(lead):
+    website = normalize_lead_website((lead or {}).get("website"))
+    name = clean_text((lead or {}).get("kunde_name"))
+    anrede = f"Guten Tag {name}," if name else "Guten Tag,"
+    reference = lead_reference(lead)
+    if website == "tomorrowworks":
+        subject = f"Ihre Anfrage bei TomorrowWorks · {reference}"
+        body = (
+            f"{anrede}\n\nvielen Dank für Ihre Anfrage. Wir haben Ihr Vorhaben aufgenommen und prüfen, "
+            "welcher Lösungsweg, Umfang und Budgetrahmen sinnvoll ist. Falls Angaben fehlen, melden wir uns "
+            "kurz bei Ihnen. Anschließend erhalten Sie ein persönliches, unverbindliches Angebot.\n\n"
+            f"Ihre Referenz: {reference}\n\nFreundliche Grüße\nTomorrowWorks"
+        )
+    elif website == "autovermietung-mos":
+        subject = f"Ihre Mietwagenanfrage · {reference}"
+        body = (
+            f"{anrede}\n\nvielen Dank für Ihre Anfrage. Wir prüfen jetzt Fahrzeug, Zeitraum und Konditionen. "
+            "Sie erhalten von uns eine persönliche Rückmeldung mit Verfügbarkeit und einem verbindlichen Angebot, "
+            "bevor eine Buchung entsteht.\n\n"
+            f"Ihre Referenz: {reference}\n\nFreundliche Grüße\nAutovermietung MOS"
+        )
+    else:
+        subject = f"Ihre Anfrage bei Gärtner Karosserie & Lack · {reference}"
+        kundenportal_url = clean_text((lead or {}).get("kunden_status_url"))
+        portal_absatz = (
+            "\n\nUnter Ihrem persönlichen Link können Sie Bilder und Unterlagen nachreichen, "
+            "einen Wunschtermin senden, Ihr Angebot prüfen und später den Reparaturstatus verfolgen:\n"
+            f"{kundenportal_url}"
+            if kundenportal_url
+            else ""
+        )
+        body = (
+            f"{anrede}\n\nvielen Dank für Ihre Anfrage. Wir haben Ihre Angaben aufgenommen und prüfen den "
+            "Schaden beziehungsweise Reparaturumfang. Fotos helfen bei der ersten Einschätzung; ein verbindlicher "
+            f"Preis folgt erst nach fachlicher Prüfung oder Besichtigung.{portal_absatz}\n\n"
+            f"Ihre Referenz: {reference}\n\nFreundliche Grüße\nGärtner Karosserie & Lack"
+        )
+    return {
+        "analyse": "Anfrage erfasst. Der Antwortentwurf wurde ohne KI als sichere Standardantwort vorbereitet.",
+        "fehlende_angaben": ["Fachliche Prüfung und gegebenenfalls ergänzende Angaben"],
+        "betreff": subject,
+        "email_text": body,
+        "naechste_aktion": clean_text((lead or {}).get("naechste_aktion")) or "Anfrage persönlich prüfen und Entwurf freigeben",
+        "source": "fallback",
+    }
+
+
+def generate_lead_ai_draft(lead):
+    fallback = fallback_lead_mail_draft(lead)
+    config = get_ai_config()
+    if not config["openai_ready"]:
+        return fallback, "OpenAI ist noch nicht konfiguriert; Standardentwurf wurde erstellt."
+    schema = {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "analyse": {"type": "string"},
+            "fehlende_angaben": {"type": "array", "items": {"type": "string"}},
+            "betreff": {"type": "string"},
+            "email_text": {"type": "string"},
+            "naechste_aktion": {"type": "string"},
+        },
+        "required": ["analyse", "fehlende_angaben", "betreff", "email_text", "naechste_aktion"],
+    }
+    site = LEAD_WEBSITES[normalize_lead_website(lead.get("website"))]
+    prompt = "\n".join([
+        f"Erstelle für den Geschäftsbereich {site['label']} einen prüfbaren Antwort- oder Angebotsentwurf auf Deutsch.",
+        "Analysiere den Kundentext und beigefügte Bilder vorsichtig. Erfinde keine Preise, Schäden, Verfügbarkeit oder Leistungen.",
+        "Wenn kein belastbarer Preis vorliegt, schreibe ausdrücklich, dass das persönliche/verbindliche Angebot nach Prüfung folgt.",
+        "Bei Fahrzeugschäden: Fotos nur als Ersteinschätzung behandeln und keine verdeckten Schäden behaupten.",
+        "Bei TomorrowWorks: Ziel, Umfang und fehlende Informationen knapp einordnen.",
+        "Bei Vermietung: Fahrzeug, Zeitraum, Kilometer und Verfügbarkeit berücksichtigen.",
+        "Die E-Mail soll professionell, freundlich, konkret und direkt versandfertig sein. Keine Markdown-Formatierung.",
+        f"Referenz: {lead_reference(lead)}",
+        f"Kunde: {lead.get('kunde_name') or '-'}",
+        f"E-Mail: {lead.get('kunde_email') or '-'}",
+        f"Telefon: {lead.get('kontakt_telefon') or '-'}",
+        f"Fahrzeug/Projekt: {lead.get('fahrzeug') or '-'}",
+        f"Anfrage: {lead.get('beschreibung') or '-'}",
+        f"Interne Notiz: {lead.get('notiz') or '-'}",
+        f"Vorhandenes Potenzial/Richtwert: {lead.get('geschaetzter_wert_label') or 'nicht festgelegt'}",
+    ])
+    content = [{"type": "text", "text": prompt}]
+    paths = []
+    if lead.get("datei_stored_name"):
+        paths.append((UPLOAD_DIR / lead["datei_stored_name"], lead.get("datei_original_name") or lead["datei_stored_name"]))
+    for item in list_lead_dateien(lead["id"]):
+        paths.append((UPLOAD_DIR / item["stored_name"], item.get("original_name") or item["stored_name"]))
+    for path, filename in paths[:4]:
+        if path.exists():
+            content.extend(build_openai_visual_inputs(path, filename))
+    payload = {
+        "model": config["openai_model"],
+        "messages": [
+            {"role": "system", "content": "Du unterstützt einen deutschen Betrieb bei Lead-Analyse und Antwortentwürfen. Du arbeitest vorsichtig; der Mensch prüft und versendet."},
+            {"role": "user", "content": content},
+        ],
+        "response_format": {"type": "json_schema", "json_schema": {"name": "lead_reply_draft", "strict": True, "schema": schema}},
+        "max_tokens": 1200,
+    }
+    requests_module = get_requests()
+    if requests_module is None:
+        return fallback, "Technische KI-Verbindung fehlt; Standardentwurf wurde erstellt."
+    response, request_error = post_openai_chat_completion(requests_module, payload)
+    if request_error or response is None or response.status_code >= 400:
+        error = request_error or extract_openai_error_message(response)
+        return fallback, friendly_analysis_error(error, "OpenAI") or "KI war nicht erreichbar; Standardentwurf wurde erstellt."
+    parsed = extract_openai_response_json(response.json())
+    if not parsed or not clean_text(parsed.get("email_text")):
+        return fallback, "KI-Antwort war unvollständig; Standardentwurf wurde erstellt."
+    parsed["source"] = "openai"
+    return parsed, ""
+
+
+def save_lead_ai_draft(lead_id, draft):
+    fehlende = draft.get("fehlende_angaben") or []
+    if isinstance(fehlende, str):
+        fehlende = [fehlende]
+    db = get_db()
+    db.execute(
+        """
+        UPDATE leads SET ki_analyse_text=?, ki_fehlende_angaben=?, mail_betreff_entwurf=?,
+                         mail_text_entwurf=?, naechste_aktion=?, ki_entwurf_am=?, geaendert_am=?
+        WHERE id=?
+        """,
+        (
+            clean_text(draft.get("analyse"))[:4000],
+            "\n".join(f"• {clean_text(item)}" for item in fehlende if clean_text(item))[:3000],
+            clean_text(draft.get("betreff"))[:300], clean_text(draft.get("email_text"))[:12000],
+            clean_text(draft.get("naechste_aktion"))[:500], now_str(), now_str(), int(lead_id),
+        ),
+    )
+    db.commit()
+    db.close()
 
 
 def parse_email_recipients(value):
@@ -25874,8 +26386,13 @@ def sende_oeffentliche_anfrage_benachrichtigung(
 
 def sende_website_lead_benachrichtigung(lead_id, payload, anliegen_label=""):
     """Benachrichtigt die Werkstatt still im Hintergrund über Homepage-Leads."""
-    bilder_anzahl = max(0, int(payload.get("bilder_anzahl") or 0))
-    bilder_info = str(bilder_anzahl) if bilder_anzahl else "nicht mitgesendet"
+    fotos_anzahl = max(0, int(payload.get("fotos_anzahl") or 0))
+    foto_namen = clean_text(payload.get("foto_namen") or payload.get("foto_name"))
+    bilder_info = (
+        f"{fotos_anzahl} ({foto_namen})" if fotos_anzahl and foto_namen
+        else str(fotos_anzahl) if fotos_anzahl
+        else "nicht mitgesendet"
+    )
     try:
         if not app.config.get("TESTING"):
             sende_oeffentliche_anfrage_benachrichtigung(
@@ -26381,6 +26898,32 @@ def email_message_attachments(message, limit_mb=None):
     return attachments, skipped
 
 
+def save_lead_email_attachments(lead_id, raw_bytes):
+    """Speichert echte Anhänge einer Lead-E-Mail; kleine Inline-Signaturen bleiben außen vor."""
+    try:
+        message = BytesParser(policy=policy.default).parsebytes(bytes(raw_bytes or b""))
+        attachments, skipped = email_message_attachments(message)
+    except Exception as exc:
+        return {"saved": 0, "skipped": [clean_text(str(exc))[:180]], "datei_ids": []}
+    datei_ids = []
+    for attachment in attachments:
+        try:
+            datei_ids.append(
+                save_lead_attachment_bytes(
+                    lead_id,
+                    attachment["original_name"],
+                    attachment["bytes"],
+                    attachment["mime_type"],
+                    quelle="email",
+                )
+            )
+        except Exception as exc:
+            skipped.append(f"{attachment['original_name']}: {clean_text(str(exc))[:140]}")
+    if datei_ids:
+        schedule_change_backup("lead-email-anhaenge")
+    return {"saved": len(datei_ids), "skipped": skipped, "datei_ids": datei_ids}
+
+
 def parse_werkstatt_email_raw_message(raw_bytes, source_uid=""):
     if isinstance(raw_bytes, str):
         raw_bytes = raw_bytes.encode("utf-8", errors="replace")
@@ -26833,6 +27376,7 @@ def sync_werkstatt_imap(limit=None):
     }
     client = None
     delete_after_copy = False
+    raw_by_email_id = {}
     try:
         client = connect_werkstatt_imap(config)
         client.login(config["user"], config["password"])
@@ -26872,6 +27416,7 @@ def sync_werkstatt_imap(limit=None):
             if result.get("created"):
                 summary["created"] += 1
                 summary["created_ids"].append(result.get("id"))
+                raw_by_email_id[int(result.get("id") or 0)] = raw_bytes
             else:
                 summary["skipped"] += 1
             if config["archive_folder"]:
@@ -26890,6 +27435,12 @@ def sync_werkstatt_imap(limit=None):
         summary["lead_skipped"] = int(lead_summary.get("skipped") or 0)
         summary["lead_ids"] = lead_summary.get("lead_ids") or []
         summary["lead_errors"] = lead_summary.get("errors") or []
+        summary["lead_attachments_saved"] = 0
+        for email_id, raw_bytes in raw_by_email_id.items():
+            lead = get_lead_by_source_email_id(email_id)
+            if lead:
+                attachment_result = save_lead_email_attachments(lead["id"], raw_bytes)
+                summary["lead_attachments_saved"] += int(attachment_result.get("saved") or 0)
         return summary
     finally:
         if client is not None:
@@ -28570,42 +29121,32 @@ def validate_schadenaufnahme_uploads(files, require_file=False):
     return (valid if not errors else []), errors
 
 
+def validate_website_lead_upload(file):
+    """Prüft das eine optionale Foto einer öffentlichen Kurzanfrage."""
+    if not file or not file.filename:
+        return None, []
+    original_name = secure_filename(file.filename or "")
+    suffix = pathlib.Path(original_name).suffix.lower()
+    if not original_name or suffix not in WEBSITE_LEAD_IMAGE_EXTENSIONS:
+        return None, ["Beim Foto sind nur JPG, PNG, WebP oder HEIC erlaubt."]
+    valid, errors = validate_schadenaufnahme_uploads([file])
+    return (valid[0] if valid else None), errors
+
+
 def validate_website_lead_uploads(files):
-    """Prüft optionale Bilder einer öffentlichen Anfrage ohne Inhaltsanalyse."""
-    selected = [file for file in (files or []) if file and file.filename]
-    if not selected:
-        return [], []
-
-    errors = []
+    """Prüft bis zu fünf optionale Bilder einer öffentlichen Anfrage."""
+    selected = [file for file in files or [] if file and file.filename]
     if len(selected) > WEBSITE_LEAD_MAX_BILDER:
-        errors.append(f"Bitte höchstens {WEBSITE_LEAD_MAX_BILDER} Bilder auswählen.")
-
+        return [], [f"Bitte höchstens {WEBSITE_LEAD_MAX_BILDER} Bilder hochladen."]
     valid = []
+    errors = []
     total_size = 0
-    max_file_bytes = SCHADENAUFNAHME_MAX_DATEI_MB * 1024 * 1024
-    for file in selected[:WEBSITE_LEAD_MAX_BILDER]:
-        original_name = secure_filename(file.filename or "")
-        suffix = pathlib.Path(original_name).suffix.lower()
-        if not original_name or suffix not in WEBSITE_LEAD_IMAGE_EXTENSIONS:
-            errors.append(
-                f"{clean_text(file.filename) or 'Datei'}: nur JPG, PNG, WebP oder HEIC sind erlaubt."
-            )
-            continue
-        size = schadenaufnahme_upload_size(file)
-        total_size += size
-        if size <= 0:
-            errors.append(f"{original_name}: Das Bild ist leer.")
-            continue
-        if size > max_file_bytes:
-            errors.append(
-                f"{original_name}: Ein Bild darf höchstens {SCHADENAUFNAHME_MAX_DATEI_MB} MB groß sein."
-            )
-            continue
-        if not schadenaufnahme_upload_signature_ok(file, suffix):
-            errors.append(f"{original_name}: Dateityp und Dateiinhalt passen nicht zusammen.")
-            continue
-        valid.append(file)
-
+    for file in selected:
+        checked, file_errors = validate_website_lead_upload(file)
+        errors.extend(file_errors)
+        if checked:
+            valid.append(checked)
+            total_size += schadenaufnahme_upload_size(checked)
     if total_size > WEBSITE_LEAD_MAX_GESAMT_MB * 1024 * 1024:
         errors.append(
             f"Alle Bilder zusammen dürfen höchstens {WEBSITE_LEAD_MAX_GESAMT_MB} MB groß sein."
@@ -28613,47 +29154,27 @@ def validate_website_lead_uploads(files):
     return (valid if not errors else []), errors
 
 
-def save_website_lead_bilder(lead_id, files):
-    """Speichert geprüfte Anfragebilder als geschützte Lead-Anhänge, ohne OCR."""
-    saved = []
+def save_website_lead_upload(file):
+    """Speichert ein geprüftes Lead-Foto ohne OCR oder automatische Datenübernahme."""
+    original_name = secure_filename(file.filename or "")
+    suffix = pathlib.Path(original_name).suffix.lower()
+    stored_name = f"lead-{uuid.uuid4().hex}{suffix}"
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    for file in files or []:
-        original_name = secure_filename(file.filename or "")
-        suffix = pathlib.Path(original_name).suffix.lower()
-        if not original_name or suffix not in WEBSITE_LEAD_IMAGE_EXTENSIONS:
-            raise ValueError("Nicht erlaubter Bildtyp.")
-        stored_name = f"lead-{int(lead_id)}-{uuid.uuid4().hex}{suffix}"
-        target = UPLOAD_DIR / stored_name
+    target = UPLOAD_DIR / stored_name
+    try:
+        file.save(target)
+    except Exception as exc:
         try:
-            file.stream.seek(0)
-            file.save(target)
-            size = target.stat().st_size
-            if size <= 0:
-                raise ValueError("Das Bild ist leer.")
-            db = get_db()
-            try:
-                db.execute(
-                    """
-                    INSERT INTO lead_dateien
-                        (lead_id, original_name, stored_name, mime_type, size, quelle, erstellt_am)
-                    VALUES (?, ?, ?, ?, ?, 'website_formular', ?)
-                    """,
-                    (
-                        int(lead_id), original_name, stored_name,
-                        canonical_upload_mime_type(original_name), size, now_str(),
-                    ),
-                )
-                db.commit()
-            finally:
-                db.close()
-        except Exception:
-            try:
-                target.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise
-        saved.append(original_name)
-    return saved
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise OSError("Lead-Foto konnte nicht gespeichert werden.") from exc
+    return {
+        "datei_original_name": original_name,
+        "datei_stored_name": stored_name,
+        "datei_mime_type": canonical_upload_mime_type(original_name),
+        "datei_size": target.stat().st_size,
+    }
 
 
 def save_partner_standard_uploads(
@@ -32613,6 +33134,23 @@ def apply_delay_to_order(auftrag_id, start_datum="", fertig_datum="", abholtermi
     db.close()
 
 
+def update_linked_lead_action(auftrag_id, action):
+    action = clean_text(action)[:300]
+    if not action:
+        return
+    db = get_db()
+    db.execute(
+        """
+        UPDATE leads
+        SET naechste_aktion=?, geaendert_am=?
+        WHERE auftrag_id=? AND status NOT IN ('gewonnen', 'verloren')
+        """,
+        (action, now_str(), int(auftrag_id)),
+    )
+    db.commit()
+    db.close()
+
+
 def angebot_annehmen(auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     angebot_preis = clean_text((auftrag or {}).get("werkstatt_angebot_preis"))
@@ -32638,18 +33176,11 @@ def angebot_annehmen(auftrag_id):
         f"UPDATE auftraege SET {assignments} WHERE id=?",
         tuple(updates.values()) + (auftrag_id,),
     )
-    db.commit()
-    db.close()
-
-
-def angebot_ablehnen(auftrag_id):
-    db = get_db()
     db.execute(
         """
-        UPDATE auftraege
-        SET angebot_status='abgelehnt',
-            geaendert_am=?
-        WHERE id=? AND angebotsphase=1 AND angebot_status='angebot_abgegeben'
+        UPDATE leads
+        SET status='gewonnen', naechste_aktion='', geaendert_am=?
+        WHERE auftrag_id=? AND status!='verloren'
         """,
         (now_str(), auftrag_id),
     )
@@ -32665,6 +33196,20 @@ def angebot_ablehnen(auftrag_id):
         SET angebot_status='abgelehnt',
             geaendert_am=?
         WHERE id=? AND angebotsphase=1 AND angebot_status='angebot_abgegeben'
+        """,
+        (now_str(), auftrag_id),
+    )
+    db.execute(
+        """
+        UPDATE leads
+        SET status='verloren',
+            verloren_grund=CASE
+                WHEN TRIM(COALESCE(verloren_grund, ''))='' THEN 'Angebot abgelehnt'
+                ELSE verloren_grund
+            END,
+            naechste_aktion='',
+            geaendert_am=?
+        WHERE auftrag_id=? AND status!='gewonnen'
         """,
         (now_str(), auftrag_id),
     )
@@ -32748,6 +33293,16 @@ def send_workshop_offer(auftrag_id, angebot_text, angebot_preis, angebot_notiz="
             now_str(),
             auftrag_id,
         ),
+    )
+    db.execute(
+        """
+        UPDATE leads
+        SET status='angebot_offen',
+            naechste_aktion='Kundenentscheidung zum Angebot abwarten',
+            geaendert_am=?
+        WHERE auftrag_id=? AND status NOT IN ('gewonnen', 'verloren')
+        """,
+        (now_str(), auftrag_id),
     )
     db.commit()
     db.close()
@@ -35249,6 +35804,116 @@ def api_klick_event():
         ist_admin=ist_admin,
     )
     return jsonify({"ok": bool(logged)})
+
+
+def lead_website_from_request_origin():
+    origin = clean_text(request.headers.get("Origin"))
+    if not origin:
+        return "auto-lackierzentrum" if app.config.get("TESTING") else ""
+    try:
+        hostname = clean_text(urlsplit(origin).hostname).lower().rstrip(".")
+    except ValueError:
+        return ""
+    for website, config in BESUCHER_WEBSITES.items():
+        if hostname in config.get("hosts", set()):
+            return normalize_lead_website(website)
+    if app.config.get("TESTING") and hostname in {"127.0.0.1", "localhost"}:
+        return normalize_lead_website(request.args.get("website"))
+    return ""
+
+
+def lead_api_response(payload, status_code=200, origin=""):
+    response = jsonify(payload)
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+    return response, status_code
+
+
+@app.route("/api/leads", methods=["POST", "OPTIONS"])
+def api_public_lead():
+    website = lead_website_from_request_origin()
+    origin = besucher_request_origin(website) if website else None
+    if request.method == "OPTIONS":
+        response = besucher_cors_response(origin or "")
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Requested-With"
+        return response
+    if not website or origin is None:
+        return lead_api_response({"ok": False, "error": "Website nicht freigegeben."}, 403)
+    limited, wait_seconds = public_form_rate_limit_status(f"lead-{website}")
+    if limited:
+        return lead_api_response(
+            {"ok": False, "error": f"Bitte in {login_wait_label(wait_seconds)} erneut versuchen."},
+            429, origin,
+        )
+    record_public_form_attempt(f"lead-{website}")
+    data = request.get_json(silent=True) if request.is_json else request.form
+    data = data or {}
+    if clean_text(data.get("website")) and clean_text(data.get("website")) not in LEAD_WEBSITES:
+        return lead_api_response({"ok": True, "reference": ""}, 200, origin)
+    name = clean_text(data.get("name") or data.get("kunde_name"))[:160]
+    firma = clean_text(data.get("company") or data.get("firma"))[:160]
+    email = clean_text(data.get("email") or data.get("kunde_email")).lower()[:220]
+    telefon = clean_text(data.get("phone") or data.get("telefon"))[:80]
+    projekt = clean_text(data.get("project") or data.get("projektart") or data.get("anliegen"))[:200]
+    fahrzeug = clean_text(data.get("fahrzeug") or data.get("wunschmodell") or data.get("vehicle"))[:200]
+    nachricht = clean_text(data.get("message") or data.get("nachricht") or data.get("beschreibung"))[:5000]
+    if len(name) < 2:
+        return lead_api_response({"ok": False, "error": "Bitte Namen angeben."}, 400, origin)
+    if email and len(parse_email_recipients(email)) != 1:
+        return lead_api_response({"ok": False, "error": "Bitte E-Mail-Adresse prüfen."}, 400, origin)
+    if not email and len(re.sub(r"\D", "", telefon)) < 7:
+        return lead_api_response({"ok": False, "error": "Bitte E-Mail oder Telefonnummer angeben."}, 400, origin)
+    if len(nachricht) < 5 and not any((projekt, fahrzeug)):
+        return lead_api_response({"ok": False, "error": "Bitte Anliegen kurz beschreiben."}, 400, origin)
+    detail_fields = (
+        ("Firma", firma), ("Projekt", projekt), ("Fahrzeug", fahrzeug),
+        ("Abholung", clean_text(data.get("abholung") or data.get("start_datum"))),
+        ("Rückgabe", clean_text(data.get("rueckgabe") or data.get("end_datum"))),
+        ("Laufzeit", clean_text(data.get("laufzeit"))),
+        ("Kilometer", clean_text(data.get("kilometer") or data.get("geplante_km"))),
+        ("Kundengruppe", clean_text(data.get("kundengruppe"))),
+    )
+    beschreibung = "\n".join(
+        [f"{label}: {value}" for label, value in detail_fields if value]
+        + ([f"Nachricht: {nachricht}"] if nachricht else [])
+    )
+    next_action = {
+        "tomorrowworks": "Projektanfrage analysieren und Erstgespräch/Angebot vorbereiten",
+        "autovermietung-mos": "Verfügbarkeit prüfen und persönliches Mietangebot vorbereiten",
+    }.get(website, "Anfrage prüfen und Kunden persönlich antworten")
+    lead_id = create_lead({
+        "quelle": "website", "status": "neu", "website": website,
+        "herkunft_typ": "website_formular", "herkunft_id": 0,
+        "kunde_name": " · ".join(part for part in (name, firma) if part),
+        "kontakt_telefon": telefon, "kunde_email": email,
+        "fahrzeug": fahrzeug or projekt, "beschreibung": beschreibung,
+        "naechste_aktion": next_action,
+        "notiz": f"Öffentliches Formular von {LEAD_WEBSITES[website]['domain']}.",
+    })
+    saved_files = 0
+    for file in (request.files.getlist("dateien") + request.files.getlist("bild"))[:5]:
+        try:
+            if file and file.filename:
+                save_lead_upload_file(lead_id, file, quelle="website")
+                saved_files += 1
+        except ValueError:
+            continue
+    schedule_change_backup("public-lead")
+    lead = get_lead(lead_id)
+    sende_oeffentliche_anfrage_benachrichtigung(
+        "lead", lead_id,
+        f"Neue Anfrage {lead['reference']} – {lead['kunde_name'] or LEAD_WEBSITES[website]['label']}",
+        [
+            f"Geschäftsbereich: {LEAD_WEBSITES[website]['label']}",
+            f"Kunde: {lead['kunde_name'] or '-'}", f"Telefon: {telefon or '-'}",
+            f"E-Mail: {email or '-'}", f"Anfrage: {beschreibung or '-'}",
+            f"Anhänge: {saved_files}",
+        ],
+        kunden_email=email,
+        admin_pfad=f"/admin/leads/{lead_id}",
+    )
+    return lead_api_response({"ok": True, "reference": lead["reference"]}, 201, origin)
 
 
 @app.route("/api/besucher", methods=["POST", "OPTIONS"])
@@ -40582,7 +41247,7 @@ WEBSITE_KURZANFRAGEN = {
         "label": "Mietwagenanfrage",
         "kurz": "Zeitraum und Fahrzeugwunsch anfragen",
         "frage": "Was benötigen Sie?",
-        "placeholder": "z. B. Mietwagen für drei Tage oder Ersatzmobilität während der Reparatur",
+        "placeholder": "z. B. Kleinwagen für drei Tage, Automatik bevorzugt",
     },
     "fahrzeugcheck": {
         "label": "Fahrzeugcheck",
@@ -40923,6 +41588,9 @@ def website_anfrage():
             {
                 "quelle": "website",
                 "status": "neu",
+                "website": "auto-lackierzentrum",
+                "herkunft_typ": "website_formular",
+                "herkunft_id": 0,
                 "kunde_name": name,
                 "kontakt_telefon": telefon,
                 "kunde_email": email,
@@ -40935,13 +41603,10 @@ def website_anfrage():
             }
         )
         try:
-            gespeicherte_bilder = save_website_lead_bilder(lead_id, valid_bilder)
-        except Exception as exc:
+            for bild in valid_bilder:
+                save_lead_upload_file(lead_id, bild, quelle="website_formular")
+        except (OSError, ValueError):
             delete_lead(lead_id)
-            print(
-                "WARNUNG: Bilder einer Homepage-Anfrage konnten nicht gespeichert werden: "
-                f"{clean_text(str(exc))[:240]}"
-            )
             return render_website_anfrage(
                 formdata=request.form,
                 errors=[
@@ -40959,7 +41624,10 @@ def website_anfrage():
                 "kunde_email": email,
                 "fahrzeug": fahrzeug,
                 "beschreibung": " · ".join(beschreibungsteile),
-                "bilder_anzahl": len(gespeicherte_bilder),
+                "fotos_anzahl": len(valid_bilder),
+                "foto_namen": ", ".join(
+                    secure_filename(bild.filename or "") for bild in valid_bilder
+                ),
             },
             anliegen_label,
         )
@@ -40967,7 +41635,9 @@ def website_anfrage():
         return redirect(url_for("website_anfrage", gesendet=1))
 
     vorauswahl = clean_text(request.args.get("anliegen"))
-    if vorauswahl not in {*WEBSITE_ANLIEGEN, "schaden"}:
+    if vorauswahl == "schaden":
+        pass
+    elif vorauswahl not in WEBSITE_ANLIEGEN:
         vorauswahl = "allgemein"
     besichtigungsart = clean_text(request.args.get("besichtigungsart"))
     if besichtigungsart not in WEBSITE_BESICHTIGUNGSARTEN:
@@ -44973,16 +45643,23 @@ def admin_leads():
 
     status_filter = clean_text(request.args.get("status")) or "aktiv"
     quelle_filter = clean_text(request.args.get("quelle"))
-    leads = list_leads(status_filter=status_filter, quelle_filter=quelle_filter)
-    pipeline_counts = lead_pipeline_counts()
+    website_filter = clean_text(request.args.get("website")) or "alle"
+    if website_filter != "alle":
+        website_filter = normalize_lead_website(website_filter)
+    leads = list_leads(
+        status_filter=status_filter, quelle_filter=quelle_filter, website_filter=website_filter
+    )
+    pipeline_counts = lead_pipeline_counts(website_filter)
     active_value = sum(lead["geschaetzter_wert"] for lead in leads if not lead["is_closed"])
     return render_template(
         "leads_admin.html",
         leads=leads,
         status_filter=status_filter,
         quelle_filter=quelle_filter,
+        website_filter=website_filter,
         lead_status=LEAD_STATUS,
         lead_quellen=LEAD_QUELLEN,
+        lead_websites=LEAD_WEBSITES,
         schadenarten=SCHADENARTEN,
         autohaeuser=list_autohaeuser(),
         pipeline_counts=pipeline_counts,
@@ -45002,22 +45679,60 @@ def admin_lead_detail(lead_id):
         schedule_change_backup("lead-updated")
         flash("Lead gespeichert.", "success")
         return redirect(url_for("admin_lead_detail", lead_id=lead_id))
-    mail_config = get_schaden_mail_config()
+    lead_auftrag = get_auftrag(lead["auftrag_id"]) if lead["auftrag_id"] else None
+    kundenportal_url = ""
+    if lead_auftrag:
+        lead_auftrag["kunden_whatsapp_status"] = customer_status_share(lead_auftrag)
+        kundenportal_url = clean_text(lead_auftrag.get("kunden_status_url"))
+    lead_mail_context = dict(lead)
+    lead_mail_context["kunden_status_url"] = kundenportal_url
+    lead_mail_entwurf = fallback_lead_mail_draft(lead_mail_context)
+    if lead["mail_betreff_entwurf"]:
+        lead_mail_entwurf["betreff"] = lead["mail_betreff_entwurf"]
+    if lead["mail_text_entwurf"]:
+        lead_mail_entwurf["email_text"] = lead["mail_text_entwurf"]
+    if kundenportal_url and kundenportal_url not in lead_mail_entwurf["email_text"]:
+        lead_mail_entwurf["email_text"] = (
+            lead_mail_entwurf["email_text"].rstrip()
+            + "\n\nUnter Ihrem persönlichen Link können Sie Bilder und Unterlagen nachreichen, "
+            "einen Wunschtermin senden, Ihr Angebot prüfen und später den Reparaturstatus verfolgen:\n"
+            + kundenportal_url
+        )
     return render_template(
         "lead_detail.html",
         lead=lead,
+        lead_auftrag=lead_auftrag,
         lead_status=LEAD_STATUS,
         lead_quellen=LEAD_QUELLEN,
+        lead_websites=LEAD_WEBSITES,
         schadenarten=SCHADENARTEN,
         autohaeuser=list_autohaeuser(),
         lead_dateien=list_lead_dateien(lead_id),
-        lead_mail={
-            "address": mail_config["from_address"],
-            "display_name": mail_config["display_name"] or "Gärtner Karosserie & Lack",
-            "configured": mail_config["smtp_configured"],
-        },
-        lead_mail_entwurf=lead_email_draft(lead),
+        lead_mail_log=list_lead_mail_log(lead_id),
+        lead_mail=lead_mail_status(lead["website"]),
+        lead_mail_entwurf=lead_mail_entwurf,
     )
+
+
+@app.route("/admin/leads/<int:lead_id>/datei")
+@admin_required
+def admin_lead_datei(lead_id):
+    lead = get_lead(lead_id)
+    if not lead or not lead["datei_stored_name"]:
+        abort(404)
+    path = UPLOAD_DIR / pathlib.Path(lead["datei_stored_name"]).name
+    if not path.exists() or not path.is_file():
+        abort(404)
+    suffix = path.suffix.lower()
+    response = send_file(
+        path,
+        mimetype=lead["datei_mime_type"] or canonical_upload_mime_type(lead["datei_original_name"]),
+        as_attachment=request.args.get("download") == "1" or suffix not in SAFE_INLINE_UPLOAD_EXTENSIONS,
+        download_name=lead["datei_original_name"] or path.name,
+        conditional=True,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @app.route("/admin/leads/<int:lead_id>/anhaenge/<int:datei_id>")
@@ -45047,13 +45762,55 @@ def admin_lead_anhang(lead_id, datei_id):
     return response
 
 
+@app.route("/admin/leads/<int:lead_id>/anhaenge", methods=["POST"])
+@admin_required
+def admin_lead_anhaenge_upload(lead_id):
+    lead = get_lead(lead_id)
+    if not lead:
+        abort(404)
+    files = [file for file in request.files.getlist("dateien") if file and file.filename]
+    if not files:
+        flash("Bitte mindestens eine Datei auswählen.", "warning")
+        return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#ki-antwort")
+    saved = 0
+    errors = []
+    for file in files[:5]:
+        try:
+            save_lead_upload_file(lead_id, file)
+            saved += 1
+        except Exception as exc:
+            errors.append(f"{secure_filename(file.filename)}: {clean_text(str(exc))[:160]}")
+    if saved:
+        schedule_change_backup("lead-anhaenge")
+        flash(f"{saved} Anhang/Anhänge zum Lead gespeichert.", "success")
+    if errors:
+        flash("Einige Dateien konnten nicht gespeichert werden: " + "; ".join(errors[:3]), "warning")
+    return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#ki-antwort")
+
+
+@app.route("/admin/leads/<int:lead_id>/ki-entwurf", methods=["POST"])
+@admin_required
+def admin_lead_ki_entwurf(lead_id):
+    lead = get_lead(lead_id)
+    if not lead:
+        abort(404)
+    draft, warning = generate_lead_ai_draft(lead)
+    save_lead_ai_draft(lead_id, draft)
+    schedule_change_backup("lead-ki-entwurf")
+    if warning:
+        flash(warning, "warning")
+    else:
+        flash("KI-Analyse und Antwortentwurf sind vorbereitet. Bitte vor dem Versand prüfen.", "success")
+    return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#ki-antwort")
+
+
 @app.route("/admin/leads/<int:lead_id>/mail-senden", methods=["POST"])
 @admin_required
 def admin_lead_mail_senden(lead_id):
     lead = get_lead(lead_id)
     if not lead:
         abort(404)
-    empfaenger = clean_text(lead["kunde_email"]).lower()
+    empfaenger = clean_text(request.form.get("empfaenger") or lead.get("kunde_email")).lower()
     betreff = clean_text(request.form.get("betreff"))
     nachricht = clean_text(request.form.get("nachricht"))
     try:
@@ -45061,8 +45818,9 @@ def admin_lead_mail_senden(lead_id):
     except (ValueError, RuntimeError) as exc:
         flash(str(exc), "danger")
     else:
+        schedule_change_backup("lead-mail-gesendet")
         flash(f"E-Mail wurde als {absender} an {empfaenger} gesendet.", "success")
-    return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#email-antwort")
+    return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#ki-antwort")
 
 
 @app.route("/admin/leads/<int:lead_id>/status/<status>", methods=["POST"])
@@ -45100,87 +45858,121 @@ def admin_lead_to_auftrag(lead_id):
     if not lead:
         abort(404)
     if lead["auftrag_id"]:
-        flash("Dieser Lead ist bereits mit einem Auftrag verbunden.", "info")
-        return redirect(url_for("auftrag_detail", auftrag_id=lead["auftrag_id"]))
+        flash("Dieser Lead besitzt bereits eine Anfrage-Akte mit Kundenlink.", "info")
+        return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#kundenportal")
+    if lead["website"] != "auto-lackierzentrum":
+        flash(
+            "Nur Lackierzentrum-Leads werden in einen Werkstattauftrag umgewandelt. "
+            "TomorrowWorks und Autovermietung bleiben in ihrer Lead-Pipeline.",
+            "warning",
+        )
+        return redirect(url_for("admin_lead_detail", lead_id=lead_id))
 
     auftrag_id = create_auftrag(
         "lead",
         autohaus_id=lead["autohaus_id"] or None,
         kunde_name=lead["kunde_name"],
+        kunde_email=lead["kunde_email"],
         fahrzeug=lead["fahrzeug"] or "Lead Anfrage",
         kennzeichen=lead["kennzeichen"],
         schadenart=lead["schadenart"],
         beschreibung=lead["beschreibung"],
         analyse=lead["beschreibung"],
         kontakt_telefon=lead["kontakt_telefon"],
+        schaden_aufnahme_json=json.dumps(
+            {
+                "erfasst_von": "werkstatt-cockpit",
+                "vorgang": "lead-anfrage",
+                "whatsapp_einwilligung": False,
+                "whatsapp_verifizierung_status": "nicht_bestaetigt",
+            },
+            ensure_ascii=False,
+        ),
         notiz_intern="\n".join(
             line
             for line in (
                 f"Aus Lead #{lead_id} übernommen.",
+                f"Geschäftsbereich: {lead['website_meta']['label']} ({lead['website_meta']['domain']}).",
                 f"Quelle: {lead['quelle_meta']['label']}.",
                 f"Nächste Aktion: {lead['naechste_aktion']}." if lead["naechste_aktion"] else "",
                 lead["notiz"],
             )
             if line
         ),
+        angebotsphase=1,
+        angebot_abgesendet=1,
     )
-    lead_dateien = list_lead_dateien(lead_id)
     db = get_db()
-    auftrag_kopien = []
-    try:
-        for item in lead_dateien:
-            source_name = pathlib.Path(clean_text(item.get("stored_name"))).name
-            source_path = UPLOAD_DIR / source_name
-            if not source_name or not source_path.exists() or not source_path.is_file():
-                continue
-            suffix = source_path.suffix.lower()
-            stored_name = f"auftrag-{int(auftrag_id)}-lead-{uuid.uuid4().hex}{suffix}"
-            target_path = UPLOAD_DIR / stored_name
-            shutil.copy2(source_path, target_path)
-            auftrag_kopien.append(target_path)
-            original_name = clean_text(item.get("original_name")) or source_name
-            cursor = db.execute(
-                """
-                INSERT INTO dateien
-                    (auftrag_id, original_name, stored_name, mime_type, size, quelle, kategorie,
-                     dokument_typ, notiz, extrahierter_text, extrakt_kurz, analyse_quelle,
-                     analyse_json, analyse_hinweis, hochgeladen_am)
-                VALUES (?, ?, ?, ?, ?, 'privat', 'leadbild', '', 'Mit der Anfrage hochgeladen.',
-                        '', '', '', '', '', ?)
-                """,
-                (
-                    auftrag_id,
-                    original_name,
-                    stored_name,
-                    clean_text(item.get("mime_type")) or canonical_upload_mime_type(original_name),
-                    int(item.get("size") or target_path.stat().st_size),
-                    now_str(),
-                ),
-            )
-            store_datei_backup(db, cursor.lastrowid, target_path)
-        db.execute(
-            "UPDATE leads SET status='gewonnen', auftrag_id=?, geaendert_am=? WHERE id=?",
-            (auftrag_id, now_str(), lead_id),
+    lead_attachments = []
+    if lead.get("datei_stored_name"):
+        lead_attachments.append(
+            {
+                "original_name": lead.get("datei_original_name"),
+                "stored_name": lead.get("datei_stored_name"),
+                "mime_type": lead.get("datei_mime_type"),
+                "size": lead.get("datei_size"),
+                "quelle": "Website-Formular",
+            }
         )
-        db.commit()
-    except Exception:
-        db.rollback()
-        for target_path in auftrag_kopien:
-            try:
-                target_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-        raise
-    finally:
-        db.close()
+    lead_attachments.extend(list_lead_dateien(lead_id))
+    transferred_names = set()
+    for attachment in lead_attachments:
+        stored_name = pathlib.Path(clean_text(attachment.get("stored_name"))).name
+        if not stored_name or stored_name in transferred_names:
+            continue
+        upload_path = UPLOAD_DIR / stored_name
+        if not upload_path.exists() or not upload_path.is_file():
+            continue
+        transferred_names.add(stored_name)
+        original_name = clean_text(attachment.get("original_name")) or stored_name
+        cursor = db.execute(
+            """
+            INSERT INTO dateien
+                (auftrag_id, original_name, stored_name, mime_type, size, quelle, kategorie,
+                 dokument_typ, notiz, extrahierter_text, extrakt_kurz, analyse_quelle,
+                 analyse_json, analyse_hinweis, hochgeladen_am)
+            VALUES (?, ?, ?, ?, ?, 'privat', 'leadbild', '', 'Mit der Kurzanfrage hochgeladen.',
+                    '', '', '', '', '', ?)
+            """,
+            (
+                auftrag_id,
+                original_name,
+                stored_name,
+                clean_text(attachment.get("mime_type")) or canonical_upload_mime_type(original_name),
+                int(attachment.get("size") or upload_path.stat().st_size),
+                now_str(),
+            ),
+        )
+        store_datei_backup(db, cursor.lastrowid, upload_path)
+    # Die Original-Anhänge bleiben zusätzlich am Lead nachvollziehbar. Beim
+    # Umwandeln werden sie nur mit dem Auftrag verknüpft, nicht verschoben oder gelöscht.
+    db.execute(
+        """
+        UPDATE leads
+        SET status=CASE
+                WHEN status IN ('neu', 'kontakt_offen') THEN 'unterlagen_fehlen'
+                ELSE status
+            END,
+            auftrag_id=?,
+            naechste_aktion='Kundenlink senden und Unterlagen oder Terminwunsch abwarten',
+            geaendert_am=?
+        WHERE id=?
+        """,
+        (auftrag_id, now_str(), lead_id),
+    )
+    db.commit()
+    db.close()
     add_benachrichtigung(
         auftrag_id,
-        "Aus Lead erstellt",
-        f"Lead #{lead_id} wurde in einen Auftrag umgewandelt.",
+        "Anfrage-Akte aus Lead erstellt",
+        f"Für Lead #{lead_id} wurde frühzeitig eine Anfrage-Akte mit geschütztem Kundenlink angelegt.",
     )
     schedule_change_backup("lead-to-auftrag")
-    flash("Lead in Auftrag umgewandelt. Kundenstatus und WhatsApp sind jetzt am Auftrag verfügbar.", "success")
-    return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
+    flash(
+        "Anfrage-Akte angelegt. Der Lead bleibt offen, bis der Kunde das Angebot annimmt.",
+        "success",
+    )
+    return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#kundenportal")
 
 
 def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status):
@@ -45282,14 +46074,20 @@ def admin_whatsapp_einwilligung_bestaetigen(auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag:
         abort(404)
+    next_url = clean_text(request.form.get("next"))
+    redirect_url = (
+        next_url
+        if next_url.startswith("/admin/")
+        else url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation"
+    )
     if clean_text(request.form.get("whatsapp_einwilligung_bestaetigt")) != "1":
         flash("Bitte die persönliche WhatsApp-Einwilligung zuerst bestätigen.", "warning")
-        return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
+        return redirect(redirect_url)
     try:
         telefon = bestaetige_customer_whatsapp_einwilligung(auftrag_id)
     except ValueError as exc:
         flash(str(exc), "warning")
-        return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
+        return redirect(redirect_url)
     add_benachrichtigung(
         auftrag_id,
         "WhatsApp-Einwilligung bestätigt",
@@ -45298,6 +46096,72 @@ def admin_whatsapp_einwilligung_bestaetigen(auftrag_id):
     )
     schedule_change_backup("customer-whatsapp-consent-confirmed")
     flash("WhatsApp ist für die aktuelle Mobilnummer freigegeben.", "success")
+    return redirect(redirect_url)
+
+
+@app.route(
+    "/admin/auftrag/<int:auftrag_id>/kundenwuensche-bestaetigen",
+    methods=["POST"],
+)
+@admin_required
+def admin_kundenwuensche_bestaetigen(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+    intake = parse_schadenaufnahme_json(auftrag.get("schaden_aufnahme_json"))
+    if clean_text(auftrag.get("angebot_status")) != "angenommen" or not clean_text(
+        intake.get("kunden_angebot_angenommen_am")
+    ):
+        flash("Für diesen Vorgang liegen noch keine angenommenen Kundenwünsche vor.", "warning")
+        return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
+
+    annahme_datum = format_date(intake.get("kunden_wunsch_annahme_datum"))
+    abholtermin = format_date(intake.get("kunden_wunsch_abholung_datum"))
+    transport_art = clean_text(intake.get("kunden_wunsch_transport_art")) or "standard"
+    if transport_art not in TRANSPORT_ARTEN:
+        transport_art = "standard"
+    ersatzfahrzeug = clean_text(intake.get("kunden_wunsch_ersatzfahrzeug"))
+    if ersatzfahrzeug not in {"ja", "nein"}:
+        ersatzfahrzeug = "unbekannt"
+    if not annahme_datum:
+        flash("Der Kunde hat keinen gültigen ersten Terminwunsch hinterlegt.", "warning")
+        return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
+
+    jetzt = now_str()
+    intake["kunden_wunsch_bestaetigt_am"] = jetzt
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET annahme_datum=?, abholtermin=?, transport_art=?, schaden_mietwagen=?,
+            abhol_adresse=?, schaden_aufnahme_json=?, geaendert_am=?
+        WHERE id=?
+        """,
+        (
+            annahme_datum,
+            abholtermin,
+            transport_art,
+            ersatzfahrzeug,
+            clean_text(intake.get("kunden_wunsch_abhol_adresse"))[:300],
+            json.dumps(intake, ensure_ascii=False),
+            jetzt,
+            auftrag_id,
+        ),
+    )
+    db.commit()
+    db.close()
+    aktualisiert = get_auftrag(auftrag_id)
+    if aktualisiert and int(aktualisiert.get("status") or 1) < 2:
+        fuehre_auftrag_status_wechsel_aus(aktualisiert, 2)
+    add_benachrichtigung(
+        auftrag_id,
+        "Termin und Auftragsdaten bestätigt",
+        "Die Werkstatt hat die Termin-, Übergabe- und Ersatzfahrzeugwünsche bestätigt. "
+        "Die vollständige Auftragsbestätigung ist jetzt im Kundenportal sichtbar.",
+        quelle="werkstatt",
+    )
+    schedule_change_backup("kundenwuensche-bestaetigt")
+    flash("Kundenwünsche bestätigt und Auftrag eingeplant.", "success")
     return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
 
 
@@ -45554,20 +46418,34 @@ def angebot_senden_route(auftrag_id):
         flash("Bitte Preis, Angebotstext oder Notiz eintragen.", "warning")
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
     send_workshop_offer(auftrag_id, angebot_text, angebot_preis, angebot_notiz)
+    ist_kundenangebot = clean_text(auftrag.get("quelle")) == "lead"
     titel = "Werkstatt-Angebot wurde aktualisiert" if angebot_war_vorhanden else "Werkstatt-Angebot liegt vor"
     nachricht = (
-        "Die Werkstatt hat das Angebot aktualisiert. Sie können es im Portal erneut prüfen und annehmen."
-        if angebot_war_vorhanden
-        else "Die Werkstatt hat ein Angebot abgegeben. Sie können es im Portal prüfen und annehmen."
+        "Die Werkstatt hat das Angebot aktualisiert. Es kann im persönlichen Kundenportal erneut geprüft und angenommen werden."
+        if angebot_war_vorhanden and ist_kundenangebot
+        else (
+            "Die Werkstatt hat ein Angebot im persönlichen Kundenportal bereitgestellt."
+            if ist_kundenangebot
+            else (
+                "Die Werkstatt hat das Angebot aktualisiert. Sie können es im Portal erneut prüfen und annehmen."
+                if angebot_war_vorhanden
+                else "Die Werkstatt hat ein Angebot abgegeben. Sie können es im Portal prüfen und annehmen."
+            )
+        )
     )
     add_benachrichtigung(
         auftrag_id,
         titel,
         nachricht,
     )
-    sende_autohaus_benachrichtigung_mail(auftrag_id, titel, nachricht)
+    if not ist_kundenangebot:
+        sende_autohaus_benachrichtigung_mail(auftrag_id, titel, nachricht)
     flash(
-        "Angebot aktualisiert und an das Autohaus gesendet."
+        "Angebot im Kundenportal aktualisiert."
+        if angebot_war_vorhanden and ist_kundenangebot
+        else "Angebot im Kundenportal bereitgestellt."
+        if ist_kundenangebot
+        else "Angebot aktualisiert und an das Autohaus gesendet."
         if angebot_war_vorhanden
         else "Angebot an das Autohaus gesendet.",
         "success",
@@ -45995,6 +46873,11 @@ def kunden_status(token):
         and clean_text(d.get("kategorie")) == "standard"
         and not d.get("reklamation_id")
     ]
+    kunden_intake = auftrag.get("schaden_aufnahme") or parse_schadenaufnahme_json(
+        auftrag.get("schaden_aufnahme_json")
+    )
+    kunden_wunsch_annahme_obj = parse_date(kunden_intake.get("kunden_wunsch_annahme_datum"))
+    kunden_wunsch_abholung_obj = parse_date(kunden_intake.get("kunden_wunsch_abholung_datum"))
     return (
         render_template(
             "kunden_status.html",
@@ -46023,6 +46906,14 @@ def kunden_status(token):
             werkstatt_kontakt=werkstatt_kundenkontakt(auftrag),
             kunden_bilder=kunden_bilder,
             kunden_unterlagen=kunden_unterlagen,
+            transport_arten=TRANSPORT_ARTEN,
+            kunden_heute=date.today().isoformat(),
+            kunden_wunsch_annahme_iso=(
+                kunden_wunsch_annahme_obj.isoformat() if kunden_wunsch_annahme_obj else ""
+            ),
+            kunden_wunsch_abholung_iso=(
+                kunden_wunsch_abholung_obj.isoformat() if kunden_wunsch_abholung_obj else ""
+            ),
             schadenaufnahme_max_dateien=SCHADENAUFNAHME_MAX_DATEIEN,
             schadenaufnahme_max_upload_mb=MAX_UPLOAD_MB,
             kunden_status_link=request.url,
@@ -46101,9 +46992,138 @@ def kunden_status_terminwunsch(token):
         beschreibung,
         quelle="kunde",
     )
+    intake = parse_schadenaufnahme_json(auftrag.get("schaden_aufnahme_json"))
+    intake["kunden_wunsch_annahme_datum"] = wunschtermin
+    if nachricht:
+        intake["kunden_wunsch_hinweis"] = nachricht
+    db = get_db()
+    db.execute(
+        "UPDATE auftraege SET schaden_aufnahme_json=?, geaendert_am=? WHERE id=?",
+        (json.dumps(intake, ensure_ascii=False), now_str(), auftrag["id"]),
+    )
+    db.commit()
+    db.close()
+    update_linked_lead_action(
+        auftrag["id"],
+        f"{termin_label} des Kunden prüfen und bestätigen",
+    )
     schedule_change_backup("kunden-status-terminwunsch")
     flash("Ihr Terminwunsch ist angekommen. Die Werkstatt bestätigt den Termin separat.", "success")
     return redirect(url_for("kunden_status", token=token) + "#terminvereinbarung")
+
+
+@app.route("/status/<token>/angebot-annehmen", methods=["POST"])
+def kunden_status_angebot_annehmen(token):
+    auftrag = get_auftrag_by_kunden_status_token(token)
+    if not auftrag:
+        abort(404)
+    if clean_text(auftrag.get("angebot_status")) == "angenommen":
+        flash("Das Angebot wurde bereits angenommen.", "info")
+        return redirect(url_for("kunden_status", token=token) + "#auftragsbestaetigung")
+    if not auftrag.get("angebotsphase") or clean_text(auftrag.get("angebot_status")) != "angebot_abgegeben":
+        flash("Dieses Angebot kann derzeit nicht angenommen werden.", "warning")
+        return redirect(url_for("kunden_status", token=token) + "#angebot")
+
+    scope = f"kundenstatus-angebot:{token[:12]}"
+    limited, wait_seconds = public_form_rate_limit_status(scope)
+    if limited:
+        flash(f"Zu viele Versuche. Bitte in {wait_seconds} Sekunden erneut versuchen.", "warning")
+        return redirect(url_for("kunden_status", token=token) + "#angebot"), 429
+    record_public_form_attempt(scope)
+
+    if clean_text(request.form.get("website")):
+        flash("Das Angebot konnte nicht verarbeitet werden.", "warning")
+        return redirect(url_for("kunden_status", token=token) + "#angebot")
+    if clean_text(request.form.get("angebot_annehmen_bestaetigt")) != "1":
+        flash("Bitte bestätigen Sie zuerst die Annahme des Angebots.", "warning")
+        return redirect(url_for("kunden_status", token=token) + "#angebot")
+
+    wunsch_annahme = format_date(request.form.get("wunsch_annahme_datum"))
+    wunsch_abholung = format_date(request.form.get("wunsch_abholung_datum"))
+    annahme_obj = parse_date(wunsch_annahme)
+    abholung_obj = parse_date(wunsch_abholung)
+    if not annahme_obj:
+        flash("Bitte einen gewünschten Bring- oder Abholtermin eintragen.", "warning")
+        return redirect(url_for("kunden_status", token=token) + "#angebot")
+    if annahme_obj < date.today():
+        flash("Der gewünschte Termin darf nicht in der Vergangenheit liegen.", "warning")
+        return redirect(url_for("kunden_status", token=token) + "#angebot")
+    if abholung_obj and abholung_obj < annahme_obj:
+        flash("Der gewünschte Rückgabe-/Holtermin muss nach dem ersten Termin liegen.", "warning")
+        return redirect(url_for("kunden_status", token=token) + "#angebot")
+
+    transport_art = clean_text(request.form.get("transport_art")) or "standard"
+    if transport_art not in TRANSPORT_ARTEN:
+        flash("Bitte eine gültige Fahrzeugübergabe auswählen.", "warning")
+        return redirect(url_for("kunden_status", token=token) + "#angebot")
+    ersatzfahrzeug = clean_text(request.form.get("ersatzfahrzeug"))
+    if ersatzfahrzeug not in {"ja", "nein"}:
+        flash("Bitte angeben, ob ein Ersatzfahrzeug gewünscht ist.", "warning")
+        return redirect(url_for("kunden_status", token=token) + "#angebot")
+    abhol_adresse = clean_text(request.form.get("abhol_adresse"))[:300]
+    if transport_art == "hol_und_bring" and not abhol_adresse:
+        flash("Für den Hol- und Bringservice benötigen wir die Abholadresse.", "warning")
+        return redirect(url_for("kunden_status", token=token) + "#angebot")
+    hinweis = clean_text(request.form.get("kunden_wunsch_hinweis"))[:600]
+
+    jetzt = now_str()
+    intake = parse_schadenaufnahme_json(auftrag.get("schaden_aufnahme_json"))
+    intake.update(
+        {
+            "kunden_angebot_angenommen_am": jetzt,
+            "kunden_wunsch_annahme_datum": wunsch_annahme,
+            "kunden_wunsch_abholung_datum": wunsch_abholung,
+            "kunden_wunsch_transport_art": transport_art,
+            "kunden_wunsch_ersatzfahrzeug": ersatzfahrzeug,
+            "kunden_wunsch_abhol_adresse": abhol_adresse,
+            "kunden_wunsch_hinweis": hinweis,
+            "kunden_wunsch_bestaetigt_am": "",
+        }
+    )
+    angebot_annehmen(auftrag["id"])
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET schaden_aufnahme_json=?, transport_art=?, schaden_mietwagen=?,
+            abhol_adresse=?, geaendert_am=?
+        WHERE id=?
+        """,
+        (
+            json.dumps(intake, ensure_ascii=False),
+            transport_art,
+            ersatzfahrzeug,
+            abhol_adresse,
+            jetzt,
+            auftrag["id"],
+        ),
+    )
+    db.commit()
+    db.close()
+    details = [
+        "Der Kunde hat das Werkstatt-Angebot im persönlichen Portal angenommen.",
+        f"Terminwunsch: {wunsch_annahme}",
+        f"Übergabe: {TRANSPORT_ARTEN[transport_art]['label']}",
+        f"Ersatzfahrzeug: {'gewünscht' if ersatzfahrzeug == 'ja' else 'nicht gewünscht'}",
+    ]
+    if wunsch_abholung:
+        details.append(f"Gewünschte Rückgabe/Abholung: {wunsch_abholung}")
+    if abhol_adresse:
+        details.append(f"Abholadresse: {abhol_adresse}")
+    if hinweis:
+        details.append(f"Hinweis: {hinweis}")
+    add_benachrichtigung(
+        auftrag["id"],
+        "Angebot vom Kunden angenommen",
+        "\n".join(details),
+        quelle="kunde",
+    )
+    schedule_change_backup("kundenstatus-angebot-angenommen")
+    flash(
+        "Vielen Dank. Das Angebot ist angenommen; die Werkstatt bestätigt jetzt Ihre Terminwünsche.",
+        "success",
+    )
+    return redirect(url_for("kunden_status", token=token) + "#auftragsbestaetigung")
 
 
 @app.route("/status/<token>/verzoegerung", methods=["POST"])
@@ -46224,6 +47244,10 @@ def kunden_status_unterlagen(token):
         f"Über den Kundenstatus wurden {saved} Datei(en) nachgereicht.",
         quelle="kunde",
     )
+    update_linked_lead_action(
+        auftrag["id"],
+        f"{saved} neue Kundenunterlage(n) prüfen",
+    )
     if auftrag.get("versicherung_id"):
         add_versicherung_aufgabe(
             auftrag["id"],
@@ -46257,6 +47281,7 @@ def kunden_status_nachricht(token):
         text,
         quelle="kunde",
     )
+    update_linked_lead_action(auftrag["id"], "Neue Kundennachricht beantworten")
     if auftrag.get("versicherung_id"):
         add_versicherung_aufgabe(
             auftrag["id"],
@@ -49327,6 +50352,7 @@ def mietwagen_anfrage():
             anfrage_id = cursor.lastrowid
             db.commit()
             db.close()
+            sync_mietwagen_anfragen_to_leads()
             fahrzeug_label = ""
             for f in fahrzeuge:
                 if f["id"] == wunsch_fahrzeug_id:
@@ -49545,6 +50571,9 @@ def admin_mietanfrage_uebernehmen(anfrage_id):
         raise
     finally:
         db.close()
+    lead = get_lead_by_herkunft("mietwagen_anfrage", anfrage_id)
+    if lead:
+        set_lead_status(lead["id"], "gewonnen")
     flash("Anfrage übernommen — hier ist der Mietvertrag: Daten prüfen, Kunde unterschreibt digital, dann per WhatsApp/E-Mail senden.", "success")
     return redirect(url_for("admin_mietvertrag", vorgang_id=vid))
 
@@ -49559,6 +50588,9 @@ def admin_mietanfrage_ablehnen(anfrage_id):
     )
     db.commit()
     db.close()
+    lead = get_lead_by_herkunft("mietwagen_anfrage", anfrage_id)
+    if lead:
+        set_lead_status(lead["id"], "verloren")
     flash("Anfrage abgelehnt.", "success")
     return redirect(url_for("admin_mietfahrzeuge") + "#anfragen")
 
