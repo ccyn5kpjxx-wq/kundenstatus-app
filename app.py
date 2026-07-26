@@ -11,6 +11,7 @@ import base64
 import calendar
 import csv
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from difflib import SequenceMatcher
 from email import policy
 from email.header import decode_header, make_header
@@ -7998,6 +7999,7 @@ BACKUP_TABLES = (
     "kalender_notizen",
     "mitarbeiter",
     "mitarbeiter_urlaub",
+    "google_ads_tageswerte",
 )
 BACKUP_FORMAT_VERSION = 3
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
@@ -9130,6 +9132,24 @@ def init_db():
             ON besucher_events (erstellt_am);
         CREATE INDEX IF NOT EXISTS idx_besucher_events_visitor_hash
             ON besucher_events (visitor_hash);
+
+        CREATE TABLE IF NOT EXISTS google_ads_tageswerte (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            datum            TEXT NOT NULL,
+            website          TEXT NOT NULL,
+            kampagne         TEXT DEFAULT '',
+            kosten_cent      INTEGER DEFAULT 0,
+            klicks           INTEGER DEFAULT 0,
+            impressionen     INTEGER DEFAULT 0,
+            conversions      REAL DEFAULT 0,
+            quelle           TEXT DEFAULT 'manuell',
+            aktualisiert_am  TEXT NOT NULL,
+            UNIQUE (datum, website)
+        );
+        CREATE INDEX IF NOT EXISTS idx_google_ads_tageswerte_datum
+            ON google_ads_tageswerte (datum);
+        CREATE INDEX IF NOT EXISTS idx_google_ads_tageswerte_website
+            ON google_ads_tageswerte (website);
         CREATE TABLE IF NOT EXISTS lexware_rechnungen (
             id                 INTEGER PRIMARY KEY AUTOINCREMENT,
             voucher_id         TEXT UNIQUE NOT NULL,
@@ -27190,12 +27210,261 @@ BESUCHER_WEBSITE_ALIASES = {
     "autovermietung-mos.de": "autovermietung-mos",
     "www.autovermietung-mos.de": "autovermietung-mos",
 }
+GOOGLE_ADS_KAMPAGNEN = {
+    "auto-lackierzentrum": {
+        "kampagne": "Lackierzentrum | Suche | Test 2026-07",
+        "budget_tag_cent": 500,
+    },
+    "tomorrowworks": {
+        "kampagne": "Tomorrowworks | Suche | Test 2026-07",
+        "budget_tag_cent": 500,
+    },
+    "autovermietung-mos": {
+        "kampagne": "Autovermietung MOS | Suche | Test 2026-07",
+        "budget_tag_cent": 500,
+    },
+}
 BESUCHER_BOT_PATTERN = re.compile(
     r"bot|spider|crawl|slurp|headless|preview|facebookexternalhit|meta-externalagent|"
     r"whatsapp|telegrambot|discordbot|bingpreview|google-inspectiontool|lighthouse|"
     r"pagespeed|uptime|monitor|curl|wget|python-requests|go-http-client|dataprovider",
     re.IGNORECASE,
 )
+
+
+def google_ads_euro_label_cent(value):
+    try:
+        cent = int(value or 0)
+    except (TypeError, ValueError):
+        cent = 0
+    amount = cent / 100
+    return f"{amount:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def google_ads_prozent_label(value):
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        number = 0.0
+    return f"{number:.2f} %".replace(".", ",")
+
+
+def google_ads_parse_kosten_cent(value):
+    raw = clean_text(value).replace("€", "").replace(" ", "").replace("\u00a0", "")
+    if not raw:
+        return 0
+    if not re.fullmatch(r"(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d{1,2})?", raw):
+        return None
+    normalized = raw.replace(".", "").replace(",", ".")
+    try:
+        amount = Decimal(normalized).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return None
+    if amount < 0 or amount > Decimal("1000000"):
+        return None
+    return int(amount * 100)
+
+
+def google_ads_parse_nonnegative_int(value, maximum=1000000000):
+    raw = clean_text(value)
+    if not re.fullmatch(r"\d+", raw):
+        return None
+    try:
+        number = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return number if 0 <= number <= maximum else None
+
+
+def google_ads_parse_conversions(value):
+    raw = clean_text(value).replace(",", ".")
+    if not raw:
+        return 0.0
+    try:
+        number = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return round(number, 2) if 0 <= number <= 100000000 else None
+
+
+def save_google_ads_tageswert(
+    website,
+    datum,
+    kosten_cent,
+    klicks,
+    impressionen,
+    conversions=0.0,
+    quelle="manuell",
+):
+    website = normalize_besucher_website(website)
+    if website not in GOOGLE_ADS_KAMPAGNEN:
+        raise ValueError("Unbekannte Google-Ads-Kampagne")
+    try:
+        parsed_date = datetime.strptime(clean_text(datum), "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError("Ungültiges Datum") from exc
+    if parsed_date > date.today() or parsed_date < date.today() - timedelta(days=365):
+        raise ValueError("Datum liegt außerhalb des erlaubten Zeitraums")
+    values = (kosten_cent, klicks, impressionen)
+    if any(not isinstance(value, int) or value < 0 for value in values):
+        raise ValueError("Kosten, Klicks und Impressionen müssen positiv oder null sein")
+    try:
+        conversions = float(conversions or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Ungültige Abschlusszahl") from exc
+    if conversions < 0:
+        raise ValueError("Abschlüsse müssen positiv oder null sein")
+    config = GOOGLE_ADS_KAMPAGNEN[website]
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT INTO google_ads_tageswerte
+                (datum, website, kampagne, kosten_cent, klicks, impressionen,
+                 conversions, quelle, aktualisiert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (datum, website) DO UPDATE SET
+                kampagne=excluded.kampagne,
+                kosten_cent=excluded.kosten_cent,
+                klicks=excluded.klicks,
+                impressionen=excluded.impressionen,
+                conversions=excluded.conversions,
+                quelle=excluded.quelle,
+                aktualisiert_am=excluded.aktualisiert_am
+            """,
+            (
+                parsed_date.isoformat(),
+                website,
+                config["kampagne"],
+                kosten_cent,
+                klicks,
+                impressionen,
+                conversions,
+                clean_text(quelle)[:40] or "manuell",
+                db_datetime_str(),
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def list_google_ads_statistik(tage=30, website="alle"):
+    try:
+        tage = int(tage or 30)
+    except (TypeError, ValueError):
+        tage = 30
+    tage = max(1, min(tage, 90))
+    website = clean_text(website).lower()
+    if website != "alle":
+        website = normalize_besucher_website(website) or "alle"
+    erster_tag = date.today() - timedelta(days=tage - 1)
+    letzter_tag = date.today()
+    website_filter = " AND website=?" if website != "alle" else ""
+    params = (
+        (erster_tag.isoformat(), letzter_tag.isoformat(), website)
+        if website != "alle"
+        else (erster_tag.isoformat(), letzter_tag.isoformat())
+    )
+    db = get_db()
+    try:
+        rows = db.execute(
+            f"""
+            SELECT website,
+                   SUM(kosten_cent) AS kosten_cent,
+                   SUM(klicks) AS klicks,
+                   SUM(impressionen) AS impressionen,
+                   SUM(conversions) AS conversions,
+                   COUNT(DISTINCT datum) AS erfasste_tage,
+                   MAX(aktualisiert_am) AS aktualisiert_am
+            FROM google_ads_tageswerte
+            WHERE datum >= ? AND datum <= ?{website_filter}
+            GROUP BY website
+            """,
+            params,
+        ).fetchall()
+    finally:
+        db.close()
+
+    lookup = {row["website"]: dict(row) for row in rows}
+    selected_keys = list(GOOGLE_ADS_KAMPAGNEN)
+    if website != "alle":
+        selected_keys = [website]
+    campaigns = []
+    for key in selected_keys:
+        config = GOOGLE_ADS_KAMPAGNEN[key]
+        site = BESUCHER_WEBSITES[key]
+        raw = lookup.get(key, {})
+        kosten_cent = int(raw.get("kosten_cent") or 0)
+        klicks = int(raw.get("klicks") or 0)
+        impressionen = int(raw.get("impressionen") or 0)
+        conversions = float(raw.get("conversions") or 0)
+        cpc_cent = round(kosten_cent / klicks) if klicks else 0
+        kosten_pro_abschluss_cent = round(kosten_cent / conversions) if conversions else 0
+        ctr = (klicks / impressionen * 100) if impressionen else 0
+        campaigns.append({
+            "website": key,
+            "website_label": site["label"],
+            "domain": site["domain"],
+            "kampagne": config["kampagne"],
+            "budget_tag_cent": config["budget_tag_cent"],
+            "budget_tag_label": google_ads_euro_label_cent(config["budget_tag_cent"]),
+            "max_budget_cent": config["budget_tag_cent"] * tage,
+            "max_budget_label": google_ads_euro_label_cent(config["budget_tag_cent"] * tage),
+            "kosten_cent": kosten_cent,
+            "kosten_label": google_ads_euro_label_cent(kosten_cent),
+            "klicks": klicks,
+            "impressionen": impressionen,
+            "conversions": conversions,
+            "conversions_label": f"{conversions:g}".replace(".", ","),
+            "kosten_pro_abschluss_cent": kosten_pro_abschluss_cent,
+            "kosten_pro_abschluss_label": (
+                google_ads_euro_label_cent(kosten_pro_abschluss_cent) if conversions else "—"
+            ),
+            "cpc_cent": cpc_cent,
+            "cpc_label": google_ads_euro_label_cent(cpc_cent) if klicks else "—",
+            "ctr": ctr,
+            "ctr_label": google_ads_prozent_label(ctr) if impressionen else "—",
+            "erfasste_tage": int(raw.get("erfasste_tage") or 0),
+            "aktualisiert_am": clean_text(raw.get("aktualisiert_am")),
+        })
+
+    kosten_cent = sum(item["kosten_cent"] for item in campaigns)
+    klicks = sum(item["klicks"] for item in campaigns)
+    impressionen = sum(item["impressionen"] for item in campaigns)
+    conversions = sum(item["conversions"] for item in campaigns)
+    tagesbudget_cent = sum(item["budget_tag_cent"] for item in campaigns)
+    aktualisiert_am = max((item["aktualisiert_am"] for item in campaigns), default="")
+    try:
+        aktualisiert_label = datetime.strptime(aktualisiert_am, "%Y-%m-%d %H:%M:%S").strftime(DATETIME_FMT)
+    except (TypeError, ValueError):
+        aktualisiert_label = "Noch keine Ist-Werte"
+    return {
+        "tage": tage,
+        "website": website,
+        "kosten_cent": kosten_cent,
+        "kosten_label": google_ads_euro_label_cent(kosten_cent),
+        "klicks": klicks,
+        "impressionen": impressionen,
+        "conversions": conversions,
+        "conversions_label": f"{conversions:g}".replace(".", ","),
+        "kosten_pro_abschluss_cent": round(kosten_cent / conversions) if conversions else 0,
+        "kosten_pro_abschluss_label": (
+            google_ads_euro_label_cent(round(kosten_cent / conversions)) if conversions else "—"
+        ),
+        "cpc_cent": round(kosten_cent / klicks) if klicks else 0,
+        "cpc_label": google_ads_euro_label_cent(round(kosten_cent / klicks)) if klicks else "—",
+        "ctr_label": google_ads_prozent_label(klicks / impressionen * 100) if impressionen else "—",
+        "tagesbudget_cent": tagesbudget_cent,
+        "tagesbudget_label": google_ads_euro_label_cent(tagesbudget_cent),
+        "max_budget_cent": tagesbudget_cent * tage,
+        "max_budget_label": google_ads_euro_label_cent(tagesbudget_cent * tage),
+        "campaigns": campaigns,
+        "hat_ist_werte": any(item["erfasste_tage"] for item in campaigns),
+        "aktualisiert_label": aktualisiert_label,
+        "heute": date.today().isoformat(),
+        "sync_status": "Google-Ads-API noch nicht verbunden",
+    }
 
 
 def normalize_besucher_website(value):
@@ -34799,7 +35068,68 @@ def admin_besucherstatistik():
         tage=request.args.get("tage", 30),
         website=request.args.get("website", "alle"),
     )
-    return render_template("besucherstatistik_admin.html", statistik=statistik)
+    google_ads = list_google_ads_statistik(
+        tage=statistik["tage"],
+        website=statistik["website"],
+    )
+    return render_template(
+        "besucherstatistik_admin.html",
+        statistik=statistik,
+        google_ads=google_ads,
+    )
+
+
+@app.route("/admin/besucherstatistik/google-ads", methods=["POST"])
+@admin_required
+def admin_google_ads_tageswert():
+    next_tage = request.form.get("next_tage", 30)
+    try:
+        next_tage = max(1, min(int(next_tage), 90))
+    except (TypeError, ValueError):
+        next_tage = 30
+    next_website = clean_text(request.form.get("next_website") or "alle").lower()
+    if next_website != "alle":
+        next_website = normalize_besucher_website(next_website) or "alle"
+
+    website = normalize_besucher_website(request.form.get("website"))
+    datum = clean_text(request.form.get("datum"))
+    kosten_cent = google_ads_parse_kosten_cent(request.form.get("kosten"))
+    klicks = google_ads_parse_nonnegative_int(request.form.get("klicks"))
+    impressionen = google_ads_parse_nonnegative_int(request.form.get("impressionen"))
+    conversions = google_ads_parse_conversions(request.form.get("conversions"))
+    if not website or website not in GOOGLE_ADS_KAMPAGNEN:
+        flash("Bitte eine gültige Google-Ads-Kampagne auswählen.", "danger")
+    elif kosten_cent is None:
+        flash("Bitte die Kosten als Euro-Betrag eingeben, zum Beispiel 12,50.", "danger")
+    elif klicks is None or impressionen is None:
+        flash("Klicks und Impressionen müssen ganze Zahlen ab 0 sein.", "danger")
+    elif klicks > impressionen:
+        flash("Die Klickzahl darf nicht größer als die Zahl der Impressionen sein.", "danger")
+    elif conversions is None:
+        flash("Abschlüsse müssen eine Zahl ab 0 sein.", "danger")
+    else:
+        try:
+            save_google_ads_tageswert(
+                website=website,
+                datum=datum,
+                kosten_cent=kosten_cent,
+                klicks=klicks,
+                impressionen=impressionen,
+                conversions=conversions,
+            )
+        except ValueError as exc:
+            flash(str(exc), "danger")
+        else:
+            schedule_change_backup("google-ads-tageswert")
+            flash(
+                f"Google-Ads-Werte für {BESUCHER_WEBSITES[website]['label']} am "
+                f"{datetime.strptime(datum, '%Y-%m-%d').strftime('%d.%m.%Y')} gespeichert.",
+                "success",
+            )
+    return redirect(
+        url_for("admin_besucherstatistik", tage=next_tage, website=next_website)
+        + "#google-ads-kosten"
+    )
 
 
 @app.route("/admin/klickstatistik")
@@ -42517,6 +42847,9 @@ def validate_backup_binary_reference_completeness(export, reference_map):
     required_tables = set(BACKUP_TABLES) - {
         "datei_backups",
         "fahrzeugeinkauf_scan_treffer",
+        # Vor Einführung der Google-Ads-Kosten gab es diese Tabelle in
+        # vorhandenen Sicherungen noch nicht. Alte Pakete bleiben importierbar.
+        "google_ads_tageswerte",
     }
     if format_version >= 3:
         required_tables.add("fahrzeugeinkauf_scan_treffer")

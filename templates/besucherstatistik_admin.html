@@ -34,8 +34,32 @@
   .analytics-website-values { display:flex; gap:1.4rem; margin-top:.75rem; }
   .analytics-website-values strong { display:block; font-size:1.45rem; line-height:1; }
   .analytics-website-values small { color:var(--muted); }
+  .ads-panel { position:relative; overflow:hidden; }
+  .ads-panel::before { content:""; position:absolute; inset:0 auto 0 0; width:5px; background:linear-gradient(180deg,#4285f4,#34a853,#fbbc05,#ea4335); }
+  .ads-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
+  .ads-status { display:inline-flex; align-items:center; gap:.45rem; padding:.45rem .7rem; border-radius:999px; background:#fff4d8; color:#75530b; font-size:.78rem; font-weight:800; }
+  .ads-status::before { content:""; width:8px; height:8px; border-radius:50%; background:#fbbc05; }
+  .ads-kpis { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.8rem; margin-top:1.15rem; }
+  .ads-kpi { padding:1rem; border:1px solid rgba(24,56,63,.1); border-radius:15px; background:#fffdf9; }
+  .ads-kpi span,.ads-kpi small { display:block; color:var(--muted); }
+  .ads-kpi span { font-size:.78rem; font-weight:800; }
+  .ads-kpi strong { display:block; margin:.2rem 0; font-size:1.55rem; line-height:1.05; color:var(--ink); }
+  .ads-kpi small { font-size:.74rem; }
+  .ads-budget { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin:1rem 0; padding:.85rem 1rem; border-radius:14px; background:rgba(66,133,244,.08); }
+  .ads-budget strong,.ads-budget small { display:block; }
+  .ads-budget small { color:var(--muted); margin-top:.12rem; }
+  .ads-entry { margin-top:1rem; border-top:1px solid rgba(24,56,63,.1); padding-top:1rem; }
+  .ads-entry summary { cursor:pointer; color:var(--brand); font-weight:800; }
+  .ads-secondary { display:flex; gap:.75rem; flex-wrap:wrap; margin-top:.85rem; }
+  .ads-secondary span { min-width:180px; padding:.8rem 1rem; border-radius:13px; background:#f7f2e9; }
+  .ads-secondary strong,.ads-secondary small { display:block; }
+  .ads-secondary small { color:var(--muted); margin-top:.12rem; }
+  .ads-entry-grid { display:grid; grid-template-columns:1.35fr repeat(5,minmax(100px,.75fr)); gap:.75rem; align-items:end; margin-top:1rem; }
+  .ads-entry .form-label { color:var(--muted); font-size:.76rem; font-weight:800; }
+  @media(max-width:1180px){.ads-kpis{grid-template-columns:repeat(3,1fr)}.ads-entry-grid{grid-template-columns:repeat(3,1fr)}}
   @media(max-width:1050px){.analytics-site-picker{grid-template-columns:repeat(2,1fr)}.analytics-kpis{grid-template-columns:repeat(2,1fr)}.analytics-grid{grid-template-columns:1fr}.analytics-websites{grid-template-columns:1fr}}
   @media(max-width:620px){.analytics-site-picker{grid-template-columns:1fr}.analytics-kpis{grid-template-columns:1fr 1fr}.analytics-kpi{padding:.9rem}.analytics-kpi strong{font-size:1.7rem}}
+  @media(max-width:620px){.ads-kpis,.ads-entry-grid{grid-template-columns:1fr 1fr}.ads-kpi strong{font-size:1.35rem}.ads-entry-grid .ads-entry-campaign,.ads-entry-grid .ads-entry-submit{grid-column:1/-1}}
 </style>
 {% endblock %}
 {% block content %}
@@ -74,6 +98,80 @@
     </a>
   {% endfor %}
 </div>
+
+<section class="page-card p-4 mb-4 ads-panel" id="google-ads-kosten" aria-labelledby="google-ads-title">
+  <div class="ads-head">
+    <div>
+      <h5 id="google-ads-title" class="mb-1">Google Ads Kosten</h5>
+      <p class="mb-0">Die wichtigsten Kosten und Ergebnisse für {{ statistik['website_label'] }}.</p>
+    </div>
+    <span class="ads-status">{{ google_ads['sync_status'] }}</span>
+  </div>
+
+  <div class="ads-kpis">
+    <div class="ads-kpi"><span>Ist-Kosten</span><strong>{{ google_ads['kosten_label'] }}</strong><small>{{ google_ads['tage'] }} Tage</small></div>
+    <div class="ads-kpi"><span>Klicks</span><strong>{{ google_ads['klicks'] }}</strong><small>Anzeigenklicks</small></div>
+    <div class="ads-kpi"><span>Ø Klickpreis</span><strong>{{ google_ads['cpc_label'] }}</strong><small>Kosten je Anzeigenklick</small></div>
+    <div class="ads-kpi"><span>Abschlüsse</span><strong>{{ google_ads['conversions_label'] }}</strong><small>Anfragen oder Buchungen</small></div>
+    <div class="ads-kpi"><span>Kosten je Abschluss</span><strong>{{ google_ads['kosten_pro_abschluss_label'] }}</strong><small>nur bei erfassten Abschlüssen</small></div>
+  </div>
+
+  <div class="ads-budget">
+    <span><strong>{{ google_ads['tagesbudget_label'] }} Tagesbudget eingerichtet</strong><small>{{ google_ads['campaigns']|length }} Kampagne{{ 'n' if google_ads['campaigns']|length != 1 else '' }} im gewählten Filter</small></span>
+    <span><strong>Maximal {{ google_ads['max_budget_label'] }}</strong><small>mögliches Budget für den gewählten {{ google_ads['tage'] }}-Tage-Zeitraum, nicht bereits ausgegeben</small></span>
+  </div>
+
+  <div class="analytics-table-shell">
+    <table class="table analytics-table align-middle">
+      <thead><tr><th>Website / Kampagne</th><th>Budget/Tag</th><th>Ist-Kosten</th><th>Klicks</th><th>Ø CPC</th><th>Abschlüsse</th><th>Kosten/Abschluss</th></tr></thead>
+      <tbody>
+      {% for row in google_ads['campaigns'] %}
+        <tr>
+          <td><strong>{{ row['website_label'] }}</strong><br><small class="text-muted">{{ row['kampagne'] }}</small></td>
+          <td>{{ row['budget_tag_label'] }}</td>
+          <td class="fw-bold">{{ row['kosten_label'] }}</td>
+          <td>{{ row['klicks'] }}</td>
+          <td>{{ row['cpc_label'] }}</td>
+          <td>{{ row['conversions_label'] }}</td>
+          <td>{{ row['kosten_pro_abschluss_label'] }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="analytics-note mt-3 mb-0">
+    <strong>Stand: {{ google_ads['aktualisiert_label'] }}.</strong>
+    Solange die Google-Ads-API noch nicht verbunden ist, stammen die Ist-Werte aus der geschützten Erfassung unten. 0,00 € bedeutet daher entweder keine Ausgaben oder noch keine eingetragenen Ist-Werte; das eingerichtete Budget wird getrennt angezeigt.
+  </p>
+
+  <details class="ads-entry">
+    <summary>Weitere Kennzahlen</summary>
+    <div class="ads-secondary">
+      <span><strong>{{ google_ads['impressionen'] }}</strong><small>Impressionen</small></span>
+      <span><strong>{{ google_ads['ctr_label'] }}</strong><small>Klickrate</small></span>
+      <span><strong>{{ google_ads['aktualisiert_label'] }}</strong><small>Letzte Aktualisierung</small></span>
+    </div>
+  </details>
+
+  <details class="ads-entry">
+    <summary>Ist-Werte eintragen oder korrigieren</summary>
+    <form method="post" action="{{ url_for('admin_google_ads_tageswert') }}">
+      {{ csrf_field()|safe }}
+      <input type="hidden" name="next_tage" value="{{ statistik['tage'] }}">
+      <input type="hidden" name="next_website" value="{{ statistik['website'] }}">
+      <div class="ads-entry-grid">
+        <div class="ads-entry-campaign"><label class="form-label" for="ads-website">Kampagne</label><select class="form-select" id="ads-website" name="website" required>{% for row in google_ads['campaigns'] %}<option value="{{ row['website'] }}">{{ row['website_label'] }}</option>{% endfor %}</select></div>
+        <div><label class="form-label" for="ads-datum">Datum</label><input class="form-control" id="ads-datum" type="date" name="datum" value="{{ google_ads['heute'] }}" max="{{ google_ads['heute'] }}" required></div>
+        <div><label class="form-label" for="ads-kosten">Kosten in €</label><input class="form-control" id="ads-kosten" name="kosten" inputmode="decimal" placeholder="0,00" required></div>
+        <div><label class="form-label" for="ads-klicks">Klicks</label><input class="form-control" id="ads-klicks" type="number" name="klicks" min="0" step="1" value="0" required></div>
+        <div><label class="form-label" for="ads-impressionen">Impressionen</label><input class="form-control" id="ads-impressionen" type="number" name="impressionen" min="0" step="1" value="0" required></div>
+        <div><label class="form-label" for="ads-conversions">Abschlüsse</label><input class="form-control" id="ads-conversions" type="number" name="conversions" min="0" step="0.01" value="0"></div>
+        <div class="ads-entry-submit"><button class="btn btn-brand w-100" type="submit">Werte speichern</button></div>
+      </div>
+    </form>
+  </details>
+</section>
 
 <div class="analytics-grid mb-4">
   <section class="page-card p-4 analytics-panel" aria-labelledby="analytics-verlauf">

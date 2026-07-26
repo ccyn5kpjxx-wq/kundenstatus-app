@@ -62,6 +62,19 @@ def main():
                 browser TEXT DEFAULT '',
                 ist_bot INTEGER DEFAULT 0
             );
+            CREATE TABLE google_ads_tageswerte (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                datum TEXT NOT NULL,
+                website TEXT NOT NULL,
+                kampagne TEXT DEFAULT '',
+                kosten_cent INTEGER DEFAULT 0,
+                klicks INTEGER DEFAULT 0,
+                impressionen INTEGER DEFAULT 0,
+                conversions REAL DEFAULT 0,
+                quelle TEXT DEFAULT 'manuell',
+                aktualisiert_am TEXT NOT NULL,
+                UNIQUE (datum, website)
+            );
             """
         )
         database.execute(
@@ -121,6 +134,16 @@ def main():
             statistik = portal.list_besucher_statistik(7, website="alle")
             auto_statistik = portal.list_besucher_statistik(7, website="auto-lackierzentrum")
             tomorrowworks_statistik = portal.list_besucher_statistik(7, website="tomorrowworks")
+            portal.save_google_ads_tageswert(
+                website="auto-lackierzentrum",
+                datum=datetime.now().strftime("%Y-%m-%d"),
+                kosten_cent=1234,
+                klicks=10,
+                impressionen=200,
+                conversions=2,
+            )
+            google_ads = portal.list_google_ads_statistik(7, website="alle")
+            google_ads_auto = portal.list_google_ads_statistik(7, website="auto-lackierzentrum")
             database = temp_get_db()
             rows = database.execute(
                 "SELECT visitor_hash, website, seite, referrer_domain, geraet, browser, ist_bot FROM besucher_events ORDER BY id"
@@ -143,10 +166,30 @@ def main():
             ok &= check("Unpassende Herkunft wird ignoriert", len(rows) == 5)
             ok &= check("Besucher-Hashes bleiben je Website getrennt", rows[0]["visitor_hash"] != rows[4]["visitor_hash"])
             ok &= check("90-Tage-Löschfrist greift", all(row["visitor_hash"] != "alt" for row in rows))
+            ok &= check(
+                "Google-Ads-Kosten werden über alle drei Kampagnen ausgewertet",
+                google_ads["kosten_cent"] == 1234
+                and google_ads["klicks"] == 10
+                and google_ads["impressionen"] == 200
+                and google_ads["tagesbudget_cent"] == 1500
+                and google_ads["max_budget_cent"] == 10500
+                and len(google_ads["campaigns"]) == 3,
+            )
+            ok &= check(
+                "Google-Ads-Kosten sind nach Website filterbar",
+                google_ads_auto["kosten_label"] == "12,34 €"
+                and google_ads_auto["cpc_label"] == "1,23 €"
+                and google_ads_auto["kosten_pro_abschluss_label"] == "6,17 €"
+                and google_ads_auto["campaigns"][0]["ctr_label"] == "5,00 %",
+            )
 
             captured = {}
             portal.render_template = lambda name, **context: captured.update(
-                {"name": name, "statistik": context.get("statistik")}
+                {
+                    "name": name,
+                    "statistik": context.get("statistik"),
+                    "google_ads": context.get("google_ads"),
+                }
             ) or "analytics-ok"
             unauthenticated = client.get("/admin/besucherstatistik")
             with client.session_transaction() as session:
@@ -163,8 +206,40 @@ def main():
             after_admin_beacon = database.execute("SELECT COUNT(*) AS n FROM besucher_events").fetchone()["n"]
             database.close()
             ok &= check("Analytics ist nur für Admins erreichbar", unauthenticated.status_code in {302, 303})
-            ok &= check("Admin-Auswertung nutzt Website- und Zeitraumfilter", admin_view.status_code == 200 and captured.get("name") == "besucherstatistik_admin.html" and captured.get("statistik", {}).get("tage") == 7 and captured.get("statistik", {}).get("website") == "tomorrowworks")
+            ok &= check(
+                "Admin-Auswertung nutzt Website- und Zeitraumfilter",
+                admin_view.status_code == 200
+                and captured.get("name") == "besucherstatistik_admin.html"
+                and captured.get("statistik", {}).get("tage") == 7
+                and captured.get("statistik", {}).get("website") == "tomorrowworks"
+                and captured.get("google_ads", {}).get("website") == "tomorrowworks",
+            )
             ok &= check("Eigene Admin-Aufrufe werden nicht gezählt", admin_beacon.status_code == 204 and after_admin_beacon == before_admin_beacon)
+
+            with client.session_transaction() as session:
+                csrf_token = session.get(portal.CSRF_FIELD_NAME)
+            ads_post = client.post(
+                "/admin/besucherstatistik/google-ads",
+                data={
+                    portal.CSRF_FIELD_NAME: csrf_token,
+                    "next_tage": "7",
+                    "next_website": "auto-lackierzentrum",
+                    "website": "auto-lackierzentrum",
+                    "datum": datetime.now().strftime("%Y-%m-%d"),
+                    "kosten": "20,50",
+                    "klicks": "15",
+                    "impressionen": "300",
+                    "conversions": "3",
+                },
+            )
+            updated_ads = portal.list_google_ads_statistik(7, website="auto-lackierzentrum")
+            ok &= check(
+                "Google-Ads-Istwerte können CSRF-geschützt gespeichert werden",
+                ads_post.status_code in {302, 303}
+                and updated_ads["kosten_cent"] == 2050
+                and updated_ads["klicks"] == 15
+                and updated_ads["conversions"] == 3,
+            )
 
             portal.PUBLIC_SITE_ONLY = True
             public_client = portal.app.test_client()
@@ -193,7 +268,11 @@ def main():
             and "Besucher-Summe" in rendered_html
             and "Tomorrowworks" in rendered_html
             and "Autovermietung MOS" in rendered_html
-            and "Erkannte Bots" in rendered_html,
+            and "Erkannte Bots" in rendered_html
+            and "Google Ads Kosten" in rendered_html
+            and "Kosten je Abschluss" in rendered_html
+            and "Weitere Kennzahlen" in rendered_html
+            and "15,00 € Tagesbudget eingerichtet" in rendered_html,
         )
         mietwagen_info = render_client.get("/mietwagen-info")
         mietwagen_anfrage = render_client.get("/mietwagen")
