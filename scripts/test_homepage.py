@@ -86,6 +86,7 @@ def main():
     try:
         form_get = client.get("/anfrage?anliegen=leasingrueckgabe")
         form_html = form_get.get_data(as_text=True)
+        farbton_html = client.get("/anfrage?anliegen=farbton").get_data(as_text=True)
         with client.session_transaction() as sess:
             csrf_token = sess.get(portal.CSRF_FIELD_NAME)
         form_post = client.post(
@@ -105,17 +106,43 @@ def main():
             },
             follow_redirects=False,
         )
+        leasing_payload = dict(captured.get("payload", {}))
+        farbton_post = client.post(
+            "/anfrage",
+            data={
+                portal.CSRF_FIELD_NAME: csrf_token,
+                "anliegen": "farbton",
+                "besichtigungsart": "vor_ort",
+                "name": "Test Kunde",
+                "telefon": "0171 1234567",
+                "email": "kunde@example.test",
+                "fahrzeug": "VW Golf 8",
+                "wunschdatum": "",
+                "fahrzeug_link": "https://example.test/darf-nicht-gespeichert-werden",
+                "nachricht": "Beratung zum passenden Farbton.",
+                "website": "",
+            },
+            follow_redirects=False,
+        )
+        farbton_beschreibung = captured.get("payload", {}).get("beschreibung", "")
         success = client.get(form_post.headers.get("Location", "")) if form_post.status_code == 302 else None
         form_checks = {
             "Anfrageformular Status 200": form_get.status_code == 200,
             "Leasing vorausgewaehlt": 'value="leasingrueckgabe" selected' in form_html,
             "CSRF und Honeypot": 'name="csrf_token"' in form_html and 'name="website"' in form_html,
+            "Prueffelder nur fuer Fahrzeugchecks": 'data-anliegen-visible="kaufberatung leasingrueckgabe"' in form_html
+            and 'data-anliegen-visible="kaufberatung"' in form_html
+            and 'data-anliegen-visible="kaufberatung" hidden' in farbton_html
+            and 'data-anliegen-visible="kaufberatung leasingrueckgabe" hidden' in farbton_html,
             "Anfrage PRG": form_post.status_code == 302 and "gesendet=1" in form_post.headers.get("Location", ""),
-            "Website-Lead gespeichert": captured.get("payload", {}).get("quelle") == "website",
+            "Website-Lead gespeichert": leasing_payload.get("quelle") == "website",
             "Werkstatt per E-Mail benachrichtigt": captured.get("mail", {}).get("lead_id") == 991
             and captured.get("mail", {}).get("payload", {}).get("kunde_email") == "kunde@example.test",
-            "Vor-Ort-Aufpreis dokumentiert": "gegen Aufpreis" in captured.get("payload", {}).get("beschreibung", ""),
-            "Keine WhatsApp-Einwilligung behauptet": "keine WhatsApp-Einwilligung" in captured.get("payload", {}).get("notiz", ""),
+            "Vor-Ort-Aufpreis dokumentiert": "gegen Aufpreis" in leasing_payload.get("beschreibung", ""),
+            "Unpassende Pruefwerte verworfen": farbton_post.status_code == 302
+            and "Prüfort:" not in farbton_beschreibung
+            and "Fahrzeuganzeige:" not in farbton_beschreibung,
+            "Keine WhatsApp-Einwilligung behauptet": "keine WhatsApp-Einwilligung" in leasing_payload.get("notiz", ""),
             "Bestaetigung ohne Lead-ID": success is not None and success.status_code == 200 and "Ihre Anfrage ist angekommen" in success.get_data(as_text=True) and "991" not in success.get_data(as_text=True),
         }
     finally:

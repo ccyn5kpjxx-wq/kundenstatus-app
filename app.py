@@ -40367,19 +40367,28 @@ def website_anfrage():
             return redirect(url_for("website_anfrage"))
 
         anliegen = clean_text(request.form.get("anliegen"))
-        besichtigungsart = clean_text(request.form.get("besichtigungsart")) or "werkstatt"
+        ist_fahrzeugcheck = anliegen in {"kaufberatung", "leasingrueckgabe"}
+        besichtigungsart = (
+            clean_text(request.form.get("besichtigungsart")) or "werkstatt"
+            if ist_fahrzeugcheck
+            else ""
+        )
         name = clean_text(request.form.get("name"))[:120]
         telefon = clean_text(request.form.get("telefon"))[:80]
         email = clean_text(request.form.get("email")).lower()[:200]
         fahrzeug = clean_text(request.form.get("fahrzeug"))[:160]
         wunschdatum = clean_text(request.form.get("wunschdatum"))[:10]
-        fahrzeug_link = clean_text(request.form.get("fahrzeug_link"))[:1000]
+        fahrzeug_link = (
+            clean_text(request.form.get("fahrzeug_link"))[:1000]
+            if anliegen == "kaufberatung"
+            else ""
+        )
         nachricht = clean_text(request.form.get("nachricht"))[:2000]
         errors = []
 
         if anliegen not in WEBSITE_ANLIEGEN:
             errors.append("Bitte ein Anliegen auswählen.")
-        if besichtigungsart not in WEBSITE_BESICHTIGUNGSARTEN:
+        if ist_fahrzeugcheck and besichtigungsart not in WEBSITE_BESICHTIGUNGSARTEN:
             errors.append("Bitte eine gültige Besichtigungsart auswählen.")
         if len(name) < 2:
             errors.append("Bitte Ihren vollständigen Namen angeben.")
@@ -40406,13 +40415,13 @@ def website_anfrage():
             return render_website_anfrage(formdata=request.form, errors=errors, status_code=400)
 
         anliegen_label = WEBSITE_ANLIEGEN[anliegen]
-        besichtigung_label = WEBSITE_BESICHTIGUNGSARTEN[besichtigungsart]
+        besichtigung_label = WEBSITE_BESICHTIGUNGSARTEN.get(besichtigungsart, "")
         beschreibungsteile = [anliegen_label]
         if fahrzeug:
             beschreibungsteile.append(f"Fahrzeug: {fahrzeug}")
         if wunschdatum:
             beschreibungsteile.append(f"Wunschdatum: {wunschdatum}")
-        if anliegen in {"kaufberatung", "leasingrueckgabe"}:
+        if ist_fahrzeugcheck:
             beschreibungsteile.append(f"Prüfort: {besichtigung_label}")
         if fahrzeug_link:
             beschreibungsteile.append(f"Fahrzeuganzeige: {fahrzeug_link}")
