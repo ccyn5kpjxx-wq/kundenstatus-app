@@ -30,9 +30,13 @@ def main():
         "Details auf Wunsch erreichbar": 'class="category-disclosure"' in html and "Leistungen und Möglichkeiten im Detail" in html,
         "Fahrzeugcheck klar vermarktet": all(label in html for label in (
             "Gebrauchtwagen-Kaufcheck", "Leasingfahrzeug vor der Rückgabe kontrollieren",
-            "Besichtigung beim Verkäufer gegen Aufpreis", "Fotodokumentation",
+            "Nachforderungen vermeiden", "Kleine Spuren können sich summieren",
+            "Felgen &amp; Glasschäden", "Fotodokumentation",
             "kein amtliches Gutachten", "endgültige Leasingbewertung"
         )),
+        "Glasschaden direkt erreichbar": "/anfrage?anliegen=glasschaden" in html
+        and "Glasschaden melden" in html
+        and "17-stellige FIN" in html,
         "Zentrales Anfrageformular verlinkt": '/anfrage?anliegen=' in html and "mailto:info@auto-lackierzentrum.de?subject=" not in html,
         "Mobile Navigation vorhanden": all(marker in html for marker in (
             'class="nav-toggle"', 'aria-controls="hauptmenue"', 'class="nav-menu"', "aria-expanded"
@@ -168,9 +172,14 @@ def main():
             "member is-hannes", "member-photo", 'alt="Hannes, Auszubildender zum Fahrzeuglackierer"'
         )) and "hannes-azubi-fahrzeuglackierer-v2.webp" not in team_html,
         "Teamseite nutzt Anfrageformular": "Dellenreparatur anfragen" in team_html and "/anfrage?anliegen=dellenreparatur" in team_html,
-        "Leistungsseite nutzt Anfrageformular": "Fahrzeugcheck anfragen" in leistungen_html and "/anfrage?anliegen=leasingrueckgabe" in leistungen_html,
+        "Leistungsseite nutzt Anfrageformular": "Anfrage senden" in leistungen_html
+        and "/anfrage?anliegen=leasingrueckgabe" in leistungen_html,
+        "Glasschaden auf Leistungsseite": all(marker in leistungen_html for marker in (
+            "Glasschaden", "17-stelligen FIN", "Glasschaden melden",
+            "/anfrage?anliegen=glasschaden",
+        )),
         "Leasingrueckgabe auf Leistungsseite": all(label in leistungen_html for label in (
-            "Leasingrückgabe-Check", "sichtbare Schäden und Verschleiß", "wirtschaftlich sinnvoll"
+            "Leasingrückgabe-Check", "hohen Nachforderungen", "wirtschaftlich sinnvoll"
         )),
     }
     print_checks(category_checks)

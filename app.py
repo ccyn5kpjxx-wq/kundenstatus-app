@@ -41375,6 +41375,7 @@ def homepage_portal_links():
 
 WEBSITE_ANLIEGEN = {
     "lackanfrage": "Lackanfrage",
+    "glasschaden": "Glasschaden",
     "reparaturanfrage": "Reparaturanfrage",
     "mechanikanfrage": "Mechanik & Wartung",
     "fahrzeugpflege": "Fahrzeugpflege & Aufbereitung",
@@ -41396,6 +41397,12 @@ WEBSITE_KURZANFRAGEN = {
         "kurz": "Kratzer, Lackschaden oder Farbproblem",
         "frage": "Was sollen wir uns ansehen?",
         "placeholder": "z. B. Kratzer an der hinteren Tür oder Lackschaden am Kotflügel",
+    },
+    "glasschaden": {
+        "label": "Glasschaden",
+        "kurz": "Steinschlag, Riss oder Scheibentausch",
+        "frage": "Wo ist der Glasschaden und wie sieht er aus?",
+        "placeholder": "z. B. Steinschlag in der Frontscheibe auf der Beifahrerseite",
     },
     "reparaturanfrage": {
         "label": "Reparaturanfrage",
@@ -41590,6 +41597,11 @@ def website_anfrage():
         telefon = clean_text(request.form.get("telefon"))[:80]
         email = clean_text(request.form.get("email")).lower()[:200]
         fahrzeug = clean_text(request.form.get("fahrzeug"))[:160]
+        fin = re.sub(
+            r"[^A-Za-z0-9]",
+            "",
+            clean_text(request.form.get("fin"))[:80],
+        ).upper()
         wunschdatum = clean_text(request.form.get("wunschdatum"))[:10]
         fahrzeug_link = (
             clean_text(request.form.get("fahrzeug_link"))[:1000]
@@ -41637,6 +41649,10 @@ def website_anfrage():
             email_empfaenger = parse_email_recipients(email)
             if len(email_empfaenger) != 1 or clean_text(email_empfaenger[0]).lower() != email:
                 errors.append("Bitte genau eine gültige E-Mail-Adresse angeben.")
+        if anliegen == "glasschaden" and not re.fullmatch(r"[A-HJ-NPR-Z0-9]{17}", fin):
+            errors.append(
+                "Bitte die vollständige 17-stellige Fahrzeug-Identifizierungsnummer (FIN) angeben."
+            )
         if anliegen in {"kaufberatung", "leasingrueckgabe"} and len(fahrzeug) < 2:
             errors.append("Bitte Marke und Modell des Fahrzeugs angeben.")
         if anliegen in WEBSITE_KURZANFRAGEN and len(nachricht) < 5:
@@ -41693,6 +41709,8 @@ def website_anfrage():
         if fahrzeug:
             fahrzeug_label = "Gewünschtes Mietfahrzeug" if anliegen == "mietwagenanfrage" else "Fahrzeug"
             beschreibungsteile.append(f"{fahrzeug_label}: {fahrzeug}")
+        if anliegen == "glasschaden":
+            beschreibungsteile.append(f"FIN: {fin}")
         if wunschdatum:
             beschreibungsteile.append(f"Wunschdatum: {wunschdatum}")
         if ist_fahrzeugcheck:
@@ -41743,6 +41761,7 @@ def website_anfrage():
 
         naechste_aktion = {
             "lackanfrage": "Lackanfrage prüfen und Kunden zurückrufen",
+            "glasschaden": "Glasschaden prüfen, Scheibe über FIN zuordnen und Angebot vorbereiten",
             "reparaturanfrage": "Reparaturumfang prüfen und Kunden zurückrufen",
             "mechanikanfrage": "Mechanik- oder Wartungsbedarf prüfen und Kunden zurückrufen",
             "fahrzeugpflege": "Aufbereitungsumfang prüfen und Kunden zurückrufen",

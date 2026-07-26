@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>{% if kurzanfrage %}Schnelle Anfrage senden{% else %}Anfrage & Beratung{% endif %} | Gärtner Karosserie & Lack</title>
-  <meta name="description" content="Unverbindliche Anfrage für Lack, Reparatur, Fahrzeugpflege, Mietwagen oder Fahrzeugcheck bei Gärtner in Mosbach.">
+  <meta name="description" content="Unverbindliche Anfrage für Lack, Glasschaden, Reparatur, Fahrzeugpflege, Mietwagen oder Fahrzeugcheck bei Gärtner in Mosbach.">
   <style>
     :root { --ink:#252624; --ink-soft:#343532; --cream:#f2ede5; --paper:#fffdf9; --muted:#676660; --red:#e32219; --red-dark:#bd1c16; --line:#ded5c8; --teal:#0b6b67; --shadow:0 26px 70px rgba(49,42,33,.14); }
     * { box-sizing:border-box; }
@@ -31,6 +31,10 @@
     .intent-card.is-selected { box-shadow:inset 0 0 0 2px var(--red),0 20px 45px rgba(49,42,33,.14); }
     .intent-icon { width:54px; height:54px; display:grid; place-items:center; border-radius:16px; color:var(--red); background:#fff0ee; }
     .intent-icon svg { width:29px; height:29px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+    .glass-symbol { position:relative; width:31px; height:22px; display:block; border:2px solid currentColor; border-radius:10px 10px 6px 6px; transform:perspective(34px) rotateX(-9deg); }
+    .glass-symbol::before,.glass-symbol::after { content:""; position:absolute; background:currentColor; transform-origin:center; }
+    .glass-symbol::before { width:2px; height:16px; left:14px; top:1px; transform:rotate(31deg); }
+    .glass-symbol::after { width:11px; height:2px; left:10px; top:8px; transform:rotate(-25deg); }
     .intent-card.insurance .intent-icon { color:var(--teal); background:#edf8f6; }
     .intent-kicker { color:var(--red-dark); font-size:11px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
     .intent-card.insurance .intent-kicker { color:var(--teal); }
@@ -59,6 +63,7 @@
     input,select,textarea { width:100%; min-height:48px; padding:11px 13px; border:1px solid #cfc5b8; border-radius:11px; color:var(--ink); background:white; font:inherit; }
     textarea { min-height:115px; resize:vertical; }
     input:focus,select:focus,textarea:focus { border-color:var(--red); outline:2px solid rgba(227,34,25,.13); }
+    #fin { text-transform:uppercase; letter-spacing:.08em; font-weight:800; }
     .hint { margin:0; color:#77736d; font-size:12px; line-height:1.45; }
     fieldset { grid-column:1/-1; display:grid; gap:10px; margin:2px 0 0; padding:0; border:0; }
     .choice { display:flex; gap:10px; align-items:flex-start; padding:13px; border:1px solid var(--line); border-radius:12px; background:#faf7f1; cursor:pointer; }
@@ -157,6 +162,13 @@
           <p>Kratzer, Lackschaden, Farbton oder einzelne Bauteile lackieren lassen.</p>
           <span class="intent-link">Kurzanfrage öffnen →</span>
         </a>
+        <a class="intent-card {% if formdata.get('anliegen') == 'glasschaden' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='glasschaden') }}#kurzanfrage">
+          <span class="intent-icon" aria-hidden="true"><span class="glass-symbol"></span></span>
+          <span class="intent-kicker">FIN bereithalten</span>
+          <h2>Glasschaden</h2>
+          <p>Steinschlag, Riss oder Scheibentausch. Über die FIN ordnen wir die passende Scheibe zu.</p>
+          <span class="intent-link">Glasschaden melden →</span>
+        </a>
         <a class="intent-card {% if formdata.get('anliegen') == 'reparaturanfrage' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='reparaturanfrage') }}#kurzanfrage">
           <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="m19 6 7 7-4 4-7-7z"/><path d="M17 12 7 22a3 3 0 0 0 4 4l10-10"/><path d="m8 21 3 3"/></svg></span>
           <span class="intent-kicker">Ca. 1 Minute</span>
@@ -189,8 +201,15 @@
           <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><circle cx="14" cy="14" r="8"/><path d="m20 20 7 7M10 14l3 3 5-6"/></svg></span>
           <span class="intent-kicker">Schnell anfragen</span>
           <h2>Fahrzeugcheck</h2>
-          <p>Gebrauchtwagenkauf, Leasingrückgabe oder allgemeine Fahrzeugprüfung.</p>
+          <p>Gebrauchtwagenkauf oder eine allgemeine Fahrzeugprüfung.</p>
           <span class="intent-link">Check anfragen →</span>
+        </a>
+        <a class="intent-card {% if formdata.get('anliegen') == 'leasingrueckgabe' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='leasingrueckgabe') }}#kurzanfrage">
+          <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M7 22h18l-2-9H9z"/><path d="M10 22v4M22 22v4M11 26h10"/><path d="m12 16 3 3 6-7"/></svg></span>
+          <span class="intent-kicker">Vor der Rückgabe</span>
+          <h2>Leasingrückgabe-Check</h2>
+          <p>Kratzer, Dellen, Felgen, Glas und Zubehör vor der Fahrzeugabgabe prüfen lassen.</p>
+          <span class="intent-link">Anfrage senden →</span>
         </a>
         <a class="intent-card {% if formdata.get('anliegen') == 'weitere_anfrage' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='weitere_anfrage') }}#kurzanfrage">
           <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 7h22v15H13l-6 5v-5H5z"/><path d="M10 12h12M10 17h8"/></svg></span>
@@ -223,7 +242,7 @@
         <aside class="info">
           <div class="eyebrow">Ganz einfach</div>
           <h2>Kurz schildern. Wir kümmern uns.</h2>
-          <p>Sie müssen noch keine Versicherungsdaten, Termine oder langen Fahrzeugangaben zusammensuchen.</p>
+          <p>Sie müssen noch keine Versicherungsdaten, Termine oder langen Fahrzeugangaben zusammensuchen.{% if formdata.get('anliegen') == 'glasschaden' %} Für die eindeutige Scheibenzuordnung benötigen wir lediglich die FIN.{% endif %}</p>
           <ul><li>Name und Rückrufmöglichkeit</li><li>Kurze Beschreibung</li><li>Bis zu fünf Bilder, wenn Sie möchten</li></ul>
           <p class="info-note">Wir prüfen die Anfrage persönlich und klären alles Weitere direkt mit Ihnen.</p>
         </aside>
@@ -240,6 +259,13 @@
             <div class="field"><label for="telefon">Telefon</label><input id="telefon" name="telefon" maxlength="80" inputmode="tel" autocomplete="tel" value="{{ formdata.get('telefon','') }}" placeholder="z. B. 0171 1234567"><p class="hint">Telefon oder E-Mail genügt.</p></div>
             <div class="field"><label for="email">E-Mail</label><input id="email" name="email" maxlength="200" type="email" autocomplete="email" value="{{ formdata.get('email','') }}"></div>
             {% if formdata.get('anliegen') != 'mietwagenanfrage' %}<div class="field"><label for="fahrzeug">Fahrzeug <span class="hint">(optional)</span></label><input id="fahrzeug" name="fahrzeug" maxlength="160" placeholder="z. B. VW Golf 8" value="{{ formdata.get('fahrzeug','') }}"></div>{% endif %}
+            {% if formdata.get('anliegen') == 'glasschaden' %}
+            <div class="field full">
+              <label for="fin">Fahrzeug-Identifizierungsnummer (FIN) *</label>
+              <input id="fin" name="fin" maxlength="17" minlength="17" pattern="[A-HJ-NPR-Z0-9]{17}" autocomplete="off" autocapitalize="characters" spellcheck="false" value="{{ formdata.get('fin','') }}" placeholder="17-stellige FIN" aria-describedby="fin-hinweis" required>
+              <p class="hint" id="fin-hinweis">Die FIN steht im Fahrzeugschein unter Feld E. Wir benötigen sie, um Scheibe, Sensorik und Ausstattung passend zuzuordnen.</p>
+            </div>
+            {% endif %}
             {% if formdata.get('anliegen') == 'mechanikanfrage' %}
             <fieldset>
               <legend>Was soll geprüft oder gemacht werden? *</legend>
@@ -303,7 +329,7 @@
             <div class="photo-preview" id="photo-preview" aria-live="polite"></div>
           </div>
           <p class="privacy">Wir verwenden Ihre Angaben und die optionalen Bilder ausschließlich zur Bearbeitung dieser Anfrage und zur persönlichen Kontaktaufnahme. Mehr dazu in der <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>.</p>
-          <button class="button" type="submit">Kurzanfrage senden</button>
+          <button class="button" type="submit">{% if formdata.get('anliegen') == 'glasschaden' %}Glasschaden melden{% else %}Kurzanfrage senden{% endif %}</button>
         </form>
       {% elif not kurzanfrage %}
         {% set ausgewaehltes_anliegen = formdata.get('anliegen','allgemein') %}
@@ -432,6 +458,15 @@
 
       anliegen.addEventListener('change', felderAktualisieren);
       felderAktualisieren();
+    })();
+  </script>
+  <script>
+    (() => {
+      const fin = document.getElementById('fin');
+      if (!fin) return;
+      fin.addEventListener('input', () => {
+        fin.value = fin.value.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, '').slice(0, 17);
+      });
     })();
   </script>
   <script>

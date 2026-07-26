@@ -82,6 +82,8 @@ def main():
     auswahl_html = auswahl.get_data(as_text=True)
     lack = client.get("/anfrage?anliegen=lackanfrage")
     lack_html = lack.get_data(as_text=True)
+    glas = client.get("/anfrage?anliegen=glasschaden")
+    glas_html = glas.get_data(as_text=True)
     pflege = client.get("/anfrage?anliegen=fahrzeugpflege")
     pflege_html = pflege.get_data(as_text=True)
     mechanik = client.get("/anfrage?anliegen=mechanikanfrage")
@@ -97,8 +99,9 @@ def main():
         check("Homepage verlinkt neue Auswahl", "/anfrage?anliegen=schaden" in homepage_html),
         check("Alle Anfragewege sind auswählbar", auswahl.status_code == 200 and all(
             text in auswahl_html for text in (
-                "Lackanfrage", "Reparaturanfrage", "Mechanik &amp; Wartung", "Fahrzeugpflege", "Mietwagen",
-                "Fahrzeugcheck", "Weitere Anfrage", "Versicherungsschaden",
+                "Lackanfrage", "Glasschaden", "Reparaturanfrage", "Mechanik &amp; Wartung",
+                "Fahrzeugpflege", "Mietwagen", "Fahrzeugcheck", "Leasingrückgabe-Check",
+                "Weitere Anfrage", "Versicherungsschaden",
             )
         )),
         check("Versicherung bleibt eigener Prozess", 'href="/privat/schaden"' in auswahl_html),
@@ -109,6 +112,12 @@ def main():
             )
         )),
         check("Kurzanfrage erlaubt mehrere Bilder", "Bilder hinzufügen" in lack_html and 'multiple' in lack_html),
+        check("Glasschaden fragt FIN verpflichtend ab", glas.status_code == 200 and all(
+            marker in glas_html for marker in (
+                "Glasschaden melden", 'name="fin"', 'maxlength="17"', 'minlength="17"',
+                'pattern="[A-HJ-NPR-Z0-9]{17}"', "Fahrzeugschein unter Feld E",
+            )
+        )),
         check("Fahrzeugpflege bietet Kategorien", pflege.status_code == 200 and all(
             marker in pflege_html for marker in (
                 'name="pflege_kategorie"', "Innenaufbereitung", "Außenaufbereitung",
@@ -176,8 +185,54 @@ def main():
             path.is_file() and path.read_bytes() == PNG_1X1 for path in upload_paths
         )),
         check("Bilder starten keine OCR", lead and not lead.get("ki_analyse_text")),
-        check("Lead ist dem Werkstatt-Cockpit zugeordnet", lead and lead["quelle"] == "website"),
+        check("Lead ist dem Werkstattbereich zugeordnet", lead and
+              lead["website"] == "auto-lackierzentrum" and lead["herkunft_typ"] == "website_formular"),
     ]
+
+    glas_ohne_fin = client.post(
+        "/anfrage",
+        data={
+            portal.CSRF_FIELD_NAME: csrf_token,
+            "anliegen": "glasschaden",
+            "name": "Glaskunde Ohne Fin",
+            "telefon": "0171 9990011",
+            "email": "",
+            "fahrzeug": "VW Golf",
+            "fin": "",
+            "nachricht": "Steinschlag in der Frontscheibe",
+            "website": "",
+        },
+        follow_redirects=False,
+    )
+    glas_response = client.post(
+        "/anfrage",
+        data={
+            portal.CSRF_FIELD_NAME: csrf_token,
+            "anliegen": "glasschaden",
+            "name": "Glaskunde Mit Fin",
+            "telefon": "0171 9990022",
+            "email": "",
+            "fahrzeug": "VW Golf",
+            "fin": "WVWZZZ1JZXW000001",
+            "nachricht": "Steinschlag in der Frontscheibe",
+            "website": "",
+        },
+        follow_redirects=False,
+    )
+    glas_lead_id = int(scalar("SELECT MAX(id) FROM leads") or 0)
+    glas_lead = portal.get_lead(glas_lead_id) if glas_lead_id else None
+    checks += [
+        check("Glasschaden ohne FIN wird abgewiesen", glas_ohne_fin.status_code == 400
+              and "17-stellige Fahrzeug-Identifizierungsnummer" in glas_ohne_fin.get_data(as_text=True)),
+        check("Glasschaden mit FIN erzeugt Lead", glas_response.status_code == 302 and glas_lead_id > lead_id),
+        check("FIN steht eindeutig im Lead", glas_lead and all(
+            text in glas_lead["beschreibung"] for text in ("Glasschaden", "FIN: WVWZZZ1JZXW000001")
+        )),
+        check("Glasschaden setzt passende Folgeaktion", glas_lead
+              and "Scheibe über FIN zuordnen" in glas_lead["naechste_aktion"]),
+    ]
+    with portal.PUBLIC_FORM_ATTEMPTS_LOCK:
+        portal.PUBLIC_FORM_ATTEMPTS.clear()
 
     pflege_response = client.post(
         "/anfrage",
@@ -315,7 +370,10 @@ def main():
             antwort.status_code == 200 and antwort.data == PNG_1X1 for antwort in datei_antworten
         )),
         check("Neue Anfragearten erscheinen im Lead-Cockpit", cockpit.status_code == 200 and all(
-            name in cockpit_html for name in ("Pflegeanfrage Kunde", "Mechanikanfrage Kunde", "Mietwagenanfrage Kunde")
+            name in cockpit_html for name in (
+                "Glaskunde Mit Fin", "Pflegeanfrage Kunde", "Mechanikanfrage Kunde",
+                "Mietwagenanfrage Kunde",
+            )
         )),
     ]
 
@@ -326,19 +384,14 @@ def main():
     )
     lead_nachher = portal.get_lead(lead_id)
     auftrag_id = int(lead_nachher["auftrag_id"] or 0)
-    leadbild_count = int(
-        scalar(
-            "SELECT COUNT(*) FROM dateien WHERE auftrag_id=? AND kategorie='leadbild'",
-            (auftrag_id,),
-        )
-        or 0
-    )
     bestand_nachher = dict(portal.get_auftrag(bestand_id))
     lead_dateien_nachher = portal.list_lead_dateien(lead_id)
     checks += [
-        check("Lead wird normaler Auftrag", umwandlung.status_code == 302 and auftrag_id > 0),
-        check("Alle Bilder bleiben am Auftrag erhalten", leadbild_count == 3 and all(path.is_file() for path in upload_paths)),
+        check("Lead bleibt bis zur Angebotsannahme ohne Auftrag", umwandlung.status_code == 302
+              and auftrag_id == 0 and lead_nachher["kunden_status_token"]),
         check("Bildhistorie bleibt auch am Lead erhalten", len(lead_dateien_nachher) == 3),
+        check("Lead-Bilder bleiben bis zur Annahme sicher gespeichert",
+              all(path.is_file() for path in upload_paths)),
         check("Bestehender Auftrag bleibt unverändert", bestand_nachher == bestand_vorher),
     ]
 
