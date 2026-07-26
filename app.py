@@ -11238,10 +11238,10 @@ def hydrate_lead(row):
     )
     lead["is_closed"] = lead["status"] in {"gewonnen", "verloren"}
     lead["is_due"] = bool(lead["naechster_kontakt_obj"] and lead["naechster_kontakt_obj"] <= date.today() and not lead["is_closed"])
-    # Öffentliche Website-Anfragen erlauben einen Rückruf, aber ohne
-    # dokumentiertes Opt-in keine Kontaktaufnahme über WhatsApp.
-    lead["can_whatsapp"] = bool(lead_whatsapp_url(lead)) and lead["quelle"] != "website"
-    lead["whatsapp_url"] = lead_whatsapp_url(lead) if lead["can_whatsapp"] else ""
+    # Der Link bereitet nur einen persönlichen Entwurf vor; gesendet wird erst
+    # nach der bewussten Bestätigung durch die Werkstatt in WhatsApp.
+    lead["whatsapp_url"] = lead_whatsapp_url(lead)
+    lead["can_whatsapp"] = bool(lead["whatsapp_url"])
     lead["mailto_url"] = (
         f"mailto:{quote(lead['kunde_email'], safe='@.+-_')}?subject={quote('Ihre Anfrage bei Gaertner Karosserie & Lack')}"
         f"&body={quote(lead_whatsapp_message(lead))}"

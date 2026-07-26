@@ -177,10 +177,10 @@
       <div class="mb-3">{{ lead['naechste_aktion'] or 'Noch keine konkrete Aktion festgelegt.' }}</div>
       <div class="d-grid gap-2">
         {% if lead['whatsapp_url'] %}
-        <a href="{{ lead['whatsapp_url'] }}" target="_blank" rel="noopener" class="btn btn-success">WhatsApp vorbereiten</a>
+        <a href="{{ lead['whatsapp_url'] }}" target="_blank" rel="noopener" class="btn btn-success">Per WhatsApp antworten</a>
         {% endif %}
         {% if lead['mailto_url'] %}
-        <a href="{{ lead['mailto_url'] }}" class="btn btn-outline-dark">E-Mail vorbereiten</a>
+        <a href="{{ lead['mailto_url'] }}" class="btn btn-outline-dark">Per E-Mail antworten</a>
         {% endif %}
         {% if not lead['whatsapp_url'] and not lead['mailto_url'] %}
         <div class="text-muted small">Handynummer oder E-Mail eintragen, dann kann direkt aus dem Lead kommuniziert werden.</div>
