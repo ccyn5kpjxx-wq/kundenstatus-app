@@ -1,8 +1,20 @@
+import atexit
+import os
 from pathlib import Path
+import shutil
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+TEST_ROOT = Path(tempfile.mkdtemp(prefix="kundenstatus-werkstatt-tafel-test-"))
+os.environ["DATABASE_URL"] = ""
+os.environ["RENDER"] = "1"
+os.environ["REQUIRE_POSTGRES_ON_RENDER"] = "0"
+os.environ["SQLITE_DB_PATH"] = str(TEST_ROOT / "auftraege.db")
+os.environ["UPLOAD_DIR"] = str(TEST_ROOT / "uploads")
+atexit.register(shutil.rmtree, TEST_ROOT, ignore_errors=True)
 
 import app as portal  # noqa: E402
 
@@ -56,6 +68,13 @@ def main():
     response = client.get("/werkstatt/tafel")
     html = response.get_data(as_text=True)
     check("Tafel laedt mit Spalten", response.status_code == 200 and "In Arbeit" in html and "Geplant" in html)
+    check(
+        "Tafel-Kopf oeffnet interne Messungsuebersicht",
+        "🎨 Messungen" in html
+        and "data-messungen-oeffnen" in html
+        and "data-messungen-dialog" in html
+        and "emea.ppglinq.com" not in html,
+    )
 
     # Eingeloggt: Login-Seite leitet direkt zur Tafel weiter
     response = client.get("/werkstatt")
@@ -66,6 +85,24 @@ def main():
     if auftraege:
         auftrag = auftraege[0]
         auftrag_id = auftrag["id"]
+
+        # Eine erfasste Lackmessung muss direkt im Tafel-Dialog auftauchen.
+        db = portal.get_db()
+        db.execute(
+            "UPDATE auftraege SET messung_erforderlich='ja', farbton=?, variantencode=?, angemischte_menge=? WHERE id=?",
+            ("Testblau", "PPG-TEST-42", "250 ml", auftrag_id),
+        )
+        db.commit()
+        db.close()
+        messungen_html = client.get("/werkstatt/tafel").get_data(as_text=True)
+        check(
+            "Interne Messungsuebersicht zeigt Auftrags-Lackdaten",
+            "PPG-TEST-42" in messungen_html
+            and "Testblau" in messungen_html
+            and "250 ml" in messungen_html
+            and "Messung offen" not in messungen_html,
+        )
+
         response = client.get(f"/werkstatt/auftrag/{auftrag_id}")
         html = response.get_data(as_text=True)
         check(
