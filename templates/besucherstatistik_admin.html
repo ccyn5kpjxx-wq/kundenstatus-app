@@ -39,6 +39,14 @@
   .ads-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
   .ads-status { display:inline-flex; align-items:center; gap:.45rem; padding:.45rem .7rem; border-radius:999px; background:#fff4d8; color:#75530b; font-size:.78rem; font-weight:800; }
   .ads-status::before { content:""; width:8px; height:8px; border-radius:50%; background:#fbbc05; }
+  .ads-status.is-connected { background:#e4f5ea; color:#176b38; }
+  .ads-status.is-connected::before { background:#34a853; }
+  .ads-status.is-error { background:#fde8e6; color:#9a2f27; }
+  .ads-status.is-error::before { background:#ea4335; }
+  .ads-status.is-ready { background:#e8f0fe; color:#2458a6; }
+  .ads-status.is-ready::before { background:#4285f4; }
+  .ads-head-actions { display:flex; align-items:center; justify-content:flex-end; gap:.55rem; flex-wrap:wrap; }
+  .ads-sync-note { width:100%; max-width:560px; color:var(--muted); font-size:.78rem; text-align:right; }
   .ads-kpis { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.8rem; margin-top:1.15rem; }
   .ads-kpi { padding:1rem; border:1px solid rgba(24,56,63,.1); border-radius:15px; background:#fffdf9; }
   .ads-kpi span,.ads-kpi small { display:block; color:var(--muted); }
@@ -59,7 +67,7 @@
   @media(max-width:1180px){.ads-kpis{grid-template-columns:repeat(3,1fr)}.ads-entry-grid{grid-template-columns:repeat(3,1fr)}}
   @media(max-width:1050px){.analytics-site-picker{grid-template-columns:repeat(2,1fr)}.analytics-kpis{grid-template-columns:repeat(2,1fr)}.analytics-grid{grid-template-columns:1fr}.analytics-websites{grid-template-columns:1fr}}
   @media(max-width:620px){.analytics-site-picker{grid-template-columns:1fr}.analytics-kpis{grid-template-columns:1fr 1fr}.analytics-kpi{padding:.9rem}.analytics-kpi strong{font-size:1.7rem}}
-  @media(max-width:620px){.ads-kpis,.ads-entry-grid{grid-template-columns:1fr 1fr}.ads-kpi strong{font-size:1.35rem}.ads-entry-grid .ads-entry-campaign,.ads-entry-grid .ads-entry-submit{grid-column:1/-1}}
+  @media(max-width:620px){.ads-kpis,.ads-entry-grid{grid-template-columns:1fr 1fr}.ads-kpi strong{font-size:1.35rem}.ads-entry-grid .ads-entry-campaign,.ads-entry-grid .ads-entry-submit{grid-column:1/-1}.ads-head-actions{justify-content:flex-start}.ads-sync-note{text-align:left}}
 </style>
 {% endblock %}
 {% block content %}
@@ -105,7 +113,18 @@
       <h5 id="google-ads-title" class="mb-1">Google Ads Kosten</h5>
       <p class="mb-0">Die wichtigsten Kosten und Ergebnisse für {{ statistik['website_label'] }}.</p>
     </div>
-    <span class="ads-status">{{ google_ads['sync_status'] }}</span>
+    <div class="ads-head-actions">
+      <span class="ads-status is-{{ google_ads['sync_status_kind'] }}">{{ google_ads['sync_status'] }}</span>
+      {% if google_ads['api_configured'] %}
+        <form method="post" action="{{ url_for('admin_google_ads_sync') }}">
+          {{ csrf_field()|safe }}
+          <input type="hidden" name="next_tage" value="{{ statistik['tage'] }}">
+          <input type="hidden" name="next_website" value="{{ statistik['website'] }}">
+          <button class="btn btn-soft btn-sm" type="submit">Jetzt synchronisieren</button>
+        </form>
+      {% endif %}
+      <small class="ads-sync-note">{{ google_ads['sync_note'] }}</small>
+    </div>
   </div>
 
   <div class="ads-kpis">
@@ -142,7 +161,11 @@
 
   <p class="analytics-note mt-3 mb-0">
     <strong>Stand: {{ google_ads['aktualisiert_label'] }}.</strong>
-    Solange die Google-Ads-API noch nicht verbunden ist, stammen die Ist-Werte aus der geschützten Erfassung unten. 0,00 € bedeutet daher entweder keine Ausgaben oder noch keine eingetragenen Ist-Werte; das eingerichtete Budget wird getrennt angezeigt.
+    {% if google_ads['api_configured'] %}
+      API-Werte werden täglich importiert; die geschützte manuelle Erfassung bleibt für Korrekturen verfügbar. 0,00 € bedeutet, dass im gewählten Zeitraum keine importierten oder manuell erfassten Kosten vorliegen.
+    {% else %}
+      Solange die Google-Ads-API noch nicht verbunden ist, stammen die Ist-Werte aus der geschützten Erfassung unten. 0,00 € bedeutet daher entweder keine Ausgaben oder noch keine eingetragenen Ist-Werte; das eingerichtete Budget wird getrennt angezeigt.
+    {% endif %}
   </p>
 
   <details class="ads-entry">

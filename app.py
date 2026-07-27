@@ -432,6 +432,25 @@ WEATHER_CACHE_SECONDS = max(60, env_int("WEATHER_CACHE_SECONDS", 600))
 TOPCOLOR_EMAIL = (os.environ.get("TOPCOLOR_EMAIL") or "").strip()
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_DOC_AI_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+GOOGLE_ADS_API_BASE_URL = "https://googleads.googleapis.com"
+GOOGLE_ADS_API_VERSION = clean_text(
+    os.environ.get("GOOGLE_ADS_API_VERSION") or "v25"
+).lower()
+if not re.fullmatch(r"v\d+", GOOGLE_ADS_API_VERSION):
+    GOOGLE_ADS_API_VERSION = "v25"
+GOOGLE_ADS_API_TIMEOUT_SECONDS = max(
+    5,
+    min(env_int("GOOGLE_ADS_API_TIMEOUT_SECONDS", 30), 120),
+)
+GOOGLE_ADS_AUTO_SYNC_ENABLED = env_flag("GOOGLE_ADS_AUTO_SYNC_ENABLED", True)
+GOOGLE_ADS_SYNC_INTERVAL_SECONDS = max(
+    3600,
+    env_int("GOOGLE_ADS_SYNC_INTERVAL_SECONDS", 24 * 60 * 60),
+)
+GOOGLE_ADS_SYNC_LOOKBACK_DAYS = max(
+    1,
+    min(env_int("GOOGLE_ADS_SYNC_LOOKBACK_DAYS", 90), 90),
+)
 GOOGLE_DOC_AI_TIMEOUT = env_int(
     "DOCUMENT_ANALYSIS_TIMEOUT_SECONDS",
     20 if RUNNING_ON_RENDER else 45,
@@ -28082,6 +28101,478 @@ GOOGLE_ADS_KAMPAGNEN = {
         "budget_tag_cent": 500,
     },
 }
+GOOGLE_ADS_CAMPAIGN_ID_ENV = {
+    "auto-lackierzentrum": "GOOGLE_ADS_CAMPAIGN_ID_AUTO_LACKIERZENTRUM",
+    "tomorrowworks": "GOOGLE_ADS_CAMPAIGN_ID_TOMORROWWORKS",
+    "autovermietung-mos": "GOOGLE_ADS_CAMPAIGN_ID_AUTOVERMIETUNG_MOS",
+}
+GOOGLE_ADS_LAST_ATTEMPT_SETTING = "google_ads_last_attempt_at"
+GOOGLE_ADS_LAST_SUCCESS_SETTING = "google_ads_last_success_at"
+GOOGLE_ADS_LAST_ERROR_SETTING = "google_ads_last_error"
+GOOGLE_ADS_LAST_SUMMARY_SETTING = "google_ads_last_summary"
+_google_ads_sync_lock = threading.Lock()
+_google_ads_thread_started = False
+
+
+class GoogleAdsSyncError(RuntimeError):
+    pass
+
+
+def google_ads_normalize_customer_id(value):
+    normalized = re.sub(r"[\s-]+", "", clean_text(value))
+    return normalized if re.fullmatch(r"\d{10}", normalized) else ""
+
+
+def google_ads_normalize_campaign_id(value):
+    normalized = re.sub(r"[\s-]+", "", clean_text(value))
+    return normalized if re.fullmatch(r"\d{1,20}", normalized) else ""
+
+
+def google_ads_runtime_config():
+    values = {
+        "developer_token": clean_secret_value(os.environ.get("GOOGLE_ADS_DEVELOPER_TOKEN")),
+        "client_id": clean_secret_value(os.environ.get("GOOGLE_ADS_CLIENT_ID")),
+        "client_secret": clean_secret_value(os.environ.get("GOOGLE_ADS_CLIENT_SECRET")),
+        "refresh_token": clean_secret_value(os.environ.get("GOOGLE_ADS_REFRESH_TOKEN")),
+        "customer_id": google_ads_normalize_customer_id(
+            os.environ.get("GOOGLE_ADS_CUSTOMER_ID")
+        ),
+        "login_customer_id": google_ads_normalize_customer_id(
+            os.environ.get("GOOGLE_ADS_LOGIN_CUSTOMER_ID")
+        ),
+        "api_version": GOOGLE_ADS_API_VERSION,
+    }
+    required = (
+        ("developer_token", "Developer Token"),
+        ("client_id", "OAuth Client-ID"),
+        ("client_secret", "OAuth Client-Secret"),
+        ("refresh_token", "OAuth Refresh-Token"),
+        ("customer_id", "Ads-Kundennummer"),
+    )
+    values["missing"] = [label for key, label in required if not values[key]]
+    values["configured"] = not values["missing"]
+    values["campaign_ids"] = {
+        website: google_ads_normalize_campaign_id(os.environ.get(env_name))
+        for website, env_name in GOOGLE_ADS_CAMPAIGN_ID_ENV.items()
+    }
+    return values
+
+
+def google_ads_response_error(response, fallback):
+    message = ""
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            message = clean_text(error.get("message") or error.get("status"))
+        elif isinstance(error, str):
+            message = clean_text(payload.get("error_description") or error)
+        if not message:
+            message = clean_text(payload.get("error_description") or payload.get("message"))
+    status_code = getattr(response, "status_code", 0)
+    if not message and status_code:
+        message = f"HTTP {status_code}"
+    request_id = clean_text(getattr(response, "headers", {}).get("request-id"))
+    result = f"{fallback}: {message or 'unbekannter API-Fehler'}"
+    if request_id:
+        result += f" (Request-ID {request_id})"
+    return result[:500]
+
+
+def google_ads_access_token(config, http_client=None):
+    http = http_client or get_requests()
+    if http is None:
+        raise GoogleAdsSyncError("Das Python-Modul requests ist nicht verfügbar.")
+    try:
+        response = http.post(
+            GOOGLE_TOKEN_URL,
+            data={
+                "grant_type": "refresh_token",
+                "client_id": config["client_id"],
+                "client_secret": config["client_secret"],
+                "refresh_token": config["refresh_token"],
+            },
+            timeout=GOOGLE_ADS_API_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        raise GoogleAdsSyncError(
+            f"OAuth-Verbindung zu Google fehlgeschlagen: {clean_text(exc)[:240]}"
+        ) from exc
+    if getattr(response, "status_code", 500) >= 400:
+        raise GoogleAdsSyncError(
+            google_ads_response_error(response, "Google OAuth wurde abgelehnt")
+        )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise GoogleAdsSyncError("Google OAuth lieferte keine gültige JSON-Antwort.") from exc
+    access_token = clean_secret_value(
+        payload.get("access_token") if isinstance(payload, dict) else ""
+    )
+    if not access_token:
+        raise GoogleAdsSyncError("Google OAuth lieferte keinen Access-Token.")
+    return access_token
+
+
+def google_ads_search_stream(config, access_token, query, http_client=None):
+    http = http_client or get_requests()
+    if http is None:
+        raise GoogleAdsSyncError("Das Python-Modul requests ist nicht verfügbar.")
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "developer-token": config["developer_token"],
+        "Content-Type": "application/json",
+    }
+    if config.get("login_customer_id"):
+        headers["login-customer-id"] = config["login_customer_id"]
+    url = (
+        f"{GOOGLE_ADS_API_BASE_URL}/{config['api_version']}/customers/"
+        f"{config['customer_id']}/googleAds:searchStream"
+    )
+    try:
+        response = http.post(
+            url,
+            headers=headers,
+            json={"query": query},
+            timeout=GOOGLE_ADS_API_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        raise GoogleAdsSyncError(
+            f"Google-Ads-API ist nicht erreichbar: {clean_text(exc)[:240]}"
+        ) from exc
+    if getattr(response, "status_code", 500) >= 400:
+        raise GoogleAdsSyncError(
+            google_ads_response_error(response, "Google-Ads-Abfrage fehlgeschlagen")
+        )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise GoogleAdsSyncError("Google Ads lieferte keine gültige JSON-Antwort.") from exc
+    if not isinstance(payload, list):
+        raise GoogleAdsSyncError("Google Ads lieferte ein unerwartetes Antwortformat.")
+    results = []
+    for chunk in payload:
+        if isinstance(chunk, dict) and isinstance(chunk.get("results"), list):
+            results.extend(row for row in chunk["results"] if isinstance(row, dict))
+    return results
+
+
+def google_ads_match_campaigns(config, campaign_rows):
+    available = []
+    for row in campaign_rows:
+        campaign = row.get("campaign") if isinstance(row, dict) else None
+        if not isinstance(campaign, dict):
+            continue
+        campaign_id = google_ads_normalize_campaign_id(campaign.get("id"))
+        campaign_name = clean_text(campaign.get("name"))
+        if campaign_id:
+            available.append({"id": campaign_id, "name": campaign_name})
+
+    matched = {}
+    missing = []
+    ambiguous = []
+    for website, campaign_config in GOOGLE_ADS_KAMPAGNEN.items():
+        configured_id = config["campaign_ids"].get(website)
+        if configured_id:
+            candidates = [row for row in available if row["id"] == configured_id]
+        else:
+            expected_name = clean_text(campaign_config.get("kampagne")).casefold()
+            candidates = [
+                row for row in available if row["name"].casefold() == expected_name
+            ]
+        if len(candidates) == 1:
+            matched[candidates[0]["id"]] = {
+                "website": website,
+                "name": candidates[0]["name"] or campaign_config["kampagne"],
+            }
+        elif len(candidates) > 1:
+            ambiguous.append(BESUCHER_WEBSITES[website]["label"])
+        else:
+            missing.append(BESUCHER_WEBSITES[website]["label"])
+    if ambiguous:
+        raise GoogleAdsSyncError(
+            "Mehrere gleichnamige Kampagnen gefunden. Bitte Kampagnen-IDs hinterlegen: "
+            + ", ".join(ambiguous)
+        )
+    if missing:
+        raise GoogleAdsSyncError(
+            "Kampagnen im Google-Ads-Konto nicht gefunden: " + ", ".join(missing)
+        )
+    return matched
+
+
+def google_ads_api_metric_values(metric_rows, matched_campaigns):
+    values = {}
+    for row in metric_rows:
+        campaign = row.get("campaign") if isinstance(row, dict) else None
+        segments = row.get("segments") if isinstance(row, dict) else None
+        metrics = row.get("metrics") if isinstance(row, dict) else None
+        if not isinstance(campaign, dict) or not isinstance(segments, dict):
+            continue
+        campaign_id = google_ads_normalize_campaign_id(campaign.get("id"))
+        mapping = matched_campaigns.get(campaign_id)
+        if not mapping:
+            continue
+        datum = clean_text(segments.get("date"))
+        try:
+            parsed_date = date.fromisoformat(datum)
+        except ValueError:
+            continue
+        if parsed_date > date.today() or parsed_date < date.today() - timedelta(days=365):
+            continue
+        metrics = metrics if isinstance(metrics, dict) else {}
+        try:
+            cost_micros = max(0, int(metrics.get("costMicros") or 0))
+            klicks = max(0, int(metrics.get("clicks") or 0))
+            impressionen = max(0, int(metrics.get("impressions") or 0))
+            conversions = max(0.0, float(metrics.get("conversions") or 0))
+        except (TypeError, ValueError):
+            continue
+        kosten_cent = int(
+            (Decimal(cost_micros) / Decimal("10000")).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+        key = (datum, mapping["website"])
+        aggregate = values.setdefault(
+            key,
+            {
+                "datum": datum,
+                "website": mapping["website"],
+                "kampagne": mapping["name"],
+                "kosten_cent": 0,
+                "klicks": 0,
+                "impressionen": 0,
+                "conversions": 0.0,
+            },
+        )
+        aggregate["kosten_cent"] += kosten_cent
+        aggregate["klicks"] += klicks
+        aggregate["impressionen"] += impressionen
+        aggregate["conversions"] = round(
+            aggregate["conversions"] + conversions,
+            2,
+        )
+    return sorted(values.values(), key=lambda row: (row["datum"], row["website"]))
+
+
+def save_google_ads_api_tageswerte(values):
+    if not values:
+        return 0
+    db = get_db()
+    aktualisiert_am = db_datetime_str()
+    try:
+        for row in values:
+            db.execute(
+                """
+                INSERT INTO google_ads_tageswerte
+                    (datum, website, kampagne, kosten_cent, klicks, impressionen,
+                     conversions, quelle, aktualisiert_am)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'google_ads_api', ?)
+                ON CONFLICT (datum, website) DO UPDATE SET
+                    kampagne=excluded.kampagne,
+                    kosten_cent=excluded.kosten_cent,
+                    klicks=excluded.klicks,
+                    impressionen=excluded.impressionen,
+                    conversions=excluded.conversions,
+                    quelle=excluded.quelle,
+                    aktualisiert_am=excluded.aktualisiert_am
+                """,
+                (
+                    row["datum"],
+                    row["website"],
+                    row["kampagne"],
+                    int(row["kosten_cent"]),
+                    int(row["klicks"]),
+                    int(row["impressionen"]),
+                    float(row["conversions"]),
+                    aktualisiert_am,
+                ),
+            )
+        db.commit()
+    finally:
+        db.close()
+    return len(values)
+
+
+def google_ads_sync_timestamp():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def google_ads_sync_datetime_label(value):
+    try:
+        parsed = datetime.fromisoformat(clean_text(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(ZoneInfo("Europe/Berlin")).strftime(DATETIME_FMT)
+    except (TypeError, ValueError):
+        return ""
+
+
+def google_ads_connection_state():
+    config = google_ads_runtime_config()
+    last_success = get_app_setting(GOOGLE_ADS_LAST_SUCCESS_SETTING)
+    last_error = get_app_setting(GOOGLE_ADS_LAST_ERROR_SETTING)
+    last_success_label = google_ads_sync_datetime_label(last_success)
+    if not config["configured"]:
+        return {
+            "configured": False,
+            "kind": "missing",
+            "label": "Google-Ads-API noch nicht verbunden",
+            "note": "Es fehlen: " + ", ".join(config["missing"]),
+            "last_success": last_success,
+            "last_success_label": last_success_label,
+        }
+    if last_error:
+        return {
+            "configured": True,
+            "kind": "error",
+            "label": "Google-Ads-API: Abruf prüfen",
+            "note": last_error,
+            "last_success": last_success,
+            "last_success_label": last_success_label,
+        }
+    if last_success_label:
+        return {
+            "configured": True,
+            "kind": "connected",
+            "label": f"Google Ads verbunden · {last_success_label}",
+            "note": "Die Werte werden automatisch einmal täglich aktualisiert.",
+            "last_success": last_success,
+            "last_success_label": last_success_label,
+        }
+    return {
+        "configured": True,
+        "kind": "ready",
+        "label": "Google-Ads-API bereit",
+        "note": "Die Zugangsdaten sind vollständig. Der erste Abruf steht noch aus.",
+        "last_success": "",
+        "last_success_label": "",
+    }
+
+
+def sync_google_ads_tageswerte(tage=None, http_client=None):
+    config = google_ads_runtime_config()
+    if not config["configured"]:
+        raise GoogleAdsSyncError(
+            "Google-Ads-Zugangsdaten unvollständig: " + ", ".join(config["missing"])
+        )
+    if not _google_ads_sync_lock.acquire(blocking=False):
+        raise GoogleAdsSyncError("Ein Google-Ads-Abgleich läuft bereits.")
+    attempt_at = google_ads_sync_timestamp()
+    try:
+        set_app_setting(GOOGLE_ADS_LAST_ATTEMPT_SETTING, attempt_at)
+        try:
+            tage = int(tage or GOOGLE_ADS_SYNC_LOOKBACK_DAYS)
+        except (TypeError, ValueError):
+            tage = GOOGLE_ADS_SYNC_LOOKBACK_DAYS
+        tage = max(1, min(tage, 90))
+        erster_tag = date.today() - timedelta(days=tage - 1)
+        letzter_tag = date.today()
+        access_token = google_ads_access_token(config, http_client=http_client)
+        campaign_rows = google_ads_search_stream(
+            config,
+            access_token,
+            """
+            SELECT campaign.id, campaign.name
+            FROM campaign
+            WHERE campaign.status != 'REMOVED'
+            """.strip(),
+            http_client=http_client,
+        )
+        matched = google_ads_match_campaigns(config, campaign_rows)
+        campaign_ids = ", ".join(sorted(matched, key=int))
+        metric_rows = google_ads_search_stream(
+            config,
+            access_token,
+            f"""
+            SELECT segments.date, campaign.id, campaign.name,
+                   metrics.cost_micros, metrics.clicks,
+                   metrics.impressions, metrics.conversions
+            FROM campaign
+            WHERE segments.date BETWEEN '{erster_tag.isoformat()}' AND '{letzter_tag.isoformat()}'
+              AND campaign.id IN ({campaign_ids})
+            """.strip(),
+            http_client=http_client,
+        )
+        values = google_ads_api_metric_values(metric_rows, matched)
+        imported = save_google_ads_api_tageswerte(values)
+        success_at = google_ads_sync_timestamp()
+        summary = {
+            "tage": tage,
+            "kampagnen": len(matched),
+            "tageswerte": imported,
+            "von": erster_tag.isoformat(),
+            "bis": letzter_tag.isoformat(),
+        }
+        set_app_setting(GOOGLE_ADS_LAST_SUCCESS_SETTING, success_at)
+        set_app_setting(GOOGLE_ADS_LAST_ERROR_SETTING, "")
+        set_app_setting(
+            GOOGLE_ADS_LAST_SUMMARY_SETTING,
+            json.dumps(summary, ensure_ascii=False, separators=(",", ":")),
+        )
+        return summary
+    except Exception as exc:
+        error = exc if isinstance(exc, GoogleAdsSyncError) else GoogleAdsSyncError(
+            f"Google-Ads-Abgleich fehlgeschlagen: {clean_text(exc)[:300]}"
+        )
+        try:
+            set_app_setting(GOOGLE_ADS_LAST_ERROR_SETTING, clean_text(error)[:500])
+        except Exception:
+            pass
+        raise error
+    finally:
+        _google_ads_sync_lock.release()
+
+
+def google_ads_sync_due():
+    if not GOOGLE_ADS_AUTO_SYNC_ENABLED or not google_ads_runtime_config()["configured"]:
+        return False
+    last_success = get_app_setting(GOOGLE_ADS_LAST_SUCCESS_SETTING)
+    try:
+        parsed = datetime.fromisoformat(clean_text(last_success).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    return datetime.now(timezone.utc) - parsed.astimezone(timezone.utc) >= timedelta(
+        seconds=GOOGLE_ADS_SYNC_INTERVAL_SECONDS
+    )
+
+
+def google_ads_auto_sync_worker():
+    time.sleep(10)
+    poll_seconds = max(300, min(1800, GOOGLE_ADS_SYNC_INTERVAL_SECONDS // 12))
+    while True:
+        try:
+            if google_ads_sync_due():
+                summary = sync_google_ads_tageswerte()
+                print(
+                    "Google-Ads-Auto-Abgleich: "
+                    f"{summary['tageswerte']} Tageswerte, {summary['kampagnen']} Kampagnen."
+                )
+        except Exception as exc:
+            print(f"WARNUNG: Google-Ads-Auto-Abgleich fehlgeschlagen: {clean_text(exc)[:300]}")
+        time.sleep(poll_seconds)
+
+
+def start_google_ads_auto_sync():
+    global _google_ads_thread_started
+    if (
+        _google_ads_thread_started
+        or app.config.get("TESTING")
+        or PUBLIC_SITE_ONLY
+        or not GOOGLE_ADS_AUTO_SYNC_ENABLED
+        or not google_ads_runtime_config()["configured"]
+    ):
+        return
+    _google_ads_thread_started = True
+    threading.Thread(target=google_ads_auto_sync_worker, daemon=True).start()
+
+
 BESUCHER_BOT_PATTERN = re.compile(
     r"bot|spider|crawl|slurp|headless|preview|facebookexternalhit|meta-externalagent|"
     r"whatsapp|telegrambot|discordbot|bingpreview|google-inspectiontool|lighthouse|"
@@ -28297,6 +28788,7 @@ def list_google_ads_statistik(tage=30, website="alle"):
         aktualisiert_label = datetime.strptime(aktualisiert_am, "%Y-%m-%d %H:%M:%S").strftime(DATETIME_FMT)
     except (TypeError, ValueError):
         aktualisiert_label = "Noch keine Ist-Werte"
+    connection = google_ads_connection_state()
     return {
         "tage": tage,
         "website": website,
@@ -28321,7 +28813,11 @@ def list_google_ads_statistik(tage=30, website="alle"):
         "hat_ist_werte": any(item["erfasste_tage"] for item in campaigns),
         "aktualisiert_label": aktualisiert_label,
         "heute": date.today().isoformat(),
-        "sync_status": "Google-Ads-API noch nicht verbunden",
+        "api_configured": connection["configured"],
+        "sync_status": connection["label"],
+        "sync_status_kind": connection["kind"],
+        "sync_note": connection["note"],
+        "api_last_success_label": connection["last_success_label"],
     }
 
 
@@ -36184,6 +36680,34 @@ def admin_google_ads_tageswert():
                 f"{datetime.strptime(datum, '%Y-%m-%d').strftime('%d.%m.%Y')} gespeichert.",
                 "success",
             )
+    return redirect(
+        url_for("admin_besucherstatistik", tage=next_tage, website=next_website)
+        + "#google-ads-kosten"
+    )
+
+
+@app.route("/admin/besucherstatistik/google-ads/sync", methods=["POST"])
+@admin_required
+def admin_google_ads_sync():
+    next_tage = request.form.get("next_tage", 30)
+    try:
+        next_tage = max(1, min(int(next_tage), 90))
+    except (TypeError, ValueError):
+        next_tage = 30
+    next_website = clean_text(request.form.get("next_website") or "alle").lower()
+    if next_website != "alle":
+        next_website = normalize_besucher_website(next_website) or "alle"
+    try:
+        summary = sync_google_ads_tageswerte()
+    except GoogleAdsSyncError as exc:
+        flash(f"Google-Ads-Abgleich fehlgeschlagen: {clean_text(exc)}", "danger")
+    else:
+        flash(
+            "Google Ads synchronisiert: "
+            f"{summary['tageswerte']} Tageswerte aus "
+            f"{summary['kampagnen']} Kampagnen geprüft.",
+            "success",
+        )
     return redirect(
         url_for("admin_besucherstatistik", tage=next_tage, website=next_website)
         + "#google-ads-kosten"
@@ -52162,6 +52686,7 @@ def api_fahrzeugeinkauf_import():
 init_db()
 start_hourly_backups()
 start_lexware_auto_sync()
+start_google_ads_auto_sync()
 
 
 if __name__ == "__main__":

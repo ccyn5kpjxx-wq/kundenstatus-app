@@ -58,6 +58,11 @@ Wichtige Variablen:
 - `GOOGLE_DOC_AI_PROJECT_ID`
 - `GOOGLE_DOC_AI_LOCATION`
 - `GOOGLE_DOC_AI_PROCESSOR_ID`
+- `GOOGLE_ADS_DEVELOPER_TOKEN`
+- `GOOGLE_ADS_CLIENT_ID`
+- `GOOGLE_ADS_CLIENT_SECRET`
+- `GOOGLE_ADS_REFRESH_TOKEN`
+- `GOOGLE_ADS_CUSTOMER_ID`
 - `OPENAI_API_KEY`
 - `OPENAI_EXTRACTION_MODEL`
 - `OPENAI_CHAT_MODEL`
@@ -84,6 +89,13 @@ Nicht committen:
 Ohne API-Schlüssel nutzt die App lokale OCR. Mit konfiguriertem Google Document AI und OpenAI wird die stabilere Pipeline verwendet.
 
 Details stehen in `KI_SETUP.md`.
+
+## Google Ads
+
+Das geschützte Analytics-Dashboard kann Kosten, Klicks, Impressionen und
+Conversions einmal täglich direkt aus Google Ads importieren. Ohne vollständige
+Zugangsdaten bleibt die manuelle Erfassung aktiv. Einrichtung und sichere
+Render-Konfiguration stehen in `GOOGLE_ADS_SETUP.md`.
 
 ## Entwicklung
 

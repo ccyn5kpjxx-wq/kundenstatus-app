@@ -62,6 +62,32 @@ services:
         value: true
       - key: OPENAI_API_KEY
         sync: false
+      - key: GOOGLE_ADS_DEVELOPER_TOKEN
+        sync: false
+      - key: GOOGLE_ADS_CLIENT_ID
+        sync: false
+      - key: GOOGLE_ADS_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_ADS_REFRESH_TOKEN
+        sync: false
+      - key: GOOGLE_ADS_CUSTOMER_ID
+        sync: false
+      - key: GOOGLE_ADS_LOGIN_CUSTOMER_ID
+        sync: false
+      - key: GOOGLE_ADS_CAMPAIGN_ID_AUTO_LACKIERZENTRUM
+        sync: false
+      - key: GOOGLE_ADS_CAMPAIGN_ID_TOMORROWWORKS
+        sync: false
+      - key: GOOGLE_ADS_CAMPAIGN_ID_AUTOVERMIETUNG_MOS
+        sync: false
+      - key: GOOGLE_ADS_API_VERSION
+        value: v25
+      - key: GOOGLE_ADS_AUTO_SYNC_ENABLED
+        value: true
+      - key: GOOGLE_ADS_SYNC_INTERVAL_SECONDS
+        value: 86400
+      - key: GOOGLE_ADS_SYNC_LOOKBACK_DAYS
+        value: 90
       - key: FAHRZEUGEINKAUF_SCANNER_API_TOKEN
         sync: false
       - key: OPENAI_EXTRACTION_MODEL
