@@ -372,6 +372,7 @@
     </section>
   </main>
   {% include "_besucher_tracking.html" %}
+  {% if gesendet %}<script>window.gaertnerAdsTrack?.('form');</script>{% endif %}
   <script>
     (() => {
       const input = document.getElementById('bilder');
