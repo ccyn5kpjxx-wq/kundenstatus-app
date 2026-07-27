@@ -49069,31 +49069,10 @@ def werkstatt_tafel():
     guard = werkstatt_tafel_guard()
     if guard:
         return guard
-    alle_auftraege = list_auftraege()
     auftraege = [
         auftrag
-        for auftrag in alle_auftraege
+        for auftrag in list_auftraege()
         if int(auftrag.get("status") or 1) <= 4
-    ]
-    # Die Messungsuebersicht bleibt vollstaendig innerhalb der Werkstatt-Tafel.
-    # Sie zeigt offene Messaufgaben zuerst und danach bereits erfasste Lackdaten.
-    offene_messungen = [
-        auftrag
-        for auftrag in alle_auftraege
-        if auftrag.get("messung_erforderlich") == "ja"
-        and not clean_text(auftrag.get("variantencode"))
-        and not clean_text(auftrag.get("angemischte_menge"))
-    ]
-    erfasste_messungen = [
-        auftrag
-        for auftrag in alle_auftraege
-        if clean_text(auftrag.get("variantencode"))
-        or clean_text(auftrag.get("angemischte_menge"))
-    ]
-    messungen = offene_messungen + [
-        auftrag
-        for auftrag in erfasste_messungen
-        if auftrag not in offene_messungen
     ]
     spalten = (
         {
@@ -49131,7 +49110,6 @@ def werkstatt_tafel():
     return render_template(
         "werkstatt_tafel.html",
         spalten=spalten,
-        messungen=messungen,
         anzahl=len(auftraege),
         stand_label=jetzt.strftime("%H:%M"),
         datum_label=f"{WOCHENTAGE[jetzt.weekday()]}, {jetzt.strftime(DATE_FMT)}",

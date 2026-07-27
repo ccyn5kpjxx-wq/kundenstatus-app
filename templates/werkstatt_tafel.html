@@ -451,109 +451,6 @@
       font-size: clamp(.9rem, 1.5vw, 1.1rem);
     }
 
-    .messungen-dialog[hidden] { display: none; }
-
-    .messungen-dialog {
-      position: fixed;
-      inset: 0;
-      z-index: 100;
-      display: grid;
-      place-items: center;
-      padding: clamp(.7rem, 2vw, 1.5rem);
-    }
-
-    .messungen-hintergrund {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      border: 0;
-      background: rgba(10, 19, 29, .72);
-      cursor: pointer;
-    }
-
-    .messungen-panel {
-      position: relative;
-      width: min(920px, 96vw);
-      max-height: min(86vh, 820px);
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 24px;
-      box-shadow: 0 28px 80px rgba(0, 0, 0, .34);
-    }
-
-    .messungen-kopf {
-      display: flex;
-      align-items: center;
-      gap: .8rem;
-      padding: clamp(.8rem, 2vw, 1.2rem);
-      background: #12202e;
-      color: #fff;
-    }
-
-    .messungen-kopf > div { flex: 1; min-width: 0; }
-    .messungen-kopf h2 { flex: 1; margin: 0; font-size: clamp(1.15rem, 2.2vw, 1.65rem); }
-    .messungen-kopf p { margin: .18rem 0 0; color: rgba(255, 255, 255, .66); font-size: .88rem; }
-
-    .messungen-schliessen {
-      min-width: 44px;
-      min-height: 44px;
-      border: 1px solid rgba(255, 255, 255, .24);
-      border-radius: 12px;
-      background: rgba(255, 255, 255, .1);
-      color: #fff;
-      font-size: 1.35rem;
-      cursor: pointer;
-    }
-
-    .messungen-liste {
-      overflow: auto;
-      display: grid;
-      gap: .65rem;
-      padding: clamp(.7rem, 2vw, 1.15rem);
-    }
-
-    .messung-zeile {
-      display: grid;
-      grid-template-columns: minmax(150px, 1.1fr) minmax(190px, 1.4fr) minmax(170px, 1fr) auto;
-      align-items: center;
-      gap: .7rem 1rem;
-      padding: .8rem;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: #fff;
-      color: var(--ink);
-      text-decoration: none;
-    }
-
-    .messung-zeile:hover, .messung-zeile:focus-visible {
-      border-color: var(--accent);
-      box-shadow: 0 8px 22px rgba(20, 93, 102, .12);
-    }
-
-    .messung-fahrzeug { font-weight: 700; }
-    .messung-fahrzeug small, .messung-daten small { display: block; margin-top: .2rem; color: var(--muted); font-weight: 500; }
-    .messung-daten strong { color: var(--accent); }
-    .messung-status { justify-self: end; border-radius: 999px; padding: .32rem .65rem; color: #fff; font-weight: 700; font-size: .8rem; white-space: nowrap; }
-    .messung-status.offen { background: var(--danger); }
-    .messung-status.erfasst { background: var(--good); }
-
-    .messungen-leer {
-      padding: 2.2rem 1rem;
-      text-align: center;
-      color: var(--muted);
-    }
-
-    body.messungen-offen { overflow: hidden; }
-
-    @media (max-width: 720px) {
-      .messung-zeile { grid-template-columns: 1fr auto; }
-      .messung-daten { grid-column: 1 / -1; }
-    }
-
     .toast-leiste {
       position: fixed;
       top: .8rem;
@@ -623,47 +520,9 @@
     </div>
     <a href="{{ url_for('werkstatt_abwesenheit') }}" title="Abwesenheit / Urlaub beantragen" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">🌴 Abwesenheit</a>
     <a href="{{ url_for('werkstatt_aufgaben') }}" title="Tagesaufgaben der Werkstatt" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">📋 Aufgaben</a>
-    <button type="button" data-messungen-oeffnen title="Lackmessungen direkt auf der Tafel ansehen" style="background:#087fae; border:1px solid #54c0e6; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; cursor:pointer; white-space:nowrap; align-self:center;">🎨 Messungen{% if messungen %} · {{ messungen | length }}{% endif %}</button>
+    <a href="https://emea.ppglinq.com/rapid-match" target="_blank" rel="noopener noreferrer" title="PPG LINQ DigiMatch-Messungen öffnen – Anmeldung falls erforderlich" style="background:#087fae; border:1px solid #54c0e6; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">🎨 PPG-Messungen</a>
     <button type="button" data-vollbild title="Vollbild ein/aus" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center;">⛶ Vollbild</button>
   </div>
-
-  <section class="messungen-dialog" data-messungen-dialog role="dialog" aria-modal="true" aria-labelledby="messungen-titel" hidden>
-    <button type="button" class="messungen-hintergrund" data-messungen-schliessen aria-label="Messungsübersicht schließen"></button>
-    <div class="messungen-panel">
-      <div class="messungen-kopf">
-        <div>
-          <h2 id="messungen-titel">🎨 Lackmessungen</h2>
-          <p>Offene Messungen und bereits eingetragene Lackdaten</p>
-        </div>
-        <button type="button" class="messungen-schliessen" data-messungen-schliessen aria-label="Schließen">×</button>
-      </div>
-      <div class="messungen-liste">
-        {% for auftrag in messungen %}
-        {% set messung_erfasst = auftrag['variantencode'] or auftrag['angemischte_menge'] %}
-        <a class="messung-zeile" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}">
-          <div class="messung-fahrzeug">
-            {{ auftrag['kennzeichen'] or 'Ohne Kennzeichen' }}
-            <small>{{ auftrag['fahrzeug'] or ('Auftrag ' ~ auftrag['id']) }}</small>
-          </div>
-          <div class="messung-daten">
-            Farbton: <strong>{{ auftrag['farbton'] or auftrag['farbcode'] or 'noch offen' }}</strong>
-            {% if auftrag['farbton_2'] %}<small>2. Farbton: {{ auftrag['farbton_2'] }}</small>{% endif %}
-          </div>
-          <div class="messung-daten">
-            Variante: <strong>{{ auftrag['variantencode'] or 'noch offen' }}</strong>
-            {% if auftrag['angemischte_menge'] %}<small>Menge: {{ auftrag['angemischte_menge'] }}</small>{% endif %}
-          </div>
-          <span class="messung-status {{ 'erfasst' if messung_erfasst else 'offen' }}">{{ 'Erfasst' if messung_erfasst else 'Messung offen' }}</span>
-        </a>
-        {% else %}
-        <div class="messungen-leer">
-          <strong>Noch keine Lackmessungen vorhanden.</strong><br>
-          Messung und Variantencode können im jeweiligen Werkstattauftrag eingetragen werden.
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-  </section>
 
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
@@ -879,30 +738,6 @@
         setVollbildLabel();
       }
 
-      // Lackmessungen direkt auf der Tafel anzeigen; kein Wechsel zur externen PPG-Seite.
-      const messungenDialog = document.querySelector('[data-messungen-dialog]');
-      const messungenOeffnen = document.querySelector('[data-messungen-oeffnen]');
-      const messungenSchliessen = () => {
-        if (!messungenDialog) return;
-        messungenDialog.hidden = true;
-        document.body.classList.remove('messungen-offen');
-        if (messungenOeffnen) messungenOeffnen.focus();
-      };
-      if (messungenDialog && messungenOeffnen) {
-        messungenOeffnen.addEventListener('click', () => {
-          messungenDialog.hidden = false;
-          document.body.classList.add('messungen-offen');
-          const schliessenKnopf = messungenDialog.querySelector('.messungen-schliessen');
-          if (schliessenKnopf) schliessenKnopf.focus();
-        });
-        messungenDialog.querySelectorAll('[data-messungen-schliessen]').forEach((knopf) => {
-          knopf.addEventListener('click', messungenSchliessen);
-        });
-        document.addEventListener('keydown', (event) => {
-          if (event.key === 'Escape' && !messungenDialog.hidden) messungenSchliessen();
-        });
-      }
-
       // Wetter Mosbach (Open-Meteo, kein API-Key noetig; laedt bei jedem Reload neu)
       const wetterBox = document.querySelector('[data-wetter]');
       const wmo = (c) => {
@@ -970,8 +805,7 @@
       ['click', 'touchstart', 'scroll'].forEach((ev) => {
         document.addEventListener(ev, reloadVerschieben, { passive: true, capture: true });
       });
-      const panelOffen = () => !!document.querySelector('[data-prod-toggle][aria-expanded="true"]')
-        || !!document.querySelector('[data-messungen-dialog]:not([hidden])');
+      const panelOffen = () => !!document.querySelector('[data-prod-toggle][aria-expanded="true"]');
       const verbindungsHinweisZeigen = () => {
         if (document.querySelector('[data-verbindungs-hinweis]')) return;
         const leiste = document.createElement('div');

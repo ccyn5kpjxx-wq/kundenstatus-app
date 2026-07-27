@@ -69,11 +69,12 @@ def main():
     html = response.get_data(as_text=True)
     check("Tafel laedt mit Spalten", response.status_code == 200 and "In Arbeit" in html and "Geplant" in html)
     check(
-        "Tafel-Kopf oeffnet interne Messungsuebersicht",
-        "🎨 Messungen" in html
-        and "data-messungen-oeffnen" in html
-        and "data-messungen-dialog" in html
-        and "emea.ppglinq.com" not in html,
+        "Tafel-Kopf verlinkt PPG-Messungen als Uebergang",
+        "🎨 PPG-Messungen" in html
+        and 'href="https://emea.ppglinq.com/rapid-match"' in html
+        and 'target="_blank"' in html
+        and 'rel="noopener noreferrer"' in html
+        and "data-messungen-dialog" not in html,
     )
 
     # Eingeloggt: Login-Seite leitet direkt zur Tafel weiter
@@ -85,23 +86,6 @@ def main():
     if auftraege:
         auftrag = auftraege[0]
         auftrag_id = auftrag["id"]
-
-        # Eine erfasste Lackmessung muss direkt im Tafel-Dialog auftauchen.
-        db = portal.get_db()
-        db.execute(
-            "UPDATE auftraege SET messung_erforderlich='ja', farbton=?, variantencode=?, angemischte_menge=? WHERE id=?",
-            ("Testblau", "PPG-TEST-42", "250 ml", auftrag_id),
-        )
-        db.commit()
-        db.close()
-        messungen_html = client.get("/werkstatt/tafel").get_data(as_text=True)
-        check(
-            "Interne Messungsuebersicht zeigt Auftrags-Lackdaten",
-            "PPG-TEST-42" in messungen_html
-            and "Testblau" in messungen_html
-            and "250 ml" in messungen_html
-            and "Messung offen" not in messungen_html,
-        )
 
         response = client.get(f"/werkstatt/auftrag/{auftrag_id}")
         html = response.get_data(as_text=True)
