@@ -50298,39 +50298,25 @@ def partner_neuer_auftrag(slug):
                 "success",
             )
             return render_partner_new_form(autohaus, form=prepared_form)
-        if not clean_text(form.get("kunde_name")) or not clean_text(
-            form.get("kontakt_telefon")
-        ):
-            flash(
-                "Bitte zuerst Endkunde / Referenz und die Handynummer des Kunden angeben.",
-                "warning",
-            )
-            return render_partner_new_form(autohaus, form=form)
         if not (
             clean_text(form.get("fahrzeug")) or clean_text(form.get("kennzeichen"))
         ):
             flash("Bitte mindestens Fahrzeug oder Kennzeichen angeben, damit die Werkstatt den Auftrag zuordnen kann.", "warning")
             return render_partner_new_form(autohaus, form=form)
         gewaehlte_dateien = [file for file in dateien if file and file.filename]
-        if not gewaehlte_dateien:
-            flash(
-                "Bitte zuerst eine Datei hochladen und analysieren. Danach können Sie die ergänzten Angaben prüfen.",
-                "warning",
-            )
-            return render_partner_new_form(autohaus, form=form)
-        if len(erlaubte_dateien) != len(gewaehlte_dateien):
+        if gewaehlte_dateien and len(erlaubte_dateien) != len(gewaehlte_dateien):
             flash(
                 "Mindestens eine Datei hat einen nicht unterstützten Typ. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.",
                 "warning",
             )
             return render_partner_new_form(autohaus, form=form)
-        if clean_text(form.get("analyse_abgeschlossen")) != "1":
+        if gewaehlte_dateien and clean_text(form.get("analyse_abgeschlossen")) != "1":
             flash(
                 "Bitte die ausgewählte Datei zuerst analysieren. Dabei werden nur die Formularfelder ergänzt; ein Auftrag entsteht noch nicht.",
                 "warning",
             )
             return render_partner_new_form(autohaus, form=form)
-        if not partner_new_analysis_token_valid(
+        if gewaehlte_dateien and not partner_new_analysis_token_valid(
             form.get("analyse_token"),
             autohaus["id"],
             erlaubte_dateien,

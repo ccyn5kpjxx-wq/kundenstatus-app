@@ -1,5 +1,4 @@
 """Feature-Tests für das UX-Paket 2026-07 (47 Review-Fixes)."""
-from io import BytesIO
 from pathlib import Path
 import sys
 
@@ -88,35 +87,11 @@ def main():
     check("Kein leerer Auftrag angelegt", nachher == vorher)
     with partner.session_transaction() as session:
         token = session.get("csrf_token")
-    ux_document = (
-        b"Lackierauftrag UX Test\n"
-        b"Fahrzeug: TEST UX Golf\n"
-        b"Kennzeichen: MOS-UX 1\n"
-    )
-    analyse_antwort = partner.post(
-        f"/partner/{autohaus['slug']}/neu/analysieren",
-        data={
-            "csrf_token": token,
-            "dateien": (BytesIO(ux_document), "test-ux-lackierauftrag.txt"),
-        },
-        content_type="multipart/form-data",
-        follow_redirects=False,
-    )
-    analyse_payload = analyse_antwort.get_json(silent=True) or {}
-    check(
-        "Partner-Unterlage vor dem Formular analysiert",
-        analyse_antwort.status_code == 200 and analyse_payload.get("ok"),
-    )
-    with partner.session_transaction() as session:
-        token = session.get("csrf_token")
     antwort = partner.post(f"/partner/{autohaus['slug']}/neu", data={
-        "csrf_token": token, "aktion": "speichern", "kunde_name": "Test UX Kunde",
-        "kontakt_telefon": "01234", "fahrzeug": "TEST UX Golf", "kennzeichen": "MOS-UX 1",
-        "analyse_abgeschlossen": "1", "analyse_datei_erforderlich": "1",
-        "analyse_dateisignatur": "test-ux-lackierauftrag.txt",
-        "analyse_token": analyse_payload.get("analysis_token") or "",
-        "dateien": (BytesIO(ux_document), "test-ux-lackierauftrag.txt"),
-    }, content_type="multipart/form-data", follow_redirects=False)
+        "csrf_token": token, "aktion": "speichern",
+        "fahrzeug": "TEST UX Golf", "kennzeichen": "MOS-UX 1",
+    }, follow_redirects=False)
+    check("Datei und Kontaktdaten bleiben optional", antwort.status_code == 302)
     check("Gültiger Partner-Auftrag angelegt (302)", antwort.status_code == 302)
     test_auftrag_id = int((antwort.headers.get("Location") or "/0").rstrip("/").split("/")[-1])
 

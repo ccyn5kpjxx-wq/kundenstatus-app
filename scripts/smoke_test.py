@@ -903,16 +903,20 @@ def main():
         partner_new_html = partner_new_response.get_data(as_text=True)
         partner_new_flow_ok = (
             partner_new_response.status_code == 200
-            and "Unterlage zuerst hochladen" in partner_new_html
-            and "Kunde und Ansprechpartner" in partner_new_html
+            and "Kunde, Fahrzeug und Unterlage" in partner_new_html
             and "Datei analysieren &amp; Felder eintragen" in partner_new_html
             and "Erst mit „Auftrag jetzt senden“ wird der Auftrag angelegt" in partner_new_html
             and "Mit der Analyse wird direkt ein Auftrag vorbereitet" not in partner_new_html
+            and "Schritt 1 von 2" in partner_new_html
+            and 'id="partner-step-3"' not in partner_new_html
             and "Lackierauftrag noch vorbereiten?" in partner_new_html
             and partner_new_html.index('id="dateien"')
-            < partner_new_html.index('id="partner-step-1"')
-            and partner_new_html.index("Lackierauftrag noch vorbereiten?")
-            > partner_new_html.index('id="partner-step-3"')
+            > partner_new_html.index('id="partner-step-1"')
+            and partner_new_html.index('id="dateien"')
+            < partner_new_html.index('id="partner-step-2"')
+            and "Datei zur Analyse <span class=\"text-muted\">(optional)</span>" in partner_new_html
+            and "Endkunde / Referenz <span class=\"text-muted\">(optional)</span>" in partner_new_html
+            and "Handy / WhatsApp Kunde <span class=\"text-muted\">(optional)</span>" in partner_new_html
         )
         print(
             "[OK] Partner-Neuanlage trennt Analyse und Auftragsanlage"
@@ -920,31 +924,33 @@ def main():
             else "[FEHLER] Partner-Neuanlage zeigt noch den alten Upload-Ablauf"
         )
         ok &= partner_new_flow_ok
-        before_missing_file_count = len(portal.list_auftraege())
-        missing_file_response = upload_client.post(
+        optional_file_response = upload_client.post(
             "/partner/kaesmann/neu",
             data=csrf_data(
                 upload_client,
                 {
                     "aktion": "speichern",
-                    "kunde_name": "Smoke ohne Datei",
-                    "kontakt_telefon": "01234 567890",
-                    "fahrzeug": "Audi A4",
+                    "fahrzeug": "Smoke ohne Datei und Kontakt",
                 },
             ),
-            follow_redirects=True,
+            follow_redirects=False,
         )
-        missing_file_blocked = bool(
-            missing_file_response.status_code == 200
-            and "Bitte zuerst eine Datei hochladen und analysieren" in missing_file_response.get_data(as_text=True)
-            and len(portal.list_auftraege()) == before_missing_file_count
-        )
+        optional_location = optional_file_response.headers.get("Location", "")
+        optional_id = None
+        if "/auftrag/" in optional_location:
+            try:
+                optional_id = int(optional_location.rsplit("/auftrag/", 1)[1].split("?", 1)[0].strip("/"))
+            except ValueError:
+                optional_id = None
+        optional_created = optional_id is not None and portal.get_auftrag(optional_id)
         print(
-            "[OK] Partner-Auftrag bleibt ohne vorherige Datei gesperrt"
-            if missing_file_blocked
-            else "[FEHLER] Partner-Auftrag lässt sich ohne vorherige Datei anlegen"
+            "[OK] Datei, Endkunde und Handy bleiben optional"
+            if optional_created
+            else "[FEHLER] Optionaler Partner-Auftrag ohne Datei oder Kontakt wurde blockiert"
         )
-        ok &= missing_file_blocked
+        ok &= bool(optional_created)
+        if optional_id:
+            portal.delete_auftrag(optional_id)
         before_analysis_count = len(portal.list_auftraege())
         analysis_response = upload_client.post(
             "/partner/kaesmann/neu/analysieren",
