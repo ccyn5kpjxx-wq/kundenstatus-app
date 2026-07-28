@@ -76,6 +76,7 @@ def main():
         vorher = db.execute("SELECT COUNT(*) AS c FROM auftraege").fetchone()["c"]
     antwort = partner.post(f"/partner/{autohaus['slug']}/neu", data={
         "csrf_token": token, "aktion": "speichern", "kunde_name": "Nur Name",
+        "kontakt_telefon": "01234",
     }, follow_redirects=True)
     html = antwort.get_data(as_text=True)
     check("Leerer Partner-Auftrag abgewiesen (Hinweis)", "mindestens Fahrzeug oder Kennzeichen" in html)
@@ -87,7 +88,8 @@ def main():
     with partner.session_transaction() as session:
         token = session.get("csrf_token")
     antwort = partner.post(f"/partner/{autohaus['slug']}/neu", data={
-        "csrf_token": token, "aktion": "speichern", "fahrzeug": "TEST UX Golf", "kennzeichen": "MOS-UX 1",
+        "csrf_token": token, "aktion": "speichern", "kunde_name": "Test UX Kunde",
+        "kontakt_telefon": "01234", "fahrzeug": "TEST UX Golf", "kennzeichen": "MOS-UX 1",
     }, follow_redirects=False)
     check("Gültiger Partner-Auftrag angelegt (302)", antwort.status_code == 302)
     test_auftrag_id = int((antwort.headers.get("Location") or "/0").rstrip("/").split("/")[-1])

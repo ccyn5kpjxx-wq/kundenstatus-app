@@ -189,6 +189,28 @@
       font-weight: 700;
     }
     .vehicle-error.is-visible { display: block; }
+    .vehicle-analysis-result {
+      margin-top: 14px;
+      padding: 13px 14px;
+      border: 1px solid #b9cfbf;
+      border-radius: 13px;
+      color: #244c31;
+      background: #edf7ef;
+      font-size: .9rem;
+    }
+    .vehicle-analysis-result strong { display: block; margin-bottom: 3px; }
+    .vehicle-advanced {
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--soft);
+    }
+    .vehicle-advanced summary {
+      padding: 15px 17px;
+      cursor: pointer;
+      color: #31404c;
+      font-weight: 700;
+    }
+    .vehicle-advanced-body { padding: 2px 17px 17px; }
     .transport-note {
       margin-top: 6px;
       color: var(--muted);
@@ -358,7 +380,7 @@
     <div class="loading-card">
       <div class="spinner-ring" aria-hidden="true"></div>
       <h2 class="h4 mb-2" id="loading-title">Daten werden verarbeitet</h2>
-      <div class="text-muted" data-loading-text>Bitte kurz warten. Der Auftrag wird vorbereitet.</div>
+      <div class="text-muted" data-loading-text>Bitte kurz warten. Die Unterlage wird gelesen.</div>
       <div class="loading-progress" aria-hidden="true"><div class="loading-progress-bar"></div></div>
       <div class="loading-status">Je nach PDF oder Bild kann die Analyse ein paar Sekunden dauern.</div>
       <div class="loading-news">
@@ -381,86 +403,72 @@
         <div class="partner-form-header-copy">
           <div class="eyebrow">Fahrzeug übermitteln</div>
           <h1 id="partner-vehicle-title">Neues Fahrzeug für {{ autohaus['portal_label'] }}</h1>
-          <p>{{ autohaus['portal_welcome'] }} Tragen Sie nur ein, was bereits bekannt ist. Fehlende Angaben können später ergänzt werden.</p>
+          <p>{{ autohaus['portal_welcome'] }} Erfassen Sie zuerst den Kunden, danach Fahrzeug und Schaden. Die Unterlage wird erst im letzten Schritt hinzugefügt.</p>
         </div>
         <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zur Übersicht</a>
       </header>
 
-      <aside class="template-card" aria-label="Lackierauftrag als Vorlage">
-        <div>
-          <strong>Lieber mit dem Lackierauftrag starten?</strong>
-          <p>Online ausfüllen oder die PDF-Vorlage herunterladen.</p>
-        </div>
-        <div class="template-actions">
-          <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-dark">Online ausfüllen</a>
-          <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
-        </div>
-      </aside>
-
-      <form method="POST" enctype="multipart/form-data" class="vehicle-wizard" data-upload-form data-vehicle-wizard novalidate>
+      <form method="POST" enctype="multipart/form-data" class="vehicle-wizard" data-upload-form data-vehicle-wizard data-analysis-url="{{ url_for('partner_neuer_auftrag_analysieren', slug=autohaus['slug']) }}" novalidate>
+        {{ csrf_field()|safe }}
+        <input type="hidden" name="analyse_abgeschlossen" value="{{ form.get('analyse_abgeschlossen', '') }}" data-analysis-completed>
+        <input type="hidden" name="analyse_datei_erforderlich" value="{{ form.get('analyse_datei_erforderlich', '') }}" data-analysis-file-required>
+        <input type="hidden" name="analyse_dateisignatur" value="{{ form.get('analyse_dateisignatur', '') }}" data-analysis-file-signature>
+        <input type="hidden" name="analyse_token" value="{{ form.get('analyse_token', '') }}" data-analysis-token>
+        <input type="hidden" name="analyse_hinweis" value="{{ form.get('analyse_hinweis', '') }}" data-analysis-hint>
+        <input type="hidden" name="analyse_confidence" value="{{ form.get('analyse_confidence', '') }}" data-analysis-confidence>
+        <input type="hidden" id="fertig_datum" name="fertig_datum" value="{{ form.get('fertig_datum', '') }}">
         <nav class="vehicle-progress" aria-label="Schritte der Fahrzeugerfassung">
           <button type="button" class="vehicle-progress-button is-active" data-step-target="1" aria-controls="partner-step-1" aria-current="step">
             <span class="vehicle-progress-number">1</span>
-            <span class="vehicle-progress-copy"><strong>Fahrzeug</strong><span>Grunddaten und Unterlagen</span></span>
+            <span class="vehicle-progress-copy"><strong>Kunde</strong><span>Name und Handynummer</span></span>
           </button>
           <button type="button" class="vehicle-progress-button" data-step-target="2" aria-controls="partner-step-2">
             <span class="vehicle-progress-number">2</span>
-            <span class="vehicle-progress-copy"><strong>Schaden</strong><span>Arbeiten und Hinweise</span></span>
+            <span class="vehicle-progress-copy"><strong>Fahrzeug</strong><span>Fahrzeug und Schaden</span></span>
           </button>
           <button type="button" class="vehicle-progress-button" data-step-target="3" aria-controls="partner-step-3">
             <span class="vehicle-progress-number">3</span>
-            <span class="vehicle-progress-copy"><strong>Transport</strong><span>Termine prüfen und senden</span></span>
+            <span class="vehicle-progress-copy"><strong>Auftrag</strong><span>Unterlage, Termine und Senden</span></span>
           </button>
         </nav>
 
         <section class="vehicle-step is-active" id="partner-step-1" data-form-step="1" aria-labelledby="partner-step-title-1">
           <div class="vehicle-step-title">
-            <h2 id="partner-step-title-1" tabindex="-1">Fahrzeug und Ansprechpartner</h2>
-            <p>Fahrzeug oder Kennzeichen genügt. Eine Unterlage kann die Angaben automatisch vorbereiten.</p>
+            <h2 id="partner-step-title-1" tabindex="-1">Kunde und Ansprechpartner</h2>
+            <p>Bitte zuerst den Endkunden oder Ihre Referenz und eine erreichbare Handynummer eintragen.</p>
           </div>
           <div class="row g-4">
-            <div class="col-lg-5">
-              <div class="vehicle-upload-card">
-                <label class="form-label" for="dateien">Unterlagen oder Schadensfotos</label>
-                <input type="file" id="dateien" name="dateien" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf" aria-describedby="dateien-hinweis dateien-status">
-                <div id="dateien-hinweis" class="form-text">PDF, Foto oder Dokument auswählen. Mit der Analyse wird direkt ein Auftrag vorbereitet.</div>
-                <div id="dateien-status" class="vehicle-upload-status" data-upload-status aria-live="polite">Noch keine Datei ausgewählt.</div>
-                <div class="vehicle-error" data-file-error role="alert">Bitte zuerst eine Datei auswählen.</div>
-                <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark w-100 mt-2" data-upload-analyze disabled data-loading-message="Bitte kurz warten. Die Datei wird gelesen und der Auftrag wird vorbereitet.">Datei hochladen &amp; analysieren</button>
-              </div>
+            <div class="col-md-6">
+              <label class="form-label" for="kunde_name">Endkunde / Referenz</label>
+              <input type="text" id="kunde_name" name="kunde_name" class="form-control form-control-lg" value="{{ form.get('kunde_name', '') }}" autocomplete="name" required aria-describedby="contact-required-error">
             </div>
-            <div class="col-lg-7">
-              <div class="row g-3">
-                <div class="col-md-6">
-                  <label class="form-label" for="kunde_name">Endkunde / Referenz</label>
-                  <input type="text" id="kunde_name" name="kunde_name" class="form-control form-control-lg" value="{{ form.get('kunde_name', '') }}" autocomplete="name">
-                </div>
-                <div class="col-md-6">
-                  <label class="form-label" for="kontakt_telefon">Handy / WhatsApp Kunde</label>
-                  <input type="tel" inputmode="tel" autocomplete="tel" id="kontakt_telefon" name="kontakt_telefon" class="form-control form-control-lg" placeholder="z. B. 0171 1234567" value="{{ form.get('kontakt_telefon', '') }}">
-                </div>
-                <div class="col-md-8">
-                  <label class="form-label" for="fahrzeug">Fahrzeug</label>
-                  <input type="text" id="fahrzeug" name="fahrzeug" class="form-control form-control-lg" placeholder="z. B. Hyundai Tucson" value="{{ form.get('fahrzeug', '') }}" aria-describedby="vehicle-minimum-error">
-                </div>
-                <div class="col-md-4">
-                  <label class="form-label" for="kennzeichen">Kennzeichen</label>
-                  <input type="text" id="kennzeichen" name="kennzeichen" class="form-control form-control-lg text-uppercase" autocapitalize="characters" autocomplete="off" spellcheck="false" value="{{ form.get('kennzeichen', '') }}" aria-describedby="vehicle-minimum-error">
-                </div>
-                <div class="col-12">
-                  <div id="vehicle-minimum-error" class="vehicle-error" data-vehicle-error role="alert">Bitte mindestens Fahrzeug oder Kennzeichen angeben.</div>
-                </div>
-              </div>
+            <div class="col-md-6">
+              <label class="form-label" for="kontakt_telefon">Handy / WhatsApp Kunde</label>
+              <input type="tel" inputmode="tel" autocomplete="tel" id="kontakt_telefon" name="kontakt_telefon" class="form-control form-control-lg" placeholder="z. B. 0171 1234567" value="{{ form.get('kontakt_telefon', '') }}" required aria-describedby="contact-required-error">
+            </div>
+            <div class="col-12">
+              <div id="contact-required-error" class="vehicle-error" data-contact-error role="alert">Bitte Endkunde / Referenz und Handynummer vollständig eintragen.</div>
             </div>
           </div>
         </section>
 
         <section class="vehicle-step" id="partner-step-2" data-form-step="2" aria-labelledby="partner-step-title-2">
           <div class="vehicle-step-title">
-            <h2 id="partner-step-title-2" tabindex="-1">Schaden und gewünschte Arbeiten</h2>
-            <p>Eine kurze Beschreibung genügt. Die Werkstatt klärt offene Details anschließend mit Ihnen.</p>
+            <h2 id="partner-step-title-2" tabindex="-1">Fahrzeug und Schaden</h2>
+            <p>Fahrzeug oder Kennzeichen genügt. Weitere erkannte Angaben können Sie vor dem Senden prüfen.</p>
           </div>
           <div class="row g-4">
+            <div class="col-md-8">
+              <label class="form-label" for="fahrzeug">Fahrzeug</label>
+              <input type="text" id="fahrzeug" name="fahrzeug" class="form-control form-control-lg" placeholder="z. B. Hyundai Tucson" value="{{ form.get('fahrzeug', '') }}" aria-describedby="vehicle-minimum-error">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="kennzeichen">Kennzeichen</label>
+              <input type="text" id="kennzeichen" name="kennzeichen" class="form-control form-control-lg text-uppercase" autocapitalize="characters" autocomplete="off" spellcheck="false" value="{{ form.get('kennzeichen', '') }}" aria-describedby="vehicle-minimum-error">
+            </div>
+            <div class="col-12">
+              <div id="vehicle-minimum-error" class="vehicle-error" data-vehicle-error role="alert">Bitte mindestens Fahrzeug oder Kennzeichen angeben.</div>
+            </div>
             <div class="col-md-6">
               <label class="form-label" for="analyse_text">Kurze Schadensbeschreibung</label>
               <input type="text" id="analyse_text" name="analyse_text" class="form-control form-control-lg" placeholder="z. B. Stoßstange hinten instandsetzen" value="{{ form.get('analyse_text', '') }}">
@@ -473,52 +481,106 @@
               <label class="form-label" for="beschreibung">Weitere Beschreibung <span class="text-muted">(optional)</span></label>
               <textarea id="beschreibung" name="beschreibung" class="form-control" rows="4" placeholder="Gewünschte Arbeiten, Besonderheiten oder Rückfragen">{{ form.get('beschreibung', '') }}</textarea>
             </div>
+            <div class="col-12">
+              <details class="vehicle-advanced" {% if form.get('fin_nummer') or form.get('hsn_nummer') or form.get('tsn_nummer') or form.get('auftragsnummer') %}open{% endif %}>
+                <summary>FIN, HSN/TSN und Auftragsnummer</summary>
+                <div class="vehicle-advanced-body">
+                  <div class="row g-3">
+                    <div class="col-lg-6">
+                      <label class="form-label" for="fin_nummer">Fahrzeug-Identifizierungsnummer (FIN)</label>
+                      <input type="text" id="fin_nummer" name="fin_nummer" class="form-control form-control-lg text-uppercase" value="{{ form.get('fin_nummer', '') }}" autocomplete="off">
+                    </div>
+                    <div class="col-md-2">
+                      <label class="form-label" for="hsn_nummer">HSN</label>
+                      <input type="text" id="hsn_nummer" name="hsn_nummer" class="form-control form-control-lg" value="{{ form.get('hsn_nummer', '') }}" autocomplete="off">
+                    </div>
+                    <div class="col-md-2">
+                      <label class="form-label" for="tsn_nummer">TSN</label>
+                      <input type="text" id="tsn_nummer" name="tsn_nummer" class="form-control form-control-lg text-uppercase" value="{{ form.get('tsn_nummer', '') }}" autocomplete="off">
+                    </div>
+                    <div class="col-md-2">
+                      <label class="form-label" for="auftragsnummer">Auftrag-Nr.</label>
+                      <input type="text" id="auftragsnummer" name="auftragsnummer" class="form-control form-control-lg" value="{{ form.get('auftragsnummer', '') }}" autocomplete="off">
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </div>
           </div>
         </section>
 
         <section class="vehicle-step" id="partner-step-3" data-form-step="3" aria-labelledby="partner-step-title-3">
           <div class="vehicle-step-title">
-            <h2 id="partner-step-title-3" tabindex="-1">Transport und Termine</h2>
-            <p>Nur bereits abgestimmte Termine eintragen. Alles andere kann später mit der Werkstatt geplant werden.</p>
+            <h2 id="partner-step-title-3" tabindex="-1">Auftrag, Transport und Termine</h2>
+            <p>Unterlage erst jetzt hinzufügen. Die Analyse ergänzt nur dieses Formular und legt noch keinen Auftrag an.</p>
           </div>
           <div class="row g-4">
-            <div class="col-lg-4">
-              <label class="form-label" for="transport_art">Transport</label>
-              <select id="transport_art" name="transport_art" class="form-select form-select-lg" data-transport-select>
-                {% for key, meta in transport_arten.items() %}
-                <option value="{{ key }}" {% if selected_transport == key %}selected{% endif %}>{{ meta['label'] }}</option>
-                {% endfor %}
-              </select>
-              <div class="transport-note">Die Bezeichnungen der Termine passen sich der Transportart an.</div>
-            </div>
-            <div class="col-lg-4">
-              <label class="form-label" for="annahme_datum" data-annahme-label>Fahrzeug wird von Ihnen angeliefert</label>
-              <div class="row g-2">
-                <div class="col-7">
-                  <input type="date" id="annahme_datum" name="annahme_datum" class="form-control form-control-lg" value="{{ form.get('annahme_datum', '') }}" aria-label="Datum der Fahrzeugübergabe">
+            <div class="col-lg-5">
+              <aside class="template-card" aria-label="Lackierauftrag als Vorlage">
+                <div>
+                  <strong>Lackierauftrag noch vorbereiten?</strong>
+                  <p>Online ausfüllen oder die PDF-Vorlage herunterladen und anschließend hier hochladen.</p>
                 </div>
-                <div class="col-5">
-                  <input type="time" id="annahme_uhrzeit" name="annahme_uhrzeit" class="form-control form-control-lg" value="{{ form.get('annahme_uhrzeit', '') }}" aria-label="Uhrzeit der Fahrzeugübergabe">
+                <div class="template-actions">
+                  <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-dark">Online ausfüllen</a>
+                  <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
                 </div>
-              </div>
-            </div>
-            <div class="col-lg-4">
-              <label class="form-label" for="abholtermin" data-abholung-label>Fahrzeug wird von Ihnen geholt</label>
-              <div class="row g-2">
-                <div class="col-7">
-                  <input type="date" id="abholtermin" name="abholtermin" class="form-control form-control-lg" value="{{ form.get('abholtermin', '') }}" aria-label="Datum der Fahrzeugrückgabe">
-                </div>
-                <div class="col-5">
-                  <input type="time" id="abhol_uhrzeit" name="abhol_uhrzeit" class="form-control form-control-lg" value="{{ form.get('abhol_uhrzeit', '') }}" aria-label="Uhrzeit der Fahrzeugrückgabe">
+              </aside>
+              <div class="vehicle-upload-card">
+                <label class="form-label" for="dateien">Lackierauftrag, Unterlage oder Schadensfoto</label>
+                <input type="file" id="dateien" name="dateien" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf" aria-describedby="dateien-hinweis dateien-status">
+                <div id="dateien-hinweis" class="form-text">Datei auswählen und zuerst analysieren. Erkannte Angaben werden nur in Schritt 1 bis 3 ergänzt.</div>
+                <div id="dateien-status" class="vehicle-upload-status" data-upload-status aria-live="polite">Noch keine Datei ausgewählt.</div>
+                <div class="vehicle-error" data-file-error role="alert">Bitte zuerst eine Datei auswählen.</div>
+                <div class="vehicle-error" data-analysis-error role="alert">Bitte die ausgewählte Datei zuerst analysieren.</div>
+                <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark w-100 mt-2" data-upload-analyze disabled data-loading-message="Die Unterlage wird nur analysiert. Es wird noch kein Auftrag angelegt.">Datei analysieren &amp; Felder ergänzen</button>
+                <div class="vehicle-analysis-result" data-analysis-result {% if not form.get('analyse_summary') %}hidden{% endif %} aria-live="polite">
+                  <strong>Analyse abgeschlossen – noch kein Auftrag angelegt</strong>
+                  <span data-analysis-result-text>{{ form.get('analyse_summary', '') }}</span>
                 </div>
               </div>
             </div>
-            <div class="col-12" id="abhol-adresse-wrap" hidden>
-              <label class="form-label" for="abhol_adresse">Abhol-/Lieferadresse</label>
-              <input type="text" id="abhol_adresse" name="abhol_adresse" class="form-control form-control-lg" placeholder="z. B. Unteres Lohhaus 5, 74915 Waibstadt" value="{{ form.get('abhol_adresse', '') }}" autocomplete="street-address">
-              <div class="form-text">Die Adresse erscheint beim Hol- und Bringservice auf der Werkstatt-Tafel.</div>
+            <div class="col-lg-7">
+              <div class="row g-3">
+                <div class="col-12">
+                  <label class="form-label" for="transport_art">Transport</label>
+                  <select id="transport_art" name="transport_art" class="form-select form-select-lg" data-transport-select>
+                    {% for key, meta in transport_arten.items() %}
+                    <option value="{{ key }}" {% if selected_transport == key %}selected{% endif %}>{{ meta['label'] }}</option>
+                    {% endfor %}
+                  </select>
+                  <div class="transport-note">Die Bezeichnungen der Termine passen sich der Transportart an.</div>
+                </div>
+                <div class="col-12">
+                  <label class="form-label" for="annahme_datum" data-annahme-label>Fahrzeug wird von Ihnen angeliefert</label>
+                  <div class="row g-2">
+                    <div class="col-7">
+                      <input type="date" id="annahme_datum" name="annahme_datum" class="form-control form-control-lg" value="{{ form.get('annahme_datum', '') }}" aria-label="Datum der Fahrzeugübergabe">
+                    </div>
+                    <div class="col-5">
+                      <input type="time" id="annahme_uhrzeit" name="annahme_uhrzeit" class="form-control form-control-lg" value="{{ form.get('annahme_uhrzeit', '') }}" aria-label="Uhrzeit der Fahrzeugübergabe">
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12">
+                  <label class="form-label" for="abholtermin" data-abholung-label>Fahrzeug wird von Ihnen geholt</label>
+                  <div class="row g-2">
+                    <div class="col-7">
+                      <input type="date" id="abholtermin" name="abholtermin" class="form-control form-control-lg" value="{{ form.get('abholtermin', '') }}" aria-label="Datum der Fahrzeugrückgabe">
+                    </div>
+                    <div class="col-5">
+                      <input type="time" id="abhol_uhrzeit" name="abhol_uhrzeit" class="form-control form-control-lg" value="{{ form.get('abhol_uhrzeit', '') }}" aria-label="Uhrzeit der Fahrzeugrückgabe">
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12" id="abhol-adresse-wrap" hidden>
+                  <label class="form-label" for="abhol_adresse">Abhol-/Lieferadresse</label>
+                  <input type="text" id="abhol_adresse" name="abhol_adresse" class="form-control form-control-lg" placeholder="z. B. Unteres Lohhaus 5, 74915 Waibstadt" value="{{ form.get('abhol_adresse', '') }}" autocomplete="street-address">
+                  <div class="form-text">Die Adresse erscheint beim Hol- und Bringservice auf der Werkstatt-Tafel.</div>
+                </div>
+              </div>
             </div>
-            <div class="col-12 text-muted small">Nach dem Absenden öffnet sich die Auftragsansicht. Dort können Sie Unterlagen und Angaben weiter ergänzen.</div>
+            <div class="col-12 text-muted small">Erst mit „Auftrag jetzt senden“ wird der Auftrag angelegt und die ausgewählte Datei gespeichert.</div>
           </div>
         </section>
 
@@ -530,7 +592,7 @@
           <div class="vehicle-step-status" data-step-status aria-live="polite">Schritt 1 von 3</div>
           <div class="vehicle-action-group">
             <button type="button" class="btn btn-primary" data-step-next hidden>Weiter</button>
-            <button type="submit" name="aktion" value="speichern" class="btn btn-primary" data-save-vehicle data-loading-message="Bitte kurz warten. Das Fahrzeug wird gespeichert.">Fahrzeug senden</button>
+            <button type="submit" name="aktion" value="speichern" class="btn btn-primary" data-save-vehicle data-loading-message="Bitte kurz warten. Fahrzeug und Auftrag werden jetzt gespeichert.">Auftrag jetzt senden</button>
           </div>
         </div>
       </form>
@@ -554,6 +616,19 @@
       const uploadButton = form.querySelector('[data-upload-analyze]');
       const uploadStatus = form.querySelector('[data-upload-status]');
       const fileError = form.querySelector('[data-file-error]');
+      const analysisError = form.querySelector('[data-analysis-error]');
+      const analysisResult = form.querySelector('[data-analysis-result]');
+      const analysisResultText = form.querySelector('[data-analysis-result-text]');
+      const analysisCompleted = form.querySelector('[data-analysis-completed]');
+      const analysisFileRequired = form.querySelector('[data-analysis-file-required]');
+      const analysisFileSignature = form.querySelector('[data-analysis-file-signature]');
+      const analysisToken = form.querySelector('[data-analysis-token]');
+      const analysisHint = form.querySelector('[data-analysis-hint]');
+      const analysisConfidence = form.querySelector('[data-analysis-confidence]');
+      const csrfInput = form.querySelector('[name="csrf_token"]');
+      const contactError = form.querySelector('[data-contact-error]');
+      const customerInput = form.querySelector('#kunde_name');
+      const phoneInput = form.querySelector('#kontakt_telefon');
       const vehicleError = form.querySelector('[data-vehicle-error]');
       const vehicleInput = form.querySelector('#fahrzeug');
       const plateInput = form.querySelector('#kennzeichen');
@@ -561,6 +636,8 @@
       const annahmeLabel = form.querySelector('[data-annahme-label]');
       const abholungLabel = form.querySelector('[data-abholung-label]');
       const addressWrap = form.querySelector('#abhol-adresse-wrap');
+      const pickupDateInput = form.querySelector('#abholtermin');
+      const finishDateInput = form.querySelector('#fertig_datum');
       const transportLabels = {{ transport_arten | tojson }};
       const overlay = document.querySelector('[data-loading-overlay]');
       const loadingText = document.querySelector('[data-loading-text]');
@@ -572,6 +649,7 @@
       let loadingNewsTimer = null;
       let submitterMessage = '';
       let submitterAction = '';
+      let analyzing = false;
 
       const showStep = (stepNumber, focusHeading = true) => {
         currentStep = Math.min(3, Math.max(1, Number(stepNumber) || 1));
@@ -596,13 +674,30 @@
         }
       };
 
+      const selectedFileSignature = () => Array.from(fileInput.files || [])
+        .map((file) => file.name.replace(/^.*[\\/]/, ''))
+        .join('|');
+
       const updateUpload = () => {
         const files = Array.from(fileInput?.files || []);
         uploadButton.disabled = files.length === 0;
         uploadStatus.textContent = files.length
           ? `${files.length} Datei${files.length === 1 ? '' : 'en'} ausgewählt: ${files.map((file) => file.name).join(', ')}`
           : 'Noch keine Datei ausgewählt.';
-        if (files.length) fileError.classList.remove('is-visible');
+        if (files.length) {
+          fileError.classList.remove('is-visible');
+          const currentSignature = selectedFileSignature();
+          if (analysisFileSignature.value && analysisFileSignature.value !== currentSignature) {
+            analysisCompleted.value = '';
+            analysisFileRequired.value = '';
+            analysisFileSignature.value = '';
+            analysisToken.value = '';
+            analysisHint.value = '';
+            analysisConfidence.value = '';
+            analysisResult.hidden = true;
+          }
+        }
+        analysisError.classList.remove('is-visible');
       };
 
       const updateTransport = () => {
@@ -613,6 +708,41 @@
       };
 
       const hasVehicleReference = () => Boolean(vehicleInput.value.trim() || plateInput.value.trim());
+      const hasContact = () => Boolean(customerInput.value.trim() && phoneInput.value.trim());
+
+      const validateContact = () => {
+        const valid = hasContact();
+        contactError.classList.toggle('is-visible', !valid);
+        [customerInput, phoneInput].forEach((input) => {
+          input.classList.toggle('is-invalid', !input.value.trim());
+          input.setAttribute('aria-invalid', input.value.trim() ? 'false' : 'true');
+        });
+        if (!valid) (customerInput.value.trim() ? phoneInput : customerInput).focus();
+        return valid;
+      };
+
+      const validateVehicle = () => {
+        const valid = hasVehicleReference();
+        vehicleError.classList.toggle('is-visible', !valid);
+        [vehicleInput, plateInput].forEach((input) => {
+          input.classList.toggle('is-invalid', !valid);
+          input.setAttribute('aria-invalid', valid ? 'false' : 'true');
+        });
+        if (!valid) vehicleInput.focus();
+        return valid;
+      };
+
+      const canOpenStep = (target) => {
+        if (target > 1 && !validateContact()) {
+          showStep(1);
+          return false;
+        }
+        if (target > 2 && !validateVehicle()) {
+          showStep(2);
+          return false;
+        }
+        return true;
+      };
 
       const updateLoadingNews = () => {
         if (!loadingNewsItems.length || !loadingNewsTitle || !loadingNewsText) return;
@@ -628,13 +758,98 @@
         loadingNewsTimer = window.setInterval(updateLoadingNews, 3200);
       };
 
-      stepButtons.forEach((button) => button.addEventListener('click', () => showStep(button.dataset.stepTarget)));
+      const stopLoading = () => {
+        if (loadingNewsTimer) window.clearInterval(loadingNewsTimer);
+        loadingNewsTimer = null;
+        overlay?.classList.remove('show');
+      };
+
+      const analyzeSelectedFiles = async () => {
+        if (analyzing) return;
+        const files = Array.from(fileInput.files || []);
+        if (!files.length) {
+          fileError.classList.add('is-visible');
+          fileInput.focus();
+          return;
+        }
+        analyzing = true;
+        uploadButton.disabled = true;
+        fileError.classList.remove('is-visible');
+        analysisError.classList.remove('is-visible');
+        if (overlay && loadingText) {
+          loadingText.textContent = 'Die Unterlage wird nur analysiert. Es wird noch kein Auftrag angelegt.';
+          startLoadingNews();
+          overlay.classList.add('show');
+        }
+        const payload = new FormData();
+        files.forEach((file) => payload.append('dateien', file, file.name));
+        if (csrfInput) payload.append('csrf_token', csrfInput.value);
+        try {
+          const response = await fetch(form.dataset.analysisUrl, {
+            method: 'POST',
+            body: payload,
+            headers: csrfInput ? { 'X-CSRF-Token': csrfInput.value } : {},
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok || !result.ok) {
+            throw new Error(result.error || 'Die Datei konnte nicht analysiert werden.');
+          }
+          let filled = 0;
+          Object.entries(result.fields || {}).forEach(([name, value]) => {
+            if (value === null || value === undefined || String(value).trim() === '') return;
+            const input = form.elements.namedItem(name);
+            if (!input || String(input.value || '').trim()) return;
+            input.value = String(value);
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            filled += 1;
+          });
+          if (finishDateInput && !finishDateInput.value && pickupDateInput?.value) {
+            finishDateInput.value = pickupDateInput.value;
+          }
+          analysisCompleted.value = '1';
+          analysisFileRequired.value = '1';
+          analysisFileSignature.value = selectedFileSignature();
+          analysisToken.value = result.analysis_token || '';
+          analysisHint.value = result.review_hint || 'Bitte die automatisch ergänzten Angaben gegen die Originaldatei prüfen.';
+          analysisConfidence.value = result.confidence || '';
+          analysisResult.hidden = false;
+          analysisResultText.textContent = filled
+            ? `${filled} Formularfeld${filled === 1 ? '' : 'er'} ergänzt. Bitte prüfen Sie die Angaben jetzt noch einmal ab Schritt 1.`
+            : 'Die Datei wurde gelesen. Es konnten keine leeren Formularfelder sicher ergänzt werden; bitte Angaben manuell prüfen.';
+          showStep(1);
+        } catch (error) {
+          analysisError.textContent = error.message || 'Die Datei konnte nicht analysiert werden.';
+          analysisError.classList.add('is-visible');
+        } finally {
+          analyzing = false;
+          uploadButton.disabled = (fileInput.files || []).length === 0;
+          stopLoading();
+        }
+      };
+
+      stepButtons.forEach((button) => button.addEventListener('click', () => {
+        const target = Number(button.dataset.stepTarget);
+        if (target < currentStep || canOpenStep(target)) showStep(target);
+      }));
       backButton.addEventListener('click', () => showStep(currentStep - 1));
-      nextButton.addEventListener('click', () => showStep(currentStep + 1));
+      nextButton.addEventListener('click', () => {
+        const target = currentStep + 1;
+        if (canOpenStep(target)) showStep(target);
+      });
       fileInput.addEventListener('change', updateUpload);
       transportSelect.addEventListener('change', updateTransport);
+      pickupDateInput?.addEventListener('change', () => {
+        if (finishDateInput) finishDateInput.value = pickupDateInput.value;
+      });
+      [customerInput, phoneInput].forEach((input) => input.addEventListener('input', () => {
+        input.classList.remove('is-invalid');
+        if (hasContact()) contactError.classList.remove('is-visible');
+      }));
       [vehicleInput, plateInput].forEach((input) => input.addEventListener('input', () => {
-        if (hasVehicleReference()) vehicleError.classList.remove('is-visible');
+        if (hasVehicleReference()) {
+          vehicleError.classList.remove('is-visible');
+          [vehicleInput, plateInput].forEach((field) => field.classList.remove('is-invalid'));
+        }
       }));
 
       form.addEventListener('click', (event) => {
@@ -648,23 +863,42 @@
         const action = event.submitter?.name === 'aktion'
           ? (event.submitter.value || '')
           : submitterAction;
-        if (action === 'upload_analyze' && fileInput.files.length === 0) {
+        if (action === 'upload_analyze') {
           event.preventDefault();
+          analyzeSelectedFiles();
+          return;
+        }
+        if (!validateContact()) {
+          event.preventDefault();
+          showStep(1);
+          return;
+        }
+        if (!validateVehicle()) {
+          event.preventDefault();
+          showStep(2);
+          return;
+        }
+        if (fileInput.files.length && analysisCompleted.value !== '1') {
+          event.preventDefault();
+          showStep(3);
+          analysisError.classList.add('is-visible');
+          uploadButton.focus();
+          return;
+        }
+        if (analysisFileRequired.value === '1' && !fileInput.files.length) {
+          event.preventDefault();
+          showStep(3);
+          fileError.textContent = 'Bitte die zuvor analysierte Datei noch einmal auswählen.';
           fileError.classList.add('is-visible');
           fileInput.focus();
           return;
         }
-        if (action !== 'upload_analyze' && !hasVehicleReference()) {
-          event.preventDefault();
-          showStep(1);
-          vehicleError.classList.add('is-visible');
-          vehicleInput.focus();
-          return;
-        }
         fileError.classList.remove('is-visible');
+        analysisError.classList.remove('is-visible');
+        contactError.classList.remove('is-visible');
         vehicleError.classList.remove('is-visible');
         if (overlay && loadingText) {
-          loadingText.textContent = submitterMessage || 'Bitte kurz warten. Der Auftrag wird vorbereitet.';
+          loadingText.textContent = submitterMessage || 'Bitte kurz warten. Fahrzeug und Auftrag werden jetzt gespeichert.';
           startLoadingNews();
           overlay.classList.add('show');
         }

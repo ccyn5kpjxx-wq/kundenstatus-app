@@ -49999,6 +49999,268 @@ def partner_versicherung_prozess_status(slug, auftrag_id, prozess_key):
     )
 
 
+PARTNER_NEW_ANALYSIS_FIELDS = (
+    "fahrzeug",
+    "kennzeichen",
+    "fin_nummer",
+    "hsn_nummer",
+    "tsn_nummer",
+    "auftragsnummer",
+    "analyse_text",
+    "beschreibung",
+    "annahme_datum",
+    "fertig_datum",
+    "abholtermin",
+)
+PARTNER_NEW_ANALYSIS_TOKEN_TTL_SECONDS = 6 * 60 * 60
+
+
+def partner_new_file_hash(file):
+    stream = getattr(file, "stream", file)
+    digest = hashlib.sha256()
+    try:
+        stream.seek(0)
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        stream.seek(0)
+    except Exception:
+        try:
+            stream.seek(0)
+        except Exception:
+            pass
+        return ""
+    return digest.hexdigest()
+
+
+def create_partner_new_analysis_token(autohaus_id, file_hashes):
+    hashes = [clean_text(value) for value in file_hashes if clean_text(value)]
+    if not hashes:
+        return ""
+    payload = {
+        "autohaus_id": int(autohaus_id or 0),
+        "file_hashes": hashes,
+        "created_at": int(time.time()),
+    }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    signature = hmac.new(
+        str(app.secret_key).encode("utf-8"),
+        encoded.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def partner_new_analysis_token_valid(token, autohaus_id, files):
+    token = clean_text(token)
+    if not token or "." not in token:
+        return False
+    encoded, signature = token.rsplit(".", 1)
+    expected_signature = hmac.new(
+        str(app.secret_key).encode("utf-8"),
+        encoded.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected_signature):
+        return False
+    try:
+        padding_length = (-len(encoded)) % 4
+        payload = json.loads(
+            base64.urlsafe_b64decode(encoded + ("=" * padding_length)).decode("utf-8")
+        )
+        created_at = int(payload.get("created_at") or 0)
+        token_autohaus_id = int(payload.get("autohaus_id") or 0)
+        token_hashes = [clean_text(value) for value in payload.get("file_hashes") or []]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    age = int(time.time()) - created_at
+    if (
+        token_autohaus_id != int(autohaus_id or 0)
+        or age < -60
+        or age > PARTNER_NEW_ANALYSIS_TOKEN_TTL_SECONDS
+    ):
+        return False
+    current_hashes = [partner_new_file_hash(file) for file in files or []]
+    if not current_hashes or any(not value for value in current_hashes):
+        return False
+    return len(token_hashes) == len(current_hashes) and all(
+        hmac.compare_digest(expected, current)
+        for expected, current in zip(token_hashes, current_hashes)
+    )
+
+
+def analyze_partner_new_files(files):
+    """Analysiert einen Formularentwurf, ohne Upload oder Auftrag zu speichern."""
+    fields = {}
+    hints = []
+    sources = []
+    errors = []
+    analyzed = 0
+    confidence_values = []
+    file_names = []
+    file_hashes = []
+    analysis_deadline = document_analysis_deadline()
+
+    with tempfile.TemporaryDirectory(prefix="partner-neu-analyse-") as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        for index, file in enumerate(files or []):
+            if not document_analysis_time_available(analysis_deadline):
+                errors.append(
+                    "Die Analyse wurde wegen des Zeitlimits beendet. Es wurde kein Auftrag angelegt."
+                )
+                break
+            original_name = secure_filename(file.filename or "")
+            suffix = pathlib.Path(original_name).suffix.lower()
+            if not original_name or suffix not in ANALYSIS_EXTENSIONS:
+                continue
+            file_names.append(original_name)
+            target = tmp_path / f"{index:02d}-{uuid.uuid4().hex}{suffix}"
+            try:
+                file.stream.seek(0)
+                file.save(target)
+                file.stream.seek(0)
+                file_hashes.append(hashlib.sha256(target.read_bytes()).hexdigest())
+                bundle = build_document_analysis_bundle_safe(target, original_name)
+            except Exception as exc:
+                errors.append(
+                    f"{original_name} konnte nicht analysiert werden: {clean_text(str(exc))[:220]}"
+                )
+                continue
+
+            analyzed += 1
+            extracted_text = clean_text(bundle.get("text"))
+            ai_fields = load_saved_analysis_json(bundle.get("analysis_json"))
+            local_fields = parse_document_fields(extracted_text, original_name)
+            detected = merge_document_fields(ai_fields, local_fields)
+            detected = ensure_document_review_fallback(
+                detected,
+                extracted_text,
+                original_name,
+            )
+            for key, value in detected.items():
+                if key not in PARTNER_NEW_ANALYSIS_FIELDS or not clean_text(value):
+                    continue
+                if key == "abholtermin":
+                    continue
+                if key not in fields:
+                    fields[key] = value
+            if clean_text(detected.get("fertig_datum")) and not clean_text(
+                fields.get("abholtermin")
+            ):
+                fields["abholtermin"] = detected["fertig_datum"]
+            hint = clean_text(detected.get("analyse_hinweis")) or clean_text(
+                bundle.get("hint")
+            )
+            if hint and hint not in hints:
+                hints.append(hint)
+            source = clean_text(bundle.get("source"))
+            if source and source not in sources:
+                sources.append(source)
+            try:
+                confidence = float(detected.get("analyse_confidence") or 0)
+            except (TypeError, ValueError):
+                confidence = 0
+            if confidence:
+                confidence_values.append(confidence)
+            if bundle.get("status") == "error" and clean_text(bundle.get("hint")):
+                errors.append(clean_text(bundle["hint"]))
+
+    for key in ("annahme_datum", "fertig_datum", "abholtermin"):
+        if clean_text(fields.get(key)):
+            fields[key] = iso_date(fields[key])
+    if clean_text(fields.get("kennzeichen")):
+        fields["kennzeichen"] = clean_text(fields["kennzeichen"]).upper()
+    if clean_text(fields.get("fin_nummer")):
+        fields["fin_nummer"] = normalize_fin(fields["fin_nummer"])
+    if clean_text(fields.get("hsn_nummer")):
+        fields["hsn_nummer"] = normalize_hsn(fields["hsn_nummer"])
+    if clean_text(fields.get("tsn_nummer")):
+        fields["tsn_nummer"] = normalize_tsn(fields["tsn_nummer"])
+
+    return {
+        "files_analyzed": analyzed,
+        "fields": fields,
+        "review_hint": " ".join(dict.fromkeys(hints))[:1200],
+        "needs_review": bool(fields or hints),
+        "confidence": min(confidence_values) if confidence_values else 0,
+        "sources": sources,
+        "file_names": file_names,
+        "file_hashes": file_hashes,
+        "errors": list(dict.fromkeys(error for error in errors if clean_text(error))),
+    }
+
+
+def partner_new_analysis_form_values(form, result):
+    prepared = dict(form or {})
+    filled = 0
+    for key, value in (result.get("fields") or {}).items():
+        if clean_text(value) and not clean_text(prepared.get(key)):
+            prepared[key] = value
+            filled += 1
+    prepared["analyse_abgeschlossen"] = "1"
+    prepared["analyse_datei_erforderlich"] = "1"
+    prepared["analyse_dateisignatur"] = "|".join(result.get("file_names") or [])
+    prepared["analyse_token"] = clean_text(result.get("analysis_token"))
+    prepared["analyse_hinweis"] = clean_text(result.get("review_hint"))
+    prepared["analyse_confidence"] = clean_text(result.get("confidence"))
+    prepared["analyse_summary"] = (
+        f"{filled} Formularfeld{'er' if filled != 1 else ''} ergänzt. "
+        "Bitte die Angaben jetzt ab Schritt 1 gegen die Originaldatei prüfen."
+        if filled
+        else "Die Datei wurde gelesen, aber es konnten keine Formularfelder sicher ergänzt werden."
+    )
+    return prepared
+
+
+@app.route("/partner/<slug>/neu/analysieren", methods=["POST"])
+def partner_neuer_auftrag_analysieren(slug):
+    autohaus, redirect_response = partner_session_required(slug)
+    if redirect_response:
+        return redirect_response
+
+    selected = [
+        file for file in request.files.getlist("dateien") if file and file.filename
+    ]
+    allowed = get_allowed_uploads(selected)
+    if not selected:
+        return jsonify({"ok": False, "error": "Bitte zuerst eine Datei auswählen."}), 400
+    if len(allowed) != len(selected):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.",
+                }
+            ),
+            400,
+        )
+
+    result = analyze_partner_new_files(allowed)
+    if not result["files_analyzed"]:
+        message = result["errors"][0] if result["errors"] else "Die Datei konnte nicht analysiert werden."
+        return jsonify({"ok": False, "error": message}), 422
+    result["analysis_token"] = create_partner_new_analysis_token(
+        autohaus["id"],
+        result["file_hashes"],
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "fields": result["fields"],
+            "files_analyzed": result["files_analyzed"],
+            "review_hint": result["review_hint"],
+            "needs_review": result["needs_review"],
+            "confidence": result["confidence"],
+            "analysis_token": result["analysis_token"],
+            "warning": result["errors"][0] if result["errors"] else "",
+        }
+    )
+
+
 @app.route("/partner/<slug>/neu", methods=["GET", "POST"])
 def partner_neuer_auftrag(slug):
     autohaus, redirect_response = partner_session_required(slug)
@@ -50016,7 +50278,35 @@ def partner_neuer_auftrag(slug):
         if aktion == "upload_analyze" and not erlaubte_dateien:
             flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.", "warning")
             return render_partner_new_form(autohaus, form=form)
-        if aktion != "upload_analyze" and not (
+        if aktion == "upload_analyze":
+            result = analyze_partner_new_files(erlaubte_dateien)
+            if not result["files_analyzed"]:
+                message = (
+                    result["errors"][0]
+                    if result["errors"]
+                    else "Die Datei konnte nicht analysiert werden."
+                )
+                flash(message, "warning")
+                return render_partner_new_form(autohaus, form=form)
+            result["analysis_token"] = create_partner_new_analysis_token(
+                autohaus["id"],
+                result["file_hashes"],
+            )
+            prepared_form = partner_new_analysis_form_values(form, result)
+            flash(
+                "Die Datei wurde nur analysiert; es wurde noch kein Auftrag angelegt. Bitte alle ergänzten Angaben prüfen.",
+                "success",
+            )
+            return render_partner_new_form(autohaus, form=prepared_form)
+        if not clean_text(form.get("kunde_name")) or not clean_text(
+            form.get("kontakt_telefon")
+        ):
+            flash(
+                "Bitte zuerst Endkunde / Referenz und die Handynummer des Kunden angeben.",
+                "warning",
+            )
+            return render_partner_new_form(autohaus, form=form)
+        if not (
             clean_text(form.get("fahrzeug")) or clean_text(form.get("kennzeichen"))
         ):
             flash("Bitte mindestens Fahrzeug oder Kennzeichen angeben, damit die Werkstatt den Auftrag zuordnen kann.", "warning")
@@ -50024,6 +50314,45 @@ def partner_neuer_auftrag(slug):
         gewaehlte_dateien = [file for file in dateien if file and file.filename]
         if gewaehlte_dateien and len(erlaubte_dateien) < len(gewaehlte_dateien):
             flash("Hinweis: Mindestens eine Datei hatte einen nicht unterstützten Typ und wurde nicht gespeichert (PDF, JPG, PNG, HEIC, DOCX oder XLSX).", "warning")
+        if gewaehlte_dateien and clean_text(form.get("analyse_abgeschlossen")) != "1":
+            flash(
+                "Bitte die ausgewählte Datei zuerst analysieren. Dabei werden nur die Formularfelder ergänzt; ein Auftrag entsteht noch nicht.",
+                "warning",
+            )
+            return render_partner_new_form(autohaus, form=form)
+        if gewaehlte_dateien and not partner_new_analysis_token_valid(
+            form.get("analyse_token"),
+            autohaus["id"],
+            erlaubte_dateien,
+        ):
+            flash(
+                "Die sichere Analysebestätigung fehlt oder passt nicht mehr zur Datei. Bitte die Datei erneut analysieren.",
+                "warning",
+            )
+            return render_partner_new_form(autohaus, form=form)
+        expected_file_signature = clean_text(form.get("analyse_dateisignatur"))
+        current_file_signature = "|".join(
+            secure_filename(file.filename or "") for file in gewaehlte_dateien
+        )
+        if (
+            gewaehlte_dateien
+            and expected_file_signature
+            and not hmac.compare_digest(expected_file_signature, current_file_signature)
+        ):
+            flash(
+                "Die Dateiauswahl wurde nach der Analyse geändert. Bitte die aktuelle Datei noch einmal analysieren.",
+                "warning",
+            )
+            return render_partner_new_form(autohaus, form=form)
+        if (
+            clean_text(form.get("analyse_datei_erforderlich")) == "1"
+            and not gewaehlte_dateien
+        ):
+            flash(
+                "Bitte die zuvor analysierte Datei noch einmal auswählen, damit sie dem Auftrag beigefügt wird.",
+                "warning",
+            )
+            return render_partner_new_form(autohaus, form=form)
         beschreibung = clean_text(form.get("beschreibung"))
         analyse = clean_text(form.get("analyse_text")) or analyse_text(beschreibung)
         auftrag_id = create_auftrag(
@@ -50035,6 +50364,7 @@ def partner_neuer_auftrag(slug):
             kilometerstand=clean_text(form.get("kilometerstand")),
             hsn_nummer=normalize_hsn(form.get("hsn_nummer")),
             tsn_nummer=normalize_tsn(form.get("tsn_nummer")),
+            auftragsnummer=clean_text(form.get("auftragsnummer")),
             kennzeichen=clean_text(form.get("kennzeichen")).upper(),
             beschreibung=beschreibung,
             analyse=analyse,
@@ -50060,19 +50390,34 @@ def partner_neuer_auftrag(slug):
                 "autohaus",
                 "standard",
                 upload_note=form.get("upload_notiz"),
+                analyze=False,
+                apply_analysis=False,
             )
         except Exception as exc:
             upload_result = (
                 0,
                 {"_analysis_error": f"Upload/Analyse konnte nicht abgeschlossen werden: {clean_text(str(exc))[:300]}"},
             )
-        if aktion == "upload_analyze":
-            flash_upload_analysis_result(
-                upload_result,
-                "Datei hochgeladen und Analyse sichtbar gemacht.",
+        review_hint = clean_text(form.get("analyse_hinweis"))[:1200]
+        if gewaehlte_dateien and review_hint:
+            try:
+                confidence = float(clean_text(form.get("analyse_confidence")) or 0)
+            except (TypeError, ValueError):
+                confidence = 0
+            _db = get_db()
+            _db.execute(
+                """
+                UPDATE auftraege
+                SET analyse_pruefen=1, analyse_hinweis=?, analyse_confidence=?,
+                    analyse_autohaus_geprueft=0, analyse_werkstatt_geprueft=0,
+                    geaendert_am=?
+                WHERE id=?
+                """,
+                (review_hint, confidence, now_str(), auftrag_id),
             )
-        else:
-            flash("Fahrzeug angelegt.", "success")
+            _db.commit()
+            _db.close()
+        flash("Fahrzeug und Auftrag wurden übermittelt.", "success")
         flash_betriebsurlaub_planungshinweis(
             form.get("annahme_datum"),
             form.get("start_datum"),

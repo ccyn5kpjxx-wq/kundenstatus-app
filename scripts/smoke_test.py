@@ -899,20 +899,30 @@ def main():
         upload_client = portal.app.test_client()
         with upload_client.session_transaction() as session:
             session["partner_autohaus_id"] = autohaus["id"]
-        upload_client.get("/partner/kaesmann/neu")
-        upload_response = upload_client.post(
-            "/partner/kaesmann/neu",
+        partner_new_response = upload_client.get("/partner/kaesmann/neu")
+        partner_new_html = partner_new_response.get_data(as_text=True)
+        partner_new_flow_ok = (
+            partner_new_response.status_code == 200
+            and "Kunde und Ansprechpartner" in partner_new_html
+            and "Datei analysieren &amp; Felder ergänzen" in partner_new_html
+            and "Erst mit „Auftrag jetzt senden“ wird der Auftrag angelegt" in partner_new_html
+            and "Mit der Analyse wird direkt ein Auftrag vorbereitet" not in partner_new_html
+            and "Lackierauftrag noch vorbereiten?" in partner_new_html
+            and partner_new_html.index("Lackierauftrag noch vorbereiten?")
+            > partner_new_html.index('id="partner-step-3"')
+        )
+        print(
+            "[OK] Partner-Neuanlage trennt Analyse und Auftragsanlage"
+            if partner_new_flow_ok
+            else "[FEHLER] Partner-Neuanlage zeigt noch den alten Upload-Ablauf"
+        )
+        ok &= partner_new_flow_ok
+        before_analysis_count = len(portal.list_auftraege())
+        analysis_response = upload_client.post(
+            "/partner/kaesmann/neu/analysieren",
             data=csrf_data(
                 upload_client,
                 {
-                    "aktion": "upload_analyze",
-                    "kunde_name": "Smoke Test Kunde",
-                    "kontakt_telefon": "01234 567890",
-                    "fahrzeug": "",
-                    "kennzeichen": "",
-                    "analyse_text": "",
-                    "beschreibung": "",
-                    "transport_art": "standard",
                     "dateien": (
                         BytesIO(
                             b"Lackierauftrag Smoke Test\n"
@@ -927,7 +937,62 @@ def main():
             content_type="multipart/form-data",
             follow_redirects=False,
         )
-        ok &= check("Kundenportal Upload leitet zum Auftrag", upload_response, {302})
+        ok &= check("Partner-Datei wird im Formularentwurf analysiert", analysis_response, {200})
+        analysis_payload = analysis_response.get_json(silent=True) or {}
+        analysis_fields = analysis_payload.get("fields") or {}
+        analysis_prefill_ok = bool(
+            analysis_payload.get("ok")
+            and (analysis_fields.get("fahrzeug") or analysis_fields.get("kennzeichen"))
+        )
+        print(
+            "[OK] Analyse liefert erkannte Formularfelder"
+            if analysis_prefill_ok
+            else "[FEHLER] Analyse liefert keine erkannten Formularfelder"
+        )
+        ok &= analysis_prefill_ok
+        after_analysis_count = len(portal.list_auftraege())
+        no_order_from_analysis = after_analysis_count == before_analysis_count
+        print(
+            "[OK] Analyse legt keinen Auftrag an"
+            if no_order_from_analysis
+            else "[FEHLER] Analyse hat bereits einen Auftrag angelegt"
+        )
+        ok &= no_order_from_analysis
+
+        upload_response = upload_client.post(
+            "/partner/kaesmann/neu",
+            data=csrf_data(
+                upload_client,
+                {
+                    "aktion": "speichern",
+                    "kunde_name": "Smoke Test Kunde",
+                    "kontakt_telefon": "01234 567890",
+                    "fahrzeug": analysis_fields.get("fahrzeug") or "Audi A4",
+                    "kennzeichen": analysis_fields.get("kennzeichen") or "MOS ST 42",
+                    "analyse_text": analysis_fields.get("analyse_text") or "",
+                    "beschreibung": analysis_fields.get("beschreibung") or "",
+                    "transport_art": "standard",
+                    "analyse_abgeschlossen": "1",
+                    "analyse_datei_erforderlich": "1",
+                    "analyse_dateisignatur": "smoke-kunden-upload.txt",
+                    "analyse_token": analysis_payload.get("analysis_token") or "",
+                    "analyse_hinweis": analysis_payload.get("review_hint") or "Automatisch ergänzt; bitte prüfen.",
+                    "analyse_confidence": analysis_payload.get("confidence") or "",
+                    "dateien": (
+                        BytesIO(
+                            b"Lackierauftrag Smoke Test\n"
+                            b"Fahrzeug: Audi A4\n"
+                            b"Kennzeichen: MOS ST 42\n"
+                            b"Auftrag: SMOKE-PORTAL-42\n"
+                        ),
+                        "smoke-kunden-upload.txt",
+                    ),
+                },
+            ),
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        ok &= check("Geprüfter Partner-Auftrag wird abschließend angelegt", upload_response, {302})
         auftrag_id = None
         location = upload_response.headers.get("Location", "")
         marker = "/auftrag/"
@@ -938,9 +1003,9 @@ def main():
                 auftrag_id = None
         upload_created = auftrag_id is not None and portal.get_auftrag(auftrag_id)
         print(
-            "[OK] Kundenportal Upload erstellt Auftrag"
+            "[OK] Abschließendes Senden erstellt Auftrag"
             if upload_created
-            else "[FEHLER] Kundenportal Upload erstellt keinen pruefbaren Auftrag"
+            else "[FEHLER] Abschließendes Senden erstellt keinen pruefbaren Auftrag"
         )
         ok &= bool(upload_created)
         if auftrag_id:
@@ -950,12 +1015,13 @@ def main():
                     len(dateien) == 1
                     and dateien[0]["quelle"] == "autohaus"
                     and dateien[0]["original_name"] == "smoke-kunden-upload.txt"
-                    and dateien[0]["extrahierter_text"]
+                    and upload_created.get("fahrzeug")
+                    and upload_created.get("analyse_pruefen")
                 )
                 print(
-                    "[OK] Kundendatei gespeichert und analysiert"
+                    "[OK] Geprüfte Formularwerte und Originaldatei gespeichert"
                     if upload_saved
-                    else "[FEHLER] Kundendatei wurde nicht korrekt gespeichert/analysiert"
+                    else "[FEHLER] Formularwerte oder Originaldatei wurden nicht korrekt gespeichert"
                 )
                 ok &= upload_saved
                 detail_response = upload_client.get(f"/partner/kaesmann/auftrag/{auftrag_id}")
