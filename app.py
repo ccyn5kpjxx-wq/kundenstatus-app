@@ -50312,15 +50312,25 @@ def partner_neuer_auftrag(slug):
             flash("Bitte mindestens Fahrzeug oder Kennzeichen angeben, damit die Werkstatt den Auftrag zuordnen kann.", "warning")
             return render_partner_new_form(autohaus, form=form)
         gewaehlte_dateien = [file for file in dateien if file and file.filename]
-        if gewaehlte_dateien and len(erlaubte_dateien) < len(gewaehlte_dateien):
-            flash("Hinweis: Mindestens eine Datei hatte einen nicht unterstützten Typ und wurde nicht gespeichert (PDF, JPG, PNG, HEIC, DOCX oder XLSX).", "warning")
-        if gewaehlte_dateien and clean_text(form.get("analyse_abgeschlossen")) != "1":
+        if not gewaehlte_dateien:
+            flash(
+                "Bitte zuerst eine Datei hochladen und analysieren. Danach können Sie die ergänzten Angaben prüfen.",
+                "warning",
+            )
+            return render_partner_new_form(autohaus, form=form)
+        if len(erlaubte_dateien) != len(gewaehlte_dateien):
+            flash(
+                "Mindestens eine Datei hat einen nicht unterstützten Typ. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.",
+                "warning",
+            )
+            return render_partner_new_form(autohaus, form=form)
+        if clean_text(form.get("analyse_abgeschlossen")) != "1":
             flash(
                 "Bitte die ausgewählte Datei zuerst analysieren. Dabei werden nur die Formularfelder ergänzt; ein Auftrag entsteht noch nicht.",
                 "warning",
             )
             return render_partner_new_form(autohaus, form=form)
-        if gewaehlte_dateien and not partner_new_analysis_token_valid(
+        if not partner_new_analysis_token_valid(
             form.get("analyse_token"),
             autohaus["id"],
             erlaubte_dateien,
@@ -50341,15 +50351,6 @@ def partner_neuer_auftrag(slug):
         ):
             flash(
                 "Die Dateiauswahl wurde nach der Analyse geändert. Bitte die aktuelle Datei noch einmal analysieren.",
-                "warning",
-            )
-            return render_partner_new_form(autohaus, form=form)
-        if (
-            clean_text(form.get("analyse_datei_erforderlich")) == "1"
-            and not gewaehlte_dateien
-        ):
-            flash(
-                "Bitte die zuvor analysierte Datei noch einmal auswählen, damit sie dem Auftrag beigefügt wird.",
                 "warning",
             )
             return render_partner_new_form(autohaus, form=form)

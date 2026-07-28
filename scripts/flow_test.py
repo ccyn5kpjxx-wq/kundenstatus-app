@@ -1174,6 +1174,31 @@ def main():
         )
         check("KI-Helfer-Verlauf ist löschbar", response.status_code == 200)
 
+        urlaub_document = (
+            b"Lackierauftrag Betriebsurlaub\n"
+            b"Fahrzeug: Urlaubstest Auto\n"
+            b"Kennzeichen: MOS-URLAUB-26\n"
+        )
+        urlaub_analysis_response = partner.post(
+            "/partner/kaesmann/neu/analysieren",
+            data=with_csrf(
+                partner,
+                {
+                    "dateien": (
+                        BytesIO(urlaub_document),
+                        "flow-betriebsurlaub-lackierauftrag.txt",
+                    ),
+                },
+            ),
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        urlaub_analysis = urlaub_analysis_response.get_json(silent=True) or {}
+        check(
+            "Betriebsurlaub-Auftrag analysiert zuerst die Unterlage",
+            urlaub_analysis_response.status_code == 200 and urlaub_analysis.get("ok"),
+            str(urlaub_analysis),
+        )
         urlaub_response = partner.post(
             "/partner/kaesmann/neu",
             data=with_csrf(
@@ -1189,8 +1214,17 @@ def main():
                     "transport_art": "standard",
                     "annahme_datum": "2026-08-20",
                     "abholtermin": "2026-08-21",
+                    "analyse_abgeschlossen": "1",
+                    "analyse_datei_erforderlich": "1",
+                    "analyse_dateisignatur": "flow-betriebsurlaub-lackierauftrag.txt",
+                    "analyse_token": urlaub_analysis.get("analysis_token") or "",
+                    "dateien": (
+                        BytesIO(urlaub_document),
+                        "flow-betriebsurlaub-lackierauftrag.txt",
+                    ),
                 },
             ),
+            content_type="multipart/form-data",
             follow_redirects=True,
         )
         urlaub_html = urlaub_response.get_data(as_text=True)

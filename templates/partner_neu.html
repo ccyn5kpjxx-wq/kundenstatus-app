@@ -167,6 +167,34 @@
       font-size: clamp(1.35rem, 3vw, 1.75rem);
     }
     .vehicle-step-title p { margin: 0; color: var(--muted); }
+    .vehicle-analysis-start {
+      max-width: 720px;
+      margin: 0 auto 22px;
+      padding: clamp(22px, 4vw, 34px);
+      border: 1px solid var(--line);
+      border-radius: 21px;
+      background: var(--paper);
+    }
+    .vehicle-analysis-start .vehicle-step-title { text-align: center; }
+    .vehicle-analysis-start-actions {
+      display: flex;
+      justify-content: center;
+      margin-top: 16px;
+    }
+    .vehicle-analysis-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 18px;
+      padding: 14px 16px;
+      border: 1px solid #b9cfbf;
+      border-radius: 15px;
+      color: #244c31;
+      background: #edf7ef;
+    }
+    .vehicle-analysis-banner strong { display: block; margin-bottom: 2px; }
+    .vehicle-analysis-banner span { font-size: .9rem; }
     .vehicle-upload-card {
       height: 100%;
       padding: 18px;
@@ -340,6 +368,9 @@
       .vehicle-progress-button { min-height: 50px; }
       .vehicle-progress-copy span { display: none; }
       .vehicle-step { padding: 18px 14px; border-radius: 16px; }
+      .vehicle-analysis-start { padding: 20px 14px; border-radius: 17px; }
+      .vehicle-analysis-banner { align-items: stretch; flex-direction: column; }
+      .vehicle-analysis-banner .btn { width: 100%; }
       .sticky-form-actions {
         align-items: stretch;
         flex-flow: row wrap;
@@ -403,7 +434,7 @@
         <div class="partner-form-header-copy">
           <div class="eyebrow">Fahrzeug übermitteln</div>
           <h1 id="partner-vehicle-title">Neues Fahrzeug für {{ autohaus['portal_label'] }}</h1>
-          <p>{{ autohaus['portal_welcome'] }} Erfassen Sie zuerst den Kunden, danach Fahrzeug und Schaden. Die Unterlage wird erst im letzten Schritt hinzugefügt.</p>
+          <p>{{ autohaus['portal_welcome'] }} Starten Sie mit dem Lackierauftrag, einer Unterlage oder einem Schadensfoto. Die Analyse ergänzt danach die Felder in Schritt 1 bis 3.</p>
         </div>
         <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zur Übersicht</a>
       </header>
@@ -417,6 +448,34 @@
         <input type="hidden" name="analyse_hinweis" value="{{ form.get('analyse_hinweis', '') }}" data-analysis-hint>
         <input type="hidden" name="analyse_confidence" value="{{ form.get('analyse_confidence', '') }}" data-analysis-confidence>
         <input type="hidden" id="fertig_datum" name="fertig_datum" value="{{ form.get('fertig_datum', '') }}">
+
+        <section class="vehicle-analysis-start" data-analysis-start aria-labelledby="partner-analysis-title">
+          <div class="vehicle-step-title">
+            <h2 id="partner-analysis-title" tabindex="-1">Unterlage zuerst hochladen</h2>
+            <p>Wir lesen die Datei nur aus und tragen erkannte Angaben in das Formular ein. Ein Auftrag wird dabei noch nicht angelegt.</p>
+          </div>
+          <div class="vehicle-upload-card">
+            <label class="form-label" for="dateien">Lackierauftrag, Unterlage oder Schadensfoto</label>
+            <input type="file" id="dateien" name="dateien" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf" aria-describedby="dateien-hinweis dateien-status">
+            <div id="dateien-hinweis" class="form-text">Datei auswählen und analysieren. Erkannte Angaben werden anschließend in Schritt 1 bis 3 eingetragen.</div>
+            <div id="dateien-status" class="vehicle-upload-status" data-upload-status aria-live="polite">Noch keine Datei ausgewählt.</div>
+            <div class="vehicle-error" data-file-error role="alert">Bitte zuerst eine Datei auswählen.</div>
+            <div class="vehicle-error" data-analysis-error role="alert">Bitte die ausgewählte Datei zuerst analysieren.</div>
+            <button type="submit" name="aktion" value="upload_analyze" class="btn btn-primary w-100 mt-2" data-upload-analyze disabled data-loading-message="Die Unterlage wird nur analysiert. Es wird noch kein Auftrag angelegt.">Datei analysieren &amp; Felder eintragen</button>
+          </div>
+          <div class="vehicle-analysis-start-actions">
+            <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Abbrechen</a>
+          </div>
+        </section>
+
+        <div class="vehicle-analysis-banner" data-analysis-result {% if not form.get('analyse_summary') %}hidden{% endif %} aria-live="polite">
+          <div>
+            <strong>Analyse abgeschlossen – noch kein Auftrag angelegt</strong>
+            <span data-analysis-result-text>{{ form.get('analyse_summary', '') }}</span>
+          </div>
+          <button type="button" class="btn btn-outline-dark" data-change-analysis-file>Andere Datei auswählen</button>
+        </div>
+
         <nav class="vehicle-progress" aria-label="Schritte der Fahrzeugerfassung">
           <button type="button" class="vehicle-progress-button is-active" data-step-target="1" aria-controls="partner-step-1" aria-current="step">
             <span class="vehicle-progress-number">1</span>
@@ -428,7 +487,7 @@
           </button>
           <button type="button" class="vehicle-progress-button" data-step-target="3" aria-controls="partner-step-3">
             <span class="vehicle-progress-number">3</span>
-            <span class="vehicle-progress-copy"><strong>Auftrag</strong><span>Unterlage, Termine und Senden</span></span>
+            <span class="vehicle-progress-copy"><strong>Transport</strong><span>Termine prüfen und senden</span></span>
           </button>
         </nav>
 
@@ -511,8 +570,8 @@
 
         <section class="vehicle-step" id="partner-step-3" data-form-step="3" aria-labelledby="partner-step-title-3">
           <div class="vehicle-step-title">
-            <h2 id="partner-step-title-3" tabindex="-1">Auftrag, Transport und Termine</h2>
-            <p>Unterlage erst jetzt hinzufügen. Die Analyse ergänzt nur dieses Formular und legt noch keinen Auftrag an.</p>
+            <h2 id="partner-step-title-3" tabindex="-1">Transport, Termine und Auftrag senden</h2>
+            <p>Prüfen Sie zum Schluss die Übergabe und die gewünschten Termine. Erst danach wird der Auftrag angelegt.</p>
           </div>
           <div class="row g-4">
             <div class="col-lg-5">
@@ -526,19 +585,6 @@
                   <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
                 </div>
               </aside>
-              <div class="vehicle-upload-card">
-                <label class="form-label" for="dateien">Lackierauftrag, Unterlage oder Schadensfoto</label>
-                <input type="file" id="dateien" name="dateien" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf" aria-describedby="dateien-hinweis dateien-status">
-                <div id="dateien-hinweis" class="form-text">Datei auswählen und zuerst analysieren. Erkannte Angaben werden nur in Schritt 1 bis 3 ergänzt.</div>
-                <div id="dateien-status" class="vehicle-upload-status" data-upload-status aria-live="polite">Noch keine Datei ausgewählt.</div>
-                <div class="vehicle-error" data-file-error role="alert">Bitte zuerst eine Datei auswählen.</div>
-                <div class="vehicle-error" data-analysis-error role="alert">Bitte die ausgewählte Datei zuerst analysieren.</div>
-                <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark w-100 mt-2" data-upload-analyze disabled data-loading-message="Die Unterlage wird nur analysiert. Es wird noch kein Auftrag angelegt.">Datei analysieren &amp; Felder ergänzen</button>
-                <div class="vehicle-analysis-result" data-analysis-result {% if not form.get('analyse_summary') %}hidden{% endif %} aria-live="polite">
-                  <strong>Analyse abgeschlossen – noch kein Auftrag angelegt</strong>
-                  <span data-analysis-result-text>{{ form.get('analyse_summary', '') }}</span>
-                </div>
-              </div>
             </div>
             <div class="col-lg-7">
               <div class="row g-3">
@@ -605,6 +651,8 @@
       if (!form) return;
 
       form.classList.add('is-enhanced');
+      const analysisStart = form.querySelector('[data-analysis-start]');
+      const progress = form.querySelector('.vehicle-progress');
       const steps = Array.from(form.querySelectorAll('[data-form-step]'));
       const stepButtons = Array.from(form.querySelectorAll('[data-step-target]'));
       const backButton = form.querySelector('[data-step-back]');
@@ -619,6 +667,7 @@
       const analysisError = form.querySelector('[data-analysis-error]');
       const analysisResult = form.querySelector('[data-analysis-result]');
       const analysisResultText = form.querySelector('[data-analysis-result-text]');
+      const changeAnalysisFileButton = form.querySelector('[data-change-analysis-file]');
       const analysisCompleted = form.querySelector('[data-analysis-completed]');
       const analysisFileRequired = form.querySelector('[data-analysis-file-required]');
       const analysisFileSignature = form.querySelector('[data-analysis-file-signature]');
@@ -644,12 +693,41 @@
       const loadingNewsTitle = document.querySelector('[data-loading-news-title]');
       const loadingNewsText = document.querySelector('[data-loading-news-text]');
       const loadingNewsItems = {{ analysis_loading_news() | tojson }};
+      const formActions = form.querySelector('.sticky-form-actions');
       let currentStep = 1;
+      let analysisReady = analysisCompleted.value === '1';
       let loadingNewsIndex = 0;
       let loadingNewsTimer = null;
       let submitterMessage = '';
       let submitterAction = '';
       let analyzing = false;
+
+      const showAnalysisStart = (focusFile = true) => {
+        analysisReady = false;
+        form.classList.add('is-analysis-stage');
+        analysisStart.hidden = false;
+        progress.hidden = true;
+        analysisResult.hidden = true;
+        formActions.hidden = true;
+        steps.forEach((step) => {
+          step.classList.remove('is-active');
+          step.hidden = true;
+        });
+        if (focusFile) {
+          analysisStart.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          fileInput.focus();
+        }
+      };
+
+      const showWizard = (stepNumber = 1, focusHeading = true) => {
+        analysisReady = true;
+        form.classList.remove('is-analysis-stage');
+        analysisStart.hidden = true;
+        progress.hidden = false;
+        analysisResult.hidden = false;
+        formActions.hidden = false;
+        showStep(stepNumber, focusHeading);
+      };
 
       const showStep = (stepNumber, focusHeading = true) => {
         currentStep = Math.min(3, Math.max(1, Number(stepNumber) || 1));
@@ -733,6 +811,10 @@
       };
 
       const canOpenStep = (target) => {
+        if (!analysisReady) {
+          showAnalysisStart();
+          return false;
+        }
         if (target > 1 && !validateContact()) {
           showStep(1);
           return false;
@@ -816,7 +898,7 @@
           analysisResultText.textContent = filled
             ? `${filled} Formularfeld${filled === 1 ? '' : 'er'} ergänzt. Bitte prüfen Sie die Angaben jetzt noch einmal ab Schritt 1.`
             : 'Die Datei wurde gelesen. Es konnten keine leeren Formularfelder sicher ergänzt werden; bitte Angaben manuell prüfen.';
-          showStep(1);
+          showWizard(1);
         } catch (error) {
           analysisError.textContent = error.message || 'Die Datei konnte nicht analysiert werden.';
           analysisError.classList.add('is-visible');
@@ -837,6 +919,17 @@
         if (canOpenStep(target)) showStep(target);
       });
       fileInput.addEventListener('change', updateUpload);
+      changeAnalysisFileButton?.addEventListener('click', () => {
+        fileInput.value = '';
+        analysisCompleted.value = '';
+        analysisFileRequired.value = '';
+        analysisFileSignature.value = '';
+        analysisToken.value = '';
+        analysisHint.value = '';
+        analysisConfidence.value = '';
+        updateUpload();
+        showAnalysisStart();
+      });
       transportSelect.addEventListener('change', updateTransport);
       pickupDateInput?.addEventListener('change', () => {
         if (finishDateInput) finishDateInput.value = pickupDateInput.value;
@@ -868,6 +961,21 @@
           analyzeSelectedFiles();
           return;
         }
+        if (!fileInput.files.length) {
+          event.preventDefault();
+          showAnalysisStart();
+          fileError.textContent = 'Bitte zuerst eine Datei auswählen und analysieren.';
+          fileError.classList.add('is-visible');
+          fileInput.focus();
+          return;
+        }
+        if (analysisCompleted.value !== '1') {
+          event.preventDefault();
+          showAnalysisStart();
+          analysisError.classList.add('is-visible');
+          uploadButton.focus();
+          return;
+        }
         if (!validateContact()) {
           event.preventDefault();
           showStep(1);
@@ -878,16 +986,9 @@
           showStep(2);
           return;
         }
-        if (fileInput.files.length && analysisCompleted.value !== '1') {
-          event.preventDefault();
-          showStep(3);
-          analysisError.classList.add('is-visible');
-          uploadButton.focus();
-          return;
-        }
         if (analysisFileRequired.value === '1' && !fileInput.files.length) {
           event.preventDefault();
-          showStep(3);
+          showAnalysisStart();
           fileError.textContent = 'Bitte die zuvor analysierte Datei noch einmal auswählen.';
           fileError.classList.add('is-visible');
           fileInput.focus();
@@ -906,7 +1007,8 @@
 
       updateUpload();
       updateTransport();
-      showStep(1, false);
+      if (analysisReady) showWizard(1, false);
+      else showAnalysisStart(false);
     })();
   </script>
   {% include "_session_keepalive.html" %}
