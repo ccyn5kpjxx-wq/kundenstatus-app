@@ -1,4 +1,5 @@
 import atexit
+import io
 import os
 from pathlib import Path
 import shutil
@@ -49,6 +50,8 @@ def main():
     check("Tafel ohne Login leitet zum Login um", response.status_code == 302 and "/werkstatt" in response.headers.get("Location", ""))
     response = client.get("/werkstatt/auftrag/1")
     check("Auftrags-Detail ohne Login leitet zum Login um", response.status_code == 302)
+    response = client.get("/werkstatt/auftrag-anlegen")
+    check("Werkstatt-Anlage ohne Login leitet zum Login um", response.status_code == 302)
 
     # Login-Seite laedt (und setzt CSRF-Token in die Session)
     response = client.get("/werkstatt")
@@ -75,6 +78,78 @@ def main():
         and 'target="_blank"' in html
         and 'rel="noopener noreferrer"' in html
         and "data-messungen-dialog" not in html,
+    )
+    check(
+        "Tafel hat Button zum Auftrag-Anlegen",
+        "＋ Anlegen" in html and 'data-auftrag-anlegen' in html and "/werkstatt/auftrag-anlegen" in html,
+    )
+
+    response = client.get("/werkstatt/auftrag-anlegen")
+    anlegen_html = response.get_data(as_text=True)
+    check(
+        "Werkstatt-Anlage zeigt Kunden-, FIN-, Foto- und Preisfelder",
+        response.status_code == 200
+        and 'name="kunde_name"' in anlegen_html
+        and 'name="kontakt_telefon"' in anlegen_html
+        and 'name="fin_nummer"' in anlegen_html
+        and 'name="fotos"' in anlegen_html
+        and 'capture="environment"' in anlegen_html
+        and 'name="werkstatt_preisvorschlag"' in anlegen_html
+        and "Nur das Büro" in anlegen_html,
+    )
+
+    response = client.post(
+        "/werkstatt/auftrag-anlegen",
+        data=csrf_data(
+            client,
+            {
+                "kunde_name": "Werkstatt Testkunde",
+                "kontakt_telefon": "0176 12345678",
+                "fahrzeug": "Volkswagen Golf",
+                "kennzeichen": "mos wt 42",
+                "fin_nummer": "WVWZZZ1JZXW000001",
+                "beschreibung": "Stoßfänger vorne prüfen",
+                "werkstatt_preisvorschlag": "599,00",
+                "fotos": (
+                    io.BytesIO(b"\x89PNG\r\n\x1a\nWerkstatt-Aufnahme"),
+                    "werkstatt-aufnahme.png",
+                ),
+            },
+        ),
+        content_type="multipart/form-data",
+    )
+    db = portal.get_db()
+    werkstatt_row = db.execute(
+        "SELECT * FROM auftraege WHERE quelle='werkstatt' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    werkstatt_neu_id = int(werkstatt_row["id"]) if werkstatt_row else 0
+    werkstatt_fotos = db.execute(
+        "SELECT * FROM dateien WHERE auftrag_id=? ORDER BY id",
+        (werkstatt_neu_id,),
+    ).fetchall()
+    db.close()
+    check(
+        "Werkstatt kann Auftrag mit Foto und Preisvorschlag anlegen",
+        response.status_code == 302
+        and werkstatt_row is not None
+        and int(werkstatt_row["status"]) == 1
+        and int(werkstatt_row["werkstatt_neu"]) == 1
+        and werkstatt_row["kunde_name"] == "Werkstatt Testkunde"
+        and werkstatt_row["kontakt_telefon"] == "0176 12345678"
+        and werkstatt_row["fin_nummer"] == "WVWZZZ1JZXW000001"
+        and werkstatt_row["kennzeichen"] == "MOS WT 42"
+        and werkstatt_row["werkstatt_preisvorschlag"] == "599,00 € netto"
+        and len(werkstatt_fotos) == 1
+        and werkstatt_fotos[0]["quelle"] == "werkstatt"
+        and werkstatt_fotos[0]["kategorie"] == "standard",
+    )
+    response = client.post(
+        f"/werkstatt/auftrag/{werkstatt_neu_id}/status/3",
+        data=csrf_data(client),
+    )
+    check(
+        "Werkstatt-Annahme bleibt bis zur Büroprüfung gesperrt",
+        response.status_code == 400 and portal.get_auftrag(werkstatt_neu_id)["status"] == 1,
     )
 
     # Eingeloggt: Login-Seite leitet direkt zur Tafel weiter
@@ -353,6 +428,15 @@ def main():
         session["admin"] = True
     response = admin_client.get("/werkstatt/tafel")
     check("Admin sieht Tafel ohne Extra-Login", response.status_code == 200)
+    response = admin_client.get(f"/admin/auftrag/{werkstatt_neu_id}")
+    admin_html = response.get_data(as_text=True)
+    check(
+        "Büro sieht offenen Prüfstatus und Mitarbeiter-Preisvorschlag",
+        response.status_code == 200
+        and "Büro-Prüfung offen" in admin_html
+        and "Noch nicht freigegeben" in admin_html
+        and "599,00 € netto" in admin_html,
+    )
 
     response = admin_client.get("/admin/zugaenge")
     html = response.get_data(as_text=True)

@@ -2287,6 +2287,7 @@ KALENDER_KATEGORIEN = {
 AUFTRAG_QUELLE_META = {
     "versicherung": {"label": "Versicherung", "farbe": "primary", "row_class": "auftrag-source-versicherung"},
     "autohaus": {"label": "Autohaus", "farbe": "success", "row_class": "auftrag-source-autohaus"},
+    "werkstatt": {"label": "Werkstatt", "farbe": "dark", "row_class": "auftrag-source-privat"},
     "fahrzeugsuche": {"label": "Fahrzeugsuche", "farbe": "info", "row_class": "auftrag-source-privat"},
     "privat": {"label": "Privat", "farbe": "secondary", "row_class": "auftrag-source-privat"},
 }
@@ -2297,6 +2298,8 @@ def auftrag_quelle_key(auftrag):
         return "versicherung"
     if int((auftrag or {}).get("autohaus_id") or 0) or clean_text((auftrag or {}).get("quelle")) == "autohaus":
         return "autohaus"
+    if clean_text((auftrag or {}).get("quelle")) == "werkstatt":
+        return "werkstatt"
     if clean_text((auftrag or {}).get("quelle")) == "fahrzeugsuche":
         return "fahrzeugsuche"
     return "privat"
@@ -8825,6 +8828,7 @@ def init_db():
             angebot_status TEXT DEFAULT 'entwurf',
             werkstatt_angebot_text TEXT DEFAULT '',
             werkstatt_angebot_preis TEXT DEFAULT '',
+            werkstatt_preisvorschlag TEXT DEFAULT '',
             werkstatt_angebot_notiz TEXT DEFAULT '',
             werkstatt_angebot_am TEXT DEFAULT '',
             kalkulation_json TEXT DEFAULT '',
@@ -9394,6 +9398,7 @@ def init_db():
     ensure_column(db, "auftraege", "angebot_status", "TEXT DEFAULT 'entwurf'")
     ensure_column(db, "auftraege", "werkstatt_angebot_text", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "werkstatt_angebot_preis", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "werkstatt_preisvorschlag", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "werkstatt_angebot_notiz", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "werkstatt_angebot_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kalkulation_json", "TEXT DEFAULT ''")
@@ -15293,6 +15298,12 @@ def row_to_auftrag(row):
     auftrag["werkstatt_angebot_preis"] = clean_text(auftrag.get("werkstatt_angebot_preis"))
     auftrag["werkstatt_angebot_preis_label"] = format_werkstatt_angebot_preis(
         auftrag["werkstatt_angebot_preis"]
+    )
+    auftrag["werkstatt_preisvorschlag"] = clean_text(
+        auftrag.get("werkstatt_preisvorschlag")
+    )
+    auftrag["werkstatt_preisvorschlag_label"] = format_werkstatt_angebot_preis(
+        auftrag["werkstatt_preisvorschlag"]
     )
     auftrag["werkstatt_angebot_notiz"] = clean_text(auftrag.get("werkstatt_angebot_notiz"))
     auftrag["angebot_status"] = clean_text(auftrag.get("angebot_status")) or (
@@ -35064,7 +35075,7 @@ def dashboard_daten(auftraege):
         quelle_counts[auftrag.get("quelle_meta", {}).get("key") or auftrag_quelle_key(auftrag)] += 1
     quelle_total = max(len(auftraege or []), 1)
     quelle_mix = []
-    for key in ("versicherung", "autohaus", "privat"):
+    for key in ("versicherung", "autohaus", "werkstatt", "privat"):
         meta = AUFTRAG_QUELLE_META[key]
         count = quelle_counts.get(key, 0)
         quelle_mix.append(
@@ -49116,6 +49127,112 @@ def werkstatt_tafel():
         server_now_iso=jetzt.isoformat(timespec="seconds"),
         countdown_ziel_iso=abflug.isoformat(timespec="seconds"),
     )
+
+
+@app.route("/werkstatt/auftrag-anlegen", methods=["GET", "POST"])
+def werkstatt_auftrag_anlegen():
+    """Schnelle Fahrzeugannahme durch die Halle; Freigabe bleibt beim Büro."""
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+
+    if request.method == "POST":
+        kunde_name = clean_text(request.form.get("kunde_name"))
+        kontakt_telefon = clean_text(request.form.get("kontakt_telefon"))
+        fahrzeug = clean_text(request.form.get("fahrzeug"))
+        kennzeichen = clean_text(request.form.get("kennzeichen")).upper()
+        fin_nummer = normalize_fin(request.form.get("fin_nummer"))
+        beschreibung = clean_text(request.form.get("beschreibung"))
+        preis_eingabe = clean_text(request.form.get("werkstatt_preisvorschlag"))
+        preis_betrag = positive_money_amount(preis_eingabe)
+        fotos, foto_fehler = validate_website_lead_uploads(
+            request.files.getlist("fotos")
+        )
+
+        fehler = list(foto_fehler)
+        if not kunde_name:
+            fehler.append("Bitte den Kundennamen eintragen.")
+        if not kontakt_telefon:
+            fehler.append("Bitte die Handynummer des Kunden eintragen.")
+        elif len(re.sub(r"\D", "", kontakt_telefon)) < 6:
+            fehler.append("Bitte eine vollständige Telefonnummer eintragen.")
+        if not fahrzeug:
+            fehler.append("Bitte Hersteller und Modell des Fahrzeugs eintragen.")
+        if fin_nummer and len(fin_nummer) != 17:
+            fehler.append("Die FIN muss aus genau 17 Zeichen bestehen.")
+        if preis_eingabe and preis_betrag is None:
+            fehler.append("Bitte den Preisvorschlag als positiven Betrag eintragen.")
+
+        if fehler:
+            for hinweis in fehler:
+                flash(hinweis, "warning")
+            return render_template("werkstatt_auftrag_neu.html"), 400
+
+        preisvorschlag = (
+            f"{format_bonus_money(preis_betrag)} netto" if preis_betrag else ""
+        )
+        auftrag_id = create_auftrag(
+            "werkstatt",
+            kunde_name=kunde_name,
+            fahrzeug=fahrzeug,
+            fin_nummer=fin_nummer,
+            kennzeichen=kennzeichen,
+            beschreibung=beschreibung,
+            analyse=beschreibung,
+            kontakt_telefon=kontakt_telefon,
+            notiz_intern=(
+                "Direkt durch die Werkstatt angenommen. "
+                "Fahrzeugdaten, Bilder, Arbeitsumfang und Preisvorschlag bitte im Büro prüfen."
+            ),
+        )
+        db = get_db()
+        db.execute(
+            """
+            UPDATE auftraege
+            SET werkstatt_preisvorschlag=?, werkstatt_neu=1, geaendert_am=?
+            WHERE id=?
+            """,
+            (preisvorschlag, now_str(), auftrag_id),
+        )
+        db.commit()
+        db.close()
+
+        gespeichert = 0
+        if fotos:
+            gespeichert, _ = save_uploads(
+                auftrag_id,
+                fotos,
+                "werkstatt",
+                "standard",
+                analyze=False,
+                apply_analysis=False,
+            )
+
+        zusammenfassung = [
+            f"Kunde: {kunde_name}",
+            f"Telefon: {kontakt_telefon}",
+            f"Fahrzeug: {fahrzeug}",
+        ]
+        if fin_nummer:
+            zusammenfassung.append(f"FIN: {fin_nummer}")
+        if preisvorschlag:
+            zusammenfassung.append(f"Preisvorschlag: {preisvorschlag}")
+        if gespeichert:
+            zusammenfassung.append(f"Aufnahmebilder: {gespeichert}")
+        add_benachrichtigung(
+            auftrag_id,
+            "Neue Werkstatt-Annahme – Büroprüfung offen",
+            " · ".join(zusammenfassung),
+            quelle="werkstatt",
+        )
+        schedule_change_backup("werkstatt-auftrag-anlegen")
+        flash(
+            "Auftrag angelegt. Er bleibt gesperrt, bis das Büro Daten und Preisvorschlag geprüft und ihn eingeplant hat.",
+            "success",
+        )
+        return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
+
+    return render_template("werkstatt_auftrag_neu.html")
 
 
 @app.route("/werkstatt/auftrag/<int:auftrag_id>")

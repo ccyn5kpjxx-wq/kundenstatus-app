@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Auftrag anlegen — Werkstatt-Tafel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f3efe6;
+      --panel: #fffdf9;
+      --ink: #16202a;
+      --muted: #6f7a83;
+      --line: #ddd1c0;
+      --brand: #a23f2d;
+      --brand-dark: #7f2a1b;
+      --good: #1b7f53;
+      --shadow: 0 18px 48px rgba(64, 47, 25, .14);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: "DM Sans", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(162, 63, 45, .1), transparent 30%),
+        radial-gradient(circle at top right, rgba(20, 93, 102, .09), transparent 32%),
+        linear-gradient(180deg, #f7f2ea 0%, var(--bg) 100%);
+    }
+
+    h1, h2 { font-family: "Space Grotesk", sans-serif; letter-spacing: -.02em; }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: .8rem clamp(1rem, 3vw, 2.2rem);
+      background: #12202e;
+      color: #fff;
+    }
+
+    .topbar-title { display: flex; align-items: center; gap: .8rem; }
+
+    .topbar img {
+      width: 64px;
+      height: 42px;
+      object-fit: contain;
+      background: #fff;
+    }
+
+    .topbar strong { font: 700 clamp(1.05rem, 2.2vw, 1.5rem) "Space Grotesk", sans-serif; }
+
+    .back {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(255,255,255,.26);
+      border-radius: 12px;
+      padding: .55rem .85rem;
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    main {
+      width: min(980px, calc(100% - 1.4rem));
+      margin: clamp(1rem, 3vw, 2rem) auto 3rem;
+    }
+
+    .intro, form {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .intro {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: clamp(1rem, 3vw, 1.6rem);
+      margin-bottom: 1rem;
+    }
+
+    .intro h1 { margin: 0 0 .35rem; font-size: clamp(1.6rem, 4vw, 2.35rem); }
+    .intro p { margin: 0; color: var(--muted); line-height: 1.5; }
+
+    .locked {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: .5rem .8rem;
+      background: rgba(204,138,22,.14);
+      color: #8b5b08;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .messages { display: grid; gap: .55rem; margin-bottom: 1rem; }
+
+    .message {
+      border: 1px solid #e3bd78;
+      border-radius: 14px;
+      padding: .75rem 1rem;
+      background: #fff8e8;
+      color: #76500b;
+      font-weight: 700;
+    }
+
+    form { padding: clamp(1rem, 3vw, 1.6rem); }
+
+    .section + .section {
+      border-top: 1px solid var(--line);
+      margin-top: 1.4rem;
+      padding-top: 1.4rem;
+    }
+
+    .section h2 { margin: 0 0 .25rem; font-size: 1.15rem; }
+    .section-copy { margin: 0 0 1rem; color: var(--muted); font-size: .92rem; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .field { min-width: 0; }
+    .field.full { grid-column: 1 / -1; }
+
+    label { display: block; margin-bottom: .38rem; font-weight: 800; }
+
+    input, textarea {
+      width: 100%;
+      min-height: 50px;
+      border: 1.5px solid #cfc2b0;
+      border-radius: 13px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      padding: .72rem .82rem;
+    }
+
+    textarea { min-height: 104px; resize: vertical; }
+    input:focus, textarea:focus { outline: 3px solid rgba(162,63,45,.16); border-color: var(--brand); }
+
+    .help { display: block; margin-top: .35rem; color: var(--muted); font-size: .82rem; line-height: 1.4; }
+
+    .photo-box {
+      border: 2px dashed #b9aa96;
+      border-radius: 16px;
+      padding: 1rem;
+      background: #faf6ef;
+    }
+
+    .photo-box input { min-height: auto; border: 0; padding: .3rem 0; background: transparent; }
+    .photo-count { margin-top: .45rem; color: var(--good); font-weight: 800; }
+
+    .price-box {
+      border: 1px solid #dfc17f;
+      border-radius: 16px;
+      padding: 1rem;
+      background: #fff9eb;
+    }
+
+    .approval-note {
+      display: flex;
+      gap: .75rem;
+      align-items: flex-start;
+      margin-top: 1.3rem;
+      padding: 1rem;
+      border-radius: 15px;
+      background: #eef3f4;
+      color: #3d4c55;
+      line-height: 1.45;
+    }
+
+    .approval-note strong { color: var(--ink); }
+
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: .75rem;
+      margin-top: 1.3rem;
+    }
+
+    .button {
+      min-height: 50px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      padding: .72rem 1.1rem;
+      background: #fff;
+      color: var(--ink);
+      font: 800 1rem "DM Sans", sans-serif;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .button.primary {
+      border-color: var(--brand);
+      background: var(--brand);
+      color: #fff;
+      box-shadow: 0 10px 24px rgba(162,63,45,.2);
+    }
+
+    .button.primary:hover { background: var(--brand-dark); }
+
+    @media (max-width: 680px) {
+      .intro { flex-direction: column; }
+      .grid { grid-template-columns: 1fr; }
+      .field.full { grid-column: auto; }
+      .actions { flex-direction: column-reverse; }
+      .button { width: 100%; }
+      .topbar-title strong { font-size: 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-title">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Gärtner Karosserie & Lack">
+      <strong>Werkstatt-Annahme</strong>
+    </div>
+    <a class="back" href="{{ url_for('werkstatt_tafel') }}">← Zur Tafel</a>
+  </header>
+
+  <main>
+    <section class="intro">
+      <div>
+        <h1>Fahrzeug anlegen</h1>
+        <p>Kundendaten und Fahrzeug direkt bei der Annahme erfassen. Fotos können mit dem Handy aufgenommen werden.</p>
+      </div>
+      <div class="locked">🔒 Büroprüfung</div>
+    </section>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <div class="messages">
+        {% for category, message in messages %}
+        <div class="message">{{ message }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    {% endwith %}
+
+    <form method="POST" enctype="multipart/form-data">
+      {{ csrf_field()|safe }}
+
+      <section class="section">
+        <h2>1. Kunde</h2>
+        <p class="section-copy">Name und Handynummer für Rückfragen vollständig eintragen.</p>
+        <div class="grid">
+          <div class="field">
+            <label for="kunde_name">Kundenname *</label>
+            <input id="kunde_name" name="kunde_name" type="text" value="{{ request.form.get('kunde_name', '') }}" autocomplete="name" required>
+          </div>
+          <div class="field">
+            <label for="kontakt_telefon">Handynummer *</label>
+            <input id="kontakt_telefon" name="kontakt_telefon" type="tel" value="{{ request.form.get('kontakt_telefon', '') }}" autocomplete="tel" inputmode="tel" placeholder="z. B. 0176 12345678" required>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>2. Fahrzeug</h2>
+        <p class="section-copy">Die FIN ist optional, wird bei Eingabe aber auf 17 Zeichen geprüft.</p>
+        <div class="grid">
+          <div class="field">
+            <label for="fahrzeug">Hersteller und Modell *</label>
+            <input id="fahrzeug" name="fahrzeug" type="text" value="{{ request.form.get('fahrzeug', '') }}" placeholder="z. B. Mercedes-Benz C 200" required>
+          </div>
+          <div class="field">
+            <label for="kennzeichen">Kennzeichen</label>
+            <input id="kennzeichen" name="kennzeichen" type="text" value="{{ request.form.get('kennzeichen', '') }}" placeholder="z. B. MOS-GA 123" autocapitalize="characters">
+          </div>
+          <div class="field full">
+            <label for="fin_nummer">FIN / Fahrzeug-Identifizierungsnummer</label>
+            <input id="fin_nummer" name="fin_nummer" type="text" value="{{ request.form.get('fin_nummer', '') }}" maxlength="17" autocapitalize="characters" spellcheck="false" placeholder="17-stellige FIN">
+          </div>
+          <div class="field full">
+            <label for="beschreibung">Was soll gemacht werden?</label>
+            <textarea id="beschreibung" name="beschreibung" placeholder="Schaden, Kundenwunsch oder vereinbarte Arbeiten kurz beschreiben">{{ request.form.get('beschreibung', '') }}</textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>3. Fahrzeugfotos</h2>
+        <p class="section-copy">Bis zu fünf Fotos aufnehmen oder aus der Galerie wählen.</p>
+        <div class="photo-box">
+          <label for="fotos">📷 Bilder vom Auto</label>
+          <input id="fotos" name="fotos" type="file" accept="image/jpeg,image/png,image/webp,image/heic,.jpg,.jpeg,.png,.webp,.heic" capture="environment" multiple>
+          <small class="help">JPG, PNG, WebP oder HEIC. Die Bilder werden ohne automatische Datenübernahme zur Büroprüfung gespeichert.</small>
+          <div class="photo-count" data-photo-count hidden></div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>4. Preisvorschlag</h2>
+        <p class="section-copy">Optionaler interner Vorschlag des Mitarbeiters – noch kein Kundenangebot.</p>
+        <div class="price-box">
+          <label for="werkstatt_preisvorschlag">Preisvorschlag netto</label>
+          <input id="werkstatt_preisvorschlag" name="werkstatt_preisvorschlag" type="text" value="{{ request.form.get('werkstatt_preisvorschlag', '') }}" inputmode="decimal" placeholder="z. B. 650,00">
+          <small class="help">Das Büro prüft den Betrag. Er wird nicht automatisch als Angebot oder Rechnungsbetrag übernommen.</small>
+        </div>
+      </section>
+
+      <div class="approval-note">
+        <span>🔒</span>
+        <div><strong>Der Auftrag startet immer in „Angelegt“.</strong><br>Nur das Büro kann ihn nach der Kontrolle auf „Eingeplant“ setzen. Erst danach kann die Werkstatt den normalen Ablauf starten.</div>
+      </div>
+
+      <div class="actions">
+        <a class="button" href="{{ url_for('werkstatt_tafel') }}">Abbrechen</a>
+        <button class="button primary" type="submit">Auftrag anlegen</button>
+      </div>
+    </form>
+  </main>
+
+  <script>
+    (() => {
+      const input = document.querySelector('#fotos');
+      const count = document.querySelector('[data-photo-count]');
+      if (!input || !count) return;
+      input.addEventListener('change', () => {
+        const amount = input.files ? input.files.length : 0;
+        count.hidden = amount === 0;
+        count.textContent = amount === 1 ? '1 Foto ausgewählt' : `${amount} Fotos ausgewählt`;
+      });
+    })();
+  </script>
+</body>
+</html>
