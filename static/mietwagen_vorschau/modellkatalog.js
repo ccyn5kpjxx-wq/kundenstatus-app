@@ -322,6 +322,14 @@
   const root = document.getElementById('weitere-marken');
   if (!root) return;
 
+  const brandLogos = {
+    audi: 'markenlogos/audi.svg',
+    bmw: 'markenlogos/bmw.svg',
+    volkswagen: 'markenlogos/volkswagen.svg',
+    ford: 'markenlogos/ford.svg',
+    mercedes: 'markenlogos/mercedes-benz.svg',
+    byd: 'markenlogos/byd.svg'
+  };
   const countModels = catalog => catalog.groups.reduce((sum, group) => sum + group.models.length, 0);
   const modelCard = (brand, model) => {
     const [name, type, image, status = ''] = model;
@@ -337,7 +345,8 @@
 
   root.innerHTML = catalogs.map(catalog => {
     const count = countModels(catalog);
+    const logo = brandLogos[catalog.id] ? `<span class="catalog-brand-logo" aria-hidden="true"><img src="${brandLogos[catalog.id]}" alt="" width="64" height="40" loading="lazy" decoding="async"></span>` : '';
     const groups = catalog.groups.map(group => `<div class="model-group"><h4>${group.title}</h4><div class="model-grid">${group.models.map(model => modelCard(catalog.brand, model)).join('')}</div></div>`).join('');
-    return `<details class="catalog-toggle" id="marke-${catalog.id}"${catalog.open ? ' open' : ''}><summary><span><span class="catalog-summary-kicker">${catalog.brand} Modellprogramm</span><strong>${catalog.brand} entdecken</strong></span><span class="catalog-summary-meta"><span>${count} Modellfamilien</span><i class="catalog-summary-icon" aria-hidden="true"></i></span></summary><div class="model-catalog"><div class="model-catalog-head"><div><div class="kicker">${catalog.brand} Modellprogramm</div><h3>${catalog.title}</h3></div><p>${catalog.intro}</p></div>${groups}<p class="legal-note">Autovermietung MOS ist kein ${catalog.brand}-Vertragshändler. Herstellerabbildungen: ${catalog.source}, zur Modellorientierung. Modellnamen beschreiben ausschließlich den Kundenwunsch. Verfügbarkeit und Beschaffung nur nach Händlerprüfung.</p></div></details>`;
+    return `<details class="catalog-toggle" id="marke-${catalog.id}"${catalog.open ? ' open' : ''}><summary><span class="catalog-summary-brand">${logo}<span><span class="catalog-summary-kicker">${catalog.brand} Modellprogramm</span><strong>${catalog.brand} entdecken</strong></span></span><span class="catalog-summary-meta"><span>${count} Modellfamilien</span><i class="catalog-summary-icon" aria-hidden="true"></i></span></summary><div class="model-catalog"><div class="model-catalog-head"><div><div class="kicker">${catalog.brand} Modellprogramm</div><h3>${catalog.title}</h3></div><p>${catalog.intro}</p></div>${groups}<p class="legal-note">Autovermietung MOS ist kein ${catalog.brand}-Vertragshändler. Herstellerabbildungen: ${catalog.source}, zur Modellorientierung. Modellnamen beschreiben ausschließlich den Kundenwunsch. Verfügbarkeit und Beschaffung nur nach Händlerprüfung.</p></div></details>`;
   }).join('');
 })();
