@@ -72,6 +72,13 @@ def main():
     html = response.get_data(as_text=True)
     check("Tafel laedt mit Spalten", response.status_code == 200 and "In Arbeit" in html and "Geplant" in html)
     check(
+        "Tafel nutzt das Teamfoto als dezenten, lesbaren Hintergrund",
+        "/static/homepage/team-daniel-hannes-abdul-v2.png" in html
+        and "linear-gradient(180deg, rgba(247, 242, 234, 0.7)" in html
+        and "background: rgba(255, 253, 249, 0.95)" in html
+        and "backdrop-filter: blur(10px)" in html,
+    )
+    check(
         "Tafel-Kopf verlinkt PPG-Messungen als Uebergang",
         "🎨 PPG-Messungen" in html
         and 'href="https://emea.ppglinq.com/rapid-match"' in html

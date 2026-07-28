@@ -34,9 +34,11 @@
     body {
       margin: 0;
       background:
-        radial-gradient(circle at top left, rgba(162, 63, 45, 0.08), transparent 28%),
-        radial-gradient(circle at top right, rgba(20, 93, 102, 0.08), transparent 32%),
-        linear-gradient(180deg, #f7f2ea 0%, var(--bg) 100%);
+        radial-gradient(circle at top left, rgba(162, 63, 45, 0.1), transparent 31%),
+        radial-gradient(circle at top right, rgba(20, 93, 102, 0.1), transparent 34%),
+        linear-gradient(180deg, rgba(247, 242, 234, 0.7) 0%, rgba(243, 239, 230, 0.84) 100%),
+        url("{{ url_for('static', filename='homepage/team-daniel-hannes-abdul-v2.png') }}") center 38% / cover no-repeat fixed;
+      background-color: var(--bg);
       color: var(--ink);
       font-family: "DM Sans", sans-serif;
       min-height: 100vh;
@@ -176,10 +178,12 @@
     }
 
     .spalte {
-      background: var(--panel);
+      background: rgba(255, 253, 249, 0.95);
       border: 1px solid var(--line);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
+      -webkit-backdrop-filter: blur(10px) saturate(.82);
+      backdrop-filter: blur(10px) saturate(.82);
       padding: clamp(.4rem, .7vw, .65rem);
       min-height: 22vh;
       min-width: 0;
