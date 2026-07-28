@@ -87,6 +87,18 @@ def main():
         and "data-messungen-dialog" not in html,
     )
     check(
+        "Tafel zeigt die automatische Teamvorstellung mit Musik",
+        "👥 Unser Team" in html
+        and 'data-team-intervall="180000"' in html
+        and 'data-team-slide-dauer="4000"' in html
+        and 'data-team-dauer="1800"' in html
+        and "Christopher Gärtner" in html
+        and "/static/werkstatt_team_showcase.css" in html
+        and "/static/werkstatt_team_showcase.js" in html
+        and "/static/audio/werkstatt-team-cinematic-v1.mp3" in html
+        and (ROOT / "static" / "audio" / "werkstatt-team-cinematic-v1.mp3").is_file(),
+    )
+    check(
         "Tafel hat Button zum Auftrag-Anlegen",
         "＋ Anlegen" in html and 'data-auftrag-anlegen' in html and "/werkstatt/auftrag-anlegen" in html,
     )

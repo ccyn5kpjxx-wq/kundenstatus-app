@@ -1,0 +1,111 @@
+  <section class="team-showcase"
+           data-team-showcase
+           data-team-intervall="180000"
+           data-team-slide-dauer="4000"
+           role="dialog"
+           aria-modal="true"
+           aria-labelledby="team-showcase-titel"
+           hidden>
+    <audio data-team-musik
+           preload="auto"
+           src="{{ url_for('static', filename='audio/werkstatt-team-cinematic-v1.mp3') }}"></audio>
+    <header class="team-showcase-kopf">
+      <div class="team-showcase-marke">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="">
+        <div>
+          <strong id="team-showcase-titel">Menschen hinter der Qualität</strong>
+          <span>Gärtner Karosserie &amp; Lack</span>
+        </div>
+      </div>
+      <div class="team-showcase-aktionen">
+        <button type="button" class="team-showcase-knopf" data-team-ton aria-pressed="true">🔊 Melodie an</button>
+        <button type="button" class="team-showcase-knopf" data-team-schliessen>Überspringen ×</button>
+      </div>
+    </header>
+
+    <div class="team-showcase-buehne" aria-live="polite">
+      <article class="team-slide is-gruppe" data-team-slide data-team-dauer="1800" aria-hidden="true">
+        <div class="team-slide-bild">
+          <img src="{{ url_for('static', filename='homepage/team-daniel-hannes-abdul-v2.png') }}"
+               alt="Daniel, Hannes und Abdul gemeinsam in der Werkstatt">
+        </div>
+        <div class="team-slide-copy">
+          <p class="team-slide-kicker">Gemeinsam in der Werkstatt</p>
+          <h2>Wir sind<br>Gärtner.</h2>
+          <p class="team-slide-motto">Gute Arbeit entsteht, wenn Können, Verantwortung und Teamgeist zusammenkommen.</p>
+          <span class="team-slide-rolle">Ein Team. Ein Anspruch. Qualität.</span>
+        </div>
+      </article>
+
+      <article class="team-slide is-christopher" data-team-slide aria-hidden="true">
+        <div class="team-slide-bild">
+          <img src="{{ url_for('static', filename='homepage/portrait.webp') }}"
+               alt="Christopher Gärtner, Geschäftsführer von Gärtner Karosserie und Lack">
+        </div>
+        <div class="team-slide-copy">
+          <p class="team-slide-kicker">Geschäftsführung &amp; Team</p>
+          <h2>Christopher<br>Gärtner</h2>
+          <p class="team-slide-motto">Gemeinsam Verantwortung übernehmen, Chancen sehen und jeden Tag ein Stück besser werden.</p>
+          <span class="team-slide-rolle">Geschäftsführer · Persönlicher Ansprechpartner</span>
+        </div>
+      </article>
+
+      <article class="team-slide" data-team-slide aria-hidden="true">
+        <div class="team-slide-bild">
+          <img src="{{ url_for('static', filename='homepage/abdul-lackiervorbereitung-v1.webp') }}"
+               alt="Abdul aus der Lackiervorbereitung">
+        </div>
+        <div class="team-slide-copy">
+          <p class="team-slide-kicker">Lackiervorbereitung</p>
+          <h2>Abdul</h2>
+          <p class="team-slide-motto">Sorgfalt schafft die Grundlage für ein Ergebnis, auf das wir gemeinsam stolz sein können.</p>
+          <span class="team-slide-rolle">Präzise Vorbereitung · Sauberes Ergebnis</span>
+        </div>
+      </article>
+
+      <article class="team-slide is-hannes" data-team-slide aria-hidden="true">
+        <div class="team-slide-bild">
+          <img src="{{ url_for('static', filename='homepage/team-daniel-hannes-abdul-v2.png') }}"
+               alt="Hannes, Auszubildender zum Fahrzeuglackierer">
+        </div>
+        <div class="team-slide-copy">
+          <p class="team-slide-kicker">Unser Nachwuchs</p>
+          <h2>Hannes</h2>
+          <p class="team-slide-motto">Jeder Arbeitsschritt bringt Erfahrung – und macht unser Team jeden Tag stärker.</p>
+          <span class="team-slide-rolle">Auszubildender zum Fahrzeuglackierer</span>
+        </div>
+      </article>
+
+      <article class="team-slide" data-team-slide aria-hidden="true">
+        <div class="team-slide-bild">
+          <img src="{{ url_for('static', filename='homepage/daniel-karosserie-mechanik-v2.webp') }}"
+               alt="Daniel aus Karosserie und Mechanik">
+        </div>
+        <div class="team-slide-copy">
+          <p class="team-slide-kicker">Handwerk &amp; Technik</p>
+          <h2>Daniel</h2>
+          <p class="team-slide-motto">Präzision, technisches Verständnis und Verlässlichkeit bringen jedes Fahrzeug sicher ans Ziel.</p>
+          <span class="team-slide-rolle">Karosserie &amp; Mechanik</span>
+        </div>
+      </article>
+
+      <article class="team-slide" data-team-slide aria-hidden="true">
+        <div class="team-slide-bild">
+          <img src="{{ url_for('static', filename='homepage/mobiler-dellendruecker-v1.webp') }}"
+               alt="Daniel Marx, mobiler Dellendrücker">
+        </div>
+        <div class="team-slide-copy">
+          <p class="team-slide-kicker">Externer mobiler Spezialist</p>
+          <h2>Daniel<br>Marx</h2>
+          <p class="team-slide-motto">Spezialwissen genau dann, wenn es darauf ankommt – lackschonend, sauber und gemeinsam gelöst.</p>
+          <span class="team-slide-rolle">Mobiler Dellendrücker</span>
+        </div>
+      </article>
+    </div>
+
+    <footer class="team-showcase-fuss">
+      <strong>Gemeinsam liefern wir Qualität.</strong>
+      <div class="team-showcase-fortschritt" data-team-fortschritt aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+    </footer>

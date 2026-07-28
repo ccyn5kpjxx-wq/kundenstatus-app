@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_team_showcase.css') }}">
+  <script defer src="{{ url_for('static', filename='werkstatt_team_showcase.js') }}"></script>
   <style>
     /* Portal-Designsprache (siehe base.html) — helle Tafel im Look des Werkstatt-Cockpits */
     :root {
@@ -526,8 +528,11 @@
     <a href="{{ url_for('werkstatt_abwesenheit') }}" title="Abwesenheit / Urlaub beantragen" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">🌴 Abwesenheit</a>
     <a href="{{ url_for('werkstatt_aufgaben') }}" title="Tagesaufgaben der Werkstatt" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">📋 Aufgaben</a>
     <a href="https://emea.ppglinq.com/rapid-match" target="_blank" rel="noopener noreferrer" title="PPG LINQ DigiMatch-Messungen öffnen – Anmeldung falls erforderlich" style="background:#087fae; border:1px solid #54c0e6; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">🎨 PPG-Messungen</a>
+    <button type="button" data-team-oeffnen title="Teamvorstellung jetzt starten" style="background:#a23f2d; border:1px solid #df7764; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; cursor:pointer; white-space:nowrap; align-self:center;">👥 Unser Team</button>
     <button type="button" data-vollbild title="Vollbild ein/aus" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center;">⛶ Vollbild</button>
   </div>
+
+  {% include '_werkstatt_team_showcase.html' %}
 
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
@@ -810,7 +815,8 @@
       ['click', 'touchstart', 'scroll'].forEach((ev) => {
         document.addEventListener(ev, reloadVerschieben, { passive: true, capture: true });
       });
-      const panelOffen = () => !!document.querySelector('[data-prod-toggle][aria-expanded="true"]');
+      const panelOffen = () => !!document.querySelector('[data-prod-toggle][aria-expanded="true"]')
+        || !!document.querySelector('[data-team-showcase]:not([hidden])');
       const verbindungsHinweisZeigen = () => {
         if (document.querySelector('[data-verbindungs-hinweis]')) return;
         const leiste = document.createElement('div');
