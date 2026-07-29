@@ -55,6 +55,10 @@
       ad_personalization: 'denied'
     });
     setGoogleConsent(true);
+    gtag('set', 'linker', {
+      domains: ['auto-lackierzentrum.de', 'kundenstatus-app.onrender.com'],
+      accept_incoming: true
+    });
     gtag('js', new Date());
     gtag('config', googleTagId);
     const tag = document.createElement('script');

@@ -3059,11 +3059,23 @@ def add_security_headers(response):
                 "form-action 'self'",
                 "frame-ancestors 'self'",
                 "object-src 'none'",
-                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+                (
+                    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net "
+                    "https://www.googletagmanager.com https://www.googleadservices.com "
+                    "https://www.google.com https://pagead2.googlesyndication.com "
+                    "https://googleads.g.doubleclick.net"
+                ),
                 "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com",
                 "font-src 'self' https://fonts.gstatic.com data:",
                 "img-src 'self' data: blob: https:",
-                "connect-src 'self' https://api.open-meteo.com",
+                "frame-src 'self' https://www.googletagmanager.com",
+                (
+                    "connect-src 'self' https://api.open-meteo.com "
+                    "https://kundenstatus-app.onrender.com https://www.googletagmanager.com "
+                    "https://pagead2.googlesyndication.com https://www.googleadservices.com "
+                    "https://googleads.g.doubleclick.net https://ad.doubleclick.net "
+                    "https://www.google.com https://google.com https://www.google.de"
+                ),
             ]
         ),
     )
@@ -28066,7 +28078,11 @@ BESUCHER_WEBSITES = {
     "auto-lackierzentrum": {
         "label": "Auto-Lackierzentrum",
         "domain": "auto-lackierzentrum.de",
-        "hosts": {"auto-lackierzentrum.de", "www.auto-lackierzentrum.de"},
+        "hosts": {
+            "auto-lackierzentrum.de",
+            "www.auto-lackierzentrum.de",
+            "kundenstatus-app.onrender.com",
+        },
         "seiten": {
             "/": "Homepage",
             "/homepage": "Homepage",

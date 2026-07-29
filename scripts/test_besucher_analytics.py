@@ -118,6 +118,17 @@ def main():
                 headers={"User-Agent": "Googlebot/2.1", "CF-Connecting-IP": "203.0.113.99", "Origin": "https://auto-lackierzentrum.de"},
                 base_url="https://auto-lackierzentrum.de",
             )
+            portal_form = client.post(
+                "/api/besucher",
+                data='{"website":"auto-lackierzentrum","seite":"/anfrage","referrer":"auto-lackierzentrum.de"}',
+                content_type="text/plain;charset=UTF-8",
+                headers={
+                    "User-Agent": chrome_ua,
+                    "CF-Connecting-IP": "203.0.113.42",
+                    "Origin": "https://kundenstatus-app.onrender.com",
+                },
+                base_url="https://kundenstatus-app.onrender.com",
+            )
             tomorrowworks = client.post(
                 "/api/besucher",
                 data='{"website":"tomorrowworks","seite":"/websites.html","referrer":"www.google.de"}',
@@ -151,11 +162,19 @@ def main():
             database.close()
 
             ok &= check("Beacon-Endpunkt antwortet ohne Inhalt", all(
-                response.status_code == 204 for response in (first, second, mobile, bot, tomorrowworks, invalid)
+                response.status_code == 204
+                for response in (first, second, mobile, bot, portal_form, tomorrowworks, invalid)
             ))
-            ok &= check("CORS erlaubt nur die passende Website", tomorrowworks.headers.get("Access-Control-Allow-Origin") == "https://www.tomorrowworks-agentur.de" and not invalid.headers.get("Access-Control-Allow-Origin"))
-            ok &= check("Drei Websites werden gemeinsam ausgewertet", statistik["aufrufe"] == 4 and statistik["besucher"] == 3 and len(statistik["websites"]) == 3)
-            ok &= check("Auto-Lackierzentrum separat auswertbar", auto_statistik["aufrufe"] == 3 and auto_statistik["besucher"] == 2)
+            ok &= check(
+                "CORS erlaubt nur die passende Website",
+                portal_form.headers.get("Access-Control-Allow-Origin")
+                == "https://kundenstatus-app.onrender.com"
+                and tomorrowworks.headers.get("Access-Control-Allow-Origin")
+                == "https://www.tomorrowworks-agentur.de"
+                and not invalid.headers.get("Access-Control-Allow-Origin"),
+            )
+            ok &= check("Drei Websites werden gemeinsam ausgewertet", statistik["aufrufe"] == 5 and statistik["besucher"] == 4 and len(statistik["websites"]) == 3)
+            ok &= check("Auto-Lackierzentrum separat auswertbar", auto_statistik["aufrufe"] == 4 and auto_statistik["besucher"] == 3)
             ok &= check("Tomorrowworks separat auswertbar", tomorrowworks_statistik["aufrufe"] == 1 and tomorrowworks_statistik["besucher"] == 1)
             ok &= check("Bots werden separat ausgewiesen", statistik["bot_aufrufe"] == 1)
             ok &= check("Homepage-Pfade werden zusammengeführt", auto_statistik["seiten"][0]["seite"] == "/")
@@ -163,8 +182,8 @@ def main():
             ok &= check("Interne Herkunft erkannt", rows[2]["referrer_domain"] == "Intern")
             ok &= check("Gerät und Browser klassifiziert", rows[2]["geraet"] == "Mobil" and rows[2]["browser"] == "Safari")
             ok &= check("Keine Roh-IP in Ereignisdaten", all("203.0.113" not in row["visitor_hash"] for row in rows))
-            ok &= check("Unpassende Herkunft wird ignoriert", len(rows) == 5)
-            ok &= check("Besucher-Hashes bleiben je Website getrennt", rows[0]["visitor_hash"] != rows[4]["visitor_hash"])
+            ok &= check("Unpassende Herkunft wird ignoriert", len(rows) == 6)
+            ok &= check("Besucher-Hashes bleiben je Website getrennt", rows[0]["visitor_hash"] != rows[5]["visitor_hash"])
             ok &= check("90-Tage-Löschfrist greift", all(row["visitor_hash"] != "alt" for row in rows))
             ok &= check(
                 "Google-Ads-Kosten werden über alle drei Kampagnen ausgewertet",
@@ -273,6 +292,28 @@ def main():
             and "Kosten je Abschluss" in rendered_html
             and "Weitere Kennzahlen" in rendered_html
             and "15,00 € Tagesbudget eingerichtet" in rendered_html,
+        )
+        public_homepage = render_client.get(
+            "/homepage",
+            base_url="https://auto-lackierzentrum.de",
+        )
+        content_security_policy = public_homepage.headers.get("Content-Security-Policy", "")
+        ok &= check(
+            "Sicherheitsheader erlaubt Besucher- und Google-Ads-Signale",
+            public_homepage.status_code == 200
+            and "connect-src 'self'" in content_security_policy
+            and "https://kundenstatus-app.onrender.com" in content_security_policy
+            and "https://www.googleadservices.com" in content_security_policy
+            and "https://www.googletagmanager.com" in content_security_policy
+            and "frame-src 'self' https://www.googletagmanager.com" in content_security_policy,
+        )
+        ads_tracking = (ROOT / "static" / "google_ads_tracking.js").read_text(encoding="utf-8")
+        ok &= check(
+            "Google-Ads-Linker verbindet Homepage und Anfrageformular",
+            "gtag('set', 'linker'" in ads_tracking
+            and "auto-lackierzentrum.de" in ads_tracking
+            and "kundenstatus-app.onrender.com" in ads_tracking
+            and "accept_incoming: true" in ads_tracking,
         )
         mietwagen_info = render_client.get("/mietwagen-info")
         mietwagen_anfrage = render_client.get("/mietwagen")
