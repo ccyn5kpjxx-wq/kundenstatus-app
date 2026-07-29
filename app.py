@@ -15557,6 +15557,8 @@ def row_to_auftrag(row):
 def auftrag_planung_label(auftrag, feld):
     if feld == "annahme_datum":
         return "Holen" if auftrag.get("transport_art") == "hol_und_bring" else "Kommt"
+    if feld == "kunden_wunsch_annahme_datum":
+        return "Terminwunsch"
     if feld == "abholtermin":
         return "Rückbringen" if auftrag.get("transport_art") == "hol_und_bring" else "Muss weg"
     if feld == "start_datum":
@@ -15598,6 +15600,32 @@ def build_auftrag_planung(auftrag, reference_date=None):
             }
         )
 
+    # Ein angenommener Kundenauftrag kann bereits einen Terminwunsch enthalten,
+    # bevor das Buero ihn als verbindlichen Annahmetermin bestaetigt. Dieser
+    # Wunsch darf auf der Tafel nicht als "Kein Termin gesetzt" verschwinden,
+    # muss aber klar von einem bestaetigten "Kommt"-Termin unterscheidbar bleiben.
+    kundenwunsch = (auftrag.get("schaden_aufnahme") or {}).get(
+        "kunden_wunsch_annahme_datum"
+    )
+    kundenwunsch_datum = parse_date(kundenwunsch)
+    if kundenwunsch_datum and not auftrag.get("annahme_datum_obj"):
+        kundenwunsch_text = format_date(kundenwunsch)
+        events.append(
+            {
+                "feld": "kunden_wunsch_annahme_datum",
+                "label": auftrag_planung_label(
+                    auftrag, "kunden_wunsch_annahme_datum"
+                ),
+                "datum": kundenwunsch_datum,
+                "datum_text": kundenwunsch_text,
+                "farbe": "info",
+                "priority": 1,
+                "is_today": kundenwunsch_datum == heute,
+                "is_past": kundenwunsch_datum < heute,
+                "is_relevant": False,
+            }
+        )
+
     date_warning = any(
         event["datum"].year < heute.year - 1 or event["datum"].year > heute.year + 2
         for event in events
@@ -15611,9 +15639,21 @@ def build_auftrag_planung(auftrag, reference_date=None):
     elif status >= 3:
         relevante_felder = ("fertig_datum", "abholtermin")
     elif status >= 2:
-        relevante_felder = ("annahme_datum", "start_datum", "fertig_datum", "abholtermin")
+        relevante_felder = (
+            "annahme_datum",
+            "kunden_wunsch_annahme_datum",
+            "start_datum",
+            "fertig_datum",
+            "abholtermin",
+        )
     else:
-        relevante_felder = ("annahme_datum", "start_datum", "fertig_datum", "abholtermin")
+        relevante_felder = (
+            "annahme_datum",
+            "kunden_wunsch_annahme_datum",
+            "start_datum",
+            "fertig_datum",
+            "abholtermin",
+        )
 
     candidates = [event for event in events if event["feld"] in relevante_felder]
     future_or_today = [event for event in candidates if event["datum"] >= heute]
@@ -49267,6 +49307,21 @@ def versicherung_datei(slug, datei_id):
 WERKSTATT_TAFEL_ERLAUBTE_STATUS = (2, 3, 4)  # Tafel: nur Eingeplant(2)->In Arbeit(3)->Fertig(4); Angelegt(1)/Zurueckgegeben(5) nur Buero
 
 
+def werkstatt_tafel_auftrag_sichtbar(auftrag):
+    """Zeigt nur freigegebene, operative Auftraege auf der Hallen-Tafel."""
+    if int((auftrag or {}).get("status") or 1) > 4:
+        return False
+    if not int((auftrag or {}).get("versicherung_id") or 0):
+        return True
+    return (
+        normalize_freigabe_status(
+            (auftrag or {}).get("versicherung_freigabe_status")
+        )
+        == "freigegeben"
+        or bool((auftrag or {}).get("schaden_eigenauftrag"))
+    )
+
+
 def werkstatt_datei_sichtbar(datei):
     """Kaufmaennische Belege (Rechnungen) gehoeren nicht auf den Hallen-Bildschirm.
 
@@ -49323,7 +49378,7 @@ def werkstatt_tafel():
     auftraege = [
         auftrag
         for auftrag in list_auftraege()
-        if int(auftrag.get("status") or 1) <= 4
+        if werkstatt_tafel_auftrag_sichtbar(auftrag)
     ]
     spalten = (
         {

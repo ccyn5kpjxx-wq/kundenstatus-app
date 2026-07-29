@@ -115,6 +115,81 @@ def main():
         "＋ Anlegen" in html and 'data-auftrag-anlegen' in html and "/werkstatt/auftrag-anlegen" in html,
     )
 
+    heute = portal.format_date(portal.date.today().isoformat())
+    versicherung = portal.create_versicherung("Werkstatt-Tafel Testversicherung")
+    versicherung_id = versicherung["id"]
+    versicherung_offen_id = portal.create_auftrag(
+        "versicherung",
+        versicherung_id=versicherung_id,
+        kunde_name="Freigabe offen",
+        fahrzeug="Opel Corsa Test",
+        kennzeichen="MOS OF 1",
+        versicherung_freigabe_status="offen",
+        annahme_datum=heute,
+    )
+    versicherung_frei_id = portal.create_auftrag(
+        "versicherung",
+        versicherung_id=versicherung_id,
+        kunde_name="Freigabe erteilt",
+        fahrzeug="Opel Corsa Freigegeben",
+        kennzeichen="MOS FG 1",
+        versicherung_freigabe_status="freigegeben",
+        annahme_datum=heute,
+    )
+    eigenauftrag_id = portal.create_auftrag(
+        "versicherung",
+        versicherung_id=versicherung_id,
+        kunde_name="Eigenauftrag dokumentiert",
+        fahrzeug="Opel Corsa Eigenauftrag",
+        kennzeichen="MOS EA 1",
+        versicherung_freigabe_status="offen",
+        annahme_datum=heute,
+    )
+    terminwunsch_id = portal.create_auftrag(
+        "lead",
+        kunde_name="Terminwunsch vorhanden",
+        fahrzeug="Audi A6 C7 Limousine",
+        kennzeichen="MD AZ 604",
+        schaden_aufnahme_json=portal.json.dumps(
+            {
+                "kunden_angebot_angenommen_am": portal.now_str(),
+                "kunden_wunsch_annahme_datum": heute,
+                "kunden_wunsch_bestaetigt_am": "",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    db = portal.get_db()
+    db.execute(
+        "UPDATE auftraege SET schaden_eigenauftrag=1 WHERE id=?",
+        (eigenauftrag_id,),
+    )
+    db.commit()
+    db.close()
+
+    tafel_html = client.get("/werkstatt/tafel").get_data(as_text=True)
+    check(
+        "Versicherungsfall ohne Freigabe bleibt von der Tafel fern",
+        f'data-auftrag="{versicherung_offen_id}"' not in tafel_html
+        and "Opel Corsa Test" not in tafel_html,
+    )
+    check(
+        "Freigegebener Versicherungsfall erscheint auf der Tafel",
+        f'data-auftrag="{versicherung_frei_id}"' in tafel_html
+        and "Opel Corsa Freigegeben" in tafel_html,
+    )
+    check(
+        "Dokumentierter Eigenauftrag bleibt als Freigabe-Ausnahme sichtbar",
+        f'data-auftrag="{eigenauftrag_id}"' in tafel_html
+        and "Opel Corsa Eigenauftrag" in tafel_html,
+    )
+    check(
+        "Unbestaetigter Kundenwunsch wird als Terminwunsch statt terminlos gezeigt",
+        f'data-auftrag="{terminwunsch_id}"' in tafel_html
+        and "Audi A6 C7 Limousine" in tafel_html
+        and "Terminwunsch heute" in tafel_html,
+    )
+
     response = client.get("/werkstatt/auftrag-anlegen")
     anlegen_html = response.get_data(as_text=True)
     check(
