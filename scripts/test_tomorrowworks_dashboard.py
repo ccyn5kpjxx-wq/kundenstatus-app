@@ -494,6 +494,42 @@ def run() -> None:
         assert "Path=/agentur" in mounted_cookie
         assert "Secure" in mounted_cookie
 
+        migration_source = temp / "migration-source.db"
+        source_db = sqlite3.connect(database)
+        migration_copy = sqlite3.connect(migration_source)
+        try:
+            source_db.backup(migration_copy)
+        finally:
+            migration_copy.close()
+            source_db.close()
+        migration_target = temp / "migration-target.db"
+        migration_app = create_app(
+            {
+                "TESTING": True,
+                "DATABASE": str(migration_target),
+                "UPLOAD_FOLDER": str(temp / "migration-uploads"),
+                "SECRET_KEY": "migration-test-secret",
+                "GIT_MONITOR_ENABLED": False,
+                "MIGRATION_TOKEN": "one-time-migration-token",
+            }
+        )
+        migration_client = migration_app.test_client()
+        with migration_source.open("rb") as source_file:
+            imported = migration_client.post(
+                "/migration/import",
+                headers={"Authorization": "Bearer one-time-migration-token"},
+                data={"database": (io.BytesIO(source_file.read()), "dashboard.db")},
+                content_type="multipart/form-data",
+            )
+        assert imported.status_code == 200
+        assert imported.get_json()["counts"]["kunden"] == 1
+        imported_db = sqlite3.connect(migration_target)
+        try:
+            assert imported_db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            assert imported_db.execute("SELECT COUNT(*) FROM projekte").fetchone()[0] == 1
+        finally:
+            imported_db.close()
+
     print("Tomorrow-Works-Dashboard: Kernablauf erfolgreich getestet.")
 
 

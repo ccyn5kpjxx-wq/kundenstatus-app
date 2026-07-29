@@ -18,6 +18,7 @@ from flask import (
     current_app,
     flash,
     g,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -351,6 +352,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         SMTP_TIMEOUT=int(os.getenv("TW_SMTP_TIMEOUT", "12")),
         TEAM_NOTIFY_EMAIL=os.getenv("TW_TEAM_NOTIFY_EMAIL", "").strip(),
         CONTRACT_LEGAL_APPROVED=os.getenv("TW_CONTRACT_LEGAL_APPROVED", "0") == "1",
+        MIGRATION_TOKEN=os.getenv("TW_MIGRATION_TOKEN", "").strip(),
     )
     if test_config:
         app.config.update(test_config)
@@ -557,7 +559,8 @@ def register_helpers(app: Flask) -> None:
 
     @app.before_request
     def csrf_pruefen():
-        if request.method == "POST" and request.endpoint != "agent_update_api":
+        csrf_freie_endpunkte = {"agent_update_api", "migration_import"}
+        if request.method == "POST" and request.endpoint not in csrf_freie_endpunkte:
             session_token = session.get("_csrf_token", "")
             form_token = request.form.get("_csrf_token", "")
             if not session_token or not form_token or not secrets.compare_digest(session_token, form_token):
@@ -992,6 +995,66 @@ def register_routes(app: Flask) -> None:
     @app.get("/healthz")
     def healthz():
         return {"ok": True, "app": "tomorrowworks-dashboard"}
+
+    @app.post("/migration/import")
+    def migration_import():
+        expected_token = current_app.config["MIGRATION_TOKEN"]
+        if not expected_token:
+            abort(404)
+        authorization = request.headers.get("Authorization", "")
+        supplied_token = authorization[7:].strip() if authorization.startswith("Bearer ") else ""
+        if not supplied_token or not secrets.compare_digest(supplied_token, expected_token):
+            return jsonify({"ok": False, "error": "Nicht autorisiert."}), 403
+        uploaded = request.files.get("database")
+        if uploaded is None or not uploaded.filename:
+            return jsonify({"ok": False, "error": "Datenbankdatei fehlt."}), 400
+
+        target = Path(current_app.config["DATABASE"])
+        staging = target.with_name(f".{target.name}.{uuid4().hex}.import")
+        backup_dir = target.parent / "backups"
+        required_tables = {"kunden", "projekte", "teammitglieder", "kunden_tickets", "portal_nachrichten"}
+        try:
+            uploaded.save(staging)
+            source = sqlite3.connect(staging)
+            try:
+                integrity = source.execute("PRAGMA integrity_check").fetchone()[0]
+                tables = {
+                    row[0]
+                    for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+                }
+                counts = {
+                    table: source.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    for table in required_tables
+                    if table in tables
+                }
+            finally:
+                source.close()
+            if integrity != "ok" or not required_tables.issubset(tables) or counts.get("teammitglieder", 0) < 1:
+                return jsonify({"ok": False, "error": "Datenbankprüfung fehlgeschlagen."}), 400
+
+            close_db()
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                backup_path = backup_dir / f"vor-import-{datetime.now().strftime('%Y%m%d-%H%M%S')}.db"
+                old_db = sqlite3.connect(target)
+                backup_db = sqlite3.connect(backup_path)
+                try:
+                    old_db.backup(backup_db)
+                finally:
+                    backup_db.close()
+                    old_db.close()
+            for suffix in ("-wal", "-shm"):
+                sidecar = Path(f"{target}{suffix}")
+                if sidecar.exists():
+                    sidecar.unlink()
+            os.replace(staging, target)
+            init_db()
+            get_db().commit()
+        finally:
+            if staging.exists():
+                staging.unlink()
+
+        return jsonify({"ok": True, "counts": counts})
 
     @app.route("/einrichtung", methods=["GET", "POST"])
     def einrichtung():
