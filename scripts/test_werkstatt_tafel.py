@@ -70,6 +70,8 @@ def main():
 
     response = client.get("/werkstatt/tafel")
     html = response.get_data(as_text=True)
+    team_showcase_template = (ROOT / "templates" / "_werkstatt_team_showcase.html").read_text(encoding="utf-8")
+    team_showcase_script = (ROOT / "static" / "werkstatt_team_showcase.js").read_text(encoding="utf-8")
     check("Tafel laedt mit Spalten", response.status_code == 200 and "In Arbeit" in html and "Geplant" in html)
     check(
         "Tafel nutzt das Teamfoto als dezenten, lesbaren Hintergrund",
@@ -89,7 +91,7 @@ def main():
     check(
         "Tafel zeigt die automatische Teamvorstellung mit Musik",
         "👥 Unser Team" in html
-        and 'data-team-intervall="180000"' in html
+        and 'data-team-intervall="300000"' in html
         and 'data-team-slide-dauer="4000"' in html
         and 'data-team-dauer="1800"' in html
         and "Christopher Gärtner" in html
@@ -97,6 +99,16 @@ def main():
         and "/static/werkstatt_team_showcase.js" in html
         and "/static/audio/werkstatt-team-cinematic-v1.mp3" in html
         and (ROOT / "static" / "audio" / "werkstatt-team-cinematic-v1.mp3").is_file(),
+    )
+    check(
+        "Auftragstafel liegt ausserhalb der ausgeblendeten Teamvorstellung",
+        team_showcase_template.rstrip().endswith("</section>"),
+    )
+    check(
+        "Teamvorstellung startet erstmals und danach alle fuenf Minuten",
+        "const teamErsterStart = teamIntervall;" in team_showcase_script
+        and "werkstatt-team-showcase-letzter-start-v2" in team_showcase_script
+        and "|| 300000" in team_showcase_script,
     )
     check(
         "Tafel hat Button zum Auftrag-Anlegen",

@@ -1,7 +1,7 @@
 (function () {
   const messungenDialog = document.querySelector('[data-messungen-dialog]');
       // Team-Motivation als kurze Diashow. Der letzte Lauf wird lokal gespeichert,
-      // damit der automatische Minuten-Reload den 3-Minuten-Rhythmus nicht zuruecksetzt.
+      // damit der automatische Minuten-Reload den 5-Minuten-Rhythmus nicht zuruecksetzt.
       const teamShowcase = document.querySelector('[data-team-showcase]');
       const teamOeffnen = document.querySelector('[data-team-oeffnen]');
       const teamSchliessen = document.querySelector('[data-team-schliessen]');
@@ -9,10 +9,10 @@
       const teamMusik = document.querySelector('[data-team-musik]');
       const teamSlides = teamShowcase ? Array.from(teamShowcase.querySelectorAll('[data-team-slide]')) : [];
       const teamFortschritt = teamShowcase ? Array.from(teamShowcase.querySelectorAll('[data-team-fortschritt] span')) : [];
-      const teamIntervall = teamShowcase ? Number(teamShowcase.dataset.teamIntervall) || 180000 : 180000;
+      const teamIntervall = teamShowcase ? Number(teamShowcase.dataset.teamIntervall) || 300000 : 300000;
       const teamSlideDauer = teamShowcase ? Number(teamShowcase.dataset.teamSlideDauer) || 4000 : 4000;
-      const teamErsterStart = 25000;
-      const teamSpeicherKey = 'werkstatt-team-showcase-letzter-start-v1';
+      const teamErsterStart = teamIntervall;
+      const teamSpeicherKey = 'werkstatt-team-showcase-letzter-start-v2';
       const teamTonKey = 'werkstatt-team-showcase-ton-v1';
       let teamTimer = null;
       let teamSlideTimer = null;
