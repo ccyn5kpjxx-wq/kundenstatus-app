@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Fahrzeuganfrage erfassen — Werkstatt-Tafel</title>
+  <title>Auftrag anlegen — Werkstatt-Tafel</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -183,21 +183,6 @@
 
     .approval-note strong { color: var(--ink); }
 
-    .customer-link-note {
-      display: flex;
-      gap: .75rem;
-      align-items: flex-start;
-      margin-top: 1rem;
-      padding: .85rem 1rem;
-      border: 1px solid rgba(27, 127, 83, .3);
-      border-radius: 15px;
-      background: rgba(27, 127, 83, .08);
-      color: #245b43;
-      line-height: 1.45;
-    }
-
-    .customer-link-note strong { color: var(--ink); }
-
     .actions {
       display: flex;
       justify-content: flex-end;
@@ -251,10 +236,10 @@
   <main>
     <section class="intro">
       <div>
-        <h1>Fahrzeuganfrage erfassen</h1>
-        <p>Kundendaten und Fahrzeug direkt erfassen. Die Anfrage geht anschließend zur Klärung in die gemeinsame Lead-Pipeline.</p>
+        <h1>Fahrzeug anlegen</h1>
+        <p>Kundendaten und Fahrzeug direkt bei der Annahme erfassen. Fotos können mit dem Handy aufgenommen werden.</p>
       </div>
-      <div class="locked">📥 Lead-Pipeline</div>
+      <div class="locked">🔒 Büroprüfung</div>
     </section>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -314,7 +299,7 @@
         <div class="photo-box">
           <label for="fotos">📷 Bilder vom Auto</label>
           <input id="fotos" name="fotos" type="file" accept="image/jpeg,image/png,image/webp,image/heic,.jpg,.jpeg,.png,.webp,.heic" capture="environment" multiple>
-          <small class="help">JPG, PNG, WebP oder HEIC. Die Bilder werden ohne automatische Datenübernahme am Lead zur Büroprüfung gespeichert.</small>
+          <small class="help">JPG, PNG, WebP oder HEIC. Die Bilder werden ohne automatische Datenübernahme zur Büroprüfung gespeichert.</small>
           <div class="photo-count" data-photo-count hidden></div>
         </div>
       </section>
@@ -330,18 +315,13 @@
       </section>
 
       <div class="approval-note">
-        <span>📥</span>
-        <div><strong>Es entsteht zunächst noch kein Werkstattauftrag.</strong><br>Die Anfrage landet als neuer Lead beim Büro. Dort werden Arbeitsumfang, Rückfragen und Angebot geklärt. Erst nach der Angebotsannahme entsteht automatisch der Auftrag für die Werkstatt-Tafel.</div>
-      </div>
-
-      <div class="customer-link-note">
-        <span>▦</span>
-        <div><strong>Kundenlink sofort mitgeben.</strong><br>Nach dem Erfassen erscheint direkt der persönliche QR-Code zur Anfrage. Der Kunde kann darüber Unterlagen nachreichen, Nachrichten lesen und später das Angebot prüfen.</div>
+        <span>🔒</span>
+        <div><strong>Der Auftrag startet immer in „Angelegt“.</strong><br>Nur das Büro kann ihn nach der Kontrolle auf „Eingeplant“ setzen. Erst danach kann die Werkstatt den normalen Ablauf starten.</div>
       </div>
 
       <div class="actions">
         <a class="button" href="{{ url_for('werkstatt_tafel') }}">Abbrechen</a>
-        <button class="button primary" type="submit">Als Lead anlegen &amp; QR-Code anzeigen</button>
+        <button class="button primary" type="submit">Auftrag anlegen</button>
       </div>
     </form>
   </main>

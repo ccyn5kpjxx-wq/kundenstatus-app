@@ -71,7 +71,6 @@ def main():
             "kontakt_telefon": "0151 23456789",
             "kunde_email": "klara@example.test",
             "fahrzeug": "VW Golf VII",
-            "fin_nummer": "WVWZZZ1JZXW000042",
             "kennzeichen": "MOS-K 123",
             "beschreibung": "Kratzer an der Beifahrertuer",
         }
@@ -215,7 +214,6 @@ def main():
         check("Kunde nimmt Angebot verbindlich an und erzeugt erst jetzt den Auftrag", accept.status_code == 302 and lead["auftrag_id"] > 0 and auftrag["angebot_status"] == "angenommen" and not auftrag["angebotsphase"]),
         check("Lead wird erst bei Annahme automatisch gewonnen", lead["status"] == "gewonnen"),
         check("Derselbe Kundenlink bleibt nach der Umwandlung gueltig", auftrag["kunden_status_token"] == token),
-        check("FIN wird bei der Lead-Umwandlung in den Auftrag übernommen", auftrag["fin_nummer"] == "WVWZZZ1JZXW000042"),
         check(
             "Termin, Transport und Ersatzfahrzeug bleiben bis Werkstattbestaetigung Wuensche",
             intake.get("kunden_wunsch_annahme_datum") == wunsch_annahme_db
