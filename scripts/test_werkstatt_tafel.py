@@ -50,6 +50,8 @@ def main():
     check("Tafel ohne Login leitet zum Login um", response.status_code == 302 and "/werkstatt" in response.headers.get("Location", ""))
     response = client.get("/werkstatt/auftrag/1")
     check("Auftrags-Detail ohne Login leitet zum Login um", response.status_code == 302)
+    response = client.get("/werkstatt/anfrage/1")
+    check("Werkstatt-Lead ohne Login leitet zum Login um", response.status_code == 302)
     response = client.get("/werkstatt/auftrag-anlegen")
     check("Werkstatt-Anlage ohne Login leitet zum Login um", response.status_code == 302)
 
@@ -99,8 +101,8 @@ def main():
         and (ROOT / "static" / "audio" / "werkstatt-team-cinematic-v1.mp3").is_file(),
     )
     check(
-        "Tafel hat Button zum Auftrag-Anlegen",
-        "＋ Anlegen" in html and 'data-auftrag-anlegen' in html and "/werkstatt/auftrag-anlegen" in html,
+        "Tafel hat Button zur Lead-Anfrage",
+        "＋ Anfrage" in html and 'data-auftrag-anlegen' in html and "/werkstatt/auftrag-anlegen" in html,
     )
 
     response = client.get("/werkstatt/auftrag-anlegen")
@@ -114,9 +116,16 @@ def main():
         and 'name="fotos"' in anlegen_html
         and 'capture="environment"' in anlegen_html
         and 'name="werkstatt_preisvorschlag"' in anlegen_html
-        and "Nur das Büro" in anlegen_html,
+        and "Lead-Pipeline" in anlegen_html
+        and "noch kein Werkstattauftrag" in anlegen_html
+        and "Kundenlink sofort mitgeben" in anlegen_html
+        and "Als Lead anlegen &amp; QR-Code anzeigen" in anlegen_html,
     )
 
+    db = portal.get_db()
+    auftraege_vorher = int(db.execute("SELECT COUNT(*) AS anzahl FROM auftraege").fetchone()["anzahl"])
+    leads_vorher = int(db.execute("SELECT COUNT(*) AS anzahl FROM leads").fetchone()["anzahl"])
+    db.close()
     response = client.post(
         "/werkstatt/auftrag-anlegen",
         data=csrf_data(
@@ -138,37 +147,78 @@ def main():
         content_type="multipart/form-data",
     )
     db = portal.get_db()
-    werkstatt_row = db.execute(
-        "SELECT * FROM auftraege WHERE quelle='werkstatt' ORDER BY id DESC LIMIT 1"
+    werkstatt_lead_row = db.execute(
+        "SELECT * FROM leads WHERE herkunft_typ='werkstatt_annahme' ORDER BY id DESC LIMIT 1"
     ).fetchone()
-    werkstatt_neu_id = int(werkstatt_row["id"]) if werkstatt_row else 0
+    werkstatt_lead_id = int(werkstatt_lead_row["id"]) if werkstatt_lead_row else 0
     werkstatt_fotos = db.execute(
-        "SELECT * FROM dateien WHERE auftrag_id=? ORDER BY id",
-        (werkstatt_neu_id,),
+        "SELECT * FROM lead_dateien WHERE lead_id=? ORDER BY id",
+        (werkstatt_lead_id,),
     ).fetchall()
+    auftraege_nachher = int(db.execute("SELECT COUNT(*) AS anzahl FROM auftraege").fetchone()["anzahl"])
+    leads_nachher = int(db.execute("SELECT COUNT(*) AS anzahl FROM leads").fetchone()["anzahl"])
     db.close()
+    werkstatt_lead = portal.get_lead(werkstatt_lead_id) if werkstatt_lead_id else None
     check(
-        "Werkstatt kann Auftrag mit Foto und Preisvorschlag anlegen",
+        "Werkstatt-Annahme erzeugt einen vollständigen Lead",
         response.status_code == 302
-        and werkstatt_row is not None
-        and int(werkstatt_row["status"]) == 1
-        and int(werkstatt_row["werkstatt_neu"]) == 1
-        and werkstatt_row["kunde_name"] == "Werkstatt Testkunde"
-        and werkstatt_row["kontakt_telefon"] == "0176 12345678"
-        and werkstatt_row["fin_nummer"] == "WVWZZZ1JZXW000001"
-        and werkstatt_row["kennzeichen"] == "MOS WT 42"
-        and werkstatt_row["werkstatt_preisvorschlag"] == "599,00 € netto"
+        and werkstatt_lead is not None
+        and werkstatt_lead["website"] == "auto-lackierzentrum"
+        and werkstatt_lead["quelle"] == "werkstatt"
+        and werkstatt_lead["herkunft_typ"] == "werkstatt_annahme"
+        and werkstatt_lead["status"] == "neu"
+        and not werkstatt_lead["auftrag_id"]
+        and werkstatt_lead["kunde_name"] == "Werkstatt Testkunde"
+        and werkstatt_lead["kontakt_telefon"] == "0176 12345678"
+        and werkstatt_lead["fahrzeug"] == "Volkswagen Golf"
+        and werkstatt_lead["fin_nummer"] == "WVWZZZ1JZXW000001"
+        and werkstatt_lead["kennzeichen"] == "MOS WT 42"
+        and werkstatt_lead["geschaetzter_wert"] == 599.0
+        and "Unverbindlicher interner Mitarbeiter-Preisvorschlag" in werkstatt_lead["notiz"]
+        and bool(werkstatt_lead["kunden_status_token"])
         and len(werkstatt_fotos) == 1
-        and werkstatt_fotos[0]["quelle"] == "werkstatt"
-        and werkstatt_fotos[0]["kategorie"] == "standard",
-    )
-    response = client.post(
-        f"/werkstatt/auftrag/{werkstatt_neu_id}/status/3",
-        data=csrf_data(client),
+        and werkstatt_fotos[0]["quelle"] == "werkstatt_annahme",
     )
     check(
-        "Werkstatt-Annahme bleibt bis zur Büroprüfung gesperrt",
-        response.status_code == 400 and portal.get_auftrag(werkstatt_neu_id)["status"] == 1,
+        "Werkstatt-Annahme legt keinen Auftrag vor der Angebotsannahme an",
+        auftraege_nachher == auftraege_vorher and leads_nachher == leads_vorher + 1,
+    )
+    check(
+        "Neue Werkstatt-Anfrage leitet direkt zum Lead-Kundenlink",
+        f"/werkstatt/anfrage/{werkstatt_lead_id}" in response.headers.get("Location", "")
+        and "kundenlink=1" in response.headers.get("Location", ""),
+    )
+    kundenlink_response = client.get(response.headers.get("Location", ""))
+    kundenlink_html = kundenlink_response.get_data(as_text=True)
+    check(
+        "Werkstatt-Lead zeigt kopierbaren und druckbaren Kundenlink",
+        kundenlink_response.status_code == 200
+        and "Lead-Pipeline" in kundenlink_html
+        and "Noch wurde kein Werkstattauftrag angelegt" in kundenlink_html
+        and "Persönlicher Link zur Anfrage" in kundenlink_html
+        and "Jetzt direkt an den Kunden übergeben" in kundenlink_html
+        and "data-kundenlink-kopieren" in kundenlink_html
+        and "data-kundenlink-drucken" in kundenlink_html
+        and "Noch nicht für die Kundenübergabe geeignet" in kundenlink_html
+        and f"/status/{werkstatt_lead['kunden_status_token']}/qr.svg" in kundenlink_html,
+    )
+    qr_response = portal.app.test_client().get(
+        f"/status/{werkstatt_lead['kunden_status_token']}/qr.svg"
+    )
+    check(
+        "Kunden-QR-Code ist ohne Werkstatt-Login abrufbar",
+        qr_response.status_code == 200
+        and qr_response.content_type.startswith("image/svg+xml")
+        and b"<svg" in qr_response.data,
+    )
+    kundenportal_response = portal.app.test_client().get(
+        f"/status/{werkstatt_lead['kunden_status_token']}"
+    )
+    check(
+        "Werkstatt-Lead nutzt dasselbe Kundenportal wie Homepage-Leads",
+        kundenportal_response.status_code == 200
+        and "Ihre Anfrage" in kundenportal_response.get_data(as_text=True)
+        and "Volkswagen Golf" in kundenportal_response.get_data(as_text=True),
     )
 
     # Eingeloggt: Login-Seite leitet direkt zur Tafel weiter
@@ -447,14 +497,22 @@ def main():
         session["admin"] = True
     response = admin_client.get("/werkstatt/tafel")
     check("Admin sieht Tafel ohne Extra-Login", response.status_code == 200)
-    response = admin_client.get(f"/admin/auftrag/{werkstatt_neu_id}")
+    response = admin_client.get(f"/admin/leads/{werkstatt_lead_id}")
     admin_html = response.get_data(as_text=True)
     check(
-        "Büro sieht offenen Prüfstatus und Mitarbeiter-Preisvorschlag",
+        "Büro sieht Werkstatt-Annahme in derselben Lead-Pipeline",
         response.status_code == 200
-        and "Büro-Prüfung offen" in admin_html
-        and "Noch nicht freigegeben" in admin_html
-        and "599,00 € netto" in admin_html,
+        and "Lead weiterziehen" in admin_html
+        and "Werkstatt-Annahme" in admin_html
+        and "WVWZZZ1JZXW000001" in admin_html
+        and "599,00 €" in admin_html,
+    )
+    pipeline_html = admin_client.get("/admin/leads?website=auto-lackierzentrum&status=aktiv").get_data(as_text=True)
+    check(
+        "Werkstatt-Annahme erscheint in der gemeinsamen Büro-Pipeline",
+        "Werkstatt Testkunde" in pipeline_html
+        and "Volkswagen Golf" in pipeline_html
+        and "Werkstatt-Annahme" in pipeline_html,
     )
 
     response = admin_client.get("/admin/zugaenge")

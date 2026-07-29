@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ lead['reference'] }} — Werkstatt-Annahme</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f3efe6;
+      --panel: #fffdf9;
+      --ink: #16202a;
+      --muted: #6f7a83;
+      --line: #ddd1c0;
+      --brand: #a23f2d;
+      --good: #1b7f53;
+      --warning: #cc8a16;
+      --shadow: 0 18px 48px rgba(64, 47, 25, .14);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: "DM Sans", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(162, 63, 45, .1), transparent 30%),
+        radial-gradient(circle at top right, rgba(20, 93, 102, .09), transparent 32%),
+        linear-gradient(180deg, #f7f2ea 0%, var(--bg) 100%);
+    }
+
+    h1, h2 { font-family: "Space Grotesk", sans-serif; letter-spacing: -.02em; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: .8rem clamp(1rem, 3vw, 2.2rem);
+      background: #12202e;
+      color: #fff;
+    }
+    .topbar-title { display: flex; align-items: center; gap: .8rem; }
+    .topbar img { width: 64px; height: 42px; object-fit: contain; background: #fff; }
+    .topbar strong { font: 700 clamp(1.05rem, 2.2vw, 1.5rem) "Space Grotesk", sans-serif; }
+    .topbar-actions { display: flex; gap: .55rem; }
+    .topbar a {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(255,255,255,.26);
+      border-radius: 12px;
+      padding: .55rem .85rem;
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    main { width: min(1040px, calc(100% - 1.4rem)); margin: clamp(1rem, 3vw, 2rem) auto 3rem; }
+    .success-card, .qr-card, .info-card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .success-card {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+      padding: clamp(1rem, 3vw, 1.55rem);
+      border-color: rgba(27, 127, 83, .45);
+      background: linear-gradient(135deg, #fffdf9, #eef8f2);
+    }
+    .success-card h1 { margin: 0 0 .35rem; font-size: clamp(1.55rem, 4vw, 2.2rem); }
+    .success-card p { margin: 0; color: var(--muted); line-height: 1.5; }
+    .pipeline-badge {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: .55rem .85rem;
+      background: rgba(27, 127, 83, .13);
+      color: var(--good);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .messages { display: grid; gap: .55rem; margin-bottom: 1rem; }
+    .message { border: 1px solid #79b99b; border-radius: 14px; padding: .75rem 1rem; background: #eef8f2; color: #245b43; font-weight: 700; }
+
+    .qr-card {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: clamp(1rem, 3vw, 1.7rem);
+      align-items: center;
+      padding: clamp(1rem, 3vw, 1.6rem);
+      border-width: 2px;
+      border-color: var(--good);
+    }
+    .qr-image {
+      width: clamp(165px, 22vw, 230px);
+      aspect-ratio: 1;
+      display: block;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 9px;
+      background: #fff;
+    }
+    .qr-kicker { margin-bottom: .35rem; color: var(--good); font-weight: 800; text-transform: uppercase; letter-spacing: .06em; font-size: .78rem; }
+    .qr-content h2 { margin: 0 0 .4rem; font-size: clamp(1.3rem, 3vw, 1.8rem); }
+    .qr-content p { margin: 0; color: var(--muted); line-height: 1.5; }
+    .status-link {
+      display: block;
+      margin-top: .8rem;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: .65rem .75rem;
+      background: #fff;
+      color: var(--ink);
+      font: 600 .85rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+      overflow-wrap: anywhere;
+      user-select: all;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .85rem; }
+    .button {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: .58rem .85rem;
+      background: #fff;
+      color: var(--ink);
+      font: 700 .92rem "DM Sans", sans-serif;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .button.primary { border-color: var(--good); background: var(--good); color: #fff; }
+    .warning {
+      grid-column: 1 / -1;
+      border: 1px solid rgba(204, 138, 22, .55);
+      border-radius: 12px;
+      padding: .72rem .85rem;
+      background: #fff8e8;
+      color: #76500b;
+      line-height: 1.45;
+    }
+    .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+    .info-card { padding: 1.15rem; }
+    .info-card h2 { margin: 0 0 .8rem; font-size: 1.08rem; }
+    .facts { display: grid; gap: .7rem; }
+    .fact { display: grid; grid-template-columns: minmax(100px, .42fr) 1fr; gap: .8rem; }
+    .fact span { color: var(--muted); }
+    .fact strong { overflow-wrap: anywhere; }
+    .next-steps { margin: 0; padding-left: 1.2rem; line-height: 1.65; }
+    .print-head { display: none; }
+
+    @media (max-width: 700px) {
+      .topbar { align-items: flex-start; }
+      .topbar-title strong { font-size: 1rem; }
+      .topbar-actions { flex-direction: column; }
+      .topbar a { min-height: 38px; padding: .4rem .65rem; font-size: .85rem; }
+      .success-card { flex-direction: column; }
+      .qr-card { grid-template-columns: 1fr; text-align: center; }
+      .qr-image { width: min(230px, 72vw); margin: 0 auto; }
+      .actions { justify-content: center; }
+      .button { flex: 1 1 145px; }
+      .details-grid { grid-template-columns: 1fr; }
+      .fact { grid-template-columns: 1fr; gap: .15rem; text-align: left; }
+    }
+
+    @media print {
+      @page { size: A5 portrait; margin: 12mm; }
+      body { background: #fff; }
+      body * { visibility: hidden; }
+      .qr-card, .qr-card * { visibility: visible; }
+      .qr-card { position: absolute; inset: 0 auto auto 0; width: 100%; display: block; border: 2px solid var(--good); box-shadow: none; text-align: center; }
+      .print-head { display: block; margin-bottom: 9mm; }
+      .print-head strong { display: block; font: 700 19pt "Space Grotesk", sans-serif; }
+      .print-head span { display: block; margin-top: 2mm; }
+      .qr-image { width: 66mm; margin: 0 auto 7mm; }
+      .actions, .qr-kicker, .warning { display: none !important; }
+      .qr-content p { color: var(--ink); }
+      .status-link { font-size: 8.5pt; text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-title">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Gärtner Karosserie & Lack">
+      <strong>Werkstatt-Annahme</strong>
+    </div>
+    <div class="topbar-actions">
+      <a href="{{ url_for('werkstatt_auftrag_anlegen') }}">＋ Neue Anfrage</a>
+      <a href="{{ url_for('werkstatt_tafel') }}">← Zur Tafel</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="success-card">
+      <div>
+        <h1>Anfrage {{ lead['reference'] }} erfasst</h1>
+        <p>Sie liegt jetzt gemeinsam mit den Homepage-Anfragen in der Büro-Pipeline. Noch wurde kein Werkstattauftrag angelegt.</p>
+      </div>
+      <div class="pipeline-badge">✓ Lead-Pipeline · {{ lead['status_meta']['label'] }}</div>
+    </section>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <div class="messages">
+        {% for category, message in messages %}<div class="message">{{ message }}</div>{% endfor %}
+      </div>
+      {% endif %}
+    {% endwith %}
+
+    <section class="qr-card" data-kundenlink-karte>
+      <div class="print-head">
+        <strong>Gärtner Karosserie &amp; Lack</strong>
+        <span>{{ lead['kunde_name'] }} · {{ lead['fahrzeug'] }}{% if lead['kennzeichen'] %} · {{ lead['kennzeichen'] }}{% endif %}</span>
+      </div>
+      <img class="qr-image" src="{{ url_for('kunden_status_qr', token=lead['kunden_status_token']) }}" alt="QR-Code zur persönlichen Fahrzeuganfrage">
+      <div class="qr-content">
+        {% if kundenlink_hervorheben %}<div class="qr-kicker">✓ Jetzt direkt an den Kunden übergeben</div>{% endif %}
+        <h2>Persönlicher Link zur Anfrage</h2>
+        <p>Über diesen QR-Code kann der Kunde Unterlagen nachreichen, Nachrichten lesen, Terminwünsche senden und später das Angebot prüfen.</p>
+        <code class="status-link" data-kundenlink-url>{{ kundenlink_url }}</code>
+        <div class="actions">
+          <button class="button primary" type="button" data-kundenlink-kopieren>Link kopieren</button>
+          <a class="button" href="{{ kundenlink_url }}" target="_blank" rel="noopener">Kundenansicht öffnen</a>
+          <button class="button" type="button" data-kundenlink-drucken>QR-Karte drucken</button>
+          <a class="button" href="{{ url_for('kunden_status_qr', token=lead['kunden_status_token']) }}" download="gaertner-anfrage-{{ lead['reference'] }}.svg">QR-Code speichern</a>
+        </div>
+      </div>
+      {% if kundenlink_uebergabe_warnung %}
+      <div class="warning"><strong>Noch nicht für die Kundenübergabe geeignet:</strong> Dieser QR-Code verweist nicht auf eine öffentliche HTTPS-Adresse. Vor der Übergabe muss <code>PORTAL_BASE_URL</code> auf die öffentlich erreichbare HTTPS-Adresse des Portals gesetzt sein.</div>
+      {% endif %}
+    </section>
+
+    <div class="details-grid">
+      <section class="info-card">
+        <h2>Erfasste Anfrage</h2>
+        <div class="facts">
+          <div class="fact"><span>Kunde</span><strong>{{ lead['kunde_name'] }}</strong></div>
+          <div class="fact"><span>Telefon</span><strong>{{ lead['kontakt_telefon'] }}</strong></div>
+          <div class="fact"><span>Fahrzeug</span><strong>{{ lead['fahrzeug'] }}</strong></div>
+          <div class="fact"><span>Kennzeichen</span><strong>{{ lead['kennzeichen'] or '—' }}</strong></div>
+          <div class="fact"><span>FIN</span><strong>{{ lead['fin_nummer'] or '—' }}</strong></div>
+          <div class="fact"><span>Fotos</span><strong>{{ lead_dateien|length }}</strong></div>
+          {% if lead['geschaetzter_wert_label'] %}<div class="fact"><span>Interner Vorschlag</span><strong>{{ lead['geschaetzter_wert_label'] }} netto · noch kein Angebot</strong></div>{% endif %}
+        </div>
+      </section>
+      <section class="info-card">
+        <h2>So geht es weiter</h2>
+        <ol class="next-steps">
+          <li>Das Büro sieht den Lead sofort in der gemeinsamen Pipeline.</li>
+          <li>Arbeitsumfang, fehlende Angaben und Unterlagen werden mit dem Kunden geklärt.</li>
+          <li>Das Büro stellt das Angebot im Kundenportal bereit.</li>
+          <li>Erst nach der Annahme entsteht automatisch der Werkstattauftrag.</li>
+        </ol>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const copyButton = document.querySelector('[data-kundenlink-kopieren]');
+      const linkElement = document.querySelector('[data-kundenlink-url]');
+      const printButton = document.querySelector('[data-kundenlink-drucken]');
+      const copyText = async (value) => {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(value);
+          return;
+        }
+        const helper = document.createElement('textarea');
+        helper.value = value;
+        helper.setAttribute('readonly', '');
+        helper.style.position = 'fixed';
+        helper.style.opacity = '0';
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand('copy');
+        helper.remove();
+      };
+      if (copyButton && linkElement) {
+        copyButton.addEventListener('click', async () => {
+          const original = copyButton.textContent;
+          try {
+            await copyText(linkElement.textContent.trim());
+            copyButton.textContent = '✓ Link kopiert';
+          } catch (error) {
+            copyButton.textContent = 'Link markieren & kopieren';
+            window.getSelection()?.selectAllChildren(linkElement);
+          }
+          window.setTimeout(() => { copyButton.textContent = original; }, 2200);
+        });
+      }
+      if (printButton) printButton.addEventListener('click', () => window.print());
+    })();
+  </script>
+</body>
+</html>

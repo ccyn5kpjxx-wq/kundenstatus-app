@@ -1131,6 +1131,7 @@ LEAD_QUELLEN = {
     "privat": {"label": "Privatkunde", "farbe": "secondary"},
     "autohaus": {"label": "Autohaus", "farbe": "success"},
     "versicherung": {"label": "Versicherung", "farbe": "primary"},
+    "werkstatt": {"label": "Werkstatt-Annahme", "farbe": "dark"},
     "telefon": {"label": "Telefon", "farbe": "info"},
     "whatsapp": {"label": "WhatsApp", "farbe": "success"},
     "email": {"label": "E-Mail", "farbe": "warning"},
@@ -1166,6 +1167,7 @@ LEAD_WEBSITE_ALIASES = {
 LEAD_HERKUNFT_TYPEN = {
     "manuell": "Manuell erfasst", "website_formular": "Website-Formular",
     "email": "E-Mail", "mietwagen_anfrage": "Mietwagen-Formular",
+    "werkstatt_annahme": "Werkstatt-Annahme",
 }
 
 FAHRZEUGSUCHE_STATUS = {
@@ -8507,6 +8509,7 @@ def init_db():
             kontakt_telefon      TEXT DEFAULT '',
             kunde_email          TEXT DEFAULT '',
             fahrzeug             TEXT DEFAULT '',
+            fin_nummer           TEXT DEFAULT '',
             kennzeichen          TEXT DEFAULT '',
             schadenart           TEXT DEFAULT '',
             beschreibung         TEXT DEFAULT '',
@@ -9469,6 +9472,7 @@ def init_db():
     ensure_column(db, "leads", "kontakt_telefon", "TEXT DEFAULT ''")
     ensure_column(db, "leads", "kunde_email", "TEXT DEFAULT ''")
     ensure_column(db, "leads", "fahrzeug", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "fin_nummer", "TEXT DEFAULT ''")
     ensure_column(db, "leads", "kennzeichen", "TEXT DEFAULT ''")
     ensure_column(db, "leads", "schadenart", "TEXT DEFAULT ''")
     ensure_column(db, "leads", "beschreibung", "TEXT DEFAULT ''")
@@ -11174,6 +11178,21 @@ def lead_kunden_status_url(lead, force_request_host=False):
     return f"{base}{path}" if base and path.startswith("/") else path
 
 
+def kundenlink_braucht_uebergabe_warnung(status_url):
+    """Warnt vor QR-Codes, die auf Kundenhandys nicht sicher erreichbar sind."""
+    status_url = clean_text(status_url)
+    if not status_url:
+        return False
+    parts = urlsplit(status_url)
+    host = clean_text(parts.hostname).lower()
+    try:
+        host_ip = ipaddress.ip_address(host)
+        private_host = bool(host_ip.is_private or host_ip.is_loopback or host_ip.is_reserved)
+    except ValueError:
+        private_host = bool(host == "localhost" or host.endswith(".local"))
+    return bool(clean_text(parts.scheme).lower() != "https" or private_host)
+
+
 def is_probable_mobile_number(value):
     key = whatsapp_number_key(value)
     if key.startswith("49"):
@@ -11438,6 +11457,7 @@ def hydrate_lead(row):
     lead["kontakt_telefon"] = clean_text(lead.get("kontakt_telefon"))
     lead["kunde_email"] = clean_text(lead.get("kunde_email")).lower()
     lead["fahrzeug"] = clean_text(lead.get("fahrzeug"))
+    lead["fin_nummer"] = normalize_fin(lead.get("fin_nummer"))
     lead["kennzeichen"] = clean_text(lead.get("kennzeichen")).upper()
     lead["schadenart"] = normalize_schadenart(lead.get("schadenart"))
     lead["schadenart_label"] = schadenart_label(lead["schadenart"])
@@ -11678,6 +11698,7 @@ def lead_payload_from_form(form):
         "kontakt_telefon": clean_text(form.get("kontakt_telefon")),
         "kunde_email": clean_text(form.get("kunde_email")).lower(),
         "fahrzeug": clean_text(form.get("fahrzeug")),
+        "fin_nummer": normalize_fin(form.get("fin_nummer")),
         "kennzeichen": clean_text(form.get("kennzeichen")).upper(),
         "schadenart": normalize_schadenart(form.get("schadenart")),
         "beschreibung": clean_text(form.get("beschreibung")),
@@ -11698,11 +11719,11 @@ def create_lead(payload, attachments=None):
         """
         INSERT INTO leads
         (quelle, status, autohaus_id, auftrag_id, source_email_id, kunde_name, kontakt_telefon, kunde_email,
-         fahrzeug, kennzeichen, schadenart, beschreibung, naechste_aktion,
+         fahrzeug, fin_nummer, kennzeichen, schadenart, beschreibung, naechste_aktion,
          naechster_kontakt_am, geschaetzter_wert, notiz, verloren_grund,
          datei_original_name, datei_stored_name, datei_mime_type, datei_size,
          erstellt_am, geaendert_am)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             normalize_lead_quelle(payload.get("quelle")),
@@ -11714,6 +11735,7 @@ def create_lead(payload, attachments=None):
             clean_text(payload.get("kontakt_telefon")),
             clean_text(payload.get("kunde_email")).lower(),
             clean_text(payload.get("fahrzeug")),
+            normalize_fin(payload.get("fin_nummer")),
             clean_text(payload.get("kennzeichen")).upper(),
             normalize_schadenart(payload.get("schadenart")),
             clean_text(payload.get("beschreibung")),
@@ -11780,7 +11802,7 @@ def update_lead(lead_id, payload):
         """
         UPDATE leads
         SET quelle=?, status=?, autohaus_id=?, kunde_name=?, kontakt_telefon=?,
-            kunde_email=?, fahrzeug=?, kennzeichen=?, schadenart=?, beschreibung=?,
+            kunde_email=?, fahrzeug=?, fin_nummer=?, kennzeichen=?, schadenart=?, beschreibung=?,
             naechste_aktion=?, naechster_kontakt_am=?, geschaetzter_wert=?,
             notiz=?, verloren_grund=?, geaendert_am=?
         WHERE id=?
@@ -11793,6 +11815,7 @@ def update_lead(lead_id, payload):
             clean_text(payload.get("kontakt_telefon")),
             clean_text(payload.get("kunde_email")).lower(),
             clean_text(payload.get("fahrzeug")),
+            normalize_fin(payload.get("fin_nummer")),
             clean_text(payload.get("kennzeichen")).upper(),
             normalize_schadenart(payload.get("schadenart")),
             clean_text(payload.get("beschreibung")),
@@ -46650,6 +46673,7 @@ def create_order_from_accepted_lead(lead, intake):
         kunde_name=lead["kunde_name"],
         kunde_email=lead["kunde_email"],
         fahrzeug=lead["fahrzeug"] or "Kundenanfrage",
+        fin_nummer=lead["fin_nummer"],
         kennzeichen=lead["kennzeichen"],
         schadenart=lead["schadenart"],
         beschreibung=lead["beschreibung"],
@@ -49131,7 +49155,7 @@ def werkstatt_tafel():
 
 @app.route("/werkstatt/auftrag-anlegen", methods=["GET", "POST"])
 def werkstatt_auftrag_anlegen():
-    """Schnelle Fahrzeugannahme durch die Halle; Freigabe bleibt beim Büro."""
+    """Erfasst eine Fahrzeuganfrage als Lead; erst die Angebotsannahme erzeugt den Auftrag."""
     guard = werkstatt_tafel_guard()
     if guard:
         return guard
@@ -49168,71 +49192,92 @@ def werkstatt_auftrag_anlegen():
                 flash(hinweis, "warning")
             return render_template("werkstatt_auftrag_neu.html"), 400
 
-        preisvorschlag = (
-            f"{format_bonus_money(preis_betrag)} netto" if preis_betrag else ""
-        )
-        auftrag_id = create_auftrag(
-            "werkstatt",
-            kunde_name=kunde_name,
-            fahrzeug=fahrzeug,
-            fin_nummer=fin_nummer,
-            kennzeichen=kennzeichen,
-            beschreibung=beschreibung,
-            analyse=beschreibung,
-            kontakt_telefon=kontakt_telefon,
-            notiz_intern=(
-                "Direkt durch die Werkstatt angenommen. "
-                "Fahrzeugdaten, Bilder, Arbeitsumfang und Preisvorschlag bitte im Büro prüfen."
-            ),
-        )
-        db = get_db()
-        db.execute(
-            """
-            UPDATE auftraege
-            SET werkstatt_preisvorschlag=?, werkstatt_neu=1, geaendert_am=?
-            WHERE id=?
-            """,
-            (preisvorschlag, now_str(), auftrag_id),
-        )
-        db.commit()
-        db.close()
-
-        gespeichert = 0
-        if fotos:
-            gespeichert, _ = save_uploads(
-                auftrag_id,
-                fotos,
-                "werkstatt",
-                "standard",
-                analyze=False,
-                apply_analysis=False,
-            )
-
-        zusammenfassung = [
-            f"Kunde: {kunde_name}",
-            f"Telefon: {kontakt_telefon}",
-            f"Fahrzeug: {fahrzeug}",
+        preisvorschlag = format_bonus_money(preis_betrag) if preis_betrag else ""
+        interne_notizen = [
+            "Direkt durch einen Mitarbeiter in der Werkstatt-Annahme als Lead erfasst.",
+            "Das Büro klärt Arbeitsumfang, Unterlagen und Angebot mit dem Kunden.",
         ]
-        if fin_nummer:
-            zusammenfassung.append(f"FIN: {fin_nummer}")
         if preisvorschlag:
-            zusammenfassung.append(f"Preisvorschlag: {preisvorschlag}")
-        if gespeichert:
-            zusammenfassung.append(f"Aufnahmebilder: {gespeichert}")
-        add_benachrichtigung(
-            auftrag_id,
-            "Neue Werkstatt-Annahme – Büroprüfung offen",
-            " · ".join(zusammenfassung),
+            interne_notizen.append(
+                f"Unverbindlicher interner Mitarbeiter-Preisvorschlag: {preisvorschlag} netto."
+            )
+        lead_id = create_lead(
+            {
+                "quelle": "werkstatt",
+                "status": "neu",
+                "website": "auto-lackierzentrum",
+                "herkunft_typ": "werkstatt_annahme",
+                "herkunft_id": 0,
+                "kunde_name": kunde_name,
+                "kontakt_telefon": kontakt_telefon,
+                "fahrzeug": fahrzeug,
+                "fin_nummer": fin_nummer,
+                "kennzeichen": kennzeichen,
+                "schadenart": "unbekannt",
+                "beschreibung": beschreibung,
+                "naechste_aktion": "Anfrage prüfen, Arbeitsumfang klären und Kunden kontaktieren",
+                "geschaetzter_wert": preis_betrag or 0,
+                "notiz": "\n".join(interne_notizen),
+            }
+        )
+        upload_fehler = []
+        for foto in fotos:
+            try:
+                save_lead_upload_file(lead_id, foto, quelle="werkstatt_annahme")
+            except (OSError, ValueError) as exc:
+                upload_fehler.append(clean_text(str(exc))[:180])
+        add_lead_portal_event(
+            lead_id,
+            "Fahrzeuganfrage in Prüfung",
+            "Das Büro prüft jetzt die Angaben und meldet sich zum weiteren Vorgehen.",
             quelle="werkstatt",
         )
-        schedule_change_backup("werkstatt-auftrag-anlegen")
+        schedule_change_backup("werkstatt-lead-anlegen")
+        lead = get_lead(lead_id)
         flash(
-            "Auftrag angelegt. Er bleibt gesperrt, bis das Büro Daten und Preisvorschlag geprüft und ihn eingeplant hat.",
+            f"Anfrage {lead['reference']} ist in der Lead-Pipeline. Das Büro übernimmt jetzt die weitere Klärung.",
             "success",
         )
-        return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
+        if upload_fehler:
+            flash(
+                "Die Anfrage wurde gespeichert, aber mindestens ein Foto konnte nicht übernommen werden: "
+                + "; ".join(upload_fehler[:2]),
+                "warning",
+            )
+        return redirect(
+            url_for(
+                "werkstatt_anfrage",
+                lead_id=lead_id,
+                kundenlink="1",
+            )
+        )
 
     return render_template("werkstatt_auftrag_neu.html")
+
+
+@app.route("/werkstatt/anfrage/<int:lead_id>")
+def werkstatt_anfrage(lead_id):
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    lead = get_lead(lead_id)
+    if (
+        not lead
+        or lead["website"] != "auto-lackierzentrum"
+        or lead["herkunft_typ"] != "werkstatt_annahme"
+    ):
+        abort(404)
+    kundenlink_url = clean_text(lead.get("kunden_status_url"))
+    return render_template(
+        "werkstatt_lead.html",
+        lead=lead,
+        lead_dateien=list_lead_dateien(lead_id),
+        kundenlink_url=kundenlink_url,
+        kundenlink_hervorheben=strict_bool(request.args.get("kundenlink")),
+        kundenlink_uebergabe_warnung=kundenlink_braucht_uebergabe_warnung(
+            kundenlink_url
+        ),
+    )
 
 
 @app.route("/werkstatt/auftrag/<int:auftrag_id>")
