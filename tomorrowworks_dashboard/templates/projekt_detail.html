@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{{ projekt['titel'] }}{% endblock %}
+{% block content %}
+<header class="page-header project-detail-header">
+    <div><a class="back-link" href="{{ url_for('kunde_detail', kunde_id=projekt['kunde_id']) }}">← {{ projekt['kundenname'] }}</a><div class="title-with-badge"><h1>{{ projekt['titel'] }}</h1><span class="status-badge status-{{ projekt['status'] }}">{{ projekt_status_labels.get(projekt['status'], projekt['status']) }}</span></div><p>{{ projekt_typ_labels.get(projekt['typ'], projekt['typ']) }} · zuletzt aktualisiert {{ projekt['updated_at']|zeitpunkt }}</p></div>
+    <div class="header-actions"><a class="button button-ticket" href="{{ url_for('kunden_ticket', kunde_id=projekt['kunde_id']) }}">Kunden-Ticket</a>{% if interne_vorschau_url %}<a class="button button-preview" href="{{ interne_vorschau_url }}" target="_blank" rel="noopener">Interne Vorschau ↗</a>{% elif projekt['vorschau_url'] %}<a class="button button-preview" href="{{ projekt['vorschau_url'] }}" target="_blank" rel="noopener">Vorschau öffnen ↗</a>{% endif %}<a class="button button-secondary" href="{{ url_for('projekt_bearbeiten', projekt_id=projekt['id']) }}">Bearbeiten</a></div>
+</header>
+
+<div class="project-overview-grid">
+    <section class="project-hero-card">
+        <div class="progress-header"><div><small>Projektfortschritt</small><strong>{{ projekt['fortschritt'] }} %</strong></div><span>{{ projekt['zieldatum']|datum }}</span></div>
+        <div class="progress-large"><span style="width: {{ projekt['fortschritt'] }}%"></span></div>
+        <div class="current-task"><span>Nächster konkreter Schritt</span><h2>{{ projekt['aktuelle_aufgabe'] or 'Noch nicht festgelegt' }}</h2></div>
+        {% if projekt['blockiert_grund'] %}<div class="blocked-box"><strong>Blockiert</strong><span>{{ projekt['blockiert_grund'] }}</span></div>{% endif %}
+        <div class="project-facts"><div><small>Priorität</small><strong>{{ projekt['prioritaet']|capitalize }}</strong></div><div><small>Start</small><strong>{{ projekt['startdatum']|datum }}</strong></div><div><small>Ziel</small><strong>{{ projekt['zieldatum']|datum }}</strong></div><div><small>Team</small><div class="avatar-stack">{% for mitglied in team %}<span class="avatar avatar-small" style="--avatar-color: {{ mitglied['farbe'] }}" title="{{ mitglied['name'] }}{{ ' · Federführung' if mitglied['ist_hauptverantwortlich'] else '' }}">{{ mitglied['name'].split()[0][0] }}{{ mitglied['name'].split()[-1][0] if mitglied['name'].split()|length > 1 else '' }}</span>{% else %}<span class="muted">Offen</span>{% endfor %}</div></div></div>
+    </section>
+    <aside class="quick-update-card">
+        <p class="eyebrow">Schnellupdate</p><h2>Stand aktualisieren</h2>
+        <form method="post" action="{{ url_for('projekt_status_aendern', projekt_id=projekt['id']) }}" class="stack-form compact-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <label>Status<select name="status">{% for value, label in projekt_status %}<option value="{{ value }}" {{ 'selected' if projekt['status'] == value else '' }}>{{ label }}</option>{% endfor %}</select></label>
+            <label>Fortschritt <output data-progress-output>{{ projekt['fortschritt'] }} %</output><input class="range-input" type="range" name="fortschritt" min="0" max="100" step="5" value="{{ projekt['fortschritt'] }}" data-progress-input></label>
+            <label>Nächster Schritt<input name="aktuelle_aufgabe" value="{{ projekt['aktuelle_aufgabe'] }}"></label>
+            <label>Blockierungsgrund<input name="blockiert_grund" value="{{ projekt['blockiert_grund'] }}" placeholder="Nur bei Blockiert"></label>
+            <button class="button button-primary button-wide" type="submit">Update speichern</button>
+        </form>
+    </aside>
+</div>
+
+<section class="content-card integration-section" id="verbindung">
+    <div class="section-heading"><div><p class="eyebrow">Automatische Verbindung</p><h2>Codex, Claude, Git & interne Vorschau</h2></div><span class="live-indicator"><i></i> wird automatisch geprüft</span></div>
+    <div class="integration-grid">
+        <article class="integration-card" data-project-sync="{{ projekt['id'] }}">
+            <div class="integration-card-head"><span class="integration-icon">GIT</span><span class="sync-badge sync-{{ projekt['git_status'] }}" data-git-badge>{{ git_status_labels.get(projekt['git_status'], projekt['git_status']) }}</span></div>
+            <h3>Gemeinsamer Arbeitsstand</h3>
+            {% if projekt['git_kurz'] %}
+                <p class="commit-message" data-git-detail>{{ projekt['git_kurz'] }} · {{ projekt['git_nachricht'] }}</p>
+                <dl class="compact-details"><dt>Branch</dt><dd>{{ projekt['git_branch'] or '–' }}</dd><dt>Letzte Änderung</dt><dd>{{ projekt['git_author'] or '–' }} · {{ projekt['git_geaendert_am']|zeitpunkt }}</dd><dt>Offen</dt><dd>{% if projekt['git_dirty'] %}{{ projekt['git_dirty'] }} lokale Dateiänderungen{% elif projekt['git_ahead'] %}{{ projekt['git_ahead'] }} Commit(s) noch nicht gepusht{% elif projekt['git_behind'] %}{{ projekt['git_behind'] }} neue Commit(s) abrufen{% else %}Sauberer Stand{% endif %}</dd></dl>
+            {% else %}
+                <p data-git-detail>{{ projekt['git_fehler'] or 'Hinterlege den lokalen Projektordner. Danach liest das Dashboard Git automatisch aus.' }}</p>
+            {% endif %}
+            <form method="post" action="{{ url_for('projekt_git_sync', projekt_id=projekt['id']) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="button button-secondary button-wide" type="submit">Jetzt prüfen</button></form>
+        </article>
+
+        <article class="integration-card preview-card">
+            <div class="integration-card-head"><span class="integration-icon">LIVE</span><span class="sync-badge {{ 'sync-aktuell' if interne_vorschau_url else 'sync-nicht_verbunden' }}">{{ 'Vorschau läuft' if interne_vorschau_url else 'Nicht gestartet' }}</span></div>
+            <h3>Interne Team-Vorschau</h3>
+            {% if interne_vorschau_url %}
+                <p>Ohne Kundendomain. Änderungen im Vorschauordner sind sofort sichtbar.</p>
+                <div class="preview-url-list">{% for adresse in preview_team_urls %}<a href="{{ adresse }}" target="_blank" rel="noopener">{{ adresse }}</a>{% endfor %}</div>
+                <form method="post" action="{{ url_for('projekt_vorschau_stop', projekt_id=projekt['id']) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="button button-secondary button-wide" type="submit">Vorschau stoppen</button></form>
+            {% else %}
+                <p>Für statische Websites oder gebaute Ausgaben. Im Zielordner muss eine <code>index.html</code> liegen.</p>
+                <form method="post" action="{{ url_for('projekt_vorschau_start', projekt_id=projekt['id']) }}" class="stack-form compact-form">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <label>Vorschau-Unterordner<input name="preview_pfad" value="{{ projekt['preview_pfad'] or '.' }}" placeholder=". oder dist"></label>
+                    <button class="button button-primary button-wide" type="submit">Interne Vorschau starten</button>
+                </form>
+            {% endif %}
+        </article>
+
+        <article class="integration-card agent-card" id="agent-verbindung">
+            <div class="integration-card-head"><span class="integration-icon">AI</span><span class="sync-badge sync-aktuell">Bereit</span></div>
+            <h3>Codex-/Claude-Übergabe</h3>
+            <p>{{ agent_anweisung }}</p>
+            <div class="command-box"><code>{{ agent_befehl }}</code><button type="button" data-copy="{{ agent_befehl }}">Befehl kopieren</button></div>
+            <small class="security-note">Der Verbindungsschlüssel gehört nicht in Git, AGENTS.md oder CLAUDE.md.</small>
+            {% if g.user['rolle'] == 'admin' %}<form method="post" action="{{ url_for('projekt_agent_token_neu', projekt_id=projekt['id']) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="link-button inline-link-button" type="submit">Verbindungsschlüssel erneuern</button></form>{% endif %}
+        </article>
+    </div>
+</section>
+
+<div class="detail-grid project-detail-grid">
+    <section class="detail-main">
+        <section class="content-card" id="dateien">
+            <div class="section-heading"><div><p class="eyebrow">Projektstand</p><h2>Vorschau & Dateien</h2></div></div>
+            <div class="link-panels">
+                <div class="link-panel"><span>Vorschau</span><strong>{{ interne_vorschau_url or projekt['vorschau_url'] or 'Noch nicht verbunden' }}</strong>{% if interne_vorschau_url %}<a href="{{ interne_vorschau_url }}" target="_blank" rel="noopener">Intern öffnen ↗</a>{% elif projekt['vorschau_url'] %}<a href="{{ projekt['vorschau_url'] }}" target="_blank" rel="noopener">Öffnen ↗</a>{% endif %}</div>
+                <div class="link-panel"><span>Repository</span><strong>{{ projekt['repo_url'] or 'Noch nicht verbunden' }}</strong>{% if projekt['repo_url'] %}<a href="{{ projekt['repo_url'] }}" target="_blank" rel="noopener">Öffnen ↗</a>{% endif %}</div>
+                <div class="link-panel span-full"><span>Lokaler Projektordner</span><strong>{{ projekt['lokaler_pfad'] or 'Noch nicht hinterlegt' }}</strong>{% if projekt['lokaler_pfad'] %}<button type="button" class="text-link" data-copy="{{ projekt['lokaler_pfad'] }}">Pfad kopieren</button>{% endif %}</div>
+            </div>
+            <div class="file-list">
+            {% for datei in dateien %}
+                <div class="file-row"><span class="file-icon">{{ datei['original_name'].rsplit('.', 1)[-1]|upper }}</span><div><strong>{{ datei['original_name'] }}</strong><small>{{ datei['teamname'] or 'Ehemaliges Teammitglied' }} · {{ datei['created_at']|zeitpunkt }}</small></div><div class="file-actions"><a href="{{ url_for('projekt_datei', datei_id=datei['id']) }}" target="_blank">Ansehen</a><a href="{{ url_for('projekt_datei', datei_id=datei['id'], download=1) }}">Download</a></div></div>
+            {% else %}<p class="muted">Noch keine Entwürfe oder Dokumente hinterlegt.</p>{% endfor %}
+            </div>
+            <form class="upload-bar" method="post" action="{{ url_for('projekt_datei_hochladen', projekt_id=projekt['id']) }}" enctype="multipart/form-data">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <label class="file-picker"><input type="file" name="datei" accept=".pdf,.png,.jpg,.jpeg,.webp" required data-file-input><span data-file-label>PDF oder Bild auswählen</span></label>
+                <button class="button button-secondary" type="submit">Hochladen</button>
+            </form>
+        </section>
+
+        <section class="content-card" id="aktivitaet">
+            <div class="section-heading"><div><p class="eyebrow">Verlauf</p><h2>Aktivität & Notizen</h2></div></div>
+            <form method="post" action="{{ url_for('projekt_notiz', projekt_id=projekt['id']) }}" class="note-form"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><label><span class="sr-only">Neue Notiz</span><textarea name="text" rows="3" required placeholder="Entscheidung, Kundenfeedback oder Übergabe notieren …"></textarea></label><button class="button button-primary" type="submit">Notiz speichern</button></form>
+            <div class="timeline">
+            {% for eintrag in aktivitaeten %}
+                <article class="timeline-item"><span class="timeline-dot" style="--avatar-color: {{ eintrag['teamfarbe'] or '#8e959f' }}"></span><div><div class="timeline-title"><strong>{{ eintrag['aktion'] }}</strong><time>{{ eintrag['created_at']|zeitpunkt }}</time></div><p>{{ eintrag['text'] or 'Keine zusätzliche Notiz.' }}</p><small>{{ eintrag['teamname'] or 'System' }}</small></div></article>
+            {% else %}<p class="muted">Noch keine Aktivität.</p>{% endfor %}
+            </div>
+        </section>
+    </section>
+    <aside class="detail-side">
+        <section class="info-card"><h2>Kunde</h2><a class="customer-inline" href="{{ url_for('kunde_detail', kunde_id=projekt['kunde_id']) }}"><span class="company-monogram">{{ projekt['kundenname'][0]|upper }}</span><span><strong>{{ projekt['kundenname'] }}</strong><small>{{ projekt['ansprechpartner'] or 'Kein Ansprechpartner' }}</small></span></a><dl><dt>E-Mail</dt><dd>{{ projekt['kunden_email'] or '–' }}</dd><dt>Telefon</dt><dd>{{ projekt['kunden_telefon'] or '–' }}</dd></dl></section>
+        <section class="info-card"><h2>Projektteam</h2><div class="assigned-team">{% for mitglied in team %}<div><span class="avatar" style="--avatar-color: {{ mitglied['farbe'] }}">{{ mitglied['name'].split()[0][0] }}{{ mitglied['name'].split()[-1][0] if mitglied['name'].split()|length > 1 else '' }}</span><span><strong>{{ mitglied['name'] }}</strong><small>{{ 'Federführung' if mitglied['ist_hauptverantwortlich'] else 'Mitarbeit' }}</small></span></div>{% else %}<p class="muted">Noch niemand zugewiesen.</p>{% endfor %}</div></section>
+        <section class="info-card"><h2>Beschreibung</h2><p class="pre-line">{{ projekt['beschreibung'] or 'Noch keine Projektbeschreibung.' }}</p></section>
+    </aside>
+</div>
+{% endblock %}

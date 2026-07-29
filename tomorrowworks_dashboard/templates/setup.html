@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Ersteinrichtung{% endblock %}
+{% block auth_content %}
+<div class="auth-card">
+    <span class="step-label">Ersteinrichtung</span>
+    <h2>Ersten Admin anlegen</h2>
+    <p>Dieser Zugang verwaltet Kunden, Projekte und die weiteren Teammitglieder.</p>
+    <form method="post" class="stack-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label>Vollständiger Name
+            <input type="text" name="name" value="{{ request.form.get('name', '') }}" required autofocus autocomplete="name" placeholder="Christopher Gärtner">
+        </label>
+        <label>E-Mail-Adresse
+            <input type="email" name="email" value="{{ request.form.get('email', '') }}" required autocomplete="email" placeholder="name@tomorrowworks-agentur.de">
+        </label>
+        <label>Passwort
+            <span class="password-field"><input type="password" name="passwort" required minlength="8" autocomplete="new-password" placeholder="Mindestens 8 Zeichen" data-password-input><button type="button" data-password-toggle>Passwort anzeigen</button></span>
+            <small class="field-help">Du legst das Passwort selbst fest. Es muss mindestens 8 Zeichen lang sein.</small>
+        </label>
+        <button class="button button-primary button-wide" type="submit">Dashboard einrichten <span aria-hidden="true">→</span></button>
+    </form>
+</div>
+{% endblock %}

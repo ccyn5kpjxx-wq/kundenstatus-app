@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Teammitglied bearbeiten' if mitglied else 'Teammitglied anlegen' }}{% endblock %}
+{% block content %}
+<header class="page-header compact-header"><div><a class="back-link" href="{{ url_for('team_liste') }}">← Team</a><p class="eyebrow">Zugangsverwaltung</p><h1>{{ 'Teammitglied bearbeiten' if mitglied else 'Teammitglied anlegen' }}</h1></div></header>
+<form method="post" class="form-layout narrow-form">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <section class="form-card">
+        <div class="form-section-heading"><span>01</span><div><h2>Person & Zugang</h2><p>Jede Person arbeitet mit dem eigenen Konto.</p></div></div>
+        <div class="form-grid">
+            <label>Name<input name="name" required value="{{ request.form.get('name', mitglied['name'] if mitglied else '') }}"></label>
+            <label>E-Mail<input type="email" name="email" required value="{{ request.form.get('email', mitglied['email'] if mitglied else '') }}"></label>
+            <label>Rolle<select name="rolle"><option value="team" {{ 'selected' if request.form.get('rolle', mitglied['rolle'] if mitglied else 'team') == 'team' else '' }}>Team</option><option value="admin" {{ 'selected' if request.form.get('rolle', mitglied['rolle'] if mitglied else '') == 'admin' else '' }}>Admin</option></select></label>
+            <label>{{ 'Neues Passwort (optional)' if mitglied else 'Startpasswort' }}<span class="password-field"><input type="password" name="passwort" {{ '' if mitglied else 'required' }} minlength="8" autocomplete="new-password" placeholder="Mindestens 8 Zeichen" data-password-input><button type="button" data-password-toggle>Passwort anzeigen</button></span><small class="field-help">Mindestens 8 Zeichen.</small></label>
+        </div>
+    </section>
+    <section class="form-card">
+        <div class="form-section-heading"><span>02</span><div><h2>Darstellung</h2><p>Eine eigene Farbe macht Zuständigkeiten schneller sichtbar.</p></div></div>
+        <div class="color-picker">{% for farbe in team_farben %}<label style="--pick-color: {{ farbe }}"><input type="radio" name="farbe" value="{{ farbe }}" {{ 'checked' if request.form.get('farbe', mitglied['farbe'] if mitglied else team_farben[0]) == farbe else '' }}><span aria-label="Farbe {{ loop.index }}"></span></label>{% endfor %}</div>
+        {% if mitglied %}<label class="toggle-row"><input type="checkbox" name="aktiv" value="1" {{ 'checked' if mitglied['aktiv'] else '' }}><span>Zugang ist aktiv</span></label>{% endif %}
+    </section>
+    <div class="form-actions"><a class="button button-secondary" href="{{ url_for('team_liste') }}">Abbrechen</a><button class="button button-primary" type="submit">Speichern</button></div>
+</form>
+{% endblock %}

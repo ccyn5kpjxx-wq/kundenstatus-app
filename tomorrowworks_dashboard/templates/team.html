@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Team{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">Tomorrow Works</p><h1>Das Team</h1><p>Zugänge, Zuständigkeiten und aktueller Fokus.</p></div>{% if g.user['rolle'] == 'admin' %}<a class="button button-primary" href="{{ url_for('team_neu') }}">＋ Teammitglied</a>{% endif %}</header>
+<div class="team-directory">
+{% for mitglied in team %}
+    <article class="team-directory-card {{ 'is-inactive' if not mitglied['aktiv'] else '' }}">
+        <div class="team-directory-head"><span class="avatar avatar-xl" style="--avatar-color: {{ mitglied['farbe'] }}">{{ mitglied['name'].split()[0][0] }}{{ mitglied['name'].split()[-1][0] if mitglied['name'].split()|length > 1 else '' }}</span><div><h2>{{ mitglied['name'] }}</h2><p>{{ mitglied['email'] }}</p></div><span class="role-pill">{{ 'Admin' if mitglied['rolle'] == 'admin' else 'Team' }}</span></div>
+        <div class="directory-focus"><span>Aktueller Fokus</span>{% if mitglied['fokus_titel'] %}<strong>{{ mitglied['fokus_kunde'] }} · {{ mitglied['fokus_titel'] }}</strong><small>{{ mitglied['fokus_notiz'] or 'Keine Fokusnotiz' }}</small>{% else %}<strong>Noch nicht eingetragen</strong><small>Kann auf der Übersicht gesetzt werden.</small>{% endif %}</div>
+        <div class="directory-footer"><span>{{ mitglied['projektanzahl'] }} Projektzuweisungen</span>{% if g.user['rolle'] == 'admin' %}<a class="text-link" href="{{ url_for('team_bearbeiten', team_id=mitglied['id']) }}">Zugang bearbeiten →</a>{% endif %}</div>
+    </article>
+{% else %}<div class="empty-state"><h2>Noch keine Teammitglieder</h2></div>{% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ kunde['firma'] }}{% endblock %}
+{% block content %}
+<header class="page-header customer-detail-header">
+    <div><a class="back-link" href="{{ url_for('kunden_liste') }}">← Alle Kunden</a><p class="eyebrow">Kundenakte</p><h1>{{ kunde['firma'] }}</h1><p>{{ kunde['ansprechpartner'] or 'Noch kein Ansprechpartner hinterlegt' }}</p></div>
+    <div class="header-actions"><a class="button button-ticket" href="{{ url_for('kunden_ticket', kunde_id=kunde['id']) }}">Kunden-Ticket{% if ticket_ungelesen %} <span>{{ ticket_ungelesen }}</span>{% endif %}</a><a class="button button-secondary" href="{{ url_for('kunde_bearbeiten', kunde_id=kunde['id']) }}">Bearbeiten</a><a class="button button-primary" href="{{ url_for('projekt_neu', kunde=kunde['id']) }}">＋ Projekt</a></div>
+</header>
+<div class="detail-grid">
+    <section class="detail-main">
+        {% if fehlende_kundendaten %}<div class="customer-data-warning"><div><strong>Kundendaten noch nicht vollständig</strong><p>Vor WhatsApp- oder E-Mail-Versand bitte ergänzen: {{ fehlende_kundendaten|join(', ') }}.</p></div><a class="button button-primary" href="{{ url_for('kunde_bearbeiten', kunde_id=kunde['id']) }}">Jetzt vervollständigen</a></div>{% endif %}
+        <div class="section-heading"><div><p class="eyebrow">Projekte</p><h2>Arbeit für {{ kunde['firma'] }}</h2></div><span class="result-count">{{ projekte|length }}</span></div>
+        <div class="project-card-list">
+        {% for projekt in projekte %}
+            <a class="project-card" href="{{ url_for('projekt_detail', projekt_id=projekt['id']) }}">
+                <div><small>{{ projekt_typ_labels.get(projekt['typ'], projekt['typ']) }}</small><h3>{{ projekt['titel'] }}</h3><p>{{ projekt['aktuelle_aufgabe'] or 'Nächster Schritt noch offen' }}</p></div>
+                <div class="project-card-meta"><span class="status-badge status-{{ projekt['status'] }}">{{ projekt_status_labels.get(projekt['status'], projekt['status']) }}</span><strong>{{ projekt['fortschritt'] }} %</strong><span>{{ projekt['zieldatum']|datum }}</span></div>
+            </a>
+        {% else %}<div class="empty-state compact"><h3>Noch kein Projekt</h3><p>Starte mit dem ersten Auftrag für diesen Kunden.</p><a class="button button-primary" href="{{ url_for('projekt_neu', kunde=kunde['id']) }}">Projekt anlegen</a></div>{% endfor %}
+        </div>
+    </section>
+    <aside class="detail-side">
+        <section class="info-card"><h2>Kontakt</h2><dl><dt>Ansprechpartner</dt><dd>{{ kunde['ansprechpartner'] or '–' }}</dd><dt>Geschäftsanschrift</dt><dd>{{ kunde['adresse'] or '–' }}</dd><dt>E-Mail</dt><dd>{% if kunde['email'] %}<a href="mailto:{{ kunde['email'] }}">{{ kunde['email'] }}</a>{% else %}–{% endif %}</dd><dt>Handynummer</dt><dd>{% if kunde['telefon'] %}<a href="tel:{{ kunde['telefon'] }}">{{ kunde['telefon'] }}</a>{% else %}–{% endif %}</dd><dt>Website</dt><dd>{% if kunde['website'].startswith('http://') or kunde['website'].startswith('https://') %}<a href="{{ kunde['website'] }}" target="_blank" rel="noopener">Website öffnen ↗</a>{% elif kunde['keine_website'] %}Noch keine Website vorhanden{% elif kunde['website'] %}{{ kunde['website'] }}{% else %}–{% endif %}</dd></dl>{% if whatsapp_link %}<div class="contact-actions"><a class="button button-whatsapp button-wide" href="{{ whatsapp_link }}" target="_blank" rel="noopener noreferrer">Ticket per WhatsApp vorbereiten</a></div>{% elif kunde['whatsapp_freigabe'] and not portal_oeffentlich %}<p class="contact-hint">WhatsApp ist freigegeben. Vor dem Teilen muss noch die öffentliche Portal-Adresse eingerichtet werden.</p>{% elif kunde['telefon'] and not kunde['whatsapp_freigabe'] %}<p class="contact-hint">WhatsApp bleibt gesperrt, bis die Zustimmung für diese Mobilnummer bestätigt ist.</p>{% endif %}</section>
+        <section class="info-card ticket-summary-card"><span class="always-on-dot"></span><h2>Dauerhaftes Ticket</h2><p>Bleibt für Abstimmungen, Dateien und Weiterentwicklung immer aktiv.</p><a href="{{ url_for('kunden_ticket', kunde_id=kunde['id']) }}">Gemeinsamen Verlauf öffnen →</a></section>
+        <section class="info-card"><h2>Interne Notizen</h2><p class="pre-line">{{ kunde['notizen'] or 'Noch keine internen Notizen.' }}</p></section>
+    </aside>
+</div>
+{% endblock %}

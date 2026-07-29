@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Ticket · {{ ticket['firma'] }}{% endblock %}
+{% block content %}
+<header class="page-header ticket-header">
+    <div><a class="back-link" href="{{ url_for('kunde_detail', kunde_id=ticket['kunde_id']) }}">← {{ ticket['firma'] }}</a><p class="eyebrow">Dauerhaftes Kunden-Ticket</p><h1>{{ ticket['firma'] }}</h1><p><span class="always-on-dot"></span> Immer aktiv · letzter Kontakt {{ ticket['last_activity_at']|zeitpunkt }}</p></div>
+    <div class="header-actions"><a class="button button-secondary" href="{{ url_for('kunden_ticket_angebot', kunde_id=ticket['kunde_id']) }}">Angebot</a><button class="button button-primary" type="button" data-copy="{{ portal_link }}">Kundenlink kopieren</button></div>
+</header>
+
+{% if fehlende_kundendaten %}<div class="customer-data-warning"><div><strong>Ticketversand noch gesperrt</strong><p>Bitte zuerst ergänzen: {{ fehlende_kundendaten|join(', ') }}.</p></div><a class="button button-primary" href="{{ url_for('kunde_bearbeiten', kunde_id=ticket['kunde_id']) }}">Kundendaten vervollständigen</a></div>{% endif %}
+
+<section class="portal-link-bar {{ 'is-ready' if portal_oeffentlich else 'is-local' }}">
+    <div><span>{{ 'Öffentlicher Kundenlink' if portal_oeffentlich else 'Lokale Vorschau des Kundenlinks' }}</span><strong>{{ portal_link }}</strong><small>{% if portal_oeffentlich %}Diesen persönlichen Link vertraulich behandeln.{% else %}Für E-Mails an Kunden fehlt noch die öffentliche Domain. Lokal kann der Ablauf bereits vollständig getestet werden.{% endif %}</small></div>
+    <div class="portal-link-actions">{% if whatsapp_link %}<a class="button button-whatsapp" href="{{ whatsapp_link }}" target="_blank" rel="noopener noreferrer">Per WhatsApp vorbereiten</a>{% else %}<span class="button button-disabled" title="Vollständige Kundendaten, öffentliche Portal-Adresse und WhatsApp-Zustimmung erforderlich">WhatsApp noch nicht bereit</span>{% endif %}<form method="post" action="{{ url_for('kunden_ticket_einladung', kunde_id=ticket['kunde_id']) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="button button-secondary" type="submit" {{ 'disabled' if not email_bereit else '' }}>Per E-Mail senden</button></form>{% if g.user['rolle'] == 'admin' %}<form method="post" action="{{ url_for('kunden_ticket_link_erneuern', kunde_id=ticket['kunde_id']) }}" onsubmit="return confirm('Der bisherige Kundenlink wird sofort ungültig. Fortfahren?')"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="link-button" type="submit">Link erneuern</button></form>{% endif %}</div>
+</section>
+
+<div class="ticket-workspace">
+    <main class="ticket-main">
+        <section class="content-card ticket-composer" id="schreiben">
+            <div class="section-heading"><div><p class="eyebrow">An den Kunden</p><h2>Nachricht oder Neuerung veröffentlichen</h2></div><span class="result-count">E-Mail bei vollständigen Kontaktdaten</span></div>
+            <form method="post" action="{{ url_for('kunden_ticket_nachricht', kunde_id=ticket['kunde_id']) }}" enctype="multipart/form-data" class="stack-form">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <div class="composer-grid"><label>Art<select name="art"><option value="nachricht">Nachricht</option><option value="anforderung">Material/Rückfrage</option><option value="update">Sichtbare Neuerung</option><option value="meilenstein">Meilenstein</option></select></label><label>Projekt<select name="projekt_id"><option value="">Allgemein</option>{% for projekt in projekte %}<option value="{{ projekt['id'] }}">{{ projekt['titel'] }}</option>{% endfor %}</select></label></div>
+                <label>Nachricht<textarea name="text" rows="5" placeholder="Zum Beispiel: Bitte laden Sie Ihr Logo als Originaldatei hoch. Oder: Die mobile Startseite ist jetzt fertig."></textarea></label>
+                <label class="multi-file-picker"><input type="file" name="dateien" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.docx,.xlsx,.zip,.ai,.eps,.svg"><span><strong>Dateien hinzufügen</strong><small>Logos, Bilder, PDF, Office, ZIP, AI, EPS oder SVG · bis zu 8 Dateien</small></span></label>
+                <button class="button button-primary" type="submit">Im Ticket veröffentlichen & E-Mail senden</button>
+            </form>
+        </section>
+
+        <section class="content-card" id="verlauf">
+            <div class="section-heading"><div><p class="eyebrow">Gemeinsame Historie</p><h2>Alles, was der Kunde sehen kann</h2></div><span class="result-count">{{ nachrichten|length }} Einträge</span></div>
+            <div class="conversation-stream">
+            {% for nachricht in nachrichten %}
+                <article class="conversation-item from-{{ nachricht['absender'] }} type-{{ nachricht['art'] }}">
+                    <div class="conversation-avatar">{% if nachricht['absender'] == 'kunde' %}K{% elif nachricht['absender'] == 'system' %}TW{% else %}{{ (nachricht['teamname'] or 'TW').split()[0][0] }}{% endif %}</div>
+                    <div class="conversation-bubble"><div class="conversation-meta"><strong>{% if nachricht['absender'] == 'kunde' %}{{ ticket['ansprechpartner'] or ticket['firma'] }}{% elif nachricht['absender'] == 'system' %}Tomorrow Works{% else %}{{ nachricht['teamname'] or 'Tomorrow Works' }}{% endif %}</strong><span>{{ nachricht['art']|capitalize }}{% if nachricht['projekttitel'] %} · {{ nachricht['projekttitel'] }}{% endif %} · {{ nachricht['created_at']|zeitpunkt }}</span></div>{% if nachricht['text'] %}<p>{{ nachricht['text'] }}</p>{% endif %}{% if nachrichten_dateien.get(nachricht['id']) %}<div class="message-files">{% for datei in nachrichten_dateien.get(nachricht['id']) %}<a href="{{ url_for('kunden_ticket_datei', kunde_id=ticket['kunde_id'], datei_id=datei['id']) }}" target="_blank"><span>{{ datei['original_name'].rsplit('.', 1)[-1]|upper }}</span>{{ datei['original_name'] }}</a>{% endfor %}</div>{% endif %}</div>
+                </article>
+            {% else %}<p class="muted">Noch keine Einträge.</p>{% endfor %}
+            </div>
+        </section>
+    </main>
+
+    <aside class="ticket-side">
+        <section class="info-card"><h2>Aktuelle Phase</h2><form method="post" action="{{ url_for('kunden_ticket_phase', kunde_id=ticket['kunde_id']) }}" class="stack-form compact-form"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><select name="phase">{% for value, label in ticket_phase_labels.items() %}<option value="{{ value }}" {{ 'selected' if ticket['phase'] == value else '' }}>{{ label }}</option>{% endfor %}</select><button class="button button-secondary button-wide" type="submit">Phase speichern</button></form></section>
+        <section class="info-card offer-mini-card"><h2>Angebot & Vertrag</h2>{% if angebot %}<span class="offer-status offer-{{ angebot['status'] }}">{{ angebot_status_labels.get(angebot['status'], angebot['status']) }}</span><strong>{{ angebot['paket_name'] }}</strong><p>{{ angebot['einmalig_cent']|euro }} einmalig<br>{{ angebot['monatlich_cent']|euro }} monatlich</p>{% else %}<p>Noch kein Angebot vorbereitet.</p>{% endif %}<a href="{{ url_for('kunden_ticket_angebot', kunde_id=ticket['kunde_id']) }}">{{ 'Angebot bearbeiten' if angebot else 'Angebot vorbereiten' }} →</a></section>
+        <section class="info-card"><h2>Benachrichtigungen</h2><div class="mail-log">{% for mail in benachrichtigungen %}<div><span class="mail-status mail-{{ mail['status'] }}">{{ mail['status']|replace('_', ' ') }}</span><small>{{ mail['empfaenger'] or 'Keine Adresse' }}<br>{{ mail['created_at']|zeitpunkt }}</small></div>{% else %}<p class="muted">Noch keine E-Mail vorbereitet.</p>{% endfor %}</div></section>
+    </aside>
+</div>
+{% endblock %}

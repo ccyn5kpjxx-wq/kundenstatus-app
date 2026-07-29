@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Kunden{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div><p class="eyebrow">Kundenstamm</p><h1>Kunden & Unternehmen</h1><p>Alle Ansprechpartner und Projekte an einem Ort.</p></div>
+    <a class="button button-primary" href="{{ url_for('kunde_neu') }}">＋ Kunde anlegen</a>
+</header>
+<form class="filter-bar single-search" method="get"><label class="search-field"><span class="sr-only">Kunden suchen</span><input type="search" name="q" value="{{ suche }}" placeholder="Firma oder Ansprechpartner suchen …"></label><button class="button button-secondary" type="submit">Suchen</button></form>
+<div class="customer-grid">
+{% for kunde in kunden %}
+    <a class="customer-card" href="{{ url_for('kunden_ticket', kunde_id=kunde['id']) if kunde['ungelesen'] else url_for('kunde_detail', kunde_id=kunde['id']) }}">
+        <div class="customer-card-top"><span class="company-monogram">{{ kunde['firma'][0]|upper }}</span>{% if kunde['ungelesen'] %}<span class="customer-unread">{{ kunde['ungelesen'] }} neu</span>{% else %}<span class="status-badge {{ 'status-abgeschlossen' if kunde['status'] == 'archiviert' else 'status-in_arbeit' }}">{{ kunde['status']|capitalize }}</span>{% endif %}</div>
+        <h2>{{ kunde['firma'] }}</h2>
+        <p>{{ kunde['ansprechpartner'] or 'Noch kein Ansprechpartner' }}</p>
+        <div class="customer-stats"><span><strong>{{ kunde['aktive_projekte'] or 0 }}</strong> aktiv</span><span><strong>{{ kunde['projektanzahl'] or 0 }}</strong> gesamt</span></div>
+        <span class="card-link">{{ 'Neue Nachricht öffnen' if kunde['ungelesen'] else 'Kundenakte öffnen' }} →</span>
+    </a>
+{% else %}
+    <div class="empty-state"><h2>Noch keine Kunden</h2><p>Lege den ersten Kunden an und starte danach das Projekt.</p><a class="button button-primary" href="{{ url_for('kunde_neu') }}">Ersten Kunden anlegen</a></div>
+{% endfor %}
+</div>
+{% endblock %}

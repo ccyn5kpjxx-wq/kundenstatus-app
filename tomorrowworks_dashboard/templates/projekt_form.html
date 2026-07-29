@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Projekt bearbeiten' if projekt else 'Projekt anlegen' }}{% endblock %}
+{% block content %}
+<header class="page-header compact-header"><div><a class="back-link" href="{{ url_for('projekt_detail', projekt_id=projekt['id']) if projekt else url_for('dashboard') }}">← Zurück</a><p class="eyebrow">Projektanlage</p><h1>{{ 'Projekt bearbeiten' if projekt else 'Neues Projekt starten' }}</h1><p>Kunde, Verantwortung und nächsten Schritt von Anfang an klar festhalten.</p></div></header>
+<form method="post" class="form-layout">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <section class="form-card">
+        <div class="form-section-heading"><span>01</span><div><h2>Projekt</h2><p>Was wird für welchen Kunden umgesetzt?</p></div></div>
+        <div class="form-grid">
+            <label>Kunde<select name="kunde_id" required><option value="">Bitte auswählen</option>{% for kunde in kunden %}{% set selected_kunde = request.form.get('kunde_id', kunde_vorauswahl|string)|int %}<option value="{{ kunde['id'] }}" {{ 'selected' if kunde['id'] == selected_kunde else '' }}>{{ kunde['firma'] }}</option>{% endfor %}</select></label>
+            <label>Projektart<select name="typ">{% for value, label in projekt_typen %}<option value="{{ value }}" {{ 'selected' if request.form.get('typ', projekt['typ'] if projekt else 'website') == value else '' }}>{{ label }}</option>{% endfor %}</select></label>
+            <label class="span-2">Projektname<input name="titel" required value="{{ request.form.get('titel', projekt['titel'] if projekt else '') }}" placeholder="z. B. Neue Unternehmenswebsite"></label>
+            <label class="span-2">Kurzbeschreibung<textarea name="beschreibung" rows="4" placeholder="Ziel, Umfang und wichtige Anforderungen">{{ request.form.get('beschreibung', projekt['beschreibung'] if projekt else '') }}</textarea></label>
+        </div>
+    </section>
+    <section class="form-card">
+        <div class="form-section-heading"><span>02</span><div><h2>Team & Verantwortung</h2><p>Eine Person führt, weitere arbeiten mit.</p></div></div>
+        <div class="team-picker">
+        {% for mitglied in team %}
+            {% set assigned = (mitglied['id']|string in request.form.getlist('teammitglieder')) if request.method == 'POST' else (mitglied['id'] in zugewiesene_ids) %}
+            <div class="team-picker-item">
+                <label class="team-check"><input type="checkbox" name="teammitglieder" value="{{ mitglied['id'] }}" {{ 'checked' if assigned else '' }}><span class="avatar" style="--avatar-color: {{ mitglied['farbe'] }}">{{ mitglied['name'].split()[0][0] }}{{ mitglied['name'].split()[-1][0] if mitglied['name'].split()|length > 1 else '' }}</span><span><strong>{{ mitglied['name'] }}</strong><small>{{ 'Admin' if mitglied['rolle'] == 'admin' else 'Team' }}</small></span></label>
+                <label class="lead-radio"><input type="radio" name="hauptverantwortlich" value="{{ mitglied['id'] }}" {{ 'checked' if (request.form.get('hauptverantwortlich', haupt_id|string)|int) == mitglied['id'] else '' }}> Federführung</label>
+            </div>
+        {% else %}<p class="muted">Lege zuerst weitere Teammitglieder an.</p>{% endfor %}
+        </div>
+    </section>
+    <section class="form-card">
+        <div class="form-section-heading"><span>03</span><div><h2>Ablauf</h2><p>Status, Termin und ganz konkreter nächster Schritt.</p></div></div>
+        <div class="form-grid">
+            <label>Status<select name="status">{% for value, label in projekt_status %}<option value="{{ value }}" {{ 'selected' if request.form.get('status', projekt['status'] if projekt else 'neu') == value else '' }}>{{ label }}</option>{% endfor %}</select></label>
+            <label>Priorität<select name="prioritaet">{% for value, label in prioritaeten %}<option value="{{ value }}" {{ 'selected' if request.form.get('prioritaet', projekt['prioritaet'] if projekt else 'normal') == value else '' }}>{{ label }}</option>{% endfor %}</select></label>
+            <label>Startdatum<input type="date" name="startdatum" value="{{ request.form.get('startdatum', projekt['startdatum'] if projekt and projekt['startdatum'] else '') }}"></label>
+            <label>Zieldatum<input type="date" name="zieldatum" value="{{ request.form.get('zieldatum', projekt['zieldatum'] if projekt and projekt['zieldatum'] else '') }}"></label>
+            <label class="span-2">Aktuelle Aufgabe<input name="aktuelle_aufgabe" value="{{ request.form.get('aktuelle_aufgabe', projekt['aktuelle_aufgabe'] if projekt else '') }}" placeholder="z. B. Startseite für Mobilgeräte fertigstellen"></label>
+            <label class="span-2">Fortschritt <output data-progress-output>{{ request.form.get('fortschritt', projekt['fortschritt'] if projekt else 0) }} %</output><input class="range-input" type="range" name="fortschritt" min="0" max="100" step="5" value="{{ request.form.get('fortschritt', projekt['fortschritt'] if projekt else 0) }}" data-progress-input></label>
+            <label class="span-2">Blockierungsgrund<input name="blockiert_grund" value="{{ request.form.get('blockiert_grund', projekt['blockiert_grund'] if projekt else '') }}" placeholder="Nur ausfüllen, wenn etwas das Projekt stoppt"></label>
+        </div>
+    </section>
+    <section class="form-card">
+        <div class="form-section-heading"><span>04</span><div><h2>Vorschau & Dateien</h2><p>Ein gemeinsamer Stand, den jeder öffnen kann.</p></div></div>
+        <div class="form-grid">
+            <label>Vorschau-Adresse<input type="url" name="vorschau_url" value="{{ request.form.get('vorschau_url', projekt['vorschau_url'] if projekt else '') }}" placeholder="http://127.0.0.1:… oder https://…"></label>
+            <label>Repository-Adresse<input type="url" name="repo_url" value="{{ request.form.get('repo_url', projekt['repo_url'] if projekt else '') }}" placeholder="https://github.com/…"></label>
+            <label>Lokaler Projektordner<input name="lokaler_pfad" value="{{ request.form.get('lokaler_pfad', projekt['lokaler_pfad'] if projekt else '') }}" placeholder="C:\Projekte\Kunde-A"><small class="field-help">Hier arbeiten Codex oder Claude am Projekt.</small></label>
+            <label>Vorschau-Unterordner<input name="preview_pfad" value="{{ request.form.get('preview_pfad', projekt['preview_pfad'] if projekt else '.') }}" placeholder=". oder dist"><small class="field-help">Ordner mit der fertigen index.html, relativ zum Projektordner.</small></label>
+        </div>
+    </section>
+    <div class="form-actions"><a class="button button-secondary" href="{{ url_for('projekt_detail', projekt_id=projekt['id']) if projekt else url_for('dashboard') }}">Abbrechen</a><button class="button button-primary" type="submit">{{ 'Änderungen speichern' if projekt else 'Projekt anlegen' }}</button></div>
+</form>
+{% endblock %}

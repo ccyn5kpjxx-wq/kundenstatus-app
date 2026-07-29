@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Kunden-Tickets{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div><p class="eyebrow">Gemeinsamer Posteingang</p><h1>Kunden-Tickets</h1><p>Nachrichten, Dateien, Freigaben und Neuerungen bleiben dauerhaft beim Kunden.</p></div>
+    <a class="button button-primary" href="{{ url_for('kunde_neu') }}">＋ Kunde & Ticket</a>
+</header>
+
+<div class="ticket-list">
+{% for ticket in tickets %}
+    <a class="ticket-list-card {{ 'has-unread' if ticket['ungelesen'] else '' }}" href="{{ url_for('kunden_ticket', kunde_id=ticket['kunde_id']) }}">
+        <span class="company-monogram">{{ ticket['firma'][0]|upper }}</span>
+        <div class="ticket-list-main"><div><strong>{{ ticket['firma'] }}</strong><small>{{ ticket_phase_labels.get(ticket['phase'], ticket['phase']) }} · dauerhaft aktiv</small></div><p>{{ ticket['letzte_nachricht'] or 'Der Projektraum ist bereit.' }}</p></div>
+        <div class="ticket-list-meta">{% if ticket['ungelesen'] %}<span class="customer-unread">{{ ticket['ungelesen'] }} neu</span>{% elif ticket['angebot_status'] %}<span class="offer-status offer-{{ ticket['angebot_status'] }}">{{ angebot_status_labels.get(ticket['angebot_status'], ticket['angebot_status']) }}</span>{% else %}<span class="always-active">● Aktiv</span>{% endif %}<time>{{ ticket['last_activity_at']|zeitpunkt }}</time></div>
+        <span class="row-arrow">→</span>
+    </a>
+{% else %}
+    <div class="empty-state"><h2>Noch keine Kunden-Tickets</h2><p>Mit dem ersten Kunden wird automatisch ein dauerhafter Projektraum angelegt.</p><a class="button button-primary" href="{{ url_for('kunde_neu') }}">Ersten Kunden anlegen</a></div>
+{% endfor %}
+</div>
+{% endblock %}

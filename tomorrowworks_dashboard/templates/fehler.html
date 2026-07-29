@@ -1,0 +1,4 @@
+{% extends "base.html" %}
+{% block title %}Fehler {{ code }}{% endblock %}
+{% block content %}<div class="empty-state error-state"><span>{{ code }}</span><h1>{{ meldung }}</h1><p>Gehe zurück zur Übersicht und versuche es erneut.</p><a class="button button-primary" href="{{ url_for('dashboard') }}">Zur Übersicht</a></div>{% endblock %}
+{% block auth_content %}<div class="auth-card"><span class="step-label">Fehler {{ code }}</span><h2>{{ meldung }}</h2><a class="button button-primary button-wide" href="{{ url_for('anmelden') }}">Zur Anmeldung</a></div>{% endblock %}

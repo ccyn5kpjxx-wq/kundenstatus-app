@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>{% block title %}Projektcockpit{% endblock %} · Tomorrow Works</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body class="{% if not g.user %}auth-body{% endif %}">
+{% if g.user %}
+    <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
+    <div class="app-shell">
+        <aside class="sidebar" id="hauptnavigation">
+            <a class="brand" href="{{ url_for('dashboard') }}" aria-label="Tomorrow Works Projektcockpit">
+                <span class="brand-mark" aria-hidden="true">T<span></span></span>
+                <span><strong>Tomorrow Works</strong><small>Projektcockpit</small></span>
+            </a>
+
+            <nav class="navigation" aria-label="Hauptnavigation">
+                <a class="{{ 'active' if request.endpoint == 'dashboard' else '' }}" href="{{ url_for('dashboard') }}">
+                    <span aria-hidden="true">⌂</span> Übersicht
+                </a>
+                <a class="{{ 'active' if request.endpoint in ['kunden_liste', 'kunde_neu', 'kunde_detail', 'kunde_bearbeiten'] else '' }}" href="{{ url_for('kunden_liste') }}">
+                    <span aria-hidden="true">◫</span> Kunden
+                </a>
+                <a class="{{ 'active' if request.endpoint == 'tickets_liste' or (request.endpoint and request.endpoint.startswith('kunden_ticket')) else '' }}" href="{{ url_for('tickets_liste') }}">
+                    <span aria-hidden="true">✉</span> Kunden-Tickets {% if portal_ungelesen %}<strong class="nav-count">{{ portal_ungelesen }}</strong>{% endif %}
+                </a>
+                <a class="{{ 'active' if request.endpoint and request.endpoint.startswith('projekt') else '' }}" href="{{ url_for('projekt_neu') }}">
+                    <span aria-hidden="true">＋</span> Neues Projekt
+                </a>
+                <a class="{{ 'active' if request.endpoint and request.endpoint.startswith('team') else '' }}" href="{{ url_for('team_liste') }}">
+                    <span aria-hidden="true">◎</span> Team
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="user-chip">
+                    <span class="avatar" style="--avatar-color: {{ g.user['farbe'] }}">{{ g.user['name'].split()[0][0] }}{{ g.user['name'].split()[-1][0] if g.user['name'].split()|length > 1 else '' }}</span>
+                    <span><strong>{{ g.user['name'] }}</strong><small>{{ 'Admin' if g.user['rolle'] == 'admin' else 'Team' }}</small></span>
+                </div>
+                <form method="post" action="{{ url_for('abmelden') }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <button class="link-button" type="submit">Abmelden</button>
+                </form>
+            </div>
+        </aside>
+
+        <div class="mobile-topbar">
+            <a class="brand brand-mobile" href="{{ url_for('dashboard') }}">
+                <span class="brand-mark" aria-hidden="true">T<span></span></span>
+                <span><strong>Tomorrow Works</strong><small>Projektcockpit</small></span>
+            </a>
+            <button class="menu-button" type="button" data-menu-toggle aria-controls="hauptnavigation" aria-expanded="false">Menü</button>
+        </div>
+
+        <main class="main-content" id="inhalt">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="flash-stack" aria-live="polite">
+                    {% for category, message in messages %}
+                        <div class="flash flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+{% else %}
+    <main class="auth-shell">
+        <section class="auth-brand-panel" aria-label="Tomorrow Works">
+            <div class="auth-brand-copy">
+                <div class="brand brand-auth">
+                    <span class="brand-mark" aria-hidden="true">T<span></span></span>
+                    <span><strong>Tomorrow Works</strong><small>Projektcockpit</small></span>
+                </div>
+                <p class="eyebrow">Eine gemeinsame Wahrheit</p>
+                <h1>Alle Kunden.<br>Alle Projekte.<br><em>Ein Überblick.</em></h1>
+                <p>Das lokale Cockpit für Zuständigkeiten, Fortschritt, Termine und Projektvorschauen.</p>
+            </div>
+        </section>
+        <section class="auth-form-panel">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="flash-stack" aria-live="polite">
+                    {% for category, message in messages %}<div class="flash flash-{{ category }}">{{ message }}</div>{% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+            {% block auth_content %}{% endblock %}
+        </section>
+    </main>
+{% endif %}
+<script src="{{ url_for('static', filename='dashboard.js') }}" defer></script>
+</body>
+</html>

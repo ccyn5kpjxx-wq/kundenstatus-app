@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Angebot · {{ ticket['firma'] }}{% endblock %}
+{% block content %}
+<header class="page-header compact-header"><div><a class="back-link" href="{{ url_for('kunden_ticket', kunde_id=ticket['kunde_id']) }}">← Kunden-Ticket</a><p class="eyebrow">Angebot & Zusammenarbeit</p><h1>{{ ticket['firma'] }}</h1><p>Leistungen und laufende Kosten transparent festhalten.</p></div><span class="offer-status offer-{{ angebot['status'] }}">{{ angebot_status_labels.get(angebot['status'], angebot['status']) }}</span></header>
+
+{% if angebot['status'] in ['angenommen', 'freigegeben'] %}
+<section class="content-card accepted-offer"><span>✓</span><div><h2>{{ angebot_status_labels.get(angebot['status']) }}</h2><p>Bestätigt durch {{ angebot['accepted_name'] }} am {{ angebot['accepted_at']|zeitpunkt }}. Die bestätigten Konditionen sind gesperrt.</p></div></section>
+{% endif %}
+
+<form method="post" class="form-layout offer-form">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <section class="form-card">
+        <div class="form-section-heading"><span>01</span><div><h2>Paket und Preis</h2><p>Die Werte sind Vorschläge und bleiben pro Kunde editierbar.</p></div></div>
+        <div class="offer-presets"><button type="button" data-offer-preset="website">Website · 2.500 €</button><button type="button" data-offer-preset="ki">Website + KI · 3.000 €</button><button type="button" data-offer-preset="betreuung">Betreuung · 300 €/Monat</button></div>
+        <div class="form-grid">
+            <label class="span-2">Paketname<input name="paket_name" required value="{{ request.form.get('paket_name', angebot['paket_name']) }}" {{ 'disabled' if angebot['status'] in ['angenommen', 'freigegeben'] else '' }}></label>
+            <label>Einmaliger Projektpreis<input name="einmalig" inputmode="decimal" value="{{ request.form.get('einmalig', '%.2f'|format(angebot['einmalig_cent'] / 100)) }}" {{ 'disabled' if angebot['status'] in ['angenommen', 'freigegeben'] else '' }}><small class="field-help">z. B. 2500 oder 3000</small></label>
+            <label>Monatliche Betreuung/API<input name="monatlich" inputmode="decimal" value="{{ request.form.get('monatlich', '%.2f'|format(angebot['monatlich_cent'] / 100)) }}" {{ 'disabled' if angebot['status'] in ['angenommen', 'freigegeben'] else '' }}><small class="field-help">z. B. 300 pro Monat</small></label>
+            <label>Einrichtung/Integration einmalig<input name="einrichtung" inputmode="decimal" value="{{ request.form.get('einrichtung', '%.2f'|format(angebot['einrichtung_cent'] / 100)) }}" {{ 'disabled' if angebot['status'] in ['angenommen', 'freigegeben'] else '' }}></label>
+            <label>Gültig bis<input type="date" name="gueltig_bis" value="{{ request.form.get('gueltig_bis', angebot['gueltig_bis'] or '') }}" {{ 'disabled' if angebot['status'] in ['angenommen', 'freigegeben'] else '' }}></label>
+            <label>Laufzeit in Monaten<input type="number" name="laufzeit_monate" min="0" max="120" value="{{ request.form.get('laufzeit_monate', angebot['laufzeit_monate']) }}" {{ 'disabled' if angebot['status'] in ['angenommen', 'freigegeben'] else '' }}></label>
+            <label>Kündigungsfrist in Monaten<input type="number" name="kuendigungsfrist_monate" min="0" max="24" value="{{ request.form.get('kuendigungsfrist_monate', angebot['kuendigungsfrist_monate']) }}" {{ 'disabled' if angebot['status'] in ['angenommen', 'freigegeben'] else '' }}></label>
+        </div>
+    </section>
+    <section class="form-card"><div class="form-section-heading"><span>02</span><div><h2>Leistungsumfang</h2><p>Nur ausdrücklich genannte Leistungen werden dem Kunden angeboten.</p></div></div><label>Enthaltene Leistungen<textarea name="leistungsumfang" rows="9" required {{ 'disabled' if angebot['status'] in ['angenommen', 'freigegeben'] else '' }}>{{ request.form.get('leistungsumfang', angebot['leistungsumfang']) }}</textarea></label><label>Hinweise, API-Kosten und Abgrenzungen<textarea name="hinweise" rows="6" {{ 'disabled' if angebot['status'] in ['angenommen', 'freigegeben'] else '' }}>{{ request.form.get('hinweise', angebot['hinweise']) }}</textarea></label></section>
+    <section class="legal-mode-note {{ 'is-approved' if vertrag_rechtlich_freigegeben else '' }}"><strong>{{ 'Rechtsverbindlicher Modus freigegeben' if vertrag_rechtlich_freigegeben else 'Sicherer Prüfmodus aktiv' }}</strong><p>{% if vertrag_rechtlich_freigegeben %}Die Kundenansicht verwendet eine ausdrücklich zahlungspflichtige Annahme.{% else %}Der Kunde kann das Angebot fachlich freigeben, aber noch keinen rechtsverbindlichen Onlinevertrag abschließen. Erst nach juristischer Prüfung der Vertrags-, Verbraucher- und Datenschutztexte wird dieser Modus bewusst aktiviert.{% endif %}</p></section>
+    {% if angebot['status'] not in ['angenommen', 'freigegeben'] %}<div class="form-actions"><a class="button button-secondary" href="{{ url_for('kunden_ticket', kunde_id=ticket['kunde_id']) }}">Abbrechen</a><button class="button button-primary" type="submit">Entwurf speichern</button></div>{% endif %}
+</form>
+{% if angebot['status'] not in ['angenommen', 'freigegeben'] %}<form method="post" action="{{ url_for('kunden_ticket_angebot_senden', kunde_id=ticket['kunde_id']) }}" class="send-offer-bar"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><div><strong>Fertigen Stand an den Kunden geben</strong><small>Das Angebot erscheint im Ticket und löst eine E-Mail aus.</small></div><button class="button button-primary" type="submit">Angebot veröffentlichen</button></form>{% endif %}
+{% endblock %}

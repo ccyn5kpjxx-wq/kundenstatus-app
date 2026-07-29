@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Übersicht{% endblock %}
+{% block content %}
+<header class="page-header dashboard-header">
+    <div>
+        <p class="eyebrow">Teamzentrale</p>
+        <h1>Guten Überblick, {{ g.user['name'].split()[0] }}.</h1>
+        <p>Hier siehst du, wer woran arbeitet und wo ein Projekt festhängt.</p>
+    </div>
+    <div class="header-actions">
+        <a class="button button-secondary" href="{{ url_for('kunde_neu') }}">＋ Kunde</a>
+        <a class="button button-primary" href="{{ url_for('projekt_neu') }}">＋ Projekt</a>
+    </div>
+</header>
+
+{% if team_adressen %}
+<section class="team-network-banner">
+    <div><span class="network-dot"></span><div><strong>Im Büro-Netz erreichbar</strong><small>Diese Adresse können die anderen Arbeitsplätze öffnen.</small></div></div>
+    <div class="network-links">{% for adresse in team_adressen %}<button type="button" class="network-address" data-copy="{{ adresse }}">{{ adresse }} · kopieren</button>{% endfor %}</div>
+</section>
+{% endif %}
+
+{% if kunden_updates %}
+<section class="customer-update-banner">
+    <div><span class="update-count">{{ portal_ungelesen }}</span><div><strong>Neue Nachricht{{ 'en' if portal_ungelesen != 1 else '' }} von Kunden</strong><small>Bitte Rückfrage oder Datei im Kunden-Ticket prüfen.</small></div></div>
+    <div>{% for update in kunden_updates %}<a href="{{ url_for('kunden_ticket', kunde_id=update['kunde_id']) }}">{{ update['firma'] }} <span>{{ update['ungelesen'] }}</span></a>{% endfor %}</div>
+    <a class="button button-secondary" href="{{ url_for('tickets_liste') }}">Posteingang öffnen</a>
+</section>
+{% endif %}
+
+<section class="metric-grid" aria-label="Projektkennzahlen">
+    <article class="metric-card metric-primary"><span>Aktive Projekte</span><strong>{{ stats['aktiv'] or 0 }}</strong><small>gerade im Ablauf</small></article>
+    <article class="metric-card"><span>Wartet auf Kunde</span><strong>{{ stats['wartet'] or 0 }}</strong><small>Feedback oder Freigabe</small></article>
+    <article class="metric-card"><span>Blockiert</span><strong>{{ stats['blockiert'] or 0 }}</strong><small>braucht eine Entscheidung</small></article>
+    <article class="metric-card"><span>Überfällig</span><strong>{{ stats['ueberfaellig'] or 0 }}</strong><small>Zieldatum überschritten</small></article>
+</section>
+
+<section class="section-block">
+    <div class="section-heading">
+        <div><p class="eyebrow">Heute</p><h2>Wer arbeitet woran?</h2></div>
+        <a class="text-link" href="{{ url_for('team_liste') }}">Team verwalten →</a>
+    </div>
+    <div class="team-focus-grid">
+        {% for mitglied in team %}
+        <article class="team-focus-card {{ 'is-current' if mitglied['id'] == g.user['id'] else '' }}">
+            <div class="team-card-head">
+                <span class="avatar avatar-large" style="--avatar-color: {{ mitglied['farbe'] }}">{{ mitglied['name'].split()[0][0] }}{{ mitglied['name'].split()[-1][0] if mitglied['name'].split()|length > 1 else '' }}</span>
+                <div><h3>{{ mitglied['name'] }}</h3><small>{{ 'Du' if mitglied['id'] == g.user['id'] else ('Admin' if mitglied['rolle'] == 'admin' else 'Team') }}</small></div>
+                <span class="presence-dot" title="Aktiv"></span>
+            </div>
+            {% if mitglied['fokus_titel'] %}
+                <a class="focus-project" href="{{ url_for('projekt_detail', projekt_id=mitglied['fokus_projekt_id']) }}">
+                    <span>{{ mitglied['fokus_kunde'] }}</span>
+                    <strong>{{ mitglied['fokus_titel'] }}</strong>
+                    <small>{{ mitglied['fokus_notiz'] or projekt_status_labels.get(mitglied['fokus_status'], mitglied['fokus_status']) }}</small>
+                </a>
+            {% else %}
+                <div class="focus-project focus-empty"><span>Noch kein Fokus</span><strong>Heute frei eintragen</strong><small>Damit jeder den aktuellen Stand sieht.</small></div>
+            {% endif %}
+            {% if mitglied['id'] == g.user['id'] %}
+            <details class="focus-editor">
+                <summary>Meinen Fokus ändern</summary>
+                <form method="post" action="{{ url_for('mein_fokus') }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <label>Projekt
+                        <select name="projekt_id">
+                            <option value="">Kein Fokus</option>
+                            {% for p in fokus_projekte %}<option value="{{ p['id'] }}" {{ 'selected' if p['id'] == mitglied['fokus_projekt_id'] else '' }}>{{ p['firma'] }} · {{ p['titel'] }}</option>{% endfor %}
+                        </select>
+                    </label>
+                    <label>Was machst du gerade?
+                        <input name="fokus_notiz" maxlength="180" value="{{ mitglied['fokus_notiz'] }}" placeholder="z. B. Startseite mobil fertigstellen">
+                    </label>
+                    <button class="button button-small button-primary" type="submit">Speichern</button>
+                </form>
+            </details>
+            {% endif %}
+        </article>
+        {% else %}
+        <div class="empty-state"><h3>Noch kein Team</h3><p>Lege die vier Zugänge an.</p></div>
+        {% endfor %}
+    </div>
+</section>
+
+<section class="section-block projects-section">
+    <div class="section-heading project-heading">
+        <div><p class="eyebrow">Projektportfolio</p><h2>Alle laufenden Projekte</h2></div>
+        <span class="result-count">{{ projekte|length }} Treffer</span>
+    </div>
+
+    <form class="filter-bar" method="get">
+        <label class="search-field"><span class="sr-only">Projekte suchen</span><input type="search" name="q" value="{{ suche }}" placeholder="Kunde, Projekt oder Aufgabe suchen …"></label>
+        <label><span class="sr-only">Status</span><select name="status"><option value="">Alle Status</option>{% for value, label in projekt_status %}<option value="{{ value }}" {{ 'selected' if status_filter == value else '' }}>{{ label }}</option>{% endfor %}</select></label>
+        <label><span class="sr-only">Mitarbeiter</span><select name="team"><option value="">Ganzes Team</option>{% for mitglied in team %}<option value="{{ mitglied['id'] }}" {{ 'selected' if team_filter == mitglied['id'] else '' }}>{{ mitglied['name'] }}</option>{% endfor %}</select></label>
+        <button class="button button-secondary" type="submit">Filtern</button>
+        {% if suche or status_filter or team_filter %}<a class="text-link" href="{{ url_for('dashboard') }}">Zurücksetzen</a>{% endif %}
+    </form>
+
+    <div class="project-table-wrap">
+        <table class="project-table">
+            <thead><tr><th>Kunde & Projekt</th><th>Team</th><th>Status</th><th>Git-Stand</th><th>Fortschritt</th><th>Nächster Schritt</th><th>Termin</th><th><span class="sr-only">Öffnen</span></th></tr></thead>
+            <tbody>
+            {% for projekt in projekte %}
+                <tr class="{{ 'is-overdue' if projekt['zieldatum'] and projekt['zieldatum'] < heute and projekt['status'] not in ['abgeschlossen', 'veroeffentlicht'] else '' }}">
+                    <td data-label="Projekt"><a class="project-name" href="{{ url_for('projekt_detail', projekt_id=projekt['id']) }}"><small>{{ projekt['kundenname'] }}</small><strong>{{ projekt['titel'] }}</strong><span>{{ projekt_typ_labels.get(projekt['typ'], projekt['typ']) }}</span></a></td>
+                    <td data-label="Team">
+                        <div class="avatar-stack">
+                        {% set namen = projekt['teamnamen'].split('|||') if projekt['teamnamen'] else [] %}
+                        {% set farben = projekt['teamfarben'].split('|||') if projekt['teamfarben'] else [] %}
+                        {% for name in namen[:4] %}<span class="avatar avatar-small" style="--avatar-color: {{ farben[loop.index0] if loop.index0 < farben|length else '#5b8def' }}" title="{{ name }}">{{ name.split()[0][0] }}{{ name.split()[-1][0] if name.split()|length > 1 else '' }}</span>{% endfor %}
+                        {% if not namen %}<span class="muted">Offen</span>{% endif %}
+                        </div>
+                    </td>
+                    <td data-label="Status"><span class="status-badge status-{{ projekt['status'] }}">{{ projekt_status_labels.get(projekt['status'], projekt['status']) }}</span></td>
+                    <td data-label="Git-Stand"><div class="git-table-state" data-project-sync="{{ projekt['id'] }}"><span class="sync-badge sync-{{ projekt['git_status'] }}" data-git-badge>{{ git_status_labels.get(projekt['git_status'], projekt['git_status']) }}</span><small data-git-detail>{% if projekt['git_kurz'] %}{{ projekt['git_kurz'] }} · {{ projekt['git_author'] }}{% elif projekt['git_fehler'] %}{{ projekt['git_fehler'] }}{% else %}Projektordner verbinden{% endif %}</small></div></td>
+                    <td data-label="Fortschritt"><div class="progress-line"><span style="width: {{ projekt['fortschritt'] }}%"></span></div><small>{{ projekt['fortschritt'] }} %</small></td>
+                    <td data-label="Nächster Schritt"><span class="next-task">{{ projekt['aktuelle_aufgabe'] or 'Noch nicht festgelegt' }}</span>{% if projekt['blockiert_grund'] %}<small class="danger-text">{{ projekt['blockiert_grund'] }}</small>{% endif %}</td>
+                    <td data-label="Termin"><span class="deadline">{{ projekt['zieldatum']|datum }}</span></td>
+                    <td><a class="row-arrow" href="{{ url_for('projekt_detail', projekt_id=projekt['id']) }}" aria-label="{{ projekt['titel'] }} öffnen">→</a></td>
+                </tr>
+            {% else %}
+                <tr><td colspan="8"><div class="empty-state compact"><h3>Keine Projekte gefunden</h3><p>Lege das erste Projekt an oder ändere die Filter.</p><a class="button button-primary" href="{{ url_for('projekt_neu') }}">Projekt anlegen</a></div></td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
