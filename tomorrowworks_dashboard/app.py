@@ -337,6 +337,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         SESSION_COOKIE_SECURE=secure_cookie,
         SESSION_COOKIE_PATH=None if application_root == "/" else application_root,
         DASHBOARD_PORT=int(os.getenv("TW_DASHBOARD_PORT", "5070")),
+        SQLITE_BUSY_TIMEOUT_MS=max(5_000, int(os.getenv("TW_SQLITE_BUSY_TIMEOUT_MS", "30000"))),
         GIT_MONITOR_ENABLED=os.getenv("TW_GIT_MONITOR", "1") != "0",
         GIT_MONITOR_INTERVAL=int(os.getenv("TW_GIT_MONITOR_INTERVAL", "30")),
         PUBLIC_BASE_URL=os.getenv("TW_PUBLIC_BASE_URL", "").strip().rstrip("/"),
@@ -373,9 +374,16 @@ def create_app(test_config: dict | None = None) -> Flask:
 
 def get_db() -> sqlite3.Connection:
     if "db" not in g:
-        g.db = sqlite3.connect(current_app.config["DATABASE"])
+        timeout_ms = int(current_app.config["SQLITE_BUSY_TIMEOUT_MS"])
+        g.db = sqlite3.connect(
+            current_app.config["DATABASE"],
+            timeout=timeout_ms / 1000,
+        )
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
+        g.db.execute(f"PRAGMA busy_timeout = {timeout_ms}")
+        g.db.execute("PRAGMA journal_mode = WAL")
+        g.db.execute("PRAGMA synchronous = NORMAL")
     return g.db
 
 

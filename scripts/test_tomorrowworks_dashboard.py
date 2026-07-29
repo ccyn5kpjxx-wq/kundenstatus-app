@@ -64,6 +64,13 @@ def run() -> None:
         )
         client = app.test_client()
 
+        with app.app_context():
+            from tomorrowworks_dashboard.app import get_db
+
+            configured_db = get_db()
+            assert configured_db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+            assert configured_db.execute("PRAGMA busy_timeout").fetchone()[0] >= 30_000
+
         response = client.get("/", follow_redirects=True)
         assert response.status_code == 200
         assert "Ersten Admin anlegen" in response.get_data(as_text=True)
