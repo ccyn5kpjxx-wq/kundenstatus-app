@@ -11174,6 +11174,21 @@ def lead_kunden_status_url(lead, force_request_host=False):
     return f"{base}{path}" if base and path.startswith("/") else path
 
 
+def kundenlink_braucht_uebergabe_warnung(status_url):
+    """Warnt vor QR-Codes, die auf Kundenhandys nicht sicher erreichbar sind."""
+    status_url = clean_text(status_url)
+    if not status_url:
+        return False
+    parts = urlsplit(status_url)
+    host = clean_text(parts.hostname).lower()
+    try:
+        host_ip = ipaddress.ip_address(host)
+        private_host = bool(host_ip.is_private or host_ip.is_loopback or host_ip.is_reserved)
+    except ValueError:
+        private_host = bool(host == "localhost" or host.endswith(".local"))
+    return bool(clean_text(parts.scheme).lower() != "https" or private_host)
+
+
 def is_probable_mobile_number(value):
     key = whatsapp_number_key(value)
     if key.startswith("49"):
@@ -49230,7 +49245,13 @@ def werkstatt_auftrag_anlegen():
             "Auftrag angelegt. Er bleibt gesperrt, bis das Büro Daten und Preisvorschlag geprüft und ihn eingeplant hat.",
             "success",
         )
-        return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
+        return redirect(
+            url_for(
+                "werkstatt_auftrag",
+                auftrag_id=auftrag_id,
+                kundenlink="1",
+            )
+        )
 
     return render_template("werkstatt_auftrag_neu.html")
 
@@ -49243,6 +49264,8 @@ def werkstatt_auftrag(auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag or auftrag.get("archiviert"):
         abort(404)
+    kundenlink_url = clean_text(auftrag.get("kunden_status_url"))
+    kundenlink_uebergabe_warnung = kundenlink_braucht_uebergabe_warnung(kundenlink_url)
     if auftrag.get("werkstatt_neu"):
         db = get_db()
         db.execute("UPDATE auftraege SET werkstatt_neu=0 WHERE id=?", (auftrag_id,))
@@ -49262,6 +49285,9 @@ def werkstatt_auftrag(auftrag_id):
         statusliste=STATUSLISTE,
         erlaubte_status=WERKSTATT_TAFEL_ERLAUBTE_STATUS,
         kunde_whatsapp_url=customer_whatsapp_url(auftrag, customer_fertig_whatsapp_message(auftrag)),
+        kundenlink_url=kundenlink_url,
+        kundenlink_hervorheben=strict_bool(request.args.get("kundenlink")),
+        kundenlink_uebergabe_warnung=kundenlink_uebergabe_warnung,
     )
 
 

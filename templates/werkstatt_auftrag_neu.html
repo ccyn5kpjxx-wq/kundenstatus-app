@@ -183,6 +183,21 @@
 
     .approval-note strong { color: var(--ink); }
 
+    .customer-link-note {
+      display: flex;
+      gap: .75rem;
+      align-items: flex-start;
+      margin-top: 1rem;
+      padding: .85rem 1rem;
+      border: 1px solid rgba(27, 127, 83, .3);
+      border-radius: 15px;
+      background: rgba(27, 127, 83, .08);
+      color: #245b43;
+      line-height: 1.45;
+    }
+
+    .customer-link-note strong { color: var(--ink); }
+
     .actions {
       display: flex;
       justify-content: flex-end;
@@ -319,9 +334,14 @@
         <div><strong>Der Auftrag startet immer in „Angelegt“.</strong><br>Nur das Büro kann ihn nach der Kontrolle auf „Eingeplant“ setzen. Erst danach kann die Werkstatt den normalen Ablauf starten.</div>
       </div>
 
+      <div class="customer-link-note">
+        <span>▦</span>
+        <div><strong>Kundenlink sofort mitgeben.</strong><br>Nach dem Anlegen erscheint direkt der persönliche QR-Code zum Auftrag. Der Kunde kann darüber jederzeit den aktuellen Fahrzeugstatus aufrufen.</div>
+      </div>
+
       <div class="actions">
         <a class="button" href="{{ url_for('werkstatt_tafel') }}">Abbrechen</a>
-        <button class="button primary" type="submit">Auftrag anlegen</button>
+        <button class="button primary" type="submit">Auftrag anlegen &amp; QR-Code anzeigen</button>
       </div>
     </form>
   </main>

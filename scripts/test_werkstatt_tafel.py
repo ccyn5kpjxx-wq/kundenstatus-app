@@ -128,6 +128,11 @@ def main():
         and 'name="werkstatt_preisvorschlag"' in anlegen_html
         and "Nur das Büro" in anlegen_html,
     )
+    check(
+        "Werkstatt-Anlage kuendigt direkten Kunden-QR-Code an",
+        "Kundenlink sofort mitgeben" in anlegen_html
+        and "Auftrag anlegen &amp; QR-Code anzeigen" in anlegen_html,
+    )
 
     response = client.post(
         "/werkstatt/auftrag-anlegen",
@@ -170,9 +175,47 @@ def main():
         and werkstatt_row["fin_nummer"] == "WVWZZZ1JZXW000001"
         and werkstatt_row["kennzeichen"] == "MOS WT 42"
         and werkstatt_row["werkstatt_preisvorschlag"] == "599,00 € netto"
+        and bool(werkstatt_row["kunden_status_token"])
         and len(werkstatt_fotos) == 1
         and werkstatt_fotos[0]["quelle"] == "werkstatt"
         and werkstatt_fotos[0]["kategorie"] == "standard",
+    )
+    check(
+        "Nach dem Anlegen wird der neue Auftrag mit QR-Uebergabe geoeffnet",
+        response.headers.get("Location", "").endswith(
+            f"/werkstatt/auftrag/{werkstatt_neu_id}?kundenlink=1"
+        ),
+        response.headers.get("Location", ""),
+    )
+    response = client.get(response.headers.get("Location", ""))
+    detail_html = response.get_data(as_text=True)
+    check(
+        "Neuer Auftrag zeigt Kundenlink, QR und Uebergabeaktionen",
+        response.status_code == 200
+        and "Auftrag angelegt – jetzt an den Kunden übergeben" in detail_html
+        and "Persönlicher Kundenlink &amp; QR-Code" in detail_html
+        and "Link kopieren" in detail_html
+        and "Kundenansicht öffnen" in detail_html
+        and "QR-Karte drucken" in detail_html
+        and "QR-Code speichern" in detail_html,
+    )
+    qr_response = portal.app.test_client().get(
+        f"/status/{werkstatt_row['kunden_status_token']}/qr.svg"
+    )
+    check(
+        "Kunden-QR-Code ist ohne Werkstatt-Login abrufbar",
+        qr_response.status_code == 200
+        and qr_response.mimetype == "image/svg+xml"
+        and b"<svg" in qr_response.data,
+    )
+    check(
+        "Lokale unsichere Kundenlinks werden vor der Uebergabe markiert",
+        portal.kundenlink_braucht_uebergabe_warnung(
+            "http://127.0.0.1:5000/status/test"
+        )
+        and not portal.kundenlink_braucht_uebergabe_warnung(
+            "https://kundenstatus-app.onrender.com/status/test"
+        ),
     )
     response = client.post(
         f"/werkstatt/auftrag/{werkstatt_neu_id}/status/3",

@@ -324,6 +324,101 @@
 
     .toast-leiste .toast.t-danger, .toast-leiste .toast.t-warning { border-color: var(--warning); }
 
+    .kundenlink-karte {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: clamp(1rem, 2.5vw, 1.6rem);
+      align-items: center;
+      margin: clamp(.8rem, 1.5vw, 1.4rem) clamp(.9rem, 2vw, 1.8rem) 0;
+      padding: clamp(1rem, 2vw, 1.5rem);
+      border: 2px solid rgba(27, 127, 83, .48);
+      border-radius: var(--radius);
+      background: linear-gradient(135deg, #fffdf9 0%, #eef8f2 100%);
+      box-shadow: var(--shadow);
+    }
+
+    .kundenlink-karte.neu {
+      border-color: var(--good);
+      box-shadow: 0 18px 42px rgba(27, 127, 83, .2);
+    }
+
+    .kundenlink-qr {
+      width: clamp(154px, 18vw, 210px);
+      aspect-ratio: 1;
+      display: block;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+      padding: 9px;
+    }
+
+    .kundenlink-kicker {
+      margin-bottom: .35rem;
+      color: var(--good);
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      font-size: .78rem;
+    }
+
+    .kundenlink-inhalt h2 {
+      margin: 0 0 .35rem;
+      color: var(--ink);
+      font-size: clamp(1.25rem, 2.4vw, 1.75rem);
+    }
+
+    .kundenlink-inhalt p { margin: 0; color: var(--muted); line-height: 1.5; }
+
+    .kundenlink-url {
+      display: block;
+      margin-top: .8rem;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: .62rem .75rem;
+      background: #fff;
+      color: var(--ink);
+      font: 600 .85rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+      overflow-wrap: anywhere;
+      user-select: all;
+    }
+
+    .kundenlink-aktionen {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .55rem;
+      margin-top: .85rem;
+    }
+
+    .kundenlink-knopf {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: .58rem .85rem;
+      background: #fff;
+      color: var(--ink);
+      font: 700 .92rem "DM Sans", sans-serif;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .kundenlink-knopf.primary { border-color: var(--good); background: var(--good); color: #fff; }
+    .kundenlink-knopf:hover, .kundenlink-knopf:focus-visible { box-shadow: 0 0 0 3px rgba(27, 127, 83, .15); }
+
+    .kundenlink-warnung {
+      grid-column: 1 / -1;
+      border: 1px solid rgba(204, 138, 22, .55);
+      border-radius: 12px;
+      padding: .7rem .85rem;
+      background: #fff8e8;
+      color: #76500b;
+      line-height: 1.45;
+    }
+
+    .kundenlink-druckkopf { display: none; }
+
     /* Upload-Overlay — gleiches Muster wie .analysis-overlay/.analysis-spinner in base.html */
     .upload-overlay {
       position: fixed;
@@ -388,6 +483,39 @@
       .fakten { grid-template-columns: 1fr; gap: .45rem .9rem; }
       .arbeit-text { font-size: 1.05rem; }
       .fotos { grid-template-columns: 1fr 1fr; }
+      .kundenlink-karte { grid-template-columns: 1fr; text-align: center; }
+      .kundenlink-qr { width: min(210px, 72vw); margin: 0 auto; }
+      .kundenlink-aktionen { justify-content: center; }
+      .kundenlink-knopf { flex: 1 1 145px; }
+    }
+
+    @media print {
+      @page { size: A5 portrait; margin: 12mm; }
+      body { background: #fff; padding: 0; }
+      body * { visibility: hidden; }
+      .kundenlink-karte,
+      .kundenlink-karte * { visibility: visible; }
+      .kundenlink-karte {
+        position: absolute;
+        inset: 0 auto auto 0;
+        width: 100%;
+        display: block;
+        margin: 0;
+        border: 2px solid #1b7f53;
+        box-shadow: none;
+        text-align: center;
+        background: #fff;
+      }
+      .kundenlink-druckkopf { display: block; margin-bottom: 10mm; }
+      .kundenlink-druckkopf strong { display: block; font: 700 19pt "Space Grotesk", sans-serif; }
+      .kundenlink-druckkopf span { display: block; margin-top: 2mm; font-size: 11pt; }
+      .kundenlink-qr { width: 66mm; margin: 0 auto 7mm; }
+      .kundenlink-inhalt h2 { font-size: 18pt; }
+      .kundenlink-url { font-size: 8.5pt; text-align: left; }
+      .kundenlink-aktionen,
+      .kundenlink-kicker,
+      .kundenlink-warnung { display: none !important; }
+      .kundenlink-inhalt p { color: #16202a; }
     }
   </style>
 </head>
@@ -410,6 +538,35 @@
     </div>
     {% endif %}
   {% endwith %}
+
+  {% if kundenlink_url %}
+  <section class="kundenlink-karte{% if kundenlink_hervorheben %} neu{% endif %}" data-kundenlink-karte>
+    <div class="kundenlink-druckkopf">
+      <strong>Gärtner Karosserie &amp; Lack</strong>
+      <span>{{ auftrag['kunde_name'] }} · {{ auftrag['fahrzeug'] }}{% if auftrag['kennzeichen'] %} · {{ auftrag['kennzeichen'] }}{% endif %}</span>
+    </div>
+    <img
+      class="kundenlink-qr"
+      src="{{ url_for('kunden_status_qr', token=auftrag['kunden_status_token']) }}"
+      alt="QR-Code zum persönlichen Kundenstatus"
+    >
+    <div class="kundenlink-inhalt">
+      {% if kundenlink_hervorheben %}<div class="kundenlink-kicker">✓ Auftrag angelegt – jetzt an den Kunden übergeben</div>{% endif %}
+      <h2>Persönlicher Kundenlink &amp; QR-Code</h2>
+      <p>Der Kunde scannt den QR-Code und sieht anschließend Termine, Hinweise und den aktuellen Fahrzeugstatus.</p>
+      <code class="kundenlink-url" data-kundenlink-url>{{ kundenlink_url }}</code>
+      <div class="kundenlink-aktionen">
+        <button class="kundenlink-knopf primary" type="button" data-kundenlink-kopieren>Link kopieren</button>
+        <a class="kundenlink-knopf" href="{{ kundenlink_url }}" target="_blank" rel="noopener">Kundenansicht öffnen</a>
+        <button class="kundenlink-knopf" type="button" data-kundenlink-drucken>QR-Karte drucken</button>
+        <a class="kundenlink-knopf" href="{{ url_for('kunden_status_qr', token=auftrag['kunden_status_token']) }}" download="gaertner-kundenstatus-{{ auftrag['id'] }}.svg">QR-Code speichern</a>
+      </div>
+    </div>
+    {% if kundenlink_uebergabe_warnung %}
+    <div class="kundenlink-warnung"><strong>Noch nicht für die Kundenübergabe geeignet:</strong> Dieser QR-Code verweist nicht auf eine öffentliche HTTPS-Adresse. Vor der Übergabe muss <code>PORTAL_BASE_URL</code> auf die öffentlich erreichbare HTTPS-Adresse des Portals gesetzt sein.</div>
+    {% endif %}
+  </section>
+  {% endif %}
 
   <div class="inhalt">
     <div>
@@ -714,6 +871,48 @@
       </div>
     </div>
   </div>
+
+  <script>
+    (() => {
+      const copyButton = document.querySelector('[data-kundenlink-kopieren]');
+      const linkElement = document.querySelector('[data-kundenlink-url]');
+      const printButton = document.querySelector('[data-kundenlink-drucken]');
+
+      const copyText = async (value) => {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(value);
+          return;
+        }
+        const helper = document.createElement('textarea');
+        helper.value = value;
+        helper.setAttribute('readonly', '');
+        helper.style.position = 'fixed';
+        helper.style.opacity = '0';
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand('copy');
+        helper.remove();
+      };
+
+      if (copyButton && linkElement) {
+        copyButton.addEventListener('click', async () => {
+          const label = copyButton.textContent;
+          try {
+            await copyText(linkElement.textContent.trim());
+            copyButton.textContent = '✓ Link kopiert';
+          } catch (error) {
+            copyButton.textContent = 'Link markieren & kopieren';
+            window.getSelection()?.selectAllChildren(linkElement);
+          }
+          window.setTimeout(() => { copyButton.textContent = label; }, 2200);
+        });
+      }
+
+      if (printButton) {
+        printButton.addEventListener('click', () => window.print());
+      }
+    })();
+  </script>
 
   <div class="upload-overlay" data-upload-overlay>
     <div class="upload-karte">
