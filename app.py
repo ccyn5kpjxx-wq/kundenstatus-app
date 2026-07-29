@@ -45322,20 +45322,137 @@ def neuer_auftrag():
         form = request.form
         aktion = form.get("aktion", "speichern")
         dateien = request.files.getlist("dateien")
+        gewaehlte_dateien = [file for file in dateien if file and file.filename]
         erlaubte_dateien = get_allowed_uploads(dateien)
-        if aktion == "upload_analyze" and not any(file and file.filename for file in dateien):
+        if aktion == "upload_analyze" and not gewaehlte_dateien:
             flash("Bitte zuerst eine Datei auswählen.", "warning")
             return render_template(
                 "neu.html",
                 autohaeuser=autohaeuser,
                 transport_arten=TRANSPORT_ARTEN,
+                form=form,
             )
-        if aktion == "upload_analyze" and not erlaubte_dateien:
+        if aktion == "upload_analyze" and len(erlaubte_dateien) != len(gewaehlte_dateien):
             flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.", "warning")
             return render_template(
                 "neu.html",
                 autohaeuser=autohaeuser,
                 transport_arten=TRANSPORT_ARTEN,
+                form=form,
+            )
+        if aktion == "upload_analyze":
+            result = analyze_partner_new_files(erlaubte_dateien)
+            if not result["files_analyzed"]:
+                message = (
+                    result["errors"][0]
+                    if result["errors"]
+                    else "Die Datei konnte nicht analysiert werden."
+                )
+                flash(message, "warning")
+                return render_template(
+                    "neu.html",
+                    autohaeuser=autohaeuser,
+                    transport_arten=TRANSPORT_ARTEN,
+                    form=form,
+                )
+            result["analysis_token"] = create_partner_new_analysis_token(
+                0,
+                result["file_hashes"],
+            )
+            prepared_form = partner_new_analysis_form_values(form, result)
+            flash(
+                "Die Datei wurde nur analysiert; es wurde noch kein Auftrag angelegt. Bitte alle ergänzten Angaben prüfen.",
+                "success",
+            )
+            return render_template(
+                "neu.html",
+                autohaeuser=autohaeuser,
+                transport_arten=TRANSPORT_ARTEN,
+                form=prepared_form,
+            )
+
+        if not (
+            clean_text(form.get("fahrzeug")) or clean_text(form.get("kennzeichen"))
+        ):
+            flash(
+                "Bitte mindestens Fahrzeug oder Kennzeichen angeben, bevor der Auftrag angelegt wird.",
+                "warning",
+            )
+            return render_template(
+                "neu.html",
+                autohaeuser=autohaeuser,
+                transport_arten=TRANSPORT_ARTEN,
+                form=form,
+            )
+        if gewaehlte_dateien and len(erlaubte_dateien) != len(gewaehlte_dateien):
+            flash(
+                "Mindestens eine Datei hat einen nicht unterstützten Typ. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.",
+                "warning",
+            )
+            return render_template(
+                "neu.html",
+                autohaeuser=autohaeuser,
+                transport_arten=TRANSPORT_ARTEN,
+                form=form,
+            )
+        if (
+            clean_text(form.get("analyse_datei_erforderlich")) == "1"
+            and not gewaehlte_dateien
+        ):
+            flash(
+                "Bitte die zuvor analysierte Datei erneut auswählen, damit sie zusammen mit dem geprüften Auftrag gespeichert wird.",
+                "warning",
+            )
+            return render_template(
+                "neu.html",
+                autohaeuser=autohaeuser,
+                transport_arten=TRANSPORT_ARTEN,
+                form=form,
+            )
+        if gewaehlte_dateien and clean_text(form.get("analyse_abgeschlossen")) != "1":
+            flash(
+                "Bitte die ausgewählte Datei zuerst analysieren. Dabei werden nur Formularfelder ergänzt; ein Auftrag entsteht noch nicht.",
+                "warning",
+            )
+            return render_template(
+                "neu.html",
+                autohaeuser=autohaeuser,
+                transport_arten=TRANSPORT_ARTEN,
+                form=form,
+            )
+        if gewaehlte_dateien and not partner_new_analysis_token_valid(
+            form.get("analyse_token"),
+            0,
+            erlaubte_dateien,
+        ):
+            flash(
+                "Die sichere Analysebestätigung fehlt oder passt nicht mehr zur Datei. Bitte die Datei erneut analysieren.",
+                "warning",
+            )
+            return render_template(
+                "neu.html",
+                autohaeuser=autohaeuser,
+                transport_arten=TRANSPORT_ARTEN,
+                form=form,
+            )
+        expected_file_signature = clean_text(form.get("analyse_dateisignatur"))
+        current_file_signature = "|".join(
+            secure_filename(file.filename or "") for file in gewaehlte_dateien
+        )
+        if (
+            gewaehlte_dateien
+            and expected_file_signature
+            and not hmac.compare_digest(expected_file_signature, current_file_signature)
+        ):
+            flash(
+                "Die Dateiauswahl wurde nach der Analyse geändert. Bitte die aktuelle Datei noch einmal analysieren.",
+                "warning",
+            )
+            return render_template(
+                "neu.html",
+                autohaeuser=autohaeuser,
+                transport_arten=TRANSPORT_ARTEN,
+                form=form,
             )
 
         auftrag_id = create_auftrag(
@@ -45364,20 +45481,65 @@ def neuer_auftrag():
             _db.execute("UPDATE auftraege SET abhol_adresse=? WHERE id=?", (_adr, auftrag_id))
             _db.commit()
             _db.close()
-        upload_result = save_uploads(auftrag_id, erlaubte_dateien, "intern", "standard")
-        if aktion == "upload_analyze":
-            flash_upload_analysis_result(
-                upload_result,
-                "Datei hochgeladen und Analyse sichtbar gemacht.",
-            )
-        else:
-            flash("Fahrzeug angelegt.", "success")
+        save_uploads(
+            auftrag_id,
+            erlaubte_dateien,
+            "intern",
+            "standard",
+            analyze=False,
+            apply_analysis=False,
+        )
+        flash("Fahrzeug angelegt.", "success")
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id))
 
     return render_template(
         "neu.html",
         autohaeuser=autohaeuser,
         transport_arten=TRANSPORT_ARTEN,
+        form={},
+    )
+
+
+@app.route("/admin/neu/analysieren", methods=["POST"])
+@admin_required
+def admin_neuer_auftrag_analysieren():
+    """Analysiert Unterlagen nur für den Formularentwurf, ohne Auftragserzeugung."""
+    selected = [
+        file for file in request.files.getlist("dateien") if file and file.filename
+    ]
+    allowed = get_allowed_uploads(selected)
+    if not selected:
+        return jsonify({"ok": False, "error": "Bitte zuerst eine Datei auswählen."}), 400
+    if len(allowed) != len(selected):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.",
+                }
+            ),
+            400,
+        )
+
+    result = analyze_partner_new_files(allowed)
+    if not result["files_analyzed"]:
+        message = result["errors"][0] if result["errors"] else "Die Datei konnte nicht analysiert werden."
+        return jsonify({"ok": False, "error": message}), 422
+    result["analysis_token"] = create_partner_new_analysis_token(
+        0,
+        result["file_hashes"],
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "fields": result["fields"],
+            "files_analyzed": result["files_analyzed"],
+            "review_hint": result["review_hint"],
+            "needs_review": result["needs_review"],
+            "confidence": result["confidence"],
+            "analysis_token": result["analysis_token"],
+            "warning": result["errors"][0] if result["errors"] else "",
+        }
     )
 
 
