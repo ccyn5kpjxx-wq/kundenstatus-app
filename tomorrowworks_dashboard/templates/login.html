@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Anmelden{% endblock %}
+{% block auth_content %}
+<div class="auth-card">
+    <span class="step-label">Teamzugang</span>
+    <h2>Willkommen zurück</h2>
+    <p>Melde dich an und aktualisiere deinen Fokus für heute.</p>
+    <form method="post" class="stack-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label>E-Mail-Adresse
+            <input type="email" name="email" value="{{ request.form.get('email', '') }}" required autofocus autocomplete="email">
+        </label>
+        <label>Passwort
+            <span class="password-field"><input type="password" name="passwort" required autocomplete="current-password" data-password-input><button type="button" data-password-toggle>Passwort anzeigen</button></span>
+        </label>
+        <button class="button button-primary button-wide" type="submit">Anmelden <span aria-hidden="true">→</span></button>
+    </form>
+</div>
+{% endblock %}
