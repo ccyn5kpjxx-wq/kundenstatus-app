@@ -272,6 +272,7 @@ def run() -> None:
         assert "Neue Unternehmenswebsite" in public_page.get_data(as_text=True)
         assert "mobile Navigation wurde verbessert" in public_page.get_data(as_text=True)
         assert public_page.headers["Cache-Control"] == "no-store, private"
+        assert public_page.headers["X-Robots-Tag"] == "noindex, nofollow, noarchive"
         assert client.get("/portal/falscher-token").status_code == 404
 
         customer_message_token = csrf(client, portal_path)

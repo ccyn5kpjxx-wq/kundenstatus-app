@@ -592,6 +592,7 @@ def register_helpers(app: Flask) -> None:
         if request.endpoint and request.endpoint.startswith("kundenportal"):
             response.headers["Cache-Control"] = "no-store, private"
             response.headers["Referrer-Policy"] = "no-referrer"
+            response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
             response.headers["X-Frame-Options"] = "DENY"
             response.headers["X-Content-Type-Options"] = "nosniff"
         return response
