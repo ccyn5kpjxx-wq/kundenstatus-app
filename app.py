@@ -9363,6 +9363,30 @@ def init_db():
     db.execute(
         """
         UPDATE auftraege
+        SET versicherung_sendefreigabe_am=COALESCE(
+              NULLIF(versicherung_sendefreigabe_am, ''),
+              (
+                SELECT MAX(c.erstellt_am)
+                FROM chat_nachrichten c
+                WHERE c.auftrag_id=auftraege.id
+                  AND c.absender='werkstatt'
+                  AND c.nachricht LIKE 'E-Mail an Versicherung gesendet:%'
+              )
+            )
+        WHERE COALESCE(versicherung_id, 0)>0
+          AND COALESCE(versicherung_sendefreigabe_am, '')=''
+          AND EXISTS (
+            SELECT 1
+            FROM chat_nachrichten c
+            WHERE c.auftrag_id=auftraege.id
+              AND c.absender='werkstatt'
+              AND c.nachricht LIKE 'E-Mail an Versicherung gesendet:%'
+          )
+        """
+    )
+    db.execute(
+        """
+        UPDATE auftraege
         SET versicherung_portal_freigabe_id=versicherung_id
         WHERE COALESCE(versicherung_portal_freigabe_id, 0)=0
           AND COALESCE(versicherung_id, 0)>0
@@ -43790,6 +43814,29 @@ def admin_versicherung_mail_senden(auftrag_id):
         flash(f"E-Mail wurde nicht versendet: {clean_text(str(exc))[:300]}", "danger")
         return redirect(url_for("admin_versicherung_schaden_detail", auftrag_id=auftrag_id) + "#nachrichten-versicherung")
 
+    sent_at = now_str()
+    db = get_db()
+    db.execute(
+        """
+        UPDATE auftraege
+        SET versicherung_email=?,
+            versicherung_email_cc=?,
+            versicherung_sendefreigabe_am=COALESCE(NULLIF(versicherung_sendefreigabe_am, ''), ?),
+            versicherung_portal_freigabe_id=?,
+            geaendert_am=?
+        WHERE id=?
+        """,
+        (
+            empfaenger,
+            cc,
+            sent_at,
+            int(auftrag.get("versicherung_id") or 0),
+            sent_at,
+            auftrag_id,
+        ),
+    )
+    db.commit()
+    db.close()
     save_versicherung_mail_draft(auftrag_id, empfaenger, cc)
     add_benachrichtigung(
         auftrag_id,
