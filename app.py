@@ -9370,7 +9370,7 @@ def init_db():
                 FROM chat_nachrichten c
                 WHERE c.auftrag_id=auftraege.id
                   AND c.absender='werkstatt'
-                  AND c.nachricht LIKE 'E-Mail an Versicherung gesendet:%'
+                  AND c.nachricht LIKE 'E-Mail an Versicherung gesendet:%%'
               )
             )
         WHERE COALESCE(versicherung_id, 0)>0
@@ -9380,7 +9380,7 @@ def init_db():
             FROM chat_nachrichten c
             WHERE c.auftrag_id=auftraege.id
               AND c.absender='werkstatt'
-              AND c.nachricht LIKE 'E-Mail an Versicherung gesendet:%'
+              AND c.nachricht LIKE 'E-Mail an Versicherung gesendet:%%'
           )
         """
     )
