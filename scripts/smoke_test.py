@@ -964,7 +964,7 @@ def main():
                             b"Kennzeichen: MOS ST 42\n"
                             b"Auftrag: SMOKE-PORTAL-42\n"
                         ),
-                        "smoke-kunden-upload.txt",
+                        "Lackierauftrag-Kaesmann 42.txt",
                     ),
                 },
             ),
@@ -1008,7 +1008,7 @@ def main():
                     "transport_art": "standard",
                     "analyse_abgeschlossen": "1",
                     "analyse_datei_erforderlich": "1",
-                    "analyse_dateisignatur": "smoke-kunden-upload.txt",
+                    "analyse_dateisignatur": "Lackierauftrag-Kaesmann 42.txt",
                     "analyse_token": analysis_payload.get("analysis_token") or "",
                     "analyse_hinweis": analysis_payload.get("review_hint") or "Automatisch ergänzt; bitte prüfen.",
                     "analyse_confidence": analysis_payload.get("confidence") or "",
@@ -1019,7 +1019,7 @@ def main():
                             b"Kennzeichen: MOS ST 42\n"
                             b"Auftrag: SMOKE-PORTAL-42\n"
                         ),
-                        "smoke-kunden-upload.txt",
+                        "Lackierauftrag-Kaesmann 42.txt",
                     ),
                 },
             ),
@@ -1048,7 +1048,7 @@ def main():
                 upload_saved = bool(
                     len(dateien) == 1
                     and dateien[0]["quelle"] == "autohaus"
-                    and dateien[0]["original_name"] == "smoke-kunden-upload.txt"
+                    and dateien[0]["original_name"] == "Lackierauftrag-Kaesmann_42.txt"
                     and upload_created.get("fahrzeug")
                     and upload_created.get("analyse_pruefen")
                 )
@@ -1128,7 +1128,7 @@ def main():
                 ok &= check("Admin sieht Kundenauftrag", admin_detail, {200})
                 admin_html = admin_detail.get_data(as_text=True)
                 admin_shows_file = (
-                    "smoke-kunden-upload.txt" in admin_html
+                    "Lackierauftrag-Kaesmann_42.txt" in admin_html
                     and "Autohaus/Kundenportal" in admin_html
                 )
                 print(

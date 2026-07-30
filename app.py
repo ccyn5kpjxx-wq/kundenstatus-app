@@ -45538,9 +45538,11 @@ def neuer_auftrag():
                 transport_arten=TRANSPORT_ARTEN,
                 form=form,
             )
-        expected_file_signature = clean_text(form.get("analyse_dateisignatur"))
-        current_file_signature = "|".join(
-            secure_filename(file.filename or "") for file in gewaehlte_dateien
+        expected_file_signature = partner_new_file_signature(
+            clean_text(form.get("analyse_dateisignatur")).split("|")
+        )
+        current_file_signature = partner_new_file_signature(
+            file.filename for file in gewaehlte_dateien
         )
         if (
             gewaehlte_dateien
@@ -50341,6 +50343,11 @@ def partner_new_file_hash(file):
     return digest.hexdigest()
 
 
+def partner_new_file_signature(file_names):
+    """Normalisiert Browser- und Server-Dateinamen fuer denselben Vergleich."""
+    return "|".join(secure_filename(str(name or "")) for name in file_names or [])
+
+
 def create_partner_new_analysis_token(autohaus_id, file_hashes):
     hashes = [clean_text(value) for value in file_hashes if clean_text(value)]
     if not hashes:
@@ -50509,7 +50516,9 @@ def partner_new_analysis_form_values(form, result):
             filled += 1
     prepared["analyse_abgeschlossen"] = "1"
     prepared["analyse_datei_erforderlich"] = "1"
-    prepared["analyse_dateisignatur"] = "|".join(result.get("file_names") or [])
+    prepared["analyse_dateisignatur"] = partner_new_file_signature(
+        result.get("file_names") or []
+    )
     prepared["analyse_token"] = clean_text(result.get("analysis_token"))
     prepared["analyse_hinweis"] = clean_text(result.get("review_hint"))
     prepared["analyse_confidence"] = clean_text(result.get("confidence"))
@@ -50632,9 +50641,11 @@ def partner_neuer_auftrag(slug):
                 "warning",
             )
             return render_partner_new_form(autohaus, form=form)
-        expected_file_signature = clean_text(form.get("analyse_dateisignatur"))
-        current_file_signature = "|".join(
-            secure_filename(file.filename or "") for file in gewaehlte_dateien
+        expected_file_signature = partner_new_file_signature(
+            clean_text(form.get("analyse_dateisignatur")).split("|")
+        )
+        current_file_signature = partner_new_file_signature(
+            file.filename for file in gewaehlte_dateien
         )
         if (
             gewaehlte_dateien
