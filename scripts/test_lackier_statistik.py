@@ -52,16 +52,13 @@ def main():
         "Juni 2026",
         "Mai 2026",
     ]
-    assert [monat["label"] for monat in statistik["historie"]] == [
-        "April 2026",
-        "März 2026",
-        "Februar 2026",
-        "Januar 2026",
-    ]
-    assert [monat["count"] for monat in statistik["historie"]] == [1, 0, 0, 1]
-    januar = statistik["historie"][-1]
-    assert januar["items"][0]["fahrzeug"] == "VW Golf", januar
-    assert januar["items"][0]["kennzeichen"] == "MOS-L 26", januar
+    assert statistik["alle_monate"] == statistik["monate"]
+    assert "historie" not in statistik
+    assert all(
+        item["id"] != 8
+        for monat in statistik["monate"]
+        for item in monat["items"]
+    )
     json.dumps(statistik, ensure_ascii=False)
     assert any(rule.endpoint == "admin_lackier_statistik" for rule in portal.app.url_map.iter_rules())
 
@@ -75,7 +72,7 @@ def main():
         "Dezember 2025",
         "November 2025",
     ]
-    print("[OK] Lackierstatistik zählt Fertigstellungen monatsweise und ohne Angebotsentwürfe.")
+    print("[OK] Lackierstatistik zeigt ausschließlich die letzten drei Monate.")
 
 
 if __name__ == "__main__":

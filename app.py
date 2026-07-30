@@ -35321,20 +35321,8 @@ def build_lackier_statistik(auftraege, reference_date=None, fertigmeldungen=None
         )
 
     reference_index = reference_monat.year * 12 + reference_monat.month - 1
-    vergangene_daten = [
-        fertig_datum
-        for fertig_datum, _, _ in fertiggestellte
-        if fertig_datum <= reference
-    ]
-    if vergangene_daten:
-        aeltestes_datum = min(vergangene_daten)
-        aeltester_index = aeltestes_datum.year * 12 + aeltestes_datum.month - 1
-        aeltester_index = max(aeltester_index, reference_index - 119)
-    else:
-        aeltester_index = reference_index - 2
-
     monate = []
-    for month_index in range(reference_index, min(aeltester_index, reference_index - 2) - 1, -1):
+    for month_index in range(reference_index, reference_index - 3, -1):
         month_start = date(month_index // 12, month_index % 12 + 1, 1)
         monate.append(
             {
@@ -35359,15 +35347,12 @@ def build_lackier_statistik(auftraege, reference_date=None, fertigmeldungen=None
             monat["count"] += 1
             monat["items"].append(item)
 
-    letzte_drei = monate[:3]
-    historie = monate[3:]
-    gesamt = sum(monat["count"] for monat in letzte_drei)
+    gesamt = sum(monat["count"] for monat in monate)
     return {
-        "monate": letzte_drei,
-        "historie": historie,
+        "monate": monate,
         "alle_monate": monate,
         "gesamt": gesamt,
-        "zeitraum_label": f"{letzte_drei[-1]['label']} bis {letzte_drei[0]['label']}",
+        "zeitraum_label": f"{monate[-1]['label']} bis {monate[0]['label']}",
         "aktualisierung_sekunden": 60,
     }
 

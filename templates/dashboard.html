@@ -18,15 +18,6 @@
   .source-mix-privat { border-left-color:#6c757d; }
   .source-mix-item span { display:block; color:#6f6253; font-size:.78rem; font-weight:800; text-transform:uppercase; }
   .source-mix-item strong { font-size:1.45rem; line-height:1.1; }
-  .month-history { margin-bottom:1.35rem; padding:1rem; border:1px solid #e4d6c3; border-radius:16px; background:#fbf6ee; }
-  .month-history[hidden] { display:none; }
-  .month-history-head { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-bottom:.7rem; }
-  .month-history-buttons { display:flex; flex-wrap:wrap; gap:.55rem; }
-  .month-button { display:inline-flex; align-items:center; gap:.5rem; min-height:40px; padding:.55rem .8rem; border:1px solid #d9cab4; border-radius:999px; color:#253751; background:#fff; font:inherit; font-size:.84rem; font-weight:750; cursor:pointer; transition:border-color .15s ease,background .15s ease,transform .15s ease; }
-  .month-button:hover { border-color:#9b8263; background:#fffaf2; transform:translateY(-1px); }
-  .month-button.is-selected { color:#fff; border-color:#1f3557; background:#1f3557; }
-  .month-button-count { display:inline-grid; place-items:center; min-width:24px; height:24px; padding:0 .4rem; border-radius:999px; color:#6a5844; background:#f3e7d6; font-size:.76rem; }
-  .month-button.is-selected .month-button-count { color:#1f3557; background:#fff; }
   .paint-heading-row { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
   .paint-live { display:inline-flex; align-items:center; gap:.45rem; padding:.45rem .7rem; border:1px solid #bcd7c5; border-radius:999px; color:#23633d; background:#edf8f0; font-size:.78rem; font-weight:800; }
   .paint-live-dot { width:8px; height:8px; border-radius:50%; background:#2f9d58; box-shadow:0 0 0 4px rgba(47,157,88,.12); }
@@ -35,8 +26,7 @@
   button.paint-stat { cursor:pointer; transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease; }
   button.paint-stat:hover { border-color:#a99172; box-shadow:0 10px 22px rgba(58,43,24,.09); transform:translateY(-2px); }
   button.paint-stat.is-selected { border-color:#1f3557; box-shadow:0 0 0 3px rgba(31,53,87,.13); }
-  button.paint-stat:focus-visible,
-  .month-button:focus-visible { outline:3px solid rgba(181,43,31,.28); outline-offset:2px; }
+  button.paint-stat:focus-visible { outline:3px solid rgba(181,43,31,.28); outline-offset:2px; }
   .paint-stat::after { content:""; position:absolute; right:-25px; bottom:-35px; width:90px; height:90px; border-radius:50%; background:rgba(181,43,31,.08); }
   .paint-stat-total { color:#fff; border-color:#243c62; background:linear-gradient(145deg,#1f3557 0%,#2f527e 100%); }
   .paint-stat-total::after { background:rgba(255,255,255,.09); }
@@ -57,7 +47,7 @@
   @media (max-width: 767.98px) { .source-mix { grid-template-columns:1fr; } }
   @media (max-width: 991.98px) { .paint-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } }
   @media (max-width: 767.98px) { .month-detail-item { grid-template-columns:minmax(0,1fr) auto; } .month-detail-item .month-detail-meta { grid-column:1 / -1; grid-row:2; } }
-  @media (max-width: 575.98px) { .paint-stats { grid-template-columns:1fr; } .paint-stat { min-height:104px; } .month-history { padding:.85rem; } .month-button { flex:1 1 auto; justify-content:space-between; } .month-detail-head { align-items:flex-start; flex-direction:column; } }
+  @media (max-width: 575.98px) { .paint-stats { grid-template-columns:1fr; } .paint-stat { min-height:104px; } .month-detail-head { align-items:flex-start; flex-direction:column; } }
   .analysis-cell {
     max-width: 340px;
     line-height: 1.35;
@@ -337,23 +327,6 @@
   {% if lackier_statistik %}
   {% set aktueller_statistik_monat = lackier_statistik['monate'][0] %}
   <section id="lackier-statistik" data-live-url="{{ url_for('admin_lackier_statistik') }}">
-    <div class="month-history" data-month-history-shell{% if not lackier_statistik['historie'] %} hidden{% endif %}>
-      <div class="month-history-head">
-        <div>
-          <h3 class="h6 mb-1">Frühere Monate</h3>
-          <div class="text-muted small">Monat anklicken und die lackierten Fahrzeuge ansehen.</div>
-        </div>
-      </div>
-      <div class="month-history-buttons" data-month-history>
-        {% for monat in lackier_statistik['historie'] %}
-        <button type="button" class="month-button" data-stat-month="{{ monat['key'] }}" aria-controls="lackier-monatsdetails" aria-pressed="false">
-          <span>{{ monat['label'] }}</span>
-          <span class="month-button-count">{{ monat['count'] }}</span>
-        </button>
-        {% endfor %}
-      </div>
-    </div>
-
     <div class="paint-heading-row">
       <div>
         <h3 class="h5 mb-1">Lackierte Fahrzeuge · letzte 3 Monate</h3>
@@ -563,8 +536,6 @@
   const lackierStatistikRoot = document.getElementById('lackier-statistik');
   if (lackierStatistikRoot) {
     const statistikDataElement = document.getElementById('lackier-statistik-data');
-    const historyShell = lackierStatistikRoot.querySelector('[data-month-history-shell]');
-    const historyButtons = lackierStatistikRoot.querySelector('[data-month-history]');
     const detail = lackierStatistikRoot.querySelector('[data-month-detail]');
     const detailTitle = lackierStatistikRoot.querySelector('[data-detail-title]');
     const detailSubtitle = lackierStatistikRoot.querySelector('[data-detail-subtitle]');
@@ -576,23 +547,6 @@
 
     const monthByKey = (key) => (statistikData.alle_monate || []).find((month) => month.key === key);
     const vehicleWord = (count) => `Fahrzeug${count === 1 ? '' : 'e'}`;
-
-    const createHistoryButton = (month) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'month-button';
-      button.dataset.statMonth = month.key;
-      button.setAttribute('aria-controls', 'lackier-monatsdetails');
-      button.setAttribute('aria-pressed', month.key === selectedMonth ? 'true' : 'false');
-
-      const label = document.createElement('span');
-      label.textContent = month.label;
-      const count = document.createElement('span');
-      count.className = 'month-button-count';
-      count.textContent = String(month.count || 0);
-      button.append(label, count);
-      return button;
-    };
 
     const renderDetail = (month) => {
       if (!month || !detailTitle || !detailCount || !detailList) {
@@ -681,10 +635,6 @@
         totalUnit.textContent = vehicleWord(statistikData.gesamt || 0);
       }
 
-      historyButtons?.replaceChildren(...(statistikData.historie || []).map(createHistoryButton));
-      if (historyShell) {
-        historyShell.hidden = !(statistikData.historie || []).length;
-      }
       if (!monthByKey(selectedMonth)) {
         selectedMonth = statistikData.monate?.[0]?.key || '';
       }
