@@ -42,7 +42,7 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     # Mit nur einem Worker darf kein request-basierter Zwangsneustart aktiv sein.
-    startCommand: gunicorn --workers 1 --threads 4 --timeout 180 app:app
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 180 tomorrowworks_production:application
     healthCheckPath: /healthz
     disk:
       name: kundenstatus-uploads

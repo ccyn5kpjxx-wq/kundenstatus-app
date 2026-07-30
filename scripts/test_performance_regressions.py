@@ -49,6 +49,11 @@ def main():
         "Einzelner Gunicorn-Worker wird nicht request-basiert neu gestartet",
         "--max-requests" not in render_config and "--max-requests" not in procfile,
     )
+    check(
+        "Render-Portal startet die gemeinsame Produktionsanwendung",
+        "startCommand: gunicorn --workers 1 --threads 4 --timeout 180 "
+        "tomorrowworks_production:application" in render_config,
+    )
 
     with portal.app.test_request_context("/session/ping", method="POST"):
         check(
