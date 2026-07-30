@@ -18,7 +18,46 @@
   .source-mix-privat { border-left-color:#6c757d; }
   .source-mix-item span { display:block; color:#6f6253; font-size:.78rem; font-weight:800; text-transform:uppercase; }
   .source-mix-item strong { font-size:1.45rem; line-height:1.1; }
+  .month-history { margin-bottom:1.35rem; padding:1rem; border:1px solid #e4d6c3; border-radius:16px; background:#fbf6ee; }
+  .month-history[hidden] { display:none; }
+  .month-history-head { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-bottom:.7rem; }
+  .month-history-buttons { display:flex; flex-wrap:wrap; gap:.55rem; }
+  .month-button { display:inline-flex; align-items:center; gap:.5rem; min-height:40px; padding:.55rem .8rem; border:1px solid #d9cab4; border-radius:999px; color:#253751; background:#fff; font:inherit; font-size:.84rem; font-weight:750; cursor:pointer; transition:border-color .15s ease,background .15s ease,transform .15s ease; }
+  .month-button:hover { border-color:#9b8263; background:#fffaf2; transform:translateY(-1px); }
+  .month-button.is-selected { color:#fff; border-color:#1f3557; background:#1f3557; }
+  .month-button-count { display:inline-grid; place-items:center; min-width:24px; height:24px; padding:0 .4rem; border-radius:999px; color:#6a5844; background:#f3e7d6; font-size:.76rem; }
+  .month-button.is-selected .month-button-count { color:#1f3557; background:#fff; }
+  .paint-heading-row { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
+  .paint-live { display:inline-flex; align-items:center; gap:.45rem; padding:.45rem .7rem; border:1px solid #bcd7c5; border-radius:999px; color:#23633d; background:#edf8f0; font-size:.78rem; font-weight:800; }
+  .paint-live-dot { width:8px; height:8px; border-radius:50%; background:#2f9d58; box-shadow:0 0 0 4px rgba(47,157,88,.12); }
+  .paint-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.85rem; margin:1rem 0 .7rem; }
+  .paint-stat { position:relative; overflow:hidden; min-height:118px; padding:1rem 1.1rem; border:1px solid #e4d6c3; border-radius:16px; color:#17283f; background:linear-gradient(145deg,#fffdf9 0%,#f7f0e6 100%); font:inherit; text-align:left; }
+  button.paint-stat { cursor:pointer; transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease; }
+  button.paint-stat:hover { border-color:#a99172; box-shadow:0 10px 22px rgba(58,43,24,.09); transform:translateY(-2px); }
+  button.paint-stat.is-selected { border-color:#1f3557; box-shadow:0 0 0 3px rgba(31,53,87,.13); }
+  button.paint-stat:focus-visible,
+  .month-button:focus-visible { outline:3px solid rgba(181,43,31,.28); outline-offset:2px; }
+  .paint-stat::after { content:""; position:absolute; right:-25px; bottom:-35px; width:90px; height:90px; border-radius:50%; background:rgba(181,43,31,.08); }
+  .paint-stat-total { color:#fff; border-color:#243c62; background:linear-gradient(145deg,#1f3557 0%,#2f527e 100%); }
+  .paint-stat-total::after { background:rgba(255,255,255,.09); }
+  .paint-stat-label { display:block; margin-bottom:.45rem; color:#6f6253; font-size:.78rem; font-weight:800; letter-spacing:.045em; text-transform:uppercase; }
+  .paint-stat-total .paint-stat-label,
+  .paint-stat-total .paint-stat-unit { color:rgba(255,255,255,.78); }
+  .paint-stat-value { position:relative; z-index:1; display:block; font-size:2.35rem; font-weight:800; line-height:1; }
+  .paint-stat-unit { position:relative; z-index:1; display:block; margin-top:.35rem; color:#6f6253; font-size:.86rem; }
+  .month-detail { margin:1rem 0 1.35rem; border:1px solid #ded1bf; border-radius:16px; background:#fff; overflow:hidden; }
+  .month-detail-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1rem 1.1rem; border-bottom:1px solid #eadfce; background:#fffaf2; }
+  .month-detail-count { white-space:nowrap; }
+  .month-detail-list { display:grid; max-height:430px; overflow:auto; }
+  .month-detail-item { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(140px,.8fr) auto; align-items:center; gap:1rem; padding:.9rem 1.1rem; border-bottom:1px solid #eee5d8; }
+  .month-detail-item:last-child { border-bottom:0; }
+  .month-detail-vehicle { color:#17283f; font-weight:800; }
+  .month-detail-meta { color:#6f6253; font-size:.82rem; }
+  .month-detail-empty { padding:1.25rem 1.1rem; color:#6f6253; }
   @media (max-width: 767.98px) { .source-mix { grid-template-columns:1fr; } }
+  @media (max-width: 991.98px) { .paint-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  @media (max-width: 767.98px) { .month-detail-item { grid-template-columns:minmax(0,1fr) auto; } .month-detail-item .month-detail-meta { grid-column:1 / -1; grid-row:2; } }
+  @media (max-width: 575.98px) { .paint-stats { grid-template-columns:1fr; } .paint-stat { min-height:104px; } .month-history { padding:.85rem; } .month-button { flex:1 1 auto; justify-content:space-between; } .month-detail-head { align-items:flex-start; flex-direction:column; } }
   .analysis-cell {
     max-width: 340px;
     line-height: 1.35;
@@ -295,6 +334,79 @@
       <p>Hier liegen abgeschlossene oder ausgeblendete Aufträge.</p>
     </div>
   </div>
+  {% if lackier_statistik %}
+  {% set aktueller_statistik_monat = lackier_statistik['monate'][0] %}
+  <section id="lackier-statistik" data-live-url="{{ url_for('admin_lackier_statistik') }}">
+    <div class="month-history" data-month-history-shell{% if not lackier_statistik['historie'] %} hidden{% endif %}>
+      <div class="month-history-head">
+        <div>
+          <h3 class="h6 mb-1">Frühere Monate</h3>
+          <div class="text-muted small">Monat anklicken und die lackierten Fahrzeuge ansehen.</div>
+        </div>
+      </div>
+      <div class="month-history-buttons" data-month-history>
+        {% for monat in lackier_statistik['historie'] %}
+        <button type="button" class="month-button" data-stat-month="{{ monat['key'] }}" aria-controls="lackier-monatsdetails" aria-pressed="false">
+          <span>{{ monat['label'] }}</span>
+          <span class="month-button-count">{{ monat['count'] }}</span>
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="paint-heading-row">
+      <div>
+        <h3 class="h5 mb-1">Lackierte Fahrzeuge · letzte 3 Monate</h3>
+        <div class="text-muted small">Der laufende Monat wächst live mit; abgeschlossene Monate bleiben unverändert abrufbar.</div>
+      </div>
+      <span class="paint-live" title="Die Stückzahlen werden automatisch aktualisiert.">
+        <span class="paint-live-dot" aria-hidden="true"></span>
+        <span data-stat-live-text>Live · alle 60 Sekunden</span>
+      </span>
+    </div>
+    <div class="paint-stats" aria-label="Stückzahlen lackierter Fahrzeuge in den letzten drei Monaten">
+      {% for monat in lackier_statistik['monate'] %}
+      <button type="button" class="paint-stat{% if loop.first %} is-selected{% endif %}" data-recent-card data-stat-month="{{ monat['key'] }}" aria-controls="lackier-monatsdetails" aria-pressed="{{ 'true' if loop.first else 'false' }}">
+        <span class="paint-stat-label" data-stat-label>{{ monat['label'] }} · {{ 'live' if monat['aktuell'] else 'abgeschlossen' }}</span>
+        <strong class="paint-stat-value" data-stat-count>{{ monat['count'] }}</strong>
+        <span class="paint-stat-unit" data-stat-unit>Fahrzeug{% if monat['count'] != 1 %}e{% endif %} · Details öffnen</span>
+      </button>
+      {% endfor %}
+      <div class="paint-stat paint-stat-total">
+        <span class="paint-stat-label">3-Monats-Summe</span>
+        <strong class="paint-stat-value" data-stat-total>{{ lackier_statistik['gesamt'] }}</strong>
+        <span class="paint-stat-unit" data-stat-total-unit>Fahrzeug{% if lackier_statistik['gesamt'] != 1 %}e{% endif %}</span>
+      </div>
+    </div>
+
+    <div class="month-detail" id="lackier-monatsdetails" data-month-detail aria-live="polite">
+      <div class="month-detail-head">
+        <div>
+          <h4 class="h6 mb-1" data-detail-title>{{ aktueller_statistik_monat['label'] }} · live</h4>
+          <div class="text-muted small" data-detail-subtitle>Fertiggestellte Fahrzeuge mit hinterlegtem Fertig-Datum.</div>
+        </div>
+        <span class="badge text-bg-light border month-detail-count" data-detail-count>{{ aktueller_statistik_monat['count'] }} Fahrzeug{% if aktueller_statistik_monat['count'] != 1 %}e{% endif %}</span>
+      </div>
+      <div class="month-detail-list" data-detail-list>
+        {% for item in aktueller_statistik_monat['items'] %}
+        <div class="month-detail-item">
+          <div>
+            <div class="month-detail-vehicle">{{ item['fahrzeug'] }}</div>
+            <div class="month-detail-meta">{{ item['auftraggeber'] }}{% if item['kennzeichen'] %} · {{ item['kennzeichen'] }}{% endif %}</div>
+          </div>
+          <div class="month-detail-meta">Fertig {{ item['fertig_datum'] }}</div>
+          <a href="{{ url_for('auftrag_detail', auftrag_id=item['id']) }}" class="btn btn-soft btn-sm">Öffnen</a>
+        </div>
+        {% else %}
+        <div class="month-detail-empty">In diesem Monat wurde noch kein Fahrzeug als fertig gezählt.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <p class="text-muted small mb-4">Jeder Auftrag wird einmal gezählt; Angebotsentwürfe und nur ausgeblendete, noch nicht fertiggestellte Aufträge zählen nicht.</p>
+    <script type="application/json" id="lackier-statistik-data">{{ lackier_statistik|tojson }}</script>
+  </section>
+  {% endif %}
   {% if archivierte_auftraege %}
   <form method="POST" action="{{ url_for('admin_sammelaktion') }}" data-bulk-form>
   <div class="bulk-bar">
@@ -444,6 +556,178 @@
         suchForm.dispatchEvent(filterEvent);
       } else {
         document.dispatchEvent(filterEvent);
+      }
+    });
+  }
+
+  const lackierStatistikRoot = document.getElementById('lackier-statistik');
+  if (lackierStatistikRoot) {
+    const statistikDataElement = document.getElementById('lackier-statistik-data');
+    const historyShell = lackierStatistikRoot.querySelector('[data-month-history-shell]');
+    const historyButtons = lackierStatistikRoot.querySelector('[data-month-history]');
+    const detail = lackierStatistikRoot.querySelector('[data-month-detail]');
+    const detailTitle = lackierStatistikRoot.querySelector('[data-detail-title]');
+    const detailSubtitle = lackierStatistikRoot.querySelector('[data-detail-subtitle]');
+    const detailCount = lackierStatistikRoot.querySelector('[data-detail-count]');
+    const detailList = lackierStatistikRoot.querySelector('[data-detail-list]');
+    const liveText = lackierStatistikRoot.querySelector('[data-stat-live-text]');
+    let statistikData = JSON.parse(statistikDataElement?.textContent || '{}');
+    let selectedMonth = statistikData.monate?.[0]?.key || '';
+
+    const monthByKey = (key) => (statistikData.alle_monate || []).find((month) => month.key === key);
+    const vehicleWord = (count) => `Fahrzeug${count === 1 ? '' : 'e'}`;
+
+    const createHistoryButton = (month) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'month-button';
+      button.dataset.statMonth = month.key;
+      button.setAttribute('aria-controls', 'lackier-monatsdetails');
+      button.setAttribute('aria-pressed', month.key === selectedMonth ? 'true' : 'false');
+
+      const label = document.createElement('span');
+      label.textContent = month.label;
+      const count = document.createElement('span');
+      count.className = 'month-button-count';
+      count.textContent = String(month.count || 0);
+      button.append(label, count);
+      return button;
+    };
+
+    const renderDetail = (month) => {
+      if (!month || !detailTitle || !detailCount || !detailList) {
+        return;
+      }
+      detailTitle.textContent = `${month.label} · ${month.aktuell ? 'live' : 'abgeschlossen'}`;
+      detailSubtitle.textContent = month.aktuell
+        ? 'Der laufende Monat wird automatisch aktualisiert.'
+        : 'Dieser abgeschlossene Monatsstand bleibt jederzeit abrufbar.';
+      detailCount.textContent = `${month.count || 0} ${vehicleWord(month.count || 0)}`;
+      detailList.replaceChildren();
+
+      if (!month.items?.length) {
+        const empty = document.createElement('div');
+        empty.className = 'month-detail-empty';
+        empty.textContent = 'In diesem Monat wurde kein Fahrzeug als fertig gezählt.';
+        detailList.append(empty);
+        return;
+      }
+
+      month.items.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = 'month-detail-item';
+
+        const vehicleBox = document.createElement('div');
+        const vehicle = document.createElement('div');
+        vehicle.className = 'month-detail-vehicle';
+        vehicle.textContent = item.fahrzeug || 'Fahrzeug';
+        const meta = document.createElement('div');
+        meta.className = 'month-detail-meta';
+        meta.textContent = [item.auftraggeber, item.kennzeichen].filter(Boolean).join(' · ');
+        vehicleBox.append(vehicle, meta);
+
+        const dateText = document.createElement('div');
+        dateText.className = 'month-detail-meta';
+        dateText.textContent = `Fertig ${item.fertig_datum || 'ohne Datum'}`;
+
+        const link = document.createElement('a');
+        link.className = 'btn btn-soft btn-sm';
+        link.href = `/admin/auftrag/${encodeURIComponent(item.id)}`;
+        link.textContent = 'Öffnen';
+        row.append(vehicleBox, dateText, link);
+        detailList.append(row);
+      });
+    };
+
+    const selectMonth = (key, scrollToDetail = false) => {
+      const month = monthByKey(key);
+      if (!month) {
+        return;
+      }
+      selectedMonth = month.key;
+      lackierStatistikRoot.querySelectorAll('[data-stat-month]').forEach((button) => {
+        const selected = button.dataset.statMonth === selectedMonth;
+        button.classList.toggle('is-selected', selected);
+        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      });
+      renderDetail(month);
+      if (scrollToDetail) {
+        detail?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    };
+
+    const renderStatistik = (data) => {
+      statistikData = data;
+      const recentCards = Array.from(lackierStatistikRoot.querySelectorAll('[data-recent-card]'));
+      recentCards.forEach((card, index) => {
+        const month = statistikData.monate?.[index];
+        if (!month) {
+          card.hidden = true;
+          return;
+        }
+        card.hidden = false;
+        card.dataset.statMonth = month.key;
+        card.querySelector('[data-stat-label]').textContent = `${month.label} · ${month.aktuell ? 'live' : 'abgeschlossen'}`;
+        card.querySelector('[data-stat-count]').textContent = String(month.count || 0);
+        card.querySelector('[data-stat-unit]').textContent = `${vehicleWord(month.count || 0)} · Details öffnen`;
+      });
+
+      const total = lackierStatistikRoot.querySelector('[data-stat-total]');
+      const totalUnit = lackierStatistikRoot.querySelector('[data-stat-total-unit]');
+      if (total) {
+        total.textContent = String(statistikData.gesamt || 0);
+      }
+      if (totalUnit) {
+        totalUnit.textContent = vehicleWord(statistikData.gesamt || 0);
+      }
+
+      historyButtons?.replaceChildren(...(statistikData.historie || []).map(createHistoryButton));
+      if (historyShell) {
+        historyShell.hidden = !(statistikData.historie || []).length;
+      }
+      if (!monthByKey(selectedMonth)) {
+        selectedMonth = statistikData.monate?.[0]?.key || '';
+      }
+      selectMonth(selectedMonth);
+    };
+
+    lackierStatistikRoot.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-stat-month]');
+      if (!button || !lackierStatistikRoot.contains(button)) {
+        return;
+      }
+      selectMonth(button.dataset.statMonth, true);
+    });
+
+    const refreshStatistik = async () => {
+      try {
+        const response = await fetch(lackierStatistikRoot.dataset.liveUrl, {
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        });
+        if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) {
+          throw new Error('Statistik nicht verfügbar');
+        }
+        renderStatistik(await response.json());
+        if (liveText) {
+          const time = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' }).format(new Date());
+          liveText.textContent = `Live · aktualisiert ${time}`;
+        }
+      } catch (error) {
+        if (liveText) {
+          liveText.textContent = 'Live · nächster Versuch automatisch';
+        }
+      }
+    };
+
+    renderStatistik(statistikData);
+    refreshStatistik();
+    const refreshSeconds = Math.max(30, Number(statistikData.aktualisierung_sekunden || 60));
+    window.setInterval(refreshStatistik, refreshSeconds * 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        refreshStatistik();
       }
     });
   }

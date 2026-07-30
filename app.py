@@ -35248,6 +35248,130 @@ def dashboard_daten(auftraege):
     }
 
 
+def list_erste_fertigmeldungen(auftrag_ids):
+    ids = sorted({int(auftrag_id) for auftrag_id in auftrag_ids if auftrag_id})
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    db = get_db()
+    rows = db.execute(
+        f"""
+        SELECT log.auftrag_id, log.zeitstempel
+        FROM status_log log
+        JOIN (
+            SELECT auftrag_id, MIN(id) AS erste_log_id
+            FROM status_log
+            WHERE status=4 AND auftrag_id IN ({placeholders})
+            GROUP BY auftrag_id
+        ) erste ON erste.erste_log_id=log.id
+        """,
+        ids,
+    ).fetchall()
+    db.close()
+    return {
+        int(row["auftrag_id"]): parse_date(clean_text(row["zeitstempel"])[:10])
+        for row in rows
+    }
+
+
+def build_lackier_statistik(auftraege, reference_date=None, fertigmeldungen=None):
+    reference = reference_date or date.today()
+    reference_monat = date(reference.year, reference.month, 1)
+    echte_auftraege = [
+        auftrag
+        for auftrag in (auftraege or [])
+        if auftrag and not auftrag.get("angebotsphase") and auftrag.get("id")
+    ]
+    if fertigmeldungen is None:
+        fertigmeldungen = list_erste_fertigmeldungen(
+            [auftrag["id"] for auftrag in echte_auftraege]
+        )
+
+    fertiggestellte = []
+    for auftrag in echte_auftraege:
+        auftrag_id = int(auftrag["id"])
+        status = int(auftrag.get("status") or 1)
+        wurde_fertig_gemeldet = auftrag_id in fertigmeldungen
+        if status < 4 and not wurde_fertig_gemeldet:
+            continue
+        fertig_datum = (
+            auftrag.get("fertig_datum_obj")
+            or parse_date(auftrag.get("fertig_datum"))
+            or fertigmeldungen.get(auftrag_id)
+        )
+        if not fertig_datum:
+            continue
+        fertiggestellte.append(
+            (
+                fertig_datum,
+                auftrag_id,
+                {
+                    "id": auftrag_id,
+                    "fahrzeug": clean_text(auftrag.get("fahrzeug")) or "Fahrzeug",
+                    "kennzeichen": clean_text(auftrag.get("kennzeichen")),
+                    "auftraggeber": (
+                        clean_text(auftrag.get("autohaus_name"))
+                        or clean_text(auftrag.get("versicherung_name"))
+                        or clean_text((auftrag.get("quelle_meta") or {}).get("label"))
+                        or "Direktkunde"
+                    ),
+                    "fertig_datum": fertig_datum.strftime(DATE_FMT),
+                },
+            )
+        )
+
+    reference_index = reference_monat.year * 12 + reference_monat.month - 1
+    vergangene_daten = [
+        fertig_datum
+        for fertig_datum, _, _ in fertiggestellte
+        if fertig_datum <= reference
+    ]
+    if vergangene_daten:
+        aeltestes_datum = min(vergangene_daten)
+        aeltester_index = aeltestes_datum.year * 12 + aeltestes_datum.month - 1
+        aeltester_index = max(aeltester_index, reference_index - 119)
+    else:
+        aeltester_index = reference_index - 2
+
+    monate = []
+    for month_index in range(reference_index, min(aeltester_index, reference_index - 2) - 1, -1):
+        month_start = date(month_index // 12, month_index % 12 + 1, 1)
+        monate.append(
+            {
+                "key": month_start.strftime("%Y-%m"),
+                "label": f"{MONATSNAMEN[month_start.month]} {month_start.year}",
+                "kurz_label": MONATSNAMEN[month_start.month],
+                "count": 0,
+                "aktuell": month_index == reference_index,
+                "abgeschlossen": month_index < reference_index,
+                "items": [],
+            }
+        )
+
+    monatswerte = {monat["key"]: monat for monat in monate}
+    for fertig_datum, _, item in sorted(
+        fertiggestellte,
+        key=lambda eintrag: (eintrag[0], eintrag[1]),
+        reverse=True,
+    ):
+        monat = monatswerte.get(fertig_datum.strftime("%Y-%m"))
+        if monat:
+            monat["count"] += 1
+            monat["items"].append(item)
+
+    letzte_drei = monate[:3]
+    historie = monate[3:]
+    gesamt = sum(monat["count"] for monat in letzte_drei)
+    return {
+        "monate": letzte_drei,
+        "historie": historie,
+        "alle_monate": monate,
+        "gesamt": gesamt,
+        "zeitraum_label": f"{letzte_drei[-1]['label']} bis {letzte_drei[0]['label']}",
+        "aktualisierung_sekunden": 60,
+    }
+
+
 def build_werkstatt_auftragsuebersicht(auftraege):
     autohaus_counts = {}
     planungsgruppen_defs = [
@@ -36862,14 +36986,23 @@ def dashboard():
     archivierte_auftraege = [a for a in alle_auftraege if a["archiviert"]]
     angebotsanfragen = list_angebotsanfragen()
     cockpit_data = dashboard_daten(auftraege)
+    lackier_statistik = build_lackier_statistik(alle_auftraege)
     return render_template(
         "dashboard.html",
         auftraege=auftraege,
         archivierte_auftraege=archivierte_auftraege,
         angebotsanfragen=angebotsanfragen,
         cockpit=cockpit_data,
+        lackier_statistik=lackier_statistik,
         zurueck_archivierbar_count=sum(1 for a in auftraege if a.get("archivierbar_zurueckgegeben")),
     )
+
+
+@app.route("/admin/lackier-statistik")
+@admin_required
+def admin_lackier_statistik():
+    alle_auftraege = list_auftraege(include_archived=True)
+    return jsonify(build_lackier_statistik(alle_auftraege))
 
 
 @app.route("/admin/start")
