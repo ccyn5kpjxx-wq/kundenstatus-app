@@ -2907,6 +2907,14 @@ def is_public_site_request():
     return bool(request_hostname and request_hostname in PUBLIC_HOSTS)
 
 
+def public_site_is_indexable_request():
+    """Allow indexing only on an explicitly configured public hostname."""
+    if not has_request_context() or not PUBLIC_SITE_INDEXABLE or not PUBLIC_BASE_URL:
+        return False
+    request_hostname = clean_text(request.host).split(":", 1)[0].lower()
+    return bool(request_hostname and request_hostname in PUBLIC_HOSTS)
+
+
 @app.before_request
 def restrict_public_site_service():
     if not is_public_site_request():
@@ -36941,7 +36949,11 @@ def admin_zugaenge():
 
 @app.route("/impressum")
 def impressum_seite():
-    return render_template("impressum.html")
+    return render_template(
+        "impressum.html",
+        site_indexable=public_site_is_indexable_request(),
+        canonical_url=f"{PUBLIC_BASE_URL}/impressum" if PUBLIC_BASE_URL else "",
+    )
 
 
 @app.route("/datenschutz")
@@ -36949,6 +36961,8 @@ def datenschutz_seite():
     return render_template(
         "datenschutz.html",
         rechtlich_freigegeben=DATENSCHUTZ_RECHTLICH_FREIGEGEBEN,
+        site_indexable=public_site_is_indexable_request(),
+        canonical_url=f"{PUBLIC_BASE_URL}/datenschutz" if PUBLIC_BASE_URL else "",
     )
 
 
@@ -42479,16 +42493,23 @@ def healthz():
 
 @app.route("/robots.txt")
 def public_robots():
-    if not PUBLIC_SITE_INDEXABLE or not PUBLIC_BASE_URL:
+    if not public_site_is_indexable_request():
         body = "User-agent: *\nDisallow: /\n"
     else:
-        body = f"User-agent: *\nAllow: /\nDisallow: /admin\nSitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
+        body = (
+            "User-agent: *\n"
+            "Allow: /\n"
+            "Disallow: /admin\n"
+            "Disallow: /partner\n"
+            "Disallow: /versicherung\n"
+            f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
+        )
     return body, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/sitemap.xml")
 def public_sitemap():
-    if not PUBLIC_SITE_INDEXABLE or not PUBLIC_BASE_URL:
+    if not public_site_is_indexable_request():
         abort(404)
     urls = ("", "/leistungen", "/team", "/portale", "/impressum", "/datenschutz")
     entries = "".join(f"<url><loc>{escape(PUBLIC_BASE_URL + path)}</loc></url>" for path in urls)
@@ -42518,7 +42539,7 @@ def oeffentliche_homepage():
             "homepage.html",
             google_reviews=get_google_reviews(),
             portal_links=homepage_portal_links(),
-            site_indexable=PUBLIC_SITE_INDEXABLE,
+            site_indexable=public_site_is_indexable_request(),
             canonical_url=f"{PUBLIC_BASE_URL}/" if PUBLIC_BASE_URL else "",
         ),
         200,
@@ -42535,7 +42556,7 @@ def oeffentliche_leistungen():
     return render_template(
         "homepage_leistungen.html",
         portal_links=homepage_portal_links(),
-        site_indexable=PUBLIC_SITE_INDEXABLE,
+        site_indexable=public_site_is_indexable_request(),
         canonical_url=f"{PUBLIC_BASE_URL}/leistungen" if PUBLIC_BASE_URL else "",
     )
 
@@ -42545,7 +42566,7 @@ def oeffentliche_portale():
     return render_template(
         "homepage_portale.html",
         portal_links=homepage_portal_links(),
-        site_indexable=PUBLIC_SITE_INDEXABLE,
+        site_indexable=public_site_is_indexable_request(),
         canonical_url=f"{PUBLIC_BASE_URL}/portale" if PUBLIC_BASE_URL else "",
     )
 
@@ -42555,7 +42576,7 @@ def oeffentliches_team():
     return render_template(
         "homepage_team.html",
         portal_links=homepage_portal_links(),
-        site_indexable=PUBLIC_SITE_INDEXABLE,
+        site_indexable=public_site_is_indexable_request(),
         canonical_url=f"{PUBLIC_BASE_URL}/team" if PUBLIC_BASE_URL else "",
     )
 

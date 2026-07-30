@@ -9,9 +9,13 @@ services:
       - key: PUBLIC_SITE_ONLY
         value: true
       - key: PUBLIC_SITE_INDEXABLE
-        value: false
+        value: true
       - key: PUBLIC_BASE_URL
         sync: false
+      - key: PUBLIC_HOSTS
+        value: auto-lackierzentrum.de,www.auto-lackierzentrum.de
+      - key: DATENSCHUTZ_RECHTLICH_FREIGEGEBEN
+        value: true
       - key: PORTAL_BASE_URL
         sync: false
       - key: ANALYTICS_INGEST_URL
@@ -45,9 +49,13 @@ services:
       - key: PUBLIC_SITE_ONLY
         value: false
       - key: PUBLIC_SITE_INDEXABLE
-        value: false
+        value: true
       - key: PUBLIC_BASE_URL
         sync: false
+      - key: PUBLIC_HOSTS
+        value: auto-lackierzentrum.de,www.auto-lackierzentrum.de
+      - key: DATENSCHUTZ_RECHTLICH_FREIGEGEBEN
+        value: true
       - key: ADMIN_PASS
         sync: false
       - key: FLASK_SECRET_KEY

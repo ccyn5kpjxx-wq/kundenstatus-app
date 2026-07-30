@@ -189,6 +189,7 @@ def main():
     original_portal_base = portal.PORTAL_BASE_URL
     original_public_base = portal.PUBLIC_BASE_URL
     original_public_hosts = portal.PUBLIC_HOSTS.copy()
+    original_datenschutz_freigabe = portal.DATENSCHUTZ_RECHTLICH_FREIGEGEBEN
     try:
         portal.PUBLIC_SITE_ONLY = True
         portal.PUBLIC_SITE_INDEXABLE = False
@@ -206,24 +207,54 @@ def main():
             "Vorschau blockiert Suchmaschinen": "Disallow: /" in public_client.get("/robots.txt").get_data(as_text=True),
         }
         portal.PUBLIC_SITE_INDEXABLE = True
+        live_home = public_client.get("/", base_url="https://www.example.test")
+        live_html = live_home.get_data(as_text=True)
         public_checks["Live-Sitemap vorbereitet"] = (
-            public_client.get("/sitemap.xml").status_code == 200
-            and "https://www.example.test/team" in public_client.get("/sitemap.xml").get_data(as_text=True)
+            public_client.get("/sitemap.xml", base_url="https://www.example.test").status_code == 200
+            and "https://www.example.test/team" in public_client.get(
+                "/sitemap.xml", base_url="https://www.example.test"
+            ).get_data(as_text=True)
+        )
+        public_checks["Oeffentliche Domain indexierbar"] = (
+            live_home.status_code == 200
+            and 'name="robots" content="index, follow"' in live_html
+            and "Disallow: /partner" in public_client.get(
+                "/robots.txt", base_url="https://www.example.test"
+            ).get_data(as_text=True)
         )
         portal.PUBLIC_SITE_ONLY = False
         shared_client = portal.app.test_client()
         public_host_root = shared_client.get("/", base_url="https://www.example.test")
         portal_host_root = shared_client.get("/", base_url="https://portal.example.test")
         public_host_admin = shared_client.get("/admin", base_url="https://www.example.test")
+        portal_host_homepage = shared_client.get("/homepage", base_url="https://portal.example.test")
+        portal_host_robots = shared_client.get("/robots.txt", base_url="https://portal.example.test")
+        portal_host_sitemap = shared_client.get("/sitemap.xml", base_url="https://portal.example.test")
+        portal.DATENSCHUTZ_RECHTLICH_FREIGEGEBEN = True
+        datenschutz = shared_client.get("/datenschutz", base_url="https://www.example.test")
+        datenschutz_html = datenschutz.get_data(as_text=True)
         public_checks["Hauptdomain zeigt Homepage"] = public_host_root.status_code == 200 and "Karosserie, Lack" in public_host_root.get_data(as_text=True)
         public_checks["Portalhost behaelt Portal-Start"] = portal_host_root.status_code == 302 and "/admin" in portal_host_root.headers.get("Location", "")
         public_checks["Hauptdomain sperrt interne Routen"] = public_host_admin.status_code == 404
+        public_checks["Portalhost bleibt von Suchmaschinen gesperrt"] = (
+            'name="robots" content="noindex, nofollow"' in portal_host_homepage.get_data(as_text=True)
+            and "Disallow: /" in portal_host_robots.get_data(as_text=True)
+            and portal_host_sitemap.status_code == 404
+        )
+        public_checks["Datenschutz ohne Entwurfsplatzhalter"] = (
+            datenschutz.status_code == 200
+            and 'name="robots" content="index, follow"' in datenschutz_html
+            and 'rel="canonical" href="https://www.example.test/datenschutz"' in datenschutz_html
+            and "Prüffassung" not in datenschutz_html
+            and "muss vor der rechtlichen Freigabe" not in datenschutz_html
+        )
     finally:
         portal.PUBLIC_SITE_ONLY = original_public_only
         portal.PUBLIC_SITE_INDEXABLE = original_indexable
         portal.PORTAL_BASE_URL = original_portal_base
         portal.PUBLIC_BASE_URL = original_public_base
         portal.PUBLIC_HOSTS = original_public_hosts
+        portal.DATENSCHUTZ_RECHTLICH_FREIGEGEBEN = original_datenschutz_freigabe
     print_checks(public_checks)
 
     all_checks = (checks, form_checks, category_checks, public_checks)

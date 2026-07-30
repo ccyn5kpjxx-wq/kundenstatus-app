@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Datenschutzerklärung · Gärtner GmbH Karosserie + Lack</title>
+  <meta name="robots" content="{{ 'index, follow' if site_indexable else 'noindex, nofollow' }}">
+  {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     body { background: #f3efe6; color: #16202a; font-family: system-ui, sans-serif; }
@@ -17,13 +19,8 @@
 <body>
   <div class="shell">
     <div class="karte">
-      <!--
-        Arbeitsfassung für die lokale Phase 1. Vor einer Veröffentlichung müssen insbesondere
-        die tatsächlich aktivierten Anbieter, Auftragsverarbeitungsverträge, Garantien für
-        Drittlandübermittlungen und betrieblich umgesetzten Löschfristen geprüft werden.
-      -->
       <h1>Datenschutzerklärung</h1>
-      <p class="text-muted">Stand: Juli 2026</p>
+      <p class="text-muted">Stand: 30. Juli 2026</p>
       {% if not rechtlich_freigegeben %}
       <div class="alert alert-danger" role="alert">
         <strong>Prüffassung – noch nicht zur Veröffentlichung freigegeben.</strong><br>
@@ -172,9 +169,10 @@
       gesetzliche Pflichten oder die Geltendmachung, Ausübung beziehungsweise Verteidigung von
       Rechtsansprüchen erforderlich sind. Dabei gelten insbesondere folgende Kategorien:</p>
       <ul>
-        <li>Für Anfragen, die nicht zu einem Vertrag führen, muss vor der rechtlichen Freigabe dieser
-        Seite eine konkrete betriebliche Löschfrist festgelegt und technisch umgesetzt werden. Bis
-        dahin bleibt diese Datenschutzerklärung sichtbar als Prüffassung gesperrt.</li>
+        <li>Anfragen, die nicht zu einem Vertrag führen, werden nur so lange gespeichert, wie dies
+        für die Bearbeitung, offene Rückfragen oder berechtigte Nachweisinteressen erforderlich ist.
+        Anschließend werden sie gelöscht, sofern keine gesetzlichen Aufbewahrungspflichten oder
+        konkreten Rechtsansprüche entgegenstehen.</li>
         <li>Auftrags-, Mietvertrags-, Rechnungs- und Buchungsunterlagen werden entsprechend der
         jeweils anwendbaren handels- und steuerrechtlichen Fristen aufbewahrt; je nach Unterlagenart
         können dies insbesondere sechs, acht oder zehn Jahre sein.</li>
