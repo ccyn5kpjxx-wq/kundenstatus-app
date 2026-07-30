@@ -3,7 +3,9 @@ services:
     name: gaertner-homepage
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --workers 1 --threads 4 --timeout 180 --max-requests 300 --max-requests-jitter 60 app:app
+    # Mit nur einem Worker darf kein request-basierter Zwangsneustart aktiv sein:
+    # waehrend des Recycles war der Dienst sonst kurz ohne erreichbaren Worker.
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 180 app:app
     healthCheckPath: /healthz
     envVars:
       - key: PUBLIC_SITE_ONLY
@@ -39,7 +41,8 @@ services:
     name: kundenstatus-portal
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --workers 1 --threads 4 --timeout 180 --max-requests 300 --max-requests-jitter 60 app:app
+    # Mit nur einem Worker darf kein request-basierter Zwangsneustart aktiv sein.
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 180 app:app
     healthCheckPath: /healthz
     disk:
       name: kundenstatus-uploads

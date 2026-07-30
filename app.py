@@ -8362,6 +8362,7 @@ def schedule_change_backup(reason="change"):
 DATA_CHANGE_ENDPOINT_EXCLUDES = {
     "admin_backup_sofort",
     "admin_backup_download",
+    "session_ping",
     "login",
     "partner_login",
     "partner_login_key",
@@ -22397,6 +22398,16 @@ def list_partner_auftrag_suche(autohaus, query, limit=8):
 
 
 def list_admin_postfach_items(limit=80):
+    cache = None
+    cache_key = int(limit or 80)
+    if has_request_context():
+        cache = getattr(g, "admin_postfach_items_cache", None)
+        if cache is None:
+            cache = {}
+            g.admin_postfach_items_cache = cache
+        if cache_key in cache:
+            return cache[cache_key]
+
     hidden = postfach_hidden_keys("admin", 0)
     items = []
     db = get_db()
@@ -22664,7 +22675,10 @@ def list_admin_postfach_items(limit=80):
             }
         )
 
-    return sort_postfach_items(items, limit)
+    result = sort_postfach_items(items, limit)
+    if cache is not None:
+        cache[cache_key] = result
+    return result
 
 
 def admin_postfach_count():
@@ -35130,7 +35144,9 @@ def dashboard_daten(auftraege):
     heute = date.today()
     offene_verzoegerungen = []
     offene_reklamationen = []
-    postfach_items = list_admin_postfach_items()
+    # Die Navigation fragt denselben 200er-Bestand fuer ihr Badge ab. Der
+    # Request-Cache verhindert, dass die neun Postfach-Abfragen doppelt laufen.
+    postfach_items = list_admin_postfach_items(limit=200)
     offene_chat_nachrichten = [
         item for item in postfach_items if item.get("typ") == "Chat"
     ]
@@ -35806,6 +35822,7 @@ def build_mini_monatskalender(
     route_values=None,
     include_internal_notes=False,
     only_arrival_events=False,
+    miet_fahrzeuge=None,
 ):
     selected_day = parse_date(selected_day_value)
     month_start = parse_mini_calendar_month(month_value)
@@ -35915,11 +35932,12 @@ def build_mini_monatskalender(
     miete_dates = defaultdict(list)
     miete_day_items = defaultdict(list)
     if include_internal_notes:
-        try:
-            miet_fahrzeuge = list_mietfahrzeuge(include_inactive=True)
-        except Exception:
-            miet_fahrzeuge = []
-        for fahrzeug in miet_fahrzeuge:
+        if miet_fahrzeuge is None:
+            try:
+                miet_fahrzeuge = list_mietfahrzeuge(include_inactive=True)
+            except Exception:
+                miet_fahrzeuge = []
+        for fahrzeug in miet_fahrzeuge or []:
             fzg_label = clean_text(fahrzeug.get("kennzeichen")) or "Mietfahrzeug"
             if clean_text(fahrzeug.get("bezeichnung")):
                 fzg_label += f" ({clean_text(fahrzeug.get('bezeichnung'))})"
@@ -36860,16 +36878,19 @@ def dashboard():
 def betriebs_cockpit():
     alle_auftraege = list_auftraege(include_archived=True)
     auftraege = [a for a in alle_auftraege if not a["archiviert"]]
-    autohaeuser = list_autohaeuser()
-    angebotsanfragen = list_angebotsanfragen()
     cockpit_data = dashboard_daten(auftraege)
     current_datetime = datetime.now()
+    try:
+        miet_fahrzeuge = list_mietfahrzeuge(include_inactive=True)
+    except Exception:
+        miet_fahrzeuge = []
     mini_calendar = build_mini_monatskalender(
         auftraege,
         request.args.get("monat"),
         request.args.get("tag"),
         endpoint="betriebs_cockpit",
         include_internal_notes=True,
+        miet_fahrzeuge=miet_fahrzeuge,
     )
     mini_calendar["full_url"] = url_for("kalender")
     neue_emails = list_werkstatt_emails(status="neu", limit=5)
@@ -36881,16 +36902,12 @@ def betriebs_cockpit():
         tages_gruss = "Guten Abend"
     return render_template(
         "cockpit.html",
-        auftraege=auftraege,
-        archivierte_auftraege=[a for a in alle_auftraege if a["archiviert"]],
-        angebotsanfragen=angebotsanfragen,
-        autohaeuser=autohaeuser,
         cockpit=cockpit_data,
         start_inbox=start_inbox_daten(
             cockpit_data["postfach_items"],
             neue_emails,
         ),
-        mietwagen_heute=mietwagen_heute_uebersicht(),
+        mietwagen_heute=mietwagen_heute_uebersicht(miet_fahrzeuge),
         tages_gruss=tages_gruss,
         erinnerungen=list_erinnerungen(limit=8),
         ki_status=get_ai_status(),
@@ -38005,11 +38022,15 @@ def list_mietfahrzeuge(include_inactive=True):
     ]
 
 
-def mietwagen_heute_uebersicht():
+def mietwagen_heute_uebersicht(miet_fahrzeuge=None):
     heute = date.today()
     heute_start = []
     heute_rueckgabe = []
-    for fahrzeug in list_mietfahrzeuge(include_inactive=False):
+    if miet_fahrzeuge is None:
+        miet_fahrzeuge = list_mietfahrzeuge(include_inactive=False)
+    for fahrzeug in miet_fahrzeuge or []:
+        if not bool(fahrzeug.get("aktiv")):
+            continue
         for vorgang in fahrzeug.get("vorgaenge", []):
             if vorgang["abgeschlossen"]:
                 continue
