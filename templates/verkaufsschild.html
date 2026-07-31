@@ -45,6 +45,17 @@
       text-decoration: none;
     }
 
+    .toolbar .download {
+      border-color: var(--brand);
+      background: var(--brand);
+      color: #fff;
+    }
+
+    .toolbar .download:hover,
+    .toolbar .download:focus-visible {
+      background: #0b2f24;
+    }
+
     .sheet {
       width: min(210mm, calc(100vw - 24px));
       min-height: 297mm;
@@ -272,6 +283,7 @@
 </head>
 <body>
   <div class="toolbar">
+    <a class="download" href="{{ pdf_url }}" download>PDF herunterladen</a>
     <button type="button" onclick="window.print()">Drucken</button>
     <a href="{{ detail_url }}">{{ detail_label or 'Zurück zum Fahrzeugverkauf' }}</a>
   </div>

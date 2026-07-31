@@ -46703,6 +46703,307 @@ def admin_fahrzeugverkauf_schild(verkauf_id):
         werkstatt_kontakt=werkstatt_kundenkontakt(verkauf),
         detail_url=url_for("admin_fahrzeugverkauf_detail", verkauf_id=verkauf_id),
         detail_label="Zurück zum Fahrzeugverkauf",
+        pdf_url=url_for("admin_fahrzeugverkauf_schild_pdf", verkauf_id=verkauf_id),
+    )
+
+
+def fahrzeugverkauf_schild_pdf_filename(verkauf):
+    fahrzeug_slug = slugify(clean_text((verkauf or {}).get("fahrzeug"))) or f"Fahrzeug-{int((verkauf or {}).get('id') or 0)}"
+    return f"Verkaufsschild_{fahrzeug_slug[:80]}.pdf"
+
+
+def make_fahrzeugverkauf_schild_pdf(verkauf, verkauf_bild=None, werkstatt_kontakt=None):
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas
+    from reportlab.platypus import Paragraph
+
+    verkauf = dict(verkauf or {})
+    werkstatt_kontakt = dict(werkstatt_kontakt or {})
+    buffer = BytesIO()
+    page_width, page_height = A4
+    pdf = canvas.Canvas(buffer, pagesize=A4, pageCompression=1)
+
+    ink = colors.HexColor("#1F2528")
+    muted = colors.HexColor("#69747B")
+    line = colors.HexColor("#D8DED8")
+    brand = colors.HexColor("#123D30")
+    accent = colors.HexColor("#B32B2B")
+    paper = colors.HexColor("#FBFCF8")
+
+    def pdf_text(value, fallback=""):
+        return clean_text(value).replace("\u2013", "-").replace("\u2014", "-") or fallback
+
+    def paragraph(value, style, width, max_height):
+        raw = pdf_text(value)
+        content = escape(raw).replace("\n", "<br/>")
+        item = Paragraph(content, style)
+        _, height = item.wrap(width, max_height)
+        if height <= max_height:
+            return item, height
+
+        shortened = raw
+        while shortened and height > max_height:
+            shortened = shortened[: max(0, len(shortened) - max(20, len(shortened) // 12))].rstrip(" ,.;:-")
+            item = Paragraph(f"{escape(shortened)} ...", style)
+            _, height = item.wrap(width, max_height)
+        return item, min(height, max_height)
+
+    def draw_cover_image(image_path, x, y, width, height):
+        try:
+            reader = ImageReader(str(image_path))
+            image_width, image_height = reader.getSize()
+            scale = max(width / max(image_width, 1), height / max(image_height, 1))
+            draw_width = image_width * scale
+            draw_height = image_height * scale
+            pdf.saveState()
+            clip = pdf.beginPath()
+            clip.rect(x, y, width, height)
+            pdf.clipPath(clip, stroke=0, fill=0)
+            pdf.drawImage(
+                reader,
+                x + (width - draw_width) / 2,
+                y + (height - draw_height) / 2,
+                width=draw_width,
+                height=draw_height,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+            pdf.restoreState()
+            return True
+        except Exception:
+            return False
+
+    fahrzeug = pdf_text(verkauf.get("fahrzeug"), "Verkaufsfahrzeug")
+    pdf.setTitle(f"Verkaufsschild {fahrzeug}")
+    pdf.setAuthor("Gärtner GmbH Karosserie + Lack")
+    margin = 42
+    content_width = page_width - (2 * margin)
+
+    pdf.setFillColor(brand)
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(margin, page_height - 54, "Gärtner GmbH Karosserie + Lack")
+    pdf.setFillColor(muted)
+    pdf.setFont("Helvetica-Bold", 7.5)
+    pdf.drawString(margin, page_height - 68, "FAHRZEUGVERKAUF IM KUNDENAUFTRAG")
+
+    status_text = pdf_text(verkauf.get("verkauf_preis_basis"), "VB")[:12].upper()
+    status_width = max(36, pdf.stringWidth(status_text, "Helvetica-Bold", 12) + 18)
+    status_x = page_width - margin - status_width
+    pdf.setFillColor(colors.HexColor("#FFF6F6"))
+    pdf.setStrokeColor(accent)
+    pdf.setLineWidth(1.5)
+    pdf.rect(status_x, page_height - 70, status_width, 28, fill=1, stroke=1)
+    pdf.setFillColor(accent)
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawCentredString(status_x + (status_width / 2), page_height - 60, status_text)
+
+    header_line_y = page_height - 85
+    pdf.setStrokeColor(brand)
+    pdf.setLineWidth(2)
+    pdf.line(margin, header_line_y, page_width - margin, header_line_y)
+
+    hero_top = header_line_y - 18
+    hero_height = 270
+    photo_width = 274
+    photo_x = margin
+    photo_y = hero_top - hero_height
+    pdf.setFillColor(colors.HexColor("#EEF1EC"))
+    pdf.setStrokeColor(line)
+    pdf.setLineWidth(0.8)
+    pdf.rect(photo_x, photo_y, photo_width, hero_height, fill=1, stroke=1)
+
+    image_path = None
+    stored_name = pathlib.Path(pdf_text((verkauf_bild or {}).get("stored_name"))).name
+    if stored_name:
+        candidate = UPLOAD_DIR / stored_name
+        if candidate.is_file():
+            image_path = candidate
+    if not image_path or not draw_cover_image(image_path, photo_x, photo_y, photo_width, hero_height):
+        pdf.setFillColor(muted)
+        pdf.setFont("Helvetica-Bold", 15)
+        pdf.drawCentredString(photo_x + (photo_width / 2), photo_y + (hero_height / 2), "Fahrzeugfoto folgt")
+
+    right_x = photo_x + photo_width + 20
+    right_width = page_width - margin - right_x
+    title_style = ParagraphStyle(
+        "verkauf_title",
+        fontName="Helvetica-Bold",
+        fontSize=21,
+        leading=22,
+        textColor=ink,
+        alignment=TA_LEFT,
+    )
+    title, title_height = paragraph(fahrzeug, title_style, right_width, 72)
+    title.drawOn(pdf, right_x, hero_top - title_height)
+
+    price_y = hero_top - max(title_height + 42, 104)
+    pdf.setFillColor(accent)
+    pdf.setFont("Helvetica-Bold", 29)
+    price_label = pdf_text(verkauf.get("verkauf_preis_label"), "Preis auf Anfrage")
+    price_lines = price_label.split()
+    if len(price_lines) > 2:
+        price_lines = [" ".join(price_lines[:-1]), price_lines[-1]]
+    for index, price_line in enumerate(price_lines[:2]):
+        pdf.drawString(right_x, price_y - (index * 31), price_line)
+    note_y = price_y - (len(price_lines[:2]) * 31) - 3
+    pdf.setFillColor(muted)
+    pdf.setFont("Helvetica", 8.5)
+    pdf.drawString(right_x, note_y, "Verhandlungsbasis im Kundenauftrag")
+
+    facts = [
+        ("BAUJAHR / EZ", pdf_text(verkauf.get("verkauf_baujahr"), "auf Anfrage")),
+        ("KILOMETERSTAND", pdf_text(verkauf.get("kilometerstand"), "auf Anfrage")),
+        ("STANDORT", "Mosbach"),
+        ("STATUS", "Verkauft" if pdf_text(verkauf.get("verkauf_status")) == "verkauft" else "Verfügbar"),
+    ]
+    fact_gap = 8
+    fact_width = (right_width - fact_gap) / 2
+    fact_height = 46
+    facts_bottom = photo_y
+    for index, (label, value) in enumerate(facts):
+        column = index % 2
+        row = index // 2
+        x = right_x + (column * (fact_width + fact_gap))
+        y = facts_bottom + ((1 - row) * (fact_height + fact_gap))
+        pdf.setFillColor(colors.white)
+        pdf.setStrokeColor(line)
+        pdf.setLineWidth(0.7)
+        pdf.rect(x, y, fact_width, fact_height, fill=1, stroke=1)
+        pdf.setFillColor(muted)
+        pdf.setFont("Helvetica-Bold", 6.7)
+        pdf.drawString(x + 8, y + fact_height - 14, label)
+        value_style = ParagraphStyle(
+            f"fact_{index}",
+            fontName="Helvetica-Bold",
+            fontSize=10.5,
+            leading=11.5,
+            textColor=ink,
+        )
+        value_paragraph, value_height = paragraph(value, value_style, fact_width - 16, 23)
+        value_paragraph.drawOn(pdf, x + 8, y + 7 + max(0, 15 - value_height))
+
+    section_top = photo_y - 22
+    footer_top = 80
+    section_bottom = footer_top + 12
+    section_height = section_top - section_bottom
+    column_gap = 20
+    column_width = (content_width - column_gap) / 2
+    description_x = margin + column_width + column_gap
+
+    def draw_section_heading(text, x, y, width):
+        pdf.setFillColor(brand)
+        pdf.setFont("Helvetica-Bold", 13)
+        pdf.drawString(x, y, text)
+        pdf.setStrokeColor(brand)
+        pdf.setLineWidth(1.2)
+        pdf.line(x, y - 7, x + width, y - 7)
+
+    draw_section_heading("Ausstattung", margin, section_top, column_width)
+    draw_section_heading("Beschreibung", description_x, section_top, column_width)
+
+    features = list(verkauf.get("verkauf_ausstattung_liste") or [])[:12]
+    feature_y = section_top - 25
+    feature_style = ParagraphStyle(
+        "feature",
+        fontName="Helvetica-Bold",
+        fontSize=8.2,
+        leading=9.2,
+        textColor=ink,
+    )
+    if not features:
+        features = ["Ausstattung wird ergänzt."]
+    for item in features:
+        if feature_y <= section_bottom + 16:
+            break
+        feature, feature_height = paragraph(item, feature_style, column_width - 16, 24)
+        box_height = max(20, feature_height + 8)
+        if feature_y - box_height < section_bottom:
+            break
+        pdf.setFillColor(colors.white)
+        pdf.setStrokeColor(line)
+        pdf.setLineWidth(0.6)
+        pdf.rect(margin, feature_y - box_height, column_width, box_height, fill=1, stroke=1)
+        feature.drawOn(pdf, margin + 8, feature_y - box_height + ((box_height - feature_height) / 2))
+        feature_y -= box_height + 5
+
+    legal_text = (
+        "Hinweis: Angaben zu Zustand, Vorschäden und Unfallschäden erfolgen im Kundenauftrag nach Auskunft "
+        "des Auftraggebers und vorliegenden Unterlagen, soweit bekannt. Eine Beschaffenheitsgarantie oder "
+        "Zusicherung der Unfallfreiheit ist damit nicht verbunden."
+    )
+    legal_style = ParagraphStyle(
+        "legal_note",
+        fontName="Helvetica",
+        fontSize=6.5,
+        leading=8,
+        textColor=muted,
+    )
+    legal, legal_height = paragraph(legal_text, legal_style, column_width - 16, 58)
+    legal_box_height = legal_height + 14
+    legal_y = section_bottom
+    pdf.setFillColor(paper)
+    pdf.setStrokeColor(line)
+    pdf.setLineWidth(0.6)
+    pdf.rect(description_x, legal_y, column_width, legal_box_height, fill=1, stroke=1)
+    legal.drawOn(pdf, description_x + 8, legal_y + 7)
+
+    description_style = ParagraphStyle(
+        "description",
+        fontName="Helvetica",
+        fontSize=8.5,
+        leading=10.8,
+        textColor=ink,
+    )
+    description_height = max(60, section_top - 25 - (legal_y + legal_box_height + 10))
+    description, used_description_height = paragraph(
+        verkauf.get("verkauf_beschreibung"),
+        description_style,
+        column_width,
+        description_height,
+    )
+    description.drawOn(pdf, description_x, section_top - 25 - used_description_height)
+
+    pdf.setStrokeColor(brand)
+    pdf.setLineWidth(2)
+    pdf.line(margin, footer_top, page_width - margin, footer_top)
+    pdf.setFillColor(brand)
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(margin, footer_top - 19, pdf_text(werkstatt_kontakt.get("name"), "Gärtner GmbH Karosserie + Lack"))
+    pdf.setFillColor(muted)
+    pdf.setFont("Helvetica", 7.5)
+    pdf.drawString(margin, footer_top - 33, pdf_text(werkstatt_kontakt.get("adresse"), "Binauer Höhe 4, 74821 Mosbach"))
+    pdf.setFillColor(accent)
+    pdf.setFont("Helvetica-Bold", 16)
+    phone = pdf_text(verkauf.get("verkauf_kontakt") or werkstatt_kontakt.get("telefon"))
+    if phone:
+        pdf.drawRightString(page_width - margin, footer_top - 25, phone)
+
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+    return buffer
+
+
+@app.route("/admin/fahrzeugverkauf/<int:verkauf_id>/verkaufsschild.pdf")
+@admin_required
+def admin_fahrzeugverkauf_schild_pdf(verkauf_id):
+    verkauf = get_fahrzeugverkauf(verkauf_id)
+    if not verkauf:
+        abort(404)
+    dateien = list_fahrzeugverkauf_dateien(verkauf_id)
+    return send_file(
+        make_fahrzeugverkauf_schild_pdf(
+            verkauf,
+            verkauf_bild=get_fahrzeugverkauf_bild(verkauf, dateien),
+            werkstatt_kontakt=werkstatt_kundenkontakt(verkauf),
+        ),
+        download_name=fahrzeugverkauf_schild_pdf_filename(verkauf),
+        mimetype="application/pdf",
+        as_attachment=True,
     )
 
 
