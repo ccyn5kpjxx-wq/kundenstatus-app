@@ -358,6 +358,7 @@ SCHADEN_IMAP_PORT = max(1, env_int("SCHADEN_IMAP_PORT", MAIL_IMAP_PORT))
 SCHADEN_IMAP_USER = (os.environ.get("SCHADEN_IMAP_USER") or "").strip()
 SCHADEN_IMAP_PASS = (os.environ.get("SCHADEN_IMAP_PASS") or "").strip()
 SCHADEN_IMAP_FOLDER = (os.environ.get("SCHADEN_IMAP_FOLDER") or MAIL_IMAP_FOLDER).strip() or "INBOX"
+SCHADEN_IMAP_SENT_FOLDER = (os.environ.get("SCHADEN_IMAP_SENT_FOLDER") or "").strip()
 SCHADEN_IMAP_SSL = env_flag("SCHADEN_IMAP_SSL", MAIL_IMAP_SSL)
 SCHADEN_IMAP_MARK_SEEN = env_flag("SCHADEN_IMAP_MARK_SEEN", False)
 SCHADEN_IMAP_SEARCH = (os.environ.get("SCHADEN_IMAP_SEARCH") or "ALL").strip().upper() or "ALL"
@@ -26070,6 +26071,7 @@ def get_schaden_mail_config():
         "imap_port": SCHADEN_IMAP_PORT,
         "imap_user": imap_user,
         "imap_folder": SCHADEN_IMAP_FOLDER,
+        "imap_sent_folder": SCHADEN_IMAP_SENT_FOLDER,
         "imap_ssl": bool(SCHADEN_IMAP_SSL),
         "imap_mark_seen": bool(SCHADEN_IMAP_MARK_SEEN),
         "imap_search": search,
@@ -26085,6 +26087,7 @@ def get_schaden_mail_config():
         "attachments_enabled": bool(SCHADEN_SMTP_ATTACHMENTS),
         "attachment_limit_mb": SCHADEN_SMTP_ATTACHMENT_LIMIT_MB,
         "_smtp_password": smtp_password,
+        "_imap_password": imap_password,
     }
 
 
@@ -26131,6 +26134,14 @@ def schaden_mail_status():
     }
 
 
+def infer_imap_host_from_smtp(smtp_host):
+    """Leitet den üblichen IMAP-Host ab; explizite IMAP-Werte haben Vorrang."""
+    smtp_host = clean_text(smtp_host)
+    if smtp_host.lower().startswith("smtp."):
+        return f"imap.{smtp_host[5:]}"
+    return smtp_host
+
+
 def get_lead_mail_config(website):
     website = normalize_lead_website(website)
     site = LEAD_WEBSITES[website]
@@ -26148,6 +26159,36 @@ def get_lead_mail_config(website):
     password = clean_secret_value(os.environ.get(f"{prefix}_SMTP_PASS") or base["_smtp_password"])
     use_ssl = env_flag(f"{prefix}_SMTP_SSL", bool(base["smtp_ssl"]))
     use_tls = env_flag(f"{prefix}_SMTP_TLS", bool(base["smtp_tls"]))
+    explicit_imap_host = clean_text(os.environ.get(f"{prefix}_IMAP_HOST"))
+    explicit_imap_user = clean_text(os.environ.get(f"{prefix}_IMAP_USER"))
+    explicit_imap_password = clean_secret_value(os.environ.get(f"{prefix}_IMAP_PASS"))
+    base_imap_password = clean_secret_value(base["_imap_password"])
+    uses_base_imap_login = bool(base_imap_password)
+    imap_host = (
+        explicit_imap_host
+        or (base["imap_host"] if uses_base_imap_login else "")
+        or infer_imap_host_from_smtp(host)
+    )
+    imap_port = max(1, env_int(f"{prefix}_IMAP_PORT", int(base["imap_port"] or 993)))
+    imap_user = clean_text(
+        explicit_imap_user
+        or (base["imap_user"] if uses_base_imap_login else "")
+        or user
+        or address
+    )
+    imap_password = clean_secret_value(
+        explicit_imap_password
+        or (base_imap_password if uses_base_imap_login else "")
+        or password
+    )
+    imap_ssl = env_flag(f"{prefix}_IMAP_SSL", bool(base["imap_ssl"]))
+    imap_sent_folder = clean_text(
+        os.environ.get(f"{prefix}_IMAP_SENT_FOLDER") or base["imap_sent_folder"]
+    )
+    imap_timeout = max(
+        5,
+        env_int(f"{prefix}_IMAP_TIMEOUT_SECONDS", int(base["imap_timeout"] or 20)),
+    )
     return {
         "website": website,
         "address": address,
@@ -26159,6 +26200,14 @@ def get_lead_mail_config(website):
         "ssl": use_ssl,
         "tls": use_tls,
         "configured": bool(address and host and user and password),
+        "imap_host": imap_host,
+        "imap_port": imap_port,
+        "imap_user": imap_user,
+        "imap_password": imap_password,
+        "imap_ssl": imap_ssl,
+        "imap_sent_folder": imap_sent_folder,
+        "imap_timeout": imap_timeout,
+        "sent_copy_configured": bool(imap_host and imap_user and imap_password),
         "uses_shared_login": bool(
             website != "auto-lackierzentrum" and base["smtp_user"] and user == base["smtp_user"]
         ),
@@ -26168,7 +26217,9 @@ def get_lead_mail_config(website):
 def lead_mail_status(website):
     config = get_lead_mail_config(website)
     return {
-        key: value for key, value in config.items() if key != "password"
+        key: value
+        for key, value in config.items()
+        if key not in {"password", "imap_password"}
     }
 
 
@@ -26188,6 +26239,71 @@ def log_lead_mail(lead_id, absender, empfaenger, betreff, nachricht, status, feh
     )
     db.commit()
     db.close()
+
+
+def parse_imap_list_mailbox_name(entry):
+    """Liest den Ordnernamen aus einer normalen IMAP-LIST-Antwort."""
+    if isinstance(entry, bytes):
+        entry = entry.decode("utf-8", errors="replace")
+    text = clean_text(entry)
+    match = re.match(
+        r'^\([^)]*\)\s+(?:NIL|"(?:\\.|[^"])*")\s+(.+)$',
+        text,
+    )
+    if not match:
+        return ""
+    mailbox = match.group(1).strip()
+    if len(mailbox) >= 2 and mailbox[0] == mailbox[-1] == '"':
+        mailbox = mailbox[1:-1].replace(r'\"', '"')
+    return clean_text(mailbox)
+
+
+def find_imap_sent_folder(client, configured_folder=""):
+    r"""Bevorzugt den konfigurierten bzw. per \Sent markierten Mailordner."""
+    configured_folder = clean_text(configured_folder)
+    if configured_folder:
+        return configured_folder
+    status, entries = client.list()
+    if clean_text(status).upper() == "OK":
+        for entry in entries or []:
+            flags = {
+                clean_text(flag.decode("ascii", errors="ignore") if isinstance(flag, bytes) else flag).lower()
+                for flag in imaplib.ParseFlags(entry)
+            }
+            if r"\sent" in flags:
+                folder = parse_imap_list_mailbox_name(entry)
+                if folder:
+                    return folder
+    # IONOS/Webmail zeigt diesen standardisierten IMAP-Ordner lokalisiert als
+    # "Gesendet" an. Bei abweichenden Postfaechern ist *_IMAP_SENT_FOLDER setzbar.
+    return "Sent"
+
+
+def append_lead_message_to_sent(config, message):
+    """Speichert eine bereits erfolgreich versendete Nachricht als IMAP-Kopie."""
+    if not config.get("sent_copy_configured"):
+        raise ValueError("IMAP-Ablage für den Gesendet-Ordner ist nicht konfiguriert.")
+    client = None
+    try:
+        imap_class = imaplib.IMAP4_SSL if config.get("imap_ssl") else imaplib.IMAP4
+        client = imap_class(
+            config["imap_host"],
+            int(config["imap_port"]),
+            timeout=int(config.get("imap_timeout") or 20),
+        )
+        client.login(config["imap_user"], config["imap_password"])
+        sent_folder = find_imap_sent_folder(client, config.get("imap_sent_folder"))
+        raw_message = message.as_bytes(policy=policy.SMTP)
+        status, _ = client.append(sent_folder, r"(\Seen)", None, raw_message)
+        if clean_text(status).upper() != "OK":
+            raise RuntimeError(f"IMAP-Ordner '{sent_folder}' hat die Kopie nicht angenommen.")
+        return sent_folder
+    finally:
+        if client is not None:
+            try:
+                client.logout()
+            except Exception:
+                pass
 
 
 def send_lead_email(lead, empfaenger, betreff, nachricht):
@@ -26228,7 +26344,29 @@ def send_lead_email(lead, empfaenger, betreff, nachricht):
             lead["id"], config["address"], recipients[0], betreff, nachricht, "fehler", str(exc)
         )
         raise RuntimeError(f"E-Mail konnte nicht versendet werden: {clean_text(str(exc))[:240]}") from exc
-    log_lead_mail(lead["id"], config["address"], recipients[0], betreff, nachricht, "gesendet")
+    sent_folder = ""
+    sent_copy_error = ""
+    try:
+        sent_folder = append_lead_message_to_sent(config, message)
+    except Exception as exc:
+        sent_copy_error = clean_text(str(exc))[:500]
+        print(
+            "WARNUNG: Lead-E-Mail wurde versendet, aber nicht im IMAP-Gesendet-Ordner gespeichert: "
+            f"{sent_copy_error}"
+        )
+    log_lead_mail(
+        lead["id"],
+        config["address"],
+        recipients[0],
+        betreff,
+        nachricht,
+        "gesendet",
+        (
+            f"Versand erfolgreich; Kopie im IONOS-Gesendet-Ordner fehlgeschlagen: {sent_copy_error}"
+            if sent_copy_error
+            else ""
+        ),
+    )
     db = get_db()
     db.execute(
         """
@@ -26240,7 +26378,11 @@ def send_lead_email(lead, empfaenger, betreff, nachricht):
     )
     db.commit()
     db.close()
-    return config["address"]
+    return {
+        "address": config["address"],
+        "sent_folder": sent_folder,
+        "sent_copy_error": sent_copy_error,
+    }
 
 
 def fallback_lead_mail_draft(lead):
@@ -46983,12 +47125,24 @@ def admin_lead_mail_senden(lead_id):
     betreff = clean_text(request.form.get("betreff"))
     nachricht = clean_text(request.form.get("nachricht"))
     try:
-        absender = send_lead_email(lead, empfaenger, betreff, nachricht)
+        send_result = send_lead_email(lead, empfaenger, betreff, nachricht)
     except (ValueError, RuntimeError) as exc:
         flash(str(exc), "danger")
     else:
+        absender = send_result["address"]
         schedule_change_backup("lead-mail-gesendet")
         flash(f"E-Mail wurde als {absender} an {empfaenger} gesendet.", "success")
+        if send_result["sent_copy_error"]:
+            flash(
+                "Die E-Mail ist versendet, aber die Kopie im IONOS-Ordner "
+                f"'Gesendet' konnte nicht gespeichert werden: {send_result['sent_copy_error']}",
+                "warning",
+            )
+        else:
+            flash(
+                f"Eine Kopie wurde im Mailordner '{send_result['sent_folder']}' gespeichert.",
+                "success",
+            )
     return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#ki-antwort")
 
 
