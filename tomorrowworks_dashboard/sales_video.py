@@ -388,6 +388,37 @@ def _run_ffmpeg(command: list[str], *, timeout: int, message: str) -> subprocess
     return completed
 
 
+def validate_sales_video_mp4(path: Path) -> None:
+    """Prüft eine bereitgestellte MP4 auf eine decodierbare Bild- und Tonspur."""
+    try:
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    except (OSError, RuntimeError) as exc:
+        raise SalesVideoError("Die MP4-Datei kann auf diesem Server gerade nicht geprüft werden.") from exc
+    _run_ffmpeg(
+        [
+            ffmpeg,
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-i",
+            str(path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0",
+            "-t",
+            "1",
+            "-f",
+            "null",
+            os.devnull,
+        ],
+        timeout=30,
+        message="Die ausgewählte MP4-Datei enthält keinen lesbaren Film mit Ton.",
+    )
+
+
 def _speech_error(status_code: int) -> SalesVideoError:
     if status_code in {401, 403}:
         return SalesVideoError("Die Sprecherstimme ist noch nicht korrekt freigeschaltet. Bitte die sichere API-Konfiguration prüfen.")

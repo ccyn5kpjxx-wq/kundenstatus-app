@@ -52,9 +52,14 @@ except ModuleNotFoundError:
     from notifications import mail_senden
 
 try:
-    from tomorrowworks_dashboard.sales_video import SalesVideoError, SalesVideoSource, create_sales_video
+    from tomorrowworks_dashboard.sales_video import (
+        SalesVideoError,
+        SalesVideoSource,
+        create_sales_video,
+        validate_sales_video_mp4,
+    )
 except ModuleNotFoundError:
-    from sales_video import SalesVideoError, SalesVideoSource, create_sales_video
+    from sales_video import SalesVideoError, SalesVideoSource, create_sales_video, validate_sales_video_mp4
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -1066,6 +1071,18 @@ def _zuweisungen_speichern(db: sqlite3.Connection, projekt_id: int) -> None:
 
 
 def register_routes(app: Flask) -> None:
+    def verkaufsvideo_lock_anfordern() -> bool:
+        if not VIDEO_GENERATION_LOCK.acquire(blocking=False):
+            return False
+        g.verkaufsvideo_lock_aktiv = True
+        return True
+
+    @app.teardown_request
+    def verkaufsvideo_lock_freigeben(_error):
+        if getattr(g, "verkaufsvideo_lock_aktiv", False):
+            g.verkaufsvideo_lock_aktiv = False
+            VIDEO_GENERATION_LOCK.release()
+
     @app.get("/healthz")
     def healthz():
         return {"ok": True, "app": "tomorrowworks-dashboard"}
@@ -2188,7 +2205,7 @@ def register_routes(app: Flask) -> None:
                 return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
             sources.append(SalesVideoSource(path=path, display_name=row["original_name"]))
 
-        if not VIDEO_GENERATION_LOCK.acquire(blocking=False):
+        if not verkaufsvideo_lock_anfordern():
             flash("Gerade wird bereits ein Verkaufsvideo erzeugt. Bitte in einem Moment erneut starten.", "info")
             return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
 
@@ -2229,9 +2246,6 @@ def register_routes(app: Flask) -> None:
                 current_app.logger.warning("Unvollständiges Verkaufsvideo konnte nicht gelöscht werden: %s", output_path)
             flash("Das Verkaufsvideo konnte unerwartet nicht erzeugt werden. Bitte später erneut versuchen.", "error")
             return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
-        finally:
-            VIDEO_GENERATION_LOCK.release()
-
         try:
             video_size = output_path.stat().st_size
         except OSError:
@@ -2319,6 +2333,10 @@ def register_routes(app: Flask) -> None:
             flash("Für den fertigen Sprecherfilm ist nur eine MP4-Datei erlaubt.", "error")
             return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
 
+        if not verkaufsvideo_lock_anfordern():
+            flash("Gerade wird bereits ein Verkaufsvideo verarbeitet. Bitte in einem Moment erneut versuchen.", "info")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+
         upload_root = Path(app.config["UPLOAD_FOLDER"]).resolve()
         gespeichert_name = f"{projekt_id}_verkaufsvideo_{uuid4().hex}.mp4"
         output_path = upload_root / gespeichert_name
@@ -2342,6 +2360,16 @@ def register_routes(app: Flask) -> None:
             except OSError:
                 current_app.logger.warning("Ungültiger Sprecherfilm konnte nicht gelöscht werden: %s", output_path)
             flash("Die ausgewählte Datei ist keine gültige MP4-Datei.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+
+        try:
+            validate_sales_video_mp4(output_path)
+        except SalesVideoError as exc:
+            try:
+                output_path.unlink(missing_ok=True)
+            except OSError:
+                current_app.logger.warning("Nicht lesbarer Sprecherfilm konnte nicht gelöscht werden: %s", output_path)
+            flash(str(exc), "error")
             return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
 
         original_name = secure_filename(
@@ -2372,7 +2400,7 @@ def register_routes(app: Flask) -> None:
             _aktivitaet(
                 projekt_id,
                 "Verkaufsvideo hochgeladen · intern",
-                f"Fertiger MP4-Sprecherfilm · {video_size / 1024 / 1024:.1f} MB · KI-Sprecherstimme · kein Kundenversand",
+                f"Fertiger MP4-Film · {video_size / 1024 / 1024:.1f} MB · Bild- und Tonspur geprüft · kein Kundenversand",
             )
             db.commit()
         except sqlite3.Error:

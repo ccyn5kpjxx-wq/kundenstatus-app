@@ -147,6 +147,23 @@ def run() -> None:
         assert "/anmelden" in denied.headers["Location"]
         no_csrf = client.post(f"/projekte/{project_id}/verkaufsvideo", data={"datei_ids": "1"})
         assert no_csrf.status_code == 400
+        denied_upload = anonymous.post(
+            f"/projekte/{project_id}/verkaufsvideo/hochladen",
+            data={
+                "_csrf_token": csrf(anonymous, f"/projekte/{project_id}/verkaufsvideo"),
+                "video": (io.BytesIO(b"not-an-mp4"), "film.mp4"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        assert denied_upload.status_code == 302
+        assert "/anmelden" in denied_upload.headers["Location"]
+        no_csrf_upload = client.post(
+            f"/projekte/{project_id}/verkaufsvideo/hochladen",
+            data={"video": (io.BytesIO(b"not-an-mp4"), "film.mp4")},
+            content_type="multipart/form-data",
+        )
+        assert no_csrf_upload.status_code == 400
 
         too_many = post(
             client,
@@ -372,16 +389,33 @@ def run() -> None:
         assert "keine gültige MP4-Datei" in invalid_upload.get_data(as_text=True)
         assert video_path.exists()
 
-        narrated_video_bytes = video_path.read_bytes()
-        uploaded = client.post(
+        fake_ftyp_upload = client.post(
             f"/projekte/{project_id}/verkaufsvideo/hochladen",
             data={
                 "_csrf_token": csrf(client, f"/projekte/{project_id}/verkaufsvideo"),
-                "video": (io.BytesIO(narrated_video_bytes), "lokal-gepruefter-sprecherfilm.mp4"),
+                "video": (io.BytesIO(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 80), "fake-ftyp.mp4"),
             },
             content_type="multipart/form-data",
             follow_redirects=True,
         )
+        assert fake_ftyp_upload.status_code == 200
+        assert "keinen lesbaren Film mit Ton" in fake_ftyp_upload.get_data(as_text=True)
+        assert video_path.exists()
+
+        narrated_video_bytes = video_path.read_bytes()
+        dashboard_module.mail_senden = forbidden_mail
+        try:
+            uploaded = client.post(
+                f"/projekte/{project_id}/verkaufsvideo/hochladen",
+                data={
+                    "_csrf_token": csrf(client, f"/projekte/{project_id}/verkaufsvideo"),
+                    "video": (io.BytesIO(narrated_video_bytes), "lokal-gepruefter-sprecherfilm.mp4"),
+                },
+                content_type="multipart/form-data",
+                follow_redirects=True,
+            )
+        finally:
+            dashboard_module.mail_senden = original_mail
         uploaded_body = uploaded.get_data(as_text=True)
         assert uploaded.status_code == 200
         assert "fertige Sprecherfilm wurde intern übernommen" in uploaded_body
@@ -400,7 +434,7 @@ def run() -> None:
         ).fetchone()
         assert len(videos) == 1
         assert upload_activity is not None
-        assert "KI-Sprecherstimme" in upload_activity["text"]
+        assert "Bild- und Tonspur geprüft" in upload_activity["text"]
         assert "kein Kundenversand" in upload_activity["text"]
         assert connection.execute("SELECT COUNT(*) FROM portal_nachrichten").fetchone()[0] == before_messages
         assert connection.execute("SELECT COUNT(*) FROM portal_benachrichtigungen").fetchone()[0] == before_notifications
