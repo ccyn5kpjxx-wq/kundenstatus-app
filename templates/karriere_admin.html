@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Bewerbungen{% endblock %}
+
+{% block content %}
+<div class="section-title mb-4">
+  <div>
+    <div class="badge-soft mb-3">Eigener Bewerbungseingang</div>
+    <h1 class="mb-2">Bewerbungen</h1>
+    <p class="mb-0">Neue Bewerbungen erscheinen hier mit einer roten Zahl im Cockpit – getrennt vom Postfach.</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-soft" href="#stellenanzeigen">Stellenanzeigen verwalten</a>
+    <a class="btn btn-soft" href="{{ url_for('oeffentliche_karriere') }}" target="_blank" rel="noopener">Karriereseite öffnen</a>
+  </div>
+</div>
+
+{% set neue_bewerbungen = bewerbungen|selectattr('status', 'equalto', 'neu')|list|length %}
+<section class="mb-5" id="bewerbungen" aria-labelledby="bewerbungen-titel">
+  <div class="section-title mb-3">
+    <div>
+      <div class="badge-soft mb-3">Rückrufliste</div>
+      <h2 class="h3 mb-1" id="bewerbungen-titel">Bewerber zurückrufen</h2>
+      <p class="mb-0">Name und Telefonnummer sind nur im geschützten Cockpit sichtbar.</p>
+    </div>
+    {% if neue_bewerbungen %}
+    <span class="badge text-bg-danger">{{ neue_bewerbungen }} neu</span>
+    {% else %}
+    <span class="badge text-bg-success">Keine neue Bewerbung</span>
+    {% endif %}
+  </div>
+
+  <div class="d-grid gap-3">
+    {% for bewerbung in bewerbungen %}
+    <article class="page-card p-4{% if bewerbung['status'] == 'neu' %} border border-danger{% endif %}" id="bewerbung-{{ bewerbung['id'] }}">
+      <div class="row g-4">
+        <div class="col-lg-7">
+          <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+            <span class="badge text-bg-{{ bewerbung['status_meta']['farbe'] }}">{{ bewerbung['status_meta']['label'] }}</span>
+            <span class="text-muted small">Eingegangen {{ bewerbung['erstellt_am'][:16] }}</span>
+          </div>
+          <h3 class="h4 mb-2">{{ bewerbung['name'] }}</h3>
+          <a class="btn btn-brand mb-3" href="tel:{{ bewerbung['telefon_link'] }}">{{ bewerbung['telefon'] }} anrufen</a>
+          <dl class="row mb-0">
+            <dt class="col-sm-3">Stelle</dt><dd class="col-sm-9">{{ bewerbung['bereiche'] }}</dd>
+            <dt class="col-sm-3">Rückrufwunsch</dt><dd class="col-sm-9">{{ bewerbung['rueckrufwunsch'] or 'Keine zusätzliche Angabe' }}</dd>
+            <dt class="col-sm-3">Datenschutz</dt><dd class="col-sm-9">bestätigt am {{ bewerbung['datenschutz_bestaetigt_am'][:16] }}</dd>
+          </dl>
+        </div>
+        <div class="col-lg-5">
+          <form method="POST" action="{{ url_for('admin_bewerbung_bearbeiten', bewerbung_id=bewerbung['id']) }}" class="d-grid gap-3">
+            {{ csrf_field()|safe }}
+            <div>
+              <label class="form-label" for="bewerbung-{{ bewerbung['id'] }}-status">Bearbeitungsstand</label>
+              <select class="form-select" id="bewerbung-{{ bewerbung['id'] }}-status" name="status">
+                {% for key, meta in bewerbung_status.items() %}<option value="{{ key }}" {% if key == bewerbung['status'] %}selected{% endif %}>{{ meta['label'] }}</option>{% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="form-label" for="bewerbung-{{ bewerbung['id'] }}-notiz">Interne Notiz</label>
+              <textarea class="form-control" id="bewerbung-{{ bewerbung['id'] }}-notiz" name="notiz_intern" rows="4" maxlength="3000" placeholder="z. B. Rückruf am Montag vereinbart">{{ bewerbung['notiz_intern'] }}</textarea>
+            </div>
+            <button class="btn btn-dark" type="submit">Bewerbung speichern</button>
+          </form>
+          <form method="POST" action="{{ url_for('admin_bewerbung_loeschen', bewerbung_id=bewerbung['id']) }}" class="mt-2" onsubmit="return confirm('Diese Bewerbung mit Name, Telefonnummer und Notizen dauerhaft löschen?');">
+            {{ csrf_field()|safe }}
+            <button class="btn btn-outline-danger w-100" type="submit">Kontaktdaten löschen</button>
+          </form>
+        </div>
+      </div>
+    </article>
+    {% else %}
+    <div class="page-card p-4 text-muted">Noch keine Bewerbung eingegangen.</div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="page-card p-4 mb-4" id="stellenanzeigen">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+    <div>
+      <h2 class="h4 mb-1">Neue Stellenanzeige</h2>
+      <p class="text-muted mb-0">Titel, Kurztext und Beschreibung können jederzeit geändert werden.</p>
+    </div>
+    <span class="badge badge-soft">{{ stellenanzeigen|length }} Anzeigen</span>
+  </div>
+  <form method="POST" action="{{ url_for('admin_stellenanzeige_neu') }}" class="row g-3">
+    {{ csrf_field()|safe }}
+    <div class="col-lg-8">
+      <label class="form-label" for="stelle-neu-titel">Stellentitel *</label>
+      <input class="form-control" id="stelle-neu-titel" name="titel" required maxlength="180" placeholder="z. B. Fahrzeuglackierer (m/w/d)">
+    </div>
+    <div class="col-lg-2">
+      <label class="form-label" for="stelle-neu-sortierung">Reihenfolge</label>
+      <input class="form-control" id="stelle-neu-sortierung" name="sortierung" type="number" value="{{ stellenanzeigen|length + 1 }}" min="-999" max="999">
+    </div>
+    <div class="col-lg-2 d-flex align-items-end">
+      <div class="form-check form-switch mb-2">
+        <input class="form-check-input" id="stelle-neu-aktiv" name="aktiv" type="checkbox" value="1" checked>
+        <label class="form-check-label" for="stelle-neu-aktiv">Sofort anzeigen</label>
+      </div>
+    </div>
+    <div class="col-12">
+      <label class="form-label" for="stelle-neu-kurz">Kurzbeschreibung</label>
+      <input class="form-control" id="stelle-neu-kurz" name="kurzbeschreibung" maxlength="400" placeholder="Ein kurzer Satz für die Stellenkarte">
+    </div>
+    <div class="col-12">
+      <label class="form-label" for="stelle-neu-beschreibung">Ausführliche Beschreibung</label>
+      <textarea class="form-control" id="stelle-neu-beschreibung" name="beschreibung" rows="5" maxlength="6000" placeholder="Aufgaben, gewünschte Erfahrung und alles, was Bewerber wissen sollen"></textarea>
+    </div>
+    <div class="col-12"><button class="btn btn-brand" type="submit">Stellenanzeige anlegen</button></div>
+  </form>
+</section>
+
+<div class="row g-3 mb-5">
+  {% for stelle in stellenanzeigen %}
+  <div class="col-xl-6" id="stelle-{{ stelle['id'] }}">
+    <section class="page-card p-4 h-100 {% if not stelle['aktiv'] %}opacity-75{% endif %}">
+      <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+        <h2 class="h5 mb-0">{{ stelle['titel'] }}</h2>
+        <span class="badge text-bg-{{ 'success' if stelle['aktiv'] else 'secondary' }}">{{ 'Online' if stelle['aktiv'] else 'Ausgeblendet' }}</span>
+      </div>
+      <form method="POST" action="{{ url_for('admin_stellenanzeige_bearbeiten', stellen_id=stelle['id']) }}" class="row g-3">
+        {{ csrf_field()|safe }}
+        <div class="col-md-9">
+          <label class="form-label" for="stelle-{{ stelle['id'] }}-titel">Stellentitel *</label>
+          <input class="form-control" id="stelle-{{ stelle['id'] }}-titel" name="titel" value="{{ stelle['titel'] }}" required maxlength="180">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label" for="stelle-{{ stelle['id'] }}-sortierung">Reihenfolge</label>
+          <input class="form-control" id="stelle-{{ stelle['id'] }}-sortierung" name="sortierung" type="number" value="{{ stelle['sortierung'] }}" min="-999" max="999">
+        </div>
+        <div class="col-12">
+          <label class="form-label" for="stelle-{{ stelle['id'] }}-kurz">Kurzbeschreibung</label>
+          <input class="form-control" id="stelle-{{ stelle['id'] }}-kurz" name="kurzbeschreibung" value="{{ stelle['kurzbeschreibung'] }}" maxlength="400">
+        </div>
+        <div class="col-12">
+          <label class="form-label" for="stelle-{{ stelle['id'] }}-beschreibung">Ausführliche Beschreibung</label>
+          <textarea class="form-control" id="stelle-{{ stelle['id'] }}-beschreibung" name="beschreibung" rows="5" maxlength="6000">{{ stelle['beschreibung'] }}</textarea>
+        </div>
+        <div class="col-12 d-flex justify-content-between align-items-center gap-3 flex-wrap">
+          <div class="form-check form-switch">
+            <input class="form-check-input" id="stelle-{{ stelle['id'] }}-aktiv" name="aktiv" type="checkbox" value="1" {% if stelle['aktiv'] %}checked{% endif %}>
+            <label class="form-check-label" for="stelle-{{ stelle['id'] }}-aktiv">Auf der Karriereseite anzeigen</label>
+          </div>
+          <button class="btn btn-brand" type="submit">Änderungen speichern</button>
+        </div>
+      </form>
+    </section>
+  </div>
+  {% endfor %}
+</div>
+
+{% endblock %}

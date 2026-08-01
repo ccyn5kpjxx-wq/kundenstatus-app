@@ -504,8 +504,8 @@ def main():
             "SELECT * FROM fahrzeugeinkauf_scan_treffer WHERE scan_id=?", (scan_id,)
         )
         check(
-            "Backup v3 enthält und restauriert Scan-Treffer; v2 bleibt lesbar",
-            portal.BACKUP_FORMAT_VERSION == 3
+            "Backup v4 enthält und restauriert Scan-Treffer; v2 bleibt lesbar",
+            portal.BACKUP_FORMAT_VERSION == 4
             and v2_kompatibel
             and bool(exported_hits)
             and restored_hit is not None,

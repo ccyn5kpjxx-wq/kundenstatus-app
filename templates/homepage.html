@@ -367,6 +367,28 @@
     .team-preview-flow { display:flex; flex-wrap:wrap; gap:7px; margin:24px 0; }
     .team-preview-flow span { padding:8px 11px; border:1px solid rgba(255,255,255,.13); border-radius:999px; color:#d4d1cb; font-size:11px; font-weight:800; }
     .team-preview-copy .category-action { margin-top:0; }
+    .career-preview { scroll-margin-top:94px; padding:0 0 70px; color:#fff; }
+    .career-shell { overflow:hidden; padding:clamp(30px,4.5vw,52px); border:1px solid rgba(255,255,255,.15); border-radius:24px; background:linear-gradient(145deg,rgba(69,43,40,.97),rgba(31,32,31,.98)); box-shadow:0 25px 65px rgba(0,0,0,.25); }
+    .career-heading { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr); align-items:end; gap:36px; margin-bottom:30px; }
+    .career-heading .eyebrow { color:#ff6c65; }
+    .career-heading h2 { max-width:690px; margin:14px 0 0; font-size:clamp(39px,4.8vw,60px); line-height:.97; letter-spacing:-.047em; }
+    .career-heading p { margin:0; color:#d8d4ce; font-size:17px; line-height:1.62; }
+    .career-openings { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:12px; }
+    .career-opening { grid-column:span 2; min-height:260px; display:flex; flex-direction:column; padding:24px; border:1px solid rgba(255,255,255,.13); border-radius:17px; background:rgba(255,255,255,.055); }
+    .career-opening:nth-child(n+4) { grid-column:span 3; }
+    .career-opening.is-training { background:linear-gradient(145deg,rgba(227,34,25,.18),rgba(255,255,255,.045)); }
+    .career-opening-meta { display:flex; flex-wrap:wrap; gap:7px; }
+    .career-opening-meta span { padding:7px 9px; border:1px solid rgba(255,255,255,.15); border-radius:999px; color:#e6e1db; font-size:10px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+    .career-opening-meta .career-status { color:#fff; border-color:rgba(255,99,91,.55); background:rgba(227,34,25,.2); }
+    .career-status::before { content:""; display:inline-block; width:6px; height:6px; margin-right:7px; border-radius:50%; background:#ff645c; box-shadow:0 0 0 4px rgba(227,34,25,.14); }
+    .career-opening h3 { margin:24px 0 12px; font-size:clamp(23px,2.2vw,29px); line-height:1.08; letter-spacing:-.03em; }
+    .career-opening p { margin:0; color:#d0ccc6; font-size:14px; line-height:1.6; }
+    .career-opening a { margin-top:auto; padding-top:22px; color:#fff; font-size:13px; font-weight:850; text-decoration:none; }
+    .career-opening a::after { content:" →"; color:#ff645c; }
+    .career-footer { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:28px; margin-top:14px; padding:23px 25px; border-radius:16px; color:#2d2e2d; background:#f2ede5; }
+    .career-footer strong { display:block; margin-bottom:5px; font-size:18px; }
+    .career-footer span { color:#66615c; font-size:13px; line-height:1.5; }
+    .career-footer .btn { min-width:250px; color:#fff; border-color:var(--yellow); background:var(--yellow); }
     .contact { min-height:340px; }
     .footer-links { display:grid; gap:5px; }
     .mobile-actions { grid-template-columns:1.35fr 1fr!important; }
@@ -382,12 +404,16 @@
       .proof-grid { grid-template-columns:repeat(2,1fr); }
       .proof-item:nth-child(2) { border-right:0; }
       .proof-item:nth-child(-n+2) { border-bottom:1px solid rgba(255,255,255,.1); }
+      .career-openings { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .career-opening,.career-opening:nth-child(n+4) { grid-column:auto; }
     }
     @media (max-width:760px) {
       .check-layout,.quality-card,.confidence-grid { grid-template-columns:1fr; }
       .quality-image { min-height:250px; }
       .team-preview-card { grid-template-columns:1fr; }
       .team-preview-photo,.team-preview-photo img { min-height:320px; height:320px; }
+      .career-heading,.career-footer { grid-template-columns:1fr; }
+      .career-footer .btn { min-width:0; width:100%; }
     }
     @media (max-width:620px) {
       .nav { min-height:66px; grid-template-columns:1fr auto; }
@@ -433,6 +459,13 @@
       .team-preview-copy h2 { font-size:36px; }
       .team-preview-quote { font-size:18px; }
       .team-preview-flow { margin:20px 0; }
+      .career-preview { padding:46px 0; }
+      .career-shell { padding:28px 22px; border-radius:18px; }
+      .career-heading { gap:18px; margin-bottom:24px; }
+      .career-heading h2 { font-size:39px; }
+      .career-openings { grid-template-columns:1fr; }
+      .career-opening { min-height:0; }
+      .career-footer { padding:20px; }
       .location-actions,.check-actions { display:grid; }
       .location-actions .btn,.check-actions .btn { width:100%; }
       .mobile-actions a { min-height:48px; font-size:12px; }
@@ -445,7 +478,7 @@
     <nav class="wrap nav" aria-label="Hauptnavigation">
       <a class="nav-brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt=""><span>Gärtner</span></a>
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="hauptmenue"><span class="nav-toggle-bars" aria-hidden="true"><i></i><i></i><i></i></span><span>Menü</span></button>
-      <div class="nav-menu" id="hauptmenue"><a href="#schaden">Schaden</a><a href="#mietwagen">Mietwagen</a><a href="#fahrzeugcheck">Fahrzeugcheck</a><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a href="{{ url_for('oeffentliches_team') }}">Team</a><a href="{{ url_for('oeffentliche_portale') }}">Portale</a><a href="#kontakt">Kontakt</a></div>
+      <div class="nav-menu" id="hauptmenue"><a href="#schaden">Schaden</a><a href="#mietwagen">Mietwagen</a><a href="#fahrzeugcheck">Fahrzeugcheck</a><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a href="{{ url_for('oeffentliches_team') }}">Team</a><a href="#jobs">Stellen</a><a href="{{ url_for('oeffentliche_portale') }}">Portale</a><a href="#kontakt">Kontakt</a></div>
       <a class="nav-cta" href="{{ portal_links.schaden }}">Anfrage senden</a>
     </nav>
   </header>
@@ -464,6 +497,26 @@
         <a class="proof-item" href="https://www.google.com/maps/search/?api=1&amp;query=Binauer+H%C3%B6he+4+74821+Mosbach-Lohrbach" target="_blank" rel="noopener noreferrer"><span>Werkstatt</span><strong>Mosbach-Lohrbach</strong><small>Binauer Höhe 4</small></a>
         <a class="proof-item" href="{{ portal_links.status }}"><span>Transparent</span><strong>Reparaturstatus online</strong><small>Mit persönlichem Zugang</small></a>
         <a class="proof-item" href="tel:+4915227706694"><span>Persönlich erreichbar</span><strong>0152 277 066 94</strong><small>Termine nach Abstimmung</small></a>
+      </div>
+    </section>
+
+    <section class="career-preview" id="jobs" aria-labelledby="jobs-titel">
+      <div class="wrap career-shell">
+        <div class="career-heading">
+          <div><div class="eyebrow">Stellenangebote · Ab sofort</div><h2 id="jobs-titel">Wir suchen Verstärkung.</h2></div>
+          <p>Ob Ausbildung, Fachkraft oder Unterstützung im Lackierteam: Werden Sie Teil von Gärtner Karosserie &amp; Lack. Für den ersten Kontakt genügen Ihr Name und Ihre Telefonnummer.</p>
+        </div>
+        <div class="career-openings">
+          {% for stelle in homepage_stellenanzeigen %}
+          <article class="career-opening{% if stelle['typ'] == 'Ausbildung' %} is-training{% endif %}">
+            <div class="career-opening-meta"><span class="career-status">Ab sofort</span><span>{{ stelle['typ'] }}</span></div>
+            <h3>{{ stelle['titel'] }}</h3>
+            <p>{{ stelle['beschreibung'] }}</p>
+            <a href="{{ portal_links.karriere }}?stelle={{ stelle['slug'] }}#bewerbung">Dafür interessiere ich mich</a>
+          </article>
+          {% endfor %}
+        </div>
+        <div class="career-footer"><div><strong>Interesse? Wir rufen Sie zurück.</strong><span>Kein Anschreiben und kein Lebenslauf für den Erstkontakt nötig.</span></div><a class="btn primary" href="{{ portal_links.karriere }}">Kurz bewerben &amp; Rückruf anfordern</a></div>
       </div>
     </section>
 
@@ -523,7 +576,7 @@
     <section class="contact" id="kontakt"><div class="contact-inner"><div class="eyebrow">Ihr Weg zu Gärtner</div><h2>Wir lösen auch Ihr Problem.</h2><p>Schildern Sie kurz Ihr Anliegen. Wir melden uns persönlich und sagen Ihnen klar, wie es weitergeht.</p><div class="hero-actions" style="justify-content:center"><a class="btn primary" href="{{ portal_links.anfrage }}?anliegen=allgemein">Anfrage senden</a><a class="btn" href="tel:+4915227706694">0152 277 066 94</a></div></div></section>
   </main>
 
-  <footer><div class="wrap footer-grid"><div><h3>Gärtner Karosserie & Lack GmbH</h3>Binauer Höhe 4<br>74821 Mosbach-Lohrbach<br><a href="tel:+4915227706694">0152 277 066 94</a><br><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></div><div><h3>Leistungen</h3><div class="footer-links"><a href="#schaden">Schaden &amp; Reparatur</a><a href="{{ portal_links.anfrage }}?anliegen=glasschaden">Glasschaden melden</a><a href="{{ portal_links.mietwagen }}">Mietwagen</a><a href="{{ portal_links.anfrage }}?anliegen=kaufberatung">Kaufcheck</a><a href="{{ portal_links.anfrage }}?anliegen=leasingrueckgabe">Leasingrückgabe</a><a href="{{ url_for('oeffentliche_leistungen') }}">Alle Werkstattleistungen</a></div></div><div><h3>Service</h3><div class="footer-links"><a href="{{ url_for('oeffentliches_team') }}">Team</a><a href="{{ url_for('oeffentliche_portale') }}">Portale</a><a href="{{ portal_links.privat }}">Privatkundenportal</a><a href="{{ portal_links.partner }}">Autohaus-Portal</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></div></div></footer>
+  <footer><div class="wrap footer-grid"><div><h3>Gärtner Karosserie & Lack GmbH</h3>Binauer Höhe 4<br>74821 Mosbach-Lohrbach<br><a href="tel:+4915227706694">0152 277 066 94</a><br><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></div><div><h3>Leistungen</h3><div class="footer-links"><a href="#schaden">Schaden &amp; Reparatur</a><a href="{{ portal_links.anfrage }}?anliegen=glasschaden">Glasschaden melden</a><a href="{{ portal_links.mietwagen }}">Mietwagen</a><a href="{{ portal_links.anfrage }}?anliegen=kaufberatung">Kaufcheck</a><a href="{{ portal_links.anfrage }}?anliegen=leasingrueckgabe">Leasingrückgabe</a><a href="{{ url_for('oeffentliche_leistungen') }}">Alle Werkstattleistungen</a></div></div><div><h3>Service</h3><div class="footer-links"><a href="{{ url_for('oeffentliches_team') }}">Team</a><a href="#jobs">Stellen &amp; Karriere</a><a href="{{ url_for('oeffentliche_portale') }}">Portale</a><a href="{{ portal_links.privat }}">Privatkundenportal</a><a href="{{ portal_links.partner }}">Autohaus-Portal</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></div></div></footer>
   <nav class="mobile-actions" aria-label="Mobile Schnellaktionen"><a class="primary" href="{{ portal_links.schaden }}">Anfrage senden</a><a class="outline" href="tel:+4915227706694">Anrufen</a></nav>
   <script>
     (() => {

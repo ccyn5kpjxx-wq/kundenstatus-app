@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jobs & Karriere · Gärtner Karosserie & Lack</title>
+  <meta name="description" content="Jobs bei Gärtner Karosserie & Lack in Mosbach-Lohrbach. Name und Telefonnummer genügen für den ersten persönlichen Rückruf.">
+  {% if not site_indexable %}<meta name="robots" content="noindex, nofollow">{% endif %}
+  {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --red:#e3231b; --red-dark:#ba1913; --ink:#f7f4ee; --muted:#bcb8b1; --panel:#292a29; --panel-2:#343533; --paper:#f2ede5; --text:#282826; --line:rgba(255,255,255,.13); }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--ink); background:#171817 url("{{ url_for('static', filename='homepage/ziegelwand-schwarz-v1.webp') }}") center top/900px auto repeat; font-family:"DM Sans",sans-serif; }
+    body::before { content:""; position:fixed; inset:0; z-index:-1; background:rgba(14,15,14,.72); }
+    a { color:inherit; }
+    button,input,textarea { font:inherit; }
+    .wrap { width:min(1160px,calc(100% - 40px)); margin-inline:auto; }
+    .skip-link { position:fixed; top:8px; left:8px; z-index:20; padding:10px 14px; color:#111; background:#fff; transform:translateY(-160%); }
+    .skip-link:focus { transform:none; }
+    header { position:sticky; top:0; z-index:10; border-bottom:1px solid rgba(227,35,27,.72); background:rgba(31,32,31,.96); backdrop-filter:blur(14px); }
+    .nav { min-height:78px; display:flex; align-items:center; justify-content:space-between; gap:24px; }
+    .brand { display:flex; align-items:center; gap:12px; text-decoration:none; font-weight:800; }
+    .brand img { width:103px; height:48px; padding:5px; border-radius:9px; background:#fff; object-fit:contain; }
+    .nav-links { display:flex; align-items:center; gap:24px; font-size:14px; font-weight:800; }
+    .nav-links a { min-height:44px; display:inline-flex; align-items:center; text-decoration:none; }
+    .nav-links a:hover,.nav-links a:focus-visible { color:#ff6d66; }
+    .nav-cta { padding:0 18px; border-radius:999px; color:#fff!important; background:var(--red); }
+    .hero { padding:70px 0 56px; }
+    .hero-grid { display:grid; grid-template-columns:minmax(0,.92fr) minmax(420px,1.08fr); overflow:hidden; border:1px solid var(--line); border-radius:26px; background:linear-gradient(145deg,rgba(48,49,47,.98),rgba(31,32,31,.98)); box-shadow:0 30px 75px rgba(0,0,0,.34); }
+    .hero-copy { align-self:center; padding:clamp(38px,6vw,72px); }
+    .eyebrow { color:#ff5e57; font-size:12px; font-weight:900; letter-spacing:.11em; text-transform:uppercase; }
+    h1,h2,h3 { font-family:"Space Grotesk",sans-serif; }
+    h1 { max-width:700px; margin:16px 0 20px; font-size:clamp(43px,6vw,72px); line-height:.96; letter-spacing:-.055em; }
+    .hero-copy p { margin:0; color:#d5d1ca; font-size:clamp(18px,2vw,22px); line-height:1.6; }
+    .hero-points { display:flex; flex-wrap:wrap; gap:8px; margin:26px 0 0; }
+    .hero-points span { padding:8px 11px; border:1px solid var(--line); border-radius:999px; color:#e5e1da; font-size:12px; font-weight:800; }
+    .hero-photo { min-height:480px; position:relative; overflow:hidden; background:#171817; }
+    .hero-photo::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,rgba(31,32,31,.7),transparent 35%); }
+    .hero-photo img { width:100%; height:100%; display:block; object-fit:cover; object-position:center 42%; }
+    .jobs { padding:25px 0 68px; }
+    .section-heading { display:flex; justify-content:space-between; align-items:end; gap:30px; margin-bottom:26px; }
+    .section-heading h2 { margin:13px 0 0; font-size:clamp(35px,5vw,54px); letter-spacing:-.045em; }
+    .section-heading p { max-width:520px; margin:0; color:#c8c4bd; line-height:1.65; }
+    .job-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:15px; }
+    .job-card { display:flex; flex-direction:column; min-height:310px; padding:28px; border:1px solid var(--line); border-radius:20px; background:linear-gradient(145deg,rgba(51,52,50,.98),rgba(38,39,38,.98)); box-shadow:0 18px 45px rgba(0,0,0,.22); }
+    .job-card .number { color:#ff5e57; font-size:11px; font-weight:900; letter-spacing:.1em; }
+    .job-card h3 { margin:23px 0 12px; font-size:27px; line-height:1.08; letter-spacing:-.035em; }
+    .job-card p { margin:0 0 12px; color:#cbc7c0; line-height:1.58; white-space:pre-line; }
+    .job-card .details { color:#aba7a0; font-size:14px; }
+    .job-card a { min-height:46px; display:inline-flex; align-items:center; justify-content:center; align-self:flex-start; margin-top:auto; padding:0 16px; border-radius:999px; color:#fff; background:var(--red); text-decoration:none; font-weight:900; }
+    .job-card a:hover,.job-card a:focus-visible { background:var(--red-dark); }
+    .initiative { border-color:rgba(227,35,27,.45); background:linear-gradient(145deg,rgba(88,35,31,.96),rgba(42,32,31,.98)); }
+    .application { padding:70px 0; color:var(--text); background:var(--paper); }
+    .application-grid { display:grid; grid-template-columns:minmax(0,.82fr) minmax(480px,1.18fr); gap:50px; align-items:start; }
+    .application-copy { position:sticky; top:112px; }
+    .application-copy h2 { margin:15px 0 18px; font-size:clamp(40px,5vw,59px); line-height:.98; letter-spacing:-.05em; }
+    .application-copy p { color:#615e58; font-size:18px; line-height:1.65; }
+    .application-copy ul { display:grid; gap:11px; margin:25px 0; padding:0; list-style:none; }
+    .application-copy li { display:flex; gap:10px; font-weight:800; }
+    .application-copy li::before { content:"✓"; color:var(--red); }
+    .phone-link { display:inline-flex; align-items:center; min-height:48px; padding:0 18px; border:1px solid #c7beb1; border-radius:999px; text-decoration:none; font-weight:900; }
+    .form-card { padding:clamp(27px,4vw,42px); border:1px solid #d9d0c3; border-radius:22px; background:#fffdf9; box-shadow:0 20px 50px rgba(67,55,38,.10); }
+    .form-card h3 { margin:8px 0 8px; font-size:31px; letter-spacing:-.035em; }
+    .form-intro { margin:0 0 24px; color:#6b6760; }
+    .selected-job { display:grid; gap:5px; margin:0 0 20px; padding:15px 17px; border:1px solid rgba(227,35,27,.35); border-radius:13px; background:#fff4f2; }
+    .selected-job span { color:#9a211b; font-size:11px; font-weight:900; letter-spacing:.09em; text-transform:uppercase; }
+    .selected-job strong { color:#312e2a; line-height:1.4; }
+    .errors { margin:0 0 22px; padding:15px 18px 15px 38px; border:1px solid #d52920; border-radius:12px; color:#86160f; background:#fff0ee; }
+    fieldset { margin:0 0 24px; padding:0; border:0; }
+    legend,.field-label { display:block; margin-bottom:10px; font-weight:900; }
+    .hint { display:block; margin:-6px 0 12px; color:#78736b; font-size:13px; }
+    .choice-list { display:grid; gap:9px; }
+    .choice { position:relative; display:grid; grid-template-columns:auto 1fr; gap:12px; align-items:start; min-height:58px; padding:14px; border:1px solid #d8d0c5; border-radius:13px; background:#fff; cursor:pointer; }
+    .choice:hover { border-color:#a8a098; }
+    .choice:has(input:checked) { border-color:var(--red); box-shadow:0 0 0 2px rgba(227,35,27,.12); }
+    .choice input { width:20px; height:20px; margin:1px 0 0; accent-color:var(--red); }
+    .choice strong,.choice small { display:block; }
+    .choice small { margin-top:3px; color:#706c65; line-height:1.4; }
+    .choice-details { margin:2px 0 24px; border:1px solid #d8d0c5; border-radius:13px; background:#fff; }
+    .choice-details summary { padding:15px 17px; cursor:pointer; color:#4e4a44; font-weight:900; }
+    .choice-details[open] summary { border-bottom:1px solid #e4ddd3; }
+    .choice-details fieldset { margin:0; padding:18px; }
+    .fields { display:grid; grid-template-columns:1fr 1fr; gap:15px; }
+    .field { margin-bottom:18px; }
+    .field.full { grid-column:1/-1; }
+    .field input,.field textarea { width:100%; min-height:50px; padding:12px 14px; border:1px solid #cfc6ba; border-radius:11px; color:#272725; background:#fff; }
+    .field textarea { min-height:110px; resize:vertical; }
+    .field input:focus,.field textarea:focus { outline:3px solid rgba(227,35,27,.16); border-color:var(--red); }
+    .privacy { display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; margin:4px 0 22px; color:#65615a; font-size:13px; line-height:1.48; }
+    .privacy input { width:19px; height:19px; margin-top:1px; accent-color:var(--red); }
+    .privacy a { font-weight:800; }
+    .submit { width:100%; min-height:54px; border:0; border-radius:999px; color:white; background:var(--red); font-weight:900; cursor:pointer; }
+    .submit:hover,.submit:focus-visible { background:var(--red-dark); }
+    .success { padding:32px; border:1px solid #aac9ad; border-radius:18px; text-align:center; background:#f4fbf4; }
+    .success-mark { width:58px; height:58px; display:grid; place-items:center; margin:0 auto 16px; border-radius:50%; color:#fff; background:#2d8a42; font-size:27px; font-weight:900; }
+    .success h3 { font-size:31px; }
+    .success p { color:#526056; line-height:1.6; }
+    .success a { display:inline-flex; align-items:center; min-height:46px; margin-top:8px; padding:0 17px; border-radius:999px; color:#fff; background:#2b2c2b; text-decoration:none; font-weight:900; }
+    .honeypot { position:absolute!important; left:-10000px!important; width:1px!important; height:1px!important; overflow:hidden!important; }
+    footer { padding:40px 0; color:#aaa69f; background:rgba(23,24,23,.95); font-size:13px; }
+    .footer-row { display:flex; justify-content:space-between; gap:25px; flex-wrap:wrap; }
+    .footer-links { display:flex; gap:18px; flex-wrap:wrap; }
+    @media (max-width:960px) { .hero-grid,.application-grid { grid-template-columns:1fr; } .hero-photo { min-height:390px; order:-1; } .application-copy { position:static; } .job-grid { grid-template-columns:1fr 1fr; } }
+    @media (max-width:680px) { .wrap { width:min(100% - 22px,1160px); } .nav { min-height:66px; } .brand span,.nav-links a:not(.nav-cta) { display:none; } .brand img { width:90px; height:44px; } .hero { padding:24px 0 44px; } .hero-grid { border-radius:18px; } .hero-photo { min-height:270px; } .hero-copy { padding:30px 22px 34px; } .section-heading { display:block; } .section-heading p { margin-top:12px; } .job-grid { grid-template-columns:1fr; } .job-card { min-height:0; } .job-card a { margin-top:20px; } .application { padding:48px 0; } .application-grid { gap:28px; } .form-card { padding:24px 18px; border-radius:17px; } .fields { grid-template-columns:1fr; } .field.full { grid-column:auto; } }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#inhalt">Direkt zum Inhalt</a>
+  <header>
+    <nav class="wrap nav" aria-label="Hauptnavigation">
+      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack"><span>Gärtner</span></a>
+      <div class="nav-links"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('oeffentliches_team') }}">Team</a><a href="#stellen">Stellen</a><a class="nav-cta" href="#bewerbung">Rückruf anfordern</a></div>
+    </nav>
+  </header>
+
+  <main id="inhalt">
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div class="hero-copy"><div class="eyebrow">Karriere bei Gärtner</div><h1>Gutes Handwerk braucht gute Leute.</h1><p>Wir möchten unser Team in Mosbach-Lohrbach verstärken. Wählen Sie den Bereich, der zu Ihnen passt, und hinterlassen Sie Name und Telefonnummer. Wir melden uns persönlich zurück.</p><div class="hero-points"><span>Kein Anschreiben nötig</span><span>Kein Lebenslauf-Zwang</span><span>Persönlicher Rückruf</span></div></div>
+        <div class="hero-photo"><img src="{{ url_for('static', filename='homepage/team-daniel-hannes-abdul-v2.png') }}" alt="Daniel, Hannes und Abdul in der Gärtner Werkstatt" width="1448" height="1086"></div>
+      </div>
+    </section>
+
+    <section class="jobs" id="stellen" aria-labelledby="stellen-titel">
+      <div class="wrap">
+        <div class="section-heading"><div><div class="eyebrow">Aktuelle Möglichkeiten</div><h2 id="stellen-titel">Wo möchten Sie mit anpacken?</h2></div><p>Mehrere Bereiche passen zu Ihnen? Wählen Sie beim Rückruf einfach alle passenden Stellen aus. Auch eine Initiativbewerbung ist willkommen.</p></div>
+        <div class="job-grid">
+          {% for stelle in stellenanzeigen %}
+          <article class="job-card"><span class="number">{{ '%02d'|format(loop.index) }} / STELLE</span><h3>{{ stelle['titel'] }}</h3><p>{{ stelle['kurzbeschreibung'] }}</p>{% if stelle['beschreibung'] %}<p class="details">{{ stelle['beschreibung'] }}</p>{% endif %}<a href="{{ url_for('oeffentliche_karriere', stelle=stelle['id']) }}#bewerbung">Dafür interessiere ich mich</a></article>
+          {% endfor %}
+          <article class="job-card initiative"><span class="number">INITIATIV</span><h3>Ihr Bereich ist nicht dabei?</h3><p>Melden Sie sich trotzdem. Ob Karosserie, Fahrzeugtechnik, Lack oder ein anderer Werkstattbereich – alles Weitere klären wir persönlich.</p><a href="{{ url_for('oeffentliche_karriere', stelle='initiativ') }}#bewerbung">Initiativ Kontakt aufnehmen</a></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="application" id="bewerbung" aria-labelledby="bewerbung-titel">
+      <div class="wrap application-grid">
+        <div class="application-copy"><div class="eyebrow">Unverbindlich kennenlernen</div><h2 id="bewerbung-titel">Kurz Kontakt aufnehmen.</h2><p>Für den ersten Kontakt brauchen Sie keinen Lebenslauf hochzuladen. Name und Telefonnummer genügen.</p><ul><li>Passenden Bereich auswählen</li><li>Erreichbare Telefonnummer hinterlassen</li><li>Persönlich miteinander sprechen</li></ul><a class="phone-link" href="tel:+4915227706694">Oder direkt anrufen: 0152 277 066 94</a></div>
+        <div class="form-card">
+          {% if gesendet %}
+          <div class="success" role="status"><div class="success-mark" aria-hidden="true">✓</div><h3>Vielen Dank.</h3><p>Ihre Rückrufanfrage ist angekommen. Wir melden uns persönlich unter der angegebenen Telefonnummer.</p><a href="{{ url_for('oeffentliche_karriere') }}#stellen">Zurück zu den Stellen</a></div>
+          {% else %}
+          <form method="POST" action="{{ url_for('karriere_bewerben') }}" novalidate>
+            {{ csrf_field()|safe }}
+            <div class="honeypot" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
+            <div class="eyebrow">Rückrufbewerbung</div><h3>Name und Telefonnummer – wir rufen Sie zurück.</h3><p class="form-intro">Kein Anschreiben und kein Lebenslauf nötig. Pflichtfelder sind mit * gekennzeichnet.</p>
+            {% if errors %}<ul class="errors" role="alert" tabindex="-1">{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+            {% if ausgewaehlte_stellen %}<div class="selected-job"><span>Ausgewählt</span>{% for stelle in stellenanzeigen %}{% if stelle['id']|string in ausgewaehlte_stellen %}<strong>{{ stelle['titel'] }}</strong>{% endif %}{% endfor %}{% if 'initiativ' in ausgewaehlte_stellen %}<strong>Initiativbewerbung</strong>{% endif %}</div>{% endif %}
+            <div class="fields">
+              <div class="field"><label class="field-label" for="name">Ihr Name *</label><input id="name" name="name" value="{{ formdata.get('name', '') }}" required autocomplete="name" maxlength="160"></div>
+              <div class="field"><label class="field-label" for="telefon">Ihre Telefonnummer *</label><input id="telefon" name="telefon" type="tel" value="{{ formdata.get('telefon', '') }}" required autocomplete="tel" inputmode="tel" maxlength="80"></div>
+              <div class="field full"><label class="field-label" for="rueckrufwunsch">Wann dürfen wir Sie zurückrufen? <span class="hint" style="display:inline;margin:0">(optional)</span></label><textarea id="rueckrufwunsch" name="rueckrufwunsch" maxlength="1000" placeholder="z. B. werktags ab 16 Uhr">{{ formdata.get('rueckrufwunsch', '') }}</textarea></div>
+            </div>
+            {% if ausgewaehlte_stellen %}<details class="choice-details"><summary>Stelle ändern oder weitere Stelle auswählen</summary>{% endif %}
+            <fieldset><legend>Bereich auswählen *</legend><span class="hint">Wählen Sie eine oder mehrere Stellen.</span><div class="choice-list">
+              {% for stelle in stellenanzeigen %}<label class="choice"><input type="checkbox" name="stellen_id" value="{{ stelle['id'] }}" {% if stelle['id']|string in ausgewaehlte_stellen %}checked{% endif %}><span><strong>{{ stelle['titel'] }}</strong><small>{{ stelle['kurzbeschreibung'] }}</small></span></label>{% endfor %}
+              <label class="choice"><input type="checkbox" name="stellen_id" value="initiativ" {% if 'initiativ' in ausgewaehlte_stellen %}checked{% endif %}><span><strong>Initiativbewerbung</strong><small>Mein Bereich ist nicht dabei oder ich bin für mehrere Aufgaben offen.</small></span></label>
+            </div></fieldset>
+            {% if ausgewaehlte_stellen %}</details>{% endif %}
+            <label class="privacy"><input type="checkbox" name="datenschutz" value="1" required {% if formdata.get('datenschutz') == '1' %}checked{% endif %}><span>Ich habe die <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzhinweise</a> gelesen und nehme zur Kenntnis, dass meine Angaben zur Bearbeitung meiner Kontaktanfrage und für den Rückruf verarbeitet werden. *</span></label>
+            <button class="submit" type="submit">Rückruf anfordern</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer><div class="wrap footer-row"><div>Gärtner Karosserie &amp; Lack GmbH · Binauer Höhe 4 · 74821 Mosbach-Lohrbach</div><div class="footer-links"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></div></footer>
+  {% include "_besucher_tracking.html" %}
+</body>
+</html>

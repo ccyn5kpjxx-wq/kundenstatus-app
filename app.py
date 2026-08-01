@@ -536,6 +536,27 @@ def get_request_base_url():
         return request.url_root.rstrip("/")
     return ""
 
+
+def urls_share_origin(first_url, second_url):
+    def origin_key(raw_url):
+        parsed = urlsplit(clean_text(raw_url))
+        scheme = clean_text(parsed.scheme).lower()
+        hostname = clean_text(parsed.hostname).lower().rstrip(".")
+        if not scheme or not hostname:
+            return None
+        try:
+            port = parsed.port
+        except ValueError:
+            return None
+        if port is None:
+            port = 443 if scheme == "https" else 80 if scheme == "http" else None
+        return scheme, hostname, port
+
+    first_origin = origin_key(first_url)
+    second_origin = origin_key(second_url)
+    return bool(first_origin and first_origin == second_origin)
+
+
 PARTNER_LOGO_CONFIG = {
     "autohaus-pfaff": {
         "filename": "partner_logos/auto-pfaff.png",
@@ -1137,6 +1158,50 @@ LEAD_QUELLEN = {
     "email": {"label": "E-Mail", "farbe": "warning"},
     "website": {"label": "Website", "farbe": "dark"},
 }
+
+BEWERBUNG_STATUS = {
+    "neu": {"label": "Neu", "farbe": "danger"},
+    "kontaktiert": {"label": "Kontaktiert", "farbe": "warning"},
+    "erledigt": {"label": "Erledigt", "farbe": "success"},
+}
+
+DEFAULT_STELLENANZEIGEN = (
+    {
+        "titel": "Ausbildung zum Fahrzeuglackierer (m/w/d)",
+        "slug": "ausbildung-zum-fahrzeuglackierer-m-w-d",
+        "kurzbeschreibung": "Ausbildung in Vorbereitung, Farbtonfindung, Lackierung und Finish.",
+        "beschreibung": "Sie lernen, Fahrzeugoberflächen vorzubereiten, Farbtöne zu bestimmen, Fahrzeuge fachgerecht zu lackieren und ein sauberes Finish herzustellen. Ausbildungsstart ab sofort.",
+        "typ": "Ausbildung",
+    },
+    {
+        "titel": "Ausbildung zum Kfz-Mechatroniker (m/w/d)",
+        "slug": "ausbildung-zum-kfz-mechatroniker-m-w-d",
+        "kurzbeschreibung": "Ausbildung in Wartung, Diagnose, Mechanik und Fahrzeugelektrik.",
+        "beschreibung": "Sie lernen Wartung, Diagnose, Arbeiten an Bremsen und Mechanik sowie den Umgang mit moderner Fahrzeugelektrik direkt in unserer Werkstattpraxis. Ausbildungsstart ab sofort.",
+        "typ": "Ausbildung",
+    },
+    {
+        "titel": "Kfz-Mechatroniker / Kfz-Fachkraft (m/w/d)",
+        "slug": "kfz-mechatroniker-kfz-fachkraft-m-w-d",
+        "kurzbeschreibung": "Wartung, Diagnose, Mechanik und Fahrzeugelektrik.",
+        "beschreibung": "Sie unterstützen uns bei Wartung, Fehlersuche und Diagnose sowie bei Arbeiten an Bremsen, Mechanik und Fahrzeugelektrik. Einstieg ab sofort.",
+        "typ": "Fachkraft",
+    },
+    {
+        "titel": "Fahrzeuglackierer (m/w/d)",
+        "slug": "fahrzeuglackierer-m-w-d",
+        "kurzbeschreibung": "Vorbereitung, Farbtonfindung, Lackierung und Finish.",
+        "beschreibung": "Sie übernehmen Vorbereitungsarbeiten, Farbtonfindung, Fahrzeuglackierung und Finish im Bereich der Unfallinstandsetzung. Einstieg ab sofort.",
+        "typ": "Fachkraft",
+    },
+    {
+        "titel": "Lackierhelfer (m/w/d)",
+        "slug": "lackierhelfer-m-w-d",
+        "kurzbeschreibung": "Schleifen, Abdecken und Unterstützung in der Lackiervorbereitung.",
+        "beschreibung": "Sie unterstützen unser Lackierteam bei Schleif-, Abdeck- und Vorbereitungsarbeiten sowie rund um Lackierung und Finish. Einstieg ab sofort.",
+        "typ": "Helfer",
+    },
+)
 
 LEAD_WEBSITES = {
     "auto-lackierzentrum": {
@@ -2715,6 +2780,7 @@ def inject_csrf_helpers():
         "csrf_field": csrf_field,
         "admin_postfach_count": admin_postfach_count,
         "admin_leads_count": admin_leads_count,
+        "admin_bewerbungen_count": admin_bewerbungen_count,
         "fahrzeugsuche_count": fahrzeugsuche_count,
         "fahrzeugsuche_auktion_alert_count": fahrzeugsuche_auktion_alert_count,
         "fahrzeugverkauf_count": fahrzeugverkauf_count,
@@ -2929,6 +2995,7 @@ def restrict_public_site_service():
         "oeffentliche_leistungen",
         "oeffentliche_portale",
         "oeffentliches_team",
+        "oeffentliche_karriere",
         "impressum_seite",
         "datenschutz_seite",
         "api_besucher_event",
@@ -8038,6 +8105,8 @@ BACKUP_TABLES = (
     "lead_dateien",
     "lead_mail_log",
     "lead_portal_log",
+    "stellenanzeigen",
+    "bewerbungen",
     "fahrzeugsuchen",
     "fahrzeugsuche_dateien",
     "fahrzeug_kandidaten",
@@ -8083,7 +8152,7 @@ BACKUP_TABLES = (
     "mitarbeiter_urlaub",
     "google_ads_tageswerte",
 )
-BACKUP_FORMAT_VERSION = 3
+BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
 BACKUP_BINARY_FIELDS = {
     "mietvertrag_versionen": {
@@ -8581,6 +8650,31 @@ def init_db():
             quelle TEXT DEFAULT 'system', titel TEXT DEFAULT '', nachricht TEXT DEFAULT '',
             kunden_sichtbar INTEGER DEFAULT 1, erstellt_am TEXT NOT NULL,
             FOREIGN KEY (lead_id) REFERENCES leads(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS stellenanzeigen (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            titel             TEXT NOT NULL,
+            kurzbeschreibung  TEXT DEFAULT '',
+            beschreibung      TEXT DEFAULT '',
+            aktiv             INTEGER DEFAULT 1,
+            sortierung        INTEGER DEFAULT 0,
+            erstellt_am       TEXT NOT NULL,
+            geaendert_am      TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS bewerbungen (
+            id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+            stellen_ids_json           TEXT DEFAULT '[]',
+            bereiche                    TEXT DEFAULT '',
+            name                        TEXT NOT NULL,
+            telefon                     TEXT NOT NULL,
+            rueckrufwunsch              TEXT DEFAULT '',
+            datenschutz_bestaetigt_am   TEXT NOT NULL,
+            status                      TEXT DEFAULT 'neu',
+            notiz_intern                TEXT DEFAULT '',
+            erstellt_am                 TEXT NOT NULL,
+            geaendert_am                TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS fahrzeugsuchen (
@@ -9548,6 +9642,26 @@ def init_db():
     ensure_index(db, "idx_lead_dateien_lead_id", "lead_dateien", ("lead_id", "id"))
     ensure_index(db, "idx_lead_mail_log_lead_id", "lead_mail_log", ("lead_id", "id"))
     ensure_index(db, "idx_lead_portal_log_lead_id", "lead_portal_log", ("lead_id", "id"))
+    ensure_index(db, "idx_stellenanzeigen_aktiv_sortierung", "stellenanzeigen", ("aktiv", "sortierung", "id"))
+    ensure_index(db, "idx_bewerbungen_status_id", "bewerbungen", ("status", "id"))
+    if not db.execute("SELECT id FROM stellenanzeigen LIMIT 1").fetchone():
+        zeitpunkt = now_str()
+        for sortierung, stelle in enumerate(DEFAULT_STELLENANZEIGEN, start=1):
+            db.execute(
+                """
+                INSERT INTO stellenanzeigen
+                  (titel, kurzbeschreibung, beschreibung, aktiv, sortierung, erstellt_am, geaendert_am)
+                VALUES (?, ?, ?, 1, ?, ?, ?)
+                """,
+                (
+                    stelle["titel"],
+                    stelle["kurzbeschreibung"],
+                    stelle["beschreibung"],
+                    sortierung,
+                    zeitpunkt,
+                    zeitpunkt,
+                ),
+            )
     db.execute("""
         UPDATE leads SET website='tomorrowworks'
         WHERE COALESCE(source_email_id, 0) IN (
@@ -42295,7 +42409,237 @@ def homepage_portal_links():
         "anfrage": link("website_anfrage", "/anfrage"),
         "partner": link("partner_login", "/partner"),
         "versicherung": link("versicherung_login", "/versicherung"),
+        "karriere": link("oeffentliche_karriere", "/karriere"),
     }
+
+
+def hydrate_stellenanzeige(row):
+    stelle = dict(row or {})
+    stelle["id"] = int(stelle.get("id") or 0)
+    stelle["titel"] = clean_text(stelle.get("titel"))
+    stelle["kurzbeschreibung"] = clean_text(stelle.get("kurzbeschreibung"))
+    stelle["beschreibung"] = clean_text(stelle.get("beschreibung"))
+    stelle["aktiv"] = bool(stelle.get("aktiv"))
+    stelle["sortierung"] = int(stelle.get("sortierung") or 0)
+    stelle["slug"] = slugify(stelle["titel"])
+    return stelle
+
+
+def list_stellenanzeigen(nur_aktive=False):
+    db = get_db()
+    try:
+        where = "WHERE aktiv=1" if nur_aktive else ""
+        rows = db.execute(
+            f"SELECT * FROM stellenanzeigen {where} ORDER BY sortierung ASC, id ASC"
+        ).fetchall()
+        return [hydrate_stellenanzeige(row) for row in rows]
+    finally:
+        db.close()
+
+
+def get_stellenanzeige(stellen_id):
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT * FROM stellenanzeigen WHERE id=?",
+            (int(stellen_id),),
+        ).fetchone()
+        return hydrate_stellenanzeige(row) if row else None
+    finally:
+        db.close()
+
+
+def stellenanzeige_payload_from_form(form):
+    titel = clean_text(form.get("titel"))[:180]
+    if len(titel) < 3:
+        raise ValueError("Bitte einen vollständigen Stellentitel eintragen.")
+    try:
+        sortierung = int(clean_text(form.get("sortierung")) or 0)
+    except (TypeError, ValueError):
+        sortierung = 0
+    return {
+        "titel": titel,
+        "kurzbeschreibung": clean_text(form.get("kurzbeschreibung"))[:400],
+        "beschreibung": clean_text(form.get("beschreibung"))[:6000],
+        "aktiv": 1 if clean_text(form.get("aktiv")) == "1" else 0,
+        "sortierung": max(-999, min(999, sortierung)),
+    }
+
+
+def create_stellenanzeige(payload):
+    jetzt = now_str()
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO stellenanzeigen
+              (titel, kurzbeschreibung, beschreibung, aktiv, sortierung, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                payload["titel"],
+                payload["kurzbeschreibung"],
+                payload["beschreibung"],
+                int(payload["aktiv"]),
+                int(payload["sortierung"]),
+                jetzt,
+                jetzt,
+            ),
+        )
+        db.commit()
+        return int(cursor.lastrowid)
+    finally:
+        db.close()
+
+
+def update_stellenanzeige(stellen_id, payload):
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            UPDATE stellenanzeigen
+            SET titel=?, kurzbeschreibung=?, beschreibung=?, aktiv=?, sortierung=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                payload["titel"],
+                payload["kurzbeschreibung"],
+                payload["beschreibung"],
+                int(payload["aktiv"]),
+                int(payload["sortierung"]),
+                now_str(),
+                int(stellen_id),
+            ),
+        )
+        db.commit()
+        return bool(cursor.rowcount)
+    finally:
+        db.close()
+
+
+def hydrate_bewerbung(row):
+    bewerbung = dict(row or {})
+    bewerbung["id"] = int(bewerbung.get("id") or 0)
+    bewerbung["name"] = clean_text(bewerbung.get("name"))
+    bewerbung["telefon"] = clean_text(bewerbung.get("telefon"))
+    telefon_digits = re.sub(r"\D", "", bewerbung["telefon"])
+    bewerbung["telefon_link"] = (
+        ("+" if bewerbung["telefon"].lstrip().startswith("+") else "") + telefon_digits
+    )
+    bewerbung["bereiche"] = clean_text(bewerbung.get("bereiche"))
+    bewerbung["rueckrufwunsch"] = clean_text(bewerbung.get("rueckrufwunsch"))
+    bewerbung["notiz_intern"] = clean_text(bewerbung.get("notiz_intern"))
+    status = clean_text(bewerbung.get("status"))
+    bewerbung["status"] = status if status in BEWERBUNG_STATUS else "neu"
+    bewerbung["status_meta"] = BEWERBUNG_STATUS[bewerbung["status"]]
+    try:
+        stellen_ids = json.loads(clean_text(bewerbung.get("stellen_ids_json")) or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        stellen_ids = []
+    bewerbung["stellen_ids"] = [int(value) for value in stellen_ids if str(value).isdigit()]
+    return bewerbung
+
+
+def create_bewerbung(stellen_ids, bereiche, name, telefon, rueckrufwunsch=""):
+    jetzt = now_str()
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO bewerbungen
+              (stellen_ids_json, bereiche, name, telefon, rueckrufwunsch,
+               datenschutz_bestaetigt_am, status, notiz_intern, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, 'neu', '', ?, ?)
+            """,
+            (
+                json.dumps([int(value) for value in stellen_ids], ensure_ascii=False),
+                " · ".join(clean_text(value) for value in bereiche if clean_text(value)),
+                clean_text(name)[:160],
+                clean_text(telefon)[:80],
+                clean_text(rueckrufwunsch)[:1000],
+                jetzt,
+                jetzt,
+                jetzt,
+            ),
+        )
+        db.commit()
+        return int(cursor.lastrowid)
+    finally:
+        db.close()
+
+
+def list_bewerbungen():
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT * FROM bewerbungen
+            ORDER BY CASE status WHEN 'neu' THEN 0 WHEN 'kontaktiert' THEN 1 ELSE 2 END,
+                     id DESC
+            """
+        ).fetchall()
+        return [hydrate_bewerbung(row) for row in rows]
+    finally:
+        db.close()
+
+
+def get_bewerbung(bewerbung_id):
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT * FROM bewerbungen WHERE id=?",
+            (int(bewerbung_id),),
+        ).fetchone()
+        return hydrate_bewerbung(row) if row else None
+    finally:
+        db.close()
+
+
+def update_bewerbung(bewerbung_id, status, notiz_intern=""):
+    status = clean_text(status)
+    if status not in BEWERBUNG_STATUS:
+        raise ValueError("Bitte einen gültigen Bewerbungsstatus auswählen.")
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            UPDATE bewerbungen
+            SET status=?, notiz_intern=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (status, clean_text(notiz_intern)[:3000], now_str(), int(bewerbung_id)),
+        )
+        db.commit()
+        return bool(cursor.rowcount)
+    finally:
+        db.close()
+
+
+def delete_bewerbung(bewerbung_id):
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "DELETE FROM bewerbungen WHERE id=?",
+            (int(bewerbung_id),),
+        )
+        db.commit()
+        return bool(cursor.rowcount)
+    finally:
+        db.close()
+
+
+def admin_bewerbungen_count():
+    try:
+        db = get_db()
+        try:
+            row = db.execute(
+                "SELECT COUNT(*) FROM bewerbungen WHERE status='neu'"
+            ).fetchone()
+            return int(row[0] or 0) if row else 0
+        finally:
+            db.close()
+    except Exception:
+        return 0
 
 
 WEBSITE_ANLIEGEN = {
@@ -42820,6 +43164,7 @@ def oeffentliche_homepage():
             "homepage.html",
             google_reviews=get_google_reviews(),
             portal_links=homepage_portal_links(),
+            homepage_stellenanzeigen=DEFAULT_STELLENANZEIGEN,
             site_indexable=public_site_is_indexable_request(),
             canonical_url=f"{PUBLIC_BASE_URL}/" if PUBLIC_BASE_URL else "",
         ),
@@ -42830,6 +43175,161 @@ def oeffentliche_homepage():
             "Expires": "0",
         },
     )
+
+
+def render_karriere(formdata=None, errors=None, gesendet=False, status_code=200):
+    formdata = formdata or {}
+    stellenanzeigen = list_stellenanzeigen(nur_aktive=True)
+    raw_auswahl = (
+        [clean_text(value) for value in formdata.getlist("stellen_id")]
+        if hasattr(formdata, "getlist")
+        else [clean_text(value) for value in formdata.get("stellen_id", [])]
+    )
+    gueltige_auswahl = {str(stelle["id"]) for stelle in stellenanzeigen} | {"initiativ"}
+    response = make_response(
+        render_template(
+            "homepage_karriere.html",
+            stellenanzeigen=stellenanzeigen,
+            formdata=formdata,
+            ausgewaehlte_stellen={value for value in raw_auswahl if value in gueltige_auswahl},
+            errors=errors or [],
+            gesendet=bool(gesendet),
+            portal_links=homepage_portal_links(),
+            # Die persistente Karriereseite liegt auf dem Portal-Dienst.
+            # Erst nach einer bewussten Domain-/Canonical-Entscheidung indexieren.
+            site_indexable=False,
+            canonical_url="",
+        ),
+        status_code,
+    )
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
+
+
+@app.route("/karriere")
+def oeffentliche_karriere():
+    vorauswahl = clean_text(request.args.get("stelle"))
+    # Die öffentliche Homepage läuft als absichtlich datenbanklose Instanz.
+    # Stellen und Bewerbungen liegen deshalb ausschließlich im persistenten Portal.
+    if is_public_site_request():
+        portal_ist_aktuelle_origin = urls_share_origin(
+            PORTAL_BASE_URL,
+            get_request_base_url(),
+        )
+        if PORTAL_BASE_URL and not portal_ist_aktuelle_origin:
+            target = f"{PORTAL_BASE_URL.rstrip('/')}/karriere"
+            if vorauswahl:
+                target += f"?stelle={quote(vorauswahl)}"
+            if vorauswahl:
+                target += "#bewerbung"
+            return redirect(target)
+        if PUBLIC_SITE_ONLY:
+            return (
+                "Die Karriereseite ist vorübergehend nicht erreichbar. Bitte rufen Sie uns unter 0152 277 066 94 an.",
+                503,
+                {"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store"},
+            )
+    if vorauswahl and vorauswahl != "initiativ" and not vorauswahl.isdigit():
+        passende_stelle = next(
+            (
+                stelle
+                for stelle in list_stellenanzeigen(nur_aktive=True)
+                if stelle["slug"] == vorauswahl
+            ),
+            None,
+        )
+        vorauswahl = str(passende_stelle["id"]) if passende_stelle else ""
+    formdata = (
+        {"stellen_id": [vorauswahl]}
+        if vorauswahl.isdigit() or vorauswahl == "initiativ"
+        else {}
+    )
+    gesendet = bool(
+        request.args.get("gesendet") == "1"
+        and session.pop("karriere_bewerbung_erfolgreich", None)
+    )
+    return render_karriere(
+        formdata=formdata,
+        gesendet=gesendet,
+    )
+
+
+@app.route("/karriere/bewerben", methods=["POST"])
+def karriere_bewerben():
+    limited, wait_seconds = public_form_rate_limit_status("karriere-bewerbung")
+    if limited:
+        return render_karriere(
+            formdata=request.form,
+            errors=[
+                f"Zu viele Anfragen in kurzer Zeit. Bitte in {login_wait_label(wait_seconds)} erneut versuchen oder uns anrufen."
+            ],
+            status_code=429,
+        )
+    record_public_form_attempt("karriere-bewerbung")
+    if clean_text(request.form.get("website")):
+        return redirect(url_for("oeffentliche_karriere"))
+
+    aktive_stellen = {str(stelle["id"]): stelle for stelle in list_stellenanzeigen(nur_aktive=True)}
+    raw_auswahl = list(
+        dict.fromkeys(
+            clean_text(value)
+            for value in request.form.getlist("stellen_id")
+            if clean_text(value)
+        )
+    )
+    stellen_ids = []
+    bereiche = []
+    errors = []
+    for value in raw_auswahl:
+        if value == "initiativ":
+            if "Initiativbewerbung" not in bereiche:
+                bereiche.append("Initiativbewerbung")
+            continue
+        stelle = aktive_stellen.get(value)
+        if not stelle:
+            errors.append("Bitte nur aktuell veröffentlichte Stellen auswählen.")
+            continue
+        stellen_ids.append(stelle["id"])
+        bereiche.append(stelle["titel"])
+
+    name = clean_text(request.form.get("name"))[:160]
+    telefon = clean_text(request.form.get("telefon"))[:80]
+    rueckrufwunsch = clean_text(request.form.get("rueckrufwunsch"))[:1000]
+    if not bereiche:
+        errors.append("Bitte wählen Sie mindestens einen Bereich aus.")
+    if len(name) < 2:
+        errors.append("Bitte geben Sie Ihren Namen ein.")
+    if len(re.sub(r"\D", "", telefon)) < 7:
+        errors.append("Bitte geben Sie eine Telefonnummer ein, unter der wir Sie erreichen können.")
+    if clean_text(request.form.get("datenschutz")) != "1":
+        errors.append("Bitte bestätigen Sie, dass Sie die Datenschutzhinweise zur Kenntnis genommen haben.")
+    if errors:
+        return render_karriere(formdata=request.form, errors=list(dict.fromkeys(errors)), status_code=400)
+
+    bewerbung_id = create_bewerbung(
+        stellen_ids,
+        bereiche,
+        name,
+        telefon,
+        rueckrufwunsch,
+    )
+    schedule_change_backup("karriere-bewerbung")
+    sende_oeffentliche_anfrage_benachrichtigung(
+        "karriere-bewerbung",
+        bewerbung_id,
+        f"Neue Rückrufbewerbung – {name}",
+        [
+            "Eine neue Rückrufbewerbung ist über die Karriereseite eingegangen.",
+            "",
+            f"Name: {name}",
+            f"Telefon: {telefon}",
+            f"Bereich: {' · '.join(bereiche)}",
+            f"Rückrufwunsch: {rueckrufwunsch or '-'}",
+        ],
+        admin_pfad=f"/admin/karriere#bewerbung-{bewerbung_id}",
+    )
+    session["karriere_bewerbung_erfolgreich"] = int(bewerbung_id)
+    return redirect(url_for("oeffentliche_karriere", gesendet=1) + "#bewerbung")
 
 
 @app.route("/leistungen")
@@ -45175,9 +45675,15 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         # Vor Einführung der Google-Ads-Kosten gab es diese Tabelle in
         # vorhandenen Sicherungen noch nicht. Alte Pakete bleiben importierbar.
         "google_ads_tageswerte",
+        # Karriere und Rückrufbewerbungen wurden später ergänzt. Ältere
+        # Sicherungen dürfen weiterhin ohne diese Tabellen importiert werden.
+        "stellenanzeigen",
+        "bewerbungen",
     }
     if format_version >= 3:
         required_tables.add("fahrzeugeinkauf_scan_treffer")
+    if format_version >= 4:
+        required_tables.update({"stellenanzeigen", "bewerbungen"})
     missing_tables = sorted(required_tables - set(tables))
     if missing_tables:
         raise ValueError(
@@ -45318,6 +45824,33 @@ def replace_uploads_from_import(imported_uploads):
     for imported_upload in imported_uploads.iterdir():
         if imported_upload.is_file():
             shutil.copy2(imported_upload, UPLOAD_DIR / imported_upload.name)
+
+
+def copy_sqlite_database_snapshot(source_path, destination_path, keep_target_wal=False):
+    """Kopiert eine konsistente SQLite-Sicht inklusive eines vorhandenen WAL.
+
+    Ein normales ``copy2`` erfasst nur die Hauptdatei. Bei aktivem WAL kann
+    dadurch entweder der aktuelle Stand fehlen oder ein altes Ziel-WAL nach
+    dem Kopieren wieder eingespielt werden. Die SQLite-Backup-API koordiniert
+    die Dateisperren und schreibt den Zielstand transaktional.
+    """
+    source = sqlite3.connect(source_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS)
+    target = sqlite3.connect(destination_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS)
+    busy_timeout_ms = SQLITE_BUSY_TIMEOUT_SECONDS * 1000
+    try:
+        source.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
+        target.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
+        source.backup(target, pages=1000, sleep=0.05)
+        target.commit()
+        if keep_target_wal:
+            journal_row = target.execute("PRAGMA journal_mode=WAL").fetchone()
+            if not journal_row or clean_text(journal_row[0]).lower() != "wal":
+                raise RuntimeError("SQLite WAL konnte nach dem Import nicht aktiviert werden.")
+            target.execute("PRAGMA wal_autocheckpoint=1000")
+            target.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        source.close()
+        target.close()
 
 
 def reset_postgres_id_sequences(db):
@@ -45540,15 +46073,22 @@ def admin_daten_import():
                     DATA_DIR.mkdir(exist_ok=True)
                     backup_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
                     if DB.exists():
-                        shutil.copy2(DB, DATA_DIR / f"auftraege.backup-{backup_suffix}.db")
-                    shutil.copy2(imported_db, DB)
+                        copy_sqlite_database_snapshot(
+                            DB,
+                            DATA_DIR / f"auftraege.backup-{backup_suffix}.db",
+                        )
+                    copy_sqlite_database_snapshot(
+                        imported_db,
+                        DB,
+                        keep_target_wal=True,
+                    )
                 replace_uploads_from_import(imported_uploads)
-                db = get_db()
-                try:
-                    backfill_existing_upload_backups(db)
-                    db.commit()
-                finally:
-                    db.close()
+                # Ein älteres Datenpaket kennt neuere Tabellen und Spalten noch
+                # nicht. Nach dem Austausch beziehungsweise Zeilenimport wird
+                # deshalb dieselbe idempotente Migration wie beim App-Start
+                # ausgeführt. Sie legt auch die Standard-Stellen wieder an,
+                # wenn ein Backup vor dem Karriere-Modul importiert wurde.
+                init_db()
 
         flash("Daten wurden importiert. Fahrzeuge und Dateien sind jetzt auf diesem Server verfügbar.", "success")
     except ValueError as exc:
@@ -47237,6 +47777,77 @@ def admin_fahrzeug_kandidat_kauf(suche_id, kandidat_id):
     schedule_change_backup("fahrzeugsuche-kauf")
     flash("Fahrzeugkauf im Prozess markiert und normaler Fahrzeugauftrag angelegt.", "success")
     return redirect(url_for("admin_fahrzeugsuche_detail", suche_id=suche_id) + "#prozess")
+
+
+@app.route("/admin/karriere")
+@admin_required
+def admin_karriere():
+    return render_template(
+        "karriere_admin.html",
+        stellenanzeigen=list_stellenanzeigen(),
+        bewerbungen=list_bewerbungen(),
+        bewerbung_status=BEWERBUNG_STATUS,
+    )
+
+
+@app.route("/admin/karriere/stellen", methods=["POST"])
+@admin_required
+def admin_stellenanzeige_neu():
+    try:
+        payload = stellenanzeige_payload_from_form(request.form)
+        create_stellenanzeige(payload)
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    else:
+        schedule_change_backup("stellenanzeige-neu")
+        flash("Stellenanzeige angelegt.", "success")
+    return redirect(url_for("admin_karriere") + "#stellenanzeigen")
+
+
+@app.route("/admin/karriere/stellen/<int:stellen_id>", methods=["POST"])
+@admin_required
+def admin_stellenanzeige_bearbeiten(stellen_id):
+    if not get_stellenanzeige(stellen_id):
+        abort(404)
+    try:
+        payload = stellenanzeige_payload_from_form(request.form)
+        update_stellenanzeige(stellen_id, payload)
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    else:
+        schedule_change_backup("stellenanzeige-bearbeitet")
+        flash("Stellenanzeige gespeichert.", "success")
+    return redirect(url_for("admin_karriere") + f"#stelle-{stellen_id}")
+
+
+@app.route("/admin/karriere/bewerbungen/<int:bewerbung_id>", methods=["POST"])
+@admin_required
+def admin_bewerbung_bearbeiten(bewerbung_id):
+    if not get_bewerbung(bewerbung_id):
+        abort(404)
+    try:
+        update_bewerbung(
+            bewerbung_id,
+            request.form.get("status"),
+            request.form.get("notiz_intern"),
+        )
+    except ValueError as exc:
+        flash(str(exc), "warning")
+    else:
+        schedule_change_backup("bewerbung-bearbeitet")
+        flash("Bewerbung gespeichert.", "success")
+    return redirect(url_for("admin_karriere") + f"#bewerbung-{bewerbung_id}")
+
+
+@app.route("/admin/karriere/bewerbungen/<int:bewerbung_id>/loeschen", methods=["POST"])
+@admin_required
+def admin_bewerbung_loeschen(bewerbung_id):
+    if not get_bewerbung(bewerbung_id):
+        abort(404)
+    delete_bewerbung(bewerbung_id)
+    schedule_change_backup("bewerbung-geloescht")
+    flash("Bewerbung und Kontaktdaten wurden gelöscht.", "success")
+    return redirect(url_for("admin_karriere") + "#bewerbungen")
 
 
 @app.route("/admin/leads", methods=["GET", "POST"])
