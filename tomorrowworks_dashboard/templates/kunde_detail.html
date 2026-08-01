@@ -11,10 +11,13 @@
         <div class="section-heading"><div><p class="eyebrow">Projekte</p><h2>Arbeit für {{ kunde['firma'] }}</h2></div><span class="result-count">{{ projekte|length }}</span></div>
         <div class="project-card-list">
         {% for projekt in projekte %}
-            <a class="project-card" href="{{ url_for('projekt_detail', projekt_id=projekt['id']) }}">
-                <div><small>{{ projekt_typ_labels.get(projekt['typ'], projekt['typ']) }}</small><h3>{{ projekt['titel'] }}</h3><p>{{ projekt['aktuelle_aufgabe'] or 'Nächster Schritt noch offen' }}</p></div>
-                <div class="project-card-meta"><span class="status-badge status-{{ projekt['status'] }}">{{ projekt_status_labels.get(projekt['status'], projekt['status']) }}</span><strong>{{ projekt['fortschritt'] }} %</strong><span>{{ projekt['zieldatum']|datum }}</span></div>
-            </a>
+            <div class="project-card-shell">
+                <a class="project-card" href="{{ url_for('projekt_detail', projekt_id=projekt['id']) }}">
+                    <div><small>{{ projekt_typ_labels.get(projekt['typ'], projekt['typ']) }}</small><h3>{{ projekt['titel'] }}</h3><p>{{ projekt['aktuelle_aufgabe'] or 'Nächster Schritt noch offen' }}</p></div>
+                    <div class="project-card-meta"><span class="status-badge status-{{ projekt['status'] }}">{{ projekt_status_labels.get(projekt['status'], projekt['status']) }}</span><strong>{{ projekt['fortschritt'] }} %</strong><span>{{ projekt['zieldatum']|datum }}</span></div>
+                </a>
+                <div class="project-card-tools"><span>Präsentation für den Kunden</span><a class="button button-video" href="{{ url_for('verkaufsvideo_form', projekt_id=projekt['id']) }}">▶ Verkaufsvideo generieren</a></div>
+            </div>
         {% else %}<div class="empty-state compact"><h3>Noch kein Projekt</h3><p>Starte mit dem ersten Auftrag für diesen Kunden.</p><a class="button button-primary" href="{{ url_for('projekt_neu', kunde=kunde['id']) }}">Projekt anlegen</a></div>{% endfor %}
         </div>
     </section>

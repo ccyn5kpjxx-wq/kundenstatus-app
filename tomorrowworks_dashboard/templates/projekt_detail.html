@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-header project-detail-header">
     <div><a class="back-link" href="{{ url_for('kunde_detail', kunde_id=projekt['kunde_id']) }}">← {{ projekt['kundenname'] }}</a><div class="title-with-badge"><h1>{{ projekt['titel'] }}</h1><span class="status-badge status-{{ projekt['status'] }}">{{ projekt_status_labels.get(projekt['status'], projekt['status']) }}</span></div><p>{{ projekt_typ_labels.get(projekt['typ'], projekt['typ']) }} · zuletzt aktualisiert {{ projekt['updated_at']|zeitpunkt }}</p></div>
-    <div class="header-actions"><a class="button button-ticket" href="{{ url_for('kunden_ticket', kunde_id=projekt['kunde_id']) }}">Kunden-Ticket</a>{% if interne_vorschau_url %}<a class="button button-preview" href="{{ interne_vorschau_url }}" target="_blank" rel="noopener">Interne Vorschau ↗</a>{% elif projekt['vorschau_url'] %}<a class="button button-preview" href="{{ projekt['vorschau_url'] }}" target="_blank" rel="noopener">Vorschau öffnen ↗</a>{% endif %}<a class="button button-secondary" href="{{ url_for('projekt_bearbeiten', projekt_id=projekt['id']) }}">Bearbeiten</a></div>
+    <div class="header-actions"><a class="button button-ticket" href="{{ url_for('kunden_ticket', kunde_id=projekt['kunde_id']) }}">Kunden-Ticket</a>{% if interne_vorschau_url %}<a class="button button-preview" href="{{ interne_vorschau_url }}" target="_blank" rel="noopener">Interne Vorschau ↗</a>{% elif projekt['vorschau_url'] %}<a class="button button-preview" href="{{ projekt['vorschau_url'] }}" target="_blank" rel="noopener">Vorschau öffnen ↗</a>{% endif %}<a class="button button-video" href="{{ url_for('verkaufsvideo_form', projekt_id=projekt['id']) }}">▶ Verkaufsvideo</a><a class="button button-secondary" href="{{ url_for('projekt_bearbeiten', projekt_id=projekt['id']) }}">Bearbeiten</a></div>
 </header>
 
 <div class="project-overview-grid">
@@ -26,6 +26,19 @@
         </form>
     </aside>
 </div>
+
+<section class="content-card project-sales-video-card" id="verkaufsvideo">
+    <div class="section-heading"><div><p class="eyebrow">Kundenpräsentation</p><h2>Verkaufsvideo</h2></div><span class="sales-video-private-badge"><i></i> nur intern</span></div>
+    {% if video_dateien %}
+    {% set video = video_dateien[0] %}
+    <div class="project-video-ready">
+        <video controls preload="metadata" playsinline src="{{ url_for('projekt_datei', datei_id=video['id']) }}"></video>
+        <div><span class="sync-badge sync-aktuell">Bereit</span><h3>{{ video['original_name'] }}</h3><p>Der Film zeigt den Entwurf und die nächsten Potenziale. Er wurde noch nicht an den Kunden gesendet.</p><div class="project-video-actions"><a class="button button-primary" href="{{ url_for('projekt_datei', datei_id=video['id'], download=1) }}">MP4 herunterladen</a><a class="button button-secondary" href="{{ url_for('verkaufsvideo_form', projekt_id=projekt['id']) }}">Neu generieren</a></div></div>
+    </div>
+    {% else %}
+    <div class="project-video-empty"><div><span class="sales-video-mark">PLAY</span><h3>Homepage, Visitenkarten und Potenziale in einem Film</h3><p>Aus den geschützten Projektdateien entsteht eine kurze HD-Präsentation. Versand und Kundenfreigabe bleiben immer ein bewusster Schritt.</p></div><a class="button button-video" href="{{ url_for('verkaufsvideo_form', projekt_id=projekt['id']) }}">▶ Verkaufsvideo generieren</a></div>
+    {% endif %}
+</section>
 
 <section class="content-card integration-section" id="verbindung">
     <div class="section-heading"><div><p class="eyebrow">Automatische Verbindung</p><h2>Codex, Claude, Git & interne Vorschau</h2></div><span class="live-indicator"><i></i> wird automatisch geprüft</span></div>

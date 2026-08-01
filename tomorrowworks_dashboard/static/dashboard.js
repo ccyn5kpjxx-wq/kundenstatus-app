@@ -24,6 +24,16 @@
         });
     });
 
+    document.querySelectorAll("[data-sales-video-form]").forEach((form) => {
+        form.addEventListener("submit", () => {
+            const button = form.querySelector("[data-sales-video-submit]");
+            if (!button || button.disabled) return;
+            button.disabled = true;
+            button.textContent = "Film wird erzeugt …";
+            form.classList.add("is-generating-video");
+        });
+    });
+
     document.querySelectorAll("[data-copy]").forEach((button) => {
         button.addEventListener("click", async () => {
             try {

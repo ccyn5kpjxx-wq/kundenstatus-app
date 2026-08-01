@@ -51,6 +51,11 @@ try:
 except ModuleNotFoundError:
     from notifications import mail_senden
 
+try:
+    from tomorrowworks_dashboard.sales_video import SalesVideoError, SalesVideoSource, create_sales_video
+except ModuleNotFoundError:
+    from sales_video import SalesVideoError, SalesVideoSource, create_sales_video
+
 
 BASE_DIR = Path(__file__).resolve().parent
 REPOSITORY_DIR = BASE_DIR.parent
@@ -91,6 +96,9 @@ PRIORITAETEN = [
 
 TEAM_FARBEN = ["#ff641a", "#5b8def", "#8b5cf6", "#16a085", "#d35400", "#be3f75"]
 ERLAUBTE_DATEIEN = {"pdf", "png", "jpg", "jpeg", "webp"}
+VIDEO_QUELLDATEIEN = {"pdf", "png", "jpg", "jpeg", "webp"}
+VIDEO_DATEIEN = {"mp4"}
+VIDEO_GENERATION_LOCK = threading.Lock()
 PORTAL_DATEIEN = {"pdf", "png", "jpg", "jpeg", "webp", "docx", "xlsx", "zip", "ai", "eps", "svg"}
 ANGEBOT_STATUS_LABELS = {
     "entwurf": "Entwurf",
@@ -721,6 +729,39 @@ def _int_form(name: str, default: int = 0, minimum: int = 0, maximum: int = 100)
     except (TypeError, ValueError):
         value = default
     return min(max(value, minimum), maximum)
+
+
+def _zeilen(value: str, *, maximum: int, laenge: int) -> list[str]:
+    return [zeile.strip()[:laenge] for zeile in (value or "").splitlines() if zeile.strip()][:maximum]
+
+
+def _verkaufsvideo_standardtexte(projekt: sqlite3.Row) -> dict[str, str]:
+    kundenname = projekt["kundenname"]
+    return {
+        "headline": f"{kundenname} digital erleben.",
+        "subtitle": "Ein kompakter Rundgang durch den aktuellen Entwurf – mit den nächsten Chancen für mehr Sichtbarkeit und Anfragen.",
+        "kapitel": "\n".join(
+            (
+                "Startseite & Positionierung",
+                "Angebote & Leistungen",
+                "Termine & Buchung",
+                "Referenzen & Galerie",
+                "Persönlichkeit & Vertrauen",
+                "Kontakt & Anfrage",
+                "Visitenkarte & QR-Code",
+                "Marke & Wiedererkennung",
+            )
+        ),
+        "potenziale": "\n".join(
+            (
+                "Online-Termin- oder Kursbuchung direkt aus der Website",
+                "Google-Unternehmensprofil und lokale Auffindbarkeit sauber ausbauen",
+                "Google Ads erst nach Freigabe gezielt auf passende Suchanfragen ausrichten",
+                "WhatsApp- und Kontaktanfragen einfacher und messbar machen",
+            )
+        ),
+        "cta": "Wie gefällt Ihnen der aktuelle Stand? Lassen Sie uns die nächsten Schritte gemeinsam festlegen.",
+    }
 
 
 def _initialen(name: str) -> str:
@@ -1981,6 +2022,10 @@ def register_routes(app: Flask) -> None:
             """,
             (projekt_id,),
         ).fetchall()
+        video_dateien = [
+            datei for datei in dateien
+            if Path(datei["original_name"]).suffix.lower().lstrip(".") in VIDEO_DATEIEN
+        ]
         interne_url = interne_vorschau_url(projekt)
         agent_script = str((BASE_DIR / "agent_sync.py").resolve())
         dashboard_url = request.url_root.rstrip("/")
@@ -2008,11 +2053,194 @@ def register_routes(app: Flask) -> None:
             team=team,
             aktivitaeten=aktivitaeten,
             dateien=dateien,
+            video_dateien=video_dateien,
             interne_vorschau_url=interne_url,
             preview_team_urls=list(dict.fromkeys(preview_team_urls)),
             agent_befehl=agent_befehl,
             agent_anweisung=agent_anweisung,
         )
+
+    @app.get("/projekte/<int:projekt_id>/verkaufsvideo")
+    @login_required
+    def verkaufsvideo_form(projekt_id: int):
+        projekt = _projekt_oder_404(projekt_id)
+        dateien = get_db().execute(
+            """
+            SELECT * FROM projekt_dateien
+            WHERE projekt_id = ? ORDER BY created_at DESC, id DESC
+            """,
+            (projekt_id,),
+        ).fetchall()
+        quell_dateien = [
+            datei for datei in dateien
+            if Path(datei["original_name"]).suffix.lower().lstrip(".") in VIDEO_QUELLDATEIEN
+        ]
+        # Für einen nachvollziehbaren Rundgang stehen Quellen in Upload-Reihenfolge.
+        # Das zuletzt erzeugte Video bleibt dagegen oben in der Vorschau.
+        quell_dateien.reverse()
+        bestehende_videos = [
+            datei for datei in dateien
+            if Path(datei["original_name"]).suffix.lower().lstrip(".") in VIDEO_DATEIEN
+        ]
+        return render_template(
+            "verkaufsvideo_form.html",
+            projekt=projekt,
+            quell_dateien=quell_dateien,
+            bestehende_videos=bestehende_videos,
+            werte=_verkaufsvideo_standardtexte(projekt),
+        )
+
+    @app.post("/projekte/<int:projekt_id>/verkaufsvideo")
+    @login_required
+    def verkaufsvideo_generieren(projekt_id: int):
+        projekt = _projekt_oder_404(projekt_id)
+        ausgewaehlte_ids: list[int] = []
+        for raw in request.form.getlist("datei_ids"):
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if value > 0 and value not in ausgewaehlte_ids:
+                ausgewaehlte_ids.append(value)
+        if len(ausgewaehlte_ids) > 8:
+            flash("Bitte höchstens acht Quelldateien auswählen. Der Film zeigt maximal zehn Ansichten.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+
+        source_rows: list[sqlite3.Row] = []
+        if ausgewaehlte_ids:
+            platzhalter = ",".join("?" for _ in ausgewaehlte_ids)
+            rows = get_db().execute(
+                f"SELECT * FROM projekt_dateien WHERE projekt_id = ? AND id IN ({platzhalter})",
+                (projekt_id, *ausgewaehlte_ids),
+            ).fetchall()
+            row_map = {row["id"]: row for row in rows}
+            source_rows = [row_map[datei_id] for datei_id in ausgewaehlte_ids if datei_id in row_map]
+            if len(source_rows) != len(ausgewaehlte_ids) or any(
+                Path(row["original_name"]).suffix.lower().lstrip(".") not in VIDEO_QUELLDATEIEN
+                for row in source_rows
+            ):
+                abort(400)
+
+        headline = request.form.get("headline", "").strip()[:140]
+        subtitle = request.form.get("subtitle", "").strip()[:320]
+        cta = request.form.get("cta", "").strip()[:240]
+        kapitel = _zeilen(request.form.get("kapitel", ""), maximum=12, laenge=90)
+        potenziale = _zeilen(request.form.get("potenziale", ""), maximum=4, laenge=170)
+        dauer = _int_form("foliendauer", 4, 2, 5)
+        if not headline or not subtitle or not cta or not potenziale:
+            flash("Bitte Titel, Kurzbeschreibung, Potenziale und Abschluss vollständig ausfüllen.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+
+        upload_root = Path(app.config["UPLOAD_FOLDER"]).resolve()
+        sources: list[SalesVideoSource] = []
+        for row in source_rows:
+            path = (upload_root / row["gespeichert_name"]).resolve()
+            if path.parent != upload_root or not path.is_file():
+                flash(f"Die Projektdatei ‚{row['original_name']}‘ ist nicht mehr verfügbar.", "error")
+                return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+            sources.append(SalesVideoSource(path=path, display_name=row["original_name"]))
+
+        if not VIDEO_GENERATION_LOCK.acquire(blocking=False):
+            flash("Gerade wird bereits ein Verkaufsvideo erzeugt. Bitte in einem Moment erneut starten.", "info")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+
+        gespeichert_name = f"{projekt_id}_verkaufsvideo_{uuid4().hex}.mp4"
+        output_path = upload_root / gespeichert_name
+        try:
+            result = create_sales_video(
+                sources,
+                output_path,
+                customer_name=projekt["kundenname"],
+                project_title=projekt["titel"],
+                headline=headline,
+                subtitle=subtitle,
+                chapters=kapitel,
+                potentials=potenziale,
+                cta=cta,
+                progress=projekt["fortschritt"],
+                seconds_per_slide=dauer,
+            )
+        except SalesVideoError as exc:
+            try:
+                output_path.unlink(missing_ok=True)
+            except OSError:
+                current_app.logger.warning("Unvollständiges Verkaufsvideo konnte nicht gelöscht werden: %s", output_path)
+            flash(str(exc), "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+        except Exception:
+            current_app.logger.exception("Unerwarteter Fehler beim Verkaufsvideo für Projekt %s", projekt_id)
+            try:
+                output_path.unlink(missing_ok=True)
+            except OSError:
+                current_app.logger.warning("Unvollständiges Verkaufsvideo konnte nicht gelöscht werden: %s", output_path)
+            flash("Das Verkaufsvideo konnte unerwartet nicht erzeugt werden. Bitte später erneut versuchen.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+        finally:
+            VIDEO_GENERATION_LOCK.release()
+
+        try:
+            video_size = output_path.stat().st_size
+        except OSError:
+            current_app.logger.exception("Erzeugtes Verkaufsvideo ist nicht lesbar: %s", output_path)
+            flash("Die erzeugte MP4-Datei konnte nicht sicher gelesen werden.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+        if video_size > 20 * 1024 * 1024:
+            try:
+                output_path.unlink(missing_ok=True)
+            except OSError:
+                current_app.logger.warning("Zu großes Verkaufsvideo konnte nicht gelöscht werden: %s", output_path)
+            flash("Das Video wäre größer als 20 MB. Bitte weniger Quelldateien auswählen.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+
+        original_name = secure_filename(
+            f"Verkaufsvideo_{projekt['kundenname']}_{date.today().isoformat()}.mp4"
+        ) or f"Verkaufsvideo_Projekt-{projekt_id}_{date.today().isoformat()}.mp4"
+        db = get_db()
+        alte_videos = db.execute(
+            """
+            SELECT id, gespeichert_name FROM projekt_dateien
+            WHERE projekt_id = ? AND mimetype = 'video/mp4' AND original_name LIKE 'Verkaufsvideo_%'
+            """,
+            (projekt_id,),
+        ).fetchall()
+        try:
+            db.execute(
+                "DELETE FROM projekt_dateien WHERE projekt_id = ? AND mimetype = 'video/mp4' AND original_name LIKE 'Verkaufsvideo_%'",
+                (projekt_id,),
+            )
+            db.execute(
+                """
+                INSERT INTO projekt_dateien
+                  (projekt_id, original_name, gespeichert_name, mimetype, hochgeladen_von, created_at)
+                VALUES (?, ?, ?, 'video/mp4', ?, ?)
+                """,
+                (projekt_id, original_name, gespeichert_name, g.user["id"], jetzt()),
+            )
+            db.execute("UPDATE projekte SET updated_at = ? WHERE id = ?", (jetzt(), projekt_id))
+            _aktivitaet(
+                projekt_id,
+                "Verkaufsvideo generiert · intern",
+                f"{result.slide_count} Folien · {result.duration_seconds} Sekunden · {result.source_count} Projektansichten · kein Kundenversand",
+            )
+            db.commit()
+        except sqlite3.Error:
+            db.rollback()
+            try:
+                output_path.unlink(missing_ok=True)
+            except OSError:
+                current_app.logger.warning("Nicht registriertes Verkaufsvideo konnte nicht gelöscht werden: %s", output_path)
+            flash("Das Video wurde erzeugt, konnte aber nicht sicher im Projekt gespeichert werden.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+        for altes_video in alte_videos:
+            alter_pfad = (upload_root / altes_video["gespeichert_name"]).resolve()
+            if alter_pfad.parent == upload_root:
+                try:
+                    alter_pfad.unlink(missing_ok=True)
+                except OSError:
+                    current_app.logger.warning("Altes Verkaufsvideo konnte nicht gelöscht werden: %s", alter_pfad)
+
+        flash("Verkaufsvideo wurde intern erzeugt und im Projekt gespeichert. Es wurde nichts an den Kunden gesendet.", "success")
+        return redirect(url_for("projekt_detail", projekt_id=projekt_id) + "#verkaufsvideo")
 
     @app.route("/projekte/<int:projekt_id>/bearbeiten", methods=["GET", "POST"])
     @login_required

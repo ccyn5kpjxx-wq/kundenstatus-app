@@ -37,6 +37,7 @@ Falls Windows nachfragt, Python nur für private Netzwerke freigeben.
 - geschützter Codex-/Claude-Endpunkt für Status, Aufgabe und Fortschritt
 - externe Vorschau-, Repository- und lokale Projektpfade
 - geschützte PDF- und Bilddateien
+- intern erzeugte Verkaufsvideos aus Homepage-PDFs, Screenshots und Printentwürfen
 - Projektaktivität und Notizen
 - Filter nach Status, Mitarbeiter und Suchbegriff
 
@@ -53,6 +54,20 @@ Falls Windows nachfragt, Python nur für private Netzwerke freigeben.
    kundenlesbare Neuerung im Ticket veröffentlicht und die Kunden-E-Mail ausgelöst.
 5. Erst nach Bezahlung/Freigabe eine Kundendomain oder ein öffentliches Hosting
    hinterlegen.
+
+## Verkaufsvideos
+
+In jeder Kundenakte und jedem Projekt führt **Verkaufsvideo generieren** zu einem
+internen Assistenten. Mit ausgewählten, geschützten PDF- und Bilddateien des
+Projekts entsteht ein visueller Rundgang mit höchstens zehn Ansichten. Ohne
+Bildmaterial erzeugt der Assistent zunächst einen Projekt- und Potenzialfilm.
+Das begrenzte HD-MP4 ersetzt bei einer Neugenerierung die vorherige automatische
+Fassung und schützt den persistenten Speicher vor unbegrenzten Dubletten.
+
+Die Generierung erstellt nur eine interne Projektdatei und einen internen
+Aktivitätseintrag. Sie ruft weder Kunden-Ticket noch E-Mail oder WhatsApp auf.
+Vor jedem Versand bleibt deshalb eine bewusste Prüfung und Freigabe durch das
+Team erforderlich. Maximal eine Generierung läuft gleichzeitig.
 
 Beispiel für ein Agenten-Update (den fertigen Befehl mit Projekt-ID und Schlüssel
 zeigt das Dashboard bereits an):
