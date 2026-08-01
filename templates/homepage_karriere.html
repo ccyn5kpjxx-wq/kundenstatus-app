@@ -14,7 +14,19 @@
     :root { --red:#e3231b; --red-dark:#ba1913; --ink:#f7f4ee; --muted:#bcb8b1; --panel:#292a29; --panel-2:#343533; --paper:#f2ede5; --text:#282826; --line:rgba(255,255,255,.13); }
     * { box-sizing:border-box; }
     html { scroll-behavior:smooth; }
-    body { margin:0; color:var(--ink); background:#171817 url("{{ url_for('static', filename='homepage/ziegelwand-schwarz-v1.webp') }}") center top/900px auto repeat; font-family:"DM Sans",sans-serif; }
+    body {
+      margin:0;
+      color:var(--ink);
+      background-color:#171817;
+      background-image:
+        linear-gradient(rgba(10,11,10,.1),rgba(10,11,10,.16)),
+        url("{{ url_for('static', filename='homepage/ziegelwand-graffiti-karriere-v1.webp') }}");
+      background-position:center center;
+      background-size:cover;
+      background-repeat:no-repeat;
+      background-attachment:fixed;
+      font-family:"DM Sans",sans-serif;
+    }
     body::before { content:""; position:fixed; inset:0; z-index:-1; background:rgba(14,15,14,.72); }
     a { color:inherit; }
     button,input,textarea { font:inherit; }
@@ -22,6 +34,7 @@
     .skip-link { position:fixed; top:8px; left:8px; z-index:20; padding:10px 14px; color:#111; background:#fff; transform:translateY(-160%); }
     .skip-link:focus { transform:none; }
     header { position:sticky; top:0; z-index:10; border-bottom:1px solid rgba(227,35,27,.72); background:rgba(31,32,31,.96); backdrop-filter:blur(14px); }
+    #stellen,#bewerbung { scroll-margin-top:90px; }
     .nav { min-height:78px; display:flex; align-items:center; justify-content:space-between; gap:24px; }
     .brand { display:flex; align-items:center; gap:12px; text-decoration:none; font-weight:800; }
     .brand img { width:103px; height:48px; padding:5px; border-radius:9px; background:#fff; object-fit:contain; }
