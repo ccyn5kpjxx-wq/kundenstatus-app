@@ -361,6 +361,17 @@ def create_app(test_config: dict | None = None) -> Flask:
         TEAM_NOTIFY_EMAIL=os.getenv("TW_TEAM_NOTIFY_EMAIL", "").strip(),
         CONTRACT_LEGAL_APPROVED=os.getenv("TW_CONTRACT_LEGAL_APPROVED", "0") == "1",
         MIGRATION_TOKEN=os.getenv("TW_MIGRATION_TOKEN", "").strip(),
+        TTS_API_KEY=(os.getenv("TW_TTS_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip()),
+        TTS_MODEL=os.getenv("TW_TTS_MODEL", "gpt-4o-mini-tts").strip() or "gpt-4o-mini-tts",
+        TTS_VOICE=os.getenv("TW_TTS_VOICE", "coral").strip() or "coral",
+        TTS_INSTRUCTIONS=os.getenv(
+            "TW_TTS_INSTRUCTIONS",
+            (
+                "Sprich auf Deutsch mit einer warmen, natürlichen und zuversichtlichen weiblichen Stimme. "
+                "Klinge persönlich, hochwertig und verkaufsstark, aber nie aufdringlich. Nutze kurze Pausen, "
+                "ein hörbares Lächeln und betone Zukunft, Transparenz und gemeinsame Weiterentwicklung."
+            ),
+        ).strip(),
     )
     if test_config:
         app.config.update(test_config)
@@ -759,6 +770,27 @@ def _verkaufsvideo_standardtexte(projekt: sqlite3.Row) -> dict[str, str]:
                 "Google Ads erst nach Freigabe gezielt auf passende Suchanfragen ausrichten",
                 "WhatsApp- und Kontaktanfragen einfacher und messbar machen",
             )
+        ),
+        "servicepunkte": "\n".join(
+            (
+                "Betreuung im Abo: Inhalte, Termine und Technik aktuell halten",
+                "Google-Auswertung und Ads erst nach gemeinsamer Freigabe weiterentwickeln",
+                "Transparentes Kundenportal mit Aufgaben, nächsten Schritten und Ergebnissen",
+            )
+        ),
+        "sprechertext": (
+            f"Stellen Sie sich vor: Menschen entdecken {kundenname} und verstehen sofort, wofür das Angebot steht. "
+            "Genau dafür haben wir diesen digitalen Auftritt entwickelt. Die Startseite verbindet Persönlichkeit "
+            "mit einer klaren, hochwertigen Bildwelt. Leistungen, Termine und Preise werden übersichtlich präsentiert "
+            "und führen ohne Umwege zur Anfrage oder Buchung. Referenzen, persönliche Einblicke und klare Kontaktwege "
+            "schaffen Vertrauen. Marke, Printmaterial und QR-Code tragen den neuen Auftritt konsequent nach außen. "
+            "Nach dem Start beginnt die Zusammenarbeit erst richtig: Im Betreuungspaket halten wir Inhalte, Termine "
+            "und Technik aktuell. Wir analysieren, wie Menschen das Angebot finden, entwickeln die Google-Sichtbarkeit "
+            "weiter und können – selbstverständlich erst nach Freigabe – gezielte Google-Ads-Kampagnen umsetzen. "
+            "Im persönlichen Kundenportal bleibt transparent, was erledigt wurde, welche Schritte anstehen und welche "
+            "Ergebnisse die Maßnahmen zeigen. So entsteht nicht nur eine schöne Website, sondern ein betreuter digitaler "
+            "Auftritt, der mit dem Unternehmen wächst. Wenn dieser Weg passt, finalisieren wir ihn gemeinsam und bringen "
+            "das Angebot sichtbar nach vorn."
         ),
         "cta": "Wie gefällt Ihnen der aktuelle Stand? Lassen Sie uns die nächsten Schritte gemeinsam festlegen.",
     }
@@ -2088,6 +2120,8 @@ def register_routes(app: Flask) -> None:
             quell_dateien=quell_dateien,
             bestehende_videos=bestehende_videos,
             werte=_verkaufsvideo_standardtexte(projekt),
+            tts_configured=bool(app.config["TTS_API_KEY"]),
+            tts_voice=app.config["TTS_VOICE"],
         )
 
     @app.post("/projekte/<int:projekt_id>/verkaufsvideo")
@@ -2121,14 +2155,28 @@ def register_routes(app: Flask) -> None:
             ):
                 abort(400)
 
+        standardwerte = _verkaufsvideo_standardtexte(projekt)
         headline = request.form.get("headline", "").strip()[:140]
         subtitle = request.form.get("subtitle", "").strip()[:320]
         cta = request.form.get("cta", "").strip()[:240]
         kapitel = _zeilen(request.form.get("kapitel", ""), maximum=12, laenge=90)
         potenziale = _zeilen(request.form.get("potenziale", ""), maximum=4, laenge=170)
+        servicepunkte = _zeilen(
+            request.form.get("servicepunkte", standardwerte["servicepunkte"]),
+            maximum=3,
+            laenge=190,
+        )
+        mit_sprecher = request.form.get("mit_sprecher") == "1"
+        sprechertext = request.form.get("sprechertext", "").strip()[:2500] if mit_sprecher else ""
         dauer = _int_form("foliendauer", 4, 2, 5)
-        if not headline or not subtitle or not cta or not potenziale:
-            flash("Bitte Titel, Kurzbeschreibung, Potenziale und Abschluss vollständig ausfüllen.", "error")
+        if not headline or not subtitle or not cta or not potenziale or not servicepunkte:
+            flash("Bitte Titel, Kurzbeschreibung, Betreuung, Potenziale und Abschluss vollständig ausfüllen.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+        if mit_sprecher and not app.config["TTS_API_KEY"]:
+            flash("Die sichere Sprecherstimme ist auf diesem Server noch nicht eingerichtet.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+        if mit_sprecher and len(sprechertext) < 80:
+            flash("Bitte für die Sprecherstimme einen vollständigen Text mit mindestens 80 Zeichen eingeben.", "error")
             return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
 
         upload_root = Path(app.config["UPLOAD_FOLDER"]).resolve()
@@ -2155,10 +2203,16 @@ def register_routes(app: Flask) -> None:
                 headline=headline,
                 subtitle=subtitle,
                 chapters=kapitel,
+                service_points=servicepunkte,
                 potentials=potenziale,
                 cta=cta,
                 progress=projekt["fortschritt"],
                 seconds_per_slide=dauer,
+                narration_text=sprechertext,
+                tts_api_key=app.config["TTS_API_KEY"],
+                tts_model=app.config["TTS_MODEL"],
+                tts_voice=app.config["TTS_VOICE"],
+                tts_instructions=app.config["TTS_INSTRUCTIONS"],
             )
         except SalesVideoError as exc:
             try:
@@ -2220,7 +2274,11 @@ def register_routes(app: Flask) -> None:
             _aktivitaet(
                 projekt_id,
                 "Verkaufsvideo generiert · intern",
-                f"{result.slide_count} Folien · {result.duration_seconds} Sekunden · {result.source_count} Projektansichten · kein Kundenversand",
+                (
+                    f"{result.slide_count} Folien · {result.duration_seconds} Sekunden · "
+                    f"{result.source_count} Projektansichten · "
+                    f"{'KI-Sprecherstimme' if result.narrated else 'dezente Musik'} · kein Kundenversand"
+                ),
             )
             db.commit()
         except sqlite3.Error:
@@ -2239,7 +2297,12 @@ def register_routes(app: Flask) -> None:
                 except OSError:
                     current_app.logger.warning("Altes Verkaufsvideo konnte nicht gelöscht werden: %s", alter_pfad)
 
-        flash("Verkaufsvideo wurde intern erzeugt und im Projekt gespeichert. Es wurde nichts an den Kunden gesendet.", "success")
+        ton_hinweis = "mit KI-generierter Sprecherstimme" if result.narrated else "mit dezenter Musik"
+        flash(
+            f"Verkaufsvideo wurde {ton_hinweis} intern erzeugt und im Projekt gespeichert. "
+            "Es wurde nichts an den Kunden gesendet.",
+            "success",
+        )
         return redirect(url_for("projekt_detail", projekt_id=projekt_id) + "#verkaufsvideo")
 
     @app.route("/projekte/<int:projekt_id>/bearbeiten", methods=["GET", "POST"])

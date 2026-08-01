@@ -47,20 +47,35 @@
         </section>
 
         <section class="content-card sales-video-step">
-            <div class="sales-video-step-head"><span>04</span><div><p class="eyebrow">Kundengewinnung</p><h2>Potenzial sachlich zeigen</h2><p>Maximal vier konkrete Chancen. Google Ads werden bewusst erst nach Budget- und Kundenfreigabe genannt.</p></div></div>
+            <div class="sales-video-step-head"><span>04</span><div><p class="eyebrow">Zusammenarbeit</p><h2>Betreuung und Transparenz verkaufen</h2><p>Drei klare Leistungen zeigen, was nach dem Website-Start im laufenden Paket passiert.</p></div></div>
+            <label class="video-wide-label">Betreuungspaket<textarea name="servicepunkte" rows="4" required>{{ werte['servicepunkte'] }}</textarea></label>
+        </section>
+
+        <section class="content-card sales-video-step">
+            <div class="sales-video-step-head"><span>05</span><div><p class="eyebrow">Kundengewinnung</p><h2>Potenzial sachlich zeigen</h2><p>Maximal vier konkrete Chancen. Google Ads werden bewusst erst nach Budget- und Kundenfreigabe genannt.</p></div></div>
             <label class="video-wide-label">Potenziale<textarea name="potenziale" rows="5" required>{{ werte['potenziale'] }}</textarea></label>
         </section>
 
         <section class="content-card sales-video-step">
-            <div class="sales-video-step-head"><span>05</span><div><p class="eyebrow">Abschluss</p><h2>Nächster Schritt</h2><p>Der Schluss lädt zur gemeinsamen Besprechung ein, ohne etwas automatisch zu versenden.</p></div></div>
+            <div class="sales-video-step-head"><span>06</span><div><p class="eyebrow">Sprecherin</p><h2>Warm, persönlich und verkaufsstark</h2><p>Die KI-generierte Stimme erklärt den Entwurf und verkauft die laufende Zusammenarbeit – ohne eine echte Person nachzuahmen.</p></div></div>
+            <label class="sales-video-voice-option {{ 'is-ready' if tts_configured else 'is-unavailable' }}">
+                <input type="checkbox" name="mit_sprecher" value="1" {{ 'checked' if tts_configured else 'disabled' }}>
+                <span><strong>Deutsche Sprecherstimme einbauen</strong><small>{% if tts_configured %}Bereit · Stimme {{ tts_voice }} · wird im Film als KI-generiert gekennzeichnet{% else %}Auf diesem Server noch nicht eingerichtet{% endif %}</small></span>
+            </label>
+            <label class="video-wide-label">Sprechertext<textarea name="sprechertext" rows="10" maxlength="2500" {{ 'required' if tts_configured else '' }}>{{ werte['sprechertext'] }}</textarea></label>
+            <p class="sales-video-data-note">Datenschutz: Nur dieser Sprechertext wird an OpenAI zur Spracherzeugung übertragen. Bilder, PDFs und andere Projektdateien bleiben im geschützten System.</p>
+        </section>
+
+        <section class="content-card sales-video-step">
+            <div class="sales-video-step-head"><span>07</span><div><p class="eyebrow">Abschluss</p><h2>Nächster Schritt</h2><p>Der Schluss lädt zur gemeinsamen Besprechung ein, ohne etwas automatisch zu versenden.</p></div></div>
             <div class="stack-form">
                 <label>Abschlusstext<textarea name="cta" rows="3" maxlength="240" required>{{ werte['cta'] }}</textarea></label>
-                <label>Dauer je Folie<select name="foliendauer"><option value="3">3 Sekunden · kompakt</option><option value="4" selected>4 Sekunden · empfohlen</option><option value="5">5 Sekunden · ruhig</option></select></label>
+                <label>Dauer je Folie<select name="foliendauer"><option value="3">3 Sekunden · kompakt</option><option value="4">4 Sekunden · ausgewogen</option><option value="5" selected>5 Sekunden · empfohlen mit Sprecherin</option></select></label>
             </div>
         </section>
 
         <div class="sales-video-submit-bar">
-            <div><strong>Ausgabe: MP4 · HD · mit dezenter, eigener Tonspur</strong><small>Das bisher automatisch erzeugte Verkaufsvideo dieses Projekts wird ersetzt. Es wird keine E-Mail, Ticketnachricht oder WhatsApp verschickt.</small></div>
+            <div><strong>Ausgabe: MP4 · HD · Sprecherstimme mit dezenter Musik</strong><small>Das bisher automatisch erzeugte Verkaufsvideo dieses Projekts wird ersetzt. Es wird keine E-Mail, Ticketnachricht oder WhatsApp verschickt.</small></div>
             <button class="button button-primary" type="submit" data-sales-video-submit>▶ Verkaufsvideo jetzt generieren</button>
         </div>
     </form>
@@ -69,7 +84,7 @@
         <section class="info-card sales-video-info-card">
             <span class="sales-video-mark">PLAY</span>
             <h2>Was entsteht?</h2>
-            <ol><li>Persönliche Titelseite</li><li>Rundgang durch Entwürfe</li><li>Kurze Nutzenbeschreibungen</li><li>Potenziale für neue Anfragen</li><li>Klare Abschlussfolie</li></ol>
+            <ol><li>Persönliche Titelseite</li><li>Rundgang durch Entwürfe</li><li>Betreuung & transparentes Portal</li><li>Google-Potenziale nach Freigabe</li><li>Warme KI-Sprecherstimme</li><li>Klare Abschlussfolie</li></ol>
         </section>
         <section class="info-card sales-video-safety-card">
             <span class="always-on-dot"></span><h2>Freigabe bleibt bei euch</h2><p>Der Film liegt ausschließlich in den geschützten Projektdateien. Erst ihr entscheidet, ob und wie er an den Kunden geht.</p>

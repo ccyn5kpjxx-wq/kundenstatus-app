@@ -33,7 +33,7 @@
     {% set video = video_dateien[0] %}
     <div class="project-video-ready">
         <video controls preload="metadata" playsinline src="{{ url_for('projekt_datei', datei_id=video['id']) }}"></video>
-        <div><span class="sync-badge sync-aktuell">Bereit</span><h3>{{ video['original_name'] }}</h3><p>Der Film zeigt den Entwurf und die nächsten Potenziale. Er wurde noch nicht an den Kunden gesendet.</p><div class="project-video-actions"><a class="button button-primary" href="{{ url_for('projekt_datei', datei_id=video['id'], download=1) }}">MP4 herunterladen</a><a class="button button-secondary" href="{{ url_for('verkaufsvideo_form', projekt_id=projekt['id']) }}">Neu generieren</a></div></div>
+        <div><span class="sync-badge sync-aktuell">Bereit</span><h3>{{ video['original_name'] }}</h3><p>Der Film zeigt Entwurf, Betreuung und Wachstumspotenziale. Eine enthaltene Sprecherstimme ist als KI-generiert gekennzeichnet. Der Film wurde noch nicht an den Kunden gesendet.</p><div class="project-video-actions"><a class="button button-primary" href="{{ url_for('projekt_datei', datei_id=video['id'], download=1) }}">MP4 herunterladen</a><a class="button button-secondary" href="{{ url_for('verkaufsvideo_form', projekt_id=projekt['id']) }}">Neu generieren</a></div></div>
     </div>
     {% else %}
     <div class="project-video-empty"><div><span class="sales-video-mark">PLAY</span><h3>Homepage, Visitenkarten und Potenziale in einem Film</h3><p>Aus den geschützten Projektdateien entsteht eine kurze HD-Präsentation. Versand und Kundenfreigabe bleiben immer ein bewusster Schritt.</p></div><a class="button button-video" href="{{ url_for('verkaufsvideo_form', projekt_id=projekt['id']) }}">▶ Verkaufsvideo generieren</a></div>

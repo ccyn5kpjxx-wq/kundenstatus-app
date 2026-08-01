@@ -7,6 +7,8 @@ import re
 import sqlite3
 import sys
 import tempfile
+import wave
+from array import array
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -14,6 +16,7 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import tomorrowworks_dashboard.app as dashboard_module
+import tomorrowworks_dashboard.sales_video as sales_video_module
 from tomorrowworks_dashboard import create_app
 
 
@@ -42,6 +45,32 @@ def png_bytes() -> bytes:
     return stream.getvalue()
 
 
+def speech_wav_bytes(duration: float = 0.8, sample_rate: int = 16_000) -> bytes:
+    stream = io.BytesIO()
+    samples = array("h", [0] * int(duration * sample_rate))
+    with wave.open(stream, "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(sample_rate)
+        audio.writeframes(samples.tobytes())
+    return stream.getvalue()
+
+
+class FakeSpeechResponse:
+    def __init__(self, payload: bytes, status_code: int = 200):
+        self.payload = payload
+        self.status_code = status_code
+        self.headers = {"Content-Type": "audio/wav"}
+        self.closed = False
+
+    def iter_content(self, chunk_size: int):
+        for start in range(0, len(self.payload), chunk_size):
+            yield self.payload[start:start + chunk_size]
+
+    def close(self):
+        self.closed = True
+
+
 def run() -> None:
     with tempfile.TemporaryDirectory(prefix="tw-sales-video-test-") as temp_name:
         root = Path(temp_name)
@@ -54,6 +83,7 @@ def run() -> None:
                 "UPLOAD_FOLDER": str(uploads),
                 "SECRET_KEY": "sales-video-test-secret",
                 "GIT_MONITOR_ENABLED": False,
+                "TTS_API_KEY": "",
             }
         )
         client = app.test_client()
@@ -105,8 +135,11 @@ def run() -> None:
 
         customer_page = client.get(f"/kunden/{customer_id}").get_data(as_text=True)
         project_page = client.get(f"/projekte/{project_id}").get_data(as_text=True)
+        video_form = client.get(f"/projekte/{project_id}/verkaufsvideo").get_data(as_text=True)
         assert "Verkaufsvideo generieren" in customer_page
         assert "Verkaufsvideo" in project_page
+        assert "KI-generierte Stimme" in video_form
+        assert "Nur dieser Sprechertext wird an OpenAI" in video_form
 
         anonymous = app.test_client()
         denied = anonymous.get(f"/projekte/{project_id}/verkaufsvideo", follow_redirects=False)
@@ -143,7 +176,8 @@ def run() -> None:
             },
         )
         assert generic.status_code == 200
-        assert "wurde intern erzeugt" in generic.get_data(as_text=True)
+        generic_body = generic.get_data(as_text=True)
+        assert "mit dezenter Musik intern erzeugt" in generic_body, generic_body[:2000]
 
         upload = client.post(
             f"/projekte/{project_id}/datei",
@@ -179,6 +213,7 @@ def run() -> None:
         connection.close()
 
         original_mail = dashboard_module.mail_senden
+        original_speech_post = sales_video_module.requests.post
         mail_called = False
 
         def forbidden_mail(**_kwargs):
@@ -187,6 +222,9 @@ def run() -> None:
             raise AssertionError("Verkaufsvideo darf keine Kundenmail auslösen")
 
         dashboard_module.mail_senden = forbidden_mail
+        sales_video_module.requests.post = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Film ohne Sprecherstimme darf keinen externen Sprachdienst aufrufen")
+        )
         try:
             generated = post(
                 client,
@@ -204,10 +242,11 @@ def run() -> None:
             )
         finally:
             dashboard_module.mail_senden = original_mail
+            sales_video_module.requests.post = original_speech_post
 
         body = generated.get_data(as_text=True)
         assert generated.status_code == 200
-        assert "wurde intern erzeugt" in body
+        assert "mit dezenter Musik intern erzeugt" in body
         assert "<video" in body
         assert "kein Kundenversand" in body
         assert mail_called is False
@@ -238,6 +277,87 @@ def run() -> None:
         assert video_response.status_code == 200
         assert video_response.content_type.startswith("video/mp4")
         video_response.close()
+
+        without_key = post(
+            client,
+            f"/projekte/{project_id}/verkaufsvideo",
+            {
+                "datei_ids": str(source["id"]),
+                "headline": "Sprecherin ohne Konfiguration",
+                "subtitle": "Die bestehende Datei muss bei einem Konfigurationsfehler erhalten bleiben.",
+                "kapitel": "Startseite & Positionierung",
+                "servicepunkte": "Laufende Betreuung\nTransparentes Kundenportal",
+                "potenziale": "Google-Sichtbarkeit ausbauen",
+                "mit_sprecher": "1",
+                "sprechertext": "Dieser ausreichend lange Sprechertext darf ohne sichere API-Konfiguration nicht verarbeitet werden.",
+                "cta": "Konfiguration prüfen.",
+                "foliendauer": "2",
+            },
+        )
+        assert "noch nicht eingerichtet" in without_key.get_data(as_text=True)
+        assert video_path.exists()
+
+        captured_request: dict = {}
+
+        def fake_speech_post(url, *, headers, json, stream, timeout):
+            captured_request.update(
+                {"url": url, "headers": headers, "json": json, "stream": stream, "timeout": timeout}
+            )
+            return FakeSpeechResponse(speech_wav_bytes())
+
+        app.config["TTS_API_KEY"] = "test-secret-not-for-output"
+        sales_video_module.requests.post = fake_speech_post
+        try:
+            narrated = post(
+                client,
+                f"/projekte/{project_id}/verkaufsvideo",
+                {
+                    "datei_ids": str(source["id"]),
+                    "headline": "Ihr neuer betreuter Auftritt",
+                    "subtitle": "Website, Betreuung und Sichtbarkeit überzeugend erklärt.",
+                    "kapitel": "Startseite & Positionierung",
+                    "servicepunkte": "Laufende Betreuung im Abo\nGoogle-Auswertung nach Freigabe\nTransparentes Kundenportal",
+                    "potenziale": "Google-Sichtbarkeit ausbauen\nOnline-Termine vereinfachen",
+                    "mit_sprecher": "1",
+                    "sprechertext": "Willkommen zu Ihrem neuen digitalen Auftritt. Wir zeigen die Website und entwickeln Sichtbarkeit und Betreuung transparent gemeinsam weiter.",
+                    "cta": "Den Entwurf gemeinsam finalisieren.",
+                    "foliendauer": "2",
+                },
+                follow_redirects=True,
+            )
+        finally:
+            sales_video_module.requests.post = original_speech_post
+
+        narrated_body = narrated.get_data(as_text=True)
+        assert narrated.status_code == 200
+        assert "mit KI-generierter Sprecherstimme" in narrated_body
+        assert captured_request["url"] == sales_video_module.OPENAI_SPEECH_URL
+        assert captured_request["stream"] is True
+        assert captured_request["timeout"] == (10, 60)
+        assert captured_request["json"]["response_format"] == "wav"
+        assert captured_request["json"]["input"].startswith("Willkommen zu Ihrem neuen digitalen Auftritt")
+        assert "homepage-vorschau.png" not in repr(captured_request["json"])
+        assert captured_request["headers"]["Authorization"].startswith("Bearer ")
+        assert mail_called is False
+
+        connection = sqlite3.connect(database)
+        connection.row_factory = sqlite3.Row
+        videos = connection.execute(
+            "SELECT * FROM projekt_dateien WHERE projekt_id = ? AND mimetype = 'video/mp4'",
+            (project_id,),
+        ).fetchall()
+        latest_activity = connection.execute(
+            "SELECT * FROM aktivitaeten WHERE projekt_id = ? AND aktion LIKE 'Verkaufsvideo generiert%' ORDER BY id DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        connection.close()
+        assert len(videos) == 1
+        assert latest_activity is not None
+        assert "KI-Sprecherstimme" in latest_activity["text"]
+        assert "kein Kundenversand" in latest_activity["text"]
+        video_path = uploads / videos[0]["gespeichert_name"]
+        assert video_path.exists()
+        assert video_path.stat().st_size < 20 * 1024 * 1024
 
         files_before_failure = {path.name for path in uploads.glob(f"{project_id}_verkaufsvideo_*.mp4")}
         original_create = dashboard_module.create_sales_video

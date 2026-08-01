@@ -1,7 +1,8 @@
 """Erzeugt kurze, intern freizugebende Verkaufsvideos aus Projektdateien.
 
-Die Bildsprache und die leise Tonspur werden vollständig lokal erzeugt. Es werden
-keine Kundendaten an einen externen Video- oder KI-Dienst übertragen.
+Bildaufbereitung und Videoschnitt laufen lokal. Optional wird ausschließlich der
+freigegebene Sprechertext an den konfigurierten Sprachdienst übertragen; Bilder,
+PDFs und sonstige Projektdateien verlassen den Server dabei nicht.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from typing import Sequence
 
 import fitz
 import imageio_ffmpeg
+import requests
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
 
@@ -26,6 +28,12 @@ VIDEO_WIDTH = 1280
 VIDEO_HEIGHT = 720
 VIDEO_FPS = 25
 MAX_CONTENT_SLIDES = 10
+MAX_NARRATION_BYTES = 12 * 1024 * 1024
+OPENAI_SPEECH_URL = "https://api.openai.com/v1/audio/speech"
+ALLOWED_TTS_VOICES = {
+    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx",
+    "nova", "sage", "shimmer", "verse", "marin", "cedar",
+}
 
 
 class SalesVideoError(RuntimeError):
@@ -43,6 +51,8 @@ class SalesVideoResult:
     slide_count: int
     duration_seconds: int
     source_count: int
+    narrated: bool = False
+    narration_seconds: float = 0.0
 
 
 @dataclass
@@ -282,7 +292,39 @@ def _potential_slide(potentials: Sequence[str]) -> Image.Image:
     return image
 
 
-def _cta_slide(customer: str, cta: str) -> Image.Image:
+def _service_slide(service_points: Sequence[str]) -> Image.Image:
+    image = Image.new("RGB", (VIDEO_WIDTH, VIDEO_HEIGHT), "#f2eee5")
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((965, -210, 1405, 230), fill="#e2b866")
+    draw.text((78, 62), "NACH DEM START", font=_font(20, bold=True), fill="#d54c0d")
+    draw.text((78, 108), "Wir bleiben an Ihrer Seite.", font=_font(52, bold=True), fill="#171915")
+    _draw_wrapped(
+        draw,
+        (80, 176),
+        "Website, Sichtbarkeit und Zusammenarbeit werden laufend gepflegt – nachvollziehbar und gemeinsam freigegeben.",
+        _font(22),
+        "#555b55",
+        1025,
+        line_gap=5,
+        max_lines=2,
+    )
+    items = list(service_points)[:3] or [
+        "Betreuung im Abo: Inhalte, Termine und Technik aktuell halten",
+        "Google-Auswertung und Ads erst nach gemeinsamer Freigabe",
+        "Transparentes Kundenportal mit Aufgaben, nächsten Schritten und Ergebnissen",
+    ]
+    y = 275
+    for index, item in enumerate(items, start=1):
+        x = 78 + (index - 1) * 378
+        draw.rounded_rectangle((x, y, x + 350, 575), radius=24, fill="#ffffff", outline="#d8d3c8", width=2)
+        draw.rounded_rectangle((x + 24, y + 24, x + 84, y + 84), radius=18, fill="#173f36")
+        draw.text((x + 54 - _text_width(draw, str(index), _font(20, bold=True)) // 2, y + 41), str(index), font=_font(20, bold=True), fill="#ffffff")
+        _draw_wrapped(draw, (x + 24, y + 112), item, _font(22, bold=True), "#20231f", 300, line_gap=7, max_lines=5)
+    draw.text((80, 657), "100 % transparent: Maßnahmen und Budgets bleiben unter Ihrer Kontrolle.", font=_font(17), fill="#746b5e")
+    return image
+
+
+def _cta_slide(customer: str, cta: str, *, narrated: bool = False) -> Image.Image:
     image = Image.new("RGB", (VIDEO_WIDTH, VIDEO_HEIGHT), "#e2b866")
     draw = ImageDraw.Draw(image)
     draw.rectangle((0, 565, VIDEO_WIDTH, VIDEO_HEIGHT), fill="#173f36")
@@ -291,7 +333,9 @@ def _cta_slide(customer: str, cta: str) -> Image.Image:
     draw.rounded_rectangle((76, 432, 735, 505), radius=36, fill="#fffaf1")
     draw.text((113, 452), "Vorschau ansehen  ·  Wünsche besprechen", font=_font(22, bold=True), fill="#173f36")
     draw.text((76, 611), customer, font=_font(28, bold=True), fill="#ffffff")
-    draw.text((932, 620), "TOMORROW WORKS", font=_font(19, bold=True), fill="#b8d0c6")
+    draw.text((932, 605), "TOMORROW WORKS", font=_font(19, bold=True), fill="#b8d0c6")
+    if narrated:
+        draw.text((932, 636), "Sprecherstimme KI-generiert", font=_font(13), fill="#8faaa0")
     return image
 
 
@@ -344,6 +388,88 @@ def _run_ffmpeg(command: list[str], *, timeout: int, message: str) -> subprocess
     return completed
 
 
+def _speech_error(status_code: int) -> SalesVideoError:
+    if status_code in {401, 403}:
+        return SalesVideoError("Die Sprecherstimme ist noch nicht korrekt freigeschaltet. Bitte die sichere API-Konfiguration prüfen.")
+    if status_code == 429:
+        return SalesVideoError("Die Sprecherstimme ist gerade ausgelastet oder das Kontingent ist erreicht. Bitte später erneut versuchen.")
+    return SalesVideoError("Die Sprecherstimme konnte gerade nicht erzeugt werden. Bitte später erneut versuchen.")
+
+
+def _request_speech(
+    text: str,
+    output_path: Path,
+    *,
+    api_key: str,
+    model: str,
+    voice: str,
+    instructions: str,
+) -> None:
+    if not api_key.strip():
+        raise SalesVideoError("Für die Sprecherstimme ist die sichere Sprachkonfiguration noch nicht aktiv.")
+    if voice not in ALLOWED_TTS_VOICES:
+        raise SalesVideoError("Die konfigurierte Sprecherstimme ist nicht zulässig.")
+    payload = {
+        "model": model,
+        "voice": voice,
+        "input": text,
+        "response_format": "wav",
+        "speed": 1.03,
+    }
+    if model.startswith("gpt-4o-mini-tts"):
+        payload["instructions"] = instructions
+    try:
+        response = requests.post(
+            OPENAI_SPEECH_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            stream=True,
+            timeout=(10, 60),
+        )
+    except requests.RequestException as exc:
+        raise SalesVideoError("Die Sprecherstimme ist derzeit nicht erreichbar. Bitte später erneut versuchen.") from exc
+    try:
+        if response.status_code >= 400:
+            raise _speech_error(response.status_code)
+        content_type = (response.headers.get("Content-Type", "") or "").lower()
+        if content_type and not (content_type.startswith("audio/") or "octet-stream" in content_type):
+            raise SalesVideoError("Die Sprecherstimme wurde in einem unerwarteten Format geliefert.")
+        total = 0
+        with output_path.open("wb") as target:
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > MAX_NARRATION_BYTES:
+                    raise SalesVideoError("Die erzeugte Sprecherstimme ist unerwartet groß und wurde verworfen.")
+                target.write(chunk)
+        if total < 1_000:
+            raise SalesVideoError("Die erzeugte Sprecherstimme war unvollständig. Bitte erneut versuchen.")
+    finally:
+        response.close()
+
+
+def _probe_wav_duration(path: Path) -> float:
+    try:
+        with wave.open(str(path), "rb") as audio:
+            frame_rate = audio.getframerate()
+            channels = audio.getnchannels()
+            sample_width = audio.getsampwidth()
+            if frame_rate <= 0 or channels not in {1, 2} or sample_width not in {1, 2, 3, 4}:
+                raise wave.Error("ungültige WAV-Metadaten")
+            # Streaming-WAVs dürfen im Header eine Platzhalterlänge tragen. Die
+            # tatsächliche Dauer wird deshalb aus den lesbaren Audiodaten ermittelt.
+            maximum_frames = frame_rate * 180
+            audio_bytes = audio.readframes(maximum_frames + 1)
+            frame_count = len(audio_bytes) // (channels * sample_width)
+            duration = frame_count / frame_rate
+    except (OSError, EOFError, wave.Error) as exc:
+        raise SalesVideoError("Die erzeugte Sprecherstimme konnte nicht sicher gelesen werden.") from exc
+    if duration < 0.25 or frame_count > maximum_frames:
+        raise SalesVideoError("Die Dauer der Sprecherstimme liegt außerhalb des zulässigen Bereichs.")
+    return duration
+
+
 def create_sales_video(
     sources: Sequence[SalesVideoSource],
     output_path: Path,
@@ -353,10 +479,16 @@ def create_sales_video(
     headline: str,
     subtitle: str,
     chapters: Sequence[str],
+    service_points: Sequence[str],
     potentials: Sequence[str],
     cta: str,
     progress: int,
     seconds_per_slide: int = 4,
+    narration_text: str = "",
+    tts_api_key: str = "",
+    tts_model: str = "gpt-4o-mini-tts",
+    tts_voice: str = "coral",
+    tts_instructions: str = "",
 ) -> SalesVideoResult:
     """Erzeugt eine H.264-MP4-Datei und liefert Eckdaten für die Aktivität."""
 
@@ -383,11 +515,44 @@ def create_sales_video(
             slides.append(_content_slide(frame, chapter, index + 1))
     else:
         slides.append(_project_overview_slide(customer_name, project_title, progress))
-    slides.extend((_potential_slide(potentials), _cta_slide(customer_name, cta)))
+    narrated = bool(narration_text.strip())
+    slides.extend(
+        (
+            _service_slide(service_points),
+            _potential_slide(potentials),
+            _cta_slide(customer_name, cta, narrated=narrated),
+        )
+    )
 
-    duration = len(slides) * seconds_per_slide
+    narration_seconds = 0.0
     with tempfile.TemporaryDirectory(prefix="tw-sales-video-") as temp_name:
         temp_dir = Path(temp_name)
+        try:
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception as exc:
+            raise SalesVideoError("Die lokale Video-Engine ist derzeit nicht verfügbar.") from exc
+
+        narration_path: Path | None = None
+        if narrated:
+            narration_path = temp_dir / "narration.wav"
+            _request_speech(
+                narration_text.strip(),
+                narration_path,
+                api_key=tts_api_key,
+                model=tts_model,
+                voice=tts_voice,
+                instructions=tts_instructions,
+            )
+            narration_seconds = _probe_wav_duration(narration_path)
+            required_duration = math.ceil(narration_seconds + 1.5)
+            required_slide_duration = math.ceil(required_duration / len(slides))
+            if required_slide_duration > 7:
+                raise SalesVideoError(
+                    "Der Sprechertext ist für den Film zu lang. Bitte den Text kürzen oder mehr Bildansichten auswählen."
+                )
+            seconds_per_slide = max(seconds_per_slide, required_slide_duration)
+
+        duration = len(slides) * seconds_per_slide
         slide_paths: list[Path] = []
         for index, slide in enumerate(slides):
             slide_path = temp_dir / f"slide-{index:02d}.png"
@@ -397,10 +562,6 @@ def create_sales_video(
         silent_path = temp_dir / "silent.mp4"
         audio_path = temp_dir / "ambient.wav"
         _write_ambient_wav(audio_path, duration)
-        try:
-            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-        except Exception as exc:
-            raise SalesVideoError("Die lokale Video-Engine ist derzeit nicht verfügbar.") from exc
         segment_paths: list[Path] = []
         fade_out_start = max(0.25, seconds_per_slide - 0.28)
         for index, slide_path in enumerate(slide_paths):
@@ -463,8 +624,41 @@ def create_sales_video(
             message="Das Video konnte technisch nicht zusammengesetzt werden.",
         )
         rendered_path = temp_dir / "rendered.mp4"
-        _run_ffmpeg(
-            [
+        if narration_path is not None:
+            audio_command = [
+                ffmpeg,
+                "-y",
+                "-i",
+                str(silent_path),
+                "-i",
+                str(audio_path),
+                "-i",
+                str(narration_path),
+                "-filter_complex",
+                (
+                    "[1:a]volume=0.32[bed];"
+                    "[2:a]adelay=450:all=1,loudnorm=I=-16:TP=-1.5:LRA=11[voice];"
+                    "[bed][voice]amix=inputs=2:duration=first:dropout_transition=2:normalize=0,"
+                    "alimiter=limit=0.95[a]"
+                ),
+                "-map",
+                "0:v:0",
+                "-map",
+                "[a]",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-t",
+                str(duration),
+                "-movflags",
+                "+faststart",
+                str(rendered_path),
+            ]
+        else:
+            audio_command = [
                 ffmpeg,
                 "-y",
                 "-i",
@@ -481,7 +675,9 @@ def create_sales_video(
                 "-movflags",
                 "+faststart",
                 str(rendered_path),
-            ],
+            ]
+        _run_ffmpeg(
+            audio_command,
             timeout=90,
             message="Die fertige MP4-Datei konnte nicht gespeichert werden.",
         )
@@ -504,4 +700,6 @@ def create_sales_video(
         slide_count=len(slides),
         duration_seconds=duration,
         source_count=len(frames),
+        narrated=narrated,
+        narration_seconds=narration_seconds,
     )

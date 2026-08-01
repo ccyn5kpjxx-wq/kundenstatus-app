@@ -72,6 +72,11 @@ DATABASE_URL=<Internal Database URL der Render-Postgres-Datenbank>
 REQUIRE_POSTGRES_ON_RENDER=true
 OPENAI_API_KEY=<optional>
 OPENAI_EXTRACTION_MODEL=gpt-4o
+# Optional: getrennte Sprachkonfiguration fuer interne Verkaufsvideos.
+# Ohne TW_TTS_API_KEY verwendet das Projekt OPENAI_API_KEY.
+TW_TTS_API_KEY=<optional>
+TW_TTS_MODEL=gpt-4o-mini-tts
+TW_TTS_VOICE=coral
 UPLOAD_DIR=/var/data/uploads
 ```
 
