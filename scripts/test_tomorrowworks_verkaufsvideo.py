@@ -359,6 +359,55 @@ def run() -> None:
         assert video_path.exists()
         assert video_path.stat().st_size < 20 * 1024 * 1024
 
+        invalid_upload = client.post(
+            f"/projekte/{project_id}/verkaufsvideo/hochladen",
+            data={
+                "_csrf_token": csrf(client, f"/projekte/{project_id}/verkaufsvideo"),
+                "video": (io.BytesIO(b"not-an-mp4"), "fertiger-sprecherfilm.mp4"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        assert invalid_upload.status_code == 200
+        assert "keine gültige MP4-Datei" in invalid_upload.get_data(as_text=True)
+        assert video_path.exists()
+
+        narrated_video_bytes = video_path.read_bytes()
+        uploaded = client.post(
+            f"/projekte/{project_id}/verkaufsvideo/hochladen",
+            data={
+                "_csrf_token": csrf(client, f"/projekte/{project_id}/verkaufsvideo"),
+                "video": (io.BytesIO(narrated_video_bytes), "lokal-gepruefter-sprecherfilm.mp4"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        uploaded_body = uploaded.get_data(as_text=True)
+        assert uploaded.status_code == 200
+        assert "fertige Sprecherfilm wurde intern übernommen" in uploaded_body
+        assert "nichts an den Kunden gesendet" in uploaded_body
+        assert not video_path.exists()
+
+        connection = sqlite3.connect(database)
+        connection.row_factory = sqlite3.Row
+        videos = connection.execute(
+            "SELECT * FROM projekt_dateien WHERE projekt_id = ? AND mimetype = 'video/mp4'",
+            (project_id,),
+        ).fetchall()
+        upload_activity = connection.execute(
+            "SELECT * FROM aktivitaeten WHERE projekt_id = ? AND aktion LIKE 'Verkaufsvideo hochgeladen%' ORDER BY id DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        assert len(videos) == 1
+        assert upload_activity is not None
+        assert "KI-Sprecherstimme" in upload_activity["text"]
+        assert "kein Kundenversand" in upload_activity["text"]
+        assert connection.execute("SELECT COUNT(*) FROM portal_nachrichten").fetchone()[0] == before_messages
+        assert connection.execute("SELECT COUNT(*) FROM portal_benachrichtigungen").fetchone()[0] == before_notifications
+        connection.close()
+        video_path = uploads / videos[0]["gespeichert_name"]
+        assert video_path.exists()
+
         files_before_failure = {path.name for path in uploads.glob(f"{project_id}_verkaufsvideo_*.mp4")}
         original_create = dashboard_module.create_sales_video
 

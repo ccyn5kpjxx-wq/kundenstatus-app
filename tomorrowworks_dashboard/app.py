@@ -2305,6 +2305,100 @@ def register_routes(app: Flask) -> None:
         )
         return redirect(url_for("projekt_detail", projekt_id=projekt_id) + "#verkaufsvideo")
 
+    @app.post("/projekte/<int:projekt_id>/verkaufsvideo/hochladen")
+    @login_required
+    def verkaufsvideo_hochladen(projekt_id: int):
+        projekt = _projekt_oder_404(projekt_id)
+        datei = request.files.get("video")
+        if not datei or not datei.filename:
+            flash("Bitte einen fertigen MP4-Film auswählen.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+
+        original = secure_filename(datei.filename)
+        if not original or Path(original).suffix.lower() != ".mp4":
+            flash("Für den fertigen Sprecherfilm ist nur eine MP4-Datei erlaubt.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+
+        upload_root = Path(app.config["UPLOAD_FOLDER"]).resolve()
+        gespeichert_name = f"{projekt_id}_verkaufsvideo_{uuid4().hex}.mp4"
+        output_path = upload_root / gespeichert_name
+        try:
+            datei.save(output_path)
+            video_size = output_path.stat().st_size
+            with output_path.open("rb") as stream:
+                header = stream.read(32)
+        except OSError:
+            current_app.logger.exception("Bereitgestellter Sprecherfilm konnte nicht gespeichert werden")
+            try:
+                output_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            flash("Der fertige Sprecherfilm konnte nicht sicher gespeichert werden.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+
+        if video_size < 12 or header[4:8] != b"ftyp":
+            try:
+                output_path.unlink(missing_ok=True)
+            except OSError:
+                current_app.logger.warning("Ungültiger Sprecherfilm konnte nicht gelöscht werden: %s", output_path)
+            flash("Die ausgewählte Datei ist keine gültige MP4-Datei.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+
+        original_name = secure_filename(
+            f"Verkaufsvideo_{projekt['kundenname']}_{date.today().isoformat()}.mp4"
+        ) or f"Verkaufsvideo_Projekt-{projekt_id}_{date.today().isoformat()}.mp4"
+        db = get_db()
+        alte_videos = db.execute(
+            """
+            SELECT id, gespeichert_name FROM projekt_dateien
+            WHERE projekt_id = ? AND mimetype = 'video/mp4' AND original_name LIKE 'Verkaufsvideo_%'
+            """,
+            (projekt_id,),
+        ).fetchall()
+        try:
+            db.execute(
+                "DELETE FROM projekt_dateien WHERE projekt_id = ? AND mimetype = 'video/mp4' AND original_name LIKE 'Verkaufsvideo_%'",
+                (projekt_id,),
+            )
+            db.execute(
+                """
+                INSERT INTO projekt_dateien
+                  (projekt_id, original_name, gespeichert_name, mimetype, hochgeladen_von, created_at)
+                VALUES (?, ?, ?, 'video/mp4', ?, ?)
+                """,
+                (projekt_id, original_name, gespeichert_name, g.user["id"], jetzt()),
+            )
+            db.execute("UPDATE projekte SET updated_at = ? WHERE id = ?", (jetzt(), projekt_id))
+            _aktivitaet(
+                projekt_id,
+                "Verkaufsvideo hochgeladen · intern",
+                f"Fertiger MP4-Sprecherfilm · {video_size / 1024 / 1024:.1f} MB · KI-Sprecherstimme · kein Kundenversand",
+            )
+            db.commit()
+        except sqlite3.Error:
+            db.rollback()
+            try:
+                output_path.unlink(missing_ok=True)
+            except OSError:
+                current_app.logger.warning("Nicht registrierter Sprecherfilm konnte nicht gelöscht werden: %s", output_path)
+            flash("Der Film wurde hochgeladen, konnte aber nicht sicher im Projekt registriert werden.", "error")
+            return redirect(url_for("verkaufsvideo_form", projekt_id=projekt_id))
+
+        for altes_video in alte_videos:
+            alter_pfad = (upload_root / altes_video["gespeichert_name"]).resolve()
+            if alter_pfad.parent == upload_root:
+                try:
+                    alter_pfad.unlink(missing_ok=True)
+                except OSError:
+                    current_app.logger.warning("Altes Verkaufsvideo konnte nicht gelöscht werden: %s", alter_pfad)
+
+        flash(
+            "Der fertige Sprecherfilm wurde intern übernommen und im Projekt gespeichert. "
+            "Es wurde nichts an den Kunden gesendet.",
+            "success",
+        )
+        return redirect(url_for("projekt_detail", projekt_id=projekt_id) + "#verkaufsvideo")
+
     @app.route("/projekte/<int:projekt_id>/bearbeiten", methods=["GET", "POST"])
     @login_required
     def projekt_bearbeiten(projekt_id: int):
