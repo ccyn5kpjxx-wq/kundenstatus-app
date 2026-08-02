@@ -16,7 +16,7 @@
         <div class="form-section-heading"><span>02</span><div><h2>Kontakt</h2><p>So erreicht das Team den Kunden.</p></div></div>
         <div class="form-grid">
             <label class="span-2">Geschäftsanschrift<input name="adresse" autocomplete="street-address" required value="{{ request.form.get('adresse', kunde['adresse'] if kunde else '') }}" placeholder="Straße, Hausnummer, PLZ und Ort"><small class="field-help">Vollständige Anschrift für Angebot, Vertrag und Impressum.</small></label>
-            <label>E-Mail<input type="email" name="email" autocomplete="email" required value="{{ request.form.get('email', kunde['email'] if kunde else '') }}"><small class="field-help">Hierhin gehen Ticket-Einladung und neue Updates.</small></label>
+            <label>E-Mail<input type="email" name="email" autocomplete="email" required value="{{ request.form.get('email', kunde['email'] if kunde else '') }}"><small class="field-help">Hierhin gehen Ticket-Einladung und neue Updates – aber nur nach einer ausdrücklichen Versandaktion.</small></label>
             <label>Handynummer<input type="tel" name="telefon" autocomplete="tel" required value="{{ request.form.get('telefon', kunde['telefon'] if kunde else '') }}"><small class="field-help">Aktuelle Mobilnummer mit Vorwahl, zum Beispiel +49 171 1234567.</small></label>
             <label class="span-2 consent-row"><input type="checkbox" name="whatsapp_freigabe" value="1" {{ 'checked' if (request.form.get('whatsapp_freigabe') == '1' if request.method == 'POST' else kunde and kunde['whatsapp_freigabe']) else '' }}><span><strong>WhatsApp-Kontakt mit dieser Nummer ist vereinbart</strong><small class="field-help">Erst danach bietet TomorrowWorks einen vorausgefüllten WhatsApp-Entwurf mit dem persönlichen Ticketlink an. Gesendet wird nie automatisch.</small></span></label>
             <label class="span-2"><span class="field-label">Bestehende Website <span class="optional-label">optional, falls keine vorhanden</span></span><input type="url" name="website" autocomplete="url" inputmode="url" autocapitalize="none" spellcheck="false" value="{{ request.form.get('website', kunde['website'] if kunde else '') }}" placeholder="https://beispiel.de"><small class="field-help">Nur die Webadresse eintragen – keine E-Mail-Adresse. Falls noch keine Website besteht, unten ausdrücklich bestätigen.</small></label>
@@ -27,7 +27,16 @@
         <div class="form-section-heading"><span>03</span><div><h2>Interne Notizen</h2><p>Briefing, Besonderheiten und wichtige Absprachen.</p></div></div>
         <label><span class="sr-only">Notizen</span><textarea name="notizen" rows="6" placeholder="Was muss das Team über den Kunden wissen?">{{ request.form.get('notizen', kunde['notizen'] if kunde else '') }}</textarea></label>
     </section>
-    {% if not kunde %}<div class="ticket-create-note"><strong>Dauerhaftes Kunden-Ticket inklusive</strong><span>Beim Anlegen entsteht automatisch der gemeinsame Projektraum für Nachrichten, Dateien, Neuerungen und Angebote.</span></div>{% endif %}
-    <div class="form-actions"><a class="button button-secondary" href="{{ url_for('kunde_detail', kunde_id=kunde['id']) if kunde else url_for('kunden_liste') }}">Abbrechen</a><button class="button button-primary" type="submit">{{ 'Änderungen speichern' if kunde else 'Kunde & Ticket anlegen' }}</button></div>
+    {% if not kunde %}
+    <section class="form-card">
+        <div class="form-section-heading"><span>04</span><div><h2>Einladung</h2><p>Entscheide bewusst, ob der Kunde jetzt schon kontaktiert werden soll.</p></div></div>
+        <div class="form-grid">
+            <label class="span-2 consent-row"><input type="radio" name="einladungsmodus" value="spaeter" {{ 'checked' if request.form.get('einladungsmodus', 'spaeter') == 'spaeter' else '' }}><span><strong>Nur intern speichern / Einladung später senden</strong><small class="field-help">Empfohlen für Interessenten: Das Ticket wird intern angelegt, aber es wird keine E-Mail versendet.</small></span></label>
+            <label class="span-2 consent-row"><input type="radio" name="einladungsmodus" value="jetzt" {{ 'checked' if request.form.get('einladungsmodus') == 'jetzt' else '' }}><span><strong>Jetzt per E-Mail einladen</strong><small class="field-help">Versendet den persönlichen Ticketlink direkt nach dem Anlegen an die oben eingetragene Adresse.</small></span></label>
+        </div>
+    </section>
+    <div class="ticket-create-note"><strong>Dauerhaftes Kunden-Ticket inklusive</strong><span>Der gemeinsame Projektraum entsteht in beiden Fällen. Ohne ausdrücklichen Sofortversand bleibt er zunächst nur intern.</span></div>
+    {% endif %}
+    <div class="form-actions"><a class="button button-secondary" href="{{ url_for('kunde_detail', kunde_id=kunde['id']) if kunde else url_for('kunden_liste') }}">Abbrechen</a><button class="button button-primary" type="submit">{{ 'Änderungen speichern' if kunde else 'Kunde anlegen' }}</button></div>
 </form>
 {% endblock %}

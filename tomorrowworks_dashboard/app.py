@@ -1341,6 +1341,12 @@ def register_routes(app: Flask) -> None:
             email = request.form.get("email", "").strip().lower()
             telefon = request.form.get("telefon", "").strip()
             adresse = request.form.get("adresse", "").strip()
+            kundenstatus = request.form.get("status", "aktiv")
+            einladungsmodus = request.form.get("einladungsmodus", "")
+            if einladungsmodus not in {"spaeter", "jetzt"}:
+                # Alte Formularaufrufe ohne das neue Feld behalten für aktive Kunden
+                # den bisherigen Sofortversand. Interessenten werden sicher nur intern angelegt.
+                einladungsmodus = "jetzt" if kundenstatus == "aktiv" else "spaeter"
             keine_website = request.form.get("keine_website") == "1"
             whatsapp_freigabe = request.form.get("whatsapp_freigabe") == "1"
             formular_gueltig = True
@@ -1385,13 +1391,19 @@ def register_routes(app: Flask) -> None:
                         int(keine_website),
                         int(whatsapp_freigabe),
                         request.form.get("notizen", "").strip(),
-                        request.form.get("status", "aktiv"),
+                        kundenstatus,
                         timestamp,
                         timestamp,
                     ),
                 )
                 ticket = _ticket_sicherstellen(db, cur.lastrowid)
                 db.commit()
+                if einladungsmodus == "spaeter":
+                    flash(
+                        "Kunde und dauerhaftes Ticket wurden nur intern angelegt. Es wurde keine E-Mail gesendet; die Einladung kann später im Kunden-Ticket verschickt werden.",
+                        "success",
+                    )
+                    return redirect(url_for("kunde_detail", kunde_id=cur.lastrowid))
                 portal_link = _portal_url(ticket)
                 mail_status = _portal_mail(
                     db,
