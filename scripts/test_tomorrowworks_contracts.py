@@ -194,6 +194,18 @@ def run() -> None:
         )
         assert no_csrf.status_code == 400
 
+        unbound_budget = post(
+            admin,
+            contract_center,
+            {
+                "titel": "Budget ohne Werbemodul",
+                "package_code": "website_start",
+                "media_budget_eur": "250,00",
+            },
+        )
+        assert unbound_budget.status_code == 200
+        assert "Ein Medienbudget kann nur zusammen mit Google Ads" in unbound_budget.get_data(as_text=True)
+
         mail_called = False
         original_mail = dashboard_module.mail_senden
 
@@ -341,6 +353,7 @@ def run() -> None:
         assert "Grundpaket ankreuzen" in center_body
         assert "Zusatzmodule ankreuzen" in center_body
         assert "Business-Dashboard einrichten" in center_body
+        assert 'name="package_code" value="website_growth" checked' not in center_body
         assert center_body.count('name="addon_codes"') == len(dashboard_module.ADDON_CATALOG)
 
         portal_body = admin.get(f"/portal/{ticket['token']}").get_data(as_text=True)
@@ -457,6 +470,50 @@ def run() -> None:
         standard_text = compact_text(pdf_text(standard_pdf))
         assert "[X] gewählt Website Start" in standard_text
         assert "Founder-Pilot" not in standard_text
+
+        full_snapshot = dashboard_module.build_contract_snapshot(
+            project={"id": 100, "titel": "Vollauswahl", "beschreibung": ""},
+            customer={
+                "firma": "Vollauswahl GmbH",
+                "ansprechpartner": "Max Muster",
+                "adresse": "Musterweg 2, 74821 Mosbach",
+                "email": "voll@example.test",
+            },
+            provider={
+                "name": "Tomorrow Works",
+                "address": "Binauer Höhe 4, 74821 Mosbach",
+                "representative": "Christopher Gärtner",
+                "email": "info@example.test",
+            },
+            package_code="digital_cockpit",
+            addon_codes=[
+                "technical_care",
+                "email_setup",
+                "google_business",
+                "google_business_care",
+                "google_meta_ads",
+                "dashboard_extension",
+                "booking",
+                "sales_video",
+                "short_clips",
+                "print_bundle",
+                "social_content",
+            ],
+            media_budget_cent=500_000,
+            start_date="",
+            notes="Umfangreicher Layouttest.",
+            version=1,
+            contract_id=1,
+            created_at="2026-08-02 20:00:00",
+            legal_approved=False,
+        )
+        full_pdf = dashboard_module.create_contract_pdf(full_snapshot)
+        full_reader = PdfReader(io.BytesIO(full_pdf))
+        full_page_texts = [page.extract_text() or "" for page in full_reader.pages]
+        assert all(text.strip() for text in full_page_texts)
+        assert "Freigaben vor Livegang" in full_page_texts[-1]
+        assert "Auswahl bestätigt" in full_page_texts[-1]
+        assert "Ort, Datum / Auftragnehmer" in full_page_texts[-1]
 
         second_path.write_bytes(b"%PDF-1.4\nabsichtlich manipuliert")
         tampered = admin.get(

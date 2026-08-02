@@ -246,6 +246,11 @@ def build_contract_snapshot(
 ) -> dict[str, object]:
     package, addons = validate_selection(package_code, addon_codes)
     media_budget_cent = max(int(media_budget_cent or 0), 0)
+    selected_addon_codes = {str(item["code"]) for item in addons}
+    if media_budget_cent > 0 and not AD_ADDONS.intersection(selected_addon_codes):
+        raise ValueError(
+            "Ein Medienbudget kann nur zusammen mit Google Ads, Instagram/Facebook Ads oder Google + Meta Ads gespeichert werden."
+        )
     berechnete_addons: list[dict[str, object]] = []
     for addon in addons:
         effektiver_monatspreis = int(addon["monthly_cent"])
@@ -788,8 +793,13 @@ def create_contract_pdf(snapshot: Mapping[str, object]) -> bytes:
             ]
         )
     )
-    signature_section = KeepTogether(
+    closing_section = KeepTogether(
         [
+            _p("Freigaben vor Livegang", styles["h1"]),
+            _bullet("Firmierung, B2B-Status, Geschäftsanschriften und vertretungsberechtigte Personen", styles),
+            _bullet("Finale Texte, Preise, Termine, Bilder, Marken, KI-Kennzeichnungen und Nutzungsrechte", styles),
+            _bullet("Werbekonten, Conversion-Ziele, Medienbudget, Einwilligungs- und Datenschutzkonzept", styles),
+            _bullet("Auftragsverarbeitung, Unterauftragnehmer, Lösch- und Übergaberegeln", styles),
             Spacer(1, 5 * mm),
             _p("Auswahl bestätigt", styles["h1"]),
             _p(
@@ -896,12 +906,7 @@ def create_contract_pdf(snapshot: Mapping[str, object]) -> bytes:
                 "Der Projektraum dient der transparenten Zusammenarbeit. E-Mail-Empfang, Werbekonten-Steuerung, Rechnungsstellung, Buchhaltung und weitere Automatisierungen sind nur enthalten, wenn sie in dieser Anlage oder einer späteren versionierten Ergänzung ausdrücklich genannt sind.",
                 styles["body"],
             ),
-            _p("Freigaben vor Livegang", styles["h1"]),
-            _bullet("Firmierung, B2B-Status, Geschäftsanschriften und vertretungsberechtigte Personen", styles),
-            _bullet("Finale Texte, Preise, Termine, Bilder, Marken, KI-Kennzeichnungen und Nutzungsrechte", styles),
-            _bullet("Werbekonten, Conversion-Ziele, Medienbudget, Einwilligungs- und Datenschutzkonzept", styles),
-            _bullet("Auftragsverarbeitung, Unterauftragnehmer, Lösch- und Übergaberegeln", styles),
-            signature_section,
+            closing_section,
         ]
     )
     doc.build(story, onFirstPage=_page_decorator(snapshot), onLaterPages=_page_decorator(snapshot))

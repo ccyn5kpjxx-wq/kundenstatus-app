@@ -72,7 +72,7 @@
                 <div class="contract-package-grid">
                 {% for code, package in pakete.items() %}
                 <label class="contract-package-option">
-                    <input type="radio" name="package_code" value="{{ code }}" {{ 'checked' if code == 'website_growth' else '' }} required>
+                    <input type="radio" name="package_code" value="{{ code }}" required>
                     <span class="contract-option-check" aria-hidden="true">✓</span>
                     <span class="contract-package-copy">
                         <strong>{{ package['name'] }}</strong>
