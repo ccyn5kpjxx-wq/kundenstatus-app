@@ -64,9 +64,12 @@
         <section class="content-card contract-step">
             <div class="contract-step-head">
                 <span>02</span>
-                <div><p class="eyebrow">Grundpaket</p><h2>Was bildet die Basis?</h2><p>Alle Preise werden netto ausgewiesen. Drittanbieter-, Lizenz- und Medienkosten bleiben getrennt.</p></div>
+                <div><p class="eyebrow">Grundpaket</p><h2>Grundpaket ankreuzen</h2><p>Genau ein Grundpaket auswählen. Alle Preise werden netto ausgewiesen; Drittanbieter-, Lizenz- und Medienkosten bleiben getrennt.</p></div>
             </div>
-            <div class="contract-package-grid">
+            <fieldset class="contract-choice-fieldset" aria-describedby="package-choice-help">
+                <legend class="sr-only">Grundpaket auswählen</legend>
+                <p class="contract-choice-help" id="package-choice-help"><strong>Einfachauswahl:</strong> Das markierte Paket bildet die vertragliche Basis.</p>
+                <div class="contract-package-grid">
                 {% for code, package in pakete.items() %}
                 <label class="contract-package-option">
                     <input type="radio" name="package_code" value="{{ code }}" {{ 'checked' if code == 'website_growth' else '' }} required>
@@ -82,15 +85,19 @@
                     </span>
                 </label>
                 {% endfor %}
-            </div>
+                </div>
+            </fieldset>
         </section>
 
         <section class="content-card contract-step">
             <div class="contract-step-head">
                 <span>03</span>
-                <div><p class="eyebrow">Zusatzmodule</p><h2>Was soll zusätzlich wirken?</h2><p>Nur ausdrücklich gewählte Module werden Teil der Leistungsanlage.</p></div>
+                <div><p class="eyebrow">Zusatzmodule</p><h2>Zusatzmodule ankreuzen</h2><p>Google, Instagram/Facebook, Geschäfts-E-Mail, Dashboard, Buchung, Video und Print lassen sich einzeln auswählen.</p></div>
             </div>
-            <div class="contract-addon-grid">
+            <fieldset class="contract-choice-fieldset" aria-describedby="addon-choice-help">
+                <legend class="sr-only">Zusatzmodule auswählen</legend>
+                <p class="contract-choice-help" id="addon-choice-help"><strong>Mehrfachauswahl:</strong> Nur angekreuzte Module werden berechnet und im PDF als „gebucht“ markiert.</p>
+                <div class="contract-addon-grid">
                 {% for code, addon in zusatzmodule.items() %}
                 <label class="contract-addon-option">
                     <input type="checkbox" name="addon_codes" value="{{ code }}">
@@ -106,7 +113,8 @@
                     </span>
                 </label>
                 {% endfor %}
-            </div>
+                </div>
+            </fieldset>
         </section>
 
         <section class="content-card contract-step">
@@ -130,7 +138,7 @@
         </section>
 
         <div class="contract-submit-bar">
-            <div><strong>Unveränderliche PDF-Version erzeugen</strong><small>Der Vorgang speichert eine neue Version intern. Es wird keine E-Mail versendet und nichts automatisch an den Kunden freigegeben.</small></div>
+            <div><strong>Unveränderliche PDF-Version mit Auswahlprotokoll erzeugen</strong><small>Grundpaket und alle Zusatzmodule erscheinen im PDF mit [X] gebucht oder [ ] nicht gebucht. Es wird keine E-Mail versendet und nichts automatisch an den Kunden freigegeben.</small></div>
             <button class="button button-primary" type="submit">Vertragsentwurf erzeugen</button>
         </div>
     </form>

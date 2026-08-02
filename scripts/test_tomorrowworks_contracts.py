@@ -46,6 +46,10 @@ def pdf_text(payload: bytes) -> str:
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
+def compact_text(value: str) -> str:
+    return " ".join(value.split())
+
+
 def create_customer(client, firma: str, email: str) -> int:
     response = post(
         client,
@@ -250,7 +254,22 @@ def run() -> None:
         assert first["sha256"] == hashlib.sha256(first_bytes).hexdigest()
         assert first_bytes.startswith(b"%PDF-")
         assert first_snapshot["legal_approved"] is False
+        assert first_snapshot["text_version"] == "tw-agenturvertrag-2026-08-02-v2"
         assert first_snapshot["package"]["code"] == "founder_pilot"
+        assert {
+            item["code"] for item in first_snapshot["selection_manifest"]["packages"] if item["selected"]
+        } == {"founder_pilot"}
+        assert {
+            item["code"] for item in first_snapshot["selection_manifest"]["addons"] if item["selected"]
+        } == {
+            "email_setup",
+            "google_business",
+            "google_ads",
+            "booking",
+            "sales_video",
+            "business_card",
+        }
+        assert len(first_snapshot["selection_manifest"]["addons"]) == len(dashboard_module.ADDON_CATALOG)
         assert first_snapshot["pricing"]["setup_cent"] == 333_000
         assert first_snapshot["pricing"]["monthly_cent"] == 64_800
         assert first_snapshot["pricing"]["media_budget_cent"] == 100_000
@@ -259,6 +278,7 @@ def run() -> None:
         connection.close()
 
         first_text = pdf_text(first_bytes)
+        first_compact = compact_text(first_text)
         for expected in (
             "Nicht rechtsverbindlicher Vertragsentwurf",
             "Kunstatelier Goldschmidt",
@@ -268,8 +288,21 @@ def run() -> None:
             "keine Garantie",
             "3.330,00 EUR",
             "648,00 EUR",
+            "Leistungsauswahl",
+            "Grundpaket - genau eine Auswahl",
+            "Auswahl bestätigt",
         ):
             assert expected in first_text, expected
+        for addon in dashboard_module.ADDON_CATALOG.values():
+            assert addon["name"] in first_text, addon["name"]
+        for expected in (
+            "[X] gewählt Founder-Pilot",
+            "[ ] nicht gewählt Website Start",
+            "[X] zusätzlich gebucht Google Ads",
+            "[ ] nicht zusätzlich gebucht Instagram & Facebook Ads",
+            "Leistungen des Grundpakets und projektbezogene Inklusivleistungen gelten unabhängig",
+        ):
+            assert expected in first_compact, expected
 
         pdf_url = f"/projekte/{project_id}/vertraege/{contract['id']}/versionen/1.pdf"
         denied_pdf = anonymous.get(pdf_url, follow_redirects=False)
@@ -305,6 +338,10 @@ def run() -> None:
             assert f"{pdf_url}?download=1" in body
         assert "Founder-Pilot Rahmen- und Betreuungsvertrag" in center_body
         assert "Version 1" in center_body or "V1" in center_body
+        assert "Grundpaket ankreuzen" in center_body
+        assert "Zusatzmodule ankreuzen" in center_body
+        assert "Business-Dashboard einrichten" in center_body
+        assert center_body.count('name="addon_codes"') == len(dashboard_module.ADDON_CATALOG)
 
         portal_body = admin.get(f"/portal/{ticket['token']}").get_data(as_text=True)
         assert "Founder-Pilot Rahmen- und Betreuungsvertrag" not in portal_body
@@ -351,15 +388,25 @@ def run() -> None:
         assert second["groesse"] == len(second_bytes)
         assert second["sha256"] == hashlib.sha256(second_bytes).hexdigest()
         assert second_snapshot["version"] == 2
+        assert second_snapshot["text_version"] == "tw-agenturvertrag-2026-08-02-v2"
         assert second_snapshot["pricing"]["media_budget_cent"] == 200_000
         assert second_snapshot["pricing"]["monthly_cent"] == 84_800
+        assert {
+            item["code"] for item in second_snapshot["selection_manifest"]["addons"] if item["selected"]
+        } == {"google_ads", "dashboard_extension", "sales_video"}
         assert connection.execute("SELECT COUNT(*) FROM portal_nachrichten").fetchone()[0] == before_messages
         assert connection.execute("SELECT COUNT(*) FROM portal_benachrichtigungen").fetchone()[0] == before_notifications
         connection.close()
 
         second_text = pdf_text(second_bytes)
+        second_compact = compact_text(second_text)
         assert "Version zwei: Dashboard-Erweiterung aufgenommen" in second_text
         assert "848,00 EUR" in second_text
+        assert "[X] zusätzlich gebucht Google Ads" in second_compact
+        assert "[X] zusätzlich gebucht Business-Dashboard einrichten" in second_compact
+        assert "[ ] nicht zusätzlich gebucht Geschäfts-E-Mail bis drei Postfächer" in second_compact
+        assert "Google Ads 490,00 EUR 300,00 EUR" in second_compact
+        assert "Instagram & Facebook Ads 490,00 EUR ab 249,00 EUR oder 15 % Budget" in second_compact
         assert admin.get(pdf_url).data == first_bytes
 
         scoped_idor = admin.get(
@@ -379,6 +426,37 @@ def run() -> None:
         assert prices_download.status_code == 200
         assert prices_download.headers["Content-Disposition"].startswith("attachment;")
         prices_download.close()
+
+        standard_snapshot = dashboard_module.build_contract_snapshot(
+            project={"id": 99, "titel": "Standard-Website", "beschreibung": ""},
+            customer={
+                "firma": "Standardkunde GmbH",
+                "ansprechpartner": "Max Muster",
+                "adresse": "Musterweg 1, 74821 Mosbach",
+                "email": "standard@example.test",
+            },
+            provider={
+                "name": "Tomorrow Works",
+                "address": "Binauer Höhe 4, 74821 Mosbach",
+                "representative": "Christopher Gärtner",
+                "email": "info@example.test",
+            },
+            package_code="website_start",
+            addon_codes=[],
+            media_budget_cent=0,
+            start_date="",
+            notes="",
+            version=1,
+            contract_id=1,
+            created_at="2026-08-02 20:00:00",
+            legal_approved=False,
+        )
+        standard_pdf = dashboard_module.create_contract_pdf(standard_snapshot)
+        standard_reader = PdfReader(io.BytesIO(standard_pdf))
+        assert all((page.extract_text() or "").strip() for page in standard_reader.pages)
+        standard_text = compact_text(pdf_text(standard_pdf))
+        assert "[X] gewählt Website Start" in standard_text
+        assert "Founder-Pilot" not in standard_text
 
         second_path.write_bytes(b"%PDF-1.4\nabsichtlich manipuliert")
         tampered = admin.get(

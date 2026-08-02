@@ -21,7 +21,7 @@ from reportlab.platypus import (
 )
 
 
-TEXT_VERSION = "tw-agenturvertrag-2026-08-02-v1"
+TEXT_VERSION = "tw-agenturvertrag-2026-08-02-v2"
 
 INK = colors.HexColor("#151815")
 MUTED = colors.HexColor("#626861")
@@ -148,7 +148,7 @@ ADDON_CATALOG: dict[str, dict[str, object]] = {
         "description": "Verknüpfte Such- und Social-Kampagnen mit gemeinsamer Zieldefinition und kanalgetrennter Auswertung; Betreuung 399,00 EUR monatlich oder 15 Prozent des kombinierten Medienbudgets, falls höher.",
     },
     "dashboard_extension": {
-        "name": "Kunden-/Business-Dashboard als Zusatzmodul",
+        "name": "Business-Dashboard einrichten",
         "setup_cent": 149_000,
         "monthly_cent": 14_900,
         "description": "Projekt-, Anfrage-, Datei- und Kennzahlenübersicht; Schnittstellen und Sondermodule nach Leistungsanlage.",
@@ -254,6 +254,33 @@ def build_contract_snapshot(
             effektiver_monatspreis = max(effektiver_monatspreis, anteil)
         berechnete_addons.append(addon | {"effective_monthly_cent": effektiver_monatspreis})
     addons = berechnete_addons
+    selected_addons = {str(item["code"]): item for item in addons}
+    selection_manifest = {
+        "packages": [
+            {
+                "code": code,
+                "name": str(catalog_package["name"]),
+                "selected": code == package_code,
+                "setup_cent": int(catalog_package["setup_cent"]),
+                "monthly_cent": int(catalog_package["monthly_cent"]),
+            }
+            for code, catalog_package in PACKAGE_CATALOG.items()
+        ],
+        "addons": [
+            {
+                "code": code,
+                "name": str(catalog_addon["name"]),
+                "selected": code in selected_addons,
+                "setup_cent": int(catalog_addon["setup_cent"]),
+                "monthly_cent": int(
+                    selected_addons.get(code, {}).get(
+                        "effective_monthly_cent", catalog_addon["monthly_cent"]
+                    )
+                ),
+            }
+            for code, catalog_addon in ADDON_CATALOG.items()
+        ],
+    }
     setup_cent = int(package["setup_cent"]) + sum(int(item["setup_cent"]) for item in addons)
     monthly_cent = int(package["monthly_cent"]) + sum(int(item["effective_monthly_cent"]) for item in addons)
     duration = int(package["duration_months"])
@@ -295,6 +322,7 @@ def build_contract_snapshot(
             "services": list(package["services"]),
         },
         "addons": addons,
+        "selection_manifest": selection_manifest,
         "pricing": {
             "setup_cent": setup_cent,
             "monthly_cent": monthly_cent,
@@ -445,6 +473,63 @@ def _table(data: list[list[object]], widths: list[float], *, header: bool = Fals
                 ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
             ]
         )
+    table.setStyle(TableStyle(commands))
+    return table
+
+
+def _selection_table(
+    items: Sequence[Mapping[str, object]],
+    styles: dict[str, ParagraphStyle],
+    *,
+    selected_label: str,
+    unselected_label: str,
+) -> Table:
+    rows: list[list[object]] = [
+        [
+            _rich("Auswahl", styles["table_header"]),
+            _rich("Leistung", styles["table_header"]),
+            _rich("Einmalig", styles["table_header"]),
+            _rich("Monatlich", styles["table_header"]),
+        ]
+    ]
+    for item in items:
+        selected = bool(item.get("selected"))
+        monthly_text = euro(int(item.get("monthly_cent", 0) or 0))
+        if not selected and str(item.get("code", "")) in AD_ADDONS:
+            monthly_text = f"ab {monthly_text}\noder 15 % Budget"
+        rows.append(
+            [
+                _p(
+                    f"[X]\n{selected_label}" if selected else f"[ ]\n{unselected_label}",
+                    styles["table_bold"] if selected else styles["table"],
+                ),
+                _p(item.get("name", ""), styles["table_bold"] if selected else styles["table"]),
+                _p(euro(int(item.get("setup_cent", 0) or 0)), styles["table"]),
+                _p(monthly_text, styles["table"]),
+            ]
+        )
+    table = Table(rows, colWidths=[30 * mm, 74 * mm, 35 * mm, 35 * mm], repeatRows=1, hAlign="LEFT")
+    commands: list[tuple] = [
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("GRID", (0, 0), (-1, -1), 0.45, LINE),
+        ("BACKGROUND", (0, 0), (-1, 0), GREEN),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("ALIGN", (0, 1), (0, -1), "CENTER"),
+    ]
+    for index, item in enumerate(items, start=1):
+        if item.get("selected"):
+            commands.extend(
+                [
+                    ("BACKGROUND", (0, index), (-1, index), colors.HexColor("#E8F3EF")),
+                    ("TEXTCOLOR", (0, index), (0, index), GREEN),
+                ]
+            )
+        else:
+            commands.append(("TEXTCOLOR", (0, index), (0, index), MUTED))
     table.setStyle(TableStyle(commands))
     return table
 
@@ -703,24 +788,91 @@ def create_contract_pdf(snapshot: Mapping[str, object]) -> bytes:
             ]
         )
     )
-    story.append(
-        KeepTogether(
-            [
-                Spacer(1, 5 * mm),
-                _p("Unterschriften", styles["h1"]),
-                _p(
-                    "Mit ihrer Unterschrift bestätigen die Parteien ausschließlich die nach rechtlicher Endprüfung vorgelegte Fassung. Dieser Entwurf darf nicht ungeprüft zur Online-Annahme freigeschaltet werden.",
-                    styles["small"],
-                ),
-                signature_table,
-            ]
-        )
+    signature_section = KeepTogether(
+        [
+            Spacer(1, 5 * mm),
+            _p("Auswahl bestätigt", styles["h1"]),
+            _p(
+                "Mit ihrer Unterschrift bestätigen die Parteien die vorstehend mit [X] dokumentierte Leistungswahl sowie ausschließlich die nach rechtlicher Endprüfung vorgelegte Fassung. Dieser Entwurf darf nicht ungeprüft zur Online-Annahme freigeschaltet werden.",
+                styles["small"],
+            ),
+            signature_table,
+        ]
     )
 
-    story.extend([PageBreak(), _p("LEISTUNGS- UND PREISANLAGE", styles["kicker"]), _p("Gebuchte Module", styles["title"])])
+    manifest = snapshot.get("selection_manifest") or {}
+    package_options = list(manifest.get("packages") or [])
+    addon_options = list(manifest.get("addons") or [])
+    if not package_options:
+        package_options = [
+            {
+                "code": code,
+                "name": catalog_package["name"],
+                "selected": code == package["code"],
+                "setup_cent": catalog_package["setup_cent"],
+                "monthly_cent": catalog_package["monthly_cent"],
+            }
+            for code, catalog_package in PACKAGE_CATALOG.items()
+        ]
+    if not addon_options:
+        selected_by_code = {str(item["code"]): item for item in snapshot["addons"]}
+        addon_options = [
+            {
+                "code": code,
+                "name": catalog_addon["name"],
+                "selected": code in selected_by_code,
+                "setup_cent": catalog_addon["setup_cent"],
+                "monthly_cent": selected_by_code.get(code, {}).get(
+                    "effective_monthly_cent", catalog_addon["monthly_cent"]
+                ),
+            }
+            for code, catalog_addon in ADDON_CATALOG.items()
+        ]
+    package_options = [
+        item
+        for item in package_options
+        if bool(PACKAGE_CATALOG.get(str(item.get("code", "")), {}).get("public", True))
+        or bool(item.get("selected"))
+    ]
+
+    story.extend(
+        [
+            PageBreak(),
+            _p("LEISTUNGS- UND PREISANLAGE", styles["kicker"]),
+            _p("Leistungsauswahl", styles["title"]),
+            _p(
+                "Genau ein Grundpaket ist mit [X] als gewählt markiert. Bei den Zusatzmodulen werden nur mit [X] als zusätzlich gebucht markierte Positionen separat berechnet. Leistungen des Grundpakets und projektbezogene Inklusivleistungen gelten unabhängig von den Zusatzmodul-Kästchen.",
+                styles["callout"],
+            ),
+            Spacer(1, 5 * mm),
+            _p("Grundpaket - genau eine Auswahl", styles["h1"]),
+            _selection_table(
+                package_options,
+                styles,
+                selected_label="gewählt",
+                unselected_label="nicht gewählt",
+            ),
+            _p("Zusatzmodule - Mehrfachauswahl möglich", styles["h1"]),
+            _selection_table(
+                addon_options,
+                styles,
+                selected_label="zusätzlich gebucht",
+                unselected_label="nicht zusätzlich gebucht",
+            ),
+            Spacer(1, 6 * mm),
+            _p("Preiszusammenfassung der angekreuzten Positionen", styles["h1"]),
+        ]
+    )
+    selected_package = next(
+        (item for item in package_options if item.get("selected")),
+        {
+            "setup_cent": PACKAGE_CATALOG[package["code"]]["setup_cent"],
+            "monthly_cent": PACKAGE_CATALOG[package["code"]]["monthly_cent"],
+        },
+    )
     rows: list[list[object]] = [
         [_rich("Leistung", styles["table_header"]), _rich("Einmalig", styles["table_header"]), _rich("Monatlich", styles["table_header"])],
-        [_p(package["name"], styles["table_bold"]), _p(euro(PACKAGE_CATALOG[package["code"]]["setup_cent"]), styles["table"]), _p(euro(PACKAGE_CATALOG[package["code"]]["monthly_cent"]), styles["table"])],
+        [_p(package["name"], styles["table_bold"]), _p(euro(selected_package["setup_cent"]), styles["table"]), _p(euro(selected_package["monthly_cent"]), styles["table"])],
     ]
     for addon in snapshot["addons"]:
         rows.append([_p(addon["name"], styles["table"]), _p(euro(addon["setup_cent"]), styles["table"]), _p(euro(addon["effective_monthly_cent"]), styles["table"])])
@@ -749,6 +901,7 @@ def create_contract_pdf(snapshot: Mapping[str, object]) -> bytes:
             _bullet("Finale Texte, Preise, Termine, Bilder, Marken, KI-Kennzeichnungen und Nutzungsrechte", styles),
             _bullet("Werbekonten, Conversion-Ziele, Medienbudget, Einwilligungs- und Datenschutzkonzept", styles),
             _bullet("Auftragsverarbeitung, Unterauftragnehmer, Lösch- und Übergaberegeln", styles),
+            signature_section,
         ]
     )
     doc.build(story, onFirstPage=_page_decorator(snapshot), onLaterPages=_page_decorator(snapshot))
