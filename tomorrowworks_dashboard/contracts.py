@@ -257,6 +257,9 @@ def build_contract_snapshot(
     setup_cent = int(package["setup_cent"]) + sum(int(item["setup_cent"]) for item in addons)
     monthly_cent = int(package["monthly_cent"]) + sum(int(item["effective_monthly_cent"]) for item in addons)
     duration = int(package["duration_months"])
+    notice_months = int(package["notice_months"])
+    if monthly_cent > 0 and notice_months == 0:
+        notice_months = 1
     project_id = int(_row_value(project, "id", 0) or 0)
     contract_number = (
         f"TW-{date.fromisoformat(created_at[:10]).year}-{project_id:04d}"
@@ -297,7 +300,7 @@ def build_contract_snapshot(
             "monthly_cent": monthly_cent,
             "media_budget_cent": media_budget_cent,
             "duration_months": duration,
-            "notice_months": int(package["notice_months"]),
+            "notice_months": notice_months,
             "first_term_cent": setup_cent + monthly_cent * duration,
             "vat_rate": 19,
         },
@@ -493,13 +496,20 @@ def _page_decorator(snapshot: Mapping[str, object]):
 def _commercial_summary(snapshot: Mapping[str, object], styles: dict[str, ParagraphStyle]) -> Table:
     pricing = snapshot["pricing"]
     duration = int(pricing["duration_months"])
+    monthly_cent = int(pricing["monthly_cent"])
     duration_text = "Projektleistung ohne Mindestlaufzeit" if duration == 0 else f"{duration} Monate Mindestlaufzeit"
+    if monthly_cent <= 0:
+        notice_text = "Nicht anwendbar auf die einmalige Projektleistung"
+    elif duration == 0:
+        notice_text = f"{pricing['notice_months']} Monat(e) zum Monatsende"
+    else:
+        notice_text = f"{pricing['notice_months']} Monat(e) zum Laufzeitende; danach monatlich"
     data = [
         [_p("Einmalige Agenturleistung", styles["table_bold"]), _p(euro(pricing["setup_cent"]), styles["table"])],
         [_p("Laufende Agenturbetreuung", styles["table_bold"]), _p(f"{euro(pricing['monthly_cent'])} pro Monat", styles["table"])],
         [_p("Werbebudget", styles["table_bold"]), _p(f"{euro(pricing['media_budget_cent'])} pro Monat - separat an Plattform", styles["table"])],
         [_p("Laufzeit", styles["table_bold"]), _p(duration_text, styles["table"])],
-        [_p("Kündigung", styles["table_bold"]), _p(f"{pricing['notice_months']} Monat(e) zum Laufzeitende; danach monatlich", styles["table"])],
+        [_p("Kündigung", styles["table_bold"]), _p(notice_text, styles["table"])],
         [_p("Umsatzsteuer", styles["table_bold"]), _p("Alle Beträge netto zuzüglich gesetzlicher Umsatzsteuer", styles["table"])],
     ]
     return _table(data, [59 * mm, 115 * mm])
@@ -646,7 +656,16 @@ def create_contract_pdf(snapshot: Mapping[str, object]) -> bytes:
             ),
             _p("11. Laufzeit und Vertragsende", styles["h1"]),
             _p(
-                f"Die laufende Betreuung hat eine Mindestlaufzeit von {pricing['duration_months']} Monat(en), soweit eine Monatsleistung vereinbart ist. Sie kann mit einer Frist von {pricing['notice_months']} Monat(en) zum Ende der Mindestlaufzeit und danach monatlich gekündigt werden. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.",
+                (
+                    f"Die laufende Betreuung hat eine Mindestlaufzeit von {pricing['duration_months']} Monat(en). Sie kann mit einer Frist von {pricing['notice_months']} Monat(en) zum Ende der Mindestlaufzeit und danach monatlich gekündigt werden."
+                    if int(pricing["duration_months"]) > 0
+                    else (
+                        f"Laufende Zusatzmodule haben keine Mindestlaufzeit und können mit einer Frist von {pricing['notice_months']} Monat(en) zum Monatsende gekündigt werden. Die einmalige Projektleistung endet mit ihrer vollständigen Erbringung und Abnahme."
+                        if int(pricing["monthly_cent"]) > 0
+                        else "Die einmalige Projektleistung endet mit ihrer vollständigen Erbringung und Abnahme; eine laufende Betreuung ist in dieser Fassung nicht vereinbart."
+                    )
+                )
+                + " Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.",
                 styles["body"],
             ),
             _p(
