@@ -8,6 +8,7 @@
         <p>Hier siehst du, wer woran arbeitet und wo ein Projekt festhängt.</p>
     </div>
     <div class="header-actions">
+        <a class="button button-contract" href="{{ url_for('leistungen_preise', download=1) }}">↓ Leistungen &amp; Preise</a>
         <a class="button button-secondary" href="{{ url_for('kunde_neu') }}">＋ Kunde</a>
         <a class="button button-primary" href="{{ url_for('projekt_neu') }}">＋ Projekt</a>
     </div>
@@ -98,7 +99,7 @@
 
     <div class="project-table-wrap">
         <table class="project-table">
-            <thead><tr><th>Kunde & Projekt</th><th>Team</th><th>Status</th><th>Git-Stand</th><th>Fortschritt</th><th>Nächster Schritt</th><th>Termin</th><th><span class="sr-only">Öffnen</span></th></tr></thead>
+            <thead><tr><th>Kunde & Projekt</th><th>Team</th><th>Status</th><th>Git-Stand</th><th>Fortschritt</th><th>Nächster Schritt</th><th>Vertrag</th><th>Termin</th><th><span class="sr-only">Öffnen</span></th></tr></thead>
             <tbody>
             {% for projekt in projekte %}
                 <tr class="{{ 'is-overdue' if projekt['zieldatum'] and projekt['zieldatum'] < heute and projekt['status'] not in ['abgeschlossen', 'veroeffentlicht'] else '' }}">
@@ -115,11 +116,12 @@
                     <td data-label="Git-Stand"><div class="git-table-state" data-project-sync="{{ projekt['id'] }}"><span class="sync-badge sync-{{ projekt['git_status'] }}" data-git-badge>{{ git_status_labels.get(projekt['git_status'], projekt['git_status']) }}</span><small data-git-detail>{% if projekt['git_kurz'] %}{{ projekt['git_kurz'] }} · {{ projekt['git_author'] }}{% elif projekt['git_fehler'] %}{{ projekt['git_fehler'] }}{% else %}Projektordner verbinden{% endif %}</small></div></td>
                     <td data-label="Fortschritt"><div class="progress-line"><span style="width: {{ projekt['fortschritt'] }}%"></span></div><small>{{ projekt['fortschritt'] }} %</small></td>
                     <td data-label="Nächster Schritt"><span class="next-task">{{ projekt['aktuelle_aufgabe'] or 'Noch nicht festgelegt' }}</span>{% if projekt['blockiert_grund'] %}<small class="danger-text">{{ projekt['blockiert_grund'] }}</small>{% endif %}</td>
+                    <td data-label="Vertrag"><div class="table-contract-cell">{% if projekt['vertrag_id'] %}<a class="table-contract-link has-contract" href="{{ url_for('projekt_vertraege', projekt_id=projekt['id']) }}"><span>V{{ projekt['vertrag_version'] }}</span><strong>{{ projekt['vertrag_status']|default('Entwurf')|replace('_', ' ')|capitalize }}</strong></a><div class="table-contract-actions"><a href="{{ url_for('projekt_vertrag_pdf', projekt_id=projekt['id'], vertrag_id=projekt['vertrag_id'], version=projekt['vertrag_version']) }}" target="_blank" rel="noopener">Vertrag ansehen</a><a href="{{ url_for('projekt_vertrag_pdf', projekt_id=projekt['id'], vertrag_id=projekt['vertrag_id'], version=projekt['vertrag_version'], download=1) }}">Vertrag herunterladen</a></div>{% else %}<a class="table-contract-link" href="{{ url_for('projekt_vertraege', projekt_id=projekt['id']) }}"><span>+ PDF</span><strong>Entwurf erstellen</strong></a>{% endif %}</div></td>
                     <td data-label="Termin"><span class="deadline">{{ projekt['zieldatum']|datum }}</span></td>
                     <td><a class="row-arrow" href="{{ url_for('projekt_detail', projekt_id=projekt['id']) }}" aria-label="{{ projekt['titel'] }} öffnen">→</a></td>
                 </tr>
             {% else %}
-                <tr><td colspan="8"><div class="empty-state compact"><h3>Keine Projekte gefunden</h3><p>Lege das erste Projekt an oder ändere die Filter.</p><a class="button button-primary" href="{{ url_for('projekt_neu') }}">Projekt anlegen</a></div></td></tr>
+                <tr><td colspan="9"><div class="empty-state compact"><h3>Keine Projekte gefunden</h3><p>Lege das erste Projekt an oder ändere die Filter.</p><a class="button button-primary" href="{{ url_for('projekt_neu') }}">Projekt anlegen</a></div></td></tr>
             {% endfor %}
             </tbody>
         </table>

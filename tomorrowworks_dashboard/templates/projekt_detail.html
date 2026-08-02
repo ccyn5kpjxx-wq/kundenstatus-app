@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-header project-detail-header">
     <div><a class="back-link" href="{{ url_for('kunde_detail', kunde_id=projekt['kunde_id']) }}">← {{ projekt['kundenname'] }}</a><div class="title-with-badge"><h1>{{ projekt['titel'] }}</h1><span class="status-badge status-{{ projekt['status'] }}">{{ projekt_status_labels.get(projekt['status'], projekt['status']) }}</span></div><p>{{ projekt_typ_labels.get(projekt['typ'], projekt['typ']) }} · zuletzt aktualisiert {{ projekt['updated_at']|zeitpunkt }}</p></div>
-    <div class="header-actions"><a class="button button-ticket" href="{{ url_for('kunden_ticket', kunde_id=projekt['kunde_id']) }}">Kunden-Ticket</a>{% if interne_vorschau_url %}<a class="button button-preview" href="{{ interne_vorschau_url }}" target="_blank" rel="noopener">Interne Vorschau ↗</a>{% elif projekt['vorschau_url'] %}<a class="button button-preview" href="{{ projekt['vorschau_url'] }}" target="_blank" rel="noopener">Vorschau öffnen ↗</a>{% endif %}<a class="button button-video" href="{{ url_for('verkaufsvideo_form', projekt_id=projekt['id']) }}">▶ Verkaufsvideo</a><a class="button button-secondary" href="{{ url_for('projekt_bearbeiten', projekt_id=projekt['id']) }}">Bearbeiten</a></div>
+    <div class="header-actions"><a class="button button-ticket" href="{{ url_for('kunden_ticket', kunde_id=projekt['kunde_id']) }}">Kunden-Ticket</a>{% if interne_vorschau_url %}<a class="button button-preview" href="{{ interne_vorschau_url }}" target="_blank" rel="noopener">Interne Vorschau ↗</a>{% elif projekt['vorschau_url'] %}<a class="button button-preview" href="{{ projekt['vorschau_url'] }}" target="_blank" rel="noopener">Vorschau öffnen ↗</a>{% endif %}<a class="button button-contract" href="{{ url_for('projekt_vertraege', projekt_id=projekt['id']) }}">§ Verträge</a><a class="button button-video" href="{{ url_for('verkaufsvideo_form', projekt_id=projekt['id']) }}">▶ Verkaufsvideo</a><a class="button button-secondary" href="{{ url_for('projekt_bearbeiten', projekt_id=projekt['id']) }}">Bearbeiten</a></div>
 </header>
 
 <div class="project-overview-grid">
@@ -26,6 +26,19 @@
         </form>
     </aside>
 </div>
+
+<section class="content-card project-contract-card" id="vertraege">
+    <div class="section-heading"><div><p class="eyebrow">Leistung &amp; Vereinbarung</p><h2>Vertragscenter</h2></div><span class="sales-video-private-badge"><i></i> nur intern</span></div>
+    {% if letzter_vertrag|default(none) %}
+    <div class="project-contract-ready">
+        <span class="contract-file-icon">PDF</span>
+        <div><span class="contract-state-pill {{ 'is-approved' if letzter_vertrag['status'] in ['rechtlich_freigegeben', 'freigegeben', 'unterzeichnet', 'aktiv'] else '' }}">{{ letzter_vertrag['status']|default('Entwurf')|replace('_', ' ')|capitalize }}</span><h3>{{ letzter_vertrag['titel']|default('Rahmen- und Betreuungsvertrag') }}</h3><p>Version {{ letzter_vertrag['version'] }} · {{ letzter_vertrag['version_created_at']|default(letzter_vertrag['created_at'])|zeitpunkt }} · Im Vertragscenter bleiben alle früheren Versionen nachvollziehbar.</p></div>
+        <div class="project-contract-actions"><a class="button button-secondary" href="{{ url_for('projekt_vertrag_pdf', projekt_id=projekt['id'], vertrag_id=letzter_vertrag['id'], version=letzter_vertrag['version']) }}" target="_blank" rel="noopener">Vertrag ansehen</a><a class="button button-contract" href="{{ url_for('projekt_vertrag_pdf', projekt_id=projekt['id'], vertrag_id=letzter_vertrag['id'], version=letzter_vertrag['version'], download=1) }}">Vertrag herunterladen</a><a class="text-link" href="{{ url_for('projekt_vertraege', projekt_id=projekt['id']) }}">Alle Versionen →</a></div>
+    </div>
+    {% else %}
+    <div class="project-contract-empty"><div><span class="contract-summary-mark">§</span><div><h3>Preis und Leistung sauber festhalten</h3><p>Paket, Google- oder Meta-Werbung, E-Mail, Dashboard, Werbevideo und Printmodule lassen sich als interner PDF-Entwurf zusammenstellen.</p></div></div><a class="button button-contract" href="{{ url_for('projekt_vertraege', projekt_id=projekt['id']) }}">Vertragsentwurf erstellen</a></div>
+    {% endif %}
+</section>
 
 <section class="content-card project-sales-video-card" id="verkaufsvideo">
     <div class="section-heading"><div><p class="eyebrow">Kundenpräsentation</p><h2>Verkaufsvideo</h2></div><span class="sales-video-private-badge"><i></i> nur intern</span></div>

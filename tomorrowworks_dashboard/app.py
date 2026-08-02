@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import io
+import json
 import os
 import re
 import secrets
@@ -22,6 +25,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     send_from_directory,
     session,
     url_for,
@@ -60,6 +64,23 @@ try:
     )
 except ModuleNotFoundError:
     from sales_video import SalesVideoError, SalesVideoSource, create_sales_video, validate_sales_video_mp4
+
+try:
+    from tomorrowworks_dashboard.contracts import (
+        ADDON_CATALOG,
+        PACKAGE_CATALOG,
+        build_contract_snapshot,
+        create_contract_pdf,
+        create_price_overview_pdf,
+    )
+except ModuleNotFoundError:
+    from contracts import (
+        ADDON_CATALOG,
+        PACKAGE_CATALOG,
+        build_contract_snapshot,
+        create_contract_pdf,
+        create_price_overview_pdf,
+    )
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -130,6 +151,12 @@ GIT_STATUS_LABELS = {
     "abweichung": "Abgleich nötig",
     "kein_upstream": "Noch nicht veröffentlicht",
     "aktuell": "Git aktuell",
+}
+VERTRAG_STATUS_LABELS = {
+    "entwurf": "Interner Entwurf",
+    "rechtlich_freigegeben": "Rechtlich freigegeben",
+    "unterzeichnet": "Unterzeichnet",
+    "beendet": "Beendet",
 }
 
 
@@ -218,6 +245,35 @@ CREATE TABLE IF NOT EXISTS projekt_dateien (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS projekt_vertraege (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    projekt_id INTEGER NOT NULL REFERENCES projekte(id) ON DELETE CASCADE,
+    titel TEXT NOT NULL DEFAULT 'Rahmen- und Betreuungsvertrag',
+    typ TEXT NOT NULL DEFAULT 'agenturvertrag',
+    status TEXT NOT NULL DEFAULT 'entwurf',
+    erstellt_von INTEGER REFERENCES teammitglieder(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS projekt_vertragsversionen (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vertrag_id INTEGER NOT NULL REFERENCES projekt_vertraege(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    text_version TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    gespeichert_name TEXT NOT NULL,
+    mimetype TEXT NOT NULL DEFAULT 'application/pdf',
+    groesse INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    aenderungsgrund TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'entwurf',
+    erstellt_von INTEGER REFERENCES teammitglieder(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (vertrag_id, version)
+);
+
 CREATE TABLE IF NOT EXISTS aktivitaeten (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     projekt_id INTEGER NOT NULL REFERENCES projekte(id) ON DELETE CASCADE,
@@ -301,6 +357,8 @@ CREATE INDEX IF NOT EXISTS idx_projekte_kunde ON projekte(kunde_id);
 CREATE INDEX IF NOT EXISTS idx_projekte_status ON projekte(status);
 CREATE INDEX IF NOT EXISTS idx_projekte_zieldatum ON projekte(zieldatum);
 CREATE INDEX IF NOT EXISTS idx_aktivitaeten_projekt ON aktivitaeten(projekt_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_projekt_vertraege_projekt ON projekt_vertraege(projekt_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_vertragsversionen_vertrag ON projekt_vertragsversionen(vertrag_id, version DESC);
 CREATE INDEX IF NOT EXISTS idx_portal_nachrichten_ticket ON portal_nachrichten(ticket_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_portal_nachrichten_ungelesen ON portal_nachrichten(gelesen_team, absender);
 CREATE INDEX IF NOT EXISTS idx_portal_dateien_nachricht ON portal_dateien(nachricht_id);
@@ -365,6 +423,22 @@ def create_app(test_config: dict | None = None) -> Flask:
         SMTP_TIMEOUT=int(os.getenv("TW_SMTP_TIMEOUT", "12")),
         TEAM_NOTIFY_EMAIL=os.getenv("TW_TEAM_NOTIFY_EMAIL", "").strip(),
         CONTRACT_LEGAL_APPROVED=os.getenv("TW_CONTRACT_LEGAL_APPROVED", "0") == "1",
+        CONTRACT_PROVIDER_NAME=os.getenv(
+            "TW_CONTRACT_PROVIDER_NAME",
+            "Gärtner GmbH Karosserie + Lack - Geschäftsbereich Tomorrow Works",
+        ).strip(),
+        CONTRACT_PROVIDER_ADDRESS=os.getenv(
+            "TW_CONTRACT_PROVIDER_ADDRESS",
+            "Binauer Höhe 4, 74821 Mosbach",
+        ).strip(),
+        CONTRACT_PROVIDER_REPRESENTATIVE=os.getenv(
+            "TW_CONTRACT_PROVIDER_REPRESENTATIVE",
+            "Geschäftsführer: Christopher Gärtner",
+        ).strip(),
+        CONTRACT_PROVIDER_EMAIL=os.getenv(
+            "TW_CONTRACT_PROVIDER_EMAIL",
+            "info@tomorrowworks-agentur.de",
+        ).strip(),
         MIGRATION_TOKEN=os.getenv("TW_MIGRATION_TOKEN", "").strip(),
         TTS_API_KEY=(os.getenv("TW_TTS_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip()),
         TTS_MODEL=os.getenv("TW_TTS_MODEL", "gpt-4o-mini-tts").strip() or "gpt-4o-mini-tts",
@@ -604,6 +678,7 @@ def register_helpers(app: Flask) -> None:
             "projekt_typ_labels": PROJEKT_TYP_LABELS,
             "git_status_labels": GIT_STATUS_LABELS,
             "angebot_status_labels": ANGEBOT_STATUS_LABELS,
+            "vertrag_status_labels": VERTRAG_STATUS_LABELS,
             "ticket_phase_labels": TICKET_PHASE_LABELS,
             "portal_ungelesen": portal_ungelesen,
             "vertrag_rechtlich_freigegeben": bool(app.config["CONTRACT_LEGAL_APPROVED"]),
@@ -649,11 +724,13 @@ def register_helpers(app: Flask) -> None:
 
     @app.errorhandler(400)
     @app.errorhandler(404)
+    @app.errorhandler(409)
     @app.errorhandler(413)
     def fehlerseite(error):
         texte = {
             400: "Die Anfrage konnte nicht verarbeitet werden.",
             404: "Diese Seite wurde nicht gefunden.",
+            409: "Diese Datei stimmt nicht mehr mit der gespeicherten Vertragsfassung überein.",
             413: "Die Datei ist zu groß. Maximal sind 20 MB erlaubt.",
         }
         return render_template("fehler.html", code=error.code, meldung=texte.get(error.code, str(error))), error.code
@@ -822,6 +899,74 @@ def _projekt_oder_404(projekt_id: int):
     if projekt is None:
         abort(404)
     return projekt
+
+
+def _vertrag_oder_404(projekt_id: int, vertrag_id: int):
+    vertrag = get_db().execute(
+        "SELECT * FROM projekt_vertraege WHERE id = ? AND projekt_id = ?",
+        (vertrag_id, projekt_id),
+    ).fetchone()
+    if vertrag is None:
+        abort(404)
+    return vertrag
+
+
+def _vertragsversion_oder_404(projekt_id: int, vertrag_id: int, version: int):
+    vertragsversion = get_db().execute(
+        """
+        SELECT vv.*, v.projekt_id, v.titel AS vertrag_titel
+        FROM projekt_vertragsversionen vv
+        JOIN projekt_vertraege v ON v.id = vv.vertrag_id
+        WHERE v.projekt_id = ? AND v.id = ? AND vv.version = ?
+        """,
+        (projekt_id, vertrag_id, version),
+    ).fetchone()
+    if vertragsversion is None:
+        abort(404)
+    return vertragsversion
+
+
+def _vertragsliste(projekt_id: int) -> list[dict[str, object]]:
+    db = get_db()
+    vertraege = db.execute(
+        """
+        SELECT v.*, t.name AS created_by_name
+        FROM projekt_vertraege v
+        LEFT JOIN teammitglieder t ON t.id = v.erstellt_von
+        WHERE v.projekt_id = ?
+        ORDER BY v.updated_at DESC, v.id DESC
+        """,
+        (projekt_id,),
+    ).fetchall()
+    ergebnis: list[dict[str, object]] = []
+    for row in vertraege:
+        eintrag = dict(row)
+        versionen = db.execute(
+            """
+            SELECT vv.*, t.name AS created_by_name
+            FROM projekt_vertragsversionen vv
+            LEFT JOIN teammitglieder t ON t.id = vv.erstellt_von
+            WHERE vv.vertrag_id = ?
+            ORDER BY vv.version DESC
+            """,
+            (row["id"],),
+        ).fetchall()
+        eintrag["versionen"] = [dict(version) for version in versionen]
+        if versionen:
+            eintrag["version"] = versionen[0]["version"]
+            eintrag["original_name"] = versionen[0]["original_name"]
+            eintrag["version_created_at"] = versionen[0]["created_at"]
+        ergebnis.append(eintrag)
+    return ergebnis
+
+
+def _vertragsanbieter() -> dict[str, str]:
+    return {
+        "name": str(current_app.config["CONTRACT_PROVIDER_NAME"]),
+        "address": str(current_app.config["CONTRACT_PROVIDER_ADDRESS"]),
+        "representative": str(current_app.config["CONTRACT_PROVIDER_REPRESENTATIVE"]),
+        "email": str(current_app.config["CONTRACT_PROVIDER_EMAIL"]),
+    }
 
 
 def _kunde_oder_404(kunde_id: int):
@@ -1226,7 +1371,23 @@ def register_routes(app: Flask) -> None:
             f"""
             SELECT p.*, k.firma AS kundenname,
                    GROUP_CONCAT(t.name, '|||') AS teamnamen,
-                   GROUP_CONCAT(t.farbe, '|||') AS teamfarben
+                   GROUP_CONCAT(t.farbe, '|||') AS teamfarben,
+                   (
+                     SELECT v.id FROM projekt_vertraege v
+                     WHERE v.projekt_id = p.id
+                     ORDER BY v.updated_at DESC, v.id DESC LIMIT 1
+                   ) AS vertrag_id,
+                   (
+                     SELECT vv.version FROM projekt_vertragsversionen vv
+                     JOIN projekt_vertraege v ON v.id = vv.vertrag_id
+                     WHERE v.projekt_id = p.id
+                     ORDER BY v.updated_at DESC, v.id DESC, vv.version DESC LIMIT 1
+                   ) AS vertrag_version,
+                   (
+                     SELECT v.status FROM projekt_vertraege v
+                     WHERE v.projekt_id = p.id
+                     ORDER BY v.updated_at DESC, v.id DESC LIMIT 1
+                   ) AS vertrag_status
             FROM projekte p
             JOIN kunden k ON k.id = p.kunde_id
             LEFT JOIN projekt_team pt ON pt.projekt_id = p.id
@@ -2087,6 +2248,8 @@ def register_routes(app: Flask) -> None:
             datei for datei in dateien
             if Path(datei["original_name"]).suffix.lower().lstrip(".") in VIDEO_DATEIEN
         ]
+        vertraege = _vertragsliste(projekt_id)
+        letzter_vertrag = vertraege[0] if vertraege else None
         interne_url = interne_vorschau_url(projekt)
         agent_script = str((BASE_DIR / "agent_sync.py").resolve())
         dashboard_url = request.url_root.rstrip("/")
@@ -2115,11 +2278,212 @@ def register_routes(app: Flask) -> None:
             aktivitaeten=aktivitaeten,
             dateien=dateien,
             video_dateien=video_dateien,
+            vertraege=vertraege,
+            letzter_vertrag=letzter_vertrag,
             interne_vorschau_url=interne_url,
             preview_team_urls=list(dict.fromkeys(preview_team_urls)),
             agent_befehl=agent_befehl,
             agent_anweisung=agent_anweisung,
         )
+
+    @app.get("/leistungen-preise.pdf")
+    @login_required
+    def leistungen_preise():
+        pdf = create_price_overview_pdf(legal_approved=bool(app.config["CONTRACT_LEGAL_APPROVED"]))
+        response = send_file(
+            io.BytesIO(pdf),
+            mimetype="application/pdf",
+            as_attachment=request.args.get("download") == "1",
+            download_name="TomorrowWorks_Leistungen-und-Preise_Entwurf.pdf",
+            max_age=0,
+        )
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+        return response
+
+    @app.route("/projekte/<int:projekt_id>/vertraege", methods=["GET", "POST"])
+    @login_required
+    def projekt_vertraege(projekt_id: int):
+        projekt = _projekt_oder_404(projekt_id)
+        kunde = _kunde_oder_404(projekt["kunde_id"])
+        db = get_db()
+
+        if request.method == "POST":
+            if g.user["rolle"] != "admin":
+                abort(403)
+            titel = request.form.get("titel", "Rahmen- und Betreuungsvertrag").strip()[:120]
+            package_code = request.form.get("package_code", "").strip()
+            addon_codes = request.form.getlist("addon_codes")
+            notes = request.form.get("notes", "").strip()[:3000]
+            start_date = request.form.get("start_date", "").strip()
+            if not titel:
+                flash("Bitte einen Vertragstitel eingeben.", "error")
+                return redirect(url_for("projekt_vertraege", projekt_id=projekt_id))
+            if start_date:
+                try:
+                    date.fromisoformat(start_date)
+                except ValueError:
+                    flash("Bitte ein gültiges Startdatum auswählen.", "error")
+                    return redirect(url_for("projekt_vertraege", projekt_id=projekt_id))
+            try:
+                media_budget_cent = _euro_zu_cent(request.form.get("media_budget_eur", ""), 0)
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("projekt_vertraege", projekt_id=projekt_id))
+
+            vertrag_id = request.form.get("vertrag_id", type=int)
+            status = "rechtlich_freigegeben" if app.config["CONTRACT_LEGAL_APPROVED"] else "entwurf"
+            target: Path | None = None
+            partial: Path | None = None
+            try:
+                db.execute("BEGIN IMMEDIATE")
+                timestamp = jetzt()
+                if vertrag_id:
+                    vertrag = db.execute(
+                        "SELECT * FROM projekt_vertraege WHERE id = ? AND projekt_id = ?",
+                        (vertrag_id, projekt_id),
+                    ).fetchone()
+                    if vertrag is None:
+                        db.rollback()
+                        abort(404)
+                    db.execute(
+                        "UPDATE projekt_vertraege SET titel = ?, status = ?, updated_at = ? WHERE id = ?",
+                        (titel, status, timestamp, vertrag_id),
+                    )
+                else:
+                    cur = db.execute(
+                        """
+                        INSERT INTO projekt_vertraege
+                          (projekt_id, titel, typ, status, erstellt_von, created_at, updated_at)
+                        VALUES (?, ?, 'agenturvertrag', ?, ?, ?, ?)
+                        """,
+                        (projekt_id, titel, status, g.user["id"], timestamp, timestamp),
+                    )
+                    vertrag_id = int(cur.lastrowid)
+
+                version = int(
+                    db.execute(
+                        "SELECT COALESCE(MAX(version), 0) + 1 FROM projekt_vertragsversionen WHERE vertrag_id = ?",
+                        (vertrag_id,),
+                    ).fetchone()[0]
+                )
+                snapshot = build_contract_snapshot(
+                    project=projekt,
+                    customer=kunde,
+                    provider=_vertragsanbieter(),
+                    package_code=package_code,
+                    addon_codes=addon_codes,
+                    media_budget_cent=media_budget_cent,
+                    start_date=start_date,
+                    notes=notes,
+                    version=version,
+                    contract_id=vertrag_id,
+                    created_at=timestamp,
+                    legal_approved=bool(app.config["CONTRACT_LEGAL_APPROVED"]),
+                )
+                pdf = create_contract_pdf(snapshot)
+                if not pdf.startswith(b"%PDF-"):
+                    raise RuntimeError("Die Vertrags-PDF konnte nicht sicher erzeugt werden.")
+
+                contract_dir = Path(app.config["UPLOAD_FOLDER"]) / "contracts"
+                contract_dir.mkdir(parents=True, exist_ok=True)
+                gespeichert_name = f"contracts/{projekt_id}_{vertrag_id}_{uuid4().hex}.pdf"
+                target = Path(app.config["UPLOAD_FOLDER"]) / gespeichert_name
+                partial = target.with_suffix(".pdf.partial")
+                partial.write_bytes(pdf)
+                os.replace(partial, target)
+
+                name_part = secure_filename(f"{projekt['kundenname']}_{titel}")[:110] or f"Projekt_{projekt_id}"
+                original_name = f"TomorrowWorks_{name_part}_V{version:02d}.pdf"
+                sha256 = hashlib.sha256(pdf).hexdigest()
+                db.execute(
+                    """
+                    INSERT INTO projekt_vertragsversionen
+                      (vertrag_id, version, text_version, snapshot_json, original_name, gespeichert_name,
+                       mimetype, groesse, sha256, aenderungsgrund, status, erstellt_von, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, 'application/pdf', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        vertrag_id,
+                        version,
+                        snapshot["text_version"],
+                        json.dumps(snapshot, ensure_ascii=False, sort_keys=True),
+                        original_name,
+                        gespeichert_name,
+                        len(pdf),
+                        sha256,
+                        "Erstfassung" if version == 1 else "Neue interne Vertragsfassung",
+                        status,
+                        g.user["id"],
+                        timestamp,
+                    ),
+                )
+                _aktivitaet(
+                    projekt_id,
+                    "Vertragsfassung intern erstellt",
+                    f"{titel} · Version {version} · nicht automatisch an den Kunden übermittelt",
+                )
+                db.commit()
+            except ValueError as exc:
+                db.rollback()
+                if partial and partial.exists():
+                    partial.unlink()
+                if target and target.exists():
+                    target.unlink()
+                flash(str(exc), "error")
+                return redirect(url_for("projekt_vertraege", projekt_id=projekt_id))
+            except Exception:
+                db.rollback()
+                if partial and partial.exists():
+                    partial.unlink()
+                if target and target.exists():
+                    target.unlink()
+                raise
+
+            flash(f"Vertragsfassung V{version} wurde intern gespeichert.", "success")
+            return redirect(url_for("projekt_vertraege", projekt_id=projekt_id))
+
+        vertraege = _vertragsliste(projekt_id)
+        return render_template(
+            "projekt_vertraege.html",
+            projekt=projekt,
+            kunde=kunde,
+            vertraege=vertraege,
+            package_catalog=PACKAGE_CATALOG,
+            addon_catalog=ADDON_CATALOG,
+            legal_approved=bool(app.config["CONTRACT_LEGAL_APPROVED"]),
+        )
+
+    @app.get("/projekte/<int:projekt_id>/vertraege/<int:vertrag_id>/versionen/<int:version>.pdf")
+    @login_required
+    def projekt_vertrag_pdf(projekt_id: int, vertrag_id: int, version: int):
+        _projekt_oder_404(projekt_id)
+        vertragsversion = _vertragsversion_oder_404(projekt_id, vertrag_id, version)
+        upload_root = Path(app.config["UPLOAD_FOLDER"]).resolve()
+        contract_root = (upload_root / "contracts").resolve()
+        path = (upload_root / vertragsversion["gespeichert_name"]).resolve()
+        if contract_root not in path.parents or not path.is_file():
+            abort(404)
+        pdf = path.read_bytes()
+        if (
+            not pdf.startswith(b"%PDF-")
+            or len(pdf) != int(vertragsversion["groesse"])
+            or not secrets.compare_digest(hashlib.sha256(pdf).hexdigest(), vertragsversion["sha256"])
+        ):
+            abort(409)
+        response = send_file(
+            path,
+            mimetype="application/pdf",
+            as_attachment=request.args.get("download") == "1",
+            download_name=vertragsversion["original_name"],
+            conditional=False,
+            max_age=0,
+        )
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+        return response
 
     @app.get("/projekte/<int:projekt_id>/verkaufsvideo")
     @login_required

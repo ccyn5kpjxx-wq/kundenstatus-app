@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% set aktuelles_projekt = projekt|default(project|default(none), true) %}
+{% set aktueller_kunde = kunde|default(customer|default(none), true) %}
+{% set pakete = PACKAGE_CATALOG|default(package_catalog) %}
+{% set zusatzmodule = ADDON_CATALOG|default(addon_catalog) %}
+{% block title %}Verträge · {{ aktuelles_projekt['titel'] }}{% endblock %}
+{% block content %}
+<header class="page-header contract-page-header">
+    <div>
+        <a class="back-link" href="{{ url_for('projekt_detail', projekt_id=aktuelles_projekt['id']) }}">← {{ aktuelles_projekt['titel'] }}</a>
+        <p class="eyebrow">Internes Vertragscenter</p>
+        <h1>Leistung, Preis und Versionen an einem Ort.</h1>
+        <p>{{ aktueller_kunde['firma'] if aktueller_kunde else aktuelles_projekt['kundenname'] }} · Jede erzeugte PDF bleibt unverändert nachvollziehbar.</p>
+    </div>
+    <div class="header-actions">
+        <a class="button button-secondary" href="{{ url_for('leistungen_preise') }}" target="_blank" rel="noopener">Leistungen &amp; Preise ansehen</a>
+        <a class="button button-contract" href="{{ url_for('leistungen_preise', download=1) }}">↓ Preisübersicht PDF</a>
+    </div>
+</header>
+
+{% if legal_approved %}
+<section class="contract-legal-note is-approved" aria-label="Vertragsstatus">
+    <span class="contract-legal-icon" aria-hidden="true">✓</span>
+    <div>
+        <strong>Geprüfte Vertragsvorlage ist aktiviert</strong>
+        <p>Die Vorlage ist intern als rechtlich freigegeben markiert. Vor dem Versand bleiben Kundendaten, Leistungsumfang, Preise und Laufzeit trotzdem bewusst zu prüfen.</p>
+    </div>
+    <span class="contract-state-pill is-approved">Freigegeben</span>
+</section>
+{% else %}
+<section class="contract-legal-note" aria-label="Wichtiger Hinweis zum Vertragsentwurf">
+    <span class="contract-legal-icon" aria-hidden="true">!</span>
+    <div>
+        <strong>Prüfmodus: noch nicht rechtsverbindlich verwenden</strong>
+        <p>Die PDFs sind interne Angebots- und Vertragsentwürfe. Anbieterangaben, AGB, Datenschutz, Leistungsgrenzen und Widerrufsfragen müssen vor dem Kundenversand fachlich und juristisch freigegeben werden.</p>
+    </div>
+    <span class="contract-state-pill">Nur intern</span>
+</section>
+{% endif %}
+
+<div class="contract-workspace">
+    {% if g.user and g.user['rolle'] == 'admin' %}
+    <form class="contract-builder" method="post" action="{{ url_for('projekt_vertraege', projekt_id=aktuelles_projekt['id']) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+        <section class="content-card contract-step">
+            <div class="contract-step-head">
+                <span>01</span>
+                <div><p class="eyebrow">Dokument</p><h2>Vertrag oder neue Version</h2><p>Ein bestehendes Dokument wird niemals überschrieben. Eine Änderung erzeugt die nächste PDF-Version.</p></div>
+            </div>
+            <div class="form-grid contract-document-fields">
+                <label>Vertragsreihe
+                    <select name="vertrag_id">
+                        <option value="">Neuen Vertrag anlegen</option>
+                        {% for vertrag in vertraege %}<option value="{{ vertrag['id'] }}">Neue Version von {{ vertrag['titel']|default('Vertrag') }}</option>{% endfor %}
+                    </select>
+                </label>
+                <label>Interner Titel
+                    <input name="titel" maxlength="120" value="Rahmen- und Betreuungsvertrag" required>
+                </label>
+            </div>
+        </section>
+
+        <section class="content-card contract-step">
+            <div class="contract-step-head">
+                <span>02</span>
+                <div><p class="eyebrow">Grundpaket</p><h2>Was bildet die Basis?</h2><p>Alle Preise werden netto ausgewiesen. Drittanbieter-, Lizenz- und Medienkosten bleiben getrennt.</p></div>
+            </div>
+            <div class="contract-package-grid">
+                {% for code, package in pakete.items() %}
+                <label class="contract-package-option">
+                    <input type="radio" name="package_code" value="{{ code }}" {{ 'checked' if code == 'website_growth' else '' }} required>
+                    <span class="contract-option-check" aria-hidden="true">✓</span>
+                    <span class="contract-package-copy">
+                        <strong>{{ package['name'] }}</strong>
+                        <small>{{ package['tagline'] }}</small>
+                        <span class="contract-price-line">
+                            <b>{{ '%.2f'|format(package['setup_cent'] / 100)|replace('.', ',') }} € <small>einmalig</small></b>
+                            {% if package['monthly_cent'] %}<b>+ {{ '%.2f'|format(package['monthly_cent'] / 100)|replace('.', ',') }} € <small>monatlich</small></b>{% endif %}
+                        </span>
+                        {% if package['duration_months'] %}<em>{{ package['duration_months'] }} Monate Mindestlaufzeit · {{ package['notice_months'] }} Monat(e) Kündigungsfrist</em>{% else %}<em>Einmaliges Projektpaket</em>{% endif %}
+                    </span>
+                </label>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="content-card contract-step">
+            <div class="contract-step-head">
+                <span>03</span>
+                <div><p class="eyebrow">Zusatzmodule</p><h2>Was soll zusätzlich wirken?</h2><p>Nur ausdrücklich gewählte Module werden Teil der Leistungsanlage.</p></div>
+            </div>
+            <div class="contract-addon-grid">
+                {% for code, addon in zusatzmodule.items() %}
+                <label class="contract-addon-option">
+                    <input type="checkbox" name="addon_codes" value="{{ code }}">
+                    <span class="contract-option-check" aria-hidden="true">✓</span>
+                    <span>
+                        <strong>{{ addon['name'] }}</strong>
+                        <small>{{ addon['description'] }}</small>
+                        <b>
+                            {% if addon['setup_cent'] %}{{ '%.2f'|format(addon['setup_cent'] / 100)|replace('.', ',') }} € einmalig{% endif %}
+                            {% if addon['setup_cent'] and addon['monthly_cent'] %} · {% endif %}
+                            {% if addon['monthly_cent'] %}{{ '%.2f'|format(addon['monthly_cent'] / 100)|replace('.', ',') }} € monatlich{% endif %}
+                        </b>
+                    </span>
+                </label>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="content-card contract-step">
+            <div class="contract-step-head">
+                <span>04</span>
+                <div><p class="eyebrow">Start &amp; Freigabe</p><h2>Budget und Rahmen festhalten</h2><p>Das Anzeigenbudget geht zusätzlich an Google oder Meta und ist kein Honorar von Tomorrow Works.</p></div>
+            </div>
+            <div class="form-grid">
+                <label>Gewünschter Leistungsbeginn
+                    <input type="date" name="start_date">
+                    <small class="field-help">Ohne Datum gilt: nach gemeinsamer Freigabe.</small>
+                </label>
+                <label>Monatliches Medienbudget in Euro
+                    <input type="number" name="media_budget_eur" min="0" step="0.01" inputmode="decimal" value="0" aria-describedby="media-budget-help">
+                    <small class="field-help" id="media-budget-help">Separat vom Agenturhonorar; nur bei gebuchten Werbeanzeigen relevant.</small>
+                </label>
+                <label class="span-2">Vereinbarungen und interne Prüfhinweise
+                    <textarea name="notes" rows="5" maxlength="3000" placeholder="Zum Beispiel besondere Freigaben, enthaltene Korrekturrunden oder offene Kundendaten …"></textarea>
+                </label>
+            </div>
+        </section>
+
+        <div class="contract-submit-bar">
+            <div><strong>Unveränderliche PDF-Version erzeugen</strong><small>Der Vorgang speichert eine neue Version intern. Es wird keine E-Mail versendet und nichts automatisch an den Kunden freigegeben.</small></div>
+            <button class="button button-primary" type="submit">Vertragsentwurf erzeugen</button>
+        </div>
+    </form>
+    {% else %}
+    <section class="content-card contract-readonly-note">
+        <p class="eyebrow">Nur lesen</p>
+        <h2>Vertragsfassungen sind für dich einsehbar.</h2>
+        <p>Neue Vertragsentwürfe und Versionen dürfen ausschließlich Administratoren erzeugen. Vorhandene PDFs findest du unten im Dokumentenarchiv.</p>
+    </section>
+    {% endif %}
+
+    <aside class="contract-aside">
+        <section class="info-card contract-summary-card">
+            <span class="contract-summary-mark">PDF</span>
+            <p class="eyebrow">Sicherer Ablauf</p>
+            <h2>Erst intern prüfen, dann bewusst versenden.</h2>
+            <ol>
+                <li>Paket, Module und Medienbudget auswählen.</li>
+                <li>PDF als neue, unveränderliche Version erzeugen.</li>
+                <li>Preise, Firmendaten und Leistungsgrenzen gegenprüfen.</li>
+                <li>Erst nach Freigabe separat an den Kunden geben.</li>
+            </ol>
+        </section>
+        <section class="info-card contract-boundary-card">
+            <p class="eyebrow">Klar getrennt</p>
+            <h2>Was nicht im Agenturhonorar steckt</h2>
+            <ul>
+                <li>Anzeigenbudget bei Google, Instagram oder Facebook</li>
+                <li>Domain-, Hosting-, E-Mail- und Softwarelizenzen</li>
+                <li>Druck, Versand, Stockmaterial oder externe Produktion</li>
+                <li>Steuer- oder Rechtsberatung</li>
+            </ul>
+        </section>
+    </aside>
+</div>
+
+<section class="content-card contract-history" id="versionen">
+    <div class="section-heading">
+        <div><p class="eyebrow">Dokumentenarchiv</p><h2>Verträge &amp; unveränderliche Versionen</h2></div>
+        <span class="result-count">{{ vertraege|length }} Vertragsreihe{{ 'n' if vertraege|length != 1 else '' }}</span>
+    </div>
+    <div class="contract-history-list">
+    {% for vertrag in vertraege %}
+        <article class="contract-history-card">
+            <header>
+                <div><span class="contract-file-icon">PDF</span><div><h3>{{ vertrag['titel']|default('Rahmen- und Betreuungsvertrag') }}</h3><p>Angelegt {{ vertrag['created_at']|zeitpunkt if vertrag['created_at'] else '–' }}</p></div></div>
+                <span class="contract-state-pill {{ 'is-approved' if vertrag['status'] in ['rechtlich_freigegeben', 'freigegeben', 'unterzeichnet', 'aktiv'] else '' }}">{{ vertrag['status']|default('Entwurf')|replace('_', ' ')|capitalize }}</span>
+            </header>
+            <div class="contract-version-list">
+                {% set versionen = vertrag['versionen']|default([]) %}
+                {% for version in versionen %}
+                <div class="contract-version-row">
+                    <div><strong>Version {{ version['version'] }}</strong><small>{{ version['created_at']|zeitpunkt }}{% if version['created_by_name'] %} · {{ version['created_by_name'] }}{% endif %}</small></div>
+                    <span class="contract-version-status">{{ version['status']|default('Entwurf')|replace('_', ' ')|capitalize }}</span>
+                    <div class="contract-version-actions">
+                        <a href="{{ url_for('projekt_vertrag_pdf', projekt_id=aktuelles_projekt['id'], vertrag_id=vertrag['id'], version=version['version']) }}" target="_blank" rel="noopener">Ansehen</a>
+                        <a href="{{ url_for('projekt_vertrag_pdf', projekt_id=aktuelles_projekt['id'], vertrag_id=vertrag['id'], version=version['version'], download=1) }}">PDF laden</a>
+                    </div>
+                </div>
+                {% else %}
+                    {% if vertrag['version'] %}
+                    <div class="contract-version-row">
+                        <div><strong>Version {{ vertrag['version'] }}</strong><small>{{ vertrag['version_created_at']|default(vertrag['created_at'])|zeitpunkt }}</small></div>
+                        <span class="contract-version-status">{{ vertrag['status']|default('Entwurf')|replace('_', ' ')|capitalize }}</span>
+                        <div class="contract-version-actions">
+                            <a href="{{ url_for('projekt_vertrag_pdf', projekt_id=aktuelles_projekt['id'], vertrag_id=vertrag['id'], version=vertrag['version']) }}" target="_blank" rel="noopener">Ansehen</a>
+                            <a href="{{ url_for('projekt_vertrag_pdf', projekt_id=aktuelles_projekt['id'], vertrag_id=vertrag['id'], version=vertrag['version'], download=1) }}">PDF laden</a>
+                        </div>
+                    </div>
+                    {% else %}<p class="muted contract-no-version">Noch keine PDF-Version vorhanden.</p>{% endif %}
+                {% endfor %}
+            </div>
+        </article>
+    {% else %}
+        <div class="empty-state compact"><span class="contract-empty-mark">01</span><h3>Noch kein Vertragsentwurf</h3><p>Wähle links ein Paket und die passenden Zusatzmodule. Die erste PDF wird als Version 1 archiviert.</p></div>
+    {% endfor %}
+    </div>
+</section>
+{% endblock %}

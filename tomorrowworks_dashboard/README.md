@@ -97,6 +97,28 @@ juristischer Freigabe der konkret verwendeten Vertrags-, Verbraucher- und
 Datenschutztexte darf `TW_CONTRACT_LEGAL_APPROVED=1` gesetzt werden. Dann verwendet
 das Portal die ausdrücklich zahlungspflichtige Annahme.
 
+## Internes Vertragscenter
+
+In jedem Projekt können Administratoren einen Rahmen- und Betreuungsvertrag aus
+fest hinterlegten Paketen und Zusatzmodulen erzeugen. Jede PDF-Fassung wird als
+unveränderliche Version mit Snapshot, Dateigröße und SHA-256-Prüfsumme gespeichert.
+Angemeldete Teammitglieder dürfen die Fassungen ansehen und herunterladen; nur
+Administratoren dürfen neue Fassungen erstellen. Dabei wird bewusst keine
+Kunden-E-Mail und keine Portalnachricht ausgelöst.
+
+Solange `TW_CONTRACT_LEGAL_APPROVED=0` gilt, tragen Vertrags- und Preis-PDFs einen
+deutlichen internen Entwurfsvermerk. Vor Unterzeichnung müssen insbesondere
+Firmierung, Leistungsabgrenzung, Datenschutzrollen, Haftung und Steuerangaben
+anwaltlich beziehungsweise steuerlich geprüft werden. Die Anbieterangaben werden
+über `TW_CONTRACT_PROVIDER_NAME`, `TW_CONTRACT_PROVIDER_ADDRESS`,
+`TW_CONTRACT_PROVIDER_REPRESENTATIVE` und `TW_CONTRACT_PROVIDER_EMAIL` gesetzt.
+
+Die Leistungs- und Preisübersicht steht angemeldeten Teammitgliedern unter
+`/leistungen-preise.pdf` zur Verfügung. Werbebudget, Agenturhonorar und sonstige
+Drittkosten werden in den Vertragsunterlagen getrennt ausgewiesen. Das Dashboard
+verspricht E-Rechnungs- oder Buchhaltungsfunktionen nur, wenn eine passende
+Integration ausdrücklich beauftragt wurde.
+
 Für Tests können Datenbank und Uploadordner mit `TW_DASHBOARD_DB_PATH` und
 `TW_DASHBOARD_UPLOAD_DIR` auf temporäre Verzeichnisse gesetzt werden.
 
