@@ -2315,7 +2315,8 @@ def register_routes(app: Flask) -> None:
             titel = request.form.get("titel", "Rahmen- und Betreuungsvertrag").strip()[:120]
             package_code = request.form.get("package_code", "").strip()
             addon_codes = request.form.getlist("addon_codes")
-            notes = request.form.get("notes", "").strip()[:3000]
+            customer_agreement = request.form.get("customer_agreement", "").strip()[:2000]
+            notes = request.form.get("notes", "").strip()[:2000]
             start_date = request.form.get("start_date", "").strip()
             if not titel:
                 flash("Bitte einen Vertragstitel eingeben.", "error")
@@ -2328,6 +2329,9 @@ def register_routes(app: Flask) -> None:
                     return redirect(url_for("projekt_vertraege", projekt_id=projekt_id))
             try:
                 media_budget_cent = _euro_zu_cent(request.form.get("media_budget_eur", ""), 0)
+                agreed_ad_monthly_cent = _euro_zu_cent(
+                    request.form.get("agreed_ad_monthly_eur", ""), 0
+                )
             except ValueError as exc:
                 flash(str(exc), "error")
                 return redirect(url_for("projekt_vertraege", projekt_id=projekt_id))
@@ -2374,8 +2378,10 @@ def register_routes(app: Flask) -> None:
                     provider=_vertragsanbieter(),
                     package_code=package_code,
                     addon_codes=addon_codes,
+                    agreed_ad_monthly_cent=agreed_ad_monthly_cent,
                     media_budget_cent=media_budget_cent,
                     start_date=start_date,
+                    customer_agreement=customer_agreement,
                     notes=notes,
                     version=version,
                     contract_id=vertrag_id,

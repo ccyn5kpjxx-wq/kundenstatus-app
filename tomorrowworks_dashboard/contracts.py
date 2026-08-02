@@ -21,7 +21,7 @@ from reportlab.platypus import (
 )
 
 
-TEXT_VERSION = "tw-agenturvertrag-2026-08-02-v2"
+TEXT_VERSION = "tw-agenturvertrag-2026-08-02-v3"
 
 INK = colors.HexColor("#151815")
 MUTED = colors.HexColor("#626861")
@@ -105,57 +105,61 @@ ADDON_CATALOG: dict[str, dict[str, object]] = {
     "technical_care": {
         "name": "Technische Website-Pflege",
         "setup_cent": 0,
-        "monthly_cent": 9_900,
+        "monthly_cent": 1_999,
         "description": "Updates, Verfügbarkeitskontrolle, Backups und technische Fehlerbehebung im vereinbarten Rahmen.",
     },
     "email_setup": {
         "name": "Geschäfts-E-Mail bis drei Postfächer",
-        "setup_cent": 19_000,
+        "setup_cent": 4_999,
         "monthly_cent": 0,
         "description": "Domainprüfung, Postfächer, Weiterleitungen sowie SPF, DKIM und DMARC; Anbieter-Lizenzen separat.",
     },
     "google_business": {
         "name": "Google-Unternehmensprofil einrichten oder korrigieren",
-        "setup_cent": 29_000,
+        "setup_cent": 0,
         "monthly_cent": 0,
+        "free_service": True,
         "description": "Betriebsdaten, Kategorie, Bilder, Website und Öffnungszeiten nach bestätigter Inhaberschaft pflegen.",
     },
     "google_business_care": {
         "name": "Google-Unternehmensprofil laufend pflegen",
         "setup_cent": 0,
-        "monthly_cent": 7_900,
+        "monthly_cent": 1_999,
         "description": "Monatliche Datenkontrolle und vereinbarte Aktualisierungen; keine Bewertungs- oder Rankinggarantie.",
     },
     "google_ads": {
         "name": "Google Ads",
-        "setup_cent": 49_000,
-        "monthly_cent": 24_900,
-        "media_fee_percent": 15,
-        "description": "Lokale Suchkampagne, Keyword- und Suchbegriffsprüfung, Anzeigentexte, Conversion-Messung, Budgetkontrolle und Monatsbericht; Betreuung 249,00 EUR monatlich oder 15 Prozent des Medienbudgets, falls höher.",
+        "setup_cent": 0,
+        "monthly_cent": 0,
+        "price_mode": "agreed_monthly",
+        "minimum_monthly_cent": 20_000,
+        "description": "Lokale Suchkampagne, Keyword- und Suchbegriffsprüfung, Anzeigentexte, Conversion-Messung, Budgetkontrolle und Monatsbericht; monatliches Agenturhonorar individuell, mindestens 200,00 EUR.",
     },
     "meta_ads": {
         "name": "Instagram & Facebook Ads",
-        "setup_cent": 49_000,
-        "monthly_cent": 24_900,
-        "media_fee_percent": 15,
-        "description": "Kampagnen für Bekanntheit, Videoaufrufe, Nachrichten oder Leads mit Zielgruppen-, Creative- und Budgetoptimierung; Betreuung 249,00 EUR monatlich oder 15 Prozent des Medienbudgets, falls höher.",
+        "setup_cent": 0,
+        "monthly_cent": 0,
+        "price_mode": "agreed_monthly",
+        "minimum_monthly_cent": 20_000,
+        "description": "Kampagnen für Bekanntheit, Videoaufrufe, Nachrichten oder Leads mit Zielgruppen-, Creative- und Budgetoptimierung; monatliches Agenturhonorar individuell, mindestens 200,00 EUR.",
     },
     "google_meta_ads": {
         "name": "Google + Meta Ads",
-        "setup_cent": 79_000,
-        "monthly_cent": 39_900,
-        "media_fee_percent": 15,
-        "description": "Verknüpfte Such- und Social-Kampagnen mit gemeinsamer Zieldefinition und kanalgetrennter Auswertung; Betreuung 399,00 EUR monatlich oder 15 Prozent des kombinierten Medienbudgets, falls höher.",
+        "setup_cent": 0,
+        "monthly_cent": 0,
+        "price_mode": "agreed_monthly",
+        "minimum_monthly_cent": 20_000,
+        "description": "Verknüpfte Such- und Social-Kampagnen mit gemeinsamer Zieldefinition und kanalgetrennter Auswertung; monatliches Agenturhonorar individuell, mindestens 200,00 EUR.",
     },
     "dashboard_extension": {
         "name": "Business-Dashboard einrichten",
-        "setup_cent": 149_000,
-        "monthly_cent": 14_900,
+        "setup_cent": 49_900,
+        "monthly_cent": 4_999,
         "description": "Projekt-, Anfrage-, Datei- und Kennzahlenübersicht; Schnittstellen und Sondermodule nach Leistungsanlage.",
     },
     "booking": {
         "name": "Termin- oder Buchungssystem",
-        "setup_cent": 49_000,
+        "setup_cent": 20_000,
         "monthly_cent": 0,
         "description": "Buchungsablauf, Kalender und Bestätigungslogik; Anbieter- und Zahlungsgebühren separat.",
     },
@@ -167,13 +171,13 @@ ADDON_CATALOG: dict[str, dict[str, object]] = {
     },
     "short_clips": {
         "name": "Drei kurze Werbeclips",
-        "setup_cent": 69_000,
+        "setup_cent": 69_900,
         "monthly_cent": 0,
         "description": "Drei kurze Social-Media-Clips aus freigegebenem Material; externe Produktionskosten separat.",
     },
     "flyer": {
         "name": "Flyer-Gestaltung",
-        "setup_cent": 29_000,
+        "setup_cent": 19_900,
         "monthly_cent": 0,
         "description": "Druckfertiger Gestaltungsentwurf nach Format- und Inhaltsfreigabe; Druck und Versand separat.",
     },
@@ -236,8 +240,10 @@ def build_contract_snapshot(
     provider: Mapping[str, str],
     package_code: str,
     addon_codes: Sequence[str],
+    agreed_ad_monthly_cent: int,
     media_budget_cent: int,
     start_date: str,
+    customer_agreement: str,
     notes: str,
     version: int,
     contract_id: int | None = None,
@@ -247,6 +253,23 @@ def build_contract_snapshot(
     package, addons = validate_selection(package_code, addon_codes)
     media_budget_cent = max(int(media_budget_cent or 0), 0)
     selected_addon_codes = {str(item["code"]) for item in addons}
+    selected_ad_codes = sorted(AD_ADDONS.intersection(selected_addon_codes))
+    agreed_ad_monthly_cent = int(agreed_ad_monthly_cent or 0)
+    if selected_ad_codes:
+        selected_ad_code = selected_ad_codes[0]
+        minimum_monthly_cent = int(ADDON_CATALOG[selected_ad_code].get("minimum_monthly_cent", 1))
+        if agreed_ad_monthly_cent <= 0:
+            raise ValueError(
+                "Für Google-/Meta-Werbung bitte das mit dem Kunden vereinbarte monatliche Agenturhonorar eintragen."
+            )
+        if agreed_ad_monthly_cent < minimum_monthly_cent:
+            raise ValueError("Das monatliche Agenturhonorar für Werbeanzeigen beträgt mindestens 200,00 EUR.")
+    else:
+        selected_ad_code = ""
+        if agreed_ad_monthly_cent:
+            raise ValueError(
+                "Ein vereinbartes Werbehonorar kann nur zusammen mit Google Ads, Instagram/Facebook Ads oder Google + Meta Ads gespeichert werden."
+            )
     if media_budget_cent > 0 and not AD_ADDONS.intersection(selected_addon_codes):
         raise ValueError(
             "Ein Medienbudget kann nur zusammen mit Google Ads, Instagram/Facebook Ads oder Google + Meta Ads gespeichert werden."
@@ -254,10 +277,15 @@ def build_contract_snapshot(
     berechnete_addons: list[dict[str, object]] = []
     for addon in addons:
         effektiver_monatspreis = int(addon["monthly_cent"])
-        if addon.get("media_fee_percent"):
-            anteil = int(round(media_budget_cent * int(addon["media_fee_percent"]) / 100))
-            effektiver_monatspreis = max(effektiver_monatspreis, anteil)
-        berechnete_addons.append(addon | {"effective_monthly_cent": effektiver_monatspreis})
+        if str(addon["code"]) in AD_ADDONS:
+            effektiver_monatspreis = agreed_ad_monthly_cent
+        berechnete_addons.append(
+            addon
+            | {
+                "effective_monthly_cent": effektiver_monatspreis,
+                "agreed_monthly_cent": agreed_ad_monthly_cent if str(addon["code"]) in AD_ADDONS else 0,
+            }
+        )
     addons = berechnete_addons
     selected_addons = {str(item["code"]): item for item in addons}
     selection_manifest = {
@@ -281,6 +309,12 @@ def build_contract_snapshot(
                     selected_addons.get(code, {}).get(
                         "effective_monthly_cent", catalog_addon["monthly_cent"]
                     )
+                ),
+                "price_mode": str(catalog_addon.get("price_mode", "fixed")),
+                "minimum_monthly_cent": int(catalog_addon.get("minimum_monthly_cent", 0) or 0),
+                "free_service": bool(catalog_addon.get("free_service", False)),
+                "agreed_monthly_cent": int(
+                    selected_addons.get(code, {}).get("agreed_monthly_cent", 0) or 0
                 ),
             }
             for code, catalog_addon in ADDON_CATALOG.items()
@@ -328,17 +362,24 @@ def build_contract_snapshot(
         },
         "addons": addons,
         "selection_manifest": selection_manifest,
+        "ad_fee_agreement": {
+            "addon_code": selected_ad_code,
+            "addon_name": str(ADDON_CATALOG.get(selected_ad_code, {}).get("name", "")),
+            "monthly_cent": agreed_ad_monthly_cent,
+        },
         "pricing": {
             "setup_cent": setup_cent,
             "monthly_cent": monthly_cent,
             "media_budget_cent": media_budget_cent,
+            "agreed_ad_monthly_cent": agreed_ad_monthly_cent,
             "duration_months": duration,
             "notice_months": notice_months,
             "first_term_cent": setup_cent + monthly_cent * duration,
             "vat_rate": 19,
         },
         "start_date": start_date or "nach gemeinsamer Freigabe",
-        "notes": (notes or "").strip()[:3000],
+        "customer_agreement": (customer_agreement or "").strip()[:2000],
+        "internal_notes": (notes or "").strip()[:2000],
     }
 
 
@@ -499,9 +540,7 @@ def _selection_table(
     ]
     for item in items:
         selected = bool(item.get("selected"))
-        monthly_text = euro(int(item.get("monthly_cent", 0) or 0))
-        if not selected and str(item.get("code", "")) in AD_ADDONS:
-            monthly_text = f"ab {monthly_text}\noder 15 % Budget"
+        monthly_text = _monthly_price_text(item, selected=selected)
         rows.append(
             [
                 _p(
@@ -509,7 +548,7 @@ def _selection_table(
                     styles["table_bold"] if selected else styles["table"],
                 ),
                 _p(item.get("name", ""), styles["table_bold"] if selected else styles["table"]),
-                _p(euro(int(item.get("setup_cent", 0) or 0)), styles["table"]),
+                _p(_setup_price_text(item), styles["table"]),
                 _p(monthly_text, styles["table"]),
             ]
         )
@@ -537,6 +576,26 @@ def _selection_table(
             commands.append(("TEXTCOLOR", (0, index), (0, index), MUTED))
     table.setStyle(TableStyle(commands))
     return table
+
+
+def _monthly_price_text(item: Mapping[str, object], *, selected: bool = False) -> str:
+    if bool(item.get("free_service")):
+        return "keine laufende Gebühr"
+    if str(item.get("price_mode", "fixed")) == "agreed_monthly":
+        monthly_cent = int(item.get("monthly_cent", 0) or 0)
+        if selected and monthly_cent > 0:
+            return f"{euro(monthly_cent)}\nmit Kunden vereinbart"
+        minimum_cent = int(item.get("minimum_monthly_cent", 0) or 0)
+        if minimum_cent >= 100:
+            return f"variabel\nab {euro(minimum_cent)}"
+        return "variabel\nnach Vereinbarung"
+    return euro(int(item.get("monthly_cent", 0) or 0))
+
+
+def _setup_price_text(item: Mapping[str, object]) -> str:
+    if bool(item.get("free_service")):
+        return "kostenlos"
+    return euro(int(item.get("setup_cent", 0) or 0))
 
 
 def _page_decorator(snapshot: Mapping[str, object]):
@@ -602,6 +661,20 @@ def _commercial_summary(snapshot: Mapping[str, object], styles: dict[str, Paragr
         [_p("Kündigung", styles["table_bold"]), _p(notice_text, styles["table"])],
         [_p("Umsatzsteuer", styles["table_bold"]), _p("Alle Beträge netto zuzüglich gesetzlicher Umsatzsteuer", styles["table"])],
     ]
+    ad_agreement = snapshot.get("ad_fee_agreement") or {}
+    ad_code = str(ad_agreement.get("addon_code", ""))
+    if ad_code:
+        ad_name = str(
+            ad_agreement.get("addon_name")
+            or ADDON_CATALOG.get(ad_code, {}).get("name", "Google-/Meta-Werbung")
+        )
+        data.insert(
+            2,
+            [
+                _p("Davon individuell vereinbart", styles["table_bold"]),
+                _p(f"{ad_name}: {euro(ad_agreement.get('monthly_cent', 0))} pro Monat", styles["table"]),
+            ],
+        )
     return _table(data, [59 * mm, 115 * mm])
 
 
@@ -769,9 +842,6 @@ def create_contract_pdf(snapshot: Mapping[str, object]) -> bytes:
             ),
         ]
     )
-    if snapshot["notes"]:
-        story.extend([_p("Projektbezogene Hinweise", styles["h2"]), _p(snapshot["notes"], styles["body"])])
-
     signature_table = Table(
         [
             ["", ""],
@@ -835,6 +905,10 @@ def create_contract_pdf(snapshot: Mapping[str, object]) -> bytes:
                 "monthly_cent": selected_by_code.get(code, {}).get(
                     "effective_monthly_cent", catalog_addon["monthly_cent"]
                 ),
+                "price_mode": catalog_addon.get("price_mode", "fixed"),
+                "minimum_monthly_cent": catalog_addon.get("minimum_monthly_cent", 0),
+                "free_service": catalog_addon.get("free_service", False),
+                "agreed_monthly_cent": selected_by_code.get(code, {}).get("agreed_monthly_cent", 0),
             }
             for code, catalog_addon in ADDON_CATALOG.items()
         ]
@@ -851,7 +925,7 @@ def create_contract_pdf(snapshot: Mapping[str, object]) -> bytes:
             _p("LEISTUNGS- UND PREISANLAGE", styles["kicker"]),
             _p("Leistungsauswahl", styles["title"]),
             _p(
-                "Genau ein Grundpaket ist mit [X] als gewählt markiert. Bei den Zusatzmodulen werden nur mit [X] als zusätzlich gebucht markierte Positionen separat berechnet. Leistungen des Grundpakets und projektbezogene Inklusivleistungen gelten unabhängig von den Zusatzmodul-Kästchen.",
+                "Genau ein Grundpaket ist mit [X] als gewählt markiert. Bei den Zusatzmodulen werden nur mit [X] als zusätzlich gebucht markierte Positionen separat berechnet. Leistungen des Grundpakets und projektbezogene Inklusivleistungen gelten unabhängig von den Zusatzmodul-Kästchen. Preisangaben bei nicht markierten Optionen sind unverbindliche Orientierung und kein Vertragsbestandteil; eine spätere Beauftragung benötigt eine neue versionierte Vereinbarung.",
                 styles["callout"],
             ),
             Spacer(1, 5 * mm),
@@ -885,9 +959,35 @@ def create_contract_pdf(snapshot: Mapping[str, object]) -> bytes:
         [_p(package["name"], styles["table_bold"]), _p(euro(selected_package["setup_cent"]), styles["table"]), _p(euro(selected_package["monthly_cent"]), styles["table"])],
     ]
     for addon in snapshot["addons"]:
-        rows.append([_p(addon["name"], styles["table"]), _p(euro(addon["setup_cent"]), styles["table"]), _p(euro(addon["effective_monthly_cent"]), styles["table"])])
+        monthly_summary = euro(addon["effective_monthly_cent"])
+        if str(addon.get("price_mode", "fixed")) == "agreed_monthly":
+            monthly_summary += " · vereinbart"
+        elif bool(addon.get("free_service")):
+            monthly_summary = "keine laufende Gebühr"
+        rows.append([_p(addon["name"], styles["table"]), _p(_setup_price_text(addon), styles["table"]), _p(monthly_summary, styles["table"])])
     rows.append([_p("Agenturhonorar gesamt", styles["table_bold"]), _p(euro(pricing["setup_cent"]), styles["table_bold"]), _p(euro(pricing["monthly_cent"]), styles["table_bold"])])
     story.extend([_table(rows, [104 * mm, 35 * mm, 35 * mm], header=True), Spacer(1, 6 * mm)])
+    ad_agreement = snapshot.get("ad_fee_agreement") or {}
+    agreement_lines: list[str] = []
+    if str(ad_agreement.get("addon_code", "")):
+        ad_name = str(
+            ad_agreement.get("addon_name")
+            or ADDON_CATALOG.get(str(ad_agreement["addon_code"]), {}).get("name", "Google-/Meta-Werbung")
+        )
+        agreement_lines.append(
+            f"{ad_name}: {euro(ad_agreement.get('monthly_cent', 0))} netto pro Monat Agenturhonorar."
+        )
+    if str(snapshot.get("customer_agreement", "")).strip():
+        agreement_lines.append(str(snapshot["customer_agreement"]).strip())
+    if not agreement_lines:
+        agreement_lines.append("Keine zusätzliche individuelle Kundenvereinbarung eingetragen.")
+    story.extend(
+        [
+            _p("Mit dem Kunden vereinbart", styles["h1"]),
+            _p(" ".join(agreement_lines), styles["callout"]),
+            Spacer(1, 4 * mm),
+        ]
+    )
     if int(pricing["duration_months"]) > 0:
         story.append(
             _p(
@@ -957,8 +1057,8 @@ def create_price_overview_pdf(*, legal_approved: bool = False) -> bytes:
         addon_rows.append(
             [
                 _rich(f"<b>{escape(str(addon['name']))}</b><br/>{escape(str(addon['description']))}", styles["table"]),
-                _p(euro(addon["setup_cent"]), styles["table"]),
-                _p(euro(addon["monthly_cent"]), styles["table"]),
+                _p(_setup_price_text(addon), styles["table"]),
+                _p(_monthly_price_text(addon), styles["table"]),
             ]
         )
     story.extend([_table(addon_rows, [104 * mm, 35 * mm, 35 * mm], header=True), Spacer(1, 6 * mm)])

@@ -96,7 +96,7 @@
             </div>
             <fieldset class="contract-choice-fieldset" aria-describedby="addon-choice-help">
                 <legend class="sr-only">Zusatzmodule auswählen</legend>
-                <p class="contract-choice-help" id="addon-choice-help"><strong>Mehrfachauswahl:</strong> Nur angekreuzte Module werden berechnet und im PDF als „gebucht“ markiert.</p>
+                <p class="contract-choice-help" id="addon-choice-help"><strong>Mehrfachauswahl:</strong> Nur angekreuzte Module werden berechnet und im PDF als „gebucht“ markiert. Preise nicht markierter Optionen sind nur unverbindliche Orientierung.</p>
                 <div class="contract-addon-grid">
                 {% for code, addon in zusatzmodule.items() %}
                 <label class="contract-addon-option">
@@ -106,9 +106,16 @@
                         <strong>{{ addon['name'] }}</strong>
                         <small>{{ addon['description'] }}</small>
                         <b>
-                            {% if addon['setup_cent'] %}{{ '%.2f'|format(addon['setup_cent'] / 100)|replace('.', ',') }} € einmalig{% endif %}
-                            {% if addon['setup_cent'] and addon['monthly_cent'] %} · {% endif %}
-                            {% if addon['monthly_cent'] %}{{ '%.2f'|format(addon['monthly_cent'] / 100)|replace('.', ',') }} € monatlich{% endif %}
+                            {% if addon.get('free_service') %}
+                                kostenlos · keine laufende Gebühr
+                            {% else %}
+                            {{ '%.2f'|format(addon['setup_cent'] / 100)|replace('.', ',') }} € einmalig
+                            {% if addon.get('price_mode') == 'agreed_monthly' %}
+                                · {% if addon.get('minimum_monthly_cent', 0) >= 100 %}ab {{ '%.2f'|format(addon['minimum_monthly_cent'] / 100)|replace('.', ',') }} € monatlich{% else %}monatlich nach Vereinbarung{% endif %}
+                            {% elif addon['monthly_cent'] %}
+                                · {{ '%.2f'|format(addon['monthly_cent'] / 100)|replace('.', ',') }} € monatlich
+                            {% endif %}
+                            {% endif %}
                         </b>
                     </span>
                 </label>
@@ -131,14 +138,23 @@
                     <input type="number" name="media_budget_eur" min="0" step="0.01" inputmode="decimal" value="0" aria-describedby="media-budget-help">
                     <small class="field-help" id="media-budget-help">Separat vom Agenturhonorar; nur bei gebuchten Werbeanzeigen relevant.</small>
                 </label>
-                <label class="span-2">Vereinbarungen und interne Prüfhinweise
-                    <textarea name="notes" rows="5" maxlength="3000" placeholder="Zum Beispiel besondere Freigaben, enthaltene Korrekturrunden oder offene Kundendaten …"></textarea>
+                <label>Mit dem Kunden vereinbartes Ads-Honorar pro Monat
+                    <input type="number" name="agreed_ad_monthly_eur" min="0.01" step="0.01" inputmode="decimal" placeholder="z. B. 200,00" aria-describedby="agreed-ad-fee-help">
+                    <small class="field-help" id="agreed-ad-fee-help">Bei einem Werbemodul Pflicht: monatliches Agenturhonorar individuell vereinbaren, mindestens 200,00 €. Medienbudget nicht einrechnen.</small>
+                </label>
+                <label class="span-2">Mit dem Kunden vereinbart – zusätzliche Leistungsvereinbarung
+                    <textarea name="customer_agreement" rows="4" maxlength="2000" placeholder="Zum Beispiel genauer Leistungsumfang, Abrechnungsregel oder eine individuell vereinbarte Zusatzleistung …"></textarea>
+                    <small class="field-help">Dieser Text wird in der Vertrags-PDF gespeichert. Das Ads-Honorar ausschließlich im Zahlenfeld darüber eintragen und hier nicht wiederholen.</small>
+                </label>
+                <label class="span-2">Interne Prüfhinweise
+                    <textarea name="notes" rows="4" maxlength="2000" placeholder="Zum Beispiel noch offene Kundendaten, interne Rückfragen oder Freigaben …"></textarea>
+                    <small class="field-help">Nur intern im Snapshot; dieser Text erscheint nicht in der Vertrags-PDF.</small>
                 </label>
             </div>
         </section>
 
         <div class="contract-submit-bar">
-            <div><strong>Unveränderliche PDF-Version mit Auswahlprotokoll erzeugen</strong><small>Grundpaket und alle Zusatzmodule erscheinen im PDF mit [X] gebucht oder [ ] nicht gebucht. Es wird keine E-Mail versendet und nichts automatisch an den Kunden freigegeben.</small></div>
+            <div><strong>Unveränderliche PDF-Version mit Auswahlprotokoll erzeugen</strong><small>Grundpaket, Zusatzmodule und die konkrete Kundenvereinbarung werden versionsfest gespeichert. Es wird keine E-Mail versendet und nichts automatisch an den Kunden freigegeben.</small></div>
             <button class="button button-primary" type="submit">Vertragsentwurf erzeugen</button>
         </div>
     </form>

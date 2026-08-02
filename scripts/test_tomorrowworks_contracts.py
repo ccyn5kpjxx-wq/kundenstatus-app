@@ -154,6 +154,32 @@ def run() -> None:
         before_notifications = connection.execute("SELECT COUNT(*) FROM portal_benachrichtigungen").fetchone()[0]
         connection.close()
         assert schema_names == {"projekt_vertraege", "projekt_vertragsversionen"}
+        expected_addon_prices = {
+            "technical_care": (0, 1_999),
+            "email_setup": (4_999, 0),
+            "google_business": (0, 0),
+            "google_business_care": (0, 1_999),
+            "google_ads": (0, 0),
+            "meta_ads": (0, 0),
+            "google_meta_ads": (0, 0),
+            "dashboard_extension": (49_900, 4_999),
+            "booking": (20_000, 0),
+            "sales_video": (69_000, 0),
+            "short_clips": (69_900, 0),
+            "flyer": (19_900, 0),
+            "business_card": (19_000, 0),
+            "print_bundle": (39_000, 0),
+        }
+        for code, expected in expected_addon_prices.items():
+            addon = dashboard_module.ADDON_CATALOG[code]
+            assert (addon["setup_cent"], addon["monthly_cent"]) == expected
+        for code in ("google_ads", "meta_ads", "google_meta_ads"):
+            addon = dashboard_module.ADDON_CATALOG[code]
+            assert addon["minimum_monthly_cent"] == 20_000
+            assert addon["price_mode"] == "agreed_monthly"
+            assert addon["setup_cent"] == 0
+            assert "media_fee_percent" not in addon
+        assert dashboard_module.ADDON_CATALOG["google_business"]["free_service"] is True
 
         contract_center = f"/projekte/{project_id}/vertraege"
         anonymous = app.test_client()
@@ -206,6 +232,60 @@ def run() -> None:
         assert unbound_budget.status_code == 200
         assert "Ein Medienbudget kann nur zusammen mit Google Ads" in unbound_budget.get_data(as_text=True)
 
+        missing_ad_fee = post(
+            admin,
+            contract_center,
+            {
+                "titel": "Werbung ohne vereinbartes Honorar",
+                "package_code": "website_start",
+                "addon_codes": ["google_ads"],
+                "media_budget_eur": "250,00",
+            },
+        )
+        assert missing_ad_fee.status_code == 200
+        assert "mit dem Kunden vereinbarte monatliche Agenturhonorar" in missing_ad_fee.get_data(as_text=True)
+
+        too_low_google_fee = post(
+            admin,
+            contract_center,
+            {
+                "titel": "Google Ads unter Mindesthonorar",
+                "package_code": "website_start",
+                "addon_codes": ["google_ads"],
+                "agreed_ad_monthly_eur": "199,99",
+                "media_budget_eur": "250,00",
+            },
+        )
+        assert too_low_google_fee.status_code == 200
+        assert "mindestens 200,00 EUR" in too_low_google_fee.get_data(as_text=True)
+
+        too_low_meta_fee = post(
+            admin,
+            contract_center,
+            {
+                "titel": "Meta Ads unter Mindesthonorar",
+                "package_code": "website_start",
+                "addon_codes": ["meta_ads"],
+                "agreed_ad_monthly_eur": "199,99",
+                "media_budget_eur": "250,00",
+            },
+        )
+        assert too_low_meta_fee.status_code == 200
+        assert "mindestens 200,00 EUR" in too_low_meta_fee.get_data(as_text=True)
+
+        fee_without_ads = post(
+            admin,
+            contract_center,
+            {
+                "titel": "Honorar ohne Werbemodul",
+                "package_code": "website_start",
+                "agreed_ad_monthly_eur": "200,00",
+                "media_budget_eur": "0",
+            },
+        )
+        assert fee_without_ads.status_code == 200
+        assert "kann nur zusammen mit Google Ads" in fee_without_ads.get_data(as_text=True)
+
         mail_called = False
         original_mail = dashboard_module.mail_senden
 
@@ -231,8 +311,10 @@ def run() -> None:
                         "business_card",
                     ],
                     "start_date": "2026-09-01",
+                    "agreed_ad_monthly_eur": "200,00",
                     "media_budget_eur": "1000,00",
-                    "notes": "Kundenspezifischer Entwurf. Vor Versand Firmierung und Leistungsbeginn bestaetigen.",
+                    "customer_agreement": "Monatlicher Bericht und eine gemeinsame Optimierungsrunde.",
+                    "notes": "INTERN-NICHT-IM-PDF: Firmierung und Leistungsbeginn bestaetigen.",
                 },
                 token_path=f"/projekte/{project_id}",
                 follow_redirects=False,
@@ -266,7 +348,7 @@ def run() -> None:
         assert first["sha256"] == hashlib.sha256(first_bytes).hexdigest()
         assert first_bytes.startswith(b"%PDF-")
         assert first_snapshot["legal_approved"] is False
-        assert first_snapshot["text_version"] == "tw-agenturvertrag-2026-08-02-v2"
+        assert first_snapshot["text_version"] == "tw-agenturvertrag-2026-08-02-v3"
         assert first_snapshot["package"]["code"] == "founder_pilot"
         assert {
             item["code"] for item in first_snapshot["selection_manifest"]["packages"] if item["selected"]
@@ -282,9 +364,17 @@ def run() -> None:
             "business_card",
         }
         assert len(first_snapshot["selection_manifest"]["addons"]) == len(dashboard_module.ADDON_CATALOG)
-        assert first_snapshot["pricing"]["setup_cent"] == 333_000
-        assert first_snapshot["pricing"]["monthly_cent"] == 64_800
+        assert first_snapshot["pricing"]["setup_cent"] == 211_999
+        assert first_snapshot["pricing"]["monthly_cent"] == 59_900
         assert first_snapshot["pricing"]["media_budget_cent"] == 100_000
+        assert first_snapshot["pricing"]["first_term_cent"] == 571_399
+        assert first_snapshot["ad_fee_agreement"] == {
+            "addon_code": "google_ads",
+            "addon_name": "Google Ads",
+            "monthly_cent": 20_000,
+        }
+        assert first_snapshot["customer_agreement"] == "Monatlicher Bericht und eine gemeinsame Optimierungsrunde."
+        assert first_snapshot["internal_notes"].startswith("INTERN-NICHT-IM-PDF")
         assert connection.execute("SELECT COUNT(*) FROM portal_nachrichten").fetchone()[0] == before_messages
         assert connection.execute("SELECT COUNT(*) FROM portal_benachrichtigungen").fetchone()[0] == before_notifications
         connection.close()
@@ -298,13 +388,16 @@ def run() -> None:
             "Google Ads",
             "Instagram",
             "keine Garantie",
-            "3.330,00 EUR",
-            "648,00 EUR",
+            "2.119,99 EUR",
+            "599,00 EUR",
             "Leistungsauswahl",
             "Grundpaket - genau eine Auswahl",
+            "Mit dem Kunden vereinbart",
             "Auswahl bestätigt",
         ):
             assert expected in first_text, expected
+        assert "Monatlicher Bericht und eine gemeinsame Optimierungsrunde" in first_compact
+        assert "INTERN-NICHT-IM-PDF" not in first_text
         for addon in dashboard_module.ADDON_CATALOG.values():
             assert addon["name"] in first_text, addon["name"]
         for expected in (
@@ -313,6 +406,7 @@ def run() -> None:
             "[X] zusätzlich gebucht Google Ads",
             "[ ] nicht zusätzlich gebucht Instagram & Facebook Ads",
             "Leistungen des Grundpakets und projektbezogene Inklusivleistungen gelten unabhängig",
+            "Preisangaben bei nicht markierten Optionen sind unverbindliche Orientierung",
         ):
             assert expected in first_compact, expected
 
@@ -353,6 +447,13 @@ def run() -> None:
         assert "Grundpaket ankreuzen" in center_body
         assert "Zusatzmodule ankreuzen" in center_body
         assert "Business-Dashboard einrichten" in center_body
+        assert "Mit dem Kunden vereinbartes Ads-Honorar pro Monat" in center_body
+        assert "Mit dem Kunden vereinbart – zusätzliche Leistungsvereinbarung" in center_body
+        assert 'name="customer_agreement"' in center_body
+        assert "Nur intern im Snapshot; dieser Text erscheint nicht in der Vertrags-PDF." in center_body
+        assert "49,99 € einmalig" in center_body
+        assert "ab 200,00 € monatlich" in center_body
+        assert "kostenlos · keine laufende Gebühr" in center_body
         assert 'name="package_code" value="website_growth" checked' not in center_body
         assert center_body.count('name="addon_codes"') == len(dashboard_module.ADDON_CATALOG)
 
@@ -373,8 +474,10 @@ def run() -> None:
                     "package_code": "founder_pilot",
                     "addon_codes": ["google_ads", "dashboard_extension", "sales_video"],
                     "start_date": "2026-10-01",
+                    "agreed_ad_monthly_eur": "200,00",
                     "media_budget_eur": "2000,00",
-                    "notes": "Version zwei: Dashboard-Erweiterung aufgenommen.",
+                    "customer_agreement": "Version zwei: Dashboard-Erweiterung aufgenommen.",
+                    "notes": "Interne Kalkulation nicht im Kundenvertrag.",
                 },
                 token_path=f"/projekte/{project_id}",
                 follow_redirects=False,
@@ -401,9 +504,11 @@ def run() -> None:
         assert second["groesse"] == len(second_bytes)
         assert second["sha256"] == hashlib.sha256(second_bytes).hexdigest()
         assert second_snapshot["version"] == 2
-        assert second_snapshot["text_version"] == "tw-agenturvertrag-2026-08-02-v2"
+        assert second_snapshot["text_version"] == "tw-agenturvertrag-2026-08-02-v3"
         assert second_snapshot["pricing"]["media_budget_cent"] == 200_000
-        assert second_snapshot["pricing"]["monthly_cent"] == 84_800
+        assert second_snapshot["pricing"]["setup_cent"] == 217_900
+        assert second_snapshot["pricing"]["monthly_cent"] == 64_899
+        assert second_snapshot["pricing"]["first_term_cent"] == 607_294
         assert {
             item["code"] for item in second_snapshot["selection_manifest"]["addons"] if item["selected"]
         } == {"google_ads", "dashboard_extension", "sales_video"}
@@ -414,12 +519,13 @@ def run() -> None:
         second_text = pdf_text(second_bytes)
         second_compact = compact_text(second_text)
         assert "Version zwei: Dashboard-Erweiterung aufgenommen" in second_text
-        assert "848,00 EUR" in second_text
+        assert "648,99 EUR" in second_text
+        assert "Interne Kalkulation nicht im Kundenvertrag" not in second_text
         assert "[X] zusätzlich gebucht Google Ads" in second_compact
         assert "[X] zusätzlich gebucht Business-Dashboard einrichten" in second_compact
         assert "[ ] nicht zusätzlich gebucht Geschäfts-E-Mail bis drei Postfächer" in second_compact
-        assert "Google Ads 490,00 EUR 300,00 EUR" in second_compact
-        assert "Instagram & Facebook Ads 490,00 EUR ab 249,00 EUR oder 15 % Budget" in second_compact
+        assert "Google Ads 0,00 EUR 200,00 EUR mit Kunden vereinbart" in second_compact
+        assert "Instagram & Facebook Ads 0,00 EUR variabel ab 200,00 EUR" in second_compact
         assert admin.get(pdf_url).data == first_bytes
 
         scoped_idor = admin.get(
@@ -434,6 +540,21 @@ def run() -> None:
         prices_text = pdf_text(prices.data)
         for expected in ("Tomorrow Works", "Website Start", "Digitales Cockpit", "Google Ads", "Interne Preisvorlage"):
             assert expected in prices_text, expected
+        prices_compact = compact_text(prices_text)
+        for expected in (
+            "Technische Website-Pflege",
+            "19,99 EUR",
+            "Geschäfts-E-Mail bis drei Postfächer",
+            "49,99 EUR",
+            "variabel ab 200,00 EUR",
+            "Business-Dashboard einrichten",
+            "499,00 EUR",
+            "kostenlos",
+            "keine laufende Gebühr",
+        ):
+            assert expected in prices_compact, expected
+        for stale in ("249,00 EUR", "15 Prozent", "15 %", "1.490,00 EUR"):
+            assert stale not in prices_text, stale
         prices.close()
         prices_download = admin.get("/leistungen-preise.pdf?download=1")
         assert prices_download.status_code == 200
@@ -456,8 +577,10 @@ def run() -> None:
             },
             package_code="website_start",
             addon_codes=[],
+            agreed_ad_monthly_cent=0,
             media_budget_cent=0,
             start_date="",
+            customer_agreement="",
             notes="",
             version=1,
             contract_id=1,
@@ -470,6 +593,73 @@ def run() -> None:
         standard_text = compact_text(pdf_text(standard_pdf))
         assert "[X] gewählt Website Start" in standard_text
         assert "Founder-Pilot" not in standard_text
+        assert "Google-Unternehmensprofil einrichten oder korrigieren kostenlos keine laufende Gebühr" in standard_text
+
+        for ad_code, ad_name in (
+            ("meta_ads", "Instagram & Facebook Ads"),
+            ("google_meta_ads", "Google + Meta Ads"),
+        ):
+            ad_snapshot = dashboard_module.build_contract_snapshot(
+                project={"id": 102, "titel": "Ads-Grenztest", "beschreibung": ""},
+                customer={
+                    "firma": "Ads-Test GmbH",
+                    "ansprechpartner": "Max Muster",
+                    "adresse": "Musterweg 4, 74821 Mosbach",
+                    "email": "ads@example.test",
+                },
+                provider={
+                    "name": "Tomorrow Works",
+                    "address": "Binauer Höhe 4, 74821 Mosbach",
+                    "representative": "Christopher Gärtner",
+                    "email": "info@example.test",
+                },
+                package_code="website_start",
+                addon_codes=[ad_code],
+                agreed_ad_monthly_cent=20_000,
+                media_budget_cent=50_000,
+                start_date="",
+                customer_agreement="",
+                notes="",
+                version=1,
+                contract_id=1,
+                created_at="2026-08-02 20:00:00",
+                legal_approved=False,
+            )
+            assert ad_snapshot["pricing"]["monthly_cent"] == 20_000
+            assert ad_snapshot["ad_fee_agreement"]["addon_name"] == ad_name
+            ad_text = compact_text(pdf_text(dashboard_module.create_contract_pdf(ad_snapshot)))
+            assert f"[X] zusätzlich gebucht {ad_name} 0,00 EUR 200,00 EUR mit Kunden vereinbart" in ad_text
+
+        escaped_snapshot = dashboard_module.build_contract_snapshot(
+            project={"id": 101, "titel": "Sonderzeichen", "beschreibung": ""},
+            customer={
+                "firma": "Sonderzeichen GmbH",
+                "ansprechpartner": "Max Muster",
+                "adresse": "Musterweg 3, 74821 Mosbach",
+                "email": "sonderzeichen@example.test",
+            },
+            provider={
+                "name": "Tomorrow Works",
+                "address": "Binauer Höhe 4, 74821 Mosbach",
+                "representative": "Christopher Gärtner",
+                "email": "info@example.test",
+            },
+            package_code="website_start",
+            addon_codes=[],
+            agreed_ad_monthly_cent=0,
+            media_budget_cent=0,
+            start_date="",
+            customer_agreement="<b>Kunden & Partner</b>\n" + ("Zusatzvereinbarung " * 150),
+            notes="INTERNER HTML-Test <script>alert(1)</script>",
+            version=1,
+            contract_id=1,
+            created_at="2026-08-02 20:00:00",
+            legal_approved=False,
+        )
+        assert len(escaped_snapshot["customer_agreement"]) == 2000
+        escaped_text = pdf_text(dashboard_module.create_contract_pdf(escaped_snapshot))
+        assert "Kunden & Partner" in escaped_text
+        assert "INTERNER HTML-Test" not in escaped_text
 
         full_snapshot = dashboard_module.build_contract_snapshot(
             project={"id": 100, "titel": "Vollauswahl", "beschreibung": ""},
@@ -499,8 +689,10 @@ def run() -> None:
                 "print_bundle",
                 "social_content",
             ],
+            agreed_ad_monthly_cent=35_000,
             media_budget_cent=500_000,
             start_date="",
+            customer_agreement="Individuell abgestimmter Gesamtumfang für den Layouttest.",
             notes="Umfangreicher Layouttest.",
             version=1,
             contract_id=1,
@@ -514,6 +706,8 @@ def run() -> None:
         assert "Freigaben vor Livegang" in full_page_texts[-1]
         assert "Auswahl bestätigt" in full_page_texts[-1]
         assert "Ort, Datum / Auftragnehmer" in full_page_texts[-1]
+        assert "Umfangreicher Layouttest" not in "\n".join(full_page_texts)
+        assert "Individuell abgestimmter Gesamtumfang" in "\n".join(full_page_texts)
 
         second_path.write_bytes(b"%PDF-1.4\nabsichtlich manipuliert")
         tampered = admin.get(
