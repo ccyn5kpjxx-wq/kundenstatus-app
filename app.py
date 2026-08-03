@@ -34,6 +34,7 @@ import re
 import secrets
 import shutil
 import smtplib
+import ssl
 import sqlite3
 import tempfile
 import threading
@@ -8113,6 +8114,7 @@ BACKUP_TABLES = (
     "fahrzeugverkaeufe",
     "fahrzeugverkauf_dateien",
     "auftraege",
+    "kunden_termin_mail_versand",
     "mietfahrzeuge",
     "mietvorgaenge",
     "mietvertrag_versionen",
@@ -8154,6 +8156,7 @@ BACKUP_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand",)
 BACKUP_BINARY_FIELDS = {
     "mietvertrag_versionen": {
         "pdf_base64": {
@@ -8315,6 +8318,7 @@ def create_backup_package(reason="auto"):
                 db.execute("BEGIN")
             export = {
                 "format_version": BACKUP_FORMAT_VERSION,
+                "schema_features": list(BACKUP_SCHEMA_FEATURES),
                 "created_at": now_str(),
                 "reason": reason,
                 "database": "postgres" if USE_POSTGRES else "sqlite",
@@ -8363,6 +8367,7 @@ def create_backup_package(reason="auto"):
                     json.dumps(
                         {
                             "format_version": BACKUP_FORMAT_VERSION,
+                            "schema_features": list(BACKUP_SCHEMA_FEATURES),
                             "created_at": now_str(),
                             "reason": reason,
                             "backup_file": backup_path.name,
@@ -8972,6 +8977,30 @@ def init_db():
             erstellt_am    TEXT NOT NULL,
             geaendert_am   TEXT NOT NULL,
             FOREIGN KEY (autohaus_id) REFERENCES autohaeuser(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS kunden_termin_mail_versand (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            auftrag_id          INTEGER NOT NULL,
+            typ                 TEXT NOT NULL DEFAULT 'terminbestaetigung',
+            idempotenz_key      TEXT NOT NULL UNIQUE,
+            payload_sha256      TEXT NOT NULL,
+            termin_revision     INTEGER DEFAULT 0,
+            wunsch_revision     INTEGER DEFAULT 0,
+            absender            TEXT DEFAULT '',
+            empfaenger          TEXT DEFAULT '',
+            betreff             TEXT DEFAULT '',
+            nachricht           TEXT DEFAULT '',
+            message_id          TEXT DEFAULT '',
+            status              TEXT NOT NULL DEFAULT 'in_versand',
+            fehler              TEXT DEFAULT '',
+            imap_ordner         TEXT DEFAULT '',
+            imap_fehler         TEXT DEFAULT '',
+            erstellt_am         TEXT NOT NULL,
+            versand_gestartet_am TEXT NOT NULL,
+            gesendet_am         TEXT DEFAULT '',
+            aktualisiert_am     TEXT NOT NULL,
+            FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
         );
 
         CREATE TABLE IF NOT EXISTS status_log (
@@ -9597,6 +9626,12 @@ def init_db():
     ensure_column(db, "auftraege", "kosten_kuerzung_betrag", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "abrechnung_status", "TEXT DEFAULT 'offen'")
     ensure_column(db, "auftraege", "netzwerk_zuteilung_status", "TEXT DEFAULT ''")
+    ensure_index(
+        db,
+        "idx_kunden_termin_mail_auftrag",
+        "kunden_termin_mail_versand",
+        ("auftrag_id", "id"),
+    )
     ensure_column(db, "leads", "quelle", "TEXT DEFAULT 'privat'")
     ensure_column(db, "leads", "status", "TEXT DEFAULT 'neu'")
     ensure_column(db, "leads", "autohaus_id", "INTEGER")
@@ -26393,18 +26428,19 @@ def find_imap_sent_folder(client, configured_folder=""):
     return "Sent"
 
 
-def append_lead_message_to_sent(config, message):
+def append_lead_message_to_sent(config, message, require_tls=False):
     """Speichert eine bereits erfolgreich versendete Nachricht als IMAP-Kopie."""
     if not config.get("sent_copy_configured"):
         raise ValueError("IMAP-Ablage für den Gesendet-Ordner ist nicht konfiguriert.")
+    if require_tls and not config.get("imap_ssl"):
+        raise ValueError("Die IONOS-Gesendet-Kopie benötigt eine verschlüsselte IMAP-SSL-Verbindung.")
     client = None
     try:
         imap_class = imaplib.IMAP4_SSL if config.get("imap_ssl") else imaplib.IMAP4
-        client = imap_class(
-            config["imap_host"],
-            int(config["imap_port"]),
-            timeout=int(config.get("imap_timeout") or 20),
-        )
+        imap_kwargs = {"timeout": int(config.get("imap_timeout") or 20)}
+        if config.get("imap_ssl") and require_tls:
+            imap_kwargs["ssl_context"] = ssl.create_default_context()
+        client = imap_class(config["imap_host"], int(config["imap_port"]), **imap_kwargs)
         client.login(config["imap_user"], config["imap_password"])
         sent_folder = find_imap_sent_folder(client, config.get("imap_sent_folder"))
         raw_message = message.as_bytes(policy=policy.SMTP)
@@ -27379,17 +27415,493 @@ def build_kundentermin_mail_entwurf(auftrag):
     betreff = "Ihre Terminbestätigung bei Gärtner Karosserie & Lack"
     empfaenger = parse_single_email_recipient((auftrag or {}).get("kunde_email"))
     text = baue_endkunden_terminbestaetigung_mail(auftrag or {})
-    mailto_url = (
-        f"mailto:{quote(empfaenger, safe='@.+-_')}?subject={quote(betreff)}&body={quote(text)}"
-        if empfaenger
-        else ""
-    )
     return {
         "empfaenger": empfaenger,
         "betreff": betreff,
         "text": text,
-        "mailto_url": mailto_url,
         "status_link": clean_text((auftrag or {}).get("kunden_status_url")),
+    }
+
+
+KUNDENTERMIN_MAIL_TYP = "terminbestaetigung"
+KUNDENTERMIN_MAIL_STALE_MINUTES = 10
+IONOS_SMTP_HOSTS = {
+    "smtp.ionos.de",
+    "smtp.ionos.com",
+    "smtp.1und1.de",
+    "smtp.1and1.com",
+}
+IONOS_IMAP_HOSTS = {
+    "imap.ionos.de",
+    "imap.ionos.com",
+    "imap.1und1.de",
+    "imap.1and1.com",
+}
+
+
+def _nichtnegative_int(value):
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _ist_ionos_smtp_config(config):
+    return clean_text((config or {}).get("host")).lower().rstrip(".") in IONOS_SMTP_HOSTS
+
+
+def _ist_sichere_smtp_config(config):
+    return bool((config or {}).get("ssl") or (config or {}).get("tls"))
+
+
+def _ist_ionos_imap_config(config):
+    return clean_text((config or {}).get("imap_host")).lower().rstrip(".") in IONOS_IMAP_HOSTS
+
+
+def build_kundentermin_mail_payload(auftrag):
+    auftrag = auftrag or {}
+    intake = auftrag.get("schaden_aufnahme") or parse_schadenaufnahme_json(
+        auftrag.get("schaden_aufnahme_json")
+    )
+    if not clean_text(intake.get("kunden_wunsch_bestaetigt_am")):
+        raise ValueError("Bitte zuerst den verbindlichen Werkstatttermin bestätigen.")
+    if clean_text(intake.get("kunden_wunsch_neuabstimmung_offen_am")):
+        raise ValueError("Bitte zuerst die offene Terminabstimmung abschließen.")
+    if not format_date(auftrag.get("annahme_datum")):
+        raise ValueError("Der verbindliche Annahmetermin fehlt.")
+
+    entwurf = build_kundentermin_mail_entwurf(auftrag)
+    empfaenger = parse_single_email_recipient(entwurf.get("empfaenger"))
+    if not empfaenger:
+        raise ValueError("Bitte genau eine gültige Kunden-E-Mail-Adresse eintragen.")
+    status_link = clean_text(entwurf.get("status_link"))
+    try:
+        parsed_link = urlsplit(status_link)
+        host = (parsed_link.hostname or "").lower().rstrip(".")
+    except (TypeError, ValueError):
+        parsed_link = None
+        host = ""
+    if (
+        not parsed_link
+        or parsed_link.scheme.lower() != "https"
+        or not host
+        or host in {"localhost", "127.0.0.1", "::1"}
+        or host == "trycloudflare.com"
+        or host.endswith(".trycloudflare.com")
+    ):
+        raise ValueError("Der öffentliche HTTPS-Statuslink ist noch nicht versandbereit.")
+    canonical_base = PORTAL_BASE_URL or get_public_base_url()
+    if canonical_base and not urls_share_origin(status_link, canonical_base):
+        raise ValueError("Der Statuslink gehört nicht zum konfigurierten Kundenportal.")
+
+    betreff = clean_text(entwurf.get("betreff"))[:300]
+    nachricht = clean_text(entwurf.get("text"))[:12000]
+    if not betreff or len(nachricht) < 20 or status_link not in nachricht:
+        raise ValueError("Der Termin-Mailentwurf ist unvollständig.")
+
+    termin_revision = _nichtnegative_int(intake.get("kunden_termin_revision"))
+    wunsch_revision = _nichtnegative_int(intake.get("kunden_wunsch_revision"))
+    event_daten = {
+        "auftrag_id": int(auftrag.get("id") or 0),
+        "typ": KUNDENTERMIN_MAIL_TYP,
+        "termin_revision": termin_revision,
+        "wunsch_revision": wunsch_revision,
+        "empfaenger": empfaenger,
+        "annahme_datum": format_date(auftrag.get("annahme_datum")),
+        "annahme_uhrzeit": parse_time_value(auftrag.get("annahme_uhrzeit")),
+        "abholtermin": format_date(auftrag.get("abholtermin")),
+        "abhol_uhrzeit": parse_time_value(auftrag.get("abhol_uhrzeit")),
+        "kunde_name": clean_text(auftrag.get("kunde_name")),
+        "fahrzeug": clean_text(auftrag.get("fahrzeug")),
+        "kennzeichen": clean_text(auftrag.get("kennzeichen")),
+        "transport_art": clean_text(auftrag.get("transport_art")),
+        "schaden_mietwagen": clean_text(auftrag.get("schaden_mietwagen")),
+        "status_link": status_link,
+    }
+    event_hash = hashlib.sha256(
+        json.dumps(event_daten, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    payload_sha256 = hashlib.sha256(
+        json.dumps(
+            {**event_daten, "betreff": betreff, "nachricht": nachricht},
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        **entwurf,
+        "empfaenger": empfaenger,
+        "betreff": betreff,
+        "text": nachricht,
+        "termin_revision": termin_revision,
+        "wunsch_revision": wunsch_revision,
+        "idempotenz_key": f"kundentermin:{int(auftrag.get('id') or 0)}:{event_hash}",
+        "payload_sha256": payload_sha256,
+    }
+
+
+def _kunden_termin_mail_status_meta(status):
+    return {
+        "in_versand": {
+            "label": "IONOS-Versand läuft",
+            "badge": "warning",
+            "hinweis": "Der Versand wurde bereits gestartet. Bitte nicht erneut auslösen.",
+        },
+        "gesendet": {
+            "label": "Über IONOS gesendet",
+            "badge": "success",
+            "hinweis": "Die Terminbestätigung wurde über das Werkstatt-Postfach versendet.",
+        },
+        "versand_ungeklaert": {
+            "label": "Versandstatus unklar",
+            "badge": "danger",
+            "hinweis": "Bitte zuerst im IONOS-Ordner „Gesendet“ prüfen. Es erfolgt kein automatischer Neuversand.",
+        },
+        "fehlgeschlagen": {
+            "label": "IONOS-Verbindung fehlgeschlagen",
+            "badge": "warning",
+            "hinweis": "Vor der eigentlichen Mailübergabe ist ein Fehler aufgetreten. Nach Behebung kannst du den Versand erneut bestätigen.",
+        },
+    }.get(
+        clean_text(status),
+        {
+            "label": "Noch nicht gesendet",
+            "badge": "light",
+            "hinweis": "Die Nachricht ist weiterhin nur ein Entwurf.",
+        },
+    )
+
+
+def get_kundentermin_mail_versand(idempotenz_key):
+    idempotenz_key = clean_text(idempotenz_key)
+    if not idempotenz_key:
+        return None
+    db = get_db()
+    cutoff = db_datetime_str(datetime.now() - timedelta(minutes=KUNDENTERMIN_MAIL_STALE_MINUTES))
+    db.execute(
+        """
+        UPDATE kunden_termin_mail_versand
+        SET status='versand_ungeklaert',
+            fehler=CASE WHEN COALESCE(fehler, '')='' THEN ? ELSE fehler END,
+            aktualisiert_am=?
+        WHERE idempotenz_key=? AND status='in_versand' AND versand_gestartet_am < ?
+        """,
+        (
+            "Der Versandprozess wurde nicht eindeutig abgeschlossen.",
+            db_datetime_str(),
+            idempotenz_key,
+            cutoff,
+        ),
+    )
+    row = db.execute(
+        "SELECT * FROM kunden_termin_mail_versand WHERE idempotenz_key=? LIMIT 1",
+        (idempotenz_key,),
+    ).fetchone()
+    db.commit()
+    db.close()
+    if not row:
+        return None
+    result = dict(row)
+    result["status_meta"] = _kunden_termin_mail_status_meta(result.get("status"))
+    result["gesendet_am_label"] = normalize_email_date(result.get("gesendet_am")) if result.get("gesendet_am") else ""
+    return result
+
+
+def build_kundentermin_mail_ionos_state(auftrag):
+    config = get_lead_mail_config("auto-lackierzentrum")
+    state = {
+        "configured": bool(
+            config.get("configured")
+            and _ist_ionos_smtp_config(config)
+            and _ist_sichere_smtp_config(config)
+        ),
+        "absender": clean_text(config.get("address")),
+        "versand": None,
+        "can_send": False,
+        "fehler": "",
+        "idempotenz_key": "",
+        "payload_sha256": "",
+    }
+    try:
+        payload = build_kundentermin_mail_payload(auftrag)
+    except ValueError as exc:
+        state["fehler"] = str(exc)
+        return state
+    state["idempotenz_key"] = payload["idempotenz_key"]
+    state["payload_sha256"] = payload["payload_sha256"]
+    state["versand"] = get_kundentermin_mail_versand(payload["idempotenz_key"])
+    if not config.get("configured"):
+        state["fehler"] = "Der IONOS-SMTP-Versand ist noch nicht eingerichtet."
+    elif not _ist_ionos_smtp_config(config):
+        state["fehler"] = "Für Terminbestätigungen ist noch kein IONOS-SMTP-Server konfiguriert."
+    elif not _ist_sichere_smtp_config(config):
+        state["fehler"] = "Der IONOS-SMTP-Versand benötigt SSL oder STARTTLS."
+    versand_status = clean_text((state.get("versand") or {}).get("status"))
+    state["can_send"] = bool(
+        state["configured"]
+        and versand_status in {"", "fehlgeschlagen"}
+        and not state["fehler"]
+    )
+    return state
+
+
+def _reserviere_kundentermin_mail_versand(auftrag, payload, config, message_id):
+    zeitpunkt = db_datetime_str()
+    db = get_db()
+    cursor = db.execute(
+        """
+        INSERT INTO kunden_termin_mail_versand
+          (auftrag_id, typ, idempotenz_key, payload_sha256, termin_revision, wunsch_revision,
+           absender, empfaenger, betreff, nachricht, message_id, status, fehler,
+           imap_ordner, imap_fehler, erstellt_am, versand_gestartet_am, gesendet_am, aktualisiert_am)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'in_versand', '', '', '', ?, ?, '', ?
+        WHERE EXISTS (
+            SELECT 1
+            FROM auftraege
+            WHERE id=?
+              AND COALESCE(schaden_aufnahme_json, '')=?
+              AND LOWER(COALESCE(kunde_email, ''))=?
+              AND COALESCE(annahme_datum, '')=?
+              AND COALESCE(annahme_uhrzeit, '')=?
+              AND COALESCE(abholtermin, '')=?
+              AND COALESCE(abhol_uhrzeit, '')=?
+              AND COALESCE(kunde_name, '')=?
+              AND COALESCE(fahrzeug, '')=?
+              AND COALESCE(kennzeichen, '')=?
+              AND COALESCE(transport_art, '')=?
+              AND COALESCE(schaden_mietwagen, '')=?
+        )
+        ON CONFLICT (idempotenz_key) DO NOTHING
+        """,
+        (
+            int(auftrag.get("id") or 0),
+            KUNDENTERMIN_MAIL_TYP,
+            payload["idempotenz_key"],
+            payload["payload_sha256"],
+            int(payload.get("termin_revision") or 0),
+            int(payload.get("wunsch_revision") or 0),
+            clean_text(config.get("address"))[:220],
+            payload["empfaenger"][:220],
+            payload["betreff"][:300],
+            payload["text"][:12000],
+            clean_text(message_id)[:300],
+            zeitpunkt,
+            zeitpunkt,
+            zeitpunkt,
+            int(auftrag.get("id") or 0),
+            clean_text(auftrag.get("schaden_aufnahme_json")),
+            payload["empfaenger"],
+            clean_text(auftrag.get("annahme_datum")),
+            clean_text(auftrag.get("annahme_uhrzeit")),
+            clean_text(auftrag.get("abholtermin")),
+            clean_text(auftrag.get("abhol_uhrzeit")),
+            clean_text(auftrag.get("kunde_name")),
+            clean_text(auftrag.get("fahrzeug")),
+            clean_text(auftrag.get("kennzeichen")),
+            clean_text(auftrag.get("transport_art")),
+            clean_text(auftrag.get("schaden_mietwagen")),
+        ),
+    )
+    reserviert = int(cursor.rowcount or 0) == 1
+    if not reserviert:
+        cursor = db.execute(
+            """
+            UPDATE kunden_termin_mail_versand
+            SET payload_sha256=?, termin_revision=?, wunsch_revision=?,
+                absender=?, empfaenger=?, betreff=?, nachricht=?, message_id=?,
+                status='in_versand', fehler='', imap_ordner='', imap_fehler='',
+                versand_gestartet_am=?, gesendet_am='', aktualisiert_am=?
+            WHERE idempotenz_key=? AND status='fehlgeschlagen'
+              AND EXISTS (
+                  SELECT 1
+                  FROM auftraege
+                  WHERE id=?
+                    AND COALESCE(schaden_aufnahme_json, '')=?
+                    AND LOWER(COALESCE(kunde_email, ''))=?
+                    AND COALESCE(annahme_datum, '')=?
+                    AND COALESCE(annahme_uhrzeit, '')=?
+                    AND COALESCE(abholtermin, '')=?
+                    AND COALESCE(abhol_uhrzeit, '')=?
+                    AND COALESCE(kunde_name, '')=?
+                    AND COALESCE(fahrzeug, '')=?
+                    AND COALESCE(kennzeichen, '')=?
+                    AND COALESCE(transport_art, '')=?
+                    AND COALESCE(schaden_mietwagen, '')=?
+              )
+            """,
+            (
+                payload["payload_sha256"],
+                int(payload.get("termin_revision") or 0),
+                int(payload.get("wunsch_revision") or 0),
+                clean_text(config.get("address"))[:220],
+                payload["empfaenger"][:220],
+                payload["betreff"][:300],
+                payload["text"][:12000],
+                clean_text(message_id)[:300],
+                zeitpunkt,
+                zeitpunkt,
+                payload["idempotenz_key"],
+                int(auftrag.get("id") or 0),
+                clean_text(auftrag.get("schaden_aufnahme_json")),
+                payload["empfaenger"],
+                clean_text(auftrag.get("annahme_datum")),
+                clean_text(auftrag.get("annahme_uhrzeit")),
+                clean_text(auftrag.get("abholtermin")),
+                clean_text(auftrag.get("abhol_uhrzeit")),
+                clean_text(auftrag.get("kunde_name")),
+                clean_text(auftrag.get("fahrzeug")),
+                clean_text(auftrag.get("kennzeichen")),
+                clean_text(auftrag.get("transport_art")),
+                clean_text(auftrag.get("schaden_mietwagen")),
+            ),
+        )
+        reserviert = int(cursor.rowcount or 0) == 1
+    db.commit()
+    row = db.execute(
+        "SELECT * FROM kunden_termin_mail_versand WHERE idempotenz_key=? LIMIT 1",
+        (payload["idempotenz_key"],),
+    ).fetchone()
+    db.close()
+    if not reserviert and not row:
+        raise ValueError(
+            "Die Termindaten wurden zwischenzeitlich geändert. "
+            "Bitte die Seite neu laden und den aktuellen Entwurf prüfen."
+        )
+    return reserviert, dict(row) if row else None
+
+
+def _aktualisiere_kundentermin_mail_versand(versand_id, status, **felder):
+    erlaubte_felder = ("fehler", "imap_ordner", "imap_fehler", "gesendet_am")
+    updates = ["status=?", "aktualisiert_am=?"]
+    values = [clean_text(status), db_datetime_str()]
+    for name in erlaubte_felder:
+        if name in felder:
+            updates.append(f"{name}=?")
+            values.append(clean_text(felder.get(name))[:1000 if name.endswith("fehler") else 300])
+    values.extend((int(versand_id), "in_versand"))
+    db = get_db()
+    cursor = db.execute(
+        f"UPDATE kunden_termin_mail_versand SET {', '.join(updates)} WHERE id=? AND status=?",
+        tuple(values),
+    )
+    db.commit()
+    db.close()
+    return int(cursor.rowcount or 0) == 1
+
+
+def sende_kundentermin_mail_ueber_ionos(auftrag):
+    payload = build_kundentermin_mail_payload(auftrag)
+    config = get_lead_mail_config("auto-lackierzentrum")
+    if not config.get("configured"):
+        raise ValueError("Der IONOS-SMTP-Versand ist noch nicht eingerichtet.")
+    if not _ist_ionos_smtp_config(config):
+        raise ValueError("Für Terminbestätigungen ist noch kein IONOS-SMTP-Server konfiguriert.")
+    if not _ist_sichere_smtp_config(config):
+        raise ValueError("Der IONOS-SMTP-Versand benötigt SSL oder STARTTLS.")
+    absender = parse_single_email_recipient(config.get("address"))
+    if not absender:
+        raise ValueError("Das IONOS-Absenderpostfach ist nicht gültig konfiguriert.")
+
+    message = EmailMessage()
+    message["Subject"] = payload["betreff"]
+    message["From"] = formataddr((clean_text(config.get("display_name")) or "Gärtner Karosserie & Lack", absender))
+    message["To"] = payload["empfaenger"]
+    message["Reply-To"] = absender
+    message["X-Gaertner-Auftrag-ID"] = str(int(auftrag.get("id") or 0))
+    message["X-Gaertner-Mail-Typ"] = KUNDENTERMIN_MAIL_TYP
+    message.set_content(payload["text"])
+    add_standard_mail_headers(message)
+
+    reserviert, versand = _reserviere_kundentermin_mail_versand(
+        auftrag, payload, config, message.get("Message-ID")
+    )
+    if not reserviert:
+        return {"sent": False, "duplicate": True, "versand": versand}
+
+    tls_context = ssl.create_default_context()
+    mailuebergabe_gestartet = False
+    try:
+        if config.get("ssl"):
+            smtp_context = smtplib.SMTP_SSL(
+                config["host"],
+                config["port"],
+                local_hostname=smtp_lokaler_hostname(),
+                timeout=30,
+                context=tls_context,
+            )
+        else:
+            smtp_context = smtplib.SMTP(
+                config["host"], config["port"], local_hostname=smtp_lokaler_hostname(), timeout=30
+            )
+        with smtp_context as smtp:
+            if config.get("tls") and not config.get("ssl"):
+                smtp.starttls(context=tls_context)
+            smtp.login(config["user"], config["password"])
+            mailuebergabe_gestartet = True
+            smtp.send_message(message)
+    except Exception as exc:
+        eindeutig_vor_data = isinstance(
+            exc,
+            (
+                smtplib.SMTPRecipientsRefused,
+                smtplib.SMTPSenderRefused,
+                smtplib.SMTPHeloError,
+                smtplib.SMTPNotSupportedError,
+            ),
+        )
+        status = (
+            "versand_ungeklaert"
+            if mailuebergabe_gestartet and not eindeutig_vor_data
+            else "fehlgeschlagen"
+        )
+        _aktualisiere_kundentermin_mail_versand(
+            versand["id"],
+            status,
+            fehler=clean_text(str(exc))[:1000],
+        )
+        if status == "fehlgeschlagen":
+            raise RuntimeError(
+                "Die Verbindung zum IONOS-Postfach ist vor der eigentlichen Mailübergabe fehlgeschlagen. "
+                "Nach Prüfung der IONOS-Einstellungen kannst du den Versand erneut bestätigen."
+            ) from exc
+        raise RuntimeError(
+            "Der IONOS-Versand konnte nicht eindeutig bestätigt werden. "
+            "Bitte zuerst im IONOS-Ordner „Gesendet“ prüfen; es erfolgt kein automatischer Neuversand."
+        ) from exc
+
+    imap_ordner = ""
+    imap_fehler = ""
+    try:
+        if not _ist_ionos_imap_config(config):
+            raise ValueError(
+                "Die Gesendet-Kopie wurde nicht geöffnet, weil kein IONOS-IMAP-Server konfiguriert ist."
+            )
+        imap_ordner = append_lead_message_to_sent(config, message, require_tls=True)
+    except Exception as exc:
+        imap_fehler = clean_text(str(exc))[:1000]
+
+    gesendet_am = db_datetime_str()
+    aktualisiert = _aktualisiere_kundentermin_mail_versand(
+        versand["id"],
+        "gesendet",
+        fehler="",
+        imap_ordner=imap_ordner,
+        imap_fehler=imap_fehler,
+        gesendet_am=gesendet_am,
+    )
+    if not aktualisiert:
+        raise RuntimeError(
+            "Die E-Mail wurde an IONOS übergeben, aber der lokale Versandstatus konnte nicht gespeichert werden. "
+            "Bitte den Ordner „Gesendet“ prüfen und nicht erneut senden."
+        )
+    return {
+        "sent": True,
+        "duplicate": False,
+        "absender": absender,
+        "empfaenger": payload["empfaenger"],
+        "imap_ordner": imap_ordner,
+        "imap_fehler": imap_fehler,
+        "gesendet_am": gesendet_am,
     }
 
 
@@ -30540,6 +31052,7 @@ def delete_auftrag(auftrag_id, safety_backup=True):
     db.execute("DELETE FROM versicherung_teile WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM chat_nachrichten WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM whatsapp_nachrichten WHERE auftrag_id=?", (auftrag_id,))
+    db.execute("DELETE FROM kunden_termin_mail_versand WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM lieferanten_anfragen WHERE auftrag_id=?", (auftrag_id,))
     db.execute("UPDATE leads SET auftrag_id=NULL WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM auftraege WHERE id=?", (auftrag_id,))
@@ -45782,6 +46295,12 @@ def validate_backup_binary_reference_completeness(export, reference_map):
     if format_version < BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION:
         return
     tables = export.get("tables") or {}
+    schema_features = (export or {}).get("schema_features") or []
+    if not isinstance(schema_features, list) or any(
+        not isinstance(feature, str) for feature in schema_features
+    ):
+        raise ValueError("Datenpaket ungültig: schema_features ist fehlerhaft.")
+    schema_features = {clean_text(feature) for feature in schema_features if clean_text(feature)}
     required_tables = set(BACKUP_TABLES) - {
         "datei_backups",
         "fahrzeugeinkauf_scan_treffer",
@@ -45792,7 +46311,12 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         # Sicherungen dürfen weiterhin ohne diese Tabellen importiert werden.
         "stellenanzeigen",
         "bewerbungen",
+        # Der IONOS-Terminversand wurde nach Backupformat v4 ergänzt. Alte
+        # Sicherungen bleiben ohne das reine Versandprotokoll importierbar.
+        "kunden_termin_mail_versand",
     }
+    if "kunden_termin_mail_versand" in schema_features:
+        required_tables.add("kunden_termin_mail_versand")
     if format_version >= 3:
         required_tables.add("fahrzeugeinkauf_scan_treffer")
     if format_version >= 4:
@@ -46798,6 +47322,7 @@ def auftrag_detail(auftrag_id):
         benachrichtigungen=list_benachrichtigungen(auftrag_id),
         chat_nachrichten=chat_nachrichten,
         kunden_termin_mail=build_kundentermin_mail_entwurf(auftrag),
+        kunden_termin_mail_ionos=build_kundentermin_mail_ionos_state(auftrag),
         detail_back_url=detail_back_url,
         detail_self_url=detail_self_url,
         back_context=back_context,
@@ -48842,6 +49367,72 @@ def admin_kundenwuensche_bestaetigen(auftrag_id):
         else "Kundenwünsche bestätigt und Auftrag eingeplant. Der E-Mail-Entwurf mit Statuslink ist bereit.",
         "success",
     )
+    return redirect(redirect_url)
+
+
+@app.route(
+    "/admin/auftrag/<int:auftrag_id>/kundentermin-mail-senden",
+    methods=["POST"],
+)
+@admin_required
+def admin_kundentermin_mail_senden(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag:
+        abort(404)
+    redirect_url = (
+        url_for("auftrag_detail", auftrag_id=auftrag_id)
+        + "#kunden-termin-email-entwurf"
+    )
+    try:
+        aktueller_payload = build_kundentermin_mail_payload(auftrag)
+        angezeigter_key = clean_text(request.form.get("idempotenz_key"))
+        angezeigter_hash = clean_text(request.form.get("payload_sha256"))
+        if (
+            not re.fullmatch(r"kundentermin:\d+:[0-9a-f]{64}", angezeigter_key)
+            or not re.fullmatch(r"[0-9a-f]{64}", angezeigter_hash)
+            or not hmac.compare_digest(angezeigter_key, aktueller_payload["idempotenz_key"])
+            or not hmac.compare_digest(angezeigter_hash, aktueller_payload["payload_sha256"])
+        ):
+            raise ValueError(
+                "Der angezeigte E-Mail-Entwurf ist nicht mehr aktuell. "
+                "Bitte die Seite neu laden und Empfänger, Termin und Link erneut prüfen."
+            )
+        result = sende_kundentermin_mail_ueber_ionos(auftrag)
+    except ValueError as exc:
+        flash(str(exc), "warning")
+        return redirect(redirect_url)
+    except RuntimeError as exc:
+        flash(str(exc), "danger")
+        return redirect(redirect_url)
+
+    if result.get("duplicate"):
+        versand = result.get("versand") or {}
+        status = clean_text(versand.get("status"))
+        status_meta = _kunden_termin_mail_status_meta(status)
+        kategorie = "info" if status == "gesendet" else "warning"
+        if status == "versand_ungeklaert":
+            kategorie = "danger"
+        flash(f"{status_meta['label']}: {status_meta['hinweis']}", kategorie)
+        return redirect(redirect_url)
+
+    schedule_change_backup("kundentermin-mail-gesendet")
+    flash(
+        f"Terminbestätigung wurde als {result['absender']} "
+        f"an {result['empfaenger']} über IONOS gesendet.",
+        "success",
+    )
+    if result.get("imap_fehler"):
+        flash(
+            "Die E-Mail ist versendet, aber die Kopie im IONOS-Ordner "
+            "„Gesendet“ konnte nicht gespeichert werden. Bitte im Webmail prüfen.",
+            "warning",
+        )
+    else:
+        flash(
+            f"Eine Kopie wurde im IONOS-Mailordner "
+            f"„{result.get('imap_ordner') or 'Gesendet'}“ gespeichert.",
+            "success",
+        )
     return redirect(redirect_url)
 
 

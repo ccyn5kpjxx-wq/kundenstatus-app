@@ -11,7 +11,6 @@ import pathlib
 import sys
 import tempfile
 import threading
-from urllib.parse import parse_qs, urlsplit
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -34,7 +33,19 @@ os.environ.update(
         "FLASK_SECRET_KEY": "kunden-termin-mail-test",
         "ADMIN_PASS": "kunden-termin-mail-test",
         "PORTAL_BASE_URL": PUBLIC_URL,
-        "SCHADEN_SMTP_PASS": "",
+        "SCHADEN_MAIL_ADDRESS": "info@auto-lackierzentrum.de",
+        "SCHADEN_MAIL_DISPLAY_NAME": "Gärtner Karosserie & Lack",
+        "SCHADEN_SMTP_HOST": "smtp.ionos.de",
+        "SCHADEN_SMTP_PORT": "465",
+        "SCHADEN_SMTP_USER": "info@auto-lackierzentrum.de",
+        "SCHADEN_SMTP_PASS": "test-passwort",
+        "SCHADEN_SMTP_SSL": "1",
+        "SCHADEN_SMTP_TLS": "0",
+        "SCHADEN_IMAP_HOST": "imap.ionos.de",
+        "SCHADEN_IMAP_PORT": "993",
+        "SCHADEN_IMAP_USER": "info@auto-lackierzentrum.de",
+        "SCHADEN_IMAP_PASS": "test-passwort",
+        "SCHADEN_IMAP_SSL": "1",
     }
 )
 
@@ -303,7 +314,6 @@ def main():
     )
 
     draft = portal.build_kundentermin_mail_entwurf(auftrag)
-    mailto_query = parse_qs(urlsplit(draft["mailto_url"]).query)
     checks.append(
         check(
             "E-Mail-Entwurf enthält Empfänger, Werkstatttermin und öffentlichen Statuslink",
@@ -312,8 +322,7 @@ def main():
             and "08:30 Uhr" in draft["text"]
             and auftrag["kunden_status_url"].startswith(PUBLIC_URL + "/status/")
             and auftrag["kunden_status_url"] in draft["text"]
-            and draft["text"] in mailto_query.get("body", [])
-            and draft["betreff"] in mailto_query.get("subject", []),
+            and draft["betreff"] == "Ihre Terminbestätigung bei Gärtner Karosserie & Lack",
         )
     )
 
@@ -321,11 +330,19 @@ def main():
     admin_html = admin_page.get_data(as_text=True)
     checks.append(
         check(
-            "Adminseite bietet geprüften E-Mail-Entwurf statt automatischem Versand",
+            "Adminseite bietet direkten IONOS-Versand erst nach Klick",
             admin_page.status_code == 200
-            and "E-Mail öffnen &amp; senden" in admin_html
+            and "Mit IONOS senden" in admin_html
             and "Entwurf – noch nicht gesendet" in admin_html
+            and "info@auto-lackierzentrum.de" in admin_html
+            and "mailto:" not in admin_html
+            and "Outlook wird nicht geöffnet" in admin_html
             and auftrag["kunden_status_url"] in admin_html
+            and count_rows(
+                "SELECT COUNT(*) FROM kunden_termin_mail_versand WHERE auftrag_id=?",
+                (auftrag_id,),
+            )
+            == 0
             and not portal.ENDKUNDEN_MAIL_TESTLOG,
         )
     )
@@ -399,7 +416,7 @@ def main():
             and f"{portal.format_date(werkstatt_annahme)} · 08:30 Uhr" in kunden_html_alt
             and portal.format_date(wunsch_spaeter) not in kunden_html_alt
             and "Neue Abstimmung offen" in admin_neuabstimmung
-            and "E-Mail öffnen &amp; senden" not in admin_neuabstimmung,
+            and "Mit IONOS senden" not in admin_neuabstimmung,
         )
     )
 

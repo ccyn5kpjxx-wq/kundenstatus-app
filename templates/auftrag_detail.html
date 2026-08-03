@@ -498,23 +498,42 @@
         {% if kundenwunsch.get('kunden_wunsch_hinweis') %}<div class="small mb-3"><strong>Kundenhinweis:</strong> {{ kundenwunsch.get('kunden_wunsch_hinweis') }}</div>{% endif %}
 
         {% if kundenwunsch.get('kunden_wunsch_bestaetigt_am') and not kundenwunsch.get('kunden_wunsch_neuabstimmung_offen_am') %}
+        {% set ionos_versand = kunden_termin_mail_ionos.get('versand') %}
+        {% set ionos_status = ionos_versand.get('status_meta') if ionos_versand else none %}
         <div class="border rounded-4 p-3 mt-4" id="kunden-termin-email-entwurf">
           <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
             <div>
               <div class="fw-bold">E-Mail mit Termin und Statuslink</div>
-              <div class="text-muted small">Der Entwurf ist vorbereitet. Erst dein Klick im E-Mail-Programm löst den Versand aus.</div>
+              <div class="text-muted small">Der Entwurf ist vorbereitet. Erst dein bestätigter Klick sendet ihn direkt über das IONOS-Postfach.</div>
             </div>
+            {% if ionos_status %}
+            <span class="badge text-bg-{{ ionos_status.get('badge', 'light') }}">{{ ionos_status.get('label') }}</span>
+            {% else %}
             <span class="badge text-bg-light border text-dark">Entwurf – noch nicht gesendet</span>
+            {% endif %}
           </div>
           {% if auftrag['kunden_status_public_warning'] %}
           <div class="alert alert-warning py-2">Bitte vor dem Versand prüfen, ob der öffentliche Statuslink erreichbar ist. Der lokale Testlink gehört nicht in die Kundenmail.</div>
           {% endif %}
+          {% if ionos_status %}
+          <div class="alert alert-{{ ionos_status.get('badge', 'secondary') }} py-2">
+            {{ ionos_status.get('hinweis') }}
+            {% if ionos_versand.get('gesendet_am_label') %}<span class="d-block small mt-1">Versendet am {{ ionos_versand.get('gesendet_am_label') }} an {{ ionos_versand.get('empfaenger') }}.</span>{% endif %}
+            {% if ionos_versand.get('imap_fehler') %}<span class="d-block small mt-1">Die Ablage im IONOS-Ordner „Gesendet“ muss im Webmail geprüft werden.</span>{% endif %}
+          </div>
+          {% elif kunden_termin_mail_ionos.get('fehler') %}
+          <div class="alert alert-warning py-2">{{ kunden_termin_mail_ionos.get('fehler') }}</div>
+          {% endif %}
           <div class="row g-3">
-            <div class="col-md-5">
+            <div class="col-md-4">
+              <label class="form-label">Von</label>
+              <input class="form-control" value="{{ kunden_termin_mail_ionos.get('absender') }}" readonly placeholder="IONOS-Absender fehlt">
+            </div>
+            <div class="col-md-4">
               <label class="form-label">An</label>
               <input class="form-control" value="{{ kunden_termin_mail['empfaenger'] }}" readonly placeholder="Kunden-E-Mail fehlt">
             </div>
-            <div class="col-md-7">
+            <div class="col-md-4">
               <label class="form-label">Betreff</label>
               <input class="form-control" value="{{ kunden_termin_mail['betreff'] }}" readonly>
             </div>
@@ -524,14 +543,21 @@
             </div>
           </div>
           <div class="d-flex gap-2 flex-wrap mt-3">
-            {% if kunden_termin_mail['mailto_url'] %}
-            <a href="{{ kunden_termin_mail['mailto_url'] }}" class="btn btn-brand">E-Mail öffnen &amp; senden</a>
+            {% if kunden_termin_mail_ionos.get('can_send') %}
+            <form method="post" action="{{ url_for('admin_kundentermin_mail_senden', auftrag_id=auftrag['id']) }}">
+              {{ csrf_field()|safe }}
+              <input type="hidden" name="idempotenz_key" value="{{ kunden_termin_mail_ionos.get('idempotenz_key') }}">
+              <input type="hidden" name="payload_sha256" value="{{ kunden_termin_mail_ionos.get('payload_sha256') }}">
+              <button type="submit" class="btn btn-brand" onclick="return confirm('Terminbestätigung jetzt direkt über IONOS senden?');">{% if ionos_versand and ionos_versand.get('status') == 'fehlgeschlagen' %}Erneut über IONOS senden{% else %}Mit IONOS senden{% endif %}</button>
+            </form>
+            {% elif ionos_versand %}
+            <button type="button" class="btn btn-brand" disabled>{% if ionos_versand.get('status') == 'gesendet' %}Bereits über IONOS gesendet{% elif ionos_versand.get('status') == 'in_versand' %}IONOS-Versand läuft{% else %}Nicht erneut senden{% endif %}</button>
             {% else %}
-            <button type="button" class="btn btn-brand" disabled>Erst Kunden-E-Mail eintragen</button>
+            <button type="button" class="btn btn-brand" disabled>{% if not kunden_termin_mail_ionos.get('configured') %}IONOS nicht eingerichtet{% else %}Versand derzeit gesperrt{% endif %}</button>
             {% endif %}
             <button type="button" class="btn btn-soft" data-copy-text-target="#kundentermin-mailtext">Nachricht kopieren</button>
           </div>
-          <div class="form-text mt-2">Das lokale E-Mail-Programm wird geöffnet. Bitte Absender, Empfänger, Termin und Link vor dem Senden noch einmal prüfen.</div>
+          <div class="form-text mt-2">Der Versand erfolgt serverseitig über IONOS; Outlook wird nicht geöffnet. Bitte Empfänger, Termin und Link vor dem Senden noch einmal prüfen.</div>
         </div>
         {% endif %}
         {% endif %}
