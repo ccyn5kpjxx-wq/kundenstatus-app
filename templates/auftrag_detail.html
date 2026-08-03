@@ -430,21 +430,109 @@
             <div class="fw-bold">Angebot vom Kunden angenommen</div>
             <div class="text-muted small">Angenommen am {{ kundenwunsch.get('kunden_angebot_angenommen_am') }}. Termin- und Mobilitätswünsche bitte fachlich bestätigen.</div>
           </div>
-          <span class="badge text-bg-{{ 'success' if kundenwunsch.get('kunden_wunsch_bestaetigt_am') else 'warning' }}">{{ 'Bestätigt & eingeplant' if kundenwunsch.get('kunden_wunsch_bestaetigt_am') else 'Bestätigung offen' }}</span>
+          {% if kundenwunsch.get('kunden_wunsch_neuabstimmung_offen_am') %}
+          <span class="badge text-bg-warning">Neue Abstimmung offen</span>
+          {% elif kundenwunsch.get('kunden_wunsch_bestaetigt_am') %}
+          <span class="badge text-bg-success">Bestätigt &amp; eingeplant</span>
+          {% else %}
+          <span class="badge text-bg-warning">Bestätigung offen</span>
+          {% endif %}
         </div>
-        <div class="row g-2 mb-3">
-          <div class="col-md-6"><div class="border rounded-3 p-2 h-100"><small class="text-muted d-block">Erster Terminwunsch</small><strong>{{ kundenwunsch.get('kunden_wunsch_annahme_datum') or 'offen' }}</strong></div></div>
-          <div class="col-md-6"><div class="border rounded-3 p-2 h-100"><small class="text-muted d-block">Rückgabe-/Abholwunsch</small><strong>{{ kundenwunsch.get('kunden_wunsch_abholung_datum') or 'offen' }}</strong></div></div>
-          <div class="col-md-6"><div class="border rounded-3 p-2 h-100"><small class="text-muted d-block">Übergabe</small><strong>{{ auftrag['transport_meta']['label'] }}</strong></div></div>
-          <div class="col-md-6"><div class="border rounded-3 p-2 h-100"><small class="text-muted d-block">Ersatzfahrzeug</small><strong>{{ auftrag['schaden_mietwagen_label'] }}</strong></div></div>
-        </div>
-        {% if kundenwunsch.get('kunden_wunsch_abhol_adresse') %}<div class="small mb-2"><strong>Abholadresse:</strong> {{ kundenwunsch.get('kunden_wunsch_abhol_adresse') }}</div>{% endif %}
-        {% if kundenwunsch.get('kunden_wunsch_hinweis') %}<div class="small mb-3"><strong>Kundenhinweis:</strong> {{ kundenwunsch.get('kunden_wunsch_hinweis') }}</div>{% endif %}
-        {% if not kundenwunsch.get('kunden_wunsch_bestaetigt_am') %}
-        <form method="POST" action="{{ url_for('admin_kundenwuensche_bestaetigen', auftrag_id=auftrag['id']) }}" onsubmit="return confirm('Die Kundenwünsche als verbindliche Termine übernehmen und den Auftrag einplanen?');">
+        <form method="POST" action="{{ url_for('admin_kundenwuensche_bestaetigen', auftrag_id=auftrag['id']) }}" class="border rounded-4 p-3 bg-light">
           {{ csrf_field()|safe }}
-          <button type="submit" class="btn btn-success">Wünsche als Termine bestätigen &amp; einplanen</button>
+          <div class="fw-semibold mb-1">Kundenwünsche bearbeiten</div>
+          <div class="text-muted small mb-3">Diese Angaben stammen vom Kunden. Du kannst sie nach telefonischer Abstimmung korrigieren, ohne sie sofort als Werkstatttermin zu bestätigen.</div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="kunden-wunsch-annahme">Erster Terminwunsch</label>
+              <input id="kunden-wunsch-annahme" type="date" name="kunden_wunsch_annahme_datum" class="form-control" value="{{ kundenwunsch.get('kunden_wunsch_annahme_datum')|iso_date }}" required>
+              {% if kundenwunsch.get('kunden_wunsch_annahme_datum_original') %}<div class="form-text">Ursprünglich gemeldet: {{ kundenwunsch.get('kunden_wunsch_annahme_datum_original') }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="kunden-wunsch-abholung">Rückgabe-/Abholwunsch</label>
+              <input id="kunden-wunsch-abholung" type="date" name="kunden_wunsch_abholung_datum" class="form-control" value="{{ kundenwunsch.get('kunden_wunsch_abholung_datum')|iso_date }}">
+              {% if kundenwunsch.get('kunden_wunsch_abholung_datum_original') %}<div class="form-text">Ursprünglich gemeldet: {{ kundenwunsch.get('kunden_wunsch_abholung_datum_original') }}</div>{% endif %}
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="kunden-termin-email">Kunden-E-Mail für die Terminbestätigung</label>
+              <input id="kunden-termin-email" type="email" name="kunde_email" class="form-control" value="{{ auftrag['kunde_email'] }}" placeholder="kunde@beispiel.de">
+              <div class="form-text">Es wird genau eine Empfängeradresse akzeptiert. Ohne Adresse bleibt der E-Mail-Entwurf nur zum Kopieren sichtbar.</div>
+            </div>
+          </div>
+
+          <hr class="my-4">
+          <div class="fw-semibold mb-1">Verbindlichen Werkstatttermin eintragen</div>
+          <div class="text-muted small mb-3">Diese Daten sieht der Kunde nach der Bestätigung als festen Termin im persönlichen Statuslink.</div>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label" for="werkstatt-annahme-datum">Annahmetermin</label>
+              <input id="werkstatt-annahme-datum" type="date" name="annahme_datum" class="form-control" value="{{ (kundenwunsch.get('kunden_wunsch_annahme_datum') if kundenwunsch.get('kunden_wunsch_neuabstimmung_offen_am') else (auftrag['annahme_datum'] or kundenwunsch.get('kunden_wunsch_annahme_datum')))|iso_date }}" required>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label" for="werkstatt-annahme-uhrzeit">Uhrzeit</label>
+              <input id="werkstatt-annahme-uhrzeit" type="time" name="annahme_uhrzeit" class="form-control" value="{{ auftrag['annahme_uhrzeit'] }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="werkstatt-abholung-datum">Rückgabe/Abholung</label>
+              <input id="werkstatt-abholung-datum" type="date" name="abholtermin" class="form-control" value="{{ (kundenwunsch.get('kunden_wunsch_abholung_datum') if kundenwunsch.get('kunden_wunsch_neuabstimmung_offen_am') else (auftrag['abholtermin'] or kundenwunsch.get('kunden_wunsch_abholung_datum')))|iso_date }}">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label" for="werkstatt-abholung-uhrzeit">Uhrzeit</label>
+              <input id="werkstatt-abholung-uhrzeit" type="time" name="abhol_uhrzeit" class="form-control" value="{{ auftrag['abhol_uhrzeit'] }}">
+            </div>
+          </div>
+
+          <div class="row g-2 mt-2">
+            <div class="col-md-6"><div class="border rounded-3 p-2 h-100 bg-white"><small class="text-muted d-block">Übergabe</small><strong>{{ auftrag['transport_meta']['label'] }}</strong></div></div>
+            <div class="col-md-6"><div class="border rounded-3 p-2 h-100 bg-white"><small class="text-muted d-block">Ersatzfahrzeug</small><strong>{{ auftrag['schaden_mietwagen_label'] }}</strong></div></div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap mt-3">
+            <button type="submit" name="aktion" value="wunsch_speichern" class="btn btn-soft" formnovalidate>Kundenwunsch speichern</button>
+            <button type="submit" name="aktion" value="bestaetigen" class="btn btn-success" onclick="return confirm('Diesen Werkstatttermin verbindlich speichern und für den Kunden im Statuslink anzeigen?');">{% if kundenwunsch.get('kunden_wunsch_neuabstimmung_offen_am') %}Ersatztermin bestätigen &amp; einplanen{% elif kundenwunsch.get('kunden_wunsch_bestaetigt_am') %}Termin aktualisieren &amp; einplanen{% else %}Termin bestätigen &amp; einplanen{% endif %}</button>
+          </div>
         </form>
+        {% if kundenwunsch.get('kunden_wunsch_neuabstimmung_offen_am') %}
+        <div class="alert alert-warning mt-3 mb-2">Der bisher bestätigte Werkstatttermin bleibt für den Kunden verbindlich sichtbar, bis du hier einen Ersatztermin bestätigst. Der alte E-Mail-Entwurf wird solange ausgeblendet.</div>
+        {% endif %}
+        {% if kundenwunsch.get('kunden_wunsch_abhol_adresse') %}<div class="small mt-3 mb-2"><strong>Abholadresse:</strong> {{ kundenwunsch.get('kunden_wunsch_abhol_adresse') }}</div>{% endif %}
+        {% if kundenwunsch.get('kunden_wunsch_hinweis') %}<div class="small mb-3"><strong>Kundenhinweis:</strong> {{ kundenwunsch.get('kunden_wunsch_hinweis') }}</div>{% endif %}
+
+        {% if kundenwunsch.get('kunden_wunsch_bestaetigt_am') and not kundenwunsch.get('kunden_wunsch_neuabstimmung_offen_am') %}
+        <div class="border rounded-4 p-3 mt-4" id="kunden-termin-email-entwurf">
+          <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+            <div>
+              <div class="fw-bold">E-Mail mit Termin und Statuslink</div>
+              <div class="text-muted small">Der Entwurf ist vorbereitet. Erst dein Klick im E-Mail-Programm löst den Versand aus.</div>
+            </div>
+            <span class="badge text-bg-light border text-dark">Entwurf – noch nicht gesendet</span>
+          </div>
+          {% if auftrag['kunden_status_public_warning'] %}
+          <div class="alert alert-warning py-2">Bitte vor dem Versand prüfen, ob der öffentliche Statuslink erreichbar ist. Der lokale Testlink gehört nicht in die Kundenmail.</div>
+          {% endif %}
+          <div class="row g-3">
+            <div class="col-md-5">
+              <label class="form-label">An</label>
+              <input class="form-control" value="{{ kunden_termin_mail['empfaenger'] }}" readonly placeholder="Kunden-E-Mail fehlt">
+            </div>
+            <div class="col-md-7">
+              <label class="form-label">Betreff</label>
+              <input class="form-control" value="{{ kunden_termin_mail['betreff'] }}" readonly>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="kundentermin-mailtext">Nachricht</label>
+              <textarea id="kundentermin-mailtext" class="form-control" rows="11" readonly>{{ kunden_termin_mail['text'] }}</textarea>
+            </div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap mt-3">
+            {% if kunden_termin_mail['mailto_url'] %}
+            <a href="{{ kunden_termin_mail['mailto_url'] }}" class="btn btn-brand">E-Mail öffnen &amp; senden</a>
+            {% else %}
+            <button type="button" class="btn btn-brand" disabled>Erst Kunden-E-Mail eintragen</button>
+            {% endif %}
+            <button type="button" class="btn btn-soft" data-copy-text-target="#kundentermin-mailtext">Nachricht kopieren</button>
+          </div>
+          <div class="form-text mt-2">Das lokale E-Mail-Programm wird geöffnet. Bitte Absender, Empfänger, Termin und Link vor dem Senden noch einmal prüfen.</div>
+        </div>
         {% endif %}
         {% endif %}
       </div>
@@ -1176,6 +1264,27 @@
         priceInput.value = button.dataset.priceSuggestion || '';
         priceInput.focus();
       }
+    });
+  });
+
+  document.querySelectorAll('[data-copy-text-target]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const target = document.querySelector(button.dataset.copyTextTarget || '');
+      if (!target) {
+        return;
+      }
+      const originalText = button.textContent;
+      try {
+        await navigator.clipboard.writeText(target.value || target.textContent || '');
+      } catch (error) {
+        target.focus();
+        target.select();
+        document.execCommand('copy');
+      }
+      button.textContent = 'Kopiert';
+      window.setTimeout(() => {
+        button.textContent = originalText;
+      }, 1800);
     });
   });
 

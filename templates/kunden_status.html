@@ -232,8 +232,8 @@
       <div class="alert alert-info">Ihr Auftrag ist angenommen. Wir prüfen jetzt die Terminwünsche und bestätigen sie separat.</div>
       {% endif %}
       <div class="confirmation-grid mb-3">
-        <div class="confirmation-item"><div class="small text-muted">Erster Termin</div><div class="fw-bold">{{ auftrag['annahme_datum'] if intake['kunden_wunsch_bestaetigt_am'] else intake['kunden_wunsch_annahme_datum'] }}</div></div>
-        <div class="confirmation-item"><div class="small text-muted">Rückgabe/Abholung</div><div class="fw-bold">{{ (auftrag['abholtermin'] if intake['kunden_wunsch_bestaetigt_am'] else intake['kunden_wunsch_abholung_datum']) or 'wird abgestimmt' }}</div></div>
+        <div class="confirmation-item"><div class="small text-muted">Erster Termin</div><div class="fw-bold">{{ auftrag['annahme_datum'] if intake['kunden_wunsch_bestaetigt_am'] else intake['kunden_wunsch_annahme_datum'] }}{% if intake['kunden_wunsch_bestaetigt_am'] and auftrag['annahme_uhrzeit'] %} · {{ auftrag['annahme_uhrzeit'] }} Uhr{% endif %}</div></div>
+        <div class="confirmation-item"><div class="small text-muted">Rückgabe/Abholung</div><div class="fw-bold">{{ (auftrag['abholtermin'] if intake['kunden_wunsch_bestaetigt_am'] else intake['kunden_wunsch_abholung_datum']) or 'wird abgestimmt' }}{% if intake['kunden_wunsch_bestaetigt_am'] and auftrag['abholtermin'] and auftrag['abhol_uhrzeit'] %} · {{ auftrag['abhol_uhrzeit'] }} Uhr{% endif %}</div></div>
         <div class="confirmation-item"><div class="small text-muted">Fahrzeugübergabe</div><div class="fw-bold">{{ auftrag['transport_meta']['label'] }}</div></div>
         <div class="confirmation-item"><div class="small text-muted">Ersatzfahrzeug</div><div class="fw-bold">{{ auftrag['schaden_mietwagen_label'] }}</div></div>
       </div>
@@ -261,7 +261,7 @@
         <div>
           <h2 class="h4 mb-1">Termine</h2>
           {% if kunden_termine.next %}
-          <div class="text-muted">Nächster Termin: <strong>{{ kunden_termine.next.label }} am {{ kunden_termine.next.datum_text }}</strong></div>
+          <div class="text-muted">Nächster Termin: <strong>{{ kunden_termine.next.label }} am {{ kunden_termine.next.datum_zeit_text }}</strong></div>
           {% else %}
           <div class="text-muted">Termine werden von Versicherung oder Werkstatt eingetragen. Wenn ein Termin nicht passt, kann er hier geändert werden.</div>
           {% endif %}
@@ -305,7 +305,7 @@
         {% for termin in kunden_termine['items'] %}
         <div class="schedule-card {% if kunden_termine.next and kunden_termine.next.key == termin.key %}is-next{% endif %} {% if termin.is_open %}is-open{% endif %}">
           <div class="text-muted small">{{ termin.label }}</div>
-          <div class="fw-bold">{{ termin.datum_text }}</div>
+          <div class="fw-bold">{{ termin.datum_zeit_text }}</div>
           <div class="small text-muted">{{ termin.detail }}</div>
           {% if termin.can_change %}
           <details class="change-box mt-2">

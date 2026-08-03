@@ -26650,6 +26650,32 @@ def parse_email_recipients(value):
     return recipients
 
 
+def parse_single_email_recipient(value):
+    """Return one conservative mailbox address or an empty string."""
+    raw = clean_text(value).lower()
+    if not raw or len(raw) > 254:
+        return ""
+    recipients = parse_email_recipients(raw)
+    if len(recipients) != 1 or recipients[0] != raw:
+        return ""
+    local_part, domain = raw.rsplit("@", 1)
+    if (
+        not local_part
+        or len(local_part) > 64
+        or local_part.startswith(".")
+        or local_part.endswith(".")
+        or ".." in local_part
+        or not re.fullmatch(r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+", local_part, re.IGNORECASE)
+        or not re.fullmatch(
+            r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+",
+            domain,
+            re.IGNORECASE,
+        )
+    ):
+        return ""
+    return raw
+
+
 def split_mail_subject_and_body(text):
     subject = ""
     body_lines = []
@@ -27284,6 +27310,87 @@ def baue_endkunden_danke_mail(auftrag):
         "Binauer Höhe 4, 74821 Mosbach · Telefon +49 1522 7706694",
     ]
     return "\n".join(zeilen)
+
+
+def baue_endkunden_terminbestaetigung_mail(auftrag):
+    kunde = clean_text((auftrag or {}).get("kunde_name")) or "liebe Kundin, lieber Kunde"
+    fahrzeug = " ".join(
+        teil
+        for teil in (
+            clean_text((auftrag or {}).get("fahrzeug")),
+            clean_text((auftrag or {}).get("kennzeichen")),
+        )
+        if teil
+    )
+    annahme = format_date((auftrag or {}).get("annahme_datum"))
+    annahme_uhrzeit = format_time_value((auftrag or {}).get("annahme_uhrzeit"))
+    abholung = format_date((auftrag or {}).get("abholtermin"))
+    abhol_uhrzeit = format_time_value((auftrag or {}).get("abhol_uhrzeit"))
+    status_link = clean_text((auftrag or {}).get("kunden_status_url"))
+    if not status_link:
+        try:
+            status_link = kunden_status_url(auftrag or {})
+        except Exception:
+            status_link = ""
+
+    def terminzeile(datum, uhrzeit, fallback="wird noch abgestimmt"):
+        if not datum:
+            return fallback
+        return f"{datum} um {uhrzeit} Uhr" if uhrzeit else datum
+
+    zeilen = [
+        f"Guten Tag {kunde},",
+        "",
+        "wir haben Ihren Werkstatttermin verbindlich eingeplant.",
+        "",
+    ]
+    if fahrzeug:
+        zeilen.append(f"Fahrzeug: {fahrzeug}")
+    zeilen.extend(
+        [
+            f"Annahme: {terminzeile(annahme, annahme_uhrzeit, 'noch offen')}",
+            f"Rückgabe/Abholung: {terminzeile(abholung, abhol_uhrzeit)}",
+            f"Fahrzeugübergabe: {clean_text((auftrag or {}).get('transport_meta', {}).get('label')) or 'nach Vereinbarung'}",
+            f"Ersatzfahrzeug: {clean_text((auftrag or {}).get('schaden_mietwagen_label')) or 'nach Vereinbarung'}",
+            "",
+        ]
+    )
+    if status_link:
+        zeilen.extend(
+            [
+                "Alle Termine, Hinweise und den späteren Reparaturstatus sehen Sie jederzeit über Ihren persönlichen Link:",
+                status_link,
+                "",
+            ]
+        )
+    zeilen.extend(
+        [
+            "Falls sich bei Ihnen etwas ändert, melden Sie sich bitte kurz bei uns.",
+            "",
+            "Mit freundlichen Grüßen",
+            "Ihr Team von Gärtner Karosserie & Lack",
+            "Binauer Höhe 4, 74821 Mosbach · Telefon +49 1522 7706694",
+        ]
+    )
+    return "\n".join(zeilen)
+
+
+def build_kundentermin_mail_entwurf(auftrag):
+    betreff = "Ihre Terminbestätigung bei Gärtner Karosserie & Lack"
+    empfaenger = parse_single_email_recipient((auftrag or {}).get("kunde_email"))
+    text = baue_endkunden_terminbestaetigung_mail(auftrag or {})
+    mailto_url = (
+        f"mailto:{quote(empfaenger, safe='@.+-_')}?subject={quote(betreff)}&body={quote(text)}"
+        if empfaenger
+        else ""
+    )
+    return {
+        "empfaenger": empfaenger,
+        "betreff": betreff,
+        "text": text,
+        "mailto_url": mailto_url,
+        "status_link": clean_text((auftrag or {}).get("kunden_status_url")),
+    }
 
 
 def save_versicherung_mail_draft(auftrag_id, empfaenger="", cc="", anschreiben=None):
@@ -33986,21 +34093,27 @@ def kunden_status_termine(auftrag):
     auftrag = auftrag or {}
     heute = date.today()
     config = (
-        ("besichtigung", "Besichtigung", auftrag.get("schaden_besichtigung_datum"), "von Versicherung oder Werkstatt vorgegeben"),
-        ("annahme", "Annahme / Bringtermin", auftrag.get("annahme_datum"), "von der Werkstatt vorgegeben"),
-        ("abholung", "Abholung", auftrag.get("abholtermin"), "von der Werkstatt vorgegeben"),
+        ("besichtigung", "Besichtigung", auftrag.get("schaden_besichtigung_datum"), "", "von Versicherung oder Werkstatt vorgegeben"),
+        ("annahme", "Annahme / Bringtermin", auftrag.get("annahme_datum"), auftrag.get("annahme_uhrzeit"), "von der Werkstatt vorgegeben"),
+        ("abholung", "Abholung", auftrag.get("abholtermin"), auftrag.get("abhol_uhrzeit"), "von der Werkstatt vorgegeben"),
     )
     items = []
-    for key, label, value, detail in config:
+    for key, label, value, uhrzeit, detail in config:
         parsed = parse_date(value)
+        parsed_uhrzeit = parse_time_value(uhrzeit)
         is_open = not bool(parsed or clean_text(value))
+        datum_text = parsed.strftime(DATE_FMT) if parsed else (clean_text(value) or "offen")
         items.append(
             {
                 "key": key,
                 "label": label,
                 "detail": "Termin wird noch eingetragen." if is_open else clean_text(detail),
                 "datum": parsed,
-                "datum_text": parsed.strftime(DATE_FMT) if parsed else (clean_text(value) or "offen"),
+                "datum_text": datum_text,
+                "uhrzeit": parsed_uhrzeit,
+                "datum_zeit_text": (
+                    f"{datum_text} · {parsed_uhrzeit} Uhr" if parsed_uhrzeit and not is_open else datum_text
+                ),
                 "is_open": is_open,
                 "is_past": bool(parsed and parsed < heute),
                 "is_today": bool(parsed and parsed == heute),
@@ -46684,6 +46797,7 @@ def auftrag_detail(auftrag_id):
         verzoegerungen=list_verzoegerungen(auftrag_id),
         benachrichtigungen=list_benachrichtigungen(auftrag_id),
         chat_nachrichten=chat_nachrichten,
+        kunden_termin_mail=build_kundentermin_mail_entwurf(auftrag),
         detail_back_url=detail_back_url,
         detail_self_url=detail_self_url,
         back_context=back_context,
@@ -48466,46 +48580,248 @@ def admin_kundenwuensche_bestaetigen(auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag:
         abort(404)
-    intake = parse_schadenaufnahme_json(auftrag.get("schaden_aufnahme_json"))
+    erwartetes_intake_json = auftrag.get("schaden_aufnahme_json") or ""
+    intake = parse_schadenaufnahme_json(erwartetes_intake_json)
     if clean_text(auftrag.get("angebot_status")) != "angenommen" or not clean_text(
         intake.get("kunden_angebot_angenommen_am")
     ):
         flash("Für diesen Vorgang liegen noch keine angenommenen Kundenwünsche vor.", "warning")
         return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
 
-    annahme_datum = format_date(intake.get("kunden_wunsch_annahme_datum"))
-    abholtermin = format_date(intake.get("kunden_wunsch_abholung_datum"))
+    redirect_url = url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation"
+    aktion = clean_text(request.form.get("aktion")) or "bestaetigen"
+    if aktion not in {"wunsch_speichern", "bestaetigen"}:
+        abort(400)
+
+    fehler = []
+
+    def formularwert(name, fallback=""):
+        return request.form.get(name) if name in request.form else fallback
+
+    def formular_datum(name, label, fallback="", erforderlich=False):
+        raw = clean_text(formularwert(name, fallback))
+        if not raw:
+            if erforderlich:
+                fehler.append(f"Bitte {label} eintragen.")
+            return "", None
+        parsed = parse_date(raw)
+        if not parsed:
+            fehler.append(f"Bitte für {label} ein gültiges Datum eintragen.")
+            return "", None
+        return parsed.strftime(DATE_FMT), parsed
+
+    wunsch_annahme, wunsch_annahme_obj = formular_datum(
+        "kunden_wunsch_annahme_datum",
+        "den ersten Kundenwunsch",
+        intake.get("kunden_wunsch_annahme_datum"),
+        erforderlich=True,
+    )
+    wunsch_abholung, wunsch_abholung_obj = formular_datum(
+        "kunden_wunsch_abholung_datum",
+        "den Rückgabe-/Abholwunsch",
+        intake.get("kunden_wunsch_abholung_datum"),
+    )
+    if wunsch_annahme_obj and wunsch_abholung_obj and wunsch_abholung_obj < wunsch_annahme_obj:
+        fehler.append("Der Rückgabe-/Abholwunsch darf nicht vor dem ersten Terminwunsch liegen.")
+
+    kunde_email = clean_text(formularwert("kunde_email", auftrag.get("kunde_email"))).lower()
+    if kunde_email:
+        kunde_email = parse_single_email_recipient(kunde_email)
+        if not kunde_email:
+            fehler.append("Bitte genau eine gültige Kunden-E-Mail-Adresse eintragen.")
+
+    if fehler:
+        flash(" ".join(dict.fromkeys(fehler)), "warning")
+        return redirect(redirect_url)
+
+    alter_wunsch_annahme = format_date(intake.get("kunden_wunsch_annahme_datum"))
+    alter_wunsch_abholung = format_date(intake.get("kunden_wunsch_abholung_datum"))
+    wuensche_geaendert = (
+        wunsch_annahme != alter_wunsch_annahme
+        or wunsch_abholung != alter_wunsch_abholung
+    )
+    email_geaendert = kunde_email != clean_text(auftrag.get("kunde_email")).lower()
+    jetzt = now_str()
+    if wuensche_geaendert:
+        if alter_wunsch_annahme and not clean_text(intake.get("kunden_wunsch_annahme_datum_original")):
+            intake["kunden_wunsch_annahme_datum_original"] = alter_wunsch_annahme
+        if alter_wunsch_abholung and not clean_text(intake.get("kunden_wunsch_abholung_datum_original")):
+            intake["kunden_wunsch_abholung_datum_original"] = alter_wunsch_abholung
+        intake["kunden_wunsch_korrigiert_am"] = jetzt
+        intake["kunden_wunsch_korrigiert_von"] = "werkstatt"
+    intake["kunden_wunsch_annahme_datum"] = wunsch_annahme
+    intake["kunden_wunsch_abholung_datum"] = wunsch_abholung
+
+    if aktion == "wunsch_speichern":
+        neue_abstimmung_offen = bool(
+            wuensche_geaendert and clean_text(intake.get("kunden_wunsch_bestaetigt_am"))
+        )
+        if neue_abstimmung_offen:
+            # Der bisher bestätigte Werkstatttermin bleibt so lange verbindlich und
+            # kundenseitig sichtbar, bis ein Ersatztermin ausdrücklich bestätigt wird.
+            intake["kunden_wunsch_neuabstimmung_offen_am"] = jetzt
+        if not wuensche_geaendert and not email_geaendert:
+            flash("Kundenwunsch und E-Mail-Adresse waren bereits so gespeichert.", "info")
+            return redirect(redirect_url)
+        try:
+            wunsch_revision = int(intake.get("kunden_wunsch_revision") or 0) + 1
+        except (TypeError, ValueError):
+            wunsch_revision = 1
+        intake["kunden_wunsch_revision"] = wunsch_revision
+        db = get_db()
+        cursor = db.execute(
+            """
+            UPDATE auftraege
+            SET kunde_email=?, schaden_aufnahme_json=?, geaendert_am=?
+            WHERE id=? AND COALESCE(schaden_aufnahme_json, '')=?
+            """,
+            (
+                kunde_email,
+                json.dumps(intake, ensure_ascii=False),
+                jetzt,
+                auftrag_id,
+                erwartetes_intake_json,
+            ),
+        )
+        if cursor.rowcount != 1:
+            db.rollback()
+            db.close()
+            flash(
+                "Der Terminwunsch wurde zwischenzeitlich an anderer Stelle geändert. "
+                "Bitte Seite neu laden und die Eingaben prüfen.",
+                "warning",
+            )
+            return redirect(redirect_url)
+        db.commit()
+        db.close()
+        if wuensche_geaendert:
+            hinweis = (
+                "Die Werkstatt hat die Terminwünsche nach Abstimmung aktualisiert. "
+                "Der bisher bestätigte Werkstatttermin bleibt verbindlich, bis ein Ersatztermin bestätigt wird."
+                if neue_abstimmung_offen
+                else "Die Werkstatt hat die Terminwünsche nach Abstimmung aktualisiert. "
+                "Die verbindliche Terminbestätigung folgt separat."
+            )
+            add_benachrichtigung(
+                auftrag_id,
+                "Terminwunsch aktualisiert",
+                hinweis,
+                quelle="werkstatt",
+            )
+        schedule_change_backup("kundenwuensche-aktualisiert")
+        flash(
+            "Kundenwunsch gespeichert. Der bisher bestätigte Termin bleibt gültig, "
+            "bis du den Ersatztermin bestätigst."
+            if neue_abstimmung_offen
+            else "Kundenwunsch und Kontaktdaten gespeichert.",
+            "success",
+        )
+        return redirect(redirect_url)
+
+    annahme_datum, annahme_obj = formular_datum(
+        "annahme_datum",
+        "den verbindlichen Annahmetermin",
+        auftrag.get("annahme_datum") or wunsch_annahme,
+        erforderlich=True,
+    )
+    abholtermin, abholung_obj = formular_datum(
+        "abholtermin",
+        "den verbindlichen Rückgabe-/Abholtermin",
+        auftrag.get("abholtermin") or wunsch_abholung,
+    )
+    if annahme_obj and abholung_obj and abholung_obj < annahme_obj:
+        fehler.append("Der verbindliche Rückgabe-/Abholtermin darf nicht vor dem Annahmetermin liegen.")
+
+    annahme_uhrzeit_raw = clean_text(formularwert("annahme_uhrzeit", auftrag.get("annahme_uhrzeit")))
+    annahme_uhrzeit = parse_time_value(annahme_uhrzeit_raw)
+    if annahme_uhrzeit_raw and not annahme_uhrzeit:
+        fehler.append("Bitte eine gültige Annahme-Uhrzeit eintragen.")
+    abhol_uhrzeit_raw = clean_text(formularwert("abhol_uhrzeit", auftrag.get("abhol_uhrzeit")))
+    abhol_uhrzeit = parse_time_value(abhol_uhrzeit_raw)
+    if abhol_uhrzeit_raw and not abhol_uhrzeit:
+        fehler.append("Bitte eine gültige Rückgabe-/Abhol-Uhrzeit eintragen.")
+    if abhol_uhrzeit and not abholung_obj:
+        fehler.append("Eine Rückgabe-/Abhol-Uhrzeit benötigt auch ein Rückgabe-/Abholdatum.")
+    if (
+        annahme_obj
+        and abholung_obj
+        and annahme_obj == abholung_obj
+        and annahme_uhrzeit
+        and abhol_uhrzeit
+        and abhol_uhrzeit < annahme_uhrzeit
+    ):
+        fehler.append(
+            "Bei einem Termin am selben Tag darf die Rückgabe-/Abhol-Uhrzeit nicht vor der Annahme liegen."
+        )
+    if fehler:
+        flash(" ".join(dict.fromkeys(fehler)), "warning")
+        return redirect(redirect_url)
+
     transport_art = clean_text(intake.get("kunden_wunsch_transport_art")) or "standard"
     if transport_art not in TRANSPORT_ARTEN:
         transport_art = "standard"
     ersatzfahrzeug = clean_text(intake.get("kunden_wunsch_ersatzfahrzeug"))
     if ersatzfahrzeug not in {"ja", "nein"}:
         ersatzfahrzeug = "unbekannt"
-    if not annahme_datum:
-        flash("Der Kunde hat keinen gültigen ersten Terminwunsch hinterlegt.", "warning")
-        return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
 
-    jetzt = now_str()
+    bereits_bestaetigt = bool(clean_text(intake.get("kunden_wunsch_bestaetigt_am")))
+    neue_abstimmung_offen = bool(clean_text(intake.get("kunden_wunsch_neuabstimmung_offen_am")))
+    unveraendert = (
+        bereits_bestaetigt
+        and not neue_abstimmung_offen
+        and not wuensche_geaendert
+        and not email_geaendert
+        and annahme_datum == format_date(auftrag.get("annahme_datum"))
+        and abholtermin == format_date(auftrag.get("abholtermin"))
+        and annahme_uhrzeit == parse_time_value(auftrag.get("annahme_uhrzeit"))
+        and abhol_uhrzeit == parse_time_value(auftrag.get("abhol_uhrzeit"))
+    )
+    if unveraendert:
+        flash("Dieser Werkstatttermin war bereits genau so bestätigt.", "info")
+        return redirect(redirect_url)
+
+    if not clean_text(intake.get("kunden_wunsch_erstmals_bestaetigt_am")):
+        intake["kunden_wunsch_erstmals_bestaetigt_am"] = jetzt
     intake["kunden_wunsch_bestaetigt_am"] = jetzt
+    intake["kunden_termin_aktualisiert_am"] = jetzt
+    intake.pop("kunden_wunsch_neuabstimmung_offen_am", None)
+    try:
+        termin_revision = int(intake.get("kunden_termin_revision") or 0) + 1
+    except (TypeError, ValueError):
+        termin_revision = 1
+    intake["kunden_termin_revision"] = termin_revision
     db = get_db()
-    db.execute(
+    cursor = db.execute(
         """
         UPDATE auftraege
-        SET annahme_datum=?, abholtermin=?, transport_art=?, schaden_mietwagen=?,
-            abhol_adresse=?, schaden_aufnahme_json=?, geaendert_am=?
-        WHERE id=?
+        SET kunde_email=?, annahme_datum=?, annahme_uhrzeit=?, abholtermin=?, abhol_uhrzeit=?,
+            transport_art=?, schaden_mietwagen=?, abhol_adresse=?, schaden_aufnahme_json=?, geaendert_am=?
+        WHERE id=? AND COALESCE(schaden_aufnahme_json, '')=?
         """,
         (
+            kunde_email,
             annahme_datum,
+            annahme_uhrzeit,
             abholtermin,
+            abhol_uhrzeit,
             transport_art,
             ersatzfahrzeug,
             clean_text(intake.get("kunden_wunsch_abhol_adresse"))[:300],
             json.dumps(intake, ensure_ascii=False),
             jetzt,
             auftrag_id,
+            erwartetes_intake_json,
         ),
     )
+    if cursor.rowcount != 1:
+        db.rollback()
+        db.close()
+        flash(
+            "Der Termin wurde zwischenzeitlich bereits bestätigt oder geändert. "
+            "Bitte Seite neu laden und den aktuellen Stand prüfen.",
+            "info",
+        )
+        return redirect(redirect_url)
     db.commit()
     db.close()
     aktualisiert = get_auftrag(auftrag_id)
@@ -48513,14 +48829,20 @@ def admin_kundenwuensche_bestaetigen(auftrag_id):
         fuehre_auftrag_status_wechsel_aus(aktualisiert, 2)
     add_benachrichtigung(
         auftrag_id,
-        "Termin und Auftragsdaten bestätigt",
-        "Die Werkstatt hat die Termin-, Übergabe- und Ersatzfahrzeugwünsche bestätigt. "
+        "Werkstatttermin aktualisiert" if bereits_bestaetigt else "Termin und Auftragsdaten bestätigt",
+        "Die Werkstatt hat den verbindlichen Annahmetermin auf "
+        f"{annahme_datum}{(' um ' + annahme_uhrzeit + ' Uhr') if annahme_uhrzeit else ''} festgelegt. "
         "Die vollständige Auftragsbestätigung ist jetzt im Kundenportal sichtbar.",
         quelle="werkstatt",
     )
     schedule_change_backup("kundenwuensche-bestaetigt")
-    flash("Kundenwünsche bestätigt und Auftrag eingeplant.", "success")
-    return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id) + "#kundenkommunikation")
+    flash(
+        "Werkstatttermin aktualisiert. Der E-Mail-Entwurf mit Statuslink ist bereit."
+        if bereits_bestaetigt
+        else "Kundenwünsche bestätigt und Auftrag eingeplant. Der E-Mail-Entwurf mit Statuslink ist bereit.",
+        "success",
+    )
+    return redirect(redirect_url)
 
 
 @app.route("/admin/auftrag/<int:auftrag_id>/reklamation-neu-planen", methods=["POST"])
