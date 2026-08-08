@@ -629,6 +629,89 @@ def main():
         else "[FEHLER] Lexware-Fehler bleiben unleserlich"
     )
     ok &= lexware_error_ok
+    long_lexware_name = "L" * 318
+    lexware_line_item = portal.build_lexware_invoice_line_item(
+        {"bezeichnung": long_lexware_name},
+        "Auftrag #250",
+        1899.73,
+    )
+    lexware_line_item_ok = (
+        len(lexware_line_item["name"]) == portal.LEXWARE_LINE_ITEM_NAME_MAX_LENGTH
+        and long_lexware_name in lexware_line_item["description"]
+        and len(lexware_line_item["description"]) <= portal.LEXWARE_LINE_ITEM_DESCRIPTION_MAX_LENGTH
+        and lexware_line_item["unitPrice"]["netAmount"] == 1899.73
+        and lexware_line_item["unitPrice"]["taxRatePercentage"] == portal.LEXWARE_TAX_RATE
+    )
+    print(
+        "[OK] Lexware-Positionsnamen werden gekürzt und vollständig beschrieben"
+        if lexware_line_item_ok
+        else "[FEHLER] Lexware-Positionsname oder Beschreibung überschreitet das API-Limit"
+    )
+    ok &= lexware_line_item_ok
+    captured_lexware_payload = {}
+    original_ensure_lexware_contact = portal.ensure_lexware_contact
+    original_lexware_request = portal.lexware_request
+
+    def capture_lexware_request(method, path, payload=None, query=""):
+        captured_lexware_payload.update({"method": method, "path": path, "payload": payload, "query": query})
+        return {"id": "smoke-lexware-invoice"}
+
+    try:
+        portal.ensure_lexware_contact = lambda kunde: ("smoke-contact", False, True)
+        portal.lexware_request = capture_lexware_request
+        portal.create_lexware_invoice_draft(
+            {"abholtermin": "20.05.2026"},
+            {
+                "kunde": {"name": "Smoke Kunde"},
+                "positionen": [{"bezeichnung": long_lexware_name}],
+                "lexware_beschreibung": "Auftrag #250",
+            },
+            1899.73,
+        )
+    finally:
+        portal.ensure_lexware_contact = original_ensure_lexware_contact
+        portal.lexware_request = original_lexware_request
+    payload_line_item = (captured_lexware_payload.get("payload") or {}).get("lineItems", [{}])[0]
+    lexware_final_payload_ok = (
+        captured_lexware_payload.get("method") == "POST"
+        and captured_lexware_payload.get("path") == "/v1/invoices"
+        and len(payload_line_item.get("name", "")) == portal.LEXWARE_LINE_ITEM_NAME_MAX_LENGTH
+        and long_lexware_name in payload_line_item.get("description", "")
+    )
+    print(
+        "[OK] Lexware-Entwurf verwendet die gekürzte Position"
+        if lexware_final_payload_ok
+        else "[FEHLER] Lexware-Entwurf verwendet die gekürzte Position nicht"
+    )
+    ok &= lexware_final_payload_ok
+    lexware_description_limit_ok = (
+        len(portal.build_invoice_lexware_description("x" * 2001))
+        == portal.LEXWARE_LINE_ITEM_DESCRIPTION_MAX_LENGTH
+    )
+    print(
+        "[OK] Lexware-Positionsbeschreibungen bleiben im API-Limit"
+        if lexware_description_limit_ok
+        else "[FEHLER] Lexware-Positionsbeschreibung überschreitet das API-Limit"
+    )
+    ok &= lexware_description_limit_ok
+    lexware_error_with_details = portal.lexware_error_text(
+        406,
+        {
+            "message": "Validation failed for request.",
+            "details": [{"field": "lineItems[0].name", "message": "maximal 255 Zeichen"}],
+            "traceId": "DETAILS",
+        },
+    )
+    lexware_error_details_ok = (
+        "Details: lineItems[0].name: maximal 255 Zeichen" in lexware_error_with_details
+        and "Trace-ID DETAILS" in lexware_error_with_details
+    )
+    print(
+        "[OK] Lexware-Validierungsdetails werden angezeigt"
+        if lexware_error_details_ok
+        else "[FEHLER] Lexware-Validierungsdetails fehlen"
+    )
+    ok &= lexware_error_details_ok
     bonus_beispiel = portal.build_bonusmodell(
         [
             {

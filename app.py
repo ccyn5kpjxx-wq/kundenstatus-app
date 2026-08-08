@@ -379,6 +379,9 @@ LEXWARE_APP_BASE_URL = (os.environ.get("LEXWARE_APP_BASE_URL") or "https://app.l
 LEXWARE_TAX_RATE = float(os.environ.get("LEXWARE_TAX_RATE") or 19)
 LEXWARE_AUTO_SYNC_MINUTES = max(5, env_int("LEXWARE_AUTO_SYNC_MINUTES", 30))
 LEXWARE_MIN_DATE = date(2014, 1, 1)
+LEXWARE_LINE_ITEM_NAME_MAX_LENGTH = 255
+LEXWARE_LINE_ITEM_DESCRIPTION_MAX_LENGTH = 2000
+LEXWARE_REMARK_MAX_LENGTH = 2000
 DATE_FMT = "%d.%m.%Y"
 DATETIME_FMT = "%d.%m.%Y %H:%M"
 MAX_UPLOAD_MB = 25
@@ -17855,7 +17858,7 @@ def build_invoice_lexware_description(belegtext, bonus_text=""):
     parts = [clean_text(belegtext)]
     if clean_text(bonus_text):
         parts.append(clean_text(bonus_text))
-    return "\n\n".join(part for part in parts if part)[:3500]
+    return "\n\n".join(part for part in parts if part)[:LEXWARE_LINE_ITEM_DESCRIPTION_MAX_LENGTH]
 
 
 def extract_money_amounts_from_line(line):
@@ -18348,12 +18351,50 @@ def save_bonusrechnung_upload(auftrag_id, files, quelle="intern", notiz=""):
     }
 
 
+def lexware_error_details_text(details):
+    if not isinstance(details, dict):
+        return ""
+    raw_entries = details.get("details")
+    if isinstance(raw_entries, (str, dict)):
+        raw_entries = [raw_entries]
+    if not isinstance(raw_entries, list):
+        return ""
+
+    entries = []
+    for entry in raw_entries[:5]:
+        if isinstance(entry, str):
+            text = clean_text(entry)
+        elif isinstance(entry, dict):
+            field = clean_text(
+                entry.get("field")
+                or entry.get("fieldName")
+                or entry.get("path")
+                or entry.get("property")
+            )
+            message = clean_text(entry.get("message") or entry.get("error") or entry.get("description"))
+            text = f"{field}: {message}" if field and message else field or message
+        else:
+            text = ""
+        if text and text not in entries:
+            entries.append(text)
+    return " | ".join(entries)[:600]
+
+
 def lexware_error_text(status_code, details):
     if isinstance(details, dict):
         message = clean_text(details.get("message"))
         error = clean_text(details.get("error"))
         trace_id = clean_text(details.get("traceId") or details.get("traceid"))
-        parts = [part for part in [message or error, f"Trace-ID {trace_id}" if trace_id else ""] if part]
+        detail_text = lexware_error_details_text(details)
+        parts = [
+            part
+            for part in [
+                message or error,
+                f"Details: {detail_text}" if detail_text else "",
+                f"Trace-ID {trace_id}" if trace_id else "",
+            ]
+            if part
+        ]
         if parts:
             return f"Lexware API Fehler {status_code}: {' | '.join(parts)}"
     return f"Lexware API Fehler {status_code}: {details}"
@@ -20086,6 +20127,30 @@ def lexware_datetime(value=None, fallback=None):
     return f"{parsed.isoformat()}T00:00:00.000+01:00"
 
 
+def build_lexware_invoice_line_item(position, description, net_amount):
+    original_name = clean_text(position.get("bezeichnung")) or "Karosserie- und Lackierarbeiten"
+    line_item_name = original_name[:LEXWARE_LINE_ITEM_NAME_MAX_LENGTH]
+    line_item_description = clean_text(description)
+    if len(original_name) > LEXWARE_LINE_ITEM_NAME_MAX_LENGTH:
+        full_description = f"Leistungsbeschreibung:\n{original_name}"
+        if line_item_description:
+            full_description = f"{full_description}\n\n{line_item_description}"
+        line_item_description = full_description
+    return {
+        "type": "custom",
+        "name": line_item_name,
+        "description": line_item_description[:LEXWARE_LINE_ITEM_DESCRIPTION_MAX_LENGTH],
+        "quantity": 1,
+        "unitName": "Stück",
+        "unitPrice": {
+            "currency": "EUR",
+            "netAmount": net_amount,
+            "taxRatePercentage": LEXWARE_TAX_RATE,
+        },
+        "discountPercentage": 0,
+    }
+
+
 def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
     contact_id, contact_created, can_reference_contact = ensure_lexware_contact(rechnung["kunde"])
     position = rechnung["positionen"][0] if rechnung["positionen"] else {}
@@ -20093,7 +20158,7 @@ def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
         rechnung.get("belegtext"),
         rechnung.get("bonus_text"),
     )
-    remark = clean_text(rechnung.get("bonus_remark")) or "Vielen Dank für Ihren Auftrag."
+    remark = (clean_text(rechnung.get("bonus_remark")) or "Vielen Dank für Ihren Auftrag.")[:LEXWARE_REMARK_MAX_LENGTH]
     invoice_address = (
         {"contactId": contact_id}
         if can_reference_contact
@@ -20103,21 +20168,7 @@ def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
         "archived": False,
         "voucherDate": lexware_datetime(),
         "address": invoice_address,
-        "lineItems": [
-            {
-                "type": "custom",
-                "name": clean_text(position.get("bezeichnung")) or "Karosserie- und Lackierarbeiten",
-                "description": description,
-                "quantity": 1,
-                "unitName": "Stück",
-                "unitPrice": {
-                    "currency": "EUR",
-                    "netAmount": net_amount,
-                    "taxRatePercentage": LEXWARE_TAX_RATE,
-                },
-                "discountPercentage": 0,
-            }
-        ],
+        "lineItems": [build_lexware_invoice_line_item(position, description, net_amount)],
         "totalPrice": {"currency": "EUR"},
         "taxConditions": {"taxType": "net"},
         "shippingConditions": {
