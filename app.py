@@ -385,6 +385,23 @@ LEXWARE_REMARK_MAX_LENGTH = 2000
 DATE_FMT = "%d.%m.%Y"
 DATETIME_FMT = "%d.%m.%Y %H:%M"
 MAX_UPLOAD_MB = 25
+# Ein Import-Paket ist komprimiert auf die normale Upload-Grenze beschränkt.
+# Ohne eine zusätzliche Grenze für die *entpackte* Größe kann ein kleines ZIP
+# jedoch /tmp füllen und den Render-Dienst neu starten lassen. Die Werte sind
+# bewusst per Umgebung anpassbar, bleiben aber deutlich unter dem flüchtigen
+# Render-Dateisystem und dem 1-GB-Persistent-Disk-Rahmen des Portals.
+IMPORT_PACKAGE_MAX_UNCOMPRESSED_MB = max(
+    64,
+    min(env_int("IMPORT_PACKAGE_MAX_UNCOMPRESSED_MB", 512), 1024),
+)
+IMPORT_PACKAGE_MAX_METADATA_MB = max(
+    1,
+    min(env_int("IMPORT_PACKAGE_MAX_METADATA_MB", 32), 128),
+)
+IMPORT_PACKAGE_MAX_ENTRIES = max(
+    10,
+    min(env_int("IMPORT_PACKAGE_MAX_ENTRIES", 2000), 10000),
+)
 # Speicherschutz fuer die lokale OCR: das Arbeitsbild (nach dem Hochskalieren)
 # nie ueber diese Kantenlaenge (laengste Seite, px) wachsen lassen. Verhindert
 # RAM-Spitzen von mehreren hundert MB bei grossen Handyfotos/Scans. Per Env
@@ -46275,11 +46292,142 @@ def api_werkstatt_emails():
     return jsonify({"ok": True, "id": email_id}), 201
 
 
+def validate_import_package_archive(archive):
+    """Prüft ein Datenimport-ZIP vor jeder Entpack- oder JSON-Operation.
+
+    Flask begrenzt nur die komprimierte Upload-Größe. Ein ZIP kann dennoch
+    viele GB entpackte Daten enthalten. Diese Prüfung erfolgt ausschließlich
+    anhand des ZIP-Verzeichnisses und damit, bevor etwas nach ``/tmp``
+    geschrieben wird.
+    """
+
+    infos = archive.infolist()
+    if len(infos) > IMPORT_PACKAGE_MAX_ENTRIES:
+        raise ValueError(
+            "Datenpaket enthält zu viele Einträge. "
+            f"Erlaubt sind höchstens {IMPORT_PACKAGE_MAX_ENTRIES} Dateien."
+        )
+
+    max_uncompressed_bytes = IMPORT_PACKAGE_MAX_UNCOMPRESSED_MB * 1024 * 1024
+    max_metadata_bytes = IMPORT_PACKAGE_MAX_METADATA_MB * 1024 * 1024
+    names = set()
+    upload_names = set()
+    total_uncompressed_bytes = 0
+    total_compressed_bytes = 0
+    file_count = 0
+
+    for info in infos:
+        name = info.filename
+        if (
+            not name
+            or "\x00" in name
+            or "\\" in name
+            or name.startswith(("/", "./", "../"))
+            or "/../" in name
+            or "/./" in name
+            or "//" in name
+        ):
+            raise ValueError("Datenpaket enthält einen unzulässigen Dateipfad.")
+        posix_path = pathlib.PurePosixPath(name)
+        windows_path = pathlib.PureWindowsPath(name)
+        if (
+            posix_path.is_absolute()
+            or windows_path.is_absolute()
+            or windows_path.drive
+            or any(part in {"", ".", ".."} for part in posix_path.parts)
+        ):
+            raise ValueError("Datenpaket enthält einen unzulässigen Dateipfad.")
+        if name in names:
+            raise ValueError("Datenpaket enthält doppelte Dateinamen.")
+        names.add(name)
+        if info.flag_bits & 0x1:
+            raise ValueError("Verschlüsselte Datenpakete können nicht sicher importiert werden.")
+        if info.is_dir():
+            if info.file_size:
+                raise ValueError("Datenpaket enthält einen ungültigen Ordner-Eintrag.")
+            continue
+
+        if name.startswith("uploads/"):
+            relative_upload_path = posix_path.relative_to("uploads")
+            if len(relative_upload_path.parts) != 1:
+                raise ValueError("Datenpaket enthält einen unzulässigen Upload-Pfad.")
+            stored_name = relative_upload_path.parts[0]
+            if stored_name in upload_names:
+                raise ValueError("Datenpaket enthält doppelte Upload-Dateinamen.")
+            upload_names.add(stored_name)
+
+        file_count += 1
+        size = int(info.file_size)
+        compressed_size = int(info.compress_size)
+        if size < 0 or compressed_size < 0:
+            raise ValueError("Datenpaket enthält eine ungültige Dateigröße.")
+        if name in {"backup.json", "manifest.json"} and size > max_metadata_bytes:
+            raise ValueError(
+                "Datenpaket enthält zu umfangreiche Metadaten. "
+                f"Erlaubt sind höchstens {IMPORT_PACKAGE_MAX_METADATA_MB} MB."
+            )
+        total_uncompressed_bytes += size
+        total_compressed_bytes += compressed_size
+        if total_uncompressed_bytes > max_uncompressed_bytes:
+            raise ValueError(
+                "Datenpaket ist nach dem Entpacken zu groß. "
+                f"Erlaubt sind höchstens {IMPORT_PACKAGE_MAX_UNCOMPRESSED_MB} MB."
+            )
+
+    return names, {
+        "member_count": file_count,
+        "uncompressed_bytes": total_uncompressed_bytes,
+        "compressed_bytes": total_compressed_bytes,
+    }
+
+
+def read_import_package_metadata(archive, name):
+    """Liest kleine JSON-Metadaten mit einer zusätzlichen Arbeitsspeichergrenze."""
+
+    max_metadata_bytes = IMPORT_PACKAGE_MAX_METADATA_MB * 1024 * 1024
+    info = archive.getinfo(name)
+    if info.is_dir() or int(info.file_size) > max_metadata_bytes:
+        raise ValueError("Datenpaket enthält zu umfangreiche oder ungültige Metadaten.")
+    with archive.open(info) as source:
+        payload = source.read(max_metadata_bytes + 1)
+    if len(payload) > max_metadata_bytes or len(payload) != int(info.file_size):
+        raise ValueError("Datenpaket enthält unvollständige oder zu umfangreiche Metadaten.")
+    return payload
+
+
+def copy_import_package_member(archive, name, target):
+    """Kopiert einen bereits geprüften ZIP-Eintrag stückweise und größengetreu."""
+
+    info = archive.getinfo(name)
+    expected_size = int(info.file_size)
+    copied = 0
+    with archive.open(info) as source:
+        while True:
+            chunk = source.read(64 * 1024)
+            if not chunk:
+                break
+            copied += len(chunk)
+            if copied > expected_size:
+                raise ValueError("Datenpaket enthält eine Datei mit unerwarteter Größe.")
+            target.write(chunk)
+    if copied != expected_size:
+        raise ValueError("Datenpaket enthält eine unvollständige Datei.")
+    return copied
+
+
+def log_import_package_event(event, **details):
+    """Schlanke, datensparsame Ereignisse für die Render-Log-Korrelation."""
+
+    payload = " ".join(f"{key}={details[key]}" for key in sorted(details))
+    suffix = f" {payload}" if payload else ""
+    print(f"IMPORT_PACKAGE event={event}{suffix}", flush=True)
+
+
 def read_backup_json_from_archive(archive, names):
     if "backup.json" not in names:
         return None
     try:
-        data = json.loads(archive.read("backup.json").decode("utf-8"))
+        data = json.loads(read_import_package_metadata(archive, "backup.json").decode("utf-8"))
     except (UnicodeDecodeError, ValueError, KeyError) as exc:
         raise ValueError("Datenpaket ungültig: backup.json ist nicht lesbar.") from exc
     if not isinstance(data, dict) or not isinstance(data.get("tables"), dict):
@@ -46291,7 +46439,7 @@ def read_backup_manifest_from_archive(archive, names):
     if "manifest.json" not in names:
         return {}
     try:
-        data = json.loads(archive.read("manifest.json").decode("utf-8"))
+        data = json.loads(read_import_package_metadata(archive, "manifest.json").decode("utf-8"))
     except (UnicodeDecodeError, ValueError, KeyError) as exc:
         raise ValueError("Datenpaket ungültig: manifest.json ist nicht lesbar.") from exc
     return data if isinstance(data, dict) else {}
@@ -46477,8 +46625,8 @@ def extract_import_package_files(archive, names, tmp_path):
     imported_db = None
     if "auftraege.db" in names:
         imported_db = tmp_path / "auftraege.db"
-        with archive.open("auftraege.db") as source, imported_db.open("wb") as target:
-            shutil.copyfileobj(source, target)
+        with imported_db.open("wb") as target:
+            copy_import_package_member(archive, "auftraege.db", target)
         if export is not None:
             hydrate_imported_sqlite_backup_blobs(imported_db, archive, names, export)
 
@@ -46497,8 +46645,8 @@ def extract_import_package_files(archive, names, tmp_path):
         stored_name = pathlib.Path(name).name
         if not stored_name:
             continue
-        with archive.open(name) as source, (imported_uploads / stored_name).open("wb") as target:
-            shutil.copyfileobj(source, target)
+        with (imported_uploads / stored_name).open("wb") as target:
+            copy_import_package_member(archive, name, target)
 
     return imported_db, imported_uploads, export
 
@@ -46741,9 +46889,14 @@ def admin_daten_import():
             tmp_path = pathlib.Path(tmp_dir)
             archive_path = tmp_path / "datenpaket.zip"
             paket.save(archive_path)
+            log_import_package_event(
+                "received",
+                compressed_bytes=int(archive_path.stat().st_size),
+            )
 
             with zipfile.ZipFile(archive_path) as archive:
-                names = set(archive.namelist())
+                names, archive_stats = validate_import_package_archive(archive)
+                log_import_package_event("validated", **archive_stats)
                 imported_db, imported_uploads, backup_export = extract_import_package_files(
                     archive,
                     names,
@@ -46778,10 +46931,13 @@ def admin_daten_import():
                 # wenn ein Backup vor dem Karriere-Modul importiert wurde.
                 init_db()
 
+        log_import_package_event("completed")
         flash("Daten wurden importiert. Fahrzeuge und Dateien sind jetzt auf diesem Server verfügbar.", "success")
     except ValueError as exc:
+        log_import_package_event("rejected")
         flash(clean_text(str(exc))[:300], "danger")
     except Exception as exc:
+        log_import_package_event("failed", error_type=type(exc).__name__)
         flash(f"Datenimport fehlgeschlagen: {clean_text(str(exc))[:300]}", "danger")
     return redirect(url_for("dashboard"))
 
@@ -46829,7 +46985,7 @@ def admin_backup_download():
         flash(f"Backup fehlgeschlagen: {clean_text(str(exc))[:300]}", "danger")
         return redirect(url_for("dashboard"))
     return send_file(
-        BytesIO(backup_path.read_bytes()),
+        backup_path,
         download_name=backup_path.name,
         mimetype="application/zip",
         as_attachment=True,
