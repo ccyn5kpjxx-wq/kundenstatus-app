@@ -136,7 +136,7 @@ def main():
             and all("sofort" in job["beschreibung"].lower() for job in default_jobs),
         ),
         check(
-            "Homepage zeigt alle Stellen prominent und verlinkt den Rueckruf",
+            "Homepage zeigt alle Stellen nach den Kundeninhalten und verlinkt den Rueckruf",
             homepage.status_code == 200
             and all(title in homepage_html for title in expected_job_titles)
             and all(
@@ -145,8 +145,9 @@ def main():
             )
             and "Stellenangebote · Ab sofort" in homepage_html
             and "Kurz bewerben &amp; Rückruf anfordern" in homepage_html
-            and homepage_html.index('id="jobs"')
-            < homepage_html.index('<section class="routes">'),
+            and homepage_html.index('id="vertrauen"')
+            < homepage_html.index('id="jobs"')
+            < homepage_html.index('id="kontakt"'),
         ),
         check(
             "Karriereseite zeigt Stellen und Initiativbewerbung",

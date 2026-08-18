@@ -21,8 +21,8 @@ def main():
     checks = {
         "Status 200": response.status_code == 200,
         "Homepage nicht veraltet cachen": "no-store" in response.headers.get("Cache-Control", ""),
-        "Eine Hauptueberschrift im Hero": html.count("<h1") == 1 and "Karosserie, Lack &amp; Schadenservice in Mosbach." in html,
-        "Hero hat zwei klare Aktionen": "Anfrage senden" in html and "Termin &amp; Beratung" in html,
+        "Eine Hauptueberschrift im Hero": html.count("<h1") == 1 and "Schaden am Fahrzeug? Wir kümmern uns persönlich." in html,
+        "Hero hat zwei klare Aktionen": "Schaden mit Fotos melden" in html and "Direkt anrufen" in html,
         "Vier Hauptkategorien": html.count('class="route-card') == 4 and all(
             f'href="#{anchor}"' in html for anchor in ("schaden", "mietwagen", "fahrzeugcheck", "werkstatt")
         ),
@@ -56,6 +56,11 @@ def main():
             "Wir arbeiten als Team", "Gute Arbeit entsteht", "Unser Team kennenlernen",
             "Digital starten", "Persönlich abstimmen", "Wir kümmern uns"
         )) and 'class="process-step"' not in html,
+        "Reparaturablauf und echtes Handwerk sichtbar": all(marker in html for marker in (
+            'class="process"', "Drei Schritte. Ein fester Ansprechpartner.",
+            "Fotos &amp; Anliegen senden", "Persönlich prüfen", "Reparieren &amp; informieren",
+            'class="craft"', "Echtes Handwerk aus Mosbach", "Nicht nur versprochen. So arbeiten wir."
+        )),
         "Google-Sterne dynamisch": "{{ '★' * rounded_rating }}" not in html and 'aria-label="' in html,
         "Strukturierte Unternehmensdaten": '"@type":"AutoBodyShop"' in html,
         "Sprunglink vorhanden": 'class="skip-link" href="#inhalt"' in html,
