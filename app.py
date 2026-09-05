@@ -55948,6 +55948,11 @@ def api_fahrzeugeinkauf_import():
     )
 
 
+from mailbox_client import register_mailbox
+app.config["MAILBOX_MOVE_ENABLED"] = env_flag("MAILBOX_MOVE_ENABLED", True)
+app.config["MAILBOX_WRITE_ENABLED"] = False
+register_mailbox(app, admin_required, get_werkstatt_imap_config, get_schaden_mail_config, get_db)
+
 init_db()
 
 start_hourly_backups()
