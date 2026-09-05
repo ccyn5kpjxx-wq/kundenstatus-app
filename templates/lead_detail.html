@@ -403,7 +403,8 @@
         {% else %}
         <span class="badge text-bg-warning">Lead-Portal aktiv</span>
         {% endif %}
-        {% if not lead['auftrag_id'] %}<span class="badge text-bg-light text-dark border">Noch kein Auftrag</span>{% endif %}
+        {% if lead_notifications %}<section class="my-3"><h3 class="h5">Benachrichtigungen</h3><p class="small text-muted">Vom Anbieter angenommen bedeutet noch nicht beim Empfänger zugestellt.</p>{% for item in lead_notifications %}<p>{{ item['channel'] }} · {{ item['event'].split(' · ')[0] }}: <strong>{{ {'accepted':'Vom Anbieter angenommen','failed':'Nicht gesendet – Konfiguration prüfen','sending':'Versand begonnen – Ausgang noch unklar','unknown':'Ausgang unklar – vor erneutem Versand Anbieter prüfen'}.get(item['status'],item['status']) }}</strong></p>{% endfor %}</section>{% endif %}
+      {% if not lead['auftrag_id'] %}<span class="badge text-bg-light text-dark border">Noch kein Auftrag</span>{% endif %}
       </div>
       <p class="text-muted small">Der Lead bleibt bis zur Angebotsannahme ein Lead. Über diesen geschützten Link kann der Kunde Bilder, Nachrichten und Terminwünsche senden sowie das Angebot annehmen. Erst dann entsteht automatisch der Auftrag in der Werkstatttafel.</p>
       <div class="text-center mb-3">
@@ -420,13 +421,16 @@
       {% if not lead['auftrag_id'] %}
       <hr class="my-4">
       <h3 class="h5 mb-3">Angebot im Lead bereitstellen</h3>
-      <form method="POST" action="{{ url_for('admin_lead_angebot_senden', lead_id=lead['id']) }}" class="vstack gap-3">
+      <form method="POST" enctype="multipart/form-data" action="{{ url_for('admin_lead_angebot_senden', lead_id=lead['id']) }}" class="vstack gap-3">
         {{ csrf_field()|safe }}
         <div><label class="form-label">Leistung / Angebotsumfang</label><textarea name="angebot_text" rows="5" class="form-control" required>{{ lead['angebot_text'] or lead['beschreibung'] }}</textarea></div>
         <div><label class="form-label">Preis</label><input type="text" name="angebot_preis" value="{{ lead['angebot_preis'] }}" class="form-control" placeholder="z. B. 1.250,00 € brutto" required></div>
         <div><label class="form-label">Hinweis / Vorbehalt</label><textarea name="angebot_notiz" rows="3" class="form-control">{{ lead['angebot_notiz'] }}</textarea></div>
         {% if lead['kunde_email'] %}<label class="form-check"><input class="form-check-input" type="checkbox" name="email_senden" value="1" checked><span class="form-check-label">Kunden zusätzlich per E-Mail über das Angebot informieren</span></label>{% endif %}
-        <button type="submit" class="btn btn-brand w-100">Angebot im Kundenportal bereitstellen</button>
+        <div><label for="angebot_pdf" class="form-label">Kostenvoranschlag als PDF (optional, bis 12 MB)</label><input id="angebot_pdf" type="file" name="angebot_pdf" accept="application/pdf,.pdf" class="form-control"></div>
+        <label class="form-check"><input class="form-check-input" type="checkbox" name="whatsapp_senden" value="1"><span class="form-check-label">Kunden per WhatsApp informieren</span></label>
+        <label class="form-check"><input class="form-check-input" type="checkbox" name="whatsapp_einwilligung" value="1"><span class="form-check-label">Der Kunde hat WhatsApp-Mitteilungen an seine hinterlegte Mobilnummer zugestimmt.</span></label>
+        <button type="submit" class="btn btn-brand w-100">Angebot bereitstellen und Kunde informieren</button>
       </form>
 
       <hr class="my-4">

@@ -410,6 +410,7 @@
     {% endif %}
 
     <footer style="color: #6f7a83; text-align: center; padding: 1.5rem; font-size: .85rem;">Gärtner GmbH Karosserie + Lack · Binauer Höhe 4, 74821 Mosbach · <a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
+  {% if kunden_auftragsdokumente %}<section class="card" style="padding:20px;margin:20px 0"><h2>Ihre Dokumente zum Auftrag</h2>{% for datei in kunden_auftragsdokumente %}<p><a href="{{ url_for('kunden_auftragsdokument',token=dokument_token,datei_id=datei['id']) }}">{{ datei['original_name'] }}</a></p>{% endfor %}</section>{% endif %}
   </main>
 
   <div id="bild-lightbox" hidden

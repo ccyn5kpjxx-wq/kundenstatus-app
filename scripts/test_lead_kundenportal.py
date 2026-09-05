@@ -60,6 +60,12 @@ def main():
     admin = portal.app.test_client()
     kunde = portal.app.test_client()
     checks = []
+    sent = []
+    portal.whatsapp_workshop_numbers = lambda: ['+4915100000000']
+    portal.whatsapp_bridge_config_errors = lambda: []
+    portal.post_whatsapp_payload = lambda payload: (sent.append(payload) or True, 'test-provider', '')
+    portal.send_lead_email = lambda *args: sent.append({'email': args[1]})
+
 
     lead_id = portal.create_lead(
         {
@@ -162,6 +168,8 @@ def main():
             "angebot_preis": "1.250,00 EUR brutto",
             "angebot_text": "Instandsetzung und Lackierung der Beifahrertuer",
             "angebot_notiz": "Vorbehaltlich Sichtpruefung vor Ort.",
+            "email_senden": "1", "whatsapp_senden": "1", "whatsapp_einwilligung": "1",
+            "angebot_pdf": (BytesIO(b"%PDF-1.4\nTest\n%%EOF"), "angebot.pdf"),
         },
         follow_redirects=False,
     )
@@ -246,6 +254,23 @@ def main():
         )
     )
 
+    docs = portal.list_dateien(auftrag['id'])
+    pdf = next(d for d in docs if d['original_name'] == 'angebot.pdf')
+    checks.append(check('KV nach Annahme erreichbar', kunde.get(f"/status/{token}/dokument/{pdf['id']}").status_code == 200))
+    checks.append(check('Fremder Dokumentzugriff gesperrt', kunde.get(f"/status/fremder-token/dokument/{pdf['id']}").status_code == 404))
+    db = portal.get_db()
+    notices = [dict(r) for r in db.execute('SELECT * FROM lead_notifications WHERE lead_id=?', (lead_id,)).fetchall()]
+    db.close()
+    checks.append(check('Kunden-E-Mail und WhatsApp vom simulierten Provider angenommen', sum(r['status']=='accepted' and r['event'].startswith('Angebot bereitgestellt') for r in notices) == 2))
+    checks.append(check('Werkstatt bekommt Annahme-Hinweis', any(r['event']=='Angebot angenommen' for r in notices)))
+    count = len(sent)
+    portal.notify_lead_workshop(lead_id, 'Angebot angenommen')
+    checks.append(check('Kein doppelter Annahmeversand', len(sent) == count))
+    portal.post_whatsapp_payload = lambda payload: (False, '', 'test failure')
+    portal.notify_lead_workshop(lead_id, 'Test Versandfehler')
+    db = portal.get_db()
+    checks.append(check('Versandfehler gespeichert', db.execute("SELECT status FROM lead_notifications WHERE event='Test Versandfehler'").fetchone()[0] == 'failed'))
+    db.close()
     print(f"Temporaere Testdaten: {TEMP_DIR}")
     return 0 if all(checks) else 1
 

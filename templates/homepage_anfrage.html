@@ -232,6 +232,7 @@
 
     <section class="wrap layout" id="kurzanfrage" aria-label="Anfrageformular">
       {% if gesendet %}
+      {% if kundenlink %}<p><a class="btn btn-primary" href="{{ kundenlink }}">Meine Anfrage und Angebote öffnen</a></p><p>Speichern Sie Ihren persönlichen Link. Falls Sie eine E-Mail-Adresse angegeben haben, versuchen wir, Ihnen den Link auch per E-Mail zu senden.</p>{% endif %}
         <div class="success" role="status">
           <div class="success-mark" aria-hidden="true">✓</div>
           <h2>Ihre Anfrage ist angekommen.</h2>

@@ -8560,6 +8560,8 @@ def init_db():
             BACKUP_DIR.mkdir(parents=True, exist_ok=True)
             DELETED_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     db = get_db()
+    db.execute("CREATE TABLE IF NOT EXISTS lead_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, fingerprint TEXT UNIQUE NOT NULL, lead_id INTEGER NOT NULL, event TEXT NOT NULL, channel TEXT NOT NULL, status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', erstellt_am TEXT NOT NULL)")
+
     db.executescript(
         """
         CREATE TABLE IF NOT EXISTS app_settings (
@@ -11919,6 +11921,97 @@ def lead_payload_from_form(form):
     }
 
 
+def customer_order_documents_allowed(auftrag_id):
+    db = get_db()
+    row = db.execute("SELECT id FROM leads WHERE auftrag_id=? AND website='auto-lackierzentrum'", (auftrag_id,)).fetchone()
+    db.close()
+    return bool(row)
+
+
+@app.context_processor
+def customer_order_documents_context():
+    if request.endpoint != "kunden_status":
+        return {}
+    token = (request.view_args or {}).get("token")
+    order = get_auftrag_by_kunden_status_token(token) if token else None
+    return {"kunden_auftragsdokumente": list_dateien(order["id"]) if order and customer_order_documents_allowed(order["id"]) else [], "dokument_token": token}
+
+
+@app.get("/status/<token>/dokument/<int:datei_id>")
+def kunden_auftragsdokument(token, datei_id):
+    order = get_auftrag_by_kunden_status_token(token)
+    document = get_datei(datei_id)
+    if not order or not customer_order_documents_allowed(order["id"]) or not document or int(document["auftrag_id"]) != int(order["id"]):
+        abort(404)
+    response = app.make_response(send_upload_file(document, as_attachment=False))
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
+
+
+def lead_notice(lead_id, event, channel, recipient, message):
+    """Persist attempts before provider calls; never silently resend uncertain attempts."""
+    lead = get_lead(lead_id)
+    if not lead or not recipient:
+        return False
+    key = hashlib.sha256(json.dumps([lead_id, event, channel, recipient]).encode()).hexdigest()
+    db = get_db()
+    cursor = db.execute("INSERT INTO lead_notifications (fingerprint, lead_id, event, channel, status, erstellt_am) VALUES (?, ?, ?, ?, 'sending', ?) ON CONFLICT (fingerprint) DO NOTHING", (key, lead_id, event, channel, now_str()))
+    db.commit()
+    inserted = cursor.rowcount
+    db.close()
+    if not inserted:
+        db = get_db()
+        cursor = db.execute("UPDATE lead_notifications SET status='sending', error='' WHERE fingerprint=? AND status='failed'", (key,))
+        db.commit()
+        claimed = cursor.rowcount
+        db.close()
+        if not claimed:
+            return False
+    error = ""
+    uncertain = False
+    try:
+        if channel == "E-Mail":
+            send_lead_email(lead, recipient, event + " · Gärtner Karosserie & Lack", message)
+            ok = True
+        else:
+            if whatsapp_bridge_config_errors():
+                raise ValueError("WhatsApp ist nicht vollständig eingerichtet.")
+            ok, provider_id, error = post_whatsapp_payload(build_whatsapp_template_payload(recipient, {"id": lead.get("auftrag_id") or 0, "fahrzeug": lead.get("fahrzeug")}, message, absender_label="Gärtner Karosserie & Lack"))
+    except ValueError:
+        ok, error = False, "Versand nicht möglich. Konfiguration prüfen."
+    except Exception:
+        uncertain = True
+        ok, error = False, "Versandausgang unklar. Anbieter prüfen, bevor erneut gesendet wird."
+        app.logger.warning("Lead notification failed: lead=%s channel=%s", lead_id, channel)
+    db = get_db()
+    db.execute("UPDATE lead_notifications SET status=?, error=? WHERE fingerprint=?", ("accepted" if ok else "unknown" if uncertain else "failed", clean_text(error)[:300], key))
+    db.commit()
+    db.close()
+    return ok
+
+
+def notify_lead_workshop(lead_id, title, event_key=""):
+    lead = get_lead(lead_id)
+    if not lead or lead["website"] != "auto-lackierzentrum":
+        return
+    path = f"/admin/auftrag/{lead['auftrag_id']}" if lead["auftrag_id"] else f"/admin/leads/{lead_id}"
+    message = f"{title}: {lead['kunde_name']} · {lead['fahrzeug']}. Bitte prüfen: {PORTAL_BASE_URL or get_public_base_url()}{path}"
+    for number in whatsapp_workshop_numbers():
+        lead_notice(lead_id, title + (" · " + str(event_key) if event_key else ""), "WhatsApp Werkstatt", number, message)
+
+
+@app.context_processor
+def lead_notification_context():
+    lead_id = (request.view_args or {}).get("lead_id") if request.endpoint == "admin_lead_detail" else None
+    rows = []
+    if lead_id and session.get("admin"):
+        db = get_db()
+        rows = [dict(r) for r in db.execute("SELECT event, channel, status, erstellt_am FROM lead_notifications WHERE lead_id=? ORDER BY erstellt_am DESC", (lead_id,)).fetchall()]
+        db.close()
+    return {"lead_notifications": rows}
+
+
 def create_lead(payload, attachments=None):
     jetzt = now_str()
     website = normalize_lead_website(payload.get("website"))
@@ -12087,6 +12180,9 @@ def add_lead_portal_event(lead_id, titel, nachricht="", quelle="system", kunden_
     )
     db.commit()
     db.close()
+    if quelle == "kunde" and titel != "Angebot angenommen":
+        events = list_lead_portal_events(lead_id, limit=1)
+        notify_lead_workshop(lead_id, titel, events[0]["id"] if events else now_str())
 
 
 def list_lead_portal_events(lead_id, customer_only=False, limit=50):
@@ -21492,7 +21588,11 @@ def add_benachrichtigung(auftrag_id, titel, nachricht, quelle="werkstatt"):
         (auftrag_id, clean_text(quelle) or "werkstatt", titel, nachricht, now_str()),
     )
     db.commit()
+    event_id = db.execute("SELECT MAX(id) FROM benachrichtigungen WHERE auftrag_id=?", (auftrag_id,)).fetchone()[0]
+    linked = db.execute("SELECT id FROM leads WHERE auftrag_id=?", (auftrag_id,)).fetchone()
     db.close()
+    if quelle == "kunde" and linked:
+        notify_lead_workshop(linked["id"], titel, event_id)
 
 
 def add_rahmenvertrag_anfrage(autohaus_id, nachricht=""):
@@ -43511,6 +43611,7 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             formdata=formdata,
             errors=errors or [],
             gesendet=bool(gesendet),
+            kundenlink=session.get("website_anfrage_kundenlink", "") if gesendet else "",
             anliegen_optionen=WEBSITE_ANLIEGEN,
             kurzanfrage_optionen=WEBSITE_KURZANFRAGEN,
             pflege_kategorien=WEBSITE_PFLEGE_KATEGORIEN,
@@ -43785,6 +43886,11 @@ def website_anfrage():
             },
             anliegen_label,
         )
+        lead = get_lead(lead_id)
+        session["website_anfrage_kundenlink"] = lead["kunden_status_url"]
+        if email:
+            lead_notice(lead_id, "Ihre Anfrage ist eingegangen", "E-Mail", email, "Ihre Anfrage ist angekommen. Hier können Sie den Stand verfolgen, Ihr Angebot prüfen und Unterlagen ergänzen: " + lead["kunden_status_url"])
+        notify_lead_workshop(lead_id, "Neue Anfrage")
         session["website_anfrage_gesendet"] = int(lead_id)
         return redirect(url_for("website_anfrage", gesendet=1))
 
@@ -43807,7 +43913,7 @@ def website_anfrage():
 
 @app.route("/healthz")
 def healthz():
-    return jsonify({"ok": True, "mode": "public" if PUBLIC_SITE_ONLY else "portal"})
+    return jsonify({"ok": True, "mode": "public" if PUBLIC_SITE_ONLY else "portal", "lead_portal_notifications": True})
 
 
 @app.route("/robots.txt")
@@ -44089,7 +44195,7 @@ def privat_status_zugang():
             return redirect(url_for("privat_status_zugang"))
         token = privat_status_token_from_input(request.form.get("zugangscode"))
         auftrag = get_auftrag_by_kunden_status_token(token) if token else None
-        if auftrag:
+        if auftrag or (token and get_lead_by_kunden_status_token(token)):
             return redirect(url_for("kunden_status", token=token))
         flash(
             "Der Zugang konnte nicht geöffnet werden. Bitte Code prüfen oder den persönlichen Link aus unserer Nachricht verwenden.",
@@ -49104,6 +49210,13 @@ def admin_lead_angebot_senden(lead_id):
     if not angebot_text or not angebot_preis:
         flash("Bitte Angebotsleistung und Preis eintragen.", "warning")
         return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#kundenportal")
+    pdf = request.files.get("angebot_pdf")
+    if pdf and pdf.filename:
+        files, errors = validate_schadenaufnahme_uploads([pdf])
+        if pathlib.Path(pdf.filename).suffix.lower() != ".pdf" or errors:
+            flash("Bitte einen gültigen PDF-Kostenvoranschlag bis 12 MB auswählen.", "warning")
+            return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#kundenportal")
+        save_lead_upload_file(lead_id, pdf, quelle="werkstatt_angebot")
     jetzt = now_str()
     db = get_db()
     db.execute(
@@ -49125,24 +49238,19 @@ def admin_lead_angebot_senden(lead_id):
         quelle="werkstatt",
     )
     lead = get_lead(lead_id)
-    mail_warning = ""
+    message = "Ihr Werkstatt-Angebot liegt vor. Sie können es prüfen, annehmen und einen Terminwunsch angeben: " + lead["kunden_status_url"]
+    revision = hashlib.sha256((angebot_text + angebot_preis + angebot_notiz).encode()).hexdigest()[:12]
     if strict_bool(request.form.get("email_senden")) and lead["kunde_email"]:
-        betreff = f"Ihr Angebot von Gärtner Karosserie & Lack · {lead['reference']}"
-        nachricht = (
-            f"Guten Tag {lead['kunde_name'] or ''},\n\n"
-            "Ihr persönliches Werkstatt-Angebot liegt jetzt zur Prüfung bereit. "
-            "Über den folgenden geschützten Link können Sie das Angebot ansehen, annehmen und "
-            f"Ihre Terminwünsche eintragen:\n{lead['kunden_status_url']}\n\n"
-            "Freundliche Grüße\nGärtner Karosserie & Lack"
-        )
-        try:
-            send_lead_email(lead, lead["kunde_email"], betreff, nachricht)
-        except (ValueError, RuntimeError) as exc:
-            mail_warning = clean_text(str(exc))
+        lead_notice(lead_id, "Angebot bereitgestellt " + revision, "E-Mail", lead["kunde_email"], message)
+    if strict_bool(request.form.get("whatsapp_senden")):
+        if strict_bool(request.form.get("whatsapp_einwilligung")) and is_probable_mobile_number(lead["kontakt_telefon"]):
+            add_lead_portal_event(lead_id, "WhatsApp-Freigabe dokumentiert", "Admin bestätigt Zustimmung für die hinterlegte Mobilnummer: " + normalize_whatsapp_number(lead["kontakt_telefon"]), quelle="werkstatt", kunden_sichtbar=False)
+            lead_notice(lead_id, "Angebot bereitgestellt " + revision, "WhatsApp Kunde", lead["kontakt_telefon"], message)
+        else:
+            flash("WhatsApp nicht gesendet: gültige Mobilnummer und bestätigte Zustimmung erforderlich.", "warning")
     schedule_change_backup("lead-angebot-bereitgestellt")
     flash("Angebot ist im Kundenportal bereitgestellt.", "success")
-    if mail_warning:
-        flash(f"Das Angebot ist gespeichert; E-Mail-Hinweis nicht gesendet: {mail_warning}", "warning")
+    flash("Den Versandstatus finden Sie unter Benachrichtigungen. Anbieterannahme ist keine Zustellbestätigung.", "info")
     return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#kundenportal")
 
 
@@ -50674,6 +50782,7 @@ def accept_lead_offer_from_portal(token, lead):
         quelle="kunde",
     )
     create_order_from_accepted_lead(lead, intake)
+    notify_lead_workshop(lead["id"], "Angebot angenommen")
     schedule_change_backup("lead-angebot-angenommen-auftrag")
     flash(
         "Vielen Dank. Ihr Auftrag ist jetzt angelegt; die Werkstatt bestätigt als Nächstes Ihre Terminwünsche.",
@@ -55796,6 +55905,7 @@ def api_fahrzeugeinkauf_import():
 
 
 init_db()
+
 start_hourly_backups()
 start_lexware_auto_sync()
 start_google_ads_auto_sync()
