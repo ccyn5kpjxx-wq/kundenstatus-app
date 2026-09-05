@@ -28788,7 +28788,10 @@ def sync_werkstatt_imap(limit=None):
                 client.uid("STORE", uid, "+FLAGS", r"(\Seen)")
         if delete_after_copy:
             client.expunge()
-        lead_summary = create_auto_leads_for_email_ids(summary.get("created_ids") or [])
+        # A mailbox import is not automatically a new sales enquiry.
+        lead_summary = {"created": 0, "skipped": 0, "lead_ids": [], "errors": []}
+        if env_flag("MAIL_IMAP_AUTO_LEADS", False):
+            lead_summary = create_auto_leads_for_email_ids(summary.get("created_ids") or [])
         summary["lead_created"] = int(lead_summary.get("created") or 0)
         summary["lead_skipped"] = int(lead_summary.get("skipped") or 0)
         summary["lead_ids"] = lead_summary.get("lead_ids") or []
