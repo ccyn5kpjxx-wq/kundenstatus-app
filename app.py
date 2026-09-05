@@ -38043,7 +38043,7 @@ def admin_lackier_statistik():
 def cockpit_aktionsuebersicht(auftraege):
     """Read-only next actions; no notifications, hidden completion flags or N+1 reads."""
     db = get_db()
-    leads = [dict(r) for r in db.execute("SELECT id, auftrag_id, kunde_name, fahrzeug, status, angebot_status, naechste_aktion FROM leads WHERE website='auto-lackierzentrum' AND status!='verloren' ORDER BY id DESC").fetchall()]
+    leads = [dict(r) for r in db.execute("SELECT id, auftrag_id, kunde_name, fahrzeug, status, angebot_status, naechste_aktion, naechster_kontakt_am FROM leads WHERE website='auto-lackierzentrum' AND status!='verloren' ORDER BY id DESC").fetchall()]
     unread = {int(r["auftrag_id"]) for r in db.execute("SELECT DISTINCT auftrag_id FROM benachrichtigungen WHERE quelle='kunde' AND COALESCE(gelesen,0)=0 AND titel IN ('Nachricht vom Kunden','Neue Unterlagen vom Kunden')").fetchall()}
     db.close()
     orders = {int(a['id']): a for a in auftraege if not a.get('archiviert')}
@@ -38069,8 +38069,13 @@ def cockpit_aktionsuebersicht(auftraege):
             if (wish or intake.get('kunden_angebot_angenommen_am')) and (not intake.get('kunden_wunsch_bestaetigt_am') or intake.get('kunden_wunsch_neuabstimmung_offen_am')):
                 add('termine', 'Termin abstimmen', 'Wunschtermin: '+str(wish) if wish else 'Angebot angenommen; Termin noch abstimmen.', '#kundenkommunikation')
         elif lead['status'] != 'gewonnen':
-            if lead['angebot_status'] == 'angebot_abgegeben':
+            if lead['angebot_status'] == 'angebot_abgegeben' or lead['status'] == 'angebot_offen':
                 waiting += 1
+            elif lead['status'] == 'besichtigung_geplant':
+                add('termine', 'Besichtigung vorbereiten', lead['naechste_aktion'] or ('Geplante Besichtigung: '+str(lead['naechster_kontakt_am'] or 'Termin im Vorgang prüfen')), '#kundenportal')
+            elif lead['status'] in ('unterlagen_fehlen', 'kontakt_offen'):
+                if not response_due:
+                    add('antworten', 'Nächsten Schritt prüfen', lead['naechste_aktion'] or LEAD_STATUS[lead['status']]['label'], '#kundenportal')
             elif not response_due:
                 add('angebote', 'Anfrage prüfen und Angebot erstellen', 'Leistung und Preis vorbereiten.', '#kundenportal')
     return {'groups':groups, 'waiting':waiting, 'total':sum(len(items) for items in groups.values())}

@@ -27,6 +27,15 @@ def main():
         result=p.cockpit_aktionsuebersicht(orders)
         assert [len(result['groups'][k]) for k in ('angebote','antworten','termine')]==[1,1,1],result
         assert result['waiting']==1 and result['total']==3
+        db=p.get_db()
+        db.execute("UPDATE leads SET status='angebot_offen', angebot_status='entwurf' WHERE id=?",(ids[0],));db.commit();db.close()
+        legacy=p.cockpit_aktionsuebersicht(orders)
+        assert not legacy['groups']['angebote'] and legacy['waiting']==2
+        db=p.get_db();db.execute("UPDATE leads SET status='besichtigung_geplant', naechste_aktion='Besichtigung am 7. vorbereiten' WHERE id=?",(ids[0],));db.commit();db.close()
+        assert len(p.cockpit_aktionsuebersicht(orders)['groups']['termine'])==2
+        db=p.get_db();db.execute("UPDATE leads SET status='unterlagen_fehlen' WHERE id=?",(ids[0],));db.commit();db.close()
+        result=p.cockpit_aktionsuebersicht(orders)
+        assert not result['groups']['angebote'] and len(result['groups']['antworten'])==2
         order=next(a for a in orders if a['id']==p.get_lead(ids[3])['auftrag_id'])
         order['schaden_aufnahme']['kunden_wunsch_bestaetigt_am']='21.09.2026'
         assert len(p.cockpit_aktionsuebersicht(orders)['groups']['termine'])==0
