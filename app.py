@@ -43913,7 +43913,7 @@ def website_anfrage():
 
 @app.route("/healthz")
 def healthz():
-    return jsonify({"ok": True, "mode": "public" if PUBLIC_SITE_ONLY else "portal", "lead_portal_notifications": True})
+    return jsonify({"ok": True, "mode": "public" if PUBLIC_SITE_ONLY else "portal", "lead_portal_notifications": True, "lead_accept_notice_version": 2})
 
 
 @app.route("/robots.txt")
@@ -50782,7 +50782,6 @@ def accept_lead_offer_from_portal(token, lead):
         quelle="kunde",
     )
     create_order_from_accepted_lead(lead, intake)
-    notify_lead_workshop(lead["id"], "Angebot angenommen")
     schedule_change_backup("lead-angebot-angenommen-auftrag")
     flash(
         "Vielen Dank. Ihr Auftrag ist jetzt angelegt; die Werkstatt bestätigt als Nächstes Ihre Terminwünsche.",
