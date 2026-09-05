@@ -388,6 +388,7 @@
     }
   </style>
   {% block extra_css %}{% endblock %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin-sidebar.css') }}">
 </head>
 <body>
 <a class="skip-link" href="#hauptinhalt">Direkt zum Inhalt</a>
@@ -414,8 +415,12 @@
 {% set current_endpoint = request.endpoint or '' %}
 {% macro nav_class(endpoints) -%}nav-link{% if current_endpoint in endpoints %} is-active{% endif %}{%- endmacro %}
 {% macro nav_current(endpoints) -%}{% if current_endpoint in endpoints %} aria-current="page"{% endif %}{%- endmacro %}
-<nav class="navbar navbar-expand-lg" aria-label="Hauptnavigation">
+{% if session.get('admin') %}
+<button type="button" class="sidebar-open" aria-controls="werkstattNavigation" aria-expanded="true">☰ <span>Menü</span></button>
+{% endif %}
+<nav id="werkstattNavigation" class="navbar navbar-expand-lg{% if session.get('admin') %} admin-sidebar{% endif %}" aria-label="Hauptnavigation">
   <div class="container py-2">
+    {% if session.get('admin') %}<button type="button" class="sidebar-close" aria-label="Menü einklappen">‹ <span>Menü einklappen</span></button>{% endif %}
     <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('betriebs_cockpit') }}" aria-label="Werkstatt-Cockpit Startseite">
       <img src="{{ url_for('static', filename='logo.png') }}" alt="Gärtner Karosserie &amp; Lack">
       <span>Werkstatt-Cockpit</span>
@@ -448,6 +453,7 @@
   </div>
 </nav>
 {% endblock %}
+<script src="{{ url_for('static', filename='admin-sidebar.js') }}" defer></script>
 
 <main class="hero-shell" id="hauptinhalt" tabindex="-1">
   <div class="container">
