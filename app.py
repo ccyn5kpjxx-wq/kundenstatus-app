@@ -38040,6 +38040,42 @@ def admin_lackier_statistik():
     return jsonify(build_lackier_statistik(alle_auftraege))
 
 
+def cockpit_aktionsuebersicht(auftraege):
+    """Read-only next actions; no notifications, hidden completion flags or N+1 reads."""
+    db = get_db()
+    leads = [dict(r) for r in db.execute("SELECT id, auftrag_id, kunde_name, fahrzeug, status, angebot_status, naechste_aktion FROM leads WHERE website='auto-lackierzentrum' AND status!='verloren' ORDER BY id DESC").fetchall()]
+    unread = {int(r["auftrag_id"]) for r in db.execute("SELECT DISTINCT auftrag_id FROM benachrichtigungen WHERE quelle='kunde' AND COALESCE(gelesen,0)=0 AND titel IN ('Nachricht vom Kunden','Neue Unterlagen vom Kunden')").fetchall()}
+    db.close()
+    orders = {int(a['id']): a for a in auftraege if not a.get('archiviert')}
+    groups = {key: [] for key in ('angebote', 'antworten', 'termine')}
+    waiting = 0
+    for lead in leads:
+        order_id = int(lead.get('auftrag_id') or 0)
+        order = orders.get(order_id)
+        if order_id and not order:
+            continue
+        label = lead['kunde_name'] or 'Kundenanfrage'
+        vehicle = lead['fahrzeug'] or 'Fahrzeug noch offen'
+        link = url_for('auftrag_detail', auftrag_id=order_id) if order else url_for('admin_lead_detail', lead_id=lead['id'])
+        def add(group, title, detail, anchor):
+            groups[group].append({'lead_id':lead['id'], 'title':title, 'name':label, 'vehicle':vehicle, 'detail':detail, 'url':link+anchor})
+        action = clean_text(lead['naechste_aktion']).lower()
+        response_due = order_id in unread if order else ('kundennachricht' in action or 'kundenunterlage' in action)
+        if response_due:
+            add('antworten', 'Kundenrückmeldung prüfen', 'Neue Nachricht oder Unterlagen warten auf deine Prüfung.', '#kundenkommunikation' if order else '#kundenportal')
+        if order:
+            intake = order.get('schaden_aufnahme') or parse_schadenaufnahme_json(order.get('schaden_aufnahme_json'))
+            wish = intake.get('kunden_wunsch_annahme_datum') or intake.get('kunden_wunsch_abholung_datum')
+            if (wish or intake.get('kunden_angebot_angenommen_am')) and (not intake.get('kunden_wunsch_bestaetigt_am') or intake.get('kunden_wunsch_neuabstimmung_offen_am')):
+                add('termine', 'Termin abstimmen', 'Wunschtermin: '+str(wish) if wish else 'Angebot angenommen; Termin noch abstimmen.', '#kundenkommunikation')
+        elif lead['status'] != 'gewonnen':
+            if lead['angebot_status'] == 'angebot_abgegeben':
+                waiting += 1
+            elif not response_due:
+                add('angebote', 'Anfrage prüfen und Angebot erstellen', 'Leistung und Preis vorbereiten.', '#kundenportal')
+    return {'groups':groups, 'waiting':waiting, 'total':sum(len(items) for items in groups.values())}
+
+
 @app.route("/admin/start")
 @app.route("/admin/cockpit")
 @admin_required
@@ -38071,6 +38107,7 @@ def betriebs_cockpit():
     return render_template(
         "cockpit.html",
         cockpit=cockpit_data,
+        aktionsuebersicht=cockpit_aktionsuebersicht(auftraege),
         start_inbox=start_inbox_daten(
             cockpit_data["postfach_items"],
             neue_emails,
