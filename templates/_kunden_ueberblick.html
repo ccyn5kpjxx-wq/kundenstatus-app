@@ -28,7 +28,7 @@
       {% if confirmed %}<strong>Termin bestätigt</strong><p>{{ auftrag['annahme_datum'] or 'Bitte Termindetails beachten' }}{% if auftrag['annahme_uhrzeit'] %} · {{ auftrag['annahme_uhrzeit'] }} Uhr{% endif %}</p>
       {% elif wish_date %}<strong>Terminwunsch – Bestätigung folgt</strong><p>{{ wish_date }}</p><small>Bitte warten Sie auf die Bestätigung der Werkstatt.</small>
       {% elif not customer_is_lead and kunden_termine.next %}<strong>{{ kunden_termine.next.label }}</strong><p>{{ kunden_termine.next.datum_zeit_text }}</p><small>Bei Änderungen stimmen Sie sich bitte mit uns ab.</small>
-      {% else %}<strong>Noch kein Termin vereinbart</strong><p>Wir stimmen den Termin mit Ihnen ab.</p>{% endif %}
+      {% else %}<strong>Noch kein Termin im Portal hinterlegt</strong><p>Bei Fragen zu Ihrer Terminabsprache melden Sie sich gerne bei uns.</p>{% endif %}
     </div>
   </div>
   <div class="customer-next" aria-label="Ihr nächster Schritt">
