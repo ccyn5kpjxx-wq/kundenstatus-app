@@ -41,49 +41,17 @@
       .qr-box img { width:92px; height:92px; }
     }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='kundenportal.css') }}">
 </head>
 <body>
   <main class="shell">
     {% set meldungen = get_flashed_messages(with_categories=true) %}
     {% set angebot_offen = lead['angebot_status'] == 'angebot_abgegeben' %}
 
-    <section class="panel mb-4">
-      <div class="hero-grid">
-        <div>
-          <div class="brand-row">
-            <img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack" class="brand-logo">
-            <div><span class="badge text-bg-dark mb-1">Ihre Anfrage</span><div class="small text-muted">{{ werkstatt_kontakt.name }}</div></div>
-          </div>
-          <h1 class="h2 mb-2">{{ lead['fahrzeug'] or 'Ihre Fahrzeuganfrage' }}</h1>
-          <div class="meta-line">{% if lead['kennzeichen'] %}{{ lead['kennzeichen'] }}{% endif %}{% if lead['kunde_name'] %} · {{ lead['kunde_name'] }}{% endif %}</div>
-          <div class="mt-3"><span class="badge text-bg-{{ 'primary' if angebot_offen else 'warning' }} fs-6">{{ 'Angebot liegt vor' if angebot_offen else 'Anfrage wird geprüft' }}</span></div>
-          <div class="contact-card mt-3">
-            <div class="fw-bold">{{ werkstatt_kontakt.name }}</div>
-            <div class="text-muted small">{{ werkstatt_kontakt.adresse }}</div>
-            <div class="d-flex gap-2 flex-wrap mt-3">
-              <a class="btn btn-dark btn-sm" href="{{ werkstatt_kontakt.telefon_url }}">Anrufen</a>
-              <a class="btn btn-success btn-sm" href="{{ werkstatt_kontakt.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>
-            </div>
-          </div>
-        </div>
-        <div class="qr-box">
-          <img src="{{ kunden_status_qr_url }}" alt="QR-Code zum Kundenportal">
-          <div><div class="small fw-semibold">Dieser Link bleibt gültig</div><div class="small text-muted">Anfrage, Angebot, Termine und später Reparaturstatus.</div><div class="status-link mt-2">{{ kunden_status_link }}</div></div>
-        </div>
-      </div>
-      {% if meldungen %}<div class="mt-3">{% for category, message in meldungen %}<div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else ('info' if category == 'info' else 'success')) }} mb-2">{{ message }}</div>{% endfor %}</div>{% endif %}
-    </section>
+    {% set customer_is_lead = true %}
+    {% include '_kunden_ueberblick.html' %}
 
-    <section class="panel mb-4">
-      <div class="d-flex justify-content-between gap-2 flex-wrap mb-3"><div><h2 class="h4 mb-1">Von der Anfrage bis zur Reparatur</h2><div class="text-muted">Noch ist kein Auftrag angelegt. Das geschieht automatisch, sobald Sie das Angebot annehmen.</div></div></div>
-      <div class="timeline">
-        <div class="timeline-step is-done"><div class="timeline-dot">✓</div><div class="timeline-card"><strong>Anfrage aufgenommen</strong><div class="small text-muted">Ihre Angaben sind sicher bei der Werkstatt eingegangen.</div></div></div>
-        <div class="timeline-step {{ 'is-done' if angebot_offen else 'is-active' }}"><div class="timeline-dot">{{ '✓' if angebot_offen else '2' }}</div><div class="timeline-card"><strong>Prüfung und Rückfragen</strong><div class="small text-muted">Bilder, Unterlagen, Nachrichten und ein erster Terminwunsch können hier ergänzt werden.</div></div></div>
-        <div class="timeline-step {{ 'is-active' if angebot_offen else '' }}"><div class="timeline-dot">3</div><div class="timeline-card"><strong>Angebot prüfen und annehmen</strong><div class="small text-muted">Mit der Annahme geben Sie auch Bring-/Abholwunsch und Mobilitätsbedarf an.</div></div></div>
-        <div class="timeline-step"><div class="timeline-dot">4</div><div class="timeline-card"><strong>Auftrag und Werkstatttafel</strong><div class="small text-muted">Erst nach Ihrer Annahme wird der Auftrag angelegt und in die Werkstattplanung übernommen.</div></div></div>
-        <div class="timeline-step"><div class="timeline-dot">5</div><div class="timeline-card"><strong>Reparaturstatus verfolgen</strong><div class="small text-muted">Danach zeigt derselbe Link den Fortschritt bis zur Fahrzeugrückgabe.</div></div></div>
-      </div>
-    </section>
+
 
     {% if angebot_offen %}
     <section class="panel mb-4" id="angebot">
@@ -147,6 +115,18 @@
       </form>
       {% if portal_events %}<div class="activity mt-4">{% for event in portal_events %}<div class="activity-row {{ 'is-customer' if event['quelle'] == 'kunde' else '' }}"><div class="d-flex justify-content-between gap-2 flex-wrap"><strong>{{ event['titel'] }}</strong><span class="small text-muted">{{ event['erstellt_am'] }}</span></div>{% if event['nachricht'] %}<div class="small mt-1" style="white-space:pre-wrap;">{{ event['nachricht'] }}</div>{% endif %}</div>{% endfor %}</div>{% endif %}
     </section>
+
+<details class="panel mb-4"><summary>So geht es weiter</summary>    <section class="panel mb-4">
+      <div class="d-flex justify-content-between gap-2 flex-wrap mb-3"><div><h2 class="h4 mb-1">Von der Anfrage bis zur Reparatur</h2><div class="text-muted">Noch ist kein Auftrag angelegt. Das geschieht automatisch, sobald Sie das Angebot annehmen.</div></div></div>
+      <div class="timeline">
+        <div class="timeline-step is-done"><div class="timeline-dot">✓</div><div class="timeline-card"><strong>Anfrage aufgenommen</strong><div class="small text-muted">Ihre Angaben sind sicher bei der Werkstatt eingegangen.</div></div></div>
+        <div class="timeline-step {{ 'is-done' if angebot_offen else 'is-active' }}"><div class="timeline-dot">{{ '✓' if angebot_offen else '2' }}</div><div class="timeline-card"><strong>Prüfung und Rückfragen</strong><div class="small text-muted">Bilder, Unterlagen, Nachrichten und ein erster Terminwunsch können hier ergänzt werden.</div></div></div>
+        <div class="timeline-step {{ 'is-active' if angebot_offen else '' }}"><div class="timeline-dot">3</div><div class="timeline-card"><strong>Angebot prüfen und annehmen</strong><div class="small text-muted">Mit der Annahme geben Sie auch Bring-/Abholwunsch und Mobilitätsbedarf an.</div></div></div>
+        <div class="timeline-step"><div class="timeline-dot">4</div><div class="timeline-card"><strong>Auftrag und Werkstatttafel</strong><div class="small text-muted">Erst nach Ihrer Annahme wird der Auftrag angelegt und in die Werkstattplanung übernommen.</div></div></div>
+        <div class="timeline-step"><div class="timeline-dot">5</div><div class="timeline-card"><strong>Reparaturstatus verfolgen</strong><div class="small text-muted">Danach zeigt derselbe Link den Fortschritt bis zur Fahrzeugrückgabe.</div></div></div>
+      </div>
+    </section></details>
+{% include "_kunden_kontakt.html" %}
   </main>
 </body>
 </html>

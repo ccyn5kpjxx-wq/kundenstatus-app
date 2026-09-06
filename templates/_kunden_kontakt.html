@@ -1,0 +1,6 @@
+<section class="panel mb-4" id="werkstatt-kontakt">
+<h2 class="h4">Wir sind für Sie da</h2><strong>{{ werkstatt_kontakt.name }}</strong><p>{{ werkstatt_kontakt.adresse }}</p>
+<a href="{{ werkstatt_kontakt.telefon_url }}">{{ werkstatt_kontakt.telefon }}</a> · <a href="{{ werkstatt_kontakt.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp öffnen</a>
+{% if werkstatt_kontakt.oeffnungszeiten %}<p class="small mt-2">{{ werkstatt_kontakt.oeffnungszeiten }}</p>{% endif %}
+<details class="mt-3"><summary>Persönlichen Link und QR-Code anzeigen</summary><p class="small mt-2">Bewahren Sie diesen Link für spätere Besuche auf. Er ermöglicht den Zugriff auf Ihre Angaben – teilen Sie ihn nur mit Personen, denen Sie diesen Zugriff geben möchten.</p><img src="{{ kunden_status_qr_url }}" width="118" height="118" alt="QR-Code zum Kundenportal"><div class="status-link"><a href="{{ kunden_status_link }}">Ihren persönlichen Kundenlink öffnen</a></div></details>
+</section>

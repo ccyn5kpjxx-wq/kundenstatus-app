@@ -61,6 +61,7 @@
       .schedule-grid { grid-template-columns:1fr; }
     }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='kundenportal.css') }}">
 </head>
 <body>
   <main class="shell">
@@ -69,92 +70,11 @@
     {% set ist_anfrage = auftrag['quelle'] == 'lead' %}
     {# Flash-Meldungen EINMAL abholen (get_flashed_messages konsumiert beim ersten Aufruf) und mehrfach rendern #}
     {% set meldungen = get_flashed_messages(with_categories=true) %}
-    <div class="panel mb-4">
-      <div class="hero-grid">
-        <div>
-          <div class="brand-row">
-            <img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack" class="brand-logo">
-            <div>
-              <div class="badge text-bg-dark mb-2">{{ 'Ihre Anfrage' if ist_anfrage and angebot_status != 'angenommen' else 'Fahrzeugstatus' }}</div>
-              <div class="small text-muted">{{ werkstatt_kontakt.name }}</div>
-            </div>
-          </div>
-          <h1 class="mb-2">{{ auftrag['fahrzeug'] }}</h1>
-          <div class="meta-line">
-            {% if auftrag['kennzeichen'] %}{{ auftrag['kennzeichen'] }}{% endif %}
-            {% if auftrag['kunde_name'] %} · {{ auftrag['kunde_name'] }}{% endif %}
-          </div>
-          <div class="d-flex gap-2 flex-wrap mt-3">
-            <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }} fs-6">{{ auftrag['status_meta']['label'] }}</span>
-            {% if auftrag['versicherung_id'] %}
-            <span class="badge text-bg-{{ auftrag['versicherung_freigabe_meta']['farbe'] }} fs-6">{{ auftrag['versicherung_freigabe_meta']['label'] }}</span>
-            {% endif %}
-            {% if auftrag['schaden_station_label'] %}
-            <span class="badge text-bg-light border text-dark fs-6">{{ auftrag['schaden_station_label'] }}</span>
-            {% endif %}
-          </div>
-          <div class="contact-card mt-3">
-            <div class="fw-bold">{{ werkstatt_kontakt.name }}</div>
-            <div class="text-muted small">{{ werkstatt_kontakt.adresse }}</div>
-            <div class="small mt-1">Bei Fragen gerne anrufen: <a href="{{ werkstatt_kontakt.telefon_url }}">{{ werkstatt_kontakt.telefon }}</a></div>
-            {% if werkstatt_kontakt.oeffnungszeiten %}<div class="text-muted small mt-1">Öffnungszeiten: {{ werkstatt_kontakt.oeffnungszeiten }}</div>{% endif %}
-            <div class="quick-actions mt-3">
-              <a class="btn btn-dark btn-sm" href="{{ werkstatt_kontakt.telefon_url }}">Anrufen</a>
-              <a class="btn btn-success btn-sm" href="{{ werkstatt_kontakt.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>
-            </div>
-          </div>
-        </div>
-        <div class="qr-box">
-          <img src="{{ kunden_status_qr_url }}" alt="Status-QR-Code">
-          <div>
-            <div class="small fw-semibold">QR-Code oder Link</div>
-            <div class="small text-muted">Anfrage, Angebot, Termine und Status direkt wieder öffnen.</div>
-            <div class="status-link mt-2">{{ kunden_status_link }}</div>
-          </div>
-        </div>
-      </div>
-
-      {% if meldungen %}
-        <div class="mt-3">
-          {% for category, message in meldungen %}
-          <div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else 'success') }} mb-2">{{ message }}</div>
-          {% endfor %}
-        </div>
-      {% endif %}
-    </div>
+    {% set customer_is_lead = false %}
+    {% include '_kunden_ueberblick.html' %}
 
     {% if ist_anfrage %}
-    <div class="panel mb-4" id="ablauf">
-      <div class="section-head">
-        <div>
-          <h2 class="h4 mb-1">Von der Anfrage bis zur Reparatur</h2>
-          <div class="text-muted">Dieser eine Link bleibt für den gesamten Vorgang gültig.</div>
-        </div>
-        {% if angebot_status == 'angenommen' %}<span class="badge text-bg-success">Auftrag bestätigt</span>{% elif angebot_status == 'angebot_abgegeben' %}<span class="badge text-bg-primary">Angebot liegt vor</span>{% else %}<span class="badge text-bg-warning">Anfrage wird geprüft</span>{% endif %}
-      </div>
-      <div class="timeline">
-        <div class="timeline-step is-done">
-          <div class="timeline-dot">&#10003;</div>
-          <div class="timeline-card"><div class="fw-bold">Anfrage aufgenommen</div><div class="text-muted small">Ihre Fahrzeug- und Kontaktdaten sind sicher bei uns angelegt.</div></div>
-        </div>
-        <div class="timeline-step is-{{ 'done' if angebot_status in ['angebot_abgegeben', 'angenommen'] else 'active' }}">
-          <div class="timeline-dot">{% if angebot_status in ['angebot_abgegeben', 'angenommen'] %}&#10003;{% else %}2{% endif %}</div>
-          <div class="timeline-card"><div class="fw-bold">Unterlagen und Terminwunsch</div><div class="text-muted small">Bilder und Unterlagen können jederzeit über diesen Link ergänzt werden.</div></div>
-        </div>
-        <div class="timeline-step is-{{ 'done' if angebot_status == 'angenommen' else ('active' if angebot_status == 'angebot_abgegeben' else 'waiting') }}">
-          <div class="timeline-dot">{% if angebot_status == 'angenommen' %}&#10003;{% else %}3{% endif %}</div>
-          <div class="timeline-card"><div class="fw-bold">Angebot prüfen</div><div class="text-muted small">Sobald die Werkstatt das Angebot bereitstellt, können Sie es hier prüfen und annehmen.</div></div>
-        </div>
-        <div class="timeline-step is-{{ 'done' if intake['kunden_wunsch_bestaetigt_am'] else ('active' if angebot_status == 'angenommen' else 'waiting') }}">
-          <div class="timeline-dot">{% if intake['kunden_wunsch_bestaetigt_am'] %}&#10003;{% else %}4{% endif %}</div>
-          <div class="timeline-card"><div class="fw-bold">Termin und Mobilität bestätigen</div><div class="text-muted small">Bring-/Abholwunsch, Hol- und Bringservice sowie Ersatzfahrzeug werden verbindlich abgestimmt.</div></div>
-        </div>
-        <div class="timeline-step is-{{ 'done' if auftrag['status']|int >= 5 else ('active' if angebot_status == 'angenommen' and auftrag['status']|int >= 2 else 'waiting') }}">
-          <div class="timeline-dot">{% if auftrag['status']|int >= 5 %}&#10003;{% else %}5{% endif %}</div>
-          <div class="timeline-card"><div class="fw-bold">Reparaturstatus verfolgen</div><div class="text-muted small">Nach der Einplanung sehen Sie hier den Fortschritt bis zur Rückgabe.</div></div>
-        </div>
-      </div>
-    </div>
+
 
     {% if angebot_status == 'angebot_abgegeben' %}
     <div class="panel mb-4" id="angebot">
@@ -411,6 +331,39 @@
 
     <footer style="color: #6f7a83; text-align: center; padding: 1.5rem; font-size: .85rem;">Gärtner GmbH Karosserie + Lack · Binauer Höhe 4, 74821 Mosbach · <a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
   {% if kunden_auftragsdokumente %}<section class="card" style="padding:20px;margin:20px 0"><h2>Ihre Dokumente zum Auftrag</h2>{% for datei in kunden_auftragsdokumente %}<p><a href="{{ url_for('kunden_auftragsdokument',token=dokument_token,datei_id=datei['id']) }}">{{ datei['original_name'] }}</a></p>{% endfor %}</section>{% endif %}
+
+<details class="panel mb-4"><summary>So geht es weiter</summary>{% if ist_anfrage %}    <div class="panel mb-4" id="ablauf">
+      <div class="section-head">
+        <div>
+          <h2 class="h4 mb-1">Von der Anfrage bis zur Reparatur</h2>
+          <div class="text-muted">Dieser eine Link bleibt für den gesamten Vorgang gültig.</div>
+        </div>
+        {% if angebot_status == 'angenommen' %}<span class="badge text-bg-success">Auftrag bestätigt</span>{% elif angebot_status == 'angebot_abgegeben' %}<span class="badge text-bg-primary">Angebot liegt vor</span>{% else %}<span class="badge text-bg-warning">Anfrage wird geprüft</span>{% endif %}
+      </div>
+      <div class="timeline">
+        <div class="timeline-step is-done">
+          <div class="timeline-dot">&#10003;</div>
+          <div class="timeline-card"><div class="fw-bold">Anfrage aufgenommen</div><div class="text-muted small">Ihre Fahrzeug- und Kontaktdaten sind sicher bei uns angelegt.</div></div>
+        </div>
+        <div class="timeline-step is-{{ 'done' if angebot_status in ['angebot_abgegeben', 'angenommen'] else 'active' }}">
+          <div class="timeline-dot">{% if angebot_status in ['angebot_abgegeben', 'angenommen'] %}&#10003;{% else %}2{% endif %}</div>
+          <div class="timeline-card"><div class="fw-bold">Unterlagen und Terminwunsch</div><div class="text-muted small">Bilder und Unterlagen können jederzeit über diesen Link ergänzt werden.</div></div>
+        </div>
+        <div class="timeline-step is-{{ 'done' if angebot_status == 'angenommen' else ('active' if angebot_status == 'angebot_abgegeben' else 'waiting') }}">
+          <div class="timeline-dot">{% if angebot_status == 'angenommen' %}&#10003;{% else %}3{% endif %}</div>
+          <div class="timeline-card"><div class="fw-bold">Angebot prüfen</div><div class="text-muted small">Sobald die Werkstatt das Angebot bereitstellt, können Sie es hier prüfen und annehmen.</div></div>
+        </div>
+        <div class="timeline-step is-{{ 'done' if intake['kunden_wunsch_bestaetigt_am'] else ('active' if angebot_status == 'angenommen' else 'waiting') }}">
+          <div class="timeline-dot">{% if intake['kunden_wunsch_bestaetigt_am'] %}&#10003;{% else %}4{% endif %}</div>
+          <div class="timeline-card"><div class="fw-bold">Termin und Mobilität bestätigen</div><div class="text-muted small">Bring-/Abholwunsch, Hol- und Bringservice sowie Ersatzfahrzeug werden verbindlich abgestimmt.</div></div>
+        </div>
+        <div class="timeline-step is-{{ 'done' if auftrag['status']|int >= 5 else ('active' if angebot_status == 'angenommen' and auftrag['status']|int >= 2 else 'waiting') }}">
+          <div class="timeline-dot">{% if auftrag['status']|int >= 5 %}&#10003;{% else %}5{% endif %}</div>
+          <div class="timeline-card"><div class="fw-bold">Reparaturstatus verfolgen</div><div class="text-muted small">Nach der Einplanung sehen Sie hier den Fortschritt bis zur Rückgabe.</div></div>
+        </div>
+      </div>
+    </div>{% endif %}</details>
+{% include "_kunden_kontakt.html" %}
   </main>
 
   <div id="bild-lightbox" hidden

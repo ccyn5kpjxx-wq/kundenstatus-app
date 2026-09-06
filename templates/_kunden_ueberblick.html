@@ -1,0 +1,45 @@
+{% if customer_is_lead %}
+  {% set item = lead %}
+  {% set wishes = lead['portal_data'] %}
+  {% set offer_ready = angebot_offen %}
+  {% set confirmed = false %}
+  {% set wish_date = kunden_wunsch_annahme_iso %}
+  {% set state_title = 'Ihr Angebot ist da' if offer_ready else 'Ihre Anfrage wird geprüft' %}
+{% else %}
+  {% set item = auftrag %}
+  {% set wishes = intake %}
+  {% set offer_ready = ist_anfrage and angebot_status == 'angebot_abgegeben' %}
+  {% set confirmed = intake['kunden_wunsch_bestaetigt_am'] %}
+  {% set wish_date = intake['kunden_wunsch_annahme_datum'] %}
+  {% set state_title = 'Ihr Angebot ist da' if offer_ready else ('Angebot angenommen' if angebot_status == 'angenommen' and auftrag['status']|int < 2 else auftrag['status_meta']['label']) %}
+{% endif %}
+<section class="panel customer-overview mb-4" aria-labelledby="customer-title">
+  <div class="brand-row"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack" class="brand-logo"><div><div class="small">Ihr persönliches Kundenportal</div><strong>{{ werkstatt_kontakt.name }}</strong></div></div>
+  <h1 id="customer-title" class="h3">{{ item['fahrzeug'] or 'Ihre Fahrzeuganfrage' }}</h1>
+  <p class="meta-line">{{ item['kunde_name'] or '' }}{% if item['kennzeichen'] %} · {{ item['kennzeichen'] }}{% endif %}</p>
+  <div class="customer-summary">
+    <div><div class="customer-label">Aktueller Stand</div><h2 class="h4">{{ state_title }}</h2>
+      {% if offer_ready %}<p>Prüfen Sie den Leistungsumfang und den angegebenen Preis, bevor Sie entscheiden.</p>
+      {% elif customer_is_lead %}<p>Ihre Anfrage ist bei uns. Wir prüfen Ihre Angaben und melden uns bei Rückfragen.</p>
+      {% elif angebot_status == 'angenommen' and not confirmed and auftrag['status']|int < 2 %}<p>Ihr Auftrag ist angelegt. Die Terminabstimmung folgt separat.</p>
+      {% else %}<p>Hier sehen Sie den bei der Werkstatt hinterlegten Fortschritt Ihres Fahrzeugs.</p>{% endif %}
+    </div>
+    <div class="customer-date"><div class="customer-label">Ihr Termin</div>
+      {% if confirmed %}<strong>Termin bestätigt</strong><p>{{ auftrag['annahme_datum'] or 'Bitte Termindetails beachten' }}{% if auftrag['annahme_uhrzeit'] %} · {{ auftrag['annahme_uhrzeit'] }} Uhr{% endif %}</p>
+      {% elif wish_date %}<strong>Terminwunsch – Bestätigung folgt</strong><p>{{ wish_date }}</p><small>Bitte warten Sie auf die Bestätigung der Werkstatt.</small>
+      {% elif not customer_is_lead and kunden_termine.next %}<strong>{{ kunden_termine.next.label }}</strong><p>{{ kunden_termine.next.datum_zeit_text }}</p><small>Bei Änderungen stimmen Sie sich bitte mit uns ab.</small>
+      {% else %}<strong>Noch kein Termin vereinbart</strong><p>Wir stimmen den Termin mit Ihnen ab.</p>{% endif %}
+    </div>
+  </div>
+  <div class="customer-next" aria-label="Ihr nächster Schritt">
+    <div><div class="customer-label">Ihr nächster Schritt</div>
+      {% if offer_ready %}<strong>Ihr Angebot in Ruhe ansehen</strong>
+      {% elif customer_is_lead and lead['status'] == 'unterlagen_fehlen' %}<strong>Bitte ergänzen Sie die angefragten Unterlagen.</strong>
+      {% else %}<strong>Sie müssen aktuell nichts bestätigen.</strong><div class="small">Bei Fragen können Sie uns unten eine Nachricht schreiben.</div>{% endif %}
+    </div>
+    {% if offer_ready %}<a class="btn customer-primary" href="#angebot">Angebot ansehen</a>
+    {% elif customer_is_lead and lead['status'] == 'unterlagen_fehlen' %}<a class="btn customer-primary" href="#unterlagen">Unterlagen ergänzen</a>{% endif %}
+  </div>
+  {% if meldungen %}<div class="mt-3" role="status">{% for category, message in meldungen %}<div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else 'info') }}">{{ message }}</div>{% endfor %}</div>{% endif %}
+</section>
+<nav class="customer-links mb-4" aria-label="Bereiche im Kundenportal"><a href="{{ '#terminwunsch' if customer_is_lead else '#termine' }}">Termine</a><a href="#unterlagen">Unterlagen</a><a href="#nachrichten">Nachrichten</a><a href="#werkstatt-kontakt">Kontakt</a></nav>
