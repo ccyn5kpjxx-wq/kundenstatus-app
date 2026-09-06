@@ -46,6 +46,8 @@ import wave
 import zipfile
 import xml.etree.ElementTree as ET
 
+from backup_storage import BackupStorage
+
 try:
     import psycopg
 except Exception:
@@ -421,8 +423,14 @@ DELETED_UPLOAD_DIR = pathlib.Path(
 )
 AUTO_BACKUP_ENABLED = env_flag("AUTO_BACKUP_ENABLED", True)
 AUTO_BACKUP_INTERVAL_SECONDS = max(60, env_int("AUTO_BACKUP_INTERVAL_SECONDS", 3600))
-AUTO_BACKUP_KEEP = max(1, env_int("AUTO_BACKUP_KEEP", 168))
-AUTO_BACKUP_ON_STARTUP = env_flag("AUTO_BACKUP_ON_STARTUP", False)
+AUTO_BACKUP_KEEP = max(1, env_int("AUTO_BACKUP_KEEP", 5 if RUNNING_ON_RENDER else 168))
+# Render hat begrenzten fluechtigen Speicher. Keine Verlagerung auf die kleine
+# Upload-Disk: Sicherungen bleiben im konfigurierten BACKUP_DIR, mit Byte-Limit.
+AUTO_BACKUP_MAX_BYTES = max(0, env_int("AUTO_BACKUP_MAX_MB", 2048 if RUNNING_ON_RENDER else 0)) * 1024 * 1024
+if RUNNING_ON_RENDER and not AUTO_BACKUP_MAX_BYTES:
+    AUTO_BACKUP_MAX_BYTES = 2048 * 1024 * 1024
+AUTO_BACKUP_RESERVE_BYTES = max(0, env_int("AUTO_BACKUP_RESERVE_MB", 1024 if RUNNING_ON_RENDER else 128)) * 1024 * 1024
+AUTO_BACKUP_ON_STARTUP = env_flag("AUTO_BACKUP_ON_STARTUP", RUNNING_ON_RENDER)
 AUTO_CHANGE_BACKUP_ENABLED = env_flag("AUTO_CHANGE_BACKUP_ENABLED", True)
 AUTO_CHANGE_BACKUP_DELAY_SECONDS = max(1, env_int("AUTO_CHANGE_BACKUP_DELAY_SECONDS", 3))
 OPENAI_EXTRACTION_MODEL = os.environ.get("OPENAI_EXTRACTION_MODEL", "gpt-4o")
@@ -8322,11 +8330,17 @@ def write_uploads_to_backup(archive):
 
 def create_backup_package(reason="auto"):
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup_path = BACKUP_DIR / f"kundenstatus-backup-{timestamp}.zip"
-    partial_path = BACKUP_DIR / f".{backup_path.name}.{uuid.uuid4().hex}.part"
 
     with _backup_lock:
+        storage = BackupStorage(
+            BACKUP_DIR, keep=AUTO_BACKUP_KEEP, max_bytes=AUTO_BACKUP_MAX_BYTES,
+            reserve_bytes=AUTO_BACKUP_RESERVE_BYTES,
+        )
+        archive_limit = storage.prepare()
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        backup_path = BACKUP_DIR / f"kundenstatus-backup-{timestamp}.zip"
+        partial_path = BACKUP_DIR / f".{backup_path.name}.{uuid.uuid4().hex}.part"
+        started = time.monotonic()
         # Eigene Verbindung: ein Backup-Fehler darf NIE die Request-Transaktion vergiften.
         db = open_fresh_db()
         try:
@@ -8346,7 +8360,9 @@ def create_backup_package(reason="auto"):
                 "binary_blobs": [],
             }
             binary_blob_bytes = 0
-            with zipfile.ZipFile(partial_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            with partial_path.open("xb", buffering=0) as raw, zipfile.ZipFile(
+                storage.writer(raw, archive_limit), "w", zipfile.ZIP_DEFLATED
+            ) as archive:
                 for table_name in BACKUP_TABLES:
                     # datei_backups hält base64-Kopien JEDER Datei aller Auftraege; die echten
                     # Dateien liegen ohnehin via write_uploads_to_backup im ZIP. Das base64 hier
@@ -8400,7 +8416,17 @@ def create_backup_package(reason="auto"):
                         indent=2,
                     ),
                 )
+            # Der Mikrosekundenname wird unter dem Lock vergeben. Ein bestehendes
+            # Backup wird auch bei einer zurueckgestellten Uhr nie ueberschrieben.
+            if backup_path.exists() or backup_path.is_symlink():
+                raise RuntimeError("Backup-Ziel existiert bereits; Sicherung wird nicht ersetzt.")
             partial_path.replace(backup_path)
+            storage.validate_created(backup_path)
+            storage.finish()
+            print(
+                f"BACKUP_STORAGE event=created path={backup_path} bytes={backup_path.stat().st_size} "
+                f"duration_seconds={time.monotonic() - started:.2f}", flush=True,
+            )
         except Exception:
             try:
                 partial_path.unlink(missing_ok=True)
@@ -8410,7 +8436,6 @@ def create_backup_package(reason="auto"):
         finally:
             db.close()
 
-    prune_old_backups()
     return backup_path
 
 
@@ -8458,6 +8483,10 @@ DATA_CHANGE_ENDPOINT_EXCLUDES = {
     "admin_backup_sofort",
     "admin_backup_download",
     "session_ping",
+    # Besucher- und Klickstatistik sind im Stundenbackup enthalten. Ein Seiten-
+    # aufruf darf keine erneute Vollkopie aller Auftragsunterlagen ausloesen.
+    "api_besucher_event",
+    "api_klick_event",
     "login",
     "partner_login",
     "partner_login_key",
@@ -8495,16 +8524,11 @@ def move_upload_to_deleted_area(path, reason="deleted"):
 def prune_old_backups():
     if not BACKUP_DIR.exists():
         return
-    backups = sorted(
-        BACKUP_DIR.glob("kundenstatus-backup-*.zip"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
-    for old_backup in backups[AUTO_BACKUP_KEEP:]:
-        try:
-            old_backup.unlink()
-        except OSError:
-            pass
+    with _backup_lock:
+        BackupStorage(
+            BACKUP_DIR, keep=AUTO_BACKUP_KEEP, max_bytes=AUTO_BACKUP_MAX_BYTES,
+            reserve_bytes=AUTO_BACKUP_RESERVE_BYTES,
+        ).finish()
 
 
 def hourly_backup_worker():
