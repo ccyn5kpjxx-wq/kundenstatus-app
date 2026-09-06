@@ -92,6 +92,96 @@ class MoveTests(unittest.TestCase):
   self.assertEqual(c.post('/admin/mail/send').status_code,403)
   self.assertEqual(c.post('/admin/mail/draft').status_code,403)
 
+
+
+
+
+class ReadFlagTests(unittest.TestCase):
+ def setUp(self):
+  from contextlib import contextmanager
+  self.app=Flask(__name__);self.app.secret_key='synthetic';self.app.config['MAILBOX_FLAGS_ENABLED']=True
+  self.app.config['MAILBOX_WRITE_ENABLED']=False
+  owner=self
+  class FlagClient(Client):
+   def __init__(self):
+    self.flags={b'\\Answered',b'$Forwarded'};self.calls=[];self.missing=False;self.store_error=False;self.readback_error=False;self.noop=False
+   def select(self,folder,readonly=True):self.calls.append(('SELECT',folder,readonly));return 'OK',[b'1']
+   def uid(self,cmd,*args):
+    self.calls.append((cmd,*args))
+    meta=b'1 (UID 5 FLAGS ('+b' '.join(sorted(self.flags))+b'))'
+    if cmd=='STORE':
+     if self.store_error:return 'NO',[b'refused']
+     if not self.noop:
+      if args[1]=='+FLAGS.SILENT':self.flags.add(b'\\Seen')
+      else:self.flags.discard(b'\\Seen')
+     return 'OK',[None]
+    if cmd=='FETCH' and args[-1]=='(UID FLAGS)':
+     if self.missing:return 'OK',[None]
+     if self.readback_error and any(x[0]=='STORE' for x in self.calls):return 'NO',[b'failed']
+     return 'OK',[meta]
+    if cmd=='FETCH' and args[-1]=='(RFC822.SIZE)':return 'OK',[b'1 (UID 5 RFC822.SIZE 90)']
+    return 'OK',[(meta,b'From: test@example.invalid\r\nSubject: Test\r\n\r\nBody')]
+  self.imap=FlagClient()
+  def auth(fn):
+   @wraps(fn)
+   def wrapper(*args,**kwargs):
+    if not session.get('admin'):abort(403)
+    return fn(*args,**kwargs)
+   return wrapper
+  service=register_mailbox(self.app,auth,lambda:{},lambda:{},lambda:None)
+  @contextmanager
+  def connection():yield owner.imap
+  service.connect=connection
+  self.client=self.app.test_client()
+  with self.client.session_transaction() as s:s['admin']=True
+ def post(self,read='1',**extra):
+  return self.client.post('/admin/mail/message/5/read',data={'folder':'INBOX','validity':'7','read':read,**extra})
+ def test_separate_flags_switch_does_not_enable_mail_send_or_drafts(self):
+  self.assertEqual(self.post().status_code,200)
+  for endpoint in ('send','draft'):
+   self.assertEqual(self.client.post('/admin/mail/'+endpoint).status_code,403)
+  self.app.config['MAILBOX_FLAGS_ENABLED']=False
+  self.app.config['MAILBOX_WRITE_ENABLED']=True
+  self.assertEqual(self.post().status_code,403)
+ def test_authenticated_route_only(self):
+  with self.client.session_transaction() as s:s.clear()
+  self.assertEqual(self.post().status_code,403);self.assertEqual(self.imap.calls,[])
+ def test_both_directions_verified_and_other_flags_preserved(self):
+  for read in ('1','1','0'):
+   response=self.post(read)
+   self.assertEqual(response.status_code,200,response.json)
+   self.assertEqual(response.json,dict(ok=True,uid='5',folder='INBOX',validity='7',unread=read=='0'))
+   self.assertTrue({b'\\Answered',b'$Forwarded'}.issubset(self.imap.flags))
+  stores=[x for x in self.imap.calls if x[0]=='STORE']
+  self.assertEqual(stores,[('STORE','5','+FLAGS.SILENT',r'(\Seen)'),('STORE','5','+FLAGS.SILENT',r'(\Seen)'),('STORE','5','-FLAGS.SILENT',r'(\Seen)')])
+ def test_invalid_values_never_select_or_store(self):
+  for read in ('', 'true', 'false', '2', 'read'):
+   self.assertEqual(self.post(read).status_code,400)
+  for validity in ('', '0','7\r\n','wrong'):
+   self.assertEqual(self.post(validity=validity).status_code,400)
+  self.assertEqual(self.imap.calls,[])
+ def test_changed_validity_and_unknown_folder_never_store(self):
+  self.assertEqual(self.post(validity='6').status_code,400)
+  self.assertEqual(self.post(folder='secret').status_code,400)
+  self.assertFalse(any(x[0]=='STORE' for x in self.imap.calls))
+ def test_missing_uid_cannot_report_false_success(self):
+  self.imap.missing=True
+  self.assertEqual(self.post().status_code,400)
+  self.assertFalse(any(x[0]=='STORE' for x in self.imap.calls))
+ def test_store_error_or_unverified_readback_is_not_success(self):
+  for failure in ('store_error','readback_error','noop'):
+   with self.subTest(failure=failure):
+    self.setUp();setattr(self.imap,failure,True)
+    self.assertEqual(self.post().status_code,400)
+    self.assertEqual(sum(x[0]=='STORE' for x in self.imap.calls),1)
+ def test_reads_and_attachments_use_peek_and_do_not_mark_seen(self):
+  response=self.client.get('/admin/mail/message/5?folder=INBOX&validity=7')
+  self.assertEqual(response.status_code,200);self.assertTrue(response.json['unread'])
+  self.assertIn(('FETCH','5','(FLAGS BODY.PEEK[])'),self.imap.calls)
+  self.assertIn(('SELECT','"INBOX"',True),self.imap.calls)
+  self.assertFalse(any(x[0]=='STORE' for x in self.imap.calls))
+ def test_seen_flag_is_exact_and_case_insensitive(self):
+  for flags,unread in ((r'FLAGS (\Seen)',False),(r'flags (\seen \Answered)',False),(r'FLAGS (\SeenExtra)',True),(r'FLAGS ($Forwarded)',True)):
+   with self.subTest(flags=flags):self.assertEqual(message_view(b'Subject: Test\r\n\r\nText',5,flags)['unread'],unread)
+
 if __name__=='__main__':unittest.main()
-
-

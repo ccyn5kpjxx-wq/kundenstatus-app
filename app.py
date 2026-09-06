@@ -8487,6 +8487,8 @@ DATA_CHANGE_ENDPOINT_EXCLUDES = {
     # aufruf darf keine erneute Vollkopie aller Auftragsunterlagen ausloesen.
     "api_besucher_event",
     "api_klick_event",
+    # Lesemarkierungen betreffen ausschliesslich IONOS, keine Portal-Daten.
+    "mailbox.mark_read",
     "login",
     "partner_login",
     "partner_login_key",
@@ -55974,6 +55976,7 @@ def api_fahrzeugeinkauf_import():
 
 from mailbox_client import register_mailbox
 app.config["MAILBOX_MOVE_ENABLED"] = env_flag("MAILBOX_MOVE_ENABLED", True)
+app.config["MAILBOX_FLAGS_ENABLED"] = env_flag("MAILBOX_FLAGS_ENABLED", RUNNING_ON_RENDER)
 app.config["MAILBOX_WRITE_ENABLED"] = False
 register_mailbox(app, admin_required, get_werkstatt_imap_config, get_schaden_mail_config, get_db)
 

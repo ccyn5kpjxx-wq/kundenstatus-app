@@ -13,7 +13,7 @@
 {% block content %}
 <div class="mail-workspace">
 <header class="mail-top"><div><h1>Postfach</h1><div class="mail-sub">IONOS · {{ mail_address }}</div></div><div class="mail-toolbar"><button class="mail-btn" id="refresh">Aktualisieren</button><a class="mail-btn" href="{{ url_for('admin_emails') }}">Import-Zentrale</a></div></header>
-<div class="mail-notice">{% if mail_write %}Direkt mit deinem Postfach verbunden.{% elif mail_move %}Papierkorb und Verschieben sind mit IONOS verbunden. Versand bleibt ausgeschaltet.{% else %}Lokale Vorschau · Echte Nachrichten lesen. Versand und Änderungen am Postfach sind ausgeschaltet.{% endif %}</div>
+<div class="mail-notice">{% if mail_flags %}Beim Öffnen als gelesen markieren · Änderungen werden mit IONOS abgeglichen. Mit „Aktualisieren“ siehst du Änderungen aus IONOS.{% elif mail_write %}Direkt mit deinem Postfach verbunden.{% elif mail_move %}Papierkorb und Verschieben sind mit IONOS verbunden. Versand bleibt ausgeschaltet.{% else %}Lokale Vorschau · Echte Nachrichten lesen. Versand und Änderungen am Postfach sind ausgeschaltet.{% endif %}</div>
 <div id="mail-status" role="status" aria-live="polite"></div>
 <section class="mail-shell" id="shell">
 <aside class="mail-folders"><button class="mail-primary" id="compose" style="width:100%;margin-bottom:20px">＋ Neue E-Mail</button><nav id="folders" aria-label="E-Mail-Ordner"></nav></aside>
@@ -23,8 +23,9 @@
 <template id="mail-signature">{% include "_mail_signature.html" %}</template>
 <script>
 (()=>{
-const WRITE={{ mail_write|tojson }}, MOVE={{ mail_move|tojson }}, CSRF={{ csrf_token()|tojson }};
+const WRITE={{ mail_write|tojson }}, MOVE={{ mail_move|tojson }}, FLAGS={{ mail_flags|default(false)|tojson }}, CSRF={{ csrf_token()|tojson }};
 let folder='INBOX',page=1,query='',validity='',selected=null,loadSerial=0,detailSerial=0,folderChoices=[],loading=false,renderedState=null;
+const flagWrites=new Map();
 const $=id=>document.getElementById(id), node=(tag,text,cls)=>{let n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 function status(text,error=false){$('mail-status').className=text?'mail-notice'+(error?' mail-error':''):'';$('mail-status').textContent=text;}
 function requestError(message,extra={}){return Object.assign(new Error(message),extra);}
@@ -71,6 +72,53 @@ async function api(url,options={}){
 }
 function params(){return new URLSearchParams({folder,validity});}
 function back(){let b=node('button','← Zur Mailliste','mail-btn mail-back');b.onclick=()=>$('shell').classList.remove('reading');return b;}
+function messageKey(context){return JSON.stringify([context.folder,context.validity,String(context.m.uid)]);}
+function rowState(row,message){
+    row.dataset.uid=String(message.uid);row.classList.toggle('unread',message.unread);
+    row.setAttribute('aria-label',(message.unread?'Ungelesen: ':'')+message.sender+' – '+message.subject);
+    const dot=row.querySelector('.unread-dot');
+    if(message.unread&&!dot)row.prepend(node('span','','unread-dot'));
+    if(!message.unread&&dot)dot.remove();
+}
+function current(context){return selected===context&&context.serial===detailSerial;}
+function readControls(context){
+    if(!context||!current(context))return;
+    const busy=flagWrites.has(messageKey(context));
+    context.readButton.disabled=!FLAGS||busy||loading||context.moving;
+    context.readButton.textContent=busy?'Lesestatus wird gespeichert …':context.m.unread?'Als gelesen markieren':'Als ungelesen markieren';
+    context.trash.disabled=!MOVE||busy||loading||context.moving;
+    context.destinations.disabled=!MOVE||busy||loading||context.moving;
+}
+function applyReadState(context,unread){
+    context.m.unread=unread;
+    if(context.row.isConnected&&folder===context.folder&&validity===context.validity)rowState(context.row,context.m);
+    readControls(context);
+}
+async function markRead(context,read,automatic=false){
+    if(!FLAGS||!current(context)||context.moving||loading)return;
+    const key=messageKey(context),serial=context.serial;
+    let pending=flagWrites.get(key);
+    if(!pending){
+        const form=new FormData();form.set('csrf_token',CSRF);form.set('folder',context.folder);
+        form.set('validity',context.validity);form.set('read',read?'1':'0');
+        pending=api('/admin/mail/message/'+context.m.uid+'/read',{method:'POST',body:form}).finally(()=>flagWrites.delete(key));
+        flagWrites.set(key,pending);
+    }
+    readControls(context);
+    try{
+        const result=await pending;
+        if(String(result.uid)!==String(context.m.uid)||result.folder!==context.folder||result.validity!==context.validity||typeof result.unread!=='boolean'){
+            throw requestError('Der Lesestatus konnte nicht bestätigt werden. Bitte aktualisieren.');
+        }
+        // Keep confirmed flags even if a refresh that waits for this write then fails.
+        applyReadState(context,result.unread);
+        if(current(context)&&detailSerial===serial){
+            if(!automatic)status(result.unread?'In IONOS als ungelesen markiert.':'In IONOS als gelesen markiert.');
+        }
+    }catch(error){
+        if(current(context)&&detailSerial===serial)showLoadError(error,()=>{if(current(context))open(context.m.uid,context.row,false);});
+    }finally{readControls(selected);}
+}
 async function load(){
     if(loading)return;
     loading=true;const serial=++loadSerial;++detailSerial;
@@ -78,20 +126,35 @@ async function load(){
     const previous=renderedState;
     const previousRows=Array.from($('messages').childNodes);
     const sameView=previous&&previous.folder===folder&&previous.page===page&&previous.query===query;
+    const keptMessage=sameView&&selected&&!$('reader').querySelector('.mail-compose')?selected:null;
+    if(keptMessage)keptMessage.serial=detailSerial;
+    readControls(selected);
     status('Postfach wird geladen …');
     $('messages').setAttribute('aria-busy','true');
     $('refresh').disabled=$('prev').disabled=$('next').disabled=true;
     for(const button of $('folders').querySelectorAll('button'))button.disabled=true;
-    if(!$('reader').querySelector('.mail-compose')||(previous&&previous.folder!==folder)){
+    if(!keptMessage&&(!$('reader').querySelector('.mail-compose')||(previous&&previous.folder!==folder))){
         $('reader').replaceChildren(node('div','Wähle eine Nachricht zum Lesen.','mail-empty'));selected=null;
         $('shell').classList.remove('reading');
     }
     if(!sameView)$('messages').replaceChildren(node('div','Postfach wird geladen …','mail-loading'));
     try{
+        // Fetch after pending flag writes, so an older listing cannot undo a confirmed mark.
+        await Promise.allSettled(Array.from(flagWrites.values()));
         const data=await api('/admin/mail/messages?'+new URLSearchParams({folder:requested.folder,page:requested.page,q:requested.query}));
         if(serial!==loadSerial)return;
         validity=data.validity;folderChoices=data.folders;$('folders').replaceChildren();const rank=f=>f.id==='INBOX'?0:/\\Sent/.test(f.flags)?1:/\\Drafts/.test(f.flags)?2:3;data.folders.sort((a,b)=>rank(a)-rank(b)||a.label.localeCompare(b.label));for(const f of data.folders){let label=f.label;const names={'INBOX':'Posteingang','Sent':'Gesendet','Drafts':'Entwürfe','Trash':'Papierkorb','Spam':'Spam'};let b=node('button',names[label]||label,'mail-folder'+(f.id===folder?' active':''));b.onclick=()=>{if(loading)return;folder=f.id;page=1;query='';$('query').value='';load();};$('folders').append(b);} $('messages').replaceChildren();for(const m of data.messages){let b=node('button',undefined,'mail-row'+(m.unread?' unread':''));b.setAttribute('aria-label',(m.unread?'Ungelesen: ':'')+m.sender+' – '+m.subject);if(m.unread)b.append(node('span','','unread-dot'));b.append(node('span',m.sender,'sender'),node('span',m.subject,'subject'),node('span',new Date(m.date).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}),'date'));b.onclick=()=>{if(!loading)open(m.uid,b);};$('messages').append(b);}if(!data.messages.length)$('messages').append(node('div','Keine Nachrichten in diesem Ordner.','mail-loading'));$('count').textContent=data.total+' Nachrichten · Seite '+data.page;
         renderedState={...requested,validity,total:data.total};
+        for(const [index,message] of data.messages.entries())rowState($('messages').children[index],message);
+        if(keptMessage&&current(keptMessage)){
+            const index=data.messages.findIndex(m=>String(m.uid)===String(keptMessage.m.uid));
+            if(data.validity===keptMessage.validity&&index>=0){
+                keptMessage.row=$('messages').children[index];keptMessage.row.classList.add('selected');
+                applyReadState(keptMessage,data.messages[index].unread);
+            }else{
+                selected=null;$('reader').replaceChildren(back(),node('div','Die Nachricht ist nicht mehr in dieser Ansicht.','mail-empty'));
+            }
+        }
         if(!sameView)$('messages').scrollTop=0;
         status('');
     }catch(error){
@@ -109,13 +172,60 @@ async function load(){
         for(const button of $('folders').querySelectorAll('button'))button.disabled=false;
         $('prev').disabled=!renderedState||page<=1;
         $('next').disabled=!renderedState||page*30>=renderedState.total;
+        readControls(selected);
     }
 }
-async function open(uid,row){const serial=++detailSerial;$('shell').classList.add('reading');$('reader').replaceChildren(node('div','Nachricht wird geladen …','mail-loading'));try{let m=await api('/admin/mail/message/'+uid+'?'+params());if(serial!==detailSerial)return;selected=m;document.querySelectorAll('.mail-row.selected').forEach(x=>x.classList.remove('selected'));row.classList.add('selected');const r=$('reader');r.replaceChildren(back(),node('h2',m.subject));let meta=node('div',undefined,'mail-meta');meta.append(node('div','Von: '+m.sender),node('div','An: '+m.to),node('div',m.date));r.append(meta);let toolbar=node('div',undefined,'mail-toolbar'),reply=node('button','Antworten','mail-primary');reply.onclick=()=>compose(m);toolbar.append(reply);let read=node('button',m.unread?'Als gelesen markieren':'Als ungelesen markieren','mail-btn');read.disabled=!WRITE;read.onclick=async()=>{let f=new FormData();f.set('csrf_token',CSRF);f.set('folder',folder);f.set('validity',validity);f.set('read',m.unread?'1':'0');try{await api('/admin/mail/message/'+m.uid+'/read',{method:'POST',body:f});m.unread=!m.unread;read.textContent=m.unread?'Als gelesen markieren':'Als ungelesen markieren';load();}catch(e){status(e.message,true);}};toolbar.append(read);
-let trash=node('button','In den Papierkorb','mail-btn');trash.disabled=!MOVE;let destinations=node('select',undefined,'mail-btn');destinations.setAttribute('aria-label','Nachricht verschieben nach');destinations.append(new Option('Verschieben nach …',''));for(const f of folderChoices){if(f.id!==folder)destinations.append(new Option(f.label,f.id));}destinations.disabled=!MOVE;
-async function moveTo(target){const f=new FormData();f.set('csrf_token',CSRF);f.set('folder',folder);f.set('validity',validity);f.set('target',target);trash.disabled=true;destinations.disabled=true;try{let result=await api('/admin/mail/message/'+m.uid+'/move',{method:'POST',body:f});r.replaceChildren(node('div',result.message,'mail-empty'));selected=null;load();}catch(e){status(e.message,true);trash.disabled=!MOVE;destinations.disabled=!MOVE;}}
-trash.onclick=()=>moveTo('__trash__');destinations.onchange=()=>{if(destinations.value)moveTo(destinations.value);};toolbar.append(trash,destinations);r.append(toolbar);let files=node('div',undefined,'mail-attachments');for(let a of m.attachments){let link=node('a','↓ '+a.name);link.href='/admin/mail/message/'+uid+'/attachment/'+a.index+'?'+params();files.append(link);}r.append(files,node('div',m.body,'mail-body'),node('div','Sichere Textansicht · Externe Bilder und Tracking werden nicht geladen.','mail-safe'));}catch(e){if(serial===detailSerial){$('reader').replaceChildren(back());showLoadError(e,()=>open(uid,row));}}}
-function compose(reply){++detailSerial;$('shell').classList.add('reading');const r=$('reader');r.replaceChildren(back(),node('h2',reply?'Antwort schreiben':'Neue Nachricht'));let form=node('form',undefined,'mail-compose');for(const [name,label,value] of [['to','An',reply?reply.reply_to:''],['subject','Betreff',reply?(/^Re:/i.test(reply.subject)?reply.subject:'Re: '+reply.subject):'']]){let l=node('label',label);l.htmlFor='compose-'+name;let input=node('input');input.id=l.htmlFor;input.name=name;input.required=true;input.value=value;form.append(l,input);}let l=node('label','Nachricht');l.htmlFor='compose-body';let body=node('textarea');body.id=l.htmlFor;body.name='body';body.value=reply?'\n\n--- Ursprüngliche Nachricht ---\n'+reply.body:'';form.append(l,body);let signature=node('div',undefined,'mail-signature');signature.append($('mail-signature').content.cloneNode(true));form.append(signature);let al=node('label','Anhänge');al.htmlFor='compose-files';let file=node('input');file.type='file';file.multiple=true;file.name='attachments';file.id=al.htmlFor;form.append(al,file);let bar=node('div',undefined,'mail-toolbar');bar.style.marginTop='20px';let send=node('button','E-Mail senden','mail-primary'),draft=node('button','Entwurf speichern','mail-btn');send.type='button';draft.type='button';send.disabled=draft.disabled=!WRITE;const token=crypto.randomUUID();async function submit(path){if(!form.reportValidity())return;send.disabled=draft.disabled=true;let f=new FormData(form);f.set('csrf_token',CSRF);f.set('send_token',token);if(reply)f.set('reply_id',reply.message_id);try{let data=await api(path,{method:'POST',body:f});status(data.message);r.replaceChildren(node('h2',path.endsWith('draft')?'Entwurf gespeichert':'Nachricht übergeben'));load();}catch(e){status(e.message,true);if(path.endsWith('draft'))draft.disabled=false;}}send.onclick=()=>submit('/admin/mail/send');draft.onclick=()=>submit('/admin/mail/draft');bar.append(send,draft);form.append(bar);if(!WRITE)form.append(node('p','Du kannst hier die Bedienung ausprobieren. Der E-Mail-Versand und das Speichern von Entwürfen sind ausgeschaltet.','mail-safe'));r.append(form);}
+async function open(uid,row,markOnOpen=true){
+    const serial=++detailSerial,target={folder,validity};selected=null;
+    const pendingFlag=flagWrites.get(JSON.stringify([target.folder,target.validity,String(uid)]));
+    $('shell').classList.add('reading');$('reader').replaceChildren(node('div','Nachricht wird geladen …','mail-loading'));
+    status('');
+    try{
+        // A reopened detail must not fetch flags from before its own pending write.
+        if(pendingFlag)await Promise.allSettled([pendingFlag]);
+        if(serial!==detailSerial)return;
+        const m=await api('/admin/mail/message/'+uid+'?'+new URLSearchParams(target));
+        if(serial!==detailSerial)return;
+        const context={m,row,serial,...target,moving:false};selected=context;
+        document.querySelectorAll('.mail-row.selected').forEach(x=>x.classList.remove('selected'));
+        row.classList.add('selected');rowState(row,m);
+        const r=$('reader');r.replaceChildren(back(),node('h2',m.subject));
+        const meta=node('div',undefined,'mail-meta');
+        meta.append(node('div','Von: '+m.sender),node('div','An: '+m.to),node('div',m.date));r.append(meta);
+        const toolbar=node('div',undefined,'mail-toolbar'),reply=node('button','Antworten','mail-primary');
+        reply.onclick=()=>compose(m);toolbar.append(reply);
+        const read=node('button','','mail-btn');context.readButton=read;
+        read.onclick=()=>markRead(context,m.unread);toolbar.append(read);
+        const trash=node('button','In den Papierkorb','mail-btn');context.trash=trash;
+        const destinations=node('select',undefined,'mail-btn');context.destinations=destinations;
+        destinations.setAttribute('aria-label','Nachricht verschieben nach');destinations.append(new Option('Verschieben nach …',''));
+        for(const f of folderChoices){if(f.id!==target.folder)destinations.append(new Option(f.label,f.id));}
+        async function moveTo(destination){
+            if(!current(context)||loading||context.moving||flagWrites.has(messageKey(context)))return;
+            const form=new FormData();form.set('csrf_token',CSRF);form.set('folder',target.folder);
+            form.set('validity',target.validity);form.set('target',destination);
+            context.moving=true;readControls(context);
+            try{
+                const result=await api('/admin/mail/message/'+m.uid+'/move',{method:'POST',body:form});
+                if(!current(context))return;
+                r.replaceChildren(node('div',result.message,'mail-empty'));selected=null;load();
+            }catch(error){if(current(context))showLoadError(error);}
+            finally{context.moving=false;readControls(context);}
+        }
+        trash.onclick=()=>moveTo('__trash__');destinations.onchange=()=>{if(destinations.value)moveTo(destinations.value);};
+        toolbar.append(trash,destinations);r.append(toolbar);readControls(context);
+        const files=node('div',undefined,'mail-attachments');
+        for(const attachment of m.attachments){
+            const link=node('a','↓ '+attachment.name);
+            link.href='/admin/mail/message/'+uid+'/attachment/'+attachment.index+'?'+new URLSearchParams(target);files.append(link);
+        }
+        r.append(files,node('div',m.body,'mail-body'),node('div','Sichere Textansicht · Externe Bilder und Tracking werden nicht geladen.','mail-safe'));
+        if(FLAGS&&!pendingFlag&&m.unread&&markOnOpen)markRead(context,true,true);
+    }catch(error){
+        if(serial===detailSerial){$('reader').replaceChildren(back());showLoadError(error,()=>{if(folder===target.folder&&validity===target.validity)open(uid,row,markOnOpen);});}
+    }
+}
+function compose(reply){++detailSerial;selected=null;$('shell').classList.add('reading');const r=$('reader');r.replaceChildren(back(),node('h2',reply?'Antwort schreiben':'Neue Nachricht'));let form=node('form',undefined,'mail-compose');for(const [name,label,value] of [['to','An',reply?reply.reply_to:''],['subject','Betreff',reply?(/^Re:/i.test(reply.subject)?reply.subject:'Re: '+reply.subject):'']]){let l=node('label',label);l.htmlFor='compose-'+name;let input=node('input');input.id=l.htmlFor;input.name=name;input.required=true;input.value=value;form.append(l,input);}let l=node('label','Nachricht');l.htmlFor='compose-body';let body=node('textarea');body.id=l.htmlFor;body.name='body';body.value=reply?'\n\n--- Ursprüngliche Nachricht ---\n'+reply.body:'';form.append(l,body);let signature=node('div',undefined,'mail-signature');signature.append($('mail-signature').content.cloneNode(true));form.append(signature);let al=node('label','Anhänge');al.htmlFor='compose-files';let file=node('input');file.type='file';file.multiple=true;file.name='attachments';file.id=al.htmlFor;form.append(al,file);let bar=node('div',undefined,'mail-toolbar');bar.style.marginTop='20px';let send=node('button','E-Mail senden','mail-primary'),draft=node('button','Entwurf speichern','mail-btn');send.type='button';draft.type='button';send.disabled=draft.disabled=!WRITE;const token=crypto.randomUUID();async function submit(path){if(!form.reportValidity())return;send.disabled=draft.disabled=true;let f=new FormData(form);f.set('csrf_token',CSRF);f.set('send_token',token);if(reply)f.set('reply_id',reply.message_id);try{let data=await api(path,{method:'POST',body:f});status(data.message);r.replaceChildren(node('h2',path.endsWith('draft')?'Entwurf gespeichert':'Nachricht übergeben'));load();}catch(e){status(e.message,true);if(path.endsWith('draft'))draft.disabled=false;}}send.onclick=()=>submit('/admin/mail/send');draft.onclick=()=>submit('/admin/mail/draft');bar.append(send,draft);form.append(bar);if(!WRITE)form.append(node('p','Du kannst hier die Bedienung ausprobieren. Der E-Mail-Versand und das Speichern von Entwürfen sind ausgeschaltet.','mail-safe'));r.append(form);}
 $('compose').onclick=()=>compose();$('refresh').onclick=load;$('search').onsubmit=e=>{e.preventDefault();if(loading)return;query=$('query').value;page=1;load();};$('prev').onclick=()=>{if(loading)return;page--;load();};$('next').onclick=()=>{if(loading)return;page++;load();};load();
 })();
 </script>

@@ -19,6 +19,13 @@ from flask import Blueprint, render_template, request, jsonify, send_file, abort
 MAX_MESSAGE = 25 * 1024 * 1024
 
 
+def seen_flag(metadata):
+    if isinstance(metadata, str):
+        metadata = metadata.encode('ascii', 'replace')
+    flags = re.search(rb'\bFLAGS \(([^)]*)\)', metadata, re.I)
+    return bool(flags and any(flag.lower() == b'\\seen' for flag in flags[1].split()))
+
+
 def folder_label(value):
     def decode(m):
         if not m[1]: return '&'
@@ -57,7 +64,7 @@ def message_view(raw, uid, flags=''):
         if part.get_filename() or part.get_content_disposition()=='attachment':
             attachments.append({'index':index,'name':part.get_filename() or 'Anhang','type':part.get_content_type()})
     return {'uid':str(uid),'subject':str(msg.get('Subject','(Ohne Betreff)')),'sender':str(msg.get('From','')),
-            'to':str(msg.get('To','')),'date':str(msg.get('Date','')),'unread':'\\Seen' not in flags,
+            'to':str(msg.get('To','')),'date':str(msg.get('Date','')),'unread':not seen_flag(flags),
             'body':text,'attachments':attachments,'reply_to':str(msg.get('Reply-To',msg.get('From',''))),
             'message_id':str(msg.get('Message-ID',''))}
 
@@ -110,6 +117,18 @@ class Mailbox:
         for row in rows or []:
             if status=='OK' and isinstance(row,tuple):return row[1],row[0].decode('ascii','replace')
         raise ValueError('Nachricht konnte nicht geladen werden.')
+    def unread(self, client, uid):
+        status, rows = client.uid('FETCH', str(uid), '(UID FLAGS)')
+        if status != 'OK':
+            raise ValueError('Lesestatus konnte nicht bestätigt werden. Bitte aktualisieren.')
+        for row in rows or []:
+            meta = row[0] if isinstance(row, tuple) else row
+            if not isinstance(meta, bytes):
+                continue
+            found = re.search(rb'\bUID (\d+)\b', meta, re.I)
+            if found and found[1].decode() == str(uid) and re.search(rb'\bFLAGS \([^)]*\)', meta, re.I):
+                return not seen_flag(meta)
+        raise ValueError('Nachricht nicht mehr vorhanden oder Lesestatus unbekannt. Bitte aktualisieren.')
     def listing(self,folder,page=1,search=''):
         with self.connect() as c:
             folders=self.folders(c);version=self.select(c,folder)
@@ -135,6 +154,7 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
     bp=Blueprint('mailbox',__name__);service=Mailbox(imap_config)
     def enabled():return bool(current_app.config.get('MAILBOX_WRITE_ENABLED',False))
     def move_enabled():return bool(current_app.config.get('MAILBOX_MOVE_ENABLED',False)) or enabled()
+    def flags_enabled():return bool(current_app.config.get('MAILBOX_FLAGS_ENABLED',False))
     def writable():
         if not enabled():abort(403,description='Lokale Vorschau: Änderungen am echten Postfach und Versand sind ausgeschaltet.')
     @bp.errorhandler(ValueError)
@@ -145,7 +165,7 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
     def network_error(exc):return jsonify(error='Mailserver momentan nicht erreichbar. Bitte erneut versuchen.'),502
     @bp.get('/admin/mail')
     @admin_required
-    def index():return render_template('mailbox.html',mail_address=imap_config().get('user',''),mail_write=enabled(),mail_move=move_enabled())
+    def index():return render_template('mailbox.html',mail_address=imap_config().get('user',''),mail_write=enabled(),mail_move=move_enabled(),mail_flags=flags_enabled())
     @bp.get('/admin/mail/messages')
     @admin_required
     def listing():return jsonify(service.listing(request.args.get('folder','INBOX'),request.args.get('page',1,type=int),request.args.get('q','')[:200]))
@@ -166,12 +186,19 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
     @bp.post('/admin/mail/message/<int:uid>/read')
     @admin_required
     def mark_read(uid):
-        writable()
+        if not flags_enabled():abort(403,description='Gelesen-/Ungelesen-Abgleich ist ausgeschaltet.')
+        folder=request.form.get('folder','');version=request.form.get('validity','');read=request.form.get('read')
+        if uid < 1 or read not in ('0','1') or not re.fullmatch(r'[1-9][0-9]*',version):
+            raise ValueError('Ungültiger Lesestatus oder Postfachstand. Bitte aktualisieren.')
         with service.connect() as c:
-            service.select(c,request.form['folder'],readonly=False,validity=request.form['validity'])
-            status,_=c.uid('STORE',str(uid),'+FLAGS.SILENT' if request.form.get('read')=='1' else '-FLAGS.SILENT',r'(\Seen)')
-            if status!='OK':raise ValueError('Markierung fehlgeschlagen.')
-        return jsonify(ok=True)
+            version=service.select(c,folder,readonly=False,validity=version)
+            service.unread(c,uid)  # STORE may otherwise succeed for a nonexistent UID.
+            status,_=c.uid('STORE',str(uid),'+FLAGS.SILENT' if read=='1' else '-FLAGS.SILENT',r'(\Seen)')
+            if status!='OK':raise ValueError('Markierung fehlgeschlagen. Bitte aktualisieren.')
+            unread=service.unread(c,uid)
+            if unread != (read=='0'):
+                raise ValueError('IONOS hat die Markierung nicht bestätigt. Bitte aktualisieren.')
+        return jsonify(ok=True,uid=str(uid),folder=folder,validity=version,unread=unread)
     @bp.post('/admin/mail/message/<int:uid>/move')
     @admin_required
     def move(uid):
