@@ -8,12 +8,13 @@
 .mail-workspace{--accent:#aa3c27;--ink:#1b2c38;--line:#e2d8cd}.mail-top h1{font-weight:700}.mail-shell{border-radius:12px;box-shadow:0 8px 25px #1b2c3810;grid-template-columns:180px minmax(280px,350px) minmax(300px,1fr);background:#fffdfa}.mail-folders{background:#1e2c37;padding:15px 10px}.mail-folder{color:#c9d2da;padding:9px 12px;border-radius:6px;font-size:13px}.mail-folder:hover{background:#2c3e4b}.mail-folder.active{background:#3b4a55;color:white;border-left:3px solid #f4c430}.mail-primary{background:#aa3c27;border-radius:6px}.mail-list{background:#fffdfa}.mail-row{background:#fffdfa;padding:13px 16px;border-bottom:1px solid #e8e1d9;position:relative}.mail-row .sender{font-weight:450;color:#5f6b73}.mail-row.unread{background:#e9f2ff;border-left:4px solid #2474cd;padding-left:12px}.mail-row.unread .subject,.mail-row.unread .sender{font-weight:750;color:#173f72}.mail-row.selected{background:#d4e5fa;box-shadow:inset 0 0 0 1px #8bb5e3}.mail-row:hover{background:#f0f3f7}.mail-row.unread:hover{background:#dceaff}.unread-dot{background:#2474cd}.mail-reader{background:#fffdfa}.mail-search{background:#f5f1ea}.mail-notice{background:#ede7de;color:#59616b}.mail-error{background:#fff0ec;color:#963a26}.mail-signature{margin:18px 0 20px;border-top:1px solid #ded7ce;padding-top:18px}.mail-signature table{width:100%;max-width:560px!important}.mail-signature img{max-width:100%}.mail-signature td{overflow-wrap:anywhere}.mail-toolbar select{max-width:170px}.mail-safe{line-height:1.5}.mail-empty h2{font-size:20px;color:#304250}@media(max-width:1100px){.mail-shell{grid-template-columns:155px 270px minmax(250px,1fr)}}@media(max-width:800px){.mail-shell{grid-template-columns:125px minmax(0,1fr)}.mail-shell.reading{grid-template-columns:minmax(0,1fr)}.mail-signature table{font-size:12px}.mail-top{flex-wrap:wrap}.mail-reader{padding:16px}.mail-signature td:first-child{max-width:85px}.mail-signature img[alt="Christopher Gärtner"]{width:64px!important}}
 
 .mail-list{min-height:0;overflow:hidden}.mail-items{min-height:0;overflow-y:auto;overscroll-behavior:contain}.mail-search,.mail-pager{flex-shrink:0}
+.mail-compose-result{padding:14px;margin:14px 0;border:1px solid #bdd5c7;background:#edf7ef;border-radius:8px;line-height:1.5;overflow-wrap:anywhere}.mail-compose-result:empty{display:none}.mail-compose-result.warning{border-color:#dfba96;background:#fff4e7}.mail-compose-result .mail-toolbar{margin-top:10px;flex-wrap:wrap}.mail-file-list{padding-left:20px;overflow-wrap:anywhere;font-size:13px}.mail-compose input,.mail-compose textarea{box-sizing:border-box;max-width:100%}.mail-compose textarea{min-height:200px}.mail-compose .mail-quote{white-space:pre-wrap;max-height:200px;overflow:auto;color:#687681;font-size:13px}.mail-compose button:disabled{opacity:.55;cursor:default}.mail-attachment-note{font-size:13px;color:#687681}
 </style>
 {% endblock %}
 {% block content %}
 <div class="mail-workspace">
-<header class="mail-top"><div><h1>Postfach</h1><div class="mail-sub">IONOS · {{ mail_address }}</div></div><div class="mail-toolbar"><button class="mail-btn" id="refresh">Aktualisieren</button><a class="mail-btn" href="{{ url_for('admin_emails') }}">Import-Zentrale</a></div></header>
-<div class="mail-notice">{% if mail_flags %}Beim Öffnen als gelesen markieren · Änderungen werden mit IONOS abgeglichen. Mit „Aktualisieren“ siehst du Änderungen aus IONOS.{% elif mail_write %}Direkt mit deinem Postfach verbunden.{% elif mail_move %}Papierkorb und Verschieben sind mit IONOS verbunden. Versand bleibt ausgeschaltet.{% else %}Lokale Vorschau · Echte Nachrichten lesen. Versand und Änderungen am Postfach sind ausgeschaltet.{% endif %}</div>
+<header class="mail-top"><div><h1>Postfach</h1><div class="mail-sub">IONOS · {{ mail_address }}</div></div><div class="mail-toolbar"><button class="mail-btn" id="send-history">Versandverlauf</button><button class="mail-btn" id="resume-draft" hidden>Entwurf weiter bearbeiten</button><button class="mail-btn" id="refresh">Aktualisieren</button><a class="mail-btn" href="{{ url_for('admin_emails') }}">Import-Zentrale</a></div></header>
+<div class="mail-notice">{% if mail_send|default(false) %}Schreiben und Antworten direkt im IONOS-Postfach. Versand erst mit deinem Klick auf „E-Mail senden“.{% elif mail_flags %}Beim Öffnen als gelesen markieren · Änderungen werden mit IONOS abgeglichen. Mit „Aktualisieren“ siehst du Änderungen aus IONOS.{% elif mail_write %}Direkt mit deinem Postfach verbunden.{% elif mail_move %}Papierkorb und Verschieben sind mit IONOS verbunden. Versand bleibt ausgeschaltet.{% else %}Lokale Vorschau · Echte Nachrichten lesen. Versand und Änderungen am Postfach sind ausgeschaltet.{% endif %}</div>
 <div id="mail-status" role="status" aria-live="polite"></div>
 <section class="mail-shell" id="shell">
 <aside class="mail-folders"><button class="mail-primary" id="compose" style="width:100%;margin-bottom:20px">＋ Neue E-Mail</button><nav id="folders" aria-label="E-Mail-Ordner"></nav></aside>
@@ -23,7 +24,9 @@
 <template id="mail-signature">{% include "_mail_signature.html" %}</template>
 <script>
 (()=>{
-const WRITE={{ mail_write|tojson }}, MOVE={{ mail_move|tojson }}, FLAGS={{ mail_flags|default(false)|tojson }}, CSRF={{ csrf_token()|tojson }};
+const WRITE={{ mail_write|tojson }}, SEND={{ mail_send|default(mail_write)|tojson }}, MOVE={{ mail_move|tojson }}, FLAGS={{ mail_flags|default(false)|tojson }}, CSRF={{ csrf_token()|tojson }};
+const DRAFT_KEY='werkstatt-mail-draft:'+{{ mail_address|tojson }};
+let composer=null;
 let folder='INBOX',page=1,query='',validity='',selected=null,loadSerial=0,detailSerial=0,folderChoices=[],loading=false,renderedState=null;
 const flagWrites=new Map();
 const $=id=>document.getElementById(id), node=(tag,text,cls)=>{let n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
@@ -51,14 +54,14 @@ async function api(url,options={}){
             if(response.status===401||(response.redirected&&new URL(response.url).pathname===loginPath)){
                 throw requestError('Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an.',{login:true});
             }
-            if(response.status===403)throw requestError('Diese Aktion ist für deinen Zugang nicht freigegeben.');
+            if(response.status===403)throw requestError('Diese Aktion ist für deinen Zugang nicht freigegeben.',{httpStatus:403});
             const transient=[502,503,504].includes(response.status);
             let data;
             try{data=await response.json();}catch(error){
                 if(error.name==='AbortError'||error instanceof TypeError)throw error;
-                throw requestError('Das Postfach ist vorübergehend nicht erreichbar. Bitte lade es erneut.',{retryable:transient});
+                throw requestError('Das Postfach ist vorübergehend nicht erreichbar. Bitte lade es erneut.',{retryable:transient,httpStatus:response.status});
             }
-            if(!response.ok)throw requestError(data.error||'Das Postfach konnte nicht geladen werden. Bitte erneut versuchen.',{retryable:transient});
+            if(!response.ok)throw requestError(data.error||'Das Postfach konnte nicht geladen werden. Bitte erneut versuchen.',{retryable:transient,httpStatus:response.status,data});
             return data;
         }catch(error){
             failure=error;
@@ -225,8 +228,168 @@ async function open(uid,row,markOnOpen=true){
         if(serial===detailSerial){$('reader').replaceChildren(back());showLoadError(error,()=>{if(folder===target.folder&&validity===target.validity)open(uid,row,markOnOpen);});}
     }
 }
-function compose(reply){++detailSerial;selected=null;$('shell').classList.add('reading');const r=$('reader');r.replaceChildren(back(),node('h2',reply?'Antwort schreiben':'Neue Nachricht'));let form=node('form',undefined,'mail-compose');for(const [name,label,value] of [['to','An',reply?reply.reply_to:''],['subject','Betreff',reply?(/^Re:/i.test(reply.subject)?reply.subject:'Re: '+reply.subject):'']]){let l=node('label',label);l.htmlFor='compose-'+name;let input=node('input');input.id=l.htmlFor;input.name=name;input.required=true;input.value=value;form.append(l,input);}let l=node('label','Nachricht');l.htmlFor='compose-body';let body=node('textarea');body.id=l.htmlFor;body.name='body';body.value=reply?'\n\n--- Ursprüngliche Nachricht ---\n'+reply.body:'';form.append(l,body);let signature=node('div',undefined,'mail-signature');signature.append($('mail-signature').content.cloneNode(true));form.append(signature);let al=node('label','Anhänge');al.htmlFor='compose-files';let file=node('input');file.type='file';file.multiple=true;file.name='attachments';file.id=al.htmlFor;form.append(al,file);let bar=node('div',undefined,'mail-toolbar');bar.style.marginTop='20px';let send=node('button','E-Mail senden','mail-primary'),draft=node('button','Entwurf speichern','mail-btn');send.type='button';draft.type='button';send.disabled=draft.disabled=!WRITE;const token=crypto.randomUUID();async function submit(path){if(!form.reportValidity())return;send.disabled=draft.disabled=true;let f=new FormData(form);f.set('csrf_token',CSRF);f.set('send_token',token);if(reply)f.set('reply_id',reply.message_id);try{let data=await api(path,{method:'POST',body:f});status(data.message);r.replaceChildren(node('h2',path.endsWith('draft')?'Entwurf gespeichert':'Nachricht übergeben'));load();}catch(e){status(e.message,true);if(path.endsWith('draft'))draft.disabled=false;}}send.onclick=()=>submit('/admin/mail/send');draft.onclick=()=>submit('/admin/mail/draft');bar.append(send,draft);form.append(bar);if(!WRITE)form.append(node('p','Du kannst hier die Bedienung ausprobieren. Der E-Mail-Versand und das Speichern von Entwürfen sind ausgeschaltet.','mail-safe'));r.append(form);}
+function deliveryRecipients(container,result){
+    if(result.state!=='partial')return;
+    container.append(node('p','Vom Mailserver angenommen: '+(result.accepted||[]).join(', ')));
+    for(const [address,reason] of Object.entries(result.refused||{})){
+        container.append(node('p','Nicht angenommen: '+address+(reason.code?' (Fehler '+reason.code+')':'')+'. Bitte diese Adresse prüfen.'));
+    }
+}
+function cacheComposer(context){
+    if(composer!==context)return;
+    $('resume-draft').hidden=context.finished;
+    try{
+        if(context.finished){sessionStorage.removeItem(DRAFT_KEY);return;}
+        sessionStorage.setItem(DRAFT_KEY,JSON.stringify({to:context.to.value,subject:context.subject.value,body:context.body.value,
+            reply:context.reply,token:context.token,attempted:context.attempted,
+            filenames:Array.from(context.files.files).map(f=>f.name),missingFiles:context.missingFiles}));
+    }catch(error){context.storageFailed=true;}
+}
+function composerControls(context){
+    const locked=context.busy||context.attempted;
+    for(const input of context.form.querySelectorAll('input,textarea'))input.disabled=locked;
+    if(context.notFoundRetry&&!context.busy)context.files.disabled=false;
+    context.send.disabled=!SEND||locked||context.missingFiles.length>0;
+    context.draft.disabled=!WRITE||locked;
+    context.clearFiles.disabled=locked&&!context.notFoundRetry||context.busy;
+    if(context.retryButton)context.retryButton.disabled=context.busy||context.missingFiles.length>0;
+    context.discard.disabled=context.busy||context.attempted&&!context.finished;
+    context.send.textContent=context.busy?'Wird bearbeitet …':'E-Mail senden';
+}
+function showComposer(context){
+    ++detailSerial;selected=null;$('shell').classList.add('reading');
+    $('reader').replaceChildren(back(),node('h2',context.reply?'Antwort schreiben':'Neue Nachricht'),context.form);
+}
+function compose(reply,saved=null){
+    if(composer&&!composer.finished){showComposer(composer);return;}
+    const context={reply:saved?.reply||reply||null,token:saved?.token||crypto.randomUUID(),attempted:!!saved?.attempted,busy:false,finished:false,
+        missingFiles:saved?[...new Set([...(saved.filenames||[]),...(saved.missingFiles||[])])]:[]};
+    composer=context;
+    context.expectedFiles=[...context.missingFiles];
+    const form=node('form',undefined,'mail-compose');context.form=form;
+    form.onsubmit=e=>e.preventDefault();
+    for(const [name,label,value] of [['to','An',saved?.to??context.reply?.reply_to??''],['subject','Betreff',saved?.subject??(context.reply?(/^(Re|Aw):/i.test(context.reply.subject)?context.reply.subject:'Re: '+context.reply.subject):'')]]){
+        const l=node('label',label),input=node('input');l.htmlFor='compose-'+name;input.id=l.htmlFor;input.name=name;input.required=true;input.value=value;
+        input.maxLength=name==='subject'?250:4000;context[name]=input;form.append(l,input);
+    }
+    const l=node('label','Nachricht');l.htmlFor='compose-body';const body=node('textarea');body.id=l.htmlFor;body.name='body';body.required=true;body.maxLength=100000;body.value=saved?.body||'';context.body=body;form.append(l,body);
+    const signature=node('div',undefined,'mail-signature');signature.append($('mail-signature').content.cloneNode(true));form.append(signature);
+    if(context.reply){const details=node('details');details.append(node('summary','Ursprüngliche Nachricht'),node('div',context.reply.body,'mail-quote'));form.append(details);}
+    const al=node('label','Anhänge');al.htmlFor='compose-files';const file=node('input');file.type='file';file.multiple=true;file.name='attachments';file.id=al.htmlFor;context.files=file;
+    const fileList=node('ul',undefined,'mail-file-list'),fileNote=node('p','Zusammen höchstens 18 MB.','mail-attachment-note');
+    const clearFiles=node('button','Anhänge entfernen','mail-btn');clearFiles.type='button';context.clearFiles=clearFiles;
+    function updateFiles(){
+        fileList.replaceChildren();for(const f of file.files)fileList.append(node('li',f.name+' · '+(f.size/1024/1024).toLocaleString('de-DE',{maximumFractionDigits:2})+' MB'));
+        fileNote.textContent=context.missingFiles.length?'Bitte Anhänge erneut auswählen oder entfernen: '+context.missingFiles.join(', '):'Zusammen höchstens 18 MB.';
+        clearFiles.hidden=!file.files.length&&!context.missingFiles.length;
+        cacheComposer(context);composerControls(context);
+    }
+    file.onchange=()=>{context.missingFiles=context.expectedFiles.filter(name=>!Array.from(file.files).some(f=>f.name===name));updateFiles();};
+    clearFiles.onclick=()=>{file.value='';context.missingFiles=[];context.expectedFiles=[];updateFiles();};
+    form.append(al,file,fileList,fileNote,clearFiles);
+    const feedback=node('div',undefined,'mail-compose-result');feedback.setAttribute('role','status');feedback.setAttribute('aria-live','polite');context.feedback=feedback;form.append(feedback);
+    const bar=node('div',undefined,'mail-toolbar');bar.style.marginTop='20px';
+    const send=node('button','E-Mail senden','mail-primary'),draft=node('button','Entwurf speichern','mail-btn'),discard=node('button','Verwerfen','mail-btn');
+    for(const button of [send,draft,discard])button.type='button';Object.assign(context,{send,draft,discard});
+    function info(text,warning=false){feedback.classList.toggle('warning',warning);feedback.replaceChildren(node('div',text));}
+    function action(label,fn){const b=node('button',label,'mail-btn');b.type='button';b.onclick=fn;feedback.append(b);return b;}
+    async function check(){
+        if(context.busy)return;context.busy=true;composerControls(context);
+        try{showResult(await api('/admin/mail/outbox/'+context.token));}
+        catch(error){info(error.message+' Dein Entwurf bleibt erhalten. Bitte den Status erneut prüfen.',true);action('Versandstatus prüfen',check);}
+        finally{context.busy=false;composerControls(context);cacheComposer(context);}
+    }
+    async function copy(){
+        if(context.busy)return;context.busy=true;composerControls(context);
+        try{showResult(await api('/admin/mail/outbox/'+context.token+'/copy',{method:'POST',body:new URLSearchParams({csrf_token:CSRF})}));}
+        catch(error){info(error.message+' Es wurde keine weitere E-Mail versandt.',true);action('Versandstatus prüfen',check);}
+        finally{context.busy=false;composerControls(context);cacheComposer(context);}
+    }
+    function showResult(result){
+        const state=result.state;context.attempted=state!=='not_sent';
+        context.notFoundRetry=state==='not_found';context.retryButton=null;
+        context.finished=state==='sent';
+        if(state==='not_found'){
+            info('Es wurde noch kein Versand gespeichert. Du kannst dieselbe Nachricht erneut übergeben. Der Schutz vor doppeltem Versand bleibt aktiv. Fehlende Anhänge bitte vorher erneut auswählen.',true);
+            context.retryButton=action('Dieselbe Nachricht erneut übergeben',()=>submit('/admin/mail/send',true));
+            action('Versandstatus prüfen',check);
+        }else{
+            info(result.message||'Versandstatus wird geprüft.',state!=='sent');
+            deliveryRecipients(feedback,result);
+            if(result.can_retry_copy)action('Kopie in Gesendet nachholen',copy);
+            if(['sending','uncertain'].includes(state))action('Versandstatus prüfen',check);
+            if(result.payload_available){const link=node('a','Nachricht mit Anhängen herunterladen','mail-btn');link.href='/admin/mail/outbox/'+context.token+'/eml';feedback.append(link);}
+            if(state==='not_sent'){
+                // A new token permits correcting recipient/text only after definite non-delivery.
+                context.token=crypto.randomUUID();context.attempted=false;
+            }
+            if(['uncertain','partial','copy_pending'].includes(state))action('Andere E-Mail schreiben',()=>{if(composer===context){context.finished=true;cacheComposer(context);composer=null;compose();}});
+            if(state==='sent')action('Neue E-Mail',()=>{if(composer===context){composer=null;compose();}});
+        }
+        cacheComposer(context);composerControls(context);
+    }
+    async function submit(path,retry=false){
+        if(context.busy||context.attempted&&!retry||context.missingFiles.length||!form.reportValidity())return;
+        if(Array.from(file.files).reduce((n,f)=>n+f.size,0)>18*1024*1024){info('Anhänge dürfen zusammen höchstens 18 MB groß sein.',true);return;}
+        const data=new FormData(form);data.set('csrf_token',CSRF);data.set('send_token',context.token);
+        if(retry){
+            for(const name of ['to','subject','body'])data.set(name,context[name].value);
+            data.delete('attachments');for(const f of file.files)data.append('attachments',f);
+        }
+        if(context.reply){data.set('reply_id',context.reply.message_id||'');data.set('references',(context.reply.references||'').replace(/[\r\n]+\s*/g,' '));data.set('quoted_body',context.reply.body||'');}
+        context.busy=true;context.attempted=path.endsWith('/send');cacheComposer(context);composerControls(context);info('Nachricht wird übergeben …');
+        try{
+            const result=await api(path,{method:'POST',body:data});
+            if(path.endsWith('/draft')){info(result.message);context.finished=true;}
+            else showResult(result);
+        }catch(error){
+            const definite=!retry&&([400,401,403,413].includes(error.httpStatus)||error.login);
+            if(definite){context.attempted=false;context.token=crypto.randomUUID();info(error.message+' Dein Text und die Anhänge bleiben erhalten.',true);}
+            else{info(error.message+' Dein Entwurf bleibt erhalten. Bitte den Versandstatus prüfen; nicht erneut als neue Nachricht senden.',true);action('Versandstatus prüfen',check);}
+        }finally{context.busy=false;composerControls(context);cacheComposer(context);}
+    }
+    send.onclick=()=>submit('/admin/mail/send');draft.onclick=()=>submit('/admin/mail/draft');
+    discard.onclick=()=>{if(context.attempted&&!context.finished)return;if(!context.finished&&(body.value||context.to.value||file.files.length)&&!confirm('Diesen Entwurf verwerfen?'))return;
+        context.finished=true;cacheComposer(context);if(composer===context){composer=null;$('reader').replaceChildren(node('div','Entwurf verworfen.','mail-empty'));}};
+    bar.append(send,draft,discard);form.append(bar);
+    form.addEventListener('input',()=>cacheComposer(context));
+    if(!SEND)form.append(node('p','Vorschau: Der E-Mail-Versand ist ausgeschaltet.','mail-safe'));
+    else form.append(node('p','Gesendet wird erst mit deinem Klick auf „E-Mail senden“. Die Kopie erscheint bei IONOS unter Gesendet.','mail-safe'));
+    showComposer(context);updateFiles();
+    if(saved?.attempted)check();
+}
+async function sendHistory(){
+    const serial=++detailSerial;selected=null;$('shell').classList.add('reading');
+    const container=node('div');$('reader').replaceChildren(back(),node('h2','Versandverlauf'),container);
+    container.append(node('p','Hier siehst du die letzten 30 Versandvorgänge aus dem Cockpit.','mail-safe'));
+    try{
+        const result=await api('/admin/mail/outbox');if(serial!==detailSerial)return;
+        if(!result.items.length)container.append(node('p','Noch keine E-Mails aus dem Cockpit versandt.'));
+        for(const item of result.items){
+            const card=node('section',undefined,'mail-compose-result');container.append(card);
+            function draw(value){
+                card.classList.toggle('warning',value.state!=='sent');
+                card.replaceChildren(node('h3',value.subject||item.subject||'Nachricht'),node('div','An: '+(value.to||item.to||'')),
+                    node('div',new Date(typeof (value.created_at||item.created_at)==='number'?(value.created_at||item.created_at)*1000:(value.created_at||item.created_at)).toLocaleString('de-DE'),'mail-meta'),node('p',value.message));
+                deliveryRecipients(card,value);
+                const bar=node('div',undefined,'mail-toolbar');card.append(bar);
+                async function refresh(copy=false){
+                    for(const b of bar.querySelectorAll('button'))b.disabled=true;
+                    try{draw(await api('/admin/mail/outbox/'+item.token+(copy?'/copy':''),copy?{method:'POST',body:new URLSearchParams({csrf_token:CSRF})}:{}));}
+                    catch(error){card.append(node('p',error.message));for(const b of bar.querySelectorAll('button'))b.disabled=false;}
+                }
+                const check=node('button','Status prüfen','mail-btn');check.onclick=()=>refresh();bar.append(check);
+                if(value.can_retry_copy&&SEND){const copy=node('button','Kopie in Gesendet nachholen','mail-btn');copy.onclick=()=>refresh(true);bar.append(copy);}
+                if(value.payload_available){const a=node('a','Nachricht herunterladen','mail-btn');a.href='/admin/mail/outbox/'+item.token+'/eml';bar.append(a);}
+            }
+            draw(item);
+        }
+    }catch(error){if(serial===detailSerial){container.append(node('p',error.message));const retry=node('button','Erneut laden','mail-btn');retry.onclick=sendHistory;container.append(retry);}}
+}
+$('send-history').onclick=sendHistory;
+$('resume-draft').onclick=()=>{if(composer)showComposer(composer);};
 $('compose').onclick=()=>compose();$('refresh').onclick=load;$('search').onsubmit=e=>{e.preventDefault();if(loading)return;query=$('query').value;page=1;load();};$('prev').onclick=()=>{if(loading)return;page--;load();};$('next').onclick=()=>{if(loading)return;page++;load();};load();
+try{const saved=JSON.parse(sessionStorage.getItem(DRAFT_KEY)||'null');if(saved)compose(null,saved);}catch(error){}
 })();
 </script>
 {% endblock %}

@@ -8489,6 +8489,10 @@ DATA_CHANGE_ENDPOINT_EXCLUDES = {
     "api_klick_event",
     # Lesemarkierungen betreffen ausschliesslich IONOS, keine Portal-Daten.
     "mailbox.mark_read",
+    # Der Versandkern sichert Nachrichten selbst bis zur bestätigten IONOS-Kopie.
+    "mailbox.send",
+    "mailbox.retry_sent_copy",
+    "mailbox.draft",
     "login",
     "partner_login",
     "partner_login_key",
@@ -26373,6 +26377,30 @@ def get_werkstatt_imap_config():
         "search": search,
         "limit": MAIL_IMAP_LIMIT,
         "timeout": MAIL_IMAP_TIMEOUT_SECONDS,
+    }
+
+
+def get_werkstatt_smtp_config():
+    """Use the visible mailbox identity for SMTP, independently of Schaden aliases."""
+    imap = get_werkstatt_imap_config()
+    ionos_hosts = {
+        "imap.ionos.de": "smtp.ionos.de", "imap.1und1.de": "smtp.ionos.de",
+        "imap.ionos.com": "smtp.ionos.com", "imap.1and1.com": "smtp.ionos.com",
+    }
+    default_host = ionos_hosts.get(imap["host"].lower(), "")
+    host = clean_text(os.environ.get("MAIL_SMTP_HOST") or default_host)
+    user = clean_text(os.environ.get("MAIL_SMTP_USER") or imap["user"])
+    password = clean_secret_value(os.environ.get("MAIL_SMTP_PASS") or (imap["password"] if default_host and host.lower() == default_host and user.lower() == imap["user"].lower() else ""))
+    address = imap["user"].lower()
+    use_ssl = env_flag("MAIL_SMTP_SSL", True)
+    return {
+        "from_address": address,
+        "display_name": clean_text(os.environ.get("MAIL_SMTP_DISPLAY_NAME") or "Christopher Gärtner · Karosserie & Lack Gärtner GmbH"),
+        "smtp_configured": bool(host and user and password and address),
+        "smtp_host": host, "smtp_port": env_int("MAIL_SMTP_PORT", 465 if use_ssl else 587),
+        "smtp_user": user, "_smtp_password": password,
+        "smtp_ssl": use_ssl, "smtp_tls": env_flag("MAIL_SMTP_TLS", not use_ssl),
+        "local_hostname": smtp_lokaler_hostname(),
     }
 
 
@@ -55978,7 +56006,9 @@ from mailbox_client import register_mailbox
 app.config["MAILBOX_MOVE_ENABLED"] = env_flag("MAILBOX_MOVE_ENABLED", True)
 app.config["MAILBOX_FLAGS_ENABLED"] = env_flag("MAILBOX_FLAGS_ENABLED", RUNNING_ON_RENDER)
 app.config["MAILBOX_WRITE_ENABLED"] = False
-register_mailbox(app, admin_required, get_werkstatt_imap_config, get_schaden_mail_config, get_db)
+app.config["MAILBOX_SEND_ENABLED"] = env_flag("MAILBOX_SEND_ENABLED", RUNNING_ON_RENDER)
+app.config["MAILBOX_OUTBOX_DIR"] = os.environ.get("MAILBOX_OUTBOX_DIR") or str(UPLOAD_DIR.parent / "mail_outbox")
+register_mailbox(app, admin_required, get_werkstatt_imap_config, get_werkstatt_smtp_config, get_db)
 
 init_db()
 

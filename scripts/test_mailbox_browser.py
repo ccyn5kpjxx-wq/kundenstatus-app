@@ -14,13 +14,13 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = "http://127.0.0.1:59991"
 
 
-def rendered_mailbox(flags=False):
+def rendered_mailbox(flags=False, send=False):
     env = Environment(loader=ChoiceLoader([
         DictLoader({"base.html": "<!doctype html><html><head><meta charset='utf-8'>{% block extra_css %}{% endblock %}</head><body>{% block content %}{% endblock %}</body></html>"}),
         FileSystemLoader(ROOT / "templates"),
     ]), autoescape=True)
     return env.get_template("mailbox.html").render(
-        mail_write=False, mail_move=True, mail_flags=flags, mail_address="test@example.invalid",
+        mail_write=False, mail_move=True, mail_flags=flags, mail_send=send, mail_address="test@example.invalid",
         csrf_token=lambda: "synthetic-csrf",
         url_for=lambda endpoint, **kw: "/login" if endpoint == "login" else "/" + endpoint,
     )

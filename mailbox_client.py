@@ -3,7 +3,7 @@ import base64
 import email
 from email import policy
 from email.message import EmailMessage
-from email.utils import getaddresses, formatdate, make_msgid
+from email.utils import getaddresses, formatdate, make_msgid, formataddr
 from html.parser import HTMLParser
 import io
 import html
@@ -13,6 +13,7 @@ import re
 import ssl
 import smtplib
 import uuid
+import mimetypes
 from contextlib import contextmanager
 from flask import Blueprint, render_template, request, jsonify, send_file, abort, current_app
 
@@ -66,7 +67,7 @@ def message_view(raw, uid, flags=''):
     return {'uid':str(uid),'subject':str(msg.get('Subject','(Ohne Betreff)')),'sender':str(msg.get('From','')),
             'to':str(msg.get('To','')),'date':str(msg.get('Date','')),'unread':not seen_flag(flags),
             'body':text,'attachments':attachments,'reply_to':str(msg.get('Reply-To',msg.get('From',''))),
-            'message_id':str(msg.get('Message-ID',''))}
+            'message_id':str(msg.get('Message-ID','')),'references':str(msg.get('References',''))}
 
 
 class Mailbox:
@@ -153,6 +154,7 @@ class Mailbox:
 def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
     bp=Blueprint('mailbox',__name__);service=Mailbox(imap_config)
     def enabled():return bool(current_app.config.get('MAILBOX_WRITE_ENABLED',False))
+    def send_enabled():return bool(current_app.config.get('MAILBOX_SEND_ENABLED',enabled()))
     def move_enabled():return bool(current_app.config.get('MAILBOX_MOVE_ENABLED',False)) or enabled()
     def flags_enabled():return bool(current_app.config.get('MAILBOX_FLAGS_ENABLED',False))
     def writable():
@@ -165,7 +167,7 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
     def network_error(exc):return jsonify(error='Mailserver momentan nicht erreichbar. Bitte erneut versuchen.'),502
     @bp.get('/admin/mail')
     @admin_required
-    def index():return render_template('mailbox.html',mail_address=imap_config().get('user',''),mail_write=enabled(),mail_move=move_enabled(),mail_flags=flags_enabled())
+    def index():return render_template('mailbox.html',mail_address=imap_config().get('user',''),mail_write=enabled(),mail_send=send_enabled(),mail_move=move_enabled(),mail_flags=flags_enabled())
     @bp.get('/admin/mail/messages')
     @admin_required
     def listing():return jsonify(service.listing(request.args.get('folder','INBOX'),request.args.get('page',1,type=int),request.args.get('q','')[:200]))
@@ -218,18 +220,42 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
 
     def outgoing():
         msg=EmailMessage();cfg=smtp_config()
-        recipients=getaddresses([request.form.get('to','')])
-        if not recipients or any(not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+',addr) for _,addr in recipients):raise ValueError('Bitte gültige Empfänger angeben.')
-        msg['From']=cfg['from_address'];msg['To']=', '.join(addr for _,addr in recipients)
-        msg['Subject']=request.form.get('subject','')[:250];msg['Date']=formatdate(localtime=True);msg['Message-ID']=make_msgid(domain=cfg['from_address'].split('@')[-1])
-        if request.form.get('reply_id'):msg['In-Reply-To']=request.form['reply_id'];msg['References']=request.form['reply_id']
-        body=request.form.get('body','')[:100000]
+        recipient_text=request.form.get('to','').strip()
+        subject=request.form.get('subject','').strip()
+        if any(c in recipient_text+subject for c in '\r\n\x00'):
+            raise ValueError('Empfänger und Betreff dürfen keine Zeilenumbrüche enthalten.')
+        if len(recipient_text)>4000 or len(subject)>250:
+            raise ValueError('Empfänger sind zu lang oder der Betreff überschreitet 250 Zeichen.')
+        recipients=getaddresses([recipient_text])
+        if not recipients or len(recipients)>20 or any(not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+',addr) for _,addr in recipients):
+            raise ValueError('Bitte gültige Empfänger angeben (höchstens 20).')
+        if not subject:raise ValueError('Bitte einen Betreff eingeben.')
+        body=request.form.get('body','')
+        quoted=request.form.get('quoted_body','')
+        if not body.strip():raise ValueError('Bitte eine Nachricht schreiben.')
+        if len(body)+len(quoted)>100000:raise ValueError('Die Nachricht ist zu lang. Bitte auf 100.000 Zeichen kürzen.')
+        address=cfg.get('from_address','')
+        if address.lower()!=imap_config().get('user','').lower() or not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+',address):
+            raise ValueError('Absender und geöffnetes Postfach stimmen nicht überein. Bitte Konfiguration prüfen.')
+        msg['From']=formataddr((cfg.get('display_name','Christopher Gärtner · Karosserie & Lack Gärtner GmbH'),address))
+        msg['Reply-To']=address
+        msg['To']=', '.join(formataddr((name,addr)) for name,addr in recipients)
+        msg['Subject']=subject;msg['Date']=formatdate(localtime=True);msg['Message-ID']=make_msgid(domain=address.split('@')[-1])
+        reference_text=request.form.get('references','')
+        reply_id=request.form.get('reply_id','')
+        if any(c in reference_text+reply_id for c in '\r\n\x00') or len(reference_text)>16000:
+            raise ValueError('Die Antwort-Zuordnung ist ungültig. Bitte Nachricht erneut öffnen.')
+        if reply_id and re.fullmatch(r'<[^<>\s]+>',reply_id):
+            references=list(dict.fromkeys(re.findall(r'<[^<>\s]+>',reference_text)+[reply_id]))[-30:]
+            msg['In-Reply-To']=reply_id;msg['References']=' '.join(references)
         signature_text='Christopher Gärtner\nGründer & Geschäftsführer\nKarosserie & Lack Gärtner GmbH\nBinauer Höhe 4 · 74821 Mosbach-Lohrbach\nTelefon: +49 152 27706694\nE-Mail: info@auto-lackierzentrum.de\nInternet: www.auto-lackierzentrum.de'
-        msg.set_content(body+'\n\n'+signature_text)
+        quote_text='\n\n--- Ursprüngliche Nachricht ---\n'+quoted if quoted else ''
+        msg.set_content(body+'\n\n'+signature_text+quote_text)
         signature=render_template('_mail_signature.html')
         images=[('/static/logo-transparent.png','signature-logo','image','png'),('/static/homepage/portrait.webp','signature-portrait','image','webp')]
         for url,cid,_,_ in images:signature=signature.replace(url,'cid:'+cid)
-        msg.add_alternative('<div style="white-space:pre-wrap">'+html.escape(body)+'</div><br>'+signature,subtype='html')
+        quoted_html='<hr><blockquote style="white-space:pre-wrap">'+html.escape(quoted)+'</blockquote>' if quoted else ''
+        msg.add_alternative('<div style="white-space:pre-wrap">'+html.escape(body)+'</div><br>'+signature+quoted_html,subtype='html')
         for url,cid,maintype,subtype in images:
             payload=(Path(current_app.static_folder)/url.removeprefix('/static/')).read_bytes()
             msg.get_payload()[-1].add_related(payload,maintype=maintype,subtype=subtype,cid='<'+cid+'>',disposition='inline')
@@ -238,12 +264,21 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
             if not file.filename:continue
             payload=file.read(MAX_MESSAGE+1);total+=len(payload)
             if total>18*1024*1024:raise ValueError('Anhänge dürfen zusammen höchstens 18 MB groß sein.')
-            msg.add_attachment(payload,maintype='application',subtype='octet-stream',filename=file.filename)
+            filename=file.filename.replace('\\','/').rsplit('/',1)[-1]
+            if not filename or any(c in filename for c in '\r\n\x00') or len(filename)>240:
+                raise ValueError('Ein Anhang hat einen ungültigen oder zu langen Dateinamen.')
+            content_type=mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+            if content_type.startswith('message/'):
+                content_type='application/octet-stream'
+            maintype,subtype=content_type.split('/',1)
+            msg.add_attachment(payload,maintype=maintype,subtype=subtype,filename=filename)
+        if len(msg.as_bytes(policy=policy.SMTP))>MAX_MESSAGE:
+            raise ValueError('Die fertige E-Mail überschreitet 25 MB. Bitte Anhänge verkleinern.')
         return msg,cfg
     def append_special(msg,flag):
         with service.connect() as c:
             folders=service.folders(c);target=next((f['id'] for f in folders if flag in f['flags']),None)
-            aliases={'\\Sent':('sent','sent items','gesendet'),'\\Drafts':('drafts','entwürfe')}
+            aliases={'\\Sent':('sent','sent items','sent messages','gesendet','gesendete objekte'),'\\Drafts':('drafts','entwürfe')}
             target=target or next((f['id'] for f in folders if f['label'].lower() in aliases[flag]),None)
             if not target:raise ValueError('Zielordner fehlt. Nachricht wurde nicht im Postfach abgelegt.')
             status,_=c.append(quote(target),r'(\Draft)' if flag=='\\Drafts' else r'(\Seen)',None,msg.as_bytes(policy=policy.SMTP))
@@ -255,32 +290,46 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
     @bp.post('/admin/mail/send')
     @admin_required
     def send():
-        writable();msg,cfg=outgoing()
-        token=request.form.get('send_token','')
-        try:uuid.UUID(token)
-        except ValueError:raise ValueError('Ungültiger Versandvorgang.')
-        db=get_db()
-        try:
-            db.execute('CREATE TABLE IF NOT EXISTS mailbox_send_guard (token TEXT PRIMARY KEY, status TEXT NOT NULL)')
-            cursor=db.execute("INSERT INTO mailbox_send_guard(token,status) VALUES (?, 'sending') ON CONFLICT(token) DO NOTHING",(token,));db.commit()
-            if cursor.rowcount!=1:return jsonify(error='Dieser Versand wurde bereits gestartet. Bitte Gesendet prüfen; nicht erneut senden.'),409
-        finally:db.close()
-        if not cfg.get('smtp_configured'):raise ValueError('SMTP noch nicht eingerichtet.')
-        if not (cfg.get('smtp_ssl') or cfg.get('smtp_tls')):raise ValueError('Verschlüsselter SMTP-Zugang erforderlich.')
-        try:
-            smtp=(smtplib.SMTP_SSL(cfg['smtp_host'],cfg['smtp_port'],context=ssl.create_default_context(),timeout=30) if cfg['smtp_ssl'] else smtplib.SMTP(cfg['smtp_host'],cfg['smtp_port'],timeout=30))
-            with smtp:
-                if not cfg['smtp_ssl']:smtp.starttls(context=ssl.create_default_context())
-                smtp.login(cfg['smtp_user'],cfg['_smtp_password']);refused=smtp.send_message(msg)
-            if refused:raise ValueError('Nicht alle Empfänger angenommen. Vor erneutem Versand prüfen.')
-        except Exception:
-            return jsonify(error='Versandstatus unklar. Bitte Gesendet prüfen, bevor du erneut sendest.'),502
-        db=get_db()
-        try:db.execute("UPDATE mailbox_send_guard SET status='accepted' WHERE token=?",(token,));db.commit()
-        finally:db.close()
-        try:append_special(msg,'\\Sent')
-        except Exception:return jsonify(ok=True,message='Vom Mailserver angenommen; Kopie in Gesendet konnte nicht gespeichert werden. Nicht erneut senden.')
-        return jsonify(ok=True,message='Vom Mailserver angenommen und in Gesendet gespeichert.')
+        if not send_enabled():abort(403,description='E-Mail-Versand ist ausgeschaltet.')
+        token=valid_token(request.form.get('send_token',''))
+        queue=outbox()
+        existing=queue.status(token)
+        if existing and existing['state']!='not_sent':return jsonify(existing)
+        msg,cfg=outgoing()
+        return jsonify(queue.send(token,msg,cfg))
+
+    def valid_token(token):
+        try:return str(uuid.UUID(token))
+        except (ValueError,TypeError,AttributeError):raise ValueError('Ungültiger Versandvorgang.')
+
+    def outbox():
+        from mailbox_outbox import MailOutbox
+        path=current_app.config.get('MAILBOX_OUTBOX_DIR',str(Path(current_app.instance_path)/'mail_outbox'))
+        return MailOutbox(get_db,path,service)
+
+    @bp.get('/admin/mail/outbox')
+    @admin_required
+    def send_history():
+        return jsonify(items=outbox().recent(limit=30))
+
+    @bp.get('/admin/mail/outbox/<token>')
+    @admin_required
+    def send_status(token):
+        result=outbox().status(valid_token(token))
+        return jsonify(result or dict(state='not_found',token=token,message='Für diesen Vorgang ist noch kein Versand gespeichert.'))
+
+    @bp.post('/admin/mail/outbox/<token>/copy')
+    @admin_required
+    def retry_sent_copy(token):
+        if not send_enabled():abort(403,description='E-Mail-Versand ist ausgeschaltet.')
+        return jsonify(outbox().retry_copy(valid_token(token)))
+
+    @bp.get('/admin/mail/outbox/<token>/eml')
+    @admin_required
+    def outgoing_file(token):
+        try:raw=outbox().payload(valid_token(token))
+        except FileNotFoundError:abort(404,description='Die Nachricht ist bereits in Gesendet oder nicht mehr lokal gespeichert.')
+        return send_file(io.BytesIO(raw),mimetype='message/rfc822',download_name='Nachricht.eml',as_attachment=True)
     app.register_blueprint(bp)
     return service
 

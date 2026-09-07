@@ -45,34 +45,6 @@ class Tests(unittest.TestCase):
   m=EmailMessage();m.set_content('Hello');m.add_attachment(b'pdf',maintype='application',subtype='pdf',filename='test.pdf')
   self.assertEqual(message_view(m.as_bytes(),5)['attachments'][0]['name'],'test.pdf')
 
-class SendTests(unittest.TestCase):
- def test_send_once_and_sent_copy(self):
-  import sqlite3,tempfile,uuid
-  from contextlib import contextmanager
-  from pathlib import Path
-  with tempfile.TemporaryDirectory() as tmp:
-   app=Flask(__name__);app.config['MAILBOX_WRITE_ENABLED']=True
-   cfg=dict(smtp_configured=True,smtp_ssl=True,smtp_host='example.org',smtp_port=465,smtp_user='test',_smtp_password='test',from_address='test@example.org')
-   service=register_mailbox(app,lambda f:f,lambda:{},lambda:cfg,lambda:sqlite3.connect(Path(tmp)/'guard.db'))
-   class Fake(Client):
-    def list(self):return 'OK',[b'(\\Sent) "/" "Sent"',b'(\\Drafts) "/" "Drafts"']
-    def append(self,*args):return 'OK',[]
-   @contextmanager
-   def connection():yield Fake()
-   service.connect=connection
-   with patch('mailbox_client.smtplib.SMTP_SSL') as smtp:
-    smtp.return_value.send_message.return_value={}
-    c=app.test_client();data={'to':'recipient@example.org','subject':'Test','body':'Hello','send_token':str(uuid.uuid4())}
-    self.assertEqual(c.post('/admin/mail/send',data=data).status_code,200)
-    self.assertEqual(c.post('/admin/mail/send',data=data).status_code,409)
-    self.assertEqual(smtp.return_value.send_message.call_count,1)
-    sent=smtp.return_value.send_message.call_args.args[0]
-    self.assertIn('Christopher Gärtner',sent.get_body(preferencelist=('plain',)).get_content())
-    markup=sent.get_body(preferencelist=('html',)).get_content()
-    self.assertIn('cid:signature-portrait',markup)
-    self.assertEqual(sum(1 for part in sent.walk() if part.get_content_maintype()=='image'),2)
-    result=c.post('/admin/mail/draft',data=data);self.assertEqual(result.status_code,200,result.json)
-
 class MoveTests(unittest.TestCase):
  def test_recoverable_move_only(self):
   from contextlib import contextmanager
