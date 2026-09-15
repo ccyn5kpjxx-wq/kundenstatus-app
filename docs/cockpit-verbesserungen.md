@@ -11,6 +11,12 @@ Die Auftragsseite unter `/status/<token>` zeigt Fahrzeug und Bearbeitungsstand z
 - Die Übersicht zeigt die neueste freigegebene Nachricht. Interne Vermerke und Dokumente werden auch aus Metadaten, Verlauf und direkten Datei-URLs herausgefiltert.
 - Das Werkstattmotiv im Kopfbereich ist ausdrücklich als Symbolbild gekennzeichnet; es behauptet keinen konkreten Fahrzeugfortschritt.
 
+## Partner-Auftragsansicht
+
+Auch die Auftragsseite der Autohäuser unter `/partner/<slug>/auftrag/<id>` verwendet das moderne Erscheinungsbild. Sie ist eine eigene Ansicht neben dem öffentlichen Kundenlink. Partnerlogo, Fahrzeug, tatsächlicher Bearbeitungsstand und nächster Schritt stehen oben; Übersicht, Auftrag und Termine, Unterlagen, Nachrichten sowie weitere Aktionen sind getrennt erreichbar.
+
+Das vollständige ursprüngliche Bearbeitungsformular bleibt zusammen. Bereichswechsel speichern nichts und erhalten Eingaben sowie ausgewählte Dateien. Direktlinks auf Pflichtfelder oder Reklamationen öffnen den passenden Bereich und dessen aufklappbare Abschnitte. Die bestehenden serverseitigen Berechtigungen und Dokumentfreigaben bleiben maßgeblich.
+
 ## Werkstatt
 
 Der interne Auftrag gliedert sich in Übersicht, Arbeiten und Termine, Dokumente, Preise und Rechnung sowie Verlauf. Die Tagesaktionen stehen vor Kalender und Nebeninformationen. Noch nicht eingeplante, tatsächlich verfügbare Arbeiten können in das bestehende Aufgabenformular übernommen werden; dabei wird nichts automatisch gespeichert.
@@ -27,12 +33,13 @@ Kunde, Partner und Versicherung haben getrennte Freigaben. Alte interne Dokument
 
 ## Lokale Vorschau
 
-`python scripts/cockpit_preview.py` startet ausschließlich auf `127.0.0.1:5093` mit einer neu erzeugten temporären Datenbank. `/demo/kunde` öffnet die Kundenseite; `/demo` öffnet die interne Ansicht. Die Demo verwendet erfundene Daten und sperrt ausgehende Provideraufrufe und E-Mail-Versand. Sie ist kein Produktionsstartskript.
+`python scripts/cockpit_preview.py` startet ausschließlich auf `127.0.0.1:5093` mit einer neu erzeugten temporären Datenbank. `/demo/kunde` öffnet die Kundenseite, `/demo/partner` einen synthetischen Partnerauftrag und `/demo` die interne Ansicht. Über `COCKPIT_PREVIEW_PORT` lässt sich ein freier lokaler Port wählen. Die Demo verwendet erfundene Daten und sperrt ausgehende Provideraufrufe und E-Mail-Versand. Sie ist kein Produktionsstartskript.
 
 ## Prüfung
 
 - `scripts/test_cockpit_safety.py`: 21 isolierte Flask-Tests zu Preisen, Datenübernahme, Freigaben, sichtbaren Metadaten, Kontakten, Rechnungsrennen, CSRF und Planung.
 - `scripts/test_cockpit_customer.py`: Browserprüfungen mit synthetischen Daten, einschließlich Entwurfserhalt, Direkteinstieg, Tastatur, Angebotsbestätigung, Handybreite und Verhalten ohne JavaScript.
+- `scripts/test_cockpit_partner.py`: zwölf Browserprüfungen der Partneransicht, einschließlich Vergleich sämtlicher Formularfelder und Endpunkte mit der bisherigen Fassung, Datenprüfung, Anhangserhalt, Direktlinks, Abholbereitschaft und Verhalten ohne JavaScript. Sämtliche Anfragen werden lokal abgefangen.
 - `scripts/test_cockpit_planning.py`: 9 Planungsprüfungen.
 - Smoke-, Ablauf- und Lead-Portal-Tests laufen mit synthetischen temporären Daten, unterdrückten lokalen Umgebungsdateien und gesperrten Netzwerkverbindungen.
 

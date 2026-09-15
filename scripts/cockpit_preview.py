@@ -62,8 +62,32 @@ def setup():
     return order_id
 
 
+def setup_partner():
+    """Partner order lives only in the disposable preview database."""
+    partner = portal.get_autohaus_by_slug('autohaus-guenther-gmbh')
+    if not partner:
+        raise RuntimeError('Synthetic preview requires the seeded partner configuration.')
+    today = date.today()
+    order_id = portal.create_auftrag(
+        'autohaus', autohaus_id=partner['id'], kunde_name='Beispielauftrag',
+        fahrzeug='Audi A3', kennzeichen='DEMO-A 123',
+        beschreibung='Stoßfänger instand setzen und in Fahrzeugfarbe lackieren.',
+        analyse='Stoßfänger vorbereiten und lackieren',
+        annahme_datum=today.strftime(portal.DATE_FMT),
+        abholtermin=(today+timedelta(days=2)).strftime(portal.DATE_FMT),
+        transport_art='hol_und_bring', kontakt_telefon='0000000000',
+    )
+    db = portal.get_db()
+    db.execute("UPDATE auftraege SET status=3,produktion_schritt='lackierung',analyse_pruefen=1 WHERE id=?", (order_id,))
+    db.commit()
+    db.close()
+    portal.add_chat_nachricht(order_id, 'werkstatt', 'Die Vorbereitungen sind abgeschlossen. Ihr Fahrzeug ist in der Lackierung.')
+    return partner, order_id
+
+
 if __name__=='__main__':
     DEMO_ORDER=setup()
+    DEMO_PARTNER, DEMO_PARTNER_ORDER = setup_partner()
     @portal.app.context_processor
     def demo_context():return {'cockpit_demo':True}
     @portal.app.get('/demo')
@@ -76,6 +100,10 @@ if __name__=='__main__':
         token = db.execute('SELECT kunden_status_token FROM auftraege WHERE id=?', (DEMO_ORDER,)).fetchone()[0]
         db.close()
         return redirect(url_for('kunden_status', token=token))
+    @portal.app.get('/demo/partner')
+    def demo_partner():
+        session['partner_autohaus_id'] = DEMO_PARTNER['id']
+        return redirect(url_for('partner_auftrag', slug=DEMO_PARTNER['slug'], auftrag_id=DEMO_PARTNER_ORDER))
     print(f'LOCAL_DEMO http://127.0.0.1:{PORT}/demo',flush=True)
     print(f'DEMO_DATA {STORE}',flush=True)
     portal.app.run(host='127.0.0.1',port=PORT,debug=False,use_reloader=False)
