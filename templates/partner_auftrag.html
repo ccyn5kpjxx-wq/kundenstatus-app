@@ -8,616 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    body { background:#f6f7f5; font-family:"DM Sans",sans-serif; color:#102033; }
-    h1,h2,h3,h4,h5 { font-family:"Space Grotesk",sans-serif; }
-    .shell { max-width:1180px; margin:0 auto; padding:28px 16px; }
-    .panel { background:#fff; border:1px solid #e4e8e5; border-radius:18px; box-shadow:0 12px 30px rgba(24,38,45,.08); padding:24px; }
-    .form-control,
-    .form-select,
-    .btn {
-      min-height:48px;
-      font-size:16px;
-    }
-    textarea.form-control { min-height:112px; }
-    .mobile-actions { display:flex; gap:.75rem; flex-wrap:wrap; }
-    .chip { display:inline-flex; align-items:center; padding:.4rem .75rem; border-radius:999px; background:#eef3f1; border:1px solid #d6e0dc; margin:0 .4rem .4rem 0; }
-    .timeline-item { border-left:3px solid #ccd8d4; padding-left:1rem; margin-left:.35rem; }
-    .hero-panel {
-      background:
-        radial-gradient(circle at 8% 10%, rgba(43,128,139,.18), transparent 30%),
-        linear-gradient(135deg, #132635, #24465c 58%, #7f4624);
-      color:#fff;
-      border-radius:22px;
-      padding:30px;
-      box-shadow:0 18px 46px rgba(30,38,45,.2);
-    }
-    .hero-panel .text-muted { color:rgba(255,255,255,.72) !important; }
-    .hero-top {
-      display:grid;
-      grid-template-columns:minmax(0,1fr) minmax(165px,220px) auto;
-      align-items:start;
-      gap:16px;
-    }
-    .hero-copy { min-width:0; }
-    .hero-badge {
-      display:inline-flex;
-      align-items:center;
-      gap:.45rem;
-      padding:.55rem .85rem;
-      border-radius:999px;
-      background:rgba(255,255,255,.14);
-      border:1px solid rgba(255,255,255,.24);
-      font-weight:700;
-    }
-    .hero-actions {
-      display:flex;
-      align-items:center;
-      justify-content:flex-end;
-      gap:8px;
-      flex-wrap:wrap;
-    }
-    .hero-partner-mark {
-      display:flex;
-      min-width:0;
-      min-height:82px;
-      flex-direction:column;
-      align-items:center;
-      justify-content:center;
-      gap:7px;
-      padding:11px 14px;
-      border:1px solid rgba(255,255,255,.38);
-      border-radius:16px;
-      background:rgba(255,255,255,.94);
-      box-shadow:0 10px 24px rgba(4,18,28,.16);
-      color:#182533;
-      text-align:center;
-    }
-    .hero-partner-kicker {
-      color:#7a6b58;
-      font-size:.62rem;
-      line-height:1;
-      font-weight:800;
-      letter-spacing:.1em;
-      text-transform:uppercase;
-    }
-    .hero-partner-logo {
-      display:block;
-      width:auto;
-      max-width:100%;
-      max-height:38px;
-      object-fit:contain;
-    }
-    .hero-partner-caption,
-    .hero-partner-name {
-      color:#182533;
-      font-size:.68rem;
-      line-height:1.15;
-      font-weight:800;
-    }
-    .summary-grid {
-      display:grid;
-      grid-template-columns:repeat(3,minmax(0,1fr));
-      gap:12px;
-      margin-top:22px;
-    }
-    .summary-card {
-      background:rgba(255,255,255,.12);
-      border:1px solid rgba(255,255,255,.18);
-      border-radius:18px;
-      padding:16px;
-    }
-    .summary-card .label {
-      text-transform:uppercase;
-      letter-spacing:.08em;
-      font-size:.72rem;
-      color:rgba(255,255,255,.7);
-      margin-bottom:6px;
-    }
-    .summary-card .value { font-size:1.05rem; font-weight:700; }
-    .work-card {
-      border:1px solid #e4d6c3;
-      background:linear-gradient(135deg,#fff8ed,#f6ebdc);
-      border-radius:22px;
-      padding:20px;
-    }
-    .section-kicker {
-      text-transform:uppercase;
-      letter-spacing:.08em;
-      font-size:.78rem;
-      color:#8a6e46;
-      font-weight:700;
-      margin-bottom:6px;
-    }
-    .soft-note {
-      background:#f4f8f6;
-      border:1px solid #d6e0dc;
-      border-radius:14px;
-      padding:14px 16px;
-      color:#45524d;
-    }
-    .upload-priority {
-      border:2px solid #d7b56d;
-      background:linear-gradient(135deg,#fff9ec,#f8ead2);
-      border-radius:22px;
-      padding:22px;
-    }
-    .upload-priority .form-control {
-      background:#fffdf9;
-    }
-    .quick-upload-panel {
-      border:1px solid #c8d9d7;
-      background:#f8fbfa;
-      border-radius:18px;
-      box-shadow:0 12px 28px rgba(24,66,72,.08);
-      padding:20px;
-    }
-    .quick-upload-kicker {
-      text-transform:uppercase;
-      letter-spacing:.08em;
-      font-size:.76rem;
-      color:#37616a;
-      font-weight:700;
-      margin-bottom:4px;
-    }
-    .quick-upload-grid {
-      display:grid;
-      grid-template-columns:minmax(240px,1.1fr) minmax(250px,1.2fr) minmax(210px,.9fr) auto;
-      gap:14px;
-      align-items:end;
-    }
-    .quick-upload-panel .form-control {
-      background:#fffdf9;
-      border-color:#c8d9d7;
-    }
-    .quick-upload-panel .btn {
-      white-space:nowrap;
-    }
-    .document-summary {
-      border-color:#c8d9d7;
-      background:#fbfdfc;
-    }
-    .document-summary-counts {
-      display:flex;
-      flex-wrap:wrap;
-      gap:.5rem;
-      margin-top:12px;
-    }
-    .document-summary-counts .chip {
-      margin:0;
-    }
-    .analysis-preview {
-      border:1px solid #e4d6c3;
-      background:#fffdf9;
-      border-radius:14px;
-      padding:16px;
-    }
-    .analysis-current {
-      border:1px solid #ead8bb;
-      background:#fff7e8;
-      border-radius:16px;
-      padding:14px 16px;
-    }
-    .analysis-file {
-      border:1px solid #e4d6c3;
-      border-radius:16px;
-      padding:14px 16px;
-      background:#fffaf1;
-    }
-    .analysis-label {
-      text-transform:uppercase;
-      letter-spacing:.08em;
-      font-size:.72rem;
-      color:#37616a;
-      font-weight:700;
-    }
-    .skip-link {
-      position: fixed;
-      z-index: 1200;
-      top: 10px;
-      left: 10px;
-      padding: 10px 14px;
-      border-radius: 10px;
-      color: #fff;
-      background: #132635;
-      transform: translateY(-160%);
-    }
-    .skip-link:focus { transform: translateY(0); }
-    :focus-visible {
-      outline: 3px solid rgba(43, 128, 139, .42);
-      outline-offset: 3px;
-    }
-    .next-step-bar {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-top: 18px;
-      padding: 13px 15px;
-      border: 1px solid rgba(255,255,255,.2);
-      border-radius: 15px;
-      background: rgba(7, 22, 32, .28);
-    }
-    .next-step-label {
-      flex: 0 0 auto;
-      padding: 5px 8px;
-      border-radius: 999px;
-      color: #17313f;
-      background: #fff;
-      font-size: .72rem;
-      font-weight: 800;
-      letter-spacing: .05em;
-      text-transform: uppercase;
-    }
-    .order-action-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 14px;
-      margin-bottom: 20px;
-    }
-    .order-action-card {
-      display: flex;
-      min-height: 168px;
-      flex-direction: column;
-      padding: 20px;
-      border: 1px solid #d9e2df;
-      border-radius: 18px;
-      background: #fff;
-      box-shadow: 0 10px 26px rgba(24,38,45,.07);
-    }
-    .order-action-card.is-attention {
-      border-color: #e0b75c;
-      background: #fffaf0;
-    }
-    .order-action-kicker {
-      margin-bottom: 7px;
-      color: #37616a;
-      font-size: .74rem;
-      font-weight: 800;
-      letter-spacing: .07em;
-      text-transform: uppercase;
-    }
-    .order-action-card h2 { margin: 0 0 5px; font-size: 1.18rem; }
-    .order-action-card p { margin: 0 0 16px; color: #66717a; font-size: .9rem; }
-    .order-action-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; }
-    .order-action-buttons .btn { min-height: 42px; }
-    .portal-disclosure {
-      margin-bottom: 14px;
-      overflow: clip;
-      border: 1px solid #dfe5e2;
-      border-radius: 18px;
-      background: #fff;
-      box-shadow: 0 10px 26px rgba(24,38,45,.06);
-    }
-    .portal-disclosure > summary {
-      display: flex;
-      align-items: center;
-      gap: 13px;
-      min-height: 82px;
-      padding: 17px 20px;
-      cursor: pointer;
-      list-style: none;
-    }
-    .portal-disclosure > summary::-webkit-details-marker { display: none; }
-    .portal-disclosure > summary:hover { background: #f8fbfa; }
-    .portal-disclosure[open] > summary {
-      border-bottom: 1px solid #e7ece9;
-      background: #f8fbfa;
-    }
-    .disclosure-number {
-      width: 36px;
-      height: 36px;
-      flex: 0 0 36px;
-      display: grid;
-      place-items: center;
-      border-radius: 999px;
-      color: #fff;
-      background: #183344;
-      font-size: .76rem;
-      font-weight: 800;
-    }
-    .disclosure-copy { min-width: 0; flex: 1 1 auto; }
-    .disclosure-copy strong { display: block; color: #17232e; font-size: 1.05rem; }
-    .disclosure-copy small { display: block; margin-top: 2px; color: #6a757d; }
-    .disclosure-meta { color: #5d696f; font-size: .82rem; font-weight: 700; }
-    .disclosure-arrow {
-      width: 32px;
-      height: 32px;
-      flex: 0 0 32px;
-      display: grid;
-      place-items: center;
-      border-radius: 999px;
-      background: #edf2f0;
-      font-size: 1.2rem;
-      line-height: 1;
-      transition: transform .18s ease;
-    }
-    .portal-disclosure[open] .disclosure-arrow { transform: rotate(45deg); }
-    .portal-disclosure-body { padding: 22px; }
-    .portal-disclosure-body > .panel,
-    .portal-disclosure-body > .quick-upload-panel {
-      margin: 0 !important;
-      padding: 0;
-      border: 0;
-      border-radius: 0;
-      background: transparent;
-      box-shadow: none;
-    }
-    .attention-strip {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 18px;
-      padding: 15px 17px;
-      border: 1px solid #e0b75c;
-      border-radius: 16px;
-      background: #fff6d9;
-      color: #765300;
-    }
-    .attention-strip strong { display: block; color: #5d4300; }
-    @media (max-width: 992px) {
-      .quick-upload-grid { grid-template-columns:1fr; }
-      .quick-upload-panel .btn { width:100%; }
-      .order-action-grid { grid-template-columns: 1fr; }
-      .order-action-card { min-height: 0; }
-      .hero-top { grid-template-columns:1fr; }
-      .hero-partner-mark { width:min(260px,100%); }
-      .hero-actions { justify-content:flex-start; }
-    }
-    @media (max-width: 768px) {
-      .summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-      .summary-card:first-child { grid-column:1 / -1; }
-      .hero-panel { padding:24px; }
-    }
-    @media (max-width: 575.98px) {
-      .shell { padding:14px; }
-      .panel { padding:20px 16px; border-radius:18px; box-shadow:0 10px 28px rgba(64,47,25,.1); }
-      .hero-panel { padding:22px 18px; border-radius:20px; }
-      .hero-panel h1 { font-size:1.9rem; line-height:1.12; }
-      .hero-welcome { display:none; }
-      .hero-partner-mark { width:100%; min-height:74px; }
-      .hero-actions { width:100%; }
-      .hero-actions .btn { flex:1; }
-      .summary-card { padding:14px; border-radius:14px; }
-      .summary-card .label { font-size:.64rem; letter-spacing:.05em; }
-      .summary-card .value { font-size:1rem; overflow-wrap:anywhere; }
-      .mobile-actions,
-      .mobile-actions .btn,
-      .panel .btn,
-      .panel form .btn {
-        width:100%;
-      }
-      .chip { max-width:100%; overflow-wrap:anywhere; white-space:normal; }
-      .table-responsive table,
-      .table-responsive thead,
-      .table-responsive tbody,
-      .table-responsive tr,
-      .table-responsive th,
-      .table-responsive td {
-        display:block;
-        width:100%;
-      }
-      .table-responsive thead { display:none; }
-      .table-responsive tr {
-        border:1px solid #e4d6c3;
-        border-radius:14px;
-        padding:10px 12px;
-        margin-bottom:10px;
-        background:#fffdf9;
-      }
-      .table-responsive td {
-        border:0;
-        padding:.35rem 0;
-      }
-      .loading-overlay { align-items:flex-start; overflow-y:auto; }
-      .loading-card { padding:22px 18px; border-radius:20px; margin-top:22px; }
-      .next-step-bar { align-items: flex-start; flex-direction: column; }
-      .order-action-card { padding: 17px; }
-      .order-action-buttons,
-      .order-action-buttons .btn { width: 100%; }
-      .portal-disclosure > summary { align-items: flex-start; min-height: 0; padding: 15px; }
-      .disclosure-meta { display: none; }
-      .portal-disclosure-body { padding: 17px 15px; }
-      .attention-strip { align-items: stretch; flex-direction: column; }
-      .attention-strip .btn { width: 100%; }
-      body .live-clock-widget {
-        position: static;
-        left: auto;
-        right: auto;
-        width: calc(100% - 28px);
-        min-width: 0;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        margin: 10px auto 0;
-        padding: 9px 12px;
-        text-align: left;
-      }
-      body .live-clock-widget-label { display: none; }
-      body .live-clock-widget-time { margin: 0; font-size: 1.15rem; }
-      body .live-clock-widget-date { margin: 0; font-size: .78rem; text-align: right; }
-    }
-    @media (min-width: 1050px) {
-      .hero-panel { padding-right: 190px; }
-    }
-    .loading-overlay {
-      position: fixed;
-      inset: 0;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      background: rgba(24, 20, 14, .52);
-      backdrop-filter: blur(3px);
-      z-index: 1000;
-      padding: 20px;
-    }
-    .loading-overlay.show { display: flex; }
-    .loading-card {
-      width: min(500px, 100%);
-      background: #fffdf9;
-      border-radius: 28px;
-      padding: 28px;
-      box-shadow: 0 22px 60px rgba(24, 20, 14, .24);
-      text-align: center;
-    }
-    .spinner-ring {
-      width: 54px;
-      height: 54px;
-      margin: 0 auto 18px;
-      border-radius: 50%;
-      border: 5px solid #e4d6c3;
-      border-top-color: #1f3557;
-      animation: spin 1s linear infinite;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    .loading-progress {
-      width: 100%;
-      height: 8px;
-      border-radius: 999px;
-      background: #eee2cf;
-      overflow: hidden;
-      margin: 18px 0 22px;
-    }
-    .loading-progress-bar {
-      width: 42%;
-      height: 100%;
-      border-radius: 999px;
-      background: linear-gradient(90deg, #1f3557, #3f6a8f);
-      animation: loadingPulse 1.8s ease-in-out infinite;
-      transform-origin: left center;
-    }
-    @keyframes loadingPulse {
-      0% { transform: translateX(-20%) scaleX(.72); opacity: .72; }
-      50% { transform: translateX(105%) scaleX(1.08); opacity: 1; }
-      100% { transform: translateX(230%) scaleX(.72); opacity: .72; }
-    }
-    .loading-status {
-      font-size: .95rem;
-      color: #6b6257;
-      margin-bottom: 18px;
-    }
-    .loading-news {
-      text-align: left;
-      border: 1px solid #e4d6c3;
-      background: #f8f2e8;
-      border-radius: 18px;
-      padding: 16px 18px;
-    }
-    .loading-news-kicker {
-      font-size: .78rem;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      color: #8a6e46;
-      margin-bottom: 8px;
-    }
-    .loading-news-title {
-      font-family: "Space Grotesk", sans-serif;
-      font-size: 1rem;
-      margin-bottom: 6px;
-      color: #1f3557;
-    }
-    .loading-news-text {
-      color: #51463b;
-      line-height: 1.45;
-      min-height: 3.2em;
-    }
-    .check-card {
-      border: 1px solid #e4d6c3;
-      background: #f8f2e8;
-      border-radius: 18px;
-      padding: 16px 18px;
-    }
-    .whatsapp-forward-note {
-      display:flex;
-      align-items:flex-start;
-      gap:12px;
-      border:1px solid #b9ddc6;
-      background:#eef9f2;
-      border-radius:16px;
-      color:#173f2b;
-      padding:12px 14px;
-      font-size:.94rem;
-      line-height:1.35;
-    }
-    .whatsapp-mark {
-      display:inline-flex;
-      width:34px;
-      height:34px;
-      flex:0 0 34px;
-      align-items:center;
-      justify-content:center;
-      border-radius:999px;
-      background:#1fae62;
-      color:#fff;
-      font-size:.72rem;
-      font-weight:800;
-      letter-spacing:.02em;
-      box-shadow:0 6px 14px rgba(31,174,98,.22);
-    }
-    .whatsapp-forward-note strong {
-      display:block;
-      color:#102f21;
-      font-weight:800;
-      margin-bottom:2px;
-    }
-    .finish-image-preview {
-      width: 100%;
-      max-height: 220px;
-      object-fit: cover;
-      border-radius: 16px;
-      border: 1px solid #e4d6c3;
-      background: #f7f1e8;
-    }
-    .chat-thread {
-      max-height: 360px;
-      overflow-y: auto;
-      display: grid;
-      gap: .75rem;
-    }
-    .chat-message {
-      border: 1px solid #e4d6c3;
-      border-radius: 18px;
-      padding: .85rem .95rem;
-      background: #fffdf9;
-    }
-    .chat-message.is-autohaus {
-      background: #eef5f1;
-      border-color: #bdd7c8;
-    }
-    .chat-message.is-werkstatt {
-      background: #f8f2e8;
-      border-color: #d8c4a6;
-    }
-    .chat-message.is-versicherung {
-      background: #eef5ff;
-      border-color: #b8cce8;
-    }
-    .chat-delete-form {
-      margin: 0;
-    }
-    .chat-delete-btn {
-      min-height: 0;
-      border: 1px solid #e5b7b7;
-      background: #fffafa;
-      color: #a01818;
-      border-radius: 999px;
-      padding: .16rem .55rem;
-      font-size: .78rem;
-      font-weight: 700;
-      line-height: 1.25;
-    }
-    .chat-delete-btn:hover,
-    .chat-delete-btn:focus {
-      background: #fce8e8;
-      border-color: #d58f8f;
-      color: #7e1212;
-    }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='partner-auftrag.css') }}">
 </head>
-<body>
+<body class="partner-order-portal">
   <a class="skip-link" href="#hauptinhalt">Direkt zum Auftrag</a>
   {% include "_live_clock_widget.html" %}
   <div class="loading-overlay" data-loading-overlay>
@@ -637,73 +30,77 @@
     </div>
   </div>
   <main class="shell" id="hauptinhalt" tabindex="-1">
+    <header class="partner-brand">
+      <a class="partner-gaertner" href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" aria-label="Zur Fahrzeugübersicht"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack"></a>
+      <div class="partner-brand-caption">Ihr persönlicher<br><strong>Werkstattbegleiter</strong></div>
+      <div class="partner-brand-mark">
+        <span>In Zusammenarbeit mit</span>
+        {% if autohaus['partner_logo'] %}<img src="{{ url_for('static', filename=autohaus['partner_logo']) }}" alt="{{ autohaus['partner_logo_alt'] or autohaus['name'] }}">{% else %}<strong>{{ autohaus['name'] }}</strong>{% endif %}
+        {% if autohaus['partner_logo_caption'] %}<small>{{ autohaus['partner_logo_caption'] }}</small>{% endif %}
+      </div>
+    </header>
+    <div class="partner-breadcrumb"><a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}">← Alle Fahrzeuge</a><span>{{ autohaus['portal_label'] }}</span></div>
+    <section class="partner-hero" aria-labelledby="partner-order-title">
+      <div class="partner-hero-copy">
+        <div class="partner-eyebrow">IHR FAHRZEUG. ALLES IM BLICK.</div>
+        <h1 id="partner-order-title">{{ auftrag['fahrzeug'] }}</h1>
+        <div class="partner-identity">{% if auftrag['kennzeichen'] %}<span class="partner-plate"><span aria-hidden="true">D</span>{{ auftrag['kennzeichen'] }}</span>{% endif %}<span>{{ auftrag['kunde_name'] or autohaus['name'] }}</span></div>
+        <div class="partner-status"><span class="partner-status-dot" aria-hidden="true"></span><h2>{{ auftrag['status_meta']['label'] }}</h2></div>
+        {% if auftrag['status'] == 3 and auftrag['produktion_schritt_label'] %}<p class="partner-production">{{ auftrag['produktion_schritt_label'] }}</p>{% endif %}
+        <p class="partner-hero-description">{% if auftrag['status'] <= 1 %}Ihre Angaben sind bei uns. Wir prüfen den Auftrag und melden uns bei Rückfragen.{% elif auftrag['status'] == 2 %}Ihr Fahrzeug ist eingeplant. Hier finden Sie alle Informationen zur Übergabe.{% elif auftrag['status'] == 3 %}Wir kümmern uns um Ihr Fahrzeug. Behalten Sie den Fortschritt und die nächsten Schritte im Blick.{% elif auftrag['status'] == 4 %}Die Arbeiten sind abgeschlossen. Stimmen Sie die Rückgabe mit uns ab.{% else %}Vielen Dank für Ihr Vertrauen. Ihre Dokumente und Nachrichten bleiben hier für Sie verfügbar.{% endif %}</p>
+        <a class="partner-primary" href="{{ '#bereich-unterlagen' if auftrag['status'] >= 5 else ('#bereich-termine' if auftrag['status'] == 2 else '#nachrichten') }}">{{ 'Unterlagen öffnen' if auftrag['status'] >= 5 else ('Termine ansehen' if auftrag['status'] == 2 else 'Werkstatt kontaktieren') }} <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="partner-hero-photo"><img src="{{ url_for('static', filename='homepage/praeziser-farbauftrag.webp') }}" alt="" fetchpriority="high"><span>Einblick in die Fahrzeuglackierung · Symbolbild</span></div>
+    </section>
+    <div class="partner-freshness" data-portal-freshness>
+      <span>{% if auftrag['geaendert_am'] %}Zuletzt aktualisiert: {{ auftrag['geaendert_am'] }}{% else %}Stand beim Öffnen dieser Seite{% endif %}</span>
+      <a href="{{ request.path }}" data-portal-refresh>↻ Aktualisieren</a>
+      <div class="alert alert-warning mb-0 w-100" hidden data-refresh-warning role="status">Sie haben noch nicht gesendete Eingaben. Speichern Sie diese zuerst oder verwerfen Sie sie bewusst.<button type="button" class="btn btn-outline-dark btn-sm mt-2" data-refresh-discard>Eingaben verwerfen und aktualisieren</button></div>
+    </div>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
       <div class="alert alert-{{ cat }} mb-4">{{ msg }}</div>
       {% endfor %}
     {% endwith %}
-
-    <div class="hero-panel mb-4">
-      <div class="hero-top">
-        <div class="hero-copy">
-          <div class="text-muted hero-welcome">{{ autohaus['portal_welcome'] }}</div>
-          <h1 class="display-6 mb-2">{{ auftrag['fahrzeug'] }}</h1>
-          <div class="text-muted">{{ autohaus['portal_label'] }}{% if auftrag['kennzeichen'] %} · {{ auftrag['kennzeichen'] }}{% endif %}</div>
-        </div>
-        <div class="hero-partner-mark" aria-label="Partnerbetrieb {{ autohaus['name'] }}">
-          <span class="hero-partner-kicker">Partnerbetrieb</span>
-          {% if autohaus['partner_logo'] %}
-          <img class="hero-partner-logo" src="{{ url_for('static', filename=autohaus['partner_logo']) }}" alt="{{ autohaus['partner_logo_alt'] }}">
-          {% else %}
-          <strong class="hero-partner-name">{{ autohaus['name'] }}</strong>
-          {% endif %}
-          {% if autohaus['partner_logo_caption'] %}<span class="hero-partner-caption">{{ autohaus['partner_logo_caption'] }}</span>{% endif %}
-        </div>
-        <div class="hero-actions">
-          <span class="hero-badge">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
-          {% if auftrag['status'] == 3 and auftrag['produktion_schritt_label'] %}<span class="badge text-bg-light border text-dark align-self-center prod-schritt-badge">{{ auftrag['produktion_schritt_label'] }}</span>{% endif %}
-          <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-light">Zurück</a>
-        </div>
+    {% if auftrag['analyse_pruefen'] %}
+    <div class="attention-strip" role="status">
+      <div>
+        <strong>Bitte die automatisch erkannten Daten kurz prüfen</strong>
+        <span>Die Originaldatei war nicht eindeutig. Öffnen Sie die Auftragsdaten nur für diese kurze Kontrolle.</span>
       </div>
-      <div class="summary-grid">
-        <div class="summary-card">
-          <div class="label">Kurze Schadensbeschreibung</div>
-          <div class="value">{{ auftrag['analyse_text'] or 'Noch keine Analyse vorhanden' }}</div>
-        </div>
-        <div class="summary-card">
-          <div class="label">{{ auftrag['partner_annahme_label'] }}</div>
-          <div class="value">{{ auftrag['annahme_datum'] or 'Noch offen' }}</div>
-        </div>
-        <div class="summary-card">
-          <div class="label">{{ auftrag['partner_abholung_label'] }}</div>
-          <div class="value">{{ auftrag['abholtermin'] or 'Noch offen' }}</div>
-        </div>
-      </div>
-      <div class="next-step-bar">
-        <span class="next-step-label">Nächster Schritt</span>
-        <strong>
-          {% if auftrag['status'] <= 1 %}
-            Die Werkstatt prüft jetzt Ihre Angaben und meldet sich bei Rückfragen.
-          {% elif auftrag['status'] == 2 %}
-            Das Fahrzeug ist eingeplant. Bitte den vereinbarten Übergabetermin beachten.
-          {% elif auftrag['status'] == 3 %}
-            Das Fahrzeug wird aktuell bearbeitet. Mit „Aktualisieren“ rufen Sie den neuesten hinterlegten Stand ab.
-          {% elif auftrag['status'] == 4 %}
-            Das Fahrzeug ist fertig. Bitte die vereinbarte Rückgabe beachten.
-          {% else %}
-            Der Auftrag ist abgeschlossen. Dokumente und Nachrichten bleiben weiterhin verfügbar.
-          {% endif %}
-        </strong>
-      </div>
-      <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mt-3" data-portal-freshness>
-        <span class="small text-muted">{% if auftrag['geaendert_am'] %}Zuletzt aktualisiert: {{ auftrag['geaendert_am'] }}{% else %}Stand beim Öffnen dieser Seite{% endif %}</span>
-        <a class="btn btn-light btn-sm" href="{{ request.path }}" data-portal-refresh>Aktualisieren</a>
-        <div class="alert alert-warning mb-0 w-100" hidden data-refresh-warning role="status">Sie haben noch nicht gesendete Eingaben. Speichern Sie diese zuerst oder verwerfen Sie sie bewusst.
-          <button type="button" class="btn btn-outline-dark btn-sm mt-2" data-refresh-discard>Eingaben verwerfen und aktualisieren</button>
-        </div>
-      </div>
+      <button type="button" class="btn btn-warning" data-open-details="auftrag-daten">Daten prüfen</button>
     </div>
-
+    {% endif %}
+    <nav class="partner-tabs" aria-label="Bereiche Ihres Werkstattauftrags" data-partner-tabs>
+      <a href="#bereich-uebersicht" data-section="uebersicht">Übersicht</a>
+      <a href="#bereich-termine" data-section="termine">Auftrag &amp; Termine</a>
+      <a href="#bereich-unterlagen" data-section="unterlagen">Unterlagen <span>{{ dateien|length + fertigbilder|length }}</span></a>
+      <a href="#bereich-nachrichten" data-section="nachrichten">Nachrichten <span>{{ chat_nachrichten|length }}</span></a>
+      <a href="#bereich-service" data-section="service">Service</a>
+    </nav>
+    <section id="bereich-uebersicht" data-partner-section="uebersicht" tabindex="-1">
+    <div class="partner-summary-grid">
+      <section class="panel partner-date-card">
+        <div class="partner-card-kicker">Ihr nächster Termin</div>
+        {% if auftrag['status'] >= 5 %}<h2>Fahrzeug zurückgegeben</h2><p>Es steht kein weiterer Reparaturtermin an.</p>
+        {% elif auftrag['status'] >= 3 %}<h2>{{ auftrag['partner_abholung_label'] }}</h2><strong class="partner-date-value">{{ auftrag['abholtermin'] or 'Termin wird abgestimmt' }}</strong><p>Bei Rückfragen zum hinterlegten Termin kontaktieren Sie die Werkstatt.</p>
+        {% else %}<h2>{{ auftrag['partner_annahme_label'] }}</h2><strong class="partner-date-value">{{ auftrag['annahme_datum'] or 'Noch kein Termin hinterlegt' }}</strong><p>Bitte beachten Sie Ihre Terminabsprache mit der Werkstatt.</p>{% endif %}
+        <a href="#bereich-termine" class="partner-text-link">Alle Termindetails ↗</a>
+      </section>
+      <section class="panel partner-next-card">
+        <div class="partner-card-kicker">Ihr nächster Schritt</div>
+        {% if auftrag['analyse_pruefen'] %}<h2>Angaben kurz prüfen.</h2><p>Einige Daten wurden nicht eindeutig erkannt. Bitte prüfen Sie diese anhand der Originaldatei.</p><button type="button" class="partner-text-link" data-open-details="auftrag-daten">Daten prüfen ↗</button>
+        {% elif auftrag['status'] >= 5 %}<h2>Alles bleibt griffbereit.</h2><p>Unterlagen, Nachrichten und Service stehen Ihnen auch nach der Rückgabe zur Verfügung.</p><a href="#bereich-unterlagen" class="partner-text-link">Zu Ihren Unterlagen ↗</a>
+        {% elif auftrag['status'] == 4 %}<h2>Die Rückgabe abstimmen.</h2><p>Klären Sie die Übergabe des fertigen Fahrzeugs direkt mit uns.</p><a href="#nachrichten" class="partner-text-link">Nachricht schreiben ↗</a>
+        {% elif auftrag['status'] == 3 %}<h2>Wir kümmern uns darum.</h2><p>Ihr Fahrzeug ist in Bearbeitung. Neue Informationen finden Sie in Ihren Nachrichten.</p><a href="#nachrichten" class="partner-text-link">Nachrichten ansehen ↗</a>
+        {% elif auftrag['status'] == 2 %}<h2>Bereit für die Übergabe.</h2><p>Beachten Sie die hinterlegten Termine. Eine Änderung können Sie hier melden.</p><a href="#verzoegerung" class="partner-text-link">Terminabweichung melden ↗</a>
+        {% else %}<h2>Wir prüfen Ihren Auftrag.</h2><p>Bei offenen Fragen oder fehlenden Unterlagen melden wir uns bei Ihnen.</p><a href="#nachrichten" class="partner-text-link">Werkstatt kontaktieren ↗</a>{% endif %}
+      </section>
+    </div>
+    <section class="panel partner-progress">
+      <div class="partner-section-heading"><h2>Schritt für Schritt zu Ihrem Fahrzeug.</h2><span>Ihr Reparaturverlauf</span></div>
+      <ol>{% for nr, label in [(1, 'Angelegt'), (2, 'Eingeplant'), (3, 'In Arbeit'), (4, 'Fertig'), (5, 'Zurückgegeben')] %}<li class="{{ 'is-current' if auftrag['status'] == nr else ('is-done' if auftrag['status'] > nr else '') }}"{% if auftrag['status'] == nr %} aria-current="step"{% endif %}><span>{{ '✓' if auftrag['status'] > nr else nr }}</span><strong>{{ label }}</strong></li>{% endfor %}</ol>
+    </section>
     {% if auftrag['status'] == 2 and auftrag['transport_art'] == 'hol_und_bring' %}
     <div class="panel mb-4" style="border:2px solid #1f9d57; background:#f1fbf5;">
       {% if auftrag['fahrzeug_abholbereit'] %}
@@ -730,7 +127,6 @@
       {% endif %}
     </div>
     {% endif %}
-
     {% if auftrag['angebot_status'] == 'angenommen' and (auftrag['werkstatt_angebot_preis'] or auftrag['werkstatt_angebot_text_display'] or auftrag['werkstatt_angebot_notiz']) %}
     <div class="panel mb-4 border border-success-subtle">
       <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
@@ -754,17 +150,6 @@
       {% endif %}
     </div>
     {% endif %}
-
-    {% if auftrag['analyse_pruefen'] %}
-    <div class="attention-strip" role="status">
-      <div>
-        <strong>Bitte die automatisch erkannten Daten kurz prüfen</strong>
-        <span>Die Originaldatei war nicht eindeutig. Öffnen Sie die Auftragsdaten nur für diese kurze Kontrolle.</span>
-      </div>
-      <button type="button" class="btn btn-warning" data-open-details="auftrag-daten">Daten prüfen</button>
-    </div>
-    {% endif %}
-
     <section class="order-action-grid" aria-label="Wichtige Aktionen zum Auftrag">
       <article class="order-action-card">
         <div class="order-action-kicker">Unterlagen</div>
@@ -792,42 +177,33 @@
         </div>
       </article>
     </section>
-
-    <details class="portal-disclosure" id="schnell-upload">
-      <summary>
-        <span class="disclosure-number">01</span>
-        <span class="disclosure-copy"><strong>Bilder oder Dokumente hochladen</strong><small>Öffnen, Datei auswählen und ohne automatische Änderung speichern</small></span>
-        <span class="disclosure-meta">Schnell-Upload</span>
-        <span class="disclosure-arrow" aria-hidden="true">+</span>
-      </summary>
-      <div class="portal-disclosure-body">
-    <form method="POST" enctype="multipart/form-data" class="quick-upload-panel" data-upload-form id="pflicht-upload">
-      <div class="quick-upload-grid">
-        <div>
-          <div class="quick-upload-kicker">Schnell-Upload</div>
-          <h2 class="h4 mb-1">Bilder oder Dokumente zum Auftrag</h2>
-          <div class="text-muted">Nur hochladen. Es wird nichts analysiert und nichts am Auftrag automatisch verändert.</div>
+        {% if benachrichtigungen %}
+        <div class="panel mb-4 border border-warning-subtle">
+          <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
+            <div>
+              <h4 class="mb-1">Werkstatt-Hinweise</h4>
+              <div class="text-muted small">Aktuelle Änderungen und neue Dateien zu diesem Auftrag.</div>
+            </div>
+            <span class="badge text-bg-warning">{{ benachrichtigungen|length }} Hinweis(e)</span>
+          </div>
+          <div class="d-grid gap-3">
+            {% for hinweis in benachrichtigungen %}
+            <div class="border rounded-4 p-3">
+              <div class="d-flex justify-content-between gap-2 flex-wrap">
+                <div class="fw-bold">{{ hinweis['titel'] }}</div>
+                <div class="text-muted small">{{ hinweis['erstellt_am'] }}</div>
+              </div>
+              <div class="mt-1">{{ hinweis['nachricht'] }}</div>
+            </div>
+            {% endfor %}
+          </div>
         </div>
-        <div>
-          <label class="form-label fw-bold">Dateien auswählen</label>
-          <input type="file" name="dateien" class="form-control form-control-lg" multiple required accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
-          <div class="form-text">PDFs, Fotos, Belege und Office-Dateien werden nur als Datei gespeichert.</div>
-        </div>
-        <div>
-          <label class="form-label">Kurzer Hinweis (optional)</label>
-          <input type="text" name="upload_notiz" class="form-control form-control-lg" placeholder="z.B. Schadenfoto links">
-        </div>
-        <div>
-          <button type="submit" name="aktion" value="quick_upload" class="btn btn-dark btn-lg" data-loading-message="Unterlage wird nur hochgeladen und gespeichert. Es wird keine Analyse gestartet.">Nur hochladen</button>
-        </div>
-      </div>
-    </form>
-      </div>
-    </details>
-
-    <div class="row g-4">
-      <div class="col-xl-7">
-        <details class="portal-disclosure h-100" id="auftrag-daten">
+        {% endif %}
+    </section>
+    <section id="bereich-termine" data-partner-section="termine" tabindex="-1">
+    <div class="partner-section-heading"><h2>Auftrag &amp; Termine</h2><span>Ihre Angaben an einem Ort</span></div>
+    <section class="panel mb-4"><div class="partner-term-grid"><div><div class="partner-card-kicker">{{ auftrag['partner_annahme_label'] }}</div><strong>{{ auftrag['annahme_datum'] or 'Noch offen' }}</strong></div><div><div class="partner-card-kicker">{{ auftrag['partner_abholung_label'] }}</div><strong>{{ auftrag['abholtermin'] or 'Noch offen' }}</strong></div></div>{% if auftrag['analyse_text'] %}<div class="partner-damage-summary"><div class="partner-card-kicker">Schadensbeschreibung</div><p>{{ auftrag['analyse_text'] }}</p></div>{% endif %}</section>
+        <details class="portal-disclosure h-100" id="auftrag-daten" open>
           <summary>
             <span class="disclosure-number">02</span>
             <span class="disclosure-copy"><strong>Kundendaten und Termine prüfen</strong><small>Fahrzeug, Ansprechpartner, technische Daten und Termine bearbeiten</small></span>
@@ -934,60 +310,61 @@
           </form>
           </div>
         </details>
-      </div>
-
-      <div class="col-xl-5">
-        <details class="portal-disclosure" id="kundenstatus-teilen">
+        <details class="portal-disclosure" id="verzoegerung">
           <summary>
-            <span class="disclosure-number">03</span>
-            <span class="disclosure-copy"><strong>Status an den Endkunden weitergeben</strong><small>Statuslink öffnen oder eine WhatsApp-Nachricht vorbereiten</small></span>
+            <span class="disclosure-number">!</span>
+            <span class="disclosure-copy"><strong>Terminabweichung melden</strong><small>Nur öffnen, wenn sich Anlieferung oder Rückgabe verschiebt</small></span>
+            {% if verzoegerungen %}<span class="disclosure-meta">{{ verzoegerungen|length }} Eintrag/Einträge</span>{% endif %}
             <span class="disclosure-arrow" aria-hidden="true">+</span>
           </summary>
           <div class="portal-disclosure-body">
-        <div class="panel">
-          <h4 class="mb-3">Kundenstatus</h4>
-          <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }}">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
-          {% if auftrag['status'] == 3 and auftrag['produktion_schritt_label'] %}<div class="mt-2"><span class="badge text-bg-light border text-dark prod-schritt-badge">{{ auftrag['produktion_schritt_label'] }}</span></div>{% endif %}
-          {% if auftrag['analyse_pruefen'] or auftrag['analyse_hinweis'] or auftrag['analyse_confidence'] %}
-          <div class="alert {{ 'alert-warning' if auftrag['analyse_pruefen'] else 'alert-success' }} mt-3 mb-0">
-            <strong>{{ 'Bitte Originaldatei kurz prüfen' if auftrag['analyse_pruefen'] else 'Analyse wirkt plausibel' }}</strong>
-            {% if auftrag['analyse_hinweis'] %}
-            <div class="mt-1">{{ auftrag['analyse_hinweis'] }}</div>
-            {% endif %}
-            {% if auftrag['analyse_confidence'] %}
-            <div class="small mt-1">KI-Sicherheit: {{ '%.0f'|format((auftrag['analyse_confidence'] or 0) * 100) }}%</div>
-            {% endif %}
-          </div>
-          {% endif %}
-          <div class="mt-3">
-            {% if auftrag['annahme_datum'] %}<span class="chip">{{ auftrag['partner_annahme_label'] }} {{ auftrag['annahme_datum'] }}</span>{% endif %}
-            {% if auftrag['abholtermin'] %}<span class="chip">{{ auftrag['partner_abholung_label'] }} {{ auftrag['abholtermin'] }}</span>{% endif %}
-          </div>
-          {% if auftrag['kunden_status_url'] %}
-          <div class="mt-3 pt-3 border-top">
-            <div class="fw-bold mb-1">Kundenstatus weitergeben</div>
-            <div class="text-muted small mb-2">Der Link zeigt dem Kunden den aktuellen Fahrzeugstatus.</div>
-            <div class="d-flex gap-2 flex-wrap">
-              <a class="btn btn-outline-dark btn-sm" href="{{ auftrag['kunden_status_url'] }}" target="_blank" rel="noopener">Statuslink öffnen</a>
-              {% if auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
-              <a class="btn btn-success btn-sm" href="{{ auftrag['kunden_whatsapp_status']['status_update_whatsapp_url'] }}" target="_blank" rel="noopener">Statusupdate WhatsApp</a>
-              {% endif %}
+        <div class="panel mb-4">
+          <h4 class="mb-3">Verzögerung melden</h4>
+          <form method="POST" action="{{ url_for('partner_verzoegerung', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="row g-3">
+            <div class="col-12">
+              <label class="form-label">Meldung</label>
+              <textarea name="meldung" class="form-control" rows="3" placeholder="z.B. Fahrzeug kommt einen Tag später" required></textarea>
             </div>
-            {% if auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
-            <div class="text-muted small mt-2">WhatsApp wird nur vorbereitet und erst im geöffneten Chat versendet.</div>
-          {% elif auftrag['kunden_whatsapp_status']['whatsapp_consent_required'] and not auftrag['kunden_whatsapp_status']['whatsapp_consent_allowed'] %}
-          <div class="text-muted small mt-2">Keine gültige WhatsApp-Einwilligung für die aktuelle Mobilnummer dokumentiert.</div>
-          {% elif auftrag['kontakt_telefon'] %}
-            <div class="text-muted small mt-2">Für WhatsApp bitte eine Mobilnummer hinterlegen.</div>
-            {% else %}
-            <div class="text-muted small mt-2">Mit einer Handynummer kann der Status später per WhatsApp vorbereitet werden.</div>
-            {% endif %}
-          </div>
+            <div class="col-md-6">
+              <label class="form-label">Neuer Fertigstellungstermin</label>
+              <input type="date" name="fertig_datum" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Neuer Endtermin</label>
+              <input type="date" name="abholtermin" class="form-control">
+            </div>
+            <div class="col-12">
+              <button type="submit" class="btn btn-outline-dark">Verzögerung senden</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel mb-4">
+          <h4 class="mb-3">Verzögerungsverlauf</h4>
+          {% if verzoegerungen %}
+            <div class="d-grid gap-3">
+              {% for eintrag in verzoegerungen %}
+              <div class="timeline-item">
+                <div class="d-flex justify-content-between gap-2 flex-wrap">
+                  <div class="fw-bold">{{ eintrag['quelle']|capitalize }}</div>
+                  <div class="text-muted small">{{ eintrag['erstellt_am'] }}</div>
+                </div>
+                <div class="mt-1">{{ eintrag['meldung'] }}</div>
+                <div class="mt-2 d-flex gap-2 flex-wrap">
+                  {% if eintrag['vorgeschlagen_start'] %}<span class="chip">Start {{ eintrag['vorgeschlagen_start'] }}</span>{% endif %}
+                  {% if eintrag['vorgeschlagen_fertig'] %}<span class="chip">Fertig {{ eintrag['vorgeschlagen_fertig'] }}</span>{% endif %}
+                  {% if eintrag['vorgeschlagen_abholung'] %}<span class="chip">{{ auftrag['partner_abholung_label'] }} {{ eintrag['vorgeschlagen_abholung'] }}</span>{% endif %}
+                  {% if eintrag['uebernommen'] %}<span class="badge text-bg-success">Übernommen</span>{% else %}<span class="badge text-bg-warning">Offen</span>{% endif %}
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-muted">Noch keine Verzögerungen vorhanden.</div>
           {% endif %}
         </div>
           </div>
         </details>
-
         {% if auftrag['versicherung_id'] %}
         <details class="portal-disclosure" id="versicherung">
           <summary>
@@ -1037,22 +414,46 @@
           </div>
         </details>
         {% endif %}
-
-        {% if auftrag['status'] >= 5 %}
-        <div class="panel mb-4">
-          <h4 class="mb-2">Bonus</h4>
-          {% if auftrag['bonus_basis_label'] %}
-          <div class="h4 mb-1">{{ auftrag['bonus_basis_label'] }} netto</div>
-          <div class="text-muted">Dieser zurückgegebene Auftrag zählt in den Monatsbonus. Quelle: {{ auftrag['bonus_basis_quelle'] }}.</div>
-          <div class="text-muted mt-1">{{ auftrag['bonus_verrechnung_detail'] }}</div>
-          {% else %}
-          <div class="h4 mb-1">Preis offen</div>
-          <div class="text-muted">Die Werkstatt ergänzt den Netto-Preis. Danach wird der Monatsbonus automatisch aktualisiert.</div>
-          {% endif %}
+    </section>
+    <section id="bereich-unterlagen" data-partner-section="unterlagen" tabindex="-1">
+    <section class="panel partner-documents-intro">
+      <div><div class="partner-card-kicker">Alles zu Ihrem Auftrag</div><h2>Dokumente &amp; Bilder</h2><p>{{ dateien|length }} Unterlage(n) und {{ fertigbilder|length }} Fertigbild(er) sind für Sie verfügbar. Öffnen Sie Originaldateien und Downloads in Ihrer Dokumentübersicht.</p></div>
+      <a href="{{ url_for('partner_auftrag_dokumente', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="btn btn-dark">Dokumente anschauen ↗</a>
+    </section>
+    <details class="portal-disclosure" id="schnell-upload" open>
+      <summary>
+        <span class="disclosure-number">01</span>
+        <span class="disclosure-copy"><strong>Bilder oder Dokumente hochladen</strong><small>Öffnen, Datei auswählen und ohne automatische Änderung speichern</small></span>
+        <span class="disclosure-meta">Schnell-Upload</span>
+        <span class="disclosure-arrow" aria-hidden="true">+</span>
+      </summary>
+      <div class="portal-disclosure-body">
+    <form method="POST" enctype="multipart/form-data" class="quick-upload-panel" data-upload-form id="pflicht-upload">
+      <div class="quick-upload-grid">
+        <div>
+          <div class="quick-upload-kicker">Schnell-Upload</div>
+          <h2 class="h4 mb-1">Bilder oder Dokumente zum Auftrag</h2>
+          <div class="text-muted">Nur hochladen. Es wird nichts analysiert und nichts am Auftrag automatisch verändert.</div>
         </div>
-        {% endif %}
-
-        <details class="portal-disclosure" id="nachrichten">
+        <div>
+          <label class="form-label fw-bold">Dateien auswählen</label>
+          <input type="file" name="dateien" class="form-control form-control-lg" multiple required accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf">
+          <div class="form-text">PDFs, Fotos, Belege und Office-Dateien werden nur als Datei gespeichert.</div>
+        </div>
+        <div>
+          <label class="form-label">Kurzer Hinweis (optional)</label>
+          <input type="text" name="upload_notiz" class="form-control form-control-lg" placeholder="z.B. Schadenfoto links">
+        </div>
+        <div>
+          <button type="submit" name="aktion" value="quick_upload" class="btn btn-dark btn-lg" data-loading-message="Unterlage wird nur hochgeladen und gespeichert. Es wird keine Analyse gestartet.">Nur hochladen</button>
+        </div>
+      </div>
+    </form>
+      </div>
+    </details>
+    </section>
+    <section id="bereich-nachrichten" data-partner-section="nachrichten" tabindex="-1">
+        <details class="portal-disclosure" id="nachrichten" open>
           <summary>
             <span class="disclosure-number">✉</span>
             <span class="disclosure-copy"><strong>Nachrichten zum Auftrag</strong><small>Fragen senden und Antworten der Werkstatt nachlesen</small></span>
@@ -1111,86 +512,72 @@
         </div>
           </div>
         </details>
-
-        {% if benachrichtigungen %}
-        <div class="panel mb-4 border border-warning-subtle">
-          <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
-            <div>
-              <h4 class="mb-1">Werkstatt-Hinweise</h4>
-              <div class="text-muted small">Aktuelle Änderungen und neue Dateien zu diesem Auftrag.</div>
-            </div>
-            <span class="badge text-bg-warning">{{ benachrichtigungen|length }} Hinweis(e)</span>
-          </div>
-          <div class="d-grid gap-3">
-            {% for hinweis in benachrichtigungen %}
-            <div class="border rounded-4 p-3">
-              <div class="d-flex justify-content-between gap-2 flex-wrap">
-                <div class="fw-bold">{{ hinweis['titel'] }}</div>
-                <div class="text-muted small">{{ hinweis['erstellt_am'] }}</div>
-              </div>
-              <div class="mt-1">{{ hinweis['nachricht'] }}</div>
-            </div>
-            {% endfor %}
-          </div>
-        </div>
-        {% endif %}
-
-        <details class="portal-disclosure" id="verzoegerung">
+    </section>
+    <section id="bereich-service" data-partner-section="service" tabindex="-1">
+    <div class="partner-section-heading"><h2>Service für Ihren Auftrag</h2><span>Status teilen, Rückfragen und Verwaltung</span></div>
+        <details class="portal-disclosure" id="kundenstatus-teilen">
           <summary>
-            <span class="disclosure-number">!</span>
-            <span class="disclosure-copy"><strong>Terminabweichung melden</strong><small>Nur öffnen, wenn sich Anlieferung oder Rückgabe verschiebt</small></span>
-            {% if verzoegerungen %}<span class="disclosure-meta">{{ verzoegerungen|length }} Eintrag/Einträge</span>{% endif %}
+            <span class="disclosure-number">03</span>
+            <span class="disclosure-copy"><strong>Status an den Endkunden weitergeben</strong><small>Statuslink öffnen oder eine WhatsApp-Nachricht vorbereiten</small></span>
             <span class="disclosure-arrow" aria-hidden="true">+</span>
           </summary>
           <div class="portal-disclosure-body">
-        <div class="panel mb-4">
-          <h4 class="mb-3">Verzögerung melden</h4>
-          <form method="POST" action="{{ url_for('partner_verzoegerung', slug=autohaus['slug'], auftrag_id=auftrag['id']) }}" class="row g-3">
-            <div class="col-12">
-              <label class="form-label">Meldung</label>
-              <textarea name="meldung" class="form-control" rows="3" placeholder="z.B. Fahrzeug kommt einen Tag später" required></textarea>
+        <div class="panel">
+          <h4 class="mb-3">Kundenstatus</h4>
+          <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }}">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
+          {% if auftrag['status'] == 3 and auftrag['produktion_schritt_label'] %}<div class="mt-2"><span class="badge text-bg-light border text-dark prod-schritt-badge">{{ auftrag['produktion_schritt_label'] }}</span></div>{% endif %}
+          {% if auftrag['analyse_pruefen'] or auftrag['analyse_hinweis'] or auftrag['analyse_confidence'] %}
+          <div class="alert {{ 'alert-warning' if auftrag['analyse_pruefen'] else 'alert-success' }} mt-3 mb-0">
+            <strong>{{ 'Bitte Originaldatei kurz prüfen' if auftrag['analyse_pruefen'] else 'Analyse wirkt plausibel' }}</strong>
+            {% if auftrag['analyse_hinweis'] %}
+            <div class="mt-1">{{ auftrag['analyse_hinweis'] }}</div>
+            {% endif %}
+            {% if auftrag['analyse_confidence'] %}
+            <div class="small mt-1">KI-Sicherheit: {{ '%.0f'|format((auftrag['analyse_confidence'] or 0) * 100) }}%</div>
+            {% endif %}
+          </div>
+          {% endif %}
+          <div class="mt-3">
+            {% if auftrag['annahme_datum'] %}<span class="chip">{{ auftrag['partner_annahme_label'] }} {{ auftrag['annahme_datum'] }}</span>{% endif %}
+            {% if auftrag['abholtermin'] %}<span class="chip">{{ auftrag['partner_abholung_label'] }} {{ auftrag['abholtermin'] }}</span>{% endif %}
+          </div>
+          {% if auftrag['kunden_status_url'] %}
+          <div class="mt-3 pt-3 border-top">
+            <div class="fw-bold mb-1">Kundenstatus weitergeben</div>
+            <div class="text-muted small mb-2">Der Link zeigt dem Kunden den aktuellen Fahrzeugstatus.</div>
+            <div class="d-flex gap-2 flex-wrap">
+              <a class="btn btn-outline-dark btn-sm" href="{{ auftrag['kunden_status_url'] }}" target="_blank" rel="noopener">Statuslink öffnen</a>
+              {% if auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
+              <a class="btn btn-success btn-sm" href="{{ auftrag['kunden_whatsapp_status']['status_update_whatsapp_url'] }}" target="_blank" rel="noopener">Statusupdate WhatsApp</a>
+              {% endif %}
             </div>
-            <div class="col-md-6">
-              <label class="form-label">Neuer Fertigstellungstermin</label>
-              <input type="date" name="fertig_datum" class="form-control">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Neuer Endtermin</label>
-              <input type="date" name="abholtermin" class="form-control">
-            </div>
-            <div class="col-12">
-              <button type="submit" class="btn btn-outline-dark">Verzögerung senden</button>
-            </div>
-          </form>
-        </div>
-
-        <div class="panel mb-4">
-          <h4 class="mb-3">Verzögerungsverlauf</h4>
-          {% if verzoegerungen %}
-            <div class="d-grid gap-3">
-              {% for eintrag in verzoegerungen %}
-              <div class="timeline-item">
-                <div class="d-flex justify-content-between gap-2 flex-wrap">
-                  <div class="fw-bold">{{ eintrag['quelle']|capitalize }}</div>
-                  <div class="text-muted small">{{ eintrag['erstellt_am'] }}</div>
-                </div>
-                <div class="mt-1">{{ eintrag['meldung'] }}</div>
-                <div class="mt-2 d-flex gap-2 flex-wrap">
-                  {% if eintrag['vorgeschlagen_start'] %}<span class="chip">Start {{ eintrag['vorgeschlagen_start'] }}</span>{% endif %}
-                  {% if eintrag['vorgeschlagen_fertig'] %}<span class="chip">Fertig {{ eintrag['vorgeschlagen_fertig'] }}</span>{% endif %}
-                  {% if eintrag['vorgeschlagen_abholung'] %}<span class="chip">{{ auftrag['partner_abholung_label'] }} {{ eintrag['vorgeschlagen_abholung'] }}</span>{% endif %}
-                  {% if eintrag['uebernommen'] %}<span class="badge text-bg-success">Übernommen</span>{% else %}<span class="badge text-bg-warning">Offen</span>{% endif %}
-                </div>
-              </div>
-              {% endfor %}
-            </div>
-          {% else %}
-            <div class="text-muted">Noch keine Verzögerungen vorhanden.</div>
+            {% if auftrag['kunden_whatsapp_status']['can_whatsapp'] %}
+            <div class="text-muted small mt-2">WhatsApp wird nur vorbereitet und erst im geöffneten Chat versendet.</div>
+          {% elif auftrag['kunden_whatsapp_status']['whatsapp_consent_required'] and not auftrag['kunden_whatsapp_status']['whatsapp_consent_allowed'] %}
+          <div class="text-muted small mt-2">Keine gültige WhatsApp-Einwilligung für die aktuelle Mobilnummer dokumentiert.</div>
+          {% elif auftrag['kontakt_telefon'] %}
+            <div class="text-muted small mt-2">Für WhatsApp bitte eine Mobilnummer hinterlegen.</div>
+            {% else %}
+            <div class="text-muted small mt-2">Mit einer Handynummer kann der Status später per WhatsApp vorbereitet werden.</div>
+            {% endif %}
+          </div>
           {% endif %}
         </div>
           </div>
         </details>
-
+        {% if auftrag['status'] >= 5 %}
+        <div class="panel mb-4">
+          <h4 class="mb-2">Bonus</h4>
+          {% if auftrag['bonus_basis_label'] %}
+          <div class="h4 mb-1">{{ auftrag['bonus_basis_label'] }} netto</div>
+          <div class="text-muted">Dieser zurückgegebene Auftrag zählt in den Monatsbonus. Quelle: {{ auftrag['bonus_basis_quelle'] }}.</div>
+          <div class="text-muted mt-1">{{ auftrag['bonus_verrechnung_detail'] }}</div>
+          {% else %}
+          <div class="h4 mb-1">Preis offen</div>
+          <div class="text-muted">Die Werkstatt ergänzt den Netto-Preis. Danach wird der Monatsbonus automatisch aktualisiert.</div>
+          {% endif %}
+        </div>
+        {% endif %}
         <details class="portal-disclosure" id="reklamation">
           <summary>
             <span class="disclosure-number">!</span>
@@ -1283,123 +670,11 @@
         </div>
           </div>
         </details>
-      </div>
-    </div>
+    </section>
+    <footer class="partner-footer"><span>Gärtner Karosserie &amp; Lack · {{ autohaus['name'] }}</span><a href="#nachrichten">Kontakt zur Werkstatt ↗</a></footer>
   </main>
-  <script>
-    (() => {
-      let dirty = false;
-      const markDirty = event => { if (event.target.closest('form')) dirty = true; };
-      document.addEventListener('input', markDirty);
-      document.addEventListener('change', markDirty);
-      const refresh = document.querySelector('[data-portal-refresh]');
-      const warning = document.querySelector('[data-refresh-warning]');
-      refresh.addEventListener('click', event => {
-        if (!dirty) return;
-        event.preventDefault();
-        warning.hidden = false;
-      });
-      document.querySelector('[data-refresh-discard]').addEventListener('click', () => window.location.assign(refresh.href));
-    })();
-    const uploadForms = document.querySelectorAll('[data-upload-form]');
-    const overlay = document.querySelector('[data-loading-overlay]');
-    const loadingText = document.querySelector('[data-loading-text]');
-    const loadingNewsTitle = document.querySelector('[data-loading-news-title]');
-    const loadingNewsText = document.querySelector('[data-loading-news-text]');
-    const transportLabels = {{ transport_arten | tojson }};
-    const transportSelect = document.querySelector('[data-transport-select]');
-    const annahmeLabel = document.querySelector('[data-annahme-label]');
-    const abholungLabel = document.querySelector('[data-abholung-label]');
-    const neueAbholungLabel = document.querySelector('[data-neue-abholung-label]');
-    const loadingNewsItems = {{ analysis_loading_news() | tojson }};
-    let loadingNewsIndex = 0;
-    let loadingNewsTimer = null;
-    let submitterMessage = '';
-    const disclosures = Array.from(document.querySelectorAll('.portal-disclosure'));
-    let disclosureChangeInProgress = false;
-    disclosures.forEach((details) => {
-      details.addEventListener('toggle', () => {
-        if (!details.open || disclosureChangeInProgress) {
-          return;
-        }
-        disclosureChangeInProgress = true;
-        disclosures.forEach((other) => {
-          if (other !== details) other.open = false;
-        });
-        disclosureChangeInProgress = false;
-      });
-    });
-    const openDisclosure = (id) => {
-      const target = document.getElementById(id);
-      if (!target || target.tagName !== 'DETAILS') {
-        return;
-      }
-      disclosures.forEach((details) => {
-        if (details !== target) details.open = false;
-      });
-      target.open = true;
-      window.requestAnimationFrame(() => {
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        target.querySelector('summary')?.focus({ preventScroll: true });
-      });
-    };
-    document.querySelectorAll('[data-open-details]').forEach((button) => {
-      button.addEventListener('click', () => openDisclosure(button.dataset.openDetails));
-    });
-    if (window.location.hash) {
-      openDisclosure(window.location.hash.slice(1));
-    }
-    const updateLoadingNews = () => {
-      if (!loadingNewsTitle || !loadingNewsText) {
-        return;
-      }
-      const item = loadingNewsItems[loadingNewsIndex % loadingNewsItems.length];
-      loadingNewsTitle.textContent = item.title;
-      loadingNewsText.textContent = item.text;
-      loadingNewsIndex += 1;
-    };
-    const startLoadingNews = () => {
-      updateLoadingNews();
-      if (loadingNewsTimer) {
-        window.clearInterval(loadingNewsTimer);
-      }
-      loadingNewsTimer = window.setInterval(updateLoadingNews, 3200);
-    };
-    if (uploadForms.length && overlay && loadingText) {
-      uploadForms.forEach((form) => {
-        form.addEventListener('click', (event) => {
-          const button = event.target.closest('button[type="submit"]');
-          if (button) {
-            submitterMessage = button.dataset.loadingMessage || '';
-          }
-        });
-        form.addEventListener('submit', () => {
-          loadingText.textContent = submitterMessage || 'Bitte kurz warten. Die Datei wird jetzt ausgewertet und in den Auftrag übernommen.';
-          startLoadingNews();
-          overlay.classList.add('show');
-        });
-      });
-    }
-    const updateTransportLabels = () => {
-      if (!transportSelect) {
-        return;
-      }
-      const selected = transportLabels[transportSelect.value] || transportLabels.standard || {};
-      if (annahmeLabel) {
-        annahmeLabel.textContent = selected.partner_annahme_label || 'Fahrzeug wird von Ihnen angeliefert';
-      }
-      if (abholungLabel) {
-        abholungLabel.textContent = selected.partner_abholung_label || 'Fahrzeug wird von Ihnen geholt';
-      }
-      if (neueAbholungLabel) {
-        neueAbholungLabel.textContent = `Neue ${selected.partner_abholung_label || 'Fahrzeug wird von Ihnen geholt'}`;
-      }
-    };
-    if (transportSelect) {
-      transportSelect.addEventListener('change', updateTransportLabels);
-      updateTransportLabels();
-    }
-  </script>
+  <script type="application/json" id="partner-order-config">{{ {'transportLabels': transport_arten, 'loadingNews': analysis_loading_news()} | tojson }}</script>
+  <script src="{{ url_for('static', filename='partner-auftrag.js') }}" defer></script>
   {% include "_fin_analyse_script.html" %}
   {% include "_session_keepalive.html" %}
 {% include "_klick_tracking.html" %}
