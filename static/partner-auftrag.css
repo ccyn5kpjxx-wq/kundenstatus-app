@@ -713,6 +713,10 @@ body.partner-order-portal { background:#f4f6f3; color:var(--partner-ink); font-f
 .partner-documents-intro .btn { flex-shrink:0; }
 .partner-footer { display:flex; justify-content:space-between; gap:16px; border-top:1px solid #dce4d6; margin-top:28px; padding:24px 4px 0; font-size:11px; color:#76816f; }
 .partner-footer a { color:#455d3e; text-decoration:none; }
+.partner-order-portal .partner-clock .live-clock-widget { position:static; min-width:0; width:auto; display:flex; justify-content:flex-end; align-items:center; gap:10px; margin:0; padding:12px 4px; border:0; border-radius:0; background:transparent; box-shadow:none; color:#647061; }
+.partner-order-portal .partner-clock .live-clock-widget-label { display:none; }
+.partner-order-portal .partner-clock .live-clock-widget-time,
+.partner-order-portal .partner-clock .live-clock-widget-date { margin:0; font-size:11px; color:inherit; }
 .partner-order-portal :focus-visible { outline:3px solid #8aab78; outline-offset:4px; }
 @media(max-width:767px) {
   .partner-order-portal .shell { padding:0 16px 22px; }

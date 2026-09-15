@@ -5,6 +5,7 @@ Does not import app.py, open a database, send messages, or contact live services
 Backend authorization and phase filtering are covered separately by integration tests.
 """
 from pathlib import Path
+import mimetypes
 from types import SimpleNamespace
 from urllib.parse import urlencode, urlparse
 
@@ -108,8 +109,12 @@ class Scenario:
         elif path == "/test":
             self.loads += 1
             route.fulfill(content_type="text/html", body=self.html)
-        elif path == "/static/kundenportal.css":
-            route.fulfill(content_type="text/css", body=(ROOT / "static/kundenportal.css").read_text(encoding="utf-8"))
+        elif path.startswith("/static/"):
+            asset = (ROOT / path.lstrip("/")).resolve()
+            if asset.is_relative_to(ROOT / "static") and asset.is_file():
+                route.fulfill(content_type=mimetypes.guess_type(str(asset))[0] or "application/octet-stream", body=asset.read_bytes())
+            else:
+                route.fulfill(status=404)
         else:
             # External CDN/assets are never requested over the network.
             route.fulfill(status=204)

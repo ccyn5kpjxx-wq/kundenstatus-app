@@ -28,6 +28,8 @@ def render(source=None, *, review=True, status=3):
     }
     data['chat_nachrichten'] = [dict(id=1, absender='werkstatt', nachricht='Die Lackierung ist vorbereitet.', erstellt_am='15.09.2026 12:00')]
     env = template_environment()
+    # Keep the real clock: its original fixed positioning used to cover the partner logo.
+    env.loader.loaders[0].mapping.pop('_live_clock_widget.html', None)
     return (env.from_string(source) if source else env.get_template('partner_auftrag.html')).render(**data)
 
 
@@ -87,6 +89,7 @@ def run():
         expect(page.get_by_role('heading',name='Audi A3',exact=True)).to_be_visible()
         assert 'Symbolbild' in page.inner_text('body')
         assert not errors, errors
+        assert page.locator('[data-live-clock-root]').evaluate('(e)=>getComputedStyle(e).position') == 'static'
         print('PASS modern partner page preserves every form, endpoint and submitted field')
 
         # A review action must still lead straight to the complete original form.

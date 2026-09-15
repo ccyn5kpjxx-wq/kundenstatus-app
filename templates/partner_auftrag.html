@@ -12,7 +12,6 @@
 </head>
 <body class="partner-order-portal">
   <a class="skip-link" href="#hauptinhalt">Direkt zum Auftrag</a>
-  {% include "_live_clock_widget.html" %}
   <div class="loading-overlay" data-loading-overlay>
     <div class="loading-card">
       <div class="spinner-ring"></div>
@@ -672,6 +671,7 @@
         </details>
     </section>
     <footer class="partner-footer"><span>Gärtner Karosserie &amp; Lack · {{ autohaus['name'] }}</span><a href="#nachrichten">Kontakt zur Werkstatt ↗</a></footer>
+    <div class="partner-clock">{% include "_live_clock_widget.html" %}</div>
   </main>
   <script type="application/json" id="partner-order-config">{{ {'transportLabels': transport_arten, 'loadingNews': analysis_loading_news()} | tojson }}</script>
   <script src="{{ url_for('static', filename='partner-auftrag.js') }}" defer></script>
