@@ -47,6 +47,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from backup_storage import BackupStorage
+from cockpit_rules import document_visible, price_state, price_record, decimal_input, has_invoice, exact_contact
 
 try:
     import psycopg
@@ -2697,6 +2698,7 @@ def configured_flask_secret_key():
 
 
 app = Flask(__name__)
+app.jinja_env.globals.update(document_visible=document_visible, price_state=price_state, has_invoice=has_invoice)
 (
     _configured_secret_key,
     USING_EPHEMERAL_SECRET_KEY,
@@ -9942,6 +9944,14 @@ def init_db():
     ensure_column(db, "dateien", "quelle", "TEXT DEFAULT 'intern'")
     ensure_column(db, "dateien", "kategorie", "TEXT DEFAULT 'standard'")
     ensure_column(db, "dateien", "kunde_sichtbar", "INTEGER DEFAULT 0")
+    ensure_column(db, "dateien", "partner_sichtbar", "INTEGER DEFAULT 0")
+    ensure_column(db, "dateien", "versicherung_sichtbar", "INTEGER DEFAULT 0")
+    ensure_column(db, "dateien", "sichtbarkeit_geprueft", "INTEGER DEFAULT 0")
+    ensure_column(db, "dateien", "dokument_zweck", "TEXT DEFAULT 'pruefen'")
+    ensure_column(db, "lead_dateien", "kunden_sichtbar", "INTEGER DEFAULT NULL")
+    ensure_column(db, "benachrichtigungen", "kunden_sichtbar", "INTEGER DEFAULT 0")
+    ensure_column(db, "auftraege", "preisstand_json", "TEXT DEFAULT '{}'")
+    ensure_column(db, "auftraege", "rechnung_erstellung_status", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "reklamation_id", "INTEGER")
     ensure_column(db, "dateien", "dokument_typ", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "notiz", "TEXT DEFAULT ''")
@@ -11951,6 +11961,47 @@ def lead_payload_from_form(form):
     }
 
 
+
+def customer_history(auftrag_id=None, lead_id=None):
+    """Only customer-authored or deliberately published entries, across conversion."""
+    db = get_db()
+    events = []
+    if auftrag_id:
+        events.extend(dict(r) for r in db.execute(
+            "SELECT id, quelle, titel, nachricht, erstellt_am FROM benachrichtigungen WHERE auftrag_id=? AND (quelle='kunde' OR kunden_sichtbar=1)", (auftrag_id,)).fetchall())
+        lead_ids = [r['id'] for r in db.execute("SELECT id FROM leads WHERE auftrag_id=?", (auftrag_id,)).fetchall()]
+    else:
+        lead_ids = [lead_id] if lead_id else []
+    for item_id in lead_ids:
+        events.extend(dict(r) for r in db.execute(
+            "SELECT id, quelle, titel, nachricht, erstellt_am FROM lead_portal_log WHERE lead_id=? AND kunden_sichtbar=1", (item_id,)).fetchall())
+    db.close()
+    # All timestamps in these tables are written using the same now_str format.
+    return sorted(events, key=lambda e: (e.get('erstellt_am') or '', e.get('id') or 0), reverse=True)
+
+
+def customer_updated_at(events, documents):
+    values = [e.get('erstellt_am') or '' for e in events]
+    values += [d.get('hochgeladen_am') or d.get('erstellt_am') or '' for d in documents]
+    return max(values, default='')
+
+
+def zuweisbare_tagesauftraege(orders, tasks, day):
+    assigned = {int(t.get('auftrag_id') or 0) for t in tasks}
+    result = []
+    for order in orders:
+        status = int(order.get('status') or 1)
+        if order.get('archiviert') or order.get('angebotsphase') or status not in {2, 3}:
+            continue
+        if order['id'] in assigned or not werkstatt_tafel_auftrag_sichtbar(order):
+            continue
+        planned = parse_date(order.get('start_datum')) or parse_date(order.get('annahme_datum'))
+        if status < 3 and (not planned or planned > day):
+            continue
+        result.append({**order, 'tagesaufgabe_vorschlag': clean_text(order.get('produktion_schritt_label')) or 'Nächsten Arbeitsschritt abstimmen'})
+    return sorted(result, key=lambda o: (o.get('fertig_datum') or '9999', o['id']))
+
+
 def customer_order_documents_allowed(auftrag_id):
     db = get_db()
     row = db.execute("SELECT id FROM leads WHERE auftrag_id=? AND website='auto-lackierzentrum'", (auftrag_id,)).fetchone()
@@ -11964,14 +12015,14 @@ def customer_order_documents_context():
         return {}
     token = (request.view_args or {}).get("token")
     order = get_auftrag_by_kunden_status_token(token) if token else None
-    return {"kunden_auftragsdokumente": list_dateien(order["id"]) if order and customer_order_documents_allowed(order["id"]) else [], "dokument_token": token}
+    return {"kunden_auftragsdokumente": [d for d in list_dateien(order["id"]) if document_visible(d, "kunde")] if order and customer_order_documents_allowed(order["id"]) else [], "dokument_token": token}
 
 
 @app.get("/status/<token>/dokument/<int:datei_id>")
 def kunden_auftragsdokument(token, datei_id):
     order = get_auftrag_by_kunden_status_token(token)
     document = get_datei(datei_id)
-    if not order or not customer_order_documents_allowed(order["id"]) or not document or int(document["auftrag_id"]) != int(order["id"]):
+    if not document_visible(document, "kunde") or not order or not customer_order_documents_allowed(order["id"]) or not document or int(document["auftrag_id"]) != int(order["id"]):
         abort(404)
     response = app.make_response(send_upload_file(document, as_attachment=False))
     response.headers["Cache-Control"] = "private, no-store"
@@ -15962,12 +16013,15 @@ def build_auftrag_planung(auftrag, reference_date=None):
 
     candidates = [event for event in events if event["feld"] in relevante_felder]
     future_or_today = [event for event in candidates if event["datum"] >= heute]
-    if future_or_today:
+    overdue_production = [e for e in candidates if e["feld"] == "fertig_datum" and e["datum"] < heute] if status == 3 else []
+    if overdue_production:
+        relevant = min(overdue_production, key=lambda e: e["datum"])
+    elif future_or_today:
         relevant = sorted(future_or_today, key=lambda event: (event["datum"], event["priority"]))[0]
     elif candidates:
         relevant = sorted(candidates, key=lambda event: (event["datum"], event["priority"]), reverse=True)[0]
     else:
-        relevant = sorted(events, key=lambda event: (event["datum"], event["priority"]))[0] if events else None
+        relevant = sorted(events, key=lambda event: (event["datum"], event["priority"]))[0] if events and status < 3 else None
 
     if relevant:
         for event in events:
@@ -16950,12 +17004,15 @@ def build_lexware_rechnung_context(auftrag, invoice_net_amount=None):
     angebot_text = clean_text(auftrag.get("werkstatt_angebot_text"))
     angebot_preis = clean_text(auftrag.get("werkstatt_angebot_preis"))
     bonus_betrag, _, _ = auftrag_bonus_preis(auftrag)
+    confirmed_price = price_state(auftrag.get("preisstand_json")).get("kunde") or {}
+    if confirmed_price.get("netto"):
+        bonus_betrag = float(confirmed_price["netto"])
     bonus_preis_label = format_bonus_money(bonus_betrag) if bonus_betrag else ""
     if angebot_text or angebot_preis or bonus_preis_label:
         positionen.append(
             {
                 "bezeichnung": angebot_text or "Karosserie- und Lackierarbeiten",
-                "preis": angebot_preis or bonus_preis_label,
+                "preis": (confirmed_price["netto"] + " EUR netto / " + confirmed_price["brutto"] + " EUR brutto") if confirmed_price else angebot_preis or bonus_preis_label,
             }
         )
     else:
@@ -16964,7 +17021,7 @@ def build_lexware_rechnung_context(auftrag, invoice_net_amount=None):
                 "bezeichnung": clean_text(auftrag.get("analyse_text"))
                 or clean_text(auftrag.get("beschreibung"))
                 or "Karosserie- und Lackierarbeiten",
-                "preis": clean_text(auftrag.get("rep_max_kosten")),
+                "preis": "Preis noch zuordnen und bestätigen",
             }
         )
     belegtext = "\n".join(
@@ -16993,7 +17050,7 @@ def build_lexware_rechnung_context(auftrag, invoice_net_amount=None):
         "bonusmodell": bonus_invoice.get("bonusmodell") or {},
         "netto_betrag": bonus_betrag,
         "api_ready": bool(LEXWARE_API_KEY),
-        "tax_rate": LEXWARE_TAX_RATE,
+        "tax_rate": float(confirmed_price.get("mwst_satz", LEXWARE_TAX_RATE)),
         "lexware_kunden_url": LEXWARE_KUNDEN_URL,
         "lexware_rechnungen_url": LEXWARE_RECHNUNGEN_URL,
     }
@@ -20179,14 +20236,8 @@ def find_lexware_contact(kunde):
         "/v1/contacts",
         query=f"?name={quote(name)}&customer=true",
     )
-    for contact in data.get("content", []):
-        company_name = clean_text((contact.get("company") or {}).get("name"))
-        person = contact.get("person") or {}
-        person_name = clean_text(f"{person.get('firstName', '')} {person.get('lastName', '')}")
-        if company_name.lower() == name.lower() or person_name.lower() == name.lower():
-            return contact
-    content = data.get("content") or []
-    return content[0] if content else None
+    return exact_contact(data.get("content") or [], kunde)
+
 
 
 def create_lexware_contact(kunde):
@@ -20239,6 +20290,7 @@ def ensure_lexware_contact(kunde):
     if contact:
         contact_id = contact["id"]
         full_contact = get_lexware_contact(contact_id)
+        exact_contact([full_contact], kunde)
         return contact_id, False, lexware_contact_has_single_billing_address(full_contact)
     created = create_lexware_contact(kunde)
     contact_id = created["id"]
@@ -20270,7 +20322,7 @@ def lexware_datetime(value=None, fallback=None):
     return f"{parsed.isoformat()}T00:00:00.000+01:00"
 
 
-def build_lexware_invoice_line_item(position, description, net_amount):
+def build_lexware_invoice_line_item(position, description, net_amount, tax_rate=None):
     original_name = clean_text(position.get("bezeichnung")) or "Karosserie- und Lackierarbeiten"
     line_item_name = original_name[:LEXWARE_LINE_ITEM_NAME_MAX_LENGTH]
     line_item_description = clean_text(description)
@@ -20288,7 +20340,7 @@ def build_lexware_invoice_line_item(position, description, net_amount):
         "unitPrice": {
             "currency": "EUR",
             "netAmount": net_amount,
-            "taxRatePercentage": LEXWARE_TAX_RATE,
+            "taxRatePercentage": LEXWARE_TAX_RATE if tax_rate is None else tax_rate,
         },
         "discountPercentage": 0,
     }
@@ -20311,7 +20363,7 @@ def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
         "archived": False,
         "voucherDate": lexware_datetime(),
         "address": invoice_address,
-        "lineItems": [build_lexware_invoice_line_item(position, description, net_amount)],
+        "lineItems": [build_lexware_invoice_line_item(position, description, net_amount, rechnung["tax_rate"])],
         "totalPrice": {"currency": "EUR"},
         "taxConditions": {"taxType": "net"},
         "shippingConditions": {
@@ -21339,6 +21391,7 @@ def list_document_review_items(auftrag_id, auftrag=None):
         FROM dateien
         WHERE auftrag_id=?
           AND kategorie='standard'
+          AND COALESCE(dokument_zweck,'pruefen')='pruefen'
           AND reklamation_id IS NULL
           AND (extrahierter_text != '' OR analyse_json != '')
         ORDER BY id DESC
@@ -21373,6 +21426,7 @@ def list_document_review_items(auftrag_id, auftrag=None):
                     "value": value,
                     "current_value": current_value,
                     "active": values_match_for_review(key, value, current_value),
+                    "original_value": str(auftrag.get(key) or ""),
                 }
             )
         if items:
@@ -21454,129 +21508,11 @@ def confirm_document_review(auftrag_id, role):
 
 
 def apply_document_data_to_auftrag(auftrag_id, prefer_documents=False):
-    db = get_db()
-    auftrag_row = db.execute("SELECT * FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
-    if not auftrag_row:
-        db.close()
-        return {}
+    """Compatibility entry point: document recognition never writes order fields.
 
-    auftrag = dict(auftrag_row)
-    analysis_double_checked = bool(
-        int(auftrag.get("analyse_autohaus_geprueft") or 0)
-        and int(auftrag.get("analyse_werkstatt_geprueft") or 0)
-    )
-    dateien = db.execute(
-        """
-        SELECT original_name, notiz, extrahierter_text, analyse_json, analyse_hinweis
-        FROM dateien
-        WHERE auftrag_id=? AND (extrahierter_text != '' OR analyse_json != '' OR notiz != '')
-        ORDER BY id DESC
-        """,
-        (auftrag_id,),
-    ).fetchall()
-
-    erkannt = {}
-    for datei in dateien:
-        ai_felder = load_saved_analysis_json(datei["analyse_json"])
-        review_text = append_upload_note_to_analysis(datei["extrahierter_text"], datei["notiz"])
-        local_felder = parse_document_fields(review_text, datei["original_name"])
-        felder = merge_document_fields(ai_felder, local_felder)
-        felder = ensure_document_review_fallback(
-            felder,
-            review_text,
-            datei["original_name"],
-        )
-        for key, value in felder.items():
-            if key == "schaden_zonen_json" and clean_text(value):
-                merged = merge_schaden_zonen(erkannt.get(key), value)
-                if merged:
-                    erkannt[key] = json.dumps(merged, ensure_ascii=False)
-                continue
-            if value and key not in erkannt:
-                erkannt[key] = value
-
-    updates = {}
-    if erkannt.get("autohaus_id") and not auftrag.get("autohaus_id"):
-        updates["autohaus_id"] = erkannt["autohaus_id"]
-    if erkannt.get("fahrzeug") and (
-        prefer_documents or should_replace_fahrzeug(auftrag.get("fahrzeug"))
-    ):
-        updates["fahrzeug"] = erkannt["fahrzeug"]
-    if erkannt.get("fin_nummer") and (
-        prefer_documents or not clean_text(auftrag.get("fin_nummer"))
-    ):
-        updates["fin_nummer"] = erkannt["fin_nummer"]
-    if erkannt.get("hsn_nummer") and (
-        prefer_documents or not clean_text(auftrag.get("hsn_nummer"))
-    ):
-        updates["hsn_nummer"] = normalize_hsn(erkannt["hsn_nummer"])
-    if erkannt.get("tsn_nummer") and (
-        prefer_documents or not clean_text(auftrag.get("tsn_nummer"))
-    ):
-        updates["tsn_nummer"] = normalize_tsn(erkannt["tsn_nummer"])
-    if erkannt.get("auftragsnummer") and (
-        prefer_documents or not clean_text(auftrag.get("auftragsnummer"))
-    ):
-        updates["auftragsnummer"] = erkannt["auftragsnummer"]
-    if erkannt.get("rep_max_kosten") and (
-        prefer_documents or not clean_text(auftrag.get("rep_max_kosten"))
-    ):
-        updates["rep_max_kosten"] = erkannt["rep_max_kosten"]
-    if erkannt.get("bauteile_override") and (
-        prefer_documents or not clean_text(auftrag.get("bauteile_override"))
-    ):
-        updates["bauteile_override"] = erkannt["bauteile_override"]
-    if erkannt.get("schaden_zonen_json"):
-        merged_zones = merge_schaden_zonen(
-            auftrag.get("schaden_zonen_json"),
-            erkannt.get("schaden_zonen_json"),
-        )
-        current_zones = parse_schaden_zonen(auftrag.get("schaden_zonen_json"))
-        if merged_zones and (prefer_documents or merged_zones != current_zones):
-            updates["schaden_zonen_json"] = json.dumps(merged_zones, ensure_ascii=False)
-    if erkannt.get("kennzeichen") and (
-        prefer_documents or not clean_text(auftrag.get("kennzeichen"))
-    ):
-        updates["kennzeichen"] = erkannt["kennzeichen"]
-    if erkannt.get("annahme_datum") and (
-        prefer_documents or not clean_text(auftrag.get("annahme_datum"))
-    ):
-        updates["annahme_datum"] = erkannt["annahme_datum"]
-    if erkannt.get("fertig_datum") and (
-        prefer_documents or not clean_text(auftrag.get("fertig_datum"))
-    ):
-        updates["fertig_datum"] = erkannt["fertig_datum"]
-    if erkannt.get("fertig_datum") and (
-        prefer_documents or not clean_text(auftrag.get("abholtermin"))
-    ):
-        updates["abholtermin"] = erkannt["fertig_datum"]
-    if erkannt.get("analyse_text") and (
-        prefer_documents
-        or not clean_text(auftrag.get("analyse_text"))
-        or len(clean_text(auftrag.get("analyse_text"))) < 10
-    ):
-        updates["analyse_text"] = erkannt["analyse_text"][:220]
-    if erkannt.get("beschreibung") and (
-        prefer_documents or not clean_text(auftrag.get("beschreibung"))
-    ):
-        updates["beschreibung"] = erkannt["beschreibung"]
-    if "analyse_pruefen" in erkannt and not analysis_double_checked:
-        updates["analyse_pruefen"] = 1 if erkannt.get("analyse_pruefen") else 0
-    if erkannt.get("analyse_hinweis") and not analysis_double_checked:
-        updates["analyse_hinweis"] = erkannt["analyse_hinweis"]
-    if erkannt.get("analyse_confidence") is not None:
-        updates["analyse_confidence"] = erkannt.get("analyse_confidence") or 0
-    if updates:
-        updates["geaendert_am"] = now_str()
-        assignments = ", ".join(f"{feld}=?" for feld in updates)
-        db.execute(
-            f"UPDATE auftraege SET {assignments} WHERE id=?",
-            tuple(updates.values()) + (auftrag_id,),
-        )
-        db.commit()
-
-    db.close()
-    return updates
+    A selected field is accepted only through admin_auslese_uebernehmen.
+    """
+    return {}
 
 
 def get_status_log(auftrag_id):
@@ -30700,8 +30636,9 @@ def save_uploads(
     upload_note="",
     analyze=True,
     prozess_key="",
-    apply_analysis=True,
+    apply_analysis=False,
     force_analysis=False,
+    dokument_zweck="pruefen",
 ):
     saved = 0
     saved_analysis_document = False
@@ -30740,7 +30677,8 @@ def save_uploads(
         bundle = {}
         datei_notiz = upload_note if clean_text(kategorie) in {"standard", "teileangebot"} else ""
         is_analysis_document = (
-            analyze
+            dokument_zweck == "pruefen"
+            and analyze
             and (clean_text(kategorie) == "standard" or force_analysis)
             and reklamation_id is None
         )
@@ -30797,17 +30735,18 @@ def save_uploads(
                 timestamp,
             ),
         )
+        db.execute("UPDATE dateien SET dokument_zweck=? WHERE id=?", (dokument_zweck, cursor.lastrowid))
         store_datei_backup(db, cursor.lastrowid, target)
         saved += 1
     db.commit()
     db.close()
-    if saved and clean_text(quelle) in {"autohaus", "intern"} and clean_text(kategorie) == "standard":
+    if saved and dokument_zweck == "pruefen" and clean_text(quelle) in {"autohaus", "intern"} and clean_text(kategorie) == "standard":
         maybe_auto_advance_versicherung_after_documents(auftrag_id, quelle)
     if not saved and analysis_errors:
         return 0, {"_analysis_error": analysis_errors[0]}
-    if saved_analysis_document and apply_analysis:
+    if saved_analysis_document:
         try:
-            updates = apply_document_data_to_auftrag(auftrag_id, prefer_documents=False) or {}
+            updates = {}
             reset_document_review_checks(
                 auftrag_id,
                 clean_text(updates.get("analyse_hinweis"))
@@ -30864,6 +30803,7 @@ def reanalyze_existing_documents(auftrag_id):
         FROM dateien
         WHERE auftrag_id=?
           AND kategorie='standard'
+          AND COALESCE(dokument_zweck, 'pruefen')='pruefen'
           AND reklamation_id IS NULL
           AND COALESCE(quelle, '')!='kunde'
         ORDER BY id ASC
@@ -30916,7 +30856,7 @@ def reanalyze_existing_documents(auftrag_id):
         count += 1
     db.commit()
     db.close()
-    updates = apply_document_data_to_auftrag(auftrag_id, prefer_documents=False) if count else {}
+    updates = {}
     if count:
         reset_document_review_checks(
             auftrag_id,
@@ -34835,8 +34775,11 @@ def kunden_status_termine(auftrag):
         ("annahme", "Annahme / Bringtermin", auftrag.get("annahme_datum"), auftrag.get("annahme_uhrzeit"), "von der Werkstatt vorgegeben"),
         ("abholung", "Abholung", auftrag.get("abholtermin"), auftrag.get("abhol_uhrzeit"), "von der Werkstatt vorgegeben"),
     )
+    status = int(auftrag.get("status") or 1)
     items = []
     for key, label, value, uhrzeit, detail in config:
+        if status >= 5 or (status >= 3 and key in {"besichtigung", "annahme"}):
+            continue
         parsed = parse_date(value)
         parsed_uhrzeit = parse_time_value(uhrzeit)
         is_open = not bool(parsed or clean_text(value))
@@ -38104,7 +38047,7 @@ def cockpit_aktionsuebersicht(auftraege):
     unread = {int(r["auftrag_id"]) for r in db.execute("SELECT DISTINCT auftrag_id FROM benachrichtigungen WHERE quelle='kunde' AND COALESCE(gelesen,0)=0 AND titel IN ('Nachricht vom Kunden','Neue Unterlagen vom Kunden')").fetchall()}
     db.close()
     orders = {int(a['id']): a for a in auftraege if not a.get('archiviert')}
-    groups = {key: [] for key in ('angebote', 'antworten', 'termine')}
+    groups = {key: [] for key in ('angebote', 'antworten', 'dokumente', 'termine')}
     waiting = 0
     for lead in leads:
         order_id = int(lead.get('auftrag_id') or 0)
@@ -38135,6 +38078,13 @@ def cockpit_aktionsuebersicht(auftraege):
                     add('antworten', 'Nächsten Schritt prüfen', lead['naechste_aktion'] or LEAD_STATUS[lead['status']]['label'], '#kundenportal')
             elif not response_due:
                 add('angebote', 'Anfrage prüfen und Angebot erstellen', 'Leistung und Preis vorbereiten.', '#kundenportal')
+    db = get_db()
+    counts = {int(r['auftrag_id']): int(r['anzahl']) for r in db.execute("SELECT auftrag_id, COUNT(*) AS anzahl FROM dateien WHERE kategorie='standard' AND COALESCE(dokument_zweck,'pruefen')='pruefen' AND (extrahierter_text!='' OR analyse_json!='') GROUP BY auftrag_id").fetchall()}
+    db.close()
+    for order in orders.values():
+        count = counts.get(order['id'], 0)
+        if count and order.get('analyse_pruefen') and not order.get('analyse_werkstatt_geprueft'):
+            groups['dokumente'].append({'title':'Dokumentdaten prüfen', 'name':order.get('kunde_name') or order.get('autohaus_name') or 'Auftrag', 'vehicle':order.get('fahrzeug') or order.get('kennzeichen'), 'detail':f'{count} Unterlage(n) – Werkstattprüfung offen', 'url':url_for('auftrag_detail', auftrag_id=order['id'])+'#dokument-pruefung'})
     return {'groups':groups, 'waiting':waiting, 'total':sum(len(items) for items in groups.values())}
 
 
@@ -40809,6 +40759,8 @@ def admin_aufgaben():
         ist_heute=tag == datetime.now().date(),
         plaene=plaene,
         auftraege=auftraege_aktiv,
+        zuweisbare_auftraege=zuweisbare_tagesauftraege(auftraege_aktiv, aufgaben, tag),
+        offene_zuweisung_count=len(zuweisbare_tagesauftraege(auftraege_aktiv, aufgaben, tag)),
         wochentag=WOCHENTAGE[tag.weekday()],
     )
 
@@ -40829,6 +40781,11 @@ def admin_aufgabe_neu():
     richtwert = parse_richtwert_stunden(request.form.get("richtwert"))
     if not mitarbeiter_id or not beschreibung:
         flash("Bitte Mitarbeiter wählen und die Aufgabe kurz beschreiben.", "warning")
+        return redirect(url_for("admin_aufgaben", datum=datum_label))
+    person = get_mitarbeiter(mitarbeiter_id)
+    order = get_auftrag(auftrag_id) if auftrag_id else None
+    if not person or not person.get("aktiv") or (auftrag_id and (not order or order.get("archiviert") or order.get("angebotsphase") or not werkstatt_tafel_auftrag_sichtbar(order))):
+        flash("Mitarbeiter oder Auftrag ist nicht mehr für die Zuteilung verfügbar.", "warning")
         return redirect(url_for("admin_aufgaben", datum=datum_label))
     db = get_db()
     db.execute(
@@ -40889,6 +40846,7 @@ def werkstatt_aufgaben():
         aufgaben=aufgaben,
         datum_label=datum_label,
         wochentag=WOCHENTAGE[heute.weekday()],
+        offene_zuweisung_count=len(zuweisbare_tagesauftraege(list_auftraege(), aufgaben_fuer_datum(datum_label), heute)),
         summe_offen_label=richtwert_label(summe_offen),
     )
 
@@ -47644,7 +47602,7 @@ def auftrag_detail(auftrag_id):
                 add_benachrichtigung(
                     auftrag_id,
                     "Unterlagen neu geprüft",
-                    "Die Werkstatt hat vorhandene Unterlagen erneut analysiert und den Auftrag geprüft.",
+                    "Neue Erkennungsvorschläge sind verfügbar; die fachliche Prüfung steht noch aus.",
                 )
                 flash(f"{count} vorhandene Unterlage(n) neu analysiert.", "success")
             else:
@@ -47656,7 +47614,8 @@ def auftrag_detail(auftrag_id):
         if aktion == "upload_analyze" and not erlaubte_dateien:
             flash("Dateityp nicht unterstützt. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.", "warning")
             return redirect(detail_self_url)
-        upload_result = save_uploads(auftrag_id, erlaubte_dateien, "intern", "standard")
+        upload_result = save_uploads(auftrag_id, erlaubte_dateien, "intern", "standard",
+            dokument_zweck=("pruefen" if form.get("dokument_zweck") == "pruefen" else "ablage"))
         db = get_db()
         vor_fertig_row = db.execute("SELECT COALESCE(MAX(id), 0) AS m FROM dateien").fetchone()
         db.close()
@@ -47724,6 +47683,8 @@ def auftrag_detail(auftrag_id):
         statusliste=STATUSLISTE,
         log=get_status_log(auftrag_id),
         dateien=standard_dateien,
+        alle_dateien=dateien,
+        preisstand=price_state(auftrag.get("preisstand_json")),
         bonusrechnungen=bonusrechnungen,
         rechnungsdateien=rechnungsdateien,
         fertigbilder=fertigbilder,
@@ -49149,6 +49110,7 @@ def copy_lead_attachments_to_order(lead_id, auftrag_id):
                 "stored_name": lead.get("datei_stored_name"),
                 "mime_type": lead.get("datei_mime_type"),
                 "size": lead.get("datei_size"),
+                "quelle": lead.get("quelle"),
             }
         )
     attachments.extend(list_lead_dateien(lead_id))
@@ -49183,6 +49145,9 @@ def copy_lead_attachments_to_order(lead_id, auftrag_id):
                     now_str(),
                 ),
             )
+            db.execute("UPDATE dateien SET quelle=?, kunde_sichtbar=?, sichtbarkeit_geprueft=1 WHERE id=?",
+                       ("kunde" if attachment.get("quelle") in {"kunde_portal", "website", "website_formular"} else "intern",
+                        1 if document_visible(attachment, "kunde", lead=True) else 0, cursor.lastrowid))
             store_datei_backup(db, cursor.lastrowid, upload_path)
             copied += 1
         db.commit()
@@ -49900,6 +49865,139 @@ def reklamation_neu_planen(auftrag_id):
     return redirect(request.referrer or url_for("dashboard") + "#auftraege")
 
 
+def invoice_preflight_exists(order):
+    return bool(order.get('rechnung_erstellung_status')) or has_invoice(order) or any(d.get('kategorie') in {'rechnung', 'bonusrechnung'} for d in list_dateien(order['id']))
+
+
+
+
+@app.route('/admin/auftrag/<int:auftrag_id>/preise', methods=['POST'])
+@admin_required
+def admin_auftrag_preise(auftrag_id):
+    order = get_auftrag(auftrag_id)
+    if not order:
+        abort(404)
+    before = order.get('preisstand_json') or '{}'
+    if request.form.get('preisstand_version') != before:
+        flash('Die Preise wurden inzwischen geändert. Bitte die aktuellen Werte prüfen.', 'warning')
+        return redirect(url_for('auftrag_detail', auftrag_id=auftrag_id) + '#preise')
+    state = price_state(before)
+    try:
+        for kind in ('lieferant', 'kunde'):
+            file_id = int(request.form.get(kind + '_datei') or 0)
+            if file_id:
+                document = get_datei(file_id)
+                if not document or document['auftrag_id'] != auftrag_id:
+                    raise ValueError('Die gewählte Preisquelle gehört nicht zu diesem Auftrag.')
+            record = price_record(request.form.get(kind + '_netto'), request.form.get(kind + '_steuer'), request.form.get(kind + '_quelle'), file_id or None)
+            if record and not record['quelle']:
+                raise ValueError('Bitte für jeden Preis die Vereinbarung oder Quelle angeben.')
+            if record:
+                record['bestaetigt_am'] = now_str()
+                state[kind] = record
+            else:
+                state.pop(kind, None)
+    except (ValueError, TypeError) as exc:
+        flash(str(exc), 'warning')
+        return redirect(url_for('auftrag_detail', auftrag_id=auftrag_id) + '#preise')
+    db = get_db()
+    changed = db.execute("UPDATE auftraege SET preisstand_json=?, geaendert_am=? WHERE id=? AND COALESCE(preisstand_json,'{}')=?", (json.dumps(state, ensure_ascii=False), now_str(), auftrag_id, before)).rowcount
+    db.commit(); db.close()
+    flash('Lieferantenkosten und Kundenpreis getrennt gespeichert.' if changed else 'Zwischenzeitliche Preisänderung: Bitte neu prüfen.', 'success' if changed else 'warning')
+    return redirect(url_for('auftrag_detail', auftrag_id=auftrag_id) + '#preise')
+
+
+@app.route('/admin/auftrag/<int:auftrag_id>/auslese', methods=['POST'])
+@admin_required
+def admin_auslese_uebernehmen(auftrag_id):
+    order = get_auftrag(auftrag_id)
+    if not order:
+        abort(404)
+    key = request.form.get('feld')
+    allowed = {k for k, label in DOCUMENT_REVIEW_FIELDS} - {'rep_max_kosten'}
+    if key not in allowed:
+        abort(400)
+    review = next((r for r in list_document_review_items(auftrag_id, order) if str(r['datei_id']) == request.form.get('datei_id')), None)
+    item = next((i for i in review['items'] if i['key'] == key), None) if review else None
+    if not item:
+        abort(400)
+    old = str(order.get(key) or '')
+    if request.form.get('alter_wert') != old or request.form.get('neuer_wert') != item['value']:
+        flash('Auftrag oder Auslese wurden inzwischen geändert. Bitte erneut vergleichen.', 'warning')
+        return redirect(url_for('auftrag_detail', auftrag_id=auftrag_id) + '#dokument-pruefung')
+    value = item['value']
+    if key in {'annahme_datum', 'fertig_datum'}:
+        parsed = parse_date(value)
+        if not parsed:
+            abort(400)
+        value = parsed.strftime(DATE_FMT)
+    db = get_db()
+    changed = db.execute(f"UPDATE auftraege SET {key}=?, geaendert_am=? WHERE id=? AND COALESCE({key},'')=?", (value, now_str(), auftrag_id, old)).rowcount
+    db.commit(); db.close()
+    if changed:
+        add_benachrichtigung(auftrag_id, 'Dokumentwert übernommen', f"{item['label']}: {old or 'leer'} → {value}. Quelle: {review['original_name']}", quelle='intern')
+    flash('Das ausgewählte Feld wurde übernommen.' if changed else 'Zwischenzeitliche Änderung: Bitte erneut prüfen.', 'success' if changed else 'warning')
+    return redirect(url_for('auftrag_detail', auftrag_id=auftrag_id) + '#dokument-pruefung')
+
+
+@app.route('/admin/datei/<int:datei_id>/freigaben', methods=['POST'])
+@admin_required
+def admin_datei_freigaben(datei_id):
+    document = get_datei(datei_id)
+    if not document:
+        abort(404)
+    db = get_db()
+    db.execute('UPDATE dateien SET kunde_sichtbar=?, partner_sichtbar=?, versicherung_sichtbar=?, sichtbarkeit_geprueft=1 WHERE id=?', tuple(1 if request.form.get(role) == '1' else 0 for role in ('kunde', 'partner', 'versicherung')) + (datei_id,))
+    db.commit(); db.close()
+    flash('Sichtbarkeit dieser Datei gespeichert.', 'success')
+    return redirect(url_for('auftrag_detail', auftrag_id=document['auftrag_id']) + '#dateifreigaben')
+
+
+@app.route('/admin/lead/<int:lead_id>/datei/<int:datei_id>/freigabe', methods=['POST'])
+@admin_required
+def admin_lead_datei_freigabe(lead_id, datei_id):
+    db = get_db()
+    document = db.execute('SELECT * FROM lead_dateien WHERE id=? AND lead_id=?', (datei_id, lead_id)).fetchone()
+    if not document:
+        db.close(); abort(404)
+    db.execute('UPDATE lead_dateien SET kunden_sichtbar=? WHERE id=?', (1 if request.form.get('kunde') == '1' else 0, datei_id))
+    db.commit(); db.close()
+    flash('Sichtbarkeit im Kundenportal gespeichert.', 'success')
+    return redirect(url_for('admin_lead_detail', lead_id=lead_id))
+
+
+@app.route('/admin/auftrag/<int:auftrag_id>/kundenantwort', methods=['POST'])
+@admin_required
+def admin_kundenantwort(auftrag_id):
+    if not get_auftrag(auftrag_id):
+        abort(404)
+    text = clean_text(request.form.get('nachricht'))
+    if not text or len(text) > 10000 or request.form.get('veroeffentlichen') != '1':
+        abort(400)
+    db = get_db()
+    db.execute("INSERT INTO benachrichtigungen (auftrag_id,quelle,titel,nachricht,gelesen,kunden_sichtbar,erstellt_am) VALUES (?,'werkstatt','Nachricht der Werkstatt',?,0,1,?)", (auftrag_id, text, now_str()))
+    db.commit(); db.close()
+    flash('Antwort im Kundenportal veröffentlicht.', 'success')
+    return redirect(url_for('auftrag_detail', auftrag_id=auftrag_id) + '#kundenkommunikation')
+
+
+
+
+@app.route('/admin/auftrag/<int:auftrag_id>/rechnung/pruefung', methods=['POST'])
+@admin_required
+def admin_rechnung_pruefung(auftrag_id):
+    order = get_auftrag(auftrag_id)
+    if not order:
+        abort(404)
+    if request.form.get('kein_beleg_bestaetigt') != '1' or has_invoice(order) or any(d.get('kategorie') in {'rechnung','bonusrechnung'} for d in list_dateien(auftrag_id)):
+        abort(400)
+    db = get_db()
+    db.execute("UPDATE auftraege SET rechnung_erstellung_status='' WHERE id=? AND rechnung_erstellung_status='pruefen'", (auftrag_id,))
+    db.commit(); db.close()
+    add_benachrichtigung(auftrag_id, 'Rechnungserstellung freigegeben', 'Admin hat bestätigt: kein Rechnungsbeleg in Lexware entstanden.', quelle='intern')
+    return redirect(url_for('rechnung_schreiben', auftrag_id=auftrag_id))
+
+
 @app.route("/admin/auftrag/<int:auftrag_id>/rechnung", methods=["GET", "POST"])
 @admin_required
 def rechnung_schreiben(auftrag_id):
@@ -49958,6 +50056,8 @@ def rechnung_schreiben(auftrag_id):
         "rechnung.html",
         auftrag=auftrag,
         rechnung=build_lexware_rechnung_context(auftrag),
+        rechnung_vorhanden=invoice_preflight_exists(auftrag),
+        rechnungsdateien=[d for d in list_dateien(auftrag_id) if d.get("kategorie") in {"rechnung", "bonusrechnung"}],
     )
 
 
@@ -49974,16 +50074,36 @@ def lexware_rechnung_erstellen(auftrag_id):
         flash("Für diesen Auftrag gibt es bereits einen Lexware-Rechnungsentwurf.", "info")
         return redirect(auftrag.get("lexware_invoice_url") or url_for("rechnung_schreiben", auftrag_id=auftrag_id))
 
-    net_amount = parse_money_amount(request.form.get("netto_betrag"))
+    if invoice_preflight_exists(auftrag):
+        flash("Eine Rechnung ist bereits hinterlegt. Bitte den vorhandenen Beleg zuordnen; ein weiterer Entwurf wurde nicht erstellt.", "warning")
+        return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
+    if request.form.get("rechnung_pruefung_bestaetigt") != "1":
+        flash("Bitte Empfänger, Betrag und vorhandene Belege ausdrücklich prüfen.", "warning")
+        return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
+    try:
+        net_amount = float(decimal_input(request.form.get("netto_betrag")) or 0)
+    except ValueError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
     if not net_amount or net_amount <= 0:
         flash("Bitte einen Netto-Rechnungsbetrag eintragen.", "warning")
         return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
     rechnung = build_lexware_rechnung_context(auftrag, invoice_net_amount=net_amount)
 
+    confirmed = price_state(auftrag.get("preisstand_json")).get("kunde") or {}
+    if confirmed and decimal_input(confirmed['netto']) != decimal_input(str(net_amount)):
+        flash("Der Betrag weicht vom bestätigten Kundenpreis ab. Bitte zuerst die Preisvereinbarung im Auftrag aktualisieren.", "warning")
+        return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
+    db = get_db()
+    reserved = db.execute("UPDATE auftraege SET rechnung_erstellung_status='pruefen' WHERE id=? AND COALESCE(rechnung_erstellung_status,'')='' AND COALESCE(lexware_invoice_id,'')='' AND COALESCE(rechnung_nummer,'')='' AND COALESCE(rechnung_status,'') NOT IN ('geschrieben','lexware_entwurf')", (auftrag_id,)).rowcount
+    db.commit(); db.close()
+    if not reserved:
+        flash("Die Rechnung wird bereits vorbereitet oder muss geprüft werden. Bitte zuerst in Lexware nachsehen.", "warning")
+        return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
     try:
         result = create_lexware_invoice_draft(auftrag, rechnung, net_amount)
     except Exception as exc:
-        flash(str(exc), "danger")
+        flash("Erstellung angehalten. Bitte in Lexware prüfen, ob ein Beleg entstanden ist, bevor erneut vorbereitet wird. " + str(exc), "danger")
         return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
 
     db = get_db()
@@ -49995,6 +50115,7 @@ def lexware_rechnung_erstellen(auftrag_id):
             lexware_invoice_id=?,
             lexware_invoice_url=?,
             rechnung_status='lexware_entwurf',
+            rechnung_erstellung_status='erstellt',
             bonus_netto_betrag=?,
             bonus_preis_aktualisiert_am=?,
             geaendert_am=?
@@ -50203,9 +50324,9 @@ def admin_datei_kunde_sichtbar(datei_id):
     datei = get_datei(datei_id)
     if not datei:
         abort(404)
-    neuer_wert = 0 if int(datei.get("kunde_sichtbar") or 0) else 1
+    neuer_wert = 0 if document_visible(datei, "kunde") else 1
     db = get_db()
-    db.execute("UPDATE dateien SET kunde_sichtbar=? WHERE id=?", (neuer_wert, datei_id))
+    db.execute("UPDATE dateien SET kunde_sichtbar=?, partner_sichtbar=?, versicherung_sichtbar=?, sichtbarkeit_geprueft=1 WHERE id=?", (neuer_wert, int(document_visible(datei, "partner")), int(document_visible(datei, "versicherung")), datei_id))
     db.execute("UPDATE auftraege SET geaendert_am=? WHERE id=?", (now_str(), datei["auftrag_id"]))
     db.commit()
     db.close()
@@ -50548,6 +50669,8 @@ def kunden_status(token):
             abort(404)
         lead_dateien = []
         for item in list_lead_dateien(lead["id"]):
+            if not document_visible(item, "kunde", lead=True):
+                continue
             mime_type = clean_text(item.get("mime_type")) or canonical_upload_mime_type(
                 item.get("original_name")
             )
@@ -50571,6 +50694,9 @@ def kunden_status(token):
                 "lead_kundenportal.html",
                 lead=lead,
                 lead_dateien=lead_dateien,
+                kunden_dokumente=lead_dateien,
+                kunden_verlauf=customer_history(lead_id=lead["id"]),
+                kunden_aktualisiert_am=customer_updated_at(customer_history(lead_id=lead["id"]), lead_dateien),
                 portal_events=list_lead_portal_events(lead["id"], customer_only=True),
                 werkstatt_kontakt=werkstatt_kundenkontakt(lead),
                 transport_arten=TRANSPORT_ARTEN,
@@ -50598,10 +50724,11 @@ def kunden_status(token):
     versicherung_prozess = build_versicherung_prozess(auftrag, dateien, context="kunde") if auftrag.get("versicherung_id") else None
     versicherung_teile = list_versicherung_teile(auftrag["id"]) if auftrag.get("versicherung_id") else []
     terminfreigabe = kunden_terminfreigabe_info(auftrag, teile=versicherung_teile, prozess=versicherung_prozess)
-    kunden_bilder = [d for d in dateien if d.get("kunde_sichtbar") and d.get("is_browser_image")]
+    visible_files = [d for d in dateien if document_visible(d, "kunde")]
+    kunden_bilder = [d for d in visible_files if d.get("is_browser_image")]
     kunden_unterlagen = [
         d
-        for d in dateien
+        for d in visible_files
         if clean_text(d.get("quelle")) == "kunde"
         and clean_text(d.get("kategorie")) == "standard"
         and not d.get("reklamation_id")
@@ -50635,7 +50762,10 @@ def kunden_status(token):
             versicherung_teile=versicherung_teile,
             terminfreigabe=terminfreigabe,
             kunden_termine=kunden_termine,
-            kunden_nachrichten=list_benachrichtigungen(auftrag["id"], limit=5),
+            kunden_nachrichten=[],
+            kunden_verlauf=customer_history(auftrag_id=auftrag["id"]),
+            kunden_dokumente=[{**d, "customer_url": url_for("kunden_status_bild", token=token, datei_id=d["id"])} for d in visible_files],
+            kunden_aktualisiert_am=customer_updated_at(customer_history(auftrag_id=auftrag["id"]), visible_files),
             werkstatt_kontakt=werkstatt_kundenkontakt(auftrag),
             kunden_bilder=kunden_bilder,
             kunden_unterlagen=kunden_unterlagen,
@@ -50676,6 +50806,8 @@ def kunden_status_bild(token, datei_id):
         if not row:
             abort(404)
         item = dict(row)
+        if not document_visible(item, "kunde", lead=True):
+            abort(404)
         path = UPLOAD_DIR / pathlib.Path(clean_text(item.get("stored_name"))).name
         if not path.exists() or not path.is_file():
             abort(404)
@@ -50695,7 +50827,7 @@ def kunden_status_bild(token, datei_id):
     if (
         not datei
         or int(datei.get("auftrag_id") or 0) != int(auftrag["id"])
-        or not int(datei.get("kunde_sichtbar") or 0)
+        or not document_visible(datei, "kunde")
     ):
         abort(404)
     response = app.make_response(send_upload_file(datei, as_attachment=False))
@@ -51648,7 +51780,7 @@ def versicherung_auftrag(slug, auftrag_id):
             quelle="versicherung",
         )
         auftrag = get_auftrag(auftrag_id)
-    dateien = list_dateien(auftrag_id)
+    dateien = [d for d in list_dateien(auftrag_id) if document_visible(d, "versicherung")]
     chat_nachrichten = list_chat_nachrichten(auftrag_id)
     prozess = build_versicherung_prozess(auftrag, dateien, context="admin")
     teile = list_versicherung_teile(auftrag_id)
@@ -51837,7 +51969,7 @@ def versicherung_datei(slug, datei_id):
     if redirect_response:
         return redirect_response
     datei = get_datei(datei_id)
-    if not datei:
+    if not datei or not document_visible(datei, "versicherung"):
         abort(404)
     auftrag = get_auftrag(datei["auftrag_id"])
     if not versicherung_auftrag_im_portal_sichtbar(auftrag, versicherung["id"]):
@@ -51975,7 +52107,7 @@ def werkstatt_tafel():
         stand_label=jetzt.strftime("%H:%M"),
         datum_label=f"{WOCHENTAGE[jetzt.weekday()]}, {jetzt.strftime(DATE_FMT)}",
         server_now_iso=jetzt.isoformat(timespec="seconds"),
-        countdown_ziel_iso=abflug.isoformat(timespec="seconds"),
+        countdown_ziel_iso=abflug.isoformat(timespec="seconds") if abflug > jetzt else "",
     )
 
 
@@ -53574,7 +53706,7 @@ def partner_angebot_detail(slug, auftrag_id):
         target_anchor = "#schadentext-pruefen" if angebot.get("versicherung_id") and aktion == "review_damage" else ""
         return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id) + target_anchor)
 
-    sichtbare_dateien = [d for d in list_dateien(auftrag_id) if d.get("quelle") in {"autohaus", "intern", "versicherung"}]
+    sichtbare_dateien = [d for d in list_dateien(auftrag_id) if document_visible(d, "partner")]
     versicherung = get_versicherung(angebot.get("versicherung_id")) if angebot.get("versicherung_id") else None
     versicherung_anschreiben = clean_text(angebot.get("versicherung_anschreiben"))
     if angebot.get("versicherung_id") and not versicherung_anschreiben:
@@ -53630,6 +53762,9 @@ def partner_angebot_annehmen(slug, auftrag_id):
         abort(404)
     if angebot.get("angebot_status") != "angebot_abgegeben":
         flash("Das Angebot der Werkstatt liegt noch nicht vor.", "warning")
+        return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
+    if request.form.get("angebot_annehmen_bestaetigt") != "1":
+        flash("Bitte zuerst das vollständige Angebot prüfen und die Annahme bestätigen.", "warning")
         return redirect(url_for("partner_angebot_detail", slug=slug, auftrag_id=auftrag_id))
     angebot_annehmen(auftrag_id)
     flash("Angebot angenommen. Das Fahrzeug wurde in Ihre Aufträge übernommen.", "success")
@@ -54119,7 +54254,7 @@ def partner_auftrag(slug, auftrag_id):
         return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
 
     try:
-        sichtbare_dateien = [d for d in list_dateien(auftrag_id) if d.get("quelle") in {"autohaus", "intern", "versicherung"}]
+        sichtbare_dateien = [d for d in list_dateien(auftrag_id) if document_visible(d, "partner")]
         standard_dateien = dateien_mit_kategorie(sichtbare_dateien, "standard")
         fertigbilder = dateien_mit_kategorie(sichtbare_dateien, "fertigbild")
         chat_nachrichten = list_chat_nachrichten(auftrag_id)
@@ -54208,7 +54343,7 @@ def partner_auftrag_dokumente(slug, auftrag_id):
                         flash(f"{saved} Fertigbild(er) hochgeladen. Es wurde keine Analyse gestartet.", "success")
         return redirect(url_for("partner_auftrag_dokumente", slug=slug, auftrag_id=auftrag_id))
 
-    sichtbare_dateien = [d for d in list_dateien(auftrag_id) if d.get("quelle") in {"autohaus", "intern", "versicherung"}]
+    sichtbare_dateien = [d for d in list_dateien(auftrag_id) if document_visible(d, "partner")]
     standard_dateien = dateien_mit_kategorie(sichtbare_dateien, "standard")
     fertigbilder = dateien_mit_kategorie(sichtbare_dateien, "fertigbild")
     return render_template(
@@ -54436,7 +54571,7 @@ def partner_datei(slug, datei_id):
     if redirect_response:
         return redirect_response
     datei = get_datei(datei_id)
-    if not datei:
+    if not datei or not document_visible(datei, "partner"):
         abort(404)
     auftrag = get_auftrag(datei["auftrag_id"])
     if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
@@ -54454,7 +54589,7 @@ def partner_datei_download(slug, datei_id):
     if redirect_response:
         return redirect_response
     datei = get_datei(datei_id)
-    if not datei:
+    if not datei or not document_visible(datei, "partner"):
         abort(404)
     auftrag = get_auftrag(datei["auftrag_id"])
     if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:

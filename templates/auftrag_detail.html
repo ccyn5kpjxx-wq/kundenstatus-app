@@ -674,9 +674,70 @@
       </div>
       {% endif %}
 
+<section class="page-card p-4 mb-4" id="preise">
+  <h3>Preise und Belege</h3>
+  <p class="text-muted">Lieferantenkosten und vereinbarter Kundenpreis werden getrennt bestätigt. Die Quelle bleibt beim Betrag gespeichert.</p>
+  <form method="POST" action="{{ url_for('admin_auftrag_preise', auftrag_id=auftrag['id']) }}">
+    <input type="hidden" name="preisstand_version" value="{{ auftrag['preisstand_json'] or '{}' }}">
+    <div class="row g-3">
+      {% for kind, label in [('lieferant','Lieferantenkosten – intern'),('kunde','Vereinbarter Kundenpreis')] %}
+      {% set preis = preisstand.get(kind, {}) %}
+      <fieldset class="col-lg-6">
+        <legend class="h5">{{ label }}</legend>
+        <div class="border rounded-3 p-3 h-100">
+          {% if preis %}
+          <div class="mb-3"><strong>{{ preis['netto'] }} € netto</strong><br>{{ preis['mwst'] }} € MwSt. · {{ preis['brutto'] }} € brutto</div>
+          {% else %}<div class="alert alert-warning py-2">Noch nicht zugeordnet</div>{% endif %}
+          <label class="form-label" for="{{ kind }}-netto">Nettobetrag in Euro</label>
+          <input id="{{ kind }}-netto" class="form-control mb-2" name="{{ kind }}_netto" inputmode="decimal" value="{{ preis.get('netto','') }}">
+          <label class="form-label" for="{{ kind }}-steuer">Mehrwertsteuer in Prozent</label>
+          <input id="{{ kind }}-steuer" class="form-control mb-2" name="{{ kind }}_steuer" inputmode="decimal" value="{{ preis.get('mwst_satz','19') }}">
+          <label class="form-label" for="{{ kind }}-quelle">Vereinbarung / Quelle</label>
+          <input id="{{ kind }}-quelle" class="form-control mb-2" name="{{ kind }}_quelle" maxlength="300" value="{{ preis.get('quelle','') }}" placeholder="z. B. bestätigtes Angebot vom …">
+          <label class="form-label" for="{{ kind }}-datei">Zugehöriger Beleg</label>
+          <select id="{{ kind }}-datei" class="form-select" name="{{ kind }}_datei"><option value="">Ohne Datei</option>{% for d in alle_dateien %}<option value="{{ d['id'] }}" {% if preis.get('datei_id') == d['id'] %}selected{% endif %}>{{ d['original_name'] }}</option>{% endfor %}</select>
+        </div>
+      </fieldset>
+      {% endfor %}
+    </div>
+    <button class="btn btn-brand mt-4" type="submit">Preise bestätigen und speichern</button>
+  </form>
+  {% if auftrag['rep_max_kosten'] or auftrag['werkstatt_angebot_preis'] %}
+  <details class="mt-3"><summary>Bisherige Preisangaben abgleichen</summary><p class="mt-2">Kostenangabe aus Auftrag: {{ auftrag['rep_max_kosten'] or '—' }}<br>Angebotstext: {{ auftrag['werkstatt_angebot_preis'] or '—' }}</p><p class="text-muted small">Diese älteren Angaben werden erst durch deine Zuordnung oben zu einem bestätigten Preis.</p></details>
+  {% endif %}
+  <div class="mt-3 border-top pt-3"><strong>Rechnung:</strong> {{ auftrag['rechnung_nummer'] or 'Noch keine Rechnungsnummer' }} · {{ auftrag['rechnung_status'] or 'offen' }} <a class="btn btn-soft btn-sm ms-2" href="{{ url_for('rechnung_schreiben', auftrag_id=auftrag['id']) }}">Rechnung und Empfänger prüfen</a></div>
+</section>
+
+<details class="page-card p-4 mb-4" id="dateifreigaben">
+  <summary class="h4 mb-0">Dateien und Sichtbarkeit · {{ alle_dateien|length }} Unterlagen</summary>
+  <p class="text-muted mt-3">Für jede Datei gilt die unten bestätigte Sichtbarkeit. Nicht freigegebene Dateien bleiben intern; eigene Uploads bleiben zunächst für ihren Absender sichtbar.</p>
+  {% for d in alle_dateien %}
+  <form method="POST" action="{{ url_for('admin_datei_freigaben', datei_id=d['id']) }}" class="border-top py-3">
+    <a href="{{ url_for('admin_datei', datei_id=d['id']) }}" target="_blank" rel="noopener" class="fw-semibold text-break">{{ d['original_name'] }}</a>
+    <div class="d-flex gap-3 flex-wrap mt-2">
+      {% for role,label in [('kunde','Kunde'),('partner','Autohaus / Partner'),('versicherung','Versicherung')] %}
+      <label class="form-check"><input class="form-check-input" type="checkbox" name="{{ role }}" value="1" {% if document_visible(d,role) %}checked{% endif %}> {{ label }}</label>
+      {% endfor %}
+      <button class="btn btn-soft btn-sm" type="submit">Sichtbarkeit speichern</button>
+    </div>
+  </form>
+  {% else %}<p>Noch keine Dateien hinterlegt.</p>{% endfor %}
+  {% if auftrag['kunden_status_token'] %}<a class="btn btn-soft mt-2" href="{{ url_for('kunden_status', token=auftrag['kunden_status_token']) }}" target="_blank" rel="noopener">Kundensicht prüfen</a>{% endif %}
+</details>
+
+<details class="page-card p-4 mb-4">
+  <summary class="h4 mb-0">Nachricht im Kundenportal</summary>
+  <form method="POST" action="{{ url_for('admin_kundenantwort', auftrag_id=auftrag['id']) }}" class="mt-3">
+    <label for="portal-antwort" class="form-label">Antwort an den Kunden</label>
+    <textarea id="portal-antwort" name="nachricht" class="form-control" rows="4" maxlength="10000" required></textarea>
+    <label class="form-check mt-3"><input class="form-check-input" type="checkbox" name="veroeffentlichen" value="1" required> Diesen Text für den Kunden veröffentlichen.</label>
+    <button class="btn btn-brand mt-2" type="submit">Im Kundenportal veröffentlichen</button>
+  </form>
+</details>
+
       {% if auftrag['analyse_pruefen'] or auftrag['analyse_hinweis'] or auftrag['analyse_confidence'] %}
-      <div class="alert {{ 'alert-warning' if auftrag['analyse_pruefen'] else 'alert-success' }}">
-        <strong>{{ 'Analyse bitte prüfen' if auftrag['analyse_pruefen'] else 'Analyse wirkt plausibel' }}</strong>
+      <div class="alert {{ 'alert-warning' if auftrag['analyse_pruefen'] else 'alert-info' }}">
+        <strong>{{ 'Analyse bitte prüfen' if auftrag['analyse_pruefen'] else 'Erkennungsvorschlag vorhanden' }}</strong>
         {% if auftrag['analyse_hinweis'] %}
         <div class="mt-1">{{ auftrag['analyse_hinweis'] }}</div>
         {% endif %}
@@ -687,7 +748,8 @@
       {% endif %}
 
       {% if dokument_pruefung %}
-      <div class="page-card p-3 mb-4 border border-warning-subtle analysis-review-card">
+      <details class="page-card p-3 mb-4 border border-warning-subtle analysis-review-card" id="dokument-pruefung">
+        <summary class="h4">Erkannte Daten mit Originalen vergleichen</summary>
         <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start mb-3">
           <div>
             <h4 class="mb-1">Erkannte Felder aus Unterlagen</h4>
@@ -711,13 +773,13 @@
           <div class="border rounded-4 p-3 bg-light analysis-file-card">
             <div class="d-flex justify-content-between gap-2 flex-wrap">
               <div class="min-width-0">
-                <div class="fw-bold breakable-text">{{ pruefung['original_name'] }}</div>
+                <a class="fw-bold breakable-text" href="{{ url_for('admin_datei', datei_id=pruefung['datei_id']) }}" target="_blank" rel="noopener">{{ pruefung['original_name'] }} · Original öffnen</a>
                 <div class="text-muted small">
                   {{ pruefung['dokument_typ'] or 'Dokument' }}{% if pruefung['analyse_quelle'] %} · {{ pruefung['analyse_quelle'] }}{% endif %}
                 </div>
               </div>
               {% if pruefung['confidence'] %}
-              <span class="badge text-bg-secondary">Sicherheit {{ '%.0f'|format((pruefung['confidence'] or 0) * 100) }}%</span>
+              <span class="badge text-bg-secondary">Erkennungswert {{ '%.0f'|format((pruefung['confidence'] or 0) * 100) }}%</span>
               {% endif %}
             </div>
             {% if pruefung['analyse_hinweis'] %}
@@ -741,8 +803,15 @@
                     <td>{{ item['current_value'] or '—' }}</td>
                     <td>
                       <span class="badge {{ 'text-bg-success' if item['active'] else 'text-bg-warning' }}">
-                        {{ 'passt zum Auftrag' if item['active'] else 'Bitte prüfen' }}
+                        {{ 'Gleicher Wert' if item['active'] else 'Bitte prüfen' }}
                       </span>
+                      {% if not item['active'] and item['key'] != 'rep_max_kosten' %}
+                      <form method="POST" action="{{ url_for('admin_auslese_uebernehmen', auftrag_id=auftrag['id']) }}" class="mt-2">
+                        <input type="hidden" name="datei_id" value="{{ pruefung['datei_id'] }}"><input type="hidden" name="feld" value="{{ item['key'] }}">
+                        <input type="hidden" name="alter_wert" value="{{ item['original_value'] }}"><input type="hidden" name="neuer_wert" value="{{ item['value'] }}">
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Diesen Wert übernehmen</button>
+                      </form>
+                      {% elif item['key'] == 'rep_max_kosten' %}<a href="#preise" class="d-block small">Als Lieferanten- oder Kundenpreis zuordnen</a>{% endif %}
                     </td>
                   </tr>
                   {% endfor %}
@@ -752,7 +821,7 @@
           </div>
           {% endfor %}
         </div>
-      </div>
+      </details>
       {% endif %}
 
       <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
@@ -894,8 +963,9 @@
         </div>
         <div class="col-md-6">
           <label class="form-label">Neue Unterlagen</label>
+          <select name="dokument_zweck" class="form-select mb-2" aria-label="Verwendung der Unterlagen"><option value="ablage">Nur ablegen – z. B. SEPA, E-Mail, Lieferantenbeleg</option><option value="pruefen">Reparaturunterlage auslesen und vergleichen</option></select>
           <input type="file" name="dateien" class="form-control form-control-lg" multiple>
-          <div class="form-text">Datei direkt hochladen und den Auftrag sofort neu analysieren. Bei Gutachten kann das ein paar Sekunden dauern.</div>
+          <div class="form-text">Unterlagen zunächst intern ablegen. Eine Auslese liefert Vorschläge, die du einzeln prüfst und übernimmst.</div>
         </div>
         <div class="col-md-6">
           <label class="form-label">Fertigbilder</label>
@@ -907,7 +977,7 @@
           <textarea name="notiz_intern" class="form-control" rows="4">{{ auftrag['notiz_intern'] }}</textarea>
         </div>
         <div class="col-12 d-flex gap-2 flex-wrap">
-          <button type="submit" name="aktion" value="upload_analyze" class="btn btn-soft btn-lg" data-loading-message="Bitte kurz warten. Die neue Unterlage wird gelesen und der Auftrag wird vorbereitet.">Hochladen & analysieren</button>
+          <button type="submit" name="aktion" value="upload_analyze" class="btn btn-soft btn-lg" data-loading-message="Bitte kurz warten. Die Unterlage wird gespeichert und je nach Auswahl ausgelesen.">Unterlagen hochladen</button>
           <button type="submit" name="aktion" value="reanalyze_existing" class="btn btn-soft btn-lg" data-loading-message="Bitte kurz warten. Vorhandene Unterlagen werden neu geprüft.">Vorhandene Unterlagen neu analysieren</button>
           <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Änderungen speichern</button>
           {% if back_context %}<input type="hidden" name="back" value="{{ back_context }}">{% endif %}
@@ -1055,8 +1125,8 @@
               <form method="POST" action="{{ url_for('admin_datei_kunde_sichtbar', datei_id=datei['id']) }}" class="m-0">
                 {{ csrf_field()|safe }}
                 <input type="hidden" name="next" value="{{ detail_self_url }}">
-                <button type="submit" class="btn btn-sm {{ 'btn-success' if datei['kunde_sichtbar'] else 'btn-outline-secondary' }}" title="Steuert, ob der Kunde dieses Bild auf seiner Status-Seite sieht.">
-                  {{ '👁 Kunde sieht es' if datei['kunde_sichtbar'] else 'für Kunde einblenden' }}
+                <button type="submit" class="btn btn-sm {{ 'btn-success' if document_visible(datei, 'kunde') else 'btn-outline-secondary' }}" title="Steuert, ob der Kunde dieses Bild auf seiner Status-Seite sieht.">
+                  {{ '👁 Kunde sieht es' if document_visible(datei, 'kunde') else 'für Kunde einblenden' }}
                 </button>
               </form>
               {% endif %}
@@ -1121,8 +1191,8 @@
               <form method="POST" action="{{ url_for('admin_datei_kunde_sichtbar', datei_id=datei['id']) }}" class="m-0">
                 {{ csrf_field()|safe }}
                 <input type="hidden" name="next" value="{{ detail_self_url }}">
-                <button type="submit" class="btn btn-sm {{ 'btn-success' if datei['kunde_sichtbar'] else 'btn-outline-secondary' }}" title="Steuert, ob der Kunde dieses Bild auf seiner Status-Seite sieht.">
-                  {{ '👁 Kunde sieht es' if datei['kunde_sichtbar'] else 'für Kunde einblenden' }}
+                <button type="submit" class="btn btn-sm {{ 'btn-success' if document_visible(datei, 'kunde') else 'btn-outline-secondary' }}" title="Steuert, ob der Kunde dieses Bild auf seiner Status-Seite sieht.">
+                  {{ '👁 Kunde sieht es' if document_visible(datei, 'kunde') else 'für Kunde einblenden' }}
                 </button>
               </form>
               {% endif %}

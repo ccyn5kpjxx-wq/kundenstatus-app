@@ -148,9 +148,15 @@ Preis/Vorgabe: {{ position['preis'] }}{% endif %}
         <a href="{{ auftrag['lexware_invoice_url'] }}" class="btn btn-brand w-100" target="_blank" rel="noopener">
           Lexware-Entwurf öffnen
         </a>
+      {% elif auftrag['rechnung_erstellung_status'] == 'pruefen' %}
+        <div class="alert alert-warning">Ein vorheriger Erstellungsversuch ist noch ungeklärt. Bitte zuerst in Lexware nachsehen, ob ein Entwurf oder eine Rechnung entstanden ist.</div>
+        <form method="POST" action="{{ url_for('admin_rechnung_pruefung', auftrag_id=auftrag['id']) }}"><label class="form-check"><input class="form-check-input" type="checkbox" name="kein_beleg_bestaetigt" value="1" required> In Lexware geprüft: Es ist kein Beleg entstanden.</label><button class="btn btn-soft mt-2">Erneute Vorbereitung freigeben</button></form>
+      {% elif rechnung_vorhanden %}
+        <div class="alert alert-warning">Für diesen Auftrag ist bereits ein Rechnungsbeleg hinterlegt. Bitte diesen prüfen und zuordnen.</div>
+        {% for d in rechnungsdateien %}<a class="d-block mb-2 text-break" href="{{ url_for('admin_datei', datei_id=d['id']) }}" target="_blank" rel="noopener">{{ d['original_name'] }}</a>{% endfor %}
       {% elif not rechnung['api_ready'] %}
         <div class="alert alert-warning mb-0">
-          Für den Direkt-Button fehlt noch <code>LEXWARE_API_KEY</code> in <code>.env.local</code>.
+          Die Verbindung zu Lexware ist noch nicht eingerichtet.
         </div>
       {% else %}
         <form method="POST" action="{{ url_for('lexware_rechnung_erstellen', auftrag_id=auftrag['id']) }}" data-submit-once>
@@ -164,6 +170,11 @@ Preis/Vorgabe: {{ position['preis'] }}{% endif %}
           </div>
           <div class="small text-muted mb-3">
             Beim Klick werden Kundendaten und Rechnungsdaten an Lexware übertragen. Die Rechnung bleibt als Entwurf und wird nicht automatisch finalisiert.
+          </div>
+          <div class="border rounded-3 p-3 mb-3">
+            <strong>Rechnungskontrolle</strong><p class="mb-2 text-break">{{ rechnung['kunde']['name'] }}<br>{{ rechnung['kunde']['strasse'] }} · {{ rechnung['kunde']['plz'] }} {{ rechnung['kunde']['ort'] }}<br>{{ rechnung['kunde']['email'] or 'Rechnungs-E-Mail noch ergänzen' }}</p>
+            <output class="d-block mb-2" id="rechnung-summe"></output>
+            <label class="form-check"><input class="form-check-input" type="checkbox" name="rechnung_pruefung_bestaetigt" value="1" required> Empfänger, Leistungsumfang und Betrag geprüft; vorhandene Rechnungen abgeglichen.</label>
           </div>
           <button type="submit" class="btn btn-brand w-100" {% if auftrag['status'] < 5 %}disabled{% endif %}>
             Rechnung in Lexware vorbereiten
@@ -249,4 +260,14 @@ Preis/Vorgabe: {{ position['preis'] }}{% endif %}
     });
   });
 </script>
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  const field=document.querySelector('[name="netto_betrag"]'), output=document.getElementById('rechnung-summe');
+  if(!field||!output)return;
+  const rate={{ rechnung['tax_rate']|tojson }};
+  const update=()=>{let raw=field.value.trim().replace(/\s/g,'');if(raw.includes(','))raw=raw.replace(/\./g,'').replace(',','.');const net=Number(raw);output.textContent=Number.isFinite(net)&&net>0 ? `${net.toLocaleString('de-DE',{minimumFractionDigits:2})} € netto + ${rate}% MwSt. = ${(Math.round(net*(1+rate/100)*100)/100).toLocaleString('de-DE',{minimumFractionDigits:2})} € brutto` : 'Bitte einen gültigen Nettobetrag eintragen.';};
+  field.addEventListener('input',()=>{update();const check=document.querySelector('[name="rechnung_pruefung_bestaetigt"]');if(check)check.checked=false;});update();
+});
+</script>
+
 {% endblock %}

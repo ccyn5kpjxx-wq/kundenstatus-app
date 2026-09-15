@@ -264,6 +264,7 @@
             <div class="text-muted small mb-2">{{ datei['quelle'] }}{% if datei['size'] %} · {{ (datei['size'] / 1024 / 1024)|round(1) }} MB{% endif %}</div>
             <a class="btn btn-sm btn-soft" href="{{ datei['url'] }}" target="_blank" rel="noopener">Öffnen</a>
             <a class="btn btn-sm btn-outline-dark" href="{{ datei['url'] }}?download=1">Download</a>
+            <form class="mt-2" method="POST" action="{{ url_for('admin_lead_datei_freigabe', lead_id=lead['id'], datei_id=datei['id']) }}"><label class="form-check"><input type="checkbox" class="form-check-input" name="kunde" value="1" {% if document_visible(datei,'kunde',lead=true) %}checked{% endif %}> Im Kundenportal sichtbar</label><button class="btn btn-soft btn-sm">Sichtbarkeit speichern</button></form>
           </div>
           {% endfor %}
         </div>
