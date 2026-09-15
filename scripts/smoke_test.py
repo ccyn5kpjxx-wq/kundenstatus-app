@@ -1,14 +1,50 @@
 from pathlib import Path
 from io import BytesIO
 from datetime import date, timedelta
+import os
+from unittest.mock import patch
 import sys
 import time
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import app as portal  # noqa: E402
+# Configure isolation before app import: no real database, uploads or providers.
+TEMP_DIR = Path(tempfile.mkdtemp(prefix="cockpit-regression-"))
+os.environ.update({
+    "RENDER": "isolated-regression-test", "DATABASE_URL": "", "REQUIRE_POSTGRES_ON_RENDER": "0",
+    "DATA_DIR": str(TEMP_DIR), "SQLITE_DB_PATH": str(TEMP_DIR / "test.db"),
+    "UPLOAD_DIR": str(TEMP_DIR / "uploads"), "BACKUP_DIR": str(TEMP_DIR / "backups"),
+    "DELETED_UPLOAD_DIR": str(TEMP_DIR / "deleted"), "AUTO_BACKUP_ENABLED": "0",
+    "AUTO_CHANGE_BACKUP_ENABLED": "0", "OPENAI_API_KEY": "", "LEXWARE_API_KEY": "",
+    "GOOGLE_APPLICATION_CREDENTIALS": "", "GOOGLE_DOC_AI_SERVICE_ACCOUNT_FILE": "",
+    "GOOGLE_DOC_AI_PROJECT_ID": "", "WHATSAPP_ACCESS_TOKEN": "", "WHATSAPP_WORKSHOP_NUMBERS": "",
+    "MAIL_IMAP_PASS": "", "MAIL_SMTP_PASS": "", "SCHADEN_IMAP_PASS": "", "SCHADEN_SMTP_PASS": "",
+    "SMTP_PASSWORD": "", "FLASK_SECRET_KEY": "isolated-regression-test",
+    "ADMIN_PASS": "isolated-regression-test", "ADMIN_PASSWORD": "",
+})
+
+
+def deny_network(*args, **kwargs):
+    raise AssertionError("External network is forbidden in isolated regression tests")
+
+
+# Even a missed provider configuration cannot open a network connection.
+patch("socket.socket.connect", deny_network).start()
+patch("socket.socket.connect_ex", deny_network).start()
+patch("socket.create_connection", deny_network).start()
+_original_path_exists = Path.exists
+
+
+def isolated_path_exists(path):
+    return False if path in (ROOT / ".env", ROOT / ".env.local") else _original_path_exists(path)
+
+
+with patch.object(Path, "exists", isolated_path_exists):
+    import app as portal  # noqa: E402
+
 
 
 def check(label, response, expected_statuses):
@@ -435,6 +471,10 @@ def main():
         db.commit()
     finally:
         db.close()
+    news_start = date.today()
+    news_end = news_start + timedelta(days=3)
+    portal.create_werkstatt_news("Betriebsurlaub Smoke", "Synthetischer Kalenderhinweis",
+        news_start.isoformat(), news_end.isoformat())
     kalender_response = client.get("/admin/kalender")
     ok &= check("Interner Kalender mit Login", kalender_response, {200})
     kalender_html = kalender_response.get_data(as_text=True)
@@ -446,9 +486,9 @@ def main():
     )
     ok &= kalender_week_ok
     kalender_news_ok = (
-        "Betriebsurlaub" in kalender_html
-        and "19.08.2026" in kalender_html
-        and "04.09.2026" in kalender_html
+        "Betriebsurlaub Smoke" in kalender_html
+        and news_start.strftime("%d.%m.%Y") in kalender_html
+        and news_end.strftime("%d.%m.%Y") in kalender_html
     )
     print(
         "[OK] Kalender zeigt Werkstatt-News"
@@ -665,6 +705,7 @@ def main():
                 "kunde": {"name": "Smoke Kunde"},
                 "positionen": [{"bezeichnung": long_lexware_name}],
                 "lexware_beschreibung": "Auftrag #250",
+                "tax_rate": 7,
             },
             1899.73,
         )
@@ -675,6 +716,7 @@ def main():
     lexware_final_payload_ok = (
         captured_lexware_payload.get("method") == "POST"
         and captured_lexware_payload.get("path") == "/v1/invoices"
+        and payload_line_item.get("unitPrice", {}).get("taxRatePercentage") == 7
         and len(payload_line_item.get("name", "")) == portal.LEXWARE_LINE_ITEM_NAME_MAX_LENGTH
         and long_lexware_name in payload_line_item.get("description", "")
     )

@@ -2,7 +2,8 @@ from pathlib import Path
 from io import BytesIO
 import gc
 import json
-import shutil
+import os
+from unittest.mock import patch
 import sys
 import tempfile
 import uuid
@@ -13,7 +14,40 @@ from urllib.parse import parse_qs, urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import app as portal  # noqa: E402
+# Configure isolation before app import: no real database, uploads or providers.
+TEMP_DIR = Path(tempfile.mkdtemp(prefix="cockpit-regression-"))
+os.environ.update({
+    "RENDER": "isolated-regression-test", "DATABASE_URL": "", "REQUIRE_POSTGRES_ON_RENDER": "0",
+    "DATA_DIR": str(TEMP_DIR), "SQLITE_DB_PATH": str(TEMP_DIR / "test.db"),
+    "UPLOAD_DIR": str(TEMP_DIR / "uploads"), "BACKUP_DIR": str(TEMP_DIR / "backups"),
+    "DELETED_UPLOAD_DIR": str(TEMP_DIR / "deleted"), "AUTO_BACKUP_ENABLED": "0",
+    "AUTO_CHANGE_BACKUP_ENABLED": "0", "OPENAI_API_KEY": "", "LEXWARE_API_KEY": "",
+    "GOOGLE_APPLICATION_CREDENTIALS": "", "GOOGLE_DOC_AI_SERVICE_ACCOUNT_FILE": "",
+    "GOOGLE_DOC_AI_PROJECT_ID": "", "WHATSAPP_ACCESS_TOKEN": "", "WHATSAPP_WORKSHOP_NUMBERS": "",
+    "MAIL_IMAP_PASS": "", "MAIL_SMTP_PASS": "", "SCHADEN_IMAP_PASS": "", "SCHADEN_SMTP_PASS": "",
+    "SMTP_PASSWORD": "", "FLASK_SECRET_KEY": "isolated-regression-test",
+    "ADMIN_PASS": "isolated-regression-test", "ADMIN_PASSWORD": "",
+})
+
+
+def deny_network(*args, **kwargs):
+    raise AssertionError("External network is forbidden in isolated regression tests")
+
+
+# Even a missed provider configuration cannot open a network connection.
+patch("socket.socket.connect", deny_network).start()
+patch("socket.socket.connect_ex", deny_network).start()
+patch("socket.create_connection", deny_network).start()
+_original_path_exists = Path.exists
+
+
+def isolated_path_exists(path):
+    return False if path in (ROOT / ".env", ROOT / ".env.local") else _original_path_exists(path)
+
+
+with patch.object(Path, "exists", isolated_path_exists):
+    import app as portal  # noqa: E402
+
 
 
 def check(label, condition, detail=""):
@@ -57,8 +91,6 @@ def main():
     original_upload_dir = portal.UPLOAD_DIR
     original_backup_dir = portal.BACKUP_DIR
     original_deleted_upload_dir = portal.DELETED_UPLOAD_DIR
-    if not original_db.exists():
-        raise SystemExit(f"Datenbank nicht gefunden: {original_db}")
 
     with tempfile.TemporaryDirectory() as tmp:
         test_db = Path(tmp) / "auftraege-test.db"
@@ -67,8 +99,9 @@ def main():
         test_deleted_uploads = Path(tmp) / "deleted_uploads"
         test_uploads.mkdir()
         test_backups.mkdir()
-        shutil.copy2(original_db, test_db)
+        # Start with a fresh schema and synthetic fixtures; never copy operational data.
 
+        portal._sqlite_wal_configured = False
         portal.DB = test_db
         portal.UPLOAD_DIR = test_uploads
         portal.BACKUP_DIR = test_backups
@@ -281,14 +314,14 @@ def main():
         offene_versicherung = portal.get_versicherung(admin_claim.get("versicherung_id")) if admin_claim else None
         admin_claim_files = portal.list_dateien(admin_claim_id) if admin_claim else []
         check(
-            "Admin-Schadenanlage legt Fall mit offener Versicherung und erkannten Daten an",
+            "Admin-Schadenanlage bewahrt leere Felder und speichert Auslese zur Pruefung",
             bool(
                 admin_claim
                 and offene_versicherung
                 and offene_versicherung.get("name") == "Versicherung noch offen"
-                and admin_claim.get("fahrzeug") == "VW Golf"
-                and admin_claim.get("kennzeichen") == "MOS FS 42"
-                and admin_claim.get("fin_nummer") == "WVWZZZ1KZ6W000001"
+                and admin_claim.get("fahrzeug") == "Neues Fahrzeug"
+                and not admin_claim.get("kennzeichen")
+                and not admin_claim.get("fin_nummer")
                 and len(admin_claim_files) == 1
                 and admin_claim_files[0].get("extrahierter_text")
             ),
@@ -301,6 +334,24 @@ def main():
                 f"dateien={len(admin_claim_files)}"
             ),
         )
+        review = portal.list_document_review_items(admin_claim_id)[0]
+        suggestions = {item["key"]: item for item in review["items"]}
+        check("Auslese bietet erkannte Fahrzeugdaten zur Pruefung an",
+              suggestions["fahrzeug"]["value"] == "VW Golf"
+              and suggestions["kennzeichen"]["value"] == "MOS FS 42"
+              and suggestions["fin_nummer"]["value"] == "WVWZZZ1KZ6W000001")
+        for field in ("fahrzeug", "kennzeichen", "fin_nummer"):
+            current = portal.get_auftrag(admin_claim_id)
+            response = admin.post(f"/admin/auftrag/{admin_claim_id}/auslese", data=with_csrf(admin, {
+                "datei_id": str(review["datei_id"]), "feld": field,
+                "alter_wert": current.get(field) or "", "neuer_wert": suggestions[field]["value"],
+            }))
+            updated = portal.get_auftrag(admin_claim_id)
+            check(f"Admin uebernimmt ausschliesslich bestaetigtes Feld {field}",
+                  response.status_code == 302
+                  and updated[field] == suggestions[field]["value"]
+                  and all(updated[key] == current[key]
+                          for key in ("fahrzeug", "kennzeichen", "fin_nummer") if key != field))
         if admin_claim_id:
             portal.delete_auftrag(admin_claim_id)
 
@@ -1414,7 +1465,9 @@ def main():
             and "Werkstatt-Angebote zur Entscheidung" in dashboard_html
             and "Angebot abgegeben von der Werkstatt" in dashboard_html
             and "210 € netto" in dashboard_html
-            and f"/partner/kaesmann/angebot/{angebot_id}/annehmen" in dashboard_html
+            and f"/partner/kaesmann/angebot/{angebot_id}#werkstatt-angebot" in dashboard_html
+            and "Vollständiges Angebot prüfen" in dashboard_html
+            and f"/partner/kaesmann/angebot/{angebot_id}/annehmen" not in dashboard_html
             and f"/partner/kaesmann/angebot/{angebot_id}/ablehnen" in dashboard_html
         )
         check(
@@ -1488,7 +1541,18 @@ def main():
 
         response = partner.post(
             f"/partner/kaesmann/angebot/{angebot_id}/annehmen",
-            data=with_csrf(partner),
+            data=with_csrf(partner), follow_redirects=False,
+        )
+        check("Partner kann Angebot ohne ausdrueckliche Bestaetigung nicht annehmen",
+              response.status_code == 302
+              and portal.get_auftrag(angebot_id)["angebot_status"] == "angebot_abgegeben"
+              and portal.get_auftrag(angebot_id)["angebotsphase"])
+        check("Vollstaendiges Partnerangebot fordert Bestaetigung",
+              'name="angebot_annehmen_bestaetigt"' in partner_html
+              and "Angebot verbindlich annehmen" in partner_html)
+        response = partner.post(
+            f"/partner/kaesmann/angebot/{angebot_id}/annehmen",
+            data=with_csrf(partner, {"angebot_annehmen_bestaetigt": "1"}),
             follow_redirects=False,
         )
         check("Kunde nimmt Angebot an", response.status_code in {302, 303})
@@ -2009,24 +2073,33 @@ def main():
         )
         response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}/dokumente")
         partner_html = response.get_data(as_text=True)
+        check("Interne Fertigbilder bleiben ohne Freigabe auf Dokumentseite verborgen",
+              response.status_code == 200 and "fertigbild-test.jpg" not in partner_html)
+        for suffix in ("", "/download"):
+            with partner.get(f"/partner/kaesmann/datei/{fertigbild['id']}{suffix}") as response:
+                check(f"Interne Datei vor Freigabe auch direkt gesperrt {suffix or 'oeffnen'}",
+                      response.status_code == 404)
+        release = admin.post(f"/admin/datei/{fertigbild['id']}/freigaben",
+                             data=with_csrf(admin, {"partner": "1"}))
+        check("Admin gibt Fertigbild nur fuer Partner frei", release.status_code == 302
+              and portal.document_visible(portal.get_datei(fertigbild["id"]), "partner")
+              and not portal.document_visible(portal.get_datei(fertigbild["id"]), "kunde")
+              and not portal.document_visible(portal.get_datei(fertigbild["id"]), "versicherung"))
+        for suffix in ("", "/download"):
+            with partner.get(f"/partner/kaesmann/datei/{fertigbild['id']}{suffix}") as response:
+                check(f"Explizit freigegebene Datei erreichbar {suffix or 'oeffnen'}",
+                      response.status_code == 200)
+        response = partner.get(f"/partner/kaesmann/auftrag/{angebot_id}/dokumente")
+        partner_html = response.get_data(as_text=True)
         check(
-            "Partner sieht Fertigbild auf Dokumentseite",
+            "Partner sieht Fertigbild nach Freigabe auf Dokumentseite",
             response.status_code == 200 and "fertigbild-test.jpg" in partner_html,
             f"Status {response.status_code}",
         )
 
-        db = portal.get_db()
-        datei = db.execute("SELECT id FROM dateien LIMIT 1").fetchone()
-        db.close()
-        if datei:
-            response = admin.get(f"/admin/datei/{datei['id']}")
-            check("Admin Originaldatei öffnen Route", response.status_code in {200, 404})
-            response.close()
-            response = admin.get(f"/admin/datei/{datei['id']}/download")
-            check("Admin Originaldatei Download Route", response.status_code in {200, 404})
-            response.close()
-        else:
-            print("[INFO] Keine Datei in Testdatenbank gefunden, Datei-Routen übersprungen.")
+        for suffix in ("", "/download"):
+            with admin.get(f"/admin/datei/{fertigbild['id']}{suffix}") as response:
+                check(f"Admin Originaldatei erreichbar {suffix or 'oeffnen'}", response.status_code == 200)
 
         reklamation_id = portal.add_reklamation(angebot_id, "autohaus", "Nacharbeit nötig")
         response = admin.post(

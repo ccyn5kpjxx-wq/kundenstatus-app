@@ -7,34 +7,48 @@ import base64
 from datetime import date, timedelta
 from io import BytesIO
 import os
-import pathlib
+from pathlib import Path
+from unittest.mock import patch
 import sys
 import tempfile
 
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-TEMP_DIR = pathlib.Path(tempfile.mkdtemp(prefix="lead_kundenportal_"))
-os.environ.update(
-    {
-        "RENDER": "local-lead-kundenportal-test",
-        "DATABASE_URL": "",
-        "REQUIRE_POSTGRES_ON_RENDER": "0",
-        "DATA_DIR": str(TEMP_DIR),
-        "SQLITE_DB_PATH": str(TEMP_DIR / "test.db"),
-        "UPLOAD_DIR": str(TEMP_DIR / "uploads"),
-        "BACKUP_DIR": str(TEMP_DIR / "backups"),
-        "DELETED_UPLOAD_DIR": str(TEMP_DIR / "deleted"),
-        "AUTO_BACKUP_ENABLED": "0",
-        "AUTO_CHANGE_BACKUP_ENABLED": "0",
-        "OPENAI_API_KEY": "",
-        "FLASK_SECRET_KEY": "lead-kundenportal-test",
-        "ADMIN_PASS": "lead-kundenportal-test",
-        "SCHADEN_SMTP_PASS": "",
-    }
-)
+# Configure isolation before app import: no real database, uploads or providers.
+TEMP_DIR = Path(tempfile.mkdtemp(prefix="cockpit-regression-"))
+os.environ.update({
+    "RENDER": "isolated-regression-test", "DATABASE_URL": "", "REQUIRE_POSTGRES_ON_RENDER": "0",
+    "DATA_DIR": str(TEMP_DIR), "SQLITE_DB_PATH": str(TEMP_DIR / "test.db"),
+    "UPLOAD_DIR": str(TEMP_DIR / "uploads"), "BACKUP_DIR": str(TEMP_DIR / "backups"),
+    "DELETED_UPLOAD_DIR": str(TEMP_DIR / "deleted"), "AUTO_BACKUP_ENABLED": "0",
+    "AUTO_CHANGE_BACKUP_ENABLED": "0", "OPENAI_API_KEY": "", "LEXWARE_API_KEY": "",
+    "GOOGLE_APPLICATION_CREDENTIALS": "", "GOOGLE_DOC_AI_SERVICE_ACCOUNT_FILE": "",
+    "GOOGLE_DOC_AI_PROJECT_ID": "", "WHATSAPP_ACCESS_TOKEN": "", "WHATSAPP_WORKSHOP_NUMBERS": "",
+    "MAIL_IMAP_PASS": "", "MAIL_SMTP_PASS": "", "SCHADEN_IMAP_PASS": "", "SCHADEN_SMTP_PASS": "",
+    "SMTP_PASSWORD": "", "FLASK_SECRET_KEY": "isolated-regression-test",
+    "ADMIN_PASS": "isolated-regression-test", "ADMIN_PASSWORD": "",
+})
 
-import app as portal  # noqa: E402
+
+def deny_network(*args, **kwargs):
+    raise AssertionError("External network is forbidden in isolated regression tests")
+
+
+# Even a missed provider configuration cannot open a network connection.
+patch("socket.socket.connect", deny_network).start()
+patch("socket.socket.connect_ex", deny_network).start()
+patch("socket.create_connection", deny_network).start()
+_original_path_exists = Path.exists
+
+
+def isolated_path_exists(path):
+    return False if path in (ROOT / ".env", ROOT / ".env.local") else _original_path_exists(path)
+
+
+with patch.object(Path, "exists", isolated_path_exists):
+    import app as portal  # noqa: E402
+
 
 
 PNG_1X1 = base64.b64decode(
