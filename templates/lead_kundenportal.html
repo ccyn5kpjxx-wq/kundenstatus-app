@@ -30,7 +30,7 @@
     .file-card img { display:block; width:100%; aspect-ratio:4/3; object-fit:cover; }
     .file-card div { padding:.65rem; overflow-wrap:anywhere; }
     .activity { display:grid; gap:.6rem; }
-    .activity-row { border-left:4px solid #d8c4a7; border-radius:8px; background:#faf6ef; padding:.75rem .9rem; }
+    .activity-row { border-left:4px solid #d8c4a7; border-radius:8px; background:#faf6ef; padding:.75rem .9rem; overflow-wrap:anywhere; }
     .activity-row.is-customer { border-left-color:#1f7a4d; }
     .hp-field { position:absolute !important; left:-10000px !important; width:1px !important; height:1px !important; overflow:hidden !important; }
     @media (max-width:767.98px) {
@@ -102,18 +102,40 @@
         <div class="col-12"><input type="text" name="upload_notiz" maxlength="350" class="form-control" placeholder="Kurzer Hinweis zu den Dateien"></div>
         <div class="col-12"><button type="submit" class="btn btn-dark">Sicher hochladen</button></div>
       </form>
-      {% if lead_dateien %}<div class="file-grid mt-4">{% for datei in lead_dateien %}<a class="file-card" href="{{ datei['customer_url'] }}" target="_blank" rel="noopener">{% if datei['is_browser_image'] %}<img src="{{ datei['customer_url'] }}" alt="Hochgeladene Datei">{% endif %}<div class="small fw-semibold">{{ datei['original_name'] }}</div></a>{% endfor %}</div>{% endif %}
+      {% if kunden_dokumente %}
+      <div class="file-grid mt-4" aria-label="Dokumente zu Ihrer Anfrage">
+        {% for datei in kunden_dokumente %}
+        <div class="file-card">
+          {% if datei['is_browser_image'] and datei['customer_url'] %}<img src="{{ datei['customer_url'] }}" alt="" loading="lazy">{% endif %}
+          <div><strong class="small">{{ datei['original_name'] }}</strong><br><small class="text-muted">{{ datei['kategorie_label'] or 'Unterlage' }}{% if datei['hochgeladen_am'] %} · {{ datei['hochgeladen_am'] }}{% endif %}</small><br><span class="small">{{ datei['pruefstatus_label'] or 'Gespeichert' }}</span>
+            {% if datei['customer_url'] %}<a class="btn btn-outline-dark btn-sm d-block mt-2" style="min-height:44px; align-content:center;" href="{{ datei['customer_url'] }}" target="_blank" rel="noopener" aria-label="{{ datei['original_name'] }} öffnen">Öffnen</a>{% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<p class="small text-muted mt-3 mb-0">Hier sind noch keine Dateien für Sie hinterlegt.</p>{% endif %}
     </section>
 
     <section class="panel mb-4" id="nachrichten">
-      <h2 class="h4 mb-2">Nachricht senden</h2>
+      <h2 class="h4 mb-2">Nachrichten zu Ihrer Anfrage</h2>
+      <p class="text-muted">Ihre Nachrichten und die Rückmeldungen der Werkstatt bleiben auch nach der Angebotsannahme hier erreichbar.</p>
+      {% if kunden_verlauf %}
+      <div class="activity mb-4" aria-label="Ihr Nachrichtenverlauf">
+        {% for event in kunden_verlauf %}
+        <article class="activity-row {{ 'is-customer' if event['quelle'] == 'kunde' else '' }}">
+          <div class="d-flex justify-content-between gap-2 flex-wrap"><strong>{{ event['titel'] }}</strong><span class="small text-muted">{{ event['erstellt_am'] }}</span></div>
+          <div class="small text-muted">{{ 'Von Ihnen' if event['quelle'] == 'kunde' else 'Von der Werkstatt' }}</div>
+          {% if event['nachricht'] %}<div class="mt-2" style="white-space:pre-wrap;">{{ event['nachricht'] }}</div>{% endif %}
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}<p class="small text-muted">Noch keine Nachrichten im Verlauf. Ihre nächste Nachricht erscheint nach dem Senden hier.</p>{% endif %}
       <form method="POST" action="{{ url_for('kunden_status_nachricht', token=lead['kunden_status_token']) }}" class="row g-3">
         {{ csrf_field()|safe }}
-        <div class="col-12"><textarea name="nachricht" rows="3" maxlength="900" class="form-control" placeholder="Ihre Frage oder Rückmeldung" required></textarea></div>
-        <div class="col-12"><input type="text" name="kontakt" maxlength="160" class="form-control" placeholder="Bevorzugter Rückkontakt (optional)"></div>
+        <div class="col-12"><label class="form-label" for="anfrage-nachricht">Ihre Nachricht</label><textarea id="anfrage-nachricht" name="nachricht" rows="3" maxlength="900" class="form-control" placeholder="Ihre Frage oder Rückmeldung" required></textarea></div>
+        <div class="col-12"><label class="form-label" for="anfrage-kontakt">Bevorzugter Rückkontakt (optional)</label><input id="anfrage-kontakt" type="text" name="kontakt" maxlength="160" class="form-control" placeholder="Telefonnummer oder E-Mail"></div>
         <div class="col-12"><button type="submit" class="btn btn-outline-dark">Nachricht an Werkstatt senden</button></div>
       </form>
-      {% if portal_events %}<div class="activity mt-4">{% for event in portal_events %}<div class="activity-row {{ 'is-customer' if event['quelle'] == 'kunde' else '' }}"><div class="d-flex justify-content-between gap-2 flex-wrap"><strong>{{ event['titel'] }}</strong><span class="small text-muted">{{ event['erstellt_am'] }}</span></div>{% if event['nachricht'] %}<div class="small mt-1" style="white-space:pre-wrap;">{{ event['nachricht'] }}</div>{% endif %}</div>{% endfor %}</div>{% endif %}
     </section>
 
 <details class="panel mb-4"><summary>So geht es weiter</summary>    <section class="panel mb-4">

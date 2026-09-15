@@ -903,7 +903,7 @@
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
         <div>
           <h4 class="mb-1">Werkstatt-Angebote zur Entscheidung</h4>
-          <div class="text-muted">Die Werkstatt hat einen Preis abgegeben. Sie können das Angebot direkt annehmen oder ablehnen.</div>
+          <div class="text-muted">Öffnen Sie das vollständige Angebot, um Leistung, Preis und Termine zu prüfen und anschließend bewusst zu entscheiden.</div>
         </div>
         <span class="badge text-bg-warning">{{ werkstattangebote|length }} offen</span>
       </div>
@@ -926,16 +926,12 @@
             <strong>{{ angebot['werkstatt_angebot_preis_label'] or 'Preis im Angebot' }}</strong>
           </div>
           <div class="offer-actions">
-            <form method="POST" action="{{ url_for('partner_angebot_annehmen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="m-0">
-              {{ csrf_field()|safe }}
-              <button type="submit" class="btn btn-dark">Angebot annehmen</button>
-            </form>
+            <a href="{{ url_for('partner_angebot_detail', slug=autohaus['slug'], auftrag_id=angebot['id']) }}#werkstatt-angebot" class="btn btn-dark">Vollständiges Angebot prüfen</a>
             <form method="POST" action="{{ url_for('partner_angebot_ablehnen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="m-0" onsubmit="return confirm('Dieses Werkstatt-Angebot wirklich ablehnen?')">
               {{ csrf_field()|safe }}
               <input type="hidden" name="next" value="{{ request.path }}#werkstattangebote">
               <button type="submit" class="btn btn-outline-danger">Ablehnen</button>
             </form>
-            <a href="{{ url_for('partner_angebot_detail', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="btn btn-outline-dark">Details öffnen</a>
           </div>
         </div>
         {% endfor %}

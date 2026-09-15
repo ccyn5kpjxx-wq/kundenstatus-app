@@ -24,10 +24,11 @@
       {% elif angebot_status == 'angenommen' and not confirmed and auftrag['status']|int < 2 %}<p>Ihr Auftrag ist angelegt. Die Terminabstimmung folgt separat.</p>
       {% else %}<p>Hier sehen Sie den bei der Werkstatt hinterlegten Fortschritt Ihres Fahrzeugs.</p>{% endif %}
     </div>
-    <div class="customer-date"><div class="customer-label">Ihr Termin</div>
-      {% if confirmed %}<strong>Termin bestätigt</strong><p>{{ auftrag['annahme_datum'] or 'Bitte Termindetails beachten' }}{% if auftrag['annahme_uhrzeit'] %} · {{ auftrag['annahme_uhrzeit'] }} Uhr{% endif %}</p>
-      {% elif wish_date %}<strong>Terminwunsch – Bestätigung folgt</strong><p>{{ wish_date }}</p><small>Bitte warten Sie auf die Bestätigung der Werkstatt.</small>
+    <div class="customer-date"><div class="customer-label">Ihr nächster Termin</div>
+      {% if not customer_is_lead and auftrag['status']|int >= 5 %}<strong>Fahrzeug zurückgegeben</strong><p>Es steht kein weiterer Reparaturtermin an.</p>
+      {% elif wish_date and not confirmed and (customer_is_lead or auftrag['status']|int < 2) %}<strong>Terminwunsch – Bestätigung folgt</strong><p>{{ wish_date }}</p><small>Bitte warten Sie auf die Bestätigung der Werkstatt.</small>
       {% elif not customer_is_lead and kunden_termine.next %}<strong>{{ kunden_termine.next.label }}</strong><p>{{ kunden_termine.next.datum_zeit_text }}</p><small>Bei Änderungen stimmen Sie sich bitte mit uns ab.</small>
+      {% elif not customer_is_lead and auftrag['status']|int >= 3 %}<strong>Rückgabe wird abgestimmt</strong><p>Den Abholtermin bestätigen wir Ihnen separat.</p>
       {% else %}<strong>Noch kein Termin im Portal hinterlegt</strong><p>Bei Fragen zu Ihrer Terminabsprache melden Sie sich gerne bei uns.</p>{% endif %}
     </div>
   </div>
@@ -35,11 +36,41 @@
     <div><div class="customer-label">Ihr nächster Schritt</div>
       {% if offer_ready %}<strong>Ihr Angebot in Ruhe ansehen</strong>
       {% elif customer_is_lead and lead['status'] == 'unterlagen_fehlen' %}<strong>Bitte ergänzen Sie die angefragten Unterlagen.</strong>
+      {% elif not customer_is_lead and auftrag['status']|int >= 5 %}<strong>Ihr Auftrag ist abgeschlossen.</strong><div class="small">Ihre Unterlagen und der Nachrichtenverlauf bleiben hier erreichbar.</div>
+      {% elif not customer_is_lead and auftrag['status']|int == 4 %}<strong>Bitte die Fahrzeugrückgabe abstimmen.</strong><div class="small">Beachten Sie den vereinbarten Abholtermin oder melden Sie sich bei uns.</div>
+      {% elif not customer_is_lead and auftrag['status']|int == 3 %}<strong>Ihr Fahrzeug ist in Bearbeitung.</strong><div class="small">Den aktuellen Fortschritt und den geplanten Abholtermin finden Sie hier.</div>
+      {% elif not customer_is_lead and auftrag['status']|int == 2 %}<strong>Bitte den vereinbarten Übergabetermin beachten.</strong><div class="small">Wenn der Termin nicht passt, senden Sie uns einen Änderungswunsch.</div>
+      {% elif wish_date and not confirmed %}<strong>Die Werkstatt prüft Ihren Terminwunsch.</strong><div class="small">Bitte warten Sie auf die Terminbestätigung.</div>
       {% else %}<strong>Sie müssen aktuell nichts bestätigen.</strong><div class="small">Bei Fragen können Sie uns unten eine Nachricht schreiben.</div>{% endif %}
     </div>
     {% if offer_ready %}<a class="btn customer-primary" href="#angebot">Angebot ansehen</a>
-    {% elif customer_is_lead and lead['status'] == 'unterlagen_fehlen' %}<a class="btn customer-primary" href="#unterlagen">Unterlagen ergänzen</a>{% endif %}
+    {% elif customer_is_lead and lead['status'] == 'unterlagen_fehlen' %}<a class="btn customer-primary" href="#unterlagen">Unterlagen ergänzen</a>
+    {% elif not customer_is_lead and auftrag['status']|int == 4 %}<a class="btn customer-primary" href="#werkstatt-kontakt">Rückgabe abstimmen</a>
+    {% elif not customer_is_lead and auftrag['status']|int == 2 %}<a class="btn customer-primary" href="#termine">Termine ansehen</a>{% endif %}
+  </div>
+  <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mt-3" data-portal-freshness>
+    <span class="small text-muted">{% if kunden_aktualisiert_am %}Zuletzt für Sie aktualisiert: {{ kunden_aktualisiert_am }}{% else %}Stand beim Öffnen dieser Seite{% endif %}</span>
+    <a class="btn btn-outline-dark btn-sm" href="{{ request.path }}" data-portal-refresh>Aktualisieren</a>
+    <div class="alert alert-warning mb-0 w-100" hidden data-refresh-warning role="status">Sie haben noch nicht gesendete Eingaben. Senden Sie diese zuerst oder verwerfen Sie sie bewusst.
+      <button type="button" class="btn btn-outline-dark btn-sm mt-2" data-refresh-discard>Eingaben verwerfen und aktualisieren</button>
+    </div>
   </div>
   {% if meldungen %}<div class="mt-3" role="status">{% for category, message in meldungen %}<div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else 'info') }}">{{ message }}</div>{% endfor %}</div>{% endif %}
 </section>
 <nav class="customer-links mb-4" aria-label="Bereiche im Kundenportal"><a href="{{ '#terminwunsch' if customer_is_lead else '#termine' }}">Termine</a><a href="#unterlagen">Unterlagen</a><a href="#nachrichten">Nachrichten</a><a href="#werkstatt-kontakt">Kontakt</a></nav>
+<script>
+(() => {
+  let dirty = false;
+  const markDirty = event => { if (event.target.closest('form')) dirty = true; };
+  document.addEventListener('input', markDirty);
+  document.addEventListener('change', markDirty);
+  const refresh = document.querySelector('[data-portal-refresh]');
+  const warning = document.querySelector('[data-refresh-warning]');
+  refresh.addEventListener('click', event => {
+    if (!dirty) return;
+    event.preventDefault();
+    warning.hidden = false;
+  });
+  document.querySelector('[data-refresh-discard]').addEventListener('click', () => window.location.assign(refresh.href));
+})();
+</script>

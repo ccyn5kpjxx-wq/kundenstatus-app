@@ -802,7 +802,7 @@
       </div>
       {% endif %}
       {% if angebot['angebot_status'] in ['angebot_abgegeben', 'abgelehnt'] %}
-      <div class="border rounded-4 p-4 mt-4" style="background:#f8f2e8;border-color:#e4d6c3 !important;">
+      <div class="border rounded-4 p-4 mt-4" id="werkstatt-angebot" style="background:#f8f2e8;border-color:#e4d6c3 !important;scroll-margin-top:24px;overflow-wrap:anywhere;">
         <div class="fw-bold mb-2">Angebot der Werkstatt</div>
         {% if angebot['werkstatt_angebot_preis'] %}
         <div class="h4 mb-2">{{ angebot['werkstatt_angebot_preis_label'] }}</div>
@@ -816,13 +816,24 @@
         {% if angebot['werkstatt_angebot_am'] %}
         <div class="text-muted small mb-3">Aktualisiert am {{ angebot['werkstatt_angebot_am'] }}</div>
         {% endif %}
+        <div class="border-top pt-3 mb-3">
+          <div class="fw-semibold mb-1">Übergabe und Termine</div>
+          <div class="small">{{ angebot['transport_meta']['label'] }}</div>
+          <div class="small">{{ angebot['angebot_annahme_label'] }}: {{ angebot['annahme_datum'] or 'Noch abzustimmen' }}{% if angebot['annahme_uhrzeit'] %} · {{ angebot['annahme_uhrzeit'] }} Uhr{% endif %}</div>
+          <div class="small">{{ angebot['angebot_abholung_label'] }}: {{ angebot['abholtermin'] or 'Noch abzustimmen' }}{% if angebot['abhol_uhrzeit'] %} · {{ angebot['abhol_uhrzeit'] }} Uhr{% endif %}</div>
+          <div class="small text-muted mt-2">Offene Termine werden mit der Werkstatt separat abgestimmt.</div>
+        </div>
         {% if angebot['angebot_status'] == 'abgelehnt' %}
         <div class="alert alert-light border mb-0">Dieses Angebot wurde abgelehnt. Die Anfrage bleibt gespeichert.</div>
         {% else %}
         <div class="d-flex gap-2 flex-wrap">
-          <form method="POST" action="{{ url_for('partner_angebot_annehmen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="m-0">
+          <form method="POST" action="{{ url_for('partner_angebot_annehmen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="m-0 w-100">
             {{ csrf_field()|safe }}
-            <button type="submit" class="btn btn-dark btn-lg">Angebot annehmen</button>
+            <label class="d-flex align-items-start gap-2 border rounded-3 p-3 mb-3 bg-white">
+              <input type="checkbox" class="form-check-input flex-shrink-0" name="angebot_annehmen_bestaetigt" value="1" required>
+              <span>Ich habe den vollständigen Leistungsumfang, den Preis und die Terminangaben geprüft und nehme das Angebot verbindlich an.</span>
+            </label>
+            <button type="submit" class="btn btn-dark btn-lg">Angebot verbindlich annehmen</button>
           </form>
           <form method="POST" action="{{ url_for('partner_angebot_ablehnen', slug=autohaus['slug'], auftrag_id=angebot['id']) }}" class="m-0" onsubmit="return confirm('Dieses Werkstatt-Angebot wirklich ablehnen?')">
             {{ csrf_field()|safe }}

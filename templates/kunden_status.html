@@ -29,7 +29,8 @@
     .change-box .form-control { font-size:.92rem; }
     .readonly-note { border:1px solid #dbe4ef; background:#f4f8fd; border-radius:12px; padding:.75rem .9rem; color:#465767; }
     .message-list { display:grid; gap:.55rem; }
-    .message-row { border:1px solid #e4d6c3; border-radius:12px; background:#fffdf9; padding:.75rem .85rem; }
+    .message-row { border:1px solid #e4d6c3; border-radius:12px; background:#fffdf9; padding:.75rem .85rem; overflow-wrap:anywhere; }
+    .message-row.is-customer { border-left:4px solid #1f7a4d; }
     .timeline { display:grid; gap:.85rem; }
     .timeline-step { display:grid; grid-template-columns:34px minmax(0,1fr); gap:.75rem; align-items:start; }
     .timeline-dot { width:34px; height:34px; border-radius:999px; display:flex; align-items:center; justify-content:center; border:1px solid #d7c7b0; background:#f7f1e8; font-weight:800; }
@@ -43,9 +44,12 @@
     .bilder-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:.6rem; }
     .bild-kachel { display:block; border:1px solid #e4d6c3; border-radius:12px; overflow:hidden; background:#fff; aspect-ratio:4/3; }
     .bild-kachel img { width:100%; height:100%; object-fit:cover; display:block; }
+    #bild-lightbox[hidden] { display:none !important; }
     .document-list { display:grid; gap:.5rem; }
-    .document-row { display:flex; justify-content:space-between; gap:.75rem; align-items:center; border:1px solid #e4d6c3; border-radius:12px; background:#fffdf9; padding:.65rem .75rem; }
+    .document-row { display:flex; flex-wrap:wrap; justify-content:space-between; gap:.75rem; align-items:center; border:1px solid #e4d6c3; border-radius:12px; background:#fffdf9; padding:.65rem .75rem; }
     .document-row span { overflow-wrap:anywhere; min-width:0; }
+    .document-row .document-name { flex:1 1 200px; }
+    .document-row .btn { min-height:44px; display:inline-flex; align-items:center; }
     .hp-field { position:absolute !important; left:-10000px !important; width:1px !important; height:1px !important; overflow:hidden !important; }
     @media (max-width: 767.98px) {
       .shell { padding:14px 10px 22px; }
@@ -182,21 +186,25 @@
           <h2 class="h4 mb-1">Termine</h2>
           {% if kunden_termine.next %}
           <div class="text-muted">Nächster Termin: <strong>{{ kunden_termine.next.label }} am {{ kunden_termine.next.datum_zeit_text }}</strong></div>
+          {% elif auftrag['status']|int >= 5 %}
+          <div class="text-muted">Ihr Fahrzeug wurde zurückgegeben. Es ist kein weiterer Termin erforderlich.</div>
+          {% elif auftrag['status']|int >= 3 %}
+          <div class="text-muted">Den Rückgabetermin stimmen wir mit Ihnen ab. Bei Fragen melden Sie sich bitte bei uns.</div>
           {% else %}
-          <div class="text-muted">Termine werden von Versicherung oder Werkstatt eingetragen. Wenn ein Termin nicht passt, kann er hier geändert werden.</div>
+          <div class="text-muted">Termine werden von Versicherung oder Werkstatt eingetragen. Wenn ein Termin nicht passt, können Sie hier einen Änderungswunsch senden.</div>
           {% endif %}
         </div>
-        <div>
+        {% if auftrag['status']|int < 3 %}<div>
           <span class="badge text-bg-{{ 'success' if terminfreigabe['can_request'] or terminfreigabe['termin_gesetzt'] else 'secondary' }}">
             {{ terminfreigabe['label'] }}
           </span>
           {% if terminfreigabe['detail'] %}
           <div class="small text-muted mt-1" style="max-width:280px;">{{ terminfreigabe['detail'] }}</div>
           {% endif %}
-        </div>
+        </div>{% endif %}
       </div>
 
-      {% if terminfreigabe['can_request'] and not intake['kunden_angebot_angenommen_am'] %}
+      {% if auftrag['status']|int < 3 and terminfreigabe['can_request'] and not intake['kunden_angebot_angenommen_am'] %}
       <div class="appointment-panel mb-3" id="terminvereinbarung">
         {% if meldungen %}
           {% for category, message in meldungen %}
@@ -229,14 +237,15 @@
           <div class="small text-muted">{{ termin.detail }}</div>
           {% if termin.can_change %}
           <details class="change-box mt-2">
-            <summary>ändern</summary>
+            <summary>Änderung anfragen</summary>
             <form method="POST" action="{{ url_for('kunden_status_verzoegerung', token=auftrag['kunden_status_token']) }}" class="mt-2">
               <input type="hidden" name="termin_art" value="{{ termin.key }}">
-              <label class="form-label small mb-1">Alternativtermin</label>
-              <input type="date" name="neuer_termin" class="form-control form-control-sm mb-2">
-              <label class="form-label small mb-1">Hinweis</label>
-              <textarea name="meldung" rows="2" class="form-control form-control-sm" placeholder="Kurz schreiben, was sich ändert."></textarea>
-              <button type="submit" class="btn btn-outline-dark btn-sm mt-2">Senden</button>
+              <label class="form-label small mb-1" for="alternativtermin-{{ termin.key }}">Alternativtermin</label>
+              <input id="alternativtermin-{{ termin.key }}" type="date" name="neuer_termin" min="{{ kunden_heute }}" class="form-control form-control-sm mb-2">
+              <label class="form-label small mb-1" for="terminhinweis-{{ termin.key }}">Hinweis</label>
+              <textarea id="terminhinweis-{{ termin.key }}" name="meldung" rows="2" class="form-control form-control-sm" placeholder="Kurz schreiben, was sich ändert."></textarea>
+              <div class="small text-muted mt-2">Der bestehende Termin gilt, bis die Werkstatt die Änderung bestätigt.</div>
+              <button type="submit" class="btn btn-outline-dark btn-sm mt-2">Änderungswunsch senden</button>
             </form>
           </details>
           {% endif %}
@@ -265,8 +274,8 @@
     <div class="panel mb-4" id="unterlagen">
       <div class="section-head">
         <div>
-          <h2 class="h4 mb-1">Unterlagen nachreichen</h2>
-          <div class="text-muted">Fotos, Fahrzeugschein, Unfallbericht oder PDF sicher zur bestehenden Fallakte ergänzen.</div>
+          <h2 class="h4 mb-1">Ihre Unterlagen</h2>
+          <div class="text-muted">Hier finden Sie Ihre übermittelten und die für Sie bereitgestellten Dateien. Weitere Fotos oder PDFs können Sie unten ergänzen.</div>
         </div>
         <span class="badge text-bg-light border text-dark">max. {{ schadenaufnahme_max_dateien }} Dateien · {{ schadenaufnahme_max_upload_mb }} MB gesamt</span>
       </div>
@@ -277,15 +286,18 @@
         {% endfor %}
       </div>
       {% endif %}
-      {% if kunden_unterlagen %}
-      <div class="document-list mb-3">
-        {% for datei in kunden_unterlagen[:8] %}
+      {% if kunden_dokumente %}
+      <div class="document-list mb-3" aria-label="Dokumente zum Auftrag">
+        {% for datei in kunden_dokumente %}
         <div class="document-row">
-          <span><strong>{{ datei['original_name'] }}</strong><br><small class="text-muted">Sicher in der Fallakte gespeichert</small></span>
-          <span class="badge text-bg-success">Vorhanden</span>
+          <span class="document-name"><strong>{{ datei['original_name'] }}</strong><br><small class="text-muted">{{ datei['kategorie_label'] or 'Unterlage' }}{% if datei['hochgeladen_am'] %} · {{ datei['hochgeladen_am'] }}{% endif %}</small></span>
+          <span class="badge text-bg-light border text-dark">{{ datei['pruefstatus_label'] or 'Gespeichert' }}</span>
+          {% if datei['customer_url'] %}<a class="btn btn-outline-dark btn-sm" href="{{ datei['customer_url'] }}" target="_blank" rel="noopener" aria-label="{{ datei['original_name'] }} öffnen">Öffnen</a>{% endif %}
         </div>
         {% endfor %}
       </div>
+      {% else %}
+      <p class="small text-muted">Hier sind noch keine Dateien für Sie hinterlegt.</p>
       {% endif %}
       <form method="POST" enctype="multipart/form-data" action="{{ url_for('kunden_status_unterlagen', token=auftrag['kunden_status_token']) }}">
         <div class="hp-field" aria-hidden="true"><label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
@@ -299,8 +311,19 @@
     </div>
 
     <div class="panel mb-4" id="nachrichten">
-      <h2 class="h4 mb-1">Nachricht an die Werkstatt</h2>
-      <div class="text-muted mb-3">Rückfrage oder Ergänzung direkt an die bestehende Fallakte senden.</div>
+      <h2 class="h4 mb-1">Nachrichten zum Auftrag</h2>
+      <div class="text-muted mb-3">Ihre Nachrichten und die Rückmeldungen der Werkstatt bleiben hier zum Nachlesen erhalten.</div>
+      {% if kunden_verlauf %}
+      <div class="message-list mb-4" aria-label="Ihr Nachrichtenverlauf">
+        {% for event in kunden_verlauf %}
+        <article class="message-row {{ 'is-customer' if event['quelle'] == 'kunde' else '' }}">
+          <div class="d-flex justify-content-between gap-2 flex-wrap"><strong>{{ event['titel'] }}</strong><span class="small text-muted">{{ event['erstellt_am'] }}</span></div>
+          <div class="small text-muted">{{ 'Von Ihnen' if event['quelle'] == 'kunde' else 'Von der Werkstatt' }}</div>
+          {% if event['nachricht'] %}<div class="mt-2" style="white-space:pre-wrap;">{{ event['nachricht'] }}</div>{% endif %}
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}<p class="small text-muted">Noch keine Nachrichten im Verlauf. Ihre nächste Nachricht erscheint nach dem Senden hier.</p>{% endif %}
       <form method="POST" action="{{ url_for('kunden_status_nachricht', token=auftrag['kunden_status_token']) }}">
         <label class="form-label fw-semibold" for="kundenstatus-nachricht">Ihre Nachricht</label>
         <textarea id="kundenstatus-nachricht" class="form-control" name="nachricht" rows="3" maxlength="900" required placeholder="Was möchten Sie ergänzen oder fragen?"></textarea>
@@ -330,7 +353,6 @@
     {% endif %}
 
     <footer style="color: #6f7a83; text-align: center; padding: 1.5rem; font-size: .85rem;">Gärtner GmbH Karosserie + Lack · Binauer Höhe 4, 74821 Mosbach · <a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
-  {% if kunden_auftragsdokumente %}<section class="card" style="padding:20px;margin:20px 0"><h2>Ihre Dokumente zum Auftrag</h2>{% for datei in kunden_auftragsdokumente %}<p><a href="{{ url_for('kunden_auftragsdokument',token=dokument_token,datei_id=datei['id']) }}">{{ datei['original_name'] }}</a></p>{% endfor %}</section>{% endif %}
 
 <details class="panel mb-4"><summary>So geht es weiter</summary>{% if ist_anfrage %}    <div class="panel mb-4" id="ablauf">
       <div class="section-head">
