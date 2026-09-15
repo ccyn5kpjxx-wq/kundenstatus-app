@@ -520,9 +520,12 @@
       </div>
     </div>
 
-    {% include "_mini_month_calendar.html" %}
-
     {% include "_cockpit_aktionen.html" %}
+
+    <details class="mb-4" data-cockpit-kalender {% if request.args.get('monat') or request.args.get('tag') %}open{% endif %}>
+      <summary class="page-card p-3 fw-semibold">Monatskalender öffnen · Termine im Überblick</summary>
+      <div class="mt-3">{% include "_mini_month_calendar.html" %}</div>
+    </details>
 
     <div class="page-card p-4 mb-4">
       <div class="section-title align-items-start">

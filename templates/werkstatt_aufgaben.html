@@ -13,6 +13,7 @@
     .person-btn.aktiv { background: #145d66; color: #fff; border-color: #145d66; }
     .aufgabe { padding: 1rem 1.1rem; border-bottom: 1px solid #efe5d7; display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
     .aufgabe:last-child { border-bottom: 0; }
+    .aufgabe > div { min-width: 0; overflow-wrap: anywhere; }
     .haken-btn { min-width: 64px; height: 64px; border-radius: 16px; border: 2px solid #1b7f53; background: #fff; font-size: 1.7rem; color: #1b7f53; }
     .haken-btn.erledigt { background: #1b7f53; color: #fff; }
     .richtwert { font-size: 1.05rem; font-weight: 700; color: #145d66; white-space: nowrap; }
@@ -41,11 +42,25 @@
       </div>
     </div>
 
+    {% if offene_zuweisung_count is defined and offene_zuweisung_count %}
+    <div class="karte p-3 mb-3" style="border-left:5px solid #bc7915;">
+      <strong>{{ offene_zuweisung_count }} {{ 'Auftrag' if offene_zuweisung_count == 1 else 'Aufträge' }} noch ohne Tageszuteilung</strong>
+      <div class="text-muted mt-1">Das Büro muss Arbeitsschritt, Mitarbeiter und Richtzeit im Tagesplan zuordnen.</div>
+    </div>
+    {% endif %}
+
     {% if gewaehlt %}
+    {% set offene_aufgaben = aufgaben|rejectattr('status', 'equalto', 'erledigt')|list %}
     <div class="karte mb-3">
-      <div class="p-3 d-flex justify-content-between align-items-center" style="border-bottom: 1px solid #efe5d7;">
+      <div class="p-3 d-flex justify-content-between align-items-center flex-wrap gap-2" style="border-bottom: 1px solid #efe5d7;">
         <strong style="font-size: 1.2rem;">{{ gewaehlt['name'] }}</strong>
-        {% if summe_offen_label %}<span class="richtwert">noch ⏱ {{ summe_offen_label }}</span>{% else %}<span class="text-success fw-bold">Alles erledigt 🎉</span>{% endif %}
+        {% if offene_aufgaben %}
+          <span class="richtwert">{{ offene_aufgaben|length }} offen{% if summe_offen_label %} · ⏱ {{ summe_offen_label }}{% endif %}</span>
+        {% elif aufgaben %}
+          <span class="text-success fw-bold">Deine zugeteilten Aufgaben sind erledigt</span>
+        {% else %}
+          <span class="text-muted">Zuteilung offen</span>
+        {% endif %}
       </div>
       {% if aufgaben %}
         {% for g in aufgaben %}
@@ -66,7 +81,7 @@
         </div>
         {% endfor %}
       {% else %}
-      <div class="p-4 text-muted">Heute keine Aufgaben zugeteilt. 👍</div>
+      <div class="p-4 text-muted">Für dich ist heute noch keine Aufgabe zugeteilt. Bitte den Tagesplan mit dem Büro abstimmen.</div>
       {% endif %}
     </div>
     {% else %}

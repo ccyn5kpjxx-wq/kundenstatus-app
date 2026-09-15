@@ -1,16 +1,23 @@
 {% if aktionsvorschau %}<p class="alert alert-info">Lokale Vorschau mit Beispieldaten · kein echter Versand</p>{% endif %}
 <section class="page-card p-3 mb-4" aria-labelledby="aktionen-titel">
-  <div class="section-title"><div><h2 class="h5 mb-1" id="aktionen-titel">Das wartet auf dich <span class="badge-soft">{{ aktionsuebersicht.total }}</span></h2></div></div>
+  <div class="section-title gap-3 flex-wrap">
+    <div>
+      <h2 class="h5 mb-1" id="aktionen-titel">Das steht jetzt an <span class="badge-soft">{{ aktionsuebersicht.total }} offene Aktion{{ '' if aktionsuebersicht.total == 1 else 'en' }}</span></h2>
+      <p class="small text-muted mb-0">Angebote, Rückmeldungen und Freigaben direkt am Vorgang bearbeiten.</p>
+    </div>
+    <a class="btn btn-brand btn-sm" href="{{ url_for('admin_aufgaben') }}">Tagesaufgaben zuteilen{% if offene_zuweisung_count is defined and offene_zuweisung_count %} · {{ offene_zuweisung_count }} {{ 'Auftrag' if offene_zuweisung_count == 1 else 'Aufträge' }}{% endif %}</a>
+  </div>
   <div class="aktion-grid">
-  {% for key, title in [('angebote','Angebote vorbereiten'),('antworten','Rückmeldungen und Unterlagen'),('termine','Termine und Besichtigungen')] %}
-    <details class="aktion-gruppe">
-      <summary>{{ title }} <strong>{{ aktionsuebersicht.groups[key]|length }}</strong></summary>
-      {% for item in aktionsuebersicht.groups[key] %}<a class="aktion-eintrag" href="{{ item.url }}"><strong>{{ item.name }}</strong><span>{{ item.vehicle }}</span><small>{{ item.detail }}</small><span class="aktion-link">{{ item.title }} →</span></a>{% else %}<p class="p-3 mb-0 text-muted">Hier ist aktuell nichts offen.</p>{% endfor %}
+  {% for key, title in [('angebote','Angebote vorbereiten'),('antworten','Kundenrückmeldungen'),('dokumente','Unterlagen prüfen'),('termine','Termine und Besichtigungen')] %}
+    {% set eintraege = aktionsuebersicht.groups.get(key, []) %}
+    <details class="aktion-gruppe" {% if eintraege %}open{% endif %}>
+      <summary><span>{{ title }}</span><strong aria-label="{{ eintraege|length }} {{ 'Vorgang' if eintraege|length == 1 else 'Vorgänge' }}">{{ eintraege|length }}</strong></summary>
+      {% for item in eintraege %}<a class="aktion-eintrag" href="{{ item.url }}"><strong>{{ item.name }}</strong><span>{{ item.vehicle }}</span><small>{{ item.detail }}</small><span class="aktion-link">{{ item.title }} →</span></a>{% else %}<p class="p-3 mb-0 text-muted">Hier ist aktuell nichts offen.</p>{% endfor %}
     </details>
   {% endfor %}
   </div>
-  <p class="small text-muted mt-3 mb-0">{{ aktionsuebersicht.waiting }} Angebot{{ '' if aktionsuebersicht.waiting==1 else 'e' }} wartet{{ '' if aktionsuebersicht.waiting==1 else 'n' }} auf Kundenentscheidung. </p>
+  {% if aktionsuebersicht.waiting %}<p class="small text-muted mt-3 mb-0">{{ aktionsuebersicht.waiting }} Angebot{{ '' if aktionsuebersicht.waiting==1 else 'e' }} wartet{{ '' if aktionsuebersicht.waiting==1 else 'n' }} auf Kundenentscheidung.</p>{% endif %}
 </section>
 <style>
-.aktion-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.aktion-gruppe{min-width:0;border:1px solid #decfbb;border-radius:12px;background:#fffdf9;overflow:hidden}.aktion-gruppe summary{cursor:pointer;padding:12px;font-weight:700;min-height:48px}.aktion-gruppe summary strong{float:right}.aktion-eintrag{display:flex;flex-direction:column;gap:4px;border-top:1px solid #eadfce;padding:12px;color:#192d38;text-decoration:none;overflow-wrap:anywhere}.aktion-eintrag:hover{background:#f6f0e6}.aktion-link{font-size:.85rem;font-weight:650;color:#9b3826;margin-top:6px}.aktion-eintrag:focus-visible, .aktion-gruppe summary:focus-visible{outline:3px solid #087d91;outline-offset:-3px}@media(max-width:800px){.aktion-grid{grid-template-columns:minmax(0,1fr)}}
+.aktion-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.aktion-gruppe{min-width:0;border:1px solid #decfbb;border-radius:12px;background:#fffdf9;overflow:hidden}.aktion-gruppe summary{cursor:pointer;padding:12px;font-weight:700;min-height:48px;overflow-wrap:anywhere}.aktion-gruppe summary strong{margin-left:.65rem;background:#eee4d5;border-radius:8px;padding:.1rem .45rem;white-space:nowrap}.aktion-eintrag{display:flex;flex-direction:column;gap:4px;border-top:1px solid #eadfce;padding:12px;color:#192d38;text-decoration:none;overflow-wrap:anywhere}.aktion-eintrag:hover{background:#f6f0e6}.aktion-link{font-size:.85rem;font-weight:650;color:#9b3826;margin-top:6px}.aktion-eintrag:focus-visible, .aktion-gruppe summary:focus-visible{outline:3px solid #087d91;outline-offset:-3px}@media(max-width:700px){.aktion-grid{grid-template-columns:minmax(0,1fr)}}
 </style>

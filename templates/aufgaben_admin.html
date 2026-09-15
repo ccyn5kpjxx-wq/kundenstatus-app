@@ -17,27 +17,54 @@
   </div>
 </div>
 
-<div class="page-card p-4 mb-4">
+{% if zuweisbare_auftraege is defined %}
+<section class="page-card p-4 mb-4" aria-labelledby="zuweisung-titel">
+  <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap mb-3">
+    <div>
+      <h2 class="h5 mb-1" id="zuweisung-titel">{{ 'Heute' if ist_heute else 'Für diesen Tag' }} noch zuzuweisen <span class="badge-soft">{{ zuweisbare_auftraege|length }} {{ 'Auftrag' if zuweisbare_auftraege|length == 1 else 'Aufträge' }}</span></h2>
+      <p class="small text-muted mb-0">Fällige und laufende Aufträge ohne Tageszuteilung. Auftrag wählen, Arbeitsschritt prüfen und Mitarbeiter mit Richtzeit zuteilen.</p>
+    </div>
+    <a class="btn btn-soft btn-sm" href="{{ url_for('werkstatt_tafel') }}">Werkstatt-Tafel</a>
+  </div>
+  <div class="d-grid gap-2">
+    {% for a in zuweisbare_auftraege %}
+    <div class="border rounded-3 p-3 d-flex justify-content-between align-items-center gap-3 flex-wrap">
+      <div style="min-width:0;overflow-wrap:anywhere;">
+        <strong>{{ a['kennzeichen'] or 'Ohne Kennzeichen' }} · {{ a['fahrzeug'] or 'Fahrzeug' }}</strong>
+        <div class="small text-muted">Auftrag #{{ a['id'] }}{% if a['status_label'] %} · {{ a['status_label'] }}{% endif %}{% if a['planung'] and a['planung']['hinweis'] %} · {{ a['planung']['hinweis'] }}{% endif %}</div>
+        {% if a['produktion_schritt_label'] %}<div class="small mt-1">Aktueller Arbeitsschritt: {{ a['produktion_schritt_label'] }}</div>{% endif %}
+      </div>
+      <button type="button" class="btn btn-soft btn-sm" data-auftrag-waehlen="{{ a['id'] }}" data-aufgabe-vorschlag="{{ a['tagesaufgabe_vorschlag'] or a['produktion_schritt_label'] or '' }}" aria-controls="aufgabe-formular" {% if not plaene %}disabled{% endif %}>Zuteilung vorbereiten ↓</button>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">Für diesen Tag gibt es keine weiteren Aufträge zur Zuteilung.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<div class="page-card p-4 mb-4" id="aufgabe-formular" style="scroll-margin-top:6rem;">
   <h2 class="h5 mb-3">Neue Aufgabe für den {{ datum_label }}</h2>
-  <form method="POST" action="{{ url_for('admin_aufgabe_neu') }}" class="row g-2 align-items-end">
+  <p class="small text-muted" id="zuteilung-hinweis" aria-live="polite">Die Aufgabe wird erst mit „Zuteilen“ im Tagesplan gespeichert.</p>
+  <form method="POST" action="{{ url_for('admin_aufgabe_neu') }}" class="row g-2 align-items-end" data-zuteilung-form>
     {{ csrf_field()|safe }}
     <input type="hidden" name="datum" value="{{ datum_label }}">
     <div class="col-md-2">
-      <label class="form-label">Mitarbeiter</label>
-      <select name="mitarbeiter_id" class="form-select">
+      <label class="form-label" for="zuteilung-mitarbeiter">Mitarbeiter</label>
+      <select name="mitarbeiter_id" id="zuteilung-mitarbeiter" class="form-select" required>
         <option value="">– wählen –</option>
         {% for plan in plaene %}
         <option value="{{ plan.mitarbeiter['id'] }}">{{ plan.mitarbeiter['name'] }}</option>
         {% endfor %}
       </select>
     </div>
-    <div class="col-md-4">
-      <label class="form-label">Aufgabe</label>
-      <input type="text" name="beschreibung" class="form-control" placeholder="z. B. Tür hinten links spachteln + schleifen">
+    <div class="col-md-3">
+      <label class="form-label" for="zuteilung-beschreibung">Aufgabe</label>
+      <input type="text" name="beschreibung" id="zuteilung-beschreibung" class="form-control" placeholder="z. B. Tür hinten links spachteln + schleifen" required>
     </div>
     <div class="col-md-3">
-      <label class="form-label">Fahrzeug (optional)</label>
-      <select name="auftrag_id" class="form-select">
+      <label class="form-label" for="zuteilung-auftrag">Fahrzeug (optional)</label>
+      <select name="auftrag_id" id="zuteilung-auftrag" class="form-select">
         <option value="">– ohne Auftrag –</option>
         {% for a in auftraege %}
         <option value="{{ a['id'] }}">{{ a['kennzeichen'] or '?' }} · {{ a['fahrzeug'] or 'Fahrzeug' }}</option>
@@ -45,11 +72,11 @@
       </select>
     </div>
     <div class="col-md-2">
-      <label class="form-label">Richtwert (Std.)</label>
-      <input type="text" name="richtwert" class="form-control" placeholder="z. B. 2,5" inputmode="decimal">
+      <label class="form-label" for="zuteilung-richtwert">Richtwert (Std.)</label>
+      <input type="text" name="richtwert" id="zuteilung-richtwert" class="form-control" placeholder="z. B. 2,5" inputmode="decimal">
     </div>
-    <div class="col-md-1">
-      <button type="submit" class="btn btn-brand w-100" data-no-loading="true">+</button>
+    <div class="col-md-2">
+      <button type="submit" class="btn btn-brand w-100" data-no-loading="true" {% if not plaene %}disabled{% endif %}>Zuteilen</button>
     </div>
   </form>
 </div>
@@ -97,4 +124,36 @@
   {% endif %}
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (() => {
+    const form = document.querySelector('[data-zuteilung-form]');
+    if (!form) return;
+    const auftrag = form.elements.namedItem('auftrag_id');
+    const beschreibung = form.elements.namedItem('beschreibung');
+    const mitarbeiter = form.elements.namedItem('mitarbeiter_id');
+    const hinweis = document.getElementById('zuteilung-hinweis');
+    let letzterVorschlag = '';
+    document.querySelectorAll('[data-auftrag-waehlen]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const id = button.dataset.auftragWaehlen;
+        if (!Array.from(auftrag.options).some((option) => option.value === id)) {
+          hinweis.textContent = 'Dieser Auftrag ist nicht mehr auswählbar. Bitte die Seite aktualisieren.';
+          return;
+        }
+        auftrag.value = id;
+        const beschreibungBehalten = Boolean(beschreibung.value.trim() && beschreibung.value !== letzterVorschlag);
+        if (!beschreibungBehalten) {
+          letzterVorschlag = button.dataset.aufgabeVorschlag || '';
+          beschreibung.value = letzterVorschlag;
+        }
+        hinweis.textContent = 'Auftrag #' + id + ' ausgewählt. ' + (beschreibungBehalten ? 'Deine Aufgabenbeschreibung bleibt erhalten. ' : '') + 'Arbeitsschritt, Mitarbeiter und Richtzeit prüfen, dann zuteilen.';
+        document.getElementById('aufgabe-formular').scrollIntoView({behavior: 'smooth', block: 'start'});
+        (beschreibung.value ? mitarbeiter : beschreibung).focus({preventScroll: true});
+      });
+    });
+  })();
+</script>
 {% endblock %}
