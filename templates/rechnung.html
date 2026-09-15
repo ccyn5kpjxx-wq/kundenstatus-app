@@ -148,6 +148,8 @@ Preis/Vorgabe: {{ position['preis'] }}{% endif %}
         <a href="{{ auftrag['lexware_invoice_url'] }}" class="btn btn-brand w-100" target="_blank" rel="noopener">
           Lexware-Entwurf öffnen
         </a>
+      {% elif auftrag['rechnung_erstellung_status'] == 'laeuft' %}
+        <div class="alert alert-info">Die Rechnungserstellung läuft. Bitte später aktualisieren. Nach einem technischen Abbruch muss dieser Vorgang zunächst in Lexware geprüft werden.</div>
       {% elif auftrag['rechnung_erstellung_status'] == 'pruefen' %}
         <div class="alert alert-warning">Ein vorheriger Erstellungsversuch ist noch ungeklärt. Bitte zuerst in Lexware nachsehen, ob ein Entwurf oder eine Rechnung entstanden ist.</div>
         <form method="POST" action="{{ url_for('admin_rechnung_pruefung', auftrag_id=auftrag['id']) }}"><label class="form-check"><input class="form-check-input" type="checkbox" name="kein_beleg_bestaetigt" value="1" required> In Lexware geprüft: Es ist kein Beleg entstanden.</label><button class="btn btn-soft mt-2">Erneute Vorbereitung freigeben</button></form>

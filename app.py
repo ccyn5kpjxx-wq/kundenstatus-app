@@ -11976,14 +11976,13 @@ def customer_history(auftrag_id=None, lead_id=None):
         events.extend(dict(r) for r in db.execute(
             "SELECT id, quelle, titel, nachricht, erstellt_am FROM lead_portal_log WHERE lead_id=? AND kunden_sichtbar=1", (item_id,)).fetchall())
     db.close()
-    # All timestamps in these tables are written using the same now_str format.
-    return sorted(events, key=lambda e: (e.get('erstellt_am') or '', e.get('id') or 0), reverse=True)
+    return sorted(events, key=lambda e: (parse_postfach_datetime(e.get('erstellt_am')), e.get('id') or 0), reverse=True)
 
 
 def customer_updated_at(events, documents):
     values = [e.get('erstellt_am') or '' for e in events]
     values += [d.get('hochgeladen_am') or d.get('erstellt_am') or '' for d in documents]
-    return max(values, default='')
+    return max(values, key=parse_postfach_datetime, default='')
 
 
 def zuweisbare_tagesauftraege(orders, tasks, day):
@@ -11999,7 +11998,7 @@ def zuweisbare_tagesauftraege(orders, tasks, day):
         if status < 3 and (not planned or planned > day):
             continue
         result.append({**order, 'tagesaufgabe_vorschlag': clean_text(order.get('produktion_schritt_label')) or 'Nächsten Arbeitsschritt abstimmen'})
-    return sorted(result, key=lambda o: (o.get('fertig_datum') or '9999', o['id']))
+    return sorted(result, key=lambda o: (parse_date(o.get('fertig_datum')) or date.max, o['id']))
 
 
 def customer_order_documents_allowed(auftrag_id):
@@ -21377,7 +21376,7 @@ def values_match_for_review(key, left, right):
     return left_value == right_value
 
 
-def list_document_review_items(auftrag_id, auftrag=None):
+def list_document_review_items(auftrag_id, auftrag=None, audience=None):
     if not auftrag:
         auftrag = get_auftrag(auftrag_id)
     if not auftrag:
@@ -21386,8 +21385,7 @@ def list_document_review_items(auftrag_id, auftrag=None):
     db = get_db()
     rows = db.execute(
         """
-        SELECT id, original_name, dokument_typ, notiz, extrahierter_text, analyse_json,
-               analyse_quelle, analyse_hinweis
+        SELECT *
         FROM dateien
         WHERE auftrag_id=?
           AND kategorie='standard'
@@ -21403,6 +21401,8 @@ def list_document_review_items(auftrag_id, auftrag=None):
     reviews = []
     for row in rows:
         datei = dict(row)
+        if audience and not document_visible(datei, audience):
+            continue
         ai_felder = load_saved_analysis_json(datei.get("analyse_json"))
         review_text = append_upload_note_to_analysis(
             datei.get("extrahierter_text"),
@@ -21598,7 +21598,7 @@ def add_rahmenvertrag_anfrage(autohaus_id, nachricht=""):
     return request_id, True
 
 
-def list_benachrichtigungen(auftrag_id, limit=20, nur_ungelesen=False):
+def list_benachrichtigungen(auftrag_id, limit=20, nur_ungelesen=False, include_internal=False):
     db = get_db()
     rows = db.execute(
         """
@@ -21606,10 +21606,11 @@ def list_benachrichtigungen(auftrag_id, limit=20, nur_ungelesen=False):
         FROM benachrichtigungen
         WHERE auftrag_id=?
           AND (?=0 OR COALESCE(gelesen, 0)=0)
+          AND (?=1 OR COALESCE(quelle,'')!='intern')
         ORDER BY id DESC
         LIMIT ?
         """,
-        (auftrag_id, 1 if nur_ungelesen else 0, limit),
+        (auftrag_id, 1 if nur_ungelesen else 0, 1 if include_internal else 0, limit),
     ).fetchall()
     db.close()
     return [dict(row) for row in rows]
@@ -21622,7 +21623,7 @@ def list_autohaus_benachrichtigungen(autohaus_id, limit=10):
         SELECT b.*, a.fahrzeug, a.kennzeichen, a.auftragsnummer, a.angebotsphase
         FROM benachrichtigungen b
         JOIN auftraege a ON a.id = b.auftrag_id
-        WHERE a.autohaus_id=? AND a.archiviert=0 AND COALESCE(b.gelesen, 0)=0
+        WHERE a.autohaus_id=? AND a.archiviert=0 AND COALESCE(b.gelesen, 0)=0 AND COALESCE(b.quelle,'')!='intern'
         ORDER BY b.id DESC
         LIMIT ?
         """,
@@ -47692,7 +47693,7 @@ def auftrag_detail(auftrag_id):
         versicherung_pruefung=build_versicherung_pruefung_checkliste(auftrag, prozess=versicherung_prozess) if auftrag.get("versicherung_id") else None,
         reklamationen=list_reklamationen(auftrag_id),
         verzoegerungen=list_verzoegerungen(auftrag_id),
-        benachrichtigungen=list_benachrichtigungen(auftrag_id),
+        benachrichtigungen=list_benachrichtigungen(auftrag_id, include_internal=True),
         chat_nachrichten=chat_nachrichten,
         kunden_termin_mail=build_kundentermin_mail_entwurf(auftrag),
         kunden_termin_mail_ionos=build_kundentermin_mail_ionos_state(auftrag),
@@ -49989,7 +49990,7 @@ def admin_rechnung_pruefung(auftrag_id):
     order = get_auftrag(auftrag_id)
     if not order:
         abort(404)
-    if request.form.get('kein_beleg_bestaetigt') != '1' or has_invoice(order) or any(d.get('kategorie') in {'rechnung','bonusrechnung'} for d in list_dateien(auftrag_id)):
+    if order.get('rechnung_erstellung_status') != 'pruefen' or request.form.get('kein_beleg_bestaetigt') != '1' or has_invoice(order) or any(d.get('kategorie') in {'rechnung','bonusrechnung'} for d in list_dateien(auftrag_id)):
         abort(400)
     db = get_db()
     db.execute("UPDATE auftraege SET rechnung_erstellung_status='' WHERE id=? AND rechnung_erstellung_status='pruefen'", (auftrag_id,))
@@ -50095,7 +50096,7 @@ def lexware_rechnung_erstellen(auftrag_id):
         flash("Der Betrag weicht vom bestätigten Kundenpreis ab. Bitte zuerst die Preisvereinbarung im Auftrag aktualisieren.", "warning")
         return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
     db = get_db()
-    reserved = db.execute("UPDATE auftraege SET rechnung_erstellung_status='pruefen' WHERE id=? AND COALESCE(rechnung_erstellung_status,'')='' AND COALESCE(lexware_invoice_id,'')='' AND COALESCE(rechnung_nummer,'')='' AND COALESCE(rechnung_status,'') NOT IN ('geschrieben','lexware_entwurf')", (auftrag_id,)).rowcount
+    reserved = db.execute("UPDATE auftraege SET rechnung_erstellung_status='laeuft' WHERE id=? AND COALESCE(rechnung_erstellung_status,'')='' AND COALESCE(lexware_invoice_id,'')='' AND COALESCE(rechnung_nummer,'')='' AND COALESCE(rechnung_status,'') NOT IN ('geschrieben','lexware_entwurf')", (auftrag_id,)).rowcount
     db.commit(); db.close()
     if not reserved:
         flash("Die Rechnung wird bereits vorbereitet oder muss geprüft werden. Bitte zuerst in Lexware nachsehen.", "warning")
@@ -50103,6 +50104,9 @@ def lexware_rechnung_erstellen(auftrag_id):
     try:
         result = create_lexware_invoice_draft(auftrag, rechnung, net_amount)
     except Exception as exc:
+        db = get_db()
+        db.execute("UPDATE auftraege SET rechnung_erstellung_status='pruefen' WHERE id=? AND rechnung_erstellung_status='laeuft'", (auftrag_id,))
+        db.commit(); db.close()
         flash("Erstellung angehalten. Bitte in Lexware prüfen, ob ein Beleg entstanden ist, bevor erneut vorbereitet wird. " + str(exc), "danger")
         return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
 
@@ -53740,7 +53744,7 @@ def partner_angebot_detail(slug, auftrag_id):
         versicherung_pruefung=build_versicherung_pruefung_checkliste(angebot, prozess=versicherung_prozess) if angebot.get("versicherung_id") else None,
         versicherung_steuerung=versicherung_steuerung,
         versicherung_teile=versicherung_teile,
-        dokument_pruefung=list_document_review_items(auftrag_id, angebot),
+        dokument_pruefung=list_document_review_items(auftrag_id, angebot, audience='partner'),
         versicherungen=[
             item for item in list_versicherungen() if not versicherung_ist_platzhalter(item)
         ],
@@ -54277,7 +54281,7 @@ def partner_auftrag(slug, auftrag_id):
             auftrag=auftrag,
             dateien=standard_dateien,
             fertigbilder=fertigbilder,
-            dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
+            dokument_pruefung=list_document_review_items(auftrag_id, auftrag, audience='partner'),
             benachrichtigungen=list_benachrichtigungen(auftrag_id, nur_ungelesen=True),
             reklamationen=list_reklamationen(auftrag_id),
             verzoegerungen=list_verzoegerungen(auftrag_id),
@@ -54352,7 +54356,7 @@ def partner_auftrag_dokumente(slug, auftrag_id):
         auftrag=auftrag,
         dateien=standard_dateien,
         fertigbilder=fertigbilder,
-        dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
+        dokument_pruefung=list_document_review_items(auftrag_id, auftrag, audience='partner'),
         postfach_count=partner_postfach_count(autohaus["id"], autohaus["slug"]),
     )
 

@@ -249,10 +249,53 @@
       flex-direction: column;
     }
   }
+
+  .order-focus-header h1 { font-weight:750; letter-spacing:-.03em; }
+  .order-plate { display:inline-block; padding:.15rem .6rem; background:#fff; border:1px solid #d9dfe6; border-left:5px solid #235493; border-radius:5px; font-weight:700; }
+  .order-keyfacts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1rem; }
+  .order-keyfacts > div { border-left:2px solid #e9e3da; padding-left:1rem; min-width:0; }
+  .order-keyfacts span { display:block; font-size:.8rem; color:#67717d; margin-bottom:.25rem; }
+  .order-keyfacts strong { display:block; font-size:.95rem; overflow-wrap:anywhere; }
+  .order-section-tabs { display:flex; gap:.25rem; margin:0 0 1rem; border-bottom:1px solid #d9dfe6; overflow:auto; position:sticky; top:0; z-index:20; background:#f6f5f1; padding:.35rem 0; }
+  .order-section-tabs button { flex:0 0 auto; border:0; background:transparent; padding:.85rem 1.15rem; font-weight:650; color:#626a74; border-radius:8px; }
+  .order-section-tabs button[aria-selected="true"] { background:#253746; color:white; }
+  .order-tab-panel[hidden], .auftrag-detail-grid[hidden] { display:none!important; }
+  .order-tab-panel > form[data-upload-form] { background:white; padding:1.5rem; border:1px solid #e3e0d9; border-radius:16px; margin:0; }
+  .order-tab-panel .page-card { box-shadow:none; }
+  .order-next { margin-top:1rem; padding:.8rem 1rem; border-radius:8px; background:#fff3d6; }
+  .order-tab-panel { scroll-margin-top:75px; }
+  .order-tab-panel [id], .order-tab-panel details { scroll-margin-top:80px; }
+  .order-field-group { padding:1rem; border:1px solid #e3e0d9; border-radius:12px; }
+  .order-field-group summary { font-weight:650; }
+  @media(max-width:767px) { .order-keyfacts { grid-template-columns:repeat(2,minmax(0,1fr)); } .order-section-tabs button { padding:.75rem .8rem; } .order-tab-panel > form[data-upload-form] { padding:.75rem; } }
 </style>
 {% endblock %}
 
 {% block content %}
+<header class="order-focus-header page-card p-4 mb-3">
+  {% if cockpit_demo %}<div class="alert alert-info py-2">Lokale Vorschau · Beispieldaten · keine Nachrichten oder Rechnungen werden versendet</div>{% endif %}
+  <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
+    <div><div class="small text-muted mb-1">AUFTRAG {{ auftrag['id'] }} · {{ auftrag['autohaus_name'] or 'Direktkunde' }}</div><h1 class="h2 mb-1">{{ auftrag['fahrzeug'] }}</h1><div>{{ auftrag['kunde_name'] or 'Kunde noch ergänzen' }} <span class="ms-2 order-plate">{{ auftrag['kennzeichen'] or 'Kennzeichen offen' }}</span></div></div>
+    <div><span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }} p-2">{{ auftrag['status_meta']['label'] }}</span><div class="mt-2 text-end"><a href="{{ detail_back_url }}" class="small">Zur Auftragsliste</a></div></div>
+  </div>
+  <div class="order-keyfacts mt-4">
+    <div><span>Anlieferung</span><strong>{{ auftrag['annahme_datum'] or 'Noch offen' }}{% if auftrag['annahme_uhrzeit'] %} · {{ auftrag['annahme_uhrzeit'] }} Uhr{% endif %}</strong></div>
+    <div><span>Fertigstellung</span><strong>{{ auftrag['fertig_datum'] or 'Termin ergänzen' }}</strong></div>
+    <div><span>{{ auftrag['abholung_label'] }}</span><strong>{{ auftrag['abholtermin'] or 'Noch abstimmen' }}{% if auftrag['abhol_uhrzeit'] %} · {{ auftrag['abhol_uhrzeit'] }} Uhr{% endif %}</strong></div>
+    <div><span>Kundenpreis</span><strong>{% if preisstand.get('kunde') %}{{ preisstand['kunde']['netto'] }} € netto{% else %}<a href="#preise">Preis zuordnen</a>{% endif %}</strong></div>
+  </div>
+</header>
+<section class="page-card p-4 mb-3" id="order-work-summary">
+  <div class="d-flex justify-content-between flex-wrap gap-2"><h2 class="h5">Was ist zu tun?</h2><a href="#auftragsdaten" class="small">Arbeiten bearbeiten</a></div>
+  <p class="mb-0 text-break">{{ auftrag['analyse_text'] or auftrag['werkstatt_angebot_text_display'] or 'Arbeitsumfang im Auftrag ergänzen.' }}</p>
+  {% if auftrag['beschreibung'] %}<details class="mt-2"><summary>Vollständigen Arbeitsumfang lesen</summary><div class="mt-2 text-break" style="white-space:pre-wrap">{{ auftrag['beschreibung'] }}</div></details>{% endif %}
+  {% if auftrag['analyse_pruefen'] and not auftrag['analyse_werkstatt_geprueft'] %}<div class="order-next"><strong>Nächster Schritt:</strong> Dokumentdaten prüfen. <a href="#dokument-pruefung">Prüfansicht öffnen</a></div>
+  {% elif auftrag['status']|int in [2,3] and not auftrag['fertig_datum'] %}<div class="order-next"><strong>Nächster Schritt:</strong> Fertigstellung abstimmen. <a href="#auftragsdaten">Termin ergänzen</a></div>
+  {% elif auftrag['status']|int >= 5 %}<div class="order-next"><strong>Nächster Schritt:</strong> Rechnung und zugehörige Belege prüfen. <a href="#preise">Abrechnung öffnen</a></div>
+  {% else %}<div class="order-next"><strong>Arbeitsstand:</strong> {{ auftrag['status_meta']['label'] }}. Den nächsten Prozessschritt bestätigst du unten.</div>{% endif %}
+</section>
+<div id="order-sections"></div>
+
 <div class="row g-4 auftrag-detail-grid">
   <div class="col-xl-7">
     <div class="page-card p-4 p-lg-5 h-100">
@@ -295,7 +338,7 @@
             <strong>{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</strong>
           </span>
         </div>
-        <div class="process-steps">
+        <details class="mb-3"><summary>Alle Prozessschritte anzeigen</summary><div class="process-steps mt-3">
           {% for nummer, meta in statusliste.items() %}
           <form method="POST" action="{{ url_for('status_update', auftrag_id=auftrag['id'], neuer_status=nummer) }}"{% if nummer < auftrag['status'] %} onsubmit="return confirm('Status wirklich zurücksetzen? Der Kunde sieht die Änderung auf seiner Status-Seite.')"{% endif %}>
             <input type="hidden" name="next" value="{{ detail_self_url }}">
@@ -315,6 +358,7 @@
           </form>
           {% endfor %}
         </div>
+        </details>
         <div class="process-actions">
           <div class="text-muted small">
             {% if log %}
@@ -736,7 +780,7 @@
 </details>
 
       {% if auftrag['analyse_pruefen'] or auftrag['analyse_hinweis'] or auftrag['analyse_confidence'] %}
-      <div class="alert {{ 'alert-warning' if auftrag['analyse_pruefen'] else 'alert-info' }}">
+      <div data-order-module="dokumente" class="alert {{ 'alert-warning' if auftrag['analyse_pruefen'] else 'alert-info' }}">
         <strong>{{ 'Analyse bitte prüfen' if auftrag['analyse_pruefen'] else 'Erkennungsvorschlag vorhanden' }}</strong>
         {% if auftrag['analyse_hinweis'] %}
         <div class="mt-1">{{ auftrag['analyse_hinweis'] }}</div>
@@ -824,10 +868,11 @@
       </details>
       {% endif %}
 
-      <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form>
+      <form method="POST" enctype="multipart/form-data" class="row g-4" data-upload-form id="auftragsdaten">
         <div class="col-12 d-flex gap-2 flex-wrap">
           <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Änderungen speichern</button>
         </div>
+<div class="col-12"><details class="order-field-group"><summary>Kunde, Fahrzeug und technische Daten bearbeiten</summary><div class="row g-3 mt-1">
         <div class="col-md-6">
           <label class="form-label">Autohaus</label>
           <select name="autohaus_id" class="form-select form-select-lg">
@@ -918,6 +963,7 @@
           <input type="text" name="abhol_adresse" class="form-control" value="{{ auftrag['abhol_adresse'] }}" placeholder="z.B. Unteres Lohhaus 5, 74915 Waibstadt">
           <div class="form-text">Beim Hol- und Bringservice in der Werkstatt-Tafel sichtbar.</div>
         </div>
+</div></details></div>
         <div class="col-md-6">
           <label class="form-label">Kurze Schadensbeschreibung</label>
           <input type="text" name="analyse_text" class="form-control" value="{{ auftrag['analyse_text'] }}">
@@ -986,7 +1032,7 @@
       </form>
 
       {% if auftrag['angebotsphase'] and auftrag['angebot_abgesendet'] %}
-      <div class="page-card p-4 mt-4 border border-primary-subtle">
+      <div class="page-card p-4 mt-4 border border-primary-subtle" id="werkstatt-angebot">
         <h4 class="mb-2">{{ 'Angebot bearbeiten' if auftrag['angebot_status'] == 'angebot_abgegeben' else ('Angebot im Kundenportal bereitstellen' if auftrag['quelle'] == 'lead' else 'Angebot an Autohaus senden') }}</h4>
         <p class="text-muted mb-3">Preis, Leistungsbeschreibung und Notiz sind im {{ 'persönlichen Kundenportal' if auftrag['quelle'] == 'lead' else 'Autohaus-Portal' }} sichtbar.</p>
         <form method="POST" action="{{ url_for('angebot_senden_route', auftrag_id=auftrag['id']) }}" class="row g-3">
@@ -1429,5 +1475,60 @@
       });
     });
   }
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const grid=document.querySelector('.auftrag-detail-grid'), target=document.getElementById('order-sections');
+  if(!grid || !target)return;
+  const primary=grid.querySelector('.col-xl-7 > .page-card'), secondary=grid.querySelector('.col-xl-5');
+  if(!primary || !secondary)return;
+  const definitions=[['uebersicht','Übersicht'],['arbeiten','Arbeiten & Termine'],['dokumente','Dokumente'],['preise','Preise & Rechnung'],['verlauf','Verlauf']];
+  const nav=document.createElement('div');nav.className='order-section-tabs';nav.setAttribute('role','tablist');nav.setAttribute('aria-label','Auftragsbereiche');
+  const panels={}, buttons={};
+  for(const [key,label] of definitions){
+    const panel=document.createElement('section');panel.id='detail-'+key;panel.className='order-tab-panel';panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby','tab-'+key);panels[key]=panel;
+    const button=document.createElement('button');button.id='tab-'+key;button.type='button';button.textContent=label;button.setAttribute('role','tab');button.setAttribute('aria-controls',panel.id);buttons[key]=button;nav.append(button);
+  }
+  const header=primary.querySelector(':scope > .section-title');if(header)header.hidden=true;
+  function category(node){
+    if(node.id==='preise'||node.id==='werkstatt-angebot')return 'preise';
+    if(node.id==='dateifreigaben'||node.id==='dokument-pruefung'||node.dataset.orderModule==='dokumente')return 'dokumente';
+    if(node.id==='kundenkommunikation'||node.matches('form[data-upload-form]'))return 'arbeiten';
+    if(node.classList.contains('process-panel'))return 'uebersicht';
+    const title=(node.querySelector('h3,h4,summary')?.textContent||'').trim();
+    if(/Rechnung|Bonus|Angebot/.test(title))return 'preise';
+    if(/Unterlagen|Fertigbilder/.test(title))return 'dokumente';
+    if(/Verzögerung/.test(title))return 'arbeiten';
+    if(/Chat|Benachrichtigungen|Statusverlauf|Reklamationen|Nachricht im Kundenportal/.test(title))return 'verlauf';
+    if(node.querySelector('button.btn-outline-danger'))return 'verlauf';
+    return 'uebersicht';
+  }
+  for(const node of [...primary.children,...secondary.children]){
+    if(node===header)continue;
+    panels[category(node)].append(node);
+  }
+  const summary=document.getElementById('order-work-summary');if(summary)panels.uebersicht.prepend(summary);
+  target.append(nav,...definitions.map(([key])=>panels[key]));grid.hidden=true;
+  function activate(key){for(const [name] of definitions){const selected=name===key;panels[name].hidden=!selected;buttons[name].setAttribute('aria-selected',String(selected));buttons[name].tabIndex=selected?0:-1;}}
+  for(const [key] of definitions)buttons[key].addEventListener('click',()=>activate(key));
+  nav.addEventListener('keydown',event=>{
+    if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+    const current=definitions.findIndex(([key])=>buttons[key]===document.activeElement);if(current<0)return;
+    const index=event.key==='Home'?0:event.key==='End'?definitions.length-1:(current+(event.key==='ArrowRight'?1:-1)+definitions.length)%definitions.length;
+    event.preventDefault();const key=definitions[index][0];activate(key);buttons[key].focus();
+  });
+  function reveal(node){
+    if(!node)return;
+    const panel=node.closest('.order-tab-panel');if(panel)activate(panel.id.replace('detail-',''));
+    let parent=node;while(parent){if(parent.tagName==='DETAILS')parent.open=true;parent=parent.parentElement;}
+  }
+  function followHash(){let id;try{id=decodeURIComponent(location.hash.slice(1));}catch{return;}if(!id)return;const node=document.getElementById(id);if(node){reveal(node);requestAnimationFrame(()=>node.scrollIntoView({block:'start'}));}}
+  activate('uebersicht');followHash();window.addEventListener('hashchange',followHash);
+  document.addEventListener('click',event=>{const link=event.target.closest('a[href^="#"]');if(link){const node=document.getElementById(link.getAttribute('href').slice(1));reveal(node);}},true);
+  document.addEventListener('invalid',event=>reveal(event.target),true);
+  // Keeping the actual nodes also preserves selected files and all unsent fields.
+});
+
 </script>
 {% endblock %}

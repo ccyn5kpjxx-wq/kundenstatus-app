@@ -201,6 +201,21 @@ class CockpitSafety(unittest.TestCase):
         item=portal.build_lexware_invoice_line_item({'bezeichnung':'Lackieren'},'Test',100,7)
         self.assertEqual(item['unitPrice']['taxRatePercentage'],7)
 
+    def test_running_invoice_cannot_be_reset_or_reentered(self):
+        db_execute('UPDATE auftraege SET status=5 WHERE id=?',(self.order_id,))
+        def in_flight(*args):
+            self.assertEqual(self.post(f'/admin/auftrag/{self.order_id}/rechnung/pruefung',{'kein_beleg_bestaetigt':'1'}).status_code,400)
+            self.post(f'/admin/auftrag/{self.order_id}/rechnung/lexware',{'netto_betrag':'300','rechnung_pruefung_bestaetigt':'1'})
+            raise TimeoutError('Isolated test')
+        with patch.object(portal,'create_lexware_invoice_draft',side_effect=in_flight) as create:
+            self.post(f'/admin/auftrag/{self.order_id}/rechnung/lexware',{'netto_betrag':'300','rechnung_pruefung_bestaetigt':'1'})
+            self.assertEqual(create.call_count,1)
+
+    def test_customer_update_date_across_month_boundary(self):
+        events=[{'erstellt_am':'31.08.2026 10:00'}, {'erstellt_am':'01.09.2026 10:00'}]
+        self.assertEqual(portal.customer_updated_at(events,[]),'01.09.2026 10:00')
+        self.assertEqual(portal.customer_updated_at(events,[{'hochgeladen_am':'02.09.2026 08:00'}]),'02.09.2026 08:00')
+
     def test_planning_excludes_future_locked_and_assigned(self):
         today=date.today()
         base={'id':1,'status':3,'versicherung_id':0,'fahrzeug':'Test'}
