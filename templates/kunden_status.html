@@ -66,8 +66,144 @@
     }
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='kundenportal.css') }}">
+  <style>
+    /* Customer presentation only; the workshop and partner views keep their own layout. */
+    :root { --portal-ink:#202524; --portal-muted:#646d69; --portal-line:#e2e6e2; --portal-red:#bb301e; }
+    html { scroll-padding-top:95px; }
+    body.customer-portal { background:#f4f6f3; color:var(--portal-ink); }
+    .customer-portal .shell { max-width:1192px; padding:0 28px 32px; }
+    .customer-portal a { text-underline-offset:4px; }
+    .customer-portal .panel { background:#fff; border:1px solid var(--portal-line); padding:28px; border-radius:22px; box-shadow:0 4px 22px #283a2b04; }
+    .portal-demo { display:flex; justify-content:space-between; gap:12px; padding:9px 0; border-bottom:1px solid var(--portal-line); font-size:11px; color:#606c64; letter-spacing:.02em; }
+    .portal-brand { display:flex; align-items:center; gap:24px; padding:26px 0; }
+    .portal-brand-link { display:block; padding-right:24px; border-right:1px solid #d9ded9; }
+    .portal-brand img { width:173px; height:66px; object-fit:contain; }
+    .portal-brand-caption { font-size:12px; color:#6c756f; line-height:1.6; }
+    .portal-brand-caption strong { color:#26332c; font-weight:600; font-size:14px; }
+    .portal-contact-link { margin-left:auto; color:#25362c; font-size:13px; font-weight:600; text-decoration:none; padding:12px 16px; border:1px solid #d8dfd8; border-radius:12px; }
+    .portal-contact-link span { padding-left:12px; }
+    .customer-portal .portal-hero { position:relative; display:grid; grid-template-columns:1.1fr .9fr; overflow:hidden; background:#1c2421; color:#fff; border:0; border-radius:26px; min-height:346px; box-shadow:0 20px 42px #20382b13; }
+    .portal-hero-main { position:relative; z-index:1; padding:38px 44px; }
+    .portal-eyebrow { color:#afbdb3; font-size:10px; font-weight:700; letter-spacing:.18em; margin-bottom:15px; }
+    .portal-hero h1 { font-size:clamp(30px,4.4vw,49px); font-weight:650; line-height:1.08; letter-spacing:-.045em; margin:0 0 18px; overflow-wrap:anywhere; }
+    .portal-identity { display:flex; align-items:center; flex-wrap:wrap; gap:15px; font-size:13px; color:#c8d2cb; }
+    .portal-plate { display:inline-flex; align-items:center; gap:10px; border-radius:5px; overflow:hidden; background:#f4f6f2; padding:0 10px 0 0; color:#1a221e; font-weight:700; letter-spacing:.07em; font-size:13px; }
+    .portal-plate span { background:#273e64; padding:6px 7px; color:#fff; font-size:10px; }
+    .portal-status { display:flex; align-items:center; gap:10px; margin-top:27px; }
+    .portal-status-dot { width:8px; height:8px; flex:0 0 auto; border-radius:50%; background:#b3d5b5; box-shadow:0 0 0 5px #b3d5b514; }
+    .portal-status h2 { margin:0; font-size:20px; font-weight:600; color:#e1efe3; }
+    .portal-state-copy { color:#b9c6bc; font-size:13px; line-height:1.7; max-width:440px; margin:12px 0 20px; }
+    .portal-hero-photo { position:relative; min-height:100%; background:#303934; }
+    .portal-hero-photo:after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,#1c2421 0%,#1c242140 30%,transparent 70%),linear-gradient(0deg,#17201dd9 0%,transparent 60%); }
+    .portal-hero-photo img { position:absolute; height:100%; width:100%; object-fit:cover; object-position:48% 50%; filter:brightness(.77) saturate(.65); }
+    .portal-hero-photo>span { position:absolute; z-index:1; bottom:25px; right:27px; left:27px; text-align:right; color:#d0d7d2; font-size:10px; }
+    .customer-portal .customer-primary { display:inline-flex; align-items:center; justify-content:center; gap:22px; background:#fff; color:#212a24; border:0; border-radius:10px; padding:12px 17px; font-size:13px; font-weight:650; min-height:44px; }
+    .customer-portal .customer-primary:hover { background:#e7eee7; }
+    .portal-freshness { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; font-size:11px; color:#6c756e; padding:16px 5px 24px; }
+    .portal-freshness a { color:#45574a; font-weight:600; text-decoration:none; min-height:32px; display:inline-flex; gap:7px; align-items:center; }
+    .portal-tabs { display:flex; align-items:stretch; gap:6px; border-bottom:1px solid #dce2dc; padding:0 0 1px; margin-bottom:26px; position:sticky; top:0; z-index:5; background:#f4f6f3f5; backdrop-filter:blur(16px); }
+    .portal-tabs>a { display:flex; align-items:center; justify-content:center; gap:8px; padding:16px 20px; min-height:54px; font-weight:550; font-size:13px; text-decoration:none; white-space:nowrap; color:#657168; border-bottom:2px solid transparent; margin-bottom:-2px; }
+    .portal-tabs>a[aria-selected="true"] { color:#202c23; border-bottom-color:var(--portal-red); font-weight:700; }
+    .portal-tabs>a:hover { color:#1d2d21; background:#e9eee865; }
+    .portal-tabs>a>span:not(.portal-tab-extra) { font-size:10px; background:#e8ece7; border-radius:6px; padding:2px 6px; color:#536054; }
+    .portal-tab-extra { margin-left:-5px; }
+    .portal-summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:22px; }
+    .customer-portal .customer-date, .customer-portal .customer-next { display:block; margin:0; }
+    .customer-portal .customer-next { background:#eaf0e7; border-color:#e1e8df; }
+    .portal-card-kicker { display:flex; align-items:center; gap:11px; color:#718071; font-size:11px; font-weight:650; margin-bottom:18px; }
+    .portal-mini-icon { display:inline-flex; align-items:center; justify-content:center; width:29px; height:29px; background:#f1f4ef; color:#52694f; border-radius:9px; font-size:17px; }
+    .customer-next .portal-mini-icon { background:#dbe6d6; }
+    .portal-summary-grid h2 { font-size:20px; font-weight:600; letter-spacing:-.025em; margin:0 0 11px; }
+    .portal-date-value { display:block; font-size:22px; letter-spacing:-.045em; font-weight:600; margin-bottom:6px; }
+    .portal-summary-grid p { color:#657264; font-size:13px; line-height:1.65; margin-bottom:14px; max-width:390px; }
+    .portal-text-link { font-size:12px; color:#3c543e; font-weight:650; text-decoration:none; display:inline-flex; gap:12px; align-items:center; min-height:32px; }
+    .customer-portal .section-head h2, .customer-portal .panel>.h4 { font-size:21px; letter-spacing:-.03em; font-weight:650; }
+    .customer-portal .text-muted { color:var(--portal-muted)!important; }
+    .customer-portal .section-head .text-muted, .customer-portal .panel>.text-muted { font-size:13px; line-height:1.65; }
+    .portal-progress .timeline { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:10px; margin-top:25px; }
+    .portal-progress .timeline-step { position:relative; display:block; min-width:0; }
+    .portal-progress .timeline-step:after { content:""; position:absolute; top:14px; left:38px; right:0; height:1px; background:#e3e8e1; }
+    .portal-progress .timeline-step:last-child:after { display:none; }
+    .portal-progress .timeline-dot { width:28px; height:28px; font-size:10px; border:1px solid #e3e8e1; color:#83917f; background:#f4f6f1; margin-bottom:13px; }
+    .portal-progress .is-done .timeline-dot { background:#e4eee0; color:#486643; border-color:#e4eee0; }
+    .portal-progress .is-active .timeline-dot { background:#283a2a; border-color:#283a2a; color:#fff; box-shadow:0 0 0 5px #edf2e9; }
+    .portal-progress .timeline-card { padding:0; border:0; background:transparent; border-radius:0; }
+    .portal-progress .timeline-card .fw-bold { font-size:11px; font-weight:500!important; color:#7b877a; line-height:1.5; }
+    .portal-progress .is-active .fw-bold { font-weight:700!important; color:#2e452f; }
+    .portal-progress .timeline-card .text-muted { display:none; }
+    .portal-active-detail { display:flex; gap:10px; align-items:flex-start; padding-top:19px; margin-top:23px; border-top:1px solid #edf0ea; color:#6a7667; font-size:12px; }
+    .portal-active-detail strong { color:#40563e; }
+    .portal-updates { display:grid; grid-template-columns:1.2fr 1fr; gap:20px; margin-bottom:24px; }
+    .portal-updates h2 { font-size:19px; letter-spacing:-.025em; margin-bottom:16px; }
+    .portal-updates p { font-size:13px; line-height:1.65; color:#657063; white-space:pre-wrap; }
+    .portal-updates .portal-note-time { font-size:10px; color:#7b8575; margin:10px 0 0; }
+    .portal-file-preview { display:flex; align-items:center; gap:13px; padding:14px 0; border-top:1px solid #edf0e8; }
+    .portal-file-icon { display:flex; align-items:center; justify-content:center; width:40px; height:46px; background:#f5eee7; color:#9c6751; border-radius:8px; font-size:10px; font-weight:750; flex:0 0 auto; }
+    .portal-file-preview a { font-weight:600; font-size:12px; color:#354832; overflow-wrap:anywhere; text-decoration:none; }
+    .portal-file-preview small { display:block; font-size:10px; color:#7a8578; margin-top:3px; }
+    .customer-portal .schedule-grid { grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; }
+    .customer-portal .schedule-card, .customer-portal .confirmation-item { background:#f6f8f4; border:1px solid #e5eae0; border-radius:14px; padding:18px; }
+    .customer-portal .schedule-card.is-next { background:#edf3e9; border-color:#d9e4d1; }
+    .customer-portal .document-row { background:#fff; border:0; border-bottom:1px solid #e6ebe2; border-radius:0; padding:18px 0; }
+    .customer-portal .document-row strong { font-size:13px; font-weight:600; }
+    .customer-portal .document-row small { font-size:11px; }
+    .customer-portal .document-row .badge { background:#f1f5ef!important; color:#64765e!important; border:0!important; font-weight:500; }
+    .customer-portal .message-row { background:#f1f5ed; border:0; border-radius:15px 15px 15px 3px; padding:20px; margin-right:35px; font-size:13px; }
+    .customer-portal .message-row.is-customer { background:#edf0f0; margin-right:0; margin-left:35px; border-radius:15px 15px 3px 15px; }
+    .customer-portal .message-row .small { font-size:11px; }
+    .customer-portal .form-control, .customer-portal .form-select { border:1px solid #dce4d7; background:#fafcf8; border-radius:11px; padding:12px 14px; font-size:13px; }
+    .customer-portal .form-label { color:#4d5d47; font-size:12px; }
+    .customer-portal .btn { min-height:44px; border-radius:10px; font-size:13px; }
+    .customer-portal .btn-dark { background:#293c2b; border-color:#293c2b; padding:11px 20px; }
+    .customer-portal .btn-outline-dark { border-color:#d8e1d2; color:#3e5536; }
+    .customer-portal .btn-outline-dark:hover { background:#e9f0e3; }
+    .customer-portal details>summary { color:#3b5333; font-size:13px; padding:14px 0; min-height:44px; }
+    .customer-portal .portal-upload { background:#f7f9f4; border:1px dashed #d8e1d1; border-radius:14px; padding:4px 18px 12px; margin-top:24px; }
+    .customer-portal .form-text { font-size:11px; }
+    .customer-portal #werkstatt-kontakt { background:transparent; box-shadow:none; border:0; border-top:1px solid #dce4d6; border-radius:0; padding:25px 4px 10px; margin-top:26px; font-size:12px; }
+    .customer-portal #werkstatt-kontakt h2 { font-size:21px; }
+    .customer-portal #werkstatt-kontakt p { color:#6f7b67; margin:8px 0; }
+    .customer-portal #werkstatt-kontakt>a { color:#354d2d; font-size:13px; display:inline-block; padding:10px 0; }
+    .customer-portal footer { color:#76806f; border-top:1px solid #e5eae0; margin-top:18px; padding:20px 0!important; font-size:11px!important; }
+    .customer-portal footer a { color:inherit; }
+    [data-portal-section][hidden] { display:none!important; }
+    [data-portal-section] { scroll-margin-top:90px; }
+    .portal-tab-heading { display:flex; justify-content:space-between; gap:10px; align-items:center; }
+    @media(min-width:900px) { .portal-hero-main { padding-right:10px; } }
+    @media(max-width:767px) {
+      .customer-portal .shell { padding:0 16px 22px; }
+      .portal-brand { gap:14px; padding:20px 0; }
+      .portal-brand img { width:138px; height:52px; }
+      .portal-brand-link { padding-right:0; border:0; }
+      .portal-brand-caption { display:none; }
+      .portal-contact-link { font-size:11px; padding:10px 12px; }
+      .portal-contact-link span { padding-left:5px; }
+      .customer-portal .portal-hero { grid-template-columns:1fr; border-radius:22px; }
+      .portal-hero-main { padding:30px 25px; }
+      .portal-hero-photo { display:none; }
+      .portal-hero h1 { font-size:39px; }
+      .portal-status { margin-top:25px; }
+      .portal-tabs { gap:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+      .portal-tabs>a { flex:1 1 auto; padding:14px 6px; font-size:11px; }
+      .portal-tabs::-webkit-scrollbar { display:none; }
+      .portal-tabs>a>span { display:none; }
+      .portal-summary-grid,.portal-updates { grid-template-columns:1fr; gap:14px; }
+      .customer-portal .panel { padding:23px; border-radius:18px; }
+      .portal-date-value { font-size:21px; }
+      .portal-progress .timeline { grid-template-columns:1fr; gap:0; margin-top:20px; }
+      .portal-progress .timeline-step { display:flex; align-items:center; gap:14px; padding:8px 0; }
+      .portal-progress .timeline-step:after { left:13px; top:38px; bottom:-6px; width:1px; height:auto; right:auto; }
+      .portal-progress .timeline-dot { margin:0; flex:0 0 auto; }
+      .portal-progress .timeline-card .fw-bold { font-size:12px; }
+      .portal-freshness { font-size:10px; padding:13px 1px 17px; }
+      .portal-demo { font-size:9px; }
+      .customer-portal .message-row { margin-right:12px; }
+      .customer-portal .message-row.is-customer { margin-left:12px; }
+    }
+    @media(prefers-reduced-motion:no-preference) { .portal-hero { animation:portal-appear .4s ease-out both; } @keyframes portal-appear { from { opacity:0; transform:translateY(7px); } to { opacity:1; transform:none; } } }
+  </style>
 </head>
-<body>
+<body class="customer-portal">
   <main class="shell">
     {% set intake = auftrag['schaden_aufnahme'] %}
     {% set angebot_status = auftrag['angebot_status'] %}
@@ -81,7 +217,7 @@
 
 
     {% if angebot_status == 'angebot_abgegeben' %}
-    <div class="panel mb-4" id="angebot">
+    <div class="panel mb-4" id="angebot" data-portal-section="uebersicht">
       <div class="section-head">
         <div>
           <h2 class="h4 mb-1">Ihr Werkstatt-Angebot</h2>
@@ -137,12 +273,13 @@
       </form>
     </div>
     {% elif angebot_status in ['entwurf', 'angefragt'] %}
-    <div class="panel mb-4" id="angebot">
+    <div class="panel mb-4" id="angebot" data-portal-section="uebersicht">
       <h2 class="h4 mb-1">Angebot wird vorbereitet</h2>
       <div class="text-muted">Wir prüfen Ihre Angaben und Unterlagen persönlich. Sobald das Angebot vorliegt, können Sie es über denselben Link ansehen und annehmen.</div>
     </div>
     {% elif angebot_status == 'angenommen' %}
-    <div class="panel mb-4" id="auftragsbestaetigung">
+    <details class="panel mb-4" id="auftragsbestaetigung" data-portal-section="termine">
+      <summary>Ihr Auftrag &amp; angenommenes Angebot</summary>
       <div class="section-head">
         <div>
           <h2 class="h4 mb-1">Auftragsbestätigung</h2>
@@ -167,11 +304,11 @@
         <div class="d-flex justify-content-between gap-3 flex-wrap"><strong>Angenommenes Angebot</strong>{% if auftrag['werkstatt_angebot_preis_label'] %}<strong>{{ auftrag['werkstatt_angebot_preis_label'] }}</strong>{% endif %}</div>
         {% if auftrag['werkstatt_angebot_text_display'] %}<div class="mt-2" style="white-space:pre-wrap;">{{ auftrag['werkstatt_angebot_text_display'] }}</div>{% endif %}
       </div>
-    </div>
+    </details>
     {% endif %}
     {% endif %}
 
-    <div class="panel mb-4" id="termine">
+    <div class="panel mb-4" id="termine" data-portal-section="termine">
       {# Meldung auch hier zeigen: nach Termin-Submits landet man per Anker in diesem Panel, nicht oben. #}
       {# Wenn das Wunschtermin-Formular sichtbar ist, zeigt es die Meldung selbst (sonst doppelt). #}
       {% if meldungen and not terminfreigabe['can_request'] %}
@@ -255,8 +392,8 @@
     </div>
 
     {% if not ist_anfrage or angebot_status == 'angenommen' %}
-    <div class="panel mb-4">
-      <h2 class="h4 mb-3">Fortschritt</h2>
+    <div class="panel mb-4 portal-progress" data-portal-section="uebersicht">
+      <div class="portal-tab-heading"><h2 class="h4 mb-0">Schritt für Schritt zu Ihrem Fahrzeug.</h2><span class="small text-muted">Ihr Reparaturverlauf</span></div>
       <div class="timeline">
         {% for step in kunden_timeline %}
         <div class="timeline-step is-{{ step['state'] }}">
@@ -268,10 +405,24 @@
         </div>
         {% endfor %}
       </div>
+      {% for step in kunden_timeline if step['state'] == 'active' %}<div class="portal-active-detail"><span aria-hidden="true">→</span><div><strong>{{ step['label'] }}</strong> · {{ step['detail'] }}</div></div>{% endfor %}
     </div>
     {% endif %}
 
-    <div class="panel mb-4" id="unterlagen">
+    <div class="portal-updates" data-portal-section="uebersicht">
+      <section class="panel">
+        <div class="portal-card-kicker">NEUESTES AUS IHREM AUFTRAG</div><h2>Gut informiert. Jederzeit.</h2>
+        {% if kunden_verlauf %}{% set recent = kunden_verlauf[0] %}<p>{{ recent['nachricht'] or recent['titel'] }}</p><div class="portal-note-time">{{ 'Von Ihnen' if recent['quelle'] == 'kunde' else 'Von der Werkstatt' }} · {{ recent['erstellt_am'] }}</div>{% else %}<p>Hier finden Sie künftig Ihre Nachrichten und unsere Rückmeldungen zu Ihrem Auftrag.</p>{% endif %}
+        <a class="portal-text-link mt-2" href="#nachrichten">Zum Nachrichtenverlauf <span aria-hidden="true">↗</span></a>
+      </section>
+      <section class="panel">
+        <div class="portal-card-kicker">ALLES AN EINEM ORT</div><h2>Ihre Unterlagen.</h2>
+        {% for datei in kunden_dokumente[:2] %}<div class="portal-file-preview"><span class="portal-file-icon" aria-hidden="true">DATEI</span><div>{% if datei['customer_url'] %}<a href="{{ datei['customer_url'] }}" target="_blank" rel="noopener">{{ datei['original_name'] }}</a>{% else %}<strong>{{ datei['original_name'] }}</strong>{% endif %}<small>{{ datei['kategorie_label'] or 'Unterlage' }}</small></div></div>{% else %}<p>Sobald Unterlagen für Sie bereitstehen, können Sie sie hier öffnen.</p>{% endfor %}
+        <a class="portal-text-link mt-2" href="#unterlagen">Alle Unterlagen <span aria-hidden="true">↗</span></a>
+      </section>
+    </div>
+
+    <div class="panel mb-4" id="unterlagen" data-portal-section="unterlagen">
       <div class="section-head">
         <div>
           <h2 class="h4 mb-1">Ihre Unterlagen</h2>
@@ -299,18 +450,20 @@
       {% else %}
       <p class="small text-muted">Hier sind noch keine Dateien für Sie hinterlegt.</p>
       {% endif %}
+      <details class="portal-upload"><summary>Weitere Bilder oder Unterlagen senden</summary>
       <form method="POST" enctype="multipart/form-data" action="{{ url_for('kunden_status_unterlagen', token=auftrag['kunden_status_token']) }}">
         <div class="hp-field" aria-hidden="true"><label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
         <label class="form-label fw-semibold" for="kundenstatus-dateien">Bilder oder PDF auswählen</label>
         <input id="kundenstatus-dateien" class="form-control" type="file" name="dateien" multiple required accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,image/jpeg,image/png,image/webp,image/heic,application/pdf">
-        <div class="form-text">JPG, PNG, WebP, HEIC oder PDF. Erkannte Dokumentwerte werden erst nach Werkstattprüfung übernommen.</div>
+        <div class="form-text">JPG, PNG, WebP, HEIC oder PDF. Bis zu {{ schadenaufnahme_max_dateien }} Dateien und {{ schadenaufnahme_max_upload_mb }} MB insgesamt.</div>
         <label class="form-label fw-semibold mt-3" for="kundenstatus-upload-notiz">Kurzer Hinweis (optional)</label>
         <textarea id="kundenstatus-upload-notiz" class="form-control" name="upload_notiz" rows="2" maxlength="350" placeholder="z. B. Fahrzeugschein und zwei Detailfotos"></textarea>
         <button type="submit" class="btn btn-dark mt-3">Unterlagen sicher senden</button>
       </form>
+      </details>
     </div>
 
-    <div class="panel mb-4" id="nachrichten">
+    <div class="panel mb-4" id="nachrichten" data-portal-section="nachrichten">
       <h2 class="h4 mb-1">Nachrichten zum Auftrag</h2>
       <div class="text-muted mb-3">Ihre Nachrichten und die Rückmeldungen der Werkstatt bleiben hier zum Nachlesen erhalten.</div>
       {% if kunden_verlauf %}
@@ -334,7 +487,7 @@
     </div>
 
     {% if kunden_bilder %}
-    <div class="panel mb-4" id="bilder">
+    <div class="panel mb-4" id="bilder" data-portal-section="bilder">
       <h2 class="h4 mb-1">Bilder vom Fortschritt</h2>
       <div class="text-muted small mb-3">Aktuelle Fotos Ihres Fahrzeugs aus unserer Werkstatt.</div>
       <div class="bilder-grid">
@@ -352,9 +505,7 @@
     </div>
     {% endif %}
 
-    <footer style="color: #6f7a83; text-align: center; padding: 1.5rem; font-size: .85rem;">Gärtner GmbH Karosserie + Lack · Binauer Höhe 4, 74821 Mosbach · <a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
-
-<details class="panel mb-4"><summary>So geht es weiter</summary>{% if ist_anfrage %}    <div class="panel mb-4" id="ablauf">
+{% if ist_anfrage %}<details class="panel mb-4" data-portal-section="termine"><summary>So geht es weiter</summary><div class="panel mb-4" id="ablauf">
       <div class="section-head">
         <div>
           <h2 class="h4 mb-1">Von der Anfrage bis zur Reparatur</h2>
@@ -384,8 +535,9 @@
           <div class="timeline-card"><div class="fw-bold">Reparaturstatus verfolgen</div><div class="text-muted small">Nach der Einplanung sehen Sie hier den Fortschritt bis zur Rückgabe.</div></div>
         </div>
       </div>
-    </div>{% endif %}</details>
+    </div></details>{% endif %}
 {% include "_kunden_kontakt.html" %}
+    <footer style="text-align:center;">Gärtner GmbH Karosserie + Lack · Binauer Höhe 4, 74821 Mosbach · <a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
   </main>
 
   <div id="bild-lightbox" hidden
@@ -395,6 +547,78 @@
             style="position:absolute; top:14px; right:14px; width:44px; height:44px; border-radius:999px; border:0; background:rgba(255,253,249,.92); color:#16202a; font-size:1.3rem; font-weight:700; cursor:pointer;">✕</button>
   </div>
   <script>
+    // Progressive enhancement: without JavaScript every section and form remains reachable.
+    (() => {
+      const nav = document.querySelector('[data-portal-nav]');
+      if (!nav) return;
+      const links = [...nav.querySelectorAll('[data-section]')];
+      const panels = [...document.querySelectorAll('[data-portal-section]')];
+      nav.setAttribute('role', 'tablist');
+      panels.forEach((panel, index) => {
+        if (!panel.id) panel.id = 'portal-section-' + index;
+        panel.setAttribute('role', 'tabpanel');
+        panel.setAttribute('aria-labelledby', 'portal-tab-' + panel.dataset.portalSection);
+      });
+      links.forEach(link => {
+        link.id = 'portal-tab-' + link.dataset.section;
+        link.setAttribute('aria-controls', panels.filter(panel => panel.dataset.portalSection === link.dataset.section).map(panel => panel.id).join(' '));
+      });
+      function activate(section) {
+        links.forEach(link => {
+          const selected = link.dataset.section === section;
+          link.setAttribute('role', 'tab');
+          link.setAttribute('aria-selected', String(selected));
+          link.tabIndex = selected ? 0 : -1;
+        });
+        panels.forEach(panel => { panel.hidden = panel.dataset.portalSection !== section; });
+      }
+      function reveal(target) {
+        const panel = target.closest('[data-portal-section]');
+        if (panel) activate(panel.dataset.portalSection);
+        let node = target;
+        while (node) { if (node.tagName === 'DETAILS') node.open = true; node = node.parentElement; }
+      }
+      function hashTarget() {
+        try { return document.getElementById(decodeURIComponent(location.hash.slice(1))); } catch (_) { return null; }
+      }
+      function followHash() {
+        const target = hashTarget();
+        if (target && target.id !== 'uebersicht') {
+          if (!target.closest('[data-portal-section]')) activate('uebersicht');
+          reveal(target);
+        }
+        else activate('uebersicht');
+      }
+      nav.addEventListener('keydown', event => {
+        const index = links.indexOf(document.activeElement);
+        if (index < 0) return;
+        const offsets = {ArrowRight:1, ArrowLeft:-1};
+        let next;
+        if (event.key in offsets) next = (index + offsets[event.key] + links.length) % links.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = links.length - 1;
+        else return;
+        event.preventDefault(); links[next].focus(); links[next].click();
+      });
+      document.addEventListener('click', event => {
+        const link = event.target.closest('a[href^="#"]');
+        if (!link) return;
+        const id = link.getAttribute('href').slice(1);
+        const target = document.getElementById(id);
+        if (!target) return;
+        if (id === 'uebersicht') activate('uebersicht'); else reveal(target);
+        // Section selection preserves form values and chosen files: no clone or reload.
+        if (link.closest('[data-portal-nav]') || id === 'uebersicht') {
+          event.preventDefault();
+          history.replaceState(null, '', '#' + id);
+          nav.scrollIntoView({block:'start'});
+        }
+      });
+      document.addEventListener('invalid', event => reveal(event.target), true);
+      window.addEventListener('hashchange', followHash);
+      activate('uebersicht');
+      followHash();
+    })();
     (function () {
       const lightbox = document.getElementById('bild-lightbox');
       if (!lightbox) return;

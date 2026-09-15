@@ -27,6 +27,8 @@ def disabled(*args, **kwargs):
 
 def setup():
     portal.PUBLIC_HOSTS = set()
+    portal.app.config['TEMPLATES_AUTO_RELOAD'] = True
+    portal.app.jinja_env.auto_reload = True
     portal.init_db()
     portal.schedule_change_backup = lambda reason: None
     for name in ('lexware_request','send_lead_email','post_whatsapp_payload','send_email','send_mail','send_kunden_status_mail','send_email_message'):
@@ -68,6 +70,12 @@ if __name__=='__main__':
     def demo_entry():
         session['admin']=True
         return redirect(url_for('auftrag_detail',auftrag_id=DEMO_ORDER))
+    @portal.app.get('/demo/kunde')
+    def demo_customer():
+        db = portal.get_db()
+        token = db.execute('SELECT kunden_status_token FROM auftraege WHERE id=?', (DEMO_ORDER,)).fetchone()[0]
+        db.close()
+        return redirect(url_for('kunden_status', token=token))
     print(f'LOCAL_DEMO http://127.0.0.1:{PORT}/demo',flush=True)
     print(f'DEMO_DATA {STORE}',flush=True)
     portal.app.run(host='127.0.0.1',port=PORT,debug=False,use_reloader=False)

@@ -60,8 +60,8 @@ def fixture(status=3):
     )
     pickup = dict(key="abholung", label="Abholung", datum_zeit_text="20.09.2026 · 15:30 Uhr", detail="Bestätigt", is_open=False, can_change=True)
     history = [
-        dict(titel="Ihre Nachricht", nachricht='Bitte <script>window.injected=true</script> prüfen.', erstellt_am="14.09.2026 10:00", quelle="kunde"),
         dict(titel="Antwort der Werkstatt", nachricht="Ihre Unterlagen sind vollständig.", erstellt_am="15.09.2026 10:15", quelle="werkstatt"),
+        dict(titel="Ihre Nachricht", nachricht='Bitte <script>window.injected=true</script> prüfen.', erstellt_am="14.09.2026 10:00", quelle="kunde"),
     ]
     documents = [dict(original_name=f"Unterlage-{i:02}.pdf", customer_url=f"/files/{i}", hochgeladen_am="14.09.2026", kategorie_label="Unterlage", pruefstatus_label="Gespeichert") for i in range(12)]
     documents[0]["original_name"] = '<img src=x onerror="window.injected=true">.pdf'
@@ -135,6 +135,8 @@ def run():
 
         for name in ("kunden_status.html", "lead_kundenportal.html"):
             context, page, scenario = fresh(pages[name])
+            if name == "kunden_status.html":
+                page.get_by_role('tab', name='Nachrichten').click()
             expect(page.get_by_label("Ihr Nachrichtenverlauf")).to_contain_text("Ihre Unterlagen sind vollständig.")
             expect(page.get_by_label("Ihr Nachrichtenverlauf")).to_contain_text("<script>window.injected=true</script>")
             assert page.locator('#unterlagen a[href^="/files/"]').count() == 12
@@ -180,18 +182,65 @@ def run():
 
         ready = fixture(status=4)
         context, page, _ = fresh(render("kunden_status.html", **ready))
-        expect(page.locator('.customer-next')).to_contain_text("Fahrzeugrückgabe abstimmen")
+        expect(page.locator('.customer-next')).to_contain_text("Rückgabe abstimmen")
         expect(page.locator('.customer-next a')).to_have_attribute("href", "#werkstatt-kontakt")
         print("PASS ready vehicle offers a concrete handover action")
         context.close()
 
         context, page, scenario = fresh(pages["kunden_status.html"])
+        page.get_by_role('tab', name='Unterlagen').click()
+        page.locator('.portal-upload summary').click()
         page.locator('#kundenstatus-dateien').set_input_files(dict(name="test.pdf", mimeType="application/pdf", buffer=b"%PDF synthetic"))
         page.locator('[data-portal-refresh]').click()
         expect(page.locator('[data-refresh-warning]')).to_be_visible()
         assert page.locator('#kundenstatus-dateien').evaluate("input => input.files.length") == 1
         assert scenario.loads == 1 and not scenario.posts
         print("PASS selected attachment is preserved by refresh protection")
+        context.close()
+
+        context, page, scenario = fresh(pages['kunden_status.html'])
+        expect(page.locator('.portal-updates')).to_contain_text('Ihre Unterlagen sind vollständig.')
+        expect(page.locator('.portal-updates')).not_to_contain_text('<script>window.injected=true</script>')
+        expect(page.locator('#nachrichten')).not_to_be_visible()
+        page.get_by_role('tab', name='Nachrichten').click()
+        page.locator('#kundenstatus-nachricht').fill('Testentwurf im Nachrichtenbereich')
+        page.get_by_role('tab', name='Termine & Auftrag').click()
+        expect(page.locator('#termine')).to_be_visible()
+        expect(page.locator('#nachrichten')).not_to_be_visible()
+        page.get_by_role('tab', name='Termine & Auftrag').press('End')
+        expect(page.get_by_role('tab', name='Nachrichten')).to_be_focused()
+        expect(page.locator('#kundenstatus-nachricht')).to_have_value('Testentwurf im Nachrichtenbereich')
+        assert scenario.posts == []
+        page.goto(BASE + '/test#auftragsbestaetigung')
+        expect(page.locator('#auftragsbestaetigung')).to_have_attribute('open', '')
+        expect(page.locator('#auftragsbestaetigung')).to_contain_text(FULL_SCOPE)
+        page.goto(BASE + '/test#nachrichten')
+        expect(page.locator('#nachrichten')).to_be_visible()
+        page.goto(BASE + '/test#werkstatt-kontakt')
+        expect(page.get_by_role('tab', name='Übersicht')).to_have_attribute('aria-selected','true')
+        expect(page.locator('#nachrichten')).not_to_be_visible()
+        expect(page.locator('#werkstatt-kontakt')).to_be_visible()
+        print('PASS customer tabs preserve drafts, support keyboard and restore direct section links')
+        context.close()
+
+        open_offer = fixture(status=1)
+        open_offer['auftrag']['angebot_status'] = 'angebot_abgegeben'
+        context, page, scenario = fresh(render('kunden_status.html', **open_offer))
+        expect(page.locator('#angebot')).to_be_visible()
+        expect(page.locator('#angebot')).to_contain_text(FULL_SCOPE)
+        expect(page.locator('#angebot input[name="angebot_annehmen_bestaetigt"]')).not_to_be_checked()
+        assert scenario.posts == []
+        print('PASS open customer offer stays fully visible and still requires conscious acceptance')
+        context.close()
+
+        context = browser.new_context(java_script_enabled=False, viewport={'width':390,'height':844})
+        page = context.new_page()
+        scenario = Scenario(page, pages['kunden_status.html'])
+        page.goto(BASE + '/test')
+        expect(page.locator('#termine')).to_be_visible()
+        expect(page.locator('#nachrichten')).to_be_visible()
+        expect(page.locator('#unterlagen')).to_be_visible()
+        print('PASS customer sections remain usable without JavaScript')
         context.close()
 
         context, page, _ = fresh(pages["partner_dashboard.html"])

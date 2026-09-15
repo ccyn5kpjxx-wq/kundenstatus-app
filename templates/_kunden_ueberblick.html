@@ -13,6 +13,65 @@
   {% set wish_date = intake['kunden_wunsch_annahme_datum'] %}
   {% set state_title = 'Ihr Angebot ist da' if offer_ready else ('Angebot angenommen' if angebot_status == 'angenommen' and auftrag['status']|int < 2 else auftrag['status_meta']['label']) %}
 {% endif %}
+{% if not customer_is_lead %}
+{% if cockpit_demo %}<div class="portal-demo">Lokale Designvorschau <span>Beispieldaten · keine Live-Änderung</span></div>{% endif %}
+<header class="portal-brand">
+  <a href="#uebersicht" class="portal-brand-link" aria-label="Zur Auftragsübersicht"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack"></a>
+  <div class="portal-brand-caption">Ihr persönlicher<br><strong>Werkstattbegleiter</strong></div>
+  <a class="portal-contact-link" href="#werkstatt-kontakt">Kontakt zur Werkstatt <span aria-hidden="true">↗</span></a>
+</header>
+<section class="customer-overview portal-hero" aria-labelledby="customer-title" id="uebersicht">
+  <div class="portal-hero-main">
+    <div class="portal-eyebrow">IHR FAHRZEUG. ALLES IM BLICK.</div>
+    <h1 id="customer-title">{{ item['fahrzeug'] or 'Ihr Werkstattauftrag' }}</h1>
+    <div class="portal-identity">{% if item['kennzeichen'] %}<span class="portal-plate"><span aria-hidden="true">D</span>{{ item['kennzeichen'] }}</span>{% endif %}<span>{{ item['kunde_name'] or '' }}</span></div>
+    <div class="portal-status"><span class="portal-status-dot" aria-hidden="true"></span><h2>{{ state_title }}</h2></div>
+    <p class="portal-state-copy">{% if offer_ready %}Ihr Angebot liegt bereit. Prüfen Sie den Umfang und den Preis in Ruhe.{% elif auftrag['status']|int >= 5 %}Vielen Dank für Ihr Vertrauen. Ihre Unterlagen bleiben hier für Sie verfügbar.{% elif auftrag['status']|int == 4 %}Die Arbeiten sind abgeschlossen. Bitte stimmen Sie die Abholung mit uns ab.{% elif auftrag['status']|int == 3 %}Ihr Fahrzeug ist bei uns in Arbeit. Hier behalten Sie den nächsten Schritt und Ihre Termine im Blick.{% elif auftrag['status']|int == 2 %}Ihr Auftrag ist eingeplant. Alle Informationen für die Übergabe finden Sie hier.{% elif angebot_status == 'angenommen' and not confirmed %}Vielen Dank für Ihren Auftrag. Wir stimmen jetzt die Termine mit Ihnen ab.{% else %}Ihre Anfrage ist bei uns. Wir prüfen die Angaben und melden uns bei Rückfragen.{% endif %}</p>
+    <div class="portal-hero-actions">
+      {% if offer_ready %}<a class="btn customer-primary" href="#angebot">Angebot ansehen <span aria-hidden="true">↗</span></a>
+      {% elif auftrag['status']|int == 4 %}<a class="btn customer-primary" href="#werkstatt-kontakt">Rückgabe abstimmen <span aria-hidden="true">↗</span></a>
+      {% elif auftrag['status']|int == 2 %}<a class="btn customer-primary" href="#termine">Termine ansehen <span aria-hidden="true">↗</span></a>
+      {% elif auftrag['status']|int >= 5 %}<a class="btn customer-primary" href="#unterlagen">Unterlagen öffnen <span aria-hidden="true">↗</span></a>
+      {% else %}<a class="btn customer-primary" href="#nachrichten">Nachricht schreiben <span aria-hidden="true">↗</span></a>{% endif %}
+    </div>
+  </div>
+  <div class="portal-hero-photo" aria-hidden="true"><img src="{{ url_for('static', filename='homepage/praeziser-farbauftrag.webp') }}" alt=""><span>Einblick in die Fahrzeuglackierung · Symbolbild</span></div>
+</section>
+<div class="portal-freshness" data-portal-freshness>
+  <span>{% if kunden_aktualisiert_am %}Letzte Aktualisierung: {{ kunden_aktualisiert_am }}{% else %}Stand beim Öffnen dieser Seite{% endif %}</span>
+  <a href="{{ request.path }}" data-portal-refresh><span aria-hidden="true">↻</span> Aktualisieren</a>
+  <div class="alert alert-warning mb-0 w-100" hidden data-refresh-warning role="status">Sie haben noch nicht gesendete Eingaben. Senden Sie diese zuerst oder verwerfen Sie sie bewusst.<button type="button" class="btn btn-outline-dark btn-sm mt-2" data-refresh-discard>Eingaben verwerfen und aktualisieren</button></div>
+</div>
+{% if meldungen %}<div role="status">{% for category, message in meldungen %}<div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else 'info') }}">{{ message }}</div>{% endfor %}</div>{% endif %}
+<nav class="portal-tabs" aria-label="Bereiche im Kundenportal" data-portal-nav>
+  <a href="#uebersicht" data-section="uebersicht">Übersicht</a>
+  <a href="#termine" data-section="termine">Termine<span class="portal-tab-extra"> &amp; Auftrag</span></a>
+  <a href="#unterlagen" data-section="unterlagen">Unterlagen <span>{{ kunden_dokumente|length }}</span></a>
+  {% if kunden_bilder %}<a href="#bilder" data-section="bilder">Bilder <span>{{ kunden_bilder|length }}</span></a>{% endif %}
+  <a href="#nachrichten" data-section="nachrichten">Nachrichten <span>{{ kunden_verlauf|length }}</span></a>
+</nav>
+<div class="portal-summary-grid" data-portal-section="uebersicht">
+  <section class="panel customer-date">
+    <div class="portal-card-kicker"><span class="portal-mini-icon" aria-hidden="true">▦</span> Ihr nächster Termin</div>
+    {% if auftrag['status']|int >= 5 %}<h2>Fahrzeug zurückgegeben</h2><p>Es steht kein weiterer Reparaturtermin an.</p>
+    {% elif wish_date and not confirmed and auftrag['status']|int < 2 %}<h2>Terminwunsch – Bestätigung folgt</h2><strong class="portal-date-value">{{ wish_date }}</strong><p>Bitte warten Sie auf die Bestätigung der Werkstatt.</p>
+    {% elif kunden_termine.next %}<h2>{{ kunden_termine.next.label }}</h2><strong class="portal-date-value">{{ kunden_termine.next.datum_zeit_text }}</strong><p>{{ kunden_termine.next.detail }}</p>
+    {% elif auftrag['status']|int >= 3 %}<h2>Rückgabe wird abgestimmt</h2><p>Den Abholtermin bestätigen wir Ihnen separat.</p>
+    {% else %}<h2>Noch kein Termin hinterlegt</h2><p>Bei Fragen zu Ihrer Terminabsprache melden Sie sich gerne bei uns.</p>{% endif %}
+    <a href="#termine" class="portal-text-link">Alle Termindetails <span aria-hidden="true">↗</span></a>
+  </section>
+  <section class="panel customer-next" aria-label="Ihr nächster Schritt">
+    <div class="portal-card-kicker"><span class="portal-mini-icon" aria-hidden="true">→</span> Ihr nächster Schritt</div>
+    {% if offer_ready %}<h2>Ihr Angebot ist bereit.</h2><p>Bitte prüfen Sie alle Leistungen und den angegebenen Preis.</p><a href="#angebot" class="portal-text-link">Zum Angebot <span aria-hidden="true">↗</span></a>
+    {% elif auftrag['status']|int >= 5 %}<h2>Ihr Auftrag ist abgeschlossen.</h2><p>Ihre Dokumente und Nachrichten bleiben für Sie erreichbar.</p>
+    {% elif auftrag['status']|int == 4 %}<h2>Die Rückgabe abstimmen.</h2><p>Beachten Sie den vereinbarten Abholtermin oder melden Sie sich bei uns.</p><a href="#werkstatt-kontakt" class="portal-text-link">Werkstatt kontaktieren <span aria-hidden="true">↗</span></a>
+    {% elif auftrag['status']|int == 3 %}<h2>Wir kümmern uns darum.</h2><p>Ihr Fahrzeug ist in Bearbeitung. Aktuell ist keine Bestätigung von Ihnen erforderlich.</p>
+    {% elif auftrag['status']|int == 2 %}<h2>Bereit für die Übergabe.</h2><p>Bitte beachten Sie den vereinbarten Termin. Änderungen können Sie hier anfragen.</p>
+    {% elif wish_date and not confirmed %}<h2>Wir stimmen den Termin ab.</h2><p>Die Werkstatt prüft Ihren Terminwunsch. Bitte warten Sie auf die Bestätigung.</p>
+    {% else %}<h2>Wir prüfen Ihre Anfrage.</h2><p>Sie müssen aktuell nichts bestätigen. Bei Rückfragen melden wir uns.</p>{% endif %}
+  </section>
+</div>
+{% else %}
 <section class="panel customer-overview mb-4" aria-labelledby="customer-title">
   <div class="brand-row"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack" class="brand-logo"><div><div class="small">Ihr persönliches Kundenportal</div><strong>{{ werkstatt_kontakt.name }}</strong></div></div>
   <h1 id="customer-title" class="h3">{{ item['fahrzeug'] or 'Ihre Fahrzeuganfrage' }}</h1>
@@ -58,6 +117,7 @@
   {% if meldungen %}<div class="mt-3" role="status">{% for category, message in meldungen %}<div class="alert alert-{{ 'danger' if category == 'danger' else ('warning' if category == 'warning' else 'info') }}">{{ message }}</div>{% endfor %}</div>{% endif %}
 </section>
 <nav class="customer-links mb-4" aria-label="Bereiche im Kundenportal"><a href="{{ '#terminwunsch' if customer_is_lead else '#termine' }}">Termine</a><a href="#unterlagen">Unterlagen</a><a href="#nachrichten">Nachrichten</a><a href="#werkstatt-kontakt">Kontakt</a></nav>
+{% endif %}
 <script>
 (() => {
   let dirty = false;

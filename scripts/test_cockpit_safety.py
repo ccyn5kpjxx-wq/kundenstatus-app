@@ -153,6 +153,27 @@ class CockpitSafety(unittest.TestCase):
         self.post(f'/admin/lead/{lead_id}/datei/{private}/freigabe',{'kunde':'1'})
         with self.public.get(f'/status/{token}/bild/{private}') as response: self.assertEqual(response.status_code,200)
 
+    def test_partner_pages_never_expose_hidden_ocr_or_internal_audit(self):
+        partner=portal.get_autohaus_by_slug('kaesmann')
+        db_execute('UPDATE auftraege SET autohaus_id=? WHERE id=?',(partner['id'],self.order_id))
+        file_id=add_file(self.order_id,name='GEHEIMER-EINKAUF.pdf',analysis={'rep_max_kosten':'777,77 EUR'})
+        portal.add_benachrichtigung(self.order_id,'Interne Übernahme','GEHEIMER-EINKAUF.pdf 777,77 EUR',quelle='intern')
+        client=portal.app.test_client()
+        with client.session_transaction() as session:session['partner_autohaus_id']=partner['id']
+        for endpoint in ('partner_auftrag','partner_auftrag_dokumente','partner_dashboard'):
+            with portal.app.test_request_context():url=portal.url_for(endpoint,slug='kaesmann',**({'auftrag_id':self.order_id} if endpoint!='partner_dashboard' else {}))
+            response=client.get(url)
+            self.assertEqual(response.status_code,200)
+            self.assertNotIn('GEHEIMER-EINKAUF',response.get_data(as_text=True))
+            self.assertNotIn('777,77',response.get_data(as_text=True))
+        db_execute('UPDATE auftraege SET angebotsphase=1 WHERE id=?',(self.order_id,))
+        response=client.get(f'/partner/kaesmann/angebot/{self.order_id}')
+        self.assertEqual(response.status_code,200)
+        self.assertNotIn('GEHEIMER-EINKAUF',response.get_data(as_text=True))
+        self.assertEqual(client.get(f'/partner/kaesmann/datei/{file_id}').status_code,404)
+        self.post(f'/admin/datei/{file_id}/freigaben',{'partner':'1'})
+        with client.get(f'/partner/kaesmann/datei/{file_id}') as response:self.assertEqual(response.status_code,200)
+
     def test_customer_history_omits_internal_and_survives_conversion(self):
         lead=portal.create_lead({'website':'auto-lackierzentrum','quelle':'website','kunde_name':'Test'})
         db_execute('UPDATE leads SET auftrag_id=? WHERE id=?',(self.order_id,lead))
