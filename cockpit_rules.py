@@ -2,9 +2,19 @@
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
 import re
+from pathlib import PurePath
 
 AUDIENCE_FIELDS = {"kunde": "kunde_sichtbar", "partner": "partner_sichtbar", "versicherung": "versicherung_sichtbar"}
 CUSTOMER_SOURCES = {"kunde", "kunde_portal", "website", "website_formular"}
+
+
+def workshop_completion_photo(document):
+    """Only the workshop board's explicitly designated completion photos."""
+    return (document.get("quelle") == "werkstatt"
+            and document.get("kategorie") == "fertigbild"
+            and str(document.get("mime_type") or "").startswith("image/")
+            and PurePath(str(document.get("original_name") or "")).suffix.lower()
+            in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"})
 
 
 def document_visible(document, audience, *, lead=False):
@@ -20,6 +30,10 @@ def document_visible(document, audience, *, lead=False):
         return bool(document.get(AUDIENCE_FIELDS[audience]))
     if audience == "kunde":
         return bool(document.get("kunde_sichtbar")) or source in CUSTOMER_SOURCES
+    # Older board uploads only recorded the customer flag. Restore their intended
+    # partner visibility, but never override an explicit review/revocation above.
+    if audience == "partner" and document.get("kunde_sichtbar") and workshop_completion_photo(document):
+        return True
     return source == {"partner": "autohaus", "versicherung": "versicherung"}.get(audience)
 
 

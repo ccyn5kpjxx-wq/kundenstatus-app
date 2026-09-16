@@ -47,7 +47,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from backup_storage import BackupStorage
-from cockpit_rules import document_visible, price_state, price_record, decimal_input, has_invoice, exact_contact
+from cockpit_rules import document_visible, price_state, price_record, decimal_input, has_invoice, exact_contact, workshop_completion_photo
 
 try:
     import psycopg
@@ -30737,6 +30737,15 @@ def save_uploads(
             ),
         )
         db.execute("UPDATE dateien SET dokument_zweck=? WHERE id=?", (dokument_zweck, cursor.lastrowid))
+        if workshop_completion_photo({"quelle": quelle, "kategorie": kategorie,
+                                      "mime_type": mime_type, "original_name": original_name}):
+            # Release only this inserted photo, atomically with its upload. A
+            # concurrent invoice/document upload must never inherit its audience.
+            db.execute(
+                "UPDATE dateien SET kunde_sichtbar=1, partner_sichtbar=1, "
+                "versicherung_sichtbar=0, sichtbarkeit_geprueft=1 WHERE id=?",
+                (cursor.lastrowid,),
+            )
         store_datei_backup(db, cursor.lastrowid, target)
         saved += 1
     db.commit()
@@ -52275,24 +52284,14 @@ def werkstatt_auftrag_fotos(auftrag_id):
     if not any(f and f.filename for f in files):
         flash("Bitte zuerst ein Foto aufnehmen oder auswählen.", "warning")
         return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
-    erlaubt = get_allowed_finish_uploads(files)
+    erlaubt = [file for file in get_allowed_finish_uploads(files)
+               if pathlib.Path(secure_filename(file.filename)).suffix.lower() in IMAGE_EXTENSIONS]
     if not erlaubt:
-        flash("Nur Fotos (JPG, PNG, HEIC, WEBP) oder PDF möglich.", "warning")
+        flash("Hier sind nur Fotos möglich. Belege bitte über das Büro ablegen.", "warning")
         return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
-    db = get_db()
-    vor_row = db.execute("SELECT COALESCE(MAX(id), 0) AS m FROM dateien").fetchone()
-    db.close()
-    vor_max = int(vor_row["m"]) if vor_row else 0
     saved, _ = save_uploads(auftrag_id, erlaubt, "werkstatt", "fertigbild", analyze=False)
     if saved:
-        db = get_db()
-        db.execute(
-            "UPDATE dateien SET kunde_sichtbar=1 WHERE auftrag_id=? AND id>?",
-            (auftrag_id, vor_max),
-        )
-        db.commit()
-        db.close()
-        flash(f"{saved} Foto(s) zum Auftrag hinzugefügt. Der Kunde sieht sie auf seiner Status-Seite.", "success")
+        flash(f"{saved} Foto(s) zum Auftrag hinzugefügt. Sie sind auf der Kunden-Statusseite und im zugehörigen Autohaus-Portal sichtbar.", "success")
     else:
         flash("Es wurde kein Foto gespeichert.", "warning")
     return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
