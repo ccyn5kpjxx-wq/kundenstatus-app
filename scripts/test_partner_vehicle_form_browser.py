@@ -62,7 +62,16 @@ def main():
         scenario = Scenario(page)
         page.goto(BASE + '/neu')
         expect(page.locator('#fahrzeug')).to_be_visible()
-        expect(page.locator('[data-document-options]')).not_to_have_attribute('open', '')
+        expect(page.locator('[data-document-options]')).to_have_attribute('open', '')
+        expect(page.get_by_role('link', name='PDF herunterladen')).to_be_visible()
+        expect(page.locator('#dateien')).to_be_visible()
+        assert page.evaluate('''() => {
+          const pdf = document.querySelector('.template-actions a[href*="vorlage"]');
+          const file = document.querySelector('#dateien');
+          const vehicle = document.querySelector('#fahrzeug');
+          return Boolean(pdf.compareDocumentPosition(file) & Node.DOCUMENT_POSITION_FOLLOWING)
+            && Boolean(file.compareDocumentPosition(vehicle) & Node.DOCUMENT_POSITION_FOLLOWING);
+        }'''), 'PDF download and file analysis must precede vehicle fields'
         page.locator('#fahrzeug').fill('Testwagen')
         page.locator('#farbcode').fill('LB9A / Z5Z5')
         page.locator('#farbcode').press('Enter')
@@ -82,7 +91,6 @@ def main():
         expect(page.locator('#fertig_datum')).to_have_value('2026-10-02')
         print('PASS step changes, Enter and reload preserve paint code, dates and transport')
 
-        page.locator('[data-document-options] summary').click()
         expect(page.get_by_role('link', name='Online ausfüllen (neuer Tab)')).to_have_attribute('target', '_blank')
         file = {'name': 'synthetisch.txt', 'mimeType': 'text/plain', 'buffer': b'Synthetic'}
         page.locator('#dateien').set_input_files(file)
@@ -136,6 +144,17 @@ def main():
             page.screenshot(path=str(ROOT / '.agent-hub/partner-neu-desktop.png'), full_page=True)
             page.set_viewport_size({'width': 390, 'height': 844})
             page.screenshot(path=str(ROOT / '.agent-hub/partner-neu-mobile.png'), full_page=True)
+        file_first_page = context.new_page()
+        file_first_scenario = Scenario(file_first_page)
+        file_first_page.goto(BASE + '/neu')
+        expect(file_first_page.locator('#fahrzeug')).to_have_value('')
+        file_first_page.locator('#dateien').set_input_files(file)
+        file_first_page.locator('[data-upload-analyze]').click()
+        expect(file_first_page.locator('#kunde_name')).to_have_value('OCR Test')
+        expect(file_first_page.locator('#fahrzeug')).to_have_value('')
+        assert not file_first_scenario.posts, 'Analyzing a file before vehicle entry must not create an order'
+        file_first_page.close()
+        print('PASS PDF and analysis come first; analysis works without vehicle entry')
         assert not errors, errors
         context.close()
 

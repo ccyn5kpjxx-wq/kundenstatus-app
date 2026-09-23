@@ -403,7 +403,7 @@
         <div class="partner-form-header-copy">
           <div class="eyebrow">Fahrzeug übermitteln</div>
           <h1 id="partner-vehicle-title">Neues Fahrzeug für {{ autohaus['portal_label'] }}</h1>
-          <p>Fahrzeug oder Kennzeichen eintragen, Termin wählen und senden. Alle weiteren Angaben sind freiwillig.</p>
+          <p>Vorlage herunterladen, Unterlage analysieren und danach die erkannten Angaben prüfen. Die Datei ist freiwillig.</p>
         </div>
         <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zur Übersicht</a>
       </header>
@@ -422,7 +422,7 @@
         <nav class="vehicle-progress" aria-label="Schritte der Fahrzeugerfassung">
           <button type="button" class="vehicle-progress-button is-active" data-step-target="1" aria-controls="partner-step-1" aria-current="step">
             <span class="vehicle-progress-number">1</span>
-            <span class="vehicle-progress-copy"><strong>Kunde &amp; Fahrzeug</strong><span>Fahrzeugdaten eintragen</span></span>
+            <span class="vehicle-progress-copy"><strong>Unterlage &amp; Fahrzeug</strong><span>Vorlage, Analyse, Angaben</span></span>
           </button>
           <button type="button" class="vehicle-progress-button" data-step-target="2" aria-controls="partner-step-2">
             <span class="vehicle-progress-number">2</span>
@@ -432,10 +432,45 @@
 
         <section class="vehicle-step is-active" id="partner-step-1" data-form-step="1" aria-labelledby="partner-step-title-1">
           <div class="vehicle-step-title">
-            <h2 id="partner-step-title-1" tabindex="-1">Welches Fahrzeug melden Sie an?</h2>
-            <p>Datei, Endkunde / Referenz und Handy sind optional. Für die Zuordnung genügt Fahrzeug oder Kennzeichen.</p>
+            <h2 id="partner-step-title-1" tabindex="-1">Zuerst die Unterlage, dann die Fahrzeugdaten</h2>
+            <p>Sie können die Vorlage herunterladen oder eine vorhandene Datei verwenden. Prüfen Sie anschließend die erkannten Angaben.</p>
           </div>
           <div class="row g-4">
+            <div class="col-12">
+              <details class="vehicle-advanced" data-document-options open>
+                <summary>Unterlagen hinzufügen und analysieren <span class="text-muted">(optional)</span></summary>
+                <div class="vehicle-advanced-body">
+                  <aside class="template-card" aria-label="Lackierauftrag als Vorlage">
+                    <div>
+                      <strong>1. Lackierauftrag als PDF herunterladen</strong>
+                      <p>Füllen Sie die Vorlage aus und wählen Sie die Datei anschließend unten aus. Alternativ können Sie sie online ausfüllen.</p>
+                    </div>
+                    <div class="template-actions">
+                      <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-primary" target="_blank" rel="noopener">PDF herunterladen</a>
+                      <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-outline-dark" target="_blank" rel="noopener">Online ausfüllen (neuer Tab)</a>
+                    </div>
+                  </aside>
+                  <div class="vehicle-upload-card">
+                    <label class="form-label fw-bold" for="dateien">2. Ausgefüllte oder vorhandene Datei hinzufügen <span class="text-muted fw-normal">(optional)</span></label>
+                    <input type="file" id="dateien" name="dateien" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf" aria-describedby="dateien-hinweis dateien-status">
+                    <div id="dateien-hinweis" class="form-text">Bei der Analyse werden erkannte Formularfelder ausgefüllt. Dabei wird noch kein Auftrag angelegt.</div>
+                    <div id="dateien-status" class="vehicle-upload-status" data-upload-status aria-live="polite">Keine Datei ausgewählt – Sie können auch ohne Datei fortfahren.</div>
+                    <div class="vehicle-error" data-file-error role="alert">Bitte die zuvor analysierte Datei noch einmal auswählen.</div>
+                    <div class="vehicle-error" data-analysis-error role="alert">Bitte die ausgewählte Datei zuerst analysieren oder wieder entfernen.</div>
+                    <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark w-100 mt-2" data-upload-analyze data-loading-message="Die Unterlage wird nur analysiert. Es wird noch kein Auftrag angelegt.">Datei analysieren &amp; Felder eintragen</button>
+                    <button type="button" class="btn btn-link" data-remove-files hidden>Dateiauswahl entfernen</button>
+                    <div class="vehicle-analysis-result" data-analysis-result {% if not form.get('analyse_summary') %}hidden{% endif %} aria-live="polite">
+                      <strong>Analyse abgeschlossen – noch kein Auftrag angelegt</strong>
+                      <span data-analysis-result-text>{{ form.get('analyse_summary', '') }}</span>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </div>
+            <div class="col-12">
+              <h3 class="h5 mb-1">3. Fahrzeugdaten prüfen und ergänzen</h3>
+              <p class="text-muted mb-0">Für die Zuordnung genügt Fahrzeug oder Kennzeichen.</p>
+            </div>
             <div class="col-md-8">
               <label class="form-label" for="fahrzeug">Fahrzeug</label>
               <input type="text" id="fahrzeug" name="fahrzeug" class="form-control form-control-lg" placeholder="z. B. Hyundai Tucson" value="{{ form.get('fahrzeug', '') }}" aria-describedby="vehicle-minimum-error">
@@ -501,37 +536,6 @@
                       <input type="text" id="auftragsnummer" name="auftragsnummer" class="form-control form-control-lg" value="{{ form.get('auftragsnummer', '') }}" autocomplete="off">
                     </div>
                   </div>
-                </div>
-              </details>
-            </div>
-            <div class="col-12">
-              <details class="vehicle-advanced" data-document-options {% if form.get('analyse_abgeschlossen') %}open{% endif %}>
-                <summary>Unterlagen hinzufügen oder Daten auslesen <span class="text-muted">(optional)</span></summary>
-                <div class="vehicle-advanced-body">
-              <div class="vehicle-upload-card">
-                <label class="form-label" for="dateien">Datei zur Analyse <span class="text-muted">(optional)</span></label>
-                <input type="file" id="dateien" name="dateien" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf" aria-describedby="dateien-hinweis dateien-status">
-                <div id="dateien-hinweis" class="form-text">Bei der Analyse werden erkannte Formularfelder ausgefüllt. Dabei wird noch kein Auftrag angelegt.</div>
-                <div id="dateien-status" class="vehicle-upload-status" data-upload-status aria-live="polite">Keine Datei ausgewählt – Sie können auch ohne Datei fortfahren.</div>
-                <div class="vehicle-error" data-file-error role="alert">Bitte die zuvor analysierte Datei noch einmal auswählen.</div>
-                <div class="vehicle-error" data-analysis-error role="alert">Bitte die ausgewählte Datei zuerst analysieren oder wieder entfernen.</div>
-                <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark w-100 mt-2" data-upload-analyze data-loading-message="Die Unterlage wird nur analysiert. Es wird noch kein Auftrag angelegt.">Datei analysieren &amp; Felder eintragen</button>
-                <button type="button" class="btn btn-link" data-remove-files hidden>Dateiauswahl entfernen</button>
-                <div class="vehicle-analysis-result" data-analysis-result {% if not form.get('analyse_summary') %}hidden{% endif %} aria-live="polite">
-                  <strong>Analyse abgeschlossen – noch kein Auftrag angelegt</strong>
-                  <span data-analysis-result-text>{{ form.get('analyse_summary', '') }}</span>
-                </div>
-              </div>
-              <aside class="template-card" aria-label="Lackierauftrag als Vorlage">
-                <div>
-                  <strong>Lackierauftrag noch vorbereiten?</strong>
-                  <p>Die Vorlage öffnet in einem neuen Tab. Ihre Angaben hier bleiben erhalten.</p>
-                </div>
-                <div class="template-actions">
-                  <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-outline-dark" target="_blank" rel="noopener">Online ausfüllen (neuer Tab)</a>
-                  <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark" target="_blank" rel="noopener">PDF herunterladen</a>
-                </div>
-              </aside>
                 </div>
               </details>
             </div>

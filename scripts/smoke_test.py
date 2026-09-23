@@ -1028,18 +1028,21 @@ def main():
         partner_new_html = partner_new_response.get_data(as_text=True)
         partner_new_flow_ok = (
             partner_new_response.status_code == 200
-            and "Welches Fahrzeug melden Sie an?" in partner_new_html
+            and "Zuerst die Unterlage, dann die Fahrzeugdaten" in partner_new_html
             and "Datei analysieren &amp; Felder eintragen" in partner_new_html
             and "Erst mit „Auftrag jetzt senden“ wird der Auftrag angelegt" in partner_new_html
             and "Mit der Analyse wird direkt ein Auftrag vorbereitet" not in partner_new_html
             and "Schritt 1 von 2" in partner_new_html
             and 'id="partner-step-3"' not in partner_new_html
-            and "Lackierauftrag noch vorbereiten?" in partner_new_html
+            and "1. Lackierauftrag als PDF herunterladen" in partner_new_html
+            and partner_new_html.index('PDF herunterladen</a>') < partner_new_html.index('id="dateien"')
+            and partner_new_html.index('id="dateien"') < partner_new_html.index('id="fahrzeug"')
+            and '<details class="vehicle-advanced" data-document-options open>' in partner_new_html
             and partner_new_html.index('id="dateien"')
             > partner_new_html.index('id="partner-step-1"')
             and partner_new_html.index('id="dateien"')
             < partner_new_html.index('id="partner-step-2"')
-            and "Datei zur Analyse <span class=\"text-muted\">(optional)</span>" in partner_new_html
+            and "2. Ausgefüllte oder vorhandene Datei hinzufügen" in partner_new_html
             and "Endkunde / Referenz <span class=\"text-muted\">(optional)</span>" in partner_new_html
             and "Handy / WhatsApp Kunde <span class=\"text-muted\">(optional)</span>" in partner_new_html
         )
