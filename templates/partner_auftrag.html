@@ -200,7 +200,7 @@
         {% endif %}
     </section>
     <section id="bereich-termine" data-partner-section="termine" tabindex="-1">
-    <div class="partner-section-heading"><h2>Auftrag &amp; Termine</h2><span>Ihre Angaben an einem Ort</span></div>
+    <div class="partner-section-heading"><h2>Auftrag &amp; Termine</h2><span>Angaben ändern und Dateien jederzeit ergänzen</span></div>
     <section class="panel mb-4"><div class="partner-term-grid"><div><div class="partner-card-kicker">{{ auftrag['partner_annahme_label'] }}</div><strong>{{ auftrag['annahme_datum'] or 'Noch offen' }}</strong></div><div><div class="partner-card-kicker">{{ auftrag['partner_abholung_label'] }}</div><strong>{{ auftrag['abholtermin'] or 'Noch offen' }}</strong></div></div>{% if auftrag['analyse_text'] %}<div class="partner-damage-summary"><div class="partner-card-kicker">Schadensbeschreibung</div><p>{{ auftrag['analyse_text'] }}</p></div>{% endif %}</section>
         <details class="portal-disclosure h-100" id="auftrag-daten" open>
           <summary>
@@ -231,6 +231,18 @@
               <label class="form-label">Kennzeichen</label>
               <input type="text" name="kennzeichen" class="form-control form-control-lg" value="{{ auftrag['kennzeichen'] }}" style="text-transform:uppercase;">
             </div>
+            <div class="col-md-4">
+              <label class="form-label" for="farbcode">Farbcode</label>
+              <input type="text" id="farbcode" name="farbcode" class="form-control form-control-lg" value="{{ auftrag['farbcode'] }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="farbton">Farbton</label>
+              <input type="text" id="farbton" name="farbton" class="form-control form-control-lg" value="{{ auftrag['farbton'] }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="farbton_2">Zweiter Farbton</label>
+              <input type="text" id="farbton_2" name="farbton_2" class="form-control form-control-lg" value="{{ auftrag['farbton_2'] }}">
+            </div>
             <div class="col-md-4" id="pflicht-fahrzeugdaten">
               <label class="form-label">FIN-Nummer</label>
               <div class="input-group input-group-lg" data-fin-widget>
@@ -258,6 +270,14 @@
             <div class="col-md-4" id="pflicht-schadennummer">
               <label class="form-label">Schaden-Nr.</label>
               <input type="text" name="schaden_nummer" class="form-control form-control-lg" value="{{ auftrag['schaden_nummer'] }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="analyse_text">Kurze Schadensbeschreibung</label>
+              <input type="text" id="analyse_text" name="analyse_text" class="form-control form-control-lg" value="{{ auftrag['analyse_text'] }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="beschreibung">Weitere Beschreibung</label>
+              <textarea id="beschreibung" name="beschreibung" class="form-control" rows="4">{{ auftrag['beschreibung'] }}</textarea>
             </div>
             <div class="col-md-4">
               <label class="form-label">Police / Vertrag</label>
@@ -299,6 +319,18 @@
             <div class="col-md-4">
               <label class="form-label" data-abholung-label>{{ auftrag['partner_abholung_label'] }}</label>
               <input type="date" name="abholtermin" class="form-control form-control-lg" value="{{ auftrag['abholtermin']|iso_date }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="annahme_uhrzeit">Uhrzeit der Fahrzeugübergabe</label>
+              <input type="time" id="annahme_uhrzeit" name="annahme_uhrzeit" class="form-control form-control-lg" value="{{ auftrag['annahme_uhrzeit'] }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="abhol_uhrzeit">Uhrzeit der Fahrzeugrückgabe</label>
+              <input type="time" id="abhol_uhrzeit" name="abhol_uhrzeit" class="form-control form-control-lg" value="{{ auftrag['abhol_uhrzeit'] }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="abhol_adresse">Abhol-/Lieferadresse</label>
+              <input type="text" id="abhol_adresse" name="abhol_adresse" class="form-control form-control-lg" value="{{ auftrag['abhol_adresse'] }}">
             </div>
             <div class="col-12">
               <div class="soft-note">Tipp: Bilder, PDFs und Fertigbilder laden Sie oben oder in der Dokumentansicht hoch. Diese Uploads werden nur gespeichert und verändern die Auftragsdaten nicht automatisch.</div>

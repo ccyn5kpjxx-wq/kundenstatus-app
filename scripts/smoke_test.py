@@ -1028,7 +1028,7 @@ def main():
         partner_new_html = partner_new_response.get_data(as_text=True)
         partner_new_flow_ok = (
             partner_new_response.status_code == 200
-            and "Kunde, Fahrzeug und Unterlage" in partner_new_html
+            and "Welches Fahrzeug melden Sie an?" in partner_new_html
             and "Datei analysieren &amp; Felder eintragen" in partner_new_html
             and "Erst mit „Auftrag jetzt senden“ wird der Auftrag angelegt" in partner_new_html
             and "Mit der Analyse wird direkt ein Auftrag vorbereitet" not in partner_new_html

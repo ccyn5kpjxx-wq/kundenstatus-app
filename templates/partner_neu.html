@@ -217,7 +217,7 @@
       font-size: .86rem;
     }
     .sticky-form-actions {
-      position: sticky;
+      position: relative;
       z-index: 25;
       bottom: 12px;
       display: flex;
@@ -403,13 +403,15 @@
         <div class="partner-form-header-copy">
           <div class="eyebrow">Fahrzeug übermitteln</div>
           <h1 id="partner-vehicle-title">Neues Fahrzeug für {{ autohaus['portal_label'] }}</h1>
-          <p>{{ autohaus['portal_welcome'] }} Tragen Sie die bekannten Angaben ein. Eine Unterlage zur automatischen Ergänzung ist freiwillig.</p>
+          <p>Fahrzeug oder Kennzeichen eintragen, Termin wählen und senden. Alle weiteren Angaben sind freiwillig.</p>
         </div>
         <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Zur Übersicht</a>
       </header>
 
-      <form method="POST" enctype="multipart/form-data" class="vehicle-wizard" data-upload-form data-vehicle-wizard data-analysis-url="{{ url_for('partner_neuer_auftrag_analysieren', slug=autohaus['slug']) }}" novalidate>
+      <form method="POST" enctype="multipart/form-data" class="vehicle-wizard" data-upload-form data-vehicle-wizard data-draft-scope="{{ autohaus['id'] }}" data-postback="{{ '1' if request.method == 'POST' else '0' }}" data-completed-drafts='{{ session.get("partner_completed_drafts", []) | tojson }}' data-analysis-url="{{ url_for('partner_neuer_auftrag_analysieren', slug=autohaus['slug']) }}" novalidate>
         {{ csrf_field()|safe }}
+        <input type="hidden" name="_draft_id" value="{{ form.get('_draft_id', '') }}">
+        <div class="form-text mb-3" data-draft-status role="status"></div>
         <input type="hidden" name="analyse_abgeschlossen" value="{{ form.get('analyse_abgeschlossen', '') }}" data-analysis-completed>
         <input type="hidden" name="analyse_datei_erforderlich" value="{{ form.get('analyse_datei_erforderlich', '') }}" data-analysis-file-required>
         <input type="hidden" name="analyse_dateisignatur" value="{{ form.get('analyse_dateisignatur', '') }}" data-analysis-file-signature>
@@ -420,53 +422,20 @@
         <nav class="vehicle-progress" aria-label="Schritte der Fahrzeugerfassung">
           <button type="button" class="vehicle-progress-button is-active" data-step-target="1" aria-controls="partner-step-1" aria-current="step">
             <span class="vehicle-progress-number">1</span>
-            <span class="vehicle-progress-copy"><strong>Kunde &amp; Fahrzeug</strong><span>Unterlage und Grunddaten</span></span>
+            <span class="vehicle-progress-copy"><strong>Kunde &amp; Fahrzeug</strong><span>Fahrzeugdaten eintragen</span></span>
           </button>
           <button type="button" class="vehicle-progress-button" data-step-target="2" aria-controls="partner-step-2">
             <span class="vehicle-progress-number">2</span>
-            <span class="vehicle-progress-copy"><strong>Transport</strong><span>Termine prüfen und senden</span></span>
+            <span class="vehicle-progress-copy"><strong>Termin &amp; Senden</strong><span>Termine prüfen und senden</span></span>
           </button>
         </nav>
 
         <section class="vehicle-step is-active" id="partner-step-1" data-form-step="1" aria-labelledby="partner-step-title-1">
           <div class="vehicle-step-title">
-            <h2 id="partner-step-title-1" tabindex="-1">Kunde, Fahrzeug und Unterlage</h2>
+            <h2 id="partner-step-title-1" tabindex="-1">Welches Fahrzeug melden Sie an?</h2>
             <p>Datei, Endkunde / Referenz und Handy sind optional. Für die Zuordnung genügt Fahrzeug oder Kennzeichen.</p>
           </div>
           <div class="row g-4">
-            <div class="col-12">
-              <aside class="template-card" aria-label="Lackierauftrag als Vorlage">
-                <div>
-                  <strong>Lackierauftrag noch vorbereiten?</strong>
-                  <p>Online ausfüllen oder die PDF-Vorlage herunterladen und anschließend optional analysieren.</p>
-                </div>
-                <div class="template-actions">
-                  <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-dark">Online ausfüllen</a>
-                  <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark">PDF herunterladen</a>
-                </div>
-              </aside>
-              <div class="vehicle-upload-card">
-                <label class="form-label" for="dateien">Datei zur Analyse <span class="text-muted">(optional)</span></label>
-                <input type="file" id="dateien" name="dateien" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf" aria-describedby="dateien-hinweis dateien-status">
-                <div id="dateien-hinweis" class="form-text">Bei der Analyse werden erkannte Formularfelder ausgefüllt. Dabei wird noch kein Auftrag angelegt.</div>
-                <div id="dateien-status" class="vehicle-upload-status" data-upload-status aria-live="polite">Keine Datei ausgewählt – Sie können auch ohne Datei fortfahren.</div>
-                <div class="vehicle-error" data-file-error role="alert">Bitte die zuvor analysierte Datei noch einmal auswählen.</div>
-                <div class="vehicle-error" data-analysis-error role="alert">Bitte die ausgewählte Datei zuerst analysieren oder wieder entfernen.</div>
-                <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark w-100 mt-2" data-upload-analyze disabled data-loading-message="Die Unterlage wird nur analysiert. Es wird noch kein Auftrag angelegt.">Datei analysieren &amp; Felder eintragen</button>
-                <div class="vehicle-analysis-result" data-analysis-result {% if not form.get('analyse_summary') %}hidden{% endif %} aria-live="polite">
-                  <strong>Analyse abgeschlossen – noch kein Auftrag angelegt</strong>
-                  <span data-analysis-result-text>{{ form.get('analyse_summary', '') }}</span>
-                </div>
-              </div>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label" for="kunde_name">Endkunde / Referenz <span class="text-muted">(optional)</span></label>
-              <input type="text" id="kunde_name" name="kunde_name" class="form-control form-control-lg" value="{{ form.get('kunde_name', '') }}" autocomplete="name">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label" for="kontakt_telefon">Handy / WhatsApp Kunde <span class="text-muted">(optional)</span></label>
-              <input type="tel" inputmode="tel" autocomplete="tel" id="kontakt_telefon" name="kontakt_telefon" class="form-control form-control-lg" placeholder="z. B. 0171 1234567" value="{{ form.get('kontakt_telefon', '') }}">
-            </div>
             <div class="col-md-8">
               <label class="form-label" for="fahrzeug">Fahrzeug</label>
               <input type="text" id="fahrzeug" name="fahrzeug" class="form-control form-control-lg" placeholder="z. B. Hyundai Tucson" value="{{ form.get('fahrzeug', '') }}" aria-describedby="vehicle-minimum-error">
@@ -478,15 +447,27 @@
             <div class="col-12">
               <div id="vehicle-minimum-error" class="vehicle-error" data-vehicle-error role="alert">Bitte mindestens Fahrzeug oder Kennzeichen angeben.</div>
             </div>
+            <div class="col-md-6">
+              <label class="form-label" for="farbcode">Farbcode <span class="text-muted">(optional)</span></label>
+              <input type="text" id="farbcode" name="farbcode" class="form-control form-control-lg" value="{{ form.get('farbcode', '') }}" placeholder="z. B. LB9A / Z5Z5">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="analyse_text">Kurze Schadensbeschreibung</label>
+              <input type="text" id="analyse_text" name="analyse_text" class="form-control form-control-lg" placeholder="z. B. Stoßstange hinten instandsetzen" value="{{ form.get('analyse_text', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="kunde_name">Endkunde / Referenz <span class="text-muted">(optional)</span></label>
+              <input type="text" id="kunde_name" name="kunde_name" class="form-control form-control-lg" value="{{ form.get('kunde_name', '') }}" autocomplete="name">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="kontakt_telefon">Handy / WhatsApp Kunde <span class="text-muted">(optional)</span></label>
+              <input type="tel" inputmode="tel" autocomplete="tel" id="kontakt_telefon" name="kontakt_telefon" class="form-control form-control-lg" placeholder="z. B. 0171 1234567" value="{{ form.get('kontakt_telefon', '') }}">
+            </div>
             <div class="col-12">
-              <details class="vehicle-advanced" {% if form.get('analyse_text') or form.get('beschreibung') or form.get('fin_nummer') or form.get('hsn_nummer') or form.get('tsn_nummer') or form.get('auftragsnummer') %}open{% endif %}>
+              <details class="vehicle-advanced" {% if form.get('beschreibung') or form.get('fin_nummer') or form.get('hsn_nummer') or form.get('tsn_nummer') or form.get('auftragsnummer') or form.get('farbton') or form.get('farbton_2') %}open{% endif %}>
                 <summary>Weitere Angaben zu Schaden und Fahrzeug <span class="text-muted">(optional)</span></summary>
                 <div class="vehicle-advanced-body">
                   <div class="row g-3">
-                    <div class="col-md-6">
-                      <label class="form-label" for="analyse_text">Kurze Schadensbeschreibung</label>
-                      <input type="text" id="analyse_text" name="analyse_text" class="form-control form-control-lg" placeholder="z. B. Stoßstange hinten instandsetzen" value="{{ form.get('analyse_text', '') }}">
-                    </div>
                     <div class="col-md-6">
                       <label class="form-label" for="upload_notiz">Hinweis zur Unterlage</label>
                       <input type="text" id="upload_notiz" name="upload_notiz" class="form-control form-control-lg" placeholder="z. B. Kotflügel links, Kratzer" value="{{ form.get('upload_notiz', '') }}">
@@ -494,6 +475,14 @@
                     <div class="col-12">
                       <label class="form-label" for="beschreibung">Weitere Beschreibung</label>
                       <textarea id="beschreibung" name="beschreibung" class="form-control" rows="4" placeholder="Gewünschte Arbeiten, Besonderheiten oder Rückfragen">{{ form.get('beschreibung', '') }}</textarea>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label" for="farbton">Farbton</label>
+                      <input type="text" id="farbton" name="farbton" class="form-control" value="{{ form.get('farbton', '') }}">
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label" for="farbton_2">Zweiter Farbton</label>
+                      <input type="text" id="farbton_2" name="farbton_2" class="form-control" value="{{ form.get('farbton_2', '') }}">
                     </div>
                     <div class="col-lg-6">
                       <label class="form-label" for="fin_nummer">Fahrzeug-Identifizierungsnummer (FIN)</label>
@@ -512,6 +501,37 @@
                       <input type="text" id="auftragsnummer" name="auftragsnummer" class="form-control form-control-lg" value="{{ form.get('auftragsnummer', '') }}" autocomplete="off">
                     </div>
                   </div>
+                </div>
+              </details>
+            </div>
+            <div class="col-12">
+              <details class="vehicle-advanced" data-document-options {% if form.get('analyse_abgeschlossen') %}open{% endif %}>
+                <summary>Unterlagen hinzufügen oder Daten auslesen <span class="text-muted">(optional)</span></summary>
+                <div class="vehicle-advanced-body">
+              <div class="vehicle-upload-card">
+                <label class="form-label" for="dateien">Datei zur Analyse <span class="text-muted">(optional)</span></label>
+                <input type="file" id="dateien" name="dateien" class="form-control form-control-lg" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.pdf,.txt,.docx,.xlsx,image/*,application/pdf" aria-describedby="dateien-hinweis dateien-status">
+                <div id="dateien-hinweis" class="form-text">Bei der Analyse werden erkannte Formularfelder ausgefüllt. Dabei wird noch kein Auftrag angelegt.</div>
+                <div id="dateien-status" class="vehicle-upload-status" data-upload-status aria-live="polite">Keine Datei ausgewählt – Sie können auch ohne Datei fortfahren.</div>
+                <div class="vehicle-error" data-file-error role="alert">Bitte die zuvor analysierte Datei noch einmal auswählen.</div>
+                <div class="vehicle-error" data-analysis-error role="alert">Bitte die ausgewählte Datei zuerst analysieren oder wieder entfernen.</div>
+                <button type="submit" name="aktion" value="upload_analyze" class="btn btn-outline-dark w-100 mt-2" data-upload-analyze data-loading-message="Die Unterlage wird nur analysiert. Es wird noch kein Auftrag angelegt.">Datei analysieren &amp; Felder eintragen</button>
+                <button type="button" class="btn btn-link" data-remove-files hidden>Dateiauswahl entfernen</button>
+                <div class="vehicle-analysis-result" data-analysis-result {% if not form.get('analyse_summary') %}hidden{% endif %} aria-live="polite">
+                  <strong>Analyse abgeschlossen – noch kein Auftrag angelegt</strong>
+                  <span data-analysis-result-text>{{ form.get('analyse_summary', '') }}</span>
+                </div>
+              </div>
+              <aside class="template-card" aria-label="Lackierauftrag als Vorlage">
+                <div>
+                  <strong>Lackierauftrag noch vorbereiten?</strong>
+                  <p>Die Vorlage öffnet in einem neuen Tab. Ihre Angaben hier bleiben erhalten.</p>
+                </div>
+                <div class="template-actions">
+                  <a href="{{ url_for('partner_lackierauftrag_bearbeiten', slug=autohaus['slug']) }}" class="btn btn-outline-dark" target="_blank" rel="noopener">Online ausfüllen (neuer Tab)</a>
+                  <a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="btn btn-outline-dark" target="_blank" rel="noopener">PDF herunterladen</a>
+                </div>
+              </aside>
                 </div>
               </details>
             </div>
@@ -564,18 +584,19 @@
                 </div>
               </div>
             </div>
-            <div class="col-12 text-muted small">Erst mit „Auftrag jetzt senden“ wird der Auftrag angelegt. Eine optional analysierte Datei wird dann mitgespeichert.</div>
+            <div class="col-12 text-muted small">Erst mit „Auftrag jetzt senden“ wird der Auftrag angelegt. Danach können Sie Angaben ändern und weitere Dateien hinzufügen.</div>
           </div>
         </section>
 
         <div class="sticky-form-actions">
           <div class="vehicle-action-group">
+            <button type="button" class="btn btn-link" data-discard-draft hidden>Eingaben verwerfen</button>
             <button type="button" class="btn btn-outline-dark" data-step-back hidden>Zurück</button>
-            <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark" data-step-cancel>Abbrechen</a>
+            <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark" data-step-cancel>Zur Übersicht</a>
           </div>
           <div class="vehicle-step-status" data-step-status aria-live="polite">Schritt 1 von 2</div>
           <div class="vehicle-action-group">
-            <button type="button" class="btn btn-primary" data-step-next hidden>Weiter</button>
+            <button type="button" class="btn btn-primary" data-step-next hidden>Weiter zum Termin</button>
             <button type="submit" name="aktion" value="speichern" class="btn btn-primary" data-save-vehicle data-loading-message="Bitte kurz warten. Fahrzeug und Auftrag werden jetzt gespeichert.">Auftrag jetzt senden</button>
           </div>
         </div>
@@ -583,6 +604,7 @@
     </section>
   </main>
 
+  <script src="{{ url_for('static', filename='partner_vehicle_form.js') }}"></script>
   <script>
     (() => {
       const form = document.querySelector('[data-vehicle-wizard]');
@@ -659,16 +681,16 @@
         .map((file) => file.name.replace(/^.*[\\/]/, ''))
         .join('|');
 
-      const updateUpload = () => {
+      const updateUpload = (selectionChanged = false) => {
         const files = Array.from(fileInput?.files || []);
         uploadButton.disabled = files.length === 0;
         uploadStatus.textContent = files.length
           ? `${files.length} Datei${files.length === 1 ? '' : 'en'} ausgewählt: ${files.map((file) => file.name).join(', ')}`
           : 'Keine Datei ausgewählt – Sie können auch ohne Datei fortfahren.';
-        if (files.length) {
-          fileError.classList.remove('is-visible');
+        if (files.length) fileError.classList.remove('is-visible');
+        {
           const currentSignature = selectedFileSignature();
-          if (analysisFileSignature.value && analysisFileSignature.value !== currentSignature) {
+          if (selectionChanged || (files.length && analysisFileSignature.value && analysisFileSignature.value !== currentSignature)) {
             analysisCompleted.value = '';
             analysisFileRequired.value = '';
             analysisFileSignature.value = '';
@@ -678,6 +700,7 @@
             analysisResult.hidden = true;
           }
         }
+        form.querySelector('[data-remove-files]').hidden = !files.length && analysisFileRequired.value !== '1';
         analysisError.classList.remove('is-visible');
       };
 
@@ -783,6 +806,7 @@
             ? `${filled} Formularfeld${filled === 1 ? '' : 'er'} ergänzt. Bitte prüfen Sie die Angaben in Schritt 1.`
             : 'Die Datei wurde gelesen. Es konnten keine leeren Formularfelder sicher ergänzt werden; bitte Angaben manuell prüfen.';
           showStep(1);
+          form.dispatchEvent(new Event('input', { bubbles: true }));
         } catch (error) {
           analysisError.textContent = error.message || 'Die Datei konnte nicht analysiert werden.';
           analysisError.classList.add('is-visible');
@@ -833,6 +857,7 @@
         if (fileInput.files.length && analysisCompleted.value !== '1') {
           event.preventDefault();
           showStep(1);
+          form.querySelector('[data-document-options]').open = true;
           analysisError.classList.add('is-visible');
           uploadButton.focus();
           return;
@@ -845,6 +870,7 @@
         if (analysisFileRequired.value === '1' && !fileInput.files.length) {
           event.preventDefault();
           showStep(1);
+          form.querySelector('[data-document-options]').open = true;
           fileError.textContent = 'Bitte die zuvor analysierte Datei noch einmal auswählen.';
           fileError.classList.add('is-visible');
           fileInput.focus();
@@ -863,6 +889,8 @@
       updateUpload();
       updateTransport();
       showStep(1, false);
+      window.initPartnerVehicleForm?.({ form, showStep, updateTransport, updateUpload, stopLoading,
+        getStep: () => currentStep, isAnalyzing: () => analyzing });
     })();
   </script>
   {% include "_session_keepalive.html" %}

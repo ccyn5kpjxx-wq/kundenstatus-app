@@ -5284,6 +5284,7 @@ def normalize_openai_document_data(data, source_text=""):
         analyse_confidence = 0
     fields = {
         "fahrzeug": clean_text(data.get("vehicle_type")),
+        "farbcode": clean_text(data.get("farbnummer")),
         "fin_nummer": clean_text(data.get("fin_nummer")).upper(),
         "hsn_nummer": normalize_hsn(data.get("hsn_nummer")),
         "tsn_nummer": normalize_tsn(data.get("tsn_nummer")),
@@ -7841,6 +7842,7 @@ def parse_document_fields(text, filename=""):
     return {
         "autohaus_id": find_matching_autohaus_id(cleaned),
         "fahrzeug": fahrzeug,
+        "farbcode": farbnummer,
         "fin_nummer": vin or fahrgestellnummer,
         "hsn_nummer": hsn_nummer,
         "tsn_nummer": tsn_nummer,
@@ -15128,6 +15130,7 @@ def create_auftrag_aus_lackierauftrag(autohaus, daten):
         fertig_datum=clean_text((daten or {}).get("fertig_bis")),
         kontakt_telefon=clean_text((daten or {}).get("kontakt")),
         transport_art="standard",
+        farbcode=clean_text((daten or {}).get("farb_nr")),
         notiz_intern="Aus Online-Lackierauftrag übernommen.",
     )
 
@@ -21285,6 +21288,7 @@ def merge_document_fields(ai_fields, local_fields):
             fields["bauteile_override"] = cleaned_bauteile
     for key, label, is_date in (
         ("fahrzeug", "Fahrzeugtyp", False),
+        ("farbcode", "Farbcode", False),
         ("fin_nummer", "FIN", False),
         ("hsn_nummer", "HSN", False),
         ("tsn_nummer", "TSN", False),
@@ -31297,6 +31301,9 @@ def create_auftrag(
     notiz_intern="",
     angebotsphase=0,
     angebot_abgesendet=0,
+    farbcode="",
+    farbton="",
+    farbton_2="",
 ):
     jetzt = now_str()
     db = get_db()
@@ -31379,6 +31386,10 @@ def create_auftrag(
     db.execute(
         "INSERT INTO status_log (auftrag_id, status, zeitstempel) VALUES (?, 1, ?)",
         (auftrag_id, jetzt),
+    )
+    db.execute(
+        "UPDATE auftraege SET farbcode=?, farbton=?, farbton_2=? WHERE id=?",
+        (clean_text(farbcode), clean_text(farbton), clean_text(farbton_2), auftrag_id),
     )
     if clean_text(quelle) == "autohaus":
         db.execute("UPDATE auftraege SET werkstatt_neu=1 WHERE id=?", (auftrag_id,))
@@ -53007,6 +53018,7 @@ def partner_versicherung_prozess_status(slug, auftrag_id, prozess_key):
 
 PARTNER_NEW_ANALYSIS_FIELDS = (
     "fahrzeug",
+    "farbcode",
     "kennzeichen",
     "fin_nummer",
     "hsn_nummer",
@@ -53317,6 +53329,9 @@ def partner_neuer_auftrag(slug):
             flash("Bitte mindestens Fahrzeug oder Kennzeichen angeben, damit die Werkstatt den Auftrag zuordnen kann.", "warning")
             return render_partner_new_form(autohaus, form=form)
         gewaehlte_dateien = [file for file in dateien if file and file.filename]
+        if not gewaehlte_dateien and clean_text(form.get("analyse_datei_erforderlich")) == "1":
+            flash("Bitte die zuvor analysierte Datei erneut auswählen. Ihre Angaben sind erhalten geblieben.", "warning")
+            return render_partner_new_form(autohaus, form=form)
         if gewaehlte_dateien and len(erlaubte_dateien) != len(gewaehlte_dateien):
             flash(
                 "Mindestens eine Datei hat einen nicht unterstützten Typ. Bitte PDF, JPG, PNG, HEIC, DOCX oder XLSX verwenden.",
@@ -53362,6 +53377,9 @@ def partner_neuer_auftrag(slug):
             autohaus_id=autohaus["id"],
             kunde_name=clean_text(form.get("kunde_name")),
             fahrzeug=clean_text(form.get("fahrzeug")),
+            farbcode=clean_text(form.get("farbcode")),
+            farbton=clean_text(form.get("farbton")),
+            farbton_2=clean_text(form.get("farbton_2")),
             fin_nummer=normalize_fin(form.get("fin_nummer")),
             kilometerstand=clean_text(form.get("kilometerstand")),
             hsn_nummer=normalize_hsn(form.get("hsn_nummer")),
@@ -53419,7 +53437,16 @@ def partner_neuer_auftrag(slug):
             )
             _db.commit()
             _db.close()
-        flash("Fahrzeug und Auftrag wurden übermittelt.", "success")
+        draft_id = clean_text(form.get("_draft_id"))
+        if re.fullmatch(r"[a-zA-Z0-9-]{1,64}", draft_id):
+            session["partner_completed_drafts"] = (
+                session.get("partner_completed_drafts", []) + [draft_id]
+            )[-10:]
+        flash("Fahrzeug und Auftrag wurden übermittelt. Angaben und Dateien können Sie hier weiter bearbeiten.", "success")
+        upload_error = clean_text((upload_result[1] or {}).get("_analysis_error")) if isinstance(upload_result, tuple) else ""
+        uploaded_count = upload_result[0] if isinstance(upload_result, tuple) else int(upload_result or 0)
+        if upload_error or uploaded_count < len(erlaubte_dateien):
+            flash("Der Auftrag ist gespeichert, aber die Dateien konnten nicht vollständig hinzugefügt werden. Bitte laden Sie die fehlenden Dateien hier erneut hoch.", "warning")
         flash_betriebsurlaub_planungshinweis(
             form.get("annahme_datum"),
             form.get("start_datum"),
@@ -54134,6 +54161,9 @@ def partner_auftrag(slug, auftrag_id):
             notify_workshop_whatsapp_abholbereit(auftrag_id, autohaus)
             flash("Danke! Die Werkstatt wurde benachrichtigt, dass das Fahrzeug abholbereit ist.", "success")
             return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
+        # Older/partial forms must not erase fields they did not submit.
+        # An explicitly submitted empty value still clears that field.
+        form = {**auftrag, **form}
         analyse = clean_text(form.get("analyse_text")) or analyse_text(form.get("beschreibung"))
         start_datum = format_date(form.get("start_datum")) if "start_datum" in form else auftrag["start_datum"]
         fertig_datum = format_date(form.get("fertig_datum")) if "fertig_datum" in form else auftrag["fertig_datum"]
@@ -54144,6 +54174,9 @@ def partner_auftrag(slug, auftrag_id):
             SET kunde_name=?,
                 versicherungsnehmer=?,
                 fahrzeug=?,
+                farbcode=?,
+                farbton=?,
+                farbton_2=?,
                 fin_nummer=?,
                 kilometerstand=?,
                 hsn_nummer=?,
@@ -54156,6 +54189,9 @@ def partner_auftrag(slug, auftrag_id):
                 beschreibung=?,
                 analyse_text=?,
                 annahme_datum=?,
+                annahme_uhrzeit=?,
+                abhol_uhrzeit=?,
+                abhol_adresse=?,
                 start_datum=?,
                 fertig_datum=?,
                 abholtermin=?,
@@ -54168,6 +54204,9 @@ def partner_auftrag(slug, auftrag_id):
                 clean_text(form.get("kunde_name")),
                 clean_text(form.get("versicherungsnehmer")),
                 clean_text(form.get("fahrzeug")),
+                clean_text(form.get("farbcode")),
+                clean_text(form.get("farbton")),
+                clean_text(form.get("farbton_2")),
                 normalize_fin(form.get("fin_nummer")),
                 clean_text(form.get("kilometerstand")),
                 normalize_hsn(form.get("hsn_nummer")),
@@ -54180,6 +54219,9 @@ def partner_auftrag(slug, auftrag_id):
                 clean_text(form.get("beschreibung")),
                 analyse,
                 format_date(form.get("annahme_datum")),
+                format_time_value(form.get("annahme_uhrzeit")),
+                format_time_value(form.get("abhol_uhrzeit")),
+                clean_text(form.get("abhol_adresse")),
                 start_datum,
                 fertig_datum,
                 format_date(form.get("abholtermin")),
