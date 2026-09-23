@@ -7,6 +7,7 @@ import json
 import secrets
 import stripe
 from .gateway import StripeTestGateway
+from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME
 
 ACTIVE_LISTINGS={'kona','i10'}
 
@@ -33,6 +34,10 @@ def launch_errors(cfg):
         errors.append('Freigegebene Bedingungsversion fehlt.')
     for name in ('terms_text','privacy_url','merchant_name','merchant_address','merchant_email','merchant_phone'):
         if not cfg.get(name):errors.append('Pflichtangabe fehlt: '+name)
+    if cfg.get('merchant_name') and cfg['merchant_name'] != LESSOR_NAME:
+        errors.append('Vermieter muss Gärtner GmbH Karosserie + Lack sein.')
+    if cfg.get('merchant_address') and cfg['merchant_address'] != LESSOR_ADDRESS:
+        errors.append('Vermieteranschrift stimmt nicht mit dem Impressum überein.')
     if not cfg.get('origin','').startswith('https://'):
         errors.append('Livebetrieb erfordert HTTPS.')
     if cfg.get('live_enabled') is not True:

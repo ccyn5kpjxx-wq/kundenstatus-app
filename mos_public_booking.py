@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 
 from flask import Blueprint, abort, current_app, redirect, render_template, request, session, url_for
 from itsdangerous import URLSafeTimedSerializer, BadSignature
+from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME, init_schema as init_contract_schema
+from mos_public_contract import read as read_contract, sign as sign_contract_record, snapshot as contract_snapshot, snapshot_hash
 
 LISTINGS = {'kona':'Hyundai KONA N Line X', 'i10':'Hyundai i10'}
 
@@ -108,7 +110,7 @@ def register(portal):
         service=SharedCheckout(portal,gateway,cfg['origin']+prefix+'/status')
         app.config['MOS_SHARED_CHECKOUT_ENABLED']=bool(app.config['MOS_PUBLIC_BOOKING'].get('enabled'))
         db=portal.get_db()
-        try:init_refund_schema(db);db.commit()
+        try:init_refund_schema(db);init_contract_schema(db);db.commit()
         finally:db.close()
         existing={'cfg':cfg,'service':service,'gateway':gateway,'secret':secret,'ledger':RefundLedger(service)}
         app.extensions['mos_public_booking']=existing
@@ -118,7 +120,8 @@ def register(portal):
     def guard():
         cfg=app.config.get('MOS_PUBLIC_BOOKING',{})
         settling={'mos_public.status','mos_public.retry','mos_public.cancel','mos_public.webhook','mos_public.receipt',
-                  'mos_public.cancel_paid','mos_public.admin_bookings','mos_public.admin_action'}
+                  'mos_public.cancel_paid','mos_public.admin_bookings','mos_public.admin_action',
+                  'mos_public.sign_contract','mos_public.signed_contract_pdf','mos_public.admin_contract_pdf'}
         if not cfg.get('enabled') and not (request.endpoint in settling and cfg.get('mode') in {'offline','stripe_test','live'}):
             abort(404)
         state=setup()
@@ -191,7 +194,8 @@ def register(portal):
             'included_km':days*cfg['included_km_day'],'extra_km_cents':cfg['extra_km_cents'],
             'deposit_cents':cfg['deposit_cents'],'deductible_cents':cfg['deductible_cents'],
             'rules_version':cfg['terms_version'],'terms_text':cfg['terms_text'],'owner_hash':owner(),
-            'test_only':cfg['mode']!='live','vat_included':True}
+            'test_only':cfg['mode']!='live','vat_included':True,
+            'lessor_name':LESSOR_NAME,'lessor_address':LESSOR_ADDRESS}
 
     def owned(hold_id):
         try:h=setup()['service'].read(hold_id)
@@ -218,7 +222,13 @@ def register(portal):
         text+='\nMieter: '+p['customer']['name']+'\nE-Mail: '+p['customer']['email']
         text+=f"\nMiete: {q.get('rental_cents',q['amount_cents'])/100:.2f} EUR inkl. MwSt.\nKaution eingezogen: {q.get('deposit_charged_cents',0)/100:.2f} EUR\nGesamtzahlung: {q['amount_cents']/100:.2f} EUR"
         text+='\nAbholung persönlich: Gärtner, Binauer Höhe 4, 74821 Mosbach-Lohrbach.'
+        text+='\nVermieter und Vertragspartner: '+q.get('lessor_name',LESSOR_NAME)+', '+q.get('lessor_address',LESSOR_ADDRESS)
+        text+='\nAutovermietung MOS ist nur die Bezeichnung des Angebots, keine eigene Vertragspartei.'
         text+='\nBedingungsversion: '+q['rules_version']+'\n\n'+q['terms_text']
+        db=portal.get_db()
+        try:contract=read_contract(db,hold_id)
+        finally:db.close()
+        text+='\n\nDigitale Unterschrift: '+('am '+contract['signed_at']+' UTC gespeichert.' if contract else 'noch ausstehend.')
         if account(hold_id)['cancellation']:text+='\n\nACHTUNG: Diese Buchung wurde inzwischen storniert. Abrechnung siehe Statusseite.'
         return text,200,{'Content-Type':'text/plain; charset=utf-8','Content-Disposition':'attachment; filename="MOS-Buchungsbestaetigung.txt"'}
 
@@ -235,11 +245,21 @@ def register(portal):
     @portal.admin_required
     def admin_bookings():
         db=portal.get_db()
-        try:holds=[dict(r) for r in db.execute('SELECT * FROM miet_checkout_holds ORDER BY expires_at DESC LIMIT 100').fetchall()]
+        try:
+            holds=[dict(r) for r in db.execute('''SELECT h.*,c.signed_at FROM miet_checkout_holds h
+                LEFT JOIN miet_checkout_contracts c ON c.hold_id=h.id
+                ORDER BY h.expires_at DESC LIMIT 100''').fetchall()]
         finally:db.close()
         for h in holds:
             h['q']=json.loads(h['payload'])['quote'];h['account']=account(h['id'])
+            if h['signed_at']:
+                h['signed_at']=datetime.fromisoformat(h['signed_at']).astimezone(ZoneInfo('Europe/Berlin')).strftime('%d.%m.%Y um %H:%M Uhr')
         return render_template('mos_public/admin.html',holds=holds,request_id=secrets.token_urlsafe(24))
+
+    @bp.get('/admin/<hold_id>/vertrag.pdf')
+    @portal.admin_required
+    def admin_contract_pdf(hold_id):
+        return contract_pdf_response(hold_id)
 
     @bp.post('/admin/<hold_id>')
     @portal.admin_required
@@ -333,11 +353,54 @@ def register(portal):
 
     @bp.get('/status/<hold_id>')
     def status(hold_id):
+        return render_status(hold_id)
+
+    def render_status(hold_id,error=None):
         h,p=owned(hold_id)
         try:setup()['service'].cancel_or_reconcile(hold_id)
         except Exception:pass
         h,_=owned(hold_id)
-        return render_template('mos_public/status.html',h=h,q=p['quote'],account=account(hold_id))
+        acc=account(hold_id)
+        db=portal.get_db()
+        try:signed=read_contract(db,hold_id)
+        finally:db.close()
+        contract=contract_snapshot(h,p) if h['status']=='confirmed' else None
+        signed_local=(datetime.fromisoformat(signed['signed_at']).astimezone(ZoneInfo('Europe/Berlin'))
+                      .strftime('%d.%m.%Y um %H:%M Uhr')) if signed else None
+        return render_template('mos_public/status.html',h=h,q=p['quote'],account=acc,error=error,
+                               contract=contract,contract_hash=snapshot_hash(contract) if contract else None,
+                               signed=signed,signed_local=signed_local)
+
+    @bp.post('/status/<hold_id>/unterschrift')
+    def sign_contract(hold_id):
+        owned(hold_id)
+        if request.form.get('confirm')!='yes':
+            return render_status(hold_id,'Bitte bestätige deine Unterschrift ausdrücklich.')
+        try:
+            sign_contract_record(portal,hold_id,owner(),request.form.get('contract_hash',''),
+                                 request.form.get('signer_name',''),request.form.get('signature_data',''))
+        except ValueError as exc:
+            return render_status(hold_id,str(exc))
+        return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
+
+    @bp.get('/status/<hold_id>/vertrag.pdf')
+    def signed_contract_pdf(hold_id):
+        owned(hold_id)
+        return contract_pdf_response(hold_id)
+
+    def contract_pdf_response(hold_id):
+        db=portal.get_db()
+        try:contract=read_contract(db,hold_id)
+        finally:db.close()
+        if not contract:abort(404)
+        from base64 import b64decode
+        from flask import make_response
+        pdf=b64decode(contract['pdf_base64'],validate=True)
+        if hashlib.sha256(pdf).hexdigest()!=contract['pdf_sha256']:abort(500)
+        response=make_response(pdf)
+        response.headers['Content-Type']='application/pdf'
+        response.headers['Content-Disposition']=f'attachment; filename="MOS-Mietvertrag-{hold_id}.pdf"'
+        return response
 
     @bp.post('/status/<hold_id>/cancel')
     def cancel(hold_id):

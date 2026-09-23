@@ -21,7 +21,7 @@ Veröffentlicht sind außerdem 150 Freikilometer je Miettag, 0,25 €/Mehrkilome
 
 ### A. Fahrzeug, Zeitraum und Buchung
 
-Du mietest das in deiner Buchungsübersicht bezeichnete Fahrzeug für den ausgewählten Zeitraum. Vermieter ist **[Gärtner GmbH Karosserie + Lack – Vertragsidentität und vollständige Kontaktdaten abschließend bestätigen]**. Vor dem Bezahlen siehst du Fahrzeug, Abhol- und Rückgabetermin, Mietdauer, Mietpreis, enthaltene Kilometer und mögliche zusätzliche Kosten.
+Du mietest das in deiner Buchungsübersicht bezeichnete Fahrzeug für den ausgewählten Zeitraum. Vermieter und Vertragspartner ist **Gärtner GmbH Karosserie + Lack, Binauer Höhe 4, 74821 Mosbach, Deutschland**. „Autovermietung MOS“ ist nur die Bezeichnung des Mietangebots und keine eigene Vertragspartei. Vor dem Bezahlen siehst du Fahrzeug, Abhol- und Rückgabetermin, Mietdauer, Mietpreis, enthaltene Kilometer und mögliche zusätzliche Kosten.
 
 Mit der zahlungspflichtigen Bestellung gibst du ein verbindliches Buchungsangebot ab. Wir nehmen es mit unserer Buchungsbestätigung nach erfolgreicher Zahlungs- und Verfügbarkeitsprüfung an. Eine vorläufige Reservierung oder Zahlungsanzeige allein ist noch keine Annahme. Kann die Buchung trotz Zahlung nicht bestätigt werden, informieren wir dich und erstatten den Mietpreis. **[Annahmezeitpunkt, maximale Bearbeitungsfrist und Erstattungsablauf vor Freigabe rechtlich und technisch abstimmen.]**
 

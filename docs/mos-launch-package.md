@@ -1,6 +1,6 @@
 # MOS: Freigabepaket für echte Kundenbuchungen
 
-Stand 22.09.2026, Aufgabe 69. **Noch kein Go-live.** Ziel sind öffentliche entgeltliche Selbstfahrer-Mieten ausschließlich für **Hyundai i10 und Hyundai KONA**. C3 ist von der Direktbuchung ausgeschlossen; Fiat bleibt ebenfalls ausgeschlossen. Werkstatttarife bleiben eine manuelle Anfrage. Es wurde nichts veröffentlicht und keine echte Zahlung/Erstattung ausgeführt.
+Stand 23.09.2026. **Noch kein Zahlungs-Go-live.** Ziel sind öffentliche entgeltliche Selbstfahrer-Mieten ausschließlich für **Hyundai i10 und Hyundai KONA**. C3 ist von der Direktbuchung ausgeschlossen; Fiat bleibt ebenfalls ausgeschlossen. Werkstatttarife bleiben eine manuelle Anfrage. Der Code ist auf GitHub, die öffentliche Zahlungsroute bleibt deaktiviert; keine echte Zahlung/Erstattung wurde ausgeführt.
 
 ## Implementierter Stand
 
@@ -8,7 +8,7 @@ Stand 22.09.2026, Aufgabe 69. **Noch kein Go-live.** Ziel sind öffentliche entg
 - Ein gemeinsamer Portalbestand für Online-Holds, Admin-Anlage, Anfrageübernahme und Datumsänderung. Die bestehenden inklusiven Tagesbelegungen bleiben konservativ erhalten; exakte Übergabezeiten stehen unveränderlich im Buchungssnapshot. Damit wird keine kurzfristige Wiedervermietung am Rückgabetag versprochen.
 - Getrennter Stripe-Test-/Liveadapter mit Modusprüfung. Live verlangt geprüfte Konfiguration, dauerhaften Flask-Schlüssel, HTTPS und die autoritative PostgreSQL-Datenbank. Kein Produktivbetrieb auf einer lokalen Testkopie.
 - Hosted Checkout mit zwei getrennten Posten: Mietpreis inklusive MwSt. und 500 € rückzahlbare Kaution. **Dieses Kautionsverfahren ist eine Implementierungsoption, erst nach Finanz-/Betriebsfreigabe aktivierbar.** Es ist eine Zahlung mit späterer Rückerstattung, keine langfristige Kartenautorisierung. Keine Aussage über Versicherungsschutz wird aus der 1.000-€-Kunden-Selbstbeteiligung abgeleitet.
-- Signaturgeprüfter Webhook plus erneute Providerabfrage bestätigt genau einen Mietvorgang. Rücksprung, doppelte Klicks und doppelte Events ersetzen keine Zahlungsprüfung. Kunden sehen Status und können Bestätigung samt vereinbarten Bedingungen als Textdatei herunterladen. Es gibt keinen automatischen E-Mail-Versand.
+- Signaturgeprüfter Webhook plus erneute Providerabfrage bestätigt genau einen Mietvorgang. Rücksprung, doppelte Klicks und doppelte Events ersetzen keine Zahlungsprüfung. Kunden sehen nach bestätigter Zahlung sofort den Vertrag mit dem vor Zahlung gezeigten Bedingungstext. Sie können mit Finger oder Maus unterschreiben und die unveränderlich gespeicherte, unterschriebene Fassung als PDF herunterladen. Die Werkstatt sieht den Unterschriftsstatus und kann das PDF im geschützten Adminbereich herunterladen. Zusätzlich gibt es weiterhin die Textbestätigung. Die gezeichnete Unterschrift ist keine qualifizierte elektronische Signatur. Es gibt keinen automatischen E-Mail-Versand.
 - Kundenstorno vor Mietbeginn; bis einschließlich 24 Stunden vorher kostenlos. Danach maximal erster gebuchter Tag, ohne Kaution als Gebührenbasis. Nach Mietbeginn keine automatische Kundenstornierung. Admin kann persönlich geprüftes Nichterscheinen erfassen.
 - Stornierung, Inventarfreigabe und Erstattungsauftrag werden gemeinsam gespeichert. Offene Erstattung sperrt das Fahrzeug nicht weiter. Erstattung ist erst bei bestätigtem Providerstatus als erfolgt markiert.
 - Geschützte Adminansicht für Erstattungsstatus, Minderung wegen Ersparnissen/Wiedervermietung/geringerem oder fehlendem Schaden, erneuten Providerabgleich und volle Kautionsrückzahlung nach protokollierter Fahrzeugrückgabe. Keine automatische Schadensabbuchung. Strittige/teilweise Kautionsabzüge bleiben eine manuelle Abrechnung außerhalb dieser Automatik.
@@ -23,8 +23,8 @@ Stand 22.09.2026, Aufgabe 69. **Noch kein Go-live.** Ziel sind öffentliche entg
 | Betrieb / Preise / Bedingungen | Unternehmerische Freigabe von Slots, Vorlauf/maximaler Mietdauer, Tagesberechnung, Storno, Kraftstoff-/Schadenprozess und vollständigem Bedingungstext nötig. Öffentliche Preise sind aktuell noch als vorläufig beschrieben. |
 | Kaution | 500 € beschlossen; vorgeschlagenes Einziehen mit Mietpreis und spätere Erstattung, Fristen, mögliche Gebühren und Buchhaltung müssen bestätigt werden. |
 | Stripe / Hosting | Konto und Wallets laut Ursprungstask aktiv; Website-Key, Webhook und echte Sandbox-Abnahme fehlen. Kein echtes Checkout-/Erstattungsereignis ausgeführt. |
-| Datenbank / Abnahme | SQLite-Konkurrenz-/HTTP-/Erstattungstests bestehen. Echter PostgreSQL-Konkurrenztest und Deployment-Abnahme stehen aus. |
-| Recht / Datenschutz | Finale Mietbedingungen, §312j-Abschlussdarstellung in Hosted Checkout und Stripe-Datenschutzhinweis prüfen; Entwurf nicht als freigegebene AGB einsetzen. |
+| Datenbank / Abnahme | SQLite-Konkurrenz-/HTTP-/Erstattungstests und ein lokaler PostgreSQL-Kaltstart mit synthetischen Checkout-Fällen bestanden. Die neue Vertragstabelle samt Textspeicherung wurde auf derselben isolierten PostgreSQL-Instanz geprüft; ein vollständiger PostgreSQL-HTTP-Signierlauf und die Deployment-Abnahme stehen noch aus. |
+| Recht / Datenschutz | Finale Mietbedingungen, elektronische Unterschrift, §312j-Abschlussdarstellung in Hosted Checkout und Stripe-Datenschutzhinweis prüfen; Entwurf nicht als freigegebene AGB einsetzen. |
 
 Es ist deshalb keine belastbare Zusage möglich, dass Kunden morgen bereits bezahlen können. Codevorbereitung allein ersetzt diese Nachweise nicht. Update 23.09.2026: Laut verifiziertem Bericht des Ursprungstasks wurde die Versicherungsanfrage um 10:57 über IONOS gesendet (ein Eintrag in Gesendet). Der frühere SMTP-Versuch war erfolglos. Eine Antwort oder Deckungsbestätigung liegt damit noch nicht vor.
 
@@ -54,15 +54,15 @@ Es ist deshalb keine belastbare Zusage möglich, dass Kunden morgen bereits beza
   "terms_version": "draft:noch-nicht-freigegeben",
   "terms_text": "",
   "privacy_url": "",
-  "merchant_name": "",
-  "merchant_address": "",
+  "merchant_name": "Gärtner GmbH Karosserie + Lack",
+  "merchant_address": "Binauer Höhe 4, 74821 Mosbach, Deutschland",
   "merchant_email": "",
   "merchant_phone": "",
   "launch": {}
 }
 ```
 
-Keine Nullwerte als echte IDs ersetzen, bevor die Zuordnung geprüft ist. Slots sind konkrete zukünftige ISO-Zeitpunkte mit dem für Europe/Berlin gültigen UTC-Offset; keine erfundenen Öffnungszeiten. Eine neue Konfigurationsversion erfordert Prozessneustart, bestehende Buchungen behalten ihren gespeicherten Snapshot.
+Keine Nullwerte als echte IDs ersetzen, bevor die Zuordnung geprüft ist. Slots sind konkrete zukünftige ISO-Zeitpunkte mit dem für Europe/Berlin gültigen UTC-Offset; keine erfundenen Öffnungszeiten. Eine neue Konfigurationsversion erfordert Prozessneustart, bestehende Buchungen behalten ihren gespeicherten Snapshot. `merchant_name` und `merchant_address` müssen genau den Impressumsdaten des Vermieters entsprechen. „Autovermietung MOS“ bleibt nur die Angebotsüberschrift.
 
 Unter `launch` benötigt jede der Freigaben `business_review`, `legal_review`, `finance_review`, `privacy_review`, `sandbox_acceptance`, `postgres_acceptance` die Felder `approved_by`, `approved_at`, `evidence`. Unter `launch.insurance.kona` und `.i10` sind `verified=true`, `use=paid_self_drive`, eine echte Belegreferenz und die passende `vehicle_id` nötig. Das sind dokumentierte Betreiberprüfungen, keine automatischen Versicherungsnachweise. Niemals bloß zur Umgehung der Sperre ausfüllen.
 
@@ -92,7 +92,7 @@ Der Refund-Datensatz enthält laut API kein garantiertes `livemode`-Feld; Modus 
 4. Nach vollständigen externen Belegen private Livekonfiguration, stabile sichere Cookies und Secretstore setzen. Portal läuft auf dem bestehenden autoritativen PostgreSQL-Bestand. Keine zweite Homepage-DB verwenden.
 5. Live-Key/Webhook erst nach gesonderter Handlungsgenehmigung anlegen; HTTPS-Endpunkt und Signaturprüfung verifizieren. Öffentliche Buttons erst danach über `MOS_PUBLIC_LIVE_ENTRY_URL=https://kundenstatus-app.onrender.com/mieten/` im schlanken MOS-Frontend einblenden. `enabled` und `live_enabled` bleiben bis zur Abnahme false.
 6. Im Betriebsplan regelmäßig `python -m flask --app app mos-booking-reconcile` ausführen. Der Befehl sendet keine Bestätigungen ohne signierten Webhook; er gleicht offene Sessions und unveränderliche Erstattungsaufträge ab. Im aktuellen Lauf wurde kein Scheduler angelegt. Fehlerausgabe und Admin-Prüfliste aktiv überwachen, unklare alte Aufträge manuell abgleichen.
-7. Adminansicht: `/mieten/admin` (Test: `/mietwagen-test/admin`), geschützt durch bestehenden Admin-Login/CSRF. Kundenstatus und Download sind sitzungsgebunden; bei verlorenem Browserzugang hilft die Werkstatt nach Identitätsprüfung. Automatischer Mailversand ist nicht Teil dieser Implementierung.
+7. Adminansicht: `/mieten/admin` (Test: `/mietwagen-test/admin`), geschützt durch bestehenden Admin-Login/CSRF. Kundenstatus und signierter PDF-Download sind sitzungsgebunden; bei verlorenem Browserzugang hilft die Werkstatt nach Identitätsprüfung mit der gespeicherten Vertragskopie. Automatischer Mailversand ist nicht Teil dieser Implementierung.
 8. Bei Störung `enabled=false`: keine neuen Buchungen, vorhandene Holds bleiben gesperrt; konfigurierte Webhook-/Status-/Erstattungswege müssen weiterlaufen. Nicht Datenbankzeilen löschen oder unklare Zahlungen einfach freigeben. Hinter einem Proxy die tatsächliche, vertrauenswürdig konfigurierte Client-IP prüfen: die persistente Rategrenze nutzt `remote_addr`, nicht ungeprüfte Forwarded-Header.
 
 ## Verifikation

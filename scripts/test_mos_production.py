@@ -119,7 +119,8 @@ class ProductionTests(unittest.TestCase):
         cfg=json.loads(json.dumps(self.state['cfg']))
         cfg.update(mode='live',live_enabled=True,origin='https://booking.example.invalid',
             terms_version='test-fixture-final-v1',deposit_method='charge_with_rent_refund_after_return',
-            privacy_url='https://booking.example.invalid/privacy',merchant_name='TEST',merchant_address='TEST',
+            privacy_url='https://booking.example.invalid/privacy',merchant_name='Gärtner GmbH Karosserie + Lack',
+            merchant_address='Binauer Höhe 4, 74821 Mosbach, Deutschland',
             merchant_email='test@example.invalid',merchant_phone='TEST')
         cfg['launch']={name:{'approved_by':'TEST FIXTURE','approved_at':'2026-09-22','evidence':'TEST ONLY'}
             for name in ['business_review','legal_review','finance_review','privacy_review','sandbox_acceptance','postgres_acceptance']}
@@ -131,6 +132,8 @@ class ProductionTests(unittest.TestCase):
 
     def test_each_launch_gate_independently_required(self):
         cfg=self.ready_config();self.assertEqual(launch_errors(cfg),[])
+        wrong=json.loads(json.dumps(cfg));wrong['merchant_name']='Autovermietung MOS'
+        self.assertTrue(any('Vermieter' in error for error in launch_errors(wrong)))
         for field in ['business_review','legal_review','finance_review','privacy_review','sandbox_acceptance','postgres_acceptance','insurance']:
             changed=json.loads(json.dumps(cfg));del changed['launch'][field]
             self.assertTrue(launch_errors(changed),field)
