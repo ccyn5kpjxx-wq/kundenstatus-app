@@ -1,6 +1,6 @@
 # MOS: getrennte PostgreSQL- und Stripe-Abnahme
 
-Stand 23.09.2026, aktualisiert nach der Entscheidung für eine separate
+Stand 23.09.2026, aktualisiert nach dem lokalen Stripe-Testlauf mit separater
 Kreditkartenautorisierung. Keine Livefreigabe, kein Deployment.
 
 ## Tatsächlich ausgeführt
@@ -56,16 +56,43 @@ wieder gestoppt; keine Produktivdatenbank wurde kontaktiert.
 
 ## Stripe-Sandbox: Voraussetzungen und Abnahme
 
-In der am 23.09.2026 geprüften lokalen Umgebung fehlen
-`MOS_STRIPE_TEST_KEY`, `MOS_STRIPE_PUBLISHABLE_KEY` und
-`MOS_STRIPE_WEBHOOK_SECRET`. Das Stripe-SDK ist in der vorbereiteten lokalen
-Python-Umgebung installiert; die Stripe CLI wurde im ignorierten Agenten-Hub
-installiert, aber noch nicht authentifiziert oder als Listener gestartet.
-Deshalb wurden keine echte Stripe-
-Testautorisierung, Checkout-Session, Webhook-Zustellung oder Erstattung
-ausgeführt. `scripts/run_mos_public_test.py` löscht geerbte Stripe-Variablen
-absichtlich und startet ausschließlich den synthetischen Offline-Modus; er
-ist kein Sandbox-Runner.
+Der lokale Kernablauf wurde am 23.09.2026 mit vorhandenen Schlüsseln des
+regulären Stripe-**Testmodus** und einem temporären signierten Stripe-CLI-
+Webhook-Listener ausgeführt. Die Schlüssel und das Listener-Secret wurden für
+den Lauf in lokalen Prozessvariablen verwendet; eine kurzzeitige ignorierte
+Transferdatei wurde gelöscht. Nichts davon wurde in Git oder der
+Testdatenbank gespeichert.
+`scripts/run_mos_public_test.py` löscht geerbte Stripe-Variablen absichtlich
+und startet ausschließlich den synthetischen Offline-Modus; er ist kein
+Sandbox-Runner.
+
+Beim ersten Versuch lehnte Stripe die für jede Kartenautorisierung erzwungene
+Option `request_extended_authorization=if_available` mit einem Fehler zur
+Kontoberechtigung ab. Der Gateway fordert diese Erweiterung für neue
+PaymentIntents jetzt nicht mehr automatisch an. `capture_method=manual` und
+die Prüfung der **tatsächlich** von Stripe gemeldeten Frist `capture_before`
+bleiben erhalten. Damit werden für dieses Konto nur Mieten zugelassen, deren
+Rückgabe plus 24 Stunden in das normale Autorisierungsfenster passt. Eine
+verlängerte Autorisierung wäre eine gesonderte Stripe-Kontofreigabe und ist
+für den getesteten Ablauf nicht vorausgesetzt.
+
+**Tatsächlicher Stripe-Testlauf:** Ein synthetischer i10 wurde für
+25.–26.09.2026, jeweils 09:00 Uhr, zu 39 € gebucht. Der Entwurfsvertrag wurde
+zuerst digital unterschrieben. Stripe bestätigte auf einer Test-Kreditkarte
+einen 500-€-PaymentIntent mit `requires_capture`, 50.000 Cent autorisierbar,
+`amount_received=0` und `capture_before` am 30.09.2026; die Frist reichte
+über die Rückgabe plus 24 Stunden. Danach wurde eine getrennte 39-€-
+Checkout-Session im Testmodus bezahlt (`complete`, `paid`,
+`livemode=false`). Der signierte `checkout.session.completed`-Webhook wurde
+lokal zugestellt und genau einmal gespeichert; in der isolierten Datenbank
+standen genau ein bestätigter Mietvorgang und eine signierte Vertrags-PDF.
+PDF-Header und gespeicherter SHA-256-Hash wurden geprüft.
+
+Anschließend wurde dieselbe synthetische Buchung weniger als 48 Stunden vor
+Abholung storniert: 3,90 € Stornogebühr, 35,10 € Stripe-Erstattung mit Status
+`succeeded`. Die Kautionsautorisierung wurde separat storniert; Stripe meldete
+für sie `canceled`, `amount_received=0`, `amount_capturable=0`. Dabei wurde
+kein echtes Geld bewegt und kein Kundenfahrzeug gebucht.
 
 Für die lokale Stripe-Sandbox steht jetzt `scripts/run_mos_stripe_staging.py`
 bereit. Dieser Starter prüft vor dem Anlegen einer Datenbank drei
@@ -155,11 +182,16 @@ Mietvorgang bestätigen; ein Erfolgs-Redirect genügt nicht.
    kontrollieren. Für Livebetrieb zusätzlich einen dauerhaften Job vorsehen;
    ein manueller Probelauf ersetzt ihn nicht.
 
-Offline- und Mock-Tests bestätigen Geschäftslogik und Fehlerbehandlung, **nicht**
-die Stripe-Rechte, Kartenbestätigung, tatsächliche Webhook-Zustellung oder
-Erstattung. Die hier beschriebene Sandbox-Abnahme ist noch offen. Für
-Kundenzahlungen fehlen außerdem belegter Selbstfahrervermietungsschutz für
-beide Fahrzeuge, reale freigegebene Termine, finale Bedingungen und weitere
-Freigaben laut [Launch-Paket](mos-launch-package.md). Die dokumentierte
+Die lokale Stripe-Kernkette einschließlich signiertem Webhook, Erstattung und
+Kautionsfreigabe ist damit nachgewiesen. Die weiteren Negativfälle aus der
+Checkliste, ein gemeinsamer Stripe-/PostgreSQL-Browserlauf, Restricted-Key-
+Rechte, dauerhafte Webhook-Konfiguration, Geräteprüfung und Hosting-Abnahme
+bleiben offen. Ein automatischer Browser-Sprung vom lokalen POST zum Stripe-
+Checkout wurde bei diesem Test nicht beobachtet; die bereits von der App
+erzeugte Test-Checkout-URL wurde für den Bezahlvorgang direkt geöffnet. Vor
+Produktivbetrieb ist auch dieser Übergang im Zielbrowser zu verifizieren.
+Für Kundenzahlungen fehlen außerdem belegter Selbstfahrervermietungsschutz
+für beide Fahrzeuge, reale freigegebene Termine, finale Bedingungen und
+weitere Freigaben laut [Launch-Paket](mos-launch-package.md). Die dokumentierte
 Allane-Mietwagennutzung und KONA-Übernahme ersetzen den Versicherungsnachweis
 nicht.

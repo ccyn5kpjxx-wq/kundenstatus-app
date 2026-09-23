@@ -127,9 +127,7 @@ class DepositGatewayTests(unittest.TestCase):
             api.create.return_value.to_dict.return_value = intent()
             created = gateway.create_deposit_intent(PARAMS, 'create-stripe')
             self.assertEqual(created['status'], 'requires_payment_method')
-            api.create.assert_called_once_with({**PARAMS, 'expand': ['latest_charge'],
-                                                'payment_method_options': {'card': {
-                                                    'request_extended_authorization': 'if_available'}}},
+            api.create.assert_called_once_with({**PARAMS, 'expand': ['latest_charge']},
                                                options={'idempotency_key': 'create-stripe'})
             api.retrieve.return_value.to_dict.return_value = intent('requires_capture')
             self.assertEqual(gateway.retrieve_deposit_intent('pi_test_synthetic')['amount_capturable'], 50_000)

@@ -42,12 +42,11 @@ def _deposit_params(params):
                 or set(options['card']) != {'request_extended_authorization'}
                 or options['card']['request_extended_authorization'] != 'if_available'):
             raise ValueError('Nicht freigegebene Kautions-Kartenoption.')
-    request = dict(params)
-    # An extended window is only requested when the card/account is eligible.
-    # The actual deadline still comes solely from the authorized charge.
-    request['payment_method_options'] = {
-        'card': {'request_extended_authorization': 'if_available'}}
-    return request
+    # Extended authorizations require a separately eligible Stripe account.
+    # The default manual-capture hold uses the ordinary card window. Even when
+    # the caller explicitly opts into an extension, coverage is determined
+    # solely from the authorized charge's actual capture_before timestamp.
+    return dict(params)
 
 
 def validate_deposit_intent(data, livemode, expected_id=None):
