@@ -34,7 +34,14 @@ def snapshot(payload):
         raise ValueError('Die Mietbedingungen wurden bei der Buchung nicht bestätigt.')
     if q.get('lessor_name', LESSOR_NAME) != LESSOR_NAME or q.get('lessor_address', LESSOR_ADDRESS) != LESSOR_ADDRESS:
         raise ValueError('Die Vertragspartei der Buchung muss geprüft werden.')
-    return {
+    if q.get('deposit_authorized_cents', 0) and (
+        q.get('deposit_method') != 'card_authorization_at_booking'
+        or q['deposit_authorized_cents'] != q['deposit_cents']
+        or q['deposit_charged_cents'] != 0
+        or q['amount_cents'] != q['rental_cents']
+    ):
+        raise ValueError('Zahlbetrag und Kreditkartenreservierung stimmen nicht überein.')
+    contract = {
         'lessor_name': LESSOR_NAME, 'lessor_address': LESSOR_ADDRESS,
         'offer_name': OFFER_NAME, 'customer_name': customer['name'],
         'customer_email': customer['email'], 'vehicle_name': q['vehicle_name'],
@@ -49,6 +56,12 @@ def snapshot(payload):
         'terms_version': q['rules_version'], 'terms_text': q['terms_text'],
         'test_only': q['test_only'],
     }
+    # Preserve hashes of already signed charge-and-refund contracts. New deposit
+    # fields are signed only when they were present in the displayed quote.
+    for key in ('deposit_authorized_cents', 'deposit_method'):
+        if key in q:
+            contract[key] = q[key]
+    return contract
 
 
 def canonical(value):
@@ -142,9 +155,19 @@ def render_pdf(contract, signed_at, signature, document_hash, signature_record_h
         ('Rückgabe', _slot(contract['end_slot'])),
         ('Mietdauer / Tagessatz', f"{contract['days']} Miettag(e) / {_eur(contract['daily_cents'])}"),
         ('Mietpreis inkl. MwSt.', _eur(contract['rental_cents'])),
-        ('Rückzahlbare Kaution', _eur(contract['deposit_cents'])),
-        ('Kaution im Zahlbetrag', _eur(contract['deposit_charged_cents'])),
-        ('Vorgesehener Zahlbetrag', _eur(contract['amount_cents'])),
+    ]
+    if contract.get('deposit_authorized_cents', 0):
+        rows += [
+            ('Kaution auf Kreditkarte reserviert', _eur(contract['deposit_authorized_cents']) + ' - keine Abbuchung'),
+            ('Zahlbetrag (nur Miete)', _eur(contract['amount_cents'])),
+        ]
+    else:
+        rows += [
+            ('Rückzahlbare Kaution', _eur(contract['deposit_cents'])),
+            ('Kaution im Zahlbetrag', _eur(contract['deposit_charged_cents'])),
+            ('Vorgesehener Zahlbetrag', _eur(contract['amount_cents'])),
+        ]
+    rows += [
         ('Vertragliche Selbstbeteiligung', _eur(contract['deductible_cents'])),
         ('Freikilometer', str(contract['included_km']) + ' km'),
         ('Mehrkilometer', _eur(contract['extra_km_cents']) + ' pro km'),

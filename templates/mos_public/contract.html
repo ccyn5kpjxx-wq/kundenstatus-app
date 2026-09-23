@@ -23,8 +23,10 @@
     <dt>Abholung und Rückgabe</dt><dd>{{ contract.start_slot|mos_slot }}<br>{{ contract.end_slot|mos_slot }}</dd>
     <dt>Mietdauer und Tagessatz</dt><dd>{{ contract.days }} Miettag(e) à {{ '%.2f'|format(contract.daily_cents/100)|replace('.', ',') }} €</dd>
     <dt>Miete inkl. MwSt.</dt><dd>{{ '%.2f'|format(contract.rental_cents/100)|replace('.', ',') }} €</dd>
-    <dt>Rückzahlbare Kaution</dt><dd>{{ '%.2f'|format(contract.deposit_cents/100)|replace('.', ',') }} €{% if contract.deposit_charged_cents %} · im vorgesehenen Zahlbetrag enthalten{% endif %}</dd>
-    <dt>{{ 'Gesamtzahlung' if h.status=='confirmed' else 'Vorgesehener Zahlbetrag' }}</dt><dd>{{ '%.2f'|format(contract.amount_cents/100)|replace('.', ',') }} €</dd>
+    {% if contract.deposit_authorized_cents|default(0) %}<dt>Kaution als Kreditkartenreservierung</dt><dd>{{ '%.2f'|format(contract.deposit_authorized_cents/100)|replace('.', ',') }} € · bei der Online-Reservierung zur Autorisierung vorgesehen, nicht zur Abbuchung; die Autorisierung ist zeitlich begrenzt</dd>
+    <dt>{{ 'Bezahlter Mietpreis' if h.status=='confirmed' else 'Vorgesehener Zahlbetrag (nur Miete)' }}</dt><dd>{{ '%.2f'|format(contract.amount_cents/100)|replace('.', ',') }} €</dd>
+    {% else %}<dt>Rückzahlbare Kaution</dt><dd>{{ '%.2f'|format(contract.deposit_cents/100)|replace('.', ',') }} €{% if contract.deposit_charged_cents %} · im vorgesehenen Zahlbetrag enthalten{% endif %}</dd>
+    <dt>{{ 'Gesamtzahlung' if h.status=='confirmed' else 'Vorgesehener Zahlbetrag' }}</dt><dd>{{ '%.2f'|format(contract.amount_cents/100)|replace('.', ',') }} €</dd>{% endif %}
     <dt>Vertragliche Selbstbeteiligung</dt><dd>{{ '%.2f'|format(contract.deductible_cents/100)|replace('.', ',') }} € gemäß den Mietbedingungen</dd>
     <dt>Kilometer</dt><dd>{{ contract.included_km }} km inklusive; {{ '%.2f'|format(contract.extra_km_cents/100)|replace('.', ',') }} € je Mehrkilometer</dd>
   </dl>

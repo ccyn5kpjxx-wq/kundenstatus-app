@@ -1,0 +1,51 @@
+{% extends 'mos_public/base.html' %}{% block content %}
+<h1>500 € Kaution auf der Karte reservieren</h1>
+<section class="card">
+  <h2>{{ q.vehicle_name }}</h2>
+  <p>{{ q.start_slot|mos_slot }} bis {{ q.end_slot|mos_slot }}</p>
+  <p>Du hast den Mietvertrag bereits digital unterschrieben. Jetzt werden <strong>500 € auf deiner Kreditkarte reserviert, nicht abgebucht</strong>. Anschließend bezahlst du den Mietpreis von <strong>{{ '%.2f'|format(q.rental_cents/100)|replace('.', ',') }} €</strong> separat online. Vor Ort ist dafür kein Zahlungsschritt nötig.</p>
+  <p>Für die Kaution ist eine Kreditkarte erforderlich. Debit- und Prepaidkarten können dafür nicht verwendet werden.</p>
+  <p>Eine Buchung wird erst bestätigt, wenn Kartenreservierung, Mietzahlung und Verfügbarkeit geprüft sind. Eine zeitlich nicht ausreichend gültige Kartenreservierung wird nicht für die Buchung verwendet.</p>
+  {% if offline %}
+  <p class="notice">Offline-Test: Keine Kartendaten eingeben. Der Knopf erzeugt nur eine synthetische Reservierung.</p>
+  <form method="post" action="{{ url_for('mos_public.simulate_deposit',hold_id=h.id) }}">{{ csrf_field()|safe }}<button>Test-Kartenreservierung simulieren</button></form>
+  {% else %}
+  <div id="payment-element" aria-label="Sicheres Kartenformular von Stripe"></div>
+  <form id="deposit-form"><button id="deposit-button" type="submit">500 € auf der Karte reservieren</button></form>
+  <p id="deposit-message" role="status" aria-live="polite"></p>
+  <script src="https://js.stripe.com/v3/"></script>
+  <script>
+  (() => {
+    const stripe = Stripe({{ publishable_key|tojson }});
+    const elements = stripe.elements({clientSecret: {{ client_secret|tojson }}});
+    elements.create('payment').mount('#payment-element');
+    const form = document.getElementById('deposit-form');
+    const button = document.getElementById('deposit-button');
+    const message = document.getElementById('deposit-message');
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      button.disabled = true;
+      message.textContent = 'Kartenreservierung wird geprüft …';
+      try {
+        const result = await stripe.confirmPayment({
+          elements,
+          confirmParams: {return_url: {{ url_for('mos_public.status',hold_id=h.id,_external=True)|tojson }}},
+          redirect: 'if_required'
+        });
+        if (result.error) {
+          message.textContent = result.error.message || 'Kartenreservierung nicht möglich. Bitte erneut versuchen.';
+          button.disabled = false;
+          return;
+        }
+        location.assign({{ url_for('mos_public.status',hold_id=h.id)|tojson }});
+      } catch (_) {
+        message.textContent = 'Kartenreservierung derzeit nicht erreichbar. Bitte den Status prüfen.';
+        button.disabled = false;
+      }
+    });
+  })();
+  </script>
+  {% endif %}
+  <a href="{{ url_for('mos_public.status',hold_id=h.id) }}">Buchungsstatus ansehen</a>
+</section>
+{% endblock %}

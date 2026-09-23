@@ -28,8 +28,8 @@ def launch_errors(cfg):
             errors.append('Belegter Selbstfahrervermietungsschutz fehlt: '+slug)
         if not cfg.get('fleet',{}).get(slug,{}).get('expected_name'):
             errors.append('Geprüfte Fahrzeugidentität fehlt: '+slug)
-    if cfg.get('deposit_method')!='charge_with_rent_refund_after_return':
-        errors.append('Separater Kautionseinzug mit Rückerstattung ist nicht freigegeben.')
+    if cfg.get('deposit_method')!='card_authorization_at_booking':
+        errors.append('Online-Kartenautorisierung ohne Kautionseinzug ist nicht konfiguriert.')
     if not cfg.get('terms_version') or cfg['terms_version'].startswith('draft:'):
         errors.append('Freigegebene Bedingungsversion fehlt.')
     for name in ('terms_text','privacy_url','merchant_name','merchant_address','merchant_email','merchant_phone'):

@@ -36,7 +36,8 @@ class PublicTests(unittest.TestCase):
         self.client=portal.app.test_client()
         self.client.get('/mietwagen-test/')
         db=portal.get_db()
-        for table in ('miet_checkout_contracts','miet_checkout_events','miet_checkout_holds','mietvorgaenge'):db.execute('DELETE FROM '+table)
+        for table in ('miet_checkout_contracts','miet_checkout_events','miet_checkout_deposit_auths',
+                      'miet_checkout_holds','mietvorgaenge'):db.execute('DELETE FROM '+table)
         db.commit();db.close()
         self.cfg=portal.app.extensions['mos_public_booking']['cfg']
 
@@ -72,6 +73,154 @@ class PublicTests(unittest.TestCase):
         draw.line([(40,110),(90,40),(125,125),(180,60),(240,110),(320,50),(380,105)],fill=(20,30,40,255),width=5)
         buf=BytesIO();image.save(buf,format='PNG')
         return 'data:image/png;base64,'+b64encode(buf.getvalue()).decode('ascii')
+
+    def card_deposit(self,slug='kona'):
+        token,quote_page=self.quote(slug)
+        checkout=self.checkout(token)
+        self.assertEqual(checkout.status_code,303)
+        self.assertTrue(checkout.location.endswith('/kaution'))
+        hold=checkout.location.rsplit('/',2)[-2]
+        state=portal.app.extensions['mos_public_booking']
+        intent_id=state['service']._deposit_record(hold)['intent_id']
+        self.assertIsNone(state['service'].read(hold)['session_id'])
+        return hold,intent_id,quote_page
+
+    def test_card_authorization_before_rent_only_checkout(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,intent_id,quote_page=self.card_deposit()
+            self.assertIn('147,00',quote_page.get_data(as_text=True))
+            self.assertIn('nicht abgebucht',quote_page.get_data(as_text=True))
+            state=portal.app.extensions['mos_public_booking']
+            gateway=state['gateway']
+            self.assertEqual(gateway.retrieve_deposit_intent(intent_id)['status'],'requires_payment_method')
+            deposit_page=self.client.get('/mietwagen-test/status/'+hold+'/kaution')
+            self.assertEqual(deposit_page.status_code,200)
+            self.assertIn('Kaution auf der Karte reservieren',deposit_page.get_data(as_text=True))
+            self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/retry').location,
+                             '/mietwagen-test/status/'+hold+'/kaution')
+            self.assertEqual(self.rows(),[])
+            reserved=self.post('/mietwagen-test/status/'+hold+'/kaution-test')
+            self.assertEqual(reserved.status_code,303)
+            intent=gateway.retrieve_deposit_intent(intent_id)
+            self.assertEqual(intent['status'],'requires_capture')
+            self.assertEqual(intent['amount_capturable'],50000)
+            self.assertEqual(intent['amount_received'],0)
+            self.assertIn('Kaution auf der Kreditkarte reserviert',self.client.get(reserved.location).get_data(as_text=True))
+            rent=self.post('/mietwagen-test/status/'+hold+'/retry')
+            self.assertEqual(rent.status_code,303)
+            sid=rent.location.rsplit('/',1)[1]
+            self.assertEqual(gateway.retrieve(sid)['amount_total'],14700)
+            self.assertEqual(self.rows(),[])
+            paid=self.post(rent.location)
+            self.assertEqual(paid.status_code,303)
+            self.assertEqual(len(self.rows()),1)
+            receipt=self.client.get('/mietwagen-test/status/'+hold+'/bestaetigung.txt').get_data(as_text=True)
+            self.assertIn('nicht abgebucht: 500.00 EUR',receipt)
+            self.assertIn('Gezahlter Mietpreis: 147.00 EUR',receipt)
+            self.assertEqual(gateway.retrieve_deposit_intent(intent_id)['amount_received'],0)
+
+    def test_card_deposit_cancel_before_rent_releases_hold(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,intent_id,_=self.card_deposit()
+            self.post('/mietwagen-test/status/'+hold+'/kaution-test')
+            released=self.post('/mietwagen-test/status/'+hold+'/cancel')
+            self.assertEqual(released.status_code,303)
+            state=portal.app.extensions['mos_public_booking']
+            self.assertEqual(state['service'].read(hold)['status'],'released')
+            self.assertEqual(state['service']._deposit_record(hold)['status'],'released')
+            self.assertEqual(state['gateway'].retrieve_deposit_intent(intent_id)['status'],'canceled')
+            self.assertEqual(self.rows(),[])
+            status_page=self.client.get(released.location).get_data(as_text=True)
+            self.assertIn('freigegeben',status_page)
+            self.assertNotIn('Kartenreservierung wird geprüft',status_page)
+            self.assertIn('war auf der Kreditkarte reserviert und wurde freigegeben',status_page)
+            self.quote()
+
+    def test_debit_or_prepaid_card_cannot_start_rent_checkout(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            state=portal.app.extensions['mos_public_booking']
+            for funding in ('debit','prepaid'):
+                with self.subTest(funding=funding):
+                    hold,intent_id,_=self.card_deposit()
+                    state['gateway'].authorize_deposit_intent(intent_id,funding=funding)
+                    status=self.client.get('/mietwagen-test/status/'+hold)
+                    self.assertEqual(status.status_code,200)
+                    page=status.get_data(as_text=True)
+                    self.assertIn('freigegeben',page)
+                    self.assertIn('Bitte neu buchen',page)
+                    self.assertEqual(state['service'].read(hold)['status'],'released')
+                    self.assertIsNone(state['service'].read(hold)['session_id'])
+                    self.assertEqual(state['service']._deposit_record(hold)['status'],'released')
+                    intent=state['gateway'].retrieve_deposit_intent(intent_id)
+                    self.assertEqual(intent['status'],'canceled')
+                    self.assertEqual(intent['amount_received'],0)
+                    self.assertEqual(self.rows(),[])
+                    retry=self.post('/mietwagen-test/status/'+hold+'/retry')
+                    self.assertEqual(retry.status_code,303)
+                    self.assertEqual(retry.location,'/mietwagen-test/status/'+hold)
+
+    def test_card_deposit_paid_cancel_refunds_only_rent_and_releases_card(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,intent_id,_=self.card_deposit()
+            self.post('/mietwagen-test/status/'+hold+'/kaution-test')
+            rent=self.post('/mietwagen-test/status/'+hold+'/retry')
+            self.assertEqual(self.post(rent.location).status_code,303)
+            cancelled=self.post('/mietwagen-test/status/'+hold+'/stornieren',{'confirm':'yes'})
+            self.assertEqual(cancelled.status_code,303)
+            state=portal.app.extensions['mos_public_booking']
+            self.assertEqual(state['service']._deposit_record(hold)['status'],'released')
+            intent=state['gateway'].retrieve_deposit_intent(intent_id)
+            self.assertEqual(intent['status'],'canceled')
+            self.assertEqual(intent['amount_received'],0)
+            db=portal.get_db()
+            try:
+                refunds=[dict(row) for row in db.execute(
+                    'SELECT amount_cents,status FROM miet_checkout_refunds WHERE hold_id=?',(hold,)).fetchall()]
+            finally:db.close()
+            self.assertEqual(refunds,[{'amount_cents':14700,'status':'succeeded'}])
+            status_page=self.client.get(cancelled.location).get_data(as_text=True)
+            self.assertIn('Buchung storniert',status_page)
+            self.assertNotIn('Kartenreservierung wird geprüft',status_page)
+            self.assertIn('war auf der Kreditkarte reserviert und wurde freigegeben',status_page)
+
+    def test_card_deposit_admin_release_requires_recorded_return(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,intent_id,_=self.card_deposit()
+            self.post('/mietwagen-test/status/'+hold+'/kaution-test')
+            rent=self.post('/mietwagen-test/status/'+hold+'/retry')
+            self.assertEqual(self.post(rent.location).status_code,303)
+            state=portal.app.extensions['mos_public_booking']
+            active_check=portal.app.test_cli_runner().invoke(args=['mos-booking-reconcile'])
+            self.assertEqual(active_check.exit_code,0,active_check.output)
+            self.assertIn('1 aktive Kartenreservierungen',active_check.output)
+            self.assertIn('offene Fehler: 0',active_check.output)
+            self.assertEqual(state['gateway'].retrieve_deposit_intent(intent_id)['status'],'requires_capture')
+            admin=portal.app.test_client()
+            with admin.session_transaction() as session:session['admin']=True
+            admin.get('/mietwagen-test/admin')
+            action='/mietwagen-test/admin/'+hold
+            data={'action':'deposit','reason':'Rückgabeprotokoll geprüft'}
+            premature=self.post(action,data,client=admin)
+            self.assertEqual(premature.status_code,409)
+            self.assertIn('erst nach protokollierter',premature.get_data(as_text=True))
+            self.assertEqual(state['gateway'].retrieve_deposit_intent(intent_id)['status'],'requires_capture')
+            rental_id=state['service'].read(hold)['mietvorgang_id']
+            db=portal.get_db()
+            try:
+                db.execute("UPDATE mietvorgaenge SET status='zurueck' WHERE id=?",(rental_id,))
+                db.commit()
+            finally:db.close()
+            released=self.post(action,data,client=admin)
+            self.assertEqual(released.status_code,303)
+            self.assertEqual(state['gateway'].retrieve_deposit_intent(intent_id)['status'],'canceled')
+            self.assertEqual(state['service']._deposit_record(hold)['status'],'released')
+            settled_check=portal.app.test_cli_runner().invoke(args=['mos-booking-reconcile'])
+            self.assertEqual(settled_check.exit_code,0,settled_check.output)
+            self.assertIn('0 aktive Kartenreservierungen',settled_check.output)
+            self.assertIn('offene Fehler: 0',settled_check.output)
+            status_page=self.client.get('/mietwagen-test/status/'+hold).get_data(as_text=True)
+            self.assertIn('war auf der Kreditkarte reserviert und wurde freigegeben',status_page)
+            self.assertNotIn('Kartenreservierung wird geprüft',status_page)
 
     def test_incoming_vehicle_has_no_public_quote(self):
         vid=self.cfg['fleet']['kona']['id']

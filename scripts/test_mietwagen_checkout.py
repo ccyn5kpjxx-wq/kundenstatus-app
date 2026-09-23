@@ -1,5 +1,8 @@
 """Real portal functions/routes with synthetic records in an isolated database."""
 from concurrent.futures import ThreadPoolExecutor
+from base64 import b64encode
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 import json
@@ -7,8 +10,10 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import uuid
+from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -34,6 +39,7 @@ with patch.object(Path, 'exists', lambda p: False if p in (ROOT/'.env',ROOT/'.en
     import app as portal
 from mietwagen_checkout import SharedCheckout
 from mos_booking.gateway import OfflineGateway
+from mos_public_contract import presign_quote
 assert portal.app.config['MOS_SHARED_CHECKOUT_ENABLED'] is False
 
 
@@ -52,6 +58,30 @@ class InventoryTests(unittest.TestCase):
 
     def hold(self, key=None, start='2030-01-10', end='2030-01-12'):
         return self.s.reserve(key or uuid.uuid4().hex,self.vid,start,end,self.customer,self.quote)
+
+    def authorization_hold(self, start_delta=None):
+        start = datetime.now(timezone.utc) + (start_delta or timedelta(days=1))
+        start = start.replace(second=0, microsecond=0)
+        end = start + timedelta(days=1)
+        image = Image.new('RGBA', (700, 180), (255, 255, 255, 0))
+        draw = ImageDraw.Draw(image)
+        draw.line([(40, 110), (90, 40), (125, 125), (180, 60), (240, 110), (320, 50), (380, 105)],
+                  fill=(20, 30, 40, 255), width=5)
+        output = BytesIO()
+        image.save(output, format='PNG')
+        signature = 'data:image/png;base64,' + b64encode(output.getvalue()).decode('ascii')
+        quote = {'amount_cents': 7800, 'rental_cents': 7800, 'deposit_charged_cents': 0,
+                 'deposit_authorized_cents': 50000, 'deposit_cents': 50000,
+                 'deposit_method': 'card_authorization_at_booking', 'currency': 'eur',
+                 'rules_version': 'synthetic-card-auth-v1', 'vehicle_id': self.vid,
+                 'vehicle_name': 'Synthetischer Testwagen', 'vehicle_plate': 'TEST ONLY',
+                 'vehicle_vin': '', 'start_slot': start.isoformat(), 'end_slot': end.isoformat(),
+                 'days': 1, 'daily_cents': 7800, 'deductible_cents': 100000,
+                 'included_km': 100, 'extra_km_cents': 30, 'terms_text': 'Nur synthetischer Test.',
+                 'test_only': True}
+        signed = presign_quote(quote, self.customer, signature)
+        return self.s.reserve(uuid.uuid4().hex, self.vid, start.date().isoformat(),
+                              end.date().isoformat(), self.customer, signed)
 
     def admin(self,start='2030-01-10',end='2030-01-12'):
         return portal.create_mietvorgang(self.vid,kunde_name='Test Admin',kunde_email='admin@example.invalid',start_datum=start,end_datum=end)
@@ -294,6 +324,172 @@ class InventoryTests(unittest.TestCase):
         finally:
             db=portal.get_db();db.execute('DROP TRIGGER fail_confirmation');db.commit();db.close()
         self.s.handle_signed_event(raw,sig,self.secret);self.assertEqual(self.count(),1)
+
+    def test_authorization_then_rent_only_checkout_then_signed_confirmation(self):
+        h = self.authorization_hold()
+        with self.assertRaises(ValueError):
+            self.s.create_checkout(h['id'])
+        intent = self.s.prepare_deposit(h['id'])
+        self.assertEqual(intent['amount'], 50000)
+        self.assertFalse(intent['ready'])
+        with self.assertRaises(ValueError):
+            self.s.create_checkout(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7*24*3600)
+        self.assertTrue(self.s.reconcile_deposit(h['id'])['ready'])
+        session = self.s.create_checkout(h['id'])
+        self.assertEqual(session['amount_total'], 7800)
+        self.gateway.pay(session['id'])
+        raw, sig = self.gateway.signed_event(session['id'])
+        rid = self.s.handle_signed_event(raw, sig, self.secret)
+        self.assertTrue(rid)
+        self.assertEqual(self.s.read(h['id'])['status'], 'confirmed')
+        self.assertEqual(self.s._deposit_record(h['id'])['status'], 'authorized')
+
+    def test_short_card_hold_cannot_open_rent_checkout(self):
+        h = self.authorization_hold()
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=24*3600)
+        with self.assertRaisesRegex(ValueError, 'reicht nicht'):
+            self.s.create_checkout(h['id'])
+        self.assertEqual(self.s.read(h['id'])['status'], 'released')
+        self.assertIsNone(self.s.read(h['id'])['session_id'])
+        self.s.cancel_or_reconcile(h['id'], cancel=True)
+        self.assertEqual(self.s.read(h['id'])['status'], 'released')
+        self.assertEqual(self.s._deposit_record(h['id'])['status'], 'released')
+
+    def test_debit_card_hold_is_released_without_rent_checkout(self):
+        h = self.authorization_hold()
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], funding='debit')
+        with self.assertRaisesRegex(ValueError, 'Kreditkarte'):
+            self.s.create_checkout(h['id'])
+        self.assertEqual(self.gateway.retrieve_deposit_intent(intent['id'])['status'], 'canceled')
+        self.assertEqual(self.s.read(h['id'])['status'], 'released')
+        self.assertIsNone(self.s.read(h['id'])['session_id'])
+
+    def test_card_confirmation_extends_checkout_window_once(self):
+        h = self.authorization_hold()
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7*24*3600)
+        db = portal.get_db()
+        db.execute('UPDATE miet_checkout_holds SET expires_at=? WHERE id=?', (int(time.time()) + 100, h['id']))
+        db.commit();db.close()
+        self.assertTrue(self.s.reconcile_deposit(h['id'])['ready'])
+        extended = self.s.read(h['id'])['expires_at']
+        self.assertGreater(extended, int(time.time()) + 3500)
+        self.assertEqual(self.s.create_checkout(h['id'])['amount_total'], 7800)
+        self.assertEqual(self.s.read(h['id'])['expires_at'], extended)
+
+    def test_unknown_authorization_outcome_keeps_stock_and_late_retry_is_blocked(self):
+        h = self.authorization_hold()
+        original = self.gateway.create_deposit_intent
+        def lose_response(params, key):
+            original(params, key)
+            raise TimeoutError('provider response lost')
+        with patch.object(self.gateway, 'create_deposit_intent', side_effect=lose_response):
+            with self.assertRaises(TimeoutError):
+                self.s.prepare_deposit(h['id'])
+        with self.assertRaises(ValueError):
+            self.s.cancel_or_reconcile(h['id'], cancel=True)
+        with self.assertRaises(ValueError):
+            self.admin(h['start_datum'], h['end_datum'])
+        db = portal.get_db()
+        db.execute('UPDATE miet_checkout_deposit_auths SET created_at=1 WHERE hold_id=?', (h['id'],))
+        db.commit();db.close()
+        with self.assertRaisesRegex(ValueError, 'manuell abgeglichen'):
+            self.s.prepare_deposit(h['id'])
+        self.assertEqual(self.s.read(h['id'])['status'], 'pending')
+
+    def test_paid_rent_with_released_card_hold_requires_review(self):
+        h = self.authorization_hold()
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7*24*3600)
+        session = self.s.create_checkout(h['id'])
+        self.gateway.cancel_deposit_intent(intent['id'], 'test-external-release-' + h['id'])
+        self.gateway.pay(session['id'])
+        raw, sig = self.gateway.signed_event(session['id'])
+        self.assertIsNone(self.s.handle_signed_event(raw, sig, self.secret))
+        self.assertEqual(self.count(), 0)
+        self.assertEqual(self.s.read(h['id'])['status'], 'review')
+
+    def test_cancel_authorization_and_unpaid_rent_releases_inventory(self):
+        h = self.authorization_hold()
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7*24*3600)
+        session = self.s.create_checkout(h['id'])
+        self.s.cancel_or_reconcile(h['id'], cancel=True)
+        self.assertEqual(self.gateway.retrieve(session['id'])['status'], 'expired')
+        self.assertEqual(self.s.read(h['id'])['status'], 'released')
+        self.assertEqual(self.s._deposit_record(h['id'])['status'], 'released')
+        self.assertEqual(self.s.release_deposit(h['id'], 'repeat'), 'released')
+
+    def test_expired_unpaid_card_hold_is_released_by_reconciliation(self):
+        h = self.authorization_hold()
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7*24*3600)
+        db = portal.get_db()
+        db.execute('UPDATE miet_checkout_holds SET expires_at=1 WHERE id=?', (h['id'],))
+        db.commit();db.close()
+        self.s.cancel_or_reconcile(h['id'])
+        self.assertEqual(self.s.read(h['id'])['status'], 'released')
+        self.assertEqual(self.s._deposit_record(h['id'])['status'], 'released')
+
+    def test_unknown_rent_checkout_creation_never_auto_releases_card_or_stock(self):
+        h = self.authorization_hold()
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7*24*3600)
+        original = self.gateway.create
+        def lose_response(params, key):
+            original(params, key)
+            raise TimeoutError('checkout response lost')
+        with patch.object(self.gateway, 'create', side_effect=lose_response):
+            with self.assertRaises(TimeoutError):
+                self.s.create_checkout(h['id'])
+        db = portal.get_db()
+        db.execute('UPDATE miet_checkout_holds SET expires_at=1 WHERE id=?', (h['id'],))
+        db.commit();db.close()
+        with self.assertRaisesRegex(ValueError, 'manuell abgeglichen'):
+            self.s.cancel_or_reconcile(h['id'])
+        self.assertEqual(self.s.read(h['id'])['status'], 'pending')
+        self.assertEqual(self.s._deposit_record(h['id'])['status'], 'authorized')
+
+    def test_future_near_term_pickup_needs_no_generic_lead_time(self):
+        h = self.authorization_hold(start_delta=timedelta(minutes=3))
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7*24*3600)
+        self.assertEqual(self.s.create_checkout(h['id'])['amount_total'], 7800)
+
+    def test_elapsed_pickup_cancels_unused_card_hold_before_checkout(self):
+        h = self.authorization_hold(start_delta=timedelta(minutes=3))
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7*24*3600)
+        class AfterPickup(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime.now(tz) + timedelta(hours=1)
+        with patch('mietwagen_checkout.datetime', AfterPickup):
+            with self.assertRaisesRegex(ValueError, 'Abholtermin'):
+                self.s.create_checkout(h['id'])
+        self.assertEqual(self.s.read(h['id'])['status'], 'released')
+        self.assertEqual(self.gateway.retrieve_deposit_intent(intent['id'])['status'], 'canceled')
+        self.assertIsNone(self.s.read(h['id'])['session_id'])
+
+    def test_paid_webhook_after_pickup_needs_review(self):
+        h = self.authorization_hold(start_delta=timedelta(minutes=3))
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7*24*3600)
+        session = self.s.create_checkout(h['id'])
+        self.gateway.pay(session['id'])
+        raw, sig = self.gateway.signed_event(session['id'])
+        class AfterPickup(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime.now(tz) + timedelta(hours=1)
+        with patch('mietwagen_checkout.datetime', AfterPickup):
+            self.assertIsNone(self.s.handle_signed_event(raw, sig, self.secret))
+        self.assertEqual(self.s.read(h['id'])['status'], 'review')
+        self.assertEqual(self.s.read(h['id'])['grund'], 'paid_pickup_passed_review')
+        self.assertEqual(self.count(), 0)
 
 
 if __name__=='__main__':

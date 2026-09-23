@@ -50,6 +50,7 @@ def register(portal):
         app.config['MOS_PUBLIC_STRIPE_TEST_KEY']=os.environ.get('MOS_STRIPE_TEST_KEY','')
         app.config['MOS_PUBLIC_STRIPE_LIVE_KEY']=os.environ.get('MOS_STRIPE_LIVE_KEY','')
         app.config['MOS_PUBLIC_WEBHOOK_SECRET']=os.environ.get('MOS_STRIPE_WEBHOOK_SECRET','')
+        app.config['MOS_PUBLIC_STRIPE_PUBLISHABLE_KEY']=os.environ.get('MOS_STRIPE_PUBLISHABLE_KEY','')
     prefix='/mieten' if app.config['MOS_PUBLIC_BOOKING'].get('mode')=='live' else '/mietwagen-test'
     bp=Blueprint('mos_public',__name__,url_prefix=prefix)
 
@@ -108,6 +109,10 @@ def register(portal):
             if not secret.startswith('whsec_'):raise ValueError('Test-Webhook-Secret fehlt.')
             gateway=(StripeLiveGateway(app.config.get('MOS_PUBLIC_STRIPE_LIVE_KEY',''),cfg) if live else
                      StripeTestGateway(app.config.get('MOS_PUBLIC_STRIPE_TEST_KEY','')))
+            if cfg.get('deposit_method')=='card_authorization_at_booking':
+                publishable=app.config.get('MOS_PUBLIC_STRIPE_PUBLISHABLE_KEY','')
+                if not publishable.startswith('pk_live_' if live else 'pk_test_'):
+                    raise ValueError('Passender Stripe-Schlüssel für das sichere Kartenformular fehlt.')
         service=SharedCheckout(portal,gateway,cfg['origin']+prefix+'/status')
         app.config['MOS_SHARED_CHECKOUT_ENABLED']=bool(app.config['MOS_PUBLIC_BOOKING'].get('enabled'))
         db=portal.get_db()
@@ -154,6 +159,15 @@ def register(portal):
         response.headers.update({'Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow',
                                  'Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff',
                                  'X-Frame-Options':'DENY'})
+        if request.endpoint=='mos_public.deposit_page':
+            response.headers['Content-Security-Policy']=(
+                "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+                "form-action 'self' https://hooks.stripe.com; "
+                "script-src 'self' 'unsafe-inline' https://js.stripe.com; "
+                "style-src 'self' 'unsafe-inline' https://js.stripe.com; "
+                "font-src 'self' data:; img-src 'self' data: https://*.stripe.com; "
+                "frame-src https://js.stripe.com https://hooks.stripe.com; "
+                "connect-src 'self' https://api.stripe.com https://r.stripe.com https://m.stripe.network")
         return response
 
     @bp.errorhandler(ValueError)
@@ -168,32 +182,36 @@ def register(portal):
     def quote(slug,start,end):
         state=setup();cfg=state['cfg']
         if slug not in LISTINGS or start not in cfg['slots'] or end not in cfg['slots']:
-            raise ValueError('Bitte ein Testfahrzeug und freigegebene Testtermine wählen.')
+            raise ValueError('Bitte ein verfügbares Fahrzeug und freigegebene Termine wählen.')
         a,b=datetime.fromisoformat(start),datetime.fromisoformat(end)
         seconds=(b.astimezone(timezone.utc)-a.astimezone(timezone.utc)).total_seconds()
         days=math.ceil(seconds/86400)
         if a<=datetime.now(timezone.utc) or seconds<=0 or days>cfg['max_days']:
-            raise ValueError('Ungültiger Testzeitraum.')
+            raise ValueError('Ungültiger Mietzeitraum.')
         f=cfg['fleet'][slug];rate=f['daily_cents']
         if days>=f.get('discount_after_days',cfg['max_days']+1):rate=f['discount_cents']
         db=portal.get_db()
         try:
             vehicle=db.execute('SELECT id,bezeichnung,kennzeichen,fin_nummer,aktiv,status FROM mietfahrzeuge WHERE id=?',(f['id'],)).fetchone()
             if not vehicle or not int(vehicle['aktiv'] or 0) or portal.normalize_mietfahrzeug_status(vehicle['status']) in {'bald','wartung','inaktiv'}:
-                raise ValueError('Zugeordnetes Testfahrzeug ist nicht verfügbar.')
+                raise ValueError('Das zugeordnete Fahrzeug ist nicht verfügbar.')
             if cfg['mode']=='live' and vehicle['bezeichnung']!=f['expected_name']:
                 raise ValueError('Fahrzeugzuordnung muss von der Werkstatt geprüft werden.')
             if not portal.mietfahrzeug_zeitraum_frei_db(db,f['id'],a.date(),b.date()):
                 raise ValueError('Der Zeitraum ist bereits belegt. Bitte andere Termine wählen.')
         finally:db.close()
+        authorization=cfg.get('deposit_method')=='card_authorization_at_booking'
+        charged=cfg['mode'] in {'live','stripe_test'} and not authorization
         return {'slug':slug,'vehicle_id':f['id'],'vehicle_name':LISTINGS[slug],
             'portal_vehicle_name':vehicle['bezeichnung'],
             'vehicle_plate':vehicle['kennzeichen'] or '', 'vehicle_vin':vehicle['fin_nummer'] or '',
             'start_slot':start,'end_slot':end,
             'days':days,'daily_cents':rate,'rental_cents':days*rate,
-            'amount_cents':days*rate+(50000 if cfg['mode'] in {'live','stripe_test'} else 0),'currency':'eur',
-            'deposit_charged_cents':50000 if cfg['mode'] in {'live','stripe_test'} else 0,
-            'checkout_deposit':cfg['mode'] in {'live','stripe_test'},
+            'amount_cents':days*rate+(50000 if charged else 0),'currency':'eur',
+            'deposit_charged_cents':50000 if charged else 0,
+            'deposit_authorized_cents':50000 if authorization else 0,
+            'deposit_method':cfg.get('deposit_method',''),
+            'checkout_deposit':charged,
             'included_km':days*cfg['included_km_day'],'extra_km_cents':cfg['extra_km_cents'],
             'deposit_cents':cfg['deposit_cents'],'deductible_cents':cfg['deductible_cents'],
             'rules_version':cfg['terms_version'],'terms_text':cfg['terms_text'],'owner_hash':owner(),
@@ -224,7 +242,12 @@ def register(portal):
         text=('BUCHUNGSBESTÄTIGUNG' if cfg['mode']=='live' else 'TESTBESTÄTIGUNG – KEIN MIETVERTRAG')
         text+='\nReferenz: '+h['id']+'\n'+q['vehicle_name']+'\n'+q['start_slot']+' bis '+q['end_slot']
         text+='\nMieter: '+p['customer']['name']+'\nE-Mail: '+p['customer']['email']
-        text+=f"\nMiete: {q.get('rental_cents',q['amount_cents'])/100:.2f} EUR inkl. MwSt.\nKaution eingezogen: {q.get('deposit_charged_cents',0)/100:.2f} EUR\nGesamtzahlung: {q['amount_cents']/100:.2f} EUR"
+        text+=f"\nMiete: {q.get('rental_cents',q['amount_cents'])/100:.2f} EUR inkl. MwSt."
+        if q.get('deposit_authorized_cents'):
+            text+=f"\nKaution bei Buchung auf Kreditkarte autorisiert, nicht abgebucht: {q['deposit_authorized_cents']/100:.2f} EUR"
+            text+=f"\nGezahlter Mietpreis: {q['amount_cents']/100:.2f} EUR"
+        else:
+            text+=f"\nKaution eingezogen: {q.get('deposit_charged_cents',0)/100:.2f} EUR\nGesamtzahlung: {q['amount_cents']/100:.2f} EUR"
         text+='\nAbholung persönlich: Gärtner, Binauer Höhe 4, 74821 Mosbach-Lohrbach.'
         text+='\nVermieter und Vertragspartner: '+q.get('lessor_name',LESSOR_NAME)+', '+q.get('lessor_address',LESSOR_ADDRESS)
         text+='\nAutovermietung MOS ist nur die Bezeichnung des Angebots, keine eigene Vertragspartei.'
@@ -236,6 +259,14 @@ def register(portal):
         if account(hold_id)['cancellation']:text+='\n\nACHTUNG: Diese Buchung wurde inzwischen storniert. Abrechnung siehe Statusseite.'
         return text,200,{'Content-Type':'text/plain; charset=utf-8','Content-Disposition':'attachment; filename="MOS-Buchungsbestaetigung.txt"'}
 
+    def deposit_state(hold_id):
+        db=portal.get_db()
+        try:
+            row=db.execute('SELECT status FROM miet_checkout_deposit_auths WHERE hold_id=?',
+                           (hold_id,)).fetchone()
+            return row['status'] if row else None
+        finally:db.close()
+
     @bp.post('/status/<hold_id>/stornieren')
     def cancel_paid(hold_id):
         h,p=owned(hold_id)
@@ -243,6 +274,9 @@ def register(portal):
         rid=setup()['ledger'].cancel(hold_id)
         try:setup()['ledger'].process(rid)
         except Exception:pass  # Durable queued operation remains visible to admin/customer.
+        if p['quote'].get('deposit_authorized_cents'):
+            try:setup()['service'].release_deposit(hold_id,'Kundenstorno')
+            except Exception:app.logger.exception('MOS Kartenreservierung nach Storno noch offen')
         return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
 
     @bp.get('/admin')
@@ -250,8 +284,9 @@ def register(portal):
     def admin_bookings():
         db=portal.get_db()
         try:
-            holds=[dict(r) for r in db.execute('''SELECT h.*,c.signed_at FROM miet_checkout_holds h
+            holds=[dict(r) for r in db.execute('''SELECT h.*,c.signed_at,d.status AS deposit_status FROM miet_checkout_holds h
                 LEFT JOIN miet_checkout_contracts c ON c.hold_id=h.id
+                LEFT JOIN miet_checkout_deposit_auths d ON d.hold_id=h.id
                 ORDER BY h.expires_at DESC LIMIT 100''').fetchall()]
         finally:db.close()
         for h in holds:
@@ -270,13 +305,25 @@ def register(portal):
     def admin_action(hold_id):
         state=setup();action=request.form.get('action');reason=request.form.get('reason','').strip()
         h=state['service'].read(hold_id)
+        q=json.loads(h['payload'])['quote']
         if not reason:raise ValueError('Begründung/Prüfvermerk erforderlich.')
         if action=='cancel':rid=state['ledger'].cancel(hold_id,admin=True,no_show=request.form.get('no_show')=='yes')
         elif action=='credit':
             key=request.form.get('request_id','')
             if not 20<=len(key)<=100:raise ValueError('Erstattungsreferenz fehlt.')
             rid=state['ledger'].credit(hold_id,int(request.form.get('cents','')),reason,key)
-        elif action=='deposit':rid=state['ledger'].deposit(hold_id,reason)
+        elif action=='deposit':
+            if q.get('deposit_authorized_cents'):
+                db=portal.get_db()
+                try:
+                    rental=(db.execute('SELECT status FROM mietvorgaenge WHERE id=?',(h['mietvorgang_id'],)).fetchone()
+                            if h['mietvorgang_id'] else None)
+                finally:db.close()
+                if not rental or rental['status']!='zurueck':
+                    raise ValueError('Kartenreservierung erst nach protokollierter Rückgabe freigeben.')
+                state['service'].release_deposit(hold_id,reason)
+                return redirect(url_for('mos_public.admin_bookings'),code=303)
+            rid=state['ledger'].deposit(hold_id,reason)
         elif action=='retry_refund':
             rid=request.form.get('refund_id','')
             if rid not in {r['id'] for r in account(hold_id)['refunds']}:abort(404)
@@ -287,6 +334,10 @@ def register(portal):
         try:state['ledger'].process(rid)
         except Exception:
             portal.flash('Erstattungsauftrag gespeichert; Providerstatus unklar. Dieselbe Referenz erneut prüfen, keinen neuen Auftrag erzeugen.','warning')
+        if action=='cancel' and q.get('deposit_authorized_cents'):
+            try:state['service'].release_deposit(hold_id,reason)
+            except Exception:
+                portal.flash('Kartenreservierung noch offen; Providerstatus prüfen und Freigabe erneut ausführen.','warning')
         return redirect(url_for('mos_public.admin_bookings'),code=303)
 
     @bp.get('/')
@@ -306,11 +357,28 @@ def register(portal):
         for hid in holds:
             try:state['service'].cancel_or_reconcile(hid)
             except Exception:errors+=1
+        db=portal.get_db()
+        try:
+            release_ids=[r['id'] for r in db.execute('''SELECT h.id FROM miet_checkout_holds h
+                JOIN miet_checkout_cancellations c ON c.id=h.id
+                JOIN miet_checkout_deposit_auths d ON d.hold_id=h.id
+                WHERE d.status!='released' ''').fetchall()]
+            active_ids=[r['id'] for r in db.execute('''SELECT h.id FROM miet_checkout_holds h
+                JOIN miet_checkout_deposit_auths d ON d.hold_id=h.id
+                WHERE h.status='confirmed' AND d.status!='released'
+                AND NOT EXISTS (SELECT 1 FROM miet_checkout_cancellations c WHERE c.id=h.id)''').fetchall()]
+        finally:db.close()
+        for hid in release_ids:
+            try:state['service'].release_deposit(hid,'Stornierung erneut abgleichen')
+            except Exception:errors+=1
+        for hid in active_ids:
+            try:state['service'].reconcile_deposit(hid)
+            except Exception:errors+=1
         for rid in refunds:
             try:state['ledger'].process(rid)
             except Exception:errors+=1
         import click
-        click.echo(f'Geprüft: {len(holds)} Reservierungen, {len(refunds)} Erstattungen; offene Fehler: {errors}')
+        click.echo(f'Geprüft: {len(holds)} Reservierungen, {len(refunds)} Erstattungen, {len(release_ids)} Kartenfreigaben, {len(active_ids)} aktive Kartenreservierungen; offene Fehler: {errors}')
         if errors:raise click.ClickException('Offene Providerfehler; Admin-Prüfung erforderlich.')
 
     @bp.post('/quote')
@@ -322,7 +390,7 @@ def register(portal):
     @bp.post('/checkout')
     def checkout():
         if not app.config['MOS_PUBLIC_BOOKING'].get('enabled'):abort(404)
-        if request.form.get('accept')!='yes':raise ValueError('Bitte den Testentwurf ausdrücklich bestätigen.')
+        if request.form.get('accept')!='yes':raise ValueError('Bitte die angezeigten Mietbedingungen ausdrücklich bestätigen.')
         token=request.form.get('quote_token','')
         try:data=serializer().loads(token,max_age=900)
         except BadSignature:raise ValueError('Preisübersicht abgelaufen oder ungültig. Bitte neu prüfen.')
@@ -357,11 +425,63 @@ def register(portal):
         if not app.config['MOS_PUBLIC_BOOKING'].get('enabled'):
             return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
         signed_payload(p)
+        state=setup()
+        if p['quote'].get('deposit_authorized_cents'):
+            try:
+                state['service'].prepare_deposit(hold_id)
+                deposit=state['service'].reconcile_deposit(hold_id)
+            except Exception:
+                if deposit_state(hold_id)=='released':
+                    return render_status(hold_id,'Diese Kartenreservierung wurde freigegeben. Bitte mit einer Kreditkarte und einem passenden Termin neu buchen.'),409
+                app.logger.exception('MOS Kartenreservierung konnte nicht geprüft werden')
+                return render_status(hold_id,'Kartenreservierung derzeit nicht erreichbar. Bitte Status erneut prüfen.'),503
+            if not deposit.get('ready'):
+                if deposit.get('status') in {'requires_payment_method','requires_confirmation','requires_action'}:
+                    return redirect(url_for('mos_public.deposit_page',hold_id=hold_id),code=303)
+                return render_status(hold_id,'Kartenreservierung nicht ausreichend gültig. Es wurde kein Mietpreis abgebucht.'),409
         try:s=setup()['service'].create_checkout(hold_id)
         except Exception:
             return render_status(hold_id,
                 'Checkout derzeit nicht erreichbar. Bitte prüfe den Status und versuche es bei offener Reservierung erneut.'),503
         return redirect(s['url'],code=303)
+
+    @bp.get('/status/<hold_id>/kaution')
+    def deposit_page(hold_id):
+        h,p=owned(hold_id)
+        if (h['status']!='pending' or not app.config['MOS_PUBLIC_BOOKING'].get('enabled')
+                or not p['quote'].get('deposit_authorized_cents')):
+            return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
+        signed_payload(p)
+        state=setup()
+        try:
+            state['service'].prepare_deposit(hold_id)
+            deposit=state['service'].reconcile_deposit(hold_id)
+        except Exception:
+            if deposit_state(hold_id)=='released':
+                return render_status(hold_id,'Diese Kartenreservierung wurde freigegeben. Bitte mit einer Kreditkarte und einem passenden Termin neu buchen.'),409
+            app.logger.exception('MOS Kartenformular konnte nicht vorbereitet werden')
+            return render_status(hold_id,'Kartenreservierung derzeit nicht erreichbar. Bitte Status erneut prüfen.'),503
+        if deposit.get('ready'):
+            return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
+        if deposit.get('status') not in {'requires_payment_method','requires_confirmation','requires_action'}:
+            return render_status(hold_id,'Kartenreservierung nicht verfügbar. Der Mietpreis wurde nicht abgebucht.'),409
+        return render_template('mos_public/deposit.html',h=h,q=p['quote'],
+            client_secret=deposit['client_secret'],
+            publishable_key=app.config.get('MOS_PUBLIC_STRIPE_PUBLISHABLE_KEY',''),
+            offline=state['cfg']['mode']=='offline')
+
+    @bp.post('/status/<hold_id>/kaution-test')
+    def simulate_deposit(hold_id):
+        h,p=owned(hold_id)
+        state=setup()
+        if (state['cfg']['mode']!='offline' or h['status']!='pending'
+                or not p['quote'].get('deposit_authorized_cents')):
+            abort(404)
+        signed_payload(p)
+        deposit=state['service'].prepare_deposit(hold_id)
+        state['gateway'].authorize_deposit_intent(deposit['id'])
+        state['service'].reconcile_deposit(hold_id)
+        return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
 
     @bp.get('/status/<hold_id>')
     def status(hold_id):
@@ -372,6 +492,21 @@ def register(portal):
         try:setup()['service'].cancel_or_reconcile(hold_id)
         except Exception:pass
         h,_=owned(hold_id)
+        deposit=None
+        if p['quote'].get('deposit_authorized_cents'):
+            card_state=deposit_state(hold_id)
+            if card_state in {'released','releasing','review'}:
+                deposit={'status':card_state,'ready':False}
+            elif card_state:
+                try:deposit=setup()['service'].reconcile_deposit(hold_id)
+                except Exception:
+                    if deposit_state(hold_id)=='released':
+                        h,_=owned(hold_id)
+                        deposit={'status':'released','ready':False}
+                        error=error or 'Diese Kartenreservierung konnte nicht verwendet werden und wurde freigegeben. Bitte neu buchen.'
+                    else:
+                        app.logger.exception('MOS Kartenreservierung konnte nicht abgeglichen werden')
+                        error=error or 'Kartenreservierung muss geprüft werden. Bitte Werkstatt kontaktieren.'
         acc=account(hold_id)
         if h['status']=='confirmed':
             try:finalize_contract(portal,hold_id)
@@ -394,7 +529,7 @@ def register(portal):
         signed_at=signed['signed_at'] if signed else p['quote'].get('signed_at')
         signed_local=(datetime.fromisoformat(signed_at).astimezone(ZoneInfo('Europe/Berlin'))
                       .strftime('%d.%m.%Y um %H:%M Uhr')) if signed_at else None
-        return render_template('mos_public/status.html',h=h,q=p['quote'],account=acc,error=error,
+        return render_template('mos_public/status.html',h=h,q=p['quote'],account=acc,error=error,deposit=deposit,
                                contract=contract,signed=signed,signed_local=signed_local,
                                presigned=presigned)
 
