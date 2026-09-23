@@ -179,8 +179,35 @@ Mietvorgang bestätigen; ein Erfolgs-Redirect genügt nicht.
    dies ist keine Kautionserstattung, da kein Einzug erfolgte.
 5. `python -m flask --app app mos-booking-reconcile` mit Testkonfiguration
    ausführen und offene Autorisierungen, Checkouts, Refunds und Prüffälle
-   kontrollieren. Für Livebetrieb zusätzlich einen dauerhaften Job vorsehen;
+   kontrollieren. Der Job meldet jetzt bezahlte Checkouts ohne zugestellten
+   signierten Webhook, nach fünf Minuten noch unklare Checkout-Erzeugung,
+   ungeklärte Kartenfreigaben/-erzeugung, `review`-Buchungen und endgültig
+   fehlgeschlagene Erstattungen mit Fehlerstatus. Er bestätigt selbst keine
+   Buchung und ersetzt keine manuelle Klärung in Stripe und im Portal. Für
+   Livebetrieb zusätzlich einen dauerhaften Job mit Alarmierung vorsehen;
    ein manueller Probelauf ersetzt ihn nicht.
+
+### Nächste Stripe-Testfälle (noch nicht ausgeführt)
+
+Mit frischer synthetischer Buchung je Fall und ausschließlich Testschlüsseln:
+
+| Fall | Stripe-Testkarte | Erwartung vor dem Mietpreis-Checkout |
+| --- | --- | --- |
+| 3-D-Secure | `4000 0000 0000 3220` | Vor erfolgreicher Authentifizierung keine verwendbare Kautionsautorisierung; danach nur bei `requires_capture`, 500 € autorisierbar und `amount_received=0` fortfahren. |
+| Ablehnung | `4000 0000 0000 0002` | Keine gültige Autorisierung, kein Mietpreis-Checkout, keine bestätigte Miete. |
+| Debit | `4000 0566 5566 5556` | Trotz möglicher Autorisierung anhand `funding=debit` ablehnen und die Kaution ohne Einzug freigeben. |
+| Prepaid | `5105 1051 0510 5100` | Anhand `funding=prepaid` ablehnen und die Kaution ohne Einzug freigeben. |
+
+Die [Stripe-Testkarten](https://docs.stripe.com/testing) simulieren diese
+Karten- und Fehlerzustände. Eine gezielt zu kurze `capture_before`-Frist lässt
+sich damit nicht zuverlässig erzeugen: Der tatsächliche Wert muss beim
+Stripe-Lauf geprüft und die Ablehnung kurzer/fehlender Fristen separat mit
+einem kontrollierten Gateway-Test belegt werden. Die maßgebliche Frist steht
+laut [Stripe-Autorisierungsdokumentation](https://docs.stripe.com/payments/place-a-hold-on-a-payment-method)
+am Kartenumsatz. Zusätzlich einen geöffneten Miet-Checkout abbrechen und
+prüfen, dass Rücksprung oder Tab-Schließen keine Buchung bestätigen; eine
+offene Session kann über die [Expire-API](https://docs.stripe.com/api/checkout/sessions/expire)
+beendet werden.
 
 Die lokale Stripe-Kernkette einschließlich signiertem Webhook, Erstattung und
 Kautionsfreigabe ist damit nachgewiesen. Die weiteren Negativfälle aus der

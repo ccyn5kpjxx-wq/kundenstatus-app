@@ -538,9 +538,46 @@ def register(portal):
         for rid in refunds:
             try:state['ledger'].process(rid)
             except Exception:errors+=1
+        # A provider-paid Checkout must remain unconfirmed until its signed
+        # webhook arrives. Surface missing delivery to the operator instead of
+        # letting a successful reconciliation run conceal the paid hold.
+        db=portal.get_db()
+        try:
+            stale_before=int(time.time())-300
+            pending_sessions=[dict(r) for r in db.execute('''SELECT id,session_id FROM miet_checkout_holds
+                WHERE status='pending' AND session_id IS NOT NULL AND mietvorgang_id IS NULL''').fetchall()]
+            uncertain_checkouts=db.execute('''SELECT COUNT(*) AS n FROM miet_checkout_holds h
+                JOIN miet_checkout_creation_attempts a ON a.hold_id=h.id
+                WHERE h.status='pending' AND h.session_id IS NULL AND a.created_at<=?''',
+                (stale_before,)).fetchone()['n']
+            unresolved_deposits=db.execute('''SELECT COUNT(*) AS n FROM miet_checkout_deposit_auths
+                WHERE status IN ('releasing','review') OR (status='creating' AND created_at<=?)''',
+                (stale_before,)).fetchone()['n']
+            review_count=db.execute("SELECT COUNT(*) AS n FROM miet_checkout_holds WHERE status='review'").fetchone()['n']
+            failed_refunds=db.execute("SELECT COUNT(*) AS n FROM miet_checkout_refunds WHERE status='failed'").fetchone()['n']
+        finally:db.close()
+        paid_without_webhook=0
+        for pending in pending_sessions:
+            try:
+                h=state['service'].read(pending['id'])
+                if h['status']!='pending' or h['session_id']!=pending['session_id'] or h['mietvorgang_id']:
+                    continue
+                session=state['gateway'].retrieve(pending['session_id'])
+                state['service'].validate(h,session)
+                if session.get('status')=='complete' and session.get('payment_status')=='paid':
+                    current=state['service'].read(h['id'])
+                    if current['status']=='pending' and current['session_id']==pending['session_id'] and not current['mietvorgang_id']:
+                        paid_without_webhook+=1
+            except Exception:errors+=1
         import click
-        click.echo(f'Geprüft: {len(holds)} Reservierungen, {len(refunds)} Erstattungen, {len(release_ids)} Kartenfreigaben, {len(active_ids)} aktive Kartenreservierungen; offene Fehler: {errors}')
-        if errors:raise click.ClickException('Offene Providerfehler; Admin-Prüfung erforderlich.')
+        click.echo(f'Geprüft: {len(holds)} Reservierungen, {len(refunds)} Erstattungen, '
+                   f'{len(release_ids)} Kartenfreigaben, {len(active_ids)} aktive Kartenreservierungen; '
+                   f'offene Fehler: {errors}; bezahlte Checkouts ohne Webhook: {paid_without_webhook}; '
+                   f'unklare Checkout-Aufträge: {uncertain_checkouts}; ungeklärte Kartenreservierungen: {unresolved_deposits}; '
+                   f'Prüffälle: {review_count}; fehlgeschlagene Erstattungen: {failed_refunds}')
+        if (errors or paid_without_webhook or uncertain_checkouts or unresolved_deposits
+                or review_count or failed_refunds):
+            raise click.ClickException('Offene Zahlungs- oder Prüffälle; Admin-Prüfung erforderlich.')
 
     @bp.post('/quote')
     def preview():

@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from PIL import Image, ImageDraw
@@ -39,7 +40,7 @@ class PublicTests(unittest.TestCase):
         self.client.get('/mietwagen-test/')
         db=portal.get_db()
         for table in ('miet_checkout_refunds','miet_checkout_cancellations','miet_checkout_contracts',
-                      'miet_checkout_events','miet_checkout_deposit_auths',
+                      'miet_checkout_events','miet_checkout_deposit_auths','miet_checkout_creation_attempts',
                       'miet_checkout_holds','mietvorgaenge'):db.execute('DELETE FROM '+table)
         db.commit();db.close()
         self.cfg=portal.app.extensions['mos_public_booking']['cfg']
@@ -399,6 +400,117 @@ class PublicTests(unittest.TestCase):
         s=state['gateway'].pay(sid);h=s['metadata']['hold_id']
         self.client.get('/mietwagen-test/status/'+h)
         self.assertEqual(self.rows(),[])
+
+    def test_reconcile_alarms_on_paid_checkout_without_signed_webhook(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,intent_id,_=self.card_deposit()
+            self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/kaution-test').status_code,303)
+            rent=self.post('/mietwagen-test/status/'+hold+'/retry')
+            self.assertEqual(rent.status_code,303)
+            state=portal.app.extensions['mos_public_booking']
+            sid=state['service'].read(hold)['session_id']
+            self.assertEqual(state['gateway'].pay(sid)['payment_status'],'paid')
+            self.assertEqual(state['gateway'].retrieve_deposit_intent(intent_id)['amount_received'],0)
+            check=portal.app.test_cli_runner().invoke(args=['mos-booking-reconcile'])
+            self.assertNotEqual(check.exit_code,0,check.output)
+            self.assertIn('bezahlte Checkouts ohne Webhook: 1',check.output)
+            self.assertEqual(state['service'].read(hold)['status'],'pending')
+            self.assertEqual(self.rows(),[])
+
+    def test_reconcile_alarms_on_review_hold(self):
+        token,_=self.quote()
+        checkout=self.checkout(token)
+        state=portal.app.extensions['mos_public_booking']
+        sid=checkout.location.rsplit('/',1)[1]
+        hold=state['gateway'].retrieve(sid)['metadata']['hold_id']
+        db=portal.get_db()
+        try:
+            db.execute("UPDATE miet_checkout_holds SET status='review',grund='test_provider_review' WHERE id=?",(hold,))
+            db.commit()
+        finally:db.close()
+        check=portal.app.test_cli_runner().invoke(args=['mos-booking-reconcile'])
+        self.assertNotEqual(check.exit_code,0,check.output)
+        self.assertIn('Prüffälle: 1',check.output)
+        self.assertEqual(state['service'].read(hold)['status'],'review')
+        self.assertEqual(self.rows(),[])
+
+    def test_reconcile_alarms_on_failed_refund_without_resubmitting(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,_,quote=self.paid_card_booking()
+            state=portal.app.extensions['mos_public_booking']
+            rid=state['ledger'].cancel(hold,requested_at=datetime.fromisoformat(quote['start_slot'])-timedelta(hours=1))
+            payment_intent=state['service'].read(hold)['payment_intent']
+            def failed_refund(pi,amount,key):
+                self.assertEqual(pi,payment_intent)
+                self.assertEqual(key,'mos-refund-'+rid)
+                return {'id':'re_offline_failed_synthetic','object':'refund','payment_intent':pi,
+                        'amount':amount,'currency':'eur','status':'failed'}
+            with patch.object(state['gateway'],'refund',side_effect=failed_refund):
+                self.assertEqual(state['ledger'].process(rid),'failed')
+            state['service'].release_deposit(hold,'Synthetische Stornierung')
+            db=portal.get_db()
+            try:
+                before=dict(db.execute('SELECT * FROM miet_checkout_refunds WHERE id=?',(rid,)).fetchone())
+            finally:db.close()
+            self.assertEqual(before['status'],'failed')
+            self.assertEqual(before['provider_id'],'re_offline_failed_synthetic')
+            with patch.object(state['gateway'],'refund') as send, patch.object(state['gateway'],'retrieve_refund') as retrieve:
+                check=portal.app.test_cli_runner().invoke(args=['mos-booking-reconcile'])
+                send.assert_not_called()
+                retrieve.assert_not_called()
+            self.assertNotEqual(check.exit_code,0,check.output)
+            self.assertIn('fehlgeschlagene Erstattungen: 1',check.output)
+            self.assertIn('offene Fehler: 0',check.output)
+            db=portal.get_db()
+            try:
+                after=dict(db.execute('SELECT * FROM miet_checkout_refunds WHERE id=?',(rid,)).fetchone())
+                count=db.execute('SELECT COUNT(*) AS n FROM miet_checkout_refunds WHERE hold_id=?',(hold,)).fetchone()['n']
+            finally:db.close()
+            self.assertEqual(after,before)
+            self.assertEqual(count,1)
+
+    def test_reconcile_alarms_on_stale_checkout_creation_without_session(self):
+        token,_=self.quote()
+        state=portal.app.extensions['mos_public_booking']
+        with patch.object(state['gateway'],'create',side_effect=ConnectionError('synthetic timeout')):
+            self.assertEqual(self.checkout(token).status_code,503)
+        db=portal.get_db()
+        try:
+            hold=db.execute('SELECT id FROM miet_checkout_holds').fetchone()['id']
+            db.execute('UPDATE miet_checkout_creation_attempts SET created_at=? WHERE hold_id=?',
+                       (int(time.time())-601,hold))
+            db.commit()
+        finally:db.close()
+        self.assertIsNone(state['service'].read(hold)['session_id'])
+        with patch.object(state['gateway'],'create') as create:
+            check=portal.app.test_cli_runner().invoke(args=['mos-booking-reconcile'])
+            create.assert_not_called()
+        self.assertNotEqual(check.exit_code,0,check.output)
+        self.assertIn('unklare Checkout-Aufträge: 1',check.output)
+        self.assertEqual(state['service'].read(hold)['status'],'pending')
+        self.assertEqual(self.rows(),[])
+
+    def test_reconcile_alarms_on_releasing_deposit_without_rent_session(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,intent_id,_=self.card_deposit()
+            self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/kaution-test').status_code,303)
+            state=portal.app.extensions['mos_public_booking']
+            db=portal.get_db()
+            try:
+                db.execute("UPDATE miet_checkout_deposit_auths SET status='releasing' WHERE hold_id=?",(hold,))
+                db.commit()
+            finally:db.close()
+            self.assertIsNone(state['service'].read(hold)['session_id'])
+            with patch.object(state['gateway'],'cancel_deposit_intent') as release, patch.object(state['gateway'],'create') as create:
+                check=portal.app.test_cli_runner().invoke(args=['mos-booking-reconcile'])
+                release.assert_not_called()
+                create.assert_not_called()
+            self.assertNotEqual(check.exit_code,0,check.output)
+            self.assertIn('ungeklärte Kartenreservierungen: 1',check.output)
+            self.assertEqual(state['service']._deposit_record(hold)['status'],'releasing')
+            self.assertEqual(state['gateway'].retrieve_deposit_intent(intent_id)['status'],'requires_capture')
+            self.assertEqual(state['service'].read(hold)['status'],'pending')
+            self.assertEqual(self.rows(),[])
 
     def test_paid_contract_signature_and_immutable_pdf(self):
         token,quote_page=self.quote()
