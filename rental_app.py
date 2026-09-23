@@ -1,14 +1,18 @@
 import os
 
 from flask import Flask, jsonify, redirect, send_from_directory
+from mos_public_booking import website_response
 
 app = Flask(__name__, static_folder="static")
+app.config['MOS_PUBLIC_TEST_ENTRY_URL'] = None  # Explicit staging config only; inquiry remains default.
+app.config['MOS_PUBLIC_LIVE_ENTRY_URL'] = os.environ.get('MOS_PUBLIC_LIVE_ENTRY_URL') or None
 RENTAL_DIR = os.path.join(app.static_folder, "mietwagen_vorschau")
 PORTAL_BASE_URL = (os.environ.get("PORTAL_BASE_URL") or "https://kundenstatus-app.onrender.com").rstrip("/")
 
 @app.get("/")
 def homepage():
-    return send_from_directory(RENTAL_DIR, "index.html")
+    live_url=app.config.get('MOS_PUBLIC_LIVE_ENTRY_URL')
+    return website_response(send_from_directory(RENTAL_DIR, "index.html"), live_url or app.config.get('MOS_PUBLIC_TEST_ENTRY_URL'), live=bool(live_url))
 
 @app.get("/mietwagen-vorschau/")
 def homepage_legacy():

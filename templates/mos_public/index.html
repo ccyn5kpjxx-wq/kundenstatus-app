@@ -1,0 +1,6 @@
+{% extends 'mos_public/base.html' %}{% block content %}<h1>Auto wählen.<br>Termin prüfen.</h1><p>Abholung und Rückgabe persönlich bei Gärtner, Binauer Höhe 4, 74821 Mosbach-Lohrbach. {% if not live %}Die angebotenen Termine sind ausdrücklich konfigurierte Testtermine.{% endif %}</p>
+<form class="card" method="post" action="{{ url_for('mos_public.preview') }}">{{ csrf_field()|safe }}
+<label for="vehicle">Fahrzeug</label><select id="vehicle" name="vehicle">{% for slug,name in listings.items() %}<option value="{{ slug }}">{{ name }}</option>{% endfor %}</select>
+<div class="grid"><div><label for="start">Abholtermin</label><select name="start" id="start">{% for slot in slots %}<option value="{{ slot }}">{{ slot|mos_slot }}</option>{% endfor %}</select></div>
+<div><label for="end">Rückgabetermin</label><select name="end" id="end">{% for slot in slots %}<option value="{{ slot }}" {% if loop.last %}selected{% endif %}>{{ slot|mos_slot }}</option>{% endfor %}</select></div></div>
+<button>{{ "Verfügbarkeit und Preis prüfen" if live else "Verfügbarkeit und Testpreis prüfen" }}</button></form><p class="muted">Abholung und Rückgabe sind nur zu den angezeigten Terminen möglich. Auto-Abos und Werkstatt-Sondertarife bleiben individuelle Anfragen. Citroën C3 und Fiat sind hier nicht buchbar.</p>{% endblock %}

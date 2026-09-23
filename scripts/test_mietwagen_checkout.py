@@ -1,0 +1,300 @@
+"""Real portal functions/routes with synthetic records in an isolated database."""
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from unittest.mock import patch
+import json
+import os
+import sys
+import tempfile
+import threading
+import unittest
+import uuid
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+TEMP = tempfile.TemporaryDirectory(prefix='mos-shared-inventory-')
+os.environ.update({'RENDER':'isolated-test','DATABASE_URL':'','REQUIRE_POSTGRES_ON_RENDER':'0',
+    'DATA_DIR':TEMP.name,'SQLITE_DB_PATH':str(Path(TEMP.name)/'portal.db'),
+    'UPLOAD_DIR':str(Path(TEMP.name)/'uploads'),'FLASK_SECRET_KEY':'test-only-secret',
+    'BACKUP_DIR':str(Path(TEMP.name)/'backups'),'DELETED_UPLOAD_DIR':str(Path(TEMP.name)/'deleted'),
+    'AUTO_BACKUP_ENABLED':'0','AUTO_CHANGE_BACKUP_ENABLED':'0','LEXWARE_API_KEY':'',
+    'GOOGLE_DOC_AI_SERVICE_ACCOUNT_FILE':'','GOOGLE_DOC_AI_PROJECT_ID':'',
+    'WHATSAPP_ACCESS_TOKEN':'','WHATSAPP_WORKSHOP_NUMBERS':'','MAIL_IMAP_PASS':'','MAIL_SMTP_PASS':'',
+    'ADMIN_PASS':'test-only','OPENAI_API_KEY':'','GOOGLE_APPLICATION_CREDENTIALS':'',
+    'SCHADEN_IMAP_PASS':'','SCHADEN_SMTP_PASS':'','SMTP_PASSWORD':''})
+
+def no_network(*args, **kwargs):
+    raise AssertionError('No external network in inventory tests')
+
+patch('socket.socket.connect', no_network).start()
+patch('socket.socket.connect_ex', no_network).start()
+patch('socket.create_connection', no_network).start()
+exists = Path.exists
+with patch.object(Path, 'exists', lambda p: False if p in (ROOT/'.env',ROOT/'.env.local') else exists(p)):
+    import app as portal
+from mietwagen_checkout import SharedCheckout
+from mos_booking.gateway import OfflineGateway
+assert portal.app.config['MOS_SHARED_CHECKOUT_ENABLED'] is False
+
+
+class InventoryTests(unittest.TestCase):
+    def setUp(self):
+        portal.app.config.update(TESTING=True, MOS_SHARED_CHECKOUT_ENABLED=True)
+        self.secret = 'test-webhook-secret'
+        self.gateway = OfflineGateway(Path(TEMP.name)/'provider.db','http://127.0.0.1:5084',self.secret)
+        self.s = SharedCheckout(portal,self.gateway)
+        db=portal.get_db()
+        self.vid=db.execute('''INSERT INTO mietfahrzeuge (kennzeichen,bezeichnung,erstellt_am,geaendert_am)
+            VALUES ('TEST ONLY','Synthetisch',?,?)''',(portal.now_str(),portal.now_str())).lastrowid
+        db.commit();db.close()
+        self.customer={'name':'Test Person','email':'test@example.invalid','telefon':''}
+        self.quote={'amount_cents':10000,'currency':'eur','rules_version':'synthetic-test-only'}
+
+    def hold(self, key=None, start='2030-01-10', end='2030-01-12'):
+        return self.s.reserve(key or uuid.uuid4().hex,self.vid,start,end,self.customer,self.quote)
+
+    def admin(self,start='2030-01-10',end='2030-01-12'):
+        return portal.create_mietvorgang(self.vid,kunde_name='Test Admin',kunde_email='admin@example.invalid',start_datum=start,end_datum=end)
+
+    def count(self):
+        db=portal.get_db()
+        try:return db.execute('SELECT COUNT(*) AS n FROM mietvorgaenge WHERE mietfahrzeug_id=?',(self.vid,)).fetchone()['n']
+        finally:db.close()
+
+    def event(self,h,paid=True,event_id=None):
+        s=self.s.create_checkout(h['id'])
+        if paid and s['status']=='open':self.gateway.pay(s['id'])
+        raw,sig=self.gateway.signed_event(s['id'],event_id=event_id)
+        return self.s.handle_signed_event(raw,sig,self.secret)
+
+    def client(self):
+        c=portal.app.test_client()
+        with c.session_transaction() as s:s['admin']=True;s['csrf_token']='test-csrf'
+        return c
+
+    def test_disabled_creation_but_existing_holds_still_block_admin(self):
+        self.hold()
+        portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False
+        with self.assertRaises(ValueError):self.hold(start='2030-02-01',end='2030-02-02')
+        with self.assertRaises(ValueError):self.admin()
+
+    def test_admin_then_hold_and_hold_then_admin(self):
+        self.admin()
+        with self.assertRaises(ValueError):self.hold()
+        h=self.hold(start='2030-02-01',end='2030-02-02')
+        with self.assertRaises(ValueError):self.admin('2030-02-02','2030-02-03')
+        self.assertEqual(self.s.read(h['id'])['status'],'pending')
+
+    def test_competing_admin_checkout_exactly_one(self):
+        barrier=threading.Barrier(8)
+        def run(i):
+            barrier.wait()
+            try:
+                return ('ok',self.admin() if i%2 else self.hold()['id'])
+            except ValueError:return ('conflict',None)
+        with ThreadPoolExecutor(8) as pool:results=list(pool.map(run,range(8)))
+        self.assertEqual(sum(r[0]=='ok' for r in results),1)
+
+    def test_same_request_parallel_single_hold(self):
+        key=uuid.uuid4().hex
+        with ThreadPoolExecutor(5) as pool:holds=list(pool.map(lambda _:self.hold(key),range(5)))
+        self.assertEqual(len({h['id'] for h in holds}),1)
+        with self.assertRaises(ValueError):self.hold(key,end='2030-01-13')
+
+    def test_signed_success_parallel_exactly_one_rental(self):
+        h=self.hold();s=self.s.create_checkout(h['id']);self.gateway.pay(s['id'])
+        raw,sig=self.gateway.signed_event(s['id'])
+        with ThreadPoolExecutor(5) as pool:ids=list(pool.map(lambda _:self.s.handle_signed_event(raw,sig,self.secret),range(5)))
+        self.assertEqual(len(set(ids)),1);self.assertEqual(self.count(),1)
+        self.assertEqual(self.s.read(h['id'])['status'],'confirmed')
+        with self.assertRaises(ValueError):self.admin()
+        portal.storniere_mietvorgang(ids[0], 'Isolierter Test')
+        self.s.handle_signed_event(raw,sig,self.secret)
+        self.assertEqual(self.count(),1)
+
+    def test_cancel_releases_only_provider_expired(self):
+        h=self.hold();self.s.create_checkout(h['id'])
+        self.s.cancel_or_reconcile(h['id'],cancel=True)
+        self.assertEqual(self.s.read(h['id'])['status'],'released')
+        self.admin()
+
+    def test_timeout_and_local_expiry_keep_hold(self):
+        h=self.hold()
+        with patch.object(self.gateway,'create',side_effect=TimeoutError):
+            with self.assertRaises(TimeoutError):self.s.create_checkout(h['id'])
+        db=portal.get_db();db.execute('UPDATE miet_checkout_holds SET expires_at=1 WHERE id=?',(h['id'],));db.commit();db.close()
+        self.s.cancel_or_reconcile(h['id'],cancel=True)
+        with self.assertRaises(ValueError):self.admin()
+
+    def test_paid_during_cancel_waits_for_signed_webhook(self):
+        h=self.hold();s=self.s.create_checkout(h['id']);self.gateway.pay(s['id'])
+        self.s.cancel_or_reconcile(h['id'],cancel=True)
+        self.assertEqual(self.count(),0)
+        with self.assertRaises(ValueError):self.admin()
+        self.event(h);self.assertEqual(self.count(),1)
+
+    def test_invalid_signature_and_amount_never_fulfil(self):
+        h=self.hold();s=self.s.create_checkout(h['id']);self.gateway.pay(s['id'])
+        raw,sig=self.gateway.signed_event(s['id'])
+        with self.assertRaises(Exception):self.s.handle_signed_event(raw,'bad',self.secret)
+        self.gateway.change(s['id'],lambda d:d.update(amount_total=1))
+        with self.assertRaises(ValueError):self.s.handle_signed_event(raw,sig,self.secret)
+        self.assertEqual(self.count(),0)
+        with self.assertRaises(ValueError):self.admin()
+
+    def test_late_payment_after_release_requires_review(self):
+        h=self.hold();s=self.s.create_checkout(h['id']);self.s.cancel_or_reconcile(h['id'],True)
+        self.admin()
+        self.gateway.change(s['id'],lambda d:d.update(status='complete',payment_status='paid',payment_intent='pi_late_test'))
+        raw,sig=self.gateway.signed_event(s['id'])
+        self.s.handle_signed_event(raw,sig,self.secret)
+        self.assertEqual(self.count(),1);self.assertEqual(self.s.read(h['id'])['status'],'review')
+
+    def test_acceptance_route_cannot_bypass_hold(self):
+        self.hold();db=portal.get_db()
+        cols=db.execute('PRAGMA table_info(mietwagen_anfragen)').fetchall()
+        values={'auto_name':'Test','name':'Test','email':'test@example.invalid','telefon':'',
+                'start_datum':'10.01.2030','end_datum':'12.01.2030','erstellt_am':portal.now_str(),'geaendert_am':portal.now_str()}
+        values={k:v for k,v in values.items() if k in {r['name'] for r in cols}}
+        names=','.join(values);marks=','.join('?' for _ in values)
+        aid=db.execute(f'INSERT INTO mietwagen_anfragen ({names}) VALUES ({marks})',tuple(values.values())).lastrowid
+        db.commit();db.close()
+        client=self.client()
+        response=client.post(f'/admin/mietanfrage/{aid}/uebernehmen',data={'csrf_token':'test-csrf','mietfahrzeug_id':self.vid})
+        self.assertEqual(response.status_code,302);self.assertEqual(self.count(),0)
+        with client.session_transaction() as session:
+            self.assertTrue(any('belegt' in msg for _,msg in session.get('_flashes',[])))
+
+    def test_date_change_route_cannot_bypass_hold(self):
+        rid=self.admin('2030-02-01','2030-02-02');self.hold()
+        v=portal.get_mietvorgang(rid);db=portal.get_db()
+        vehicle=dict(db.execute('SELECT * FROM mietfahrzeuge WHERE id=?',(self.vid,)).fetchone());db.close()
+        client=self.client()
+        response=client.post(f'/admin/mietvorgang/{rid}/vertrag/speichern',data={
+            'csrf_token':'test-csrf','kunde_name':'Test','kunde_email':'test@example.invalid',
+            'start_datum':'10.01.2030','end_datum':'12.01.2030','expected_version':max(1,int(v.get('vertrag_version') or 1)),
+            'expected_draft_hash':portal.mietvertrag_entwurf_hash(v,vehicle,portal.mietvertrag_auftrag(v)),
+            'expected_text_version':portal.MIETVERTRAG_TEXT_VERSION})
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(portal.get_mietvorgang(rid)['start_datum'],'01.02.2030')
+        with client.session_transaction() as session:
+            self.assertTrue(any('belegt' in msg for _,msg in session.get('_flashes',[])))
+
+    def test_provider_timeout_retry_preserves_session(self):
+        h=self.hold();original=self.gateway.create
+        def fail_after_create(params,key):
+            original(params,key)
+            raise TimeoutError('response lost')
+        with patch.object(self.gateway,'create',side_effect=fail_after_create):
+            with self.assertRaises(TimeoutError):self.s.create_checkout(h['id'])
+        s=self.s.create_checkout(h['id'])
+        self.assertEqual(s['id'],self.s.create_checkout(h['id'])['id'])
+        self.event(h);self.assertEqual(self.count(),1)
+
+    def test_webhook_before_creation_response(self):
+        h=self.hold();original=self.gateway.create
+        def paid_before_response(params,key):
+            s=original(params,key);self.gateway.pay(s['id'])
+            raw,sig=self.gateway.signed_event(s['id'])
+            self.s.handle_signed_event(raw,sig,self.secret)
+            return s
+        with patch.object(self.gateway,'create',side_effect=paid_before_response):self.s.create_checkout(h['id'])
+        self.assertEqual(self.s.read(h['id'])['status'],'confirmed');self.assertEqual(self.count(),1)
+
+    def test_unpaid_event_and_provider_failure_keep_hold(self):
+        h=self.hold();s=self.s.create_checkout(h['id'])
+        raw,sig=self.gateway.signed_event(s['id'])
+        self.s.handle_signed_event(raw,sig,self.secret)
+        self.assertEqual(self.count(),0)
+        with patch.object(self.gateway,'retrieve',side_effect=TimeoutError):
+            with self.assertRaises(TimeoutError):self.s.cancel_or_reconcile(h['id'],True)
+        with self.assertRaises(ValueError):self.admin()
+
+    def test_expiry_after_paid_event_cannot_release_rental(self):
+        h=self.hold();rid=self.event(h);s=self.s.read(h['id'])
+        raw,sig=self.gateway.signed_event(s['session_id'],kind='checkout.session.expired')
+        self.assertEqual(self.s.handle_signed_event(raw,sig,self.secret),rid)
+        self.assertEqual(self.count(),1)
+        with self.assertRaises(ValueError):self.admin()
+
+    def test_competing_date_change_and_checkout(self):
+        rid=self.admin('2030-02-01','2030-02-02');v=portal.get_mietvorgang(rid)
+        db=portal.get_db();vehicle=dict(db.execute('SELECT * FROM mietfahrzeuge WHERE id=?',(self.vid,)).fetchone());db.close()
+        data={'csrf_token':'test-csrf','kunde_name':'Test','kunde_email':'test@example.invalid',
+              'start_datum':'10.01.2030','end_datum':'12.01.2030','expected_version':max(1,int(v.get('vertrag_version') or 1)),
+              'expected_draft_hash':portal.mietvertrag_entwurf_hash(v,vehicle,portal.mietvertrag_auftrag(v)),
+              'expected_text_version':portal.MIETVERTRAG_TEXT_VERSION}
+        barrier=threading.Barrier(2)
+        def change():
+            client=self.client();barrier.wait()
+            return client.post(f'/admin/mietvorgang/{rid}/vertrag/speichern',data=data).status_code
+        def reserve():
+            barrier.wait()
+            try:return self.hold()['id']
+            except ValueError:return None
+        with ThreadPoolExecutor(2) as pool:
+            a=pool.submit(change);b=pool.submit(reserve);self.assertEqual(a.result(),302);hold=b.result()
+        moved=portal.get_mietvorgang(rid)['start_datum']=='10.01.2030'
+        self.assertNotEqual(moved,bool(hold))
+
+    def test_competing_request_acceptance_and_checkout(self):
+        db=portal.get_db()
+        aid=db.execute('''INSERT INTO mietwagen_anfragen
+            (name,email,start_datum,end_datum,erstellt_am) VALUES ('Test','test@example.invalid','10.01.2030','12.01.2030',?)''',
+            (portal.now_str(),)).lastrowid
+        db.commit();db.close();barrier=threading.Barrier(2)
+        def accept():
+            client=self.client();barrier.wait()
+            return client.post(f'/admin/mietanfrage/{aid}/uebernehmen',data={'csrf_token':'test-csrf','mietfahrzeug_id':self.vid}).status_code
+        def reserve():
+            barrier.wait()
+            try:return self.hold()['id']
+            except ValueError:return None
+        with ThreadPoolExecutor(2) as pool:
+            a=pool.submit(accept);b=pool.submit(reserve);self.assertEqual(a.result(),302);hold=b.result()
+        self.assertEqual(self.count()+bool(hold),1)
+
+    def test_incoming_vehicle_cannot_be_reserved(self):
+        db=portal.get_db()
+        db.execute("UPDATE mietfahrzeuge SET status='bald' WHERE id=?",(self.vid,));db.commit();db.close()
+        with self.assertRaises(ValueError):self.hold()
+
+    def test_incoming_after_checkout_requires_review(self):
+        h=self.hold();self.s.create_checkout(h['id'])
+        db=portal.get_db()
+        db.execute("UPDATE mietfahrzeuge SET status='bald' WHERE id=?",(self.vid,));db.commit();db.close()
+        self.event(h)
+        self.assertEqual(self.count(),0)
+        self.assertEqual(self.s.read(h['id'])['status'],'review')
+
+    def test_maintenance_before_payment_requires_review(self):
+        h=self.hold();self.s.create_checkout(h['id']);db=portal.get_db()
+        db.execute("UPDATE mietfahrzeuge SET status='wartung' WHERE id=?",(self.vid,));db.commit();db.close()
+        self.event(h);self.assertEqual(self.count(),0);self.assertEqual(self.s.read(h['id'])['status'],'review')
+
+    def test_same_payment_intent_cannot_create_second_rental(self):
+        first=self.hold();self.event(first);pi=self.s.read(first['id'])['payment_intent']
+        second=self.hold(start='2030-03-01',end='2030-03-02');session=self.s.create_checkout(second['id'])
+        self.gateway.change(session['id'],lambda s:s.update(status='complete',payment_status='paid',payment_intent=pi))
+        raw,sig=self.gateway.signed_event(session['id']);self.s.handle_signed_event(raw,sig,self.secret)
+        self.assertEqual(self.count(),1);self.assertEqual(self.s.read(second['id'])['status'],'review')
+
+    def test_fulfilment_failure_rolls_back_rental_and_event(self):
+        h=self.hold();s=self.s.create_checkout(h['id']);self.gateway.pay(s['id'])
+        raw,sig=self.gateway.signed_event(s['id']);db=portal.get_db()
+        db.execute("""CREATE TRIGGER fail_confirmation BEFORE UPDATE OF status ON miet_checkout_holds
+            WHEN NEW.status='confirmed' BEGIN SELECT RAISE(ABORT, 'test rollback'); END""")
+        db.commit();db.close()
+        try:
+            with self.assertRaises(Exception):self.s.handle_signed_event(raw,sig,self.secret)
+            self.assertEqual(self.count(),0)
+            db=portal.get_db()
+            self.assertEqual(db.execute('SELECT COUNT(*) AS n FROM miet_checkout_events WHERE hold_id=?',(h['id'],)).fetchone()['n'],0)
+            db.close()
+        finally:
+            db=portal.get_db();db.execute('DROP TRIGGER fail_confirmation');db.commit();db.close()
+        self.s.handle_signed_event(raw,sig,self.secret);self.assertEqual(self.count(),1)
+
+
+if __name__=='__main__':
+    unittest.main()

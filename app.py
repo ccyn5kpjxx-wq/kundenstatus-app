@@ -47,6 +47,8 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from backup_storage import BackupStorage
+import mietwagen_checkout
+import mos_public_booking
 from cockpit_rules import document_visible, price_state, price_record, decimal_input, has_invoice, exact_contact, workshop_completion_photo
 
 try:
@@ -2698,6 +2700,7 @@ def configured_flask_secret_key():
 
 
 app = Flask(__name__)
+app.config['MOS_SHARED_CHECKOUT_ENABLED'] = False  # Internal test integration only; no live route.
 app.jinja_env.globals.update(document_visible=document_visible, price_state=price_state, has_invoice=has_invoice)
 (
     _configured_secret_key,
@@ -3035,7 +3038,7 @@ def restrict_public_site_service():
         "public_sitemap",
         "legacy_public_redirect",
     }
-    if request.endpoint not in allowed_endpoints:
+    if request.endpoint not in allowed_endpoints and not (request.endpoint or '').startswith('mos_public.'):
         abort(404)
     return None
 
@@ -3051,6 +3054,8 @@ def refresh_authenticated_session():
 def protect_csrf():
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return None
+    if request.endpoint == 'mos_public.webhook':
+        return None  # Exact endpoint verifies raw Stripe signature, never a browser action.
     if request.path.startswith("/webhooks/whatsapp"):
         return None
     if request.path == "/api/klick":
@@ -8630,6 +8635,92 @@ def init_db():
             erstellt_am  TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS auftraege (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            token          TEXT DEFAULT '',
+            kunde_email    TEXT DEFAULT '',
+            autohaus_id    INTEGER,
+            versicherung_id INTEGER DEFAULT 0,
+            kunde_name     TEXT DEFAULT '',
+            fahrzeug       TEXT NOT NULL,
+            fin_nummer     TEXT DEFAULT '',
+            kilometerstand  TEXT DEFAULT '',
+            hsn_nummer      TEXT DEFAULT '',
+            tsn_nummer      TEXT DEFAULT '',
+            auftragsnummer TEXT DEFAULT '',
+            schaden_nummer TEXT DEFAULT '',
+            schadenart     TEXT DEFAULT '',
+            versicherungsnehmer TEXT DEFAULT '',
+            versicherung_police TEXT DEFAULT '',
+            versicherung_email TEXT DEFAULT '',
+            versicherung_email_cc TEXT DEFAULT '',
+            versicherung_anschreiben TEXT DEFAULT '',
+            versicherung_freigabe_status TEXT DEFAULT 'offen',
+            versicherung_gemeldet_am TEXT DEFAULT '',
+            versicherung_sendefreigabe_am TEXT DEFAULT '',
+            versicherung_portal_freigabe_id INTEGER DEFAULT 0,
+            kunden_status_token TEXT DEFAULT '',
+            kunden_status_aktiv INTEGER DEFAULT 1,
+            schaden_aufnahme_json TEXT DEFAULT '{}',
+            schaden_datenschutz_bestaetigt_am TEXT DEFAULT '',
+            schaden_zonen_json TEXT DEFAULT '[]',
+            schaden_zonen_notiz TEXT DEFAULT '',
+            gt_motive_vorgang_id TEXT DEFAULT '',
+            gt_motive_status TEXT DEFAULT '',
+            gt_motive_kalkulation_betrag TEXT DEFAULT '',
+            gt_motive_model_code TEXT DEFAULT '',
+            gt_motive_zone TEXT DEFAULT '',
+            gt_motive_job_type TEXT DEFAULT '',
+            gt_motive_equipments TEXT DEFAULT '',
+            gt_motive_manufacturing_values TEXT DEFAULT '',
+            gt_motive_language TEXT DEFAULT '',
+            gt_motive_model_id TEXT DEFAULT '',
+            gt_motive_vehicle_representation_json TEXT DEFAULT '',
+            gt_motive_vehicle_representation_loaded_at TEXT DEFAULT '',
+            gt_motive_vehicle_representation_error TEXT DEFAULT '',
+            rep_max_kosten TEXT DEFAULT '',
+            bauteile_override TEXT DEFAULT '',
+            kennzeichen    TEXT DEFAULT '',
+            beschreibung   TEXT DEFAULT '',
+            analyse_text   TEXT DEFAULT '',
+            analyse_pruefen INTEGER DEFAULT 0,
+            analyse_hinweis TEXT DEFAULT '',
+            analyse_confidence REAL DEFAULT 0,
+            angebotsphase  INTEGER DEFAULT 0,
+            angebot_abgesendet INTEGER DEFAULT 0,
+            angebot_status TEXT DEFAULT 'entwurf',
+            werkstatt_angebot_text TEXT DEFAULT '',
+            werkstatt_angebot_preis TEXT DEFAULT '',
+            werkstatt_preisvorschlag TEXT DEFAULT '',
+            werkstatt_angebot_notiz TEXT DEFAULT '',
+            werkstatt_angebot_am TEXT DEFAULT '',
+            kalkulation_json TEXT DEFAULT '',
+            kalkulation_status TEXT DEFAULT 'entwurf',
+            kalkulation_aktualisiert_am TEXT DEFAULT '',
+            bonus_netto_betrag REAL DEFAULT 0,
+            bonus_preis_aktualisiert_am TEXT DEFAULT '',
+            status         INTEGER DEFAULT 1,
+            annahme_datum  TEXT DEFAULT '',
+            start_datum    TEXT DEFAULT '',
+            fertig_datum   TEXT DEFAULT '',
+            abholtermin    TEXT DEFAULT '',
+            transport_art  TEXT DEFAULT 'standard',
+            archiviert     INTEGER DEFAULT 0,
+            lexware_kunde_angelegt INTEGER DEFAULT 0,
+            lexware_contact_id TEXT DEFAULT '',
+            lexware_invoice_id TEXT DEFAULT '',
+            lexware_invoice_url TEXT DEFAULT '',
+            rechnung_status TEXT DEFAULT 'offen',
+            rechnung_nummer TEXT DEFAULT '',
+            rechnung_geschrieben_am TEXT DEFAULT '',
+            kontakt_telefon TEXT DEFAULT '',
+            notiz_intern   TEXT DEFAULT '',
+            quelle         TEXT DEFAULT 'intern',
+            erstellt_am    TEXT NOT NULL,
+            geaendert_am   TEXT NOT NULL,
+            FOREIGN KEY (autohaus_id) REFERENCES autohaeuser(id)
+        );
+
         CREATE TABLE IF NOT EXISTS versicherungen (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             name         TEXT NOT NULL,
@@ -8947,91 +9038,7 @@ def init_db():
             FOREIGN KEY (suche_id) REFERENCES fahrzeugsuchen(id)
         );
 
-        CREATE TABLE IF NOT EXISTS auftraege (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            token          TEXT DEFAULT '',
-            kunde_email    TEXT DEFAULT '',
-            autohaus_id    INTEGER,
-            versicherung_id INTEGER DEFAULT 0,
-            kunde_name     TEXT DEFAULT '',
-            fahrzeug       TEXT NOT NULL,
-            fin_nummer     TEXT DEFAULT '',
-            kilometerstand  TEXT DEFAULT '',
-            hsn_nummer      TEXT DEFAULT '',
-            tsn_nummer      TEXT DEFAULT '',
-            auftragsnummer TEXT DEFAULT '',
-            schaden_nummer TEXT DEFAULT '',
-            schadenart     TEXT DEFAULT '',
-            versicherungsnehmer TEXT DEFAULT '',
-            versicherung_police TEXT DEFAULT '',
-            versicherung_email TEXT DEFAULT '',
-            versicherung_email_cc TEXT DEFAULT '',
-            versicherung_anschreiben TEXT DEFAULT '',
-            versicherung_freigabe_status TEXT DEFAULT 'offen',
-            versicherung_gemeldet_am TEXT DEFAULT '',
-            versicherung_sendefreigabe_am TEXT DEFAULT '',
-            versicherung_portal_freigabe_id INTEGER DEFAULT 0,
-            kunden_status_token TEXT DEFAULT '',
-            kunden_status_aktiv INTEGER DEFAULT 1,
-            schaden_aufnahme_json TEXT DEFAULT '{}',
-            schaden_datenschutz_bestaetigt_am TEXT DEFAULT '',
-            schaden_zonen_json TEXT DEFAULT '[]',
-            schaden_zonen_notiz TEXT DEFAULT '',
-            gt_motive_vorgang_id TEXT DEFAULT '',
-            gt_motive_status TEXT DEFAULT '',
-            gt_motive_kalkulation_betrag TEXT DEFAULT '',
-            gt_motive_model_code TEXT DEFAULT '',
-            gt_motive_zone TEXT DEFAULT '',
-            gt_motive_job_type TEXT DEFAULT '',
-            gt_motive_equipments TEXT DEFAULT '',
-            gt_motive_manufacturing_values TEXT DEFAULT '',
-            gt_motive_language TEXT DEFAULT '',
-            gt_motive_model_id TEXT DEFAULT '',
-            gt_motive_vehicle_representation_json TEXT DEFAULT '',
-            gt_motive_vehicle_representation_loaded_at TEXT DEFAULT '',
-            gt_motive_vehicle_representation_error TEXT DEFAULT '',
-            rep_max_kosten TEXT DEFAULT '',
-            bauteile_override TEXT DEFAULT '',
-            kennzeichen    TEXT DEFAULT '',
-            beschreibung   TEXT DEFAULT '',
-            analyse_text   TEXT DEFAULT '',
-            analyse_pruefen INTEGER DEFAULT 0,
-            analyse_hinweis TEXT DEFAULT '',
-            analyse_confidence REAL DEFAULT 0,
-            angebotsphase  INTEGER DEFAULT 0,
-            angebot_abgesendet INTEGER DEFAULT 0,
-            angebot_status TEXT DEFAULT 'entwurf',
-            werkstatt_angebot_text TEXT DEFAULT '',
-            werkstatt_angebot_preis TEXT DEFAULT '',
-            werkstatt_preisvorschlag TEXT DEFAULT '',
-            werkstatt_angebot_notiz TEXT DEFAULT '',
-            werkstatt_angebot_am TEXT DEFAULT '',
-            kalkulation_json TEXT DEFAULT '',
-            kalkulation_status TEXT DEFAULT 'entwurf',
-            kalkulation_aktualisiert_am TEXT DEFAULT '',
-            bonus_netto_betrag REAL DEFAULT 0,
-            bonus_preis_aktualisiert_am TEXT DEFAULT '',
-            status         INTEGER DEFAULT 1,
-            annahme_datum  TEXT DEFAULT '',
-            start_datum    TEXT DEFAULT '',
-            fertig_datum   TEXT DEFAULT '',
-            abholtermin    TEXT DEFAULT '',
-            transport_art  TEXT DEFAULT 'standard',
-            archiviert     INTEGER DEFAULT 0,
-            lexware_kunde_angelegt INTEGER DEFAULT 0,
-            lexware_contact_id TEXT DEFAULT '',
-            lexware_invoice_id TEXT DEFAULT '',
-            lexware_invoice_url TEXT DEFAULT '',
-            rechnung_status TEXT DEFAULT 'offen',
-            rechnung_nummer TEXT DEFAULT '',
-            rechnung_geschrieben_am TEXT DEFAULT '',
-            kontakt_telefon TEXT DEFAULT '',
-            notiz_intern   TEXT DEFAULT '',
-            quelle         TEXT DEFAULT 'intern',
-            erstellt_am    TEXT NOT NULL,
-            geaendert_am   TEXT NOT NULL,
-            FOREIGN KEY (autohaus_id) REFERENCES autohaeuser(id)
-        );
+
 
         CREATE TABLE IF NOT EXISTS kunden_termin_mail_versand (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -10382,6 +10389,7 @@ def init_db():
         )
         """
     )
+    mietwagen_checkout.init_schema(db)
     ensure_index(db, "idx_mietvorgaenge_fahrzeug", "mietvorgaenge", ("mietfahrzeug_id", "status"))
     ensure_index(db, "idx_mietfahrzeug_bilder_fahrzeug", "mietfahrzeug_bilder", ("mietfahrzeug_id",))
     # Mietvertrag-Felder am Mietvorgang (digitale Unterschrift, Versand, Kontaktweg)
@@ -39617,7 +39625,7 @@ def validiere_mietkontakt(telefon="", email=""):
         raise ValueError("Bitte eine gültige E-Mail-Adresse angeben.")
 
 
-def mietfahrzeug_zeitraum_frei_db(db, fahrzeug_id, start_obj, end_obj, exclude_vorgang_id=None):
+def mietfahrzeug_zeitraum_frei_db(db, fahrzeug_id, start_obj, end_obj, exclude_vorgang_id=None, exclude_hold_id=None):
     rows = db.execute(
         """
         SELECT id, start_datum, end_datum
@@ -39628,6 +39636,8 @@ def mietfahrzeug_zeitraum_frei_db(db, fahrzeug_id, start_obj, end_obj, exclude_v
         """,
         (int(fahrzeug_id),),
     ).fetchall()
+    if not mietwagen_checkout.zeitraum_frei(db, fahrzeug_id, start_obj, end_obj, exclude_hold_id):
+        return False
     ende = end_obj or date.max
     for row in rows:
         if exclude_vorgang_id and int(row["id"]) == int(exclude_vorgang_id):
@@ -54816,7 +54826,10 @@ def schadenmeldung_vorschau():
 @app.route("/mietwagen-vorschau/")
 def mietwagen_vorschau():
     """Unverlinkte Vorschau (noindex) der Marketing-Landingpage für auto-lackierzentrum.de/mietwagen — nur zur GF-Sichtung."""
-    return send_from_directory(os.path.join(app.static_folder, "mietwagen_vorschau"), "index.html")
+    response = send_from_directory(os.path.join(app.static_folder, "mietwagen_vorschau"), "index.html")
+    config = app.config.get('MOS_PUBLIC_BOOKING', {})
+    live = config.get('mode') == 'live'
+    return mos_public_booking.website_response(response, config.get('origin', '') + ('/mieten/' if live else '/mietwagen-test/') if config.get('enabled') else None, live=live)
 
 
 @app.route("/mietwagen-vorschau/<path:dateiname>")
@@ -56148,6 +56161,7 @@ app.config["MAILBOX_SEND_ENABLED"] = env_flag("MAILBOX_SEND_ENABLED", RUNNING_ON
 app.config["MAILBOX_OUTBOX_DIR"] = os.environ.get("MAILBOX_OUTBOX_DIR") or str(UPLOAD_DIR.parent / "mail_outbox")
 register_mailbox(app, admin_required, get_werkstatt_imap_config, get_werkstatt_smtp_config, get_db)
 
+mos_public_booking.register(__import__(__name__))
 init_db()
 
 start_hourly_backups()
