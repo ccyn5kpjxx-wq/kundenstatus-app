@@ -17,6 +17,7 @@ sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'scripts'))
 def deny(*a,**k):raise AssertionError('External network forbidden')
 patch('socket.socket.connect',deny).start();patch('socket.socket.connect_ex',deny).start();patch('socket.create_connection',deny).start()
 from run_mos_public_test import build_test_app
+from mos_public_contract import signed_payload
 TEMP=tempfile.TemporaryDirectory(prefix='mos-public-tests-')
 # Simulate an operator launching the test from a live-configured shell.
 with patch.dict(os.environ, {
@@ -33,10 +34,10 @@ class PublicTests(unittest.TestCase):
         portal.app.config.update(TESTING=True)
         portal.app.config['MOS_PUBLIC_BOOKING']['enabled']=True
         self.client=portal.app.test_client()
+        self.client.get('/mietwagen-test/')
         db=portal.get_db()
         for table in ('miet_checkout_contracts','miet_checkout_events','miet_checkout_holds','mietvorgaenge'):db.execute('DELETE FROM '+table)
         db.commit();db.close()
-        self.client.get('/mietwagen-test/')
         self.cfg=portal.app.extensions['mos_public_booking']['cfg']
 
     def post(self,path,data=None,client=None):
@@ -50,7 +51,8 @@ class PublicTests(unittest.TestCase):
         return html.unescape(re.search(r'name="quote_token" value="([^"]+)"',r.get_data(as_text=True))[1]),r
 
     def checkout(self,token):
-        return self.post('/mietwagen-test/checkout',{'quote_token':token,'accept':'yes','name':'Test','email':'test@example.invalid'})
+        return self.post('/mietwagen-test/checkout',{'quote_token':token,'accept':'yes','sign_confirm':'yes',
+            'name':'Test','email':'test@example.invalid','signature_data':self.signature()})
 
     def rows(self):
         db=portal.get_db()
@@ -174,22 +176,28 @@ class PublicTests(unittest.TestCase):
         self.assertEqual(self.rows(),[])
 
     def test_paid_contract_signature_and_immutable_pdf(self):
-        hold=self.paid_hold()
+        token,quote_page=self.quote()
+        self.assertIn('Testvertrag vor der Testzahlung',quote_page.get_data(as_text=True))
+        self.assertIn('Gärtner GmbH Karosserie + Lack',quote_page.get_data(as_text=True))
+        checkout=self.checkout(token)
+        self.assertEqual(checkout.status_code,303)
+        sid=checkout.location.rsplit('/',1)[1]
+        hold=portal.app.extensions['mos_public_booking']['gateway'].retrieve(sid)['metadata']['hold_id']
         status_url='/mietwagen-test/status/'+hold
         page=self.client.get(status_url).get_data(as_text=True)
-        self.assertIn('Dein Mietvertrag',page)
+        self.assertIn('Dein unterschriebener Mietvertrag',page)
+        self.assertIn('Zahlung noch offen',page)
         self.assertIn('Gärtner GmbH Karosserie + Lack',page)
         self.assertIn('keine eigene Vertragspartei',page)
         self.assertIn(self.cfg['terms_text'],page)
-        contract_hash=re.search(r'name="contract_hash" value="([0-9a-f]{64})"',page)[1]
+        self.assertEqual(self.rows(),[])
         self.assertEqual(self.client.get(status_url+'/vertrag.pdf').status_code,404)
-        tampered=self.post(status_url+'/unterschrift',{'confirm':'yes','contract_hash':'0'*64,
-            'signer_name':'Test','signature_data':self.signature()})
-        self.assertIn('Vertragsdaten oder Name stimmen nicht',tampered.get_data(as_text=True))
-        self.assertEqual(self.client.get(status_url+'/vertrag.pdf').status_code,404)
-        signed=self.post(status_url+'/unterschrift',{'confirm':'yes','contract_hash':contract_hash,
-            'signer_name':'Test','signature_data':self.signature()})
-        self.assertEqual(signed.status_code,303)
+        h=portal.app.extensions['mos_public_booking']['service'].read(hold)
+        unsigned_snapshot=json.loads(h['payload'])['quote']
+        self.assertTrue(unsigned_snapshot['signed_at'])
+        self.assertEqual(len(unsigned_snapshot['signed_contract_hash']),64)
+        paid=self.post(checkout.location)
+        self.assertEqual(paid.status_code,303)
         db=portal.get_db()
         try:stored=dict(db.execute('SELECT * FROM miet_checkout_contracts WHERE hold_id=?',(hold,)).fetchone())
         finally:db.close()
@@ -198,6 +206,9 @@ class PublicTests(unittest.TestCase):
         self.assertEqual(document['terms_text'],self.cfg['terms_text'])
         self.assertEqual(document['deposit_cents'],50000)
         self.assertEqual(document['deductible_cents'],100000)
+        self.assertEqual(stored['signed_at'],unsigned_snapshot['signed_at'])
+        self.assertEqual(stored['contract_sha256'],unsigned_snapshot['signed_contract_hash'])
+        self.assertNotIn('payment_intent',document)
         pdf=self.client.get(status_url+'/vertrag.pdf')
         self.assertEqual(pdf.status_code,200)
         self.assertTrue(pdf.data.startswith(b'%PDF-'))
@@ -215,44 +226,63 @@ class PublicTests(unittest.TestCase):
         try:
             self.assertEqual(self.client.get(status_url+'/vertrag.pdf').data,pdf.data)
             self.assertIn('TESTENTWURF',self.client.get(status_url).get_data(as_text=True))
-            self.assertEqual(self.post(status_url+'/unterschrift',{'confirm':'yes','contract_hash':contract_hash,
-                'signer_name':'Test','signature_data':self.signature()}).status_code,303)
+            self.assertEqual(self.checkout(token).location,status_url)
             self.assertEqual(self.client.get(status_url+'/vertrag.pdf').data,pdf.data)
         finally:self.cfg['terms_text']=document['terms_text']
 
-    def test_signature_requires_paid_owner_and_real_ink(self):
-        token,_=self.quote();checkout=self.checkout(token)
+    def test_signature_required_before_checkout_and_owner(self):
+        token,_=self.quote()
+        base={'quote_token':token,'accept':'yes','sign_confirm':'yes','name':'Test','email':'test@example.invalid'}
+        no_confirmation=self.post('/mietwagen-test/checkout',{**base,'sign_confirm':'','signature_data':self.signature()})
+        self.assertIn('ausdrücklich unterschreiben',no_confirmation.get_data(as_text=True))
+        self.assertIn('Unterschrift',self.post('/mietwagen-test/checkout',base).get_data(as_text=True))
+        blank=Image.new('RGBA',(700,180),(255,255,255,0));buf=BytesIO();blank.save(buf,format='PNG')
+        empty='data:image/png;base64,'+b64encode(buf.getvalue()).decode('ascii')
+        invalid=self.post('/mietwagen-test/checkout',{**base,'signature_data':empty})
+        self.assertIn('lesbare Unterschrift',invalid.get_data(as_text=True))
+        db=portal.get_db()
+        try:self.assertEqual(db.execute('SELECT COUNT(*) AS n FROM miet_checkout_holds').fetchone()['n'],0)
+        finally:db.close()
+        checkout=self.checkout(token)
         sid=checkout.location.rsplit('/',1)[1]
         hold=portal.app.extensions['mos_public_booking']['gateway'].retrieve(sid)['metadata']['hold_id']
         status_url='/mietwagen-test/status/'+hold
-        self.assertNotIn('Dein Mietvertrag',self.client.get(status_url).get_data(as_text=True))
-        premature=self.post(status_url+'/unterschrift',{'confirm':'yes','signer_name':'Test','signature_data':self.signature()})
-        self.assertIn('erst nach bestätigter Zahlung',premature.get_data(as_text=True))
-        paid=self.post(checkout.location);self.assertEqual(paid.status_code,303)
-        page=self.client.get(status_url).get_data(as_text=True)
-        contract_hash=re.search(r'name="contract_hash" value="([0-9a-f]{64})"',page)[1]
-        blank=Image.new('RGBA',(700,180),(255,255,255,0));buf=BytesIO();blank.save(buf,format='PNG')
-        empty='data:image/png;base64,'+b64encode(buf.getvalue()).decode('ascii')
-        invalid=self.post(status_url+'/unterschrift',{'confirm':'yes','contract_hash':contract_hash,
-            'signer_name':'Test','signature_data':empty})
-        self.assertIn('lesbare Unterschrift',invalid.get_data(as_text=True))
+        self.assertIn('Dein unterschriebener Mietvertrag',self.client.get(status_url).get_data(as_text=True))
         other=portal.app.test_client();other.get('/mietwagen-test/')
         self.assertEqual(other.get(status_url).status_code,404)
         self.assertEqual(other.get(status_url+'/vertrag.pdf').status_code,404)
-        self.assertEqual(self.post(status_url+'/unterschrift',{'confirm':'yes','contract_hash':contract_hash,
-            'signer_name':'Test','signature_data':self.signature()},other).status_code,404)
+        self.assertEqual(self.post(status_url+'/retry',client=other).status_code,404)
+        self.assertEqual(self.post(status_url+'/unterschrift',{'signature_data':self.signature()}).status_code,404)
 
-    def test_cancelled_paid_booking_cannot_be_signed(self):
+    def test_signature_record_binds_time_to_signed_terms(self):
+        token,_=self.quote();checkout=self.checkout(token)
+        sid=checkout.location.rsplit('/',1)[1]
+        hold=portal.app.extensions['mos_public_booking']['gateway'].retrieve(sid)['metadata']['hold_id']
+        payload=json.loads(portal.app.extensions['mos_public_booking']['service'].read(hold)['payload'])
+        signed_payload(payload)
+        payload['quote']['signed_at']='2031-01-01T00:00:00+00:00'
+        with self.assertRaisesRegex(ValueError,'Unterschriftsnachweis'):
+            signed_payload(payload)
+
+    def test_checkout_failure_keeps_signed_retry_available(self):
+        token,_=self.quote()
+        gateway=portal.app.extensions['mos_public_booking']['gateway']
+        with patch.object(gateway,'create',side_effect=ConnectionError('provider unavailable')):
+            failed=self.checkout(token)
+        self.assertEqual(failed.status_code,503)
+        self.assertIn('Zahlung sicher erneut öffnen',failed.get_data(as_text=True))
+        db=portal.get_db()
+        try:hold=db.execute('SELECT id FROM miet_checkout_holds').fetchone()['id']
+        finally:db.close()
+        self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/retry').status_code,303)
+
+    def test_cancelled_paid_booking_keeps_signed_copy(self):
         hold=self.paid_hold();url='/mietwagen-test/status/'+hold
-        page=self.client.get(url).get_data(as_text=True)
-        digest=re.search(r'name="contract_hash" value="([0-9a-f]{64})"',page)[1]
+        pdf=self.client.get(url+'/vertrag.pdf').data
         cancelled=self.post(url+'/stornieren',{'confirm':'yes'})
         self.assertEqual(cancelled.status_code,303)
-        self.assertNotIn('contract-sign-form',self.client.get(url).get_data(as_text=True))
-        refused=self.post(url+'/unterschrift',{'confirm':'yes','contract_hash':digest,
-            'signer_name':'Test','signature_data':self.signature()})
-        self.assertIn('stornierte Buchung',refused.get_data(as_text=True))
-        self.assertEqual(self.client.get(url+'/vertrag.pdf').status_code,404)
+        self.assertIn('storniert',self.client.get(url).get_data(as_text=True))
+        self.assertEqual(self.client.get(url+'/vertrag.pdf').data,pdf)
 
 
 if __name__=='__main__':unittest.main()

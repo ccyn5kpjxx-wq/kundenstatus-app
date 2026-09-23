@@ -13,7 +13,8 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, abort, current_app, redirect, render_template, request, session, url_for
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME, init_schema as init_contract_schema
-from mos_public_contract import read as read_contract, sign as sign_contract_record, snapshot as contract_snapshot, snapshot_hash
+from mos_public_contract import finalize as finalize_contract, presign_quote, read as read_contract
+from mos_public_contract import signed_payload
 
 LISTINGS = {'kona':'Hyundai KONA N Line X', 'i10':'Hyundai i10'}
 
@@ -121,7 +122,7 @@ def register(portal):
         cfg=app.config.get('MOS_PUBLIC_BOOKING',{})
         settling={'mos_public.status','mos_public.retry','mos_public.cancel','mos_public.webhook','mos_public.receipt',
                   'mos_public.cancel_paid','mos_public.admin_bookings','mos_public.admin_action',
-                  'mos_public.sign_contract','mos_public.signed_contract_pdf','mos_public.admin_contract_pdf'}
+                  'mos_public.signed_contract_pdf','mos_public.admin_contract_pdf'}
         if not cfg.get('enabled') and not (request.endpoint in settling and cfg.get('mode') in {'offline','stripe_test','live'}):
             abort(404)
         state=setup()
@@ -177,7 +178,7 @@ def register(portal):
         if days>=f.get('discount_after_days',cfg['max_days']+1):rate=f['discount_cents']
         db=portal.get_db()
         try:
-            vehicle=db.execute('SELECT id,bezeichnung,aktiv,status FROM mietfahrzeuge WHERE id=?',(f['id'],)).fetchone()
+            vehicle=db.execute('SELECT id,bezeichnung,kennzeichen,fin_nummer,aktiv,status FROM mietfahrzeuge WHERE id=?',(f['id'],)).fetchone()
             if not vehicle or not int(vehicle['aktiv'] or 0) or portal.normalize_mietfahrzeug_status(vehicle['status']) in {'bald','wartung','inaktiv'}:
                 raise ValueError('Zugeordnetes Testfahrzeug ist nicht verfügbar.')
             if cfg['mode']=='live' and vehicle['bezeichnung']!=f['expected_name']:
@@ -186,7 +187,9 @@ def register(portal):
                 raise ValueError('Der Zeitraum ist bereits belegt. Bitte andere Termine wählen.')
         finally:db.close()
         return {'slug':slug,'vehicle_id':f['id'],'vehicle_name':LISTINGS[slug],
-            'portal_vehicle_name':vehicle['bezeichnung'],'start_slot':start,'end_slot':end,
+            'portal_vehicle_name':vehicle['bezeichnung'],
+            'vehicle_plate':vehicle['kennzeichen'] or '', 'vehicle_vin':vehicle['fin_nummer'] or '',
+            'start_slot':start,'end_slot':end,
             'days':days,'daily_cents':rate,'rental_cents':days*rate,
             'amount_cents':days*rate+(50000 if cfg['mode'] in {'live','stripe_test'} else 0),'currency':'eur',
             'deposit_charged_cents':50000 if cfg['mode'] in {'live','stripe_test'} else 0,
@@ -216,6 +219,7 @@ def register(portal):
     def receipt(hold_id):
         h,p=owned(hold_id)
         if not h['mietvorgang_id']:abort(409)
+        finalize_contract(portal,hold_id)
         q=p['quote'];cfg=setup()['cfg']
         text=('BUCHUNGSBESTÄTIGUNG' if cfg['mode']=='live' else 'TESTBESTÄTIGUNG – KEIN MIETVERTRAG')
         text+='\nReferenz: '+h['id']+'\n'+q['vehicle_name']+'\n'+q['start_slot']+' bis '+q['end_slot']
@@ -325,30 +329,38 @@ def register(portal):
         q=data['quote']
         if q['owner_hash']!=owner():abort(404)
         state=setup();key=hashlib.sha256((owner()+token).encode()).hexdigest()
-        # A repeated POST retries the same hold, even though it now occupies the period.
+        customer={'name':request.form.get('name','').strip(),'email':request.form.get('email','').strip(),'telefon':''}
+        if not customer['name'] or not customer['email'] or len(customer['name'])>150 or len(customer['email'])>254:
+            raise ValueError('Bitte gültigen Namen und E-Mail angeben.')
+        if request.form.get('sign_confirm')!='yes':
+            raise ValueError('Bitte den Vertrag vor der Zahlung ausdrücklich unterschreiben.')
+        # A repeated POST retries the same immutable hold, even though it now occupies the period.
         db=portal.get_db()
         try:old=db.execute('SELECT id FROM miet_checkout_holds WHERE request_key=?',(key,)).fetchone()
         finally:db.close()
+        if old:
+            h,p=owned(old['id'])
+            if p['customer']!=customer:
+                raise ValueError('Kundendaten nach der Unterschrift geändert. Bitte neue Preisübersicht öffnen.')
+            return retry(h['id'])
         if not old and quote(q['slug'],q['start_slot'],q['end_slot'])!=q:
             raise ValueError('Preis oder Regeln geändert. Bitte neue Übersicht bestätigen.')
-        customer={'name':request.form.get('name','').strip(),'email':request.form.get('email','').strip(),'telefon':''}
-        if not customer['email'] or len(customer['name'])>150 or len(customer['email'])>254:
-            raise ValueError('Bitte gültigen Testnamen und Test-E-Mail angeben.')
-        q={**q,'accepted_terms':True}
+        q=presign_quote(q,customer,request.form.get('signature_data',''))
         h=state['service'].reserve(key,q['vehicle_id'],datetime.fromisoformat(q['start_slot']).date().isoformat(),
                                   datetime.fromisoformat(q['end_slot']).date().isoformat(),customer,q)
         return retry(h['id'])
 
     @bp.post('/status/<hold_id>/retry')
     def retry(hold_id):
-        h,_=owned(hold_id)
+        h,p=owned(hold_id)
         if h['status']!='pending':return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
         if not app.config['MOS_PUBLIC_BOOKING'].get('enabled'):
             return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
+        signed_payload(p)
         try:s=setup()['service'].create_checkout(hold_id)
         except Exception:
-            return render_template('mos_public/status.html',h=h,q=json.loads(h['payload'])['quote'],
-                error='Checkout derzeit nicht erreichbar. Dein Testzeitraum bleibt reserviert; sicher erneut versuchen.'),503
+            return render_status(hold_id,
+                'Checkout derzeit nicht erreichbar. Bitte prüfe den Status und versuche es bei offener Reservierung erneut.'),503
         return redirect(s['url'],code=303)
 
     @bp.get('/status/<hold_id>')
@@ -361,27 +373,30 @@ def register(portal):
         except Exception:pass
         h,_=owned(hold_id)
         acc=account(hold_id)
+        if h['status']=='confirmed':
+            try:finalize_contract(portal,hold_id)
+            except Exception:
+                app.logger.exception('MOS Vertrags-PDF konnte nicht abgeschlossen werden')
+                error=error or 'Zahlung bestätigt; die Vertragskopie wird noch erstellt. Bitte aktualisiere den Status.'
         db=portal.get_db()
         try:signed=read_contract(db,hold_id)
         finally:db.close()
-        contract=contract_snapshot(h,p) if h['status']=='confirmed' else None
-        signed_local=(datetime.fromisoformat(signed['signed_at']).astimezone(ZoneInfo('Europe/Berlin'))
-                      .strftime('%d.%m.%Y um %H:%M Uhr')) if signed else None
+        presigned=p['quote'].get('signature_png_base64')
+        contract=None
+        if presigned:
+            try:contract,_,_=signed_payload(p)
+            except ValueError:
+                app.logger.exception('MOS Vorab-Unterschrift stimmt nicht mit der Buchung überein')
+                error=error or 'Die gespeicherte Unterschrift muss von der Werkstatt geprüft werden.'
+                presigned=None
+        if signed and not contract:
+            contract=json.loads(signed['contract_json'])
+        signed_at=signed['signed_at'] if signed else p['quote'].get('signed_at')
+        signed_local=(datetime.fromisoformat(signed_at).astimezone(ZoneInfo('Europe/Berlin'))
+                      .strftime('%d.%m.%Y um %H:%M Uhr')) if signed_at else None
         return render_template('mos_public/status.html',h=h,q=p['quote'],account=acc,error=error,
-                               contract=contract,contract_hash=snapshot_hash(contract) if contract else None,
-                               signed=signed,signed_local=signed_local)
-
-    @bp.post('/status/<hold_id>/unterschrift')
-    def sign_contract(hold_id):
-        owned(hold_id)
-        if request.form.get('confirm')!='yes':
-            return render_status(hold_id,'Bitte bestätige deine Unterschrift ausdrücklich.')
-        try:
-            sign_contract_record(portal,hold_id,owner(),request.form.get('contract_hash',''),
-                                 request.form.get('signer_name',''),request.form.get('signature_data',''))
-        except ValueError as exc:
-            return render_status(hold_id,str(exc))
-        return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
+                               contract=contract,signed=signed,signed_local=signed_local,
+                               presigned=presigned)
 
     @bp.get('/status/<hold_id>/vertrag.pdf')
     def signed_contract_pdf(hold_id):
@@ -415,8 +430,17 @@ def register(portal):
         state=setup()
         if request.content_length and request.content_length>65536:abort(413)
         import stripe
-        try:state['service'].handle_signed_event(request.get_data(),request.headers.get('Stripe-Signature',''),state['secret'])
+        try:
+            body=request.get_data()
+            state['service'].handle_signed_event(body,request.headers.get('Stripe-Signature',''),state['secret'])
         except (ValueError,KeyError,TypeError,stripe.SignatureVerificationError):return 'Invalid test event',400
+        except Exception:return 'Retry later',503
+        try:
+            session_id=json.loads(body)['data']['object']['id']
+            db=portal.get_db()
+            try:row=db.execute('SELECT id FROM miet_checkout_holds WHERE session_id=?',(session_id,)).fetchone()
+            finally:db.close()
+            if row:finalize_contract(portal,row['id'])
         except Exception:return 'Retry later',503
         return '',204
 
@@ -431,6 +455,7 @@ def register(portal):
             if s['status']=='open':state['gateway'].pay(sid)
             raw,sig=state['gateway'].signed_event(sid)
             state['service'].handle_signed_event(raw,sig,state['secret'])
+            finalize_contract(portal,h['id'])
             return redirect(url_for('mos_public.status',hold_id=h['id']),code=303)
         return render_template('mos_public/simulate.html',h=h,q=p['quote'])
 

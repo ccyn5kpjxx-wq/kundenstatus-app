@@ -1,9 +1,69 @@
 {% extends 'mos_public/base.html' %}{% block content %}<h1>Deine Buchungsübersicht</h1><section class="card"><h2>{{ q.vehicle_name }}</h2>{% if not live %}<p class="small muted">Zugeordneter Portal-Testdatensatz: {{ q.portal_vehicle_name }}</p>{% endif %}<dl><dt>Abholung / Rückgabe</dt><dd>{{ q.start_slot|mos_slot }}<br>{{ q.end_slot|mos_slot }}</dd><dt>Persönliche Schlüsselübergabe</dt><dd>Gärtner · Binauer Höhe 4 · 74821 Mosbach-Lohrbach</dd><dt>Mietdauer</dt><dd>{{ q.days }} Miettag(e) à {{ '%.2f'|format(q.daily_cents/100)|replace('.', ',') }} €</dd></dl>
 <div class="price">{{ '%.2f'|format(q.amount_cents/100)|replace('.', ',') }} €</div><p>{% if q.checkout_deposit %}{% if not live %}TEST – keine echte Abbuchung. {% endif %}Gesamtzahlung: {{ "%.2f"|format(q.rental_cents/100)|replace(".", ",") }} € Miete inkl. MwSt. + 500 € rückzahlbare Kaution.{% else %}Mietpreis inkl. MwSt. · im Checkout ausschließlich als Testbetrag.{% endif %}</p><p>{{ q.included_km }} km inklusive. Tatsächliche Mehrkilometer: {{ '%.2f'|format(q.extra_km_cents/100)|replace('.', ',') }} €/km, getrennt bei Rückgabe abzurechnen.</p>
 <p><strong>500 € rückzahlbare Kaution zusätzlich zur Miete.</strong> {% if q.checkout_deposit %}{% if not live %}Nur im Stripe-Testmodus, ohne echte Geldbewegung: {% endif %}Die Kaution wird zusammen mit der Miete als gesonderter Posten bezahlt und nach Rückgabe entsprechend den vereinbarten Bedingungen zurückerstattet.{% else %}Wird hier weder belastet noch reserviert; Verfahren noch nicht freigegeben.{% endif %}</p><p><strong>1.000 € vertragliche Selbstbeteiligung.</strong> {% if live %}Anwendungsfälle und Ausnahmen ergeben sich aus den nachfolgenden Mietbedingungen.{% else %}Versicherungsschutz und Anwendungsfälle sind nicht bestätigt. Keine Deckungszusage.{% endif %}</p>
+<p><strong>Konkretes Fahrzeug:</strong> {{ q.portal_vehicle_name }} · Kennzeichen: {{ q.vehicle_plate or 'wird vor Übergabe mitgeteilt' }}{% if q.vehicle_vin %} · FIN: {{ q.vehicle_vin }}{% endif %}.</p>
 <p><strong>Vermieter und Vertragspartner:</strong> {{ q.lessor_name }}, {{ q.lessor_address }}. „Autovermietung MOS“ bezeichnet nur das Angebot und ist keine eigene Vertragspartei.</p>
 <h2>{{ "Mietbedingungen" if live else "Entwurf der Mietbedingungen" }}</h2><div class="terms">{{ q.terms_text }}</div><p class="small">Version: {{ q.rules_version }}. Diese Übersicht ist 15 Minuten gültig.</p></section>
-<form class="card" method="post" action="{{ url_for('mos_public.checkout') }}">{{ csrf_field()|safe }}<input type="hidden" name="quote_token" value="{{ token }}">
+<form class="card" method="post" action="{{ url_for('mos_public.checkout') }}" id="contract-sign-form">{{ csrf_field()|safe }}<input type="hidden" name="quote_token" value="{{ token }}"><input type="hidden" name="signature_data" id="signature-data">
+<h2>{{ 'Mietvertrag vor der Zahlung unterschreiben' if live else 'Testvertrag vor der Testzahlung unterschreiben' }}</h2>
 <label for="name">{{ "Name" if live else "Testname" }}</label><input id="name" name="name" maxlength="150" required autocomplete="off"><label for="email">{{ "E-Mail" if live else "Test-E-Mail (kein Versand)" }}</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="off">
 <label><input type="checkbox" name="accept" value="yes" required> {% if live %}Ich habe die Preisübersicht gelesen und stimme den Mietbedingungen dieser Version zu.{% else %}Ich habe Preisübersicht und gekennzeichnete Entwurfsbedingungen für diesen Test gelesen.{% endif %}</label>
-{% if live %}<p>Im nächsten Schritt bezahlst du über Stripe mit Karte oder einer dort verfügbaren Wallet. Die endgültige zahlungspflichtige Bestellung erfolgt dort nach der Preisübersicht. Nach bestätigter Zahlung siehst du direkt den Mietvertrag mit dieser Bedingungsversion und kannst ihn digital unterschreiben. Danach steht die unterschriebene Fassung als PDF zum Download bereit. <a href="{{ booking_config.privacy_url }}">Datenschutzhinweise einschließlich Stripe</a></p><p>{{ q.lessor_name }} · {{ q.lessor_address }} · {{ booking_config.merchant_email }} · {{ booking_config.merchant_phone }}</p><button>Weiter zur sicheren Zahlung</button>{% else %}<p>Im nächsten Schritt folgt die simulierte Zahlung oder Stripe im Testmodus. Nach bestätigter Testzahlung kannst du einen Testvertrag digital unterschreiben. Es entsteht kein echter Mietvertrag.</p><button>Weiter zur Testzahlung</button>{% endif %}</form><a href="{{ url_for('mos_public.index') }}">Auswahl ändern</a>{% endblock %}
+<label for="signature-pad">Unterschrift mit Finger oder Maus zeichnen</label>
+<canvas id="signature-pad" width="700" height="180" style="width:100%;height:180px;touch-action:none;background:#fff;border:1px solid #888;border-radius:8px" aria-label="Unterschriftsfeld"></canvas>
+<label for="signature-file">Alternativ eine bereits gezeichnete Unterschrift als PNG-Datei auswählen</label><input id="signature-file" type="file" accept="image/png">
+<button type="button" class="secondary" id="clear-signature">Unterschrift löschen</button>
+<label><input type="checkbox" name="sign_confirm" value="yes" required> Ich habe den angezeigten Vertrag geprüft und unterschreibe ihn vor der Zahlung.</label>
+<p class="small">Die gezeichnete Unterschrift wird mit der angezeigten Vertragsfassung und dem Zeitpunkt gespeichert. Sie ist keine qualifizierte elektronische Signatur. Eine Buchung wird erst nach bestätigter Zahlung und Verfügbarkeitsprüfung angenommen.</p>
+{% if live %}<p>Nach deiner Unterschrift öffnet sich Stripe zur Zahlung mit Karte oder einer dort verfügbaren Wallet. Die endgültige zahlungspflichtige Bestellung erfolgt dort nach der Preisübersicht. Nach bestätigter Zahlung kannst du die unterschriebene Fassung als PDF herunterladen. <a href="{{ booking_config.privacy_url }}">Datenschutzhinweise einschließlich Stripe</a></p><p>{{ q.lessor_name }} · {{ q.lessor_address }} · {{ booking_config.merchant_email }} · {{ booking_config.merchant_phone }}</p><button>Vertrag unterschreiben und zur sicheren Zahlung</button>{% else %}<p>Nach der Unterschrift folgt die simulierte Zahlung oder Stripe im Testmodus. Es entsteht kein echter Mietvertrag.</p><button>Testvertrag unterschreiben und zur Testzahlung</button>{% endif %}</form>
+<script>
+(() => {
+  const pad = document.getElementById('signature-pad');
+  const form = document.getElementById('contract-sign-form');
+  const ctx = pad.getContext('2d');
+  let drawing = false, hasInk = false;
+  ctx.strokeStyle = '#17202a'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  function point(event) {
+    const box = pad.getBoundingClientRect();
+    return {x: (event.clientX - box.left) * pad.width / box.width,
+            y: (event.clientY - box.top) * pad.height / box.height};
+  }
+  pad.addEventListener('pointerdown', event => {
+    drawing = true; pad.setPointerCapture(event.pointerId);
+    const p = point(event); ctx.beginPath(); ctx.moveTo(p.x, p.y);
+  });
+  pad.addEventListener('pointermove', event => {
+    if (!drawing) return;
+    const p = point(event); ctx.lineTo(p.x, p.y); ctx.stroke(); hasInk = true;
+  });
+  for (const name of ['pointerup', 'pointercancel']) pad.addEventListener(name, () => { drawing = false; });
+  document.getElementById('signature-file').addEventListener('change', event => {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.type !== 'image/png') { alert('Bitte eine PNG-Datei auswählen.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new window.Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, pad.width, pad.height);
+        const scale = Math.min(pad.width / img.width, pad.height / img.height);
+        ctx.drawImage(img, (pad.width - img.width * scale) / 2,
+          (pad.height - img.height * scale) / 2, img.width * scale, img.height * scale);
+        hasInk = true;
+      };
+      img.onerror = () => alert('Die PNG-Datei konnte nicht gelesen werden.');
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+  document.getElementById('clear-signature').addEventListener('click', () => {
+    ctx.clearRect(0, 0, pad.width, pad.height); hasInk = false;
+    document.getElementById('signature-data').value = '';
+    document.getElementById('signature-file').value = '';
+  });
+  form.addEventListener('submit', event => {
+    if (!hasInk) { event.preventDefault(); alert('Bitte zeichne zuerst deine Unterschrift.'); return; }
+    document.getElementById('signature-data').value = pad.toDataURL('image/png');
+  });
+})();
+</script>
+<a href="{{ url_for('mos_public.index') }}">Auswahl ändern</a>{% endblock %}

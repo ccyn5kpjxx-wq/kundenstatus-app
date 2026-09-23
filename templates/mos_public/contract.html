@@ -1,80 +1,38 @@
 {% if contract %}
 <section class="card" id="mietvertrag">
-  <p class="small muted">{{ 'TESTVERTRAG – keine echte Anmietung' if contract.test_only else 'Mietvertrag nach bestätigter Zahlung' }}</p>
-  <h2>Dein Mietvertrag</h2>
-  {% if signed %}
-  <p><strong>Digital unterschrieben am {{ signed_local }}.</strong> Die unterzeichnete Fassung wurde gespeichert.</p>
-  <a class="button" href="{{ url_for('mos_public.signed_contract_pdf',hold_id=h.id) }}">Unterschriebenen Mietvertrag als PDF herunterladen</a>
-  {% elif account and account.cancellation %}
-  <p>Diese Buchung wurde storniert. Der Vertrag kann jetzt nicht mehr unterschrieben werden.</p>
+  <p class="small muted">{{ 'TESTVERTRAG – keine echte Anmietung' if contract.test_only else 'Digital unterschriebener Vertrag' }}</p>
+  <h2>Dein unterschriebener Mietvertrag</h2>
+  {% if account and account.cancellation %}
+  <p><strong>Die Buchung wurde storniert.</strong> Die ursprünglich unterschriebene Vertragsfassung bleibt dokumentiert.</p>
+  {% elif h.status=='confirmed' and signed %}
+  <p><strong>Zahlung bestätigt.</strong> Du hast den Vertrag am {{ signed_local }}{% if presigned %} vor der Zahlung{% endif %} unterschrieben. Die gespeicherte Fassung steht zum Download bereit.</p>
+  {% elif h.status=='pending' %}
+  <p><strong>Unterschrift vom {{ signed_local }} gespeichert. Zahlung noch offen.</strong> Erst die bestätigte Zahlung und Verfügbarkeitsprüfung führen zur Buchungsbestätigung.</p>
+  {% elif h.status=='released' %}
+  <p><strong>Checkout beendet.</strong> Die Unterschrift wurde vor der Zahlung erfasst; es gibt keine bestätigte Buchung.</p>
   {% else %}
-  <p><strong>Zahlung bestätigt.</strong> Bitte prüfe den Vertrag und füge unten deine digitale Unterschrift hinzu. Danach kannst du die unterzeichnete Fassung als PDF herunterladen.</p>
+  <p><strong>Manuelle Prüfung läuft.</strong> Aus der Unterschrift allein folgt keine bestätigte Buchung.</p>
   {% endif %}
+  {% if signed %}<a class="button" href="{{ url_for('mos_public.signed_contract_pdf',hold_id=h.id) }}">Unterschriebenen Mietvertrag als PDF herunterladen</a>{% endif %}
   <p><strong>Vermieter und Vertragspartner:</strong> {{ contract.lessor_name }}, {{ contract.lessor_address }}.</p>
   <p>„Autovermietung MOS“ bezeichnet das Mietangebot und ist keine eigene Vertragspartei.</p>
   <dl>
     <dt>Mieter</dt><dd>{{ contract.customer_name }} · {{ contract.customer_email }}</dd>
     <dt>Fahrzeug</dt><dd>{{ contract.vehicle_name }}</dd>
+    <dt>Kennzeichen / FIN</dt><dd>{{ contract.vehicle_plate or 'Wird vor Übergabe mitgeteilt' }}{% if contract.vehicle_vin %} · {{ contract.vehicle_vin }}{% endif %}</dd>
     <dt>Abholung und Rückgabe</dt><dd>{{ contract.start_slot|mos_slot }}<br>{{ contract.end_slot|mos_slot }}</dd>
     <dt>Mietdauer und Tagessatz</dt><dd>{{ contract.days }} Miettag(e) à {{ '%.2f'|format(contract.daily_cents/100)|replace('.', ',') }} €</dd>
     <dt>Miete inkl. MwSt.</dt><dd>{{ '%.2f'|format(contract.rental_cents/100)|replace('.', ',') }} €</dd>
-    <dt>Rückzahlbare Kaution</dt><dd>{{ '%.2f'|format(contract.deposit_cents/100)|replace('.', ',') }} €{% if contract.deposit_charged_cents %} · zusammen mit der Miete gezahlt{% endif %}</dd>
-    <dt>Gesamtzahlung</dt><dd>{{ '%.2f'|format(contract.amount_cents/100)|replace('.', ',') }} €</dd>
+    <dt>Rückzahlbare Kaution</dt><dd>{{ '%.2f'|format(contract.deposit_cents/100)|replace('.', ',') }} €{% if contract.deposit_charged_cents %} · im vorgesehenen Zahlbetrag enthalten{% endif %}</dd>
+    <dt>{{ 'Gesamtzahlung' if h.status=='confirmed' else 'Vorgesehener Zahlbetrag' }}</dt><dd>{{ '%.2f'|format(contract.amount_cents/100)|replace('.', ',') }} €</dd>
     <dt>Vertragliche Selbstbeteiligung</dt><dd>{{ '%.2f'|format(contract.deductible_cents/100)|replace('.', ',') }} € gemäß den Mietbedingungen</dd>
     <dt>Kilometer</dt><dd>{{ contract.included_km }} km inklusive; {{ '%.2f'|format(contract.extra_km_cents/100)|replace('.', ',') }} € je Mehrkilometer</dd>
   </dl>
-  <h3>Vereinbarte Mietbedingungen</h3>
-  <p class="small">Version {{ contract.terms_version }}. Dies ist die vor der Zahlung angezeigte und bestätigte Fassung.</p>
+  <h3>Unterschriebene Mietbedingungen</h3>
+  <p class="small">Version {{ contract.terms_version }}. Dies ist die bei der Unterschrift angezeigte Fassung.</p>
   <div class="terms">{{ contract.terms_text }}</div>
-  {% if signed %}
   <h3>Unterschrift</h3>
-  <img src="data:image/png;base64,{{ signed.signature_png_base64 }}" alt="Gespeicherte digitale Unterschrift von {{ signed.signer_name }}" style="display:block;max-width:100%;max-height:150px;border-bottom:1px solid #666">
-  <p class="small">{{ signed.signer_name }} · {{ signed_local }} · Vertragsdaten SHA-256: {{ signed.contract_sha256 }}</p>
-  {% elif not (account and account.cancellation) %}
-  <form method="post" action="{{ url_for('mos_public.sign_contract',hold_id=h.id) }}" id="contract-sign-form">
-    {{ csrf_field()|safe }}
-    <input type="hidden" name="contract_hash" value="{{ contract_hash }}">
-    <input type="hidden" name="signature_data" id="signature-data">
-    <label for="signer-name">Dein Name wie in der Buchung</label>
-    <input id="signer-name" name="signer_name" maxlength="150" required autocomplete="name" placeholder="{{ contract.customer_name }}">
-    <label for="signature-pad">Unterschrift mit Finger oder Maus zeichnen</label>
-    <canvas id="signature-pad" width="700" height="180" style="width:100%;height:180px;touch-action:none;background:#fff;border:1px solid #888;border-radius:8px" aria-label="Unterschriftsfeld"></canvas>
-    <button type="button" class="secondary" id="clear-signature">Unterschrift löschen</button>
-    <label><input type="checkbox" name="confirm" value="yes" required> Ich habe den obenstehenden Vertrag geprüft und möchte ihn digital unterschreiben.</label>
-    <p class="small">Die gezeichnete Unterschrift wird mit diesem Vertrag und dem Zeitpunkt gespeichert. Sie ist keine qualifizierte elektronische Signatur.</p>
-    <button type="submit">Mietvertrag digital unterschreiben</button>
-  </form>
-  <script>
-  (() => {
-    const pad = document.getElementById('signature-pad');
-    const form = document.getElementById('contract-sign-form');
-    const ctx = pad.getContext('2d');
-    let drawing = false, hasInk = false;
-    ctx.strokeStyle = '#17202a'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    function point(event) {
-      const box = pad.getBoundingClientRect();
-      return {x: (event.clientX - box.left) * pad.width / box.width,
-              y: (event.clientY - box.top) * pad.height / box.height};
-    }
-    pad.addEventListener('pointerdown', event => {
-      drawing = true; pad.setPointerCapture(event.pointerId);
-      const p = point(event); ctx.beginPath(); ctx.moveTo(p.x, p.y);
-    });
-    pad.addEventListener('pointermove', event => {
-      if (!drawing) return;
-      const p = point(event); ctx.lineTo(p.x, p.y); ctx.stroke(); hasInk = true;
-    });
-    for (const name of ['pointerup', 'pointercancel']) pad.addEventListener(name, () => { drawing = false; });
-    document.getElementById('clear-signature').addEventListener('click', () => {
-      ctx.clearRect(0, 0, pad.width, pad.height); hasInk = false;
-      document.getElementById('signature-data').value = '';
-    });
-    form.addEventListener('submit', event => {
-      if (!hasInk) { event.preventDefault(); alert('Bitte zeichne zuerst deine Unterschrift.'); return; }
-      document.getElementById('signature-data').value = pad.toDataURL('image/png');
-    });
-  })();
-  </script>
-  {% endif %}
+  <img src="data:image/png;base64,{{ signed.signature_png_base64 if signed else presigned }}" alt="Gespeicherte digitale Unterschrift von {{ contract.customer_name }}" style="display:block;max-width:100%;max-height:150px;border-bottom:1px solid #666">
+  <p class="small">{{ contract.customer_name }} · {{ signed_local }}{% if signed %} · Vertragsdaten SHA-256: {{ signed.contract_sha256 }}{% endif %}</p>
 </section>
 {% endif %}
