@@ -12,7 +12,7 @@ from run_mos_public_test import build_test_app
 TEMP=tempfile.TemporaryDirectory(prefix='mos-production-tests-')
 portal=build_test_app(TEMP.name,origin='http://localhost')
 portal.app.test_client().get('/mietwagen-test/')
-from mos_booking.production import launch_errors,StripeLiveGateway,cancellation_fee
+from mos_booking.production import launch_errors,StripeLiveGateway,cancellation_fee,CANCELLATION_POLICY_48H_10_PERCENT
 from mos_booking.gateway import StripeTestGateway
 from mietwagen_checkout import SharedCheckout
 
@@ -28,10 +28,11 @@ class ProductionTests(unittest.TestCase):
         for table in ['miet_checkout_refunds','miet_checkout_cancellations','miet_checkout_events','miet_checkout_holds','mietvorgaenge']:db.execute('DELETE FROM '+table)
         db.commit();db.close()
 
-    def paid(self):
+    def paid(self,policy=None):
         q={'amount_cents':64700,'rental_cents':14700,'deposit_charged_cents':50000,'currency':'eur',
            'rules_version':'draft:test','daily_cents':4900,'start_slot':self.start.isoformat(),
            'end_slot':(self.start+timedelta(days=3)).isoformat()}
+        if policy:q['cancellation_policy']=policy
         h=self.s.reserve(uuid.uuid4().hex,self.state['cfg']['fleet']['kona']['id'],self.start.date().isoformat(),
                          (self.start+timedelta(days=3)).date().isoformat(),{'name':'Test','email':'test@example.invalid'},q)
         session=self.s.create_checkout(h['id']);self.g.pay(session['id']);body,sig=self.g.signed_event(session['id'])
@@ -56,9 +57,19 @@ class ProductionTests(unittest.TestCase):
 
     def test_cancellation_boundary_and_deposit_not_fee(self):
         _,q=self.paid()
+        new_q={**q,'cancellation_policy':CANCELLATION_POLICY_48H_10_PERCENT}
+        self.assertEqual(cancellation_fee(new_q,self.start-timedelta(hours=48)),0)
+        self.assertEqual(cancellation_fee(new_q,self.start-timedelta(hours=48)+timedelta(seconds=1)),1470)
+        self.assertEqual(cancellation_fee(new_q,self.start),1470)
+        # Historical signed bookings had no policy field and retain their old terms.
         self.assertEqual(cancellation_fee(q,self.start-timedelta(hours=24)),0)
         self.assertEqual(cancellation_fee(q,self.start-timedelta(hours=24)+timedelta(seconds=1)),4900)
         self.assertEqual(cancellation_fee(q,self.start),4900)
+
+    def test_new_policy_refunds_rent_less_ten_percent_and_all_charged_deposit(self):
+        h,_=self.paid(CANCELLATION_POLICY_48H_10_PERCENT)
+        rid=self.l.cancel(h['id'],self.start-timedelta(hours=47))
+        self.assertEqual(self.refund(rid)['amount_cents'],63230)
 
     def test_free_cancel_full_refund_once_and_inventory_free(self):
         h,_=self.paid();rid=self.l.cancel(h['id'],self.start-timedelta(days=2))
@@ -119,6 +130,7 @@ class ProductionTests(unittest.TestCase):
         cfg=json.loads(json.dumps(self.state['cfg']))
         cfg.update(mode='live',live_enabled=True,origin='https://booking.example.invalid',
             terms_version='test-fixture-final-v1',deposit_method='card_authorization_at_booking',
+            cancellation_policy=CANCELLATION_POLICY_48H_10_PERCENT,
             privacy_url='https://booking.example.invalid/privacy',merchant_name='Gärtner GmbH Karosserie + Lack',
             merchant_address='Binauer Höhe 4, 74821 Mosbach, Deutschland',
             merchant_email='test@example.invalid',merchant_phone='TEST')
@@ -134,6 +146,8 @@ class ProductionTests(unittest.TestCase):
         cfg=self.ready_config();self.assertEqual(launch_errors(cfg),[])
         old_method=json.loads(json.dumps(cfg));old_method['deposit_method']='charge_with_rent_refund_after_return'
         self.assertTrue(any('Kartenautorisierung' in error for error in launch_errors(old_method)))
+        no_policy=json.loads(json.dumps(cfg));del no_policy['cancellation_policy']
+        self.assertTrue(any('Stornoregel' in error for error in launch_errors(no_policy)))
         wrong=json.loads(json.dumps(cfg));wrong['merchant_name']='Autovermietung MOS'
         self.assertTrue(any('Vermieter' in error for error in launch_errors(wrong)))
         for field in ['business_review','legal_review','finance_review','privacy_review','sandbox_acceptance','postgres_acceptance','insurance']:

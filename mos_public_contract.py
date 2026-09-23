@@ -56,9 +56,9 @@ def snapshot(payload):
         'terms_version': q['rules_version'], 'terms_text': q['terms_text'],
         'test_only': q['test_only'],
     }
-    # Preserve hashes of already signed charge-and-refund contracts. New deposit
+    # Preserve hashes of already signed contracts. New deposit/cancellation
     # fields are signed only when they were present in the displayed quote.
-    for key in ('deposit_authorized_cents', 'deposit_method'):
+    for key in ('deposit_authorized_cents', 'deposit_method', 'cancellation_policy'):
         if key in q:
             contract[key] = q[key]
     return contract

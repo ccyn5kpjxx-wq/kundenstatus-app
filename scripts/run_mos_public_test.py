@@ -36,15 +36,18 @@ def build_test_app(directory, origin='http://127.0.0.1:5085'):
     first=(datetime.now(ZoneInfo('Europe/Berlin'))+timedelta(days=2)).replace(hour=9,minute=0,second=0,microsecond=0)
     portal.app.config['MOS_PUBLIC_BOOKING']={'enabled':True,'test_configuration':True,'mode':'offline','origin':origin,
         'fleet':fleet,'slots':[(first+timedelta(days=n)).isoformat() for n in range(5)],
-        'terms_version':'draft:ENTWURF-2026-09-22-01','vat_included':True,'day_rule':'elapsed_24h_ceil',
+        'terms_version':'draft:ENTWURF-2026-09-23-02','cancellation_policy':'free_48h_then_10pct_rent',
+        'vat_included':True,'day_rule':'elapsed_24h_ceil',
         'included_km_day':150,'extra_km_cents':25,'max_days':30,'deposit_cents':50000,'deductible_cents':100000,
         'terms_text':'TESTENTWURF, keine verbindlichen Mietbedingungen. Vorgeschlagen: 24-Stunden-Miettage, '
         '30 Minuten Rückgabekulanz, Verlängerung nur nach Bestätigung. Persönliche Übergabe mit Ausweis-/Führerscheinprüfung '
-        'und Foto-/Kilometer-/Tankprotokoll. Voll/voll. Kostenlos stornieren bis 24 Stunden vor Abholung; '
-        'danach oder bei Nichterscheinen höchstens erster gebuchter Miettag, unter Anrechnung ersparter Kosten '
-        'und Wiedervermietung. Nachweis geringeren oder fehlenden Schadens möglich. '
+        'und Foto-/Kilometer-/Tankprotokoll. Voll/voll. Kostenlos stornieren bis einschließlich 48 Stunden '
+        'vor der vereinbarten Abholung; bei späterer Stornierung pauschalierter Ausfallersatz von 10 Prozent '
+        'nur des Mietpreises, ohne Kaution; dasselbe bei persönlich geprüftem Nichterscheinen ohne Fahrzeugübernahme. '
+        'Ersparte Aufwendungen und Vorteile aus anderweitiger Vermietung '
+        'werden angerechnet. Ein Nachweis keines oder eines wesentlich geringeren Schadens ist möglich. '
         '500 Euro rückzahlbare Kaution und 1.000 Euro vertragliche Selbstbeteiligung beschlossen; '
-        'Versicherung und Kautionsverfahren noch ungeprüft. Keine echte Buchung.'}
+        'Versicherung und Kartenautorisierungsfrist noch ungeprüft. Keine echte Buchung.'}
     return portal
 
 

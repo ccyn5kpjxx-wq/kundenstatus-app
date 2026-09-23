@@ -41,6 +41,25 @@ def _pickup_passed(quote):
     return slot.astimezone(timezone.utc) <= datetime.now(timezone.utc)
 
 
+def _require_open_public_slots(db, quote, postgres=False):
+    """Serialize public slot checks with admin close/open updates."""
+    policy = quote.get('slot_policy')
+    if policy is None:  # Existing internal and prototype quotes have no public slot policy.
+        return
+    if policy != 'db_open_slots_v1':
+        raise ValueError('Unbekannte Übergabetermin-Regel.')
+    start, end = quote.get('start_slot'), quote.get('end_slot')
+    if not isinstance(start, str) or not isinstance(end, str) or start == end:
+        raise ValueError('Übergabetermine fehlen oder sind ungültig.')
+    if _pickup_passed(quote):
+        raise ValueError('Der Abholtermin ist verstrichen. Bitte neu buchen.')
+    suffix = ' FOR UPDATE' if postgres else ''
+    rows = db.execute('SELECT slot,active FROM miet_checkout_slots WHERE slot IN (?,?)' + suffix,
+                      (start, end)).fetchall()
+    if {row['slot'] for row in rows if int(row['active']) == 1} != {start, end}:
+        raise ValueError('Ein Übergabetermin ist nicht mehr freigegeben. Bitte neu buchen.')
+
+
 def zeitraum_frei(db, vehicle_id, start, end, exclude_hold_id=None):
     # Never expire from the local clock: a payment may have won the expiry race.
     rows = db.execute('''SELECT id,start_datum,end_datum FROM miet_checkout_holds
@@ -124,6 +143,7 @@ class SharedCheckout:
                 return dict(existing)
             if not int(vehicle['aktiv'] or 0) or self.p.normalize_mietfahrzeug_status(vehicle['status']) in {'bald','wartung','inaktiv'}:
                 raise ValueError('Fahrzeug nicht freigegeben.')
+            _require_open_public_slots(db, quote, self.p.USE_POSTGRES)
             if not self.p.mietfahrzeug_zeitraum_frei_db(db, vehicle_id, start, end):
                 raise ValueError('Zeitraum bereits belegt.')
             hold_id = secrets.token_urlsafe(24)
@@ -202,6 +222,7 @@ class SharedCheckout:
             current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
             if current['status'] != 'pending':
                 raise ValueError('Reservierung nicht offen.')
+            _require_open_public_slots(db, q, self.p.USE_POSTGRES)
             record = db.execute('SELECT * FROM miet_checkout_deposit_auths WHERE hold_id=?', (hold_id,)).fetchone()
             if record is None:
                 db.execute('''INSERT INTO miet_checkout_deposit_auths (hold_id,status,created_at)
@@ -224,14 +245,21 @@ class SharedCheckout:
             intent = self.gateway.create_deposit_intent(params, 'mos-deposit-' + h['id'])
         ready = self._validated_deposit(h, record, intent, enforce_coverage=False)
         expired_after_confirmation = False
+        authorization_needs_review = False
         with self.locked(h['mietfahrzeug_id']) as (db, _):
             current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
             latest = dict(db.execute('SELECT * FROM miet_checkout_deposit_auths WHERE hold_id=?', (hold_id,)).fetchone())
-            if current['status'] != 'pending' or latest['status'] in {'releasing', 'released', 'review'}:
-                raise ValueError('Reservierung oder Kartenautorisierung nicht mehr offen.')
             if latest['intent_id'] and latest['intent_id'] != intent['id']:
                 raise ValueError('Mehrdeutige Kartenautorisierung; manuelle Prüfung erforderlich.')
-            if ready and latest['authorized_at'] is None:
+            authorization_needs_review = (current['status'] != 'pending'
+                                          or latest['status'] in {'releasing', 'released', 'review'})
+            if authorization_needs_review and not latest['intent_id']:
+                # The admin can close a slot while Stripe is creating an intent.
+                # Persist its ID before reporting a manual-review case.
+                db.execute('''UPDATE miet_checkout_deposit_auths
+                    SET intent_id=?,status='review',capture_before=?,reason=? WHERE hold_id=?''',
+                    (intent['id'], intent.get('capture_before'), 'authorization_created_after_close', hold_id))
+            if not authorization_needs_review and ready and latest['authorized_at'] is None:
                 now = int(time.time())
                 if current['expires_at'] <= now:
                     expired_after_confirmation = True
@@ -239,10 +267,13 @@ class SharedCheckout:
                         'SELECT hold_id FROM miet_checkout_creation_attempts WHERE hold_id=?', (hold_id,)).fetchone():
                     db.execute('UPDATE miet_checkout_holds SET expires_at=? WHERE id=?',
                                (max(current['expires_at'], now + 3600), hold_id))
-            db.execute('''UPDATE miet_checkout_deposit_auths
-                SET intent_id=?,status=?,capture_before=?,authorized_at=COALESCE(authorized_at,?) WHERE hold_id=?''',
-                (intent['id'], 'authorized' if ready else 'awaiting_card', intent.get('capture_before'),
-                 int(time.time()) if ready else None, hold_id))
+            if not authorization_needs_review:
+                db.execute('''UPDATE miet_checkout_deposit_auths
+                    SET intent_id=?,status=?,capture_before=?,authorized_at=COALESCE(authorized_at,?) WHERE hold_id=?''',
+                    (intent['id'], 'authorized' if ready else 'awaiting_card', intent.get('capture_before'),
+                     int(time.time()) if ready else None, hold_id))
+        if authorization_needs_review:
+            raise ValueError('Kartenautorisierung wurde während der Erstellung gesperrt; manuelle Prüfung erforderlich.')
         if expired_after_confirmation:
             self._release_unusable_authorization(hold_id, 'Reservierungsfrist ist abgelaufen')
         if intent['status'] == 'requires_capture' and not ready:
@@ -382,6 +413,8 @@ class SharedCheckout:
             if not self.deposit_ready(hold_id):
                 raise ValueError('Die 500 EUR Kaution sind noch nicht vollständig auf der Karte reserviert.')
         if h['session_id']:
+            with self.locked(h['mietfahrzeug_id']) as (db, _):
+                _require_open_public_slots(db, q, self.p.USE_POSTGRES)
             return self.gateway.retrieve(h['session_id'])
         if h['expires_at'] - int(time.time()) < 1860:
             raise ValueError('Unklarer Checkout muss geprüft werden; Reservierung bleibt gesperrt.')
@@ -416,6 +449,7 @@ class SharedCheckout:
                 raise ValueError('Reservierung nicht mehr offen.')
             pickup_passed_before_provider = _card_authorization_quote(q) and _pickup_passed(q)
             if not pickup_passed_before_provider:
+                _require_open_public_slots(db, q, self.p.USE_POSTGRES)
                 if _card_authorization_quote(q):
                     deposit = db.execute('SELECT status FROM miet_checkout_deposit_auths WHERE hold_id=?',
                                          (hold_id,)).fetchone()
@@ -441,13 +475,35 @@ class SharedCheckout:
         # A timeout leaves the hold intact. Retrying uses exactly the same parameters/key.
         session = self.gateway.create(params, 'shared-hold-'+h['id'])
         self.validate(h, session)
+        checkout_needs_review = False
         with self.locked(h['mietfahrzeug_id']) as (db, _):
             current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?',(hold_id,)).fetchone())
             self.validate(current, session)
-            if current['status'] != 'pending' and current['session_id'] != session['id']:
-                raise ValueError('Reservierung nicht mehr offen.')
             if current['status'] == 'pending':
-                db.execute('UPDATE miet_checkout_holds SET session_id=? WHERE id=?',(session['id'],hold_id))
+                try:
+                    _require_open_public_slots(db, q, self.p.USE_POSTGRES)
+                except ValueError:
+                    checkout_needs_review = True
+                db.execute('''UPDATE miet_checkout_holds SET session_id=?,status=?,grund=? WHERE id=?''',
+                           (session['id'], 'review' if checkout_needs_review else 'pending',
+                            'slot_closed_review' if checkout_needs_review else current['grund'], hold_id))
+            elif current['session_id'] != session['id']:
+                # Keep the provider ID for reconciliation if an admin closed the
+                # slot while the create request was in flight.
+                checkout_needs_review = True
+                db.execute('''UPDATE miet_checkout_holds SET session_id=?,status='review',grund=? WHERE id=?''',
+                           (session['id'], 'checkout_created_after_release_review', hold_id))
+            elif current['status'] == 'review':
+                checkout_needs_review = True
+        if checkout_needs_review:
+            try:
+                if session.get('status') == 'open':
+                    session = self.gateway.expire(session['id'])
+                if session.get('status') == 'expired' and session.get('payment_status') == 'unpaid':
+                    self.release_deposit(hold_id, 'Übergabetermin geschlossen')
+            except Exception:
+                self.p.app.logger.exception('MOS Checkout nach Terminschließung muss manuell abgeglichen werden')
+            raise ValueError('Der Übergabetermin ist nicht mehr geöffnet. Zahlungsstatus wird geprüft.')
         if _card_authorization_quote(q) and _pickup_passed(q):
             self.cancel_or_reconcile(hold_id, cancel=True)
             raise ValueError('Der Abholtermin ist verstrichen. Bitte neu buchen.')

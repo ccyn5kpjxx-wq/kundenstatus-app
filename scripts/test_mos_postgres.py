@@ -42,6 +42,7 @@ def main():
     portal.get_db = lambda: portal.PostgresConnection(psycopg.connect(**cfg))
     portal.init_db()
     from mos_booking.production import RefundLedger, init_refund_schema
+    from mos_public_booking import init_slot_schema
     db = portal.get_db()
     init_refund_schema(db)
     db.commit()
@@ -49,6 +50,28 @@ def main():
 
     class RefundTests(suite_module.InventoryTests):
         # Only load the methods defined below; stock tests run separately.
+        def test_postgres_public_slot_close_blocks_reserve_and_checkout(self):
+            start = (datetime.now(timezone.utc)+timedelta(days=5)).replace(second=0,microsecond=0)
+            end = start+timedelta(days=1)
+            a,b=start.isoformat(),end.isoformat()
+            q=dict(self.quote,start_slot=a,end_slot=b,slot_policy='db_open_slots_v1')
+            db=portal.get_db()
+            init_slot_schema(db,[a,b]);db.commit();db.close()
+            db=portal.get_db()
+            db.execute('UPDATE miet_checkout_slots SET active=0 WHERE slot=?',(a,));db.commit();db.close()
+            with self.assertRaisesRegex(ValueError,'nicht mehr freigegeben'):
+                self.s.reserve(uuid.uuid4().hex,self.vid,start.date().isoformat(),
+                               end.date().isoformat(),self.customer,q)
+            db=portal.get_db()
+            db.execute('UPDATE miet_checkout_slots SET active=1 WHERE slot=?',(a,));db.commit();db.close()
+            h=self.s.reserve(uuid.uuid4().hex,self.vid,start.date().isoformat(),
+                             end.date().isoformat(),self.customer,q)
+            db=portal.get_db()
+            db.execute('UPDATE miet_checkout_slots SET active=0 WHERE slot=?',(a,));db.commit();db.close()
+            with self.assertRaisesRegex(ValueError,'nicht mehr freigegeben'):
+                self.s.create_checkout(h['id'])
+            self.assertIsNone(self.s.read(h['id'])['session_id'])
+
         def test_postgres_atomic_rollback(self):
             h=self.hold(); session=self.s.create_checkout(h['id'])
             self.gateway.pay(session['id'])
@@ -102,6 +125,7 @@ def main():
     suite = unittest.TestSuite(suite_module.InventoryTests(n) for n in names)
     suite.addTest(RefundTests('test_postgres_refund_after_cancel'))
     suite.addTest(RefundTests('test_postgres_atomic_rollback'))
+    suite.addTest(RefundTests('test_postgres_public_slot_close_blocks_reserve_and_checkout'))
     print('Synthetic acceptance database:', name, flush=True)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1

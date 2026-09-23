@@ -1,5 +1,6 @@
 from pathlib import Path
 from base64 import b64encode
+from datetime import datetime, timedelta
 from hashlib import sha256
 import html
 from io import BytesIO
@@ -18,6 +19,7 @@ def deny(*a,**k):raise AssertionError('External network forbidden')
 patch('socket.socket.connect',deny).start();patch('socket.socket.connect_ex',deny).start();patch('socket.create_connection',deny).start()
 from run_mos_public_test import build_test_app
 from mos_public_contract import signed_payload
+from mos_booking.production import cancellation_fee
 TEMP=tempfile.TemporaryDirectory(prefix='mos-public-tests-')
 # Simulate an operator launching the test from a live-configured shell.
 with patch.dict(os.environ, {
@@ -36,7 +38,8 @@ class PublicTests(unittest.TestCase):
         self.client=portal.app.test_client()
         self.client.get('/mietwagen-test/')
         db=portal.get_db()
-        for table in ('miet_checkout_contracts','miet_checkout_events','miet_checkout_deposit_auths',
+        for table in ('miet_checkout_refunds','miet_checkout_cancellations','miet_checkout_contracts',
+                      'miet_checkout_events','miet_checkout_deposit_auths',
                       'miet_checkout_holds','mietvorgaenge'):db.execute('DELETE FROM '+table)
         db.commit();db.close()
         self.cfg=portal.app.extensions['mos_public_booking']['cfg']
@@ -46,8 +49,9 @@ class PublicTests(unittest.TestCase):
         with client.session_transaction() as s:csrf=s.get('csrf_token')
         return client.post(path,data={**(data or {}),'csrf_token':csrf})
 
-    def quote(self,slug='kona'):
-        r=self.post('/mietwagen-test/quote',{'vehicle':slug,'start':self.cfg['slots'][0],'end':self.cfg['slots'][3]})
+    def quote(self,slug='kona',start_index=0,end_index=3):
+        r=self.post('/mietwagen-test/quote',{'vehicle':slug,'start':self.cfg['slots'][start_index],
+                                             'end':self.cfg['slots'][end_index]})
         self.assertEqual(r.status_code,200)
         return html.unescape(re.search(r'name="quote_token" value="([^"]+)"',r.get_data(as_text=True))[1]),r
 
@@ -74,8 +78,8 @@ class PublicTests(unittest.TestCase):
         buf=BytesIO();image.save(buf,format='PNG')
         return 'data:image/png;base64,'+b64encode(buf.getvalue()).decode('ascii')
 
-    def card_deposit(self,slug='kona'):
-        token,quote_page=self.quote(slug)
+    def card_deposit(self,slug='kona',start_index=0,end_index=3):
+        token,quote_page=self.quote(slug,start_index,end_index)
         checkout=self.checkout(token)
         self.assertEqual(checkout.status_code,303)
         self.assertTrue(checkout.location.endswith('/kaution'))
@@ -84,6 +88,26 @@ class PublicTests(unittest.TestCase):
         intent_id=state['service']._deposit_record(hold)['intent_id']
         self.assertIsNone(state['service'].read(hold)['session_id'])
         return hold,intent_id,quote_page
+
+    def paid_card_booking(self,slug='kona',start_index=0,end_index=3):
+        hold,intent_id,_=self.card_deposit(slug,start_index,end_index)
+        self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/kaution-test').status_code,303)
+        rent=self.post('/mietwagen-test/status/'+hold+'/retry')
+        self.assertEqual(rent.status_code,303)
+        self.assertEqual(self.post(rent.location).status_code,303)
+        state=portal.app.extensions['mos_public_booking']
+        h=state['service'].read(hold)
+        self.assertEqual(h['status'],'confirmed')
+        return hold,intent_id,json.loads(h['payload'])['quote']
+
+    def cancellation_rows(self,hold):
+        db=portal.get_db()
+        try:
+            cancellation=db.execute('SELECT * FROM miet_checkout_cancellations WHERE id=?',(hold,)).fetchone()
+            refunds=[dict(row) for row in db.execute(
+                'SELECT amount_cents,kind,status FROM miet_checkout_refunds WHERE hold_id=?',(hold,)).fetchall()]
+            return dict(cancellation) if cancellation else None,refunds
+        finally:db.close()
 
     def test_card_authorization_before_rent_only_checkout(self):
         with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
@@ -123,6 +147,8 @@ class PublicTests(unittest.TestCase):
         with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
             hold,intent_id,_=self.card_deposit()
             self.post('/mietwagen-test/status/'+hold+'/kaution-test')
+            self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/stornieren',
+                                       {'confirm':'yes'}).status_code,409)
             released=self.post('/mietwagen-test/status/'+hold+'/cancel')
             self.assertEqual(released.status_code,303)
             state=portal.app.extensions['mos_public_booking']
@@ -130,6 +156,7 @@ class PublicTests(unittest.TestCase):
             self.assertEqual(state['service']._deposit_record(hold)['status'],'released')
             self.assertEqual(state['gateway'].retrieve_deposit_intent(intent_id)['status'],'canceled')
             self.assertEqual(self.rows(),[])
+            self.assertEqual(self.cancellation_rows(hold),(None,[]))
             status_page=self.client.get(released.location).get_data(as_text=True)
             self.assertIn('freigegeben',status_page)
             self.assertNotIn('Kartenreservierung wird geprüft',status_page)
@@ -161,7 +188,7 @@ class PublicTests(unittest.TestCase):
 
     def test_card_deposit_paid_cancel_refunds_only_rent_and_releases_card(self):
         with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
-            hold,intent_id,_=self.card_deposit()
+            hold,intent_id,_=self.card_deposit(start_index=1,end_index=4)
             self.post('/mietwagen-test/status/'+hold+'/kaution-test')
             rent=self.post('/mietwagen-test/status/'+hold+'/retry')
             self.assertEqual(self.post(rent.location).status_code,303)
@@ -182,6 +209,55 @@ class PublicTests(unittest.TestCase):
             self.assertIn('Buchung storniert',status_page)
             self.assertNotIn('Kartenreservierung wird geprüft',status_page)
             self.assertIn('war auf der Kreditkarte reserviert und wurde freigegeben',status_page)
+
+    def test_new_card_policy_exactly_48_hours_refunds_all_rent_and_releases_deposit(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,intent_id,q=self.paid_card_booking(start_index=1,end_index=4)
+            self.assertEqual(q['cancellation_policy'],'free_48h_then_10pct_rent')
+            start=datetime.fromisoformat(q['start_slot'])
+            state=portal.app.extensions['mos_public_booking']
+            rid=state['ledger'].cancel(hold,requested_at=start-timedelta(hours=48))
+            self.assertEqual(rid,'cancel-'+hold)
+            cancelled=self.post('/mietwagen-test/status/'+hold+'/stornieren',{'confirm':'yes'})
+            self.assertEqual(cancelled.status_code,303)
+            self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/stornieren',{'confirm':'yes'}).status_code,303)
+            row,refunds=self.cancellation_rows(hold)
+            self.assertEqual(row['fee_cents'],0)
+            self.assertEqual(refunds,[{'amount_cents':14700,'kind':'cancellation','status':'succeeded'}])
+            self.assertEqual(state['service']._deposit_record(hold)['status'],'released')
+            intent=state['gateway'].retrieve_deposit_intent(intent_id)
+            self.assertEqual(intent['status'],'canceled')
+            self.assertEqual(intent['amount_received'],0)
+
+    def test_new_card_policy_inside_48_hours_keeps_only_ten_percent_of_rent(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,intent_id,q=self.paid_card_booking(start_index=1,end_index=4)
+            self.assertEqual(q['cancellation_policy'],'free_48h_then_10pct_rent')
+            start=datetime.fromisoformat(q['start_slot'])
+            self.assertEqual(cancellation_fee(q,start-timedelta(hours=1)),1470)
+            state=portal.app.extensions['mos_public_booking']
+            state['ledger'].cancel(hold,requested_at=start-timedelta(hours=48)+timedelta(seconds=1))
+            self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/stornieren',
+                                       {'confirm':'yes'}).status_code,303)
+            row,refunds=self.cancellation_rows(hold)
+            self.assertEqual(row['fee_cents'],1470)
+            self.assertEqual(refunds,[{'amount_cents':13230,'kind':'cancellation','status':'succeeded'}])
+            self.assertEqual(state['service']._deposit_record(hold)['status'],'released')
+            intent=state['gateway'].retrieve_deposit_intent(intent_id)
+            self.assertEqual(intent['status'],'canceled')
+            self.assertEqual(intent['amount_received'],0)
+            self.assertIn('Stornogebühr nach bisheriger Minderung: 14,70 €',
+                          self.client.get('/mietwagen-test/status/'+hold).get_data(as_text=True))
+
+    def test_legacy_quote_without_policy_keeps_original_cancellation_rule(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            _,_,new_quote=self.paid_card_booking(start_index=1,end_index=4)
+            start=datetime.fromisoformat(new_quote['start_slot'])
+            old_quote=dict(new_quote)
+            old_quote.pop('cancellation_policy')
+            self.assertEqual(cancellation_fee(new_quote,start-timedelta(hours=36)),1470)
+            self.assertEqual(cancellation_fee(old_quote,start-timedelta(hours=36)),0)
+            self.assertEqual(cancellation_fee(old_quote,start-timedelta(hours=23)),4900)
 
     def test_card_deposit_admin_release_requires_recorded_return(self):
         with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):

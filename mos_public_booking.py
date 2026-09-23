@@ -5,6 +5,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import secrets
 import time
 from urllib.parse import urlsplit
@@ -17,6 +18,57 @@ from mos_public_contract import finalize as finalize_contract, presign_quote, re
 from mos_public_contract import signed_payload
 
 LISTINGS = {'kona':'Hyundai KONA N Line X', 'i10':'Hyundai i10'}
+BERLIN = ZoneInfo('Europe/Berlin')
+
+
+def local_slot_to_iso(value):
+    """Accept a future Berlin wall-clock minute only when its UTC offset is unambiguous."""
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}',value or ''):
+        raise ValueError('Bitte einen gültigen Abhol- oder Rückgabetermin eingeben.')
+    try: local=datetime.strptime(value,'%Y-%m-%dT%H:%M')
+    except ValueError:raise ValueError('Bitte einen gültigen Abhol- oder Rückgabetermin eingeben.') from None
+    possible=[]
+    for fold in (0,1):
+        aware=local.replace(tzinfo=BERLIN,fold=fold)
+        if aware.astimezone(timezone.utc).astimezone(BERLIN).replace(tzinfo=None)==local:
+            possible.append(aware)
+    if len({d.utcoffset() for d in possible})!=1:
+        raise ValueError('Dieser Termin liegt in einer mehrdeutigen oder nicht vorhandenen Zeitumstellung.')
+    slot=possible[0]
+    if slot.astimezone(timezone.utc)<=datetime.now(timezone.utc):
+        raise ValueError('Nur künftige Übergabetermine können geöffnet werden.')
+    return slot.isoformat()
+
+
+def init_slot_schema(db, configured_slots):
+    """The portal database is authoritative; config dates seed only previously unseen rows."""
+    db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_slots (
+        slot TEXT PRIMARY KEY, active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL)''')
+    now=datetime.now(timezone.utc).isoformat()
+    for slot in configured_slots:
+        db.execute('''INSERT INTO miet_checkout_slots (slot,active,created_at,updated_at)
+            VALUES (?,1,?,?) ON CONFLICT (slot) DO NOTHING RETURNING slot''',(slot,now,now))
+
+
+def listed_slots(db, active=True):
+    rows=db.execute('SELECT slot,active FROM miet_checkout_slots').fetchall()
+    now=datetime.now(timezone.utc)
+    slots=[dict(r) for r in rows if datetime.fromisoformat(r['slot']).astimezone(timezone.utc)>now
+           and (active is None or bool(r['active']) is active)]
+    return sorted(slots,key=lambda row:datetime.fromisoformat(row['slot']).astimezone(timezone.utc))
+
+
+def selected_slots_open(db,start,end):
+    try:
+        a,b=datetime.fromisoformat(start),datetime.fromisoformat(end)
+        if (a.tzinfo is None or b.tzinfo is None or a.astimezone(timezone.utc)<=datetime.now(timezone.utc)
+                or b.astimezone(timezone.utc)<=a.astimezone(timezone.utc)):
+            return False
+    except (TypeError,ValueError):return False
+    active={row['slot'] for row in db.execute(
+        'SELECT slot FROM miet_checkout_slots WHERE active=1 AND slot IN (?,?)',(start,end)).fetchall()}
+    return active=={start,end}
 
 
 def website_response(response, test_url=None, live=False):
@@ -83,12 +135,15 @@ def register(portal):
             raise ValueError('Entwurfsversion und Bruttopreise erforderlich.')
         if cfg.get('day_rule') != 'elapsed_24h_ceil' or cfg.get('deposit_cents')!=50000 or cfg.get('deductible_cents')!=100000:
             raise ValueError('Explizite Test-Zeitregel und beschlossene Beträge erforderlich.')
+        if cfg.get('cancellation_policy') not in (None,'free_48h_then_10pct_rent'):
+            raise ValueError('Unbekannte Stornoregel in der Buchungskonfiguration.')
         for key in ('included_km_day','extra_km_cents','max_days'):
             if type(cfg[key]) is not int or cfg[key]<1:raise ValueError('Test-Tarif unvollständig.')
-        if not cfg['slots'] or len(set(cfg['slots'])) != len(cfg['slots']):raise ValueError('Test-Slots fehlen.')
+        if not isinstance(cfg.get('slots'),list) or len(set(cfg['slots'])) != len(cfg['slots']):
+            raise ValueError('Übergabetermine müssen eine Liste eindeutiger Zeitpunkte sein.')
         for slot in cfg['slots']:
             dt=datetime.fromisoformat(slot)
-            if dt.tzinfo is None or dt.astimezone(ZoneInfo('Europe/Berlin')).isoformat()!=slot:
+            if dt.tzinfo is None or dt.astimezone(BERLIN).isoformat()!=slot:
                 raise ValueError('Slots müssen eindeutige Europe/Berlin-Zeitpunkte mit Offset sein.')
         from mos_booking.gateway import OfflineGateway, StripeTestGateway
         from mietwagen_checkout import SharedCheckout
@@ -116,7 +171,9 @@ def register(portal):
         service=SharedCheckout(portal,gateway,cfg['origin']+prefix+'/status')
         app.config['MOS_SHARED_CHECKOUT_ENABLED']=bool(app.config['MOS_PUBLIC_BOOKING'].get('enabled'))
         db=portal.get_db()
-        try:init_refund_schema(db);init_contract_schema(db);db.commit()
+        try:
+            init_refund_schema(db);init_contract_schema(db)
+            init_slot_schema(db,cfg['slots']);db.commit()
         finally:db.close()
         existing={'cfg':cfg,'service':service,'gateway':gateway,'secret':secret,'ledger':RefundLedger(service)}
         app.extensions['mos_public_booking']=existing
@@ -125,6 +182,11 @@ def register(portal):
     @bp.before_request
     def guard():
         cfg=app.config.get('MOS_PUBLIC_BOOKING',{})
+        if request.endpoint in {'mos_public.admin_slot_page','mos_public.admin_slots'}:
+            # Operators can configure appointments before payment/insurance launch gates pass.
+            # Both views still require the portal's admin session and global POST-CSRF check.
+            if request.content_length and request.content_length>65536:abort(413)
+            return
         settling={'mos_public.status','mos_public.retry','mos_public.cancel','mos_public.webhook','mos_public.receipt',
                   'mos_public.cancel_paid','mos_public.admin_bookings','mos_public.admin_action',
                   'mos_public.signed_contract_pdf','mos_public.admin_contract_pdf'}
@@ -151,7 +213,7 @@ def register(portal):
     @bp.context_processor
     def mode_context():
         state=app.extensions.get('mos_public_booking',{})
-        cfg=state.get('cfg',{})
+        cfg=state.get('cfg') or app.config.get('MOS_PUBLIC_BOOKING',{})
         return {'live':cfg.get('mode')=='live','booking_config':cfg}
 
     @bp.after_request
@@ -179,19 +241,33 @@ def register(portal):
 
     def serializer():return URLSafeTimedSerializer(app.secret_key,salt='mos-public-quote-v1')
 
+    def quote_slots_open(q):
+        db=portal.get_db()
+        try:return selected_slots_open(db,q['start_slot'],q['end_slot'])
+        finally:db.close()
+
+    def closed_slot_response(hold_id,q):
+        if quote_slots_open(q):return None
+        try:setup()['service'].cancel_or_reconcile(hold_id,cancel=True)
+        except Exception:
+            app.logger.exception('MOS Kartenreservierung/Checkout nach Terminschließung muss geprüft werden')
+        return render_status(hold_id,'Der Übergabetermin ist nicht mehr geöffnet. Bitte neu buchen.'),409
+
     def quote(slug,start,end):
         state=setup();cfg=state['cfg']
-        if slug not in LISTINGS or start not in cfg['slots'] or end not in cfg['slots']:
+        if slug not in LISTINGS:
             raise ValueError('Bitte ein verfügbares Fahrzeug und freigegebene Termine wählen.')
-        a,b=datetime.fromisoformat(start),datetime.fromisoformat(end)
-        seconds=(b.astimezone(timezone.utc)-a.astimezone(timezone.utc)).total_seconds()
-        days=math.ceil(seconds/86400)
-        if a<=datetime.now(timezone.utc) or seconds<=0 or days>cfg['max_days']:
-            raise ValueError('Ungültiger Mietzeitraum.')
-        f=cfg['fleet'][slug];rate=f['daily_cents']
-        if days>=f.get('discount_after_days',cfg['max_days']+1):rate=f['discount_cents']
         db=portal.get_db()
         try:
+            if not selected_slots_open(db,start,end):
+                raise ValueError('Bitte ein verfügbares Fahrzeug und freigegebene Termine wählen.')
+            a,b=datetime.fromisoformat(start),datetime.fromisoformat(end)
+            seconds=(b.astimezone(timezone.utc)-a.astimezone(timezone.utc)).total_seconds()
+            days=math.ceil(seconds/86400)
+            if a<=datetime.now(timezone.utc) or seconds<=0 or days>cfg['max_days']:
+                raise ValueError('Ungültiger Mietzeitraum.')
+            f=cfg['fleet'][slug];rate=f['daily_cents']
+            if days>=f.get('discount_after_days',cfg['max_days']+1):rate=f['discount_cents']
             vehicle=db.execute('SELECT id,bezeichnung,kennzeichen,fin_nummer,aktiv,status FROM mietfahrzeuge WHERE id=?',(f['id'],)).fetchone()
             if not vehicle or not int(vehicle['aktiv'] or 0) or portal.normalize_mietfahrzeug_status(vehicle['status']) in {'bald','wartung','inaktiv'}:
                 raise ValueError('Das zugeordnete Fahrzeug ist nicht verfügbar.')
@@ -202,10 +278,11 @@ def register(portal):
         finally:db.close()
         authorization=cfg.get('deposit_method')=='card_authorization_at_booking'
         charged=cfg['mode'] in {'live','stripe_test'} and not authorization
-        return {'slug':slug,'vehicle_id':f['id'],'vehicle_name':LISTINGS[slug],
+        quoted={'slug':slug,'vehicle_id':f['id'],'vehicle_name':LISTINGS[slug],
             'portal_vehicle_name':vehicle['bezeichnung'],
             'vehicle_plate':vehicle['kennzeichen'] or '', 'vehicle_vin':vehicle['fin_nummer'] or '',
             'start_slot':start,'end_slot':end,
+            'slot_policy':'db_open_slots_v1',
             'days':days,'daily_cents':rate,'rental_cents':days*rate,
             'amount_cents':days*rate+(50000 if charged else 0),'currency':'eur',
             'deposit_charged_cents':50000 if charged else 0,
@@ -217,6 +294,9 @@ def register(portal):
             'rules_version':cfg['terms_version'],'terms_text':cfg['terms_text'],'owner_hash':owner(),
             'test_only':cfg['mode']!='live','vat_included':True,
             'lessor_name':LESSOR_NAME,'lessor_address':LESSOR_ADDRESS}
+        if cfg.get('cancellation_policy'):
+            quoted['cancellation_policy']=cfg['cancellation_policy']
+        return quoted
 
     def owned(hold_id):
         try:h=setup()['service'].read(hold_id)
@@ -288,12 +368,91 @@ def register(portal):
                 LEFT JOIN miet_checkout_contracts c ON c.hold_id=h.id
                 LEFT JOIN miet_checkout_deposit_auths d ON d.hold_id=h.id
                 ORDER BY h.expires_at DESC LIMIT 100''').fetchall()]
+            open_slots=listed_slots(db,True)
+            closed_slots=listed_slots(db,False)
         finally:db.close()
         for h in holds:
             h['q']=json.loads(h['payload'])['quote'];h['account']=account(h['id'])
             if h['signed_at']:
                 h['signed_at']=datetime.fromisoformat(h['signed_at']).astimezone(ZoneInfo('Europe/Berlin')).strftime('%d.%m.%Y um %H:%M Uhr')
-        return render_template('mos_public/admin.html',holds=holds,request_id=secrets.token_urlsafe(24))
+        return render_template('mos_public/admin.html',holds=holds,open_slots=open_slots,
+                               closed_slots=closed_slots,request_id=secrets.token_urlsafe(24))
+
+    @bp.get('/admin/termine')
+    @portal.admin_required
+    def admin_slot_page():
+        db=portal.get_db()
+        try:
+            configured=app.config.get('MOS_PUBLIC_BOOKING',{}).get('slots',[])
+            init_slot_schema(db,configured if isinstance(configured,list) else [])
+            db.commit()
+            open_slots=listed_slots(db,True)
+            closed_slots=listed_slots(db,False)
+        finally:db.close()
+        return render_template('mos_public/admin.html',holds=[],open_slots=open_slots,
+                               closed_slots=closed_slots,slot_only=True)
+
+    @bp.post('/admin/termine')
+    @portal.admin_required
+    def admin_slots():
+        action=request.form.get('action')
+        affected=[]
+        db=portal.get_db()
+        try:
+            configured=app.config.get('MOS_PUBLIC_BOOKING',{}).get('slots',[])
+            init_slot_schema(db,configured if isinstance(configured,list) else [])
+            now=datetime.now(timezone.utc).isoformat()
+            if action=='add':
+                slot=local_slot_to_iso(request.form.get('local_slot',''))
+                db.execute('''INSERT INTO miet_checkout_slots (slot,active,created_at,updated_at)
+                    VALUES (?,1,?,?) ON CONFLICT (slot) DO UPDATE SET active=1,updated_at=excluded.updated_at
+                    RETURNING slot''',
+                    (slot,now,now))
+            elif action in {'close','reopen'}:
+                slot=request.form.get('slot','')
+                row=db.execute('SELECT slot FROM miet_checkout_slots WHERE slot=?',(slot,)).fetchone()
+                if not row:raise ValueError('Übergabetermin nicht gefunden.')
+                if action=='reopen' and datetime.fromisoformat(slot).astimezone(timezone.utc)<=datetime.now(timezone.utc):
+                    raise ValueError('Nur künftige Übergabetermine können geöffnet werden.')
+                db.execute('UPDATE miet_checkout_slots SET active=?,updated_at=? WHERE slot=?',
+                           (1 if action=='reopen' else 0,now,slot))
+                if action=='close':
+                    rows=db.execute("SELECT id,payload FROM miet_checkout_holds WHERE status='pending'").fetchall()
+                    for pending in rows:
+                        q=json.loads(pending['payload'])['quote']
+                        if slot in (q.get('start_slot'),q.get('end_slot')):affected.append(pending['id'])
+            else:abort(400)
+            db.commit()
+        except Exception:
+            db.rollback();raise
+        finally:db.close()
+        if affected:
+            try:state=app.extensions.get('mos_public_booking') or setup()
+            except Exception:
+                state=None
+                app.logger.exception('MOS Zahlungsdienst beim Schließen eines Übergabetermins nicht erreichbar')
+            for hold_id in affected:
+                try:
+                    if state:state['service'].cancel_or_reconcile(hold_id,cancel=True)
+                except Exception:
+                    app.logger.exception('MOS offener Checkout nach Terminschließung muss geprüft werden')
+                # A paid/uncertain provider race remains blocked for manual review;
+                # already confirmed rentals are never changed by slot management.
+                review_db=portal.get_db()
+                try:
+                    if not portal.USE_POSTGRES:review_db.execute('BEGIN IMMEDIATE')
+                    suffix=' FOR UPDATE' if portal.USE_POSTGRES else ''
+                    current=review_db.execute('SELECT status FROM miet_checkout_holds WHERE id=?'+suffix,
+                                              (hold_id,)).fetchone()
+                    if current and current['status']=='pending':
+                        review_db.execute("UPDATE miet_checkout_holds SET status='review',grund='slot_closed_review' WHERE id=?",
+                                          (hold_id,))
+                        portal.flash('Ein offener Checkout ist wegen der Terminschließung in manueller Prüfung. Zahlungs- und Kartenstatus prüfen.','warning')
+                    review_db.commit()
+                except Exception:
+                    review_db.rollback();raise
+                finally:review_db.close()
+        return redirect(url_for('mos_public.admin_slot_page'),code=303)
 
     @bp.get('/admin/<hold_id>/vertrag.pdf')
     @portal.admin_required
@@ -342,8 +501,10 @@ def register(portal):
 
     @bp.get('/')
     def index():
-        cfg=setup()['cfg']
-        return render_template('mos_public/index.html',listings=LISTINGS,slots=cfg['slots'])
+        db=portal.get_db()
+        try:slots=[row['slot'] for row in listed_slots(db,True)]
+        finally:db.close()
+        return render_template('mos_public/index.html',listings=LISTINGS,slots=slots)
 
     @app.cli.command('mos-booking-reconcile')
     def reconcile_jobs():
@@ -424,6 +585,8 @@ def register(portal):
         if h['status']!='pending':return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
         if not app.config['MOS_PUBLIC_BOOKING'].get('enabled'):
             return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
+        closed=closed_slot_response(hold_id,p['quote'])
+        if closed:return closed
         signed_payload(p)
         state=setup()
         if p['quote'].get('deposit_authorized_cents'):
@@ -439,6 +602,8 @@ def register(portal):
                 if deposit.get('status') in {'requires_payment_method','requires_confirmation','requires_action'}:
                     return redirect(url_for('mos_public.deposit_page',hold_id=hold_id),code=303)
                 return render_status(hold_id,'Kartenreservierung nicht ausreichend gültig. Es wurde kein Mietpreis abgebucht.'),409
+        closed=closed_slot_response(hold_id,p['quote'])
+        if closed:return closed
         try:s=setup()['service'].create_checkout(hold_id)
         except Exception:
             return render_status(hold_id,
@@ -451,6 +616,8 @@ def register(portal):
         if (h['status']!='pending' or not app.config['MOS_PUBLIC_BOOKING'].get('enabled')
                 or not p['quote'].get('deposit_authorized_cents')):
             return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
+        closed=closed_slot_response(hold_id,p['quote'])
+        if closed:return closed
         signed_payload(p)
         state=setup()
         try:
@@ -477,6 +644,8 @@ def register(portal):
         if (state['cfg']['mode']!='offline' or h['status']!='pending'
                 or not p['quote'].get('deposit_authorized_cents')):
             abort(404)
+        closed=closed_slot_response(hold_id,p['quote'])
+        if closed:return closed
         signed_payload(p)
         deposit=state['service'].prepare_deposit(hold_id)
         state['gateway'].authorize_deposit_intent(deposit['id'])

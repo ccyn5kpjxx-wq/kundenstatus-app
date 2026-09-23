@@ -1,0 +1,270 @@
+"""Admin-managed handover times are authoritative even before launch."""
+from datetime import datetime, timedelta, timezone
+from base64 import b64encode
+import html
+from io import BytesIO
+import re
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
+from PIL import Image, ImageDraw
+
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'scripts'))
+from run_mos_public_test import build_test_app
+from mos_public_booking import init_slot_schema, local_slot_to_iso
+
+
+class SlotTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp=tempfile.TemporaryDirectory(prefix='mos-slots-')
+        cls.portal=build_test_app(cls.temp.name,origin='http://localhost')
+
+    @classmethod
+    def tearDownClass(cls):cls.temp.cleanup()
+
+    def setUp(self):
+        self.portal.app.config.update(TESTING=True)
+        self.portal.app.extensions.pop('mos_public_booking',None)
+        cfg=self.portal.app.config['MOS_PUBLIC_BOOKING']
+        cfg['enabled']=False
+        cfg['slots']=[]
+        cfg.pop('deposit_method',None)
+        db=self.portal.get_db()
+        try:
+            init_slot_schema(db,[])
+            tables={r['name'] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            for table in ('miet_checkout_refunds','miet_checkout_cancellations','miet_checkout_contracts',
+                          'miet_checkout_events','miet_checkout_deposit_auths','miet_checkout_creation_attempts',
+                          'miet_checkout_holds','mietvorgaenge'):
+                if table in tables:db.execute('DELETE FROM '+table)
+            db.execute('DELETE FROM miet_checkout_slots')
+            db.commit()
+        finally:db.close()
+        self.client=self.portal.app.test_client()
+        with self.client.session_transaction() as session:session['admin']=True
+        self.assertEqual(self.client.get('/mietwagen-test/admin/termine').status_code,200)
+
+    def post(self,path,data):
+        with self.client.session_transaction() as session:token=session['csrf_token']
+        return self.client.post(path,data={**data,'csrf_token':token})
+
+    def open(self,dt):
+        local=dt.astimezone(ZoneInfo('Europe/Berlin')).strftime('%Y-%m-%dT%H:%M')
+        response=self.post('/mietwagen-test/admin/termine',{'action':'add','local_slot':local})
+        self.assertEqual(response.status_code,303)
+        return local_slot_to_iso(local)
+
+    def signature(self):
+        image=Image.new('RGBA',(700,180),(255,255,255,0))
+        draw=ImageDraw.Draw(image)
+        draw.line([(40,110),(90,40),(125,125),(180,60),(240,110),(320,50),(380,105)],
+                  fill=(20,30,40,255),width=5)
+        output=BytesIO();image.save(output,format='PNG')
+        return 'data:image/png;base64,'+b64encode(output.getvalue()).decode('ascii')
+
+    def test_admin_auth_csrf_and_prelaunch_access(self):
+        self.assertNotIn('mos_public_booking',self.portal.app.extensions)
+        self.assertEqual(self.portal.app.config['MOS_PUBLIC_BOOKING']['enabled'],False)
+        anonymous=self.portal.app.test_client()
+        self.assertEqual(anonymous.get('/mietwagen-test/admin/termine').status_code,302)
+        self.assertEqual(self.client.post('/mietwagen-test/admin/termine',data={'action':'add'}).status_code,400)
+        self.assertNotIn('mos_public_booking',self.portal.app.extensions)
+
+    def test_open_close_and_reopen_are_shared_by_page_and_quote(self):
+        first=datetime.now(timezone.utc)+timedelta(hours=2)
+        last=first+timedelta(days=1,hours=1)
+        a,b=self.open(first),self.open(last)
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['enabled']=True
+        page=self.client.get('/mietwagen-test/')
+        self.assertEqual(page.status_code,200)
+        self.assertIn(a,page.get_data(as_text=True))
+        self.assertIn(b,page.get_data(as_text=True))
+        quote=self.post('/mietwagen-test/quote',{'vehicle':'i10','start':a,'end':b})
+        self.assertEqual(quote.status_code,200)
+        token=html.unescape(re.search(r'name="quote_token" value="([^"]+)"',quote.get_data(as_text=True))[1])
+
+        self.assertEqual(self.post('/mietwagen-test/admin/termine',{'action':'close','slot':a}).status_code,303)
+        db=self.portal.get_db()
+        try:
+            init_slot_schema(db,[a])  # A config reload must not silently reopen a closed date.
+            db.commit()
+            self.assertEqual(db.execute('SELECT active FROM miet_checkout_slots WHERE slot=?',(a,)).fetchone()['active'],0)
+        finally:db.close()
+        self.assertNotIn(a,self.client.get('/mietwagen-test/').get_data(as_text=True))
+        self.assertEqual(self.post('/mietwagen-test/quote',{'vehicle':'i10','start':a,'end':b}).status_code,409)
+        # A signed price preview cannot bypass an appointment closed before checkout.
+        rejected=self.post('/mietwagen-test/checkout',{'quote_token':token,'accept':'yes',
+            'sign_confirm':'yes','name':'Test','email':'test@example.invalid','signature_data':'invalid'})
+        self.assertEqual(rejected.status_code,409)
+        self.assertEqual(self.post('/mietwagen-test/admin/termine',{'action':'reopen','slot':a}).status_code,303)
+        self.assertEqual(self.post('/mietwagen-test/quote',{'vehicle':'i10','start':a,'end':b}).status_code,200)
+
+    def test_invalid_and_arbitrary_times_are_rejected(self):
+        for local in ('2026-03-29T02:30','2026-10-25T02:30','2030-13-01T09:00'):
+            self.assertEqual(self.post('/mietwagen-test/admin/termine',
+                             {'action':'add','local_slot':local}).status_code,409)
+        past=(datetime.now(ZoneInfo('Europe/Berlin'))-timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+        self.assertEqual(self.post('/mietwagen-test/admin/termine',
+                         {'action':'add','local_slot':past}).status_code,409)
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['enabled']=True
+        self.assertIn('keine persönlichen Übergabetermine',self.client.get('/mietwagen-test/').get_data(as_text=True))
+        self.assertEqual(self.post('/mietwagen-test/quote',{'vehicle':'i10',
+            'start':'2030-01-01T09:00:00+01:00','end':'2030-01-02T09:00:00+01:00'}).status_code,409)
+
+    def test_closing_after_card_authorization_prevents_rent_checkout(self):
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['deposit_method']='card_authorization_at_booking'
+        first=datetime.now(timezone.utc)+timedelta(hours=2)
+        a,b=self.open(first),self.open(first+timedelta(days=1,hours=1))
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['enabled']=True
+        self.client.get('/mietwagen-test/')
+        quote=self.post('/mietwagen-test/quote',{'vehicle':'i10','start':a,'end':b})
+        self.assertEqual(quote.status_code,200)
+        token=html.unescape(re.search(r'name="quote_token" value="([^"]+)"',quote.get_data(as_text=True))[1])
+        checkout=self.post('/mietwagen-test/checkout',{'quote_token':token,'accept':'yes',
+            'sign_confirm':'yes','name':'Test','email':'test@example.invalid','signature_data':self.signature()})
+        self.assertEqual(checkout.status_code,303)
+        hold=checkout.location.rsplit('/',2)[-2]
+        self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/kaution-test',{}).status_code,303)
+
+        # Even if a close bypasses the admin cleanup, retry must release the card hold.
+        db=self.portal.get_db()
+        try:
+            db.execute('UPDATE miet_checkout_slots SET active=0 WHERE slot=?',(a,));db.commit()
+        finally:db.close()
+        blocked=self.post('/mietwagen-test/status/'+hold+'/retry',{})
+        self.assertEqual(blocked.status_code,409)
+        state=self.portal.app.extensions['mos_public_booking']
+        self.assertEqual(state['service'].read(hold)['status'],'released')
+        deposit=state['service']._deposit_record(hold)
+        self.assertEqual(deposit['status'],'released')
+        self.assertIsNone(state['service'].read(hold)['session_id'])
+
+    def test_closing_an_open_checkout_expires_it(self):
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['deposit_method']='card_authorization_at_booking'
+        first=datetime.now(timezone.utc)+timedelta(hours=2)
+        a,b=self.open(first),self.open(first+timedelta(days=1,hours=1))
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['enabled']=True
+        self.client.get('/mietwagen-test/')
+        quote=self.post('/mietwagen-test/quote',{'vehicle':'i10','start':a,'end':b})
+        token=html.unescape(re.search(r'name="quote_token" value="([^"]+)"',quote.get_data(as_text=True))[1])
+        checkout=self.post('/mietwagen-test/checkout',{'quote_token':token,'accept':'yes',
+            'sign_confirm':'yes','name':'Test','email':'test@example.invalid','signature_data':self.signature()})
+        hold=checkout.location.rsplit('/',2)[-2]
+        self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/kaution-test',{}).status_code,303)
+        self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/retry',{}).status_code,303)
+        state=self.portal.app.extensions['mos_public_booking']
+        self.assertIsNotNone(state['service'].read(hold)['session_id'])
+        self.assertEqual(self.post('/mietwagen-test/admin/termine',{'action':'close','slot':a}).status_code,303)
+        self.assertEqual(state['service'].read(hold)['status'],'released')
+        self.assertEqual(state['service']._deposit_record(hold)['status'],'released')
+
+    def test_closing_slot_keeps_existing_confirmed_rental(self):
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['deposit_method']='card_authorization_at_booking'
+        first=datetime.now(timezone.utc)+timedelta(hours=2)
+        a,b=self.open(first),self.open(first+timedelta(days=1,hours=1))
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['enabled']=True
+        self.client.get('/mietwagen-test/')
+        quote=self.post('/mietwagen-test/quote',{'vehicle':'i10','start':a,'end':b})
+        token=html.unescape(re.search(r'name="quote_token" value="([^"]+)"',quote.get_data(as_text=True))[1])
+        checkout=self.post('/mietwagen-test/checkout',{'quote_token':token,'accept':'yes',
+            'sign_confirm':'yes','name':'Test','email':'test@example.invalid','signature_data':self.signature()})
+        hold=checkout.location.rsplit('/',2)[-2]
+        self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/kaution-test',{}).status_code,303)
+        rent=self.post('/mietwagen-test/status/'+hold+'/retry',{})
+        self.assertEqual(rent.status_code,303)
+        self.assertEqual(self.post(rent.location,{}).status_code,303)
+        state=self.portal.app.extensions['mos_public_booking']
+        before=state['service'].read(hold)
+        self.assertEqual(before['status'],'confirmed')
+        self.assertEqual(self.post('/mietwagen-test/admin/termine',{'action':'close','slot':a}).status_code,303)
+        after=state['service'].read(hold)
+        self.assertEqual(after['status'],'confirmed')
+        self.assertEqual(after['mietvorgang_id'],before['mietvorgang_id'])
+
+    def test_admin_close_during_gateway_create_keeps_session_for_review(self):
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['deposit_method']='card_authorization_at_booking'
+        first=datetime.now(timezone.utc)+timedelta(hours=2)
+        a,b=self.open(first),self.open(first+timedelta(days=1,hours=1))
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['enabled']=True
+        self.client.get('/mietwagen-test/')
+        quote=self.post('/mietwagen-test/quote',{'vehicle':'i10','start':a,'end':b})
+        token=html.unescape(re.search(r'name="quote_token" value="([^"]+)"',quote.get_data(as_text=True))[1])
+        checkout=self.post('/mietwagen-test/checkout',{'quote_token':token,'accept':'yes',
+            'sign_confirm':'yes','name':'Test','email':'test@example.invalid','signature_data':self.signature()})
+        hold=checkout.location.rsplit('/',2)[-2]
+        self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/kaution-test',{}).status_code,303)
+        state=self.portal.app.extensions['mos_public_booking']
+        admin=self.portal.app.test_client()
+        with admin.session_transaction() as session:session['admin']=True
+        self.assertEqual(admin.get('/mietwagen-test/admin/termine').status_code,200)
+        with admin.session_transaction() as session:csrf=session['csrf_token']
+        created=[]
+        original_create=state['gateway'].create
+
+        def create_while_admin_closes(params,key):
+            session=original_create(params,key)
+            created.append(session['id'])
+            closed=admin.post('/mietwagen-test/admin/termine',data={
+                'csrf_token':csrf,'action':'close','slot':a})
+            self.assertEqual(closed.status_code,303)
+            return session
+
+        with (patch.object(state['gateway'],'create',side_effect=create_while_admin_closes),
+              patch.object(self.portal.app.logger,'exception')):
+            response=self.post('/mietwagen-test/status/'+hold+'/retry',{})
+        self.assertEqual(response.status_code,503)
+        self.assertNotIn('Location',response.headers)
+        self.assertEqual(len(created),1)
+        after=state['service'].read(hold)
+        self.assertEqual(after['session_id'],created[0])
+        self.assertEqual(after['status'],'review')
+        self.assertEqual(state['gateway'].retrieve(created[0])['status'],'expired')
+
+    def test_admin_close_during_deposit_creation_keeps_intent_for_review(self):
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['deposit_method']='card_authorization_at_booking'
+        first=datetime.now(timezone.utc)+timedelta(hours=2)
+        a,b=self.open(first),self.open(first+timedelta(days=1,hours=1))
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['enabled']=True
+        self.client.get('/mietwagen-test/')
+        quote=self.post('/mietwagen-test/quote',{'vehicle':'i10','start':a,'end':b})
+        token=html.unescape(re.search(r'name="quote_token" value="([^"]+)"',quote.get_data(as_text=True))[1])
+        state=self.portal.app.extensions['mos_public_booking']
+        admin=self.portal.app.test_client()
+        with admin.session_transaction() as session:session['admin']=True
+        self.assertEqual(admin.get('/mietwagen-test/admin/termine').status_code,200)
+        with admin.session_transaction() as session:csrf=session['csrf_token']
+        created=[]
+        original_create=state['gateway'].create_deposit_intent
+
+        def create_intent_while_admin_closes(params,key):
+            intent=original_create(params,key)
+            created.append(intent['id'])
+            closed=admin.post('/mietwagen-test/admin/termine',data={
+                'csrf_token':csrf,'action':'close','slot':a})
+            self.assertEqual(closed.status_code,303)
+            return intent
+
+        with (patch.object(state['gateway'],'create_deposit_intent',side_effect=create_intent_while_admin_closes),
+              patch.object(self.portal.app.logger,'exception')):
+            response=self.post('/mietwagen-test/checkout',{'quote_token':token,'accept':'yes',
+                'sign_confirm':'yes','name':'Test','email':'test@example.invalid','signature_data':self.signature()})
+        self.assertEqual(len(created),1)
+        self.assertNotIn('Location',response.headers)
+        self.assertIn(response.status_code,(409,503))
+        db=self.portal.get_db()
+        try:hold=db.execute('SELECT id FROM miet_checkout_holds').fetchone()['id']
+        finally:db.close()
+        after=state['service'].read(hold)
+        deposit=state['service']._deposit_record(hold)
+        self.assertEqual(after['status'],'review')
+        self.assertIsNone(after['session_id'])
+        self.assertEqual(deposit['status'],'review')
+        self.assertEqual(deposit['intent_id'],created[0])
+
+
+if __name__=='__main__':unittest.main()

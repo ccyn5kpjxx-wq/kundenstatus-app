@@ -19,6 +19,7 @@
   </div>
   <div class="d-flex gap-2 align-items-center flex-wrap">
     <a class="btn btn-brand" href="{{ url_for('admin_ersatzfahrzeug') }}">Ersatzfahrzeug finden</a>
+    {% if config.get('MOS_PUBLIC_BOOKING', {}).get('mode') == 'live' %}<a class="btn btn-soft" href="{{ url_for('mos_public.admin_slot_page') }}">Online-Übergabetermine</a>{% endif %}
     <a class="btn btn-soft" href="#flotte">Flotte</a>
     <a class="btn btn-soft" href="#belegung">Belegung</a>
     <a class="btn btn-soft" href="#neu">+ Fahrzeug</a>

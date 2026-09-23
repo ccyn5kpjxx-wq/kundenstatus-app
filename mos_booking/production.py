@@ -10,6 +10,7 @@ from .gateway import StripeTestGateway
 from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME
 
 ACTIVE_LISTINGS={'kona','i10'}
+CANCELLATION_POLICY_48H_10_PERCENT='free_48h_then_10pct_rent'
 
 
 def launch_errors(cfg):
@@ -30,6 +31,8 @@ def launch_errors(cfg):
             errors.append('Geprüfte Fahrzeugidentität fehlt: '+slug)
     if cfg.get('deposit_method')!='card_authorization_at_booking':
         errors.append('Online-Kartenautorisierung ohne Kautionseinzug ist nicht konfiguriert.')
+    if cfg.get('cancellation_policy')!=CANCELLATION_POLICY_48H_10_PERCENT:
+        errors.append('Die bestätigte Stornoregel (48 Stunden kostenlos, danach 10 % des Mietpreises) fehlt.')
     if not cfg.get('terms_version') or cfg['terms_version'].startswith('draft:'):
         errors.append('Freigegebene Bedingungsversion fehlt.')
     for name in ('terms_text','privacy_url','merchant_name','merchant_address','merchant_email','merchant_phone'):
@@ -75,7 +78,19 @@ def init_refund_schema(db):
 
 def cancellation_fee(quote,requested_at):
     start=datetime.fromisoformat(quote['start_slot']).astimezone(timezone.utc)
-    if (start-requested_at.astimezone(timezone.utc)).total_seconds()>=86400:return 0
+    seconds_before_pickup=(start-requested_at.astimezone(timezone.utc)).total_seconds()
+    policy=quote.get('cancellation_policy')
+    if policy==CANCELLATION_POLICY_48H_10_PERCENT:
+        if seconds_before_pickup>=48*3600:return 0
+        rental_cents=quote.get('rental_cents')
+        if type(rental_cents) is not int or rental_cents<0:
+            raise ValueError('Mietpreis für Stornoberechnung fehlt.')
+        # Integer half-up rounding: never include a charged or authorized deposit.
+        return (rental_cents+5)//10
+    if policy is not None:
+        raise ValueError('Unbekannte Stornoregel im Buchungssnapshot.')
+    # Existing signed bookings without an explicit policy keep their original rule.
+    if seconds_before_pickup>=24*3600:return 0
     return min(quote['daily_cents'],quote.get('rental_cents',quote['amount_cents']))
 
 

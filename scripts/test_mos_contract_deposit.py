@@ -83,6 +83,16 @@ class DepositContractTests(unittest.TestCase):
             snapshot({'quote': wrong,
                       'customer': {'name': 'Testkunde', 'email': 'test@example.invalid'}})
 
+    def test_cancellation_policy_is_signed_only_for_new_quotes(self):
+        old = self.contract(True)
+        self.assertNotIn('cancellation_policy', old)
+        new_quote = quote(authorized=True)
+        new_quote['cancellation_policy'] = 'free_48h_then_10pct_rent'
+        new = snapshot({'quote': new_quote,
+                        'customer': {'name': 'Testkunde', 'email': 'test@example.invalid'}})
+        self.assertEqual(new['cancellation_policy'], 'free_48h_then_10pct_rent')
+        self.assertNotEqual(snapshot_hash(old), snapshot_hash(new))
+
 
 if __name__ == '__main__':
     unittest.main()
