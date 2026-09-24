@@ -3162,13 +3162,19 @@ def add_security_headers(response):
             "Strict-Transport-Security",
             "max-age=31536000; includeSubDomains",
         )
+    form_action = "form-action 'self'"
+    if request.endpoint in {
+        'mos_public.preview', 'mos_public.checkout',
+        'mos_public.status', 'mos_public.retry',
+    }:
+        form_action += " https://checkout.stripe.com"
     response.headers.setdefault(
         "Content-Security-Policy",
         "; ".join(
             [
                 "default-src 'self'",
                 "base-uri 'self'",
-                "form-action 'self'",
+                form_action,
                 "frame-ancestors 'self'",
                 "object-src 'none'",
                 (

@@ -581,7 +581,8 @@ class SharedCheckout:
                      start_datum,end_datum,rueckgabe_datum,status,notiz,erstellt_am,geaendert_am)
                     VALUES (?,0,?,?,?,0,?,?,'','aktiv',?,?,?)''',
                     (h['mietfahrzeug_id'],c['name'],c['telefon'],c['email'],start.strftime(self.p.DATE_FMT),
-                     end.strftime(self.p.DATE_FMT),'Stripe TEST Checkout '+h['id'],now,now))
+                     end.strftime(self.p.DATE_FMT),
+                     ('Stripe TEST Checkout ' if q.get('test_only') else 'Stripe Checkout ')+h['id'],now,now))
                 rental_id = cur.lastrowid
                 db.execute("UPDATE miet_checkout_holds SET status='confirmed',payment_intent=?,mietvorgang_id=? WHERE id=?",(pi,rental_id,h['id']))
                 return rental_id
