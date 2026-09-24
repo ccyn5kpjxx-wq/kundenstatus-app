@@ -39,8 +39,8 @@ Es ist deshalb keine belastbare Zusage möglich, dass Kunden morgen bereits beza
   "live_enabled": false,
   "origin": "https://kundenstatus-app.onrender.com",
   "fleet": {
-    "kona": {"id": null, "expected_name": "", "daily_cents": 5900, "discount_after_days": 3, "discount_cents": 4900},
-    "i10": {"id": null, "expected_name": "", "daily_cents": 3900}
+    "kona": {"id": 3, "expected_name": "Hyundai Kona 1.6 T-GDI 132 kW N Line X DCT (Leasing)", "daily_cents": 5900, "discount_after_days": 3, "discount_cents": 4900},
+    "i10": {"id": 1, "expected_name": "Hyundai i10", "daily_cents": 3900}
   },
   "slots": [],
   "day_rule": "elapsed_24h_ceil",
@@ -63,7 +63,7 @@ Es ist deshalb keine belastbare Zusage möglich, dass Kunden morgen bereits beza
 }
 ```
 
-Diese JSON-Datei ist bewusst **nicht startfähig**: Fahrzeug-IDs, Namen, positive `max_days`, Bedingungen und Freigaben fehlen; die leere Slotliste legt zunächst keine Termine an. Keine Nullwerte als echte IDs ersetzen, bevor die Zuordnung geprüft ist. `max_days` muss ein freigegebener positiver Wert sein; `null` ist nur ein Platzhalter. Konfigurierte Slots dienen nur als anfängliche Einträge; die Werkstatt verwaltet sie danach dauerhaft im Portal unter `/mieten/admin/termine` auch vor Aktivierung der Kundenbuchung. Geschlossene Termine bleiben nach Neustart geschlossen. Jeder Slot ist ein konkreter zukünftiger Europe/Berlin-Zeitpunkt mit gültigem UTC-Offset. Der Buchungscode verlangt keinen pauschalen Mindestvorlauf; ein künftiger Slot kann auch heute liegen. Ohne freigegebenen künftigen Slot ist keine Sofortabholung buchbar. Keine Öffnungszeiten oder Autorisierungsdauer erfinden. Eine neue Konfigurationsversion erfordert Prozessneustart; bestehende Buchungen behalten ihren gespeicherten Snapshot. `merchant_name` und `merchant_address` müssen genau den Impressumsdaten des Vermieters entsprechen. „Autovermietung MOS“ bleibt nur die Angebotsüberschrift.
+Diese JSON-Datei ist bewusst **nicht startfähig**: Positive `max_days`, Bedingungen und Freigaben fehlen; die leere Slotliste legt zunächst keine Termine an. Die Fahrzeug-IDs und exakten Modellnamen wurden am 24.09.2026 im produktiven Adminportal nur lesend geprüft: i10 ID 1, KONA ID 3; beide dort als verfügbar angezeigt. Das ist keine künftige Verfügbarkeitszusage. Der KONA-Staffeltarif im Beispiel bleibt ein [Betreiber-Vorschlag](mos-preis-betriebsregeln-vorschlag.md). `max_days` muss ein freigegebener positiver Wert sein; `null` ist nur ein Platzhalter. Konfigurierte Slots dienen nur als anfängliche Einträge; die Werkstatt verwaltet sie danach dauerhaft im Portal unter `/mieten/admin/termine` auch vor Aktivierung der Kundenbuchung. Geschlossene Termine bleiben nach Neustart geschlossen. Jeder Slot ist ein konkreter zukünftiger Europe/Berlin-Zeitpunkt mit gültigem UTC-Offset. Der Buchungscode verlangt keinen pauschalen Mindestvorlauf; ein künftiger Slot kann auch heute liegen. Ohne freigegebenen künftigen Slot ist keine Sofortabholung buchbar. Keine Öffnungszeiten oder Autorisierungsdauer erfinden. Eine neue Konfigurationsversion erfordert Prozessneustart; bestehende Buchungen behalten ihren gespeicherten Snapshot. `merchant_name` und `merchant_address` müssen genau den Impressumsdaten des Vermieters entsprechen. „Autovermietung MOS“ bleibt nur die Angebotsüberschrift.
 
 Unter `launch` benötigt jede der Freigaben `business_review`, `legal_review`, `finance_review`, `privacy_review`, `sandbox_acceptance`, `postgres_acceptance` die Felder `approved_by`, `approved_at`, `evidence`. Unter `launch.insurance.kona` und `.i10` sind `verified=true`, `use=paid_self_drive`, eine echte Belegreferenz und die passende `vehicle_id` nötig. Das sind dokumentierte Betreiberprüfungen, keine automatischen Versicherungsnachweise. Niemals bloß zur Umgehung der Sperre ausfüllen.
 
