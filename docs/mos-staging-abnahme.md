@@ -277,3 +277,16 @@ für beide Fahrzeuge, reale freigegebene Termine, finale Bedingungen und
 weitere Freigaben laut [Launch-Paket](mos-launch-package.md). Die dokumentierte
 Allane-Mietwagennutzung und KONA-Übernahme ersetzen den Versicherungsnachweis
 nicht.
+
+### Nachtrag 24.09.2026: Checkout-Weiterleitung und Render-Deploy
+
+Als konkrete Ursache des ausbleibenden Browser-Sprungs wurde die globale
+`Content-Security-Policy` mit `form-action 'self'` gefunden. Der MOS-Status-POST
+lieferte bereits `303` zu `checkout.stripe.com`; Chromium kann dieses
+Redirectziel bei der bisherigen Richtlinie blockieren. Die Richtlinie erlaubt
+Stripe-Checkout jetzt eng auf den betreffenden MOS-Buchungsseiten. Der
+fokussierte Offline-Regressionstest war zuvor rot und danach grün. Der
+geprüfte Code ist deaktiviert auf dem tatsächlichen Render-Portal ausgerollt:
+`/healthz` 200, Admin-Terminroute mit Login-Weiterleitung und `/mieten/` 404.
+Eine vollständige reale Browserweiterleitung auf Render und alle Live-
+Zahlungsfälle bleiben bis zur freigegebenen Konfiguration offen.

@@ -1,6 +1,6 @@
 # MOS: Render-Betrieb für Stripe-Webhook und Zahlungsabgleich
 
-Stand 24.09.2026. Dies ist eine **vorbereitete Betriebsanleitung**, keine eingerichtete Liveverbindung. Der tatsächlich beobachtete Render-Portal-Dienst heißt `kundenstatus-app` und läuft auf `main`; `/mieten/` antwortete zuletzt mit 404. Der MOS-Arbeitszweig ist dort nicht ausgerollt. Weder ein Stripe-Live-Webhook noch ein regelmäßiger Render-Job wurde angelegt.
+Stand 24.09.2026. Dies ist eine **vorbereitete Betriebsanleitung**, keine eingerichtete Liveverbindung. Der tatsächlich beobachtete Render-Portal-Dienst heißt `kundenstatus-app` und läuft auf `main`. Der geprüfte, deaktivierte MOS-Code wurde mit Commit `b1dd786` auf `main` bereitgestellt: `/healthz` antwortete danach mit 200, die Admin-Terminroute mit Login-Weiterleitung und `/mieten/` weiterhin mit 404. Weder eine MOS-Live-Konfiguration noch ein Stripe-Live-Webhook oder ein regelmäßiger Render-Job wurde angelegt.
 
 ## Gemeinsame Laufzeitkonfiguration
 
@@ -12,7 +12,7 @@ Die bereits vorhandene `render.yaml` enthält **keinen Cron-Dienst** und benennt
 
 ## Stripe-Webhook am Portal-Webdienst
 
-1. Erst nach Deployment des geprüften MOS-Codes und der vollständigen Betreiber-/Versicherungsfreigaben die öffentliche HTTPS-Route `/mieten/webhook` am tatsächlichen Portal-Origin prüfen. Die letzte beobachtete `/mieten/`-Antwort 404 zeigt, dass dies noch nicht geschehen ist.
+1. Erst nach vollständigen Betreiber-/Versicherungsfreigaben und sicherer Live-Konfiguration die öffentliche HTTPS-Route `/mieten/webhook` am tatsächlichen Portal-Origin prüfen. Die `/mieten/`-Antwort 404 zeigt derzeit, dass die Live-Konfiguration nicht aktiviert ist.
 2. Im **richtigen Stripe-Live-Konto** ein Webhook-Ziel auf `{origin}/mieten/webhook` für `checkout.session.completed`, `checkout.session.expired`, `checkout.session.async_payment_succeeded` und `checkout.session.async_payment_failed` anlegen. Stripe stellt für dieses Ziel ein eigenes Signatur-Secret aus; `whsec_` verrät allein nicht, ob es Test oder Live ist. Die Zuordnung im Stripe-Dashboard prüfen und den Wert geschützt als `MOS_STRIPE_WEBHOOK_SECRET` im Portal-Webdienst speichern.
 3. Einen signierten Zustelltest im passenden Modus ausführen und im Stripe-Dashboard die erfolgreiche Zustellung sowie im Portal genau einen Mietvorgang für eine tatsächlich bezahlte Buchung prüfen. Rücksprung im Browser und bloßer HTTP-Erfolg ersetzen diese Prüfung nicht. Doppelte und verzögerte Zustellungen ebenfalls abnehmen. Webhook-Ausfälle bleiben im Zahlungsabgleich sichtbar, führen aber **nie** zu einer automatischen Bestätigung ohne signiertes Ereignis.
 
@@ -37,7 +37,7 @@ Render garantiert höchstens einen aktiven Lauf **dieses** Cron-Jobs und kann be
 
 - Schriftliche Bestätigung der entgeltlichen Selbstfahrervermietung für **i10 und KONA**; niemals durch Testdaten oder erfundene Belegreferenzen ersetzen.
 - Tatsächliche persönliche Übergabeslots, maximale Mietdauer, KONA-Tarif und finale Mietbedingungen/Schaden- und Rückgabeabläufe samt rechtlicher Freigabe; alle `launch`-Nachweise müssen echt sein.
-- Render-Zugang, Deployment des geprüften Stands, privates gemeinsames Secret File, Live-Schlüssel mit erforderlichen Stripe-Rechten, Webhook-Ziel und dessen Signatur-Secret; anschließend Hosting- und Live-Abnahme. Der bestehende lokale PostgreSQL-/Stripe-Test ersetzt diese Schritte nicht.
+- Privates gemeinsames Render Secret File, Live-Schlüssel mit erforderlichen Stripe-Rechten, Webhook-Ziel und dessen Signatur-Secret; anschließend Hosting- und Live-Abnahme. Der geprüfte Code ist bereits deaktiviert ausgerollt, der bestehende lokale PostgreSQL-/Stripe-Test ersetzt diese Schritte nicht.
 - Für einen neuen Render-Cron-Dienst fallen laut Render derzeit mindestens **1 US-Dollar pro Monat** an. Diesen Dienst erst als konkret geprüften Betriebsschritt anlegen; das bloße Einchecken dieser Dateien erzeugt keinen Dienst.
 
 Quellen: [Render Cron Jobs](https://render.com/docs/cronjobs), [Render Secret Files und Environment Groups](https://render.com/docs/configure-environment-variables), [Render-Benachrichtigungen](https://render.com/docs/notifications), [Stripe-Webhooks](https://docs.stripe.com/webhooks).

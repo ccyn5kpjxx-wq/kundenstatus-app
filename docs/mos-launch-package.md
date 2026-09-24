@@ -22,7 +22,7 @@ Die frühere Implementierung zog Miete und Kaution zusammen im Checkout ein und 
 | Reale Flotte und Kalender | Portal-Zuordnung inzwischen read-only gefunden (Details lokal im Hub). KONA-Stammdaten wurden in Aufgabe76 anhand der dokumentierten Übernahme und Kennzeichen/FIN korrigiert; Die Mietwagennutzung ist laut neuer Quellenprüfung des Ursprungstasks in der angenommenen Leasingvereinbarung dokumentiert; die frühere Portalnotiz ist insoweit überholt. Vollständiger Kalender und konkrete Übergabeslots weiterhin unbestätigt. |
 | Betrieb / Preise / Bedingungen | i10 39 €/Tag, 500 € Kaution, 1.000 € vertragliche Selbstbeteiligung, kein Mindestvorlauf bei freiem Auto und freiem künftigen Slot, voll/voll sowie 48 Stunden kostenlos und danach 10 % nur des Mietpreises sind entschieden. Der [öffentlich angezeigte KONA-Tarif](https://www.autovermietung-mos.de/) liegt bei 59 €/Tag, ab drei Tagen 49 €/Tag; vor verbindlicher Direktbuchung ist er mit dem Betreiber abzugleichen. Persönliche Übergabeslots können vor dem Launch im Portal verwaltet werden; die tatsächlich angebotenen Zeiten, maximale Mietdauer, verbindliche Tagesberechnung, Schadenprozess und vollständiger Bedingungstext benötigen eine abschließende Betreiberfreigabe. |
 | Kaution | 500 € bei der Online-Reservierung auf Kreditkarte autorisieren, nicht einziehen. Der lokale Stripe-Test belegte Autorisierung ohne Einzug und Freigabe bei Storno. Freigabe nach dokumentierter Rückgabe und weitere Karten-/Fristfälle sind noch separat abzunehmen. Begrenzte Autorisierungsdauer schließt ungeeignete lange oder weit vorausliegende Mieten aus. |
-| Stripe / Hosting | Der lokale Stripe-Test belegte 39 € Mietzahlung, signierten Webhook, genau einen Mietvorgang und 35,10 € Test-Erstattung nach Storno; [Einzelheiten](mos-staging-abnahme.md). Restricted-Key-Rechte, weitere Negativfälle, dauerhafter Webhook und der gemeinsame Stripe-/PostgreSQL-/Browserlauf bleiben offen. Stripe-Live-Konto und Render-Projekt sind im Browser erreichbar; im Render-Dienst waren zuletzt keine `MOS_*`-Variablen sichtbar. Der Code dieses Arbeitszweigs ist dort nicht ausgerollt, die öffentliche `/mieten/`-Route antwortete zuletzt mit 404. Keine Livezahlung durchgeführt. |
+| Stripe / Hosting | Der gemeinsame lokale Stripe-/PostgreSQL-Lauf belegte Kreditkartenautorisierung ohne Einzug, 39 € Mietzahlung, signierten Webhook, genau einen Mietvorgang, Vertrags-PDF und kostenlose Test-Erstattung; [Einzelheiten](mos-staging-abnahme.md). Der Chromium-Checkout-Redirect hatte eine zu enge CSP und ist im Code mit fokussiertem Regressionstest korrigiert; die reale Weiterleitung auf dem Zielgerät bleibt zu prüfen. Der geprüfte Code ist seit Commit `b1dd786` deaktiviert auf dem tatsächlichen Render-Dienst `kundenstatus-app` ausgerollt (`/healthz` 200, Admin-Terminroute leitet zum Login, `/mieten/` 404). Im Dienst waren zuletzt keine `MOS_*`-Variablen sichtbar. Restricted-Key-Rechte, dauerhafter Webhook, periodischer Abgleich mit Alarm und Hosting-/Live-Zahlungsabnahme fehlen; [Render-Betriebsanleitung](mos-render-betrieb.md). Keine Livezahlung durchgeführt. |
 | Datenbank / Abnahme | SQLite-Konkurrenz-/HTTP-/Erstattungstests und ein lokaler PostgreSQL-Kaltstart mit synthetischen Checkout-Fällen bestanden. Der PostgreSQL-Lauf prüft nun auch das Öffnen und Schließen persönlicher Übergabetermine im Reservierungs- und Checkout-Kern; 36 Tests bestanden. Die Vertragstabelle samt Textspeicherung wurde auf derselben isolierten PostgreSQL-Instanz geprüft; ein vollständiger PostgreSQL-HTTP-Signierlauf und die Deployment-Abnahme stehen noch aus. |
 | Recht / Datenschutz | Finale Mietbedingungen, elektronische Unterschrift, §312j-Abschlussdarstellung in Hosted Checkout und Stripe-Datenschutzhinweis prüfen; Entwurf nicht als freigegebene AGB einsetzen. |
 
@@ -185,3 +185,15 @@ Option nun nicht mehr automatisch an und prüft weiterhin die tatsächliche
 
 Dies belegt nur den lokalen Kernpfad im Testmodus. Die übrigen Fälle der
 Abnahme-Checkliste sowie die oben genannten Live-Gates bleiben offen.
+
+## Nachtrag 24.09.2026 – geprüfter Code deaktiviert auf Render
+
+Der gemeinsame lokale Stripe-/PostgreSQL-Test, die Korrektur der Checkout-CSP
+und der vorbereitete Render-Abgleich sind in den Arbeitszweig und anschließend
+per Fast-Forward auf `main` gelangt. Der tatsächliche Dienst `kundenstatus-app`
+antwortete nach dem Auto-Deploy auf `/healthz` mit 200 und auf die neue
+Admin-Terminroute mit Login-Weiterleitung. `/mieten/` antwortet weiterhin mit
+404, weil keine Live-Konfiguration gesetzt ist. Es wurden keine Stripe-Live-
+Schlüssel, kein Webhook, kein kostenpflichtiger Cron und keine Livezahlung
+eingerichtet. Aktuelle Schritte stehen in [Render-Betrieb](mos-render-betrieb.md)
+und im [Preis- und Betriebsregelvorschlag](mos-preis-betriebsregeln-vorschlag.md).
