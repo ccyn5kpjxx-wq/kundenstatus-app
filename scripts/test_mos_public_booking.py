@@ -1,6 +1,6 @@
 from pathlib import Path
 from base64 import b64encode
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import html
 from io import BytesIO
@@ -12,6 +12,7 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 from PIL import Image, ImageDraw
 from pypdf import PdfReader
 ROOT=Path(__file__).resolve().parents[1]
@@ -30,6 +31,14 @@ with patch.dict(os.environ, {
     'MOS_STRIPE_WEBHOOK_SECRET':'synthetic-webhook-sentinel',
 }):
     portal=build_test_app(TEMP.name,origin='http://localhost')
+
+# Keep three-day rentals inside the offline card hold (seven days), while the
+# second pickup slot stays more than 48 hours away at every test run time.
+first_slot=datetime.now(timezone.utc)+timedelta(hours=36)
+portal.app.config['MOS_PUBLIC_BOOKING']['slots']=[
+    (first_slot+timedelta(days=day)).astimezone(ZoneInfo('Europe/Berlin')).isoformat()
+    for day in range(5)
+]
 
 
 class PublicTests(unittest.TestCase):

@@ -1,7 +1,7 @@
 # MOS: getrennte PostgreSQL- und Stripe-Abnahme
 
-Stand 23.09.2026, aktualisiert nach dem lokalen Stripe-Testlauf mit separater
-Kreditkartenautorisierung. Keine Livefreigabe, kein Deployment.
+Stand 24.09.2026, aktualisiert nach dem gemeinsamen lokalen
+PostgreSQL-/Stripe-Testlauf. Keine Livefreigabe, kein Deployment.
 
 ## Tatsächlich ausgeführt
 
@@ -94,6 +94,61 @@ Abholung storniert: 3,90 € Stornogebühr, 35,10 € Stripe-Erstattung mit Stat
 für sie `canceled`, `amount_received=0`, `amount_capturable=0`. Dabei wurde
 kein echtes Geld bewegt und kein Kundenfahrzeug gebucht.
 
+## Gemeinsamer PostgreSQL-/Stripe-Test am 24.09.2026
+
+`scripts/run_mos_stripe_postgres_staging.py` startet den echten Portalcode nur
+gegen den privaten Loopback-Cluster `127.0.0.1:55439`. Er prüft Testschlüssel,
+Testmodus, festen Clusterbenutzer und eine private Verbindungsdatei, bereinigt
+geerbte Live-/Mail-/Datenbankeinstellungen und erstellt pro Aufruf eine neue
+`mos_stripe_acceptance_<zufall>`-Datenbank. Nur synthetische i10-/KONA-Datensätze
+und Entwurfsbedingungen werden angelegt. Eine vorhandene Mietdatenbank wird nicht
+geöffnet, überschrieben oder gelöscht. Die Testseite läuft ausschließlich auf
+`http://127.0.0.1:5087/mietwagen-test/`. Testschlüssel und das kurzlebige
+Webhook-Secret wurden nur in lokalen Prozessvariablen verwendet; der lokale
+Transferhelfer und Stripe-CLI-Listener wurden nach dem Lauf beendet.
+
+Im normalen Gärtner-Stripe-**Testmodus** wurden mit separaten synthetischen
+Buchungen folgende Kartenfälle im Browser geprüft:
+
+| Fall | Beobachtetes Ergebnis |
+| --- | --- |
+| Ablehnung `4000 0000 0000 0002` | Stripe verweigerte die Kautionsautorisierung; keine Mietzahlung. |
+| Debit `4000 0566 5566 5556` | Für die Kaution abgelehnt; Testautorisierung und Zeitraum freigegeben, keine Mietzahlung. |
+| Prepaid `5105 1051 0510 5100` | Ebenso freigegeben, ohne Mietzahlung. |
+| 3-D-Secure `4000 0000 0000 3220` | Nach erfolgreicher Testauthentifizierung 500 € autorisiert, nicht abgebucht; danach separate 39-€-Testzahlung. |
+
+Beim ersten gemeinsamen Lauf legten Zahlung und signierter Webhook genau einen
+bestätigten Mietvorgang in PostgreSQL an. Die Vertrags-PDF-Erstellung deckte
+aber einen Adapterfehler auf: `PostgresConnection.execute()` hängte an den
+Vertrags-INSERT fälschlich `RETURNING id`, obwohl die Tabelle `hold_id` als
+Primärschlüssel verwendet. Nach gezielter Korrektur wurde die PDF für diesen
+synthetischen Vorgang nachträglich erzeugt und geprüft.
+
+Ein **zweiter frischer End-to-End-Lauf mit korrigiertem Code** bestätigte die
+automatische Erstellung direkt nach der Testzahlung: ein signierter Webhook,
+genau ein bestätigter Mietvorgang und genau eine Vertrags-PDF. PDF-Header und
+gespeicherter SHA-256-Hash stimmten. Die 500-€-Autorisierung hatte einen von
+Stripe gemeldeten `capture_before` am 01.10.2026, nach der Rückgabe am
+27.09.2026 plus 24 Stunden. Anschließend wurde die Buchung mehr als 48 Stunden
+vor Abholung kostenlos storniert: 39,00 € Test-Erstattung `succeeded`, Kaution
+`released`; die Vertragskopie blieb erhalten. Beide lokalen Testdatenbanken
+bleiben ausschließlich im privaten Cluster zur Inspektion; der Cluster wurde
+anschließend gestoppt. Es gab kein echtes Geld und keine Produktivbuchung.
+
+Ein direkter automatischer Sprung vom lokalen POST zum externen Stripe-Checkout
+war im gesteuerten Chrome weiterhin nicht beobachtbar. Der von der Anwendung
+bereits erzeugte offene Test-Checkout wurde anhand seiner Stripe-Session direkt
+im Browser geöffnet. Dieser Browserübergang muss vor dem Live-Start auf der
+Zielumgebung separat verifiziert werden.
+
+```powershell
+& .agent-hub/setup-venv/Scripts/python.exe scripts/run_mos_stripe_postgres_staging.py --connection-file .agent-hub/postgres-runtime/connection.json
+```
+
+Dieser Starter verlangt die drei `MOS_STRIPE_*`-Testzugangsdaten als
+Prozessvariablen und lehnt Live-Keys ab. Keinen Schlüssel in Befehlsargumente,
+Dateien, Konsolenausgaben oder Git schreiben.
+
 Für die lokale Stripe-Sandbox steht jetzt `scripts/run_mos_stripe_staging.py`
 bereit. Dieser Starter prüft vor dem Anlegen einer Datenbank drei
 Test-Zugangsdaten, lehnt einen gesetzten Live-Key ab und erzeugt ausschließlich
@@ -127,10 +182,10 @@ aktive Übergabeslots, Entwurfsbedingungen, Bruttopreise und ausdrücklich
 `cancellation_policy=free_48h_then_10pct_rent`. Ohne die Deposit-Einstellung
 kann der historische Einzugspfad statt der beschlossenen Autorisierung laufen.
 Die öffentliche Test-Route ist `/mietwagen-test/`; der Webhook liegt unter
-`/mietwagen-test/webhook`. Der isolierte öffentliche Testpfad akzeptiert
-derzeit kein PostgreSQL. Der PostgreSQL-Sperrpfad wurde separat geprüft; für
-einen gemeinsamen Stripe-/Browser-/PostgreSQL-Lauf ist ein eigener sicherer
-Staging-Pfad nötig.
+`/mietwagen-test/webhook`. PostgreSQL ist im Testmodus ausschließlich für den
+oben beschriebenen lokalen Starter mit genau passender, frisch angelegter
+Testdatenbank und Loopback-Origin freigegeben. Andere PostgreSQL-Testpfade
+bleiben gesperrt.
 
 Für ein separates Deployment werden im geschützten Test-Secretstore ein
 eingeschränkter Stripe-Test-Serverkey (`rk_test_`, alternativ `sk_test_`), der zugehörige
@@ -187,9 +242,10 @@ Mietvorgang bestätigen; ein Erfolgs-Redirect genügt nicht.
    Livebetrieb zusätzlich einen dauerhaften Job mit Alarmierung vorsehen;
    ein manueller Probelauf ersetzt ihn nicht.
 
-### Nächste Stripe-Testfälle (noch nicht ausgeführt)
+### Stripe-Kartenfälle und verbleibende Negativtests
 
-Mit frischer synthetischer Buchung je Fall und ausschließlich Testschlüsseln:
+Die folgenden vier Kartenfälle wurden mit frischen synthetischen Buchungen
+und ausschließlich Testschlüsseln ausgeführt:
 
 | Fall | Stripe-Testkarte | Erwartung vor dem Mietpreis-Checkout |
 | --- | --- | --- |
@@ -209,14 +265,13 @@ prüfen, dass Rücksprung oder Tab-Schließen keine Buchung bestätigen; eine
 offene Session kann über die [Expire-API](https://docs.stripe.com/api/checkout/sessions/expire)
 beendet werden.
 
-Die lokale Stripe-Kernkette einschließlich signiertem Webhook, Erstattung und
-Kautionsfreigabe ist damit nachgewiesen. Die weiteren Negativfälle aus der
-Checkliste, ein gemeinsamer Stripe-/PostgreSQL-Browserlauf, Restricted-Key-
-Rechte, dauerhafte Webhook-Konfiguration, Geräteprüfung und Hosting-Abnahme
-bleiben offen. Ein automatischer Browser-Sprung vom lokalen POST zum Stripe-
-Checkout wurde bei diesem Test nicht beobachtet; die bereits von der App
-erzeugte Test-Checkout-URL wurde für den Bezahlvorgang direkt geöffnet. Vor
-Produktivbetrieb ist auch dieser Übergang im Zielbrowser zu verifizieren.
+Die lokale Stripe-Kernkette einschließlich PostgreSQL, signiertem Webhook,
+PDF, Erstattung und Kautionsfreigabe ist damit nachgewiesen. 3-D-Secure-
+Fehlschlag, eine gezielt zu kurze Autorisierungsfrist, weitere reale
+Provider-Rennen, Restricted-Key-Rechte, dauerhafte Webhook-Konfiguration,
+Geräteprüfung und Hosting-Abnahme bleiben offen. Der automatische Browser-
+Sprung vom lokalen POST zum Stripe-Checkout muss in der Zielumgebung geprüft
+werden.
 Für Kundenzahlungen fehlen außerdem belegter Selbstfahrervermietungsschutz
 für beide Fahrzeuge, reale freigegebene Termine, finale Bedingungen und
 weitere Freigaben laut [Launch-Paket](mos-launch-package.md). Die dokumentierte

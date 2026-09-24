@@ -21,6 +21,26 @@ LISTINGS = {'kona':'Hyundai KONA N Line X', 'i10':'Hyundai i10'}
 BERLIN = ZoneInfo('Europe/Berlin')
 
 
+def isolated_postgres_stripe_test(portal, cfg):
+    """Allow only a fresh, explicitly named database on the dedicated local test cluster."""
+    if (cfg.get('mode') != 'stripe_test' or cfg.get('test_configuration') is not True
+            or cfg.get('origin') != 'http://127.0.0.1:5087'
+            or not getattr(portal, 'USE_POSTGRES', False)
+            or portal.app.config.get('MOS_PUBLIC_STRIPE_LIVE_KEY')):
+        return False
+    name = cfg.get('postgres_test_database')
+    if not isinstance(name, str) or not re.fullmatch(r'mos_stripe_acceptance_[0-9a-f]{32}', name):
+        return False
+    try:
+        db_url = urlsplit(getattr(portal, 'DATABASE_URL', ''))
+        return (db_url.scheme in {'postgres', 'postgresql'}
+                and db_url.hostname == '127.0.0.1' and db_url.port == 55439
+                and db_url.username == 'mos_test_admin' and db_url.path == '/' + name
+                and not db_url.query and not db_url.fragment)
+    except ValueError:
+        return False
+
+
 def local_slot_to_iso(value):
     """Accept a future Berlin wall-clock minute only when its UTC offset is unambiguous."""
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}',value or ''):
@@ -113,7 +133,9 @@ def register(portal):
         cfg=app.config['MOS_PUBLIC_BOOKING']
         live=cfg.get('mode')=='live'
         # No accidental production inventory edits with a test Stripe key.
-        if not live and (portal.USE_POSTGRES or not str(portal.DB).endswith('.mos-public-test.sqlite3')):
+        pg_test = isolated_postgres_stripe_test(portal, cfg) if portal.USE_POSTGRES else False
+        if not live and not (pg_test or not portal.USE_POSTGRES and
+                             str(portal.DB).endswith('.mos-public-test.sqlite3')):
             raise ValueError('Getrennte *.mos-public-test.sqlite3 Portal-Testdatenbank erforderlich.')
         if cfg.get('mode') not in {'offline','stripe_test','live'} or (not live and cfg.get('test_configuration') is not True):
             raise ValueError('Explizite Testkonfiguration erforderlich.')
