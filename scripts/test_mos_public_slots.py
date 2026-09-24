@@ -15,7 +15,9 @@ from PIL import Image, ImageDraw
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'scripts'))
 from run_mos_public_test import build_test_app
-from mos_public_booking import init_slot_schema, local_slot_to_iso
+from mos_public_booking import (WEEKLY_HANDOVER, WEEKLY_SLOT_HORIZON_DAYS,
+                                init_slot_schema, local_slot_to_iso, selected_slots_open,
+                                weekly_handover_enabled, weekly_handover_slots)
 
 
 class SlotTests(unittest.TestCase):
@@ -33,6 +35,7 @@ class SlotTests(unittest.TestCase):
         cfg=self.portal.app.config['MOS_PUBLIC_BOOKING']
         cfg['enabled']=False
         cfg['slots']=[]
+        cfg.pop('weekly_handover',None)
         cfg.pop('deposit_method',None)
         db=self.portal.get_db()
         try:
@@ -74,6 +77,98 @@ class SlotTests(unittest.TestCase):
         self.assertEqual(anonymous.get('/mietwagen-test/admin/termine').status_code,302)
         self.assertEqual(self.client.post('/mietwagen-test/admin/termine',data={'action':'add'}).status_code,400)
         self.assertNotIn('mos_public_booking',self.portal.app.extensions)
+
+    def test_weekly_hours_include_same_day_and_20h_but_not_sunday(self):
+        berlin=ZoneInfo('Europe/Berlin')
+        monday=datetime(2026,9,28,19,30,tzinfo=berlin)
+        slots=list(weekly_handover_slots(monday))
+        self.assertEqual(slots[0],'2026-09-28T20:00:00+02:00')
+        self.assertNotIn('2026-09-28T19:00:00+02:00',slots)
+        self.assertNotIn('2026-09-28T21:00:00+02:00',slots)
+        self.assertIn('2026-10-03T20:00:00+02:00',slots)
+        self.assertFalse(any(s.startswith('2026-10-04') for s in slots))
+        self.assertFalse(any(datetime.fromisoformat(s).date() >=
+                             (monday.date()+timedelta(days=WEEKLY_SLOT_HORIZON_DAYS)) for s in slots))
+
+    def test_weekly_rule_rejects_unconfirmed_hours(self):
+        wrong=dict(WEEKLY_HANDOVER,first_hour=7)
+        with self.assertRaisesRegex(ValueError,'08 bis 20'):
+            weekly_handover_enabled({'weekly_handover':wrong})
+
+    def test_weekly_hours_use_berlin_offset_across_summer_and_winter_change(self):
+        berlin=ZoneInfo('Europe/Berlin')
+        spring=list(weekly_handover_slots(datetime(2026,3,28,19,30,tzinfo=berlin)))
+        autumn=list(weekly_handover_slots(datetime(2026,10,24,19,30,tzinfo=berlin)))
+        self.assertIn('2026-03-28T20:00:00+01:00',spring)
+        self.assertIn('2026-03-30T08:00:00+02:00',spring)
+        self.assertFalse(any(s.startswith('2026-03-29') for s in spring))
+        self.assertIn('2026-10-24T20:00:00+02:00',autumn)
+        self.assertIn('2026-10-26T08:00:00+01:00',autumn)
+        self.assertFalse(any(s.startswith('2026-10-25') for s in autumn))
+
+    def test_weekly_virtual_slots_respect_launch_gate_and_admin_override(self):
+        cfg=self.portal.app.config['MOS_PUBLIC_BOOKING']
+        cfg['weekly_handover']=dict(WEEKLY_HANDOVER)
+        slots=list(weekly_handover_slots())
+        self.assertGreater(len(slots),1)
+        a,b=slots[:2]
+        # Staff can close dates in advance, while customers still see no
+        # booking flow before the explicit launch/insurance gates.
+        self.assertIn(a,self.client.get('/mietwagen-test/admin/termine').get_data(as_text=True))
+        self.assertEqual(self.client.get('/mietwagen-test/').status_code,404)
+        cfg['enabled']=True
+        self.assertIn(a,self.client.get('/mietwagen-test/').get_data(as_text=True))
+        db=self.portal.get_db()
+        try:self.assertIsNone(db.execute('SELECT slot FROM miet_checkout_slots WHERE slot=?',(a,)).fetchone())
+        finally:db.close()
+        # Closing a still-virtual time creates a durable inactive override.
+        self.assertEqual(self.post('/mietwagen-test/admin/termine',{'action':'close','slot':a}).status_code,303)
+        self.assertNotIn(a,self.client.get('/mietwagen-test/').get_data(as_text=True))
+        self.client.get('/mietwagen-test/admin/termine')
+        self.assertNotIn(a,self.client.get('/mietwagen-test/').get_data(as_text=True))
+        self.assertEqual(self.post('/mietwagen-test/quote',{'vehicle':'i10','start':a,'end':b}).status_code,409)
+        self.assertEqual(self.post('/mietwagen-test/admin/termine',{'action':'reopen','slot':a}).status_code,303)
+        self.assertEqual(self.post('/mietwagen-test/quote',{'vehicle':'i10','start':a,'end':b}).status_code,200)
+
+    def test_weekly_quote_materializes_selected_slots_for_deposit_and_checkout(self):
+        cfg=self.portal.app.config['MOS_PUBLIC_BOOKING']
+        cfg['weekly_handover']=dict(WEEKLY_HANDOVER)
+        cfg['deposit_method']='card_authorization_at_booking'
+        cfg['enabled']=True
+        now=datetime.now(timezone.utc)
+        future=[s for s in weekly_handover_slots(now) if
+                datetime.fromisoformat(s).astimezone(timezone.utc)>now+timedelta(hours=2)]
+        a,b=future[:2]
+        self.assertEqual(self.client.get('/mietwagen-test/').status_code,200)
+        quote=self.post('/mietwagen-test/quote',{'vehicle':'i10','start':a,'end':b})
+        self.assertEqual(quote.status_code,200)
+        db=self.portal.get_db()
+        try:
+            rows=db.execute('SELECT slot,active FROM miet_checkout_slots WHERE slot IN (?,?)',(a,b)).fetchall()
+            self.assertEqual({r['slot'] for r in rows if r['active']==1},{a,b})
+        finally:db.close()
+        token=html.unescape(re.search(r'name="quote_token" value="([^"]+)"',quote.get_data(as_text=True))[1])
+        checkout=self.post('/mietwagen-test/checkout',{'quote_token':token,'accept':'yes',
+            'sign_confirm':'yes','name':'Test','email':'test@example.invalid','signature_data':self.signature()})
+        self.assertEqual(checkout.status_code,303)
+        hold=checkout.location.rsplit('/',2)[-2]
+        self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/kaution-test',{}).status_code,303)
+        rent=self.post('/mietwagen-test/status/'+hold+'/retry',{})
+        self.assertEqual(rent.status_code,303)
+        self.assertEqual(self.post(rent.location,{}).status_code,303)
+        self.assertEqual(self.portal.app.extensions['mos_public_booking']['service'].read(hold)['status'],'confirmed')
+
+    def test_weekly_virtual_slots_reject_outside_horizon_without_manual_open(self):
+        now=datetime(2026,9,28,9,30,tzinfo=ZoneInfo('Europe/Berlin'))
+        start='2026-09-28T10:00:00+02:00'
+        end='2026-09-28T11:00:00+02:00'
+        too_far='2026-10-05T10:00:00+02:00'
+        db=self.portal.get_db()
+        try:
+            self.assertTrue(selected_slots_open(db,start,end,weekly=True,now=now))
+            self.assertFalse(selected_slots_open(db,start,too_far,weekly=True,now=now))
+            self.assertFalse(selected_slots_open(db,start,'2026-10-04T10:00:00+02:00',weekly=True,now=now))
+        finally:db.close()
 
     def test_open_close_and_reopen_are_shared_by_page_and_quote(self):
         first=datetime.now(timezone.utc)+timedelta(hours=2)

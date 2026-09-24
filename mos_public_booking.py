@@ -1,5 +1,5 @@
 """Public-facing TEST flow; explicit configuration, isolated portal DB, no live mode."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
@@ -19,6 +19,36 @@ from mos_public_contract import signed_payload
 
 LISTINGS = {'kona':'Hyundai KONA N Line X', 'i10':'Hyundai i10'}
 BERLIN = ZoneInfo('Europe/Berlin')
+WEEKLY_HANDOVER = {'timezone':'Europe/Berlin', 'weekdays':[0,1,2,3,4,5],
+                   'first_hour':8, 'last_hour':20, 'step_minutes':60}
+# A rolling calendar-week window keeps the public select finite. A manually
+# opened appointment can still be offered outside it, subject to payment gates.
+WEEKLY_SLOT_HORIZON_DAYS = 7
+
+
+def weekly_handover_enabled(cfg):
+    schedule=cfg.get('weekly_handover')
+    if schedule is None:return False
+    if schedule != WEEKLY_HANDOVER:
+        raise ValueError('Übergabezeiten müssen Montag bis Samstag stündlich von 08 bis 20 Uhr in Berlin sein.')
+    return True
+
+
+def weekly_handover_slots(now=None):
+    """Future Berlin wall-clock hours, today through the next six local dates."""
+    now=now or datetime.now(timezone.utc)
+    if now.tzinfo is None:raise ValueError('Zeitzone für Übergabezeiten fehlt.')
+    today=now.astimezone(BERLIN).date()
+    for offset in range(WEEKLY_SLOT_HORIZON_DAYS):
+        day=today+timedelta(days=offset)
+        if day.weekday()==6:continue
+        for hour in range(8,21):
+            local=datetime(day.year,day.month,day.day,hour,tzinfo=BERLIN)
+            utc=local.astimezone(timezone.utc)
+            # Defensive if the business hours are changed across a DST fold.
+            if utc<=now or utc.astimezone(BERLIN).replace(tzinfo=None)!=local.replace(tzinfo=None):
+                continue
+            yield local.isoformat()
 
 
 def isolated_postgres_stripe_test(portal, cfg):
@@ -71,24 +101,41 @@ def init_slot_schema(db, configured_slots):
             VALUES (?,1,?,?) ON CONFLICT (slot) DO NOTHING RETURNING slot''',(slot,now,now))
 
 
-def listed_slots(db, active=True):
+def listed_slots(db, active=True, weekly=False, now=None):
     rows=db.execute('SELECT slot,active FROM miet_checkout_slots').fetchall()
-    now=datetime.now(timezone.utc)
-    slots=[dict(r) for r in rows if datetime.fromisoformat(r['slot']).astimezone(timezone.utc)>now
+    now=now or datetime.now(timezone.utc)
+    # Database rows override the recurring default, including active=0. No
+    # automatically generated opening is persisted or revived on page load.
+    available={slot:{'slot':slot,'active':1} for slot in weekly_handover_slots(now)} if weekly else {}
+    available.update({r['slot']:dict(r) for r in rows})
+    slots=[r for r in available.values() if datetime.fromisoformat(r['slot']).astimezone(timezone.utc)>now
            and (active is None or bool(r['active']) is active)]
     return sorted(slots,key=lambda row:datetime.fromisoformat(row['slot']).astimezone(timezone.utc))
 
 
-def selected_slots_open(db,start,end):
+def selected_slots_open(db,start,end,weekly=False,now=None):
+    now=now or datetime.now(timezone.utc)
     try:
         a,b=datetime.fromisoformat(start),datetime.fromisoformat(end)
-        if (a.tzinfo is None or b.tzinfo is None or a.astimezone(timezone.utc)<=datetime.now(timezone.utc)
+        if (a.tzinfo is None or b.tzinfo is None or a.astimezone(timezone.utc)<=now
                 or b.astimezone(timezone.utc)<=a.astimezone(timezone.utc)):
             return False
     except (TypeError,ValueError):return False
-    active={row['slot'] for row in db.execute(
-        'SELECT slot FROM miet_checkout_slots WHERE active=1 AND slot IN (?,?)',(start,end)).fetchall()}
-    return active=={start,end}
+    overrides={row['slot']:bool(row['active']) for row in db.execute(
+        'SELECT slot,active FROM miet_checkout_slots WHERE slot IN (?,?)',(start,end)).fetchall()}
+    recurring=set(weekly_handover_slots(now)) if weekly else set()
+    return all(overrides.get(slot,slot in recurring) for slot in (start,end))
+
+
+def materialize_selected_weekly_slots(db,start,end,now):
+    """Persist only chosen recurring hours so payment checks can lock their rows."""
+    recurring=set(weekly_handover_slots(now))
+    stamp=now.isoformat()
+    for slot in (start,end):
+        if slot in recurring:
+            db.execute('''INSERT INTO miet_checkout_slots (slot,active,created_at,updated_at)
+                VALUES (?,1,?,?) ON CONFLICT (slot) DO NOTHING RETURNING slot''',
+                (slot,stamp,stamp))
 
 
 def website_response(response, test_url=None, live=False):
@@ -163,6 +210,7 @@ def register(portal):
             if type(cfg[key]) is not int or cfg[key]<1:raise ValueError('Test-Tarif unvollständig.')
         if not isinstance(cfg.get('slots'),list) or len(set(cfg['slots'])) != len(cfg['slots']):
             raise ValueError('Übergabetermine müssen eine Liste eindeutiger Zeitpunkte sein.')
+        weekly_handover_enabled(cfg)
         for slot in cfg['slots']:
             dt=datetime.fromisoformat(slot)
             if dt.tzinfo is None or dt.astimezone(BERLIN).isoformat()!=slot:
@@ -265,6 +313,8 @@ def register(portal):
 
     def quote_slots_open(q):
         db=portal.get_db()
+        # A quoted recurring time has already been materialized; the database
+        # row is authoritative for all subsequent payment and admin-close races.
         try:return selected_slots_open(db,q['start_slot'],q['end_slot'])
         finally:db.close()
 
@@ -281,7 +331,10 @@ def register(portal):
             raise ValueError('Bitte ein verfügbares Fahrzeug und freigegebene Termine wählen.')
         db=portal.get_db()
         try:
-            if not selected_slots_open(db,start,end):
+            if not portal.USE_POSTGRES:db.execute('BEGIN IMMEDIATE')
+            now=datetime.now(timezone.utc)
+            weekly=weekly_handover_enabled(cfg)
+            if not selected_slots_open(db,start,end,weekly,now):
                 raise ValueError('Bitte ein verfügbares Fahrzeug und freigegebene Termine wählen.')
             a,b=datetime.fromisoformat(start),datetime.fromisoformat(end)
             seconds=(b.astimezone(timezone.utc)-a.astimezone(timezone.utc)).total_seconds()
@@ -297,6 +350,13 @@ def register(portal):
                 raise ValueError('Fahrzeugzuordnung muss von der Werkstatt geprüft werden.')
             if not portal.mietfahrzeug_zeitraum_frei_db(db,f['id'],a.date(),b.date()):
                 raise ValueError('Der Zeitraum ist bereits belegt. Bitte andere Termine wählen.')
+            if weekly:
+                materialize_selected_weekly_slots(db,start,end,now)
+                if not selected_slots_open(db,start,end):
+                    raise ValueError('Ein Übergabetermin ist nicht mehr freigegeben. Bitte neu buchen.')
+            db.commit()
+        except Exception:
+            db.rollback();raise
         finally:db.close()
         authorization=cfg.get('deposit_method')=='card_authorization_at_booking'
         charged=cfg['mode'] in {'live','stripe_test'} and not authorization
@@ -390,7 +450,8 @@ def register(portal):
                 LEFT JOIN miet_checkout_contracts c ON c.hold_id=h.id
                 LEFT JOIN miet_checkout_deposit_auths d ON d.hold_id=h.id
                 ORDER BY h.expires_at DESC LIMIT 100''').fetchall()]
-            open_slots=listed_slots(db,True)
+            weekly=weekly_handover_enabled(app.config.get('MOS_PUBLIC_BOOKING',{}))
+            open_slots=listed_slots(db,True,weekly)
             closed_slots=listed_slots(db,False)
         finally:db.close()
         for h in holds:
@@ -408,7 +469,8 @@ def register(portal):
             configured=app.config.get('MOS_PUBLIC_BOOKING',{}).get('slots',[])
             init_slot_schema(db,configured if isinstance(configured,list) else [])
             db.commit()
-            open_slots=listed_slots(db,True)
+            weekly=weekly_handover_enabled(app.config.get('MOS_PUBLIC_BOOKING',{}))
+            open_slots=listed_slots(db,True,weekly)
             closed_slots=listed_slots(db,False)
         finally:db.close()
         return render_template('mos_public/admin.html',holds=[],open_slots=open_slots,
@@ -423,6 +485,7 @@ def register(portal):
         try:
             configured=app.config.get('MOS_PUBLIC_BOOKING',{}).get('slots',[])
             init_slot_schema(db,configured if isinstance(configured,list) else [])
+            weekly=weekly_handover_enabled(app.config.get('MOS_PUBLIC_BOOKING',{}))
             now=datetime.now(timezone.utc).isoformat()
             if action=='add':
                 slot=local_slot_to_iso(request.form.get('local_slot',''))
@@ -433,11 +496,17 @@ def register(portal):
             elif action in {'close','reopen'}:
                 slot=request.form.get('slot','')
                 row=db.execute('SELECT slot FROM miet_checkout_slots WHERE slot=?',(slot,)).fetchone()
-                if not row:raise ValueError('Übergabetermin nicht gefunden.')
+                if not row and not (action=='close' and weekly and slot in set(weekly_handover_slots())):
+                    raise ValueError('Übergabetermin nicht gefunden.')
                 if action=='reopen' and datetime.fromisoformat(slot).astimezone(timezone.utc)<=datetime.now(timezone.utc):
                     raise ValueError('Nur künftige Übergabetermine können geöffnet werden.')
-                db.execute('UPDATE miet_checkout_slots SET active=?,updated_at=? WHERE slot=?',
-                           (1 if action=='reopen' else 0,now,slot))
+                if row:
+                    db.execute('UPDATE miet_checkout_slots SET active=?,updated_at=? WHERE slot=?',
+                               (1 if action=='reopen' else 0,now,slot))
+                else:
+                    db.execute('''INSERT INTO miet_checkout_slots (slot,active,created_at,updated_at)
+                        VALUES (?,0,?,?) ON CONFLICT (slot) DO UPDATE SET active=0,updated_at=excluded.updated_at
+                        RETURNING slot''',(slot,now,now))
                 if action=='close':
                     rows=db.execute("SELECT id,payload FROM miet_checkout_holds WHERE status='pending'").fetchall()
                     for pending in rows:
@@ -524,7 +593,7 @@ def register(portal):
     @bp.get('/')
     def index():
         db=portal.get_db()
-        try:slots=[row['slot'] for row in listed_slots(db,True)]
+        try:slots=[row['slot'] for row in listed_slots(db,True,weekly_handover_enabled(setup()['cfg']))]
         finally:db.close()
         return render_template('mos_public/index.html',listings=LISTINGS,slots=slots)
 

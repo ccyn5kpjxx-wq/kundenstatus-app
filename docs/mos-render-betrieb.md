@@ -10,6 +10,8 @@ Der Cron-Job verwendet **denselben Git-Stand und dieselbe autoritative PostgreSQ
 
 Die bereits vorhandene `render.yaml` enthält **keinen Cron-Dienst** und benennt andere Webdienste als den tatsächlich beobachteten `kundenstatus-app`. Sie darf deshalb nicht als Beweis gelten, dass Änderungen an ihr den laufenden Dienst konfigurieren. Einen Cron-Eintrag dort hinzuzufügen würde bei einem Blueprint-Sync womöglich einen kostenpflichtigen Dienst provisionieren. Diese Anleitung und der Starter allein verändern Render nicht.
 
+Die bestätigte Wochenregel bietet montags bis samstags von 08:00 bis einschließlich 20:00 Uhr stündliche persönliche Termine an. Wenn ein Kunde eine Preisübersicht für zwei dieser Zeiten erzeugt, werden genau diese gewählten Zeiten für die sicheren Buchungs- und Zahlungssperren in der Portal-Datenbank gespeichert. Bei einem Rückzug der Wochenregel zuerst neue öffentliche Buchungen mit `enabled=false` stoppen und danach alle künftig nicht mehr gewünschten, bereits gespeicherten Zeiten im Adminportal unter `/mieten/admin/termine` schließen. Allein das Entfernen von `weekly_handover` aus der Konfiguration entfernt diese vorhandenen Zeilen nicht; laufende Holds und Zahlungen müssen nach den üblichen Regeln abgeglichen werden.
+
 ## Stripe-Webhook am Portal-Webdienst
 
 1. Erst nach vollständigen Betreiber-/Versicherungsfreigaben und sicherer Live-Konfiguration die öffentliche HTTPS-Route `/mieten/webhook` am tatsächlichen Portal-Origin prüfen. Die `/mieten/`-Antwort 404 zeigt derzeit, dass die Live-Konfiguration nicht aktiviert ist.
