@@ -15087,7 +15087,7 @@ def get_lackierauftrag_entwurf(autohaus):
     }
 
 
-def save_lackierauftrag_entwurf(autohaus, data):
+def save_lackierauftrag_entwurf(autohaus, data, expected_id):
     normalized = normalize_lackierauftrag_data(data, autohaus)
     payload = json.dumps(normalized, ensure_ascii=False)
     now = now_str()
@@ -15105,6 +15105,10 @@ def save_lackierauftrag_entwurf(autohaus, data):
             """,
             (autohaus["id"],),
         ).fetchone()
+        current_id = int(existing["id"]) if existing else 0
+        if current_id != expected_id:
+            db.rollback()
+            return None
         if existing:
             updated = db.execute(
                 """
@@ -15152,7 +15156,7 @@ def lackierauftrag_beschreibung_aus_positionen(daten):
     return "\n".join(zeilen)
 
 
-def reset_lackierauftrag_entwurf(autohaus):
+def reset_lackierauftrag_entwurf(autohaus, expected_id):
     db = get_db()
     try:
         if USE_POSTGRES:
@@ -15161,12 +15165,16 @@ def reset_lackierauftrag_entwurf(autohaus):
             db.execute("BEGIN IMMEDIATE")
         latest = db.execute(
             """
-            SELECT angelegter_auftrag_id FROM lackierauftrag_entwuerfe
+            SELECT id, angelegter_auftrag_id FROM lackierauftrag_entwuerfe
             WHERE autohaus_id=? ORDER BY id DESC LIMIT 1
             """,
             (autohaus["id"],),
         ).fetchone()
-        if not latest or int(latest["angelegter_auftrag_id"] or 0) == -1:
+        if (
+            not latest
+            or int(latest["id"]) != expected_id
+            or int(latest["angelegter_auftrag_id"] or 0) == -1
+        ):
             db.rollback()
             return False
         cursor = db.execute(
@@ -15185,18 +15193,30 @@ def reset_lackierauftrag_entwurf(autohaus):
 def claim_lackierauftrag_anlage(autohaus, daten):
     """Atomically claim this draft before creating its vehicle."""
     db = get_db()
-    cursor = db.execute(
-        """
-        UPDATE lackierauftrag_entwuerfe
-        SET angelegter_auftrag_id=-1
-        WHERE autohaus_id=? AND daten_json=? AND angelegter_auftrag_id=0
-          AND id=(SELECT MAX(id) FROM lackierauftrag_entwuerfe WHERE autohaus_id=?)
-        """,
-        (autohaus["id"], json.dumps(daten, ensure_ascii=False), autohaus["id"]),
-    )
-    db.commit()
-    db.close()
-    return cursor.rowcount == 1
+    try:
+        if USE_POSTGRES:
+            db.execute("SELECT id FROM autohaeuser WHERE id=? FOR UPDATE", (autohaus["id"],))
+        else:
+            db.execute("BEGIN IMMEDIATE")
+        cursor = db.execute(
+            """
+            UPDATE lackierauftrag_entwuerfe
+            SET angelegter_auftrag_id=-1
+            WHERE autohaus_id=? AND daten_json=? AND angelegter_auftrag_id=0
+              AND id=(SELECT MAX(id) FROM lackierauftrag_entwuerfe WHERE autohaus_id=?)
+            """,
+            (autohaus["id"], json.dumps(daten, ensure_ascii=False), autohaus["id"]),
+        )
+        if cursor.rowcount != 1:
+            db.rollback()
+            return False
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def mark_lackierauftrag_anlage(autohaus, auftrag_id):
@@ -52974,15 +52994,15 @@ def partner_lackierauftrag_bearbeiten(slug):
     if request.method == "POST":
         aktion = request.form.get("aktion")
         if aktion == "neuer_entwurf":
-            if not reset_lackierauftrag_entwurf(autohaus):
-                flash("Der Lackierauftrag wird gerade angelegt. Bitte zuerst den Abschluss abwarten.", "warning")
+            submitted_draft_id = request.form.get("entwurf_id", "")
+            expected_id = int(submitted_draft_id) if submitted_draft_id.isdigit() else 0
+            if not expected_id or not reset_lackierauftrag_entwurf(autohaus, expected_id):
+                flash("Der Formularstand ist veraltet oder wird gerade verarbeitet. Bitte den aktuellen Auftrag prüfen.", "warning")
                 return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
             flash("Neuer leerer Lackierauftrag gestartet. Der bereits angelegte Fahrzeugauftrag bleibt erhalten.", "info")
             return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
-        submitted_draft_id = request.form.get("entwurf_id")
-        if submitted_draft_id is not None and (
-            not submitted_draft_id.isdigit() or int(submitted_draft_id) != entwurf["id"]
-        ):
+        submitted_draft_id = request.form.get("entwurf_id", "")
+        if not submitted_draft_id.isdigit() or int(submitted_draft_id) != entwurf["id"]:
             flash("Dieser Formularstand ist veraltet. Bitte die Seite neu laden und den aktuellen Entwurf prüfen.", "warning")
             return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
         if entwurf.get("angelegter_auftrag_id"):
@@ -52996,13 +53016,13 @@ def partner_lackierauftrag_bearbeiten(slug):
             flash("Der Lackierauftrag wird bereits angelegt. Bitte das Dashboard prüfen, bevor Sie erneut senden.", "warning")
             return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
         daten = parse_lackierauftrag_form(request.form, autohaus)
-        daten = save_lackierauftrag_entwurf(autohaus, daten)
+        daten = save_lackierauftrag_entwurf(autohaus, daten, int(submitted_draft_id))
         if daten is None:
             current_id = get_lackierauftrag_entwurf(autohaus)["angelegter_auftrag_id"]
             if current_id > 0:
                 flash("Dieses Fahrzeug wurde bereits angelegt. Bitte den bestehenden Auftrag öffnen.", "warning")
                 return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=current_id))
-            flash("Der Entwurf wird bereits verarbeitet. Bitte die Seite neu laden und den Auftrag prüfen.", "warning")
+            flash("Der Entwurf hat sich geändert oder wird bereits verarbeitet. Bitte die Seite neu laden und den Auftrag prüfen.", "warning")
             return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
         if aktion == "fahrzeug_anlegen":
             if not (daten.get("typ") or daten.get("kennzeichen")):

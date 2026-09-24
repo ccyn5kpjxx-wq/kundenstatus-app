@@ -125,6 +125,7 @@
       <div class="mt-3"><a href="{{ url_for('partner_lackierauftrag_vorlage', slug=autohaus['slug']) }}" class="alert-link">Ausgefülltes PDF erneut herunterladen</a></div>
       <form method="POST" class="mt-3">
         {{ csrf_field()|safe }}
+        <input type="hidden" name="entwurf_id" value="{{ entwurf['id'] }}">
         <button type="submit" name="aktion" value="neuer_entwurf" class="btn btn-outline-dark" onclick="return confirm('Neuen leeren Lackierauftrag starten? Die Eingaben dieses Entwurfs werden entfernt.');">Neuen Lackierauftrag starten</button>
       </form>
     </div>

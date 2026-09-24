@@ -53,7 +53,7 @@ class VehicleFormTests(unittest.TestCase):
 
     def test_online_paint_order_transfers_color(self):
         response = self.post('/partner/kaesmann/lackierauftrag', {
-            'aktion': 'fahrzeug_anlegen', 'typ': 'Testwagen', 'farb_nr': 'SAW',
+            'aktion': 'fahrzeug_anlegen', 'entwurf_id': '0', 'typ': 'Testwagen', 'farb_nr': 'SAW',
             'kennzeichen': 'TEST-456',
         })
         self.assertEqual(response.status_code, 302)

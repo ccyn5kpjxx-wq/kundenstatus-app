@@ -42,6 +42,7 @@ class PartnerWorkflowTests(unittest.TestCase):
 
     def test_download_and_create_keep_positions_and_attach_pdf(self):
         form = {
+            "entwurf_id": "0",
             "typ": "Synthetischer Testwagen",
             "kennzeichen": "TEST-LACK-1",
             "farb_nr": "TEST-FARBE",
@@ -56,6 +57,7 @@ class PartnerWorkflowTests(unittest.TestCase):
         self.assertIn("Weitere Arbeit ohne Bauteilname pruefen", pdf_text(response.data))
         self.assertFalse(any(a["kennzeichen"] == "TEST-LACK-1" for a in portal.list_auftraege()))
 
+        form["entwurf_id"] = str(portal.get_lackierauftrag_entwurf(self.partner)["id"])
         response = self.post("/partner/autohaus-pfaff/lackierauftrag", {**form, "aktion": "fahrzeug_anlegen"})
         self.assertEqual(response.status_code, 302)
         order_id = int(response.location.rsplit("/", 1)[-1])
@@ -82,11 +84,13 @@ class PartnerWorkflowTests(unittest.TestCase):
         repeated = self.post("/partner/autohaus-pfaff/lackierauftrag", {**form, "aktion": "fahrzeug_anlegen"})
         self.assertEqual(repeated.location, response.location)
         self.assertEqual(len([a for a in portal.list_auftraege() if a["kennzeichen"] == "TEST-LACK-1"]), 1)
-        self.post("/partner/autohaus-pfaff/lackierauftrag", {"aktion": "neuer_entwurf"})
+        self.post("/partner/autohaus-pfaff/lackierauftrag", {
+            "aktion": "neuer_entwurf", "entwurf_id": str(portal.get_lackierauftrag_entwurf(self.partner)["id"]),
+        })
         self.assertEqual(portal.get_lackierauftrag_entwurf(self.partner)["id"], 0)
 
     def test_failed_pdf_storage_does_not_create_second_vehicle(self):
-        form = {"typ": "Synthetischer Fehlerwagen", "kennzeichen": "TEST-LACK-2", "aktion": "fahrzeug_anlegen"}
+        form = {"entwurf_id": "0", "typ": "Synthetischer Fehlerwagen", "kennzeichen": "TEST-LACK-2", "aktion": "fahrzeug_anlegen"}
         with patch.object(portal, "save_uploads", return_value=(0, {})):
             first = self.post("/partner/autohaus-pfaff/lackierauftrag", form)
         self.assertEqual(first.status_code, 302)
@@ -95,18 +99,21 @@ class PartnerWorkflowTests(unittest.TestCase):
         self.assertEqual(draft["angelegter_auftrag_id"], first_id)
         self.assertIn("Erneutes Anlegen ist gesperrt", self.client.get("/partner/autohaus-pfaff/lackierauftrag").text)
 
+        form["entwurf_id"] = str(draft["id"])
         second = self.post("/partner/autohaus-pfaff/lackierauftrag", form)
         self.assertEqual(second.location, first.location)
         orders = [a for a in portal.list_auftraege() if a["kennzeichen"] == "TEST-LACK-2"]
         self.assertEqual(len(orders), 1)
         self.assertEqual(portal.list_dateien(first_id), [])
-        reset = self.post("/partner/autohaus-pfaff/lackierauftrag", {"aktion": "neuer_entwurf"})
+        reset = self.post("/partner/autohaus-pfaff/lackierauftrag", {
+            "aktion": "neuer_entwurf", "entwurf_id": str(portal.get_lackierauftrag_entwurf(self.partner)["id"]),
+        })
         self.assertEqual(reset.status_code, 302)
         self.assertEqual(portal.get_lackierauftrag_entwurf(self.partner)["id"], 0)
         self.assertIsNotNone(portal.get_auftrag(first_id))
 
     def test_concurrent_vehicle_claim_allows_only_one_submission(self):
-        data = portal.save_lackierauftrag_entwurf(self.partner, {"typ": "Gleichzeitiger Testwagen"})
+        data = portal.save_lackierauftrag_entwurf(self.partner, {"typ": "Gleichzeitiger Testwagen"}, 0)
         with ThreadPoolExecutor(max_workers=2) as executor:
             claimed = list(executor.map(
                 lambda _: portal.claim_lackierauftrag_anlage(self.partner, data), range(2)
@@ -117,10 +124,10 @@ class PartnerWorkflowTests(unittest.TestCase):
     def test_concurrent_first_save_keeps_one_draft(self):
         with ThreadPoolExecutor(max_workers=2) as executor:
             results = list(executor.map(
-                lambda name: portal.save_lackierauftrag_entwurf(self.partner, {"typ": name}),
+                lambda name: portal.save_lackierauftrag_entwurf(self.partner, {"typ": name}, 0),
                 ("Erster Testwagen", "Zweiter Testwagen"),
             ))
-        self.assertEqual(len(results), 2)
+        self.assertEqual(sum(result is not None for result in results), 1)
         db = portal.get_db()
         count = db.execute(
             "SELECT COUNT(*) FROM lackierauftrag_entwuerfe WHERE autohaus_id=?",
@@ -132,11 +139,11 @@ class PartnerWorkflowTests(unittest.TestCase):
     def test_stale_form_cannot_change_claimed_order_pdf(self):
         first = portal.save_lackierauftrag_entwurf(self.partner, {
             "typ": "Erster Testwagen", "position_1_teil": "Erster Kotfluegel",
-        })
+        }, 0)
         self.assertTrue(portal.claim_lackierauftrag_anlage(self.partner, first))
         rejected = portal.save_lackierauftrag_entwurf(self.partner, {
             "typ": "Zweiter Testwagen", "position_1_teil": "Falsche Tuer",
-        })
+        }, portal.get_lackierauftrag_entwurf(self.partner)["id"])
         self.assertIsNone(rejected)
         order_id = portal.create_auftrag(
             "autohaus", autohaus_id=self.partner["id"], fahrzeug="Erster Testwagen",
@@ -162,6 +169,42 @@ class PartnerWorkflowTests(unittest.TestCase):
         })
         self.assertEqual(stale.status_code, 302)
         self.assertEqual(portal.get_lackierauftrag_entwurf(self.partner)["daten"]["typ"], "Erster Testwagen")
+
+    def test_save_checks_draft_id_inside_transaction(self):
+        first = portal.save_lackierauftrag_entwurf(self.partner, {"typ": "Erster Testwagen"}, 0)
+        self.assertIsNotNone(first)
+        old_id = portal.get_lackierauftrag_entwurf(self.partner)["id"]
+        self.assertTrue(portal.reset_lackierauftrag_entwurf(self.partner, old_id))
+        self.assertIsNotNone(portal.save_lackierauftrag_entwurf(
+            self.partner, {"typ": "Neuer Testwagen"}, 0,
+        ))
+        self.assertIsNone(portal.save_lackierauftrag_entwurf(
+            self.partner, {"typ": "Alter Tab"}, old_id,
+        ))
+        self.assertEqual(portal.get_lackierauftrag_entwurf(self.partner)["daten"]["typ"], "Neuer Testwagen")
+
+    def test_form_without_draft_id_cannot_save(self):
+        response = self.post("/partner/autohaus-pfaff/lackierauftrag", {
+            "aktion": "speichern", "typ": "Ohne Entwurfskennung",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(portal.get_lackierauftrag_entwurf(self.partner)["id"], 0)
+
+    def test_old_reset_button_cannot_delete_new_draft(self):
+        first = portal.save_lackierauftrag_entwurf(self.partner, {"typ": "Erster Testwagen"}, 0)
+        old_id = portal.get_lackierauftrag_entwurf(self.partner)["id"]
+        self.assertTrue(portal.claim_lackierauftrag_anlage(self.partner, first))
+        order_id = portal.create_auftrag(
+            "autohaus", autohaus_id=self.partner["id"], fahrzeug="Erster Testwagen",
+        )
+        portal.mark_lackierauftrag_anlage(self.partner, order_id)
+        self.assertTrue(portal.reset_lackierauftrag_entwurf(self.partner, old_id))
+        portal.save_lackierauftrag_entwurf(self.partner, {"typ": "Neuer Testwagen"}, 0)
+        stale = self.post("/partner/autohaus-pfaff/lackierauftrag", {
+            "aktion": "neuer_entwurf", "entwurf_id": str(old_id),
+        })
+        self.assertEqual(stale.status_code, 302)
+        self.assertEqual(portal.get_lackierauftrag_entwurf(self.partner)["daten"]["typ"], "Neuer Testwagen")
 
     def test_archived_complaint_appears_as_admin_alarm(self):
         order_id = portal.create_auftrag(
