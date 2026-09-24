@@ -426,6 +426,43 @@ class PublicTests(unittest.TestCase):
             self.assertEqual(state['service'].read(hold)['status'],'pending')
             self.assertEqual(self.rows(),[])
 
+    def test_reconcile_alarms_if_card_hold_disappears_during_open_rent_checkout(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,intent_id,_=self.card_deposit()
+            self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/kaution-test').status_code,303)
+            rent=self.post('/mietwagen-test/status/'+hold+'/retry')
+            self.assertEqual(rent.status_code,303)
+            state=portal.app.extensions['mos_public_booking']
+            session_id=state['service'].read(hold)['session_id']
+            self.assertEqual(state['gateway'].retrieve(session_id)['status'],'open')
+            state['gateway'].cancel_deposit_intent(intent_id,'synthetic-external-release-'+hold)
+
+            check=portal.app.test_cli_runner().invoke(args=['mos-booking-reconcile'])
+            self.assertNotEqual(check.exit_code,0,check.output)
+            self.assertIn('offene Fehler: 1',check.output)
+            self.assertEqual(state['service'].read(hold)['status'],'pending')
+            self.assertEqual(state['gateway'].retrieve(session_id)['status'],'open')
+            self.assertEqual(self.rows(),[])
+
+    def test_reconcile_alarms_if_card_hold_is_recorded_released_but_rent_checkout_open(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,_,_=self.card_deposit()
+            self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/kaution-test').status_code,303)
+            rent=self.post('/mietwagen-test/status/'+hold+'/retry')
+            self.assertEqual(rent.status_code,303)
+            state=portal.app.extensions['mos_public_booking']
+            session_id=state['service'].read(hold)['session_id']
+            # Simulate a release committed before an intervening cleanup step.
+            state['service'].release_deposit(hold,'synthetic interrupted cleanup')
+            self.assertEqual(state['service']._deposit_record(hold)['status'],'released')
+            self.assertEqual(state['gateway'].retrieve(session_id)['status'],'open')
+
+            check=portal.app.test_cli_runner().invoke(args=['mos-booking-reconcile'])
+            self.assertNotEqual(check.exit_code,0,check.output)
+            self.assertIn('offene Fehler: 1',check.output)
+            self.assertEqual(state['service'].read(hold)['status'],'pending')
+            self.assertEqual(self.rows(),[])
+
     def test_reconcile_alarms_on_review_hold(self):
         token,_=self.quote()
         checkout=self.checkout(token)

@@ -548,7 +548,8 @@ def register(portal):
                 WHERE d.status!='released' ''').fetchall()]
             active_ids=[r['id'] for r in db.execute('''SELECT h.id FROM miet_checkout_holds h
                 JOIN miet_checkout_deposit_auths d ON d.hold_id=h.id
-                WHERE h.status='confirmed' AND d.status!='released'
+                WHERE ((h.status='confirmed' AND d.status!='released')
+                    OR (h.status='pending' AND h.session_id IS NOT NULL))
                 AND NOT EXISTS (SELECT 1 FROM miet_checkout_cancellations c WHERE c.id=h.id)''').fetchall()]
         finally:db.close()
         for hid in release_ids:
