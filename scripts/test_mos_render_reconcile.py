@@ -22,7 +22,7 @@ def fixture_config():
     review = {'approved_by': 'TEST ONLY', 'approved_at': '2026-09-24', 'evidence': 'TEST ONLY'}
     launch = {name: dict(review) for name in
               ('business_review', 'legal_review', 'finance_review', 'privacy_review',
-               'sandbox_acceptance', 'postgres_acceptance')}
+               'sandbox_acceptance', 'postgres_acceptance', 'contract_delivery_acceptance')}
     launch['insurance'] = {
         name: {'verified': True, 'use': 'paid_self_drive',
                'evidence': 'TEST ONLY', 'vehicle_id': vehicle['id']}

@@ -25,6 +25,8 @@ def init_schema(db):
         hold_id TEXT PRIMARY KEY, contract_json TEXT NOT NULL, contract_sha256 TEXT NOT NULL,
         signer_name TEXT NOT NULL, signed_at TEXT NOT NULL, signature_png_base64 TEXT NOT NULL,
         pdf_base64 TEXT NOT NULL, pdf_sha256 TEXT NOT NULL)''')
+    from mos_contract_delivery import init_schema as init_delivery_schema
+    init_delivery_schema(db)
 
 
 def snapshot(payload):
@@ -261,6 +263,9 @@ def finalize(portal, hold_id):
         hold = dict(row)
         existing = read(db, hold_id)
         if existing:
+            from mos_contract_delivery import enqueue
+            enqueue(db, hold, json.loads(existing['contract_json']), existing['pdf_sha256'])
+            db.commit()
             return existing
         if hold['status'] != 'confirmed' or not hold['mietvorgang_id'] or not hold['payment_intent']:
             return None
@@ -276,6 +281,8 @@ def finalize(portal, hold_id):
             VALUES (?,?,?,?,?,?,?,?)''',
             (hold_id, canonical(contract), digest, contract['customer_name'], signed_at,
              payload['quote']['signature_png_base64'], b64encode(pdf).decode('ascii'), sha256(pdf).hexdigest()))
+        from mos_contract_delivery import enqueue
+        enqueue(db, hold, contract, sha256(pdf).hexdigest())
         db.commit()
         return read(db, hold_id)
     except Exception:

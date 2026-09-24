@@ -446,9 +446,11 @@ def register(portal):
     def admin_bookings():
         db=portal.get_db()
         try:
-            holds=[dict(r) for r in db.execute('''SELECT h.*,c.signed_at,d.status AS deposit_status FROM miet_checkout_holds h
+            holds=[dict(r) for r in db.execute('''SELECT h.*,c.signed_at,d.status AS deposit_status,
+                delivery.status AS contract_delivery_status FROM miet_checkout_holds h
                 LEFT JOIN miet_checkout_contracts c ON c.hold_id=h.id
                 LEFT JOIN miet_checkout_deposit_auths d ON d.hold_id=h.id
+                LEFT JOIN miet_checkout_contract_delivery delivery ON delivery.hold_id=h.id
                 ORDER BY h.expires_at DESC LIMIT 100''').fetchall()]
             weekly=weekly_handover_enabled(app.config.get('MOS_PUBLIC_BOOKING',{}))
             open_slots=listed_slots(db,True,weekly)
@@ -596,6 +598,41 @@ def register(portal):
         try:slots=[row['slot'] for row in listed_slots(db,True,weekly_handover_enabled(setup()['cfg']))]
         finally:db.close()
         return render_template('mos_public/index.html',listings=LISTINGS,slots=slots)
+
+    @app.cli.command('mos-contract-delivery')
+    def deliver_contracts():
+        """Send frozen contract PDFs only from an explicitly enabled live worker."""
+        import click
+        from mos_contract_delivery import deliver_one, pending_ids, unfinished_live_ids, unresolved_count
+        cfg=app.config.get('MOS_PUBLIC_BOOKING',{})
+        if (cfg.get('mode')!='live' or not portal.USE_POSTGRES
+                or os.environ.get('MOS_CONTRACT_EMAIL_ENABLED')!='1'):
+            raise click.ClickException('MOS-Vertragsversand ist nicht für den Livebetrieb aktiviert.')
+        mail_cfg=portal.get_werkstatt_smtp_config()
+        if not mail_cfg.get('smtp_configured') or not (mail_cfg.get('smtp_ssl') or mail_cfg.get('smtp_tls')):
+            raise click.ClickException('Verschlüsselter Werkstatt-Mailversand ist nicht eingerichtet.')
+        db=portal.get_db()
+        try:init_contract_schema(db);db.commit()
+        finally:db.close()
+        errors=0
+        for hold_id in unfinished_live_ids(portal,limit=100):
+            try:
+                if not finalize_contract(portal,hold_id):errors+=1
+            except Exception:
+                errors+=1
+                app.logger.exception('MOS Vertrags-PDF oder Versandauftrag muss geprüft werden')
+        for hold_id in pending_ids(portal):
+            try:
+                result=deliver_one(portal,hold_id,mail_cfg,live=True,enabled=True)
+                if result!='sent':errors+=1
+            except Exception:
+                errors+=1
+                app.logger.exception('MOS Vertragszustellung muss geprüft werden')
+        unresolved=unresolved_count(portal)
+        missing=len(unfinished_live_ids(portal))
+        click.echo(f'MOS Vertragszustellungen offen oder zu prüfen: {unresolved}; ohne PDF/Versandauftrag: {missing}')
+        if errors or unresolved or missing:
+            raise click.ClickException('MOS Vertragszustellung ist noch nicht abgeschlossen.')
 
     @app.cli.command('mos-booking-reconcile')
     def reconcile_jobs():

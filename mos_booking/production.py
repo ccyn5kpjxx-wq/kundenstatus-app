@@ -18,7 +18,8 @@ def launch_errors(cfg):
     if set(cfg.get('fleet',{})) != ACTIVE_LISTINGS:
         errors.append('Nur die bestätigten Fahrzeuge KONA und i10 dürfen freigegeben werden.')
     launch=cfg.get('launch',{})
-    for name in ('business_review','legal_review','finance_review','privacy_review','sandbox_acceptance','postgres_acceptance'):
+    for name in ('business_review','legal_review','finance_review','privacy_review','sandbox_acceptance',
+                 'postgres_acceptance','contract_delivery_acceptance'):
         record=launch.get(name,{})
         if not (record.get('approved_by') and record.get('approved_at') and record.get('evidence')):
             errors.append('Freigabenachweis fehlt: '+name)

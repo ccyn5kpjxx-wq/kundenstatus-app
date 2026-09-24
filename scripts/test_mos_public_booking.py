@@ -48,7 +48,7 @@ class PublicTests(unittest.TestCase):
         self.client=portal.app.test_client()
         self.client.get('/mietwagen-test/')
         db=portal.get_db()
-        for table in ('miet_checkout_refunds','miet_checkout_cancellations','miet_checkout_contracts',
+        for table in ('miet_checkout_refunds','miet_checkout_cancellations','miet_checkout_contract_delivery','miet_checkout_contracts',
                       'miet_checkout_events','miet_checkout_deposit_auths','miet_checkout_creation_attempts',
                       'miet_checkout_holds','mietvorgaenge'):db.execute('DELETE FROM '+table)
         db.commit();db.close()
@@ -582,7 +582,9 @@ class PublicTests(unittest.TestCase):
         paid=self.post(checkout.location)
         self.assertEqual(paid.status_code,303)
         db=portal.get_db()
-        try:stored=dict(db.execute('SELECT * FROM miet_checkout_contracts WHERE hold_id=?',(hold,)).fetchone())
+        try:
+            stored=dict(db.execute('SELECT * FROM miet_checkout_contracts WHERE hold_id=?',(hold,)).fetchone())
+            self.assertIsNone(db.execute('SELECT hold_id FROM miet_checkout_contract_delivery WHERE hold_id=?',(hold,)).fetchone())
         finally:db.close()
         document=json.loads(stored['contract_json'])
         self.assertEqual(document['lessor_name'],'Gärtner GmbH Karosserie + Lack')
@@ -612,6 +614,13 @@ class PublicTests(unittest.TestCase):
             self.assertEqual(self.checkout(token).location,status_url)
             self.assertEqual(self.client.get(status_url+'/vertrag.pdf').data,pdf.data)
         finally:self.cfg['terms_text']=document['terms_text']
+
+    def test_contract_delivery_worker_cannot_send_from_test_mode(self):
+        with patch.dict(os.environ, {'MOS_CONTRACT_EMAIL_ENABLED':'1'}), patch('smtplib.SMTP_SSL') as smtp:
+            result=portal.app.test_cli_runner().invoke(args=['mos-contract-delivery'])
+        self.assertNotEqual(result.exit_code,0)
+        self.assertIn('nicht für den Livebetrieb aktiviert',result.output)
+        smtp.assert_not_called()
 
     def test_signature_required_before_checkout_and_owner(self):
         token,_=self.quote()
