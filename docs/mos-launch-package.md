@@ -1,6 +1,6 @@
 # MOS: Freigabepaket für echte Kundenbuchungen
 
-Stand 23.09.2026. **Noch kein Zahlungs-Go-live.** Ziel sind öffentliche entgeltliche Selbstfahrer-Mieten ausschließlich für **Hyundai i10 und Hyundai KONA**. C3 und Fiat sind von der Direktbuchung ausgeschlossen; Werkstatttarife bleiben manuelle Anfragen. Der Kernablauf mit separater Kautionsautorisierung, Mietzahlung, signiertem Webhook und Storno wurde in einer isolierten lokalen Stripe-Testinstanz ausgeführt. Die öffentliche Zahlungsroute ist weiterhin deaktiviert; es gab keine Livezahlung und keine Autorisierung einer echten Kundenkarte.
+Stand 24.09.2026. **Noch kein Zahlungs-Go-live.** Ziel sind öffentliche entgeltliche Selbstfahrer-Mieten ausschließlich für **Hyundai i10 und Hyundai KONA**. C3 und Fiat sind von der Direktbuchung ausgeschlossen; Werkstatttarife bleiben manuelle Anfragen. Der Kernablauf mit separater Kautionsautorisierung, Mietzahlung, signiertem Webhook und Storno wurde in einer isolierten lokalen Stripe-Testinstanz ausgeführt. Die öffentliche Zahlungsroute ist weiterhin deaktiviert; es gab keine Livezahlung und keine Autorisierung einer echten Kundenkarte.
 
 ## Aktuelle Nutzerentscheidung und Zielablauf
 
@@ -14,7 +14,7 @@ Stand 23.09.2026. **Noch kein Zahlungs-Go-live.** Ziel sind öffentliche entgelt
 
 Die frühere Implementierung zog Miete und Kaution zusammen im Checkout ein und erstattete die Kaution später. Historische Buchungssnapshots und Tests können diesen Ablauf noch enthalten; für neue Livebuchungen ist ausschließlich `card_authorization_at_booking` vorgesehen. Gemeinsamer Portalbestand, signierter Checkout-Webhook, unveränderlicher Vertragssnapshot und idempotente Mietpreiserstattungen bleiben Teil des Entwurfs. Der Produktivbetrieb verlangt geprüfte Konfiguration, sicheren dauerhaften Flask-Schlüssel, HTTPS und die autoritative PostgreSQL-Datenbank.
 
-## Noch fehlende Tatsachen und Abnahme – aktuell NO-GO für morgen
+## Noch fehlende Tatsachen und Abnahme – aktuell NO-GO für öffentliche Zahlung
 
 | Freigabe | Aktueller Stand / benötigter Beleg |
 |---|---|
@@ -22,11 +22,11 @@ Die frühere Implementierung zog Miete und Kaution zusammen im Checkout ein und 
 | Reale Flotte und Kalender | Portal-Zuordnung inzwischen read-only gefunden (Details lokal im Hub). KONA-Stammdaten wurden in Aufgabe76 anhand der dokumentierten Übernahme und Kennzeichen/FIN korrigiert; Die Mietwagennutzung ist laut neuer Quellenprüfung des Ursprungstasks in der angenommenen Leasingvereinbarung dokumentiert; die frühere Portalnotiz ist insoweit überholt. Vollständiger Kalender und konkrete Übergabeslots weiterhin unbestätigt. |
 | Betrieb / Preise / Bedingungen | i10 39 €/Tag, 500 € Kaution, 1.000 € vertragliche Selbstbeteiligung, kein Mindestvorlauf bei freiem Auto und freiem künftigen Slot, voll/voll sowie 48 Stunden kostenlos und danach 10 % nur des Mietpreises sind entschieden. Der [öffentlich angezeigte KONA-Tarif](https://www.autovermietung-mos.de/) liegt bei 59 €/Tag, ab drei Tagen 49 €/Tag; vor verbindlicher Direktbuchung ist er mit dem Betreiber abzugleichen. Persönliche Übergabeslots können vor dem Launch im Portal verwaltet werden; die tatsächlich angebotenen Zeiten, maximale Mietdauer, verbindliche Tagesberechnung, Schadenprozess und vollständiger Bedingungstext benötigen eine abschließende Betreiberfreigabe. |
 | Kaution | 500 € bei der Online-Reservierung auf Kreditkarte autorisieren, nicht einziehen. Der lokale Stripe-Test belegte Autorisierung ohne Einzug und Freigabe bei Storno. Freigabe nach dokumentierter Rückgabe und weitere Karten-/Fristfälle sind noch separat abzunehmen. Begrenzte Autorisierungsdauer schließt ungeeignete lange oder weit vorausliegende Mieten aus. |
-| Stripe / Hosting | Der gemeinsame lokale Stripe-/PostgreSQL-Lauf belegte Kreditkartenautorisierung ohne Einzug, 39 € Mietzahlung, signierten Webhook, genau einen Mietvorgang, Vertrags-PDF und kostenlose Test-Erstattung; [Einzelheiten](mos-staging-abnahme.md). Der Chromium-Checkout-Redirect hatte eine zu enge CSP und ist im Code mit fokussiertem Regressionstest korrigiert; die reale Weiterleitung auf dem Zielgerät bleibt zu prüfen. Der geprüfte Code ist seit Commit `b1dd786` deaktiviert auf dem tatsächlichen Render-Dienst `kundenstatus-app` ausgerollt (`/healthz` 200, Admin-Terminroute leitet zum Login, `/mieten/` 404). Im Dienst waren zuletzt keine `MOS_*`-Variablen sichtbar. Restricted-Key-Rechte, dauerhafter Webhook, periodischer Abgleich mit Alarm und Hosting-/Live-Zahlungsabnahme fehlen; [Render-Betriebsanleitung](mos-render-betrieb.md). Keine Livezahlung durchgeführt. |
-| Datenbank / Abnahme | SQLite-Konkurrenz-/HTTP-/Erstattungstests und ein lokaler PostgreSQL-Kaltstart mit synthetischen Checkout-Fällen bestanden. Der PostgreSQL-Lauf prüft nun auch das Öffnen und Schließen persönlicher Übergabetermine im Reservierungs- und Checkout-Kern; 36 Tests bestanden. Die Vertragstabelle samt Textspeicherung wurde auf derselben isolierten PostgreSQL-Instanz geprüft; ein vollständiger PostgreSQL-HTTP-Signierlauf und die Deployment-Abnahme stehen noch aus. |
-| Recht / Datenschutz | Finale Mietbedingungen, elektronische Unterschrift, §312j-Abschlussdarstellung in Hosted Checkout und Stripe-Datenschutzhinweis prüfen; Entwurf nicht als freigegebene AGB einsetzen. |
+| Stripe / Hosting | Der gemeinsame lokale Stripe-/PostgreSQL-Browserlauf belegte Unterschrift vor Zahlung, 500 € Kreditkartenautorisierung ohne Einzug, automatische Weiterleitung zum Hosted Checkout, 39 € Mietzahlung, signierten Webhook, genau einen Mietvorgang, Vertrags-PDF, Storno mit 3,90 € Gebühr und 35,10 € Erstattung sowie einen gescheiterten 3-D-Secure-Fall; [Einzelheiten](mos-staging-abnahme.md). Der deaktivierte Stand `75ee7af` ist auf dem tatsächlichen Render-Dienst `kundenstatus-app` erfolgreich live deployed; `/healthz` 200 und `/mieten/` 404 wurden erneut geprüft. Restricted-Key-Rechte, dauerhafter Live-Webhook, periodischer Abgleich mit Alarm und Hosting-/Live-Zahlungsabnahme fehlen; [Render-Betriebsanleitung](mos-render-betrieb.md). Keine Livezahlung durchgeführt. |
+| Datenbank / Abnahme | SQLite-Konkurrenz-/HTTP-/Erstattungstests, PostgreSQL-Kaltstart und vollständiger isolierter PostgreSQL-/Stripe-HTTP-Signierlauf mit synthetischen Daten bestanden. Die Deployment-Abnahme des deaktivierten Codes ist erfolgt; ein echter Live-Zahlungsdurchlauf nach allen Freigaben steht aus. |
+| Recht / Datenschutz | Finale Mietbedingungen, elektronische Unterschrift, §312j-Abschlussdarstellung in Hosted Checkout und Aufbewahrung/Löschung nicht abgeschlossener Unterschriften rechtlich prüfen. Der Stripe-Datenfluss steht nun in der Datenschutzerklärung, die Ergänzung ist noch nicht rechtlich freigegeben. Entwurf nicht als freigegebene AGB einsetzen. |
 
-Es ist deshalb keine belastbare Zusage möglich, dass Kunden morgen bereits bezahlen können. Codevorbereitung allein ersetzt diese Nachweise nicht. Update 23.09.2026: Laut verifiziertem Bericht des Ursprungstasks wurde die Versicherungsanfrage um 10:57 über IONOS gesendet (ein Eintrag in Gesendet). Der frühere SMTP-Versuch war erfolglos. Eine Antwort oder Deckungsbestätigung liegt damit noch nicht vor.
+Eine öffentliche Zahlung ist damit noch nicht freigegeben. Codevorbereitung und Testzahlungen ersetzen diese Nachweise nicht. Laut verifiziertem Bericht des Ursprungstasks wurde die Versicherungsanfrage am 23.09.2026 um 10:57 über IONOS gesendet; eine Antwort oder Deckungsbestätigung liegt weiterhin nicht vor.
 
 ## Konfiguration ohne Geheimnisse im Repository
 
@@ -44,7 +44,7 @@ Es ist deshalb keine belastbare Zusage möglich, dass Kunden morgen bereits beza
   },
   "slots": [],
   "day_rule": "elapsed_24h_ceil",
-  "max_days": null,
+  "max_days": 5,
   "included_km_day": 150,
   "extra_km_cents": 25,
   "vat_included": true,
@@ -54,16 +54,16 @@ Es ist deshalb keine belastbare Zusage möglich, dass Kunden morgen bereits beza
   "cancellation_policy": "free_48h_then_10pct_rent",
   "terms_version": "draft:noch-nicht-freigegeben",
   "terms_text": "",
-  "privacy_url": "",
+  "privacy_url": "https://kundenstatus-app.onrender.com/datenschutz",
   "merchant_name": "Gärtner GmbH Karosserie + Lack",
   "merchant_address": "Binauer Höhe 4, 74821 Mosbach, Deutschland",
-  "merchant_email": "",
-  "merchant_phone": "",
+  "merchant_email": "info@auto-lackierzentrum.de",
+  "merchant_phone": "+49 1522 7706694",
   "launch": {}
 }
 ```
 
-Diese JSON-Datei ist bewusst **nicht startfähig**: Positive `max_days`, Bedingungen und Freigaben fehlen; die leere Slotliste legt zunächst keine Termine an. Die Fahrzeug-IDs und exakten Modellnamen wurden am 24.09.2026 im produktiven Adminportal nur lesend geprüft: i10 ID 1, KONA ID 3; beide dort als verfügbar angezeigt. Das ist keine künftige Verfügbarkeitszusage. Der KONA-Staffeltarif im Beispiel bleibt ein [Betreiber-Vorschlag](mos-preis-betriebsregeln-vorschlag.md). `max_days` muss ein freigegebener positiver Wert sein; `null` ist nur ein Platzhalter. Konfigurierte Slots dienen nur als anfängliche Einträge; die Werkstatt verwaltet sie danach dauerhaft im Portal unter `/mieten/admin/termine` auch vor Aktivierung der Kundenbuchung. Geschlossene Termine bleiben nach Neustart geschlossen. Jeder Slot ist ein konkreter zukünftiger Europe/Berlin-Zeitpunkt mit gültigem UTC-Offset. Der Buchungscode verlangt keinen pauschalen Mindestvorlauf; ein künftiger Slot kann auch heute liegen. Ohne freigegebenen künftigen Slot ist keine Sofortabholung buchbar. Keine Öffnungszeiten oder Autorisierungsdauer erfinden. Eine neue Konfigurationsversion erfordert Prozessneustart; bestehende Buchungen behalten ihren gespeicherten Snapshot. `merchant_name` und `merchant_address` müssen genau den Impressumsdaten des Vermieters entsprechen. „Autovermietung MOS“ bleibt nur die Angebotsüberschrift.
+Diese JSON-Datei ist bewusst **nicht startfähig**: Bedingungen und Freigaben fehlen; die leere Slotliste legt zunächst keine Termine an. Die Fahrzeug-IDs und exakten Modellnamen wurden am 24.09.2026 im produktiven Adminportal nur lesend geprüft: i10 ID 1, KONA ID 3; beide dort als verfügbar angezeigt. Das ist keine künftige Verfügbarkeitszusage. Der KONA-Staffeltarif und die Grenze von fünf berechneten Tagen im Beispiel bleiben [Betreiber-Vorschläge](mos-preis-betriebsregeln-vorschlag.md), keine freigegebenen Direktbuchungsregeln. Die Vermieterkontakte stammen aus der veröffentlichten Datenschutzerklärung; ob diese Kanäle für Storno und Notfälle durchgehend betreut werden, muss der Betreiber prüfen. Konfigurierte Slots dienen nur als anfängliche Einträge; die Werkstatt verwaltet sie danach dauerhaft im Portal unter `/mieten/admin/termine` auch vor Aktivierung der Kundenbuchung. Geschlossene Termine bleiben nach Neustart geschlossen. Jeder Slot ist ein konkreter zukünftiger Europe/Berlin-Zeitpunkt mit gültigem UTC-Offset. Der Buchungscode verlangt keinen pauschalen Mindestvorlauf; ein künftiger Slot kann auch heute liegen. Ohne freigegebenen künftigen Slot ist keine Sofortabholung buchbar. Keine Öffnungszeiten oder Autorisierungsdauer erfinden. Eine neue Konfigurationsversion erfordert Prozessneustart; bestehende Buchungen behalten ihren gespeicherten Snapshot. `merchant_name` und `merchant_address` müssen genau den Impressumsdaten des Vermieters entsprechen. „Autovermietung MOS“ bleibt nur die Angebotsüberschrift.
 
 Unter `launch` benötigt jede der Freigaben `business_review`, `legal_review`, `finance_review`, `privacy_review`, `sandbox_acceptance`, `postgres_acceptance` die Felder `approved_by`, `approved_at`, `evidence`. Unter `launch.insurance.kona` und `.i10` sind `verified=true`, `use=paid_self_drive`, eine echte Belegreferenz und die passende `vehicle_id` nötig. Das sind dokumentierte Betreiberprüfungen, keine automatischen Versicherungsnachweise. Niemals bloß zur Umgehung der Sperre ausfüllen.
 
