@@ -76,8 +76,11 @@ def main():
 
     captured = {}
     original_create_lead = portal.create_lead
+    original_get_lead = portal.get_lead
     original_backup = portal.schedule_change_backup
     original_lead_mail = portal.sende_website_lead_benachrichtigung
+    original_lead_notice = portal.lead_notice
+    original_notify_lead_workshop = portal.notify_lead_workshop
     def fake_create_lead(payload):
         captured["payload"] = payload
         return 991
@@ -90,8 +93,14 @@ def main():
         }
 
     portal.create_lead = fake_create_lead
+    portal.get_lead = lambda lead_id: {
+        "id": lead_id,
+        "kunden_status_url": "https://portal.example.test/lead/test-token",
+    }
     portal.schedule_change_backup = lambda _reason: None
     portal.sende_website_lead_benachrichtigung = fake_lead_mail
+    portal.lead_notice = lambda *_args, **_kwargs: None
+    portal.notify_lead_workshop = lambda *_args, **_kwargs: None
     try:
         form_get = client.get("/anfrage?anliegen=leasingrueckgabe")
         form_html = form_get.get_data(as_text=True)
@@ -159,8 +168,11 @@ def main():
         }
     finally:
         portal.create_lead = original_create_lead
+        portal.get_lead = original_get_lead
         portal.schedule_change_backup = original_backup
         portal.sende_website_lead_benachrichtigung = original_lead_mail
+        portal.lead_notice = original_lead_notice
+        portal.notify_lead_workshop = original_notify_lead_workshop
     print_checks(form_checks)
 
     team_html = client.get("/team").get_data(as_text=True)
