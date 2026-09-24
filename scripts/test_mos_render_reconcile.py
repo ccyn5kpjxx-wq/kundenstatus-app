@@ -1,5 +1,6 @@
 """Offline checks for the future Render reconciliation entry point."""
 
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -22,7 +23,13 @@ def fixture_config():
     review = {'approved_by': 'TEST ONLY', 'approved_at': '2026-09-24', 'evidence': 'TEST ONLY'}
     launch = {name: dict(review) for name in
               ('business_review', 'legal_review', 'finance_review', 'privacy_review',
-               'sandbox_acceptance', 'postgres_acceptance', 'contract_delivery_acceptance')}
+               'sandbox_acceptance', 'postgres_acceptance', 'contract_delivery_acceptance',
+               'checkout_button_acceptance', 'order_receipt_acceptance',
+               'webhook_reconcile_acceptance', 'termination_review')}
+    launch['legal_review'].update(
+        terms_version='test-fixture-final-v1',
+        terms_sha256=hashlib.sha256('TEST ONLY'.encode('utf-8')).hexdigest())
+    launch['termination_review']['applies'] = False
     launch['insurance'] = {
         name: {'verified': True, 'use': 'paid_self_drive',
                'evidence': 'TEST ONLY', 'vehicle_id': vehicle['id']}

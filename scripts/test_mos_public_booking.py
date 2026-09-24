@@ -48,7 +48,7 @@ class PublicTests(unittest.TestCase):
         self.client=portal.app.test_client()
         self.client.get('/mietwagen-test/')
         db=portal.get_db()
-        for table in ('miet_checkout_refunds','miet_checkout_cancellations','miet_checkout_contract_delivery','miet_checkout_contracts',
+        for table in ('miet_checkout_refunds','miet_checkout_cancellations','miet_checkout_handovers','miet_checkout_contract_delivery','miet_checkout_contracts',
                       'miet_checkout_events','miet_checkout_deposit_auths','miet_checkout_creation_attempts',
                       'miet_checkout_holds','mietvorgaenge'):db.execute('DELETE FROM '+table)
         db.commit();db.close()
@@ -372,6 +372,55 @@ class PublicTests(unittest.TestCase):
         self.assertNotIn('Testbuchung für KONA',r.get_data(as_text=True))
         r.close()
 
+    def test_offline_test_booking_cannot_record_live_key_handover(self):
+        hold=self.paid_hold()
+        admin=portal.app.test_client()
+        with admin.session_transaction() as s:s['admin']=True
+        admin.get('/mietwagen-test/admin')
+        response=self.post('/mietwagen-test/admin/'+hold+'/uebergabe',
+                           {'operator_name':'Test Person','odometer_km':'1234',
+                            'protocol_ref':'TEST-123','receipt_confirmed':'yes',
+                            'license_checked':'yes','fuel_full':'yes',
+                            'condition_recorded':'yes'},client=admin)
+        self.assertEqual(response.status_code,409)
+        db=portal.get_db()
+        try:self.assertEqual(db.execute('SELECT COUNT(*) AS n FROM miet_checkout_handovers').fetchone()['n'],0)
+        finally:db.close()
+
+    def test_general_rental_admin_blocks_only_real_mos_without_handover(self):
+        hold=self.paid_hold()
+        h=portal.app.extensions['mos_public_booking']['service'].read(hold)
+        rental_id=h['mietvorgang_id']
+        self.assertIsNone(portal.mos_direct_handover_state(rental_id))  # test-only hold
+        q=json.loads(h['payload'])
+        q['quote']['test_only']=False  # synthetic marker only; no live payment or mail
+        db=portal.get_db()
+        try:
+            db.execute('UPDATE miet_checkout_holds SET payload=? WHERE id=?',(json.dumps(q),hold))
+            db.commit()
+        finally:db.close()
+        self.assertEqual(portal.mos_direct_handover_state(rental_id)['hold_id'],hold)
+        admin=portal.app.test_client()
+        with admin.session_transaction() as s:s['admin']=True
+        page=admin.get('/admin/mietfahrzeuge').get_data(as_text=True)
+        self.assertIn('MOS-Übergabe offen',page)
+        self.assertIn(hold,admin.get('/mietwagen-test/admin?hold_id='+hold).get_data(as_text=True))
+        response=self.post('/admin/mietvorgang/'+str(rental_id)+'/loeschen',
+                           {'storno_grund':'synthetischer Test'},client=admin)
+        self.assertIn(response.status_code,(302,303))
+        response=self.post('/admin/mietvorgang/'+str(rental_id)+'/zurueck',{},client=admin)
+        self.assertIn(response.status_code,(302,303))
+        db=portal.get_db()
+        try:
+            self.assertEqual(db.execute('SELECT status FROM mietvorgaenge WHERE id=?',
+                                        (rental_id,)).fetchone()['status'],'aktiv')
+            db.execute("UPDATE mietvorgaenge SET status='storniert' WHERE id=?",(rental_id,))
+            db.commit()
+        finally:db.close()
+        listings=portal.list_mietfahrzeuge()
+        rental=next(v for f in listings for v in f['vorgaenge'] if v['id']==rental_id)
+        self.assertNotIn('mos_handover_required',rental)
+
     def test_csrf_owner_tampering_and_missing_acceptance(self):
         token,_=self.quote()
         self.assertEqual(self.client.post('/mietwagen-test/checkout').status_code,400)
@@ -560,7 +609,7 @@ class PublicTests(unittest.TestCase):
 
     def test_paid_contract_signature_and_immutable_pdf(self):
         token,quote_page=self.quote()
-        self.assertIn('Testvertrag vor der Testzahlung',quote_page.get_data(as_text=True))
+        self.assertIn('Test-Buchungsangebot vor der Testzahlung',quote_page.get_data(as_text=True))
         self.assertIn('Gärtner GmbH Karosserie + Lack',quote_page.get_data(as_text=True))
         checkout=self.checkout(token)
         self.assertEqual(checkout.status_code,303)

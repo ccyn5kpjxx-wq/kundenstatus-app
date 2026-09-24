@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>Vertrag kündigen · MOS</title>
+<style>body{margin:0;background:#f5f3ee;color:#24272a;font:16px/1.6 system-ui,sans-serif}header{background:#1e2023;color:#fff;padding:18px}header a{color:#fff}main{max-width:720px;margin:auto;padding:24px 18px}.card{background:#fff;border:1px solid #dedbd5;border-radius:18px;padding:24px}label{display:block;margin:16px 0 5px}input,select,textarea,button{font:inherit;box-sizing:border-box;width:100%;padding:12px;border:1px solid #c8c8c8;border-radius:9px}textarea{min-height:100px}button{background:#fb741d;font-weight:700;cursor:pointer;margin-top:20px}.error{border-left:4px solid #d45417;padding:15px;background:#fff0e5}footer{max-width:720px;margin:20px auto;padding:18px;color:#596168}footer a{margin-right:14px}a{color:#8b3500}</style></head>
+<body><header><a href="/">Gärtner GmbH Karosserie + Lack</a></header><main>
+<h1>Vertrag kündigen</h1>
+<p>Hier können Sie eine ordentliche oder außerordentliche Kündigung Ihres MOS-Mietvertrags erklären. Die Erklärung wird mit der Eingangszeit gespeichert und Ihnen elektronisch bestätigt. Die rechtliche Wirksamkeit und etwaige Erstattung werden danach geprüft.</p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<form class="card" method="post" action="{{ url_for('mos_termination.form') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<input type="hidden" name="form_token" value="{{ form_token }}">
+<div style="position:absolute;left:-10000px" aria-hidden="true"><label>Website<input name="website" tabindex="-1" autocomplete="off"></label></div>
+<label for="kind">Art der Kündigung</label><select id="kind" name="kind" required><option value="ordinary">Ordentliche Kündigung</option><option value="extraordinary">Außerordentliche Kündigung</option></select>
+<label for="reason">Grund der außerordentlichen Kündigung (nur dann erforderlich)</label><textarea id="reason" name="reason" maxlength="1000"></textarea>
+<label for="name">Vollständiger Name</label><input id="name" name="name" required maxlength="150" autocomplete="name">
+<label for="contract_reference">Buchungs- oder Vertragsreferenz; falls nicht vorhanden, Fahrzeug und Mietzeitraum</label><input id="contract_reference" name="contract_reference" required maxlength="100">
+<label for="email">E-Mail für die schnelle Bestätigung</label><input id="email" name="email" type="email" required maxlength="254" autocomplete="email">
+<label for="timing">Gewünschter Beendigungszeitpunkt</label><select id="timing" name="timing" required><option value="earliest">Zum frühestmöglichen Zeitpunkt</option><option value="date">Zu einem bestimmten Datum</option></select>
+<label for="desired_date">Datum, falls oben gewählt</label><input id="desired_date" name="desired_date" type="date">
+<p>Nach dem Absenden können Sie Ihre Erklärung mit Abgabe- und Zugangszeit als Textdatei speichern. Das Absenden löst keine automatische Kartenbelastung oder Rückzahlung aus.</p>
+<button type="submit">jetzt kündigen</button>
+</form></main><footer><a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a></footer></body></html>

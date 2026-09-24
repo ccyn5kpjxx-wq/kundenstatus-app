@@ -155,7 +155,7 @@
 <footer>
   <div class="wrap">
     © Gärtner GmbH Karosserie + Lack · Mosbach
-    <p style="margin-top:4px;"><a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a> · Alle Preise inkl. gesetzl. MwSt.</p>
+    <p style="margin-top:4px;">{% if config.MOS_TERMINATION_ENABLED %}<a href="{{ config.MOS_TERMINATION_ORIGIN }}{{ url_for('mos_termination.form') }}">Verträge hier kündigen</a> · {% endif %}<a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a> · Alle Preise inkl. gesetzl. MwSt.</p>
   </div>
 </footer>
 

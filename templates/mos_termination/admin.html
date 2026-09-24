@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>MOS-Kündigungen · Werkstatt</title>
+<style>body{margin:0;background:#f5f3ee;color:#24272a;font:16px/1.5 system-ui,sans-serif}main{max-width:940px;margin:auto;padding:24px 18px}.card{background:#fff;border:1px solid #dedbd5;border-radius:12px;padding:18px;margin:16px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}.alarm{background:#fff0e5;border-left:4px solid #d45417;padding:14px}small{color:#596168}</style></head><body><main>
+<h1>MOS-Kündigungserklärungen</h1>
+<p>Die Erklärung ist unabhängig von einer Buchungsstornierung oder Rückzahlung zu prüfen. Ein Status „gesendet“ belegt nur die Annahme durch den Mailserver.</p>
+{% if unresolved %}<p class="alarm" role="alert"><strong>{{ unresolved }} Bestätigung(en) offen.</strong> Postfach und Versandstatus unverzüglich prüfen; unklare E-Mail-Antworten nicht blind erneut senden.</p>{% endif %}
+{% for row in rows %}<section class="card"><h2>Eingang {{ row.received_at }}</h2><p><strong>Mailstatus:</strong> {{ row.mail_status }}{% if row.mail_detail %} · {{ row.mail_detail }}{% endif %}<br><strong>Empfänger:</strong> {{ row.customer_email }}</p><pre>{{ row.declaration_text }}</pre><small>Versuch: {{ row.mail_attempted_at or 'noch keiner' }} · Annahme: {{ row.mail_accepted_at or 'nicht belegt' }}</small></section>{% else %}<p>Keine Erklärungen vorhanden.</p>{% endfor %}
+</main></body></html>

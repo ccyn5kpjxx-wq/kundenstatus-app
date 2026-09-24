@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
 from unittest.mock import patch
-import json,sys,tempfile,unittest,uuid
+import hashlib,json,sys,tempfile,unittest,uuid
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'scripts'))
 def deny(*a,**k):raise AssertionError('External network forbidden')
@@ -136,7 +136,12 @@ class ProductionTests(unittest.TestCase):
             merchant_email='test@example.invalid',merchant_phone='TEST')
         cfg['launch']={name:{'approved_by':'TEST FIXTURE','approved_at':'2026-09-22','evidence':'TEST ONLY'}
             for name in ['business_review','legal_review','finance_review','privacy_review','sandbox_acceptance',
-                         'postgres_acceptance','contract_delivery_acceptance']}
+                         'postgres_acceptance','contract_delivery_acceptance','checkout_button_acceptance',
+                         'order_receipt_acceptance','webhook_reconcile_acceptance','termination_review']}
+        cfg['launch']['legal_review'].update(
+            terms_version=cfg['terms_version'],
+            terms_sha256=hashlib.sha256(cfg['terms_text'].encode('utf-8')).hexdigest())
+        cfg['launch']['termination_review']['applies'] = False
         cfg['launch']['insurance']={}
         for slug,v in cfg['fleet'].items():
             v['expected_name']='TEST'
@@ -151,8 +156,13 @@ class ProductionTests(unittest.TestCase):
         self.assertTrue(any('Stornoregel' in error for error in launch_errors(no_policy)))
         wrong=json.loads(json.dumps(cfg));wrong['merchant_name']='Autovermietung MOS'
         self.assertTrue(any('Vermieter' in error for error in launch_errors(wrong)))
+        changed_terms=json.loads(json.dumps(cfg));changed_terms['terms_text']+=' Neue Klausel.'
+        self.assertTrue(any('aktuellen Bedingungsfassung' in e for e in launch_errors(changed_terms)))
+        unknown_termination=json.loads(json.dumps(cfg));del unknown_termination['launch']['termination_review']['applies']
+        self.assertTrue(any('§-312k-Entscheidung' in e for e in launch_errors(unknown_termination)))
         for field in ['business_review','legal_review','finance_review','privacy_review','sandbox_acceptance',
-                      'postgres_acceptance','contract_delivery_acceptance','insurance']:
+                      'postgres_acceptance','contract_delivery_acceptance','checkout_button_acceptance',
+                      'order_receipt_acceptance','webhook_reconcile_acceptance','termination_review','insurance']:
             changed=json.loads(json.dumps(cfg));del changed['launch'][field]
             self.assertTrue(launch_errors(changed),field)
         with patch('stripe.StripeClient') as client:

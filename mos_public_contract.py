@@ -236,7 +236,7 @@ def signed_payload(payload):
     """Check that a hold still contains the exact signed pre-payment snapshot."""
     quote = payload['quote']
     if not quote.get('signature_png_base64') or not quote.get('signed_at'):
-        raise ValueError('Bitte den Mietvertrag vor der Zahlung unterschreiben.')
+        raise ValueError('Bitte das Buchungsangebot vor der Zahlung unterschreiben.')
     signature = signature_png('data:image/png;base64,' + quote['signature_png_base64'])
     signed_at = datetime.fromisoformat(quote['signed_at'])
     if signed_at.tzinfo is None:

@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Kündigungserklärung eingegangen · MOS</title>
+<style>body{margin:0;background:#f5f3ee;color:#24272a;font:16px/1.6 system-ui,sans-serif}main{max-width:720px;margin:auto;padding:24px 18px}.card{background:#fff;border:1px solid #dedbd5;border-radius:18px;padding:24px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}.button{display:block;background:#fb741d;color:#181818;padding:14px;border-radius:9px;text-align:center;font-weight:700}a{color:#8b3500}</style></head><body><main>
+<h1>Ihre Erklärung ist eingegangen</h1>
+<p>Der Zugang beim Vermieter wurde protokolliert. Bitte speichern Sie jetzt Ihre Erklärung mit Abgabe- und Zugangszeit.</p>
+{% if mail_sent %}<p>Die elektronische Bestätigung wurde vom Mailserver angenommen. Der tatsächliche Eingang in Ihrem Postfach ist damit noch nicht nachgewiesen.</p>{% else %}<p role="alert"><strong>Die E-Mail-Bestätigung ist noch ungeklärt.</strong> Speichern Sie die Erklärung unten. Der Vermieter muss den Versand unverzüglich prüfen.</p>{% endif %}
+<p><a class="button" href="{{ receipt_url }}">Kündigungserklärung als Textdatei speichern</a></p>
+<section class="card"><h2>Wortlaut Ihrer Erklärung</h2><pre>{{ row.declaration_text }}</pre></section>
+<p>Diese Eingangsbestätigung entscheidet nicht über die Wirksamkeit der Kündigung oder eine Erstattung.</p>
+</main></body></html>

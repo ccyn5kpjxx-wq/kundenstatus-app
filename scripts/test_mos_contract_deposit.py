@@ -11,6 +11,7 @@ from pypdf import PdfReader
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mos_public_contract import render_pdf, snapshot, snapshot_hash
+from mietwagen_checkout import _checkout_disclosure
 
 
 def quote(*, authorized):
@@ -92,6 +93,19 @@ class DepositContractTests(unittest.TestCase):
                         'customer': {'name': 'Testkunde', 'email': 'test@example.invalid'}})
         self.assertEqual(new['cancellation_policy'], 'free_48h_then_10pct_rent')
         self.assertNotEqual(snapshot_hash(old), snapshot_hash(new))
+
+    def test_stripe_final_button_disclosure_uses_the_signed_rent_and_policy(self):
+        signed = quote(authorized=True)
+        signed['cancellation_policy'] = 'free_48h_then_10pct_rent'
+        description, submit = _checkout_disclosure(signed, test_mode=False)
+        self.assertIn('01.10.2026 09:00', description)
+        self.assertIn('04.10.2026 09:00', description)
+        self.assertIn('450 km inklusive', description)
+        self.assertIn('500 EUR Kaution', submit)
+        self.assertIn('ohne Abbuchung', submit)
+        self.assertIn('14.70 EUR (10 % der Miete)', submit)
+        self.assertIn('Gärtner GmbH Karosserie + Lack', submit)
+        self.assertLessEqual(len(submit), 500)
 
 
 if __name__ == '__main__':

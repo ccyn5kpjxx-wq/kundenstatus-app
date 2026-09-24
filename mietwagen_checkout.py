@@ -10,6 +10,7 @@ import json
 import secrets
 import time
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 
 def init_schema(db):
@@ -32,6 +33,41 @@ def init_schema(db):
 
 def _card_authorization_quote(quote):
     return quote.get('deposit_method') == 'card_authorization_at_booking'
+
+
+def _checkout_disclosure(quote, *, test_mode):
+    """Repeat the signed booking's key costs beside Stripe's final pay button."""
+    def local_slot(value):
+        slot = datetime.fromisoformat(value)
+        if slot.tzinfo is None:
+            raise ValueError('Miettermin ohne Zeitzone ist nicht verbindlich.')
+        return slot.astimezone(ZoneInfo('Europe/Berlin')).strftime('%d.%m.%Y %H:%M')
+
+    description = (
+        f"Abholung {local_slot(quote['start_slot'])}; Rückgabe {local_slot(quote['end_slot'])}; "
+        f"{quote['included_km']} km inklusive; Mehrkilometer "
+        f"{quote['extra_km_cents']/100:.2f} EUR/km. "
+        'Persönliche Übergabe bei Gärtner, Binauer Höhe 4, Mosbach-Lohrbach.'
+    )
+    deposit = ('500 EUR Kaution bereits separat auf der Kreditkarte reserviert, ohne Abbuchung. '
+               if _card_authorization_quote(quote) else
+               'Eine rückzahlbare Kaution ist als eigener Posten ausgewiesen. ')
+    cancellation = ''
+    if quote.get('cancellation_policy') == 'free_48h_then_10pct_rent':
+        fee = (quote['rental_cents'] + 5) // 10
+        cancellation = (
+            f'Bis einschließlich 48 Stunden vor Abholung kostenlos stornieren; danach '
+            f'höchstens {fee/100:.2f} EUR (10 % der Miete), vorbehaltlich geringeren Schadens. '
+        )
+    message = (
+        ('TEST – keine echte Zahlung. ' if test_mode else '') +
+        'Sie bestellen die angezeigte Miete zahlungspflichtig. ' + deposit +
+        'Vertragliche Selbstbeteiligung 1.000 EUR gemäß den vorab unterschriebenen Bedingungen. ' +
+        cancellation + 'Vermieter: Gärtner GmbH Karosserie + Lack.'
+    )
+    if len(message) > 500:
+        raise ValueError('Stripe-Hinweis zur Bestellung ist zu lang.')
+    return description, message
 
 
 def _pickup_passed(quote):
@@ -433,20 +469,14 @@ class SharedCheckout:
                   'line_items':[{'quantity':1,'price_data':{'currency':'eur','unit_amount':q['amount_cents'],
                      'product_data':{'name':'TEST Mietwagenreservierung – keine echte Zahlung'}}}]}
         if self.gateway.livemode or q.get('checkout_deposit') is True or _card_authorization_quote(q):
-            description=(f"{q['start_slot']} bis {q['end_slot']}; persönliche Übergabe Gärtner, Binauer Höhe 4, Mosbach-Lohrbach. "
-                         f"{q['included_km']} km inklusive; weitere Kilometer {q['extra_km_cents']/100:.2f} EUR/km. "
-                         "Vertragliche Selbstbeteiligung 1.000 EUR gemäß vereinbarten Bedingungen.")
+            description, submit_message = _checkout_disclosure(q, test_mode=not self.gateway.livemode)
             params['submit_type']='pay'
             params['line_items']=[{'quantity':1,'price_data':{'currency':'eur','unit_amount':q['rental_cents'],
                 'product_data':{'name':q['vehicle_name']+' – '+str(q['days'])+' Miettag(e), inkl. MwSt.','description':description}}}]
             if not _card_authorization_quote(q):
                 params['line_items'].append({'quantity':1,'price_data':{'currency':'eur','unit_amount':q['deposit_charged_cents'],
                     'product_data':{'name':'Rückzahlbare Kaution','description':'Gesonderte Sicherheitsleistung, Abrechnung nach Rückgabe gemäß Mietbedingungen.'}}})
-            deposit_message = ('Die 500 EUR Kaution wurden separat auf Ihrer Kreditkarte reserviert und werden nicht abgebucht. '
-                               if _card_authorization_quote(q) else
-                               'Mietpreis und rückzahlbare Kaution sind getrennt ausgewiesen. ')
-            params['custom_text']={'submit':{'message':('TEST – keine echte Zahlung. ' if not self.gateway.livemode else '')+
-                'Sie buchen zahlungspflichtig. '+deposit_message+'Es gelten die vorab bestätigten Mietbedingungen.'}}
+            params['custom_text']={'submit':{'message':submit_message}}
         session_to_retrieve = None
         pickup_passed_before_provider = False
         with self.locked(h['mietfahrzeug_id']) as (db, _):
@@ -562,6 +592,10 @@ class SharedCheckout:
             db.execute('INSERT INTO miet_checkout_events (id,hold_id,session_id,kind) VALUES (?,?,?,?)',
                        (event['id'],h['id'],session['id'],event['type']))
             db.execute('UPDATE miet_checkout_holds SET session_id=? WHERE id=?',(session['id'],h['id']))
+            if (self.gateway.livemode and q.get('test_only') is False
+                    and session.get('status') == 'complete' and session.get('payment_status') == 'paid'):
+                from mos_order_receipt import enqueue as enqueue_order_receipt
+                enqueue_order_receipt(db, h, session, source_event_id=event['id'])
             if h['mietvorgang_id']:
                 return h['mietvorgang_id']  # Never recreate a returned/cancelled rental.
             if h['status'] == 'review':

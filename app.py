@@ -48,7 +48,10 @@ import xml.etree.ElementTree as ET
 
 from backup_storage import BackupStorage
 import mietwagen_checkout
+import mos_handover
+import mos_order_receipt
 import mos_public_booking
+import mos_termination
 from cockpit_rules import document_visible, price_state, price_record, decimal_input, has_invoice, exact_contact, workshop_completion_photo
 
 try:
@@ -3038,7 +3041,8 @@ def restrict_public_site_service():
         "public_sitemap",
         "legacy_public_redirect",
     }
-    if request.endpoint not in allowed_endpoints and not (request.endpoint or '').startswith('mos_public.'):
+    if (request.endpoint not in allowed_endpoints
+            and not (request.endpoint or '').startswith(('mos_public.', 'mos_termination.'))):
         abort(404)
     return None
 
@@ -3052,6 +3056,8 @@ def refresh_authenticated_session():
 
 @app.before_request
 def protect_csrf():
+    if (request.endpoint or '').startswith('mos_termination.') and request.content_length and request.content_length > mos_termination.MAX_BODY:
+        abort(413)
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return None
     if request.endpoint == 'mos_public.webhook':
@@ -10401,6 +10407,8 @@ def init_db():
         """
     )
     mietwagen_checkout.init_schema(db)
+    mos_handover.init_schema(db)
+    mos_order_receipt.init_schema(db)
     ensure_index(db, "idx_mietvorgaenge_fahrzeug", "mietvorgaenge", ("mietfahrzeug_id", "status"))
     ensure_index(db, "idx_mietfahrzeug_bilder_fahrzeug", "mietfahrzeug_bilder", ("mietfahrzeug_id",))
     # Mietvertrag-Felder am Mietvorgang (digitale Unterschrift, Versand, Kontaktweg)
@@ -39256,14 +39264,32 @@ def list_mietfahrzeuge(include_inactive=True):
         else:
             rows = db.execute("SELECT * FROM mietfahrzeuge WHERE aktiv=1 ORDER BY fahrzeugklasse ASC, kennzeichen ASC").fetchall()
         vorgang_rows = db.execute("SELECT * FROM mietvorgaenge ORDER BY id DESC").fetchall()
+        mos_rows = db.execute('''SELECT h.mietvorgang_id,h.id,h.payload,h.status,
+            handover.handed_at FROM miet_checkout_holds h
+            LEFT JOIN miet_checkout_handovers handover ON handover.hold_id=h.id
+            WHERE h.mietvorgang_id IS NOT NULL AND h.status='confirmed' ''').fetchall()
         bild_rows = db.execute(
             "SELECT * FROM mietfahrzeug_bilder ORDER BY ist_titelbild DESC, id ASC"
         ).fetchall()
     finally:
         db.close()
+    mos_by_rental = {}
+    for row in mos_rows:
+        try:
+            if json.loads(row['payload'])['quote'].get('test_only') is False:
+                mos_by_rental[row['mietvorgang_id']] = dict(row)
+        except (KeyError, TypeError, ValueError):
+            # Unknown old snapshots are not silently classified as a live MOS rental.
+            continue
     vorgaenge_by_fahrzeug = defaultdict(list)
     for v in vorgang_rows:
-        vorgaenge_by_fahrzeug[v["mietfahrzeug_id"]].append(hydrate_mietvorgang(v))
+        rental = hydrate_mietvorgang(v)
+        mos = mos_by_rental.get(v['id'])
+        if mos and not rental['abgeschlossen']:
+            rental['mos_handover_required'] = True
+            rental['mos_handed_at'] = mos['handed_at']
+            rental['mos_hold_id'] = mos['id']
+        vorgaenge_by_fahrzeug[v["mietfahrzeug_id"]].append(rental)
     bilder_by_fahrzeug = defaultdict(list)
     for b in bild_rows:
         bilder_by_fahrzeug[b["mietfahrzeug_id"]].append(dict(b))
@@ -39275,6 +39301,29 @@ def list_mietfahrzeuge(include_inactive=True):
         )
         for row in rows
     ]
+
+
+def _mos_direct_handover_state_db(db, vorgang_id):
+    rows = db.execute('''SELECT h.id,h.payload,handover.handed_at
+            FROM miet_checkout_holds h
+            LEFT JOIN miet_checkout_handovers handover ON handover.hold_id=h.id
+            WHERE h.mietvorgang_id=? AND h.status='confirmed' ''', (int(vorgang_id),)).fetchall()
+    for row in rows:
+        try:
+            if json.loads(row['payload'])['quote'].get('test_only') is False:
+                return {'hold_id': row['id'], 'handed_at': row['handed_at']}
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
+
+
+def mos_direct_handover_state(vorgang_id):
+    """Identify only confirmed real MOS rentals; never infer from name or plate."""
+    db = get_db()
+    try:
+        return _mos_direct_handover_state_db(db, vorgang_id)
+    finally:
+        db.close()
 
 
 def mietwagen_heute_uebersicht(miet_fahrzeuge=None):
@@ -39748,6 +39797,9 @@ def mietvorgang_zuruecknehmen(vorgang_id, rueckgabe_datum=None):
             ).fetchone()
         if not row:
             raise ValueError("Der Mietvorgang wurde nicht gefunden.")
+        mos_state = _mos_direct_handover_state_db(db, vorgang_id)
+        if mos_state and not mos_state['handed_at']:
+            raise ValueError('MOS-Schlüsselübergabe ist noch nicht dokumentiert. Buchungsfall zuerst im MOS-Admin prüfen.')
         status = clean_text(row["status"])
         if status == "storniert":
             raise ValueError("Ein stornierter Mietvorgang kann nicht als zurückgegeben gebucht werden.")
@@ -39792,6 +39844,8 @@ def storniere_mietvorgang(vorgang_id, grund):
             ).fetchone()
         if not row:
             raise ValueError("Der Mietvorgang wurde nicht gefunden.")
+        if _mos_direct_handover_state_db(db, vorgang_id):
+            raise ValueError('Bezahlte MOS-Buchung bitte nur im MOS-Admin mit Stripe-Erstattung stornieren.')
         if clean_text(row["status"]) == "zurueck":
             raise ValueError("Ein bereits zurückgegebener Mietvorgang kann nicht storniert werden.")
         if clean_text(row["status"]) == "storniert":
@@ -56213,6 +56267,8 @@ app.config["MAILBOX_OUTBOX_DIR"] = os.environ.get("MAILBOX_OUTBOX_DIR") or str(U
 register_mailbox(app, admin_required, get_werkstatt_imap_config, get_werkstatt_smtp_config, get_db)
 
 mos_public_booking.register(__import__(__name__))
+app.config['MOS_TERMINATION_ENABLED'] = env_flag('MOS_TERMINATION_ENABLED', False)
+mos_termination.register(__import__(__name__), enabled=app.config['MOS_TERMINATION_ENABLED'])
 init_db()
 
 start_hourly_backups()

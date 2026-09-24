@@ -20,6 +20,7 @@
   <div class="d-flex gap-2 align-items-center flex-wrap">
     <a class="btn btn-brand" href="{{ url_for('admin_ersatzfahrzeug') }}">Ersatzfahrzeug finden</a>
     {% if config.get('MOS_PUBLIC_BOOKING', {}).get('mode') == 'live' %}<a class="btn btn-soft" href="{{ url_for('mos_public.admin_slot_page') }}">Online-Übergabetermine</a>{% endif %}
+    {% if config.MOS_TERMINATION_ENABLED %}<a class="btn btn-soft" href="{{ url_for('mos_termination.admin_declarations') }}">MOS-Kündigungen prüfen</a>{% endif %}
     <a class="btn btn-soft" href="#flotte">Flotte</a>
     <a class="btn btn-soft" href="#belegung">Belegung</a>
     <a class="btn btn-soft" href="#neu">+ Fahrzeug</a>
@@ -145,9 +146,11 @@
             {% if e.ueberfaellig %}<div class="small text-danger fw-bold">überfällig</div>
             {% elif e.tage_bis_rueckgabe is not none and e.phase == 'aktiv' %}<div class="small text-muted">noch {{ e.tage_bis_rueckgabe }} Tg.</div>{% endif %}
           </td>
-          <td>{{ status_badge(e.phase if e.phase != 'aktiv' else 'vermietet', 'Reserviert' if e.phase == 'reserviert' else 'Unterwegs') }}</td>
+          <td>{% if e.mos_handover_required and not e.mos_handed_at %}<span class="badge text-bg-danger">MOS-Übergabe offen</span><div class="small text-danger">Schlüssel erst nach Übergabeprüfung ausgeben.</div>{% else %}{{ status_badge(e.phase if e.phase != 'aktiv' else 'vermietet', 'Reserviert' if e.phase == 'reserviert' else 'Unterwegs') }}{% endif %}</td>
           <td class="text-end">
-            {% if e.phase == 'reserviert' %}
+            {% if e.mos_handover_required and (not e.mos_handed_at or e.phase == 'reserviert') %}
+            <a class="btn btn-sm btn-outline-danger" href="{{ url_for('mos_public.admin_bookings',hold_id=e.mos_hold_id) }}#hold-{{ e.mos_hold_id }}">MOS-Buchung prüfen</a>
+            {% elif e.phase == 'reserviert' %}
             <details class="text-start" style="min-width:220px;">
               <summary class="btn btn-sm btn-outline-danger" style="list-style:none;">Reservierung stornieren</summary>
               <form method="POST" action="{{ url_for('admin_mietvorgang_loeschen', vorgang_id=e.id) }}" class="mt-2" onsubmit="return confirm('Diese Reservierung stornieren? Der Vorgang bleibt im Verlauf erhalten.');">

@@ -3,6 +3,7 @@
 No network call occurs on import. Runtime enabling requires explicit operator evidence.
 """
 from datetime import datetime, timezone
+import hashlib
 import json
 import secrets
 import stripe
@@ -19,10 +20,19 @@ def launch_errors(cfg):
         errors.append('Nur die bestätigten Fahrzeuge KONA und i10 dürfen freigegeben werden.')
     launch=cfg.get('launch',{})
     for name in ('business_review','legal_review','finance_review','privacy_review','sandbox_acceptance',
-                 'postgres_acceptance','contract_delivery_acceptance'):
+                 'postgres_acceptance','contract_delivery_acceptance','checkout_button_acceptance',
+                 'order_receipt_acceptance','webhook_reconcile_acceptance','termination_review'):
         record=launch.get(name,{})
         if not (record.get('approved_by') and record.get('approved_at') and record.get('evidence')):
             errors.append('Freigabenachweis fehlt: '+name)
+    legal=launch.get('legal_review',{})
+    terms=cfg.get('terms_text')
+    if (not isinstance(terms,str) or not terms.strip() or
+            legal.get('terms_sha256') != hashlib.sha256(terms.encode('utf-8')).hexdigest() or
+            legal.get('terms_version') != cfg.get('terms_version')):
+        errors.append('Rechtsfreigabe gehört nicht zur aktuellen Bedingungsfassung.')
+    if type(launch.get('termination_review', {}).get('applies')) is not bool:
+        errors.append('§-312k-Entscheidung zur Kündigungsstrecke fehlt.')
     for slug in ACTIVE_LISTINGS:
         record=launch.get('insurance',{}).get(slug,{})
         if not (record.get('verified') is True and record.get('use')=='paid_self_drive'
@@ -119,6 +129,9 @@ class RefundLedger:
         if now>=datetime.fromisoformat(q['start_slot']) and not (admin and no_show):
             raise ValueError('Nach Mietbeginn bitte die Werkstatt kontaktieren; keine automatische Stornierung.')
         with self.s.locked(h['mietfahrzeug_id']) as (db,_):
+            if db.execute('SELECT hold_id FROM miet_checkout_handovers WHERE hold_id=?',
+                          (hold_id,)).fetchone():
+                raise ValueError('Schlüsselübergabe ist dokumentiert; Storno nur nach manueller Abrechnung.')
             old=db.execute('SELECT * FROM miet_checkout_cancellations WHERE id=?',(hold_id,)).fetchone()
             if old:return 'cancel-'+hold_id
             rental=db.execute('SELECT status,rueckgabe_datum FROM mietvorgaenge WHERE id=?',(h['mietvorgang_id'],)).fetchone()

@@ -16,6 +16,8 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature
 from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME, init_schema as init_contract_schema
 from mos_public_contract import finalize as finalize_contract, presign_quote, read as read_contract
 from mos_public_contract import signed_payload
+from mos_handover import init_schema as init_handover_schema, existing as existing_handover, record as record_handover
+from mos_order_receipt import init_schema as init_order_receipt_schema, enqueue as enqueue_order_receipt
 
 LISTINGS = {'kona':'Hyundai KONA N Line X', 'i10':'Hyundai i10'}
 BERLIN = ZoneInfo('Europe/Berlin')
@@ -221,6 +223,9 @@ def register(portal):
         if live:
             problems=launch_errors(cfg)
             if problems:raise ValueError('Buchung noch nicht freigegeben: '+'; '.join(problems))
+            if (cfg['launch']['termination_review']['applies']
+                    and not app.config.get('MOS_TERMINATION_ENABLED')):
+                raise ValueError('Öffentlicher Kündigungsweg muss vor Livebuchungen aktiviert sein.')
             if not portal.USE_POSTGRES:
                 raise ValueError('Livebetrieb benötigt den autoritativen PostgreSQL-Portalbestand, keine lokale Kopie.')
             if getattr(portal,'USING_EPHEMERAL_SECRET_KEY',True) or getattr(portal,'USING_GENERATED_FLASK_SECRET_KEY',True):
@@ -242,7 +247,7 @@ def register(portal):
         app.config['MOS_SHARED_CHECKOUT_ENABLED']=bool(app.config['MOS_PUBLIC_BOOKING'].get('enabled'))
         db=portal.get_db()
         try:
-            init_refund_schema(db);init_contract_schema(db)
+            init_refund_schema(db);init_contract_schema(db);init_handover_schema(db);init_order_receipt_schema(db)
             init_slot_schema(db,cfg['slots']);db.commit()
         finally:db.close()
         existing={'cfg':cfg,'service':service,'gateway':gateway,'secret':secret,'ledger':RefundLedger(service)}
@@ -259,7 +264,7 @@ def register(portal):
             return
         settling={'mos_public.status','mos_public.retry','mos_public.cancel','mos_public.webhook','mos_public.receipt',
                   'mos_public.cancel_paid','mos_public.admin_bookings','mos_public.admin_action',
-                  'mos_public.signed_contract_pdf','mos_public.admin_contract_pdf'}
+                  'mos_public.signed_contract_pdf','mos_public.admin_contract_pdf','mos_public.admin_handover'}
         if not cfg.get('enabled') and not (request.endpoint in settling and cfg.get('mode') in {'offline','stripe_test','live'}):
             abort(404)
         state=setup()
@@ -444,14 +449,24 @@ def register(portal):
     @bp.get('/admin')
     @portal.admin_required
     def admin_bookings():
+        selected=request.args.get('hold_id','').strip()
+        if len(selected)>100:abort(400)
         db=portal.get_db()
         try:
-            holds=[dict(r) for r in db.execute('''SELECT h.*,c.signed_at,d.status AS deposit_status,
-                delivery.status AS contract_delivery_status FROM miet_checkout_holds h
+            sql='''SELECT h.*,c.signed_at,d.status AS deposit_status,
+                delivery.status AS contract_delivery_status,delivery.enqueued_at AS contract_enqueued_at,
+                delivery.accepted_at AS contract_accepted_at,
+                handover.handed_at AS handed_at, handover.operator_name AS handover_operator
+                FROM miet_checkout_holds h
                 LEFT JOIN miet_checkout_contracts c ON c.hold_id=h.id
                 LEFT JOIN miet_checkout_deposit_auths d ON d.hold_id=h.id
                 LEFT JOIN miet_checkout_contract_delivery delivery ON delivery.hold_id=h.id
-                ORDER BY h.expires_at DESC LIMIT 100''').fetchall()]
+                LEFT JOIN miet_checkout_handovers handover ON handover.hold_id=h.id
+                '''
+            if selected:
+                holds=[dict(r) for r in db.execute(sql+' WHERE h.id=?',(selected,)).fetchall()]
+            else:
+                holds=[dict(r) for r in db.execute(sql+' ORDER BY h.expires_at DESC LIMIT 100').fetchall()]
             weekly=weekly_handover_enabled(app.config.get('MOS_PUBLIC_BOOKING',{}))
             open_slots=listed_slots(db,True,weekly)
             closed_slots=listed_slots(db,False)
@@ -460,6 +475,17 @@ def register(portal):
             h['q']=json.loads(h['payload'])['quote'];h['account']=account(h['id'])
             if h['signed_at']:
                 h['signed_at']=datetime.fromisoformat(h['signed_at']).astimezone(ZoneInfo('Europe/Berlin')).strftime('%d.%m.%Y um %H:%M Uhr')
+            if h['handed_at']:
+                h['handed_at']=datetime.fromisoformat(h['handed_at']).astimezone(BERLIN).strftime('%d.%m.%Y um %H:%M Uhr')
+            h['contract_delivery_delay_seconds']=None
+            if h['contract_accepted_at'] and h['contract_enqueued_at']:
+                try:
+                    accepted=datetime.fromisoformat(h['contract_accepted_at'])
+                    queued=datetime.fromisoformat(h['contract_enqueued_at'])
+                    if accepted.tzinfo and queued.tzinfo and accepted>=queued:
+                        h['contract_delivery_delay_seconds']=round((accepted-queued).total_seconds())
+                except ValueError:
+                    pass
         return render_template('mos_public/admin.html',holds=holds,open_slots=open_slots,
                                closed_slots=closed_slots,request_id=secrets.token_urlsafe(24))
 
@@ -552,6 +578,36 @@ def register(portal):
     def admin_contract_pdf(hold_id):
         return contract_pdf_response(hold_id)
 
+    @bp.post('/admin/<hold_id>/uebergabe')
+    @portal.admin_required
+    def admin_handover(hold_id):
+        state=setup()
+        if state['cfg']['mode']!='live' or not portal.USE_POSTGRES:
+            raise ValueError('Schlüsselübergabe ist ausschließlich für echte Live-Buchungen verfügbar.')
+        h=state['service'].read(hold_id)
+        q=json.loads(h['payload'])['quote']
+        if q.get('test_only') is not False or h['status']!='confirmed':
+            raise ValueError('Nur bestätigte echte MOS-Buchungen können übergeben werden.')
+        db=portal.get_db()
+        try:
+            if existing_handover(db,hold_id):
+                return redirect(url_for('mos_public.admin_bookings',hold_id=hold_id)+'#hold-'+hold_id,code=303)
+        finally:db.close()
+        try:odometer=int(request.form.get('odometer_km',''))
+        except (TypeError,ValueError):raise ValueError('Kilometerstand als ganze Zahl eingeben.') from None
+        attestations={name:request.form.get(name)=='yes' for name in
+                      ('receipt_confirmed','license_checked','fuel_full','condition_recorded')}
+        if not all(attestations.values()):
+            raise ValueError('Alle Übergabeprüfungen müssen ausdrücklich bestätigt werden.')
+        intent=state['service'].reconcile_deposit(hold_id)  # fresh, read-only provider check
+        with state['service'].locked(h['mietfahrzeug_id']) as (db,_):
+            record_handover(db,state['service'],hold_id,intent,
+                            operator_name=request.form.get('operator_name',''),
+                            odometer_km=odometer,protocol_ref=request.form.get('protocol_ref',''),
+                            **attestations)
+        portal.flash('MOS-Schlüsselübergabe mit Vertrags-, Zustell- und Kautionsprüfung dokumentiert.','success')
+        return redirect(url_for('mos_public.admin_bookings',hold_id=hold_id)+'#hold-'+hold_id,code=303)
+
     @bp.post('/admin/<hold_id>')
     @portal.admin_required
     def admin_action(hold_id):
@@ -601,9 +657,12 @@ def register(portal):
 
     @app.cli.command('mos-contract-delivery')
     def deliver_contracts():
-        """Send frozen contract PDFs only from an explicitly enabled live worker."""
+        """Send order receipts first, then frozen contracts, from an enabled live worker."""
         import click
         from mos_contract_delivery import deliver_one, pending_ids, unfinished_live_ids, unresolved_count
+        from mos_order_receipt import deliver_one as deliver_order_receipt
+        from mos_order_receipt import pending_ids as order_receipt_pending_ids
+        from mos_order_receipt import unresolved_count as order_receipt_unresolved_count
         cfg=app.config.get('MOS_PUBLIC_BOOKING',{})
         if (cfg.get('mode')!='live' or not portal.USE_POSTGRES
                 or os.environ.get('MOS_CONTRACT_EMAIL_ENABLED')!='1'):
@@ -612,9 +671,16 @@ def register(portal):
         if not mail_cfg.get('smtp_configured') or not (mail_cfg.get('smtp_ssl') or mail_cfg.get('smtp_tls')):
             raise click.ClickException('Verschlüsselter Werkstatt-Mailversand ist nicht eingerichtet.')
         db=portal.get_db()
-        try:init_contract_schema(db);db.commit()
+        try:init_contract_schema(db);init_order_receipt_schema(db);db.commit()
         finally:db.close()
         errors=0
+        for hold_id in order_receipt_pending_ids(portal):
+            try:
+                result=deliver_order_receipt(portal,hold_id,mail_cfg,live=True,enabled=True)
+                if result!='sent':errors+=1
+            except Exception:
+                errors+=1
+                app.logger.exception('MOS Bestelleingangsbestätigung muss geprüft werden')
         for hold_id in unfinished_live_ids(portal,limit=100):
             try:
                 if not finalize_contract(portal,hold_id):errors+=1
@@ -629,10 +695,12 @@ def register(portal):
                 errors+=1
                 app.logger.exception('MOS Vertragszustellung muss geprüft werden')
         unresolved=unresolved_count(portal)
+        unresolved_receipts=order_receipt_unresolved_count(portal)
         missing=len(unfinished_live_ids(portal))
-        click.echo(f'MOS Vertragszustellungen offen oder zu prüfen: {unresolved}; ohne PDF/Versandauftrag: {missing}')
-        if errors or unresolved or missing:
-            raise click.ClickException('MOS Vertragszustellung ist noch nicht abgeschlossen.')
+        click.echo(f'MOS Bestelleingangsbestätigungen offen oder zu prüfen: {unresolved_receipts}; '
+                   f'Vertragszustellungen offen oder zu prüfen: {unresolved}; ohne PDF/Versandauftrag: {missing}')
+        if errors or unresolved_receipts or unresolved or missing:
+            raise click.ClickException('MOS Bestell- oder Vertragszustellung ist noch nicht abgeschlossen.')
 
     @app.cli.command('mos-booking-reconcile')
     def reconcile_jobs():
@@ -698,10 +766,46 @@ def register(portal):
                     if current['status']=='pending' and current['session_id']==pending['session_id'] and not current['mietvorgang_id']:
                         paid_without_webhook+=1
             except Exception:errors+=1
+        # A verified paid provider session merits a neutral receipt even when
+        # the signed webhook is delayed. This never accepts the rental; the
+        # existing paid-without-webhook alarm remains active.
+        receipt_queued=0
+        if state['gateway'].livemode:
+            db=portal.get_db()
+            try:
+                missing_receipts=[dict(r) for r in db.execute('''SELECT h.id,h.session_id
+                    FROM miet_checkout_holds h
+                    LEFT JOIN miet_checkout_order_receipts receipt ON receipt.hold_id=h.id
+                    WHERE h.session_id IS NOT NULL AND receipt.hold_id IS NULL
+                      AND h.status IN ('pending','review','confirmed')
+                    ORDER BY h.expires_at LIMIT 100''').fetchall()]
+            finally:db.close()
+            for candidate in missing_receipts:
+                try:
+                    h=state['service'].read(candidate['id'])
+                    if (h['session_id']!=candidate['session_id'] or
+                            json.loads(h['payload'])['quote'].get('test_only') is not False):
+                        continue
+                    session=state['gateway'].retrieve(candidate['session_id'])
+                    state['service'].validate(h,session)
+                    if session.get('status')!='complete' or session.get('payment_status')!='paid':
+                        continue
+                    with state['service'].locked(h['mietfahrzeug_id']) as (locked_db,_):
+                        current=dict(locked_db.execute('SELECT * FROM miet_checkout_holds WHERE id=?',
+                                                       (h['id'],)).fetchone())
+                        state['service'].validate(current,session)
+                        if enqueue_order_receipt(locked_db,current,session):
+                            receipt_queued+=1
+                except Exception:
+                    errors+=1
+                    app.logger.exception('MOS bezahlte Bestellung ohne Eingangsbestätigung muss geprüft werden')
+            if len(missing_receipts)==100:
+                errors+=1  # Continue in another run; a capped scan is not all clear.
         import click
         click.echo(f'Geprüft: {len(holds)} Reservierungen, {len(refunds)} Erstattungen, '
                    f'{len(release_ids)} Kartenfreigaben, {len(active_ids)} aktive Kartenreservierungen; '
                    f'offene Fehler: {errors}; bezahlte Checkouts ohne Webhook: {paid_without_webhook}; '
+                   f'Bestelleingangsbestätigungen nach Providerabgleich neu vorgemerkt: {receipt_queued}; '
                    f'unklare Checkout-Aufträge: {uncertain_checkouts}; ungeklärte Kartenreservierungen: {unresolved_deposits}; '
                    f'Prüffälle: {review_count}; fehlgeschlagene Erstattungen: {failed_refunds}')
         if (errors or paid_without_webhook or uncertain_checkouts or unresolved_deposits
