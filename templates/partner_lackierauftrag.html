@@ -9,59 +9,114 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    body { background:#f4f1ea; font-family:"DM Sans",sans-serif; color:#132635; }
-    h1,h2,h3,h4,h5 { font-family:"Space Grotesk",sans-serif; }
-    .shell { max-width:1180px; margin:0 auto; padding:32px 16px; }
-    .panel { background:#fffdf9; border-radius:24px; box-shadow:0 16px 40px rgba(64,47,25,.12); padding:28px; }
-    .form-control,.form-select,.btn { min-height:44px; font-size:16px; }
-    .section-title { color:#a54817; text-transform:uppercase; letter-spacing:.12em; font-size:.78rem; font-weight:700; }
-    .position-grid { display:grid; gap:12px; }
-    .position-row {
-      display:grid;
-      grid-template-columns:1.25fr .7fr minmax(220px,2fr) .8fr;
-      gap:12px;
-      align-items:end;
-      padding:16px;
-      border:1px solid #e4d6c3;
-      border-radius:16px;
-      background:#fffaf2;
+    :root {
+      --ink:#17232e;
+      --muted:#64727b;
+      --paper:#fffdf9;
+      --canvas:#f4f1ea;
+      --line:#e2d9cd;
+      --accent:#b74432;
     }
-    .position-row-title { grid-column:1/-1; color:#a54817; font-weight:700; }
-    .position-row .form-label { color:#52483e; font-size:.86rem; font-weight:700; }
+    * { box-sizing:border-box; }
+    body { min-height:100vh; margin:0; background:var(--canvas); font-family:"DM Sans",sans-serif; color:var(--ink); }
+    h1,h2,h3,h4,h5 { font-family:"Space Grotesk",sans-serif; }
+    :focus-visible { outline:3px solid rgba(183,68,50,.48); outline-offset:3px; }
+    .skip-link { position:absolute; top:-80px; left:16px; z-index:20; padding:10px 14px; border-radius:10px; color:#fff; background:var(--ink); }
+    .skip-link:focus { top:12px; }
+    .shell { width:min(1120px,calc(100% - 32px)); margin:0 auto; padding:30px 0 56px; }
+    .hero { position:relative; overflow:hidden; padding:clamp(24px,4vw,42px); border-radius:24px; color:#fff; background:linear-gradient(120deg,#162a39 0%,#263e4b 74%,#344b50 100%); box-shadow:0 20px 48px rgba(17,38,48,.18); }
+    .hero::after { content:""; position:absolute; width:340px; height:340px; top:-210px; right:-80px; border:1px solid rgba(255,255,255,.16); border-radius:50%; box-shadow:0 0 0 58px rgba(255,255,255,.025),0 0 0 118px rgba(255,255,255,.02); pointer-events:none; }
+    .hero-top,.hero-steps { position:relative; z-index:1; }
+    .hero-top { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; }
+    .hero-copy { max-width:720px; }
+    .eyebrow { margin:0 0 11px; color:#f7b7a8; font-size:.78rem; font-weight:700; letter-spacing:.13em; text-transform:uppercase; }
+    .hero h1 { margin:0 0 9px; font-size:clamp(1.85rem,4vw,2.75rem); line-height:1.08; letter-spacing:-.035em; }
+    .hero-description { max-width:640px; margin:0; color:#d7e1e4; line-height:1.55; }
+    .hero .btn { flex:0 0 auto; border-color:rgba(255,255,255,.55); color:#fff; }
+    .hero .btn:hover,.hero .btn:focus { color:var(--ink); background:#fff; }
+    .hero-steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; margin:28px 0 0; padding:0; list-style:none; }
+    .hero-step { display:flex; align-items:center; gap:10px; min-height:54px; padding:10px 12px; border:1px solid rgba(255,255,255,.16); border-radius:13px; background:rgba(255,255,255,.07); color:#ecf0ef; font-size:.87rem; font-weight:700; }
+    .hero-step-number { display:grid; place-items:center; width:28px; height:28px; flex:0 0 auto; border-radius:50%; color:#17232e; background:#f7b7a8; font-size:.79rem; }
+    .saved-note { display:inline-flex; margin-top:14px; color:#d7e1e4; font-size:.85rem; }
+    .form-layout { display:grid; gap:16px; }
+    .form-section,.form-actions { padding:clamp(20px,3vw,30px); border:1px solid var(--line); border-radius:20px; background:var(--paper); box-shadow:0 7px 28px rgba(52,42,25,.055); }
+    .section-header { display:flex; align-items:flex-start; gap:15px; margin-bottom:23px; }
+    .section-number { display:grid; place-items:center; width:39px; height:39px; flex:0 0 auto; border-radius:12px; background:#f8e8e2; color:#9a3525; font-family:"Space Grotesk",sans-serif; font-size:.9rem; font-weight:700; }
+    .section-title { margin-bottom:3px; color:#a54832; text-transform:uppercase; letter-spacing:.11em; font-size:.72rem; font-weight:700; }
+    .section-header h2 { margin:0; font-size:clamp(1.28rem,2.4vw,1.55rem); letter-spacing:-.02em; }
+    .section-header p { margin:5px 0 0; color:var(--muted); font-size:.92rem; }
+    .form-label { color:#31404b; font-size:.88rem; font-weight:700; }
+    .form-control,.form-select,.btn { min-height:48px; font-size:16px; }
+    .form-control,.form-select { border-color:#d9dfe1; border-radius:11px; background:#fff; }
+    .form-control:hover,.form-select:hover { border-color:#a9b3b9; }
+    .form-control:focus,.form-select:focus { border-color:#be6755; box-shadow:0 0 0 .2rem rgba(183,68,50,.15); }
+    .billing-options { display:flex; gap:10px; flex-wrap:wrap; }
+    .billing-option { min-width:150px; padding:10px 14px 10px 2.2rem; border:1px solid var(--line); border-radius:12px; background:#fff; }
+    .billing-option:has(input:checked) { border-color:#b96755; background:#fff4ef; }
+    .billing-option .form-check-input { margin-top:.23em; margin-left:-1.35rem; }
+    .position-grid { display:grid; gap:10px; }
+    .position-row { display:grid; grid-template-columns:1.2fr .65fr minmax(200px,1.8fr) .8fr; align-items:end; gap:12px; padding:17px 18px 19px; border:1px solid var(--line); border-radius:16px; background:#fff; }
+    .position-row:focus-within { border-color:#bf8475; box-shadow:0 0 0 3px rgba(183,68,50,.08); }
+    .position-row-title { grid-column:1/-1; display:flex; align-items:center; gap:9px; color:#273b47; font-family:"Space Grotesk",sans-serif; font-size:.92rem; font-weight:700; }
+    .position-row-title span { display:grid; place-items:center; width:25px; height:25px; border-radius:8px; color:#a54832; background:#f8e8e2; font-size:.72rem; }
     .position-row[hidden] { display:none; }
-    .steps { display:flex; flex-wrap:wrap; gap:8px; margin:20px 0 0; }
-    .steps span { background:#f4f1ea; border:1px solid #e4d6c3; border-radius:999px; padding:7px 12px; font-size:.88rem; }
-    .saved-note { color:#6c6255; }
-    @media (max-width: 767.98px) {
-      .shell { padding:14px; }
-      .panel { padding:20px 16px; border-radius:18px; }
-      .position-row { grid-template-columns:1fr; }
+    .add-position { width:100%; margin-top:11px; border:1px dashed #b9ada1; border-radius:13px; background:#f9f7f3; color:#344552; font-weight:700; }
+    .add-position:hover { border-color:#ad5745; color:#8f3928; background:#fff5f0; }
+    .form-actions { display:flex; align-items:center; justify-content:space-between; gap:18px; border-color:#ccdad3; background:#f3f8f5; }
+    .form-actions h2 { margin:0 0 4px; font-size:1.15rem; }
+    .form-actions p { max-width:440px; margin:0; color:#4c6259; font-size:.88rem; }
+    .action-buttons { display:flex; align-items:center; justify-content:flex-end; gap:9px; flex-wrap:wrap; }
+    .action-buttons .btn { white-space:nowrap; border-radius:11px; font-weight:700; }
+    .btn-create { border-color:var(--ink); background:var(--ink); color:#fff; }
+    .btn-create:hover,.btn-create:focus { border-color:#324d5c; background:#324d5c; color:#fff; }
+    @media (max-width:800px) {
+      .position-row { grid-template-columns:1fr 1fr; }
+      .position-row > :nth-child(4) { grid-column:1/-1; }
+      .form-actions { align-items:stretch; flex-direction:column; }
+      .action-buttons { justify-content:stretch; }
+      .action-buttons .btn { flex:1 1 180px; }
+    }
+    @media (max-width:575.98px) {
+      .shell { width:min(100% - 20px,1120px); padding:10px 0 32px; }
+      .hero { padding:22px 19px; border-radius:18px; }
+      .hero-top { flex-direction:column; gap:15px; }
+      .hero .btn { width:100%; }
+      .hero-steps { grid-template-columns:1fr; gap:6px; margin-top:20px; }
+      .hero-step { min-height:42px; }
+      .form-layout { gap:10px; }
+      .form-section,.form-actions { padding:20px 16px; border-radius:17px; }
+      .section-header { gap:11px; margin-bottom:18px; }
+      .section-number { width:34px; height:34px; border-radius:10px; }
+      .position-row { grid-template-columns:1fr; gap:9px; padding:15px; }
+      .position-row > :nth-child(4) { grid-column:auto; }
+      .action-buttons { display:grid; grid-template-columns:1fr; }
     }
   </style>
 </head>
 <body>
-  <div class="shell">
+  <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
+  <main class="shell" id="inhalt">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
       <div class="alert alert-{{ cat }} mb-4">{{ msg }}</div>
       {% endfor %}
     {% endwith %}
 
-    <div class="panel mb-4">
-      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
-        <div>
-          <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
-          <h1 class="mb-2">Lackierauftrag online ausfüllen</h1>
-          <div class="text-muted">Fahrzeug und Arbeiten eintragen. Die PDF entsteht aus den aktuellen Eingaben und wird beim Anlegen zum Fahrzeug gespeichert.</div>
-          <div class="steps" aria-label="Ablauf"><span>1 · Fahrzeug eintragen</span><span>2 · Arbeiten erfassen</span><span>3 · PDF speichern oder Fahrzeug anlegen</span></div>
-          {% if entwurf['geaendert_am'] %}
-          <div class="saved-note small mt-2">Zuletzt gespeichert: {{ entwurf['geaendert_am'] }}</div>
-          {% endif %}
+    <div class="hero mb-4">
+      <div class="hero-top">
+        <div class="hero-copy">
+          <p class="eyebrow">{{ autohaus['portal_welcome'] }}</p>
+          <h1>Lackierauftrag erfassen</h1>
+          <p class="hero-description">Fahrzeug und Arbeiten eintragen. Beim Anlegen wird der ausgefüllte Lackierauftrag als PDF direkt am Fahrzeug gespeichert.</p>
+          {% if entwurf['geaendert_am'] %}<span class="saved-note">Entwurf zuletzt gespeichert: {{ entwurf['geaendert_am'] }}</span>{% endif %}
         </div>
-        <div class="d-flex gap-2 flex-wrap">
-          <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-dark">Dashboard</a>
-        </div>
+        <a href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" class="btn btn-outline-light">Zum Dashboard</a>
       </div>
+      <ol class="hero-steps" aria-label="Ablauf">
+        <li class="hero-step"><span class="hero-step-number" aria-hidden="true">1</span><span>Fahrzeug eintragen</span></li>
+        <li class="hero-step"><span class="hero-step-number" aria-hidden="true">2</span><span>Arbeiten erfassen</span></li>
+        <li class="hero-step"><span class="hero-step-number" aria-hidden="true">3</span><span>PDF laden oder Auftrag anlegen</span></li>
+      </ol>
     </div>
 
     {% if entwurf['angelegter_auftrag_id'] > 0 %}
@@ -78,96 +133,103 @@
     {% endif %}
 
     {% if not entwurf['angelegter_auftrag_id'] %}
-    <form method="POST" class="panel">
+    <form method="POST" id="lackierformular" class="form-layout">
       {{ csrf_field()|safe }}
-      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
-        <div>
-          <div class="section-title">Auftraggeber</div>
-          <h2 class="h4 mb-1">Stammdaten und Fahrzeug</h2>
+      <section class="form-section" aria-labelledby="section-auftraggeber">
+        <div class="section-header">
+          <span class="section-number" aria-hidden="true">01</span>
+          <div><div class="section-title">Auftraggeber</div><h2 id="section-auftraggeber">Kontakt und Termin</h2><p>Wer gibt den Lackierauftrag auf, und bis wann soll das Fahrzeug fertig sein?</p></div>
         </div>
-        <span class="text-muted small">Speichern oder Anlegen erst nach dem Ausfüllen unten auswählen.</span>
-      </div>
-
-      <div class="row g-3 mb-4">
+        <div class="row g-3">
         <div class="col-md-6">
-          <label class="form-label">Firma</label>
-          <input type="text" name="firma" class="form-control" value="{{ daten['firma'] }}">
+          <label class="form-label" for="firma">Firma</label>
+          <input type="text" id="firma" name="firma" class="form-control" value="{{ daten['firma'] }}">
         </div>
         <div class="col-md-6">
-          <label class="form-label">Ansprechpartner</label>
-          <input type="text" name="ansprechpartner" class="form-control" value="{{ daten['ansprechpartner'] }}">
+          <label class="form-label" for="ansprechpartner">Ansprechpartner</label>
+          <input type="text" id="ansprechpartner" name="ansprechpartner" class="form-control" value="{{ daten['ansprechpartner'] }}">
         </div>
         <div class="col-md-6">
-          <label class="form-label">Tel. / E-Mail</label>
-          <input type="text" name="kontakt" class="form-control" value="{{ daten['kontakt'] }}">
+          <label class="form-label" for="kontakt">Telefon / E-Mail</label>
+          <input type="text" id="kontakt" name="kontakt" class="form-control" value="{{ daten['kontakt'] }}">
         </div>
         <div class="col-md-3">
-          <label class="form-label">Auftrags-Datum</label>
-          <input type="date" name="auftrags_datum" class="form-control" value="{{ daten['auftrags_datum']|iso_date }}">
+          <label class="form-label" for="auftrags_datum">Auftragsdatum</label>
+          <input type="date" id="auftrags_datum" name="auftrags_datum" class="form-control" value="{{ daten['auftrags_datum']|iso_date }}">
         </div>
         <div class="col-md-3">
-          <label class="form-label">Fertig bis spätestens</label>
-          <input type="date" name="fertig_bis" class="form-control" value="{{ daten['fertig_bis']|iso_date }}">
+          <label class="form-label" for="fertig_bis">Fertig bis spätestens</label>
+          <input type="date" id="fertig_bis" name="fertig_bis" class="form-control" value="{{ daten['fertig_bis']|iso_date }}">
         </div>
       </div>
+      </section>
 
-      <div class="section-title mb-2">Fahrzeug</div>
-      <div class="row g-3 mb-4">
+      <section class="form-section" aria-labelledby="section-fahrzeug">
+        <div class="section-header">
+          <span class="section-number" aria-hidden="true">02</span>
+          <div><div class="section-title">Fahrzeug</div><h2 id="section-fahrzeug">Fahrzeugdaten</h2><p>Typ oder Kennzeichen genügt, um den Auftrag zuzuordnen.</p></div>
+        </div>
+      <div class="row g-3">
         <div class="col-md-4">
-          <label class="form-label">Typ</label>
-          <input type="text" name="typ" class="form-control" value="{{ daten['typ'] }}">
+          <label class="form-label" for="typ">Typ</label>
+          <input type="text" id="typ" name="typ" class="form-control" placeholder="z. B. VW Golf" value="{{ daten['typ'] }}">
         </div>
         <div class="col-md-4">
-          <label class="form-label">Amtl. Kennzeichen</label>
-          <input type="text" name="kennzeichen" class="form-control" value="{{ daten['kennzeichen'] }}" style="text-transform:uppercase;">
+          <label class="form-label" for="kennzeichen">Amtliches Kennzeichen</label>
+          <input type="text" id="kennzeichen" name="kennzeichen" class="form-control text-uppercase" placeholder="z. B. MOS-AB 123" value="{{ daten['kennzeichen'] }}">
         </div>
         <div class="col-md-4">
-          <label class="form-label">Fg.-Nr.</label>
-          <input type="text" name="fg_nr" class="form-control" value="{{ daten['fg_nr'] }}" style="text-transform:uppercase;">
+          <label class="form-label" for="fg_nr">Fahrgestellnummer</label>
+          <input type="text" id="fg_nr" name="fg_nr" class="form-control text-uppercase" value="{{ daten['fg_nr'] }}">
         </div>
         <div class="col-md-4">
-          <label class="form-label">Farb-Nr.</label>
-          <input type="text" name="farb_nr" class="form-control" value="{{ daten['farb_nr'] }}">
+          <label class="form-label" for="farb_nr">Farbnummer</label>
+          <input type="text" id="farb_nr" name="farb_nr" class="form-control" value="{{ daten['farb_nr'] }}">
         </div>
         <div class="col-md-4">
-          <label class="form-label">km-Stand</label>
-          <input type="text" name="km_stand" class="form-control" value="{{ daten['km_stand'] }}">
+          <label class="form-label" for="km_stand">Kilometerstand</label>
+          <input type="text" id="km_stand" name="km_stand" class="form-control" value="{{ daten['km_stand'] }}">
         </div>
       </div>
+      </section>
 
-      <div class="section-title mb-2">Abrechnung</div>
-      <div class="row g-3 mb-4">
+      <section class="form-section" aria-labelledby="section-abrechnung">
+        <div class="section-header">
+          <span class="section-number" aria-hidden="true">03</span>
+          <div><div class="section-title">Abrechnung</div><h2 id="section-abrechnung">Kostenträger</h2><p>Wählen Sie die Abrechnung und ergänzen Sie bei Bedarf die Schadendaten.</p></div>
+        </div>
+      <div class="row g-3">
         <div class="col-12">
-          <div class="d-flex gap-3 flex-wrap">
+          <fieldset class="billing-options">
+            <legend class="visually-hidden">Abrechnung über</legend>
             {% for key, label in abrechnung_optionen %}
-            <div class="form-check">
+            <div class="form-check billing-option">
               <input class="form-check-input" type="radio" name="abrechnung" value="{{ key }}" id="abrechnung-{{ key }}" {% if daten['abrechnung'] == key %}checked{% endif %}>
               <label class="form-check-label" for="abrechnung-{{ key }}">{{ label }}</label>
             </div>
             {% endfor %}
-          </div>
+          </fieldset>
         </div>
         <div class="col-md-6">
-          <label class="form-label">Versicherung / Schaden-Nr.</label>
-          <input type="text" name="versicherung_schaden_nr" class="form-control" value="{{ daten['versicherung_schaden_nr'] }}">
+          <label class="form-label" for="versicherung_schaden_nr">Versicherung / Schadennummer</label>
+          <input type="text" id="versicherung_schaden_nr" name="versicherung_schaden_nr" class="form-control" value="{{ daten['versicherung_schaden_nr'] }}">
         </div>
         <div class="col-md-6">
-          <label class="form-label">Vers.-Nehmer</label>
-          <input type="text" name="versicherungsnehmer" class="form-control" value="{{ daten['versicherungsnehmer'] }}">
+          <label class="form-label" for="versicherungsnehmer">Versicherungsnehmer</label>
+          <input type="text" id="versicherungsnehmer" name="versicherungsnehmer" class="form-control" value="{{ daten['versicherungsnehmer'] }}">
         </div>
       </div>
+      </section>
 
-      <div class="d-flex justify-content-between align-items-end gap-3 flex-wrap mb-2">
-        <div>
-          <div class="section-title">Karosserieteile</div>
-          <h3 class="h5 mb-0">Arbeitsumfang eintragen</h3>
-          <p class="text-muted small mt-1 mb-0">Je Bauteil eine Zeile. Zum Beispiel „Kotflügel“, „rechts“, „Neuteil lackieren“.</p>
+      <section class="form-section" aria-labelledby="section-arbeiten">
+        <div class="section-header">
+          <span class="section-number" aria-hidden="true">04</span>
+          <div><div class="section-title">Arbeitsumfang</div><h2 id="section-arbeiten">Bauteile und Arbeiten</h2><p>Pro Bauteil eine Position. Weitere Positionen können Sie jederzeit hinzufügen.</p></div>
         </div>
-      </div>
-      <div class="position-grid mb-4">
+      <div class="position-grid">
         {% for index in range(1, position_count + 1) %}
         <div class="position-row" data-position-index="{{ index }}">
-          <div class="position-row-title">Position {{ index }}</div>
+          <div class="position-row-title"><span aria-hidden="true">{{ '%02d'|format(index) }}</span>Position {{ index }}</div>
           <div>
             <label class="form-label" for="position_{{ index }}_teil">Karosserieteil</label>
             <input type="text" id="position_{{ index }}_teil" name="position_{{ index }}_teil" class="form-control" placeholder="z. B. Kotflügel" value="{{ daten['position_' ~ index ~ '_teil'] }}">
@@ -187,36 +249,48 @@
         </div>
         {% endfor %}
       </div>
-      <button type="button" id="weitere-position" class="btn btn-outline-dark mb-4">Weitere Position hinzufügen</button>
+      <button type="button" id="weitere-position" class="btn add-position">+ Weitere Position hinzufügen</button>
+      </section>
 
-      <div class="section-title mb-2">Qualitätskontrolle</div>
-      <div class="row g-3 mb-4">
+      <section class="form-section" aria-labelledby="section-kontrolle">
+        <div class="section-header">
+          <span class="section-number" aria-hidden="true">05</span>
+          <div><div class="section-title">Abschluss</div><h2 id="section-kontrolle">Qualitätskontrolle</h2><p>Diese Angaben können Sie ergänzen, sobald die Arbeiten geprüft sind.</p></div>
+        </div>
+      <div class="row g-3">
         <div class="col-md-4">
-          <label class="form-label">Datum</label>
-          <input type="date" name="kontrolle_datum" class="form-control" value="{{ daten['kontrolle_datum']|iso_date }}">
+          <label class="form-label" for="kontrolle_datum">Kontrolldatum</label>
+          <input type="date" id="kontrolle_datum" name="kontrolle_datum" class="form-control" value="{{ daten['kontrolle_datum']|iso_date }}">
         </div>
         <div class="col-md-8">
-          <label class="form-label">Unterschrift Auftragnehmer</label>
-          <input type="text" name="unterschrift_auftragnehmer" class="form-control" value="{{ daten['unterschrift_auftragnehmer'] }}">
+          <label class="form-label" for="unterschrift_auftragnehmer">Unterschrift Auftragnehmer</label>
+          <input type="text" id="unterschrift_auftragnehmer" name="unterschrift_auftragnehmer" class="form-control" value="{{ daten['unterschrift_auftragnehmer'] }}">
         </div>
       </div>
+      </section>
 
-      <div class="d-flex gap-2 flex-wrap justify-content-end">
-        <button type="submit" name="aktion" value="speichern" class="btn btn-outline-dark btn-lg">Speichern</button>
-        <button type="submit" name="aktion" value="download" class="btn btn-dark btn-lg">Speichern & PDF herunterladen</button>
-        <button type="submit" name="aktion" value="fahrzeug_anlegen" class="btn btn-success btn-lg">Fahrzeug mit Lackierauftrag anlegen</button>
+      <div class="form-actions">
+        <div>
+          <h2>Angaben übernehmen</h2>
+          <p>Der PDF-Download speichert den Entwurf, legt aber noch kein Fahrzeug an. Erst „Fahrzeug anlegen“ übernimmt den Lackierauftrag.</p>
+        </div>
+        <div class="action-buttons">
+          <button type="submit" name="aktion" value="speichern" class="btn btn-link text-dark">Entwurf speichern</button>
+          <button type="submit" name="aktion" value="download" class="btn btn-outline-dark">Speichern &amp; PDF herunterladen</button>
+          <button type="submit" name="aktion" value="fahrzeug_anlegen" class="btn btn-create">Fahrzeug anlegen →</button>
+        </div>
       </div>
-      <p class="text-muted small text-end mt-2 mb-0">„Speichern &amp; PDF herunterladen“ legt noch kein Fahrzeug an. Erst die grüne Aktion übernimmt alles in den Auftrag.</p>
     </form>
     {% endif %}
-  </div>
+  </main>
   {% include "ki_assistent_widget.html" ignore missing %}
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     (() => {
       const rows = [...document.querySelectorAll('[data-position-index]')];
       const more = document.getElementById('weitere-position');
-      let visible = Math.max(4, ...rows.filter(row =>
+      if (!more || !rows.length) return;
+      let visible = Math.max(1, ...rows.filter(row =>
         [...row.querySelectorAll('input')].some(input => input.value.trim())
       ).map(row => Number(row.dataset.positionIndex)));
       function showRows() {
