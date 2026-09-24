@@ -1,7 +1,9 @@
 # MOS: getrennte PostgreSQL- und Stripe-Abnahme
 
 Stand 24.09.2026, aktualisiert nach dem gemeinsamen lokalen
-PostgreSQL-/Stripe-Testlauf. Keine Livefreigabe, kein Deployment.
+PostgreSQL-/Stripe-Testlauf. Keine Livefreigabe oder Livezahlung. Der
+geprüfte Code ist auf Render nur mit ausgeschalteter öffentlicher Buchung
+deployed; die beschriebenen Stripe-Zahlungsabläufe wurden lokal getestet.
 
 ## Tatsächlich ausgeführt
 
@@ -266,12 +268,12 @@ offene Session kann über die [Expire-API](https://docs.stripe.com/api/checkout/
 beendet werden.
 
 Die lokale Stripe-Kernkette einschließlich PostgreSQL, signiertem Webhook,
-PDF, Erstattung und Kautionsfreigabe ist damit nachgewiesen. 3-D-Secure-
-Fehlschlag, eine gezielt zu kurze Autorisierungsfrist, weitere reale
-Provider-Rennen, Restricted-Key-Rechte, dauerhafte Webhook-Konfiguration,
-Geräteprüfung und Hosting-Abnahme bleiben offen. Der automatische Browser-
-Sprung vom lokalen POST zum Stripe-Checkout muss in der Zielumgebung geprüft
-werden.
+PDF, Erstattung und Kautionsfreigabe ist damit nachgewiesen. Eine gezielt zu
+kurze Autorisierungsfrist, weitere reale Provider-Rennen,
+Restricted-Key-Rechte, dauerhafte Webhook-Konfiguration, weitere Geräteprüfung
+und Hosting-Abnahme bleiben offen. Die automatische Browserweiterleitung ist
+inzwischen im lokalen Chrome-Test nachgewiesen; die Zielumgebung Render bleibt
+bis zur freigegebenen Konfiguration ungeprüft.
 Für Kundenzahlungen fehlen außerdem belegter Selbstfahrervermietungsschutz
 für beide Fahrzeuge, reale freigegebene Termine, finale Bedingungen und
 weitere Freigaben laut [Launch-Paket](mos-launch-package.md). Die dokumentierte
@@ -290,3 +292,39 @@ geprüfte Code ist deaktiviert auf dem tatsächlichen Render-Portal ausgerollt:
 `/healthz` 200, Admin-Terminroute mit Login-Weiterleitung und `/mieten/` 404.
 Eine vollständige reale Browserweiterleitung auf Render und alle Live-
 Zahlungsfälle bleiben bis zur freigegebenen Konfiguration offen.
+
+### Nachtrag 24.09.2026: vollständiger Chrome-Lauf nach der CSP-Korrektur
+
+Auf einer frischen, ausschließlich lokalen PostgreSQL-Testdatenbank mit
+synthetischem i10 und Gärtner-Stripe-**Testmodus** wurde die echte
+Browserkette erneut ausgeführt. Testkunde und Entwurfsvertrag wurden im Chrome
+vor der Zahlung gezeichnet und gespeichert. Stripe bestätigte die separate
+500-€-Kreditkartenautorisierung ohne Einzug. Der Klick auf „Weiter zur
+Mietzahlung“ führte diesmal unmittelbar vom Portal-POST zu
+`checkout.stripe.com`; dort wurden ausschließlich **39 € Testmiete** angezeigt
+und mit einer Stripe-Testkarte bezahlt. Der signierte Test-Webhook bestätigte
+genau einen Portal-Mietvorgang; die vor der Zahlung signierte Vertrags-PDF stand
+zum Download bereit. Nach Teststorno unter 48 Stunden bestätigte die
+Statusseite 3,90 € Gebühr, 35,10 € Provider-Erstattung und die Freigabe der
+Kautionsautorisierung. Es gab keine Livezahlung und kein Kundenfahrzeug.
+
+Ein zweiter synthetischer i10-Versuch verwendete die in der
+[Stripe-Testkarten-Dokumentation](https://docs.stripe.com/testing) angegebene
+Karte für erforderliches 3-D-Secure mit anschließender Ablehnung. Im
+Stripe-Testchallenge wurde „FAIL“ gewählt. Das Kartenformular meldete fehlende
+Authentifizierung; die Portal-Statusseite zeigte **keine bestätigte Buchung,
+keine abgeschlossene Kautionsautorisierung und keine Mietzahlung**. „Offenen
+Checkout beenden“ gab den Zeitraum frei. Dieser Fehlerfall wurde damit im
+echten Testmodus über den Browser geprüft. Die Testschlüssel lagen nur
+vorübergehend lokal bzw. im Speicher der isolierten Testprozesse; temporäre
+Transferdateien wurden geleert.
+
+Die anschließende Offline-Fehlerfallprüfung fand einen Wiederholungsfehler bei
+verlorener erster Checkout-Antwort: Nach bestätigter Kaution wurde die lokale
+Reservierungsfrist verlängert, aber für die Stripe-Checkout-Anfrage noch die
+alte Frist verwendet. Ein Retry hätte dadurch andere Idempotenzparameter
+gesendet. `SharedCheckout.create_checkout()` liest jetzt vor dem Provideraufruf
+die gespeicherte Frist erneut. Der neue Timeout-Retry-Test reproduzierte den
+Fehler vor der Korrektur und bestand danach; vier weitere Offline-Tests prüfen
+Grenzfrist, fehlgeschlagene Kartenauthentifizierung, verspätete Ereignisse und
+Zahlung/Storno-Rennen. Diese Tests sind keine weiteren echten Stripe-Läufe.

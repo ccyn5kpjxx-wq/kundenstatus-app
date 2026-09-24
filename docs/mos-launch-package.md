@@ -197,3 +197,15 @@ Admin-Terminroute mit Login-Weiterleitung. `/mieten/` antwortet weiterhin mit
 Schlüssel, kein Webhook, kein kostenpflichtiger Cron und keine Livezahlung
 eingerichtet. Aktuelle Schritte stehen in [Render-Betrieb](mos-render-betrieb.md)
 und im [Preis- und Betriebsregelvorschlag](mos-preis-betriebsregeln-vorschlag.md).
+
+Der anschließende vollständige Chrome-Test auf der isolierten lokalen
+PostgreSQL-/Stripe-Testinstanz bestätigte auch den zuvor offenen automatischen
+Sprung zum Stripe Checkout. Nach Unterschrift wurde die 500-€-Testkaution nur
+autorisiert; 39 € Testmiete wurden separat bezahlt, der signierte Webhook
+bestätigte genau eine Buchung und der PDF-Vertrag war abrufbar. Das Teststorno
+bestätigte 35,10 € Erstattung nach 3,90 € Gebühr sowie die Freigabe der
+Kautionsautorisierung. Ein zweiter Browserlauf mit gescheiterter 3-D-Secure-
+Authentifizierung erzeugte keine Buchung oder Mietzahlung; der Zeitraum wurde
+freigegeben. [Prüfprotokoll](mos-staging-abnahme.md). Im Render-Dashboard ist
+der neueste Dokumentations-Commit `019a932` als „Live“ deployed sichtbar;
+`/healthz` antwortet mit 200 und `/mieten/` bleibt absichtlich bei 404.

@@ -412,6 +412,12 @@ class SharedCheckout:
                 self._release_unusable_authorization(hold_id, 'Der Abholtermin ist verstrichen')
             if not self.deposit_ready(hold_id):
                 raise ValueError('Die 500 EUR Kaution sind noch nicht vollständig auf der Karte reserviert.')
+            # A newly confirmed card authorization can extend the unpaid hold.
+            # Use the persisted deadline for Stripe's idempotent Checkout request;
+            # a retry after a lost response must send identical parameters.
+            h = self.read(hold_id)
+            if h['status'] != 'pending':
+                raise ValueError('Reservierung nicht mehr offen.')
         if h['session_id']:
             with self.locked(h['mietfahrzeug_id']) as (db, _):
                 _require_open_public_slots(db, q, self.p.USE_POSTGRES)

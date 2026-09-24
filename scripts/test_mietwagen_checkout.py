@@ -357,6 +357,109 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(self.s.read(h['id'])['status'], 'released')
         self.assertEqual(self.s._deposit_record(h['id'])['status'], 'released')
 
+    def test_card_hold_expiring_exactly_at_return_plus_24h_is_rejected(self):
+        h = self.authorization_hold()
+        q = json.loads(h['payload'])['quote']
+        minimum_deadline = int((datetime.fromisoformat(q['end_slot']) + timedelta(hours=24)).timestamp())
+        now = int(time.time())
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.clock = lambda: now
+        self.gateway.authorize_deposit_intent(intent['id'],
+                                              valid_for_seconds=minimum_deadline-now)
+        with patch.object(self.gateway, 'create') as rent_checkout:
+            with self.assertRaisesRegex(ValueError, 'reicht nicht'):
+                self.s.create_checkout(h['id'])
+            rent_checkout.assert_not_called()
+        self.assertEqual(self.s.read(h['id'])['status'], 'released')
+        self.assertIsNone(self.s.read(h['id'])['session_id'])
+        self.assertEqual(self.gateway.retrieve_deposit_intent(intent['id'])['status'], 'canceled')
+
+    def test_failed_card_challenge_never_opens_rent_checkout(self):
+        h = self.authorization_hold()
+        intent = self.s.prepare_deposit(h['id'])
+        # Offline model of a card challenge followed by an authentication
+        # failure. Stripe's browser 3DS challenge itself is not simulated.
+        for provider_status in ('requires_action', 'requires_payment_method'):
+            with self.subTest(provider_status=provider_status):
+                response = {**intent, 'status': provider_status}
+                with patch.object(self.gateway, 'retrieve_deposit_intent', return_value=response), \
+                        patch.object(self.gateway, 'create') as rent_checkout:
+                    self.assertFalse(self.s.reconcile_deposit(h['id'])['ready'])
+                    with self.assertRaisesRegex(ValueError, 'noch nicht vollständig'):
+                        self.s.create_checkout(h['id'])
+                    rent_checkout.assert_not_called()
+        self.assertEqual(self.count(), 0)
+        self.assertIsNone(self.s.read(h['id'])['session_id'])
+        self.s.cancel_or_reconcile(h['id'], cancel=True)
+        self.assertEqual(self.s.read(h['id'])['status'], 'released')
+        self.assertEqual(self.gateway.retrieve_deposit_intent(intent['id'])['status'], 'canceled')
+
+    def test_late_duplicate_unpaid_checkout_events_do_not_restore_booking(self):
+        h = self.authorization_hold()
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7*24*3600)
+        session = self.s.create_checkout(h['id'])
+        self.gateway.expire(session['id'])
+        first, signature = self.gateway.signed_event(session['id'], kind='checkout.session.expired')
+        self.assertIsNone(self.s.handle_signed_event(first, signature, self.secret))
+        self.assertIsNone(self.s.handle_signed_event(first, signature, self.secret))
+        late, late_signature = self.gateway.signed_event(session['id'], kind='checkout.session.completed')
+        self.assertIsNone(self.s.handle_signed_event(late, late_signature, self.secret))
+        self.assertEqual(self.count(), 0)
+        self.assertEqual(self.s.read(h['id'])['status'], 'released')
+        self.assertEqual(self.s._deposit_record(h['id'])['status'], 'released')
+        self.assertEqual(self.gateway.retrieve_deposit_intent(intent['id'])['amount_received'], 0)
+        with self.assertRaisesRegex(ValueError, 'nicht mehr zahlbar'):
+            self.gateway.pay(session['id'])
+
+    def test_card_checkout_creation_timeout_retries_same_session_before_cancel(self):
+        h = self.authorization_hold()
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7*24*3600)
+        original_create = self.gateway.create
+        created = {}
+
+        def lose_checkout_response(params, key):
+            created['session'] = original_create(params, key)
+            raise TimeoutError('synthetic lost Checkout response')
+
+        with patch.object(self.gateway, 'create', side_effect=lose_checkout_response):
+            with self.assertRaises(TimeoutError):
+                self.s.create_checkout(h['id'])
+        self.assertIsNone(self.s.read(h['id'])['session_id'])
+        with self.assertRaisesRegex(ValueError, 'manuell abgeglichen'):
+            self.s.cancel_or_reconcile(h['id'], cancel=True)
+        self.assertEqual(self.s.read(h['id'])['status'], 'pending')
+        self.assertEqual(self.s._deposit_record(h['id'])['status'], 'authorized')
+
+        retried = self.s.create_checkout(h['id'])
+        self.assertEqual(retried['id'], created['session']['id'])
+        self.assertEqual(retried['amount_total'], 7800)
+        self.s.cancel_or_reconcile(h['id'], cancel=True)
+        self.assertEqual(self.gateway.retrieve(retried['id'])['status'], 'expired')
+        self.assertEqual(self.s.read(h['id'])['status'], 'released')
+        self.assertEqual(self.s._deposit_record(h['id'])['status'], 'released')
+        self.assertEqual(self.gateway.retrieve_deposit_intent(intent['id'])['amount_received'], 0)
+
+    def test_paid_checkout_during_cancel_and_out_of_order_events_confirms_once(self):
+        h = self.authorization_hold()
+        intent = self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7*24*3600)
+        session = self.s.create_checkout(h['id'])
+        self.gateway.pay(session['id'])
+        self.s.cancel_or_reconcile(h['id'], cancel=True)
+        self.assertEqual(self.s.read(h['id'])['status'], 'pending')
+        self.assertEqual(self.s._deposit_record(h['id'])['status'], 'authorized')
+        # A stale expiry event cannot override the current paid provider state.
+        expired, expired_sig = self.gateway.signed_event(session['id'], kind='checkout.session.expired')
+        rental_id = self.s.handle_signed_event(expired, expired_sig, self.secret)
+        completed, completed_sig = self.gateway.signed_event(session['id'])
+        self.assertEqual(self.s.handle_signed_event(completed, completed_sig, self.secret), rental_id)
+        self.assertEqual(self.s.handle_signed_event(expired, expired_sig, self.secret), rental_id)
+        self.assertEqual(self.count(), 1)
+        self.assertEqual(self.s.read(h['id'])['status'], 'confirmed')
+        self.assertEqual(self.gateway.retrieve_deposit_intent(intent['id'])['amount_received'], 0)
+
     def test_debit_card_hold_is_released_without_rent_checkout(self):
         h = self.authorization_hold()
         intent = self.s.prepare_deposit(h['id'])
