@@ -135,6 +135,7 @@
     {% if not entwurf['angelegter_auftrag_id'] %}
     <form method="POST" id="lackierformular" class="form-layout">
       {{ csrf_field()|safe }}
+      <input type="hidden" name="entwurf_id" value="{{ entwurf['id'] }}">
       <section class="form-section" aria-labelledby="section-auftraggeber">
         <div class="section-header">
           <span class="section-number" aria-hidden="true">01</span>

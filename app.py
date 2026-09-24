@@ -15092,31 +15092,47 @@ def save_lackierauftrag_entwurf(autohaus, data):
     payload = json.dumps(normalized, ensure_ascii=False)
     now = now_str()
     db = get_db()
-    existing = db.execute(
-        "SELECT id FROM lackierauftrag_entwuerfe WHERE autohaus_id=? ORDER BY id DESC LIMIT 1",
-        (autohaus["id"],),
-    ).fetchone()
-    if existing:
-        db.execute(
+    try:
+        # Lock the partner row so two first submissions cannot create two drafts.
+        if USE_POSTGRES:
+            db.execute("SELECT id FROM autohaeuser WHERE id=? FOR UPDATE", (autohaus["id"],))
+        else:
+            db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
             """
-            UPDATE lackierauftrag_entwuerfe
-            SET daten_json=?, geaendert_am=?
-            WHERE id=?
+            SELECT id FROM lackierauftrag_entwuerfe
+            WHERE autohaus_id=? ORDER BY id DESC LIMIT 1
             """,
-            (payload, now, existing["id"]),
-        )
-    else:
-        db.execute(
-            """
-            INSERT INTO lackierauftrag_entwuerfe
-            (autohaus_id, daten_json, erstellt_am, geaendert_am)
-            VALUES (?, ?, ?, ?)
-            """,
-            (autohaus["id"], payload, now, now),
-        )
-    db.commit()
-    db.close()
-    return normalized
+            (autohaus["id"],),
+        ).fetchone()
+        if existing:
+            updated = db.execute(
+                """
+                UPDATE lackierauftrag_entwuerfe
+                SET daten_json=?, geaendert_am=?
+                WHERE id=? AND angelegter_auftrag_id=0
+                """,
+                (payload, now, existing["id"]),
+            )
+            if updated.rowcount != 1:
+                db.rollback()
+                return None
+        else:
+            db.execute(
+                """
+                INSERT INTO lackierauftrag_entwuerfe
+                (autohaus_id, daten_json, erstellt_am, geaendert_am)
+                VALUES (?, ?, ?, ?)
+                """,
+                (autohaus["id"], payload, now, now),
+            )
+        db.commit()
+        return normalized
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def lackierauftrag_beschreibung_aus_positionen(daten):
@@ -15138,13 +15154,32 @@ def lackierauftrag_beschreibung_aus_positionen(daten):
 
 def reset_lackierauftrag_entwurf(autohaus):
     db = get_db()
-    cursor = db.execute(
-        "DELETE FROM lackierauftrag_entwuerfe WHERE autohaus_id=? AND angelegter_auftrag_id!=-1",
-        (autohaus["id"],),
-    )
-    db.commit()
-    db.close()
-    return cursor.rowcount > 0
+    try:
+        if USE_POSTGRES:
+            db.execute("SELECT id FROM autohaeuser WHERE id=? FOR UPDATE", (autohaus["id"],))
+        else:
+            db.execute("BEGIN IMMEDIATE")
+        latest = db.execute(
+            """
+            SELECT angelegter_auftrag_id FROM lackierauftrag_entwuerfe
+            WHERE autohaus_id=? ORDER BY id DESC LIMIT 1
+            """,
+            (autohaus["id"],),
+        ).fetchone()
+        if not latest or int(latest["angelegter_auftrag_id"] or 0) == -1:
+            db.rollback()
+            return False
+        cursor = db.execute(
+            "DELETE FROM lackierauftrag_entwuerfe WHERE autohaus_id=?",
+            (autohaus["id"],),
+        )
+        db.commit()
+        return cursor.rowcount > 0
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def claim_lackierauftrag_anlage(autohaus, daten):
@@ -15155,8 +15190,9 @@ def claim_lackierauftrag_anlage(autohaus, daten):
         UPDATE lackierauftrag_entwuerfe
         SET angelegter_auftrag_id=-1
         WHERE autohaus_id=? AND daten_json=? AND angelegter_auftrag_id=0
+          AND id=(SELECT MAX(id) FROM lackierauftrag_entwuerfe WHERE autohaus_id=?)
         """,
-        (autohaus["id"], json.dumps(daten, ensure_ascii=False)),
+        (autohaus["id"], json.dumps(daten, ensure_ascii=False), autohaus["id"]),
     )
     db.commit()
     db.close()
@@ -15171,8 +15207,9 @@ def mark_lackierauftrag_anlage(autohaus, auftrag_id):
         UPDATE lackierauftrag_entwuerfe
         SET angelegter_auftrag_id=?
         WHERE autohaus_id=? AND angelegter_auftrag_id=-1
+          AND id=(SELECT MAX(id) FROM lackierauftrag_entwuerfe WHERE autohaus_id=?)
         """,
-        (auftrag_id, autohaus["id"]),
+        (auftrag_id, autohaus["id"], autohaus["id"]),
     )
     db.commit()
     db.close()
@@ -52942,6 +52979,12 @@ def partner_lackierauftrag_bearbeiten(slug):
                 return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
             flash("Neuer leerer Lackierauftrag gestartet. Der bereits angelegte Fahrzeugauftrag bleibt erhalten.", "info")
             return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
+        submitted_draft_id = request.form.get("entwurf_id")
+        if submitted_draft_id is not None and (
+            not submitted_draft_id.isdigit() or int(submitted_draft_id) != entwurf["id"]
+        ):
+            flash("Dieser Formularstand ist veraltet. Bitte die Seite neu laden und den aktuellen Entwurf prüfen.", "warning")
+            return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
         if entwurf.get("angelegter_auftrag_id"):
             previous_id = int(entwurf["angelegter_auftrag_id"])
             previous_order = get_auftrag(previous_id) if previous_id > 0 else None
@@ -52954,6 +52997,13 @@ def partner_lackierauftrag_bearbeiten(slug):
             return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
         daten = parse_lackierauftrag_form(request.form, autohaus)
         daten = save_lackierauftrag_entwurf(autohaus, daten)
+        if daten is None:
+            current_id = get_lackierauftrag_entwurf(autohaus)["angelegter_auftrag_id"]
+            if current_id > 0:
+                flash("Dieses Fahrzeug wurde bereits angelegt. Bitte den bestehenden Auftrag öffnen.", "warning")
+                return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=current_id))
+            flash("Der Entwurf wird bereits verarbeitet. Bitte die Seite neu laden und den Auftrag prüfen.", "warning")
+            return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
         if aktion == "fahrzeug_anlegen":
             if not (daten.get("typ") or daten.get("kennzeichen")):
                 flash("Bitte Fahrzeugtyp oder Kennzeichen eintragen, bevor Sie das Fahrzeug anlegen.", "warning")
