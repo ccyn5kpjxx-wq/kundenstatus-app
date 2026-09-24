@@ -119,6 +119,20 @@
 {% endblock %}
 
 {% block content %}
+{% if cockpit and cockpit['offene_reklamationen'] %}
+<div class="page-card p-4 mb-4 border border-danger" id="reklamationen" role="alert">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div>
+      <h2 class="h4 text-danger mb-1">Offene Reklamationen ({{ cockpit['offene_reklamationen']|length }})</h2>
+      <p class="mb-2">Auch Meldungen zu archivierten Fahrzeugen werden hier angezeigt.</p>
+      {% for reklamation in cockpit['offene_reklamationen'][:4] %}
+      <div class="small mb-1"><a href="{{ url_for('auftrag_detail', auftrag_id=reklamation['auftrag_id']) }}">{{ reklamation['autohaus_name'] or 'Autohaus' }} · {{ reklamation['fahrzeug'] or 'Fahrzeug' }}{% if reklamation['kennzeichen'] %} · {{ reklamation['kennzeichen'] }}{% endif %}</a></div>
+      {% endfor %}
+    </div>
+    <a href="{{ url_for('admin_postfach') }}" class="btn btn-outline-danger">Alle Reklamationen prüfen</a>
+  </div>
+</div>
+{% endif %}
 {% if cockpit and cockpit['offene_chat_nachrichten'] %}
 <div class="page-card p-4 mb-4" id="chat-nachrichten">
   <div class="section-title">
@@ -421,6 +435,9 @@
           <td class="auftrag-vehicle-cell" data-mobile-label="Fahrzeug">
             <div>{{ a['fahrzeug'] }}</div>
             {% if a['kennzeichen'] %}<div class="small"><code>{{ a['kennzeichen'] }}</code></div>{% endif %}
+            {% if a['hat_offene_reklamation'] %}
+            <div class="small text-danger fw-bold mt-1">Reklamation offen ({{ a['offene_reklamationen_count'] }})</div>
+            {% endif %}
           </td>
           <td class="analysis-cell" data-mobile-label="Arbeiten">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
           <td class="auftrag-date-cell" data-mobile-label="Letzte Termine">

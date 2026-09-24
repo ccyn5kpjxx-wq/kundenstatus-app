@@ -3,6 +3,7 @@
 {% block extra_css %}
 <style>
   .mail-item { border:1px solid #e4d6c3; border-radius:18px; padding:16px; background:#fffdf9; }
+  .mail-item-alarm { border:2px solid #b42318; background:#fff5f3; }
   .mail-preview { color:#4f5b64; white-space:pre-wrap; }
   .mail-meta { overflow-wrap:anywhere; }
 </style>
@@ -23,11 +24,11 @@
   {% if items %}
     <div class="d-grid gap-3">
       {% for item in items %}
-      <div class="mail-item">
+      <div class="mail-item{% if item['typ'] == 'Alarm' %} mail-item-alarm{% endif %}">
         <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
           <div class="min-width-0">
             <div class="d-flex gap-2 align-items-center flex-wrap mb-1">
-              <span class="badge text-bg-warning">{{ item['typ'] }}</span>
+              <span class="badge {% if item['typ'] == 'Alarm' %}text-bg-danger{% else %}text-bg-warning{% endif %}">{{ item['typ'] }}</span>
               <strong>{{ item['titel'] }}</strong>
             </div>
             <div class="text-muted small mail-meta">

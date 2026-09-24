@@ -9221,6 +9221,7 @@ def init_db():
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             autohaus_id  INTEGER NOT NULL,
             daten_json   TEXT DEFAULT '{}',
+            angelegter_auftrag_id INTEGER DEFAULT 0,
             erstellt_am  TEXT NOT NULL,
             geaendert_am TEXT NOT NULL,
             FOREIGN KEY (autohaus_id) REFERENCES autohaeuser(id)
@@ -9997,6 +9998,7 @@ def init_db():
     ensure_column(db, "rahmenvertrag_anfragen", "erledigt_am", "TEXT DEFAULT ''")
     ensure_column(db, "lackierauftrag_entwuerfe", "autohaus_id", "INTEGER DEFAULT 0")
     ensure_column(db, "lackierauftrag_entwuerfe", "daten_json", "TEXT DEFAULT '{}'")
+    ensure_column(db, "lackierauftrag_entwuerfe", "angelegter_auftrag_id", "INTEGER DEFAULT 0")
     ensure_column(db, "lackierauftrag_entwuerfe", "erstellt_am", "TEXT DEFAULT ''")
     ensure_column(db, "lackierauftrag_entwuerfe", "geaendert_am", "TEXT DEFAULT ''")
     ensure_column(db, "autohaeuser", "portal_key", "TEXT DEFAULT ''")
@@ -15066,6 +15068,7 @@ def get_lackierauftrag_entwurf(autohaus):
         return {
             "id": 0,
             "daten": defaults,
+            "angelegter_auftrag_id": 0,
             "erstellt_am": "",
             "geaendert_am": "",
         }
@@ -15078,6 +15081,7 @@ def get_lackierauftrag_entwurf(autohaus):
     return {
         "id": row["id"],
         "daten": normalize_lackierauftrag_data(merged, autohaus),
+        "angelegter_auftrag_id": int(row["angelegter_auftrag_id"] or 0),
         "erstellt_am": clean_text(row["erstellt_am"]),
         "geaendert_am": clean_text(row["geaendert_am"]),
     }
@@ -15119,15 +15123,59 @@ def lackierauftrag_beschreibung_aus_positionen(daten):
     zeilen = []
     for index in range(1, LACKIERAUFTRAG_POSITION_COUNT + 1):
         teil = clean_text((daten or {}).get(f"position_{index}_teil"))
-        if not teil:
-            continue
         seite = clean_text((daten or {}).get(f"position_{index}_seite"))
         bemerkung = clean_text((daten or {}).get(f"position_{index}_bemerkung"))
         status = clean_text((daten or {}).get(f"position_{index}_status"))
-        teil_text = f"{teil} ({seite})" if seite else teil
+        if not any((teil, seite, bemerkung, status)):
+            continue
+        teil_text = teil or f"Position {index} (Bauteil noch offen)"
+        if seite:
+            teil_text = f"{teil_text} ({seite})"
         rest = " – ".join(part for part in (bemerkung, status) if part)
         zeilen.append(f"{teil_text}: {rest}" if rest else teil_text)
     return "\n".join(zeilen)
+
+
+def reset_lackierauftrag_entwurf(autohaus):
+    db = get_db()
+    cursor = db.execute(
+        "DELETE FROM lackierauftrag_entwuerfe WHERE autohaus_id=? AND angelegter_auftrag_id!=-1",
+        (autohaus["id"],),
+    )
+    db.commit()
+    db.close()
+    return cursor.rowcount > 0
+
+
+def claim_lackierauftrag_anlage(autohaus, daten):
+    """Atomically claim this draft before creating its vehicle."""
+    db = get_db()
+    cursor = db.execute(
+        """
+        UPDATE lackierauftrag_entwuerfe
+        SET angelegter_auftrag_id=-1
+        WHERE autohaus_id=? AND daten_json=? AND angelegter_auftrag_id=0
+        """,
+        (autohaus["id"], json.dumps(daten, ensure_ascii=False)),
+    )
+    db.commit()
+    db.close()
+    return cursor.rowcount == 1
+
+
+def mark_lackierauftrag_anlage(autohaus, auftrag_id):
+    """Keep the completed draft marked until the partner explicitly starts a new one."""
+    db = get_db()
+    db.execute(
+        """
+        UPDATE lackierauftrag_entwuerfe
+        SET angelegter_auftrag_id=?
+        WHERE autohaus_id=? AND angelegter_auftrag_id=-1
+        """,
+        (auftrag_id, autohaus["id"]),
+    )
+    db.commit()
+    db.close()
 
 
 def create_auftrag_aus_lackierauftrag(autohaus, daten):
@@ -15334,7 +15382,7 @@ def make_lackierauftrag_pdf(autohaus, data=None):
         Table(
             positions,
             colWidths=[4.5 * cm, 2 * cm, 9 * cm, 2.5 * cm],
-            rowHeights=[0.55 * cm] + [0.7 * cm] * 14,
+            rowHeights=[0.55 * cm] + [None] * LACKIERAUFTRAG_POSITION_COUNT,
             style=TableStyle(
                 [
                     ("GRID", (0, 0), (-1, -1), 0.5, mid_gray),
@@ -22900,11 +22948,11 @@ def list_admin_postfach_items(limit=80):
     rows = db.execute(
         """
         SELECT r.id, r.auftrag_id, r.meldung, r.erstellt_am,
-               a.fahrzeug, a.kennzeichen, h.name AS autohaus_name
+               a.fahrzeug, a.kennzeichen, a.archiviert, h.name AS autohaus_name
         FROM reklamationen r
         JOIN auftraege a ON a.id = r.auftrag_id
         LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
-        WHERE r.bearbeitet=0 AND a.archiviert=0
+        WHERE r.bearbeitet=0
         ORDER BY r.erstellt_am DESC, r.id DESC
         LIMIT 80
         """
@@ -22917,7 +22965,7 @@ def list_admin_postfach_items(limit=80):
             {
                 "item_key": key,
                 "typ": "Alarm",
-                "titel": "Reklamation offen",
+                "titel": "Reklamation offen · Archiv" if row["archiviert"] else "Reklamation offen",
                 "nachricht": postfach_excerpt(row["meldung"]),
                 "erstellt_am": row["erstellt_am"],
                 "autohaus_name": row["autohaus_name"],
@@ -52887,10 +52935,73 @@ def partner_lackierauftrag_bearbeiten(slug):
         return redirect_response
     entwurf = get_lackierauftrag_entwurf(autohaus)
     if request.method == "POST":
+        aktion = request.form.get("aktion")
+        if aktion == "neuer_entwurf":
+            if not reset_lackierauftrag_entwurf(autohaus):
+                flash("Der Lackierauftrag wird gerade angelegt. Bitte zuerst den Abschluss abwarten.", "warning")
+                return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
+            flash("Neuer leerer Lackierauftrag gestartet. Der bereits angelegte Fahrzeugauftrag bleibt erhalten.", "info")
+            return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
+        if entwurf.get("angelegter_auftrag_id"):
+            previous_id = int(entwurf["angelegter_auftrag_id"])
+            previous_order = get_auftrag(previous_id) if previous_id > 0 else None
+            if aktion == "download":
+                return send_lackierauftrag_pdf(autohaus, entwurf["daten"])
+            if previous_order and previous_order.get("autohaus_id") == autohaus["id"]:
+                flash("Dieses Fahrzeug wurde bereits angelegt. Bitte den bestehenden Auftrag öffnen.", "warning")
+                return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=previous_id))
+            flash("Der Lackierauftrag wird bereits angelegt. Bitte das Dashboard prüfen, bevor Sie erneut senden.", "warning")
+            return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
         daten = parse_lackierauftrag_form(request.form, autohaus)
         daten = save_lackierauftrag_entwurf(autohaus, daten)
-        if request.form.get("aktion") == "fahrzeug_anlegen":
-            auftrag_id = create_auftrag_aus_lackierauftrag(autohaus, daten)
+        if aktion == "fahrzeug_anlegen":
+            if not (daten.get("typ") or daten.get("kennzeichen")):
+                flash("Bitte Fahrzeugtyp oder Kennzeichen eintragen, bevor Sie das Fahrzeug anlegen.", "warning")
+                return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
+            try:
+                pdf = make_lackierauftrag_pdf(autohaus, daten)
+            except Exception:
+                app.logger.exception("Online-Lackierauftrag konnte nicht als PDF erzeugt werden")
+                flash("Das PDF konnte nicht erzeugt werden. Ihre Eingaben sind gespeichert; bitte versuchen Sie es erneut.", "danger")
+                return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
+            if not claim_lackierauftrag_anlage(autohaus, daten):
+                current_id = get_lackierauftrag_entwurf(autohaus)["angelegter_auftrag_id"]
+                if current_id > 0:
+                    flash("Dieses Fahrzeug wurde bereits angelegt. Bitte den bestehenden Auftrag öffnen.", "warning")
+                    return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=current_id))
+                flash("Der Lackierauftrag wird bereits angelegt. Bitte das Dashboard prüfen, bevor Sie erneut senden.", "warning")
+                return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
+            try:
+                auftrag_id = create_auftrag_aus_lackierauftrag(autohaus, daten)
+            except Exception:
+                app.logger.exception("Online-Lackierauftrag konnte kein Fahrzeug anlegen")
+                mark_lackierauftrag_anlage(autohaus, 0)
+                flash("Das Fahrzeug konnte nicht angelegt werden. Ihre Eingaben sind gespeichert; bitte versuchen Sie es erneut.", "danger")
+                return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
+            mark_lackierauftrag_anlage(autohaus, auftrag_id)
+            from werkzeug.datastructures import FileStorage
+
+            pdf_name = f"Lackierauftrag_{autohaus['slug']}_{auftrag_id}.pdf"
+            try:
+                saved, _ = save_uploads(
+                    auftrag_id,
+                    [FileStorage(stream=pdf, filename=pdf_name, content_type="application/pdf")],
+                    "autohaus",
+                    "standard",
+                    analyze=False,
+                    dokument_zweck="ablage",
+                )
+            except Exception:
+                app.logger.exception("Online-Lackierauftrag konnte nicht zum Auftrag gespeichert werden")
+                saved = 0
+            if not saved:
+                flash(
+                    "Fahrzeug angelegt, aber das Lackierauftrag-PDF konnte nicht abgelegt werden. "
+                    "Die Eingaben bleiben im Entwurf; bitte den bestehenden Auftrag öffnen und das PDF dort nachreichen. "
+                    "Nicht erneut ein Fahrzeug anlegen.",
+                    "danger",
+                )
+                return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
             whatsapp_sent, whatsapp_errors = notify_workshop_whatsapp_for_new_order(
                 auftrag_id,
                 absender_label=autohaus.get("name") or autohaus.get("portal_label") or "Autohaus",
@@ -52900,9 +53011,9 @@ def partner_lackierauftrag_bearbeiten(slug):
                 detail = whatsapp_error_summary(whatsapp_errors)
                 suffix = f" Grund: {detail}" if detail else ""
                 flash(f"WhatsApp-Hinweis an die Werkstatt wurde nicht gesendet.{suffix}", "warning")
-            flash("Lackierauftrag übernommen – das Fahrzeug ist jetzt im Dashboard gespeichert.", "success")
+            flash("Fahrzeug und ausgefülltes Lackierauftrag-PDF sind im Auftrag gespeichert.", "success")
             return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
-        if request.form.get("aktion") == "download":
+        if aktion == "download":
             return send_lackierauftrag_pdf(autohaus, daten)
         flash("Lackierauftrag gespeichert. Sie können ihn später weiterbearbeiten oder als PDF herunterladen.", "success")
         return redirect(url_for("partner_lackierauftrag_bearbeiten", slug=slug))
