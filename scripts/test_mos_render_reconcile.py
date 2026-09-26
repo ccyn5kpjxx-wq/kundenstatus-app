@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'scripts'))
 
 from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME
+from mos_booking.production import StripeLiveGateway
 import run_mos_render_reconcile as runner
 
 
@@ -43,7 +44,7 @@ def fixture_config():
         'terms_version': 'test-fixture-final-v1', 'terms_text': 'TEST ONLY',
         'privacy_url': 'https://booking.example.invalid/privacy',
         'merchant_name': LESSOR_NAME, 'merchant_address': LESSOR_ADDRESS,
-        'merchant_email': 'test@example.invalid', 'merchant_phone': 'TEST',
+        'merchant_email': 'test@example.invalid', 'merchant_phone': '+49 1522 0000000',
     }
 
 
@@ -82,17 +83,42 @@ class RenderReconcileTests(unittest.TestCase):
         self.assertEqual(kwargs['env']['MAILBOX_SEND_ENABLED'], 'false')
         self.assertNotIn('DATA_DIR', self.env)
 
-    def test_missing_insurance_or_live_activation_does_not_start_job(self):
-        with patch.object(runner.subprocess, 'run') as process:
+    def test_missing_insurance_blocks_new_bookings_but_not_existing_settlement(self):
+        with patch.object(runner.subprocess, 'run', return_value=SimpleNamespace(returncode=0)) as process:
             del self.config['launch']['insurance']['kona']
             self.write_config()
             self.assertEqual(runner.run(self.env, secret_root=self.root), 2)
             process.assert_not_called()
-            self.config = fixture_config()
+            self.config['enabled'] = False
+            self.write_config()
+            self.assertEqual(runner.preflight(self.env, secret_root=self.root), self.config)
+            self.assertEqual(runner.run(self.env, secret_root=self.root), 0)
+            process.assert_called_once()
+            process.reset_mock()
             self.config['live_enabled'] = False
             self.write_config()
             self.assertEqual(runner.run(self.env, secret_root=self.root), 2)
             process.assert_not_called()
+
+    def test_disabled_new_bookings_need_no_browser_key_but_no_new_provider_objects(self):
+        self.config['enabled'] = False
+        self.config['launch'] = {}  # operator withdrew new-booking approvals
+        self.write_config()
+        environment = {key: value for key, value in self.env.items()
+                       if key != 'MOS_STRIPE_PUBLISHABLE_KEY'}
+        self.assertEqual(runner.preflight(environment, secret_root=self.root), self.config)
+        with patch('stripe.StripeClient') as client:
+            gateway = StripeLiveGateway('rk_live_TEST_ONLY', self.config, settlement_only=True)
+            with self.assertRaisesRegex(ValueError, 'kein Miet-Checkout'):
+                gateway.create({}, 'new-checkout')
+            with self.assertRaisesRegex(ValueError, 'keine neue Kautionsautorisierung'):
+                gateway.create_deposit_intent({}, 'new-card-hold')
+            client.return_value.v1.checkout.sessions.create.assert_not_called()
+            client.return_value.v1.payment_intents.create.assert_not_called()
+        self.config['enabled'] = True
+        self.write_config()
+        with self.assertRaises(runner.ReconcilePreflightError):
+            runner.preflight(environment, secret_root=self.root)
 
     def test_wrong_database_secret_location_or_key_mode_fails_closed(self):
         bad = (

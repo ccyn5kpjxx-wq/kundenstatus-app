@@ -1,4 +1,5 @@
 """Public-facing TEST flow; explicit configuration, isolated portal DB, no live mode."""
+from base64 import b64encode
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -14,7 +15,7 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, abort, current_app, redirect, render_template, request, session, url_for
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME, init_schema as init_contract_schema
-from mos_public_contract import finalize as finalize_contract, presign_quote, read as read_contract
+from mos_public_contract import finalize as finalize_contract, presign_quote, read as read_contract, signature_png
 from mos_public_contract import signed_payload
 from mos_handover import init_schema as init_handover_schema, existing as existing_handover, record as record_handover
 from mos_return import (init_schema as init_return_schema, deposit_release_eligible,
@@ -22,6 +23,7 @@ from mos_return import (init_schema as init_return_schema, deposit_release_eligi
                         record_vehicle_readiness,
                         release_review_deadline)
 from mos_order_receipt import init_schema as init_order_receipt_schema, enqueue as enqueue_order_receipt
+from mos_contract_delivery import _single_address
 
 LISTINGS = {'kona':'Hyundai KONA N Line X', 'i10':'Hyundai i10'}
 BERLIN = ZoneInfo('Europe/Berlin')
@@ -223,11 +225,12 @@ def register(portal):
                 raise ValueError('Slots müssen eindeutige Europe/Berlin-Zeitpunkte mit Offset sein.')
         from mos_booking.gateway import OfflineGateway, StripeTestGateway
         from mietwagen_checkout import SharedCheckout
-        from mos_booking.production import StripeLiveGateway, RefundLedger, init_refund_schema, launch_errors
+        from mos_booking.production import (StripeLiveGateway, RefundLedger, init_refund_schema,
+                                            launch_errors, settlement_errors)
         if live:
-            problems=launch_errors(cfg)
+            problems=launch_errors(cfg) if cfg.get('enabled') is True else settlement_errors(cfg)
             if problems:raise ValueError('Buchung noch nicht freigegeben: '+'; '.join(problems))
-            if (cfg['launch']['termination_review']['applies']
+            if (cfg.get('enabled') is True and cfg['launch']['termination_review']['applies']
                     and not app.config.get('MOS_TERMINATION_ENABLED')):
                 raise ValueError('Öffentlicher Kündigungsweg muss vor Livebuchungen aktiviert sein.')
             if not portal.USE_POSTGRES:
@@ -241,9 +244,10 @@ def register(portal):
         else:
             secret=app.config.get('MOS_PUBLIC_WEBHOOK_SECRET','')
             if not secret.startswith('whsec_'):raise ValueError('Test-Webhook-Secret fehlt.')
-            gateway=(StripeLiveGateway(app.config.get('MOS_PUBLIC_STRIPE_LIVE_KEY',''),cfg) if live else
+            gateway=(StripeLiveGateway(app.config.get('MOS_PUBLIC_STRIPE_LIVE_KEY',''),cfg,
+                                       settlement_only=cfg.get('enabled') is False) if live else
                      StripeTestGateway(app.config.get('MOS_PUBLIC_STRIPE_TEST_KEY','')))
-            if cfg.get('deposit_method')=='card_authorization_at_booking':
+            if cfg.get('enabled') is True and cfg.get('deposit_method')=='card_authorization_at_booking':
                 publishable=app.config.get('MOS_PUBLIC_STRIPE_PUBLISHABLE_KEY','')
                 if not publishable.startswith('pk_live_' if live else 'pk_test_'):
                     raise ValueError('Passender Stripe-Schlüssel für das sichere Kartenformular fehlt.')
@@ -386,7 +390,8 @@ def register(portal):
             'deposit_cents':cfg['deposit_cents'],'deductible_cents':cfg['deductible_cents'],
             'rules_version':cfg['terms_version'],'terms_text':cfg['terms_text'],'owner_hash':owner(),
             'test_only':cfg['mode']!='live','vat_included':True,
-            'lessor_name':LESSOR_NAME,'lessor_address':LESSOR_ADDRESS}
+            'lessor_name':LESSOR_NAME,'lessor_address':LESSOR_ADDRESS,
+            'lessor_email':cfg.get('merchant_email',''),'lessor_phone':cfg.get('merchant_phone','')}
         if cfg.get('cancellation_policy'):
             quoted['cancellation_policy']=cfg['cancellation_policy']
         return quoted
@@ -398,12 +403,29 @@ def register(portal):
         if payload['quote'].get('owner_hash')!=owner():abort(404)
         return h,payload
 
+    def retry_existing_checkout(request_key,customer,signature_data):
+        """Replayed form submissions may reuse only the original signed hold."""
+        db=portal.get_db()
+        try:old=db.execute('SELECT id FROM miet_checkout_holds WHERE request_key=?',(request_key,)).fetchone()
+        finally:db.close()
+        if not old:return None
+        h,p=owned(old['id'])
+        if p['customer']!=customer:
+            raise ValueError('Kundendaten nach der Unterschrift geändert. Bitte neue Preisübersicht öffnen.')
+        signed_payload(p)
+        submitted=b64encode(signature_png(signature_data)).decode('ascii')
+        if submitted!=p['quote']['signature_png_base64']:
+            raise ValueError('Unterschrift nach der Reservierung geändert. Bitte neue Preisübersicht öffnen.')
+        return retry(h['id'])
+
     def account(hold_id):
         db=portal.get_db()
         try:
             c=db.execute('SELECT * FROM miet_checkout_cancellations WHERE id=?',(hold_id,)).fetchone()
             refunds=db.execute('SELECT * FROM miet_checkout_refunds WHERE hold_id=? ORDER BY created_at',(hold_id,)).fetchall()
-            return {'cancellation':dict(c) if c else None,'refunds':[dict(r) for r in refunds]}
+            review=db.execute('SELECT * FROM miet_checkout_review_refunds WHERE hold_id=?',(hold_id,)).fetchone()
+            return {'cancellation':dict(c) if c else None,'refunds':[dict(r) for r in refunds],
+                    'review_refund':dict(review) if review else None}
         finally:db.close()
 
     @bp.get('/status/<hold_id>/bestaetigung.txt')
@@ -423,6 +445,8 @@ def register(portal):
             text+=f"\nKaution eingezogen: {q.get('deposit_charged_cents',0)/100:.2f} EUR\nGesamtzahlung: {q['amount_cents']/100:.2f} EUR"
         text+='\nAbholung persönlich: Gärtner, Binauer Höhe 4, 74821 Mosbach-Lohrbach.'
         text+='\nVermieter und Vertragspartner: '+q.get('lessor_name',LESSOR_NAME)+', '+q.get('lessor_address',LESSOR_ADDRESS)
+        if q.get('lessor_email') or q.get('lessor_phone'):
+            text+='\nKontakt Vermieter: '+', '.join(filter(None,(q.get('lessor_email'),q.get('lessor_phone'))))
         text+='\nAutovermietung MOS ist nur die Bezeichnung des Angebots, keine eigene Vertragspartei.'
         text+='\nBedingungsversion: '+q['rules_version']+'\n\n'+q['terms_text']
         db=portal.get_db()
@@ -733,6 +757,11 @@ def register(portal):
             key=request.form.get('request_id','')
             if not 20<=len(key)<=100:raise ValueError('Erstattungsreferenz fehlt.')
             rid=state['ledger'].credit(hold_id,int(request.form.get('cents','')),reason,key)
+        elif action=='review_full_refund':
+            if request.form.get('confirm_review_refund')!='yes':
+                raise ValueError('Vollerstattung des geprüften, nicht bestätigten Falls ausdrücklich bestätigen.')
+            rid=state['ledger'].review_full_refund(
+                hold_id,request.form.get('operator_name',''),reason)
         elif action=='deposit':
             if q.get('deposit_authorized_cents'):
                 db=portal.get_db()
@@ -765,6 +794,13 @@ def register(portal):
             try:state['service'].release_deposit(hold_id,reason)
             except Exception:
                 portal.flash('Kartenreservierung noch offen; Providerstatus prüfen und Freigabe erneut ausführen.','warning')
+        if action=='review_full_refund':
+            try:state['service'].release_deposit(hold_id,'Vollerstattung einer bezahlten, nicht bestätigten Buchung')
+            except Exception:
+                portal.flash('Kartenreservierung noch offen oder unklar; separat mit Stripe abgleichen.','warning')
+            try:state['ledger'].close_review_refund(hold_id)
+            except ValueError:
+                portal.flash('Prüffall bleibt gesperrt, bis Vollerstattung und Kartenfreigabe bestätigt sind.','warning')
         return redirect(url_for('mos_public.admin_bookings'),code=303)
 
     @bp.get('/')
@@ -959,24 +995,32 @@ def register(portal):
         if q['owner_hash']!=owner():abort(404)
         state=setup();key=hashlib.sha256((owner()+token).encode()).hexdigest()
         customer={'name':request.form.get('name','').strip(),'email':request.form.get('email','').strip(),'telefon':''}
-        if not customer['name'] or not customer['email'] or len(customer['name'])>150 or len(customer['email'])>254:
+        if (not customer['name'] or len(customer['name'])>150 or len(customer['email'])>254
+                or not _single_address(customer['email'])):
             raise ValueError('Bitte gültigen Namen und E-Mail angeben.')
         if request.form.get('sign_confirm')!='yes':
             raise ValueError('Bitte den Vertrag vor der Zahlung ausdrücklich unterschreiben.')
         # A repeated POST retries the same immutable hold, even though it now occupies the period.
-        db=portal.get_db()
-        try:old=db.execute('SELECT id FROM miet_checkout_holds WHERE request_key=?',(key,)).fetchone()
-        finally:db.close()
-        if old:
-            h,p=owned(old['id'])
-            if p['customer']!=customer:
-                raise ValueError('Kundendaten nach der Unterschrift geändert. Bitte neue Preisübersicht öffnen.')
-            return retry(h['id'])
-        if not old and quote(q['slug'],q['start_slot'],q['end_slot'])!=q:
+        signature_data=request.form.get('signature_data','')
+        existing=retry_existing_checkout(key,customer,signature_data)
+        if existing is not None:return existing
+        try:current_quote=quote(q['slug'],q['start_slot'],q['end_slot'])
+        except ValueError:
+            existing=retry_existing_checkout(key,customer,signature_data)
+            if existing is not None:return existing
+            raise
+        if current_quote!=q:
+            existing=retry_existing_checkout(key,customer,signature_data)
+            if existing is not None:return existing
             raise ValueError('Preis oder Regeln geändert. Bitte neue Übersicht bestätigen.')
-        q=presign_quote(q,customer,request.form.get('signature_data',''))
-        h=state['service'].reserve(key,q['vehicle_id'],datetime.fromisoformat(q['start_slot']).date().isoformat(),
-                                  datetime.fromisoformat(q['end_slot']).date().isoformat(),customer,q)
+        q=presign_quote(q,customer,signature_data)
+        try:
+            h=state['service'].reserve(key,q['vehicle_id'],datetime.fromisoformat(q['start_slot']).date().isoformat(),
+                                       datetime.fromisoformat(q['end_slot']).date().isoformat(),customer,q)
+        except ValueError:
+            existing=retry_existing_checkout(key,customer,signature_data)
+            if existing is not None:return existing
+            raise
         return retry(h['id'])
 
     @bp.post('/status/<hold_id>/retry')

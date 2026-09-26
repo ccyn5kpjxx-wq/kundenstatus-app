@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from io import BytesIO
 import json
+import re
 from xml.sax.saxutils import escape
 from zoneinfo import ZoneInfo
 
@@ -18,6 +19,14 @@ from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate
 LESSOR_NAME = 'Gärtner GmbH Karosserie + Lack'
 LESSOR_ADDRESS = 'Binauer Höhe 4, 74821 Mosbach, Deutschland'
 OFFER_NAME = 'Autovermietung MOS'
+
+
+def valid_lessor_contact(email, phone):
+    return (isinstance(email, str) and isinstance(phone, str)
+            and len(email) <= 254
+            and re.fullmatch(r'[^\s@,;\x00]+@[^\s@,;\x00]+\.[^\s@,;\x00]+', email) is not None
+            and re.fullmatch(r'\+?[0-9() /-]{7,40}', phone) is not None
+            and sum(c.isdigit() for c in phone) >= 7)
 
 
 def init_schema(db):
@@ -63,6 +72,13 @@ def snapshot(payload):
     for key in ('deposit_authorized_cents', 'deposit_method', 'cancellation_policy'):
         if key in q:
             contract[key] = q[key]
+    # Old signed quotes have no contact fields and must keep their original hash.
+    if q.get('lessor_email') or q.get('lessor_phone'):
+        email, phone = q.get('lessor_email'), q.get('lessor_phone')
+        if not valid_lessor_contact(email, phone):
+            raise ValueError('Vermieterkontakt im unterschriebenen Angebot ist ungültig.')
+        contract['lessor_email'] = email
+        contract['lessor_phone'] = phone
     return contract
 
 
@@ -147,8 +163,11 @@ def render_pdf(contract, signed_at, signature, document_hash, signature_record_h
         para('Vertragsparteien', 'MOSSection'),
         para('Vermieter: ' + contract['lessor_name'] + ', ' + contract['lessor_address']),
         para('Mieter: ' + contract['customer_name'] + ' · ' + contract['customer_email']),
-        para('Fahrzeug und Zahlung', 'MOSSection'),
     ]
+    if 'lessor_email' in contract and 'lessor_phone' in contract:
+        story.append(para('Kontakt des Vermieters: ' + contract['lessor_email'] +
+                          ' · Telefon ' + contract['lessor_phone']))
+    story.append(para('Fahrzeug und Zahlung', 'MOSSection'))
     rows = [
         ('Fahrzeug', contract['vehicle_name']),
         ('Kennzeichen', contract['vehicle_plate'] or 'Wird vor Übergabe mitgeteilt'),

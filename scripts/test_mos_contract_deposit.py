@@ -71,11 +71,40 @@ class DepositContractTests(unittest.TestCase):
         contract = self.contract(False)
         self.assertNotIn('deposit_authorized_cents', contract)
         self.assertNotIn('deposit_method', contract)
+        self.assertNotIn('lessor_email', contract)
+        self.assertNotIn('lessor_phone', contract)
         self.assertEqual(contract['amount_cents'], 64700)
         self.assertEqual(contract['deposit_charged_cents'], 50000)
         text = self.pdf_text(contract)
         self.assertIn('Kaution im Zahlbetrag', text)
         self.assertNotIn('Kaution auf Kreditkarte reserviert', text)
+
+    def test_new_quote_signs_vermieter_contact_and_prints_it_in_pdf(self):
+        old = self.contract(True)
+        new_quote = quote(authorized=True)
+        new_quote['lessor_email'] = 'info@auto-lackierzentrum.de'
+        new_quote['lessor_phone'] = '+49 1522 7706694'
+        contract = snapshot({'quote': new_quote,
+                             'customer': {'name': 'Testkunde', 'email': 'test@example.invalid'}})
+        self.assertEqual(contract['lessor_email'], 'info@auto-lackierzentrum.de')
+        self.assertEqual(contract['lessor_phone'], '+49 1522 7706694')
+        self.assertNotEqual(snapshot_hash(old), snapshot_hash(contract))
+        text = self.pdf_text(contract)
+        self.assertIn('info@auto-lackierzentrum.de', text)
+        self.assertIn('+49 1522 7706694', text)
+
+    def test_new_quote_requires_both_valid_contact_fields(self):
+        for email, phone in (('info@auto-lackierzentrum.de', None),
+                             ('not-an-email', '+49 1522 7706694'),
+                             ('info@auto-lackierzentrum.de', 'abc')):
+            with self.subTest(email=email, phone=phone):
+                new_quote = quote(authorized=True)
+                new_quote['lessor_email'] = email
+                if phone is not None:
+                    new_quote['lessor_phone'] = phone
+                with self.assertRaisesRegex(ValueError, 'Vermieterkontakt'):
+                    snapshot({'quote': new_quote,
+                              'customer': {'name': 'Testkunde', 'email': 'test@example.invalid'}})
 
     def test_new_contract_rejects_kaution_hidden_in_payable_amount(self):
         wrong = quote(authorized=True)

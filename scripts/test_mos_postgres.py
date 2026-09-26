@@ -50,6 +50,33 @@ def main():
 
     class RefundTests(suite_module.InventoryTests):
         # Only load the methods defined below; stock tests run separately.
+        def test_postgres_paid_review_full_refund_and_card_release(self):
+            h=self.authorization_hold(start_delta=timedelta(days=3))
+            intent=self.s.prepare_deposit(h['id'])
+            self.gateway.authorize_deposit_intent(intent['id'],valid_for_seconds=7*24*3600)
+            session=self.s.create_checkout(h['id'])
+            self.gateway.pay(session['id'])
+            body,signature=self.gateway.signed_event(session['id'])
+            portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False
+            self.assertIsNone(self.s.handle_signed_event(body,signature,self.secret))
+            self.assertEqual(self.s.read(h['id'])['status'],'review')
+            self.assertEqual(self.count(),0)
+            ledger=RefundLedger(self.s)
+            rid=ledger.review_full_refund(h['id'],'PG Test Operator',
+                                          'Paid after new bookings were paused')
+            self.assertEqual(ledger.process(rid),'succeeded')
+            self.assertEqual(self.s.release_deposit(h['id'],'Full rent refund completed'),
+                             'released')
+            self.assertEqual(ledger.close_review_refund(h['id']),'released')
+            self.assertEqual(self.s.read(h['id'])['grund'],'review_full_refund_completed')
+            self.assertEqual(self.count(),0)
+            db=portal.get_db()
+            try:
+                audit=db.execute('SELECT refund_id,amount_cents FROM miet_checkout_review_refunds WHERE hold_id=?',
+                                 (h['id'],)).fetchone()
+                self.assertEqual((audit['refund_id'],audit['amount_cents']),(rid,7800))
+            finally:db.close()
+
         def test_postgres_public_slot_close_blocks_reserve_and_checkout(self):
             start = (datetime.now(timezone.utc)+timedelta(days=5)).replace(second=0,microsecond=0)
             end = start+timedelta(days=1)
@@ -145,6 +172,7 @@ def main():
     names.remove('test_fulfilment_failure_rolls_back_rental_and_event')
     suite = unittest.TestSuite(suite_module.InventoryTests(n) for n in names)
     suite.addTest(RefundTests('test_postgres_refund_after_cancel'))
+    suite.addTest(RefundTests('test_postgres_paid_review_full_refund_and_card_release'))
     suite.addTest(RefundTests('test_postgres_atomic_rollback'))
     suite.addTest(RefundTests('test_postgres_public_slot_close_blocks_reserve_and_checkout'))
     suite.addTest(RefundTests('test_postgres_paid_webhook_after_slot_close_needs_review'))

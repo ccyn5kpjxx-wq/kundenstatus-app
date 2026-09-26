@@ -8043,7 +8043,9 @@ class PostgresConnection:
         insert_table = get_insert_table_name(converted_sql)
         # Some tables use a natural/text primary key instead of an `id` column.
         # A synthetic RETURNING id makes an otherwise valid INSERT fail on PG.
-        inserts_with_id = bool(insert_table and insert_table not in {"app_settings", "miet_checkout_contracts"}
+        inserts_with_id = bool(insert_table and insert_table not in {
+            "app_settings", "miet_checkout_contracts", "miet_checkout_review_refunds"
+        }
                                and " returning " not in lowered)
         if inserts_with_id:
             converted_sql = f"{converted_sql} RETURNING id"

@@ -62,8 +62,9 @@ def preflight(environment: dict[str, str], *, secret_root: Path = SECRET_ROOT) -
         config = json.loads(config_path.read_text(encoding='utf-8'))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ReconcilePreflightError('MOS-Konfiguration ist nicht lesbar oder ungültig.') from exc
-    if not isinstance(config, dict) or config.get('mode') != 'live' or config.get('enabled') is not True:
-        raise ReconcilePreflightError('Freigegebene Live-Konfiguration fehlt.')
+    if (not isinstance(config, dict) or config.get('mode') != 'live'
+            or type(config.get('enabled')) is not bool):
+        raise ReconcilePreflightError('Live- oder ausdrücklich deaktivierte Neubuchungskonfiguration fehlt.')
     try:
         origin = urlsplit(config.get('origin', ''))
     except (TypeError, ValueError) as exc:
@@ -71,16 +72,17 @@ def preflight(environment: dict[str, str], *, secret_root: Path = SECRET_ROOT) -
     if origin.scheme != 'https' or not origin.hostname or origin.path or origin.query or origin.fragment:
         raise ReconcilePreflightError('HTTPS-Origin der Livebuchung fehlt.')
 
-    from mos_booking.production import launch_errors
+    from mos_booking.production import launch_errors, settlement_errors
 
     try:
-        missing = launch_errors(config)
+        missing = launch_errors(config) if config['enabled'] else settlement_errors(config)
     except (AttributeError, TypeError, ValueError) as exc:
         raise ReconcilePreflightError('Buchungsfreigaben sind ungültig.') from exc
     if missing:
         raise ReconcilePreflightError('Buchungsfreigaben unvollständig: ' + '; '.join(missing))
     _required_value(environment, 'MOS_STRIPE_LIVE_KEY', ('sk_live_', 'rk_live_'))
-    _required_value(environment, 'MOS_STRIPE_PUBLISHABLE_KEY', ('pk_live_',))
+    if config['enabled']:
+        _required_value(environment, 'MOS_STRIPE_PUBLISHABLE_KEY', ('pk_live_',))
     _required_value(environment, 'MOS_STRIPE_WEBHOOK_SECRET', ('whsec_',))
     if environment.get('MOS_STRIPE_TEST_KEY'):
         raise ReconcilePreflightError('Testschlüssel darf nicht in der Live-Umgebung stehen.')

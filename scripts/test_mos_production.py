@@ -176,7 +176,7 @@ class ProductionTests(unittest.TestCase):
             cancellation_policy=CANCELLATION_POLICY_48H_10_PERCENT,
             privacy_url='https://booking.example.invalid/privacy',merchant_name='Gärtner GmbH Karosserie + Lack',
             merchant_address='Binauer Höhe 4, 74821 Mosbach, Deutschland',
-            merchant_email='test@example.invalid',merchant_phone='TEST')
+            merchant_email='test@example.invalid',merchant_phone='+49 1522 0000000')
         cfg['launch']={name:{'approved_by':'TEST FIXTURE','approved_at':'2026-09-22','evidence':'TEST ONLY'}
             for name in ['business_review','legal_review','finance_review','privacy_review','sandbox_acceptance',
                          'postgres_acceptance','contract_delivery_acceptance','checkout_button_acceptance',
@@ -199,6 +199,8 @@ class ProductionTests(unittest.TestCase):
         self.assertTrue(any('Stornoregel' in error for error in launch_errors(no_policy)))
         wrong=json.loads(json.dumps(cfg));wrong['merchant_name']='Autovermietung MOS'
         self.assertTrue(any('Vermieter' in error for error in launch_errors(wrong)))
+        bad_contact=json.loads(json.dumps(cfg));bad_contact['merchant_phone']='TEST'
+        self.assertTrue(any('Vermieterkontakt' in error for error in launch_errors(bad_contact)))
         changed_terms=json.loads(json.dumps(cfg));changed_terms['terms_text']+=' Neue Klausel.'
         self.assertTrue(any('aktuellen Bedingungsfassung' in e for e in launch_errors(changed_terms)))
         unknown_termination=json.loads(json.dumps(cfg));del unknown_termination['launch']['termination_review']['applies']
@@ -210,6 +212,33 @@ class ProductionTests(unittest.TestCase):
             self.assertTrue(launch_errors(changed),field)
         with patch('stripe.StripeClient') as client:
             StripeLiveGateway('rk_live_TEST_NOT_REAL',cfg);client.assert_called_once()
+
+    def test_signed_off_draft_terms_still_block_live_launch(self):
+        base=self.ready_config()
+        for marker in ('ENTWURF-2026-09-26-02', 'ENTWURF_2026-09-26',
+                       'NICHT VERÖFFENTLICHEN', 'Prüffassung', 'TODO_1',
+                       '[Vor Veröffentlichung: Schadenregel ergänzen.]',
+                       '[Den Annahmezeitpunkt bestimmen.]'):
+            with self.subTest(marker=marker):
+                cfg=json.loads(json.dumps(base))
+                cfg['terms_text']=base['terms_text']+'\n'+marker
+                cfg['launch']['legal_review']['terms_sha256']=hashlib.sha256(
+                    cfg['terms_text'].encode('utf-8')).hexdigest()
+                self.assertTrue(any('Entwurfsmarker' in error for error in launch_errors(cfg)))
+        for version in ('draft:final', 'DRAFT_2026-09-26', 'ENTWURF-2026-09-26-02'):
+            with self.subTest(version=version):
+                cfg=json.loads(json.dumps(base))
+                cfg['terms_version']=version
+                cfg['launch']['legal_review']['terms_version']=version
+                self.assertTrue(any('Entwurfsmarker' in error for error in launch_errors(cfg)))
+
+    def test_live_gateway_never_captures_deposit_authorization(self):
+        cfg=self.ready_config()
+        with patch('stripe.StripeClient') as client:
+            gateway=StripeLiveGateway('rk_live_TEST_NOT_REAL',cfg)
+            with self.assertRaisesRegex(ValueError,'nicht als Zahlung'):
+                gateway.capture_deposit_intent('pi_test_synthetic',50000,'no-capture')
+            client.return_value.v1.payment_intents.capture.assert_not_called()
 
     def test_live_checkout_split_total_and_mode_bound_webhook(self):
         cfg=self.ready_config()

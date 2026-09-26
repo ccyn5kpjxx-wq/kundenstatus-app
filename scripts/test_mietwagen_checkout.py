@@ -107,6 +107,84 @@ class InventoryTests(unittest.TestCase):
         portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False
         with self.assertRaises(ValueError):self.hold(start='2030-02-01',end='2030-02-02')
 
+    def test_paid_webhook_after_new_bookings_paused_stays_in_review(self):
+        h=self.hold();session=self.s.create_checkout(h['id'])
+        paid=self.gateway.pay(session['id'])
+        raw,sig=self.gateway.signed_event(session['id'])
+        portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False
+        self.assertIsNone(self.s.handle_signed_event(raw,sig,self.secret))
+        self.assertIsNone(self.s.handle_signed_event(raw,sig,self.secret))
+        paused=self.s.read(h['id'])
+        self.assertEqual((paused['status'],paused['grund']),
+                         ('review','paid_bookings_disabled_review'))
+        self.assertEqual(self.count(),0)
+        self.assertEqual(paused['session_id'],session['id'])
+        self.assertEqual(paused['payment_intent'],paid['payment_intent'])
+        with self.assertRaises(ValueError):self.admin()
+        portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=True
+        later,later_sig=self.gateway.signed_event(session['id'])
+        self.assertIsNone(self.s.handle_signed_event(later,later_sig,self.secret))
+        self.assertEqual(self.s.read(h['id'])['status'],'review')
+        self.assertEqual(self.count(),0)
+
+    def test_paused_live_config_overrides_stale_shared_creation_flag(self):
+        h=self.hold();session=self.s.create_checkout(h['id'])
+        self.gateway.pay(session['id'])
+        raw,sig=self.gateway.signed_event(session['id'])
+        with patch.dict(portal.app.config,{'MOS_PUBLIC_BOOKING':{'mode':'live','enabled':False}}):
+            self.assertIsNone(self.s.handle_signed_event(raw,sig,self.secret))
+            with self.assertRaises(ValueError):self.hold(start='2030-02-01',end='2030-02-02')
+        self.assertEqual(self.s.read(h['id'])['status'],'review')
+        self.assertEqual(self.count(),0)
+
+    def test_replayed_event_after_pause_marks_newly_paid_hold_for_review(self):
+        h=self.hold();session=self.s.create_checkout(h['id'])
+        raw,sig=self.gateway.signed_event(session['id'])
+        self.assertIsNone(self.s.handle_signed_event(raw,sig,self.secret))
+        self.gateway.pay(session['id'])
+        portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False
+        self.assertIsNone(self.s.handle_signed_event(raw,sig,self.secret))
+        self.assertEqual(self.s.read(h['id'])['status'],'review')
+        self.assertEqual(self.count(),0)
+
+    def test_paused_reconcile_expires_open_checkout_and_releases_card_hold(self):
+        h=self.authorization_hold()
+        intent=self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'],valid_for_seconds=7*24*3600)
+        session=self.s.create_checkout(h['id'])
+        portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False
+        self.s.cancel_or_reconcile(h['id'])
+        self.assertEqual(self.gateway.retrieve(session['id'])['status'],'expired')
+        self.assertEqual(self.s.read(h['id'])['status'],'released')
+        self.assertEqual(self.s._deposit_record(h['id'])['status'],'released')
+        with self.assertRaisesRegex(ValueError,'nicht mehr zahlbar'):
+            self.gateway.pay(session['id'])
+
+    def test_paused_reconcile_paid_race_waits_for_signed_review_webhook(self):
+        h=self.authorization_hold()
+        intent=self.s.prepare_deposit(h['id'])
+        self.gateway.authorize_deposit_intent(intent['id'],valid_for_seconds=7*24*3600)
+        session=self.s.create_checkout(h['id'])
+        portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False
+        self.gateway.pay(session['id'])
+        self.s.cancel_or_reconcile(h['id'])
+        self.assertEqual(self.s.read(h['id'])['status'],'pending')
+        self.assertEqual(self.s._deposit_record(h['id'])['status'],'authorized')
+        raw,sig=self.gateway.signed_event(session['id'])
+        self.assertIsNone(self.s.handle_signed_event(raw,sig,self.secret))
+        self.assertEqual(self.s.read(h['id'])['status'],'review')
+        self.assertEqual(self.count(),0)
+
+    def test_existing_confirmed_rental_survives_new_booking_pause(self):
+        h=self.hold();session=self.s.create_checkout(h['id'])
+        self.gateway.pay(session['id'])
+        raw,sig=self.gateway.signed_event(session['id'])
+        rental_id=self.s.handle_signed_event(raw,sig,self.secret)
+        portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False
+        self.assertEqual(self.s.handle_signed_event(raw,sig,self.secret),rental_id)
+        self.assertEqual(self.s.read(h['id'])['status'],'confirmed')
+        self.assertEqual(self.count(),1)
+
     def test_core_availability_schema_exists_without_public_mos_setup(self):
         portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False
         db=portal.get_db()

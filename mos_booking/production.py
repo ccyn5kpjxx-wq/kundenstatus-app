@@ -5,15 +5,31 @@ No network call occurs on import. Runtime enabling requires explicit operator ev
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import re
 import secrets
 import stripe
 from zoneinfo import ZoneInfo
 from .gateway import StripeTestGateway
-from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME
+from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME, valid_lessor_contact
 
 ACTIVE_LISTINGS={'kona','i10'}
 CANCELLATION_POLICY_48H_10_PERCENT='free_48h_then_10pct_rent'
 BERLIN=ZoneInfo('Europe/Berlin')
+
+
+def _is_draft_terms(value):
+    """Reject unmistakable editorial markers even if a matching hash was signed off."""
+    if not isinstance(value,str):
+        return False
+    text=value.casefold()
+    if re.search(r'(?<![a-z0-9äöüß])(?:entwurf|draft|todo|tbd|platzhalter|prüffassung|prueffassung)(?![a-z0-9äöüß])',text):
+        return True
+    if 'nicht veröffentlichen' in text or 'nicht veroeffentlichen' in text:
+        return True
+    return bool(re.search(
+        r'\[[^\]]*\b(?:vor veröffentlichung|vor veroeffentlichung|bestimmen|ergänzen|ergaenzen|'
+        r'prüfen|pruefen|abstimmen|abnehmen|ersetzen|klären|klaeren|dokumentieren|nachtragen|nachweisen)\b[^\]]*\]',
+        text,re.DOTALL))
 
 
 def launch_errors(cfg):
@@ -33,6 +49,8 @@ def launch_errors(cfg):
             legal.get('terms_sha256') != hashlib.sha256(terms.encode('utf-8')).hexdigest() or
             legal.get('terms_version') != cfg.get('terms_version')):
         errors.append('Rechtsfreigabe gehört nicht zur aktuellen Bedingungsfassung.')
+    if _is_draft_terms(terms) or _is_draft_terms(cfg.get('terms_version')):
+        errors.append('Bedingungstext oder Version enthält Entwurfsmarker.')
     if type(launch.get('termination_review', {}).get('applies')) is not bool:
         errors.append('§-312k-Entscheidung zur Kündigungsstrecke fehlt.')
     for slug in ACTIVE_LISTINGS:
@@ -50,6 +68,8 @@ def launch_errors(cfg):
         errors.append('Freigegebene Bedingungsversion fehlt.')
     for name in ('terms_text','privacy_url','merchant_name','merchant_address','merchant_email','merchant_phone'):
         if not cfg.get(name):errors.append('Pflichtangabe fehlt: '+name)
+    if not valid_lessor_contact(cfg.get('merchant_email'),cfg.get('merchant_phone')):
+        errors.append('Gültiger Vermieterkontakt mit E-Mail und Telefon fehlt.')
     if cfg.get('merchant_name') and cfg['merchant_name'] != LESSOR_NAME:
         errors.append('Vermieter muss Gärtner GmbH Karosserie + Lack sein.')
     if cfg.get('merchant_address') and cfg['merchant_address'] != LESSOR_ADDRESS:
@@ -61,13 +81,44 @@ def launch_errors(cfg):
     return errors
 
 
+def settlement_errors(cfg):
+    """Allow existing live bookings to settle after new bookings are stopped.
+
+    Insurance and current terms approval govern *new* rentals. Removing either
+    approval must not strand an already paid rental or its card authorization.
+    The runtime still needs an explicit live settlement mode and provider key.
+    """
+    errors=[]
+    if cfg.get('mode')!='live' or cfg.get('enabled') is not False or cfg.get('live_enabled') is not True:
+        errors.append('Nur ausdrücklich deaktivierte Live-Neubuchungen dürfen abgewickelt werden.')
+    if cfg.get('deposit_method')!='card_authorization_at_booking':
+        errors.append('Bestehende Kreditkarten-Autorisierungen erfordern den aktuellen Kautionsmodus.')
+    if not cfg.get('origin','').startswith('https://'):
+        errors.append('Bestehende Livebuchungen erfordern HTTPS.')
+    return errors
+
+
 class StripeLiveGateway(StripeTestGateway):
     livemode=True
-    def __init__(self,key,cfg):
-        errors=launch_errors(cfg)
+    def __init__(self,key,cfg,*,settlement_only=False):
+        errors=settlement_errors(cfg) if settlement_only else launch_errors(cfg)
         if errors:raise ValueError('; '.join(errors))
         if not key.startswith(('sk_live_','rk_live_')):raise ValueError('Live-Schlüssel fehlt oder falscher Modus.')
+        self.settlement_only=settlement_only
         self.client=stripe.StripeClient(key,max_network_retries=2)
+
+    def create(self,params,key):
+        if self.settlement_only:
+            raise ValueError('Bei deaktivierter Neubuchung darf kein Miet-Checkout erzeugt werden.')
+        return super().create(params,key)
+
+    def create_deposit_intent(self,params,key):
+        if self.settlement_only:
+            raise ValueError('Bei deaktivierter Neubuchung darf keine neue Kautionsautorisierung entstehen.')
+        return super().create_deposit_intent(params,key)
+
+    def capture_deposit_intent(self,intent_id,amount_cents,key):
+        raise ValueError('Eine MOS-Kautionsautorisierung darf nicht als Zahlung eingezogen werden.')
 
     def refund(self,payment_intent,amount,key):
         return self.client.v1.refunds.create({'payment_intent':payment_intent,'amount':amount},
@@ -85,6 +136,11 @@ def init_refund_schema(db):
         id TEXT PRIMARY KEY, hold_id TEXT NOT NULL, amount_cents BIGINT NOT NULL,
         kind TEXT NOT NULL, status TEXT NOT NULL, provider_id TEXT UNIQUE,
         reason TEXT NOT NULL, created_at TEXT NOT NULL)''')
+    db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_review_refunds (
+        hold_id TEXT PRIMARY KEY, refund_id TEXT NOT NULL UNIQUE,
+        session_id TEXT NOT NULL, payment_intent TEXT NOT NULL,
+        amount_cents BIGINT NOT NULL, verified_at TEXT NOT NULL,
+        operator_name TEXT NOT NULL, reason TEXT NOT NULL)''')
     db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_limits (
         id TEXT PRIMARY KEY, attempts INTEGER NOT NULL)''')
 
@@ -109,6 +165,98 @@ def cancellation_fee(quote,requested_at):
 
 class RefundLedger:
     def __init__(self,service):self.s=service
+
+    def review_full_refund(self,hold_id,operator_name,reason):
+        """Queue one full rental refund after an operator verifies a paid Session.
+
+        Browser redirects and review flags are insufficient payment evidence.
+        The provider lookup is deliberately outside the vehicle transaction;
+        all hold and refund conditions are checked again under its lock.
+        """
+        operator_name=operator_name.strip() if isinstance(operator_name,str) else ''
+        reason=reason.strip() if isinstance(reason,str) else ''
+        if not 2<=len(operator_name)<=100 or not 5<=len(reason)<=1000:
+            raise ValueError('Prüfende Person und konkrete Begründung für die Vollerstattung angeben.')
+        h=self.s.read(hold_id)
+        if not h['session_id']:
+            raise ValueError('Keine prüfbare Stripe-Zahlungssitzung vorhanden.')
+        session=self.s.gateway.retrieve(h['session_id'])
+        self.s.validate(h,session)
+        q=json.loads(h['payload'])['quote']
+        pi=session.get('payment_intent')
+        if (h['status']!='review' or h['mietvorgang_id']
+                or session.get('object')!='checkout.session'
+                or session.get('status')!='complete' or session.get('payment_status')!='paid'
+                or not isinstance(pi,str) or not pi.startswith('pi_')
+                or h['payment_intent'] not in (None,pi)
+                or q.get('deposit_method')!='card_authorization_at_booking'
+                or q.get('deposit_charged_cents')!=0
+                or q.get('deposit_authorized_cents')!=50000
+                or type(q.get('rental_cents')) is not int or q['rental_cents']<=0
+                or q.get('amount_cents')!=q['rental_cents']):
+            raise ValueError('Prüffall und verifizierte Mietpreiszahlung stimmen nicht überein.')
+        rid='review-full-'+hold_id
+        with self.s.locked(h['mietfahrzeug_id']) as (db,_):
+            current=dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?',
+                                    (hold_id,)).fetchone())
+            self.s.validate(current,session)
+            if current['mietvorgang_id'] or current['status']!='review':
+                raise ValueError('Prüffall wurde zwischenzeitlich geändert.')
+            if current['payment_intent'] not in (None,pi) or db.execute(
+                    'SELECT id FROM miet_checkout_holds WHERE payment_intent=? AND id!=?',
+                    (pi,hold_id)).fetchone():
+                raise ValueError('Stripe-Zahlung ist einem anderen Fall zugeordnet.')
+            old=db.execute('SELECT * FROM miet_checkout_review_refunds WHERE hold_id=?',
+                           (hold_id,)).fetchone()
+            if old:
+                if (old['refund_id']!=rid or old['session_id']!=session['id']
+                        or old['payment_intent']!=pi or old['amount_cents']!=q['rental_cents']):
+                    raise ValueError('Prüffall hat abweichenden Erstattungsauftrag.')
+                return rid
+            if db.execute('SELECT id FROM miet_checkout_refunds WHERE hold_id=?',
+                          (hold_id,)).fetchone():
+                raise ValueError('Bereits vorhandene Erstattung zuerst manuell abgleichen.')
+            if db.execute('SELECT id FROM miet_checkout_cancellations WHERE id=?',
+                          (hold_id,)).fetchone():
+                raise ValueError('Bereits stornierte Buchung getrennt abrechnen.')
+            note=('Vollerstattung einer bezahlten, nicht bestätigten Buchung; '
+                  'Prüfung durch '+operator_name+'; Stripe-Session '+session['id']+
+                  '; PaymentIntent '+pi+'; Grund: '+reason)
+            self._enqueue(db,current,q['rental_cents'],'review_full_refund',note,rid)
+            db.execute('''INSERT INTO miet_checkout_review_refunds
+                (hold_id,refund_id,session_id,payment_intent,amount_cents,verified_at,operator_name,reason)
+                VALUES (?,?,?,?,?,?,?,?)''',
+                (hold_id,rid,session['id'],pi,q['rental_cents'],
+                 datetime.now(timezone.utc).isoformat(),operator_name,reason))
+            db.execute("UPDATE miet_checkout_holds SET payment_intent=? WHERE id=?",
+                       (pi,hold_id))
+            return rid
+
+    def close_review_refund(self,hold_id):
+        """Free inventory only after both the rent refund and card release."""
+        h=self.s.read(hold_id)
+        with self.s.locked(h['mietfahrzeug_id']) as (db,_):
+            current=db.execute('SELECT status,grund,mietvorgang_id FROM miet_checkout_holds WHERE id=?',
+                               (hold_id,)).fetchone()
+            if current['status']=='released' and current['grund']=='review_full_refund_completed':
+                return 'released'
+            if current['status']!='review' or current['mietvorgang_id']:
+                raise ValueError('Prüffall ist nicht mehr abschließbar.')
+            audit=db.execute('SELECT * FROM miet_checkout_review_refunds WHERE hold_id=?',
+                             (hold_id,)).fetchone()
+            refund=(db.execute('SELECT * FROM miet_checkout_refunds WHERE id=?',
+                               (audit['refund_id'],)).fetchone() if audit else None)
+            deposit=db.execute('SELECT status FROM miet_checkout_deposit_auths WHERE hold_id=?',
+                               (hold_id,)).fetchone()
+            if (not audit or not refund or refund['status']!='succeeded'
+                    or refund['kind']!='review_full_refund'
+                    or refund['amount_cents']!=audit['amount_cents']
+                    or refund['provider_id'] is None or not deposit
+                    or deposit['status']!='released'):
+                raise ValueError('Erstattung oder Kautionsfreigabe noch nicht belegt; Prüffall bleibt gesperrt.')
+            db.execute("UPDATE miet_checkout_holds SET status='released',grund='review_full_refund_completed' WHERE id=?",
+                       (hold_id,))
+            return 'released'
 
     def _enqueue(self,db,h,amount,kind,reason,request_id):
         old=db.execute('SELECT * FROM miet_checkout_refunds WHERE id=?',(request_id,)).fetchone()
@@ -206,6 +354,7 @@ class RefundLedger:
         if (result.get('payment_intent')!=h['payment_intent'] or result.get('amount')!=r['amount_cents']
             or (r['provider_id'] and result.get('id')!=r['provider_id'])
             or result.get('currency')!='eur' or result.get('object')!='refund'
+            or (r['kind']=='review_full_refund' and result.get('livemode') is not self.s.gateway.livemode)
             or not str(result.get('id','')).startswith('re_')):
             raise ValueError('Erstattungsantwort passt nicht zum Auftrag.')
         status={'succeeded':'succeeded','failed':'failed','canceled':'failed'}.get(result.get('status'),'submitted')

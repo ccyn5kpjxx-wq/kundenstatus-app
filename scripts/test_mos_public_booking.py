@@ -21,7 +21,7 @@ sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'scripts'))
 def deny(*a,**k):raise AssertionError('External network forbidden')
 patch('socket.socket.connect',deny).start();patch('socket.socket.connect_ex',deny).start();patch('socket.create_connection',deny).start()
 from run_mos_public_test import build_test_app
-from mos_public_contract import signed_payload
+from mos_public_contract import signed_payload, signature_png, signature_record_hash
 from mos_booking.production import cancellation_fee
 TEMP=tempfile.TemporaryDirectory(prefix='mos-public-tests-')
 # Simulate an operator launching the test from a live-configured shell.
@@ -130,6 +130,25 @@ class PublicTests(unittest.TestCase):
         self.assertIn('wird keine Mietzahlung gestartet und keine Buchung bestätigt',page)
         self.assertLess(page.index('Die tatsächliche Gültigkeitsfrist'),
                         page.index('id="contract-sign-form"'))
+
+    def test_downloadable_overview_includes_signed_lessor_contact(self):
+        with patch.dict(self.cfg, {'merchant_email': 'info@auto-lackierzentrum.de',
+                                   'merchant_phone': '+49 1522 7706694'}):
+            token, response = self.quote()
+            page = response.get_data(as_text=True)
+            overview = page.split('id="booking-overview"', 1)[1].split('</section>', 1)[0]
+            self.assertIn('info@auto-lackierzentrum.de', overview)
+            self.assertIn('+49 1522 7706694', overview)
+            checkout = self.checkout(token)
+            self.assertEqual(checkout.status_code, 303)
+            db = portal.get_db()
+            try:
+                hold = db.execute('SELECT payload FROM miet_checkout_holds').fetchone()
+            finally:
+                db.close()
+            signed_quote = json.loads(hold['payload'])['quote']
+            self.assertEqual(signed_quote['lessor_email'], 'info@auto-lackierzentrum.de')
+            self.assertEqual(signed_quote['lessor_phone'], '+49 1522 7706694')
 
     def test_card_authorization_before_rent_only_checkout(self):
         with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
@@ -899,6 +918,80 @@ class PublicTests(unittest.TestCase):
         self.assertNotEqual(result.exit_code,0)
         self.assertIn('nicht für den Livebetrieb aktiviert',result.output)
         smtp.assert_not_called()
+
+    def test_checkout_rejects_unsendable_email_before_hold_or_provider_call(self):
+        token,_=self.quote()
+        base={'quote_token':token,'accept':'yes','sign_confirm':'yes',
+              'name':'Test','signature_data':self.signature()}
+        gateway=portal.app.extensions['mos_public_booking']['gateway']
+        with patch.object(gateway,'create') as checkout_call, patch.object(gateway,'create_deposit_intent') as deposit_call:
+            for address in ('first@example.invalid,second@example.invalid',
+                            'Test <first@example.invalid>',
+                            'first@example.invalid\nBcc: second@example.invalid',
+                            'büro@example.invalid', 'not-an-email'):
+                with self.subTest(address=address):
+                    result=self.post('/mietwagen-test/checkout',{**base,'email':address})
+                    self.assertEqual(result.status_code,409)
+                    self.assertIn('gültigen Namen und E-Mail',result.get_data(as_text=True))
+            checkout_call.assert_not_called()
+            deposit_call.assert_not_called()
+        db=portal.get_db()
+        try:self.assertEqual(db.execute('SELECT COUNT(*) AS n FROM miet_checkout_holds').fetchone()['n'],0)
+        finally:db.close()
+        self.assertEqual(self.checkout(token).status_code,303)
+
+    def test_checkout_retry_requires_identical_original_signature(self):
+        token,_=self.quote()
+        original=self.signature()
+        form={'quote_token':token,'accept':'yes','sign_confirm':'yes','name':'Test',
+              'email':'test@example.invalid','signature_data':original}
+        first=self.post('/mietwagen-test/checkout',form)
+        self.assertEqual(first.status_code,303)
+        db=portal.get_db()
+        try:before=dict(db.execute('SELECT * FROM miet_checkout_holds').fetchone())
+        finally:db.close()
+        self.assertEqual(self.post('/mietwagen-test/checkout',form).status_code,303)
+        changed_image=Image.new('RGBA',(700,180),(255,255,255,0))
+        ImageDraw.Draw(changed_image).line(
+            [(50,120),(100,35),(150,115),(215,45),(280,112),(350,52),(420,100)],
+            fill=(20,30,40,255),width=5)
+        changed_file=BytesIO();changed_image.save(changed_file,format='PNG')
+        changed='data:image/png;base64,'+b64encode(changed_file.getvalue()).decode('ascii')
+        rejected=self.post('/mietwagen-test/checkout',{**form,'signature_data':changed})
+        self.assertEqual(rejected.status_code,409)
+        self.assertIn('Unterschrift nach der Reservierung geändert',rejected.get_data(as_text=True))
+        db=portal.get_db()
+        try:
+            holds=[dict(row) for row in db.execute('SELECT * FROM miet_checkout_holds')]
+        finally:db.close()
+        self.assertEqual(len(holds),1)
+        self.assertEqual(holds[0]['id'],before['id'])
+        self.assertEqual(holds[0]['payload'],before['payload'])
+        self.assertEqual(holds[0]['session_id'],before['session_id'])
+
+    def test_parallel_signature_post_can_reuse_same_signed_hold(self):
+        token,_=self.quote()
+        original=self.signature()
+        form={'quote_token':token,'accept':'yes','sign_confirm':'yes','name':'Test',
+              'email':'test@example.invalid','signature_data':original}
+        service=portal.app.extensions['mos_public_booking']['service']
+        actual_reserve=service.reserve
+        def simultaneous_first_reservation(request_key,vehicle_id,start,end,customer,quote):
+            first={**quote,'signed_at':(
+                datetime.fromisoformat(quote['signed_at'])-timedelta(microseconds=1)).isoformat()}
+            first['signature_record_hash']=signature_record_hash(
+                first['signed_contract_hash'],first['signed_at'],signature_png(original))
+            actual_reserve(request_key,vehicle_id,start,end,customer,first)
+            return actual_reserve(request_key,vehicle_id,start,end,customer,quote)
+        with patch.object(service,'reserve',side_effect=simultaneous_first_reservation):
+            result=self.post('/mietwagen-test/checkout',form)
+        self.assertEqual(result.status_code,303)
+        db=portal.get_db()
+        try:holds=[dict(row) for row in db.execute('SELECT * FROM miet_checkout_holds')]
+        finally:db.close()
+        self.assertEqual(len(holds),1)
+        self.assertEqual(holds[0]['status'],'pending')
+        self.assertIsNotNone(holds[0]['session_id'])
 
     def test_signature_required_before_checkout_and_owner(self):
         token,_=self.quote()

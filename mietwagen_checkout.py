@@ -118,6 +118,24 @@ class SharedCheckout:
                     (parsed.scheme == 'http' and parsed.hostname in {'127.0.0.1','localhost'}))):
                 raise ValueError('Ungültige Test-Rücksprungadresse.')
 
+    def _new_bookings_enabled(self):
+        if not self.p.app.config.get('MOS_SHARED_CHECKOUT_ENABLED', False):
+            return False
+        cfg = self.p.app.config.get('MOS_PUBLIC_BOOKING', {})
+        return cfg.get('mode') != 'live' or cfg.get('enabled') is True
+
+    @staticmethod
+    def _record_paused_paid_review(db, h, session):
+        pi = session.get('payment_intent')
+        valid_pi = (isinstance(pi, str) and pi.startswith('pi_')
+                    and (not h['payment_intent'] or h['payment_intent'] == pi)
+                    and not db.execute('SELECT id FROM miet_checkout_holds WHERE payment_intent=? AND id!=?',
+                                       (pi, h['id'])).fetchone())
+        db.execute('''UPDATE miet_checkout_holds
+            SET status='review',grund=?,payment_intent=? WHERE id=?''',
+            ('paid_bookings_disabled_review' if valid_pi else 'paid_bookings_disabled_payment_unclear_review',
+             pi if valid_pi else h['payment_intent'], h['id']))
+
     @contextmanager
     def locked(self, vehicle_id):
         db = self.p.get_db()
@@ -147,7 +165,7 @@ class SharedCheckout:
             db.close()
 
     def reserve(self, request_key, vehicle_id, start, end, customer, quote):
-        if not self.p.app.config.get('MOS_SHARED_CHECKOUT_ENABLED', False):
+        if not self._new_bookings_enabled():
             raise ValueError('Gemeinsamer Test-Checkout ist deaktiviert.')
         start, end = self.p.validiere_mietzeitraum(start, end)
         self.p.validiere_mietkontakt(customer.get('telefon'), customer.get('email'))
@@ -241,7 +259,7 @@ class SharedCheckout:
 
     def prepare_deposit(self, hold_id):
         """Create one manual-capture card intent; uncertain outcomes retain stock."""
-        if not self.p.app.config.get('MOS_SHARED_CHECKOUT_ENABLED', False):
+        if not self._new_bookings_enabled():
             raise ValueError('Gemeinsamer Checkout ist deaktiviert.')
         h = self.read(hold_id)
         q = json.loads(h['payload'])['quote']
@@ -444,7 +462,7 @@ class SharedCheckout:
         return 'released'
 
     def create_checkout(self, hold_id):
-        if not self.p.app.config.get('MOS_SHARED_CHECKOUT_ENABLED', False):
+        if not self._new_bookings_enabled():
             raise ValueError('Gemeinsamer Test-Checkout ist deaktiviert.')
         h = self.read(hold_id)
         if h['status'] != 'pending':
@@ -610,10 +628,14 @@ class SharedCheckout:
         with self.locked(h['mietfahrzeug_id']) as (db, vehicle):
             h = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?',(h['id'],)).fetchone())
             self.validate(h, session)
+            new_bookings_enabled = self._new_bookings_enabled()
             old = db.execute('SELECT * FROM miet_checkout_events WHERE id=?',(event['id'],)).fetchone()
             if old:
                 if (old['hold_id'],old['session_id'],old['kind']) != (h['id'],session['id'],event['type']):
                     raise ValueError('Ereignisreferenz kollidiert.')
+                if (not new_bookings_enabled and not h['mietvorgang_id'] and h['status'] == 'pending'
+                        and session.get('status') == 'complete' and session.get('payment_status') == 'paid'):
+                    self._record_paused_paid_review(db, h, session)
                 return h['mietvorgang_id']
             slots_open = True
             if (h['status'] == 'pending' and not h['mietvorgang_id']
@@ -634,9 +656,18 @@ class SharedCheckout:
                 enqueue_order_receipt(db, h, session, source_event_id=event['id'])
             if h['mietvorgang_id']:
                 return h['mietvorgang_id']  # Never recreate a returned/cancelled rental.
+            if h['status'] == 'released' and h['grund'] == 'review_full_refund_completed':
+                # An already verified full refund and separate card release are
+                # terminal. A later signed paid event must not reopen the case.
+                return None
             if h['status'] == 'review':
                 return None  # A manual-review case cannot silently confirm on a later event.
             if session.get('status') == 'complete' and session.get('payment_status') == 'paid':
+                if not new_bookings_enabled:
+                    # Stripe may finish a session created before new bookings
+                    # were paused. Keep payment for manual review, not a rental.
+                    self._record_paused_paid_review(db, h, session)
+                    return None
                 pi = session.get('payment_intent')
                 duplicate = not isinstance(pi,str) or not pi.startswith('pi_') or db.execute(
                     'SELECT id FROM miet_checkout_holds WHERE payment_intent=? AND id!=?',(pi,h['id'])).fetchone()
@@ -674,10 +705,11 @@ class SharedCheckout:
         h = self.read(hold_id)
         if h['status'] != 'pending':
             return
+        new_bookings_enabled = self._new_bookings_enabled()
         q = json.loads(h['payload'])['quote']
         if not h['session_id']:
             if (_card_authorization_quote(q)
-                    and (cancel or h['expires_at'] <= int(time.time()) or _pickup_passed(q))):
+                    and (cancel or not new_bookings_enabled or h['expires_at'] <= int(time.time()) or _pickup_passed(q))):
                 self._begin_release_without_session(h, 'Buchung vor Mietpreiszahlung abgebrochen')
                 self.release_deposit(h['id'], 'Buchung vor Mietpreiszahlung abgebrochen')
                 with self.locked(h['mietfahrzeug_id']) as (db, _):
@@ -692,7 +724,7 @@ class SharedCheckout:
                         db.execute("UPDATE miet_checkout_holds SET status='released' WHERE id=?",(h['id'],))
             return  # Unknown creation outcome never frees stock.
         session = self.gateway.retrieve(h['session_id'])
-        if (cancel or _card_authorization_quote(q) and _pickup_passed(q)) and session.get('status') == 'open':
+        if (cancel or not new_bookings_enabled or _card_authorization_quote(q) and _pickup_passed(q)) and session.get('status') == 'open':
             session = self.gateway.expire(h['session_id'])
         self.validate(h, session)
         if (session.get('status') == 'expired' and session.get('payment_status') == 'unpaid'
