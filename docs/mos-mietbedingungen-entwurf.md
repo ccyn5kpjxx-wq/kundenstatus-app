@@ -1,8 +1,8 @@
 # MOS Mietbedingungen – interner Entwurf
 
-**Version: ENTWURF-2026-09-24-02 · Aufgabe 67 · NICHT VERÖFFENTLICHEN.**
+**Version: ENTWURF-2026-09-26-01 · Aufgabe 67 · NICHT VERÖFFENTLICHEN.**
 
-Prüfvorlage für Tagesmieten mit Direktbuchung. Kein geltender Vertrag, keine Rechts- oder Versicherungsfreigabe. Die Beauftragung dieses Entwurfs bestätigt nicht pauschal alle Konditionen. Ausdrücklich entschieden wurden 500 € Kaution als Kreditkartenreservierung ohne Abbuchung bei Online-Buchung, 1.000 € vertragliche Selbstbeteiligung, die Stornofrist und -höhe in Abschnitt F, i10 39 €/Tag, KONA 59 €/Tag beziehungsweise 49 €/Tag ab drei Miettagen, höchstens fünf berechnete Miettage sowie persönliche Übergabe/Rückgabe montags bis samstags stündlich von 08:00 bis einschließlich 20:00 Uhr bei tatsächlich freiem Termin. Die rechtliche Ausgestaltung und alle übrigen Vorschläge bleiben zur Prüfung. Es werden keine Preise, Zahlungen oder App-Funktionen aktiviert. Auto-Abos sind nicht Gegenstand dieses Textes.
+Prüfvorlage für Tagesmieten mit Direktbuchung. Kein geltender Vertrag, keine Rechts- oder Versicherungsfreigabe. Die Beauftragung dieses Entwurfs bestätigt nicht pauschal alle Konditionen. Ausdrücklich entschieden wurden 500 € Kaution als Kreditkartenreservierung ohne Abbuchung bei Online-Buchung, 1.000 € vertragliche Selbstbeteiligung, die Stornofrist und -höhe in Abschnitt F, i10 39 €/Tag, KONA 59 €/Tag beziehungsweise 49 €/Tag ab drei Miettagen, 150 Freikilometer je berechnetem Miettag und 0,25 € je Mehrkilometer, höchstens fünf berechnete Miettage sowie persönliche Übergabe/Rückgabe montags bis samstags stündlich von 08:00 bis einschließlich 20:00 Uhr bei tatsächlich freiem Termin. Die rechtliche Ausgestaltung und alle übrigen Vorschläge bleiben zur Prüfung. Es werden keine Preise, Zahlungen oder App-Funktionen aktiviert. Auto-Abos sind nicht Gegenstand dieses Textes.
 
 ## 1. Veröffentlichter Ausgangsstand
 
@@ -23,7 +23,7 @@ Veröffentlicht sind außerdem 150 Freikilometer je Miettag, 0,25 €/Mehrkilome
 
 Du mietest das in deiner Buchungsübersicht bezeichnete Fahrzeug für den ausgewählten Zeitraum. Vermieter und Vertragspartner ist **Gärtner GmbH Karosserie + Lack, Binauer Höhe 4, 74821 Mosbach, Deutschland**. „Autovermietung MOS“ ist nur die Bezeichnung des Mietangebots und keine eigene Vertragspartei. Vor dem Bezahlen siehst du Fahrzeug, Abhol- und Rückgabetermin, Mietdauer, Mietpreis, enthaltene Kilometer und mögliche zusätzliche Kosten.
 
-Für die Direktbuchung gilt beim Hyundai i10 ein Tagespreis von 39 € einschließlich Umsatzsteuer. Beim Hyundai KONA beträgt er 59 € einschließlich Umsatzsteuer je berechnetem Miettag; ab drei berechneten Miettagen gelten 49 € je Tag für die gesamte gebuchte Dauer. Eine Online-Buchung ist auf höchstens fünf berechnete Miettage begrenzt. Der konkrete Gesamtmietpreis und die zugehörige Anzahl von Miettagen stehen in deiner Buchungsübersicht; eine längere Miete kann nur gesondert angefragt werden. **[150 Freikilometer je Miettag und 0,25 €/Mehrkilometer sind veröffentlicht, für den verbindlichen Direktbuchungstarif aber noch ausdrücklich zu bestätigen.]**
+Für die Direktbuchung gilt beim Hyundai i10 ein Tagespreis von 39 € einschließlich Umsatzsteuer. Beim Hyundai KONA beträgt er 59 € einschließlich Umsatzsteuer je berechnetem Miettag; ab drei berechneten Miettagen gelten 49 € je Tag für die gesamte gebuchte Dauer. Eine Online-Buchung ist auf höchstens fünf berechnete Miettage begrenzt. Der konkrete Gesamtmietpreis und die zugehörige Anzahl von Miettagen stehen in deiner Buchungsübersicht; eine längere Miete kann nur gesondert angefragt werden. Je berechnetem Miettag sind 150 Kilometer enthalten; jeder darüber hinaus tatsächlich gefahrene Kilometer kostet 0,25 € einschließlich Umsatzsteuer. Das gesamte enthaltene Kilometerkontingent steht vor der Unterschrift in deiner Buchungsübersicht.
 
 Mit der zahlungspflichtigen Bestellung gibst du ein verbindliches Buchungsangebot ab. Wir nehmen es mit unserer Buchungsbestätigung nach erfolgreicher Zahlungs- und Verfügbarkeitsprüfung an. Eine vorläufige Reservierung oder Zahlungsanzeige allein ist noch keine Annahme. Kann die Buchung trotz Zahlung nicht bestätigt werden, informieren wir dich und erstatten den Mietpreis; weitergehende gesetzliche Ansprüche bleiben unberührt. **[Den Zeitpunkt des verbindlichen Angebots im tatsächlichen Ablauf mit digitaler Unterschrift, Kartenautorisierung und Stripe Checkout eindeutig bestimmen. Der rechtlich maßgebliche Bestellschritt muss § 312j BGB erfüllen. Annahmezeitpunkt, maximale Bearbeitungsfrist und Erstattungsablauf vor Freigabe rechtlich und technisch abstimmen.]**
 
@@ -51,7 +51,7 @@ Die Kaution wird gesondert neben dem Mietpreis angezeigt. Bei der Online-Reservi
 
 Nach Anzeige und digitaler Unterschrift des Vertrags wird zuerst die Kaution ohne Abbuchung auf einer Kreditkarte reserviert und danach nur der angezeigte Mietpreis online bezahlt. Es gibt keinen Zahlungsschritt vor Ort. Bei der Mietpreiszahlung stehen die im Checkout angezeigten Zahlungsmethoden zur Verfügung. Erst bei Rückgabe feststellbare Zusatzkosten werden gesondert ausgewiesen; die Mietzahlung ist keine pauschale Erlaubnis für spätere Abbuchungen.
 
-Zusätzliche Kilometer werden anhand des Übergabe- und Rückgabeprotokolls getrennt abgerechnet. **[Für den finalen Tarif die Werte aus Abschnitt 1 bestätigen.]** Vor der Bestellung zeigen wir das gesamte Freikilometerkontingent und den Mehrkilometerpreis. Eine Schätzung deiner Fahrstrecke führt nicht zusätzlich zur späteren Ist-Abrechnung zu einer Doppelberechnung.
+Zusätzliche Kilometer werden anhand des Übergabe- und Rückgabeprotokolls getrennt zu 0,25 € einschließlich Umsatzsteuer je Kilometer abgerechnet, soweit die gesamte Fahrstrecke die enthaltenen 150 Kilometer je berechnetem Miettag übersteigt. Vor der Bestellung zeigen wir das gesamte Freikilometerkontingent und den Mehrkilometerpreis. Eine Schätzung deiner Fahrstrecke führt nicht zusätzlich zur späteren Ist-Abrechnung zu einer Doppelberechnung.
 
 ### F. Stornierung und Nichterscheinen – Frist und Höhe entschieden, Klausel zur Prüfung
 
@@ -69,7 +69,7 @@ Status **P** = öffentlich belegt, aber noch keine verbindliche Checkout-Freigab
 
 | Thema | Status | Entscheidung / Nachweis vor Freigabe |
 |---|---|---|
-| Fahrzeugtarife und Kilometer | B/U | i10 39 €/Tag und KONA 59 €/Tag beziehungsweise 49 €/Tag ab drei berechneten Miettagen für die gesamte Miete bestätigt. Die veröffentlichten 150 Freikilometer/Tag und 0,25 €/Mehrkilometer noch als verbindliche Direktbuchungswerte bestätigen; Werkstatttarif separat anbieten. |
+| Fahrzeugtarife und Kilometer | B | i10 39 €/Tag und KONA 59 €/Tag beziehungsweise 49 €/Tag ab drei berechneten Miettagen für die gesamte Miete bestätigt. 150 Freikilometer je berechnetem Miettag und 0,25 € je Mehrkilometer für die Direktbuchung bestätigt; Werkstatttarif separat anbieten. Die rechtliche Freigabe des Gesamtvertrags bleibt offen. |
 | Bestand | U | Zwei reale Fahrzeug-IDs für i10 und KONA und gemeinsamer Werkstatt-/Telefon-/Online-Kalender; keine synthetischen IDs verwenden. |
 | 24-Stunden-Abrechnung | V | Angefangene Zeiträume aufrunden, Mindestdauer ein Miettag; Berechnung auch über Sommer-/Winterzeit prüfen. Beispiel: 24 h = 1 Tag, 25 h = 2 Tage. |
 | Rückgabekulanz | V | 30 Minuten ohne zusätzliche Zeitgebühr; nicht als kostenlose Verlängerung buchbar. Regel nach Kulanz fehlt. |

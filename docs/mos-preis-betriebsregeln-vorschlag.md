@@ -1,6 +1,6 @@
 # MOS Direktbuchung: Preis- und Betriebsregeln zur Entscheidung
 
-**Stand 24.09.2026 · Interner Vorschlag, keine Live-Freigabe.** Die schriftliche Bestätigung der Versicherung für die entgeltliche Selbstfahrervermietung beider Fahrzeuge steht aus. Die vorgeschlagenen Werte unten ändern weder Checkout-Tarife noch veröffentlichte Bedingungen.
+**Stand 24.09.2026, Kilometerentscheidung ergänzt am 26.09.2026 · Interner Vorschlag, keine Live-Freigabe.** Die schriftliche Bestätigung der Versicherung für die entgeltliche Selbstfahrervermietung beider Fahrzeuge steht aus. Die noch vorgeschlagenen Werte unten ändern weder Checkout-Tarife noch veröffentlichte Bedingungen.
 
 ## Bereits vom Betreiber entschieden
 
@@ -8,6 +8,7 @@
 - Hyundai i10: **39 € brutto je Miettag**. Kaution **500 €**: bei der Online-Reservierung auf einer Kreditkarte **nur autorisieren, nicht abbuchen**. Vertrag anzeigen und digital unterschreiben, dann Kaution reservieren und Mietpreis online zahlen; kein Zahlungsschritt vor Ort. Die **1.000 € vertragliche Selbstbeteiligung** sind als Betrag entschieden, ihr genauer Anwendungsbereich hängt vom Versicherungsnachweis und der Rechtsprüfung ab.
 - Buchung und persönliche Abholung am selben Tag sind ohne Mindestvorlauf möglich, wenn Auto und künftiger Übergabetermin tatsächlich frei sind. Vollgetankt übergeben und vollgetankt zurücknehmen.
 - Hyundai KONA: **59 € brutto je Miettag**, ab drei berechneten Miettagen **49 € brutto je Miettag für alle Tage**. Die Online-Mietdauer ist auf **fünf berechnete Miettage** begrenzt; längere Mieten bleiben persönliche Anfragen.
+- Für i10 und KONA gelten bei der Direktbuchung **150 Freikilometer je berechnetem Miettag** und **0,25 € einschließlich Umsatzsteuer je tatsächlich gefahrenem Mehrkilometer**. Das gesamte Freikilometerkontingent wird vor der Unterschrift angezeigt; Mehrkilometer werden anhand der Kilometerstände bei Übergabe und Rückgabe abgerechnet.
 - Abholung und Rückgabe erfolgen **montags bis samstags stündlich von 08:00 bis einschließlich 20:00 Uhr**, sofern das Fahrzeug tatsächlich frei ist. Die veröffentlichte Mobilnummer **+49 1522 7706694** ist der vom Betreiber genannte telefonische Storno- und Notfallkontakt. Eine durchgehende Erreichbarkeit außerhalb dieser Zeiten wurde nicht zugesagt.
 - Storno **bis einschließlich 48 Stunden vor Abholung kostenlos**; danach **10 % nur vom Mietpreis**, nicht von der Kaution. Die Pauschale ist als Ausfallersatz mit Nachweis eines fehlenden oder wesentlich geringeren Schadens und Anrechnung einer Wiedervermietung zu formulieren, nicht als Vertragsstrafe. Bei Buchungen innerhalb von 48 Stunden vor Abholung fällt die kostenlose Frist grundsätzlich weg; das muss vor der Unterschrift klar zu sehen sein.
 
@@ -20,7 +21,7 @@
 | [Huber Automobile](https://www.huberautomobile.de/fahrzeugmiete/) | i30/Kona/Bayon: 109 €/24 h inklusive 200 km | Gruppentarif, anderer Standort und andere Inklusivleistung; Seite nennt kein Gültigkeitsdatum. |
 | [Autohaus Ortmann](https://autohaus-ortmann.de/werkstattersatzwagen/) | KONA-Gruppe ab 37 €/Tag, 100 km/Tag, 750 € Selbstbeteiligung | **Nur** für Kunden während eines Werkstattaufenthalts; Preisliste Stand 05.01.2023, nicht allgemeine Tagesmiete. |
 
-**Entscheidung und verbleibender Vorschlag:** Der Betreiber hat **59 € brutto/24 h** für den KONA und ab **drei berechneten Miettagen 49 € brutto/24 h für alle Tage** bestätigt. **150 Freikilometer je berechnetem Tag** und danach **0,25 €/km** sind öffentlich beworbene Werte, aber noch nicht ausdrücklich als verbindliche Direktbuchungsregel bestätigt. i10 bleibt bei den entschiedenen 39 €; Werkstatt-Sonderpreise bleiben getrennte manuelle Angebote. Die Vergleichsdaten rechtfertigen keinen garantierten Gewinn.
+**Entscheidung und verbleibender Vorschlag:** Der Betreiber hat **59 € brutto/24 h** für den KONA und ab **drei berechneten Miettagen 49 € brutto/24 h für alle Tage** bestätigt. Die öffentlich beworbenen **150 Freikilometer je berechnetem Tag** und danach **0,25 €/km** sind nun ebenfalls für die Direktbuchung bestätigt. i10 bleibt bei den entschiedenen 39 €; Werkstatt-Sonderpreise bleiben getrennte manuelle Angebote. Die Vergleichsdaten rechtfertigen keinen garantierten Gewinn.
 
 Die genannten **etwa 300 € Rate plus etwa 300 € Versicherung pro Monat** sind Schätzungen des Betreibers, keine geprüften Verträge oder vollständige Selbstkosten. Wenn **600 € monatliche Fixkosten netto** anfallen und die Mietumsätze mit dem [Regelsatz von 19 % Umsatzsteuer](https://www.gesetze-im-internet.de/ustg_1980/__12.html) belastet sind, bleiben von 59 € brutto **49,58 € Nettoerlös je Tag**, von 49 € brutto **41,18 €**. Allein für diese 600 € wären ohne weitere Kosten mindestens **13 Tage zu 59 €** oder **15 Tage zu 49 €** nötig. Bei beispielhaft **10 € weiteren Nettokosten pro Vermiettag** steigt die Schwelle auf **16 bzw. 20 Tage**. Das ist eine Szenariorechnung, kein Gewinnversprechen: tatsächliche Vorsteuer, Zahlungsgebühren, Reinigung, Übergabezeit, Wartung, Reifen, Wertverlust, Schaden-/Ausfalltage, Steuern und Auslastung sind nicht erfasst. Der reale Versicherungsbeitrag und die zulässige Nutzung müssen erst belegt werden.
 
@@ -40,7 +41,7 @@ Die genannten **etwa 300 € Rate plus etwa 300 € Versicherung pro Monat** sin
 
 ## Für die Freigabe noch konkret erforderlich
 
-1. **Betreiberentscheidung:** Die veröffentlichten 150 km/Tag und 0,25 €/Mehr-km als verbindliche Direktbuchungswerte bestätigen; 30 Minuten Rückgabekulanz, nachgewiesene Kraftstoffkosten und etwaige vorher bezifferte Servicegebühr, No-show-Prüfung nach 60 Minuten sowie zwei Werktage Ziel für Kautionsfreigabe festlegen.
+1. **Betreiberentscheidung:** 30 Minuten Rückgabekulanz, nachgewiesene Kraftstoffkosten und etwaige vorher bezifferte Servicegebühr, No-show-Prüfung nach 60 Minuten sowie zwei Werktage Ziel für Kautionsfreigabe festlegen. Der Kilometertarif ist bereits bestätigt.
 2. **Betriebsdaten:** Aufbereitungspuffer und durchgängigen Fahrzeugkalender pflegen; Erreichbarkeit des Storno-/Notfallkontakts außerhalb der Übergabezeiten klären. KONA muss real übergabebereit sein.
 3. **Rechts- und Technikabnahme:** Konkrete 10-%-Schadenspauschale, Rückgabeverzug, Zustandsprotokolle, Datenschutz, Bestellabschluss und Erstattungen prüfen; ausgewählten Wortlaut versionieren und im tatsächlich signierten Vertrag zeigen.
 4. **Nachgereicht vom Betreiber:** Schriftliche Bestätigung der Selbstfahrervermietungsdeckung für i10 und KONA samt Selbstbehalt, Fahrerkreis, Nutzungs-/Auslandsregeln. Bis dahin keine Deckung oder allgemeine Haftungsobergrenze behaupten und keinen Live-Checkout freischalten.
