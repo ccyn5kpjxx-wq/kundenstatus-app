@@ -341,3 +341,23 @@ PostgreSQL-Datenbank bestanden 42 Tests einschließlich dieses Falls. Die
 SQLite-Public-Suite (35), Slot-Suite (15) und Buchungslogik-Suite (28)
 bestanden ebenfalls. Der dedizierte lokale PostgreSQL-Cluster wurde danach
 gestoppt. Dies war ein Offline-Gateway-Test, keine Stripe- oder Render-Abnahme.
+
+### Nachtrag 26.09.2026: deaktivierter MOS-Rückgabe-/No-show-Stand
+
+Der neue isolierte PostgreSQL-Handover-/Return-Adapterlauf bestand mit
+synthetischen Daten und Fake-SMTP **ohne externe Aufrufe**. Nach einer
+Test-only-Korrektur bestanden zudem **44 allgemeine PostgreSQL-Tests**. Der
+Rückgabepfad erfasst tatsächliche Uhrzeit, Kilometer, Tank, Zustand und
+Prüfvermerk; berechnete Zeit-/Mehrkilometerbeträge sind nur manuelle
+Prüfwerte. Beanstandete Rückgaben blockieren das Fahrzeug bis zur separaten
+auditierten Werkstatt-Fahrbereitschaftsfreigabe. Die Kautions-/Forderungsklärung
+hebt diese Fahrzeugsperre nicht auf. No-show erfordert frühestens 60 Minuten
+nach Abholtermin betreute Prüfung und dokumentierten Kontaktversuch.
+
+Commit `11f7a16` war im Render-Dashboard in Chrome für den tatsächlichen
+Webdienst als **Live/Deployed** sichtbar. Die externe Prüfung ergab
+`/healthz` **HTTP 200** und `/mieten/` weiterhin **HTTP 404**: MOS-Public-
+und Livezahlung sind deaktiviert. Dieser Deploy und die isolierten Tests sind
+kein echter Stripe-, SMTP-, Webhook- oder Cron-Durchlauf. Dauerhaftes
+Monitoring der Zwei-Werktage-Kautionsfreigabe, rechtliche Freigabe und der
+schriftliche Versicherungsnachweis für i10 und KONA bleiben ausstehend.

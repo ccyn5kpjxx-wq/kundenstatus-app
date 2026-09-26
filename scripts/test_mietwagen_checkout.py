@@ -111,7 +111,7 @@ class InventoryTests(unittest.TestCase):
         portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False
         db=portal.get_db()
         try:
-            self.assertIsNotNone(db.execute("SELECT name FROM sqlite_master WHERE name='miet_checkout_vehicle_blocks'").fetchone())
+            self.assertEqual(db.execute('SELECT COUNT(*) AS n FROM miet_checkout_vehicle_blocks').fetchone()['n'],0)
             self.assertTrue(portal.mietfahrzeug_zeitraum_frei_db(
                 db,self.vid,datetime(2030,2,1).date(),datetime(2030,2,2).date()))
         finally:db.close()
@@ -122,8 +122,8 @@ class InventoryTests(unittest.TestCase):
         try:
             db.execute('''INSERT INTO miet_checkout_vehicle_blocks
                 (hold_id,mietfahrzeug_id,blocked_at,reason)
-                VALUES (?,?,?,'return_disputed')''',
-                ('earlier-return-'+uuid.uuid4().hex,self.vid,datetime.now(timezone.utc).isoformat()))
+                VALUES (?,?,?,'return_disputed') RETURNING hold_id''',
+                ('earlier-return-'+uuid.uuid4().hex,self.vid,datetime.now(timezone.utc).isoformat())).fetchone()
             db.execute("UPDATE mietfahrzeuge SET status='verfuegbar' WHERE id=?",(self.vid,))
             db.commit()
         finally:db.close()
