@@ -328,3 +328,16 @@ die gespeicherte Frist erneut. Der neue Timeout-Retry-Test reproduzierte den
 Fehler vor der Korrektur und bestand danach; vier weitere Offline-Tests prüfen
 Grenzfrist, fehlgeschlagene Kartenauthentifizierung, verspätete Ereignisse und
 Zahlung/Storno-Rennen. Diese Tests sind keine weiteren echten Stripe-Läufe.
+
+### Nachtrag 26.09.2026: Terminschließung während einer bezahlten Checkout-Session
+
+Ein Regressionstest reproduzierte, dass ein signierter bezahlter Webhook im
+Zeitfenster zwischen dem Schließen eines Übergabetermins und der nachgelagerten
+Bereinigung offener Holds noch eine Miete bestätigen konnte. Der Webhook prüft
+die beiden ausgewählten Termine nun unter dem Fahrzeug-/Datenbank-Lock erneut.
+Ist einer geschlossen, bleibt die Zahlung zur manuellen Prüfung (`review`);
+es entsteht kein Mietvorgang. Auf einer frisch erzeugten synthetischen
+PostgreSQL-Datenbank bestanden 42 Tests einschließlich dieses Falls. Die
+SQLite-Public-Suite (35), Slot-Suite (15) und Buchungslogik-Suite (28)
+bestanden ebenfalls. Der dedizierte lokale PostgreSQL-Cluster wurde danach
+gestoppt. Dies war ein Offline-Gateway-Test, keine Stripe- oder Render-Abnahme.

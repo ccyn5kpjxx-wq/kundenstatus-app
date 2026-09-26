@@ -258,6 +258,37 @@ class SlotTests(unittest.TestCase):
         self.assertEqual(state['service'].read(hold)['status'],'released')
         self.assertEqual(state['service']._deposit_record(hold)['status'],'released')
 
+    def test_paid_webhook_during_slot_close_cannot_confirm_closed_slot(self):
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['deposit_method']='card_authorization_at_booking'
+        first=datetime.now(timezone.utc)+timedelta(hours=2)
+        a,b=self.open(first),self.open(first+timedelta(days=1,hours=1))
+        self.portal.app.config['MOS_PUBLIC_BOOKING']['enabled']=True
+        self.client.get('/mietwagen-test/')
+        quote=self.post('/mietwagen-test/quote',{'vehicle':'i10','start':a,'end':b})
+        token=html.unescape(re.search(r'name="quote_token" value="([^"]+)"',quote.get_data(as_text=True))[1])
+        checkout=self.post('/mietwagen-test/checkout',{'quote_token':token,'accept':'yes',
+            'sign_confirm':'yes','name':'Test','email':'test@example.invalid','signature_data':self.signature()})
+        hold=checkout.location.rsplit('/',2)[-2]
+        self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/kaution-test',{}).status_code,303)
+        self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/retry',{}).status_code,303)
+        state=self.portal.app.extensions['mos_public_booking']
+        session_id=state['service'].read(hold)['session_id']
+        self.assertIsNotNone(session_id)
+
+        # The admin close commits the slot before its follow-up cleanup can
+        # mark this hold as review. A paid webhook must check the slot itself.
+        db=self.portal.get_db()
+        try:
+            db.execute('UPDATE miet_checkout_slots SET active=0 WHERE slot=?',(a,))
+            db.commit()
+        finally:db.close()
+        state['gateway'].pay(session_id)
+        body,signature=state['gateway'].signed_event(session_id)
+        self.assertIsNone(state['service'].handle_signed_event(body,signature,state['secret']))
+        after=state['service'].read(hold)
+        self.assertEqual(after['status'],'review')
+        self.assertIsNone(after['mietvorgang_id'])
+
     def test_closing_slot_keeps_existing_confirmed_rental(self):
         self.portal.app.config['MOS_PUBLIC_BOOKING']['deposit_method']='card_authorization_at_booking'
         first=datetime.now(timezone.utc)+timedelta(hours=2)

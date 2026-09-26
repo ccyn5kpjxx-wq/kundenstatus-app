@@ -589,6 +589,16 @@ class SharedCheckout:
                 if (old['hold_id'],old['session_id'],old['kind']) != (h['id'],session['id'],event['type']):
                     raise ValueError('Ereignisreferenz kollidiert.')
                 return h['mietvorgang_id']
+            slots_open = True
+            if (h['status'] == 'pending' and not h['mietvorgang_id']
+                    and session.get('status') == 'complete' and session.get('payment_status') == 'paid'):
+                # Lock the selected slots before changing this hold. An admin
+                # may close a slot after the customer reaches Stripe but before
+                # the follow-up cleanup marks pending holds for review.
+                try:
+                    _require_open_public_slots(db, q, self.p.USE_POSTGRES)
+                except ValueError:
+                    slots_open = False
             db.execute('INSERT INTO miet_checkout_events (id,hold_id,session_id,kind) VALUES (?,?,?,?)',
                        (event['id'],h['id'],session['id'],event['type']))
             db.execute('UPDATE miet_checkout_holds SET session_id=? WHERE id=?',(session['id'],h['id']))
@@ -606,11 +616,12 @@ class SharedCheckout:
                     'SELECT id FROM miet_checkout_holds WHERE payment_intent=? AND id!=?',(pi,h['id'])).fetchone()
                 start, end = date.fromisoformat(h['start_datum']), date.fromisoformat(h['end_datum'])
                 pickup_passed = _card_authorization_quote(q) and _pickup_passed(q)
-                conflict = (pickup_passed or not deposit_ok or h['status'] == 'released' or duplicate or not int(vehicle['aktiv'] or 0)
+                conflict = (pickup_passed or not slots_open or not deposit_ok or h['status'] == 'released' or duplicate or not int(vehicle['aktiv'] or 0)
                     or self.p.normalize_mietfahrzeug_status(vehicle['status']) in {'bald','wartung','inaktiv'}
                     or not self.p.mietfahrzeug_zeitraum_frei_db(db,h['mietfahrzeug_id'],start,end,exclude_hold_id=h['id']))
                 if conflict:
                     reason = ('paid_pickup_passed_review' if pickup_passed else
+                              'paid_slot_closed_review' if not slots_open else
                               'paid_deposit_needs_review' if not deposit_ok else 'paid_needs_review')
                     db.execute("UPDATE miet_checkout_holds SET status='review',grund=? WHERE id=?",(reason,h['id']))
                     return None

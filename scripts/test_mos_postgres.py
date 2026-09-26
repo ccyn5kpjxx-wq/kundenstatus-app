@@ -72,6 +72,27 @@ def main():
                 self.s.create_checkout(h['id'])
             self.assertIsNone(self.s.read(h['id'])['session_id'])
 
+        def test_postgres_paid_webhook_after_slot_close_needs_review(self):
+            start = (datetime.now(timezone.utc)+timedelta(days=2)).replace(second=0,microsecond=0)
+            end = start+timedelta(days=1)
+            a,b=start.isoformat(),end.isoformat()
+            q=dict(self.quote,start_slot=a,end_slot=b,slot_policy='db_open_slots_v1')
+            db=portal.get_db()
+            init_slot_schema(db,[a,b]);db.commit();db.close()
+            h=self.s.reserve(uuid.uuid4().hex,self.vid,start.date().isoformat(),
+                             end.date().isoformat(),self.customer,q)
+            session=self.s.create_checkout(h['id'])
+            db=portal.get_db()
+            db.execute('UPDATE miet_checkout_slots SET active=0 WHERE slot=?',(a,))
+            db.commit();db.close()
+            self.gateway.pay(session['id'])
+            body,signature=self.gateway.signed_event(session['id'])
+            self.assertIsNone(self.s.handle_signed_event(body,signature,self.secret))
+            self.assertEqual(self.count(),0)
+            after=self.s.read(h['id'])
+            self.assertEqual(after['status'],'review')
+            self.assertEqual(after['grund'],'paid_slot_closed_review')
+
         def test_postgres_atomic_rollback(self):
             h=self.hold(); session=self.s.create_checkout(h['id'])
             self.gateway.pay(session['id'])
@@ -126,6 +147,7 @@ def main():
     suite.addTest(RefundTests('test_postgres_refund_after_cancel'))
     suite.addTest(RefundTests('test_postgres_atomic_rollback'))
     suite.addTest(RefundTests('test_postgres_public_slot_close_blocks_reserve_and_checkout'))
+    suite.addTest(RefundTests('test_postgres_paid_webhook_after_slot_close_needs_review'))
     print('Synthetic acceptance database:', name, flush=True)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1

@@ -119,6 +119,15 @@ class PublicTests(unittest.TestCase):
             return dict(cancellation) if cancellation else None,refunds
         finally:db.close()
 
+    def test_quote_explains_card_hold_deadline_before_signature(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            _,response=self.quote()
+        page=response.get_data(as_text=True)
+        self.assertIn('länger als 24 Stunden nach der vereinbarten Rückgabe',page)
+        self.assertIn('wird keine Mietzahlung gestartet und keine Buchung bestätigt',page)
+        self.assertLess(page.index('Die tatsächliche Gültigkeitsfrist'),
+                        page.index('id="contract-sign-form"'))
+
     def test_card_authorization_before_rent_only_checkout(self):
         with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
             hold,intent_id,quote_page=self.card_deposit()
