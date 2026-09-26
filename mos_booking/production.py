@@ -2,16 +2,18 @@
 
 No network call occurs on import. Runtime enabling requires explicit operator evidence.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import secrets
 import stripe
+from zoneinfo import ZoneInfo
 from .gateway import StripeTestGateway
 from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME
 
 ACTIVE_LISTINGS={'kona','i10'}
 CANCELLATION_POLICY_48H_10_PERCENT='free_48h_then_10pct_rent'
+BERLIN=ZoneInfo('Europe/Berlin')
 
 
 def launch_errors(cfg):
@@ -122,23 +124,46 @@ class RefundLedger:
             VALUES (?,?,?,?,?,?,?)''',(request_id,h['id'],amount,kind,'succeeded' if amount==0 else 'queued',reason,datetime.now(timezone.utc).isoformat()))
         return request_id
 
-    def cancel(self,hold_id,requested_at=None,admin=False,no_show=False):
+    def cancel(self,hold_id,requested_at=None,admin=False,no_show=False,
+               staffed_check=False,contact_attempt='',contact_attempt_at=None,
+               operator_name='',review_note=''):
         now=requested_at or datetime.now(timezone.utc)
         h=self.s.read(hold_id);q=json.loads(h['payload'])['quote']
         if not h['mietvorgang_id'] or not h['payment_intent']:raise ValueError('Keine bestätigte bezahlte Buchung.')
-        if now>=datetime.fromisoformat(q['start_slot']) and not (admin and no_show):
-            raise ValueError('Nach Mietbeginn bitte die Werkstatt kontaktieren; keine automatische Stornierung.')
         with self.s.locked(h['mietfahrzeug_id']) as (db,_):
             if db.execute('SELECT hold_id FROM miet_checkout_handovers WHERE hold_id=?',
                           (hold_id,)).fetchone():
                 raise ValueError('Schlüsselübergabe ist dokumentiert; Storno nur nach manueller Abrechnung.')
             old=db.execute('SELECT * FROM miet_checkout_cancellations WHERE id=?',(hold_id,)).fetchone()
             if old:return 'cancel-'+hold_id
+            start=datetime.fromisoformat(q['start_slot'])
+            if no_show:
+                if not admin or now.tzinfo is None or start.tzinfo is None:
+                    raise ValueError('Nichterscheinen darf nur die Werkstatt mit gültigem Termin prüfen.')
+                local=now.astimezone(BERLIN)
+                if now.astimezone(timezone.utc)<start.astimezone(timezone.utc)+timedelta(hours=1):
+                    raise ValueError('Nichterscheinen frühestens 60 Minuten nach dem Abholtermin prüfen.')
+                if local.weekday()==6 or not (8<=local.hour<20):
+                    raise ValueError('Nichterscheinen erst beim nächsten betreuten Werkstatttermin prüfen.')
+                contact_attempt=contact_attempt.strip() if isinstance(contact_attempt,str) else ''
+                operator_name=operator_name.strip() if isinstance(operator_name,str) else ''
+                review_note=review_note.strip() if isinstance(review_note,str) else ''
+                if (not staffed_check or not 2<=len(operator_name)<=100
+                        or not 5<=len(contact_attempt)<=500 or not 3<=len(review_note)<=1000):
+                    raise ValueError('Betreute Prüfung, verantwortliche Person und Kontaktversuch dokumentieren.')
+                if (not isinstance(contact_attempt_at,datetime) or contact_attempt_at.tzinfo is None
+                        or not start<=contact_attempt_at<=now):
+                    raise ValueError('Zeit des Kontaktversuchs nach Abholbeginn und vor Prüfung angeben.')
+            elif now>=start:
+                raise ValueError('Nach Mietbeginn bitte die Werkstatt kontaktieren; keine automatische Stornierung.')
             rental=db.execute('SELECT status,rueckgabe_datum FROM mietvorgaenge WHERE id=?',(h['mietvorgang_id'],)).fetchone()
             if not rental or rental['status'] in {'zurueck','storniert'} or rental['rueckgabe_datum']:
                 raise ValueError('Mietvorgang bereits beendet; manuelle Abrechnung erforderlich.')
             fee=cancellation_fee(q,now)
-            reason='Nichterscheinen nach Prüfung' if no_show else 'Stornierung'
+            reason=('Nichterscheinen nach betreuter Prüfung durch '+operator_name+
+                    '; Kontaktversuch '+contact_attempt_at.isoformat()+': '+contact_attempt+
+                    '; Prüfvermerk: '+review_note
+                    if no_show else 'Stornierung')
             db.execute('INSERT INTO miet_checkout_cancellations (id,requested_at,fee_cents,reason) VALUES (?,?,?,?)',(hold_id,now.isoformat(),fee,reason))
             db.execute("UPDATE mietvorgaenge SET status='storniert',geaendert_am=? WHERE id=?",(self.s.p.now_str(),h['mietvorgang_id']))
             return self._enqueue(db,h,q['amount_cents']-fee,'cancellation',reason,'cancel-'+hold_id)

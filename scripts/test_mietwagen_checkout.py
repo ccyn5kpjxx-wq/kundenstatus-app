@@ -106,6 +106,39 @@ class InventoryTests(unittest.TestCase):
         self.hold()
         portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False
         with self.assertRaises(ValueError):self.hold(start='2030-02-01',end='2030-02-02')
+
+    def test_core_availability_schema_exists_without_public_mos_setup(self):
+        portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False
+        db=portal.get_db()
+        try:
+            self.assertIsNotNone(db.execute("SELECT name FROM sqlite_master WHERE name='miet_checkout_vehicle_blocks'").fetchone())
+            self.assertTrue(portal.mietfahrzeug_zeitraum_frei_db(
+                db,self.vid,datetime(2030,2,1).date(),datetime(2030,2,2).date()))
+        finally:db.close()
+
+    def test_disputed_return_blocks_checkout_and_admin_even_when_vehicle_status_available(self):
+        h=self.hold()
+        db=portal.get_db()
+        try:
+            db.execute('''INSERT INTO miet_checkout_vehicle_blocks
+                (hold_id,mietfahrzeug_id,blocked_at,reason)
+                VALUES (?,?,?,'return_disputed')''',
+                ('earlier-return-'+uuid.uuid4().hex,self.vid,datetime.now(timezone.utc).isoformat()))
+            db.execute("UPDATE mietfahrzeuge SET status='verfuegbar' WHERE id=?",(self.vid,))
+            db.commit()
+        finally:db.close()
+        with patch.object(self.gateway,'create') as create:
+            with self.assertRaisesRegex(ValueError,'nicht freigegeben'):
+                self.s.create_checkout(h['id'])
+            create.assert_not_called()
+        with self.assertRaises(ValueError):
+            self.admin(start='2030-03-01',end='2030-03-02')
+        vehicle=portal.get_mietfahrzeug(self.vid)
+        self.assertFalse(vehicle['ist_verfuegbar'])
+        self.assertEqual(vehicle['effektiver_status_label'],'Nach MOS-Rückgabe gesperrt')
+        listed=next(v for v in portal.list_mietfahrzeuge() if v['id']==self.vid)
+        self.assertFalse(listed['ist_verfuegbar'])
+        self.assertEqual(listed['effektiver_status_label'],'Nach MOS-Rückgabe gesperrt')
         with self.assertRaises(ValueError):self.admin()
 
     def test_admin_then_hold_and_hold_then_admin(self):

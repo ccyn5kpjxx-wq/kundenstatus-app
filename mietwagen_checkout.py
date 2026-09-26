@@ -420,6 +420,18 @@ class SharedCheckout:
         self._validated_deposit(h, record, intent, enforce_coverage=False)
         if intent['status'] != 'canceled':
             with self.locked(h['mietfahrzeug_id']) as (db, _):
+                current = db.execute('SELECT status,mietvorgang_id,payload FROM miet_checkout_holds WHERE id=?',
+                                     (hold_id,)).fetchone()
+                if not current:
+                    raise ValueError('Buchung für Kartenfreigabe fehlt.')
+                current_quote = json.loads(current['payload'])['quote']
+                if current_quote.get('test_only') is False:
+                    handover = db.execute('SELECT hold_id FROM miet_checkout_handovers WHERE hold_id=?',
+                                          (hold_id,)).fetchone()
+                    if handover:
+                        from mos_return import deposit_release_eligible
+                        if not deposit_release_eligible(db, hold_id, current['mietvorgang_id']):
+                            raise ValueError('Kartenreservierung nach Schlüsselübergabe nur nach dokumentierter unbeanstandeter oder geklärter Rückgabe freigeben.')
                 db.execute("UPDATE miet_checkout_deposit_auths SET status='releasing',reason=? WHERE hold_id=? AND status!='released'",
                            (str(reason)[:200], hold_id))
             intent = self.gateway.cancel_deposit_intent(record['intent_id'], 'mos-deposit-release-' + h['id'])
@@ -457,6 +469,10 @@ class SharedCheckout:
         if h['session_id']:
             with self.locked(h['mietfahrzeug_id']) as (db, _):
                 _require_open_public_slots(db, q, self.p.USE_POSTGRES)
+                if not self.p.mietfahrzeug_zeitraum_frei_db(
+                        db,h['mietfahrzeug_id'],date.fromisoformat(h['start_datum']),
+                        date.fromisoformat(h['end_datum']),exclude_hold_id=h['id']):
+                    raise ValueError('Fahrzeug ist für neue Zahlungen derzeit nicht freigegeben.')
             return self.gateway.retrieve(h['session_id'])
         if h['expires_at'] - int(time.time()) < 1860:
             raise ValueError('Unklarer Checkout muss geprüft werden; Reservierung bleibt gesperrt.')
@@ -486,6 +502,10 @@ class SharedCheckout:
             pickup_passed_before_provider = _card_authorization_quote(q) and _pickup_passed(q)
             if not pickup_passed_before_provider:
                 _require_open_public_slots(db, q, self.p.USE_POSTGRES)
+                if not self.p.mietfahrzeug_zeitraum_frei_db(
+                        db,h['mietfahrzeug_id'],date.fromisoformat(current['start_datum']),
+                        date.fromisoformat(current['end_datum']),exclude_hold_id=hold_id):
+                    raise ValueError('Fahrzeug ist für neue Zahlungen derzeit nicht freigegeben.')
                 if _card_authorization_quote(q):
                     deposit = db.execute('SELECT status FROM miet_checkout_deposit_auths WHERE hold_id=?',
                                          (hold_id,)).fetchone()
@@ -516,13 +536,19 @@ class SharedCheckout:
             current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?',(hold_id,)).fetchone())
             self.validate(current, session)
             if current['status'] == 'pending':
+                review_reason = None
                 try:
                     _require_open_public_slots(db, q, self.p.USE_POSTGRES)
                 except ValueError:
-                    checkout_needs_review = True
+                    review_reason = 'slot_closed_review'
+                if (not review_reason and not self.p.mietfahrzeug_zeitraum_frei_db(
+                        db,h['mietfahrzeug_id'],date.fromisoformat(current['start_datum']),
+                        date.fromisoformat(current['end_datum']),exclude_hold_id=hold_id)):
+                    review_reason = 'vehicle_unavailable_review'
+                checkout_needs_review = bool(review_reason)
                 db.execute('''UPDATE miet_checkout_holds SET session_id=?,status=?,grund=? WHERE id=?''',
                            (session['id'], 'review' if checkout_needs_review else 'pending',
-                            'slot_closed_review' if checkout_needs_review else current['grund'], hold_id))
+                            review_reason if checkout_needs_review else current['grund'], hold_id))
             elif current['session_id'] != session['id']:
                 # Keep the provider ID for reconciliation if an admin closed the
                 # slot while the create request was in flight.

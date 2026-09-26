@@ -4,6 +4,7 @@ from datetime import datetime,timedelta,timezone
 from pathlib import Path
 from unittest.mock import patch
 import hashlib,json,sys,tempfile,unittest,uuid
+from zoneinfo import ZoneInfo
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'scripts'))
 def deny(*a,**k):raise AssertionError('External network forbidden')
@@ -88,11 +89,53 @@ class ProductionTests(unittest.TestCase):
         self.assertEqual(self.l.credit(h['id'],4900,'Wiedervermietung: kein Schaden',key),key)
         with self.assertRaises(ValueError):self.l.credit(h['id'],1,'zu viel',uuid.uuid4().hex)
 
-    def test_customer_cannot_cancel_after_start_admin_can_record_no_show(self):
+    def test_no_show_requires_sixty_minutes_staffed_check_and_contact_attempt(self):
+        berlin=ZoneInfo('Europe/Berlin')
+        today=datetime.now(berlin).date()
+        monday=today+timedelta(days=(7-today.weekday())%7+7)
+        self.start=datetime(monday.year,monday.month,monday.day,9,tzinfo=berlin)
         h,_=self.paid()
         with self.assertRaises(ValueError):self.l.cancel(h['id'],self.start+timedelta(minutes=1))
-        rid=self.l.cancel(h['id'],self.start+timedelta(minutes=1),admin=True,no_show=True)
+        evidence=dict(admin=True,no_show=True,staffed_check=True,
+                      operator_name='Test Person',contact_attempt='Telefonisch nicht erreicht',
+                      contact_attempt_at=self.start+timedelta(minutes=45),
+                      review_note='Fahrzeug unberührt auf dem Hof')
+        with self.assertRaisesRegex(ValueError,'60 Minuten'):
+            self.l.cancel(h['id'],self.start+timedelta(minutes=59),**evidence)
+        with self.assertRaisesRegex(ValueError,'Kontaktversuch'):
+            self.l.cancel(h['id'],self.start+timedelta(hours=1),
+                          **{**evidence,'contact_attempt':''})
+        with self.assertRaisesRegex(ValueError,'Kontaktversuch'):
+            self.l.cancel(h['id'],self.start+timedelta(hours=1),
+                          **{**evidence,'contact_attempt_at':None})
+        with self.assertRaisesRegex(ValueError,'Prüfung'):
+            self.l.cancel(h['id'],self.start+timedelta(hours=1),
+                          **{**evidence,'staffed_check':False})
+        rid=self.l.cancel(h['id'],self.start+timedelta(hours=1),**evidence)
         self.assertEqual(self.refund(rid)['amount_cents'],59800)
+        db=portal.get_db()
+        try:
+            row=db.execute('SELECT reason FROM miet_checkout_cancellations WHERE id=?',(h['id'],)).fetchone()
+            self.assertIn('Test Person',row['reason'])
+            self.assertIn('Telefonisch nicht erreicht',row['reason'])
+            self.assertIn(evidence['contact_attempt_at'].isoformat(),row['reason'])
+        finally:db.close()
+        self.assertEqual(self.l.cancel(h['id'],self.start+timedelta(days=1),admin=True,no_show=True),rid)
+
+    def test_twenty_o_clock_pickup_is_not_no_show_at_twenty_one_without_staffing(self):
+        berlin=ZoneInfo('Europe/Berlin')
+        today=datetime.now(berlin).date()
+        monday=today+timedelta(days=(7-today.weekday())%7+7)
+        self.start=datetime(monday.year,monday.month,monday.day,20,tzinfo=berlin)
+        h,_=self.paid(CANCELLATION_POLICY_48H_10_PERCENT)
+        evidence=dict(admin=True,no_show=True,staffed_check=True,
+                      operator_name='Test Person',contact_attempt='Telefonisch nicht erreicht',
+                      contact_attempt_at=self.start+timedelta(minutes=45),
+                      review_note='Fahrzeug unberührt auf dem Hof')
+        with self.assertRaisesRegex(ValueError,'betreuten Werkstatttermin'):
+            self.l.cancel(h['id'],self.start+timedelta(hours=1),**evidence)
+        rid=self.l.cancel(h['id'],self.start+timedelta(hours=12),**evidence)
+        self.assertEqual(self.refund(rid)['amount_cents'],63230)
 
     def test_timeout_after_refund_retries_identical_operation(self):
         h,_=self.paid();rid=self.l.cancel(h['id']);original=self.g.refund

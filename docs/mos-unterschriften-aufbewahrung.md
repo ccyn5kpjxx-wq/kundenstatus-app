@@ -110,3 +110,58 @@ berührte keine bestehende Datenbank; der Cluster wurde danach gestoppt.
    autoritativen Datenbankziel einrichten. Ohne gemessene Laufhäufigkeit darf
    nicht zugesagt werden, dass jeder abgebrochene Datensatz genau am 30. Tag
    gelöscht ist.
+
+## Nachtrag 26.09.2026 – rechtliche und technische Vorprüfung
+
+**Die Zustimmung zu den Miet-Betriebsregeln ist keine Freigabe dieser
+Aufbewahrungspolitik.** Der Vorschlag von 30 Tagen ist keine gesetzliche
+Löschfrist. Bei einem genehmigten `--apply`-Lauf wird ein technisch geeigneter
+`released`-Hold zunächst mit `first_seen_released_at` vorgemerkt. Ein späterer
+Lauf löscht ihn nur, wenn **Unterschriftszeitpunkt, Hold-Ablauf und erstmalige
+Beobachtung jeweils mindestens die gewählte Policy-Dauer zurückliegen** und
+alle Provider-, Finanz- und Streitfall-Ausschlüsse in der Transaktion weiterhin
+fehlen. Die erste Beobachtung setzt nicht voraus, dass die Unterschrift schon
+30 Tage alt ist. Erfolgt sie erst 30 Tage nach Unterschrift und Hold-Ablauf,
+entsteht faktisch ein weiterer 30-Tage-Zeitraum; bei zeitnaher Beobachtung
+können beide Fristen weitgehend parallel laufen. Der tatsächliche Löschtermin
+hängt zusätzlich vom genehmigten Laufplan ab. „Löschung nach 30 Tagen“ wäre
+als pauschale Zusage daher falsch.
+
+Das vor Stripe elektronisch eingereichte, unterschriebene Buchungsangebot
+**könnte** trotz fehlender Zahlung ein empfangener Handels- oder Geschäftsbrief
+sein. [§ 257 Abs. 1 Nr. 2, Abs. 2, 4 und 5 HGB](https://www.gesetze-im-internet.de/hgb/__257.html)
+und [§ 147 Abs. 1 Nr. 2, Abs. 3 und 4 AO](https://www.gesetze-im-internet.de/ao_1977/__147.html)
+sehen für solche Unterlagen grundsätzlich sechs Jahre ab Schluss des
+Empfangsjahres vor. Das ist eine **offene rechtliche Einordnung des konkreten
+Angebots**, keine Feststellung, dass jeder unbezahlte Hold sechs Jahre
+aufzubewahren ist. Falls die Pflicht greift, darf der vollständige signierte
+Nachweis nicht durch den derzeit vorbereiteten 30-Tage-Purge verloren gehen;
+eine getrennte, unverändert lesbare Archivierung und das Löschen einer bloßen
+Arbeitskopie müssten erst konzipiert und geprüft werden.
+
+Stripe-berührte Vorgänge bleiben technisch vom isolierten Purge ausgeschlossen,
+sind damit aber nicht automatisch unbegrenzt aufzubewahren. Für Angebote,
+Kartenautorisierungen, Checkout-Sessions, Zahlungen, Erstattungen und
+Stornierungen braucht es einen **eigenen** Fristen- und Löschplan nach ihrem
+jeweiligen Zweck und ihrer rechtlichen Einordnung. Soweit Unterlagen tatsächlich
+Buchungsbelege sind, nennen [§ 257 Abs. 1 Nr. 4 und Abs. 4 HGB](https://www.gesetze-im-internet.de/hgb/__257.html)
+und [§ 147 Abs. 1 Nr. 4 und Abs. 3 AO](https://www.gesetze-im-internet.de/ao_1977/__147.html)
+grundsätzlich acht Jahre. Ein bloßer Providerkontakt ist noch kein Nachweis
+dafür, dass gerade ein Buchungsbeleg vorliegt.
+
+Konkrete Rechtsstreitigkeiten müssen mit dokumentiertem Grund gezielt gesperrt
+und nach Abschluss erneut geprüft werden; sie rechtfertigen keine pauschale
+Langzeitspeicherung sämtlicher Fälle. Für Sicherungskopien fehlen noch eine
+konkret dokumentierte Überschreibfrist und ein Verfahren, das Löschungen nach
+einer Wiederherstellung erneut anwendet. Der [Europäische Datenschutzausschuss
+im Bericht zur Löschung 2026](https://www.edpb.europa.eu/system/files/2026-02/edpb_cef-report_2025_right-to-erasure_en.pdf)
+hebt getrennte, zweckbezogene Fristen und den Umgang mit wiederhergestellten
+Backups hervor; [Art. 5 Abs. 1 Buchst. e und Art. 13 Abs. 2 Buchst. a
+DSGVO](https://eur-lex.europa.eu/eli/reg/2016/679/oj/deu) verlangen
+Speicherbegrenzung und transparente Fristen oder Bestimmungskriterien.
+
+Vor einer produktiven Löschregel müssen eine qualifizierte rechtliche Prüfung
+die Angebots- und Belegkategorien einordnen, der Betreiber daraufhin getrennte
+Fristen sowie Backup- und Streitfallverfahren festlegen und die tatsächliche
+Praxis mit dem Datenschutzhinweis abgleichen. **Dieser Nachtrag aktiviert weder
+eine Löschung noch Live-Buchungen oder Zahlungen.**

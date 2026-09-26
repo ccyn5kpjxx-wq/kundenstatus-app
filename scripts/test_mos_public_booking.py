@@ -1,4 +1,5 @@
 from pathlib import Path
+from contextlib import contextmanager
 from base64 import b64encode
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -48,7 +49,9 @@ class PublicTests(unittest.TestCase):
         self.client=portal.app.test_client()
         self.client.get('/mietwagen-test/')
         db=portal.get_db()
-        for table in ('miet_checkout_refunds','miet_checkout_cancellations','miet_checkout_handovers','miet_checkout_contract_delivery','miet_checkout_contracts',
+        for table in ('miet_checkout_vehicle_readiness','miet_checkout_vehicle_blocks',
+                      'miet_checkout_return_clearances','miet_checkout_returns',
+                      'miet_checkout_refunds','miet_checkout_cancellations','miet_checkout_handovers','miet_checkout_contract_delivery','miet_checkout_contracts',
                       'miet_checkout_events','miet_checkout_deposit_auths','miet_checkout_creation_attempts',
                       'miet_checkout_holds','mietvorgaenge'):db.execute('DELETE FROM '+table)
         db.commit();db.close()
@@ -303,8 +306,55 @@ class PublicTests(unittest.TestCase):
             db=portal.get_db()
             try:
                 db.execute("UPDATE mietvorgaenge SET status='zurueck' WHERE id=?",(rental_id,))
+                payload=db.execute('SELECT payload FROM miet_checkout_holds WHERE id=?',(hold,)).fetchone()['payload']
+                live_marker=json.loads(payload)
+                live_marker['quote']['test_only']=False
+                db.execute('UPDATE miet_checkout_holds SET payload=? WHERE id=?',
+                           (json.dumps(live_marker),hold))
                 db.commit()
             finally:db.close()
+            missing_protocol=self.post(action,data,client=admin)
+            self.assertEqual(missing_protocol.status_code,409)
+            self.assertIn('vollständig geklärter MOS-Rückgabe',missing_protocol.get_data(as_text=True))
+            db=portal.get_db()
+            try:
+                stamp=datetime.now(timezone.utc).isoformat()
+                db.execute('''INSERT INTO miet_checkout_handovers
+                    (hold_id,mietvorgang_id,handed_at,operator_name,odometer_km,protocol_ref,
+                     customer_receipt_confirmed,license_checked,fuel_full,condition_recorded)
+                    VALUES (?,?,?,?,?,?,1,1,1,1)''',
+                    (hold,rental_id,stamp,'Synthetic Operator',12000,'SYNTHETIC-HANDOVER'))
+                db.commit()
+            finally:db.close()
+            with self.assertRaisesRegex(ValueError,'geklärter Rückgabe'):
+                state['service'].release_deposit(hold,'Bypass-Versuch ohne Rückgabeprotokoll')
+            db=portal.get_db()
+            try:
+                db.execute('''INSERT INTO miet_checkout_returns
+                    (hold_id,mietvorgang_id,returned_at,recorded_at,operator_name,
+                     odometer_km,fuel_full,condition_recorded,damage_free,charges_resolved,
+                     no_objection,protocol_ref,note,late_review_cents,extra_km_review_cents)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    (hold,rental_id,stamp,stamp,'Synthetic Operator',12010,0,1,1,0,0,
+                     'SYNTHETIC-RETURN','Tank noch zu klären',0,0))
+                db.commit()
+            finally:db.close()
+            with self.assertRaisesRegex(ValueError,'geklärter Rückgabe'):
+                state['service'].release_deposit(hold,'Bypass-Versuch bei beanstandeter Rückgabe')
+            db=portal.get_db()
+            try:
+                db.execute('''INSERT INTO miet_checkout_return_clearances
+                    (hold_id,cleared_at,operator_name,evidence_ref,note,
+                     fuel_resolved,damage_resolved,time_km_resolved)
+                    VALUES (?,?,?,?,?,1,1,1)''',
+                    (hold,stamp,'Synthetic Operator','SYNTHETIC-INVOICE',
+                     'Tank gegen Beleg getrennt geklärt; Kunde informiert'))
+                db.execute("UPDATE miet_checkout_return_clearances SET cleared_at='2020-10-02T18:00:00+00:00' WHERE hold_id=?",(hold,))
+                db.commit()
+            finally:db.close()
+            overdue=portal.app.test_cli_runner().invoke(args=['mos-booking-reconcile'])
+            self.assertNotEqual(overdue.exit_code,0,overdue.output)
+            self.assertIn('Kautionsfreigaben nach internem Prüftermin: 1',overdue.output)
             released=self.post(action,data,client=admin)
             self.assertEqual(released.status_code,303)
             self.assertEqual(state['gateway'].retrieve_deposit_intent(intent_id)['status'],'canceled')
@@ -313,6 +363,11 @@ class PublicTests(unittest.TestCase):
             self.assertEqual(settled_check.exit_code,0,settled_check.output)
             self.assertIn('0 aktive Kartenreservierungen',settled_check.output)
             self.assertIn('offene Fehler: 0',settled_check.output)
+            db=portal.get_db()
+            try:
+                db.execute('UPDATE miet_checkout_holds SET payload=? WHERE id=?',(payload,hold))
+                db.commit()
+            finally:db.close()
             status_page=self.client.get('/mietwagen-test/status/'+hold).get_data(as_text=True)
             self.assertIn('war auf der Kreditkarte reserviert und wurde freigegeben',status_page)
             self.assertNotIn('Kartenreservierung wird geprüft',status_page)
@@ -327,6 +382,160 @@ class PublicTests(unittest.TestCase):
         finally:
             db=portal.get_db()
             db.execute("UPDATE mietfahrzeuge SET status='verfuegbar' WHERE id=?",(vid,));db.commit();db.close()
+
+    def test_disputed_return_blocks_fresh_quote_and_existing_quote_checkout(self):
+        token,_=self.quote()
+        vid=self.cfg['fleet']['kona']['id']
+        db=portal.get_db()
+        try:
+            db.execute('''INSERT INTO miet_checkout_vehicle_blocks
+                (hold_id,mietfahrzeug_id,blocked_at,reason)
+                VALUES ('synthetic-prior-return',?,?,'return_disputed')''',
+                (vid,datetime.now(timezone.utc).isoformat()))
+            db.execute("UPDATE mietfahrzeuge SET status='verfuegbar' WHERE id=?",(vid,))
+            db.commit()
+        finally:db.close()
+        response=self.post('/mietwagen-test/quote',{
+            'vehicle':'kona','start':self.cfg['slots'][0],
+            'end':self.cfg['slots'][3]})
+        self.assertEqual(response.status_code,409)
+        self.assertEqual(self.checkout(token).status_code,409)
+        db=portal.get_db()
+        try:self.assertEqual(db.execute('SELECT COUNT(*) FROM miet_checkout_holds').fetchone()[0],0)
+        finally:db.close()
+
+    def test_vehicle_readiness_route_requires_admin_csrf_and_live_postgres(self):
+        path='/mietwagen-test/admin/synthetic/fahrzeug-freigeben'
+        self.assertNotEqual(self.post(path,{}).status_code,303)
+        admin=portal.app.test_client()
+        with admin.session_transaction() as session:session['admin']=True
+        self.assertEqual(admin.post(path,data={'operator_name':'Operator'}).status_code,400)
+        admin.get('/mietwagen-test/admin')
+        response=self.post(path,{},client=admin)
+        self.assertEqual(response.status_code,409)
+        self.assertIn('nur für echte Live-MOS-Mieten',response.get_data(as_text=True))
+
+    def test_vehicle_readiness_admin_route_records_separate_audit_once(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,_,_=self.paid_card_booking()
+        admin=portal.app.test_client()
+        with admin.session_transaction() as session:session['admin']=True
+        admin.get('/mietwagen-test/admin')
+        state=portal.app.extensions['mos_public_booking']
+        db=portal.get_db()
+        try:
+            row=dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?',(hold,)).fetchone())
+            payload=json.loads(row['payload'])
+            payload['quote']['test_only']=False
+            db.execute('UPDATE miet_checkout_holds SET payload=? WHERE id=?',
+                       (json.dumps(payload),hold))
+            db.execute("UPDATE mietvorgaenge SET status='zurueck' WHERE id=?",
+                       (row['mietvorgang_id'],))
+            now=(datetime.now(timezone.utc)-timedelta(minutes=1)).isoformat()
+            db.execute('''INSERT INTO miet_checkout_returns
+                (hold_id,mietvorgang_id,returned_at,recorded_at,operator_name,
+                 odometer_km,fuel_full,condition_recorded,damage_free,charges_resolved,
+                 no_objection,protocol_ref,note,late_review_cents,extra_km_review_cents)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (hold,row['mietvorgang_id'],now,now,'Synthetic Operator',12010,
+                 0,1,1,0,0,'SYNTHETIC-RETURN','Tank offen',0,0))
+            db.execute('''INSERT INTO miet_checkout_vehicle_blocks
+                (hold_id,mietfahrzeug_id,blocked_at,reason)
+                VALUES (?,?,?,'return_disputed')''',(hold,row['mietfahrzeug_id'],now))
+            db.commit()
+            row=dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?',(hold,)).fetchone())
+
+            @contextmanager
+            def locked(vehicle_id):
+                self.assertEqual(vehicle_id,row['mietfahrzeug_id'])
+                try:
+                    yield db,None
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    raise
+
+            path='/mietwagen-test/admin/'+hold+'/fahrzeug-freigeben'
+            form={'operator_name':'Workshop Operator','evidence_ref':'WORKSHOP-1',
+                  'note':'Tank nachgefüllt, Schäden geprüft und Fahrzeug gereinigt',
+                  'fuel_ready':'yes','damage_ready':'yes','cleaned':'yes',
+                  'safe_to_rent':'yes'}
+            with patch.object(state['service'],'read',return_value=row), \
+                 patch.object(state['service'],'locked',side_effect=locked), \
+                 patch.object(portal,'USE_POSTGRES',True), \
+                 patch.dict(state['cfg'],{'mode':'live'}):
+                missing=self.post(path,{**form,'damage_ready':''},client=admin)
+                self.assertEqual(missing.status_code,409)
+                self.assertEqual(self.post(path,form,client=admin).status_code,303)
+                self.assertEqual(self.post(path,{**form,'note':'Changed'},client=admin).status_code,303)
+            release=db.execute('SELECT * FROM miet_checkout_vehicle_readiness WHERE hold_id=?',
+                               (hold,)).fetchone()
+            self.assertEqual(release['note'],form['note'])
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM miet_checkout_vehicle_readiness WHERE hold_id=?',
+                                        (hold,)).fetchone()[0],1)
+        finally:db.close()
+
+    def test_return_admin_route_requires_audited_matching_rental_and_is_immutable(self):
+        with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
+            hold,_,_=self.paid_card_booking()
+        path='/mietwagen-test/admin/'+hold+'/rueckgabe'
+        form={'returned_at':(datetime.now(ZoneInfo('Europe/Berlin'))-timedelta(minutes=1)).strftime('%Y-%m-%dT%H:%M'),
+              'operator_name':'Return Operator','odometer_km':'12010',
+              'protocol_ref':'RETURN-ROUTE-1','condition_recorded':'yes',
+              'damage_free':'yes','note':'Tank nicht voll; Nachbetankung prüfen'}
+        self.assertNotEqual(self.post(path,form).status_code,303)
+        admin=portal.app.test_client()
+        with admin.session_transaction() as session:session['admin']=True
+        self.assertEqual(admin.post(path,data=form).status_code,400)
+        admin.get('/mietwagen-test/admin')
+        state=portal.app.extensions['mos_public_booking']
+        db=portal.get_db()
+        try:
+            row=dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?',(hold,)).fetchone())
+            payload=json.loads(row['payload'])
+            payload['quote']['test_only']=False
+            payload['quote']['end_slot']=(datetime.now(timezone.utc)-timedelta(minutes=2)).isoformat()
+            db.execute('UPDATE miet_checkout_holds SET payload=? WHERE id=?',
+                       (json.dumps(payload),hold))
+            db.execute('''INSERT INTO miet_checkout_handovers
+                (hold_id,mietvorgang_id,handed_at,operator_name,odometer_km,protocol_ref,
+                 customer_receipt_confirmed,license_checked,fuel_full,condition_recorded)
+                VALUES (?,?,?,?,?,?,1,1,1,1)''',
+                (hold,999,(datetime.now(timezone.utc)-timedelta(hours=2)).isoformat(),
+                 'Handover Operator',12000,'HANDOVER-ROUTE-1'))
+            db.commit()
+            row=dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?',(hold,)).fetchone())
+
+            @contextmanager
+            def locked(vehicle_id):
+                self.assertEqual(vehicle_id,row['mietfahrzeug_id'])
+                try:
+                    yield db,None
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    raise
+
+            with patch.object(state['service'],'read',return_value=row), \
+                 patch.object(state['service'],'locked',side_effect=locked), \
+                 patch.object(portal,'USE_POSTGRES',True), \
+                 patch.dict(state['cfg'],{'mode':'live'}):
+                self.assertEqual(self.post(path,form,client=admin).status_code,409)
+                db.execute('UPDATE miet_checkout_handovers SET mietvorgang_id=? WHERE hold_id=?',
+                           (row['mietvorgang_id'],hold))
+                db.commit()
+                self.assertEqual(self.post(path,form,client=admin).status_code,303)
+                self.assertEqual(self.post(path,{**form,'operator_name':'Different Operator'},
+                                           client=admin).status_code,303)
+            returned=db.execute('SELECT * FROM miet_checkout_returns WHERE hold_id=?',
+                                (hold,)).fetchone()
+            self.assertEqual(returned['operator_name'],form['operator_name'])
+            self.assertEqual(returned['mietvorgang_id'],row['mietvorgang_id'])
+            self.assertEqual(db.execute('SELECT status FROM mietvorgaenge WHERE id=?',
+                                        (row['mietvorgang_id'],)).fetchone()['status'],'zurueck')
+            self.assertIsNotNone(db.execute('SELECT hold_id FROM miet_checkout_vehicle_blocks WHERE hold_id=?',
+                                            (hold,)).fetchone())
+        finally:db.close()
 
     def test_inherited_live_configuration_is_ignored(self):
         rules={r.rule for r in portal.app.url_map.iter_rules()}
@@ -421,6 +630,17 @@ class PublicTests(unittest.TestCase):
         self.assertIn(response.status_code,(302,303))
         db=portal.get_db()
         try:
+            self.assertEqual(db.execute('SELECT status FROM mietvorgaenge WHERE id=?',
+                                        (rental_id,)).fetchone()['status'],'aktiv')
+            db.execute('''INSERT INTO miet_checkout_handovers
+                (hold_id,mietvorgang_id,handed_at,operator_name,odometer_km,protocol_ref,
+                 customer_receipt_confirmed,license_checked,fuel_full,condition_recorded)
+                VALUES (?,?,?,?,?,?,1,1,1,1)''',
+                (hold,rental_id,datetime.now(timezone.utc).isoformat(),
+                 'Synthetic Operator',12000,'SYNTHETIC-HANDOVER'))
+            db.commit()
+            with self.assertRaisesRegex(ValueError,'MOS-Admin'):
+                portal.mietvorgang_zuruecknehmen(rental_id)
             self.assertEqual(db.execute('SELECT status FROM mietvorgaenge WHERE id=?',
                                         (rental_id,)).fetchone()['status'],'aktiv')
             db.execute("UPDATE mietvorgaenge SET status='storniert' WHERE id=?",(rental_id,))

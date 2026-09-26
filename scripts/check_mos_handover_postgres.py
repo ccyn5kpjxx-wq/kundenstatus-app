@@ -35,6 +35,10 @@ def check(cfg, name, directory):
         from mos_public_contract import init_schema as init_contract_schema
         from mos_contract_delivery import deliver_one, enqueue
         from mos_handover import record
+        from mos_return import (init_schema as init_return_schema,
+                                record as record_return, record_clearance,
+                                deposit_release_eligible, vehicle_blocked,
+                                record_vehicle_readiness)
 
         if not portal.USE_POSTGRES or portal.DATABASE_URL != url:
             raise RuntimeError('Only the fresh synthetic PostgreSQL database is allowed.')
@@ -44,6 +48,8 @@ def check(cfg, name, directory):
         hold_id = 'handover-test-' + name.rsplit('_', 1)[1]
         quote = {'test_only': False, 'start_slot': start.isoformat(),
                  'end_slot': end.isoformat(), 'amount_cents': 3900,
+                 'daily_cents': 3900, 'included_km': 150,
+                 'extra_km_cents': 25,
                  'deposit_method': 'card_authorization_at_booking',
                  'deposit_authorized_cents': 50000}
         contract = {'test_only': False, 'customer_email': 'synthetic@example.test'}
@@ -55,6 +61,7 @@ def check(cfg, name, directory):
         try:
             init_refund_schema(db)
             init_contract_schema(db)
+            init_return_schema(db)
             vehicle_id = db.execute('''INSERT INTO mietfahrzeuge
                 (kennzeichen,erstellt_am,geaendert_am) VALUES (?,?,?) RETURNING id''',
                 ('TEST-HANDOVER', portal.now_str(), portal.now_str())).fetchone()['id']
@@ -127,6 +134,58 @@ def check(cfg, name, directory):
                 raise
         else:
             raise AssertionError('No-show cancellation bypassed the handed-out key audit.')
+        try:
+            portal.mietvorgang_zuruecknehmen(rental_id)
+        except ValueError as exc:
+            if 'MOS-Admin' not in str(exc):
+                raise
+        else:
+            raise AssertionError('Generic date-only return bypassed the MOS return audit.')
+        return_at = end + timedelta(minutes=31)
+        with service.locked(vehicle_id) as (db, _):
+            returned = record_return(db, hold_id, returned_at=return_at,
+                operator_name='Synthetic Operator', odometer_km=12496,
+                fuel_full=True, condition_recorded=True, damage_free=True,
+                charges_resolved=False, no_objection=False,
+                protocol_ref='SYNTHETIC-RETURN', note='Extra kilometers for manual review',
+                now=return_at+timedelta(minutes=1))
+        with service.locked(vehicle_id) as (db, _):
+            repeated = record_return(db, hold_id, returned_at=return_at,
+                operator_name='Another Operator', odometer_km=12999,
+                fuel_full=False, condition_recorded=False, damage_free=False,
+                charges_resolved=False, no_objection=False,
+                protocol_ref='IGNORED', note='Ignored', now=return_at+timedelta(minutes=2))
+        if (returned['odometer_km'] != repeated['odometer_km']
+                or returned['late_review_cents'] != 3
+                or returned['extra_km_review_cents'] != 25
+                or returned['no_objection'] != 0):
+            raise AssertionError('PostgreSQL MOS return audit is not immutable and correctly calculated.')
+        db=portal.get_db()
+        try:
+            if not vehicle_blocked(db,vehicle_id):
+                raise AssertionError('Disputed PostgreSQL return did not block availability.')
+        finally:db.close()
+        with service.locked(vehicle_id) as (db, _):
+            cleared = record_clearance(db, hold_id, operator_name='Synthetic Operator',
+                evidence_ref='SYNTHETIC-INVOICE',
+                note='Zeit und Kilometer getrennt geklärt; Kunde informiert',
+                fuel_resolved=True, damage_resolved=True, time_km_resolved=True,
+                now=return_at+timedelta(minutes=2))
+            if not deposit_release_eligible(db, hold_id, rental_id):
+                raise AssertionError('Resolved PostgreSQL return should permit separate card release.')
+            if not vehicle_blocked(db,vehicle_id):
+                raise AssertionError('Financial clearance released physical inventory.')
+            readiness=record_vehicle_readiness(db,hold_id,
+                operator_name='Workshop Operator',evidence_ref='SYNTHETIC-WORKSHOP',
+                note='Tank, Schäden, Reinigung und Fahrbereitschaft geprüft',
+                fuel_ready=True,damage_ready=True,cleaned=True,safe_to_rent=True,
+                now=return_at+timedelta(minutes=3))
+            if vehicle_blocked(db,vehicle_id):
+                raise AssertionError('Documented workshop release did not unblock inventory.')
+        if cleared['evidence_ref'] != 'SYNTHETIC-INVOICE':
+            raise AssertionError('PostgreSQL return clearance record is missing.')
+        if readiness['evidence_ref'] != 'SYNTHETIC-WORKSHOP':
+            raise AssertionError('PostgreSQL workshop release record is missing.')
 
 
 def main():

@@ -10309,6 +10309,8 @@ def init_db():
         )
         """
     )
+    from mos_return import init_vehicle_schema
+    init_vehicle_schema(db)
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS mietvertrag_versionen (
@@ -39329,11 +39331,12 @@ def naechste_reservierung(vorgaenge):
     return None
 
 
-def hydrate_mietfahrzeug(row, vorgaenge=None, bilder=None):
+def hydrate_mietfahrzeug(row, vorgaenge=None, bilder=None, mos_blocked=False):
     if row is None:
         return None
     fahrzeug = dict(row)
     fahrzeug["basis_status"] = normalize_mietfahrzeug_status(fahrzeug.get("status"))
+    fahrzeug["mos_betriebsgesperrt"] = bool(mos_blocked)
     fahrzeug["tagessatz_label"] = tagessatz_label(fahrzeug.get("tagessatz"))
     bilder = bilder if bilder is not None else list_mietfahrzeug_bilder(fahrzeug["id"])
     fahrzeug["bilder"] = bilder
@@ -39347,6 +39350,8 @@ def hydrate_mietfahrzeug(row, vorgaenge=None, bilder=None):
     fahrzeug["naechste_reservierung"] = reserviert
     if not bool(fahrzeug.get("aktiv")) or fahrzeug["basis_status"] == "inaktiv":
         effektiv = "inaktiv"
+    elif mos_blocked:
+        effektiv = "wartung"
     elif laufend:
         effektiv = "vermietet"
     elif fahrzeug["basis_status"] == "wartung":
@@ -39356,7 +39361,10 @@ def hydrate_mietfahrzeug(row, vorgaenge=None, bilder=None):
     else:
         effektiv = "verfuegbar"
     fahrzeug["effektiver_status"] = effektiv
-    fahrzeug["effektiver_status_label"] = MIETFAHRZEUG_STATUS_LABEL.get(effektiv, "Verfügbar")
+    fahrzeug["effektiver_status_label"] = (
+        "Nach MOS-Rückgabe gesperrt" if mos_blocked and effektiv == "wartung"
+        else MIETFAHRZEUG_STATUS_LABEL.get(effektiv, "Verfügbar")
+    )
     fahrzeug["ist_verfuegbar"] = effektiv == "verfuegbar"
     return fahrzeug
 
@@ -39364,10 +39372,12 @@ def hydrate_mietfahrzeug(row, vorgaenge=None, bilder=None):
 def list_mietfahrzeuge(include_inactive=True):
     db = get_db()
     try:
+        from mos_return import vehicle_blocked
         if include_inactive:
             rows = db.execute("SELECT * FROM mietfahrzeuge ORDER BY aktiv DESC, fahrzeugklasse ASC, kennzeichen ASC").fetchall()
         else:
             rows = db.execute("SELECT * FROM mietfahrzeuge WHERE aktiv=1 ORDER BY fahrzeugklasse ASC, kennzeichen ASC").fetchall()
+        blocked_ids = {row["id"] for row in rows if vehicle_blocked(db, row["id"])}
         vorgang_rows = db.execute("SELECT * FROM mietvorgaenge ORDER BY id DESC").fetchall()
         mos_rows = db.execute('''SELECT h.mietvorgang_id,h.id,h.payload,h.status,
             handover.handed_at FROM miet_checkout_holds h
@@ -39403,6 +39413,7 @@ def list_mietfahrzeuge(include_inactive=True):
             row,
             vorgaenge_by_fahrzeug.get(row["id"], []),
             bilder_by_fahrzeug.get(row["id"], []),
+            row["id"] in blocked_ids,
         )
         for row in rows
     ]
@@ -39460,11 +39471,14 @@ def get_mietfahrzeug(fahrzeug_id):
     db = get_db()
     try:
         row = db.execute("SELECT * FROM mietfahrzeuge WHERE id=?", (int(fahrzeug_id),)).fetchone()
+        if row is not None:
+            from mos_return import vehicle_blocked
+            blocked = vehicle_blocked(db, row["id"])
     finally:
         db.close()
     if row is None:
         return None
-    return hydrate_mietfahrzeug(row)
+    return hydrate_mietfahrzeug(row, mos_blocked=blocked)
 
 
 def list_mietfahrzeug_bilder(fahrzeug_id):
@@ -39800,6 +39814,9 @@ def validiere_mietkontakt(telefon="", email=""):
 
 
 def mietfahrzeug_zeitraum_frei_db(db, fahrzeug_id, start_obj, end_obj, exclude_vorgang_id=None, exclude_hold_id=None):
+    from mos_return import vehicle_blocked
+    if vehicle_blocked(db, fahrzeug_id):
+        return False
     rows = db.execute(
         """
         SELECT id, start_datum, end_datum
@@ -39905,6 +39922,8 @@ def mietvorgang_zuruecknehmen(vorgang_id, rueckgabe_datum=None):
         mos_state = _mos_direct_handover_state_db(db, vorgang_id)
         if mos_state and not mos_state['handed_at']:
             raise ValueError('MOS-Schlüsselübergabe ist noch nicht dokumentiert. Buchungsfall zuerst im MOS-Admin prüfen.')
+        if mos_state:
+            raise ValueError('MOS-Direktmiete bitte im MOS-Admin mit tatsächlicher Uhrzeit, Tank-, Kilometer- und Zustandsprotokoll zurücknehmen.')
         status = clean_text(row["status"])
         if status == "storniert":
             raise ValueError("Ein stornierter Mietvorgang kann nicht als zurückgegeben gebucht werden.")

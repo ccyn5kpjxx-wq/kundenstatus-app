@@ -6,11 +6,14 @@ separate audit record: a paid rental is not evidence that keys were handed out.
 
 from datetime import datetime, timedelta, timezone
 import json
+from zoneinfo import ZoneInfo
 
 from mos_contract_delivery import _verified_row
+from mos_return import init_vehicle_schema, vehicle_blocked
 
 
 def init_schema(db):
+    init_vehicle_schema(db)
     db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_handovers (
         hold_id TEXT PRIMARY KEY, mietvorgang_id INTEGER NOT NULL UNIQUE,
         handed_at TEXT NOT NULL, operator_name TEXT NOT NULL,
@@ -70,6 +73,43 @@ def record(db, service, hold_id, provider_intent, *, operator_name, odometer_km,
 
     rental = db.execute('''SELECT mietfahrzeug_id,status,rueckgabe_datum FROM mietvorgaenge
         WHERE id=?''', (hold['mietvorgang_id'],)).fetchone()
+    if vehicle_blocked(db, hold['mietfahrzeug_id']):
+        raise ValueError('Fahrzeug nach beanstandeter MOS-Rückgabe betrieblich gesperrt; Werkstattfreigabe fehlt.')
+    other_rentals = db.execute('''SELECT rental.id,rental.start_datum,
+        other_hold.id AS mos_hold_id,other_hold.payload AS mos_payload,
+        EXISTS (SELECT 1 FROM miet_checkout_handovers other_handover
+                WHERE other_handover.mietvorgang_id=rental.id) AS handed_out
+        FROM mietvorgaenge rental
+        LEFT JOIN miet_checkout_holds other_hold
+          ON other_hold.mietvorgang_id=rental.id AND other_hold.status='confirmed'
+        WHERE rental.mietfahrzeug_id=? AND rental.id<>?
+          AND rental.status='aktiv' AND COALESCE(rental.rueckgabe_datum,'')='' ''',
+        (hold['mietfahrzeug_id'],hold['mietvorgang_id'])).fetchall()
+    local_today = now.astimezone(ZoneInfo('Europe/Berlin')).date()
+    for other in other_rentals:
+        if other['handed_out']:
+            raise ValueError('Schlüsselübergabe gesperrt: Vormiete noch nicht zurückgegeben.')
+        if other['mos_hold_id']:
+            # Confirmed MOS bookings are stored as active before key handover.
+            # A future pickup is fine; an elapsed, still-open booking is not.
+            try:
+                mos_start = datetime.fromisoformat(
+                    json.loads(other['mos_payload'])['quote']['start_slot'])
+            except (TypeError, KeyError, ValueError) as exc:
+                raise ValueError('Schlüsselübergabe gesperrt: Termin einer anderen MOS-Buchung unklar.') from exc
+            if mos_start.tzinfo is None or mos_start.astimezone(timezone.utc) <= now:
+                raise ValueError('Schlüsselübergabe gesperrt: Eine andere MOS-Buchung ist noch offen.')
+            continue
+        start_text = other['start_datum'] or ''
+        try:
+            legacy_start = datetime.strptime(start_text,'%d.%m.%Y').date()
+        except ValueError:
+            try:
+                legacy_start = datetime.fromisoformat(start_text).date()
+            except ValueError:
+                legacy_start = None
+        if legacy_start is None or legacy_start <= local_today:
+            raise ValueError('Schlüsselübergabe gesperrt: Eine andere Vormiete ist noch offen.')
     deposit = db.execute('SELECT * FROM miet_checkout_deposit_auths WHERE hold_id=?',
                          (hold_id,)).fetchone()
     if (not rental or rental['mietfahrzeug_id'] != hold['mietfahrzeug_id']

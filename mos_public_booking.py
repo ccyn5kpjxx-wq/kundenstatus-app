@@ -17,6 +17,10 @@ from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME, init_schema as init
 from mos_public_contract import finalize as finalize_contract, presign_quote, read as read_contract
 from mos_public_contract import signed_payload
 from mos_handover import init_schema as init_handover_schema, existing as existing_handover, record as record_handover
+from mos_return import (init_schema as init_return_schema, deposit_release_eligible,
+                        record as record_return, record_clearance,
+                        record_vehicle_readiness,
+                        release_review_deadline)
 from mos_order_receipt import init_schema as init_order_receipt_schema, enqueue as enqueue_order_receipt
 
 LISTINGS = {'kona':'Hyundai KONA N Line X', 'i10':'Hyundai i10'}
@@ -73,8 +77,8 @@ def isolated_postgres_stripe_test(portal, cfg):
         return False
 
 
-def local_slot_to_iso(value):
-    """Accept a future Berlin wall-clock minute only when its UTC offset is unambiguous."""
+def local_slot_to_iso(value, *, require_future=True):
+    """Accept a Berlin wall-clock minute only when its UTC offset is unambiguous."""
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}',value or ''):
         raise ValueError('Bitte einen gültigen Abhol- oder Rückgabetermin eingeben.')
     try: local=datetime.strptime(value,'%Y-%m-%dT%H:%M')
@@ -87,7 +91,7 @@ def local_slot_to_iso(value):
     if len({d.utcoffset() for d in possible})!=1:
         raise ValueError('Dieser Termin liegt in einer mehrdeutigen oder nicht vorhandenen Zeitumstellung.')
     slot=possible[0]
-    if slot.astimezone(timezone.utc)<=datetime.now(timezone.utc):
+    if require_future and slot.astimezone(timezone.utc)<=datetime.now(timezone.utc):
         raise ValueError('Nur künftige Übergabetermine können geöffnet werden.')
     return slot.isoformat()
 
@@ -247,7 +251,7 @@ def register(portal):
         app.config['MOS_SHARED_CHECKOUT_ENABLED']=bool(app.config['MOS_PUBLIC_BOOKING'].get('enabled'))
         db=portal.get_db()
         try:
-            init_refund_schema(db);init_contract_schema(db);init_handover_schema(db);init_order_receipt_schema(db)
+            init_refund_schema(db);init_contract_schema(db);init_handover_schema(db);init_return_schema(db);init_order_receipt_schema(db)
             init_slot_schema(db,cfg['slots']);db.commit()
         finally:db.close()
         existing={'cfg':cfg,'service':service,'gateway':gateway,'secret':secret,'ledger':RefundLedger(service)}
@@ -264,7 +268,9 @@ def register(portal):
             return
         settling={'mos_public.status','mos_public.retry','mos_public.cancel','mos_public.webhook','mos_public.receipt',
                   'mos_public.cancel_paid','mos_public.admin_bookings','mos_public.admin_action',
-                  'mos_public.signed_contract_pdf','mos_public.admin_contract_pdf','mos_public.admin_handover'}
+                  'mos_public.signed_contract_pdf','mos_public.admin_contract_pdf',
+                  'mos_public.admin_handover','mos_public.admin_return',
+                  'mos_public.admin_return_clearance','mos_public.admin_vehicle_readiness'}
         if not cfg.get('enabled') and not (request.endpoint in settling and cfg.get('mode') in {'offline','stripe_test','live'}):
             abort(404)
         state=setup()
@@ -456,12 +462,24 @@ def register(portal):
             sql='''SELECT h.*,c.signed_at,d.status AS deposit_status,
                 delivery.status AS contract_delivery_status,delivery.enqueued_at AS contract_enqueued_at,
                 delivery.accepted_at AS contract_accepted_at,
-                handover.handed_at AS handed_at, handover.operator_name AS handover_operator
+                handover.handed_at AS handed_at, handover.operator_name AS handover_operator,
+                rental.status AS rental_status,
+                ret.returned_at AS returned_at,ret.no_objection AS return_no_objection,
+                ret.late_review_cents AS late_review_cents,
+                ret.extra_km_review_cents AS extra_km_review_cents,
+                clearance.cleared_at AS return_cleared_at,
+                clearance.operator_name AS return_clearance_operator,
+                readiness.released_at AS vehicle_released_at,
+                readiness.operator_name AS vehicle_release_operator
                 FROM miet_checkout_holds h
                 LEFT JOIN miet_checkout_contracts c ON c.hold_id=h.id
                 LEFT JOIN miet_checkout_deposit_auths d ON d.hold_id=h.id
                 LEFT JOIN miet_checkout_contract_delivery delivery ON delivery.hold_id=h.id
                 LEFT JOIN miet_checkout_handovers handover ON handover.hold_id=h.id
+                LEFT JOIN mietvorgaenge rental ON rental.id=h.mietvorgang_id
+                LEFT JOIN miet_checkout_returns ret ON ret.hold_id=h.id
+                LEFT JOIN miet_checkout_return_clearances clearance ON clearance.hold_id=h.id
+                LEFT JOIN miet_checkout_vehicle_readiness readiness ON readiness.hold_id=h.id
                 '''
             if selected:
                 holds=[dict(r) for r in db.execute(sql+' WHERE h.id=?',(selected,)).fetchall()]
@@ -477,6 +495,19 @@ def register(portal):
                 h['signed_at']=datetime.fromisoformat(h['signed_at']).astimezone(ZoneInfo('Europe/Berlin')).strftime('%d.%m.%Y um %H:%M Uhr')
             if h['handed_at']:
                 h['handed_at']=datetime.fromisoformat(h['handed_at']).astimezone(BERLIN).strftime('%d.%m.%Y um %H:%M Uhr')
+            h['deposit_release_review_by']=None
+            if h['returned_at']:
+                returned_at=datetime.fromisoformat(h['returned_at'])
+                if (h['return_no_objection'] or h['return_cleared_at']) and h['deposit_status'] not in (None,'released'):
+                    h['deposit_release_review_by']=release_review_deadline(
+                        (datetime.fromisoformat(h['return_cleared_at'])
+                         if h['return_cleared_at'] else returned_at),
+                        portal.bw_feiertage).strftime('%d.%m.%Y')
+                h['returned_at']=datetime.fromisoformat(h['returned_at']).astimezone(BERLIN).strftime('%d.%m.%Y um %H:%M Uhr')
+            if h['return_cleared_at']:
+                h['return_cleared_at']=datetime.fromisoformat(h['return_cleared_at']).astimezone(BERLIN).strftime('%d.%m.%Y um %H:%M Uhr')
+            if h['vehicle_released_at']:
+                h['vehicle_released_at']=datetime.fromisoformat(h['vehicle_released_at']).astimezone(BERLIN).strftime('%d.%m.%Y um %H:%M Uhr')
             h['contract_delivery_delay_seconds']=None
             if h['contract_accepted_at'] and h['contract_enqueued_at']:
                 try:
@@ -608,6 +639,77 @@ def register(portal):
         portal.flash('MOS-Schlüsselübergabe mit Vertrags-, Zustell- und Kautionsprüfung dokumentiert.','success')
         return redirect(url_for('mos_public.admin_bookings',hold_id=hold_id)+'#hold-'+hold_id,code=303)
 
+    @bp.post('/admin/<hold_id>/rueckgabe')
+    @portal.admin_required
+    def admin_return(hold_id):
+        state=setup()
+        if state['cfg']['mode']!='live' or not portal.USE_POSTGRES:
+            raise ValueError('MOS-Rückgabeprotokoll ist nur für echte Live-Buchungen verfügbar.')
+        h=state['service'].read(hold_id)
+        q=json.loads(h['payload'])['quote']
+        if q.get('test_only') is not False or h['status']!='confirmed':
+            raise ValueError('Nur bestätigte echte MOS-Buchungen können zurückgegeben werden.')
+        returned_at=datetime.fromisoformat(local_slot_to_iso(
+            request.form.get('returned_at',''),require_future=False))
+        try:odometer=int(request.form.get('odometer_km',''))
+        except (TypeError,ValueError):raise ValueError('Rückgabe-Kilometerstand als ganze Zahl eingeben.') from None
+        with state['service'].locked(h['mietfahrzeug_id']) as (db,_):
+            record_return(db,hold_id,returned_at=returned_at,
+                          operator_name=request.form.get('operator_name',''),
+                          odometer_km=odometer,
+                          fuel_full=request.form.get('fuel_full')=='yes',
+                          condition_recorded=request.form.get('condition_recorded')=='yes',
+                          damage_free=request.form.get('damage_free')=='yes',
+                          charges_resolved=request.form.get('charges_resolved')=='yes',
+                          no_objection=request.form.get('no_objection')=='yes',
+                          protocol_ref=request.form.get('protocol_ref',''),
+                          note=request.form.get('note',''))
+        portal.flash('Tatsächliche MOS-Rückgabe mit Uhrzeit und Prüfprotokoll dokumentiert. Offene Forderungen getrennt prüfen; keine automatische Kartenbelastung.','success')
+        return redirect(url_for('mos_public.admin_bookings',hold_id=hold_id)+'#hold-'+hold_id,code=303)
+
+    @bp.post('/admin/<hold_id>/rueckgabe-klaeren')
+    @portal.admin_required
+    def admin_return_clearance(hold_id):
+        state=setup()
+        if state['cfg']['mode']!='live' or not portal.USE_POSTGRES:
+            raise ValueError('MOS-Rückgabeklärung ist nur für echte Live-Buchungen verfügbar.')
+        h=state['service'].read(hold_id)
+        q=json.loads(h['payload'])['quote']
+        if q.get('test_only') is not False or h['status']!='confirmed':
+            raise ValueError('Nur bestätigte echte MOS-Rückgaben können geklärt werden.')
+        with state['service'].locked(h['mietfahrzeug_id']) as (db,_):
+            record_clearance(db,hold_id,
+                operator_name=request.form.get('operator_name',''),
+                evidence_ref=request.form.get('evidence_ref',''),
+                note=request.form.get('note',''),
+                fuel_resolved=request.form.get('fuel_resolved')=='yes',
+                damage_resolved=request.form.get('damage_resolved')=='yes',
+                time_km_resolved=request.form.get('time_km_resolved')=='yes')
+        portal.flash('Nachträgliche Klärung getrennt vom ursprünglichen Rückgabeprotokoll dokumentiert. Kartenfreigabe bei noch bestehender Autorisierung separat ausführen.','success')
+        return redirect(url_for('mos_public.admin_bookings',hold_id=hold_id)+'#hold-'+hold_id,code=303)
+
+    @bp.post('/admin/<hold_id>/fahrzeug-freigeben')
+    @portal.admin_required
+    def admin_vehicle_readiness(hold_id):
+        state=setup()
+        if state['cfg']['mode']!='live' or not portal.USE_POSTGRES:
+            raise ValueError('Fahrzeug-Betriebsfreigabe ist nur für echte Live-MOS-Mieten verfügbar.')
+        h=state['service'].read(hold_id)
+        q=json.loads(h['payload'])['quote']
+        if q.get('test_only') is not False or h['status']!='confirmed':
+            raise ValueError('Nur beanstandet zurückgegebene echte MOS-Fahrzeuge können freigegeben werden.')
+        with state['service'].locked(h['mietfahrzeug_id']) as (db,_):
+            record_vehicle_readiness(db,hold_id,
+                operator_name=request.form.get('operator_name',''),
+                evidence_ref=request.form.get('evidence_ref',''),
+                note=request.form.get('note',''),
+                fuel_ready=request.form.get('fuel_ready')=='yes',
+                damage_ready=request.form.get('damage_ready')=='yes',
+                cleaned=request.form.get('cleaned')=='yes',
+                safe_to_rent=request.form.get('safe_to_rent')=='yes')
+        portal.flash('Fahrzeug nach separater Werkstattprüfung wieder betrieblich freigegeben. Zahlung/Kaution bleiben unabhängig zu klären.','success')
+        return redirect(url_for('mos_public.admin_bookings',hold_id=hold_id)+'#hold-'+hold_id,code=303)
+
     @bp.post('/admin/<hold_id>')
     @portal.admin_required
     def admin_action(hold_id):
@@ -615,7 +717,18 @@ def register(portal):
         h=state['service'].read(hold_id)
         q=json.loads(h['payload'])['quote']
         if not reason:raise ValueError('Begründung/Prüfvermerk erforderlich.')
-        if action=='cancel':rid=state['ledger'].cancel(hold_id,admin=True,no_show=request.form.get('no_show')=='yes')
+        if action=='cancel':
+            no_show=request.form.get('no_show')=='yes'
+            contact_time=(datetime.fromisoformat(local_slot_to_iso(
+                request.form.get('contact_attempt_at',''),require_future=False))
+                if no_show else None)
+            rid=state['ledger'].cancel(hold_id,admin=True,
+                no_show=no_show,
+                staffed_check=request.form.get('staffed_check')=='yes',
+                contact_attempt=request.form.get('contact_attempt',''),
+                contact_attempt_at=contact_time,
+                operator_name=request.form.get('operator_name',''),
+                review_note=reason)
         elif action=='credit':
             key=request.form.get('request_id','')
             if not 20<=len(key)<=100:raise ValueError('Erstattungsreferenz fehlt.')
@@ -629,6 +742,12 @@ def register(portal):
                 finally:db.close()
                 if not rental or rental['status']!='zurueck':
                     raise ValueError('Kartenreservierung erst nach protokollierter Rückgabe freigeben.')
+                if q.get('test_only') is False:
+                    db=portal.get_db()
+                    try:eligible=deposit_release_eligible(db,hold_id,h['mietvorgang_id'])
+                    finally:db.close()
+                    if not eligible:
+                        raise ValueError('Kartenreservierung erst nach dokumentierter unbeanstandeter oder vollständig geklärter MOS-Rückgabe freigeben.')
                 state['service'].release_deposit(hold_id,reason)
                 return redirect(url_for('mos_public.admin_bookings'),code=303)
             rid=state['ledger'].deposit(hold_id,reason)
@@ -752,7 +871,17 @@ def register(portal):
                 (stale_before,)).fetchone()['n']
             review_count=db.execute("SELECT COUNT(*) AS n FROM miet_checkout_holds WHERE status='review'").fetchone()['n']
             failed_refunds=db.execute("SELECT COUNT(*) AS n FROM miet_checkout_refunds WHERE status='failed'").fetchone()['n']
+            uncleared_returns=[dict(r) for r in db.execute('''SELECT ret.returned_at,clearance.cleared_at
+                FROM miet_checkout_returns ret
+                JOIN miet_checkout_deposit_auths d ON d.hold_id=ret.hold_id
+                LEFT JOIN miet_checkout_return_clearances clearance ON clearance.hold_id=ret.hold_id
+                WHERE (ret.no_objection=1 OR clearance.hold_id IS NOT NULL)
+                  AND d.status!='released' ''').fetchall()]
         finally:db.close()
+        clear_return_overdue=sum(
+            datetime.now(timezone.utc)>release_review_deadline(
+                datetime.fromisoformat(row['cleared_at'] or row['returned_at']),portal.bw_feiertage)
+            for row in uncleared_returns)
         paid_without_webhook=0
         for pending in pending_sessions:
             try:
@@ -807,9 +936,10 @@ def register(portal):
                    f'offene Fehler: {errors}; bezahlte Checkouts ohne Webhook: {paid_without_webhook}; '
                    f'Bestelleingangsbestätigungen nach Providerabgleich neu vorgemerkt: {receipt_queued}; '
                    f'unklare Checkout-Aufträge: {uncertain_checkouts}; ungeklärte Kartenreservierungen: {unresolved_deposits}; '
-                   f'Prüffälle: {review_count}; fehlgeschlagene Erstattungen: {failed_refunds}')
+                   f'Prüffälle: {review_count}; fehlgeschlagene Erstattungen: {failed_refunds}; '
+                   f'Kautionsfreigaben nach internem Prüftermin: {clear_return_overdue}')
         if (errors or paid_without_webhook or uncertain_checkouts or unresolved_deposits
-                or review_count or failed_refunds):
+                or review_count or failed_refunds or clear_return_overdue):
             raise click.ClickException('Offene Zahlungs- oder Prüffälle; Admin-Prüfung erforderlich.')
 
     @bp.post('/quote')

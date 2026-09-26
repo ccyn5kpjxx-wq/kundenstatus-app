@@ -43,13 +43,14 @@ class HandoverTests(unittest.TestCase):
         self.db.execute('''CREATE TABLE miet_checkout_deposit_auths
             (hold_id TEXT PRIMARY KEY,intent_id TEXT,status TEXT,capture_before TEXT)''')
         self.db.execute('''CREATE TABLE mietvorgaenge
-            (id INTEGER PRIMARY KEY,mietfahrzeug_id INTEGER,status TEXT,rueckgabe_datum TEXT)''')
+            (id INTEGER PRIMARY KEY,mietfahrzeug_id INTEGER,status TEXT,
+             rueckgabe_datum TEXT,start_datum TEXT)''')
         init_delivery_schema(self.db)
         init_schema(self.db)
         self.db.execute('INSERT INTO miet_checkout_holds VALUES (?,?,?,?,?,?,?)',
                         ('h1', 3, 'confirmed', 'pi_payment', 7,
                          json.dumps({'quote': self.quote}), 'quote-digest'))
-        self.db.execute("INSERT INTO mietvorgaenge VALUES (7,3,'aktiv','')")
+        self.db.execute("INSERT INTO mietvorgaenge VALUES (7,3,'aktiv','','24.09.2026')")
         self.db.execute("INSERT INTO miet_checkout_deposit_auths VALUES ('h1','pi_deposit','authorized',?)",
                         (self.until,))
         canonical = json.dumps(self.contract, ensure_ascii=False, sort_keys=True,
@@ -146,6 +147,50 @@ class HandoverTests(unittest.TestCase):
         self.db.execute('UPDATE miet_checkout_contract_delivery SET accepted_at=? WHERE hold_id=?',
                         ((self.now+timedelta(minutes=1)).isoformat(), 'h1'))
         self.assert_blocked()
+
+    def test_confirmed_later_booking_cannot_handover_while_vehicle_is_blocked(self):
+        self.db.execute('''INSERT INTO miet_checkout_vehicle_blocks
+            (hold_id,mietfahrzeug_id,blocked_at,reason)
+            VALUES ('earlier-return',3,?,'return_disputed')''',
+            ((self.now-timedelta(days=1)).isoformat(),))
+        with self.assertRaisesRegex(ValueError,'Werkstattfreigabe fehlt'):
+            self.handover()
+        self.assertIsNone(self.db.execute(
+            "SELECT hold_id FROM miet_checkout_handovers WHERE hold_id='h1'").fetchone())
+        self.db.execute('''INSERT INTO miet_checkout_vehicle_readiness
+            (hold_id,released_at,operator_name,evidence_ref,note,
+             fuel_ready,damage_ready,cleaned,safe_to_rent)
+            VALUES ('earlier-return',?,'Workshop Operator','WORKSHOP-1',
+                    'Nach Reparatur fahrbereit',1,1,1,1)''',
+            ((self.now-timedelta(minutes=5)).isoformat(),))
+        self.assertEqual(self.handover()['mietvorgang_id'],7)
+
+    def test_confirmed_following_booking_waits_for_actual_prior_return(self):
+        self.db.execute("INSERT INTO mietvorgaenge VALUES (6,3,'aktiv','','23.09.2026')")
+        with self.assertRaisesRegex(ValueError,'andere Vormiete'):
+            self.handover()
+        self.assertIsNone(self.db.execute(
+            "SELECT hold_id FROM miet_checkout_handovers WHERE hold_id='h1'").fetchone())
+        self.db.execute("UPDATE mietvorgaenge SET status='zurueck',rueckgabe_datum='24.09.2026' WHERE id=6")
+        self.assertEqual(self.handover()['mietvorgang_id'],7)
+
+    def test_future_booking_does_not_block_current_handover(self):
+        self.db.execute("INSERT INTO mietvorgaenge VALUES (8,3,'aktiv','','24.09.2026')")
+        future_quote={**self.quote,'start_slot':(self.now+timedelta(hours=3)).isoformat(),
+                      'end_slot':(self.end+timedelta(days=1)).isoformat()}
+        self.db.execute('INSERT INTO miet_checkout_holds VALUES (?,?,?,?,?,?,?)',
+                        ('future',3,'confirmed','pi_future',8,
+                         json.dumps({'quote':future_quote}),'future-digest'))
+        self.assertEqual(self.handover()['mietvorgang_id'],7)
+
+    def test_elapsed_confirmed_mos_booking_without_handover_blocks(self):
+        self.db.execute("INSERT INTO mietvorgaenge VALUES (6,3,'aktiv','','24.09.2026')")
+        old_quote={**self.quote,'start_slot':(self.now-timedelta(hours=2)).isoformat()}
+        self.db.execute('INSERT INTO miet_checkout_holds VALUES (?,?,?,?,?,?,?)',
+                        ('earlier',3,'confirmed','pi_earlier',6,
+                         json.dumps({'quote':old_quote}),'earlier-digest'))
+        with self.assertRaisesRegex(ValueError,'andere MOS-Buchung'):
+            self.handover()
 
 
 if __name__ == '__main__':
