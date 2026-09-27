@@ -3194,6 +3194,7 @@ def add_security_headers(response):
                 "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com",
                 "font-src 'self' https://fonts.gstatic.com data:",
                 "img-src 'self' data: blob: https:",
+                "media-src 'self' blob:",
                 "frame-src 'self' https://www.googletagmanager.com",
                 (
                     "connect-src 'self' https://api.open-meteo.com "
@@ -8214,6 +8215,11 @@ BACKUP_TABLES = (
     "reklamationen",
     "kalender_notizen",
     "mitarbeiter",
+    "assistent_rechte",
+    "assistent_profile",
+    "assistent_aktionen",
+    "assistent_audit",
+    "assistent_dialog",
     "mitarbeiter_urlaub",
     "google_ads_tageswerte",
 )
@@ -8245,7 +8251,7 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
-BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2")
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1")
 BACKUP_BINARY_FIELDS = {
     "mietvertrag_versionen": {
         "pdf_base64": {
@@ -46938,6 +46944,9 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         "assistent_fortschritt_audit", "assistent_bestellkontakte",
         "assistent_bestellkonfiguration", "assistent_bestellanforderungen",
         "assistent_bestellpakete",
+        # Native avatar identity/history arrived after the first assistant API.
+        "assistent_rechte", "assistent_profile", "assistent_aktionen",
+        "assistent_audit", "assistent_dialog",
     }
     if "kunden_termin_mail_versand" in schema_features:
         required_tables.add("kunden_termin_mail_versand")
@@ -46946,6 +46955,9 @@ def validate_backup_binary_reference_completeness(export, reference_map):
                                 "assistent_fortschritt_audit", "assistent_bestellkontakte",
                                 "assistent_bestellkonfiguration", "assistent_bestellanforderungen",
                                 "assistent_bestellpakete"})
+    if "werkstatt_avatar_v1" in schema_features:
+        required_tables.update({"assistent_rechte", "assistent_profile", "assistent_aktionen",
+                                "assistent_audit", "assistent_dialog"})
     if format_version >= 3:
         required_tables.add("fahrzeugeinkauf_scan_treffer")
     if format_version >= 4:
@@ -47127,14 +47139,22 @@ def reset_postgres_id_sequences(db):
             continue
         if "id" not in columns:
             continue
+        sequence = db.execute(
+            "SELECT pg_get_serial_sequence(?, 'id') AS sequence_name", (table_name,)
+        ).fetchone()
+        if not sequence or not sequence["sequence_name"]:
+            # Avatar action IDs are text keys, not serials. Never apply MAX(id)
+            # as an integer expression to a natural/text primary key.
+            continue
         db.execute(
             f"""
             SELECT setval(
-                pg_get_serial_sequence('{table_name}', 'id'),
+                ?::regclass,
                 COALESCE((SELECT MAX(id) FROM {table_name}), 1),
                 (SELECT COUNT(*) FROM {table_name}) > 0
             )
-            """
+            """,
+            (sequence["sequence_name"],),
         )
 
 
@@ -47388,6 +47408,11 @@ def admin_daten_import():
                 # ausgeführt. Sie legt auch die Standard-Stellen wieder an,
                 # wenn ein Backup vor dem Karriere-Modul importiert wurde.
                 init_db()
+                # SQLite replacement can predate the native avatar tables.
+                # Recreate their schema without registering Flask routes again.
+                avatar_schema = globals().get("assistant_init_schema")
+                if callable(avatar_schema):
+                    avatar_schema()
 
         log_import_package_event("completed")
         flash("Daten wurden importiert. Fahrzeuge und Dateien sind jetzt auf diesem Server verfügbar.", "success")
@@ -56556,6 +56581,10 @@ from werkstatt_fortschritt_api import register_progress_api, progress_csrf_exemp
 workshop_progress = register_progress_api(sys.modules[__name__])
 from werkstatt_bestellungen import register_orders
 workshop_orders = register_orders(sys.modules[__name__])
+from werkstatt_assistent import register_assistant
+app.config["ASSISTANT_READ_ONLY"] = env_flag("ASSISTANT_READ_ONLY", True)
+app.config["ASSISTANT_NATIVE_COCKPIT"] = True
+register_assistant(sys.modules[__name__])
 
 start_hourly_backups()
 start_lexware_auto_sync()

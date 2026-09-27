@@ -12,9 +12,10 @@ Result: {status, source, candidates, coverage, warnings}. Status is ok, partial,
 unavailable or error. Source contains kind/id/supplier/reference only; candidates
 preserve produkt_name, artikelnummer, stueckzahl, ve, produkt_beschreibung, preis
 and kategorie, plus page provenance. Every candidate and price is UNVERIFIED.
-``preis`` is the extractor's ambiguous observed position price, never a verified
-unit price; ``price_evidence.basis`` is always unknown. Do not use it as an agreed
-purchase price. Supplier comes exclusively from the source row, never a default.
+Generic ``preis`` values have unknown basis. The recognized Topcolor table can
+derive a net package price with explicit calculation/provenance, still marked
+unverified. Neither kind is an agreed purchase price. Supplier comes exclusively
+from the source row, never a default.
 
 Coverage reports files_total/files_read, pages_total/pages_read/pages_attempted, complete and
 per-file detail. Unknown page counts are None, not zero. ``complete`` describes
@@ -220,7 +221,7 @@ def _download(portal, file_id, directory):
             response.close()
 
 
-def _candidate(position, source, file_id, page, digest):
+def _candidate(position, source, file_id, page, digest, native=False):
     if not isinstance(position, dict):
         return None
     name = _text(position.get("produkt_name"), 180)
@@ -238,7 +239,7 @@ def _candidate(position, source, file_id, page, digest):
     except (TypeError, ValueError, OverflowError):
         quantity = 1
     provenance = dict(source, file_id=file_id, page=page, sha256=digest)
-    return {
+    item = {
         "produkt_name": name,
         "artikelnummer": article,
         "stueckzahl": quantity,
@@ -252,6 +253,14 @@ def _candidate(position, source, file_id, page, digest):
         "price_evidence": {"value": price, "basis": "unknown", "verified": False},
         "source": provenance,
     }
+    if native:
+        # Only our positional parser reaches this path, never model-supplied
+        # flags. Derived prices stay unverified and carry their exact basis.
+        item.update({key: position.get(key) for key in (
+            "gebinde", "groesse", "preis_geprueft", "pruefen", "auslese_hinweise", "price_evidence")})
+        item["stueckzahl"] = position.get("stueckzahl")
+        item["source"].update(position["native_source"])
+    return item
 
 
 def _extract_page(portal, path, filename, text, result, file_id, page, digest):
@@ -283,6 +292,9 @@ def _extract_page(portal, path, filename, text, result, file_id, page, digest):
     if not positions and not text:
         complete = False
         _warn(result, "Mindestens eine Seite enthält keinen auslesbaren Artikeltext und muss geprüft werden.")
+    elif not positions and text:
+        complete = False
+        _warn(result, "Eine Seite enthält Text, aber keine erkannten Produktpositionen; Tabellenlayout und Inhalt prüfen.")
     if not isinstance(positions, list):
         complete = False
         positions = []
@@ -327,6 +339,28 @@ def _read_file(portal, path, file_id, result, directory):
             detail["complete"] = 0 < len(document) <= remaining
             if len(document) > remaining:
                 _warn(result, "Die Rechnung überschreitet die Seitengrenze; sie ist noch nicht vollständig ausgelesen.")
+            from werkstatt_topcolor_positionen import parse_topcolor_pages
+            native = parse_topcolor_pages([
+                {"page": index + 1, "height": document[index].rect.height,
+                 "words": document[index].get_text("words")}
+                for index in range(min(len(document), remaining))
+            ], result["source"]["supplier"])
+            if native is not None:
+                pages_read = min(len(document), remaining)
+                detail["pages_attempted"] += pages_read
+                coverage["pages_attempted"] += pages_read
+                detail["pages_read"] += pages_read
+                coverage["pages_read"] += pages_read
+                detail["complete"] = detail["complete"] and native["complete"]
+                for warning in native["warnings"]:
+                    _warn(result, warning)
+                for position in native["positions"]:
+                    candidate = _candidate(position, result["source"], file_id,
+                                           position["native_source"]["page"], digest, native=True)
+                    if candidate:
+                        result["candidates"].append(candidate)
+                coverage["files_read"] += 1
+                return
             for index in range(min(len(document), remaining)):
                 page_path = directory / f"{file_id}-page-{index + 1}.pdf"
                 detail["pages_attempted"] += 1

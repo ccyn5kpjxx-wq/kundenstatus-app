@@ -10,7 +10,17 @@
     const list = document.getElementById('sources');
     list.replaceChildren(...report.quellen.map(source => {
       const row = document.createElement('li');
-      row.textContent = `${source.supplier || 'Lieferant ungeklärt'} · ${source.reference} · ${source.state} ${(source.result.hinweise || []).join(' · ')}`;
+      row.textContent = `${source.state === 'ausgeschlossen' ? 'Ausgeschlossene Quelle' : source.supplier || 'Lieferant ungeklärt'} · ${source.reference} · ${source.state} ${(source.result.hinweise || []).join(' · ')}`;
+      if (['ausgelesen', 'pruefen'].includes(source.state) && Number.isSafeInteger(source.id) && source.id > 0) {
+        const retry = document.createElement('form');
+        retry.method = 'post';
+        retry.action = `/admin/assistent-artikel/quelle/${source.id}/wiederholen`;
+        const csrf = document.createElement('input');
+        csrf.type = 'hidden'; csrf.name = 'csrf_token'; csrf.value = form.elements.csrf_token.value;
+        const button = document.createElement('button');
+        button.type = 'submit'; button.textContent = 'Nur diesen Beleg erneut einlesen';
+        retry.appendChild(csrf); retry.appendChild(button); row.appendChild(retry);
+      }
       return row;
     }));
   };
