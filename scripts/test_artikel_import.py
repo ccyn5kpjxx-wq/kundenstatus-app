@@ -22,7 +22,7 @@ if importlib.util.find_spec('werkstatt_rechnungsquelle') is None:
     reader.read_source = lambda *args: (_ for _ in ()).throw(AssertionError('Unmocked reader'))
     sys.modules['werkstatt_rechnungsquelle'] = reader
 
-from werkstatt_artikel_import import InvoiceCatalog, register_invoice_catalog
+from werkstatt_artikel_import import InvoiceCatalog, register_invoice_catalog, is_product_candidate
 
 
 class FakePortal:
@@ -333,6 +333,139 @@ class CatalogTests(unittest.TestCase):
                 self.assertEqual(self.catalog.process_next()['zuordnen'], 1)
                 read.assert_not_called()
 
+    def test_financial_footer_and_fee_candidates_are_rejected_before_storage(self):
+        non_products = [
+            'Der Betrag wird Ihrem Konto in den nächsten Tagen belastet.',
+            'Der Betrag wird von Ihrem Konto eingezogen.',
+            'Kontobelastung erfolgt per Lastschrift', 'IBAN: TEST-ACCOUNT', 'BIC: TESTCODE',
+            'Zwischensumme', 'Summe', 'Mehrwertsteuer', 'MwSt', 'Zahlungsziel nach Rechnungserhalt',
+            'Übertrag', 'Vortrag', 'Logistik- und Energiekostenpauschale',
+            'Logistik-/Energiekosten', 'Bearbeitungsgebühr', 'Versandkosten', 'Pauschale',
+        ]
+        for text in non_products:
+            self.assertFalse(is_product_candidate(candidate(produkt_name=text)), text)
+        rows = [candidate(produkt_name=text, artikelnummer='SYNTHETIC-FEE') for text in non_products]
+        report = self.process(extracted(*rows, candidate(produkt_name='Steuergerät'), candidate(produkt_name='Werkbank')))
+        self.assertEqual(report['vorschlaege'], 2)
+        self.assertEqual({row['produkt_name'] for row in self.catalog.search('')}, {'Steuergerät', 'Werkbank'})
+        self.assertEqual(self.catalog.rows('SELECT COUNT(*) AS n FROM assistent_rechnungsartikel')[0]['n'], 2)
+
+    def test_real_material_names_and_physical_load_description_are_retained(self):
+        for product in ('Steuergerät', 'Motorsteuergerät', 'Werkbank', 'Werkbank 200 cm',
+                        'Lackierständer', 'Klebeband grün', 'Steuerleitung'):
+            self.assertTrue(is_product_candidate(candidate(produkt_name=product)), product)
+        self.assertTrue(is_product_candidate(candidate(produkt_name='Werkbank', produkt_beschreibung='Die Werkbank kann mit Werkzeug belastet werden.')))
+        self.assertTrue(is_product_candidate(candidate(produkt_name='Werkbank', produkt_beschreibung='Lieferung inklusive Versandkosten.')))
+        self.assertFalse(is_product_candidate(candidate(produkt_name='Artikel FEE', produkt_beschreibung='Energiekostenpauschale')))
+        self.assertFalse(is_product_candidate(candidate(produkt_name='Klebeband', produkt_beschreibung='Bitte den Betrag auf unser Konto überweisen.')))
+
+    def test_known_fee_article_is_supplier_specific_not_a_global_article_block(self):
+        row = candidate(produkt_name='Artikel', artikelnummer='00000071')
+        self.assertFalse(is_product_candidate(row, supplier='Top-Color GmbH'))
+        self.assertTrue(is_product_candidate(row, supplier='Test Supplier'))
+
+    def test_historical_non_products_disappear_from_search_and_visible_counts_without_delete(self):
+        self.process(extracted(candidate(produkt_name='Werkbank')))
+        good = self.catalog.rows('SELECT * FROM assistent_rechnungsartikel')[0]
+        payload = json.loads(good['payload_json'])
+        # Simulate rows from the old extractor without passing through the new
+        # creation guard. More than one search page must not hide older products.
+        for index in range(205):
+            bad = dict(payload, produkt_name='Der Betrag wird Ihrem Konto belastet.',
+                       produkt_beschreibung='Zahlungshinweis', artikelnummer='SYNTHETIC-FEE')
+            self.update('INSERT INTO assistent_rechnungsartikel(fingerprint,identity_key,import_id,supplier,product_name,article_number,payload_json,created_at) VALUES(?,?,?,?,?,?,?,?)',
+                        ('historical-footer-'+str(index), 'synthetic-fee', good['import_id'], good['supplier'],
+                         bad['produkt_name'], bad['artikelnummer'], json.dumps(bad), good['created_at']))
+        report = self.catalog.status()
+        self.assertEqual(report['vorschlaege'], 1)
+        self.assertEqual(report['quellen'][0]['result']['positionen'], 1)
+        self.assertEqual([row['produkt_name'] for row in self.catalog.search('', limit=1)], ['Werkbank'])
+        self.assertEqual(self.catalog.search('Konto'), [])
+        self.assertEqual(self.catalog.rows('SELECT COUNT(*) AS n FROM assistent_rechnungsartikel')[0]['n'], 206)
+        self.update("UPDATE assistent_rechnungsimporte SET supplier='Volksbank Muster'")
+        self.assertEqual(self.catalog.status()['vorschlaege'], 0)
+        self.assertEqual(self.catalog.search('Werkbank'), [])
+
+    def test_historical_fee_and_malformed_payload_never_count_as_visible_products(self):
+        self.process(extracted(candidate()))
+        self.update("UPDATE assistent_rechnungsimporte SET supplier='Top-Color GmbH'")
+        self.update("UPDATE assistent_rechnungsartikel SET supplier='Top-Color GmbH',article_number='00000071'")
+        self.assertEqual(self.catalog.status()['vorschlaege'], 0)
+        self.assertEqual(self.catalog.search(''), [])
+        self.update("UPDATE assistent_rechnungsartikel SET article_number='MATERIAL',payload_json='not-json'")
+        self.assertEqual(self.catalog.status()['vorschlaege'], 0)
+        self.assertEqual(self.catalog.search(''), [])
+
+    def test_price_calculation_and_multiple_pages_preserve_only_whitelisted_evidence(self):
+        evidence = {
+            'value': '8.40', 'unrounded_value': '8.400', 'quantity': '2', 'content': '1.5',
+            'measure_unit': 'Ltr/KG', 'base_price_per_measure': '7', 'discount_percent': '-20',
+            'line_total_net': '16.80', 'basis': 'gebindepreis_netto_abgeleitet',
+            'verified': True, 'reconciled': True, 'calculation': 'private-bank-marker',
+            'bank_field': 'private-bank-marker',
+        }
+        row = candidate(preis='8.40', price_evidence=evidence, source={
+            'page': 2, 'pages': [2, 3, 3, 0, -1, True, 'private-bank-marker'],
+            'position': 21, 'method': 'topcolor_word_columns_v1', 'bank_field': 'private-bank-marker',
+        })
+        self.process(extracted(row))
+        stored = self.catalog.search('Klebeband')[0]
+        self.assertEqual(stored['quelle']['seite'], 2)
+        self.assertEqual(stored['quelle']['seiten'], [2, 3])
+        self.assertEqual(stored['quelle']['position'], 21)
+        self.assertEqual(stored['quelle']['methode'], 'topcolor_word_columns_v1')
+        self.assertEqual(stored['price_evidence']['value'], '8.40')
+        self.assertEqual(stored['price_evidence']['unrounded_value'], '8.400')
+        self.assertEqual(stored['price_evidence']['base_price_per_measure'], '7')
+        self.assertEqual(stored['price_evidence']['discount_percent'], '-20')
+        self.assertEqual(stored['price_evidence']['line_total_net'], '16.80')
+        self.assertEqual(stored['price_evidence']['measure_unit'], 'Ltr/KG')
+        self.assertIn('Inhalt × Grundpreis', stored['price_evidence']['calculation'])
+        self.assertFalse(stored['price_evidence']['verified'])
+        self.assertFalse(stored['preis_geprueft'])
+        self.assertNotIn('private-bank-marker', json.dumps(stored))
+
+    def test_retry_replaces_visible_extraction_atomically_without_deleting_history(self):
+        self.process(extracted(candidate(produkt_name='Old synthetic product')))
+        source_id = self.catalog.status()['quellen'][0]['id']
+        self.assertTrue(self.catalog.retry_source(source_id))
+        self.assertFalse(self.catalog.retry_source(source_id), 'already queued')
+        self.assertEqual(len(self.catalog.search('Old')), 1)
+        self.process(extracted(candidate(produkt_name='Corrected synthetic product')))
+        self.assertEqual(self.catalog.search('Old'), [])
+        self.assertEqual(len(self.catalog.search('Corrected')), 1)
+        self.assertEqual(self.catalog.status()['vorschlaege'], 1)
+        self.assertEqual(self.catalog.rows('SELECT COUNT(*) AS n FROM assistent_rechnungsartikel')[0]['n'], 2)
+        self.assertEqual(self.catalog.rows('SELECT COUNT(*) AS n FROM assistent_rechnungsartikel WHERE active=1')[0]['n'], 1)
+        # Replaying an identical earlier extraction reactivates its fingerprint.
+        self.assertTrue(self.catalog.retry_source(source_id))
+        self.process(extracted(candidate(produkt_name='Old synthetic product')))
+        self.assertEqual(self.catalog.rows('SELECT COUNT(*) AS n FROM assistent_rechnungsartikel')[0]['n'], 2)
+        self.assertEqual(len(self.catalog.search('Old')), 1)
+        self.assertEqual(self.catalog.search('Corrected'), [])
+
+    def test_retry_cannot_replace_active_worker_or_bypass_source_policy(self):
+        source_id = self.catalog.status()['quellen'][0]['id']
+        self.update("UPDATE assistent_rechnungsimporte SET state='laeuft',lease='active-worker'")
+        self.assertFalse(self.catalog.retry_source(source_id))
+        self.assertEqual(self.catalog.rows('SELECT lease FROM assistent_rechnungsimporte')[0]['lease'], 'active-worker')
+        self.update("UPDATE assistent_rechnungsimporte SET state='ausgelesen',supplier='Unknown Materials'")
+        self.assertFalse(self.catalog.retry_source(source_id))
+        self.update("UPDATE assistent_rechnungsimporte SET supplier='Volksbank Muster'")
+        self.assertFalse(self.catalog.retry_source(source_id))
+
+    def test_active_column_is_added_to_existing_catalog_without_data_loss(self):
+        path = str(pathlib.Path(self.temp.name) / 'legacy.db')
+        db = sqlite3.connect(path)
+        try:
+            db.execute('CREATE TABLE assistent_rechnungsartikel (id INTEGER PRIMARY KEY, fingerprint TEXT UNIQUE, identity_key TEXT, import_id INTEGER, supplier TEXT, product_name TEXT, article_number TEXT, payload_json TEXT, created_at TEXT)')
+            db.execute("INSERT INTO assistent_rechnungsartikel VALUES(1,'legacy','id',1,'Test Supplier','Werkbank','TEST','{}','synthetic')")
+            db.commit()
+        finally:
+            db.close()
+        legacy = InvoiceCatalog(FakePortal(path))
+        self.assertEqual(legacy.rows('SELECT active FROM assistent_rechnungsartikel')[0]['active'], 1)
+
 
 class CatalogUploadAndApprovalTests(unittest.TestCase):
     def setUp(self):
@@ -403,6 +536,25 @@ class CatalogUploadAndApprovalTests(unittest.TestCase):
         self.assertEqual(self.client.post(unknown, data={'csrf_token': 'synthetic-csrf', 'supplier': 'attacker-name'}).status_code, 302)
         self.assertIn('Unknown Materials', self.catalog.allowed_suppliers())
         self.assertNotIn('attacker-name', self.catalog.allowed_suppliers())
+
+    def test_retry_route_requires_admin_and_csrf_and_marks_only_requested_receipt(self):
+        source_id = self.catalog.status()['quellen'][0]['id']
+        db = self.portal.get_db()
+        try:
+            db.execute("UPDATE assistent_rechnungsimporte SET state='ausgelesen'")
+            db.commit()
+        finally:
+            db.close()
+        path = '/admin/assistent-artikel/quelle/'+str(source_id)+'/wiederholen'
+        self.assertEqual(self.client.post(path).status_code, 400)
+        with self.client.session_transaction() as state:
+            state['admin'] = False
+        self.assertEqual(self.client.post(path, data={'csrf_token': 'synthetic-csrf'}).status_code, 302)
+        self.assertEqual(self.catalog.status()['quellen'][0]['state'], 'ausgelesen')
+        with self.client.session_transaction() as state:
+            state['admin'] = True
+        self.assertEqual(self.client.post(path, data={'csrf_token': 'synthetic-csrf'}).status_code, 302)
+        self.assertEqual(self.catalog.status()['quellen'][0]['state'], 'offen')
 
 
 if __name__ == '__main__':
