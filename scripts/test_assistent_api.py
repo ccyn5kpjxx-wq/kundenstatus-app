@@ -1,11 +1,14 @@
 """Isolated tests for the production cockpit API; no network or real customer data."""
 import hashlib
+from datetime import datetime
 import json
 import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
@@ -22,6 +25,7 @@ class ApiTests(unittest.TestCase):
         self.client=p.app.test_client()
         self.headers={'Authorization':'Bearer synthetic-api-secret'}
         self.grant(['auftraege:lesen','dokumente:lesen','einkauf:lesen'])
+        p.set_app_setting('ASSISTANT_MATERIAL_SUPPLIERS','["Supplier Test"]')
         db=p.get_db()
         try:
             db.execute('PRAGMA foreign_keys=OFF') if not p.USE_POSTGRES else None
@@ -37,6 +41,19 @@ class ApiTests(unittest.TestCase):
         p.set_app_setting('ASSISTANT_API_GRANT',json.dumps({'hash':hashlib.sha256(b'synthetic-api-secret').hexdigest(),'scopes':scopes}))
 
     def get(self,path):return self.client.get('/api/werkstatt/v1/'+path,headers=self.headers)
+
+    def update_order(self,oid,**values):
+        db=p.get_db()
+        try:
+            db.execute('UPDATE auftraege SET '+','.join(key+'=?' for key in values)+' WHERE id=?',(*values.values(),oid))
+            db.commit()
+        finally:db.close()
+
+    def paint_get(self,period='woche'):
+        # Stable Monday fixture: tests do not depend on the developer's clock.
+        with patch('werkstatt_cockpit_api.datetime',wraps=datetime) as clock:
+            clock.now.return_value=datetime(2026,9,28,8,0,tzinfo=ZoneInfo('Europe/Berlin'))
+            return self.get('lackplan?zeitraum='+period)
 
     def test_access_scope_and_revocation(self):
         self.assertEqual(self.client.get('/api/werkstatt/v1/auftraege').status_code,401)
@@ -66,12 +83,108 @@ class ApiTests(unittest.TestCase):
         self.assertEqual({x['art'] for x in future['ereignisse']},{'zurueckbringen','kunde_holt'})
         self.assertEqual(self.get('termine?datum=tomorrow').status_code,400)
 
+    def test_briefing_and_paint_plan_require_order_read_scope(self):
+        paths=('briefing?datum=2026-09-28','lackplan?zeitraum=heute')
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get('/api/werkstatt/v1/'+path).status_code,401)
+        self.grant(['dokumente:lesen','einkauf:lesen'])
+        for path in paths:self.assertEqual(self.get(path).status_code,403)
+        self.grant(['auftraege:lesen'])
+        for path in paths:
+            result=self.get(path)
+            self.assertEqual(result.status_code,200)
+            self.assertEqual(result.headers['Cache-Control'],'no-store')
+            self.assertNotIn('must-not-leak',result.text)
+        self.assertEqual(self.get('briefing?datum=not-a-day').status_code,400)
+        self.assertEqual(self.get('lackplan?zeitraum=jahr').status_code,400)
+        p.set_app_setting('ASSISTANT_API_GRANT','')
+        for path in paths:self.assertEqual(self.get(path).status_code,401)
+
+    def test_briefing_and_schedule_keep_finish_and_transport_times_separate(self):
+        self.update_order(901,annahme_uhrzeit='08:15',fertig_uhrzeit='14:30',
+                          abholtermin='2026-09-28',abhol_uhrzeit='17:45')
+        # A pickup time must never fill an absent completion hour.
+        self.update_order(902,annahme_uhrzeit='09:00',fertig_uhrzeit='',
+                          abholtermin='2026-09-28',abhol_uhrzeit='18:00')
+        with patch.object(p,'get_auftrag',side_effect=AssertionError('Read API must not hydrate/write orders')):
+            briefing=self.get('briefing?datum=2026-09-28')
+            schedule=self.get('termine?datum=2026-09-28')
+        self.assertEqual(briefing.status_code,200)
+        self.assertEqual(schedule.status_code,200)
+        events={(item['auftrag_id'],item['art']):item for item in briefing.json['ereignisse']}
+        self.assertEqual(events[901,'heute_faellig']['uhrzeit'],'14:30')
+        self.assertEqual(events[901,'heute_faellig']['uhrzeit_feld'],'fertig_uhrzeit')
+        self.assertEqual(events[901,'abholung_durch_werkstatt_heute']['uhrzeit'],'08:15')
+        self.assertEqual(events[901,'rueckbringung_heute']['uhrzeit'],'17:45')
+        self.assertIsNone(events[902,'heute_faellig']['uhrzeit'])
+        self.assertEqual(events[902,'heute_faellig']['uhrzeit_status'],'unbekannt')
+        self.assertEqual(events[902,'anlieferung_heute']['uhrzeit'],'09:00')
+        self.assertEqual(events[902,'kundenabholung_heute']['uhrzeit'],'18:00')
+        self.assertIn('Uhrzeit unbekannt',briefing.json['speech_text'])
+        self.assertEqual(events[901,'heute_faellig']['quelle'],'/admin/auftrag/901')
+        times={(item['auftrag_id'],item['art']):item['uhrzeit'] for item in schedule.json['ereignisse']}
+        self.assertEqual(times[901,'fertig'],'14:30')
+        self.assertEqual(times[901,'abholen'],'08:15')
+        self.assertEqual(times[901,'zurueckbringen'],'17:45')
+        self.assertIn(times[902,'fertig'],('',None))
+
+    def test_briefing_finished_order_only_retains_return_transport(self):
+        self.update_order(901,status=4,fertig_datum='2026-09-27',abholtermin='2026-09-28')
+        self.update_order(902,archiviert=1)
+        report=self.get('briefing?datum=2026-09-28').json
+        self.assertEqual([(item['auftrag_id'],item['art']) for item in report['ereignisse']],[(901,'rueckbringung_heute')])
+        self.assertEqual(report['kategorien']['ueberfaellig'],[])
+        self.assertEqual(report['kategorien']['heute_faellig'],[])
+        self.update_order(901,status=5)
+        self.assertEqual(self.get('briefing?datum=2026-09-28').json['ereignisse'],[])
+
+    def test_paint_plan_preserves_colors_and_labels_finish_time_as_non_paint_schedule(self):
+        self.update_order(901,beschreibung='Stoßfänger lackieren',farbcode='LY7W',farbton='Silber',
+                          farbton_2='Schwarz',fertig_uhrzeit='14:30',abhol_uhrzeit='18:00')
+        self.update_order(902,beschreibung='Tür lackieren',farbcode='',farbton='',farbton_2='',
+                          annahme_datum='',start_datum='2026-10-02',fertig_datum='2026-10-02')
+        today=self.paint_get('heute')
+        week=self.paint_get('woche')
+        self.assertEqual(today.status_code,200)
+        self.assertEqual(today.json['datum'],'2026-09-28')
+        self.assertEqual(today.json['bis'],'2026-09-28')
+        self.assertEqual(week.json['bis'],'2026-10-04')
+        self.assertEqual([item['auftrag_id'] for item in today.json['eintraege']],[901])
+        items={item['auftrag_id']:item for item in week.json['eintraege']}
+        self.assertEqual(set(items),{901,902})
+        self.assertEqual((items[901]['farbcode'],items[901]['farbton'],items[901]['farbton_2']),('LY7W','Silber','Schwarz'))
+        self.assertEqual(items[901]['uhrzeit'],'14:30')
+        self.assertIn('Fertigfrist',items[901]['hinweis'])
+        self.assertIn('eigener Lackiertermin ist nicht hinterlegt',items[901]['hinweis'])
+        self.assertIn('Kabinen- oder Personalplan',week.json['hinweis'])
+        self.assertIn('fehlende Farbcodes bleiben unbekannt',week.json['hinweis'])
+        self.assertEqual(items[902]['farbcode'],'')
+        self.assertEqual(items[901]['quelle'],'/admin/auftrag/901')
+        order=self.get('auftraege/901').json
+        self.assertEqual((order['farbcode'],order['farbton'],order['farbton_2']),('LY7W','Silber','Schwarz'))
+        self.assertEqual(order['fertig_uhrzeit'],'14:30')
+        self.assertNotIn('must-not-leak',week.text)
+
+    def test_paint_plan_excludes_finish_complete_and_archived_but_keeps_active_paint(self):
+        self.update_order(902,beschreibung='Räder wechseln',farbcode='',farbton='',farbton_2='')
+        self.update_order(901,status=3,produktion_schritt='lackierung',fertig_datum='',start_datum='',fertig_uhrzeit='')
+        active=self.paint_get('heute').json['eintraege']
+        self.assertEqual([item['auftrag_id'] for item in active],[901])
+        self.assertEqual(active[0]['art'],'Lackierung aktiv')
+        self.assertEqual(active[0]['datum'],'')
+        self.assertIsNone(active[0]['uhrzeit'])
+        for status,stage,archived in ((3,'finish',0),(4,'lackierung',0),(5,'lackierung',0),(3,'lackierung',1)):
+            with self.subTest(status=status,stage=stage,archived=archived):
+                self.update_order(901,status=status,produktion_schritt=stage,archiviert=archived)
+                self.assertEqual(self.paint_get('heute').json['eintraege'],[])
+
     def test_documents_and_invoice_products_preserve_sources(self):
         db=p.get_db()
         try:
             db.execute("INSERT INTO dateien(id,auftrag_id,original_name,stored_name,extrahierter_text,hochgeladen_am) VALUES(901,901,'test.txt','private-path','Originaltest',?)",(p.now_str(),))
-            db.execute("INSERT INTO einkauf_belege(id,original_name,extrahierter_text,erstellt_am) VALUES(901,'testrechnung.pdf','Artikel TEST-123',?)",(p.now_str(),))
-            db.execute("INSERT INTO einkauf_artikel(id,artikelnummer,produkt_name,quelle_beleg_id,erstellt_am,geaendert_am) VALUES(901,'TEST-123','Testmaterial',901,?,?)",(p.now_str(),p.now_str()))
+            db.execute("INSERT INTO einkauf_belege(id,lieferant,original_name,extrahierter_text,erstellt_am) VALUES(901,'Top-Color GmbH','testrechnung.pdf','Artikel TEST-123',?)",(p.now_str(),))
+            db.execute("INSERT INTO einkauf_artikel(id,lieferant,artikelnummer,produkt_name,quelle_beleg_id,erstellt_am,geaendert_am) VALUES(901,'Top-Color GmbH','TEST-123','Testmaterial',901,?,?)",(p.now_str(),p.now_str()))
             db.commit()
         finally:db.close()
         order=self.get('auftraege/901').json
@@ -95,6 +208,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual([r['voucher_id'] for r in result.json['lieferantenrechnungen']],['supplier-test'])
         self.assertNotIn('bank-secret',result.text)
         self.assertNotIn('98765',result.text)
+        db=p.get_db()
+        try:
+            db.execute("UPDATE lexware_rechnungen SET contact_name='Volksbank' WHERE voucher_id='supplier-test'")
+            db.commit()
+        finally:db.close()
+        self.assertEqual(self.get('belege').json['lieferantenrechnungen'],[])
         self.grant(['auftraege:lesen'])
         self.assertEqual(self.get('belege').status_code,403)
 

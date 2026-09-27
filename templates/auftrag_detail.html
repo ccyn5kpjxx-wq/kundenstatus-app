@@ -272,6 +272,7 @@
 {% endblock %}
 
 {% block content %}
+<div class="mb-3"><a class="btn btn-soft" href="{{ url_for('auftrag_ausdruck.werkstattzettel', auftrag_id=auftrag['id']) }}" target="_blank" rel="noopener">Werkstattzettel drucken · Auftrag {{ auftrag['id'] }}</a></div>
 <header class="order-focus-header page-card p-4 mb-3">
   {% if cockpit_demo %}<div class="alert alert-info py-2">Lokale Vorschau · Beispieldaten · keine Nachrichten oder Rechnungen werden versendet</div>{% endif %}
   <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">

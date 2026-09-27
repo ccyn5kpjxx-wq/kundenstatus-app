@@ -5,10 +5,11 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from flask import jsonify, render_template
+from flask import jsonify, render_template, request, flash, redirect, url_for
 
 from werkstatt_artikel_identity import catalog_identity
 from werkstatt_rechnungsquelle import read_source
+from werkstatt_rechnungsfreigabe import classify_invoice_source
 
 
 def _text(value, limit=1000):
@@ -87,28 +88,67 @@ class InvoiceCatalog:
         finally:
             db.close()
 
+    def allowed_suppliers(self):
+        getter = getattr(self.p, 'get_app_setting', None)
+        try:
+            values = json.loads(getter('ASSISTANT_MATERIAL_SUPPLIERS', '[]') or '[]') if callable(getter) else []
+        except (ValueError, TypeError):
+            return []
+        return values if isinstance(values, list) else []
+
+    def source_rule(self, source, allowed_suppliers=None):
+        allowed = self.allowed_suppliers() if allowed_suppliers is None else allowed_suppliers
+        return classify_invoice_source(source, allowed_suppliers=allowed)
+
+    @staticmethod
+    def _scope_report(rule):
+        return {'status': 'ausgeschlossen' if rule['decision'] == 'block' else 'zuordnen',
+                'positionen': 0, 'hinweise': [rule['reason']], 'scope_rule': rule['rule']}
+
+    def _apply_source_rules(self, db):
+        """Recheck the complete existing queue; revoke a denied worker's lease."""
+        allowed = self.allowed_suppliers()
+        rows = db.execute('SELECT id,supplier,reference,state FROM assistent_rechnungsimporte').fetchall()
+        for row in rows:
+            source = dict(row)
+            rule = self.source_rule(source, allowed)
+            if not rule['allowed']:
+                state = 'ausgeschlossen' if rule['decision'] == 'block' else 'zuordnen'
+                db.execute("UPDATE assistent_rechnungsimporte SET state=?,lease='',result_json=? WHERE id=? AND state<>?",
+                           (state, json.dumps(self._scope_report(rule), ensure_ascii=False), source['id'], state))
+            elif source['state'] in ('ausgeschlossen', 'zuordnen'):
+                db.execute("UPDATE assistent_rechnungsimporte SET state='offen',lease='',result_json='{}' WHERE id=? AND state=?",
+                           (source['id'], source['state']))
+
+    def _stop_source(self, source, rule, lease):
+        db = self.p.get_db()
+        try:
+            state = 'ausgeschlossen' if rule['decision'] == 'block' else 'zuordnen'
+            db.execute("UPDATE assistent_rechnungsimporte SET state=?,lease='',result_json=? WHERE id=? AND lease=?",
+                       (state, json.dumps(self._scope_report(rule), ensure_ascii=False), source['id'], lease))
+            db.commit()
+        finally:
+            db.close()
+
     def prepare(self, inventory):
         sources = [('einkauf', str(r['id']), r.get('lieferant') or '', r.get('original_name') or '')
                    for r in inventory['einkaufsbelege']]
         sources += [('lexware', r['voucher_id'], r.get('contact_name') or '', r.get('voucher_number') or '')
                     for r in inventory['lieferantenrechnungen']]
+        allowed = self.allowed_suppliers()
         def priority(source):
-            supplier = ''.join(c for c in _text(source[2]).casefold() if c.isalnum())
-            if 'topcolor' in supplier or 'topcolour' in supplier or 'autocolor' in supplier:
-                return 0
-            if 'carparts' in supplier:
-                return 1
-            if 'tech' in supplier or 'master' in supplier:
-                return 2
-            return 3
+            rule = self.source_rule({'supplier': source[2], 'reference': source[3]}, allowed)
+            return {'known_supplier:topcolor': 0, 'known_supplier:carparts': 1,
+                    'known_supplier:techmasters': 2}.get(rule['rule'], 3)
         # Execution priority only: supplier identity is never changed or merged.
         sources.sort(key=priority)
         db = self.p.get_db()
         try:
             self._reclaim_expired(db)
             for kind, sid, supplier, reference in sources:
-                db.execute("INSERT INTO assistent_rechnungsimporte(source_key,source_kind,source_id,supplier,reference) VALUES(?,?,?,?,?) ON CONFLICT(source_key) DO NOTHING",
+                db.execute("INSERT INTO assistent_rechnungsimporte(source_key,source_kind,source_id,supplier,reference) VALUES(?,?,?,?,?) ON CONFLICT(source_key) DO UPDATE SET supplier=excluded.supplier,reference=excluded.reference",
                            (kind+':'+sid, kind, sid, supplier, reference))
+            self._apply_source_rules(db)
             db.commit()
         finally:
             db.close()
@@ -122,16 +162,31 @@ class InvoiceCatalog:
 
     def status(self):
         sources = self.rows('SELECT id,supplier,reference,state,result_json FROM assistent_rechnungsimporte ORDER BY id')
+        allowed = self.allowed_suppliers()
+        allowed_ids = set()
         for row in sources:
+            rule = self.source_rule(row, allowed)
+            if not rule['allowed']:
+                row.pop('result_json', None)
+                row['state'] = 'ausgeschlossen' if rule['decision'] == 'block' else 'zuordnen'
+                row['result'] = self._scope_report(rule)
+                row['reference'] = ''
+                if rule['decision'] == 'block':
+                    row['supplier'] = ''
+                continue
+            allowed_ids.add(row['id'])
             try:
                 result = json.loads(row.pop('result_json'))
                 row['result'] = result if isinstance(result, dict) else {}
             except (ValueError, TypeError):
                 row['result'] = {'hinweise': ['Verarbeitungsergebnis muss geprüft werden.']}
+        counts = self.rows('SELECT import_id,supplier,COUNT(*) AS n FROM assistent_rechnungsartikel GROUP BY import_id,supplier')
         return {'quellen': sources,
                 'offen': sum(r['state'] == 'offen' for r in sources),
                 'laeuft': sum(r['state'] == 'laeuft' for r in sources),
-                'vorschlaege': self.rows('SELECT COUNT(*) AS n FROM assistent_rechnungsartikel')[0]['n']}
+                'ausgeschlossen': sum(r['state'] == 'ausgeschlossen' for r in sources),
+                'zuordnen': sum(r['state'] == 'zuordnen' for r in sources),
+                'vorschlaege': sum(r['n'] for r in counts if r['import_id'] in allowed_ids and self.source_rule(r, allowed)['allowed'])}
 
     def process_next(self):
         lease = uuid.uuid4().hex
@@ -141,6 +196,7 @@ class InvoiceCatalog:
         try:
             # A failed worker can be resumed. Its expired lease cannot publish results.
             self._reclaim_expired(db, now)
+            self._apply_source_rules(db)
             row = db.execute("SELECT * FROM assistent_rechnungsimporte WHERE state='offen' ORDER BY id LIMIT 1").fetchone()
             if row:
                 source = dict(row)
@@ -152,6 +208,12 @@ class InvoiceCatalog:
         finally:
             db.close()
         if not source:
+            return self.status()
+        # Settings may have changed since the queue was claimed. Do not open a
+        # receipt merely to find out whether its supplier belongs to our scope.
+        rule = self.source_rule(source)
+        if not rule['allowed']:
+            self._stop_source(source, rule, lease)
             return self.status()
         try:
             result = read_source(self.p, source['source_kind'], source['source_id'])
@@ -185,6 +247,10 @@ class InvoiceCatalog:
         state = 'ausgelesen' if records and result.get('status') == 'ok' and coverage.get('complete') is True else 'pruefen'
         report = {'positionen': len(records), 'abdeckung': coverage,
                   'hinweise': warnings, 'status': _text(result.get('status'), 40) or 'error'}
+        rule = self.source_rule(source)
+        if not rule['allowed']:
+            self._stop_source(source, rule, lease)
+            return self.status()
         db = self.p.get_db()
         try:
             owned = db.execute("UPDATE assistent_rechnungsimporte SET state=?,lease='',result_json=? WHERE id=? AND lease=? AND state='laeuft'",
@@ -245,15 +311,36 @@ class InvoiceCatalog:
 
     def search(self, query, limit=30):
         limit = max(1, min(int(limit), 100))
+        allowed = self.allowed_suppliers()
+        sources = self.rows('SELECT id,supplier,reference FROM assistent_rechnungsimporte')
+        ids = [row['id'] for row in sources if self.source_rule(row, allowed)['allowed']]
+        if not ids:
+            return []
         terms = query.lower().split()
         conditions = []
         args = []
         for term in terms[:12]:
             conditions.append('(LOWER(product_name) LIKE ? OR LOWER(article_number) LIKE ? OR LOWER(supplier) LIKE ?)')
             args += ['%'+term+'%']*3
-        rows = self.rows('SELECT id,payload_json FROM assistent_rechnungsartikel'+
-                         (' WHERE '+' AND '.join(conditions) if conditions else '')+' ORDER BY id DESC LIMIT ?', (*args, limit))
-        return [dict(json.loads(r['payload_json']), vorschlag_id=r['id']) for r in rows]
+        results = []
+        # Apply source permissions before LIMIT, otherwise blocked historical
+        # proposals could hide valid workshop results on later pages.
+        for offset in range(0, len(ids), 400):
+            batch = ids[offset:offset+400]
+            base = 'import_id IN ('+','.join('?' for _ in batch)+')'
+            where = ' AND '+ ' AND '.join(conditions) if conditions else ''
+            rows = self.rows('SELECT id,supplier,payload_json FROM assistent_rechnungsartikel WHERE '+base+where+' ORDER BY id DESC LIMIT ?',
+                             (*batch, *args, limit))
+            for row in rows:
+                if not self.source_rule(row, allowed)['allowed']:
+                    continue
+                try:
+                    payload = json.loads(row['payload_json'])
+                    if isinstance(payload, dict):
+                        results.append(dict(payload, vorschlag_id=row['id']))
+                except (ValueError, TypeError):
+                    continue
+        return sorted(results, key=lambda row: row['vorschlag_id'], reverse=True)[:limit]
 
 
 def register_invoice_catalog(p, service):
@@ -264,10 +351,77 @@ def register_invoice_catalog(p, service):
     def assistant_invoice_catalog():
         return render_template('assistent_artikel.html', report=catalog.status(), articles=catalog.search('', 100))
 
+    @p.app.post('/admin/assistent-artikel/upload')
+    @p.admin_required
+    def assistant_invoice_catalog_upload():
+        supplier = str(request.form.get('lieferant') or '').strip()
+        rule = catalog.source_rule({'supplier': supplier})
+        if not rule['allowed']:
+            flash(rule['reason'], 'warning')
+            return redirect(url_for('assistant_invoice_catalog'))
+        files = [f for f in request.files.getlist('rechnungen') if f.filename]
+        if not files or len(files) > 20:
+            flash('Bitte 1 bis 20 Lieferantenrechnungen auswählen.', 'warning')
+            return redirect(url_for('assistant_invoice_catalog'))
+        saved = 0
+        seen = set()
+        for file in files:
+            rule = catalog.source_rule({'supplier': supplier, 'original_name': file.filename})
+            if not rule['allowed']:
+                flash(rule['reason'], 'warning')
+                continue
+            try:
+                # Deduplicate identical files within the upload without saving
+                # or OCR first. The source reader enforces the same 20 MiB cap.
+                digest = hashlib.sha256()
+                size = 0
+                stream = file.stream
+                while chunk := stream.read(65536):
+                    size += len(chunk)
+                    if size > 20 * 1024 * 1024:
+                        raise ValueError('Invoice exceeds limit')
+                    digest.update(chunk)
+                stream.seek(0)
+                if not size or digest.hexdigest() in seen:
+                    continue
+                seen.add(digest.hexdigest())
+                # Save receipt only: legacy import may collapse different variants.
+                if p.save_einkauf_beleg_upload(file, lieferant=supplier, beleg_typ='rechnung'):
+                    saved += 1
+            except ValueError:
+                flash('Eine Datei konnte nicht als Lieferantenrechnung gespeichert werden.', 'warning')
+        catalog.prepare(service.invoice_sources(include_held=True))
+        flash(f'{saved} Rechnungsdateien gespeichert. Einlesen setzt die Verarbeitung fort.', 'success')
+        return redirect(url_for('assistant_invoice_catalog'))
+
     @p.app.post('/admin/assistent-artikel/start')
     @p.admin_required
     def assistant_invoice_catalog_start():
-        return jsonify(catalog.prepare(service.invoice_sources()))
+        return jsonify(catalog.prepare(service.invoice_sources(include_held=True)))
+
+    @p.app.post('/admin/assistent-artikel/lieferant/<int:source_id>/freigeben')
+    @p.admin_required
+    def assistant_invoice_supplier_approve(source_id):
+        # Standard app POST/CSRF protection also covers this explicit admin action.
+        sources = catalog.rows('SELECT id,supplier,reference FROM assistent_rechnungsimporte WHERE id=?', (source_id,))
+        if not sources:
+            flash('Die Rechnungsquelle ist nicht vorhanden.', 'warning')
+            return redirect(url_for('assistant_invoice_catalog'))
+        source = sources[0]
+        rule = catalog.source_rule(source)
+        if rule['decision'] != 'review' or rule['rule'] != 'unclassified_supplier':
+            flash('Diese Quelle kann hier nicht zusätzlich freigegeben werden.', 'warning')
+            return redirect(url_for('assistant_invoice_catalog'))
+        allowed = catalog.allowed_suppliers()
+        allowed.append(source['supplier'])
+        # No client-supplied supplier name, wildcards or financial-scope override.
+        if not catalog.source_rule(source, allowed)['allowed']:
+            flash('Der Lieferant konnte nicht für Materialrechnungen freigegeben werden.', 'warning')
+            return redirect(url_for('assistant_invoice_catalog'))
+        p.set_app_setting('ASSISTANT_MATERIAL_SUPPLIERS', json.dumps(allowed, ensure_ascii=False))
+        catalog.prepare(service.invoice_sources(include_held=True))
+        flash('Der Lieferant ist für Materialrechnungen freigegeben. Einlesen kann jetzt fortgesetzt werden.', 'success')
+        return redirect(url_for('assistant_invoice_catalog'))
 
     @p.app.post('/admin/assistent-artikel/weiter')
     @p.admin_required

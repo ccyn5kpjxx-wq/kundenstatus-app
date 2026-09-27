@@ -3060,6 +3060,8 @@ def protect_csrf():
         abort(413)
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return None
+    if progress_csrf_exempt(sys.modules[__name__]):
+        return None
     if request.endpoint == 'mos_public.webhook':
         return None  # Exact endpoint verifies raw Stripe signature, never a browser action.
     if request.path.startswith("/webhooks/whatsapp"):
@@ -8193,6 +8195,11 @@ BACKUP_TABLES = (
     "einkauf_artikel",
     "assistent_rechnungsimporte",
     "assistent_rechnungsartikel",
+    "assistent_fortschritt_audit",
+    "assistent_bestellkontakte",
+    "assistent_bestellkonfiguration",
+    "assistent_bestellanforderungen",
+    "assistent_bestellpakete",
     "fahrzeugeinkauf_scans",
     "fahrzeugeinkauf_fahrzeuge",
     "fahrzeugeinkauf_scan_treffer",
@@ -8238,7 +8245,7 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
-BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand",)
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2")
 BACKUP_BINARY_FIELDS = {
     "mietvertrag_versionen": {
         "pdf_base64": {
@@ -9728,6 +9735,8 @@ def init_db():
     ensure_column(db, "auftraege", "schaden_besichtigung_datum", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "schaden_station", "TEXT DEFAULT 'aufnahme'")
     ensure_column(db, "auftraege", "produktion_schritt", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "lackierbereit", "INTEGER DEFAULT 0")
+    ensure_column(db, "auftraege", "lackierbereit_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kosten_gutachten_betrag", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kosten_werkstatt_betrag", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kosten_freigabe_betrag", "TEXT DEFAULT ''")
@@ -46924,9 +46933,19 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         # Der IONOS-Terminversand wurde nach Backupformat v4 ergänzt. Alte
         # Sicherungen bleiben ohne das reine Versandprotokoll importierbar.
         "kunden_termin_mail_versand",
+        # Assistant tables were introduced after backup format v4.
+        "assistent_rechnungsimporte", "assistent_rechnungsartikel",
+        "assistent_fortschritt_audit", "assistent_bestellkontakte",
+        "assistent_bestellkonfiguration", "assistent_bestellanforderungen",
+        "assistent_bestellpakete",
     }
     if "kunden_termin_mail_versand" in schema_features:
         required_tables.add("kunden_termin_mail_versand")
+    if "werkstatt_assistent_v2" in schema_features:
+        required_tables.update({"assistent_rechnungsimporte", "assistent_rechnungsartikel",
+                                "assistent_fortschritt_audit", "assistent_bestellkontakte",
+                                "assistent_bestellkonfiguration", "assistent_bestellanforderungen",
+                                "assistent_bestellpakete"})
     if format_version >= 3:
         required_tables.add("fahrzeugeinkauf_scan_treffer")
     if format_version >= 4:
@@ -56531,6 +56550,12 @@ init_db()
 from werkstatt_cockpit_api import register_cockpit_api
 import sys
 cockpit_data = register_cockpit_api(sys.modules[__name__])
+from werkstatt_auftrag_ausdruck import register_auftrag_ausdruck
+register_auftrag_ausdruck(sys.modules[__name__])
+from werkstatt_fortschritt_api import register_progress_api, progress_csrf_exempt
+workshop_progress = register_progress_api(sys.modules[__name__])
+from werkstatt_bestellungen import register_orders
+workshop_orders = register_orders(sys.modules[__name__])
 
 start_hourly_backups()
 start_lexware_auto_sync()

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Werkstattzettel · Auftrag {{ zettel.nummer }}</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root { color-scheme: light; font-family: Arial, Helvetica, sans-serif; color: #13271e; }
+    body { margin: 0; background: #e9edea; }
+    .toolbar { max-width: 210mm; margin: 20px auto; padding: 0 18px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .toolbar a, .toolbar button { font: inherit; font-size: 15px; border: 1px solid #153f2d; border-radius: 8px; padding: 11px 15px; text-decoration: none; cursor: pointer; }
+    .toolbar a { color: #153f2d; background: white; }
+    .toolbar button { color: white; background: #153f2d; font-weight: 700; }
+    .toolbar p { margin: 0; color: #4b5d53; font-size: 13px; }
+    .sheet { max-width: 210mm; min-height: 275mm; padding: 15mm; margin: 0 auto 24px; background: white; box-shadow: 0 5px 35px #183f251a; }
+    .brand { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; border-bottom: 2px solid currentColor; padding-bottom: 10px; font-size: 13px; }
+    .brand strong { font-size: 18px; letter-spacing: .3px; }
+    .identity { padding: 21px 0 20px; border-bottom: 3px solid currentColor; }
+    .eyebrow { font-size: 17px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; margin: 0; }
+    .number { margin: 0 0 10px; font-size: 114px; font-weight: 900; letter-spacing: -5px; line-height: 1.08; overflow-wrap: anywhere; }
+    .vehicle { margin: 0; font-size: 31px; line-height: 1.2; overflow-wrap: anywhere; }
+    .plate { display: inline-block; border: 2px solid currentColor; border-radius: 5px; padding: 5px 13px; font-size: 29px; font-weight: 700; margin: 15px 0 0; }
+    .reference { margin: 10px 0 0; font-size: 13px; }
+    .status { display: flex; justify-content: space-between; gap: 15px; padding: 13px 0; font-size: 15px; border-bottom: 1px solid #c6d0c8; }
+    .archive { border: 2px solid currentColor; padding: 9px; margin: 12px 0 0; font-weight: 700; }
+    .due { margin: 22px 0; padding: 15px 18px; border: 2px solid currentColor; border-left-width: 8px; }
+    .due h2, .work h2 { margin: 0 0 8px; font-size: 15px; text-transform: uppercase; letter-spacing: 1px; }
+    .due p { margin: 0; font-size: 27px; font-weight: 700; }
+    .time { white-space: nowrap; }
+    .work { margin: 0 0 25px; }
+    .work-text { font-size: 20px; line-height: 1.45; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .missing { color: #59625c; font-style: italic; }
+    .paint { border: 1px solid currentColor; padding: 12px 15px; margin-bottom: 22px; break-inside: avoid; }
+    .paint h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 9px; }
+    .paint dl { display: flex; flex-wrap: wrap; gap: 12px 30px; margin: 0; }
+    .paint dt { font-size: 12px; margin-bottom: 4px; }
+    .paint dd { margin: 0; font-size: 21px; font-weight: 700; overflow-wrap: anywhere; }
+    .dates { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; border-top: 2px solid currentColor; padding-top: 16px; }
+    .dates h3 { margin: 0 0 7px; font-size: 13px; }
+    .dates p { margin: 0; font-size: 17px; font-weight: 700; line-height: 1.5; }
+    .transport { font-size: 13px; margin: 12px 0 0; }
+    footer { margin-top: 28px; padding-top: 12px; border-top: 1px solid #c6d0c8; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 7px; font-size: 11px; }
+    footer strong { font-size: 13px; }
+    @media (max-width: 650px) {
+      .sheet { padding: 25px 20px; min-height: 0; }
+      .brand { flex-direction: column; gap: 4px; }
+      .number { font-size: 96px; }
+      .vehicle { font-size: 25px; }
+      .dates { grid-template-columns: 1fr; gap: 17px; }
+      .due p { font-size: 23px; }
+    }
+    @media print {
+      @page { size: A4 portrait; margin: 13mm; }
+      body { background: white; color: black; }
+      .toolbar { display: none !important; }
+      .sheet { width: auto; max-width: none; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
+      .brand { flex-direction: row; }
+      .number { font-size: 112pt; }
+      .vehicle { font-size: 26pt; }
+      .plate { font-size: 25pt; }
+      .dates { grid-template-columns: 1fr 1fr 1fr; }
+      .identity, .status, .due, .dates, footer { break-inside: avoid; }
+      .work h2 { break-after: avoid; }
+      .work-text { orphans: 3; widows: 3; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="toolbar" aria-label="Druckaktionen">
+    <button type="button" onclick="window.print()">Drucken / als PDF speichern</button>
+    <a href="/admin/auftrag/{{ zettel.nummer }}">Zurück zum Auftrag</a>
+    <p>A4 · Im Druckdialog Kopf- und Fußzeilen ausschalten.</p>
+  </nav>
+  <main class="sheet">
+    <header class="brand"><strong>GÄRTNER · Karosserie &amp; Lack</strong><span>Werkstattzettel</span></header>
+    <section class="identity" aria-label="Fahrzeug und Auftragsnummer">
+      <p class="eyebrow">Auftrag</p>
+      <h1 class="number">{{ zettel.nummer }}</h1>
+      <h2 class="vehicle">{{ zettel.fahrzeug }}</h2>
+      <p class="plate">{{ zettel.kennzeichen }}</p>
+      {% if zettel.externe_referenz %}<p class="reference">Externe Referenz: {{ zettel.externe_referenz }}</p>{% endif %}
+    </section>
+    {% if zettel.archiviert %}<p class="archive">Archivierter Auftrag – aktuellen Arbeitsauftrag prüfen.</p>{% endif %}
+    <div class="status"><span>Status: <strong>{{ zettel.status }}</strong></span>{% if zettel.produktion %}<span>{{ zettel.produktion }}</span>{% endif %}</div>
+    <section class="due">
+      <h2>{{ zettel.fertig.label }}</h2>
+      <p>{% if zettel.fertig.datum %}{{ zettel.fertig.datum }}{% if zettel.fertig.uhrzeit %} <span class="time">· {{ zettel.fertig.uhrzeit }} Uhr</span>{% endif %}{% else %}Termin noch offen{% endif %}</p>
+    </section>
+    <section class="work">
+      <h2>Was ist zu tun?</h2>
+      {% if zettel.arbeit %}<p class="work-text">{{ zettel.arbeit }}</p>{% else %}<p class="work-text missing">Keine Arbeitsbeschreibung hinterlegt. Vor Beginn im Auftrag klären.</p>{% endif %}
+    </section>
+    {% if zettel.lackdaten %}
+    <section class="paint" aria-label="Gespeicherte Lackdaten">
+      <h2>Lackdaten aus dem Auftrag</h2>
+      <dl>{% for lack in zettel.lackdaten %}<div><dt>{{ lack.label }}</dt><dd>{{ lack.wert }}</dd></div>{% endfor %}</dl>
+    </section>
+    {% endif %}
+    <section class="dates" aria-label="Termine und Transport">
+      {% for termin in zettel.termine %}
+      <div><h3>{{ termin.label }}</h3><p>{% if termin.datum %}{{ termin.datum }}{% if termin.uhrzeit %}<br><span class="time">{{ termin.uhrzeit }} Uhr</span>{% endif %}{% else %}<span class="missing">Noch offen</span>{% endif %}</p></div>
+      {% endfor %}
+    </section>
+    <p class="transport">{{ zettel.transport }}</p>
+    <footer><strong>Zum Assistenten: „Auftrag {{ zettel.nummer }} – was ist zu tun?“</strong><span>Druckstand: {{ zettel.stand }}</span></footer>
+  </main>
+</body>
+</html>
