@@ -354,7 +354,6 @@ class RefundLedger:
         if (result.get('payment_intent')!=h['payment_intent'] or result.get('amount')!=r['amount_cents']
             or (r['provider_id'] and result.get('id')!=r['provider_id'])
             or result.get('currency')!='eur' or result.get('object')!='refund'
-            or (r['kind']=='review_full_refund' and result.get('livemode') is not self.s.gateway.livemode)
             or not str(result.get('id','')).startswith('re_')):
             raise ValueError('Erstattungsantwort passt nicht zum Auftrag.')
         status={'succeeded':'succeeded','failed':'failed','canceled':'failed'}.get(result.get('status'),'submitted')

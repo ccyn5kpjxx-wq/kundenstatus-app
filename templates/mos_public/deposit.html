@@ -3,7 +3,7 @@
 <section class="card">
   <h2>{{ q.vehicle_name }}</h2>
   <p>{{ q.start_slot|mos_slot }} bis {{ q.end_slot|mos_slot }}</p>
-  <p>Du hast den Mietvertrag bereits digital unterschrieben. Jetzt werden <strong>500 € auf deiner Kreditkarte reserviert, nicht abgebucht</strong>. Anschließend bezahlst du den Mietpreis von <strong>{{ '%.2f'|format(q.rental_cents/100)|replace('.', ',') }} €</strong> separat online. Vor Ort ist dafür kein Zahlungsschritt nötig.</p>
+  <p>Du hast dein Buchungsangebot bereits digital unterschrieben. Jetzt werden <strong>500 € auf deiner Kreditkarte reserviert, nicht abgebucht</strong>. Anschließend bezahlst du den Mietpreis von <strong>{{ '%.2f'|format(q.rental_cents/100)|replace('.', ',') }} €</strong> separat online. Vor Ort ist dafür kein Zahlungsschritt nötig.</p>
   <p>Für die Kaution ist eine Kreditkarte erforderlich. Debit- und Prepaidkarten können dafür nicht verwendet werden.</p>
   <p>Eine Buchung wird erst bestätigt, wenn Kartenreservierung, Mietzahlung und Verfügbarkeit geprüft sind. Eine zeitlich nicht ausreichend gültige Kartenreservierung wird nicht für die Buchung verwendet.</p>
   {% if offline %}

@@ -8,6 +8,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mos_order_receipt import deliver_one, enqueue, init_schema, pending_ids, unresolved_count
@@ -18,6 +19,7 @@ class Portal:
 
     def __init__(self, path):
         self.path = path
+        self.app = SimpleNamespace(config={'MOS_SHARED_CHECKOUT_ENABLED': False})
 
     def get_db(self):
         db = sqlite3.connect(self.path)

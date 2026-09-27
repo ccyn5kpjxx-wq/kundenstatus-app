@@ -1,23 +1,23 @@
 {% if contract %}
 <section class="card" id="mietvertrag">
-  <p class="small muted">{{ 'TESTVERTRAG – keine echte Anmietung' if contract.test_only else 'Digital unterschriebener Vertrag' }}</p>
-  <h2>Dein unterschriebener Mietvertrag</h2>
+  <p class="small muted">{% if contract.test_only %}TEST – keine echte Anmietung{% elif signed %}Digital unterschriebener Vertrag{% else %}Digital unterschriebenes Buchungsangebot{% endif %}</p>
+  <h2>{{ 'Dein unterschriebener Mietvertrag' if signed else 'Dein unterschriebenes Buchungsangebot' }}</h2>
   {% if account and account.cancellation %}
   <p><strong>Die Buchung wurde storniert.</strong> Die ursprünglich unterschriebene Vertragsfassung bleibt dokumentiert.</p>
   {% elif h.status=='confirmed' and signed %}
   <p><strong>Zahlung bestätigt.</strong> Du hast den Vertrag am {{ signed_local }}{% if presigned %} vor der Zahlung{% endif %} unterschrieben. Die gespeicherte Fassung steht zum Download bereit.</p>
   {% elif h.status=='pending' %}
-  <p><strong>Unterschrift vom {{ signed_local }} gespeichert. Zahlung noch offen.</strong> Erst die bestätigte Zahlung und Verfügbarkeitsprüfung führen zur Buchungsbestätigung.</p>
+  <p><strong>Unterschrift unter dem Buchungsangebot vom {{ signed_local }} gespeichert. Zahlung noch offen.</strong> Erst die bestätigte Zahlung und Verfügbarkeitsprüfung führen zur Buchungsbestätigung.</p>
   {% elif h.status=='released' %}
-  <p><strong>Checkout beendet.</strong> Die Unterschrift wurde vor der Zahlung erfasst; es gibt keine bestätigte Buchung.</p>
+  <p><strong>Checkout beendet.</strong> Die Unterschrift unter dem Buchungsangebot wurde vor der Zahlung erfasst; es gibt keine bestätigte Buchung.</p>
   {% else %}
-  <p><strong>Manuelle Prüfung läuft.</strong> Aus der Unterschrift allein folgt keine bestätigte Buchung.</p>
+  <p><strong>Manuelle Prüfung läuft.</strong> Aus dem unterschriebenen Buchungsangebot allein folgt keine bestätigte Buchung.</p>
   {% endif %}
   {% if signed %}<a class="button" href="{{ url_for('mos_public.signed_contract_pdf',hold_id=h.id) }}">Unterschriebenen Mietvertrag als PDF herunterladen</a>{% endif %}
-  <p><strong>Vermieter und Vertragspartner:</strong> {{ contract.lessor_name }}, {{ contract.lessor_address }}.</p>
+  <p><strong>{{ 'Vermieter und Vertragspartner' if signed else 'Vorgesehener Vermieter und Vertragspartner' }}:</strong> {{ contract.lessor_name }}, {{ contract.lessor_address }}.</p>
   <p>„Autovermietung MOS“ bezeichnet das Mietangebot und ist keine eigene Vertragspartei.</p>
   <dl>
-    <dt>Mieter</dt><dd>{{ contract.customer_name }} · {{ contract.customer_email }}</dd>
+    <dt>{{ 'Mieter' if signed else 'Anfragende Person' }}</dt><dd>{{ contract.customer_name }} · {{ contract.customer_email }}</dd>
     <dt>Fahrzeug</dt><dd>{{ contract.vehicle_name }}</dd>
     <dt>Kennzeichen / FIN</dt><dd>{{ contract.vehicle_plate or 'Wird vor Übergabe mitgeteilt' }}{% if contract.vehicle_vin %} · {{ contract.vehicle_vin }}{% endif %}</dd>
     <dt>Abholung und Rückgabe</dt><dd>{{ contract.start_slot|mos_slot }}<br>{{ contract.end_slot|mos_slot }}</dd>
@@ -30,7 +30,7 @@
     <dt>Vertragliche Selbstbeteiligung</dt><dd>{{ '%.2f'|format(contract.deductible_cents/100)|replace('.', ',') }} € gemäß den Mietbedingungen</dd>
     <dt>Kilometer</dt><dd>{{ contract.included_km }} km inklusive; {{ '%.2f'|format(contract.extra_km_cents/100)|replace('.', ',') }} € je Mehrkilometer</dd>
   </dl>
-  <h3>Unterschriebene Mietbedingungen</h3>
+  <h3>{{ 'Unterschriebene Mietbedingungen' if signed else 'Mietbedingungen des unterschriebenen Buchungsangebots' }}</h3>
   <p class="small">Version {{ contract.terms_version }}. Dies ist die bei der Unterschrift angezeigte Fassung.</p>
   <div class="terms">{{ contract.terms_text }}</div>
   <h3>Unterschrift</h3>

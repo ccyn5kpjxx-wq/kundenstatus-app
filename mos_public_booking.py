@@ -484,6 +484,9 @@ def register(portal):
         db=portal.get_db()
         try:
             sql='''SELECT h.*,c.signed_at,d.status AS deposit_status,
+                order_receipt.status AS order_receipt_status,
+                order_receipt.enqueued_at AS order_receipt_enqueued_at,
+                order_receipt.accepted_at AS order_receipt_accepted_at,
                 delivery.status AS contract_delivery_status,delivery.enqueued_at AS contract_enqueued_at,
                 delivery.accepted_at AS contract_accepted_at,
                 handover.handed_at AS handed_at, handover.operator_name AS handover_operator,
@@ -498,6 +501,7 @@ def register(portal):
                 FROM miet_checkout_holds h
                 LEFT JOIN miet_checkout_contracts c ON c.hold_id=h.id
                 LEFT JOIN miet_checkout_deposit_auths d ON d.hold_id=h.id
+                LEFT JOIN miet_checkout_order_receipts order_receipt ON order_receipt.hold_id=h.id
                 LEFT JOIN miet_checkout_contract_delivery delivery ON delivery.hold_id=h.id
                 LEFT JOIN miet_checkout_handovers handover ON handover.hold_id=h.id
                 LEFT JOIN mietvorgaenge rental ON rental.id=h.mietvorgang_id
@@ -515,6 +519,22 @@ def register(portal):
         finally:db.close()
         for h in holds:
             h['q']=json.loads(h['payload'])['quote'];h['account']=account(h['id'])
+            h['order_receipt_open_minutes']=None
+            h['order_receipt_delay_seconds']=None
+            if h['order_receipt_enqueued_at']:
+                try:
+                    queued=datetime.fromisoformat(h['order_receipt_enqueued_at'])
+                    accepted=(datetime.fromisoformat(h['order_receipt_accepted_at'])
+                              if h['order_receipt_status']=='sent' and h['order_receipt_accepted_at'] else None)
+                    endpoint=accepted or datetime.now(timezone.utc)
+                    if queued.tzinfo and endpoint.tzinfo and endpoint>=queued:
+                        elapsed=int((endpoint-queued).total_seconds())
+                        if accepted:
+                            h['order_receipt_delay_seconds']=elapsed
+                        else:
+                            h['order_receipt_open_minutes']=elapsed//60
+                except ValueError:
+                    pass
             if h['signed_at']:
                 h['signed_at']=datetime.fromisoformat(h['signed_at']).astimezone(ZoneInfo('Europe/Berlin')).strftime('%d.%m.%Y um %H:%M Uhr')
             if h['handed_at']:

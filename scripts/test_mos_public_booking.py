@@ -51,7 +51,7 @@ class PublicTests(unittest.TestCase):
         db=portal.get_db()
         for table in ('miet_checkout_vehicle_readiness','miet_checkout_vehicle_blocks',
                       'miet_checkout_return_clearances','miet_checkout_returns',
-                      'miet_checkout_refunds','miet_checkout_cancellations','miet_checkout_handovers','miet_checkout_contract_delivery','miet_checkout_contracts',
+                      'miet_checkout_refunds','miet_checkout_cancellations','miet_checkout_handovers','miet_checkout_contract_delivery','miet_checkout_order_receipts','miet_checkout_contracts',
                       'miet_checkout_events','miet_checkout_deposit_auths','miet_checkout_creation_attempts',
                       'miet_checkout_holds','mietvorgaenge'):db.execute('DELETE FROM '+table)
         db.commit();db.close()
@@ -122,6 +122,40 @@ class PublicTests(unittest.TestCase):
             return dict(cancellation) if cancellation else None,refunds
         finally:db.close()
 
+    def test_admin_shows_order_receipt_status_and_elapsed_time_without_recipient(self):
+        hold=self.paid_hold()
+        queued=datetime.now(timezone.utc)-timedelta(minutes=7)
+        db=portal.get_db()
+        try:
+            row=db.execute('SELECT session_id,payment_intent,payload FROM miet_checkout_holds WHERE id=?',
+                           (hold,)).fetchone()
+            db.execute('''INSERT INTO miet_checkout_order_receipts
+                (hold_id,session_id,payment_intent,recipient,amount_cents,currency,
+                 payload_sha256,provider_observed_at,enqueued_at,status,next_attempt_at)
+                VALUES (?,?,?,?,?,?,?,?,?,'queued',?)''',
+                (hold,row['session_id'],row['payment_intent'],'private@example.test',
+                 json.loads(row['payload'])['quote']['amount_cents'],'eur',
+                 sha256(row['payload'].encode()).hexdigest(),queued.isoformat(),
+                 queued.isoformat(),queued.isoformat()))
+            db.commit()
+        finally:db.close()
+        admin=portal.app.test_client()
+        with admin.session_transaction() as session:session['admin']=True
+        page=admin.get('/mietwagen-test/admin?hold_id='+hold).get_data(as_text=True)
+        self.assertIn('Bestelleingangsbestätigung offen:',page)
+        self.assertIn('seit 7 Minuten nicht als angenommen bestätigt',page)
+        self.assertNotIn('private@example.test',page)
+        db=portal.get_db()
+        try:
+            db.execute("UPDATE miet_checkout_order_receipts SET status='sent',accepted_at=? WHERE hold_id=?",
+                       ((queued+timedelta(seconds=80)).isoformat(),hold))
+            db.commit()
+        finally:db.close()
+        page=admin.get('/mietwagen-test/admin?hold_id='+hold).get_data(as_text=True)
+        self.assertIn('Vom Mailserver angenommen nach 80 Sekunden',page)
+        self.assertNotIn('Bestelleingangsbestätigung offen:',page)
+        self.assertNotIn('private@example.test',page)
+
     def test_quote_explains_card_hold_deadline_before_signature(self):
         with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
             _,response=self.quote()
@@ -161,6 +195,8 @@ class PublicTests(unittest.TestCase):
             deposit_page=self.client.get('/mietwagen-test/status/'+hold+'/kaution')
             self.assertEqual(deposit_page.status_code,200)
             self.assertIn('Kaution auf der Karte reservieren',deposit_page.get_data(as_text=True))
+            self.assertIn('Buchungsangebot bereits digital unterschrieben',deposit_page.get_data(as_text=True))
+            self.assertNotIn('Mietvertrag bereits digital unterschrieben',deposit_page.get_data(as_text=True))
             self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/retry').location,
                              '/mietwagen-test/status/'+hold+'/kaution')
             self.assertEqual(self.rows(),[])
@@ -776,6 +812,9 @@ class PublicTests(unittest.TestCase):
         self.assertIn('Prüffälle: 1',check.output)
         self.assertEqual(state['service'].read(hold)['status'],'review')
         self.assertEqual(self.rows(),[])
+        status_page=self.client.get('/mietwagen-test/status/'+hold).get_data(as_text=True)
+        self.assertIn('Dein unterschriebenes Buchungsangebot',status_page)
+        self.assertNotIn('Dein unterschriebener Mietvertrag',status_page)
 
     def test_reconcile_alarms_on_failed_refund_without_resubmitting(self):
         with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
@@ -865,7 +904,8 @@ class PublicTests(unittest.TestCase):
         hold=portal.app.extensions['mos_public_booking']['gateway'].retrieve(sid)['metadata']['hold_id']
         status_url='/mietwagen-test/status/'+hold
         page=self.client.get(status_url).get_data(as_text=True)
-        self.assertIn('Dein unterschriebener Mietvertrag',page)
+        self.assertIn('Dein unterschriebenes Buchungsangebot',page)
+        self.assertNotIn('Dein unterschriebener Mietvertrag',page)
         self.assertIn('Zahlung noch offen',page)
         self.assertIn('Gärtner GmbH Karosserie + Lack',page)
         self.assertIn('keine eigene Vertragspartei',page)
@@ -878,6 +918,9 @@ class PublicTests(unittest.TestCase):
         self.assertEqual(len(unsigned_snapshot['signed_contract_hash']),64)
         paid=self.post(checkout.location)
         self.assertEqual(paid.status_code,303)
+        confirmed_page=self.client.get(status_url).get_data(as_text=True)
+        self.assertIn('Dein unterschriebener Mietvertrag',confirmed_page)
+        self.assertNotIn('Dein unterschriebenes Buchungsangebot',confirmed_page)
         db=portal.get_db()
         try:
             stored=dict(db.execute('SELECT * FROM miet_checkout_contracts WHERE hold_id=?',(hold,)).fetchone())
@@ -1010,7 +1053,7 @@ class PublicTests(unittest.TestCase):
         sid=checkout.location.rsplit('/',1)[1]
         hold=portal.app.extensions['mos_public_booking']['gateway'].retrieve(sid)['metadata']['hold_id']
         status_url='/mietwagen-test/status/'+hold
-        self.assertIn('Dein unterschriebener Mietvertrag',self.client.get(status_url).get_data(as_text=True))
+        self.assertIn('Dein unterschriebenes Buchungsangebot',self.client.get(status_url).get_data(as_text=True))
         other=portal.app.test_client();other.get('/mietwagen-test/')
         self.assertEqual(other.get(status_url).status_code,404)
         self.assertEqual(other.get(status_url+'/vertrag.pdf').status_code,404)

@@ -199,12 +199,23 @@ class ReviewRefundTests(unittest.TestCase):
         self.assertEqual((len(refunds),refunds[0]['id'],audit,rental_count),
                          (1,'prior-'+hold,None,0))
 
+    def test_stripe_refund_without_livemode_completes_review(self):
+        hold,_,_=self.paid_review()
+        original=self.g.refund
+        def stripe_schema(pi,amount,key):
+            return {k:v for k,v in original(pi,amount,key).items() if k!='livemode'}
+        with patch.object(self.g,'refund',side_effect=stripe_schema):
+            self.assertEqual(self.refund_action(hold).status_code,303)
+        refunds,_,rental_count=self.rows(hold)
+        self.assertEqual((len(refunds),refunds[0]['status'],rental_count),(1,'succeeded',0))
+        self.assertEqual(self.s.read(hold)['status'],'released')
+
     def test_mismatched_refund_response_never_completes_review(self):
         hold,_,_=self.paid_review()
         original=self.g.refund
-        def wrong_mode(pi,amount,key):
-            return {**original(pi,amount,key),'livemode':True}
-        with patch.object(self.g,'refund',side_effect=wrong_mode):
+        def wrong_payment(pi,amount,key):
+            return {**original(pi,amount,key),'payment_intent':'pi_other'}
+        with patch.object(self.g,'refund',side_effect=wrong_payment):
             self.assertEqual(self.refund_action(hold).status_code,303)
         refunds,_,rental_count=self.rows(hold)
         self.assertEqual((len(refunds),refunds[0]['status'],rental_count),(1,'queued',0))
