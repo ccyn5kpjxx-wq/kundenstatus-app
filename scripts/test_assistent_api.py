@@ -91,6 +91,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.get('status').status_code,401,'rotation revokes old token')
         stored=json.loads(p.get_app_setting('ASSISTANT_API_GRANT'))
         self.assertEqual(len(stored['hash']),64)
+        self.assertEqual(stored['scopes'],['auftraege:lesen'])
+        result=self.client.post('/admin/assistent-api',data={'aktion':'erstellen','csrf_token':'test-csrf','scopes':['dokumente:lesen','banking:lesen','finanzen:lesen']})
+        self.assertEqual(result.status_code,200)
+        stored=json.loads(p.get_app_setting('ASSISTANT_API_GRANT'))
+        self.assertEqual(stored['scopes'],['auftraege:lesen','dokumente:lesen'])
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

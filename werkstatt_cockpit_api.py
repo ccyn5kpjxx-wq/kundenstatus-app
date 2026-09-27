@@ -153,7 +153,10 @@ def register_cockpit_api(p):
             if request.form.get('aktion')=='widerrufen':p.set_app_setting('ASSISTANT_API_GRANT','')
             else:
                 token=secrets.token_urlsafe(40)
-                scopes=['auftraege:lesen','dokumente:lesen','einkauf:lesen']
+                # Optional data domains require explicit selection; never accept arbitrary scopes.
+                scopes=['auftraege:lesen']
+                scopes += [scope for scope in ('dokumente:lesen','einkauf:lesen')
+                           if scope in request.form.getlist('scopes')]
                 p.set_app_setting('ASSISTANT_API_GRANT',json.dumps({'hash':hashlib.sha256(token.encode()).hexdigest(),'scopes':scopes}))
         response=p.app.make_response(render_template('assistent_api_zugang.html',token=token,configured=bool(p.get_app_setting('ASSISTANT_API_GRANT',''))))
         response.headers['Cache-Control']='no-store';return response
