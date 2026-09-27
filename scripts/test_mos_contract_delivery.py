@@ -172,6 +172,7 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(self.send_fake(), 'sent')
         self.assertEqual(self.send_fake(), 'sent')
         self.assertEqual(FakeSMTP.calls, 1)
+        self.assertIn(b'\nDate:', FakeSMTP.raw.replace(b'\r\n', b'\n'))
         self.assertEqual(self.row()['status'], 'sent')
         self.assertEqual(unresolved_count(self.portal), 0)
 

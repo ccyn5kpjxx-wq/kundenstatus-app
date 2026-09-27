@@ -66,6 +66,11 @@ class RenderReconcileTests(unittest.TestCase):
             'MOS_STRIPE_PUBLISHABLE_KEY': 'pk_live_TEST_ONLY',
             'MOS_STRIPE_WEBHOOK_SECRET': 'whsec_TEST_ONLY',
             'FLASK_SECRET_KEY': 'TEST_ONLY_' + 'x' * 40,
+            'MAIL_SMTP_PASS': 'synthetic-never-used',
+            'MAIL_IMAP_PASS': 'synthetic-never-used',
+            'MIETWAGEN_SMTP_PASS': 'synthetic-never-used',
+            'TOMORROWWORKS_IMAP_PASS': 'synthetic-never-used',
+            'SMTP_PASSWORD': 'synthetic-never-used',
         }
 
     def write_config(self):
@@ -81,6 +86,11 @@ class RenderReconcileTests(unittest.TestCase):
         self.assertEqual(kwargs['env']['DATABASE_URL'], self.env['DATABASE_URL'])
         self.assertEqual(kwargs['env']['AUTO_BACKUP_ON_STARTUP'], 'false')
         self.assertEqual(kwargs['env']['MAILBOX_SEND_ENABLED'], 'false')
+        self.assertNotIn('MAIL_SMTP_PASS', kwargs['env'])
+        self.assertNotIn('MAIL_IMAP_PASS', kwargs['env'])
+        self.assertNotIn('MIETWAGEN_SMTP_PASS', kwargs['env'])
+        self.assertNotIn('TOMORROWWORKS_IMAP_PASS', kwargs['env'])
+        self.assertNotIn('SMTP_PASSWORD', kwargs['env'])
         self.assertNotIn('DATA_DIR', self.env)
 
     def test_missing_insurance_blocks_new_bookings_but_not_existing_settlement(self):

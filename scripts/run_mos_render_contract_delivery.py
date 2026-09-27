@@ -51,8 +51,10 @@ def preflight(environment: dict[str, str], *, secret_root: Path = SECRET_ROOT) -
         config = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise DeliveryPreflightError('MOS-Konfiguration ist nicht lesbar oder ungültig.') from exc
-    if not isinstance(config, dict) or config.get('mode') != 'live':
-        raise DeliveryPreflightError('Live-Konfiguration fehlt.')
+    if (not isinstance(config, dict) or config.get('mode') != 'live'
+            or config.get('live_enabled') is not True
+            or type(config.get('enabled')) is not bool):
+        raise DeliveryPreflightError('Live- oder ausdrücklich pausierte Buchungskonfiguration fehlt.')
     try:
         origin = urlsplit(config.get('origin', ''))
     except (TypeError, ValueError) as exc:
@@ -62,7 +64,7 @@ def preflight(environment: dict[str, str], *, secret_root: Path = SECRET_ROOT) -
         raise DeliveryPreflightError('HTTPS-Origin fehlt.')
     if environment.get('MOS_CONTRACT_EMAIL_ENABLED') != '1':
         raise DeliveryPreflightError('MOS-Vertragsversand ist nicht ausdrücklich aktiviert.')
-    if environment.get('MOS_STRIPE_TEST_KEY'):
+    if environment.get('MOS_STRIPE_TEST_KEY') or environment.get('MOS_PUBLIC_STRIPE_TEST_KEY'):
         raise DeliveryPreflightError('Testschlüssel darf nicht in der Live-Umgebung stehen.')
     secret = environment.get('FLASK_SECRET_KEY', '')
     if len(secret) < 32 or secret in {'change-me', 'gaertner-autohaus-2026'}:
@@ -105,8 +107,9 @@ def run(environment: dict[str, str] | None = None, *, secret_root: Path = SECRET
         'LEXWARE_API_KEY': '',
         'CODEX_BRIDGE_ENABLED': 'false',
     })
-    for key in ('MOS_STRIPE_LIVE_KEY', 'MOS_STRIPE_PUBLISHABLE_KEY', 'MOS_STRIPE_WEBHOOK_SECRET'):
-        runtime.pop(key, None)  # The mail worker never contacts Stripe.
+    for key in tuple(runtime):
+        if key.startswith(('MOS_STRIPE_', 'MOS_PUBLIC_STRIPE_')) or key == 'MOS_PUBLIC_WEBHOOK_SECRET':
+            runtime.pop(key)  # The mail worker never contacts Stripe.
     try:
         result = subprocess.run(
             [sys.executable, '-m', 'flask', '--app', 'app', 'mos-contract-delivery'],

@@ -453,3 +453,15 @@ sowie ein kontrollierter Live-Zahlungs-/Fehlerfall. Der schriftliche
 Versicherungsnachweis und die getrennte Vertrags-/Datenschutzfreigabe bleiben
 ebenfalls offen. Lokale Stripe-Testzahlungen oder der neue synthetische
 PostgreSQL-Lauf mit 51 bestandenen Tests ersetzen diese Abnahmen nicht.
+
+## Nachprüfung 27.09.2026 – Testzugang und Wallet-Abnahme
+
+Nach dem Feature-Commit `1b40184` wurden 97 isolierte Gateway-/Webhook-/Signatur-/Replay-Tests erneut bestanden. Im angemeldeten Stripe-**Testkonto** sind Karten, Apple Pay und Google Pay aktiviert; `checkout.stripe.com` ist als Zahlungsdomain aktiv. Die Test-Workbench enthält kein dauerhaftes Webhook-Ziel. Ein lokaler Stripe-CLI-Listener reicht für die signierte Zustellung an den isolierten Testserver, wurde mangels in dieser Laufzeit bereitgestellter Testschlüssel aber **nicht** erneut gestartet. Die öffentliche MOS- und Portalroute `/mieten/` antwortete jeweils mit HTTP 404.
+
+Der neue Bediener-Starter `scripts/run_mos_stripe_operator.py` bereitet den nächsten Test ohne Schlüsseldatei oder sichtbare Schlüsselargumente vor. Er fragt **vorhandene** `sk_test_`/`rk_test_` und den dazugehörigen `pk_test_` verdeckt in einem interaktiven Windows-Terminal ab, startet ausschließlich den Test-Listener für vier `checkout.session.*`-Ereignisse an `127.0.0.1:5086/mietwagen-test/webhook`, übernimmt dessen Signatursecret nur im Speicher und startet die synthetische Test-App. Beim Ende stoppt er beide Prozesse. Die CLI-Konfiguration liegt temporär unter dem ignorierten `.agent-hub/stripe-operator-temp/`; Stripe-CLI-v1.51.1-Hilfe und -Quellcode sowie sieben lokale Fakeprozess-/Windows-Job-Tests wurden geprüft. **Mit echten Testschlüsseln wurde dieser neue Starter noch nicht ausgeführt.** Er erstellt weder Stripe-Key noch persistentes Ereignisziel und aktiviert keine Livezahlung.
+
+```powershell
+& .agent-hub/setup-venv/Scripts/python.exe scripts/run_mos_stripe_operator.py
+```
+
+Die Mietpreis-Session nutzt Hosted Checkout. Ein im isolierten Desktop-Test nach Kreditkarten-Kautionsautorisierung erzeugter vollständiger `checkout.stripe.com`-**Testlink** könnte manuell auf einem geeigneten iPhone/Safari bzw. Android/Chrome geöffnet werden; der Rücksprung auf `localhost` funktioniert auf dem Telefon nicht. Der signierte Test-Webhook müsste den Desktop-Listener erreichen und der Buchungsstatus danach dort geprüft werden. Diese Geräte- und Endseitenprüfung ist eine **noch offene Probe**, kein jetzt bestätigtes Wallet-Ergebnis. [Stripe: Apple Pay](https://docs.stripe.com/apple-pay?platform=web), [Google Pay](https://docs.stripe.com/google-pay?platform=web), [lokale CLI-Webhooks](https://docs.stripe.com/webhooks#local-listener).

@@ -17,7 +17,7 @@ class PreflightTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         self.file = root / 'mos-booking.json'
-        self.file.write_text(json.dumps({'mode': 'live', 'enabled': False,
+        self.file.write_text(json.dumps({'mode': 'live', 'enabled': False, 'live_enabled': True,
                                          'origin': 'https://rental.example.test'}), encoding='utf-8')
         self.env = {
             'RENDER': 'true', 'PUBLIC_SITE_ONLY': 'false',
@@ -31,6 +31,9 @@ class PreflightTests(unittest.TestCase):
             'MAIL_IMAP_USER': 'workshop@example.test',
             'MAIL_SMTP_PASS': 'synthetic', 'MAIL_SMTP_SSL': '1', 'MAIL_SMTP_TLS': '0',
             'MOS_STRIPE_LIVE_KEY': 'synthetic-never-used',
+            'MOS_STRIPE_FUTURE_SECRET': 'synthetic-never-used',
+            'MOS_PUBLIC_STRIPE_PUBLISHABLE_KEY': 'synthetic-never-used',
+            'MOS_PUBLIC_WEBHOOK_SECRET': 'synthetic-never-used',
         }
 
     def test_disabled_new_bookings_can_still_deliver_existing_contracts(self):
@@ -41,6 +44,9 @@ class PreflightTests(unittest.TestCase):
         args, kwargs = process.call_args
         self.assertEqual(args[0][-1], 'mos-contract-delivery')
         self.assertNotIn('MOS_STRIPE_LIVE_KEY', kwargs['env'])
+        self.assertNotIn('MOS_STRIPE_FUTURE_SECRET', kwargs['env'])
+        self.assertNotIn('MOS_PUBLIC_STRIPE_PUBLISHABLE_KEY', kwargs['env'])
+        self.assertNotIn('MOS_PUBLIC_WEBHOOK_SECRET', kwargs['env'])
         self.assertEqual(kwargs['env']['MAIL_SMTP_PASS'], 'synthetic')
 
     def test_no_mail_authority_or_untrusted_runtime_never_starts_worker(self):
@@ -50,6 +56,7 @@ class PreflightTests(unittest.TestCase):
             ('no TLS', {'MAIL_SMTP_SSL': '0', 'MAIL_SMTP_TLS': '0'}),
             ('SMTP missing', {'MAIL_SMTP_PASS': ''}),
             ('test key', {'MOS_STRIPE_TEST_KEY': 'sk_test_synthetic'}),
+            ('public test key', {'MOS_PUBLIC_STRIPE_TEST_KEY': 'sk_test_synthetic'}),
             ('bad file', {'MOS_BOOKING_CONFIG_FILE': str(self.file.parent / 'absent.json')}),
         ]
         for label, changes in cases:
@@ -62,6 +69,21 @@ class PreflightTests(unittest.TestCase):
                                          'origin': 'https://rental.example.test'}), encoding='utf-8')
         with self.assertRaises(DeliveryPreflightError):
             preflight(self.env, secret_root=self.file.parent)
+
+    def test_live_settlement_flag_and_explicit_pause_are_required(self):
+        for config in (
+            {'mode': 'live', 'enabled': False, 'live_enabled': False,
+             'origin': 'https://rental.example.test'},
+            {'mode': 'live', 'enabled': 'false', 'live_enabled': True,
+             'origin': 'https://rental.example.test'},
+            {'mode': 'live', 'live_enabled': True,
+             'origin': 'https://rental.example.test'},
+        ):
+            with self.subTest(config=config):
+                self.file.write_text(json.dumps(config), encoding='utf-8')
+                with patch('scripts.run_mos_render_contract_delivery.subprocess.run') as process:
+                    self.assertEqual(run(self.env, secret_root=self.file.parent), 2)
+                    process.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -118,6 +118,12 @@ def run(environment: dict[str, str] | None = None, *, secret_root: Path = SECRET
         'LEXWARE_API_KEY': '',
         'CODEX_BRIDGE_ENABLED': 'false',
     })
+    for key in tuple(runtime):
+        if (key.startswith(('MAIL_SMTP_', 'MAIL_IMAP_', 'SCHADEN_SMTP_', 'SCHADEN_IMAP_',
+                            'MIETWAGEN_SMTP_', 'MIETWAGEN_IMAP_',
+                            'TOMORROWWORKS_SMTP_', 'TOMORROWWORKS_IMAP_'))
+                or key in {'SMTP_PASSWORD', 'TW_SMTP_PASSWORD'}):
+            runtime.pop(key)  # Known mail credentials are not needed by the payment job.
     try:
         result = subprocess.run(
             [sys.executable, '-m', 'flask', '--app', 'app', 'mos-booking-reconcile'],

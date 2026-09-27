@@ -8,7 +8,7 @@ from base64 import b64decode
 from datetime import datetime, timedelta, timezone
 from email import policy
 from email.message import EmailMessage
-from email.utils import formataddr, parseaddr
+from email.utils import formataddr, format_datetime, parseaddr
 from hashlib import sha256
 import json
 import smtplib
@@ -104,6 +104,8 @@ def _smtp_send(message, cfg):
     smtp = None
     phase = 'before_data'
     try:
+        if not message['Date']:
+            message['Date'] = format_datetime(datetime.now(timezone.utc))
         kwargs = {'timeout': 30, 'context': ssl.create_default_context()}
         if cfg.get('local_hostname'):
             kwargs['local_hostname'] = cfg['local_hostname']
