@@ -82,6 +82,22 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.get('artikel?q=TEST-123').json['artikel'][0]['quelle_beleg_id'],901)
         self.assertIn('TEST-123',self.get('belege/901').json['extrahierter_text'])
 
+    def test_invoice_inventory_excludes_accounting_and_bank_fields(self):
+        db=p.get_db()
+        try:
+            db.execute("DELETE FROM lexware_rechnungen")
+            for kind,vid in [('purchaseinvoice','supplier-test'),('salesinvoice','customer-test')]:
+                db.execute("INSERT INTO lexware_rechnungen(voucher_id,voucher_type,contact_name,voucher_number,status,total_amount,raw_json,erstellt_am,geaendert_am) VALUES(?,?,?,'INV-1','offen',98765,'bank-secret',?,?)",(vid,kind,'Supplier Test',p.now_str(),p.now_str()))
+            db.commit()
+        finally:db.close()
+        result=self.get('belege')
+        self.assertEqual(result.status_code,200)
+        self.assertEqual([r['voucher_id'] for r in result.json['lieferantenrechnungen']],['supplier-test'])
+        self.assertNotIn('bank-secret',result.text)
+        self.assertNotIn('98765',result.text)
+        self.grant(['auftraege:lesen'])
+        self.assertEqual(self.get('belege').status_code,403)
+
     def test_key_management_requires_admin_and_csrf(self):
         self.assertNotEqual(self.client.get('/admin/assistent-api').status_code,200)
         with self.client.session_transaction() as session:session.update(admin=True,csrf_token='test-csrf')

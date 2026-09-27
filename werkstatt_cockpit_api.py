@@ -92,6 +92,13 @@ class CockpitData:
         rows=self.rows('SELECT id,lieferant,artikelnummer,produkt_name,produkt_beschreibung,ve,gebinde,letzter_preis,letzter_preis_datum,preisquelle,quelle_beleg_id FROM einkauf_artikel WHERE LOWER(artikelnummer) LIKE ? OR LOWER(produkt_name) LIKE ? OR LOWER(produkt_beschreibung) LIKE ? ORDER BY id DESC LIMIT 30',values)
         return {'artikel':rows,'hinweis':'Historische Rechnungsartikel. Keine aktuelle Preis- oder Verfügbarkeitszusage. Ähnliche Produkte sind keine eindeutige Identifikation.'}
 
+    def invoice_sources(self):
+        # Product-import inventory only: no amounts, payments, balances or bank data.
+        local = self.rows("SELECT id,lieferant,original_name,status FROM einkauf_belege WHERE beleg_typ='rechnung' ORDER BY id")
+        remote = self.rows("SELECT voucher_id,contact_name,voucher_number,voucher_date FROM lexware_rechnungen WHERE voucher_type='purchaseinvoice' AND status NOT IN ('storniert','geloescht') ORDER BY voucher_date,voucher_id")
+        return {'einkaufsbelege': local, 'lieferantenrechnungen': remote,
+                'hinweis': 'Nur Quellenliste. Lexware-Originaldateien muessen fuer Artikelpositionen gesondert gelesen werden.'}
+
     def invoice(self, bid):
         rows=self.rows('SELECT id,beleg_typ,lieferant,original_name,extrahierter_text,status,erstellt_am FROM einkauf_belege WHERE id=?',(bid,))
         if not rows:raise ValueError('Einkaufsbeleg nicht gefunden.')
@@ -140,6 +147,9 @@ def register_cockpit_api(p):
     @bp.get('/artikel')
     @require('einkauf:lesen')
     def articles():return jsonify(service.articles(request.args.get('q','')))
+    @bp.get('/belege')
+    @require('einkauf:lesen')
+    def invoice_sources():return jsonify(service.invoice_sources())
     @bp.get('/belege/<int:bid>')
     @require('einkauf:lesen')
     def invoice(bid):return jsonify(service.invoice(bid))
