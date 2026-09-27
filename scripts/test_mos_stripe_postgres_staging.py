@@ -108,6 +108,8 @@ class PostgresStripePreflight(unittest.TestCase):
             db_path = Path(directory) / 'fake-http.sqlite3'
             app = Flask('pg-test-http', template_folder=str(ROOT / 'templates'))
             app.secret_key = 'dummy-http-test-secret'
+            app.add_url_rule('/impressum', endpoint='impressum_seite', view_func=lambda: 'TEST')
+            app.add_url_rule('/datenschutz', endpoint='datenschutz_seite', view_func=lambda: 'TEST')
             app.config.update(
                 MOS_PUBLIC_BOOKING={
                     'enabled': True, 'test_configuration': True, 'mode': 'stripe_test',
@@ -119,7 +121,7 @@ class PostgresStripePreflight(unittest.TestCase):
                     'included_km_day': 150, 'extra_km_cents': 25, 'max_days': 30,
                     'deposit_cents': 50000, 'deductible_cents': 100000,
                     'deposit_method': 'card_authorization_at_booking',
-                    'cancellation_policy': 'free_48h_then_10pct_rent',
+                    'cancellation_policy': 'free_24h_then_one_day_rent',
                 },
                 MOS_PUBLIC_STRIPE_TEST_KEY='sk_test_dummy',
                 MOS_PUBLIC_STRIPE_PUBLISHABLE_KEY='pk_test_dummy',

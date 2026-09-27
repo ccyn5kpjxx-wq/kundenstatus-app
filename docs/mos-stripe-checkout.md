@@ -2,6 +2,8 @@
 
 > Historischer Prüfbericht. Aktueller Beschluss vom 23.09.2026: Direktbuchung ausschließlich für Hyundai i10 und Hyundai KONA. C3 bleibt Anfrage; Fiat ist ausgeschlossen. Drei-Fahrzeug-Angaben und C3-Tests unten beschreiben den damaligen Stand bzw. den isolierten Altprototyp und sind keine aktuelle Flottenkonfiguration. Aktueller Test-Starter: [Öffentlicher Testablauf](mos-public-test.md); Freigaben: [Launch-Paket](mos-launch-package.md).
 
+**Statusnotiz 27.09.2026:** Die Aussage unten, `stripe_test` sei nur mit API-Mocks geprüft, beschreibt den Prototypstand vom 22.09. Für die später integrierte MOS-Direktbuchung gab es inzwischen einen echten lokalen Stripe-**TEST**-Checkout mit 500-€-Kreditkartenautorisierung ohne Einzug, 39-€-Mietzahlung, signiertem Webhook und Storno/Refund sowie einen weiteren Stripe-TEST-Prüffall nach Not-Aus mit genau einer 39-€-Vollerstattung. Die Beträge und Abläufe sind im [Staging-Protokoll](mos-staging-abnahme.md) dokumentiert. Das beweist weder Apple Pay/Google Pay auf geeigneten Geräten noch eine Render-End-to-End-Abnahme oder Livezahlung; der öffentliche Zahlungsmodus bleibt deaktiviert.
+
 Stand: 22.09.2026. TomorrowWorks Aufgabe 65, Branch `feature/mos-mietanfrage-klarheit`.
 
 ## Ergebnis und Grenzen

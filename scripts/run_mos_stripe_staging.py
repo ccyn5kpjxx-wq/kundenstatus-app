@@ -53,7 +53,7 @@ def staging_configuration(offline_config):
     config = deepcopy(offline_config)
     config.update(enabled=True, mode='stripe_test', origin=TEST_ORIGIN,
                   deposit_method='card_authorization_at_booking',
-                  cancellation_policy='free_48h_then_10pct_rent')
+                  cancellation_policy='free_24h_then_one_day_rent')
     return config
 
 

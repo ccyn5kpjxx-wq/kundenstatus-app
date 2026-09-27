@@ -1,6 +1,6 @@
 # MOS: getrennte PostgreSQL- und Stripe-Abnahme
 
-Stand 27.09.2026, mit historischen Testläufen ab 24.09.2026. Keine Livefreigabe oder Livezahlung. Der aktuelle Code-Commit `2191ba8` ist auf Render mit ausgeschalteter öffentlicher Buchung ausgerollt; eine Zahlungs-, Webhook- oder Mail-End-to-End-Abnahme auf Render liegt nicht vor. Die beschriebenen Stripe-Zahlungsabläufe wurden lokal getestet.
+Stand 27.09.2026, mit historischen Testläufen ab 24.09.2026. Keine Livefreigabe oder Livezahlung. Der Code-Commit `2191ba8` wurde auf Render mit ausgeschalteter öffentlicher Buchung ausgerollt; eine Zahlungs-, Webhook- oder Mail-End-to-End-Abnahme auf Render liegt nicht vor. Die beschriebenen Stripe-Zahlungsabläufe wurden lokal getestet. Die unten dokumentierten 3,90-€/35,10-€-Ergebnisse belegen **die damalige 48-Stunden-/10-%-Regel**, nicht die am 27.09.2026 beschlossene neue 24-Stunden-/Ein-Miettag-Regel für künftige Buchungen.
 
 ## Tatsächlich ausgeführt
 
@@ -178,7 +178,7 @@ synthetischen i10-/KONA-Datensätzen. Die private Testkonfiguration benötigt
 HTTPS- oder Loopback-Origin, zwei unterschiedliche Testfahrzeug-IDs, künftige
 aktive Übergabeslots, Entwurfsbedingungen, Bruttopreise und ausdrücklich
 `deposit_method=card_authorization_at_booking` sowie
-`cancellation_policy=free_48h_then_10pct_rent`. Ohne die Deposit-Einstellung
+`cancellation_policy=free_24h_then_one_day_rent`. Ohne die Deposit-Einstellung
 kann der historische Einzugspfad statt der beschlossenen Autorisierung laufen.
 Die öffentliche Test-Route ist `/mietwagen-test/`; der Webhook liegt unter
 `/mietwagen-test/webhook`. PostgreSQL ist im Testmodus ausschließlich für den
@@ -221,13 +221,19 @@ Mietvorgang bestätigen; ein Erfolgs-Redirect genügt nicht.
 2. Mit Stripe-Testkarten Vertragssignatur → 500-€-Kreditkarten-Hold ohne Einzug
    → separaten Mietpreis-Checkout → signierten Webhook → genau eine bestätigte
    Buchung durchspielen. Beträge, Kartenart und `capture_before` im Testkonto
-   und Portalzustand abgleichen; Checkout-Button auch am geeigneten Gerät prüfen.
+   und Portalzustand abgleichen. Für den Mietpreis Karte, Apple Pay und Google Pay
+   auf jeweils geeigneten Geräten und Browsern tatsächlich prüfen; die Kaution
+   bleibt ein eigener Kreditkarten-Hold. Sichtbaren Checkout-Button prüfen.
 3. 3-D-Secure/Abbruch, Ablehnung, Debit/Prepaid, zu kurze Autorisierungsfrist,
    parallele Reservierung, geschlossenen oder verstrichenen Slot, doppelte und
    verspätete Webhooks, Checkout-Timeout sowie Zahlung/Storno-Rennen prüfen.
    Unklare Ergebnisse bleiben zur manuellen Prüfung gesperrt.
-4. Bis einschließlich 48 Stunden vor Abholung kostenlosen Storno und danach
-   10 % nur vom Mietpreis prüfen. Erstattung des verbleibenden Mietpreises
+4. Für neue Vertragssnapshots bis einschließlich 24 Stunden vor Abholung
+   kostenlosen Storno und danach höchstens einen vereinbarten Miettag, begrenzt
+   auf den gesamten Mietpreis, prüfen. Anrechnung ersparter Aufwendungen und
+   Wiedervermietung sowie Gegenbeweisrecht sichtbar prüfen. Ältere signierte
+   Snapshots mit ihrer gespeicherten Regel getrennt abnehmen. Erstattung des
+   verbleibenden Mietpreises
    idempotent abgleichen. Kaution bei Abbruch/Storno und nach dokumentierter
    Rückgabe durch **Stornierung der ungenutzten Autorisierung** freigeben;
    dies ist keine Kautionserstattung, da kein Einzug erfolgte.

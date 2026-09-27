@@ -58,7 +58,7 @@ class StagingPreflightTests(unittest.TestCase):
         self.assertTrue(config['enabled'])
         self.assertTrue(config['test_configuration'])
         self.assertEqual(config['deposit_method'], 'card_authorization_at_booking')
-        self.assertEqual(config['cancellation_policy'], 'free_48h_then_10pct_rent')
+        self.assertEqual(config['cancellation_policy'], 'free_24h_then_one_day_rent')
         self.assertEqual(config['fleet'], offline['fleet'])
         self.assertEqual(config['terms_version'], 'draft:test')
         self.assertEqual(offline['mode'], 'offline')

@@ -59,6 +59,13 @@ def _checkout_disclosure(quote, *, test_mode):
             f'Bis einschließlich 48 Stunden vor Abholung kostenlos stornieren; danach '
             f'höchstens {fee/100:.2f} EUR (10 % der Miete), vorbehaltlich geringeren Schadens. '
         )
+    elif quote.get('cancellation_policy') == 'free_24h_then_one_day_rent':
+        fee = min(quote['daily_cents'], quote['rental_cents'])
+        cancellation = (
+            f'Bis einschließlich 24 Stunden vor Abholung kostenlos stornieren; danach '
+            f'höchstens {fee/100:.2f} EUR (ein Miettag), mit Anrechnung ersparter Kosten/'
+            'Wiedervermietung und Gegenbeweis geringeren oder fehlenden Schadens. '
+        )
     message = (
         ('TEST – keine echte Zahlung. ' if test_mode else '') +
         'Sie bestellen die angezeigte Miete zahlungspflichtig. ' + deposit +

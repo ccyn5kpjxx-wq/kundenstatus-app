@@ -13,7 +13,8 @@ from run_mos_public_test import build_test_app
 TEMP=tempfile.TemporaryDirectory(prefix='mos-production-tests-')
 portal=build_test_app(TEMP.name,origin='http://localhost')
 portal.app.test_client().get('/mietwagen-test/')
-from mos_booking.production import launch_errors,StripeLiveGateway,cancellation_fee,CANCELLATION_POLICY_48H_10_PERCENT
+from mos_booking.production import (launch_errors,StripeLiveGateway,cancellation_fee,
+    CANCELLATION_POLICY_24H_ONE_DAY,CANCELLATION_POLICY_48H_10_PERCENT)
 from mos_booking.gateway import StripeTestGateway
 from mietwagen_checkout import SharedCheckout
 
@@ -58,22 +59,34 @@ class ProductionTests(unittest.TestCase):
 
     def test_cancellation_boundary_and_deposit_not_fee(self):
         _,q=self.paid()
-        new_q={**q,'cancellation_policy':CANCELLATION_POLICY_48H_10_PERCENT}
-        self.assertEqual(cancellation_fee(new_q,self.start-timedelta(hours=48)),0)
-        self.assertEqual(cancellation_fee(new_q,self.start-timedelta(hours=48)+timedelta(seconds=1)),1470)
-        self.assertEqual(cancellation_fee(new_q,self.start),1470)
+        new_q={**q,'cancellation_policy':CANCELLATION_POLICY_24H_ONE_DAY}
+        self.assertEqual(cancellation_fee(new_q,self.start-timedelta(hours=24)),0)
+        self.assertEqual(cancellation_fee(new_q,self.start-timedelta(hours=24)+timedelta(seconds=1)),4900)
+        self.assertEqual(cancellation_fee(new_q,self.start),4900)
+        self.assertEqual(cancellation_fee({**new_q,'rental_cents':3900},self.start),3900)
+        # An already signed 48h/10% snapshot keeps its exact historical rule.
+        old_signed={**q,'cancellation_policy':CANCELLATION_POLICY_48H_10_PERCENT}
+        self.assertEqual(cancellation_fee(old_signed,self.start-timedelta(hours=48)),0)
+        self.assertEqual(cancellation_fee(old_signed,self.start-timedelta(hours=48)+timedelta(seconds=1)),1470)
         # Historical signed bookings had no policy field and retain their old terms.
         self.assertEqual(cancellation_fee(q,self.start-timedelta(hours=24)),0)
         self.assertEqual(cancellation_fee(q,self.start-timedelta(hours=24)+timedelta(seconds=1)),4900)
         self.assertEqual(cancellation_fee(q,self.start),4900)
 
-    def test_new_policy_refunds_rent_less_ten_percent_and_all_charged_deposit(self):
+    def test_new_policy_fee_excludes_deposit_in_legacy_charged_fixture(self):
+        # This synthetic charged-deposit fixture is retained for old data only;
+        # new MOS bookings authorize the card without charging the 500 EUR.
+        h,_=self.paid(CANCELLATION_POLICY_24H_ONE_DAY)
+        rid=self.l.cancel(h['id'],self.start-timedelta(hours=23))
+        self.assertEqual(self.refund(rid)['amount_cents'],59800)
+
+    def test_old_signed_48h_policy_still_refunds_original_amount(self):
         h,_=self.paid(CANCELLATION_POLICY_48H_10_PERCENT)
         rid=self.l.cancel(h['id'],self.start-timedelta(hours=47))
         self.assertEqual(self.refund(rid)['amount_cents'],63230)
 
     def test_free_cancel_full_refund_once_and_inventory_free(self):
-        h,_=self.paid();rid=self.l.cancel(h['id'],self.start-timedelta(days=2))
+        h,_=self.paid(CANCELLATION_POLICY_24H_ONE_DAY);rid=self.l.cancel(h['id'],self.start-timedelta(days=2))
         self.assertEqual(self.refund(rid)['amount_cents'],64700)
         self.assertEqual(self.l.process(rid),'succeeded');self.assertEqual(self.l.process(rid),'succeeded')
         self.assertEqual(self.l.cancel(h['id'],self.start-timedelta(days=2)),rid)
@@ -81,7 +94,7 @@ class ProductionTests(unittest.TestCase):
         self.assertTrue(portal.mietfahrzeug_zeitraum_frei_db(db,h['mietfahrzeug_id'],self.start.date(),(self.start+timedelta(days=3)).date()));db.close()
 
     def test_late_cancel_and_lesser_damage_credit(self):
-        h,_=self.paid();rid=self.l.cancel(h['id'],self.start-timedelta(hours=1))
+        h,_=self.paid(CANCELLATION_POLICY_24H_ONE_DAY);rid=self.l.cancel(h['id'],self.start-timedelta(hours=1))
         self.assertEqual(self.refund(rid)['amount_cents'],59800)
         self.l.process(rid)
         key=uuid.uuid4().hex;credit=self.l.credit(h['id'],4900,'Wiedervermietung: kein Schaden',key)
@@ -94,7 +107,7 @@ class ProductionTests(unittest.TestCase):
         today=datetime.now(berlin).date()
         monday=today+timedelta(days=(7-today.weekday())%7+7)
         self.start=datetime(monday.year,monday.month,monday.day,9,tzinfo=berlin)
-        h,_=self.paid()
+        h,_=self.paid(CANCELLATION_POLICY_24H_ONE_DAY)
         with self.assertRaises(ValueError):self.l.cancel(h['id'],self.start+timedelta(minutes=1))
         evidence=dict(admin=True,no_show=True,staffed_check=True,
                       operator_name='Test Person',contact_attempt='Telefonisch nicht erreicht',
@@ -127,7 +140,7 @@ class ProductionTests(unittest.TestCase):
         today=datetime.now(berlin).date()
         monday=today+timedelta(days=(7-today.weekday())%7+7)
         self.start=datetime(monday.year,monday.month,monday.day,20,tzinfo=berlin)
-        h,_=self.paid(CANCELLATION_POLICY_48H_10_PERCENT)
+        h,_=self.paid(CANCELLATION_POLICY_24H_ONE_DAY)
         evidence=dict(admin=True,no_show=True,staffed_check=True,
                       operator_name='Test Person',contact_attempt='Telefonisch nicht erreicht',
                       contact_attempt_at=self.start+timedelta(minutes=45),
@@ -135,7 +148,7 @@ class ProductionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'betreuten Werkstatttermin'):
             self.l.cancel(h['id'],self.start+timedelta(hours=1),**evidence)
         rid=self.l.cancel(h['id'],self.start+timedelta(hours=12),**evidence)
-        self.assertEqual(self.refund(rid)['amount_cents'],63230)
+        self.assertEqual(self.refund(rid)['amount_cents'],59800)
 
     def test_timeout_after_refund_retries_identical_operation(self):
         h,_=self.paid();rid=self.l.cancel(h['id']);original=self.g.refund
@@ -173,7 +186,7 @@ class ProductionTests(unittest.TestCase):
         cfg=json.loads(json.dumps(self.state['cfg']))
         cfg.update(mode='live',live_enabled=True,origin='https://booking.example.invalid',
             terms_version='test-fixture-final-v1',deposit_method='card_authorization_at_booking',
-            cancellation_policy=CANCELLATION_POLICY_48H_10_PERCENT,
+            cancellation_policy=CANCELLATION_POLICY_24H_ONE_DAY,
             privacy_url='https://booking.example.invalid/privacy',merchant_name='Gärtner GmbH Karosserie + Lack',
             merchant_address='Binauer Höhe 4, 74821 Mosbach, Deutschland',
             merchant_email='test@example.invalid',merchant_phone='+49 1522 0000000')
@@ -197,6 +210,8 @@ class ProductionTests(unittest.TestCase):
         self.assertTrue(any('Kartenautorisierung' in error for error in launch_errors(old_method)))
         no_policy=json.loads(json.dumps(cfg));del no_policy['cancellation_policy']
         self.assertTrue(any('Stornoregel' in error for error in launch_errors(no_policy)))
+        old_policy=json.loads(json.dumps(cfg));old_policy['cancellation_policy']=CANCELLATION_POLICY_48H_10_PERCENT
+        self.assertTrue(any('Stornoregel' in error for error in launch_errors(old_policy)))
         wrong=json.loads(json.dumps(cfg));wrong['merchant_name']='Autovermietung MOS'
         self.assertTrue(any('Vermieter' in error for error in launch_errors(wrong)))
         bad_contact=json.loads(json.dumps(cfg));bad_contact['merchant_phone']='TEST'

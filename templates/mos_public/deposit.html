@@ -4,8 +4,8 @@
   <h2>{{ q.vehicle_name }}</h2>
   <p>{{ q.start_slot|mos_slot }} bis {{ q.end_slot|mos_slot }}</p>
   <p>Du hast dein Buchungsangebot bereits digital unterschrieben. Jetzt werden <strong>500 € auf deiner Kreditkarte reserviert, nicht abgebucht</strong>. Anschließend bezahlst du den Mietpreis von <strong>{{ '%.2f'|format(q.rental_cents/100)|replace('.', ',') }} €</strong> separat online. Vor Ort ist dafür kein Zahlungsschritt nötig.</p>
-  <p>Für die Kaution ist eine Kreditkarte erforderlich. Debit- und Prepaidkarten können dafür nicht verwendet werden.</p>
-  <p>Eine Buchung wird erst bestätigt, wenn Kartenreservierung, Mietzahlung und Verfügbarkeit geprüft sind. Eine zeitlich nicht ausreichend gültige Kartenreservierung wird nicht für die Buchung verwendet.</p>
+  <p>Für diese Kaution brauchst du eine zusätzliche Kreditkarte. Debit- und Prepaidkarten sowie Apple Pay oder Google Pay allein können dafür nicht verwendet werden. Apple Pay und Google Pay kommen erst bei der separaten Mietpreiszahlung infrage, wenn Stripe sie auf deinem Gerät anbietet.</p>
+  <p>Eine Buchung wird erst bestätigt, wenn Kartenreservierung, Mietzahlung und Verfügbarkeit geprüft sind. Die vom Zahlungsanbieter gemeldete Autorisierungsfrist muss über die vereinbarte Rückgabe plus 24 Stunden hinausreichen. Andernfalls startet keine Mietpreiszahlung.</p>
   {% if offline %}
   <p class="notice">Offline-Test: Keine Kartendaten eingeben. Der Knopf erzeugt nur eine synthetische Reservierung.</p>
   <form method="post" action="{{ url_for('mos_public.simulate_deposit',hold_id=h.id) }}">{{ csrf_field()|safe }}<button>Test-Kartenreservierung simulieren</button></form>
@@ -18,7 +18,7 @@
   (() => {
     const stripe = Stripe({{ publishable_key|tojson }});
     const elements = stripe.elements({clientSecret: {{ client_secret|tojson }}});
-    elements.create('payment').mount('#payment-element');
+    elements.create('payment', {wallets: {applePay: 'never', googlePay: 'never', link: 'never'}}).mount('#payment-element');
     const form = document.getElementById('deposit-form');
     const button = document.getElementById('deposit-button');
     const message = document.getElementById('deposit-message');

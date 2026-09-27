@@ -212,7 +212,9 @@ def register(portal):
             raise ValueError('Entwurfsversion und Bruttopreise erforderlich.')
         if cfg.get('day_rule') != 'elapsed_24h_ceil' or cfg.get('deposit_cents')!=50000 or cfg.get('deductible_cents')!=100000:
             raise ValueError('Explizite Test-Zeitregel und beschlossene Beträge erforderlich.')
-        if cfg.get('cancellation_policy') not in (None,'free_48h_then_10pct_rent'):
+        if (cfg.get('cancellation_policy') not in (None,'free_24h_then_one_day_rent')
+                and not (cfg.get('enabled') is False
+                         and cfg.get('cancellation_policy')=='free_48h_then_10pct_rent')):
             raise ValueError('Unbekannte Stornoregel in der Buchungskonfiguration.')
         for key in ('included_km_day','extra_km_cents','max_days'):
             if type(cfg[key]) is not int or cfg[key]<1:raise ValueError('Test-Tarif unvollständig.')

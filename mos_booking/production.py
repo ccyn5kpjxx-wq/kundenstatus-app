@@ -14,6 +14,7 @@ from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME, valid_lessor_contac
 
 ACTIVE_LISTINGS={'kona','i10'}
 CANCELLATION_POLICY_48H_10_PERCENT='free_48h_then_10pct_rent'
+CANCELLATION_POLICY_24H_ONE_DAY='free_24h_then_one_day_rent'
 BERLIN=ZoneInfo('Europe/Berlin')
 
 
@@ -62,8 +63,8 @@ def launch_errors(cfg):
             errors.append('Geprüfte Fahrzeugidentität fehlt: '+slug)
     if cfg.get('deposit_method')!='card_authorization_at_booking':
         errors.append('Online-Kartenautorisierung ohne Kautionseinzug ist nicht konfiguriert.')
-    if cfg.get('cancellation_policy')!=CANCELLATION_POLICY_48H_10_PERCENT:
-        errors.append('Die bestätigte Stornoregel (48 Stunden kostenlos, danach 10 % des Mietpreises) fehlt.')
+    if cfg.get('cancellation_policy')!=CANCELLATION_POLICY_24H_ONE_DAY:
+        errors.append('Die bestätigte Stornoregel (24 Stunden kostenlos, danach höchstens ein Miettag) fehlt.')
     if not cfg.get('terms_version') or cfg['terms_version'].startswith('draft:'):
         errors.append('Freigegebene Bedingungsversion fehlt.')
     for name in ('terms_text','privacy_url','merchant_name','merchant_address','merchant_email','merchant_phone'):
@@ -156,6 +157,16 @@ def cancellation_fee(quote,requested_at):
             raise ValueError('Mietpreis für Stornoberechnung fehlt.')
         # Integer half-up rounding: never include a charged or authorized deposit.
         return (rental_cents+5)//10
+    if policy==CANCELLATION_POLICY_24H_ONE_DAY:
+        if seconds_before_pickup>=24*3600:return 0
+        rental_cents=quote.get('rental_cents')
+        daily_cents=quote.get('daily_cents')
+        if (type(rental_cents) is not int or rental_cents<0
+                or type(daily_cents) is not int or daily_cents<=0):
+            raise ValueError('Vereinbarter Tages- oder Gesamtmietpreis für Storno fehlt.')
+        # The agreed daily rate already includes a KONA multi-day discount.
+        # Never include a charged or authorized deposit or exceed the rent.
+        return min(daily_cents,rental_cents)
     if policy is not None:
         raise ValueError('Unbekannte Stornoregel im Buchungssnapshot.')
     # Existing signed bookings without an explicit policy keep their original rule.

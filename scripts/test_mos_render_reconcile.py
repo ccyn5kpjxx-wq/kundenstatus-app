@@ -40,7 +40,7 @@ def fixture_config():
         'mode': 'live', 'enabled': True, 'live_enabled': True,
         'origin': 'https://booking.example.invalid', 'fleet': fleet, 'launch': launch,
         'deposit_method': 'card_authorization_at_booking',
-        'cancellation_policy': 'free_48h_then_10pct_rent',
+        'cancellation_policy': 'free_24h_then_one_day_rent',
         'terms_version': 'test-fixture-final-v1', 'terms_text': 'TEST ONLY',
         'privacy_url': 'https://booking.example.invalid/privacy',
         'merchant_name': LESSOR_NAME, 'merchant_address': LESSOR_ADDRESS,

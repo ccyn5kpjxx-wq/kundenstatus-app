@@ -34,7 +34,7 @@ with patch.dict(os.environ, {
     portal=build_test_app(TEMP.name,origin='http://localhost')
 
 # Keep three-day rentals inside the offline card hold (seven days), while the
-# second pickup slot stays more than 48 hours away at every test run time.
+# second pickup slot stays more than 24 hours away at every test run time.
 first_slot=datetime.now(timezone.utc)+timedelta(hours=36)
 portal.app.config['MOS_PUBLIC_BOOKING']['slots']=[
     (first_slot+timedelta(days=day)).astimezone(ZoneInfo('Europe/Berlin')).isoformat()
@@ -287,13 +287,13 @@ class PublicTests(unittest.TestCase):
             self.assertNotIn('Kartenreservierung wird geprüft',status_page)
             self.assertIn('war auf der Kreditkarte reserviert und wurde freigegeben',status_page)
 
-    def test_new_card_policy_exactly_48_hours_refunds_all_rent_and_releases_deposit(self):
+    def test_new_card_policy_exactly_24_hours_refunds_all_rent_and_releases_deposit(self):
         with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
             hold,intent_id,q=self.paid_card_booking(start_index=1,end_index=4)
-            self.assertEqual(q['cancellation_policy'],'free_48h_then_10pct_rent')
+            self.assertEqual(q['cancellation_policy'],'free_24h_then_one_day_rent')
             start=datetime.fromisoformat(q['start_slot'])
             state=portal.app.extensions['mos_public_booking']
-            rid=state['ledger'].cancel(hold,requested_at=start-timedelta(hours=48))
+            rid=state['ledger'].cancel(hold,requested_at=start-timedelta(hours=24))
             self.assertEqual(rid,'cancel-'+hold)
             cancelled=self.post('/mietwagen-test/status/'+hold+'/stornieren',{'confirm':'yes'})
             self.assertEqual(cancelled.status_code,303)
@@ -306,25 +306,29 @@ class PublicTests(unittest.TestCase):
             self.assertEqual(intent['status'],'canceled')
             self.assertEqual(intent['amount_received'],0)
 
-    def test_new_card_policy_inside_48_hours_keeps_only_ten_percent_of_rent(self):
+    def test_new_card_policy_inside_24_hours_keeps_only_discounted_day_of_rent(self):
         with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
             hold,intent_id,q=self.paid_card_booking(start_index=1,end_index=4)
-            self.assertEqual(q['cancellation_policy'],'free_48h_then_10pct_rent')
+            self.assertEqual(q['cancellation_policy'],'free_24h_then_one_day_rent')
             start=datetime.fromisoformat(q['start_slot'])
-            self.assertEqual(cancellation_fee(q,start-timedelta(hours=1)),1470)
+            status_before_cancel=self.client.get('/mietwagen-test/status/'+hold).get_data(as_text=True)
+            self.assertIn('Bis einschließlich 24 Stunden',status_before_cancel)
+            self.assertIn('einen vereinbarten Miettag (49,00 €)',status_before_cancel)
+            self.assertEqual(q['daily_cents'],4900)  # KONA's three-day rate.
+            self.assertEqual(cancellation_fee(q,start-timedelta(hours=1)),4900)
             state=portal.app.extensions['mos_public_booking']
-            state['ledger'].cancel(hold,requested_at=start-timedelta(hours=48)+timedelta(seconds=1))
+            state['ledger'].cancel(hold,requested_at=start-timedelta(hours=24)+timedelta(seconds=1))
             self.assertEqual(self.post('/mietwagen-test/status/'+hold+'/stornieren',
                                        {'confirm':'yes'}).status_code,303)
             row,refunds=self.cancellation_rows(hold)
-            self.assertEqual(row['fee_cents'],1470)
-            self.assertEqual(refunds,[{'amount_cents':13230,'kind':'cancellation','status':'succeeded'}])
+            self.assertEqual(row['fee_cents'],4900)
+            self.assertEqual(refunds,[{'amount_cents':9800,'kind':'cancellation','status':'succeeded'}])
             self.assertEqual(state['service']._deposit_record(hold)['status'],'released')
             intent=state['gateway'].retrieve_deposit_intent(intent_id)
             self.assertEqual(intent['status'],'canceled')
             self.assertEqual(intent['amount_received'],0)
-            self.assertIn('Stornogebühr nach bisheriger Minderung: 14,70 €',
-                          self.client.get('/mietwagen-test/status/'+hold).get_data(as_text=True))
+            self.assertIn('Stornogebühr nach bisheriger Minderung: 49,00 €',
+                           self.client.get('/mietwagen-test/status/'+hold).get_data(as_text=True))
 
     def test_legacy_quote_without_policy_keeps_original_cancellation_rule(self):
         with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
@@ -332,9 +336,29 @@ class PublicTests(unittest.TestCase):
             start=datetime.fromisoformat(new_quote['start_slot'])
             old_quote=dict(new_quote)
             old_quote.pop('cancellation_policy')
-            self.assertEqual(cancellation_fee(new_quote,start-timedelta(hours=36)),1470)
+            prior_signed={**new_quote,'cancellation_policy':'free_48h_then_10pct_rent'}
+            self.assertEqual(cancellation_fee(new_quote,start-timedelta(hours=36)),0)
+            self.assertEqual(cancellation_fee(new_quote,start-timedelta(hours=23)),4900)
+            self.assertEqual(cancellation_fee(prior_signed,start-timedelta(hours=36)),1470)
+            self.assertEqual(cancellation_fee(prior_signed,start-timedelta(hours=23)),1470)
             self.assertEqual(cancellation_fee(old_quote,start-timedelta(hours=36)),0)
             self.assertEqual(cancellation_fee(old_quote,start-timedelta(hours=23)),4900)
+
+    def test_live_copy_requires_extra_credit_card_before_optional_wallet_rent(self):
+        from flask import render_template
+        with portal.app.test_request_context('/mietwagen-test/'):
+            copy=render_template('mos_public/index.html',slots=[],listings={},live=True,
+                booking_config={'deposit_method':'card_authorization_at_booking'})
+            self.assertIn('zusätzlich eine Kreditkarte',copy)
+            self.assertIn('Apple Pay oder Google Pay',copy)
+            self.assertIn('Smartphone-Wallet allein ersetzt',copy)
+            deposit=render_template('mos_public/deposit.html',h={'id':'synthetic'},
+                q={'vehicle_name':'TEST','start_slot':self.cfg['slots'][0],
+                   'end_slot':self.cfg['slots'][3],'rental_cents':14700},
+                publishable_key='pk_test_synthetic',client_secret='pi_test_synthetic_secret',
+                offline=False,live=True,booking_config={'deposit_method':'card_authorization_at_booking'})
+            self.assertIn("wallets: {applePay: 'never', googlePay: 'never', link: 'never'}",deposit)
+            self.assertIn('Autorisierungsfrist',deposit)
 
     def test_card_deposit_admin_release_requires_recorded_return(self):
         with patch.dict(self.cfg,{'deposit_method':'card_authorization_at_booking'}):
@@ -602,6 +626,8 @@ class PublicTests(unittest.TestCase):
 
     def test_end_to_end_signed_confirmation(self):
         token,r=self.quote();self.assertIn('147,00',r.get_data(as_text=True))
+        self.assertIn('Bis einschließlich 24 Stunden vor Abholung kostenlos',r.get_data(as_text=True))
+        self.assertIn('49,00 € für einen vereinbarten Miettag',r.get_data(as_text=True))
         r=self.checkout(token);self.assertEqual(r.status_code,303)
         page=self.client.get(r.location);self.assertIn('Offline-Testzahlung',page.get_data(as_text=True))
         result=self.post(r.location);self.assertEqual(result.status_code,303)
