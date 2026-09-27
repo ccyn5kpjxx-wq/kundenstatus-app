@@ -56526,6 +56526,9 @@ mos_public_booking.register(__import__(__name__))
 app.config['MOS_TERMINATION_ENABLED'] = env_flag('MOS_TERMINATION_ENABLED', False)
 mos_termination.register(__import__(__name__), enabled=app.config['MOS_TERMINATION_ENABLED'])
 init_db()
+from werkstatt_cockpit_api import register_cockpit_api
+import sys
+cockpit_data = register_cockpit_api(sys.modules[__name__])
 
 start_hourly_backups()
 start_lexware_auto_sync()
