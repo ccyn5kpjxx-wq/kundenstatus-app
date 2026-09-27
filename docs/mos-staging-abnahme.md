@@ -1,9 +1,6 @@
 # MOS: getrennte PostgreSQL- und Stripe-Abnahme
 
-Stand 24.09.2026, aktualisiert nach dem gemeinsamen lokalen
-PostgreSQL-/Stripe-Testlauf. Keine Livefreigabe oder Livezahlung. Der
-geprüfte Code ist auf Render nur mit ausgeschalteter öffentlicher Buchung
-deployed; die beschriebenen Stripe-Zahlungsabläufe wurden lokal getestet.
+Stand 27.09.2026, mit historischen Testläufen ab 24.09.2026. Keine Livefreigabe oder Livezahlung. Der aktuelle Code-Commit `2191ba8` ist auf Render mit ausgeschalteter öffentlicher Buchung ausgerollt; eine Zahlungs-, Webhook- oder Mail-End-to-End-Abnahme auf Render liegt nicht vor. Die beschriebenen Stripe-Zahlungsabläufe wurden lokal getestet.
 
 ## Tatsächlich ausgeführt
 
@@ -361,3 +358,92 @@ und Livezahlung sind deaktiviert. Dieser Deploy und die isolierten Tests sind
 kein echter Stripe-, SMTP-, Webhook- oder Cron-Durchlauf. Dauerhaftes
 Monitoring der Zwei-Werktage-Kautionsfreigabe, rechtliche Freigabe und der
 schriftliche Versicherungsnachweis für i10 und KONA bleiben ausstehend.
+
+### Nachtrag 26.09.2026: aktueller Deploy und Grenzen der weiteren Nachbesserung
+
+Der nachfolgende Commit `3cf9e63` wurde auf dem tatsächlichen Render-Webdienst
+als **Live/Deployed** verifiziert. Extern blieb `/healthz` bei **HTTP 200** und
+`/mieten/` bei **HTTP 404**. Das beweist die Erreichbarkeit und die weiterhin
+gesperrte öffentliche Buchung, keine Zahlungsfähigkeit. Der isolierte
+PostgreSQL-Rückgabe-/Übergabe-Lauf mit Fake-SMTP und **44/44 allgemeine
+PostgreSQL-Tests** bestanden; der lokale Testcluster wurde gestoppt.
+
+### Nachtrag 27.09.2026: lokal geprüfte Not-Aus- und Erstattungsfälle
+
+Der lokal geprüfte und anschließend deaktiviert auf Render ausgerollte Stand
+prüft Entwurfskennzeichen und Vermieterkontakt vor dem Freigabeschalter,
+bindet E-Mail und Telefon in neue signierte Angebote und lässt eine
+wiederholte Signatur nur bei identischen gültigen Angaben zu. Nach einem
+Not-Aus können vorhandene Verpflichtungen weiter abgeglichen werden, während
+neue Miet-Checkouts und Kautionsautorisierungen gesperrt bleiben. Offene,
+unbezahlte Checkout-Sessions werden beendet und ungenutzte
+Kartenautorisierungen nach Providerbestätigung freigegeben. Ein trotzdem
+bezahlter und signiert gemeldeter Checkout wird unter Fahrzeug-Lock als
+`review` gespeichert, **ohne** automatisch eine Miete anzulegen. Die
+Statusseite bietet für gestoppte Neubuchungen keinen Zahlungsneustart an.
+
+Für bezahlte, nicht als Miete angenommene Prüffälle ist eine kontrollierte
+Admin-Vollerstattung des Mietpreises vorbereitet. Sie verlangt erneuten
+Stripe-Abgleich, einen benannten Bearbeiter und einen Grund. Die nie
+eingezogene 500-€-Kartenautorisierung wird gesondert freigegeben. Erst
+bestätigte Provider-Erstattung **und** bestätigte Kartenfreigabe schließen
+den Fall; unklare Erstattung oder Freigabe halten ihn zur Prüfung offen.
+Ein verspätetes signiertes Zahlungsevent öffnet den genau so abgeschlossenen
+Fall nicht erneut. Ein Capture der Kautionsautorisierung ist im lokalen
+Live-Gateway gesperrt.
+
+Die getrennt ausgeführten lokalen Suiten bestanden mit 6 Erstattungs-,
+17 Produktions-, 43 Public-, 48 Checkout-, 7 Kautionsvertrags- und
+6 Render-Abgleich-Tests. Nach einer Korrektur des PostgreSQL-Adapters
+bestand auch der frische synthetische Gesamtlauf mit **51/51** Tests,
+einschließlich Prüffall-Vollerstattung; der Rückgabe-/Übergabe-Adapterlauf
+bestand ebenfalls. Der Testcluster wurde gestoppt. Commit `2191ba8` wurde
+auf dem tatsächlichen Render-Webdienst als `Deploy succeeded | Live` geprüft;
+extern antworteten `/healthz` mit HTTP 200 und `/mieten/` mit HTTP 404.
+Diese Offline- und synthetischen Tests sowie die Deploy-Kontrolle waren noch
+kein echter Stripe-Provider-Lauf für den neuen Prüffall und keine Render-
+End-to-End-, SMTP- oder Live-Zahlungsabnahme. Der separate lokale Stripe-
+Testlauf dazu ist im folgenden Nachtrag dokumentiert.
+
+### Nachtrag 27.09.2026: bezahlter Not-Aus-Prüffall bei Stripe im Testmodus
+
+In einer frischen isolierten lokalen PostgreSQL-/Flask-Testinstanz wurde mit
+synthetischen Daten ein i10-Angebot unterschrieben, die 500-€-Kaution auf
+einer Test-Kreditkarte **nur autorisiert** und der 39-€-Miet-Checkout bei
+Stripe TEST geöffnet. Nach dem Ausschalten neuer Buchungen wurde die bereits
+offene Test-Session bezahlt. Der signierte Webhook erzeugte einen gesperrten
+`review`-Hold, aber **keinen Mietvorgang**. Bei der kontrollierten
+Admin-Vollerstattung zeigte ein echter Stripe-Refund die 39 € als erfolgreich,
+während die lokale Prüfung die Antwort zunächst fälschlich zurückwies:
+Stripe-Refundobjekte enthalten kein `livemode`-Feld. Der überstrenge Check
+wurde entfernt; PaymentIntent, Betrag, Währung, Objekttyp und Refund-ID werden
+weiter geprüft. Ein erneuter Abgleich mit **derselben** Idempotenzreferenz
+führte zu weiterhin genau **einer** Stripe-Erstattung und einem abgeschlossenen
+lokalen Ledger. Der Hold wurde terminal freigegeben, die 500-€-Autorisierung
+bei Stripe separat storniert (`amount_received=0`); Mietvorgänge: **0**.
+Fokussierte Stripe-Schema- und Negativtests sowie Production-, Checkout-,
+Public- und Redirect-Regressionen bestanden. Testserver, Listener und
+isolierter PostgreSQL-Cluster wurden danach gestoppt. Das prüft diesen
+lokalen Stripe-Testfall, nicht den Render-Webhook, echte E-Mail, einen
+dauerhaften Job oder eine Livezahlung.
+
+Der daraus entstandene Code-Commit `8cdf068` korrigiert zusätzlich die
+Kundenbezeichnungen vor und nach Buchungsannahme und macht im MOS-Admin
+offene Bestelleingangsbestätigungen samt Alter sichtbar, ohne die
+Empfängeradresse zu zeigen. Nach diesen Änderungen bestanden **7/7**
+Review-Erstattungs-, **17/17** Produktions-, **44/44** Public-, **8/8**
+Bestelleingangs-, **48/48** Checkout-, **7/7** Kautionsvertrags- und **6/6**
+Render-Abgleich-Tests sowie Smoke und Flow. Ein frischer isolierter
+PostgreSQL-Gesamtlauf bestand erneut mit **51/51**, der Rückgabe-/Übergabe-
+Adapterlauf ebenfalls; der Testcluster ist gestoppt. Der Code-Commit und
+dieser lokale Abnahmebeleg allein beweisen keinen aktuellen Render-Deploy.
+
+Für einen öffentlichen Zahlungsstart fehlen weiterhin der echte deutsche
+Stripe-Endbildschirm auf Desktop und Mobilgerät, die rechtliche Prüfung des
+Bestellabschlusses, ein signierter **Live**-Webhook, eingeschränkte
+Live-Key-Rechte, nachgewiesene Postfachzustellung von Eingangsbestätigung und
+Vertrags-PDF, der überwachte Render-Abgleich und Mailworker samt Fehleralarm
+sowie ein kontrollierter Live-Zahlungs-/Fehlerfall. Der schriftliche
+Versicherungsnachweis und die getrennte Vertrags-/Datenschutzfreigabe bleiben
+ebenfalls offen. Lokale Stripe-Testzahlungen oder der neue synthetische
+PostgreSQL-Lauf mit 51 bestandenen Tests ersetzen diese Abnahmen nicht.
