@@ -569,7 +569,7 @@
 "Bitte überweisen Sie 2.485,75 EUR auf das Konto des Geschädigten:\n"+
 "  Kontoinhaber: Paul Philipp Gärtner · IBAN DE88 6745 0048 1001 6109 12\n\n"+
 "Mit freundlichen Grüßen\n"+
-"Christopher Gärtner · Karosserie & Lack Gärtner GmbH",
+"Christopher Gärtner · Gärtner GmbH Karosserie + Lack",
     konkret:
 "An:        VHV Versicherung – Schaden  ·  [Schadennummer einsetzen]\n"+
 "Betreff:   Haftpflichtschaden / Reparaturauftrag – Unfall 20.05.2026 –\n"+
@@ -595,7 +595,7 @@
 "  Zugangscode: 4827-VHV\n\n"+
 "Die Reparatur erfolgt in unserem Betrieb; Zahlung an die Werkstatt.\n\n"+
 "Mit freundlichen Grüßen\n"+
-"Christopher Gärtner · Karosserie & Lack Gärtner GmbH"
+"Christopher Gärtner · Gärtner GmbH Karosserie + Lack"
   };
   var MAILS_KASKO=
 "An:        VHV Versicherung – Kaskoschaden  ·  [Versicherungs-/Schadennummer]\n"+
@@ -614,7 +614,7 @@
 "  Zugang:      https://portal.lack-gaertner.de/s/0952416\n"+
 "  Zugangscode: 4827-VHV\n\n"+
 "Mit freundlichen Grüßen\n"+
-"Christopher Gärtner · Karosserie & Lack Gärtner GmbH";
+"Christopher Gärtner · Gärtner GmbH Karosserie + Lack";
   function setMode(m){state.mode=m;document.getElementById('tg-f').classList.toggle('on',m==='fiktiv');document.getElementById('tg-k').classList.toggle('on',m==='konkret');render();}
   function refreshMail(){var tg=document.getElementById('email-toggle');var mb=document.getElementById('mailbox');if(!mb)return;var kasko=(state.schadenart==='vk'||state.schadenart==='tk');if(kasko){if(tg)tg.style.display='none';mb.textContent=MAILS_KASKO;}else{if(tg)tg.style.display='inline-flex';mb.textContent=MAILS[state.mode];}}
   function setSchadenart(t){state.schadenart=t;
@@ -646,7 +646,7 @@
 "Kennzeichen:   MOS PG 707\n"+
 "FIN:           WBA1C71070P840316\n"+
 "Erstzulassung: 15.05.2014\n"+
-"Rückfragen:    Karosserie & Lack Gärtner GmbH · Tel. 0152 27706694\n\n"+
+"Rückfragen:    Gärtner GmbH Karosserie + Lack · Tel. 0152 27706694\n\n"+
 "Ersatzteile:\n"+
 "  Verkleidung Stoßfänger hinten, grundiert   ETN 51127293557   1x\n"+
 "  Träger Stoßfänger hinten                   ETN 51127240912   1x\n"+
@@ -664,7 +664,7 @@
 "  Zugang:      https://portal.lack-gaertner.de/t/0952416\n"+
 "  Zugangscode: 4827-STG\n\n"+
 "Mit freundlichen Grüßen\n"+
-"Karosserie & Lack Gärtner GmbH";
+"Gärtner GmbH Karosserie + Lack";
   var SUP_BESTELLUNG=
 "An:        Stahlgruber, NL Heilbronn – Teilevertrieb\n"+
 "Betreff:   Verbindliche Bestellung – BMW 116d (MOS PG 707) – Schaden 0952416/2026\n\n"+
@@ -673,7 +673,7 @@
 "verbindlich zu den im Portal hinterlegten Lieferterminen. Bitte bestätigen\n"+
 "Sie den Versand im Portal.\n\n"+
 "Mit freundlichen Grüßen\n"+
-"Karosserie & Lack Gärtner GmbH";
+"Gärtner GmbH Karosserie + Lack";
 
   function renderBestellung(){
     var c=document.getElementById('best-flow'); if(!c)return;

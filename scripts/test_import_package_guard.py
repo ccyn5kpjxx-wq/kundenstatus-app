@@ -14,6 +14,7 @@ import pathlib
 import sys
 import tempfile
 import zipfile
+from unittest.mock import patch
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -71,6 +72,24 @@ def expect_rejected(label, entries, expected_text):
     return passed
 
 
+def import_archive(admin, payload):
+    with admin.session_transaction() as session:
+        session[portal.CSRF_FIELD_NAME] = "import-package-guard-csrf"
+    response = admin.post(
+        "/admin/daten-import",
+        data={
+            portal.CSRF_FIELD_NAME: "import-package-guard-csrf",
+            "datenpaket": (io.BytesIO(payload), "backup-v4.zip"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    with admin.session_transaction() as session:
+        flashes = [message for _, message in session.get("_flashes", [])]
+        session.pop("_flashes", None)
+    return response, flashes
+
+
 def main():
     portal.app.config["TESTING"] = True
     portal.init_db()
@@ -123,6 +142,73 @@ def main():
             "unzulässigen Upload-Pfad",
         )
     )
+
+    archive_bytes = backup_path.read_bytes()
+    admin = portal.app.test_client()
+    with admin.session_transaction() as session:
+        session["admin"] = True
+    db = portal.get_db()
+    try:
+        db.execute(
+            """INSERT INTO miet_checkout_holds
+            (id,request_key,mietfahrzeug_id,start_datum,end_datum,payload,
+             fingerprint,status,expires_at) VALUES (?,?,?,?,?,?,?,?,?)""",
+            ("synthetic-hold", "synthetic-request", 1, "2026-10-01", "2026-10-02",
+             "{}", "synthetic", "confirmed", 9999999999),
+        )
+        db.commit()
+    finally:
+        db.close()
+    with patch.object(portal, "create_backup_package") as safety_backup:
+        rejected, messages = import_archive(admin, archive_bytes)
+    db = portal.get_db()
+    try:
+        hold_still_present = bool(db.execute(
+            "SELECT 1 FROM miet_checkout_holds WHERE id=?", ("synthetic-hold",)
+        ).fetchone())
+        db.execute("DELETE FROM miet_checkout_holds WHERE id=?", ("synthetic-hold",))
+        db.commit()
+    finally:
+        db.close()
+    checks.append(
+        rejected.status_code == 302 and hold_still_present
+        and not safety_backup.called
+        and any("Mietbuchungsdaten" in message for message in messages)
+    )
+    print(f"[{'OK' if checks[-1] else 'FEHLER'}] Altes v4-Paket löscht keine MOS-Buchung")
+
+    with patch.object(portal, "create_backup_package", side_effect=OSError("synthetic-limit")) as safety_backup:
+        with patch.object(portal, "copy_sqlite_database_snapshot") as importer:
+            rejected, messages = import_archive(admin, archive_bytes)
+    checks.append(
+        rejected.status_code == 302 and safety_backup.call_count == 1
+        and not importer.called
+        and any("Datenimport fehlgeschlagen" in message for message in messages)
+    )
+    print(f"[{'OK' if checks[-1] else 'FEHLER'}] Fehlgeschlagenes Sicherheitsbackup stoppt Import")
+
+    old_mos_cfg = portal.app.config.get("MOS_PUBLIC_BOOKING")
+    portal.app.config["MOS_PUBLIC_BOOKING"] = {"mode": "live", "enabled": False}
+    try:
+        with patch.object(portal, "create_backup_package") as safety_backup:
+            rejected, messages = import_archive(admin, archive_bytes)
+        checks.append(
+            rejected.status_code == 302 and not safety_backup.called
+            and any("Live-Mietbetrieb" in message for message in messages)
+        )
+        print(f"[{'OK' if checks[-1] else 'FEHLER'}] Pausierter Livebetrieb sperrt alten Datenimport")
+    finally:
+        if old_mos_cfg is None:
+            portal.app.config.pop("MOS_PUBLIC_BOOKING", None)
+        else:
+            portal.app.config["MOS_PUBLIC_BOOKING"] = old_mos_cfg
+
+    accepted, messages = import_archive(admin, archive_bytes)
+    checks.append(
+        accepted.status_code == 302
+        and any("Daten wurden importiert" in message for message in messages)
+    )
+    print(f"[{'OK' if checks[-1] else 'FEHLER'}] Altes v4-Paket ohne MOS-Daten bleibt importierbar")
 
     failed = len([check for check in checks if not check])
     print(f"== ERGEBNIS: {len(checks) - failed}/{len(checks)} Checks bestanden ==")

@@ -15,9 +15,12 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from mos_company_identity import (LEGAL_NAME, BUSINESS_ADDRESS, REGISTERED_SEAT,
+                                  REGISTER_COURT, REGISTER_NUMBER, MANAGING_DIRECTOR)
 
-LESSOR_NAME = 'Gärtner GmbH Karosserie + Lack'
-LESSOR_ADDRESS = 'Binauer Höhe 4, 74821 Mosbach, Deutschland'
+
+LESSOR_NAME = LEGAL_NAME
+LESSOR_ADDRESS = BUSINESS_ADDRESS
 OFFER_NAME = 'Autovermietung MOS'
 
 
@@ -162,6 +165,9 @@ def render_pdf(contract, signed_at, signature, document_hash, signature_record_h
         para('Buchungsreferenz: ' + reference, 'MOSSmall'),
         para('Vertragsparteien', 'MOSSection'),
         para('Vermieter: ' + contract['lessor_name'] + ', ' + contract['lessor_address']),
+        para('Sitz: ' + REGISTERED_SEAT + ' · Registergericht: ' + REGISTER_COURT +
+             ' · Handelsregister: ' + REGISTER_NUMBER +
+             ' · Geschäftsführer: ' + MANAGING_DIRECTOR, 'MOSSmall'),
         para('Mieter: ' + contract['customer_name'] + ' · ' + contract['customer_email']),
     ]
     if 'lessor_email' in contract and 'lessor_phone' in contract:

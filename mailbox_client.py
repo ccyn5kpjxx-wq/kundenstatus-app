@@ -237,7 +237,7 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
         address=cfg.get('from_address','')
         if address.lower()!=imap_config().get('user','').lower() or not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+',address):
             raise ValueError('Absender und geöffnetes Postfach stimmen nicht überein. Bitte Konfiguration prüfen.')
-        msg['From']=formataddr((cfg.get('display_name','Christopher Gärtner · Karosserie & Lack Gärtner GmbH'),address))
+        msg['From']=formataddr((cfg.get('display_name','Christopher Gärtner · Gärtner GmbH Karosserie + Lack'),address))
         msg['Reply-To']=address
         msg['To']=', '.join(formataddr((name,addr)) for name,addr in recipients)
         msg['Subject']=subject;msg['Date']=formatdate(localtime=True);msg['Message-ID']=make_msgid(domain=address.split('@')[-1])
@@ -248,7 +248,7 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
         if reply_id and re.fullmatch(r'<[^<>\s]+>',reply_id):
             references=list(dict.fromkeys(re.findall(r'<[^<>\s]+>',reference_text)+[reply_id]))[-30:]
             msg['In-Reply-To']=reply_id;msg['References']=' '.join(references)
-        signature_text='Christopher Gärtner\nGründer & Geschäftsführer\nKarosserie & Lack Gärtner GmbH\nBinauer Höhe 4 · 74821 Mosbach-Lohrbach\nTelefon: +49 152 27706694\nE-Mail: info@auto-lackierzentrum.de\nInternet: www.auto-lackierzentrum.de'
+        signature_text='Christopher Gärtner\nGründer & Geschäftsführer\nGärtner GmbH Karosserie + Lack\nBinauer Höhe 4 · 74821 Mosbach-Lohrbach\nTelefon: +49 152 27706694\nE-Mail: info@auto-lackierzentrum.de\nInternet: www.auto-lackierzentrum.de'
         quote_text='\n\n--- Ursprüngliche Nachricht ---\n'+quoted if quoted else ''
         msg.set_content(body+'\n\n'+signature_text+quote_text)
         signature=render_template('_mail_signature.html')

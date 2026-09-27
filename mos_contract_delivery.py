@@ -14,6 +14,8 @@ import json
 import smtplib
 import ssl
 
+from mos_company_identity import LEGAL_NAME, BUSINESS_ADDRESS, business_letter_details
+
 
 def init_schema(db):
     db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_contract_delivery (
@@ -59,7 +61,9 @@ def _message(hold_id, recipient, pdf, cancelled):
     body = ('Beigefügt erhalten Sie die Kopie des bei Ihrer Buchung geschlossenen '
             'Mietvertrags mit den damals vereinbarten Mietbedingungen.\n\n'
             'Buchungsreferenz: ' + hold_id + '\n\n'
-            'Vermieter: Gärtner GmbH Karosserie + Lack\n')
+            'Vermieter: ' + LEGAL_NAME + '\n'
+            + BUSINESS_ADDRESS + '\n'
+            + business_letter_details() + '\n')
     if cancelled:
         body += ('\nDie Buchung wurde inzwischen storniert. Diese Vertragskopie ist keine '
                  'erneute Buchungszusage; bitte beachten Sie den Storno- und Erstattungsstand.\n')

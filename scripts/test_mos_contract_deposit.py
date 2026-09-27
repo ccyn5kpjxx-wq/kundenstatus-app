@@ -65,9 +65,13 @@ class DepositContractTests(unittest.TestCase):
         self.assertIn('Kaution auf Kreditkarte reserviert', text)
         self.assertIn('keine Abbuchung', text)
         self.assertIn('Zahlbetrag (nur Miete)', text)
+        self.assertIn('Sitz: Mosbach', text)
+        self.assertIn('Amtsgericht Mannheim', text)
+        self.assertIn('HRB 754425', text)
+        self.assertIn('Christopher Gärtner', text)
         self.assertNotIn('Kaution im Zahlbetrag', text)
 
-    def test_historic_charged_quote_keeps_original_snapshot_shape_and_pdf(self):
+    def test_historic_charged_quote_keeps_original_snapshot_shape_and_deposit_display(self):
         contract = self.contract(False)
         self.assertNotIn('deposit_authorized_cents', contract)
         self.assertNotIn('deposit_method', contract)

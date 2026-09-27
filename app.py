@@ -8208,6 +8208,32 @@ BACKUP_TABLES = (
     "mitarbeiter_urlaub",
     "google_ads_tageswerte",
 )
+# Der aktuelle ZIP-Import stellt diese MOS-Tabellen noch nicht wieder her.
+# Solange das so ist, darf ein altes Paket keinen vorhandenen MOS-Bestand
+# (auch keinen bereits abgeschlossenen Zahlungs-/Vertragsbeleg) ersetzen.
+MOS_IMPORT_PROTECTED_TABLES = (
+    "miet_checkout_holds",
+    "miet_checkout_events",
+    "miet_checkout_deposit_auths",
+    "miet_checkout_creation_attempts",
+    "miet_checkout_contracts",
+    "miet_checkout_contract_delivery",
+    "miet_checkout_order_receipts",
+    "miet_checkout_handovers",
+    "miet_checkout_vehicle_blocks",
+    "miet_checkout_vehicle_readiness",
+    "miet_checkout_returns",
+    "miet_checkout_return_clearances",
+    "miet_checkout_cancellations",
+    "miet_checkout_refunds",
+    "miet_checkout_review_refunds",
+    "miet_checkout_limits",
+    "miet_checkout_retention_blocks",
+    "miet_checkout_retention_seen",
+    "miet_checkout_terminations",
+    "miet_checkout_termination_limits",
+    "miet_checkout_slots",
+)
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
 BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand",)
@@ -26470,7 +26496,7 @@ def get_werkstatt_smtp_config():
     use_ssl = env_flag("MAIL_SMTP_SSL", True)
     return {
         "from_address": address,
-        "display_name": clean_text(os.environ.get("MAIL_SMTP_DISPLAY_NAME") or "Christopher Gärtner · Karosserie & Lack Gärtner GmbH"),
+        "display_name": clean_text(os.environ.get("MAIL_SMTP_DISPLAY_NAME") or "Christopher Gärtner · Gärtner GmbH Karosserie + Lack"),
         "smtp_configured": bool(host and user and password and address),
         "smtp_host": host, "smtp_port": env_int("MAIL_SMTP_PORT", 465 if use_ssl else 587),
         "smtp_user": user, "_smtp_password": password,
@@ -31787,7 +31813,7 @@ def build_versicherung_anschreiben(auftrag, versicherung=None, dateien=None):
             "",
             "Mit freundlichen Grüßen",
             "Christopher Gärtner",
-            "Karosserie & Lack Gärtner GmbH",
+            "Gärtner GmbH Karosserie + Lack",
         ]
     )
     return "\n".join(lines)
@@ -47259,6 +47285,30 @@ def import_sqlite_rows_into_current_database(imported_db):
         target.close()
 
 
+def ensure_no_unrestorable_mos_data_for_import():
+    """Reject old archive imports before they can replace a MOS booking history."""
+    # A read-only row check cannot fence bookings started concurrently while
+    # the safety archive is being built. Never import through this legacy path
+    # in a live MOS runtime, even when acceptance of new bookings is paused.
+    if (app.config.get("MOS_PUBLIC_BOOKING") or {}).get("mode") == "live":
+        raise ValueError(
+            "Datenimport gesperrt: Im Live-Mietbetrieb ist nur ein vollständig "
+            "abgenommener Wiederherstellungsweg zulässig."
+        )
+    db = get_db()
+    try:
+        for table_name in MOS_IMPORT_PROTECTED_TABLES:
+            if not get_table_columns(db, table_name):
+                continue
+            if db.execute(f"SELECT 1 FROM {table_name} LIMIT 1").fetchone():
+                raise ValueError(
+                    "Datenimport gesperrt: Vorhandene Mietbuchungsdaten können "
+                    "mit diesem Datenpaket nicht vollständig wiederhergestellt werden."
+                )
+    finally:
+        db.close()
+
+
 @app.route("/admin/daten-import", methods=["POST"])
 @admin_required
 def admin_daten_import():
@@ -47286,7 +47336,11 @@ def admin_daten_import():
                     tmp_path,
                 )
 
-                create_safety_backup("before-data-import")
+                ensure_no_unrestorable_mos_data_for_import()
+                # Ein Import ersetzt Daten und Uploads. Ohne überprüftes
+                # Sicherheitsbackup darf er auch bei deaktivierten automatischen
+                # Backups oder vollem Archivlimit nicht fortfahren.
+                create_backup_package("before-data-import")
                 if imported_db is None:
                     import_backup_json_rows_into_current_database(
                         backup_export, archive, names

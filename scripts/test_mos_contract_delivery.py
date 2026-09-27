@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mos_contract_delivery import deliver_one, enqueue, init_schema, pending_ids, unfinished_live_ids, unresolved_count
+from mos_contract_delivery import _message, deliver_one, enqueue, init_schema, pending_ids, unfinished_live_ids, unresolved_count
 
 
 class Portal:
@@ -174,6 +174,13 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(FakeSMTP.calls, 1)
         self.assertEqual(self.row()['status'], 'sent')
         self.assertEqual(unresolved_count(self.portal), 0)
+
+    def test_personal_contract_mail_has_registered_company_details(self):
+        text = _message(self.hold, 'customer@example.test', self.pdf, False).get_body().get_content()
+        self.assertIn('Sitz: Mosbach', text)
+        self.assertIn('Registergericht: Amtsgericht Mannheim', text)
+        self.assertIn('Handelsregister: HRB 754425', text)
+        self.assertIn('Geschäftsführer: Christopher Gärtner', text)
 
     def test_parallel_workers_do_not_submit_twice(self):
         self.queue()

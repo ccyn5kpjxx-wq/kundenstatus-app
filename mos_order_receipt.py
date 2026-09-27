@@ -13,6 +13,7 @@ from hashlib import sha256
 import json
 
 from mos_contract_delivery import _single_address, _smtp_send
+from mos_company_identity import LEGAL_NAME, BUSINESS_ADDRESS, business_letter_details
 
 
 def init_schema(db):
@@ -112,7 +113,9 @@ def _message(row):
         'Diese Eingangsbestätigung ist keine zusätzliche Annahme oder Zusage '
         'einer Fahrzeugübergabe. Falls die Bestellung geprüft werden muss, '
         'informiert Sie die Werkstatt über das Ergebnis.\n\n'
-        'Vermieter: Gärtner GmbH Karosserie + Lack\n')
+        'Vermieter: ' + LEGAL_NAME + '\n'
+        + BUSINESS_ADDRESS + '\n'
+        + business_letter_details() + '\n')
     return message
 
 
