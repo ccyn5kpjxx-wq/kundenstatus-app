@@ -8191,6 +8191,8 @@ BACKUP_TABLES = (
     "einkaufsliste",
     "einkauf_belege",
     "einkauf_artikel",
+    "assistent_rechnungsimporte",
+    "assistent_rechnungsartikel",
     "fahrzeugeinkauf_scans",
     "fahrzeugeinkauf_fahrzeuge",
     "fahrzeugeinkauf_scan_treffer",

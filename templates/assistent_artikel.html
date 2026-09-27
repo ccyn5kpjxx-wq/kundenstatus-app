@@ -1,0 +1,12 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Artikel aus Lieferantenrechnungen</title><link rel="stylesheet" href="{{ url_for('static',filename='assistent.css') }}"></head><body><main>
+<nav><a href="/admin/einkauf">Zum Einkauf</a> · <a href="/admin/assistent-api">API-Zugang</a></nav>
+<h1>Artikel aus Lieferantenrechnungen</h1>
+<p>Vorhandene Einkaufsbelege und importierte Lieferantenrechnungen aus Lexware werden einzeln gelesen. Daraus entstehen gespeicherte Artikelvorschläge mit Lieferant, Variante und Preisquelle. Banking und betriebliche Finanzübersichten werden nicht abgefragt.</p>
+<p>Die Vorschläge sind noch keine geprüften Artikel oder Bestellungen. Größen und Farben bleiben getrennt. Ein Rechnungsbetrag wird nicht als aktueller Einzelpreis zugesagt.</p>
+<form id="import-form">{{ csrf_field()|safe }}<button id="start">Alle vorhandenen Lieferantenrechnungen einlesen</button><button id="stop" type="button" disabled>Nach diesem Beleg pausieren</button></form>
+<p id="progress" role="status">{{ report.quellen|length }} Belege erfasst · {{ report.offen }} offen · {{ report.vorschlaege }} Artikelvorschläge gespeichert</p>
+<p>Bei geschlossenem Browser pausiert die Verarbeitung nach dem aktuellen Beleg. Erneutes Starten setzt fort und erzeugt keine doppelten Vorschläge.</p>
+<h2>Belege</h2><ul id="sources">{% for row in report.quellen %}<li>{{ row.supplier or 'Lieferant ungeklärt' }} · {{ row.reference }} · {{ row.state }}{% for message in row.result.get('hinweise',[]) %} · {{ message }}{% endfor %}</li>{% endfor %}</ul>
+<h2>Gespeicherte Artikelvorschläge</h2><p>Die neuesten 100 Vorschläge. Der Avatar kann nach Produktname, Artikelnummer oder Lieferant suchen und Varianten nachfragen.</p>
+{% for article in articles %}<section><h3>{{ article.produkt_name }}</h3><p>{{ article.lieferant or 'Lieferant ungeklärt' }} · {{ article.artikelnummer }} · {{ article.ve }}</p><p>{{ article.produkt_beschreibung }}</p><p>Preisangabe aus Beleg: {{ article.historischer_preishinweis or 'nicht erkannt' }} · noch ungeprüft</p><p>Quelle: {{ article.quelle.beleg }}{% if article.quelle.seite %}, Seite {{ article.quelle.seite }}{% endif %}</p></section>{% endfor %}
+</main><script src="{{ url_for('static',filename='assistent-artikel.js') }}" defer></script></body></html>

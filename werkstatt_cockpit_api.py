@@ -90,7 +90,8 @@ class CockpitData:
         if not 2<=len(query)<=150:raise ValueError('Artikelname oder Artikelnummer mit mindestens zwei Zeichen erforderlich.')
         values=['%'+query.lower()+'%']*3
         rows=self.rows('SELECT id,lieferant,artikelnummer,produkt_name,produkt_beschreibung,ve,gebinde,letzter_preis,letzter_preis_datum,preisquelle,quelle_beleg_id FROM einkauf_artikel WHERE LOWER(artikelnummer) LIKE ? OR LOWER(produkt_name) LIKE ? OR LOWER(produkt_beschreibung) LIKE ? ORDER BY id DESC LIMIT 30',values)
-        return {'artikel':rows,'hinweis':'Historische Rechnungsartikel. Keine aktuelle Preis- oder Verfügbarkeitszusage. Ähnliche Produkte sind keine eindeutige Identifikation.'}
+        proposals = self.catalog.search(query) if getattr(self, 'catalog', None) else []
+        return {'artikel':rows, 'artikelvorschlaege':proposals, 'hinweis':'Historische Rechnungsartikel. Keine aktuelle Preis- oder Verfügbarkeitszusage. Ähnliche Produkte sind keine eindeutige Identifikation.'}
 
     def invoice_sources(self):
         # Product-import inventory only: no amounts, payments, balances or bank data.
@@ -170,4 +171,6 @@ def register_cockpit_api(p):
                 p.set_app_setting('ASSISTANT_API_GRANT',json.dumps({'hash':hashlib.sha256(token.encode()).hexdigest(),'scopes':scopes}))
         response=p.app.make_response(render_template('assistent_api_zugang.html',token=token,configured=bool(p.get_app_setting('ASSISTANT_API_GRANT',''))))
         response.headers['Cache-Control']='no-store';return response
+    from werkstatt_artikel_import import register_invoice_catalog
+    service.catalog = register_invoice_catalog(p, service)
     return service

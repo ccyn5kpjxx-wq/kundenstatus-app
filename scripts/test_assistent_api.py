@@ -98,6 +98,16 @@ class ApiTests(unittest.TestCase):
         self.grant(['auftraege:lesen'])
         self.assertEqual(self.get('belege').status_code,403)
 
+    def test_invoice_catalog_requires_admin_csrf_and_keeps_read_grants_readonly(self):
+        self.assertNotEqual(self.client.get('/admin/assistent-artikel').status_code,200)
+        self.assertNotEqual(self.client.post('/admin/assistent-artikel/start',headers=self.headers).status_code,200)
+        with self.client.session_transaction() as session:session.update(admin=True,csrf_token='test-csrf')
+        self.assertEqual(self.client.get('/admin/assistent-artikel').status_code,200)
+        self.assertEqual(self.client.post('/admin/assistent-artikel/start').status_code,400)
+        result=self.client.post('/admin/assistent-artikel/start',headers={'X-CSRF-Token':'test-csrf'})
+        self.assertEqual(result.status_code,200)
+        self.assertIn('quellen',result.json)
+
     def test_key_management_requires_admin_and_csrf(self):
         self.assertNotEqual(self.client.get('/admin/assistent-api').status_code,200)
         with self.client.session_transaction() as session:session.update(admin=True,csrf_token='test-csrf')
