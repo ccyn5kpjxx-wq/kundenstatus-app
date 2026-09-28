@@ -334,15 +334,31 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(self.post('/profil',{'name':'Chris','stil':'ruhig','stimme':'coral','avatar':'unknown'}).status_code,400)
 
     def test_character_defaults_and_invalid_stored_values_have_safe_fallback(self):
-        self.assertEqual(self.rendered_profile()['character'],'chris')
+        self.assertEqual(self.rendered_profile()['character'],'drache')
         with database() as db:
             db.execute("INSERT INTO assistent_profile(actor,name,stil,stimme) VALUES('mitarbeiter:1','Existing name','knapp','ash')")
-        self.assertEqual(self.rendered_profile()['character'],'chris')
+        self.assertEqual(self.rendered_profile()['character'],'drache')
         for stored in ('', 'removed-figure', '../../arbitrary.svg'):
             with database() as db:db.execute("UPDATE assistent_profile SET character=? WHERE actor='mitarbeiter:1'",(stored,))
             visible=self.rendered_profile()
-            self.assertEqual((visible['character'],visible['name'],visible['stimme']),('chris','Existing name','ash'))
+            self.assertEqual((visible['character'],visible['name'],visible['stimme']),('drache','Existing name','ash'))
             with database() as db:self.assertEqual(db.execute("SELECT character FROM assistent_profile WHERE actor='mitarbeiter:1'").fetchone()[0],stored)
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_fantasy_characters_and_legacy_choices_persist_in_both_profile_routes(self):
+        preferences={'name':'Eigener Rufname','stil':'ruhig','stimme':'ash','avatar':'blau'}
+        self.assertEqual(self.post('/profil',preferences).status_code,200)
+        before=self.rendered_profile()
+        self.assertEqual(before['character'],'drache')
+        for character in ('drache','zauberfuchs','einhorn','chris','mila','robot'):
+            with self.subTest(character=character):
+                self.assertEqual(self.post('/profil',dict(preferences,character=character)).status_code,200)
+                self.assertEqual(self.post('/avatar',{'character':character}).json,{'ok':True,'character':character})
+                self.assertEqual(self.rendered_profile(),dict(before,character=character))
+                # Old clients may save names/voices without knowing new figures.
+                self.assertEqual(self.post('/profil',preferences).status_code,200)
+                self.assertEqual(self.rendered_profile(),dict(before,character=character))
+                with database() as db:self.assertEqual(db.execute("SELECT character FROM assistent_profile WHERE actor='mitarbeiter:1'").fetchone()[0],character)
 
     def test_profile_character_and_old_color_are_independent_and_invalid_is_atomic(self):
         first={'name':'Werkstatt','stil':'knapp','stimme':'ash','avatar':'kupfer','character':'robot'}

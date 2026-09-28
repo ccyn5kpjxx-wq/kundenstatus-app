@@ -26,8 +26,8 @@ from PIL import Image, UnidentifiedImageError
 
 VOICES = ("alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
 STYLES = {"ruhig": "ruhig und sachlich", "kollegial": "freundlich und kollegial", "knapp": "sehr knapp und direkt"}
-CHARACTERS = ("chris", "mila", "robot")
-DEFAULT_CHARACTER = "chris"
+CHARACTERS = ("chris", "mila", "robot", "drache", "zauberfuchs", "einhorn")
+DEFAULT_CHARACTER = "drache"
 
 
 def cents(value):
@@ -77,7 +77,7 @@ def register_assistant(p):
                   version INTEGER NOT NULL DEFAULT 1);
                 CREATE TABLE IF NOT EXISTS assistent_profile (
                   actor TEXT PRIMARY KEY, name TEXT NOT NULL, stil TEXT NOT NULL, stimme TEXT NOT NULL,
-                  character TEXT NOT NULL DEFAULT 'chris');
+                  character TEXT NOT NULL DEFAULT 'drache');
                 CREATE TABLE IF NOT EXISTS assistent_aktionen (
                   id TEXT PRIMARY KEY, actor TEXT NOT NULL, auftrag_id INTEGER NOT NULL,
                   art TEXT NOT NULL, payload TEXT NOT NULL, fingerprint TEXT NOT NULL UNIQUE,
@@ -90,7 +90,7 @@ def register_assistant(p):
                   role TEXT NOT NULL, text TEXT NOT NULL, zeit TEXT NOT NULL);
             """)
             # The same migration runs after restoring an older portal backup.
-            p.ensure_column(db, "assistent_profile", "character", "TEXT NOT NULL DEFAULT 'chris'")
+            p.ensure_column(db, "assistent_profile", "character", "TEXT NOT NULL DEFAULT 'drache'")
 
     def identity():
         if session.get("admin"):
@@ -298,7 +298,7 @@ def register_assistant(p):
         has_character = "character" in data
         character = data.get("character", DEFAULT_CHARACTER)
         if not isinstance(character, str) or character not in CHARACTERS:
-            raise ValueError("Figur ungültig. Chris, Mila oder Roboter auswählen.")
+            raise ValueError("Figur ungültig. Bitte angebotenen Avatar auswählen.")
         avatar = data.get("avatar", "mint")
         if not isinstance(avatar, str) or avatar not in {"mint", "blau", "kupfer"}:
             raise ValueError("Avatar-Auswahl ungültig.")
@@ -316,7 +316,7 @@ def register_assistant(p):
             raise ValueError("JSON-Objekt erforderlich.")
         character = data.get("character")
         if set(data) != {"character"} or not isinstance(character, str) or character not in CHARACTERS:
-            raise ValueError("Nur eine gültige Figur auswählen: Chris, Mila oder Roboter.")
+            raise ValueError("Figur ungültig. Bitte angebotenen Avatar auswählen.")
         with db_scope() as db:
             # Create default personal preferences only when absent. A picker
             # update changes no existing name, voice, style or avatar color.

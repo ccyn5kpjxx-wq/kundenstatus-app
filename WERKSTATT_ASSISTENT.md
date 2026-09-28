@@ -31,13 +31,15 @@ Dienste; ihre Existenz aktiviert keinen Versand im Avatar.
 
 ## Figuren auswählen
 
-Direkt oben auf `/werkstatt/assistent` öffnet **Avatar wählen** die drei Figuren
-Chris, Mila und Roboter. Die Figur wird pro angemeldeter Person gespeichert;
+Direkt oben auf `/werkstatt/assistent` öffnet **Avatar wählen** die Fabeltiere
+Drache, Zauberfuchs und Einhorn. Chris, Mila und Roboter bleiben unter **Weitere
+Figuren** erreichbar. Für neue Profile ist der Drache vorausgewählt; vorhandene
+Auswahlen bleiben erhalten. Die Figur wird pro angemeldeter Person gespeichert;
 Rufname, Stimme und die bisherigen Roboterfarben bleiben unabhängig davon.
 Die Auswahl liegt in `assistent_profile.character`, wird gesichert und auch
 beim Wiederherstellen älterer Sicherungen automatisch ergänzt.
 
-Chris und Mila sind eigene KI-generierte Illustrationen mit Ruhe-, Sprech- und
+Die Fabeltiere, Chris und Mila sind eigene KI-generierte Illustrationen mit Ruhe-, Sprech- und
 Blinzelframes. Ihre Bewegungen folgen dem Gesprächszustand und stoppen bei
 Unterbrechung, Seitenwechsel und reduzierter Bewegung. Dies ist keine
 phonemgenaue Lippensynchronisierung und keine Google-Live-Avatar-Anbindung.

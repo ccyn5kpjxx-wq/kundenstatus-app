@@ -1,7 +1,7 @@
 /* Decorative, state-driven portrait animation; no audio capture or phoneme analysis. */
 (function (host) {
   'use strict';
-  const CHARACTERS = Object.freeze({chris: 'Chris', mila: 'Mila', robot: 'Roboter'});
+  const CHARACTERS = Object.freeze({drache: 'Drache', zauberfuchs: 'Zauberfuchs', einhorn: 'Einhorn', chris: 'Chris', mila: 'Mila', robot: 'Roboter'});
   const knownCharacter = value => Object.prototype.hasOwnProperty.call(CHARACTERS, value);
 
   class AvatarAnimationController {
@@ -115,7 +115,7 @@
     let disposed = false;
     let requestAbort = null;
     let requestTimeout = null;
-    const selected = () => knownCharacter(assistant.dataset.character) ? assistant.dataset.character : 'chris';
+    const selected = () => knownCharacter(assistant.dataset.character) ? assistant.dataset.character : 'drache';
     const syncSelection = () => {
       const value = selected();
       options.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.characterOption === value)));

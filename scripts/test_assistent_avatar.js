@@ -62,7 +62,7 @@ function animationFixture(state = 'idle') {
     state(value) { avatar.dataset.state = value; controller.observer.trigger(); }};
 }
 
-function pickerFixture() {
+function pickerFixture(character = 'chris') {
   const time = clock();
   const document = new Events(); document.hidden = false;
   const window = new Events();
@@ -73,10 +73,10 @@ function pickerFixture() {
     'assistant', 'avatar', 'avatar-picker', 'avatar-choose', 'avatar-picker-close',
     'avatar-picker-status', 'profile-character', 'avatar-choice-label', 'avatar-name'
   ].map(id => [id, new Element()]));
-  elements.assistant.dataset.character = 'chris';
+  elements.assistant.dataset.character = character;
   elements.avatar.dataset.state = 'thinking';
   elements.avatar.children = [new Element()];
-  const options = ['chris', 'mila', 'robot', 'unexpected'].map(character => new Element({characterOption: character}));
+  const options = ['chris', 'mila', 'robot', 'drache', 'zauberfuchs', 'einhorn', 'unexpected'].map(character => new Element({characterOption: character}));
   elements['avatar-picker'].children = options;
   elements['avatar-name'].textContent = 'Existing personal name';
   const token = {content: 'synthetic-csrf'};
@@ -161,7 +161,7 @@ function pickerFixture() {
   assert.ok(picker.elements['avatar-choose'].focusCount > 0);
   assert.equal(picker.elements['avatar-name'].textContent, 'Existing personal name');
   assert.equal(picker.time.timers.size, 0, 'save timeout cleaned up');
-  assert.equal(picker.options[3].disabled, true, 'unknown figures cannot be selected');
+  assert.equal(picker.options[6].disabled, true, 'unknown figures cannot be selected');
   await picker.window.emit('pagehide');
   assert.equal(picker.app.animation.suspended, true);
   await picker.window.emit('pageshow');
@@ -203,5 +203,34 @@ function pickerFixture() {
   assert.equal(missingToken.requests.length, 0);
   assert.match(missingToken.elements['avatar-picker-status'].textContent, /Anmeldung/);
   missingToken.app.destroy();
+  for (const [character, label] of [['drache', 'Drache'], ['zauberfuchs', 'Zauberfuchs'], ['einhorn', 'Einhorn']]) {
+    const fantasy = pickerFixture();
+    const option = fantasy.options.find(button => button.dataset.characterOption === character);
+    assert.equal(option.disabled, false);
+    await fantasy.elements['avatar-choose'].emit('click');
+    const pending = option.emit('click');
+    assert.deepEqual(JSON.parse(fantasy.requests[0].options.body), {character});
+    fantasy.resolve({ok: true, json: async () => ({ok: true, character})});
+    await pending;
+    assert.equal(fantasy.elements.assistant.dataset.character, character);
+    assert.equal(fantasy.elements['profile-character'].value, character);
+    assert.equal(fantasy.elements['avatar-choice-label'].textContent, label);
+    assert.equal(option.attributes['aria-pressed'], 'true');
+    fantasy.app.destroy();
+  }
+  for (const character of ['chris', 'mila', 'robot']) {
+    const legacy = pickerFixture(character);
+    const option = legacy.options.find(button => button.dataset.characterOption === character);
+    assert.equal(option.attributes['aria-pressed'], 'true', 'existing saved figure stays selected');
+    assert.equal(legacy.elements['profile-character'].value, character);
+    await option.emit('click');
+    assert.equal(legacy.requests.length, 0, 'choosing the saved legacy figure does not rewrite it');
+    legacy.app.destroy();
+  }
+  const fallback = pickerFixture('missing-character');
+  assert.equal(fallback.elements['profile-character'].value, 'drache');
+  assert.equal(fallback.elements['avatar-choice-label'].textContent, 'Drache');
+  assert.equal(fallback.options.find(button => button.dataset.characterOption === 'drache').attributes['aria-pressed'], 'true');
+  fallback.app.destroy();
   console.log('PASS: animation interruption, blink, reduced motion, visibility, cleanup; confirmed picker persistence, CSRF, duplicate/error/timeout guards, focus and unchanged personal name.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

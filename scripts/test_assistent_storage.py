@@ -115,7 +115,7 @@ class AssistantStorageTests(unittest.TestCase):
                     tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                     self.assertTrue({'assistent_rechte', 'assistent_profile', 'assistent_aktionen', 'assistent_audit', 'assistent_dialog'} <= tables)
                     self.assertEqual(db.execute('SELECT name FROM assistent_profile').fetchone()[0], 'Saved avatar')
-                    self.assertEqual(db.execute('SELECT character FROM assistent_profile').fetchone()[0], 'chris')
+                    self.assertEqual(db.execute('SELECT character FROM assistent_profile').fetchone()[0], 'drache')
                 finally:
                     db.close()
         self.assertEqual(len(list(p.app.url_map.iter_rules())), routes_before)
@@ -134,7 +134,7 @@ class AssistantStorageTests(unittest.TestCase):
             with patch.object(p,'get_db',side_effect=restored_db):
                 p.assistant_init_schema()
                 with closing(restored_db()) as db:
-                    self.assertEqual(tuple(db.execute('SELECT name,stil,stimme,character FROM assistent_profile').fetchone()),('Existing','knapp','ash','chris'))
+                    self.assertEqual(tuple(db.execute('SELECT name,stil,stimme,character FROM assistent_profile').fetchone()),('Existing','knapp','ash','drache'))
                     db.execute("UPDATE assistent_profile SET character='mila'")
                     db.commit()
                 p.assistant_init_schema()
