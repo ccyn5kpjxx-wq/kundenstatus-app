@@ -13,7 +13,7 @@
 {% endblock %}
 {% block content %}
 <div class="mail-workspace">
-<header class="mail-top"><div><h1>Postfach</h1><div class="mail-sub">IONOS · {{ mail_address }}</div></div><div class="mail-toolbar"><button class="mail-btn" id="send-history">Versandverlauf</button><button class="mail-btn" id="resume-draft" hidden>Entwurf weiter bearbeiten</button><button class="mail-btn" id="refresh">Aktualisieren</button><a class="mail-btn" href="{{ url_for('admin_emails') }}">Import-Zentrale</a></div></header>
+<header class="mail-top"><div><h1>Postfach</h1><div class="mail-sub">IONOS · {{ mail_address }}</div></div><div class="mail-toolbar"><a class="mail-btn" href="/admin/assistent-mailquellen">Lieferanten einlesen</a><button class="mail-btn" id="send-history">Versandverlauf</button><button class="mail-btn" id="resume-draft" hidden>Entwurf weiter bearbeiten</button><button class="mail-btn" id="refresh">Aktualisieren</button><a class="mail-btn" href="{{ url_for('admin_emails') }}">Import-Zentrale</a></div></header>
 <div class="mail-notice">{% if mail_send|default(false) %}Schreiben und Antworten direkt im IONOS-Postfach. Versand erst mit deinem Klick auf „E-Mail senden“.{% elif mail_flags %}Beim Öffnen als gelesen markieren · Änderungen werden mit IONOS abgeglichen. Mit „Aktualisieren“ siehst du Änderungen aus IONOS.{% elif mail_write %}Direkt mit deinem Postfach verbunden.{% elif mail_move %}Papierkorb und Verschieben sind mit IONOS verbunden. Versand bleibt ausgeschaltet.{% else %}Lokale Vorschau · Echte Nachrichten lesen. Versand und Änderungen am Postfach sind ausgeschaltet.{% endif %}</div>
 <div id="mail-status" role="status" aria-live="polite"></div>
 <section class="mail-shell" id="shell">

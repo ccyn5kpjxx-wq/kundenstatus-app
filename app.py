@@ -8244,6 +8244,11 @@ BACKUP_TABLES = (
     "assistent_audit",
     "assistent_dialog",
     "assistent_uploads",
+    "assistent_mailquellen_laeufe",
+    "assistent_mailquellen_ordner",
+    "assistent_mailquellen_nachrichten",
+    "assistent_mailquellen_absender",
+    "assistent_mailquellen_dateien",
     "mitarbeiter_urlaub",
     "google_ads_tageswerte",
 )
@@ -8275,8 +8280,14 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
-BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1")
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1")
 BACKUP_BINARY_FIELDS = {
+    "assistent_mailquellen_dateien": {
+        "file_base64": {
+            "suffix": ".bin",
+            "max_bytes": 20 * 1024 * 1024,
+        },
+    },
     "mietvertrag_versionen": {
         "pdf_base64": {
             "suffix": ".pdf",
@@ -46977,6 +46988,9 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         "assistent_rechte", "assistent_profile", "assistent_aktionen",
         "assistent_audit", "assistent_dialog",
         "assistent_uploads",
+        "assistent_mailquellen_laeufe", "assistent_mailquellen_ordner",
+        "assistent_mailquellen_nachrichten", "assistent_mailquellen_absender",
+        "assistent_mailquellen_dateien",
     }
     if "kunden_termin_mail_versand" in schema_features:
         required_tables.add("kunden_termin_mail_versand")
@@ -46990,6 +47004,10 @@ def validate_backup_binary_reference_completeness(export, reference_map):
                                 "assistent_audit", "assistent_dialog"})
     if "werkstatt_avatar_uploads_v1" in schema_features:
         required_tables.add("assistent_uploads")
+    if "werkstatt_mailquellen_v1" in schema_features:
+        required_tables.update({"assistent_mailquellen_laeufe", "assistent_mailquellen_ordner",
+                                "assistent_mailquellen_nachrichten", "assistent_mailquellen_absender",
+                                "assistent_mailquellen_dateien"})
     if format_version >= 3:
         required_tables.add("fahrzeugeinkauf_scan_treffer")
     if format_version >= 4:
@@ -47445,6 +47463,12 @@ def admin_daten_import():
                 avatar_schema = globals().get("assistant_init_schema")
                 if callable(avatar_schema):
                     avatar_schema()
+                mail_schema = globals().get("assistant_mail_sources_init_schema")
+                if callable(mail_schema):
+                    mail_schema()
+                mail_sources = globals().get("assistant_mail_sources")
+                if mail_sources is not None:
+                    mail_sources.restore_files()
 
         log_import_package_event("completed")
         flash("Daten wurden importiert. Fahrzeuge und Dateien sind jetzt auf diesem Server verfügbar.", "success")
@@ -56607,6 +56631,8 @@ init_db()
 from werkstatt_cockpit_api import register_cockpit_api
 import sys
 cockpit_data = register_cockpit_api(sys.modules[__name__])
+from werkstatt_mailquellen import register_mail_sources
+assistant_mail_sources = register_mail_sources(sys.modules[__name__])
 from werkstatt_auftrag_ausdruck import register_auftrag_ausdruck
 register_auftrag_ausdruck(sys.modules[__name__])
 from werkstatt_fortschritt_api import register_progress_api, progress_csrf_exempt

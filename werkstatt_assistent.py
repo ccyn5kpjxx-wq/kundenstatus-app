@@ -32,6 +32,37 @@ CHARACTERS = ("chris", "mila", "robot", "drache", "zauberfuchs", "einhorn", "pho
 DEFAULT_CHARACTER = "drache"
 
 
+def material_query(text, history=()):
+    """Return product search text, or None to skip unrelated text-turn preload.
+
+    History is newest first. Follow-ups reuse product words only: an old width
+    or color must never contradict the employee's new selection.
+    """
+    marker = re.compile(r"abkleb|ankleb|klebeband|klebebänder|tape|bestell|nachbestell|lieferant|artikel|material|verpackung|gebinde|karton|\bve\b|schleif|handschuh|politur|verdünn|silikonentferner", re.I)
+    product = re.compile(r"\b(?:abkleb\w*|ankleb\w*|klebeb\w*|tape|hydrogreen|schleif(?:papier|blatt|blätter|scheibe|mittel)\w*|handschuh\w*|politur\w*|verdünn\w*|silikonentferner)\b", re.I)
+    if product.search(text):
+        return text[:150]
+    # Work/status questions should not carry a material index merely because
+    # the employee discussed purchases earlier in the same conversation.
+    if re.search(r"\b(?:auftrag|fahrzeug|kennzeichen|status|termin|abholen|fertig|lackieren)\b", text, re.I) and not re.search(r"bestell|material|artikel", text, re.I):
+        return None
+    colors = r"(?:grün|gruen|blau|rot|gelb|weiß|weiss|schwarz|grau|orange|violett|transparent|braun)(?:e|en|er|es|em)?"
+    size_words = r"(?:zwanzig|dreißig|dreissig|vierzig|fünfzig|fuenfzig|sechzig|siebzig|achtzig|neunzig|hundert)(?:er|e|en|es)?"
+    selection = re.compile(r"\b(?:\d+(?:[.,]\d+)?\s*(?:mm|cm|m|millimeter|zentimeter|meter)|\d{1,3}er|"+size_words+r"|"+colors+r")\b", re.I)
+    short = len(text) <= 100
+    follows = short and (selection.search(text) or re.search(r"\b(?:breit|rollen?|kartons?|pack|gebinde|davon|dieses|diese|das|die)\b", text, re.I) or re.fullmatch(r"\d{1,3}", text.strip()))
+    if follows:
+        for row in history:
+            if row["role"] != "user":
+                continue
+            words = list(dict.fromkeys(match.group() for match in product.finditer(str(row["text"]))))
+            if words:
+                qualifiers = [match.group() for match in selection.finditer(text)]
+                if re.fullmatch(r"\d{1,3}", text.strip()):qualifiers.append(text.strip())
+                return " ".join(words + qualifiers)[:150]
+    return text[:150] if marker.search(text) else None
+
+
 def workshop_now():
     return datetime.now(ZoneInfo("Europe/Berlin"))
 
@@ -904,7 +935,7 @@ def register_assistant(p):
             return cockpit.api_read('belege/'+str(bid)) if remote else service.invoice(bid)
         raise ValueError("Unbekanntes Lesewerkzeug.")
 
-    def realtime_context():
+    def realtime_context(who, query=""):
         now = workshop_now()
         if remote_enabled():
             context = dict(cockpit.load_snapshot())
@@ -915,6 +946,13 @@ def register_assistant(p):
         context["kalender"] = {"zeitzone":"Europe/Berlin", "heute":now.date().isoformat(),
                                "morgen":(now.date()+timedelta(days=1)).isoformat(),
                                "uebermorgen":(now.date()+timedelta(days=2)).isoformat()}
+        if who["einkaufen"] and not remote_enabled() and query is not None:
+            try:
+                context["materialwissen"] = p.cockpit_data.material_context(query=query, limit=12 if not query else 8)
+            except Exception:
+                # A material index outage must not prevent the employee reading jobs.
+                p.app.logger.warning("Assistent: Materialwissen vorübergehend nicht verfügbar.")
+                context["materialwissen"] = {"verfuegbar": False, "hinweis": "Materialwissen konnte nicht vorgeladen werden; gezielte Artikelsuche erforderlich."}
         return context
 
     def realtime_instructions(who, context, preferences=None):
@@ -956,7 +994,14 @@ def register_assistant(p):
             "Auftragsstatus: 1 angelegt, 2 eingeplant, 3 in Arbeit, 4 fertig, 5 zurückgegeben. "
             "lackierbereit und produktion_schritt lackierung/finish sind Produktionsschritte, nicht automatisch ein fertiges oder zurückgegebenes Fahrzeug. "
             "Suche Fahrzeuge über auftraege_suchen. Bei Fragen zu Unterlagen Auftrag lesen und dokument_lesen nutzen; "
-            "zeige fehlende oder unsichere Auslese. Für Produktidentifikation artikel_suchen nutzen. "
+            "zeige fehlende oder unsichere Auslese. Für Produktidentifikation das vorgeladene materialwissen nutzen; "
+            "wenn dort passende Varianten fehlen oder die Liste gekürzt ist, sofort artikel_suchen mit dem Produktnamen nutzen, ohne den Nutzer erst nach Lieferant oder Artikelnummer zu fragen. "
+            "Materialwissen ist ein begrenzter belegter Ausschnitt, kein Wissen über sämtliche E-Mails oder den gesamten Betrieb. Die abdeckung benennt Lücken. "
+            "Bei Klebeband/Abklebeband zuerst die tatsächlich gefundenen Breiten und Farben knapp zur Auswahl nennen und nur das nächste fehlende Merkmal erfragen. Keine Beispielgrößen erfinden. "
+            "Betriebliche Vorgabe des Inhabers: Abklebeband normalerweise als einen Karton vorschlagen; dies ist eine Mengenpräferenz, kein Nachweis für dessen Inhalt. "
+            "Rechnungsmenge, Bestelleinheit und Packinhalt sind verschieden: ein Karton kann viele Rollen enthalten; niemals Rollenanzahl als Kartonanzahl einsetzen. "
+            "Nur belegten Packinhalt nennen. Fehlender Packinhalt bleibt unbekannt. Historische uebliche_menge nur als Vorschlag anbieten, einzelne Rechnungsmenge nur als letzte belegte Menge. "
+            "Nie Bestellmengen über unterschiedliche Varianten, Gebinde oder Einheiten mitteln. Unsichere Altwerte nicht als üblichen Verbrauch darstellen. "
             "Artikelvorschläge aus Rechnungen sind ungeprüft und nicht bestellbar. Nenne passende gefundene Varianten und "
             "frage gezielt nach fehlender Breite, Farbe, Gebinde oder Menge. Zahlen ohne Maßeinheit klären; Zentimeter niemals als Millimeter auslegen. "
             "Historischer Preishinweis ist kein bestätigter Einzelpreis und kein aktuelles Angebot. "
@@ -978,7 +1023,7 @@ def register_assistant(p):
     @bp.get("/realtime/kontext")
     @protected
     def realtime_refresh(who):
-        context = realtime_context()
+        context = realtime_context(who)
         selected = request.args.get("auftrag_id")
         if selected:
             context["ausgewaehlter_auftrag"] = order_context(selected)
@@ -993,7 +1038,7 @@ def register_assistant(p):
         sdp = data.get("sdp", "")
         if not isinstance(sdp, str) or not sdp.startswith("v=0") or len(sdp) > 64000:
             raise ValueError("Ungültige Sprachverbindung.")
-        context = realtime_context()
+        context = realtime_context(who)
         selected = data.get("auftrag_id")
         if selected:
             context["ausgewaehlter_auftrag"] = order_context(selected)
@@ -1078,7 +1123,7 @@ def register_assistant(p):
             "Bei fehlenden Preisen eine unverbindliche Teileanfrage art anfrage vorschlagen. Die App erzeugt daraus einen E-Mail-Entwurf. K-Parts ist nicht live angebunden. Nenne keine Bestellerfolge."
         )
         if read_only() or operations_enabled():
-            instructions = realtime_instructions(who, realtime_context(), config)
+            instructions = realtime_instructions(who, realtime_context(who, material_query(text, history)), config)
             if data.get("auftrag_id"):
                 instructions += " Ausgewählter Auftrag: " + json.dumps(order_context(data["auftrag_id"]), ensure_ascii=False)
         events = []

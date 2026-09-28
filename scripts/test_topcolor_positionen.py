@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import Mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from werkstatt_topcolor_positionen import parse_topcolor_pages
+from werkstatt_topcolor_positionen import parse_topcolor_pages, explicit_package_evidence
 import werkstatt_rechnungsquelle as reader
 
 
@@ -59,6 +59,12 @@ class TableParserTests(unittest.TestCase):
         self.assertFalse(item["price_verified"])
         self.assertFalse(item["preis_geprueft"])
         self.assertEqual(item["price_evidence"]["basis"], "gebindepreis_netto_abgeleitet")
+        self.assertEqual(item['quantity_evidence']['value'], '2')
+        self.assertEqual(item['quantity_evidence']['unit'], 'Gebinde')
+        self.assertEqual(item['quantity_evidence']['source_field'], 'Menge')
+        self.assertEqual(item['package_evidence']['value'], '0.5')
+        self.assertEqual(item['package_evidence']['unit'], 'L')
+        self.assertEqual(item['package_evidence']['per_unit'], 'Gebinde')
 
     def test_variants_and_pack_sizes_preserve_multiline_descriptions(self):
         pages = [page(lines=[
@@ -71,6 +77,41 @@ class TableParserTests(unittest.TestCase):
         self.assertEqual(items[0]["groesse"], "80x200mm / P80")
         self.assertEqual(items[1]["groesse"], "80x200mm / P180")
         self.assertNotEqual(items[0]["produkt_name"], items[1]["produkt_name"])
+        self.assertEqual(items[0]['quantity_evidence']['value'], '1')
+        self.assertEqual(items[0]['quantity_evidence']['unit'], 'Pack')
+        self.assertEqual(items[0]['package_evidence']['value'], '25')
+        self.assertEqual(items[0]['package_evidence']['unit'], 'Stück')
+        self.assertEqual(items[0]['package_evidence']['per_unit'], 'Pack')
+
+    def test_one_pack_in_content_column_does_not_mean_one_piece_per_pack(self):
+        item = self.parse([page(lines=[product(name='Test Schleifpapier', quantity='2,00',
+            content='1,000', measure='Pack', total='64,00')])])['positions'][0]
+        self.assertEqual(item['quantity_evidence']['value'], '2')
+        self.assertEqual(item['quantity_evidence']['unit'], 'Pack')
+        self.assertIsNone(item['package_evidence']['value'])
+        self.assertEqual(item['package_evidence']['basis'], 'unknown')
+
+    def test_price_measure_is_not_invoice_unit_for_multi_piece_content(self):
+        item = self.parse([page(lines=[product(name='Schleifpapier 25/Pack', quantity='2,00',
+            content='25,000', measure='Stück', base='1,00', discount='', total='50,00')])])['positions'][0]
+        self.assertEqual(item['quantity_evidence']['value'], '2')
+        self.assertIsNone(item['quantity_evidence']['unit'])
+        self.assertEqual(item['ve'], '')
+        self.assertEqual(item['package_evidence']['value'], '25')
+        self.assertEqual(item['package_evidence']['per_unit'], 'Pack')
+
+    def test_conflicting_package_description_does_not_choose_arbitrary_count(self):
+        item = self.parse([page(lines=[product(name='Schleifpapier 25/Pack 50/Pack',
+            content='1,000', measure='Pack', total='64,00')])])['positions'][0]
+        self.assertEqual(item['package_evidence']['basis'], 'unknown')
+        item = self.parse([page(lines=[product(name='Testlack 5 Liter')])])['positions'][0]
+        self.assertEqual(item['package_evidence']['basis'], 'unknown')
+
+    def test_rolls_per_carton_keep_content_unit_and_do_not_count_roll_length(self):
+        evidence = explicit_package_evidence('Abdeckband 48 mm x 50 m, 6 Rollen/Karton', 'Karton')
+        self.assertEqual((evidence['value'], evidence['unit'], evidence['per_unit']), ('6', 'Rolle', 'Karton'))
+        evidence = explicit_package_evidence('Abdeckband 48 mm x 50 m', 'Rolle')
+        self.assertEqual(evidence['basis'], 'unknown')
 
     def test_fee_is_not_a_product_or_continuation(self):
         result = self.parse([page(lines=[product(),
@@ -151,6 +192,9 @@ class SourceIntegrationTests(unittest.TestCase):
         self.assertFalse(item["verified"])
         self.assertFalse(item["price_evidence"]["verified"])
         self.assertEqual(item["price_evidence"]["basis"], "gebindepreis_netto_abgeleitet")
+        self.assertEqual(item['quantity_evidence']['value'], '2')
+        self.assertEqual(item['package_evidence']['value'], '0.5')
+        self.assertEqual(item['source']['quantity_version'], 1)
 
     def test_read_source_uses_native_pdf_columns_without_cloud_or_generic_parser(self):
         try:

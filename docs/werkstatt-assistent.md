@@ -1,5 +1,15 @@
 # Werkstatt-Cockpit API v1
 
+## Materialwissen und Postfachquellen
+
+`/admin/assistent-mailquellen` erfasst das vorhandene betriebliche IMAP-Postfach schrittweise mit gespeichertem Ordner-/UID-Fortschritt. Bank-, Finanz- und private Ordner werden vor dem Lesen ausgeschlossen. Bekannte bzw. ausdrücklich zugeordnete Materialabsender liefern Rechnungsanhänge für den Artikelimport; eine Lesezuordnung bestätigt keine Bestelladresse. Einlesen ändert keine IMAP-Markierungen und versendet keine Nachrichten. Erfasste Header, gesicherte Anhänge und ausgelesene Artikel sind getrennte Bearbeitungsstände. Mailtexte, sonstige Unterlagen, ausgeschlossene Ordner und unklare Absender gelten nicht als vollständig ausgewertet.
+
+Die Artikelsuche berücksichtigt Synonyme und belegte Varianten. Rechnungsmenge, Bestelleinheit und expliziter Packinhalt sind getrennte Angaben mit Quellen. Fehlende Mengen werden nicht als eins behandelt; frühere ungeprüfte Mengen-Defaults bleiben unbekannt. Wiederholte Mengen gleicher Varianten können einen Vorschlag ergeben, niemals einen sicheren Verbrauch oder eine Bestellfreigabe. Die Betriebspräferenz „ein Karton Abklebeband“ beweist keinen Kartoninhalt.
+
+Der Avatar erhält einen kompakten, rechtegeprüften Materialkontext. Bei passenden Textfragen werden Suchtreffer vor dem ersten Modellaufruf bereitgestellt; die Artikelabfrage bleibt für weitere Varianten verfügbar. Es findet keine Rechnungs-OCR im Gespräch statt. Die Architektur reduziert zusätzliche Anfragen entsprechend der [OpenAI-Dokumentation zur Latenzoptimierung](https://developers.openai.com/api/docs/guides/latency-optimization); eine garantierte Antwortzeit oder ein erfolgreicher iPhone-Mikrofontest ist damit nicht nachgewiesen.
+
+Die neuen Postfachquellen-Tabellen gehören zum Backup unter `werkstatt_mailquellen_v1`. Ältere Sicherungen werden beim Wiederherstellen ergänzt. Keine Kontozahlen oder unbereinigten Rechnungen werden dem Avatar als Kontext übergeben.
+
 Diese Erweiterung stellt eine authentifizierte Lese-API für den Werkstattassistenten bereit. Bestehende Leseschlüssel bleiben lesend. Neue Funktionen ergänzen eigene Tabellen und zwei Lackierbereitschaftsfelder; beim Lesen werden keine Aufträge verändert. Bestellversand ist separat konfiguriert und standardmäßig deaktiviert.
 
 Admin-Seite: `/admin/assistent-api`. Dort erzeugt/erneuert/widerruft die Werkstattleitung den Zugang. Nur der SHA-256-Hash des zufälligen Schlüssels wird gespeichert; der vollständige Schlüssel wird einmal angezeigt. POST benötigt die bestehende Admin-Anmeldung und CSRF. Der API-Schlüssel ist ausschließlich serverseitig zu hinterlegen, niemals in einer Browser-App oder einem Commit.

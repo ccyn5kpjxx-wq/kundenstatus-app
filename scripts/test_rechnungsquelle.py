@@ -60,7 +60,7 @@ class InvoiceSourceTests(unittest.TestCase):
                 CREATE TABLE lexware_rechnungen (
                     id INTEGER, voucher_id TEXT, voucher_type TEXT,
                     voucher_status TEXT, status TEXT, contact_name TEXT,
-                    voucher_number TEXT
+                    voucher_number TEXT, voucher_date TEXT
                 );
             """)
         self.calls = []
@@ -96,8 +96,8 @@ class InvoiceSourceTests(unittest.TestCase):
 
     def seed_lexware(self, voucher=VOUCHER, kind="purchaseinvoice", status="open"):
         with contextlib.closing(self.get_db()) as db:
-            db.execute("INSERT INTO lexware_rechnungen VALUES (?, ?, ?, ?, ?, ?, ?)",
-                       (42, voucher, kind, status, "offen", "Actual Supplier", "Invoice-7"))
+            db.execute("INSERT INTO lexware_rechnungen VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                       (42, voucher, kind, status, "offen", "Actual Supplier", "Invoice-7", "2026-09-12T00:00:00.000+02:00"))
             db.commit()
 
     def get(self, url, **kwargs):
@@ -154,6 +154,99 @@ class InvoiceSourceTests(unittest.TestCase):
         self.assertFalse(result["coverage"]["extraction_verified"])
         self.vision.assert_not_called()
 
+    def test_legacy_default_and_package_counts_are_not_invoice_quantity_evidence(self):
+        for raw in (None, 0, 1, 25, -1, True, 'NaN', '1.000', 'unknown'):
+            for description in ('Klebeband', 'Schleifpapier 25 Stück/Pack', 'Menge: unbekannt'):
+                position = {'produkt_name': 'Schleifpapier 25 Stück/Pack', 'stueckzahl': raw,
+                            've': 'Pack', 'produkt_beschreibung': description}
+                item = reader._candidate(position, {'supplier': 'Test Supplier'}, 'file', 1, 'a' * 64)
+                self.assertIsNone(item['stueckzahl'])
+                self.assertEqual(item['quantity_evidence']['basis'], 'unknown')
+                self.assertEqual(item['package_evidence']['value'], '25')
+                self.assertEqual(item['package_evidence']['per_unit'], 'Pack')
+                self.assertEqual(item['source']['quantity_version'], 1)
+
+    def test_explicit_decimal_invoice_quantity_is_distinct_from_package_content(self):
+        position = {'produkt_name': 'Schleifpapier 25 Stück/Pack', 'stueckzahl': 25, 've': 'Pack',
+                    'produkt_beschreibung': 'Menge: 2 Pack; IBAN DE02120300000000202051',
+                    'quelle': 'Schleifpapier 25 Stück/Pack Menge: 2 Pack'}
+        item = reader._candidate(position, {'supplier': 'Test Supplier'}, 'file', 1, 'a' * 64)
+        self.assertEqual(item['stueckzahl'], '2')
+        self.assertEqual(item['quantity_evidence']['unit'], 'Pack')
+        self.assertEqual(item['quantity_evidence']['source_field'], 'Menge')
+        self.assertEqual(item['package_evidence']['value'], '25')
+        self.assertNotIn('DE021203', json.dumps(item))
+        for text, expected in (('Menge: 2,5 Liter', '2.5'), ('Menge: 1.000 Pack', None),
+                               ('Menge: -2 Pack', None), ('Menge: 0 Pack', None)):
+            position.update(quelle=text, produkt_beschreibung=text)
+            self.assertEqual(reader._candidate(position, {'supplier': 'Test Supplier'}, 'file', 1, 'digest')['stueckzahl'], expected)
+        position.update(quelle='Menge: 2 Pack', produkt_beschreibung='Menge: 3 Pack')
+        self.assertIsNone(reader._candidate(position, {'supplier': 'Test Supplier'}, 'file', 1, 'digest')['stueckzahl'])
+
+    def test_invoice_date_requires_named_source_not_import_or_arbitrary_date(self):
+        self.seed_local(filename='', text='Rechnungsdatum: 14.09.2026\n' + TEXT)
+        result = reader.read_source(self.portal, 'einkauf', 1)
+        self.assertEqual(result['source']['date'], '2026-09-14')
+        self.assertEqual(result['candidates'][0]['source']['date'], '2026-09-14')
+        for value in ('31.02.2026', 'yesterday', 'Bank 14.09.2026', None):
+            self.assertIsNone(reader.invoice_date(value))
+        clean = reader._result('einkauf', 1)
+        reader._date_from_text('Importdatum: 14.09.2026', clean)
+        self.assertIsNone(clean['source'].get('date'))
+
+    @unittest.skipUnless(fitz, "PyMuPDF is required for synthetic PDF coverage")
+    def test_missing_original_restores_exact_local_blob_before_text_fallback(self):
+        self.seed_local(filename='invoice.pdf')
+        def restore(name):
+            self.assertEqual(name, 'invoice.pdf')
+            (self.root / name).write_bytes(self.pdf())
+            return True
+        self.portal.assistant_mail_sources_restore_file = mock.Mock(side_effect=restore)
+        result = reader.read_source(self.portal, 'einkauf', 1)
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['coverage']['files_read'], 1)
+        self.portal.assistant_mail_sources_restore_file.assert_called_once_with('invoice.pdf')
+        self.assertEqual(self.calls, [])
+        reader.read_source(self.portal, 'einkauf', 1)
+        self.portal.assistant_mail_sources_restore_file.assert_called_once()
+
+    def test_restore_unknown_corrupt_or_unsafe_original_never_uses_network_or_new_receipt(self):
+        for index, name in enumerate(('../outside.pdf', 'nested/invoice.pdf', 'missing.pdf'), 1):
+            self.seed_local(source_id=index, filename=name, text=TEXT)
+        restore = self.portal.assistant_mail_sources_restore_file = mock.Mock(return_value=False)
+        for index in (1, 2):
+            self.assertEqual(reader.read_source(self.portal, 'einkauf', index)['status'], 'partial')
+        restore.assert_not_called()
+        self.assertEqual(reader.read_source(self.portal, 'einkauf', 3)['status'], 'partial')
+        restore.assert_called_once_with('missing.pdf')
+        restore.side_effect = ValueError('private-backup-marker')
+        result = reader.read_source(self.portal, 'einkauf', 3)
+        self.assertEqual(result['status'], 'partial')
+        self.assertTrue(any('Sicherung' in warning for warning in result['warnings']))
+        self.assertNotIn('private-backup-marker', json.dumps(result))
+        self.assertEqual(self.calls, [])
+        with contextlib.closing(self.get_db()) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM einkauf_belege').fetchone()[0], 3)
+
+    def test_staged_webp_original_uses_existing_image_reader_and_cleans_temp_file(self):
+        from PIL import Image
+        Image.new('RGB', (2, 2), color='white').save(self.root / 'invoice.webp', format='WEBP')
+        self.seed_local(filename='invoice.webp')
+        paths = []
+        def local_text(path, filename):
+            self.assertEqual(path.suffix, '.webp')
+            self.assertTrue(path.is_file())
+            paths.append(path)
+            return TEXT
+        self.portal.extract_document_text_local = local_text
+        result = reader.read_source(self.portal, 'einkauf', 1)
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['coverage']['pages_read'], 1)
+        self.assertEqual(len(result['candidates']), 1)
+        self.assertTrue(paths and all(not path.exists() for path in paths))
+        self.assertTrue((self.root / 'invoice.webp').is_file())
+        self.assertEqual(self.calls, [])
+
     @unittest.skipUnless(fitz, "PyMuPDF is required for synthetic PDF coverage")
     def test_uuid_lookup_products_only_and_download_cleanup(self):
         self.seed_lexware()
@@ -180,6 +273,7 @@ class InvoiceSourceTests(unittest.TestCase):
         candidate = result["candidates"][0]
         self.assertEqual(candidate["source"]["page"], 1)
         self.assertEqual(candidate["source"]["file_id"], FILE)
+        self.assertEqual(candidate["source"]["date"], '2026-09-12')
         self.assertEqual(candidate["price_evidence"], {"value": "3,45", "basis": "unknown", "verified": False})
         self.assertFalse(candidate["price_verified"])
         serialized = json.dumps(result)

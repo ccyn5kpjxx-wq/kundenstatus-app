@@ -9,8 +9,9 @@ from datetime import datetime, timedelta, timezone
 from flask import jsonify, render_template, request, flash, redirect, url_for
 
 from werkstatt_artikel_identity import catalog_identity
-from werkstatt_rechnungsquelle import read_source
+from werkstatt_rechnungsquelle import read_source, invoice_date
 from werkstatt_rechnungsfreigabe import classify_invoice_source
+from werkstatt_topcolor_positionen import quantity_value, material_unit
 
 
 def _text(value, limit=1000):
@@ -88,7 +89,43 @@ def _visible_article_payload(row):
         return None
     stored = dict(payload, produkt_name=row.get('product_name') or payload.get('produkt_name'),
                   artikelnummer=row.get('article_number') or payload.get('artikelnummer'))
-    return payload if is_product_candidate(stored, row['supplier']) else None
+    if not is_product_candidate(stored, row['supplier']):
+        return None
+    # Legacy 'menge=1' may have been a parser default. Do not upgrade it into
+    # observed purchasing history just because it is in the old JSON payload.
+    payload['quantity_evidence'] = _quantity_evidence(payload.get('quantity_evidence'), payload.get('quelle'))
+    payload['package_evidence'] = _package_evidence(payload.get('package_evidence'), payload.get('quelle'))
+    return payload
+
+
+def _quantity_evidence(value, source=None):
+    value = value if isinstance(value, dict) else {}
+    number = quantity_value(value.get('value'))
+    field = value.get('source_field') if value.get('source_field') in ('Menge', 'stueckzahl', 'quantity', 'menge') else None
+    known = value.get('basis') == 'invoice_line' and number is not None and field is not None
+    result = {'value': number if known else None, 'unit': material_unit(value.get('unit')) if known else None,
+              'basis': 'invoice_line' if known else 'unknown', 'source_field': field if known else None,
+              'verified': False}
+    if isinstance(source, dict):
+        result['source'] = source
+    return result
+
+
+def _package_evidence(value, source=None):
+    value = value if isinstance(value, dict) else {}
+    number = quantity_value(value.get('value'))
+    unit = material_unit(value.get('unit'))
+    per_unit = 'VE' if value.get('per_unit') == 'VE' else material_unit(value.get('per_unit'))
+    text = _text(value.get('text'), 100)
+    if _PAYMENT_TEXT.search(_product_text(text)) or _SUMMARY_TEXT.search(_product_text(text)):
+        text = ''
+    known = value.get('basis') == 'explicit_description' and number and unit and per_unit and text
+    result = {'value': number if known else None, 'unit': unit if known else None,
+              'per_unit': per_unit if known else None, 'basis': 'explicit_description' if known else 'unknown',
+              'text': text, 'verified': False}
+    if isinstance(source, dict):
+        result['source'] = source
+    return result
 
 
 def _marker(value):
@@ -376,7 +413,7 @@ class InvoiceCatalog:
                 # all older records for review. An expired worker cannot do this.
                 db.execute('UPDATE assistent_rechnungsartikel SET active=0 WHERE import_id=?', (source['id'],))
                 for record in records:
-                    db.execute('INSERT INTO assistent_rechnungsartikel(fingerprint,identity_key,import_id,supplier,product_name,article_number,payload_json,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(fingerprint) DO UPDATE SET active=1', record)
+                    db.execute('INSERT INTO assistent_rechnungsartikel(fingerprint,identity_key,import_id,supplier,product_name,article_number,payload_json,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(fingerprint) DO UPDATE SET active=1,payload_json=excluded.payload_json,identity_key=excluded.identity_key', record)
             db.commit()
         finally:
             db.close()
@@ -434,14 +471,45 @@ class InvoiceCatalog:
                               'position': position, 'extraktionsindex': index,
                               'positionsnachweis': 'vorhanden_ungeprueft' if known_source else 'ungeklaert'},
                    'hinweis': 'Aus Rechnung vorgeschlagen. Größe, Farbe, Lieferant und Preis am Original bestätigen.'}
+        # Keep the existing exact observation fingerprint compatible. Adding or
+        # refining structured evidence updates the same row, while a different
+        # variant, occurrence or factual quantity/price still retains history.
+        core = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        fingerprint = hashlib.sha256((source['source_key']+core).encode()).hexdigest()
+        payload['quelle']['datum'] = invoice_date(raw_source.get('date'))
+        payload['quantity_evidence'] = _quantity_evidence(candidate.get('quantity_evidence'), payload['quelle'])
+        payload['package_evidence'] = _package_evidence(candidate.get('package_evidence'), payload['quelle'])
+        payload['evidence_version'] = 1
         serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-        fingerprint = hashlib.sha256((source['source_key']+serialized).encode()).hexdigest()
         return ((fingerprint, identity or '', source['id'], supplier, product, number, serialized, now.isoformat()), known_source)
 
     def search(self, query, limit=30):
         limit = max(1, min(int(limit), 100))
+        return self._search(query, limit)
+
+    def knowledge_rows(self, limit=5000):
+        """Read the scoped active evidence set; never initiate an import/read."""
+        limit = max(1, min(int(limit), 5000))
         allowed = self.allowed_suppliers()
-        sources = self.rows('SELECT id,supplier,reference FROM assistent_rechnungsimporte')
+        sources = self.rows('SELECT id,supplier,reference,state FROM assistent_rechnungsimporte')
+        scoped = [(source, self.source_rule(source, allowed)) for source in sources]
+        items = self._search('', limit + 1, sources=sources, allowed=allowed)
+        truncated = len(items) > limit
+        # Reuse the already privacy-filtered observations. A full status() here
+        # would reload every payload, including all rows beyond the context cap.
+        # At the cap, report a lower bound explicitly rather than imply a count
+        # of unexamined/possibly invalid historical proposals.
+        return {'items': items[:limit], 'truncated': len(items) > limit,
+                'coverage': {'quellen_gesamt': len(sources),
+                             'freigegebene_quellen': sum(rule['allowed'] for _, rule in scoped),
+                             'ungeklaerte_quellen': sum(rule['decision'] == 'review' for _, rule in scoped),
+                             'offene_auslese': sum(rule['allowed'] and row['state'] in ('offen', 'laeuft') for row, rule in scoped),
+                             'auslese_zu_pruefen': sum(rule['allowed'] and row['state'] == 'pruefen' for row, rule in scoped),
+                             'positionen': len(items), 'positionen_begrenzt': truncated}}
+
+    def _search(self, query, limit, sources=None, allowed=None):
+        allowed = self.allowed_suppliers() if allowed is None else allowed
+        sources = self.rows('SELECT id,supplier,reference FROM assistent_rechnungsimporte') if sources is None else sources
         ids = [row['id'] for row in sources if self.source_rule(row, allowed)['allowed']]
         if not ids:
             return []
@@ -475,6 +543,8 @@ class InvoiceCatalog:
                         if len(batch_results) == limit:
                             break
                 after_id = rows[-1]['id']
+                if len(rows) < 200:
+                    break
             results.extend(batch_results)
         return sorted(results, key=lambda row: row['vorschlag_id'], reverse=True)[:limit]
 

@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from flask import Blueprint, jsonify, request, session, render_template
 from werkstatt_rechnungsfreigabe import classify_invoice_source, normalize_supplier
+from werkstatt_materialwissen import build_variants, query_notes, rank_records
 
 _BANK_DATA = re.compile(
     r'\b(?:iban|bic|swift|bankverbindung|kontoverbindung|kontoinhaber|kontonummer|kontoauszug|'
@@ -37,7 +38,7 @@ def _clean_fields(row):
 
 def _invoice_product(row, supplier, bid, proposal=False, source_kind='einkauf'):
     """Allowlist one persisted product, never invoice text or arbitrary payload keys."""
-    from werkstatt_artikel_import import is_product_candidate, _price_evidence
+    from werkstatt_artikel_import import is_product_candidate, _price_evidence, _quantity_evidence, _package_evidence
     from werkstatt_artikel_identity import parse_unit_price
     if not isinstance(row, dict) or normalize_supplier(row.get('lieferant')) != normalize_supplier(supplier):
         return None
@@ -70,6 +71,15 @@ def _invoice_product(row, supplier, bid, proposal=False, source_kind='einkauf'):
     pages=source.get('seiten')
     if isinstance(pages,list):item['quelle']['seiten']=list(dict.fromkeys(x for x in pages[:100] if isinstance(x,int) and not isinstance(x,bool) and x>0))
     if source.get('methode')=='topcolor_word_columns_v1':item['quelle']['methode']='topcolor_word_columns_v1'
+    if isinstance(source.get('datum'),str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}',source['datum']):
+        item['quelle']['datum']=source['datum']
+    if isinstance(source.get('datei_sha256'),str) and re.fullmatch(r'[0-9a-fA-F]{64}',source['datei_sha256']):
+        item['quelle']['datei_sha256']=source['datei_sha256'].lower()
+    for field in ('quantity_evidence','package_evidence'):
+        item[field]=(_package_evidence if field=='package_evidence' else _quantity_evidence)(row.get(field))
+        if any(isinstance(v,str) and _BANK_DATA.search(v) for v in item[field].values()):
+            item[field]=(_package_evidence if field=='package_evidence' else _quantity_evidence)(None)
+        item[field]['source']=dict(item['quelle'])
     if proposal:
         item['price_evidence'] = _price_evidence(row.get('price_evidence'))
     elif isinstance(row.get('id'), int):
@@ -198,27 +208,90 @@ class CockpitData:
         if redacted:result['hinweis']+=' Bankangaben wurden zeilenweise entfernt; die Auslese ist insoweit unvollständig.'
         return result
 
-    def articles(self, query):
-        if not 2<=len(query)<=150:raise ValueError('Artikelname oder Artikelnummer mit mindestens zwei Zeichen erforderlich.')
-        values=['%'+query.lower()+'%']*3
-        rows=self.rows('SELECT id,lieferant,artikelnummer,produkt_name,produkt_beschreibung,ve,gebinde,letzter_preis,letzter_preis_datum,preisquelle,quelle_beleg_id FROM einkauf_artikel WHERE LOWER(artikelnummer) LIKE ? OR LOWER(produkt_name) LIKE ? OR LOWER(produkt_beschreibung) LIKE ? ORDER BY id DESC LIMIT 30',values)
-        articles=[]
-        for row in rows:
-            if not self.material_allowed(row):continue
-            item=_invoice_product(row,row['lieferant'],row['quelle_beleg_id'])
-            if item is None:continue
-            clean=_clean_fields(row)
-            clean['letzter_preis']=item['historischer_preishinweis']
-            articles.append(clean)
+    def _material_records(self, limit=5000):
+        # PK cursor paging, no invoice files or full texts. Scope is checked on
+        # every read; no cache can retain revoked suppliers or inactive imports.
+        articles=[];before=None;truncated=False;scanned=0
+        try:allowed=json.loads(self.p.get_app_setting('ASSISTANT_MATERIAL_SUPPLIERS','[]') or '[]')
+        except (ValueError,TypeError):allowed=[]
+        def permitted(row):return classify_invoice_source(row,allowed_suppliers=allowed)['allowed']
+        while len(articles)<=limit:
+            clause=' WHERE id<?' if before is not None else ''
+            rows=self.rows('SELECT id,lieferant,artikelnummer,produkt_name,produkt_beschreibung,ve,gebinde,letzter_preis,letzter_preis_datum,preisquelle,quelle_beleg_id FROM einkauf_artikel'+clause+' ORDER BY id DESC LIMIT 500',(before,) if before is not None else ())
+            if not rows:break
+            scanned+=len(rows)
+            for row in rows:
+                if not permitted(row):continue
+                item=_invoice_product(row,row['lieferant'],row['quelle_beleg_id'])
+                if item is None:continue
+                item.update(id=row['id'],quelle_beleg_id=row['quelle_beleg_id'],
+                            letzter_preis=item['historischer_preishinweis'],
+                            letzter_preis_datum=_without_bank_lines(row.get('letzter_preis_datum'))[:40],
+                            preisquelle=_without_bank_lines(row.get('preisquelle'))[:500])
+                articles.append(item)
+                if len(articles)>limit:break
+            before=rows[-1]['id']
+            if len(rows)<500:break
+            if scanned>=limit*4:
+                truncated=True;break
+        truncated=truncated or len(articles)>limit
+        articles=articles[:limit]
+        catalog=getattr(self,'catalog',None)
+        reader=getattr(catalog,'knowledge_rows',None)
+        if callable(reader):
+            snapshot=reader(limit=limit)
+        else:
+            legacy=catalog.search('',100) if catalog else []
+            snapshot={'items':legacy,'truncated':len(legacy)>=100,'coverage':{}}
         proposals=[]
-        for row in self.catalog.search(query) if getattr(self,'catalog',None) else []:
-            if not self.material_allowed(row):continue
+        for row in snapshot.get('items',[]):
+            if not permitted(row):continue
             source=row.get('quelle') if isinstance(row.get('quelle'),dict) else {}
             item=_invoice_product(row,row.get('lieferant'),source.get('beleg_id'),proposal=True,source_kind=source.get('art'))
             if item is not None:
                 if isinstance(row.get('vorschlag_id'),int):item['vorschlag_id']=row['vorschlag_id']
                 proposals.append(item)
-        return {'artikel':articles, 'artikelvorschlaege':proposals, 'hinweis':'Historische Rechnungsartikel. Keine aktuelle Preis- oder Verfügbarkeitszusage. Ähnliche Produkte sind keine eindeutige Identifikation. Bankangaben sind ausgeschlossen; fehlende Quellen oder Preise bleiben unbekannt.'}
+        coverage={key:value for key,value in snapshot.get('coverage',{}).items()
+                  if key in ('quellen_gesamt','freigegebene_quellen','ungeklaerte_quellen','offene_auslese','auslese_zu_pruefen','positionen') and type(value) is int and value>=0}
+        coverage.update(gespeicherte_artikel=len(articles),sichtbare_positionen=len(proposals),
+                        begrenzt=truncated or snapshot.get('truncated') is True,
+                        vollstaendigkeit_bestaetigt=False)
+        return articles,proposals,coverage
+
+    def articles(self, query):
+        if not isinstance(query,str) or not 2<=len(query)<=150:raise ValueError('Artikelname oder Artikelnummer mit mindestens zwei Zeichen erforderlich.')
+        articles,proposals,coverage=self._material_records()
+        variants=build_variants(proposals+articles,query,31)
+        matched_articles=rank_records(articles,query);matched_proposals=rank_records(proposals,query)
+        return {'artikel':matched_articles[:30], 'artikelvorschlaege':matched_proposals[:30],
+                'varianten':variants[:30], 'varianten_gekuerzt':len(variants)>30,'abdeckung':coverage,
+                'positionen_gekuerzt':len(matched_articles)>30 or len(matched_proposals)>30,
+                'suchhinweise':query_notes(query),
+                'hinweis':'Historische Rechnungsartikel und ungeprüfte Varianten. Mengen sind Vorschläge, kein Verbrauch und keine Bestellfreigabe. Fehlenden Packinhalt nicht aus Rechnungsmenge oder VE ableiten. Maße mit Einheit nennen; mm und cm nicht vertauschen. Keine aktuelle Preis-/Verfügbarkeitszusage und keine Vollständigkeitsbehauptung.'}
+
+    def material_context(self, query='', limit=12):
+        """Compact product-only preload; caller must enforce purchase-read rights."""
+        if not isinstance(query,str) or len(query)>1000 or type(limit) is not int or not 1<=limit<=20:
+            raise ValueError('Ungültiger Materialkontext.')
+        articles,proposals,coverage=self._material_records()
+        records=proposals+articles
+        variants=build_variants(records,query,limit+1)
+        compact=[]
+        for variant in variants[:limit]:
+            item={key:variant[key] for key in ('variante_id','produkt_name','lieferant','artikelnummer','groesse','farbe','gebinde','ve','packinhalt','uebliche_menge','letzte_belegte_menge','historischer_preishinweis','fehlende_angaben','pruefen','bestellbar')}
+            item['belege_anzahl']=variant['belege_anzahl']
+            item['historie_gekuerzt']=variant['historie_gekuerzt'] or len(variant['quellen'])>2 or len(variant['mengenhistorie'])>3
+            item['quellen']=variant['quellen'][:2]
+            item['mengenhistorie']=variant['mengenhistorie'][:3]
+            compact.append(item)
+        suppliers={}
+        for record in records:
+            name=record['lieferant']
+            suppliers[name]=suppliers.get(name,0)+1
+        return {'varianten':compact,'lieferanten':[{'name':name,'sichtbare_positionen':count} for name,count in sorted(suppliers.items())[:50]],
+                'abdeckung':coverage,'varianten_gekuerzt':len(variants)>limit,'pruefen':True,'bestellbar':False,
+                'suchhinweise':query_notes(query),
+                'hinweis':'Nur gespeicherte Produktbelege. Ungeprüfte Auslese, keine vollständige Artikelkenntnis. Maße immer mit Einheit nennen. Häufigste belegte Menge nur vorschlagen; Packinhalt muss ausdrücklich belegt sein. Vorlesen oder Ja zur Variante gibt keine Bestellung frei.'}
 
     def invoice_sources(self, include_held=False):
         # Product-import inventory only: no amounts, payments, balances or bank data.
@@ -299,6 +372,9 @@ def register_cockpit_api(p):
     @bp.get('/artikel')
     @require('einkauf:lesen')
     def articles():return jsonify(service.articles(request.args.get('q','')))
+    @bp.get('/materialwissen')
+    @require('einkauf:lesen')
+    def material_context():return jsonify(service.material_context(request.args.get('q',''),int(request.args.get('limit',12))))
     @bp.get('/belege')
     @require('einkauf:lesen')
     def invoice_sources():return jsonify(service.invoice_sources())

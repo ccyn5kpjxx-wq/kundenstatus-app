@@ -1,5 +1,5 @@
 <!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Artikel aus Lieferantenrechnungen</title><link rel="stylesheet" href="{{ url_for('static',filename='assistent.css') }}"></head><body><main>
-<nav><a href="/admin/einkauf">Zum Einkauf</a> · <a href="/admin/assistent-api">API-Zugang</a></nav>
+<nav><a href="/admin/einkauf">Zum Einkauf</a> · <a href="/admin/assistent-mailquellen">Lieferantenpostfach einlesen</a> · <a href="/admin/assistent-api">API-Zugang</a></nav>
 <h1>Artikel aus Lieferantenrechnungen</h1>
 <p>Freigegebene Material- und Werkstattlieferanten werden einzeln gelesen. Daraus entstehen gespeicherte Artikelvorschläge mit Lieferant, Variante und Preisquelle. Unbekannte Lieferanten warten zuerst auf Zuordnung. Banking, Versicherungen, Beiträge, Steuern und medizinische Belege bleiben ausgeschlossen.</p>
 <p>Die Vorschläge sind noch keine geprüften Artikel oder Bestellungen. Größen und Farben bleiben getrennt. Ein Rechnungsbetrag wird nicht als aktueller Einzelpreis zugesagt.</p>
@@ -14,5 +14,15 @@
 {% with messages = get_flashed_messages() %}{% for message in messages %}<p role="status">{{ message }}</p>{% endfor %}{% endwith %}
 <h2>Belege</h2><p>Nach erneutem Einlesen ersetzen die neuen Vorschläge die bisher sichtbare Auslese dieses Belegs. Frühere Einträge bleiben gespeichert.</p><ul id="sources">{% for row in report.quellen %}<li>{{ 'Ausgeschlossene Quelle' if row.state == 'ausgeschlossen' else (row.supplier or 'Lieferant ungeklärt') }} · {{ row.reference }} · {{ row.state }}{% for message in row.result.get('hinweise',[]) %} · {{ message }}{% endfor %}{% if row.state in ('ausgelesen','pruefen') %}<form method="post" action="{{ url_for('assistant_invoice_source_retry', source_id=row.id) }}">{{ csrf_field()|safe }}<button>Nur diesen Beleg erneut einlesen</button></form>{% endif %}</li>{% endfor %}</ul>
 <h2>Gespeicherte Artikelvorschläge</h2><p>Die neuesten 100 Vorschläge. Der Avatar kann nach Produktname, Artikelnummer oder Lieferant suchen und Varianten nachfragen.</p>
-{% for article in articles %}<section><h3>{{ article.produkt_name }}</h3><p>{{ article.lieferant or 'Lieferant ungeklärt' }} · {{ article.artikelnummer }} · {{ article.ve }}</p><p>{{ article.produkt_beschreibung }}</p><p>Preisangabe aus Beleg: {{ article.historischer_preishinweis or 'nicht erkannt' }} · noch ungeprüft</p><p>Quelle: {{ article.quelle.beleg }}{% if article.quelle.seite %}, Seite {{ article.quelle.seite }}{% endif %}</p></section>{% endfor %}
+{% for article in articles %}
+{% set quantity = article.get('quantity_evidence', {}) %}{% set package = article.get('package_evidence', {}) %}
+<section><h3>{{ article.produkt_name }}</h3>
+<p>{{ article.lieferant or 'Lieferant ungeklärt' }} · {{ article.artikelnummer }}</p><p>{{ article.produkt_beschreibung }}</p>
+<p>Rechnungsmenge: {% if quantity.get('basis') == 'invoice_line' and quantity.get('value') %}{{ quantity.value }} {{ quantity.unit or '(Einheit ungeklärt)' }} · ungeprüft aus der Belegposition{% else %}nicht belegt – am Original prüfen{% endif %}</p>
+<p>Verkaufseinheit (VE): {{ article.ve or 'nicht erkannt' }} · Gebinde/Variante: {{ article.gebinde or 'nicht erkannt' }}{% if article.groesse %} · {{ article.groesse }}{% endif %}{% if article.farbe %} · {{ article.farbe }}{% endif %}</p>
+<p>Packungsinhalt: {% if package.get('basis') == 'explicit_description' and package.get('value') %}{{ package.value }} {{ package.unit }} je {{ package.per_unit }} · laut „{{ package.text }}“, ungeprüft{% else %}nicht eindeutig belegt{% endif %}</p>
+<p>Die Rechnungsmenge ist keine neue Bestellvorgabe und wird nicht als Packungsinhalt verwendet.</p>
+<p>Preisangabe aus Beleg: {{ article.historischer_preishinweis or 'nicht erkannt' }} · noch ungeprüft</p>
+<p>Quelle: {{ article.quelle.beleg }}{% if article.quelle.get('datum') %} · Rechnungsdatum {{ article.quelle.datum }}{% endif %}{% if article.quelle.seiten %}, Seite(n) {{ article.quelle.seiten|join(', ') }}{% elif article.quelle.seite %}, Seite {{ article.quelle.seite }}{% endif %}{% if article.quelle.position is not none %} · Position {{ article.quelle.position }}{% elif article.quelle.zeile is not none %} · Zeile {{ article.quelle.zeile }}{% endif %}</p></section>
+{% endfor %}
 </main><script src="{{ url_for('static',filename='assistent-artikel.js') }}" defer></script></body></html>

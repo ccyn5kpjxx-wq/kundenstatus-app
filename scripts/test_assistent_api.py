@@ -64,6 +64,20 @@ class ApiTests(unittest.TestCase):
         p.set_app_setting('ASSISTANT_API_GRANT','')
         self.assertEqual(self.get('auftraege').status_code,401)
 
+    def test_material_context_is_product_read_only_and_scope_protected(self):
+        self.assertEqual(self.client.get('/api/werkstatt/v1/materialwissen').status_code,401)
+        self.grant(['auftraege:lesen'])
+        self.assertEqual(self.get('materialwissen').status_code,403)
+        self.grant(['einkauf:lesen'])
+        result=self.get('materialwissen?limit=1')
+        self.assertEqual(result.status_code,200)
+        self.assertEqual(result.headers['Cache-Control'],'no-store')
+        self.assertFalse(result.json['bestellbar'])
+        self.assertTrue(result.json['pruefen'])
+        self.assertFalse(result.json['abdeckung']['vollstaendigkeit_bestaetigt'])
+        self.assertIn('varianten_gekuerzt',result.json)
+        self.assertEqual(self.get('materialwissen?limit=999').status_code,400)
+
     def test_pagination_search_and_secret_exclusion(self):
         result=self.get('auftraege?limit=1')
         self.assertEqual(result.status_code,200)

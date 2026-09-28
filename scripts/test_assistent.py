@@ -674,7 +674,76 @@ class AssistantTests(unittest.TestCase):
                 self.assertEqual(schedule.call_count,5)
             with patch.object(p.cockpit_data,'briefing',side_effect=lambda day:{'datum':day}):
                 result=self.post('/realtime/werkzeug',{'name':'morgenueberblick','arguments':{'datum':'morgen'}})
-                self.assertEqual(result.json['result']['datum'],'2026-10-26')
+            self.assertEqual(result.json['result']['datum'],'2026-10-26')
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_material_prefetch_is_ready_before_first_model_request(self):
+        from unittest.mock import Mock
+        result=Mock(); result.json.return_value={'output':[{'type':'message','content':[{'type':'output_text','text':'Welche belegte Breite?'}]}]}
+        evidence={'varianten':[{'produkt_name':'SYNTHETIC BAND','groesse':'30 mm','packinhalt':None}], 'bestellbar':False}
+        with patch.object(p.cockpit_data,'material_context',create=True,return_value=evidence) as materials, patch.object(p,'get_openai_api_key',return_value='synthetic-key'), patch('werkstatt_assistent.requests.post',return_value=result) as provider:
+            response=self.post('/dialog',{'text':'Ich brauche Abklebeband'})
+            self.assertEqual(response.status_code,200)
+            materials.assert_called_once_with(query='Ich brauche Abklebeband',limit=8)
+            self.assertEqual(provider.call_count,1)
+            self.assertIn('SYNTHETIC BAND',provider.call_args.kwargs['json']['instructions'])
+        with database() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_aktionen').fetchone()[0],0)
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_material_prefetch_respects_revoked_rights_and_outage(self):
+        with database() as db: db.execute('UPDATE assistent_rechte SET einkaufen=0 WHERE mitarbeiter_id=1')
+        with patch.object(p.cockpit_data,'material_context',create=True) as materials:
+            response=self.client.get('/werkstatt/assistent/realtime/kontext')
+            self.assertEqual(response.status_code,200)
+            materials.assert_not_called()
+            self.assertNotIn('"materialwissen":',response.json['instructions'])
+        with database() as db: db.execute('UPDATE assistent_rechte SET einkaufen=1 WHERE mitarbeiter_id=1')
+        with patch.object(p.cockpit_data,'material_context',create=True,side_effect=ValueError('private technical data')):
+            response=self.client.get('/werkstatt/assistent/realtime/kontext')
+            self.assertEqual(response.status_code,200)
+            self.assertIn('"verfuegbar": false',response.json['instructions'])
+            self.assertNotIn('private technical data',response.text)
+            self.assertIn('Testfahrzeug',response.json['instructions'])
+
+    def test_material_followups_reuse_product_without_stale_variant_constraints(self):
+        from werkstatt_assistent import material_query
+        history=[{'role':'assistant','text':'Fremde Antwort kein Produktbezug'},
+                 {'role':'user','text':'Bitte grünes Abklebeband 30 mm bestellen'}]
+        self.assertEqual(material_query('Einen Karton davon bitte',history),'Abklebeband')
+        self.assertEqual(material_query('Was bestellen wir davon?',history),'Abklebeband')
+        self.assertEqual(material_query('Doch 50 mm bitte',history),'Abklebeband 50 mm')
+        self.assertEqual(material_query('Dann blau bitte',history),'Abklebeband blau')
+        self.assertEqual(material_query('Davon 2 Rollen',history),'Abklebeband')
+        self.assertEqual(material_query('50',history),'Abklebeband 50')
+        self.assertEqual(material_query('Handschuhe bitte',history),'Handschuhe bitte')
+        self.assertIsNone(material_query('Was muss ich an Auftrag 156 machen?',history))
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_job_text_skips_material_preload_but_realtime_start_retains_it(self):
+        from unittest.mock import Mock
+        result=Mock();result.json.return_value={'output':[{'type':'message','content':[{'type':'output_text','text':'Laut Cockpit: Testarbeit.'}]}]}
+        with patch.object(p.cockpit_data,'material_context',return_value={'varianten':[]}) as materials, patch.object(p,'get_openai_api_key',return_value='synthetic-key'), patch('werkstatt_assistent.requests.post',return_value=result) as provider:
+            response=self.post('/dialog',{'text':'Was muss ich an Auftrag 156 machen?'})
+            self.assertEqual(response.status_code,200)
+            materials.assert_not_called()
+            self.assertNotIn('"materialwissen":',provider.call_args.kwargs['json']['instructions'])
+            self.assertEqual(provider.call_count,1)
+            response=self.client.get('/werkstatt/assistent/realtime/kontext')
+            self.assertEqual(response.status_code,200)
+            materials.assert_called_once_with(query='',limit=12)
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_followup_width_prefetch_is_resolved_before_first_model_round(self):
+        from unittest.mock import Mock
+        with database() as db:
+            db.execute("INSERT INTO assistent_dialog(actor,role,text,zeit) VALUES('mitarbeiter:1','user','Ich brauche Abklebeband grün 30 mm',?)",(p.now_str(),))
+        result=Mock();result.json.return_value={'output':[{'type':'message','content':[{'type':'output_text','text':'Die 50-mm-Variante ist als Vorschlag hinterlegt.'}]}]}
+        with patch.object(p.cockpit_data,'material_context',return_value={'varianten':[]}) as materials, patch.object(p,'get_openai_api_key',return_value='synthetic-key'), patch('werkstatt_assistent.requests.post',return_value=result) as provider:
+            response=self.post('/dialog',{'text':'Doch 50 mm bitte'})
+            self.assertEqual(response.status_code,200)
+            materials.assert_called_once_with(query='Abklebeband 50 mm',limit=8)
+            self.assertEqual(provider.call_count,1)
 
     @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
     def test_preload_marks_partial_list_and_explains_status_and_deadlines(self):

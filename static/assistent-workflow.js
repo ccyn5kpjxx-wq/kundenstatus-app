@@ -6,7 +6,7 @@
   const documents=root.dataset.documentsEnabled==='true', offers=root.dataset.offersEnabled==='true';
   const fields=['kunde_name','fahrzeug','kennzeichen','fin_nummer','hsn_nummer','tsn_nummer','kunde_email','kontakt_telefon','beschreibung','farbcode','farbton','farbton_2'];
   const labels={kunde_name:'Auftraggeber',fahrzeug:'Fahrzeug',kennzeichen:'Kennzeichen',fin_nummer:'FIN',hsn_nummer:'HSN',tsn_nummer:'TSN',kunde_email:'Kunden-E-Mail',kontakt_telefon:'Telefon',beschreibung:'Gewünschte Arbeiten',farbcode:'Farbcode',farbton:'Farbton',farbton_2:'Zweiter Farbton',analyse_text:'Auslesehinweis',bauteile_override:'Erkannte Bauteile'};
-  const uploadStates={bereit:'Gespeichert, noch nicht ausgewertet',auswertung:'Auswertung läuft',pruefen:'Zur Prüfung',zugeordnet:'Auftrag zugeordnet',fehler:'Auswertung bitte erneut starten'};
+  const uploadStates={bereit:'Gespeichert, noch nicht ausgewertet',analyse:'Auswertung läuft',auswertung:'Auswertung läuft',pruefen:'Zur Prüfung',zugeordnet:'Auftrag zugeordnet',fehler:'Auswertung bitte erneut starten'};
   const purposes={fahrzeugschein:'Fahrzeugschein',schaden:'Schadenfoto',angebot:'Lieferantenangebot',sonstiges:'Arbeitsunterlage'};
   let generation=0, reviewRevision=0, uploads=[], selected=null, newSource=null, uploadRequest=null, currentTab='upload', newIntake=false;
   let editorOrderId=null, mailOrderId=null, mailReady=false;

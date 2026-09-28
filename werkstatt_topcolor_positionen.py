@@ -14,6 +14,66 @@ _FEE_SKUS = {"00000071"}
 _HEADERS = ("Pos.", "Art.-Nr.", "Bezeichnung", "Menge", "Inhalt", "Preis", "Gesamt")
 
 
+def quantity_value(value):
+    """A positive canonical quantity; never a default or thousands guess."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        return None
+    raw = str(value).strip()
+    if len(raw) > 30 or not re.fullmatch(r"\d+(?:[.,]\d{1,6})?", raw):
+        return None
+    try:
+        number = Decimal(raw.replace(",", "."))
+        return _plain(number) if 0 < number <= 1000000 else None
+    except InvalidOperation:
+        return None
+
+
+def material_unit(value):
+    """Units are data, never free document/footer text."""
+    key = str(value or "").strip().casefold().rstrip(".")
+    return {
+        "stück": "Stück", "stueck": "Stück", "stk": "Stück", "stck": "Stück", "st": "Stück",
+        "rolle": "Rolle", "rollen": "Rolle", "rol": "Rolle",
+        "pack": "Pack", "packung": "Pack", "packungen": "Pack", "kp": "Pack",
+        "karton": "Karton", "kartons": "Karton", "set": "Set", "satz": "Satz",
+        "gebinde": "Gebinde", "dose": "Dose", "dosen": "Dose", "flasche": "Flasche",
+        "flaschen": "Flasche", "kanister": "Kanister", "tube": "Tube", "eimer": "Eimer",
+        "paar": "Paar", "beutel": "Beutel", "l": "L", "liter": "L", "ltr": "L",
+        "ml": "ml", "kg": "kg", "g": "g", "m": "m", "mtr": "m", "meter": "m",
+        "cm": "cm", "mm": "mm",
+    }.get(key)
+
+
+def explicit_package_evidence(name, order_unit=None):
+    """Read explicit packaging text, never invoice quantity or price content.
+
+    A table cell 'Inhalt 1 Pack' does not prove how many pieces a pack contains.
+    Several contradictory counts/volumes remain unknown instead of choosing one.
+    """
+    result = {"value": None, "unit": None, "per_unit": None,
+              "basis": "unknown", "text": "", "verified": False}
+    if not isinstance(name, str):
+        return result
+    name = name[:1000]
+    counts = []
+    pattern = r"\b(\d+)\s*(?:(Stück|Stueck|Stk\.?|Rollen?|Dosen?)\s*)?/\s*(Pack|Packung|KP|ROL|Rolle|Karton|Beutel)\b"
+    for match in re.finditer(pattern, name, re.I):
+        counts.append((quantity_value(match[1]), material_unit(match[2]) if match[2] else "Stück", material_unit(match[3]), match[0]))
+    unit = material_unit(order_unit)
+    for match in re.finditer(r"\bVE\s*[=:]\s*(\d+)\s*(Stück|Stueck|Stk\.?|Rollen?)\b", name, re.I):
+        counts.append((quantity_value(match[1]), material_unit(match[2]), unit if unit in ("Pack", "Karton", "Beutel", "Set") else "VE", match[0]))
+    if not counts and unit in ("Gebinde", "Dose", "Flasche", "Kanister", "Tube", "Eimer"):
+        for match in re.finditer(r"\b(\d+(?:[.,]\d+)?)\s*(Liter|Ltr|ml|kg|l|g)\b", name, re.I):
+            counts.append((quantity_value(match[1]), material_unit(match[2]), unit, match[0]))
+    valid = {(value, content_unit, per_unit) for value, content_unit, per_unit, _ in counts
+             if value and content_unit and per_unit}
+    if len(valid) == 1:
+        value, content_unit, per_unit = next(iter(valid))
+        result.update(value=value, unit=content_unit, per_unit=per_unit,
+                      basis="explicit_description", text=counts[0][3][:100])
+    return result
+
+
 def _lines(words):
     rows = []
     for word in sorted(words, key=lambda w: (w[1], w[0])):
@@ -111,6 +171,12 @@ def _candidate(row):
     else:
         problems.append("Preisberechnung unvollständig; kein Gebindepreis übernommen.")
     packaging, unit = _packaging(name, content, values["measure"])
+    package_evidence = explicit_package_evidence(name, unit)
+    # ME belongs to the *content/price* column. With 'Inhalt 25 Stück'
+    # it does not prove that Menge=2 means 2 pieces rather than 2 packages.
+    invoice_unit = material_unit(unit)
+    if values["measure"] != "Ltr/KG" and content != 1:
+        invoice_unit = None
     if values["measure"] == "Ltr/KG":
         explicit_size = re.fullmatch(r"(\d+(?:\.\d+)?) (L|ml|kg)", packaging)
         if explicit_size is None:
@@ -121,15 +187,22 @@ def _candidate(row):
             if described != content:
                 problems.append("Gebindeangabe der Beschreibung widerspricht der Inhaltsspalte.")
                 price = ""
+                package_evidence.update(value=None, unit=None, per_unit=None, basis="unknown")
     dimensions = re.findall(r"(?:Ø\s*)?\d+(?:[.,]\d+)?\s*(?:[x×]\s*\d+(?:[.,]\d+)?\s*)?(?:mm|mtr|µm)\b", name, re.I)
     grits = re.findall(r"\bP\d{2,4}\b", name)
     return {
         "produkt_name": name, "artikelnummer": row["article"],
         "produkt_beschreibung": name, "stueckzahl": _plain(quantity) or None,
-        "ve": unit, "gebinde": packaging, "groesse": " / ".join(dimensions + grits),
+        "ve": invoice_unit or "", "gebinde": packaging, "groesse": " / ".join(dimensions + grits),
         "preis": price, "kategorie": "Material", "verified": False,
         "price_verified": False, "preis_geprueft": False, "pruefen": True,
         "auslese_hinweise": problems,
+        "quantity_evidence": {
+            "value": _plain(quantity) or None,
+            "unit": invoice_unit, "basis": "invoice_line" if quantity else "unknown",
+            "source_field": "Menge", "verified": False,
+        },
+        "package_evidence": package_evidence,
         "price_evidence": {
             "value": price, "basis": "gebindepreis_netto_abgeleitet" if price else "unknown",
             "verified": False, "reconciled": bool(price),

@@ -9,9 +9,12 @@ for Lexware, get_requests() and its configured credentials.
 Importing this module does not import/start the Flask app or perform any I/O.
 
 Result: {status, source, candidates, coverage, warnings}. Status is ok, partial,
-unavailable or error. Source contains kind/id/supplier/reference only; candidates
+unavailable or error. Source contains kind/id/supplier/reference and the known
+invoice date (never ingestion date); candidates
 preserve produkt_name, artikelnummer, stueckzahl, ve, produkt_beschreibung, preis
 and kategorie, plus page provenance. Every candidate and price is UNVERIFIED.
+Quantity evidence is separate from explicit package contents. Old parser
+default=1 is never treated as proof; missing or ambiguous quantities stay None.
 Generic ``preis`` values have unknown basis. The recognized Topcolor table can
 derive a net package price with explicit calculation/provenance, still marked
 unverified. Neither kind is an agreed purchase price. Supplier comes exclusively
@@ -31,13 +34,15 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
-import math
 import pathlib
 import re
+from datetime import date
 import tempfile
 import threading
 import time
 import uuid
+
+from werkstatt_topcolor_positionen import explicit_package_evidence, material_unit, quantity_value
 
 
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -69,6 +74,54 @@ def _warn(result, message):
         result["warnings"].append(message)
 
 
+def invoice_date(value):
+    """Known invoice dates only; never fall back to ingestion timestamps."""
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:T[^\s]{1,30})?", raw):
+        raw = raw[:10]
+    elif re.fullmatch(r"\d{2}\.\d{2}\.\d{4}", raw):
+        raw = raw[6:] + "-" + raw[3:5] + "-" + raw[:2]
+    else:
+        return None
+    try:
+        return date.fromisoformat(raw).isoformat()
+    except ValueError:
+        return None
+
+
+def _date_from_text(text, result):
+    if result["source"].get("date"):
+        return
+    dates = {invoice_date(match) for match in re.findall(
+        r"\bRechnungsdatum\s*[:=]?\s*(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})\b", text[:12000], re.I)}
+    dates.discard(None)
+    if len(dates) == 1:
+        result["source"]["date"] = next(iter(dates))
+
+
+def _generic_quantity(position):
+    # Both old text and AI normalization use default=1. A supplied stueckzahl
+    # therefore is NOT evidence. Only an explicit quantity label in the source
+    # excerpt proves the distinction from the product's package size.
+    result = {"value": None, "unit": None, "basis": "unknown",
+              "source_field": None, "verified": False}
+    texts = [_text(position.get(key), 1000) for key in ("quelle", "produkt_beschreibung")]
+    matches = []
+    pattern = r"\b(?:Rechnungsmenge|Bestellmenge|Menge|Anzahl)\s*[:=]?\s*(\d+(?:[.,]\d{1,6})?)\s*([A-Za-zÄÖÜäöüß.]+)\b"
+    for text in texts:
+        for match in re.finditer(pattern, text, re.I):
+            # A solitary three-digit dot fraction is also a DE thousands form.
+            value = None if re.fullmatch(r"[1-9]\d*\.\d{3}", match[1]) else quantity_value(match[1])
+            unit = material_unit(match[2])
+            if value and unit:
+                matches.append((value, unit))
+    if len(set(matches)) == 1:
+        result.update(value=matches[0][0], unit=matches[0][1], basis="invoice_line", source_field="Menge")
+    return result
+
+
 def _result(kind, row_id):
     return {
         "status": "unavailable",
@@ -88,7 +141,7 @@ def _row(portal, kind, source_id):
                "extrahierter_text, status FROM einkauf_belege WHERE id=?")
     elif kind == "lexware":
         sql = ("SELECT id, voucher_id, voucher_type, voucher_status, status, "
-               "contact_name, voucher_number FROM lexware_rechnungen WHERE voucher_id=?")
+               "contact_name, voucher_number, voucher_date FROM lexware_rechnungen WHERE voucher_id=?")
     else:
         raise SourceUnavailable("Diese Rechnungsquelle wird nicht unterstützt.")
     db = portal.get_db()
@@ -231,19 +284,16 @@ def _candidate(position, source, file_id, page, digest, native=False):
     price = _text(position.get("preis"), 60).replace("EUR", "").replace("€", "").strip()
     if price and not re.fullmatch(r"-?\d[\d., ]{0,40}", price):
         price = ""
-    try:
-        quantity = float(position.get("stueckzahl") or 1)
-        if not math.isfinite(quantity) or quantity <= 0 or quantity > 1000000:
-            quantity = 1
-        quantity = int(quantity) if quantity.is_integer() else quantity
-    except (TypeError, ValueError, OverflowError):
-        quantity = 1
+    quantity = _generic_quantity(position)
     provenance = dict(source, file_id=file_id, page=page, sha256=digest)
     item = {
         "produkt_name": name,
         "artikelnummer": article,
-        "stueckzahl": quantity,
-        "ve": _text(position.get("ve"), 40),
+        "stueckzahl": quantity["value"],
+        "ve": material_unit(position.get("ve")) or "",
+        "gebinde": _text(position.get("gebinde"), 200),
+        "groesse": _text(position.get("groesse"), 100),
+        "farbe": _text(position.get("farbe"), 100),
         "produkt_beschreibung": _text(position.get("produkt_beschreibung"), 500),
         "preis": price,
         "kategorie": _text(position.get("kategorie"), 80) or "Material",
@@ -251,20 +301,25 @@ def _candidate(position, source, file_id, page, digest, native=False):
         "verified": False,
         "price_verified": False,
         "price_evidence": {"value": price, "basis": "unknown", "verified": False},
+        "quantity_evidence": quantity,
+        "package_evidence": explicit_package_evidence(name, position.get("ve")),
         "source": provenance,
     }
     if native:
         # Only our positional parser reaches this path, never model-supplied
         # flags. Derived prices stay unverified and carry their exact basis.
         item.update({key: position.get(key) for key in (
-            "gebinde", "groesse", "preis_geprueft", "pruefen", "auslese_hinweise", "price_evidence")})
+            "gebinde", "groesse", "preis_geprueft", "pruefen", "auslese_hinweise", "price_evidence",
+            "quantity_evidence", "package_evidence")})
         item["stueckzahl"] = position.get("stueckzahl")
         item["source"].update(position["native_source"])
+    item["source"]["quantity_version"] = 1
     return item
 
 
 def _extract_page(portal, path, filename, text, result, file_id, page, digest):
     complete = True
+    _date_from_text(text, result)
     if len(text) > MAX_PAGE_TEXT:
         _warn(result, "Ein ungewöhnlich langer Seitentext wurde begrenzt; die Auslese ist unvollständig.")
         text = text[:MAX_PAGE_TEXT]
@@ -340,6 +395,8 @@ def _read_file(portal, path, file_id, result, directory):
             if len(document) > remaining:
                 _warn(result, "Die Rechnung überschreitet die Seitengrenze; sie ist noch nicht vollständig ausgelesen.")
             from werkstatt_topcolor_positionen import parse_topcolor_pages
+            if len(document):
+                _date_from_text(document[0].get_text() or "", result)
             native = parse_topcolor_pages([
                 {"page": index + 1, "height": document[index].rect.height,
                  "words": document[index].get_text("words")}
@@ -381,8 +438,9 @@ def _read_file(portal, path, file_id, result, directory):
                     _warn(result, "Mindestens eine Rechnungsseite konnte nicht gelesen werden.")
                 finally:
                     page_path.unlink(missing_ok=True)
-    elif prefix.startswith(b"\x89PNG\r\n\x1a\n") or prefix.startswith(b"\xff\xd8\xff"):
-        suffix = ".png" if prefix.startswith(b"\x89PNG") else ".jpg"
+    elif (prefix.startswith(b"\x89PNG\r\n\x1a\n") or prefix.startswith(b"\xff\xd8\xff")
+          or (prefix.startswith(b"RIFF") and prefix[8:12] == b"WEBP")):
+        suffix = ".png" if prefix.startswith(b"\x89PNG") else (".webp" if prefix[8:12] == b"WEBP" else ".jpg")
         image_path = directory / f"{file_id}{suffix}"
         if image_path != path:
             image_path.write_bytes(path.read_bytes())
@@ -441,6 +499,7 @@ def read_source(portal, source_kind, source_id):
         row = _row(portal, kind, row_id)
         result["source"]["supplier"] = _text(row.get("lieferant" if kind == "einkauf" else "contact_name"), 240)
         result["source"]["reference"] = _text(row.get("original_name" if kind == "einkauf" else "voucher_number"), 240)
+        result["source"]["date"] = invoice_date(row.get("voucher_date"))
         if not result["source"]["supplier"]:
             _warn(result, "Der Lieferant ist in der Quelle nicht zugeordnet und muss geprüft werden.")
         with tempfile.TemporaryDirectory(prefix="werkstatt-rechnungsquelle-") as temporary:
@@ -463,7 +522,20 @@ def read_source(portal, source_kind, source_id):
                 stored = str(row.get("stored_name") or "")
                 upload_root = pathlib.Path(portal.UPLOAD_DIR).resolve()
                 path = (upload_root / stored).resolve()
-                if not stored or "/" in stored or "\\" in stored or not path.is_relative_to(upload_root) or not path.is_file():
+                safe_name = bool(stored and "/" not in stored and "\\" not in stored
+                                 and path.is_relative_to(upload_root) and path.parent == upload_root)
+                available = safe_name and path.is_file()
+                if safe_name and not available:
+                    # Restore only the exact known local original from its
+                    # private persisted blob. Never reconnect to IMAP, reimport
+                    # a message or guess a new receipt when a file disappears.
+                    restore = getattr(portal, "assistant_mail_sources_restore_file", None)
+                    if callable(restore):
+                        try:
+                            available = restore(stored) is True and path.is_file() and path.resolve().parent == upload_root
+                        except Exception:
+                            _warn(result, "Die lokale Sicherung des Rechnungsoriginals konnte nicht geprüft werden.")
+                if not available:
                     _warn(result, "Die Originaldatei der Einkaufsrechnung ist nicht verfügbar.")
                     _stored_text(portal, row, result)
                 else:

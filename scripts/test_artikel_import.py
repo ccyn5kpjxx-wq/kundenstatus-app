@@ -90,6 +90,77 @@ class CatalogTests(unittest.TestCase):
         self.update("UPDATE assistent_rechnungsimporte SET state='offen'")
         self.assertEqual(self.process(extracted(candidate()))['vorschlaege'], 1)
 
+    def test_evidence_extension_updates_same_observation_and_keeps_explicit_units(self):
+        self.process(extracted(candidate()))
+        before = self.catalog.search('')[0]
+        # Simulate a stored proposal written before structured quantity evidence.
+        old = dict(before)
+        for key in ('quantity_evidence', 'package_evidence', 'evidence_version', 'vorschlag_id'):
+            old.pop(key, None)
+        old['quelle'].pop('datum', None)
+        self.update('UPDATE assistent_rechnungsartikel SET payload_json=?', (json.dumps(old),))
+        legacy = self.catalog.knowledge_rows()['items'][0]
+        self.assertEqual(legacy['menge'], '2')
+        self.assertIsNone(legacy['quantity_evidence']['value'])
+        self.assertEqual(legacy['quantity_evidence']['basis'], 'unknown')
+        row = candidate(quantity_evidence={'value': '2', 'unit': 'Rollen', 'basis': 'invoice_line',
+            'source_field': 'Menge', 'verified': True, 'bank': 'private-bank-marker'},
+            package_evidence={'value': '6', 'unit': 'Rolle', 'per_unit': 'Karton',
+                'basis': 'explicit_description', 'text': '6 Rollen/Karton', 'verified': True},
+            source={'page': 1, 'line': 1, 'date': '2026-09-14'})
+        self.assertTrue(self.catalog.retry_source(self.catalog.status()['quellen'][0]['id']))
+        self.process(extracted(row))
+        after = self.catalog.search('')[0]
+        self.assertEqual(after['vorschlag_id'], before['vorschlag_id'])
+        self.assertEqual(self.catalog.rows('SELECT COUNT(*) AS n FROM assistent_rechnungsartikel')[0]['n'], 1)
+        self.assertEqual(after['quantity_evidence']['value'], '2')
+        self.assertEqual(after['quantity_evidence']['unit'], 'Rolle')
+        self.assertFalse(after['quantity_evidence']['verified'])
+        self.assertEqual(after['package_evidence']['value'], '6')
+        self.assertEqual(after['package_evidence']['per_unit'], 'Karton')
+        self.assertEqual(after['quantity_evidence']['source']['datum'], '2026-09-14')
+        self.assertEqual(after['package_evidence']['source']['zeile'], 1)
+        self.assertNotIn('private-bank-marker', json.dumps(after))
+        self.assertFalse(after['bestellbar'])
+
+    def test_quantity_and_package_evidence_fail_closed_without_labels_or_valid_units(self):
+        self.process(extracted(candidate(
+            quantity_evidence={'value': '25', 'unit': 'Pack', 'verified': True},
+            package_evidence={'value': '25', 'unit': 'IBAN private-bank-marker', 'per_unit': 'Pack',
+                'basis': 'explicit_description', 'text': 'IBAN DE02120300000000202051'},
+            source={'page': 1, 'date': 'not a date'})))
+        article = self.catalog.search('')[0]
+        self.assertEqual(article['quantity_evidence']['basis'], 'unknown')
+        self.assertEqual(article['package_evidence']['basis'], 'unknown')
+        self.assertIsNone(article['quelle']['datum'])
+        self.assertNotIn('private-bank-marker', json.dumps(article))
+        self.assertNotIn('DE021203', json.dumps(article))
+
+    def test_knowledge_rows_scope_limit_and_counts_do_not_trigger_read_or_leak_blocked_data(self):
+        self.process(extracted(candidate(), candidate(produkt_name='Schleifpapier')))
+        self.catalog.prepare({'einkaufsbelege': [
+            {'id': 2, 'lieferant': 'Unknown supplier', 'original_name': 'unknown.pdf'},
+            {'id': 3, 'lieferant': 'Volksbank Muster', 'original_name': 'private-bank-marker.pdf'},
+        ], 'lieferantenrechnungen': []})
+        with patch('werkstatt_artikel_import.read_source', side_effect=AssertionError('Read-only query')), \
+             patch.object(self.catalog, 'status', side_effect=AssertionError('Must not reload all payloads')):
+            result = self.catalog.knowledge_rows(limit=1)
+            self.assertTrue(result['truncated'])
+            self.assertTrue(result['coverage']['positionen_begrenzt'])
+            self.assertEqual(len(result['items']), 1)
+            self.assertEqual(result['coverage']['positionen'], 2)
+            self.assertEqual(result['coverage']['quellen_gesamt'], 3)
+            self.assertEqual(result['coverage']['freigegebene_quellen'], 1)
+            self.assertEqual(result['coverage']['ungeklaerte_quellen'], 1)
+            self.assertNotIn('Volksbank', json.dumps(result))
+            self.assertNotIn('private-bank-marker', json.dumps(result))
+            complete = self.catalog.knowledge_rows()
+            self.assertFalse(complete['truncated'])
+            self.assertFalse(complete['coverage']['positionen_begrenzt'])
+            self.assertEqual(len(complete['items']), 2)
+            self.portal.settings['ASSISTANT_MATERIAL_SUPPLIERS'] = '[]'
+            self.assertEqual(self.catalog.knowledge_rows()['items'], [])
+
     def test_new_sources_prioritize_requested_suppliers_without_aliasing(self):
         suppliers = ['Other Supplier', 'Tech Masters', 'Car-Parts', 'Topcolor', 'Auto-Color']
         rows = [{'id': index, 'lieferant': supplier, 'original_name': 'invoice.pdf'}

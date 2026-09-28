@@ -1,0 +1,14 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lieferantenpostfach einlesen</title><link rel="stylesheet" href="{{ url_for('static',filename='assistent.css') }}"></head><body><main>
+<nav><a href="/admin/mail">Zum Postfach</a> · <a href="/admin/assistent-artikel">Artikel aus Rechnungen</a></nav>
+<h1>Lieferantenquellen aus dem Postfach</h1>
+<p>Der Import erfasst die Absender aller zulässigen Ordner. Bank-, Finanz- und erkennbare Privatordner bleiben ungeöffnet. Nur eindeutig zugeordnete Materiallieferanten werden auf Rechnungsanhänge geprüft. Postfachnachrichten werden weder als gelesen markiert noch verschoben.</p>
+<p>Rechnungsdateien werden für die getrennte Artikelauslese gespeichert. Andere E-Mails, eigene gesendete Nachrichten, Retouren, Gutschriften und Datenblätter sind damit noch nicht inhaltlich ausgewertet. Daraus entstehen keine Bestellungen, Artikelpreise oder Bestellfreigaben.</p>
+<form id="mail-source-form">{{ csrf_field()|safe }}<button id="mail-source-start">Einlesen starten / fortsetzen</button><button id="mail-source-stop" type="button" disabled>Nach diesem Schritt pausieren</button></form>
+<p id="mail-source-progress" role="status" aria-live="polite"></p><p id="mail-source-hint"></p>
+<p>Beim Schließen dieser Seite läuft nur der aktuelle Schritt zu Ende. Erneutes Starten setzt den gespeicherten Stand fort. Nach einem abgeschlossenen Durchlauf beginnt eine neue Momentaufnahme; bereits gespeicherte Dateien werden nicht nochmals angelegt.</p>
+<h2>Erfasste Ordner</h2><ul id="mail-source-folders"></ul>
+<h2>Absender zuordnen</h2><p>Hier stehen höchstens 100 noch unbekannte Absendergruppen. Zum Bearbeiten zuerst pausieren oder den Durchlauf abwarten. Eine Zuordnung erlaubt ausschließlich das Lesen ihrer Materialbelege. Sie bestätigt keine Bestelladresse. Erst nach dem Zuordnen weiter einlesen.</p><div id="mail-source-unknown"></div>
+<h2>Zuletzt geprüfte Lieferantenquellen</h2><p>Die neuesten 50 Quellen. „Weitere Quelle“ bedeutet: noch keine vollständige Inhaltsauswertung.</p><div id="mail-source-results"></div>
+<p><a href="/admin/assistent-artikel">Übernommene Rechnungen anschließend zu Artikelvorschlägen auslesen</a></p>
+<script id="mail-source-initial" type="application/json">{{ report|tojson }}</script><script src="{{ url_for('static',filename='assistent-mailquellen.js',v='1') }}" defer></script>
+</main></body></html>

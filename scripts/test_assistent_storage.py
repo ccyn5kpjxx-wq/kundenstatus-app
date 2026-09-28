@@ -1,5 +1,9 @@
 """Offline regressions for natural-key PG inserts and the restore schema hook."""
 import sqlite3
+import base64
+import hashlib
+import io
+import zipfile
 import tempfile
 import types
 import unittest
@@ -39,6 +43,44 @@ class AssistantStorageTests(unittest.TestCase):
     tearDown = fixture.AssistantTests.tearDown
     make_client = fixture.AssistantTests.make_client
     post = fixture.AssistantTests.post
+
+    def test_mail_attachment_backup_externalizes_and_preserves_original_bytes(self):
+        raw = b'%PDF-1.4 synthetic invoice attachment'
+        p.assistant_mail_sources_init_schema()
+        with fixture.database() as db:
+            db.execute('''INSERT INTO assistent_mailquellen_dateien
+                (sha256,supplier,beleg_id,stored_name,original_name,file_base64,size,created_at)
+                VALUES(?,?,?,?,?,?,?,?)''', (hashlib.sha256(raw).hexdigest(), 'Synthetic materials', 1,
+                'synthetic.pdf', 'synthetic.pdf', base64.b64encode(raw).decode(), len(raw), '2026-09-28'))
+            stream = io.BytesIO()
+            with zipfile.ZipFile(stream, 'w') as archive:
+                rows, references, size = p.write_table_rows_and_binary_blobs(db, archive, 'assistent_mailquellen_dateien')
+        self.assertEqual(rows[0]['file_base64'], '')
+        self.assertEqual(size, len(raw))
+        self.assertEqual(references[0]['sha256'], hashlib.sha256(raw).hexdigest())
+        with zipfile.ZipFile(stream) as archive:
+            self.assertEqual(archive.read(references[0]['zip_path']), raw)
+
+    def test_mail_source_restore_schema_and_backup_feature_preserve_cursor(self):
+        from werkstatt_mailquellen import TABLES
+        self.assertTrue(set(TABLES) <= set(p.BACKUP_TABLES))
+        self.assertIn('werkstatt_mailquellen_v1', p.BACKUP_SCHEMA_FEATURES)
+        routes_before=len(list(p.app.url_map.iter_rules()))
+        with tempfile.TemporaryDirectory() as temporary:
+            path=Path(temporary)/'old-backup.db'
+            def restored_db():
+                db=sqlite3.connect(path); db.row_factory=sqlite3.Row; return db
+            with patch.object(p,'get_db',side_effect=restored_db):
+                p.assistant_mail_sources_init_schema()
+                with closing(restored_db()) as db:
+                    db.execute("INSERT INTO assistent_mailquellen_laeufe(account,run_token,state,started_at) VALUES('synthetic','run','paused','2026-09-28')")
+                    db.commit()
+                p.assistant_mail_sources_init_schema()
+                with closing(restored_db()) as db:
+                    actual={row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                    self.assertTrue(set(TABLES) <= actual)
+                    self.assertEqual(db.execute('SELECT state FROM assistent_mailquellen_laeufe').fetchone()[0],'paused')
+        self.assertEqual(len(list(p.app.url_map.iter_rules())),routes_before)
 
     def adapted_db(self, statements):
         sqlite = self.original_get_db()
