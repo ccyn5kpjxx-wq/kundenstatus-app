@@ -15,6 +15,15 @@
 [data-character="drache"] .avatar-portrait,.avatar-option-art[data-character="drache"]{background-image:url('avatars/drache-sprite.png')}
 [data-character="zauberfuchs"] .avatar-portrait,.avatar-option-art[data-character="zauberfuchs"]{background-image:url('avatars/zauberfuchs-sprite.png')}
 [data-character="einhorn"] .avatar-portrait,.avatar-option-art[data-character="einhorn"]{background-image:url('avatars/einhorn-sprite.png')}
+[data-character="phoenix"] .avatar-portrait,.avatar-option-art[data-character="phoenix"]{background-image:url('avatars/phoenix-sprite.png')}
+[data-character="greif"] .avatar-portrait,.avatar-option-art[data-character="greif"]{background-image:url('avatars/greif-sprite.png')}
+[data-character="waldgeist"] .avatar-portrait,.avatar-option-art[data-character="waldgeist"]{background-image:url('avatars/waldgeist-sprite.png')}
+.avatar-home [data-character="phoenix"] .avatar{border-radius:30px;background:linear-gradient(150deg,#f0dfc5,#d9bfa7)}
+.avatar-home [data-character="greif"] .avatar{border-radius:30px;background:linear-gradient(150deg,#e1e7e6,#b6cdd3)}
+.avatar-home [data-character="waldgeist"] .avatar{border-radius:30px;background:linear-gradient(150deg,#dce6cd,#a9c0a0)}
+.avatar-option-art[data-character="phoenix"]{background-color:#ead9c3}
+.avatar-option-art[data-character="greif"]{background-color:#cddce1}
+.avatar-option-art[data-character="waldgeist"]{background-color:#ccdabd}
 .avatar-home [data-character="drache"] .avatar{border-radius:30px;background:linear-gradient(150deg,#d7e6c7,#acc4a9)}
 .avatar-home [data-character="zauberfuchs"] .avatar{border-radius:30px;background:linear-gradient(150deg,#ede3cd,#c4cdbd)}
 .avatar-home [data-character="einhorn"] .avatar{border-radius:30px;background:linear-gradient(150deg,#eee6ef,#c7c6e0)}
@@ -67,6 +76,7 @@
 .avatar-more{margin:8px 0 20px;color:var(--muted)}
 .avatar-more>summary{font-size:13px;font-weight:500}
 .avatar-more .avatar-choices{margin:16px 0}
+.avatar-fantasy-grid .avatar-option-art{aspect-ratio:1.3;background-size:200% auto}
 @media(max-width:500px){.avatar-option-check{position:absolute;top:10px;right:10px;display:grid;place-items:center;width:19px;height:19px;border-radius:50%;background:#102025dc}}
 #avatar-picker-status{min-height:21px;color:var(--accent);margin-bottom:8px}
 #avatar-picker .avatar-picker-help{font-size:12px;line-height:1.6;border-top:1px solid var(--line);padding-top:16px;margin-bottom:0}

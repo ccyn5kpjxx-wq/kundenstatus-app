@@ -76,7 +76,7 @@ function pickerFixture(character = 'chris') {
   elements.assistant.dataset.character = character;
   elements.avatar.dataset.state = 'thinking';
   elements.avatar.children = [new Element()];
-  const options = ['chris', 'mila', 'robot', 'drache', 'zauberfuchs', 'einhorn', 'unexpected'].map(character => new Element({characterOption: character}));
+  const options = ['chris', 'mila', 'robot', 'drache', 'zauberfuchs', 'einhorn', 'phoenix', 'greif', 'waldgeist', 'unexpected'].map(character => new Element({characterOption: character}));
   elements['avatar-picker'].children = options;
   elements['avatar-name'].textContent = 'Existing personal name';
   const token = {content: 'synthetic-csrf'};
@@ -161,7 +161,7 @@ function pickerFixture(character = 'chris') {
   assert.ok(picker.elements['avatar-choose'].focusCount > 0);
   assert.equal(picker.elements['avatar-name'].textContent, 'Existing personal name');
   assert.equal(picker.time.timers.size, 0, 'save timeout cleaned up');
-  assert.equal(picker.options[6].disabled, true, 'unknown figures cannot be selected');
+  assert.equal(picker.options.find(button => button.dataset.characterOption === 'unexpected').disabled, true, 'unknown figures cannot be selected');
   await picker.window.emit('pagehide');
   assert.equal(picker.app.animation.suspended, true);
   await picker.window.emit('pageshow');
@@ -203,7 +203,7 @@ function pickerFixture(character = 'chris') {
   assert.equal(missingToken.requests.length, 0);
   assert.match(missingToken.elements['avatar-picker-status'].textContent, /Anmeldung/);
   missingToken.app.destroy();
-  for (const [character, label] of [['drache', 'Drache'], ['zauberfuchs', 'Zauberfuchs'], ['einhorn', 'Einhorn']]) {
+  for (const [character, label] of [['drache', 'Drache'], ['zauberfuchs', 'Zauberfuchs'], ['einhorn', 'Einhorn'], ['phoenix', 'Phönix'], ['greif', 'Greif'], ['waldgeist', 'Waldgeist']]) {
     const fantasy = pickerFixture();
     const option = fantasy.options.find(button => button.dataset.characterOption === character);
     assert.equal(option.disabled, false);

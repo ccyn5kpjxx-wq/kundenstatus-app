@@ -26,7 +26,7 @@ from PIL import Image, UnidentifiedImageError
 
 VOICES = ("alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
 STYLES = {"ruhig": "ruhig und sachlich", "kollegial": "freundlich und kollegial", "knapp": "sehr knapp und direkt"}
-CHARACTERS = ("chris", "mila", "robot", "drache", "zauberfuchs", "einhorn")
+CHARACTERS = ("chris", "mila", "robot", "drache", "zauberfuchs", "einhorn", "phoenix", "greif", "waldgeist")
 DEFAULT_CHARACTER = "drache"
 
 

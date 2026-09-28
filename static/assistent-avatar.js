@@ -1,7 +1,7 @@
 /* Decorative, state-driven portrait animation; no audio capture or phoneme analysis. */
 (function (host) {
   'use strict';
-  const CHARACTERS = Object.freeze({drache: 'Drache', zauberfuchs: 'Zauberfuchs', einhorn: 'Einhorn', chris: 'Chris', mila: 'Mila', robot: 'Roboter'});
+  const CHARACTERS = Object.freeze({drache: 'Drache', zauberfuchs: 'Zauberfuchs', einhorn: 'Einhorn', phoenix: 'Phönix', greif: 'Greif', waldgeist: 'Waldgeist', chris: 'Chris', mila: 'Mila', robot: 'Roboter'});
   const knownCharacter = value => Object.prototype.hasOwnProperty.call(CHARACTERS, value);
 
   class AvatarAnimationController {

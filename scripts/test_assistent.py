@@ -350,7 +350,9 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(self.post('/profil',preferences).status_code,200)
         before=self.rendered_profile()
         self.assertEqual(before['character'],'drache')
-        for character in ('drache','zauberfuchs','einhorn','chris','mila','robot'):
+        with database() as db:
+            rights_before=dict(db.execute('SELECT * FROM assistent_rechte WHERE mitarbeiter_id=1').fetchone())
+        for character in ('drache','zauberfuchs','einhorn','phoenix','greif','waldgeist','chris','mila','robot'):
             with self.subTest(character=character):
                 self.assertEqual(self.post('/profil',dict(preferences,character=character)).status_code,200)
                 self.assertEqual(self.post('/avatar',{'character':character}).json,{'ok':True,'character':character})
@@ -358,7 +360,9 @@ class AssistantTests(unittest.TestCase):
                 # Old clients may save names/voices without knowing new figures.
                 self.assertEqual(self.post('/profil',preferences).status_code,200)
                 self.assertEqual(self.rendered_profile(),dict(before,character=character))
-                with database() as db:self.assertEqual(db.execute("SELECT character FROM assistent_profile WHERE actor='mitarbeiter:1'").fetchone()[0],character)
+                with database() as db:
+                    self.assertEqual(db.execute("SELECT character FROM assistent_profile WHERE actor='mitarbeiter:1'").fetchone()[0],character)
+                    self.assertEqual(dict(db.execute('SELECT * FROM assistent_rechte WHERE mitarbeiter_id=1').fetchone()),rights_before)
 
     def test_profile_character_and_old_color_are_independent_and_invalid_is_atomic(self):
         first={'name':'Werkstatt','stil':'knapp','stimme':'ash','avatar':'kupfer','character':'robot'}

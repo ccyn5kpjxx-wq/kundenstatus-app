@@ -32,7 +32,7 @@ Dienste; ihre Existenz aktiviert keinen Versand im Avatar.
 ## Figuren auswählen
 
 Direkt oben auf `/werkstatt/assistent` öffnet **Avatar wählen** die Fabeltiere
-Drache, Zauberfuchs und Einhorn. Chris, Mila und Roboter bleiben unter **Weitere
+Drache, Zauberfuchs, Einhorn, Phönix, Greif und Waldgeist. Chris, Mila und Roboter bleiben unter **Weitere
 Figuren** erreichbar. Für neue Profile ist der Drache vorausgewählt; vorhandene
 Auswahlen bleiben erhalten. Die Figur wird pro angemeldeter Person gespeichert;
 Rufname, Stimme und die bisherigen Roboterfarben bleiben unabhängig davon.
