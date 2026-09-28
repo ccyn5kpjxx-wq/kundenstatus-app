@@ -9,10 +9,19 @@ separate Angaben. Im Admin-Auftrag führt **Werkstattzettel** zur Druckansicht.
 ## Zugang und Daten
 
 Admins verwenden ihre bestehende Anmeldung. Mitarbeiter benötigen einen aktiven
-Mitarbeiterdatensatz, die Werkstatt-Anmeldung und einen persönlichen Zugang, den
-die Leitung unter `/werkstatt/assistent/rechte` einrichtet. Rechte werden bei jedem
+Mitarbeiterdatensatz und einen persönlichen Zugang, den die Leitung unter
+`/werkstatt/assistent/rechte` einrichtet. Die Mitarbeiterverwaltung verlinkt die
+Seite unter **Avatar-Zugänge**. Im nativen Betrieb ist kein zusätzlicher gemeinsamer
+Werkstatt-Code nötig; die persönliche Anmeldung öffnet ausschließlich den Avatar
+und verleiht keine Admin- oder Werkstatt-Tafel-Sitzung. Rechte werden bei jedem
 Zugriff erneut geprüft. Der Avatar liest die gemeinsame Cockpit-Datenquelle direkt;
 ein zusätzlicher API-Schlüssel oder Listenimport ist dafür nicht erforderlich.
+
+Für neue Zugänge sind Auftrags- und Artikel-Leserechte vorausgewählt, Dokumentation
+und Einkaufsbudget bleiben auf null. Erst ein persönliches Passwort (mindestens
+12 Zeichen) und **Persönlichen Zugang einrichten** aktivieren den Zugang. Bestehende Passwörter
+bleiben bei leerem Passwortfeld erhalten. Die Leitung gibt jedem Mitarbeiter seine
+eigene ID und sein eigenes Passwort über einen geschützten Weg weiter.
 
 Die Produktionsintegration startet mit `ASSISTANT_READ_ONLY=true`. Änderungen,
 Fotos, Fortschrittsmeldungen und Bestellungen über den Avatar sind gesperrt.

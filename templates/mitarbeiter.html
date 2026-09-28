@@ -89,7 +89,10 @@
       <h1 class="mb-2">Team und Urlaub</h1>
       <p class="mb-0 text-muted">Mitarbeiter pflegen, Urlaub direkt am Mitarbeiter eintragen und automatisch im Kalender sehen.</p>
     </div>
-    <a href="{{ url_for('kalender') }}" class="btn btn-soft">Zum Kalender</a>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="{{ url_for('assistent.rights') }}" class="btn btn-brand">Avatar-Zugänge</a>
+      <a href="{{ url_for('kalender') }}" class="btn btn-soft">Zum Kalender</a>
+    </div>
   </div>
 </div>
 

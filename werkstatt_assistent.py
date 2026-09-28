@@ -91,7 +91,7 @@ def register_assistant(p):
         if session.get("admin"):
             return {"actor": "admin", "lesen": 1, "dokumentieren": 1, "einkaufen": 1, "limit_cent": 0}
         mid = session.get("assistent_mid")
-        if not mid or not p.werkstatt_tafel_session_ok():
+        if not mid or (not p.app.config["ASSISTANT_NATIVE_COCKPIT"] and not p.werkstatt_tafel_session_ok()):
             return None
         with db_scope() as db:
             row = db.execute("SELECT r.*, m.aktiv FROM assistent_rechte r JOIN mitarbeiter m ON m.id=r.mitarbeiter_id WHERE r.mitarbeiter_id=?", (mid,)).fetchone()
@@ -205,7 +205,7 @@ def register_assistant(p):
 
     @bp.route("", methods=["GET"])
     def page():
-        if not p.werkstatt_tafel_session_ok():
+        if not p.app.config["ASSISTANT_NATIVE_COCKPIT"] and not p.werkstatt_tafel_session_ok():
             return redirect(url_for("werkstatt_login"))
         who = identity()
         return render_template("assistent.html", who=who, profile=profile(who) if who else None, ready=bool(p.get_openai_api_key()), voices=VOICES, styles=STYLES, read_only=read_only())
@@ -234,7 +234,7 @@ def register_assistant(p):
 
     @bp.post("/login")
     def login():
-        if not p.werkstatt_tafel_session_ok():
+        if not p.app.config["ASSISTANT_NATIVE_COCKPIT"] and not p.werkstatt_tafel_session_ok():
             abort(403)
         limited, _ = p.login_rate_limit_status("assistent", "login")
         if limited:
@@ -245,6 +245,9 @@ def register_assistant(p):
             p.record_failed_login("assistent", "login")
             return jsonify(error="Anmeldung fehlgeschlagen."), 401
         p.clear_login_attempts("assistent", "login")
+        # Personal avatar access is independent of the shared workshop/admin
+        # session. Use the existing portal session lifetime (default: 8h idle).
+        session.permanent = True
         session["assistent_mid"] = row["mitarbeiter_id"]
         session["assistent_version"] = row["version"]
         return redirect(url_for("assistent.page"))
@@ -274,7 +277,7 @@ def register_assistant(p):
                 audit(db, {"actor": "admin"}, None, "rechte", json.dumps({"mitarbeiter": mid, "flags": flags, "limit_cent": limit}))
             employees = [dict(r) for r in db.execute("SELECT m.id,m.name,r.lesen,r.dokumentieren,r.einkaufen,r.limit_cent FROM mitarbeiter m LEFT JOIN assistent_rechte r ON r.mitarbeiter_id=m.id WHERE m.aktiv=1 ORDER BY m.name").fetchall()]
             events = [dict(r) for r in db.execute("SELECT * FROM assistent_audit ORDER BY id DESC LIMIT 100").fetchall()]
-        return render_template("assistent_rechte.html", employees=employees, events=events)
+        return render_template("assistent_rechte.html", employees=employees, events=events, read_only=read_only())
 
     @bp.post("/profil")
     @protected

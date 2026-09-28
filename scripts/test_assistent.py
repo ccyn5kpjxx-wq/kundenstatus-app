@@ -101,6 +101,72 @@ class AssistantTests(unittest.TestCase):
         with database() as db: db.execute('UPDATE assistent_rechte SET version=2 WHERE mitarbeiter_id=1')
         self.assertEqual(client.get('/werkstatt/assistent/auftrag/156').status_code,401)
 
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_native_personal_login_without_workshop_code_or_privilege_escalation(self):
+        self.guard.stop()  # Exercise the real workshop gate: no shared code/session.
+        client=p.app.test_client()
+        response=client.get('/werkstatt/assistent')
+        self.assertEqual(response.status_code,200)
+        self.assertIn('name="mitarbeiter_id"',response.text)
+        self.assertNotIn('Keine Freigabe',response.text)
+        with client.session_transaction() as s:
+            token=s['csrf_token']
+            self.assertFalse(s.get('werkstatt_tafel'))
+            self.assertFalse(s.get('admin'))
+        data={'mitarbeiter_id':'1','password':'test-passwort-123'}
+        self.assertEqual(client.post('/werkstatt/assistent/login',data=data).status_code,400)
+        data['csrf_token']=token
+        self.assertEqual(client.post('/werkstatt/assistent/login',data=dict(data,password='falsch')).status_code,401)
+        response=client.post('/werkstatt/assistent/login',data=data)
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(response.location,'/werkstatt/assistent')
+        with client.session_transaction() as s:
+            self.assertEqual(s['assistent_mid'],1)
+            self.assertEqual(s['assistent_version'],1)
+            self.assertTrue(s.permanent)
+            self.assertFalse(s.get('werkstatt_tafel'))
+            self.assertFalse(s.get('admin'))
+        self.assertEqual(client.get('/werkstatt/assistent/auftrag/156').status_code,200)
+        self.assertEqual(client.get('/werkstatt/assistent/ueberblick').status_code,200)
+        self.assertNotEqual(client.get('/admin/mitarbeiter').status_code,200)
+        self.assertEqual(client.get('/werkstatt/tafel').status_code,302)
+        self.assertEqual(client.post('/werkstatt/assistent/vorschlag',json={'auftrag_id':156,'art':'notiz','text':'Keine Änderung'},headers={'X-CSRF-Token':token}).status_code,403)
+        with database() as db:db.execute('UPDATE assistent_rechte SET version=2 WHERE mitarbeiter_id=1')
+        self.assertEqual(client.get('/werkstatt/assistent/auftrag/156').status_code,401)
+
+    def test_native_login_keeps_activity_rights_ratelimit_and_own_logout(self):
+        self.guard.stop()
+        client=p.app.test_client()
+        client.get('/werkstatt/assistent')
+        with client.session_transaction() as s: token=s['csrf_token']
+        data={'mitarbeiter_id':'1','password':'test-passwort-123','csrf_token':token}
+        with patch.object(p,'login_rate_limit_status',return_value=(True,60)):
+            self.assertEqual(client.post('/werkstatt/assistent/login',data=data).status_code,429)
+        with database() as db:db.execute('UPDATE mitarbeiter SET aktiv=0 WHERE id=1')
+        self.assertEqual(client.post('/werkstatt/assistent/login',data=data).status_code,401)
+        with database() as db:db.execute('UPDATE mitarbeiter SET aktiv=1 WHERE id=1')
+        self.assertEqual(client.post('/werkstatt/assistent/login',data=data).status_code,302)
+        with database() as db:db.execute('UPDATE assistent_rechte SET lesen=0 WHERE mitarbeiter_id=1')
+        self.assertEqual(client.get('/werkstatt/assistent/auftrag/156').status_code,403)
+        with client.session_transaction() as s:
+            s['werkstatt_tafel']='independent-existing-workshop-session'
+            s['other_preference']='keep'
+        self.assertEqual(client.post('/werkstatt/assistent/logout',data={'csrf_token':token}).status_code,302)
+        with client.session_transaction() as s:
+            self.assertNotIn('assistent_mid',s)
+            self.assertNotIn('assistent_version',s)
+            self.assertEqual(s['werkstatt_tafel'],'independent-existing-workshop-session')
+            self.assertEqual(s['other_preference'],'keep')
+        self.assertEqual(client.get('/werkstatt/assistent/auftrag/156').status_code,401)
+
+    @patch.dict(p.app.config, ASSISTANT_NATIVE_COCKPIT=False)
+    def test_remote_comparison_still_requires_workshop_gate(self):
+        self.guard.stop()
+        client=self.make_client()
+        self.assertEqual(client.get('/werkstatt/assistent').status_code,302)
+        self.assertEqual(client.get('/werkstatt/assistent/auftrag/156').status_code,401)
+        self.assertEqual(client.post('/werkstatt/assistent/login',data={'mitarbeiter_id':'1','password':'test-passwort-123','csrf_token':'test-csrf'}).status_code,403)
+
     def test_note_requires_confirmation_and_idempotent(self):
         action=self.post('/vorschlag',{'auftrag_id':156,'art':'notiz','text':'Kotflügel demontiert'}).json
         with database() as db: self.assertEqual(db.execute('SELECT notiz_intern FROM auftraege WHERE id=156').fetchone()[0], '')

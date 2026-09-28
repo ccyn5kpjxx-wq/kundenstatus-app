@@ -1,3 +1,42 @@
-<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Assistent · Mitarbeiterfreigaben</title><link rel="stylesheet" href="{{ url_for('static', filename='assistent.css') }}"></head><body><main><nav><a href="{{ url_for('assistent.page') }}">← Assistent</a><a href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter verwalten</a></nav><h1>Mitarbeiterfreigaben</h1><p>Persönliche Konten ergänzen den gemeinsamen Werkstattzugang. Jede Änderung beendet bestehende persönliche Sitzungen. Leserecht erlaubt Zugriff auf alle aktiven Werkstattaufträge.</p>
-{% for employee in employees %}<section><h2>{{ employee.name }} · ID {{ employee.id }}</h2><form method="post">{{ csrf_field()|safe }}<input type="hidden" name="mitarbeiter_id" value="{{ employee.id }}"><label>Neues persönliches Passwort (mindestens 12 Zeichen; leer = beibehalten)<input name="password" type="password" autocomplete="new-password" minlength="12"></label>{% for key,label in [('lesen','Aufträge lesen'),('dokumentieren','Fotos und Fortschritt dokumentieren'),('einkaufen','Einkaufsentwürfe intern freigeben')] %}<label class="inline"><input name="{{ key }}" type="checkbox" {{ 'checked' if employee[key] }}>{{ label }}</label>{% endfor %}<label>Brutto-Limit pro Einkauf inkl. Versand und Nebenkosten (€)<input name="limit" inputmode="decimal" value="{{ '%.2f'|format((employee.limit_cent or 0)/100) }}" required></label><button>Rechte speichern</button></form></section>{% else %}<p>Noch keine aktiven Mitarbeiter angelegt.</p>{% endfor %}
-<section><h2>Letzte 100 protokollierte Aktionen</h2>{% for event in events %}<p><strong>{{ event.zeit }} · {{ event.actor }}</strong><br>{{ event.aktion }} · Auftrag {{ event.auftrag_id or '–' }}<br>{{ event.details }}</p>{% endfor %}</section></main></body></html>
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Assistent · Mitarbeiterzugänge</title><link rel="stylesheet" href="{{ url_for('static', filename='assistent.css') }}"></head>
+<body><main>
+<nav><a href="{{ url_for('assistent.page') }}">← Assistent</a><a href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter verwalten</a></nav>
+<h1>Mitarbeiterzugänge</h1>
+<p>Jeder Mitarbeiter meldet sich mit seiner Mitarbeiter-ID und einem persönlichen Passwort direkt beim Assistenten an. Ein gemeinsamer Werkstattcode ist dafür nicht erforderlich. Jede Änderung beendet bestehende persönliche Sitzungen.</p>
+<section class="notice"><h2>Was der Zugang erlaubt</h2>
+<p>Leserechte gelten für aktive Werkstattaufträge, Termine und Unterlagen. Mit dem Artikelrecht sind außerdem Produkte und einzelne Preise aus freigegebenen Materiallieferanten-Rechnungen sichtbar.</p>
+<p>Banking, Konten und Betriebsfinanzen bleiben ausgeschlossen.{% if read_only %} Änderungen an Aufträgen, Fotospeicherung und Bestellungen sind derzeit inaktiv.{% endif %}</p>
+</section>
+{% for employee in employees %}
+{% set new_access = employee.lesen is none %}
+<section aria-labelledby="employee-{{ employee.id }}">
+<h2 id="employee-{{ employee.id }}">{{ employee.name }}</h2>
+<p><strong>Mitarbeiter-ID {{ employee.id }}</strong></p>
+{% if new_access %}<p><strong>Noch nicht aktiviert – Passwort setzen und speichern.</strong> Die vorausgewählten Rechte sind bisher nur ein Vorschlag.</p>{% else %}<p>Persönlicher Zugang eingerichtet.</p>{% endif %}
+<form method="post">
+{{ csrf_field()|safe }}
+<input type="hidden" name="mitarbeiter_id" value="{{ employee.id }}">
+<label for="password-{{ employee.id }}">{{ 'Persönliches Passwort festlegen' if new_access else 'Persönliches Passwort ändern' }}</label>
+<input id="password-{{ employee.id }}" name="password" type="password" autocomplete="new-password" minlength="12" {% if new_access %}required{% endif %} aria-describedby="password-help-{{ employee.id }}">
+<p id="password-help-{{ employee.id }}">Mindestens 12 Zeichen.{% if not new_access %} Leer lassen, um das bestehende Passwort beizubehalten.{% endif %}</p>
+<label class="inline"><input name="lesen" type="checkbox" {% if new_access or employee.lesen %}checked{% endif %}>Aufträge, Termine und Unterlagen lesen</label>
+<label class="inline"><input name="einkaufen" type="checkbox" {% if new_access or employee.einkaufen %}checked{% endif %}>{{ 'Artikel, Rechnungsprodukte und Preise lesen' if read_only else 'Artikel lesen und Einkaufsentwürfe intern freigeben' }}</label>
+{% if read_only %}
+<details><summary>Derzeit inaktive Schreibrechte</summary>
+<p>Diese Einstellungen werden aufbewahrt. Sie erlauben im aktuellen Lesemodus keine Änderungen und keine Bestellungen.</p>
+<label class="inline"><input type="checkbox" disabled {% if not new_access and employee.dokumentieren %}checked{% endif %}>Fotos und Fortschritt dokumentieren</label>
+{% if not new_access and employee.dokumentieren %}<input name="dokumentieren" type="hidden" value="on">{% endif %}
+<label>Gespeichertes Einkaufslimit (€) · derzeit nicht genutzt<input name="limit" inputmode="decimal" value="{{ '%.2f'|format((employee.limit_cent or 0)/100) }}" readonly required></label>
+</details>
+{% else %}
+<label class="inline"><input name="dokumentieren" type="checkbox" {% if not new_access and employee.dokumentieren %}checked{% endif %}>Fotos und Fortschritt dokumentieren</label>
+<label>Brutto-Limit pro Einkauf inklusive Versand und Nebenkosten (€)<input name="limit" inputmode="decimal" value="{{ '%.2f'|format((employee.limit_cent or 0)/100) }}" required></label>
+{% endif %}
+<button>{{ 'Persönlichen Zugang einrichten' if new_access else 'Zugang speichern' }}</button>
+</form>
+</section>
+{% else %}<p>Noch keine aktiven Mitarbeiter angelegt.</p>{% endfor %}
+<section><details><summary>Letzte 100 protokollierte Aktionen</summary>{% for event in events %}<p><strong>{{ event.zeit }} · {{ event.actor }}</strong><br>{{ event.aktion }} · Auftrag {{ event.auftrag_id or '–' }}<br>{{ event.details }}</p>{% else %}<p>Noch keine Aktionen protokolliert.</p>{% endfor %}</details></section>
+</main></body></html>

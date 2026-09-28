@@ -1,12 +1,12 @@
 <!doctype html>
 <html lang="de">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="csrf-token" content="{{ csrf_token() }}"><title>Gärtner · Dein Assistent</title><meta name="theme-color" content="#10232d"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Gärtner"><link rel="manifest" href="/static/assistent.webmanifest"><link rel="icon" href="/static/assistent-icon.svg"><link rel="stylesheet" href="{{ url_for('static', filename='assistent.css') }}"></head>
-<body class="avatar-home"><main>
-{% if not who %}<nav><a href="{{ url_for('werkstatt_tafel') }}">← Werkstatt-Tafel</a>{% if session.get('admin') %}<a href="{{ url_for('assistent.rights') }}">Mitarbeiterfreigaben</a> <a href="{{ url_for('assistent.connection') }}">Cockpit-Verbindung</a>{% endif %}</nav>
+<body class="{{ 'avatar-home' if who else 'assistant-login' }}"><main>
+{% if not who %}
 <header><span class="eyebrow">GÄRTNER · WERKSTATT</span><h1>{{ profile.name if profile else 'Dein Werkstatt-Assistent' }} <small>KI</small></h1><p>Aufträge verstehen. Termine kennen. Unterlagen prüfen.</p></header>
 {% endif %}
 {% if not who %}
-<section><h2>Persönlich anmelden</h2><p>Die Werkstattleitung vergibt Mitarbeiter-ID, persönliches Passwort und Rechte.</p><form method="post" action="{{ url_for('assistent.login') }}">{{ csrf_field()|safe }}<label>Mitarbeiter-ID<input name="mitarbeiter_id" required inputmode="numeric" autocomplete="username"></label><label>Passwort<input type="password" name="password" required autocomplete="current-password"></label><button>Anmelden</button></form></section>
+<section><h2>Persönlich anmelden</h2><p>Mit deiner Mitarbeiter-ID und deinem persönlichen Passwort kommst du direkt zum Avatar. Ein gemeinsamer Werkstattcode ist nicht nötig.</p><form method="post" action="{{ url_for('assistent.login') }}">{{ csrf_field()|safe }}<label>Mitarbeiter-ID<input name="mitarbeiter_id" required inputmode="numeric" autocomplete="username"></label><label>Persönliches Passwort<input type="password" name="password" required autocomplete="current-password"></label><button>Beim Assistenten anmelden</button></form><p>Deinen persönlichen Zugang richtet die Werkstattleitung ein.</p></section>
 {% else %}
 <div id="assistant" data-avatar="{{ profile.avatar }}" data-read-only="{{ 'true' if read_only else 'false' }}" data-admin="{{ 'true' if who.actor == 'admin' else 'false' }}" data-ready="{{ 'true' if ready else 'false' }}">
 <button id="menu-open" class="menu-open" type="button" aria-label="Menü öffnen">☰ <span>Menü</span></button>
