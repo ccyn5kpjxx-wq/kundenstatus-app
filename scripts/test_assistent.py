@@ -73,6 +73,12 @@ class AssistantTests(unittest.TestCase):
     def post(self, path, data=None, client=None):
         return (client or self.client).post('/werkstatt/assistent' + path, json=data or {}, headers={"X-CSRF-Token": "test-csrf"})
 
+    def rendered_profile(self, client=None):
+        # Inspect the server contract independently of the figure artwork/UI.
+        with patch('werkstatt_assistent.render_template',return_value='synthetic-profile') as render:
+            self.assertEqual((client or self.client).get('/werkstatt/assistent').status_code,200)
+            return render.call_args.kwargs['profile']
+
     def purchase(self, **overrides):
         return self.post('/vorschlag', dict(auftrag_id=156, art='einkauf', lieferant='K-Parts', teilenummer='TEST-123', bezeichnung='Testteil', menge=2, stueckpreis_brutto='140.00', versand_brutto='10.00', nebenkosten_brutto='10.00', **overrides))
 
@@ -326,6 +332,85 @@ class AssistantTests(unittest.TestCase):
         self.assertIn('Gespräch starten',html)
         self.assertIn('assistent.webmanifest',html)
         self.assertEqual(self.post('/profil',{'name':'Chris','stil':'ruhig','stimme':'coral','avatar':'unknown'}).status_code,400)
+
+    def test_character_defaults_and_invalid_stored_values_have_safe_fallback(self):
+        self.assertEqual(self.rendered_profile()['character'],'chris')
+        with database() as db:
+            db.execute("INSERT INTO assistent_profile(actor,name,stil,stimme) VALUES('mitarbeiter:1','Existing name','knapp','ash')")
+        self.assertEqual(self.rendered_profile()['character'],'chris')
+        for stored in ('', 'removed-figure', '../../arbitrary.svg'):
+            with database() as db:db.execute("UPDATE assistent_profile SET character=? WHERE actor='mitarbeiter:1'",(stored,))
+            visible=self.rendered_profile()
+            self.assertEqual((visible['character'],visible['name'],visible['stimme']),('chris','Existing name','ash'))
+            with database() as db:self.assertEqual(db.execute("SELECT character FROM assistent_profile WHERE actor='mitarbeiter:1'").fetchone()[0],stored)
+
+    def test_profile_character_and_old_color_are_independent_and_invalid_is_atomic(self):
+        first={'name':'Werkstatt','stil':'knapp','stimme':'ash','avatar':'kupfer','character':'robot'}
+        self.assertEqual(self.post('/profil',first).status_code,200)
+        saved=self.rendered_profile()
+        self.assertEqual((saved['character'],saved['avatar']),('robot','kupfer'))
+        old_client={'name':'Legacy client','stil':'ruhig','stimme':'coral','avatar':'blau'}
+        self.assertEqual(self.post('/profil',old_client).status_code,200)
+        saved=self.rendered_profile()
+        self.assertEqual((saved['character'],saved['avatar'],saved['name']),('robot','blau','Legacy client'))
+        for invalid in ('unknown','../../image.svg',None,True,['mila'],{'id':'mila'}):
+            response=self.post('/profil',dict(first,name='Must not save',character=invalid))
+            self.assertEqual(response.status_code,400)
+            self.assertEqual(self.rendered_profile(),saved)
+        self.assertEqual(self.post('/profil',dict(first,avatar='invalid',character='mila')).status_code,400)
+        self.assertEqual(self.rendered_profile(),saved)
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_character_picker_changes_only_own_character_and_preserves_preferences(self):
+        first={'name':'Individueller Name','stil':'knapp','stimme':'ash','avatar':'kupfer','character':'chris'}
+        self.assertEqual(self.post('/profil',first).status_code,200)
+        before=self.rendered_profile()
+        admin=self.make_client(admin=True)
+        self.assertEqual(self.post('/avatar',{'character':'robot'},client=admin).json,{'ok':True,'character':'robot'})
+        admin_before=self.rendered_profile(admin)
+        response=self.post('/avatar',{'character':'mila'})
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json,{'ok':True,'character':'mila'})
+        self.assertEqual(self.rendered_profile(),dict(before,character='mila'))
+        self.assertEqual(self.rendered_profile(admin),admin_before)
+        self.assertEqual((admin_before['name'],admin_before['stil'],admin_before['stimme']),('Chris','kollegial','coral'))
+        # Reject attempts to target another actor or modify unrelated preferences.
+        for extra in ({'actor':'admin'},{'name':'Another name'},{'stimme':'coral'},{'avatar':'mint'}):
+            self.assertEqual(self.post('/avatar',dict(extra,character='robot')).status_code,400)
+        self.assertEqual(self.rendered_profile(),dict(before,character='mila'))
+        self.assertEqual(self.rendered_profile(admin),admin_before)
+        # A later save from an old profile form cannot undo the picker.
+        first.pop('character')
+        self.assertEqual(self.post('/profil',first).status_code,200)
+        self.assertEqual(self.rendered_profile()['character'],'mila')
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_character_picker_rechecks_auth_csrf_rights_and_validation(self):
+        anon=p.app.test_client()
+        with anon.session_transaction() as s:s['csrf_token']='test-csrf'
+        self.assertEqual(self.post('/avatar',{'character':'mila'},client=anon).status_code,401)
+        self.assertEqual(self.client.post('/werkstatt/assistent/avatar',json={'character':'mila'}).status_code,400)
+        for invalid in ({},{'character':None},{'character':[]},{'character':'unknown'}):
+            self.assertEqual(self.post('/avatar',invalid).status_code,400)
+        with database() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_profile').fetchone()[0],0)
+            db.execute('UPDATE assistent_rechte SET lesen=0 WHERE mitarbeiter_id=1')
+        self.assertEqual(self.post('/avatar',{'character':'mila'}).status_code,403)
+        with database() as db:db.execute('UPDATE assistent_rechte SET lesen=1,version=2 WHERE mitarbeiter_id=1')
+        self.assertEqual(self.post('/avatar',{'character':'mila'}).status_code,401)
+
+    def test_profile_and_character_reject_nonobject_json_without_changes(self):
+        import json
+        initial={'name':'Keep this name','stil':'ruhig','stimme':'ash','avatar':'kupfer','character':'mila'}
+        self.assertEqual(self.post('/profil',initial).status_code,200)
+        before=self.rendered_profile()
+        for route in ('/avatar','/profil'):
+            for value in ([],['mila'],'mila',True,7,None):
+                with self.subTest(route=route,value=value):
+                    response=self.client.post('/werkstatt/assistent'+route,data=json.dumps(value),content_type='application/json',headers={'X-CSRF-Token':'test-csrf'})
+                    self.assertEqual(response.status_code,400)
+                    self.assertEqual(response.json['error'],'JSON-Objekt erforderlich.')
+                    self.assertEqual(self.rendered_profile(),before)
 
 
     def test_realtime_preload_and_session_contract(self):

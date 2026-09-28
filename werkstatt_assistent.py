@@ -26,6 +26,8 @@ from PIL import Image, UnidentifiedImageError
 
 VOICES = ("alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
 STYLES = {"ruhig": "ruhig und sachlich", "kollegial": "freundlich und kollegial", "knapp": "sehr knapp und direkt"}
+CHARACTERS = ("chris", "mila", "robot")
+DEFAULT_CHARACTER = "chris"
 
 
 def cents(value):
@@ -74,7 +76,8 @@ def register_assistant(p):
                   einkaufen INTEGER NOT NULL DEFAULT 0, limit_cent INTEGER NOT NULL DEFAULT 0,
                   version INTEGER NOT NULL DEFAULT 1);
                 CREATE TABLE IF NOT EXISTS assistent_profile (
-                  actor TEXT PRIMARY KEY, name TEXT NOT NULL, stil TEXT NOT NULL, stimme TEXT NOT NULL);
+                  actor TEXT PRIMARY KEY, name TEXT NOT NULL, stil TEXT NOT NULL, stimme TEXT NOT NULL,
+                  character TEXT NOT NULL DEFAULT 'chris');
                 CREATE TABLE IF NOT EXISTS assistent_aktionen (
                   id TEXT PRIMARY KEY, actor TEXT NOT NULL, auftrag_id INTEGER NOT NULL,
                   art TEXT NOT NULL, payload TEXT NOT NULL, fingerprint TEXT NOT NULL UNIQUE,
@@ -86,6 +89,8 @@ def register_assistant(p):
                   id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL,
                   role TEXT NOT NULL, text TEXT NOT NULL, zeit TEXT NOT NULL);
             """)
+            # The same migration runs after restoring an older portal backup.
+            p.ensure_column(db, "assistent_profile", "character", "TEXT NOT NULL DEFAULT 'chris'")
 
     def identity():
         if session.get("admin"):
@@ -113,7 +118,7 @@ def register_assistant(p):
                 if who["actor"] != "admin":
                     return jsonify(error="Cockpit-Prüfstand ist nur für die Werkstattleitung freigegeben."), 403
             if read_only():
-                if fn.__name__ not in {"order", "source_info", "overview", "actions", "transcribe", "speak", "dialog", "clear_dialog", "realtime_refresh", "realtime_start", "realtime_tool", "save_profile"}:
+                if fn.__name__ not in {"order", "source_info", "overview", "actions", "transcribe", "speak", "dialog", "clear_dialog", "realtime_refresh", "realtime_start", "realtime_tool", "save_profile", "save_avatar"}:
                     return jsonify(error="Der Avatar ist schreibgeschützt. Auftragsänderungen, Fotos und Bestellungen sind hier gesperrt."), 403
             return fn(who, *args, **kwargs)
         return wrapper
@@ -131,8 +136,10 @@ def register_assistant(p):
 
     def profile(who):
         with db_scope() as db:
-            row = db.execute("SELECT name,stil,stimme FROM assistent_profile WHERE actor=?", (who["actor"],)).fetchone()
+            row = db.execute("SELECT name,stil,stimme,character FROM assistent_profile WHERE actor=?", (who["actor"],)).fetchone()
         result = dict(row) if row else {"name": "Chris", "stil": "kollegial", "stimme": "coral"}
+        if result.get("character") not in CHARACTERS:
+            result["character"] = DEFAULT_CHARACTER
         with db_scope() as db:
             choice = db.execute("SELECT value FROM app_settings WHERE key=?", ("assistant_avatar:" + who["actor"],)).fetchone()
         result["avatar"] = choice["value"] if choice and choice["value"] in {"mint", "blau", "kupfer"} else "mint"
@@ -282,17 +289,39 @@ def register_assistant(p):
     @bp.post("/profil")
     @protected
     def save_profile(who):
-        data = request.get_json() or {}
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            raise ValueError("JSON-Objekt erforderlich.")
         name = str(data.get("name", "")).strip()
         if not 1 <= len(name) <= 40 or data.get("stil") not in STYLES or data.get("stimme") not in VOICES:
             raise ValueError("Name, Stil und Stimme prüfen.")
+        has_character = "character" in data
+        character = data.get("character", DEFAULT_CHARACTER)
+        if not isinstance(character, str) or character not in CHARACTERS:
+            raise ValueError("Figur ungültig. Chris, Mila oder Roboter auswählen.")
+        avatar = data.get("avatar", "mint")
+        if not isinstance(avatar, str) or avatar not in {"mint", "blau", "kupfer"}:
+            raise ValueError("Avatar-Auswahl ungültig.")
         with db_scope() as db:
-            db.execute("INSERT INTO assistent_profile(actor,name,stil,stimme) VALUES(?,?,?,?) ON CONFLICT(actor) DO UPDATE SET name=excluded.name,stil=excluded.stil,stimme=excluded.stimme RETURNING actor", (who["actor"], name, data["stil"], data["stimme"])).fetchall()
-            avatar = data.get("avatar", "mint")
-            if avatar not in {"mint", "blau", "kupfer"}:
-                raise ValueError("Avatar-Auswahl ungültig.")
+            # An old client omitting character must never reset a newer choice.
+            db.execute("INSERT INTO assistent_profile(actor,name,stil,stimme,character) VALUES(?,?,?,?,?) ON CONFLICT(actor) DO UPDATE SET name=excluded.name,stil=excluded.stil,stimme=excluded.stimme,character=CASE WHEN ? THEN excluded.character ELSE assistent_profile.character END RETURNING actor", (who["actor"], name, data["stil"], data["stimme"], character, has_character)).fetchall()
             db.execute("INSERT INTO app_settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", ("assistant_avatar:" + who["actor"], avatar, p.now_str()))
         return jsonify(ok=True)
+
+    @bp.post("/avatar")
+    @protected
+    def save_avatar(who):
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            raise ValueError("JSON-Objekt erforderlich.")
+        character = data.get("character")
+        if set(data) != {"character"} or not isinstance(character, str) or character not in CHARACTERS:
+            raise ValueError("Nur eine gültige Figur auswählen: Chris, Mila oder Roboter.")
+        with db_scope() as db:
+            # Create default personal preferences only when absent. A picker
+            # update changes no existing name, voice, style or avatar color.
+            db.execute("INSERT INTO assistent_profile(actor,name,stil,stimme,character) VALUES(?,?,?,?,?) ON CONFLICT(actor) DO UPDATE SET character=excluded.character RETURNING actor", (who["actor"], "Chris", "kollegial", "coral", character)).fetchall()
+        return jsonify(ok=True, character=character)
 
     @bp.post("/vorlesen/<action_id>")
     @protected

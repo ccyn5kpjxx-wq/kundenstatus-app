@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import types
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -54,14 +55,28 @@ class AssistantStorageTests(unittest.TestCase):
         self.original_get_db = p.get_db
         statements = []
         with patch.object(p, 'get_db', side_effect=lambda: self.adapted_db(statements)):
-            for name in ('First synthetic avatar', 'Updated synthetic avatar'):
-                result = self.post('/profil', {'name': name, 'stil': 'ruhig', 'stimme': 'coral', 'avatar': 'blau'})
+            for data in ({'name':'First synthetic avatar','character':'mila'}, {'name':'Updated synthetic avatar'}):
+                result = self.post('/profil', dict(data, stil='ruhig', stimme='coral', avatar='blau'))
                 self.assertEqual(result.status_code, 200)
         self.assertEqual(len(statements), 2)
         self.assertTrue(all(sql.endswith('RETURNING actor') for sql in statements))
         with fixture.database() as db:
-            row = db.execute('SELECT actor,name FROM assistent_profile').fetchone()
-        self.assertEqual((row['actor'], row['name']), ('mitarbeiter:1', 'Updated synthetic avatar'))
+            row = db.execute('SELECT actor,name,character FROM assistent_profile').fetchone()
+        self.assertEqual((row['actor'], row['name'], row['character']), ('mitarbeiter:1', 'Updated synthetic avatar', 'mila'))
+
+    def test_character_picker_insert_update_and_backup_preserve_natural_key(self):
+        self.original_get_db=p.get_db
+        statements=[]
+        with patch.object(p,'get_db',side_effect=lambda:self.adapted_db(statements)):
+            for character in ('robot','mila'):
+                self.assertEqual(self.post('/avatar',{'character':character}).json,{'ok':True,'character':character})
+        self.assertEqual(len(statements),2)
+        self.assertTrue(all(sql.endswith('RETURNING actor') for sql in statements))
+        self.assertIn('assistent_profile',p.BACKUP_TABLES)
+        with fixture.database() as db:
+            rows,refs,size=p.write_table_rows_and_binary_blobs(db,None,'assistent_profile')
+        self.assertEqual((rows[0]['actor'],rows[0]['name'],rows[0]['character']),('mitarbeiter:1','Chris','mila'))
+        self.assertEqual((refs,size),([],0))
 
     def test_rights_insert_and_update_use_employee_key_through_pg_adapter(self):
         with fixture.database() as db:
@@ -86,7 +101,11 @@ class AssistantStorageTests(unittest.TestCase):
         routes_before = len(list(p.app.url_map.iter_rules()))
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'synthetic-restored.db'
-            with patch.object(p, 'get_db', side_effect=lambda: sqlite3.connect(path)):
+            def restored_db():
+                db=sqlite3.connect(path)
+                db.row_factory=sqlite3.Row
+                return db
+            with patch.object(p, 'get_db', side_effect=restored_db):
                 p.assistant_init_schema()
                 db = sqlite3.connect(path)
                 try:
@@ -96,9 +115,31 @@ class AssistantStorageTests(unittest.TestCase):
                     tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                     self.assertTrue({'assistent_rechte', 'assistent_profile', 'assistent_aktionen', 'assistent_audit', 'assistent_dialog'} <= tables)
                     self.assertEqual(db.execute('SELECT name FROM assistent_profile').fetchone()[0], 'Saved avatar')
+                    self.assertEqual(db.execute('SELECT character FROM assistent_profile').fetchone()[0], 'chris')
                 finally:
                     db.close()
         self.assertEqual(len(list(p.app.url_map.iter_rules())), routes_before)
+
+    def test_restore_migrates_old_profile_and_preserves_existing_character(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path=Path(temporary)/'legacy-profile.db'
+            def restored_db():
+                db=sqlite3.connect(path)
+                db.row_factory=sqlite3.Row
+                return db
+            with closing(restored_db()) as db:
+                db.execute('CREATE TABLE assistent_profile(actor TEXT PRIMARY KEY,name TEXT NOT NULL,stil TEXT NOT NULL,stimme TEXT NOT NULL)')
+                db.execute("INSERT INTO assistent_profile VALUES('mitarbeiter:1','Existing','knapp','ash')")
+                db.commit()
+            with patch.object(p,'get_db',side_effect=restored_db):
+                p.assistant_init_schema()
+                with closing(restored_db()) as db:
+                    self.assertEqual(tuple(db.execute('SELECT name,stil,stimme,character FROM assistent_profile').fetchone()),('Existing','knapp','ash','chris'))
+                    db.execute("UPDATE assistent_profile SET character='mila'")
+                    db.commit()
+                p.assistant_init_schema()
+                with closing(restored_db()) as db:
+                    self.assertEqual(db.execute('SELECT character FROM assistent_profile').fetchone()[0],'mila')
 
 
 if __name__ == '__main__':
