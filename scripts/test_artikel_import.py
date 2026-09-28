@@ -197,6 +197,32 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn('private-bank-marker', json.dumps(article))
         self.assertNotIn('DE021203', json.dumps(article))
 
+    def test_existing_explicit_ve_description_is_available_without_reimport_or_quantity_guess(self):
+        rows = [candidate(produkt_name=f'Abdeckband 50 m Rolle x {width} mm ({count} Stück/VE)',
+                          stueckzahl=2, source={'page': 1, 'line': index})
+                for index, (width, count) in enumerate(((25, 36), (30, 32), (50, 24)), 1)]
+        self.process(extracted(*rows))
+        before = self.catalog.rows('SELECT id,payload_json FROM assistent_rechnungsartikel ORDER BY id')
+        with patch('werkstatt_artikel_import.read_source', side_effect=AssertionError('No reimport')):
+            visible = self.catalog.knowledge_rows()['items']
+        self.assertEqual({item['package_evidence']['value'] for item in visible}, {'36', '32', '24'})
+        for item in visible:
+            self.assertEqual(item['package_evidence']['per_unit'], 'VE')
+            self.assertEqual(item['package_evidence']['unit'], 'Stück')
+            self.assertEqual(item['package_evidence']['source']['seite'], 1)
+            self.assertIsNone(item['quantity_evidence']['value'], 'Legacy invoice quantity remains unproven')
+            self.assertFalse(item['bestellbar'])
+        self.assertEqual(before, self.catalog.rows('SELECT id,payload_json FROM assistent_rechnungsartikel ORDER BY id'))
+        self.update("UPDATE assistent_rechnungsimporte SET state='offen'")
+        self.process(extracted(candidate(produkt_name='Abdeckband (36 Stück/VE)',
+                                         produkt_beschreibung='Abdeckband (24 Stück/VE)')))
+        self.assertEqual(self.catalog.search('')[0]['package_evidence']['basis'], 'unknown')
+
+    def test_legacy_ve_backfill_does_not_hide_a_conflicting_suffix_at_parser_bound(self):
+        self.process(extracted(candidate(produkt_name='Abdeckband (36 Stück/VE)',
+                                         produkt_beschreibung='x' * 970 + ' (24 Stück/VE)')))
+        self.assertEqual(self.catalog.knowledge_rows()['items'][0]['package_evidence']['basis'], 'unknown')
+
     def test_knowledge_rows_scope_limit_and_counts_do_not_trigger_read_or_leak_blocked_data(self):
         self.process(extracted(candidate(), candidate(produkt_name='Schleifpapier')))
         prepare_catalog(self.catalog, {'einkaufsbelege': [

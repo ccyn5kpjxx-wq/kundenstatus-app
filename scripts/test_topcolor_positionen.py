@@ -113,6 +113,21 @@ class TableParserTests(unittest.TestCase):
         evidence = explicit_package_evidence('Abdeckband 48 mm x 50 m', 'Rolle')
         self.assertEqual(evidence['basis'], 'unknown')
 
+    def test_pieces_per_ve_are_explicit_content_independent_of_invoice_quantity(self):
+        for width, count in ((25, 36), (30, 32), (50, 24)):
+            name = f'Test-Abdeckband 50 m Rolle x {width} mm ({count} Stück/VE)'
+            item = self.parse([page(lines=[product(name=name, quantity='2,00', content='1,000',
+                measure='Stück', base='1,00', discount='', total='2,00')])])['positions'][0]
+            evidence = item['package_evidence']
+            self.assertEqual((evidence['value'], evidence['unit'], evidence['per_unit']), (str(count), 'Stück', 'VE'))
+            self.assertEqual(evidence['basis'], 'explicit_description')
+            self.assertEqual(evidence['text'], f'{count} Stück/VE')
+            self.assertFalse(evidence['verified'])
+            self.assertEqual(item['quantity_evidence']['value'], '2')
+        for spelling in ('36 Stueck / VE', '36 Stk./VE', '36 stück/ve'):
+            self.assertEqual(explicit_package_evidence('Abdeckband ('+spelling+')')['value'], '36')
+        self.assertEqual(explicit_package_evidence('Abdeckband (36 Stück/VE) (24 Stück/VE)')['basis'], 'unknown')
+
     def test_fee_is_not_a_product_or_continuation(self):
         result = self.parse([page(lines=[product(),
             product(2, "00000071", "Logistik-", y=130), [word(103, 142, "/Energiekostenpauschale")],

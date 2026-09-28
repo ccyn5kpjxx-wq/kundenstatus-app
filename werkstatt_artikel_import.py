@@ -11,7 +11,7 @@ from flask import jsonify, render_template, request, flash, redirect, url_for
 from werkstatt_artikel_identity import catalog_identity
 from werkstatt_rechnungsquelle import read_source, invoice_date
 from werkstatt_rechnungsfreigabe import classify_invoice_source
-from werkstatt_topcolor_positionen import quantity_value, material_unit
+from werkstatt_topcolor_positionen import quantity_value, material_unit, explicit_package_evidence
 
 
 def _text(value, limit=1000):
@@ -95,6 +95,16 @@ def _visible_article_payload(row):
     # observed purchasing history just because it is in the old JSON payload.
     payload['quantity_evidence'] = _quantity_evidence(payload.get('quantity_evidence'), payload.get('quelle'))
     payload['package_evidence'] = _package_evidence(payload.get('package_evidence'), payload.get('quelle'))
+    if payload['package_evidence']['basis'] == 'unknown':
+        # Older saved proposals missed explicit '36 Stück/VE'. This is a pure
+        # interpretation of existing product text, never a quantity fallback or
+        # new document read. Contradictory descriptions remain unknown.
+        description = ' '.join(_text(payload.get(key), 1001) for key in ('produkt_name', 'produkt_beschreibung'))
+        # Never let the parser's text bound discard a conflicting suffix.
+        if len(description) <= 1000 and re.search(r'\b\d+\s*(?:Stück|Stueck|Stk\.?|Rollen?|Dosen?)\s*/\s*VE\b', description, re.I):
+            explicit = explicit_package_evidence(description, payload.get('ve'))
+            if explicit['per_unit'] == 'VE':
+                payload['package_evidence'] = _package_evidence(explicit, payload.get('quelle'))
     return payload
 
 

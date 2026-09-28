@@ -35,7 +35,7 @@ def material_unit(value):
         "stück": "Stück", "stueck": "Stück", "stk": "Stück", "stck": "Stück", "st": "Stück",
         "rolle": "Rolle", "rollen": "Rolle", "rol": "Rolle",
         "pack": "Pack", "packung": "Pack", "packungen": "Pack", "kp": "Pack",
-        "karton": "Karton", "kartons": "Karton", "set": "Set", "satz": "Satz",
+        "karton": "Karton", "kartons": "Karton", "set": "Set", "satz": "Satz", "ve": "VE",
         "gebinde": "Gebinde", "dose": "Dose", "dosen": "Dose", "flasche": "Flasche",
         "flaschen": "Flasche", "kanister": "Kanister", "tube": "Tube", "eimer": "Eimer",
         "paar": "Paar", "beutel": "Beutel", "l": "L", "liter": "L", "ltr": "L",
@@ -56,7 +56,7 @@ def explicit_package_evidence(name, order_unit=None):
         return result
     name = name[:1000]
     counts = []
-    pattern = r"\b(\d+)\s*(?:(Stück|Stueck|Stk\.?|Rollen?|Dosen?)\s*)?/\s*(Pack|Packung|KP|ROL|Rolle|Karton|Beutel)\b"
+    pattern = r"\b(\d+)\s*(?:(Stück|Stueck|Stk\.?|Rollen?|Dosen?)\s*)?/\s*(Pack|Packung|KP|ROL|Rolle|Karton|Beutel|VE)\b"
     for match in re.finditer(pattern, name, re.I):
         counts.append((quantity_value(match[1]), material_unit(match[2]) if match[2] else "Stück", material_unit(match[3]), match[0]))
     unit = material_unit(order_unit)
