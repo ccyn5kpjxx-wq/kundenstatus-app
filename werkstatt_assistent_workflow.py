@@ -26,7 +26,9 @@ TOOLS = []
 
 
 def _tool(name, description, properties, required):
-    TOOLS.append({'type': 'function', 'name': name, 'description': description,
+    # These are partial edits: omitted fields must stay omitted. The server
+    # validates the allowlist and actual required values before every preview.
+    TOOLS.append({'type': 'function', 'name': name, 'description': description, 'strict': False,
                   'parameters': {'type': 'object', 'properties': properties,
                                  'required': required, 'additionalProperties': False}})
 

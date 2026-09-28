@@ -335,6 +335,10 @@ class AssistantWorkflowTests(unittest.TestCase):
         self.assertEqual(self.order()['farbcode'], 'LY9B')
 
     def test_realtime_model_proposes_color_and_file_without_confirmation_tool(self):
+        from werkstatt_assistent_workflow import TOOLS
+        color_tool = next(tool for tool in TOOLS if tool['name'] == 'farbton_vorschlagen')
+        self.assertFalse(color_tool['strict'], 'Partial edits must not be normalized into required fields by Responses')
+        self.assertNotIn('required', color_tool['parameters']['properties']['felder'])
         before = self.order()
         response = self.post('/realtime/werkzeug', {'name': 'farbton_vorschlagen', 'arguments': {'auftrag_id': 156, 'felder': {'farbcode': 'LY9B'}}})
         self.assertEqual(response.status_code, 200, response.text)
