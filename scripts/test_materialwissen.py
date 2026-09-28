@@ -70,6 +70,11 @@ class SearchTests(unittest.TestCase):
         variant = build_variants([row], 'grünes Klebeband')[0]
         self.assertEqual(variant['farbe'], '')
         self.assertIn('Farbe separat bestätigen', variant['fehlende_angaben'])
+        self.assertEqual(variant['farbabgleich']['basis'], 'produktname_alias')
+        self.assertEqual(variant['farbabgleich']['namenshinweis'], 'HydroGreen')
+        self.assertFalse(variant['farbabgleich']['bestaetigt'])
+        self.assertEqual(variant['groesse'], '30 mm')
+        self.assertIsNone(build_variants([row], 'Klebeband')[0]['farbabgleich'])
 
     def test_exact_supplier_sku_name_size_color_and_pack_remain_separate(self):
         base = tape()

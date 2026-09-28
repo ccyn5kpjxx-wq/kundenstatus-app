@@ -711,6 +711,50 @@ class AssistantTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_aktionen').fetchone()[0],0)
 
     @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_green_tape_question_preloads_widths_and_pack_despite_unconfirmed_color(self):
+        import json
+        from unittest.mock import Mock
+        from werkstatt_cockpit_api import _invoice_product
+        records=[]
+        for width, count in ((25,36),(30,32),(50,24)):
+            row={'produkt_name':f'Test MP TapeHydroGreen50mRolle x{width}mm',
+                 'artikelnummer':f'SYNTH-{width}', 'lieferant':'Top-Color GmbH', 've':'Stück',
+                 'quelle':{'art':'einkauf','beleg_id':1,'seite':1,'position':width},
+                 'package_evidence':{'value':str(count),'unit':'Stück','per_unit':'VE',
+                     'basis':'explicit_description','text':f'{count} Stück/VE'}}
+            records.append(_invoice_product(row,'Top-Color GmbH',1,True))
+        with database() as db:
+            db.execute("INSERT INTO assistent_dialog(actor,role,text,zeit) VALUES('mitarbeiter:1','assistant',?,?)",
+                       ('Frühere Antwort: Die Farbe ist unbekannt, deshalb kann ich keine Breiten nennen.',p.now_str()))
+        reply=Mock(); reply.json.return_value={'output':[{'type':'message','content':[{'type':'output_text','text':'Passend dazu finde ich HydroGreen.'}]}]}
+        question='Nur Auskunft: Welche Breiten und Verpackungseinheiten sind bei unserem grünen Abklebeband belegt?'
+        with patch.object(p.cockpit_data,'_material_records',return_value=([],records,{})), \
+             patch.object(p,'get_openai_api_key',return_value='synthetic-key'), \
+             patch('werkstatt_assistent.requests.post',return_value=reply) as provider:
+            response=self.post('/dialog',{'text':question})
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(provider.call_count,1)
+            instructions=provider.call_args.kwargs['json']['instructions']
+        context=json.loads(instructions.rsplit('\nAKTENSTAND ',1)[1].split(': ',1)[1])
+        material=context['materialwissen']
+        self.assertEqual(material['suchstatus'],'treffer')
+        self.assertEqual(len(material['varianten']),3)
+        for variant in material['varianten']:
+            width=int(variant['artikelnummer'].split('-')[1])
+            self.assertIn(f'{width} mm',variant['groesse'])
+            self.assertEqual(variant['packinhalt']['menge'],str({25:36,30:32,50:24}[width]))
+            self.assertEqual(variant['packinhalt']['pro'],'VE')
+            self.assertEqual(variant['packinhalt']['quelle']['seite'],1)
+            self.assertEqual(variant['farbe'],'')
+            self.assertEqual(variant['farbabgleich']['basis'],'produktname_alias')
+            self.assertEqual(variant['farbabgleich']['namenshinweis'],'HydroGreen')
+            self.assertFalse(variant['farbabgleich']['bestaetigt'])
+            self.assertFalse(variant['bestellbar'])
+            self.assertNotIn('Packinhalt',variant['fehlende_angaben'])
+        with database() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_aktionen').fetchone()[0],0)
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
     def test_material_prefetch_respects_revoked_rights_and_outage(self):
         with database() as db: db.execute('UPDATE assistent_rechte SET einkaufen=0 WHERE mitarbeiter_id=1')
         with patch.object(p.cockpit_data,'material_context',create=True) as materials:

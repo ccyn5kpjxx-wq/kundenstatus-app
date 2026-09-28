@@ -260,8 +260,15 @@ def build_variants(records, query='', limit=30):
         group['fehlende_angaben'] = [name for name, present in
                                     (('Artikelnummer', group['artikelnummer']), ('Einheit', group['ve']),
                                      ('Packinhalt', group['packinhalt']), ('belegte Menge', history)) if not present]
+        group['farbabgleich'] = None
         if query_colors and not group['farbe']:
             group['fehlende_angaben'].append('Farbe separat bestätigen')
+            name_match = query_colors == {'gruen'} and 'hydrogreen' in tokens(group['produkt_name'])
+            group['farbabgleich'] = {
+                'angefragte_farben': sorted(query_colors), 'bestaetigt': False,
+                'basis': 'produktname_alias' if name_match else 'unbekannt',
+                'namenshinweis': 'HydroGreen' if name_match else '',
+                'hinweis': 'Nur die Farbzuordnung ist unbestätigt. Vorhandene Breiten und Packmengen dieser gefundenen Variante bleiben belegte Angaben und können genannt werden.'}
         if any(not item['einheit'] for item in history):
             group['fehlende_angaben'].append('Einheit der Rechnungsmenge')
         group['belege_anzahl'] = len({_invoice_key(source) for source in group['quellen'] if source.get('beleg_id')})

@@ -284,7 +284,7 @@ class CockpitData:
         variants=build_variants(records,query,limit+1)
         compact=[]
         for variant in variants[:limit]:
-            item={key:variant[key] for key in ('variante_id','produkt_name','lieferant','artikelnummer','groesse','farbe','gebinde','ve','packinhalt','uebliche_menge','letzte_belegte_menge','historischer_preishinweis','fehlende_angaben','pruefen','bestellbar')}
+            item={key:variant[key] for key in ('variante_id','produkt_name','lieferant','artikelnummer','groesse','farbe','farbabgleich','gebinde','ve','packinhalt','uebliche_menge','letzte_belegte_menge','historischer_preishinweis','fehlende_angaben','pruefen','bestellbar')}
             item['belege_anzahl']=variant['belege_anzahl']
             item['historie_gekuerzt']=variant['historie_gekuerzt'] or len(variant['quellen'])>2 or len(variant['mengenhistorie'])>3
             item['quellen']=variant['quellen'][:2]
