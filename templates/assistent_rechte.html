@@ -5,9 +5,24 @@
 <nav><a href="{{ url_for('assistent.page') }}">← Assistent</a><a href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter verwalten</a></nav>
 <h1>Mitarbeiterzugänge</h1>
 <p>Jeder Mitarbeiter meldet sich mit seiner Mitarbeiter-ID und einem persönlichen Passwort direkt beim Assistenten an. Ein gemeinsamer Werkstattcode ist dafür nicht erforderlich. Jede Änderung beendet bestehende persönliche Sitzungen.</p>
+{% for category,message in get_flashed_messages(with_categories=true) %}<p role="status">{{ message }}</p>{% endfor %}
+<section aria-labelledby="operations-title"><h2 id="operations-title">Statusaktionen und Bestellversand</h2>
+<p><strong>{{ 'Betriebsfreigabe aktiv' if operations_enabled else 'Betriebsfreigabe pausiert' }}</strong></p>
+<p>Bestätigte Statusmeldungen können den Auftrag aktualisieren. Dringende Bestellungen gehen sofort per E-Mail heraus; andere sammeln wir je Lieferant bis Montag um 12 Uhr deutscher Zeit.</p>
+<p>Die Grenze gilt brutto einschließlich Versand und Nebenkosten: je dringender Bestellung und für die gesamte wöchentliche Sammelmail je Lieferant. Höchstens 250,00 € sind freigegeben. Kleinere persönliche Mitarbeiterlimits gelten zusätzlich.</p>
+{% if order_availability %}<p>Postfach: {{ 'bereit' if order_availability.mailbox_ready else 'noch nicht bereit' }} · Versand: {{ 'aktiv' if order_availability.can_send else 'noch gesperrt' }} · Montagsversand: {{ 'läuft' if order_availability.worker_live else 'noch kein aktueller Lauf bestätigt' }}.</p>{% endif %}
+<form method="post" action="{{ url_for('werkstatt_orders.configure_operations') }}">
+{{ csrf_field()|safe }}
+<label>Gemeinsamer Brutto-Kostenrahmen (€)<input name="max_total" type="number" inputmode="decimal" min="0.01" max="250" step="0.01" value="{{ '%.2f'|format((order_cap or 25000)/100) }}" required></label>
+<button name="action" value="activate">{{ 'Freigabe und Kostenrahmen speichern' if operations_enabled else 'Status und Bestellversand freischalten' }}</button>
+{% if operations_enabled %}<button class="secondary" name="action" value="deactivate" formnovalidate>Betrieb pausieren</button>{% endif %}
+</form>
+<p><a href="{{ url_for('werkstatt_orders.index') }}">Lieferantenkontakte und Versandprotokoll öffnen</a></p>
+<p>Die Freigabe erzeugt keine Bestellung. Ein Lieferant braucht eine bestätigte Bestelladresse; jeder Auftrag braucht eine ausdrückliche Bestellbestätigung.</p>
+</section>
 <section class="notice"><h2>Was der Zugang erlaubt</h2>
 <p>Leserechte gelten für aktive Werkstattaufträge, Termine und Unterlagen. Mit dem Artikelrecht sind außerdem Produkte und einzelne Preise aus freigegebenen Materiallieferanten-Rechnungen sichtbar.</p>
-<p>Banking, Konten und Betriebsfinanzen bleiben ausgeschlossen.{% if read_only %} Änderungen an Aufträgen, Fotospeicherung und Bestellungen sind derzeit inaktiv.{% endif %}</p>
+<p>Banking, Konten und Betriebsfinanzen bleiben ausgeschlossen.{% if read_only and not operations_enabled %} Änderungen an Aufträgen und Bestellungen sind derzeit inaktiv.{% endif %}{% if read_only %} Fotospeicherung bleibt gesperrt.{% endif %}</p>
 </section>
 {% for employee in employees %}
 {% set new_access = employee.lesen is none %}
@@ -22,17 +37,18 @@
 <input id="password-{{ employee.id }}" name="password" type="password" autocomplete="new-password" minlength="12" {% if new_access %}required{% endif %} aria-describedby="password-help-{{ employee.id }}">
 <p id="password-help-{{ employee.id }}">Mindestens 12 Zeichen.{% if not new_access %} Leer lassen, um das bestehende Passwort beizubehalten.{% endif %}</p>
 <label class="inline"><input name="lesen" type="checkbox" {% if new_access or employee.lesen %}checked{% endif %}>Aufträge, Termine und Unterlagen lesen</label>
-<label class="inline"><input name="einkaufen" type="checkbox" {% if new_access or employee.einkaufen %}checked{% endif %}>{{ 'Artikel, Rechnungsprodukte und Preise lesen' if read_only else 'Artikel lesen und Einkaufsentwürfe intern freigeben' }}</label>
-{% if read_only %}
+<label class="inline"><input name="einkaufen" type="checkbox" {% if new_access or employee.einkaufen %}checked{% endif %}>{{ 'Artikel und Rechnungsprodukte lesen; bestätigte Bestellungen im persönlichen Limit auslösen' if operations_enabled else ('Artikel, Rechnungsprodukte und Preise lesen' if read_only else 'Artikel lesen und Einkaufsentwürfe intern freigeben') }}</label>
+{% if read_only and not operations_enabled %}
 <details><summary>Derzeit inaktive Schreibrechte</summary>
 <p>Diese Einstellungen werden aufbewahrt. Sie erlauben im aktuellen Lesemodus keine Änderungen und keine Bestellungen.</p>
-<label class="inline"><input type="checkbox" disabled {% if not new_access and employee.dokumentieren %}checked{% endif %}>Fotos und Fortschritt dokumentieren</label>
+<label class="inline"><input type="checkbox" disabled {% if not new_access and employee.dokumentieren %}checked{% endif %}>Auftragsstatus und Fortschritt melden</label>
 {% if not new_access and employee.dokumentieren %}<input name="dokumentieren" type="hidden" value="on">{% endif %}
 <label>Gespeichertes Einkaufslimit (€) · derzeit nicht genutzt<input name="limit" inputmode="decimal" value="{{ '%.2f'|format((employee.limit_cent or 0)/100) }}" readonly required></label>
 </details>
 {% else %}
-<label class="inline"><input name="dokumentieren" type="checkbox" {% if not new_access and employee.dokumentieren %}checked{% endif %}>Fotos und Fortschritt dokumentieren</label>
-<label>Brutto-Limit pro Einkauf inklusive Versand und Nebenkosten (€)<input name="limit" inputmode="decimal" value="{{ '%.2f'|format((employee.limit_cent or 0)/100) }}" required></label>
+<label class="inline"><input name="dokumentieren" type="checkbox" {% if (new_access and operations_enabled) or (not new_access and employee.dokumentieren) %}checked{% endif %}>Auftragsstatus und Fortschritt melden</label>
+<label>Persönliches Brutto-Limit pro Bestellung inklusive Versand und Nebenkosten (€)<input name="limit" inputmode="decimal" value="{{ '%.2f'|format(((order_cap or 25000) if new_access and operations_enabled else (employee.limit_cent or 0))/100) }}" required></label>
+<p>0 € sperrt Bestellungen. Zusätzlich gilt die gemeinsame Grenze von {{ '%.2f'|format((order_cap or 0)/100) }} € je dringender Bestellung bzw. gesamter Lieferanten-Sammelmail. Bestehende persönliche Limits werden nicht automatisch erhöht.</p>
 {% endif %}
 <button>{{ 'Persönlichen Zugang einrichten' if new_access else 'Zugang speichern' }}</button>
 </form>

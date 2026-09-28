@@ -2,6 +2,9 @@
 (() => {
   const $ = id => document.getElementById(id), base = '/werkstatt/assistent';
   const readOnly = $('assistant').dataset.readOnly === 'true';
+  const statusEnabled = $('assistant').dataset.statusEnabled === 'true';
+  const purchaseEnabled = $('assistant').dataset.purchaseEnabled === 'true';
+  const actionAllowed = kind => kind==='status'?statusEnabled:kind==='bestellung'?purchaseEnabled:!readOnly&&['notiz','einkauf','anfrage'].includes(kind);
   if(readOnly)document.querySelectorAll('[data-write-section]').forEach(el=>{el.hidden=true;el.querySelectorAll('input,button,textarea,select').forEach(field=>field.disabled=true);});
   const token = document.querySelector('meta[name="csrf-token"]').content;
   let current=null, photoOrder=null, photo=null, stream=null, recorder=null, micStream=null;
@@ -31,7 +34,7 @@
   function safe(fn){return async event=>{event?.preventDefault();try{await fn(event);}catch(e){reportError(e);}};}
   function log(who,text){const p=document.createElement('p');p.textContent=who+': '+text;$('conversation').append(p);}
   function showOrder(data){current=data;$('order-form').elements.id.value=data.id;$('active-order').textContent=`Auftrag ${data.id} · ${data.kennzeichen||'ohne Kennzeichen'}`;const pre=document.createElement('pre');pre.textContent=`Auftrag ${data.id} · ${data.kennzeichen||'ohne Kennzeichen'} · ${data.fahrzeug}\nAngebotsstatus: ${data.angebot_status}\nVersicherungsfreigabe: ${data.versicherung_freigabe_status}\nAngebotstext: ${data.werkstatt_angebot_text||'nicht hinterlegt'}\nBeschreibung (keine Freigabe): ${data.beschreibung||'–'}\nTeile-Aktenstand: ${JSON.stringify(data.teile,null,2)}\n${data.hinweis}`;$('order').replaceChildren(pre);if(data.quelle){pre.textContent=`Auftrag ${data.id} · ${data.fahrzeug} · ${data.kennzeichen||'ohne Kennzeichen'}\nStatus im Cockpit: ${data.status}\nArbeiten / Beschreibung:\n${data.beschreibung||'Keine Angaben in der Übersicht.'}\nTermine: ${data.termine||('Annahme: '+(data.annahme_datum||'offen')+' · Fertig: '+(data.fertig_datum||'offen')+' · Rückgabe: '+(data.abholtermin||'offen'))}\n${data.modus==='lesestand'?'Freigaben und Teilebestand: im Lesestand nicht erhoben.':'Angebotsstatus: '+(data.angebot_status||'unbekannt')+' · Versicherungsfreigabe: '+(data.versicherung_freigabe_status||'unbekannt')+'\nDokumente: '+(data.dokumente||[]).map(d=>d.id+' · '+d.original_name).join(', ')}`;const note=document.createElement('p');note.textContent=(data.modus==='live'?'Cockpit, abgerufen: ':'Cockpit-Lesestand: ')+new Date(data.stand).toLocaleString('de-DE')+' · '+(data.modus==='live'?'Direkter Portalabruf':data.detail_gelesen?'Beschreibung aus Auftragsdetails':'Listenübersicht, möglicherweise gekürzt');const link=document.createElement('a');link.href=data.quelle;link.target='_blank';link.rel='noopener';link.textContent='Originalauftrag im Cockpit öffnen';$('order').prepend(note);if($('assistant').dataset.admin==='true')$('order').prepend(link);if(data.uebersicht){const summary=document.createElement('p');summary.textContent='Cockpit-Kurzfassung: '+data.uebersicht;$('order').append(summary);}}}
-  document.addEventListener('assistant-open-order',safe(async event=>{showOrder(await api('/auftrag/'+Number(event.detail.id)));$('order').scrollIntoView({behavior:'smooth'});}));
+  document.addEventListener('assistant-open-order',safe(async event=>{stopVoice();pending=null;showOrder(await api('/auftrag/'+Number(event.detail.id)));$('order').scrollIntoView({behavior:'smooth'});}));
   function needOrder(){if(!current)throw new Error('Zuerst den richtigen Auftrag aufrufen.');return current.id;}
   function stopCamera(){stream?.getTracks().forEach(t=>t.stop());stream=null;$('video').srcObject=null;$('video').hidden=true;$('capture').disabled=true;}
   async function camera(){needOrder();if(!window.isSecureContext||!navigator.mediaDevices)throw new Error('Kamera benötigt HTTPS und Browserfreigabe.');stopCamera();const result=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});if(document.hidden){result.getTracks().forEach(t=>t.stop());return;}stream=result;$('video').srcObject=stream;$('video').hidden=false;await $('video').play();$('capture').disabled=false;}
@@ -103,6 +106,7 @@
   }
   async function prepareReadback(item){
     pending=null;
+    if(!actionAllowed(item.art))throw new Error('Für diese Aktion fehlt die aktuelle Freigabe.');
     const requestedGeneration=playbackGeneration;
     const challenge=await api('/vorlesen/'+item.id,{});
     if(requestedGeneration!==playbackGeneration)return false;
@@ -112,18 +116,49 @@
     pending={type:'action',...challenge};
     return true;
   }
+  const euros = value => Number.isSafeInteger(value)&&value>=0?(value/100).toLocaleString('de-DE',{style:'currency',currency:'EUR'}):'nicht geklärt';
+  function confirmationResult(result){
+    if(result.ok!==true)throw new Error(result.hinweis||'Die Aktion wurde nicht bestätigt.');
+    if(result.auftrag&&(!current||Number(current.id)===Number(result.auftrag.id)))showOrder(result.auftrag);
+    const message=[result.hinweis,result.versandstatus?.message].filter((text,index,items)=>typeof text==='string'&&text&&items.indexOf(text)===index).join(' ');
+    return message||'Serverantwort erhalten. Bitte den Aktionsstatus prüfen.';
+  }
   async function refresh(){
     const items=await api('/aktionen');$('actions').replaceChildren();
-    for(const item of items){if(item.art==='foto')continue;const div=document.createElement('div');div.className='action';const pre=document.createElement('pre');let details=item.daten.text;
-      if(item.art!=='notiz'){details=`${item.daten.lieferant} · ${item.daten.teilenummer}\n${item.daten.menge} × ${item.daten.bezeichnung}\n`;
-        details+=item.art==='anfrage'?'Preis und Verfügbarkeit werden angefragt. Keine Bestellung.':`Stückpreis: ${(item.daten.stueckpreis_brutto_cent/100).toFixed(2)} € · Versand: ${(item.daten.versand_brutto_cent/100).toFixed(2)} € · Nebenkosten: ${(item.daten.nebenkosten_brutto_cent/100).toFixed(2)} €\nGesamt brutto: ${(item.daten.gesamt_cent/100).toFixed(2)} €\n${item.daten.preisquelle}\nKein Bestellversand.`;}
-      pre.textContent=`Auftrag ${item.auftrag_id} · ${item.art} · ${item.status}\n${details}`;div.append(pre);
+    for(const item of items){if(!actionAllowed(item.art))continue;const div=document.createElement('div');div.className='action';const pre=document.createElement('pre');const data=item.daten||{};let details=data.text||'';
+      if(['einkauf','anfrage','bestellung'].includes(item.art)){
+        const order=data.versand||{};
+        details=`Lieferant: ${data.lieferant||'nicht geklärt'}\nArtikel: ${data.teilenummer||'nicht geklärt'} · ${data.bezeichnung||'nicht geklärt'}\nMenge: ${data.menge??'nicht geklärt'} ${order.unit||'Stück'}\n`;
+        if(item.art==='bestellung')details+=`Variante: ${order.variant||'nicht geklärt'}\nEmpfänger: ${order.recipient||'nicht geklärt'}\n`;
+        details+=item.art==='anfrage'?'Preis und Verfügbarkeit werden angefragt. Keine Bestellung.':`Stückpreis brutto: ${euros(data.stueckpreis_brutto_cent)} · Versand: ${euros(data.versand_brutto_cent)} · Nebenkosten: ${euros(data.nebenkosten_brutto_cent)}\nGesamt brutto: ${euros(data.gesamt_cent)}\n`;
+        if(item.art==='bestellung')details+=`Kostenrahmen: ${euros(order.max_total_cents)}\nPreise: brutto in EUR.\nPreisquelle: ${data.preisquelle||order.price_source||'nicht geklärt'}\n${order.urgent===true?'Dringend: Versand nach Bestätigung.':order.urgent===false?'Sammelversand: Montag um 12:00 Uhr (Europe/Berlin).':'Dringlichkeit nicht geklärt.'}`;
+        else if(item.art==='einkauf')details+=`${data.preisquelle||'Preisquelle nicht geklärt'}\nKein Bestellversand.`;
+      }
+      const labels={status:'Statusänderung',bestellung:'Verbindliche Bestellung',notiz:'Interne Notiz',einkauf:'Einkaufsentwurf',anfrage:'Teileanfrage'};
+      pre.textContent=`Auftrag ${item.auftrag_id} · ${labels[item.art]} · ${item.status==='vorschlag'?'Zur Prüfung':item.status}\n${details}`;div.append(pre);
+      if(item.versandstatus?.message){const message=document.createElement('p');message.textContent=item.versandstatus.message;div.append(message);}
       if(item.status==='vorschlag'){
-        const button=document.createElement('button');button.textContent=item.art==='notiz'?'Geprüfte Notiz speichern':'Geprüften Entwurf intern freigeben';
-        button.onclick=safe(async()=>{button.disabled=true;try{const r=await api('/bestaetigen/'+item.id,{});pending=null;status(r.hinweis);await refresh();}finally{button.disabled=false;}});div.append(button);
+        const button=document.createElement('button');button.textContent=item.art==='status'?'Status ändern':item.art==='bestellung'?'Verbindlich bestellen':item.art==='notiz'?'Geprüfte Notiz speichern':'Geprüften Entwurf intern freigeben';
+        button.onclick=safe(async()=>{button.disabled=true;try{const r=await api('/bestaetigen/'+item.id,{});pending=null;status(confirmationResult(r));await refresh();}finally{button.disabled=false;}});div.append(button);
         const read=document.createElement('button');read.className='secondary';read.textContent='Vorlesen & per Sprache bestätigen';read.disabled=$('assistant').dataset.ready!=='true';read.onclick=safe(async()=>{unlockOutput();stopVoice();if(await prepareReadback(item))status('Vorgelesen. Gespräch starten und die genannte Bestätigung sprechen.');});div.append(read);
       }
-      if(item.art!=='notiz'){const a=document.createElement('a');a.href=base+'/email/'+item.id;a.textContent='E-Mail-Anfrage als Entwurf öffnen';a.className='email-download';div.append(a);}
+      if(item.art==='bestellung'&&item.status!=='vorschlag'&&['sent','copy_pending'].includes(item.versandstatus?.state)){
+        const again=document.createElement('button');again.className='secondary';again.textContent='Erneut vorbereiten';let requestId=null;
+        again.onclick=safe(async()=>{
+          if(again.disabled)return;again.disabled=true;stopVoice();pending=null;
+          try{
+            if(!requestId){
+              if(window.crypto?.randomUUID)requestId=window.crypto.randomUUID();
+              else if(window.crypto?.getRandomValues)requestId=Array.from(window.crypto.getRandomValues(new Uint8Array(16)),byte=>byte.toString(16).padStart(2,'0')).join('');
+              else throw new Error('Sichere Vorgangsnummer nicht verfügbar. Bitte die Seite neu öffnen.');
+            }
+            await api('/erneut-vorbereiten/'+item.id,{request_id:requestId});await refresh();
+            status('Neue Bestellung vorbereitet, noch nicht ausgelöst. Bitte den neuen Vorschlag prüfen und erneut ausdrücklich bestätigen.');
+          }finally{again.disabled=false;}
+        });div.append(again);
+        const note=document.createElement('p');note.textContent='Erstellt einen neuen Bestellvorschlag. Versand erst nach erneuter Bestätigung.';div.append(note);
+      }
+      if(['anfrage','einkauf'].includes(item.art)){const a=document.createElement('a');a.href=base+'/email/'+item.id;a.textContent='E-Mail-Anfrage als Entwurf öffnen';a.className='email-download';div.append(a);}
       $('actions').append(div);
     }
   }
@@ -139,7 +174,7 @@
         if(clean!==normalized(pending.phrase)){await say('Nicht bestätigt. Sage genau: '+pending.phrase+'. Oder Abbrechen.');return;}
         let message;
         if(pending.type==='photo')message=await savePhoto();
-        else {const r=await api('/sprache-bestaetigen',{nonce:pending.nonce,text});message=r.hinweis;pending=null;await refresh();}
+        else {const r=await api('/sprache-bestaetigen',{nonce:pending.nonce,text});message=confirmationResult(r);pending=null;await refresh();}
         if(!currentChat())return;
         log('KI',message);status(message);await say(message);return;
       }
@@ -203,6 +238,11 @@
   $('write-message').onclick=()=>{stopVoice();const menu=$('assistant-menu');if(!menu.open)menu.showModal();menu.querySelector('details').open=true;$('chat').scrollIntoView({block:'center'});$('chat').elements.text.focus();};
   $('chat').onsubmit=safe(async()=>{const input=$('chat').elements.text,text=input.value.trim();if(!text)return;unlockOutput();stopVoice();input.value='';await chat(text);});
   $('order-form').onsubmit=safe(async()=>{stopVoice();pending=null;showOrder(await api('/auftrag/'+Number($('order-form').elements.id.value)));});
+  if($('status-change'))$('status-change').onsubmit=safe(async()=>{
+    if(!statusEnabled)throw new Error('Statusänderungen sind für diesen Zugang nicht freigegeben.');
+    stopVoice();pending=null;const button=$('status-change').querySelector('button');button.disabled=true;
+    try{await api('/vorschlag',{art:'status',auftrag_id:needOrder(),aktion:$('status-change').elements.aktion.value});await refresh();status('Statusänderung vorbereitet. Bitte den Vorschlag prüfen und bestätigen.');$('actions-section').scrollIntoView({block:'center'});}finally{button.disabled=false;}
+  });
   $('profile').onsubmit=safe(async()=>{stopVoice();const data=Object.fromEntries(new FormData($('profile')));await api('/profil',data);$('assistant').dataset.avatar=data.avatar;$('avatar-name').textContent=data.name;status('Persönlichkeit gespeichert.');});
   $('note').onsubmit=safe(async()=>{const item=await api('/vorschlag',{auftrag_id:needOrder(),art:'notiz',text:$('note').elements.text.value});await refresh();status('Notiz zur Prüfung vorbereitet.');});
   $('purchase').onsubmit=safe(async()=>{const data=Object.fromEntries(new FormData($('purchase')));data.menge=Number(data.menge);await api('/vorschlag',{...data,auftrag_id:needOrder()});await refresh();status('Entwurf vorbereitet. E-Mail kann unter Vorschläge geöffnet werden. Keine Bestellung.');});
@@ -264,7 +304,7 @@
     if(readOnly||source.readonly||source.modus==='lesestand'){
     for(const id of ['note','purchase'])$(id).closest('section').hidden=true;
     for(const id of ['camera','capture','camera-stop','photo-file','photo-save','vision'])$(id).disabled=true;
-    $('actions').textContent='Lesemodus: Speichern, Fotozuordnung und Bestellungen sind gesperrt.';
+    if(!statusEnabled&&!purchaseEnabled)$('actions').textContent='Lesemodus: Speichern, Fotozuordnung und Bestellungen sind gesperrt.';
     }
   }
   safe(async()=>{await refresh();await loadSource();})();

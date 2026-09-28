@@ -20,6 +20,9 @@ Payload keys follow werkstatt_bestellplan, plus product_name, verified gross
 unit_price_cents, explicit shipping_cents, price_verified=True, price_basis='gross'
 and currency='EUR'. Historical invoice prices alone are not verified prices.
 Each request's cap includes its shipping allowance. No unknown charge is added.
+New avatar requests also require explicit extra_costs_cents and price_source.
+The management layer supplies transactional reservation and pre-send batch guards
+to enforce the shared supplier budget and current verified contact.
 """
 from collections import defaultdict
 from contextlib import contextmanager
@@ -93,13 +96,15 @@ class OrderDispatch:
     MAX_SEND_ATTEMPTS = 3
 
     def __init__(self, get_db, outbox, smtp_config, authorize_order=None,
-                 supplier_resolver=None, clock=None):
+                 supplier_resolver=None, clock=None, reservation_guard=None, batch_guard=None):
         self.get_db = get_db
         self.outbox = outbox
         self.smtp_config = smtp_config
         self.authorize_order = authorize_order
         self.supplier_resolver = supplier_resolver
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.reservation_guard = reservation_guard
+        self.batch_guard = batch_guard
         with self._db() as db:
             db.execute('''CREATE TABLE IF NOT EXISTS assistent_bestellanforderungen (
                 id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -152,15 +157,18 @@ class OrderDispatch:
         if payload.get('price_verified') is not True or payload.get('price_basis') != 'gross' or payload.get('currency') != 'EUR':
             raise ValueError('Bestätigter Brutto-Stückpreis in EUR erforderlich; Rechnungsfunde allein reichen nicht.')
         price, shipping, cap = payload.get('unit_price_cents'), payload.get('shipping_cents'), item['max_total_cents']
-        if any(type(value) is not int or value < 0 or value > 10**12 for value in (price, shipping, cap)):
+        extra = payload.get('extra_costs_cents', 0)
+        if any(type(value) is not int or value < 0 or value > 10**12 for value in (price, shipping, extra, cap)):
             raise ValueError('Bestätigter Preis, Versandkosten und Kostenrahmen müssen in Cent vorliegen.')
-        expected = int((Decimal(item['quantity']) * price).to_integral_value(rounding=ROUND_CEILING)) + shipping
+        expected = int((Decimal(item['quantity']) * price).to_integral_value(rounding=ROUND_CEILING)) + shipping + extra
         if expected > cap:
             raise ValueError('Bestellung einschließlich Versand überschreitet den erlaubten Kostenrahmen.')
         return dict(item, supplier_id=group['supplier_id'], recipient=group['recipient'],
                     urgent=group['urgent'], order_requested=True,
                     product_name=_text(payload.get('product_name'), 'Produktname'),
                     unit_price_cents=price, shipping_cents=shipping,
+                    extra_costs_cents=extra,
+                    price_source=_text(payload.get('price_source', 'Manuell bestätigter Brutto-Stückpreis'), 'Preisquelle', 500),
                     expected_total_cents=expected, price_verified=True, price_basis='gross', currency='EUR')
 
     def enqueue(self, payload, actor_id, request_id):
@@ -190,16 +198,19 @@ class OrderDispatch:
             raise ValueError('Lieferantenzuordnung ist nicht eindeutig.')
         sender, account = _sender(self.smtp_config())
         now = _aware(self.clock())
+        due_at = next_dispatch_at(now, intent['urgent']).timestamp()
         order_id = str(uuid.uuid4())
         snapshot = {'order': intent, 'actor_id': actor,
                     'supplier_name': _text(supplier.get('name') or intent['supplier_id'], 'Lieferant'),
                     'recipient_verified': True, 'from_address': sender, 'sender_account': account}
         with self._db() as db:
+            if self.reservation_guard:
+                self.reservation_guard(db, actor, request_key, intent, due_at)
             db.execute('''INSERT INTO assistent_bestellanforderungen
                 (id,actor_id,request_id,request_fingerprint,snapshot_json,due_at,created_at)
                 VALUES(?,?,?,?,?,?,?) ON CONFLICT(actor_id,request_id) DO NOTHING''',
                 (order_id, actor, request_key, fingerprint, _canonical(snapshot),
-                 next_dispatch_at(now, intent['urgent']).timestamp(), now.timestamp()))
+                 due_at, now.timestamp()))
             stored = db.execute('SELECT id,request_fingerprint FROM assistent_bestellanforderungen WHERE actor_id=? AND request_id=?',
                                 (actor, request_key)).fetchone()
             if stored['request_fingerprint'] != fingerprint:
@@ -234,7 +245,8 @@ class OrderDispatch:
                     continue
                 payload = {'orders': claimed, 'created_at': now.isoformat(),
                            'from_address': claimed[0]['from_address'], 'sender_account': claimed[0]['sender_account'],
-                           'recipient': claimed[0]['order']['recipient'], 'urgent': claimed[0]['order']['urgent']}
+                           'recipient': claimed[0]['order']['recipient'], 'urgent': claimed[0]['order']['urgent'],
+                           'max_total_cents': sum(entry['order']['max_total_cents'] for entry in claimed)}
                 db.execute('''INSERT INTO assistent_bestellpakete
                     (id,payload_json,fingerprint,due_at,created_at,state) VALUES(?,?,?,?,?,'ready')''',
                     (batch_id, _canonical(payload), _digest(payload), group[0][0]['due_at'], now.timestamp()))
@@ -255,6 +267,8 @@ class OrderDispatch:
         lines = ['Guten Tag,', '', 'hiermit bestellen wir die folgenden ausdrücklich freigegebenen Positionen.',
                  'Bitte keine abweichenden Artikel oder Varianten liefern. Die genannten Brutto-Höchstbeträge',
                  'einschließlich Versand dürfen nicht überschritten werden; andernfalls bitte vor Lieferung rückfragen.', '']
+        lines += ['Verbindlicher Brutto-Höchstbetrag der gesamten Bestellmail einschließlich aller Versand- und Nebenkosten: '
+                  + money(payload.get('max_total_cents', sum(entry['order']['max_total_cents'] for entry in payload['orders']))), '']
         for number, entry in enumerate(payload['orders'], 1):
             order = entry['order']
             lines += [f'{number}. {order["product_name"]}',
@@ -262,17 +276,21 @@ class OrderDispatch:
                       f'Variante: {order["variant"]}', f'Menge: {order["quantity"]} {order["unit"]}',
                       f'Bestätigter Brutto-Stückpreis: {money(order["unit_price_cents"])}',
                       f'Freigegebener Versandanteil: {money(order["shipping_cents"])}',
+                      f'Freigegebene Nebenkosten: {money(order.get("extra_costs_cents", 0))}',
+                      f'Preisquelle: {order.get("price_source", "Manuell bestätigter Brutto-Stückpreis")}',
                       f'Höchstbetrag dieser Anforderung inklusive Versand: {money(order["max_total_cents"])}',
                       f'Bestellreferenz: {entry["id"]}', '']
         lines += ['Bitte bestätigen Sie die Bestellung und den Liefertermin.', '', 'Gärtner Karosserie & Lack']
         message.set_content('\n'.join(lines))
         return message
 
-    def _record_result(self, batch_id, owner, result, now):
+    def _record_result(self, batch_id, owner, result, now, blocked_message=None):
         state = result.get('state') if isinstance(result, dict) else None
         if state not in _STATES or state in {'queued', 'ready'}:
             state = 'uncertain'
         public = {'state': state, 'message': _MESSAGES[state]}
+        if state == 'blocked' and blocked_message:
+            public['message'] = str(blocked_message)[:500]
         with self._db() as db:
             db.execute('''UPDATE assistent_bestellpakete SET state=?,result_json=?,lease='',lease_until=0,next_attempt_at=?
                 WHERE id=? AND lease=?''', (state, _canonical(public), now.timestamp()+self.RETRY_SECONDS, batch_id, owner))
@@ -299,6 +317,11 @@ class OrderDispatch:
                 message = self._message(batch)
             except Exception:
                 return self._record_result(batch['id'], owner, {'state': 'blocked'}, now)
+            if self.batch_guard:
+                try:
+                    self.batch_guard(payload)
+                except ValueError as exc:
+                    return self._record_result(batch['id'], owner, {'state': 'blocked'}, now, str(exc))
             with self._db() as db:
                 changed = db.execute("UPDATE assistent_bestellpakete SET state='sending',attempts=attempts+1 WHERE id=? AND lease=? AND attempts<?",
                                      (batch['id'], owner, self.MAX_SEND_ATTEMPTS))
@@ -342,7 +365,7 @@ class OrderDispatch:
 
     def status(self, order_id):
         with self._db() as db:
-            row = db.execute('''SELECT o.*,b.state AS batch_state,b.attempts FROM assistent_bestellanforderungen o
+            row = db.execute('''SELECT o.*,b.state AS batch_state,b.attempts,b.result_json FROM assistent_bestellanforderungen o
                 LEFT JOIN assistent_bestellpakete b ON b.id=o.batch_id WHERE o.id=?''', (order_id,)).fetchone()
         if not row:
             raise ValueError('Bestellanforderung nicht gefunden.')
@@ -354,10 +377,17 @@ class OrderDispatch:
                 actual = None  # Retain the last durably recorded result.
                 if state in {'ready', 'sending'}:
                     state = 'uncertain'
-            if actual and actual.get('state') in _STATES:
+            if (actual and actual.get('state') in _STATES
+                    and not (state == 'blocked' and actual.get('state') == 'not_sent')):
                 state = actual['state']
         snapshot = json.loads(row['snapshot_json'])
-        return {'id': row['id'], 'actor_id': row['actor_id'], 'state': state, 'message': _MESSAGES[state],
+        message = _MESSAGES[state]
+        if state == 'blocked':
+            try:
+                message = json.loads(row['result_json'] or '{}').get('message') or message
+            except (ValueError, TypeError):
+                pass
+        return {'id': row['id'], 'actor_id': row['actor_id'], 'state': state, 'message': message,
                 'due_at': datetime.fromtimestamp(row['due_at'], timezone.utc).isoformat(),
                 'order': snapshot['order'], 'batch_id': row['batch_id'] or None,
                 'needs_review': state in {'uncertain', 'partial', 'blocked'} or
@@ -372,8 +402,10 @@ class OrderDispatch:
 
 
 def build_order_dispatch(get_db, storage_dir, imap_config, smtp_config,
-                         authorize_order=None, supplier_resolver=None, clock=None):
+                         authorize_order=None, supplier_resolver=None, clock=None,
+                         reservation_guard=None, batch_guard=None):
     """Construct the real durable mailbox boundary; does not send or connect."""
     mailbox = Mailbox(imap_config)
     outbox = MailOutbox(get_db, storage_dir, mailbox)
-    return OrderDispatch(get_db, outbox, smtp_config, authorize_order, supplier_resolver, clock)
+    return OrderDispatch(get_db, outbox, smtp_config, authorize_order, supplier_resolver, clock,
+                         reservation_guard, batch_guard)

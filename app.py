@@ -56579,12 +56579,14 @@ from werkstatt_auftrag_ausdruck import register_auftrag_ausdruck
 register_auftrag_ausdruck(sys.modules[__name__])
 from werkstatt_fortschritt_api import register_progress_api, progress_csrf_exempt
 workshop_progress = register_progress_api(sys.modules[__name__])
-from werkstatt_bestellungen import register_orders
+from werkstatt_bestellungen import register_orders, start_order_worker
 workshop_orders = register_orders(sys.modules[__name__])
 from werkstatt_assistent import register_assistant
 app.config["ASSISTANT_READ_ONLY"] = env_flag("ASSISTANT_READ_ONLY", True)
 app.config["ASSISTANT_NATIVE_COCKPIT"] = True
 register_assistant(sys.modules[__name__])
+if not PUBLIC_SITE_ONLY:
+    start_order_worker(workshop_orders)
 
 start_hourly_backups()
 start_lexware_auto_sync()

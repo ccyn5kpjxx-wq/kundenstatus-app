@@ -21,11 +21,12 @@ class Element {
     this.listeners.get(name).add(handler);
   }
   removeEventListener(name, handler) { this.listeners.get(name)?.delete(handler); }
-  emit(name) { for (const handler of this.listeners.get(name) || []) handler(); }
+  emit(name, event) { return Promise.all([...this.listeners.get(name) || []].map(handler=>handler(event))); }
   append(child) { this.children.push(child); }
+  prepend(child) { this.children.unshift(child); }
   replaceChildren(...children) { this.children = children; }
   querySelectorAll() { return []; }
-  querySelector() { return new Element(); }
+  querySelector(tag) { return this.children.find(child=>child.tagName===tag) || new Element(); }
   closest() { return this; }
   reset() {}
   focus() { this.focused = true; }
@@ -33,9 +34,10 @@ class Element {
   showModal() { this.open = true; }
 }
 async function fixture(options={}) {
-  const elements = new Map(), document = new Element(), requests = [], dialogs = [], transcriptions = [], timers = new Map(), revoked = [], meterCalls = [];
+  const elements = new Map(), document = new Element(), requests = [], dialogs = [], transcriptions = [], timers = new Map(), revoked = [], meterCalls = [], apiRequests = [];
+  const responses = options.responses || new Map();
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
-  get('assistant').dataset = {readOnly: 'true', ready: 'true'};
+  get('assistant').dataset = {readOnly: 'true', ready: 'true', statusEnabled:String(!!options.statusEnabled), purchaseEnabled:String(!!options.purchaseEnabled)};
   get('read-aloud').checked = true;
   const audio = get('speech');
   Object.assign(audio, {srcObject: null, src: '', ended: false, paused: true, plays: 0, pauses: 0});
@@ -45,7 +47,7 @@ async function fixture(options={}) {
   audio.load = () => {};
   document.hidden = false;
   document.getElementById = get;
-  document.createElement = () => new Element();
+  document.createElement = tag => Object.assign(new Element(), {tagName:tag});
   document.querySelector = () => ({content: 'synthetic-csrf'});
   let timerId = 0, urlId = 0;
   class Voice {
@@ -74,15 +76,20 @@ async function fixture(options={}) {
   const context = {
     document, AbortController, FormData, Blob, MediaRecorder: Recorder,
     navigator: {mediaDevices: {getUserMedia: options.getUserMedia || (async () => ({getTracks: () => [{stop() {}}]}))}},
-    window: {isSecureContext: true, MediaRecorder: Recorder, AssistantVoiceMode: Voice, AssistantRealtime: Realtime, OutputAudioMeter: Meter, addEventListener() {}},
+    window: {isSecureContext: true, crypto:require('node:crypto').webcrypto, MediaRecorder: Recorder, AssistantVoiceMode: Voice, AssistantRealtime: Realtime, OutputAudioMeter: Meter, addEventListener() {}},
     URL: {createObjectURL: () => `blob:synthetic-${++urlId}`, revokeObjectURL: url => revoked.push(url)},
     setTimeout: (fn,ms) => { timers.set(++timerId, {fn,ms}); return timerId; },
     clearTimeout: id => timers.delete(id),
-    fetch: async (url, options) => {
+    fetch: async (url, requestOptions) => {
+      apiRequests.push({url,options:requestOptions});
+      const route=url.replace('/werkstatt/assistent','');
+      if(responses.has(route))return {ok:true,json:async()=>{
+        const value=responses.get(route);return typeof value==='function'?value(requestOptions):value;
+      }};
       if (url.endsWith('/sprechen')) {
         const body = deferred();
         // Intentionally ignore abort to cover already-delivered responses too.
-        requests.push({...body, signal: options.signal});
+        requests.push({...body, signal: requestOptions.signal});
         return {ok: true, blob: () => body.promise};
       }
       if (url.endsWith('/dialog') || url.endsWith('/audio')) {
@@ -95,9 +102,9 @@ async function fixture(options={}) {
   };
   vm.createContext(context);
   // Expose closures only in this in-memory test instance; production has no test API.
-  vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.playbackTest={say,stopVoice,safe,realtime};\n})();'), context);
+  vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.playbackTest={say,stopVoice,safe,realtime,prepareReadback,refresh,showOrder,chat,getPending:()=>pending,getCurrent:()=>current};\n})();'), context);
   await flush();
-  return {test: context.window.playbackTest, get, audio, requests, dialogs, transcriptions, timers, revoked, document, meterCalls,
+  return {test: context.window.playbackTest, get, audio, requests, dialogs, transcriptions, timers, revoked, document, meterCalls, apiRequests, responses,
     state: () => get('avatar').dataset.state,
     deliver: async index => { requests[index].resolve(new Blob(['synthetic audio'])); await flush(); }};
 }
@@ -308,5 +315,105 @@ async function fixture(options={}) {
   f.get('chat').elements.text.value='Meine nächste Frage';
   f.dialogs[0].resolve({text:'Antwort',events:[]});await submission;
   assert.equal(f.get('chat').elements.text.value,'Meine nächste Frage');
-  console.log('PASS: TTS lifecycle, generation overlap, WebRTC handoff, stopped dialog/error and stopped single-recording transcription.');
+  const statusProposal={id:'status-1',auftrag_id:156,art:'status',status:'vorschlag',daten:{text:'Auftrag 156: Lackierbereit melden.',fortschritt:{}}};
+  const orderProposal={id:'purchase-1',auftrag_id:156,art:'bestellung',status:'vorschlag',daten:{lieferant:'Testlieferant',teilenummer:'BAND-50',bezeichnung:'Grünes Klebeband',menge:2,stueckpreis_brutto_cent:1000,versand_brutto_cent:500,nebenkosten_brutto_cent:0,gesamt_cent:2500,versand:{recipient:'test@example.invalid',variant:'grün, 50 mm',unit:'Rollen',urgent:false,max_total_cents:25000,price_basis:'gross',price_source:'Bestätigtes Testangebot'}}};
+  const queued={...orderProposal,id:'purchase-queued',status:'bestellung_eingeplant',versandstatus:{message:'Für Montag eingeplant. Noch nicht versendet.'}};
+  const legacy={id:'legacy',auftrag_id:156,art:'einkauf',status:'vorschlag',daten:orderProposal.daten};
+  const routes=new Map([['/aktionen',[statusProposal,orderProposal,queued,legacy]]]);
+  f=await fixture({statusEnabled:true,purchaseEnabled:true,responses:routes});
+  let cards=f.get('actions').children;
+  assert.equal(cards.length,3,'targeted capabilities do not re-enable legacy write forms/actions');
+  assert.match(cards[0].children[0].textContent,/Statusänderung.*Zur Prüfung/);
+  assert.match(cards[0].children[0].textContent,/Lackierbereit/);
+  assert.doesNotMatch(cards[0].children[0].textContent,/NaN|undefined|Versand/);
+  assert.equal(cards[0].children.find(x=>x.tagName==='button').textContent,'Status ändern');
+  assert.match(cards[1].children[0].textContent,/50 mm/);
+  assert.match(cards[1].children[0].textContent,/2 Rollen/);
+  assert.match(cards[1].children[0].textContent,/test@example.invalid/);
+  assert.match(cards[1].children[0].textContent,/Kostenrahmen: 250,00/);
+  assert.match(cards[1].children[0].textContent,/Preise: brutto in EUR/);
+  assert.match(cards[1].children[0].textContent,/Preisquelle: Bestätigtes Testangebot/);
+  assert.match(cards[1].children[0].textContent,/Montag um 12:00/);
+  assert.equal(cards[1].children.find(x=>x.tagName==='button').textContent,'Verbindlich bestellen');
+  assert.ok(cards.every(card=>card.children.every(x=>x.tagName!=='a')),'new actions have no misleading email-draft link');
+  assert.ok(cards[2].children.every(x=>x.tagName!=='button'),'confirmed orders cannot be resubmitted');
+  assert.ok(cards[2].children.some(x=>x.textContent===queued.versandstatus.message));
+
+  // A deliberate click confirms exactly the displayed action and refreshes its own order.
+  f.test.showOrder({id:156,kennzeichen:'TEST-156',status:2});
+  routes.set('/bestaetigen/status-1',()=>{routes.set('/aktionen',[{...statusProposal,status:'status_geaendert'},queued]);return {ok:true,status:'status_geaendert',hinweis:'Status ist jetzt lackierbereit.',auftrag:{id:156,kennzeichen:'TEST-156',status:3}};});
+  await cards[0].children.find(x=>x.textContent==='Status ändern').onclick({preventDefault(){}});
+  assert.equal(f.test.getCurrent().status,3);
+  assert.equal(f.get('status').textContent,'Status ist jetzt lackierbereit.');
+  const confirmation=f.apiRequests.find(x=>x.url.endsWith('/bestaetigen/status-1'));
+  assert.equal(confirmation.options.method,'POST');assert.equal(confirmation.options.headers['X-CSRF-Token'],'synthetic-csrf');
+  assert.ok(f.get('actions').children.every(card=>card.children.every(x=>x.tagName!=='button')));
+
+  // Manual status changes prepare a proposal; they never commit at form submit.
+  f.get('status-change').elements.aktion={value:'finish_starten'};
+  routes.set('/vorschlag',statusProposal);
+  const beforeConfirm=f.apiRequests.filter(x=>x.url.includes('/bestaetigen/')).length;
+  await f.get('status-change').onsubmit({preventDefault(){}});
+  assert.deepEqual(JSON.parse(f.apiRequests.find(x=>x.url.endsWith('/vorschlag')).options.body),{art:'status',auftrag_id:156,aktion:'finish_starten'});
+  assert.equal(f.apiRequests.filter(x=>x.url.includes('/bestaetigen/')).length,beforeConfirm);
+
+  const challenge={action_id:orderProposal.id,nonce:'one-use-test-nonce',phrase:'Bestellung für Auftrag 156 verbindlich bestätigen',text:'Bitte zwei Rollen grünes Klebeband, 50 mm, für 25 Euro brutto prüfen.'};
+  routes.set('/vorlesen/purchase-1',challenge);
+  let readback=f.test.prepareReadback(orderProposal);await flush();
+  assert.equal(f.test.getPending(),null,'a pending TTS request is not an armed confirmation');
+  f.test.stopVoice();assert.equal(await readback,false);
+  assert.equal(f.test.getPending(),null,'interrupted readback never arms confirmation');
+  readback=f.test.prepareReadback(orderProposal);await flush();
+  await f.deliver(f.requests.length-1);f.audio.emit('playing');
+  assert.equal(f.test.getPending(),null,'partial readback is not sufficient');
+  f.audio.emit('ended');assert.equal(await readback,true);
+  assert.equal(f.test.getPending().nonce,challenge.nonce);
+  let spoken=f.test.chat('Ja');await flush();
+  assert.ok(!f.apiRequests.some(x=>x.url.endsWith('/sprache-bestaetigen')),'a generic yes cannot order');
+  f.test.stopVoice();await spoken;
+  routes.set('/sprache-bestaetigen',()=>({ok:true,status:'bestellung_eingeplant',hinweis:'Bestellung bestätigt.',versandstatus:queued.versandstatus}));
+  spoken=f.test.chat(challenge.phrase);await flush();
+  assert.deepEqual(JSON.parse(f.apiRequests.find(x=>x.url.endsWith('/sprache-bestaetigen')).options.body),{nonce:challenge.nonce,text:challenge.phrase});
+  assert.match(f.get('status').textContent,/Noch nicht versendet/);
+  assert.equal(f.test.getPending(),null);
+  f.test.stopVoice();await spoken;
+
+  readback=f.test.prepareReadback(orderProposal);await flush();await f.deliver(f.requests.length-1);f.audio.emit('ended');await readback;
+  routes.set('/auftrag/200',{id:200,kennzeichen:'TEST-200'});
+  await f.document.emit('assistant-open-order',{detail:{id:200},preventDefault(){}});
+  assert.equal(f.test.getPending(),null,'the menu order shortcut cancels the old spoken confirmation');
+  assert.equal(f.test.getCurrent().id,200);
+
+  f=await fixture({responses:new Map([['/aktionen',[statusProposal,orderProposal]]])});
+  assert.equal(f.get('actions').children.length,0,'read-only without capabilities does not expose mutation proposals');
+  await assert.rejects(f.test.prepareReadback(orderProposal),/Freigabe/);
+  await f.get('status-change').onsubmit({preventDefault(){}});
+  assert.ok(!f.apiRequests.some(x=>x.url.includes('/vorschlag')||x.url.includes('/bestaetigen')||x.url.includes('/vorlesen')),'hidden controls do not grant write capabilities');
+
+  // Only SMTP-accepted orders can create a fresh unapproved proposal, never resend.
+  const previousStates=['sent','copy_pending','uncertain','queued','blocked'];
+  const previousOrders=previousStates.map(state=>({...queued,id:'previous-'+state,versandstatus:{state,message:state}}));
+  const repeatRoutes=new Map([['/aktionen',previousOrders]]);
+  f=await fixture({purchaseEnabled:true,responses:repeatRoutes});
+  cards=f.get('actions').children;
+  assert.equal(cards.filter(card=>card.children.some(x=>x.textContent==='Erneut vorbereiten')).length,2);
+  assert.ok(cards.every(card=>card.children.every(x=>x.textContent!=='Verbindlich bestellen')));
+  const retry=cards[0].children.find(x=>x.textContent==='Erneut vorbereiten');
+  let repeatAttempts=0;
+  repeatRoutes.set('/erneut-vorbereiten/previous-sent',()=>{
+    if(++repeatAttempts===1)throw new Error('Synthetic lost response');
+    repeatRoutes.set('/aktionen',[...previousOrders,{...orderProposal,id:'new-repeat'}]);
+    return {...orderProposal,id:'new-repeat'};
+  });
+  await retry.onclick({preventDefault(){}});
+  await retry.onclick({preventDefault(){}});
+  const repeatedRequests=f.apiRequests.filter(x=>x.url.includes('/erneut-vorbereiten/'));
+  assert.equal(repeatedRequests.length,2);
+  assert.equal(JSON.parse(repeatedRequests[0].options.body).request_id,JSON.parse(repeatedRequests[1].options.body).request_id,'retry reuses its client key after a lost response');
+  assert.match(JSON.parse(repeatedRequests[0].options.body).request_id,/^[a-zA-Z0-9-]{16,80}$/);
+  assert.ok(!f.apiRequests.some(x=>x.url.includes('/bestaetigen/')||x.url.includes('/bestellen/')),'repeat preparation cannot send');
+  assert.match(f.get('status').textContent,/Neue Bestellung vorbereitet, noch nicht ausgelöst/);
+  assert.equal(f.get('actions').children.at(-1).children.find(x=>x.tagName==='button').textContent,'Verbindlich bestellen','new proposal still requires deliberate confirmation');
+
+  console.log('PASS: TTS lifecycle, generation overlap, WebRTC handoff, stopped requests; targeted status/order capabilities, explicit summaries, truthful queued state, no resend, exact spoken confirmation after full readback and order-change cancellation.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
