@@ -62,10 +62,24 @@ Beim Start werden Mikrofonfreigabe, Vorbereitung, Serverantwort und Audioverbind
 getrennt angezeigt. Alte Verbindungsrückmeldungen dürfen einen Neustart nicht beenden.
 Eine blockierte automatische Wiedergabe lässt sich über **Ton einschalten** erneut
 anstoßen. Fehlermeldungen bleiben nach einem Fensterwechsel sichtbar.
+Das gilt auch für vorgelesene Textantworten. **Nachricht schreiben** öffnet die
+Texteingabe direkt; ein bereits getippter neuer Entwurf bleibt beim Eintreffen
+einer früheren Antwort erhalten. Unter **Mikrofon & Ton** stehen die Schritte zur
+Browserfreigabe; bei länger ausstehendem Mikrofonstream öffnet sich die Hilfe.
+Auch eine noch offene Mikrofonabfrage der Einzelaufnahme lässt sich abbrechen;
+später bereitgestellte Streams werden dann sofort geschlossen. Die App kann
+Browser- oder Betriebssystemberechtigungen nicht selbst erteilen.
+Kurze Netzunterbrechungen erhalten bis zu fünf Sekunden zur Wiederverbindung.
 Für ein App-Symbol kann die HTTPS-Seite in Safari zum Home-Bildschirm hinzugefügt
 werden. Die Seite hört nicht im Hintergrund zu.
 
 ## Tages- und Lackierübersicht
+
+Folgefragen verwenden die letzten zehn eigenen Dialognachrichten. Angaben aus
+früheren Antworten gelten dabei nicht als aktueller Aktennachweis. Rechte werden
+bei jeder Anfrage neu geprüft; angebotene Werkzeuge folgen dem aktuellen Zugang.
+Eine auf 60 Aufträge begrenzte Übersicht wird als Teilmenge gekennzeichnet;
+fehlende Aufträge werden gezielt gesucht, bevor die KI „nicht gefunden“ meldet.
 
 Der Tag richtet sich nach Europe/Berlin. Anlieferung, Werkstatt-Abholung,
 Fertigstellung, Rückbringung und Kundenabholung sind unterschiedliche Ereignisse.

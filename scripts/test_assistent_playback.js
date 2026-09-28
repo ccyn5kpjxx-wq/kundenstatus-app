@@ -28,8 +28,11 @@ class Element {
   querySelector() { return new Element(); }
   closest() { return this; }
   reset() {}
+  focus() { this.focused = true; }
+  scrollIntoView() {}
+  showModal() { this.open = true; }
 }
-async function fixture() {
+async function fixture(options={}) {
   const elements = new Map(), document = new Element(), requests = [], dialogs = [], transcriptions = [], timers = new Map(), revoked = [], meterCalls = [];
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('assistant').dataset = {readOnly: 'true', ready: 'true'};
@@ -70,10 +73,10 @@ async function fixture() {
   }
   const context = {
     document, AbortController, FormData, Blob, MediaRecorder: Recorder,
-    navigator: {mediaDevices: {getUserMedia: async () => ({getTracks: () => [{stop() {}}]})}},
+    navigator: {mediaDevices: {getUserMedia: options.getUserMedia || (async () => ({getTracks: () => [{stop() {}}]}))}},
     window: {isSecureContext: true, MediaRecorder: Recorder, AssistantVoiceMode: Voice, AssistantRealtime: Realtime, OutputAudioMeter: Meter, addEventListener() {}},
     URL: {createObjectURL: () => `blob:synthetic-${++urlId}`, revokeObjectURL: url => revoked.push(url)},
-    setTimeout: fn => { timers.set(++timerId, fn); return timerId; },
+    setTimeout: (fn,ms) => { timers.set(++timerId, {fn,ms}); return timerId; },
     clearTimeout: id => timers.delete(id),
     fetch: async (url, options) => {
       if (url.endsWith('/sprechen')) {
@@ -126,13 +129,21 @@ async function fixture() {
   f.test.stopVoice(); assert.equal(f.revoked.length, 1);
   assert.equal([...f.audio.listeners.values()].reduce((sum, set) => sum + set.size, 0), 0);
 
-  // Autoplay rejection and decoder errors stop the speaking state truthfully.
+  // Autoplay recovery also works for typed answers from the avatar's main screen.
   f = await fixture();
   const denied = deferred(); f.audio.nextPlay = denied.promise;
-  result = f.test.say('Antwort'); const rejected = assert.rejects(result, /blockiert/);
-  await f.deliver(0); denied.reject(new Error('NotAllowedError')); await rejected;
-  assert.equal(f.state(), 'error'); assert.equal(f.timers.size, 0);
-  f.test.stopVoice();
+  result = f.test.say('Antwort');
+  await f.deliver(0); denied.reject(Object.assign(new Error('blocked'),{name:'NotAllowedError'})); await flush();
+  assert.equal(f.state(), 'idle'); assert.equal(f.timers.size, 0);
+  assert.equal(f.get('audio-resume').hidden,false);
+  assert.match(f.get('avatar-status').textContent,/Ton einschalten/);
+  f.audio.nextPlay=null;await f.get('audio-resume').onclick({preventDefault(){}});
+  assert.equal(f.audio.plays,2);assert.equal(f.get('audio-resume').hidden,true);
+  assert.ok(!f.meterCalls.includes('resumePlayback'),'TTS resumes its own audio, not WebRTC');
+  f.audio.emit('playing');assert.equal(f.state(),'speaking');
+  f.audio.emit('ended');assert.equal(await result,true);f.test.stopVoice();
+
+  // Decoder errors still stop the speaking state truthfully.
   f = await fixture(); result = f.test.say('Antwort');
   const broken = assert.rejects(result, /abgespielt/);
   await f.deliver(0); f.audio.emit('playing'); f.audio.emit('error'); await broken;
@@ -234,5 +245,68 @@ async function fixture() {
     assert.equal(f.dialogs.length, 0); assert.equal(f.requests.length, 0);
     assert.equal(f.get('chat').elements.text.value, ''); assert.equal(f.state(), 'idle');
   }
+  // Cancelling an unanswered permission prompt settles immediately; late tracks close.
+  for(const leavePage of [false,true]){
+    const request=deferred();let stops=0;
+    f=await fixture({getUserMedia:()=>request.promise});
+    const opening=f.get('record').onclick({preventDefault(){}});
+    assert.match(f.get('record').textContent,/abbrechen/);
+    if(leavePage){f.document.hidden=true;f.document.emit('visibilitychange');}
+    else await f.get('record').onclick({preventDefault(){}});
+    await opening;
+    request.resolve({getTracks:()=>[{stop(){stops++;}}]});await flush();
+    assert.equal(stops,1);assert.equal(f.transcriptions.length,0);assert.equal(f.timers.size,0);
+    assert.equal(f.state(),'idle');
+  }
+  // Stop in the microtask between stream acquisition and recorder construction releases ownership.
+  const acquisition=deferred();let acquiredStops=0;
+  f=await fixture({getUserMedia:()=>acquisition.promise});
+  const pendingRecording=f.get('record').onclick({preventDefault(){}});
+  acquisition.resolve({getTracks:()=>[{stop(){acquiredStops++;}}]});
+  await Promise.resolve();f.test.stopVoice();await pendingRecording;
+  assert.ok(acquiredStops>=1);assert.equal(f.transcriptions.length,0);
+
+  // An unanswered permission prompt times out with visible help and still releases late tracks.
+  const unanswered=deferred();let timeoutStops=0;
+  f=await fixture({getUserMedia:()=>unanswered.promise});
+  const timeoutRecording=f.get('record').onclick({preventDefault(){}});
+  const [helpId,help]=[...f.timers].find(([,timer])=>timer.ms===8000);
+  f.timers.delete(helpId);help.fn();assert.equal(f.get('voice-help').open,true);
+  const [deadlineId,deadline]=[...f.timers].find(([,timer])=>timer.ms===60000);
+  f.timers.delete(deadlineId);deadline.fn();await timeoutRecording;
+  assert.equal(f.state(),'error');assert.equal(f.timers.size,0);
+  unanswered.resolve({getTracks:()=>[{stop(){timeoutStops++;}}]});await flush();
+  assert.equal(timeoutStops,1);assert.equal(f.transcriptions.length,0);
+
+  // A cancelled old opening cannot cancel an immediate new permission request.
+  const firstMic=deferred(),secondMic=deferred();let micCalls=0,oldMicStops=0,newMicStops=0;
+  f=await fixture({getUserMedia:()=>++micCalls===1?firstMic.promise:secondMic.promise});
+  const openingFirst=f.get('record').onclick({preventDefault(){}});
+  f.test.stopVoice();
+  const openingSecond=f.get('record').onclick({preventDefault(){}});
+  await openingFirst;
+  assert.match(f.get('record').textContent,/abbrechen/);
+  secondMic.resolve({getTracks:()=>[{stop(){newMicStops++;}}]});await openingSecond;
+  assert.equal(f.state(),'listening');assert.equal(newMicStops,0);
+  firstMic.resolve({getTracks:()=>[{stop(){oldMicStops++;}}]});await flush();
+  assert.equal(oldMicStops,1);assert.equal(newMicStops,0);f.test.stopVoice();
+
+  // Speech transcription must not overwrite a draft typed while it was processing.
+  f=await fixture();f.get('read-aloud').checked=false;
+  await f.get('record').onclick({preventDefault(){}});
+  await f.get('record').onclick({preventDefault(){}});
+  f.get('chat').elements.text.value='Neuer geschriebener Entwurf';
+  f.transcriptions[0].resolve({text:'Erkannte Sprachnachricht'});await flush();
+  assert.equal(f.get('chat').elements.text.value,'Neuer geschriebener Entwurf');
+  f.dialogs[0].resolve({text:'Antwort',events:[]});await flush();
+
+  // Sending an earlier question never erases the next draft typed during its answer.
+  f=await fixture();f.get('read-aloud').checked=false;
+  f.get('chat').elements.text.value='Erste Frage';
+  const submission=f.get('chat').onsubmit({preventDefault(){}});
+  assert.equal(f.get('chat').elements.text.value,'');
+  f.get('chat').elements.text.value='Meine nächste Frage';
+  f.dialogs[0].resolve({text:'Antwort',events:[]});await submission;
+  assert.equal(f.get('chat').elements.text.value,'Meine nächste Frage');
   console.log('PASS: TTS lifecycle, generation overlap, WebRTC handoff, stopped dialog/error and stopped single-recording transcription.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

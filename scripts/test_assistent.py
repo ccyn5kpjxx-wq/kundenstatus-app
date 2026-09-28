@@ -604,4 +604,123 @@ class AssistantTests(unittest.TestCase):
             self.assertNotIn('aktion_vorschlagen',{t['name'] for t in call.call_args.kwargs['json']['tools']})
         with database() as db: self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_aktionen').fetchone()[0],0)
 
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_readonly_followup_keeps_own_conversation_but_refreshes_facts(self):
+        from unittest.mock import Mock
+        with database() as db:
+            for actor, role, text in [
+                ('mitarbeiter:1','user','Welche Breiten vom grünen Klebeband wurden bestellt?'),
+                ('mitarbeiter:1','assistant','Im Vorschlag stehen 30 mm und 50 mm.'),
+                ('admin','assistant','OTHER-ACTOR-PRIVATE-CONTEXT'),
+                ('mitarbeiter:1','system','STORED-SYSTEM-ROLE-MUST-NOT-BE-USED'),
+            ]:
+                db.execute('INSERT INTO assistent_dialog(actor,role,text,zeit) VALUES(?,?,?,?)',(actor,role,text,p.now_str()))
+        result=Mock();result.json.return_value={'output':[{'type':'message','content':[{'type':'output_text','text':'50 mm, verstanden.'}]}]}
+        with patch.object(p,'get_openai_api_key',return_value='synthetic-key'), patch('werkstatt_assistent.requests.post',return_value=result) as provider:
+            response=self.post('/dialog',{'text':'Die 50 mm bitte.'})
+        self.assertEqual(response.status_code,200)
+        sent=provider.call_args.kwargs['json']
+        history=[item for item in sent['input'] if 'role' in item]
+        self.assertEqual([item['content'] for item in history],[
+            'Welche Breiten vom grünen Klebeband wurden bestellt?',
+            'Im Vorschlag stehen 30 mm und 50 mm.', 'Die 50 mm bitte.'])
+        self.assertIn('Frühere Antworten sind kein aktueller Aktennachweis',sent['instructions'])
+        self.assertIn('kalender',sent['instructions'])
+        self.assertFalse(sent['store'])
+        self.assertEqual(provider.call_count,1)
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_missing_article_rights_remove_model_tools_and_previous_price_answers(self):
+        import json
+        from unittest.mock import Mock
+        with database() as db:
+            db.execute('UPDATE assistent_rechte SET einkaufen=0 WHERE mitarbeiter_id=1')
+            db.execute("INSERT INTO assistent_dialog(actor,role,text,zeit) VALUES('mitarbeiter:1','assistant','OLDER-ARTICLE-PRICE',?)",(p.now_str(),))
+        result=Mock(text='v=0\r\nanswer');result.json.return_value={'output':[{'type':'message','content':[{'type':'output_text','text':'Auftragsauskunft ist möglich.'}]}]}
+        with patch.object(p,'get_openai_api_key',return_value='synthetic-key'), patch('werkstatt_assistent.requests.post',return_value=result) as provider:
+            self.assertEqual(self.post('/realtime/start',{'sdp':'v=0\r\noffer'}).status_code,200)
+            realtime=json.loads(provider.call_args.kwargs['files']['session'][1])
+            self.assertEqual(self.post('/dialog',{'text':'Was steht im Auftrag?'}).status_code,200)
+            dialog=provider.call_args.kwargs['json']
+        for request_data in (realtime,dialog):
+            names={tool['name'] for tool in request_data['tools']}
+            self.assertTrue({'auftrag_lesen','tagesplan'} <= names)
+            self.assertFalse({'artikel_suchen','beleg_lesen','aktion_vorschlagen','kamera'} & names)
+        self.assertNotIn('OLDER-ARTICLE-PRICE',json.dumps(dialog['input']))
+        with patch.object(p.cockpit_data,'articles') as articles:
+            self.assertEqual(self.post('/realtime/werkzeug',{'name':'artikel_suchen','arguments':{'suche':'Klebeband'}}).status_code,400)
+            articles.assert_not_called()
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_berlin_calendar_and_relative_dates_cross_utc_midnight_and_dst(self):
+        import json
+        from datetime import datetime,timezone
+        from unittest.mock import Mock
+        frozen=datetime(2026,10,24,22,30,tzinfo=timezone.utc)
+        class Clock(datetime):
+            @classmethod
+            def now(cls,tz=None):return frozen.astimezone(tz) if tz else frozen.replace(tzinfo=None)
+        with patch('werkstatt_assistent.datetime',Clock):
+            response=self.client.get('/werkstatt/assistent/realtime/kontext')
+            text=response.json['instructions']
+            context=json.loads(text.rsplit('\nAKTENSTAND ',1)[1].split(': ',1)[1])
+            self.assertEqual(context['kalender'],{'zeitzone':'Europe/Berlin','heute':'2026-10-25','morgen':'2026-10-26','uebermorgen':'2026-10-27'})
+            self.assertEqual(context['stand'],'2026-10-25T00:30:00+02:00')
+            with patch.object(p.cockpit_data,'schedule',side_effect=lambda day:{'datum':day}) as schedule:
+                for word, expected in [(None,'2026-10-25'),('heute','2026-10-25'),('morgen','2026-10-26'),('übermorgen','2026-10-27'),('2026-11-02','2026-11-02')]:
+                    result=self.post('/realtime/werkzeug',{'name':'tagesplan','arguments':{'datum':word}})
+                    self.assertEqual(result.status_code,200)
+                    self.assertEqual(result.json['result']['datum'],expected)
+                self.assertEqual(schedule.call_count,5)
+            with patch.object(p.cockpit_data,'briefing',side_effect=lambda day:{'datum':day}):
+                result=self.post('/realtime/werkzeug',{'name':'morgenueberblick','arguments':{'datum':'morgen'}})
+                self.assertEqual(result.json['result']['datum'],'2026-10-26')
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_preload_marks_partial_list_and_explains_status_and_deadlines(self):
+        import json
+        with patch.object(p.cockpit_data,'orders',return_value={'auftraege':[{'id':156,'status':3}],'next_offset':60}):
+            text=self.client.get('/werkstatt/assistent/realtime/kontext').json['instructions']
+        context=json.loads(text.rsplit('\nAKTENSTAND ',1)[1].split(': ',1)[1])
+        self.assertTrue(context['gekuerzt'])
+        self.assertEqual(context['next_offset'],60)
+        self.assertIn('Erst nach erfolgloser Abfrage nicht gefunden sagen',text)
+        self.assertIn('geplante Fertigfrist, keine bestätigte Fertigstellung',text)
+        self.assertIn('4 fertig, 5 zurückgegeben',text)
+        self.assertNotIn('hinterlegten Arbeiten und Freigabe',text)
+        result=self.post('/realtime/werkzeug',{'name':'auftrag_lesen','arguments':{'auftrag_id':157}})
+        self.assertEqual(result.json['result']['id'],157)
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_read_tool_bad_types_return_400_without_reading_other_sources(self):
+        cases=[
+            ([],{}), (None,{}), ('auftrag_lesen',{'auftrag_id':True}),
+            ('auftrag_lesen',{'auftrag_id':[156]}), ('auftrag_lesen',{'auftrag_id':156.5}),
+            ('dokument_lesen',{'dokument_id':True}), ('beleg_lesen',{'beleg_id':{}}),
+            ('auftraege_suchen',{'suche':[]}), ('auftraege_suchen',{'suche':'Test','offset':True}),
+            ('tagesplan',{'datum':[]}), ('tagesplan',{'datum':'2026-02-30'}),
+            ('artikel_suchen',{'suche':['Test']}), ('lackierplan',{'zeitraum':['heute']}),
+        ]
+        with patch.object(p.cockpit_data,'order') as order, patch.object(p.cockpit_data,'document') as document, patch.object(p.cockpit_data,'invoice') as invoice:
+            for name,args in cases:
+                with self.subTest(name=name,args=args):
+                    response=self.post('/realtime/werkzeug',{'name':name,'arguments':args})
+                    self.assertEqual(response.status_code,400)
+            order.assert_not_called();document.assert_not_called();invoice.assert_not_called()
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_document_tool_rejects_archived_parent_before_reading_content(self):
+        with database() as db:
+            db.execute("INSERT INTO dateien(id,auftrag_id,original_name,stored_name,hochgeladen_am) VALUES(801,156,'synthetic-job.pdf','synthetic-unused.pdf',?)",(p.now_str(),))
+        with patch.object(p.cockpit_data,'document',return_value={'id':801,'auftrag_id':156,'extrahierter_text':'SYNTHETIC WORK'}) as document:
+            result=self.post('/realtime/werkzeug',{'name':'dokument_lesen','arguments':{'dokument_id':801}})
+            self.assertEqual(result.status_code,200)
+            document.assert_called_once_with(801)
+            document.reset_mock()
+            with database() as db:db.execute('UPDATE auftraege SET archiviert=1 WHERE id=156')
+            result=self.post('/realtime/werkzeug',{'name':'dokument_lesen','arguments':{'dokument_id':801}})
+            self.assertEqual(result.status_code,400)
+            self.assertNotIn('SYNTHETIC WORK',result.text)
+            document.assert_not_called()
+
 if __name__=='__main__': unittest.main(verbosity=2)

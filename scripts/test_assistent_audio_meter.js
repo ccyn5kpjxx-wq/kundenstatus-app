@@ -18,7 +18,7 @@ function fixture() {
   const window = new Events();
   window.document = new Events(); window.document.hidden = false;
   const audio = new Events();
-  Object.assign(audio, {paused: false, ended: false, muted: false, volume: 1, readyState: 4,
+  Object.assign(audio, {paused: false, ended: false, muted: false, seeking: false, volume: 1, readyState: 4,
     currentTime: 0, srcObject: null, src: ''});
   audio.pause = audio.play = () => { throw new Error('Meter must never control playback'); };
   Object.defineProperty(window, 'navigator', {get() { throw new Error('No microphone access'); }});
@@ -141,6 +141,13 @@ const blob = () => ({size: 32, arrayBuffer: async () => new ArrayBuffer(32)});
   assert.equal(tts.meter.source.blob, null);
   tts.audio.currentTime = 0.025; tts.step(); tts.step();
   assert.ok(tts.latest() > 0.5 && tts.latest() < 0.8, 'playback currentTime selects the actual audio segment');
+  tts.audio.seeking = true; tts.audio.emit('seeking');
+  assert.equal(tts.latest(), 0, 'seeking closes before the newly selected audio is audible');
+  assert.equal(tts.frames.size, 0, 'seeking must not sample the destination ahead of playback');
+  tts.audio.currentTime = 0; tts.audio.emit('timeupdate');
+  assert.equal(tts.frames.size, 0, 'timeupdate during seeking cannot reopen the mouth');
+  tts.audio.seeking = false; tts.audio.emit('seeked'); tts.step();
+  assert.ok(tts.latest() > 0 && tts.latest() < 0.2, 'seeked resumes from the actual new position');
   tts.audio.currentTime = 0.15;
   for (let i = 0; i < 4; i++) tts.step();
   assert.equal(tts.latest(), 0);
@@ -200,5 +207,21 @@ const blob = () => ({size: 32, arrayBuffer: async () => new ArrayBuffer(32)});
   assert.doesNotThrow(() => ended.meter.clear(), 'cleanup failures must not escape into speech controls');
   assert.equal(ended.audio.paused, false); ended.meter.destroy();
 
-  console.log('PASS: output RMS smoothing/silence, stream and compact TTS envelopes, source ownership, pause/mute/context/visibility gates, stale RAF/decode guards and cleanup without playback or microphone access.');
+  const unlocking = fixture(); await unlocking.streamStart();
+  unlocking.raw(0.5);
+  const context = unlocking.contexts[0], attempts = [];
+  context.state = 'suspended'; context.emit('statechange');
+  context.resume = () => new Promise((resolve, reject) => attempts.push({resolve, reject}));
+  const oldUnlock = unlocking.meter.unlock();
+  const newUnlock = unlocking.meter.unlock();
+  context.state = 'running'; context.emit('statechange'); attempts[1].resolve();
+  assert.equal(await newUnlock, true);
+  unlocking.step(); assert.ok(unlocking.latest() > 0);
+  attempts[0].reject(new Error('old audio gesture rejected'));
+  assert.equal(await oldUnlock, false);
+  assert.ok(unlocking.latest() > 0, 'an old unlock failure cannot blank newer audible output');
+  assert.equal(unlocking.frames.size, 1, 'an old unlock failure cannot cancel the current measurement loop');
+  unlocking.meter.destroy();
+
+  console.log('PASS: output RMS smoothing/silence, stream and compact TTS envelopes, source ownership, pause/mute/seek/context/visibility gates, stale unlock/RAF/decode guards and cleanup without playback or microphone access.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

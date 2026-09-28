@@ -64,6 +64,11 @@ const toolEvent={type:'response.function_call_arguments.done',name:'auftrag_lese
   // Explicit stop also completes the start promise without waiting for permission.
   f=fixture();mic=deferred();f.behaviour.microphone=()=>mic.promise;pending=f.voice.start();f.voice.stop();await pending;
   assert.equal(f.errors.length,0);mic.resolve(f.newStream());await flush();assert.equal(f.stopped(),1);
+  // Permission may resolve just before Stop, while start still awaits its race.
+  f=fixture();const justGranted=f.newStream();f.behaviour.microphone=()=>Promise.resolve(justGranted);
+  pending=f.voice.start();await Promise.resolve();f.voice.stop();await pending;
+  assert.equal(f.stopped(),1,'the newly granted microphone must already belong to the session');
+  assert.equal(f.pcs.length,0);assert.equal(f.calls.length,0);assert.equal(f.errors.length,0);
   for(const [name,word] of [['NotAllowedError',/nicht erlaubt/],['NotFoundError',/Kein Mikrofon/],['NotReadableError',/nicht öffnen/],['SecurityError',/blockiert/]]){
     f=fixture();f.behaviour.microphone=()=>Promise.reject(Object.assign(new Error('private device details'),{name}));await f.voice.start();
     assert.equal(f.voice.active,false);assert.match(f.errors[0].message,word);assert.equal(f.errors[0].phase,'microphone');
@@ -93,11 +98,48 @@ const toolEvent={type:'response.function_call_arguments.done',name:'auftrag_lese
   assert.equal(f.voice.active,true);assert.equal(f.voice.pc,freshPc);assert.equal(f.audio.muted,false);assert.equal(f.audio.srcObject,null);
   assert.equal(f.timers.size,count);assert.equal(f.errors.length,0);assert.equal(f.texts.length,0);f.voice.stop();
 
+  // Brief network loss recovers, without unmuting a user interruption.
+  f=fixture();await f.voice.start();const recoveringPc=f.voice.pc;
+  await f.voice.event({type:'output_audio_buffer.started'});
+  await f.voice.event({type:'input_audio_buffer.speech_started'});
+  recoveringPc.connectionState='disconnected';recoveringPc.onconnectionstatechange();
+  const recoveryTimer=[...f.timers.entries()].find(([,timer])=>timer.ms===5000);
+  assert.ok(recoveryTimer);assert.equal(f.voice.active,true);assert.equal(f.stopped(),0);
+  recoveringPc.onconnectionstatechange();
+  assert.equal([...f.timers.values()].filter(timer=>timer.ms===5000).length,1);
+  assert.ok(f.timers.has(recoveryTimer[0]),'duplicate disconnected events cannot postpone the deadline');
+  recoveringPc.connectionState='connected';recoveringPc.onconnectionstatechange();
+  assert.equal(f.voice.active,true);assert.equal(f.audio.muted,true);assert.equal(f.states.at(-1)[0],'listening');
+  assert.equal(f.timers.has(recoveryTimer[0]),false);assert.equal(f.errors.length,0);f.voice.stop();
+  // A persistent loss still ends the session and releases all resources.
+  f=fixture();await f.voice.start();f.voice.pc.connectionState='disconnected';f.voice.pc.onconnectionstatechange();
+  f.fire(5000);assert.equal(f.voice.active,false);assert.equal(f.stopped(),1);assert.equal(f.timers.size,0);
+  assert.match(f.errors[0].message,/nicht wiederhergestellt/);
+  // Stopping during recovery must not let its old timeout affect the next call.
+  f=fixture();await f.voice.start();f.voice.pc.connectionState='disconnected';f.voice.pc.onconnectionstatechange();
+  const staleRecovery=[...f.timers.values()].find(timer=>timer.ms===5000).fn;
+  f.voice.stop();await f.voice.start();staleRecovery();assert.equal(f.voice.active,true);assert.equal(f.errors.length,0);
+  f.voice.pc.connectionState='failed';f.voice.pc.onconnectionstatechange();assert.equal(f.voice.active,false);assert.equal(f.timers.size,0);
+
   // A rejected old play() promise cannot stop a fresh session.
   f=fixture();await f.voice.start();const play=deferred();f.behaviour.play=()=>play.promise;
   f.voice.pc.ontrack({streams:[f.newStream()]});f.voice.stop();delete f.behaviour.play;await f.voice.start();
   play.reject(Object.assign(new Error('old pause'),{name:'AbortError'}));await flush();
   assert.equal(f.voice.active,true);assert.equal(f.errors.length,0);f.voice.stop();
+
+  // Playback attempts within one session have their own ownership, too.
+  for(const name of ['NotAllowedError','NotSupportedError']){
+    f=fixture();await f.voice.start();const olderPlay=deferred();f.behaviour.play=()=>olderPlay.promise;
+    f.voice.pc.ontrack({streams:[f.newStream()]});delete f.behaviour.play;
+    assert.equal(await f.voice.resumePlayback(),true);
+    olderPlay.reject(Object.assign(new Error('obsolete play attempt'),{name}));await flush();
+    assert.equal(f.voice.active,true);assert.equal(f.voice.playbackBlocked,false);assert.equal(f.blocked.length,0);assert.equal(f.errors.length,0);f.voice.stop();
+  }
+  f=fixture();await f.voice.start();const obsoleteSuccess=deferred();f.behaviour.play=()=>obsoleteSuccess.promise;
+  f.voice.pc.ontrack({streams:[f.newStream()]});
+  f.behaviour.play=()=>Promise.reject(Object.assign(new Error('current attempt denied'),{name:'NotAllowedError'}));
+  assert.equal(await f.voice.resumePlayback(),false);obsoleteSuccess.resolve();await flush();
+  assert.equal(f.voice.playbackBlocked,true,'an obsolete success must not hide the current playback block');f.voice.stop();
 
   // Old refresh results and cleanup cannot update/unlock a newer refresh.
   for(const rejectOld of [false,true]){

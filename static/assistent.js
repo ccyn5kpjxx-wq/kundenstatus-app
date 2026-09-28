@@ -6,7 +6,13 @@
   const token = document.querySelector('meta[name="csrf-token"]').content;
   let current=null, photoOrder=null, photo=null, stream=null, recorder=null, micStream=null;
   let busy=false, audioUrl=null, photoUrl=null, pending=null, cancelPlayback=null;
-  let playbackGeneration=0, busyGeneration=null;
+  let playbackGeneration=0, busyGeneration=null, recordingGeneration=0, micPending=false;
+  let resumeOutput=null, helpTimer=null, cancelMicrophone=null, recordingTimer=null;
+  function voicePhase(phase){
+    clearTimeout(helpTimer);helpTimer=null;$('assistant').dataset.voicePhase=phase;
+    if(phase==='microphone')helpTimer=setTimeout(()=>{if($('assistant').dataset.voicePhase==='microphone')$('voice-help').open=true;},8000);
+    else if(phase==='connected')$('voice-help').open=false;
+  }
   // Observe output only. Playback and microphone ownership stay with their controllers.
   const outputMeter=window.OutputAudioMeter?new window.OutputAudioMeter({window,audio:$('speech'),onLevel:level=>window.AssistantAvatar?.instance?.animation.setAudioLevel(level)}):null;
   const unlockOutput=()=>{outputMeter?.unlock().catch(()=>{});};
@@ -21,7 +27,7 @@
     return raw?response.blob():response.json();
   }
   const stalePlaybackError = error => error.playbackGeneration!==undefined&&error.playbackGeneration!==playbackGeneration;
-  function reportError(error){if(stalePlaybackError(error))return;if(error.phase)$('assistant').dataset.voicePhase=error.phase;status(error.message);state('error',error.message);}
+  function reportError(error){if(stalePlaybackError(error))return;if(error.phase){voicePhase(error.phase);clearTimeout(helpTimer);if(error.phase==='microphone')$('voice-help').open=true;}status(error.message);state('error',error.message);}
   function safe(fn){return async event=>{event?.preventDefault();try{await fn(event);}catch(e){reportError(e);}};}
   function log(who,text){const p=document.createElement('p');p.textContent=who+': '+text;$('conversation').append(p);}
   function showOrder(data){current=data;$('order-form').elements.id.value=data.id;$('active-order').textContent=`Auftrag ${data.id} · ${data.kennzeichen||'ohne Kennzeichen'}`;const pre=document.createElement('pre');pre.textContent=`Auftrag ${data.id} · ${data.kennzeichen||'ohne Kennzeichen'} · ${data.fahrzeug}\nAngebotsstatus: ${data.angebot_status}\nVersicherungsfreigabe: ${data.versicherung_freigabe_status}\nAngebotstext: ${data.werkstatt_angebot_text||'nicht hinterlegt'}\nBeschreibung (keine Freigabe): ${data.beschreibung||'–'}\nTeile-Aktenstand: ${JSON.stringify(data.teile,null,2)}\n${data.hinweis}`;$('order').replaceChildren(pre);if(data.quelle){pre.textContent=`Auftrag ${data.id} · ${data.fahrzeug} · ${data.kennzeichen||'ohne Kennzeichen'}\nStatus im Cockpit: ${data.status}\nArbeiten / Beschreibung:\n${data.beschreibung||'Keine Angaben in der Übersicht.'}\nTermine: ${data.termine||('Annahme: '+(data.annahme_datum||'offen')+' · Fertig: '+(data.fertig_datum||'offen')+' · Rückgabe: '+(data.abholtermin||'offen'))}\n${data.modus==='lesestand'?'Freigaben und Teilebestand: im Lesestand nicht erhoben.':'Angebotsstatus: '+(data.angebot_status||'unbekannt')+' · Versicherungsfreigabe: '+(data.versicherung_freigabe_status||'unbekannt')+'\nDokumente: '+(data.dokumente||[]).map(d=>d.id+' · '+d.original_name).join(', ')}`;const note=document.createElement('p');note.textContent=(data.modus==='live'?'Cockpit, abgerufen: ':'Cockpit-Lesestand: ')+new Date(data.stand).toLocaleString('de-DE')+' · '+(data.modus==='live'?'Direkter Portalabruf':data.detail_gelesen?'Beschreibung aus Auftragsdetails':'Listenübersicht, möglicherweise gekürzt');const link=document.createElement('a');link.href=data.quelle;link.target='_blank';link.rel='noopener';link.textContent='Originalauftrag im Cockpit öffnen';$('order').prepend(note);if($('assistant').dataset.admin==='true')$('order').prepend(link);if(data.uebersicht){const summary=document.createElement('p');summary.textContent='Cockpit-Kurzfassung: '+data.uebersicht;$('order').append(summary);}}}
@@ -34,6 +40,7 @@
   async function savePhoto(){if(!photo||!photoOrder)throw new Error('Foto fehlt.');if(needOrder()!==photoOrder.id)throw new Error('Auftrag wurde gewechselt. Ursprünglichen Auftrag wieder aufrufen oder neues Foto aufnehmen.');$('photo-save').disabled=true;try{const form=new FormData();form.append('foto',photo,'aufnahme.jpg');form.append('analyse',$('vision').checked?'1':'0');const r=await api('/foto/'+photoOrder.id,form);photo=null;pending=null;$('photo-preview').hidden=true;stopCamera();await refresh();return r.hinweis+(r.sichtung?' KI-Sichtung: '+r.sichtung:'');}catch(e){$('photo-save').disabled=false;throw e;}}
   function stopPlayback(){
     ++playbackGeneration;
+    resumeOutput=null;$('audio-resume').hidden=true;
     const cancel=cancelPlayback;cancelPlayback=null;cancel?.();
     outputMeter?.clear();
   }
@@ -41,7 +48,7 @@
     stopPlayback();
     const generation=playbackGeneration, abort=new AbortController(), audio=$('speech');
     const current=()=>generation===playbackGeneration&&!abort.signal.aborted;
-    let timer=null, settled=false, url=null;
+    let timer=null, settled=false, url=null, playAttempt=0;
     const listeners=[];
     state('thinking','Antwort wird vorbereitet.');voiceButtons(true);
     return new Promise((resolve,reject)=>{
@@ -59,7 +66,7 @@
         done(null,true);
       };
       const ownsAudio=()=>current()&&audio.srcObject===null&&audio.src===url;
-      const fail=message=>{if(!current())return;state('error',message);done(new Error(message));};
+      const fail=message=>{if(!current())return;resumeOutput=null;$('audio-resume').hidden=true;state('error',message);done(new Error(message));};
       const listen=(name,handler)=>{
         const guarded=()=>{if(ownsAudio())handler();};
         listeners.push([name,guarded]);audio.addEventListener(name,guarded);
@@ -71,13 +78,26 @@
         url=audioUrl=URL.createObjectURL(blob);audio.srcObject=null;audio.src=url;audio.hidden=false;
         outputMeter?.useBlob(blob,url);
         // Keep these listeners for manual replay, until stop or the next output.
-        listen('playing',()=>state('speaking','Ich spreche. Das Mikrofon nimmt gerade nicht auf.'));
+        listen('playing',()=>{resumeOutput=null;$('audio-resume').hidden=true;state('speaking','Ich spreche. Das Mikrofon nimmt gerade nicht auf.');});
         listen('pause',()=>state('idle',audio.ended?'Bereit für deine nächste Nachricht.':'Sprachausgabe pausiert.'));
         listen('waiting',()=>state('thinking','Sprachausgabe lädt.'));
         listen('ended',()=>{state('idle','Bereit für deine nächste Nachricht.');done();});
         listen('error',()=>fail('Audio konnte nicht abgespielt werden.'));
-        timer=setTimeout(()=>{if(ownsAudio()){audio.pause();fail('Sprachausgabe unterbrochen. Bitte erneut starten.');}},90000);
-        audio.play().catch(()=>{if(ownsAudio())fail('iPhone blockiert die Wiedergabe. Audioplayer antippen oder Gespräch erneut starten.');});
+        const play=async()=>{
+          const attempt=++playAttempt;
+          clearTimeout(timer);timer=setTimeout(()=>{if(ownsAudio()){audio.pause();fail('Sprachausgabe unterbrochen. Bitte erneut starten.');}},90000);
+          try{await audio.play();if(!ownsAudio()||attempt!==playAttempt)return false;resumeOutput=null;$('audio-resume').hidden=true;return true;}
+          catch(error){
+            if(!ownsAudio()||attempt!==playAttempt)return false;
+            if(error.name==='NotAllowedError'){
+              clearTimeout(timer);timer=null;
+              resumeOutput=play;$('audio-resume').hidden=false;
+              state('idle','Antwort ist bereit. Tippe auf „Ton einschalten“, um sie zu hören.');
+            }else fail('Audio konnte nicht abgespielt werden. Bitte erneut versuchen.');
+            return false;
+          }
+        };
+        void play();
       }).catch(error=>{if(current()){state('error',error.message);done(error);}});
     });
   }
@@ -149,13 +169,13 @@
       try{
         const form=new FormData();form.append('audio',blob,blob.type.includes('mp4')?'sprache.mp4':'sprache.webm');
         const r=await api('/audio',form);if(!voice.active||generation!==voice.generation)return;
-        $('chat').elements.text.value=r.text;await chat(r.text,true);
+        await chat(r.text,true);
         if(voice.active&&generation===voice.generation&&!pending){voice.stop();stopPlayback();await realtime.start(current?.id);}
       }catch(error){if(voice.active&&generation===voice.generation&&!stalePlaybackError(error))throw error;}
     }
   });
   const realtime=new window.AssistantRealtime({api,audio:$('speech'),
-    onState:(name,text,detail)=>{state(name,text);if(detail?.phase)$('assistant').dataset.voicePhase=detail.phase;voiceButtons(realtime.active||voice.active);if(!realtime.active||name==='speaking')$('audio-resume').hidden=true;},
+    onState:(name,text,detail)=>{state(name,text);if(detail?.phase)voicePhase(detail.phase);voiceButtons(realtime.active||voice.active);if(!realtime.active||name==='speaking')$('audio-resume').hidden=true;},
     onRemoteStream:stream=>{if(stream)outputMeter?.useStream(stream);else outputMeter?.clear();},
     onPlaybackBlocked:()=>{$('audio-resume').hidden=false;},
     onError:reportError,onText:log,
@@ -175,11 +195,13 @@
       }
     }
   });
-  function stopVoice(){stopPlayback();busy=false;busyGeneration=null;realtime.stop();voice.stop();$('speech').pause();$('audio-resume').hidden=true;}
-  $('audio-resume').onclick=safe(async()=>{unlockOutput();$('audio-resume').disabled=true;try{if(await realtime.resumePlayback())$('audio-resume').hidden=true;}finally{$('audio-resume').disabled=false;}});
-  $('voice-mode').onclick=safe(async()=>{unlockOutput();if(busy)throw new Error('Bitte Antwort abwarten.');if(recorder?.state==='recording')throw new Error('Einzelaufnahme zuerst beenden.');stopPlayback();if(pending)await voice.start();else await realtime.start(current?.id);});
+  function stopRecording(){++recordingGeneration;micPending=false;cancelMicrophone?.();cancelMicrophone=null;clearTimeout(recordingTimer);recordingTimer=null;if(recorder){recorder.onstop=null;if(recorder.state==='recording')recorder.stop();recorder=null;}micStream?.getTracks().forEach(t=>t.stop());micStream=null;$('record').textContent='Mikrofon starten';}
+  function stopVoice(){stopPlayback();stopRecording();voicePhase('idle');busy=false;busyGeneration=null;realtime.stop();voice.stop();$('speech').pause();$('audio-resume').hidden=true;}
+  $('audio-resume').onclick=safe(async()=>{unlockOutput();$('audio-resume').disabled=true;try{const retry=resumeOutput;if(await (retry?retry():realtime.resumePlayback()))$('audio-resume').hidden=true;}finally{$('audio-resume').disabled=false;}});
+  $('voice-mode').onclick=safe(async()=>{unlockOutput();if(busy)throw new Error('Bitte Antwort abwarten.');if(micPending||recorder?.state==='recording')throw new Error('Einzelaufnahme zuerst beenden.');stopPlayback();if(pending)await voice.start();else await realtime.start(current?.id);});
   $('voice-stop').onclick=()=>{stopVoice();stopCamera();};
-  $('chat').onsubmit=safe(async()=>{unlockOutput();stopVoice();await chat($('chat').elements.text.value);$('chat').reset();});
+  $('write-message').onclick=()=>{stopVoice();const menu=$('assistant-menu');if(!menu.open)menu.showModal();menu.querySelector('details').open=true;$('chat').scrollIntoView({block:'center'});$('chat').elements.text.focus();};
+  $('chat').onsubmit=safe(async()=>{const input=$('chat').elements.text,text=input.value.trim();if(!text)return;unlockOutput();stopVoice();input.value='';await chat(text);});
   $('order-form').onsubmit=safe(async()=>{stopVoice();pending=null;showOrder(await api('/auftrag/'+Number($('order-form').elements.id.value)));});
   $('profile').onsubmit=safe(async()=>{stopVoice();const data=Object.fromEntries(new FormData($('profile')));await api('/profil',data);$('assistant').dataset.avatar=data.avatar;$('avatar-name').textContent=data.name;status('Persönlichkeit gespeichert.');});
   $('note').onsubmit=safe(async()=>{const item=await api('/vorschlag',{auftrag_id:needOrder(),art:'notiz',text:$('note').elements.text.value});await refresh();status('Notiz zur Prüfung vorbereitet.');});
@@ -191,28 +213,44 @@
   $('clear').onclick=safe(async()=>{stopVoice();pending=null;await api('/dialog/leeren',{});$('conversation').replaceChildren();status('Dialog gelöscht. Aktionsprotokoll bleibt erhalten.');});
   $('record').onclick=safe(async()=>{
     unlockOutput();
+    if(micPending){stopVoice();return;}
     if(recorder?.state==='recording'){recorder.stop();return;}
     if(busy)throw new Error('Bitte laufende Antwort abwarten.');
     if(!window.isSecureContext||!navigator.mediaDevices||!window.MediaRecorder)throw new Error('Sprachaufnahme benötigt HTTPS und MediaRecorder.');
-    $('speech').pause();micStream=await navigator.mediaDevices.getUserMedia({audio:true});
-    const mime=['audio/webm;codecs=opus','audio/mp4'].find(t=>MediaRecorder.isTypeSupported(t));recorder=new MediaRecorder(micStream,mime?{mimeType:mime}:{});
-    const generation=playbackGeneration;
-    const chunks=[];const timer=setTimeout(()=>{if(recorder?.state==='recording')recorder.stop();},60000);
-    recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
-    recorder.onstop=async()=>{
-      clearTimeout(timer);micStream?.getTracks().forEach(t=>t.stop());micStream=null;$('record').textContent='Mikrofon starten';
-      if(generation!==playbackGeneration||document.hidden)return;
+    stopVoice();
+    const generation=playbackGeneration,recordRun=++recordingGeneration;
+    micPending=true;$('record').textContent='Mikrofonzugriff abbrechen';$('voice-mode').hidden=true;$('voice-stop').hidden=false;voicePhase('microphone');state('connecting','Mikrofon wird geöffnet. Bitte im Browser erlauben.');
+    let received,cancelRequest,pendingTimer;
+    const cancelled=new Promise(resolve=>{cancelRequest=()=>resolve(null);cancelMicrophone=cancelRequest;});
+    const deadline=new Promise((resolve,reject)=>{pendingTimer=setTimeout(()=>reject(new Error('Mikrofon antwortet nicht.')),60000);});
+    try{
+      const media=navigator.mediaDevices.getUserMedia({audio:true}).then(result=>{if(recordRun!==recordingGeneration||document.hidden){result.getTracks().forEach(t=>t.stop());return null;}micStream=result;return result;});
+      received=await Promise.race([media,cancelled,deadline]);
+    }catch(error){if(recordRun!==recordingGeneration)return;stopRecording();voiceButtons(false);const message=error.name==='NotAllowedError'?'Mikrofonzugriff nicht erlaubt. Bitte die Freigabe im Browser prüfen.':'Mikrofon konnte nicht geöffnet werden. Bitte Mikrofon und Browserfreigabe prüfen.';const failure=new Error(message);failure.phase='microphone';throw failure;}
+    finally{clearTimeout(pendingTimer);if(cancelMicrophone===cancelRequest)cancelMicrophone=null;}
+    if(recordRun!==recordingGeneration||!received)return;
+    if(document.hidden){stopRecording();return;}
+    micPending=false;micStream=received;voicePhase('recording');
+    const mime=['audio/webm;codecs=opus','audio/mp4'].find(t=>MediaRecorder.isTypeSupported(t));
+    let recording;
+    try{recording=recorder=new MediaRecorder(received,mime?{mimeType:mime}:{});}catch(error){stopRecording();voiceButtons(false);throw error;}
+    const chunks=[];const timer=recordingTimer=setTimeout(()=>{if(recordRun===recordingGeneration&&recording.state==='recording')recording.stop();},60000);
+    recording.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
+    recording.onstop=async()=>{
+      clearTimeout(timer);received.getTracks().forEach(t=>t.stop());if(micStream===received)micStream=null;if(recorder===recording)recorder=null;
+      if(recordRun!==recordingGeneration||generation!==playbackGeneration||document.hidden)return;
+      $('record').textContent='Mikrofon starten';voiceButtons(false);
       try{
         state('thinking','Sprache wird erkannt.');const form=new FormData();
-        form.append('audio',new Blob(chunks,{type:recorder.mimeType}),recorder.mimeType.includes('mp4')?'sprache.mp4':'sprache.webm');
+        form.append('audio',new Blob(chunks,{type:recording.mimeType}),recording.mimeType.includes('mp4')?'sprache.mp4':'sprache.webm');
         const r=await api('/audio',form);
         if(generation!==playbackGeneration||document.hidden)return;
-        $('chat').elements.text.value=r.text;await chat(r.text);
+        await chat(r.text);
       }catch(e){if(e.playbackGeneration!==undefined||(generation===playbackGeneration&&!document.hidden))reportError(e);}
     };
-    recorder.start();$('record').textContent='Aufnahme stoppen';state('listening','Mikrofon aktiv. Zum Senden stoppen.');
+    try{recording.start();}catch(error){clearTimeout(timer);stopRecording();voiceButtons(false);throw error;}$('record').textContent='Aufnahme stoppen';state('listening','Mikrofon aktiv. Zum Senden stoppen.');
   });
-  function stopDevices(){const failure=$('avatar').dataset.state==='error'?$('avatar-status').textContent:null;stopVoice();outputMeter?.suspend();pending=null;stopCamera();if(recorder?.state==='recording'){recorder.onstop=null;recorder.stop();}micStream?.getTracks().forEach(t=>t.stop());micStream=null;$('record').textContent='Mikrofon starten';if(failure)state('error',failure);}
+  function stopDevices(){const failure=$('avatar').dataset.state==='error'?$('avatar-status').textContent:null;stopVoice();outputMeter?.suspend();pending=null;stopCamera();if(failure)state('error',failure);}
   document.addEventListener('visibilitychange',()=>{if(document.hidden)stopDevices();});window.addEventListener('pagehide',stopDevices);
   if($('assistant').dataset.ready!=='true'){$('record').disabled=true;$('voice-mode').disabled=true;$('chat').querySelector('button').disabled=true;$('vision').disabled=true;state('idle','Avatar bereit · Sprachzugang noch einrichten.');}
   async function loadSource(){
@@ -228,7 +266,6 @@
     for(const id of ['camera','capture','camera-stop','photo-file','photo-save','vision'])$(id).disabled=true;
     $('actions').textContent='Lesemodus: Speichern, Fotozuordnung und Bestellungen sind gesperrt.';
     }
-    $('conversation').replaceChildren();current=null;
   }
   safe(async()=>{await refresh();await loadSource();})();
 })();

@@ -44,6 +44,9 @@ window.AssistantRealtime = class {
       // A permission granted later must still release the obsolete stream.
       const microphone=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}}).then(stream=>{
         if(!this.current(session))stream.getTracks().forEach(track=>track.stop());
+        // Own the resource before the next await continuation: Stop may run
+        // after permission resolves but before start() resumes below.
+        else session.stream=stream;
         return stream;
       });
       const stream=await this.waitFor(microphone,session);
@@ -66,7 +69,22 @@ window.AssistantRealtime = class {
         session.cleanups.push(()=>track.removeEventListener?.('ended',ended));
       });
       pc.onconnectionstatechange=()=>{
-        if(this.current(session)&&['failed','disconnected','closed'].includes(pc.connectionState))this.fail(new Error('Sprachverbindung unterbrochen. Bitte Internetverbindung prüfen und erneut starten.'),session);
+        if(!this.current(session))return;
+        if(['failed','closed'].includes(pc.connectionState)){
+          this.fail(new Error('Sprachverbindung unterbrochen. Bitte Internetverbindung prüfen und erneut starten.'),session);
+        }else if(pc.connectionState==='disconnected'&&session.phase==='connected'){
+          // A short network loss can recover without replacing the connection.
+          // Repeated disconnected events must not extend the deadline.
+          if(session.disconnectTimer!=null)return;
+          this.state(session,'thinking','Die Verbindung ist kurz unterbrochen. Ich warte auf die Wiederverbindung.');
+          session.disconnectTimer=setTimeout(()=>{
+            if(this.current(session)&&pc.connectionState!=='connected')this.fail(new Error('Die Sprachverbindung konnte nicht wiederhergestellt werden. Bitte Internetverbindung prüfen und erneut starten.'),session);
+          },5000);
+        }else if(pc.connectionState==='connected'&&session.disconnectTimer!=null){
+          clearTimeout(session.disconnectTimer);session.disconnectTimer=null;
+          const speaking=session.outputActive&&!session.playbackBlocked&&!this.audio.muted;
+          this.state(session,speaking?'speaking':'listening',session.playbackBlocked?'Verbindung wiederhergestellt. Bitte „Ton einschalten“ antippen.':speaking?'Verbindung wiederhergestellt. Du kannst mich jederzeit unterbrechen.':'Verbindung wiederhergestellt. Ich höre zu.');
+        }
       };
       const channel=this.channel=session.channel=pc.createDataChannel('oai-events');
       channel.onopen=()=>{
@@ -116,16 +134,18 @@ window.AssistantRealtime = class {
   async playRemote(session) {
     if(!this.current(session)||!session.remoteStream||this.audio.srcObject!==session.remoteStream)return false;
     const stream=session.remoteStream;
+    const attempt=session.playAttempt=(session.playAttempt||0)+1;
+    const ownsPlayback=()=>this.current(session)&&session.playAttempt===attempt&&this.audio.srcObject===stream;
     try {
       // Called synchronously from resumePlayback on a user gesture.
       await this.waitFor(this.audio.play(),session);
-      if(this.audio.srcObject!==stream)return false;
+      if(!ownsPlayback())return false;
       const wasBlocked=session.playbackBlocked;
       this.playbackBlocked=session.playbackBlocked=false;
       if(wasBlocked)this.state(session,session.outputActive?'speaking':'listening',session.outputActive?'Du kannst mich jederzeit unterbrechen.':'Ton eingeschaltet. Ich höre zu.');
       return true;
     }catch(error){
-      if(!this.current(session)||this.audio.srcObject!==stream)return false;
+      if(!ownsPlayback())return false;
       if(error.name==='NotAllowedError'){
         this.playbackBlocked=session.playbackBlocked=true;
         this.state(session,session.phase==='connected'?'listening':'thinking','Die Tonwiedergabe ist gesperrt. Bitte „Ton einschalten“ antippen.');
@@ -187,7 +207,7 @@ window.AssistantRealtime = class {
     const session=this.session;
     this.active=false;++this.generation;this.session=null;this.phase='idle';this.refreshing=false;this.playbackBlocked=false;
     if(session){
-      clearTimeout(session.phaseTimer);clearTimeout(session.limit);clearInterval(session.refreshTimer);
+      clearTimeout(session.phaseTimer);clearTimeout(session.disconnectTimer);clearTimeout(session.limit);clearInterval(session.refreshTimer);
       session.resolveStop(session.cancelled);session.abort.abort();
       session.cleanups.forEach(cleanup=>cleanup());
       if(session.channel){session.channel.onopen=null;session.channel.onmessage=null;session.channel.onclose=null;session.channel.onerror=null;session.channel.close();}

@@ -34,7 +34,7 @@
       for (const type of ['waiting', 'stalled', 'error', 'emptied']) {
         on(audio, type, () => { this.buffering = true; this.sync(); });
       }
-      for (const type of ['pause', 'ended', 'volumechange', 'timeupdate', 'seeked']) on(audio, type, this.sync);
+      for (const type of ['pause', 'ended', 'volumechange', 'timeupdate', 'seeking', 'seeked']) on(audio, type, this.sync);
       on(this.document, 'visibilitychange', this.sync);
       on(window, 'pagehide', () => this.suspend());
       this.emit(0);
@@ -77,7 +77,8 @@
         this.sync();
         return this.context.state === 'running';
       } catch (_) {
-        this.reset();
+        // A delayed rejection from an older gesture must not stop a newer unlock.
+        if (attempt === this.unlockGeneration && !this.destroyed && !this.suspended) this.reset();
         return false;
       }
     }
@@ -162,7 +163,7 @@
     canSample() {
       const source = this.source, audio = this.audio;
       if (this.destroyed || this.suspended || this.document?.hidden || this.context?.state !== 'running' || !source || source.failed) return false;
-      if (audio.paused || audio.ended || audio.muted || audio.volume <= 0 || this.buffering) return false;
+      if (audio.paused || audio.ended || audio.seeking || audio.muted || audio.volume <= 0 || this.buffering) return false;
       if (typeof audio.readyState === 'number' && audio.readyState < 2) return false;
       if (source.kind === 'blob') return Boolean(source.envelope && !audio.srcObject && audio.src === source.url);
       try {
