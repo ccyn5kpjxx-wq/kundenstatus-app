@@ -40,9 +40,15 @@ Die Auswahl liegt in `assistent_profile.character`, wird gesichert und auch
 beim Wiederherstellen älterer Sicherungen automatisch ergänzt.
 
 Die Fabeltiere, Chris und Mila sind eigene KI-generierte Illustrationen mit Ruhe-, Sprech- und
-Blinzelframes. Ihre Bewegungen folgen dem Gesprächszustand und stoppen bei
-Unterbrechung, Seitenwechsel und reduzierter Bewegung. Dies ist keine
-phonemgenaue Lippensynchronisierung und keine Google-Live-Avatar-Anbindung.
+Blinzelframes. Die Mundöffnung folgt lokal dem Pegel der tatsächlich abgespielten
+Stimme. Nur der Mundbereich wird eingeblendet; das restliche Bild bleibt beim
+Sprechen ruhig. Sprechpausen schließen den Mund. Unterbrechung, Seitenwechsel
+und reduzierte Bewegung stoppen die Animation. Das ist keine phonemgenaue
+Lippensynchronisierung und keine Google-Live-Avatar-Anbindung.
+WebRTC wird über einen unhörbaren Analyser-Zweig des empfangenen Streams gemessen;
+TTS über eine aus dem bereits vorhandenen Audioblob berechnete Hüllkurve, die der
+Wiedergabezeit folgt. Der Mikrofonton wird dafür weder analysiert noch zusätzlich
+übertragen. Fehlende Audioanalyse verhindert keine Sprachwiedergabe.
 Quellenhinweis und Bildprompts stehen in `static/avatars/README.md`.
 
 ## Sprache und iPhone
@@ -52,6 +58,10 @@ die benötigten Auftragsdaten werden zur Sprachverarbeitung an OpenAI übertrage
 Der Sprachmodus startet durch einen bewussten Tipp. Er endet beim Sperren oder
 Verlassen der Seite. Unterbrechen ist im Sprachablauf vorgesehen; tatsächliche
 Latenz und Mikrofonverhalten müssen auf den verwendeten iPhones geprüft werden.
+Beim Start werden Mikrofonfreigabe, Vorbereitung, Serverantwort und Audioverbindung
+getrennt angezeigt. Alte Verbindungsrückmeldungen dürfen einen Neustart nicht beenden.
+Eine blockierte automatische Wiedergabe lässt sich über **Ton einschalten** erneut
+anstoßen. Fehlermeldungen bleiben nach einem Fensterwechsel sichtbar.
 Für ein App-Symbol kann die HTTPS-Seite in Safari zum Home-Bildschirm hinzugefügt
 werden. Die Seite hört nicht im Hintergrund zu.
 

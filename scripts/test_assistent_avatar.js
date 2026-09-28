@@ -18,6 +18,7 @@ class Element extends Events {
   constructor(dataset = {}) {
     super(); this.dataset = dataset; this.attributes = {}; this.value = ''; this.textContent = '';
     this.disabled = false; this.open = false; this.focusCount = 0;
+    this.style = {setProperty(name, value) { this[name] = value; }};
   }
   setAttribute(name, value) { this.attributes[name] = value; }
   focus() { this.focusCount++; }
@@ -100,13 +101,41 @@ function pickerFixture(character = 'chris') {
 
 (async () => {
   const motion = animationFixture('speaking');
-  assert.deepEqual(motion.portraits.map(p => p.dataset.frame), ['a', 'a']);
-  assert.equal(motion.time.tick(), 170);
-  assert.equal(motion.portraits[0].dataset.frame, 'o');
+  const mouthLevel = () => Number(motion.avatar.style['--avatar-output-level']);
+  assert.deepEqual(motion.portraits.map(p => p.dataset.frame), ['rest', 'rest']);
+  assert.equal(motion.time.timers.size, 0, 'speaking without audible output has no fake animation loop');
+  assert.equal(motion.avatar.dataset.audioActive, 'false');
+  motion.controller.setAudioLevel(0.1);
+  const quietScale = Number(motion.avatar.style['--avatar-mouth-scale']);
   const stale = [...motion.time.timers.values()][0].fn;
+  motion.controller.setAudioLevel(0.9);
+  assert.equal(mouthLevel(), 0.9);
+  assert.equal(motion.avatar.dataset.audioActive, 'true');
+  assert.ok(Number(motion.avatar.style['--avatar-mouth-scale']) > quietScale, 'mouth opening follows measured loudness');
+  assert.deepEqual(motion.portraits.map(p => p.dataset.frame), ['rest', 'rest'], 'loudness never switches whole portrait frames');
+  stale();
+  assert.equal(mouthLevel(), 0.9, 'a cancelled watchdog cannot clear newer samples');
+  assert.equal(motion.time.timers.size, 1, 'only one finite meter watchdog is pending');
+  assert.equal(motion.time.tick(), 220);
+  assert.equal(mouthLevel(), 0, 'a stalled output meter returns to rest');
+  assert.equal(motion.time.timers.size, 0, 'watchdog is not an animation loop');
+  for (const value of [0, -1, 0.02, NaN, Infinity, '0.9', null, undefined]) {
+    motion.controller.setAudioLevel(0.8);
+    motion.controller.setAudioLevel(value);
+    assert.equal(mouthLevel(), 0, `silence/invalid sample ${value} closes immediately`);
+    assert.equal(motion.avatar.dataset.audioActive, 'false');
+    assert.equal(motion.time.timers.size, 0);
+  }
+  motion.controller.setAudioLevel(5);
+  assert.equal(mouthLevel(), 1, 'levels clamp to the normalized output range');
+  assert.equal(Number(motion.avatar.style['--avatar-mouth-scale']), 1);
+  const interrupted = [...motion.time.timers.values()][0].fn;
   motion.state('listening');
   assert.equal(motion.portraits[0].dataset.frame, 'rest', 'barge-in immediately closes mouth');
-  stale();
+  assert.equal(mouthLevel(), 0);
+  motion.controller.setAudioLevel(0.9);
+  assert.equal(mouthLevel(), 0, 'late output/microphone samples cannot animate while listening');
+  interrupted();
   assert.equal(motion.portraits[0].dataset.frame, 'rest', 'a cancelled speaking frame cannot revive');
   assert.equal(motion.time.tick(), 3200);
   assert.equal(motion.portraits[0].dataset.frame, 'blink');
@@ -114,21 +143,57 @@ function pickerFixture(character = 'chris') {
   assert.equal(motion.portraits[0].dataset.frame, 'rest');
   for (const state of ['thinking', 'error', 'unexpected']) {
     motion.state(state);
+    motion.controller.setAudioLevel(1);
+    assert.equal(mouthLevel(), 0);
     assert.equal(motion.portraits[0].dataset.frame, 'rest');
     assert.equal(motion.time.timers.size, 0);
   }
   motion.state('speaking');
+  motion.controller.setAudioLevel(0.8);
   motion.document.hidden = true; await motion.document.emit('visibilitychange');
   assert.equal(motion.time.timers.size, 0); assert.equal(motion.portraits[0].dataset.frame, 'rest');
+  assert.equal(mouthLevel(), 0);
+  motion.controller.setAudioLevel(0.8); assert.equal(mouthLevel(), 0);
   motion.document.hidden = false; await motion.document.emit('visibilitychange');
-  assert.equal(motion.time.timers.size, 1);
+  assert.equal(motion.time.timers.size, 0, 'becoming visible waits for a fresh audible sample');
+  motion.controller.setAudioLevel(0.8);
   motion.media.matches = true; await motion.media.emit('change');
   assert.equal(motion.time.timers.size, 0); assert.equal(motion.portraits[0].dataset.frame, 'rest');
+  assert.equal(mouthLevel(), 0);
+  motion.controller.setAudioLevel(0.8); assert.equal(mouthLevel(), 0);
   motion.state('idle'); assert.equal(motion.time.timers.size, 0, 'reduced motion also prevents blinking');
   motion.media.matches = false; await motion.media.emit('change');
   assert.equal(motion.time.timers.size, 1);
+  motion.state('speaking'); motion.controller.setAudioLevel(0.8);
+  motion.controller.suspend();
+  assert.equal(mouthLevel(), 0); assert.equal(motion.time.timers.size, 0);
+  motion.controller.setAudioLevel(0.8); assert.equal(mouthLevel(), 0);
+  motion.controller.resume();
+  assert.equal(mouthLevel(), 0, 'page restore does not reuse a stale level');
+  motion.controller.setAudioLevel(0.8);
   motion.controller.destroy();
   assert.equal(motion.time.timers.size, 0); assert.equal(motion.controller.observer.disconnected, true);
+  assert.equal(mouthLevel(), 0);
+  motion.controller.setAudioLevel(0.8);
+  assert.equal(mouthLevel(), 0); assert.equal(motion.time.timers.size, 0);
+  assert.equal(motion.document.listeners.get('visibilitychange').size, 0);
+  assert.equal(motion.media.listeners.get('change').size, 0);
+
+  // Exercise the actual browser export without browser/media/network access.
+  const browserExport = pickerFixture(); browserExport.app.destroy();
+  browserExport.document.readyState = 'loading';
+  browserExport.window.document = browserExport.document;
+  require('node:vm').runInNewContext(require('node:fs').readFileSync(require.resolve('../static/assistent-avatar.js'), 'utf8'), {window: browserExport.window});
+  assert.equal(browserExport.window.AssistantAvatar.instance, null);
+  await browserExport.document.emit('DOMContentLoaded');
+  const exposed = browserExport.window.AssistantAvatar.instance;
+  assert.equal(typeof exposed.animation.setAudioLevel, 'function', 'output meter has a stable public integration point');
+  browserExport.elements.avatar.dataset.state = 'speaking'; exposed.animation.observer.trigger();
+  exposed.animation.setAudioLevel(0.6);
+  assert.equal(browserExport.elements.avatar.style['--avatar-output-level'], '0.600');
+  await browserExport.window.emit('pagehide');
+  assert.equal(browserExport.elements.avatar.style['--avatar-output-level'], '0');
+  exposed.destroy();
 
   const picker = pickerFixture();
   await picker.elements['avatar-choose'].emit('click');
@@ -232,5 +297,5 @@ function pickerFixture(character = 'chris') {
   assert.equal(fallback.elements['avatar-choice-label'].textContent, 'Drache');
   assert.equal(fallback.options.find(button => button.dataset.characterOption === 'drache').attributes['aria-pressed'], 'true');
   fallback.app.destroy();
-  console.log('PASS: animation interruption, blink, reduced motion, visibility, cleanup; confirmed picker persistence, CSRF, duplicate/error/timeout guards, focus and unchanged personal name.');
+  console.log('PASS: measured output levels, silent/stalled meter rest, no fake phonemes, state gating, blink, reduced motion, visibility, cleanup and public instance; confirmed picker persistence, CSRF, duplicate/error/timeout guards, focus and unchanged personal name.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

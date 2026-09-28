@@ -7,9 +7,12 @@
   let current=null, photoOrder=null, photo=null, stream=null, recorder=null, micStream=null;
   let busy=false, audioUrl=null, photoUrl=null, pending=null, cancelPlayback=null;
   let playbackGeneration=0, busyGeneration=null;
+  // Observe output only. Playback and microphone ownership stay with their controllers.
+  const outputMeter=window.OutputAudioMeter?new window.OutputAudioMeter({window,audio:$('speech'),onLevel:level=>window.AssistantAvatar?.instance?.animation.setAudioLevel(level)}):null;
+  const unlockOutput=()=>{outputMeter?.unlock().catch(()=>{});};
   const normalized = text => text.toLocaleLowerCase('de-DE').replace(/[^\p{L}\p{N}\s]/gu,'').trim();
   const status = text => {$('status').textContent=text;};
-  const state = (name,text) => {$('avatar').dataset.state=name;$('avatar-status').textContent=text;};
+  const state = (name,text) => {$('avatar').dataset.state=name;$('avatar-status').textContent=text;if(name!=='speaking')window.AssistantAvatar?.instance?.animation.setAudioLevel(0);};
   async function api(path,data,raw=false,signal) {
     const options={headers:{'X-CSRF-Token':token},signal};
     if(data!==undefined){options.method='POST';if(data instanceof FormData)options.body=data;else{options.headers['Content-Type']='application/json';options.body=JSON.stringify(data);}}
@@ -18,7 +21,7 @@
     return raw?response.blob():response.json();
   }
   const stalePlaybackError = error => error.playbackGeneration!==undefined&&error.playbackGeneration!==playbackGeneration;
-  function reportError(error){if(stalePlaybackError(error))return;status(error.message);state('error',error.message);}
+  function reportError(error){if(stalePlaybackError(error))return;if(error.phase)$('assistant').dataset.voicePhase=error.phase;status(error.message);state('error',error.message);}
   function safe(fn){return async event=>{event?.preventDefault();try{await fn(event);}catch(e){reportError(e);}};}
   function log(who,text){const p=document.createElement('p');p.textContent=who+': '+text;$('conversation').append(p);}
   function showOrder(data){current=data;$('order-form').elements.id.value=data.id;$('active-order').textContent=`Auftrag ${data.id} · ${data.kennzeichen||'ohne Kennzeichen'}`;const pre=document.createElement('pre');pre.textContent=`Auftrag ${data.id} · ${data.kennzeichen||'ohne Kennzeichen'} · ${data.fahrzeug}\nAngebotsstatus: ${data.angebot_status}\nVersicherungsfreigabe: ${data.versicherung_freigabe_status}\nAngebotstext: ${data.werkstatt_angebot_text||'nicht hinterlegt'}\nBeschreibung (keine Freigabe): ${data.beschreibung||'–'}\nTeile-Aktenstand: ${JSON.stringify(data.teile,null,2)}\n${data.hinweis}`;$('order').replaceChildren(pre);if(data.quelle){pre.textContent=`Auftrag ${data.id} · ${data.fahrzeug} · ${data.kennzeichen||'ohne Kennzeichen'}\nStatus im Cockpit: ${data.status}\nArbeiten / Beschreibung:\n${data.beschreibung||'Keine Angaben in der Übersicht.'}\nTermine: ${data.termine||('Annahme: '+(data.annahme_datum||'offen')+' · Fertig: '+(data.fertig_datum||'offen')+' · Rückgabe: '+(data.abholtermin||'offen'))}\n${data.modus==='lesestand'?'Freigaben und Teilebestand: im Lesestand nicht erhoben.':'Angebotsstatus: '+(data.angebot_status||'unbekannt')+' · Versicherungsfreigabe: '+(data.versicherung_freigabe_status||'unbekannt')+'\nDokumente: '+(data.dokumente||[]).map(d=>d.id+' · '+d.original_name).join(', ')}`;const note=document.createElement('p');note.textContent=(data.modus==='live'?'Cockpit, abgerufen: ':'Cockpit-Lesestand: ')+new Date(data.stand).toLocaleString('de-DE')+' · '+(data.modus==='live'?'Direkter Portalabruf':data.detail_gelesen?'Beschreibung aus Auftragsdetails':'Listenübersicht, möglicherweise gekürzt');const link=document.createElement('a');link.href=data.quelle;link.target='_blank';link.rel='noopener';link.textContent='Originalauftrag im Cockpit öffnen';$('order').prepend(note);if($('assistant').dataset.admin==='true')$('order').prepend(link);if(data.uebersicht){const summary=document.createElement('p');summary.textContent='Cockpit-Kurzfassung: '+data.uebersicht;$('order').append(summary);}}}
@@ -32,6 +35,7 @@
   function stopPlayback(){
     ++playbackGeneration;
     const cancel=cancelPlayback;cancelPlayback=null;cancel?.();
+    outputMeter?.clear();
   }
   function say(text){
     stopPlayback();
@@ -65,6 +69,7 @@
         if(document.hidden){stopPlayback();return;}
         if(audioUrl)URL.revokeObjectURL(audioUrl);
         url=audioUrl=URL.createObjectURL(blob);audio.srcObject=null;audio.src=url;audio.hidden=false;
+        outputMeter?.useBlob(blob,url);
         // Keep these listeners for manual replay, until stop or the next output.
         listen('playing',()=>state('speaking','Ich spreche. Das Mikrofon nimmt gerade nicht auf.'));
         listen('pause',()=>state('idle',audio.ended?'Bereit für deine nächste Nachricht.':'Sprachausgabe pausiert.'));
@@ -96,7 +101,7 @@
       if(item.status==='vorschlag'){
         const button=document.createElement('button');button.textContent=item.art==='notiz'?'Geprüfte Notiz speichern':'Geprüften Entwurf intern freigeben';
         button.onclick=safe(async()=>{button.disabled=true;try{const r=await api('/bestaetigen/'+item.id,{});pending=null;status(r.hinweis);await refresh();}finally{button.disabled=false;}});div.append(button);
-        const read=document.createElement('button');read.className='secondary';read.textContent='Vorlesen & per Sprache bestätigen';read.disabled=$('assistant').dataset.ready!=='true';read.onclick=safe(async()=>{stopVoice();if(await prepareReadback(item))status('Vorgelesen. Gespräch starten und die genannte Bestätigung sprechen.');});div.append(read);
+        const read=document.createElement('button');read.className='secondary';read.textContent='Vorlesen & per Sprache bestätigen';read.disabled=$('assistant').dataset.ready!=='true';read.onclick=safe(async()=>{unlockOutput();stopVoice();if(await prepareReadback(item))status('Vorgelesen. Gespräch starten und die genannte Bestätigung sprechen.');});div.append(read);
       }
       if(item.art!=='notiz'){const a=document.createElement('a');a.href=base+'/email/'+item.id;a.textContent='E-Mail-Anfrage als Entwurf öffnen';a.className='email-download';div.append(a);}
       $('actions').append(div);
@@ -150,7 +155,9 @@
     }
   });
   const realtime=new window.AssistantRealtime({api,audio:$('speech'),
-    onState:(name,text)=>{state(name,text);voiceButtons(realtime.active||voice.active);},
+    onState:(name,text,detail)=>{state(name,text);if(detail?.phase)$('assistant').dataset.voicePhase=detail.phase;voiceButtons(realtime.active||voice.active);if(!realtime.active||name==='speaking')$('audio-resume').hidden=true;},
+    onRemoteStream:stream=>{if(stream)outputMeter?.useStream(stream);else outputMeter?.clear();},
+    onPlaybackBlocked:()=>{$('audio-resume').hidden=false;},
     onError:reportError,onText:log,
     onEvent:async event=>{
       if(event.type==='auftrag'){showOrder(event.data);return;}
@@ -168,10 +175,11 @@
       }
     }
   });
-  function stopVoice(){stopPlayback();busy=false;busyGeneration=null;realtime.stop();voice.stop();$('speech').pause();}
-  $('voice-mode').onclick=safe(async()=>{if(busy)throw new Error('Bitte Antwort abwarten.');if(recorder?.state==='recording')throw new Error('Einzelaufnahme zuerst beenden.');stopPlayback();if(pending)await voice.start();else await realtime.start(current?.id);});
+  function stopVoice(){stopPlayback();busy=false;busyGeneration=null;realtime.stop();voice.stop();$('speech').pause();$('audio-resume').hidden=true;}
+  $('audio-resume').onclick=safe(async()=>{unlockOutput();$('audio-resume').disabled=true;try{if(await realtime.resumePlayback())$('audio-resume').hidden=true;}finally{$('audio-resume').disabled=false;}});
+  $('voice-mode').onclick=safe(async()=>{unlockOutput();if(busy)throw new Error('Bitte Antwort abwarten.');if(recorder?.state==='recording')throw new Error('Einzelaufnahme zuerst beenden.');stopPlayback();if(pending)await voice.start();else await realtime.start(current?.id);});
   $('voice-stop').onclick=()=>{stopVoice();stopCamera();};
-  $('chat').onsubmit=safe(async()=>{stopVoice();await chat($('chat').elements.text.value);$('chat').reset();});
+  $('chat').onsubmit=safe(async()=>{unlockOutput();stopVoice();await chat($('chat').elements.text.value);$('chat').reset();});
   $('order-form').onsubmit=safe(async()=>{stopVoice();pending=null;showOrder(await api('/auftrag/'+Number($('order-form').elements.id.value)));});
   $('profile').onsubmit=safe(async()=>{stopVoice();const data=Object.fromEntries(new FormData($('profile')));await api('/profil',data);$('assistant').dataset.avatar=data.avatar;$('avatar-name').textContent=data.name;status('Persönlichkeit gespeichert.');});
   $('note').onsubmit=safe(async()=>{const item=await api('/vorschlag',{auftrag_id:needOrder(),art:'notiz',text:$('note').elements.text.value});await refresh();status('Notiz zur Prüfung vorbereitet.');});
@@ -182,6 +190,7 @@
   $('photo-save').onclick=safe(async()=>status(await savePhoto()));
   $('clear').onclick=safe(async()=>{stopVoice();pending=null;await api('/dialog/leeren',{});$('conversation').replaceChildren();status('Dialog gelöscht. Aktionsprotokoll bleibt erhalten.');});
   $('record').onclick=safe(async()=>{
+    unlockOutput();
     if(recorder?.state==='recording'){recorder.stop();return;}
     if(busy)throw new Error('Bitte laufende Antwort abwarten.');
     if(!window.isSecureContext||!navigator.mediaDevices||!window.MediaRecorder)throw new Error('Sprachaufnahme benötigt HTTPS und MediaRecorder.');
@@ -203,7 +212,7 @@
     };
     recorder.start();$('record').textContent='Aufnahme stoppen';state('listening','Mikrofon aktiv. Zum Senden stoppen.');
   });
-  function stopDevices(){stopVoice();pending=null;stopCamera();if(recorder?.state==='recording'){recorder.onstop=null;recorder.stop();}micStream?.getTracks().forEach(t=>t.stop());micStream=null;$('record').textContent='Mikrofon starten';}
+  function stopDevices(){const failure=$('avatar').dataset.state==='error'?$('avatar-status').textContent:null;stopVoice();outputMeter?.suspend();pending=null;stopCamera();if(recorder?.state==='recording'){recorder.onstop=null;recorder.stop();}micStream?.getTracks().forEach(t=>t.stop());micStream=null;$('record').textContent='Mikrofon starten';if(failure)state('error',failure);}
   document.addEventListener('visibilitychange',()=>{if(document.hidden)stopDevices();});window.addEventListener('pagehide',stopDevices);
   if($('assistant').dataset.ready!=='true'){$('record').disabled=true;$('voice-mode').disabled=true;$('chat').querySelector('button').disabled=true;$('vision').disabled=true;state('idle','Avatar bereit · Sprachzugang noch einrichten.');}
   async function loadSource(){

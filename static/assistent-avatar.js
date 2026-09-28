@@ -1,4 +1,4 @@
-/* Decorative, state-driven portrait animation; no audio capture or phoneme analysis. */
+/* Output-level-driven mouth layer; no audio capture or inferred phonemes. */
 (function (host) {
   'use strict';
   const CHARACTERS = Object.freeze({drache: 'Drache', zauberfuchs: 'Zauberfuchs', einhorn: 'Einhorn', phoenix: 'Phönix', greif: 'Greif', waldgeist: 'Waldgeist', chris: 'Chris', mila: 'Mila', robot: 'Roboter'});
@@ -15,6 +15,8 @@
       this.cancel = clearTimeout;
       this.random = random;
       this.timer = null;
+      this.levelTimer = null;
+      this.levelGeneration = 0;
       this.generation = 0;
       this.destroyed = false;
       this.suspended = false;
@@ -29,6 +31,38 @@
 
     frame(value) {
       this.portraits.forEach(portrait => { portrait.dataset.frame = value; });
+      this.avatar.dataset.frame = value;
+    }
+
+    restMouth() {
+      ++this.levelGeneration;
+      if (this.levelTimer !== null) this.cancel(this.levelTimer);
+      this.levelTimer = null;
+      this.avatar.dataset.audioActive = 'false';
+      this.avatar.style.setProperty('--avatar-output-level', '0');
+      this.avatar.style.setProperty('--avatar-mouth-opacity', '0');
+      this.avatar.style.setProperty('--avatar-mouth-scale', '0.65');
+    }
+
+    // The caller supplies the audible OUTPUT level, never microphone activity.
+    // State alone must not animate speech when audio is buffering or unavailable.
+    setAudioLevel(value) {
+      this.restMouth();
+      if (!this.active() || this.avatar.dataset.state !== 'speaking' ||
+          typeof value !== 'number' || !Number.isFinite(value)) return;
+      const level = Math.min(1, Math.max(0, value));
+      if (level <= 0.025) return;
+      const openness = Math.sqrt((level - 0.025) / 0.975);
+      this.frame('rest');
+      this.avatar.style.setProperty('--avatar-output-level', level.toFixed(3));
+      this.avatar.style.setProperty('--avatar-mouth-opacity', Math.min(1, openness * 2.4).toFixed(3));
+      this.avatar.style.setProperty('--avatar-mouth-scale', (0.65 + 0.35 * openness).toFixed(3));
+      this.avatar.dataset.audioActive = 'true';
+      const generation = this.levelGeneration;
+      // A disconnected/stalled meter cannot leave a frozen open mouth behind.
+      this.levelTimer = this.schedule(() => {
+        if (generation === this.levelGeneration) this.restMouth();
+      }, 220);
     }
 
     active() {
@@ -49,18 +83,10 @@
       if (this.timer !== null) this.cancel(this.timer);
       this.timer = null;
       this.frame('rest');
+      this.restMouth();
       if (!this.active() || !this.portraits.length) return;
       const state = this.avatar.dataset.state;
-      if (state === 'speaking') {
-        const frames = ['a', 'o', 'a', 'rest'];
-        let index = 0;
-        const speak = () => {
-          if (this.avatar.dataset.state !== 'speaking') return this.refresh();
-          this.frame(frames[index++ % frames.length]);
-          this.later(170, generation, speak);
-        };
-        speak();
-      } else if (state === 'idle' || state === 'listening') {
+      if (state === 'idle' || state === 'listening') {
         const waitForBlink = () => this.later(3200 + Math.floor(this.random() * 2200), generation, () => {
           if (!['idle', 'listening'].includes(this.avatar.dataset.state)) return this.refresh();
           this.frame('blink');
@@ -203,11 +229,11 @@
     };
   }
 
-  const api = {AvatarAnimationController, initAssistantAvatar};
+  const api = {AvatarAnimationController, initAssistantAvatar, instance: null};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else {
     host.AssistantAvatar = api;
-    const start = () => initAssistantAvatar(host.document, host);
+    const start = () => { api.instance = initAssistantAvatar(host.document, host); };
     if (host.document.readyState === 'loading') host.document.addEventListener('DOMContentLoaded', start, {once: true});
     else start();
   }

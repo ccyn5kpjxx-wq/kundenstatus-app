@@ -1,90 +1,201 @@
 'use strict';
 // Bidirectional WebRTC: microphone stays live during model audio.
 window.AssistantRealtime = class {
-  constructor({api, audio, onState, onError, onText, onEvent}) {
-    Object.assign(this,{api,audio,onState,onError,onText,onEvent});
-    this.active=false;this.generation=0;
+  constructor({api, audio, onState, onError, onText, onEvent, onPlaybackBlocked, onRemoteStream}) {
+    Object.assign(this,{api,audio,onState,onError,onText,onEvent,onPlaybackBlocked,onRemoteStream});
+    this.active=false;this.generation=0;this.phase='idle';this.session=null;
   }
-  send(event) {if(this.channel?.readyState==='open')this.channel.send(JSON.stringify(event));}
+  current(session) {return !!session&&this.active&&this.session===session&&session.generation===this.generation;}
+  state(session,name,text) {
+    if(this.current(session))this.onState(name,text,{phase:session.phase,playbackBlocked:!!session.playbackBlocked});
+  }
+  setPhase(session,phase,text,delay,timeoutMessage) {
+    if(!this.current(session))return;
+    clearTimeout(session.phaseTimer);session.phase=phase;this.phase=phase;
+    this.state(session,'thinking',text);
+    session.phaseTimer=setTimeout(()=>{
+      if(this.current(session))this.fail(new Error(timeoutMessage),session);
+    },delay);
+  }
+  async waitFor(promise,session) {
+    const result=await Promise.race([promise,session.stopped]);
+    if(!this.current(session)||result===session.cancelled)throw new Error('Gespräch beendet.');
+    return result;
+  }
+  send(event,session=this.session) {
+    if(this.current(session)&&session.channel?.readyState==='open')session.channel.send(JSON.stringify(event));
+  }
+  notifyRemoteStream(stream) {
+    // Optional visualisation must never take down the voice connection.
+    try{this.onRemoteStream?.(stream);}catch(_){}
+  }
   async start(order) {
     if(this.active)return;
-    if(!window.isSecureContext||!navigator.mediaDevices||!window.RTCPeerConnection)throw new Error('Echtzeitgespräch benötigt HTTPS und WebRTC.');
-    this.order=order;this.active=true;const generation=++this.generation;
-    this.onState('thinking','Sprachverbindung und Aufträge werden geladen.');
-    this.abort=new AbortController();
-    this.timeout=setTimeout(()=>this.fail(new Error('Sprachverbindung nicht erreichbar. Erneut starten.')),25000);
+    if(!window.isSecureContext)throw new Error('Das Gespräch benötigt HTTPS. Bitte die sichere Cockpit-Adresse öffnen.');
+    if(!navigator.mediaDevices?.getUserMedia||!window.RTCPeerConnection)throw new Error('Dieser Browser unterstützt das Mikrofon oder Echtzeitgespräche nicht. Bitte Safari oder Chrome verwenden.');
+    this.order=order;this.active=true;
+    const session={generation:++this.generation,abort:new AbortController(),cancelled:{},cleanups:[],refreshing:false,playbackBlocked:false};
+    session.stopped=new Promise(resolve=>{session.resolveStop=resolve;});
+    this.session=session;this.abort=session.abort;this.refreshing=false;this.playbackBlocked=false;
+    this.setPhase(session,'microphone','Mikrofon wird geöffnet. Bitte den Mikrofonzugriff im Browser erlauben.',60000,
+      'Der Browser hat das Mikrofon nach 60 Sekunden noch nicht bereitgestellt. Bitte Mikrofonfreigabe und angeschlossenes Mikrofon prüfen und erneut starten.');
     try {
-      const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
-      if(!this.active||generation!==this.generation){stream.getTracks().forEach(t=>t.stop());return;}
-      this.stream=stream;
-      const pc=this.pc=new RTCPeerConnection();
-      this.audio.autoplay=true;this.audio.srcObject=null;this.audio.removeAttribute('src');
-      pc.ontrack=event=>{if(!this.active)return;this.audio.srcObject=event.streams[0];this.audio.play().catch(()=>this.fail(new Error('Audiowiedergabe blockiert. Gespräch erneut per Knopfdruck starten.')));};
-      stream.getTracks().forEach(track=>pc.addTrack(track,stream));
-      pc.onconnectionstatechange=()=>{if(['failed','disconnected','closed'].includes(pc.connectionState)&&this.active)this.fail(new Error('Sprachverbindung unterbrochen. Bitte erneut starten.'));};
-      const channel=this.channel=pc.createDataChannel('oai-events');
-      channel.onopen=()=>{
-        if(!this.active)return;
-        clearTimeout(this.timeout);
-        this.onState('listening','Ich höre zu. Du kannst mich beim Sprechen unterbrechen.');
-        this.refreshTimer=setInterval(()=>this.refresh(),15000);
-        this.limit=setTimeout(()=>{this.stop();this.onState('idle','Gespräch nach 15 Minuten beendet. Bei Bedarf neu starten.');},900000);
+      // Stop settles start even while a permission prompt stays pending.
+      // A permission granted later must still release the obsolete stream.
+      const microphone=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}}).then(stream=>{
+        if(!this.current(session))stream.getTracks().forEach(track=>track.stop());
+        return stream;
+      });
+      const stream=await this.waitFor(microphone,session);
+      this.stream=session.stream=stream;
+      this.setPhase(session,'connection','Mikrofon ist bereit. Die Sprachverbindung wird vorbereitet.',25000,
+        'Der Browser konnte die Sprachverbindung nicht vorbereiten. Bitte erneut starten oder den Browser neu öffnen.');
+      const pc=this.pc=session.pc=new RTCPeerConnection();
+      this.audio.autoplay=true;this.audio.playsInline=true;this.audio.srcObject=null;this.audio.removeAttribute('src');this.audio.muted=false;
+      pc.ontrack=event=>{
+        if(!this.current(session)||(event.track?.kind&&event.track.kind!=='audio'))return;
+        const remote=event.streams?.[0]||(event.track?new MediaStream([event.track]):null);
+        if(!remote){this.fail(new Error('Die Sprachverbindung hat keine Audiospur geliefert. Bitte erneut starten.'),session);return;}
+        session.remoteStream=remote;this.audio.srcObject=remote;this.notifyRemoteStream(remote);
+        void this.playRemote(session);
       };
-      channel.onmessage=event=>{if(this.active)this.event(JSON.parse(event.data)).catch(error=>this.fail(error));};
-      channel.onclose=()=>{if(this.active)this.fail(new Error('Sprachkanal geschlossen. Bitte neu starten.'));};
-      const offer=await pc.createOffer();await pc.setLocalDescription(offer);
-      const answer=await this.api('/realtime/start',{sdp:offer.sdp,auftrag_id:order||null},false,this.abort.signal);
-      if(!this.active||generation!==this.generation)return;
-      await pc.setRemoteDescription({type:'answer',sdp:answer.sdp});
-    }catch(error){if(this.active&&generation===this.generation)this.fail(error);}
-  }
-  async refresh() {
-    if(!this.active||this.refreshing)return;
-    this.refreshing=true;
-    try {
-      const context=await this.api('/realtime/kontext'+(this.order?'?auftrag_id='+encodeURIComponent(this.order):''),undefined,false,this.abort.signal);
-      if(this.active)this.send({type:'session.update',session:{type:'realtime',instructions:context.instructions}});
-    }catch(error){if(this.active)this.fail(new Error('Auftragskontext oder Zugriffsrecht nicht mehr verfügbar. Gespräch beendet.'));}
-    finally{this.refreshing=false;}
-  }
-  async event(event) {
-    switch(event.type){
-      case 'input_audio_buffer.speech_started':
-        // Server VAD also cancels/truncates pending output; mute the local buffer immediately.
-        this.audio.muted=true;
-        this.onState('listening','Ich höre zu.');break;
-      case 'input_audio_buffer.speech_stopped':
-        this.onState('thinking','Antwort kommt.');break;
-      case 'output_audio_buffer.started':
-        this.audio.muted=false;
-        this.onState('speaking','Du kannst mich jederzeit unterbrechen.');break;
-      case 'output_audio_buffer.stopped':
-        this.onState('listening','Ich höre zu.');break;
-      case 'conversation.item.input_audio_transcription.completed':
-        this.onText('Du',event.transcript);
-        if(/^(gespräch beenden|sprachmodus beenden|stop)[.!?]?$/i.test(event.transcript.trim()))this.stop();
-        break;
-      case 'response.output_audio_transcript.done':this.onText('KI',event.transcript);break;
-      case 'response.function_call_arguments.done': {
-        let result;
-        try{result=await this.api('/realtime/werkzeug',{name:event.name,arguments:JSON.parse(event.arguments)},false,this.abort.signal);}
-        catch(error){if(!this.active)return;result={result:{error:error.message}};}
-        if(!this.active)return;
-        if(result.event?.type==='auftrag')this.order=result.event.data.id;
-        if(result.event)await this.onEvent(result.event);
-        if(!this.active)return;
-        this.send({type:'conversation.item.create',item:{type:'function_call_output',call_id:event.call_id,output:JSON.stringify(result.result)}});
-        this.send({type:'response.create'});break;
+      stream.getTracks().forEach(track=>{
+        pc.addTrack(track,stream);
+        const ended=()=>{if(this.current(session))this.fail(new Error('Das Mikrofon wurde getrennt oder die Freigabe beendet. Bitte erneut starten.'),session);};
+        track.addEventListener?.('ended',ended);
+        session.cleanups.push(()=>track.removeEventListener?.('ended',ended));
+      });
+      pc.onconnectionstatechange=()=>{
+        if(this.current(session)&&['failed','disconnected','closed'].includes(pc.connectionState))this.fail(new Error('Sprachverbindung unterbrochen. Bitte Internetverbindung prüfen und erneut starten.'),session);
+      };
+      const channel=this.channel=session.channel=pc.createDataChannel('oai-events');
+      channel.onopen=()=>{
+        if(!this.current(session)||session.phase==='connected')return;
+        clearTimeout(session.phaseTimer);session.phase='connected';this.phase='connected';
+        this.state(session,'listening',session.playbackBlocked?'Ich höre zu. Bitte „Ton einschalten“ antippen, um meine Antwort zu hören.':'Ich höre zu. Du kannst mich beim Sprechen unterbrechen.');
+        session.refreshTimer=setInterval(()=>{if(this.current(session))void this.refresh(session);},15000);
+        session.limit=setTimeout(()=>{
+          if(!this.current(session))return;
+          this.stop();this.onState('idle','Gespräch nach 15 Minuten beendet. Bei Bedarf neu starten.',{phase:'idle'});
+        },900000);
+      };
+      channel.onmessage=message=>{
+        if(!this.current(session))return;
+        try {
+          const event=JSON.parse(message.data);
+          this.event(event,session).catch(error=>{if(this.current(session))this.fail(error,session);});
+        }catch(_){this.fail(new Error('Der Sprachdienst hat eine ungültige Nachricht gesendet. Bitte erneut starten.'),session);}
+      };
+      channel.onclose=()=>{if(this.current(session))this.fail(new Error('Sprachkanal geschlossen. Bitte neu starten.'),session);};
+      channel.onerror=()=>{if(this.current(session))this.fail(new Error('Der Sprachkanal konnte keine Daten übertragen. Bitte erneut starten.'),session);};
+      const offer=await this.waitFor(pc.createOffer(),session);
+      await this.waitFor(pc.setLocalDescription(offer),session);
+      this.setPhase(session,'server','Mikrofon ist bereit. Der KI-Sprachdienst wird verbunden und die Aufträge werden geladen.',80000,
+        'Der Sprachdienst hat nicht rechtzeitig geantwortet. Mikrofonfreigabe ist vorhanden; bitte die Serververbindung prüfen und erneut starten.');
+      const answer=await this.waitFor(this.api('/realtime/start',{sdp:offer.sdp,auftrag_id:order||null},false,session.abort.signal),session);
+      if(typeof answer?.sdp!=='string'||!answer.sdp.startsWith('v=0'))throw new Error('Der Sprachdienst hat keine gültige Verbindungsantwort geliefert. Bitte erneut starten.');
+      this.setPhase(session,'connection','Der Sprachdienst ist bereit. Die Audioverbindung wird aufgebaut.',25000,
+        'Der Sprachdienst hat geantwortet, aber die Audioverbindung kam nicht zustande. Bitte Netzwerk oder Browser prüfen und erneut starten.');
+      await this.waitFor(pc.setRemoteDescription({type:'answer',sdp:answer.sdp}),session);
+    }catch(error){
+      if(!this.current(session))return;
+      if(session.phase==='microphone'){
+        const messages={
+          NotAllowedError:'Der Mikrofonzugriff wurde nicht erlaubt. Bitte das Mikrofon in den Website-Einstellungen freigeben und erneut starten.',
+          PermissionDeniedError:'Der Mikrofonzugriff wurde nicht erlaubt. Bitte das Mikrofon in den Website-Einstellungen freigeben und erneut starten.',
+          NotFoundError:'Kein Mikrofon gefunden. Bitte ein Mikrofon anschließen oder ein anderes Gerät verwenden.',
+          NotReadableError:'Das Mikrofon lässt sich nicht öffnen. Bitte andere Mikrofon-Apps schließen und die Geräteeinstellungen prüfen.',
+          AbortError:'Der Mikrofonstart wurde vom Gerät abgebrochen. Bitte erneut starten.',
+          SecurityError:'Der Browser blockiert das Mikrofon für diese Seite. Bitte die Website-Berechtigungen prüfen.'
+        };
+        error=new Error(messages[error.name]||'Das Mikrofon konnte nicht gestartet werden. Bitte Mikrofon und Browserfreigabe prüfen.');
       }
-      case 'error':throw new Error('Echtzeitdienst meldet einen Fehler. Bitte Gespräch neu starten oder Einzelaufnahme verwenden.');
+      this.fail(error,session);
     }
   }
-  fail(error){this.stop();this.onError(error);}
+  async playRemote(session) {
+    if(!this.current(session)||!session.remoteStream||this.audio.srcObject!==session.remoteStream)return false;
+    const stream=session.remoteStream;
+    try {
+      // Called synchronously from resumePlayback on a user gesture.
+      await this.waitFor(this.audio.play(),session);
+      if(this.audio.srcObject!==stream)return false;
+      const wasBlocked=session.playbackBlocked;
+      this.playbackBlocked=session.playbackBlocked=false;
+      if(wasBlocked)this.state(session,session.outputActive?'speaking':'listening',session.outputActive?'Du kannst mich jederzeit unterbrechen.':'Ton eingeschaltet. Ich höre zu.');
+      return true;
+    }catch(error){
+      if(!this.current(session)||this.audio.srcObject!==stream)return false;
+      if(error.name==='NotAllowedError'){
+        this.playbackBlocked=session.playbackBlocked=true;
+        this.state(session,session.phase==='connected'?'listening':'thinking','Die Tonwiedergabe ist gesperrt. Bitte „Ton einschalten“ antippen.');
+        try{this.onPlaybackBlocked?.(error,{generation:session.generation,retry:()=>this.playRemote(session)});}catch(_){}
+      }else this.fail(new Error('Audio konnte nicht abgespielt werden. Bitte Gespräch erneut starten.'),session);
+      return false;
+    }
+  }
+  resumePlayback() {return this.playRemote(this.session);}
+  async refresh(session=this.session) {
+    if(!this.current(session)||session.refreshing)return;
+    this.refreshing=session.refreshing=true;
+    try {
+      const context=await this.waitFor(this.api('/realtime/kontext'+(this.order?'?auftrag_id='+encodeURIComponent(this.order):''),undefined,false,session.abort.signal),session);
+      this.send({type:'session.update',session:{type:'realtime',instructions:context.instructions}},session);
+    }catch(error){if(this.current(session))this.fail(new Error('Auftragskontext oder Zugriffsrecht nicht mehr verfügbar. Gespräch beendet.'),session);}
+    finally{session.refreshing=false;if(this.current(session))this.refreshing=false;}
+  }
+  async event(event,session=this.session) {
+    if(!this.current(session))return;
+    try {
+      switch(event.type){
+        case 'input_audio_buffer.speech_started':
+          // Server VAD also cancels/truncates pending output; mute locally now.
+          this.audio.muted=true;session.outputActive=false;
+          this.state(session,'listening','Ich höre zu.');break;
+        case 'input_audio_buffer.speech_stopped':
+          this.state(session,'thinking','Antwort kommt.');break;
+        case 'output_audio_buffer.started':
+          this.audio.muted=false;session.outputActive=true;
+          this.state(session,session.playbackBlocked?'listening':'speaking',session.playbackBlocked?'Bitte „Ton einschalten“ antippen, um meine Antwort zu hören.':'Du kannst mich jederzeit unterbrechen.');break;
+        case 'output_audio_buffer.stopped':
+          session.outputActive=false;this.state(session,'listening','Ich höre zu.');break;
+        case 'conversation.item.input_audio_transcription.completed':
+          this.onText('Du',event.transcript);
+          if(/^(gespräch beenden|sprachmodus beenden|stop)[.!?]?$/i.test(event.transcript.trim()))this.stop();
+          break;
+        case 'response.output_audio_transcript.done':this.onText('KI',event.transcript);break;
+        case 'response.function_call_arguments.done': {
+          let result;
+          try{result=await this.waitFor(this.api('/realtime/werkzeug',{name:event.name,arguments:JSON.parse(event.arguments)},false,session.abort.signal),session);}
+          catch(error){if(!this.current(session))return;result={result:{error:error.message}};}
+          if(!this.current(session))return;
+          if(result.event?.type==='auftrag')this.order=result.event.data.id;
+          if(result.event)await this.waitFor(this.onEvent(result.event),session);
+          if(!this.current(session))return;
+          this.send({type:'conversation.item.create',item:{type:'function_call_output',call_id:event.call_id,output:JSON.stringify(result.result)}},session);
+          this.send({type:'response.create'},session);break;
+        }
+        case 'error':throw new Error('Echtzeitdienst meldet einen Fehler. Bitte Gespräch neu starten oder Einzelaufnahme verwenden.');
+      }
+    }catch(error){if(this.current(session))throw error;}
+  }
+  fail(error,session=this.session){
+    if(!this.current(session))return;
+    error.phase=session.phase;this.stop();this.onError(error);
+  }
   stop(){
-    this.active=false;++this.generation;clearTimeout(this.timeout);clearTimeout(this.limit);clearInterval(this.refreshTimer);
-    this.abort?.abort();this.channel?.close();this.pc?.close();
-    this.stream?.getTracks().forEach(t=>t.stop());this.stream=null;this.pc=null;this.channel=null;
-    this.audio.pause();this.audio.srcObject=null;this.audio.muted=false;
-    this.onState('idle','Gespräch beendet.');
+    const session=this.session;
+    this.active=false;++this.generation;this.session=null;this.phase='idle';this.refreshing=false;this.playbackBlocked=false;
+    if(session){
+      clearTimeout(session.phaseTimer);clearTimeout(session.limit);clearInterval(session.refreshTimer);
+      session.resolveStop(session.cancelled);session.abort.abort();
+      session.cleanups.forEach(cleanup=>cleanup());
+      if(session.channel){session.channel.onopen=null;session.channel.onmessage=null;session.channel.onclose=null;session.channel.onerror=null;session.channel.close();}
+      if(session.pc){session.pc.ontrack=null;session.pc.onconnectionstatechange=null;session.pc.close();}
+      session.stream?.getTracks().forEach(track=>track.stop());
+    }
+    this.stream=null;this.pc=null;this.channel=null;this.abort=null;
+    this.audio.pause();this.audio.srcObject=null;this.audio.muted=false;this.notifyRemoteStream(null);
+    this.onState('idle','Gespräch beendet.',{phase:'idle',playbackBlocked:false});
   }
 };

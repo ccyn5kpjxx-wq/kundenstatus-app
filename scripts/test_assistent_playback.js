@@ -30,7 +30,7 @@ class Element {
   reset() {}
 }
 async function fixture() {
-  const elements = new Map(), document = new Element(), requests = [], dialogs = [], transcriptions = [], timers = new Map(), revoked = [];
+  const elements = new Map(), document = new Element(), requests = [], dialogs = [], transcriptions = [], timers = new Map(), revoked = [], meterCalls = [];
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('assistant').dataset = {readOnly: 'true', ready: 'true'};
   get('read-aloud').checked = true;
@@ -53,6 +53,14 @@ async function fixture() {
   class Realtime extends Voice {
     async start() { await super.start(); this.audio.srcObject = {syntheticRealtimeStream: true}; }
     stop() { super.stop(); this.audio.srcObject = null; }
+    async resumePlayback() { meterCalls.push('resumePlayback'); return true; }
+  }
+  class Meter {
+    async unlock() { meterCalls.push('unlock'); return true; }
+    useBlob(blob, url) { meterCalls.push({blob, url}); }
+    useStream(stream) { meterCalls.push({stream}); }
+    clear() { meterCalls.push('clear'); }
+    suspend() { meterCalls.push('suspend'); }
   }
   class Recorder {
     static isTypeSupported() { return true; }
@@ -63,7 +71,7 @@ async function fixture() {
   const context = {
     document, AbortController, FormData, Blob, MediaRecorder: Recorder,
     navigator: {mediaDevices: {getUserMedia: async () => ({getTracks: () => [{stop() {}}]})}},
-    window: {isSecureContext: true, MediaRecorder: Recorder, AssistantVoiceMode: Voice, AssistantRealtime: Realtime, addEventListener() {}},
+    window: {isSecureContext: true, MediaRecorder: Recorder, AssistantVoiceMode: Voice, AssistantRealtime: Realtime, OutputAudioMeter: Meter, addEventListener() {}},
     URL: {createObjectURL: () => `blob:synthetic-${++urlId}`, revokeObjectURL: url => revoked.push(url)},
     setTimeout: fn => { timers.set(++timerId, fn); return timerId; },
     clearTimeout: id => timers.delete(id),
@@ -84,9 +92,9 @@ async function fixture() {
   };
   vm.createContext(context);
   // Expose closures only in this in-memory test instance; production has no test API.
-  vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.playbackTest={say,stopVoice,safe};\n})();'), context);
+  vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.playbackTest={say,stopVoice,safe,realtime};\n})();'), context);
   await flush();
-  return {test: context.window.playbackTest, get, audio, requests, dialogs, transcriptions, timers, revoked, document,
+  return {test: context.window.playbackTest, get, audio, requests, dialogs, transcriptions, timers, revoked, document, meterCalls,
     state: () => get('avatar').dataset.state,
     deliver: async index => { requests[index].resolve(new Blob(['synthetic audio'])); await flush(); }};
 }
@@ -129,6 +137,29 @@ async function fixture() {
   const broken = assert.rejects(result, /abgespielt/);
   await f.deliver(0); f.audio.emit('playing'); f.audio.emit('error'); await broken;
   assert.equal(f.state(), 'error'); f.test.stopVoice();
+
+  // Losing focus must not replace the actual failure with an innocuous stop label.
+  f = await fixture(); await f.test.safe(async () => { throw new Error('Mikrofon ist blockiert.'); })();
+  f.document.hidden = true; f.document.emit('visibilitychange');
+  assert.equal(f.state(), 'error'); assert.equal(f.get('avatar-status').textContent, 'Mikrofon ist blockiert.');
+  assert.ok(f.meterCalls.includes('suspend'));
+
+  // Output observation receives exactly the owned blob; stopping clears it.
+  f = await fixture(); result = f.test.say('Antwort'); await f.deliver(0);
+  assert.equal(f.meterCalls.filter(value => value?.blob).length, 1);
+  assert.equal(f.meterCalls.find(value => value?.blob).url, f.audio.src);
+  f.test.stopVoice(); await result; assert.equal(f.meterCalls.at(-1), 'clear');
+  const remote = {testRemote: true}; f.test.realtime.onRemoteStream(remote);
+  assert.equal(f.meterCalls.at(-1).stream, remote);
+  f.test.realtime.onRemoteStream(null); assert.equal(f.meterCalls.at(-1), 'clear');
+
+  // Autoplay recovery is one deliberate tap, not a new microphone/session request.
+  f.test.realtime.active = true; f.test.realtime.onPlaybackBlocked();
+  assert.equal(f.get('audio-resume').hidden, false);
+  await f.get('audio-resume').onclick({preventDefault() {}});
+  assert.equal(f.get('audio-resume').hidden, true);
+  assert.equal(f.get('audio-resume').disabled, false);
+  assert.ok(f.meterCalls.includes('unlock')); assert.ok(f.meterCalls.includes('resumePlayback'));
 
   // A newer answer owns the audio; old fetch failures must not report an error.
   f = await fixture();
