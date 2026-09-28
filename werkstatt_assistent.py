@@ -24,6 +24,7 @@ import assistent_cockpit as cockpit
 from flask import Blueprint, abort, jsonify, render_template, request, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 from PIL import Image, UnidentifiedImageError
+from werkstatt_assistent_workflow import Workflow, KINDS as WORKFLOW_KINDS, MAIL_KINDS, PROPOSAL_TOOLS, READ_TOOLS as WORKFLOW_READ_TOOLS, TOOLS as WORKFLOW_TOOLS, RULES as WORKFLOW_RULES
 
 VOICES = ("alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
 STYLES = {"ruhig": "ruhig und sachlich", "kollegial": "freundlich und kollegial", "knapp": "sehr knapp und direkt"}
@@ -96,9 +97,13 @@ def register_assistant(p):
     def capabilities(who):
         enabled = operations_enabled() and who and who["lesen"]
         return {"status": bool(enabled and who["dokumentieren"]),
+                "auftrag": bool(enabled and who["dokumentieren"]),
+                "angebote": bool(enabled and who["einkaufen"]),
                 "bestellen": bool(enabled and who["einkaufen"] and order_limit(who) > 0)}
 
     def action_allowed(who, kind):
+        if kind in WORKFLOW_KINDS:
+            return capabilities(who)["angebote" if kind in MAIL_KINDS else "auftrag"]
         if kind in {"status", "bestellung"}:
             return capabilities(who)["status" if kind == "status" else "bestellen"]
         return not read_only() and kind in {"notiz", "einkauf", "anfrage"} and bool(who["dokumentieren" if kind == "notiz" else "einkaufen"])
@@ -169,6 +174,7 @@ def register_assistant(p):
                 allowed = {"order", "source_info", "overview", "actions", "transcribe", "speak", "dialog", "clear_dialog", "realtime_refresh", "realtime_start", "realtime_tool", "save_profile", "save_avatar"}
                 if operations_enabled():
                     allowed |= {"propose", "readback", "voice_confirm", "confirm", "repeat_order"}
+                    allowed |= {"workflow_uploads", "workflow_analysis", "workflow_original", "workflow_suppliers", "workflow_offers"}
                 if fn.__name__ not in allowed:
                     return jsonify(error="Der Avatar ist schreibgeschützt. Auftragsänderungen, Fotos und Bestellungen sind hier gesperrt."), 403
             return fn(who, *args, **kwargs)
@@ -187,6 +193,13 @@ def register_assistant(p):
         result = p.cockpit_data.order(order_id)
         if result.get("archiviert"):
             raise ValueError("Aktiver Auftrag nicht gefunden. Bitte Auftragsnummer prüfen.")
+        who = identity()
+        if who and capabilities(who).get("auftrag"):
+            with db_scope() as db:
+                contact = db.execute('SELECT kunde_name,kunde_email,kontakt_telefon FROM auftraege WHERE id=?', (order_id,)).fetchone()
+            if contact:
+                from werkstatt_cockpit_api import _without_bank_lines
+                result = {**result, **{k: _without_bank_lines(str(contact[k] or '')) for k in ('kunde_name', 'kunde_email', 'kontakt_telefon')}}
         return {**result, "modus": "live", "native": True}
 
     def profile(who):
@@ -201,6 +214,8 @@ def register_assistant(p):
         return result
 
     def proposal(who, args):
+        if args.get("art") in WORKFLOW_KINDS:
+            return action_view(workflow.proposal(who, args))
         if args.get("art") in {"status", "bestellung"}:
             return operational_proposal(who, args)
         if read_only():
@@ -298,6 +313,8 @@ def register_assistant(p):
         result = {"id": row["id"], "auftrag_id": row["auftrag_id"], "art": row["art"], "status": row["status"], "daten": json.loads(row["payload"])}
         if row["art"] == "bestellung" and row["status"] != "vorschlag":
             result["versandstatus"] = p.workshop_orders.approved_action_status(row["actor"], row["id"])
+        if row["art"] in MAIL_KINDS and row["status"] != "vorschlag":
+            result["versandstatus"] = p.assistant_offers.status(row["actor"], row["id"])
         return result
 
     def openai(path, **kwargs):
@@ -314,6 +331,10 @@ def register_assistant(p):
     @bp.errorhandler(ValueError)
     def invalid(exc):
         return jsonify(error=str(exc)), 400
+
+    @bp.errorhandler(PermissionError)
+    def denied(exc):
+        return jsonify(error=str(exc)), 403
 
     @bp.after_request
     def privacy(response):
@@ -445,8 +466,19 @@ def register_assistant(p):
         payload = json.loads(row["payload"])
         phrase = f"Auftrag {row['auftrag_id']} bestätigen"
         text = (f"Bitte prüfen: Auftrag {row['auftrag_id']}, Kennzeichen {context.get('kennzeichen') or 'nicht hinterlegt'}. "
-                if row['auftrag_id'] else "Bitte prüfen: Bestellung für Werkstattmaterial. ")
-        if row["art"] == "status":
+                if row['auftrag_id'] else "Bitte prüfen: Bestellung für Werkstattmaterial. " if row['art'] == 'bestellung' else "Bitte prüfen: ")
+        if row["art"] in WORKFLOW_KINDS:
+            if row["art"] in MAIL_KINDS:
+                if payload.get("missing_fields"):
+                    raise ValueError("Mail noch unvollständig. Fehlende Angaben ergänzen und neue Vorschau vorbereiten.")
+                phrase = "Angebotsmail senden"
+                text += (f"E-Mail an {payload['mail']['recipient']}. Betreff: {payload['mail']['subject']}. "
+                         f"Text: {payload['mail']['body']}. Anhänge: " +
+                         ", ".join(str(a.get('filename') or a.get('original_name') or a.get('name') or 'Datei') for a in payload.get('attachments', [])) + ". ")
+            else:
+                phrase = {"farbe": "Farbdaten speichern", "kontakt": "Kontaktdaten speichern", "auftrag_neu": "Neuen Auftrag anlegen", "datei": "Datei zum Auftrag hinzufügen"}[row["art"]]
+                text += payload["text"] + " "
+        elif row["art"] == "status":
             phrase = f"Status für Auftrag {row['auftrag_id']} ändern"
             text += payload["text"] + " "
         elif row["art"] == "bestellung":
@@ -467,6 +499,9 @@ def register_assistant(p):
         else:
             text += f"Teileanfrage für {payload['lieferant']}: {payload['menge']} Stück {payload['bezeichnung']}, Teilenummer {payload['teilenummer']}. Preis und Verfügbarkeit werden angefragt. Keine Bestellung. "
         text += f"Zum Speichern sage genau: {phrase}. Oder sage Abbrechen."
+        if len(text) > 3000:
+            session.pop("assistent_bestaetigung", None)
+            raise ValueError("Diese Vorschau ist zum vollständigen Vorlesen zu lang. Bitte den vollständigen Text auf dem Bildschirm prüfen und dort bestätigen.")
         nonce = secrets.token_urlsafe(24)
         session["assistent_bestaetigung"] = {"id": action_id, "actor": who["actor"], "nonce": nonce, "phrase": phrase, "expires": time.time() + 180}
         return jsonify(text=text, nonce=nonce, phrase=phrase, action_id=action_id)
@@ -597,6 +632,8 @@ def register_assistant(p):
             abort(403)
         if item["art"] in {"status", "bestellung"}:
             return confirm_operation(who, item)
+        if item["art"] in WORKFLOW_KINDS:
+            return jsonify(workflow.confirm(who, item))
         with db_scope() as db:
             row = db.execute("SELECT * FROM assistent_aktionen WHERE id=? AND actor=?", (action_id, who["actor"])).fetchone()
             if not row:
@@ -793,12 +830,15 @@ def register_assistant(p):
 
     def available_tools(who):
         allowed = set(read_names) if read_only() else {tool["name"] for tool in tools}
-        allowed -= {"status_vorschlagen", "bestellung_vorschlagen", "lieferanten_lesen"}
+        allowed -= {"status_vorschlagen", "bestellung_vorschlagen", "lieferanten_lesen"} | {tool["name"] for tool in WORKFLOW_TOOLS}
+        allowed |= workflow.available_names(who)
         caps = capabilities(who)
         if caps["status"]:
             allowed.add("status_vorschlagen")
         if caps["bestellen"]:
             allowed |= {"bestellung_vorschlagen", "lieferanten_lesen"}
+        if caps["angebote"]:
+            allowed.add("lieferanten_lesen")
         if not who["einkaufen"]:
             allowed -= {"artikel_suchen", "beleg_lesen"}
         if not who["dokumentieren"]:
@@ -819,7 +859,7 @@ def register_assistant(p):
         remote = remote_api_enabled()
         service = p.cockpit_data
         if name == "lieferanten_lesen":
-            if not capabilities(who)["bestellen"]:
+            if not (capabilities(who)["bestellen"] or capabilities(who)["angebote"]):
                 raise ValueError("Bestellrecht fehlt.")
             contacts = [p.workshop_orders.resolve_supplier(r["id"]) for r in p.workshop_orders.contacts()]
             return {"lieferanten": [r for r in contacts if r and r["verified"]], "limit_cent": order_limit(who),
@@ -889,7 +929,7 @@ def register_assistant(p):
             "Historische Rechnungswerte deutlich als solche kennzeichnen, sie sind kein aktuelles Angebot. Niemals unbekannte Kosten auf null setzen. "
             f"Persönlicher Höchstbetrag ist {order_limit(who)/100:.2f} Euro brutto. Die Sammelgrenze gilt zusätzlich je Lieferant für die gesamte Montagsmail. Nicht aufteilen, um Grenzen zu umgehen. "
             "Nach Bestätigung: dringend sofort, sonst Montag zwölf Uhr gesammelt. Ein Vorschlag ist noch keine ausgeführte Änderung oder versandte Bestellung. "
-            "Fotos und andere nicht angebotene Schreibfunktionen bleiben gesperrt. "
+            + WORKFLOW_RULES
         ) if any(caps.values()) else (
             "Diese Avatar-Ansicht ist schreibgeschützt: nur Auskünfte geben. Keine Notizen, Fotos, Vorschläge, Bestellungen, Mails oder Fortschritte speichern. Bei einem Änderungs- oder Bestellwunsch ausdrücklich sagen, dass dies hier noch nicht ausgeführt werden kann. " if read_only() else "")
         return (
@@ -987,6 +1027,15 @@ def register_assistant(p):
             raise ValueError("Werkzeug ist für diesen Zugang nicht verfügbar.")
         if name in (read_names - {"auftrag_lesen"}) | {"lieferanten_lesen"}:
             return jsonify(result=read_tool(who, name, args))
+        if name in WORKFLOW_READ_TOOLS:
+            return jsonify(result=workflow.read(who, name, args))
+        if name == "bild_anfordern":
+            order_id = tool_integer(args.get("auftrag_id", 0), "Auftragsnummer", minimum=0)
+            context = order_context(order_id) if order_id else None
+            return jsonify(result={"status": "Bitte Bild senden antippen und Datei auswählen. Noch nicht zugeordnet."}, event={"type": "unterlage", "data": context})
+        if name in PROPOSAL_TOOLS:
+            result = proposal(who, dict(args, art=PROPOSAL_TOOLS[name]))
+            return jsonify(result={"status": "Prüfbare Vorschau erstellt. Noch nicht gespeichert oder versendet."}, event={"type": "vorschlag", "data": result})
         if name == "auftrag_lesen":
             result = order_context(args.get("auftrag_id"))
             return jsonify(result=result, event={"type": "auftrag", "data": result})
@@ -1028,7 +1077,7 @@ def register_assistant(p):
             "Keine Preise, Teilenummern, Freigaben oder Nebenkosten erfinden. Einkauf erst bei eindeutiger Teilenummer, Menge und allen Bruttokosten vorbereiten. "
             "Bei fehlenden Preisen eine unverbindliche Teileanfrage art anfrage vorschlagen. Die App erzeugt daraus einen E-Mail-Entwurf. K-Parts ist nicht live angebunden. Nenne keine Bestellerfolge."
         )
-        if read_only():
+        if read_only() or operations_enabled():
             instructions = realtime_instructions(who, realtime_context(), config)
             if data.get("auftrag_id"):
                 instructions += " Ausgewählter Auftrag: " + json.dumps(order_context(data["auftrag_id"]), ensure_ascii=False)
@@ -1052,6 +1101,16 @@ def register_assistant(p):
                         events.append({"type": "auftrag", "data": outcome})
                     elif call["name"] in read_names | {"lieferanten_lesen"}:
                         outcome = read_tool(who, call["name"], args)
+                    elif call["name"] in WORKFLOW_READ_TOOLS:
+                        outcome = workflow.read(who, call["name"], args)
+                    elif call["name"] == "bild_anfordern":
+                        order_id = tool_integer(args.get("auftrag_id", 0), "Auftragsnummer", minimum=0)
+                        context = order_context(order_id) if order_id else None
+                        events.append({"type": "unterlage", "data": context})
+                        outcome = {"status": "Bitte Bild senden antippen und Datei auswählen. Noch nicht zugeordnet."}
+                    elif call["name"] in PROPOSAL_TOOLS:
+                        outcome = proposal(who, dict(args, art=PROPOSAL_TOOLS[call["name"]]))
+                        events.append({"type": "vorschlag", "data": outcome})
                     elif call["name"] == "kamera":
                         if not who["dokumentieren"]:
                             raise ValueError("Keine Dokumentationsfreigabe.")
@@ -1087,4 +1146,6 @@ def register_assistant(p):
     # Restore can recreate missing assistant tables without registering routes again.
     p.assistant_init_schema = init_schema
     init_schema()
+    workflow = Workflow(p, bp, protected, capabilities, order_context, db_scope, audit)
+    tools.extend(WORKFLOW_TOOLS)
     p.app.register_blueprint(bp)

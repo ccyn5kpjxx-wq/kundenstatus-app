@@ -4,7 +4,11 @@
   const readOnly = $('assistant').dataset.readOnly === 'true';
   const statusEnabled = $('assistant').dataset.statusEnabled === 'true';
   const purchaseEnabled = $('assistant').dataset.purchaseEnabled === 'true';
-  const actionAllowed = kind => kind==='status'?statusEnabled:kind==='bestellung'?purchaseEnabled:!readOnly&&['notiz','einkauf','anfrage'].includes(kind);
+  const documentsEnabled = $('assistant').dataset.documentsEnabled === 'true';
+  const offersEnabled = $('assistant').dataset.offersEnabled === 'true';
+  const mailKinds = ['lieferantenanfrage','kundenangebot'];
+  const workflowKinds = ['farbe','kontakt','auftrag_neu','datei',...mailKinds];
+  const actionAllowed = kind => mailKinds.includes(kind)?offersEnabled:workflowKinds.includes(kind)?documentsEnabled:kind==='status'?statusEnabled:kind==='bestellung'?purchaseEnabled:!readOnly&&['notiz','einkauf','anfrage'].includes(kind);
   if(readOnly)document.querySelectorAll('[data-write-section]').forEach(el=>{el.hidden=true;el.querySelectorAll('input,button,textarea,select').forEach(field=>field.disabled=true);});
   const token = document.querySelector('meta[name="csrf-token"]').content;
   let current=null, photoOrder=null, photo=null, stream=null, recorder=null, micStream=null;
@@ -33,8 +37,9 @@
   function reportError(error){if(stalePlaybackError(error))return;if(error.phase){voicePhase(error.phase);clearTimeout(helpTimer);if(error.phase==='microphone')$('voice-help').open=true;}status(error.message);state('error',error.message);}
   function safe(fn){return async event=>{event?.preventDefault();try{await fn(event);}catch(e){reportError(e);}};}
   function log(who,text){const p=document.createElement('p');p.textContent=who+': '+text;$('conversation').append(p);}
-  function showOrder(data){current=data;$('order-form').elements.id.value=data.id;$('active-order').textContent=`Auftrag ${data.id} · ${data.kennzeichen||'ohne Kennzeichen'}`;const pre=document.createElement('pre');pre.textContent=`Auftrag ${data.id} · ${data.kennzeichen||'ohne Kennzeichen'} · ${data.fahrzeug}\nAngebotsstatus: ${data.angebot_status}\nVersicherungsfreigabe: ${data.versicherung_freigabe_status}\nAngebotstext: ${data.werkstatt_angebot_text||'nicht hinterlegt'}\nBeschreibung (keine Freigabe): ${data.beschreibung||'–'}\nTeile-Aktenstand: ${JSON.stringify(data.teile,null,2)}\n${data.hinweis}`;$('order').replaceChildren(pre);if(data.quelle){pre.textContent=`Auftrag ${data.id} · ${data.fahrzeug} · ${data.kennzeichen||'ohne Kennzeichen'}\nStatus im Cockpit: ${data.status}\nArbeiten / Beschreibung:\n${data.beschreibung||'Keine Angaben in der Übersicht.'}\nTermine: ${data.termine||('Annahme: '+(data.annahme_datum||'offen')+' · Fertig: '+(data.fertig_datum||'offen')+' · Rückgabe: '+(data.abholtermin||'offen'))}\n${data.modus==='lesestand'?'Freigaben und Teilebestand: im Lesestand nicht erhoben.':'Angebotsstatus: '+(data.angebot_status||'unbekannt')+' · Versicherungsfreigabe: '+(data.versicherung_freigabe_status||'unbekannt')+'\nDokumente: '+(data.dokumente||[]).map(d=>d.id+' · '+d.original_name).join(', ')}`;const note=document.createElement('p');note.textContent=(data.modus==='live'?'Cockpit, abgerufen: ':'Cockpit-Lesestand: ')+new Date(data.stand).toLocaleString('de-DE')+' · '+(data.modus==='live'?'Direkter Portalabruf':data.detail_gelesen?'Beschreibung aus Auftragsdetails':'Listenübersicht, möglicherweise gekürzt');const link=document.createElement('a');link.href=data.quelle;link.target='_blank';link.rel='noopener';link.textContent='Originalauftrag im Cockpit öffnen';$('order').prepend(note);if($('assistant').dataset.admin==='true')$('order').prepend(link);if(data.uebersicht){const summary=document.createElement('p');summary.textContent='Cockpit-Kurzfassung: '+data.uebersicht;$('order').append(summary);}}}
+  function showOrder(data){current=data;if(typeof CustomEvent!=='undefined')document.dispatchEvent(new CustomEvent('assistant-order-changed',{detail:data}));$('order-form').elements.id.value=data.id;$('active-order').textContent=`Auftrag ${data.id} · ${data.kennzeichen||'ohne Kennzeichen'}`;const pre=document.createElement('pre');pre.textContent=`Auftrag ${data.id} · ${data.kennzeichen||'ohne Kennzeichen'} · ${data.fahrzeug}\nAngebotsstatus: ${data.angebot_status}\nVersicherungsfreigabe: ${data.versicherung_freigabe_status}\nAngebotstext: ${data.werkstatt_angebot_text||'nicht hinterlegt'}\nBeschreibung (keine Freigabe): ${data.beschreibung||'–'}\nTeile-Aktenstand: ${JSON.stringify(data.teile,null,2)}\n${data.hinweis}`;$('order').replaceChildren(pre);if(data.quelle){pre.textContent=`Auftrag ${data.id} · ${data.fahrzeug} · ${data.kennzeichen||'ohne Kennzeichen'}\nFarbcode: ${data.farbcode||'nicht hinterlegt'} · Farbton: ${data.farbton||'nicht hinterlegt'}${data.farbton_2?' · Zweiter Farbton: '+data.farbton_2:''}\nStatus im Cockpit: ${data.status}\nArbeiten / Beschreibung:\n${data.beschreibung||'Keine Angaben in der Übersicht.'}\nTermine: ${data.termine||('Annahme: '+(data.annahme_datum||'offen')+' · Fertig: '+(data.fertig_datum||'offen')+' · Rückgabe: '+(data.abholtermin||'offen'))}\n${data.modus==='lesestand'?'Freigaben und Teilebestand: im Lesestand nicht erhoben.':'Angebotsstatus: '+(data.angebot_status||'unbekannt')+' · Versicherungsfreigabe: '+(data.versicherung_freigabe_status||'unbekannt')+'\nDokumente: '+(data.dokumente||[]).map(d=>d.id+' · '+d.original_name).join(', ')}`;const note=document.createElement('p');note.textContent=(data.modus==='live'?'Cockpit, abgerufen: ':'Cockpit-Lesestand: ')+new Date(data.stand).toLocaleString('de-DE')+' · '+(data.modus==='live'?'Direkter Portalabruf':data.detail_gelesen?'Beschreibung aus Auftragsdetails':'Listenübersicht, möglicherweise gekürzt');const link=document.createElement('a');link.href=data.quelle;link.target='_blank';link.rel='noopener';link.textContent='Originalauftrag im Cockpit öffnen';$('order').prepend(note);if($('assistant').dataset.admin==='true')$('order').prepend(link);if(data.uebersicht){const summary=document.createElement('p');summary.textContent='Cockpit-Kurzfassung: '+data.uebersicht;$('order').append(summary);}}}
   document.addEventListener('assistant-open-order',safe(async event=>{stopVoice();pending=null;showOrder(await api('/auftrag/'+Number(event.detail.id)));$('order').scrollIntoView({behavior:'smooth'});}));
+  function clearOrder(){current=null;$('order-form').elements.id.value='';$('active-order').textContent='Auftrag auswählen';$('order').replaceChildren();if(typeof CustomEvent!=='undefined')document.dispatchEvent(new CustomEvent('assistant-order-changed',{detail:null}));}
   function needOrder(){if(!current)throw new Error('Zuerst den richtigen Auftrag aufrufen.');return current.id;}
   function stopCamera(){stream?.getTracks().forEach(t=>t.stop());stream=null;$('video').srcObject=null;$('video').hidden=true;$('capture').disabled=true;}
   async function camera(){needOrder();if(!window.isSecureContext||!navigator.mediaDevices)throw new Error('Kamera benötigt HTTPS und Browserfreigabe.');stopCamera();const result=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});if(document.hidden){result.getTracks().forEach(t=>t.stop());return;}stream=result;$('video').srcObject=stream;$('video').hidden=false;await $('video').play();$('capture').disabled=false;}
@@ -107,6 +112,8 @@
   async function prepareReadback(item){
     pending=null;
     if(!actionAllowed(item.art))throw new Error('Für diese Aktion fehlt die aktuelle Freigabe.');
+    if(workflowKinds.includes(item.art))showActions();
+    if(item.daten?.missing_fields?.length){status('Die Mail ist noch unvollständig. Bitte die fehlenden Angaben im Vorschlag ergänzen.');return false;}
     const requestedGeneration=playbackGeneration;
     const challenge=await api('/vorlesen/'+item.id,{});
     if(requestedGeneration!==playbackGeneration)return false;
@@ -119,7 +126,8 @@
   const euros = value => Number.isSafeInteger(value)&&value>=0?(value/100).toLocaleString('de-DE',{style:'currency',currency:'EUR'}):'nicht geklärt';
   function confirmationResult(result){
     if(result.ok!==true)throw new Error(result.hinweis||'Die Aktion wurde nicht bestätigt.');
-    if(result.auftrag&&(!current||Number(current.id)===Number(result.auftrag.id)))showOrder(result.auftrag);
+    if(result.neuer_auftrag)window.AssistantWorkflow?.created();
+    if(result.auftrag&&(result.neuer_auftrag||!current||Number(current.id)===Number(result.auftrag.id)))showOrder(result.auftrag);
     const message=[result.hinweis,result.versandstatus?.message].filter((text,index,items)=>typeof text==='string'&&text&&items.indexOf(text)===index).join(' ');
     return message||'Serverantwort erhalten. Bitte den Aktionsstatus prüfen.';
   }
@@ -134,12 +142,14 @@
         if(item.art==='bestellung')details+=`Kostenrahmen: ${euros(order.max_total_cents)}\nPreise: brutto in EUR.\nPreisquelle: ${data.preisquelle||order.price_source||'nicht geklärt'}\n${order.urgent===true?'Dringend: Versand nach Bestätigung.':order.urgent===false?'Sammelversand: Montag um 12:00 Uhr (Europe/Berlin).':'Dringlichkeit nicht geklärt.'}`;
         else if(item.art==='einkauf')details+=`${data.preisquelle||'Preisquelle nicht geklärt'}\nKein Bestellversand.`;
       }
-      const labels={status:'Statusänderung',bestellung:'Verbindliche Bestellung',notiz:'Interne Notiz',einkauf:'Einkaufsentwurf',anfrage:'Teileanfrage'};
-      pre.textContent=`Auftrag ${item.auftrag_id} · ${labels[item.art]} · ${item.status==='vorschlag'?'Zur Prüfung':item.status}\n${details}`;div.append(pre);
+      if(mailKinds.includes(item.art))details=`Empfänger: ${data.mail?.recipient||'fehlt'}\nAbsender: ${data.mail?.from||'fehlt'}\nBetreff: ${data.mail?.subject||'fehlt'}\n${item.art==='kundenangebot'?'Kundenpreis gesamt brutto: '+euros(data.gross_total_cents)+'\n':''}\n${data.mail?.body||''}\n\nAnhänge: ${(data.attachments||[]).map(a=>a.name||a.original_name||a.filename).join(', ')||'keine'}\n${data.missing_fields?.length?'Noch offen: '+data.missing_fields.map(k=>({recipient:'Empfänger',gross_total_cents:'Kundenpreis brutto',sender:'Absender',configuration:'Postfach'}[k]||k)).join(', '):''}`;
+      const labels={status:'Statusänderung',bestellung:'Verbindliche Bestellung',notiz:'Interne Notiz',einkauf:'Einkaufsentwurf',anfrage:'Teileanfrage',farbe:'Farbdaten',kontakt:'Kundenkontakt',auftrag_neu:'Neuer Auftrag',datei:'Bild / Unterlage zuordnen',lieferantenanfrage:'Unverbindliche Lieferantenanfrage',kundenangebot:'Angebot an Kunden'};
+      pre.textContent=`${item.auftrag_id?'Auftrag '+item.auftrag_id:item.art==='auftrag_neu'?'Neue Auftragsnummer beim Speichern':'Werkstattmaterial'} · ${labels[item.art]} · ${item.status==='vorschlag'?'Zur Prüfung':item.status}\n${details}`;div.append(pre);
       if(item.versandstatus?.message){const message=document.createElement('p');message.textContent=item.versandstatus.message;div.append(message);}
       if(item.status==='vorschlag'){
-        const button=document.createElement('button');button.textContent=item.art==='status'?'Status ändern':item.art==='bestellung'?'Verbindlich bestellen':item.art==='notiz'?'Geprüfte Notiz speichern':'Geprüften Entwurf intern freigeben';
-        button.onclick=safe(async()=>{button.disabled=true;try{const r=await api('/bestaetigen/'+item.id,{});pending=null;status(confirmationResult(r));await refresh();}finally{button.disabled=false;}});div.append(button);
+        const button=document.createElement('button');button.textContent=mailKinds.includes(item.art)?'Geprüfte E-Mail senden':workflowKinds.includes(item.art)?'Geprüft speichern':item.art==='status'?'Status ändern':item.art==='bestellung'?'Verbindlich bestellen':item.art==='notiz'?'Geprüfte Notiz speichern':'Geprüften Entwurf intern freigeben';
+        button.disabled=Boolean(data.missing_fields?.length);
+        button.onclick=safe(async()=>{button.disabled=true;stopVoice();try{const r=await api('/bestaetigen/'+item.id,{});pending=null;status(confirmationResult(r));await refresh();}finally{button.disabled=Boolean(data.missing_fields?.length);}});div.append(button);
         const read=document.createElement('button');read.className='secondary';read.textContent='Vorlesen & per Sprache bestätigen';read.disabled=$('assistant').dataset.ready!=='true';read.onclick=safe(async()=>{unlockOutput();stopVoice();if(await prepareReadback(item))status('Vorgelesen. Gespräch starten und die genannte Bestätigung sprechen.');});div.append(read);
       }
       if(item.art==='bestellung'&&item.status!=='vorschlag'&&['sent','copy_pending'].includes(item.versandstatus?.state)){
@@ -183,10 +193,10 @@
       if(!currentChat()||(spoken&&!voice.active))return;
       log('KI',r.text);
       let proposal=null,photoReady=false;
-      for(const event of r.events){if(!currentChat())return;if(event.type==='auftrag')showOrder(event.data);if(event.type==='vorschlag'&&event.data.status==='vorschlag')proposal=event.data;if(event.type==='kamera'){showOrder(event.data);await camera();if(!currentChat())return;await capture();photoReady=true;}}
+      for(const event of r.events){if(!currentChat())return;if(event.type==='unterlage'){stopVoice();if(event.data)showOrder(event.data);else clearOrder();window.AssistantWorkflow?.openUpload(event.data);return;}if(event.type==='auftrag')showOrder(event.data);if(event.type==='vorschlag'&&event.data.status==='vorschlag')proposal=event.data;if(event.type==='kamera'){showOrder(event.data);await camera();if(!currentChat())return;await capture();photoReady=true;}}
       if(!currentChat())return;
       await refresh();if(!currentChat())return;status('Antwort erhalten.');
-      if(proposal){await prepareReadback(proposal);}
+      if(proposal){showActions();if(spoken||$('read-aloud').checked)await prepareReadback(proposal);else status('Vorschlag ist bereit. Bitte vollständig prüfen und bestätigen.');}
       else if(photoReady){const phrase=`Foto für Auftrag ${photoOrder.id} speichern`;if(await say(`Foto für Auftrag ${photoOrder.id}, Kennzeichen ${photoOrder.kennzeichen}. Prüfe Bild und Zuordnung. Sage: ${phrase}. Oder Abbrechen.`))pending={type:'photo',phrase};}
       else if(spoken||$('read-aloud').checked)await say(r.text);
       else state('idle','Antwort erhalten.');
@@ -216,6 +226,7 @@
     onError:reportError,onText:log,
     onEvent:async event=>{
       if(event.type==='auftrag'){showOrder(event.data);return;}
+      if(event.type==='unterlage'){stopVoice();if(event.data)showOrder(event.data);else clearOrder();window.AssistantWorkflow?.openUpload(event.data);return;}
       // Existing deterministic readback and exact confirmation stay outside model control.
       realtime.stop();await refresh();
       if(event.type==='vorschlag'){
@@ -304,8 +315,11 @@
     if(readOnly||source.readonly||source.modus==='lesestand'){
     for(const id of ['note','purchase'])$(id).closest('section').hidden=true;
     for(const id of ['camera','capture','camera-stop','photo-file','photo-save','vision'])$(id).disabled=true;
-    if(!statusEnabled&&!purchaseEnabled)$('actions').textContent='Lesemodus: Speichern, Fotozuordnung und Bestellungen sind gesperrt.';
+    if(!statusEnabled&&!purchaseEnabled&&!documentsEnabled&&!offersEnabled)$('actions').textContent='Lesemodus: Speichern, Fotozuordnung und Bestellungen sind gesperrt.';
     }
   }
+  function showActions(){const menu=$('assistant-menu');if(!menu.open)menu.showModal();menu.querySelector('details').open=true;$('actions-section').hidden=false;$('actions-section').scrollIntoView({block:'start'});}
+  window.AssistantWorkflowHost={api,safe,status,stopVoice:()=>{stopVoice();pending=null;},getOrder:()=>current,
+    proposed:async()=>{pending=null;await refresh();showActions();status('Vorschlag vorbereitet. Bitte prüfen und ausdrücklich bestätigen.');}};
   safe(async()=>{await refresh();await loadSource();})();
 })();

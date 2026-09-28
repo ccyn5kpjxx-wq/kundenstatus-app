@@ -52,7 +52,8 @@ import mos_handover
 import mos_order_receipt
 import mos_public_booking
 import mos_termination
-from cockpit_rules import document_visible, price_state, price_record, decimal_input, has_invoice, exact_contact, workshop_completion_photo
+from cockpit_rules import document_visible as base_document_visible, price_state, price_record, decimal_input, has_invoice, exact_contact, workshop_completion_photo
+from werkstatt_assistent_uploads import ensure_upload_schema, is_assistant_private
 
 try:
     import psycopg
@@ -2704,6 +2705,28 @@ def configured_flask_secret_key():
 
 app = Flask(__name__)
 app.config['MOS_SHARED_CHECKOUT_ENABLED'] = False  # Internal test integration only; no live route.
+def document_visible(document, audience, *, lead=False):
+    # Avatar attachments remain internal even if an unrelated bulk operation
+    # changes legacy visibility flags. Explicit mail selection is separate.
+    if not lead and is_assistant_private(document):
+        return False
+    return base_document_visible(document, audience, lead=lead)
+
+
+def assistent_datei_intern_sichtbar(document):
+    """Last guard for originals; external routes never inherit admin sessions."""
+    if not is_assistant_private(document):
+        return True
+    if not has_request_context():
+        return False
+    if request.path.startswith("/admin/"):
+        return bool(session.get("admin"))
+    if request.path.startswith("/werkstatt/datei/"):
+        return werkstatt_tafel_session_ok()
+    # Own assistant previews use the separate actor-bound read_content service.
+    return False
+
+
 app.jinja_env.globals.update(document_visible=document_visible, price_state=price_state, has_invoice=has_invoice)
 (
     _configured_secret_key,
@@ -8220,6 +8243,7 @@ BACKUP_TABLES = (
     "assistent_aktionen",
     "assistent_audit",
     "assistent_dialog",
+    "assistent_uploads",
     "mitarbeiter_urlaub",
     "google_ads_tageswerte",
 )
@@ -8251,7 +8275,7 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
-BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1")
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1")
 BACKUP_BINARY_FIELDS = {
     "mietvertrag_versionen": {
         "pdf_base64": {
@@ -10018,6 +10042,7 @@ def init_db():
     ensure_column(db, "dateien", "versicherung_sichtbar", "INTEGER DEFAULT 0")
     ensure_column(db, "dateien", "sichtbarkeit_geprueft", "INTEGER DEFAULT 0")
     ensure_column(db, "dateien", "dokument_zweck", "TEXT DEFAULT 'pruefen'")
+    ensure_upload_schema(db)
     ensure_column(db, "lead_dateien", "kunden_sichtbar", "INTEGER DEFAULT NULL")
     ensure_column(db, "benachrichtigungen", "kunden_sichtbar", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "preisstand_json", "TEXT DEFAULT '{}'")
@@ -21389,6 +21414,8 @@ def missing_upload_response(datei, back_url=""):
 
 
 def send_upload_file(datei, as_attachment=False, missing_back_url=""):
+    if not assistent_datei_intern_sichtbar(datei):
+        abort(404)
     path = ensure_upload_file_available(datei)
     if not path:
         return missing_upload_response(datei, missing_back_url)
@@ -27070,6 +27097,8 @@ def versicherung_mail_attachments(dateien, limit_mb=None):
     attachments = []
     skipped = []
     for datei in dateien or []:
+        if is_assistant_private(datei):
+            continue
         if clean_text(datei.get("quelle")) == "versicherung":
             continue
         if clean_text(datei.get("kategorie")) == "fertigbild":
@@ -46947,6 +46976,7 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         # Native avatar identity/history arrived after the first assistant API.
         "assistent_rechte", "assistent_profile", "assistent_aktionen",
         "assistent_audit", "assistent_dialog",
+        "assistent_uploads",
     }
     if "kunden_termin_mail_versand" in schema_features:
         required_tables.add("kunden_termin_mail_versand")
@@ -46958,6 +46988,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
     if "werkstatt_avatar_v1" in schema_features:
         required_tables.update({"assistent_rechte", "assistent_profile", "assistent_aktionen",
                                 "assistent_audit", "assistent_dialog"})
+    if "werkstatt_avatar_uploads_v1" in schema_features:
+        required_tables.add("assistent_uploads")
     if format_version >= 3:
         required_tables.add("fahrzeugeinkauf_scan_treffer")
     if format_version >= 4:

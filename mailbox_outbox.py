@@ -448,7 +448,7 @@ class MailOutbox:
                     except Exception:
                         pass
 
-    def send(self, token, msg: EmailMessage, cfg: dict):
+    def send(self, token, msg: EmailMessage, cfg: dict, *, retry_not_sent=True):
         token = self._token(token)
         fingerprint = _fingerprint(msg)
         self._ensure_schema()
@@ -474,7 +474,7 @@ class MailOutbox:
             else:
                 if row['fingerprint'] != fingerprint:
                     raise ValueError('Dieser Versandvorgang gehört zu einem anderen Nachrichteninhalt.')
-                if row['state'] != 'not_sent':
+                if row['state'] != 'not_sent' or not retry_not_sent:
                     if row['state'] == 'sending':
                         row['state'] = 'uncertain'  # Lock was free: previous sender was interrupted.
                     return self._public(row)

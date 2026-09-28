@@ -91,7 +91,7 @@ class AssistantOperationTests(unittest.TestCase):
         self.assertTrue(p.app.config['ASSISTANT_READ_ONLY'])
         with patch('werkstatt_assistent.render_template', return_value='page') as render:
             self.assertEqual(self.client.get('/werkstatt/assistent').status_code, 200)
-            self.assertEqual(render.call_args.kwargs['capabilities'], {'status': True, 'bestellen': True})
+            self.assertEqual(render.call_args.kwargs['capabilities'], {'status': True, 'auftrag': True, 'angebote': True, 'bestellen': True})
             self.assertTrue(render.call_args.kwargs['read_only'])
         for client in (self.client, self.legacy.make_client(admin=True)):
             for kind in ('notiz', 'einkauf', 'anfrage'):
