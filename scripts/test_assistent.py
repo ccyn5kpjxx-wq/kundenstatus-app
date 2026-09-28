@@ -684,9 +684,29 @@ class AssistantTests(unittest.TestCase):
         with patch.object(p.cockpit_data,'material_context',create=True,return_value=evidence) as materials, patch.object(p,'get_openai_api_key',return_value='synthetic-key'), patch('werkstatt_assistent.requests.post',return_value=result) as provider:
             response=self.post('/dialog',{'text':'Ich brauche Abklebeband'})
             self.assertEqual(response.status_code,200)
-            materials.assert_called_once_with(query='Ich brauche Abklebeband',limit=8)
+            materials.assert_called_once_with(query='Abklebeband',limit=8)
             self.assertEqual(provider.call_count,1)
             self.assertIn('SYNTHETIC BAND',provider.call_args.kwargs['json']['instructions'])
+        with database() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_aktionen').fetchone()[0],0)
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_natural_invoice_question_preloads_concatenated_tape_before_model(self):
+        from unittest.mock import Mock
+        product='Mipa593250500 MP TapeHydroGreen50mRolle x30mm'
+        with database() as db:
+            db.execute("INSERT INTO einkauf_artikel(lieferant,artikelnummer,produkt_name,ve,gebinde,erstellt_am,geaendert_am) VALUES('Top-Color GmbH','10000991',?,'Stück','',?,?)",(product,p.now_str(),p.now_str()))
+        result=Mock();result.json.return_value={'output':[{'type':'message','content':[{'type':'output_text','text':'Ein belegter Artikel ist mit 30 mm hinterlegt; Packinhalt unbekannt.'}]}]}
+        question='Nur Auskunft, keine Bestellung: Welche Abklebebänder haben wir bisher gekauft, und welche Breiten und Verpackungseinheiten sind belegt?'
+        with patch.object(p,'get_openai_api_key',return_value='synthetic-key'), patch('werkstatt_assistent.requests.post',return_value=result) as provider:
+            response=self.post('/dialog',{'text':question})
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(provider.call_count,1)
+            instructions=provider.call_args.kwargs['json']['instructions']
+            self.assertIn(product,instructions)
+            self.assertIn('30 mm',instructions)
+            self.assertIn('"packinhalt": null',instructions)
+            self.assertIn('Keine Treffer für einen Suchtext bedeuten nicht',instructions)
         with database() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_aktionen').fetchone()[0],0)
 
@@ -716,8 +736,12 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(material_query('Dann blau bitte',history),'Abklebeband blau')
         self.assertEqual(material_query('Davon 2 Rollen',history),'Abklebeband')
         self.assertEqual(material_query('50',history),'Abklebeband 50')
-        self.assertEqual(material_query('Handschuhe bitte',history),'Handschuhe bitte')
+        self.assertEqual(material_query('Handschuhe bitte',history),'Handschuhe')
         self.assertIsNone(material_query('Was muss ich an Auftrag 156 machen?',history))
+        question='Nur Auskunft, keine Bestellung: Welche Abklebebänder haben wir bisher gekauft, und welche Breiten und Verpackungseinheiten sind belegt?'
+        self.assertEqual(material_query(question),'Abklebebänder')
+        self.assertEqual(material_query('Welche grünen Abklebebänder in 30 mm haben wir gekauft?'),'Abklebebänder grünen 30 mm')
+        self.assertEqual(material_query('Ich brauche Klebeband für Auftrag 156'),'Klebeband')
 
     @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
     def test_job_text_skips_material_preload_but_realtime_start_retains_it(self):

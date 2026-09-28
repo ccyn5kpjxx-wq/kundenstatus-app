@@ -233,7 +233,31 @@ class InvoiceCatalog:
 
     def source_rule(self, source, allowed_suppliers=None):
         allowed = self.allowed_suppliers() if allowed_suppliers is None else allowed_suppliers
+        if isinstance(source, dict) and source.get('source_kind') == 'einkauf':
+            # A queued source is not authorization forever. Quarantine/deletion
+            # is checked from current metadata, never by opening its document.
+            if '_current_beleg_typ' in source:
+                current_type = source['_current_beleg_typ']
+            else:
+                current = self.rows('SELECT beleg_typ FROM einkauf_belege WHERE CAST(id AS TEXT)=?', (str(source.get('source_id') or ''),))
+                current_type = current[0]['beleg_typ'] if current else None
+            source = dict(source, beleg_typ=current_type)
         return classify_invoice_source(source, allowed_suppliers=allowed)
+
+    def _source_rows(self, db=None, source_id=None, include_result=False):
+        # One batched metadata join for search/status/context; no per-source DB
+        # connection and no document text, bank fields or original bytes.
+        fields = 'i.id,i.supplier,i.reference,i.state,i.source_kind,i.source_id,b.beleg_typ AS _current_beleg_typ'
+        if include_result:
+            fields += ',i.result_json'
+        sql = ('SELECT '+fields+' FROM assistent_rechnungsimporte i '
+               "LEFT JOIN einkauf_belege b ON i.source_kind='einkauf' AND i.source_id=CAST(b.id AS TEXT)")
+        args = ()
+        if source_id is not None:
+            sql += ' WHERE i.id=?'
+            args = (source_id,)
+        sql += ' ORDER BY i.id'
+        return [dict(row) for row in db.execute(sql, args).fetchall()] if db is not None else self.rows(sql, args)
 
     @staticmethod
     def _scope_report(rule):
@@ -243,7 +267,7 @@ class InvoiceCatalog:
     def _apply_source_rules(self, db):
         """Recheck the complete existing queue; revoke a denied worker's lease."""
         allowed = self.allowed_suppliers()
-        rows = db.execute('SELECT id,supplier,reference,state FROM assistent_rechnungsimporte').fetchall()
+        rows = self._source_rows(db=db)
         for row in rows:
             source = dict(row)
             rule = self.source_rule(source, allowed)
@@ -296,11 +320,13 @@ class InvoiceCatalog:
                    ((now-timedelta(minutes=15)).isoformat(),))
 
     def status(self):
-        sources = self.rows('SELECT id,supplier,reference,state,result_json FROM assistent_rechnungsimporte ORDER BY id')
+        sources = self._source_rows(include_result=True)
         allowed = self.allowed_suppliers()
         allowed_ids = set()
         for row in sources:
             rule = self.source_rule(row, allowed)
+            for key in ('source_kind', 'source_id', '_current_beleg_typ'):
+                row.pop(key, None)
             if not rule['allowed']:
                 row.pop('result_json', None)
                 row['state'] = 'ausgeschlossen' if rule['decision'] == 'block' else 'zuordnen'
@@ -330,7 +356,7 @@ class InvoiceCatalog:
                 'vorschlaege': sum(counts.values())}
 
     def retry_source(self, source_id):
-        sources = self.rows('SELECT id,supplier,reference,state FROM assistent_rechnungsimporte WHERE id=?', (source_id,))
+        sources = self._source_rows(source_id=source_id)
         if not sources or not self.source_rule(sources[0])['allowed']:
             return False
         db = self.p.get_db()
@@ -491,7 +517,7 @@ class InvoiceCatalog:
         """Read the scoped active evidence set; never initiate an import/read."""
         limit = max(1, min(int(limit), 5000))
         allowed = self.allowed_suppliers()
-        sources = self.rows('SELECT id,supplier,reference,state FROM assistent_rechnungsimporte')
+        sources = self._source_rows()
         scoped = [(source, self.source_rule(source, allowed)) for source in sources]
         items = self._search('', limit + 1, sources=sources, allowed=allowed)
         truncated = len(items) > limit
@@ -509,7 +535,7 @@ class InvoiceCatalog:
 
     def _search(self, query, limit, sources=None, allowed=None):
         allowed = self.allowed_suppliers() if allowed is None else allowed
-        sources = self.rows('SELECT id,supplier,reference FROM assistent_rechnungsimporte') if sources is None else sources
+        sources = self._source_rows() if sources is None else sources
         ids = [row['id'] for row in sources if self.source_rule(row, allowed)['allowed']]
         if not ids:
             return []
@@ -609,7 +635,7 @@ def register_invoice_catalog(p, service):
     @p.admin_required
     def assistant_invoice_supplier_approve(source_id):
         # Standard app POST/CSRF protection also covers this explicit admin action.
-        sources = catalog.rows('SELECT id,supplier,reference FROM assistent_rechnungsimporte WHERE id=?', (source_id,))
+        sources = catalog._source_rows(source_id=source_id)
         if not sources:
             flash('Die Rechnungsquelle ist nicht vorhanden.', 'warning')
             return redirect(url_for('assistant_invoice_catalog'))

@@ -142,6 +142,24 @@ class InvoiceSourceTests(unittest.TestCase):
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual(self.calls, [])
 
+    def test_quarantined_or_payment_metadata_never_opens_file_restore_or_stored_ocr(self):
+        self.seed_local(source_id=1, supplier='TOP-Color GmbH', filename='forbidden.pdf', text='PRIVATE STORED TEXT', kind='gesperrt')
+        self.seed_local(source_id=2, supplier='TOP-Color GmbH', filename='forbidden.pdf', text='PRIVATE STORED TEXT')
+        with contextlib.closing(self.get_db()) as db:
+            db.execute("UPDATE einkauf_belege SET original_name='SEPA-Mandat.pdf' WHERE id=2")
+            db.commit()
+        self.portal.assistant_mail_sources_restore_file = mock.Mock()
+        with mock.patch.object(reader, '_read_file') as read, mock.patch.object(reader, '_stored_text') as fallback:
+            for source_id in (1, 2):
+                result = reader.read_source(self.portal, 'einkauf', source_id)
+                self.assertEqual(result['status'], 'unavailable')
+                self.assertEqual(result['candidates'], [])
+                self.assertNotIn('PRIVATE STORED TEXT', json.dumps(result))
+            read.assert_not_called()
+            fallback.assert_not_called()
+        self.portal.assistant_mail_sources_restore_file.assert_not_called()
+        self.assertEqual(self.calls, [])
+
     def test_stored_text_has_no_invented_supplier_or_page_coverage(self):
         self.seed_local(supplier="", filename="", text=TEXT)
         result = reader.read_source(self.portal, "einkauf", 1)

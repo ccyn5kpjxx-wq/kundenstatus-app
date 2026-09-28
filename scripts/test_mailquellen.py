@@ -43,6 +43,8 @@ class FakePortal:
         self.app.jinja_env.globals.update(csrf_field=lambda:'<input name="csrf_token" value="synthetic">')
         with self.get_db() as db:
             db.executescript('''CREATE TABLE app_settings(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
+                CREATE TABLE assistent_rechnungsimporte(id INTEGER PRIMARY KEY AUTOINCREMENT,source_kind TEXT,source_id TEXT,state TEXT,lease TEXT,result_json TEXT);
+                CREATE TABLE assistent_rechnungsartikel(id INTEGER PRIMARY KEY AUTOINCREMENT,import_id INTEGER,active INTEGER);
                 CREATE TABLE einkauf_belege(id INTEGER PRIMARY KEY AUTOINCREMENT,beleg_typ TEXT,lieferant TEXT,original_name TEXT,stored_name TEXT,mime_type TEXT,size INTEGER,extrahierter_text TEXT,positionen_count INTEGER,status TEXT,erstellt_am TEXT);''')
     def get_db(self):
         db=sqlite3.connect(self.path,timeout=5,factory=ClosingConnection);db.row_factory=sqlite3.Row;return db
@@ -165,9 +167,57 @@ class MailSourcesTests(unittest.TestCase):
         self.assertTrue(self.service.restore_file(row['stored_name']));self.assertTrue(path.is_file())
         self.assertFalse(self.service.restore_file('../foreign.pdf'));self.assertFalse(self.service.restore_file('unknown.pdf'))
     def test_credit_attachment_never_creates_positive_invoice(self):
-        self.mail.data['INBOX']={1:message(filename='Gutschrift_RE12345.pdf'),2:message(subject='Reklamation Rechnung'),3:message(sender='info@tech-masters.de',subject='Rechnung826-17851')}
+        self.mail.data['INBOX']={1:message(filename='Gutschrift_RE12345.pdf'),2:message(subject='Reklamation Rechnung'),3:message(sender='info@tech-masters.de',subject='Rechnung826-00123')}
         report=self.finish();self.assertEqual(len(self.rows('SELECT * FROM einkauf_belege')),1)
         self.assertEqual(report['counts']['other'],2)
+    def test_payment_headers_never_fetch_body_and_payment_files_not_staged(self):
+        self.mail.data['INBOX']={1:message(subject='Überweisung 210000 Doppelzahlung TEST26-RE001122'),
+          2:message(subject='SEPA-Mandat'),3:message(subject='Rechnung RE12345',filename='SEPA-Mandat.pdf'),
+          4:message(subject='Rechnung RE67890'),5:message(sender='info@tech-masters.de',subject='TECH-MASTERS Deutschland GmbH - M26-00123'),
+          6:message(subject='Rechnung M26-00123')}
+        report=self.finish()
+        self.assertEqual(self.mail.raw_calls,[('INBOX','3'),('INBOX','4'),('INBOX','6')])
+        self.assertEqual(len(self.rows('SELECT * FROM einkauf_belege')),1)
+        self.assertEqual(report['counts']['excluded'],3)
+    def test_status_quarantines_historical_payment_metadata_without_reading_file(self):
+        self.mail.data['INBOX']={1:message()};self.finish()
+        bid=self.rows('SELECT id FROM einkauf_belege')[0]['id']
+        with self.p.get_db() as db:
+            db.execute("UPDATE assistent_mailquellen_nachrichten SET subject='Überweisung Doppelzahlung TEST26-RE001122'")
+            imp=db.execute("INSERT INTO assistent_rechnungsimporte(source_kind,source_id,state,lease) VALUES('einkauf',?,'laeuft','old-lease')",(str(bid),)).lastrowid
+            db.execute('INSERT INTO assistent_rechnungsartikel(import_id,active) VALUES(?,1)',(imp,))
+        calls=list(self.mail.raw_calls)
+        with patch.object(Path,'read_bytes',side_effect=AssertionError('NO FILE READ')):
+            report=self.service.status()
+        self.assertEqual(self.mail.raw_calls,calls);self.assertEqual(report['counts']['excluded'],1)
+        self.assertEqual(report['quarantined_files'],1)
+        self.assertEqual(self.rows('SELECT beleg_typ FROM einkauf_belege')[0]['beleg_typ'],'gesperrt')
+        self.assertEqual(self.rows('SELECT state,lease FROM assistent_rechnungsimporte')[0],{'state':'ausgeschlossen','lease':''})
+        self.assertEqual(self.rows('SELECT active FROM assistent_rechnungsartikel')[0]['active'],0)
+        self.assertEqual(len(self.rows('SELECT id FROM assistent_mailquellen_dateien')),1)
+        stored=self.rows('SELECT stored_name FROM assistent_mailquellen_dateien')[0]['stored_name']
+        self.assertFalse(self.service.restore_file(stored))
+        with self.service.db() as db:
+            with self.assertRaises(ValueError):self.service._stage(db,b'%PDF-1.4 synthetic receipt','new-neutral-name.pdf','TOP-Color GmbH')
+    def test_unknown_sender_search_finds_rare_supplier_beyond_first_hundred(self):
+        self.service.start();account,_=self.service.identity()
+        with self.p.get_db() as db:
+            token=db.execute('SELECT run_token FROM assistent_mailquellen_laeufe').fetchone()['run_token']
+            for i in range(102):
+                db.execute('''INSERT INTO assistent_mailquellen_nachrichten(account,run_token,folder,validity,uid,sender,sender_name,subject,state,updated_at)
+                    VALUES(?,?,'INBOX','1',?,?,?,?, 'review','synthetic')''',
+                    (account,token,str(i+1),f'newsletter{i:03}@example.test','Newsletter','Neuigkeiten'))
+            db.execute('''INSERT INTO assistent_mailquellen_nachrichten(account,run_token,folder,validity,uid,sender,sender_name,subject,state,updated_at)
+                VALUES(?,?,'INBOX','1','200','zzparts@example.test','Seltener Lieferant','Car-Parts Angebot', 'review','synthetic')''',(account,token))
+            db.execute("UPDATE assistent_mailquellen_laeufe SET state='paused'")
+        report=self.service.status();self.assertEqual(len(report['unknown_senders']),100)
+        self.assertNotIn('zzparts@example.test',[row['sender'] for row in report['unknown_senders']])
+        for query in ['Car-Parts','zzparts','Seltener']:
+            report=self.service.status(query);self.assertEqual([row['sender'] for row in report['unknown_senders']],['zzparts@example.test'])
+            self.assertEqual(report['counts']['review'],103)
+        self.assertEqual(self.service.status('%')['unknown_senders'],[])
+        self.assertEqual(self.service.status("' OR 1=1 --")['unknown_senders'],[])
+        self.assertEqual(self.mail.raw_calls,[])
     def test_changed_uidvalidity_and_body_limit_are_visible_not_retry_loops(self):
         self.mail.data['INBOX']={i:message() for i in range(1,45)}
         self.service.start();self.service.step();self.mail.versions['INBOX']='2'
@@ -196,7 +246,7 @@ class MailSourcesTests(unittest.TestCase):
         self.assertEqual(self.rows('SELECT * FROM einkauf_belege'),[])
     def test_legacy_file_dedup_and_foreign_supplier_rejected(self):
         raw=b'%PDF-1.4 synthetic receipt';self.p.UPLOAD_DIR.mkdir();(self.p.UPLOAD_DIR/'manual.pdf').write_bytes(raw)
-        with self.p.get_db() as db:db.execute("INSERT INTO einkauf_belege(lieferant,stored_name,size) VALUES('TOP-Color GmbH','manual.pdf',?)",(len(raw),))
+        with self.p.get_db() as db:db.execute("INSERT INTO einkauf_belege(beleg_typ,lieferant,stored_name,size) VALUES('rechnung','TOP-Color GmbH','manual.pdf',?)",(len(raw),))
         self.mail.data['INBOX']={1:message()};self.finish()
         self.assertEqual(len(self.rows('SELECT * FROM einkauf_belege')),1)
         self.assertEqual(self.rows('SELECT stored_name FROM assistent_mailquellen_dateien')[0]['stored_name'],'manual.pdf')

@@ -29,6 +29,12 @@ class FakePortal:
     def __init__(self, path):
         self.path = path
         self.settings = {'ASSISTANT_MATERIAL_SUPPLIERS': json.dumps(['Test Supplier', 'Other Supplier', 'Auto-Color'])}
+        db = self.get_db()
+        try:
+            db.execute("CREATE TABLE IF NOT EXISTS einkauf_belege(id INTEGER PRIMARY KEY,beleg_typ TEXT)")
+            db.commit()
+        finally:
+            db.close()
 
     def get_app_setting(self, key, default=''):
         return self.settings.get(key, default)
@@ -45,6 +51,18 @@ class FakePortal:
 def inventory():
     return {'einkaufsbelege': [{'id': 1, 'lieferant': 'Test Supplier', 'original_name': 'invoice.pdf'}],
             'lieferantenrechnungen': []}
+
+
+def prepare_catalog(catalog, sources):
+    """Real source metadata exists before its synthetic extraction is queued."""
+    db = catalog.p.get_db()
+    try:
+        for row in sources['einkaufsbelege']:
+            db.execute("INSERT INTO einkauf_belege(id,beleg_typ) VALUES(?,'rechnung') ON CONFLICT(id) DO NOTHING", (row['id'],))
+        db.commit()
+    finally:
+        db.close()
+    return catalog.prepare(sources)
 
 
 def candidate(**changes):
@@ -64,7 +82,7 @@ class CatalogTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.portal = FakePortal(str(pathlib.Path(self.temp.name) / 'catalog.db'))
         self.catalog = InvoiceCatalog(self.portal)
-        self.catalog.prepare(inventory())
+        prepare_catalog(self.catalog, inventory())
 
     def tearDown(self):
         self.temp.cleanup()
@@ -82,13 +100,56 @@ class CatalogTests(unittest.TestCase):
             return self.catalog.process_next()
 
     def test_prepare_and_completed_processing_are_idempotent(self):
-        self.assertEqual(len(self.catalog.prepare(inventory())['quellen']), 1)
+        self.assertEqual(len(prepare_catalog(self.catalog, inventory())['quellen']), 1)
         self.process(extracted(candidate()))
         with patch('werkstatt_artikel_import.read_source', side_effect=AssertionError('Already done')):
             self.assertEqual(self.catalog.process_next()['vorschlaege'], 1)
         # Even an explicit retry of the same extraction cannot duplicate it.
         self.update("UPDATE assistent_rechnungsimporte SET state='offen'")
         self.assertEqual(self.process(extracted(candidate()))['vorschlaege'], 1)
+
+    def test_quarantine_cannot_be_reopened_by_prepare_or_retried_and_never_calls_reader(self):
+        self.update("UPDATE einkauf_belege SET beleg_typ='gesperrt' WHERE id=1")
+        with patch('werkstatt_artikel_import.read_source') as reader:
+            self.assertEqual(prepare_catalog(self.catalog, inventory())['ausgeschlossen'], 1)
+            self.assertEqual(self.catalog.process_next()['ausgeschlossen'], 1)
+            reader.assert_not_called()
+        source_id = self.catalog.status()['quellen'][0]['id']
+        self.assertFalse(self.catalog.retry_source(source_id))
+        self.assertEqual(self.catalog.search(''), [])
+        self.assertEqual(self.catalog.knowledge_rows()['items'], [])
+
+    def test_live_quarantine_hides_existing_proposals_without_needing_queue_mutation(self):
+        self.process(extracted(candidate()))
+        self.update("UPDATE einkauf_belege SET beleg_typ='gesperrt' WHERE id=1")
+        # Simulate the old queue even retaining an active proposal and a lease.
+        self.update("UPDATE assistent_rechnungsimporte SET state='laeuft',lease='stale',started_at=?", (datetime.now(timezone.utc).isoformat(),))
+        with patch.object(self.catalog, 'rows', wraps=self.catalog.rows) as queries:
+            self.assertEqual(self.catalog.search(''), [])
+            result = self.catalog.knowledge_rows()
+            self.assertEqual(result['items'], [])
+            self.assertEqual(result['coverage']['freigegebene_quellen'], 0)
+            self.assertFalse(any('SELECT beleg_typ FROM einkauf_belege' in call.args[0] for call in queries.call_args_list), 'read context must batch metadata')
+        self.assertEqual(self.catalog.status()['vorschlaege'], 0)
+        with patch('werkstatt_artikel_import.read_source') as reader:
+            self.catalog.process_next()
+            reader.assert_not_called()
+        self.assertEqual(self.catalog.rows('SELECT state,lease FROM assistent_rechnungsimporte')[0], {'state': 'ausgeschlossen', 'lease': ''})
+        self.assertEqual(self.catalog.rows('SELECT active FROM assistent_rechnungsartikel')[0]['active'], 1, 'visibility must not rely solely on active=0')
+
+    def test_quarantine_during_read_prevents_any_publication_and_deleted_original_stays_hidden(self):
+        def interrupted(*args):
+            self.update("UPDATE einkauf_belege SET beleg_typ='gesperrt' WHERE id=1")
+            return extracted(candidate())
+        with patch('werkstatt_artikel_import.read_source', side_effect=interrupted):
+            self.assertEqual(self.catalog.process_next()['vorschlaege'], 0)
+        self.assertEqual(self.catalog.rows('SELECT COUNT(*) AS n FROM assistent_rechnungsartikel')[0]['n'], 0)
+        self.update("UPDATE einkauf_belege SET beleg_typ='rechnung' WHERE id=1")
+        prepare_catalog(self.catalog, inventory())
+        self.process(extracted(candidate()))
+        self.update('DELETE FROM einkauf_belege WHERE id=1')
+        self.assertEqual(self.catalog.search(''), [])
+        self.assertEqual(self.catalog.knowledge_rows()['items'], [])
 
     def test_evidence_extension_updates_same_observation_and_keeps_explicit_units(self):
         self.process(extracted(candidate()))
@@ -138,7 +199,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_knowledge_rows_scope_limit_and_counts_do_not_trigger_read_or_leak_blocked_data(self):
         self.process(extracted(candidate(), candidate(produkt_name='Schleifpapier')))
-        self.catalog.prepare({'einkaufsbelege': [
+        prepare_catalog(self.catalog, {'einkaufsbelege': [
             {'id': 2, 'lieferant': 'Unknown supplier', 'original_name': 'unknown.pdf'},
             {'id': 3, 'lieferant': 'Volksbank Muster', 'original_name': 'private-bank-marker.pdf'},
         ], 'lieferantenrechnungen': []})
@@ -165,7 +226,7 @@ class CatalogTests(unittest.TestCase):
         suppliers = ['Other Supplier', 'Tech Masters', 'Car-Parts', 'Topcolor', 'Auto-Color']
         rows = [{'id': index, 'lieferant': supplier, 'original_name': 'invoice.pdf'}
                 for index, supplier in enumerate(suppliers, 2)]
-        self.catalog.prepare({'einkaufsbelege': rows, 'lieferantenrechnungen': []})
+        prepare_catalog(self.catalog, {'einkaufsbelege': rows, 'lieferantenrechnungen': []})
         stored = self.catalog.rows('SELECT supplier FROM assistent_rechnungsimporte WHERE source_id!=? ORDER BY id', ('1',))
         self.assertEqual([row['supplier'] for row in stored],
                          ['Topcolor', 'Car-Parts', 'Tech Masters', 'Other Supplier', 'Auto-Color'])
@@ -192,7 +253,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(payloads[4]['quelle']['zeile'], 8)
         other = inventory()
         other['einkaufsbelege'].append({'id': 2, 'lieferant': 'Other Supplier', 'original_name': 'second.pdf'})
-        self.catalog.prepare(other)
+        prepare_catalog(self.catalog, other)
         self.process(extracted(candidate()))
         keys = self.catalog.rows('SELECT identity_key FROM assistent_rechnungsartikel ORDER BY id')
         self.assertNotEqual(keys[0]['identity_key'], keys[-1]['identity_key'])
@@ -255,10 +316,10 @@ class CatalogTests(unittest.TestCase):
     def test_start_reclaims_expired_but_not_active_lease(self):
         expired = (datetime.now(timezone.utc) - timedelta(minutes=16)).isoformat()
         self.update("UPDATE assistent_rechnungsimporte SET state='laeuft',lease='old',started_at=?", (expired,))
-        self.assertEqual(self.catalog.prepare(inventory())['offen'], 1)
+        self.assertEqual(prepare_catalog(self.catalog, inventory())['offen'], 1)
         self.update("UPDATE assistent_rechnungsimporte SET state='laeuft',lease='active',started_at=?",
                     (datetime.now(timezone.utc).isoformat(),))
-        self.assertEqual(self.catalog.prepare(inventory())['laeuft'], 1)
+        self.assertEqual(prepare_catalog(self.catalog, inventory())['laeuft'], 1)
 
     def test_concurrent_request_does_not_duplicate_an_active_read(self):
         entered, release = threading.Event(), threading.Event()
@@ -312,7 +373,7 @@ class CatalogTests(unittest.TestCase):
                 self.assertTrue(entered.wait(5))
                 expired = (datetime.now(timezone.utc) - timedelta(minutes=16)).isoformat()
                 self.update('UPDATE assistent_rechnungsimporte SET started_at=?', (expired,))
-                self.catalog.prepare(inventory())
+                prepare_catalog(self.catalog, inventory())
                 self.process(extracted(candidate(produkt_name='Replacement result')))
             finally:
                 release.set()
@@ -325,7 +386,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_prepare_holds_unknown_and_redacts_blocked_sources_before_read(self):
         self.update('DELETE FROM assistent_rechnungsimporte')
-        report = self.catalog.prepare({'einkaufsbelege': [
+        report = prepare_catalog(self.catalog, {'einkaufsbelege': [
             {'id': 10, 'lieferant': 'Volksbank Muster eG', 'original_name': 'private-bank-reference.pdf'},
             {'id': 11, 'lieferant': 'Neue Materialfirma GmbH', 'original_name': 'unknown-reference.pdf'},
         ], 'lieferantenrechnungen': []})
@@ -341,6 +402,7 @@ class CatalogTests(unittest.TestCase):
     def test_existing_open_queue_is_rechecked_without_prepare(self):
         self.update('DELETE FROM assistent_rechnungsimporte')
         for index, supplier in enumerate(('Volksbank Muster', 'Unknown Materials'), 20):
+            self.update("INSERT INTO einkauf_belege(id,beleg_typ) VALUES(?,'rechnung')", (index,))
             self.update("INSERT INTO assistent_rechnungsimporte(source_key,source_kind,source_id,supplier,reference,state) VALUES(?,?,?,?,?,'offen')",
                         ('einkauf:'+str(index), 'einkauf', str(index), supplier, 'hidden-original.pdf'))
         with patch('werkstatt_artikel_import.read_source') as read:
@@ -558,7 +620,7 @@ class CatalogUploadAndApprovalTests(unittest.TestCase):
         self.portal.save_einkauf_beleg_upload = Mock(return_value={'id': 99})
         self.service = types.SimpleNamespace(invoice_sources=lambda include_held=False: inventory())
         self.catalog = register_invoice_catalog(self.portal, self.service)
-        self.catalog.prepare(inventory())
+        prepare_catalog(self.catalog, inventory())
 
         @self.portal.app.before_request
         def csrf():
@@ -587,7 +649,7 @@ class CatalogUploadAndApprovalTests(unittest.TestCase):
                          {'lieferant': 'Top-Color GmbH', 'beleg_typ': 'rechnung'})
 
     def test_admin_and_csrf_required_for_supplier_approval_without_block_override(self):
-        self.catalog.prepare({'einkaufsbelege': [
+        prepare_catalog(self.catalog, {'einkaufsbelege': [
             {'id': 30, 'lieferant': 'Unknown Materials', 'original_name': 'unknown.pdf'},
             {'id': 31, 'lieferant': 'Volksbank', 'original_name': 'secret.pdf'},
         ], 'lieferantenrechnungen': []})

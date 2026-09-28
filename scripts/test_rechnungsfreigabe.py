@@ -57,6 +57,35 @@ class SourceApprovalTests(unittest.TestCase):
             self.assertEqual(result["decision"], "block")
             self.assertEqual(result["rule"], "banking")
 
+    def test_payment_metadata_overrides_known_supplier_and_explicit_permission(self):
+        titles = (
+            'Überweisung 210000 Doppelzahlung TEST-RE001122',
+            'Ueberweisungsbestaetigung Rechnung RE001122.pdf', 'SEPA-Mandat.pdf',
+            'SEPA_Lastschriftmandat.pdf', 'Lastschriftmandat Rechnung123.pdf',
+            'SEPALastschriftMandat.pdf', 'Doppel_Zahlung.pdf', 'Zahlungs-Avis.pdf',
+            'Überweisung210000.pdf', 'Zahlungsavis2026.pdf', 'Mahnung RE001122.pdf', 'Doppelbelastung.pdf',
+            'Mandatserteilung.pdf', 'Einzugsermächtigung.pdf', 'Doppelzahlung.pdf',
+            'Überzahlung Rechnung RE001122', 'Zahlungsavis Rechnung001122.pdf',
+            'Zahlungserinnerung zur Rechnung', 'Zahlungsbestätigung.pdf',
+            'Zahlungseingang Rechnung', 'Zahlungsausgang Rechnung', 'Abbuchungsmitteilung.pdf',
+            'Kontenabstimmung.pdf', 'Saldenbestätigung.pdf', 'Rückerstattung Rechnung.pdf',
+            'Remittance advice invoice001122.pdf', 'Payment confirmation invoice001122.pdf',
+            'Direct debit invoice001122.pdf',
+        )
+        for key in ('reference', 'original_name', 'subject', 'filename'):
+            for title in titles:
+                with self.subTest(key=key, title=title):
+                    result = classify_invoice_source({'supplier': 'Topcolor GmbH', key: title}, ['Topcolor GmbH'])
+                    self.assertEqual(result['decision'], 'block')
+                    self.assertEqual(result['rule'], 'payment_metadata')
+
+    def test_product_invoice_price_and_packaging_words_remain_allowed(self):
+        for title in ('Rechnung RE001122.pdf', 'Materialrechnung Artikelpreise.pdf',
+                      'Klebeband grün 50mm VE6 Rechnung.pdf', 'Rechnung Stückpreis netto 12,50 EUR.pdf',
+                      'Rechnung Gebindepreise Rabatt und Versand.pdf', 'Preisliste Lackierbedarf.pdf'):
+            result = classify_invoice_source({'supplier': 'Topcolor GmbH', 'subject': title})
+            self.assertEqual(result['decision'], 'allow', title)
+
     def test_unknown_supplier_needs_explicit_exact_server_allowlist(self):
         source = {"lieferant": "Muster Lackierbedarf GmbH"}
         self.assertEqual(classify_invoice_source(source)["decision"], "review")

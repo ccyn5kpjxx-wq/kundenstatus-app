@@ -53,6 +53,9 @@ def _tokens(value):
     # Pure string normalization only. Catalog rows, scope decisions and search
     # results are never cached, so revocation/import changes apply immediately.
     value = re.sub(r'(?<=\d)(?=[a-z])|(?<=[a-z])(?=\d)', ' ', _ascii(value))
+    # Recorded trade names can be concatenated by PDF extraction. These are
+    # search aliases only; the persisted name and variant identity stay exact.
+    value = re.sub(r'\btapehydrogreen\b', 'tape hydrogreen', value)
     value = re.sub(r'\btop[ -]+colou?r\b', 'topcolor', value)
     value = re.sub(r'\bcar[ -]+parts\b', 'carparts', value)
     value = re.sub(r'\btech[ -]+masters\b', 'techmasters', value)
@@ -98,6 +101,13 @@ def rank_records(records, query=''):
     # Packing wishes such as "einen Karton" do not imply a known pack size and
     # must not hide matching tape sold by the roll.
     required = [t for t in terms if t not in {'karton', 'pack', 'gebinde', 'rolle', 'stueck'}]
+    families=[t for t in required if re.fullmatch(r'klebeband|hydrogreen|schleif[a-z]+|handschuh[a-z]*|politur[a-z]*|verduenn[a-z]*|silikonentferner',t)]
+    if families:
+        # Natural questions contain grammar that cannot occur on product rows.
+        # Keep explicit variant/SKU/supplier constraints; other words can rank
+        # a match but cannot erase an identified product family.
+        required=list(dict.fromkeys(families+[t for t in required if re.fullmatch(r'\d+(?:[.,]\d+)?',t)
+                        or t in _UNITS or t in _COLORS or t in {'topcolor','carparts','techmasters'}]))
     dimensions, colors = _measurements(query), _colors(query)
     ranked = []
     for index, row in enumerate(records):
@@ -117,6 +127,7 @@ def rank_records(records, query=''):
             continue
         name = set(tokens(row.get('produkt_name', '')))
         score = sum(5 if term in name else 2 for term in matches)
+        score += sum(3 for term in terms if term not in required and term in hay)
         if query and _normal(query) == _normal(row.get('artikelnummer')):
             score += 100
         ranked.append((score, -index, row))

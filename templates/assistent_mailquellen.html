@@ -7,8 +7,9 @@
 <p id="mail-source-progress" role="status" aria-live="polite"></p><p id="mail-source-hint"></p>
 <p>Beim Schließen dieser Seite läuft nur der aktuelle Schritt zu Ende. Erneutes Starten setzt den gespeicherten Stand fort. Nach einem abgeschlossenen Durchlauf beginnt eine neue Momentaufnahme; bereits gespeicherte Dateien werden nicht nochmals angelegt.</p>
 <h2>Erfasste Ordner</h2><ul id="mail-source-folders"></ul>
-<h2>Absender zuordnen</h2><p>Hier stehen höchstens 100 noch unbekannte Absendergruppen. Zum Bearbeiten zuerst pausieren oder den Durchlauf abwarten. Eine Zuordnung erlaubt ausschließlich das Lesen ihrer Materialbelege. Sie bestätigt keine Bestelladresse. Erst nach dem Zuordnen weiter einlesen.</p><div id="mail-source-unknown"></div>
+<h2>Absender zuordnen</h2><p>Hier stehen höchstens 100 noch unbekannte Absendergruppen. Zum Bearbeiten zuerst pausieren oder den Durchlauf abwarten. Eine Zuordnung erlaubt ausschließlich das Lesen ihrer Materialbelege. Sie bestätigt keine Bestelladresse. Erst nach dem Zuordnen weiter einlesen.</p>
+<form id="mail-source-search" method="get"><label>Absender, Lieferantenname oder Betreff suchen<input id="mail-source-query" name="q" maxlength="150" value="{{ report.query or '' }}" placeholder="Zum Beispiel Car-Parts, Würth oder eine E-Mail-Adresse"></label><button id="mail-source-search-button">Gespeicherte Absender suchen</button></form><p id="mail-source-search-note" role="status"></p><div id="mail-source-unknown"></div>
 <h2>Zuletzt geprüfte Lieferantenquellen</h2><p>Die neuesten 50 Quellen. „Weitere Quelle“ bedeutet: noch keine vollständige Inhaltsauswertung.</p><div id="mail-source-results"></div>
 <p><a href="/admin/assistent-artikel">Übernommene Rechnungen anschließend zu Artikelvorschlägen auslesen</a></p>
-<script id="mail-source-initial" type="application/json">{{ report|tojson }}</script><script src="{{ url_for('static',filename='assistent-mailquellen.js',v='1') }}" defer></script>
+<script id="mail-source-initial" type="application/json">{{ report|tojson }}</script><script src="{{ url_for('static',filename='assistent-mailquellen.js',v='2') }}" defer></script>
 </main></body></html>

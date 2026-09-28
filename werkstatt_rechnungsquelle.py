@@ -43,6 +43,7 @@ import time
 import uuid
 
 from werkstatt_topcolor_positionen import explicit_package_evidence, material_unit, quantity_value
+from werkstatt_rechnungsfreigabe import classify_invoice_source
 
 
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -138,7 +139,7 @@ def _row(portal, kind, source_id):
     # Deliberately never select raw_json, payment_status, totals or bank fields.
     if kind == "einkauf":
         sql = ("SELECT id, beleg_typ, lieferant, original_name, stored_name, "
-               "extrahierter_text, status FROM einkauf_belege WHERE id=?")
+               "status FROM einkauf_belege WHERE id=?")
     elif kind == "lexware":
         sql = ("SELECT id, voucher_id, voucher_type, voucher_status, status, "
                "contact_name, voucher_number, voucher_date FROM lexware_rechnungen WHERE voucher_id=?")
@@ -159,6 +160,8 @@ def _row(portal, kind, source_id):
         raise SourceUnavailable("Die Quelle ist keine bekannte Lieferantenrechnung.")
     if kind == "einkauf" and str(item.get("beleg_typ") or "").lower() != "rechnung":
         raise SourceUnavailable("Der Einkaufsbeleg ist nicht als Rechnung gekennzeichnet.")
+    if classify_invoice_source(item)['decision'] == 'block':
+        raise SourceUnavailable("Diese Quelle gehört nicht zu den erlaubten Materialrechnungen.")
     return item
 
 
@@ -460,7 +463,14 @@ def _read_file(portal, path, file_id, result, directory):
 
 
 def _stored_text(portal, row, result):
-    text = str(row.get("extrahierter_text") or "")
+    # Only after the metadata/type gate, and only if the original is missing.
+    # Quarantined documents must not even load their persisted OCR fallback.
+    db = portal.get_db()
+    try:
+        stored = db.execute("SELECT extrahierter_text FROM einkauf_belege WHERE id=? AND beleg_typ='rechnung'", (row['id'],)).fetchone()
+    finally:
+        db.close()
+    text = str(stored['extrahierter_text'] or "") if stored else ""
     if not text.strip():
         return
     _warn(result, "Nur gespeicherter Text ist verfügbar; die vollständige Seitenabdeckung ist nicht nachweisbar.")

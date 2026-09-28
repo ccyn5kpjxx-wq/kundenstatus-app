@@ -24,7 +24,7 @@ import unicodedata
 
 
 _SUPPLIER_KEYS = ("supplier", "lieferant", "contact_name", "contactName")
-_REFERENCE_KEYS = ("reference", "original_name", "voucher_number", "voucherNumber")
+_REFERENCE_KEYS = ("reference", "original_name", "voucher_number", "voucherNumber", "subject", "betreff", "filename")
 _LEGAL_SUFFIXES = ("", "gmbh", "ag", "kg", "gmbhcokg", "gmbhundcokg", "ohg", "ek", "eg")
 
 
@@ -55,6 +55,14 @@ _KNOWN = {
 }
 
 _BLOCK_RULES = (
+    ("payment_metadata", re.compile(
+        r"\b(?:ueberweisung[a-z0-9]*|doppel\s?zahlung[a-z0-9]*|ueber\s?zahlung[a-z0-9]*|"
+        r"sepa(?:lastschrift)?(?:mandat)?[0-9]*|lastschrift[a-z0-9]*|mandat(?:e|serteilung)?|mandatsreferenz|mandatsaenderung|"
+        r"einzugsermaechtigung[a-z0-9]*|abbuchung[a-z0-9]*|mahnung[a-z0-9]*|doppelbelastung[a-z0-9]*|"
+        r"zahlungs\s?(?:avis[a-z0-9]*|erinnerung[a-z0-9]*|bestaetigung[a-z0-9]*|abgleich|eingang|ausgang|verkehr|mitteilung|differenz|aufforderung)|"
+        r"kontoabstimmung|kontenabstimmung|saldenbestaetigung|rueckzahlung[a-z]*|rueckerstattung[a-z]*|"
+        r"remittance|payment\s+(?:advice|confirmation|reminder)|direct\s+debit)\b"),
+     "Zahlungsmitteilungen, Überweisungen und Lastschriftunterlagen sind vom Artikelimport ausgeschlossen."),
     ("banking", re.compile(r"\b(?:[a-z]*bank[a-z]*|sparkass[a-z]*|raiffeisen[a-z]*|commerzbank|postbank|hypovereinsbank|dkb|ing(?:\s*diba)?|banking|konto(?:auszug|fuehrung|gebuehr[a-z]*|stand|nummer)|kreditkarte|darlehen|zinsen|zahlungsdienstleister|paypal|klarna)\b"),
      "Bank-, Konto- und Zahlungsdaten sind vom Artikelimport ausgeschlossen."),
     ("insurance", re.compile(r"\b(?:[a-z]*versicherung[a-z]*|assekuranz|allianz|huk(?:\s*coburg)?|devk|debeka|axa|generali|signal\s*iduna|r\s*v)\b"),

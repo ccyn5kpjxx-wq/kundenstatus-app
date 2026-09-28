@@ -33,6 +33,17 @@ MAX_ATTACHMENTS = 20
 _FOLDER_BLOCK = re.compile(r'bank|konto|finanz|finance|buchhalt|buchfuehr|steuer|lohn|gehalt|payroll|personal|persoenlich|family|familie|bewerbung|medizin|medical|arzt|krank|privat|private|urlaub|reise|travel|versicherung|\b(?:bwa|fibu|tax|hr)\b', re.I)
 _INVOICE = re.compile(r'rechnung|invoice|faktura|(?:^|[\s_\-])re\d{4,}', re.I)
 _NON_PURCHASE = re.compile(r'gutschrift|credit\s*note|storno|retour|reklamation|refund|zahlungserinnerung|mahnung|zahlungsavis|kontoauszug', re.I)
+_PAYMENT_META = re.compile(r'\b(?:sepa[a-z]*|mandat[a-z]*|ueberweisung[a-z]*|doppelzahlung[a-z]*|doppelbuchung[a-z]*|zahlungs(?:avis|erinnerung|eingang|ausgang|bestaetigung|abgleich|aufforderung)[a-z]*|lastschrift[a-z]*|ruecklastschrift[a-z]*|konto[a-z]*|bank[a-z]*|iban|bic|saldo|mahnung[a-z]*)\b', re.I)
+
+
+def financial_metadata(*values):
+    return bool(_PAYMENT_META.search(' '.join(normalize_supplier(value) for value in values)))
+
+
+def financial_header(sender, name, subject):
+    # Observed TECH-MASTERS reminder series; do not generalize product codes.
+    return financial_metadata(sender, name, subject) or (
+        str(sender).lower().endswith('@tech-masters.de') and bool(re.search(r'\bM\d{2}-\d+\b', str(subject), re.I)))
 
 
 def now():
@@ -115,6 +126,7 @@ class MailSources:
     def start(self):
         account, _ = self.identity()
         with self.db() as db:
+            self._quarantine(db, account)
             previous = db.execute('SELECT * FROM assistent_mailquellen_laeufe WHERE account=?', (account,)).fetchone()
             if previous and previous['state'] in ('active', 'paused'):
                 db.execute("UPDATE assistent_mailquellen_laeufe SET state='active',last_error='' WHERE id=?", (previous['id'],))
@@ -185,6 +197,8 @@ class MailSources:
         name, sender = parseaddr(str(msg.get('From', '')))
         sender = address(sender)
         subject = text(msg.get('Subject', ''), 400)
+        if financial_header(sender, name, subject):
+            return '', '', '', 'excluded'
         rule = classify_invoice_source({'supplier': name or sender, 'reference': subject})
         sender_rule = classify_invoice_source({'supplier': sender})
         if rule['decision'] == 'block' or sender_rule['decision'] == 'block':
@@ -270,7 +284,7 @@ class MailSources:
             header['Subject'] = source['subject']
             sender, _, supplier, state = self._classify(db, run['account'], header, own_address)
             if state != 'queued' or sender != source['sender'] or supplier != source['supplier']:
-                db.execute("UPDATE assistent_mailquellen_nachrichten SET state='review',note=? WHERE id=?", ('Aktuelle Absenderzuordnung passt nicht mehr. Vor Inhaltszugriff prüfen.', source['id']))
+                db.execute("UPDATE assistent_mailquellen_nachrichten SET state=?,note=? WHERE id=?", ('excluded' if state == 'excluded' else 'review', 'Aktuelle Absenderzuordnung passt nicht mehr. Vor Inhaltszugriff prüfen.', source['id']))
                 return
         try:
             with self.mailbox.connect() as client:
@@ -291,7 +305,7 @@ class MailSources:
             for index, part in enumerate(attachments[:MAX_ATTACHMENTS]):
                 filename = text(part.get_filename() or 'Anhang', 180)
                 rule = classify_invoice_source({'supplier': supplier, 'reference': filename}, [supplier])
-                if not rule['allowed']:
+                if not rule['allowed'] or financial_metadata(filename):
                     results.append({'state': 'excluded', 'note': 'Kein zulässiger Materialbeleg.'})
                     continue
                 is_invoice = bool(_INVOICE.search(filename + ' ' + source['subject']))
@@ -313,6 +327,8 @@ class MailSources:
             db.execute('UPDATE assistent_mailquellen_nachrichten SET state=?,note=?,attachments_json=?,updated_at=? WHERE id=?', (state, note, json.dumps(results, ensure_ascii=False), now(), source['id']))
 
     def _stage(self, db, raw, filename, supplier):
+        if financial_metadata(filename) or not classify_invoice_source({'supplier': supplier, 'reference': filename}, [supplier])['allowed']:
+            raise ValueError('Quelle vom Materialimport ausgeschlossen.')
         if not raw or len(raw) > MAX_FILE:
             raise ValueError('Datei leer oder größer als 20 MB; separat prüfen.')
         if raw.startswith(b'%PDF-'):
@@ -330,19 +346,21 @@ class MailSources:
         if existing:
             if normalize_supplier(existing['supplier']) != normalize_supplier(supplier):
                 raise ValueError('Identische Datei ist einem anderen Lieferanten zugeordnet; prüfen.')
-            if not db.execute('SELECT id FROM einkauf_belege WHERE id=?', (existing['beleg_id'],)).fetchone():
-                raise ValueError('Bereits importierter Beleg wurde entfernt; keine automatische Neuanlage.')
+            if not db.execute("SELECT id FROM einkauf_belege WHERE id=? AND beleg_typ='rechnung'", (existing['beleg_id'],)).fetchone():
+                raise ValueError('Bereits importierter Beleg ist gesperrt oder entfernt; keine automatische Neuanlage.')
             self._restore_row(dict(existing))
             return {'state': 'duplicate', 'beleg_id': existing['beleg_id'], 'sha256': digest, 'name': existing['original_name']}
         name = (Path(secure_filename(filename)).stem or 'Lieferantenrechnung')[:120] + suffix
         stored = 'mailquelle-' + digest + suffix
         original = None
         # Recognise a byte-identical prior manual upload, without OCR or body logs.
-        for row in db.execute('SELECT id,lieferant,stored_name FROM einkauf_belege WHERE size=?', (len(raw),)).fetchall():
+        for row in db.execute('SELECT id,lieferant,stored_name,beleg_typ FROM einkauf_belege WHERE size=?', (len(raw),)).fetchall():
             candidate = Path(self.p.UPLOAD_DIR) / str(row['stored_name'])
             if candidate.resolve().parent != Path(self.p.UPLOAD_DIR).resolve() or not candidate.is_file():
                 continue
             if hashlib.sha256(candidate.read_bytes()).hexdigest() == digest:
+                if row['beleg_typ'] != 'rechnung':
+                    raise ValueError('Identische Datei ist kein freigegebener Rechnungsbeleg; prüfen.')
                 if normalize_supplier(row['lieferant']) != normalize_supplier(supplier):
                     raise ValueError('Datei bereits mit anderem Lieferanten gespeichert; prüfen.')
                 original = dict(row)
@@ -399,7 +417,7 @@ class MailSources:
             return False
         with self.db() as db:
             row = db.execute('''SELECT f.* FROM assistent_mailquellen_dateien f JOIN einkauf_belege b
-                ON b.id=f.beleg_id AND b.stored_name=f.stored_name WHERE f.stored_name=?''', (stored_name,)).fetchone()
+                ON b.id=f.beleg_id AND b.stored_name=f.stored_name WHERE f.stored_name=? AND b.beleg_typ='rechnung' ''', (stored_name,)).fetchone()
             if not row:
                 return False
             try:
@@ -417,7 +435,7 @@ class MailSources:
             row = db.execute("SELECT * FROM assistent_mailquellen_nachrichten WHERE id=? AND account=? AND state='review'", (message_id, account)).fetchone()
             if not row or not address(row['sender']):
                 raise ValueError('Eindeutiger Absender fehlt oder diese Quelle wurde bereits eingeordnet.')
-            if classify_invoice_source({'supplier': row['sender_name'] or row['sender'], 'reference': row['subject']})['decision'] == 'block':
+            if financial_header(row['sender'], row['sender_name'], row['subject']) or classify_invoice_source({'supplier': row['sender_name'] or row['sender'], 'reference': row['subject']})['decision'] == 'block':
                 raise ValueError('Diese Quelle bleibt vom Materialimport ausgeschlossen.')
             db.execute('''INSERT INTO assistent_mailquellen_absender(account,email,supplier,approved_at) VALUES(?,?,?,?)
                 ON CONFLICT(account,email) DO UPDATE SET supplier=excluded.supplier,approved_at=excluded.approved_at''', (account, row['sender'], supplier, now()))
@@ -440,28 +458,67 @@ class MailSources:
             db.execute("UPDATE assistent_mailquellen_laeufe SET state='paused',finished_at='' WHERE account=? AND state='done'", (account,))
             return self._status(db, account)
 
-    def _status(self, db, account):
+    def _quarantine(self, db, account):
+        """Revoke historical misclassification using metadata only, no blob reads."""
+        denied = set()
+        for row in db.execute("SELECT id,sender,sender_name,subject,attachments_json FROM assistent_mailquellen_nachrichten WHERE account=? AND state<>'excluded'", (account,)).fetchall():
+            try:
+                attachments = json.loads(row['attachments_json'] or '[]')
+            except (ValueError, TypeError):
+                attachments = []
+            attachments = attachments if isinstance(attachments, list) else []
+            blocked = financial_header(row['sender'], row['sender_name'], row['subject'])
+            changed = False
+            for item in attachments:
+                if not isinstance(item, dict):
+                    continue
+                if blocked or financial_metadata(item.get('name')):
+                    bid = item.get('beleg_id')
+                    if isinstance(bid, int) and not isinstance(bid, bool) and bid > 0:
+                        denied.add(bid)
+                    item['state'] = 'excluded'
+                    item['note'] = 'Quelle vom Materialimport ausgeschlossen.'
+                    changed = True
+            if blocked or changed:
+                db.execute("UPDATE assistent_mailquellen_nachrichten SET state=?,note=?,attachments_json=? WHERE id=?", ('excluded' if blocked else 'review_files', 'Quelle vom Materialimport ausgeschlossen.', json.dumps(attachments, ensure_ascii=False), row['id']))
+        for row in db.execute('SELECT beleg_id,original_name FROM assistent_mailquellen_dateien').fetchall():
+            if financial_metadata(row['original_name']):
+                denied.add(row['beleg_id'])
+        for bid in denied:
+            db.execute("UPDATE einkauf_belege SET beleg_typ='gesperrt' WHERE id=?", (bid,))
+            db.execute("UPDATE assistent_rechnungsartikel SET active=0 WHERE import_id IN (SELECT id FROM assistent_rechnungsimporte WHERE source_kind='einkauf' AND source_id=?)", (str(bid),))
+            db.execute("UPDATE assistent_rechnungsimporte SET state='ausgeschlossen',lease='',result_json=? WHERE source_kind='einkauf' AND source_id=?", (json.dumps({'hinweise':['Quelle vom Materialimport ausgeschlossen.'],'positionen':0}), str(bid)))
+
+    def _status(self, db, account, query=''):
+        query = text(query, 150)
         row = db.execute('SELECT * FROM assistent_mailquellen_laeufe WHERE account=?', (account,)).fetchone()
         if not row:
             return {'state': 'new', 'folders': [], 'counts': {}, 'unknown_senders': [], 'complete': False}
         run = dict(row)
         folders = [dict(r) for r in db.execute('SELECT id,label,state,total,cursor,missing,snapshot_at FROM assistent_mailquellen_ordner WHERE run_id=? ORDER BY id', (run['id'],)).fetchall()]
         counts = {r['state']: r['n'] for r in db.execute('SELECT state,COUNT(*) AS n FROM assistent_mailquellen_nachrichten WHERE account=? AND run_token=? GROUP BY state', (account, run['run_token'])).fetchall()}
-        unknown = [dict(r) for r in db.execute("SELECT MIN(id) AS id,sender,sender_name,COUNT(*) AS n FROM assistent_mailquellen_nachrichten WHERE account=? AND run_token=? AND state='review' GROUP BY sender,sender_name ORDER BY n DESC LIMIT 100", (account, run['run_token'])).fetchall()]
+        where, params = '', [account, run['run_token']]
+        if query:
+            pattern = '%' + query.lower().replace('!', '!!').replace('%', '!%').replace('_', '!_') + '%'
+            where = " AND (LOWER(sender) LIKE ? ESCAPE '!' OR LOWER(sender_name) LIKE ? ESCAPE '!' OR LOWER(subject) LIKE ? ESCAPE '!')"
+            params += [pattern, pattern, pattern]
+        unknown = [dict(r) for r in db.execute("SELECT MIN(id) AS id,sender,sender_name,COUNT(*) AS n FROM assistent_mailquellen_nachrichten WHERE account=? AND run_token=? AND state='review'" + where + " GROUP BY sender,sender_name ORDER BY n DESC,sender LIMIT 100", params).fetchall()]
+        quarantined = db.execute("SELECT COUNT(DISTINCT f.beleg_id) AS n FROM assistent_mailquellen_dateien f JOIN einkauf_belege b ON b.id=f.beleg_id WHERE b.beleg_typ='gesperrt'").fetchone()['n']
         sources = [dict(r) for r in db.execute("SELECT supplier,sender,subject,state,note,attachments_json FROM assistent_mailquellen_nachrichten WHERE account=? AND run_token=? AND supplier<>'' AND state IN ('files','other','review_files') ORDER BY id DESC LIMIT 50", (account, run['run_token'])).fetchall()]
         for source in sources:
             source['attachments'] = json.loads(source.pop('attachments_json'))
         headers_complete = all(f['state'] in ('done', 'excluded') and not f['missing'] for f in folders)
         return {'state': run['state'], 'started_at': run['started_at'], 'finished_at': run['finished_at'], 'busy': run['lease_until'] > time.time(),
-                'folders': folders, 'counts': counts, 'unknown_senders': unknown, 'sources': sources, 'error': run['last_error'],
+                'folders': folders, 'counts': counts, 'unknown_senders': unknown, 'query': query, 'quarantined_files': quarantined, 'sources': sources, 'error': run['last_error'],
                 'headers_complete': headers_complete,
                 'complete': run['state'] == 'done' and headers_complete and not any(counts.get(key) for key in ('queued', 'review', 'review_files', 'other')),
                 'hint': 'Ordner- und Headerstand zur angegebenen Erfassung. Nur Rechnungsanhänge werden übernommen; Mailtexte, Datenblätter und sonstige Anhänge sind noch nicht vollständig ausgewertet. Ausgeschlossene Ordner wurden nicht geöffnet.'}
 
-    def status(self):
+    def status(self, query=''):
         account, _ = self.identity()
         with self.db() as db:
-            return self._status(db, account)
+            self._quarantine(db, account)
+            return self._status(db, account, query)
 
 
 def register_mail_sources(portal):
@@ -484,12 +541,12 @@ def register_mail_sources(portal):
     @bp.get('')
     @portal.admin_required
     def index():
-        return render_template('assistent_mailquellen.html', report=service.status())
+        return render_template('assistent_mailquellen.html', report=service.status(request.args.get('q', '')))
 
     @bp.get('/status')
     @portal.admin_required
     def status_route():
-        return jsonify(service.status())
+        return jsonify(service.status(request.args.get('q', '')))
 
     @bp.post('/start')
     @portal.admin_required

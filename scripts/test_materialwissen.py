@@ -15,7 +15,7 @@ from werkstatt_cockpit_api import CockpitData, _invoice_product
 from werkstatt_artikel_import import InvoiceCatalog
 from werkstatt_topcolor_positionen import parse_topcolor_pages
 from werkstatt_rechnungsquelle import _candidate
-from test_artikel_import import FakePortal
+from test_artikel_import import FakePortal, prepare_catalog
 from test_topcolor_positionen import page, product
 
 
@@ -29,6 +29,23 @@ def tape(number='T-30', width='30 mm', color='grün', supplier='Top-Color GmbH',
 
 
 class SearchTests(unittest.TestCase):
+    def test_live_wording_and_concatenated_trade_name_match_without_fabricated_pack(self):
+        row=tape(number='10000991')
+        row.update(produkt_name='Mipa593250500 MP TapeHydroGreen50mRolle x30mm',groesse='',farbe='',ve='Stück',gebinde='')
+        questions=('Welche Abklebebänder haben wir gekauft?',
+                   'Nur Auskunft, keine Bestellung: Welche Abklebebänder haben wir bisher gekauft, und welche Breiten und Verpackungseinheiten sind belegt?',
+                   'grünes Abklebeband 30 mm')
+        for question in questions:
+            with self.subTest(question=question):
+                variants=build_variants([row],question)
+                self.assertEqual(len(variants),1)
+                self.assertEqual(variants[0]['artikelnummer'],'10000991')
+                self.assertEqual(variants[0]['produkt_name'],row['produkt_name'])
+                self.assertIn('30 mm',variants[0]['groesse'])
+                self.assertIsNone(variants[0]['packinhalt'])
+                self.assertEqual(variants[0]['farbe'],'')
+                self.assertFalse(variants[0]['bestellbar'])
+
     def test_synonyms_reordered_tokens_and_natural_request(self):
         rows = [tape(), tape('T-50', '50 mm'), tape('BLUE', color='blau')]
         for query in ('Anklebeband grün 30mm', '30 mm grün Abklebeband', 'Ich möchte bitte grünes Klebeband 30 mm bestellen'):
@@ -131,7 +148,7 @@ class PipelineTests(unittest.TestCase):
                 letzter_preis TEXT DEFAULT '',letzter_preis_datum TEXT DEFAULT '',preisquelle TEXT DEFAULT '',quelle_beleg_id INTEGER)''')
 
     def prepare(self, sources):
-        self.catalog.prepare({'einkaufsbelege': [{'id': sid, 'lieferant': supplier, 'original_name': 'synthetic.pdf'}
+        prepare_catalog(self.catalog, {'einkaufsbelege': [{'id': sid, 'lieferant': supplier, 'original_name': 'synthetic.pdf'}
                                                for sid,supplier in sources], 'lieferantenrechnungen': []})
 
     def test_topcolor_columns_through_reader_catalog_api_grouping(self):
@@ -175,6 +192,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.service.material_context()['varianten'],[])
 
     def test_saved_article_after_many_blocked_rows_still_searchable(self):
+        self.prepare([(1,'Top-Color GmbH')])
         with self.db() as db:
             db.execute("INSERT INTO einkauf_artikel(id,lieferant,artikelnummer,produkt_name,quelle_beleg_id) VALUES(1,'Top-Color GmbH','T-30','Klebeband grün 30 mm',1)")
             for number in range(2, 72):
@@ -194,6 +212,7 @@ class PipelineTests(unittest.TestCase):
         self.assertFalse(item['quantity_evidence']['verified'])
 
     def test_context_and_article_variant_limits_are_explicit(self):
+        self.prepare([(1,'Top-Color GmbH')])
         with self.db() as db:
             for number in range(1,34):
                 db.execute("INSERT INTO einkauf_artikel(id,lieferant,artikelnummer,produkt_name,quelle_beleg_id) VALUES(?,'Top-Color GmbH',?,'Klebeband grün 30 mm',1)",(number,'T-'+str(number)))
@@ -204,6 +223,21 @@ class PipelineTests(unittest.TestCase):
         found=self.service.articles('Abklebeband')
         self.assertEqual(len(found['varianten']),30)
         self.assertTrue(found['varianten_gekuerzt'])
+
+    def test_quarantined_original_hides_legacy_article_immediately_but_manual_stays(self):
+        self.prepare([(1,'Top-Color GmbH')])
+        with self.db() as db:
+            for identifier,sku,source_id in ((1,'LINKED',1),(2,'MANUAL',None),(3,'MISSING-ORIGINAL',999),(4,'MANUAL-DEFAULT',0)):
+                db.execute("INSERT INTO einkauf_artikel(id,lieferant,artikelnummer,produkt_name,quelle_beleg_id) VALUES(?,'Top-Color GmbH',?,'Klebeband grün 30 mm',?)",(identifier,sku,source_id))
+        before=self.service.articles('Abklebeband')
+        self.assertCountEqual([x['artikelnummer'] for x in before['artikel']],['LINKED','MANUAL','MANUAL-DEFAULT'])
+        with self.db() as db:db.execute("UPDATE einkauf_belege SET beleg_typ='gesperrt' WHERE id=1")
+        after=self.service.articles('Abklebeband')
+        self.assertCountEqual([x['artikelnummer'] for x in after['artikel']],['MANUAL','MANUAL-DEFAULT'])
+        compact=self.service.material_context('Abklebeband')
+        self.assertCountEqual([x['artikelnummer'] for x in compact['varianten']],['MANUAL','MANUAL-DEFAULT'])
+        self.assertNotIn('LINKED',json.dumps(compact))
+        self.assertNotIn('MISSING-ORIGINAL',json.dumps(compact))
 
 
 if __name__=='__main__':unittest.main()

@@ -216,8 +216,12 @@ class CockpitData:
         except (ValueError,TypeError):allowed=[]
         def permitted(row):return classify_invoice_source(row,allowed_suppliers=allowed)['allowed']
         while len(articles)<=limit:
-            clause=' WHERE id<?' if before is not None else ''
-            rows=self.rows('SELECT id,lieferant,artikelnummer,produkt_name,produkt_beschreibung,ve,gebinde,letzter_preis,letzter_preis_datum,preisquelle,quelle_beleg_id FROM einkauf_artikel'+clause+' ORDER BY id DESC LIMIT 500',(before,) if before is not None else ())
+            # A quarantined/deleted original must also hide legacy catalog
+            # records. Apply this metadata guard in SQL before reading products;
+            # genuinely manual articles without an original remain available.
+            clause=" WHERE (a.quelle_beleg_id IS NULL OR a.quelle_beleg_id=0 OR b.beleg_typ='rechnung')"
+            if before is not None:clause+=' AND a.id<?'
+            rows=self.rows('SELECT a.id,a.lieferant,a.artikelnummer,a.produkt_name,a.produkt_beschreibung,a.ve,a.gebinde,a.letzter_preis,a.letzter_preis_datum,a.preisquelle,a.quelle_beleg_id FROM einkauf_artikel a LEFT JOIN einkauf_belege b ON b.id=a.quelle_beleg_id'+clause+' ORDER BY a.id DESC LIMIT 500',(before,) if before is not None else ())
             if not rows:break
             scanned+=len(rows)
             for row in rows:
@@ -255,6 +259,7 @@ class CockpitData:
                   if key in ('quellen_gesamt','freigegebene_quellen','ungeklaerte_quellen','offene_auslese','auslese_zu_pruefen','positionen') and type(value) is int and value>=0}
         coverage.update(gespeicherte_artikel=len(articles),sichtbare_positionen=len(proposals),
                         begrenzt=truncated or snapshot.get('truncated') is True,
+                        positionen_begrenzt=snapshot.get('coverage',{}).get('positionen_begrenzt') is True,
                         vollstaendigkeit_bestaetigt=False)
         return articles,proposals,coverage
 
@@ -267,6 +272,7 @@ class CockpitData:
                 'varianten':variants[:30], 'varianten_gekuerzt':len(variants)>30,'abdeckung':coverage,
                 'positionen_gekuerzt':len(matched_articles)>30 or len(matched_proposals)>30,
                 'suchhinweise':query_notes(query),
+                'suchstatus':'treffer' if variants else 'keine_treffer_fuer_diesen_suchtext',
                 'hinweis':'Historische Rechnungsartikel und ungeprüfte Varianten. Mengen sind Vorschläge, kein Verbrauch und keine Bestellfreigabe. Fehlenden Packinhalt nicht aus Rechnungsmenge oder VE ableiten. Maße mit Einheit nennen; mm und cm nicht vertauschen. Keine aktuelle Preis-/Verfügbarkeitszusage und keine Vollständigkeitsbehauptung.'}
 
     def material_context(self, query='', limit=12):
@@ -291,6 +297,7 @@ class CockpitData:
         return {'varianten':compact,'lieferanten':[{'name':name,'sichtbare_positionen':count} for name,count in sorted(suppliers.items())[:50]],
                 'abdeckung':coverage,'varianten_gekuerzt':len(variants)>limit,'pruefen':True,'bestellbar':False,
                 'suchhinweise':query_notes(query),
+                'suchstatus':'treffer' if variants else 'keine_treffer_fuer_diesen_suchtext',
                 'hinweis':'Nur gespeicherte Produktbelege. Ungeprüfte Auslese, keine vollständige Artikelkenntnis. Maße immer mit Einheit nennen. Häufigste belegte Menge nur vorschlagen; Packinhalt muss ausdrücklich belegt sein. Vorlesen oder Ja zur Variante gibt keine Bestellung frei.'}
 
     def invoice_sources(self, include_held=False):

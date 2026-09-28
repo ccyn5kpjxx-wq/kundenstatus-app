@@ -39,16 +39,21 @@ def material_query(text, history=()):
     or color must never contradict the employee's new selection.
     """
     marker = re.compile(r"abkleb|ankleb|klebeband|klebebänder|tape|bestell|nachbestell|lieferant|artikel|material|verpackung|gebinde|karton|\bve\b|schleif|handschuh|politur|verdünn|silikonentferner", re.I)
-    product = re.compile(r"\b(?:abkleb\w*|ankleb\w*|klebeb\w*|tape|hydrogreen|schleif(?:papier|blatt|blätter|scheibe|mittel)\w*|handschuh\w*|politur\w*|verdünn\w*|silikonentferner)\b", re.I)
-    if product.search(text):
-        return text[:150]
+    product = re.compile(r"\b(?:abkleb\w*|ankleb\w*|klebeb\w*|abdeckband|maskierband|lackierband|tape(?:hydrogreen)?|hydrogreen|schleif(?:papier|blatt|blätter|scheibe|mittel)\w*|handschuh\w*|politur\w*|verdünn\w*|silikonentferner)\b", re.I)
     # Work/status questions should not carry a material index merely because
     # the employee discussed purchases earlier in the same conversation.
-    if re.search(r"\b(?:auftrag|fahrzeug|kennzeichen|status|termin|abholen|fertig|lackieren)\b", text, re.I) and not re.search(r"bestell|material|artikel", text, re.I):
+    if re.search(r"\b(?:auftrag|fahrzeug|kennzeichen|status|termin|abholen|fertig|lackieren)\b", text, re.I) and not product.search(text) and not re.search(r"bestell|material|artikel", text, re.I):
         return None
     colors = r"(?:grün|gruen|blau|rot|gelb|weiß|weiss|schwarz|grau|orange|violett|transparent|braun)(?:e|en|er|es|em)?"
     size_words = r"(?:zwanzig|dreißig|dreissig|vierzig|fünfzig|fuenfzig|sechzig|siebzig|achtzig|neunzig|hundert)(?:er|e|en|es)?"
     selection = re.compile(r"\b(?:\d+(?:[.,]\d+)?\s*(?:mm|cm|m|millimeter|zentimeter|meter)|\d{1,3}er|"+size_words+r"|"+colors+r")\b", re.I)
+    words = list(dict.fromkeys(match.group() for match in product.finditer(text)))
+    if words:
+        # Grammar and intent ("nur Auskunft, keine Bestellung", "bisher
+        # gekauft") are not product attributes required on every invoice row.
+        qualifiers = [match.group() for match in selection.finditer(text)]
+        suppliers = re.findall(r"\b(?:top[ -]?colou?r|car[ -]?parts|tech[ -]?masters)\b", text, re.I)
+        return " ".join(words + qualifiers + suppliers)[:150]
     short = len(text) <= 100
     follows = short and (selection.search(text) or re.search(r"\b(?:breit|rollen?|kartons?|pack|gebinde|davon|dieses|diese|das|die)\b", text, re.I) or re.fullmatch(r"\d{1,3}", text.strip()))
     if follows:
@@ -997,6 +1002,7 @@ def register_assistant(p):
             "zeige fehlende oder unsichere Auslese. Für Produktidentifikation das vorgeladene materialwissen nutzen; "
             "wenn dort passende Varianten fehlen oder die Liste gekürzt ist, sofort artikel_suchen mit dem Produktnamen nutzen, ohne den Nutzer erst nach Lieferant oder Artikelnummer zu fragen. "
             "Materialwissen ist ein begrenzter belegter Ausschnitt, kein Wissen über sämtliche E-Mails oder den gesamten Betrieb. Die abdeckung benennt Lücken. "
+            "Keine Treffer für einen Suchtext bedeuten nicht, dass keine Rechnungsdaten existieren. Suche zunächst vereinfacht nach der Produktfamilie; nenne danach nur eine erfolglose Suche, keine unbelegte Vollständigkeitsbehauptung. "
             "Bei Klebeband/Abklebeband zuerst die tatsächlich gefundenen Breiten und Farben knapp zur Auswahl nennen und nur das nächste fehlende Merkmal erfragen. Keine Beispielgrößen erfinden. "
             "Betriebliche Vorgabe des Inhabers: Abklebeband normalerweise als einen Karton vorschlagen; dies ist eine Mengenpräferenz, kein Nachweis für dessen Inhalt. "
             "Rechnungsmenge, Bestelleinheit und Packinhalt sind verschieden: ein Karton kann viele Rollen enthalten; niemals Rollenanzahl als Kartonanzahl einsetzen. "
