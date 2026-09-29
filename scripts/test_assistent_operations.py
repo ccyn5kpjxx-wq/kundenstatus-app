@@ -91,7 +91,7 @@ class AssistantOperationTests(unittest.TestCase):
         self.assertTrue(p.app.config['ASSISTANT_READ_ONLY'])
         with patch('werkstatt_assistent.render_template', return_value='page') as render:
             self.assertEqual(self.client.get('/werkstatt/assistent').status_code, 200)
-            self.assertEqual(render.call_args.kwargs['capabilities'], {'status': True, 'auftrag': True, 'angebote': True, 'bestellen': True})
+            self.assertEqual(render.call_args.kwargs['capabilities'], {'status': True, 'auftrag': True, 'angebote': True, 'bestellen': True, 'personal': True, 'materialfoto': True})
             self.assertTrue(render.call_args.kwargs['read_only'])
         for client in (self.client, self.legacy.make_client(admin=True)):
             for kind in ('notiz', 'einkauf', 'anfrage'):
@@ -239,8 +239,10 @@ class AssistantOperationTests(unittest.TestCase):
     def test_order_spoken_readback_names_costs_and_expiry_prevents_approval(self):
         action = self.purchase_proposal().json
         challenge = self.post('/vorlesen/' + action['id']).json
-        for expected in ('Werkstattmaterial', 'orders@example.invalid', '50 mm', '25.00 Euro', 'Preisquelle'):
+        for expected in ('Werkstattmaterial', 'orders@example.invalid', 'Grünes Klebeband', '50 mm', '25.00 Euro', 'Versand 5.00 Euro', 'weitere Kosten 0.00 Euro'):
             self.assertIn(expected, challenge['text'])
+        self.assertNotIn('Artikelnummer', challenge['text'])
+        self.assertTrue(action['daten']['preisquelle'], 'Price evidence remains in the review, without reading long source identifiers aloud')
         with self.client.session_transaction() as session:
             expired = dict(session['assistent_bestaetigung'])
             expired['expires'] = 0

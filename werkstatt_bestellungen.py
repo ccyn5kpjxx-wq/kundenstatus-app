@@ -36,6 +36,7 @@ from flask import Blueprint, abort, flash, g, has_request_context, redirect, ren
 from werkstatt_artikel_identity import parse_unit_price
 from werkstatt_bestellausgang import build_order_dispatch
 from werkstatt_bestellplan import BERLIN
+from werkstatt_bestelluebersicht import OrderOverview
 
 
 def _now():
@@ -410,6 +411,11 @@ def register_orders(portal):
     manager = OrderManagement(portal)
     bp = Blueprint('werkstatt_orders', __name__, url_prefix='/admin/assistent-bestellungen')
 
+    @bp.after_request
+    def private_order_response(response):
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+
     @bp.before_request
     def require_admin_and_csrf():
         if not session.get('admin'):
@@ -432,11 +438,9 @@ def register_orders(portal):
             request_id = str(uuid.uuid4())
             pending[request_id] = True
             session['assistant_order_requests'] = dict(list(pending.items())[-20:])
-        orders = manager.dispatch.list_orders()
-        for order in orders:
-            order['due_label'] = datetime.fromisoformat(order['due_at']).astimezone(BERLIN).strftime('%d.%m.%Y %H:%M')
+        overview = OrderOverview(portal.get_db).page(request.args)
         return render_template('assistent_bestellungen.html', contacts=manager.contacts(), availability=manager.availability(),
-                               orders=orders, cap_cents=manager.cap(), csrf=csrf, request_id=request_id,
+                               overview=overview, cap_cents=manager.cap(), csrf=csrf, request_id=request_id,
                                errors=errors or [], form=form), code
 
     @bp.get('')

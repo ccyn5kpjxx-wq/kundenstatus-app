@@ -25,6 +25,10 @@ from flask import Blueprint, abort, jsonify, render_template, request, session, 
 from werkzeug.security import check_password_hash, generate_password_hash
 from PIL import Image, UnidentifiedImageError
 from werkstatt_assistent_workflow import Workflow, KINDS as WORKFLOW_KINDS, MAIL_KINDS, PROPOSAL_TOOLS, READ_TOOLS as WORKFLOW_READ_TOOLS, TOOLS as WORKFLOW_TOOLS, RULES as WORKFLOW_RULES
+from werkstatt_personal_assistent import PersonalActions, KINDS as PERSONAL_KINDS, READ_TOOLS as PERSONAL_READ_TOOLS, PROPOSAL_TOOLS as PERSONAL_PROPOSAL_TOOLS, TOOLS as PERSONAL_TOOLS, RULES as PERSONAL_RULES
+from werkstatt_arbeitszeit import TimeTracking, register_time_views
+from werkstatt_mitarbeiter_selfservice import register_selfservice
+from werkstatt_materialfoto import MaterialPhotoService
 
 VOICES = ("alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
 STYLES = {"ruhig": "ruhig und sachlich", "kollegial": "freundlich und kollegial", "knapp": "sehr knapp und direkt"}
@@ -135,9 +139,13 @@ def register_assistant(p):
         return {"status": bool(enabled and who["dokumentieren"]),
                 "auftrag": bool(enabled and who["dokumentieren"]),
                 "angebote": bool(enabled and who["einkaufen"]),
-                "bestellen": bool(enabled and who["einkaufen"] and order_limit(who) > 0)}
+                "bestellen": bool(enabled and who["einkaufen"] and order_limit(who) > 0),
+                "personal": bool(p.app.config["ASSISTANT_NATIVE_COCKPIT"] and who and who.get('mitarbeiter_id') and who['lesen']),
+                "materialfoto": bool(p.app.config["ASSISTANT_NATIVE_COCKPIT"] and who and who['lesen'] and who['einkaufen'])}
 
     def action_allowed(who, kind):
+        if kind in PERSONAL_KINDS:
+            return capabilities(who)['personal']
         if kind in WORKFLOW_KINDS:
             return capabilities(who)["angebote" if kind in MAIL_KINDS else "auftrag"]
         if kind in {"status", "bestellung"}:
@@ -188,7 +196,7 @@ def register_assistant(p):
         if not mid or (not p.app.config["ASSISTANT_NATIVE_COCKPIT"] and not p.werkstatt_tafel_session_ok()):
             return None
         with db_scope() as db:
-            row = db.execute("SELECT r.*, m.aktiv FROM assistent_rechte r JOIN mitarbeiter m ON m.id=r.mitarbeiter_id WHERE r.mitarbeiter_id=?", (mid,)).fetchone()
+            row = db.execute("SELECT r.*, m.aktiv, m.name AS mitarbeiter_name FROM assistent_rechte r JOIN mitarbeiter m ON m.id=r.mitarbeiter_id WHERE r.mitarbeiter_id=?", (mid,)).fetchone()
         if not row or not row["aktiv"] or row["version"] != session.get("assistent_version"):
             return None
         return {**dict(row), "actor": f"mitarbeiter:{mid}"}
@@ -211,6 +219,19 @@ def register_assistant(p):
                 if operations_enabled():
                     allowed |= {"propose", "readback", "voice_confirm", "confirm", "repeat_order"}
                     allowed |= {"workflow_uploads", "workflow_analysis", "workflow_original", "workflow_suppliers", "workflow_offers"}
+                if capabilities(who)['personal']:
+                    allowed |= {"propose", "readback", "voice_confirm", "confirm", "personal_time", "vacation_page", "vacation_summary", "vacation_apply", "vacation_withdraw"}
+                if capabilities(who)['materialfoto']:
+                    allowed |= {'material_photos', 'material_photo', 'material_analyze', 'material_select'}
+                if not operations_enabled() and fn.__name__ in {'propose', 'readback', 'voice_confirm', 'confirm'}:
+                    kind = (request.get_json(silent=True) or {}).get('art') if fn.__name__ == 'propose' else None
+                    if fn.__name__ != 'propose':
+                        action_id = kwargs.get('action_id') or (session.get('assistent_bestaetigung') or {}).get('id')
+                        with db_scope() as db:
+                            action = db.execute('SELECT art FROM assistent_aktionen WHERE id=? AND actor=?', (action_id, who['actor'])).fetchone()
+                        kind = action['art'] if action else None
+                    if not isinstance(kind,str) or kind not in PERSONAL_KINDS or not capabilities(who)['personal']:
+                        return jsonify(error='Auftragsänderungen und Bestellungen sind schreibgeschützt.'), 403
                 if fn.__name__ not in allowed:
                     return jsonify(error="Der Avatar ist schreibgeschützt. Auftragsänderungen, Fotos und Bestellungen sind hier gesperrt."), 403
             return fn(who, *args, **kwargs)
@@ -250,6 +271,12 @@ def register_assistant(p):
         return result
 
     def proposal(who, args):
+        if not isinstance(args,dict) or not isinstance(args.get('art'),str):
+            raise ValueError('Eine gültige Aktionsart ist erforderlich.')
+        if args.get('art') in PERSONAL_KINDS:
+            if not capabilities(who)['personal']:
+                raise ValueError('Bitte mit deinem persönlichen Mitarbeiterzugang anmelden.')
+            return action_view(personal.propose(who,args))
         if args.get("art") in WORKFLOW_KINDS:
             return action_view(workflow.proposal(who, args))
         if args.get("art") in {"status", "bestellung"}:
@@ -503,7 +530,10 @@ def register_assistant(p):
         phrase = f"Auftrag {row['auftrag_id']} bestätigen"
         text = (f"Bitte prüfen: Auftrag {row['auftrag_id']}, Kennzeichen {context.get('kennzeichen') or 'nicht hinterlegt'}. "
                 if row['auftrag_id'] else "Bitte prüfen: Bestellung für Werkstattmaterial. " if row['art'] == 'bestellung' else "Bitte prüfen: ")
-        if row["art"] in WORKFLOW_KINDS:
+        if row['art'] in PERSONAL_KINDS:
+            phrase='Urlaub beantragen' if row['art']=='urlaub' else 'Zeitstempel bestätigen'
+            text+=payload['text']+' '
+        elif row["art"] in WORKFLOW_KINDS:
             if row["art"] in MAIL_KINDS:
                 if payload.get("missing_fields"):
                     raise ValueError("Mail noch unvollständig. Fehlende Angaben ergänzen und neue Vorschau vorbereiten.")
@@ -522,10 +552,10 @@ def register_assistant(p):
             shipping = payload["versand"]
             timing = "Dringend: sofort versenden." if shipping["urgent"] else "Je Lieferant gesammelt am nächsten Montag um zwölf Uhr versenden."
             text += (f"Verbindliche Bestellung bei {payload['lieferant']} an {shipping['recipient']}: "
-                     f"{payload['menge']} {payload['einheit']} {payload['bezeichnung']}, Variante {payload['variante']}, Artikelnummer {payload['teilenummer']}. "
+                     f"{payload['menge']} {payload['einheit']} {payload['bezeichnung']}, Variante {payload['variante']}. "
                      f"Bruttopreis pro Einheit {payload['stueckpreis_brutto_cent']/100:.2f} Euro, Versand {payload['versand_brutto_cent']/100:.2f} Euro, "
                      f"weitere Kosten {payload['nebenkosten_brutto_cent']/100:.2f} Euro. Verbindlicher Gesamthöchstbetrag {payload['gesamt_cent']/100:.2f} Euro brutto. "
-                     f"Preisquelle: {payload['preisquelle']}. Bestätige diese Kosten ausdrücklich. {timing} ")
+                     f"Bestätige diese Kosten ausdrücklich. {timing} ")
         elif row["art"] == "notiz":
             text += f"Interne Notiz: {payload['text']}. "
         elif row["art"] == "einkauf":
@@ -618,7 +648,7 @@ def register_assistant(p):
     @bp.get("/aktionen")
     @protected
     def actions(who):
-        if read_only() and not operations_enabled():
+        if read_only() and not operations_enabled() and not capabilities(who)['personal']:
             return jsonify([])
         with db_scope() as db:
             rows = db.execute("SELECT * FROM assistent_aktionen WHERE actor=? ORDER BY erstellt_am DESC LIMIT 30", (who["actor"],)).fetchall()
@@ -668,6 +698,8 @@ def register_assistant(p):
             abort(403)
         if item["art"] in {"status", "bestellung"}:
             return confirm_operation(who, item)
+        if item['art'] in PERSONAL_KINDS:
+            return jsonify(personal.confirm(who,item))
         if item["art"] in WORKFLOW_KINDS:
             return jsonify(workflow.confirm(who, item))
         with db_scope() as db:
@@ -868,7 +900,13 @@ def register_assistant(p):
         allowed = set(read_names) if read_only() else {tool["name"] for tool in tools}
         allowed -= {"status_vorschlagen", "bestellung_vorschlagen", "lieferanten_lesen"} | {tool["name"] for tool in WORKFLOW_TOOLS}
         allowed |= workflow.available_names(who)
+        allowed -= {tool['name'] for tool in PERSONAL_TOOLS}
+        allowed -= {'materialfoto_anfordern','materialfoto_lesen'}
         caps = capabilities(who)
+        if caps['materialfoto']:
+            allowed |= {'materialfoto_anfordern','materialfoto_lesen'}
+        if caps['personal']:
+            allowed |= {tool['name'] for tool in PERSONAL_TOOLS}
         if caps["status"]:
             allowed.add("status_vorschlagen")
         if caps["bestellen"]:
@@ -958,6 +996,8 @@ def register_assistant(p):
                 # A material index outage must not prevent the employee reading jobs.
                 p.app.logger.warning("Assistent: Materialwissen vorübergehend nicht verfügbar.")
                 context["materialwissen"] = {"verfuegbar": False, "hinweis": "Materialwissen konnte nicht vorgeladen werden; gezielte Artikelsuche erforderlich."}
+        if capabilities(who)['materialfoto']:
+            context['materialfoto_auswahl'] = material_photos_service.context(who)
         return context
 
     def realtime_instructions(who, context, preferences=None):
@@ -973,10 +1013,13 @@ def register_assistant(p):
             f"Persönlicher Höchstbetrag ist {order_limit(who)/100:.2f} Euro brutto. Die Sammelgrenze gilt zusätzlich je Lieferant für die gesamte Montagsmail. Nicht aufteilen, um Grenzen zu umgehen. "
             "Nach Bestätigung: dringend sofort, sonst Montag zwölf Uhr gesammelt. Ein Vorschlag ist noch keine ausgeführte Änderung oder versandte Bestellung. "
             + WORKFLOW_RULES
-        ) if any(caps.values()) else (
-            "Diese Avatar-Ansicht ist schreibgeschützt: nur Auskünfte geben. Keine Notizen, Fotos, Vorschläge, Bestellungen, Mails oder Fortschritte speichern. Bei einem Änderungs- oder Bestellwunsch ausdrücklich sagen, dass dies hier noch nicht ausgeführt werden kann. " if read_only() else "")
+        ) if any(caps[key] for key in ('status', 'auftrag', 'angebote', 'bestellen')) else (
+            "Aufträge und Bestellungen sind schreibgeschützt. Keine Auftragsnotizen, Fahrzeugfotos, Bestellungen, Mails oder Fortschritte speichern. Eigene Mitarbeiterfunktionen und private Materialfotoauswahl sind davon getrennt und nur mit den dafür angebotenen Werkzeugen erlaubt. " if read_only() else "")
         return (
-            operation_rules +
+            operation_rules + PERSONAL_RULES +
+            "Bei einem Produktfoto materialfoto_anfordern verwenden; für Fahrzeugpapiere oder Schadenbilder dagegen bild_anfordern. "
+            "Eine materialfoto_auswahl enthält nur den zuletzt bewusst ausgewählten Artikel und ungeprüfte Belegmerkmale. Sie ist kein Bestellauftrag und keine Preis-, Mengen- oder Dringlichkeitsbestätigung. "
+            "Bei Bezug auf dieses Foto materialfoto_lesen nutzen und direkt mit dem kurzen Artikelnamen sowie der nächsten fehlenden Angabe fortfahren. Bei anderem Produktwunsch die alte Fotoauswahl nicht übernehmen. "
             "Du bist der KI-Werkstattassistent. Sprich deutsch, knapp, normalerweise ein bis zwei Sätze. "
             "Beantworte konkrete Fragen sofort aus dem beigefügten Aktenstand, ohne Vorrede oder unnötige Rückfrage. "
             "Bei einer konkreten Arbeitsfrage nenne direkt die hinterlegten Arbeiten. "
@@ -1010,6 +1053,7 @@ def register_assistant(p):
             "Fehlende Angaben betreffen nur das jeweilige Feld: eine unbestätigte Farbe entwertet keine vorhandene Breite oder Packmenge. Bei farbabgleich.basis produktname_alias passende Treffer trotzdem nennen, etwa Passend dazu finde ich HydroGreen, danach deren belegte Breiten und Packmengen. Nur die Farbzuordnung kurz als unbestätigt kennzeichnen; niemals deshalb fehlende Artikel-, Breiten- oder Verpackungsdaten behaupten. "
             "Bei einer reinen Auskunft keine Bestellfrage anhängen. Bei vielen Treffern eine klar als Auswahl bezeichnete kompakte Übersicht geben; ausdrücklich gewünschte vollständige Details nicht als vollständig ausgeben, wenn sie gekürzt sind. "
             "Bei Klebeband/Abklebeband zuerst die tatsächlich gefundenen Breiten und Farben knapp nennen; bei einem Auswahl- oder Bestellwunsch nur das nächste fehlende Merkmal erfragen. Keine Beispielgrößen erfinden. "
+            "Bei Artikelwahl nur kurzer Produktname, nötige Größe/Farbe und anschließend Menge: etwa Meinst du HydroGreen in 50 Millimeter? Artikelnummern nur auf Nachfrage vorlesen; intern bleibt die genaue Nummer Pflicht. Ein Ja zur Artikelauswahl ist keine verbindliche Bestellung. Nach Menge und Dringlichkeit folgt eine getrennte, konkrete Bestellbestätigung einschließlich Bruttokosten. "
             "Betriebliche Vorgabe des Inhabers: Abklebeband normalerweise als einen Karton vorschlagen; dies ist eine Mengenpräferenz, kein Nachweis für dessen Inhalt. "
             "Rechnungsmenge, Bestelleinheit und Packinhalt sind verschieden: ein Karton kann viele Rollen enthalten; niemals Rollenanzahl als Kartonanzahl einsetzen. "
             "Nur belegten Packinhalt nennen. Fehlender Packinhalt bleibt unbekannt. Historische uebliche_menge nur als Vorschlag anbieten, einzelne Rechnungsmenge nur als letzte belegte Menge. "
@@ -1086,6 +1130,17 @@ def register_assistant(p):
             return jsonify(result=read_tool(who, name, args))
         if name in WORKFLOW_READ_TOOLS:
             return jsonify(result=workflow.read(who, name, args))
+        if name in PERSONAL_READ_TOOLS:
+            return jsonify(result=personal.read(who,name,args))
+        if name in PERSONAL_PROPOSAL_TOOLS:
+            result=proposal(who,dict(args,art=PERSONAL_PROPOSAL_TOOLS[name]))
+            return jsonify(result={'status':'Eigener Vorschlag vorbereitet. Noch nicht eingereicht oder gestempelt.'},event={'type':'vorschlag','data':result})
+        if name in {'materialfoto_anfordern', 'materialfoto_lesen'}:
+            if args:
+                raise ValueError('Das Materialfoto gehört ausschließlich zum angemeldeten Zugang.')
+            if name == 'materialfoto_lesen':
+                return jsonify(result={'auswahl':material_photos_service.context(who)})
+            return jsonify(result={'status':'Artikel fotografieren antippen und Produktetikett auswählen. Noch keine Bestellung.'},event={'type':'materialfoto'})
         if name == "bild_anfordern":
             order_id = tool_integer(args.get("auftrag_id", 0), "Auftragsnummer", minimum=0)
             context = order_context(order_id) if order_id else None
@@ -1165,6 +1220,19 @@ def register_assistant(p):
                         outcome = read_tool(who, call["name"], args)
                     elif call["name"] in WORKFLOW_READ_TOOLS:
                         outcome = workflow.read(who, call["name"], args)
+                    elif call['name'] in PERSONAL_READ_TOOLS:
+                        outcome=personal.read(who,call['name'],args)
+                    elif call['name'] in PERSONAL_PROPOSAL_TOOLS:
+                        outcome=proposal(who,dict(args,art=PERSONAL_PROPOSAL_TOOLS[call['name']]))
+                        events.append({'type':'vorschlag','data':outcome})
+                    elif call['name'] in {'materialfoto_anfordern', 'materialfoto_lesen'}:
+                        if args:
+                            raise ValueError('Nur das eigene Materialfoto ist verfügbar.')
+                        if call['name'] == 'materialfoto_lesen':
+                            outcome={'auswahl':material_photos_service.context(who)}
+                        else:
+                            events.append({'type':'materialfoto'})
+                            outcome={'status':'Artikel fotografieren antippen. Noch kein Artikel gewählt oder bestellt.'}
                     elif call["name"] == "bild_anfordern":
                         order_id = tool_integer(args.get("auftrag_id", 0), "Auftragsnummer", minimum=0)
                         context = order_context(order_id) if order_id else None
@@ -1206,8 +1274,49 @@ def register_assistant(p):
         return jsonify(ok=True)
 
     # Restore can recreate missing assistant tables without registering routes again.
-    p.assistant_init_schema = init_schema
     init_schema()
     workflow = Workflow(p, bp, protected, capabilities, order_context, db_scope, audit)
+    leave=register_selfservice(p,bp,protected)
+    p.assistant_time=TimeTracking(p)
+    register_time_views(p,bp,protected,p.assistant_time)
+    personal=PersonalActions(p,leave,p.assistant_time,db_scope,audit)
+    material_photos_service=MaterialPhotoService(p)
+    p.assistant_material_photos=material_photos_service
+
+    @bp.route('/materialfotos', methods=['GET','POST'])
+    @protected
+    def material_photos(who):
+        if request.method == 'GET':
+            return jsonify(fotos=material_photos_service.list(who))
+        return jsonify(material_photos_service.stage(who,request.files.get('file'),request.form.get('request_id')))
+
+    @bp.get('/materialfotos/<foto_id>')
+    @protected
+    def material_photo(who,foto_id):
+        return jsonify(material_photos_service.status(who,foto_id))
+
+    @bp.post('/materialfotos/<foto_id>/analyse')
+    @protected
+    def material_analyze(who,foto_id):
+        return jsonify(material_photos_service.analyze(who,foto_id))
+
+    @bp.post('/materialfotos/<foto_id>/auswahl')
+    @protected
+    def material_select(who,foto_id):
+        data=request.get_json(silent=True) or {}
+        if set(data)-{'treffer_id'}:
+            raise ValueError('Nur einen angezeigten Artikeltreffer auswählen.')
+        return jsonify(material_photos_service.select(who,foto_id,data.get('treffer_id')))
+    def all_assistant_schemas():
+        init_schema()
+        p.assistant_selfservice_init_schema()
+        p.assistant_time.init_schema()
+        material_photos_service.init_schema()
+    p.assistant_init_schema=all_assistant_schemas
     tools.extend(WORKFLOW_TOOLS)
+    tools.extend(PERSONAL_TOOLS)
+    for name,description in (
+        ('materialfoto_anfordern','Produktetikett zur Artikelauswahl fotografieren. Öffnet nur die Fotoauswahl, keine Bestellung. Nicht für Fahrzeugdokumente.'),
+        ('materialfoto_lesen','Den zuletzt bewusst ausgewählten Artikel aus dem eigenen Materialfoto erneut gegen die aktuellen Belege prüfen. Kein Preis- oder Bestellnachweis.')):
+        tools.append({'type':'function','name':name,'description':description,'parameters':{'type':'object','properties':{},'required':[],'additionalProperties':False}})
     p.app.register_blueprint(bp)

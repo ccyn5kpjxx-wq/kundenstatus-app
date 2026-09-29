@@ -2,9 +2,56 @@
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Werkstatt-Bestellungen</title>
 <style>body{font-family:system-ui,sans-serif;max-width:1100px;margin:auto;padding:24px;background:#f4f6f9;color:#172234}h1,h2{margin-top:0}section{background:white;border:1px solid #d7dee7;border-radius:12px;padding:20px;margin:20px 0}label{display:block;margin:12px 0}input,select,button{font:inherit;padding:9px;max-width:100%;box-sizing:border-box}input:not([type=checkbox]),select{display:block;width:100%;border:1px solid #9ca9ba;border-radius:5px}button{background:#143b64;color:white;border:0;border-radius:5px;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.notice{padding:12px;background:#fff3d4;border-left:4px solid #ab7600}.good{background:#e7f7ed;border-color:#287748}.errors{color:#932727}small{display:block;color:#47576c}table{border-collapse:collapse;width:100%}td,th{text-align:left;vertical-align:top;border-bottom:1px solid #dae1e9;padding:10px}.scroll{overflow:auto}a{color:#1b518d}</style></head>
 <body><nav><a href="/admin/einkauf">Einkauf</a> · <a href="/admin/assistent-artikel">Artikelvorschläge</a> · <a href="/admin/mail">Postfach</a></nav>
-<h1>Werkstatt-Bestellungen</h1><p>Dringende ausdrückliche Bestellungen werden sofort verschickt. Alle anderen werden je Lieferant montags um 12 Uhr deutscher Zeit gesammelt versandt.</p>
+<h1>Bestellordner</h1><p>Wer hat was bestellt – und was wurde tatsächlich an den Mailserver übergeben? Dringende, ausdrücklich freigegebene Bestellungen sind sofort fällig. Die übrigen werden je Lieferant montags um 12 Uhr deutscher Zeit gesammelt versandt.</p>
 {% for error in errors %}<p class="notice errors" role="alert">{{ error }}</p>{% endfor %}
 {% for category,message in get_flashed_messages(with_categories=true) %}<p class="notice {% if category=='success' %}good{% endif %}" role="status">{{ message }}</p>{% endfor %}
+{% if overview %}
+{% macro overview_url(page=overview.page,draft_page=overview.draft_page,bestellung='',vorschlag='') -%}{{ url_for('werkstatt_orders.index',page=page,draft_page=draft_page,bestellung=bestellung,vorschlag=vorschlag,**overview.filters) }}{%- endmacro %}
+{% macro order_table(items) %}
+<div class="scroll"><table><thead><tr><th>Wer / angelegt</th><th>Artikel / Variante</th><th>Menge</th><th>Betrag brutto</th><th>Lieferant</th><th>Dringlichkeit / Termin</th><th>Status / Nachweis</th></tr></thead><tbody>
+{% for entry in items %}<tr>
+<td>{{ entry.person }}<small>{{ entry.created }}</small></td>
+<td><a href="{{ overview_url(bestellung=entry.id if not entry.draft else '',vorschlag=entry.id if entry.draft else '') }}#bestelldetail">{{ entry.product }}</a><small>{{ entry.sku }} · {{ entry.variant }}</small></td>
+<td>{{ entry.quantity }} {{ entry.unit }}</td><td>{{ entry.total }}<small>{{ 'Noch ungeprüfte Preisangabe' if entry.draft else 'Gespeicherter Planbetrag' }}<br>Höchstbetrag: {{ entry.cap }}</small></td>
+<td>{{ entry.supplier }}</td><td>{{ entry.urgency }}<small>{{ entry.due }}{% if entry.overdue %}<br><strong>Fällig, Abschluss offen</strong>{% endif %}</small></td>
+<td>{{ entry.state_label }}<small>{% if entry.batch_id %}Mailpaket {{ entry.batch_id[:8] }}{% elif not entry.draft %}Noch kein Mailpaket{% endif %}</small>{% if entry.warnings %}<small class="errors">Details prüfen</small>{% endif %}</td>
+</tr>{% else %}<tr><td colspan="7">Keine Einträge für diese Filter.</td></tr>{% endfor %}
+</tbody></table></div>
+{% endmacro %}
+<section aria-label="Bestellübersicht"><h2>Bestellungen aller Mitarbeiter</h2>
+<p>Stand {{ overview.stand }} · Zeiten Europe/Berlin. Die Übersicht löst keinen Versand aus.</p>
+{% for error in overview.errors %}<p class="notice errors" role="alert">{{ error }}</p>{% endfor %}
+<form method="get" action="{{ url_for('werkstatt_orders.index') }}">{% if overview.filters.batch %}<p>Nur Mailpaket {{ overview.filters.batch }}</p><input type="hidden" name="batch" value="{{ overview.filters.batch }}">{% endif %}<div class="grid">
+<label>Artikel / Quelle suchen<input name="q" value="{{ overview.filters.q }}" maxlength="160" placeholder="Artikelnummer, Name oder Preisquelle"></label>
+<label>Mitarbeiter<select name="person"><option value="">Alle</option>{% for person in overview.people %}<option value="{{ person.id }}" {% if overview.filters.person==person.id %}selected{% endif %}>{{ person.name }}</option>{% endfor %}</select></label>
+<label>Lieferant<select name="supplier"><option value="">Alle</option>{% for supplier in overview.suppliers %}<option value="{{ supplier.id }}" {% if overview.filters.supplier==supplier.id %}selected{% endif %}>{{ supplier.name }}</option>{% endfor %}</select></label>
+<label>Status<select name="state"><option value="">Alle</option><option value="overdue" {% if overview.filters.state=='overdue' %}selected{% endif %}>Fällig, Abschluss offen</option>{% for key,label in overview.states.items() %}<option value="{{ key }}" {% if overview.filters.state==key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label>Dringlichkeit<select name="urgency"><option value="">Alle</option><option value="urgent" {% if overview.filters.urgency=='urgent' %}selected{% endif %}>Dringend</option><option value="weekly" {% if overview.filters.urgency=='weekly' %}selected{% endif %}>Sammelbestellung</option></select></label>
+<label>Angelegt ab<input name="from" type="date" value="{{ overview.filters['from'] }}"></label><label>Angelegt bis<input name="to" type="date" value="{{ overview.filters.to }}"></label>
+</div><button>Filtern</button> <a href="{{ url_for('werkstatt_orders.index') }}">Filter zurücksetzen</a></form>
+<h3>An Versand übergeben: {{ overview.count }}</h3><p>Jede Zeile ist eine eigene freigegebene Anforderung. Mehrere Zeilen können gemeinsam in einer Sammelmail stehen; erneute Aufrufe derselben Anforderung erzeugen keine zusätzliche Zeile.</p>
+{{ order_table(overview['items']) }}
+<p>Seite {{ overview.page }} von {{ overview.pages }}{% if overview.page>1 %} · <a href="{{ overview_url(page=overview.page-1) }}">Zurück</a>{% endif %}{% if overview.page<overview.pages %} · <a href="{{ overview_url(page=overview.page+1) }}">Weitere Bestellungen</a>{% endif %}</p>
+<h3>Noch nicht an Versand übergeben: {{ overview.draft_count }}</h3><p>Diese Vorschläge sind keine versendeten Bestellungen. Eine frühere Bestätigung allein belegt noch keine erfolgreiche Übergabe.</p>
+{{ order_table(overview.drafts) }}
+<p>Seite {{ overview.draft_page }} von {{ overview.draft_pages }}{% if overview.draft_page>1 %} · <a href="{{ overview_url(draft_page=overview.draft_page-1) }}">Vorherige Vorschläge</a>{% endif %}{% if overview.draft_page<overview.draft_pages %} · <a href="{{ overview_url(draft_page=overview.draft_page+1) }}">Weitere Vorschläge</a>{% endif %}</p>
+<small>Nur konkrete Bestellaktionen und die Bestellwarteschlange sind hier enthalten. Rechnungsimporte, unverbindliche Angebote und alte interne Einkaufsentwürfe werden nicht als Bestellungen gezählt.</small>
+</section>
+{% if overview.selected %}{% set entry=overview.selected %}
+<section id="bestelldetail" aria-label="Bestelldetail"><h2>{{ entry.product }}</h2><p class="notice">{{ entry.state_label }}. Eine Annahme durch den Mailserver ist keine Lieferbestätigung. Bei unklarem Versand bitte im Postfach prüfen und nicht erneut bestellen.</p>
+{% for warning in entry.warnings %}<p class="notice errors">{{ warning }}</p>{% endfor %}
+<div class="grid"><div><h3>Wer und was</h3><p>{{ entry.person }}<small>Zugang: {{ entry.actor }} · Mitarbeitername aus der heutigen Stammdatenzuordnung</small></p><p>Artikelnummer: {{ entry.sku }}<br>Variante: {{ entry.variant }}<br>{{ 'Gewünschte Menge' if entry.draft else 'Bestellte Menge' }}: {{ entry.quantity }} {{ entry.unit }}</p><p>{{ 'Fahrzeugauftrag ' ~ entry.order_id if entry.order_id else 'Werkstattmaterial ohne Fahrzeugauftrag' }}</p></div>
+<div><h3>Lieferant und Zeitpunkt</h3><p>{{ entry.supplier }}<br>{{ 'Geplanter Empfänger' if entry.draft else 'Freigegebener Empfänger' }}: {{ entry.recipient }}</p><p>{{ entry.urgency }}<br>Angelegt: {{ entry.created }}<br>Versand fällig: {{ entry.due }}</p></div>
+<div><h3>Gespeicherte Preisangaben</h3><p>Stückpreis brutto: {{ entry.unit_price }}<br>Versandanteil: {{ entry.shipping }}<br>Nebenkosten: {{ entry.extra }}<br>Planbetrag brutto: <strong>{{ entry.total }}</strong><br>{{ 'Vorgeschlagener Höchstbetrag' if entry.draft else 'Freigegebener Höchstbetrag' }}: {{ entry.cap }}</p><small>{{ 'Noch nicht an Versand übergeben.' if entry.draft else 'Historischer Bestellstand; kein aktueller Lieferantenpreis oder tatsächlicher Rechnungsbetrag.' }}</small></div></div>
+<h3>Quellen und Nachvollziehbarkeit</h3><p>Preisquelle: {{ entry.price_source }}</p><p>Vorgangs-ID: {{ entry.id }}{% if entry.request_id %}<br>Wiederholungskennung: {{ entry.request_id }}{% endif %}{% if entry.action_id %}<br>Gespeicherte Avatar-Aktion: {{ entry.action_id }}{% endif %}</p>
+{% if entry.events %}<ul>{% for event in entry.events %}<li>{{ event.time }} · {{ event.label }}</li>{% endfor %}</ul>{% else %}<p>Keine zusätzlichen Aktionsereignisse hinterlegt. Die gespeicherte Anforderung und ihr Versandstatus bleiben maßgeblich.</p>{% endif %}
+{% if entry.batch_id %}<h3>Gemeinsame Bestellmail</h3><p>Mailpaket: {{ entry.batch_id }}<br>Vorbereitet: {{ entry.batch_created|default('nicht belegt') }}<br>Gespeicherter Brutto-Höchstbetrag der gesamten Mail: {{ entry.batch_cap }}<br>SMTP-Versuche laut Paket: {{ entry.attempts }}{% if entry.mail_updated %}<br>Letzter protokollierter Mailstatus: {{ entry.mail_updated }}{% endif %}{% if entry.message_id %}<br>Message-ID: {{ entry.message_id }}{% endif %}</p>
+<p>{{ entry.sibling_count }} Anforderung(en) gehören zu dieser Mail. Der Status gilt für das gemeinsame Paket. <a href="{{ url_for('werkstatt_orders.index',batch=entry.batch_id) }}">Alle Positionen dieser Mail filtern</a></p>{{ order_table(entry.siblings) }}{% if entry.sibling_count>100 %}<p>Die ersten 100 Positionen werden hier gezeigt; alle Positionen sind über den Mailpaket-Filter erreichbar.</p>{% endif %}
+{% else %}<p>Noch kein unveränderliches Mailpaket zugeordnet. Der Termin allein ist kein Versandnachweis.</p>{% endif %}
+<p><a href="/admin/mail">Im Postfach prüfen</a> · <a href="{{ overview_url() }}">Detail schließen</a></p></section>
+{% endif %}
+{% endif %}
+<details {% if errors %}open{% endif %}><summary><strong>Versand einrichten, Lieferantenkontakte und neue Bestellung</strong></summary>
 <section aria-label="Versandstatus"><h2>Versandstatus</h2>
 <p class="notice {% if availability.can_send %}good{% endif %}">{% if availability.can_send %}Sofortversand aktiviert{% elif not availability.enabled %}Bestellversand deaktiviert{% elif not availability.storage_ready %}Dauerhafter Ausgabespeicher noch nicht eingerichtet{% else %}Postfach für Versand noch nicht vollständig eingerichtet{% endif %}.</p>
 <p>Absender: {{ availability.sender or 'noch nicht eingerichtet' }}. Es wird das bestehende Werkstatt-Postfach verwendet.</p>
@@ -29,4 +76,4 @@
 <label>Dringlichkeit<select name="urgency" required><option value="">Bitte auswählen</option><option value="urgent" {% if form.get('urgency')=='urgent' %}selected{% endif %}>Dringend – sofort versenden</option><option value="weekly" {% if form.get('urgency')=='weekly' %}selected{% endif %}>Nicht dringend – Montag 12 Uhr</option></select></label></div>
 <label><input type="checkbox" name="price_confirmed" value="ja" required> Artikel, Variante, Preisquelle, Versand und sämtliche Nebenkosten sind geprüft. Diese konkrete Bestellung soll innerhalb des Kostenrahmens ausgeführt werden.</label>
 <button name="action" value="bestellen" {% if not availability.can_send or not cap_cents %}disabled{% endif %}>Bestellung verbindlich auslösen</button></form></section>
-<section><h2>Gespeicherte Bestellanforderungen</h2><div class="scroll"><table><thead><tr><th>Artikel / Variante</th><th>Menge</th><th>Empfänger</th><th>Versandtermin</th><th>Status</th></tr></thead><tbody>{% for entry in orders %}<tr><td>{{ entry.order.product_name }}<small>{{ entry.order.article_number }} · {{ entry.order.variant }}</small></td><td>{{ entry.order.quantity }} {{ entry.order.unit }}</td><td>{{ entry.order.recipient }}</td><td>{{ entry.due_label }}</td><td>{{ entry.message }}{% if entry.needs_review %}<strong> Bitte im Postfach prüfen.</strong>{% endif %}</td></tr>{% else %}<tr><td colspan="5">Noch keine ausdrücklich ausgelösten Bestellanforderungen.</td></tr>{% endfor %}</tbody></table></div></section></body></html>
+</details></body></html>

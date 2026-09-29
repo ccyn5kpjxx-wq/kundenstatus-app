@@ -6,9 +6,11 @@
   const purchaseEnabled = $('assistant').dataset.purchaseEnabled === 'true';
   const documentsEnabled = $('assistant').dataset.documentsEnabled === 'true';
   const offersEnabled = $('assistant').dataset.offersEnabled === 'true';
+  const personalEnabled = $('assistant').dataset.personalEnabled === 'true';
+  const personalKinds = ['urlaub','arbeitszeit'];
   const mailKinds = ['lieferantenanfrage','kundenangebot'];
   const workflowKinds = ['farbe','kontakt','auftrag_neu','datei',...mailKinds];
-  const actionAllowed = kind => mailKinds.includes(kind)?offersEnabled:workflowKinds.includes(kind)?documentsEnabled:kind==='status'?statusEnabled:kind==='bestellung'?purchaseEnabled:!readOnly&&['notiz','einkauf','anfrage'].includes(kind);
+  const actionAllowed = kind => personalKinds.includes(kind)?personalEnabled:mailKinds.includes(kind)?offersEnabled:workflowKinds.includes(kind)?documentsEnabled:kind==='status'?statusEnabled:kind==='bestellung'?purchaseEnabled:!readOnly&&['notiz','einkauf','anfrage'].includes(kind);
   if(readOnly)document.querySelectorAll('[data-write-section]').forEach(el=>{el.hidden=true;el.querySelectorAll('input,button,textarea,select').forEach(field=>field.disabled=true);});
   const token = document.querySelector('meta[name="csrf-token"]').content;
   let current=null, photoOrder=null, photo=null, stream=null, recorder=null, micStream=null;
@@ -153,11 +155,11 @@
         else if(item.art==='einkauf')details+=`${data.preisquelle||'Preisquelle nicht geklärt'}\nKein Bestellversand.`;
       }
       if(mailKinds.includes(item.art))details=`Empfänger: ${data.mail?.recipient||'fehlt'}\nAbsender: ${data.mail?.from||'fehlt'}\nBetreff: ${data.mail?.subject||'fehlt'}\n${item.art==='kundenangebot'?'Kundenpreis gesamt brutto: '+euros(data.gross_total_cents)+'\n':''}\n${data.mail?.body||''}\n\nAnhänge: ${(data.attachments||[]).map(a=>a.name||a.original_name||a.filename).join(', ')||'keine'}\n${data.missing_fields?.length?'Noch offen: '+data.missing_fields.map(k=>({recipient:'Empfänger',gross_total_cents:'Kundenpreis brutto',sender:'Absender',configuration:'Postfach'}[k]||k)).join(', '):''}`;
-      const labels={status:'Statusänderung',bestellung:'Verbindliche Bestellung',notiz:'Interne Notiz',einkauf:'Einkaufsentwurf',anfrage:'Teileanfrage',farbe:'Farbdaten',kontakt:'Kundenkontakt',auftrag_neu:'Neuer Auftrag',datei:'Bild / Unterlage zuordnen',lieferantenanfrage:'Unverbindliche Lieferantenanfrage',kundenangebot:'Angebot an Kunden'};
-      pre.textContent=`${item.auftrag_id?'Auftrag '+item.auftrag_id:item.art==='auftrag_neu'?'Neue Auftragsnummer beim Speichern':'Werkstattmaterial'} · ${labels[item.art]} · ${item.status==='vorschlag'?'Zur Prüfung':item.status}\n${details}`;div.append(pre);
+      const labels={status:'Statusänderung',bestellung:'Verbindliche Bestellung',notiz:'Interne Notiz',einkauf:'Einkaufsentwurf',anfrage:'Teileanfrage',farbe:'Farbdaten',kontakt:'Kundenkontakt',auftrag_neu:'Neuer Auftrag',datei:'Bild / Unterlage zuordnen',lieferantenanfrage:'Unverbindliche Lieferantenanfrage',kundenangebot:'Angebot an Kunden',urlaub:'Mein Urlaubsantrag',arbeitszeit:'Meine Arbeitszeit'};
+      pre.textContent=`${item.auftrag_id?'Auftrag '+item.auftrag_id:item.art==='auftrag_neu'?'Neue Auftragsnummer beim Speichern':personalKinds.includes(item.art)?'Mein Mitarbeiterkonto':'Werkstattmaterial'} · ${labels[item.art]} · ${item.status==='vorschlag'?'Zur Prüfung':item.status}\n${details}`;div.append(pre);
       if(item.versandstatus?.message){const message=document.createElement('p');message.textContent=item.versandstatus.message;div.append(message);}
       if(item.status==='vorschlag'){
-        const button=document.createElement('button');button.textContent=mailKinds.includes(item.art)?'Geprüfte E-Mail senden':workflowKinds.includes(item.art)?'Geprüft speichern':item.art==='status'?'Status ändern':item.art==='bestellung'?'Verbindlich bestellen':item.art==='notiz'?'Geprüfte Notiz speichern':'Geprüften Entwurf intern freigeben';
+        const button=document.createElement('button');button.textContent=item.art==='urlaub'?'Urlaub verbindlich beantragen':item.art==='arbeitszeit'?'Zeitstempel jetzt erfassen':mailKinds.includes(item.art)?'Geprüfte E-Mail senden':workflowKinds.includes(item.art)?'Geprüft speichern':item.art==='status'?'Status ändern':item.art==='bestellung'?'Verbindlich bestellen':item.art==='notiz'?'Geprüfte Notiz speichern':'Geprüften Entwurf intern freigeben';
         button.disabled=Boolean(data.missing_fields?.length);
         button.onclick=safe(async()=>{button.disabled=true;stopVoice();try{const r=await api('/bestaetigen/'+item.id,{});pending=null;status(confirmationResult(r));await refresh();}finally{button.disabled=Boolean(data.missing_fields?.length);}});div.append(button);
         const read=document.createElement('button');read.className='secondary';read.textContent='Vorlesen & per Sprache bestätigen';read.dataset.voiceConfirmation='true';read.disabled=!voiceAvailable||$('assistant').dataset.ready!=='true';read.onclick=safe(async()=>{unlockOutput();stopVoice();if(await prepareReadback(item))status('Vorgelesen. Gespräch starten und die genannte Bestätigung sprechen.');});div.append(read);
@@ -203,7 +205,7 @@
       if(!currentChat()||(spoken&&!voice.active))return;
       log('KI',r.text);
       let proposal=null,photoReady=false;
-      for(const event of r.events){if(!currentChat())return;if(event.type==='unterlage'){stopVoice();if(event.data)showOrder(event.data);else clearOrder();window.AssistantWorkflow?.openUpload(event.data);return;}if(event.type==='auftrag')showOrder(event.data);if(event.type==='vorschlag'&&event.data.status==='vorschlag')proposal=event.data;if(event.type==='kamera'){showOrder(event.data);await camera();if(!currentChat())return;await capture();photoReady=true;}}
+      for(const event of r.events){if(!currentChat())return;if(event.type==='materialfoto'){stopVoice();window.AssistantMaterialPhoto?.open();return;}if(event.type==='unterlage'){stopVoice();if(event.data)showOrder(event.data);else clearOrder();window.AssistantWorkflow?.openUpload(event.data);return;}if(event.type==='auftrag')showOrder(event.data);if(event.type==='vorschlag'&&event.data.status==='vorschlag')proposal=event.data;if(event.type==='kamera'){showOrder(event.data);await camera();if(!currentChat())return;await capture();photoReady=true;}}
       if(!currentChat())return;
       await refresh();if(!currentChat())return;status('Antwort erhalten.');
       if(proposal){showActions();if(spoken||$('read-aloud').checked)await prepareReadback(proposal);else status('Vorschlag ist bereit. Bitte vollständig prüfen und bestätigen.');}
@@ -237,7 +239,7 @@
     onError:reportError,onText:log,
     onEvent:async event=>{
       if(event.type==='auftrag'){showOrder(event.data);return;}
-      if(event.type==='unterlage'){stopVoice();if(event.data)showOrder(event.data);else clearOrder();window.AssistantWorkflow?.openUpload(event.data);return;}
+      if(event.type==='materialfoto'){stopVoice();window.AssistantMaterialPhoto?.open();return;}if(event.type==='unterlage'){stopVoice();if(event.data)showOrder(event.data);else clearOrder();window.AssistantWorkflow?.openUpload(event.data);return;}
       // Existing deterministic readback and exact confirmation stay outside model control.
       realtime.stop();await refresh();
       if(event.type==='vorschlag'){
@@ -375,10 +377,12 @@
     if(readOnly||source.readonly||source.modus==='lesestand'){
     for(const id of ['note','purchase'])$(id).closest('section').hidden=true;
     for(const id of ['camera','capture','camera-stop','photo-file','photo-save','vision'])$(id).disabled=true;
-    if(!statusEnabled&&!purchaseEnabled&&!documentsEnabled&&!offersEnabled)$('actions').textContent='Lesemodus: Speichern, Fotozuordnung und Bestellungen sind gesperrt.';
+    if(!statusEnabled&&!purchaseEnabled&&!documentsEnabled&&!offersEnabled&&!personalEnabled)$('actions').textContent='Lesemodus: Speichern, Fotozuordnung und Bestellungen sind gesperrt.';
     }
   }
   function showActions(){const menu=$('assistant-menu');if(!menu.open)menu.showModal();menu.querySelector('details').open=true;$('actions-section').hidden=false;$('actions-section').scrollIntoView({block:'start'});}
+  window.AssistantMaterialPhotoHost={api,status,stopVoice,selectMaterial:selection=>{stopVoice();log('KI','Artikel gewählt: '+(selection.produkt_name||'Produkt')+'. Menge und Dringlichkeit bitte noch nennen.');status('Artikel gewählt. Gespräch starten oder Nachricht schreiben, um Menge und Dringlichkeit zu nennen.');}};
+  $('materialfoto-open')?.addEventListener('click',()=>stopVoice());
   window.AssistantWorkflowHost={api,safe,status,stopVoice:()=>{stopVoice();pending=null;},getOrder:()=>current,
     proposed:async()=>{pending=null;await refresh();showActions();status('Vorschlag vorbereitet. Bitte prüfen und ausdrücklich bestätigen.');}};
   safe(async()=>{await refresh();await loadSource();})();

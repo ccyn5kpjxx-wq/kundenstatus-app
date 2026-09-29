@@ -412,7 +412,7 @@ class ManagementTests(unittest.TestCase):
         self.assertIn('name="limit" inputmode="decimal" value="0.00"', old)
         self.assertIn('name="limit" inputmode="decimal" value="40.00"', lower)
         self.assertNotIn('readonly required', html)
-        self.assertIn('Fotospeicherung bleibt gesperrt', html)
+        self.assertIn('Bilder und Unterlagen intern zuordnen', html)
         self.assertIn('/admin/assistent-bestellungen/betrieb', html)
 
     def test_registration_is_reentrant_and_defaults_to_no_sends(self):

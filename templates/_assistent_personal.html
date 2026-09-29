@@ -1,0 +1,6 @@
+<section class="personal-account" aria-label="Mein Mitarbeiterkonto">
+<h3>{{ who.mitarbeiter_name or 'Mein Mitarbeiterkonto' }}</h3>
+<nav aria-label="Persönliche Bereiche"><a href="{{ url_for('assistent.personal_time') }}">Meine Arbeitszeit</a><a href="{{ url_for('assistent.vacation_page') }}">Mein Urlaub &amp; Anträge</a></nav>
+<div class="personal-clock">{% for action,label in [('kommen','Kommen'),('pause','Pause beginnen'),('weiter','Pause beenden'),('gehen','Gehen')] %}<button type="button" class="secondary" data-time-action="{{ action }}">{{ label }}</button>{% endfor %}</div>
+<p id="personal-status" role="status">Zeit erfassen: sprechen oder tippen, dann bestätigen.</p></section>
+<style>.personal-account{padding:16px!important;margin:12px 0!important}.personal-account h3{margin:0 0 12px}.personal-account nav{display:flex;gap:10px;flex-wrap:wrap}.personal-account nav a{font-size:14px}.personal-clock{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}.personal-clock .secondary{margin:0;padding:9px 6px;font-size:14px;min-height:44px}.personal-account #personal-status{font-size:13px;line-height:1.4;margin:12px 0 0}</style>
