@@ -20,12 +20,20 @@
     if(phase==='microphone')helpTimer=setTimeout(()=>{if($('assistant').dataset.voicePhase==='microphone')$('voice-help').open=true;},8000);
     else if(phase==='connected')$('voice-help').open=false;
   }
-  // Observe output only. Playback and microphone ownership stay with their controllers.
-  const outputMeter=window.OutputAudioMeter?new window.OutputAudioMeter({window,audio:$('speech'),onLevel:level=>window.AssistantAvatar?.instance?.animation.setAudioLevel(level)}):null;
-  const unlockOutput=()=>{outputMeter?.unlock().catch(()=>{});};
+  // Audio is optional: a missing asset must not prevent text/menu initialization.
+  const audioFailures=new Set();
+  let outputMeter=null, voiceAvailable=false, realtimeAvailable=false, audioRetryUsed=false;
+  const unavailableVoice=()=>({active:false,generation:0,stop(){this.active=false;this.generation++;},async start(){throw new Error('Diese Sprachfunktion wurde nicht geladen. Bitte „Sprachfunktionen erneut laden“ wählen oder eine Nachricht schreiben.');},async resumePlayback(){return false;}});
+  let voice=unavailableVoice(), realtime=unavailableVoice();
+  function audioLevel(level){try{window.AssistantAvatar?.instance?.animation?.setAudioLevel?.(level);}catch{}}
+  function meter(method,...args){
+    try{const result=outputMeter?.[method]?.(...args);if(result?.catch)result.catch(()=>{outputMeter=null;});}
+    catch{outputMeter=null;}
+  }
+  const unlockOutput=()=>meter('unlock');
   const normalized = text => text.toLocaleLowerCase('de-DE').replace(/[^\p{L}\p{N}\s]/gu,'').trim();
   const status = text => {$('status').textContent=text;};
-  const state = (name,text) => {$('avatar').dataset.state=name;$('avatar-status').textContent=text;if(name!=='speaking')window.AssistantAvatar?.instance?.animation.setAudioLevel(0);};
+  const state = (name,text) => {$('avatar').dataset.state=name;$('avatar-status').textContent=text;if(name!=='speaking')audioLevel(0);};
   async function api(path,data,raw=false,signal) {
     const options={headers:{'X-CSRF-Token':token},signal};
     if(data!==undefined){options.method='POST';if(data instanceof FormData)options.body=data;else{options.headers['Content-Type']='application/json';options.body=JSON.stringify(data);}}
@@ -50,7 +58,7 @@
     ++playbackGeneration;
     resumeOutput=null;$('audio-resume').hidden=true;
     const cancel=cancelPlayback;cancelPlayback=null;cancel?.();
-    outputMeter?.clear();
+    meter('clear');
   }
   function say(text){
     stopPlayback();
@@ -84,7 +92,7 @@
         if(document.hidden){stopPlayback();return;}
         if(audioUrl)URL.revokeObjectURL(audioUrl);
         url=audioUrl=URL.createObjectURL(blob);audio.srcObject=null;audio.src=url;audio.hidden=false;
-        outputMeter?.useBlob(blob,url);
+        meter('useBlob',blob,url);
         // Keep these listeners for manual replay, until stop or the next output.
         listen('playing',()=>{resumeOutput=null;$('audio-resume').hidden=true;state('speaking','Ich spreche. Das Mikrofon nimmt gerade nicht auf.');});
         listen('pause',()=>state('idle',audio.ended?'Bereit für deine nächste Nachricht.':'Sprachausgabe pausiert.'));
@@ -112,6 +120,7 @@
   async function prepareReadback(item){
     pending=null;
     if(!actionAllowed(item.art))throw new Error('Für diese Aktion fehlt die aktuelle Freigabe.');
+    if(!voiceAvailable){showActions();status('Sprachbestätigung ist gerade nicht verfügbar. Bitte den Vorschlag im Menü prüfen und dort ausdrücklich bestätigen.');return false;}
     if(workflowKinds.includes(item.art))showActions();
     if(item.daten?.missing_fields?.length){status('Die Mail ist noch unvollständig. Bitte die fehlenden Angaben im Vorschlag ergänzen.');return false;}
     const requestedGeneration=playbackGeneration;
@@ -121,6 +130,7 @@
     const playback=say(challenge.text), generation=playbackGeneration;
     if(!await playback||generation!==playbackGeneration)return false;
     pending={type:'action',...challenge};
+    voiceButtons(false);
     return true;
   }
   const euros = value => Number.isSafeInteger(value)&&value>=0?(value/100).toLocaleString('de-DE',{style:'currency',currency:'EUR'}):'nicht geklärt';
@@ -150,7 +160,7 @@
         const button=document.createElement('button');button.textContent=mailKinds.includes(item.art)?'Geprüfte E-Mail senden':workflowKinds.includes(item.art)?'Geprüft speichern':item.art==='status'?'Status ändern':item.art==='bestellung'?'Verbindlich bestellen':item.art==='notiz'?'Geprüfte Notiz speichern':'Geprüften Entwurf intern freigeben';
         button.disabled=Boolean(data.missing_fields?.length);
         button.onclick=safe(async()=>{button.disabled=true;stopVoice();try{const r=await api('/bestaetigen/'+item.id,{});pending=null;status(confirmationResult(r));await refresh();}finally{button.disabled=Boolean(data.missing_fields?.length);}});div.append(button);
-        const read=document.createElement('button');read.className='secondary';read.textContent='Vorlesen & per Sprache bestätigen';read.disabled=$('assistant').dataset.ready!=='true';read.onclick=safe(async()=>{unlockOutput();stopVoice();if(await prepareReadback(item))status('Vorgelesen. Gespräch starten und die genannte Bestätigung sprechen.');});div.append(read);
+        const read=document.createElement('button');read.className='secondary';read.textContent='Vorlesen & per Sprache bestätigen';read.dataset.voiceConfirmation='true';read.disabled=!voiceAvailable||$('assistant').dataset.ready!=='true';read.onclick=safe(async()=>{unlockOutput();stopVoice();if(await prepareReadback(item))status('Vorgelesen. Gespräch starten und die genannte Bestätigung sprechen.');});div.append(read);
       }
       if(item.art==='bestellung'&&item.status!=='vorschlag'&&['sent','copy_pending'].includes(item.versandstatus?.state)){
         const again=document.createElement('button');again.className='secondary';again.textContent='Erneut vorbereiten';let requestId=null;
@@ -205,8 +215,9 @@
       if(currentChat()||error.playbackGeneration!==undefined)throw error;
     }finally{if(busyGeneration===generation){busy=false;busyGeneration=null;}}
   }
-  function voiceButtons(active){$('voice-mode').hidden=active;$('voice-stop').hidden=!active;$('record').disabled=active||$('assistant').dataset.ready!=='true';}
-  const voice=new window.AssistantVoiceMode({
+  function voiceAvailability(){$('voice-mode').disabled=$('assistant').dataset.ready!=='true'||!(pending?voiceAvailable:realtimeAvailable);}
+  function voiceButtons(active){$('voice-mode').hidden=active;voiceAvailability();$('voice-stop').hidden=!active;$('record').disabled=active||$('assistant').dataset.ready!=='true';}
+  const voiceOptions={
     onState:(name,text)=>{state(name,text);voiceButtons(voice.active);},
     onError:reportError,
     onSegment:async blob=>{
@@ -215,13 +226,13 @@
         const form=new FormData();form.append('audio',blob,blob.type.includes('mp4')?'sprache.mp4':'sprache.webm');
         const r=await api('/audio',form);if(!voice.active||generation!==voice.generation)return;
         await chat(r.text,true);
-        if(voice.active&&generation===voice.generation&&!pending){voice.stop();stopPlayback();await realtime.start(current?.id);}
+        if(voice.active&&generation===voice.generation&&!pending){voice.stop();stopPlayback();if(realtimeAvailable)await realtime.start(current?.id);}
       }catch(error){if(voice.active&&generation===voice.generation&&!stalePlaybackError(error))throw error;}
     }
-  });
-  const realtime=new window.AssistantRealtime({api,audio:$('speech'),
+  };
+  const realtimeOptions={api,audio:$('speech'),
     onState:(name,text,detail)=>{state(name,text);if(detail?.phase)voicePhase(detail.phase);voiceButtons(realtime.active||voice.active);if(!realtime.active||name==='speaking')$('audio-resume').hidden=true;},
-    onRemoteStream:stream=>{if(stream)outputMeter?.useStream(stream);else outputMeter?.clear();},
+    onRemoteStream:stream=>{if(stream)meter('useStream',stream);else meter('clear');},
     onPlaybackBlocked:()=>{$('audio-resume').hidden=false;},
     onError:reportError,onText:log,
     onEvent:async event=>{
@@ -235,14 +246,63 @@
         await voice.start();
       }else if(event.type==='kamera'){
         showOrder(event.data);await camera();await capture();
+        if(!voiceAvailable){status('Foto aufgenommen. Bitte das Bild im Menü prüfen und dort ausdrücklich speichern.');return;}
         const phrase=`Foto für Auftrag ${photoOrder.id} speichern`;
         if(!await say(`Foto für Auftrag ${photoOrder.id}, Kennzeichen ${photoOrder.kennzeichen}. Prüfe Bild und Zuordnung. Sage: ${phrase}. Oder Abbrechen.`))return;
         pending={type:'photo',phrase};await voice.start();
       }
     }
+  };
+  const audioComponents=[
+    {key:'realtime',name:'Echtzeitgespräch',global:'AssistantRealtime',file:'assistent-realtime.js',methods:['start','stop','resumePlayback'],options:realtimeOptions,install:value=>{realtime=value;realtimeAvailable=true;}},
+    {key:'voice',name:'Sprachbestätigung',global:'AssistantVoiceMode',file:'assistent-voice.js',methods:['start','stop'],options:voiceOptions,install:value=>{voice=value;voiceAvailable=true;}},
+    {key:'meter',name:'Mundbewegung',global:'OutputAudioMeter',file:'assistent-audio-meter.js',methods:['unlock','clear','useBlob','useStream','suspend'],options:{window,audio:$('speech'),onLevel:audioLevel},install:value=>{outputMeter=value;}}
+  ];
+  function initializeAudio(component){
+    try{
+      const Constructor=window[component.global];
+      if(typeof Constructor!=='function')throw new Error('Missing audio component');
+      const instance=new Constructor(component.options);
+      if(component.methods.some(method=>typeof instance[method]!=='function'))throw new Error('Incomplete audio component');
+      component.install(instance);audioFailures.delete(component.key);
+    }catch{audioFailures.add(component.key);}
+  }
+  function audioHelp(retried=false){
+    const box=$('audio-components-help'),message=$('audio-components-message'),retry=$('audio-components-retry');
+    if(box)box.hidden=!audioFailures.size;
+    if(message){const names=audioComponents.filter(component=>audioFailures.has(component.key)).map(component=>component.name).join(', ');message.textContent=audioFailures.size?`${names} konnte nicht geladen werden. Texteingabe und Menü bleiben verfügbar. ${retried?'Der Nachladeversuch ist beendet. Bitte später die Seite neu öffnen; ungespeicherte Angaben vorher sichern.':'Du kannst die fehlenden Sprachfunktionen einmal erneut laden. Es wird dabei kein Gespräch gestartet.'}`:'';}
+    if(retry){retry.hidden=!audioFailures.size;retry.disabled=audioRetryUsed;}
+    // Recovery must not hide Stop or unlock recording during an existing readback.
+    voiceAvailability();
+    document.querySelectorAll('[data-voice-confirmation]').forEach(button=>{button.disabled=!voiceAvailable||$('assistant').dataset.ready!=='true';});
+  }
+  function loadAudioScript(component){
+    return new Promise(resolve=>{
+      const script=document.createElement('script');let settled=false;
+      const finish=ok=>{if(settled)return;settled=true;clearTimeout(timer);script.onload=null;script.onerror=null;if(!ok)script.remove();resolve(ok);};
+      const timer=setTimeout(()=>finish(false),15000);
+      // Fixed local assets only; no supplier/model/user-controlled script URL.
+      script.src='/static/'+component.file+'?audio-retry='+Date.now();script.async=true;
+      script.onload=()=>finish(true);script.onerror=()=>finish(false);
+      document.head.append(script);
+    });
+  }
+  audioComponents.forEach(initializeAudio);
+  voiceButtons(false);
+  audioHelp();
+  if($('audio-components-retry'))$('audio-components-retry').onclick=safe(async()=>{
+    if(audioRetryUsed)return;audioRetryUsed=true;audioHelp();
+    $('audio-components-message').textContent='Fehlende Sprachfunktionen werden einmal nachgeladen. Deine Eingaben bleiben erhalten.';
+    await Promise.all(audioComponents.filter(component=>audioFailures.has(component.key)).map(async component=>{
+      // Do not redeclare an already evaluated script after a constructor error.
+      if(typeof window[component.global]!=='function'&&!await loadAudioScript(component))return;
+      initializeAudio(component);
+    }));
+    audioHelp(true);
+    if(!audioFailures.size)status('Sprachfunktionen geladen. Du kannst das Gespräch selbst starten.');
   });
   function stopRecording(){++recordingGeneration;micPending=false;cancelMicrophone?.();cancelMicrophone=null;clearTimeout(recordingTimer);recordingTimer=null;if(recorder){recorder.onstop=null;if(recorder.state==='recording')recorder.stop();recorder=null;}micStream?.getTracks().forEach(t=>t.stop());micStream=null;$('record').textContent='Mikrofon starten';}
-  function stopVoice(){stopPlayback();stopRecording();voicePhase('idle');busy=false;busyGeneration=null;realtime.stop();voice.stop();$('speech').pause();$('audio-resume').hidden=true;}
+  function stopVoice(){stopPlayback();stopRecording();voicePhase('idle');busy=false;busyGeneration=null;realtime.stop();voice.stop();$('speech').pause();$('audio-resume').hidden=true;voiceButtons(false);state('idle','Sprachmodus beendet.');}
   $('audio-resume').onclick=safe(async()=>{unlockOutput();$('audio-resume').disabled=true;try{const retry=resumeOutput;if(await (retry?retry():realtime.resumePlayback()))$('audio-resume').hidden=true;}finally{$('audio-resume').disabled=false;}});
   $('voice-mode').onclick=safe(async()=>{unlockOutput();if(busy)throw new Error('Bitte Antwort abwarten.');if(micPending||recorder?.state==='recording')throw new Error('Einzelaufnahme zuerst beenden.');stopPlayback();if(pending)await voice.start();else await realtime.start(current?.id);});
   $('voice-stop').onclick=()=>{stopVoice();stopCamera();};
@@ -301,7 +361,7 @@
     };
     try{recording.start();}catch(error){clearTimeout(timer);stopRecording();voiceButtons(false);throw error;}$('record').textContent='Aufnahme stoppen';state('listening','Mikrofon aktiv. Zum Senden stoppen.');
   });
-  function stopDevices(){const failure=$('avatar').dataset.state==='error'?$('avatar-status').textContent:null;stopVoice();outputMeter?.suspend();pending=null;stopCamera();if(failure)state('error',failure);}
+  function stopDevices(){const failure=$('avatar').dataset.state==='error'?$('avatar-status').textContent:null;stopVoice();meter('suspend');pending=null;stopCamera();if(failure)state('error',failure);}
   document.addEventListener('visibilitychange',()=>{if(document.hidden)stopDevices();});window.addEventListener('pagehide',stopDevices);
   if($('assistant').dataset.ready!=='true'){$('record').disabled=true;$('voice-mode').disabled=true;$('chat').querySelector('button').disabled=true;$('vision').disabled=true;state('idle','Avatar bereit · Sprachzugang noch einrichten.');}
   async function loadSource(){

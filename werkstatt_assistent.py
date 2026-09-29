@@ -1134,13 +1134,18 @@ def register_assistant(p):
             "Keine Preise, Teilenummern, Freigaben oder Nebenkosten erfinden. Einkauf erst bei eindeutiger Teilenummer, Menge und allen Bruttokosten vorbereiten. "
             "Bei fehlenden Preisen eine unverbindliche Teileanfrage art anfrage vorschlagen. Die App erzeugt daraus einen E-Mail-Entwurf. K-Parts ist nicht live angebunden. Nenne keine Bestellerfolge."
         )
+        direct_answer = None
         if read_only() or operations_enabled():
-            instructions = realtime_instructions(who, realtime_context(who, material_query(text, history)), config)
+            context = realtime_context(who, material_query(text, history))
+            if who['einkaufen'] and not remote_enabled() and not data.get('auftrag_id'):
+                from werkstatt_materialwissen import band_auskunft
+                direct_answer = band_auskunft(text, context.get('materialwissen'))
+            instructions = realtime_instructions(who, context, config)
             if data.get("auftrag_id"):
                 instructions += " Ausgewählter Auftrag: " + json.dumps(order_context(data["auftrag_id"]), ensure_ascii=False)
         events = []
-        answer = ""
-        for _ in range(4):
+        answer = direct_answer or ""
+        for _ in range(0 if direct_answer else 4):
             result = openai("responses", json={"model": os.getenv("ASSISTANT_MODEL", "gpt-4.1-mini"), "store": False, "instructions": instructions, "input": messages, "tools": available_tools(who), "parallel_tool_calls": False, "max_output_tokens": 1200}).json()
             output = result.get("output", [])
             messages.extend(output)
@@ -1190,7 +1195,7 @@ def register_assistant(p):
         with db_scope() as db:
             for role, content in (("user", text), ("assistant", answer)):
                 db.execute("INSERT INTO assistent_dialog(actor,role,text,zeit) VALUES(?,?,?,?)", (who["actor"], role, content, p.now_str()))
-            audit(db, who, None, "dialog", "KI-Dialog; serverseitig begrenzte Werkzeuge")
+            audit(db, who, None, "dialog", "Direkte Belegauskunft; keine Aktion" if direct_answer else "KI-Dialog; serverseitig begrenzte Werkzeuge")
         return jsonify(text=answer, events=events)
 
     @bp.post("/dialog/leeren")

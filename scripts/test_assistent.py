@@ -728,7 +728,7 @@ class AssistantTests(unittest.TestCase):
                        ('Frühere Antwort: Die Farbe ist unbekannt, deshalb kann ich keine Breiten nennen.',p.now_str()))
         reply=Mock(); reply.json.return_value={'output':[{'type':'message','content':[{'type':'output_text','text':'Passend dazu finde ich HydroGreen.'}]}]}
         question='Nur Auskunft: Welche Breiten und Verpackungseinheiten sind bei unserem grünen Abklebeband belegt?'
-        with patch.object(p.cockpit_data,'_material_records',return_value=([],records,{})), \
+        with patch.object(p.cockpit_data,'_material_records',return_value=([],records,{'begrenzt':True})), \
              patch.object(p,'get_openai_api_key',return_value='synthetic-key'), \
              patch('werkstatt_assistent.requests.post',return_value=reply) as provider:
             response=self.post('/dialog',{'text':question})
@@ -753,6 +753,28 @@ class AssistantTests(unittest.TestCase):
             self.assertNotIn('Packinhalt',variant['fehlende_angaben'])
         with database() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_aktionen').fetchone()[0],0)
+
+        # The complete fresh view can answer the exact same pure question
+        # without a language-model round; old dialogue cannot alter its facts.
+        with patch.object(p.cockpit_data,'_material_records',return_value=([],records,{})), \
+             patch('werkstatt_assistent.requests.post',side_effect=AssertionError('No provider call')):
+            direct=self.post('/dialog',{'text':question})
+        self.assertEqual(direct.status_code,200)
+        self.assertEqual(direct.json['events'],[])
+        self.assertIn('25 mm mit 36, 30 mm mit 32 und 50 mm mit 24 Stück je Verkaufseinheit',direct.json['text'])
+        self.assertIn('Farbzuordnung sind ungeprüft',direct.json['text'])
+        with database() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_aktionen').fetchone()[0],0)
+            self.assertEqual(db.execute("SELECT text FROM assistent_dialog WHERE actor='mitarbeiter:1' AND role='assistant' ORDER BY id DESC LIMIT 1").fetchone()[0],direct.json['text'])
+
+        with database() as db:db.execute('UPDATE assistent_rechte SET einkaufen=0 WHERE mitarbeiter_id=1')
+        with patch.object(p.cockpit_data,'material_context') as material, \
+             patch.object(p,'get_openai_api_key',return_value='synthetic-key'), \
+             patch('werkstatt_assistent.requests.post',return_value=reply) as provider:
+            self.assertEqual(self.post('/dialog',{'text':question}).status_code,200)
+            material.assert_not_called()
+            self.assertEqual(provider.call_count,1)
+            self.assertNotIn('36 Stück',provider.call_args.kwargs['json']['instructions'])
 
     @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
     def test_material_prefetch_respects_revoked_rights_and_outage(self):

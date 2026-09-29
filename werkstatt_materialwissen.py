@@ -202,6 +202,124 @@ def _package(row):
     return None
 
 
+def band_auskunft(text, context):
+    """Return a short factual answer for a narrow band question, else None.
+
+    ``context`` must be freshly loaded, scope-filtered material_context data.
+    No writes, historical defaults, stock claims or order recommendations.
+    Only HydroGreen is recognized here: other tapes can have diameters instead
+    of widths. Any unsupported intent, incomplete result or conflict falls back
+    to the normal assistant. This does not replace authorization at the caller.
+    """
+    if not isinstance(text, str) or len(text) > 350 or not isinstance(context, dict):
+        return None
+    question = re.sub(r'^nur auskunft(?:,?\s*keine bestellung)?\s*:\s*', '', _ascii(text))
+    terms = tokens(question)
+    fields = r'(?:breiten?|verpackungseinheiten|packmengen|packinhalte?)'
+    sentence = (rf'welche {fields}(?: und {fields})? (?:sind|ist) '
+                r'(?:(?:bei|von) (?:unserem|unseren|dem|den) |beim |unserem |unser )?'
+                r'(?:gruen )?(?:klebeband|hydrogreen) (?:belegt|hinterlegt)')
+    if ('?' in question.rstrip('?').strip() or not re.fullmatch(sentence, ' '.join(terms))):
+        return None
+    wants_width = bool({'breiten', 'breite'} & set(terms))
+    wants_pack = bool({'verpackungseinheiten', 'packmengen', 'packinhalt', 'packinhalte'} & set(terms))
+    if not (wants_width or wants_pack):
+        return None
+    coverage = context.get('abdeckung') or {}
+    if (context.get('suchstatus') != 'treffer' or context.get('varianten_gekuerzt')
+            or context.get('suchhinweise') or coverage.get('begrenzt') or coverage.get('positionen_begrenzt')):
+        return None
+    variants = context.get('varianten')
+    if not isinstance(variants, list) or not 1 <= len(variants) <= 20:
+        return None
+
+    def has_source(source):
+        return (isinstance(source, dict) and source.get('art') in ('einkauf', 'lexware')
+                and bool(source.get('beleg_id'))
+                and any(type(source.get(key)) is int and source[key] > 0 for key in ('seite', 'position', 'zeile')))
+
+    groups = {}
+    color_unconfirmed = False
+    for item in variants:
+        if not isinstance(item, dict) or 'hydrogreen' not in tokens(item.get('produkt_name', '')):
+            return None
+        source_rows = item.get('quellen') or []
+        if not any(has_source(source) for source in source_rows):
+            return None
+        dimensions = _measurements(item.get('groesse', ''))
+        name_dimensions = _measurements(item.get('produkt_name', ''))
+        for dimension_unit in ('mm', 'm'):
+            stored = {number for number, unit in dimensions if unit == dimension_unit}
+            named = {number for number, unit in name_dimensions if unit == dimension_unit}
+            if stored and named and stored != named:
+                return None
+        dimensions |= name_dimensions
+        widths = {number for number, unit in dimensions if unit == 'mm'}
+        if (len(widths) != 1 or len({number for number, unit in dimensions if unit == 'm'}) > 1
+                or any(unit not in ('mm', 'm') for _, unit in dimensions)):
+            return None
+        width = _number(next(iter(widths)))
+        if not width or Decimal(width) > 1000:
+            return None
+        supplier, sku = _normal(item.get('lieferant')), _normal(item.get('artikelnummer'))
+        if not supplier or not sku:
+            return None
+        colors = _colors(item.get('farbe', ''))
+        if colors - {'gruen'}:
+            return None
+        if 'gruen' in terms and not colors:
+            match = item.get('farbabgleich') or {}
+            if match.get('basis') != 'produktname_alias' or match.get('namenshinweis') != 'HydroGreen':
+                return None
+            color_unconfirmed = True
+        # Presentation only: old and new descriptions of the same SKU may
+        # supply compatible evidence. Their stored variants remain separate.
+        # Only formatting and explicit /VE contents may differ between old
+        # and new names. Meaningful suffixes such as Premium stay distinct.
+        name = re.sub(r'\b\d+(?:[.,]\d+)?\s*(?:stueck|stk\.?|rollen?)\s*/\s*ve\b', '', _ascii(item.get('produkt_name')))
+        name = re.sub(r'(?<=\d)\s*mrolle\b', ' m rolle', name)
+        packaging = tokens(item.get('gebinde', ''))
+        if packaging == ('1', 'stueck'):
+            packaging = ()  # Known legacy default; not evidence of pack size.
+        key = (supplier, sku, tuple(sorted(dimensions)), tokens(name), packaging, tokens(item.get('ve', '')))
+        group = groups.setdefault(key, {'width': width, 'packs': set()})
+        pack = item.get('packinhalt')
+        if pack is not None:
+            if not isinstance(pack, dict) or not has_source(pack.get('quelle')):
+                return None
+            amount = _number(pack.get('menge'))
+            unit, per = _ascii(pack.get('einheit')), _ascii(pack.get('pro'))
+            units = {'stueck': 'Stück', 'rolle': 'Rollen', 'rollen': 'Rollen'}
+            containers = {'ve': 'Verkaufseinheit', 'pack': 'Packung', 'karton': 'Karton', 'gebinde': 'Gebinde'}
+            if not amount or unit not in units or per not in containers:
+                return None
+            group['packs'].add((amount, units[unit], containers[per]))
+            if len(group['packs']) > 1:
+                return None
+    rows = sorted(groups.values(), key=lambda group: Decimal(group['width']))
+    if (not 1 <= len(rows) <= 4 or len({key[0] for key in groups}) != 1
+            or len({row['width'] for row in rows}) != len(rows)):
+        return None
+
+    def join(parts):
+        return ' und '.join(parts) if len(parts) < 3 else ', '.join(parts[:-1]) + ' und ' + parts[-1]
+
+    packs = [next(iter(row['packs'])) if row['packs'] else None for row in rows]
+    if wants_pack and all(packs) and len({pack[1:] for pack in packs}) == 1:
+        details = join([f"{row['width']} mm mit {pack[0].replace('.', ',')}" for row, pack in zip(rows, packs)])
+        details += f' {packs[0][1]} je {packs[0][2]}'
+    elif wants_pack:
+        details = join([f"{row['width']} mm" + (f" mit {pack[0].replace('.', ',')} {pack[1]} je {pack[2]}" if pack else '')
+                        for row, pack in zip(rows, packs)])
+        missing = [f"{row['width']} mm" for row, pack in zip(rows, packs) if not pack]
+        if missing:
+            details += '. Packinhalt unbekannt bei ' + join(missing)
+    else:
+        details = join([f"{row['width']} mm" for row in rows])
+    qualification = 'Die Auslese und Farbzuordnung sind ungeprüft.' if color_unconfirmed else 'Die Auslese ist ungeprüft.'
+    return f'Laut bisheriger Belegauslese: HydroGreen {details}. {qualification}'
+
+
 def build_variants(records, query='', limit=30):
     """Group exact operational variants; every amount remains a review proposal."""
     groups = OrderedDict()

@@ -19,8 +19,8 @@
 <section><h3>{{ article.produkt_name }}</h3>
 <p>{{ article.lieferant or 'Lieferant ungeklärt' }} · {{ article.artikelnummer }}</p><p>{{ article.produkt_beschreibung }}</p>
 <p>Rechnungsmenge: {% if quantity.get('basis') == 'invoice_line' and quantity.get('value') %}{{ quantity.value }} {{ quantity.unit or '(Einheit ungeklärt)' }} · ungeprüft aus der Belegposition{% else %}nicht belegt – am Original prüfen{% endif %}</p>
-<p>Verkaufseinheit (VE): {{ article.ve or 'nicht erkannt' }} · Gebinde/Variante: {{ article.gebinde or 'nicht erkannt' }}{% if article.groesse %} · {{ article.groesse }}{% endif %}{% if article.farbe %} · {{ article.farbe }}{% endif %}</p>
-<p>Packungsinhalt: {% if package.get('basis') == 'explicit_description' and package.get('value') %}{{ package.value }} {{ package.unit }} je {{ package.per_unit }} · laut „{{ package.text }}“, ungeprüft{% else %}nicht eindeutig belegt{% endif %}</p>
+<p>Einheit laut Beleg: {{ article.ve or 'nicht erkannt' }} · Gebinde/Variante: {{ article.gebinde or 'nicht erkannt' }}{% if article.groesse %} · {{ article.groesse }}{% endif %}{% if article.farbe %} · {{ article.farbe }}{% endif %}</p>
+<p>Packungsinhalt: {% if package.get('basis') == 'explicit_description' and package.get('value') %}{{ package.value }} {{ package.unit }} je {{ 'Verkaufseinheit (VE)' if package.per_unit == 'VE' else package.per_unit }} · laut „{{ package.text }}“, ungeprüft{% else %}nicht eindeutig belegt{% endif %}</p>
 <p>Die Rechnungsmenge ist keine neue Bestellvorgabe und wird nicht als Packungsinhalt verwendet.</p>
 <p>Preisangabe aus Beleg: {{ article.historischer_preishinweis or 'nicht erkannt' }} · noch ungeprüft</p>
 <p>Quelle: {{ article.quelle.beleg }}{% if article.quelle.get('datum') %} · Rechnungsdatum {{ article.quelle.datum }}{% endif %}{% if article.quelle.seiten %}, Seite(n) {{ article.quelle.seiten|join(', ') }}{% elif article.quelle.seite %}, Seite {{ article.quelle.seite }}{% endif %}{% if article.quelle.position is not none %} · Position {{ article.quelle.position }}{% elif article.quelle.zeile is not none %} · Zeile {{ article.quelle.zeile }}{% endif %}</p></section>

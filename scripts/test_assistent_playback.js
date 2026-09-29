@@ -13,7 +13,7 @@ function deferred() {
 }
 class Element {
   constructor() {
-    this.dataset = {}; this.elements = {text: {value: ''}, id: {value: ''}};
+    this.dataset = {}; this.elements = {text: {value: '',focus(){this.focused=true;}}, id: {value: ''}};
     this.listeners = new Map(); this.children = []; this.textContent = '';
   }
   addEventListener(name, handler) {
@@ -22,7 +22,8 @@ class Element {
   }
   removeEventListener(name, handler) { this.listeners.get(name)?.delete(handler); }
   emit(name, event) { return Promise.all([...this.listeners.get(name) || []].map(handler=>handler(event))); }
-  append(child) { this.children.push(child); }
+  append(child) { this.children.push(child); child.parentNode=this; }
+  remove() { if(this.parentNode)this.parentNode.children=this.parentNode.children.filter(child=>child!==this);this.parentNode=null; }
   prepend(child) { this.children.unshift(child); }
   replaceChildren(...children) { this.children = children; }
   querySelectorAll() { return []; }
@@ -34,7 +35,7 @@ class Element {
   showModal() { this.open = true; }
 }
 async function fixture(options={}) {
-  const elements = new Map(), document = new Element(), requests = [], dialogs = [], transcriptions = [], timers = new Map(), revoked = [], meterCalls = [], apiRequests = [];
+  const elements = new Map(), document = new Element(), requests = [], dialogs = [], transcriptions = [], timers = new Map(), revoked = [], meterCalls = [], apiRequests = [], mediaCalls = [];
   const responses = options.responses || new Map();
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('assistant').dataset = {readOnly: 'true', ready: 'true', statusEnabled:String(!!options.statusEnabled), purchaseEnabled:String(!!options.purchaseEnabled)};
@@ -46,6 +47,7 @@ async function fixture(options={}) {
   audio.removeAttribute = name => { if (name === 'src') audio.src = ''; };
   audio.load = () => {};
   document.hidden = false;
+  document.head = new Element();
   document.getElementById = get;
   document.createElement = tag => Object.assign(new Element(), {tagName:tag});
   document.querySelector = () => ({content: 'synthetic-csrf'});
@@ -75,7 +77,7 @@ async function fixture(options={}) {
   }
   const context = {
     document, AbortController, FormData, Blob, MediaRecorder: Recorder,
-    navigator: {mediaDevices: {getUserMedia: options.getUserMedia || (async () => ({getTracks: () => [{stop() {}}]}))}},
+    navigator: {mediaDevices: {getUserMedia: (...args) => {mediaCalls.push(args);return (options.getUserMedia || (async () => ({getTracks: () => [{stop() {}}]})))(...args);}}},
     window: {isSecureContext: true, crypto:require('node:crypto').webcrypto, MediaRecorder: Recorder, AssistantVoiceMode: Voice, AssistantRealtime: Realtime, OutputAudioMeter: Meter, addEventListener() {}},
     URL: {createObjectURL: () => `blob:synthetic-${++urlId}`, revokeObjectURL: url => revoked.push(url)},
     setTimeout: (fn,ms) => { timers.set(++timerId, {fn,ms}); return timerId; },
@@ -100,18 +102,91 @@ async function fixture(options={}) {
       return {ok: true, json: async () => url.endsWith('/aktionen') ? [] : {modus: 'unavailable'}};
     }
   };
+  Object.assign(context.window,options.audioConstructors||{});
   vm.createContext(context);
   // Expose closures only in this in-memory test instance; production has no test API.
-  vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.playbackTest={say,stopVoice,safe,realtime,prepareReadback,refresh,showOrder,chat,getPending:()=>pending,getCurrent:()=>current};\n})();'), context);
+  vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.playbackTest={say,stopVoice,safe,realtime,prepareReadback,refresh,showOrder,chat,getPending:()=>pending,getCurrent:()=>current,getRealtime:()=>realtime};\n})();'), context);
   await flush();
-  return {test: context.window.playbackTest, get, audio, requests, dialogs, transcriptions, timers, revoked, document, meterCalls, apiRequests, responses,
+  return {test: context.window.playbackTest, get, audio, requests, dialogs, transcriptions, timers, revoked, document, meterCalls, apiRequests, responses, mediaCalls, window:context.window, constructors:{Voice,Realtime,Meter},
     state: () => get('avatar').dataset.state,
     deliver: async index => { requests[index].resolve(new Blob(['synthetic audio'])); await flush(); }};
 }
 
 (async () => {
+  // A failed optional asset must not abort initialization of text/menu/workflows.
+  let f=await fixture({audioConstructors:{AssistantRealtime:undefined,AssistantVoiceMode:undefined,OutputAudioMeter:undefined}});
+  assert.equal(f.get('audio-components-help').hidden,false);
+  assert.match(f.get('audio-components-message').textContent,/Texteingabe und Menü bleiben verfügbar/);
+  assert.equal(f.get('voice-mode').disabled,true);
+  assert.equal(f.get('record').disabled,false,'standalone recording is not dependent on voice scripts');
+  assert.equal(typeof f.window.AssistantWorkflowHost.api,'function');
+  assert.equal(f.document.head.children.length,0,'no automatic reload loop');
+  f.get('write-message').onclick();
+  assert.equal(f.get('assistant-menu').open,true);assert.equal(f.get('chat').elements.text.focused,true);
+  f.get('read-aloud').checked=false;f.get('chat').elements.text.value='Was steht im Auftrag?';
+  let written=f.get('chat').onsubmit({preventDefault(){}});await flush();
+  assert.equal(f.dialogs.length,1);f.dialogs[0].resolve({text:'Die Beschreibung ist verfügbar.',events:[]});await written;
+  assert.ok(f.get('conversation').children.some(row=>row.textContent==='KI: Die Beschreibung ist verfügbar.'));
+  assert.equal(f.mediaCalls.length,0);assert.equal(f.get('chat').elements.text.value,'');
+
+  // Reload only the missing fixed local asset, once, preserving unsaved forms.
+  f=await fixture({audioConstructors:{AssistantRealtime:undefined}});
+  f.get('chat').elements.text.value='Ungesendeter Text';f.get('order-form').elements.id.value='123';
+  const bootstrapRetry=f.get('audio-components-retry').onclick({preventDefault(){}});
+  assert.equal(f.document.head.children.length,1);
+  const script=f.document.head.children[0];assert.match(script.src,/^\/static\/assistent-realtime\.js\?audio-retry=\d+$/);
+  await f.get('audio-components-retry').onclick({preventDefault(){}});
+  assert.equal(f.document.head.children.length,1,'double click cannot load a second script');
+  f.window.AssistantRealtime=f.constructors.Realtime;script.onload();await bootstrapRetry;
+  assert.equal(f.get('audio-components-help').hidden,true);assert.equal(f.get('voice-mode').disabled,false);
+  assert.equal(f.get('chat').elements.text.value,'Ungesendeter Text');assert.equal(f.get('order-form').elements.id.value,'123');
+  assert.equal(f.test.getRealtime().active,false);assert.equal(f.mediaCalls.length,0);
+  assert.ok(!f.apiRequests.some(row=>row.options.method==='POST'),'asset recovery cannot confirm an action or start a session');
+  await f.get('voice-mode').onclick({preventDefault(){}});assert.equal(f.test.getRealtime().active,true);f.test.stopVoice();
+
+  // A failed or late reload stays bounded and leaves the working controller alone.
+  f=await fixture({audioConstructors:{AssistantVoiceMode:undefined}});
+  const originalRealtime=f.test.getRealtime();
+  const failedRetry=f.get('audio-components-retry').onclick({preventDefault(){}});
+  const delayed=f.document.head.children[0],lateLoad=delayed.onload;
+  [...f.timers.values()].find(timer=>timer.ms===15000).fn();await failedRetry;
+  assert.equal(f.document.head.children.length,0);assert.equal(f.get('audio-components-retry').disabled,true);
+  assert.match(f.get('audio-components-message').textContent,/Nachladeversuch ist beendet/);
+  f.window.AssistantVoiceMode=f.constructors.Voice;lateLoad();await flush();
+  assert.equal(f.test.getRealtime(),originalRealtime);assert.equal(f.mediaCalls.length,0);
+  assert.equal(f.get('voice-mode').disabled,false,'working realtime stays available without spoken confirmation');
+  await f.get('audio-components-retry').onclick({preventDefault(){}});assert.equal(f.document.head.children.length,0);
+
+  // Constructor errors and malformed exports are isolated too, without re-executing
+  // already evaluated scripts (VoiceMode has a top-level lexical class declaration).
+  const Broken=class{constructor(){throw new Error('synthetic constructor failure');}};
+  f=await fixture({audioConstructors:{AssistantRealtime:Broken,AssistantVoiceMode:{invalid:true},OutputAudioMeter:Broken}});
+  f.get('write-message').onclick();assert.equal(f.get('assistant-menu').open,true);
+  const brokenRetry=f.get('audio-components-retry').onclick({preventDefault(){}});
+  assert.equal(f.document.head.children.length,1);assert.match(f.document.head.children[0].src,/assistent-voice\.js/);
+  f.document.head.children[0].onerror();await brokenRetry;
+  assert.equal(f.get('audio-components-retry').disabled,true);assert.equal(f.mediaCalls.length,0);
+
+  // The optional meter/animation may fail during use without blocking real audio.
+  const FailingMeter=class{unlock(){throw new Error('meter failed');}clear(){}useBlob(){}useStream(){}suspend(){}};
+  f=await fixture({audioConstructors:{OutputAudioMeter:FailingMeter}});
+  f.window.AssistantAvatar={instance:{animation:{setAudioLevel(){throw new Error('animation failed');}}}};
+  f.get('write-message').onclick();f.get('read-aloud').checked=false;f.get('chat').elements.text.value='Weiter';
+  written=f.get('chat').onsubmit({preventDefault(){}});await flush();
+  f.dialogs[0].resolve({text:'Weiter geht es.',events:[]});await written;
+  assert.equal(f.state(),'idle');
+
+  // Recovery cannot remove the stop control while another audio feature is busy.
+  f=await fixture({audioConstructors:{AssistantRealtime:undefined}});
+  const recoveryReadback=f.test.say('Bitte vollständig prüfen.');
+  const duringAudioRetry=f.get('audio-components-retry').onclick({preventDefault(){}});
+  f.window.AssistantRealtime=f.constructors.Realtime;f.document.head.children[0].onload();await duringAudioRetry;
+  assert.equal(f.get('voice-stop').hidden,false);assert.equal(f.get('record').disabled,true);
+  f.test.stopVoice();assert.equal(await recoveryReadback,false);await f.deliver(0);
+  assert.equal(f.audio.plays,0,'stopped TTS cannot return after dependency recovery');
+
   // Stop must settle immediately, abort fetch, and ignore its eventual body.
-  let f = await fixture();
+  f = await fixture();
   let result = f.test.say('Erste Antwort');
   assert.equal(f.state(), 'thinking');
   assert.equal(f.get('voice-stop').hidden, false, 'stop is available while TTS loads');
@@ -390,6 +465,20 @@ async function fixture(options={}) {
   await f.get('status-change').onsubmit({preventDefault(){}});
   assert.ok(!f.apiRequests.some(x=>x.url.includes('/vorschlag')||x.url.includes('/bestaetigen')||x.url.includes('/vorlesen')),'hidden controls do not grant write capabilities');
 
+  // Missing spoken confirmation never arms a nonce, but a deliberate reviewed
+  // button still works using the existing protected confirmation endpoint.
+  const fallbackRoutes=new Map([['/aktionen',[orderProposal]],['/bestaetigen/purchase-1',()=>{
+    fallbackRoutes.set('/aktionen',[queued]);return {ok:true,hinweis:'Bestellung bestätigt.',versandstatus:queued.versandstatus};
+  }]]);
+  f=await fixture({purchaseEnabled:true,audioConstructors:{AssistantVoiceMode:undefined},responses:fallbackRoutes});
+  const fallbackCard=f.get('actions').children[0];
+  assert.equal(fallbackCard.children.find(button=>button.textContent==='Vorlesen & per Sprache bestätigen').disabled,true);
+  assert.equal(await f.test.prepareReadback(orderProposal),false);assert.equal(f.test.getPending(),null);
+  assert.ok(!f.apiRequests.some(row=>row.options.method==='POST'),'missing voice cannot approve or arm an action');
+  await fallbackCard.children.find(button=>button.textContent==='Verbindlich bestellen').onclick({preventDefault(){}});
+  assert.equal(f.apiRequests.filter(row=>row.url.endsWith('/bestaetigen/purchase-1')).length,1);
+  assert.match(f.get('status').textContent,/Noch nicht versendet/);
+
   // Only SMTP-accepted orders can create a fresh unapproved proposal, never resend.
   const previousStates=['sent','copy_pending','uncertain','queued','blocked'];
   const previousOrders=previousStates.map(state=>({...queued,id:'previous-'+state,versandstatus:{state,message:state}}));
@@ -415,5 +504,5 @@ async function fixture(options={}) {
   assert.match(f.get('status').textContent,/Neue Bestellung vorbereitet, noch nicht ausgelöst/);
   assert.equal(f.get('actions').children.at(-1).children.find(x=>x.tagName==='button').textContent,'Verbindlich bestellen','new proposal still requires deliberate confirmation');
 
-  console.log('PASS: TTS lifecycle, generation overlap, WebRTC handoff, stopped requests; targeted status/order capabilities, explicit summaries, truthful queued state, no resend, exact spoken confirmation after full readback and order-change cancellation.');
+  console.log('PASS: optional audio bootstrap isolation, bounded deliberate recovery without microphone/action side effects; TTS lifecycle, generation overlap, WebRTC handoff, stopped requests; targeted capabilities and exact confirmation after full readback.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

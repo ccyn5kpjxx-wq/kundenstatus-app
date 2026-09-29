@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from werkstatt_materialwissen import build_variants, query_notes, rank_records
+from werkstatt_materialwissen import band_auskunft, build_variants, query_notes, rank_records
 from werkstatt_cockpit_api import CockpitData, _invoice_product
 from werkstatt_artikel_import import InvoiceCatalog
 from werkstatt_topcolor_positionen import parse_topcolor_pages
@@ -29,6 +29,65 @@ def tape(number='T-30', width='30 mm', color='grün', supplier='Top-Color GmbH',
 
 
 class SearchTests(unittest.TestCase):
+    def band_context(self):
+        rows=[]
+        for width,count in ((25,36),(30,32),(50,24)):
+            item=tape(number=f'T-{width}',width=f'{width} mm',color='',quantity='2')
+            item.update(produkt_name=f'Test MP TapeHydroGreen50mRolle x{width}mm',ve='Stück')
+            item['package_evidence']={'basis':'explicit_description','value':str(count),'unit':'Stück','per_unit':'VE'}
+            rows.append(item)
+        return {'varianten':build_variants(rows,'grünes Abklebeband'), 'suchstatus':'treffer',
+                'varianten_gekuerzt':False,'abdeckung':{'begrenzt':False,'positionen_begrenzt':False}}
+
+    def test_direct_band_answer_preserves_pack_evidence_and_color_qualification(self):
+        result=band_auskunft('Nur Auskunft: Welche Breiten und Verpackungseinheiten sind bei unserem grünen Abklebeband belegt?',self.band_context())
+        self.assertEqual(result,'Laut bisheriger Belegauslese: HydroGreen 25 mm mit 36, 30 mm mit 32 und 50 mm mit 24 Stück je Verkaufseinheit. Die Auslese und Farbzuordnung sind ungeprüft.')
+        self.assertLess(len(result.split()),40)
+        self.assertNotIn('Karton',result)
+
+    def test_direct_band_answer_declines_other_intents_and_partial_or_unproven_data(self):
+        question='Welche Breiten und Packmengen sind bei unserem Abklebeband belegt?'
+        for suffix in (' Und bestelle einen Karton.', ' Was kostet es?', ' Wie viel ist auf Lager?', ' Auftrag 156 ist fertig.', ' Warum?', ' Bitte empfehle eine Menge.', ' Welche Rechnungen haben wir?'):
+            self.assertIsNone(band_auskunft(question+suffix,self.band_context()))
+        self.assertIsNone(band_auskunft(question.rstrip('?')+' und',self.band_context()))
+        for marker in ('varianten_gekuerzt','suchhinweise'):
+            context=self.band_context();context[marker]=True
+            self.assertIsNone(band_auskunft(question,context))
+        for marker in ('begrenzt','positionen_begrenzt'):
+            context=self.band_context();context['abdeckung'][marker]=True
+            self.assertIsNone(band_auskunft(question,context))
+        context=self.band_context();context['varianten'][0]['packinhalt']['quelle']={}
+        self.assertIsNone(band_auskunft(question,context))
+        context=self.band_context();context['varianten'][0]['groesse']='25 mm / 30 mm'
+        self.assertIsNone(band_auskunft(question,context))
+        context=self.band_context();context['varianten'][0]['groesse']='30 mm'
+        self.assertIsNone(band_auskunft(question,context))
+        context=self.band_context();context['varianten'][0]['produkt_name']='Soft Foam Masking Tape 13 mm'
+        self.assertIsNone(band_auskunft(question,context))
+
+    def test_direct_band_answer_handles_legacy_duplicates_without_quantity_guess(self):
+        question='Welche Breiten und Packmengen sind bei unserem grünen Abklebeband belegt?'
+        context=self.band_context()
+        old=deepcopy(context['varianten'][0]);old['packinhalt']=None
+        old.update(produkt_name='Test MP Tape HydroGreen 50 m Rolle x 25 mm',ve='Stück',gebinde='1 Stück')
+        context['varianten'].append(old)
+        answer=band_auskunft(question,context)
+        self.assertIn('25 mm mit 36',answer)
+        self.assertNotIn('mit 1',answer)
+        old['gebinde']='12 Rollen/Karton'
+        self.assertIsNone(band_auskunft(question,context))
+        old['gebinde']='1 Stück'
+        old['produkt_name']='Test MP Tape HydroGreen Premium 50 m Rolle x 25 mm'
+        self.assertIsNone(band_auskunft(question,context))
+        old['produkt_name']='Test MP Tape HydroGreen 50 m Rolle x 25 mm'
+        old['artikelnummer']='DIFFERENT-SKU'
+        self.assertIsNone(band_auskunft(question,context))
+        old['artikelnummer']=context['varianten'][0]['artikelnummer']
+        old['packinhalt']=deepcopy(context['varianten'][0]['packinhalt']);old['packinhalt']['menge']='24'
+        self.assertIsNone(band_auskunft(question,context))
+        context=self.band_context();context['varianten'][0]['packinhalt']=None
+        self.assertIn('Packinhalt unbekannt bei 25 mm',band_auskunft(question,context))
+
     def test_live_wording_and_concatenated_trade_name_match_without_fabricated_pack(self):
         row=tape(number='10000991')
         row.update(produkt_name='Mipa593250500 MP TapeHydroGreen50mRolle x30mm',groesse='',farbe='',ve='Stück',gebinde='')
