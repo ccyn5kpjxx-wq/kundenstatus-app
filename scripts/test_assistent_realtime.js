@@ -56,6 +56,69 @@ const toolEvent={type:'response.function_call_arguments.done',name:'auftrag_lese
   await f.voice.refresh();assert.equal(f.sent.at(-1).event.type,'session.update');
   f.voice.stop();assert.equal(f.stopped(),1);assert.equal(f.audio.srcObject,null);assert.equal(f.timers.size,0);assert.equal(f.remoteStreams.at(-1),null);
 
+  // Provider response failures arrive as response.done, not necessarily as an
+  // error event. They must stop the waiting state and release all resources,
+  // without exposing raw provider/account details or attempting another call.
+  for(const [code,expected] of [
+    ['server_error',/keine Antwort erzeugen/],['rate_limit_exceeded',/ausgelastet/],
+    ['insufficient_quota',/Werkstattleitung/],['billing_hard_limit_reached',/Werkstattleitung/],
+    ['unknown_private_code',/keine Antwort erzeugen/]
+  ]){
+    f=fixture();await f.voice.start();
+    await f.voice.event({type:'input_audio_buffer.speech_started'});
+    await f.voice.event({type:'input_audio_buffer.speech_stopped'});
+    await f.voice.event({type:'response.created',response:{id:'synthetic-failure'}});
+    f.voice.channel.onmessage({data:JSON.stringify({type:'response.done',response:{id:'synthetic-failure',status:'failed',
+      status_details:{type:'failed',error:{code,message:'PRIVATE_SYNTHETIC_ACCOUNT_DATA'}}}})});
+    await flush();
+    assert.equal(f.errors.length,1);assert.match(f.errors[0].message,expected);
+    assert.doesNotMatch(f.errors[0].message,/PRIVATE_SYNTHETIC|unknown_private_code|server_error/);
+    assert.equal(f.errors[0].phase,'connected');assert.equal(f.voice.active,false);
+    assert.equal(f.stopped(),1);assert.equal(f.audio.srcObject,null);assert.equal(f.audio.muted,false);
+    assert.equal(f.timers.size,0);assert.equal(f.calls[0].signal.aborted,true);
+    assert.equal(f.calls.length,1);assert.equal(f.sent.length,0,'a failed answer is never retried or confirmed automatically');
+  }
+  for(const reason of ['max_output_tokens','content_filter']){
+    f=fixture();await f.voice.start();
+    await f.voice.event({type:'response.created',response:{id:'synthetic-incomplete'}});
+    await f.voice.event({type:'output_audio_buffer.started',response_id:'synthetic-incomplete'});
+    await f.voice.event({type:'response.done',response:{id:'synthetic-incomplete',status:'incomplete',status_details:{reason}}});
+    assert.equal(f.voice.active,false);assert.equal(f.errors.length,1);
+    assert.match(f.errors[0].message,reason==='max_output_tokens'?/abgeschnitten/:/nicht vollständig/);
+    assert.equal(f.sent.length,0);assert.equal(f.stopped(),1);
+  }
+
+  // A normal user interruption is not a fatal provider failure. Neither its
+  // cancellation nor any obsolete terminal response may stop the new turn.
+  f=fixture();await f.voice.start();
+  await f.voice.event({type:'response.created',response:{id:'synthetic-old'}});
+  await f.voice.event({type:'output_audio_buffer.started',response_id:'synthetic-old'});
+  await f.voice.event({type:'input_audio_buffer.speech_started'});
+  await f.voice.event({type:'response.done',response:{id:'synthetic-old',status:'cancelled',status_details:{reason:'turn_detected'}}});
+  assert.equal(f.voice.active,true);assert.equal(f.audio.muted,true);assert.equal(f.states.at(-1)[0],'listening');
+  await f.voice.event({type:'input_audio_buffer.speech_stopped'});
+  await f.voice.event({type:'response.created',response:{id:'synthetic-new'}});
+  await f.voice.event({type:'output_audio_buffer.started',response_id:'synthetic-new'});
+  for(const status of ['cancelled','failed','incomplete','completed']){
+    await f.voice.event({type:'response.done',response:{id:'synthetic-old',status}});
+    assert.equal(f.voice.active,true);assert.equal(f.audio.muted,false);assert.equal(f.states.at(-1)[0],'speaking');
+  }
+  await f.voice.event({type:'response.done',response:{id:'synthetic-new',status:'completed',output:[{type:'message'}]}});
+  assert.equal(f.states.at(-1)[0],'speaking','generation done is not the end of queued audio playback');
+  await f.voice.event({type:'output_audio_buffer.stopped',response_id:'synthetic-new'});
+  assert.equal(f.states.at(-1)[0],'listening');assert.equal(f.errors.length,0);f.voice.stop();
+
+  // Successful tool responses still produce exactly one normal continuation;
+  // response.done must not close the channel while the local tool is pending.
+  f=fixture();await f.voice.start();const toolResponse=deferred();f.behaviour.api=()=>toolResponse.promise;
+  await f.voice.event({type:'response.created',response:{id:'synthetic-tool'}});
+  const pendingTool=f.voice.event({...toolEvent,response_id:'synthetic-tool'});
+  await f.voice.event({type:'response.done',response:{id:'synthetic-tool',status:'completed',output:[{type:'function_call'}]}});
+  assert.equal(f.voice.active,true);assert.equal(f.sent.length,0);
+  toolResponse.resolve({result:{id:156}});await pendingTool;
+  assert.deepEqual(f.sent.map(row=>row.event.type),['conversation.item.create','response.create']);
+  assert.equal(f.errors.length,0);f.voice.stop();
+
   // A never-resolving permission prompt has its own deadline and no server call.
   f=fixture();let mic=deferred();f.behaviour.microphone=()=>mic.promise;
   let pending=f.voice.start();assert.equal(f.voice.phase,'microphone');f.fire(60000);await pending;
@@ -95,6 +158,7 @@ const toolEvent={type:'response.function_call_arguments.done',name:'auftrag_lese
   f.voice.stop();await f.voice.start();const freshPc=f.voice.pc,count=f.timers.size;
   callbacks.track({streams:[f.newStream()]});callbacks.state();callbacks.open();callbacks.close();callbacks.error();callbacks.ended();
   callbacks.message({data:JSON.stringify({type:'input_audio_buffer.speech_started'})});oldTimers.forEach(callback=>callback());
+  callbacks.message({data:JSON.stringify({type:'response.done',response:{id:'obsolete-session',status:'failed'}})});
   assert.equal(f.voice.active,true);assert.equal(f.voice.pc,freshPc);assert.equal(f.audio.muted,false);assert.equal(f.audio.srcObject,null);
   assert.equal(f.timers.size,count);assert.equal(f.errors.length,0);assert.equal(f.texts.length,0);f.voice.stop();
 
@@ -181,5 +245,5 @@ const toolEvent={type:'response.function_call_arguments.done',name:'auftrag_lese
   const remoteTrack={kind:'audio'};f.voice.pc.ontrack({streams:[],track:remoteTrack});await flush();
   assert.equal(f.audio.srcObject.getTracks()[0],remoteTrack);assert.equal(f.voice.active,true);assert.equal(f.errors.length,0);f.voice.stop();
   f=fixture();await f.voice.start();assert.doesNotThrow(()=>f.voice.channel.onmessage({data:'invalid JSON'}));assert.equal(f.voice.active,false);assert.match(f.errors[0].message,/ungültige Nachricht/);
-  console.log('PASS: startup phases/timeouts, permission errors, old callbacks, playback retry, refresh/tool isolation, barge-in and cleanup.');
+  console.log('PASS: startup phases/timeouts, permission errors, old callbacks, playback retry, refresh/tool isolation, barge-in, safe response failure/incomplete handling and cleanup.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

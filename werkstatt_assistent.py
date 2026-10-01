@@ -36,6 +36,61 @@ CHARACTERS = ("chris", "mila", "robot", "drache", "zauberfuchs", "einhorn", "pho
 DEFAULT_CHARACTER = "drache"
 
 
+def _openai_http_error(response):
+    """Return only fixed diagnostic text; provider bodies/headers are private.
+
+    Error messages can echo prompts, API keys or customer data. Even error.code
+    and error.param are untrusted: they may select a fixed label, never output.
+    """
+    status = getattr(response, "status_code", None)
+    error = {}
+    if status in {400, 429}:
+        try:
+            payload = response.json()
+            if isinstance(payload, dict) and isinstance(payload.get("error"), dict):
+                error = payload["error"]
+        except (ValueError, TypeError):
+            pass
+    code = error.get("code")
+    error_type = error.get("type")
+    code = code if isinstance(code, str) else ""
+    error_type = error_type if isinstance(error_type, str) else ""
+    if status == 401:
+        text = "KI-Zugang abgelehnt (HTTP 401). Die Werkstattleitung muss den serverseitigen API-Zugang prüfen."
+    elif status == 403:
+        text = "KI-Zugriff nicht erlaubt (HTTP 403). Die Werkstattleitung muss die Freigabe des KI-Projekts und Modells prüfen."
+    elif status == 404:
+        text = "KI-Modell oder Endpunkt nicht verfügbar (HTTP 404). Die Werkstattleitung muss die KI-Konfiguration prüfen."
+    elif status == 429:
+        if code in {"insufficient_quota", "credit_balance_exhausted", "organization_spend_limit_exceeded",
+                    "project_spend_limit_exceeded", "organization_usage_limit_exceeded", "billing_hard_limit_reached"} or error_type == "insufficient_quota":
+            text = "KI-Kontingent oder Kostenlimit erreicht (HTTP 429). Die Werkstattleitung muss Guthaben und Limits prüfen; erneutes Starten allein behebt das nicht."
+        elif code in {"rate_limit_exceeded", "slow_down"} or error_type == "rate_limit_error":
+            text = "Zu viele KI-Anfragen in kurzer Zeit (HTTP 429). Bitte etwas warten und dann erneut starten."
+        else:
+            text = "KI-Anfragen derzeit begrenzt (HTTP 429). Ob Anfragerate oder Kontingent betroffen ist, ist unbekannt. Die Werkstattleitung muss die Limits prüfen."
+    elif status == 400:
+        # Only explicitly supported schema paths become fixed German labels.
+        labels = {"model": "Modell", "session.model": "Modell", "sdp": "Sprachverbindung",
+                  "session": "Sprachkonfiguration", "session.instructions": "Anweisungen",
+                  "session.tools": "Werkzeuge", "session.audio": "Audioeinstellungen",
+                  "session.audio.output.voice": "Stimme",
+                  "session.audio.input.transcription.model": "Spracherkennungsmodell",
+                  "session.audio.input.turn_detection": "Sprecherkennung",
+                  "session.max_output_tokens": "Antwortlänge"}
+        param = error.get("param")
+        label = labels.get(param) if isinstance(param, str) else None
+        text = "KI-Anfrage oder Konfiguration abgelehnt (HTTP 400)."
+        if label:
+            text += " Betroffener Bereich: " + label + "."
+        text += " Die Werkstattleitung muss die KI-Konfiguration prüfen."
+    elif type(status) is int and 500 <= status <= 599:
+        text = "KI-Dienst hat eine vorübergehende Serverstörung (HTTP " + str(status) + "). Bitte später erneut starten."
+    else:
+        text = "KI-Dienst hat die Anfrage abgelehnt. Die Werkstattleitung muss Verbindung und KI-Konfiguration prüfen."
+    return text + " Keine Aktion automatisch ausgeführt."
+
+
 def material_query(text, history=()):
     """Return product search text, or None to skip unrelated text-turn preload.
 
@@ -388,8 +443,12 @@ def register_assistant(p):
             response = requests.post("https://api.openai.com/v1/" + path, headers={"Authorization": "Bearer " + key}, timeout=(10, 60), **kwargs)
             response.raise_for_status()
             return response
+        except requests.Timeout:
+            raise ValueError("KI-Dienst antwortet nicht rechtzeitig (Zeitüberschreitung). Bitte erneut starten. Keine Aktion automatisch ausgeführt.") from None
+        except requests.HTTPError as exc:
+            raise ValueError(_openai_http_error(exc.response)) from None
         except requests.RequestException:
-            raise ValueError("KI-Dienst derzeit nicht erreichbar oder Zugang/Modell abgelehnt. Keine Aktion automatisch ausgeführt.") from None
+            raise ValueError("Verbindung zum KI-Dienst fehlgeschlagen. Bitte Internet- und Serververbindung prüfen. Keine Aktion automatisch ausgeführt.") from None
 
     @bp.errorhandler(ValueError)
     def invalid(exc):

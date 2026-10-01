@@ -168,6 +168,32 @@ window.AssistantRealtime = class {
     if(!this.current(session))return;
     try {
       switch(event.type){
+        case 'response.created':
+          // A late terminal event from an interrupted response must not end
+          // the newer response in the same WebRTC session.
+          session.responseId=event.response?.id||null;break;
+        case 'response.done': {
+          const response=event.response;
+          if(!response||(session.responseId&&response.id&&response.id!==session.responseId))break;
+          // Generation completion is not playback completion. Keep successful
+          // audio/tool follow-ups and normal VAD cancellations on their paths.
+          if(!['failed','incomplete'].includes(response.status))break;
+          let message;
+          if(response.status==='incomplete'){
+            message=response.status_details?.reason==='max_output_tokens'
+              ?'Die Sprachantwort wurde wegen ihrer Länge abgeschnitten. Bitte Gespräch neu starten und die Frage in kürzeren Schritten stellen.'
+              :'Die Sprachantwort wurde nicht vollständig erzeugt. Bitte Gespräch neu starten oder die Nachricht schreiben.';
+          }else{
+            const code=response.status_details?.error?.code;
+            message=code==='rate_limit_exceeded'
+              ?'Der Sprachdienst ist gerade ausgelastet. Bitte kurz warten und das Gespräch erneut starten.'
+              :['insufficient_quota','billing_hard_limit_reached'].includes(code)
+                ?'Der Sprachdienst kann derzeit keine Antwort erzeugen. Bitte die Werkstattleitung den KI-Zugang prüfen lassen.'
+                :'Der Sprachdienst konnte keine Antwort erzeugen. Bitte Gespräch neu starten oder die Nachricht schreiben.';
+          }
+          // Never display provider text: it may contain request or account data.
+          this.fail(new Error(message),session);break;
+        }
         case 'input_audio_buffer.speech_started':
           // Server VAD also cancels/truncates pending output; mute locally now.
           this.audio.muted=true;session.outputActive=false;

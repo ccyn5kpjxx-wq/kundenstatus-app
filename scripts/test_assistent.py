@@ -470,6 +470,104 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(self.client.get('/werkstatt/assistent/realtime/kontext').status_code,401)
         self.assertEqual(self.post('/realtime/werkzeug',{'name':'auftrag_lesen','arguments':{'auftrag_id':156}}).status_code,401)
 
+    def provider_failure(self, status, payload, *, raw=False):
+        """Exercise real requests.HTTPError, with hostile synthetic data only."""
+        import json
+        import requests
+        response = requests.Response()
+        response.status_code = status
+        response._content = (payload if raw else json.dumps(payload)).encode('utf-8')
+        response.headers.update({'X-Private-Provider': 'PRIVATE_CUSTOMER',
+                                 'Retry-After': 'PRIVATE_CUSTOMER',
+                                 'Set-Cookie': 'provider_secret=PRIVATE_CUSTOMER'})
+        response.url = 'https://api.openai.com/v1/realtime/calls?private=PRIVATE_CUSTOMER'
+        response.request = requests.Request('POST', response.url,
+            headers={'Authorization': 'Bearer synthetic-private-key'},
+            data='PRIVATE_CUSTOMER').prepare()
+        with patch.object(p, 'get_openai_api_key', return_value='synthetic-private-key'), \
+             patch('werkstatt_assistent.requests.post', return_value=response) as provider:
+            result = self.post('/realtime/start', {'sdp': 'v=0\r\nsynthetic-offer'})
+        self.assertEqual(provider.call_count, 1, 'No automatic provider retry')
+        self.assertEqual(result.status_code, 400)
+        self.assertEqual(set(result.json), {'error'})
+        self.assertEqual(result.headers['Cache-Control'], 'no-store')
+        self.assertNotIn('X-Private-Provider', result.headers)
+        self.assertNotIn('Retry-After', result.headers)
+        visible = result.text + str(list(result.headers))
+        for secret in ('synthetic-private-key', 'PRIVATE_CUSTOMER', 'provider_secret'):
+            self.assertNotIn(secret, visible)
+        with database() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_aktionen').fetchone()[0], 0)
+        return result.json['error']
+
+    def test_provider_http_failures_have_safe_distinct_german_categories(self):
+        cases = [
+            (401, {}, 'KI-Zugang abgelehnt'),
+            (403, {}, 'KI-Zugriff nicht erlaubt'),
+            (404, {}, 'Modell oder Endpunkt nicht verfügbar'),
+            (429, {'code': 'insufficient_quota'}, 'KI-Kontingent oder Kostenlimit'),
+            (429, {'code': 'credit_balance_exhausted'}, 'KI-Kontingent oder Kostenlimit'),
+            (429, {'code': 'organization_spend_limit_exceeded'}, 'KI-Kontingent oder Kostenlimit'),
+            (429, {'code': 'project_spend_limit_exceeded'}, 'KI-Kontingent oder Kostenlimit'),
+            (429, {'code': 'organization_usage_limit_exceeded'}, 'KI-Kontingent oder Kostenlimit'),
+            (429, {'type': 'insufficient_quota'}, 'KI-Kontingent oder Kostenlimit'),
+            (429, {'code': 'rate_limit_exceeded'}, 'Zu viele KI-Anfragen'),
+            (429, {'code': 'slow_down'}, 'Zu viele KI-Anfragen'),
+            (429, {'type': 'rate_limit_error'}, 'Zu viele KI-Anfragen'),
+            (429, {}, 'ist unbekannt'),
+            (400, {'code': 'invalid_request_error', 'param': 'session.audio.output.voice'}, 'Betroffener Bereich: Stimme'),
+            (500, {}, 'vorübergehende Serverstörung'),
+            (503, {}, 'vorübergehende Serverstörung'),
+        ]
+        for status, fields, expected in cases:
+            with self.subTest(status=status, fields=fields):
+                message = self.provider_failure(status, {'error': {**fields,
+                    'message': 'PRIVATE_CUSTOMER synthetic-private-key'}})
+                self.assertIn(expected, message)
+                self.assertIn('HTTP ' + str(status), message)
+                self.assertIn('Keine Aktion automatisch ausgeführt.', message)
+
+    def test_provider_error_metadata_is_untrusted_and_never_reflected(self):
+        cases = [(400, {'error': {'code': 'PRIVATE_CUSTOMER', 'param': 'session.tools.PRIVATE_CUSTOMER', 'message': 'PRIVATE_CUSTOMER'}}),
+                 (400, {'error': {'param': ['PRIVATE_CUSTOMER']}}),
+                 (429, {'error': {'code': {'PRIVATE_CUSTOMER': 1}, 'type': ['PRIVATE_CUSTOMER']}}),
+                 (429, ['PRIVATE_CUSTOMER']), (400, {'error': 'PRIVATE_CUSTOMER'}),
+                 (400, None), (418, {'error': {'message': 'PRIVATE_CUSTOMER'}})]
+        for status, payload in cases:
+            with self.subTest(status=status, payload=payload):
+                message = self.provider_failure(status, payload)
+                self.assertNotIn('Betroffener Bereich', message)
+        self.provider_failure(400, '<html>PRIVATE_CUSTOMER synthetic-private-key</html>', raw=True)
+
+    def test_provider_transport_errors_are_distinct_and_redacted(self):
+        import requests
+        for error, expected in [(requests.Timeout, 'Zeitüberschreitung'),
+                                (requests.ConnectTimeout, 'Zeitüberschreitung'),
+                                (requests.ConnectionError, 'Verbindung zum KI-Dienst fehlgeschlagen'),
+                                (requests.RequestException, 'Verbindung zum KI-Dienst fehlgeschlagen')]:
+            with self.subTest(error=error.__name__), \
+                 patch.object(p, 'get_openai_api_key', return_value='synthetic-private-key'), \
+                 patch('werkstatt_assistent.requests.post', side_effect=error('PRIVATE_CUSTOMER synthetic-private-key')) as provider:
+                result = self.post('/realtime/start', {'sdp': 'v=0\r\nsynthetic-offer'})
+                self.assertEqual(result.status_code, 400)
+                self.assertIn(expected, result.json['error'])
+                self.assertNotIn('PRIVATE_CUSTOMER', result.text)
+                self.assertNotIn('synthetic-private-key', result.text)
+                self.assertEqual(result.headers['Cache-Control'], 'no-store')
+                self.assertEqual(provider.call_count, 1)
+
+    def test_provider_authorization_stays_server_side_and_multipart_boundary_is_automatic(self):
+        from unittest.mock import Mock
+        provider = Mock(text='v=0\r\nsynthetic-answer')
+        with patch.object(p, 'get_openai_api_key', return_value='synthetic-private-key'), \
+             patch('werkstatt_assistent.requests.post', return_value=provider) as call:
+            result = self.post('/realtime/start', {'sdp': 'v=0\r\nsynthetic-offer'})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(call.call_args.kwargs['headers'], {'Authorization': 'Bearer synthetic-private-key'})
+        self.assertEqual(call.call_args.kwargs['timeout'], (10, 60))
+        self.assertIn('files', call.call_args.kwargs)
+        self.assertNotIn('synthetic-private-key', result.text + str(list(result.headers)))
+
     @patch.dict(p.app.config, ASSISTANT_NATIVE_COCKPIT=False)
     def test_cockpit_snapshot_readonly_no_demo_fallback(self):
         import json
