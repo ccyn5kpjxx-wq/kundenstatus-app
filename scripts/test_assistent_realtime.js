@@ -6,7 +6,7 @@ const vm=require('node:vm');
 const flush=()=>new Promise(setImmediate);
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 function fixture(){
-  const behaviour={},timers=new Map(),sent=[],states=[],errors=[],texts=[],calls=[],events=[],pcs=[],streams=[],remoteStreams=[],blocked=[];
+  const behaviour={},timers=new Map(),sent=[],states=[],errors=[],texts=[],calls=[],events=[],pcs=[],streams=[],remoteStreams=[],blocked=[],fetchCalls=[];
   let timer=0,stopped=0;
   function newStream(){
     const handlers=new Map();
@@ -23,31 +23,45 @@ function fixture(){
     createDataChannel(){return this.channel;}
     async createOffer(){return behaviour.offer?behaviour.offer():{sdp:'v=0\r\nsynthetic-offer'};}
     async setLocalDescription(){if(behaviour.local)return behaviour.local();}
-    async setRemoteDescription(){if(behaviour.remote)return behaviour.remote();if(behaviour.autoOpen!==false)this.channel.onopen?.();}
+    async setRemoteDescription(answer){this.remoteDescription=answer;if(behaviour.remote)return behaviour.remote();if(behaviour.autoOpen!==false)this.channel.onopen?.();}
     close(){this.connectionState='closed';this.onconnectionstatechange?.();}
   }
   const audio={muted:false,srcObject:null,plays:0,play(){this.plays++;return behaviour.play?behaviour.play():Promise.resolve();},pause(){},removeAttribute(){}};
   const context={window:{isSecureContext:true,RTCPeerConnection:PC},RTCPeerConnection:PC,MediaStream:Stream,
     navigator:{mediaDevices:{getUserMedia:()=>behaviour.microphone?behaviour.microphone():Promise.resolve(newStream())}},AbortController,
+    fetch:async(url,options)=>{fetchCalls.push({url,options});if(behaviour.fetch)return behaviour.fetch(url,options);return {ok:true,status:201,text:async()=> 'v=0\r\nsynthetic-answer'};},
     setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id),
     setInterval:(fn,ms)=>{timers.set(++timer,{fn,ms,interval:true});return timer;},clearInterval:id=>timers.delete(id)};
   vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'..','static','assistent-realtime.js'),'utf8'),context);
   const voice=new context.window.AssistantRealtime({audio,
     api:async(url,data,raw,signal)=>{
       calls.push({url,data,signal});if(behaviour.api)return behaviour.api(url,data,signal);
+      if(url==='/realtime/start')return {client_secret:'synthetic-ephemeral-only',expires_at:Math.floor(Date.now()/1000)+60};
       return {sdp:'v=0\r\nsynthetic-answer',instructions:'current',result:{id:156},event:{type:'auftrag',data:{id:156}}};
     },onState:(...args)=>states.push(args),onError:error=>errors.push(error),onText:(...args)=>texts.push(args),
     onEvent:async event=>{events.push(event);if(behaviour.event)return behaviour.event(event);},
     onPlaybackBlocked:(...args)=>blocked.push(args),onRemoteStream:stream=>remoteStreams.push(stream)});
   const fire=ms=>{const entry=[...timers.entries()].find(([,value])=>value.ms===ms);assert.ok(entry,`expected timer ${ms}`);if(!entry[1].interval)timers.delete(entry[0]);entry[1].fn();};
-  return {voice,audio,behaviour,context,timers,states,errors,texts,calls,events,pcs,streams,sent,remoteStreams,blocked,newStream,fire,stopped:()=>stopped};
+  return {voice,audio,behaviour,context,timers,states,errors,texts,calls,events,pcs,streams,sent,remoteStreams,blocked,fetchCalls,newStream,fire,stopped:()=>stopped};
 }
 const toolEvent={type:'response.function_call_arguments.done',name:'auftrag_lesen',arguments:'{"auftrag_id":156}',call_id:'synthetic'};
 (async()=>{
   let f=fixture();const start=f.voice.start(156);
   assert.equal(f.states[0][2].phase,'microphone');assert.match(f.states[0][1],/Mikrofon/);
   await start;assert.equal(f.voice.active,true);assert.equal(f.calls[0].data.auftrag_id,156);
-  assert.deepEqual(f.states.map(state=>state[2].phase),['microphone','connection','server','connection','connected']);
+  assert.equal(f.calls[0].data.transport,'browser');assert.equal(f.calls[0].data.sdp,'v=0\r\nsynthetic-offer');
+  assert.equal(f.fetchCalls.length,1);
+  assert.equal(f.fetchCalls[0].url,'https://api.openai.com/v1/realtime/calls');
+  const directRequest=f.fetchCalls[0].options;
+  assert.equal(directRequest.method,'POST');assert.equal(directRequest.body,'v=0\r\nsynthetic-offer');
+  assert.equal(directRequest.headers.Authorization,'Bearer synthetic-ephemeral-only');
+  assert.equal(directRequest.headers['Content-Type'],'application/sdp');
+  assert.equal(directRequest.signal,f.calls[0].signal);
+  assert.equal(directRequest.credentials,'omit');assert.equal(directRequest.redirect,'error');
+  assert.equal(directRequest.cache,'no-store');assert.equal(directRequest.referrerPolicy,'no-referrer');
+  assert.equal(f.voice.pc.remoteDescription.sdp,'v=0\r\nsynthetic-answer');
+  assert.doesNotMatch(JSON.stringify({voice:f.voice,states:f.states,texts:f.texts}),/synthetic-ephemeral-only/,'credential is not retained on the controller or exposed to UI callbacks');
+  assert.deepEqual(f.states.map(state=>state[2].phase),['microphone','connection','server','server','connection','connected']);
   assert.match(f.states[1][1],/vorbereitet/);assert.match(f.states[2][1],/KI-Sprachdienst/);
   await f.voice.event({type:'output_audio_buffer.started'});assert.equal(f.audio.muted,false);
   await f.voice.event({type:'input_audio_buffer.speech_started'});assert.equal(f.audio.muted,true);assert.equal(f.stopped(),0);
@@ -55,6 +69,72 @@ const toolEvent={type:'response.function_call_arguments.done',name:'auftrag_lese
   await f.voice.event(toolEvent);assert.equal(f.sent.at(-1).event.type,'response.create');
   await f.voice.refresh();assert.equal(f.sent.at(-1).event.type,'session.update');
   f.voice.stop();assert.equal(f.stopped(),1);assert.equal(f.audio.srcObject,null);assert.equal(f.timers.size,0);assert.equal(f.remoteStreams.at(-1),null);
+
+  // Invalid credentials cannot create a provider request, and API response data
+  // cannot substitute a destination or weaken the fixed no-redirect policy.
+  for(const access of [{},{client_secret:'',expires_at:Date.now()/1000+60},
+    {client_secret:'synthetic-expired',expires_at:1},
+    {client_secret:'synthetic-invalid-expiry',expires_at:'9999999999'}]){
+    f=fixture();f.behaviour.api=async()=>access;await f.voice.start();
+    assert.equal(f.fetchCalls.length,0);assert.equal(f.voice.active,false);
+    assert.match(f.errors[0].message,/kurzlebige Sprachzugang/);assert.equal(f.stopped(),1);
+    assert.doesNotMatch(f.errors[0].message,/synthetic/);
+  }
+  f=fixture();f.behaviour.api=async()=>({client_secret:'synthetic-ephemeral-only',expires_at:Date.now()/1000+60,url:'https://untrusted.example.invalid/receive'});
+  await f.voice.start();assert.equal(f.fetchCalls[0].url,'https://api.openai.com/v1/realtime/calls');f.voice.stop();
+  f=fixture();const obsoleteAccess=deferred();f.behaviour.api=()=>obsoleteAccess.promise;
+  const obsoleteStart=f.voice.start();await flush();f.voice.stop();await obsoleteStart;
+  delete f.behaviour.api;await f.voice.start();const freshConnection=f.voice.pc;
+  obsoleteAccess.resolve({client_secret:'obsolete-ephemeral-only',expires_at:Date.now()/1000+60});await flush();
+  assert.equal(f.fetchCalls.length,1,'a credential delivered after Stop must never reach the provider');
+  assert.equal(f.voice.pc,freshConnection);assert.equal(f.voice.active,true);assert.equal(f.errors.length,0);f.voice.stop();
+
+  // Never read or display provider error bodies; all direct failures remain
+  // finite and release the microphone without retrying or changing API mode.
+  for(const status of [400,401,403,429,500,504]){
+    f=fixture();let reads=0;
+    f.behaviour.fetch=async()=>({ok:false,status,text:async()=>{reads++;return 'PRIVATE_TOKEN_AND_ACCOUNT';}});
+    await f.voice.start();assert.equal(reads,0);assert.equal(f.errors.length,1);
+    assert.doesNotMatch(f.errors[0].message,/PRIVATE|synthetic/);assert.equal(f.voice.active,false);
+    assert.equal(f.stopped(),1);assert.equal(f.timers.size,0);assert.equal(f.fetchCalls.length,1);assert.equal(f.calls.length,1);
+  }
+  for(const where of ['fetch','body']){
+    f=fixture();const fail=async()=>{throw new Error('PRIVATE_TOKEN_AND_ACCOUNT');};
+    f.behaviour.fetch=where==='fetch'?fail:async()=>({ok:true,text:fail});
+    await f.voice.start();assert.equal(f.voice.active,false);assert.equal(f.errors.length,1);
+    assert.doesNotMatch(f.errors[0].message,/PRIVATE_TOKEN_AND_ACCOUNT/);assert.equal(f.stopped(),1);
+  }
+
+  // Stop wins during both direct fetch and body reading. A late old response
+  // or rejection cannot set an SDP, play audio, or stop a freshly started call.
+  for(const where of ['fetch','body'])for(const rejectOld of [false,true]){
+    f=fixture();const exchange=deferred();let lateBodyReads=0;
+    f.behaviour.fetch=where==='fetch'?()=>exchange.promise:async()=>({ok:true,text:()=>exchange.promise});
+    const opening=f.voice.start();await flush();const oldPc=f.voice.pc,oldSignal=f.fetchCalls[0].options.signal;
+    f.voice.stop();await opening;assert.equal(oldSignal.aborted,true);assert.equal(f.stopped(),1);
+    delete f.behaviour.fetch;await f.voice.start();const latestPc=f.voice.pc;
+    if(rejectOld)exchange.reject(new Error('PRIVATE_OLD_FAILURE'));
+    else exchange.resolve(where==='fetch'?{ok:true,text:async()=>{lateBodyReads++;return 'v=0\r\nobsolete-answer';}}:'v=0\r\nobsolete-answer');
+    await flush();assert.equal(lateBodyReads,0);assert.equal(oldPc.remoteDescription,undefined);
+    assert.equal(f.voice.pc,latestPc);assert.equal(latestPc.remoteDescription.sdp,'v=0\r\nsynthetic-answer');
+    assert.equal(f.voice.active,true);assert.equal(f.errors.length,0);f.voice.stop();
+  }
+
+  // Token retrieval and direct SDP/body exchange share the existing 80-second
+  // deadline; the second network leg must not silently reset that budget.
+  for(const where of ['fetch','body']){
+    f=fixture();const access=deferred(),exchange=deferred();
+    f.behaviour.api=()=>access.promise;
+    f.behaviour.fetch=where==='fetch'?()=>exchange.promise:async()=>({ok:true,text:()=>exchange.promise});
+    const opening=f.voice.start();await flush();
+    const deadline=[...f.timers.entries()].find(([,value])=>value.ms===80000)[0];
+    access.resolve({client_secret:'synthetic-ephemeral-only',expires_at:Date.now()/1000+60});await flush();
+    assert.equal([...f.timers.entries()].find(([,value])=>value.ms===80000)[0],deadline);
+    const signal=f.fetchCalls[0].options.signal;f.fire(80000);await opening;
+    assert.equal(signal.aborted,true);assert.equal(f.voice.active,false);assert.equal(f.stopped(),1);
+    assert.equal(f.errors.length,1);assert.equal(f.errors[0].phase,'server');assert.equal(f.timers.size,0);
+    exchange.reject(new Error('PRIVATE_LATE_TIMEOUT'));await flush();assert.equal(f.errors.length,1);
+  }
 
   // Provider response failures arrive as response.done, not necessarily as an
   // error event. They must stop the waiting state and release all resources,
@@ -148,7 +228,7 @@ const toolEvent={type:'response.function_call_arguments.done',name:'auftrag_lese
   assert.match(f.errors[0].message,/Mikrofonfreigabe ist vorhanden/);server.reject(new Error('late server rejection'));await flush();assert.equal(f.errors.length,1);
   f=fixture();f.behaviour.autoOpen=false;await f.voice.start();assert.equal(f.voice.phase,'connection');f.fire(25000);
   assert.match(f.errors[0].message,/Audioverbindung kam nicht zustande/);
-  f=fixture();f.behaviour.api=async()=>({sdp:'invalid'});await f.voice.start();assert.match(f.errors[0].message,/gültige Verbindungsantwort/);
+  f=fixture();f.behaviour.fetch=async()=>({ok:true,text:async()=> 'invalid'});await f.voice.start();assert.match(f.errors[0].message,/gültige Verbindungsantwort/);
 
   // Every old PC/channel/microphone/timer callback stays harmless after restart.
   f=fixture();await f.voice.start();
@@ -245,5 +325,5 @@ const toolEvent={type:'response.function_call_arguments.done',name:'auftrag_lese
   const remoteTrack={kind:'audio'};f.voice.pc.ontrack({streams:[],track:remoteTrack});await flush();
   assert.equal(f.audio.srcObject.getTracks()[0],remoteTrack);assert.equal(f.voice.active,true);assert.equal(f.errors.length,0);f.voice.stop();
   f=fixture();await f.voice.start();assert.doesNotThrow(()=>f.voice.channel.onmessage({data:'invalid JSON'}));assert.equal(f.voice.active,false);assert.match(f.errors[0].message,/ungültige Nachricht/);
-  console.log('PASS: startup phases/timeouts, permission errors, old callbacks, playback retry, refresh/tool isolation, barge-in, safe response failure/incomplete handling and cleanup.');
+  console.log('PASS: direct ephemeral WebRTC transport, bounded token/SDP exchange, safe errors, stale/cancel cleanup; startup phases, permissions, playback, refresh/tools, barge-in and response failures.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

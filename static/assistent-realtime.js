@@ -110,11 +110,39 @@ window.AssistantRealtime = class {
       await this.waitFor(pc.setLocalDescription(offer),session);
       this.setPhase(session,'server','Mikrofon ist bereit. Der KI-Sprachdienst wird verbunden und die Aufträge werden geladen.',80000,
         'Der Sprachdienst hat nicht rechtzeitig geantwortet. Mikrofonfreigabe ist vorhanden; bitte die Serververbindung prüfen und erneut starten.');
-      const answer=await this.waitFor(this.api('/realtime/start',{sdp:offer.sdp,auftrag_id:order||null},false,session.abort.signal),session);
-      if(typeof answer?.sdp!=='string'||!answer.sdp.startsWith('v=0'))throw new Error('Der Sprachdienst hat keine gültige Verbindungsantwort geliefert. Bitte erneut starten.');
+      const access=await this.waitFor(this.api('/realtime/start',{sdp:offer.sdp,auftrag_id:order||null,transport:'browser'},false,session.abort.signal),session);
+      if(typeof access?.client_secret!=='string'||!access.client_secret||access.client_secret.length>4096||
+          !Number.isFinite(access.expires_at)||access.expires_at*1000<=Date.now()){
+        throw new Error('Der kurzlebige Sprachzugang ist ungültig oder bereits abgelaufen. Bitte das Gespräch erneut starten.');
+      }
+      // Keep the credential only in this start call. No persistent session field,
+      // DOM, storage or logging; the fixed destination cannot be supplied by API data.
+      this.state(session,'thinking','Sprachzugang ist bereit. Der Browser verbindet sich direkt mit dem KI-Sprachdienst.');
+      let response;
+      try{
+        response=await this.waitFor(fetch('https://api.openai.com/v1/realtime/calls',{
+          method:'POST',body:offer.sdp,headers:{'Content-Type':'application/sdp',Authorization:'Bearer '+access.client_secret},
+          signal:session.abort.signal,credentials:'omit',redirect:'error',cache:'no-store',referrerPolicy:'no-referrer'
+        }),session);
+      }catch(_){throw new Error('Die direkte Sprachverbindung konnte nicht aufgebaut werden. Bitte Netzwerk oder Browser prüfen und erneut starten.');}
+      if(!response.ok){
+        const message=response.status===401
+          ?'Der kurzlebige Sprachzugang wurde abgelehnt. Bitte das Gespräch erneut starten.'
+          :response.status===403
+            ?'Der Sprachdienst hat die Verbindung nicht freigegeben. Bitte die Werkstattleitung den KI-Zugang prüfen lassen.'
+            :response.status===429
+              ?'Der Sprachdienst ist gerade ausgelastet. Bitte kurz warten und das Gespräch erneut starten.'
+              :'Der Sprachdienst konnte die direkte Verbindung nicht herstellen. Bitte später erneut starten.';
+        // Never read provider error bodies or expose request/credential details.
+        throw new Error(message);
+      }
+      let answerSdp;
+      try{answerSdp=await this.waitFor(response.text(),session);}
+      catch(_){throw new Error('Die Antwort für die Sprachverbindung konnte nicht gelesen werden. Bitte erneut starten.');}
+      if(typeof answerSdp!=='string'||!answerSdp.startsWith('v=0')||answerSdp.length>128000)throw new Error('Der Sprachdienst hat keine gültige Verbindungsantwort geliefert. Bitte erneut starten.');
       this.setPhase(session,'connection','Der Sprachdienst ist bereit. Die Audioverbindung wird aufgebaut.',25000,
         'Der Sprachdienst hat geantwortet, aber die Audioverbindung kam nicht zustande. Bitte Netzwerk oder Browser prüfen und erneut starten.');
-      await this.waitFor(pc.setRemoteDescription({type:'answer',sdp:answer.sdp}),session);
+      await this.waitFor(pc.setRemoteDescription({type:'answer',sdp:answerSdp}),session);
     }catch(error){
       if(!this.current(session))return;
       if(session.phase==='microphone'){

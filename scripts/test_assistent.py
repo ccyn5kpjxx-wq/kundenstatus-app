@@ -470,6 +470,126 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(self.client.get('/werkstatt/assistent/realtime/kontext').status_code,401)
         self.assertEqual(self.post('/realtime/werkzeug',{'name':'auftrag_lesen','arguments':{'auftrag_id':156}}).status_code,401)
 
+    def test_browser_realtime_uses_same_trusted_session_and_only_ephemeral_response(self):
+        import json
+        import time
+        from datetime import datetime, timezone
+        from unittest.mock import Mock
+        now = int(time.time())
+        secret = 'ek_synthetic_short_lived_credential'
+        provider = Mock(text='v=0\r\nsynthetic-answer')
+        provider.json.return_value = {'value': secret, 'expires_at': now + 60,
+            'session': {'instructions': 'PRIVATE_PROVIDER_SESSION'}, 'api_key': 'PRIVATE_PROVIDER_KEY'}
+        with patch.object(p, 'get_openai_api_key', return_value='sk-synthetic-server-only'), \
+             patch('werkstatt_assistent.time.time', return_value=now), \
+             patch('werkstatt_assistent.workshop_now', return_value=datetime(2026,10,1,tzinfo=timezone.utc)), \
+             patch.object(p.cockpit_data, 'orders', return_value={'auftraege': [], 'next_offset': None}), \
+             patch.object(p.cockpit_data, 'material_context', return_value={'varianten': []}), \
+             patch('werkstatt_assistent.requests.post', return_value=provider) as call:
+            old = self.post('/realtime/start', {'sdp': 'v=0\r\nsynthetic-offer'})
+            old_config = json.loads(call.call_args.kwargs['files']['session'][1])
+            self.assertEqual(old.status_code, 200)
+            self.assertEqual(old.json, {'sdp': 'v=0\r\nsynthetic-answer'})
+            result = self.post('/realtime/start', {'sdp': 'v=0\r\nsynthetic-offer', 'transport': 'browser',
+                'session': {'instructions': 'CLIENT_OVERRIDE', 'tools': []}, 'model': 'CLIENT_MODEL',
+                'expires_after': {'seconds': 7200}})
+            sent = call.call_args
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json, {'client_secret': secret, 'expires_at': now + 60})
+        self.assertEqual(result.headers['Cache-Control'], 'no-store')
+        self.assertEqual(sent.args[0], 'https://api.openai.com/v1/realtime/client_secrets')
+        self.assertEqual(sent.kwargs['json'], {'session': old_config,
+            'expires_after': {'anchor': 'created_at', 'seconds': 60}})
+        self.assertNotIn('files', sent.kwargs)
+        self.assertEqual(sent.kwargs['headers'], {'Authorization': 'Bearer sk-synthetic-server-only'})
+        self.assertNotIn('CLIENT_OVERRIDE', json.dumps(sent.kwargs['json']))
+        for private in ('PRIVATE_PROVIDER', 'sk-synthetic-server-only', 'instructions', 'tools'):
+            self.assertNotIn(private, result.text)
+        with self.client.session_transaction() as state:
+            self.assertNotIn(secret, str(dict(state)))
+        with database() as db:
+            for table in ('assistent_dialog', 'assistent_audit', 'assistent_aktionen'):
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM ' + table).fetchone()[0], 0)
+
+    def test_browser_realtime_validates_transport_sdp_auth_csrf_and_current_rights(self):
+        body = {'transport': 'browser', 'sdp': 'v=0\r\nsynthetic-offer'}
+        # setUp's provider mock rejects every unexpected network invocation.
+        for transport in ('unknown', '', None, [], {}, True):
+            self.assertEqual(self.post('/realtime/start', {**body, 'transport': transport}).status_code, 400)
+        for sdp in ('invalid', 'v=0' + 'x' * 64000, None, []):
+            self.assertEqual(self.post('/realtime/start', {**body, 'sdp': sdp}).status_code, 400)
+        self.assertEqual(self.client.post('/werkstatt/assistent/realtime/start', json=body).status_code, 400)
+        anonymous = p.app.test_client()
+        with anonymous.session_transaction() as state:
+            state['csrf_token'] = 'test-csrf'
+        self.assertEqual(self.post('/realtime/start', body, anonymous).status_code, 401)
+        with database() as db:
+            db.execute('UPDATE assistent_rechte SET lesen=0 WHERE mitarbeiter_id=1')
+        self.assertEqual(self.post('/realtime/start', body).status_code, 403)
+        with database() as db:
+            db.execute('UPDATE assistent_rechte SET lesen=1,version=2 WHERE mitarbeiter_id=1')
+        self.assertEqual(self.post('/realtime/start', body).status_code, 401)
+        with database() as db:
+            db.execute('UPDATE assistent_rechte SET version=1 WHERE mitarbeiter_id=1')
+            db.execute('UPDATE mitarbeiter SET aktiv=0 WHERE id=1')
+        self.assertEqual(self.post('/realtime/start', body).status_code, 401)
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_browser_realtime_tools_follow_rights_and_model_is_trimmed(self):
+        import time
+        from unittest.mock import Mock
+        with database() as db:
+            db.execute('UPDATE assistent_rechte SET einkaufen=0,dokumentieren=0 WHERE mitarbeiter_id=1')
+        provider = Mock()
+        provider.json.return_value = {'value': 'ek_synthetic_short_lived_credential', 'expires_at': int(time.time()) + 60}
+        for configured, expected in [('  gpt-realtime  ', 'gpt-realtime'), (' \t ', 'gpt-realtime')]:
+            with patch.dict(os.environ, {'ASSISTANT_REALTIME_MODEL': configured}), \
+                 patch.object(p, 'get_openai_api_key', return_value='sk-synthetic-server-only'), \
+                 patch('werkstatt_assistent.requests.post', return_value=provider) as call:
+                result = self.post('/realtime/start', {'transport': 'browser', 'sdp': 'v=0\r\nsynthetic-offer'})
+            self.assertEqual(result.status_code, 200)
+            config = call.call_args.kwargs['json']['session']
+            self.assertEqual(config['model'], expected)
+            names = {tool['name'] for tool in config['tools']}
+            self.assertIn('auftrag_lesen', names)
+            self.assertTrue(names.isdisjoint({'beleg_lesen', 'bestellung_vorschlagen', 'status_vorschlagen', 'bestaetigen'}))
+            self.assertNotIn('"materialwissen":', config['instructions'])
+
+    def test_browser_realtime_invalid_credentials_fail_closed_without_provider_data(self):
+        import time
+        from unittest.mock import Mock
+        now = int(time.time())
+        valid = {'value': 'ek_synthetic_short_lived_credential', 'expires_at': now + 60}
+        cases = [None, [], {}, {'client_secret': valid},
+                 {**valid, 'value': 'sk-synthetic-server-only'}, {**valid, 'value': ''},
+                 {**valid, 'value': 'ek_INVALID\r\nPRIVATE_PROVIDER'}, {**valid, 'value': ['PRIVATE_PROVIDER']},
+                 {**valid, 'value': 'ek_' + 'x' * 2049},
+                 {**valid, 'expires_at': now - 1}, {**valid, 'expires_at': now},
+                 {**valid, 'expires_at': now + 600}, {**valid, 'expires_at': str(now + 60)},
+                 {**valid, 'expires_at': True}, {**valid, 'expires_at': None}]
+        for payload in cases:
+            with self.subTest(payload=payload):
+                provider = Mock()
+                provider.json.return_value = payload
+                with patch.object(p, 'get_openai_api_key', return_value='sk-synthetic-server-only'), \
+                     patch('werkstatt_assistent.time.time', return_value=now), \
+                     patch('werkstatt_assistent.requests.post', return_value=provider):
+                    result = self.post('/realtime/start', {'transport': 'browser', 'sdp': 'v=0\r\nsynthetic-offer'})
+                self.assertEqual(result.status_code, 400)
+                self.assertEqual(set(result.json), {'error'})
+                self.assertIn('keinen gültigen kurzlebigen Sprachzugang', result.json['error'])
+                self.assertEqual(result.headers['Cache-Control'], 'no-store')
+                for private in ('sk-synthetic-server-only', 'ek_', 'PRIVATE_PROVIDER'):
+                    self.assertNotIn(private, result.text)
+        provider = Mock()
+        provider.json.side_effect = ValueError('PRIVATE_PROVIDER sk-synthetic-server-only')
+        with patch.object(p, 'get_openai_api_key', return_value='sk-synthetic-server-only'), \
+             patch('werkstatt_assistent.requests.post', return_value=provider):
+            result = self.post('/realtime/start', {'transport': 'browser', 'sdp': 'v=0\r\nsynthetic-offer'})
+        self.assertEqual(result.status_code, 400)
+        self.assertNotIn('PRIVATE_PROVIDER', result.text)
+        self.assertNotIn('sk-synthetic-server-only', result.text)
+
     def provider_failure(self, status, payload, *, raw=False):
         """Exercise real requests.HTTPError, with hostile synthetic data only."""
         import json

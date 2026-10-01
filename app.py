@@ -3199,6 +3199,10 @@ def add_security_headers(response):
         'mos_public.status', 'mos_public.retry',
     }:
         form_action += " https://checkout.stripe.com"
+    realtime_connection = (
+        " https://api.openai.com/v1/realtime/calls"
+        if request.endpoint == "assistent.page" else ""
+    )
     response.headers.setdefault(
         "Content-Security-Policy",
         "; ".join(
@@ -3225,6 +3229,7 @@ def add_security_headers(response):
                     "https://pagead2.googlesyndication.com https://www.googleadservices.com "
                     "https://googleads.g.doubleclick.net https://ad.doubleclick.net "
                     "https://www.google.com https://google.com https://www.google.de"
+                    + realtime_connection
                 ),
             ]
         ),

@@ -1150,6 +1150,9 @@ def register_assistant(p):
     @protected
     def realtime_start(who):
         data = request.get_json() or {}
+        transport = data.get("transport", "server")
+        if not isinstance(transport, str) or transport not in {"server", "browser"}:
+            raise ValueError("Unbekannter Sprachtransport.")
         sdp = data.get("sdp", "")
         if not isinstance(sdp, str) or not sdp.startswith("v=0") or len(sdp) > 64000:
             raise ValueError("Ungültige Sprachverbindung.")
@@ -1161,7 +1164,8 @@ def register_assistant(p):
         voice = preferences["stimme"]
         if voice not in {"alloy", "ash", "coral", "echo", "sage", "shimmer"}:
             voice = "coral"
-        config = {"type": "realtime", "model": os.getenv("ASSISTANT_REALTIME_MODEL", "gpt-realtime"),
+        model = os.getenv("ASSISTANT_REALTIME_MODEL", "").strip() or "gpt-realtime"
+        config = {"type": "realtime", "model": model,
                   "instructions": realtime_instructions(who, context, preferences), "max_output_tokens": 600,
                   "audio": {"input": {"noise_reduction": {"type": "near_field"},
                       "transcription": {"model": "gpt-4o-mini-transcribe", "language": "de"},
@@ -1170,8 +1174,25 @@ def register_assistant(p):
                           "interrupt_response": True, "create_response": True}},
                       "output": {"voice": voice}},
                   "tools": [{k: v for k, v in tool.items() if k != "strict"} for tool in available_tools(who)]}
-        result = openai("realtime/calls", files={"sdp": (None, sdp), "session": (None, json.dumps(config))})
-        response = jsonify(sdp=result.text)
+        if transport == "browser":
+            result = openai("realtime/client_secrets", json={"session": config,
+                "expires_after": {"anchor": "created_at", "seconds": 60}})
+            invalid_secret = "KI-Dienst hat keinen gültigen kurzlebigen Sprachzugang geliefert. Bitte erneut starten."
+            try:
+                payload = result.json()
+            except (ValueError, TypeError):
+                raise ValueError(invalid_secret) from None
+            value = payload.get("value") if isinstance(payload, dict) else None
+            expires = payload.get("expires_at") if isinstance(payload, dict) else None
+            # Never forward a long-lived sk- key, provider session or raw error.
+            # Thirty seconds of clock tolerance; unexpectedly long tokens fail closed.
+            if (not isinstance(value, str) or not re.fullmatch(r"ek_[A-Za-z0-9_-]{8,2048}", value)
+                    or type(expires) is not int or not 0 < expires - time.time() <= 90):
+                raise ValueError(invalid_secret)
+            response = jsonify(client_secret=value, expires_at=expires)
+        else:
+            result = openai("realtime/calls", files={"sdp": (None, sdp), "session": (None, json.dumps(config))})
+            response = jsonify(sdp=result.text)
         response.headers["Cache-Control"] = "no-store"
         return response
 
