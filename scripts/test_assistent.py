@@ -659,6 +659,68 @@ class AssistantTests(unittest.TestCase):
                 self.assertNotIn('Betroffener Bereich', message)
         self.provider_failure(400, '<html>PRIVATE_CUSTOMER synthetic-private-key</html>', raw=True)
 
+    def test_provider_400_reason_categories_do_not_echo_messages(self):
+        cases = [({'code': 'context_length_exceeded'}, 'Sitzungskontext'),
+                 ({'message': 'Maximum context length PRIVATE_CUSTOMER'}, 'Sitzungskontext'),
+                 ({'code': 'string_above_max_length'}, 'Zeichenanzahl'),
+                 ({'message': 'Instructions are too long: PRIVATE_CUSTOMER'}, 'Sitzungsanweisungen'),
+                 ({'message': 'Instructions cannot exceed PRIVATE_CUSTOMER'}, 'Sitzungsanweisungen'),
+                 ({'code': 'invalid_function_parameters'}, 'Werkzeugformat'),
+                 ({'message': 'Invalid schema for function PRIVATE_CUSTOMER'}, 'Werkzeugformat'),
+                 ({'code': 'model_not_found'}, 'Modell ist unbekannt'),
+                 ({'message': 'Unknown model PRIVATE_CUSTOMER'}, 'Modell ist unbekannt'),
+                 ({'message': 'Unsupported voice PRIVATE_CUSTOMER'}, 'Stimme wurde abgelehnt'),
+                 ({'code': 'unknown_parameter'}, 'Konfigurationsparameter wird nicht unterstützt')]
+        for fields, expected in cases:
+            with self.subTest(fields=fields):
+                message = self.provider_failure(400, {'error': {'message': 'PRIVATE_CUSTOMER synthetic-private-key', **fields}})
+                self.assertIn(expected, message)
+                self.assertNotIn('Diagnose:', message)
+        for value in (None, ['PRIVATE_CUSTOMER'], {'PRIVATE_CUSTOMER': 1}, 3,
+                      'PRIVATE_CUSTOMER ' * 500 + 'instructions too long'):
+            self.assertNotIn('Hinweis:', self.provider_failure(400, {'error': {'message': value}}))
+
+    def test_realtime_provider400_summary_is_admin_only_bounded_and_content_free(self):
+        import json
+        import requests
+        admin = self.make_client(admin=True)
+        provider = requests.Response()
+        provider.status_code = 400
+        provider._content = json.dumps({'error': {'code': 'context_length_exceeded',
+            'message': 'PRIVATE_PROVIDER_CONTENT sk-synthetic-private-key'}}).encode()
+        private_context = {'auftraege': [{'beschreibung': 'PRIVATE_CUSTOMER_CONTENT ' * 3000}], 'next_offset': None}
+        for transport in ('server', 'browser'):
+            for client, model, label in ((self.client, 'gpt-realtime', None),
+                                          (admin, 'gpt-realtime', 'gpt-realtime'),
+                                          (admin, 'sk-synthetic-private-key', 'anderes Modell'),
+                                          (admin, 'gpt-' + 'x' * 81, 'anderes Modell')):
+                with self.subTest(transport=transport, label=label), \
+                     patch.object(p, 'get_openai_api_key', return_value='sk-synthetic-private-key'), \
+                     patch.dict(os.environ, {'ASSISTANT_REALTIME_MODEL': model}), \
+                     patch.object(p.cockpit_data, 'orders', return_value=private_context), \
+                     patch('werkstatt_assistent.requests.post', return_value=provider) as call:
+                    result = self.post('/realtime/start', {'transport': transport, 'sdp': 'v=0\r\nsynthetic-offer', 'actor': 'admin'}, client)
+                self.assertEqual(result.status_code, 400)
+                message = result.json['error']
+                config = (call.call_args.kwargs['json']['session'] if transport == 'browser'
+                          else json.loads(call.call_args.kwargs['files']['session'][1]))
+                self.assertGreater(len(config['instructions']), 60000)
+                if label:
+                    self.assertIn(f"Diagnose: {len(config['instructions'])} Anweisungszeichen, {len(config['tools'])} Werkzeuge, Modell {label}.", message)
+                else:
+                    self.assertNotIn('Diagnose:', message)
+                    self.assertNotIn('Anweisungszeichen', message)
+                self.assertEqual(set(result.json), {'error'})
+                self.assertEqual(result.headers['Cache-Control'], 'no-store')
+                self.assertLess(len(message), 650)
+                for private in ('PRIVATE_PROVIDER_CONTENT', 'PRIVATE_CUSTOMER_CONTENT', 'sk-synthetic-private-key'):
+                    self.assertNotIn(private, result.text)
+        provider.status_code = 503
+        with patch.object(p, 'get_openai_api_key', return_value='synthetic-key'), \
+             patch('werkstatt_assistent.requests.post', return_value=provider):
+            result = self.post('/realtime/start', {'transport': 'browser', 'sdp': 'v=0\r\nsynthetic-offer'}, admin)
+        self.assertNotIn('Diagnose:', result.json['error'])
+
     def test_provider_transport_errors_are_distinct_and_redacted(self):
         import requests
         for error, expected in [(requests.Timeout, 'Zeitüberschreitung'),

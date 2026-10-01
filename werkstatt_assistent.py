@@ -81,6 +81,34 @@ def _openai_http_error(response):
         param = error.get("param")
         label = labels.get(param) if isinstance(param, str) else None
         text = "KI-Anfrage oder Konfiguration abgelehnt (HTTP 400)."
+        # Legacy/provider variants sometimes omit param/code. Phrase matches
+        # select fixed categories only; no fragment of the message is returned.
+        message = error.get("message")
+        message = message[:4096].casefold() if isinstance(message, str) else ""
+        reason = ""
+        if code == "context_length_exceeded" or any(phrase in message for phrase in (
+                "maximum context length", "context length exceeded", "context window exceeded")):
+            reason = "Der Sitzungskontext überschreitet die erlaubte Länge."
+        elif any(phrase in message for phrase in ("instructions too long", "instructions are too long",
+                "instructions cannot exceed", "instructions must be at most", "instructions length exceeds")):
+            reason = "Die Sitzungsanweisungen überschreiten die erlaubte Länge."
+        elif code in {"string_above_max_length", "string_too_long"}:
+            reason = "Ein Konfigurationsfeld überschreitet die erlaubte Zeichenanzahl."
+        elif code in {"invalid_json_schema", "invalid_function_parameters", "invalid_tool_schema"} or any(
+                phrase in message for phrase in ("invalid schema for function", "invalid tools schema", "invalid tool schema", "tools schema is invalid")):
+            reason = "Das Werkzeugformat wurde abgelehnt."
+        elif code in {"model_not_found", "unsupported_model"} or any(phrase in message for phrase in (
+                "unknown model", "model not found", "unsupported model")):
+            reason = "Das konfigurierte Modell ist unbekannt oder nicht freigegeben."
+        elif code in {"invalid_voice", "unsupported_voice"} or any(phrase in message for phrase in (
+                "invalid voice", "unsupported voice", "voice must be")):
+            reason = "Die konfigurierte Stimme wurde abgelehnt."
+        elif code == "unknown_parameter":
+            reason = "Ein Konfigurationsparameter wird nicht unterstützt."
+        elif code == "missing_required_parameter":
+            reason = "Ein erforderlicher Konfigurationsparameter fehlt."
+        if reason:
+            text += " Hinweis: " + reason
         if label:
             text += " Betroffener Bereich: " + label + "."
         text += " Die Werkstattleitung muss die KI-Konfiguration prüfen."
@@ -1174,9 +1202,20 @@ def register_assistant(p):
                           "interrupt_response": True, "create_response": True}},
                       "output": {"voice": voice}},
                   "tools": [{k: v for k, v in tool.items() if k != "strict"} for tool in available_tools(who)]}
+        try:
+            if transport == "browser":
+                result = openai("realtime/client_secrets", json={"session": config,
+                    "expires_after": {"anchor": "created_at", "seconds": 60}})
+            else:
+                result = openai("realtime/calls", files={"sdp": (None, sdp), "session": (None, json.dumps(config))})
+        except ValueError as exc:
+            # The helper emits this fixed prefix only for provider HTTP 400.
+            # Counts aid diagnosis without exposing live instructions/customer data.
+            if who["actor"] == "admin" and str(exc).startswith("KI-Anfrage oder Konfiguration abgelehnt (HTTP 400)."):
+                safe_model = model if len(model) <= 80 and re.fullmatch(r"gpt-[a-z0-9.-]+", model) else "anderes Modell"
+                raise ValueError(str(exc) + f" Diagnose: {len(config['instructions'])} Anweisungszeichen, {len(config['tools'])} Werkzeuge, Modell {safe_model}.") from None
+            raise
         if transport == "browser":
-            result = openai("realtime/client_secrets", json={"session": config,
-                "expires_after": {"anchor": "created_at", "seconds": 60}})
             invalid_secret = "KI-Dienst hat keinen gültigen kurzlebigen Sprachzugang geliefert. Bitte erneut starten."
             try:
                 payload = result.json()
@@ -1191,7 +1230,6 @@ def register_assistant(p):
                 raise ValueError(invalid_secret)
             response = jsonify(client_secret=value, expires_at=expires)
         else:
-            result = openai("realtime/calls", files={"sdp": (None, sdp), "session": (None, json.dumps(config))})
             response = jsonify(sdp=result.text)
         response.headers["Cache-Control"] = "no-store"
         return response
