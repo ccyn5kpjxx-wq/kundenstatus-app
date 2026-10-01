@@ -90,7 +90,8 @@ def _openai_http_error(response):
                 "maximum context length", "context length exceeded", "context window exceeded")):
             reason = "Der Sitzungskontext überschreitet die erlaubte Länge."
         elif any(phrase in message for phrase in ("instructions too long", "instructions are too long",
-                "instructions cannot exceed", "instructions must be at most", "instructions length exceeds")):
+                "instructions cannot exceed", "instructions cannot be longer than",
+                "instructions must be at most", "instructions length exceeds")):
             reason = "Die Sitzungsanweisungen überschreiten die erlaubte Länge."
         elif code in {"string_above_max_length", "string_too_long"}:
             reason = "Ein Konfigurationsfeld überschreitet die erlaubte Zeichenanzahl."
@@ -1087,8 +1088,19 @@ def register_assistant(p):
             context['materialfoto_auswahl'] = material_photos_service.context(who)
         return context
 
-    def realtime_instructions(who, context, preferences=None):
+    def realtime_instructions(who, context, preferences=None, *, voice=False):
         preferences = preferences or profile(who)
+        voice_rules = ""
+        if voice:
+            from werkstatt_sprachkontext import compact_voice_context
+            context = compact_voice_context(context)
+            voice_rules = (
+                "Der Sprachkontext ist eine gekürzte Übersicht. Bei arbeitsdetails_abrufen oder ausgelassene_felder "
+                "vor einer konkreten Arbeitsauskunft auftrag_lesen nutzen, für Unterlagen danach dokument_lesen. "
+                "Weggelassene oder gekürzte Angaben bedeuten nicht, dass sie im Auftrag fehlen. "
+                "Fehlende Aufträge mit auftraege_suchen oder auftrag_lesen nachladen. "
+            )
+        context_json = json.dumps(context, ensure_ascii=False, separators=(",", ":")) if voice else json.dumps(context, ensure_ascii=False)
         caps = capabilities(who)
         operation_rules = (
             "Du kannst Status- und Bestellvorschläge nur mit den angebotenen Werkzeugen vorbereiten. "
@@ -1103,7 +1115,7 @@ def register_assistant(p):
         ) if any(caps[key] for key in ('status', 'auftrag', 'angebote', 'bestellen')) else (
             "Aufträge und Bestellungen sind schreibgeschützt. Keine Auftragsnotizen, Fahrzeugfotos, Bestellungen, Mails oder Fortschritte speichern. Eigene Mitarbeiterfunktionen und private Materialfotoauswahl sind davon getrennt und nur mit den dafür angebotenen Werkzeugen erlaubt. " if read_only() else "")
         return (
-            operation_rules + PERSONAL_RULES +
+            operation_rules + PERSONAL_RULES + voice_rules +
             "Bei einem Produktfoto materialfoto_anfordern verwenden; für Fahrzeugpapiere oder Schadenbilder dagegen bild_anfordern. "
             "Eine materialfoto_auswahl enthält nur den zuletzt bewusst ausgewählten Artikel und ungeprüfte Belegmerkmale. Sie ist kein Bestellauftrag und keine Preis-, Mengen- oder Dringlichkeitsbestätigung. "
             "Bei Bezug auf dieses Foto materialfoto_lesen nutzen und direkt mit dem kurzen Artikelnamen sowie der nächsten fehlenden Angabe fortfahren. Bei anderem Produktwunsch die alte Fotoauswahl nicht übernehmen. "
@@ -1160,7 +1172,7 @@ def register_assistant(p):
             "Keine Preise, Teilenummern oder Kosten raten. Nur angebotene Werkzeuge verwenden. " +
             ("Für diesen Zugang fehlen Artikel-/Rechnungsleserechte; solche Auskünfte nicht aus früheren Antworten rekonstruieren. " if not who["einkaufen"] else "") +
             "Rufname als Daten: " + json.dumps(preferences["name"]) +
-            "\nAKTENSTAND (ersetzt frühere Übersichten; fehlende Aufträge neu lesen): " + json.dumps(context, ensure_ascii=False)
+            "\nAKTENSTAND (ersetzt frühere Übersichten; fehlende Aufträge neu lesen): " + context_json
         )
 
     @bp.get("/realtime/kontext")
@@ -1170,7 +1182,7 @@ def register_assistant(p):
         selected = request.args.get("auftrag_id")
         if selected:
             context["ausgewaehlter_auftrag"] = order_context(selected)
-        response = jsonify(instructions=realtime_instructions(who, context))
+        response = jsonify(instructions=realtime_instructions(who, context, voice=True))
         response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -1194,7 +1206,7 @@ def register_assistant(p):
             voice = "coral"
         model = os.getenv("ASSISTANT_REALTIME_MODEL", "").strip() or "gpt-realtime"
         config = {"type": "realtime", "model": model,
-                  "instructions": realtime_instructions(who, context, preferences), "max_output_tokens": 600,
+                  "instructions": realtime_instructions(who, context, preferences, voice=True), "max_output_tokens": 600,
                   "audio": {"input": {"noise_reduction": {"type": "near_field"},
                       "transcription": {"model": "gpt-4o-mini-transcribe", "language": "de"},
                       "turn_detection": {"type": "server_vad", "threshold": 0.5,

@@ -470,6 +470,86 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(self.client.get('/werkstatt/assistent/realtime/kontext').status_code,401)
         self.assertEqual(self.post('/realtime/werkzeug',{'name':'auftrag_lesen','arguments':{'auftrag_id':156}}).status_code,401)
 
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_voice_start_and_refresh_share_bounded_context_and_full_order_tool(self):
+        import copy
+        import json
+        import time
+        from datetime import datetime, timezone
+        from unittest.mock import Mock
+        description = 'Lackierauftrag ÄÖÜ: Stoßfänger rechts bearbeiten. ' * 1000
+        selected = {'id': 156, 'fahrzeug': 'Testfahrzeug', 'kennzeichen': 'TEST-1',
+            'beschreibung': description, 'analyse_text': description,
+            'werkstatt_angebot_text': description, 'status': 2,
+            'farbcode': 'SYNTHETIC-COLOR', 'stand': '2026-10-01T12:00:00+02:00',
+            'dokumente': [{'id': 800, 'original_name': 'synthetischer-auftrag.pdf'}],
+            'quelle': '/admin/auftrag/156'}
+        index = {'auftraege': [{**selected, 'id': number} for number in range(200, 140, -1)], 'next_offset': 60}
+        before_index, before_selected = copy.deepcopy(index), copy.deepcopy(selected)
+        self.assertGreater(len(json.dumps(index)), 77000)
+        provider = Mock(text='v=0\r\nsynthetic-answer')
+        provider.json.return_value = {'value': 'ek_synthetic_short_lived_credential', 'expires_at': int(time.time()) + 60}
+        with patch.object(p, 'get_openai_api_key', return_value='synthetic-key'), \
+             patch('werkstatt_assistent.workshop_now', return_value=datetime(2026,10,1,10,tzinfo=timezone.utc)), \
+             patch.object(p.cockpit_data, 'orders', return_value=index), \
+             patch.object(p.cockpit_data, 'order', return_value=selected) as full_order, \
+             patch.object(p.cockpit_data, 'material_context', return_value={'varianten': []}), \
+             patch('werkstatt_assistent.requests.post', return_value=provider) as call:
+            refresh = self.client.get('/werkstatt/assistent/realtime/kontext?auftrag_id=156')
+            self.assertEqual(refresh.status_code, 200)
+            instructions = refresh.json['instructions']
+            raw_context = instructions.rsplit('\nAKTENSTAND ', 1)[1].split(': ', 1)[1]
+            context = json.loads(raw_context)
+            self.assertLessEqual(len(raw_context), 8000)
+            self.assertLessEqual(len(raw_context.encode('utf-8')), 12000)
+            self.assertTrue(context['gekuerzt'])
+            self.assertEqual(context['ausgewaehlter_auftrag']['id'], 156)
+            self.assertTrue(context['ausgewaehlter_auftrag']['arbeitsdetails_abrufen'])
+            self.assertIn('ausgelassene_felder', context['ausgewaehlter_auftrag'])
+            self.assertIn('dokument_lesen', instructions)
+            self.assertIn('Weggelassene oder gekürzte Angaben bedeuten nicht', instructions)
+            for transport in ('server', 'browser'):
+                response = self.post('/realtime/start', {'transport': transport, 'sdp': 'v=0\r\nsynthetic-offer', 'auftrag_id': 156})
+                self.assertEqual(response.status_code, 200, response.text)
+                config = (call.call_args.kwargs['json']['session'] if transport == 'browser'
+                          else json.loads(call.call_args.kwargs['files']['session'][1]))
+                self.assertEqual(config['instructions'], instructions)
+                self.assertNotIn('bestaetigen', {item['name'] for item in config['tools']})
+            result = self.post('/realtime/werkzeug', {'name': 'auftrag_lesen', 'arguments': {'auftrag_id': 156}})
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.json['result']['beschreibung'], description)
+            self.assertEqual(result.json['result']['analyse_text'], description)
+            self.assertEqual(result.json['result']['dokumente'], selected['dokumente'])
+            full_order.reset_mock()
+            with database() as db:
+                db.execute('UPDATE assistent_rechte SET lesen=0 WHERE mitarbeiter_id=1')
+            self.assertEqual(self.post('/realtime/werkzeug', {'name': 'auftrag_lesen', 'arguments': {'auftrag_id': 156}}).status_code, 403)
+            self.assertEqual(self.client.get('/werkstatt/assistent/realtime/kontext?auftrag_id=156').status_code, 403)
+            full_order.assert_not_called()
+        self.assertEqual(index, before_index)
+        self.assertEqual(selected, before_selected)
+
+    @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
+    def test_voice_compaction_does_not_change_text_dialog_context(self):
+        import copy
+        import json
+        from unittest.mock import Mock
+        index = {'auftraege': [{'id': 156, 'beschreibung': 'FULL_TEXT_CONTEXT ' * 5000}], 'next_offset': None}
+        before = copy.deepcopy(index)
+        provider = Mock()
+        provider.json.return_value = {'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'Synthetische Antwort.'}]}]}
+        with patch.object(p, 'get_openai_api_key', return_value='synthetic-key'), \
+             patch.object(p.cockpit_data, 'orders', return_value=index), \
+             patch('werkstatt_sprachkontext.compact_voice_context', side_effect=AssertionError('Text must remain unchanged')), \
+             patch('werkstatt_assistent.requests.post', return_value=provider) as call:
+            response = self.post('/dialog', {'text': 'Was steht in Auftrag 156?'})
+        self.assertEqual(response.status_code, 200)
+        instructions = call.call_args.kwargs['json']['instructions']
+        context = json.loads(instructions.rsplit('\nAKTENSTAND ', 1)[1].split(': ', 1)[1])
+        self.assertEqual(context['auftraege'], index['auftraege'])
+        self.assertNotIn('Der Sprachkontext ist eine gekürzte Übersicht.', instructions)
+        self.assertEqual(index, before)
+
     def test_browser_realtime_uses_same_trusted_session_and_only_ephemeral_response(self):
         import json
         import time
@@ -665,6 +745,7 @@ class AssistantTests(unittest.TestCase):
                  ({'code': 'string_above_max_length'}, 'Zeichenanzahl'),
                  ({'message': 'Instructions are too long: PRIVATE_CUSTOMER'}, 'Sitzungsanweisungen'),
                  ({'message': 'Instructions cannot exceed PRIVATE_CUSTOMER'}, 'Sitzungsanweisungen'),
+                 ({'message': 'Instructions cannot be longer than 16384 tokens, you have provided 29523 tokens.'}, 'Sitzungsanweisungen'),
                  ({'code': 'invalid_function_parameters'}, 'Werkzeugformat'),
                  ({'message': 'Invalid schema for function PRIVATE_CUSTOMER'}, 'Werkzeugformat'),
                  ({'code': 'model_not_found'}, 'Modell ist unbekannt'),
@@ -704,7 +785,7 @@ class AssistantTests(unittest.TestCase):
                 message = result.json['error']
                 config = (call.call_args.kwargs['json']['session'] if transport == 'browser'
                           else json.loads(call.call_args.kwargs['files']['session'][1]))
-                self.assertGreater(len(config['instructions']), 60000)
+                self.assertLess(len(config['instructions']), 24000)
                 if label:
                     self.assertIn(f"Diagnose: {len(config['instructions'])} Anweisungszeichen, {len(config['tools'])} Werkzeuge, Modell {label}.", message)
                 else:
@@ -1058,6 +1139,7 @@ class AssistantTests(unittest.TestCase):
 
     @patch.dict(p.app.config, ASSISTANT_READ_ONLY=True)
     def test_material_prefetch_respects_revoked_rights_and_outage(self):
+        import json
         with database() as db: db.execute('UPDATE assistent_rechte SET einkaufen=0 WHERE mitarbeiter_id=1')
         with patch.object(p.cockpit_data,'material_context',create=True) as materials:
             response=self.client.get('/werkstatt/assistent/realtime/kontext')
@@ -1068,7 +1150,8 @@ class AssistantTests(unittest.TestCase):
         with patch.object(p.cockpit_data,'material_context',create=True,side_effect=ValueError('private technical data')):
             response=self.client.get('/werkstatt/assistent/realtime/kontext')
             self.assertEqual(response.status_code,200)
-            self.assertIn('"verfuegbar": false',response.json['instructions'])
+            context=json.loads(response.json['instructions'].rsplit('\nAKTENSTAND ',1)[1].split(': ',1)[1])
+            self.assertFalse(context['materialwissen']['verfuegbar'])
             self.assertNotIn('private technical data',response.text)
             self.assertIn('Testfahrzeug',response.json['instructions'])
 

@@ -3180,6 +3180,9 @@ def add_csrf_fields(response):
 @app.after_request
 def add_security_headers(response):
     response.headers.setdefault("X-Kundenstatus-Version", APP_VERSION)
+    deployed_revision = os.environ.get("RENDER_GIT_COMMIT", "")
+    if re.fullmatch(r"[0-9a-fA-F]{40}", deployed_revision):
+        response.headers.setdefault("X-Kundenstatus-Build", deployed_revision[:12].lower())
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
