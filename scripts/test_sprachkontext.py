@@ -218,6 +218,23 @@ class VoiceContextTests(unittest.TestCase):
             self.assert_budget(result)
         self.assert_budget(compact_voice_context(None))
 
+    def test_all_material_metadata_is_bounded_even_without_variants(self):
+        coverage_keys = ('quellen_gesamt', 'freigegebene_quellen', 'ungeklaerte_quellen',
+                         'offene_auslese', 'auslese_zu_pruefen', 'positionen',
+                         'gespeicherte_artikel', 'sichtbare_positionen', 'begrenzt',
+                         'positionen_begrenzt', 'vollstaendigkeit_bestaetigt')
+        material = {'verfuegbar': False, 'suchstatus': '🚗' * 100,
+                    'abdeckung': dict.fromkeys(coverage_keys, '🚗' * 60)}
+        for variants in (None, [], [variant()]):
+            if variants is not None:
+                material['varianten'] = variants
+            result = compact_voice_context({'auftraege': [order(i) for i in range(50)],
+                                            'materialwissen': material,
+                                            'ausgewaehlter_auftrag': order(156)})
+            self.assertIs(result['materialwissen']['verfuegbar'], False)
+            self.assertLessEqual(len(encoded(result['materialwissen']).encode('utf-8')), 2400)
+            self.assert_budget(result)
+
 
 if __name__ == '__main__':
     unittest.main()

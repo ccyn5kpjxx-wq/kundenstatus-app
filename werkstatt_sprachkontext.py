@@ -180,9 +180,10 @@ def _material(raw):
         data['abdeckung'] = coverage
     rows = raw.get('varianten')
     if not isinstance(rows, list):
-        return data
+        return _bounded(data, [], MAX_MATERIAL_CHARS)
+    data = _bounded(data, [], MAX_MATERIAL_CHARS - 70)
     data['varianten'] = []
-    data['varianten_gekuerzt'] = True  # Reserve marker space during packing.
+    data['varianten_gekuerzt'] = False  # Longer JSON boolean reserves marker space.
     for raw_row in rows:
         row = _variant(raw_row)
         if row is None:
@@ -254,7 +255,7 @@ def compact_voice_context(context):
             break
         # Reserve the cursor/true marker *before* the final limit check.
         candidate = dict(result, auftraege=result['auftraege'] + [row],
-                         next_offset=offset + len(result['auftraege']) + 1, gekuerzt=True)
+                         next_offset=10**18, gekuerzt=False)
         if not _fits(candidate, MAX_CONTEXT_CHARS, MAX_CONTEXT_BYTES):
             break
         result['auftraege'].append(row)
