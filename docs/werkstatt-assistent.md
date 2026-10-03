@@ -1,5 +1,19 @@
 # Werkstatt-Cockpit API v1
 
+## Persönliches Gesprächsgedächtnis
+
+Unter **Menü → Mein Gedächtnis** kann der angemeldete Mitarbeiter seinen gespeicherten Gesprächsverlauf durchsuchen und Beiträge löschen. Persönliche Merknotizen lassen sich anlegen, bearbeiten und löschen. Auch die Werkstattleitung sieht hier ausschließlich das eigene Gedächtnis. Die bestehenden persönlichen Zugangsrechte werden bei jedem Abruf geprüft.
+
+Textdialoge und vollständig erkannte Sprachbeiträge werden als Text gespeichert; es gibt kein Tonarchiv und keine Speicherung bei geschlossener App. Ein neuer Sprachstart lädt einen begrenzten Rückblick mit persönlichen Notizen und jüngsten Gesprächsbeiträgen. Ältere Themen kann die KI über `gedaechtnis_suchen` gezielt abrufen. Das ist ein gekennzeichneter historischer Ausschnitt, keine fehlerfreie Zusammenfassung oder ein Nachweis für aktuelle Preise, Freigaben und ausgeführte Aktionen. Diese Fakten bleiben Aufgabe der bestehenden Cockpit-Werkzeuge.
+
+Ein Sprachgespräch startet erst nach erfolgreichem Laden des Gedächtnisstands. Speicherfehler während des Gesprächs werden angezeigt, ohne die Tonwiedergabe zu blockieren. Notizänderungen und Löschungen beenden das aktuelle Gespräch; eine neue Generation verhindert, dass verspätete Antworten gelöschte Inhalte erneut speichern. Auch ein anderes offenes Fenster beendet seine Sprachsitzung beim nächsten Kontextabgleich, wenn der Stand gewechselt hat.
+
+Gesprächsbeiträge können maximal 8000 Zeichen, einzelne Notizen maximal 1000 Zeichen enthalten. Bis zu 30 Notizen sind möglich; ältere Gesprächsbeiträge bleiben über die paginierte Suche erreichbar. Der Modellrückblick ist auf 2400 Zeichen und 4000 UTF-8-Bytes begrenzt. Bankzeilen und erkennbare Zugangsschlüssel werden beim Speichern und Abrufen bereinigt; die Erkennung ersetzt keinen allgemeinen Geheimnisschutz. Entzogene Einkaufsrechte sperren auch frühere KI-Antworten in Verlauf und Rückblick.
+
+Die Tabellen gehören mit `werkstatt_gedaechtnis_v1` zum bestehenden Backup. Alte Sicherungen werden um fehlende Tabellen und Spalten ergänzt. Gelöschte Einträge verschwinden aus dem aktiven Gedächtnis; vorhandene Sicherungskopien folgen weiterhin der betrieblichen Backup-Aufbewahrung. Keine automatische Aufgabenplanung oder neue fachliche Freigabe wird durch das Gedächtnis eingerichtet.
+
+Prüfung: `python scripts/test_gedaechtnis.py`, `python scripts/test_assistent_memory.py`, `node scripts/test_assistent_memory.js` und die bestehenden Sprach-/Portaltests. Sprachereignisse folgen der [offiziellen Realtime-Dokumentation](https://developers.openai.com/api/docs/guides/realtime-conversations).
+
 ## Materialwissen und Postfachquellen
 
 `/admin/assistent-mailquellen` erfasst das vorhandene betriebliche IMAP-Postfach schrittweise mit gespeichertem Ordner-/UID-Fortschritt. Bank-, Finanz- und private Ordner werden vor dem Lesen ausgeschlossen. Bekannte bzw. ausdrücklich zugeordnete Materialabsender liefern Rechnungsanhänge für den Artikelimport; eine Lesezuordnung bestätigt keine Bestelladresse. Einlesen ändert keine IMAP-Markierungen und versendet keine Nachrichten. Erfasste Header, gesicherte Anhänge und ausgelesene Artikel sind getrennte Bearbeitungsstände. Mailtexte, sonstige Unterlagen, ausgeschlossene Ordner und unklare Absender gelten nicht als vollständig ausgewertet.

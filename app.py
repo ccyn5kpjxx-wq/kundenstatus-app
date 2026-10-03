@@ -8256,6 +8256,8 @@ BACKUP_TABLES = (
     "assistent_aktionen",
     "assistent_audit",
     "assistent_dialog",
+    "assistent_gedaechtnis_state",
+    "assistent_gedaechtnis_notizen",
     "assistent_uploads",
     "assistent_mailquellen_laeufe",
     "assistent_mailquellen_ordner",
@@ -8299,7 +8301,7 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
-BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1")
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1")
 BACKUP_BINARY_FIELDS = {
     "assistent_materialfotos": {
         "file_base64": {"suffix": ".jpg", "max_bytes": 8 * 1024 * 1024},
@@ -47802,6 +47804,7 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         # Native avatar identity/history arrived after the first assistant API.
         "assistent_rechte", "assistent_profile", "assistent_aktionen",
         "assistent_audit", "assistent_dialog",
+        "assistent_gedaechtnis_state", "assistent_gedaechtnis_notizen",
         "assistent_uploads",
         "assistent_mailquellen_laeufe", "assistent_mailquellen_ordner",
         "assistent_mailquellen_nachrichten", "assistent_mailquellen_absender",
@@ -47826,6 +47829,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
                                 "mitarbeiter_zeitstatus", "mitarbeiter_zeitstempel"})
     if "werkstatt_materialfotos_v1" in schema_features:
         required_tables.add("assistent_materialfotos")
+    if "werkstatt_gedaechtnis_v1" in schema_features:
+        required_tables.update({"assistent_dialog", "assistent_gedaechtnis_state", "assistent_gedaechtnis_notizen"})
     if "werkstatt_mailquellen_v1" in schema_features:
         required_tables.update({"assistent_mailquellen_laeufe", "assistent_mailquellen_ordner",
                                 "assistent_mailquellen_nachrichten", "assistent_mailquellen_absender",

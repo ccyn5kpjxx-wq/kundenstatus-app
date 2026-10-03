@@ -325,5 +325,27 @@ const toolEvent={type:'response.function_call_arguments.done',name:'auftrag_lese
   const remoteTrack={kind:'audio'};f.voice.pc.ontrack({streams:[],track:remoteTrack});await flush();
   assert.equal(f.audio.srcObject.getTracks()[0],remoteTrack);assert.equal(f.voice.active,true);assert.equal(f.errors.length,0);f.voice.stop();
   f=fixture();await f.voice.start();assert.doesNotThrow(()=>f.voice.channel.onmessage({data:'invalid JSON'}));assert.equal(f.voice.active,false);assert.match(f.errors[0].message,/ungültige Nachricht/);
-  console.log('PASS: direct ephemeral WebRTC transport, bounded token/SDP exchange, safe errors, stale/cancel cleanup; startup phases, permissions, playback, refresh/tools, barge-in and response failures.');
+  // Memory preload is cancellable and pinned to this voice session. Its writes
+  // must never delay barge-in or keep an obsolete microphone/session alive.
+  f=fixture();const memoryReady=deferred();f.voice.onBeforeStart=()=>memoryReady.promise;
+  const waitingMemory=f.voice.start();await flush();assert.equal(f.calls.length,0);f.voice.stop();await waitingMemory;
+  f.voice.onBeforeStart=async()=>({generation:'new-memory'});await f.voice.start();const latest=f.voice.session;
+  memoryReady.resolve({generation:'obsolete-memory'});await flush();assert.equal(f.voice.session,latest);assert.equal(latest.memory.generation,'new-memory');
+  assert.equal(f.calls[0].data.memory_generation,'new-memory');
+  const transcripts=[],savedLater=deferred();f.voice.onTranscript=(handle,entry)=>{transcripts.push({handle,entry});return savedLater.promise;};
+  await f.voice.event({type:'conversation.item.input_audio_transcription.completed',item_id:'item_1',content_index:0,transcript:'Morgen weiter.'});
+  await f.voice.event({type:'response.output_audio_transcript.delta',item_id:'item_2',delta:'Noch unvollständig'});
+  await f.voice.event({type:'response.output_audio_transcript.done',item_id:'item_2',content_index:0,transcript:'Morgen können wir weitermachen.'});
+  assert.equal(transcripts.length,2);assert.equal(transcripts[0].entry.role,'user');assert.equal(transcripts[0].entry.eventId,'item_1:0');
+  assert.equal(transcripts[1].entry.role,'assistant');assert.equal(transcripts[0].handle,latest.memory);
+  await f.voice.event({type:'output_audio_buffer.started'});await f.voice.event({type:'input_audio_buffer.speech_started'});
+  assert.equal(f.audio.muted,true);assert.equal(f.voice.active,true,'pending persistence never blocks interruption');
+  f.behaviour.api=async()=>({instructions:'changed',memory_generation:'other-memory'});await f.voice.refresh();
+  assert.match(f.calls.at(-1).url,/memory_generation=new-memory/);assert.equal(f.voice.active,false);assert.match(f.errors.at(-1).message,/Gedächtnis wurde geändert/);
+  savedLater.reject(new Error('offline'));await flush();assert.equal(f.errors.length,1,'persistence rejection is handled by its own controller');
+  f=fixture();f.voice.onBeforeStart=async()=>{throw new Error('Gedächtnis konnte nicht geladen werden.');};await f.voice.start();
+  assert.equal(f.calls.length,0);assert.equal(f.voice.active,false);assert.equal(f.stopped(),1);assert.match(f.errors[0].message,/Gedächtnis/);
+  f=fixture();await f.voice.start();f.behaviour.api=async()=>{throw Object.assign(new Error('conflict'),{status:409});};await f.voice.refresh();
+  assert.equal(f.voice.active,false);assert.match(f.errors[0].message,/Gedächtnis wurde geändert/);
+  console.log('PASS: direct ephemeral WebRTC transport, bounded exchange, errors, cancellation, memory preload/generation/transcripts, nonblocking barge-in and response failures.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

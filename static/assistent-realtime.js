@@ -1,8 +1,8 @@
 'use strict';
 // Bidirectional WebRTC: microphone stays live during model audio.
 window.AssistantRealtime = class {
-  constructor({api, audio, onState, onError, onText, onEvent, onPlaybackBlocked, onRemoteStream}) {
-    Object.assign(this,{api,audio,onState,onError,onText,onEvent,onPlaybackBlocked,onRemoteStream});
+  constructor({api, audio, onState, onError, onText, onEvent, onPlaybackBlocked, onRemoteStream, onBeforeStart, onTranscript}) {
+    Object.assign(this,{api,audio,onState,onError,onText,onEvent,onPlaybackBlocked,onRemoteStream,onBeforeStart,onTranscript});
     this.active=false;this.generation=0;this.phase='idle';this.session=null;
   }
   current(session) {return !!session&&this.active&&this.session===session&&session.generation===this.generation;}
@@ -29,6 +29,13 @@ window.AssistantRealtime = class {
     // Optional visualisation must never take down the voice connection.
     try{this.onRemoteStream?.(stream);}catch(_){}
   }
+  transcript(session,role,event) {
+    if(!this.current(session)||typeof event.transcript!=='string')return;
+    this.onText(role==='user'?'Du':'KI',event.transcript);
+    // Completed text only; never persist audio, deltas or tool instructions.
+    const eventId=event.item_id?event.item_id+':'+(event.content_index??0):event.event_id;
+    try{const saved=this.onTranscript?.(session.memory,{role,text:event.transcript,eventId});saved?.catch?.(()=>{});}catch(_){}
+  }
   async start(order) {
     if(this.active)return;
     if(!window.isSecureContext)throw new Error('Das Gespräch benötigt HTTPS. Bitte die sichere Cockpit-Adresse öffnen.');
@@ -53,6 +60,7 @@ window.AssistantRealtime = class {
       this.stream=session.stream=stream;
       this.setPhase(session,'connection','Mikrofon ist bereit. Die Sprachverbindung wird vorbereitet.',25000,
         'Der Browser konnte die Sprachverbindung nicht vorbereiten. Bitte erneut starten oder den Browser neu öffnen.');
+      if(this.onBeforeStart)session.memory=await this.waitFor(this.onBeforeStart(),session);
       const pc=this.pc=session.pc=new RTCPeerConnection();
       this.audio.autoplay=true;this.audio.playsInline=true;this.audio.srcObject=null;this.audio.removeAttribute('src');this.audio.muted=false;
       pc.ontrack=event=>{
@@ -110,7 +118,7 @@ window.AssistantRealtime = class {
       await this.waitFor(pc.setLocalDescription(offer),session);
       this.setPhase(session,'server','Mikrofon ist bereit. Der KI-Sprachdienst wird verbunden und die Aufträge werden geladen.',80000,
         'Der Sprachdienst hat nicht rechtzeitig geantwortet. Mikrofonfreigabe ist vorhanden; bitte die Serververbindung prüfen und erneut starten.');
-      const access=await this.waitFor(this.api('/realtime/start',{sdp:offer.sdp,auftrag_id:order||null,transport:'browser'},false,session.abort.signal),session);
+      const access=await this.waitFor(this.api('/realtime/start',{sdp:offer.sdp,auftrag_id:order||null,transport:'browser',...(session.memory?.generation?{memory_generation:session.memory.generation}:{})},false,session.abort.signal),session);
       if(typeof access?.client_secret!=='string'||!access.client_secret||access.client_secret.length>4096||
           !Number.isFinite(access.expires_at)||access.expires_at*1000<=Date.now()){
         throw new Error('Der kurzlebige Sprachzugang ist ungültig oder bereits abgelaufen. Bitte das Gespräch erneut starten.');
@@ -187,9 +195,15 @@ window.AssistantRealtime = class {
     if(!this.current(session)||session.refreshing)return;
     this.refreshing=session.refreshing=true;
     try {
-      const context=await this.waitFor(this.api('/realtime/kontext'+(this.order?'?auftrag_id='+encodeURIComponent(this.order):''),undefined,false,session.abort.signal),session);
+      const params=[];
+      if(this.order)params.push('auftrag_id='+encodeURIComponent(this.order));
+      if(session.memory?.generation)params.push('memory_generation='+encodeURIComponent(session.memory.generation));
+      const context=await this.waitFor(this.api('/realtime/kontext'+(params.length?'?'+params.join('&'):''),undefined,false,session.abort.signal),session);
+      if(session.memory?.generation&&context.memory_generation&&session.memory.generation!==context.memory_generation){
+        this.fail(new Error('Dein Gedächtnis wurde geändert. Starte das Gespräch neu.'),session);return;
+      }
       this.send({type:'session.update',session:{type:'realtime',instructions:context.instructions}},session);
-    }catch(error){if(this.current(session))this.fail(new Error('Auftragskontext oder Zugriffsrecht nicht mehr verfügbar. Gespräch beendet.'),session);}
+    }catch(error){if(this.current(session))this.fail(new Error(error.status===409?'Dein Gedächtnis wurde geändert. Starte das Gespräch neu.':'Auftragskontext oder Zugriffsrecht nicht mehr verfügbar. Gespräch beendet.'),session);}
     finally{session.refreshing=false;if(this.current(session))this.refreshing=false;}
   }
   async event(event,session=this.session) {
@@ -234,10 +248,10 @@ window.AssistantRealtime = class {
         case 'output_audio_buffer.stopped':
           session.outputActive=false;this.state(session,'listening','Ich höre zu.');break;
         case 'conversation.item.input_audio_transcription.completed':
-          this.onText('Du',event.transcript);
-          if(/^(gespräch beenden|sprachmodus beenden|stop)[.!?]?$/i.test(event.transcript.trim()))this.stop();
+          this.transcript(session,'user',event);
+          if(typeof event.transcript==='string'&&/^(gespräch beenden|sprachmodus beenden|stop)[.!?]?$/i.test(event.transcript.trim()))this.stop();
           break;
-        case 'response.output_audio_transcript.done':this.onText('KI',event.transcript);break;
+        case 'response.output_audio_transcript.done':this.transcript(session,'assistant',event);break;
         case 'response.function_call_arguments.done': {
           let result;
           try{result=await this.waitFor(this.api('/realtime/werkzeug',{name:event.name,arguments:JSON.parse(event.arguments)},false,session.abort.signal),session);}
