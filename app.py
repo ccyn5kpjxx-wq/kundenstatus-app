@@ -440,6 +440,9 @@ AUTO_BACKUP_RESERVE_BYTES = max(0, env_int("AUTO_BACKUP_RESERVE_MB", 1024 if RUN
 AUTO_BACKUP_ON_STARTUP = env_flag("AUTO_BACKUP_ON_STARTUP", RUNNING_ON_RENDER)
 AUTO_CHANGE_BACKUP_ENABLED = env_flag("AUTO_CHANGE_BACKUP_ENABLED", True)
 AUTO_CHANGE_BACKUP_DELAY_SECONDS = max(1, env_int("AUTO_CHANGE_BACKUP_DELAY_SECONDS", 3))
+PORTAL_FILE_EXPORT_CHUNK_BYTES = 128 * 1024 * 1024
+PORTAL_FILE_EXPORT_TTL_SECONDS = 24 * 60 * 60
+PORTAL_FILE_EXPORT_ROOT = pathlib.Path(tempfile.gettempdir()) / "gaertner-portal-dateiarchiv-v1"
 OPENAI_EXTRACTION_MODEL = os.environ.get("OPENAI_EXTRACTION_MODEL", "gpt-4o")
 OPENAI_CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL") or OPENAI_EXTRACTION_MODEL
 # Der Portal-Helfer bleibt standardmäßig lokal. Online-Chat muss bewusst aktiviert werden.
@@ -8322,6 +8325,7 @@ _backup_thread_started = False
 _change_backup_lock = threading.Lock()
 _change_backup_pending = False
 _change_backup_running = False
+_portal_file_export_lock = threading.Lock()
 
 
 def list_table_rows_for_backup(db, table_name, exclude_columns=()):
@@ -8558,6 +8562,418 @@ def create_backup_package(reason="auto"):
     return backup_path
 
 
+PORTAL_FILE_REFERENCE_COLUMNS = (
+    "stored_name",
+    "datei_stored_name",
+    "pdf_stored_name",
+    "unterschrift_stored",
+)
+PORTAL_FILE_ASSOCIATION_COLUMNS = (
+    "auftrag_id",
+    "reklamation_id",
+    "lead_id",
+    "suche_id",
+    "verkauf_id",
+    "mietfahrzeug_id",
+    "mietvorgang_id",
+    "anfrage_id",
+    "quelle_beleg_id",
+    "quelle_item_id",
+)
+
+
+def portal_file_export_root():
+    root = pathlib.Path(PORTAL_FILE_EXPORT_ROOT).absolute()
+    forbidden_roots = {
+        pathlib.Path(DATA_DIR).absolute(),
+        pathlib.Path(UPLOAD_DIR).absolute(),
+        pathlib.Path(BACKUP_DIR).absolute(),
+    }
+    if any(root == forbidden or forbidden in root.parents for forbidden in forbidden_roots):
+        raise RuntimeError("Der Dateiarchiv-Export darf nicht im Daten- oder Backup-Verzeichnis liegen.")
+    if root.exists() and root.is_symlink():
+        raise RuntimeError("Das temporaere Dateiarchiv-Verzeichnis darf kein Link sein.")
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return root
+
+
+def cleanup_stale_portal_file_exports():
+    root = portal_file_export_root()
+    cutoff = time.time() - PORTAL_FILE_EXPORT_TTL_SECONDS
+    for candidate in root.iterdir():
+        if not candidate.is_dir() or candidate.is_symlink():
+            continue
+        if not re.fullmatch(r"[0-9a-f]{32}", candidate.name):
+            continue
+        try:
+            if candidate.stat().st_mtime < cutoff:
+                shutil.rmtree(candidate)
+        except OSError:
+            continue
+
+
+def portal_file_database_references():
+    references = defaultdict(list)
+    backup_by_datei_id = {}
+    covered_columns = []
+    db = open_fresh_db()
+    try:
+        for table_name in BACKUP_TABLES:
+            columns = get_table_columns(db, table_name)
+            reference_columns = [
+                column for column in PORTAL_FILE_REFERENCE_COLUMNS if column in columns
+            ]
+            if not reference_columns or "id" not in columns:
+                continue
+            selected = ["id", *reference_columns]
+            for column in ("original_name", "datei_original_name", *PORTAL_FILE_ASSOCIATION_COLUMNS):
+                if column in columns and column not in selected:
+                    selected.append(column)
+            where_sql = " OR ".join(
+                f"COALESCE({column}, '') <> ''" for column in reference_columns
+            )
+            rows = db.execute(
+                f"SELECT {', '.join(selected)} FROM {table_name} WHERE {where_sql}"
+            ).fetchall()
+            covered_columns.extend(f"{table_name}.{column}" for column in reference_columns)
+            for row in rows:
+                item = dict(row)
+                for column in reference_columns:
+                    stored_value = clean_text(item.get(column))
+                    stored_name = pathlib.Path(stored_value).name
+                    if not stored_name:
+                        continue
+                    reference = {
+                        "table": table_name,
+                        "row_id": item.get("id"),
+                        "column": column,
+                    }
+                    original_name = clean_text(
+                        item.get("original_name") or item.get("datei_original_name")
+                    )
+                    if original_name:
+                        reference["original_name"] = original_name
+                    associations = {
+                        key: item.get(key)
+                        for key in PORTAL_FILE_ASSOCIATION_COLUMNS
+                        if item.get(key) not in (None, "", 0, "0")
+                    }
+                    if associations:
+                        reference["associations"] = associations
+                    if stored_value != stored_name:
+                        reference["stored_value"] = stored_value
+                    references[stored_name].append(reference)
+
+        datei_columns = get_table_columns(db, "dateien")
+        backup_columns = get_table_columns(db, "datei_backups")
+        if {"id", "stored_name"}.issubset(datei_columns) and {
+            "datei_id", "file_sha256", "size"
+        }.issubset(backup_columns):
+            rows = db.execute(
+                """
+                SELECT d.id, d.stored_name, b.file_sha256, b.size
+                FROM dateien d
+                LEFT JOIN datei_backups b ON b.datei_id=d.id
+                WHERE COALESCE(d.stored_name, '') <> ''
+                """
+            ).fetchall()
+            for row in rows:
+                backup_by_datei_id[int(row["id"])] = {
+                    "stored_name": pathlib.Path(clean_text(row["stored_name"])).name,
+                    "sha256": clean_text(row["file_sha256"]).lower(),
+                    "size": int(row["size"] or 0),
+                }
+    finally:
+        db.close()
+    return references, backup_by_datei_id, sorted(covered_columns)
+
+
+def stable_portal_file_digest(path):
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError(f"Keine regulaere Exportdatei: {path.name}")
+    before = path.stat()
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    after = path.stat()
+    identity_before = (before.st_size, before.st_mtime_ns)
+    identity_after = (after.st_size, after.st_mtime_ns)
+    if identity_before != identity_after:
+        raise RuntimeError(f"Datei wurde waehrend der Bestandsaufnahme veraendert: {path.name}")
+    return digest.hexdigest(), before.st_size, before.st_mtime_ns
+
+
+def portal_upload_directory_snapshot():
+    if not UPLOAD_DIR.is_dir() or UPLOAD_DIR.is_symlink():
+        raise RuntimeError("Das Upload-Verzeichnis ist nicht als regulaerer Ordner verfuegbar.")
+    snapshot = []
+    for path in sorted(UPLOAD_DIR.iterdir(), key=lambda item: item.name):
+        if path.is_dir() or path.is_symlink() or not path.is_file():
+            raise RuntimeError(f"Unbekannter Eintrag im Upload-Verzeichnis: {path.name}")
+        info = path.stat()
+        snapshot.append((path.name, info.st_size, info.st_mtime_ns))
+    return snapshot
+
+
+def build_portal_file_export_manifest():
+    cleanup_stale_portal_file_exports()
+    root = portal_file_export_root()
+    references, backup_by_datei_id, covered_columns = portal_file_database_references()
+    source_snapshot = portal_upload_directory_snapshot()
+    physical_names = {stored_name for stored_name, _size, _mtime_ns in source_snapshot}
+    entries = []
+    for stored_name, _snapshot_size, _snapshot_mtime_ns in source_snapshot:
+        path = UPLOAD_DIR / stored_name
+        digest, size, mtime_ns = stable_portal_file_digest(path)
+        file_references = references.get(path.name, [])
+        exact_database_backup = False
+        for reference in file_references:
+            if reference["table"] != "dateien":
+                continue
+            backup = backup_by_datei_id.get(int(reference["row_id"] or 0))
+            if not backup:
+                reference["database_backup"] = {
+                    "present": False,
+                    "matches_file": False,
+                }
+                continue
+            matches = (
+                backup["stored_name"] == path.name
+                and backup["size"] == size
+                and re.fullmatch(r"[0-9a-f]{64}", backup["sha256"] or "") is not None
+                and hmac.compare_digest(backup["sha256"], digest)
+            )
+            reference["database_backup"] = {
+                "present": True,
+                "sha256": backup["sha256"],
+                "size": backup["size"],
+                "matches_file": matches,
+            }
+            exact_database_backup = exact_database_backup or matches
+        datei_references = [
+            reference for reference in file_references if reference["table"] == "dateien"
+        ]
+        safe_disk_duplicate = bool(file_references) and len(datei_references) == len(
+            file_references
+        ) and all(
+            bool((reference.get("database_backup") or {}).get("matches_file"))
+            for reference in datei_references
+        )
+        entries.append(
+            {
+                "relative_path": path.name,
+                "size": size,
+                "sha256": digest,
+                "mtime_ns": mtime_ns,
+                "database_references": file_references,
+                "exact_datei_backup": exact_database_backup,
+                "safe_disk_duplicate": safe_disk_duplicate,
+            }
+        )
+    if portal_upload_directory_snapshot() != source_snapshot:
+        raise RuntimeError("Der Upload-Bestand hat sich waehrend der Bestandsaufnahme veraendert.")
+
+    chunks = []
+    current_files = []
+    current_bytes = 0
+    for entry in entries:
+        if current_files and current_bytes + entry["size"] > PORTAL_FILE_EXPORT_CHUNK_BYTES:
+            chunks.append({"files": current_files, "total_bytes": current_bytes})
+            current_files = []
+            current_bytes = 0
+        current_files.append(entry["relative_path"])
+        current_bytes += entry["size"]
+    if current_files:
+        chunks.append({"files": current_files, "total_bytes": current_bytes})
+    for index, chunk in enumerate(chunks, 1):
+        chunk.update(
+            {
+                "number": index,
+                "file_count": len(chunk["files"]),
+            }
+        )
+    chunk_by_name = {
+        name: chunk["number"] for chunk in chunks for name in chunk["files"]
+    }
+    for entry in entries:
+        entry["chunk"] = chunk_by_name[entry["relative_path"]]
+
+    inventory_rows = [
+        [entry["relative_path"], entry["size"], entry["sha256"]]
+        for entry in entries
+    ]
+    inventory_json = json.dumps(inventory_rows, separators=(",", ":"))
+    token = uuid.uuid4().hex
+    manifest = {
+        "format": "gaertner-portal-dateiarchiv-v1",
+        "export_id": token,
+        "created_at": now_str(),
+        "source": "UPLOAD_DIR",
+        "file_count": len(entries),
+        "total_file_bytes": sum(entry["size"] for entry in entries),
+        "inventory_sha256": hashlib.sha256(inventory_json.encode("utf-8")).hexdigest(),
+        "inventory_algorithm": (
+            "sha256(json.dumps([[posix_relative_path,file_size,sha256_file],...],"
+            "separators=(',',':')).encode()); paths lexicographically sorted"
+        ),
+        "chunk_bytes_limit": PORTAL_FILE_EXPORT_CHUNK_BYTES,
+        "chunk_count": len(chunks),
+        "chunks": chunks,
+        "mapping_coverage": covered_columns,
+        "unreferenced_file_count": sum(
+            1 for entry in entries if not entry["database_references"]
+        ),
+        "missing_source_reference_count": len(
+            [stored_name for stored_name in references if stored_name not in physical_names]
+        ),
+        "missing_source_references": [
+            {
+                "relative_path": stored_name,
+                "database_references": references[stored_name],
+            }
+            for stored_name in sorted(references)
+            if stored_name not in physical_names
+        ],
+        "exact_datei_backup_file_count": sum(
+            1 for entry in entries if entry["exact_datei_backup"]
+        ),
+        "safe_disk_duplicate_file_count": sum(
+            1 for entry in entries if entry["safe_disk_duplicate"]
+        ),
+        "files": entries,
+    }
+    session_dir = root / token
+    session_dir.mkdir(mode=0o700)
+    manifest_path = session_dir / "manifest.json"
+    partial_path = session_dir / ".manifest.json.part"
+    partial_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    partial_path.replace(manifest_path)
+    return manifest
+
+
+def portal_file_export_manifest_path(export_id):
+    export_id = clean_text(export_id).lower()
+    if not re.fullmatch(r"[0-9a-f]{32}", export_id):
+        return None
+    root = portal_file_export_root()
+    session_dir = root / export_id
+    if session_dir.parent != root or not session_dir.is_dir() or session_dir.is_symlink():
+        return None
+    candidate = session_dir / "manifest.json"
+    return candidate if candidate.is_file() and not candidate.is_symlink() else None
+
+
+def load_portal_file_export_manifest(export_id):
+    path = portal_file_export_manifest_path(export_id)
+    if not path:
+        return None
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("format") != "gaertner-portal-dateiarchiv-v1"
+        or manifest.get("export_id") != clean_text(export_id).lower()
+        or not isinstance(manifest.get("files"), list)
+        or not isinstance(manifest.get("chunks"), list)
+    ):
+        return None
+    return manifest
+
+
+def write_portal_file_to_archive(archive, entry):
+    stored_name = clean_text(entry.get("relative_path"))
+    if not stored_name or pathlib.Path(stored_name).name != stored_name:
+        raise RuntimeError("Unsicherer Dateiname im Exportmanifest.")
+    path = UPLOAD_DIR / stored_name
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError(f"Quelldatei fehlt oder ist kein regulaerer Upload: {stored_name}")
+    before = path.stat()
+    expected_size = int(entry["size"]) if "size" in entry else -1
+    expected_mtime_ns = int(entry["mtime_ns"]) if "mtime_ns" in entry else -1
+    if before.st_size != expected_size or before.st_mtime_ns != expected_mtime_ns:
+        raise RuntimeError(f"Quelldatei hat sich seit der Bestandsaufnahme veraendert: {stored_name}")
+    info = zipfile.ZipInfo(f"uploads/{stored_name}")
+    info.compress_type = zipfile.ZIP_STORED
+    info.external_attr = 0o600 << 16
+    digest = hashlib.sha256()
+    with path.open("rb") as source, archive.open(info, "w", force_zip64=True) as target:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+            target.write(block)
+    after = path.stat()
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        raise RuntimeError(f"Quelldatei wurde waehrend des Exports veraendert: {stored_name}")
+    expected_hash = clean_text(entry.get("sha256")).lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_hash) or not hmac.compare_digest(
+        digest.hexdigest(), expected_hash
+    ):
+        raise RuntimeError(f"Pruefsumme stimmt beim Export nicht mehr: {stored_name}")
+
+
+def build_portal_file_export_chunk(manifest, chunk_number):
+    chunks = manifest.get("chunks") or []
+    try:
+        chunk = next(item for item in chunks if int(item.get("number") or 0) == int(chunk_number))
+    except (StopIteration, TypeError, ValueError):
+        return None
+    entries_by_name = {
+        clean_text(entry.get("relative_path")): entry
+        for entry in manifest.get("files") or []
+    }
+    entries = [entries_by_name.get(name) for name in chunk.get("files") or []]
+    if not entries or any(entry is None for entry in entries):
+        raise RuntimeError("Teilarchiv ist im Manifest unvollstaendig.")
+    root = portal_file_export_root()
+    session_dir = root / clean_text(manifest.get("export_id")).lower()
+    if session_dir.parent != root or not session_dir.is_dir() or session_dir.is_symlink():
+        raise RuntimeError("Export-Sitzung ist nicht mehr verfuegbar.")
+    required = int(chunk.get("total_bytes") or 0) + 256 * 1024 * 1024
+    if shutil.disk_usage(root).free < required:
+        raise RuntimeError("Im temporaeren Speicher ist nicht genug Platz fuer dieses Teilarchiv.")
+    temp_handle = tempfile.NamedTemporaryFile(
+        prefix=f"gaertner-export-{manifest['export_id']}-teil-{int(chunk_number):02d}-",
+        suffix=".zip",
+        dir=session_dir,
+        delete=False,
+    )
+    temp_path = pathlib.Path(temp_handle.name)
+    temp_handle.close()
+    try:
+        with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+            archive.writestr(
+                "manifest.json",
+                json.dumps(manifest, ensure_ascii=False, indent=2),
+            )
+            archive.writestr(
+                "part.json",
+                json.dumps(chunk, ensure_ascii=False, indent=2),
+            )
+            archive.writestr(
+                "README.txt",
+                (
+                    "Gärtner Portal-Dateiarchiv\n\n"
+                    "Alle Dateien dieses Teilarchivs stehen unter uploads/. "
+                    "manifest.json enthält SHA-256, Größe, Teilnummer und DB-Zuordnungen.\n"
+                    "Vor einer Serverbereinigung müssen sämtliche Teile lokal entpackt und "
+                    "gegen das Manifest geprüft werden.\n"
+                ),
+            )
+            for entry in entries:
+                write_portal_file_to_archive(archive, entry)
+        with zipfile.ZipFile(temp_path) as archive:
+            if archive.testzip() is not None:
+                raise RuntimeError("Das erzeugte Teilarchiv hat die ZIP-Pruefung nicht bestanden.")
+        return temp_path, chunk
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
 def create_safety_backup(reason):
     if not AUTO_BACKUP_ENABLED:
         return None
@@ -8601,6 +9017,7 @@ def schedule_change_backup(reason="change"):
 DATA_CHANGE_ENDPOINT_EXCLUDES = {
     "admin_backup_sofort",
     "admin_backup_download",
+    "admin_dateiarchiv_start",
     "session_ping",
     # Besucher- und Klickstatistik sind im Stundenbackup enthalten. Ein Seiten-
     # aufruf darf keine erneute Vollkopie aller Auftragsunterlagen ausloesen.
@@ -21352,34 +21769,59 @@ def datei_backup_exists(datei_id):
         db.close()
 
 
-def restore_upload_file_from_backup(datei, path):
+def load_datei_backup_bytes(datei):
+    """Load a database copy only when its stored integrity data matches."""
     try:
         datei_id = int((datei or {}).get("id") or 0)
     except (TypeError, ValueError):
-        return False
-    if not datei_id or not path:
-        return False
+        return None
+    if not datei_id:
+        return None
     db = get_db()
     try:
         row = db.execute(
-            "SELECT file_base64, file_sha256 FROM datei_backups WHERE datei_id=?",
+            "SELECT file_base64, file_sha256, size FROM datei_backups WHERE datei_id=?",
             (datei_id,),
         ).fetchone()
     finally:
         db.close()
     if not row:
-        return False
+        return None
     try:
         data = base64.b64decode(clean_text(row["file_base64"]), validate=True)
-    except Exception:
-        return False
+        expected_size = int(row["size"] or 0)
+    except (TypeError, ValueError, KeyError, base64.binascii.Error):
+        return None
     expected_hash = clean_text(row["file_sha256"]).lower()
-    if expected_hash and hashlib.sha256(data).hexdigest().lower() != expected_hash:
+    actual_hash = hashlib.sha256(data).hexdigest().lower()
+    if not data or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        return None
+    if expected_size and len(data) != expected_size:
+        return None
+    if not hmac.compare_digest(actual_hash, expected_hash):
+        return None
+    return data
+
+
+def restore_upload_file_from_backup(datei, path):
+    if not path:
         return False
+    data = load_datei_backup_bytes(datei)
+    if data is None:
+        return False
+    partial_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        with partial_path.open("xb") as target:
+            target.write(data)
+            target.flush()
+            os.fsync(target.fileno())
+        partial_path.replace(path)
     except OSError:
+        try:
+            partial_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         return False
     return True
 
@@ -21444,13 +21886,19 @@ def missing_upload_response(datei, back_url=""):
 def send_upload_file(datei, as_attachment=False, missing_back_url=""):
     if not assistent_datei_intern_sichtbar(datei):
         abort(404)
-    path = ensure_upload_file_available(datei)
-    if not path:
-        return missing_upload_response(datei, missing_back_url)
-    original_name = clean_text(datei.get("original_name")) or path.name
+    path = upload_file_path(datei)
+    source = path if path and path.exists() and path.is_file() else None
+    if source is None:
+        backup_data = load_datei_backup_bytes(datei)
+        if backup_data is None:
+            return missing_upload_response(datei, missing_back_url)
+        # Normal viewing/downloading must not recreate an archived file on the
+        # persistent disk. Workflows that require a path use a temporary copy.
+        source = BytesIO(backup_data)
+    original_name = clean_text(datei.get("original_name")) or (path.name if path else f"datei-{datei.get('id')}.bin")
     suffix = pathlib.Path(original_name).suffix.lower()
     response = send_file(
-        path,
+        source,
         download_name=original_name,
         mimetype=canonical_upload_mime_type(original_name),
         as_attachment=bool(as_attachment or suffix not in SAFE_INLINE_UPLOAD_EXTENSIONS),
@@ -27132,10 +27580,13 @@ def versicherung_mail_attachments(dateien, limit_mb=None):
         if clean_text(datei.get("kategorie")) == "fertigbild":
             continue
         path = upload_file_path(datei)
+        data = None
         if not path or not path.exists() or not path.is_file():
+            data = load_datei_backup_bytes(datei)
+        if (not path or not path.exists() or not path.is_file()) and data is None:
             continue
-        size = int(datei.get("size") or path.stat().st_size or 0)
-        name = clean_text(datei.get("original_name")) or path.name
+        size = len(data) if data is not None else int(datei.get("size") or path.stat().st_size or 0)
+        name = clean_text(datei.get("original_name")) or (path.name if path else f"datei-{datei.get('id')}.bin")
         if size <= 0:
             continue
         if total + size > limit_bytes:
@@ -27146,6 +27597,7 @@ def versicherung_mail_attachments(dateien, limit_mb=None):
         attachments.append(
             {
                 "path": path,
+                "data": data,
                 "name": name,
                 "size": size,
                 "main_type": main_type or "application",
@@ -27210,7 +27662,7 @@ def send_versicherung_schadenmail(auftrag, empfaenger, cc, anschreiben, dateien=
 
     for attachment in attachments:
         message.add_attachment(
-            attachment["path"].read_bytes(),
+            attachment["data"] if attachment.get("data") is not None else attachment["path"].read_bytes(),
             maintype=attachment["main_type"],
             subtype=attachment["sub_type"],
             filename=attachment["name"],
@@ -31065,10 +31517,20 @@ def reanalyze_existing_documents(auftrag_id):
         suffix = pathlib.Path(original_name).suffix.lower()
         if suffix not in ANALYSIS_EXTENSIONS:
             continue
-        path = ensure_upload_file_available(datei)
-        if not path:
-            continue
-        bundle = build_document_analysis_bundle_safe(path, original_name)
+        path = upload_file_path(datei)
+        temporary_directory = None
+        if not path or not path.exists() or not path.is_file():
+            backup_data = load_datei_backup_bytes(datei)
+            if backup_data is None:
+                continue
+            temporary_directory = tempfile.TemporaryDirectory(prefix="gaertner-reanalyse-")
+            path = pathlib.Path(temporary_directory.name) / f"dokument{suffix}"
+            path.write_bytes(backup_data)
+        try:
+            bundle = build_document_analysis_bundle_safe(path, original_name)
+        finally:
+            if temporary_directory is not None:
+                temporary_directory.cleanup()
         extracted_text = clean_text(bundle.get("text"))
         note = clean_text(datei.get("notiz"))
         doc_type = (
@@ -47553,6 +48015,162 @@ def admin_backup_download():
         mimetype="application/zip",
         as_attachment=True,
     )
+
+
+def render_admin_dateiarchiv(manifest=None, error="", status_code=200):
+    return render_template_string(
+        """
+        <!doctype html>
+        <html lang="de">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Portal-Dateiarchiv</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 0; background: #f4f1eb; color: #16202a; }
+              main { max-width: 980px; margin: 36px auto; padding: 0 20px; }
+              .card { background: white; border: 1px solid #d9d1c5; border-radius: 16px; padding: 24px; margin-bottom: 18px; }
+              .warning { background: #fff5dd; border-color: #e5bd61; }
+              .error { background: #ffe8e5; border-color: #d46a5d; }
+              .button { display: inline-block; border: 0; border-radius: 10px; padding: 11px 16px; background: #17212a; color: white; text-decoration: none; cursor: pointer; }
+              .part { display: flex; justify-content: space-between; gap: 18px; align-items: center; border-top: 1px solid #eee7dc; padding: 13px 0; }
+              code { overflow-wrap: anywhere; }
+              .muted { color: #5d6670; }
+            </style>
+          </head>
+          <body><main>
+            <div class="card">
+              <h1>Portal-Dateiarchiv</h1>
+              <p>Dieser Export liest die Originaldateien nur. Teilarchive entstehen ausschließlich im temporären Systemspeicher und verändern keine Portal- oder Auftragsdaten.</p>
+              {% if not manifest %}
+              <form method="post" action="{{ url_for('admin_dateiarchiv_start') }}">
+                {{ csrf_field()|safe }}
+                <button class="button" type="submit">Bestand erfassen und Export vorbereiten</button>
+              </form>
+              {% endif %}
+            </div>
+            {% if error %}<div class="card error"><strong>Export nicht freigegeben:</strong> {{ error }}</div>{% endif %}
+            {% if manifest %}
+            <div class="card warning">
+              <strong>Noch keine Löschfreigabe.</strong> Zuerst Manifest und alle Teile herunterladen, lokal entpacken und jede SHA-256-Prüfsumme bestätigen.
+            </div>
+            <div class="card">
+              <p><strong>{{ manifest['file_count'] }}</strong> Dateien · <strong>{{ manifest['total_file_bytes'] }}</strong> Byte · {{ manifest['chunk_count'] }} Teile</p>
+              <p class="muted">Nur als Prüfwerte: {{ manifest['exact_datei_backup_file_count'] }} Dateien haben mindestens eine passende DB-Kopie; {{ manifest['safe_disk_duplicate_file_count'] }} sind ausschließlich durch passende Auftragsdatei-Kopien referenziert. {{ manifest['unreferenced_file_count'] }} Dateien sind ohne bekannte DB-Zuordnung, {{ manifest['missing_source_reference_count'] }} DB-Referenzen ohne physische Quelldatei.</p>
+              <p class="muted">Inventar-SHA-256</p>
+              <code>{{ manifest['inventory_sha256'] }}</code>
+              <p><a class="button" href="{{ url_for('admin_dateiarchiv_manifest', export_id=manifest['export_id']) }}">Mastermanifest herunterladen</a></p>
+            </div>
+            <div class="card">
+              <h2>Teilarchive</h2>
+              {% for part in manifest['chunks'] %}
+              <div class="part">
+                <span>Teil {{ part['number'] }} von {{ manifest['chunk_count'] }} · {{ part['file_count'] }} Dateien · {{ part['total_bytes'] }} Byte</span>
+                <a class="button" href="{{ url_for('admin_dateiarchiv_chunk', export_id=manifest['export_id'], chunk_number=part['number']) }}">Teil {{ part['number'] }} laden</a>
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </main></body>
+        </html>
+        """,
+        manifest=manifest,
+        error=clean_text(error),
+    ), status_code
+
+
+@app.route("/admin/dateiarchiv")
+@admin_required
+def admin_dateiarchiv():
+    return render_admin_dateiarchiv()
+
+
+@app.route("/admin/dateiarchiv/start", methods=["POST"])
+@admin_required
+def admin_dateiarchiv_start():
+    if not _portal_file_export_lock.acquire(blocking=False):
+        return render_admin_dateiarchiv(error="Ein Dateiarchiv wird bereits vorbereitet.", status_code=409)
+    try:
+        manifest = build_portal_file_export_manifest()
+    except Exception as exc:
+        return render_admin_dateiarchiv(
+            error=clean_text(str(exc))[:500] or "Dateiarchiv konnte nicht vorbereitet werden.",
+            status_code=409,
+        )
+    finally:
+        _portal_file_export_lock.release()
+    return redirect(url_for("admin_dateiarchiv_status", export_id=manifest["export_id"]))
+
+
+@app.route("/admin/dateiarchiv/<export_id>")
+@admin_required
+def admin_dateiarchiv_status(export_id):
+    manifest = load_portal_file_export_manifest(export_id)
+    if not manifest:
+        abort(404)
+    return render_admin_dateiarchiv(manifest=manifest)
+
+
+@app.route("/admin/dateiarchiv/<export_id>/manifest.json")
+@admin_required
+def admin_dateiarchiv_manifest(export_id):
+    path = portal_file_export_manifest_path(export_id)
+    if not path:
+        abort(404)
+    response = send_file(
+        path,
+        mimetype="application/json",
+        as_attachment=True,
+        download_name=f"Portal-Dateiarchiv-{clean_text(export_id)}-manifest.json",
+        conditional=True,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@app.route("/admin/dateiarchiv/<export_id>/teil/<int:chunk_number>.zip")
+@admin_required
+def admin_dateiarchiv_chunk(export_id, chunk_number):
+    manifest = load_portal_file_export_manifest(export_id)
+    if not manifest:
+        abort(404)
+    if not _portal_file_export_lock.acquire(blocking=False):
+        return render_admin_dateiarchiv(
+            manifest=manifest,
+            error="Ein anderes Teilarchiv wird gerade erstellt. Bitte gleich erneut versuchen.",
+            status_code=409,
+        )
+    try:
+        result = build_portal_file_export_chunk(manifest, chunk_number)
+    except Exception as exc:
+        return render_admin_dateiarchiv(
+            manifest=manifest,
+            error=clean_text(str(exc))[:500] or "Teilarchiv konnte nicht erstellt werden.",
+            status_code=409,
+        )
+    finally:
+        _portal_file_export_lock.release()
+    if not result:
+        abort(404)
+    archive_path, chunk = result
+    filename = (
+        f"Portal-Dateiarchiv-{manifest['export_id']}-Teil-"
+        f"{int(chunk['number']):02d}-von-{int(manifest['chunk_count']):02d}.zip"
+    )
+    response = send_file(
+        archive_path,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=filename,
+        conditional=True,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Portal-Inventory-SHA256"] = manifest["inventory_sha256"]
+    response.direct_passthrough = False
+    response.call_on_close(lambda: archive_path.unlink(missing_ok=True))
+    return response
 
 
 @app.route("/admin/autohaus/neu", methods=["POST"])

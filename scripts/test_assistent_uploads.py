@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import time
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -179,6 +180,215 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(p.ensure_upload_file_available(file).read_bytes(), self.raw)
         self.assertEqual(self.rows('SELECT * FROM auftraege'), before)
         self.assertEqual(len(self.rows('SELECT * FROM datei_backups')), 1)
+
+    def test_download_streams_verified_database_copy_without_recreating_disk_file(self):
+        item = self.prepared()
+        attached = self.service.attach(ACTOR, item['id'], 156, confirmed=True)
+        file = self.rows('SELECT * FROM dateien WHERE id=?', (attached['datei_id'],))[0]
+        path = p.UPLOAD_DIR / file['stored_name']
+        path.unlink()
+
+        with p.app.test_request_context('/admin/datei/1'):
+            p.session['admin'] = True
+            response = p.send_upload_file(file)
+            response.direct_passthrough = False
+            self.assertEqual(response.get_data(), self.raw)
+            self.assertEqual(response.headers['X-Content-Type-Options'], 'nosniff')
+
+        self.assertFalse(path.exists())
+
+    def test_download_refuses_corrupt_database_copy_without_recreating_disk_file(self):
+        item = self.prepared()
+        attached = self.service.attach(ACTOR, item['id'], 156, confirmed=True)
+        file = self.rows('SELECT * FROM dateien WHERE id=?', (attached['datei_id'],))[0]
+        path = p.UPLOAD_DIR / file['stored_name']
+        path.unlink()
+        with database() as db:
+            db.execute(
+                "UPDATE datei_backups SET file_sha256=? WHERE datei_id=?",
+                ('0' * 64, attached['datei_id']),
+            )
+
+        with p.app.test_request_context('/admin/datei/1'):
+            p.session['admin'] = True
+            response = p.app.make_response(p.send_upload_file(file))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(path.exists())
+
+    def test_insurance_mail_attachment_uses_verified_database_copy_without_disk_restore(self):
+        item = self.prepared()
+        attached = self.service.attach(ACTOR, item['id'], 156, confirmed=True)
+        file = self.rows('SELECT * FROM dateien WHERE id=?', (attached['datei_id'],))[0]
+        file['kategorie'] = 'standard'
+        path = p.UPLOAD_DIR / file['stored_name']
+        path.unlink()
+
+        attachments, skipped, total = p.versicherung_mail_attachments([file])
+
+        self.assertEqual(skipped, [])
+        self.assertEqual(total, len(self.raw))
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(attachments[0]['data'], self.raw)
+        self.assertFalse(path.exists())
+
+    def test_reanalysis_uses_temporary_database_copy_without_recreating_upload(self):
+        item = self.prepared()
+        attached = self.service.attach(ACTOR, item['id'], 156, confirmed=True)
+        file = self.rows('SELECT * FROM dateien WHERE id=?', (attached['datei_id'],))[0]
+        path = p.UPLOAD_DIR / file['stored_name']
+        path.unlink()
+        with database() as db:
+            db.execute(
+                """
+                UPDATE dateien
+                SET kategorie='standard', quelle='intern', dokument_zweck='pruefen'
+                WHERE id=?
+                """,
+                (attached['datei_id'],),
+            )
+
+        count, _updates = p.reanalyze_existing_documents(156)
+
+        self.assertEqual(count, 1)
+        self.assertFalse(path.exists())
+        analyzed_path = Path(self.analysis.call_args.args[0])
+        self.assertNotEqual(analyzed_path.parent, p.UPLOAD_DIR)
+        self.assertFalse(analyzed_path.exists())
+
+    def test_portal_file_export_is_complete_chunked_and_hash_verified_in_temp_storage(self):
+        with tempfile.TemporaryDirectory() as upload_tmp, tempfile.TemporaryDirectory() as export_tmp, \
+             patch.object(p, 'UPLOAD_DIR', Path(upload_tmp)), \
+             patch.object(p, 'PORTAL_FILE_EXPORT_ROOT', Path(export_tmp)), \
+             patch.object(p, 'PORTAL_FILE_EXPORT_CHUNK_BYTES', 5):
+            first = p.UPLOAD_DIR / 'a.bin'
+            second = p.UPLOAD_DIR / 'b.bin'
+            empty = p.UPLOAD_DIR / 'empty.bin'
+            first.write_bytes(b'abcd')
+            second.write_bytes(b'1234')
+            empty.write_bytes(b'')
+            with database() as db:
+                cursor = db.execute(
+                    """
+                    INSERT INTO dateien
+                    (auftrag_id, original_name, stored_name, mime_type, size, quelle, kategorie, hochgeladen_am)
+                    VALUES (156, 'original-a.bin', 'a.bin', 'application/octet-stream', 4,
+                            'intern', 'standard', ?)
+                    """,
+                    (p.now_str(),),
+                )
+                self.assertTrue(p.store_datei_backup(db, cursor.lastrowid, first))
+                lead = db.execute(
+                    "INSERT INTO leads(erstellt_am, geaendert_am) VALUES(?, ?)",
+                    (p.now_str(), p.now_str()),
+                )
+                db.execute(
+                    """
+                    INSERT INTO lead_dateien
+                    (lead_id, original_name, stored_name, mime_type, size, quelle, erstellt_am)
+                    VALUES (?, 'shared-a.bin', 'a.bin', 'application/octet-stream', 4,
+                            'intern', ?)
+                    """,
+                    (lead.lastrowid, p.now_str()),
+                )
+                db.execute(
+                    """
+                    INSERT INTO lead_dateien
+                    (lead_id, original_name, stored_name, mime_type, size, quelle, erstellt_am)
+                    VALUES (?, 'missing.bin', 'missing.bin', 'application/octet-stream', 7,
+                            'intern', ?)
+                    """,
+                    (lead.lastrowid, p.now_str()),
+                )
+
+            manifest = p.build_portal_file_export_manifest()
+
+            expected_rows = [
+                ['a.bin', 4, p.hashlib.sha256(b'abcd').hexdigest()],
+                ['b.bin', 4, p.hashlib.sha256(b'1234').hexdigest()],
+                ['empty.bin', 0, p.hashlib.sha256(b'').hexdigest()],
+            ]
+            expected_inventory = p.hashlib.sha256(
+                json.dumps(expected_rows, separators=(',', ':')).encode()
+            ).hexdigest()
+            self.assertEqual(manifest['file_count'], 3)
+            self.assertEqual(manifest['total_file_bytes'], 8)
+            self.assertEqual(manifest['chunk_count'], 2)
+            self.assertEqual(manifest['inventory_sha256'], expected_inventory)
+            self.assertEqual(manifest['exact_datei_backup_file_count'], 1)
+            self.assertEqual(manifest['safe_disk_duplicate_file_count'], 0)
+            self.assertEqual(manifest['unreferenced_file_count'], 2)
+            self.assertGreaterEqual(manifest['missing_source_reference_count'], 1)
+            self.assertIn(
+                'missing.bin',
+                {item['relative_path'] for item in manifest['missing_source_references']},
+            )
+
+            archive_path, chunk = p.build_portal_file_export_chunk(manifest, 1)
+            self.assertTrue(str(archive_path).startswith(str(Path(export_tmp))))
+            with zipfile.ZipFile(archive_path) as archive:
+                self.assertIsNone(archive.testzip())
+                self.assertEqual(archive.read('uploads/a.bin'), b'abcd')
+                self.assertEqual(json.loads(archive.read('manifest.json'))['inventory_sha256'], expected_inventory)
+                self.assertEqual(json.loads(archive.read('part.json'))['number'], chunk['number'])
+            archive_path.unlink()
+            second_archive_path, _second_chunk = p.build_portal_file_export_chunk(manifest, 2)
+            with zipfile.ZipFile(second_archive_path) as archive:
+                self.assertEqual(archive.read('uploads/b.bin'), b'1234')
+                self.assertEqual(archive.read('uploads/empty.bin'), b'')
+            second_archive_path.unlink()
+            self.assertEqual(first.read_bytes(), b'abcd')
+            self.assertEqual(second.read_bytes(), b'1234')
+            self.assertEqual(empty.read_bytes(), b'')
+
+    def test_portal_file_export_routes_require_admin_and_csrf(self):
+        with tempfile.TemporaryDirectory() as upload_tmp, tempfile.TemporaryDirectory() as export_tmp, \
+             patch.object(p, 'UPLOAD_DIR', Path(upload_tmp)), \
+             patch.object(p, 'PORTAL_FILE_EXPORT_ROOT', Path(export_tmp)):
+            (p.UPLOAD_DIR / 'route.bin').write_bytes(b'route-test')
+            anonymous = p.app.test_client()
+            self.assertEqual(anonymous.get('/admin/dateiarchiv').status_code, 302)
+            admin = self.legacy.make_client(admin=True)
+            self.assertEqual(admin.get('/admin/dateiarchiv').status_code, 200)
+            self.assertEqual(admin.post('/admin/dateiarchiv/start').status_code, 400)
+
+            started = admin.post(
+                '/admin/dateiarchiv/start',
+                data={'csrf_token': 'test-csrf'},
+            )
+
+            self.assertEqual(started.status_code, 302)
+            status_path = started.headers['Location']
+            status_response = admin.get(status_path)
+            self.assertEqual(status_response.status_code, 200)
+            export_id = status_path.rstrip('/').rsplit('/', 1)[-1]
+            manifest_response = admin.get(f'{status_path}/manifest.json')
+            self.assertEqual(manifest_response.status_code, 200)
+            self.assertEqual(json.loads(manifest_response.data)['export_id'], export_id)
+            manifest_response.close()
+            chunk_response = admin.get(f'{status_path}/teil/1.zip')
+            self.assertEqual(chunk_response.status_code, 200)
+            with zipfile.ZipFile(io.BytesIO(chunk_response.data)) as archive:
+                self.assertEqual(archive.read('uploads/route.bin'), b'route-test')
+            chunk_response.close()
+            session_dir = Path(export_tmp) / export_id
+            self.assertEqual([item.name for item in session_dir.iterdir()], ['manifest.json'])
+
+    def test_portal_file_export_rejects_source_change_after_manifest(self):
+        with tempfile.TemporaryDirectory() as upload_tmp, tempfile.TemporaryDirectory() as export_tmp, \
+             patch.object(p, 'UPLOAD_DIR', Path(upload_tmp)), \
+             patch.object(p, 'PORTAL_FILE_EXPORT_ROOT', Path(export_tmp)):
+            source = p.UPLOAD_DIR / 'changed.bin'
+            source.write_bytes(b'before')
+            manifest = p.build_portal_file_export_manifest()
+            source.write_bytes(b'after-change')
+
+            with self.assertRaisesRegex(RuntimeError, 'veraendert'):
+                p.build_portal_file_export_chunk(manifest, 1)
+
+            self.assertEqual(source.read_bytes(), b'after-change')
+            session_dir = Path(export_tmp) / manifest['export_id']
+            self.assertEqual([item.name for item in session_dir.iterdir()], ['manifest.json'])
 
     def test_atomic_attachment_rolls_back_with_new_order_transaction(self):
         item = self.prepared()
