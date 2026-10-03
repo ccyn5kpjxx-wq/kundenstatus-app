@@ -375,6 +375,112 @@ class MinimalCanaryTests(unittest.TestCase):
                 os.close(other_fd)
                 os.close(own_fd)
 
+    @unittest.skipUnless(os.name == "posix", "/proc fd scan requires POSIX")
+    def test_foreign_fd_scan_still_checks_readable_outside_cgroup(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            proc_root = root / "proc"
+            source = root / "candidate"
+            source.write_bytes(b"verified")
+            (proc_root / "self").mkdir(parents=True)
+            (proc_root / "self" / "cgroup").write_bytes(b"0::/service\n")
+
+            same = proc_root / "101"
+            (same / "fd").mkdir(parents=True)
+            (same / "cgroup").write_bytes(b"0::/service\n")
+            os.link(source, same / "fd" / "7")
+
+            outside = proc_root / "202"
+            (outside / "fd").mkdir(parents=True)
+            (outside / "cgroup").write_bytes(b"0::/platform\n")
+            os.link(source, outside / "fd" / "8")
+
+            own_fd = os.open(source, os.O_RDONLY)
+            try:
+                file_identity = canary.identity(os.fstat(own_fd))
+                with mock.patch.object(canary, "PROC_ROOT", proc_root):
+                    matches = canary.foreign_open_fds(file_identity, own_fd)
+                self.assertEqual(matches, ["101/7", "202/8"])
+            finally:
+                os.close(own_fd)
+
+    @unittest.skipUnless(os.name == "posix", "/proc fd scan requires POSIX")
+    def test_foreign_fd_scan_skips_opaque_outside_cgroup_only(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            proc_root = root / "proc"
+            source = root / "candidate"
+            source.write_bytes(b"verified")
+            (proc_root / "self").mkdir(parents=True)
+            (proc_root / "self" / "cgroup").write_bytes(b"0::/service\n")
+
+            outside = proc_root / "202"
+            (outside / "fd").mkdir(parents=True)
+            (outside / "cgroup").write_bytes(b"0::/platform\n")
+
+            real_iterdir = pathlib.Path.iterdir
+
+            def controlled_iterdir(path):
+                if path == outside / "fd":
+                    raise PermissionError("opaque platform fd directory")
+                return real_iterdir(path)
+
+            own_fd = os.open(source, os.O_RDONLY)
+            try:
+                file_identity = canary.identity(os.fstat(own_fd))
+                with (
+                    mock.patch.object(canary, "PROC_ROOT", proc_root),
+                    mock.patch.object(
+                        pathlib.Path,
+                        "iterdir",
+                        autospec=True,
+                        side_effect=controlled_iterdir,
+                    ),
+                ):
+                    self.assertEqual(
+                        canary.foreign_open_fds(file_identity, own_fd), []
+                    )
+            finally:
+                os.close(own_fd)
+
+    @unittest.skipUnless(os.name == "posix", "/proc fd scan requires POSIX")
+    def test_foreign_fd_scan_fails_closed_for_opaque_same_cgroup(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            proc_root = root / "proc"
+            source = root / "candidate"
+            source.write_bytes(b"verified")
+            (proc_root / "self").mkdir(parents=True)
+            (proc_root / "self" / "cgroup").write_bytes(b"0::/service\n")
+
+            same = proc_root / "101"
+            (same / "fd").mkdir(parents=True)
+            (same / "cgroup").write_bytes(b"0::/service\n")
+
+            real_iterdir = pathlib.Path.iterdir
+
+            def controlled_iterdir(path):
+                if path == same / "fd":
+                    raise PermissionError("opaque service fd directory")
+                return real_iterdir(path)
+
+            own_fd = os.open(source, os.O_RDONLY)
+            try:
+                file_identity = canary.identity(os.fstat(own_fd))
+                with (
+                    mock.patch.object(canary, "PROC_ROOT", proc_root),
+                    mock.patch.object(
+                        pathlib.Path,
+                        "iterdir",
+                        autospec=True,
+                        side_effect=controlled_iterdir,
+                    ),
+                ):
+                    with self.assertRaises(canary.CanaryError):
+                        canary.foreign_open_fds(file_identity, own_fd)
+            finally:
+                os.close(own_fd)
+
     def _execute_fixture(
         self,
         *,

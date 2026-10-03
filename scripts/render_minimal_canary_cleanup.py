@@ -54,6 +54,7 @@ PLAN_FORMAT = "gaertner-render-minimal-canary-plan-v1"
 RECEIPT_FORMAT = "gaertner-render-minimal-canary-receipt-v1"
 PLAN_ROOT = pathlib.Path(tempfile.gettempdir()) / "gaertner-minimal-canary-v1"
 RECEIPT_ROOT = EXPECTED_UPLOAD_ROOT.parent / ".gaertner-minimal-canary-v1"
+PROC_ROOT = pathlib.Path("/proc")
 PLAN_MAX_AGE = timedelta(minutes=10)
 AUDIT_MAX_AGE = timedelta(minutes=20)
 FUTURE_SKEW = timedelta(seconds=30)
@@ -392,7 +393,8 @@ def foreign_open_fds(file_identity: dict, own_fd: int) -> list[str]:
     matches: list[str] = []
     own_pid = os.getpid()
     try:
-        processes = list(pathlib.Path("/proc").iterdir())
+        own_cgroup = (PROC_ROOT / "self" / "cgroup").read_bytes()
+        processes = list(PROC_ROOT.iterdir())
     except OSError as exc:
         raise CanaryError("/proc kann nicht fuer offene FDs geprueft werden.") from exc
     for process in processes:
@@ -402,18 +404,30 @@ def foreign_open_fds(file_identity: dict, own_fd: int) -> list[str]:
             process_owner = int(process.stat().st_uid)
         except (FileNotFoundError, OSError):
             continue
-        # Render's container includes platform sidecars owned by another UID;
-        # their /proc/<pid>/fd directories are intentionally unreadable.  Only
-        # same-UID processes can be the portal/shell processes that race this
-        # same-user upload namespace, so require exhaustive visibility there.
+        # Render exposes platform sidecars in /proc.  Some use the service UID
+        # but live in a different cgroup and keep their FD metadata opaque.
+        # Cgroups are not treated as an access boundary: scan every readable
+        # same-UID FD and use the cgroup difference only to classify an opaque
+        # platform process.  Same-cgroup opacity remains fail-closed.
         if process_owner != os.getuid():
             continue
+        try:
+            process_cgroup = (process / "cgroup").read_bytes()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise CanaryError(
+                "Prozessgrenzen sind nicht vollstaendig lesbar."
+            ) from exc
+        same_cgroup = hmac.compare_digest(process_cgroup, own_cgroup)
         fd_root = process / "fd"
         try:
             descriptors = list(fd_root.iterdir())
         except FileNotFoundError:
             continue
         except PermissionError as exc:
+            if not same_cgroup:
+                continue
             raise CanaryError("Offene Prozess-FDs sind nicht vollstaendig lesbar.") from exc
         for descriptor in descriptors:
             try:
@@ -422,6 +436,8 @@ def foreign_open_fds(file_identity: dict, own_fd: int) -> list[str]:
                     continue
                 current = descriptor.stat()
             except PermissionError as exc:
+                if not same_cgroup:
+                    continue
                 raise CanaryError(
                     "Offene Prozess-FDs sind nicht vollstaendig lesbar."
                 ) from exc
