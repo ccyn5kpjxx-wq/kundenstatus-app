@@ -8,7 +8,9 @@ Partner: http://localhost:5000/partner/<slug>
 
 from collections import defaultdict
 import base64
+import binascii
 import calendar
+from contextlib import contextmanager
 import csv
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -8326,6 +8328,12 @@ _change_backup_lock = threading.Lock()
 _change_backup_pending = False
 _change_backup_running = False
 _portal_file_export_lock = threading.Lock()
+_portal_originals_thread_lock = threading.RLock()
+_portal_originals_lock_state = threading.local()
+PORTAL_ORIGINALS_ADVISORY_LOCK_KEY = 6572746_20261003
+PORTAL_ORIGINALS_FILE_LOCK = (
+    pathlib.Path(tempfile.gettempdir()) / "gaertner-portal-originals-v1.lock"
+)
 
 
 def list_table_rows_for_backup(db, table_name, exclude_columns=()):
@@ -8441,14 +8449,175 @@ def strip_externalized_blobs_from_sqlite_snapshot(conn):
 
 def write_uploads_to_backup(archive):
     if not UPLOAD_DIR.exists():
-        return 0
-    count = 0
+        return []
+    written_names = []
     for path in sorted(UPLOAD_DIR.iterdir()):
         if not path.is_file():
             continue
         archive.write(path, f"uploads/{path.name}")
-        count += 1
-    return count
+        written_names.append(path.name)
+    return written_names
+
+
+def database_only_datei_backup_summary(db=None, available_upload_names=None):
+    """Count originals that would be lost by the legacy import/ZIP workflow.
+
+    ``datei_backups`` deliberately is not written to normal backup ZIPs. That
+    is only safe while the corresponding regular upload file still exists.
+    Keep this check aggregate-only so customer filenames never reach logs or
+    administrator flash messages.
+    """
+    owns_connection = db is None
+    connection = db or open_fresh_db()
+    try:
+        rows = connection.execute(
+            """
+            SELECT d.id, d.stored_name, MAX(COALESCE(b.size, 0)) AS backup_size
+            FROM dateien d
+            JOIN datei_backups b ON b.datei_id=d.id
+            GROUP BY d.id, d.stored_name
+            """
+        ).fetchall()
+    finally:
+        if owns_connection:
+            connection.close()
+
+    count = 0
+    total_bytes = 0
+    available_names = (
+        {clean_text(name) for name in available_upload_names}
+        if available_upload_names is not None
+        else None
+    )
+    for row in rows:
+        stored_name = pathlib.Path(clean_text(row["stored_name"])).name
+        if available_names is None:
+            path = UPLOAD_DIR / stored_name if stored_name else None
+            available = bool(
+                path is not None and not path.is_symlink() and path.is_file()
+            )
+        else:
+            available = bool(stored_name and stored_name in available_names)
+        if not available:
+            count += 1
+            total_bytes += max(0, int(row["backup_size"] or 0))
+    return {"count": count, "bytes": total_bytes}
+
+
+def ensure_no_database_only_originals_for_import(db=None):
+    summary = database_only_datei_backup_summary(db)
+    if summary["count"]:
+        raise ValueError(
+            "Datenimport gesperrt: "
+            f"{summary['count']} Originaldateien liegen derzeit nur in der "
+            "Datenbank-Sicherung. Dieser Importweg würde diese Sicherungen löschen."
+        )
+
+
+def database_only_backup_coverage(summary, includes_database_snapshot):
+    """Describe whether a ZIP can restore originals absent from uploads/.
+
+    Native SQLite packages contain ``auftraege.db`` (and therefore
+    ``datei_backups``). PostgreSQL packages only contain the JSON table export,
+    where that high-volume table is intentionally omitted.
+    """
+    excluded_count = 0 if includes_database_snapshot else int(summary["count"])
+    excluded_bytes = 0 if includes_database_snapshot else int(summary["bytes"])
+    complete = excluded_count == 0
+    warnings = []
+    if not complete:
+        warnings.append(
+            "DB-only Originaldateien sind nicht Bestandteil dieses ZIP-Backups."
+        )
+    return {
+        "database_only_datei_backups_excluded_count": excluded_count,
+        "database_only_datei_backups_excluded_bytes": excluded_bytes,
+        "standalone_restore_contains_all_originals": complete,
+        "warnings": warnings,
+    }
+
+
+@contextmanager
+def portal_originals_operation_lock():
+    """Serialize destructive imports with the verified Render cleanup.
+
+    PostgreSQL's session advisory lock works across workers and Render
+    instances. SQLite/local runtimes use an OS file lock. The thread-local
+    depth makes the lock safely re-entrant when a guarded route calls a guarded
+    importer in the same request.
+    """
+    with _portal_originals_thread_lock:
+        depth = int(getattr(_portal_originals_lock_state, "depth", 0) or 0)
+        if depth:
+            _portal_originals_lock_state.depth = depth + 1
+            try:
+                yield
+            finally:
+                _portal_originals_lock_state.depth = depth
+            return
+
+        lock_connection = None
+        lock_handle = None
+        try:
+            if USE_POSTGRES:
+                lock_connection = open_fresh_db()
+                lock_connection.execute(
+                    "SELECT pg_advisory_lock(?)",
+                    (PORTAL_ORIGINALS_ADVISORY_LOCK_KEY,),
+                ).fetchone()
+            else:
+                flags = os.O_RDWR | os.O_CREAT
+                if hasattr(os, "O_BINARY"):
+                    flags |= os.O_BINARY
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                fd = os.open(str(PORTAL_ORIGINALS_FILE_LOCK), flags, 0o600)
+                lock_handle = os.fdopen(fd, "r+b", buffering=0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    if lock_handle.seek(0, os.SEEK_END) == 0:
+                        lock_handle.write(b"0")
+                    lock_handle.seek(0)
+                    msvcrt.locking(lock_handle.fileno(), msvcrt.LK_LOCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            _portal_originals_lock_state.depth = 1
+            yield
+        finally:
+            _portal_originals_lock_state.depth = 0
+            if lock_connection is not None:
+                try:
+                    lock_connection.execute(
+                        "SELECT pg_advisory_unlock(?)",
+                        (PORTAL_ORIGINALS_ADVISORY_LOCK_KEY,),
+                    ).fetchone()
+                finally:
+                    lock_connection.close()
+            if lock_handle is not None:
+                try:
+                    lock_handle.seek(0)
+                    if os.name == "nt":
+                        import msvcrt
+
+                        msvcrt.locking(lock_handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        import fcntl
+
+                        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                finally:
+                    lock_handle.close()
+
+
+def portal_originals_locked(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with portal_originals_operation_lock():
+            return function(*args, **kwargs)
+
+    return wrapped
 
 
 def create_backup_package(reason="auto"):
@@ -8500,10 +8669,6 @@ def create_backup_package(reason="auto"):
                     export["binary_blobs"].extend(references)
                     binary_blob_bytes += blob_bytes
 
-                archive.writestr(
-                    "backup.json",
-                    json.dumps(export, ensure_ascii=False, indent=2, default=str),
-                )
                 if not USE_POSTGRES and DB.exists():
                     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
                         tmp_path = pathlib.Path(tmp.name)
@@ -8520,7 +8685,20 @@ def create_backup_package(reason="auto"):
                             tmp_path.unlink()
                         except OSError:
                             pass
-                upload_count = write_uploads_to_backup(archive)
+                written_upload_names = write_uploads_to_backup(archive)
+                database_only_originals = database_only_datei_backup_summary(
+                    db,
+                    available_upload_names=written_upload_names,
+                )
+                original_coverage = database_only_backup_coverage(
+                    database_only_originals,
+                    includes_database_snapshot=not USE_POSTGRES,
+                )
+                export.update(original_coverage)
+                archive.writestr(
+                    "backup.json",
+                    json.dumps(export, ensure_ascii=False, indent=2, default=str),
+                )
                 archive.writestr(
                     "manifest.json",
                     json.dumps(
@@ -8530,9 +8708,10 @@ def create_backup_package(reason="auto"):
                             "created_at": now_str(),
                             "reason": reason,
                             "backup_file": backup_path.name,
-                            "upload_count": upload_count,
+                            "upload_count": len(written_upload_names),
                             "binary_blob_count": len(export["binary_blobs"]),
                             "binary_blob_bytes": binary_blob_bytes,
+                            **original_coverage,
                             "keep": AUTO_BACKUP_KEEP,
                         },
                         ensure_ascii=False,
@@ -47390,6 +47569,163 @@ def read_backup_manifest_from_archive(archive, names):
     return data if isinstance(data, dict) else {}
 
 
+def validate_import_original_coverage(export, manifest, names):
+    """Reject any package that cannot independently restore file originals."""
+    coverage_key = "standalone_restore_contains_all_originals"
+    count_key = "database_only_datei_backups_excluded_count"
+    bytes_key = "database_only_datei_backups_excluded_bytes"
+    documents = [
+        ("backup.json", export),
+        ("manifest.json", manifest),
+    ]
+    declared = []
+    for label, document in documents:
+        if not isinstance(document, dict) or coverage_key not in document:
+            continue
+        value = document.get(coverage_key)
+        if type(value) is not bool:
+            raise ValueError(
+                f"Datenpaket ungültig: {coverage_key} in {label} ist fehlerhaft."
+            )
+        try:
+            excluded_count = int(document.get(count_key, 0))
+            excluded_bytes = int(document.get(bytes_key, 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Datenpaket ungültig: Originaldatei-Abdeckung in {label} ist fehlerhaft."
+            ) from exc
+        if excluded_count < 0 or excluded_bytes < 0:
+            raise ValueError(
+                f"Datenpaket ungültig: Originaldatei-Abdeckung in {label} ist fehlerhaft."
+            )
+        declared.append((value, excluded_count, excluded_bytes))
+    if len(declared) == 2 and declared[0] != declared[1]:
+        raise ValueError(
+            "Datenpaket ungültig: Angaben zur Originaldatei-Abdeckung widersprechen sich."
+        )
+    if any(value is False for value, _count, _bytes in declared):
+        raise ValueError(
+            "Datenpaket unvollständig: DB-only Originaldateien fehlen in diesem ZIP-Backup."
+        )
+
+    # A native SQLite snapshot may carry datei_backups even when an upload is
+    # absent. A JSON-only/PostgreSQL package cannot: prove completeness from
+    # the actual archive members instead of trusting optional metadata.
+    if "auftraege.db" in names or not isinstance(export, dict):
+        return
+    tables = export.get("tables")
+    if not isinstance(tables, dict):
+        return
+    dateien = tables.get("dateien")
+    if dateien is None:
+        return
+    if not isinstance(dateien, list):
+        raise ValueError("Datenpaket ungültig: Tabelle dateien ist keine Liste.")
+    upload_names = {
+        pathlib.Path(name).name
+        for name in names
+        if name.startswith("uploads/") and not name.endswith("/")
+    }
+    missing_count = 0
+    for row in dateien:
+        if not isinstance(row, dict):
+            raise ValueError("Datenpaket ungültig: Tabelle dateien enthält eine fehlerhafte Zeile.")
+        stored_value = clean_text(row.get("stored_name"))
+        stored_name = pathlib.Path(stored_value).name
+        if not stored_name or stored_name not in upload_names:
+            missing_count += 1
+    if missing_count:
+        raise ValueError(
+            "Datenpaket unvollständig: "
+            f"{missing_count} Datei-Originale fehlen im ZIP-Archiv."
+        )
+
+
+def validate_imported_sqlite_original_coverage(imported_db, imported_uploads):
+    """Prove every absent SQLite upload has an exact embedded DB original."""
+    upload_names = {
+        path.name
+        for path in imported_uploads.iterdir()
+        if path.is_file() and not path.is_symlink()
+    }
+    connection = sqlite3.connect(imported_db)
+    connection.row_factory = sqlite3.Row
+    missing_count = 0
+    try:
+        tables = {
+            row["name"]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "dateien" not in tables:
+            return
+        datei_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(dateien)").fetchall()
+        }
+        backup_columns = (
+            {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(datei_backups)").fetchall()
+            }
+            if "datei_backups" in tables
+            else set()
+        )
+        if not {"id", "stored_name", "size"}.issubset(datei_columns):
+            raise ValueError("Datenpaket ungültig: Dateitabelle ist unvollständig.")
+        backup_available = {
+            "datei_id",
+            "file_base64",
+            "file_sha256",
+            "size",
+        }.issubset(backup_columns)
+        for row in connection.execute(
+            "SELECT id, stored_name, size FROM dateien"
+        ).fetchall():
+            stored_name = pathlib.Path(clean_text(row["stored_name"])).name
+            if stored_name and stored_name in upload_names:
+                continue
+            verified = False
+            backups = (
+                connection.execute(
+                    """
+                    SELECT file_base64, file_sha256, size
+                    FROM datei_backups WHERE datei_id=?
+                    """,
+                    (int(row["id"]),),
+                ).fetchall()
+                if backup_available
+                else []
+            )
+            if len(backups) == 1:
+                backup = backups[0]
+                encoded = backup["file_base64"]
+                stored_hash = clean_text(backup["file_sha256"]).lower()
+                try:
+                    raw = base64.b64decode(encoded, validate=True)
+                    expected_size = int(row["size"] or 0)
+                    backup_size = int(backup["size"] or 0)
+                except (binascii.Error, TypeError, ValueError):
+                    raw = None
+                if raw is not None:
+                    actual_hash = hashlib.sha256(raw).hexdigest()
+                    verified = bool(
+                        len(raw) == expected_size == backup_size
+                        and re.fullmatch(r"[0-9a-f]{64}", stored_hash)
+                        and hmac.compare_digest(actual_hash, stored_hash)
+                    )
+            if not verified:
+                missing_count += 1
+    finally:
+        connection.close()
+    if missing_count:
+        raise ValueError(
+            "Datenpaket unvollständig: "
+            f"{missing_count} Datei-Originale fehlen sowohl im ZIP als auch in der Datenbankkopie."
+        )
+
+
 def backup_binary_reference_map(export):
     references = (export or {}).get("binary_blobs") or []
     if not isinstance(references, list):
@@ -47574,6 +47910,7 @@ def hydrate_imported_sqlite_backup_blobs(imported_db, archive, names, export):
 def extract_import_package_files(archive, names, tmp_path):
     export = read_backup_json_from_archive(archive, names)
     manifest = read_backup_manifest_from_archive(archive, names)
+    validate_import_original_coverage(export, manifest, names)
     try:
         manifest_version = int(manifest.get("format_version") or 1)
     except (TypeError, ValueError):
@@ -47625,6 +47962,9 @@ def extract_import_package_files(archive, names, tmp_path):
             continue
         with (imported_uploads / stored_name).open("wb") as target:
             copy_import_package_member(archive, name, target)
+
+    if imported_db is not None:
+        validate_imported_sqlite_original_coverage(imported_db, imported_uploads)
 
     return imported_db, imported_uploads, export
 
@@ -47730,6 +48070,7 @@ def normalize_import_value(value, column_type):
     return value
 
 
+@portal_originals_locked
 def import_backup_json_rows_into_current_database(export, archive, names):
     tables = (export or {}).get("tables")
     if not isinstance(tables, dict):
@@ -47739,6 +48080,7 @@ def import_backup_json_rows_into_current_database(export, archive, names):
     remaining_references = set(reference_map)
     target = get_db()
     try:
+        ensure_no_database_only_originals_for_import(target)
         for table_name in reversed(BACKUP_TABLES):
             target.execute(f"DELETE FROM {table_name}")
 
@@ -47808,6 +48150,7 @@ def import_backup_json_rows_into_current_database(export, archive, names):
         target.close()
 
 
+@portal_originals_locked
 def import_sqlite_rows_into_current_database(imported_db):
     source = sqlite3.connect(imported_db)
     source.row_factory = sqlite3.Row
@@ -47819,6 +48162,7 @@ def import_sqlite_rows_into_current_database(imported_db):
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
+        ensure_no_database_only_originals_for_import(target)
         for table_name in reversed(BACKUP_TABLES):
             target.execute(f"DELETE FROM {table_name}")
 
@@ -47913,48 +48257,54 @@ def admin_daten_import():
                     tmp_path,
                 )
 
-                ensure_no_unrestorable_mos_data_for_import()
-                # Ein Import ersetzt Daten und Uploads. Ohne überprüftes
-                # Sicherheitsbackup darf er auch bei deaktivierten automatischen
-                # Backups oder vollem Archivlimit nicht fortfahren.
-                create_backup_package("before-data-import")
-                if imported_db is None:
-                    import_backup_json_rows_into_current_database(
-                        backup_export, archive, names
-                    )
-                elif USE_POSTGRES:
-                    import_sqlite_rows_into_current_database(imported_db)
-                else:
-                    DATA_DIR.mkdir(exist_ok=True)
-                    backup_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
-                    if DB.exists():
-                        copy_sqlite_database_snapshot(
-                            DB,
-                            DATA_DIR / f"auftraege.backup-{backup_suffix}.db",
+                with portal_originals_operation_lock():
+                    ensure_no_unrestorable_mos_data_for_import()
+                    ensure_no_database_only_originals_for_import()
+                    # Ein Import ersetzt Daten und Uploads. Ohne überprüftes
+                    # Sicherheitsbackup darf er auch bei deaktivierten automatischen
+                    # Backups oder vollem Archivlimit nicht fortfahren.
+                    create_backup_package("before-data-import")
+                    # Das Sicherheitsbackup kann lange dauern. Falls eine Datei in
+                    # diesem Zeitfenster verschwindet, muss der Import vor der ersten
+                    # Datenbank- oder Upload-Mutation erneut stoppen.
+                    ensure_no_database_only_originals_for_import()
+                    if imported_db is None:
+                        import_backup_json_rows_into_current_database(
+                            backup_export, archive, names
                         )
-                    copy_sqlite_database_snapshot(
-                        imported_db,
-                        DB,
-                        keep_target_wal=True,
-                    )
-                replace_uploads_from_import(imported_uploads)
-                # Ein älteres Datenpaket kennt neuere Tabellen und Spalten noch
-                # nicht. Nach dem Austausch beziehungsweise Zeilenimport wird
-                # deshalb dieselbe idempotente Migration wie beim App-Start
-                # ausgeführt. Sie legt auch die Standard-Stellen wieder an,
-                # wenn ein Backup vor dem Karriere-Modul importiert wurde.
-                init_db()
-                # SQLite replacement can predate the native avatar tables.
-                # Recreate their schema without registering Flask routes again.
-                avatar_schema = globals().get("assistant_init_schema")
-                if callable(avatar_schema):
-                    avatar_schema()
-                mail_schema = globals().get("assistant_mail_sources_init_schema")
-                if callable(mail_schema):
-                    mail_schema()
-                mail_sources = globals().get("assistant_mail_sources")
-                if mail_sources is not None:
-                    mail_sources.restore_files()
+                    elif USE_POSTGRES:
+                        import_sqlite_rows_into_current_database(imported_db)
+                    else:
+                        DATA_DIR.mkdir(exist_ok=True)
+                        backup_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+                        if DB.exists():
+                            copy_sqlite_database_snapshot(
+                                DB,
+                                DATA_DIR / f"auftraege.backup-{backup_suffix}.db",
+                            )
+                        copy_sqlite_database_snapshot(
+                            imported_db,
+                            DB,
+                            keep_target_wal=True,
+                        )
+                    replace_uploads_from_import(imported_uploads)
+                    # Ein älteres Datenpaket kennt neuere Tabellen und Spalten noch
+                    # nicht. Nach dem Austausch beziehungsweise Zeilenimport wird
+                    # deshalb dieselbe idempotente Migration wie beim App-Start
+                    # ausgeführt. Sie legt auch die Standard-Stellen wieder an,
+                    # wenn ein Backup vor dem Karriere-Modul importiert wurde.
+                    init_db()
+                    # SQLite replacement can predate the native avatar tables.
+                    # Recreate their schema without registering Flask routes again.
+                    avatar_schema = globals().get("assistant_init_schema")
+                    if callable(avatar_schema):
+                        avatar_schema()
+                    mail_schema = globals().get("assistant_mail_sources_init_schema")
+                    if callable(mail_schema):
+                        mail_schema()
+                    mail_sources = globals().get("assistant_mail_sources")
+                    if mail_sources is not None:
+                        mail_sources.restore_files()
 
         log_import_package_event("completed")
         flash("Daten wurden importiert. Fahrzeuge und Dateien sind jetzt auf diesem Server verfügbar.", "success")
