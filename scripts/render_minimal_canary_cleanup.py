@@ -398,6 +398,16 @@ def foreign_open_fds(file_identity: dict, own_fd: int) -> list[str]:
     for process in processes:
         if not process.name.isdigit():
             continue
+        try:
+            process_owner = int(process.stat().st_uid)
+        except (FileNotFoundError, OSError):
+            continue
+        # Render's container includes platform sidecars owned by another UID;
+        # their /proc/<pid>/fd directories are intentionally unreadable.  Only
+        # same-UID processes can be the portal/shell processes that race this
+        # same-user upload namespace, so require exhaustive visibility there.
+        if process_owner != os.getuid():
+            continue
         fd_root = process / "fd"
         try:
             descriptors = list(fd_root.iterdir())
