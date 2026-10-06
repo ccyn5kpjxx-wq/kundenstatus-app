@@ -133,6 +133,63 @@ class MaterialAdminTests(unittest.TestCase):
         self.service.process_next.assert_not_called()
         self.service.send_question.assert_not_called()
 
+    def test_external_reservation_uses_admin_csrf_revision_and_no_client_quantity_or_sender(self):
+        url='/admin/assistent-bestellungen/eingang/material/7/extern-reservieren'
+        form=dict(self.form,confirmed='ja',recipient='orders@example.test',subject='Testbestellung',
+            recipient_source='Synthetischer Kontaktbeleg',authorization_note='Einmalige Freigabe',max_total='250,00',
+            quantity='999',urgent='false',actor='mitarbeiter:99')
+        self.assertEqual(self.client.post(url,data=dict(form,csrf_token='wrong')).status_code,400)
+        for change in ({'confirmed':''},{'revision':'0'},{'max_total':''}):
+            self.assertEqual(self.client.post(url,data=dict(form,**change)).status_code,303)
+        self.service.reserve_external.assert_not_called()
+        response=self.client.post(url,data=form)
+        self.assertEqual(response.status_code,303)
+        args,kwargs=self.service.reserve_external.call_args
+        self.assertEqual(args[:2],(7,3))
+        self.assertEqual(args[2]['max_total_cents'],25000)
+        self.assertNotIn('quantity',args[2]);self.assertNotIn('urgent',args[2])
+        self.assertEqual(kwargs,{'actor':'admin'})
+        self.service.process_next.assert_not_called()
+        self.service.send_question.assert_not_called()
+        with self.client.session_transaction() as state:
+            self.assertTrue(any('keine E-Mail versandt' in msg for _,msg in state['_flashes']))
+
+    def test_external_send_proof_is_admin_only_and_never_sends(self):
+        url='/admin/assistent-bestellungen/eingang/material/7/extern-versand-nachweisen'
+        form=dict(csrf_token='synthetic-csrf',revision='4',confirmed='ja',reservation_id='synthetic-reservation',
+            recipient='orders@example.test',subject='Testbestellung',sent_at='2026-10-06T19:00:15+02:00',
+            send_evidence='Gesendet-Nachweis Test',actor='other')
+        self.assertEqual(self.client.post(url,data=dict(form,csrf_token='')).status_code,400)
+        self.service.record_external_sent.assert_not_called()
+        response=self.client.post(url,data=form)
+        self.assertEqual(response.status_code,303)
+        args,kwargs=self.service.record_external_sent.call_args
+        self.assertEqual(args[:2],(7,4));self.assertEqual(kwargs,{'actor':'admin'})
+        self.assertEqual(args[2]['sent_at'],form['sent_at'])
+        self.service.process_next.assert_not_called();self.service.send_question.assert_not_called()
+        for path in ('extern-reservieren','extern-versand-nachweisen'):
+            with self.client.session_transaction() as state:state.pop('admin',None)
+            self.assertEqual(self.client.post('/admin/assistent-bestellungen/eingang/material/7/'+path,data=form).status_code,403)
+
+    def test_external_reserved_template_shows_frozen_claim_and_no_automatic_review(self):
+        external=dict(quantity='1',unit='Stück',product_name='<script>bad</script>',variant='Test 0,5 L',article_number='TEST',
+            supplier_name='Testlieferant',recipient='orders@example.test',subject='Testbestellung',max_total_cents=25000,
+            reservation_id='synthetic-reservation',reserved_at='2026-10-06T17:00:00+00:00',recipient_source='Quelle',
+            authorization_note='Freigabe',body='Testtext',sent_at='2026-10-06T17:05:00+00:00',send_evidence='Gesendet-Test')
+        item=dict(id=7,revision=4,code='M-7 R4',state='external_pending',review={},analysis={},analysis_state='done',
+            fields={},questions=[],missing_fields=[],dispatch_id='',error_code='',external_order=external)
+        for state in ('external_pending','external_sent'):
+            item['state']=state
+            with self.app.test_request_context():
+                html=render_template('materialdialog.html',material_dialogs=[item],material_current=item,
+                    material_contacts=[],material_replies_enabled=True,csrf='synthetic')
+            self.assertIn('&lt;script&gt;',html);self.assertNotIn('<script>bad</script>',html)
+            self.assertIn('dauerhaft für die Bestellautomatik gesperrt',html)
+            self.assertNotIn('name="unit_price"',html)
+            self.assertNotIn('extern-reservieren',html)
+            self.assertNotIn('uebergabe-pruefen',html)
+            self.assertEqual('extern-versand-nachweisen' in html,state=='external_pending')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,5 +1,5 @@
 {% if material_dialogs is defined %}
-{% set state_names={'open':'Angaben fehlen','approved':'Zur Übergabe bereit','accepted':'An Bestellordner übergeben','cancelled':'Abgebrochen','review':'Klärung erforderlich'} %}
+{% set state_names={'open':'Angaben fehlen','approved':'Zur Übergabe bereit','accepted':'An Bestellordner übergeben','cancelled':'Abgebrochen','review':'Klärung erforderlich','external_pending':'Extern reserviert – Versandnachweis offen','external_sent':'Extern versandt – Nachweis gespeichert'} %}
 {% set field_names={'order_requested':'Bestellwunsch','quantity':'Menge','unit':'Bestelleinheit','urgent':'Dringlichkeit','article':'Artikel und Variante','supplier_review':'Interne Lieferanten- und Artikelzuordnung','price':'Geprüfter Gesamtpreis','unit_conflict':'Widerspruch bei der Bestelleinheit','budget':'Kostenrahmen'} %}
 <section id="materialdialog"><h2>Bestellungen aus Fotos und Nachrichten</h2>
 <p>Dringend: sofort nach vollständiger Zuordnung. Regulär: je Lieferant montags um 14 Uhr. Es gelten die hinterlegten Mitarbeiterrechte und höchstens 250 € brutto einschließlich Nebenkosten.</p>
@@ -22,7 +22,28 @@
 {% set photo_labels=item.analysis.get('merkmale',{}) %}
 {% if photo_labels.get('produkt') %}<article class="notice"><h4>Vom Produktetikett erkannt</h4><dl>{% for key,label in [('marke','Marke'),('produkt','Produkt'),('artikelnummer','Hersteller- / Produktcode'),('farbe','Farbe'),('breite','Breite')] %}{% if photo_labels.get(key) %}<dt>{{ label }}</dt><dd>{{ photo_labels[key] }}</dd>{% endif %}{% endfor %}</dl><p>Diese Angaben bleiben beim Bestellwunsch erhalten. Lieferantenzuordnung und aktuelle Einkaufskonditionen werden separat geprüft.</p></article>{% endif %}
 {% if item.analysis.get('treffer') %}<details open><summary>Artikeltreffer aus dem Foto – noch ungeprüft</summary>{% for hit in item.analysis.treffer %}<article><p><strong>{{ hit.produkt_name }}</strong> · {{ hit.groesse }} {{ hit.farbe }}</p><small>{{ hit.lieferant }} · Artikel {{ hit.artikelnummer }} · {{ hit.gebinde }} {{ hit.ve }}</small>{% if hit.quelle %}<small>Quelle: {{ hit.quelle.get('bezeichnung') or hit.quelle.get('quelle') or 'Gespeicherter Rechnungsartikel' }}{% if hit.quelle.get('seite') %} · Seite {{ hit.quelle.seite }}{% endif %}</small>{% endif %}</article>{% endfor %}</details>{% endif %}
-{% if item.state not in ['accepted','cancelled'] %}
+{% if item.state in ['external_pending','external_sent'] %}
+{% set external=item.external_order %}
+<article class="notice"><h4>Einmalige externe Bestellung</h4>
+<p>Dieser Vorgang ist dauerhaft für die Bestellautomatik gesperrt.</p>
+{% if external %}<dl><dt>Artikel</dt><dd>{{ external.quantity }} {{ external.unit }} {{ external.product_name }} · {{ external.variant }} · Artikel {{ external.article_number }}</dd>
+<dt>Lieferant / Empfänger</dt><dd>{{ external.supplier_name }} · {{ external.recipient }}</dd><dt>Betreff</dt><dd>{{ external.subject }}</dd>
+<dt>Verbindliche Gesamtobergrenze</dt><dd>{{ '%.2f'|format(external.max_total_cents/100) }} € einschließlich Mehrwertsteuer, Versand und aller Nebenkosten</dd>
+<dt>Reservierung</dt><dd>{{ external.reservation_id }} · {{ material_time(external.reserved_at) }}</dd>
+<dt>Empfängerbeleg</dt><dd>{{ external.recipient_source }}</dd><dt>Einzelfreigabe</dt><dd>{{ external.authorization_note }}</dd></dl>
+<details><summary>Reservierter Bestelltext</summary><pre>{{ external.body }}</pre></details>
+{% if item.state=='external_sent' %}<p><strong>Versandt am {{ material_time(external.sent_at) }}</strong></p><p>Nachweis: {{ external.send_evidence }}</p><small>Der Lieferant muss Gesamtpreis und Liefertermin noch bestätigen. Dieser Nachweis ist keine Lieferbestätigung.</small>
+{% else %}<p><strong>Noch kein Versandnachweis gespeichert.</strong> Vor dem einmaligen Versand Empfänger, Betreff und Bestelltext mit dieser Reservierung abgleichen. Bei unklarem Sendeausgang zuerst das Postfach prüfen; nicht erneut senden.</p>
+<form method="post" action="{{ url_for('werkstatt_materialverwaltung.record_external_sent',draft_id=item.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ item.revision }}"><input type="hidden" name="reservation_id" value="{{ external.reservation_id }}">
+<label>Tatsächlicher Empfänger<input type="email" name="recipient" value="{{ external.recipient }}" required></label>
+<label>Tatsächlicher Betreff<input name="subject" value="{{ external.subject }}" maxlength="500" required></label>
+<label>Sendezeit mit Zeitzone<input name="sent_at" placeholder="2026-10-06T18:30:45+02:00" required></label>
+<label>Versandnachweis<input name="send_evidence" maxlength="1000" placeholder="Nachrichten-ID oder eindeutiger Beleg aus dem Gesendet-Ordner" required></label>
+<label><input type="checkbox" name="confirmed" value="ja" required> Der Versand dieser reservierten Bestellung ist tatsächlich im Postfach nachgewiesen.</label><button>Versandnachweis speichern</button></form>{% endif %}
+{% else %}<p class="notice error">Reservierungsnachweis muss geprüft werden. Die automatische Sperre bleibt bestehen.</p>{% endif %}</article>
+{% endif %}
+{% if item.state not in ['accepted','cancelled','external_pending','external_sent'] %}
 {% if item.analysis_state!='done' %}<form method="post" action="{{ url_for('werkstatt_materialverwaltung.analyze',draft_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ item.revision }}"><button>Fotoauslese erneut prüfen</button></form>{% endif %}
 <details {% if 'article' in item.missing_fields or 'supplier_review' in item.missing_fields or 'price' in item.missing_fields %}open{% endif %}><summary>Artikel und aktuelle Preisbedingungen prüfen</summary>
 <p>Ein Rechnungswert ist ein historischer Hinweis. Bitte die aktuelle Bestelleinheit, den Bruttopreis, alle Nebenkosten und die Gültigkeit anhand einer belastbaren Quelle prüfen. Diese Zuordnung kann für genau denselben Artikel bis zum angegebenen Datum wiederverwendet werden. Unbekannte Beträge bleiben offen.</p>
@@ -35,6 +56,20 @@
 {% for name,label in [('unit_price','Bruttopreis je Bestelleinheit in Euro'),('shipping','Versandkosten brutto in Euro'),('extra_costs','Weitere Kosten brutto in Euro')] %}<label>{{ label }}<input name="{{ name }}" inputmode="decimal" value="{{ '%.2f'|format(review[name+'_cents']/100) if name+'_cents' in review else '' }}" placeholder="Unbekannt = leer; keine Kosten = 0" required></label>{% endfor %}
 </div><label>Geprüfte Konditionen gültig bis<input name="verified_until" type="date" value="{{ review.get('verified_until','') }}" required></label><label>Aktuelle Preisquelle / vereinbarte Konditionen<input name="price_source" maxlength="300" value="{{ review.get('price_source','') }}" placeholder="z. B. Lieferantenangebot mit Datum und Positionsnummer" required></label>
 <label><input type="checkbox" name="reviewed" value="ja" required> Artikel, Variante, Bestelleinheit und heutige Bruttokosten sind geprüft. Ein vollständiger Bestellwunsch darf danach automatisch weiterlaufen.</label>
-<button>Geprüfte Bedingungen speichern</button></form><small>Fehlt ein Lieferant, zuerst im <a href="{{ url_for('werkstatt_orders.index') }}">Bestellordner</a> die Bestelladresse prüfen und hinterlegen.</small></details>{% endif %}
+<button>Geprüfte Bedingungen speichern</button></form><small>Fehlt ein Lieferant, zuerst im <a href="{{ url_for('werkstatt_orders.index') }}">Bestellordner</a> die Bestelladresse prüfen und hinterlegen.</small></details>
+<details><summary>Einzelbestellung für manuellen Mailversand reservieren</summary>
+<p>Für eine ausdrücklich freigegebene Einzelbestellung mit verbindlicher Gesamtobergrenze. Diese Reservierung sendet keine E-Mail. Sie sperrt den Vorgang dauerhaft gegen die Automatik; aktuelle Artikelpreise werden dadurch nicht freigegeben.</p>
+<form method="post" action="{{ url_for('werkstatt_materialverwaltung.reserve_external',draft_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ item.revision }}">
+<label>Lieferant<select name="supplier_id" required><option value="">Lieferant auswählen</option>{% for contact in material_contacts %}<option value="{{ contact.id }}">{{ contact.name }} · {{ contact.recipient }}</option>{% endfor %}</select></label>
+<label>Für diese Bestellung geprüfter Empfänger<input type="email" name="recipient" maxlength="300" required></label>
+<label>Beleg für diesen Empfänger<input name="recipient_source" maxlength="500" placeholder="z. B. konkrete Lieferantenkorrespondenz mit Datum" required></label>
+<label>Genauer Artikelname<input name="product_name" maxlength="500" value="{{ review.get('product_name') or photo_labels.get('produkt','') }}" required></label>
+<label>Lieferantenartikelnummer<input name="article_number" maxlength="500" required></label>
+<label>Exakte Variante / Gebinde<input name="variant" maxlength="500" required></label>
+<label>Betreff der einmaligen Bestellmail<input name="subject" maxlength="500" required></label>
+<label>Höchstgesamtbetrag brutto in Euro inklusive aller Nebenkosten<input name="max_total" inputmode="decimal" placeholder="Höchstens 250,00" required></label>
+<label>Beleg der ausdrücklichen Einzelfreigabe<input name="authorization_note" maxlength="500" required></label>
+<p>Menge, Einheit und Dringlichkeit werden unverändert aus den persönlichen Nachrichten übernommen. Der reservierte Text untersagt Ersatzartikel und die Ausführung oberhalb des Gesamtlimits.</p>
+<label><input type="checkbox" name="confirmed" value="ja" required> Artikel, Variante, Empfänger und ausdrückliche Einzelfreigabe geprüft. Ich reserviere genau diesen Vorgang vor einem einmaligen externen Versand.</label><button>Einzelbestellung fest reservieren</button></form></details>{% endif %}
 {% if item.questions %}<details open><summary>Rückfragen und Zustellstatus</summary>{% for question in item.questions %}<p>{{ question.body }}</p><small>{{ {'queued':'Noch nicht versandt','sent':'An WhatsApp übergeben','superseded':'Durch neueren Stand ersetzt','review':'Manuelle Klärung nötig','sending':'Übergabe begonnen; nicht erneut senden','uncertain':'Zustellung unklar; kein automatischer Zweitversand'}.get(question.state,'Status prüfen') }}</small>{% endfor %}</details>{% endif %}
 {% endif %}</section>{% endif %}

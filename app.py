@@ -48183,6 +48183,7 @@ def import_backup_json_rows_into_current_database(export, archive, names):
     target = get_db()
     try:
         ensure_no_database_only_originals_for_import(target)
+        ensure_material_external_claims_for_import(export=export, target=target)
         for table_name in reversed(BACKUP_TABLES):
             target.execute(f"DELETE FROM {table_name}")
 
@@ -48265,6 +48266,7 @@ def import_sqlite_rows_into_current_database(imported_db):
             ).fetchall()
         }
         ensure_no_database_only_originals_for_import(target)
+        ensure_material_external_claims_for_import(imported_db=imported_db, target=target)
         for table_name in reversed(BACKUP_TABLES):
             target.execute(f"DELETE FROM {table_name}")
 
@@ -48306,6 +48308,76 @@ def import_sqlite_rows_into_current_database(imported_db):
     finally:
         source.close()
         target.close()
+
+
+def ensure_material_external_claims_for_import(*, export=None, imported_db=None, target=None):
+    """Keep external sends reserved across restore, including uncertain sends.
+
+    The caller holds portal_originals_operation_lock, as do reserve_external
+    and record_external_sent. Otherwise a new claim could appear between this
+    check and destructive replacement. A matching recent backup remains valid;
+    older snapshots may not undo a reservation, its frozen content or its audit.
+    """
+    own_target = target is None
+    target = target if target is not None else get_db()
+    source = None
+    try:
+        protected = {}
+        if get_table_columns(target, "einkauf_material_dialoge"):
+            protected["einkauf_material_dialoge"] = [dict(row) for row in target.execute(
+                "SELECT * FROM einkauf_material_dialoge WHERE state IN (?, ?)",
+                ("external_pending", "external_sent"),
+            ).fetchall()]
+        if get_table_columns(target, "assistent_audit"):
+            protected["assistent_audit"] = [dict(row) for row in target.execute(
+                "SELECT * FROM assistent_audit WHERE aktion IN (?, ?)",
+                ("material_external_reserved", "material_external_sent"),
+            ).fetchall()]
+        if not any(protected.values()):
+            return
+
+        if imported_db is not None:
+            # The SQLite file wins over backup.json in the actual import path.
+            # Validate that file, never the possibly newer JSON beside it.
+            source = sqlite3.connect(pathlib.Path(imported_db).resolve().as_uri() + "?mode=ro", uri=True)
+            source.row_factory = sqlite3.Row
+            source_tables = {row["name"] for row in source.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+            incoming = {table: [dict(row) for row in source.execute(f"SELECT * FROM {table}").fetchall()]
+                        if table in source_tables else [] for table in protected}
+        else:
+            incoming = (export or {}).get("tables", {})
+        error = (
+            "Datenimport gesperrt: Die Sicherung enthält vorhandene externe "
+            "Bestellreservierungen oder Versandnachweise nicht unverändert. "
+            "Eine aktuelle Sicherung mit diesen Vorgängen und ihrem Audit verwenden."
+        )
+        if not isinstance(incoming, dict):
+            raise ValueError(error)
+        dialog_keys = ("id", "message_id", "revision", "state", "fields_json",
+                       "snapshot_json", "snapshot_hash", "dispatch_id", "dispatch_state")
+        for table, rows in protected.items():
+            if not rows:
+                continue
+            candidates = incoming.get(table, [])
+            if not isinstance(candidates, list):
+                raise ValueError(error)
+            for row in rows:
+                matches = [candidate for candidate in candidates if isinstance(candidate, dict)
+                           and candidate.get("id") == row["id"]]
+                if len(matches) != 1:
+                    raise ValueError(error)
+                restored = matches[0]
+                keys = dialog_keys if table == "einkauf_material_dialoge" else tuple(row)
+                for key in keys:
+                    if key not in restored or key not in row or restored[key] != row[key]:
+                        raise ValueError(error)
+    finally:
+        if source is not None:
+            source.close()
+        if own_target:
+            target.close()
 
 
 def ensure_no_unrestorable_mos_data_for_import():
@@ -48362,6 +48434,9 @@ def admin_daten_import():
                 with portal_originals_operation_lock():
                     ensure_no_unrestorable_mos_data_for_import()
                     ensure_no_database_only_originals_for_import()
+                    ensure_material_external_claims_for_import(
+                        export=backup_export, imported_db=imported_db
+                    )
                     # Ein Import ersetzt Daten und Uploads. Ohne überprüftes
                     # Sicherheitsbackup darf er auch bei deaktivierten automatischen
                     # Backups oder vollem Archivlimit nicht fortfahren.

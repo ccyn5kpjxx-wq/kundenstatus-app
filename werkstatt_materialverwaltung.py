@@ -121,4 +121,35 @@ def register_material_admin(p):
             flash(str(exc), 'error')
         return redirect(url_for('werkstatt_orders.intake_index', material=draft_id, _anchor='materialdialog'), code=303)
 
+    @bp.post('/<int:draft_id>/extern-reservieren')
+    def reserve_external(draft_id):
+        try:
+            revision = request.form.get('revision', type=int)
+            if not revision or revision<1 or request.form.get('confirmed')!='ja':
+                raise ValueError('Aktuellen Vorgang und die einzelne externe Bestellung ausdrücklich bestätigen.')
+            payload = {key:request.form.get(key,'').strip() for key in (
+                'supplier_id','recipient','product_name','article_number','variant','subject',
+                'recipient_source','authorization_note')}
+            payload.update(max_total_cents=euro_cents(request.form.get('max_total')),confirmed=True)
+            p.material_dialog.reserve_external(draft_id,revision,payload,actor='admin')
+            flash('Einzelbestellung fest reserviert. Die Automatik bleibt für diesen Vorgang gesperrt. Es wurde keine E-Mail versandt; Versand anschließend am selben Vorgang nachweisen.', 'success')
+        except (ValueError,PermissionError,LookupError) as exc:
+            flash(str(exc),'error')
+        return redirect(url_for('werkstatt_orders.intake_index', material=draft_id, _anchor='materialdialog'),code=303)
+
+    @bp.post('/<int:draft_id>/extern-versand-nachweisen')
+    def record_external_sent(draft_id):
+        try:
+            revision = request.form.get('revision', type=int)
+            if not revision or revision<1 or request.form.get('confirmed')!='ja':
+                raise ValueError('Aktuelle Reservierung und tatsächlich erfolgten Versand ausdrücklich bestätigen.')
+            payload = {key:request.form.get(key,'').strip() for key in (
+                'reservation_id','recipient','subject','sent_at','send_evidence')}
+            payload['confirmed'] = True
+            p.material_dialog.record_external_sent(draft_id,revision,payload,actor='admin')
+            flash('Externer Mailversand mit Nachweis gespeichert. Dieser Vorgang bleibt dauerhaft gegen eine zweite automatische Bestellung gesperrt.', 'success')
+        except (ValueError,PermissionError,LookupError) as exc:
+            flash(str(exc),'error')
+        return redirect(url_for('werkstatt_orders.intake_index', material=draft_id, _anchor='materialdialog'),code=303)
+
     p.app.register_blueprint(bp)

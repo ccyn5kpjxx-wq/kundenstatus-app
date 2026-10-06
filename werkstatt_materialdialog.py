@@ -29,6 +29,7 @@ WORDS = {'ein':'1','eine':'1','einen':'1','einem':'1','zwei':'2','drei':'3','vie
 QUANTITY_PATTERN = r'\b(\d{1,8}(?:[.,]\d{1,6})?|' + '|'.join(WORDS) + r')\s+(' + '|'.join(sorted(UNITS, key=len, reverse=True)) + r')\b'
 EMPLOYEE_FIELDS = {'order_requested', 'quantity', 'unit', 'urgent', 'article', 'unit_conflict'}
 INTERNAL_FIELDS = {'supplier_review', 'price', 'budget'}
+EXTERNAL_STATES = {'external_pending', 'external_sent'}
 
 
 def article_query(text):
@@ -147,7 +148,7 @@ class MaterialDialog:
         return dict(row)
 
     def _accepted(self, db, draft):
-        if draft['dispatch_id']:
+        if draft['state'] in EXTERNAL_STATES or draft['dispatch_id']:
             return True
         # Also close the small gap after durable enqueue but before order_attempt.
         manager = getattr(self.p, 'workshop_orders', None)
@@ -365,7 +366,11 @@ class MaterialDialog:
                    intake_id=source['intake_id'] if source else None, source_kind='text' if source and source['mime']=='text/plain' else 'image')
         for source,target in (('fields_json','fields'),('review_json','review'),('analysis_json','analysis'),('missing_json','missing_fields')):
             row[target] = json.loads(row.pop(source))
-        row.pop('snapshot_json'); row.pop('snapshot_hash'); row.pop('analysis_lease')
+        snapshot = json.loads(row.pop('snapshot_json'))
+        fingerprint = row.pop('snapshot_hash')
+        row['external_order'] = snapshot if (row['state'] in EXTERNAL_STATES
+            and snapshot.get('kind') == 'manual_external_order' and _fingerprint(snapshot) == fingerprint) else {}
+        row.pop('analysis_lease')
         row['code'] = 'M-' + str(row['id']) + ' R' + str(row['revision'])
         row['questions'] = [dict(q) for q in db.execute('SELECT id,revision,field,body,state,error_code FROM einkauf_material_rueckfragen WHERE draft_id=? ORDER BY id DESC LIMIT 8',(draft_id,)).fetchall()]
         row['employee_reply_required'] = row['state']=='open' and any(key in EMPLOYEE_FIELDS for key in row['missing_fields'])
@@ -461,6 +466,8 @@ class MaterialDialog:
         with self.db() as db:
             draft = self._draft(db,draft_id,lock=True)
             source = self._source(db,draft)
+            if self._accepted(db,draft) or draft['state']=='cancelled':
+                return self._view(db,draft_id)
             if draft['analysis_state'] == 'done' or draft['analysis_until'] > self.clock():
                 return self._view(db,draft_id)
             db.execute("UPDATE einkauf_material_dialoge SET analysis_state='processing',analysis_lease=?,analysis_until=? WHERE id=?",(lease,self.clock()+120,draft_id))
@@ -469,7 +476,7 @@ class MaterialDialog:
         def guarded_photo_db():
             with self.db() as db:
                 current = self._draft(db,draft_id,lock=True)
-                if current['analysis_lease'] != lease or current['analysis_until'] < self.clock() or current['state'] == 'cancelled':
+                if self._accepted(db,current) or current['analysis_lease'] != lease or current['analysis_until'] < self.clock() or current['state'] == 'cancelled':
                     raise PermissionError('Fotoauslese wurde geändert oder abgebrochen.')
                 yield db
         photos.db = guarded_photo_db
@@ -488,7 +495,7 @@ class MaterialDialog:
                 result = photos.analyze({'actor':'mitarbeiter:' + str(source['employee_id']),'lesen':True,'einkaufen':True},source['assistant_photo_id'])
             with self.db() as db:
                 current = self._draft(db,draft_id,lock=True)
-                if current['analysis_lease'] != lease or current['analysis_until'] < self.clock():
+                if self._accepted(db,current) or current['analysis_lease'] != lease or current['analysis_until'] < self.clock():
                     raise PermissionError('Fotoauslese wurde inzwischen übernommen.')
                 state = 'done' if result['status'] == 'pruefen' else 'failed'
                 db.execute("UPDATE einkauf_material_dialoge SET analysis_json=?,analysis_state=?,analysis_lease='',analysis_until=0,revision=revision+1 WHERE id=?",(_json(result),state,draft_id))
@@ -496,8 +503,139 @@ class MaterialDialog:
             return self.status(draft_id)
         except (PermissionError,ValueError):
             with self.db() as db:
-                db.execute("UPDATE einkauf_material_dialoge SET analysis_state='failed',analysis_lease='',analysis_until=0,error_code='fotoauslese_oder_berechtigung_klaeren' WHERE id=? AND analysis_lease=?",(draft_id,lease))
+                db.execute("UPDATE einkauf_material_dialoge SET analysis_state='failed',analysis_lease='',analysis_until=0,error_code='fotoauslese_oder_berechtigung_klaeren' WHERE id=? AND analysis_lease=? AND state NOT IN ('external_pending','external_sent')",(draft_id,lease))
             return self.status(draft_id)
+
+    @staticmethod
+    def _external_text(value, maximum=500):
+        if (not isinstance(value,str) or not value.strip() or len(value)>maximum
+                or any(ord(char)<32 for char in value) or _note(value,maximum)!=value.strip()):
+            raise ValueError('Die Angaben zur einmaligen externen Bestellung vollständig und eindeutig eintragen.')
+        return value.strip()
+
+    def _external_audit(self, db, action, draft_id, revision, snapshot):
+        db.execute('INSERT INTO assistent_audit(actor,auftrag_id,aktion,details,zeit) VALUES(?,?,?,?,?)',
+            ('admin',None,action,_json({'draft_id':draft_id,'revision':revision,
+             'reservation_id':snapshot['reservation_id'],'snapshot_hash':_fingerprint(snapshot),
+             'recipient':snapshot['recipient'],'subject':snapshot['subject'],
+             'max_total_cents':snapshot['max_total_cents']}),
+             datetime.fromtimestamp(self.clock(),timezone.utc).isoformat()))
+
+    def reserve_external(self, draft_id, revision, payload, actor='admin'):
+        """Freeze one explicitly authorized external mail; never enqueue or price it.
+
+        This transaction shares the dialog lock with automatic dispatch. A claim
+        has no reset/retry operation: an uncertain external send remains claimed.
+        """
+        keys = {'supplier_id','recipient','product_name','article_number','variant','subject',
+                'recipient_source','authorization_note','max_total_cents','confirmed'}
+        if actor!='admin' or not isinstance(payload,dict) or payload.get('confirmed') is not True:
+            raise PermissionError('Die Werkstattleitung muss diese einzelne externe Bestellung ausdrücklich bestätigen.')
+        if set(payload)!=keys:
+            raise ValueError('Lieferant, genauer Artikel, Empfänger, Betreff und verbindliche Gesamtobergrenze fehlen.')
+        claim = {key:self._external_text(payload[key]) for key in keys-{'confirmed','max_total_cents'}}
+        from werkstatt_bestellungen import _email
+        claim['recipient'] = _email(claim['recipient'])
+        cap = payload['max_total_cents']
+        if type(cap) is not int or not 0<cap<=25000:
+            raise ValueError('Die verbindliche Gesamtobergrenze muss höchstens 250 Euro brutto betragen.')
+        with self.p.portal_originals_operation_lock(), self.db() as db:
+            draft = self._draft(db,draft_id,revision,lock=True)
+            source = self._source(db,draft)
+            if self._accepted(db,draft) or draft['state']=='cancelled':
+                raise ValueError('Dieser Vorgang ist bereits übergeben, extern reserviert oder abgebrochen.')
+            fields = json.loads(draft['fields_json'])
+            values = {key:fields.get(key,{}).get('value') for key in ('quantity','unit','urgent','order_requested')}
+            if (draft['error_code']=='antwort_unverstaendlich' or fields.get('cancelled')
+                    or values['order_requested'] is not True or type(values['urgent']) is not bool
+                    or not isinstance(values['quantity'],str) or not re.fullmatch(r'[0-9]{1,8}(?:\.[0-9]{1,6})?',values['quantity'])
+                    or Decimal(values['quantity'])<=0 or values['unit'] not in set(UNITS.values())):
+                raise ValueError('Persönlicher Bestellwunsch, Menge, Einheit oder Dringlichkeit sind noch nicht eindeutig.')
+            for key in values:
+                proof = fields.get(key,{}).get('proof',{})
+                if proof.get('employee_id')!=source['employee_id']:
+                    raise PermissionError('Persönlicher Nachrichtenbeleg fehlt.')
+                if proof.get('kind')=='image':
+                    if proof.get('id')!=source['id'] or source['forwarded']:
+                        raise PermissionError('Weiterleitung ist keine Bestellfreigabe.')
+                elif proof.get('kind')=='text':
+                    evidence = db.execute('SELECT * FROM einkauf_material_texte WHERE id=?',(proof.get('id'),)).fetchone()
+                    if (not evidence or evidence['state']!='applied' or evidence['draft_id']!=draft_id
+                            or evidence['forwarded'] or evidence['employee_id']!=source['employee_id']):
+                        raise PermissionError('Zugeordneter Nachrichtenbeleg fehlt.')
+                else:
+                    raise PermissionError('Signierter Nachrichtenbeleg fehlt.')
+            manager = self.p.workshop_orders
+            rights = db.execute('SELECT limit_cent FROM assistent_rechte WHERE mitarbeiter_id=?',(source['employee_id'],)).fetchone()
+            if not rights or cap>min(25000,manager.cap(),rights['limit_cent']):
+                raise PermissionError('Persönlicher oder betrieblicher Brutto-Kostenrahmen überschritten.')
+            supplier = manager.resolve_supplier(claim['supplier_id'])
+            # Single-order, evidenced admin confirmation does not globally verify
+            # this contact or manufacture current commercial terms.
+            if not supplier or supplier['recipient'].casefold()!=claim['recipient'].casefold():
+                raise ValueError('Empfänger stimmt nicht mit dem ausgewählten Lieferantenkontakt überein.')
+            selected = fields.get('selected_article',{}).get('value')
+            if selected and (selected.get('artikelnummer')!=claim['article_number']
+                    or selected.get('lieferant','').casefold()!=supplier['name'].casefold()):
+                raise ValueError('Persönlich bestätigter Artikel und externe Einzelbestellung passen nicht zusammen.')
+            claim.update(kind='manual_external_order',reservation_id=secrets.token_hex(16),draft_id=draft_id,
+                reserved_revision=draft['revision'],reserved_by='admin',
+                reserved_at=datetime.fromtimestamp(self.clock(),timezone.utc).isoformat(),
+                employee_id=source['employee_id'],supplier_name=supplier['name'],
+                quantity=values['quantity'],unit=values['unit'],urgent=values['urgent'],max_total_cents=cap)
+            amount = format(Decimal(cap)/100,'.2f').replace('.',',')
+            claim['body'] = (f"{'Dringende Bestellung' if claim['urgent'] else 'Bestellung'} M-{draft_id}\n\n"
+                f"Hiermit bestellen wir {claim['quantity']} {claim['unit']} {claim['product_name']}, {claim['variant']}.\n"
+                f"Lieferantenartikelnummer: {claim['article_number']}.\n\n"
+                f"Verbindlicher Höchstgesamtbetrag: {amount} EUR einschließlich Mehrwertsteuer, Versand und aller Nebenkosten. "
+                'Bei Überschreitung dieses Gesamtbetrags den Auftrag nicht ausführen. Keine Ersatzartikel liefern. '
+                'Bitte den konkreten Gesamtpreis und den Liefertermin bestätigen.')
+            db.execute("""UPDATE einkauf_material_dialoge SET state='external_pending',revision=revision+1,
+                snapshot_json=?,snapshot_hash=?,analysis_lease='',analysis_until=0,missing_json='[]',error_code='',updated_at=? WHERE id=?""",
+                (_json(claim),_fingerprint(claim),self.clock(),draft_id))
+            db.execute("UPDATE einkauf_material_rueckfragen SET state='superseded',updated_at=? WHERE draft_id=? AND state='queued'",(self.clock(),draft_id))
+            self._external_audit(db,'material_external_reserved',draft_id,draft['revision']+1,claim)
+            return self._view(db,draft_id)
+
+    def record_external_sent(self, draft_id, revision, payload, actor='admin'):
+        """Record a witnessed external send, including after rights revocation."""
+        keys = {'reservation_id','recipient','subject','sent_at','send_evidence','confirmed'}
+        if actor!='admin' or not isinstance(payload,dict) or payload.get('confirmed') is not True:
+            raise PermissionError('Den tatsächlichen externen Versand muss die Werkstattleitung belegen.')
+        if set(payload)!=keys:
+            raise ValueError('Reservierung, Empfänger, Betreff, Sendezeit und Versandnachweis vollständig angeben.')
+        data = {key:self._external_text(payload[key],1000 if key=='send_evidence' else 500) for key in keys-{'confirmed'}}
+        try:
+            sent = datetime.fromisoformat(data['sent_at'])
+            if sent.tzinfo is None:
+                raise ValueError()
+            data['sent_at'] = sent.astimezone(timezone.utc).isoformat()
+        except (TypeError,ValueError):
+            raise ValueError('Die Sendezeit mit Zeitzone angeben.') from None
+        with self.p.portal_originals_operation_lock(), self.db() as db:
+            # Lock without requiring still-active employee rights: this is an
+            # admin's truthful record of an already completed external action.
+            db.execute('UPDATE einkauf_material_dialoge SET updated_at=updated_at WHERE id=?',(_row_id(draft_id),))
+            draft = self._draft(db,draft_id)
+            claim = json.loads(draft['snapshot_json'])
+            if (draft['state'] not in EXTERNAL_STATES or claim.get('kind')!='manual_external_order'
+                    or _fingerprint(claim)!=draft['snapshot_hash']):
+                raise ValueError('Keine unveränderte externe Reservierung vorhanden.')
+            if any(data[key]!=claim.get(key) for key in ('reservation_id','recipient','subject')):
+                raise ValueError('Versandnachweis gehört nicht zu dieser reservierten E-Mail.')
+            if draft['state']=='external_sent':
+                if all(data[key]==claim.get(key) for key in ('sent_at','send_evidence')):
+                    return self._view(db,draft_id)
+                raise ValueError('Der Versandnachweis ist bereits fest gespeichert.')
+            self._draft(db,draft_id,revision)
+            if sent.timestamp()<datetime.fromisoformat(claim['reserved_at']).timestamp() or sent.timestamp()>self.clock()+60:
+                raise ValueError('Sendezeit muss nach der Reservierung liegen und darf nicht in der Zukunft liegen.')
+            claim.update(sent_at=data['sent_at'],send_evidence=data['send_evidence'],recorded_by='admin',
+                recorded_at=datetime.fromtimestamp(self.clock(),timezone.utc).isoformat())
+            db.execute("UPDATE einkauf_material_dialoge SET state='external_sent',revision=revision+1,snapshot_json=?,snapshot_hash=?,updated_at=? WHERE id=?",
+                (_json(claim),_fingerprint(claim),self.clock(),draft_id))
+            self._external_audit(db,'material_external_sent',draft_id,draft['revision']+1,claim)
+            return self._view(db,draft_id)
 
     def apply_admin_review(self, draft_id, revision, payload, actor='admin'):
         if actor != 'admin' or not isinstance(payload,dict) or payload.get('reviewed') is not True:
@@ -623,6 +761,10 @@ class MaterialDialog:
         if not isinstance(result,dict):
             raise ValueError('Bestellstatus fehlt.')
         with self.db() as db:
+            db.execute('UPDATE einkauf_material_dialoge SET updated_at=updated_at WHERE id=?',(_row_id(draft_id),))
+            current = self._draft(db,draft_id)
+            if current['state'] in EXTERNAL_STATES:
+                return self._view(db,draft_id)
             draft = self._draft(db,draft_id,revision)
             order_id = str(result.get('id') or '')
             if not order_id:
@@ -710,7 +852,7 @@ class MaterialDialog:
         draft = None
         for _ in range(5):
             with self.db() as db:
-                draft = db.execute("SELECT id FROM einkauf_material_dialoge WHERE state NOT IN ('accepted','cancelled','review') AND (analysis_state='pending' OR (analysis_state='processing' AND analysis_until<?)) ORDER BY id LIMIT 1",(self.clock(),)).fetchone()
+                draft = db.execute("SELECT id FROM einkauf_material_dialoge WHERE state NOT IN ('accepted','cancelled','review','external_pending','external_sent') AND (analysis_state='pending' OR (analysis_state='processing' AND analysis_until<?)) ORDER BY id LIMIT 1",(self.clock(),)).fetchone()
             if not draft:
                 break
             try:
@@ -718,7 +860,7 @@ class MaterialDialog:
                 break
             except (PermissionError,ValueError):
                 with self.db() as db:
-                    db.execute("UPDATE einkauf_material_dialoge SET state='review',analysis_state='failed',error_code='fotoauslese_oder_berechtigung_klaeren' WHERE id=? AND (analysis_state='pending' OR analysis_until<?)",(draft['id'],self.clock()))
+                    db.execute("UPDATE einkauf_material_dialoge SET state='review',analysis_state='failed',error_code='fotoauslese_oder_berechtigung_klaeren' WHERE id=? AND state NOT IN ('external_pending','external_sent') AND (analysis_state='pending' OR analysis_until<?)",(draft['id'],self.clock()))
         text = self.process_text()
         with self.db() as db:
             approved = db.execute("SELECT id,revision FROM einkauf_material_dialoge WHERE state='approved' ORDER BY updated_at,id LIMIT 1").fetchone()
