@@ -622,7 +622,7 @@ def register_assistant(p):
             return jsonify(error="Zu viele Fehlversuche. Bitte später erneut versuchen."), 429
         with db_scope() as db:
             row = db.execute("SELECT r.*,m.aktiv FROM assistent_rechte r JOIN mitarbeiter m ON m.id=r.mitarbeiter_id WHERE r.mitarbeiter_id=?", (request.form.get("mitarbeiter_id", ""),)).fetchone()
-        if not row or not row["aktiv"] or not check_password_hash(row["passwort_hash"], request.form.get("password", "")):
+        if not row or not row["aktiv"] or not row["passwort_hash"] or not check_password_hash(row["passwort_hash"], request.form.get("password", "")):
             p.record_failed_login("assistent", "login")
             return jsonify(error="Anmeldung fehlgeschlagen."), 401
         p.clear_login_attempts("assistent", "login")
@@ -649,14 +649,19 @@ def register_assistant(p):
                     raise ValueError("Aktiven Mitarbeiter auswählen.")
                 existing = db.execute("SELECT * FROM assistent_rechte WHERE mitarbeiter_id=?", (mid,)).fetchone()
                 password = request.form.get("password", "")
-                if (password or not existing) and len(password) < 12:
+                enable_portal = request.form.get("enable_portal_login") == "on"
+                if (password or not existing or enable_portal) and len(password) < 12:
                     raise ValueError("Persönliches Passwort mit mindestens 12 Zeichen erforderlich.")
+                if existing and not existing["passwort_hash"] and password and not enable_portal:
+                    raise ValueError("Portalzugang ausdrücklich über ‚Portalzugang mit Passwort aktivieren‘ einschalten.")
                 hashed = generate_password_hash(password) if password else existing["passwort_hash"]
                 limit = cents(request.form.get("limit", "0"))
                 flags = [int(request.form.get(k) == "on") for k in ("lesen", "dokumentieren", "einkaufen")]
                 db.execute("INSERT INTO assistent_rechte(mitarbeiter_id,passwort_hash,lesen,dokumentieren,einkaufen,limit_cent) VALUES(?,?,?,?,?,?) ON CONFLICT(mitarbeiter_id) DO UPDATE SET passwort_hash=excluded.passwort_hash,lesen=excluded.lesen,dokumentieren=excluded.dokumentieren,einkaufen=excluded.einkaufen,limit_cent=excluded.limit_cent,version=assistent_rechte.version+1 RETURNING mitarbeiter_id", (mid, hashed, *flags, limit)).fetchall()
                 audit(db, {"actor": "admin"}, None, "rechte", json.dumps({"mitarbeiter": mid, "flags": flags, "limit_cent": limit}))
-            employees = [dict(r) for r in db.execute("SELECT m.id,m.name,r.lesen,r.dokumentieren,r.einkaufen,r.limit_cent FROM mitarbeiter m LEFT JOIN assistent_rechte r ON r.mitarbeiter_id=m.id WHERE m.aktiv=1 ORDER BY m.name").fetchall()]
+            employees = [dict(r) for r in db.execute("SELECT m.id,m.name,r.lesen,r.dokumentieren,r.einkaufen,r.limit_cent,CASE WHEN LENGTH(COALESCE(r.passwort_hash,''))>0 THEN 1 ELSE 0 END AS has_password FROM mitarbeiter m LEFT JOIN assistent_rechte r ON r.mitarbeiter_id=m.id WHERE m.aktiv=1 ORDER BY m.name").fetchall()]
+            for employee in employees:
+                employee["has_password"] = bool(employee["has_password"])
             events = [dict(r) for r in db.execute("SELECT * FROM assistent_audit ORDER BY id DESC LIMIT 100").fetchall()]
         return render_template("assistent_rechte.html", employees=employees, events=events, read_only=read_only(), operations_enabled=operations_enabled(), order_cap=p.workshop_orders.cap(), order_availability=p.workshop_orders.availability())
 
@@ -729,7 +734,7 @@ def register_assistant(p):
         elif row["art"] == "bestellung":
             phrase = "Bestellung bestätigen"
             shipping = payload["versand"]
-            timing = "Dringend: sofort versenden." if shipping["urgent"] else "Je Lieferant gesammelt am nächsten Montag um zwölf Uhr versenden."
+            timing = "Dringend: sofort versenden." if shipping["urgent"] else "Je Lieferant gesammelt am nächsten Montag um vierzehn Uhr versenden."
             text += (f"Verbindliche Bestellung bei {payload['lieferant']} an {shipping['recipient']}: "
                      f"{payload['menge']} {payload['einheit']} {payload['bezeichnung']}, Variante {payload['variante']}. "
                      f"Bruttopreis pro Einheit {payload['stueckpreis_brutto_cent']/100:.2f} Euro, Versand {payload['versand_brutto_cent']/100:.2f} Euro, "
@@ -1124,7 +1129,7 @@ def register_assistant(p):
                 raise ValueError("Bestellrecht fehlt.")
             contacts = [p.workshop_orders.resolve_supplier(r["id"]) for r in p.workshop_orders.contacts()]
             return {"lieferanten": [r for r in contacts if r and r["verified"]], "limit_cent": order_limit(who),
-                    "regel": "Dringend sofort, sonst je Lieferant Montag 12 Uhr Europe/Berlin; nur nach ausdrücklicher Bestätigung.",
+                    "regel": "Dringend sofort, sonst je Lieferant Montag 14 Uhr Europe/Berlin; nur nach ausdrücklicher Bestätigung.",
                     "versand_bereit": p.workshop_orders.availability()["can_send"]}
         if name == "morgenueberblick":
             day = tool_day(args.get('datum'))
@@ -1209,7 +1214,7 @@ def register_assistant(p):
             "Bestellkontakt mit lieferanten_lesen prüfen. Anschließend bestellung_vorschlagen, sobald alle Kosten einschließlich Steuer, Versand und Nebenkosten ausdrücklich geklärt sind. "
             "Historische Rechnungswerte deutlich als solche kennzeichnen, sie sind kein aktuelles Angebot. Niemals unbekannte Kosten auf null setzen. "
             f"Persönlicher Höchstbetrag ist {order_limit(who)/100:.2f} Euro brutto. Die Sammelgrenze gilt zusätzlich je Lieferant für die gesamte Montagsmail. Nicht aufteilen, um Grenzen zu umgehen. "
-            "Nach Bestätigung: dringend sofort, sonst Montag zwölf Uhr gesammelt. Ein Vorschlag ist noch keine ausgeführte Änderung oder versandte Bestellung. "
+            "Nach Bestätigung: dringend sofort, sonst Montag vierzehn Uhr gesammelt. Ein Vorschlag ist noch keine ausgeführte Änderung oder versandte Bestellung. "
             + WORKFLOW_RULES
         ) if any(caps[key] for key in ('status', 'auftrag', 'angebote', 'bestellen')) else (
             "Aufträge und Bestellungen sind schreibgeschützt. Keine Auftragsnotizen, Fahrzeugfotos, Bestellungen, Mails oder Fortschritte speichern. Eigene Mitarbeiterfunktionen und private Materialfotoauswahl sind davon getrennt und nur mit den dafür angebotenen Werkzeugen erlaubt. " if read_only() else "")
