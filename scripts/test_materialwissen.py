@@ -29,6 +29,21 @@ def tape(number='T-30', width='30 mm', color='grün', supplier='Top-Color GmbH',
 
 
 class SearchTests(unittest.TestCase):
+    def test_english_silver_label_finds_german_invoice_without_merging_products(self):
+        base = dict(tape(), produkt_name='PPG T4000/E0.5 ENVIROBASE CRYSTAL SILBER 0,5 Liter',
+                    artikelnummer='TEST-SILVER', groesse='', farbe='', ve='Stück')
+        rows = [base, dict(base, artikelnummer='SHORT', produkt_name='PPG T400 Crystal Silber'),
+                dict(base, artikelnummer='LONG', produkt_name='PPG T40000 Crystal Silber'),
+                dict(base, artikelnummer='BLUE', produkt_name='PPG T4000 Crystal Blau'),
+                dict(base, artikelnummer='OTHER-SUPPLIER', lieferant='Other Supplier')]
+        matched = rank_records(rows, 'T4000 Crystal Silver')
+        self.assertEqual([row['artikelnummer'] for row in matched], ['TEST-SILVER', 'OTHER-SUPPLIER'])
+        variants = build_variants(matched)
+        self.assertEqual(len(variants), 2)
+        self.assertTrue(all(v['produkt_name'] == base['produkt_name'] for v in variants))
+        self.assertTrue(all(not v['bestellbar'] for v in variants))
+        self.assertEqual(len(rank_records([base], 'T4000 Crystal Silber')), 1)
+
     def band_context(self):
         rows=[]
         for width,count in ((25,36),(30,32),(50,24)):

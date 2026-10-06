@@ -113,6 +113,8 @@ def register_material_admin(p):
             result = p.material_dialog.recheck(draft_id, revision)
             if result['state'] == 'approved':
                 flash('Die unveränderte Anforderung ist wieder zur Übergabe vorgemerkt. Der aktive Bestelldienst prüft vor dem Versand erneut Rechte, Kosten und Kontakt.', 'success')
+            elif result.get('internal_review_pending') is True and result.get('employee_reply_required') is False:
+                flash('Die Mitarbeiterangaben sind erfasst. Lieferantenzuordnung und Einkaufskonditionen werden intern geprüft; keine erneute Artikelfrage nötig. Noch nicht bestellt.', 'info')
             else:
                 flash('Anforderung erneut geprüft. Offene Angaben sind weiterhin zu klären.', 'error')
         except (ValueError, PermissionError, LookupError) as exc:

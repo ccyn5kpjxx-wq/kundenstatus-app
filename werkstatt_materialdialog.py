@@ -27,6 +27,8 @@ UNITS = {'karton':'Karton', 'kartons':'Karton', 'rolle':'Rolle', 'rollen':'Rolle
 WORDS = {'ein':'1','eine':'1','einen':'1','einem':'1','zwei':'2','drei':'3','vier':'4','fünf':'5','fuenf':'5',
          'sechs':'6','sieben':'7','acht':'8','neun':'9','zehn':'10'}
 QUANTITY_PATTERN = r'\b(\d{1,8}(?:[.,]\d{1,6})?|' + '|'.join(WORDS) + r')\s+(' + '|'.join(sorted(UNITS, key=len, reverse=True)) + r')\b'
+EMPLOYEE_FIELDS = {'order_requested', 'quantity', 'unit', 'urgent', 'article', 'unit_conflict'}
+INTERNAL_FIELDS = {'supplier_review', 'price', 'budget'}
 
 
 def article_query(text):
@@ -263,6 +265,13 @@ class MaterialDialog:
             if review:
                 db.execute('UPDATE einkauf_material_dialoge SET review_json=? WHERE id=?',(_json(review),draft['id']))
         values = {key:item['value'] for key,item in fields.items()}
+        analysis = json.loads(draft['analysis_json'])
+        labels, hits = analysis.get('merkmale',{}), analysis.get('treffer',[])
+        # Recognizing a label is not a catalog match or a price approval. It only
+        # means the employee need not repeat an already readable product name.
+        identified = bool(selected or (draft['analysis_state']=='done' and labels.get('produkt')
+            and (labels.get('marke') or labels.get('artikelnummer'))
+            and (not hits or len(hits)==1 and not analysis.get('treffer_gekuerzt'))))
         missing = []
         if values.get('cancelled') is True:
             state, payload = 'cancelled', {}
@@ -271,7 +280,7 @@ class MaterialDialog:
                 if key not in values or key == 'order_requested' and values[key] is not True:
                     missing.append(key)
             if not review:
-                missing += ['article','price']
+                missing += ['supplier_review' if identified else 'article','price']
             elif review.get('verified_until','') < self._today():
                 missing.append('price')
             elif values.get('unit') and values['unit'].casefold() != review['unit'].casefold():
@@ -285,28 +294,66 @@ class MaterialDialog:
                                price_verified=True,price_basis='gross',currency='EUR')
                 if not 0 < total <= 25000:
                     missing.append('budget')
-            state = 'open' if missing else 'approved'
+            staff_missing = [key for key in missing if key in EMPLOYEE_FIELDS]
+            state = ('review' if not staff_missing and draft['analysis_state'] not in {'pending','processing'} else 'open') if missing else 'approved'
         snapshot = {'actor':'mitarbeiter:' + str(self._source(db,draft)['employee_id']), 'request_key':'material:' + str(draft['id']), 'payload':payload}
         db.execute('''UPDATE einkauf_material_dialoge SET state=?,snapshot_json=?,snapshot_hash=?,missing_json=?,updated_at=? WHERE id=?''',
             (state,_json(snapshot),_fingerprint(snapshot),_json(missing),self.clock(),draft['id']))
         db.execute("UPDATE einkauf_material_rueckfragen SET state='superseded' WHERE draft_id=? AND revision<>? AND state='queued'", (draft['id'],draft['revision']))
-        if missing and state == 'open':
-            first = missing[0]
+        if missing and state in {'open','review'}:
+            first = next((key for key in missing if key in EMPLOYEE_FIELDS),'internal_review')
+            if first in {'article','internal_review'} and draft['analysis_state'] in {'pending','processing'}:
+                return
             questions = {'order_requested':'Soll dieses Material bestellt werden? Bitte ausdrücklich „bestellen“ schreiben.',
                 'quantity':'Wie viel möchtest du bestellen? Bitte Menge und Bestelleinheit nennen, etwa „ein Karton“.',
                 'unit':'Welche Bestelleinheit meinst du: Karton, Rolle oder Packung?', 'urgent':'Ist die Bestellung dringend?',
-                'article':'Welcher genaue Artikel und welche Variante sind gemeint? Die Werkstattleitung prüft die Zuordnung.',
-                'price':'Die Werkstattleitung muss Bruttopreis, Versand und Nebenkosten anhand einer aktuellen Quelle prüfen.',
+                'article':'Der Artikel ist noch nicht eindeutig lesbar. Bitte Artikelnamen und Variante vom Etikett nennen.',
                 'unit_conflict':'Genannte Bestelleinheit und geprüfter Artikel passen noch nicht zusammen. Bitte klären.',
-                'budget':'Der Gesamtbetrag liegt außerhalb des freigegebenen Rahmens. Die Werkstattleitung muss übernehmen.'}
+                'internal_review':'Die interne Lieferanten- und Preisprüfung ist noch offen. Die Werkstattleitung prüft die Zuordnung und vollständigen aktuellen Kosten. Noch nicht bestellt.'}
+            if 'budget' in missing:
+                questions['internal_review']='Der Gesamtbetrag liegt außerhalb des freigegebenen Rahmens von 250 Euro. Die Werkstattleitung muss übernehmen. Noch nicht bestellt.'
+            elif review and 'price' in missing:
+                questions['internal_review']='Die bisherigen Einkaufskonditionen sind abgelaufen. Die Werkstattleitung prüft die aktuellen vollständigen Kosten. Noch nicht bestellt.'
+            if first == 'unit_conflict':
+                questions[first]='Du hast '+str(values['unit'])+' angegeben; die geprüften Konditionen gelten je '+review['unit']+'. Welche Bestelleinheit meinst du?'
             if first == 'article':
-                hits = json.loads(draft['analysis_json']).get('treffer',[])
                 if len(hits)==1:
                     hit=hits[0]
                     questions['article']='Meinst du '+str(hit.get('produkt_name','Artikel'))+' '+str(hit.get('groesse',''))+' '+str(hit.get('farbe',''))+'?'
                 elif hits:
                     questions['article']='Welche Variante: '+', '.join(str(h.get('groesse') or h.get('produkt_name')) for h in hits[:5])+'?'
-            body = 'M-' + str(draft['id']) + ' R' + str(draft['revision']) + ': ' + questions[first] + ' Antworte bitte zitiert oder mit diesem Vorgangscode.'
+            details = []
+            product = selected or review
+            if product:
+                name = ' '.join(str(product.get(key,'')) for key in ('produkt_name','product_name','groesse','farbe','variant')).strip()
+                if name:
+                    details.append('Artikel: '+name+'.')
+            elif labels.get('produkt'):
+                parts = []
+                for key in ('marke','produkt','breite','farbe'):
+                    label = str(labels.get(key,'')).strip()
+                    if label and label.casefold() not in ' '.join(parts).casefold():
+                        parts.append(label)
+                details.append('Auf dem Foto erkannt: '+' '.join(parts)+'.')
+            known = []
+            if values.get('quantity'):
+                known.append(str(values['quantity'])+' '+str(values.get('unit','')).strip())
+            if type(values.get('urgent')) is bool:
+                known.append('dringend' if values['urgent'] else 'nicht dringend')
+            if known:
+                details.append('Erfasst: '+', '.join(known)+'.')
+            body = 'M-' + str(draft['id']) + ' R' + str(draft['revision']) + ': ' + ' '.join(details+[questions[first]])
+            if first != 'internal_review':
+                body += ' Antworte bitte zitiert oder mit diesem Vorgangscode.'
+            else:
+                last = db.execute("""SELECT body FROM einkauf_material_rueckfragen
+                    WHERE draft_id=? AND field='internal_review' AND state IN ('queued','sending','sent','uncertain')
+                    ORDER BY id DESC LIMIT 1""",(draft['id'],)).fetchone()
+                # Admin rechecking unchanged evidence must not repeat a status
+                # already delivered or with an uncertain/in-flight outcome.
+                strip_code = lambda text: re.sub(r'^M-\d+\s+R\d+:\s*','',text)
+                if last and strip_code(last['body']) == strip_code(body):
+                    return
             db.execute('''INSERT INTO einkauf_material_rueckfragen(draft_id,revision,field,body,created_at,updated_at)
                 VALUES(?,?,?,?,?,?) ON CONFLICT(draft_id,revision) DO NOTHING RETURNING id''',
                 (draft['id'],draft['revision'],first,body,self.clock(),self.clock())).fetchall()
@@ -321,6 +368,8 @@ class MaterialDialog:
         row.pop('snapshot_json'); row.pop('snapshot_hash'); row.pop('analysis_lease')
         row['code'] = 'M-' + str(row['id']) + ' R' + str(row['revision'])
         row['questions'] = [dict(q) for q in db.execute('SELECT id,revision,field,body,state,error_code FROM einkauf_material_rueckfragen WHERE draft_id=? ORDER BY id DESC LIMIT 8',(draft_id,)).fetchall()]
+        row['employee_reply_required'] = row['state']=='open' and any(key in EMPLOYEE_FIELDS for key in row['missing_fields'])
+        row['internal_review_pending'] = row['state']=='review' and not row['error_code'] and any(key in INTERNAL_FIELDS for key in row['missing_fields'])
         return row
 
     def status(self, draft_id):
@@ -544,13 +593,28 @@ class MaterialDialog:
             return self.guard_order(db,draft_id,revision)
 
     def recheck(self, draft_id, revision):
-        """Re-evaluate unchanged evidence; never dispatch or retry uncertain mail."""
+        """Refresh catalog matches from stored labels, never rerun vision or send."""
         with self.db() as db:
             draft = self._draft(db,draft_id,revision,lock=True)
+            source = self._source(db,draft)
             if self._accepted(db,draft) or draft['state']=='cancelled':
                 raise ValueError('Übergebenen oder abgebrochenen Vorgang nicht erneut freigeben.')
             if draft['error_code']=='antwort_unverstaendlich':
                 raise ValueError('Die unklare Mitarbeiterantwort zuerst über denselben Vorgang klären.')
+        analysis = None
+        if source['mime']!='text/plain' and draft['analysis_state']=='done':
+            analysis = self.p.assistant_material_photos.status(
+                {'actor':'mitarbeiter:'+str(source['employee_id']),'lesen':True,'einkaufen':True},
+                source['assistant_photo_id'])
+            if analysis.get('status')!='pruefen' or analysis.get('artikelsuche_verfuegbar') is False:
+                raise ValueError('Aktuelle Artikelsuche nicht verfügbar; gespeicherten Stand beibehalten.')
+        with self.db() as db:
+            current = self._draft(db,draft_id,revision,lock=True)
+            unchanged = ('fields_json','review_json','analysis_json','analysis_state','error_code','state','dispatch_id')
+            if self._accepted(db,current) or any(current[key]!=draft[key] for key in unchanged):
+                raise ValueError('Materialvorgang wurde während der Prüfung geändert. Bitte neu laden.')
+            if analysis is not None:
+                db.execute('UPDATE einkauf_material_dialoge SET analysis_json=? WHERE id=?',(_json(analysis),draft_id))
             db.execute("UPDATE einkauf_material_dialoge SET revision=revision+1,error_code='' WHERE id=?",(draft_id,))
             self._refresh(db,self._draft(db,draft_id))
             return self._view(db,draft_id)
@@ -570,6 +634,14 @@ class MaterialDialog:
             db.execute('UPDATE einkauf_material_dialoge SET state=?,dispatch_id=?,dispatch_state=?,error_code=?,updated_at=? WHERE id=?',
                 (state,order_id,str(result.get('state','blocked'))[:50],'' if order_id else 'bestelluebergabe_offen',self.clock(),draft_id))
 
+    @staticmethod
+    def _reply_eligible(draft, question):
+        missing = set(json.loads(draft['missing_json']))
+        if question['field']=='internal_review':
+            return (draft['state']=='review' and not draft['error_code']
+                    and bool(missing & INTERNAL_FIELDS) and not missing & EMPLOYEE_FIELDS)
+        return draft['state']=='open' and question['field'] in missing & EMPLOYEE_FIELDS
+
     def send_question(self):
         with self.db() as db:
             db.execute("UPDATE einkauf_material_rueckfragen SET state='uncertain',error_code='sendestatus_unklar_nicht_erneut_senden' WHERE state='sending' AND updated_at<?",(self.clock()-120,))
@@ -583,7 +655,7 @@ class MaterialDialog:
             try:
                 draft = self._draft(db,question['draft_id'],question['revision'],lock=True)
                 source = self._source(db,draft)
-                if draft['state'] != 'open':
+                if not self._reply_eligible(draft,question):
                     raise ValueError('Vorgang benötigt keine Rückfrage mehr.')
                 last = db.execute('SELECT MAX(source_at) AS stamp FROM einkauf_material_texte WHERE sender_id=? AND phone_number_id=?', (source['sender_id'],source['phone_number_id'])).fetchone()
                 stamp = max(source['source_at'],last['stamp'] or source['source_at'])
@@ -600,7 +672,9 @@ class MaterialDialog:
         state, provider_id = 'uncertain',''
         try:
             with self.db() as db:
-                self._draft(db,draft['id'],draft['revision'],lock=True)
+                current = self._draft(db,draft['id'],draft['revision'],lock=True)
+                if not self._reply_eligible(current,question):
+                    raise ValueError('Vorgang benötigt diese Nachricht nicht mehr.')
             response = self.channel.transport.post('https://graph.facebook.com/'+config['version']+'/'+source['phone_number_id']+'/messages',
                 headers={'Authorization':'Bearer '+config['token']},json={'messaging_product':'whatsapp','recipient_type':'individual',
                 'to':sender['phone_e164'],'type':'text','context':{'message_id':source['wamid']},'text':{'preview_url':False,'body':question['body']}},

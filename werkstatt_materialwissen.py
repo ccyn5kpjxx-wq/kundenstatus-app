@@ -19,8 +19,11 @@ _ALIASES = {
     'klebebaender': 'klebeband', 'abklebebaender': 'klebeband',
     'millimeter': 'mm', 'millimetern': 'mm', 'zentimeter': 'cm', 'meter': 'm', 'mtr': 'm',
     'rollen': 'rolle', 'kartons': 'karton', 'stueck': 'stueck', 'stk': 'stueck', 'stck': 'stueck',
+    # Packaging can use the English color while the supplier invoice uses German.
+    # This only broadens search; original names and variant identity stay intact.
+    'silver': 'silber',
 }
-_COLORS = ('gruen', 'blau', 'rot', 'gelb', 'weiss', 'schwarz', 'grau', 'orange', 'violett', 'transparent', 'braun')
+_COLORS = ('gruen', 'blau', 'rot', 'gelb', 'weiss', 'schwarz', 'grau', 'orange', 'violett', 'transparent', 'braun', 'silber')
 _TOKEN_ALIASES = dict(_ALIASES, **{color+suffix:color for color in _COLORS for suffix in ('','e','en','er','es','em')})
 _STOP = frozenset(('ich moechte will brauche brauchen bitte bestelle bestellen nachbestellen kauf kaufen '
                   'haben habt wir ihr du mir mich uns ein eine einen einem einer eines der die das den '

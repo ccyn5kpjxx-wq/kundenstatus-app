@@ -107,6 +107,32 @@ class MaterialAdminTests(unittest.TestCase):
         self.service.process_next.assert_not_called()
         self.service.send_question.assert_not_called()
 
+    def test_recognized_label_is_visible_without_becoming_supplier_or_price_evidence(self):
+        item = dict(id=7, revision=3, code='M-7 R3', state='review', review={},
+                    analysis=dict(merkmale=dict(produkt='Test-Silber', marke='Testmarke', artikelnummer='TEST/E0.5')),
+                    analysis_state='done', fields={}, questions=[], missing_fields=['supplier_review','price'],
+                    dispatch_id='', error_code='', internal_review_pending=True, employee_reply_required=False)
+        with self.app.test_request_context():
+            html = render_template('materialdialog.html', material_dialogs=[item], material_current=item,
+                                   material_contacts=[], material_replies_enabled=True, csrf='synthetic')
+        self.assertIn('Interne Bestellprüfung', html)
+        self.assertIn('Vom Produktetikett erkannt', html)
+        self.assertIn('TEST/E0.5', html)
+        self.assertIn('name="product_name" maxlength="300" value="Test-Silber"', html)
+        self.assertIn('name="article_number" maxlength="300" value=""', html)
+        self.assertIn('name="unit_price" inputmode="decimal" value=""', html)
+        self.assertIn('noch nicht bestellt', html)
+
+    def test_internal_review_recheck_needs_no_employee_repetition_and_does_not_send(self):
+        self.service.recheck.return_value = dict(state='review', internal_review_pending=True,
+                                                employee_reply_required=False)
+        self.client.post('/admin/assistent-bestellungen/eingang/material/7/uebergabe-pruefen', data=self.form)
+        with self.client.session_transaction() as state:
+            self.assertTrue(any(category=='info' and 'keine erneute Artikelfrage' in message
+                                for category,message in state['_flashes']))
+        self.service.process_next.assert_not_called()
+        self.service.send_question.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

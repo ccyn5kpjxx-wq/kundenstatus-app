@@ -102,6 +102,253 @@ class DialogTests(unittest.TestCase):
         self.s.process_next()
         self.assertEqual(len(self.p.workshop_orders.calls),1)
 
+    def crystal_photo(self,caption='Ein Stück, dringend',new=False):
+        self.hits=[]
+        self.p.assistant_material_photos.vision=lambda *args: {
+            'art':'produkt','marke':'PPG','produkt':'T4000 Crystal Silver','artikelnummer':'T4000/E0.5'}
+        return self.photo(caption,new=new)
+
+    def test_recognized_photo_without_catalog_match_needs_internal_review_not_article_repeat(self):
+        view=self.crystal_photo()
+        self.assertEqual(view['state'],'review')
+        self.assertEqual(view['missing_fields'],['supplier_review','price'])
+        self.assertTrue(view['internal_review_pending'])
+        self.assertFalse(view['employee_reply_required'])
+        notice=view['questions'][0]
+        self.assertEqual(notice['field'],'internal_review')
+        for text in ('T4000 Crystal Silver','1 Stück','dringend','Noch nicht bestellt'):
+            self.assertIn(text,notice['body'])
+        self.assertNotIn('T4000/E0.5',notice['body'])
+        self.assertNotIn('Antworte',notice['body'])
+        self.assertNotIn('?',notice['body'])
+        self.assertEqual(view['review'],{})
+        self.assertNotIn('selected_article',view['fields'])
+        with self.assertRaises(PermissionError):self.s.approved_order(view['id'],view['revision'])
+        self.s.process_next()
+        self.assertEqual(self.p.workshop_orders.calls,[])
+        self.assertEqual(self.f.sql('SELECT * FROM assistent_bestellanforderungen'),[])
+
+    def test_recognized_photo_only_asks_missing_quantity_then_keeps_bound_answer(self):
+        view=self.crystal_photo('dringend')
+        self.assertTrue(view['employee_reply_required'])
+        question=view['questions'][0]
+        self.assertEqual(question['field'],'quantity')
+        self.assertIn('T4000 Crystal Silver',question['body'])
+        self.assertIn('dringend',question['body'])
+        self.assertIn('Antworte',question['body'])
+        self.assertEqual(self.answer(view,'Ein Stück')['state'],'applied')
+        updated=self.s.status(view['id'])
+        self.assertEqual(updated['fields']['quantity']['value'],'1')
+        self.assertEqual(updated['fields']['unit']['value'],'Stück')
+        self.assertTrue(updated['fields']['urgent']['value'])
+        self.assertEqual(updated['state'],'review')
+        self.assertEqual(updated['questions'][0]['field'],'internal_review')
+        self.assertNotIn('Antworte',updated['questions'][0]['body'])
+        self.assertEqual(updated['questions'][1]['state'],'superseded')
+
+    def test_internal_status_can_be_sent_once_but_quoted_yes_grants_nothing(self):
+        view=self.crystal_photo()
+        self.p.app.config['MATERIAL_WHATSAPP_REPLIES_ENABLED']=True
+        calls=[]
+        def post(url,**kwargs):
+            calls.append(kwargs['json'])
+            return fixtures.Response(json.dumps({'messages':[{'id':'wamid.internal-status'}]}).encode())
+        self.channel.transport.post=post
+        self.assertEqual(self.s.send_question()['state'],'sent')
+        self.assertIsNone(self.s.send_question())
+        self.assertEqual(len(calls),1)
+        self.assertNotIn('Antworte',calls[0]['text']['body'])
+        self.assertEqual(self.answer(None,'ja',quote='wamid.internal-status',explicit=False)['state'],'review')
+        updated=self.s.status(view['id'])
+        self.assertNotIn('selected_article',updated['fields'])
+        self.assertEqual(updated['review'],{})
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_selected_catalog_article_is_not_asked_again_when_only_terms_are_missing(self):
+        view=self.photo()
+        self.assertEqual(self.answer(view,'ja')['state'],'applied')
+        updated=self.s.status(view['id'])
+        self.assertEqual(updated['state'],'review')
+        self.assertEqual(updated['missing_fields'],['supplier_review','price'])
+        self.assertEqual(updated['questions'][0]['field'],'internal_review')
+        self.assertIn('Test-Klebeband',updated['questions'][0]['body'])
+        self.assertNotIn('Meinst du',updated['questions'][0]['body'])
+        self.assertEqual(updated['review'],{})
+
+    def test_unclear_correction_prevents_queued_internal_status_from_being_sent(self):
+        view=self.crystal_photo()
+        self.assertEqual(self.answer(view,'Das anders machen')['state'],'review')
+        self.assertFalse(self.s.status(view['id'])['internal_review_pending'])
+        self.p.app.config['MATERIAL_WHATSAPP_REPLIES_ENABLED']=True
+        with patch.object(self.channel.transport,'post',create=True) as post:
+            self.assertEqual(self.s.send_question()['state'],'review')
+        post.assert_not_called()
+
+    def test_internal_status_rechecks_correction_after_claim_before_transport(self):
+        view=self.crystal_photo()
+        self.p.app.config['MATERIAL_WHATSAPP_REPLIES_ENABLED']=True
+        original=self.s._draft
+        calls=0
+        def changed(dbase,*args,**kwargs):
+            nonlocal calls
+            calls+=1
+            if calls==2:
+                dbase.execute("UPDATE einkauf_material_dialoge SET error_code='antwort_unverstaendlich' WHERE id=?",(view['id'],))
+            return original(dbase,*args,**kwargs)
+        with patch.object(self.s,'_draft',side_effect=changed),patch.object(self.channel.transport,'post',create=True) as post:
+            self.s.send_question()
+        self.assertEqual(calls,2)
+        post.assert_not_called()
+
+    def crystal_catalog_hit(self):
+        return dict(self.hits[0] if self.hits else {},produkt_name='PPG T4000/E0.5 ENVIROBASE CRYSTAL SILBER',
+                    lieferant='Testlieferant',artikelnummer='SYNTHETIC-SILVER-05',groesse='0,5 Liter',
+                    gebinde='0,5 Liter',ve='Dose',quellen=[{'art':'einkauf','beleg_id':1,'position':1}])
+
+    def test_recheck_refreshes_stored_label_catalog_without_vision_selection_or_order(self):
+        view=self.crystal_photo()
+        self.hits=[self.crystal_catalog_hit()]
+        with patch.object(self.p.assistant_material_photos,'vision',side_effect=AssertionError('No new vision')):
+            updated=self.s.recheck(view['id'],view['revision'])
+        self.assertEqual(len(updated['analysis']['treffer']),1)
+        self.assertEqual(updated['revision'],view['revision']+1)
+        self.assertEqual(updated['state'],'review')
+        self.assertEqual(updated['missing_fields'],['supplier_review','price'])
+        self.assertEqual(updated['questions'][0]['field'],'internal_review')
+        self.assertNotIn('Meinst du',updated['questions'][0]['body'])
+        self.assertEqual(updated['review'],{})
+        self.assertNotIn('selected_article',updated['fields'])
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_recheck_preserves_genuine_catalog_ambiguity(self):
+        view=self.crystal_photo()
+        hit=self.crystal_catalog_hit()
+        self.hits=[hit,dict(hit,artikelnummer='SYNTHETIC-SILVER-1',groesse='1 Liter',gebinde='1 Liter')]
+        updated=self.s.recheck(view['id'],view['revision'])
+        self.assertEqual(updated['state'],'open')
+        self.assertTrue(updated['employee_reply_required'])
+        self.assertEqual(updated['questions'][0]['field'],'article')
+        self.assertIn('0,5 Liter',updated['questions'][0]['body'])
+        self.assertIn('1 Liter',updated['questions'][0]['body'])
+        self.assertNotIn('selected_article',updated['fields'])
+
+    def test_recheck_catalog_outage_preserves_previous_analysis_and_revision(self):
+        view=self.crystal_photo()
+        self.p.cockpit_data.articles=lambda query: (_ for _ in ()).throw(ValueError('Synthetic unavailable'))
+        with self.assertRaises(ValueError):self.s.recheck(view['id'],view['revision'])
+        updated=self.s.status(view['id'])
+        self.assertEqual(updated['analysis'],view['analysis'])
+        self.assertEqual(updated['revision'],view['revision'])
+
+    def test_recheck_rechecks_rights_and_same_revision_corrections_after_lookup(self):
+        for mutation in ('rights','correction','revision','accepted'):
+            with self.subTest(mutation=mutation):
+                view=self.crystal_photo() if mutation=='rights' else self.photo('Ein Stück, dringend',new=True)
+                initial=self.s.status(view['id'])
+                old_lookup=self.p.cockpit_data.articles
+                mutated=False
+                def changed_lookup(query):
+                    nonlocal mutated
+                    if not mutated:
+                        if mutation=='rights':
+                            self.f.sql('UPDATE assistent_rechte SET version=version+1 WHERE mitarbeiter_id=1')
+                        elif mutation=='correction':
+                            self.f.sql("UPDATE einkauf_material_dialoge SET state='review',error_code='antwort_unverstaendlich' WHERE id=?",(view['id'],))
+                        elif mutation=='revision':
+                            self.f.sql('UPDATE einkauf_material_dialoge SET revision=revision+1 WHERE id=?',(view['id'],))
+                        else:
+                            self.f.sql('INSERT INTO assistent_bestellanforderungen VALUES(?,?,?)',('durable','mitarbeiter:1','material:'+str(view['id'])))
+                        mutated=True
+                    return {'varianten':[]}
+                self.p.cockpit_data.articles=changed_lookup
+                with self.assertRaises((ValueError,PermissionError)):
+                    self.s.recheck(view['id'],view['revision'])
+                self.p.cockpit_data.articles=old_lookup
+                updated=self.s.status(view['id'])
+                self.assertEqual(updated['revision'],initial['revision']+(mutation=='revision'))
+                self.assertEqual(updated['analysis'],initial['analysis'])
+                if mutation=='rights':
+                    self.f.sql('UPDATE assistent_rechte SET version=version-1 WHERE mitarbeiter_id=1')
+
+    def test_recheck_does_not_even_search_cancelled_or_accepted_requests(self):
+        view=self.crystal_photo()
+        self.answer(view,'abbrechen')
+        cancelled=self.s.status(view['id'])
+        with patch.object(self.p.assistant_material_photos,'status') as lookup:
+            with self.assertRaises(ValueError):self.s.recheck(cancelled['id'],cancelled['revision'])
+        lookup.assert_not_called()
+        other=self.photo(new=True)
+        self.f.sql('INSERT INTO assistent_bestellanforderungen VALUES(?,?,?)',('durable','mitarbeiter:1','material:'+str(other['id'])))
+        with patch.object(self.p.assistant_material_photos,'status') as lookup:
+            with self.assertRaises(ValueError):self.s.recheck(other['id'],other['revision'])
+        lookup.assert_not_called()
+
+    def test_recheck_does_not_repeat_sent_uncertain_or_inflight_internal_status(self):
+        for state in ('sent','uncertain','sending'):
+            with self.subTest(state=state):
+                view=self.crystal_photo(new=True)
+                notice_id=view['questions'][0]['id']
+                self.f.sql('UPDATE einkauf_material_rueckfragen SET state=? WHERE id=?',(state,notice_id))
+                updated=self.s.recheck(view['id'],view['revision'])
+                updated=self.s.recheck(updated['id'],updated['revision'])
+                self.assertEqual(updated['questions'][0]['id'],notice_id)
+                self.assertEqual(self.f.sql("SELECT id FROM einkauf_material_rueckfragen WHERE draft_id=? AND state='queued'",(view['id'],)),[])
+
+    def test_recheck_replaces_unsent_status_and_changed_quantity_gets_new_status(self):
+        view=self.crystal_photo()
+        previous=view['questions'][0]['id']
+        updated=self.s.recheck(view['id'],view['revision'])
+        self.assertEqual(updated['questions'][1]['id'],previous)
+        self.assertEqual(updated['questions'][1]['state'],'superseded')
+        self.assertEqual(updated['questions'][0]['state'],'queued')
+        notice_id=updated['questions'][0]['id']
+        self.f.sql("UPDATE einkauf_material_rueckfragen SET state='sent' WHERE id=?",(notice_id,))
+        self.assertEqual(self.answer(updated,'Zwei Stück')['state'],'applied')
+        updated=self.s.status(view['id'])
+        self.assertNotEqual(updated['questions'][0]['id'],notice_id)
+        self.assertEqual(updated['questions'][0]['state'],'queued')
+        self.assertIn('2 Stück',updated['questions'][0]['body'])
+
+    def test_multiple_catalog_variants_still_need_a_specific_employee_answer(self):
+        self.hits.append(dict(self.hits[0],artikelnummer='TEST-30',groesse='30 mm'))
+        view=self.photo()
+        self.assertEqual(view['state'],'open')
+        self.assertTrue(view['employee_reply_required'])
+        self.assertFalse(view['internal_review_pending'])
+        question=view['questions'][0]
+        self.assertEqual(question['field'],'article')
+        for text in ('50 mm','30 mm','1 Karton','dringend','Antworte'):
+            self.assertIn(text,question['body'])
+
+    def test_unreadable_product_is_not_misrepresented_as_identified(self):
+        self.hits=[]
+        self.p.assistant_material_photos.vision=lambda *args:{'art':'unklar'}
+        view=self.photo('Ein Stück, dringend')
+        self.assertEqual(view['state'],'open')
+        self.assertIn('article',view['missing_fields'])
+        self.assertNotIn('supplier_review',view['missing_fields'])
+        self.assertEqual(view['questions'][0]['field'],'article')
+        self.assertIn('noch nicht eindeutig lesbar',view['questions'][0]['body'])
+
+    def test_price_expiry_and_budget_limit_are_internal_blockers_not_employee_questions(self):
+        view=self.review(self.photo(),unit_price_cents=24501,shipping_cents=500)
+        self.assertEqual(view['state'],'review')
+        self.assertEqual(view['missing_fields'],['budget'])
+        self.assertEqual(view['questions'][0]['field'],'internal_review')
+        self.assertIn('250 Euro',view['questions'][0]['body'])
+        self.assertNotIn('Antworte',view['questions'][0]['body'])
+        with self.assertRaises(PermissionError):self.s.approved_order(view['id'],view['revision'])
+        view=self.review(view,verified_until='2026-10-05')
+        self.f.time+=86400
+        view=self.s.recheck(view['id'],view['revision'])
+        self.assertEqual(view['state'],'review')
+        self.assertEqual(view['missing_fields'],['price'])
+        self.assertIn('abgelaufen',view['questions'][0]['body'])
+        self.assertNotIn('Antworte',view['questions'][0]['body'])
+        with self.assertRaises(PermissionError):self.s.approved_order(view['id'],view['revision'])
+        self.s.process_next()
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
     def test_nonurgent_is_not_cancelled_and_uses_weekly_bridge(self):
         for text in ('Bitte 1 Karton bestellen, nicht dringend','Nicht dringend, bitte 1 Karton bestellen'):
             parsed=parse_request(text)
@@ -267,7 +514,7 @@ class DialogTests(unittest.TestCase):
         view=self.review(self.s.status(view['id']))
         self.answer(view,'30 mm')
         updated=self.s.status(view['id'])
-        self.assertEqual(updated['state'],'open')
+        self.assertEqual(updated['state'],'review')
         self.assertEqual(updated['review'],{})
         with self.assertRaises(PermissionError): self.s.approved_order(updated['id'],updated['revision'])
         # Even an inconsistent stored snapshot cannot bypass the final fence.

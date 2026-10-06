@@ -104,6 +104,25 @@ class MaterialPhotoTests(unittest.TestCase):
         self.portal.app.config['ASSISTANT_NATIVE_COCKPIT'] = False
         with self.assertRaises(PermissionError): self.service.context(self.who)
 
+    def test_photo_search_uses_localized_catalog_name_and_keeps_historical_evidence_unverified(self):
+        self.vision.return_value = {'art': 'produkt', 'produkt': 'T4000 Crystal Silver',
+                                    'marke': 'PPG Envirobase High Performance', 'farbe': 'Crystal Silver',
+                                    'artikelnummer': '123456789 T4000 ED 5', 'barcode': '4006381333931'}
+        row = {'produkt_name': 'PPG T4000/E0.5 ENVIROBASE CRYSTAL SILBER 0,5 Liter',
+               'artikelnummer': 'TEST-SILVER', 'lieferant': 'Test Supplier', 've': 'Stück',
+               'quelle': {'art': 'einkauf', 'beleg_id': 3, 'seite': 2, 'position': 15},
+               'historischer_preishinweis': '99.00'}
+        self.portal.cockpit_data.articles.side_effect = lambda query: {
+            'varianten': build_variants([row], query), 'abdeckung': {}}
+        result = self.prepared()
+        self.assertEqual(len(result['treffer']), 1)
+        hit = result['treffer'][0]
+        self.assertEqual(hit['artikelnummer'], 'TEST-SILVER')
+        self.assertEqual(hit['quelle']['position'], 15)
+        self.assertEqual(result['merkmale']['produkt'], 'T4000 Crystal Silver')
+        self.assertFalse(hit['bestellbar'])
+        self.assertNotIn('99.00', json.dumps(hit))
+
     def test_source_revocation_or_changed_product_invalidates_previous_selection(self):
         item = self.prepared(); self.service.select(self.who, item['id'], item['treffer'][0]['id'])
         self.portal.cockpit_data.articles.return_value = {'varianten': [], 'abdeckung': {}}
