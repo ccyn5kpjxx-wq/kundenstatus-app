@@ -160,6 +160,7 @@ class ExternalOrderTests(unittest.TestCase):
         self.assertEqual(self.raw(view),stored[0])
 
     def test_selected_automatic_dispatch_cannot_reset_manual_claim_or_enqueue(self):
+        self.payload.update(article_number='TEST-50',product_name='Test-Klebeband',variant='grün 50 mm')
         view=self.base.review(self.base.photo())
         stored=[]
         original_submit=self.p.workshop_orders.submit_material_request

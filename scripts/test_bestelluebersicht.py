@@ -86,6 +86,28 @@ class OverviewTests(unittest.TestCase):
                        (key, actor, 156, art, json.dumps(payload), 'synthetic:'+key, state, when))
             db.commit()
 
+    def material(self,key=1,*,state='external_sent',employee=1,created=None,dispatch='',broken=False,**changes):
+        fields={name:{'value':value} for name,value in [('quantity','1'),('unit','Stück'),('urgent',True)]}
+        snapshot=dict(kind='manual_external_order',draft_id=key,reservation_id=f'{key:032x}',employee_id=employee,
+            quantity='1',unit='Stück',urgent=True,supplier_id='supplier-a',supplier_name='Historischer Materiallieferant',
+            recipient='orders@example.invalid',product_name='Crystal Silver',article_number='TEST-4000',variant='0,5 Liter',
+            max_total_cents=25000,reserved_by='admin',reserved_at='2026-09-29T08:00:00+00:00',
+            sent_at='2026-09-29T08:05:00+00:00',recorded_by='admin',send_evidence='Synthetischer Gesendet-Nachweis',
+            authorization_note='PRIVATE_AUTHORIZATION',body='PRIVATE_MAIL_BODY',bank_data='NEVER_SHOW_BANK_DATA')
+        snapshot.update(changes)
+        review=dict(supplier_id='supplier-a',product_name='Crystal Silver',article_number='TEST-4000',variant='0,5 Liter',recipient='orders@example.invalid')
+        with self.manager.db() as db:
+            db.executescript('''CREATE TABLE IF NOT EXISTS einkauf_material_nachrichten(id INTEGER PRIMARY KEY,employee_id INTEGER,caption TEXT);
+                CREATE TABLE IF NOT EXISTS einkauf_material_dialoge(id INTEGER PRIMARY KEY,message_id INTEGER,state TEXT,
+                fields_json TEXT,review_json TEXT,analysis_json TEXT,snapshot_json TEXT,snapshot_hash TEXT,
+                dispatch_id TEXT,created_at DOUBLE PRECISION);''')
+            db.execute('INSERT INTO einkauf_material_nachrichten VALUES(?,?,?)',(key,employee,'PRIVATE_SOURCE_MESSAGE'))
+            db.execute('INSERT INTO einkauf_material_dialoge VALUES(?,?,?,?,?,?,?,?,?,?)',
+                (key,key,state,canonical(fields),canonical(review),canonical({'merkmale':{'produkt':'Crystal Silver'}}),
+                 canonical(snapshot),'broken' if broken else hashlib.sha256(canonical(snapshot).encode()).hexdigest(),dispatch,
+                 created if created is not None else self.now.timestamp()))
+            db.commit()
+
     def test_admin_only_and_readonly_no_dispatch_or_file_recovery(self):
         self.order('one')
         self.assertEqual(self.p.app.test_client().get('/admin/assistent-bestellungen').status_code, 403)
@@ -223,6 +245,143 @@ class OverviewTests(unittest.TestCase):
         self.assertEqual(rows[1]['created'], '01.02.2026 10:30')
         selected = self.reader.page({'from':'2026-02-01','to':'2026-02-28'}, now=self.now)
         self.assertEqual([row['id'] for row in selected['drafts']], ['february'])
+
+    def test_external_sent_is_visible_once_with_historical_identity_unknown_actual_and_separate_cap(self):
+        self.material()
+        data=self.reader.page({'bestellung':'material:1'},now=self.now)
+        self.assertEqual(data['count'],1)
+        self.assertEqual(data['counts'],{'external_sent':1})
+        row=data['selected']
+        self.assertEqual(row['source'],'material:1')
+        self.assertEqual(row['detail_url'],'/admin/assistent-bestellungen/eingang/ansicht?material=1#materialdialog')
+        self.assertEqual(row['channel'],'WhatsApp')
+        self.assertEqual(row['person'],'Testperson A')
+        self.assertEqual(row['supplier'],'Historischer Materiallieferant')
+        self.assertEqual((row['quantity'],row['unit']),('1','Stück'))
+        self.assertEqual(row['cap'],'250,00 €')
+        self.assertEqual(row['total'],'nicht belegt')
+        self.assertEqual(row['actual_price'],'nicht belegt')
+        self.assertFalse(row['actual_price_known']);self.assertFalse(row['verified'])
+        self.assertTrue(row['detail_url'].endswith('material=1#materialdialog'))
+        self.assertEqual(row['state'],'external_sent')
+        self.assertEqual(len(row['events']),2)
+        self.assertTrue(row['send_evidence'])
+        self.assertIn({'id':'mitarbeiter:1','name':'Testperson A'},data['people'])
+        serialized=json.dumps(data)
+        for private in ('PRIVATE_SOURCE_MESSAGE','PRIVATE_AUTHORIZATION','PRIVATE_MAIL_BODY','NEVER_SHOW_BANK_DATA','private-do-not-show'):
+            self.assertNotIn(private,serialized)
+
+    def test_external_pending_missing_or_tampered_proof_never_claims_sent(self):
+        self.material(1,state='external_pending')
+        self.material(2,broken=True)
+        self.material(3,send_evidence='')
+        self.material(4,draft_id=999)
+        self.material(5,employee_id=2)
+        self.material(6,sent_at='2026-09-29T08:05:00')
+        self.material(7,reservation_id='wrong')
+        self.material(8,quantity='2')
+        self.material(9,sent_at='2026-09-28T00:00:00+00:00')
+        self.material(10,state='external_pending',reserved_at='')
+        self.material(11,max_total_cents=25001)
+        self.material(12,supplier_name='')
+        self.material(13,send_evidence='   ')
+        self.material(14,send_evidence=123)
+        data=self.reader.page({},now=self.now)
+        self.assertEqual(data['counts'],{'external_pending':1,'unknown':13})
+        pending=self.reader.page({'bestellung':'material:1'},now=self.now)['selected']
+        self.assertEqual(pending['mail_updated'],'')
+        self.assertEqual(pending['send_evidence'],'')
+        self.assertEqual(len(pending['events']),1)
+        for row in data['items']:
+            if row['source']=='material:1':continue
+            self.assertEqual(row['state'],'unknown')
+            self.assertEqual(row['cap'],'nicht belegt')
+            self.assertTrue(row['warnings'])
+            self.assertEqual(row['send_evidence'],'')
+
+    def test_material_filters_and_merged_pagination_preserve_every_request(self):
+        self.material(1,employee=2,product_name='100% Crystal',created=datetime(2026,9,28,22,15,tzinfo=timezone.utc).timestamp())
+        self.material(2,supplier_id='supplier-other',created=datetime(2026,9,28,20,tzinfo=timezone.utc).timestamp())
+        for query in ({'person':'mitarbeiter:2'},{'q':'%'},{'supplier':'supplier-a'},
+                      {'from':'2026-09-29','to':'2026-09-29'},{'q':'material:1'}):
+            self.assertEqual([r['source'] for r in self.reader.page(query,now=self.now)['items']],['material:1'])
+        self.assertEqual(self.reader.page({'urgency':'weekly'},now=self.now)['count'],0)
+        self.assertEqual(self.reader.page({'batch':'unrelated'},now=self.now)['count'],0)
+        self.assertEqual(self.reader.page({'state':'overdue'},now=self.now)['count'],0)
+        self.assertEqual(self.reader.page({'person':"' OR 1=1 --"},now=self.now)['count'],0)
+        for index in range(3,37):
+            self.material(index,created=self.now.timestamp()+index)
+            self.order(f'order-{index:03d}',created=self.now.timestamp()+index-.5)
+        seen=[]
+        for page in range(1,4):
+            data=self.reader.page({'page':str(page)},now=self.now)
+            self.assertEqual(data['count'],70)
+            seen.extend(row['id'] for row in data['items'])
+        self.assertEqual(len(seen),70);self.assertEqual(len(set(seen)),70)
+
+    def test_durable_material_queue_owns_one_row_including_enqueue_acknowledgement_gap(self):
+        self.material(1,state='accepted',dispatch='queue-1')
+        self.order('queue-1',request_id='material:1')
+        self.material(2,state='approved')
+        self.order('queue-2',request_id='material:2')
+        self.material(3,state='accepted',dispatch='queue-3')
+        self.order('queue-3',request_id='historical-other-key')
+        data=self.reader.page({},now=self.now)
+        self.assertEqual(data['count'],3)
+        self.assertEqual({row['id'] for row in data['items']},{'queue-1','queue-2','queue-3'})
+        row=self.reader.page({'bestellung':'material:1'},now=self.now)['selected']
+        self.assertEqual(row['id'],'queue-1')
+        self.assertEqual(row['source'],'material:1')
+        self.assertEqual(row['detail_url'],'/admin/assistent-bestellungen/eingang/ansicht?material=1#materialdialog')
+        self.assertEqual(row['channel'],'WhatsApp')
+        fallback=self.reader.page({'bestellung':'material:3'},now=self.now)
+        self.assertEqual(fallback['errors'],[])
+        self.assertEqual(fallback['selected']['id'],'queue-3')
+        self.assertEqual(fallback['selected']['source'],'material:3')
+        self.assertEqual(fallback['selected']['channel'],'WhatsApp')
+
+    def test_unordered_and_orphaned_material_states_are_not_reported_as_sent(self):
+        for key,state in enumerate(('open','review','approved','cancelled','accepted'),start=1):
+            self.material(key,state=state)
+        data=self.reader.page({},now=self.now)
+        self.assertEqual(data['count'],5)
+        self.assertEqual(set(data['counts']),{'material_open','material_review','material_ready','cancelled','material_accepted'})
+        for row in data['items']:
+            self.assertFalse(row['verified']);self.assertEqual(row['mail_updated'],'')
+            self.assertEqual(row['total'],'nicht belegt');self.assertEqual(row['cap'],'nicht belegt')
+        self.assertTrue(self.reader.page({'bestellung':'material:5'},now=self.now)['selected']['warnings'])
+
+    def test_material_projection_only_selects_without_recovery_or_transport(self):
+        self.material()
+        original=self.p.get_db
+        def readonly():
+            db=original()
+            forbidden={sqlite3.SQLITE_INSERT,sqlite3.SQLITE_UPDATE,sqlite3.SQLITE_DELETE,
+                       sqlite3.SQLITE_CREATE_TABLE,sqlite3.SQLITE_DROP_TABLE}
+            db.set_authorizer(lambda action,*args:sqlite3.SQLITE_DENY if action in forbidden else sqlite3.SQLITE_OK)
+            return db
+        with patch.object(self.manager,'tick',side_effect=AssertionError('no dispatch')), \
+                patch.object(self.manager.dispatch,'status',side_effect=AssertionError('no recovery')):
+            data=OrderOverview(readonly).page({'bestellung':'material:1'},now=self.now)
+        self.assertEqual(data['selected']['state'],'external_sent')
+
+    def test_pending_duplicate_is_visible_until_matching_employee_confirmation(self):
+        self.material(state='open')
+        marker={'id':2,'signature':'synthetic-same-item'}
+        with self.manager.db() as db:
+            fields=json.loads(db.execute('SELECT fields_json FROM einkauf_material_dialoge WHERE id=1').fetchone()[0])
+            fields['possible_duplicate']={'value':marker}
+            db.execute('UPDATE einkauf_material_dialoge SET fields_json=? WHERE id=1',(canonical(fields),))
+            db.commit()
+        row=self.reader.page({'bestellung':'material:1'},now=self.now)['selected']
+        self.assertIn('Doppelbestellung',row['state_label'])
+        self.assertTrue(row['warnings'])
+        with self.manager.db() as db:
+            fields['duplicate_confirmation']={'value':marker}
+            db.execute('UPDATE einkauf_material_dialoge SET fields_json=? WHERE id=1',(canonical(fields),))
+            db.commit()
+        row=self.reader.page({'bestellung':'material:1'},now=self.now)['selected']
+        self.assertNotIn('Doppelbestellung',row['state_label'])
 
 
 if __name__ == '__main__':

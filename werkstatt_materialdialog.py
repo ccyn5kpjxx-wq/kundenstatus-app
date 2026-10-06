@@ -1,7 +1,8 @@
 """Persistent, evidence-bound material requests; transport and dispatch stay opt-in.
 
-Image labels are proposals. Only direct signed employee text supplies purchase
-intent/quantity/urgency; independently reviewed commercial terms supply prices.
+Image labels are proposals. Direct signed employee text supplies purchase
+intent/quantity; unstated urgency follows the owner's Monday rule. Independently
+reviewed commercial terms supply prices.
 No Flask session is fabricated and no model output grants purchase permission.
 """
 from contextlib import contextmanager
@@ -27,7 +28,7 @@ UNITS = {'karton':'Karton', 'kartons':'Karton', 'rolle':'Rolle', 'rollen':'Rolle
 WORDS = {'ein':'1','eine':'1','einen':'1','einem':'1','zwei':'2','drei':'3','vier':'4','fünf':'5','fuenf':'5',
          'sechs':'6','sieben':'7','acht':'8','neun':'9','zehn':'10'}
 QUANTITY_PATTERN = r'\b(\d{1,8}(?:[.,]\d{1,6})?|' + '|'.join(WORDS) + r')\s+(' + '|'.join(sorted(UNITS, key=len, reverse=True)) + r')\b'
-EMPLOYEE_FIELDS = {'order_requested', 'quantity', 'unit', 'urgent', 'article', 'unit_conflict'}
+EMPLOYEE_FIELDS = {'order_requested', 'quantity', 'unit', 'urgent', 'article', 'unit_conflict', 'possible_duplicate'}
 INTERNAL_FIELDS = {'supplier_review', 'price', 'budget'}
 EXTERNAL_STATES = {'external_pending', 'external_sent'}
 
@@ -49,6 +50,9 @@ def parse_request(text, question=''):
     conditional = bool(re.search(r'\b(vielleicht|eventuell|falls|wenn|beispiel|angenommen)\b', value))
     if conditional or '?' in value:
         return fields
+    if (re.search(r'\b(?:vorhanden|übrig|uebrig|bestand|geliefert|erhalten|angekommen|gekauft)\b|\bauf\s+lager\b',value)
+            and not re.search(r'\b(?:bestellen|bestelle|bestell|nachbestellen|nachbestelle)\b',value)):
+        return fields
     if re.search(r'\b(?:bestellen|bestelle|bestell|nachbestellen|nachbestelle)\b', value):
         fields['order_requested'] = True
     urgency = set()
@@ -66,7 +70,7 @@ def parse_request(text, question=''):
     matches = []
     for match in re.finditer(QUANTITY_PATTERN, value):
         prefix = value[max(0, match.start()-35):match.start()]
-        if re.search(r'(?:\bve|inhalt|packungsinhalt|enthält|enthaelt)\s*[:=]?\s*$', prefix):
+        if re.search(r'(?:\bve|inhalt|packungsinhalt|enthält|enthaelt)\s*[:=]?\s*$|\b(?:nicht|kein|keine)\s*$', prefix):
             continue
         amount = Decimal(WORDS.get(match[1], match[1]).replace(',', '.'))
         if amount > 0:
@@ -165,6 +169,8 @@ class MaterialDialog:
             previous = fields.get(key)
             if previous and previous['proof']['source_at'] > proof['source_at']:
                 continue
+            if key in {'quantity','unit','urgent','selected_article'} and previous and previous['value']!=value:
+                fields.pop('duplicate_confirmation',None)
             if key == 'urgent_unclear':
                 previous = fields.get('urgent')
                 if not previous or previous['proof']['source_at'] <= proof['source_at']:
@@ -172,6 +178,17 @@ class MaterialDialog:
             elif key == 'urgent':
                 fields.pop('urgent_unclear',None)
             fields[key] = {'value': value, 'proof': proof}
+        # Explicit employee quantity in the dedicated material-order channel is
+        # the purchase request. The owner's default is the Monday collection;
+        # keep that policy distinguishable from a literally stated urgency.
+        if not fields.get('cancelled',{}).get('value'):
+            quantity = fields.get('quantity')
+            if quantity and fields.get('unit') and 'order_requested' not in fields:
+                fields['order_requested'] = {'value':True,'proof':dict(quantity['proof'],
+                    basis='quantity_in_personal_material_channel')}
+            if fields.get('order_requested',{}).get('value') is True and not fields.get('urgent_unclear') and 'urgent' not in fields:
+                fields['urgent'] = {'value':False,'proof':dict(fields['order_requested']['proof'],
+                    basis='owner_default_monday_14')}
 
     def ensure_draft(self, message_id):
         with self.db() as db:
@@ -221,6 +238,27 @@ class MaterialDialog:
     def _hit_identity(hit):
         return {key:' '.join(str(hit.get(key,'')).casefold().split()) for key in ('lieferant','artikelnummer','groesse','farbe','gebinde','ve')}
 
+    @staticmethod
+    def _exact_photo_hit(draft, analysis):
+        """Select only an unambiguous exact label match, never its price."""
+        labels,hits = analysis.get('merkmale',{}),analysis.get('treffer',[])
+        if draft['analysis_state']!='done' or len(hits)!=1 or analysis.get('treffer_gekuerzt'):
+            return None
+        hit = hits[0]
+        compact = lambda value: re.sub(r'\s+','',str(value or '').casefold()).replace(',','.')
+        product,code = compact(labels.get('produkt')),compact(labels.get('artikelnummer'))
+        exact_code = bool(code and code==compact(hit.get('artikelnummer')))
+        if code and hit.get('artikelnummer') and not exact_code:
+            return None
+        dimensions = [(compact(labels.get(left)),compact(hit.get(right))) for left,right in (('breite','groesse'),('farbe','farbe'))]
+        if any(label and actual and label!=actual for label,actual in dimensions):
+            return None
+        exact_name_variant = (len(product)>=6 and product==compact(hit.get('produkt_name'))
+            and any(label for label,actual in dimensions) and all(not label or label==actual for label,actual in dimensions))
+        if hit.get('artikelnummer') and hit.get('lieferant') and (exact_code or exact_name_variant):
+            return hit
+        return None
+
     def _reuse_review(self, db, hit):
         identity = self._hit_identity(hit)
         rows = [(row['id'],json.loads(row['review_json'])) for row in db.execute(
@@ -234,6 +272,49 @@ class MaterialDialog:
                 if supplier and supplier.get('verified') and supplier['recipient']==review['recipient']:
                     return dict(review,reused_from=key)
         return {}
+
+    def _duplicate_signature(self, fields, review, draft=None):
+        values = {key:fields.get(key,{}).get('value') for key in ('quantity','unit','urgent')}
+        if not values['quantity'] or not values['unit'] or type(values['urgent']) is not bool:
+            return None
+        item = fields.get('selected_article',{}).get('value',{})
+        supplier,article = item.get('lieferant'),item.get('artikelnummer')
+        variant = {key:' '.join(str(item.get(key,'')).casefold().split()) for key in ('groesse','farbe','gebinde','ve')} if item else {
+            'variant':' '.join(str(review.get('variant','')).casefold().split())}
+        if not article and review.get('article_number'):
+            contact = self.p.workshop_orders.resolve_supplier(review.get('supplier_id'))
+            supplier,article = (contact or {}).get('name'),review['article_number']
+        if draft and draft['state'] in EXTERNAL_STATES:
+            claim = json.loads(draft['snapshot_json'])
+            if _fingerprint(claim)==draft['snapshot_hash'] and claim.get('draft_id')==draft['id']:
+                supplier,article = claim.get('supplier_name'),claim.get('article_number')
+                if not item:
+                    variant = {'variant':' '.join(str(claim.get('variant','')).casefold().split())}
+        if not supplier or not article:
+            return None
+        return dict(values,supplier=str(supplier).casefold().strip(),article=str(article).casefold().strip(),variant=variant)
+
+    def _duplicate_of(self, db, draft, source, signature):
+        if not signature:
+            return None
+        rows = db.execute('''SELECT d.* FROM einkauf_material_dialoge d
+            JOIN einkauf_material_nachrichten n ON n.id=d.message_id
+            WHERE n.employee_id=? AND d.id<>? AND d.state<>'cancelled'
+            AND d.created_at>=? AND d.created_at<=?
+            AND (d.id<? OR d.state IN ('accepted','external_pending','external_sent') OR d.dispatch_id<>''
+                OR EXISTS (SELECT 1 FROM assistent_bestellanforderungen o WHERE o.request_id=('material:' || CAST(d.id AS TEXT))))
+            ORDER BY d.id''',(source['employee_id'],draft['id'],draft['created_at']-600,draft['created_at']+600,draft['id'])).fetchall()
+        for row in rows:
+            other = self._duplicate_signature(json.loads(row['fields_json']),json.loads(row['review_json']),row)
+            if not other or any(other[key]!=signature[key] for key in ('supplier','article','quantity','unit')):
+                continue
+            # Missing structured variant data on an older manual order cannot
+            # exempt the same SKU from review. Only evidenced differences split it.
+            if any(signature['variant'].get(key) and other['variant'].get(key)
+                    and signature['variant'][key]!=other['variant'][key] for key in ('groesse','farbe','gebinde','ve')):
+                continue
+            return {'id':row['id'],'signature':_fingerprint(signature)}
+        return None
 
     def receive_text(self, db, event, sender, employee):
         fingerprint = _fingerprint(event)
@@ -257,6 +338,20 @@ class MaterialDialog:
         if self._accepted(db, draft):
             return
         fields, review = json.loads(draft['fields_json']), json.loads(draft['review_json'])
+        analysis = json.loads(draft['analysis_json'])
+        selected_field = fields.get('selected_article',{})
+        if selected_field.get('proof',{}).get('basis')=='exact_photo_catalog_match':
+            current_hit = self._exact_photo_hit(draft,analysis)
+            if not current_hit or self._hit_identity(current_hit)!=self._hit_identity(selected_field['value']):
+                fields.pop('selected_article',None)
+                review = {}
+                db.execute("UPDATE einkauf_material_dialoge SET fields_json=?,review_json='{}' WHERE id=?",(_json(fields),draft['id']))
+        if not fields.get('selected_article') and not fields.get('cancelled',{}).get('value'):
+            hit = self._exact_photo_hit(draft,analysis)
+            source = self._source(db,draft)
+            if hit and source['mime']!='text/plain' and not source['forwarded']:
+                fields['selected_article'] = {'value':hit,'proof':dict(self._proof(source),basis='exact_photo_catalog_match')}
+                db.execute('UPDATE einkauf_material_dialoge SET fields_json=? WHERE id=?',(_json(fields),draft['id']))
         selected = fields.get('selected_article',{}).get('value')
         if selected and review and review.get('match_identity') != self._hit_identity(selected):
             review = {}
@@ -266,12 +361,21 @@ class MaterialDialog:
             if review:
                 db.execute('UPDATE einkauf_material_dialoge SET review_json=? WHERE id=?',(_json(review),draft['id']))
         values = {key:item['value'] for key,item in fields.items()}
-        analysis = json.loads(draft['analysis_json'])
+        signature = self._duplicate_signature(fields,review,draft)
+        duplicate = values.get('possible_duplicate')
+        if not duplicate or duplicate.get('signature')!=_fingerprint(signature):
+            fields.pop('duplicate_confirmation',None)
+            duplicate = self._duplicate_of(db,draft,self._source(db,draft),signature)
+            if duplicate:
+                fields['possible_duplicate'] = {'value':duplicate,'proof':{'kind':'system','basis':'same_employee_article_quantity_within_10_minutes'}}
+            else:
+                fields.pop('possible_duplicate',None)
+            db.execute('UPDATE einkauf_material_dialoge SET fields_json=? WHERE id=?',(_json(fields),draft['id']))
         labels, hits = analysis.get('merkmale',{}), analysis.get('treffer',[])
         # Recognizing a label is not a catalog match or a price approval. It only
         # means the employee need not repeat an already readable product name.
         identified = bool(selected or (draft['analysis_state']=='done' and labels.get('produkt')
-            and (labels.get('marke') or labels.get('artikelnummer'))
+            and (labels.get('marke') or labels.get('artikelnummer') or labels.get('breite') or labels.get('farbe'))
             and (not hits or len(hits)==1 and not analysis.get('treffer_gekuerzt'))))
         missing = []
         if values.get('cancelled') is True:
@@ -286,8 +390,10 @@ class MaterialDialog:
                 missing.append('price')
             elif values.get('unit') and values['unit'].casefold() != review['unit'].casefold():
                 missing.append('unit_conflict')
+            if duplicate and fields.get('duplicate_confirmation',{}).get('value')!=duplicate:
+                missing.append('possible_duplicate')
             payload = {}
-            if not missing:
+            if not missing or missing==['possible_duplicate']:
                 payload = {key:review[key] for key in ('supplier_id','recipient','article_number','product_name','variant','unit',
                     'unit_price_cents','shipping_cents','extra_costs_cents','price_source')}
                 total = int((Decimal(values['quantity']) * review['unit_price_cents']).to_integral_value(rounding=ROUND_CEILING)) + review['shipping_cents'] + review['extra_costs_cents']
@@ -310,6 +416,8 @@ class MaterialDialog:
                 'unit':'Welche Bestelleinheit meinst du: Karton, Rolle oder Packung?', 'urgent':'Ist die Bestellung dringend?',
                 'article':'Der Artikel ist noch nicht eindeutig lesbar. Bitte Artikelnamen und Variante vom Etikett nennen.',
                 'unit_conflict':'Genannte Bestelleinheit und geprüfter Artikel passen noch nicht zusammen. Bitte klären.',
+                'possible_duplicate':('Gleicher Artikel und gleiche Menge wurden bereits in M-'+str((duplicate or {}).get('id',''))+
+                    ' angefordert. Möchtest du zusätzlich bestellen? Bitte mit Ja oder Nein antworten. Noch nicht erneut bestellt.'),
                 'internal_review':'Die interne Lieferanten- und Preisprüfung ist noch offen. Die Werkstattleitung prüft die Zuordnung und vollständigen aktuellen Kosten. Noch nicht bestellt.'}
             if 'budget' in missing:
                 questions['internal_review']='Der Gesamtbetrag liegt außerhalb des freigegebenen Rahmens von 250 Euro. Die Werkstattleitung muss übernehmen. Noch nicht bestellt.'
@@ -375,6 +483,7 @@ class MaterialDialog:
         row['questions'] = [dict(q) for q in db.execute('SELECT id,revision,field,body,state,error_code FROM einkauf_material_rueckfragen WHERE draft_id=? ORDER BY id DESC LIMIT 8',(draft_id,)).fetchall()]
         row['employee_reply_required'] = row['state']=='open' and any(key in EMPLOYEE_FIELDS for key in row['missing_fields'])
         row['internal_review_pending'] = row['state']=='review' and not row['error_code'] and any(key in INTERNAL_FIELDS for key in row['missing_fields'])
+        row['duplicate_of'] = row['fields'].get('possible_duplicate',{}).get('value',{}).get('id')
         return row
 
     def status(self, draft_id):
@@ -418,10 +527,35 @@ class MaterialDialog:
                         draft = self._draft(db,origin['id'],lock=True)
                 else:
                     parsed = parse_request(text['body'])
-                    if not parsed.get('order_requested') and parsed.get('urgent') is not True:
-                        raise ValueError('Bitte den konkreten Vorgang zitieren oder ausdrücklich einen neuen Artikel bestellen.')
-                    view = self._ensure(db,self._text_source(db,text),text)
-                    return {'id':text['id'],'state':'applied','draft_id':view['id']}
+                    # A bare quantity can answer one recent personal photo;
+                    # never pick the newest of several possible requests.
+                    origins = []
+                    if parsed.get('quantity') and parsed.get('unit') and not article_query(text['body']):
+                        origins = db.execute('''SELECT d.id,n.state FROM einkauf_material_nachrichten n
+                            LEFT JOIN einkauf_material_dialoge d ON d.message_id=n.id
+                            WHERE (d.id IS NULL OR d.state NOT IN ('accepted','cancelled','external_pending','external_sent'))
+                            AND n.forwarded=0 AND n.mime<>'text/plain' AND n.sender_id=? AND n.sender_revision=?
+                            AND n.employee_id=? AND n.rights_version=? AND n.phone_number_id=?
+                            AND n.received_at>=? AND n.source_at>=? AND n.source_at<=?
+                            AND NOT EXISTS (SELECT 1 FROM assistent_bestellanforderungen o WHERE o.request_id=('material:' || CAST(d.id AS TEXT)))
+                            ORDER BY n.id LIMIT 2''',
+                            (text['sender_id'],text['sender_revision'],text['employee_id'],text['rights_version'],
+                             text['phone_number_id'],self.clock()-15*60,
+                             datetime.fromtimestamp(self.clock()-15*60,timezone.utc).isoformat(),text['source_at'])).fetchall()
+                        if len(origins)!=1:
+                            raise ValueError('Menge gehört nicht zu genau einem aktuellen Foto. Bitte das konkrete Foto zitieren.')
+                        if not origins[0]['id'] or origins[0]['state']!='ready':
+                            if origins[0]['state'] not in {'queued','processing','ready'}:
+                                raise ValueError('Fotoeingang muss intern geklärt werden; Menge noch nicht übernehmen.')
+                            db.execute("UPDATE einkauf_material_texte SET state='queued' WHERE id=?",(text['id'],))
+                            return {'id':text['id'],'state':'waiting_for_photo'}
+                    if origins:
+                        draft = self._draft(db,origins[0]['id'],lock=True)
+                    else:
+                        if not parsed.get('order_requested') and parsed.get('urgent') is not True:
+                            raise ValueError('Bitte den konkreten Vorgang zitieren oder ausdrücklich einen neuen Artikel bestellen.')
+                        view = self._ensure(db,self._text_source(db,text),text)
+                        return {'id':text['id'],'state':'applied','draft_id':view['id']}
                 source = self._source(db,draft)
                 if any(source[key] != text[key] for key in ('sender_id','sender_revision','employee_id','rights_version','phone_number_id')):
                     raise PermissionError('Antwort gehört einem anderen persönlichen Fotoeingang.')
@@ -429,12 +563,19 @@ class MaterialDialog:
                     raise ValueError('Bestellung ist bereits übergeben oder abgebrochen; einen neuen Vorgang beginnen.')
                 body = re.sub(r'\bM-\d+\s+R\d+\s*[:,-]?','',text['body'],flags=re.I).strip()
                 parsed = parse_request(body,question['field'] if question else '')
+                if question and question['field']=='possible_duplicate' and body.casefold().strip(' .!') in {'ja','nein'}:
+                    marker = json.loads(draft['fields_json']).get('possible_duplicate',{}).get('value')
+                    if marker:
+                        parsed = {'duplicate_confirmation':marker} if body.casefold().strip(' .!')=='ja' else {'cancelled':True}
                 if parsed.get('urgent') is True and not parsed.get('cancelled'):
                     parsed['order_requested'] = True
                 analysis = json.loads(draft['analysis_json'])
                 hits = analysis.get('treffer',[])
                 hit = None
-                if question and question['field']=='article' and body.casefold().strip(' .!')=='ja' and len(hits)==1 and not analysis.get('treffer_gekuerzt'):
+                existing_article = json.loads(draft['fields_json']).get('selected_article',{})
+                label_acknowledgement = (existing_article.get('proof',{}).get('basis')=='exact_photo_catalog_match'
+                    and len(hits)==1 and self._hit_identity(existing_article.get('value',{}))==self._hit_identity(hits[0]))
+                if ((question and question['field']=='article') or label_acknowledgement) and body.casefold().strip(' .!')=='ja' and len(hits)==1 and not analysis.get('treffer_gekuerzt'):
                     hit = hits[0]
                 else:
                     label = re.sub(r'\s+','',body.casefold().strip(' .!'))
@@ -546,12 +687,17 @@ class MaterialDialog:
                 raise ValueError('Dieser Vorgang ist bereits übergeben, extern reserviert oder abgebrochen.')
             fields = json.loads(draft['fields_json'])
             values = {key:fields.get(key,{}).get('value') for key in ('quantity','unit','urgent','order_requested')}
+            duplicate = fields.get('possible_duplicate',{}).get('value')
+            if not duplicate:
+                duplicate = self._duplicate_of(db,draft,source,self._duplicate_signature(fields,json.loads(draft['review_json']),draft))
+            if duplicate and fields.get('duplicate_confirmation',{}).get('value')!=duplicate:
+                raise ValueError('Mögliche Doppelbestellung: Vorgang erneut prüfen und persönlich als zusätzliche Bestellung bestätigen lassen.')
             if (draft['error_code']=='antwort_unverstaendlich' or fields.get('cancelled')
                     or values['order_requested'] is not True or type(values['urgent']) is not bool
                     or not isinstance(values['quantity'],str) or not re.fullmatch(r'[0-9]{1,8}(?:\.[0-9]{1,6})?',values['quantity'])
                     or Decimal(values['quantity'])<=0 or values['unit'] not in set(UNITS.values())):
                 raise ValueError('Persönlicher Bestellwunsch, Menge, Einheit oder Dringlichkeit sind noch nicht eindeutig.')
-            for key in values:
+            for key in tuple(values) + (('duplicate_confirmation',) if duplicate else ()):
                 proof = fields.get(key,{}).get('proof',{})
                 if proof.get('employee_id')!=source['employee_id']:
                     raise PermissionError('Persönlicher Nachrichtenbeleg fehlt.')
@@ -689,6 +835,11 @@ class MaterialDialog:
             raise PermissionError('Bestellfreigabe gehört einem anderen Vorgang.')
         fields = json.loads(draft['fields_json'])
         review = json.loads(draft['review_json'])
+        duplicate = fields.get('possible_duplicate',{}).get('value')
+        if not duplicate and draft['state']=='approved':
+            duplicate = self._duplicate_of(db,draft,source,self._duplicate_signature(fields,review,draft))
+        if duplicate and fields.get('duplicate_confirmation',{}).get('value')!=duplicate:
+            raise PermissionError('Mögliche Doppelbestellung muss ausdrücklich zusätzlich bestätigt werden.')
         if review.get('verified_until','') < self._today() or review.get('reviewed_by') != 'admin':
             raise PermissionError('Aktuell geprüfte Einkaufskonditionen fehlen.')
         selected = fields.get('selected_article',{}).get('value')
@@ -700,7 +851,7 @@ class MaterialDialog:
         for key in ('supplier_id','recipient','article_number','product_name','variant','unit','unit_price_cents','shipping_cents','extra_costs_cents','price_source'):
             if snapshot['payload'].get(key) != review.get(key):
                 raise PermissionError('Bestellfreigabe passt nicht zu den geprüften Konditionen.')
-        for key in ('order_requested','quantity','unit','urgent') + (('selected_article',) if selected else ()):
+        for key in ('order_requested','quantity','unit','urgent') + (('selected_article',) if selected else ()) + (('duplicate_confirmation',) if duplicate else ()):
             field = fields.get(key,{})
             proof = field.get('proof',{})
             if proof.get('employee_id') != source['employee_id']:
@@ -772,6 +923,16 @@ class MaterialDialog:
                 order_id = draft['dispatch_id'] or (str(durable['id']) if durable else '')
             if draft['dispatch_id'] and draft['dispatch_id'] != order_id:
                 raise ValueError('Bestellreferenz ist bereits fest gespeichert.')
+            if not order_id and draft['state']=='approved':
+                try:
+                    source = self._source(db,draft,lock=True)
+                    fields,review = json.loads(draft['fields_json']),json.loads(draft['review_json'])
+                    duplicate = self._duplicate_of(db,draft,source,self._duplicate_signature(fields,review,draft))
+                    if duplicate and fields.get('duplicate_confirmation',{}).get('value')!=duplicate:
+                        self._refresh(db,draft)
+                        return self._view(db,draft_id)
+                except PermissionError:
+                    pass
             state = 'accepted' if order_id else 'review'
             db.execute('UPDATE einkauf_material_dialoge SET state=?,dispatch_id=?,dispatch_state=?,error_code=?,updated_at=? WHERE id=?',
                 (state,order_id,str(result.get('state','blocked'))[:50],'' if order_id else 'bestelluebergabe_offen',self.clock(),draft_id))

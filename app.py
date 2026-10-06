@@ -8285,6 +8285,8 @@ BACKUP_TABLES = (
     "einkauf_material_dialoge",
     "einkauf_material_texte",
     "einkauf_material_rueckfragen",
+    "assistent_bestellpreis_basis",
+    "assistent_bestellpreis_rechnungen",
     "google_ads_tageswerte",
 )
 # Der aktuelle ZIP-Import stellt diese MOS-Tabellen noch nicht wieder her.
@@ -8315,7 +8317,7 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
-BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1")
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1")
 BACKUP_BINARY_FIELDS = {
     "einkauf_eingang_dateien": {
         "original_base64": {"suffix": ".bin", "max_bytes": 8 * 1024 * 1024},
@@ -47896,6 +47898,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         "einkauf_material_absender", "einkauf_material_nachrichten",
         "einkauf_material_worker",
         "einkauf_material_dialoge", "einkauf_material_texte", "einkauf_material_rueckfragen",
+        # Historical estimates and invoice matches postdate the order dialog.
+        "assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen",
     }
     if "kunden_termin_mail_versand" in schema_features:
         required_tables.add("kunden_termin_mail_versand")
@@ -47924,6 +47928,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
                                 "einkauf_material_absender", "einkauf_material_nachrichten", "einkauf_material_worker"})
     if "werkstatt_materialdialog_v1" in schema_features:
         required_tables.update({"einkauf_material_dialoge", "einkauf_material_texte", "einkauf_material_rueckfragen"})
+    if "werkstatt_bestellvergleich_v1" in schema_features:
+        required_tables.update({"assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen"})
     if "werkstatt_mailquellen_v1" in schema_features:
         required_tables.update({"assistent_mailquellen_laeufe", "assistent_mailquellen_ordner",
                                 "assistent_mailquellen_nachrichten", "assistent_mailquellen_absender",
@@ -48311,12 +48317,13 @@ def import_sqlite_rows_into_current_database(imported_db):
 
 
 def ensure_material_external_claims_for_import(*, export=None, imported_db=None, target=None):
-    """Keep external sends reserved across restore, including uncertain sends.
+    """Keep external sends and append-only price evidence across restores.
 
     The caller holds portal_originals_operation_lock, as do reserve_external
-    and record_external_sent. Otherwise a new claim could appear between this
-    check and destructive replacement. A matching recent backup remains valid;
-    older snapshots may not undo a reservation, its frozen content or its audit.
+    and record_external_sent as well as OrderPriceComparison writes. Otherwise
+    a new claim or price record could appear between this check and destructive
+    replacement. Matching recent backups remain valid; older snapshots may not
+    undo a reservation, its frozen content, audit, estimate or invoice match.
     """
     own_target = target is None
     target = target if target is not None else get_db()
@@ -48333,6 +48340,9 @@ def ensure_material_external_claims_for_import(*, export=None, imported_db=None,
                 "SELECT * FROM assistent_audit WHERE aktion IN (?, ?)",
                 ("material_external_reserved", "material_external_sent"),
             ).fetchall()]
+        for table in ("assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen"):
+            if get_table_columns(target, table):
+                protected[table] = [dict(row) for row in target.execute(f"SELECT * FROM {table}").fetchall()]
         if not any(protected.values()):
             return
 
@@ -48350,8 +48360,8 @@ def ensure_material_external_claims_for_import(*, export=None, imported_db=None,
             incoming = (export or {}).get("tables", {})
         error = (
             "Datenimport gesperrt: Die Sicherung enthält vorhandene externe "
-            "Bestellreservierungen oder Versandnachweise nicht unverändert. "
-            "Eine aktuelle Sicherung mit diesen Vorgängen und ihrem Audit verwenden."
+            "Bestellreservierungen, Versandnachweise oder feste Bestellpreis-Nachweise "
+            "nicht unverändert. Eine aktuelle Sicherung mit diesen Vorgängen verwenden."
         )
         if not isinstance(incoming, dict):
             raise ValueError(error)
@@ -48482,7 +48492,7 @@ def admin_daten_import():
                     intake_schema = globals().get("workshop_intake_init_schema")
                     if callable(intake_schema):
                         intake_schema()
-                    for hook in ("workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema"):
+                    for hook in ("workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema", "order_price_comparison_init_schema"):
                         schema = globals().get(hook)
                         if callable(schema):
                             schema()
@@ -57827,6 +57837,9 @@ workshop_purchase_monitor = register_monitor(sys.modules[__name__])
 material_channel = register_material_channel(sys.modules[__name__])
 from werkstatt_materialdialog import register_material_dialog
 material_dialog = register_material_dialog(sys.modules[__name__])
+from werkstatt_bestellvergleich import OrderPriceComparison
+order_price_comparison = OrderPriceComparison(sys.modules[__name__])
+order_price_comparison_init_schema = order_price_comparison.init_schema
 from werkstatt_materialverwaltung import register_material_admin
 register_material_admin(sys.modules[__name__])
 if not PUBLIC_SITE_ONLY:

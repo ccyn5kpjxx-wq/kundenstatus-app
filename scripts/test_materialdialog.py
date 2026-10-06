@@ -1,5 +1,6 @@
 """Isolated end-to-end material dialogs; synthetic images, catalog and dispatch."""
 import copy
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -10,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import test_materialkanal as fixtures
 from werkstatt_bestellausgang import OrderDispatch
+from werkstatt_bestellplan import BERLIN, next_dispatch_at
 from werkstatt_materialdialog import MaterialDialog, register_material_dialog, parse_request, article_query, TABLES
 
 
@@ -60,6 +62,7 @@ class DialogTests(unittest.TestCase):
     def photo(self,caption='Test-Klebeband grün 50 mm, ein Karton, dringend', new=False):
         if new:
             self.f.message['id']='wamid.photo-'+str(self.sequence+10)
+            self.f.message['timestamp']=str(int(self.f.time))
             self.sequence+=1
         self.f.message['image']['caption']=caption
         self.f.ingest();self.f.replies()
@@ -107,6 +110,305 @@ class DialogTests(unittest.TestCase):
         self.p.assistant_material_photos.vision=lambda *args: {
             'art':'produkt','marke':'PPG','produkt':'T4000 Crystal Silver','artikelnummer':'T4000/E0.5'}
         return self.photo(caption,new=new)
+
+    def test_photo_quantity_is_request_with_monday_default_and_internal_terms_check(self):
+        view=self.photo('ein Stück')
+        self.assertEqual(view['state'],'review')
+        self.assertFalse(view['employee_reply_required'])
+        self.assertTrue(view['fields']['order_requested']['value'])
+        self.assertEqual(view['fields']['order_requested']['proof']['basis'],'quantity_in_personal_material_channel')
+        self.assertEqual(view['fields']['quantity']['value'],'1')
+        self.assertEqual(view['fields']['unit']['value'],'Stück')
+        self.assertFalse(view['fields']['urgent']['value'])
+        self.assertEqual(view['fields']['urgent']['proof']['basis'],'owner_default_monday_14')
+        self.assertEqual(view['fields']['selected_article']['value']['artikelnummer'],'TEST-50')
+        self.assertEqual(view['missing_fields'],['supplier_review','price'])
+        self.assertEqual(view['questions'][0]['field'],'internal_review')
+        self.assertIn('Noch nicht bestellt',view['questions'][0]['body'])
+        self.assertNotIn('?',view['questions'][0]['body'])
+        self.s.process_next()
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_exact_photo_with_valid_same_unit_terms_needs_no_repeat_or_final_yes(self):
+        prior=self.review(self.photo('ein Stück'),unit='Stück')
+        self.assertEqual(self.s.process_next()['state'],'queued')
+        for caption,expected in (('ein Stück','queued'),('ein Stück, dringend','sent')):
+            with self.subTest(caption=caption):
+                self.f.time+=601
+                view=self.photo(caption,new=True)
+                self.assertEqual(view['state'],'approved')
+                self.assertEqual(view['review']['reused_from'],prior['id'])
+                self.assertFalse(view['employee_reply_required'])
+                self.assertEqual(self.s.process_next()['state'],expected)
+                snapshot=self.p.workshop_orders.calls[-1]
+                self.assertEqual(snapshot['payload']['quantity'],'1')
+                now=datetime.fromtimestamp(self.f.time,timezone.utc)
+                due=next_dispatch_at(now,snapshot['payload']['urgent'])
+                if expected=='sent':
+                    self.assertEqual(due,now)
+                else:
+                    self.assertEqual((due.astimezone(BERLIN).weekday(),due.astimezone(BERLIN).hour),(0,14))
+                count=len(self.p.workshop_orders.calls)
+                self.s.process_next()
+                self.assertEqual(len(self.p.workshop_orders.calls),count)
+                prior=view
+
+    def test_bare_quantity_binds_one_recent_personal_photo_preserving_urgency(self):
+        view=self.photo('dringend')
+        self.assertEqual(self.answer(None,'ein Stück',explicit=False)['state'],'applied')
+        updated=self.s.status(view['id'])
+        self.assertEqual(len(self.s.list()),1)
+        self.assertEqual(updated['fields']['quantity']['value'],'1')
+        self.assertTrue(updated['fields']['urgent']['value'])
+        self.assertEqual(updated['state'],'review')
+        self.assertFalse(updated['employee_reply_required'])
+        self.assertEqual(updated['questions'][0]['field'],'internal_review')
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_bare_quantity_binds_blank_photo_with_monday_default(self):
+        view=self.photo('')
+        self.assertEqual(self.answer(None,'ein Stück',explicit=False)['state'],'applied')
+        updated=self.s.status(view['id'])
+        self.assertTrue(updated['fields']['order_requested']['value'])
+        self.assertFalse(updated['fields']['urgent']['value'])
+        self.assertFalse(updated['employee_reply_required'])
+
+    def test_bare_quantity_never_chooses_latest_of_multiple_photos(self):
+        first=self.photo('')
+        second=self.photo('',new=True)
+        self.assertEqual(self.answer(None,'ein Stück',explicit=False)['state'],'review')
+        for view in (first,second):
+            self.assertNotIn('quantity',self.s.status(view['id'])['fields'])
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_unprocessed_second_photo_also_makes_bare_quantity_ambiguous(self):
+        first=self.photo('')
+        self.f.message['id']='wamid.second-unprocessed'
+        self.f.message['image']['caption']=''
+        self.f.ingest()
+        self.assertEqual(self.answer(None,'ein Stück',explicit=False)['state'],'review')
+        self.assertNotIn('quantity',self.s.status(first['id'])['fields'])
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_bare_quantity_waits_for_its_only_photo_to_finish_intake(self):
+        self.f.message['image']['caption']=''
+        self.f.ingest()
+        self.assertEqual(self.answer(None,'ein Stück',explicit=False)['state'],'waiting_for_photo')
+        self.assertEqual(self.s.list(),[])
+        self.f.replies()
+        source=self.channel.process_next()
+        view=self.s.ensure_draft(source['id'])
+        self.s.analyze(view['id'])
+        self.assertEqual(self.s.process_text()['state'],'applied')
+        self.assertEqual(self.s.status(view['id'])['fields']['quantity']['value'],'1')
+
+    def test_bare_quantity_does_not_bind_old_photo_or_other_employee(self):
+        view=self.photo('')
+        self.channel.verify_sender(2,'491702222222','persönlich geprüft',confirmed=True)
+        self.assertEqual(self.answer(None,'ein Stück',sender='491702222222',explicit=False)['state'],'review')
+        self.f.time+=901
+        self.assertEqual(self.answer(None,'ein Stück',explicit=False)['state'],'review')
+        self.assertNotIn('quantity',self.s.status(view['id'])['fields'])
+        self.assertEqual(self.answer(None,'ein Stück',quote='wamid.synthetic-1',explicit=False)['state'],'applied')
+
+    def test_negated_quantity_stock_and_conditional_captions_are_not_purchase_requests(self):
+        for caption in ('Nicht ein Stück','nicht 1 Stück','ein Stück vorhanden','wir haben ein Stück auf Lager',
+                        'ein Stück geliefert','vielleicht ein Stück','ein Stück?','VE 96 Stück','nicht bestellen, ein Stück'):
+            with self.subTest(caption=caption):
+                view=self.photo(caption,new=True)
+                self.assertNotIn('order_requested',view['fields'])
+                self.assertNotEqual(view['state'],'approved')
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_negated_bare_quantity_does_not_order_with_valid_reusable_terms(self):
+        self.review(self.photo('ein Stück'),unit='Stück')
+        self.s.process_next()
+        view=self.photo('',new=True)
+        self.assertEqual(self.answer(None,'nicht 1 Stück',explicit=False)['state'],'review')
+        updated=self.s.status(view['id'])
+        self.assertNotIn('quantity',updated['fields'])
+        self.assertNotIn('order_requested',updated['fields'])
+        self.s.process_next()
+        self.assertEqual(len(self.p.workshop_orders.calls),1)
+
+    def test_conflicting_urgency_still_needs_answer_not_monday_default(self):
+        view=self.photo('ein Stück dringend, aber erst am Montag')
+        self.assertIn('urgent',view['missing_fields'])
+        self.assertNotIn('urgent',view['fields'])
+        self.assertTrue(view['employee_reply_required'])
+        self.assertEqual(view['questions'][0]['field'],'urgent')
+
+    def test_exact_photo_match_preserves_decimal_dimensions_and_missing_variants(self):
+        for width,color in (('5.0 mm','grün'),('5,0 mm','grün'),('50 mm','blau'),('50 mm','')):
+            with self.subTest(width=width,color=color):
+                self.hits[0]['groesse']=width
+                self.hits[0]['farbe']=color
+                view=self.photo('ein Stück',new=True)
+                self.assertNotIn('selected_article',view['fields'])
+                self.assertNotEqual(view['state'],'approved')
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_recheck_discards_automatic_selection_if_current_catalog_loses_uniqueness(self):
+        view=self.review(self.photo('ein Stück'),unit='Stück')
+        self.assertEqual(view['fields']['selected_article']['proof']['basis'],'exact_photo_catalog_match')
+        self.hits.append(dict(self.hits[0],artikelnummer='TEST-30',groesse='30 mm'))
+        updated=self.s.recheck(view['id'],view['revision'])
+        self.assertNotIn('selected_article',updated['fields'])
+        self.assertEqual(updated['review'],{})
+        self.assertEqual(updated['state'],'open')
+        self.assertEqual(updated['questions'][0]['field'],'article')
+        self.s.process_next()
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_matching_name_and_variant_do_not_override_different_photo_sku(self):
+        self.p.assistant_material_photos.vision=lambda *args: {
+            'art':'produkt','produkt':'Test-Klebeband','artikelnummer':'TEST-30','breite':'50 mm','farbe':'grün'}
+        view=self.photo('ein Stück')
+        self.assertNotIn('selected_article',view['fields'])
+        self.assertEqual(view['review'],{})
+        self.assertEqual(view['state'],'review')
+        self.s.process_next()
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_possible_double_order_requires_bound_additional_yes_and_persists(self):
+        first=self.review(self.photo('ein Stück, dringend'),unit='Stück')
+        self.assertEqual(self.s.process_next()['state'],'sent')
+        second=self.photo('ein Stück, dringend',new=True)
+        self.assertEqual(second['state'],'open')
+        self.assertEqual(second['duplicate_of'],first['id'])
+        self.assertEqual(second['questions'][0]['field'],'possible_duplicate')
+        self.assertIn('zusätzlich',second['questions'][0]['body'])
+        self.assertEqual(self.answer(None,'ja',explicit=False)['state'],'review')
+        self.f.time+=3600
+        restarted=MaterialDialog(self.p)
+        self.p.material_dialog=restarted
+        second=restarted.recheck(second['id'],second['revision'])
+        self.assertEqual(second['duplicate_of'],first['id'])
+        self.assertIn('possible_duplicate',second['missing_fields'])
+        self.s=restarted
+        self.assertEqual(self.answer(second,'Ja')['state'],'applied')
+        second=self.s.status(second['id'])
+        self.assertEqual(second['state'],'approved')
+        self.assertEqual(self.s.process_next()['state'],'sent')
+        self.s.process_next()
+        self.assertEqual(len(self.p.workshop_orders.calls),2)
+
+    def test_duplicate_no_cancels_only_new_request_and_wrong_employee_cannot_confirm(self):
+        first=self.review(self.photo('ein Stück, dringend'),unit='Stück')
+        self.s.process_next()
+        second=self.photo('ein Stück, dringend',new=True)
+        self.channel.verify_sender(2,'491702222222','persönlich geprüft',confirmed=True)
+        self.assertEqual(self.answer(second,'Ja',sender='491702222222')['state'],'review')
+        self.assertEqual(self.s.status(second['id'])['state'],'open')
+        self.assertEqual(self.answer(second,'Nein')['state'],'applied')
+        self.assertEqual(self.s.status(second['id'])['state'],'cancelled')
+        self.assertEqual(self.s.status(first['id'])['state'],'accepted')
+        self.s.process_next()
+        self.assertEqual(len(self.p.workshop_orders.calls),1)
+
+    def test_changed_urgency_does_not_silently_order_same_article_twice(self):
+        first=self.review(self.photo('Ein Stück'),unit='Stück')
+        self.assertEqual(self.s.process_next()['state'],'queued')
+        second=self.photo('Ein Stück, dringend',new=True)
+        self.assertEqual(second['duplicate_of'],first['id'])
+        self.assertEqual(second['questions'][0]['field'],'possible_duplicate')
+        self.s.process_next()
+        self.assertEqual(len(self.p.workshop_orders.calls),1)
+        self.assertEqual(self.answer(second,'Ja')['state'],'applied')
+        self.assertEqual(self.s.process_next()['state'],'sent')
+        self.assertEqual(len(self.p.workshop_orders.calls),2)
+
+    def test_duplicate_confirmation_does_not_apply_after_changed_quantity(self):
+        self.review(self.photo('ein Stück, dringend'),unit='Stück')
+        self.s.process_next()
+        second=self.photo('ein Stück, dringend',new=True)
+        self.answer(second,'Ja')
+        second=self.s.status(second['id'])
+        self.answer(second,'Zwei Stück')
+        changed=self.s.status(second['id'])
+        self.assertIsNone(changed['duplicate_of'])
+        self.assertEqual(changed['fields']['quantity']['value'],'2')
+        self.assertNotIn('duplicate_confirmation',changed['fields'])
+        self.answer(changed,'Ein Stück')
+        restored=self.s.status(second['id'])
+        self.assertIn('possible_duplicate',restored['missing_fields'])
+        self.assertNotIn('duplicate_confirmation',restored['fields'])
+
+    def test_late_duplicate_before_dispatch_persists_an_answerable_question(self):
+        first=self.photo('Ein Stück, dringend')
+        fields=copy.deepcopy(first['fields'])
+        fields.pop('selected_article')
+        self.f.sql("UPDATE einkauf_material_dialoge SET fields_json=?,analysis_json='{}',analysis_state='pending' WHERE id=?",
+                   (json.dumps(fields),first['id']))
+        second=self.review(self.photo('Ein Stück, dringend',new=True),unit='Stück')
+        self.assertEqual(second['state'],'approved')
+        self.s.analyze(first['id'])
+        with self.assertRaises(PermissionError):self.p.workshop_orders.submit_material_request(second['id'],second['revision'])
+        self.s.order_attempt(second['id'],second['revision'],{'state':'blocked'})
+        second=self.s.status(second['id'])
+        self.assertEqual(second['state'],'open')
+        self.assertEqual(second['duplicate_of'],first['id'])
+        self.assertEqual(second['questions'][0]['field'],'possible_duplicate')
+        self.assertEqual(self.answer(second,'Ja')['state'],'applied')
+        self.assertEqual(self.s.status(second['id'])['state'],'approved')
+
+    def test_duplicate_signature_changes_with_size_colour_and_packaging(self):
+        first=self.review(self.photo('Ein Stück, dringend'),unit='Stück')
+        signature=self.s._duplicate_signature(first['fields'],first['review'])
+        for key,value in (('groesse','30 mm'),('farbe','blau'),('gebinde','12 Rollen'),('ve','Packung')):
+            with self.subTest(key=key):
+                fields=copy.deepcopy(first['fields'])
+                fields['selected_article']['value'][key]=value
+                self.assertNotEqual(self.s._duplicate_signature(fields,first['review']),signature)
+
+    def test_external_reservation_does_not_bypass_additional_duplicate_confirmation(self):
+        from test_material_external import ExternalOrderTests
+        external=ExternalOrderTests('runTest')
+        external.setUp()
+        self.addCleanup(external.doCleanups)
+        first=external.base.review(external.base.photo('Ein Stück, dringend'),unit='Stück')
+        external.s.process_next()
+        second=external.base.photo('Ein Stück, dringend',new=True)
+        external.payload.update(article_number='TEST-50',product_name='Test-Klebeband',variant='grün 50 mm')
+        with self.assertRaises(ValueError):external.reserve(second)
+        self.assertEqual(external.s.status(first['id'])['state'],'accepted')
+        self.assertEqual(external.base.answer(second,'Ja')['state'],'applied')
+        second=external.s.status(second['id'])
+        self.assertEqual(external.reserve(second)['state'],'external_pending')
+        self.assertEqual(len(external.p.workshop_orders.calls),1)
+
+    def test_late_duplicate_also_blocks_external_reservation_before_marker_exists(self):
+        from test_material_external import ExternalOrderTests
+        external=ExternalOrderTests('runTest')
+        external.setUp()
+        self.addCleanup(external.doCleanups)
+        first=external.base.photo('Ein Stück, dringend')
+        fields=copy.deepcopy(first['fields']);fields.pop('selected_article')
+        external.f.sql("UPDATE einkauf_material_dialoge SET fields_json=?,analysis_json='{}',analysis_state='pending' WHERE id=?",
+                       (json.dumps(fields),first['id']))
+        second=external.base.review(external.base.photo('Ein Stück, dringend',new=True),unit='Stück')
+        external.s.analyze(first['id'])
+        external.payload.update(article_number='TEST-50',product_name='Test-Klebeband',variant='grün 50 mm')
+        self.assertIsNone(external.s.status(second['id'])['duplicate_of'])
+        with self.assertRaises(ValueError):external.reserve(second)
+        self.assertEqual(external.p.workshop_orders.calls,[])
+
+    def test_catalog_article_detects_prior_manual_order_with_free_text_variant(self):
+        from test_material_external import ExternalOrderTests
+        external=ExternalOrderTests('runTest')
+        external.setUp()
+        self.addCleanup(external.doCleanups)
+        first=external.base.crystal_photo()
+        first=external.reserve(first)
+        external.base.hits=[{'produkt_name':'Test Crystal Silver','lieferant':'Testlieferant','artikelnummer':'TEST-4000',
+                            'groesse':'0,5 Liter','farbe':'silber','gebinde':'Dose','ve':'Stück',
+                            'quellen':[{'art':'einkauf','beleg_id':1,'position':1}]}]
+        external.p.assistant_material_photos.vision=lambda *args: {
+            'art':'produkt','produkt':'Test Crystal Silver','artikelnummer':'TEST-4000'}
+        second=external.base.photo('Ein Stück, dringend',new=True)
+        self.assertEqual(second['duplicate_of'],first['id'])
+        self.assertIn('possible_duplicate',second['missing_fields'])
+        self.assertEqual(external.p.workshop_orders.calls,[])
 
     def test_recognized_photo_without_catalog_match_needs_internal_review_not_article_repeat(self):
         view=self.crystal_photo()
@@ -469,7 +771,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(self.s.list()[0]['questions'][0]['state'],'uncertain')
 
     def test_question_uses_same_receiver_and_sent_question_binds_yes(self):
-        view=self.photo('Klebeband ein Karton bestellen')
+        view=self.photo('Klebeband ein Karton dringend bestellen, aber erst am Montag')
         self.p.app.config['MATERIAL_WHATSAPP_REPLIES_ENABLED']=True
         calls=[]
         def post(url,**kwargs):
@@ -572,6 +874,85 @@ class DialogTests(unittest.TestCase):
         self.assertIn('urgent',view['missing_fields'])
         self.assertNotIn('urgent',view['fields'])
         self.assertEqual(view['state'],'open')
+
+
+class PhotoQuantityEndToEndTests(unittest.TestCase):
+    def test_ten_different_photos_keep_each_quantity_and_replayed_webhook_never_resends(self):
+        from test_materialbestellung_e2e import MaterialPurchaseEndToEndTests
+        fixture=MaterialPurchaseEndToEndTests('runTest')
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        employee=fixture.f
+        def catalog(index):
+            name='Synthetischer Testartikel '+str(index)
+            employee.hits[0].update(produkt_name=name,artikelnummer='TEST-'+str(index))
+            employee.p.assistant_material_photos.vision=lambda *args: {
+                'art':'produkt','produkt':name,'breite':'50 mm','farbe':'grün'}
+        for index in range(10):
+            catalog(index)
+            old=employee.photo('Zwei Stück',new=True)
+            old=employee.review(old,supplier_id=fixture.contact,article_number='TEST-'+str(index),
+                product_name='Synthetischer Testartikel '+str(index),unit='Stück',unit_price_cents=1000,shipping_cents=0)
+            employee.answer(old,'Abbrechen')
+        fixture.f.f.time+=601
+        fixture.manager.set_setting('worker_last_ok',fixture.f.f.time)
+        drafts=[]
+        for index in range(10):
+            catalog(index)
+            view=employee.photo('Ein Stück'+(', dringend' if index%2==0 else ''),new=True)
+            self.assertEqual(view['state'],'approved')
+            self.assertFalse(view['employee_reply_required'])
+            self.assertIsNone(view['duplicate_of'])
+            drafts.append(view['id'])
+            self.assertEqual(employee.s.process_next()['state'],'sent' if index%2==0 else 'queued')
+        self.assertEqual(len(set(drafts)),10)
+        self.assertEqual(fixture.smtp.data_calls,5)
+        fixture.f.f.ingest()
+        employee.s.process_next()
+        self.assertEqual(fixture.smtp.data_calls,5)
+        for index,draft_id in enumerate(drafts):
+            stored=employee.s.status(draft_id)
+            self.assertEqual(stored['fields']['selected_article']['value']['artikelnummer'],'TEST-'+str(index))
+            self.assertEqual(stored['fields']['quantity']['value'],'1')
+        fixture.f.f.time=datetime(2026,10,12,13,59,tzinfo=BERLIN).timestamp()
+        fixture.manager.tick(worker=True)
+        self.assertEqual(fixture.smtp.data_calls,5)
+        fixture.f.f.time=datetime(2026,10,12,14,0,tzinfo=BERLIN).timestamp()
+        fixture.manager.tick(worker=True)
+        self.assertEqual(fixture.smtp.data_calls,6)
+        fixture.manager.tick(worker=True)
+        employee.s.process_next()
+        self.assertEqual(fixture.smtp.data_calls,6)
+
+    def test_photo_then_one_piece_dispatches_urgent_once_otherwise_monday_14(self):
+        from test_materialbestellung_e2e import MaterialPurchaseEndToEndTests
+        fixture=MaterialPurchaseEndToEndTests('runTest')
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        employee=fixture.f
+        prior=employee.photo('ein Stück',new=True)
+        employee.review(prior,supplier_id=fixture.contact,unit='Stück',unit_price_cents=1000,shipping_cents=0)
+        self.assertEqual(employee.s.process_next()['state'],'queued')
+        fixture.f.f.time+=601
+        fixture.manager.set_setting('worker_last_ok',fixture.f.f.time)
+        employee.photo('dringend',new=True)
+        self.assertEqual(employee.answer(None,'ein Stück',explicit=False)['state'],'applied')
+        self.assertEqual(employee.s.process_next()['state'],'sent')
+        self.assertEqual(fixture.smtp.data_calls,1)
+        fixture.f.f.time+=601
+        fixture.manager.set_setting('worker_last_ok',fixture.f.f.time)
+        employee.photo('',new=True)
+        self.assertEqual(employee.answer(None,'ein Stück',explicit=False)['state'],'applied')
+        self.assertEqual(employee.s.process_next()['state'],'queued')
+        fixture.f.f.time=datetime(2026,10,12,13,59,tzinfo=BERLIN).timestamp()
+        fixture.manager.tick(worker=True)
+        self.assertEqual(fixture.smtp.data_calls,1)
+        fixture.f.f.time=datetime(2026,10,12,14,0,tzinfo=BERLIN).timestamp()
+        fixture.manager.tick(worker=True)
+        self.assertEqual(fixture.smtp.data_calls,2)
+        fixture.manager.tick(worker=True)
+        employee.s.process_next()
+        self.assertEqual(fixture.smtp.data_calls,2)
 
 
 if __name__=='__main__': unittest.main(verbosity=2)

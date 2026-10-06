@@ -592,10 +592,11 @@ def register_orders(portal):
             session['assistant_order_requests'] = dict(list(pending.items())[-20:])
         overview = OrderOverview(portal.get_db).page(request.args)
         intake = getattr(portal, 'workshop_intake', None)
+        from werkstatt_bestellvergleich_ui import comparison_context
         return render_template('assistent_bestellungen.html', contacts=manager.contacts(), availability=manager.availability(),
                                overview=overview, cap_cents=manager.cap(), csrf=csrf, request_id=request_id,
                                intake_entries=intake.list(limit=20) if intake else None,
-                               errors=errors or [], form=form), code
+                               errors=errors or [], form=form, **comparison_context(portal, overview)), code
 
     def intake_page(errors=None, code=200, group_id=None):
         service = getattr(portal, 'workshop_intake', None)
@@ -870,6 +871,8 @@ def register_orders(portal):
         except Exception:
             raise click.ClickException('Bestellworker gestoppt. Aktivierung, Postfach und dauerhaften Speicher prüfen.') from None
 
+    from werkstatt_bestellvergleich_ui import register_comparison_forms
+    register_comparison_forms(bp, portal)
     app.register_blueprint(bp)
     app.extensions['werkstatt_orders'] = manager
     return manager
