@@ -8271,6 +8271,20 @@ BACKUP_TABLES = (
     "mitarbeiter_zeitstatus",
     "mitarbeiter_zeitstempel",
     "assistent_materialfotos",
+    "einkauf_eingang",
+    "einkauf_eingang_positionen",
+    "einkauf_eingang_dateien",
+    "einkauf_eingang_lieferungen",
+    "einkauf_eingang_preise",
+    "einkauf_eingang_klaerungen",
+    "assistent_einkaufsmonitor",
+    "assistent_einkaufsmonitor_quellen",
+    "einkauf_material_absender",
+    "einkauf_material_nachrichten",
+    "einkauf_material_worker",
+    "einkauf_material_dialoge",
+    "einkauf_material_texte",
+    "einkauf_material_rueckfragen",
     "google_ads_tageswerte",
 )
 # Der aktuelle ZIP-Import stellt diese MOS-Tabellen noch nicht wieder her.
@@ -8301,8 +8315,11 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
-BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1")
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1")
 BACKUP_BINARY_FIELDS = {
+    "einkauf_eingang_dateien": {
+        "original_base64": {"suffix": ".bin", "max_bytes": 8 * 1024 * 1024},
+    },
     "assistent_materialfotos": {
         "file_base64": {"suffix": ".jpg", "max_bytes": 8 * 1024 * 1024},
     },
@@ -23245,6 +23262,9 @@ def resolve_whatsapp_reply_auftrag_id(message, text, from_phone):
 
 
 def handle_whatsapp_inbound_message(message):
+    # Product photos must never become a placeholder on the latest vehicle.
+    if not isinstance(message, dict) or message.get("type") != "text":
+        return False
     provider_id = clean_text(message.get("id"))
     if provider_id and whatsapp_message_exists(provider_id):
         return False
@@ -23288,13 +23308,36 @@ def handle_whatsapp_inbound_message(message):
     return True
 
 
-def process_whatsapp_webhook(payload):
+def process_whatsapp_webhook(payload, excluded_receiver_ids=(), reserved_sender_pairs=()):
     processed = 0
     entries = payload.get("entry") if isinstance(payload, dict) else []
-    for entry in entries or []:
-        for change in entry.get("changes") or []:
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict) or not isinstance(entry.get("changes"), list):
+            continue
+        for change in entry["changes"]:
+            if not isinstance(change, dict):
+                continue
             value = change.get("value") or {}
-            for message in value.get("messages") or []:
+            if not isinstance(value, dict) or not isinstance(value.get("messages"), list):
+                continue
+            metadata = value.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                continue
+            receiver_id = metadata.get("phone_number_id")
+            if (not isinstance(receiver_id, str) or not WHATSAPP_PHONE_NUMBER_ID
+                    or receiver_id != WHATSAPP_PHONE_NUMBER_ID or receiver_id in excluded_receiver_ids):
+                continue
+            for message in value["messages"]:
+                context = message.get("context") if isinstance(message, dict) else None
+                context = context if isinstance(context, dict) else {}
+                if (not isinstance(message, dict) or message.get("group_id") or value.get("group_id")
+                        or context.get("group_id") or message.get("recipient_type") == "group"
+                        or value.get("recipient_type") == "group"):
+                    continue
+                if reserved_sender_pairs:
+                    sender = message.get("from")
+                    if not isinstance(sender, str) or (receiver_id, whatsapp_number_key(sender)) in reserved_sender_pairs:
+                        continue
                 if handle_whatsapp_inbound_message(message):
                     processed += 1
     return processed
@@ -38558,13 +38601,48 @@ def whatsapp_webhook():
             return challenge, 200, {"Content-Type": "text/plain; charset=utf-8"}
         abort(403)
 
-    if not whatsapp_bridge_enabled():
+    material = globals().get("material_channel")
+    material_enabled = app.config.get("MATERIAL_WHATSAPP_ENABLED") is True and material is not None
+    bridge_enabled = whatsapp_bridge_enabled()
+    if not bridge_enabled and not material_enabled:
         return jsonify({"ok": False, "enabled": False, "processed": 0})
-    if not verify_whatsapp_signature():
+    if request.content_length is not None and request.content_length > 256 * 1024:
+        abort(413)
+    raw = request.stream.read(256 * 1024 + 1)
+    if len(raw) > 256 * 1024:
+        abort(413)
+    # Verify the exact received body for both channels before any side effect.
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if not WHATSAPP_APP_SECRET or not re.fullmatch(r"sha256=[a-fA-F0-9]{64}", signature):
         abort(403)
-    payload = request.get_json(silent=True) or {}
-    processed = process_whatsapp_webhook(payload)
-    return jsonify({"ok": True, "processed": processed})
+    expected = "sha256=" + hmac.new(WHATSAPP_APP_SECRET.encode(), raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature.lower()):
+        abort(403)
+    try:
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError("Webhook muss ein Objekt sein.")
+        material_result = material.ingest_webhook(raw, signature) if material_enabled else {}
+    except PermissionError:
+        abort(403)
+    except (ValueError, UnicodeError):
+        abort(400)
+    # Resolve routing only after successful intake. A paused or revoked material
+    # sender must not fall through into the most recent vehicle conversation.
+    # Shared portal use is explicit; other material receivers remain exclusive.
+    reserved_pairs = ()
+    if material is not None:
+        routing = material.vehicle_routing_exclusions()
+        receivers = routing["exclusive_receiver_ids"]
+        reserved_pairs = routing["reserved_sender_pairs"]
+    else:
+        receivers = app.config.get("MATERIAL_WHATSAPP_PHONE_IDS", "")
+        if isinstance(receivers, str):
+            receivers = [value.strip() for value in receivers.split(",") if value.strip()]
+        elif not isinstance(receivers, (list, tuple)):
+            receivers = ()
+    processed = process_whatsapp_webhook(payload, receivers, reserved_pairs) if bridge_enabled else 0
+    return jsonify({"ok": True, "processed": processed, "material": material_result})
 
 
 @app.route("/favicon.ico")
@@ -47811,6 +47889,13 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         "assistent_mailquellen_dateien",
         "mitarbeiter_urlaubskonten", "mitarbeiter_urlaubsantraege", "mitarbeiter_urlaub_audit",
         "mitarbeiter_zeitstatus", "mitarbeiter_zeitstempel", "assistent_materialfotos",
+        "einkauf_eingang", "einkauf_eingang_positionen", "einkauf_eingang_dateien",
+        "einkauf_eingang_lieferungen", "einkauf_eingang_preise",
+        "einkauf_eingang_klaerungen",
+        "assistent_einkaufsmonitor", "assistent_einkaufsmonitor_quellen",
+        "einkauf_material_absender", "einkauf_material_nachrichten",
+        "einkauf_material_worker",
+        "einkauf_material_dialoge", "einkauf_material_texte", "einkauf_material_rueckfragen",
     }
     if "kunden_termin_mail_versand" in schema_features:
         required_tables.add("kunden_termin_mail_versand")
@@ -47831,6 +47916,14 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         required_tables.add("assistent_materialfotos")
     if "werkstatt_gedaechtnis_v1" in schema_features:
         required_tables.update({"assistent_dialog", "assistent_gedaechtnis_state", "assistent_gedaechtnis_notizen"})
+    if "werkstatt_einkaufseingang_v1" in schema_features:
+        required_tables.update({"einkauf_eingang", "einkauf_eingang_positionen", "einkauf_eingang_dateien",
+                                "einkauf_eingang_lieferungen", "einkauf_eingang_preise", "einkauf_eingang_klaerungen"})
+    if "werkstatt_materialautomatik_v1" in schema_features:
+        required_tables.update({"assistent_einkaufsmonitor", "assistent_einkaufsmonitor_quellen",
+                                "einkauf_material_absender", "einkauf_material_nachrichten", "einkauf_material_worker"})
+    if "werkstatt_materialdialog_v1" in schema_features:
+        required_tables.update({"einkauf_material_dialoge", "einkauf_material_texte", "einkauf_material_rueckfragen"})
     if "werkstatt_mailquellen_v1" in schema_features:
         required_tables.update({"assistent_mailquellen_laeufe", "assistent_mailquellen_ordner",
                                 "assistent_mailquellen_nachrichten", "assistent_mailquellen_absender",
@@ -47859,6 +47952,10 @@ def validate_backup_binary_reference_completeness(export, reference_map):
             if row_id <= 0:
                 raise ValueError(f"Datenpaket ungültig: Tabelle {table_name} enthält eine Zeile ohne ID.")
             for column_name in field_config:
+                if table_name == "einkauf_eingang_dateien" and (table_name, row_id, column_name) not in reference_map:
+                    raise ValueError(
+                        f"Datenpaket unvollständig: Originaldatei für {table_name} #{row_id} fehlt."
+                    )
                 if clean_text(row.get(column_name)):
                     raise ValueError(
                         f"Datenpaket ungültig: {table_name}.{column_name} ist in Format v2 nicht externalisiert."
@@ -48307,6 +48404,13 @@ def admin_daten_import():
                     mail_schema = globals().get("assistant_mail_sources_init_schema")
                     if callable(mail_schema):
                         mail_schema()
+                    intake_schema = globals().get("workshop_intake_init_schema")
+                    if callable(intake_schema):
+                        intake_schema()
+                    for hook in ("workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema"):
+                        schema = globals().get(hook)
+                        if callable(schema):
+                            schema()
                     mail_sources = globals().get("assistant_mail_sources")
                     if mail_sources is not None:
                         mail_sources.restore_files()
@@ -57636,12 +57740,24 @@ from werkstatt_fortschritt_api import register_progress_api, progress_csrf_exemp
 workshop_progress = register_progress_api(sys.modules[__name__])
 from werkstatt_bestellungen import register_orders, start_order_worker
 workshop_orders = register_orders(sys.modules[__name__])
+from werkstatt_einkaufseingang import register_intake
+workshop_intake = register_intake(sys.modules[__name__])
 from werkstatt_assistent import register_assistant
 app.config["ASSISTANT_READ_ONLY"] = env_flag("ASSISTANT_READ_ONLY", True)
 app.config["ASSISTANT_NATIVE_COCKPIT"] = True
 register_assistant(sys.modules[__name__])
+from werkstatt_einkaufsmonitor import register_monitor, start_purchase_monitor_worker
+from werkstatt_materialkanal import register_material_channel, start_material_worker
+workshop_purchase_monitor = register_monitor(sys.modules[__name__])
+material_channel = register_material_channel(sys.modules[__name__])
+from werkstatt_materialdialog import register_material_dialog
+material_dialog = register_material_dialog(sys.modules[__name__])
+from werkstatt_materialverwaltung import register_material_admin
+register_material_admin(sys.modules[__name__])
 if not PUBLIC_SITE_ONLY:
     start_order_worker(workshop_orders)
+    start_purchase_monitor_worker(sys.modules[__name__])
+    start_material_worker(sys.modules[__name__])
 
 start_hourly_backups()
 start_lexware_auto_sync()

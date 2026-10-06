@@ -24,10 +24,10 @@ _MAILBOX = re.compile(
 
 
 def next_dispatch_at(now: datetime, urgent: bool) -> datetime:
-    """Return an aware UTC dispatch time: now, or Monday noon in Berlin.
+    """Return an aware UTC dispatch time: now, or Monday 14:00 in Berlin.
 
-    Exactly Monday 12:00:00 is eligible immediately. Any later instant is due
-    the following Monday. Berlin calendar arithmetic preserves local noon over
+    Exactly Monday 14:00:00 is eligible immediately. Any later instant is due
+    the following Monday. Berlin calendar arithmetic preserves local 14:00 over
     the spring/autumn daylight-saving transitions, unlike adding 168 UTC hours.
     Urgency must have been answered explicitly; strings such as 'false' fail.
     """
@@ -40,12 +40,43 @@ def next_dispatch_at(now: datetime, urgent: bool) -> datetime:
     now_utc = now.astimezone(timezone.utc)
     if urgent:
         return now_utc
+    return _weekly_dispatch_at(now_utc, 14)
+
+
+def _weekly_dispatch_at(now_utc, hour):
     local = now_utc.astimezone(BERLIN)
     monday = local.date() + timedelta(days=(-local.weekday()) % 7)
-    cutoff = datetime.combine(monday, time(12), tzinfo=BERLIN)
+    cutoff = datetime.combine(monday, time(hour), tzinfo=BERLIN)
     if cutoff.astimezone(timezone.utc) < now_utc:
-        cutoff = datetime.combine(monday + timedelta(days=7), time(12), tzinfo=BERLIN)
+        cutoff = datetime.combine(monday + timedelta(days=7), time(hour), tzinfo=BERLIN)
     return cutoff.astimezone(timezone.utc)
+
+
+def migrated_weekly_dispatch_at(created_at, old_due_at):
+    """Move an evidenced old Monday-noon slot to 14:00 on that same Monday."""
+    if any(not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None
+           for value in (created_at, old_due_at)):
+        raise ValueError('Gespeicherte Termine brauchen eine Zeitzone.')
+    if _weekly_dispatch_at(created_at.astimezone(timezone.utc), 12) != old_due_at:
+        raise ValueError('Alte Montagsfrist stimmt nicht mit dem gespeicherten Bestellzeitpunkt überein.')
+    local = old_due_at.astimezone(BERLIN)
+    return datetime.combine(local.date(), time(14), tzinfo=BERLIN).astimezone(timezone.utc)
+
+
+def valid_saved_dispatch_at(created_at, urgent, due_at, schedule_version, legacy_due_at=None):
+    """Verify an explicit plan version; legacy dates require stored migration proof."""
+    if type(schedule_version) is not int or schedule_version not in (1, 2) or type(urgent) is not bool:
+        return False
+    if urgent:
+        return legacy_due_at is None and next_dispatch_at(created_at, True) == due_at
+    if schedule_version == 1:
+        return legacy_due_at is None and _weekly_dispatch_at(created_at.astimezone(timezone.utc), 12) == due_at
+    if legacy_due_at is not None:
+        try:
+            return migrated_weekly_dispatch_at(created_at, legacy_due_at) == due_at
+        except (ValueError, TypeError):
+            return False
+    return next_dispatch_at(created_at, False) == due_at
 
 
 def _text(value):

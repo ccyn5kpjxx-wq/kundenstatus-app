@@ -37,7 +37,7 @@ import uuid
 
 from mailbox_client import Mailbox
 from mailbox_outbox import MailOutbox
-from werkstatt_bestellplan import group_orders, next_dispatch_at
+from werkstatt_bestellplan import group_orders, next_dispatch_at, migrated_weekly_dispatch_at, valid_saved_dispatch_at
 
 
 _STATES = {'queued', 'ready', 'sending', 'sent', 'copy_pending', 'partial',
@@ -96,7 +96,7 @@ class OrderDispatch:
     MAX_SEND_ATTEMPTS = 3
 
     def __init__(self, get_db, outbox, smtp_config, authorize_order=None,
-                 supplier_resolver=None, clock=None, reservation_guard=None, batch_guard=None):
+                 supplier_resolver=None, clock=None, reservation_guard=None, batch_guard=None, schedule_guard=None):
         self.get_db = get_db
         self.outbox = outbox
         self.smtp_config = smtp_config
@@ -105,6 +105,11 @@ class OrderDispatch:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.reservation_guard = reservation_guard
         self.batch_guard = batch_guard
+        self.schedule_guard = schedule_guard
+        self.init_schema()
+
+    def init_schema(self):
+        """Restore-safe schema setup, without routes, threads or transport."""
         with self._db() as db:
             db.execute('''CREATE TABLE IF NOT EXISTS assistent_bestellanforderungen (
                 id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -118,6 +123,78 @@ class OrderDispatch:
                 next_attempt_at REAL NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
                 result_json TEXT NOT NULL DEFAULT '{}')''')
             db.commit()
+        self.init_schedule_schema()
+
+    def init_schedule_schema(self):
+        """Add versioned schedule metadata to old DBs, also after a restore."""
+        for table, column, definition in (
+            ('assistent_bestellanforderungen','schedule_version','INTEGER NOT NULL DEFAULT 1'),
+            ('assistent_bestellanforderungen','legacy_due_at','DOUBLE PRECISION'),
+            ('assistent_bestellpakete','not_before_at','DOUBLE PRECISION NOT NULL DEFAULT 0'),
+        ):
+            with self._db() as db:
+                try:
+                    db.execute(f'SELECT {column} FROM {table} WHERE 1=0')
+                except Exception:
+                    db.rollback()
+                    try:
+                        db.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+                        db.commit()
+                    except Exception:
+                        # Two starting processes can race the same migration.
+                        # Clear PostgreSQL's aborted transaction, then prove
+                        # that the exact column is available instead of hiding
+                        # any unrelated DDL error.
+                        db.rollback()
+                        db.execute(f'SELECT {column} FROM {table} WHERE 1=0')
+
+    def migrate_weekly_schedule(self, db):
+        """Keep the original Monday, and never rewrite frozen mail payloads."""
+        if self.schedule_guard:
+            self.schedule_guard(db)
+        db.execute("UPDATE assistent_bestellanforderungen SET due_at=due_at WHERE schedule_version=1 AND batch_id=''")
+        rows = db.execute("SELECT * FROM assistent_bestellanforderungen WHERE schedule_version=1 AND batch_id='' ORDER BY id").fetchall()
+        for row in rows:
+            snapshot = json.loads(row['snapshot_json'])
+            order = snapshot['order']
+            created = datetime.fromtimestamp(row['created_at'], timezone.utc)
+            due = datetime.fromtimestamp(row['due_at'], timezone.utc)
+            if (_digest(order) != row['request_fingerprint'] or snapshot['actor_id'] != row['actor_id']
+                    or not valid_saved_dispatch_at(created,order['urgent'],due,1)):
+                raise ValueError('Alte Bestellfrist oder Freigabe muss geprüft werden; keine automatische Verschiebung.')
+            if order['urgent']:
+                db.execute("UPDATE assistent_bestellanforderungen SET schedule_version=2 WHERE id=? AND schedule_version=1 AND batch_id=''", (row['id'],))
+            else:
+                shifted = migrated_weekly_dispatch_at(created,due).timestamp()
+                db.execute("UPDATE assistent_bestellanforderungen SET legacy_due_at=due_at,due_at=?,schedule_version=2 WHERE id=? AND schedule_version=1 AND batch_id='' AND due_at=?",
+                           (shifted,row['id'],row['due_at']))
+        # Already frozen but provably unsent batches retain their payload/hash
+        # and original slot. A separate not-before time postpones transport.
+        batches = db.execute("SELECT * FROM assistent_bestellpakete WHERE state IN ('ready','blocked','not_sent') AND not_before_at=0 ORDER BY id").fetchall()
+        for batch in batches:
+            payload = json.loads(batch['payload_json'])
+            if payload.get('urgent') is not False:
+                continue
+            originals = db.execute('SELECT * FROM assistent_bestellanforderungen WHERE batch_id=?', (batch['id'],)).fetchall()
+            if not originals or not any(row['schedule_version']==1 for row in originals):
+                continue
+            entries = {entry['id']:entry for entry in payload.get('orders',[])}
+            if (_digest(payload) != batch['fingerprint'] or len(entries) != len(originals)
+                    or set(entries) != {row['id'] for row in originals}
+                    or not all(row['schedule_version']==1 for row in originals)):
+                raise ValueError('Eingefrorene Altbestellung stimmt nicht mit ihren Bestellbelegen überein.')
+            gates = []
+            for row in originals:
+                snapshot = json.loads(row['snapshot_json'])
+                if (entries[row['id']] != dict(snapshot,id=row['id'])
+                        or _digest(snapshot['order']) != row['request_fingerprint']
+                        or snapshot['actor_id'] != row['actor_id'] or row['due_at'] != batch['due_at']):
+                    raise ValueError('Eingefrorene Altbestellung wurde verändert; Versand gesperrt.')
+                created = datetime.fromtimestamp(row['created_at'],timezone.utc)
+                due = datetime.fromtimestamp(row['due_at'],timezone.utc)
+                gates.append(migrated_weekly_dispatch_at(created,due).timestamp())
+            db.execute("UPDATE assistent_bestellpakete SET not_before_at=? WHERE id=? AND not_before_at=0 AND state IN ('ready','blocked','not_sent')",
+                       (max(gates),batch['id']))
 
     @contextmanager
     def _db(self):
@@ -207,8 +284,8 @@ class OrderDispatch:
             if self.reservation_guard:
                 self.reservation_guard(db, actor, request_key, intent, due_at)
             db.execute('''INSERT INTO assistent_bestellanforderungen
-                (id,actor_id,request_id,request_fingerprint,snapshot_json,due_at,created_at)
-                VALUES(?,?,?,?,?,?,?) ON CONFLICT(actor_id,request_id) DO NOTHING''',
+                (id,actor_id,request_id,request_fingerprint,snapshot_json,due_at,created_at,schedule_version)
+                VALUES(?,?,?,?,?,?,?,2) ON CONFLICT(actor_id,request_id) DO NOTHING''',
                 (order_id, actor, request_key, fingerprint, _canonical(snapshot),
                  due_at, now.timestamp()))
             stored = db.execute('SELECT id,request_fingerprint FROM assistent_bestellanforderungen WHERE actor_id=? AND request_id=?',
@@ -220,6 +297,7 @@ class OrderDispatch:
 
     def _freeze_due_batches(self, now):
         with self._db() as db:
+            self.migrate_weekly_schedule(db)
             rows = db.execute("SELECT * FROM assistent_bestellanforderungen WHERE batch_id='' AND due_at<=? ORDER BY due_at,id",
                               (now.timestamp(),)).fetchall()
             groups = defaultdict(list)
@@ -227,8 +305,9 @@ class OrderDispatch:
                 snapshot = json.loads(row['snapshot_json'])
                 order = snapshot['order']
                 if (_digest(order) != row['request_fingerprint'] or snapshot['actor_id'] != row['actor_id']
-                        or next_dispatch_at(datetime.fromtimestamp(row['created_at'], timezone.utc),
-                                            order['urgent']).timestamp() != row['due_at']):
+                        or not valid_saved_dispatch_at(datetime.fromtimestamp(row['created_at'], timezone.utc),
+                            order['urgent'],datetime.fromtimestamp(row['due_at'], timezone.utc),row['schedule_version'],
+                            datetime.fromtimestamp(row['legacy_due_at'], timezone.utc) if row['legacy_due_at'] is not None else None)):
                     raise ValueError('Gespeicherte Bestellfreigabe wurde verändert; Versand gesperrt.')
                 key = (order['supplier_id'], order['recipient'], order['urgent'], row['due_at'],
                        snapshot['from_address'], snapshot['sender_account'], row['id'] if order['urgent'] else '')
@@ -299,6 +378,13 @@ class OrderDispatch:
 
     def _deliver(self, batch, owner, now):
         try:
+            with self._db() as db:
+                gate = db.execute('SELECT due_at,not_before_at FROM assistent_bestellpakete WHERE id=?', (batch['id'],)).fetchone()
+                effective = max(gate['due_at'],gate['not_before_at'])
+                if effective > now.timestamp():
+                    db.execute("UPDATE assistent_bestellpakete SET lease='',lease_until=0,next_attempt_at=? WHERE id=? AND lease=?", (effective,batch['id'],owner))
+                    db.commit()
+                    return {'state':batch['state'],'message':'Sammelversand frühestens Montag um 14 Uhr (Europe/Berlin).'}
             existing = self.outbox.status(batch['id'])
             if existing and existing.get('state') in {'sent', 'uncertain', 'sending'}:
                 return self._record_result(batch['id'], owner, existing, now)
@@ -345,19 +431,21 @@ class OrderDispatch:
             rows = db.execute('''SELECT * FROM assistent_bestellpakete
                 WHERE state IN ('ready','not_sent','blocked','copy_pending','partial','sending')
                 AND next_attempt_at<=? AND lease_until<=?
+                AND due_at<=? AND not_before_at<=?
                 AND (attempts<? OR state IN ('copy_pending','partial','sending'))
                 ORDER BY due_at,id LIMIT ?''',
-                (now.timestamp(), now.timestamp(), self.MAX_SEND_ATTEMPTS, max(1, min(int(limit), 100)))).fetchall()
+                (now.timestamp(), now.timestamp(), now.timestamp(), now.timestamp(), self.MAX_SEND_ATTEMPTS, max(1, min(int(limit), 100)))).fetchall()
         results = []
         for row in rows:
             owner = uuid.uuid4().hex
             with self._db() as db:
                 claimed = db.execute('''UPDATE assistent_bestellpakete SET lease=?,lease_until=?
                     WHERE id=? AND lease_until<=? AND next_attempt_at<=?
+                    AND due_at<=? AND not_before_at<=?
                     AND (attempts<? OR state IN ('copy_pending','partial','sending'))
                     AND state IN ('ready','not_sent','blocked','copy_pending','partial','sending')''',
                     (owner, now.timestamp()+self.LEASE_SECONDS, row['id'], now.timestamp(),
-                     now.timestamp(), self.MAX_SEND_ATTEMPTS))
+                     now.timestamp(), now.timestamp(), now.timestamp(), self.MAX_SEND_ATTEMPTS))
                 db.commit()
             if claimed.rowcount == 1:
                 results.append(dict(self._deliver(dict(row), owner, now), batch_id=row['id']))
@@ -365,7 +453,7 @@ class OrderDispatch:
 
     def status(self, order_id):
         with self._db() as db:
-            row = db.execute('''SELECT o.*,b.state AS batch_state,b.attempts,b.result_json FROM assistent_bestellanforderungen o
+            row = db.execute('''SELECT o.*,b.state AS batch_state,b.attempts,b.result_json,b.not_before_at FROM assistent_bestellanforderungen o
                 LEFT JOIN assistent_bestellpakete b ON b.id=o.batch_id WHERE o.id=?''', (order_id,)).fetchone()
         if not row:
             raise ValueError('Bestellanforderung nicht gefunden.')
@@ -388,7 +476,8 @@ class OrderDispatch:
             except (ValueError, TypeError):
                 pass
         return {'id': row['id'], 'actor_id': row['actor_id'], 'state': state, 'message': message,
-                'due_at': datetime.fromtimestamp(row['due_at'], timezone.utc).isoformat(),
+                'due_at': datetime.fromtimestamp(max(row['due_at'],row['not_before_at'] or 0), timezone.utc).isoformat(),
+                'original_due_at': datetime.fromtimestamp(row['legacy_due_at'] if row['legacy_due_at'] is not None else row['due_at'], timezone.utc).isoformat(),
                 'order': snapshot['order'], 'batch_id': row['batch_id'] or None,
                 'needs_review': state in {'uncertain', 'partial', 'blocked'} or
                                 (state == 'not_sent' and (row['attempts'] or 0) >= self.MAX_SEND_ATTEMPTS)}
@@ -403,9 +492,9 @@ class OrderDispatch:
 
 def build_order_dispatch(get_db, storage_dir, imap_config, smtp_config,
                          authorize_order=None, supplier_resolver=None, clock=None,
-                         reservation_guard=None, batch_guard=None):
+                         reservation_guard=None, batch_guard=None, schedule_guard=None):
     """Construct the real durable mailbox boundary; does not send or connect."""
     mailbox = Mailbox(imap_config)
     outbox = MailOutbox(get_db, storage_dir, mailbox)
     return OrderDispatch(get_db, outbox, smtp_config, authorize_order, supplier_resolver, clock,
-                         reservation_guard, batch_guard)
+                         reservation_guard, batch_guard, schedule_guard)

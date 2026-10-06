@@ -200,7 +200,7 @@ class ManagementTests(unittest.TestCase):
         self.assertEqual(first['state'], 'queued');self.assertEqual(second['state'], 'queued')
         blocked = self.submit_action('action-3')
         self.assertEqual(blocked['state'], 'blocked');self.assertIn('Nicht in weitere', blocked['message'])
-        self.now = datetime(2026, 9, 28, 10, tzinfo=timezone.utc)
+        self.now = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
         self.manager.tick(worker=True)
         self.assertEqual(self.smtp.data_calls, 1)
         message = BytesParser(policy=policy.default).parsebytes(self.smtp.raw[0]).get_content()
@@ -232,7 +232,7 @@ class ManagementTests(unittest.TestCase):
         self.approved_action(contact, urgent=False)
         queued = self.submit_action()
         self.manager.propose_contact('Supplier', 'changed@supplier.example', contact_id=contact)
-        self.now = datetime(2026, 9, 28, 10, tzinfo=timezone.utc)
+        self.now = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
         self.manager.tick(worker=True)
         self.assertEqual(self.manager.dispatch.status(queued['id'])['state'], 'blocked')
         self.assertIn('Bestellkontakt', self.manager.dispatch.status(queued['id'])['message'])
@@ -352,22 +352,41 @@ class ManagementTests(unittest.TestCase):
         namespace = {'re': re}
         exec(compile(ast.Module(body=nodes, type_ignores=[]), 'app.py (adapter only)', 'exec'), namespace)
         statements, database_path = [], self.portal.path
+        rollbacks = []
+        with self.manager.db() as db:
+            db.execute('ALTER TABLE assistent_bestellanforderungen DROP COLUMN schedule_version')
+            db.execute('ALTER TABLE assistent_bestellanforderungen DROP COLUMN legacy_due_at')
+            db.execute('ALTER TABLE assistent_bestellpakete DROP COLUMN not_before_at')
+            db.commit()
         class Cursor:
-            def __init__(self, connection): self.cursor = connection.cursor()
+            def __init__(self, connection):
+                self.owner = connection
+                self.cursor = connection.connection.cursor()
             def __enter__(self): return self
             def __exit__(self, *args): self.cursor.close()
             def execute(self, sql, params):
                 statements.append(sql)
-                self.cursor.execute(sql.replace('%s', '?').replace('SERIAL PRIMARY KEY', 'INTEGER PRIMARY KEY AUTOINCREMENT'), params)
+                if self.owner.failed:
+                    raise RuntimeError('PostgreSQL transaction is aborted until rollback')
+                try:
+                    self.cursor.execute(sql.replace('%s', '?').replace('SERIAL PRIMARY KEY', 'INTEGER PRIMARY KEY AUTOINCREMENT'), params)
+                except sqlite3.DatabaseError:
+                    self.owner.failed = True
+                    raise
                 self.rows = self.cursor.fetchall() if self.cursor.description else []
                 self.rowcount = self.cursor.rowcount
                 self.description = [type('Column', (), {'name': item[0]}) for item in self.cursor.description] if self.cursor.description else None
             def fetchall(self): return self.rows
         class Connection:
-            def __init__(self): self.connection = sqlite3.connect(database_path)
-            def cursor(self): return Cursor(self.connection)
+            def __init__(self):
+                self.connection = sqlite3.connect(database_path)
+                self.failed = False
+            def cursor(self): return Cursor(self)
             def commit(self): self.connection.commit()
-            def rollback(self): self.connection.rollback()
+            def rollback(self):
+                rollbacks.append(True)
+                self.connection.rollback()
+                self.failed = False
             def close(self): self.connection.close()
         with patch.object(self.portal, 'get_db', side_effect=lambda: namespace['PostgresConnection'](Connection())):
             manager = OrderManagement(self.portal)
@@ -379,6 +398,8 @@ class ManagementTests(unittest.TestCase):
             self.assertTrue(manager.resolve_supplier(contact)['verified'])
             self.assertTrue(manager.availability()['worker_live'])
             manager.configure_operations(False)
+        self.assertGreaterEqual(len(rollbacks),3)
+        self.assertEqual(len([sql for sql in statements if sql.startswith('ALTER TABLE')]),3)
         settings = [sql for sql in statements if sql.startswith('INSERT INTO assistent_bestellkonfiguration')]
         self.assertTrue(settings)
         self.assertTrue(all(sql.endswith('RETURNING setting_key') for sql in settings))
@@ -395,7 +416,9 @@ class ManagementTests(unittest.TestCase):
         self.assertEqual(self.manager.cap(), 0)
 
     def test_rights_template_offers_new_access_defaults_without_increasing_existing_limits(self):
-        for endpoint, path in (('assistent.page', '/werkstatt/assistent'), ('admin_mitarbeiter', '/admin/mitarbeiter')):
+        for endpoint, path in (('assistent.page', '/werkstatt/assistent'), ('admin_mitarbeiter', '/admin/mitarbeiter'),
+                               ('assistent.vacation_admin', '/admin/assistent-urlaub'),
+                               ('arbeitszeit_admin.index', '/admin/arbeitszeit')):
             self.portal.app.url_map.add(Rule(path, endpoint=endpoint))
         employees = [{'id': 1, 'name': 'Neu', 'lesen': None, 'einkaufen': None, 'dokumentieren': None, 'limit_cent': None},
                      {'id': 2, 'name': 'Bestehend', 'lesen': 1, 'einkaufen': 1, 'dokumentieren': 0, 'limit_cent': 0},
@@ -476,7 +499,7 @@ class ManagementTests(unittest.TestCase):
         self.assertEqual(saved['order']['recipient'], 'orders@supplier.example')
         self.assertEqual(saved['state'], 'sent')
 
-    def test_weekly_requires_live_worker_then_dispatches_at_monday_noon(self):
+    def test_weekly_requires_live_worker_then_dispatches_at_monday_fourteen(self):
         contact_id = self.ready()
         form = self.order_form(contact_id, urgency='weekly')
         self.assertEqual(self.post('/bestellen', form).status_code, 400)
@@ -485,7 +508,7 @@ class ManagementTests(unittest.TestCase):
         self.assertTrue(self.manager.availability()['worker_live'])
         self.assertEqual(self.post('/bestellen', form).status_code, 303)
         self.assertEqual(self.smtp.data_calls, 0)
-        self.now = datetime(2026, 9, 28, 10, tzinfo=timezone.utc)
+        self.now = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
         run_worker(self.manager, once=True)
         self.assertEqual(self.smtp.data_calls, 1)
         self.assertEqual(self.manager.dispatch.list_orders()[0]['state'], 'sent')

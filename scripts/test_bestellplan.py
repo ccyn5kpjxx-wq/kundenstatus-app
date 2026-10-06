@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from werkstatt_bestellplan import group_orders, next_dispatch_at
+from werkstatt_bestellplan import group_orders, next_dispatch_at, migrated_weekly_dispatch_at, valid_saved_dispatch_at
 
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -28,29 +28,29 @@ def order(**changes):
 
 
 class DispatchTimeTests(unittest.TestCase):
-    def test_monday_before_exactly_and_after_noon(self):
-        cutoff = datetime(2026, 9, 28, 12, tzinfo=BERLIN)
+    def test_monday_before_exactly_and_after_fourteen(self):
+        cutoff = datetime(2026, 9, 28, 14, tzinfo=BERLIN)
         for now in (cutoff - timedelta(microseconds=1), cutoff):
-            self.assertEqual(next_dispatch_at(now, False), datetime(2026, 9, 28, 10, tzinfo=UTC))
+            self.assertEqual(next_dispatch_at(now, False), datetime(2026, 9, 28, 12, tzinfo=UTC))
         self.assertEqual(next_dispatch_at(cutoff + timedelta(microseconds=1), False),
-                         datetime(2026, 10, 5, 10, tzinfo=UTC))
+                         datetime(2026, 10, 5, 12, tzinfo=UTC))
 
     def test_weekend_and_other_timezone_use_berlin_cutoff(self):
         self.assertEqual(next_dispatch_at(datetime(2026, 9, 27, 23, 59, tzinfo=UTC), False),
-                         datetime(2026, 9, 28, 10, tzinfo=UTC))
-        self.assertEqual(next_dispatch_at(datetime(2026, 9, 28, 11, tzinfo=UTC), False),
-                         datetime(2026, 10, 5, 10, tzinfo=UTC))
+                         datetime(2026, 9, 28, 12, tzinfo=UTC))
+        self.assertEqual(next_dispatch_at(datetime(2026, 9, 28, 13, tzinfo=UTC), False),
+                         datetime(2026, 10, 5, 12, tzinfo=UTC))
 
-    def test_spring_dst_preserves_monday_noon(self):
-        self.assertEqual(next_dispatch_at(datetime(2026, 3, 23, 12, 1, tzinfo=BERLIN), False),
-                         datetime(2026, 3, 30, 10, tzinfo=UTC))
+    def test_spring_dst_preserves_monday_fourteen(self):
+        self.assertEqual(next_dispatch_at(datetime(2026, 3, 23, 14, 1, tzinfo=BERLIN), False),
+                         datetime(2026, 3, 30, 12, tzinfo=UTC))
 
-    def test_autumn_dst_preserves_monday_noon(self):
-        self.assertEqual(next_dispatch_at(datetime(2026, 10, 19, 12, 1, tzinfo=BERLIN), False),
-                         datetime(2026, 10, 26, 11, tzinfo=UTC))
+    def test_autumn_dst_preserves_monday_fourteen(self):
+        self.assertEqual(next_dispatch_at(datetime(2026, 10, 19, 14, 1, tzinfo=BERLIN), False),
+                         datetime(2026, 10, 26, 13, tzinfo=UTC))
         for fold in (0, 1):
             self.assertEqual(next_dispatch_at(datetime(2026, 10, 25, 2, 30, tzinfo=BERLIN, fold=fold), False),
-                             datetime(2026, 10, 26, 11, tzinfo=UTC))
+                             datetime(2026, 10, 26, 13, tzinfo=UTC))
 
     def test_urgent_is_immediate_and_utc(self):
         now = datetime(2026, 12, 28, 17, 32, 10, 123456, tzinfo=BERLIN)
@@ -60,7 +60,7 @@ class DispatchTimeTests(unittest.TestCase):
 
     def test_year_rollover(self):
         self.assertEqual(next_dispatch_at(datetime(2026, 12, 29, 8, tzinfo=BERLIN), False),
-                         datetime(2027, 1, 4, 11, tzinfo=UTC))
+                         datetime(2027, 1, 4, 13, tzinfo=UTC))
 
     def test_naive_time_or_implicit_urgency_fail(self):
         with self.assertRaises(ValueError):
@@ -68,6 +68,26 @@ class DispatchTimeTests(unittest.TestCase):
         for urgent in (None, "false", 0, 1):
             with self.subTest(urgent=urgent), self.assertRaises(TypeError):
                 next_dispatch_at(datetime.now(UTC), urgent)
+
+    def test_legacy_after_noon_keeps_original_next_monday(self):
+        created = datetime(2026,9,28,13,tzinfo=BERLIN)
+        old = datetime(2026,10,5,12,tzinfo=BERLIN)
+        shifted = datetime(2026,10,5,14,tzinfo=BERLIN)
+        self.assertEqual(migrated_weekly_dispatch_at(created,old),shifted)
+        self.assertNotEqual(next_dispatch_at(created,False),shifted)
+        self.assertTrue(valid_saved_dispatch_at(created,False,old,1))
+        self.assertFalse(valid_saved_dispatch_at(created,False,old,2))
+        self.assertTrue(valid_saved_dispatch_at(created,False,shifted,2,old))
+        self.assertFalse(valid_saved_dispatch_at(created,False,shifted,2))
+        with self.assertRaises(ValueError):
+            migrated_weekly_dispatch_at(created,old+timedelta(days=7))
+
+    def test_legacy_migration_preserves_dst_calendar_day(self):
+        for created,old in ((datetime(2026,3,23,13,tzinfo=BERLIN),datetime(2026,3,30,12,tzinfo=BERLIN)),
+                            (datetime(2026,10,19,13,tzinfo=BERLIN),datetime(2026,10,26,12,tzinfo=BERLIN))):
+            shifted = migrated_weekly_dispatch_at(created,old)
+            self.assertEqual(shifted.astimezone(BERLIN).hour,14)
+            self.assertEqual(shifted.astimezone(BERLIN).date(),old.date())
 
 
 class OrderGroupingTests(unittest.TestCase):

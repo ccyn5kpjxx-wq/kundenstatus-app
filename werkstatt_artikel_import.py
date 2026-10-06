@@ -157,6 +157,15 @@ def _price_evidence(value):
     unit = _text(value.get('measure_unit'), 30)
     result['measure_unit'] = unit if _product_text(unit) in ('ltr/kg', 'ltr', 'kg', 'l', 'ml', 'g', 'm', 'mtr', 'cm', 'mm', 'stk', 'st', 'stueck', 'rol', 'rolle', 'pack', 'set', 'gebinde', 'karton', 'stck', 'dose') else ''
     result['reconciled'] = value.get('reconciled') is True and bool(result['value'])
+    # Preserve explicitly supplied evidence, without inventing EUR or a tax rate.
+    currency = value.get('currency')
+    if isinstance(currency, str) and re.fullmatch(r'[A-Z]{3}', currency):
+        result['currency'] = currency
+    if value.get('tax_basis') in ('net', 'gross', 'unknown'):
+        result['tax_basis'] = value['tax_basis']
+    rate = _text(value.get('tax_rate'), 30)
+    if re.fullmatch(r'\d{1,2}(?:[.,]\d{1,4})?|100(?:[.,]0{1,4})?', rate):
+        result['tax_rate'] = rate.replace(',', '.')
     if result['basis'] == 'gebindepreis_netto_abgeleitet':
         result['calculation'] = 'Inhalt × Grundpreis je Maßeinheit × (1 + Rabatt / 100)'
     return result
@@ -377,16 +386,25 @@ class InvoiceCatalog:
         finally:
             db.close()
 
-    def process_next(self):
+    def process_next(self, source_id=None, guard=None):
+        if source_id is not None and (type(source_id) is not int or source_id <= 0):
+            raise ValueError('Ungültige Rechnungsquelle.')
+        if guard is not None and not callable(guard):
+            raise ValueError('Ungültige Importfreigabe.')
         lease = uuid.uuid4().hex
         now = datetime.now(timezone.utc)
         db = self.p.get_db()
         source = None
         try:
+            if guard is not None:
+                guard(db)
             # A failed worker can be resumed. Its expired lease cannot publish results.
             self._reclaim_expired(db, now)
             self._apply_source_rules(db)
-            row = db.execute("SELECT * FROM assistent_rechnungsimporte WHERE state='offen' ORDER BY id LIMIT 1").fetchone()
+            if source_id is None:
+                row = db.execute("SELECT * FROM assistent_rechnungsimporte WHERE state='offen' ORDER BY id LIMIT 1").fetchone()
+            else:
+                row = db.execute("SELECT * FROM assistent_rechnungsimporte WHERE state='offen' AND id=?", (source_id,)).fetchone()
             if row:
                 source = dict(row)
                 changed = db.execute("UPDATE assistent_rechnungsimporte SET state='laeuft',lease=?,started_at=? WHERE id=? AND state='offen'",
@@ -442,6 +460,17 @@ class InvoiceCatalog:
             return self.status()
         db = self.p.get_db()
         try:
+            if guard is not None:
+                try:
+                    guard(db)
+                except Exception:
+                    db.rollback()
+                    # A revoked monitor must publish nothing, but should not
+                    # strand its own source until the old lease expires.
+                    db.execute("UPDATE assistent_rechnungsimporte SET state='offen',lease='',started_at='' WHERE id=? AND lease=? AND state='laeuft'",
+                               (source['id'], lease))
+                    db.commit()
+                    raise
             owned = db.execute("UPDATE assistent_rechnungsimporte SET state=?,lease='',result_json=? WHERE id=? AND lease=? AND state='laeuft'",
                                (state, json.dumps(report, ensure_ascii=False), source['id'], lease))
             if owned.rowcount:

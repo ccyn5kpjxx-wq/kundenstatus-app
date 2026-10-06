@@ -113,8 +113,22 @@ class MailSources:
                   created_at TEXT NOT NULL);
             ''')
             ensure = getattr(self.p, 'ensure_column', None)
-            if callable(ensure):
-                ensure(db, 'assistent_mailquellen_ordner', 'outgoing', 'INTEGER DEFAULT 0')
+            additions = {
+                'assistent_mailquellen_ordner': {
+                    'outgoing': 'INTEGER DEFAULT 0', 'incremental': 'INTEGER DEFAULT 0',
+                    'high_water_uid': 'BIGINT DEFAULT 0', 'poll_ceiling_uid': 'BIGINT DEFAULT 0',
+                    'scan_end_uid': 'BIGINT DEFAULT 0'},
+                'assistent_mailquellen_nachrichten': {
+                    'raw_sha256': "TEXT DEFAULT ''", 'message_fingerprint': "TEXT DEFAULT ''",
+                    'duplicate_of': 'INTEGER', 'monitor_catalog_queued': 'INTEGER DEFAULT 0'},
+            }
+            for table, columns in additions.items():
+                for column, definition in columns.items():
+                    if callable(ensure):
+                        ensure(db, table, column, definition)
+                    elif column not in {row[1] for row in db.execute('PRAGMA table_info('+table+')').fetchall()}:
+                        db.execute('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition)
+            db.execute('CREATE INDEX IF NOT EXISTS idx_mailquellen_message_fingerprint ON assistent_mailquellen_nachrichten(account,message_fingerprint)')
 
     def identity(self):
         config = self.p.get_werkstatt_imap_config()
@@ -158,23 +172,77 @@ class MailSources:
             db.execute("UPDATE assistent_mailquellen_laeufe SET state='paused' WHERE account=? AND state='active'", (account,))
             return self._status(db, account)
 
+    def start_incremental(self, guard=None):
+        """Resume the current snapshot or poll new UIDs; never reset saved originals."""
+        account, _ = self.identity()
+        with self.db() as db:
+            if guard is not None:
+                guard(db)
+            self._quarantine(db, account)
+            previous = db.execute('SELECT * FROM assistent_mailquellen_laeufe WHERE account=?', (account,)).fetchone()
+            if previous and previous['state'] in ('active', 'paused'):
+                db.execute("UPDATE assistent_mailquellen_laeufe SET state='active',last_error='' WHERE id=?", (previous['id'],))
+                return self._status(db, account)
+        with self.mailbox.connect() as client:
+            folders = self.mailbox.folders(client)
+        with self.db() as db:
+            if guard is not None:
+                guard(db)
+            db.execute('''INSERT INTO assistent_mailquellen_laeufe(account,run_token,state,started_at)
+                VALUES(?,?,'new',?) ON CONFLICT(account) DO NOTHING''', (account, uuid.uuid4().hex, now()))
+            db.execute('UPDATE assistent_mailquellen_laeufe SET account=account WHERE account=?', (account,))
+            run = dict(db.execute('SELECT * FROM assistent_mailquellen_laeufe WHERE account=?', (account,)).fetchone())
+            if run['lease_until'] > time.time() or run['state'] == 'active':
+                return self._status(db, account)
+            db.execute("UPDATE assistent_mailquellen_laeufe SET run_token=?,state='active',started_at=?,finished_at='',last_error='' WHERE id=?",
+                       (uuid.uuid4().hex, now(), run['id']))
+            # Folder records are checkpoints, not a disposable inventory. An
+            # absent/deleted folder never authorizes a fallback mailbox read.
+            db.execute("UPDATE assistent_mailquellen_ordner SET state='excluded' WHERE run_id=?", (run['id'],))
+            for folder in folders:
+                name = str(folder['id'])
+                label = text(folder.get('label') or folder_label(name))
+                outgoing = '\\sent' in str(folder.get('flags', '')).lower() or bool(re.search(r'\b(?:sent|gesendet|gesendete)\b', normalize_supplier(label)))
+                state = 'excluded' if outgoing or _FOLDER_BLOCK.search(normalize_supplier(label)) else 'pending'
+                old = db.execute('SELECT * FROM assistent_mailquellen_ordner WHERE run_id=? AND folder=?', (run['id'], name)).fetchone()
+                high_water = int(old['high_water_uid'] or 0) if old else 0
+                # A previous manual full inventory is usable only after its
+                # complete saved UID list, never an incomplete header cursor.
+                if old and not old['incremental'] and old['validity']:
+                    ids = json.loads(old['uids_json'] or '[]')
+                    if old['cursor'] >= len(ids) and not old['missing']:
+                        high_water = max([int(uid) for uid in ids] + [high_water])
+                db.execute('''INSERT INTO assistent_mailquellen_ordner
+                    (run_id,folder,label,state,outgoing,incremental,high_water_uid)
+                    VALUES(?,?,?,?,?,1,?) ON CONFLICT(run_id,folder) DO UPDATE SET
+                    label=excluded.label,state=excluded.state,outgoing=excluded.outgoing,incremental=1,
+                    high_water_uid=excluded.high_water_uid,poll_ceiling_uid=0,scan_end_uid=0,
+                    uids_json='[]',cursor=0,total=0,missing=0,snapshot_at='' ''',
+                    (run['id'], name, label, state, int(outgoing), high_water))
+            return self._status(db, account)
+
     @contextmanager
     def owned(self, run):
         with self.db() as db:
+            if run.get('_guard') is not None:
+                run['_guard'](db)
             db.execute('UPDATE assistent_mailquellen_laeufe SET account=account WHERE id=?', (run['id'],))
-            row = db.execute('SELECT lease,run_token FROM assistent_mailquellen_laeufe WHERE id=?', (run['id'],)).fetchone()
-            if not row or row['lease'] != run['lease'] or row['run_token'] != run['run_token']:
+            row = db.execute('SELECT lease,run_token,state,lease_until FROM assistent_mailquellen_laeufe WHERE id=?', (run['id'],)).fetchone()
+            if not row or row['lease'] != run['lease'] or row['run_token'] != run['run_token'] or row['state'] != 'active' or row['lease_until'] <= time.time():
                 raise ValueError('Dieser Einleseschritt ist abgelaufen. Gespeicherte Quellen bleiben erhalten.')
             yield db
 
-    def step(self):
+    def step(self, guard=None):
         account, own_address = self.identity()
         with self.db() as db:
+            if guard is not None:
+                guard(db)
             lease = uuid.uuid4().hex
             changed = db.execute("UPDATE assistent_mailquellen_laeufe SET lease=?,lease_until=? WHERE account=? AND state='active' AND lease_until<?", (lease, time.time()+180, account, time.time()))
             if not changed.rowcount:
                 return self._status(db, account)
             run = dict(db.execute('SELECT * FROM assistent_mailquellen_laeufe WHERE account=?', (account,)).fetchone())
+            run['_guard'] = guard
             folder = db.execute("SELECT * FROM assistent_mailquellen_ordner WHERE run_id=? AND state IN ('pending','headers') ORDER BY id LIMIT 1", (run['id'],)).fetchone()
             message = None if folder else db.execute("SELECT * FROM assistent_mailquellen_nachrichten WHERE account=? AND run_token=? AND state='queued' ORDER BY id LIMIT 1", (account, run['run_token'])).fetchone()
         try:
@@ -225,6 +293,8 @@ class MailSources:
         return sender, text(name), '', 'review'
 
     def _headers(self, run, folder, own_address):
+        if folder.get('incremental'):
+            return self._incremental_headers(run, folder, own_address)
         with self.mailbox.connect() as client:
             version = self.mailbox.select(client, folder['folder'])
             if not re.fullmatch(r'[1-9][0-9]*', str(version or '')):
@@ -276,6 +346,91 @@ class MailSources:
             db.execute('''UPDATE assistent_mailquellen_ordner SET validity=?,uids_json=?,total=?,cursor=?,missing=missing+?,snapshot_at=?,state=? WHERE id=?''',
               (version, folder['uids_json'], folder['total'], cursor, len(chosen)-len(headers), folder['snapshot_at'], 'done' if cursor >= len(ids) else 'headers', folder['id']))
 
+    def _incremental_headers(self, run, folder, own_address):
+        """Persist header outcomes before advancing a bounded UID checkpoint."""
+        with self.mailbox.connect() as client:
+            version = self.mailbox.select(client, folder['folder'])
+            if not re.fullmatch(r'[1-9][0-9]*', str(version or '')):
+                raise ValueError('Ordnerkennung fehlt; keine sichere Fortsetzung möglich.')
+            if folder['validity'] and folder['validity'] != version:
+                with self.owned(run) as db:
+                    db.execute("UPDATE assistent_mailquellen_nachrichten SET state='review_files',note=? WHERE account=? AND folder=? AND validity=? AND state='queued'",
+                               ('UIDVALIDITY geändert; alte Nachrichtenreferenz wird nicht erneut geöffnet.', run['account'], folder['folder'], folder['validity']))
+                    db.execute("UPDATE assistent_mailquellen_ordner SET validity=?,high_water_uid=0,poll_ceiling_uid=0,scan_end_uid=0,uids_json='[]',cursor=0,total=0,missing=0,snapshot_at='',state='pending' WHERE id=?", (version, folder['id']))
+                return
+            ceiling = int(folder['poll_ceiling_uid'] or 0)
+            if not folder['snapshot_at']:
+                values = client.response('UIDNEXT')[1]
+                value = values[0].decode('ascii') if values and isinstance(values[0], bytes) else ''
+                if not re.fullmatch(r'[1-9][0-9]*', value) or int(value) > 4294967296:
+                    raise ValueError('UIDNEXT fehlt; kein sicherer inkrementeller Stand.')
+                ceiling = int(value)-1
+                folder.update(poll_ceiling_uid=ceiling, snapshot_at=now())
+            high_water = int(folder['high_water_uid'] or 0)
+            if high_water > ceiling:
+                raise ValueError('UID-Fortsetzung ist widersprüchlich; Ordnerprüfung erforderlich.')
+            ids = json.loads(folder['uids_json'] or '[]')
+            scan_end = int(folder['scan_end_uid'] or 0)
+            if scan_end <= high_water:
+                scan_end = min(high_water+1000, ceiling)
+                ids = []
+                if scan_end > high_water:
+                    status, data = client.uid('SEARCH', None, 'UID', f'{high_water+1}:{scan_end}')
+                    if status != 'OK':
+                        raise ValueError('UID-Fenster nicht erreichbar.')
+                    ids = sorted({int(uid) for uid in (data[0] or b'').split() if re.fullmatch(rb'[1-9][0-9]*',uid)})
+                    # IMAP range semantics can include the last UID for an empty
+                    # range; never advance/read a UID outside our exact window.
+                    ids = [str(uid) for uid in ids if high_water < uid <= scan_end]
+                folder['cursor'] = 0
+            chosen = ids[folder['cursor']:folder['cursor']+HEADER_BATCH]
+            headers = {}
+            if chosen:
+                status, rows = client.uid('FETCH', ','.join(chosen), '(UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])')
+                if status != 'OK':
+                    raise ValueError('Header nicht erreichbar.')
+                for row in rows or []:
+                    if isinstance(row, tuple) and isinstance(row[1],bytes):
+                        match = re.search(rb'\bUID (\d+)\b',row[0])
+                        if match and match[1].decode() in chosen and len(row[1]) <= 65536:
+                            headers[match[1].decode()] = email.message_from_bytes(row[1],policy=policy.default)
+                missing = sorted(set(chosen)-set(headers))
+                if missing:
+                    status, data = client.uid('SEARCH', None, 'UID', ','.join(missing))
+                    if status != 'OK' or any(uid.decode() in missing for uid in (data[0] or b'').split()):
+                        raise ValueError('Header fehlen noch; Checkpoint bleibt unverändert.')
+            else:
+                missing = []
+        with self.owned(run) as db:
+            for uid, msg in headers.items():
+                sender,name,supplier,state = self._classify(db,run['account'],msg,own_address)
+                hidden = state == 'excluded'
+                db.execute('''INSERT INTO assistent_mailquellen_nachrichten
+                    (account,run_token,folder,validity,uid,sender,sender_name,subject,message_date,message_id,supplier,state,updated_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account,folder,validity,uid) DO UPDATE SET
+                    run_token=excluded.run_token,sender=excluded.sender,sender_name=excluded.sender_name,
+                    subject=excluded.subject,message_date=excluded.message_date,message_id=excluded.message_id,
+                    supplier=excluded.supplier,state=CASE WHEN excluded.state IN ('excluded','other','review') THEN excluded.state
+                    WHEN assistent_mailquellen_nachrichten.state IN ('review','review_files') THEN excluded.state
+                    ELSE assistent_mailquellen_nachrichten.state END''',
+                    (run['account'],run['run_token'],folder['folder'],version,uid,sender,name,
+                     '' if hidden else text(msg.get('Subject',''),400), '' if hidden else text(msg.get('Date','')),
+                     '' if hidden else text(msg.get('Message-ID','')),supplier,state,now()))
+            for uid in missing:
+                db.execute('''INSERT INTO assistent_mailquellen_nachrichten
+                    (account,run_token,folder,validity,uid,state,note,updated_at) VALUES(?,?,?,?,?,'gone',?,?)
+                    ON CONFLICT(account,folder,validity,uid) DO NOTHING''',
+                    (run['account'],run['run_token'],folder['folder'],version,uid,'Nachricht nach UID-Erfassung entfernt; kein Inhalt gelesen.',now()))
+            cursor = int(folder['cursor'])+len(chosen)
+            done_window = cursor >= len(ids)
+            if done_window:
+                high_water = scan_end
+            state = 'done' if done_window and high_water >= ceiling else 'headers'
+            db.execute('''UPDATE assistent_mailquellen_ordner SET validity=?,uids_json=?,cursor=?,total=total+?,
+                high_water_uid=?,poll_ceiling_uid=?,scan_end_uid=?,snapshot_at=?,state=? WHERE id=?''',
+                (version,'[]' if done_window else json.dumps(ids),0 if done_window else cursor,len(chosen),
+                 high_water,ceiling,scan_end,folder['snapshot_at'],state,folder['id']))
+
     def _attachments(self, run, source, own_address):
         # Recheck current metadata permission before downloading any body/part.
         with self.owned(run) as db:
@@ -299,6 +454,19 @@ class MailSources:
             sender, _, supplier, state = self._classify(db, run['account'], msg, own_address)
             if state != 'queued' or sender != source['sender'] or supplier != source['supplier']:
                 db.execute("UPDATE assistent_mailquellen_nachrichten SET state='review',note=? WHERE id=?", ('Absender oder Lesefreigabe hat sich geändert. Erneut zuordnen.', source['id']))
+                return
+            message_id = text(msg.get('Message-ID', ''))
+            if message_id != source['message_id']:
+                db.execute("UPDATE assistent_mailquellen_nachrichten SET state='review_files',note=? WHERE id=?",
+                           ('Message-ID stimmt nicht mehr mit dem Header überein; Quelle prüfen.',source['id']))
+                return
+            raw_hash = hashlib.sha256(raw).hexdigest()
+            fingerprint = hashlib.sha256(json.dumps([run['account'],sender,message_id,raw_hash],separators=(',',':')).encode()).hexdigest()
+            duplicate = db.execute("SELECT id,attachments_json,state,note FROM assistent_mailquellen_nachrichten WHERE account=? AND message_fingerprint=? AND state='files' AND id<>? ORDER BY id LIMIT 1", (run['account'],fingerprint,source['id'])).fetchone()
+            db.execute('UPDATE assistent_mailquellen_nachrichten SET raw_sha256=?,message_fingerprint=? WHERE id=?', (raw_hash,fingerprint,source['id']))
+            if duplicate:
+                db.execute('UPDATE assistent_mailquellen_nachrichten SET duplicate_of=?,state=?,attachments_json=?,note=?,updated_at=? WHERE id=?',
+                           (duplicate['id'],duplicate['state'],duplicate['attachments_json'],'Identische Originalnachricht bereits erfasst; vorhandene Belege verknüpft.',now(),source['id']))
                 return
             results = []
             attachments = [part for part in msg.walk() if part.get_filename() or part.get_content_disposition() == 'attachment']

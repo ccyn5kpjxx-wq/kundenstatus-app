@@ -1,5 +1,6 @@
 """Offline orders/outbox regressions with real MailOutbox and fake SMTP/IMAP."""
 from copy import deepcopy
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from email import policy
 from email.parser import BytesParser
@@ -68,10 +69,10 @@ class DispatchTests(unittest.TestCase):
     def messages(self):
         return [BytesParser(policy=policy.default).parsebytes(raw) for raw in self.smtp.raw]
 
-    def test_enqueue_does_not_send_and_persists_monday_noon_berlin(self):
+    def test_enqueue_does_not_send_and_persists_monday_fourteen_berlin(self):
         result = self.enqueue()
         self.assertEqual(result['state'], 'queued')
-        self.assertEqual(result['due_at'], '2026-09-28T10:00:00+00:00')
+        self.assertEqual(result['due_at'], '2026-09-28T12:00:00+00:00')
         self.dispatch.dispatch_due()
         self.assertEqual(self.smtp.data_calls, 0)
         self.assertEqual(self.mailbox.connect_calls, 0)
@@ -97,7 +98,7 @@ class DispatchTests(unittest.TestCase):
         first = self.enqueue()
         second = self.enqueue(order(product_id='product-2', article_number='TAPE-30', variant='grün 30 mm'), 'second')
         third = self.enqueue(order(supplier_id='supplier-2', recipient='orders@two.example'), 'third')
-        self.now = datetime(2026, 9, 28, 10, tzinfo=timezone.utc)
+        self.now = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
         self.dispatch.dispatch_due()
         self.assertEqual(self.smtp.data_calls, 2)
         self.assertEqual(self.dispatch.status(first['id'])['batch_id'], self.dispatch.status(second['id'])['batch_id'])
@@ -110,7 +111,7 @@ class DispatchTests(unittest.TestCase):
 
     def test_urgent_never_joins_weekly_batch_for_same_supplier(self):
         weekly = self.enqueue()
-        self.now = datetime(2026, 9, 28, 10, tzinfo=timezone.utc)
+        self.now = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
         urgent = self.enqueue(order(urgent=True), 'urgent')
         self.dispatch.dispatch_due()
         self.assertNotEqual(self.dispatch.status(weekly['id'])['batch_id'], self.dispatch.status(urgent['id'])['batch_id'])
@@ -141,7 +142,7 @@ class DispatchTests(unittest.TestCase):
         payload['variant'] = 'Changed after acceptance'
         self.suppliers['supplier-1']['recipient'] = 'changed@one.example'
         self.assertEqual(first['id'], self.enqueue(order())['id'])
-        self.now = datetime(2026, 9, 28, 10, tzinfo=timezone.utc)
+        self.now = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
         self.dispatch.dispatch_due()
         message = self.messages()[0]
         self.assertEqual(str(message['To']), 'orders@one.example')
@@ -168,7 +169,7 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(self.smtp.data_calls, 1)
 
     def test_rejected_batch_retry_preserves_its_original_membership_and_mime(self):
-        self.now = datetime(2026, 9, 28, 10, tzinfo=timezone.utc)
+        self.now = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
         first = self.enqueue()
         self.smtp.data_result = (554, b'rejected')
         self.dispatch.dispatch_due()
@@ -254,6 +255,103 @@ class DispatchTests(unittest.TestCase):
         service = build_order_dispatch(self.get_db, self.root / 'factory', lambda: {}, lambda: self.config)
         self.assertIsInstance(service.outbox, MailOutbox)
         self.assertEqual(self.smtp.data_calls, 0)
+
+    def legacy_order(self):
+        result = self.enqueue()
+        old = datetime(2026,9,28,10,tzinfo=timezone.utc).timestamp()
+        with closing(self.get_db()) as db, db:
+            db.execute('UPDATE assistent_bestellanforderungen SET schedule_version=1,legacy_due_at=NULL,due_at=? WHERE id=?',(old,result['id']))
+        return result,old
+
+    def test_overdue_legacy_migration_is_idempotent_and_keeps_original_monday(self):
+        result,old = self.legacy_order()
+        with closing(self.get_db()) as db, db:
+            before = db.execute('SELECT snapshot_json,request_fingerprint FROM assistent_bestellanforderungen').fetchone()
+            self.dispatch.migrate_weekly_schedule(db)
+        with closing(self.get_db()) as db, db:
+            self.dispatch.migrate_weekly_schedule(db)
+            row = db.execute('SELECT * FROM assistent_bestellanforderungen').fetchone()
+        self.assertEqual(row['due_at'],old+7200)
+        self.assertEqual(row['legacy_due_at'],old)
+        self.assertEqual(row['schedule_version'],2)
+        self.assertEqual((row['snapshot_json'],row['request_fingerprint']),tuple(before))
+        self.restarted().dispatch_due(datetime(2026,10,6,8,tzinfo=timezone.utc))
+        self.assertEqual(self.dispatch.status(result['id'])['state'],'sent')
+        self.assertEqual(self.smtp.data_calls,1)
+
+    def test_frozen_legacy_mail_keeps_payload_but_waits_until_fourteen(self):
+        result,old = self.legacy_order()
+        self.now = datetime.fromtimestamp(old,timezone.utc)
+        with patch.object(self.dispatch,'migrate_weekly_schedule',return_value=None):
+            self.dispatch._freeze_due_batches(self.now)
+        with closing(self.get_db()) as db, db:
+            before = dict(db.execute('SELECT * FROM assistent_bestellpakete').fetchone())
+        self.dispatch.dispatch_due()
+        self.assertEqual(self.smtp.data_calls,0)
+        with closing(self.get_db()) as db, db:
+            after = dict(db.execute('SELECT * FROM assistent_bestellpakete').fetchone())
+            request = dict(db.execute('SELECT * FROM assistent_bestellanforderungen').fetchone())
+        self.assertEqual(after['payload_json'],before['payload_json'])
+        self.assertEqual(after['fingerprint'],before['fingerprint'])
+        self.assertEqual(after['due_at'],old)
+        self.assertEqual(after['not_before_at'],old+7200)
+        self.assertEqual(request['due_at'],old)
+        self.assertEqual(request['schedule_version'],1)
+        self.assertEqual(self.dispatch.status(result['id'])['due_at'],'2026-09-28T12:00:00+00:00')
+        self.dispatch.dispatch_due(self.now+timedelta(hours=2))
+        self.dispatch.dispatch_due(self.now+timedelta(hours=3))
+        self.assertEqual(self.smtp.data_calls,1)
+
+    def test_sent_legacy_payload_and_schedule_remain_unchanged(self):
+        result,old = self.legacy_order()
+        self.now = datetime.fromtimestamp(old,timezone.utc)
+        with patch.object(self.dispatch,'migrate_weekly_schedule',return_value=None):
+            self.dispatch.dispatch_due()
+        with closing(self.get_db()) as db, db:
+            before = dict(db.execute('SELECT * FROM assistent_bestellpakete').fetchone())
+        self.restarted().dispatch_due(self.now+timedelta(days=1))
+        with closing(self.get_db()) as db, db:
+            after = dict(db.execute('SELECT * FROM assistent_bestellpakete').fetchone())
+        self.assertEqual(before,after)
+        self.assertEqual(self.smtp.data_calls,1)
+
+    def test_concurrent_migration_and_freeze_create_only_one_batch(self):
+        result,old = self.legacy_order()
+        now = datetime.fromtimestamp(old+7200,timezone.utc)
+        barrier = threading.Barrier(2)
+        errors = []
+        def migrate_or_freeze(migrate):
+            try:
+                barrier.wait(3)
+                if migrate:
+                    with closing(self.get_db()) as db, db:
+                        self.dispatch.migrate_weekly_schedule(db)
+                else:
+                    self.dispatch._freeze_due_batches(now)
+            except Exception as exc:
+                errors.append(exc)
+        threads = [threading.Thread(target=migrate_or_freeze,args=(value,)) for value in (True,False)]
+        for thread in threads: thread.start()
+        for thread in threads: thread.join(8)
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertEqual(errors,[])
+        self.dispatch.dispatch_due(now)
+        with closing(self.get_db()) as db, db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_bestellpakete').fetchone()[0],1)
+        self.assertEqual(self.smtp.data_calls,1)
+
+    def test_restore_without_version_columns_recreates_only_schema(self):
+        with closing(self.get_db()) as db, db:
+            db.execute('ALTER TABLE assistent_bestellanforderungen DROP COLUMN schedule_version')
+            db.execute('ALTER TABLE assistent_bestellanforderungen DROP COLUMN legacy_due_at')
+            db.execute('ALTER TABLE assistent_bestellpakete DROP COLUMN not_before_at')
+        self.dispatch.init_schedule_schema()
+        self.dispatch.init_schedule_schema()
+        with closing(self.get_db()) as db, db:
+            columns = [row['name'] for row in db.execute('PRAGMA table_info(assistent_bestellanforderungen)')]
+        self.assertIn('schedule_version',columns)
+        self.assertIn('legacy_due_at',columns)
+        self.assertEqual(self.smtp.data_calls,0)
 
 
 if __name__ == '__main__':

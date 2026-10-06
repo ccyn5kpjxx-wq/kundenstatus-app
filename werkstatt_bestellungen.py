@@ -18,7 +18,8 @@ current employee sessions, rights, exact stored data and the shared budget.
 start_order_worker is an explicit opt-in alternative in the existing web process.
 """
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from contextvars import ContextVar
+from datetime import datetime, time as day_time, timedelta, timezone
 from decimal import Decimal
 import hmac
 import json
@@ -37,6 +38,13 @@ from werkstatt_artikel_identity import parse_unit_price
 from werkstatt_bestellausgang import build_order_dispatch
 from werkstatt_bestellplan import BERLIN
 from werkstatt_bestelluebersicht import OrderOverview
+
+
+_material_permit = ContextVar('werkstatt_material_order_permit', default=None)
+
+
+def _canonical_intent(intent):
+    return json.dumps(intent, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
 
 def _now():
@@ -73,6 +81,20 @@ class OrderManagement:
         self.app = portal.app
         for key in ('ASSISTANT_ORDER_SEND_ENABLED', 'ASSISTANT_ORDER_WORKER_ENABLED'):
             self.app.config.setdefault(key, os.environ.get(key, '').casefold() in {'1', 'true', 'yes'})
+        self.init_schema()
+        storage = self.app.config.get('MAILBOX_OUTBOX_DIR') or str(Path(self.app.instance_path) / 'mail_outbox')
+        self.storage_dir = Path(storage).resolve()
+        self.dispatch = build_order_dispatch(portal.get_db, storage, portal.get_werkstatt_imap_config,
+                                             portal.get_werkstatt_smtp_config, self.authorize_order,
+                                             self.resolve_supplier, lambda: _now(),
+                                             self.reserve_budget, self.check_batch, self._schedule_lock)
+        self._worker_lock = threading.Lock()
+        self._worker = None
+        self._worker_pid = None
+        self._worker_stop = threading.Event()
+
+    def init_schema(self):
+        """Recreate all ordering tables after a backup restore; never dispatch."""
         with self.db() as db:
             db.execute('''CREATE TABLE IF NOT EXISTS assistent_bestellkontakte (
                 id TEXT PRIMARY KEY, name TEXT NOT NULL, recipient TEXT NOT NULL DEFAULT '',
@@ -81,16 +103,10 @@ class OrderManagement:
             db.execute('''CREATE TABLE IF NOT EXISTS assistent_bestellkonfiguration (
                 setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL)''')
             db.commit()
-        storage = self.app.config.get('MAILBOX_OUTBOX_DIR') or str(Path(self.app.instance_path) / 'mail_outbox')
-        self.storage_dir = Path(storage).resolve()
-        self.dispatch = build_order_dispatch(portal.get_db, storage, portal.get_werkstatt_imap_config,
-                                             portal.get_werkstatt_smtp_config, self.authorize_order,
-                                             self.resolve_supplier, lambda: _now(),
-                                             self.reserve_budget, self.check_batch)
-        self._worker_lock = threading.Lock()
-        self._worker = None
-        self._worker_pid = None
-        self._worker_stop = threading.Event()
+        if hasattr(self,'dispatch'):
+            self.dispatch.init_schema()
+            # The outbox lazily caches schema readiness; a restored DB is new.
+            self.dispatch.outbox._schema_ready = False
 
     @contextmanager
     def db(self):
@@ -116,7 +132,7 @@ class OrderManagement:
 
     def cap(self):
         try:
-            return max(0, int(self.setting('max_total_cents', '0')))
+            return min(25000, max(0, int(self.setting('max_total_cents', '0'))))
         except ValueError:
             return 0
 
@@ -207,6 +223,11 @@ class OrderManagement:
                 'can_send': enabled and mailbox_ready and storage_ready}
 
     def authorize_order(self, actor_id, intent):
+        permit = _material_permit.get()
+        if (permit and permit[0] is self and permit[1] == actor_id and permit[2] == intent.get('id')
+                and permit[3] == _canonical_intent(intent)
+                and 0 < intent.get('max_total_cents', 0) <= self.cap() and self.availability()['can_send']):
+            return True
         if (has_request_context() and getattr(g, 'assistant_approved_order', None) == (actor_id, intent.get('id'))
                 and 0 < intent.get('max_total_cents', 0) <= self.cap() and self.availability()['can_send']):
             return True
@@ -224,21 +245,64 @@ class OrderManagement:
         Count immutable authorized ceilings, including already frozen batches, so
         a second request/worker cannot split a Monday supplier limit into mails.
         """
-        db.execute("UPDATE assistent_bestellkonfiguration SET setting_value=setting_value WHERE setting_key='max_total_cents'")
+        self._schedule_lock(db)
+        row = db.execute("SELECT setting_value FROM assistent_bestellkonfiguration WHERE setting_key='max_total_cents'").fetchone()
+        cap = min(25000,int(row['setting_value'])) if row and str(row['setting_value']).isdigit() else 0
+        if request_key.startswith('material:'):
+            permit = _material_permit.get()
+            if (not permit or permit[0] is not self or permit[1] != actor or permit[2] != request_key
+                    or permit[3] != _canonical_intent(intent)):
+                raise PermissionError('Materialbedarf ist nicht für diese unveränderte Bestellung freigegeben.')
+            self._guard_material(db,permit[4],permit[5],actor,request_key,intent,cap)
         existing = db.execute('SELECT id FROM assistent_bestellanforderungen WHERE actor_id=? AND request_id=?',
                               (actor, request_key)).fetchone()
         if existing:
             return  # Dispatch verifies the exact immutable fingerprint next.
-        row = db.execute("SELECT setting_value FROM assistent_bestellkonfiguration WHERE setting_key='max_total_cents'").fetchone()
-        cap = int(row['setting_value']) if row and str(row['setting_value']).isdigit() else 0
         reserved = 0
         if not intent['urgent']:
-            for saved in db.execute('SELECT snapshot_json FROM assistent_bestellanforderungen WHERE due_at=?', (due_at,)).fetchall():
-                order = json.loads(saved['snapshot_json'])['order']
-                if not order['urgent'] and order['supplier_id'] == intent['supplier_id']:
-                    reserved += order['max_total_cents']
+            reserved = self._weekly_reserved(db,intent['supplier_id'],due_at)
         if cap <= 0 or reserved + intent['max_total_cents'] > cap:
             raise ValueError('Brutto-Kostenrahmen überschritten: dringend je Bestellung, sonst insgesamt je Lieferant und Montagsversand. Nicht in weitere Bestellungen aufteilen.')
+
+    @staticmethod
+    def _schedule_lock(db):
+        db.execute("UPDATE assistent_bestellkonfiguration SET setting_value=setting_value WHERE setting_key='max_total_cents'")
+
+    @staticmethod
+    def _weekly_reserved(db,supplier_id,due_at):
+        local_day = datetime.fromtimestamp(due_at,timezone.utc).astimezone(BERLIN).date()
+        day_start = datetime.combine(local_day,day_time(),tzinfo=BERLIN).timestamp()
+        day_end = datetime.combine(local_day+timedelta(days=1),day_time(),tzinfo=BERLIN).timestamp()
+        reserved = 0
+        for saved in db.execute('SELECT snapshot_json FROM assistent_bestellanforderungen WHERE due_at>=? AND due_at<?', (day_start,day_end)).fetchall():
+            order = json.loads(saved['snapshot_json'])['order']
+            if not order['urgent'] and order['supplier_id'] == supplier_id:
+                reserved += order['max_total_cents']
+        return reserved
+
+    def migrate_weekly_schedule(self):
+        with self.db() as db:
+            self.dispatch.migrate_weekly_schedule(db)
+            db.commit()
+
+    def _guard_material(self, db, draft_id, revision, actor, request_key, intent, cap):
+        dialog = getattr(self.p,'material_dialog',None)
+        if dialog is None:
+            raise PermissionError('Der geprüfte Materialbedarf ist nicht verfügbar.')
+        if actor == 'admin':
+            limit = cap
+        else:
+            match = re.fullmatch(r'mitarbeiter:([1-9][0-9]*)',actor)
+            if not match:
+                raise PermissionError('Persönlicher Materialbesteller fehlt.')
+            row = db.execute('''SELECT r.lesen,r.einkaufen,r.limit_cent,m.aktiv FROM assistent_rechte r
+                JOIN mitarbeiter m ON m.id=r.mitarbeiter_id WHERE r.mitarbeiter_id=?''', (int(match[1]),)).fetchone()
+            if not row or not row['aktiv'] or not row['lesen'] or not row['einkaufen']:
+                raise PermissionError('Aktuelle Mitarbeiterfreigabe für Materialbestellungen fehlt.')
+            limit = min(cap,max(0,int(row['limit_cent'])))
+        if not 0 < intent['max_total_cents'] <= limit:
+            raise ValueError('Materialbestellung überschreitet den persönlichen oder betrieblichen Brutto-Kostenrahmen.')
+        return dialog.guard_order(db,draft_id,revision=revision,actor=actor,request_key=request_key,intent=intent)
 
     def check_batch(self, payload):
         cap = self.cap()
@@ -250,6 +314,93 @@ class OrderManagement:
             supplier = self.resolve_supplier(order['supplier_id'])
             if not supplier or not supplier['verified'] or supplier['recipient'] != order['recipient']:
                 raise ValueError('Bestellkontakt wurde geändert oder seine Bestätigung aufgehoben.')
+            if not order['urgent']:
+                with self.db() as db:
+                    self._schedule_lock(db)
+                    stored = db.execute('SELECT due_at FROM assistent_bestellanforderungen WHERE id=?', (entry['id'],)).fetchone()
+                    if not stored or self._weekly_reserved(db,order['supplier_id'],stored['due_at']) > cap:
+                        raise ValueError('Gesamter Brutto-Kostenrahmen für diesen Lieferanten und Montag überschritten.')
+                    db.commit()
+            match = re.fullmatch(r'material:([1-9][0-9]*)',str(order.get('id','')))
+            if match:
+                try:
+                    with self.db() as db:
+                        self._schedule_lock(db)
+                        self._guard_material(db,int(match[1]),None,entry['actor_id'],order['id'],order,cap)
+                        db.commit()
+                except PermissionError as exc:
+                    raise ValueError(str(exc)) from None
+
+    def submit_material_request(self, draft_id, revision):
+        """Submit only a server-approved material snapshot; no fabricated session.
+
+        The durable key is the draft identity, never its revision. The material
+        guard is checked again inside reservation and immediately before SMTP.
+        """
+        if type(draft_id) is not int or draft_id <= 0 or type(revision) is not int or revision <= 0:
+            raise ValueError('Materialbedarf und geprüfte Revision eindeutig angeben.')
+        dialog = getattr(self.p,'material_dialog',None)
+        if dialog is None:
+            raise ValueError('Materialdialog ist noch nicht eingerichtet.')
+        request_key = 'material:'+str(draft_id)
+        def blocked(message):
+            # This is an internal service, not a public lookup. A revoked source
+            # after enqueue must not erase the already durable order identity.
+            with self.db() as db:
+                saved = db.execute('SELECT id FROM assistent_bestellanforderungen WHERE request_id=?', (request_key,)).fetchall()
+            if len(saved) == 1:
+                result = self.dispatch.status(saved[0]['id'])
+                return dict(result,draft_id=draft_id,needs_review=True,
+                            message='Bestellung bereits gespeichert; aktuelle Freigabe prüfen. Nicht erneut bestellen. '+str(message)[:350])
+            return {'id':None,'draft_id':draft_id,'state':'blocked','needs_review':True,'message':str(message)[:500]}
+        try:
+            approved = dialog.approved_order(draft_id,revision)
+            if (not isinstance(approved,dict) or approved.get('draft_id') != draft_id
+                    or approved.get('revision') != revision or approved.get('request_key') != request_key):
+                raise PermissionError('Freigabe gehört nicht zu diesem Materialbedarf und Bearbeitungsstand.')
+            actor = _text(approved.get('actor'),'Persönlicher Besteller',128)
+            payload = approved.get('payload')
+            if not isinstance(payload,dict) or any(key not in payload for key in ('price_source','shipping_cents','extra_costs_cents')):
+                raise ValueError('Geprüfte Preisquelle, Versand und Nebenkosten fehlen.')
+            intent = self.dispatch._intent(payload,request_key)
+            with self.db() as db:
+                existing = db.execute('SELECT id FROM assistent_bestellanforderungen WHERE actor_id=? AND request_id=?', (actor,request_key)).fetchone()
+            if existing:
+                result = self.dispatch.status(existing['id'])
+                if result['order'] != intent:
+                    raise ValueError('Dieser Materialbedarf wurde bereits mit anderem Inhalt übergeben; keine zweite Bestellung.')
+            else:
+                available = self.availability()
+                if not available['can_send']:
+                    raise ValueError('Bestellversand, betrieblicher Postfachzugang oder dauerhafter Ausgabespeicher fehlen.')
+                if not intent['urgent'] and not available['worker_live']:
+                    raise ValueError('Der automatische Montagsversand um 14 Uhr ist noch nicht betriebsbereit.')
+                token = _material_permit.set((self,actor,request_key,_canonical_intent(intent),draft_id,revision))
+                try:
+                    result = self.dispatch.enqueue(payload,actor,request_key)
+                finally:
+                    _material_permit.reset(token)
+        except (ValueError,PermissionError,TypeError) as exc:
+            return blocked(exc)
+        # The queue is durable before acknowledging it to the source dialog. A
+        # failed acknowledgement never creates a new key or loses the order ID.
+        try:
+            dialog.order_attempt(draft_id,revision,result)
+        except Exception:
+            return dict(result,draft_id=draft_id,needs_review=True,
+                        message='Bestellung gespeichert; Zuordnung zum Materialbedarf wird noch abgeglichen. Nicht erneut bestellen.')
+        if intent['urgent']:
+            try:
+                self.tick()
+            except Exception:
+                return dict(self.dispatch.status(result['id']),draft_id=draft_id,needs_review=True,
+                            message='Bestellung gespeichert; sofortiger Versand noch nicht bestätigt. Nicht erneut bestellen.')
+            result = self.dispatch.status(result['id'])
+            try:
+                dialog.order_attempt(draft_id,revision,result)
+            except Exception:
+                pass  # Delivery state is already authoritative in the outbox.
+        return dict(result,draft_id=draft_id)
 
     def _action_actor_limit(self, actor, *, write=False):
         if not has_request_context():
@@ -409,6 +560,7 @@ def register_orders(portal):
     if 'werkstatt_orders' in app.extensions:
         return app.extensions['werkstatt_orders']
     manager = OrderManagement(portal)
+    portal.workshop_orders_init_schema = manager.init_schema
     bp = Blueprint('werkstatt_orders', __name__, url_prefix='/admin/assistent-bestellungen')
 
     @bp.after_request
@@ -439,9 +591,168 @@ def register_orders(portal):
             pending[request_id] = True
             session['assistant_order_requests'] = dict(list(pending.items())[-20:])
         overview = OrderOverview(portal.get_db).page(request.args)
+        intake = getattr(portal, 'workshop_intake', None)
         return render_template('assistent_bestellungen.html', contacts=manager.contacts(), availability=manager.availability(),
                                overview=overview, cap_cents=manager.cap(), csrf=csrf, request_id=request_id,
+                               intake_entries=intake.list(limit=20) if intake else None,
                                errors=errors or [], form=form), code
+
+    def intake_page(errors=None, code=200, group_id=None):
+        service = getattr(portal, 'workshop_intake', None)
+        if service is None:
+            abort(404)
+        csrf = session.setdefault('csrf_token', secrets.token_urlsafe(32))
+        group_id = group_id or request.args.get('id', type=int)
+        try:
+            current = service.detail(group_id) if group_id else None
+        except (ValueError, LookupError):
+            abort(404, description='Dieser Materialeingang wurde nicht gefunden.')
+        candidates = None
+        lookup_line = request.args.get('lookup', type=int)
+        if current and lookup_line:
+            try:
+                candidates = service.catalog_candidates(group_id, lookup_line)
+            except (ValueError, LookupError):
+                abort(404, description='Diese Materialposition wurde nicht gefunden.')
+        def display_time(value):
+            return datetime.fromisoformat(value).astimezone(BERLIN).strftime('%d.%m.%Y %H:%M Uhr (%Z)')
+
+        if current:
+            current['source_at_display'] = display_time(current['source_at'])
+        entries = service.list(limit=100)
+        for entry in entries:
+            entry['source_at_display'] = display_time(entry['source_at'])
+        monitor = getattr(portal, 'workshop_purchase_monitor', None)
+        channel = getattr(portal, 'material_channel', None)
+        material_dialog = getattr(portal,'material_dialog',None)
+        material_current = None
+        material_id = request.args.get('material',type=int)
+        if 'material' in request.args and (material_dialog is None or material_id is None or material_id <= 0):
+            abort(404)
+        if material_dialog and material_id:
+            try:
+                material_current = material_dialog.status(material_id)
+            except (ValueError,LookupError):
+                abort(404,description='Dieser Materialbedarf wurde nicht gefunden.')
+        employees = []
+        if channel:
+            db = portal.get_db()
+            try:
+                employees = [dict(row) for row in db.execute('''SELECT m.id,m.name FROM mitarbeiter m
+                    JOIN assistent_rechte r ON r.mitarbeiter_id=m.id
+                    WHERE m.aktiv=1 AND r.lesen=1 AND r.einkaufen=1 ORDER BY m.name,m.id''').fetchall()]
+            finally:
+                db.close()
+        return render_template('einkaufseingang.html', entries=entries,
+                               current=current, errors=errors or [], csrf=csrf,
+                               candidates=candidates, lookup_line=lookup_line,
+                               source_nonce=str(uuid.uuid4()),
+                               monitor=monitor.status() if monitor else None,
+                               channel=channel.readiness() if channel else None,
+                               senders=channel.list_senders() if channel else [], employees=employees,
+                               incoming=channel.status(limit=20) if channel else [],
+                               material_dialogs=material_dialog.list(limit=50) if material_dialog else [],
+                               material_current=material_current,material_contacts=manager.contacts(),
+                               material_replies_enabled=portal.app.config.get('MATERIAL_WHATSAPP_REPLIES_ENABLED') is True,
+                               preview_mode=portal.app.config.get('MATERIAL_INTAKE_PREVIEW', False)), code
+
+    @bp.get('/eingang/ansicht')
+    @portal.admin_required
+    def intake_index():
+        return intake_page()
+
+    @bp.post('/eingang/automatik/<action>')
+    @portal.admin_required
+    def intake_automation(action):
+        monitor = getattr(portal, 'workshop_purchase_monitor', None)
+        channel = getattr(portal, 'material_channel', None)
+        form = request.form
+        try:
+            if action in ('rechnungen-start', 'rechnungen-pause') and monitor:
+                monitor.configure(action == 'rechnungen-start', interval_seconds=form.get('interval_seconds', 300, type=int))
+                message = 'Rechnungsabruf freigegeben. Der Hintergrunddienst muss ebenfalls laufen.' if action.endswith('start') else 'Rechnungsabruf pausiert.'
+            elif action == 'rechnungen-abrufen' and monitor:
+                monitor.tick(max_steps=2, force=True)
+                message = 'Begrenzter Rechnungsabgleich ausgeführt. Den Stand und offene Prüfungen sehen Sie unten.'
+            elif action == 'absender' and channel:
+                channel.verify_sender(form.get('employee_id', type=int), form.get('phone_e164'), form.get('source_note'),
+                                      confirmed=form.get('confirmed') == 'ja')
+                message = 'Persönliche Materialzuordnung gespeichert.'
+            elif action == 'absender-widerrufen' and channel:
+                channel.revoke_sender(form.get('sender_id', type=int), form.get('revision', type=int))
+                message = 'Materialzuordnung widerrufen.'
+            elif action == 'foto-abrufen' and channel:
+                channel.process_next()
+                message = 'Fotoabruf geprüft. Den tatsächlichen Eingangsstand und offene Prüfungen sehen Sie unten.'
+            else:
+                abort(404)
+        except (ValueError, LookupError, PermissionError) as exc:
+            return intake_page([str(exc)], code=400)
+        flash(message, 'success')
+        return redirect(url_for('werkstatt_orders.intake_index', _anchor='automatik'), code=303)
+
+    @bp.post('/eingang/form/<action>')
+    @portal.admin_required
+    def intake_form(action):
+        service = getattr(portal, 'workshop_intake', None)
+        if service is None:
+            abort(404)
+        form = request.form
+        group_id = form.get('group_id', type=int)
+        try:
+            if action == 'anlegen':
+                from werkstatt_bestellplan import BERLIN
+                stamp = datetime.fromisoformat(form.get('source_at', ''))
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=BERLIN)
+                mode = form.get('mode')
+                if mode not in {'bedarf', 'bereits_bestellt'}:
+                    raise ValueError('Bedarf oder bereits erfolgte Bestellung auswählen.')
+                labels = [value.strip() for value in form.get('products', '').splitlines() if value.strip()]
+                data = service.create({'supplier': form.get('supplier'), 'source_key': form.get('source_key'),
+                    'external_ref': form.get('external_ref'), 'source_at': stamp.isoformat(),
+                    'already_ordered': mode == 'bereits_bestellt', 'original_author': form.get('original_author') or None,
+                    'lines': [{'product': label, 'sku': '', 'variant': '', 'unit': '', 'pack': '',
+                               'quantity': None, 'urgent': None, 'category': 'ungeklaert'} for label in labels]})
+                group_id = data['id']
+            elif action == 'datei':
+                service.attach(group_id, request.files.get('file'), form.get('kind'))
+            elif action == 'auslesen':
+                service.analyze_file(group_id, form.get('file_id', type=int))
+            elif action == 'klaeren':
+                service.update_line(group_id, form.get('line_id', type=int), {
+                    'revision': form.get('revision', type=int), 'reviewed': form.get('reviewed') == 'ja',
+                    'product': form.get('product'), 'sku': form.get('sku'), 'variant': form.get('variant'),
+                    'unit': form.get('unit'), 'pack': form.get('pack'), 'quantity': form.get('quantity') or None,
+                    'urgent': {'urgent': True, 'weekly': False, 'unknown': None}.get(form.get('urgency')),
+                    'category': form.get('category'), 'original_author': form.get('original_author') or None,
+                    'reason': form.get('reason')})
+            elif action == 'lieferung':
+                service.record_delivery(group_id, {'revision': form.get('revision', type=int),
+                    'line_id': form.get('line_id', type=int), 'file_id': form.get('file_id', type=int),
+                    'position': form.get('position', type=int), 'quantity': form.get('quantity'), 'unit': form.get('unit')})
+            elif action == 'preis':
+                current = service.detail(group_id)
+                line = next((item for item in current['lines'] if item['id'] == form.get('line_id', type=int)), None)
+                if line is None:
+                    raise ValueError('Position wurde nicht gefunden.')
+                service.record_price(group_id, {'revision': form.get('revision', type=int),
+                    'line_id': line['id'], 'file_id': form.get('file_id', type=int),
+                    'position': form.get('position', type=int), 'page': form.get('page', type=int),
+                    'role': form.get('role'), 'amount': form.get('amount'), 'unit': form.get('unit'),
+                    'pack': form.get('pack'), 'currency': 'EUR', 'tax_basis': form.get('tax_basis'),
+                    'tax_rate': form.get('tax_rate') or None, 'discount_basis': form.get('discount_basis'),
+                    'source_date': form.get('source_date'), 'reviewed': form.get('reviewed') == 'ja',
+                    'identity': {'supplier': current['supplier'], **{key: line[key] for key in ('product','sku','variant','unit','pack')}}})
+            elif action == 'katalogpreis':
+                service.set_catalog_price(group_id, form.get('line_id', type=int), {
+                    'revision': form.get('revision', type=int), 'proposal_id': form.get('proposal_id', type=int)})
+            else:
+                abort(404)
+        except (ValueError, LookupError) as exc:
+            return intake_page([str(exc)], code=400, group_id=group_id)
+        flash('Interner Nachweis gespeichert.', 'success')
+        return redirect(url_for('werkstatt_orders.intake_index', id=group_id), code=303)
 
     @bp.get('')
     @portal.admin_required
