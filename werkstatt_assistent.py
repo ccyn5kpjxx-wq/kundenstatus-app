@@ -21,7 +21,7 @@ from email.message import EmailMessage
 
 import requests
 import assistent_cockpit as cockpit
-from flask import Blueprint, abort, jsonify, render_template, request, session, redirect, url_for
+from flask import Blueprint, abort, flash, jsonify, render_template, request, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 from PIL import Image, UnidentifiedImageError
 from werkstatt_assistent_workflow import Workflow, KINDS as WORKFLOW_KINDS, MAIL_KINDS, PROPOSAL_TOOLS, READ_TOOLS as WORKFLOW_READ_TOOLS, TOOLS as WORKFLOW_TOOLS, RULES as WORKFLOW_RULES
@@ -615,16 +615,28 @@ def register_assistant(p):
 
     @bp.post("/login")
     def login():
+        material_form = request.form.get('next') == '/werkstatt/materialbestellung'
+        def failed_login(message, status):
+            if material_form:
+                flash(message, 'error')
+                return redirect('/werkstatt/materialbestellung', code=303)
+            return jsonify(error=message), status
         if not p.app.config["ASSISTANT_NATIVE_COCKPIT"] and not p.werkstatt_tafel_session_ok():
+            if material_form:
+                return failed_login('Der persönliche Materialzugang ist derzeit nicht verfügbar. Bitte wende dich an die Werkstattleitung.', 403)
             abort(403)
         limited, _ = p.login_rate_limit_status("assistent", "login")
         if limited:
-            return jsonify(error="Zu viele Fehlversuche. Bitte später erneut versuchen."), 429
+            return failed_login('Zu viele Fehlversuche. Bitte später erneut versuchen.', 429)
+        employee_id = request.form.get('mitarbeiter_id', '').strip()
+        if not re.fullmatch(r'[1-9][0-9]{0,9}', employee_id) or int(employee_id) > 2147483647:
+            p.record_failed_login('assistent', 'login')
+            return failed_login('Bitte deine numerische Mitarbeiter-ID und dein persönliches Passwort prüfen. Das Admin-Passwort gilt hier nicht.' if material_form else 'Anmeldung fehlgeschlagen.', 401)
         with db_scope() as db:
-            row = db.execute("SELECT r.*,m.aktiv FROM assistent_rechte r JOIN mitarbeiter m ON m.id=r.mitarbeiter_id WHERE r.mitarbeiter_id=?", (request.form.get("mitarbeiter_id", ""),)).fetchone()
+            row = db.execute("SELECT r.*,m.aktiv FROM assistent_rechte r JOIN mitarbeiter m ON m.id=r.mitarbeiter_id WHERE r.mitarbeiter_id=?", (int(employee_id),)).fetchone()
         if not row or not row["aktiv"] or not row["passwort_hash"] or not check_password_hash(row["passwort_hash"], request.form.get("password", "")):
             p.record_failed_login("assistent", "login")
-            return jsonify(error="Anmeldung fehlgeschlagen."), 401
+            return failed_login('Die Anmeldung hat nicht geklappt. Bitte Mitarbeiter-ID und persönliches Passwort prüfen. Das Admin-Passwort gilt hier nicht.' if material_form else 'Anmeldung fehlgeschlagen.', 401)
         p.clear_login_attempts("assistent", "login")
         # Personal avatar access is independent of the shared workshop/admin
         # session. Use the existing portal session lifetime (default: 8h idle).

@@ -129,6 +129,8 @@ class AssistantTests(unittest.TestCase):
         with client.session_transaction() as s:
             self.assertEqual(s['assistent_mid'],1)
             self.assertEqual(s['assistent_version'],1)
+            self.assertNotEqual(s['csrf_token'],token)
+            token=s['csrf_token']
             self.assertTrue(s.permanent)
             self.assertFalse(s.get('werkstatt_tafel'))
             self.assertFalse(s.get('admin'))
@@ -155,6 +157,8 @@ class AssistantTests(unittest.TestCase):
         with database() as db:db.execute('UPDATE assistent_rechte SET lesen=0 WHERE mitarbeiter_id=1')
         self.assertEqual(client.get('/werkstatt/assistent/auftrag/156').status_code,403)
         with client.session_transaction() as s:
+            self.assertNotEqual(s['csrf_token'],token)
+            token=s['csrf_token']
             s['werkstatt_tafel']='independent-existing-workshop-session'
             s['other_preference']='keep'
         self.assertEqual(client.post('/werkstatt/assistent/logout',data={'csrf_token':token}).status_code,302)

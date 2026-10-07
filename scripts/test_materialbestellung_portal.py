@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jinja2 import DictLoader
 from PIL import Image
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask import abort, jsonify, request, session, redirect, url_for
+from flask import abort, flash, jsonify, request, session, redirect, url_for
 
 import test_materialdialog as dialog_fixtures
 import test_materialbestellung_e2e as e2e_fixtures
@@ -56,7 +56,7 @@ class PortalTests(unittest.TestCase):
         login.decorator_list = []
         namespace = dict(p=self.p, db_scope=self.portal.db, abort=abort, jsonify=jsonify, request=request,
                          session=session, redirect=redirect, url_for=url_for, check_password_hash=check_password_hash,
-                         secrets=__import__('secrets'))
+                         flash=flash, re=__import__('re'), secrets=__import__('secrets'))
         self.p.login_rate_limit_status = lambda *_: (False, None)
         self.p.record_failed_login = self.p.clear_login_attempts = lambda *_: None
         exec(compile(ast.fix_missing_locations(ast.Module(body=[login], type_ignores=[])), 'actual-login', 'exec'), namespace)
@@ -370,6 +370,84 @@ class PortalTests(unittest.TestCase):
         login = self.client.post('/werkstatt/assistent/login', data={
             'mitarbeiter_id': 1, 'password': 'synthetic-password-123', 'next': 'https://evil.example'})
         self.assertEqual(login.location, '/werkstatt/assistent')
+
+    def test_material_login_invalid_numeric_id_never_reaches_database(self):
+        failed = []
+        self.p.record_failed_login = lambda *args: failed.append(args)
+        for employee_id in ('', 'admin', 'Chris', '-1', '0', '1.0', '1.5', '1e2', '1e3', '2147483648', '99999999999999999999999999'):
+            with patch.object(self.p, 'get_db', side_effect=AssertionError('Malformed ID must not reach PostgreSQL')):
+                result = self.client.post('/werkstatt/assistent/login', data={
+                    'mitarbeiter_id': employee_id, 'password': 'wrong', 'next': '/werkstatt/materialbestellung'})
+            self.assertEqual(result.status_code, 303, employee_id)
+            self.assertEqual(result.location, '/werkstatt/materialbestellung')
+            with self.client.session_transaction() as session:
+                self.assertIn('numerische Mitarbeiter-ID', session['_flashes'][-1][1])
+        self.assertEqual(len(failed), 11)
+
+    def test_material_login_failure_returns_form_with_generic_message_and_no_new_session(self):
+        for employee_id, password in (('1', ''), ('1', 'wrong'), ('99999', 'wrong')):
+            anonymous = self.p.app.test_client()
+            result = anonymous.post('/werkstatt/assistent/login', data={
+                'mitarbeiter_id': employee_id, 'password': password, 'next': '/werkstatt/materialbestellung'})
+            self.assertEqual(result.status_code, 303)
+            self.assertEqual(result.location, '/werkstatt/materialbestellung')
+            with anonymous.session_transaction() as session:
+                self.assertNotIn('assistent_mid', session)
+                self.assertIn('Die Anmeldung hat nicht geklappt.', session['_flashes'][-1][1])
+                self.assertNotIn(employee_id, session['_flashes'][-1][1])
+
+    def test_material_login_missing_password_or_inactive_employee_stays_unavailable(self):
+        self.sql("UPDATE assistent_rechte SET passwort_hash='' WHERE mitarbeiter_id=1")
+        self.sql('UPDATE mitarbeiter SET aktiv=0 WHERE id=2')
+        for employee_id in (1, 2):
+            anonymous = self.p.app.test_client()
+            result = anonymous.post('/werkstatt/assistent/login', data={
+                'mitarbeiter_id': str(employee_id), 'password': 'synthetic-password-123',
+                'next': '/werkstatt/materialbestellung'})
+            self.assertEqual(result.status_code, 303)
+            with anonymous.session_transaction() as session:
+                self.assertNotIn('assistent_mid', session)
+
+    def test_material_login_rate_limit_preserved_and_ordinary_api_keeps_json(self):
+        ordinary = self.client.post('/werkstatt/assistent/login', data={'mitarbeiter_id': 'admin', 'password': 'wrong'})
+        self.assertEqual(ordinary.status_code, 401)
+        self.assertEqual(ordinary.json, {'error': 'Anmeldung fehlgeschlagen.'})
+        invalid_return = self.client.post('/werkstatt/assistent/login', data={
+            'mitarbeiter_id': '1', 'password': 'wrong', 'next': 'https://evil.example'})
+        self.assertEqual(invalid_return.status_code, 401)
+        self.assertIsNone(invalid_return.location)
+        self.p.login_rate_limit_status = lambda *_: (True, None)
+        ordinary = self.client.post('/werkstatt/assistent/login', data={'mitarbeiter_id': '1', 'password': 'wrong'})
+        self.assertEqual(ordinary.status_code, 429)
+        self.assertIn('Fehlversuche', ordinary.json['error'])
+        material = self.client.post('/werkstatt/assistent/login', data={
+            'mitarbeiter_id': '1', 'password': 'wrong', 'next': '/werkstatt/materialbestellung'})
+        self.assertEqual(material.status_code, 303)
+        self.assertEqual(material.location, '/werkstatt/materialbestellung')
+
+    def test_login_passes_valid_employee_id_as_integer_and_material_rights_remain_separate(self):
+        params = []
+        original_db = self.p.get_db
+        class CheckedConnection:
+            def __init__(connection_self):
+                connection_self.connection = original_db()
+            def execute(connection_self, query, args=()):
+                if 'SELECT r.*,m.aktiv' in query:
+                    self.assertIs(type(args[0]), int)
+                    params.append(args[0])
+                return connection_self.connection.execute(query, args)
+            def __getattr__(connection_self, key):
+                return getattr(connection_self.connection, key)
+        self.sql('UPDATE assistent_rechte SET einkaufen=0 WHERE mitarbeiter_id=2')
+        anonymous = self.p.app.test_client()
+        with patch.object(self.p, 'get_db', CheckedConnection):
+            result = anonymous.post('/werkstatt/assistent/login', data={
+                'mitarbeiter_id': ' 2 ', 'password': 'synthetic-password-123', 'next': '/werkstatt/materialbestellung'})
+        self.assertEqual(result.status_code, 302)
+        self.assertEqual(params, [2])
+        page = anonymous.get(result.location)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('True False mitarbeiter:2', page.text)
 
     def test_exact_batch_lookup_preserves_reference_and_is_not_history_limited(self):
         request_id = uid()

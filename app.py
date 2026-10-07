@@ -3113,6 +3113,10 @@ def protect_csrf():
         recovery = csrf_recovery_response()
         if recovery is not None:
             return recovery
+        if request.endpoint == "assistent.login" and request.form.get("next") == "/werkstatt/materialbestellung":
+            session.pop(CSRF_FIELD_NAME, None)
+            flash("Die Anmeldeseite war veraltet. Bitte persönliche Zugangsdaten erneut eingeben.", "warning")
+            return redirect("/werkstatt/materialbestellung")
         if request.endpoint in {"login", "partner_login", "partner_login_key", "versicherung_login", "versicherung_login_key", "werkstatt_login"}:
             session.pop(CSRF_FIELD_NAME, None)
             flash("Die Login-Seite war veraltet. Bitte Passwort noch einmal eingeben.", "warning")

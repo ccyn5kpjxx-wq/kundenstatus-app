@@ -22,6 +22,10 @@
       <p>Foto aufnehmen. Stückzahl wählen. Bestellwunsch senden.</p>
     </div>
 
+    {% for category, message in get_flashed_messages(with_categories=true) %}
+    <p class="login-notice" role="alert">{{ message }}</p>
+    {% endfor %}
+
     {% if not who %}
     <section class="panel login-panel" aria-labelledby="login-heading">
       <span class="step-number" aria-hidden="true">↗</span>
@@ -30,11 +34,11 @@
       <form method="post" action="/werkstatt/assistent/login" class="login-form">
         {{ csrf_field()|safe }}
         <input type="hidden" name="next" value="/werkstatt/materialbestellung">
-        <label>Mitarbeiter-ID<input name="mitarbeiter_id" required inputmode="numeric" autocomplete="username"></label>
+        <label>Mitarbeiter-ID<input name="mitarbeiter_id" required inputmode="numeric" pattern="[0-9]+" maxlength="10" autocomplete="username" placeholder="Deine Mitarbeiter-ID als Zahl"></label>
         <label>Persönliches Passwort<input type="password" name="password" required autocomplete="current-password"></label>
         <button type="submit" class="primary-button">Anmelden und Material erfassen <span aria-hidden="true">→</span></button>
       </form>
-      <p class="muted">Deinen persönlichen Zugang richtet die Werkstattleitung ein.</p>
+      <p class="muted">Hier brauchst du eine numerische Mitarbeiter-ID und ein persönliches Passwort. Deinen eigenen Zugang richtet die Werkstattleitung ein.</p>
     </section>
     {% elif not can_order %}
     <section class="panel access-panel" aria-labelledby="access-heading">
