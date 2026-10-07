@@ -97,11 +97,11 @@ class OverviewTests(unittest.TestCase):
         snapshot.update(changes)
         review=dict(supplier_id='supplier-a',product_name='Crystal Silver',article_number='TEST-4000',variant='0,5 Liter',recipient='orders@example.invalid')
         with self.manager.db() as db:
-            db.executescript('''CREATE TABLE IF NOT EXISTS einkauf_material_nachrichten(id INTEGER PRIMARY KEY,employee_id INTEGER,caption TEXT);
+            db.executescript('''CREATE TABLE IF NOT EXISTS einkauf_material_nachrichten(id INTEGER PRIMARY KEY,employee_id INTEGER,caption TEXT,phone_number_id TEXT);
                 CREATE TABLE IF NOT EXISTS einkauf_material_dialoge(id INTEGER PRIMARY KEY,message_id INTEGER,state TEXT,
                 fields_json TEXT,review_json TEXT,analysis_json TEXT,snapshot_json TEXT,snapshot_hash TEXT,
                 dispatch_id TEXT,created_at DOUBLE PRECISION);''')
-            db.execute('INSERT INTO einkauf_material_nachrichten VALUES(?,?,?)',(key,employee,'PRIVATE_SOURCE_MESSAGE'))
+            db.execute('INSERT INTO einkauf_material_nachrichten VALUES(?,?,?,?)',(key,employee,'PRIVATE_SOURCE_MESSAGE','synthetic-whatsapp'))
             db.execute('INSERT INTO einkauf_material_dialoge VALUES(?,?,?,?,?,?,?,?,?,?)',
                 (key,key,state,canonical(fields),canonical(review),canonical({'merkmale':{'produkt':'Crystal Silver'}}),
                  canonical(snapshot),'broken' if broken else hashlib.sha256(canonical(snapshot).encode()).hexdigest(),dispatch,
@@ -395,6 +395,21 @@ class OverviewTests(unittest.TestCase):
             db.commit()
         row=self.reader.page({'bestellung':'material:1'},now=self.now)['selected']
         self.assertNotIn('Doppelbestellung',row['state_label'])
+
+
+    def test_personal_photo_source_keeps_its_channel_before_and_after_handoff(self):
+        self.material(1, state='review')
+        self.material(2, state='accepted', dispatch='portal-queued')
+        self.order('portal-queued', request_id='material:2')
+        with self.manager.db() as db:
+            db.execute("UPDATE einkauf_material_nachrichten SET phone_number_id='portal:personal'")
+            db.commit()
+        before = self.reader.page({'bestellung': 'material:1'}, now=self.now)['selected']
+        after = self.reader.page({'bestellung': 'material:2'}, now=self.now)['selected']
+        self.assertEqual(before['channel'], 'Fotoformular')
+        self.assertEqual(after['channel'], 'Fotoformular')
+        self.assertEqual(after['id'], 'portal-queued')
+        self.assertEqual(self.reader.page({}, now=self.now)['count'], 2)
 
 
 if __name__ == '__main__':

@@ -48189,7 +48189,7 @@ def import_backup_json_rows_into_current_database(export, archive, names):
     target = get_db()
     try:
         ensure_no_database_only_originals_for_import(target)
-        ensure_material_external_claims_for_import(export=export, target=target)
+        ensure_material_external_claims_for_import(export=export, target=target, archive=archive, names=names)
         for table_name in reversed(BACKUP_TABLES):
             target.execute(f"DELETE FROM {table_name}")
 
@@ -48316,14 +48316,16 @@ def import_sqlite_rows_into_current_database(imported_db):
         target.close()
 
 
-def ensure_material_external_claims_for_import(*, export=None, imported_db=None, target=None):
-    """Keep external sends and append-only price evidence across restores.
+def ensure_material_external_claims_for_import(*, export=None, imported_db=None, target=None, archive=None, names=None):
+    """Keep irreversible sends, personal batch identities and price evidence.
 
     The caller holds portal_originals_operation_lock, as do reserve_external
     and record_external_sent as well as OrderPriceComparison writes. Otherwise
     a new claim or price record could appear between this check and destructive
     replacement. Matching recent backups remain valid; older snapshots may not
     undo a reservation, its frozen content, audit, estimate or invoice match.
+    Personal photo batches also retain their original request key and durable
+    order identity: forgetting either would let a browser retry order twice.
     """
     own_target = target is None
     target = target if target is not None else get_db()
@@ -48343,6 +48345,51 @@ def ensure_material_external_claims_for_import(*, export=None, imported_db=None,
         for table in ("assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen"):
             if get_table_columns(target, table):
                 protected[table] = [dict(row) for row in target.execute(f"SELECT * FROM {table}").fetchall()]
+
+        # A personal form uses the same material/order tables, but no external
+        # reservation. Protect its whole source chain even before dispatch.
+        # Rights may have been revoked since acceptance; that does not release
+        # a previously persisted request key or make a sent mail reversible.
+        portal_dialog_ids = set()
+
+        def protect_rows(table, where, params=()):
+            if not get_table_columns(target, table):
+                return []
+            rows = [dict(row) for row in target.execute(f"SELECT * FROM {table} WHERE {where}", params).fetchall()]
+            existing = {row["id"] for row in protected.get(table, [])}
+            protected.setdefault(table, []).extend(row for row in rows if row["id"] not in existing)
+            return rows
+
+        def protect_ids(table, column, values):
+            rows = []
+            values = sorted({value for value in values if value is not None and value != ""})
+            for offset in range(0, len(values), 400):
+                chunk = values[offset:offset + 400]
+                rows.extend(protect_rows(table, column + " IN (" + ",".join("?" for _ in chunk) + ")", tuple(chunk)))
+            return rows
+
+        messages = protect_rows("einkauf_material_nachrichten", "phone_number_id=?", ("portal:personal",))
+        protect_rows("einkauf_material_texte", "phone_number_id=?", ("portal:personal",))
+        protect_rows("assistent_audit", "aktion IN (?,?)", ("material_portal_submitted", "material_portal_answer"))
+        if messages:
+            dialogs = protect_ids("einkauf_material_dialoge", "message_id", (row["id"] for row in messages))
+            portal_dialog_ids = {row["id"] for row in dialogs}
+            protect_ids("einkauf_material_rueckfragen", "draft_id", portal_dialog_ids)
+            intake_ids = {row.get("intake_id") for row in messages}
+            protect_ids("einkauf_eingang", "id", intake_ids)
+            protect_ids("einkauf_eingang_positionen", "eingang_id", intake_ids)
+            protect_ids("einkauf_eingang_dateien", "id", (row.get("file_id") for row in messages))
+            protect_ids("assistent_materialfotos", "foto_id", (row.get("assistant_photo_id") for row in messages))
+            orders = protect_ids("assistent_bestellanforderungen", "request_id", ("material:" + str(value) for value in portal_dialog_ids))
+            batch_ids = {row.get("batch_id") for row in orders}
+            protect_ids("assistent_bestellpakete", "id", batch_ids)
+            # Supplier batches may include other requests; preserve their exact
+            # membership together with the immutable package being retained.
+            protect_ids("assistent_bestellanforderungen", "batch_id", batch_ids)
+            if imported_db is not None:
+                # JSON row imports leave the outbox/journal alone; replacement
+                # of a SQLite file must retain these send records as well.
+                protect_ids("mailbox_outbox", "token", batch_ids)
         if not any(protected.values()):
             return
 
@@ -48361,7 +48408,8 @@ def ensure_material_external_claims_for_import(*, export=None, imported_db=None,
         error = (
             "Datenimport gesperrt: Die Sicherung enthält vorhandene externe "
             "Bestellreservierungen, Versandnachweise oder feste Bestellpreis-Nachweise "
-            "nicht unverändert. Eine aktuelle Sicherung mit diesen Vorgängen verwenden."
+            "oder persönliche Foto-Bestellungen nicht unverändert. "
+            "Eine aktuelle Sicherung mit diesen Vorgängen verwenden."
         )
         if not isinstance(incoming, dict):
             raise ValueError(error)
@@ -48379,9 +48427,20 @@ def ensure_material_external_claims_for_import(*, export=None, imported_db=None,
                 if len(matches) != 1:
                     raise ValueError(error)
                 restored = matches[0]
-                keys = dialog_keys if table == "einkauf_material_dialoge" else tuple(row)
+                keys = dialog_keys if table == "einkauf_material_dialoge" and row["id"] not in portal_dialog_ids else tuple(row)
                 for key in keys:
-                    if key not in restored or key not in row or restored[key] != row[key]:
+                    value = restored.get(key)
+                    if key in BACKUP_BINARY_FIELDS.get(table, {}) and imported_db is None:
+                        # Modern JSON backups externalize raw image bytes into
+                        # ZIP members. Verify the actual member, not a declared
+                        # checksum or a possibly unrelated original-file row.
+                        reference = backup_binary_reference_map(export).get((table, row["id"], key))
+                        if reference is not None:
+                            if archive is None or names is None:
+                                raise ValueError(error)
+                            raw = read_backup_binary_blob(archive, names, reference)
+                            value = base64.b64encode(raw).decode("ascii")
+                    if key not in restored or key not in row or value != row[key]:
                         raise ValueError(error)
     finally:
         if source is not None:
@@ -48445,7 +48504,7 @@ def admin_daten_import():
                     ensure_no_unrestorable_mos_data_for_import()
                     ensure_no_database_only_originals_for_import()
                     ensure_material_external_claims_for_import(
-                        export=backup_export, imported_db=imported_db
+                        export=backup_export, imported_db=imported_db, archive=archive, names=names
                     )
                     # Ein Import ersetzt Daten und Uploads. Ohne überprüftes
                     # Sicherheitsbackup darf er auch bei deaktivierten automatischen
@@ -57837,6 +57896,8 @@ workshop_purchase_monitor = register_monitor(sys.modules[__name__])
 material_channel = register_material_channel(sys.modules[__name__])
 from werkstatt_materialdialog import register_material_dialog
 material_dialog = register_material_dialog(sys.modules[__name__])
+from werkstatt_materialbestellung import register_material_order_portal
+material_order_portal = register_material_order_portal(sys.modules[__name__])
 from werkstatt_bestellvergleich import OrderPriceComparison
 order_price_comparison = OrderPriceComparison(sys.modules[__name__])
 order_price_comparison_init_schema = order_price_comparison.init_schema

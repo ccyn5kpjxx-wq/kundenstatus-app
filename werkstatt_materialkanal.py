@@ -439,6 +439,11 @@ class MaterialChannel:
                 ORDER BY id DESC LIMIT ?''', (limit,)).fetchall()]
 
     def _active(self, db, row, *, lock=False):
+        if row['phone_number_id'] == 'portal:personal':
+            portal = getattr(self.p, 'material_order_portal', None)
+            if not portal:
+                raise PermissionError('Persönlicher Portal-Bestelleingang fehlt.')
+            return portal.active(db, row, lock=lock)
         config = self._config()
         if not config['enabled'] or row['phone_number_id'] not in config['ids'] or not config['secret'] or not config['token'] or not config['version']:
             raise PermissionError('Materialkanal pausiert oder nicht vollständig eingerichtet.')
@@ -593,11 +598,13 @@ class MaterialChannel:
         error = ''
         try:
             result = self.process_next()
+            portal = getattr(self.p, 'material_order_portal', None)
+            portal_result = portal.process_next() if portal else None
             dialog = getattr(self.p,'material_dialog',None)
             if dialog:
                 followup = dialog.process_next()
-                return result or followup
-            return result
+                return result or portal_result or followup
+            return result or portal_result
         except Exception:
             error = 'worker_verarbeitung_fehlgeschlagen'
             return None

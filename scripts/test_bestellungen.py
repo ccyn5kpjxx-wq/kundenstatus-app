@@ -1,5 +1,6 @@
 """Admin UI/worker regressions using temporary DB and fake SMTP/IMAP only."""
 from copy import deepcopy
+from contextlib import nullcontext
 import ast
 from datetime import datetime, timedelta, timezone
 from email import policy
@@ -24,6 +25,7 @@ from werkstatt_bestellungen import OrderManagement, register_orders, run_worker,
 
 
 class FakePortal:
+    portal_originals_operation_lock = staticmethod(nullcontext)
     def __init__(self, root):
         self.path = root / 'test.sqlite'
         self.app = Flask(__name__, template_folder=str(Path(__file__).resolve().parents[1] / 'templates'))

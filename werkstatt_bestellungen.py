@@ -332,6 +332,11 @@ class OrderManagement:
                     raise ValueError(str(exc)) from None
 
     def submit_material_request(self, draft_id, revision):
+        """Guarded material handoff, serialized with destructive restores."""
+        with self.p.portal_originals_operation_lock():
+            return self._submit_material_request(draft_id, revision)
+
+    def _submit_material_request(self, draft_id, revision):
         """Submit only a server-approved material snapshot; no fabricated session.
 
         The durable key is the draft identity, never its revision. The material
@@ -501,6 +506,10 @@ class OrderManagement:
         return dict(result, action_id=action_id)
 
     def tick(self, *, worker=False):
+        with self.p.portal_originals_operation_lock():
+            return self._tick(worker=worker)
+
+    def _tick(self, *, worker=False):
         state = self.availability()
         if not state['can_send']:
             raise ValueError('Bestellversand, bestehendes Postfach oder dauerhafter Ausgabespeicher sind noch nicht eingerichtet.')

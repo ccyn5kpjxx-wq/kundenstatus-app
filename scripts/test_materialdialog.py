@@ -231,7 +231,7 @@ class DialogTests(unittest.TestCase):
                 self.assertEqual((parsed['quantity'],parsed['unit']),(quantity,'Stück'))
         self.assertEqual(article_query('Bitte 2x Abdeckfolie 5 x 120 m dringend bestellen'),'Abdeckfolie 5 x 120 m')
         self.assertTrue(parse_request('Bitte 2x Abdeckfolie dringend bestellen')['urgent'])
-        for text in ('5 x 120 m','Abdeckfolie 5x120m','1x 500ml','1 x Karton','2x Rollen',
+        for text in ('5 x 120 m','Abdeckfolie 5x120m','1x 500ml',
                      'VE: 10x Abdeckfolie','Inhalt 10x Abdeckfolie','nicht 1x Abdeckfolie',
                      '1x Abdeckfolie vorhanden','vielleicht 1x Abdeckfolie','1x Abdeckfolie?',
                      '1x Abdeckfolie und 1x Klebeband','1 Stück und 2x Abdeckfolie','5x zwölf Meter',
@@ -1082,6 +1082,90 @@ class DialogTests(unittest.TestCase):
         self.f.time-=86400
         self.p.workshop_orders.supplier['recipient']='changed@example.test'
         with self.assertRaises(PermissionError): self.s.approved_order(view['id'],view['revision'])
+
+    def test_named_pack_parser_preserves_packaging_and_exact_product_query(self):
+        for text,amount,query in (('Staubmaske 1x Pack','1','Staubmaske'),
+                ('1 x Pack Staubmaske','1','Staubmaske'),('Staubmasken 2 Packs','2','Staubmasken'),
+                ('Staubmaske 1 Pack','1','Staubmaske'),('Staubmaske 2×Packs','2','Staubmaske'),
+                ('Staubmaske ein Pack','1','Staubmaske')):
+            with self.subTest(text=text):
+                self.assertEqual(parse_request(text),{'quantity':amount,'unit':'Packung'})
+                self.assertEqual(article_query(text),query)
+        self.assertEqual(parse_request('1x Karton'),{'quantity':'1','unit':'Karton'})
+        self.assertEqual(parse_request('2x Rollen'),{'quantity':'2','unit':'Rolle'})
+
+    def test_named_pack_personal_text_creates_one_unpriced_request_without_extra_order_word(self):
+        self.hits=[]
+        searches=[]
+        self.p.cockpit_data.articles=lambda query:searches.append(query) or {'varianten':[]}
+        text='Staubmaske 1x Pack'
+        result=self.answer(None,text,explicit=False)
+        self.assertEqual(result['state'],'applied')
+        view=self.s.status(result['draft_id'])
+        self.assertEqual(view['source_kind'],'text')
+        self.assertEqual(view['fields']['quantity']['value'],'1')
+        self.assertEqual(view['fields']['unit']['value'],'Packung')
+        self.assertTrue(view['fields']['order_requested']['value'])
+        self.assertFalse(view['fields']['urgent']['value'])
+        self.assertEqual(view['fields']['quantity']['proof']['kind'],'text')
+        self.s.process_next()
+        self.assertEqual(searches,['Staubmaske'])
+        self.assertEqual(self.vision_calls,[])
+        self.assertEqual(self.p.workshop_orders.calls,[])
+        original=self.f.sql('SELECT * FROM einkauf_material_texte WHERE id=?',(result['id'],))[0]
+        self.assertEqual(original['body'],text)
+        message={'id':original['wamid'],'from':'491701111111','timestamp':str(int(self.f.time)),
+                 'type':'text','text':{'body':text}}
+        self.f.ingest(self.f.envelope(message))
+        self.assertIsNone(self.s.process_text())
+        self.s.process_next()
+        self.assertEqual(len(self.s.list()),1)
+        self.assertEqual(self.p.workshop_orders.calls,[])
+        with self.assertRaises(PermissionError):self.s.approved_order(view['id'],self.s.status(view['id'])['revision'])
+
+    def test_named_pack_nominal_forms_allow_normal_or_explicit_urgent_requests(self):
+        for text,amount,urgent in (('1 x Pack Staubmaske','1',False),('Staubmasken 2 Packs','2',False),
+                ('Staubmaske 1 Pack','1',False),('Bitte Staubmaske 1x Pack dringend','1',True),
+                ('Staubmaske 1x Pack nicht dringend','1',False)):
+            with self.subTest(text=text):
+                result=self.answer(None,text,explicit=False)
+                self.assertEqual(result['state'],'applied')
+                fields=self.s.status(result['draft_id'])['fields']
+                self.assertEqual(fields['quantity']['value'],amount)
+                self.assertEqual(fields['unit']['value'],'Packung')
+                self.assertEqual(fields['urgent']['value'],urgent)
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_named_pack_work_questions_source_labels_and_multiple_positions_create_nothing(self):
+        texts=('Staubmaske nicht 1x Pack','Staubmaske 1x Pack nicht','Staubmaske 1x Pack?',
+               'Staubmaske 1x Pack prüfen','Prüfe Staubmaske 1x Pack','Trage 1x Pack Staubmasken',
+               '1x Pack Staubmasken tragen','Staubmaske 1x Pack benutzen','Staubmaske 1x Pack auffüllen',
+               'Staubmaske 1x Pack auffüllen dringend','Staubmaske 1x Pack angekommen',
+               'Staubmaske 1x Pack auf Lager','Vielleicht Staubmaske 1x Pack','VE: 1x Pack Staubmaske',
+               'Etikett Staubmaske 1x Pack','Katalog Staubmaske 1x Pack','Artikelnummer AB-1x-Pack',
+               'AB-123 1x Pack','Staubmaske 1 Pack und Handschuhe 1 Pack','Staubmaske 1 Pack, Handschuhe 2 Packs',
+               '1x Pack','Staubmaske -1x Pack','Staubmaske 0 Pack','Staubmaske 1/2x Pack',
+               'Staubmaske 5x120m','Staubmaske 1x Pack und 2 Stück','Ich habe Staubmaske 1 Pack')
+        for text in texts:
+            with self.subTest(text=text):
+                self.assertEqual(self.answer(None,text,explicit=False)['state'],'review')
+                self.assertEqual(self.s.list(),[])
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_named_pack_bound_stale_or_forwarded_text_never_starts_another_request(self):
+        view=self.photo('')
+        self.assertEqual(self.answer(view,'Staubmaske 1x Pack')['state'],'applied')
+        self.assertEqual(len(self.s.list()),1)
+        self.assertEqual(self.s.status(view['id'])['fields']['unit']['value'],'Packung')
+        self.assertEqual(self.answer(view,'Staubmaske 1x Pack')['state'],'review')
+        self.assertEqual(self.answer(None,'Staubmaske 1x Pack',quote='wamid.not-an-origin',explicit=False)['state'],'review')
+        self.f.time+=2
+        message={'id':'wamid.forwarded-pack','from':'491701111111','timestamp':str(int(self.f.time)),
+                 'type':'text','text':{'body':'Staubmaske 1x Pack'},'context':{'forwarded':True}}
+        self.f.ingest(self.f.envelope(message))
+        self.assertEqual(self.s.process_text()['state'],'review')
+        self.assertEqual(len(self.s.list()),1)
+        self.assertEqual(self.p.workshop_orders.calls,[])
 
     def test_text_only_request_gets_own_source_without_photo_or_vision(self):
         self.assertEqual(self.answer(None,'Bitte ein Karton Klebeband bestellen, nicht dringend',explicit=False)['state'],'applied')

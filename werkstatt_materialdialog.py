@@ -7,6 +7,7 @@ No Flask session is fabricated and no model output grants purchase permission.
 """
 from contextlib import contextmanager
 import copy
+from functools import wraps
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 import hashlib
@@ -24,11 +25,11 @@ from werkstatt_materialkanal import _json, _fingerprint, _note, _row_id, _key, _
 
 TABLES = ('einkauf_material_dialoge', 'einkauf_material_texte', 'einkauf_material_rueckfragen')
 UNITS = {'karton':'Karton', 'kartons':'Karton', 'rolle':'Rolle', 'rollen':'Rolle', 'packung':'Packung',
-         'packungen':'Packung', 'gebinde':'Gebinde', 'dose':'Dose', 'dosen':'Dose', 'flasche':'Flasche',
+         'packungen':'Packung', 'pack':'Packung', 'packs':'Packung', 'gebinde':'Gebinde', 'dose':'Dose', 'dosen':'Dose', 'flasche':'Flasche',
          'flaschen':'Flasche', 'stück':'Stück', 'stueck':'Stück'}
 WORDS = {'ein':'1','eine':'1','einen':'1','einem':'1','zwei':'2','drei':'3','vier':'4','fünf':'5','fuenf':'5',
          'sechs':'6','sieben':'7','acht':'8','neun':'9','zehn':'10'}
-QUANTITY_PATTERN = r'(?<![\w.,/+−-])(\d{1,8}(?:[.,]\d{1,6})?|' + '|'.join(WORDS) + r')\s+(' + '|'.join(sorted(UNITS, key=len, reverse=True)) + r')\b'
+QUANTITY_PATTERN = r'(?<![\w.,/+−-])(\d{1,8}(?:[.,]\d{1,6})?|' + '|'.join(WORDS) + r')(?:\s*[x×]\s*|\s+)(' + '|'.join(sorted(UNITS, key=len, reverse=True)) + r')\b'
 COUNTED_ITEM_PATTERN = r'(?<![\w.,/+−-])([1-9]\d{0,7})\s*[x×]\s*(?P<product>[^\W\d_][\w/-]{2,})(?!\w)'
 EMPLOYEE_FIELDS = {'order_requested', 'quantity', 'unit', 'urgent', 'article', 'unit_conflict', 'possible_duplicate'}
 INTERNAL_FIELDS = {'supplier_review', 'price', 'budget', 'unit_review'}
@@ -90,6 +91,49 @@ def article_query(text):
     return re.sub(r'\s+',' ',value).strip(' ,;.!:')[:150]
 
 
+def _named_unit_request(text, parsed):
+    """A single nominal material line may start a personal text request."""
+    if (not parsed.get('quantity') or not parsed.get('unit') or parsed.get('cancelled')
+            or parsed.get('urgent_unclear') or not re.fullmatch(r'[1-9][0-9]{0,7}',parsed['quantity'])):
+        return False
+    value = _request_text(text).casefold().strip()
+    if len(value)>160 or any(char in value for char in '?\n\r;'):
+        return False
+    # These describe stock, source material, work or conversation, not a
+    # requested purchase count. Check the entire message before trimming.
+    forbidden = (r'\b(?:ve|inhalt|packungsinhalt|enthält|enthaelt|etikett|aufdruck|katalog|rechnung|beleg|'
+        r'artikelnummer|teilenummer|sku|art[.-]?nr|bestand|lager|vorhanden|übrig|uebrig|geliefert|erhalten|'
+        r'angekommen|gekauft|benutzt|benutzen|benutze|verwendet|verwenden|verwende|genutzt|nutzen|nutze|'
+        r'verbraucht|verbrauchen|verbrauche|prüfen|pruefen|prüfe|pruefe|kontrollieren|kontrolliere|'
+        r'ansehen|anschauen|testen|teste|gefunden|gezählt|gezaehlt|zählen|zaehlen|'
+        r'auffüllen|auffuellen|auffülle|auffuelle|füllen|fuellen|tragen|trage|anziehen|anziehe|'
+        r'reparieren|repariere|reinigen|reinige|putzen|putze|lackieren|lackiere|polieren|poliere|'
+        r'schleifen|schleife|fotografieren|fotografiere|scannen|scan|gescannt|öffnen|oeffnen|öffne|oeffne|'
+        r'verteilen|verteile|holen|hole|bringen|bringe|nehmen|nehme|zeigen|zeige|entsorgen|entsorge|'
+        r'und|oder|auch|kein|keine|keinen|keines|keinesfalls|vielleicht|eventuell|falls|wenn|beispiel|'
+        r'angenommen|habe|haben|hat|ist|sind|war|wurde|wird|soll|sollen|muss|müssen|muessen|'
+        r'gestern|bereits|schon|danke|hallo)\b')
+    if re.search(forbidden,value):
+        return False
+    # Only these simple request modifiers can surround the nominal line.
+    value = re.sub(r'\b(?:nicht\s+(?:dringend|sofort)|erst\s+(?:am\s+)?montag|bitte|dringend|sofort|regulär|regulaer|normal)\b',' ',value)
+    if re.search(r'\b(?:nicht|ich|du|wir|ihr|mir|uns)\b',value):
+        return False
+    matches = list(re.finditer(QUANTITY_PATTERN,value,re.I))
+    if len(matches)!=1:
+        return False
+    match = matches[0]
+    amount = Decimal(WORDS.get(match[1],match[1]).replace(',','.'))
+    if amount!=Decimal(parsed['quantity']) or UNITS[match[2]]!=parsed['unit']:
+        return False
+    before,after = (part.strip(' ,.!:') for part in (value[:match.start()],value[match.end():]))
+    if bool(before)==bool(after):
+        return False
+    name = before or after
+    return (len(name.split())<=6 and bool(re.fullmatch(r'[\wÄÖÜäöüß /.,-]+',name))
+            and bool(re.search(r'(?<!\w)[^\W\d_]{3,}(?!\w)',name)))
+
+
 def parse_request(text, question=''):
     """Small conservative grammar, never extracts quantity from a product label."""
     text = _request_text(text)
@@ -141,6 +185,16 @@ def parse_request(text, question=''):
     elif question=='unit' and value.strip(' .!') in UNITS:
         fields['unit'] = UNITS[value.strip(' .!')]
     return fields
+
+
+def _originals_guard(method):
+    @wraps(method)
+    def guarded(self, *args, **kwargs):
+        if getattr(self.p, 'material_order_portal', None) is not None:
+            with self.p.portal_originals_operation_lock():
+                return method(self, *args, **kwargs)
+        return method(self, *args, **kwargs)
+    return guarded
 
 
 class MaterialDialog:
@@ -578,9 +632,12 @@ class MaterialDialog:
             ids = db.execute('SELECT id FROM einkauf_material_dialoge ORDER BY id DESC LIMIT ?', (limit,)).fetchall()
             return [self._view(db,row['id']) for row in ids]
 
-    def process_text(self):
+    @_originals_guard
+    def process_text(self, text_id=None):
+        if text_id is not None:
+            _row_id(text_id)
         with self.db() as db:
-            text = db.execute("SELECT * FROM einkauf_material_texte WHERE state='queued' ORDER BY id LIMIT 1").fetchone()
+            text = db.execute("SELECT * FROM einkauf_material_texte WHERE state='queued' AND id=?", (text_id,)).fetchone() if text_id else db.execute("SELECT * FROM einkauf_material_texte WHERE state='queued' AND phone_number_id<>'portal:personal' ORDER BY id LIMIT 1").fetchone()
             if not text:
                 return None
             text = dict(text)
@@ -646,7 +703,9 @@ class MaterialDialog:
                                 or 'unit' not in json.loads(draft['missing_json'])):
                             raise ValueError('Bestelleinheit gehört noch zu keiner eindeutigen Einheitenfrage.')
                     else:
-                        if (not parsed.get('order_requested') and parsed.get('urgent') is not True) or not article_query(text['body']):
+                        named_request = _named_unit_request(text['body'],parsed)
+                        implicit_request = named_request if parsed.get('quantity') and parsed.get('unit') else parsed.get('urgent') is True
+                        if (not parsed.get('order_requested') and not implicit_request) or not article_query(text['body']):
                             raise ValueError('Bitte den konkreten Vorgang zitieren oder ausdrücklich einen neuen Artikel bestellen.')
                         view = self._ensure(db,self._text_source(db,text),text)
                         return {'id':text['id'],'state':'applied','draft_id':view['id']}
@@ -710,6 +769,7 @@ class MaterialDialog:
         _row_id(revision)
         return self.analyze(draft_id,refresh=True,revision=revision)
 
+    @_originals_guard
     def analyze(self, draft_id, *, refresh=False, revision=None):
         if type(refresh) is not bool or refresh and revision is None:
             raise ValueError('Erneute Fotoauslese benötigt die aktuelle Revision.')
@@ -918,6 +978,7 @@ class MaterialDialog:
             self._external_audit(db,'material_external_sent',draft_id,draft['revision']+1,claim)
             return self._view(db,draft_id)
 
+    @_originals_guard
     def apply_admin_review(self, draft_id, revision, payload, actor='admin'):
         if actor != 'admin' or not isinstance(payload,dict) or payload.get('reviewed') is not True:
             raise PermissionError('Werkstattleitung muss Artikel und aktuelle Preisbedingungen ausdrücklich prüfen.')
@@ -1016,6 +1077,7 @@ class MaterialDialog:
         with self.db() as db:
             return self.guard_order(db,draft_id,revision)
 
+    @_originals_guard
     def recheck(self, draft_id, revision):
         """Refresh catalog matches from stored labels, never rerun vision or send."""
         with self.db() as db:
@@ -1043,6 +1105,7 @@ class MaterialDialog:
             self._refresh(db,self._draft(db,draft_id))
             return self._view(db,draft_id)
 
+    @_originals_guard
     def order_attempt(self, draft_id, revision, result):
         if not isinstance(result,dict):
             raise ValueError('Bestellstatus fehlt.')
@@ -1086,7 +1149,12 @@ class MaterialDialog:
         if self.p.app.config.get('MATERIAL_WHATSAPP_REPLIES_ENABLED') is not True:
             return None
         with self.db() as db:
-            question = db.execute("SELECT * FROM einkauf_material_rueckfragen WHERE state='queued' ORDER BY id LIMIT 1").fetchone()
+            # Portal questions stay attached to their personal form. Never
+            # put a portal reference or identity into the Meta send queue.
+            question = db.execute("""SELECT q.* FROM einkauf_material_rueckfragen q
+                JOIN einkauf_material_dialoge d ON d.id=q.draft_id
+                JOIN einkauf_material_nachrichten n ON n.id=d.message_id
+                WHERE q.state='queued' AND n.phone_number_id<>'portal:personal' ORDER BY q.id LIMIT 1""").fetchone()
             if not question:
                 return None
             question = dict(question)
@@ -1136,7 +1204,7 @@ class MaterialDialog:
         for _ in range(5):
             with self.db() as db:
                 source = db.execute('''SELECT n.id FROM einkauf_material_nachrichten n LEFT JOIN einkauf_material_dialoge d ON d.message_id=n.id
-                    WHERE n.state='ready' AND d.id IS NULL ORDER BY n.id LIMIT 1''').fetchone()
+                    WHERE n.state='ready' AND n.phone_number_id<>'portal:personal' AND d.id IS NULL ORDER BY n.id LIMIT 1''').fetchone()
             if not source:
                 break
             try:
@@ -1148,7 +1216,12 @@ class MaterialDialog:
         draft = None
         for _ in range(5):
             with self.db() as db:
-                draft = db.execute("SELECT id FROM einkauf_material_dialoge WHERE state NOT IN ('accepted','cancelled','review','external_pending','external_sent') AND (analysis_state='pending' OR (analysis_state='processing' AND analysis_until<?)) ORDER BY id LIMIT 1",(self.clock(),)).fetchone()
+                draft = db.execute("""SELECT d.id FROM einkauf_material_dialoge d
+                    JOIN einkauf_material_nachrichten n ON n.id=d.message_id
+                    WHERE n.phone_number_id<>'portal:personal'
+                    AND d.state NOT IN ('accepted','cancelled','review','external_pending','external_sent')
+                    AND (d.analysis_state='pending' OR (d.analysis_state='processing' AND d.analysis_until<?))
+                    ORDER BY d.id LIMIT 1""",(self.clock(),)).fetchone()
             if not draft:
                 break
             try:
@@ -1159,7 +1232,10 @@ class MaterialDialog:
                     db.execute("UPDATE einkauf_material_dialoge SET state='review',analysis_state='failed',error_code='fotoauslese_oder_berechtigung_klaeren' WHERE id=? AND state NOT IN ('external_pending','external_sent') AND (analysis_state='pending' OR analysis_until<?)",(draft['id'],self.clock()))
         text = self.process_text()
         with self.db() as db:
-            approved = db.execute("SELECT id,revision FROM einkauf_material_dialoge WHERE state='approved' ORDER BY updated_at,id LIMIT 1").fetchone()
+            approved = db.execute("""SELECT d.id,d.revision FROM einkauf_material_dialoge d
+                JOIN einkauf_material_nachrichten n ON n.id=d.message_id
+                WHERE d.state='approved' AND n.phone_number_id<>'portal:personal'
+                ORDER BY d.updated_at,d.id LIMIT 1""").fetchone()
         manager = getattr(self.p,'workshop_orders',None)
         if approved and callable(getattr(manager,'submit_material_request',None)):
             try:

@@ -171,6 +171,68 @@ class MaterialPurchaseEndToEndTests(unittest.TestCase):
         self.manager.tick(worker=True)
         self.assertEqual(self.smtp.data_calls, 1)
 
+    def mask_text_request(self, text='Staubmaske 1x Pack'):
+        self.f.hits = [{'produkt_name': 'Staubmaske', 'lieferant': 'Testlieferant',
+                        'artikelnummer': 'TEST-MASK', 'groesse': '', 'farbe': '',
+                        'gebinde': '12 Stück', 've': 'Packung',
+                        'quellen': [{'art': 'einkauf', 'beleg_id': 1, 'position': 1}]}]
+        result = self.f.answer(None, text, explicit=False)
+        self.assertEqual(result['state'], 'applied')
+        self.f.s.analyze(result['draft_id'])
+        view = self.f.s.status(result['draft_id'])
+        self.assertEqual(view['fields']['quantity']['value'], '1')
+        self.assertEqual(view['fields']['unit']['value'], 'Packung')
+        self.assertTrue(view['fields']['order_requested']['value'])
+        self.assertEqual(self.f.vision_calls, [])
+        return view
+
+    def test_short_text_pack_request_waits_for_monday_and_sends_one_pack_once(self):
+        view = self.mask_text_request()
+        self.assertFalse(view['fields']['urgent']['value'])
+        self.f.s.process_next()
+        self.assertEqual(self.smtp.data_calls, 0)
+        self.assertEqual(len(self.f.s.list()), 1)
+        # Repeat the provider event, not a second personal purchase request.
+        message = {'id': 'wamid.answer-' + str(self.f.sequence), 'from': '491701111111',
+                   'timestamp': str(int(self.f.f.time)), 'type': 'text',
+                   'text': {'body': 'Staubmaske 1x Pack'}}
+        self.f.f.ingest(self.f.f.envelope(message))
+        self.f.s.process_text()
+        self.assertEqual(len(self.f.s.list()), 1)
+        view = self.f.review(self.f.s.status(view['id']), supplier_id=self.contact,
+                             product_name='Staubmaske', article_number='TEST-MASK', variant='Packung mit 12 Stück',
+                             unit='Packung', unit_price_cents=1200, shipping_cents=300,
+                             extra_costs_cents=0, price_source='Synthetisches Angebot je Packung')
+        self.assertEqual(self.f.s.process_next()['state'], 'queued')
+        self.assertEqual(self.smtp.data_calls, 0)
+        self.f.f.time = datetime(2026, 10, 12, 13, 59, tzinfo=BERLIN).timestamp()
+        self.manager.tick(worker=True)
+        self.assertEqual(self.smtp.data_calls, 0)
+        self.f.f.time = datetime(2026, 10, 12, 14, 0, tzinfo=BERLIN).timestamp()
+        self.manager.tick(worker=True)
+        self.assertEqual(self.smtp.data_calls, 1)
+        mail = BytesParser(policy=policy.default).parsebytes(self.smtp.raw[0])
+        content = mail.get_body(preferencelist=('plain',)).get_content()
+        self.assertIn('Staubmaske', content)
+        self.assertIn('Packung', content)
+        order = self.manager.dispatch.status(self.f.s.status(view['id'])['dispatch_id'])['order']
+        self.assertEqual((order['quantity'], order['unit']), ('1', 'Packung'))
+        self.manager.tick(worker=True)
+        self.assertEqual(self.smtp.data_calls, 1)
+
+    def test_urgent_short_text_pack_request_keeps_unverified_terms_blocked(self):
+        view = self.mask_text_request('Staubmaske 1x Pack dringend')
+        self.assertTrue(view['fields']['urgent']['value'])
+        self.assertIn('price', view['missing_fields'])
+        self.f.s.process_next()
+        self.manager.tick(worker=True)
+        self.assertEqual(self.smtp.data_calls, 0)
+        db = self.p.get_db()
+        try:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_bestellanforderungen').fetchone()[0], 0)
+        finally:
+            db.close()
+
 
 if __name__ == '__main__':
     unittest.main()

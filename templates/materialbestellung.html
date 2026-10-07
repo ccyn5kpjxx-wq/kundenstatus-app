@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <meta name="theme-color" content="#183b36">
+  <title>Material nachbestellen · Gärtner</title>
+  <link rel="icon" href="{{ url_for('static', filename='assistent-icon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='materialbestellung.css', v='foto-1') }}">
+</head>
+<body>
+  <main class="material-page">
+    <header class="material-header">
+      <a class="brand" href="/werkstatt/assistent" aria-label="Zum Werkstatt-Assistenten"><span class="brand-mark" aria-hidden="true">G</span><span>GÄRTNER<small>KAROSSERIE &amp; LACK</small></span></a>
+      {% if who and who.actor != 'admin' %}<span class="personal-badge"><span aria-hidden="true">●</span> {{ who.mitarbeiter_name or 'Persönlicher Zugang' }}</span>{% else %}<a class="header-link" href="/werkstatt/assistent">Zum Assistenten <span aria-hidden="true">↗</span></a>{% endif %}
+    </header>
+
+    <div class="intro">
+      <span class="eyebrow">DEIN MATERIAL. EINFACH ERFASST.</span>
+      <h1>Material<br>nachbestellen<span>.</span></h1>
+      <p>Foto aufnehmen. Stückzahl wählen. Bestellwunsch senden.</p>
+    </div>
+
+    {% if not who %}
+    <section class="panel login-panel" aria-labelledby="login-heading">
+      <span class="step-number" aria-hidden="true">↗</span>
+      <h2 id="login-heading">Einmal persönlich anmelden</h2>
+      <p>Verwende deinen eigenen Mitarbeiterzugang. Deine Bestellwünsche werden dir zugeordnet.</p>
+      <form method="post" action="/werkstatt/assistent/login" class="login-form">
+        {{ csrf_field()|safe }}
+        <input type="hidden" name="next" value="/werkstatt/materialbestellung">
+        <label>Mitarbeiter-ID<input name="mitarbeiter_id" required inputmode="numeric" autocomplete="username"></label>
+        <label>Persönliches Passwort<input type="password" name="password" required autocomplete="current-password"></label>
+        <button type="submit" class="primary-button">Anmelden und Material erfassen <span aria-hidden="true">→</span></button>
+      </form>
+      <p class="muted">Deinen persönlichen Zugang richtet die Werkstattleitung ein.</p>
+    </section>
+    {% elif not can_order %}
+    <section class="panel access-panel" aria-labelledby="access-heading">
+      <span class="step-number" aria-hidden="true">↗</span>
+      <h2 id="access-heading">Persönlicher Bestellzugang nötig</h2>
+      <p>Für das Fotoformular brauchst du einen eigenen Mitarbeiterzugang mit Materialberechtigung. Bitte wende dich an die Werkstattleitung.</p>
+      <a class="primary-button" href="/werkstatt/assistent">Zum persönlichen Assistenten <span aria-hidden="true">→</span></a>
+    </section>
+    {% else %}
+    <div id="materialbestellung" data-endpoint="/werkstatt/materialbestellung/anforderungen" data-actor="{{ who.actor }}">
+      <aside class="schedule-note"><span class="calendar-icon" aria-hidden="true">14</span><div><strong>Regulär am Montag um 14 Uhr</strong><p>Automatische Sammelbestellung nach interner Prüfung. Wenn es eilt, markiere den Artikel als dringend.</p></div></aside>
+
+      <form id="material-form" novalidate>
+        <section class="panel upload-panel" aria-labelledby="photos-heading">
+          <div class="section-title"><div><span class="eyebrow">01 / FOTO &amp; STÜCKZAHL</span><h2 id="photos-heading">Was brauchst du?</h2></div><span id="material-count" class="count-badge">0 / 10</span></div>
+          <p class="section-description">Ein Foto pro Artikel. Das Produkt und Etikett sollten gut lesbar sein.</p>
+          <div class="photo-actions">
+            <button id="material-camera-button" type="button" class="camera-button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5 6 8H3v12h18V8h-3l-2-3H8Z"/><circle cx="12" cy="13" r="4"/></svg><span>Foto aufnehmen<small>Kamera öffnen</small></span><span class="action-arrow" aria-hidden="true">↗</span></button>
+            <button id="material-album-button" type="button" class="album-button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m3 17 6-6 4 4 3-3 5 5"/><circle cx="16" cy="8" r="1"/></svg>Aus Fotos wählen</button>
+          </div>
+          <input id="material-camera" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden>
+          <input id="material-album" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
+          <p class="file-hint">Bis zu 10 Fotos · JPEG, PNG oder WebP · je 8 MB, zusammen 50 MB</p>
+          <div id="material-items" class="photo-list"></div>
+          <div id="material-empty" class="empty-note"><span aria-hidden="true">＋</span><p>Dein erster Artikel beginnt mit einem Foto.</p></div>
+        </section>
+
+        <div class="submit-bar">
+          <div><strong id="material-summary">Noch kein Foto ausgewählt</strong><span>Foto + Stückzahl genügen.</span></div>
+          <button id="material-submit" class="primary-button" type="submit" disabled>Bestellwünsche senden <span aria-hidden="true">→</span></button>
+        </div>
+        <p id="material-status" class="form-status" role="status" aria-live="polite" tabindex="-1"></p>
+        <div id="material-recovery" class="recovery-note" hidden><p id="material-recovery-text"></p><button id="material-check" type="button" class="secondary-button">Gespeicherte Wünsche prüfen</button><button id="material-reload" type="button" class="secondary-button" hidden>Seite neu laden</button></div>
+      </form>
+
+      <section class="history-section" aria-labelledby="history-heading">
+        <div class="section-title"><div><span class="eyebrow">02 / DEIN ÜBERBLICK</span><h2 id="history-heading">Deine Bestellwünsche</h2></div><button id="material-refresh" type="button" class="refresh-button" aria-label="Bestellwünsche aktualisieren">↻</button></div>
+        <p class="section-description">Erfasst bedeutet noch nicht bestellt. Den aktuellen Stand siehst du hier.</p>
+        <p id="material-history-status" class="muted" role="status" aria-live="polite">Deine Bestellwünsche werden geladen …</p>
+        <div id="material-history" class="history-list"></div>
+      </section>
+      <noscript><p class="panel">Bitte JavaScript aktivieren, um Fotos mit Stückzahl zu senden.</p></noscript>
+    </div>
+    <script src="{{ url_for('static', filename='materialbestellung.js', v='foto-1') }}" defer></script>
+    {% endif %}
+    <footer class="material-footer"><span>Gärtner Karosserie &amp; Lack</span><a href="/werkstatt/assistent">Dein Werkstatt-Assistent <span aria-hidden="true">↗</span></a></footer>
+  </main>
+</body>
+</html>

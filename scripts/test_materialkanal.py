@@ -1,7 +1,7 @@
 """Synthetic signed-message/media tests; no live Meta, employees or sends."""
 import ast
 import base64
-from contextlib import closing
+from contextlib import closing, nullcontext
 from copy import deepcopy
 import hashlib
 import hmac
@@ -65,6 +65,7 @@ class MaterialChannelTests(unittest.TestCase):
             connection.row_factory = sqlite3.Row
             return connection
         self.p = SimpleNamespace(app=Flask(__name__), get_db=get_db, now_str=lambda: '2026-10-05 12:00',
+            portal_originals_operation_lock=nullcontext,
             WHATSAPP_APP_SECRET='synthetic-only-secret', WHATSAPP_ACCESS_TOKEN='synthetic-only-token', WHATSAPP_GRAPH_VERSION='v25.0')
         self.p.app.config.update(MATERIAL_WHATSAPP_ENABLED=True, MATERIAL_WHATSAPP_PHONE_IDS='123456',
             MATERIAL_WHATSAPP_WORKER_ENABLED=False, MATERIAL_WHATSAPP_SHARE_PORTAL_NUMBER=False)

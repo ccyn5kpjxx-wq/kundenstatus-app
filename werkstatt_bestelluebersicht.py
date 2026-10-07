@@ -114,7 +114,7 @@ class OrderOverview:
             return people.get(mid) or f'Mitarbeiter #{mid} (Name nicht mehr hinterlegt)'
         return 'Nicht zugeordneter Zugang'
 
-    def _line(self, row, people, contacts, *, draft=False, now=None, material_id=None):
+    def _line(self, row, people, contacts, *, draft=False, now=None, material_id=None, material_channel='WhatsApp'):
         row = dict(row)
         saved = _object(row.get('payload') if draft else row.get('snapshot_json'))
         intent = saved.get('versand' if draft else 'order')
@@ -171,7 +171,7 @@ class OrderOverview:
             'attempts': row.get('attempts') or 0, 'mail_updated': _stamp(row.get('mail_updated')) if row.get('mail_updated') else '',
             'message_id': _text(row.get('message_id'), 500),
             'source': 'material:'+str(material_id) if material_id is not None else ('avatar:' if draft else 'dispatch:') + str(row['id']),
-            'channel': 'WhatsApp' if material_id is not None else 'Assistent',
+            'channel': material_channel if material_id is not None else 'Assistent',
             'material_id': material_id,
             'detail_url': ('/admin/assistent-bestellungen/eingang/ansicht?' +
                 urlencode({'material':material_id}) + '#materialdialog') if material_id is not None else '',
@@ -248,7 +248,7 @@ class OrderOverview:
             if state=='external_sent':
                 events.append({'label':'Externer Mailversand nachgewiesen','time':_stamp(snapshot['sent_at'])})
         return {'id':source,'source':source,'draft':False,'material_id':row['id'],
-            'channel':'WhatsApp','actor':actor,'person':self._person(actor,people),
+            'channel':'Fotoformular' if row.get('source_channel') == 'portal:personal' else 'WhatsApp','actor':actor,'person':self._person(actor,people),
             'supplier_id':supplier_id,'supplier':supplier or 'Lieferant noch zuordnen','product':product,
             'sku':_text(commercial.get('article_number'),128) or 'nicht belegt',
             'variant':_text(commercial.get('variant') or labels.get('farbe') or labels.get('breite')) or 'nicht belegt',
@@ -320,24 +320,27 @@ class OrderOverview:
                                                                   'einkauf_material_dialoge','einkauf_material_nachrichten')}
             people = {str(row['id']): row['name'] for row in db.execute('SELECT id,name FROM mitarbeiter').fetchall()} if available['mitarbeiter'] else {}
             contacts = {row['id']: dict(row) for row in db.execute('SELECT id,name,recipient,verified_at FROM assistent_bestellkontakte').fetchall()}
-            material_lines, material_for_dispatch = [], {}
+            material_lines, material_for_dispatch, material_channels = [], {}, {}
             if available['einkauf_material_dialoge']:
-                pairs = db.execute('''SELECT d.id AS material_id,o.id AS dispatch_id FROM einkauf_material_dialoge d
+                source_join = 'LEFT JOIN einkauf_material_nachrichten n ON n.id=d.message_id' if available['einkauf_material_nachrichten'] else ''
+                source_field = 'n.phone_number_id' if source_join else 'NULL'
+                pairs = db.execute(f'''SELECT d.id AS material_id,o.id AS dispatch_id,{source_field} AS source_channel FROM einkauf_material_dialoge d
                     JOIN assistent_bestellanforderungen o ON o.request_id=('material:' || CAST(d.id AS TEXT))
-                    OR (d.dispatch_id<>'' AND o.id=d.dispatch_id)
+                    OR (d.dispatch_id<>'' AND o.id=d.dispatch_id) {source_join}
                     ORDER BY CASE WHEN o.request_id=('material:' || CAST(d.id AS TEXT)) THEN 0 ELSE 1 END,d.id''').fetchall()
                 for pair in pairs:
                     material_for_dispatch.setdefault(pair['dispatch_id'],pair['material_id'])
-                source_join = 'LEFT JOIN einkauf_material_nachrichten n ON n.id=d.message_id' if available['einkauf_material_nachrichten'] else ''
+                    material_channels[pair['material_id']] = 'Fotoformular' if pair['source_channel'] == 'portal:personal' else 'WhatsApp'
                 employee_field = 'n.employee_id' if source_join else 'NULL'
-                material_rows = db.execute(f'''SELECT d.*, {employee_field} AS source_employee_id
+                material_rows = db.execute(f'''SELECT d.*, {employee_field} AS source_employee_id,{source_field} AS source_channel
                     FROM einkauf_material_dialoge d {source_join}
                     WHERE NOT EXISTS (SELECT 1 FROM assistent_bestellanforderungen o
                     WHERE o.request_id=('material:' || CAST(d.id AS TEXT)) OR (d.dispatch_id<>'' AND o.id=d.dispatch_id))''').fetchall()
                 material_lines = [self._material_line(row,people,contacts) for row in material_rows]
             def order_line(row,*,draft=False):
                 return self._line(row,people,contacts,draft=draft,now=now,
-                                  material_id=None if draft else material_for_dispatch.get(row['id']))
+                                  material_id=None if draft else material_for_dispatch.get(row['id']),
+                                  material_channel=material_channels.get(material_for_dispatch.get(row['id']),'WhatsApp'))
             filtered_material = [line for line in material_lines if self._material_matches(line,filters,dates)]
             mail_join = 'LEFT JOIN mailbox_outbox m ON m.token=b.id' if available['mailbox_outbox'] else ''
             mail_fields = 'm.state AS mail_state,m.updated_at AS mail_updated,m.message_id' if available['mailbox_outbox'] else 'NULL AS mail_state,NULL AS mail_updated,NULL AS message_id'

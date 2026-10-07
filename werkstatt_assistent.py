@@ -631,6 +631,11 @@ def register_assistant(p):
         session.permanent = True
         session["assistent_mid"] = row["mitarbeiter_id"]
         session["assistent_version"] = row["version"]
+        # A page opened under the previous person must not submit material
+        # for a different personal account after another login in this browser.
+        session['csrf_token'] = secrets.token_urlsafe(32)
+        if request.form.get('next') == '/werkstatt/materialbestellung':
+            return redirect('/werkstatt/materialbestellung')
         return redirect(url_for("assistent.page"))
 
     @bp.post("/logout")
