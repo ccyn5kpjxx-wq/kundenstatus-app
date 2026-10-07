@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="theme-color" content="#173f35"><title>Mein Mitarbeiterkonto · Gärtner</title><link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=einladung-1"><link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=mitarbeiter-1"></head>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="theme-color" content="#173f35"><title>Mein Mitarbeiterkonto · Gärtner</title><link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=einladung-1"><link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=mitarbeiter-2"></head>
 <body><header class="access-header"><a href="/werkstatt/mein-konto" class="brand">GÄRTNER<span>GmbH · Karosserie + Lack</span></a><span>{{ employee.name }}</span></header>
 <main class="admin-main employee-home">
 {% include '_mitarbeiter_portal_nav.html' %}
@@ -11,6 +11,7 @@
 </div>
 <h2 class="area-heading">Was möchtest du machen?</h2>
 <div class="portal-area-grid">
+<a class="portal-area area-orders" href="/werkstatt/mein-konto/auftraege"><span class="area-symbol" aria-hidden="true">▤</span><h2>Aufträge</h2><p>Nummer am Fahrzeug eingeben. Arbeiten, Farbton und Termine sehen, Fotos hinzufügen und den Arbeitsstand ändern.</p><span aria-hidden="true">→</span></a>
 <a class="portal-area" href="/werkstatt/materialbestellung"><span class="area-symbol" aria-hidden="true">＋</span><h2>Bestellen</h2><p>Foto oder Screenshot, Stückzahl, senden. Dringend oder Montag.</p><span aria-hidden="true">→</span></a>
 <a class="portal-area" href="/werkstatt/assistent/arbeitszeit"><span class="area-symbol" aria-hidden="true">◷</span><h2>Arbeitszeit</h2><p>Start, Pause und Feierabend stempeln. Deine Stunden ansehen.</p><span aria-hidden="true">→</span></a>
 <a class="portal-area" href="/werkstatt/assistent/urlaub"><span class="area-symbol" aria-hidden="true">☀</span><h2>Urlaub</h2><p>Resturlaub und Anträge. Betriebsurlaub findest du weiter unten.</p><span aria-hidden="true">→</span></a>

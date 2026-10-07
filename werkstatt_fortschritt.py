@@ -15,6 +15,8 @@ from zoneinfo import ZoneInfo
 ACTIONS = frozenset({"lackierbereit", "lackierung_starten", "finish_starten"})
 NATIVE_ACTION_LABELS = {
     "in_arbeit_starten": "In Arbeit",
+    "vorarbeit_starten": "Vorarbeit",
+    "karosserie_starten": "Karosserie",
     "lackierbereit": "Lackierbereit",
     "lackierung_starten": "Lackierung",
     "finish_starten": "Finish",
@@ -119,14 +121,16 @@ def _native_plan(row, action, day):
     if action == "lackierbereit":
         return {} if row.get("lackierbereit") == 1 else {"lackierbereit": 1}
     if status != 3:
-        raise ProgressError("status_not_allowed", "Lackierung, Finish und Fertigmeldung setzen einen Auftrag in Arbeit voraus.")
+        raise ProgressError("status_not_allowed", "Produktionsschritte und Fertigmeldung setzen einen Auftrag in Arbeit voraus.")
     if action == "fertig_melden":
         changes = {"status": 4, "start_datum": row.get("start_datum") or day,
                    "fertig_datum": row.get("fertig_datum") or day,
                    "fahrzeug_abholbereit": 0, "fahrzeug_abholbereit_am": "",
                    "lackierbereit": 0, "lackierbereit_am": ""}
     else:
-        changes = {"produktion_schritt": "lackierung" if action == "lackierung_starten" else "finish",
+        stage = {"vorarbeit_starten": "vorarbeit", "karosserie_starten": "karosserie",
+                 "lackierung_starten": "lackierung", "finish_starten": "finish"}[action]
+        changes = {"produktion_schritt": stage,
                    "lackierbereit": 0, "lackierbereit_am": ""}
     return {key: value for key, value in changes.items() if row.get(key) != value}
 
@@ -175,7 +179,7 @@ class WorkshopProgress:
         text = f"Auftrag {order_id}: {label} speichern."
         if not changes:
             text = f"Auftrag {order_id} ist bereits als {label} gespeichert. Keine Änderung."
-        elif action in ("lackierbereit", "lackierung_starten", "finish_starten"):
+        elif action in ("lackierbereit", "vorarbeit_starten", "karosserie_starten", "lackierung_starten", "finish_starten"):
             text += " Der Fahrzeugstatus bleibt unverändert; das Fahrzeug wird nicht fertiggemeldet."
         elif action == "fertig_melden":
             text += " Das gesamte Fahrzeug wird als fertig gemeldet, nicht als zurückgegeben."
@@ -190,7 +194,7 @@ class WorkshopProgress:
                 "werkstatttag": day, "fortschritt": _view(row), "unveraendert": not bool(changes),
                 "zusammenfassung": text}
 
-    def confirm(self, preview, who, request_id):
+    def confirm(self, preview, who, request_id, *, authorize=None):
         """Apply a previously saved, explicitly confirmed native preview.
 
         Resolve who afresh even on retries. request_id must be the persisted
@@ -209,7 +213,7 @@ class WorkshopProgress:
         day = _required_text(preview.get("werkstatttag"), "Werkstatttag", 10)
         return self._update(preview.get("auftrag_id"), preview.get("aktion"), preview.get("expected_status"),
                             preview.get("expected_changed_at"), actor, request_id,
-                            native={"snapshot": snapshot, "day": day})
+                            native={"snapshot": snapshot, "day": day}, authorize=authorize)
 
     def update(self, order_id, action, expected_status, expected_changed_at, actor, request_id):
         """Apply one authorized action atomically, or replay its saved result.
@@ -225,7 +229,7 @@ class WorkshopProgress:
         """
         return self._update(order_id, action, expected_status, expected_changed_at, actor, request_id)
 
-    def _update(self, order_id, action, expected_status, expected_changed_at, actor, request_id, native=None):
+    def _update(self, order_id, action, expected_status, expected_changed_at, actor, request_id, native=None, authorize=None):
         order_id = _identifier(order_id, "Auftrags-ID")
         allowed = NATIVE_ACTION_LABELS if native is not None else ACTIONS
         if not isinstance(action, str) or action not in allowed:
@@ -248,6 +252,10 @@ class WorkshopProgress:
             timestamp = now.isoformat(timespec="microseconds")
             if timestamp == expected_changed_at:
                 timestamp = (now + timedelta(microseconds=1)).isoformat(timespec="microseconds")
+            # Optional trusted route guard; never accepted from client/model data.
+            # It also runs for replay, so revoked operational release is respected.
+            if authorize is not None:
+                authorize(db, order_id)
             # A concurrent equal key waits on the database unique constraint.
             # Reservations and mutations commit together; failures leave neither.
             inserted = db.execute("""INSERT INTO assistent_fortschritt_audit
@@ -271,6 +279,8 @@ class WorkshopProgress:
             if row is None:
                 raise ProgressError("not_found", "Auftrag nicht gefunden.", 404)
             row = dict(row)
+            if authorize is not None:
+                authorize(db, order_id)
             if row.get("archiviert"):
                 raise ProgressError("archived", "Archivierte Aufträge können hier nicht geändert werden.")
             if row["status"] != expected_status or row["geaendert_am"] != expected_changed_at:

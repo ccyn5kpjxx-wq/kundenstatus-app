@@ -48209,6 +48209,7 @@ def import_backup_json_rows_into_current_database(export, archive, names):
         ensure_no_database_only_originals_for_import(target)
         ensure_employee_invitation_state_for_import(sys.modules[__name__], export=export, target=target)
         ensure_employee_private_state_for_import(sys.modules[__name__], export=export, target=target, archive=archive, names=names)
+        ensure_employee_orders_for_import(sys.modules[__name__], export=export, target=target, archive=archive, names=names)
         ensure_material_external_claims_for_import(export=export, target=target, archive=archive, names=names)
         for table_name in reversed(BACKUP_TABLES):
             target.execute(f"DELETE FROM {table_name}")
@@ -48294,6 +48295,7 @@ def import_sqlite_rows_into_current_database(imported_db):
         ensure_no_database_only_originals_for_import(target)
         ensure_employee_invitation_state_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
         ensure_employee_private_state_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
+        ensure_employee_orders_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
         ensure_material_external_claims_for_import(imported_db=imported_db, target=target)
         for table_name in reversed(BACKUP_TABLES):
             target.execute(f"DELETE FROM {table_name}")
@@ -48527,6 +48529,7 @@ def admin_daten_import():
                     ensure_no_database_only_originals_for_import()
                     ensure_employee_invitation_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db)
                     ensure_employee_private_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db, archive=archive, names=names)
+                    ensure_employee_orders_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db, archive=archive, names=names)
                     ensure_material_external_claims_for_import(
                         export=backup_export, imported_db=imported_db, archive=archive, names=names
                     )
@@ -48575,7 +48578,7 @@ def admin_daten_import():
                     intake_schema = globals().get("workshop_intake_init_schema")
                     if callable(intake_schema):
                         intake_schema()
-                    for hook in ("employee_invitations_init_schema", "employee_portal_init_schema", "workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema", "order_price_comparison_init_schema"):
+                    for hook in ("employee_invitations_init_schema", "employee_portal_init_schema", "workshop_progress_init_schema", "workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema", "order_price_comparison_init_schema"):
                         schema = globals().get(hook)
                         if callable(schema):
                             schema()
@@ -57907,6 +57910,8 @@ from werkstatt_auftrag_ausdruck import register_auftrag_ausdruck
 register_auftrag_ausdruck(sys.modules[__name__])
 from werkstatt_fortschritt_api import register_progress_api, progress_csrf_exempt
 workshop_progress = register_progress_api(sys.modules[__name__])
+from werkstatt_fortschritt import init_schema as init_workshop_progress_schema
+workshop_progress_init_schema = lambda: init_workshop_progress_schema(sys.modules[__name__])
 from werkstatt_bestellungen import register_orders, start_order_worker
 workshop_orders = register_orders(sys.modules[__name__])
 from werkstatt_einkaufseingang import register_intake
@@ -57930,6 +57935,11 @@ material_order_portal = register_material_order_portal(sys.modules[__name__])
 from werkstatt_mitarbeiter_portal import register_employee_portal, ensure_employee_private_state_for_import
 employee_portal = register_employee_portal(sys.modules[__name__])
 employee_portal_init_schema = employee_portal.init_schema
+from werkstatt_mitarbeiter_auftraege import register_employee_orders, ensure_employee_orders_for_import
+# Personal order controls have a narrow grant; general assistant permissions
+# and the shared workshop login remain independent.
+app.config["EMPLOYEE_ORDER_OPERATIONS_ENABLED"] = env_flag("EMPLOYEE_ORDER_OPERATIONS_ENABLED", True)
+employee_orders = register_employee_orders(sys.modules[__name__])
 from werkstatt_bestellvergleich import OrderPriceComparison
 order_price_comparison = OrderPriceComparison(sys.modules[__name__])
 order_price_comparison_init_schema = order_price_comparison.init_schema

@@ -27,6 +27,7 @@ from flask import Flask, flash, redirect, request, url_for
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from werkstatt_einladung_restore import ensure_employee_invitation_state_for_import
 from werkstatt_mitarbeiter_portal import ensure_employee_private_state_for_import
+from werkstatt_mitarbeiter_auftraege import ensure_employee_orders_for_import
 
 
 TABLES = ('einkauf_material_dialoge', 'assistent_audit', 'ordinary')
@@ -103,12 +104,15 @@ class ExternalRestoreTests(unittest.TestCase):
         # sys.modules[__name__]. Run the real invitation guard against this
         # isolated database; never stub out its safety check.
         module_name = '_synthetic_material_restore_' + str(id(self))
-        portal = SimpleNamespace(get_db=self.ns['get_db'], get_table_columns=self.ns['get_table_columns'])
+        portal = SimpleNamespace(get_db=self.ns['get_db'], get_table_columns=self.ns['get_table_columns'],
+                                 backup_binary_reference_map=lambda *args, **kwargs: self.ns['backup_binary_reference_map'](*args, **kwargs),
+                                 read_backup_binary_blob=lambda *args, **kwargs: self.ns['read_backup_binary_blob'](*args, **kwargs))
         sys.modules[module_name] = portal
         self.addCleanup(sys.modules.pop, module_name, None)
         self.ns.update(sys=sys, __name__=module_name,
                        ensure_employee_invitation_state_for_import=ensure_employee_invitation_state_for_import,
-                       ensure_employee_private_state_for_import=ensure_employee_private_state_for_import)
+                       ensure_employee_private_state_for_import=ensure_employee_private_state_for_import,
+                       ensure_employee_orders_for_import=ensure_employee_orders_for_import)
         exec(self.code, self.ns)
         self.client = self.app.test_client()
 

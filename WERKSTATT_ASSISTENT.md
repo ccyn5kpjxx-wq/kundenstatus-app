@@ -103,11 +103,48 @@ sie bleiben für die Nachvollziehbarkeit gespeichert. Ein Import löst keine Bes
 ## Bestellversand
 
 Die Regel ist vorbereitet: dringend sofort, sonst je Lieferant gesammelt montags
-um zwölf Uhr in Europe/Berlin. Der Versand bleibt standardmäßig inaktiv. Er benötigt
+um 14 Uhr in Europe/Berlin. Der Versand bleibt standardmäßig inaktiv. Er benötigt
 einen geprüften Lieferantenkontakt, eindeutig bestätigte Produkte/Mengen/Kosten,
 einen konfigurierten Kostenrahmen, das verbundene Mailkonto und den laufenden
 Bestellworker. Verwaltung: `/admin/assistent-bestellungen`. Versand und Worker haben
 eigene Aktivierungsschalter. Ein unbekanntes Versandergebnis wird nicht blind wiederholt.
+
+## Persönliche Aufträge
+
+Im Mitarbeiterkonto führt **Aufträge** zu `/werkstatt/mein-konto/auftraege`.
+Die Nummer am Fahrzeug ist die feste interne Datenbank-ID, z. B. 102. Eine
+Autohausreferenz im Feld `auftragsnummer` ersetzt diese Nummer nicht. Die Suche
+öffnet ausschließlich den angefragten aktuellen Werkstattauftrag; Archiv,
+fehlende Versicherungsfreigabe und nicht freigegebene Aufträge bleiben gesperrt.
+
+Die Ansicht zeigt Arbeiten, prüfpflichtige Analysehinweise, Farbdaten,
+Fertigtermin mit Uhrzeit und die getrennten Annahme-/Abhol-/Rückgabetermine.
+Fehlende Daten bleiben sichtbar offen. Sie benötigt die eigene aktive Anmeldung
+mit aktueller Rechte- und Passwortversion, keinen geteilten Werkstattcode.
+
+`EMPLOYEE_ORDER_OPERATIONS_ENABLED=1` erlaubt in diesen persönlichen Routen
+gezielt Statuswechsel und interne Arbeitsfotos. Das erweitert keine gespeicherten
+Assistenten-, Einkaufs-, Personal- oder API-Rechte. Eingeplant kann nach In Arbeit
+wechseln; Vorarbeit, Karosserie, Lackierung und Finish sind Arbeitsschritte.
+**Fahrzeug fertig** setzt den gesamten Auftrag auf Fertig. Angelegt wird im Büro
+eingeplant; abgeschlossene Aufträge werden hier nicht reaktiviert. Die festen
+Formularaktionen verwenden den bestehenden Fortschrittsdienst, gebundenen
+Formularstand, erneute Freigabeprüfung, Mitarbeiteraudit und Wiederholungsschutz.
+Sie versenden keine automatischen Kundenmails oder WhatsApp-Nachrichten.
+
+Fotos (1–6 JPEG/PNG, jeweils bis 8 MiB) werden dem geöffneten Auftrag zugeordnet,
+intern gespeichert und im Admin beim selben Auftrag abrufbar. Metadaten werden
+entfernt; die Bilder werden ohne OCR/KI verarbeitet und bleiben ohne explizite
+Außenfreigabe. Ein wiederholter identischer Formularversand speichert sie einmal.
+Alte Sicherungen dürfen weder verwendete Anforderungs-IDs, Arbeitsstand,
+Mitarbeiterbindung noch interne Fotooriginale und Sichtbarkeiten zurücksetzen.
+
+Arbeits-PDFs werden als neu erzeugte, bereinigte Textkopien geöffnet. Bank- und
+Kostenzeilen sowie Originalgrafik, Links, Metadaten und aktive Inhalte werden
+nicht weitergegeben. Rechnungen und Personal-/Bankbelege sind ausgeschlossen.
+Gescannten PDFs und unbestätigten Dokumentbildern fehlt ein sicher prüfbarer
+Textstand: Sie bleiben zur internen Prüfung gesperrt. Originalunterlagen im
+Admin werden dadurch nicht geändert.
 
 ## Prüfung
 

@@ -138,6 +138,18 @@ class NativeStatusTests(unittest.TestCase):
         self.assertFalse(result["fahrzeug_fertig"])
         self.assertEqual(self.count("status_log"), 0)
 
+    def test_vorarbeit_and_karosserie_are_internal_idempotent_steps_requiring_work(self):
+        for action, stage in (("vorarbeit_starten", "vorarbeit"), ("karosserie_starten", "karosserie")):
+            result = self.confirm(action, "first:" + action)
+            self.assertEqual(result["fortschritt"]["produktion_schritt"], stage)
+            self.assertEqual(result["fortschritt"]["status"], 3)
+            self.assertTrue(self.confirm(action, "second:" + action)["unveraendert"])
+            self.assertEqual(self.count("status_log"), 0)
+        self.execute("UPDATE auftraege SET status=2")
+        for action in ("vorarbeit_starten", "karosserie_starten"):
+            with self.assertRaises(ProgressError):
+                self.preview(action)
+
     def test_repeated_commands_do_not_toggle_or_rewrite_state(self):
         for action in ("in_arbeit_starten", "lackierbereit", "lackierung_starten", "finish_starten", "fertig_melden"):
             with self.subTest(action=action):

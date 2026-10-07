@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#173f35">
+  <title>{% if order %}Auftrag {{ order.nummer }}{% else %}Aufträge{% endif %} · Mein Mitarbeiterkonto</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=einladung-1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=mitarbeiter-2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_auftraege.css') }}?v=auftraege-1">
+</head>
+<body>
+<header class="access-header"><a href="/werkstatt/mein-konto" class="brand">GÄRTNER<span>GmbH · Karosserie + Lack</span></a><span>{{ employee.name }}</span></header>
+<main class="admin-main employee-orders">
+  {% include '_mitarbeiter_portal_nav.html' %}
+  <span class="eyebrow">DEIN AUFTRAG AM FAHRZEUG</span>
+  <h1>{% if order %}Auftrag <span>{{ order.nummer }}</span>{% else %}Aufträge{% endif %}</h1>
+  <p class="lead">Die Nummer hängt am Fahrzeug. Gib sie ein – hier findest du Arbeiten, Termine und Unterlagen.</p>
+  <form method="get" action="/werkstatt/mein-konto/auftraege" class="order-search" role="search">
+    <label for="order-number">Auftragsnummer<input id="order-number" name="nummer" type="text" inputmode="numeric" pattern="[0-9]+" maxlength="10" placeholder="z. B. 102" value="{{ nummer }}" required autocomplete="off"></label>
+    <button class="primary-button">Auftrag öffnen <span aria-hidden="true">→</span></button>
+  </form>
+  {% for category,message in get_flashed_messages(with_categories=true) %}<p role="status" class="setup-status{% if category in ['danger','error'] %} is-error{% endif %}">{{ message }}</p>{% endfor %}
+  {% if error %}<p role="alert" class="setup-status is-error">{{ error }}</p>{% endif %}
+  {% if order %}
+  <section class="order-heading" aria-label="Fahrzeug und aktueller Stand">
+    <div><h2>{{ order.fahrzeug }}</h2><p>{{ order.kennzeichen }}</p></div>
+    <div class="order-badges"><span class="order-status">{{ order.status_label }}</span>{% if order.status == 3 and order.produktion_schritt %}<span class="order-stage">{{ order.produktion_label }}</span>{% endif %}{% if order.lackierbereit and order.status in [2,3] %}<span class="order-stage">Lackierbereit</span>{% endif %}</div>
+  </section>
+  <div class="order-info-grid">
+    <section class="access-card order-work" aria-labelledby="order-work-heading"><span class="eyebrow">DAS IST ZU TUN</span><h2 id="order-work-heading">Arbeiten</h2><p class="order-work-text">{{ order.arbeit or 'Noch keine Arbeitsbeschreibung hinterlegt. Bitte mit der Werkstattleitung klären.' }}</p>
+      {% if order.text_gekuerzt %}<p class="setup-status">Sehr umfangreiche Arbeitsangaben sind hier gekürzt. Bitte die vollständige Unterlage öffnen oder mit der Werkstattleitung prüfen.</p>{% endif %}
+      {% if order.analyse_text %}<details class="order-analysis"><summary>Hinweise aus den Unterlagen{% if order.analyse_pruefen %} · prüfen{% endif %}</summary>{% if order.analyse_hinweis %}<p class="muted small">{{ order.analyse_hinweis }}</p>{% endif %}<p class="order-work-text">{{ order.analyse_text }}</p></details>{% endif %}
+    </section>
+    <section class="access-card order-paint" aria-labelledby="order-paint-heading"><span class="eyebrow">FÜR DIE LACKIERUNG</span><h2 id="order-paint-heading">Farbton</h2><dl class="order-colors">{% for key,label in [('farbcode','Farbcode'),('farbton','Farbton'),('farbton_2','Zweiter Farbton')] %}{% if order.get(key) %}<div><dt>{{ label }}</dt><dd>{{ order.get(key) }}</dd></div>{% endif %}{% endfor %}</dl>{% if not order.farbcode and not order.farbton and not order.farbton_2 %}<p class="empty-state">Noch kein Farbton hinterlegt.</p>{% endif %}</section>
+    <section class="access-card order-dates" aria-labelledby="order-dates-heading"><span class="eyebrow">WANN MUSS DAS AUTO WEG?</span><h2 id="order-dates-heading">Termine &amp; Abholung</h2><p class="transport-label">{{ order.transport }}</p><dl class="order-appointments"><div class="finish-appointment"><dt>{{ order.fertig.label }}</dt><dd>{{ order.fertig.datum or 'Noch offen' }}{% if order.fertig.uhrzeit %}<strong>{{ order.fertig.uhrzeit }} Uhr</strong>{% elif order.fertig.datum %}<span>Uhrzeit noch offen</span>{% endif %}</dd></div>{% for item in order.termine %}<div><dt>{{ item.label }}</dt><dd>{{ item.datum or 'Noch offen' }}{% if item.uhrzeit %}<strong>{{ item.uhrzeit }} Uhr</strong>{% elif item.datum %}<span>Uhrzeit noch offen</span>{% endif %}</dd></div>{% endfor %}</dl></section>
+  </div>
+  <section class="access-card order-progress" aria-labelledby="progress-heading">
+    <span class="eyebrow">IM COCKPIT BEIM SELBEN AUFTRAG</span><h2 id="progress-heading">Arbeitsstand ändern</h2>
+    <ol class="order-flow" aria-label="Auftragsablauf">{% for status,label in [(2,'Eingeplant'),(3,'In Arbeit'),(4,'Fertig')] %}<li{% if order.status == status %} class="is-current" aria-current="step"{% elif order.status > status %} class="is-done"{% endif %}><span aria-hidden="true">{% if order.status > status %}✓{% else %}{{ loop.index }}{% endif %}</span>{{ label }}</li>{% endfor %}</ol>
+    {% if can_edit and action_forms %}<p class="muted small">Tippe auf den nächsten Arbeitsschritt. „Fahrzeug fertig“ gilt für das gesamte Auto.</p><div class="order-action-grid">{% for item in action_forms %}<form method="post" action="/werkstatt/mein-konto/auftraege/{{ order.id }}/status"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="aktion" value="{{ item.aktion }}"><input type="hidden" name="request_id" value="{{ item.request_id }}"><input type="hidden" name="confirmed" value="ja"><button class="{% if item.aktion == 'in_arbeit_starten' %}primary-button{% elif item.aktion == 'fertig_melden' %}finish-button{% else %}secondary-button{% endif %}">{{ item.label }}{% if item.aktion == 'fertig_melden' %}<span>Gesamtes Fahrzeug</span>{% endif %}</button></form>{% endfor %}</div>
+    {% elif order.status >= 4 %}<p class="empty-state">Dieser Auftrag ist abgeschlossen. Ein fertiges Fahrzeug wird hier nicht wieder in Arbeit gesetzt.</p>{% elif order.status == 1 %}<p class="empty-state">Die Werkstattleitung plant diesen Auftrag zuerst ein.</p>{% else %}<p class="empty-state">Der Arbeitsstand kann mit diesem Zugang momentan nicht geändert werden.</p>{% endif %}
+  </section>
+  <section class="access-card order-documents" aria-labelledby="documents-heading"><span class="eyebrow">AM AUFTRAG HINTERLEGT</span><h2 id="documents-heading">PDFs &amp; Unterlagen</h2><div class="order-document-list">{% for item in documents %}<article class="order-document"><span class="document-symbol" aria-hidden="true">▤</span><div><strong>{{ item.name }}</strong><p>{% if item.gesperrt %}{{ item.hinweis }}{% elif item.arbeitskopie %}Bereinigte Arbeitskopie{% else %}Arbeitsunterlage{% endif %}</p></div>{% if not item.gesperrt %}<a class="document-download" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">Öffnen <span aria-hidden="true">↗</span></a>{% endif %}</article>{% else %}<p class="empty-state">Noch keine Arbeitsunterlagen hinterlegt.</p>{% endfor %}</div></section>
+  <section class="access-card order-photos" aria-labelledby="photos-heading"><span class="eyebrow">DIREKT BEI AUFTRAG {{ order.nummer }}</span><h2 id="photos-heading">Bilder</h2><div class="order-photo-grid">{% for item in photos %}{% if not item.gesperrt %}<a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" class="order-photo"><img src="{{ item.url }}" alt="{{ item.name }}" loading="lazy"><span>{{ item.name }} <span aria-hidden="true">↗</span></span></a>{% else %}<p class="empty-state">{{ item.hinweis }}</p>{% endif %}{% else %}<p class="empty-state">Noch keine Arbeitsfotos hinterlegt.</p>{% endfor %}</div>
+    {% if can_edit and photo_request_id %}<form method="post" action="/werkstatt/mein-konto/auftraege/{{ order.id }}/fotos" enctype="multipart/form-data" class="order-photo-upload"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="request_id" value="{{ photo_request_id }}"><input type="hidden" name="confirmed" value="ja"><label for="order-photos">Fotos auswählen<input id="order-photos" type="file" name="fotos" accept="image/jpeg,image/png" multiple required></label><p class="muted small">Bis zu 6 Fotos als JPEG oder PNG, je höchstens 8 MB. Sie werden intern bei diesem Auftrag gespeichert.</p><button class="primary-button">Fotos zu Auftrag {{ order.nummer }} hinzufügen <span aria-hidden="true">＋</span></button></form>{% endif %}
+  </section>
+  <a class="order-voice-link" href="/werkstatt/assistent"><span aria-hidden="true">◉</span><div><strong>Lieber mit dem Assistenten sprechen?</strong><p>Sag: „Was muss ich bei Auftrag {{ order.nummer }} machen?“</p></div><span aria-hidden="true">→</span></a>
+  {% else %}<section class="access-card order-empty"><span class="order-empty-symbol" aria-hidden="true">▤</span><h2>Ein Auto. Ein Auftrag.</h2><p>Öffne die Nummer vom Fahrzeug. Danach kannst du den Arbeitsstand ändern, Unterlagen ansehen und Fotos hinzufügen.</p></section>{% endif %}
+</main><footer>Gärtner GmbH Karosserie + Lack · Dein Mitarbeiterkonto</footer>
+</body></html>
