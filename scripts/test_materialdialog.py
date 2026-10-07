@@ -177,7 +177,7 @@ class DialogTests(unittest.TestCase):
         self.hits=[]
         self.p.assistant_material_photos.vision=lambda *args:{'art':'produkt','marke':'Top-Color','farbe':'gelb'}
         view=self.photo('')
-        self.assertEqual(view['questions'][0]['field'],'order_requested')
+        self.assertEqual(view['questions'][0]['field'],'quantity')
         reply=self.answer(None,'Bestellen',explicit=False)
         self.assertEqual(reply['state'],'applied')
         self.assertEqual(reply['draft_id'],view['id'])
@@ -187,8 +187,8 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(self.answer(None,'1',explicit=False)['state'],'applied')
         view=self.s.status(view['id'])
         self.assertEqual(view['fields']['quantity']['value'],'1')
-        self.assertNotIn('unit',view['fields'])
-        self.assertEqual(view['questions'][0]['field'],'unit')
+        self.assertEqual(view['fields']['unit']['value'],'Stück')
+        self.assertEqual(view['questions'][0]['field'],'article')
         self.assertEqual(self.answer(None,'1 stűck',explicit=False)['state'],'applied')
         view=self.s.status(view['id'])
         self.assertEqual(view['fields']['unit']['value'],'Stück')
@@ -249,17 +249,121 @@ class DialogTests(unittest.TestCase):
                 self.assertEqual(article_query(text),'')
         self.assertEqual(parse_request('Stűck',question='unit'),{'unit':'Stück'})
 
-    def test_bare_number_needs_quantity_question_and_never_invents_unit(self):
+    def test_plain_photo_number_needs_no_prior_question_and_retains_explicit_unit(self):
         view=self.photo('')
-        self.assertEqual(self.answer(None,'1',explicit=False)['state'],'review')
-        self.assertNotIn('quantity',self.s.status(view['id'])['fields'])
-        self.answer(None,'Bestellen',explicit=False)
+        self.assertIn('Wie viele Stück brauchst du? Eine Zahl genügt.',view['questions'][0]['body'])
+        self.assertEqual(self.answer(None,'2',explicit=False)['state'],'applied')
         view=self.s.status(view['id'])
+        self.assertEqual(view['fields']['quantity']['value'],'2')
+        self.assertEqual(view['fields']['unit']['value'],'Stück')
+        self.assertEqual(view['fields']['unit']['proof']['basis'],'owner_photo_piece_count')
+        self.assertFalse(view['employee_reply_required'])
+        self.answer(view,'abbrechen')
+        view=self.photo('ein Karton, dringend',new=True)
+        original_unit=copy.deepcopy(view['fields']['unit'])
+        self.assertEqual(self.answer(None,'3',explicit=False)['state'],'applied')
+        updated=self.s.status(view['id'])
+        self.assertEqual(updated['fields']['quantity']['value'],'3')
+        self.assertEqual(updated['fields']['unit'],original_unit)
+        self.assertTrue(updated['fields']['urgent']['value'])
+
+    def test_plain_photo_count_caption_and_urgency_are_personal_piece_evidence(self):
+        for caption,amount,urgent in (('1','1',False),('2','2',False),('3 dringend','3',True),('4, nicht dringend','4',False)):
+            with self.subTest(caption=caption):
+                view=self.photo(caption,new=True)
+                fields=view['fields']
+                self.assertEqual((fields['quantity']['value'],fields['unit']['value']),(amount,'Stück'))
+                self.assertTrue(fields['order_requested']['value'])
+                self.assertEqual(fields['urgent']['value'],urgent)
+                self.assertEqual(fields['quantity']['proof']['basis'],'owner_photo_piece_count')
+                self.assertFalse(view['employee_reply_required'])
+                self.assertEqual(self.f.sql('SELECT caption FROM einkauf_material_nachrichten WHERE id=?',
+                    (view['message_id'],))[0]['caption'],caption)
+        self.assertEqual(self.p.workshop_orders.calls,[])
+        self.assertEqual(parse_request('2'),{})
+
+    def test_plain_photo_count_never_uses_invalid_numbers_dimensions_or_model_labels(self):
+        for text in ('0','-1','−1','+1','- 1','1.5','1,5','.1','1e2','100000000','VE96','5x120m',
+                     '-1 Stück','−1 Stück','- 1 Stück','1/2 Stück','1 / 2 Stück','1/2x Abdeckfolie',
+                     '1 / 2x Abdeckfolie','1 . 2 Stück','1 , 2x Abdeckfolie','.5 Stück'):
+            with self.subTest(text=text):
+                view=self.photo(text,new=True)
+                self.assertNotIn('quantity',view['fields'])
+                self.assertNotIn('order_requested',view['fields'])
+        self.p.assistant_material_photos.vision=lambda *args: {
+            'art':'produkt','produkt':'Test-Klebeband','breite':'50 mm','quantity':'96','unit':'Stück'}
+        view=self.photo('',new=True)
+        self.assertNotIn('quantity',view['fields'])
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_plain_photo_count_invalid_bound_number_cannot_mutate_existing_amount(self):
+        view=self.photo('2')
+        for text in ('0','-1','−1','+1','1.5','1,5','.1','1e2','100000000'):
+            with self.subTest(text=text):
+                self.assertEqual(self.answer(view,text)['state'],'review')
+                view=self.s.status(view['id'])
+                self.assertEqual(view['fields']['quantity']['value'],'2')
+                self.assertEqual(view['fields']['unit']['value'],'Stück')
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_plain_photo_count_is_never_a_numeric_catalog_choice(self):
+        self.hits[0]['artikelnummer']='1'
+        self.p.assistant_material_photos.vision=lambda *args: {'art':'produkt','marke':'TEST','farbe':'grün'}
+        view=self.photo('')
         self.assertEqual(self.answer(view,'1')['state'],'applied')
         view=self.s.status(view['id'])
-        self.assertNotIn('unit',view['fields'])
-        self.assertEqual(self.answer(None,'Stűck',explicit=False)['state'],'applied')
-        self.assertEqual(self.s.status(view['id'])['fields']['unit']['value'],'Stück')
+        self.assertEqual(view['fields']['quantity']['value'],'1')
+        self.assertNotIn('selected_article',view['fields'])
+        self.assertEqual(view['review'],{})
+        self.assertIn('article',view['missing_fields'])
+
+    def test_plain_photo_piece_vs_priced_pack_is_internal_without_conversion(self):
+        view=self.review(self.photo('2'),unit='Rolle')
+        self.assertEqual(view['fields']['quantity']['value'],'2')
+        self.assertEqual(view['fields']['unit']['value'],'Stück')
+        self.assertEqual(view['review']['unit'],'Rolle')
+        self.assertEqual(view['missing_fields'],['unit_review'])
+        self.assertEqual(view['state'],'review')
+        self.assertFalse(view['employee_reply_required'])
+        self.assertTrue(view['internal_review_pending'])
+        self.assertEqual(view['questions'][0]['field'],'internal_review')
+        self.assertIn('passende Gebinde',view['questions'][0]['body'])
+        self.assertNotIn('Antworte',view['questions'][0]['body'])
+        with self.s.db() as db:
+            self.assertTrue(self.s._reply_eligible(self.s._draft(db,view['id']),view['questions'][0]))
+        with self.assertRaises(PermissionError):self.s.approved_order(view['id'],view['revision'])
+        self.s.process_next()
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_plain_photo_number_keeps_ambiguity_and_personal_binding_fences(self):
+        first=self.photo('')
+        second=self.photo('',new=True)
+        self.assertEqual(self.answer(None,'2',explicit=False)['state'],'review')
+        for view in (first,second):self.assertNotIn('quantity',self.s.status(view['id'])['fields'])
+        self.channel.verify_sender(2,'491702222222','persönlich geprüft',confirmed=True)
+        self.assertEqual(self.answer(second,'2',sender='491702222222')['state'],'review')
+        self.assertEqual(self.answer(first,'2')['state'],'applied')
+        self.assertEqual(self.answer(first,'3')['state'],'review')  # stale revision
+        current=self.s.status(first['id'])
+        self.assertEqual(current['fields']['quantity']['value'],'2')
+        self.answer(current,'abbrechen')
+        self.assertEqual(self.answer(self.s.status(first['id']),'3')['state'],'review')
+        self.assertNotIn('quantity',self.s.status(second['id'])['fields'])
+
+    def test_plain_photo_number_waits_for_unique_pending_photo_and_never_picks_latest(self):
+        self.f.message['image']['caption']=''
+        self.f.ingest()
+        self.assertEqual(self.answer(None,'2',explicit=False)['state'],'waiting_for_photo')
+        self.f.replies()
+        source=self.channel.process_next()
+        view=self.s.ensure_draft(source['id'])
+        self.s.analyze(view['id'])
+        self.assertEqual(self.s.process_text()['state'],'applied')
+        self.assertEqual(self.s.status(view['id'])['fields']['quantity']['value'],'2')
+        self.f.message['id']='wamid.second-pending'
+        self.f.ingest()
+        self.assertEqual(self.answer(None,'3',explicit=False)['state'],'review')
+        self.assertEqual(self.s.status(view['id'])['fields']['quantity']['value'],'2')
 
     def test_short_order_without_photo_or_with_two_photos_creates_no_text_order(self):
         self.assertEqual(self.answer(None,'Bestellen',explicit=False)['state'],'review')

@@ -136,6 +136,19 @@ class OverviewTests(unittest.TestCase):
         for private in ('NEVER_SHOW_BANK_DATA', 'private-mail-account', 'private-do-not-show'):
             self.assertNotIn(private, html)
 
+    def test_recognized_photo_dimensions_name_pending_request_without_commercial_approval(self):
+        self.material(state='review')
+        with self.manager.db() as db:
+            db.execute("UPDATE einkauf_material_dialoge SET review_json='{}',analysis_json=? WHERE id=1",
+                       (canonical({'merkmale':{'materialtyp':'Folie','masse':'5 x 120 m','farbe':'gelb'}}),))
+            db.commit()
+        item = self.reader.page({'bestellung':'material:1'}, now=self.now)['selected']
+        self.assertEqual(item['product'], 'Folie 5 x 120 m')
+        self.assertEqual(item['state'], 'material_review')
+        self.assertEqual(item['sku'], 'nicht belegt')
+        self.assertEqual(item['total'], 'nicht belegt')
+        self.assertFalse(item['verified'])
+
     def test_saved_prices_and_identity_not_current_supplier_or_avatar_name(self):
         self.order('one')
         data = self.reader.page({'bestellung': 'one'}, now=self.now)

@@ -110,6 +110,67 @@ class MaterialPurchaseEndToEndTests(unittest.TestCase):
         self.manager.tick(worker=True)
         self.assertEqual(self.smtp.data_calls, 0)
 
+    def count_demand(self, caption):
+        view = self.f.photo(caption, new=True)
+        self.assertFalse(view['employee_reply_required'])
+        self.assertEqual(view['fields']['unit']['value'], 'Stück')
+        self.assertNotIn('order_requested', view['missing_fields'])
+        self.assertNotIn('quantity', view['missing_fields'])
+        return self.f.review(view, supplier_id=self.contact, unit='Stück',
+                             unit_price_cents=1000, shipping_cents=300, extra_costs_cents=0,
+                             price_source='Geprüftes Testangebot je Stück, keine Gebindeumrechnung')
+
+    def test_photo_with_count_and_urgent_sends_once_without_extra_employee_question(self):
+        view = self.count_demand('1 dringend')
+        self.assertEqual(self.f.s.process_next()['state'], 'sent')
+        self.assertEqual(self.smtp.data_calls, 1)
+        row = self.f.s.status(view['id'])
+        order = self.manager.dispatch.status(row['dispatch_id'])['order']
+        self.assertEqual(order['quantity'], '1')
+        self.assertEqual(order['unit'], 'Stück')
+        self.assertEqual(order['max_total_cents'], 1300)
+        self.manager.submit_material_request(view['id'], row['revision'])
+        self.manager.tick()
+        self.f.s.process_next()
+        self.assertEqual(self.smtp.data_calls, 1)
+
+    def test_photo_with_count_waits_for_monday_and_duplicate_cannot_send_twice(self):
+        self.count_demand('1')
+        self.assertEqual(self.f.s.process_next()['state'], 'queued')
+        duplicate = self.f.photo('1', new=True)
+        self.assertIn('possible_duplicate', duplicate['missing_fields'])
+        self.assertTrue(duplicate['employee_reply_required'])
+        self.f.s.process_next()
+        self.assertEqual(self.smtp.data_calls, 0)
+        self.f.f.time = datetime(2026, 10, 12, 13, 59, tzinfo=BERLIN).timestamp()
+        self.manager.tick(worker=True)
+        self.assertEqual(self.smtp.data_calls, 0)
+        self.f.f.time = datetime(2026, 10, 12, 14, 0, tzinfo=BERLIN).timestamp()
+        self.manager.tick(worker=True)
+        self.assertEqual(self.smtp.data_calls, 1)
+        self.f.s.process_next()
+        self.manager.tick(worker=True)
+        self.assertEqual(self.smtp.data_calls, 1)
+        self.assertIn('possible_duplicate', self.f.s.status(duplicate['id'])['missing_fields'])
+
+    def test_photo_then_separate_count_stays_one_material_request(self):
+        view = self.f.photo('', new=True)
+        answer = self.f.answer(None, '2', explicit=False)
+        self.assertEqual(answer['state'], 'applied')
+        self.assertEqual(answer['draft_id'], view['id'])
+        updated = self.f.s.status(view['id'])
+        self.assertFalse(updated['employee_reply_required'])
+        self.assertEqual(updated['fields']['quantity']['value'], '2')
+        self.assertEqual(updated['fields']['unit']['value'], 'Stück')
+        self.assertEqual(len(self.f.s.list()), 1)
+        self.f.review(updated, supplier_id=self.contact, unit='Stück',
+                      unit_price_cents=1000, shipping_cents=0, extra_costs_cents=0)
+        self.assertEqual(self.f.s.process_next()['state'], 'queued')
+        self.assertEqual(self.smtp.data_calls, 0)
+        self.f.f.time = datetime(2026, 10, 12, 14, 0, tzinfo=BERLIN).timestamp()
+        self.manager.tick(worker=True)
+        self.assertEqual(self.smtp.data_calls, 1)
+
 
 if __name__ == '__main__':
     unittest.main()

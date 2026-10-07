@@ -239,7 +239,8 @@ class OrderOverview:
             and duplicate != value('duplicate_confirmation'))
         if duplicate_pending:
             warnings.append('Mögliche Doppelbestellung. Die gezielte Rückfrage muss vor einer zusätzlichen Bestellung beantwortet werden.')
-        product = _text(commercial.get('product_name') or labels.get('produkt')) or 'Artikel noch zuordnen'
+        photo_description = ' '.join(_text(labels.get(key)) for key in ('materialtyp','masse')).strip()
+        product = _text(commercial.get('product_name') or labels.get('produkt')) or photo_description or 'Artikel noch zuordnen'
         created = row['created_at']
         events = []
         if intact:

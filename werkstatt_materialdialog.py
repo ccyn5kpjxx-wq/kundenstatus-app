@@ -28,10 +28,10 @@ UNITS = {'karton':'Karton', 'kartons':'Karton', 'rolle':'Rolle', 'rollen':'Rolle
          'flaschen':'Flasche', 'stück':'Stück', 'stueck':'Stück'}
 WORDS = {'ein':'1','eine':'1','einen':'1','einem':'1','zwei':'2','drei':'3','vier':'4','fünf':'5','fuenf':'5',
          'sechs':'6','sieben':'7','acht':'8','neun':'9','zehn':'10'}
-QUANTITY_PATTERN = r'\b(\d{1,8}(?:[.,]\d{1,6})?|' + '|'.join(WORDS) + r')\s+(' + '|'.join(sorted(UNITS, key=len, reverse=True)) + r')\b'
-COUNTED_ITEM_PATTERN = r'(?<![\w.,+−-])([1-9]\d{0,7})\s*[x×]\s*(?P<product>[^\W\d_][\w/-]{2,})(?!\w)'
+QUANTITY_PATTERN = r'(?<![\w.,/+−-])(\d{1,8}(?:[.,]\d{1,6})?|' + '|'.join(WORDS) + r')\s+(' + '|'.join(sorted(UNITS, key=len, reverse=True)) + r')\b'
+COUNTED_ITEM_PATTERN = r'(?<![\w.,/+−-])([1-9]\d{0,7})\s*[x×]\s*(?P<product>[^\W\d_][\w/-]{2,})(?!\w)'
 EMPLOYEE_FIELDS = {'order_requested', 'quantity', 'unit', 'urgent', 'article', 'unit_conflict', 'possible_duplicate'}
-INTERNAL_FIELDS = {'supplier_review', 'price', 'budget'}
+INTERNAL_FIELDS = {'supplier_review', 'price', 'budget', 'unit_review'}
 EXTERNAL_STATES = {'external_pending', 'external_sent'}
 
 
@@ -48,6 +48,23 @@ def _bare_quantity(text):
     return format(amount.normalize(),'f') if amount>0 else None
 
 
+def _photo_piece_count(text):
+    value = _request_text(text).casefold().strip()
+    match = re.fullmatch(r'([1-9][0-9]{0,7})(?:(?:\s+|\s*[,;]\s*)(?:dringend|sofort|nicht\s+(?:dringend|sofort)|normal|regulär|regulaer))?',value)
+    return match[1] if match else None
+
+
+def _photo_count(text, source, fields):
+    """The owner's piece-count rule applies only to personal image messages."""
+    count = _photo_piece_count(text)
+    if not count or not source['mime'].startswith('image/') or source['forwarded']:
+        return {}
+    result = {'quantity':count}
+    if not fields.get('unit'):
+        result['unit'] = 'Stück'
+    return result
+
+
 def _counted_items(text):
     """Only an explicit count before a named item, never a dimension or VE."""
     excluded = set(UNITS) | set(WORDS) | {'mm','cm','m','mtr','meter','millimeter','zentimeter',
@@ -60,7 +77,7 @@ def _counted_items(text):
         'geöffnet','geoeffnet','öffnen','oeffnen','reparieren','reinigen','lackieren','polieren','schleifen','zeigen'}
     return [match for match in re.finditer(COUNTED_ITEM_PATTERN,text,flags=re.I)
             if match['product'].casefold() not in excluded
-            and not re.search(r'(?:^|\s)[+−-]\s*$',text[:match.start()])]
+            and not re.search(r'(?:[+−-]|[0-9]\s*[/.,])\s*$',text[:match.start()])]
 
 
 def article_query(text):
@@ -103,7 +120,7 @@ def parse_request(text, question=''):
     matches = []
     for match in re.finditer(QUANTITY_PATTERN, value):
         prefix = value[max(0, match.start()-35):match.start()]
-        if re.search(r'(?:\bve|inhalt|packungsinhalt|enthält|enthaelt)\s*[:=]?\s*$|\b(?:nicht|kein|keine)\s*$', prefix):
+        if re.search(r'(?:\bve|inhalt|packungsinhalt|enthält|enthaelt)\s*[:=]?\s*$|\b(?:nicht|kein|keine)\s*$|(?:[+−-]|[0-9]\s*[/.,])\s*$', prefix):
             continue
         amount = Decimal(WORDS.get(match[1], match[1]).replace(',', '.'))
         if amount > 0:
@@ -250,7 +267,9 @@ class MaterialDialog:
             parsed = parse_request(source['caption'])
             if parsed.get('urgent') is True and not parsed.get('cancelled'):
                 parsed['order_requested'] = True
-            self._merge(fields,parsed,self._proof(text,'text',text['id']) if text else self._proof(source))
+            proof = self._proof(text,'text',text['id']) if text else self._proof(source)
+            self._merge(fields,parsed,proof)
+            self._merge(fields,_photo_count(source['caption'],source,fields),dict(proof,basis='owner_photo_piece_count'))
         db.execute('''INSERT INTO einkauf_material_dialoge(message_id,fields_json,created_at,updated_at)
             VALUES(?,?,?,?) ON CONFLICT(message_id) DO NOTHING RETURNING id''',(source['id'],_json(fields),self.clock(),self.clock())).fetchall()
         draft = dict(db.execute('SELECT * FROM einkauf_material_dialoge WHERE message_id=?',(source['id'],)).fetchone())
@@ -385,6 +404,7 @@ class MaterialDialog:
         if self._accepted(db, draft):
             return
         fields, review = json.loads(draft['fields_json']), json.loads(draft['review_json'])
+        photo_source = self._source(db,draft)['mime'].startswith('image/')
         analysis = json.loads(draft['analysis_json'])
         selected_field = fields.get('selected_article',{})
         if selected_field.get('proof',{}).get('basis')=='exact_photo_catalog_match':
@@ -444,7 +464,7 @@ class MaterialDialog:
             elif review.get('verified_until','') < self._today():
                 missing.append('price')
             elif values.get('unit') and values['unit'].casefold() != review['unit'].casefold():
-                missing.append('unit_conflict')
+                missing.append('unit_review' if photo_source and values['unit']=='Stück' else 'unit_conflict')
             if duplicate and fields.get('duplicate_confirmation',{}).get('value')!=duplicate:
                 missing.append('possible_duplicate')
             payload = {}
@@ -463,7 +483,8 @@ class MaterialDialog:
             (state,_json(snapshot),_fingerprint(snapshot),_json(missing),self.clock(),draft['id']))
         db.execute("UPDATE einkauf_material_rueckfragen SET state='superseded' WHERE draft_id=? AND revision<>? AND state='queued'", (draft['id'],draft['revision']))
         if missing and state in {'open','review'}:
-            first = next((key for key in missing if key in EMPLOYEE_FIELDS),'internal_review')
+            first = ('quantity' if photo_source and 'quantity' in missing else
+                     next((key for key in missing if key in EMPLOYEE_FIELDS),'internal_review'))
             if first in {'article','internal_review'} and draft['analysis_state'] in {'pending','processing'}:
                 return
             questions = {'order_requested':'Soll dieses Material bestellt werden? Bitte ausdrücklich „bestellen“ schreiben.',
@@ -474,7 +495,12 @@ class MaterialDialog:
                 'possible_duplicate':('Gleicher Artikel und gleiche Menge wurden bereits in M-'+str((duplicate or {}).get('id',''))+
                     ' angefordert. Möchtest du zusätzlich bestellen? Bitte mit Ja oder Nein antworten. Noch nicht erneut bestellt.'),
                 'internal_review':'Die interne Lieferanten- und Preisprüfung ist noch offen. Die Werkstattleitung prüft die Zuordnung und vollständigen aktuellen Kosten. Noch nicht bestellt.'}
-            if 'budget' in missing:
+            if photo_source:
+                unit_name = {'Karton':'Kartons','Rolle':'Rollen','Packung':'Packungen','Dose':'Dosen','Flasche':'Flaschen'}.get(values.get('unit'),values.get('unit') or 'Stück')
+                questions['quantity']='Wie viele '+unit_name+' brauchst du? Eine Zahl genügt.'
+            if 'unit_review' in missing:
+                questions['internal_review']='Die Stückzahl ist erfasst. Die Werkstattleitung prüft das passende Gebinde und die aktuellen Kosten. Noch nicht bestellt.'
+            elif 'budget' in missing:
                 questions['internal_review']='Der Gesamtbetrag liegt außerhalb des freigegebenen Rahmens von 250 Euro. Die Werkstattleitung muss übernehmen. Noch nicht bestellt.'
             elif review and 'price' in missing:
                 questions['internal_review']='Die bisherigen Einkaufskonditionen sind abgelaufen. Die Werkstattleitung prüft die aktuellen vollständigen Kosten. Noch nicht bestellt.'
@@ -585,11 +611,12 @@ class MaterialDialog:
                     short_request = not article_query(text['body']) and (
                         parsed.get('order_requested') is True or parsed.get('quantity') and parsed.get('unit'))
                     bare_quantity = _bare_quantity(text['body'])
+                    photo_count = _photo_piece_count(text['body'])
                     bare_unit = parse_request(text['body'],question='unit').get('unit') if not parsed else None
                     # Short intent/quantity can answer one recent personal photo;
                     # never pick the newest of several possible requests.
                     origins = []
-                    if short_request or bare_quantity or bare_unit:
+                    if short_request or bare_quantity or photo_count or bare_unit:
                         origins = db.execute('''SELECT d.id,n.state FROM einkauf_material_nachrichten n
                             LEFT JOIN einkauf_material_dialoge d ON d.message_id=n.id
                             WHERE (d.id IS NULL OR d.state NOT IN ('accepted','cancelled','external_pending','external_sent'))
@@ -612,7 +639,7 @@ class MaterialDialog:
                         draft = self._draft(db,origins[0]['id'],lock=True)
                         question = db.execute('SELECT * FROM einkauf_material_rueckfragen WHERE draft_id=? AND revision=?',
                                               (draft['id'],draft['revision'])).fetchone()
-                        if bare_quantity and (not question or question['field']!='quantity'
+                        if bare_quantity and not photo_count and (not question or question['field']!='quantity'
                                 or 'quantity' not in json.loads(draft['missing_json'])):
                             raise ValueError('Reine Zahl gehört noch zu keiner eindeutigen Mengenfrage. Bitte Menge und Einheit nennen.')
                         if bare_unit and (not question or question['field']!='unit'
@@ -630,6 +657,12 @@ class MaterialDialog:
                     raise ValueError('Bestellung ist bereits übergeben oder abgebrochen; einen neuen Vorgang beginnen.')
                 body = re.sub(r'\bM-\d+\s+R\d+\s*[:,-]?','',text['body'],flags=re.I).strip()
                 parsed = parse_request(body,question['field'] if question else '')
+                fields = json.loads(draft['fields_json'])
+                photo_count = _photo_count(body,source,fields)
+                numeric_photo_reply = source['mime'].startswith('image/') and (photo_count or _bare_quantity(body)
+                    or re.fullmatch(r'[+−-]?\s*[0-9][0-9.,]*(?:[eE][+−-]?[0-9]+)?',body))
+                if numeric_photo_reply and not photo_count:
+                    parsed.pop('quantity',None)
                 if question and question['field']=='possible_duplicate' and body.casefold().strip(' .!') in {'ja','nein'}:
                     marker = json.loads(draft['fields_json']).get('possible_duplicate',{}).get('value')
                     if marker:
@@ -642,7 +675,9 @@ class MaterialDialog:
                 existing_article = json.loads(draft['fields_json']).get('selected_article',{})
                 label_acknowledgement = (existing_article.get('proof',{}).get('basis')=='exact_photo_catalog_match'
                     and len(hits)==1 and self._hit_identity(existing_article.get('value',{}))==self._hit_identity(hits[0]))
-                if ((question and question['field']=='article') or label_acknowledgement) and body.casefold().strip(' .!')=='ja' and len(hits)==1 and not analysis.get('treffer_gekuerzt'):
+                if numeric_photo_reply:
+                    pass  # A piece count is never a numeric SKU/variant selection.
+                elif ((question and question['field']=='article') or label_acknowledgement) and body.casefold().strip(' .!')=='ja' and len(hits)==1 and not analysis.get('treffer_gekuerzt'):
                     hit = hits[0]
                 else:
                     label = re.sub(r'\s+','',body.casefold().strip(' .!'))
@@ -651,12 +686,13 @@ class MaterialDialog:
                         hit = matching[0]
                 if hit:
                     parsed['selected_article'] = hit
-                if not parsed:
+                if not parsed and not photo_count:
                     # A bound but unclear correction must stop an earlier approval.
                     db.execute("UPDATE einkauf_material_dialoge SET state='review',error_code='antwort_unverstaendlich',updated_at=? WHERE id=?",(self.clock(),draft['id']))
                     raise ValueError('Antwort ist nicht eindeutig. Bitte konkrete Menge/Einheit oder Dringlichkeit nennen.')
-                fields = json.loads(draft['fields_json'])
-                self._merge(fields,parsed,self._proof(text,'text',text['id']))
+                proof = self._proof(text,'text',text['id'])
+                self._merge(fields,parsed,proof)
+                self._merge(fields,photo_count,dict(proof,basis='owner_photo_piece_count'))
                 review = json.loads(draft['review_json'])
                 if parsed.get('selected_article') and review.get('match_identity') != self._hit_identity(parsed['selected_article']):
                     db.execute("UPDATE einkauf_material_dialoge SET review_json='{}' WHERE id=?",(draft['id'],))
