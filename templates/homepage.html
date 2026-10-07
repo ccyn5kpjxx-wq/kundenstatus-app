@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gärtner Karosserie & Lack | Meisterbetrieb in Mosbach</title>
+  <title>Gärtner GmbH Karosserie + Lack | Meisterbetrieb in Mosbach</title>
   <meta name="description" content="Karosserie, Fahrzeuglackierung, Unfallinstandsetzung und Mietwagen in Mosbach. Schaden digital melden und Reparaturstatus sicher verfolgen.">
   <meta name="robots" content="{{ 'index, follow' if site_indexable else 'noindex, nofollow' }}">
   {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
   <meta property="og:type" content="website">
   <meta property="og:locale" content="de_DE">
-  <meta property="og:title" content="Gärtner Karosserie & Lack | Meisterbetrieb in Mosbach">
+  <meta property="og:title" content="Gärtner GmbH Karosserie + Lack | Meisterbetrieb in Mosbach">
   <meta property="og:description" content="Schaden digital melden, Mietwagen anfragen und Reparaturstatus sicher verfolgen.">
   <link rel="preload" as="image" href="{{ url_for('static', filename='homepage/werkstatt-hero-v3.webp') }}" type="image/webp">
   <script type="application/ld+json">
@@ -768,7 +768,7 @@
   <a class="skip-link" href="#inhalt">Direkt zum Inhalt</a>
   <header class="header">
     <nav class="wrap nav" aria-label="Hauptnavigation">
-      <a class="nav-brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie und Lack"></a>
+      <a class="nav-brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner GmbH Karosserie + Lack"></a>
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="hauptmenue"><span class="nav-toggle-bars" aria-hidden="true"><i></i><i></i><i></i></span><span>Menü</span></button>
       <div class="nav-menu" id="hauptmenue"><a href="#schaden">Schaden</a><a href="#so-gehts">Ablauf</a><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a href="#mietwagen">Mietwagen</a><a href="#fahrzeugcheck">Fahrzeugcheck</a><a href="{{ url_for('oeffentliches_team') }}">Team</a><a href="#kontakt">Kontakt</a></div>
       <a class="nav-cta" href="{{ portal_links.schaden }}">Schaden melden</a>

@@ -12,7 +12,7 @@
 <body>
   <main class="material-page">
     <header class="material-header">
-      <a class="brand" href="/werkstatt/assistent" aria-label="Zum Werkstatt-Assistenten"><span class="brand-mark" aria-hidden="true">G</span><span>GÄRTNER<small>KAROSSERIE &amp; LACK</small></span></a>
+      <a class="brand" href="/werkstatt/assistent" aria-label="Zum Werkstatt-Assistenten"><span class="brand-mark" aria-hidden="true">G</span><span>Gärtner GmbH<small> Karosserie + Lack</small></span></a>
       {% if who and who.actor != 'admin' %}<span class="personal-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg><span>{{ who.mitarbeiter_name or 'Persönlicher Zugang' }}</span></span>{% else %}<a class="header-link" href="/werkstatt/assistent">Zum Assistenten <span aria-hidden="true">↗</span></a>{% endif %}
     </header>
 
@@ -97,7 +97,7 @@
     </div>
     <script src="{{ url_for('static', filename='materialbestellung.js', v='foto-1') }}" defer></script>
     {% endif %}
-    <footer class="material-footer"><span>Gärtner Karosserie &amp; Lack</span><a href="/werkstatt/assistent">Dein Werkstatt-Assistent <span aria-hidden="true">↗</span></a></footer>
+    <footer class="material-footer"><span>Gärtner GmbH Karosserie + Lack</span><a href="/werkstatt/assistent">Dein Werkstatt-Assistent <span aria-hidden="true">↗</span></a></footer>
   </main>
 </body>
 </html>

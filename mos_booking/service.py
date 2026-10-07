@@ -289,7 +289,7 @@ class BookingService:
     def public(b):
         return {k: b[k] for k in ('id', 'state', 'expires', 'paid', 'reason', 'checkout_url')} | {
             'quote': json.loads(b['quote']), 'test_only': True,
-            'pickup': 'Gärtner Karosserie & Lack · Binauer Höhe 4 · 74821 Mosbach-Lohrbach',
+            'pickup': 'Gärtner GmbH Karosserie + Lack · Binauer Höhe 4 · 74821 Mosbach-Lohrbach',
             'pickup_note': 'Persönliche Schlüsselübergabe. Termin muss noch vereinbart werden.'}
 
     def get(self, bid, owner):

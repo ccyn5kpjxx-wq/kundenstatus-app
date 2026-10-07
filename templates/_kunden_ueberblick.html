@@ -16,7 +16,7 @@
 {% if not customer_is_lead %}
 {% if cockpit_demo %}<div class="portal-demo">Lokale Designvorschau <span>Beispieldaten · keine Live-Änderung</span></div>{% endif %}
 <header class="portal-brand">
-  <a href="#uebersicht" class="portal-brand-link" aria-label="Zur Auftragsübersicht"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack"></a>
+  <a href="#uebersicht" class="portal-brand-link" aria-label="Zur Auftragsübersicht"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner GmbH Karosserie + Lack"></a>
   <div class="portal-brand-caption">Ihr persönlicher<br><strong>Werkstattbegleiter</strong></div>
   <a class="portal-contact-link" href="#werkstatt-kontakt">Kontakt zur Werkstatt <span aria-hidden="true">↗</span></a>
 </header>
@@ -73,7 +73,7 @@
 </div>
 {% else %}
 <section class="panel customer-overview mb-4" aria-labelledby="customer-title">
-  <div class="brand-row"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack" class="brand-logo"><div><div class="small">Ihr persönliches Kundenportal</div><strong>{{ werkstatt_kontakt.name }}</strong></div></div>
+  <div class="brand-row"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner GmbH Karosserie + Lack" class="brand-logo"><div><div class="small">Ihr persönliches Kundenportal</div><strong>{{ werkstatt_kontakt.name }}</strong></div></div>
   <h1 id="customer-title" class="h3">{{ item['fahrzeug'] or 'Ihre Fahrzeuganfrage' }}</h1>
   <p class="meta-line">{{ item['kunde_name'] or '' }}{% if item['kennzeichen'] %} · {{ item['kennzeichen'] }}{% endif %}</p>
   <div class="customer-summary">
