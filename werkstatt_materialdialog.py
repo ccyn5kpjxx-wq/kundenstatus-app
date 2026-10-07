@@ -29,6 +29,7 @@ UNITS = {'karton':'Karton', 'kartons':'Karton', 'rolle':'Rolle', 'rollen':'Rolle
 WORDS = {'ein':'1','eine':'1','einen':'1','einem':'1','zwei':'2','drei':'3','vier':'4','fünf':'5','fuenf':'5',
          'sechs':'6','sieben':'7','acht':'8','neun':'9','zehn':'10'}
 QUANTITY_PATTERN = r'\b(\d{1,8}(?:[.,]\d{1,6})?|' + '|'.join(WORDS) + r')\s+(' + '|'.join(sorted(UNITS, key=len, reverse=True)) + r')\b'
+COUNTED_ITEM_PATTERN = r'(?<![\w.,+−-])([1-9]\d{0,7})\s*[x×]\s*(?P<product>[^\W\d_][\w/-]{2,})(?!\w)'
 EMPLOYEE_FIELDS = {'order_requested', 'quantity', 'unit', 'urgent', 'article', 'unit_conflict', 'possible_duplicate'}
 INTERNAL_FIELDS = {'supplier_review', 'price', 'budget'}
 EXTERNAL_STATES = {'external_pending', 'external_sent'}
@@ -47,9 +48,27 @@ def _bare_quantity(text):
     return format(amount.normalize(),'f') if amount>0 else None
 
 
+def _counted_items(text):
+    """Only an explicit count before a named item, never a dimension or VE."""
+    excluded = set(UNITS) | set(WORDS) | {'mm','cm','m','mtr','meter','millimeter','zentimeter',
+        'liter','litre','ml','kg','gramm','ve','inhalt','mal','pro','und','oder','zwölf','zwoelf',
+        'dreizehn','vierzehn','fünfzehn','fuenfzehn','zwanzig','dreißig','dreissig','hundert',
+        'bitte','bestellen','dringend','sofort','normal','nicht','kein','keine','ja','nein',
+        'prüfen','pruefen','kontrollieren','ansehen','anschauen','testen','benutzt','benutzen',
+        'verwendet','verwenden','genutzt','nutzen','verbraucht','verbrauchen','gefunden',
+        'gezählt','gezaehlt','zählen','zaehlen','fotografieren','gescannt','scannen',
+        'geöffnet','geoeffnet','öffnen','oeffnen','reparieren','reinigen','lackieren','polieren','schleifen','zeigen'}
+    return [match for match in re.finditer(COUNTED_ITEM_PATTERN,text,flags=re.I)
+            if match['product'].casefold() not in excluded
+            and not re.search(r'(?:^|\s)[+−-]\s*$',text[:match.start()])]
+
+
 def article_query(text):
     """Remove request grammar, retaining SKU, colour and dimensional evidence."""
-    value = re.sub(QUANTITY_PATTERN,' ',_request_text(text),flags=re.I)
+    value = _request_text(text)
+    for match in reversed(_counted_items(value)):
+        value = value[:match.start()] + value[match.start('product'):]
+    value = re.sub(QUANTITY_PATTERN,' ',value,flags=re.I)
     value = re.sub(r'\b(?:bitte|bestellen|bestelle|bestell|nachbestellen|nachbestelle|dringend|sofort|nicht|regulär|regulaer|normal|wöchentlich|woechentlich|ich|möchte|moechte|brauche|benötige|benoetige|mir|wir|uns|erst|am|montag)\b',' ',value,flags=re.I)
     return re.sub(r'\s+',' ',value).strip(' ,;.!:')[:150]
 
@@ -64,7 +83,7 @@ def parse_request(text, question=''):
     conditional = bool(re.search(r'\b(vielleicht|eventuell|falls|wenn|beispiel|angenommen)\b', value))
     if conditional or '?' in value:
         return fields
-    if (re.search(r'\b(?:vorhanden|übrig|uebrig|bestand|geliefert|erhalten|angekommen|gekauft)\b|\bauf\s+lager\b',value)
+    if (re.search(r'\b(?:vorhanden|übrig|uebrig|bestand|geliefert|erhalten|angekommen|gekauft|benutzt|benutzen|verwendet|verwenden|genutzt|nutzen|verbraucht|verbrauchen|prüfen|pruefen|kontrollieren|ansehen|anschauen|testen|gefunden|gezählt|gezaehlt)\b|\bauf\s+lager\b',value)
             and not re.search(r'\b(?:bestellen|bestelle|bestell|nachbestellen|nachbestelle)\b',value)):
         return fields
     if re.search(r'\b(?:bestellen|bestelle|bestell|nachbestellen|nachbestelle)\b', value):
@@ -89,6 +108,15 @@ def parse_request(text, question=''):
         amount = Decimal(WORDS.get(match[1], match[1]).replace(',', '.'))
         if amount > 0:
             matches.append((format(amount.normalize(), 'f'), UNITS[match[2]]))
+    counted = _counted_items(value)
+    if len(counted)==1 and not matches:
+        match = counted[0]
+        prefix = value[max(0,match.start()-35):match.start()]
+        if not re.search(r'(?:\bve|inhalt|packungsinhalt|enthält|enthaelt)\s*[:=]?\s*$|\b(?:nicht|kein|keine)\s*$',prefix):
+            matches.append((str(int(match[1])),'Stück'))
+    elif counted:
+        # Multiple item counts or a competing explicit unit need clarification.
+        matches = []
     if len(set(matches)) == 1:
         fields['quantity'], fields['unit'] = matches[0]
     elif question=='quantity' and _bare_quantity(text):
@@ -393,7 +421,14 @@ class MaterialDialog:
         labels, hits = analysis.get('merkmale',{}), analysis.get('treffer',[])
         # Recognizing a label is not a catalog match or a price approval. It only
         # means the employee need not repeat an already readable product name.
-        identified = bool(selected or (draft['analysis_state']=='done' and labels.get('produkt')
+        # A single conflict-filtered catalog candidate plus printed dimensions
+        # gives the workshop enough evidence to review internally. It is not a
+        # SKU selection and cannot reuse commercial terms or authorize dispatch.
+        catalog_review_hint = (draft['analysis_state']=='done' and len(hits)==1
+            and not analysis.get('treffer_gekuerzt')
+            and all(labels.get(key) for key in ('marke','materialtyp','masse'))
+            and all(hits[0].get(key) for key in ('artikelnummer','lieferant','produkt_name')))
+        identified = bool(selected or catalog_review_hint or (draft['analysis_state']=='done' and labels.get('produkt')
             and str(labels.get('produkt')).casefold().strip()!=str(labels.get('marke','')).casefold().strip()
             and (labels.get('marke') or labels.get('artikelnummer') or labels.get('breite') or labels.get('farbe'))
             and (not hits or len(hits)==1 and not analysis.get('treffer_gekuerzt'))))

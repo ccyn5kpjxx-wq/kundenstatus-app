@@ -198,6 +198,50 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(self.p.workshop_orders.calls,[])
         self.assertIn('article',view['missing_fields'])
 
+    def test_counted_named_photo_caption_supplies_item_quantity_without_repeat(self):
+        view=self.photo('1x abdeckfolie')
+        self.assertEqual(view['fields']['quantity']['value'],'1')
+        self.assertEqual(view['fields']['unit']['value'],'Stück')
+        self.assertTrue(view['fields']['order_requested']['value'])
+        self.assertFalse(view['fields']['urgent']['value'])
+        self.assertFalse(view['employee_reply_required'])
+        self.assertEqual(article_query('1x abdeckfolie'),'abdeckfolie')
+        self.assertEqual(self.s._proof(self.f.sql('SELECT * FROM einkauf_material_nachrichten WHERE id=?',
+                         (view['message_id'],))[0])['kind'],'image')
+        self.assertEqual(self.f.sql('SELECT caption FROM einkauf_material_nachrichten WHERE id=?',
+                         (view['message_id'],))[0]['caption'],'1x abdeckfolie')
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_counted_inspection_usage_or_negative_caption_never_authorizes_order(self):
+        old=self.review(self.photo('zwei Stück'),unit='Stück')
+        self.answer(old,'abbrechen')
+        for text in ('-1x Test-Klebeband','Bitte 1x prüfen','1x benutzt','Bitte 1x Test-Klebeband prüfen'):
+            with self.subTest(text=text):
+                view=self.photo(text,new=True)
+                self.assertNotIn('quantity',view['fields'])
+                self.assertNotIn('order_requested',view['fields'])
+                with self.assertRaises(PermissionError):self.s.approved_order(view['id'],view['revision'])
+        self.s.process_next()
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_counted_item_grammar_preserves_article_dimensions_and_urgency(self):
+        for text,quantity in (('1x Abdeckfolie','1'),('2 × Klebeband','2'),('Bitte 3 X Abdeckfolie dringend bestellen','3')):
+            with self.subTest(text=text):
+                parsed=parse_request(text)
+                self.assertEqual((parsed['quantity'],parsed['unit']),(quantity,'Stück'))
+        self.assertEqual(article_query('Bitte 2x Abdeckfolie 5 x 120 m dringend bestellen'),'Abdeckfolie 5 x 120 m')
+        self.assertTrue(parse_request('Bitte 2x Abdeckfolie dringend bestellen')['urgent'])
+        for text in ('5 x 120 m','Abdeckfolie 5x120m','1x 500ml','1 x Karton','2x Rollen',
+                     'VE: 10x Abdeckfolie','Inhalt 10x Abdeckfolie','nicht 1x Abdeckfolie',
+                     '1x Abdeckfolie vorhanden','vielleicht 1x Abdeckfolie','1x Abdeckfolie?',
+                     '1x Abdeckfolie und 1x Klebeband','1 Stück und 2x Abdeckfolie','5x zwölf Meter',
+                     '-1x Abdeckfolie','−1x Abdeckfolie','- 1x Abdeckfolie','+1x Abdeckfolie',
+                     'Bitte 1x prüfen','1x benutzt','Bitte 1x Abdeckfolie prüfen','1x Abdeckfolie benutzt',
+                     '1x dringend','1x nicht'):
+            with self.subTest(text=text):
+                self.assertNotIn('quantity',parse_request(text))
+        self.assertEqual(article_query('Abdeckfolie 5x120m'),'Abdeckfolie 5x120m')
+
     def test_unicode_unit_spelling_is_only_normalized_for_parsing(self):
         for text in ('1 stűck','1 STŰCK','1 stu\u030bck','1 stu\u0308ck','1 Stück','1 stueck'):
             with self.subTest(text=text):
@@ -249,6 +293,50 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(reply['state'],'applied')
         self.assertEqual(reply['draft_id'],view['id'])
         self.assertEqual(len(self.s.list()),1)
+
+    def test_one_brand_dimension_catalog_hint_goes_to_internal_review_without_selection(self):
+        self.hits[0].update(produkt_name='Test-Abdeckfolie',groesse='5 x 120 m',gebinde='1 Rolle',ve='Stück')
+        self.p.assistant_material_photos.vision=lambda *args: {
+            'art':'produkt','produkt':'Test-Abdeckfolie','artikelnummer':'TEST-50','farbe':'grün'}
+        old=self.review(self.photo('zwei Stück'),unit='Stück',product_name='Test-Abdeckfolie',variant='5 x 120 m')
+        self.answer(old,'abbrechen')
+        self.p.assistant_material_photos.vision=lambda *args: {
+            'art':'produkt','marke':'TEST','materialtyp':'Folie','masse':'5 x 120 m','farbe':'grün'}
+        view=self.photo('1x Abdeckfolie',new=True)
+        self.assertEqual(len(view['analysis']['treffer']),1)
+        self.assertEqual(view['analysis']['merkmale']['produkt'],'')
+        self.assertNotIn('selected_article',view['fields'])
+        self.assertEqual(view['review'],{})
+        self.assertEqual(view['state'],'review')
+        self.assertEqual(view['missing_fields'],['supplier_review','price'])
+        self.assertFalse(view['employee_reply_required'])
+        self.assertTrue(view['internal_review_pending'])
+        self.assertEqual(view['questions'][0]['field'],'internal_review')
+        self.assertIn('5 x 120 m',view['questions'][0]['body'])
+        self.assertNotIn('Antworte',view['questions'][0]['body'])
+        with self.assertRaises(PermissionError):self.s.approved_order(view['id'],view['revision'])
+        self.s.process_next()
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_brand_dimension_hint_needs_one_complete_untruncated_catalog_result(self):
+        hit=dict(self.hits[0],produkt_name='Test-Abdeckfolie',groesse='5 x 120 m',gebinde='1 Rolle',ve='Stück')
+        for case in ('multiple','truncated','no_brand','no_dimensions','no_catalog_article'):
+            with self.subTest(case=case):
+                labels={'art':'produkt','marke':'TEST','materialtyp':'Folie','masse':'5 x 120 m','farbe':'grün'}
+                if case=='no_brand':labels.pop('marke')
+                if case=='no_dimensions':labels.pop('masse')
+                self.p.assistant_material_photos.vision=lambda *args:dict(labels)
+                self.hits=[dict(hit)]
+                if case=='multiple':self.hits.append(dict(hit,artikelnummer='TEST-ALT'))
+                if case=='no_catalog_article':self.hits[0]['artikelnummer']=''
+                self.p.cockpit_data.articles=lambda query:{'varianten':copy.deepcopy(self.hits),
+                                                          'varianten_gekuerzt':case=='truncated'}
+                view=self.photo('ein Stück',new=True)
+                self.assertIn('article',view['missing_fields'])
+                self.assertTrue(view['employee_reply_required'])
+                self.assertNotIn('selected_article',view['fields'])
+                self.assertEqual(view['review'],{})
+        self.assertEqual(self.p.workshop_orders.calls,[])
 
     def test_pure_brand_and_visual_category_are_hints_not_product_identity(self):
         view=self.photo('Ein Stück')
