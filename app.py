@@ -8256,6 +8256,10 @@ BACKUP_TABLES = (
     "kalender_notizen",
     "mitarbeiter",
     "assistent_rechte",
+    "assistent_einladungen",
+    "mitarbeiter_portal_profile",
+    "mitarbeiter_lohnzettel",
+    "mitarbeiter_betriebsurlaub",
     "assistent_profile",
     "assistent_aktionen",
     "assistent_audit",
@@ -8321,8 +8325,11 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
-BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1")
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1")
 BACKUP_BINARY_FIELDS = {
+    "mitarbeiter_lohnzettel": {
+        "original_base64": {"suffix": ".bin", "max_bytes": 10 * 1024 * 1024},
+    },
     "einkauf_eingang_dateien": {
         "original_base64": {"suffix": ".bin", "max_bytes": 8 * 1024 * 1024},
     },
@@ -36599,6 +36606,7 @@ def create_mitarbeiter(
         db.close()
 
 
+@portal_originals_locked
 def update_mitarbeiter(
     mitarbeiter_id,
     name,
@@ -47904,6 +47912,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         "einkauf_material_dialoge", "einkauf_material_texte", "einkauf_material_rueckfragen",
         # Historical estimates and invoice matches postdate the order dialog.
         "assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen",
+        # Personal setup/profile documents arrived after the avatar features.
+        "assistent_einladungen", "mitarbeiter_portal_profile", "mitarbeiter_lohnzettel", "mitarbeiter_betriebsurlaub",
     }
     if "kunden_termin_mail_versand" in schema_features:
         required_tables.add("kunden_termin_mail_versand")
@@ -47915,6 +47925,10 @@ def validate_backup_binary_reference_completeness(export, reference_map):
     if "werkstatt_avatar_v1" in schema_features:
         required_tables.update({"assistent_rechte", "assistent_profile", "assistent_aktionen",
                                 "assistent_audit", "assistent_dialog"})
+    if "werkstatt_mitarbeiter_einladung_v1" in schema_features:
+        required_tables.add("assistent_einladungen")
+    if "werkstatt_mitarbeiter_portal_v1" in schema_features:
+        required_tables.update({"mitarbeiter_portal_profile", "mitarbeiter_lohnzettel", "mitarbeiter_betriebsurlaub"})
     if "werkstatt_avatar_uploads_v1" in schema_features:
         required_tables.add("assistent_uploads")
     if "werkstatt_personal_v1" in schema_features:
@@ -48193,6 +48207,8 @@ def import_backup_json_rows_into_current_database(export, archive, names):
     target = get_db()
     try:
         ensure_no_database_only_originals_for_import(target)
+        ensure_employee_invitation_state_for_import(sys.modules[__name__], export=export, target=target)
+        ensure_employee_private_state_for_import(sys.modules[__name__], export=export, target=target, archive=archive, names=names)
         ensure_material_external_claims_for_import(export=export, target=target, archive=archive, names=names)
         for table_name in reversed(BACKUP_TABLES):
             target.execute(f"DELETE FROM {table_name}")
@@ -48276,6 +48292,8 @@ def import_sqlite_rows_into_current_database(imported_db):
             ).fetchall()
         }
         ensure_no_database_only_originals_for_import(target)
+        ensure_employee_invitation_state_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
+        ensure_employee_private_state_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
         ensure_material_external_claims_for_import(imported_db=imported_db, target=target)
         for table_name in reversed(BACKUP_TABLES):
             target.execute(f"DELETE FROM {table_name}")
@@ -48507,6 +48525,8 @@ def admin_daten_import():
                 with portal_originals_operation_lock():
                     ensure_no_unrestorable_mos_data_for_import()
                     ensure_no_database_only_originals_for_import()
+                    ensure_employee_invitation_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db)
+                    ensure_employee_private_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db, archive=archive, names=names)
                     ensure_material_external_claims_for_import(
                         export=backup_export, imported_db=imported_db, archive=archive, names=names
                     )
@@ -48555,7 +48575,7 @@ def admin_daten_import():
                     intake_schema = globals().get("workshop_intake_init_schema")
                     if callable(intake_schema):
                         intake_schema()
-                    for hook in ("workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema", "order_price_comparison_init_schema"):
+                    for hook in ("employee_invitations_init_schema", "employee_portal_init_schema", "workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema", "order_price_comparison_init_schema"):
                         schema = globals().get(hook)
                         if callable(schema):
                             schema()
@@ -52063,6 +52083,7 @@ def admin_mitarbeiter_neu():
 
 @app.route("/admin/mitarbeiter/<int:mitarbeiter_id>/bearbeiten", methods=["POST"])
 @admin_required
+@portal_originals_locked
 def admin_mitarbeiter_bearbeiten(mitarbeiter_id):
     if not get_mitarbeiter(mitarbeiter_id):
         abort(404)
@@ -57894,6 +57915,10 @@ from werkstatt_assistent import register_assistant
 app.config["ASSISTANT_READ_ONLY"] = env_flag("ASSISTANT_READ_ONLY", True)
 app.config["ASSISTANT_NATIVE_COCKPIT"] = True
 register_assistant(sys.modules[__name__])
+from werkstatt_einladung_restore import ensure_employee_invitation_state_for_import
+from werkstatt_mitarbeiter_einladung import register_employee_invitations
+employee_invitations = register_employee_invitations(sys.modules[__name__])
+employee_invitations_init_schema = employee_invitations.init_schema
 from werkstatt_einkaufsmonitor import register_monitor, start_purchase_monitor_worker
 from werkstatt_materialkanal import register_material_channel, start_material_worker
 workshop_purchase_monitor = register_monitor(sys.modules[__name__])
@@ -57902,6 +57927,9 @@ from werkstatt_materialdialog import register_material_dialog
 material_dialog = register_material_dialog(sys.modules[__name__])
 from werkstatt_materialbestellung import register_material_order_portal
 material_order_portal = register_material_order_portal(sys.modules[__name__])
+from werkstatt_mitarbeiter_portal import register_employee_portal, ensure_employee_private_state_for_import
+employee_portal = register_employee_portal(sys.modules[__name__])
+employee_portal_init_schema = employee_portal.init_schema
 from werkstatt_bestellvergleich import OrderPriceComparison
 order_price_comparison = OrderPriceComparison(sys.modules[__name__])
 order_price_comparison_init_schema = order_price_comparison.init_schema

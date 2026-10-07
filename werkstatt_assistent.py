@@ -275,6 +275,7 @@ def register_assistant(p):
             """)
             # The same migration runs after restoring an older portal backup.
             p.ensure_column(db, "assistent_profile", "character", "TEXT NOT NULL DEFAULT 'drache'")
+            p.ensure_column(db, "assistent_rechte", "auth_version", "INTEGER NOT NULL DEFAULT 1")
             memory.init_schema(db)
 
     def identity():
@@ -285,7 +286,8 @@ def register_assistant(p):
             return None
         with db_scope() as db:
             row = db.execute("SELECT r.*, m.aktiv, m.name AS mitarbeiter_name FROM assistent_rechte r JOIN mitarbeiter m ON m.id=r.mitarbeiter_id WHERE r.mitarbeiter_id=?", (mid,)).fetchone()
-        if not row or not row["aktiv"] or row["version"] != session.get("assistent_version"):
+        if (not row or not row["aktiv"] or row["version"] != session.get("assistent_version")
+                or dict(row).get('auth_version', 1) != session.get('assistent_auth_version', 1)):
             return None
         return {**dict(row), "actor": f"mitarbeiter:{mid}"}
 
@@ -639,25 +641,36 @@ def register_assistant(p):
             return failed_login('Die Anmeldung hat nicht geklappt. Bitte Mitarbeiter-ID und persönliches Passwort prüfen. Das Admin-Passwort gilt hier nicht.' if material_form else 'Anmeldung fehlgeschlagen.', 401)
         p.clear_login_attempts("assistent", "login")
         # Personal avatar access is independent of the shared workshop/admin
-        # session. Use the existing portal session lifetime (default: 8h idle).
+        # session. Clear the previous identity and pending confirmations before
+        # binding this browser to the employee who has just authenticated.
+        session.clear()
         session.permanent = True
         session["assistent_mid"] = row["mitarbeiter_id"]
         session["assistent_version"] = row["version"]
+        session['assistent_auth_version'] = dict(row).get('auth_version', 1)
         # A page opened under the previous person must not submit material
         # for a different personal account after another login in this browser.
         session['csrf_token'] = secrets.token_urlsafe(32)
         if request.form.get('next') == '/werkstatt/materialbestellung':
-            return redirect('/werkstatt/materialbestellung')
-        return redirect(url_for("assistent.page"))
+            response = redirect('/werkstatt/materialbestellung')
+        else:
+            response = redirect(url_for("assistent.page"))
+        # Remembered shared logins must not restore admin/partner privileges on
+        # the next request after a personal employee login.
+        for scope in ('admin', 'partner'):
+            p.clear_remember_login_cookie(response, scope)
+        return response
 
     @bp.post("/logout")
     def logout():
         session.pop("assistent_mid", None)
         session.pop("assistent_version", None)
+        session.pop('assistent_auth_version', None)
         return redirect(url_for("assistent.page"))
 
     @bp.route("/rechte", methods=["GET", "POST"])
     @p.admin_required
+    @p.portal_originals_locked
     def rights():
         with db_scope() as db:
             if request.method == "POST":

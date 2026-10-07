@@ -7,7 +7,8 @@
     try { storage = root.sessionStorage; } catch (_) { /* Private browsing may deny storage. */ }
     root.MaterialOrder = factory({document: root.document, fetch: root.fetch.bind(root), URL: root.URL,
       crypto: root.crypto, FormData: root.FormData, AbortController: root.AbortController,
-      storage, window: root, setTimeout: root.setTimeout.bind(root), clearTimeout: root.clearTimeout.bind(root)});
+      storage, window: root, scannerFactory: root.createMaterialCodeScanner,
+      setTimeout: root.setTimeout.bind(root), clearTimeout: root.clearTimeout.bind(root)});
     void root.MaterialOrder.refresh();
   }
 })(typeof window === 'undefined' ? globalThis : window, function (options) {
@@ -17,9 +18,13 @@
   const timeoutMs = options.timeoutMs || 45000;
   const $ = id => document.getElementById('material-' + id), host = document.getElementById('materialbestellung');
   const endpoint = host.dataset.endpoint, token = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  const limitCents = Number(host.dataset.limitCents);
+  const orderLimit = Number.isInteger(limitCents) && limitCents > 0 && limitCents <= 25000
+    ? (limitCents / 100).toLocaleString('de-DE', {maximumFractionDigits: 2}) + ' € brutto' : '';
   const storageKey = 'materialbestellung:pending:' + host.dataset.actor;
   const photos = [], replies = new Map();
   let pending = null, busy = false, refreshing = false, history = [], identityExpired = false, intentionalReload = false;
+  let scanner = null;
   const node = (tag, text, className) => {
     const el = document.createElement(tag);
     if (text !== undefined) el.textContent = String(text);
@@ -43,8 +48,10 @@
     $('camera').disabled = locked(); $('album').disabled = locked();
     $('camera-button').disabled = locked() || photos.length >= 10;
     $('album-button').disabled = locked() || photos.length >= 10;
+    if ($('scan-button')) $('scan-button').disabled = locked() || photos.length >= 10;
+    if (locked()) scanner?.stop(false);
     $('submit').disabled = identityExpired || busy || (!pending && !photos.length) || Boolean(pending?.restored);
-    $('submit').textContent = identityExpired ? 'Bitte Seite neu laden' : busy ? 'Bestellwünsche werden erfasst …' : pending ? 'Unverändert erneut versuchen' : 'Bestellwünsche senden →';
+    $('submit').textContent = identityExpired ? 'Bitte Seite neu laden' : busy ? 'Wünsche werden erfasst …' : pending ? 'Unverändert erneut versuchen' : photos.some(photo => photo.vorgang === 'anfrage') ? 'Wünsche senden →' : 'Bestellwünsche senden →';
     $('form').setAttribute('aria-busy', String(busy));
     $('count').textContent = photos.length + ' / 10';
     $('empty').hidden = photos.length > 0;
@@ -55,6 +62,16 @@
       photo.controls.plus.disabled = locked() || photo.quantity >= 999;
       photo.controls.quantity.disabled = locked(); photo.controls.quantity.value = String(photo.quantity);
       photo.controls.urgent.disabled = locked(); photo.controls.urgent.checked = photo.urgent;
+      photo.controls.monday.disabled = locked(); photo.controls.monday.checked = !photo.urgent;
+      photo.controls.inquiry.disabled = locked(); photo.controls.inquiry.checked = photo.vorgang === 'anfrage';
+      photo.controls.description.disabled = locked(); photo.controls.description.value = photo.beschreibung;
+      photo.controls.mondayTitle.textContent = 'Nicht dringend';
+      photo.controls.mondayDetail.textContent = photo.vorgang === 'anfrage' ? 'Intern klären' : 'Montag · 14 Uhr';
+      photo.controls.urgentDetail.textContent = photo.vorgang === 'anfrage' ? 'Zeitnah intern klären' : orderLimit ? 'Sofort · bis ' + orderLimit : 'Sofort nach Klärung';
+      photo.controls.monday.setAttribute('aria-label', photo.controls.mondayTitle.textContent + ' für Artikel ' + (photos.indexOf(photo) + 1));
+      photo.controls.timingHint.textContent = photo.vorgang === 'anfrage'
+        ? 'Nur eine Teileanfrage. Die Werkstattleitung klärt das Teil; es wird noch nicht bestellt.'
+        : photo.urgent ? (orderLimit ? 'Automatisch sofort bis ' + orderLimit + ' inklusive Versand und Nebenkosten, sobald Artikel, Lieferant und Gesamtkosten eindeutig sind. Offene Angaben oder höhere Beträge klärt die Werkstattleitung.' : 'Artikel, Lieferant und Kosten werden intern geklärt. Die persönliche Bestellgrenze muss feststehen.') : 'Sammelbestellung am Montag um 14 Uhr.';
       photo.controls.remove.disabled = locked();
     }
     $('recovery').hidden = !pending && !identityExpired;
@@ -81,7 +98,7 @@
     $('items').replaceChildren();
     for (const [index, photo] of photos.entries()) {
       const card = node('article', undefined, 'photo-card'); card.dataset.clientId = photo.id;
-      const img = node('img', undefined, 'photo-preview'); img.src = photo.url; img.alt = 'Produktfoto für Artikel ' + (index + 1);
+      const img = node('img', undefined, 'photo-preview'); img.src = photo.url; img.alt = 'Foto oder Screenshot für Artikel ' + (index + 1);
       const details = node('div', undefined, 'photo-details'), heading = node('div', undefined, 'photo-title-row');
       const title = node('h3', 'Artikel ' + (index + 1));
       const remove = node('button', 'Entfernen', 'remove-button'); remove.type = 'button';
@@ -104,11 +121,37 @@
       plus.addEventListener('click', () => updateQuantity(photo, Math.min(999, photo.quantity + 1)));
       quantity.addEventListener('change', () => updateQuantity(photo, quantity.value));
       stepper.append(minus, quantity, plus); row.append(label, stepper);
-      const urgentLabel = node('label', undefined, 'urgent-label'), urgent = node('input'); urgent.type = 'checkbox'; urgent.checked = photo.urgent;
-      urgent.addEventListener('change', () => { if (!locked()) photo.urgent = urgent.checked; controls(); });
-      urgentLabel.append(urgent, node('span', 'Dringend · vor dem Sammeltermin'));
-      details.append(heading, row, urgentLabel, node('p', photo.file.name, 'photo-filename')); card.append(img, details);
-      photo.controls = {minus, plus, quantity, urgent, remove}; $('items').append(card);
+      details.append(heading, row, node('p', photo.file.name, 'photo-filename')); card.append(img, details);
+      const timing = node('fieldset', undefined, 'timing-choice');
+      timing.append(node('legend', 'Wann wird es gebraucht?'));
+      const timingOptions = node('div', undefined, 'timing-options');
+      const monday = node('input'), urgent = node('input');
+      let mondayTitle, mondayDetail, urgentDetail;
+      for (const [input, value, titleText, detailText] of [[monday, 'montag', 'Nicht dringend', 'Montag · 14 Uhr'], [urgent, 'dringend', 'Dringend', 'Sofort']]) {
+        input.type = 'radio'; input.name = 'timing-' + photo.id; input.value = value;
+        input.setAttribute('aria-label', titleText + ' für Artikel ' + (index + 1));
+        input.addEventListener('change', () => { if (!locked() && input.checked) photo.urgent = value === 'dringend'; controls(); });
+        const choice = node('label', undefined, 'timing-option');
+        const copy = node('span'), titleNode = node('strong', titleText), detailNode = node('small', detailText);
+        if (input === monday) { mondayTitle = titleNode; mondayDetail = detailNode; }
+        else urgentDetail = detailNode;
+        copy.append(titleNode, detailNode);
+        choice.append(input, copy); timingOptions.append(choice);
+      }
+      const timingHint = node('p', '', 'timing-hint'); timing.append(timingOptions, timingHint); card.append(timing);
+      const extra = node('details', undefined, 'photo-extra');
+      extra.append(node('summary', 'Beschreibung oder Teil anfragen (optional)'));
+      const descriptionLabel = node('label', 'Kurze Beschreibung', 'description-label'), description = node('textarea');
+      description.id = 'description-' + photo.id; description.rows = 2; description.maxLength = 500;
+      description.placeholder = 'Zum Beispiel: Abdeckfolie oder Halter am Kotflügel';
+      descriptionLabel.setAttribute('for', description.id);
+      description.addEventListener('input', () => { if (!locked()) photo.beschreibung = description.value; else description.value = photo.beschreibung; });
+      const inquiryLabel = node('label', undefined, 'inquiry-label'), inquiry = node('input'); inquiry.type = 'checkbox';
+      inquiry.setAttribute('aria-label', 'Teil nur anfragen für Artikel ' + (index + 1));
+      inquiry.addEventListener('change', () => { if (!locked()) photo.vorgang = inquiry.checked ? 'anfrage' : 'bestellung'; controls(); });
+      inquiryLabel.append(inquiry, node('span', 'Teil nur anfragen · noch nicht bestellen'));
+      extra.append(descriptionLabel, description, inquiryLabel); card.append(extra);
+      photo.controls = {minus, plus, quantity, urgent, monday, mondayTitle, mondayDetail, urgentDetail, inquiry, description, timingHint, remove}; $('items').append(card);
     }
     controls();
   }
@@ -122,7 +165,7 @@
       }
       const type = String(file.type || '').toLowerCase();
       if (!(type ? ['image/jpeg', 'image/png', 'image/webp'].includes(type) : /\.(jpe?g|png|webp)$/i.test(file.name || ''))) {
-        return 'Bitte ein Produktfoto als JPEG, PNG oder WebP auswählen. Andere Dateiformate werden nicht übernommen.';
+        return 'Bitte ein Foto oder einen Screenshot als JPEG, PNG oder WebP auswählen.';
       }
       if (!Number.isFinite(file.size) || file.size < 1 || file.size > 8 * 1024 * 1024) return 'Jedes Foto muss kleiner als oder gleich 8 MB sein und darf nicht leer sein.';
       size += file.size;
@@ -133,7 +176,7 @@
     if (locked()) return;
     const selected = Array.from(files || []), error = validateFiles(selected);
     if (error) { note(error, 'error'); return; }
-    for (const file of selected) photos.push({id: crypto.randomUUID(), file, quantity: 1, urgent: false, url: URL.createObjectURL(file)});
+    for (const file of selected) photos.push({id: crypto.randomUUID(), file, quantity: 1, urgent: false, vorgang: 'bestellung', beschreibung: '', url: URL.createObjectURL(file)});
     if (selected.length) { note(''); renderPhotos(); }
   }
   async function request(path, settings = {}) {
@@ -171,6 +214,7 @@
   }
   async function submit() {
     if (identityExpired || busy || pending?.restored || (!pending && !photos.length)) return;
+    scanner?.stop(false);
     const retrying = Boolean(pending);
     // Commit the focused number field before freezing the exact batch.
     if (!pending) for (const photo of photos) {
@@ -179,15 +223,20 @@
         note('Bitte für jeden Artikel eine ganze Stückzahl von 1 bis 999 wählen.', 'error'); photo.controls.quantity.focus(); return;
       }
       photo.quantity = Number(value);
+      const description = String(photo.controls.description.value).trim();
+      if (description.length > 500) {
+        note('Bitte die Beschreibung auf höchstens 500 Zeichen kürzen.', 'error'); photo.controls.description.focus(); return;
+      }
+      photo.beschreibung = description;
     }
     if (!pending) {
       pending = {id: crypto.randomUUID(), clientIds: photos.map(photo => photo.id), rows: photos.map(photo => ({
-        id: photo.id, menge: photo.quantity, dringend: photo.urgent, file: photo.file}))};
+        id: photo.id, menge: photo.quantity, dringend: photo.urgent, vorgang: photo.vorgang, beschreibung: photo.beschreibung, file: photo.file}))};
       persist({id: pending.id, clientIds: pending.clientIds});
     }
     const batch = pending;
     const body = new FormData(); body.append('csrf_token', token); body.append('request_id', batch.id);
-    body.append('positionen', JSON.stringify(batch.rows.map(({id, menge, dringend}) => ({id, menge, dringend}))));
+    body.append('positionen', JSON.stringify(batch.rows.map(({id, menge, dringend, vorgang, beschreibung}) => ({id, menge, dringend, vorgang, beschreibung}))));
     for (const row of batch.rows) body.append('foto_' + row.id, row.file, row.file.name);
     busy = true; note('Fotos und Stückzahlen werden erfasst …'); controls();
     try {
@@ -212,6 +261,8 @@
   const staffQuestion = row => row.employee_reply_required && row.analysis_state !== 'pending' && row.analysis_state !== 'processing' && Array.isArray(row.questions)
     ? row.questions.find(entry => entry.field !== 'internal_review') : null;
   function explanation(row) {
+    if (row.state === 'cancelled') return 'Dieser Wunsch wurde geschlossen.';
+    if (row.vorgang === 'anfrage') return 'Teileanfrage erfasst. Die Werkstattleitung prüft das Bild und die Beschreibung. Noch keine Bestellung ausgelöst.';
     if (row.dispatch_state === 'sent' || row.dispatch_state === 'copy_pending') return 'Bestellung versandt.';
     if (row.dispatch_state === 'uncertain' || row.dispatch_state === 'partial') return 'Der Versandstatus ist unklar. Bitte nicht erneut bestellen.';
     if (row.dispatch_state === 'sending') return 'Der Versand läuft. Bitte nicht erneut bestellen.';
@@ -223,7 +274,6 @@
       : 'Für die Sammelbestellung am Montag um 14 Uhr vorgemerkt. Noch nicht versandt.';
     if (row.state === 'external_pending') return 'Der Versand wird geprüft. Bitte nicht erneut bestellen.';
     if (sentStates.has(row.state)) return 'Bestellung versandt.';
-    if (row.state === 'cancelled') return 'Dieser Bestellwunsch wurde geschlossen.';
     if (row.state === 'accepted') return 'An die Bestellverarbeitung übergeben. Das bestätigt noch keinen Versand.';
     if (row.analysis_state === 'pending' || row.analysis_state === 'processing') return 'Foto wird ausgelesen. Noch nicht bestellt.';
     if (staffQuestion(row)) return 'Eine kurze Klärung ist nötig. Noch nicht bestellt.';
@@ -268,7 +318,11 @@
       title.append(node('p', row.code || 'Bestellwunsch', 'history-code'), node('h3', row.product || 'Produktfoto wird geprüft'));
       head.append(title, node('span', row.label || 'Erfasst', 'state-badge'));
       const amount = [row.quantity || '—', row.unit || 'Stück'].join(' ');
-      card.append(head, node('p', amount + ' · ' + (row.urgent ? 'Dringend' : 'Regulär · Montag 14 Uhr'), 'history-meta'), node('p', explanation(row), 'history-note'));
+      const timing = row.vorgang === 'anfrage' ? (row.urgent ? 'Dringende Teileanfrage' : 'Teileanfrage · nicht dringend') : (row.urgent ? 'Dringend' : 'Regulär · Montag 14 Uhr');
+      card.append(head, node('p', amount + ' · ' + timing, 'history-meta'), node('p', explanation(row), 'history-note'));
+      if (row.beschreibung) card.append(node('p', row.beschreibung, 'history-description'));
+      if (row.decodedCode) card.append(node('p', 'Artikelcode erkannt: ' + row.decodedCode, 'history-code-result'));
+      else if (row.code_erkennung?.status === 'mehrdeutig') card.append(node('p', 'Mehrere Codes im Foto. Die Zuordnung wird intern geprüft.', 'history-code-result'));
       const question = staffQuestion(row);
       if (question) {
         const area = node('div', undefined, 'history-question'), status = node('p', '', 'answer-status'), buttons = [];
@@ -326,6 +380,12 @@
   for (const source of ['camera', 'album']) {
     $(source + '-button').addEventListener('click', () => { if (!locked()) $(source).click(); });
     $(source).addEventListener('change', () => { addFiles($(source).files); $(source).value = ''; });
+  }
+  if (options.scannerFactory && $('scan-button')) {
+    scanner = options.scannerFactory({document, window, canAdd: () => !locked() && photos.length < 10,
+      onPhoto: file => {const before = photos.length; addFiles([file]); if (photos.length > before) note('Codefoto hinzugefügt. Stückzahl wählen und senden; der Artikelcode wird aus dem Foto gelesen.');},
+      onFallback: () => $('camera').click()});
+    $('scan-button').addEventListener('click', () => {void scanner.open();});
   }
   $('form').addEventListener('submit', event => {event.preventDefault(); void submit();});
   $('refresh').addEventListener('click', () => {void refresh();}); $('check').addEventListener('click', () => {void refresh();});

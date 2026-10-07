@@ -32,6 +32,122 @@ _LENGTH = r'(?:mm|cm|m)'
 SENSITIVE = re.compile(r'\b(?:iban|bic|swift|sepa|lastschrift|bankverbindung|konto(?:nummer|stand|auszug)|'
                        r'zahlung|rechnungsbetrag|netto|brutto|gesamtbetrag|ignore|ignoriere|systemprompt)\b|'
                        r'\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){11,30}\b|[€]|\bEUR\b', re.I)
+_CODE_KEY = '_code_erkennung'
+_CODE_FORMATS = {'qr_code', 'ean_8', 'ean_13', 'upc_a', 'upc_e'}
+_CODE_HINTS = {
+    'erkannt': 'Artikelcode erkannt. Er dient nur der Artikelsuche; Menge und Bestellung bleiben getrennt.',
+    'mehrdeutig': 'Mehrere Artikelcodes erkannt. Bitte den gewünschten Artikel vergleichen oder ein einzelnes Etikett fotografieren.',
+    'kein_code': 'Kein eindeutiger Artikelcode erkannt. Das Foto wird wie gewohnt ausgelesen.',
+    'nicht_verfuegbar': 'Codeerkennung derzeit nicht verfügbar. Das normale Foto kann weiter ausgelesen werden.',
+}
+
+
+def _search_code(value):
+    """Accept compact product identifiers only, never QR instructions or URLs."""
+    value = _text(value, 60)
+    # No URL/query parsing, GS1 application identifiers, JSON commands, quantities,
+    # credentials or arbitrary prose. Those need normal photo/manual review.
+    if not (re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,59}', value) and re.search(r'[0-9]', value)):
+        return ''
+    if re.search(r'(?:token|secret|password|passwd|api[-_]?key)', value, re.I):
+        return ''
+    return value
+
+
+def _code_view(value, digest=None):
+    """Revalidate stored server evidence before exposing it to a client/query."""
+    result = {'status': 'kein_code', 'codes': [], 'hinweis': _CODE_HINTS['kein_code']}
+    if (not isinstance(value, dict) or value.get('version') != 1
+            or digest is not None and value.get('file_sha256') != digest):
+        return result
+    codes, seen = [], set()
+    for entry in value.get('codes', [])[:8] if isinstance(value.get('codes'), list) else []:
+        if not isinstance(entry, dict) or entry.get('format') not in _CODE_FORMATS:
+            continue
+        code = _search_code(entry.get('wert'))
+        if not code or code != entry.get('suchwert'):
+            continue
+        if entry['format'] != 'qr_code' and not _labels({'art': 'produkt', 'barcode': code})['barcode']:
+            continue
+        if code not in seen:
+            seen.add(code)
+            codes.append({'format': entry['format'], 'wert': code, 'suchwert': code})
+    state = ('mehrdeutig' if len(codes) > 1 or value.get('status') == 'mehrdeutig' else
+             'erkannt' if codes else 'nicht_verfuegbar' if value.get('status') == 'nicht_verfuegbar' else 'kein_code')
+    return {'status': state, 'codes': codes, 'hinweis': _CODE_HINTS[state]}
+
+
+def _decode_codes(raw, digest):
+    """Decode actual upload pixels locally; no URL/network/model or action call."""
+    evidence = {'version': 1, 'file_sha256': digest, 'status': 'kein_code', 'codes': []}
+    try:
+        import cv2
+        import numpy as np
+        # Stage already validates format/size. Read the original before the
+        # metadata-free vision JPEG is made; EXIF orientation also applies here.
+        with Image.open(io.BytesIO(raw)) as image:
+            image = ImageOps.exif_transpose(image).convert('RGB')
+            image.thumbnail((2560, 2560))
+            pixels = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
+        detector = cv2.QRCodeDetector()
+        decoded = []
+        incomplete_multi = False
+        okay, values, regions, _ = detector.detectAndDecodeMulti(pixels)
+        incomplete_multi = regions is not None and len(regions) > 1 and len(regions) > len(values)
+        if okay:
+            incomplete_multi |= len(values) > 8 or len(values) > 1 and any(not value for value in values)
+            decoded.extend(('qr_code', value) for value in values[:8] if value)
+        if not decoded:
+            value, _, _ = detector.detectAndDecode(pixels)
+            if value:
+                decoded.append(('qr_code', value))
+        # OpenCV's barcode module is optional and handles supported EAN/UPC.
+        # QR succeeds independently when that optional decoder is unavailable.
+        try:
+            barcode = cv2.barcode_BarcodeDetector()
+            okay, values, formats, _ = barcode.detectAndDecodeWithType(pixels)
+            if okay:
+                incomplete_multi |= len(values) > 8 or len(values) > 1 and any(not value for value in values)
+                aliases = {'EAN_8': 'ean_8', 'EAN_13': 'ean_13', 'UPC_A': 'upc_a', 'UPC_E': 'upc_e'}
+                decoded.extend((aliases[kind], value) for value, kind in zip(values[:8], formats[:8]) if kind in aliases)
+        except (AttributeError, cv2.error):
+            pass
+        seen = set()
+        for kind, value in decoded:
+            code = _search_code(value)
+            if kind != 'qr_code' and not _labels({'art': 'produkt', 'barcode': code})['barcode']:
+                code = ''
+            if code and code not in seen:
+                seen.add(code)
+                evidence['codes'].append({'format': kind, 'wert': code, 'suchwert': code})
+        # Even one supported code alongside an unsupported QR is ambiguous;
+        # never quietly choose the one part of a multi-code label we understood.
+        evidence['status'] = ('mehrdeutig' if incomplete_multi or len(decoded) > 1 and len(seen) != 1 or len(seen) > 1 else
+                              'erkannt' if seen else 'kein_code')
+        if seen and any(not _search_code(value) for _, value in decoded):
+            evidence['status'] = 'mehrdeutig'
+        evidence['codes'] = evidence['codes'][:8]
+    except Exception:
+        # Optional decoder installation/failure cannot block ordinary photos.
+        # No internal exceptions, decoded private data or pixels reach the UI.
+        evidence['status'] = 'nicht_verfuegbar'
+    return evidence
+
+
+def _code_labels(labels, code):
+    """Use one locally decoded identifier as identity evidence, not approval."""
+    labels = dict(labels)
+    if code['status'] != 'erkannt':
+        return labels
+    value = code['codes'][0]['suchwert']
+    # A numeric QR may be a supplier SKU even when its checksum also happens
+    # to be a valid GTIN. Only a decoded EAN/UPC symbol establishes barcode.
+    key = 'artikelnummer' if code['codes'][0]['format'] == 'qr_code' else 'barcode'
+    # Keep a conflicting printed/OCR identifier visible for internal review;
+    # an exact-match shortcut must never silently overrule it.
+    if not labels.get(key):
+        labels[key] = value
+    return labels
 
 
 def _printed_dimensions(value, multiple=False):
@@ -169,11 +285,13 @@ class MaterialPhotoService:
             raise ValueError('Foto leer oder größer als 8 MB.')
         clean = _image(raw)
         digest = hashlib.sha256(clean).hexdigest()
+        evidence = _decode_codes(raw, digest)
         with self.db() as db:
             cursor = db.execute('''INSERT INTO assistent_materialfotos
-                (foto_id,actor,request_id,file_sha256,file_base64,erstellt_am)
-                VALUES(?,?,?,?,?,?) ON CONFLICT(actor,request_id) DO NOTHING RETURNING id''',
-                (secrets.token_hex(16), actor, request_id, digest, base64.b64encode(clean).decode('ascii'), self.p.now_str()))
+                (foto_id,actor,request_id,file_sha256,file_base64,erstellt_am,merkmale_json)
+                VALUES(?,?,?,?,?,?,?) ON CONFLICT(actor,request_id) DO NOTHING RETURNING id''',
+                (secrets.token_hex(16), actor, request_id, digest, base64.b64encode(clean).decode('ascii'), self.p.now_str(),
+                 json.dumps({_CODE_KEY: evidence}, ensure_ascii=False)))
             inserted = bool(cursor.fetchall())
             row = dict(db.execute('SELECT * FROM assistent_materialfotos WHERE actor=? AND request_id=?', (actor, request_id)).fetchone())
             if row['file_sha256'] != digest:
@@ -238,24 +356,57 @@ class MaterialPhotoService:
             if refresh:
                 db.execute("UPDATE assistent_materialfotos SET selected_hit='',selected_at=0,merkmale_json='{}' WHERE actor=? AND foto_id=? AND lease_token=?",
                            (actor, foto_id, lease))
+        not_product = False
         try:
             raw = base64.b64decode(row['file_base64'], validate=True)
             if not raw or len(raw) > MAX_BYTES or hashlib.sha256(raw).hexdigest() != row['file_sha256']:
                 raise ValueError('Foto nicht verfügbar.')
-            labels = _labels(self.vision(raw, 'image/jpeg'))
+            try:
+                stored = json.loads(row['merkmale_json'])
+            except (ValueError, TypeError):
+                stored = {}
+            not_product = isinstance(stored, dict) and stored.get('_code_not_product') is True
+            evidence = stored.get(_CODE_KEY) if isinstance(stored, dict) else None
+            if not isinstance(evidence, dict) or evidence.get('file_sha256') != row['file_sha256']:
+                # Older photos lack original-pixel code evidence. Decode their
+                # existing clean JPEG once; future refreshes retain the result.
+                evidence = _decode_codes(raw, row['file_sha256'])
+            code = _code_view(evidence, row['file_sha256'])
+            try:
+                vision = self.vision(raw, 'image/jpeg')
+                labels = _labels(vision)
+                if isinstance(vision, dict) and vision.get('art') in {'produkt', 'anderes'}:
+                    not_product = vision['art'] == 'anderes'
+            except Exception:
+                if code['status'] != 'erkannt':
+                    raise
+                # A clear server-decoded SKU still supports catalog lookup when
+                # optional vision is unavailable. No dimensions/quantities guessed.
+                labels = _labels(None)
+            if not not_product:
+                labels = _code_labels(labels, code)
             state = 'pruefen'
         except Exception:
             labels, state = {key: '' for key in FIELDS}, 'fehler'
+            # Preserve validated original code evidence even if vision fails;
+            # never preserve the previous model's stale product/variant labels.
+            try:
+                old = json.loads(row['merkmale_json'])
+                evidence = old.get(_CODE_KEY, {}) if isinstance(old, dict) else {}
+            except (ValueError, TypeError):
+                evidence = {}
         self._authorize(who)
         with self.db() as db:
             db.execute('''UPDATE assistent_materialfotos SET status=?,merkmale_json=?,lease_token='',lease_until=0
                 WHERE actor=? AND foto_id=? AND lease_token=?''',
-                (state, json.dumps(labels, ensure_ascii=False), actor, foto_id, lease))
+                (state, json.dumps(dict(labels, **{_CODE_KEY: evidence, '_code_not_product': not_product}), ensure_ascii=False), actor, foto_id, lease))
             row = self._row(db, actor, foto_id)
         return self._view(row)
 
-    def _hits(self, labels):
+    def _hits(self, labels, code=None):
         queries = [labels[key] for key in ('artikelnummer', 'barcode') if labels.get(key)]
+        if code and code['status'] == 'erkannt':
+            queries.insert(0, code['codes'][0]['suchwert'])
         sparse_queries = []
         if labels.get('produkt'):
             queries.append(' '.join(labels[key] for key in ('produkt', 'breite', 'masse', 'farbe') if labels.get(key))[:150])
@@ -337,13 +488,24 @@ class MaterialPhotoService:
         except (TypeError, ValueError):
             stored = {}
         labels = _labels(dict(stored, art='produkt')) if isinstance(stored, dict) else _labels(None)
+        code = _code_view(stored.get(_CODE_KEY), row['file_sha256']) if isinstance(stored, dict) else _code_view(None)
+        decoded = code['codes'][0]['suchwert'] if code['status'] == 'erkannt' else ''
+        not_product = isinstance(stored, dict) and stored.get('_code_not_product') is True
+        identity_key = ('artikelnummer' if decoded and code['codes'][0]['format'] == 'qr_code' else 'barcode')
+        conflict = bool(decoded and labels.get(identity_key) and labels[identity_key].casefold() != decoded.casefold())
         lookup_failed = False
         try:
-            hits, partial = (self._hits(labels) if row['status'] == 'pruefen' else ([], False))
+            hits, partial = (self._hits(labels, code) if row['status'] == 'pruefen' and not not_product else ([], False))
         except Exception:
             hits, partial, lookup_failed = [], False, True
         if lookup_failed:
             question = 'Artikelsuche derzeit nicht verfügbar. Das bedeutet nicht, dass der Artikel fehlt. Bitte später erneut prüfen.'
+        elif not_product:
+            question = 'Das Bild zeigt kein Produktetikett. Bitte ein Materialfoto aufnehmen oder den Artikel nennen.'
+        elif conflict:
+            question = 'Artikelcode und gedruckte Artikelnummer widersprechen sich. Bitte das Etikett intern prüfen.'
+        elif code['status'] == 'mehrdeutig':
+            question = code['hinweis']
         elif row['status'] == 'fehler':
             question = 'Fotoauslese nicht verfügbar. Bitte erneut versuchen oder den Artikelnamen nennen.'
         elif row['status'] != 'pruefen':
@@ -356,6 +518,7 @@ class MaterialPhotoService:
             question = 'Welche Variante passt? Bitte Name und Maße mit dem Etikett vergleichen.'
         return {'id': row['foto_id'], 'status': row['status'], 'erstellt_am': row['erstellt_am'],
                 'merkmale': labels, 'treffer': hits, 'treffer_gekuerzt': partial,
+                'code_erkennung': code, 'decodedCode': decoded, 'code_widerspruch': conflict,
                 'artikelsuche_verfuegbar': not lookup_failed, 'frage': question,
                 'hinweise': ['Fotoerkennung und Artikeltreffer sind ungeprüft. Die Auswahl bestätigt keine Bestellung.'], 'pruefen': True}
 

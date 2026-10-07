@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Mitarbeiterprofil · Gärtner</title><link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=einladung-1"><link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=mitarbeiter-1"></head>
+<body><header class="access-header"><a href="/admin" class="brand">GÄRTNER<span>GmbH · Karosserie + Lack</span></a><span>Werkstattleitung</span></header><main class="admin-main">
+<nav class="admin-nav"><a href="/admin/mitarbeiter">← Mitarbeiter</a><a href="/admin/mitarbeiter/einrichtung">Einrichtungslinks</a><a href="/admin/mitarbeiter/betriebsurlaub">Betriebsurlaub</a></nav>
+<span class="eyebrow">PERSÖNLICHE DATEN UND UNTERLAGEN</span><h1>{{ employee.name }}</h1><p class="lead">Mitarbeiter-ID {{ employee.id }}. Profilangaben und Lohnzettel sind ausschließlich dieser Person zugeordnet.</p>
+{% for category,message in get_flashed_messages(with_categories=true) %}<p role="status" class="setup-status">{{ message }}</p>{% endfor %}{% if error %}<p role="alert" class="setup-status is-error">{{ error }}</p>{% endif %}
+<section class="access-card"><h2>Profil pflegen</h2><p class="muted small">Nur belegte Angaben eintragen. Leere Felder bleiben als nicht hinterlegt sichtbar.</p><form method="post" action="/admin/mitarbeiter/{{ employee.id }}/portal">{{ csrf_field()|safe }}
+<div class="profile-edit-grid">
+<label>Personalnummer<input name="personalnummer" maxlength="40" value="{{ profile.get('personalnummer','') }}" autocomplete="off"></label>
+<label>Steuer-ID<input name="steuer_id" maxlength="11" inputmode="numeric" value="{{ profile.get('steuer_id','') }}" autocomplete="off"></label>
+<label>Steuernummer<input name="steuernummer" maxlength="30" value="{{ profile.get('steuernummer','') }}" autocomplete="off"></label>
+<label>Geburtsdatum<input name="geburtsdatum" type="date" value="{{ profile.get('geburtsdatum','') }}" autocomplete="off"></label>
+<label>E-Mail<input name="email" type="email" maxlength="254" value="{{ profile.get('email','') }}" autocomplete="off"></label>
+<label>Telefon<input name="telefon" type="tel" maxlength="40" value="{{ profile.get('telefon','') }}" autocomplete="off"></label>
+</div><label>Adresse<textarea name="adresse" maxlength="300" rows="3">{{ profile.get('adresse','') }}</textarea></label><button class="primary-button">Profil speichern <span aria-hidden="true">→</span></button></form></section>
+<section class="access-card" id="lohnzettel"><h2>Lohnzettel für {{ employee.name }} hochladen</h2><p class="muted small">PDF, JPEG oder PNG, höchstens 10 MB. Keine KI-Auslese. Die Datei erscheint nur bei dieser Person und der Werkstattleitung.</p>
+<form method="post" action="/admin/mitarbeiter/{{ employee.id }}/portal/lohnzettel" enctype="multipart/form-data">{{ csrf_field()|safe }}<label>Abrechnungsmonat<input name="period" type="month" required></label><label>Lohnzettel auswählen<input name="file" type="file" accept="application/pdf,image/jpeg,image/png" required></label><button class="primary-button">Für {{ employee.name }} hinterlegen <span aria-hidden="true">→</span></button></form>
+<h3 class="area-heading">Hinterlegte Abrechnungen</h3>{% for item in payrolls %}<article class="document-row"><div><strong>{{ item.period }}</strong><p>{{ item.filename }}</p></div><a class="document-download" href="{{ item.url }}">Herunterladen ↓</a></article>{% else %}<p class="empty-state">Noch keine Lohnzettel hinterlegt.</p>{% endfor %}</section>
+</main><footer>Gärtner GmbH Karosserie + Lack · Werkstattportal</footer></body></html>

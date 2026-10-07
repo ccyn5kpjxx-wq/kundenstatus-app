@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 from werkstatt_materialkanal import _json, _fingerprint, _note, _row_id, _key, _BorrowedConnection
+from werkstatt_materialbestellung import portal_request_details
 
 TABLES = ('einkauf_material_dialoge', 'einkauf_material_texte', 'einkauf_material_rueckfragen')
 UNITS = {'karton':'Karton', 'kartons':'Karton', 'rolle':'Rolle', 'rollen':'Rolle', 'packung':'Packung',
@@ -32,7 +33,7 @@ WORDS = {'ein':'1','eine':'1','einen':'1','einem':'1','zwei':'2','drei':'3','vie
 QUANTITY_PATTERN = r'(?<![\w.,/+−-])(\d{1,8}(?:[.,]\d{1,6})?|' + '|'.join(WORDS) + r')(?:\s*[x×]\s*|\s+)(' + '|'.join(sorted(UNITS, key=len, reverse=True)) + r')\b'
 COUNTED_ITEM_PATTERN = r'(?<![\w.,/+−-])([1-9]\d{0,7})\s*[x×]\s*(?P<product>[^\W\d_][\w/-]{2,})(?!\w)'
 EMPLOYEE_FIELDS = {'order_requested', 'quantity', 'unit', 'urgent', 'article', 'unit_conflict', 'possible_duplicate'}
-INTERNAL_FIELDS = {'supplier_review', 'price', 'budget', 'unit_review'}
+INTERNAL_FIELDS = {'supplier_review', 'price', 'budget', 'unit_review', 'parts_inquiry'}
 EXTERNAL_STATES = {'external_pending', 'external_sent'}
 
 
@@ -318,12 +319,17 @@ class MaterialDialog:
         self.channel._active(db,source,lock=True)
         fields = {}
         if not source['forwarded']:
-            parsed = parse_request(source['caption'])
+            details = portal_request_details(source)
+            parsed = ({'quantity':str(details['menge']), 'unit':'Stück', 'urgent':details['dringend'],
+                       'order_requested':details['vorgang']=='bestellung', 'vorgang':details['vorgang'],
+                       'beschreibung':details['beschreibung']} if details else parse_request(source['caption']))
             if parsed.get('urgent') is True and not parsed.get('cancelled'):
-                parsed['order_requested'] = True
+                if not details or details['vorgang']=='bestellung':
+                    parsed['order_requested'] = True
             proof = self._proof(text,'text',text['id']) if text else self._proof(source)
             self._merge(fields,parsed,proof)
-            self._merge(fields,_photo_count(source['caption'],source,fields),dict(proof,basis='owner_photo_piece_count'))
+            if not details:
+                self._merge(fields,_photo_count(source['caption'],source,fields),dict(proof,basis='owner_photo_piece_count'))
         db.execute('''INSERT INTO einkauf_material_dialoge(message_id,fields_json,created_at,updated_at)
             VALUES(?,?,?,?) ON CONFLICT(message_id) DO NOTHING RETURNING id''',(source['id'],_json(fields),self.clock(),self.clock())).fetchall()
         draft = dict(db.execute('SELECT * FROM einkauf_material_dialoge WHERE message_id=?',(source['id'],)).fetchone())
@@ -361,6 +367,8 @@ class MaterialDialog:
     def _exact_photo_hit(draft, analysis):
         """Select only an unambiguous exact label match, never its price."""
         labels,hits = analysis.get('merkmale',{}),analysis.get('treffer',[])
+        if analysis.get('code_widerspruch') or analysis.get('code_erkennung',{}).get('status') == 'mehrdeutig':
+            return None
         if draft['analysis_state']!='done' or len(hits)!=1 or analysis.get('treffer_gekuerzt'):
             return None
         hit = hits[0]
@@ -394,6 +402,8 @@ class MaterialDialog:
         return {}
 
     def _duplicate_signature(self, fields, review, draft=None):
+        if fields.get('vorgang',{}).get('value')=='anfrage':
+            return None
         values = {key:fields.get(key,{}).get('value') for key in ('quantity','unit','urgent')}
         if not values['quantity'] or not values['unit'] or type(values['urgent']) is not bool:
             return None
@@ -425,6 +435,10 @@ class MaterialDialog:
                 OR EXISTS (SELECT 1 FROM assistent_bestellanforderungen o WHERE o.request_id=('material:' || CAST(d.id AS TEXT))))
             ORDER BY d.id''',(source['employee_id'],draft['id'],draft['created_at']-600,draft['created_at']+600,draft['id'])).fetchall()
         for row in rows:
+            original = db.execute('SELECT * FROM einkauf_material_nachrichten WHERE id=?',(row['message_id'],)).fetchone()
+            details = portal_request_details(original) if original else None
+            if details and details['vorgang']=='anfrage':
+                continue
             other = self._duplicate_signature(json.loads(row['fields_json']),json.loads(row['review_json']),row)
             if not other or any(other[key]!=signature[key] for key in ('supplier','article','quantity','unit')):
                 continue
@@ -458,7 +472,27 @@ class MaterialDialog:
         if self._accepted(db, draft):
             return
         fields, review = json.loads(draft['fields_json']), json.loads(draft['review_json'])
-        photo_source = self._source(db,draft)['mime'].startswith('image/')
+        source = self._source(db,draft)
+        photo_source = source['mime'].startswith('image/')
+        details = portal_request_details(source)
+        if details:
+            proof = self._proof(source)
+            for key in ('vorgang','beschreibung'):
+                fields[key] = {'value':details[key], 'proof':proof}
+            if details['vorgang']=='anfrage':
+                # The immutable source mode always wins over answers, matching
+                # articles, reused prices and manually changed dialog fields.
+                fields['order_requested'] = {'value':False, 'proof':proof}
+                fields.pop('possible_duplicate',None)
+                fields.pop('duplicate_confirmation',None)
+                cancelled = fields.get('cancelled',{}).get('value') is True
+                state = ('cancelled' if cancelled else 'open' if draft['analysis_state'] in {'pending','processing'} else 'review')
+                missing = [] if cancelled else ['parts_inquiry']
+                snapshot = {'actor':'mitarbeiter:'+str(source['employee_id']), 'request_key':'material:'+str(draft['id']), 'payload':{}}
+                db.execute('''UPDATE einkauf_material_dialoge SET fields_json=?,state=?,snapshot_json=?,snapshot_hash=?,missing_json=?,updated_at=? WHERE id=?''',
+                    (_json(fields),state,_json(snapshot),_fingerprint(snapshot),_json(missing),self.clock(),draft['id']))
+                db.execute("UPDATE einkauf_material_rueckfragen SET state='superseded' WHERE draft_id=? AND state='queued'",(draft['id'],))
+                return
         analysis = json.loads(draft['analysis_json'])
         selected_field = fields.get('selected_article',{})
         if selected_field.get('proof',{}).get('basis')=='exact_photo_catalog_match':
@@ -604,9 +638,11 @@ class MaterialDialog:
 
     def _view(self, db, draft_id):
         row = self._draft(db,draft_id)
-        source = db.execute('SELECT employee_id,employee_name,intake_id,mime FROM einkauf_material_nachrichten WHERE id=?',(row['message_id'],)).fetchone()
+        source = db.execute('SELECT * FROM einkauf_material_nachrichten WHERE id=?',(row['message_id'],)).fetchone()
+        details = portal_request_details(source) if source else None
         row.update(employee_id=source['employee_id'] if source else None, employee_name=source['employee_name'] if source else '',
-                   intake_id=source['intake_id'] if source else None, source_kind='text' if source and source['mime']=='text/plain' else 'image')
+                   intake_id=source['intake_id'] if source else None, source_kind='text' if source and source['mime']=='text/plain' else 'image',
+                   vorgang=details['vorgang'] if details else 'bestellung', beschreibung=details['beschreibung'] if details else '')
         for source,target in (('fields_json','fields'),('review_json','review'),('analysis_json','analysis'),('missing_json','missing_fields')):
             row[target] = json.loads(row.pop(source))
         snapshot = json.loads(row.pop('snapshot_json'))
@@ -878,6 +914,9 @@ class MaterialDialog:
         with self.p.portal_originals_operation_lock(), self.db() as db:
             draft = self._draft(db,draft_id,revision,lock=True)
             source = self._source(db,draft)
+            details = portal_request_details(source)
+            if details and details['vorgang']=='anfrage':
+                raise ValueError('Eine Teileanfrage ist keine Bestellung und kann nicht für Bestellversand reserviert werden.')
             if self._accepted(db,draft) or draft['state']=='cancelled':
                 raise ValueError('Dieser Vorgang ist bereits übergeben, extern reserviert oder abgebrochen.')
             fields = json.loads(draft['fields_json'])
@@ -1022,6 +1061,9 @@ class MaterialDialog:
     def guard_order(self, db, draft_id, revision=None, actor=None, request_key=None, intent=None):
         draft = self._draft(db,draft_id,revision,lock=True)
         source = self._source(db,draft)
+        details = portal_request_details(source)
+        if details and details['vorgang']=='anfrage':
+            raise PermissionError('Diese Bildanforderung ist nur eine Teileanfrage, keine Bestellung.')
         if draft['state'] not in {'approved','accepted'}:
             raise PermissionError('Materialbedarf ist noch nicht vollständig bestätigt.')
         snapshot = json.loads(draft['snapshot_json'])

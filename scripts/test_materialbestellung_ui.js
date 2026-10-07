@@ -28,10 +28,10 @@ class Data {
   constructor() {this.fields = new Map();}
   append(name, value, filename) {this.fields.set(name, value); if (filename) (this.filenames ||= new Map()).set(name, filename);}
 }
-function fixture({saved = null} = {}) {
-  const names = ['camera', 'album', 'camera-button', 'album-button', 'submit', 'form', 'count', 'empty', 'summary', 'status', 'recovery', 'recovery-text', 'check', 'reload', 'refresh', 'items', 'history', 'history-status'];
+function fixture({saved = null, scannerFactory = null, limitCents = '25000'} = {}) {
+  const names = ['camera', 'album', 'camera-button', 'album-button', 'scan-button', 'submit', 'form', 'count', 'empty', 'summary', 'status', 'recovery', 'recovery-text', 'check', 'reload', 'refresh', 'items', 'history', 'history-status'];
   const elements = Object.fromEntries(names.map(name => ['material-' + name, new Element()]));
-  const host = new Element(); host.dataset = {endpoint: '/werkstatt/materialbestellung/anforderungen', actor: 'mitarbeiter:7'};
+  const host = new Element(); host.dataset = {endpoint: '/werkstatt/materialbestellung/anforderungen', actor: 'mitarbeiter:7', limitCents};
   const document = {getElementById: id => id === 'materialbestellung' ? host : elements[id], createElement: tag => new Element(tag), querySelector: () => ({content: 'synthetic-csrf'})};
   const calls = [], revoked = [], timers = new Map(), store = new Map(), events = {}; let seq = 0, timerId = 0;
   const key = 'materialbestellung:pending:mitarbeiter:7'; if (saved) store.set(key, JSON.stringify(saved));
@@ -42,14 +42,14 @@ function fixture({saved = null} = {}) {
       const requestId = settings.body.fields.get('request_id');
       return reply({request_id: requestId, anforderungen: rows.map((row, index) => ({client_id: row.id, id: index + 1,
         request_id: requestId, code: 'M-' + (index + 1), quantity: String(row.menge), unit: 'Stück', urgent: row.dringend,
-        state: 'review', label: 'Interne Prüfung', product: 'Synthetischer Testartikel'}))});
+        state: 'review', label: 'Interne Prüfung', product: 'Synthetischer Testartikel', vorgang: row.vorgang, beschreibung: row.beschreibung}))});
     }
     return reply({anforderungen: []});
   }};
   const controller = createMaterialOrderController({document, fetch: (...args) => api.fetch(...args),
     URL: {createObjectURL: () => 'blob:synthetic-' + ++seq, revokeObjectURL: url => revoked.push(url)},
     crypto: {randomUUID: () => '00000000-0000-4000-8000-' + String(++seq).padStart(12, '0')},
-    FormData: Data, AbortController, setTimeout: fn => {timers.set(++timerId, fn); return timerId;},
+    FormData: Data, AbortController, scannerFactory, setTimeout: fn => {timers.set(++timerId, fn); return timerId;},
     clearTimeout: id => timers.delete(id), storage: {getItem: k => store.get(k), setItem: (k, v) => store.set(k, v), removeItem: k => store.delete(k)},
     window: {addEventListener: (name, fn) => {events[name] = fn;}}});
   const $ = name => elements['material-' + name];
@@ -67,7 +67,7 @@ test('two photos retain separate quantities, urgent choice and exact multipart b
   const f = fixture(), first = photo('one.jpg'), second = photo('two.png', 124, 'image/png');
   f.controller.addFiles([first, second]);
   f.step(0, '+').click(); f.step(0, '+').click(); f.step(1, '+').click();
-  const urgent = f.field(1, 'INPUT', el => el.type === 'checkbox'); urgent.checked = true; urgent.fire('change');
+  const urgent = f.field(1, 'INPUT', el => el.type === 'radio' && el.value === 'dringend'); urgent.checked = true; urgent.fire('change');
   await f.controller.submit();
   const call = f.posts()[0], fields = call.settings.body.fields, rows = JSON.parse(fields.get('positionen'));
   assert.deepEqual(rows.map(({menge, dringend}) => ({menge, dringend})), [{menge: 3, dringend: false}, {menge: 2, dringend: true}]);
@@ -87,6 +87,54 @@ test('stepper boundaries and invalid manual quantity never create zero, fraction
   }
   input.value = '4'; // A focused field need not have emitted change before submitting.
   await f.controller.submit(); assert.equal(JSON.parse(f.posts()[0].settings.body.fields.get('positionen'))[0].menge, 4);
+});
+
+test('explicit Monday choice cancels urgency only for that image', async () => {
+  const f = fixture(); f.controller.addFiles([photo(), photo('second.png', 123, 'image/png')]);
+  for (let i = 0; i < 2; i++) {
+    const urgent = f.field(i, 'INPUT', el => el.value === 'dringend'); urgent.checked = true; urgent.fire('change');
+  }
+  const monday = f.field(0, 'INPUT', el => el.value === 'montag'); monday.checked = true; monday.fire('change');
+  assert.equal(f.field(0, 'INPUT', el => el.value === 'dringend').checked, false);
+  await f.controller.submit();
+  assert.deepEqual(JSON.parse(f.posts()[0].settings.body.fields.get('positionen')).map(row => row.dringend), [false, true]);
+});
+
+test('screenshot inquiry and description stay bound to their own image without HTML interpretation', async () => {
+  const f = fixture(); f.controller.addFiles([photo('teil-screenshot.png', 123, 'image/png'), photo('material.jpg')]);
+  const description = f.field(0, 'TEXTAREA'); description.value = 'Halter am Kotflügel <img onerror=alert(1)> dringend 9 Stück'; description.fire('input');
+  const inquiry = f.field(0, 'INPUT', el => el.type === 'checkbox'); inquiry.checked = true; inquiry.fire('change');
+  f.step(1, '+').click(); await f.controller.submit();
+  const rows = JSON.parse(f.posts()[0].settings.body.fields.get('positionen'));
+  assert.equal(rows[0].vorgang, 'anfrage'); assert.equal(rows[0].menge, 1); assert.equal(rows[0].dringend, false);
+  assert.equal(rows[0].beschreibung, description.value);
+  assert.equal(rows[1].vorgang, 'bestellung'); assert.equal(rows[1].beschreibung, ''); assert.equal(rows[1].menge, 2);
+  assert.match(f.historyText(), /Teileanfrage erfasst/); assert.match(f.historyText(), /Noch keine Bestellung ausgelöst/);
+  assert.match(f.historyText(), /<img onerror=alert\(1\)>/);
+});
+
+test('uncertain retry freezes inquiry, description and timing with original screenshot', async () => {
+  const f = fixture(), previous = f.api.fetch; let first = true;
+  f.api.fetch = async (url, settings) => {
+    if (settings.method === 'POST' && first) {first = false; f.calls.push({url, settings}); throw new Error('Unterbrochen');}
+    return previous(url, settings);
+  };
+  f.controller.addFiles([photo('screenshot.png', 123, 'image/png')]);
+  const text = f.field(0, 'TEXTAREA'), inquiry = f.field(0, 'INPUT', el => el.type === 'checkbox');
+  text.value = 'Halter links'; text.fire('input'); inquiry.checked = true; inquiry.fire('change');
+  await f.controller.submit();
+  assert.equal(text.disabled, true); assert.equal(inquiry.disabled, true);
+  text.value = 'Anderer Artikel'; text.fire('input'); inquiry.checked = false; inquiry.fire('change');
+  const urgent = f.field(0, 'INPUT', el => el.value === 'dringend'); urgent.checked = true; urgent.fire('change');
+  await f.controller.submit();
+  assert.equal(f.posts()[0].settings.body.fields.get('positionen'), f.posts()[1].settings.body.fields.get('positionen'));
+});
+
+test('oversized focused description is not silently truncated or sent', async () => {
+  const f = fixture(); f.controller.addFiles([photo()]);
+  const description = f.field(0, 'TEXTAREA'); description.value = 'x'.repeat(501);
+  await f.controller.submit(); assert.equal(f.posts().length, 0); assert.equal(description.focused, true);
+  assert.match(f.$('status').textContent, /500 Zeichen/);
 });
 
 test('an invalid focused quantity stops submission instead of sending an old value', async () => {
@@ -306,4 +354,63 @@ test('template keeps personal login redirect, native camera, album picker and pr
   assert.match(html, /action="\/werkstatt\/assistent\/login"/); assert.match(html, /capture="environment"/);
   assert.match(html, /id="material-album"[^>]+multiple/); assert.match(html, /elif not can_order/);
   assert.match(html, /Erfasst bedeutet noch nicht bestellt/); assert.doesNotMatch(html, /impersonat/i);
+});
+
+test('scanner captures through the same personal photo batch and never supplies code as order data', async () => {
+  let bindings, opened = 0, stopped = 0;
+  const f = fixture({scannerFactory: settings => {bindings = settings; return {open(){opened++;},stop(){stopped++;}};}});
+  f.$('scan-button').click(); assert.equal(opened, 1); assert.equal(bindings.canAdd(), true);
+  bindings.onFallback(); assert.equal(f.$('camera').clicked, true);
+  const scanned = photo('artikelcode.jpg'); bindings.onPhoto(scanned); f.step(0, '+').click();
+  await f.controller.submit();
+  const fields = f.posts()[0].settings.body.fields, rows = JSON.parse(fields.get('positionen'));
+  assert.equal(rows[0].menge, 2); assert.equal(fields.get('foto_' + rows[0].id), scanned);
+  assert.equal('barcode' in rows[0], false); assert.equal('decodedCode' in rows[0], false); assert.ok(stopped > 0);
+});
+
+test('scanner is blocked while a prior batch is uncertain or ten pictures are selected', async () => {
+  let bindings;
+  const f = fixture({scannerFactory: settings => {bindings = settings; return {open(){},stop(){}};}});
+  f.controller.addFiles(Array.from({length:10}, () => photo()));
+  assert.equal(f.$('scan-button').disabled, true); assert.equal(bindings.canAdd(), false);
+  f.api.fetch = async () => {throw new Error('Unklar');}; await f.controller.submit();
+  assert.equal(bindings.canAdd(), false); assert.equal(f.$('scan-button').disabled, true);
+});
+
+test('server code recognition is literal informational text without a QR link', async () => {
+  const f = fixture(); f.api.fetch = async () => reply({anforderungen:[{id:1, state:'review', product:'Test',
+    decodedCode:'TEST-QR', code_erkennung:{status:'erkannt'}},{id:2,state:'review',product:'Test2',code_erkennung:{status:'mehrdeutig'}}]});
+  await f.controller.refresh(); assert.match(f.historyText(), /Artikelcode erkannt: TEST-QR/);
+  assert.match(f.historyText(), /Mehrere Codes/); assert.equal(descendants(f.$('history')).some(el => el.tagName === 'A'), false);
+});
+
+test('a rejected camera frame keeps the actual file-limit error instead of claiming success', () => {
+  let bindings;
+  const f = fixture({scannerFactory: settings => {bindings = settings; return {open(){},stop(){}};}});
+  f.controller.addFiles(Array.from({length:6}, () => photo('large.jpg', 8 * 1024 * 1024)));
+  bindings.onPhoto(photo('artikelcode.jpg', 3 * 1024 * 1024));
+  assert.equal(f.cards().length, 6); assert.match(f.$('status').textContent, /50 MB/);
+  assert.doesNotMatch(f.$('status').textContent, /hinzugefügt/);
+});
+
+test('urgency tiles explain immediate personal cap and Monday without promising purchases for inquiries', async () => {
+  const f = fixture(); f.controller.addFiles([photo()]);
+  const cardText = () => descendants(f.cards()[0]).map(el => el.textContent).join(' ');
+  assert.match(cardText(), /Nicht dringend/); assert.match(cardText(), /Montag · 14 Uhr/);
+  assert.match(cardText(), /Sofort · bis 250 € brutto/);
+  const urgent = f.field(0, 'INPUT', el => el.value === 'dringend'); urgent.checked = true; urgent.fire('change');
+  assert.match(cardText(), /inklusive Versand und Nebenkosten/);
+  const inquiry = f.field(0, 'INPUT', el => el.type === 'checkbox'); inquiry.checked = true; inquiry.fire('change');
+  assert.match(cardText(), /Zeitnah intern klären/); assert.doesNotMatch(cardText(), /Sofort · bis/);
+  assert.match(cardText(), /wird noch nicht bestellt/); assert.equal(urgent.checked, true);
+  inquiry.checked = false; inquiry.fire('change'); assert.match(cardText(), /Sofort · bis 250 € brutto/);
+  await f.controller.submit(); assert.equal(JSON.parse(f.posts()[0].settings.body.fields.get('positionen'))[0].dringend, true);
+});
+
+test('the urgency label uses the server personal cap and never invents a 250 euro allowance', () => {
+  for (const [limitCents, expected] of [['12000', /bis 120 € brutto/], ['24999', /bis 249,99 € brutto/], ['', /Sofort nach Klärung/], ['-1', /Sofort nach Klärung/], ['25001', /Sofort nach Klärung/]]) {
+    const f = fixture({limitCents}); f.controller.addFiles([photo()]);
+    const text = descendants(f.cards()[0]).map(el => el.textContent).join(' ');
+    assert.match(text, expected); assert.doesNotMatch(text, /bis 250 € brutto/);
+  }
 });

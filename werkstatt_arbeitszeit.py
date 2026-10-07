@@ -176,7 +176,8 @@ def register_time_views(p, bp, protected, service):
     @protected
     def personal_time(who):
         report=service.summary(who,request.args.get('monat'))
-        return render_template('assistent_arbeitszeit.html',report=report,admin=False,employees=[])
+        return render_template('assistent_arbeitszeit.html',report=report,admin=False,employees=[],
+                               request_id=p.employee_portal.new_time_form(who, report['status']['revision']))
 
     admin=Blueprint('arbeitszeit_admin',__name__)
     @admin.get('/admin/arbeitszeit')

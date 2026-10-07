@@ -20,7 +20,8 @@ from flask import abort, flash, jsonify, request, session, redirect, url_for
 import test_materialdialog as dialog_fixtures
 import test_materialbestellung_e2e as e2e_fixtures
 from werkstatt_materialbestellung import (register_material_order_portal, PORTAL_SOURCE,
-                                         MAX_PHOTO_BYTES, MAX_TOTAL_BYTES, SubmissionConflict)
+                                         MAX_PHOTO_BYTES, MAX_TOTAL_BYTES, SubmissionConflict, portal_request_details)
+from werkstatt_materialkanal import _fingerprint
 from werkstatt_bestellplan import BERLIN
 
 
@@ -94,6 +95,14 @@ class PortalTests(unittest.TestCase):
     def submit(self, rows=None, request_id=None):
         return self.client.post('/werkstatt/materialbestellung/anforderungen',
                                 data=self.payload(rows, request_id))
+
+    def submit_extended(self, rows=None, request_id=None, **fields):
+        data = self.payload(rows, request_id)
+        positions = json.loads(data['positionen'])
+        for position in positions:
+            position.update(fields)
+        data['positionen'] = json.dumps(positions)
+        return self.client.post('/werkstatt/materialbestellung/anforderungen', data=data)
 
     def sql(self, query, values=()):
         return self.f.f.sql(query, values)
@@ -169,6 +178,133 @@ class PortalTests(unittest.TestCase):
         self.assertEqual(intake['lines'][0]['quantity'], '1')
         self.assertEqual(intake['original_author'], 'Testperson Eins')
         self.assertEqual(intake['created_by'], 'mitarbeiter:1')
+
+    def test_legacy_replay_hash_and_empty_additions_remain_identical(self):
+        import hashlib
+        request_id, client_id, raw = uid(), uid(), picture()
+        rows = [(client_id, 2, True, raw)]
+        first = self.submit(rows, request_id).json
+        evidence = {'client_id':client_id, 'quantity':2, 'urgent':True,
+                    'sha256':hashlib.sha256(raw).hexdigest()}
+        expected = _fingerprint(dict(batch_hash=_fingerprint([evidence]), **evidence))
+        source = self.source(first['anforderungen'][0]['id'])
+        self.assertEqual(source['canonical_hash'], expected)
+        self.assertEqual(source['caption'], '2 Stück, dringend')
+        self.assertIsNone(portal_request_details(source))
+        replay = self.submit_extended(rows, request_id, vorgang='bestellung', beschreibung='')
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(first, replay.json)
+
+    def test_description_is_source_bound_text_and_never_quantity_or_urgency(self):
+        text = 'Stoßstange rechts\n2 Stück dringend bestellen abbrechen?'
+        result = self.submit_extended(beschreibung=text)
+        self.assertEqual(result.status_code, 200, result.text)
+        view = result.json['anforderungen'][0]
+        self.assertEqual((view['vorgang'],view['beschreibung']), ('bestellung',text))
+        draft = self.p.material_dialog.status(view['id'])
+        self.assertEqual((draft['fields']['quantity']['value'],draft['fields']['urgent']['value']), ('1',False))
+        self.assertTrue(draft['fields']['order_requested']['value'])
+        self.assertNotIn('cancelled',draft['fields'])
+        source = self.source(view['id'])
+        self.assertEqual(portal_request_details(source)['beschreibung'],text)
+        self.assertEqual(draft['fields']['beschreibung']['proof']['id'],source['id'])
+        self.assertEqual(self.p.workshop_intake.detail(source['intake_id'])['lines'][0]['product'],text.replace('\n',' '))
+        self.assertEqual(self.get().json['anforderungen'][0]['beschreibung'],text)
+
+    def test_description_and_mode_changes_conflict_with_existing_batch(self):
+        request_id, client_id = uid(), uid()
+        rows = [(client_id,1,True,picture())]
+        first = self.submit_extended(rows,request_id,beschreibung='Tür rechts',vorgang='anfrage')
+        self.assertEqual(first.status_code,200)
+        for description,kind in (('Tür links','anfrage'),('Tür rechts','bestellung'),('','anfrage')):
+            changed = self.submit_extended(rows,request_id,beschreibung=description,vorgang=kind)
+            self.assertEqual(changed.status_code,409,changed.text)
+        self.assertEqual(self.submit_extended(rows,request_id,beschreibung='Tür rechts',vorgang='anfrage').json,first.json)
+        self.assertEqual(len(self.sql('SELECT id FROM einkauf_material_nachrichten')),1)
+
+    def test_description_and_mode_types_limits_and_sensitive_text_rejected_atomically(self):
+        for description in (None,True,{'text':'part'},'x'*501,'unsichtbar\x00','IBAN DE02120300000000202051'):
+            result = self.submit_extended(beschreibung=description)
+            self.assertEqual(result.status_code,400,result.text)
+        for kind in (None,True,{},'buy','anfrage '):
+            result = self.submit_extended(vorgang=kind)
+            self.assertEqual(result.status_code,400,result.text)
+        self.assertEqual(self.sql('SELECT id FROM einkauf_material_nachrichten'),[])
+        result = self.submit_extended(beschreibung='x'*500,vorgang='anfrage')
+        self.assertEqual(result.status_code,200,result.text)
+
+    def test_urgent_inquiry_analysis_review_answer_and_recheck_never_become_order(self):
+        result = self.submit_extended(vorgang='anfrage',beschreibung='Angebot für Stoßstange rechts',
+                                      rows=[(uid(),2,True,picture())])
+        self.assertEqual(result.status_code,200,result.text)
+        portal_view = result.json['anforderungen'][0]
+        self.assertEqual(portal_view['vorgang'],'anfrage')
+        self.assertFalse(portal_view['employee_reply_required'])
+        view = self.analyze(portal_view)
+        self.assertEqual((view['state'],view['missing_fields']),('review',['parts_inquiry']))
+        self.assertFalse(view['fields']['order_requested']['value'])
+        view = self.f.review(view,unit='Stück')
+        self.assertEqual(view['state'],'review')
+        # Even an explicit later ordering sentence cannot convert the source.
+        response = self.answer(view,'bestellen, ein Stück, dringend')
+        self.assertEqual(response.status_code,200,response.text)
+        view = self.p.material_dialog.status(view['id'])
+        self.assertFalse(view['fields']['order_requested']['value'])
+        view = self.p.material_dialog.recheck(view['id'],view['revision'])
+        self.assertEqual(view['state'],'review')
+        self.assertIsNone(self.portal.process_next())
+        self.assertIsNone(self.p.material_dialog.process_next())
+        self.assertEqual(self.p.workshop_orders.calls,[])
+        listing = self.get().json['anforderungen'][0]
+        self.assertEqual(listing['label'],'Teileanfrage zur internen Prüfung')
+        self.assertFalse(listing['employee_reply_required'])
+
+    def test_inquiry_source_blocks_even_tampered_fields_state_and_external_claim(self):
+        view = self.submit_extended(vorgang='anfrage',beschreibung='Tür rechts').json['anforderungen'][0]
+        view = self.analyze(view)
+        view = self.f.review(view,unit='Stück')
+        fields = view['fields']
+        fields['order_requested']['value'] = True
+        fields['vorgang']['value'] = 'bestellung'
+        self.sql("UPDATE einkauf_material_dialoge SET fields_json=?,state='approved' WHERE id=?",
+                 (json.dumps(fields),view['id']))
+        with self.portal.db() as db:
+            with self.assertRaisesRegex(PermissionError,'Teileanfrage'):
+                self.p.material_dialog.guard_order(db,view['id'],view['revision'])
+        payload = dict(supplier_id='supplier-1',recipient='orders@example.test',product_name='Test-Klebeband',
+            article_number='TEST-50',variant='grün 50 mm',subject='Testbestellung',recipient_source='synthetic',
+            authorization_note='synthetic',max_total_cents=25000,confirmed=True)
+        with self.assertRaisesRegex(ValueError,'Teileanfrage'):
+            self.p.material_dialog.reserve_external(view['id'],view['revision'],payload)
+        self.assertEqual(self.sql('SELECT id FROM assistent_bestellanforderungen'),[])
+
+    def test_reviewed_inquiry_is_not_a_duplicate_purchase(self):
+        inquiry = self.submit_extended(vorgang='anfrage',beschreibung='Klebeband prüfen').json['anforderungen'][0]
+        inquiry = self.analyze(inquiry)
+        self.f.review(inquiry,unit='Stück')
+        order = self.submit().json['anforderungen'][0]
+        order = self.analyze(order)
+        self.assertNotIn('possible_duplicate',order['fields'])
+        self.assertIsNone(order['duplicate_of'])
+
+    def test_mixed_picture_batch_keeps_each_mode_and_does_not_block_real_orders(self):
+        rows = [(uid(),1,True,picture('red')),(uid(),3,False,picture())]
+        payload = self.payload(rows)
+        positions = json.loads(payload['positionen'])
+        positions[0].update(vorgang='anfrage',beschreibung='Stoßstange rechts')
+        positions[1].update(vorgang='bestellung',beschreibung='Klebeband')
+        payload['positionen'] = json.dumps(positions)
+        result = self.client.post('/werkstatt/materialbestellung/anforderungen',data=payload)
+        self.assertEqual(result.status_code,200,result.text)
+        views = result.json['anforderungen']
+        self.assertEqual([(view['vorgang'],view['quantity'],view['urgent']) for view in views],
+                         [('anfrage','1',True),('bestellung','3',False)])
+        for view in views:
+            self.f.review(self.analyze(view),unit='Stück',unit_price_cents=1000)
+        self.assertEqual(self.portal.process_next()['state'],'queued')
+        self.assertIsNone(self.portal.process_next())
+        self.assertEqual(len(self.p.workshop_orders.calls),1)
+        self.assertEqual(self.p.workshop_orders.calls[0]['request_key'],'material:'+str(views[1]['id']))
 
     def test_ten_photos_have_distinct_immutable_quantity_bindings(self):
         rows = [(uid(), i + 1, bool(i % 2), picture('blue' if i % 2 else 'red')) for i in range(10)]
@@ -604,10 +740,15 @@ class PortalRealOrderTests(unittest.TestCase):
             session['assistent_version'] = 1
             session['csrf_token'] = 'synthetic-csrf'
 
-    def demand(self, urgent=False, *, price=1000, extras=0):
+    def demand(self, urgent=False, *, price=1000, extras=0, vorgang=None, beschreibung=None):
         request_id, client_id = uid(), uid()
+        position = {'id': client_id, 'menge': 1, 'dringend': urgent}
+        if vorgang is not None:
+            position['vorgang'] = vorgang
+        if beschreibung is not None:
+            position['beschreibung'] = beschreibung
         result = self.client.post('/werkstatt/materialbestellung/anforderungen', data={
-            'request_id': request_id, 'positionen': json.dumps([{'id': client_id, 'menge': 1, 'dringend': urgent}]),
+            'request_id': request_id, 'positionen': json.dumps([position]),
             'foto_' + client_id: (io.BytesIO(picture()), 'test.png'), 'csrf_token': 'synthetic-csrf'})
         self.assertEqual(result.status_code, 200, result.text)
         view = result.json['anforderungen'][0]
@@ -640,14 +781,87 @@ class PortalRealOrderTests(unittest.TestCase):
         self.assertEqual(actor['actor_id'], 'mitarbeiter:1')
         self.assertEqual(status['order']['quantity'], '1')
 
+    def test_urgent_picture_inquiry_never_dispatches_even_with_current_valid_terms(self):
+        view = self.demand(True,vorgang='anfrage',beschreibung='Stoßstange rechts')
+        self.assertEqual(view['state'],'review')
+        self.assertFalse(view['fields']['order_requested']['value'])
+        self.assertIsNone(self.portal.process_next())
+        self.assertEqual(self.e.manager.submit_material_request(view['id'],view['revision'])['state'],'blocked')
+        self.f.f.time = datetime(2026,10,12,14,0,tzinfo=BERLIN).timestamp()
+        self.e.manager.tick(worker=True)
+        self.assertEqual(self.e.smtp.data_calls,0)
+        with self.portal.db() as db:
+            self.assertEqual(db.execute('SELECT id FROM assistent_bestellanforderungen').fetchall(),[])
+
+    def test_order_description_cannot_cancel_or_expedite_real_regular_dispatch(self):
+        view = self.demand(False,vorgang='bestellung',beschreibung='2 Stück dringend abbrechen?')
+        self.assertEqual(view['state'],'approved')
+        self.assertEqual(view['fields']['quantity']['value'],'1')
+        self.assertFalse(view['fields']['urgent']['value'])
+        self.assertEqual(self.portal.process_next()['state'],'queued')
+        self.assertEqual(self.e.smtp.data_calls,0)
+        self.f.f.time = datetime(2026,10,12,14,0,tzinfo=BERLIN).timestamp()
+        self.e.manager.tick(worker=True)
+        self.assertEqual(self.e.smtp.data_calls,1)
+
     def test_urgent_form_request_uses_real_dispatch_guard_and_brutto_cap(self):
-        self.demand(True)
+        exact = self.demand(True, price=24600, extras=100)
+        self.assertEqual(exact['state'], 'approved')
+        self.assertFalse(exact['employee_reply_required'])
         self.assertEqual(self.portal.process_next()['state'], 'sent')
         self.assertEqual(self.e.smtp.data_calls, 1)
+        saved = self.p.material_dialog.status(exact['id'])
+        delivery = self.e.manager.dispatch.status(saved['dispatch_id'])
+        self.assertEqual(delivery['order']['max_total_cents'], 25000)
+        source = self.f.f.sql('''SELECT n.* FROM einkauf_material_nachrichten n
+            JOIN einkauf_material_dialoge d ON d.message_id=n.id WHERE d.id=?''', (exact['id'],))[0]
+        _, _, request_id, client_id = source['wamid'].split('.')
+        replay = self.client.post('/werkstatt/materialbestellung/anforderungen', data={
+            'request_id': request_id, 'positionen': json.dumps([{'id': client_id, 'menge': 1, 'dringend': True}]),
+            'foto_' + client_id: (io.BytesIO(picture()), 'test.png'), 'csrf_token': 'synthetic-csrf'})
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.json['anforderungen'][0]['id'], exact['id'])
+        self.e.manager.submit_material_request(exact['id'], saved['revision'])
+        self.e.manager.tick()
+        self.portal.process_next()
+        self.assertEqual(self.e.smtp.data_calls, 1, 'Upload retry/handoff repeat must never send twice')
         view = self.demand(True, price=24600, extras=101)
         self.assertIn('budget', view['missing_fields'])
         self.assertIsNone(self.portal.process_next())
         self.assertEqual(self.e.smtp.data_calls, 1)
+
+    def test_known_photo_reuses_valid_terms_and_sends_without_another_employee_confirmation(self):
+        prior = self.demand(False)
+        self.assertEqual(self.portal.process_next()['state'], 'queued')
+        self.assertEqual(self.e.smtp.data_calls, 0)
+        known_id = prior['id']
+        for urgent, expected in ((True,'sent'),(False,'queued')):
+            with self.subTest(urgent=urgent):
+                self.f.f.time += 601  # A separate later need, not a possible double order.
+                self.e.manager.set_setting('worker_last_ok', self.f.f.time)
+                request_id, client_id = uid(), uid()
+                result = self.client.post('/werkstatt/materialbestellung/anforderungen', data={
+                    'request_id': request_id, 'positionen': json.dumps([{'id':client_id,'menge':1,'dringend':urgent}]),
+                    'foto_' + client_id: (io.BytesIO(picture()), 'test.png'), 'csrf_token':'synthetic-csrf'})
+                self.assertEqual(result.status_code, 200)
+                draft_id = result.json['anforderungen'][0]['id']
+                self.p.material_dialog.analyze(draft_id)
+                view = self.p.material_dialog.status(draft_id)
+                self.assertEqual(view['state'], 'approved')
+                self.assertEqual(view['review']['reused_from'], known_id)
+                self.assertEqual(view['review']['price_source'], prior['review']['price_source'])
+                self.assertFalse(view['employee_reply_required'])
+                self.assertEqual(view['missing_fields'], [])
+                self.assertEqual(self.portal.process_next()['state'], expected)
+                self.assertEqual(self.e.smtp.data_calls, 1)
+                self.assertIsNone(self.portal.process_next())
+                known_id = draft_id
+        self.f.f.time = datetime(2026,10,12,13,59,tzinfo=BERLIN).timestamp()
+        self.e.manager.tick(worker=True)
+        self.assertEqual(self.e.smtp.data_calls, 1)
+        self.f.f.time = datetime(2026,10,12,14,0,tzinfo=BERLIN).timestamp()
+        self.e.manager.tick(worker=True)
+        self.assertEqual(self.e.smtp.data_calls, 2, 'One urgent mail immediately; regular needs share the Monday supplier mail')
 
     def test_revoked_personal_rights_before_monday_block_actual_delivery(self):
         self.demand()

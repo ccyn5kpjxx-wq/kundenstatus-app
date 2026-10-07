@@ -147,6 +147,27 @@ class PersonalRestoreTests(unittest.TestCase):
                     changed['tables'][table][0][key] = 'replaced'
                     self.rejected(changed)
 
+    def test_inquiry_mode_and_description_are_immutable_originals_in_restore(self):
+        self.seed(state='review')
+        details = {'menge':1,'dringend':True,'vorgang':'anfrage','beschreibung':'Stoßstange rechts'}
+        caption = 'portal-request:v1:' + json.dumps(details,ensure_ascii=False,sort_keys=True,separators=(',',':'))
+        with self.db() as db:
+            db.execute('UPDATE einkauf_material_nachrichten SET caption=? WHERE id=5',(caption,))
+            db.execute('UPDATE einkauf_material_dialoge SET fields_json=? WHERE id=6',
+                       (json.dumps({'vorgang':{'value':'anfrage'},'beschreibung':{'value':details['beschreibung']},
+                                    'order_requested':{'value':False}}),))
+        for changes in ({'vorgang':'bestellung'},{'beschreibung':'Stoßstange links'}):
+            replaced = self.export()
+            altered = dict(details,**changes)
+            replaced['tables']['einkauf_material_nachrichten'][0]['caption'] = 'portal-request:v1:'+json.dumps(altered)
+            self.rejected(replaced)
+        replaced = self.export()
+        replaced['tables']['einkauf_material_dialoge'][0]['fields_json'] = '{"order_requested":{"value":true}}'
+        self.rejected(replaced)
+        self.ns['import_backup_json_rows_into_current_database'](self.export(),None,[])
+        with self.db() as db:
+            self.assertEqual(db.execute('SELECT caption FROM einkauf_material_nachrichten WHERE id=5').fetchone()['caption'],caption)
+
     def test_matching_current_json_restores_unrelated_data(self):
         self.seed()
         current = self.export()

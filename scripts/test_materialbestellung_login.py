@@ -67,6 +67,67 @@ class MaterialLoginTests(unittest.TestCase):
             self.assertNotIn('admin', state)
             self.assertNotEqual(state['csrf_token'], 'synthetic-form-token')
 
+    def test_shared_admin_and_remembered_logins_cannot_survive_personal_login(self):
+        with p.app.test_request_context('/'):
+            admin_token = p.create_remember_login_token('admin')
+            partner_token = p.create_remember_login_token('partner', autohaus_id=7)
+        self.client.set_cookie(p.ADMIN_REMEMBER_COOKIE, admin_token, domain='localhost')
+        self.client.set_cookie(p.PARTNER_REMEMBER_COOKIE, partner_token, domain='localhost')
+        with self.client.session_transaction() as state:
+            state.update(admin=True, partner_autohaus_id=7, assistent_mid=2,
+                         assistent_version=4, assistent_auth_version=3,
+                         assistent_bestaetigung={'id': 999, 'actor': 'admin'})
+        response = self.login()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, '/werkstatt/materialbestellung')
+        cookies = response.headers.getlist('Set-Cookie')
+        for name in (p.ADMIN_REMEMBER_COOKIE, p.PARTNER_REMEMBER_COOKIE):
+            self.assertTrue(any(item.startswith(name + '=') and 'Max-Age=0' in item for item in cookies))
+            self.assertIsNone(self.client.get_cookie(name))
+        with assistant_fixture.database() as db:
+            count = db.execute('SELECT COUNT(*) FROM login_tokens WHERE token_hash IN (?,?)',
+                (p.remember_login_token_hash(admin_token), p.remember_login_token_hash(partner_token))).fetchone()[0]
+        self.assertEqual(count, 0)
+        self.assertEqual(self.client.get('/werkstatt/materialbestellung').status_code, 200)
+        with patch('werkstatt_assistent.render_template', return_value='synthetic-own-profile') as render:
+            self.assertEqual(self.client.get('/werkstatt/assistent').status_code, 200)
+        self.assertEqual(render.call_args.kwargs['who']['actor'], 'mitarbeiter:1')
+        self.assertEqual(self.client.get('/werkstatt/assistent/rechte').status_code, 302)
+        with self.client.session_transaction() as state:
+            self.assertEqual(state['assistent_mid'], 1)
+            self.assertEqual(state['assistent_version'], 1)
+            self.assertEqual(state['assistent_auth_version'], 1)
+            self.assertNotEqual(state['csrf_token'], 'synthetic-form-token')
+            for key in ('admin', 'partner_autohaus_id', 'assistent_bestaetigung'):
+                self.assertNotIn(key, state)
+
+    def test_stale_auth_session_cannot_read_or_submit_material_after_password_version_changes(self):
+        self.assertEqual(self.login().status_code, 302)
+        cookie_name = p.app.config['SESSION_COOKIE_NAME']
+        stale = p.app.test_client()
+        stale.set_cookie(cookie_name, self.client.get_cookie(cookie_name).value, domain='localhost')
+        with self.client.session_transaction() as state:
+            token = state['csrf_token']
+        with assistant_fixture.database() as db:
+            db.execute('UPDATE assistent_rechte SET auth_version=2 WHERE mitarbeiter_id=1')
+            self.assertEqual(db.execute('SELECT version FROM assistent_rechte WHERE mitarbeiter_id=1').fetchone()[0], 1)
+        self.assertEqual(stale.get('/werkstatt/materialbestellung/anforderungen').status_code, 401)
+        self.assertEqual(stale.post('/werkstatt/materialbestellung/anforderungen',
+            data={'csrf_token': token, 'request_id': 'synthetic-stale-request', 'positionen': '[]'}).status_code, 401)
+        self.assertEqual(stale.get('/werkstatt/assistent/auftrag/156').status_code, 401)
+        self.assertIn('name="mitarbeiter_id"', stale.get('/werkstatt/materialbestellung').text)
+        response = self.login(csrf_token=token)
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as state:
+            self.assertEqual(state['assistent_mid'], 1)
+            self.assertEqual(state['assistent_version'], 1)
+            self.assertEqual(state['assistent_auth_version'], 2)
+            self.assertNotEqual(state['csrf_token'], token)
+            fresh_token = state['csrf_token']
+        self.assertEqual(self.client.get('/werkstatt/materialbestellung/anforderungen',
+            headers={'X-CSRF-Token': fresh_token}).status_code, 200)
+        self.assertEqual(stale.get('/werkstatt/materialbestellung/anforderungen').status_code, 401)
+
     def test_expired_external_next_does_not_redirect_or_authenticate(self):
         response = self.login(csrf_token='stale-token', next='https://untrusted.example')
         self.assertEqual(response.status_code, 400)
@@ -82,6 +143,35 @@ class MaterialLoginTests(unittest.TestCase):
         self.assertIn('role="alert"', self.client.get(response.location).text)
         with self.client.session_transaction() as state:
             self.assertNotIn('assistent_mid', state)
+
+    def test_order_limit_display_uses_minimum_of_personal_global_and_250_eur(self):
+        self.login()
+        for personal, global_limit, expected in ((30000,30000,25000),(9000,25000,9000),
+                                                (12000,8000,8000),(12000,0,0),
+                                                (12000,-1,0),(12000,'25000',0),(0,25000,0)):
+            with self.subTest(personal=personal, global_limit=global_limit):
+                with assistant_fixture.database() as db:
+                    db.execute('UPDATE assistent_rechte SET limit_cent=? WHERE mitarbeiter_id=1', (personal,))
+                with patch.object(p.workshop_orders,'cap',return_value=global_limit), \
+                     patch('werkstatt_materialbestellung.render_template',return_value='synthetic-page') as render:
+                    response = self.client.get('/werkstatt/materialbestellung')
+                self.assertEqual(response.status_code,200)
+                self.assertEqual(render.call_args.kwargs['order_limit_cent'],expected)
+
+    def test_missing_global_configuration_or_personal_identity_never_invents_display_limit(self):
+        self.login()
+        with patch.object(p.workshop_orders,'cap',side_effect=RuntimeError('synthetic configuration unavailable')), \
+             patch('werkstatt_materialbestellung.render_template',return_value='synthetic-page') as render:
+            self.assertEqual(self.client.get('/werkstatt/materialbestellung').status_code,200)
+            self.assertEqual(render.call_args.kwargs['order_limit_cent'],0)
+        with self.client.session_transaction() as state:
+            state.pop('assistent_mid',None)
+            state.pop('assistent_version',None)
+        with patch.object(p.workshop_orders,'cap') as cap, \
+             patch('werkstatt_materialbestellung.render_template',return_value='synthetic-page') as render:
+            self.assertEqual(self.client.get('/werkstatt/materialbestellung').status_code,200)
+            self.assertEqual(render.call_args.kwargs['order_limit_cent'],0)
+            cap.assert_not_called()
 
 
 if __name__ == '__main__':

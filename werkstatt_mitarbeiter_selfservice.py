@@ -440,7 +440,9 @@ def register_selfservice(portal, bp, protected):
             summary = service.summary(who, request.args.get('jahr', _today().year))
         except (ValueError, PermissionError) as exc:
             return str(exc), 400
-        return render_template('assistent_urlaub.html', urlaub=summary, csrf=token(), request_id=secrets.token_hex(16), today=_today().isoformat())
+        employee_portal = getattr(portal, 'employee_portal', None)
+        return render_template('assistent_urlaub.html', urlaub=summary, csrf=token(), request_id=secrets.token_hex(16), today=_today().isoformat(),
+                               betriebsurlaub=employee_portal.company_holidays(summary['jahr']) if employee_portal else [])
 
     @bp.get('/urlaub/stand')
     @protected

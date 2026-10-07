@@ -149,6 +149,28 @@ class OverviewTests(unittest.TestCase):
         self.assertEqual(item['total'], 'nicht belegt')
         self.assertFalse(item['verified'])
 
+    def test_personal_picture_inquiry_is_visible_as_inquiry_and_description_searchable(self):
+        self.material(state='review')
+        description = 'Stoßstange rechts nach Bild anfragen'
+        with self.manager.db() as db:
+            db.execute("UPDATE einkauf_material_nachrichten SET phone_number_id='portal:personal' WHERE id=1")
+            db.execute("UPDATE einkauf_material_dialoge SET fields_json=?,review_json='{}' WHERE id=1",
+                (canonical({'vorgang':{'value':'anfrage'},'beschreibung':{'value':description},
+                            'quantity':{'value':'1'},'unit':{'value':'Stück'},'urgent':{'value':True},
+                            'order_requested':{'value':False}}),))
+            db.commit()
+        item = self.reader.page({'q':'Stoßstange','bestellung':'material:1'},now=self.now)['selected']
+        self.assertEqual(item['state'],'material_inquiry')
+        self.assertEqual(item['state_label'],'Teileanfrage – intern klären')
+        self.assertEqual(item['product'],description)
+        self.assertEqual(item['due'],'Interne Teileklärung')
+        self.assertEqual(item['urgency'],'Dringende Anfrage')
+        self.assertEqual(item['vorgang'],'anfrage')
+        self.assertEqual(item['beschreibung'],description)
+        self.assertTrue(any('Keine Bestellung' in warning for warning in item['warnings']))
+        self.assertFalse(item['verified'])
+        self.assertEqual(item['order_id'],0)
+
     def test_saved_prices_and_identity_not_current_supplier_or_avatar_name(self):
         self.order('one')
         data = self.reader.page({'bestellung': 'one'}, now=self.now)

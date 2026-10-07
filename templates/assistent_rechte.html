@@ -5,6 +5,7 @@
 <nav><a href="{{ url_for('assistent.page') }}">← Assistent</a><a href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter verwalten</a><a href="{{ url_for('assistent.vacation_admin') }}">Urlaubskonten &amp; Anträge</a><a href="{{ url_for('arbeitszeit_admin.index') }}">Arbeitszeiten</a></nav>
 <p>Persönlich angemeldete Mitarbeiter mit Leserecht können ihren eigenen Urlaubsstand und ihre erfassten Arbeitszeiten sehen, Urlaub beantragen und nach Bestätigung kommen, gehen oder Pausen stempeln. Resturlaub wird erst nach deiner Prüfung des Urlaubskontos angezeigt.</p>
 <h1>Mitarbeiterzugänge</h1>
+<p><a href="/admin/mitarbeiter/einrichtung">Persönliche Einrichtungslinks erstellen – Mitarbeiter wählen ihr Passwort selbst</a></p>
 <p>Für die Anmeldung im Portal braucht jeder Mitarbeiter seine Mitarbeiter-ID und ein persönliches Passwort. Ein bestätigter WhatsApp-Zugang kann unabhängig davon für Materialbestellungen eingerichtet werden. Jede Rechteänderung beendet bestehende persönliche Sitzungen.</p>
 {% for category,message in get_flashed_messages(with_categories=true) %}<p role="status">{{ message }}</p>{% endfor %}
 <section aria-labelledby="operations-title"><h2 id="operations-title">Auftragsaktionen und Versand</h2>

@@ -194,3 +194,84 @@ Technische Referenzen: [Meta Telefonnummernstatus](https://developers.facebook.c
 [Meta Coexistence](https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-business-app-users),
 [Meta Groups](https://developers.facebook.com/documentation/business-messaging/whatsapp/groups),
 [Bild-Webhooks](https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/messages/image).
+
+## Persönliche Bildmaske: Termin, Beschreibung und Teileanfrage
+
+Unter `/werkstatt/materialbestellung` können persönlich angemeldete Mitarbeiter
+Fotos oder Screenshots als JPEG, PNG oder WebP hochladen. Jedes Bild behält seine
+eigene Stückzahl. Die sichtbare Auswahl **Nicht dringend** (Standard, Montag
+14 Uhr) oder **Dringend** gilt jeweils für dieses Bild. Die bestehenden Artikel-,
+Lieferanten-, Preis- und Budgetprüfungen bleiben Voraussetzung für den Versand.
+**Dringend** wird ohne erneute Mitarbeiterbestätigung sofort versandt, sobald
+Artikel, bestätigter Lieferantenkontakt und gültige Gesamtkonditionen eindeutig
+sind. Die angezeigte Grenze ist das Minimum aus 250 Euro, persönlicher Freigabe
+und globaler Grenze; sie gilt brutto inklusive Versand und Nebenkosten. Offene
+Angaben und höhere Beträge bleiben zur internen Prüfung. Eine Teileanfrage
+erhält statt des Sofortkaufs die Kennzeichnung **Zeitnah intern klären**.
+
+Eine Beschreibung mit höchstens 500 Zeichen ist optional. **Teil nur anfragen**
+legt eine interne Teileanfrage an: Bild, Menge, Dringlichkeit und Beschreibung
+erscheinen zusammen im persönlichen Verlauf und im Bestellordner. Eine Anfrage
+löst weder eine Bestellung noch eine automatische Lieferantenmail aus. Der
+Anfragemodus wird anhand der Originalquelle geprüft und kann nicht durch eine
+spätere Antwort, Preisfreigabe oder manuelle Reservierung zur Bestellung werden.
+
+Beschreibung und Modus sind mit dem gesamten Bildsatz unveränderlich gebunden.
+Freitext wird nicht als Stückzahl oder Dringlichkeit ausgewertet. Wiederholungen
+nach einem Verbindungsabbruch verwenden denselben Bildsatz; abweichende Texte
+oder Modi unter derselben Abgabenummer werden abgewiesen. Leere Zusatzfelder
+behalten die ursprünglichen Hashes älterer Abgaben. Der vorhandene
+Wiederherstellungsschutz umfasst Originalquelle und diese gebundenen Angaben.
+
+## Artikelcodes auf dem Handy
+
+**Artikelcode scannen** öffnet einen Kameraschritt. Unterstützt der Browser die
+Codeerkennung, wird bei genau einem Code ein JPEG des Kamerabilds zur normalen
+Bildauswahl hinzugefügt. Die Stückzahl wird danach mit Minus/Plus eingestellt.
+Mehrere Codes werden nicht automatisch einem Artikel zugeordnet. Ein Abbruch,
+Seitenwechsel oder das Ausblenden der Seite beendet die Kamera; auch eine spät
+erteilte Freigabe startet keinen bereits geschlossenen Scan.
+
+**Code fotografieren** bleibt immer erreichbar und öffnet die normale Kamera-
+Dateiauswahl. Das ist auch ohne direkten Browserscanner möglich. Vorhandene
+Codebilder lassen sich über **Foto / Screenshot hochladen** wählen. Ohne Code
+genügt das Artikelfoto. Direkter Scan und fotografierter Code verwenden denselben
+persönlichen Bild-/Mengen-Eingang; der Browser liefert keine vertrauenswürdige
+Artikelnummer oder Bestellfreigabe. Gelesene QR-Webadressen werden nicht geöffnet.
+Die serverseitige Auslese und aktuelle Artikelzuordnung bestimmen das Ergebnis.
+
+Die lokale Auslese erkennt kompakte QR-Artikelcodes und unterstützte EAN/UPC-
+Barcodes aus den Bildpixeln. Der Beleg bleibt an Foto und persönlichen Absender
+gebunden. Mehrere oder widersprüchliche Codes bleiben prüfbedürftig; ein Code
+vergibt keine Preis- oder Versandfreigabe. Der Verlauf zeigt den gelesenen Code.
+Der vorhandene Sicherungsimport schützt auch diesen gespeicherten Codebeleg.
+
+Browsergrundlagen: [Chrome Shape Detection](https://developer.chrome.com/docs/capabilities/shape-detection),
+[HTML Media Capture](https://www.w3.org/TR/html-media-capture/).
+
+## Persönlicher Mitarbeiterzugang
+
+Die Werkstattleitung erstellt unter `/admin/mitarbeiter/einrichtung` persönliche
+Einrichtungslinks. Jeder Link ist drei Tage gültig und einmal verwendbar. Der
+Mitarbeiter wählt sein eigenes Passwort und gibt es zur Kontrolle zweimal ein.
+Danach öffnet sich `/werkstatt/mein-konto` mit Profil, Nachbestellen,
+Arbeitszeit, Urlaub, Lohnzetteln und Sprachassistent. Jeder Link wird nur an die
+zugehörige Person weitergegeben. Bestehende Rechte und offene Materialvorgänge
+bleiben erhalten; die Passwortwahl beendet ältere persönliche Sitzungen.
+
+Profilangaben und Lohnzettel pflegt die Werkstattleitung beim jeweiligen
+Mitarbeiter unter **Profil & Lohnzettel**. Lohnzettel bleiben geschützte
+Originaldateien ohne KI-Auslese. Ein Mitarbeiter kann ausschließlich seine
+eigenen Abrechnungen herunterladen. Leere Profilfelder und ungeprüfter Resturlaub
+werden ausdrücklich als noch nicht hinterlegt beziehungsweise zu prüfen gezeigt.
+Betriebsurlaub wird separat unter `/admin/mitarbeiter/betriebsurlaub` gepflegt;
+die Anzeige allein zieht keine Urlaubstage ab.
+
+Unter **Arbeitszeit** stempeln Mitarbeiter direkt Start, Pause, Weiter und Stopp.
+Ein Stempel verwendet die aktuelle Serverzeit und eine an Person und Zeitstatus
+gebundene Formularfreigabe. Wiederholtes Tippen erzeugt keinen zweiten Stempel.
+Der Sprachassistent verweist auf die am Fahrzeug angebrachte Auftragsnummer.
+
+Einladungen, Authentifizierung, persönliche Profile, Lohnzettel und
+Betriebsurlaub gehören zum Sicherungskatalog. Bestehende Originale und Zugänge
+dürfen beim Wiederherstellen nicht auf einen älteren Stand zurückfallen.

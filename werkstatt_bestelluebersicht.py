@@ -23,6 +23,7 @@ STATES = {
     'unknown': 'Stand prüfen',
     'material_open': 'Angaben fehlen – noch nicht bestellt',
     'material_review': 'Interne Prüfung – noch nicht bestellt',
+    'material_inquiry': 'Teileanfrage – intern klären',
     'material_ready': 'Zur Übergabe bereit – noch nicht versandt',
     'material_accepted': 'Bestellübergabe prüfen',
     'cancelled': 'Abgebrochen',
@@ -188,6 +189,8 @@ class OrderOverview:
         analysis = _object(row['analysis_json'])
         labels = analysis.get('merkmale') if isinstance(analysis.get('merkmale'),dict) else {}
         value = lambda key: fields.get(key,{}).get('value') if isinstance(fields.get(key),dict) else None
+        inquiry = row.get('source_channel') == 'portal:personal' and value('vorgang') == 'anfrage'
+        description = _text(value('beschreibung'),500)
         external = row['state'] in {'external_pending','external_sent'}
         fingerprint = hashlib.sha256(json.dumps(snapshot,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         intact = (external and snapshot.get('kind')=='manual_external_order'
@@ -219,6 +222,9 @@ class OrderOverview:
         warnings = []
         state = {'open':'material_open','review':'material_review','approved':'material_ready',
                  'accepted':'material_accepted','cancelled':'cancelled'}.get(row['state'],'unknown')
+        if inquiry and row['state'] != 'cancelled':
+            state = 'material_inquiry'
+            warnings.append('Nur eine Teileanfrage anhand Bild. Keine Bestellung und keine automatische Lieferantenmail ausgelöst.')
         if external:
             if intact:
                 state = row['state']
@@ -240,7 +246,7 @@ class OrderOverview:
         if duplicate_pending:
             warnings.append('Mögliche Doppelbestellung. Die gezielte Rückfrage muss vor einer zusätzlichen Bestellung beantwortet werden.')
         photo_description = ' '.join(_text(labels.get(key)) for key in ('materialtyp','masse')).strip()
-        product = _text(commercial.get('product_name') or labels.get('produkt')) or photo_description or 'Artikel noch zuordnen'
+        product = (description if inquiry else '') or _text(commercial.get('product_name') or labels.get('produkt')) or description or photo_description or 'Artikel noch zuordnen'
         created = row['created_at']
         events = []
         if intact:
@@ -255,8 +261,9 @@ class OrderOverview:
             'quantity':_text(snapshot.get('quantity') if intact else value('quantity'),60) or 'nicht belegt',
             'unit':_text(snapshot.get('unit') if intact else value('unit'),60),
             'recipient':_text(commercial.get('recipient'),254) or 'nicht belegt',
-            'urgency':'Dringend' if urgent is True else 'Sammelbestellung' if urgent is False else 'Nicht geklärt',
-            'created':_stamp(created),'due':'Extern versandt' if state=='external_sent' else 'Versandnachweis offen' if state=='external_pending' else 'Noch nicht eingeplant',
+            'urgency':'Dringende Anfrage' if inquiry and urgent is True else 'Reguläre Anfrage' if inquiry else 'Dringend' if urgent is True else 'Sammelbestellung' if urgent is False else 'Nicht geklärt',
+            'vorgang':'anfrage' if inquiry else 'bestellung','beschreibung':description,
+            'created':_stamp(created),'due':'Interne Teileklärung' if inquiry else 'Extern versandt' if state=='external_sent' else 'Versandnachweis offen' if state=='external_pending' else 'Noch nicht eingeplant',
             'state':state,'state_label':'Mögliche Doppelbestellung – Rückfrage offen' if duplicate_pending else STATES[state],'warnings':warnings,'overdue':False,
             'total':'nicht belegt','cap':_money(snapshot.get('max_total_cents')) if intact else 'nicht belegt',
             'verified':False,'unit_price':'nicht belegt','shipping':'nicht belegt','extra':'nicht belegt',

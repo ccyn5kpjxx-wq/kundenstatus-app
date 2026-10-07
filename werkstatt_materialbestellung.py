@@ -22,7 +22,7 @@ from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image
 
-from werkstatt_materialfoto import _image
+from werkstatt_materialfoto import _image, _code_view, _CODE_KEY
 from werkstatt_materialkanal import _BorrowedConnection, _fingerprint, _json, _note
 
 
@@ -34,6 +34,7 @@ MAX_BODY_BYTES = MAX_TOTAL_BYTES + 512 * 1024
 _UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 _PHOTO_REF = re.compile(r'portal\.([1-9][0-9]*)\.(' + _UUID.pattern + r')\.(' + _UUID.pattern + r')')
 _REPLY_REF = re.compile(r'portalreply\.([1-9][0-9]*)\.(' + _UUID.pattern + r')\.([1-9][0-9]*)')
+_REQUEST_PREFIX = 'portal-request:v1:'
 
 
 class SubmissionConflict(ValueError):
@@ -44,6 +45,44 @@ def _uuid(value):
     if not isinstance(value, str) or not _UUID.fullmatch(value):
         raise ValueError('Eindeutige Vorgangsnummer fehlt. Bitte das Formular neu öffnen.')
     return value
+
+
+def _description(value):
+    if (not isinstance(value, str) or len(value) > 500
+            or _note(value, 500) != value.strip()):
+        raise ValueError('Beschreibung mit höchstens 500 Zeichen ohne sensible Konto- oder Zugangsdaten angeben.')
+    return value.strip()
+
+
+def portal_request_details(source):
+    """Read immutable form metadata; free descriptions are never commands.
+
+    Legacy personal photos retain their original plain quantity caption and
+    therefore their exact replay hashes. Only this form can create the structured
+    image source; reply texts and other channels cannot impersonate its mode.
+    """
+    if (source['phone_number_id'] != PORTAL_SOURCE or not _PHOTO_REF.fullmatch(source['wamid'])
+            or not source['mime'].startswith('image/') or not source['caption'].startswith(_REQUEST_PREFIX)):
+        return None
+    try:
+        details = json.loads(source['caption'][len(_REQUEST_PREFIX):])
+    except (ValueError, TypeError):
+        raise ValueError('Gespeicherte Bildanforderung benötigt eine interne Prüfung.') from None
+    if (not isinstance(details, dict) or set(details) != {'menge', 'dringend', 'vorgang', 'beschreibung'}
+            or type(details['menge']) is not int or not 1 <= details['menge'] <= 999
+            or type(details['dringend']) is not bool or not isinstance(details['vorgang'], str)
+            or details['vorgang'] not in {'bestellung', 'anfrage'}
+            or _description(details['beschreibung']) != details['beschreibung']):
+        raise ValueError('Gespeicherte Bildanforderung benötigt eine interne Prüfung.')
+    return details
+
+
+def _position_evidence(row):
+    result = {key: row[key] for key in ('client_id', 'quantity', 'urgent', 'sha256')}
+    # Empty additions preserve the original three-field client's fingerprint.
+    if row['vorgang'] != 'bestellung' or row['beschreibung']:
+        result.update(vorgang=row['vorgang'], beschreibung=row['beschreibung'])
+    return result
 
 
 class MaterialOrderPortal:
@@ -67,14 +106,17 @@ class MaterialOrderPortal:
         """Only the existing personal session identifies the requesting person."""
         mid = session.get('assistent_mid')
         version = session.get('assistent_version')
+        auth_version = session.get('assistent_auth_version', 1)
         if (type(mid) is not int or mid <= 0 or type(version) is not int
+                or type(auth_version) is not int
                 or not self.p.app.config.get('ASSISTANT_NATIVE_COCKPIT', True)):
             return None
         with self.db() as db:
             row = db.execute('''SELECT r.*,m.name AS mitarbeiter_name,m.aktiv
                 FROM assistent_rechte r JOIN mitarbeiter m ON m.id=r.mitarbeiter_id
                 WHERE r.mitarbeiter_id=?''', (mid,)).fetchone()
-        if not row or not row['aktiv'] or row['version'] != version or not row['lesen']:
+        if (not row or not row['aktiv'] or row['version'] != version or not row['lesen']
+                or dict(row).get('auth_version', 1) != auth_version):
             return None
         return dict(row, actor='mitarbeiter:' + str(mid))
 
@@ -90,6 +132,7 @@ class MaterialOrderPortal:
                 or row['sender_revision'] != row['rights_version'] or row['forwarded']
                 or not self.p.app.config.get('ASSISTANT_NATIVE_COCKPIT', True)):
             raise PermissionError('Persönliche Portalquelle ist nicht gültig.')
+        portal_request_details(row)
         if lock:
             db.execute('UPDATE mitarbeiter SET aktiv=aktiv WHERE id=?', (row['employee_id'],))
             db.execute('UPDATE assistent_rechte SET version=version WHERE mitarbeiter_id=?', (row['employee_id'],))
@@ -129,8 +172,9 @@ class MaterialOrderPortal:
         if set(files.keys()) != expected_fields or any(len(files.getlist(key)) != 1 for key in files.keys()):
             raise ValueError('Jedes Foto muss genau einem Eintrag zugeordnet sein.')
         for position in positions:
-            if not isinstance(position, dict) or set(position) != {'id', 'menge', 'dringend'}:
-                raise ValueError('Zu jedem Foto nur Vorgangsnummer, Stückzahl und Dringlichkeit angeben.')
+            if (not isinstance(position, dict) or not {'id', 'menge', 'dringend'} <= set(position)
+                    or set(position) - {'id', 'menge', 'dringend', 'vorgang', 'beschreibung'}):
+                raise ValueError('Zu jedem Bild Vorgangsnummer, Stückzahl, Dringlichkeit und optional Beschreibung oder Anfrage angeben.')
             client_id = _uuid(position['id'])
             if client_id in ids:
                 raise ValueError('Fotoreferenz wurde mehrfach verwendet. Bitte neu auswählen.')
@@ -138,6 +182,10 @@ class MaterialOrderPortal:
             quantity, urgent = position['menge'], position['dringend']
             if type(quantity) is not int or not 1 <= quantity <= 999 or type(urgent) is not bool:
                 raise ValueError('Stückzahl muss eine ganze Zahl von 1 bis 999 sein; Dringlichkeit muss ja oder nein sein.')
+            kind = position.get('vorgang', 'bestellung')
+            if not isinstance(kind, str) or kind not in {'bestellung', 'anfrage'}:
+                raise ValueError('Bestellung oder Teileanfrage wählen.')
+            description = _description(position.get('beschreibung', ''))
             file = files.get('foto_' + client_id)
             if not file or not getattr(file, 'filename', ''):
                 raise ValueError('Bitte zu jedem Eintrag ein Foto auswählen.')
@@ -154,6 +202,7 @@ class MaterialOrderPortal:
                 mime, suffix = {'JPEG': ('image/jpeg', '.jpg'), 'PNG': ('image/png', '.png'),
                                 'WEBP': ('image/webp', '.webp')}[image.format]
             rows.append({'client_id': client_id, 'quantity': quantity, 'urgent': urgent,
+                         'vorgang': kind, 'beschreibung': description,
                          'sha256': hashlib.sha256(raw).hexdigest(), 'raw': raw, 'mime': mime, 'suffix': suffix})
         return request_id, rows
 
@@ -163,7 +212,7 @@ class MaterialOrderPortal:
         with self.db() as db:
             self._person(db, who)
         request_id, rows = self._validate(request_id, positions, files)
-        evidence = [{key: row[key] for key in ('client_id', 'quantity', 'urgent', 'sha256')} for row in rows]
+        evidence = [_position_evidence(row) for row in rows]
         batch_hash = _fingerprint(sorted(evidence, key=lambda row: row['client_id']))
         now = self.clock()
         stamp = datetime.fromtimestamp(now, timezone.utc).isoformat()
@@ -176,7 +225,7 @@ class MaterialOrderPortal:
                 (PORTAL_SOURCE, mid, prefix + '%')).fetchall()
             if existing:
                 expected = {prefix + row['client_id']: _fingerprint(dict(batch_hash=batch_hash,
-                            **{key: row[key] for key in ('client_id', 'quantity', 'urgent', 'sha256')})) for row in rows}
+                            **_position_evidence(row))) for row in rows}
                 if len(existing) != len(rows) or any(expected.get(row['wamid']) != row['canonical_hash'] for row in existing):
                     raise SubmissionConflict('Diese Abgabe wurde bereits mit anderen Fotos oder Mengen erfasst. Bitte den gespeicherten Vorgang prüfen.')
                 views = []
@@ -199,10 +248,13 @@ class MaterialOrderPortal:
                 reference = prefix + row['client_id']
                 source_key = 'portal-photo:' + str(mid) + ':' + hashlib.sha256(reference.encode()).hexdigest()
                 caption = str(row['quantity']) + ' Stück' + (', dringend' if row['urgent'] else '')
+                if row['vorgang'] != 'bestellung' or row['beschreibung']:
+                    caption = _REQUEST_PREFIX + _json({'menge': row['quantity'], 'dringend': row['urgent'],
+                        'vorgang': row['vorgang'], 'beschreibung': row['beschreibung']})
                 group = intake.create({'supplier': 'Lieferant ungeklärt', 'source_key': source_key,
                     'external_ref': 'Persönliche Foto-Bestellmaske; Mitarbeiter: ' + employee['name'] + '; Abgabe: ' + request_id,
                     'source_at': stamp, 'already_ordered': False, 'original_author': employee['name'],
-                    'lines': [{'product': 'Materialfoto – Artikelzuordnung prüfen', 'quantity': str(row['quantity']),
+                    'lines': [{'product': re.sub(r'\s+',' ',row['beschreibung']) or ('Teileanfrage anhand Bild' if row['vorgang']=='anfrage' else 'Materialfoto – Artikelzuordnung prüfen'), 'quantity': str(row['quantity']),
                                'unit': 'Stück', 'urgent': row['urgent'], 'category': 'ungeklaert',
                                'original_author': employee['name']}]})
                 db.execute('UPDATE einkauf_eingang SET created_by=? WHERE id=?', (who['actor'], group['id']))
@@ -217,7 +269,7 @@ class MaterialOrderPortal:
                 photo = photos.stage(who, FileStorage(stream=io.BytesIO(row['raw']), filename='materialfoto.jpg'),
                                      'portal-' + hashlib.sha256(reference.encode()).hexdigest())
                 canonical = _fingerprint(dict(batch_hash=batch_hash,
-                    **{key: row[key] for key in ('client_id', 'quantity', 'urgent', 'sha256')}))
+                    **_position_evidence(row)))
                 db.execute('''INSERT INTO einkauf_material_nachrichten
                     (phone_number_id,wamid,canonical_hash,sender_id,sender_revision,employee_id,employee_name,
                      rights_version,media_id,mime,expected_sha256,caption,source_at,received_at,state,
@@ -236,13 +288,29 @@ class MaterialOrderPortal:
 
     def _view(self, db, draft_id):
         view = self.p.material_dialog._view(db, draft_id)
-        source = db.execute('SELECT wamid FROM einkauf_material_nachrichten WHERE id=?', (view['message_id'],)).fetchone()
+        source = db.execute('SELECT * FROM einkauf_material_nachrichten WHERE id=?', (view['message_id'],)).fetchone()
         reference = _PHOTO_REF.fullmatch(source['wamid']) if source else None
+        details = portal_request_details(source) if source else None
+        kind = details['vorgang'] if details else 'bestellung'
+        description = details['beschreibung'] if details else ''
+        code = _code_view(None)
+        if source and source['assistant_photo_id']:
+            # Read only the server decoder's image-bound evidence. Client code,
+            # dialog text and model-generated labels cannot establish this value.
+            photo = db.execute('SELECT merkmale_json,file_sha256 FROM assistent_materialfotos WHERE foto_id=? AND actor=?',
+                (source['assistant_photo_id'], 'mitarbeiter:' + str(source['employee_id']))).fetchone()
+            if photo:
+                try:
+                    stored = json.loads(photo['merkmale_json'])
+                    code = _code_view(stored.get(_CODE_KEY) if isinstance(stored, dict) else None, photo['file_sha256'])
+                except (ValueError, TypeError):
+                    pass
+        decoded = code['codes'][0]['suchwert'] if code['status'] == 'erkannt' else ''
         labels = view['analysis'].get('merkmale', {})
         selected = view['fields'].get('selected_article', {}).get('value', {})
         product = selected.get('produkt_name') or view['review'].get('product_name') or labels.get('produkt')
         if not product:
-            product = ' '.join(str(labels.get(key) or '') for key in ('marke', 'materialtyp', 'masse')).strip() or 'Materialfoto'
+            product = description or ' '.join(str(labels.get(key) or '') for key in ('marke', 'materialtyp', 'masse')).strip() or 'Materialfoto'
         state = view['state']
         dispatch_state = view['dispatch_state']
         dispatch = getattr(getattr(self.p, 'workshop_orders', None), 'dispatch', None)
@@ -269,12 +337,16 @@ class MaterialOrderPortal:
                   'external_sent': 'Extern bestellt'}.get(state, 'Bedarf erfasst'))
         if view['error_code'] and state not in {'accepted', 'external_pending', 'external_sent', 'cancelled'}:
             label = 'Interne Prüfung erforderlich'
+        if kind == 'anfrage' and state != 'cancelled':
+            label = 'Bild wird geprüft' if view['analysis_state'] in {'pending', 'processing'} else 'Teileanfrage zur internen Prüfung'
         return {'client_id': reference[3] if reference else None, 'request_id': reference[2] if reference else None,
                 'id': view['id'], 'code': view['code'], 'revision': view['revision'], 'product': product,
                 'quantity': view['fields'].get('quantity', {}).get('value'),
                 'unit': view['fields'].get('unit', {}).get('value'), 'urgent': view['fields'].get('urgent', {}).get('value'),
+                'vorgang': kind, 'beschreibung': description,
+                'code_erkennung': code, 'decodedCode': decoded,
                 'state': state, 'dispatch_state': dispatch_state, 'label': label, 'duplicate_id': view['duplicate_of'],
-                'analysis_state': view['analysis_state'], 'employee_reply_required': view['employee_reply_required'],
+                'analysis_state': view['analysis_state'], 'employee_reply_required': view['employee_reply_required'] if kind=='bestellung' else False,
                 'questions': [{'field': q['field'], 'body': re.sub(r'^M-\d+\s+R\d+:\s*', '', q['body'])
                               .removesuffix(' Antworte bitte zitiert oder mit diesem Vorgangscode.')} for q in view['questions']
                               if q['revision'] == view['revision'] and q['state'] != 'superseded']}
@@ -462,9 +534,20 @@ def register_material_order_portal(p):
                     JOIN assistent_rechte r ON r.mitarbeiter_id=m.id
                     WHERE m.aktiv=1 AND r.lesen=1 AND r.einkaufen=1 AND r.limit_cent>0
                     AND LENGTH(COALESCE(r.passwort_hash,''))>0 ORDER BY m.name''').fetchall()]
+        order_limit_cent = 0
+        if service.can_order(who):
+            try:
+                cap = getattr(getattr(p, 'workshop_orders', None), 'cap', None)
+                global_limit = cap() if callable(cap) else 0
+                if type(global_limit) is int and global_limit > 0:
+                    order_limit_cent = min(25000, who['limit_cent'], global_limit)
+            except Exception:
+                # A display limit is no purchase permit. Missing configuration
+                # must not invent a 250 EUR permission or prevent login display.
+                order_limit_cent = 0
         return render_template('materialbestellung.html', who=who, auth=bool(who), can_order=service.can_order(who),
             csrf_token=token, employees=employees, max_photos=MAX_PHOTOS, max_photo_bytes=MAX_PHOTO_BYTES,
-            max_total_bytes=MAX_TOTAL_BYTES)
+            max_total_bytes=MAX_TOTAL_BYTES, order_limit_cent=order_limit_cent)
 
     @bp.route('/anforderungen', methods=['GET', 'POST'])
     def submit():
@@ -474,7 +557,7 @@ def register_material_order_portal(p):
         if request.method == 'GET':
             return jsonify(service.list(who, request.args.get('request_id')))
         if set(request.form.keys()) - {'request_id', 'positionen', 'csrf_token'}:
-            raise ValueError('Nur Fotos, Stückzahlen und Dringlichkeit übermitteln.')
+            raise ValueError('Nur Bilder mit Stückzahlen, Dringlichkeit und optional Beschreibung oder Anfrage übermitteln.')
         try:
             positions = json.loads(request.form.get('positionen', ''))
         except (ValueError, TypeError):

@@ -90,6 +90,8 @@
       <p class="mb-0 text-muted">Mitarbeiter pflegen, Urlaub direkt am Mitarbeiter eintragen und automatisch im Kalender sehen.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
+      <a href="/admin/mitarbeiter/einrichtung" class="btn btn-brand">Persönliche Einrichtungslinks</a>
+      <a href="/admin/mitarbeiter/betriebsurlaub" class="btn btn-soft">Betriebsurlaub</a>
       <a href="{{ url_for('assistent.rights') }}" class="btn btn-brand">Avatar-Zugänge</a>
       <a href="{{ url_for('assistent.vacation_admin') }}" class="btn btn-soft">Urlaubskonten &amp; Anträge</a>
       <a href="{{ url_for('arbeitszeit_admin.index') }}" class="btn btn-soft">Arbeitszeiten</a>
@@ -211,7 +213,7 @@
               {% if mitarbeiter['email'] %} · {{ mitarbeiter['email'] }}{% endif %}
             </div>
           </div>
-          <a href="{{ url_for('kalender', suche=mitarbeiter['name']) }}" class="btn btn-soft btn-sm">Im Kalender suchen</a>
+          <div class="d-flex flex-wrap gap-2"><a href="/admin/mitarbeiter/{{ mitarbeiter['id'] }}/portal" class="btn btn-brand btn-sm">Profil &amp; Lohnzettel</a><a href="{{ url_for('kalender', suche=mitarbeiter['name']) }}" class="btn btn-soft btn-sm">Im Kalender suchen</a></div>
         </div>
 
         <div class="staff-details">

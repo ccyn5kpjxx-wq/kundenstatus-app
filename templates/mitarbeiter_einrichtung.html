@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer"><title>Dein Werkstattzugang · Gärtner</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=einladung-1">
+  <script defer src="{{ url_for('static', filename='mitarbeiter_einrichtung.js') }}?v=einladung-1"></script>
+</head>
+<body>
+  <header class="access-header"><a href="/werkstatt/materialbestellung" class="brand">GÄRTNER<span>GmbH · Karosserie + Lack</span></a><span>Dein persönlicher Zugang</span></header>
+  <main class="access-main">
+    <section class="access-intro"><span class="eyebrow">WILLKOMMEN IM TEAM</span><h1>Dein Passwort.<br>Dein Zugang.</h1><p>Einmal einrichten. Danach stehen dein Profil, Bestellungen, Arbeitszeit, Urlaub, Lohnzettel und der Sprachassistent für dich bereit.</p><ol class="steps"><li>Passwort wählen</li><li>Nochmal eingeben</li><li>Mein Konto</li></ol></section>
+    <section class="access-card" id="employee-setup" data-check-url="/werkstatt/zugang/einrichten/pruefen">
+      <span class="eyebrow">PERSÖNLICHE EINLADUNG</span>
+      <h2 id="setup-title">{% if employee %}Hallo {{ employee.name }}{% else %}Dein Zugang wird geprüft{% endif %}</h2>
+      <p id="setup-identity" class="muted">{% if employee %}Mitarbeiter-ID {{ employee.id }} · nur dein eigenes Konto{% else %}Öffne den Einrichtungslink, den du von der Werkstattleitung bekommen hast.{% endif %}</p>
+      <p id="setup-status" role="status" aria-live="polite" class="setup-status{% if error %} is-error{% endif %}">{% if error %}{{ error }}{% elif employee and valid %}Wähle ein Passwort mit mindestens 12 Zeichen, zum Beispiel mehrere Wörter.{% else %}Einrichtungslink wird geprüft …{% endif %}</p>
+      <form id="setup-form" method="post" action="/werkstatt/zugang/einrichten" {% if not valid %}hidden{% endif %}>
+        {{ csrf_field()|safe }}
+        <input type="hidden" name="token" id="setup-token" value="{{ setup_token|default('', true) }}">
+        <label for="setup-password">Dein neues Passwort<input id="setup-password" name="password" type="password" required minlength="12" maxlength="256" autocomplete="new-password" aria-describedby="password-help"></label>
+        <p class="muted small" id="password-help">Mindestens 12 Zeichen. Dein Passwort wird nicht angezeigt oder an die Werkstattleitung geschickt.</p>
+        <label for="setup-password-confirm">Passwort nochmal eingeben<input id="setup-password-confirm" name="password_confirm" type="password" required minlength="12" maxlength="256" autocomplete="new-password"></label>
+        <button type="submit" id="setup-submit" class="primary-button">Zugang einrichten und Profil öffnen <span aria-hidden="true">→</span></button>
+      </form>
+      <noscript><p>Bitte JavaScript für diesen Einrichtungslink aktivieren. Alternativ hilft dir die Werkstattleitung beim persönlichen Zugang.</p></noscript>
+      <p class="access-footnote">Der Einrichtungslink gilt einmalig für drei Tage. Falls er abgelaufen ist, bekommst du einen neuen von der Werkstattleitung.</p>
+    </section>
+  </main>
+  <footer>Gärtner GmbH Karosserie + Lack · Werkstattportal</footer>
+</body>
+</html>
