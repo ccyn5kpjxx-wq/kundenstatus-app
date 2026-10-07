@@ -189,7 +189,7 @@ class OfferService:
             total = f'{gross_total_cents / 100:.2f} EUR brutto einschließlich Umsatzsteuer'.replace('.', ',') if gross_total_cents else 'noch ausdrücklich festzulegen'
             lines += [f'wir bieten Ihnen für {vehicle} folgende Arbeiten an:', '', content, '', 'Gesamtangebot: ' + total,
                       '', 'Bitte teilen Sie uns mit, ob Sie dieses Angebot annehmen möchten. Eine Annahme ist noch nicht erfolgt.']
-        lines += ['', 'Mit freundlichen Grüßen', 'Gärtner Karosserie & Lack']
+        lines += ['', 'Mit freundlichen Grüßen', 'Gärtner GmbH Karosserie + Lack']
         body = '\n'.join(lines)
         payload = {'schema_version': 1, 'kind': kind, 'order_id': order_id, 'supplier_id': supplier_id,
                    'gross_total_cents': gross_total_cents, 'scope_text': content,

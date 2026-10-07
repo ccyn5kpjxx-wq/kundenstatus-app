@@ -359,7 +359,7 @@ class OrderDispatch:
                       f'Preisquelle: {order.get("price_source", "Manuell bestätigter Brutto-Stückpreis")}',
                       f'Höchstbetrag dieser Anforderung inklusive Versand: {money(order["max_total_cents"])}',
                       f'Bestellreferenz: {entry["id"]}', '']
-        lines += ['Bitte bestätigen Sie die Bestellung und den Liefertermin.', '', 'Gärtner Karosserie & Lack']
+        lines += ['Bitte bestätigen Sie die Bestellung und den Liefertermin.', '', 'Gärtner GmbH Karosserie + Lack']
         message.set_content('\n'.join(lines))
         return message
 

@@ -837,7 +837,7 @@ def register_assistant(p):
                 "Bitte bestätigen Sie die passende Ausführung, Verfügbarkeit, Liefertermin und den vollständigen Bruttobetrag inklusive Versand und aller Nebenkosten.\n")
         if row["art"] == "einkauf":
             body += f"\nUnsere bisherige, noch zu prüfende Preisangabe: {item['gesamt_cent']/100:.2f} EUR brutto insgesamt.\n"
-        body += "\nDies ist eine unverbindliche Anfrage, keine Bestellung.\n\nFreundliche Grüße\nGärtner Karosserie & Lack\n"
+        body += "\nDies ist eine unverbindliche Anfrage, keine Bestellung.\n\nFreundliche Grüße\nGärtner GmbH Karosserie + Lack\n"
         message.set_content(body)
         return p.app.response_class(message.as_bytes(), mimetype="message/rfc822", headers={"Content-Disposition": f'attachment; filename="Teileanfrage-Auftrag-{row["auftrag_id"]}.eml"'})
 
