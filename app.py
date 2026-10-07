@@ -1,5 +1,5 @@
 """
-Gärtner Karosserie & Lack — Autohaus-Terminportal
+Gärtner GmbH Karosserie + Lack — Autohaus-Terminportal
 =================================================
 Starten: python app.py
 Admin:   http://localhost:5000/admin
@@ -363,7 +363,7 @@ WEBSITE_LEAD_NOTIFICATION_EMAIL = (
 ).strip()
 SCHADEN_MAIL_DISPLAY_NAME = (
     os.environ.get("SCHADEN_MAIL_DISPLAY_NAME")
-    or "Gärtner Karosserie & Lack - Schadenregulierung"
+    or "Gärtner GmbH Karosserie + Lack"
 ).strip()
 SCHADEN_IMAP_HOST = (os.environ.get("SCHADEN_IMAP_HOST") or MAIL_IMAP_HOST).strip()
 SCHADEN_IMAP_PORT = max(1, env_int("SCHADEN_IMAP_PORT", MAIL_IMAP_PORT))
@@ -1248,7 +1248,7 @@ LEAD_WEBSITES = {
     "auto-lackierzentrum": {
         "label": "Auto-Lackierzentrum", "kurz": "Lackierzentrum", "domain": "auto-lackierzentrum.de",
         "farbe": "danger", "mail_address": "info@auto-lackierzentrum.de",
-        "mail_display_name": "Gärtner Karosserie & Lack", "reference_prefix": "ALZ",
+        "mail_display_name": "Gärtner GmbH Karosserie + Lack", "reference_prefix": "ALZ",
     },
     "tomorrowworks": {
         "label": "TomorrowWorks", "kurz": "TomorrowWorks", "domain": "tomorrowworks-agentur.de",
@@ -3367,7 +3367,7 @@ def seite_nicht_gefunden(error):
         text=(
             "Vielleicht wurde der Link erneuert oder der Vorgang ist abgeschlossen. "
             "Rufen Sie uns einfach kurz an oder schreiben Sie per WhatsApp — "
-            "wir helfen sofort weiter. Gärtner Karosserie & Lack, Mosbach."
+            "wir helfen sofort weiter. Gärtner GmbH Karosserie + Lack, Mosbach."
         ),
         zurueck_url=request.referrer or "",
     ), 404
@@ -4716,7 +4716,7 @@ def assistant_planned_vehicle_answer(question, autohaus_id=None, include_autohau
 
 def partner_assistant_context_text(autohaus, auftrag=None, question=""):
     parts = [
-        "Portal: Gärtner Karosserie & Lack Autohaus-Portal",
+        "Portal: Gärtner GmbH Karosserie + Lack Autohaus-Portal",
         f"Heutiges Datum: {date.today().strftime(DATE_FMT)}",
         f"Autohaus: {clean_text(autohaus.get('name'))}",
     ]
@@ -4820,7 +4820,7 @@ def ask_partner_assistant(question, autohaus, auftrag=None):
         {
             "role": "system",
             "content": (
-                "Du bist der digitale KI-Helfer von Gärtner Karosserie & Lack im Autohaus-Portal. "
+                "Du bist der digitale KI-Helfer von Gärtner GmbH Karosserie + Lack im Autohaus-Portal. "
                 "Antworte auf Deutsch, warm, freundlich, konkret und in der Sie-Form. Der Nutzer ist bereits "
                 "im Portal, sonst könnte er den Chat nicht sehen. Sage niemals 'wenn Sie eingeloggt sind', "
                 "niemals 'melden Sie sich an' und verweise nicht auf technischen Support. Entschuldige dich kurz, "
@@ -4948,7 +4948,7 @@ def ask_admin_assistant(question):
         {
             "role": "system",
             "content": (
-                "Du bist der interne KI-Helfer im Betriebs-Cockpit von Gärtner Karosserie & Lack. "
+                "Du bist der interne KI-Helfer im Betriebs-Cockpit von Gärtner GmbH Karosserie + Lack. "
                 "Antworte auf Deutsch, warm, freundlich und praktisch. Hilf bei Kalender, Aufträgen, "
                 "Angeboten, Dokumentanalyse, Upload-Kategorien, Autohaus-Portal, Postfach, Reklamationen "
                 "und Werkstattorganisation. Der Nutzer ist bereits im internen Adminbereich; sonst könnte er "
@@ -12233,19 +12233,19 @@ def customer_status_share_message(auftrag, status_update=False):
         return (
             f"Hallo {name}, kurzer Status zu {vehicle_label}: {update_status_label}. "
             f"Den aktuellen Stand sehen Sie jederzeit hier: {status_url} "
-            "Viele Gruesse, Gaertner Karosserie & Lack"
+            "Viele Gruesse, Gärtner GmbH Karosserie + Lack"
         )
     if ist_anfrage:
         return (
             f"Hallo {name}, hier ist Ihr persoenlicher Link zu Ihrer Anfrage fuer {vehicle_label}: {status_url} "
             "Dort koennen Sie Bilder und Unterlagen nachreichen, einen Wunschtermin senden, "
             "Ihr Angebot pruefen und spaeter den Reparaturstatus verfolgen. "
-            "Viele Gruesse, Gaertner Karosserie & Lack"
+            "Viele Gruesse, Gärtner GmbH Karosserie + Lack"
         )
     return (
         f"Hallo {name}, hier ist Ihr Statuslink zu {vehicle_label}: {status_url} "
         "Sie koennen den Link jederzeit oeffnen und den aktuellen Stand sehen. "
-        "Viele Gruesse, Gaertner Karosserie & Lack"
+        "Viele Gruesse, Gärtner GmbH Karosserie + Lack"
     )
 
 
@@ -12260,7 +12260,7 @@ def customer_fertig_whatsapp_message(auftrag):
         f"Hallo {name}, {fahrzeug} ist fertig und kann abgeholt werden. "
         "Ein kleines Feedback würde uns sehr helfen. Wenn Sie zufrieden sind, "
         f"freuen wir uns über Ihre Google-Bewertung: {bewertung_url} "
-        "Viele Grüße, Gärtner Karosserie & Lack, Tel. +49 1522 7706694."
+        "Viele Grüße, Gärtner GmbH Karosserie + Lack, Tel. +49 1522 7706694."
     )
 
 
@@ -12433,7 +12433,7 @@ def lead_whatsapp_message(lead):
         action_text = "Wir melden uns wegen der naechsten Schritte."
     return (
         f"Hallo {name}, danke fuer Ihre Anfrage zu {vehicle_label}. "
-        f"{action_text} Viele Gruesse, Gaertner Karosserie & Lack"
+        f"{action_text} Viele Gruesse, Gärtner GmbH Karosserie + Lack"
     )
 
 
@@ -12664,7 +12664,7 @@ def ensure_lead_customer_portal(lead_id):
     add_lead_portal_event(
         lead_id,
         "Anfrage aufgenommen",
-        "Ihre Anfrage ist bei Gärtner Karosserie & Lack eingegangen und wird geprüft.",
+        "Ihre Anfrage ist bei Gärtner GmbH Karosserie + Lack eingegangen und wird geprüft.",
         quelle="werkstatt",
     )
     return get_lead(lead_id)
@@ -12802,12 +12802,12 @@ def lead_notice(lead_id, event, channel, recipient, message):
     uncertain = False
     try:
         if channel == "E-Mail":
-            send_lead_email(lead, recipient, event + " · Gärtner Karosserie & Lack", message)
+            send_lead_email(lead, recipient, event + " · Gärtner GmbH Karosserie + Lack", message)
             ok = True
         else:
             if whatsapp_bridge_config_errors():
                 raise ValueError("WhatsApp ist nicht vollständig eingerichtet.")
-            ok, provider_id, error = post_whatsapp_payload(build_whatsapp_template_payload(recipient, {"id": lead.get("auftrag_id") or 0, "fahrzeug": lead.get("fahrzeug")}, message, absender_label="Gärtner Karosserie & Lack"))
+            ok, provider_id, error = post_whatsapp_payload(build_whatsapp_template_payload(recipient, {"id": lead.get("auftrag_id") or 0, "fahrzeug": lead.get("fahrzeug")}, message, absender_label="Gärtner GmbH Karosserie + Lack"))
     except ValueError:
         ok, error = False, "Versand nicht möglich. Konfiguration prüfen."
     except Exception:
@@ -12921,7 +12921,7 @@ def create_lead(payload, attachments=None):
         add_lead_portal_event(
             lead_id,
             "Anfrage aufgenommen",
-            "Ihre Anfrage ist bei Gärtner Karosserie & Lack eingegangen und wird geprüft.",
+            "Ihre Anfrage ist bei Gärtner GmbH Karosserie + Lack eingegangen und wird geprüft.",
             quelle="werkstatt",
         )
     return lead_id
@@ -14944,7 +14944,7 @@ def build_fahrzeugsuche_kundenpaket_text(suche, kandidaten):
             "Der Fahrzeugkauf inkl. Auktionsgebühren/Transport wäre nach Zuschlag sofort fällig; die Reparaturkosten werden nach Fertigstellung abgerechnet.",
             "",
             "Viele Grüße",
-            "Gärtner Karosserie & Lack",
+            "Gärtner GmbH Karosserie + Lack",
         ]
     )
     return "\n".join(lines)
@@ -15226,7 +15226,7 @@ def build_fahrzeugsuche_angebot_vorschlag(suche, kandidaten):
     lines = [
         f"Hallo {suche['kunde_name'] or 'zusammen'},",
         "",
-        "wir suchen aktuell nach einem passenden Unfallfahrzeug mit anschließender Instandsetzung durch Gärtner Karosserie & Lack.",
+        "wir suchen aktuell nach einem passenden Unfallfahrzeug mit anschließender Instandsetzung durch Gärtner GmbH Karosserie + Lack.",
         f"Suchprofil: {suche['marken_modelle'] or suche['fahrzeugwuensche'] or 'passendes Fahrzeug'}",
     ]
     if suche["baujahr_min"]:
@@ -15261,7 +15261,7 @@ def build_fahrzeugsuche_angebot_vorschlag(suche, kandidaten):
             "Wir melden uns mit einer konkreten Empfehlung, sobald ein Kandidat wirtschaftlich passt.",
             "",
             "Viele Grüße",
-            "Gärtner Karosserie & Lack",
+            "Gärtner GmbH Karosserie + Lack",
         ]
     )
     return "\n".join(lines)
@@ -22951,7 +22951,7 @@ def notify_customer_whatsapp_fertig(auftrag):
         f"Guten Tag, {fahrzeug} ist fertig und kann abgeholt werden. "
         "Ein kleines Feedback würde uns sehr helfen. Wenn Sie zufrieden sind, "
         f"freuen wir uns über Ihre Google-Bewertung: {bewertung_url} "
-        "Ihr Team von Gärtner Karosserie & Lack, Binauer Höhe 4, 74821 Mosbach, Tel. +49 1522 7706694."
+        "Ihr Team von Gärtner GmbH Karosserie + Lack, Binauer Höhe 4, 74821 Mosbach, Tel. +49 1522 7706694."
     )
     ok, errors = send_whatsapp_notice_with_fallback(
         auftrag_id,
@@ -22960,7 +22960,7 @@ def notify_customer_whatsapp_fertig(auftrag):
         body=nachricht,
         template_text=nachricht,
         auftrag=auftrag,
-        absender_label="Gärtner Karosserie & Lack",
+        absender_label="Gärtner GmbH Karosserie + Lack",
     )
     if ok:
         return True, ""
@@ -26006,7 +26006,7 @@ def group_einkauf_items_by_lieferant(items):
 
 
 def build_topcolor_order_draft(items, topcolor_email=""):
-    subject = f"Einkauf / Angebotsanfrage Gaertner - {date.today().strftime(DATE_FMT)}"
+    subject = f"Einkauf / Angebotsanfrage Gärtner GmbH Karosserie + Lack - {date.today().strftime(DATE_FMT)}"
     lines = [
         "Hallo,",
         "",
@@ -26054,7 +26054,7 @@ def build_topcolor_order_draft(items, topcolor_email=""):
             lines.append("")
     else:
         lines.append("- Aktuell sind keine offenen Einkaufspositionen gespeichert.")
-    lines.extend(["", "Vielen Dank.", "", "Mit freundlichen Gruessen", "Gärtner Karosserie & Lack"])
+    lines.extend(["", "Vielen Dank.", "", "Mit freundlichen Gruessen", "Gärtner GmbH Karosserie + Lack"])
     body = "\n".join(lines)
     email = clean_text(topcolor_email)
     mailto_url = (
@@ -26070,7 +26070,7 @@ def build_topcolor_order_draft(items, topcolor_email=""):
 
 
 def build_supplier_api_request_draft(topcolor_email=""):
-    subject = "API / feste Einkaufskonditionen fuer Gaertner-Portal"
+    subject = "API / feste Einkaufskonditionen fuer Gärtner GmbH Karosserie + Lack"
     lines = [
         "Hallo,",
         "",
@@ -26096,7 +26096,7 @@ def build_supplier_api_request_draft(topcolor_email=""):
         "Vielen Dank.",
         "",
         "Mit freundlichen Gruessen",
-        "Gaertner Karosserie & Lack",
+        "Gärtner GmbH Karosserie + Lack",
     ]
     body = "\n".join(lines)
     email = clean_text(topcolor_email)
@@ -27630,7 +27630,7 @@ def fallback_lead_mail_draft(lead):
             f"Ihre Referenz: {reference}\n\nFreundliche Grüße\nAutovermietung MOS"
         )
     else:
-        subject = f"Ihre Anfrage bei Gärtner Karosserie & Lack · {reference}"
+        subject = f"Ihre Anfrage bei Gärtner GmbH Karosserie + Lack · {reference}"
         kundenportal_url = clean_text((lead or {}).get("kunden_status_url"))
         portal_absatz = (
             "\n\nUnter Ihrem persönlichen Link können Sie Bilder und Unterlagen nachreichen, "
@@ -27643,7 +27643,7 @@ def fallback_lead_mail_draft(lead):
             f"{anrede}\n\nvielen Dank für Ihre Anfrage. Wir haben Ihre Angaben aufgenommen und prüfen den "
             "Schaden beziehungsweise Reparaturumfang. Fotos helfen bei der ersten Einschätzung; ein verbindlicher "
             f"Preis folgt erst nach fachlicher Prüfung oder Besichtigung.{portal_absatz}\n\n"
-            f"Ihre Referenz: {reference}\n\nFreundliche Grüße\nGärtner Karosserie & Lack"
+            f"Ihre Referenz: {reference}\n\nFreundliche Grüße\nGärtner GmbH Karosserie + Lack"
         )
     return {
         "analyse": "Anfrage erfasst. Der Antwortentwurf wurde ohne KI als sichere Standardantwort vorbereitet.",
@@ -27970,7 +27970,7 @@ def build_versicherung_nachtrag_anscheiben(auftrag, prozess_key, note="", dateie
             "Die Reparatur wird erst nach entsprechender Freigabe bzw. dokumentierter Entscheidung fortgeführt, soweit der Nachtrag den freigegebenen Umfang erweitert.",
             "",
             "Mit freundlichen Grüßen",
-            "Gärtner Karosserie & Lack",
+            "Gärtner GmbH Karosserie + Lack",
         ]
     )
     return "\n".join(lines)
@@ -28313,7 +28313,7 @@ def sende_endkunden_mail(auftrag_id, betreff, text):
         betreff_voll = f"{betreff} – {kennzeichen}" if kennzeichen else betreff
         message = EmailMessage()
         message["Subject"] = betreff_voll
-        message["From"] = formataddr(("Gärtner Karosserie & Lack", config["from_address"]))
+        message["From"] = formataddr(("Gärtner GmbH Karosserie + Lack", config["from_address"]))
         message["To"] = ", ".join(empfaenger)
         message["Reply-To"] = config["smtp_user"]
         message.set_content(text)
@@ -28394,7 +28394,7 @@ def baue_endkunden_fertig_mail(auftrag):
         "Wir freuen uns auf Ihren Besuch!",
         "",
         "Mit besten Grüßen",
-        "Ihr Team von Gärtner Karosserie & Lack",
+        "Ihr Team von Gärtner GmbH Karosserie + Lack",
         "Binauer Höhe 4, 74821 Mosbach · Telefon +49 1522 7706694",
     ]
     return "\n".join(zeilen)
@@ -28421,7 +28421,7 @@ def baue_endkunden_danke_mail(auftrag):
         "Bis zum nächsten Mal!",
         "",
         "Mit besten Grüßen",
-        "Ihr Team von Gärtner Karosserie & Lack",
+        "Ihr Team von Gärtner GmbH Karosserie + Lack",
         "Binauer Höhe 4, 74821 Mosbach · Telefon +49 1522 7706694",
     ]
     return "\n".join(zeilen)
@@ -28483,7 +28483,7 @@ def baue_endkunden_terminbestaetigung_mail(auftrag):
             "Falls sich bei Ihnen etwas ändert, melden Sie sich bitte kurz bei uns.",
             "",
             "Mit freundlichen Grüßen",
-            "Ihr Team von Gärtner Karosserie & Lack",
+            "Ihr Team von Gärtner GmbH Karosserie + Lack",
             "Binauer Höhe 4, 74821 Mosbach · Telefon +49 1522 7706694",
         ]
     )
@@ -28491,7 +28491,7 @@ def baue_endkunden_terminbestaetigung_mail(auftrag):
 
 
 def build_kundentermin_mail_entwurf(auftrag):
-    betreff = "Ihre Terminbestätigung bei Gärtner Karosserie & Lack"
+    betreff = "Ihre Terminbestätigung bei Gärtner GmbH Karosserie + Lack"
     empfaenger = parse_single_email_recipient((auftrag or {}).get("kunde_email"))
     text = baue_endkunden_terminbestaetigung_mail(auftrag or {})
     return {
@@ -28883,7 +28883,7 @@ def sende_kundentermin_mail_ueber_ionos(auftrag):
 
     message = EmailMessage()
     message["Subject"] = payload["betreff"]
-    message["From"] = formataddr((clean_text(config.get("display_name")) or "Gärtner Karosserie & Lack", absender))
+    message["From"] = formataddr((clean_text(config.get("display_name")) or "Gärtner GmbH Karosserie + Lack", absender))
     message["To"] = payload["empfaenger"]
     message["Reply-To"] = absender
     message["X-Gaertner-Auftrag-ID"] = str(int(auftrag.get("id") or 0))
@@ -30006,7 +30006,7 @@ def analysiere_email_mit_ki(email_id, force=False):
             {
                 "role": "system",
                 "content": (
-                    "Du unterstuetzt die Buero-Sachbearbeitung von Gaertner Karosserie & Lack beim "
+                    "Du unterstuetzt die Buero-Sachbearbeitung von Gärtner GmbH Karosserie + Lack beim "
                     "schnellen Ueberblick ueber eingehende Werkstatt-E-Mails. Antworte auf Deutsch, "
                     "maximal 3 kurze Saetze: (1) worum es geht, (2) welcher Ton/welche Dringlichkeit, "
                     "(3) ein konkreter Vorschlag fuer die naechste Handlung. Erfinde keine Preise, "
@@ -39502,7 +39502,7 @@ def admin_rundmail_senden():
                     try:
                         message = EmailMessage()
                         message["Subject"] = paket["betreff"]
-                        message["From"] = formataddr(("Gärtner Karosserie & Lack", config["from_address"]))
+                        message["From"] = formataddr(("Gärtner GmbH Karosserie + Lack", config["from_address"]))
                         message["To"] = paket["adresse"]
                         message["Reply-To"] = config["smtp_user"]
                         message.set_content(
@@ -43028,7 +43028,7 @@ def admin_mietvertrag_senden(vorgang_id):
         )
         if statuslink:
             body += f"\nDen Reparaturstatus Ihres Fahrzeugs sehen Sie jederzeit hier:\n{statuslink}\n"
-        body += "\nViele Grüße\nGärtner Karosserie & Lack"
+        body += "\nViele Grüße\nGärtner GmbH Karosserie + Lack"
         ergebnis = send_mietvertrag_mail(
             ziel,
             betreff,

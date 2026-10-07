@@ -102,7 +102,7 @@
         <a href="{{ url_for('admin_versicherung_schaden_vorschau_versicherung', auftrag_id=fall['id']) }}" class="case-row text-decoration-none text-dark">
           <div>
             <div class="fw-bold">Schaden {{ fall['schaden_nummer'] or fall['id'] }} · {{ fall['fahrzeug'] }}</div>
-            <div class="text-muted small">Karosserie & Lack Gärtner{% if fall['schaden_forderung_betrag_label'] %} · Forderung {{ fall['schaden_forderung_betrag_label'] }}{% endif %}</div>
+            <div class="text-muted small">Gärtner GmbH Karosserie + Lack{% if fall['schaden_forderung_betrag_label'] %} · Forderung {{ fall['schaden_forderung_betrag_label'] }}{% endif %}</div>
           </div>
           <div><span class="badge text-bg-{{ fall['versicherung_freigabe_meta']['farbe'] }}">{{ fall['versicherung_freigabe_meta']['label'] }}</span></div>
           <div class="small">{{ fall['schaden_station_label'] }}</div>

@@ -30,7 +30,7 @@
   </div>
   <main class="shell" id="hauptinhalt" tabindex="-1">
     <header class="partner-brand">
-      <a class="partner-gaertner" href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" aria-label="Zur Fahrzeugübersicht"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie & Lack"></a>
+      <a class="partner-gaertner" href="{{ url_for('partner_dashboard', slug=autohaus['slug']) }}" aria-label="Zur Fahrzeugübersicht"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner GmbH Karosserie + Lack"></a>
       <div class="partner-brand-caption">Ihr persönlicher<br><strong>Werkstattbegleiter</strong></div>
       <div class="partner-brand-mark">
         <span>In Zusammenarbeit mit</span>
@@ -702,7 +702,7 @@
           </div>
         </details>
     </section>
-    <footer class="partner-footer"><span>Gärtner Karosserie &amp; Lack · {{ autohaus['name'] }}</span><a href="#nachrichten">Kontakt zur Werkstatt ↗</a></footer>
+    <footer class="partner-footer"><span>Gärtner GmbH Karosserie + Lack · {{ autohaus['name'] }}</span><a href="#nachrichten">Kontakt zur Werkstatt ↗</a></footer>
     <div class="partner-clock">{% include "_live_clock_widget.html" %}</div>
   </main>
   <script type="application/json" id="partner-order-config">{{ {'transportLabels': transport_arten, 'loadingNews': analysis_loading_news()} | tojson }}</script>

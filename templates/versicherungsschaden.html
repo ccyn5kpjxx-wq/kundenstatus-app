@@ -105,7 +105,7 @@
 <body>
 <header>
   <div class="logo">🔧 Schadenportal</div>
-  <div style="font-size:13px;opacity:.8">Karosserie &amp; Lack Gärtner</div>
+  <div style="font-size:13px;opacity:.8">Gärtner GmbH Karosserie + Lack</div>
   <div class="badge">DEMO v3</div>
 </header>
 
@@ -170,7 +170,7 @@
           <div class="av" style="background:#1e3a8a">🏢</div>
           <div class="meta">
             <b>Schaden 0952416/2026 · BMW 116d</b>
-            <div>Karosserie &amp; Lack Gärtner · Forderung 2.485,75 €</div>
+            <div>Gärtner GmbH Karosserie + Lack · Forderung 2.485,75 €</div>
           </div>
           <div class="st blue" id="vcase-status">Neu angelegt</div>
         </div>
@@ -425,7 +425,7 @@
   <section id="status" class="screen">
     <div class="card" style="max-width:430px;margin:0 auto">
       <div style="text-align:center">
-        <div class="sub">Karosserie &amp; Lack Gärtner · Status Ihres Fahrzeugs</div>
+        <div class="sub">Gärtner GmbH Karosserie + Lack · Status Ihres Fahrzeugs</div>
         <h1 style="margin:6px 0">BMW 116d · MOS PG 707</h1>
         <div id="status-big" style="font-size:18px;font-weight:700;color:var(--accent)"></div>
         <div class="sub" id="status-eta">voraussichtlich abholbereit: 06.06.2026</div>
@@ -453,7 +453,7 @@
       <div class="drop" onclick="vAnalyzePolice()">📄 Police + Versicherungsnachweis hochladen<br><small>Selbstbeteiligung wird automatisch ausgelesen</small></div>
       <div id="v-sb" class="banner green" style="display:none"></div>
       <div class="grid" style="margin-top:6px">
-        <div><label>Werkstatt</label><input value="Karosserie & Lack Gärtner, Mosbach" readonly></div>
+        <div><label>Werkstatt</label><input value="Gärtner GmbH Karosserie + Lack, Mosbach" readonly></div>
         <div><label>Fahrzeug bringt</label><input value="Kunde bringt am 04.06.2026"></div>
       </div>
       <div class="banner">ℹ️ Der Kunde wird automatisch informiert, dass er das Fahrzeug zur Werkstatt Gärtner bringt.</div>
@@ -750,13 +750,13 @@
 "bestellt und treffen bis 05.06.2026 bei uns ein.\n\n"+
 "Unser Terminvorschlag:\n"+
 "📅 Donnerstag, 05.06.2026, 08:00 Uhr\n"+
-"📍 Karosserie & Lack Gärtner, Binauer Höhe 4, 74821 Mosbach\n\n"+
+"📍 Gärtner GmbH Karosserie + Lack, Binauer Höhe 4, 74821 Mosbach\n\n"+
 "Bitte bringen Sie den Fahrzeugschein mit; planen Sie ca. 1 Tag ein. Gerne\n"+
 "besprechen wir vor Ort mögliche Zusatzleistungen.\n\n"+
 "Passt der Termin? Antworten Sie einfach mit JA – oder schlagen Sie uns eine\n"+
 "Alternative vor. 🚗🔧\n\n"+
 "Viele Grüße\n"+
-"Ihr Team von Karosserie & Lack Gärtner";
+"Ihr Team von Gärtner GmbH Karosserie + Lack";
   function showWa(){document.getElementById('wa-text').textContent=WA_MSG;document.getElementById('wa-preview').style.display='block';}
   function sendWa(){state.kundeMsgs.push({from:'ws',text:WA_MSG});state.kundeStage='sent';document.getElementById('wa-preview').style.display='none';renderKunde();toast('📲 WhatsApp an den Kunden gesendet ✓');}
   function kundeReply(){state.kundeMsgs.push({from:'ku',text:'Hallo, ja – der Termin am 05.06. um 08:00 passt mir gut 👍 Ich bringe den BMW vorbei.'});state.kundeStage='confirmed';renderKunde();toast('🔔 Der Kunde hat geantwortet – Termin bestätigt');}

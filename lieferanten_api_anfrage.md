@@ -4,7 +4,7 @@ Stand: 01.05.2026
 
 Werkstatt-Ausgangspunkt:
 
-- Gaertner Karosserie & Lack GmbH
+- Gärtner GmbH Karosserie + Lack
 - Binauer Hoehe 4, 74821 Mosbach-Lohrbach
 - Ziel: schnelle Lieferanten in der Umgebung und digitale Anbindung fuer Werkstatt-Einkauf
 
@@ -24,7 +24,7 @@ Hinweis: Fuer PROSOL, LUMOS, Profiautolacke und WM habe ich keine oeffentliche A
 
 ## Mailvorlage
 
-Betreff: Digitale Einkaufsanbindung fuer Werkstaetten - Pilotprojekt mit Gaertner Karosserie & Lack
+Betreff: Digitale Einkaufsanbindung fuer Werkstaetten - Pilotprojekt mit Gärtner GmbH Karosserie + Lack
 
 Hallo zusammen,
 
@@ -32,7 +32,7 @@ wir bauen aktuell ein digitales Werkstatt- und Einkaufsportal fuer Karosserie- u
 
 Der Ausgangspunkt ist unsere eigene Werkstatt:
 
-Gaertner Karosserie & Lack GmbH
+Gärtner GmbH Karosserie + Lack
 Binauer Hoehe 4
 74821 Mosbach-Lohrbach
 
@@ -94,7 +94,7 @@ Wir freuen uns auf Ihre Rueckmeldung und darauf, gemeinsam den Einkauf fuer Werk
 
 Mit freundlichen Gruessen
 
-Gaertner Karosserie & Lack GmbH
+Gärtner GmbH Karosserie + Lack
 Binauer Hoehe 4
 74821 Mosbach-Lohrbach
 info@auto-lackierzentrum.de
@@ -127,7 +127,7 @@ Hallo partslink24-/LexCom-Team,
 
 wir betreiben und entwickeln fuer unsere Karosserie- und Lackierwerkstatt ein eigenes digitales Werkstatt- und Schadenportal.
 
-Gaertner Karosserie & Lack GmbH
+Gärtner GmbH Karosserie + Lack
 Binauer Hoehe 4
 74821 Mosbach-Lohrbach
 
@@ -152,6 +152,6 @@ Wichtig fuer uns:
 
 Vielen Dank und freundliche Gruesse
 
-Gaertner Karosserie & Lack GmbH
+Gärtner GmbH Karosserie + Lack
 info@auto-lackierzentrum.de
 0152 / 27706694
