@@ -173,6 +173,97 @@ class DialogTests(unittest.TestCase):
         self.assertFalse(updated['fields']['urgent']['value'])
         self.assertFalse(updated['employee_reply_required'])
 
+    def test_free_order_then_number_and_unicode_unit_stay_with_same_photo(self):
+        self.hits=[]
+        self.p.assistant_material_photos.vision=lambda *args:{'art':'produkt','marke':'Top-Color','farbe':'gelb'}
+        view=self.photo('')
+        self.assertEqual(view['questions'][0]['field'],'order_requested')
+        reply=self.answer(None,'Bestellen',explicit=False)
+        self.assertEqual(reply['state'],'applied')
+        self.assertEqual(reply['draft_id'],view['id'])
+        self.assertEqual(len(self.s.list()),1)
+        view=self.s.status(view['id'])
+        self.assertEqual(view['questions'][0]['field'],'quantity')
+        self.assertEqual(self.answer(None,'1',explicit=False)['state'],'applied')
+        view=self.s.status(view['id'])
+        self.assertEqual(view['fields']['quantity']['value'],'1')
+        self.assertNotIn('unit',view['fields'])
+        self.assertEqual(view['questions'][0]['field'],'unit')
+        self.assertEqual(self.answer(None,'1 stűck',explicit=False)['state'],'applied')
+        view=self.s.status(view['id'])
+        self.assertEqual(view['fields']['unit']['value'],'Stück')
+        self.assertFalse(view['fields']['urgent']['value'])
+        self.assertEqual(len(self.s.list()),1)
+        self.assertEqual(self.f.sql('SELECT body FROM einkauf_material_texte ORDER BY id')[-1]['body'],'1 stűck')
+        self.assertEqual(self.p.workshop_orders.calls,[])
+        self.assertIn('article',view['missing_fields'])
+
+    def test_unicode_unit_spelling_is_only_normalized_for_parsing(self):
+        for text in ('1 stűck','1 STŰCK','1 stu\u030bck','1 stu\u0308ck','1 Stück','1 stueck'):
+            with self.subTest(text=text):
+                self.assertEqual(parse_request(text),{'quantity':'1','unit':'Stück'})
+                self.assertEqual(article_query(text),'')
+        self.assertEqual(parse_request('Stűck',question='unit'),{'unit':'Stück'})
+
+    def test_bare_number_needs_quantity_question_and_never_invents_unit(self):
+        view=self.photo('')
+        self.assertEqual(self.answer(None,'1',explicit=False)['state'],'review')
+        self.assertNotIn('quantity',self.s.status(view['id'])['fields'])
+        self.answer(None,'Bestellen',explicit=False)
+        view=self.s.status(view['id'])
+        self.assertEqual(self.answer(view,'1')['state'],'applied')
+        view=self.s.status(view['id'])
+        self.assertNotIn('unit',view['fields'])
+        self.assertEqual(self.answer(None,'Stűck',explicit=False)['state'],'applied')
+        self.assertEqual(self.s.status(view['id'])['fields']['unit']['value'],'Stück')
+
+    def test_short_order_without_photo_or_with_two_photos_creates_no_text_order(self):
+        self.assertEqual(self.answer(None,'Bestellen',explicit=False)['state'],'review')
+        self.assertEqual(self.s.list(),[])
+        first=self.photo('')
+        second=self.photo('',new=True)
+        self.assertEqual(self.answer(None,'Bestellen',explicit=False)['state'],'review')
+        self.assertEqual(len(self.s.list()),2)
+        for view in (first,second):
+            self.assertNotIn('order_requested',self.s.status(view['id'])['fields'])
+
+    def test_short_order_counts_unprocessed_photos_and_personal_sender(self):
+        first=self.photo('')
+        self.channel.verify_sender(2,'491702222222','persönlich geprüft',confirmed=True)
+        self.assertEqual(self.answer(None,'Bestellen',sender='491702222222',explicit=False)['state'],'review')
+        self.f.message['id']='wamid.second-unprocessed'
+        self.f.message['image']['caption']=''
+        self.f.ingest()
+        self.assertEqual(self.answer(None,'Bestellen',explicit=False)['state'],'review')
+        self.assertNotIn('order_requested',self.s.status(first['id'])['fields'])
+
+    def test_short_order_waits_for_single_photo_and_keeps_source_binding(self):
+        self.f.message['image']['caption']=''
+        self.f.ingest()
+        self.assertEqual(self.answer(None,'Bestellen',explicit=False)['state'],'waiting_for_photo')
+        self.f.replies()
+        source=self.channel.process_next()
+        view=self.s.ensure_draft(source['id'])
+        self.s.analyze(view['id'])
+        reply=self.s.process_text()
+        self.assertEqual(reply['state'],'applied')
+        self.assertEqual(reply['draft_id'],view['id'])
+        self.assertEqual(len(self.s.list()),1)
+
+    def test_pure_brand_and_visual_category_are_hints_not_product_identity(self):
+        view=self.photo('Ein Stück')
+        analysis=dict(view['analysis'],merkmale={'marke':'Top-Color','produkt':'Top-Color','farbe':'gelb',
+            'materialtyp':'Folie','masse':'5 x 120 m'},treffer=[])
+        fields=dict(view['fields']);fields.pop('selected_article')
+        self.f.sql('UPDATE einkauf_material_dialoge SET fields_json=?,analysis_json=?,revision=revision+1 WHERE id=?',
+                   (json.dumps(fields),json.dumps(analysis),view['id']))
+        with self.s.db() as db:self.s._refresh(db,self.s._draft(db,view['id']))
+        view=self.s.status(view['id'])
+        self.assertIn('article',view['missing_fields'])
+        self.assertNotIn('supplier_review',view['missing_fields'])
+        self.assertIn('5 x 120 m',view['questions'][0]['body'])
+        self.assertIn('Folie',view['questions'][0]['body'])
+
     def test_bare_quantity_never_chooses_latest_of_multiple_photos(self):
         first=self.photo('')
         second=self.photo('',new=True)
@@ -251,7 +342,7 @@ class DialogTests(unittest.TestCase):
     def test_recheck_discards_automatic_selection_if_current_catalog_loses_uniqueness(self):
         view=self.review(self.photo('ein Stück'),unit='Stück')
         self.assertEqual(view['fields']['selected_article']['proof']['basis'],'exact_photo_catalog_match')
-        self.hits.append(dict(self.hits[0],artikelnummer='TEST-30',groesse='30 mm'))
+        self.hits.append(dict(self.hits[0],artikelnummer='TEST-50-ALT',gebinde='12 Rollen'))
         updated=self.s.recheck(view['id'],view['revision'])
         self.assertNotIn('selected_article',updated['fields'])
         self.assertEqual(updated['review'],{})
@@ -542,6 +633,84 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(updated['analysis'],view['analysis'])
         self.assertEqual(updated['revision'],view['revision'])
 
+    def test_reanalyze_photo_rereads_original_clears_old_terms_and_keeps_employee_amount(self):
+        view=self.review(self.photo('Ein Stück'),unit='Stück')
+        original_photo=self.f.sql('SELECT assistant_photo_id,expected_sha256 FROM einkauf_material_nachrichten WHERE id=?',
+                                  (view['message_id'],))[0]
+        self.hits=[]
+        calls=[]
+        def vision(*args):
+            current=self.s.status(view['id'])
+            self.assertEqual(current['review'],{})
+            self.assertNotIn('selected_article',current['fields'])
+            self.assertNotEqual(current['state'],'approved')
+            calls.append(True)
+            return {'art':'produkt','marke':'Top-Color','farbe':'gelb','materialtyp':'Folie','masse':'5 x 120 m'}
+        self.p.assistant_material_photos.vision=vision
+        updated=self.s.reanalyze_photo(view['id'],view['revision'])
+        self.assertEqual(calls,[True])
+        self.assertEqual(updated['analysis_state'],'done')
+        self.assertEqual(updated['analysis']['merkmale']['masse'],'5 x 120 m')
+        self.assertEqual(updated['fields']['quantity']['value'],'1')
+        self.assertEqual(updated['fields']['unit']['value'],'Stück')
+        self.assertEqual(updated['review'],{})
+        self.assertIn('article',updated['missing_fields'])
+        self.assertIn('5 x 120 m',updated['questions'][0]['body'])
+        self.assertEqual(self.f.sql('SELECT assistant_photo_id,expected_sha256 FROM einkauf_material_nachrichten WHERE id=?',
+                                  (view['message_id'],))[0],original_photo)
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_reanalyze_rejects_stale_cancelled_text_and_inflight_requests(self):
+        view=self.photo()
+        with patch.object(self.p.assistant_material_photos,'vision') as vision:
+            with self.assertRaises(ValueError):self.s.reanalyze_photo(view['id'],view['revision']-1)
+            self.f.sql('UPDATE einkauf_material_dialoge SET analysis_until=? WHERE id=?',(self.f.time+60,view['id']))
+            with self.assertRaises(ValueError):self.s.reanalyze_photo(view['id'],view['revision'])
+            self.f.sql('UPDATE einkauf_material_dialoge SET analysis_until=0 WHERE id=?',(view['id'],))
+            self.answer(view,'Abbrechen')
+            view=self.s.status(view['id'])
+            with self.assertRaises(ValueError):self.s.reanalyze_photo(view['id'],view['revision'])
+            self.answer(None,'Ein Stück Klebeband bestellen',explicit=False)
+            text=self.s.list()[0]
+            with self.assertRaises(ValueError):self.s.reanalyze_photo(text['id'],text['revision'])
+        vision.assert_not_called()
+
+    def test_reanalyze_loses_old_selection_on_failure_without_ordering(self):
+        view=self.review(self.photo())
+        self.p.assistant_material_photos.vision=lambda *args: (_ for _ in ()).throw(ValueError('synthetic vision failed'))
+        updated=self.s.reanalyze_photo(view['id'],view['revision'])
+        self.assertEqual(updated['analysis_state'],'failed')
+        self.assertNotIn('selected_article',updated['fields'])
+        self.assertEqual(updated['review'],{})
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
+    def test_reanalyze_never_overwrites_employee_change_or_revoked_rights(self):
+        for change in ('reply','rights','durable'):
+            with self.subTest(change=change):
+                view=self.photo('Ein Stück',new=True)
+                before_durable=[]
+                def vision(*args):
+                    if change=='reply':
+                        current=self.s.status(view['id'])
+                        self.assertEqual(self.answer(current,'Zwei Stück')['state'],'applied')
+                    elif change=='rights':
+                        self.f.sql('UPDATE assistent_rechte SET version=version+1 WHERE mitarbeiter_id=1')
+                    else:
+                        self.f.sql('INSERT INTO assistent_bestellanforderungen VALUES(?,?,?)',
+                                   ('durable-'+str(view['id']),'mitarbeiter:1','material:'+str(view['id'])))
+                        before_durable.append(self.f.sql('SELECT * FROM einkauf_material_dialoge WHERE id=?',(view['id'],))[0])
+                    return {'art':'produkt','produkt':'Must not replace','artikelnummer':'NEW'}
+                self.p.assistant_material_photos.vision=vision
+                updated=self.s.reanalyze_photo(view['id'],view['revision'])
+                self.assertNotEqual(updated['analysis'].get('merkmale',{}).get('produkt'),'Must not replace')
+                if change=='reply':
+                    self.assertEqual(updated['fields']['quantity']['value'],'2')
+                elif change=='rights':
+                    self.f.sql('UPDATE assistent_rechte SET version=version-1 WHERE mitarbeiter_id=1')
+                else:
+                    self.assertEqual(self.f.sql('SELECT * FROM einkauf_material_dialoge WHERE id=?',(view['id'],))[0],before_durable[0])
+                self.p.assistant_material_photos.vision=lambda *args: {'art':'produkt','produkt':'Test-Klebeband','breite':'50 mm','farbe':'grün'}
+
     def test_recheck_rechecks_rights_and_same_revision_corrections_after_lookup(self):
         for mutation in ('rights','correction','revision','accepted'):
             with self.subTest(mutation=mutation):
@@ -612,6 +781,8 @@ class DialogTests(unittest.TestCase):
         self.assertIn('2 Stück',updated['questions'][0]['body'])
 
     def test_multiple_catalog_variants_still_need_a_specific_employee_answer(self):
+        self.p.assistant_material_photos.vision=lambda *args: {
+            'art':'produkt','produkt':'Test-Klebeband','farbe':'grün'}
         self.hits.append(dict(self.hits[0],artikelnummer='TEST-30',groesse='30 mm'))
         view=self.photo()
         self.assertEqual(view['state'],'open')
@@ -810,6 +981,8 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(article_query('Mipa D8115 bitte 2 Dosen bestellen, nicht dringend'),'Mipa D8115')
 
     def test_variant_change_invalidates_price_and_guard_checks_identity(self):
+        self.p.assistant_material_photos.vision=lambda *args: {
+            'art':'produkt','produkt':'Test-Klebeband','farbe':'grün'}
         self.hits.append(dict(self.hits[0],artikelnummer='TEST-30',groesse='30 mm'))
         view=self.photo()
         self.answer(view,'50 mm')

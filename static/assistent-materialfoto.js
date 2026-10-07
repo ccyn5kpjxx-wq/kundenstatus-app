@@ -55,7 +55,8 @@
     if (!photo?.id) { note('Foto nicht verfügbar. Bitte neu auswählen.'); return; }
     note(photo.frage);
     const fields = photo.merkmale || {};
-    const found = [fields.produkt, fields.marke, fields.breite, fields.farbe].filter(Boolean).join(' · ');
+    const found = [fields.produkt, fields.marke, fields.breite, fields.masse, fields.farbe,
+      fields.materialtyp ? `Materialart vermutet: ${fields.materialtyp}` : ''].filter(Boolean).join(' · ');
     if (found) results.append(node('p', 'Auf dem Etikett erkannt (ungeprüft): ' + found));
     if (photo.status !== 'pruefen') {
       results.append(button(photo.status === 'analyse' ? 'Auswertung prüfen' : 'Etikett auslesen', async run => {

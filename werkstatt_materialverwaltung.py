@@ -121,6 +121,21 @@ def register_material_admin(p):
             flash(str(exc), 'error')
         return redirect(url_for('werkstatt_orders.intake_index', material=draft_id, _anchor='materialdialog'), code=303)
 
+    @bp.post('/<int:draft_id>/foto-neu-auslesen')
+    def reanalyze_photo(draft_id):
+        try:
+            revision = request.form.get('revision', type=int)
+            if not revision or revision < 1:
+                raise ValueError('Materialvorgang wurde geändert. Bitte neu laden.')
+            result = p.material_dialog.reanalyze_photo(draft_id, revision)
+            if result.get('analysis_state') == 'done':
+                flash('Originalfoto neu ausgelesen. Gedruckte Maße und Artikeltreffer stehen beim bestehenden Vorgang.', 'success')
+            else:
+                flash('Die neue Fotoauslese ist noch nicht abgeschlossen. Bitte den Status prüfen.', 'error')
+        except (ValueError, PermissionError, LookupError) as exc:
+            flash(str(exc), 'error')
+        return redirect(url_for('werkstatt_orders.intake_index', material=draft_id, _anchor='materialdialog'), code=303)
+
     @bp.post('/<int:draft_id>/extern-reservieren')
     def reserve_external(draft_id):
         try:

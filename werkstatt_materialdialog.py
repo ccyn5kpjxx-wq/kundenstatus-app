@@ -15,6 +15,7 @@ import os
 import re
 import secrets
 import time
+import unicodedata
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -33,16 +34,29 @@ INTERNAL_FIELDS = {'supplier_review', 'price', 'budget'}
 EXTERNAL_STATES = {'external_pending', 'external_sent'}
 
 
+def _request_text(text):
+    """Normalize a unit typo for parsing, keeping the stored original untouched."""
+    return re.sub(r'\bstűck\b','Stück',unicodedata.normalize('NFC',_note(text)),flags=re.I)
+
+
+def _bare_quantity(text):
+    value = _request_text(text).casefold().strip(' .!')
+    if not re.fullmatch(r'\d{1,8}(?:[.,]\d{1,6})?',value):
+        return None
+    amount = Decimal(value.replace(',','.'))
+    return format(amount.normalize(),'f') if amount>0 else None
+
+
 def article_query(text):
     """Remove request grammar, retaining SKU, colour and dimensional evidence."""
-    value = re.sub(QUANTITY_PATTERN,' ',_note(text),flags=re.I)
+    value = re.sub(QUANTITY_PATTERN,' ',_request_text(text),flags=re.I)
     value = re.sub(r'\b(?:bitte|bestellen|bestelle|bestell|nachbestellen|nachbestelle|dringend|sofort|nicht|regulär|regulaer|normal|wöchentlich|woechentlich|ich|möchte|moechte|brauche|benötige|benoetige|mir|wir|uns|erst|am|montag)\b',' ',value,flags=re.I)
     return re.sub(r'\s+',' ',value).strip(' ,;.!:')[:150]
 
 
 def parse_request(text, question=''):
     """Small conservative grammar, never extracts quantity from a product label."""
-    text = _note(text)
+    text = _request_text(text)
     value = text.casefold()
     fields = {}
     if re.search(r'\b(abbrechen|stornieren)\b|\bnicht(?:\s+mehr)?\s+bestell\w*|\bkeine?\s+bestellung\b|\bbestell\w*\s+(?:bitte\s+)?nicht(?:\s+mehr)?\s*[.!]?$', value):
@@ -77,6 +91,10 @@ def parse_request(text, question=''):
             matches.append((format(amount.normalize(), 'f'), UNITS[match[2]]))
     if len(set(matches)) == 1:
         fields['quantity'], fields['unit'] = matches[0]
+    elif question=='quantity' and _bare_quantity(text):
+        fields['quantity'] = _bare_quantity(text)
+    elif question=='unit' and value.strip(' .!') in UNITS:
+        fields['unit'] = UNITS[value.strip(' .!')]
     return fields
 
 
@@ -254,6 +272,7 @@ class MaterialDialog:
         if any(label and actual and label!=actual for label,actual in dimensions):
             return None
         exact_name_variant = (len(product)>=6 and product==compact(hit.get('produkt_name'))
+            and product!=compact(labels.get('marke'))
             and any(label for label,actual in dimensions) and all(not label or label==actual for label,actual in dimensions))
         if hit.get('artikelnummer') and hit.get('lieferant') and (exact_code or exact_name_variant):
             return hit
@@ -375,6 +394,7 @@ class MaterialDialog:
         # Recognizing a label is not a catalog match or a price approval. It only
         # means the employee need not repeat an already readable product name.
         identified = bool(selected or (draft['analysis_state']=='done' and labels.get('produkt')
+            and str(labels.get('produkt')).casefold().strip()!=str(labels.get('marke','')).casefold().strip()
             and (labels.get('marke') or labels.get('artikelnummer') or labels.get('breite') or labels.get('farbe'))
             and (not hits or len(hits)==1 and not analysis.get('treffer_gekuerzt'))))
         missing = []
@@ -437,9 +457,9 @@ class MaterialDialog:
                 name = ' '.join(str(product.get(key,'')) for key in ('produkt_name','product_name','groesse','farbe','variant')).strip()
                 if name:
                     details.append('Artikel: '+name+'.')
-            elif labels.get('produkt'):
+            elif any(labels.get(key) for key in ('produkt','marke','materialtyp','masse','breite','farbe')):
                 parts = []
-                for key in ('marke','produkt','breite','farbe'):
+                for key in ('marke','produkt','materialtyp','masse','breite','farbe'):
                     label = str(labels.get(key,'')).strip()
                     if label and label.casefold() not in ' '.join(parts).casefold():
                         parts.append(label)
@@ -527,10 +547,14 @@ class MaterialDialog:
                         draft = self._draft(db,origin['id'],lock=True)
                 else:
                     parsed = parse_request(text['body'])
-                    # A bare quantity can answer one recent personal photo;
+                    short_request = not article_query(text['body']) and (
+                        parsed.get('order_requested') is True or parsed.get('quantity') and parsed.get('unit'))
+                    bare_quantity = _bare_quantity(text['body'])
+                    bare_unit = parse_request(text['body'],question='unit').get('unit') if not parsed else None
+                    # Short intent/quantity can answer one recent personal photo;
                     # never pick the newest of several possible requests.
                     origins = []
-                    if parsed.get('quantity') and parsed.get('unit') and not article_query(text['body']):
+                    if short_request or bare_quantity or bare_unit:
                         origins = db.execute('''SELECT d.id,n.state FROM einkauf_material_nachrichten n
                             LEFT JOIN einkauf_material_dialoge d ON d.message_id=n.id
                             WHERE (d.id IS NULL OR d.state NOT IN ('accepted','cancelled','external_pending','external_sent'))
@@ -543,7 +567,7 @@ class MaterialDialog:
                              text['phone_number_id'],self.clock()-15*60,
                              datetime.fromtimestamp(self.clock()-15*60,timezone.utc).isoformat(),text['source_at'])).fetchall()
                         if len(origins)!=1:
-                            raise ValueError('Menge gehört nicht zu genau einem aktuellen Foto. Bitte das konkrete Foto zitieren.')
+                            raise ValueError('Antwort gehört nicht zu genau einem aktuellen Foto. Bitte das konkrete Foto zitieren.')
                         if not origins[0]['id'] or origins[0]['state']!='ready':
                             if origins[0]['state'] not in {'queued','processing','ready'}:
                                 raise ValueError('Fotoeingang muss intern geklärt werden; Menge noch nicht übernehmen.')
@@ -551,8 +575,16 @@ class MaterialDialog:
                             return {'id':text['id'],'state':'waiting_for_photo'}
                     if origins:
                         draft = self._draft(db,origins[0]['id'],lock=True)
+                        question = db.execute('SELECT * FROM einkauf_material_rueckfragen WHERE draft_id=? AND revision=?',
+                                              (draft['id'],draft['revision'])).fetchone()
+                        if bare_quantity and (not question or question['field']!='quantity'
+                                or 'quantity' not in json.loads(draft['missing_json'])):
+                            raise ValueError('Reine Zahl gehört noch zu keiner eindeutigen Mengenfrage. Bitte Menge und Einheit nennen.')
+                        if bare_unit and (not question or question['field']!='unit'
+                                or 'unit' not in json.loads(draft['missing_json'])):
+                            raise ValueError('Bestelleinheit gehört noch zu keiner eindeutigen Einheitenfrage.')
                     else:
-                        if not parsed.get('order_requested') and parsed.get('urgent') is not True:
+                        if (not parsed.get('order_requested') and parsed.get('urgent') is not True) or not article_query(text['body']):
                             raise ValueError('Bitte den konkreten Vorgang zitieren oder ausdrücklich einen neuen Artikel bestellen.')
                         view = self._ensure(db,self._text_source(db,text),text)
                         return {'id':text['id'],'state':'applied','draft_id':view['id']}
@@ -602,16 +634,39 @@ class MaterialDialog:
                 db.execute("UPDATE einkauf_material_texte SET state='review',error_code='antwort_oder_berechtigung_klaeren' WHERE id=?",(text['id'],))
                 return {'id':text['id'],'state':'review'}
 
-    def analyze(self, draft_id):
+    def reanalyze_photo(self, draft_id, revision):
+        """Explicit revision-bound reread; discard stale selections, never send."""
+        _row_id(revision)
+        return self.analyze(draft_id,refresh=True,revision=revision)
+
+    def analyze(self, draft_id, *, refresh=False, revision=None):
+        if type(refresh) is not bool or refresh and revision is None:
+            raise ValueError('Erneute Fotoauslese benötigt die aktuelle Revision.')
         lease = secrets.token_hex(16)
+        unchanged = ('revision','fields_json','review_json','analysis_json','snapshot_json','snapshot_hash','state','error_code','dispatch_id')
         with self.db() as db:
-            draft = self._draft(db,draft_id,lock=True)
+            draft = self._draft(db,draft_id,revision,lock=True)
             source = self._source(db,draft)
             if self._accepted(db,draft) or draft['state']=='cancelled':
+                if refresh:
+                    raise ValueError('Übergebenes oder abgebrochenes Foto nicht erneut auslesen.')
                 return self._view(db,draft_id)
-            if draft['analysis_state'] == 'done' or draft['analysis_until'] > self.clock():
+            if refresh and (source['mime']=='text/plain' or source['forwarded'] or draft['analysis_until']>self.clock()):
+                raise ValueError('Nur ein persönliches Foto ohne laufende Auslese erneut prüfen.')
+            if refresh and (draft['error_code']=='antwort_unverstaendlich' or db.execute(
+                    "SELECT id FROM einkauf_material_rueckfragen WHERE draft_id=? AND state='sending'",(draft_id,)).fetchone()):
+                raise ValueError('Offene unklare Antwort oder laufenden Nachrichtenversand zuerst klären.')
+            if not refresh and (draft['analysis_state'] == 'done' or draft['analysis_until'] > self.clock()):
                 return self._view(db,draft_id)
+            if refresh:
+                fields = json.loads(draft['fields_json'])
+                fields.pop('selected_article',None)
+                fields.pop('duplicate_confirmation',None)
+                db.execute("""UPDATE einkauf_material_dialoge SET fields_json=?,review_json='{}',analysis_json='{}',
+                    snapshot_json='{}',snapshot_hash='',state='open',error_code='',revision=revision+1 WHERE id=?""",(_json(fields),draft_id))
+                db.execute("UPDATE einkauf_material_rueckfragen SET state='superseded' WHERE draft_id=? AND state='queued'",(draft_id,))
             db.execute("UPDATE einkauf_material_dialoge SET analysis_state='processing',analysis_lease=?,analysis_until=? WHERE id=?",(lease,self.clock()+120,draft_id))
+            expected = self._draft(db,draft_id)
         photos = copy.copy(self.p.assistant_material_photos)
         @contextmanager
         def guarded_photo_db():
@@ -619,6 +674,8 @@ class MaterialDialog:
                 current = self._draft(db,draft_id,lock=True)
                 if self._accepted(db,current) or current['analysis_lease'] != lease or current['analysis_until'] < self.clock() or current['state'] == 'cancelled':
                     raise PermissionError('Fotoauslese wurde geändert oder abgebrochen.')
+                if refresh and any(current[key]!=expected[key] for key in unchanged):
+                    raise PermissionError('Materialvorgang wurde während der erneuten Auslese geändert.')
                 yield db
         photos.db = guarded_photo_db
         try:
@@ -633,18 +690,25 @@ class MaterialDialog:
                         hits.append(hit)
                 result={'status':'pruefen','merkmale':{},'treffer':hits,'treffer_gekuerzt':bool(lookup.get('varianten_gekuerzt') or lookup.get('abdeckung',{}).get('begrenzt'))}
             else:
-                result = photos.analyze({'actor':'mitarbeiter:' + str(source['employee_id']),'lesen':True,'einkaufen':True},source['assistant_photo_id'])
+                result = photos.analyze({'actor':'mitarbeiter:' + str(source['employee_id']),'lesen':True,'einkaufen':True},
+                                        source['assistant_photo_id'],**({'refresh':True} if refresh else {}))
             with self.db() as db:
                 current = self._draft(db,draft_id,lock=True)
                 if self._accepted(db,current) or current['analysis_lease'] != lease or current['analysis_until'] < self.clock():
                     raise PermissionError('Fotoauslese wurde inzwischen übernommen.')
+                if refresh and any(current[key]!=expected[key] for key in unchanged):
+                    raise PermissionError('Materialvorgang wurde während der erneuten Auslese geändert.')
                 state = 'done' if result['status'] == 'pruefen' else 'failed'
                 db.execute("UPDATE einkauf_material_dialoge SET analysis_json=?,analysis_state=?,analysis_lease='',analysis_until=0,revision=revision+1 WHERE id=?",(_json(result),state,draft_id))
                 self._refresh(db,self._draft(db,draft_id))
             return self.status(draft_id)
         except (PermissionError,ValueError):
             with self.db() as db:
-                db.execute("UPDATE einkauf_material_dialoge SET analysis_state='failed',analysis_lease='',analysis_until=0,error_code='fotoauslese_oder_berechtigung_klaeren' WHERE id=? AND analysis_lease=? AND state NOT IN ('external_pending','external_sent')",(draft_id,lease))
+                db.execute("""UPDATE einkauf_material_dialoge SET analysis_state='failed',analysis_lease='',analysis_until=0,
+                    error_code=CASE WHEN revision=? THEN 'fotoauslese_oder_berechtigung_klaeren' ELSE error_code END
+                    WHERE id=? AND analysis_lease=? AND state NOT IN ('accepted','cancelled','external_pending','external_sent')
+                    AND NOT EXISTS (SELECT 1 FROM assistent_bestellanforderungen o WHERE o.request_id=?)""",
+                    (expected['revision'],draft_id,lease,'material:'+str(draft_id)))
             return self.status(draft_id)
 
     @staticmethod

@@ -107,6 +107,19 @@ class MaterialAdminTests(unittest.TestCase):
         self.service.process_next.assert_not_called()
         self.service.send_question.assert_not_called()
 
+    def test_reanalyze_is_revision_bound_without_dispatch_and_retains_failure(self):
+        url='/admin/assistent-bestellungen/eingang/material/7/foto-neu-auslesen'
+        self.assertEqual(self.client.post(url).status_code,400)
+        self.client.post(url,data=dict(self.form,revision='0'))
+        self.service.reanalyze_photo.assert_not_called()
+        self.service.reanalyze_photo.return_value={'analysis_state':'failed'}
+        self.assertEqual(self.client.post(url,data=self.form).status_code,303)
+        self.service.reanalyze_photo.assert_called_once_with(7,3)
+        self.service.process_next.assert_not_called()
+        self.service.send_question.assert_not_called()
+        with self.client.session_transaction() as state:
+            self.assertTrue(any(kind=='error' and 'nicht abgeschlossen' in message for kind,message in state['_flashes']))
+
     def test_recognized_label_is_visible_without_becoming_supplier_or_price_evidence(self):
         item = dict(id=7, revision=3, code='M-7 R3', state='review', review={},
                     analysis=dict(merkmale=dict(produkt='Test-Silber', marke='Testmarke', artikelnummer='TEST/E0.5')),

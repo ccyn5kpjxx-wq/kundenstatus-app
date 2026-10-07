@@ -16,7 +16,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image
 from werkzeug.datastructures import FileStorage
-from werkstatt_materialfoto import MaterialPhotoService, MAX_BYTES
+from werkstatt_materialfoto import MaterialPhotoService, MAX_BYTES, FIELDS, _labels
 from werkstatt_materialwissen import build_variants
 
 
@@ -72,7 +72,7 @@ class MaterialPhotoTests(unittest.TestCase):
         item = self.prepared()
         self.assertEqual(item['status'], 'pruefen')
         self.assertEqual(item['merkmale']['breite'], '30 mm')
-        self.assertEqual(set(item['merkmale']), {'produkt', 'marke', 'breite', 'farbe', 'barcode', 'artikelnummer'})
+        self.assertEqual(set(item['merkmale']), set(FIELDS))
         hit = item['treffer'][0]
         self.assertEqual(hit['packinhalt']['menge'], '32', 'Only catalog evidence supplies pack contents')
         self.assertEqual(hit['packinhalt']['pro'], 'VE')
@@ -122,6 +122,105 @@ class MaterialPhotoTests(unittest.TestCase):
         self.assertEqual(result['merkmale']['produkt'], 'T4000 Crystal Silver')
         self.assertFalse(hit['bestellbar'])
         self.assertNotIn('99.00', json.dumps(hit))
+
+    def test_printed_metre_combinations_are_preserved_without_inferred_width_or_quantity(self):
+        for value in ('5 x 120 m', '5×120m', '5,0 m x 120 m', '90 cm x 450 m', '20 x 30 x 40 cm'):
+            with self.subTest(value=value):
+                result = _labels({'art': 'produkt', 'masse': value, 'materialtyp': 'Folie', 'menge': 120})
+                self.assertEqual(result['masse'], value)
+                self.assertEqual(result['breite'], '')
+                self.assertNotIn('menge', result)
+        self.assertEqual(_labels({'art': 'produkt', 'breite': '5 m'})['breite'], '5 m')
+        for value in ('5 x 120', '5 x 120 Stück', '0 x 120 m', '5 m; bestellen', '-5 x 120 m'):
+            with self.subTest(invalid=value):
+                self.assertEqual(_labels({'art': 'produkt', 'masse': value})['masse'], '')
+        self.assertEqual(_labels({'art': 'produkt', 'materialtyp': 'Top-Color 5m'})['materialtyp'], '')
+
+    def test_logo_and_visual_category_find_film_by_printed_measures_without_inventing_identity(self):
+        self.vision.return_value = {'art': 'produkt', 'produkt': 'TOP-COLOR', 'marke': 'Top Color',
+                                  'masse': '5×120m', 'farbe': 'gelb', 'materialtyp': 'Folie'}
+        rows = [{'produkt_name': name, 'artikelnummer': code, 'lieferant': 'Top-Color', 've': 'Rolle',
+                 'groesse': size, 'farbe': color, 'quelle': {'art': 'einkauf', 'beleg_id': index+1}}
+                for index,(name,code,size,color) in enumerate([
+                    ('TOP-COLOR Abdeckfolie gelb 5,0 x 120 m', 'SYNTHETIC-YELLOW', '5,0 x 120 m', 'gelb'),
+                    ('Q-Refinish Abdeckfolie Magenta 5,0 x 120 m', 'SYNTHETIC-MAGENTA', '5,0 x 120 m', 'magenta'),
+                    ('TOP-COLOR Abdeckfolie gelb 4 x 150 m', 'SYNTHETIC-SMALL', '4 x 150 m', 'gelb')])]
+        self.portal.cockpit_data.articles.side_effect = lambda query: {'varianten': build_variants(rows, query), 'abdeckung': {}}
+        result = self.prepared()
+        self.assertEqual(result['merkmale']['produkt'], '')
+        self.assertEqual(result['merkmale']['marke'], 'Top Color')
+        self.assertEqual(result['merkmale']['materialtyp'], 'Folie')
+        self.assertEqual(result['merkmale']['masse'], '5×120m')
+        self.assertEqual([hit['artikelnummer'] for hit in result['treffer']], ['SYNTHETIC-YELLOW'])
+        self.assertTrue(all(not hit['bestellbar'] for hit in result['treffer']))
+        self.assertIsNone(self.service.context(self.who))
+        queries = [call.args[0] for call in self.portal.cockpit_data.articles.call_args_list]
+        self.assertTrue(any('120' in query for query in queries))
+        self.assertTrue(all('gelb' in query for query in queries))
+
+    def test_ocr_code_match_cannot_override_known_measure_or_magenta_color_conflict(self):
+        self.vision.return_value.update(masse='5 x 120 m', breite='', farbe='gelb')
+        for changes in ({'produkt_name': 'Folie Magenta 5 x 120 m', 'groesse': '5 x 120 m', 'farbe': 'Magenta'},
+                        {'produkt_name': 'Folie gelb 4 x 150 m', 'groesse': '4 x 150 m', 'farbe': 'gelb'}):
+            with self.subTest(changes=changes):
+                self.portal.cockpit_data.articles.return_value = {'varianten': [dict(self.variants[0], **changes)]}
+                item = self.stage(key='variant-conflict-' + str(len(changes['produkt_name'])) + '-123456')
+                self.assertEqual(self.service.analyze(self.who, item['id'])['treffer'], [])
+
+    def test_film_dimensions_find_invoice_without_color_but_never_force_magenta(self):
+        self.vision.return_value = {'art': 'produkt', 'produkt': 'TOP-COLOR', 'marke': 'Top-Color',
+                                  'masse': '5 x 120 m', 'farbe': 'gelb', 'materialtyp': 'Folie'}
+        rows = [{'produkt_name': name, 'artikelnummer': code, 'lieferant': 'Top-Color', 've': 'Stück',
+                 'groesse': size, 'farbe': color, 'quelle': {'art': 'einkauf', 'beleg_id': index + 101}}
+                for index, (name, code, size, color) in enumerate([
+                    ('Top-Color Abdeckfolie HydroPlus 5x120mtr', 'SYNTHETIC-HYDRO', '5x120mtr', ''),
+                    ('Q-Refinish Abdeckfolie Magenta 5x120mtr', 'SYNTHETIC-MAGENTA', '5x120mtr', 'magenta'),
+                    ('Top-Color Abdeckfolie HydroPlus 4x150mtr', 'SYNTHETIC-SMALL', '4x150mtr', '')])]
+        self.portal.cockpit_data.articles.side_effect = lambda query: {'varianten': build_variants(rows, query), 'abdeckung': {}}
+        result = self.prepared()
+        self.assertEqual([hit['artikelnummer'] for hit in result['treffer']], ['SYNTHETIC-HYDRO'])
+        self.assertEqual(result['merkmale']['farbe'], 'gelb', 'Visible evidence is preserved separately')
+        self.assertEqual(result['treffer'][0]['farbe'], '', 'Missing invoice color must not be invented')
+        self.assertFalse(result['treffer'][0]['bestellbar'])
+        self.assertIsNone(self.service.context(self.who))
+        queries = [call.args[0] for call in self.portal.cockpit_data.articles.call_args_list]
+        self.assertIn('Top-Color 5 x 120 m', queries)
+
+    def test_explicit_refresh_reuses_photo_clears_selection_and_never_keeps_old_results_on_failure(self):
+        item = self.prepared()
+        self.service.select(self.who, item['id'], item['treffer'][0]['id'])
+        self.vision.side_effect = RuntimeError('private-detail')
+        refreshed = self.service.analyze(self.who, item['id'], refresh=True)
+        self.assertEqual(refreshed['id'], item['id'])
+        self.assertEqual(refreshed['status'], 'fehler')
+        self.assertFalse(any(refreshed['merkmale'].values()))
+        self.assertIsNone(self.service.context(self.who))
+        self.assertEqual(self.vision.call_count, 2)
+        self.assertNotIn('private-detail', json.dumps(refreshed))
+        for invalid in ('true', 1, None):
+            with self.assertRaises(ValueError): self.service.analyze(self.who, item['id'], refresh=invalid)
+
+    def test_refresh_obeys_same_actor_rights_and_single_analysis_lease(self):
+        item = self.prepared()
+        self.service.select(self.who, item['id'], item['treffer'][0]['id'])
+        with self.assertRaises(PermissionError):
+            self.service.analyze(dict(self.who, einkaufen=0), item['id'], refresh=True)
+        with self.assertRaises(ValueError):
+            self.service.analyze(dict(self.who, actor='mitarbeiter:2'), item['id'], refresh=True)
+        entered, release = threading.Event(), threading.Event()
+        def held(raw, mime):
+            entered.set(); release.wait(3)
+            return {'art': 'produkt', 'materialtyp': 'Folie', 'marke': 'Test', 'masse': '5 x 120 m'}
+        self.vision.side_effect = held
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            future = pool.submit(self.service.analyze, self.who, item['id'], refresh=True)
+            self.assertTrue(entered.wait(2))
+            second = self.service.analyze(self.who, item['id'], refresh=True)
+            self.assertEqual(second['status'], 'analyse')
+            self.assertIsNone(self.service.context(self.who))
+            release.set()
+            self.assertEqual(future.result()['merkmale']['masse'], '5 x 120 m')
+        self.assertEqual(self.vision.call_count, 2)
 
     def test_source_revocation_or_changed_product_invalidates_previous_selection(self):
         item = self.prepared(); self.service.select(self.who, item['id'], item['treffer'][0]['id'])
@@ -194,6 +293,8 @@ class MaterialPhotoTests(unittest.TestCase):
         self.assertFalse(sent['json']['store'])
         self.assertNotIn('tools', sent['json'])
         self.assertEqual(sent['json']['text']['format']['type'], 'json_schema')
+        self.assertIn('masse', sent['json']['text']['format']['schema']['required'])
+        self.assertIn('Folie', sent['json']['text']['format']['schema']['properties']['materialtyp']['enum'])
         self.assertEqual(sent['json']['input'][0]['content'][1]['type'], 'input_image')
         self.assertNotIn('file_base64', json.dumps(item))
 
