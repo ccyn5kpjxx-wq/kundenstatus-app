@@ -10,7 +10,7 @@ Der Prototyp hält WebKit-Daten nur während der laufenden Sitzung im Speicher. 
 
 | Benötigt | Konkreter nächster Schritt |
 | --- | --- |
-| Apple Developer Program für die Firma | Vorhandene Mitgliedschaft und verfügbares Entwicklerteam bestätigen oder die Organisation registrieren. |
+| Apple Developer Program für die Firma | Die Organisation neu registrieren; eine Firmenmitgliedschaft ist bislang nicht vorhanden. |
 | Organisationsdaten | Rechtlicher Firmenname, D-U-N-S-Nummer, vertretungsberechtigte Person, geschäftliche E-Mail und Firmenwebsite bereithalten. |
 | Team-ID und App-Kennung | Apples Team-ID bereitstellen; eine eindeutige Bundle-ID unter diesem Team registrieren und mit dem Projekt abgleichen. Keine Apple-Passwörter oder Signaturschlüssel ins Repository schreiben. |
 | Mac mit Xcode | Für App-Store-Uploads mindestens Xcode 26 und iOS-26-SDK verwenden; XcodeGen installieren. Die Mindestversion der Mitarbeitergeräte bleibt iOS 17. |
@@ -49,7 +49,9 @@ Ein manueller GitHub-Workflow `iOS unsigned check` prüft Projektgenerierung und
 
 Am 8. Oktober 2026 bestanden im [Mac-Prüflauf 37791327727](https://github.com/ccyn5kpjxx-wq/kundenstatus-app/actions/runs/37791327727) alle fünf Tests für Portalziele, erlaubte Links und Auftrags-/QR-Eingaben. Die App wurde unsigniert gebaut, im iPhone-16-Pro-Simulator gestartet und der generische persönliche Anmeldebildschirm visuell geprüft. Grundlage war Commit `56e8411f5c41d768f064debca4c1aff5a9c63fba`, Xcode 16.4 mit iOS-18.5-SDK. Dieser Lauf bestätigt den Prototyp, erfüllt aber nicht Apples aktuelle Uploadvorgabe. Er enthält weder eine Mitarbeiteranmeldung noch einen Mikrofon-, Kamera- oder Dokumenttest.
 
-Im [Prüflauf 37793262574](https://github.com/ccyn5kpjxx-wq/kundenstatus-app/actions/runs/37793262574) bestanden dieselben fünf Tests und der Build mit Xcode 26.3/iOS-26.2-SDK. Der anschließende App-Start im iOS-26.2-Simulator auf macOS 15 lief jedoch in einen Timeout; der Gesamtlauf ist fehlgeschlagen. Das ist kein bestandener iOS-26-Starttest. Die Gegenprobe nutzt bei unverändertem Appcode macOS 26 mit denselben Apple-Werkzeugen; bei einem erneuten Fehler werden ein System-App-Start und begrenzte Prozessdiagnosen protokolliert. Signierung und Gerätetest bleiben davon unabhängig offen.
+Im [Prüflauf 37793262574](https://github.com/ccyn5kpjxx-wq/kundenstatus-app/actions/runs/37793262574) bestanden dieselben fünf Tests und der Build mit Xcode 26.3/iOS-26.2-SDK. Der anschließende App-Start im iOS-26.2-Simulator auf macOS 15 lief jedoch in einen Timeout; dieser Gesamtlauf ist fehlgeschlagen.
+
+Die [Gegenprobe 37794642918](https://github.com/ccyn5kpjxx-wq/kundenstatus-app/actions/runs/37794642918) auf Commit `8c35226c7db337defe37108f925cb462b1a143e0` war vollständig erfolgreich: macOS 26.6.2, Xcode 26.3, iOS-26.2-SDK, alle fünf Tests, unsignierter Build und App-Start im iPhone-17-Pro-Simulator mit iOS 26.2. Der generische persönliche Anmeldebildschirm wurde anhand des erzeugten Screenshots visuell geprüft. Der Appcode war gegenüber den vorherigen Läufen unverändert; die genaue Ursache des früheren Timeouts bleibt unbelegt. Dieser Nachweis enthält keine Mitarbeiteranmeldung und keine Prüfung von Kamera, Mikrofon oder persönlichen Dokumenten. Signierung und Gerätetest bleiben offen.
 
 Der Workflow erzeugt außerdem einen Screenshot mit einer frischen Simulator-Sitzung ohne Mitarbeiteranmeldung. Dieser zeigt nur den generischen Einstieg und wird höchstens drei Tage als CI-Artefakt gespeichert. Es werden weder echte Mitarbeiterkonten noch Einrichtungslinks verwendet; Kamera und Mikrofon werden dabei nicht freigegeben.
 
@@ -80,4 +82,4 @@ Vor der Geräteabnahme sind zwei bekannte Funktionslücken zu schließen: Gesch�
 - QR-Codes sind ausschließlich Eingaben für die erlaubte Auftragssuche, keine Anweisung zum Öffnen beliebiger URLs. Kamera und Mikrofon werden nur für die ausdrücklich gestartete Funktion benötigt.
 - Die App benötigt die vorhandenen Backend-Dienste und eine Internetverbindung. Es gibt keine Offline-Bestellwarteschlange und keine automatische Wiederholung von Schreibaktionen.
 
-Diese Grenzen beschreiben die verlangte Freigabequalität. Solange Build und Geräteabnahme offen sind, ist keine vollständige Sicherheits- oder Funktionsfreigabe behauptet.
+Diese Grenzen beschreiben die verlangte Freigabequalität. Solange signierter Gerätebuild und Geräteabnahme offen sind, ist keine vollständige Sicherheits- oder Funktionsfreigabe behauptet.
