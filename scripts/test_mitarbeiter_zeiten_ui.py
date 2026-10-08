@@ -76,6 +76,34 @@ def personal_context(**values):
 
 
 class PersonalTimeUITests(unittest.TestCase):
+    def test_admin_employee_cards_show_each_current_clock_status(self):
+        statuses = [('arbeitet','Angestempelt'),('pause','In Pause'),('beendet','Beendet'),
+                    ('nicht_angestempelt','Noch nicht angestempelt'),('inaktiv','Inaktiv')]
+        employees = [dict(id=index,name='Synthetic '+key,aktiv=key!='inaktiv',
+                          zeitstatus=dict(key=key,label=label,detail='Seit 09:00 Uhr'))
+                     for index,(key,label) in enumerate(statuses,1)]
+        html = render('assistent_arbeitszeit.html', admin=True, report=None, month='2026-01', error='',
+                      employees=employees, status_as_of='08.10.2026, 10:00 Uhr')
+        for key,label in statuses:
+            self.assertIn('state-'+key, html)
+            self.assertIn(label, html)
+        self.assertEqual(html.count('class="status-dot"'), 5)
+        self.assertIn('Aktueller Stempelstatus · Stand 08.10.2026, 10:00 Uhr', html)
+        self.assertEqual(html.count('<small>Monatszeiten ansehen</small>'), 4)
+        self.assertFalse(any(form.get('method') == 'post' for form in Forms(html).forms))
+
+    def test_admin_selected_employee_heading_shows_current_status(self):
+        data = report()
+        del data['status']
+        employee = dict(id=101,name='Synthetic Own',aktiv=True,
+                        zeitstatus=dict(key='pause',label='In Pause',detail='Seit 12:00 Uhr'))
+        html = render('assistent_arbeitszeit.html', admin=True, report=data, month='2026-01', error='',
+                      employees=[employee])
+        self.assertIn('report-clock-status', html)
+        self.assertIn('In Pause', html)
+        self.assertIn('Seit 12:00 Uhr', html)
+        self.assertNotIn('/werkstatt/mein-konto/zeit', html)
+
     def test_personal_status_transitions_keep_all_bound_fields(self):
         for state, allowed in [('abwesend', {'kommen'}), ('arbeitet', {'pause', 'gehen'}),
                                ('pause', {'weiter', 'gehen'}), ('unknown', set())]:

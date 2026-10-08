@@ -176,6 +176,44 @@ class TimeTracking:
         report=self.report(state['mitarbeiter_id'],month or self.now().astimezone(BERLIN).strftime('%Y-%m'))
         return {**report,'status':state}
 
+    def admin_employees(self):
+        """Current clock state for the team, independent of the report month."""
+        now = self.now().astimezone(BERLIN)
+        with self.db() as db:
+            employees = [dict(row) for row in db.execute('''
+                SELECT m.id,m.name,m.aktiv,s.zustand,z.aktion,z.zeit
+                FROM mitarbeiter m
+                LEFT JOIN mitarbeiter_zeitstatus s ON s.mitarbeiter_id=m.id
+                LEFT JOIN mitarbeiter_zeitstempel z ON z.id=(
+                    SELECT id FROM mitarbeiter_zeitstempel
+                    WHERE mitarbeiter_id=m.id ORDER BY revision DESC LIMIT 1)
+                ORDER BY m.aktiv DESC,m.name,m.id
+            ''').fetchall()]
+        for employee in employees:
+            state = employee.pop('zustand')
+            action, raw_time = employee.pop('aktion'), employee.pop('zeit')
+            when = None
+            if raw_time:
+                try:
+                    when = datetime.fromisoformat(raw_time).astimezone(BERLIN)
+                except (ValueError, TypeError):
+                    pass
+            key, label, detail = 'pruefen', 'Zeitstatus prüfen', ''
+            if not employee['aktiv']:
+                key, label = 'inaktiv', 'Inaktiv'
+            elif state in ('arbeitet', 'pause'):
+                key = state
+                label = 'Angestempelt' if state == 'arbeitet' else 'In Pause'
+                if when:
+                    detail = 'Seit ' + when.strftime('%H:%M Uhr' if when.date() == now.date() else '%d.%m.%Y, %H:%M Uhr')
+            elif state in (None, 'abwesend'):
+                if action == 'gehen' and when and when.date() == now.date():
+                    key, label, detail = 'beendet', 'Beendet', when.strftime('Heute um %H:%M Uhr')
+                elif not action or (when and when.date() < now.date() and action == 'gehen'):
+                    key, label, detail = 'nicht_angestempelt', 'Noch nicht angestempelt', 'Heute noch kein Arbeitsbeginn'
+            employee['zeitstatus'] = {'key': key, 'label': label, 'detail': detail}
+        return employees
+
 
 def register_time_views(p, bp, protected, service):
     @bp.get('/arbeitszeit')
@@ -198,8 +236,7 @@ def register_time_views(p, bp, protected, service):
     @admin.get('/admin/arbeitszeit')
     @p.admin_required
     def index():
-        with service.db() as db:
-            employees=[dict(row) for row in db.execute('SELECT id,name,aktiv FROM mitarbeiter ORDER BY aktiv DESC,name,id').fetchall()]
+        employees=service.admin_employees()
         report=None;error='';selected=0
         try:
             selected=int(request.args.get('mitarbeiter_id') or 0)
@@ -208,5 +245,6 @@ def register_time_views(p, bp, protected, service):
         except (ValueError,TypeError) as exc:
             error=str(exc)
         return render_template('assistent_arbeitszeit.html',report=report,admin=True,employees=employees,error=error,selected_employee_id=selected,
+                               status_as_of=service.now().astimezone(BERLIN).strftime('%d.%m.%Y, %H:%M Uhr'),
                                month=request.args.get('monat') or service.now().astimezone(BERLIN).strftime('%Y-%m'))
     p.app.register_blueprint(admin)

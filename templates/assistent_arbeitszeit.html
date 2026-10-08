@@ -6,7 +6,7 @@
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="{{ '#f3efe6' if admin else '#173f35' }}">
   <title>{{ 'Arbeitszeiten' if admin else 'Meine Arbeitszeit' }} · Gärtner</title>
-  {% if admin %}<link rel="stylesheet" href="{{ url_for('static',filename='arbeitszeit_admin.css') }}?v=farben-2">
+  {% if admin %}<link rel="stylesheet" href="{{ url_for('static',filename='arbeitszeit_admin.css') }}?v=zeitstatus-1">
   {% else %}
   <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=farben-2">
   <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=farben-2">
@@ -17,6 +17,12 @@
 </head>
 <body>
 {% if admin %}
+{% macro clock_status(employee) %}
+  {% if employee and employee.zeitstatus %}
+  <span class="employee-clock-status state-{{ employee.zeitstatus.key }}"><span class="status-dot" aria-hidden="true"></span>{{ employee.zeitstatus.label }}</span>
+  {% if employee.zeitstatus.detail %}<span class="employee-clock-detail">{{ employee.zeitstatus.detail }}</span>{% endif %}
+  {% endif %}
+{% endmacro %}
 <a class="skip-link" href="#arbeitszeiten">Zur Arbeitszeitübersicht</a>
 <header class="cockpit-header">
   <div class="cockpit-header-inner">
@@ -30,7 +36,8 @@
     <a href="{{ url_for('arbeitszeit_admin.index') }}" aria-current="page">Arbeitszeiten</a>
     <a href="{{ url_for('assistent.vacation_admin') }}">Urlaub &amp; Anträge</a>
   </nav>
-  <div class="page-heading"><div><span class="eyebrow">DEIN TEAM IM ÜBERBLICK</span><h1>Arbeitszeiten</h1><p>Mitarbeiter auswählen, Monatsstunden und erfasste Schichten ansehen.</p></div><span class="team-count">{{ employees|selectattr('aktiv','equalto',1)|list|length }} aktive Mitarbeiter</span></div>
+  <div class="page-heading"><div><span class="eyebrow">DEIN TEAM IM ÜBERBLICK</span><h1>Arbeitszeiten</h1><p>Aktuellen Stempelstatus sehen, Mitarbeiter auswählen und Monatszeiten ansehen.</p></div><span class="team-count">{{ employees|selectattr('aktiv','equalto',1)|list|length }} aktive Mitarbeiter</span></div>
+  {% if status_as_of %}<p class="status-as-of">Aktueller Stempelstatus · Stand {{ status_as_of }}</p>{% endif %}
   {% set selected_id = report.mitarbeiter.id if report else selected_employee_id|default(0) %}
   <section class="panel filter-panel" aria-label="Mitarbeiter und Monat auswählen">
     <form method="get" class="time-filter">
@@ -44,7 +51,8 @@
     {% set completed = report.schichten|rejectattr('offen')|rejectattr('pruefen')|list %}
     {% set open_shifts = report.schichten|selectattr('offen')|list %}
     {% set review_shifts = report.schichten|selectattr('pruefen')|list %}
-    <div class="report-heading"><div><span class="eyebrow">MONATSÜBERSICHT · {{ report.monat }}</span><h2>{{ report.mitarbeiter.name }}</h2></div><a class="text-link" href="{{ url_for('arbeitszeit_admin.index', monat=month) }}">Alle Mitarbeiter</a></div>
+    {% set current_employee = employees|selectattr('id','equalto',report.mitarbeiter.id)|first %}
+    <div class="report-heading"><div><span class="eyebrow">MONATSÜBERSICHT · {{ report.monat }}</span><h2>{{ report.mitarbeiter.name }}</h2><div class="report-clock-status">{{ clock_status(current_employee) }}</div></div><a class="text-link" href="{{ url_for('arbeitszeit_admin.index', monat=month) }}">Alle Mitarbeiter</a></div>
     <div class="time-totals" aria-label="Erfasste Monatszeiten">
       <section class="panel total primary-total"><span>Abgeschlossene Arbeitszeit</span><strong>{{ report.abgeschlossene_arbeitszeit }}</strong><small>Nur abgeschlossene, unauffällige Schichten</small></section>
       <section class="panel total"><span>Abgeschlossene Schichten</span><strong>{{ completed|length }}</strong><small>Im gewählten Monat</small></section>
@@ -70,7 +78,7 @@
     </section>
   {% elif not error %}
     <section aria-labelledby="team-heading"><div class="section-heading"><h2 id="team-heading">Deine Mitarbeiter</h2><span>Monat {{ month }}</span></div><div class="employee-grid">
-    {% for employee in employees %}<a class="panel employee-card{% if not employee.aktiv %} inactive{% endif %}" href="{{ url_for('arbeitszeit_admin.index', mitarbeiter_id=employee.id, monat=month) }}"><span class="employee-initial" aria-hidden="true">{{ employee.name[:1] }}</span><span><strong>{{ employee.name }}</strong><small>{{ 'Monatszeiten ansehen' if employee.aktiv else 'Inaktiv · frühere Zeiten ansehen' }}</small></span><span aria-hidden="true">→</span></a>{% else %}<div class="panel empty-state"><strong>Noch keine Mitarbeiter vorhanden</strong><p>Lege dein Team in der Mitarbeiterverwaltung an.</p><a class="text-link" href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter verwalten →</a></div>{% endfor %}
+    {% for employee in employees %}<a class="panel employee-card{% if not employee.aktiv %} inactive{% endif %}" href="{{ url_for('arbeitszeit_admin.index', mitarbeiter_id=employee.id, monat=month) }}"><span class="employee-initial" aria-hidden="true">{{ employee.name[:1] }}</span><span><strong>{{ employee.name }}</strong>{{ clock_status(employee) }}<small>{{ 'Monatszeiten ansehen' if employee.aktiv else 'Inaktiv · frühere Zeiten ansehen' }}</small></span><span aria-hidden="true">→</span></a>{% else %}<div class="panel empty-state"><strong>Noch keine Mitarbeiter vorhanden</strong><p>Lege dein Team in der Mitarbeiterverwaltung an.</p><a class="text-link" href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter verwalten →</a></div>{% endfor %}
     </div></section>
   {% endif %}
   <footer class="page-footer"><span>Gärtner · Werkstattleitung</span><a href="{{ url_for('betriebs_cockpit') }}">← Zurück ins Werkstatt-Cockpit</a></footer>

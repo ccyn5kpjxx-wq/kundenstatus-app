@@ -31,6 +31,78 @@ class TimeTests(unittest.TestCase):
         revision = self.s.state(who)['revision']
         return self.s.stamp(who, action, key or f'test-request-{revision}', revision)
 
+    def team_status(self, mid=1):
+        return next(employee['zeitstatus'] for employee in self.s.admin_employees() if employee['id'] == mid)
+
+    def test_team_current_clock_transitions_without_changing_stamps(self):
+        self.assertEqual(self.team_status()['key'], 'nicht_angestempelt')
+        for instant, action, key, label in [
+            ('2026-09-29T07:00:00+00:00','kommen','arbeitet','Angestempelt'),
+            ('2026-09-29T10:00:00+00:00','pause','pause','In Pause'),
+            ('2026-09-29T10:30:00+00:00','weiter','arbeitet','Angestempelt'),
+            ('2026-09-29T15:00:00+00:00','gehen','beendet','Beendet')]:
+            self.at(instant, action)
+            before = self.s.state(PERSON)
+            self.assertEqual((self.team_status()['key'],self.team_status()['label']), (key,label))
+            self.assertEqual(self.s.state(PERSON), before)
+            self.assertEqual(self.team_status(2)['key'], 'nicht_angestempelt')
+        self.assertEqual(self.team_status()['detail'], 'Heute um 17:00 Uhr')
+        with self.s.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM mitarbeiter_zeitstempel').fetchone()[0], 4)
+
+    def test_team_overnight_work_and_pause_stay_active_after_day_rollover(self):
+        self.at('2026-09-30T20:00:00+00:00','kommen')
+        self.clock = datetime.fromisoformat('2026-09-30T22:30:00+00:00')
+        self.assertEqual(self.team_status()['key'], 'arbeitet')
+        self.assertEqual(self.team_status()['detail'], 'Seit 30.09.2026, 22:00 Uhr')
+        self.at('2026-09-30T22:45:00+00:00','pause')
+        self.clock = datetime.fromisoformat('2026-10-01T23:00:00+00:00')
+        self.assertEqual(self.team_status()['key'], 'pause')
+        self.assertEqual(self.team_status()['detail'], 'Seit 01.10.2026, 00:45 Uhr')
+
+    def test_team_finished_status_uses_berlin_today_and_resets_next_day(self):
+        self.at('2026-09-29T19:00:00+00:00','kommen')
+        self.at('2026-09-29T22:10:00+00:00','gehen')  # 30 September in Berlin
+        self.clock = datetime.fromisoformat('2026-09-30T12:00:00+00:00')
+        self.assertEqual(self.team_status()['key'], 'beendet')
+        self.assertEqual(self.team_status()['detail'], 'Heute um 00:10 Uhr')
+        self.clock = datetime.fromisoformat('2026-09-30T22:00:00+00:00')
+        self.assertEqual(self.team_status()['key'], 'nicht_angestempelt')
+
+    def test_team_inactive_unknown_and_malformed_state_are_explicit(self):
+        self.at('2026-09-29T07:00:00+00:00','kommen')
+        with self.s.db() as db:
+            db.execute('UPDATE mitarbeiter SET aktiv=0 WHERE id=1')
+        self.assertEqual(self.team_status()['key'], 'inaktiv')
+        with self.s.db() as db:
+            db.execute("INSERT INTO mitarbeiter_zeitstatus VALUES(2,'unexpected',1)")
+        self.assertEqual(self.team_status(2)['label'], 'Zeitstatus prüfen')
+        with self.s.db() as db:
+            db.execute('UPDATE mitarbeiter SET aktiv=1 WHERE id=1')
+            db.execute("UPDATE mitarbeiter_zeitstatus SET zustand='abwesend' WHERE mitarbeiter_id=1")
+            db.execute("UPDATE mitarbeiter_zeitstempel SET zeit='invalid' WHERE mitarbeiter_id=1")
+        self.assertEqual(self.team_status()['key'], 'pruefen')
+
+    def test_admin_route_authorization_and_current_status_ignore_historical_month(self):
+        from flask import Blueprint
+        from werkstatt_arbeitszeit import register_time_views
+        register_time_views(self.p, Blueprint('synthetic_time',__name__), lambda fn:fn, self.s)
+        self.at('2026-09-29T07:00:00+00:00','kommen')
+        client = self.p.app.test_client()
+        self.assertEqual(client.get('/admin/arbeitszeit').status_code, 403)
+        with client.session_transaction() as session:
+            session['admin'] = True
+        with patch('werkstatt_arbeitszeit.render_template', return_value='synthetic page') as render:
+            response = client.get('/admin/arbeitszeit?mitarbeiter_id=1&monat=2026-01')
+            self.assertEqual(response.status_code, 200)
+            context = render.call_args.kwargs
+            self.assertEqual(context['month'], '2026-01')
+            self.assertEqual(context['report']['schichten'], [])
+            employee = next(item for item in context['employees'] if item['id'] == 1)
+            self.assertEqual(employee['zeitstatus']['key'], 'arbeitet')
+            self.assertEqual(context['status_as_of'], '29.09.2026, 09:00 Uhr')
+        self.assertEqual(client.post('/admin/arbeitszeit').status_code, 405)
+
     def test_identity_active_and_input_types(self):
         for who in (ADMIN, dict(PERSON,actor='mitarbeiter:2'), dict(PERSON,lesen=0), dict(PERSON,mitarbeiter_id=True)):
             with self.assertRaises(ValueError):self.s.state(who)
@@ -181,6 +253,7 @@ class TimeTests(unittest.TestCase):
             self.at('2026-09-29T07:00:00+00:00','kommen')
             self.at('2026-09-29T15:00:00+00:00','gehen')
             self.assertEqual(self.s.summary(PERSON)['abgeschlossene_arbeitszeit'],'8:00 Stunden')
+            self.assertEqual(self.team_status()['key'], 'beendet')
         self.assertTrue(any('INSERT INTO mitarbeiter_zeitstatus' in sql and sql.endswith('RETURNING mitarbeiter_id') for sql in statements))
 
 
