@@ -311,10 +311,15 @@ def delivery_context(portal, overview):
 
 
 def register_delivery_forms(bp, portal):
-    @bp.post('/lieferung/<action>')
+    @bp.route('/lieferung/<action>', methods=['GET', 'POST'])
     def order_delivery_form(action):
         if action not in {'beleg', 'analyse', 'zuordnen'}:
             abort(404)
+        if request.method != 'POST':
+            if action != 'beleg':
+                abort(405)
+            flash('Bitte den Lieferschein und die passende Bestellung erneut auswählen.', 'warning')
+            return redirect(url_for('werkstatt_orders.intake_index', _anchor='lieferschein-upload'), 303)
         key = request.form.get('order_key', '')
         from_intake = action == 'beleg' and request.form.get('return_to') == 'eingang'
         try:

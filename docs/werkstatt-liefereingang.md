@@ -61,10 +61,22 @@ bestätigte Liefernachweise kompatibel.
 - PostgreSQL-Kompatibilität über den vorhandenen Adapter getestet; keine echte
   PostgreSQL-Testinstanz verwendet.
 
-Die Grundfunktion wurde am 08.10.2026 mit `77f6e2eb` veröffentlicht. Die
-bereitgestellte Bilddatei liegt nur in der privaten lokalen Vorschau; eine
-produktive Lieferbuchung erfolgte nicht.
+Die Grundfunktion wurde am 08.10.2026 mit `77f6e2eb` veröffentlicht. Ein echter
+Originalupload wurde anschließend im Liveportal geprüft; der heruntergeladene
+Beleg stimmt bytegenau mit der hochgeladenen Datei überein. Die Liveauslese
+lieferte dabei keinen lesbaren Text; die manuelle Prüfung bleibt verfügbar.
+Eine produktive Lieferbuchung erfolgte nicht.
 
 ## Upload unter Eingänge & Belege
 
 Unter „Lieferung angekommen?“ kann der Admin den Lieferschein direkt als Foto oder PDF auswählen und einer gespeicherten Bestellung zuordnen. Die Bestellwahl hat keine Vorauswahl und bietet nur verifizierbare Bestellsnapshots; Alias-Schlüssel erscheinen einmal. Nach dem Speichern öffnet sich die Beleganalyse an der gewählten Bestellung. Upload und Analyse buchen weiterhin keine Lieferung. Fehler führen zurück zum Upload; eine neue Dateiauswahl ist dann erforderlich.
+
+Nach einem Verbindungsabbruch kann der Browser auf der Aktionsadresse
+`/admin/assistent-bestellungen/lieferung/beleg` stehen bleiben. Direkte GET- und
+HEAD-Aufrufe dieser Adresse öffnen wieder das Uploadformular statt einer
+405-Fehlerseite. Sie speichern keine Datei und wiederholen keine Buchung.
+Analyse und Zuordnung sind weiterhin ausschließlich per CSRF-geschütztem POST
+verfügbar. Die Wiederherstellung samt Adminschutz und unveränderten Daten ist
+durch die nun 22 Lieferprüfungen abgedeckt. Eine 502-Antwort während eines
+Serverausfalls wird dadurch nicht zu einem erfolgreichen Upload; erst der
+sichtbar gespeicherte Beleg und sein Originaldownload bestätigen den Erfolg.

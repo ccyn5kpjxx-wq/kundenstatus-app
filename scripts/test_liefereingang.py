@@ -90,6 +90,31 @@ class DeliveryTests(unittest.TestCase):
         self.assertTrue(result.location.endswith('/eingang/ansicht#lieferschein-upload'))
         self.assertIn('Lieferschein als Foto oder PDF auswählen', self.client.get(result.location).get_data(as_text=True))
 
+    def test_upload_address_recovers_after_failed_post_without_writes(self):
+        route = '/admin/assistent-bestellungen/lieferung/'
+        self.assertEqual(self.p.app.test_client().get(route + 'beleg').status_code, 403)
+        before = self.rows('SELECT * FROM einkauf_material_dialoge')
+        with patch.object(self.fixture.f.manager, 'tick', side_effect=AssertionError('No dispatch')):
+            result = self.client.get(route + 'beleg?order_key=material:1')
+            self.assertEqual(result.status_code, 303)
+            self.assertTrue(result.location.endswith('/eingang/ansicht#lieferschein-upload'))
+            view = self.client.get(result.location)
+            self.assertEqual(view.status_code, 200)
+            self.assertIn('Lieferschein und die passende Bestellung erneut auswählen', view.get_data(as_text=True))
+            self.assertEqual(self.client.get(route + 'analyse').status_code, 405)
+            self.assertEqual(self.client.get(route + 'zuordnen').status_code, 405)
+            self.assertEqual(self.client.get(route + 'unknown').status_code, 404)
+            self.assertEqual(self.client.post(route + 'beleg').status_code, 400)
+            head = self.client.head(route + 'beleg', data={
+                'order_key': 'material:1', 'file': (BytesIO(png()), 'Lieferschein.png')})
+            self.assertEqual(head.status_code, 303)
+            for action in ('analyse', 'zuordnen'):
+                self.assertEqual(self.client.head(route + action, data=self.form()).status_code, 405)
+        self.assertEqual(self.rows('SELECT * FROM einkauf_material_dialoge'), before)
+        self.assertEqual(self.rows('SELECT * FROM einkauf_eingang'), [])
+        self.assertEqual(self.rows('SELECT * FROM einkauf_eingang_dateien'), [])
+        self.assertEqual(self.rows('SELECT * FROM assistent_bestelllieferungen'), [])
+
     def test_intake_order_choices_are_canonical_and_skip_invalid_snapshots(self):
         self.fixture.f.order('alias', request_id='material:1')
         self.fixture.f.material(2, supplier_name='Other supplier')
