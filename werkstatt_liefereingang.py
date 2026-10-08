@@ -1,4 +1,4 @@
-"""Private delivery evidence attached to a frozen order; OCR never books goods."""
+"""Delivery evidence attached to frozen orders, with conservative upload automation."""
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
@@ -157,8 +157,30 @@ class OrderDelivery:
                 ('order-receipts:' + order['key'],)).fetchone()
         if not group:
             return []
-        return [dict(file, group_id=group['id'], analysis=analyze_delivery_text(file['draft_text']))
-                for file in intake.detail(group['id'])['files'] if file['kind'] == 'lieferschein']
+        files = [dict(file, group_id=group['id'], analysis=analyze_delivery_text(file['draft_text']))
+                 for file in intake.detail(group['id'])['files'] if file['kind'] == 'lieferschein']
+        if not files:
+            return []
+        with self.p.order_price_comparison.db() as db:
+            rows = db.execute('SELECT DISTINCT order_key FROM assistent_bestelllieferungen').fetchall()
+        events = []
+        for row in rows:
+            try:
+                detail = self.detail(row['order_key'])
+                events.extend(dict(event, matching_order=detail['order']) for event in detail['events'])
+            except (ValueError, LookupError, PermissionError):
+                continue
+        from werkstatt_lieferautomatik import document_identity, matching_item
+        for file in files:
+            items = [item for item in file['analysis']['items'] if not item['fee']]
+            covered = [item for item in items if any(event['page'] == item['page'] and event['position'] == item['position'] and
+                event['sku'].casefold() == item['sku'].casefold() and Decimal(event['quantity']) == Decimal(item['quantity']) and
+                matching_item(event['matching_order'], file['draft_text'], item) and
+                (event['file_sha256'] == file['sha256'] or
+                 event.get('document_identity') == document_identity(file['analysis'], item)) for event in events)]
+            file['assignment_complete'] = bool(items) and len(covered) == len(items)
+            file['assignment_partial'] = bool(covered) and not file['assignment_complete']
+        return files
 
     def detail(self, key):
         order = self.order(key)
@@ -239,8 +261,8 @@ class OrderDelivery:
             raise ValueError('Lokale Belegauslese ist nicht verfügbar.')
         return reader(path, name)
 
-    def record(self, key, payload):
-        if payload.get('reviewed') is not True:
+    def record(self, key, payload, *, automatic=False):
+        if not automatic and payload.get('reviewed') is not True:
             raise ValueError('Lieferant, Artikel, Variante, Gebinde und Liefermenge am Original bestätigen.')
         group_id, file_id = _id(payload.get('group_id')), _id(payload.get('file_id'))
         page, position = _id(payload.get('page'), 'Belegseite'), document_position(payload.get('position'))
@@ -248,6 +270,28 @@ class OrderDelivery:
         identity = {name: _text(payload.get(name), name, 500, name == 'variant') for name in ('supplier', 'sku', 'variant', 'unit')}
         with self.p.portal_originals_operation_lock():
             order, group, file = self.source(key, group_id, file_id)
+            automatic_fields = {}
+            if automatic:
+                from werkstatt_lieferautomatik import matching_item, previous_delivery, document_identity
+                analysis = analyze_delivery_text(file['draft_text'])
+                analysis['_text'] = file['draft_text']
+                items = [item for item in analysis['items'] if item['page'] == page and item['position'] == position]
+                if (file['extraction_status'] != 'pruefen' or len(items) != 1 or
+                        not matching_item(order, file['draft_text'], items[0]) or
+                        Decimal(quantity) != Decimal(items[0]['quantity'])):
+                    raise ValueError('Lieferscheinposition ist nicht eindeutig automatisch belegbar.')
+                previous = previous_delivery(self, analysis, items[0], file['sha256'])
+                if previous:
+                    if previous['order']['key'] != order['key']:
+                        raise IntakeConflict('Lieferscheinposition ist bereits einer anderen Bestellung zugeordnet.')
+                    return previous
+                current = self.detail(order['key'])
+                if (current['state'] in {'pruefen', 'mehrlieferung'} or
+                        Decimal(quantity) > Decimal(current['ordered']) - Decimal(current['quantity'])):
+                    raise ValueError('Liefermenge passt nicht zur offenen Bestellmenge.')
+                automatic_fields = {'assignment_method': 'automatic-v1', 'document_identity': document_identity(analysis, items[0]),
+                    'document_number': analysis['number'], 'document_date': analysis['date'],
+                    'content': items[0]['content'], 'total_content': items[0]['total_content']}
             if (normalize_supplier(identity['supplier']) != normalize_supplier(order['supplier'])
                     or any(_norm(identity[name]) != _norm(order[name]) for name in ('sku', 'variant', 'unit'))):
                 raise ValueError('Lieferant, Artikel, Variante oder Bestelleinheit passt nicht zur Bestellung.')
@@ -271,7 +315,7 @@ class OrderDelivery:
                 'file_sha256': file['sha256'], 'group_id': group_id, 'file_id': file_id, 'page': page,
                 'position': position, 'quantity': quantity, 'unit': order['unit'],
                 'supplier': order['supplier'], 'sku': order['sku'], 'variant': order['variant'],
-                'ocr_correction': correction}
+                'ocr_correction': correction, **automatic_fields}
             # Physical file IDs can differ after re-upload; the original bytes and
             # printed page/position establish the global delivery identity.
             stable = {name: value for name, value in record.items() if name not in {'group_id', 'file_id'}}
@@ -282,7 +326,7 @@ class OrderDelivery:
                     '(order_key,order_fingerprint,source_key,payload_hash,payload_json,created_at,created_by) '
                     'VALUES(?,?,?,?,?,?,?) ON CONFLICT(source_key) DO NOTHING',
                     (order['key'], order['fingerprint'], source, _hash(record), _json(record),
-                     datetime.now(timezone.utc).isoformat(), 'admin'))
+                     datetime.now(timezone.utc).isoformat(), 'admin:auto' if automatic else 'admin'))
                 existing = dict(db.execute('SELECT * FROM assistent_bestelllieferungen WHERE source_key=?', (source,)).fetchone())
                 old = json.loads(existing['payload_json'])
                 old_stable = {name: value for name, value in old.items() if name not in {'group_id', 'file_id'}}
@@ -325,7 +369,7 @@ def delivery_context(portal, overview):
 def register_delivery_forms(bp, portal):
     @bp.route('/lieferung/<action>', methods=['GET', 'POST'])
     def order_delivery_form(action):
-        if action not in {'beleg', 'analyse', 'zuordnen'}:
+        if action not in {'beleg', 'analyse', 'zuordnen', 'automatisch'}:
             abort(404)
         if request.method != 'POST':
             if action != 'beleg':
@@ -333,10 +377,28 @@ def register_delivery_forms(bp, portal):
             flash('Bitte den Lieferschein und die passende Bestellung erneut auswählen.', 'warning')
             return redirect(url_for('werkstatt_orders.intake_index', _anchor='lieferschein-upload'), 303)
         key = request.form.get('order_key', '')
-        from_intake = action == 'beleg' and request.form.get('return_to') == 'eingang'
+        from_intake = action in {'beleg', 'automatisch'} and request.form.get('return_to') == 'eingang'
         try:
             service = get_delivery(portal)
-            if action == 'beleg':
+            if action == 'automatisch':
+                from werkstatt_lieferautomatik import process_delivery
+                report = process_delivery(service, key, request.files.get('file'),
+                    request.form.get('group_id'), request.form.get('file_id'))
+                orders = {item['order']['key']: item for item in report['orders']}
+                if orders:
+                    key = next(iter(orders))
+                    message = 'Lieferschein automatisch zugeordnet. ' + ' · '.join(item['label'] for item in orders.values()) + '.'
+                    if report['review']:
+                        message += ' Weitere Positionen brauchen Prüfung: ' + ' '.join(report['review'])
+                    flash(message, 'warning' if report['review'] else 'success')
+                    return redirect(url_for('werkstatt_orders.index', bestellung=key[6:] if key.startswith('order:') else key,
+                        _anchor='liefereingang'), 303)
+                flash('Original gespeichert. ' + ' '.join(report['review']), 'warning')
+                if not key:
+                    return redirect(url_for('werkstatt_orders.intake_index', id=report['group_id']), 303)
+                return redirect(url_for('werkstatt_orders.index', bestellung=key[6:] if key.startswith('order:') else key,
+                    _anchor='liefereingang'), 303)
+            elif action == 'beleg':
                 if not key:
                     raise ValueError('Bitte die passende Bestellung auswählen und den Lieferschein erneut auswählen.')
                 order, _, _ = service.attach(key, request.files.get('file'))

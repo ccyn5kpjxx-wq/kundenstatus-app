@@ -1,10 +1,11 @@
 # Lieferscheine zur Bestellung
 
 Unter **Eingänge & Werkstatt → Bestellordner** die Bestellung öffnen und
-**Lieferschein erfassen** wählen. Originalfoto oder PDF speichern, **Beleg
-analysieren** drücken und die Angaben am Original kontrollieren. Anschließend
-Seite, gedruckte Position, Liefermenge, Artikel und Gebinde bestätigen und
-**Geprüfte Lieferung zuordnen** wählen.
+**Lieferschein erfassen** wählen. **Lieferschein hochladen & automatisch
+zuordnen** speichert das Original, analysiert den Beleg und übernimmt eindeutig
+belegte Lieferpositionen. Vollständig gelieferte Bestellungen erhalten den
+Lieferstatus **Vollständig geliefert**. Teilmengen bleiben als Teillieferung
+offen. Nur unklare Belege benötigen die manuelle Originalprüfung.
 
 Die Bestellübersicht zeigt offene, teilweise oder vollständige Lieferungen.
 Mehrlieferungen und beschädigte beziehungsweise fehlende Nachweise erhalten
@@ -15,7 +16,8 @@ einen Prüfstatus. Der ursprüngliche Bestell- und Versandnachweis bleibt erhalt
 Die Auslese läuft lokal. Bei Fotos werden OCR-Koordinaten verwendet, damit
 Tabellenzeilen zusammenbleiben. Die konservative Tabellenerkennung unterstützt
 den Top-Color-Lieferscheintyp; andere Layouts bleiben über Original und Auslesetext
-manuell prüfbar. OCR-Ergebnisse sind Vorschläge und buchen keine Lieferung.
+manuell prüfbar. Automatische Buchungen erfolgen ausschließlich nach dem
+positiven Abgleich unten; sonst bleiben OCR-Ergebnisse ungeprüfte Vorschläge.
 
 Ein geliefertes Gebinde mit 0,5 Liter Inhalt bedeutet **1 Stück**, sofern dies
 die gespeicherte Bestelleinheit ist. Inhalt, Gesamtmenge und gelieferte Gebinde
@@ -118,3 +120,37 @@ las den vorhandenen Beleg in 3,678 Sekunden (1289 Textzeichen, fünf Threads,
 gefilterter Umgebung und Prozessbereinigung dauerte 3,876 Sekunden. Der Container hat 8 GiB RAM;
 vorheriger Verbrauch etwa 1,4 GiB, keine OOM-Ereignisse. Dies ist ein Messwert
 für diesen Beleg, keine Laufzeitgarantie für beliebige Dokumente.
+
+## Automatische Zuordnung auf ausdrücklichen Nutzerauftrag
+
+Die Aktion `lieferung/automatisch` kombiniert Upload, begrenzte Auslese und
+Lieferzuordnung. Ohne Bestellauswahl bleibt das Original zunächst in einer
+neutralen Eingangssammlung; eindeutig passende Positionen werden mitsamt
+Original und Auslese bei den kanonischen Bestellungen abgelegt. Eine vorhandene
+Bestellauswahl begrenzt den Abgleich auf diese Bestellung. Originale unklarer
+Positionen bleiben erhalten. Die Eingangsoberfläche wird als Folgeaufgabe an
+diesen Ablauf angeschlossen.
+
+Regelversion `automatic-v1` unterstützt die bekannte Top-Color-Tabelle mit
+positiv belegtem Lieferantenkopf, Belegnummer und Datum, exakter Artikelnummer,
+PPG-T/E-Produktcode, Variante/Farbe, Literinhalt und Bestelleinheit Stück/Gebinde.
+Produkt- und Variantenangaben sowie die Beschreibung dürfen sich beim Inhalt
+nicht widersprechen. Die gelieferte ganzzahlige Gebindezahl multipliziert mit
+dem Gebindeinhalt muss der gedruckten Gesamtmenge entsprechen. Logistik wird
+ausgeschlossen. Nur eine passende offene und nachweislich versandte Bestellung
+wird gewählt; unklare Bestellungen, Mehrlieferungen und mehrdeutige Positionen
+werden nicht automatisch gebucht.
+
+Der Original-/Restore-Lock umfasst den abschließenden Abgleich, erneute
+Restmengenprüfung und Buchung. `record(..., automatic=True)` prüft den positiven
+Belegabgleich selbst erneut; ein HTTP-Formular kann diesen Modus nicht setzen.
+Automatische Nachweise tragen `created_by=admin:auto`, Regelversion und
+Dokumentidentität. SHA/Seite/Position und zusätzlich Lieferant/Belegnummer/Seite/
+Position verhindern Wiederholungen, auch bei einem neuen Foto desselben
+Papiers. Alte manuelle Nachweise ohne rekonstruierbare Belegnummer blockieren
+eine unsichere automatische Folgebuchung. Teilweise zugeordnete Dateien
+behalten die Aktionen für noch offene Positionen.
+
+Es entstehen keine neuen Bestellungen, Rechnungsbuchungen oder Nachrichten.
+Der unveränderliche Bestell-/Versandnachweis bleibt erhalten; abgehakt wird der
+separate Lieferstatus. Rechnung und tatsächlicher Preis bleiben separat offen.
