@@ -653,8 +653,10 @@ def register_orders(portal):
                     WHERE m.aktiv=1 AND r.lesen=1 AND r.einkaufen=1 ORDER BY m.name,m.id''').fetchall()]
             finally:
                 db.close()
+        delivery = getattr(portal, 'order_delivery', None)
         return render_template('einkaufseingang.html', entries=entries,
                                current=current, errors=errors or [], csrf=csrf,
+                               delivery_orders=delivery.choices() if delivery else [],
                                candidates=candidates, lookup_line=lookup_line,
                                source_nonce=str(uuid.uuid4()),
                                monitor=monitor.status() if monitor else None,

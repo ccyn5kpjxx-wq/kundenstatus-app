@@ -9,6 +9,7 @@ from flask import abort, flash, redirect, request, url_for
 
 from werkstatt_einkaufseingang import IntakeConflict, _decimal, _hash, _id, _json, _norm, _text
 from werkstatt_rechnungsfreigabe import normalize_supplier
+from werkstatt_bestellplan import BERLIN
 
 
 def document_position(value):
@@ -126,6 +127,26 @@ class OrderDelivery:
     def order(self, key):
         with self.p.order_price_comparison.db() as db:
             return self.p.order_price_comparison._order(db, key)
+
+    def choices(self):
+        """Only offer saved, verifiable orders; aliases share one choice."""
+        comparison = self.p.order_price_comparison
+        orders = {}
+        with comparison.db() as db:
+            keys = ['material:' + str(row['id']) for row in db.execute(
+                "SELECT id FROM einkauf_material_dialoge WHERE state IN ('external_pending','external_sent') ORDER BY id DESC")]
+            keys += ['order:' + row['id'] for row in db.execute(
+                'SELECT id FROM assistent_bestellanforderungen ORDER BY created_at DESC,id DESC')]
+            for key in keys:
+                try:
+                    order = comparison._order(db, key)
+                    _decimal(order['quantity'], 'Bestellmenge')
+                except (ValueError, LookupError, PermissionError):
+                    continue
+                order['created_display'] = (datetime.fromisoformat(order['created_at']).astimezone(BERLIN)
+                    .strftime('%d.%m.%Y %H:%M') if order['created_at'] else '')
+                orders.setdefault(order['key'], order)
+        return list(orders.values())
 
     def files(self, order):
         intake = self.p.workshop_intake
@@ -295,9 +316,12 @@ def register_delivery_forms(bp, portal):
         if action not in {'beleg', 'analyse', 'zuordnen'}:
             abort(404)
         key = request.form.get('order_key', '')
+        from_intake = action == 'beleg' and request.form.get('return_to') == 'eingang'
         try:
             service = get_delivery(portal)
             if action == 'beleg':
+                if not key:
+                    raise ValueError('Bitte die passende Bestellung auswählen und den Lieferschein erneut auswählen.')
                 order, _, _ = service.attach(key, request.files.get('file'))
                 key = order['key']
                 message = 'Lieferschein gespeichert. Jetzt analysieren und die Lieferung prüfen.'
@@ -317,5 +341,7 @@ def register_delivery_forms(bp, portal):
             flash(message, 'success')
         except (ValueError, LookupError, PermissionError) as exc:
             flash(str(exc), 'error')
+            if from_intake:
+                return redirect(url_for('werkstatt_orders.intake_index', _anchor='lieferschein-upload'), 303)
         return redirect(url_for('werkstatt_orders.index', bestellung=key[6:] if key.startswith('order:') else key,
             _anchor='liefereingang'), 303)

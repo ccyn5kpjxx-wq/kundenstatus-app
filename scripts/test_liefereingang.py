@@ -52,6 +52,56 @@ class DeliveryTests(unittest.TestCase):
     def rows(self, sql):
         return self.fixture.rows(sql)
 
+    def test_intake_upload_without_selected_order_leads_to_analysis(self):
+        before = self.rows('SELECT * FROM einkauf_material_dialoge')
+        route = '/admin/assistent-bestellungen/eingang/ansicht'
+        with patch.object(self.fixture.f.manager, 'tick', side_effect=AssertionError('No dispatch')):
+            view = self.client.get(route)
+            self.assertEqual(view.status_code, 200)
+            html = view.get_data(as_text=True)
+            self.assertIn('name="file"', html)
+            self.assertIn('name="order_key" required', html)
+            self.assertIn('<option value="" selected>Bitte Bestellung auswählen</option>', html)
+            self.assertIn('value="material:1"', html)
+            self.assertIn('Lieferschein hochladen &amp; prüfen', html)
+            result = self.post('beleg', return_to='eingang', file=(BytesIO(png()), 'Lieferschein.png'))
+            self.assertEqual(result.status_code, 303)
+            self.assertTrue(result.location.endswith('?bestellung=material:1#liefereingang'))
+            self.assertIn('Beleg analysieren', self.client.get(result.location).get_data(as_text=True))
+            original = self.client.get('/admin/assistent-bestellungen/eingang/1/dateien/1/original')
+            self.assertEqual(original.data, png())
+        self.assertEqual(self.rows('SELECT * FROM assistent_bestelllieferungen'), [])
+        self.assertEqual(self.rows('SELECT * FROM assistent_bestellanforderungen'), [])
+        self.assertEqual(self.rows('SELECT * FROM einkauf_material_dialoge'), before)
+
+    def test_intake_upload_error_returns_to_visible_upload(self):
+        for key in ('', 'material:9999', 'https://example.invalid/'):
+            result = self.post('beleg', order_key=key, return_to='eingang',
+                file=(BytesIO(png()), 'Lieferschein.png'))
+            self.assertEqual(result.status_code, 303)
+            self.assertTrue(result.location.endswith('/eingang/ansicht#lieferschein-upload'))
+            view = self.client.get(result.location)
+            self.assertEqual(view.status_code, 200)
+            self.assertIn('Lieferschein hochladen &amp; prüfen', view.get_data(as_text=True))
+        self.assertEqual(self.rows('SELECT * FROM einkauf_eingang'), [])
+        self.assertEqual(self.rows('SELECT * FROM einkauf_eingang_dateien'), [])
+        self.assertEqual(self.rows('SELECT * FROM assistent_bestelllieferungen'), [])
+        result = self.post('beleg', return_to='eingang')
+        self.assertTrue(result.location.endswith('/eingang/ansicht#lieferschein-upload'))
+        self.assertIn('Lieferschein als Foto oder PDF auswählen', self.client.get(result.location).get_data(as_text=True))
+
+    def test_intake_order_choices_are_canonical_and_skip_invalid_snapshots(self):
+        self.fixture.f.order('alias', request_id='material:1')
+        self.fixture.f.material(2, supplier_name='Other supplier')
+        with self.p.workshop_intake.db() as db:
+            db.execute("UPDATE einkauf_material_dialoge SET snapshot_hash='invalid' WHERE id=2")
+        from werkstatt_liefereingang import OrderDelivery
+        with patch.object(OrderDelivery, 'init_schema', side_effect=AssertionError('GET mutates schema')):
+            self.assertEqual([item['key'] for item in self.service.choices()], ['material:1'])
+            html = self.client.get('/admin/assistent-bestellungen/eingang/ansicht').get_data(as_text=True)
+        self.assertEqual(html.count('value="material:1"'), 1)
+        self.assertNotIn('value="material:2"', html)
+
     def test_upload_analysis_assignment_end_to_end_no_order_changes(self):
         before = self.rows('SELECT * FROM einkauf_material_dialoge')
         with patch.object(self.fixture.f.manager, 'tick', side_effect=AssertionError('No dispatch')):

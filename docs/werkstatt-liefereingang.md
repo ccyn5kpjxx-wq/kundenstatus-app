@@ -61,6 +61,10 @@ bestätigte Liefernachweise kompatibel.
 - PostgreSQL-Kompatibilität über den vorhandenen Adapter getestet; keine echte
   PostgreSQL-Testinstanz verwendet.
 
-Die Erweiterung ist ein lokaler geprüfter Stand. Die bereitgestellte Bilddatei
-liegt nur in der privaten lokalen Vorschau; eine produktive Lieferbuchung oder
-Veröffentlichung erfolgte nicht.
+Die Grundfunktion wurde am 08.10.2026 mit `77f6e2eb` veröffentlicht. Die
+bereitgestellte Bilddatei liegt nur in der privaten lokalen Vorschau; eine
+produktive Lieferbuchung erfolgte nicht.
+
+## Upload unter Eingänge & Belege
+
+Unter „Lieferung angekommen?“ kann der Admin den Lieferschein direkt als Foto oder PDF auswählen und einer gespeicherten Bestellung zuordnen. Die Bestellwahl hat keine Vorauswahl und bietet nur verifizierbare Bestellsnapshots; Alias-Schlüssel erscheinen einmal. Nach dem Speichern öffnet sich die Beleganalyse an der gewählten Bestellung. Upload und Analyse buchen weiterhin keine Lieferung. Fehler führen zurück zum Upload; eine neue Dateiauswahl ist dann erforderlich.
