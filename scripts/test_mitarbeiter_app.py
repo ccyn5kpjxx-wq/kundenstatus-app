@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 from functools import lru_cache
+from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
@@ -84,6 +85,37 @@ class EmployeeAppTests(TestCase):
                 self.addCleanup(response.close)
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(self.client.post(path).status_code, 405)
+
+    def test_install_action_without_javascript_targets_visible_instructions(self):
+        class InstallPage(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.action = None
+                self.details = {}
+                self.platforms = []
+
+            def handle_starttag(self, tag, attributes):
+                attrs = dict(attributes)
+                if 'data-app-install' in attrs:
+                    self.action = (tag, attrs)
+                if tag == 'details' and 'id' in attrs:
+                    self.details[attrs['id']] = attrs
+                if 'data-app-platform' in attrs:
+                    self.platforms.append(attrs)
+
+        page = InstallPage()
+        page.feed(self.get('/werkstatt/app').get_data(as_text=True))
+        tag, action = page.action
+        self.assertEqual(tag, 'a')
+        target = urlsplit(action['href'])
+        self.assertFalse(any((target.scheme, target.netloc, target.path, target.query)))
+        self.assertTrue(target.fragment)
+        instructions = page.details[target.fragment]
+        self.assertIn('open', instructions)
+        self.assertNotIn('hidden', instructions)
+        self.assertEqual({item['data-app-platform'] for item in page.platforms},
+                         {'ios', 'android', 'browser'})
+        self.assertTrue(all('hidden' not in item for item in page.platforms))
 
     def test_install_and_worker_have_privacy_and_mime_headers(self):
         for path in ('/werkstatt/app', '/werkstatt/app-sw.js'):

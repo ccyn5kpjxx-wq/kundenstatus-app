@@ -25,7 +25,9 @@
   function renderButtons() {
     const alreadyInstalled = isStandalone();
     buttons.forEach((button) => {
-      button.disabled = alreadyInstalled || promptOpen;
+      const disabled = alreadyInstalled || promptOpen;
+      if ('disabled' in button) button.disabled = disabled;
+      button.setAttribute('aria-disabled', String(disabled));
       button.textContent = alreadyInstalled ? 'App ist installiert' :
         promptOpen ? 'Installation geöffnet …' :
           pendingInstall ? 'App installieren' : 'App aufs Handy holen';
