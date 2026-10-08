@@ -2,6 +2,7 @@
 from html.parser import HTMLParser
 from pathlib import Path
 import unittest
+from urllib.parse import urlencode
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -12,7 +13,11 @@ ENV = Environment(loader=FileSystemLoader(ROOT / 'templates'), autoescape=select
 def url_for(endpoint, **values):
     if endpoint == 'static':
         return '/static/' + values['filename']
+    if endpoint == 'arbeitszeit_admin.index':
+        return '/admin/arbeitszeit' + ('?' + urlencode(values) if values else '')
     return {'assistent.page': '/werkstatt/assistent', 'admin_mitarbeiter': '/admin/mitarbeiter',
+            'betriebs_cockpit': '/admin/cockpit',
+            'assistent.vacation_admin': '/werkstatt/assistent/urlaub/verwaltung',
             'assistent.vacation_apply': '/werkstatt/assistent/urlaub/antrag',
             'assistent.vacation_withdraw': '/werkstatt/assistent/urlaub/antrag/' + str(values.get('request_id', '')) + '/zurueckziehen'}[endpoint]
 
@@ -102,7 +107,46 @@ class PersonalTimeUITests(unittest.TestCase):
         self.assertIn('Synthetic Admin Employee · inaktiv', html)
         self.assertNotIn('employee-portal-menu', html)
         self.assertNotIn('access-header', html)
-        self.assertIn('/static/assistent.css', html)
+        self.assertIn('/static/arbeitszeit_admin.css', html)
+        self.assertNotIn('/static/mitarbeiter_zeiten.css', html)
+        self.assertIn('/admin/cockpit', parsed.links)
+        self.assertIn('/admin/arbeitszeit?mitarbeiter_id=2&monat=2026-10', parsed.links)
+
+    def test_admin_report_needs_no_personal_status_or_stamp_and_keeps_warning_totals(self):
+        data = report()
+        del data['status']
+        data['mitarbeiter']['name'] = 'Synthetic Very Long Employee Name <script>unsafe</script>'
+        data['schichten'] = [dict(beginn='08.10.2026 08:00', ende=None, arbeitszeit='4:10 Stunden',
+                                 pause='0:20 Stunden', offen=True, pruefen=False),
+                             dict(beginn='07.10.2026 08:00', ende='08.10.2026 12:30', arbeitszeit='26:00 Stunden',
+                                  pause='2:30 Stunden', offen=False, pruefen=True)]
+        html = render('assistent_arbeitszeit.html', admin=True, report=data, month='2026-10', error='',
+                      employees=[dict(id=101, name=data['mitarbeiter']['name'], aktiv=True)])
+        parsed = Forms(html)
+        self.assertEqual(len(parsed.forms), 1)
+        self.assertEqual(parsed.forms[0]['method'], 'get')
+        self.assertIn('/admin/cockpit', parsed.links)
+        self.assertIn('name="mitarbeiter_id"', html)
+        self.assertIn('name="monat"', html)
+        self.assertIn('7:35 Stunden', html)
+        self.assertIn('4:10 Stunden', html)
+        self.assertIn('26:00 Stunden', html)
+        self.assertIn('Noch offen', html)
+        self.assertIn('24 Stunden', html)
+        self.assertIn('&lt;script&gt;unsafe&lt;/script&gt;', html)
+        self.assertNotIn('<script>', html)
+        self.assertNotIn('/werkstatt/mein-konto/zeit', html)
+        self.assertIn('/admin/arbeitszeit?monat=2026-10', parsed.links)
+
+    def test_admin_validation_error_keeps_selected_employee_and_escaped_message(self):
+        html = render('assistent_arbeitszeit.html', admin=True, report=None, month='invalid-month',
+                      selected_employee_id=101, error='Synthetic <unsafe> month',
+                      employees=[dict(id=101, name='Synthetic Selected', aktiv=True)])
+        self.assertIn('<option value="101" selected>', html)
+        self.assertIn('Synthetic &lt;unsafe&gt; month', html)
+        self.assertIn('role="alert"', html)
+        self.assertNotIn('<unsafe>', html)
+        self.assertFalse(any(form.get('method') == 'post' for form in Forms(html).forms))
 
     def test_month_totals_open_shift_and_review_are_preserved(self):
         data = report('arbeitet')

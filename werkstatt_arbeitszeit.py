@@ -200,13 +200,13 @@ def register_time_views(p, bp, protected, service):
     def index():
         with service.db() as db:
             employees=[dict(row) for row in db.execute('SELECT id,name,aktiv FROM mitarbeiter ORDER BY aktiv DESC,name,id').fetchall()]
-        report=None;error=''
+        report=None;error='';selected=0
         try:
             selected=int(request.args.get('mitarbeiter_id') or 0)
             if selected:
                 report=service.report(selected,request.args.get('monat') or service.now().astimezone(BERLIN).strftime('%Y-%m'))
         except (ValueError,TypeError) as exc:
             error=str(exc)
-        return render_template('assistent_arbeitszeit.html',report=report,admin=True,employees=employees,error=error,
+        return render_template('assistent_arbeitszeit.html',report=report,admin=True,employees=employees,error=error,selected_employee_id=selected,
                                month=request.args.get('monat') or service.now().astimezone(BERLIN).strftime('%Y-%m'))
     p.app.register_blueprint(admin)
