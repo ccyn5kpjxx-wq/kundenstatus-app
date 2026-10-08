@@ -44,11 +44,10 @@ class DeliveryBackupTests(unittest.TestCase):
                           variant='silver 0.5 l', unit='Dose', quantity='1',
                           created_at='2026-10-07T12:00:00+00:00')
         self.comparison._order = lambda db, key: dict(self.order)
+        # Keep the parent portal namespace and its real employee restore guards.
+        # The extracted imports resolve that portal through sys.modules[__name__].
         self.ns.update(
-            BACKUP_TABLES=TABLES, json=json, base64=base64, sys=sys,
-            ensure_employee_invitation_state_for_import=lambda *args, **kwargs: None,
-            ensure_employee_private_state_for_import=lambda *args, **kwargs: None,
-            ensure_employee_orders_for_import=lambda *args, **kwargs: None,
+            BACKUP_TABLES=TABLES, json=json, base64=base64,
             workshop_intake_init_schema=Mock(wraps=self.intake.init_schema),
             order_delivery_init_schema=Mock(wraps=self.delivery.init_schema))
 
