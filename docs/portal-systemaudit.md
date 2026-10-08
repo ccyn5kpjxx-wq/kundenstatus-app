@@ -98,11 +98,33 @@ Nachrichten oder Produktionsdaten für den breiten Testlauf verwendet.
 
 ## Betrieb und Grenzen
 
-Automatische Deploys bleiben ausgeschaltet. Die gebündelten technischen
-Reparaturen werden erst nach Integration und Prüfung einmal kontrolliert
-bereitgestellt. Die bestehende Render-Disk und deren Originale bleiben
-erhalten. Es werden keine Kundenmitteilungen oder Bestellungen zu
-Testzwecken versendet.
+Die gebündelten Reparaturen sind seit 8. Oktober 2026, 17:23:38 Uhr
+Europe/Berlin live: Commit `370573dd0212fd6ad91f7677b6863d2420fa242a`,
+Render-Deploy `dep-db3ra86i0phs73b9k1k0`, Instanz `69bmk`. Genau ein
+kontrollierter manueller Deploy wurde nach den Tests gestartet. Das Startlog
+bestaetigt Gunicorn 26.2.0 mit `portal_gunicorn.PortalThreadWorker`.
+
+Nach dem Update luden Cockpit, Werkstatttafel, Belegformular, Mitarbeiter-App
+und Materialformular authentifiziert im Browser. Die vorher fehlerhafte
+Belegadresse antwortete nachweislich mit HTTP 303 zum Formular (HTTP 200).
+Die sechs Kernseitenaufrufe benoetigten 0,325 bis 1,559 Sekunden. 16 weitere
+Gesundheitsabrufe mit vier parallelen Aufrufern lieferten alle HTTP 200
+und den erwarteten Buildheader `370573dd0212`; langsamster Abruf 0,291
+Sekunden. Im eingesehenen Start- und Anfragenfenster bis 17:24:38 Uhr gab es
+keine 5xx-Antwort, keinen Traceback und keinen Worker-Timeout. Diese
+Momentaufnahme ersetzt keine Langzeitbeobachtung.
+
+Die finale unabhaengige Kontrolle bestaetigte unveraenderten Laufzeitcode
+gegenueber dem getesteten Snapshot, korrekte Berichtszahlen und keine
+Secrets, Datenbanken oder Uploads im Diff. Livebelege liegen lokal unter
+`C:/tmp/gaertner-wide-audit-20261008/`: `deploy-live.txt`,
+`health-postdeploy.json`, `live-postdeploy.json` und
+`portal-reparatur-live.png`.
+
+Automatische Deploys bleiben ausgeschaltet. Die bestehende Render-Disk und
+deren Originale bleiben erhalten. Es wurden keine Kundenmitteilungen oder
+Bestellungen zu Testzwecken versendet. Die anschliessende Dokumentation
+erfordert keinen weiteren Serverneustart.
 
 OCR, externe KI, SMTP und Datenbank können weiterhin zeitweise nicht
 verfügbar sein. Die neuen Grenzen verhindern die konkret gefundenen
