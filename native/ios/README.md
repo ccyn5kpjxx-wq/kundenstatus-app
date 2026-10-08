@@ -13,12 +13,14 @@ Der Prototyp hält WebKit-Daten nur während der laufenden Sitzung im Speicher. 
 | Apple Developer Program für die Firma | Vorhandene Mitgliedschaft und verfügbares Entwicklerteam bestätigen oder die Organisation registrieren. |
 | Organisationsdaten | Rechtlicher Firmenname, D-U-N-S-Nummer, vertretungsberechtigte Person, geschäftliche E-Mail und Firmenwebsite bereithalten. |
 | Team-ID und App-Kennung | Apples Team-ID bereitstellen; eine eindeutige Bundle-ID unter diesem Team registrieren und mit dem Projekt abgleichen. Keine Apple-Passwörter oder Signaturschlüssel ins Repository schreiben. |
-| Mac mit Xcode | Eine von Apple unterstützte Kombination aus macOS, Xcode und iOS-SDK verwenden; XcodeGen installieren. |
+| Mac mit Xcode | Für App-Store-Uploads mindestens Xcode 26 und iOS-26-SDK verwenden; XcodeGen installieren. Die Mindestversion der Mitarbeitergeräte bleibt iOS 17. |
 | Signierung | In Xcode das bestätigte Team wählen, Provisionierung einrichten und zuerst einen signierten Build auf einem echten iPhone ausführen. |
 | App Store Connect | App-Datensatz, Support-/Datenschutz-URL, App-Icon, Screenshots mit Beispieldaten, Datenschutzangaben und Review-Zugang vorbereiten. |
 | Abnahme | Die unten genannten Geräteproben durchführen und mit Buildnummer, Gerät, iOS-Version und Ergebnis dokumentieren. |
 
 Für die Registrierung als Organisation verlangt Apple unter anderem eine rechtlich selbstständige Firma, deren D-U-N-S-Nummer und eine vertretungsberechtigte Person. Ein vorhandenes privates Apple-Konto ersetzt die Firmenmitgliedschaft nicht. Siehe [Apple: Registrierung](https://developer.apple.com/programs/enroll/). Die passende Entwicklungsumgebung steht unter [Apple: Xcode-Systemanforderungen](https://developer.apple.com/xcode/system-requirements).
+
+Seit dem 28. April 2026 verlangt Apple für neue Uploads Xcode 26 oder neuer mit dem iOS-26-SDK oder neuer. Ein erfolgreicher Simulatorbuild mit älteren Werkzeugen ist daher ausschließlich ein Entwicklungsnachweis, kein hochladbarer Releasebuild. [Apple: aktuelle Uploadvorgaben](https://developer.apple.com/news/upcoming-requirements/)
 
 ## Installationsweg für die Mitarbeiter
 
@@ -43,7 +45,9 @@ xcodegen generate --spec project.yml
 
 Anschließend die erzeugte `.xcodeproj` in Xcode öffnen, das App-Scheme auswählen und unter **Signing & Capabilities** das eigene Team konfigurieren. Projekt-/Scheme-Name und Mindest-iOS-Version werden durch `project.yml` festgelegt. XcodeGen ist ein Entwicklungswerkzeug; [die Anleitung des Projekts](https://github.com/yonaskolb/XcodeGen) beschreibt Installation und Generierung.
 
-Ein manueller GitHub-Workflow `iOS unsigned check` ist als zusätzliche macOS-Prüfung vorgesehen. Er soll Projektgenerierung und einen unsignierten Simulatorbuild prüfen, ohne Apple-Zertifikate, Portalzugänge oder Personaldaten zu erhalten. Er wird ausdrücklich manuell gestartet. Ein grüner Lauf ersetzt weder Code-Signing noch einen Gerätebuild, einen echten iPhone-Test oder App Review. Der Workflow veröffentlicht nichts; solange kein erfolgreicher Lauf nachgewiesen ist, gilt die Mac-Buildprüfung als offen.
+Ein manueller GitHub-Workflow `iOS unsigned check` prüft Projektgenerierung und einen unsignierten Simulatorbuild, ohne Apple-Zertifikate, Portalzugänge oder Personaldaten zu erhalten. Er wird ausdrücklich manuell gestartet. Ein grüner Lauf ersetzt weder Code-Signing noch einen Gerätebuild, einen echten iPhone-Test oder App Review. Der Workflow veröffentlicht nichts.
+
+Am 8. Oktober 2026 bestanden im [Mac-Prüflauf 37791327727](https://github.com/ccyn5kpjxx-wq/kundenstatus-app/actions/runs/37791327727) alle fünf Tests für Portalziele, erlaubte Links und Auftrags-/QR-Eingaben. Die App wurde unsigniert gebaut, im iPhone-16-Pro-Simulator gestartet und der generische persönliche Anmeldebildschirm visuell geprüft. Grundlage war Commit `56e8411f5c41d768f064debca4c1aff5a9c63fba`, Xcode 16.4 mit iOS-18.5-SDK. Dieser Lauf bestätigt den Prototyp, erfüllt aber nicht Apples aktuelle Uploadvorgabe. Er enthält weder eine Mitarbeiteranmeldung noch einen Mikrofon-, Kamera- oder Dokumenttest.
 
 Der Workflow erzeugt außerdem einen Screenshot mit einer frischen Simulator-Sitzung ohne Mitarbeiteranmeldung. Dieser zeigt nur den generischen Einstieg und wird höchstens drei Tage als CI-Artefakt gespeichert. Es werden weder echte Mitarbeiterkonten noch Einrichtungslinks verwendet; Kamera und Mikrofon werden dabei nicht freigegeben.
 
@@ -52,6 +56,8 @@ Für ein Release danach in Xcode einen signierten Archivbuild erzeugen, validier
 ## Verbindliche Geräteproben vor Mitarbeiterfreigabe
 
 Die folgende Liste ist eine **offene Abnahme**, kein bereits bestandenes Prüfprotokoll. Simulator- oder Quelltextprüfungen reichen für diese Fälle nicht.
+
+Vor der Geräteabnahme sind zwei bekannte Funktionslücken zu schließen: Geschützte Attachment-Downloads (unter anderem Lohnzettel) werden im Prototyp mit einer sichtbaren Meldung blockiert; außerdem zeigt das bestehende Portal in der nativen App noch seine PWA-Installationskarte. Die native Ansicht darf später nicht erneut zur Installation derselben App auffordern. Ein geprüftes Dokumentverfahren und die bereinigte Ansicht stehen noch aus.
 
 | Probe auf einem echten iPhone | Erwartetes Ergebnis |
 | --- | --- |
