@@ -53,6 +53,26 @@
       color: #fff;
     }
 
+    .auftrag-kopfzeile {
+      display: flex;
+      flex-basis: 100%;
+      align-items: center;
+      justify-content: space-between;
+      gap: .7rem;
+    }
+
+    .auftrag-kopfzeile .auftragsnummer {
+      color: #000;
+      background: #fff;
+      padding: .2em .45em;
+      border-radius: 8px;
+      font-size: clamp(1.65rem, 2.4vw, 2.1rem);
+      font-weight: 900;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
     .zurueck {
       display: inline-flex;
       align-items: center;
@@ -521,9 +541,12 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_legacy.css') }}?v=farben-2" media="screen">
   <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=farben-2" media="screen">
 </head>
-<body class="ws-legacy ws-legacy-auftrag">
+<body class="ws-legacy ws-legacy-auftrag" data-auftrag-id="{{ auftrag['id'] }}">
   <div class="topbar">
-    <a class="zurueck" href="{{ url_for('werkstatt_tafel') }}">← Zur Tafel</a>
+    <div class="auftrag-kopfzeile">
+      <a class="zurueck" href="{{ url_for('werkstatt_tafel') }}">← Zur Tafel</a>
+      <strong class="auftragsnummer" aria-label="Auftragsnummer {{ auftrag['id'] }}">{{ auftrag['id'] }}</strong>
+    </div>
     {% if auftrag['kennzeichen'] %}
       <span class="kennzeichen">{{ auftrag['kennzeichen'] }}</span>
     {% endif %}
@@ -536,7 +559,7 @@
     {% if messages %}
     <div class="toast-leiste" data-toast-leiste>
       {% for cat, msg in messages %}
-      <div class="toast t-{{ cat }}">{{ msg }}</div>
+      <div class="toast t-{{ cat }}"{% if cat == 'success' and ' Foto(s) zum Auftrag hinzugefügt.' in msg %} data-foto-upload-gespeichert="{{ msg.split(' ')[0] }}"{% endif %}>{{ msg }}</div>
       {% endfor %}
     </div>
     {% endif %}
@@ -743,6 +766,9 @@
           <div class="hinweis-leer">Keine Fotos hochgeladen.</div>
         {% endif %}
         <form method="POST" action="{{ url_for('werkstatt_auftrag_fotos', auftrag_id=auftrag['id']) }}"
+              data-foto-upload data-auftrag-id="{{ auftrag['id'] }}"
+              data-auftrag-url="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}"
+              data-max-datei-bytes="{{ (config['MAX_CONTENT_LENGTH'] or 26214400) - 65536 }}"
               enctype="multipart/form-data"
               style="margin-top:1.1rem; display:flex; gap:.7rem; flex-wrap:wrap; align-items:center;">
           {{ csrf_field()|safe }}
@@ -755,6 +781,8 @@
             <input type="file" name="fotos" accept="image/*" multiple hidden onchange="fotoUploadStarten(this)">
           </label>
         </form>
+        <p data-foto-upload-status role="status" aria-live="polite" style="overflow-wrap:anywhere;"></p>
+        <button type="button" data-foto-upload-aktualisieren hidden onclick="window.location.reload()">Auftrag aktualisieren</button>
       </div>
     </div>
 
@@ -828,7 +856,7 @@
           {% endif %}
           {% if auftrag['auftragsnummer'] %}
           <div class="fakt">
-            <div class="label">Auftragsnummer</div>
+            <div class="label">Autohaus-Referenz</div>
             <div class="wert">{{ auftrag['auftragsnummer'] }}</div>
           </div>
           {% endif %}
@@ -920,31 +948,21 @@
   <div class="upload-overlay" data-upload-overlay>
     <div class="upload-karte">
       <div class="upload-spinner"></div>
-      ⏳ Fotos werden hochgeladen — bitte warten…
+      <span data-foto-upload-fortschritt>Fotos werden hochgeladen — bitte warten…</span>
     </div>
   </div>
 
+  <script src="{{ url_for('static', filename='werkstatt_fotoupload.js') }}?v=einzeln-1"></script>
   <script>
-    // Foto-Upload: Overlay einblenden + Upload-Knoepfe sperren, damit niemand doppelt tippt
-    function fotoUploadStarten(input) {
-      if (!input.files || !input.files.length) return; // Auswahl abgebrochen
-      document.querySelector('[data-upload-overlay]').classList.add('show');
-      document.querySelectorAll('.foto-upload-knopf').forEach((l) => l.classList.add('gesperrt'));
-      input.form.submit();
-    }
-    // Falls die Seite aus dem Back-Cache zurueckkommt: Overlay/Sperre wieder aufheben
-    window.addEventListener('pageshow', (e) => {
-      if (!e.persisted) return;
-      document.querySelector('[data-upload-overlay]').classList.remove('show');
-      document.querySelectorAll('.foto-upload-knopf.gesperrt').forEach((l) => l.classList.remove('gesperrt'));
-    });
-
     // Nach 4 Minuten ohne Interaktion zurueck zur Tafel (Kiosk-Betrieb)
     (() => {
       const toastLeiste = document.querySelector('[data-toast-leiste]');
       if (toastLeiste) setTimeout(() => toastLeiste.remove(), 6000);
       let timer = null;
-      const zurueck = () => { window.location.href = "{{ url_for('werkstatt_tafel') }}"; };
+      const zurueck = () => {
+        if (window.werkstattFotoUploadAktiv) { reset(); return; }
+        window.location.href = "{{ url_for('werkstatt_tafel') }}";
+      };
       const reset = () => {
         if (timer) clearTimeout(timer);
         timer = setTimeout(zurueck, 240000);
@@ -952,6 +970,7 @@
       ['click', 'touchstart', 'scroll', 'keydown'].forEach((ev) =>
         document.addEventListener(ev, reset, { passive: true })
       );
+      document.addEventListener('werkstatt-fotoupload-ende', reset);
       reset();
     })();
   </script>

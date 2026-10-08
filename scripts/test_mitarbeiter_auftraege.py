@@ -324,6 +324,46 @@ class EmployeeOrderTests(TestCase):
         self.assertEqual(self.client.get(self.file_url(did, 156)).status_code, 404)
         self.assertEqual(p.app.test_client().get(self.file_url(did)).status_code, 404)
 
+    def test_six_valid_originals_above_global_limit_remain_one_private_idempotent_batch(self):
+        # The real app CSRF hook reads request.form before the view. This request
+        # must therefore receive its endpoint limit during URL preprocessing.
+        token = self.page()['photo_request_id']
+        raw = io.BytesIO()
+        Image.new('RGB', (1250, 1250), '#405b6a').save(raw, 'PNG', compress_level=0)
+        original = raw.getvalue()
+        self.assertGreater(len(original) * 6, 25 * 1024 * 1024)
+        self.assertLess(len(original), 8 * 1024 * 1024)
+        def batch():
+            return dict(csrf_token='test-csrf', request_id=token, confirmed='ja',
+                fotos=[(io.BytesIO(original), f'arbeitsfoto-{n}.png') for n in range(6)])
+        with patch.dict(p.app.config, MAX_CONTENT_LENGTH=25 * 1024 * 1024):
+            for _ in range(2):
+                response = self.client.post('/werkstatt/mein-konto/auftraege/102/fotos', data=batch())
+                self.assertEqual(response.status_code, 303)
+        self.assertEqual(self.audit_count(), 1)
+        with database() as db:
+            rows = db.execute('SELECT * FROM dateien WHERE auftrag_id=102').fetchall()
+            self.assertEqual(len(rows), 6)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM datei_backups').fetchone()[0], 6)
+            for row in rows:
+                self.assertEqual((row['kunde_sichtbar'], row['partner_sichtbar'], row['versicherung_sichtbar']), (0, 0, 0))
+        self.assertEqual(len(self.page()['photos']), 6)
+
+    def test_personal_limit_preserves_eight_mib_per_photo_and_rejects_oversized_request(self):
+        token = self.page()['photo_request_id']
+        with patch.dict(p.app.config, MAX_CONTENT_LENGTH=25 * 1024 * 1024):
+            response = self.photo(token, raw=b'x' * (8 * 1024 * 1024 + 1))
+            self.assertEqual(response.status_code, 303)
+            response = self.photo(token, raw=b'x' * (49 * 1024 * 1024))
+            self.assertEqual(response.status_code, 413)
+            # The endpoint-specific exception must not raise unrelated limits.
+            response = self.client.post('/werkstatt/auftrag/102/fotos', data={
+                'csrf_token': 'test-csrf', 'fotos': (io.BytesIO(b'x' * (26 * 1024 * 1024)), 'photo.png')})
+            self.assertEqual(response.status_code, 413)
+        self.assertEqual(self.audit_count(), 0)
+        with database() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM dateien WHERE auftrag_id=102').fetchone()[0], 0)
+
     def test_invalid_photo_payload_never_partial_batch_and_different_retry_rejected(self):
         token = self.page()['photo_request_id']
         self.photo(token, raw=b'<script>x</script>', filename='schaden.png')

@@ -18,7 +18,7 @@
   {% include '_mitarbeiter_portal_nav.html' %}
   <span class="eyebrow">DEIN AUFTRAG AM FAHRZEUG</span>
   <h1>{% if order %}Auftrag <span>{{ order.nummer }}</span>{% else %}Aufträge{% endif %}</h1>
-  <p class="lead">Die Nummer hängt am Fahrzeug. Gib sie ein – hier findest du Arbeiten, Termine und Unterlagen.</p>
+  <p class="lead">Die Auftragsnummer steht auf der Werkstatt-Tafel und im geöffneten Auftrag. Gib sie ein – hier findest du Arbeiten, Termine und Unterlagen.</p>
   <form method="get" action="/werkstatt/mein-konto/auftraege" class="order-search" role="search">
     <label for="order-number">Auftragsnummer<input id="order-number" name="nummer" type="text" inputmode="numeric" pattern="[0-9]+" maxlength="10" placeholder="z. B. 102" value="{{ nummer }}" required autocomplete="off"></label>
     <button class="primary-button">Auftrag öffnen <span aria-hidden="true">→</span></button>
