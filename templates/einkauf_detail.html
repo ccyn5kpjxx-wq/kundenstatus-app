@@ -14,9 +14,9 @@
     justify-content: center;
     width: 100%;
     aspect-ratio: 4 / 3;
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--line);
     border-radius: 8px;
-    background: #f7f1e8;
+    background: var(--panel-soft);
     overflow: hidden;
     color: var(--muted);
     font-weight: 700;
@@ -25,7 +25,7 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
-    background: #fff;
+    background: var(--panel);
   }
   .product-meta {
     display: grid;
@@ -45,13 +45,13 @@
     padding: .85rem 1rem;
   }
   .product-description {
-    background: #fffaf2;
-    border: 1px solid #e4d6c3;
+    background: var(--panel-soft);
+    border: 1px solid var(--line);
   }
   .raw-text {
-    background: #eef5f6;
+    background: var(--panel-soft);
     border: 1px solid rgba(20, 93, 102, .18);
-    color: #145d66;
+    color: var(--ws-accent);
     font-size: .9rem;
   }
   .compare-links {
@@ -67,27 +67,27 @@
   .price-radar {
     border: 1px solid #d8c7b0;
     border-radius: 8px;
-    background: #fffaf2;
+    background: var(--panel-soft);
     padding: .75rem .85rem;
     font-size: .92rem;
   }
   .price-radar.price-alert-danger {
     border-color: #dc3545;
-    background: #fff1f1;
-    color: #66151c;
+    background: #352024;
+    color: var(--ws-danger);
   }
   .price-radar.price-alert-warning {
     border-color: #c98500;
-    background: #fff7e6;
-    color: #614000;
+    background: #2c251b;
+    color: var(--ws-warning);
   }
   .price-radar.price-alert-info {
     border-color: #8ec4da;
-    background: #eef7fb;
+    background: #1f303d;
   }
   .price-radar.price-alert-success {
     border-color: #84c69a;
-    background: #eff8f2;
+    background: #20332b;
   }
   @media (max-width: 900px) {
     .detail-grid {

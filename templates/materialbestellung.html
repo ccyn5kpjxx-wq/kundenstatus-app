@@ -4,10 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token }}">
-  <meta name="theme-color" content="#153e35">
+  <meta name="theme-color" content="#101114">
   <title>Material nachbestellen · Gärtner</title>
   <link rel="icon" href="{{ url_for('static', filename='assistent-icon.svg') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='materialbestellung.css', v='dringend-limit-1') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='materialbestellung.css', v='werkstatt-1') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=werkstatt-1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=werkstatt-1">
 </head>
 <body>
   <main class="material-page">

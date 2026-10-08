@@ -1,4 +1,4 @@
-<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lieferantenpostfach einlesen</title><link rel="stylesheet" href="{{ url_for('static',filename='assistent.css') }}"></head><body><main>
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lieferantenpostfach einlesen</title><link rel="stylesheet" href="{{ url_for('static',filename='assistent.css') }}"><meta name="theme-color" content="#101114"><link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css', v='werkstatt-1') }}"></head><body>{% include '_werkstatt_admin_header.html' %}<main>
 <nav><a href="/admin/mail">Zum Postfach</a> · <a href="/admin/assistent-artikel">Artikel aus Rechnungen</a></nav>
 <h1>Lieferantenquellen aus dem Postfach</h1>
 <p>Der Import erfasst die Absender aller zulässigen Ordner. Bank-, Finanz- und erkennbare Privatordner bleiben ungeöffnet. Nur eindeutig zugeordnete Materiallieferanten werden auf Rechnungsanhänge geprüft. Postfachnachrichten werden weder als gelesen markiert noch verschoben.</p>

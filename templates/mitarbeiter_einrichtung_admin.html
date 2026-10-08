@@ -1,12 +1,13 @@
 <!doctype html>
 <html lang="de">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Mitarbeiter einladen · Gärtner</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=einladung-1">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="theme-color" content="#101114"><title>Mitarbeiter einladen · Gärtner</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=werkstatt-1">
+<link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=werkstatt-1">
 <script defer src="{{ url_for('static', filename='mitarbeiter_einrichtung.js') }}?v=einladung-1"></script></head>
 <body>
-<header class="access-header"><a href="/admin" class="brand">GÄRTNER<span>GmbH · Karosserie + Lack</span></a><span>Werkstattleitung</span></header>
+{% include '_werkstatt_admin_header.html' %}
 <main class="admin-main">
-<nav class="admin-nav"><a href="/admin/mitarbeiter">← Mitarbeiter</a><a href="/werkstatt/assistent/rechte">Rechte verwalten</a><a href="/admin/assistent-bestellungen">Bestellordner</a></nav>
+<nav class="admin-nav" aria-label="Bereiche der Werkstattleitung"><a href="/admin/mitarbeiter">Mitarbeiter</a><a href="/admin/arbeitszeit">Arbeitszeiten</a><a href="/werkstatt/assistent/urlaub/verwaltung">Urlaub &amp; Anträge</a><a href="/werkstatt/assistent/rechte">Rechte verwalten</a><a href="/admin/assistent-bestellungen">Bestellordner</a></nav>
 <span class="eyebrow">PERSÖNLICHE ZUGÄNGE</span><h1>Ein Link.<br>Ein eigenes Konto.</h1>
 <p class="lead">Jeder Mitarbeiter wählt sein Passwort selbst und bestätigt es zweimal. Anschließend öffnet sich sein persönliches Profil mit Bestellung, Arbeitszeit, Urlaub, Lohnzetteln und Sprachassistent.</p>
 {% for category,message in get_flashed_messages(with_categories=true) %}<p role="status" class="setup-status{% if category == 'error' %} is-error{% endif %}">{{ message }}</p>{% endfor %}

@@ -4,7 +4,8 @@ from pathlib import Path
 import unittest
 from urllib.parse import urlencode
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader, meta, select_autoescape
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = Environment(loader=FileSystemLoader(ROOT / 'templates'), autoescape=select_autoescape(['html']))
@@ -269,6 +270,45 @@ class PersonalTimeUITests(unittest.TestCase):
         vacation = self.vacation(bedarf='<script>leave</script>')
         self.assertNotIn('<script>', vacation)
         self.assertIn('&lt;script&gt;leave&lt;/script&gt;', vacation)
+
+
+class InternalThemeScopeTests(unittest.TestCase):
+    def test_admin_theme_does_not_follow_admin_session_into_public_or_partner_pages(self):
+        template = ENV.get_template('base.html')
+        source = (ROOT / 'templates' / 'base.html').read_text(encoding='utf-8')
+        counts = {name: lambda: 0 for name in meta.find_undeclared_variables(ENV.parse(source))
+                  if name.endswith('_count')}
+
+        def synthetic_url(endpoint, **values):
+            return '/static/' + values['filename'] if endpoint == 'static' else '/synthetic/' + endpoint
+
+        for admin in (False, True):
+            for path in ('/admin', '/admin/cockpit', '/admin/arbeitszeit', '/partner',
+                         '/partner/kaesmann/dashboard', '/mietwagen', '/login', '/', '/admin-other'):
+                with self.subTest(admin=admin, path=path):
+                    html = template.render(url_for=synthetic_url, session={'admin': admin},
+                        request=SimpleNamespace(path=path, endpoint='synthetic'), config={},
+                        get_flashed_messages=lambda **kwargs: [], csrf_token=lambda: 'synthetic-csrf',
+                        analysis_loading_news=lambda: [], **counts)
+                    expected = admin and (path == '/admin' or path.startswith('/admin/'))
+                    self.assertEqual('/static/werkstatt_theme.css' in html, expected)
+                    self.assertEqual('class="ws-cockpit"' in html, expected)
+
+    def test_admin_hr_pages_keep_explicit_cockpit_return(self):
+        contexts = {
+            'mitarbeiter_portal_admin.html': dict(employee=dict(id=101, name='Synthetic Own'),
+                profile={}, payrolls=[], arbeitsplan=plan(False)),
+            'mitarbeiter_einrichtung_admin.html': dict(employees=[], created_invitations=[],
+                created_invitation=None),
+            'mitarbeiter_betriebsurlaub.html': dict(items=[]),
+            'assistent_urlaub_admin.html': dict(data=dict(jahr=2026, mitarbeiter=[]), weekdays=[],
+                csrf='synthetic-csrf', today='2026-10-08'),
+        }
+        for name, values in contexts.items():
+            with self.subTest(template=name):
+                html = render(name, **values)
+                self.assertIn('/admin/cockpit', Forms(html).links)
+                self.assertIn('/static/werkstatt_theme.css', html)
 
 
 if __name__ == '__main__':

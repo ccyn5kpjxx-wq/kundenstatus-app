@@ -408,7 +408,7 @@ async function fixture(options={}) {
   assert.match(cards[1].children[0].textContent,/Kostenrahmen: 250,00/);
   assert.match(cards[1].children[0].textContent,/Preise: brutto in EUR/);
   assert.match(cards[1].children[0].textContent,/Preisquelle: Bestätigtes Testangebot/);
-  assert.match(cards[1].children[0].textContent,/Montag um 12:00/);
+  assert.match(cards[1].children[0].textContent,/Montag um 14:00/);
   assert.equal(cards[1].children.find(x=>x.tagName==='button').textContent,'Verbindlich bestellen');
   assert.ok(cards.every(card=>card.children.every(x=>x.tagName!=='a')),'new actions have no misleading email-draft link');
   assert.ok(cards[2].children.every(x=>x.tagName!=='button'),'confirmed orders cannot be resubmitted');

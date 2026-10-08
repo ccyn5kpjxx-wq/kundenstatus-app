@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101114">
   <title>Auftrag anlegen — Werkstatt-Tafel</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -238,14 +239,17 @@
       .topbar-title strong { font-size: 1rem; }
     }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_legacy.css') }}?v=werkstatt-1" media="screen">
+  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=werkstatt-1" media="screen">
 </head>
-<body>
+<body class="ws-legacy ws-legacy-auftrag_neu">
   <header class="topbar">
     <div class="topbar-title">
       <img src="{{ url_for('static', filename='logo.png') }}" alt="Gärtner GmbH Karosserie + Lack">
       <strong>Werkstatt-Annahme</strong>
     </div>
     <a class="back" href="{{ url_for('werkstatt_tafel') }}">← Zur Tafel</a>
+    {% if session.admin %}<a class="ws-back" href="/admin/cockpit">← Werkstatt-Cockpit</a>{% endif %}
   </header>
 
   <main>

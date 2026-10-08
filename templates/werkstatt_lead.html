@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101114">
   <title>{{ lead['reference'] }} — Werkstatt-Annahme</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -187,8 +188,10 @@
       .status-link { font-size: 8.5pt; text-align: left; }
     }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_legacy.css') }}?v=werkstatt-1" media="screen">
+  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=werkstatt-1" media="screen">
 </head>
-<body>
+<body class="ws-legacy ws-legacy-lead">
   <header class="topbar">
     <div class="topbar-title">
       <img src="{{ url_for('static', filename='logo.png') }}" alt="Gärtner Karosserie & Lack">
@@ -197,6 +200,7 @@
     <div class="topbar-actions">
       <a href="{{ url_for('werkstatt_auftrag_anlegen') }}">＋ Neue Anfrage</a>
       <a href="{{ url_for('werkstatt_tafel') }}">← Zur Tafel</a>
+      {% if session.admin %}<a class="ws-back" href="/admin/cockpit">← Werkstatt-Cockpit</a>{% endif %}
     </div>
   </header>
 

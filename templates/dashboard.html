@@ -2,48 +2,48 @@
 {% block title %}Autohaus-Cockpit{% endblock %}
 {% block extra_css %}
 <style>
-  .bulk-bar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border:1px solid #e4d6c3; border-radius:18px; background:#f7f0e6; margin-bottom:16px; }
+  .bulk-bar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border:1px solid var(--ws-line); border-radius:18px; background:var(--ws-panel-soft); margin-bottom:16px; }
   .row-select-cell { width:88px; white-space:nowrap; }
-  .row-check { width:20px; height:20px; accent-color:#1f3557; }
+  .row-check { width:20px; height:20px; accent-color:var(--ws-accent); }
   tr[data-select-row] { cursor:pointer; }
-  tr[data-select-row].is-selected { background:#f8f1e6; }
-  tr.auftrag-source-versicherung { box-shadow: inset 4px 0 0 #4b73d1; }
-  tr.auftrag-source-autohaus { box-shadow: inset 4px 0 0 #2f7d50; }
-  tr.auftrag-source-privat { box-shadow: inset 4px 0 0 #8c949d; }
-  .selection-badge { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid #d9cab4; border-radius:999px; background:#fffaf2; }
+  tr[data-select-row].is-selected { --bs-table-bg:color-mix(in srgb,var(--ws-accent) 10%,var(--ws-panel)); background:color-mix(in srgb,var(--ws-accent) 10%,var(--ws-panel)); }
+  tr.auftrag-source-versicherung { box-shadow: inset 4px 0 0 var(--ws-info,#9bbdec); }
+  tr.auftrag-source-autohaus { box-shadow: inset 4px 0 0 var(--ws-accent); }
+  tr.auftrag-source-privat { box-shadow: inset 4px 0 0 var(--ws-muted); }
+  .selection-badge { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid var(--ws-line); border-radius:999px; background:var(--ws-panel-soft); }
   .source-mix { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.75rem; margin-bottom:1rem; }
-  .source-mix-item { border:1px solid #e4d6c3; border-left-width:5px; border-radius:12px; background:#fffdf9; padding:.85rem; }
-  .source-mix-versicherung { border-left-color:#1f6feb; }
-  .source-mix-autohaus { border-left-color:#198754; }
-  .source-mix-privat { border-left-color:#6c757d; }
-  .source-mix-item span { display:block; color:#6f6253; font-size:.78rem; font-weight:800; text-transform:uppercase; }
+  .source-mix-item { border:1px solid var(--ws-line); border-left-width:5px; border-radius:12px; background:var(--ws-panel); padding:.85rem; }
+  .source-mix-versicherung { border-left-color:var(--ws-info,#9bbdec); }
+  .source-mix-autohaus { border-left-color:var(--ws-accent); }
+  .source-mix-privat { border-left-color:var(--ws-muted); }
+  .source-mix-item span { display:block; color:var(--ws-muted); font-size:.78rem; font-weight:800; text-transform:uppercase; }
   .source-mix-item strong { font-size:1.45rem; line-height:1.1; }
   .paint-heading-row { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
-  .paint-live { display:inline-flex; align-items:center; gap:.45rem; padding:.45rem .7rem; border:1px solid #bcd7c5; border-radius:999px; color:#23633d; background:#edf8f0; font-size:.78rem; font-weight:800; }
-  .paint-live-dot { width:8px; height:8px; border-radius:50%; background:#2f9d58; box-shadow:0 0 0 4px rgba(47,157,88,.12); }
+  .paint-live { display:inline-flex; align-items:center; gap:.45rem; padding:.45rem .7rem; border:1px solid color-mix(in srgb,var(--ws-accent) 35%,var(--ws-line)); border-radius:999px; color:var(--ws-accent); background:color-mix(in srgb,var(--ws-accent) 10%,var(--ws-panel)); font-size:.78rem; font-weight:800; }
+  .paint-live-dot { width:8px; height:8px; border-radius:50%; background:var(--ws-accent); box-shadow:0 0 0 4px color-mix(in srgb,var(--ws-accent) 12%,transparent); }
   .paint-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.85rem; margin:1rem 0 .7rem; }
-  .paint-stat { position:relative; overflow:hidden; min-height:118px; padding:1rem 1.1rem; border:1px solid #e4d6c3; border-radius:16px; color:#17283f; background:linear-gradient(145deg,#fffdf9 0%,#f7f0e6 100%); font:inherit; text-align:left; }
+  .paint-stat { position:relative; overflow:hidden; min-height:118px; padding:1rem 1.1rem; border:1px solid var(--ws-line); border-radius:16px; color:var(--ws-text); background:var(--ws-panel); font:inherit; text-align:left; }
   button.paint-stat { cursor:pointer; transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease; }
-  button.paint-stat:hover { border-color:#a99172; box-shadow:0 10px 22px rgba(58,43,24,.09); transform:translateY(-2px); }
-  button.paint-stat.is-selected { border-color:#1f3557; box-shadow:0 0 0 3px rgba(31,53,87,.13); }
-  button.paint-stat:focus-visible { outline:3px solid rgba(181,43,31,.28); outline-offset:2px; }
-  .paint-stat::after { content:""; position:absolute; right:-25px; bottom:-35px; width:90px; height:90px; border-radius:50%; background:rgba(181,43,31,.08); }
-  .paint-stat-total { color:#fff; border-color:#243c62; background:linear-gradient(145deg,#1f3557 0%,#2f527e 100%); }
-  .paint-stat-total::after { background:rgba(255,255,255,.09); }
-  .paint-stat-label { display:block; margin-bottom:.45rem; color:#6f6253; font-size:.78rem; font-weight:800; letter-spacing:.045em; text-transform:uppercase; }
+  button.paint-stat:hover { border-color:var(--ws-accent); box-shadow:0 10px 22px rgba(0,0,0,.2); transform:translateY(-2px); }
+  button.paint-stat.is-selected { border-color:var(--ws-accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--ws-accent) 18%,transparent); }
+  button.paint-stat:focus-visible { outline:3px solid var(--ws-accent); outline-offset:2px; }
+  .paint-stat::after { content:""; position:absolute; right:-25px; bottom:-35px; width:90px; height:90px; border-radius:50%; background:color-mix(in srgb,var(--ws-accent) 8%,transparent); }
+  .paint-stat-total { color:var(--ws-text); border-color:color-mix(in srgb,var(--ws-accent) 35%,var(--ws-line)); background:color-mix(in srgb,var(--ws-accent) 10%,var(--ws-panel)); }
+  .paint-stat-total::after { background:color-mix(in srgb,var(--ws-accent) 10%,transparent); }
+  .paint-stat-label { display:block; margin-bottom:.45rem; color:var(--ws-muted); font-size:.78rem; font-weight:800; letter-spacing:.045em; text-transform:uppercase; }
   .paint-stat-total .paint-stat-label,
-  .paint-stat-total .paint-stat-unit { color:rgba(255,255,255,.78); }
+  .paint-stat-total .paint-stat-unit { color:var(--ws-muted); }
   .paint-stat-value { position:relative; z-index:1; display:block; font-size:2.35rem; font-weight:800; line-height:1; }
-  .paint-stat-unit { position:relative; z-index:1; display:block; margin-top:.35rem; color:#6f6253; font-size:.86rem; }
-  .month-detail { margin:1rem 0 1.35rem; border:1px solid #ded1bf; border-radius:16px; background:#fff; overflow:hidden; }
-  .month-detail-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1rem 1.1rem; border-bottom:1px solid #eadfce; background:#fffaf2; }
+  .paint-stat-unit { position:relative; z-index:1; display:block; margin-top:.35rem; color:var(--ws-muted); font-size:.86rem; }
+  .month-detail { margin:1rem 0 1.35rem; border:1px solid var(--ws-line); border-radius:16px; background:var(--ws-panel); overflow:hidden; }
+  .month-detail-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1rem 1.1rem; border-bottom:1px solid var(--ws-line); background:var(--ws-panel-soft); }
   .month-detail-count { white-space:nowrap; }
   .month-detail-list { display:grid; max-height:430px; overflow:auto; }
-  .month-detail-item { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(140px,.8fr) auto; align-items:center; gap:1rem; padding:.9rem 1.1rem; border-bottom:1px solid #eee5d8; }
+  .month-detail-item { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(140px,.8fr) auto; align-items:center; gap:1rem; padding:.9rem 1.1rem; border-bottom:1px solid var(--ws-line); }
   .month-detail-item:last-child { border-bottom:0; }
-  .month-detail-vehicle { color:#17283f; font-weight:800; }
-  .month-detail-meta { color:#6f6253; font-size:.82rem; }
-  .month-detail-empty { padding:1.25rem 1.1rem; color:#6f6253; }
+  .month-detail-vehicle { color:var(--ws-text); font-weight:800; }
+  .month-detail-meta { color:var(--ws-muted); font-size:.82rem; }
+  .month-detail-empty { padding:1.25rem 1.1rem; color:var(--ws-muted); }
   @media (max-width: 767.98px) { .source-mix { grid-template-columns:1fr; } }
   @media (max-width: 991.98px) { .paint-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } }
   @media (max-width: 767.98px) { .month-detail-item { grid-template-columns:minmax(0,1fr) auto; } .month-detail-item .month-detail-meta { grid-column:1 / -1; grid-row:2; } }
@@ -78,12 +78,12 @@
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 13px 12px;
       padding: 17px;
-      border: 1px solid #e0d4c3;
+      border: 1px solid var(--ws-line);
       border-radius: 16px;
-      background: #fffdf9;
-      box-shadow: 0 10px 24px rgba(64, 47, 25, .08);
+      background: var(--ws-panel);
+      box-shadow: 0 10px 24px rgba(0,0,0,.2);
     }
-    .auftrag-table tr[data-select-row].is-selected { border-color: #a99172; background: #fff8ee; }
+    .auftrag-table tr[data-select-row].is-selected { border-color: var(--ws-accent); background: color-mix(in srgb,var(--ws-accent) 10%,var(--ws-panel)); }
     .auftrag-table td {
       display: block;
       min-width: 0;
@@ -94,7 +94,7 @@
       content: attr(data-mobile-label);
       display: block;
       margin-bottom: 5px;
-      color: #786b5d;
+      color: var(--ws-muted);
       font-size: .7rem;
       font-weight: 800;
       letter-spacing: .07em;

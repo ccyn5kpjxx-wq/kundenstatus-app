@@ -1,0 +1,124 @@
+/* Screen-only companion for the older internal workshop pages.
+   The original print rules and white QR/number-plate artwork stay intact. */
+body.ws-legacy {
+  --danger: var(--ws-danger);
+  --secondary: var(--ws-muted);
+  --dark: var(--ws-panel-soft);
+  --ws-danger-bg: #352024;
+  --ws-warning-bg: #2c251b;
+  background: var(--ws-bg);
+  color: var(--ws-text);
+}
+.ws-legacy h1,.ws-legacy h2,.ws-legacy h3,.ws-legacy .topbar strong {
+  font-family: inherit;
+}
+.ws-legacy .topbar {
+  background: var(--ws-bg);
+  border-bottom: 1px solid var(--ws-line);
+  color: var(--ws-text);
+  box-shadow: none;
+  flex-wrap: wrap;
+}
+.ws-legacy .topbar a,.ws-legacy .back,.ws-legacy .zurueck {
+  color: var(--ws-text);
+  background: var(--ws-panel-soft);
+  border-color: #52575f;
+}
+.ws-legacy .topbar a:hover,.ws-legacy .back:hover,.ws-legacy .zurueck:hover {
+  color: var(--ws-accent);
+  border-color: var(--ws-accent);
+}
+.ws-legacy .topbar .ws-back { margin-left: auto; width: auto; white-space: normal; }
+.ws-legacy .topbar-actions { flex-wrap: wrap; }
+.ws-legacy .panel,.ws-legacy .intro,.ws-legacy .success-card,.ws-legacy .qr-card,.ws-legacy .info-card,.ws-legacy .karte,.ws-legacy .login-card {
+  background: var(--ws-panel);
+  color: var(--ws-text);
+  border-color: var(--ws-line);
+  box-shadow: none;
+}
+.ws-legacy .success-card,.ws-legacy .kundenlink-karte {
+  background: var(--ws-panel);
+  border-color: #3e6554;
+}
+.ws-legacy .unterlage,.ws-legacy .status-link,.ws-legacy .kundenlink-url,
+.ws-legacy .button,.ws-legacy .kundenlink-knopf,.ws-legacy .person-btn {
+  background: var(--ws-panel-soft);
+  color: var(--ws-text);
+  border-color: var(--ws-line);
+}
+.ws-legacy .button.primary,.ws-legacy .kundenlink-knopf.primary,
+.ws-legacy .btn-dark,.ws-legacy .btn-senden,.ws-legacy .person-btn.aktiv,
+.ws-legacy .haken-btn.erledigt {
+  background: var(--ws-accent);
+  color: var(--ws-on-accent);
+  border-color: var(--ws-accent);
+  box-shadow: none;
+}
+.ws-legacy .button.primary:hover,.ws-legacy .kundenlink-knopf.primary:hover,.ws-legacy .btn-dark:hover {
+  background: #c1f0dd;
+  color: var(--ws-on-accent);
+}
+.ws-legacy .btn-outline-dark {
+  color: var(--ws-text);
+  border-color: #52575f;
+  background: var(--ws-panel-soft);
+}
+.ws-legacy .btn-outline-dark:hover { border-color: var(--ws-accent); color: var(--ws-accent); }
+.ws-legacy .message,.ws-legacy .warning,.ws-legacy .locked,.ws-legacy .price-box,.ws-legacy .kundenlink-warnung {
+  background: var(--ws-warning-bg);
+  color: var(--ws-warning);
+  border-color: #665134;
+}
+.ws-legacy-lead .message,.ws-legacy .customer-link-note {
+  background: #20332b;
+  color: var(--ws-accent);
+  border-color: #3e6554;
+}
+.ws-legacy .photo-box,.ws-legacy .approval-note {
+  background: var(--ws-panel-soft);
+  color: var(--ws-muted);
+  border-color: #52575f;
+}
+.ws-legacy .photo-box input { background: transparent; }
+.ws-legacy input:focus,.ws-legacy textarea:focus,.ws-legacy select:focus {
+  outline: 3px solid #a1e6ca40;
+  border-color: var(--ws-accent);
+}
+.ws-legacy .aufgabe { border-color: var(--ws-line); }
+.ws-legacy .haken-btn { background: var(--ws-panel-soft); color: var(--ws-accent); border-color: var(--ws-accent); }
+.ws-legacy .tage-box,.ws-legacy .richtwert { color: var(--ws-accent); }
+.ws-legacy .erledigt-text { color: var(--ws-muted); }
+.ws-legacy .text-success { color: var(--ws-accent) !important; }
+.ws-legacy .spalte {
+  background: var(--ws-panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+.ws-legacy .karte:hover { box-shadow: none; }
+.ws-legacy .schritt-nr,.ws-legacy .badge.b-success,.ws-legacy .badge.b-primary,
+.ws-legacy .badge.b-info,.ws-legacy .badge.b-secondary { color: var(--ws-on-accent); }
+.ws-legacy .badge.b-warning { color: #322412; }
+.ws-legacy .badge.b-danger,.ws-legacy .neu-badge { color: #3a1820; }
+.ws-legacy .badge.b-dark { color: var(--ws-text); }
+.ws-legacy .kennzeichen.leer { background: var(--ws-panel-soft); }
+.ws-legacy .prod-knopf,.ws-legacy .prod-toggle {
+  background: var(--ws-panel-soft);
+  border-color: var(--ws-line);
+}
+.ws-legacy .prod-knopf.is-erledigt,.ws-legacy .prod-knopf.is-aktiv,
+.ws-legacy .schnell-knopf,.ws-legacy .schnell-knopf.fertig {
+  background: #20332b;
+  border-color: #3e6554;
+  color: var(--ws-accent);
+}
+.ws-legacy .schnell-knopf.zurueck { background: var(--ws-panel-soft); color: var(--ws-muted); border-color: var(--ws-line); }
+.ws-legacy footer { background: var(--ws-bg); border-color: var(--ws-line); color: var(--ws-muted); }
+.ws-legacy-login .login-card { border-color: var(--ws-line); box-shadow: none !important; }
+@media (max-width: 700px) {
+  .ws-legacy .topbar { gap: .75rem; }
+  .ws-legacy .topbar .ws-back { margin-left: 0; }
+  .ws-legacy .topbar-title { min-width: 0; }
+  .ws-legacy .topbar-title strong { overflow-wrap: anywhere; }
+  .ws-legacy .topbar-actions { max-width: 100%; }
+}

@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101114">
   <title>Auftrag {{ auftrag['kennzeichen'] or auftrag['fahrzeug'] }} — Werkstatt-Tafel</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -518,8 +519,10 @@
       .kundenlink-inhalt p { color: #16202a; }
     }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_legacy.css') }}?v=werkstatt-1" media="screen">
+  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=werkstatt-1" media="screen">
 </head>
-<body>
+<body class="ws-legacy ws-legacy-auftrag">
   <div class="topbar">
     <a class="zurueck" href="{{ url_for('werkstatt_tafel') }}">← Zur Tafel</a>
     {% if auftrag['kennzeichen'] %}
@@ -527,6 +530,7 @@
     {% endif %}
     <h1>{{ auftrag['fahrzeug'] }}</h1>
     <span class="status-badge">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
+    {% if session.admin %}<a class="ws-back" href="/admin/cockpit">← Werkstatt-Cockpit</a>{% endif %}
   </div>
 
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -574,18 +578,18 @@
         <h2>🎨 Farbton &amp; Lackmessung</h2>
 
         {% if auftrag['messung_erforderlich'] == 'ja' %}
-        <div style="background:#fdecec; border:1px solid var(--danger); color:#7a1f1f; border-radius:14px; padding:.85rem 1rem; margin-bottom:1rem;">
+        <div style="background:var(--ws-danger-bg, #fdecec); border:1px solid var(--danger); color:var(--ws-danger, #7a1f1f); border-radius:14px; padding:.85rem 1rem; margin-bottom:1rem;">
           <div style="font-weight:700; font-size:1.05rem;">⚠ Achtung: Messung erforderlich</div>
-          <div style="margin-top:.4rem; color:#5e2b2b;">Wichtig: Messstelle <strong>aufpolieren</strong> und mit <strong>Silikonentferner reinigen</strong>, dann messen — für eine bestmögliche Lackmessung.</div>
+          <div style="margin-top:.4rem; color:var(--ws-danger, #5e2b2b);">Wichtig: Messstelle <strong>aufpolieren</strong> und mit <strong>Silikonentferner reinigen</strong>, dann messen — für eine bestmögliche Lackmessung.</div>
         </div>
         {% endif %}
 
         <form method="POST" action="{{ url_for('werkstatt_auftrag_farbton', auftrag_id=auftrag['id']) }}" style="display:grid; gap:.5rem; margin-bottom:1rem;">
           <label style="font-weight:600;">Farbton</label>
-          <input type="text" name="farbton" value="{{ auftrag['farbton'] or '' }}" placeholder="z.B. Brillantsilber LY7W" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:#fff;">
+          <input type="text" name="farbton" value="{{ auftrag['farbton'] or '' }}" placeholder="z.B. Brillantsilber LY7W" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:var(--ws-bg, #fff);">
           <label style="font-weight:600;">2. Farbton <span style="color:var(--muted); font-weight:400;">(optional, bei Zweiton / Sonderlack)</span></label>
-          <input type="text" name="farbton_2" value="{{ auftrag['farbton_2'] or '' }}" placeholder="zweiter Farbton" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:#fff;">
-          <button type="submit" style="justify-self:start; background:var(--accent); color:#fff; border:none; border-radius:12px; padding:.55rem 1.2rem; font-weight:600; cursor:pointer; font-size:1rem;">Farbton speichern</button>
+          <input type="text" name="farbton_2" value="{{ auftrag['farbton_2'] or '' }}" placeholder="zweiter Farbton" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:var(--ws-bg, #fff);">
+          <button type="submit" style="justify-self:start; background:var(--accent); color:var(--ws-on-accent, #fff); border:none; border-radius:12px; padding:.55rem 1.2rem; font-weight:600; cursor:pointer; font-size:1rem;">Farbton speichern</button>
         </form>
 
         <div style="border-top:1px solid var(--line); padding-top:.9rem;">
@@ -603,13 +607,13 @@
           <div style="font-weight:600;">Lackdaten <span style="color:var(--muted); font-weight:400;">— trägt der Mitarbeiter ein</span></div>
           {% if auftrag['messung_erforderlich'] == 'ja' %}
           <label style="font-weight:600;">Variantencode <span style="color:var(--muted); font-weight:400;">— nach der Messung eintragen</span></label>
-          <input type="text" name="variantencode" value="{{ auftrag['variantencode'] or '' }}" placeholder="gemessener Variantencode" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:#fff;">
+          <input type="text" name="variantencode" value="{{ auftrag['variantencode'] or '' }}" placeholder="gemessener Variantencode" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:var(--ws-bg, #fff);">
           {% else %}
           <input type="hidden" name="variantencode" value="{{ auftrag['variantencode'] or '' }}">
           {% endif %}
           <label style="font-weight:600;">Angemischte Menge <span style="color:var(--muted); font-weight:400;">— z.B. 350 ml Basislack</span></label>
-          <input type="text" name="angemischte_menge" value="{{ auftrag['angemischte_menge'] or '' }}" placeholder="z.B. 350 ml Basislack" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:#fff;">
-          <button type="submit" style="justify-self:start; background:var(--brand); color:#fff; border:none; border-radius:12px; padding:.55rem 1.2rem; font-weight:600; cursor:pointer; font-size:1rem;">Lackdaten speichern</button>
+          <input type="text" name="angemischte_menge" value="{{ auftrag['angemischte_menge'] or '' }}" placeholder="z.B. 350 ml Basislack" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:var(--ws-bg, #fff);">
+          <button type="submit" style="justify-self:start; background:var(--brand); color:var(--ws-on-accent, #fff); border:none; border-radius:12px; padding:.55rem 1.2rem; font-weight:600; cursor:pointer; font-size:1rem;">Lackdaten speichern</button>
         </form>
       </div>
 
@@ -646,7 +650,7 @@
         <div style="display:flex; align-items:stretch; gap:.25rem; margin-bottom:.6rem;">
           {% for ps in auftrag['produktion_schritte'] %}
           <form method="POST" action="{{ url_for('werkstatt_auftrag_produktion', auftrag_id=auftrag['id'], schritt=ps['key']) }}" style="flex:1; margin:0;">
-            <button type="submit" style="width:100%; display:flex; flex-direction:column; align-items:center; gap:.15rem; border-radius:10px; padding:.5rem .2rem; font-weight:700; font-size:.82rem; cursor:pointer; font-family:inherit; {% if ps['state'] == 'erledigt' %}border:1.5px solid #1b7f53; background:rgba(27,127,83,.08); color:#1b7f53;{% elif ps['state'] == 'aktiv' %}border:1.5px solid #145d66; background:rgba(20,93,102,.12); color:#145d66;{% else %}border:1.5px solid rgba(0,0,0,.14); background:rgba(0,0,0,.02); color:#6f7a83;{% endif %}">
+            <button type="submit" style="width:100%; display:flex; flex-direction:column; align-items:center; gap:.15rem; border-radius:10px; padding:.5rem .2rem; font-weight:700; font-size:.82rem; cursor:pointer; font-family:inherit; {% if ps['state'] == 'erledigt' %}border:1.5px solid var(--ws-accent, #1b7f53); background:rgba(27,127,83,.08); color:var(--ws-accent, #1b7f53);{% elif ps['state'] == 'aktiv' %}border:1.5px solid var(--ws-accent, #145d66); background:rgba(20,93,102,.12); color:var(--ws-accent, #145d66);{% else %}border:1.5px solid var(--ws-line, rgba(0,0,0,.14)); background:var(--ws-panel-soft, rgba(0,0,0,.02)); color:var(--ws-muted, #6f7a83);{% endif %}">
               <span style="font-size:1em;">{% if ps['state'] == 'erledigt' %}✓{% elif ps['state'] == 'aktiv' %}●{% else %}○{% endif %}</span>
               {{ ps['label'] }}
             </button>
@@ -727,7 +731,7 @@
 
       <div class="panel">
         <h2>Fotos ({{ bilder | length }})</h2>
-        <p style="margin:-.3rem 0 .7rem; color:#6f7a83; font-size:.9rem;">Diese Fotos sieht der Kunde auf seiner Status-Seite.</p>
+        <p style="margin:-.3rem 0 .7rem; color:var(--ws-muted, #6f7a83); font-size:.9rem;">Diese Fotos sieht der Kunde auf seiner Status-Seite.</p>
         {% if bilder %}
           <div class="fotos">
             {% for bild in bilder %}
@@ -743,11 +747,11 @@
               enctype="multipart/form-data"
               style="margin-top:1.1rem; display:flex; gap:.7rem; flex-wrap:wrap; align-items:center;">
           {{ csrf_field()|safe }}
-          <label class="foto-upload-knopf" style="cursor:pointer; display:inline-flex; align-items:center; gap:.45rem; background:#17212a; color:#fff; padding:.75rem 1.15rem; border-radius:.85rem; font-weight:700; font-size:clamp(.92rem,1.5vw,1.08rem);">
+          <label class="foto-upload-knopf" style="cursor:pointer; display:inline-flex; align-items:center; gap:.45rem; background:var(--ws-panel-soft, #17212a); color:#fff; padding:.75rem 1.15rem; border-radius:.85rem; font-weight:700; font-size:clamp(.92rem,1.5vw,1.08rem);">
             📷 Foto aufnehmen
             <input type="file" name="fotos" accept="image/*" capture="environment" multiple hidden onchange="fotoUploadStarten(this)">
           </label>
-          <label class="foto-upload-knopf" style="cursor:pointer; display:inline-flex; align-items:center; gap:.45rem; background:#fffdf9; color:#17212a; border:1px solid #ddd1c0; padding:.75rem 1.15rem; border-radius:.85rem; font-weight:500; font-size:clamp(.92rem,1.5vw,1.08rem);">
+          <label class="foto-upload-knopf" style="cursor:pointer; display:inline-flex; align-items:center; gap:.45rem; background:var(--ws-panel, #fffdf9); color:var(--ws-text, #17212a); border:1px solid var(--ws-line, #ddd1c0); padding:.75rem 1.15rem; border-radius:.85rem; font-weight:500; font-size:clamp(.92rem,1.5vw,1.08rem);">
             🖼 Aus Galerie
             <input type="file" name="fotos" accept="image/*" multiple hidden onchange="fotoUploadStarten(this)">
           </label>
@@ -760,11 +764,11 @@
         <h2>📍 Abhol-/Lieferadresse</h2>
         {% if auftrag['abhol_adresse'] %}
         <div style="font-size:clamp(1rem,1.6vw,1.2rem); font-weight:600; margin-bottom:.5rem;">{{ auftrag['abhol_adresse'] }}</div>
-        <a href="https://www.google.com/maps/search/?api=1&query={{ auftrag['abhol_adresse']|urlencode }}" target="_blank" rel="noopener" style="display:inline-block; background:var(--accent); color:#fff; text-decoration:none; border-radius:12px; padding:.45rem 1rem; font-weight:600; margin-bottom:.8rem;">🗺 Route öffnen</a>
+        <a href="https://www.google.com/maps/search/?api=1&query={{ auftrag['abhol_adresse']|urlencode }}" target="_blank" rel="noopener" style="display:inline-block; background:var(--accent); color:var(--ws-on-accent, #fff); text-decoration:none; border-radius:12px; padding:.45rem 1rem; font-weight:600; margin-bottom:.8rem;">🗺 Route öffnen</a>
         {% endif %}
         <form method="POST" action="{{ url_for('werkstatt_auftrag_adresse', auftrag_id=auftrag['id']) }}" style="display:grid; gap:.5rem;">
-          <input type="text" name="abhol_adresse" value="{{ auftrag['abhol_adresse'] or '' }}" placeholder="z.B. Unteres Lohhaus 5, 74915 Waibstadt" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:#fff;">
-          <button type="submit" style="justify-self:start; background:var(--brand); color:#fff; border:none; border-radius:12px; padding:.5rem 1.1rem; font-weight:600; cursor:pointer;">Adresse speichern</button>
+          <input type="text" name="abhol_adresse" value="{{ auftrag['abhol_adresse'] or '' }}" placeholder="z.B. Unteres Lohhaus 5, 74915 Waibstadt" style="padding:.6rem .8rem; border:1px solid var(--line); border-radius:12px; font-size:1rem; background:var(--ws-bg, #fff);">
+          <button type="submit" style="justify-self:start; background:var(--brand); color:var(--ws-on-accent, #fff); border:none; border-radius:12px; padding:.5rem 1.1rem; font-weight:600; cursor:pointer;">Adresse speichern</button>
         </form>
       </div>
 

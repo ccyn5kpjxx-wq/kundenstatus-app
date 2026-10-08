@@ -13,8 +13,14 @@ TEST_ROOT = Path(tempfile.mkdtemp(prefix="kundenstatus-werkstatt-tafel-test-"))
 os.environ["DATABASE_URL"] = ""
 os.environ["RENDER"] = "1"
 os.environ["REQUIRE_POSTGRES_ON_RENDER"] = "0"
+os.environ["DATA_DIR"] = str(TEST_ROOT)
 os.environ["SQLITE_DB_PATH"] = str(TEST_ROOT / "auftraege.db")
 os.environ["UPLOAD_DIR"] = str(TEST_ROOT / "uploads")
+os.environ["BACKUP_DIR"] = str(TEST_ROOT / "backups")
+os.environ["DELETED_UPLOAD_DIR"] = str(TEST_ROOT / "deleted_uploads")
+os.environ["AUTO_BACKUP_ENABLED"] = "0"
+os.environ["AUTO_CHANGE_BACKUP_ENABLED"] = "0"
+os.environ["AUTO_BACKUP_ON_STARTUP"] = "0"
 atexit.register(shutil.rmtree, TEST_ROOT, ignore_errors=True)
 
 import app as portal  # noqa: E402

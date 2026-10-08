@@ -3,9 +3,9 @@
 {% block extra_css %}
 <style>
   .email-form {
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--ws-line,#e4d6c3);
     border-radius: 18px;
-    background: #fffaf2;
+    background: var(--ws-panel-soft,#fffaf2);
     padding: 1rem;
   }
   .email-list {
@@ -13,9 +13,9 @@
     gap: 1rem;
   }
   .email-item {
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--ws-line,#e4d6c3);
     border-radius: 18px;
-    background: #fffdf9;
+    background: var(--ws-panel,#fffdf9);
     padding: 1rem;
   }
   .email-item.is-new {
@@ -26,9 +26,9 @@
     overflow-wrap: anywhere;
   }
   .mail-assignment {
-    border: 1px solid #d7e7df;
+    border: 1px solid var(--ws-line,#d7e7df);
     border-radius: 8px;
-    background: #f7fbf8;
+    background: var(--ws-panel,#f7fbf8);
     padding: .75rem;
   }
   .mail-assignment-form {
@@ -43,15 +43,15 @@
     }
   }
   .api-box {
-    border: 1px solid #cbe0e3;
+    border: 1px solid var(--ws-line,#cbe0e3);
     border-radius: 18px;
-    background: #f3f8f9;
+    background: var(--ws-panel-soft,#f3f8f9);
     padding: 1rem;
   }
   .imap-box {
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--ws-line,#e4d6c3);
     border-radius: 18px;
-    background: #fffdf9;
+    background: var(--ws-panel,#fffdf9);
     padding: 1rem;
   }
   .mail-meta-grid {
@@ -60,12 +60,12 @@
     gap: .75rem;
   }
   .mail-meta-item {
-    border-top: 1px solid #eee3d5;
+    border-top: 1px solid var(--ws-line,#eee3d5);
     padding-top: .65rem;
   }
   .mail-meta-item span {
     display: block;
-    color: #6c757d;
+    color: var(--ws-muted,#6c757d);
     font-size: .78rem;
     font-weight: 700;
     letter-spacing: .03em;
@@ -77,19 +77,19 @@
     gap: .75rem;
   }
   .mail-setup-item {
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--ws-line,#e4d6c3);
     border-radius: 8px;
-    background: #fffdf9;
+    background: var(--ws-panel,#fffdf9);
     padding: .85rem;
   }
   .mail-setup-item.is-done {
-    border-left: 4px solid #198754;
+    border-left: 4px solid var(--ws-accent,#198754);
   }
   .mail-setup-item.is-warning {
-    border-left: 4px solid #cc8a16;
+    border-left: 4px solid var(--ws-warning,#cc8a16);
   }
   .mail-setup-item.is-open {
-    border-left: 4px solid #6c757d;
+    border-left: 4px solid var(--ws-line,#6c757d);
   }
   .alias-list {
     display: grid;
@@ -97,16 +97,16 @@
     gap: .5rem;
   }
   .alias-row {
-    border-top: 1px solid #eee3d5;
+    border-top: 1px solid var(--ws-line,#eee3d5);
     padding-top: .55rem;
   }
   .alias-row code {
     overflow-wrap: anywhere;
   }
   .mail-details {
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--ws-line,#e4d6c3);
     border-radius: 8px;
-    background: #fffdf9;
+    background: var(--ws-panel,#fffdf9);
     padding: .85rem;
   }
   .mail-details summary {

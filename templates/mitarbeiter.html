@@ -4,16 +4,16 @@
 <style>
   .staff-form,
   .vacation-form {
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--ws-line);
     border-radius: 18px;
-    background: #fffaf2;
+    background: var(--ws-panel-soft);
     padding: 1rem;
   }
   .staff-card {
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--ws-line);
     border-left: 5px solid var(--accent);
     border-radius: 18px;
-    background: #fffdf9;
+    background: var(--ws-panel);
     padding: 1rem;
   }
   .staff-card.inactive {
@@ -25,23 +25,23 @@
     gap: .65rem;
   }
   .vacation-item {
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--ws-line);
     border-radius: 14px;
-    background: #f8f2e8;
+    background: var(--ws-panel-soft);
     padding: .75rem .85rem;
   }
   .vacation-item.current {
     border-color: rgba(27, 127, 83, .42);
-    background: #edf8f2;
+    background: #20332b;
   }
   .summary-list {
     display: grid;
     gap: .75rem;
   }
   .summary-item {
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--ws-line);
     border-radius: 16px;
-    background: #fffdf9;
+    background: var(--ws-panel);
     padding: .85rem 1rem;
   }
   .staff-details {
@@ -51,9 +51,9 @@
     margin-bottom: 1rem;
   }
   .staff-detail {
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--ws-line);
     border-radius: 14px;
-    background: #f8f2e8;
+    background: var(--ws-panel-soft);
     padding: .7rem .8rem;
     min-height: 74px;
   }

@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bestellungen · Gärtner</title>
-<link rel="stylesheet" href="{{ url_for('static',filename='bestellordner.css') }}"></head>
-<body><main><header class="page-head"><div><a class="back" href="/admin">← Werkstatt-Cockpit</a><p class="eyebrow">GÄRTNER · MATERIAL & EINKAUF</p><h1>Bestellungen</h1><p>Alle Bestellwünsche, Lieferungen und Rechnungen an einem Ort.</p></div><a class="button secondary" href="{{ url_for('werkstatt_orders.intake_index') }}">Fotos & Belege öffnen</a></header>
+<link rel="stylesheet" href="{{ url_for('static',filename='bestellordner.css', v='werkstatt-1') }}"><meta name="theme-color" content="#101114"><link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css', v='werkstatt-1') }}"></head>
+<body>{% include '_werkstatt_admin_header.html' %}<main><header class="page-head"><div><a class="back" href="/admin/cockpit">← Werkstatt-Cockpit</a><p class="eyebrow">GÄRTNER · MATERIAL & EINKAUF</p><h1>Bestellungen</h1><p>Alle Bestellwünsche, Lieferungen und Rechnungen an einem Ort.</p></div><a class="button secondary" href="{{ url_for('werkstatt_orders.intake_index') }}">Fotos & Belege öffnen</a></header>
 <nav class="tabs" aria-label="Bestellbereiche"><a class="active" aria-current="page" href="{{ url_for('werkstatt_orders.index') }}">Bestellübersicht</a><a href="{{ url_for('werkstatt_orders.intake_index') }}">Eingänge & Belege</a><a href="/admin/assistent-artikel">Artikel & Preisquellen</a><a href="#einstellungen">Einstellungen</a></nav>
 <p><a class="button secondary" href="/werkstatt/materialbestellung">Foto + Menge bestellen</a> <small>Persönliche Bestellmaske für Mitarbeiter · auch als Link aus WhatsApp nutzbar.</small></p>
 {% for error in errors %}<p class="notice errors" role="alert">{{ error }}</p>{% endfor %}

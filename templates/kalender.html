@@ -3,13 +3,13 @@
 {% block extra_css %}
 <style>
   .calendar-note {
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--line);
     border-radius: 14px;
-    background: #fffaf2;
+    background: var(--panel-soft);
     padding: .85rem 1rem;
   }
   .calendar-note.system {
-    background: #f3f8f9;
+    background: var(--panel-soft);
     border-color: #cbe0e3;
   }
   .calendar-empty {
@@ -21,7 +21,7 @@
   .week-overview {
     border: 1px solid #d8c8b1;
     border-radius: 20px;
-    background: #fffaf2;
+    background: var(--panel-soft);
     padding: 1rem;
   }
   .week-grid {
@@ -31,9 +31,9 @@
   }
   .week-day {
     min-height: 190px;
-    border: 1px solid #e4d6c3;
+    border: 1px solid var(--line);
     border-radius: 16px;
-    background: #fffdf9;
+    background: var(--panel);
     padding: .85rem;
   }
   .week-day.is-today {
@@ -41,7 +41,7 @@
     box-shadow: inset 0 0 0 2px rgba(162,63,45,.14);
   }
   .week-day.is-weekend {
-    background: #f7f1e8;
+    background: var(--panel-soft);
   }
   .week-date {
     display: flex;
@@ -65,8 +65,8 @@
   .week-point {
     border-radius: 12px;
     padding: .55rem .65rem;
-    background: #f7f1e8;
-    border: 1px solid #e4d6c3;
+    background: var(--panel-soft);
+    border: 1px solid var(--line);
     font-size: .9rem;
     line-height: 1.25;
   }
@@ -78,7 +78,7 @@
     text-decoration: underline;
   }
   .week-point {
-    background: #f3f8f9;
+    background: var(--panel-soft);
     border-color: #cbe0e3;
   }
   .week-empty {

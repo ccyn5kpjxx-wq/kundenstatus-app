@@ -17,10 +17,10 @@
     align-items: center;
     gap: 11px;
     padding: 10px 13px;
-    border: 1px solid #ded1bf;
+    border: 1px solid var(--line);
     border-radius: 15px;
-    color: #5f6b74;
-    background: #faf6ef;
+    color: var(--ws-muted);
+    background: var(--panel-soft);
     text-align: left;
     transition: border-color .18s ease, background .18s ease, color .18s ease;
   }
@@ -48,12 +48,12 @@
     padding: clamp(18px, 3vw, 28px);
     border: 1px solid #e2d6c5;
     border-radius: 19px;
-    background: #fffdf9;
+    background: var(--panel);
   }
   .vehicle-step-title {
     margin-bottom: 22px;
     padding-bottom: 17px;
-    border-bottom: 1px solid #eadfce;
+    border-bottom: 1px solid var(--line);
   }
   .vehicle-step-title h2 { margin: 0 0 5px; font-size: clamp(1.35rem, 3vw, 1.75rem); }
   .vehicle-step-title p { margin: 0; color: var(--muted); }
@@ -62,14 +62,14 @@
     padding: 18px;
     border: 1px dashed #c9b79f;
     border-radius: 15px;
-    background: #faf6ef;
+    background: var(--panel-soft);
   }
-  .vehicle-upload-card .form-control { background: #fff; }
-  .vehicle-upload-status { min-height: 1.3em; margin-top: 8px; color: #5c6871; font-size: .84rem; }
+  .vehicle-upload-card .form-control { background: var(--panel); }
+  .vehicle-upload-status { min-height: 1.3em; margin-top: 8px; color: var(--ws-muted); font-size: .84rem; }
   .vehicle-error {
     display: none;
     margin-top: 8px;
-    color: #a23f2d;
+    color: var(--ws-danger);
     font-size: .84rem;
     font-weight: 700;
   }
@@ -82,19 +82,19 @@
     border: 1px solid rgba(27, 127, 83, .32);
     border-radius: 12px;
     background: rgba(27, 127, 83, .08);
-    color: #245b43;
+    color: var(--ws-accent);
     font-size: .88rem;
   }
-  .vehicle-analysis-result strong { color: #16202a; }
+  .vehicle-analysis-result strong { color: var(--ws-text); }
   .vehicle-advanced {
     border: 1px solid #dfd3c1;
     border-radius: 15px;
-    background: #faf6ef;
+    background: var(--panel-soft);
   }
   .vehicle-advanced summary {
     padding: 15px 17px;
     cursor: pointer;
-    color: #31404c;
+    color: var(--ws-text);
     font-weight: 700;
   }
   .vehicle-advanced-body { padding: 2px 17px 17px; }
@@ -110,7 +110,7 @@
     padding: 12px;
     border: 1px solid rgba(221, 209, 192, .95);
     border-radius: 17px;
-    background: rgba(255, 253, 249, .95);
+    background: var(--panel);
     box-shadow: 0 14px 34px rgba(64, 47, 25, .16);
     backdrop-filter: blur(14px);
   }
