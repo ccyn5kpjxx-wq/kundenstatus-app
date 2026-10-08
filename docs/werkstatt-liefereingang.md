@@ -80,3 +80,41 @@ verfügbar. Die Wiederherstellung samt Adminschutz und unveränderten Daten ist
 durch die nun 22 Lieferprüfungen abgedeckt. Eine 502-Antwort während eines
 Serverausfalls wird dadurch nicht zu einem erfolgreichen Upload; erst der
 sichtbar gespeicherte Beleg und sein Originaldownload bestätigen den Erfolg.
+## Begrenzte Fotoauslese auf Render (08.10.2026)
+
+Der Lieferschein-Upload speichert das Original; die Aktion „Beleg analysieren“
+liest es anschließend als ungeprüften Vorschlag. Die Render-Standardkonfiguration
+schaltet die allgemeine lokale OCR ab. Deshalb verwendet ausschließlich diese
+explizite Adminaktion jetzt einen separaten lokalen Prozess. Es werden keine
+Dokumente an externe KI-Dienste übertragen und keine Liefermengen automatisch
+gebucht.
+
+`werkstatt_belegauslese.py` importiert keine Portal-App. Der Prozess erhält keine
+Portal-Zugangsdaten, höchstens 20 Sekunden Laufzeit, unter Linux 1 GiB Adressraum
+und echte ONNX-SessionOptions mit je einem intra-/inter-op-Thread. Die gepinnte
+RapidOCR-Version 1.2.3 ignoriert entsprechende Konstruktor-kwargs; ihre lokale
+SessionOptions-Factory wird deshalb nur bei der Engineinitialisierung im
+Wegwerfprozess angepasst. Fotos werden auf 1600 Pixel begrenzt; über 20 Megapixel
+und PDFs über fünf Seiten bleiben zur manuellen Prüfung. Originalbytes bleiben
+unverändert. Der Timeout beendet den Prozess und räumt ihn auf.
+
+Nur eine Lieferscheinanalyse läuft gleichzeitig pro Portalworker. Weitere
+Analyseanfragen erhalten sofort einen Hinweis. Nichtleere erfolgreiche Auslesen
+werden wiederverwendet; Fehler, leere Ergebnisse und Zeitlimits bleiben erneut
+versuchbar. „Zeitlimit“ wird sichtbar angezeigt. Ein Seitenlabel allein gilt
+nicht als erfolgreiche PDF-Auslese. Der globale OriginalsLock schützt weiterhin
+gegen paralleles Wiederherstellen; seine Wartezeit und Datenbankarbeit sind
+nicht Teil des OCR-Prozesslimits.
+
+Dateilisten, Upload-Rückgaben, Quellenprüfung und Analyse-Metadaten laden keine
+Original-Base64-Daten mehr. Eine neue Analyse liest und verifiziert das Original
+einmal. Downloads und bestätigte Lieferzuordnungen behalten die bisherige
+Originalprüfung.
+
+Verifikation: 26 Liefereingangtests, 54 Einkaufseingangtests und fünf
+Prozesstests bestanden. Der echte Linuxlauf auf Render unter 1 GiB Adressraum
+las den vorhandenen Beleg in 3,678 Sekunden (1289 Textzeichen, fünf Threads,
+957808 KiB maximaler virtueller Adressraum). Der vollständige Aufruf mit
+gefilterter Umgebung und Prozessbereinigung dauerte 3,876 Sekunden. Der Container hat 8 GiB RAM;
+vorheriger Verbrauch etwa 1,4 GiB, keine OOM-Ereignisse. Dies ist ein Messwert
+für diesen Beleg, keine Laufzeitgarantie für beliebige Dokumente.

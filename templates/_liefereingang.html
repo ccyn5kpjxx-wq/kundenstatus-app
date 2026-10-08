@@ -12,7 +12,8 @@
 <form method="post" action="{{ url_for('werkstatt_orders.order_delivery_form',action='analyse') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="order_key" value="{{ delivery_order.key }}"><input type="hidden" name="group_id" value="{{ file.group_id }}"><input type="hidden" name="file_id" value="{{ file.id }}">
 <button>Beleg analysieren</button></form>
-{% if file.extraction_status!='offen' %}<p class="notice">{{ {'pruefen':'Analyse vorhanden – noch ungeprüft','keine_auslese':'Keine lesbare Auslese – manuell prüfen','fehler':'Analyse fehlgeschlagen – Original manuell prüfen'}.get(file.extraction_status,'Auslese prüfen') }}</p>{% endif %}
+<small>Auf dem Server dauert die Auslese meist wenige Sekunden, höchstens 20 Sekunden. Vorhandene Ergebnisse werden sofort angezeigt. PDFs: bis zu fünf Seiten.</small>
+{% if file.extraction_status!='offen' %}<p class="notice">{{ {'pruefen':'Analyse vorhanden – noch ungeprüft','keine_auslese':'Keine lesbare Auslese – manuell prüfen','fehler':'Analyse fehlgeschlagen – Original manuell prüfen','zeitlimit':'Zeitlimit nach 20 Sekunden – Original manuell prüfen oder erneut analysieren'}.get(file.extraction_status,'Auslese prüfen') }}</p>{% endif %}
 {% if file.draft_text %}
 <details open><summary>Analyse prüfen</summary>
 {% if file.analysis.number %}<p>Lieferschein {{ file.analysis.number }}{% if file.analysis.date %} · {{ file.analysis.date }}{% endif %}</p>{% endif %}

@@ -28,6 +28,7 @@ MAX_FILE_BYTES = 8 * 1024 * 1024
 TABLES = ('einkauf_eingang', 'einkauf_eingang_positionen', 'einkauf_eingang_dateien',
           'einkauf_eingang_lieferungen', 'einkauf_eingang_preise', 'einkauf_eingang_klaerungen')
 FILE_KINDS = {'materialfoto', 'lieferschein', 'rechnung'}
+FILE_METADATA = 'id,eingang_id,kind,original_name,mime,suffix,sha256,created_at,created_by,extraction_status,draft_text'
 _SECRET = re.compile(r'\b(?:password|passwort|api[_ -]?key|access[_ -]?token|secret|authorization)\b', re.I)
 _BANK_LABEL = re.compile(r'\b(?:iban|bic|swift|bankverbindung|kontoverbindung|kontoinhaber|kontonummer|kontoauszug|'
                          r'kontostand|bankkonto|bankleitzahl|blz|kreditkartennummer|mandatsreferenz|lastschrift|sepa)\b', re.I)
@@ -289,6 +290,14 @@ class MaterialIntake:
         return dict(row)
 
     @staticmethod
+    def _file_metadata(db, group_id, file_id):
+        row = db.execute('SELECT ' + FILE_METADATA + ' FROM einkauf_eingang_dateien WHERE eingang_id=? AND id=?',
+                         (_id(group_id), _id(file_id))).fetchone()
+        if not row:
+            raise ValueError('Originalbeleg nicht gefunden.')
+        return dict(row)
+
+    @staticmethod
     def _lock(db, group_id, revision=None):
         # Acquire the parent write lock on both SQLite and PostgreSQL.
         db.execute('UPDATE einkauf_eingang SET revision=revision WHERE id=?', (_id(group_id),))
@@ -365,7 +374,7 @@ class MaterialIntake:
         with self.db() as db:
             group = self._group(db, group_id)
             lines = [dict(row) for row in db.execute('SELECT * FROM einkauf_eingang_positionen WHERE eingang_id=? ORDER BY position', (group['id'],)).fetchall()]
-            files = [self._file_view(dict(row)) for row in db.execute('SELECT * FROM einkauf_eingang_dateien WHERE eingang_id=? ORDER BY id', (group['id'],)).fetchall()]
+            files = [self._file_view(dict(row)) for row in db.execute('SELECT ' + FILE_METADATA + ' FROM einkauf_eingang_dateien WHERE eingang_id=? ORDER BY id', (group['id'],)).fetchall()]
             deliveries = [dict(row) for row in db.execute('SELECT * FROM einkauf_eingang_lieferungen WHERE eingang_id=? ORDER BY id', (group['id'],)).fetchall()]
             prices = [dict(dict(row), data=json.loads(row['payload_json'])) for row in db.execute('SELECT * FROM einkauf_eingang_preise WHERE eingang_id=? ORDER BY id', (group['id'],)).fetchall()]
             clarifications = [dict(row) for row in db.execute('SELECT * FROM einkauf_eingang_klaerungen WHERE eingang_id=? ORDER BY id', (group['id'],)).fetchall()]
@@ -422,7 +431,7 @@ class MaterialIntake:
         digest = hashlib.sha256(raw).hexdigest()
         with self.db() as db:
             group = self._lock(db, group_id)
-            existing = db.execute('SELECT * FROM einkauf_eingang_dateien WHERE eingang_id=? AND sha256=?', (group['id'], digest)).fetchone()
+            existing = db.execute('SELECT ' + FILE_METADATA + ' FROM einkauf_eingang_dateien WHERE eingang_id=? AND sha256=?', (group['id'], digest)).fetchone()
             if existing:
                 if existing['kind'] != kind:
                     raise IntakeConflict('Dieses Original ist bereits in einer anderen Belegart zugeordnet.')
@@ -432,7 +441,7 @@ class MaterialIntake:
                 VALUES(?,?,?,?,?,?,?,?,?) RETURNING id''',
                 (group['id'], kind, filename, mime, suffix, digest, base64.b64encode(raw).decode('ascii'), _now(), actor)).fetchone()
             self._bump(db, group['id'])
-            return self._file_view(self._file(db, group['id'], row['id']))
+            return self._file_view(self._file_metadata(db, group['id'], row['id']))
 
     def original(self, group_id, file_id):
         with self.db() as db:
@@ -442,9 +451,11 @@ class MaterialIntake:
             raise ValueError('Originaldatei konnte nicht verifiziert werden.')
         return raw, row['mime'], row['original_name']
 
-    def analyze_file(self, group_id, file_id, reader=None):
+    def analyze_file(self, group_id, file_id, reader=None, reuse_success=False):
         with self.db() as db:
-            row = self._file(db, group_id, file_id)
+            row = self._file_metadata(db, group_id, file_id)
+        if reuse_success and row['extraction_status'] == 'pruefen' and row['draft_text'].strip():
+            return self._file_view(row)
         raw, _, _ = self.original(group_id, file_id)
         reader = reader or getattr(self.p, 'extract_document_text_local', None)
         if not callable(reader):
@@ -460,12 +471,14 @@ class MaterialIntake:
                     text = ''.join(c for c in text if (ord(c) >= 32 or c in '\n\t') and not 0xD800 <= ord(c) <= 0xDFFF)
                 if not text.strip():
                     state = 'keine_auslese'
+        except TimeoutError:
+            state = 'zeitlimit'
         except Exception:
             state = 'fehler'
         with self.db() as db:
             db.execute('UPDATE einkauf_eingang_dateien SET draft_text=?,extraction_status=? WHERE id=? AND eingang_id=?',
                        (text, state, row['id'], row['eingang_id']))
-            return self._file_view(self._file(db, group_id, file_id))
+            return self._file_view(self._file_metadata(db, group_id, file_id))
 
     def record_delivery(self, group_id, payload, actor='admin'):
         from werkstatt_liefereingang import document_position

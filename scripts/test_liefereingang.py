@@ -247,6 +247,49 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(original.data, png())
         self.assertIn('Geprüfte Liefermenge zuordnen', self.view())
 
+    def test_render_analysis_uses_bounded_reader_and_reuses_success(self):
+        self.upload()
+        self.p.RUNNING_ON_RENDER = True
+        with patch('werkstatt_belegauslese.read_receipt', return_value=TEXT) as reader:
+            with patch.object(self.p, 'extract_document_text_local', side_effect=AssertionError('Unbounded reader')):
+                for _ in range(2):
+                    self.assertEqual(self.post('analyse', group_id='1', file_id='1').status_code, 303)
+        reader.assert_called_once()
+        self.assertIn('Analyse vorhanden', self.view())
+        self.assertEqual(self.rows('SELECT * FROM assistent_bestelllieferungen'), [])
+
+    def test_render_timeout_is_visible_retryable_and_preserves_original(self):
+        self.upload()
+        self.p.RUNNING_ON_RENDER = True
+        with patch('werkstatt_belegauslese.read_receipt', side_effect=TimeoutError):
+            result = self.post('analyse', group_id='1', file_id='1')
+        self.assertIn('Zeitlimit nach 20 Sekunden', self.client.get(result.location).get_data(as_text=True))
+        self.assertEqual(self.p.workshop_intake.original(1, 1)[0], png())
+        with patch('werkstatt_belegauslese.read_receipt', return_value=TEXT) as reader:
+            self.post('analyse', group_id='1', file_id='1')
+        reader.assert_called_once()
+        self.assertEqual(self.rows('SELECT * FROM assistent_bestelllieferungen'), [])
+
+    def test_concurrent_analysis_returns_without_waiting_or_mutating(self):
+        self.upload()
+        self.service._analysis_lock.acquire()
+        try:
+            with patch.object(self.service, 'source', side_effect=AssertionError('Must not wait for originals')):
+                result = self.post('analyse', group_id='1', file_id='1')
+        finally:
+            self.service._analysis_lock.release()
+        self.assertIn('Eine Beleganalyse läuft bereits', self.client.get(result.location).get_data(as_text=True))
+        self.assertEqual(self.rows('SELECT extraction_status FROM einkauf_eingang_dateien')[0]['extraction_status'], 'offen')
+
+    def test_analysis_reads_original_blob_once_and_overview_uses_metadata(self):
+        self.upload()
+        original_reader = self.p.workshop_intake._file
+        with patch.object(self.p.workshop_intake, '_file', wraps=original_reader) as blob:
+            self.post('analyse', group_id='1', file_id='1')
+            self.assertEqual(blob.call_count, 1)
+        with patch.object(self.p.workshop_intake, '_file', side_effect=AssertionError('Original not needed')):
+            self.assertIn('Analyse vorhanden', self.view())
+
     def test_receipt_cannot_be_assigned_twice_to_different_order(self):
         self.upload(); self.post('zuordnen', **self.form())
         self.fixture.f.material(2, supplier_name='Testlieferant', variant='50 mm')

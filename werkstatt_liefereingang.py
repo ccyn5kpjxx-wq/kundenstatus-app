@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import json
 import re
+import threading
 from statistics import median
 
 from flask import abort, flash, redirect, request, url_for
@@ -114,6 +115,7 @@ def analyze_delivery_text(text):
 class OrderDelivery:
     def __init__(self, portal):
         self.p = portal
+        self._analysis_lock = threading.Lock()
         self.init_schema()
 
     def init_schema(self):
@@ -199,17 +201,27 @@ class OrderDelivery:
         order = self.order(key)
         with self.p.workshop_intake.db() as db:
             group = self.p.workshop_intake._group(db, group_id)
-            file = self.p.workshop_intake._file(db, group_id, file_id)
+            file = self.p.workshop_intake._file_metadata(db, group_id, file_id)
         if group['source_key'] != 'order-receipts:' + order['key'] or file['kind'] != 'lieferschein':
             raise ValueError('Lieferschein gehört nicht zur Belegsammlung dieser Bestellung.')
         return order, group, file
 
     def analyze(self, key, group_id, file_id):
-        with self.p.portal_originals_operation_lock():
-            self.source(key, group_id, file_id)
-            return self.p.workshop_intake.analyze_file(group_id, file_id, reader=self.read_text)
+        # Avoid accumulating requests and simultaneous native OCR processes.
+        if not self._analysis_lock.acquire(blocking=False):
+            raise ValueError('Eine Beleganalyse läuft bereits. Bitte gleich erneut versuchen.')
+        try:
+            with self.p.portal_originals_operation_lock():
+                self.source(key, group_id, file_id)
+                return self.p.workshop_intake.analyze_file(group_id, file_id,
+                    reader=self.read_text, reuse_success=True)
+        finally:
+            self._analysis_lock.release()
 
     def read_text(self, path, name):
+        if getattr(self.p, 'RUNNING_ON_RENDER', False):
+            from werkstatt_belegauslese import read_receipt
+            return read_receipt(path)
         if path.suffix.lower() in {'.jpg', '.png', '.webp'}:
             factory = getattr(self.p, 'get_rapid_ocr', None)
             if callable(factory):
@@ -334,6 +346,7 @@ def register_delivery_forms(bp, portal):
                 result = service.analyze(key, request.form.get('group_id'), request.form.get('file_id'))
                 message = {'pruefen': 'Beleg analysiert. Auslese am Original prüfen; noch keine Lieferung gebucht.',
                     'keine_auslese': 'Keine lesbare Auslese. Original öffnen und Lieferdaten manuell prüfen.',
+                    'zeitlimit': 'Auslese nach 20 Sekunden beendet. Original erhalten; Lieferdaten manuell prüfen oder erneut analysieren.',
                     'fehler': 'Auslese fehlgeschlagen. Original erhalten; manuelle Prüfung möglich.'}.get(result['extraction_status'], 'Auslese prüfen.')
             else:
                 result = service.record(key, {name: request.form.get(name) for name in
