@@ -18,11 +18,23 @@
     <img class="employee-app-icon" src="{{ url_for('static', filename='mitarbeiter-app-icon-192.png') }}" width="88" height="88" alt="Gärtner App-Symbol">
     <span class="eyebrow">DEINE WERKSTATT. IMMER DABEI.</span>
     <h1 id="app-title">Gärtner auf<br>deinem Handy.</h1>
-    <p>Dein persönliches Mitarbeiterportal als App: direkt vom Startbildschirm öffnen und mit deinem bestehenden Zugang anmelden.</p>
+    <p>Einmal installieren. Danach das Gärtner-Symbol antippen und mit deinem persönlichen Zugang anmelden.</p>
     <a href="#app-installation" class="employee-app-button" data-app-install>App aufs Handy holen <span aria-hidden="true">↓</span></a>
-    <p class="employee-app-status" data-app-install-status role="status" aria-live="polite">Für Android und iPhone. Die Anleitung findest du unten.</p>
-    <a class="employee-app-link" href="/werkstatt/mein-konto">Mitarbeiterkonto im Browser öffnen</a>
+    <p class="employee-app-status" data-app-install-status role="status" aria-live="polite">Für iPhone und Android. So geht’s:</p>
+    <a class="employee-app-link" href="/werkstatt/mein-konto">Mein Konto öffnen</a>
   </section>
+  <details id="app-installation" class="employee-app-help" data-app-help open>
+    <summary>Einmal aufs Handy holen</summary>
+    <div class="employee-app-help-body">
+      <p class="employee-app-note" data-app-in-app hidden>Aus WhatsApp geöffnet? Öffne den Link zuerst in Safari (iPhone) oder Chrome (Android).</p>
+      <section data-app-platform="ios"><h3>iPhone · in Safari</h3><ol><li>Das <strong>Safari-Menü</strong> öffnen und <strong>Teilen</strong> antippen. Ist das Teilen-Symbol mit dem Pfeil nach oben schon sichtbar, direkt darauf tippen.</li><li><strong>Zu Home-Bildschirm hinzufügen</strong> wählen. Falls angezeigt, <strong>Als Web-App öffnen</strong> einschalten. Dann auf <strong>Hinzufügen</strong> tippen.</li></ol></section>
+      <section data-app-platform="android"><h3>Android · in Chrome</h3><ol><li>Oben auf <strong>App aufs Handy holen</strong> tippen und die Installation bestätigen.</li><li>Falls keine Abfrage erscheint: Im Chrome-Menü <strong>App installieren</strong> oder <strong>Zum Startbildschirm hinzufügen</strong> wählen.</li></ol></section>
+      <section data-app-platform="browser"><h3>Am Computer oder in einem anderen Browser</h3><p>Nutze das Installationssymbol in der Adressleiste oder den Installationspunkt im Browsermenü. Ist keine Installation verfügbar, kannst du das Mitarbeiterkonto wie bisher im Browser öffnen.</p></section>
+      <p><strong>Danach öffnest du die App über das Gärtner-Symbol.</strong></p>
+      <p>Alle Mitarbeiter nutzen dieselbe App. Jeder meldet sich mit seiner eigenen Mitarbeiter-ID und seinem selbst gewählten Passwort an. Persönliche Unterlagen bleiben getrennt.</p>
+      <p>Noch kein Passwort? Öffne zuerst deinen persönlichen Einrichtungslink. Die App braucht eine Internetverbindung.</p>
+    </div>
+  </details>
   <div class="employee-app-features" aria-label="Deine Bereiche in der App">
     <article class="employee-app-feature"><strong>Aufträge</strong><p>Auftragsnummer, Arbeiten, Farbton, Termine und Bilder.</p></article>
     <article class="employee-app-feature"><strong>Nachbestellen</strong><p>Foto oder Screenshot, Stückzahl und Dringlichkeit.</p></article>
@@ -31,17 +43,6 @@
     <article class="employee-app-feature"><strong>Unterlagen</strong><p>Deine eigenen Lohnzettel und Personalunterlagen.</p></article>
     <article class="employee-app-feature"><strong>Sprachassistent</strong><p>Fragen zum Auftrag stellen und per Sprache arbeiten.</p></article>
   </div>
-  <details id="app-installation" class="employee-app-help" data-app-help open>
-    <summary>So installierst du die App</summary>
-    <div class="employee-app-help-body">
-      <p class="employee-app-note" data-app-in-app hidden>Link aus WhatsApp geöffnet? Öffne diese Seite über das Browsermenü in Safari oder Chrome. Dort kannst du die App installieren.</p>
-      <section data-app-platform="ios"><h3>Auf dem iPhone</h3><ol><li>Diese Seite in <strong>Safari</strong> öffnen.</li><li>Auf <strong>Teilen</strong> tippen und <strong>Zum Home-Bildschirm</strong> wählen.</li><li>Falls angezeigt, <strong>Als Web-App öffnen</strong> einschalten. Mit <strong>Hinzufügen</strong> bestätigen.</li></ol></section>
-      <section data-app-platform="android"><h3>Auf Android</h3><ol><li>Diese Seite in <strong>Chrome</strong> öffnen.</li><li>Auf <strong>App aufs Handy holen</strong> tippen. Alternativ im Browsermenü <strong>App installieren</strong> oder <strong>Zum Startbildschirm hinzufügen</strong> wählen.</li><li>Die Installation bestätigen. Danach findest du <strong>Gärtner</strong> bei deinen Apps.</li></ol></section>
-      <section data-app-platform="browser"><h3>Am Computer oder in einem anderen Browser</h3><p>Nutze das Installationssymbol in der Adressleiste oder den Installationspunkt im Browsermenü. Ist keine Installation verfügbar, kannst du das Mitarbeiterkonto wie bisher im Browser öffnen.</p></section>
-      <p>Beim ersten Öffnen meldest du dich mit deiner Mitarbeiter-ID und deinem persönlichen Passwort an. Hast du deinen Einrichtungslink noch nicht verwendet, wähle dort zuerst dein Passwort.</p>
-      <p>Die App braucht eine Internetverbindung. Persönliche Unterlagen bleiben durch deinen Zugang geschützt.</p>
-    </div>
-  </details>
   <noscript><p class="employee-app-note">JavaScript ist ausgeschaltet. Du kannst die App über das Browsermenü oder auf dem iPhone über „Teilen“ zum Startbildschirm hinzufügen.</p></noscript>
 </main>
 <footer>Gärtner GmbH · Karosserie + Lack · Dein Mitarbeiterportal</footer>

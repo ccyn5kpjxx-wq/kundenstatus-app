@@ -30,7 +30,8 @@
       button.setAttribute('aria-disabled', String(disabled));
       button.textContent = alreadyInstalled ? 'App ist installiert' :
         promptOpen ? 'Installation geöffnet …' :
-          pendingInstall ? 'App installieren' : 'App aufs Handy holen';
+          pendingInstall ? 'App installieren' :
+            platform === 'ios' ? 'Auf iPhone hinzufügen' : 'App aufs Handy holen';
     });
   }
 
@@ -39,7 +40,7 @@
     const message = inApp ?
       'Öffne diesen Link zuerst in Safari oder Chrome. Dort kannst du die App zum Home-Bildschirm hinzufügen.' :
       platform === 'ios' ?
-        'In Safari auf „Teilen“ tippen, dann „Zum Home-Bildschirm“ wählen und mit „Hinzufügen“ bestätigen.' :
+        'In Safari das Menü öffnen → Teilen → Zu Home-Bildschirm hinzufügen → Hinzufügen.' :
         platform === 'android' ?
           'Öffne das Browsermenü in Chrome und wähle „App installieren“ oder „Zum Startbildschirm hinzufügen“.' :
           'Nutze das Installationssymbol in der Adressleiste oder den Punkt „App installieren“ im Browsermenü. Du kannst das Portal auch direkt im Browser nutzen.';
@@ -111,6 +112,7 @@
     if (isStandalone()) setStatus('Du nutzt das Mitarbeiterportal bereits als App.');
     else if (pendingInstall) setStatus('Bereit zum Installieren – tippe auf „App installieren“.');
     else if (inApp) setStatus('Zum Installieren den Link in Safari oder Chrome öffnen.');
+    else if (isIOS) setStatus('In Safari: Menü → Teilen → Zu Home-Bildschirm hinzufügen.');
 
     if ('serviceWorker' in navigator && window.isSecureContext) {
       navigator.serviceWorker.register('/werkstatt/app-sw.js', {
