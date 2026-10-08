@@ -1,10 +1,12 @@
 <!doctype html>
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="theme-color" content="#173f35"><title>Mein Mitarbeiterkonto · Gärtner</title><link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=farben-2"><link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=vertraege-1">  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=farben-2">
+{% include '_mitarbeiter_app_head.html' %}
 </head>
 <body><header class="access-header"><a href="/werkstatt/mein-konto" class="brand">GÄRTNER<span>GmbH · Karosserie + Lack</span></a><span>{{ employee.name }}</span></header>
 <main class="admin-main employee-home">
 {% include '_mitarbeiter_portal_nav.html' %}
 <span class="eyebrow">DEIN PERSÖNLICHES KONTO</span><h1>Hallo {{ employee.name }}.</h1><p class="lead">Deine Werkstatt. Deine Aufgaben. Alles an einem Platz.</p>
+{% include '_mitarbeiter_app_card.html' %}
 {% for category,message in get_flashed_messages(with_categories=true) %}<p role="status" class="setup-status">{{ message }}</p>{% endfor %}
 <div class="employee-summary">
 <a class="access-card summary-card" href="/werkstatt/assistent/arbeitszeit"><span class="eyebrow">ARBEITSZEIT</span><strong>{{ arbeitszeit.status_label if arbeitszeit else 'Zeiterfassung öffnen' }}</strong><span>{% if arbeitszeit and arbeitszeit.heute_stunden is not none %}{{ arbeitszeit.heute_stunden }} Stunden heute{% else %}Kommen, Gehen und Pausen{% endif %}</span></a>

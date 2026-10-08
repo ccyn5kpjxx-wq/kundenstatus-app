@@ -617,15 +617,17 @@ def register_assistant(p):
 
     @bp.post("/login")
     def login():
-        material_form = request.form.get('next') == '/werkstatt/materialbestellung'
+        login_next = request.form.get('next')
+        personal_form = login_next in {'/werkstatt/materialbestellung', '/werkstatt/mein-konto'}
+        login_page = '/werkstatt/materialbestellung?next=profil' if login_next == '/werkstatt/mein-konto' else '/werkstatt/materialbestellung'
         def failed_login(message, status):
-            if material_form:
+            if personal_form:
                 flash(message, 'error')
-                return redirect('/werkstatt/materialbestellung', code=303)
+                return redirect(login_page, code=303)
             return jsonify(error=message), status
         if not p.app.config["ASSISTANT_NATIVE_COCKPIT"] and not p.werkstatt_tafel_session_ok():
-            if material_form:
-                return failed_login('Der persönliche Materialzugang ist derzeit nicht verfügbar. Bitte wende dich an die Werkstattleitung.', 403)
+            if personal_form:
+                return failed_login('Der persönliche Portalzugang ist derzeit nicht verfügbar. Bitte wende dich an die Werkstattleitung.', 403)
             abort(403)
         limited, _ = p.login_rate_limit_status("assistent", "login")
         if limited:
@@ -633,12 +635,12 @@ def register_assistant(p):
         employee_id = request.form.get('mitarbeiter_id', '').strip()
         if not re.fullmatch(r'[1-9][0-9]{0,9}', employee_id) or int(employee_id) > 2147483647:
             p.record_failed_login('assistent', 'login')
-            return failed_login('Bitte deine numerische Mitarbeiter-ID und dein persönliches Passwort prüfen. Das Admin-Passwort gilt hier nicht.' if material_form else 'Anmeldung fehlgeschlagen.', 401)
+            return failed_login('Bitte deine numerische Mitarbeiter-ID und dein persönliches Passwort prüfen. Das Admin-Passwort gilt hier nicht.' if personal_form else 'Anmeldung fehlgeschlagen.', 401)
         with db_scope() as db:
             row = db.execute("SELECT r.*,m.aktiv FROM assistent_rechte r JOIN mitarbeiter m ON m.id=r.mitarbeiter_id WHERE r.mitarbeiter_id=?", (int(employee_id),)).fetchone()
         if not row or not row["aktiv"] or not row["passwort_hash"] or not check_password_hash(row["passwort_hash"], request.form.get("password", "")):
             p.record_failed_login("assistent", "login")
-            return failed_login('Die Anmeldung hat nicht geklappt. Bitte Mitarbeiter-ID und persönliches Passwort prüfen. Das Admin-Passwort gilt hier nicht.' if material_form else 'Anmeldung fehlgeschlagen.', 401)
+            return failed_login('Die Anmeldung hat nicht geklappt. Bitte Mitarbeiter-ID und persönliches Passwort prüfen. Das Admin-Passwort gilt hier nicht.' if personal_form else 'Anmeldung fehlgeschlagen.', 401)
         p.clear_login_attempts("assistent", "login")
         # Personal avatar access is independent of the shared workshop/admin
         # session. Clear the previous identity and pending confirmations before
@@ -651,8 +653,8 @@ def register_assistant(p):
         # A page opened under the previous person must not submit material
         # for a different personal account after another login in this browser.
         session['csrf_token'] = secrets.token_urlsafe(32)
-        if request.form.get('next') == '/werkstatt/materialbestellung':
-            response = redirect('/werkstatt/materialbestellung')
+        if personal_form:
+            response = redirect(login_next)
         else:
             response = redirect(url_for("assistent.page"))
         # Remembered shared logins must not restore admin/partner privileges on

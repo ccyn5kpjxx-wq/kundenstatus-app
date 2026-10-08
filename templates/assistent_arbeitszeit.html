@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_zeiten.css') }}?v=farben-2">
   {% endif %}
   <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=farben-2">
+  {% if not admin %}{% include '_mitarbeiter_app_head.html' %}{% endif %}
 </head>
 <body>
 {% if admin %}

@@ -752,7 +752,7 @@ def register_employee_portal(p):
         try:
             data = service.personal_view()
         except PermissionError:
-            return redirect('/werkstatt/materialbestellung')
+            return redirect('/werkstatt/materialbestellung?next=profil')
         return render_template('mitarbeiter_portal.html', **data, csrf_token=token())
 
     @bp.route('/admin/mitarbeiter/<int:mid>/portal', methods=['GET', 'POST'])

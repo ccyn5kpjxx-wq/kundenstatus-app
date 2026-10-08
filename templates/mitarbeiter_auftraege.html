@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=farben-2">
   <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_auftraege.css') }}?v=farben-2">
   <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=farben-2">
+  {% include '_mitarbeiter_app_head.html' %}
 </head>
 <body>
 <header class="access-header"><a href="/werkstatt/mein-konto" class="brand">GÄRTNER<span>GmbH · Karosserie + Lack</span></a><span>{{ employee.name }}</span></header>

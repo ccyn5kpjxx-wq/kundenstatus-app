@@ -523,6 +523,7 @@ def register_material_order_portal(p):
     @bp.get('')
     def page():
         who = service.identity()
+        login_next = '/werkstatt/mein-konto' if request.args.get('next') == 'profil' else '/werkstatt/materialbestellung'
         token = session.get('csrf_token')
         if not token:
             token = secrets.token_urlsafe(32)
@@ -546,7 +547,7 @@ def register_material_order_portal(p):
                 # must not invent a 250 EUR permission or prevent login display.
                 order_limit_cent = 0
         return render_template('materialbestellung.html', who=who, auth=bool(who), can_order=service.can_order(who),
-            csrf_token=token, employees=employees, max_photos=MAX_PHOTOS, max_photo_bytes=MAX_PHOTO_BYTES,
+            csrf_token=token, employees=employees, login_next=login_next, max_photos=MAX_PHOTOS, max_photo_bytes=MAX_PHOTO_BYTES,
             max_total_bytes=MAX_TOTAL_BYTES, order_limit_cent=order_limit_cent)
 
     @bp.route('/anforderungen', methods=['GET', 'POST'])

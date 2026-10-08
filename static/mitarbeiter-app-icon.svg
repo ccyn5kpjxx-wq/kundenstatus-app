@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="Gärtner Mitarbeiterportal">
+  <rect width="192" height="192" fill="#173f35"/>
+  <path d="M96 58V42" stroke="#e8efdc" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="96" cy="36" r="7" fill="#e8efdc"/>
+  <rect x="44" y="58" width="104" height="91" rx="30" fill="#e8efdc"/>
+  <rect x="56" y="71" width="80" height="56" rx="19" fill="#173f35"/>
+  <circle cx="77" cy="94" r="7" fill="#e8efdc"/>
+  <circle cx="115" cy="94" r="7" fill="#e8efdc"/>
+  <path d="M80 112Q96 121 112 112" fill="none" stroke="#e8efdc" stroke-width="5" stroke-linecap="round"/>
+</svg>

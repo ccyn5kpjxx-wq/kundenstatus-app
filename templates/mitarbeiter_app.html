@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#173f35">
+  <title>Deine Mitarbeiter-App · Gärtner</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css', v='farben-2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css', v='vertraege-1') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css', v='farben-2') }}">
+  {% include '_mitarbeiter_app_head.html' %}
+</head>
+<body>
+<header class="access-header"><a href="/werkstatt/mein-konto" class="brand">GÄRTNER<span>GmbH · Karosserie + Lack</span></a><a class="employee-app-link" href="/werkstatt/mein-konto">Zum Konto <span aria-hidden="true">→</span></a></header>
+<main class="admin-main employee-app-page">
+  <section class="employee-app-hero" aria-labelledby="app-title">
+    <img class="employee-app-icon" src="{{ url_for('static', filename='mitarbeiter-app-icon-192.png') }}" width="88" height="88" alt="Gärtner App-Symbol">
+    <span class="eyebrow">DEINE WERKSTATT. IMMER DABEI.</span>
+    <h1 id="app-title">Gärtner auf<br>deinem Handy.</h1>
+    <p>Dein persönliches Mitarbeiterportal als App: direkt vom Startbildschirm öffnen und mit deinem bestehenden Zugang anmelden.</p>
+    <button type="button" class="employee-app-button" data-app-install>App aufs Handy holen <span aria-hidden="true">↓</span></button>
+    <p class="employee-app-status" data-app-install-status role="status" aria-live="polite">Für Android und iPhone. Die Anleitung findest du unten.</p>
+    <a class="employee-app-link" href="/werkstatt/mein-konto">Mitarbeiterkonto im Browser öffnen</a>
+  </section>
+  <div class="employee-app-features" aria-label="Deine Bereiche in der App">
+    <article class="employee-app-feature"><strong>Aufträge</strong><p>Auftragsnummer, Arbeiten, Farbton, Termine und Bilder.</p></article>
+    <article class="employee-app-feature"><strong>Nachbestellen</strong><p>Foto oder Screenshot, Stückzahl und Dringlichkeit.</p></article>
+    <article class="employee-app-feature"><strong>Arbeitszeit</strong><p>Kommen, Pause und Feierabend. Deine Stunden im Blick.</p></article>
+    <article class="employee-app-feature"><strong>Urlaub</strong><p>Dein Urlaubsstand, Anträge und Betriebsurlaub.</p></article>
+    <article class="employee-app-feature"><strong>Unterlagen</strong><p>Deine eigenen Lohnzettel und Personalunterlagen.</p></article>
+    <article class="employee-app-feature"><strong>Sprachassistent</strong><p>Fragen zum Auftrag stellen und per Sprache arbeiten.</p></article>
+  </div>
+  <details class="employee-app-help" data-app-help>
+    <summary>So installierst du die App</summary>
+    <div class="employee-app-help-body">
+      <p class="employee-app-note" data-app-in-app hidden>Link aus WhatsApp geöffnet? Öffne diese Seite über das Browsermenü in Safari oder Chrome. Dort kannst du die App installieren.</p>
+      <section data-app-platform="ios"><h3>Auf dem iPhone</h3><ol><li>Diese Seite in <strong>Safari</strong> öffnen.</li><li>Auf <strong>Teilen</strong> tippen und <strong>Zum Home-Bildschirm</strong> wählen.</li><li>Falls angezeigt, <strong>Als Web-App öffnen</strong> einschalten. Mit <strong>Hinzufügen</strong> bestätigen.</li></ol></section>
+      <section data-app-platform="android"><h3>Auf Android</h3><ol><li>Diese Seite in <strong>Chrome</strong> öffnen.</li><li>Auf <strong>App aufs Handy holen</strong> tippen. Alternativ im Browsermenü <strong>App installieren</strong> oder <strong>Zum Startbildschirm hinzufügen</strong> wählen.</li><li>Die Installation bestätigen. Danach findest du <strong>Gärtner</strong> bei deinen Apps.</li></ol></section>
+      <section data-app-platform="browser"><h3>Am Computer oder in einem anderen Browser</h3><p>Nutze das Installationssymbol in der Adressleiste oder den Installationspunkt im Browsermenü. Ist keine Installation verfügbar, kannst du das Mitarbeiterkonto wie bisher im Browser öffnen.</p></section>
+      <p>Beim ersten Öffnen meldest du dich mit deiner Mitarbeiter-ID und deinem persönlichen Passwort an. Hast du deinen Einrichtungslink noch nicht verwendet, wähle dort zuerst dein Passwort.</p>
+      <p>Die App braucht eine Internetverbindung. Persönliche Unterlagen bleiben durch deinen Zugang geschützt.</p>
+    </div>
+  </details>
+  <noscript><p class="employee-app-note">JavaScript ist ausgeschaltet. Du kannst die App über das Browsermenü oder auf dem iPhone über „Teilen“ zum Startbildschirm hinzufügen.</p></noscript>
+</main>
+<footer>Gärtner GmbH · Karosserie + Lack · Dein Mitarbeiterportal</footer>
+</body>
+</html>

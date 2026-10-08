@@ -285,21 +285,23 @@ def main():
         else "[FEHLER] Autohaus-Zugaenge-Seite enthält wieder zu viele Funktionen"
     )
     ok &= zugaenge_page_slim_ok
-    removed_modules_ok = all(
-        text not in cockpit_html
-        for text in (
-            "Mitarbeiter",
-            "E-Mail-Zentrale",
-            "Rechnungskontrolle",
-            "Einkauf",
-            "Aktuelle Woche",
-            "Nächste Termine",
+    removed_modules_ok = (
+        'href="/admin/mitarbeiter"' in cockpit_html
+        and all(
+            text not in cockpit_html
+            for text in (
+                "E-Mail-Zentrale",
+                "Rechnungskontrolle",
+                "Einkauf",
+                "Aktuelle Woche",
+                "Nächste Termine",
+            )
         )
     )
     print(
-        "[OK] Betriebs-Cockpit blendet entfernte Module aus"
+        "[OK] Betriebs-Cockpit zeigt Mitarbeiter-Einstieg und blendet entfernte Module aus"
         if removed_modules_ok
-        else "[FEHLER] Betriebs-Cockpit zeigt entfernte Module noch an"
+        else "[FEHLER] Mitarbeiter-Einstieg fehlt oder Betriebs-Cockpit zeigt entfernte Module noch an"
     )
     ok &= removed_modules_ok
     start_clock_calendar_ok = (
@@ -499,11 +501,20 @@ def main():
     mitarbeiter_response = client.get("/admin/mitarbeiter")
     ok &= check("Mitarbeiter mit Login", mitarbeiter_response, {200})
     mitarbeiter_html = mitarbeiter_response.get_data(as_text=True)
-    mitarbeiter_page_ok = "Team und Urlaub" in mitarbeiter_html and "Mitarbeiter speichern" in mitarbeiter_html
+    mitarbeiter_page_ok = (
+        "Mitarbeiter &amp; Unterlagen</h1>" in mitarbeiter_html
+        and "Stammdaten &amp; Unterlagen" in mitarbeiter_html
+        and 'href="/admin/mitarbeiter/einrichtung"' in mitarbeiter_html
+        and 'href="/admin/mitarbeiter/betriebsurlaub"' in mitarbeiter_html
+        and 'href="/werkstatt/assistent/urlaub/verwaltung"' in mitarbeiter_html
+        and "Urlaubskonten &amp; Anträge" in mitarbeiter_html
+        and '<form method="POST" action="/admin/mitarbeiter/neu"' in mitarbeiter_html
+        and "Mitarbeiter speichern" in mitarbeiter_html
+    )
     print(
-        "[OK] Mitarbeiterseite zeigt Team- und Urlaubsverwaltung"
+        "[OK] Mitarbeiterseite zeigt Unterlagen, Zugänge, Urlaubsverwaltung und Anlageformular"
         if mitarbeiter_page_ok
-        else "[FEHLER] Mitarbeiterseite zeigt die Urlaubsverwaltung nicht"
+        else "[FEHLER] Mitarbeiterseite fehlt Unterlagen-, Zugangs-, Urlaubs- oder Anlageeinstieg"
     )
     ok &= mitarbeiter_page_ok
 

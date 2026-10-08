@@ -67,6 +67,81 @@ class MaterialLoginTests(unittest.TestCase):
             self.assertNotIn('admin', state)
             self.assertNotEqual(state['csrf_token'], 'synthetic-form-token')
 
+    def test_personal_app_start_keeps_profile_destination_through_login(self):
+        response = self.client.get('/werkstatt/mein-konto')
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, '/werkstatt/materialbestellung?next=profil')
+        page = self.client.get(response.location)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('name="next" value="/werkstatt/mein-konto"', page.text)
+        self.assertIn('Anmelden und Portal öffnen', page.text)
+        self.assertIn('DEINE WERKSTATT. DEIN PORTAL.', page.text)
+        response = self.login(next='/werkstatt/mein-konto')
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, '/werkstatt/mein-konto')
+        with patch('werkstatt_mitarbeiter_portal.render_template', return_value='synthetic-personal-profile') as render:
+            self.assertEqual(self.client.get(response.location).status_code, 200)
+        self.assertEqual(render.call_args.kwargs['employee']['id'], 1)
+        with self.client.session_transaction() as state:
+            self.assertEqual(state['assistent_mid'], 1)
+            self.assertNotIn('admin', state)
+
+    def test_profile_password_error_returns_to_profile_login_not_material(self):
+        response = self.login(next='/werkstatt/mein-konto', password='synthetic-wrong-password')
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.location, '/werkstatt/materialbestellung?next=profil')
+        page = self.client.get(response.location)
+        self.assertIn('role="alert"', page.text)
+        self.assertIn('name="next" value="/werkstatt/mein-konto"', page.text)
+        with self.client.session_transaction() as state:
+            self.assertNotIn('assistent_mid', state)
+
+    def test_expired_profile_form_preserves_destination_and_renews_csrf(self):
+        response = self.login(next='/werkstatt/mein-konto', csrf_token='stale-token')
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, '/werkstatt/materialbestellung?next=profil')
+        page = self.client.get(response.location)
+        self.assertIn('Anmeldeseite war veraltet', page.text)
+        self.assertIn('name="next" value="/werkstatt/mein-konto"', page.text)
+        with self.client.session_transaction() as state:
+            self.assertNotIn('assistent_mid', state)
+            self.assertNotEqual(state['csrf_token'], 'synthetic-form-token')
+
+    def test_profile_rate_limit_returns_visible_profile_form(self):
+        with patch.object(p, 'login_rate_limit_status', return_value=(True, None)):
+            response = self.login(next='/werkstatt/mein-konto')
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.location, '/werkstatt/materialbestellung?next=profil')
+        self.assertIn('Zu viele Fehlversuche', self.client.get(response.location).text)
+
+    def test_login_destination_is_a_fixed_whitelist(self):
+        for target in ('https://untrusted.example', '//untrusted.example',
+                       '/admin', '/werkstatt/mein-konto?mitarbeiter_id=2', 'profil'):
+            with self.subTest(target=target):
+                fresh = p.app.test_client()
+                with fresh.session_transaction() as state:
+                    state['csrf_token'] = 'synthetic-form-token'
+                page = fresh.get('/werkstatt/materialbestellung', query_string={'next': target})
+                expected = '/werkstatt/mein-konto' if target == 'profil' else '/werkstatt/materialbestellung'
+                self.assertIn(f'name="next" value="{expected}"', page.text)
+                response = fresh.post('/werkstatt/assistent/login', data={
+                    'mitarbeiter_id': '1', 'password': 'test-passwort-123',
+                    'csrf_token': 'synthetic-form-token', 'next': target})
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.location, '/werkstatt/assistent')
+
+    def test_assistant_login_without_next_keeps_existing_json_errors_and_success_target(self):
+        data = dict(mitarbeiter_id='1', password='synthetic-wrong-password',
+                    csrf_token='synthetic-form-token')
+        response = self.client.post('/werkstatt/assistent/login', data=data)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.mimetype, 'application/json')
+        self.assertIsNone(response.location)
+        data['password'] = 'test-passwort-123'
+        response = self.client.post('/werkstatt/assistent/login', data=data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, '/werkstatt/assistent')
+
     def test_shared_admin_and_remembered_logins_cannot_survive_personal_login(self):
         with p.app.test_request_context('/'):
             admin_token = p.create_remember_login_token('admin')

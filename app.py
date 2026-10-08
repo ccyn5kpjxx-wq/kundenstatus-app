@@ -3113,10 +3113,10 @@ def protect_csrf():
         recovery = csrf_recovery_response()
         if recovery is not None:
             return recovery
-        if request.endpoint == "assistent.login" and request.form.get("next") == "/werkstatt/materialbestellung":
+        if request.endpoint == "assistent.login" and request.form.get("next") in {"/werkstatt/materialbestellung", "/werkstatt/mein-konto"}:
             session.pop(CSRF_FIELD_NAME, None)
             flash("Die Anmeldeseite war veraltet. Bitte persönliche Zugangsdaten erneut eingeben.", "warning")
-            return redirect("/werkstatt/materialbestellung")
+            return redirect("/werkstatt/materialbestellung?next=profil" if request.form.get("next") == "/werkstatt/mein-konto" else "/werkstatt/materialbestellung")
         if request.endpoint in {"login", "partner_login", "partner_login_key", "versicherung_login", "versicherung_login_key", "werkstatt_login"}:
             session.pop(CSRF_FIELD_NAME, None)
             flash("Die Login-Seite war veraltet. Bitte Passwort noch einmal eingeben.", "warning")
@@ -57954,6 +57954,8 @@ material_order_portal = register_material_order_portal(sys.modules[__name__])
 from werkstatt_mitarbeiter_portal import register_employee_portal, ensure_employee_private_state_for_import
 employee_portal = register_employee_portal(sys.modules[__name__])
 employee_portal_init_schema = employee_portal.init_schema
+from werkstatt_mitarbeiter_app import register_employee_app
+register_employee_app(sys.modules[__name__])
 from werkstatt_mitarbeiter_auftraege import register_employee_orders, ensure_employee_orders_for_import
 # Personal order controls have a narrow grant; general assistant permissions
 # and the shared workshop login remain independent.
