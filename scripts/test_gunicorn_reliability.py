@@ -29,10 +29,19 @@ import time
 
 
 WSGI_SOURCE = '''import os
+from pathlib import Path
+import time
 
 def application(environ, start_response):
     # Deliberately do not read wsgi.input: early rejection has the same shape.
-    body = b"ok\\n"
+    path = environ.get("PATH_INFO", "")
+    if path.startswith("/hold"):
+        deadline = time.monotonic() + 15
+        while not Path(__file__).with_name("release").exists():
+            if time.monotonic() >= deadline:
+                raise RuntimeError("synthetic release barrier expired")
+            time.sleep(0.005)
+    body = b"z" * 262144 if path.endswith("/large") else b"ok\\n"
     start_response("200 OK", [("Content-Type", "text/plain"),
                               ("Content-Length", str(len(body))),
                               ("X-Worker-Pid", str(os.getpid()))])
@@ -47,7 +56,8 @@ def remaining(deadline):
     return value
 
 
-def receive_response(sock, deadline, *, expect_closed=False, expected_pid=None):
+def receive_response(sock, deadline, *, expect_closed=False, expected_pid=None,
+                     expected_body=b"ok\n"):
     data = bytearray()
     while b"\r\n\r\n" not in data:
         sock.settimeout(remaining(deadline))
@@ -72,7 +82,7 @@ def receive_response(sock, deadline, *, expect_closed=False, expected_pid=None):
         if not part:
             raise AssertionError("connection closed before response body")
         body += part
-    if body != b"ok\n":
+    if body != expected_body:
         raise AssertionError("unexpected synthetic response body")
     worker_pid = int(headers["x-worker-pid"])
     if expected_pid is not None and worker_pid != expected_pid:
@@ -90,8 +100,9 @@ def receive_response(sock, deadline, *, expect_closed=False, expected_pid=None):
     return worker_pid
 
 
-def send_request(sock, deadline, *, body=b"", close=False):
-    method, path = ("POST", "/ignore") if body else ("GET", "/health")
+def send_request(sock, deadline, *, body=b"", close=False, path=None):
+    method, default_path = ("POST", "/ignore") if body else ("GET", "/health")
+    path = path or default_path
     connection = "close" if close else "keep-alive"
     headers = (
         f"{method} {path} HTTP/1.1\r\nHost: synthetic.invalid\r\n"
@@ -322,12 +333,83 @@ def production_load(args):
             "waves": results, "connection_close_verified": True}
 
 
+def delayed_client_close(args):
+    """Clients retain their write halves after a complete response and FIN."""
+    baseline = args.suite == "close-baseline"
+    with SyntheticServer(args, production=True) as server:
+        baseline_fds = len(list(Path(f"/proc/{server.worker_pid}/fd").iterdir()))
+        baseline_sockets = socket_count(server.worker_pid)
+        waves = []
+        for wave in range(1 if baseline else 3):
+            release = Path(server.directory.name) / "release"
+            release.unlink(missing_ok=True)
+            with ExitStack() as stack:
+                held = []
+                for index in range(32):
+                    sock = stack.enter_context(socket.create_connection(
+                        ("127.0.0.1", server.port), timeout=args.deadline))
+                    send_request(sock, time.monotonic() + args.deadline,
+                                 body=b"x" * 16384 if index % 2 else b"",
+                                 path="/hold/large" if index % 2 else "/hold")
+                    held.append(sock)
+                accepted_deadline = time.monotonic() + args.deadline
+                while socket_count(server.worker_pid) < baseline_sockets + len(held):
+                    remaining(accepted_deadline)
+                    time.sleep(0.01)
+                release.touch()
+                # Read all bodies but intentionally retain client sockets. Even
+                # receiving FIN does not close the clients' write half.
+                deadline = time.monotonic() + args.deadline
+
+                def receive(item):
+                    index, sock = item
+                    expected = b"z" * 262144 if index % 2 else b"ok\n"
+                    receive_response(sock, deadline, expected_pid=server.worker_pid,
+                                     expected_body=expected)
+
+                with ThreadPoolExecutor(max_workers=32) as pool:
+                    list(pool.map(receive, enumerate(held)))
+                thread_count = len(list(Path(f"/proc/{server.worker_pid}/task").iterdir()))
+                expected_threads = 5 if baseline else 6
+                if thread_count != expected_threads:
+                    raise AssertionError(f"expected {expected_threads} worker threads, got {thread_count}")
+                started = time.monotonic()
+                try:
+                    server.request()
+                except TimeoutError:
+                    if not baseline:
+                        raise
+                else:
+                    if baseline:
+                        raise AssertionError("upstream graceful-close stall was not reproduced")
+                duration = time.monotonic() - started
+            # ExitStack releases all clients before one recovery request.
+            server.request()
+            cleanup_deadline = time.monotonic() + args.deadline
+            while len(list(Path(f"/proc/{server.worker_pid}/fd").iterdir())) > baseline_fds:
+                remaining(cleanup_deadline)
+                time.sleep(0.01)
+            waves.append({"wave": wave + 1, "complete_responses": 32,
+                          "health_seconds": round(duration, 4),
+                          "expected_stall_reproduced": baseline,
+                          "worker_threads": thread_count, "fd_count_restored": True})
+        if not baseline:
+            os.kill(server.worker_pid, signal.SIGURG)
+            time.sleep(0.1)
+            server.request()
+            if b"portal_gunicorn.py" not in Path(server.log.name).read_bytes():
+                raise AssertionError("worker diagnostic signal did not dump the closer stack")
+    return {"case": "delayed_client_close", "waves": waves,
+            "same_worker": True, "diagnostic_signal_verified": not baseline}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=("legacy", "corrected", "production"),
+    parser.add_argument("--suite", choices=("legacy", "corrected", "production",
+                                           "close-baseline", "close-corrected"),
                         default="corrected")
     parser.add_argument("--config", type=lambda value: Path(value).resolve(),
-                        help="Production Gunicorn config, used only by production suite")
+                        help="Gunicorn config for production or close-corrected suite")
     parser.add_argument("--gunicorn-path", type=lambda value: Path(value).resolve(),
                         help="Optional isolated pip --target package directory")
     parser.add_argument("--deadline", type=float, default=3.0,
@@ -337,8 +419,10 @@ def main():
         parser.error("Linux with /proc is required; no portal service was touched")
     if not 1 <= args.deadline <= 10:
         parser.error("--deadline must be between 1 and 10 seconds")
-    if args.config and args.suite != "production":
-        parser.error("--config is only supported with --suite production")
+    if args.config and args.suite not in {"production", "close-corrected"}:
+        parser.error("--config requires --suite production or close-corrected")
+    if args.suite == "close-corrected" and not args.config:
+        parser.error("close-corrected requires --config with PortalThreadWorker")
     if args.config and not args.config.is_file():
         parser.error("--config must name an existing file")
     if args.gunicorn_path and not args.gunicorn_path.is_dir():
@@ -348,8 +432,11 @@ def main():
                "SSL_CERT_FILE", "SSL_CERT_DIR", "SYSTEMROOT"}
     args.child_env = {key: value for key, value in os.environ.items() if key in allowed}
     args.child_env["PYTHONUNBUFFERED"] = "1"
-    if args.gunicorn_path:
-        args.child_env["PYTHONPATH"] = str(args.gunicorn_path)
+    package_paths = [str(args.gunicorn_path)] if args.gunicorn_path else []
+    if args.config:
+        package_paths.append(str(args.config.parent))
+    if package_paths:
+        args.child_env["PYTHONPATH"] = os.pathsep.join(package_paths)
     version = subprocess.check_output(
         [sys.executable, "-c", "import gunicorn; print(gunicorn.__version__)"],
         cwd=tempfile.gettempdir(), env=args.child_env, text=True, timeout=10,
@@ -358,15 +445,18 @@ def main():
     if args.suite == "legacy" and args.version_tuple != (23, 0, 0):
         parser.error("legacy suite requires exactly Gunicorn 23.0.0")
     if args.suite != "legacy" and args.version_tuple < (26, 2, 0):
-        parser.error("corrected/production suites require Gunicorn >= 26.2.0")
+        parser.error("this suite requires Gunicorn >= 26.2.0")
     print(json.dumps({"suite": args.suite, "gunicorn": version,
                       "python": sys.version.split()[0], "deadline": args.deadline}),
           flush=True)
     results = []
-    cases = [production_load] if args.suite == "production" else [
-        lambda options: idle_connection_cap(options, args.suite == "legacy"),
-        lambda options: unread_body(options, args.suite == "legacy"),
-    ]
+    if args.suite.startswith("close-"):
+        cases = [delayed_client_close]
+    elif args.suite == "production":
+        cases = [production_load]
+    else:
+        cases = [lambda options: idle_connection_cap(options, args.suite == "legacy"),
+                 lambda options: unread_body(options, args.suite == "legacy")]
     for case in cases:
         result = case(args)
         results.append(result)

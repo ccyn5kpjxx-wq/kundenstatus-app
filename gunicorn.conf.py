@@ -1,10 +1,13 @@
 """Shared Render configuration; also loaded by Gunicorn's default discovery."""
 
 from pathlib import Path
+import faulthandler
+import signal
+import sys
 
 # App startup includes singleton background services and backups.
 workers = 1
-worker_class = "gthread"
+worker_class = "portal_gunicorn.PortalThreadWorker"
 threads = 4
 timeout = 180
 
@@ -21,3 +24,8 @@ control_socket_disable = True
 
 # With one worker, request-count recycling would briefly stop serving traffic.
 max_requests = 0
+
+
+def post_fork(server, worker):
+    # Diagnostic signal for this worker only; stacks contain no frame locals.
+    faulthandler.register(signal.SIGURG, file=sys.stderr, all_threads=True)
