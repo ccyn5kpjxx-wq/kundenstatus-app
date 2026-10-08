@@ -101,89 +101,6 @@
   </div>
 </div>
 
-<div class="row g-4 mb-4">
-  <div class="col-xl-5">
-    <div class="page-card p-4 h-100">
-      <div class="section-title">
-        <div>
-          <h4 class="mb-1">Mitarbeiter anlegen</h4>
-          <p>{{ summary['aktive_count'] }} aktive Mitarbeiter im Team.</p>
-        </div>
-      </div>
-      <form method="POST" action="{{ url_for('admin_mitarbeiter_neu') }}" class="staff-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="mb-3">
-          <label class="form-label">Name</label>
-          <input type="text" name="name" class="form-control" placeholder="Vorname Nachname" required>
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Bereich / Rolle</label>
-          <input type="text" name="rolle" class="form-control" placeholder="z. B. Lackierer, Büro, Vorbereitung">
-        </div>
-        <div class="row g-3">
-          <div class="col-md-6">
-            <label class="form-label">Telefon</label>
-            <input type="text" name="telefon" class="form-control">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label">E-Mail</label>
-            <input type="email" name="email" class="form-control">
-          </div>
-        </div>
-        <div class="mt-3">
-          <label class="form-label">Notiz</label>
-          <textarea name="notiz" rows="3" class="form-control"></textarea>
-        </div>
-        <button type="submit" class="btn btn-brand mt-3">Mitarbeiter speichern</button>
-      </form>
-    </div>
-  </div>
-
-  <div class="col-xl-7">
-    <div class="page-card p-4 h-100">
-      <div class="section-title">
-        <div>
-          <h4 class="mb-1">Urlaubsübersicht</h4>
-          <p>{{ summary['aktuelle']|length }} heute im Urlaub · {{ summary['kommende']|length }} kommende Einträge.</p>
-        </div>
-      </div>
-      <div class="summary-list">
-        {% if summary['aktuelle'] %}
-          {% for urlaub in summary['aktuelle'] %}
-          <a href="#mitarbeiter-{{ urlaub['mitarbeiter']['id'] }}" class="summary-item text-decoration-none text-reset">
-            <div class="d-flex justify-content-between gap-3 flex-wrap">
-              <div>
-                <span class="badge text-bg-success me-2">Heute Urlaub</span>
-                <strong>{{ urlaub['mitarbeiter']['name'] }}</strong>
-                {% if urlaub['mitarbeiter']['rolle'] %}<span class="text-muted">· {{ urlaub['mitarbeiter']['rolle'] }}</span>{% endif %}
-              </div>
-              <span class="text-muted">{{ urlaub['zeitraum_text'] }}</span>
-            </div>
-            {% if urlaub['notiz'] %}<div class="text-muted small mt-1">{{ urlaub['notiz'] }}</div>{% endif %}
-          </a>
-          {% endfor %}
-        {% elif summary['kommende'] %}
-          {% for urlaub in summary['kommende'] %}
-          <a href="#mitarbeiter-{{ urlaub['mitarbeiter']['id'] }}" class="summary-item text-decoration-none text-reset">
-            <div class="d-flex justify-content-between gap-3 flex-wrap">
-              <div>
-                <span class="badge text-bg-success me-2">Urlaub</span>
-                <strong>{{ urlaub['mitarbeiter']['name'] }}</strong>
-                {% if urlaub['mitarbeiter']['rolle'] %}<span class="text-muted">· {{ urlaub['mitarbeiter']['rolle'] }}</span>{% endif %}
-              </div>
-              <span class="text-muted">{{ urlaub['zeitraum_text'] }}</span>
-            </div>
-            {% if urlaub['notiz'] %}<div class="text-muted small mt-1">{{ urlaub['notiz'] }}</div>{% endif %}
-          </a>
-          {% endfor %}
-        {% else %}
-          <div class="text-muted">Noch kein Urlaub eingetragen.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-</div>
-
 <div class="page-card p-4 mb-4">
   <div class="section-title">
     <div>
@@ -216,6 +133,9 @@
           <div class="d-flex flex-wrap gap-2"><a href="/admin/mitarbeiter/{{ mitarbeiter['id'] }}/portal" class="btn btn-brand btn-sm">Stammdaten &amp; Unterlagen</a><a href="{{ url_for('kalender', suche=mitarbeiter['name']) }}" class="btn btn-soft btn-sm">Im Kalender suchen</a></div>
         </div>
 
+        <details>
+          <summary class="fw-semibold py-2">Teamdaten bearbeiten &amp; Urlaub verwalten</summary>
+          <div class="pt-3">
         <div class="staff-details">
           {% if mitarbeiter['adresse'] %}
           <div class="staff-detail"><span>Adresse</span><strong>{{ mitarbeiter['adresse'] }}</strong></div>
@@ -381,11 +301,92 @@
             {% endif %}
           </div>
         </div>
+          </div>
+        </details>
       </div>
       {% endfor %}
     </div>
   {% else %}
     <div class="text-muted">Noch keine Mitarbeiter angelegt.</div>
   {% endif %}
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-5">
+    <details class="page-card p-4">
+      <summary class="fw-semibold py-2">Mitarbeiter anlegen</summary>
+      <p class="text-muted mt-3">{{ summary['aktive_count'] }} aktive Mitarbeiter im Team.</p>
+      <form method="POST" action="{{ url_for('admin_mitarbeiter_neu') }}" class="staff-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+          <label class="form-label">Name</label>
+          <input type="text" name="name" class="form-control" placeholder="Vorname Nachname" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Bereich / Rolle</label>
+          <input type="text" name="rolle" class="form-control" placeholder="z. B. Lackierer, Büro, Vorbereitung">
+        </div>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Telefon</label>
+            <input type="text" name="telefon" class="form-control">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">E-Mail</label>
+            <input type="email" name="email" class="form-control">
+          </div>
+        </div>
+        <div class="mt-3">
+          <label class="form-label">Notiz</label>
+          <textarea name="notiz" rows="3" class="form-control"></textarea>
+        </div>
+        <button type="submit" class="btn btn-brand mt-3">Mitarbeiter speichern</button>
+      </form>
+    </details>
+  </div>
+
+  <div class="col-xl-7">
+    <div class="page-card p-4 h-100">
+      <div class="section-title">
+        <div>
+          <h4 class="mb-1">Urlaubsübersicht</h4>
+          <p>{{ summary['aktuelle']|length }} heute im Urlaub · {{ summary['kommende']|length }} kommende Einträge.</p>
+        </div>
+      </div>
+      <div class="summary-list">
+        {% if summary['aktuelle'] %}
+          {% for urlaub in summary['aktuelle'] %}
+          <a href="#mitarbeiter-{{ urlaub['mitarbeiter']['id'] }}" class="summary-item text-decoration-none text-reset">
+            <div class="d-flex justify-content-between gap-3 flex-wrap">
+              <div>
+                <span class="badge text-bg-success me-2">Heute Urlaub</span>
+                <strong>{{ urlaub['mitarbeiter']['name'] }}</strong>
+                {% if urlaub['mitarbeiter']['rolle'] %}<span class="text-muted">· {{ urlaub['mitarbeiter']['rolle'] }}</span>{% endif %}
+              </div>
+              <span class="text-muted">{{ urlaub['zeitraum_text'] }}</span>
+            </div>
+            {% if urlaub['notiz'] %}<div class="text-muted small mt-1">{{ urlaub['notiz'] }}</div>{% endif %}
+          </a>
+          {% endfor %}
+        {% elif summary['kommende'] %}
+          {% for urlaub in summary['kommende'] %}
+          <a href="#mitarbeiter-{{ urlaub['mitarbeiter']['id'] }}" class="summary-item text-decoration-none text-reset">
+            <div class="d-flex justify-content-between gap-3 flex-wrap">
+              <div>
+                <span class="badge text-bg-success me-2">Urlaub</span>
+                <strong>{{ urlaub['mitarbeiter']['name'] }}</strong>
+                {% if urlaub['mitarbeiter']['rolle'] %}<span class="text-muted">· {{ urlaub['mitarbeiter']['rolle'] }}</span>{% endif %}
+              </div>
+              <span class="text-muted">{{ urlaub['zeitraum_text'] }}</span>
+            </div>
+            {% if urlaub['notiz'] %}<div class="text-muted small mt-1">{{ urlaub['notiz'] }}</div>{% endif %}
+          </a>
+          {% endfor %}
+        {% else %}
+          <div class="text-muted">Noch kein Urlaub eingetragen.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}
