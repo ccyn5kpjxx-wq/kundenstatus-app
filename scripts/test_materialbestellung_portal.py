@@ -1,12 +1,14 @@
 """Offline personal form -> original -> guarded material order regressions."""
 import copy
 import ast
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from contextlib import nullcontext, contextmanager
 import io
 import json
 from pathlib import Path
 import sys
+import threading
 import unittest
 from unittest.mock import patch
 import uuid
@@ -641,6 +643,96 @@ class PortalTests(unittest.TestCase):
         self.assertEqual(current['analysis_state'], 'failed')
         self.assertEqual(self.p.workshop_orders.calls, [])
 
+    @contextmanager
+    def paused_analysis(self, view, *, worker=True):
+        """Pause only external vision; use a real cross-thread originals lock."""
+        lock = threading.RLock()
+        entered, release = threading.Event(), threading.Event()
+        calls = []
+        @contextmanager
+        def operation_lock():
+            with lock:
+                yield
+        def vision(*_):
+            calls.append(True)
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError('Synthetic vision barrier timed out.')
+            return {'art': 'produkt', 'produkt': 'Test-Klebeband', 'breite': '50 mm', 'farbe': 'grün'}
+        self.p.portal_originals_operation_lock = operation_lock
+        self.p.assistant_material_photos.vision = vision
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            analyze = self.portal.process_next if worker else lambda: self.p.material_dialog.analyze(view['id'])
+            future = pool.submit(analyze)
+            try:
+                self.assertTrue(entered.wait(5), 'Analysis never reached synthetic vision.')
+                yield lock, pool, calls
+            finally:
+                release.set()
+                future.result(timeout=5)
+
+    def test_worker_and_direct_analysis_release_originals_lock_during_vision(self):
+        for worker in (True, False):
+            with self.subTest(worker=worker):
+                view = self.submit().json['anforderungen'][0]
+                with self.paused_analysis(view, worker=worker) as (lock, pool, calls):
+                    acquired = lock.acquire(timeout=0.25)
+                    try:
+                        self.assertTrue(acquired, 'Vision retained the shared originals lock.')
+                        # An independent employee mutation must commit before vision ends.
+                        self.sql('UPDATE assistent_rechte SET limit_cent=12345 WHERE mitarbeiter_id=2')
+                    finally:
+                        if acquired:
+                            lock.release()
+                    second = pool.submit(self.p.material_dialog.analyze, view['id'])
+                    self.assertEqual(second.result(timeout=1)['analysis_state'], 'processing')
+                    self.assertEqual(len(calls), 1)
+                self.assertEqual(self.p.material_dialog.status(view['id'])['analysis_state'], 'done')
+                self.assertEqual(self.sql('SELECT limit_cent FROM assistent_rechte WHERE mitarbeiter_id=2')[0]['limit_cent'], 12345)
+                self.assertEqual(self.p.workshop_orders.calls, [])
+
+    def test_parallel_cancel_rights_and_restore_discard_stale_analysis(self):
+        for change in ('cancel', 'rights', 'restore'):
+            with self.subTest(change=change):
+                view = self.submit().json['anforderungen'][0]
+                original = dict(self.sql('SELECT * FROM einkauf_material_dialoge WHERE id=?', (view['id'],))[0])
+                photo_id = self.source(view['id'])['assistant_photo_id']
+                photo = dict(self.sql('SELECT * FROM assistent_materialfotos WHERE foto_id=?', (photo_id,))[0])
+                with self.paused_analysis(view) as (lock, _, calls):
+                    acquired = lock.acquire(timeout=0.25)
+                    try:
+                        self.assertTrue(acquired, 'Concurrent mutation waited for external vision.')
+                        if change == 'cancel':
+                            current = self.p.material_dialog.status(view['id'])
+                            self.assertEqual(self.answer(current, 'abbrechen').status_code, 200)
+                        elif change == 'rights':
+                            self.sql('UPDATE assistent_rechte SET version=2,einkaufen=0 WHERE mitarbeiter_id=1')
+                        else:
+                            # Restore the exact pre-analysis DB rows, including empty leases.
+                            # The old worker must neither finish nor mark this restored work failed.
+                            for table, row, key in (('einkauf_material_dialoge', original, 'id'),
+                                                    ('assistent_materialfotos', photo, 'foto_id')):
+                                columns = [column for column in row if column != key]
+                                self.sql('UPDATE ' + table + ' SET ' + ','.join(column + '=?' for column in columns)
+                                         + ' WHERE ' + key + '=?', tuple(row[column] for column in columns) + (row[key],))
+                    finally:
+                        if acquired:
+                            lock.release()
+                    self.assertEqual(len(calls), 1)
+                current = self.p.material_dialog.status(view['id'])
+                if change == 'cancel':
+                    self.assertEqual(current['state'], 'cancelled')
+                elif change == 'rights':
+                    self.assertEqual(current['analysis_state'], 'failed')
+                    self.sql('UPDATE assistent_rechte SET version=1,einkaufen=1 WHERE mitarbeiter_id=1')
+                else:
+                    self.assertEqual(dict(self.sql('SELECT * FROM einkauf_material_dialoge WHERE id=?', (view['id'],))[0]), original)
+                    self.assertEqual(dict(self.sql('SELECT * FROM assistent_materialfotos WHERE foto_id=?', (photo_id,))[0]), photo)
+                current_photo = self.sql('SELECT file_sha256,file_base64 FROM assistent_materialfotos WHERE foto_id=?', (photo_id,))[0]
+                self.assertEqual(current_photo['file_sha256'], photo['file_sha256'])
+                self.assertEqual(current_photo['file_base64'], photo['file_base64'])
+                self.assertEqual(self.p.workshop_orders.calls, [])
+
     def test_count_correction_during_vision_keeps_new_quantity_and_bound_proof(self):
         view = self.submit().json['anforderungen'][0]
         def correct_during_vision(*args):
@@ -653,6 +745,38 @@ class PortalTests(unittest.TestCase):
         self.assertEqual(updated['fields']['quantity']['proof']['kind'], 'text')
         self.assertEqual(updated['fields']['quantity']['proof']['employee_id'], 1)
         self.assertEqual(self.p.workshop_orders.calls, [])
+
+    def test_worker_error_does_not_overwrite_changed_analysis_or_dispatch_revision(self):
+        for dispatch in (False, True):
+            with self.subTest(dispatch=dispatch):
+                view = self.submit().json['anforderungen'][0]
+                if dispatch:
+                    self.sql("UPDATE einkauf_material_dialoge SET state='approved' WHERE id=?", (view['id'],))
+                lock = threading.RLock()
+                @contextmanager
+                def operation_lock():
+                    with lock:
+                        yield
+                self.p.portal_originals_operation_lock = operation_lock
+                def fail_after_change(*_):
+                    if dispatch:
+                        self.assertTrue(lock._is_owned(), 'Dispatch lost the originals guard.')
+                    with operation_lock():
+                        self.sql("""UPDATE einkauf_material_dialoge SET state='open',revision=revision+1,
+                            analysis_lease='restored-lease',error_code='restored-review' WHERE id=?""", (view['id'],))
+                    raise PermissionError('Synthetic stale worker result.')
+                target = self.p.workshop_orders if dispatch else self.p.material_dialog
+                method = 'submit_material_request' if dispatch else 'analyze'
+                with patch.object(target, method, side_effect=fail_after_change):
+                    result = self.portal.process_next()
+                row = self.sql('SELECT * FROM einkauf_material_dialoge WHERE id=?', (view['id'],))[0]
+                self.assertEqual(result, {'id': view['id'], 'state': 'open'})
+                self.assertEqual(row['revision'], view['revision'] + 1)
+                self.assertEqual(row['error_code'], 'restored-review')
+                self.assertEqual(row['analysis_lease'], 'restored-lease')
+                self.assertEqual(self.p.workshop_orders.calls, [])
+                # Keep this synthetic stale job out of the next worker selection.
+                self.sql("UPDATE einkauf_material_dialoge SET state='cancelled' WHERE id=?", (view['id'],))
 
     def test_50mb_route_limit_precedes_global_csrf_form_parser_without_global_change(self):
         parsed = []

@@ -188,13 +188,20 @@ def parse_request(text, question=''):
     return fields
 
 
+@contextmanager
+def _originals_operation(portal):
+    if getattr(portal, 'material_order_portal', None) is not None:
+        with portal.portal_originals_operation_lock():
+            yield
+    else:
+        yield
+
+
 def _originals_guard(method):
     @wraps(method)
     def guarded(self, *args, **kwargs):
-        if getattr(self.p, 'material_order_portal', None) is not None:
-            with self.p.portal_originals_operation_lock():
-                return method(self, *args, **kwargs)
-        return method(self, *args, **kwargs)
+        with _originals_operation(self.p):
+            return method(self, *args, **kwargs)
     return guarded
 
 
@@ -822,13 +829,13 @@ class MaterialDialog:
         _row_id(revision)
         return self.analyze(draft_id,refresh=True,revision=revision)
 
-    @_originals_guard
     def analyze(self, draft_id, *, refresh=False, revision=None):
         if type(refresh) is not bool or refresh and revision is None:
             raise ValueError('Erneute Fotoauslese benötigt die aktuelle Revision.')
         lease = secrets.token_hex(16)
         unchanged = ('revision','fields_json','review_json','analysis_json','snapshot_json','snapshot_hash','state','error_code','dispatch_id')
-        with self.db() as db:
+        # Keep restore/dispatch atomic with each DB phase, never with vision.
+        with _originals_operation(self.p), self.db() as db:
             draft = self._draft(db,draft_id,revision,lock=True)
             source = self._source(db,draft)
             if self._accepted(db,draft) or draft['state']=='cancelled':
@@ -852,14 +859,23 @@ class MaterialDialog:
             db.execute("UPDATE einkauf_material_dialoge SET analysis_state='processing',analysis_lease=?,analysis_until=? WHERE id=?",(lease,self.clock()+120,draft_id))
             expected = self._draft(db,draft_id)
         photos = copy.copy(self.p.assistant_material_photos)
+        source_keys = ('id','canonical_hash','expected_sha256','assistant_photo_id','employee_id',
+                       'rights_version','intake_id','file_id','mime','caption','forwarded')
+        def current_analysis(db):
+            # _draft(lock=True) revalidates/locks current employee rights via _source.
+            current = self._draft(db,draft_id,lock=True)
+            latest_source = self._source(db,current)
+            if (self._accepted(db,current) or current['analysis_lease'] != lease
+                    or current['analysis_until'] < self.clock() or current['state'] == 'cancelled'
+                    or any(latest_source[key]!=source[key] for key in source_keys)):
+                raise PermissionError('Fotoauslese wurde geändert oder abgebrochen.')
+            if refresh and any(current[key]!=expected[key] for key in unchanged):
+                raise PermissionError('Materialvorgang wurde während der erneuten Auslese geändert.')
+            return current
         @contextmanager
         def guarded_photo_db():
-            with self.db() as db:
-                current = self._draft(db,draft_id,lock=True)
-                if self._accepted(db,current) or current['analysis_lease'] != lease or current['analysis_until'] < self.clock() or current['state'] == 'cancelled':
-                    raise PermissionError('Fotoauslese wurde geändert oder abgebrochen.')
-                if refresh and any(current[key]!=expected[key] for key in unchanged):
-                    raise PermissionError('Materialvorgang wurde während der erneuten Auslese geändert.')
+            with _originals_operation(self.p), self.db() as db:
+                current_analysis(db)
                 yield db
         photos.db = guarded_photo_db
         try:
@@ -876,18 +892,14 @@ class MaterialDialog:
             else:
                 result = photos.analyze({'actor':'mitarbeiter:' + str(source['employee_id']),'lesen':True,'einkaufen':True},
                                         source['assistant_photo_id'],**({'refresh':True} if refresh else {}))
-            with self.db() as db:
-                current = self._draft(db,draft_id,lock=True)
-                if self._accepted(db,current) or current['analysis_lease'] != lease or current['analysis_until'] < self.clock():
-                    raise PermissionError('Fotoauslese wurde inzwischen übernommen.')
-                if refresh and any(current[key]!=expected[key] for key in unchanged):
-                    raise PermissionError('Materialvorgang wurde während der erneuten Auslese geändert.')
+            with _originals_operation(self.p), self.db() as db:
+                current_analysis(db)
                 state = 'done' if result['status'] == 'pruefen' else 'failed'
                 db.execute("UPDATE einkauf_material_dialoge SET analysis_json=?,analysis_state=?,analysis_lease='',analysis_until=0,revision=revision+1 WHERE id=?",(_json(result),state,draft_id))
                 self._refresh(db,self._draft(db,draft_id))
             return self.status(draft_id)
         except (PermissionError,ValueError):
-            with self.db() as db:
+            with _originals_operation(self.p), self.db() as db:
                 db.execute("""UPDATE einkauf_material_dialoge SET analysis_state='failed',analysis_lease='',analysis_until=0,
                     error_code=CASE WHEN revision=? THEN 'fotoauslese_oder_berechtigung_klaeren' ELSE error_code END
                     WHERE id=? AND analysis_lease=? AND state NOT IN ('accepted','cancelled','external_pending','external_sent')

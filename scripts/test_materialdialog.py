@@ -1,9 +1,12 @@
 """Isolated end-to-end material dialogs; synthetic images, catalog and dispatch."""
 import copy
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -902,6 +905,45 @@ class DialogTests(unittest.TestCase):
                 else:
                     self.assertEqual(self.f.sql('SELECT * FROM einkauf_material_dialoge WHERE id=?',(view['id'],))[0],before_durable[0])
                 self.p.assistant_material_photos.vision=lambda *args: {'art':'produkt','produkt':'Test-Klebeband','breite':'50 mm','farbe':'grün'}
+
+    def test_reanalyze_parallel_reply_preserves_new_revision_and_discards_vision(self):
+        view=self.photo('Ein Stück')
+        self.p.material_order_portal=SimpleNamespace()
+        lock=threading.RLock()
+        entered,release=threading.Event(),threading.Event()
+        @contextmanager
+        def operation_lock():
+            with lock:
+                yield
+        def vision(*_):
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError('Synthetic vision barrier timed out.')
+            return {'art':'produkt','produkt':'Stale refreshed product','artikelnummer':'NEW'}
+        self.p.portal_originals_operation_lock=operation_lock
+        self.p.assistant_material_photos.vision=vision
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future=pool.submit(self.s.reanalyze_photo,view['id'],view['revision'])
+            try:
+                self.assertTrue(entered.wait(5))
+                acquired=lock.acquire(timeout=0.25)
+                try:
+                    self.assertTrue(acquired,'Refreshing vision retained the originals guard.')
+                    current=self.s.status(view['id'])
+                    self.assertEqual(self.answer(current,'Drei Stück')['state'],'applied')
+                    corrected=self.s.status(view['id'])
+                finally:
+                    if acquired:
+                        lock.release()
+            finally:
+                release.set()
+                updated=future.result(timeout=5)
+        self.assertEqual(updated['revision'],corrected['revision'])
+        self.assertEqual(updated['fields'],corrected['fields'])
+        self.assertEqual(updated['fields']['quantity']['value'],'3')
+        self.assertEqual(updated['analysis_state'],'failed')
+        self.assertNotEqual(updated['analysis'].get('merkmale',{}).get('produkt'),'Stale refreshed product')
+        self.assertEqual(self.p.workshop_orders.calls,[])
 
     def test_recheck_rechecks_rights_and_same_revision_corrections_after_lookup(self):
         for mutation in ('rights','correction','revision','accepted'):

@@ -502,17 +502,16 @@ class MaterialOrderPortal:
 
     def process_next(self):
         """One original analysis or guarded handoff in the existing worker tick."""
-        with self.p.portal_originals_operation_lock():
-            return self._process_next()
+        return self._process_next()
 
     def _process_next(self):
-        with self.db() as db:
+        with self.p.portal_originals_operation_lock(), self.db() as db:
             text = db.execute("SELECT id FROM einkauf_material_texte WHERE phone_number_id=? AND state='queued' ORDER BY id LIMIT 1",
                               (PORTAL_SOURCE,)).fetchone()
         if text:
             return self.p.material_dialog.process_text(text_id=text['id'])
-        with self.db() as db:
-            row = db.execute('''SELECT d.id,d.revision,d.state FROM einkauf_material_dialoge d
+        with self.p.portal_originals_operation_lock(), self.db() as db:
+            row = db.execute('''SELECT d.id,d.revision,d.state,d.analysis_lease,d.message_id FROM einkauf_material_dialoge d
                 JOIN einkauf_material_nachrichten n ON n.id=d.message_id
                 WHERE n.phone_number_id=? AND d.state NOT IN ('accepted','cancelled','review','external_pending','external_sent')
                 AND (d.state='approved' OR d.analysis_state='pending'
@@ -523,18 +522,23 @@ class MaterialOrderPortal:
         dialog = self.p.material_dialog
         try:
             if row['state'] == 'approved':
-                result = self.p.workshop_orders.submit_material_request(row['id'], row['revision'])
-                dialog.order_attempt(row['id'], row['revision'], result)
-                return {'id': row['id'], 'state': result['state']}
+                # Dispatch and its acknowledgement remain one protected mutation.
+                with self.p.portal_originals_operation_lock():
+                    result = self.p.workshop_orders.submit_material_request(row['id'], row['revision'])
+                    dialog.order_attempt(row['id'], row['revision'], result)
+                    return {'id': row['id'], 'state': result['state']}
             view = dialog.analyze(row['id'])
             return {'id': row['id'], 'state': view['state']}
         except (ValueError, PermissionError):
-            with self.db() as db:
+            with self.p.portal_originals_operation_lock(), self.db() as db:
                 db.execute('''UPDATE einkauf_material_dialoge SET state='review',error_code='portal_bedarf_intern_pruefen',updated_at=?
-                    WHERE id=? AND state NOT IN ('accepted','cancelled','external_pending','external_sent')
+                    WHERE id=? AND revision=? AND state=? AND analysis_lease=? AND message_id=?
+                    AND state NOT IN ('accepted','cancelled','external_pending','external_sent')
                     AND NOT EXISTS (SELECT 1 FROM assistent_bestellanforderungen WHERE request_id=?)''',
-                    (self.clock(), row['id'], 'material:' + str(row['id'])))
-            return {'id': row['id'], 'state': 'review'}
+                    (self.clock(), row['id'], row['revision'], row['state'], row['analysis_lease'],
+                     row['message_id'], 'material:' + str(row['id'])))
+                current = db.execute('SELECT state FROM einkauf_material_dialoge WHERE id=?', (row['id'],)).fetchone()
+            return {'id': row['id'], 'state': current['state'] if current else 'missing'}
 
 
 def register_material_order_portal(p):
