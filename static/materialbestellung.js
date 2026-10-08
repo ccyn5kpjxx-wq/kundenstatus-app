@@ -215,7 +215,10 @@
     }
     if (selected.length) { note(''); renderPhotos(); void runPreviews(); }
   }
-  function needsConfirmation(photo) {return photo.preview?.lookup_status === 'loading' || Boolean(photo.preview?.product && ['matched', 'label'].includes(photo.preview.lookup_status) && !photo.confirmedPreview);}
+  function previewHasProduct(result) {
+    return ['matched', 'label'].includes(result?.lookup_status) && typeof result.product === 'string' && Boolean(result.product.trim());
+  }
+  function needsConfirmation(photo) {return photo.preview?.lookup_status === 'loading' || (previewHasProduct(photo.preview) && !photo.confirmedPreview);}
   function updateSubmitControl() {
     $('submit').disabled = identityExpired || busy || (!pending && !photos.length) || Boolean(pending?.restored)
       || (!pending && photos.some(photo => needsConfirmation(photo)));
@@ -255,11 +258,22 @@
   function paintPreview(photo) {
     if (!photo.previewNodes) return;
     const {title, panel, index} = photo.previewNodes, result = photo.preview;
+    const hasProduct = previewHasProduct(result);
+    const needsLabel = Boolean(result && result.lookup_status !== 'loading' && !hasProduct);
     panel.replaceChildren(); panel.hidden = !result;
-    title.textContent = ['matched', 'label'].includes(result?.lookup_status) && result.product ? result.product : 'Artikel ' + (index + 1);
+    panel.dataset.needsLabel = String(needsLabel);
+    panel.setAttribute('role', needsLabel ? 'alert' : 'status');
+    panel.setAttribute('aria-live', needsLabel ? 'assertive' : 'polite');
+    title.textContent = hasProduct ? result.product : 'Artikel ' + (index + 1);
     photo.previewNodes.actions = [];
     if (!result) return;
     panel.dataset.state = result.lookup_status;
+    if (needsLabel) {
+      const warning = node('p', undefined, 'article-preview-warning'), icon = node('span', '⚠');
+      icon.setAttribute('aria-hidden', 'true');
+      warning.append(icon, node('strong', 'Achtung: Bild vom Etikett machen'));
+      panel.append(warning);
+    }
     if (result.decodedCode) panel.append(node('p', 'Artikelcode: ' + result.decodedCode, 'article-code'));
     panel.append(node('p', result.message || 'Bitte Foto und Artikel intern zuordnen.', 'article-preview-message'));
     for (const match of Array.isArray(result.matches) ? result.matches.slice(0, 8) : []) {
@@ -282,7 +296,7 @@
       const button = node('button', text); button.type = 'button'; button.disabled = locked();
       button.addEventListener('click', handler); actions.append(button); photo.previewNodes.actions.push(button);
     };
-    if (['matched', 'label'].includes(result.lookup_status) && result.product) {
+    if (hasProduct) {
       if (photo.confirmedPreview) actions.append(node('strong', 'Artikel bestätigt · Stückzahl wählen'));
       else action('Artikel stimmt', () => {
         if (locked()) return;

@@ -6,7 +6,7 @@
   <meta name="csrf-token" content="{{ csrf_token }}">
   <meta name="theme-color" content="#153e35">
   <title>{{ 'Persönlich anmelden' if not who and login_next == '/werkstatt/mein-konto' else 'Material nachbestellen' }} · Gärtner</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='materialbestellung.css', v='code-vorschau-3') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='materialbestellung.css', v='etikett-warnung-1') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=farben-2">
   <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=farben-2">
   {% if not who or who.actor != 'admin' %}{% include '_mitarbeiter_app_head.html' %}{% endif %}
@@ -119,7 +119,7 @@
     </div>
     <script src="{{ url_for('static', filename='vendor/zxing-browser.min.js', v='0.2.1') }}" defer></script>
     <script src="{{ url_for('static', filename='materialscanner.js', v='code-vorschau-3') }}" defer></script>
-    <script src="{{ url_for('static', filename='materialbestellung.js', v='code-vorschau-3') }}" defer></script>
+    <script src="{{ url_for('static', filename='materialbestellung.js', v='etikett-warnung-1') }}" defer></script>
     {% endif %}
     <footer class="material-footer"><span>Gärtner GmbH Karosserie + Lack</span><a href="/werkstatt/assistent">Dein Werkstatt-Assistent <span aria-hidden="true">↗</span></a></footer>
   </main>

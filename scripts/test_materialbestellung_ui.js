@@ -28,10 +28,11 @@ class Data {
   constructor() {this.fields = new Map();}
   append(name, value, filename) {this.fields.set(name, value); if (filename) (this.filenames ||= new Map()).set(name, filename);}
 }
-function fixture({saved = null, scannerFactory = null, limitCents = '25000'} = {}) {
+function fixture({saved = null, scannerFactory = null, limitCents = '25000', previewEndpoint = ''} = {}) {
   const names = ['camera', 'album', 'camera-button', 'album-button', 'scan-button', 'submit', 'form', 'count', 'empty', 'summary', 'status', 'recovery', 'recovery-text', 'check', 'reload', 'refresh', 'items', 'history', 'history-status'];
   const elements = Object.fromEntries(names.map(name => ['material-' + name, new Element()]));
   const host = new Element(); host.dataset = {endpoint: '/werkstatt/materialbestellung/anforderungen', actor: 'mitarbeiter:7', limitCents};
+  if (previewEndpoint) host.dataset.previewEndpoint = previewEndpoint;
   const document = {getElementById: id => id === 'materialbestellung' ? host : elements[id], createElement: tag => new Element(tag), querySelector: () => ({content: 'synthetic-csrf'})};
   const calls = [], revoked = [], timers = new Map(), store = new Map(), events = {}; let seq = 0, timerId = 0;
   const key = 'materialbestellung:pending:mitarbeiter:7'; if (saved) store.set(key, JSON.stringify(saved));
@@ -433,4 +434,80 @@ test('the urgency label uses the server personal cap and never invents a 250 eur
     const text = descendants(f.cards()[0]).map(el => el.textContent).join(' ');
     assert.match(text, expected); assert.doesNotMatch(text, /bis 250 € brutto/);
   }
+});
+
+for (const result of [
+  {lookup_status: 'no_code'},
+  {lookup_status: 'no_match', decodedCode: 'TEST-UNKNOWN'},
+  {lookup_status: 'ambiguous', matches: [{produkt_name: 'Nur ein möglicher Artikel'}]},
+  {lookup_status: 'unavailable'},
+  {lookup_status: 'awaiting_label'},
+  {lookup_status: 'matched', product: ''},
+  {lookup_status: 'matched', product: '   '},
+  {lookup_status: 'label'},
+]) {
+  test('unresolved ' + result.lookup_status + ' prominently requests an actual label photo', async () => {
+    const f = fixture({previewEndpoint: '/preview'}), fetch = f.api.fetch;
+    f.api.fetch = (url, settings) => url === '/preview' ? reply(result) : fetch(url, settings);
+    f.controller.addFiles([photo()]); await settle();
+    const panel = f.field(0, 'DIV', el => el.className === 'article-preview');
+    assert.equal(panel.dataset.needsLabel, 'true');
+    assert.equal(panel.attributes.role, 'alert'); assert.equal(panel.attributes['aria-live'], 'assertive');
+    assert.ok(descendants(panel).some(el => el.textContent === 'Achtung: Bild vom Etikett machen'));
+    const icon = descendants(panel).find(el => el.textContent === '⚠');
+    assert.equal(icon.attributes['aria-hidden'], 'true');
+    assert.equal(f.$('submit').disabled, false, 'The warning must keep manual submission available');
+    const label = f.step(0, 'Etikett mit Produktnamen fotografieren');
+    assert.ok(label); label.click(); assert.equal(f.$('camera').clicked, true);
+  });
+}
+
+test('rejecting a product shows the label warning; reading and confirming its replacement preserves the request', async () => {
+  const f = fixture({previewEndpoint: '/preview'}), fetch = f.api.fetch, labelResult = deferred(); let scans = 0;
+  f.api.fetch = (url, settings) => {
+    if (url !== '/preview') return fetch(url, settings);
+    return ++scans === 1 ? reply({lookup_status: 'matched', product: 'Erster Testartikel', decodedCode: 'TEST-OLD'}) : labelResult.promise;
+  };
+  const original = photo('original.jpg'), label = photo('label.jpg');
+  f.controller.addFiles([original]); await settle();
+  const panel = () => f.field(0, 'DIV', el => el.className === 'article-preview');
+  assert.equal(panel().dataset.needsLabel, 'false'); assert.equal(panel().attributes.role, 'status');
+  assert.equal(f.$('submit').disabled, true, 'A named proposal still needs explicit confirmation');
+  const quantity = f.quantity(0); quantity.value = '3'; quantity.fire('input');
+  const urgent = f.field(0, 'INPUT', el => el.value === 'dringend'); urgent.checked = true; urgent.fire('change');
+  f.step(0, 'Artikel stimmt').click(); f.step(0, 'Falsches Produkt · Etikett fotografieren').click();
+  assert.equal(panel().dataset.needsLabel, 'true');
+  assert.ok(descendants(panel()).some(el => el.textContent === 'Achtung: Bild vom Etikett machen'));
+  f.$('camera').files = [label]; f.$('camera').fire('change');
+  assert.equal(panel().dataset.state, 'loading'); assert.equal(panel().dataset.needsLabel, 'false');
+  assert.equal(panel().attributes['aria-live'], 'polite');
+  assert.equal(descendants(panel()).some(el => el.textContent === 'Achtung: Bild vom Etikett machen'), false);
+  assert.equal(f.$('submit').disabled, true);
+  labelResult.resolve(reply({lookup_status: 'label', product: 'Korrigierter Testartikel'})); await settle();
+  assert.equal(panel().dataset.needsLabel, 'false'); assert.equal(f.$('submit').disabled, true);
+  f.step(0, 'Artikel stimmt').click(); await f.controller.submit();
+  const fields = f.posts()[0].settings.body.fields, rows = JSON.parse(fields.get('positionen'));
+  assert.equal(rows.length, 1); assert.equal(rows[0].menge, 3); assert.equal(rows[0].dringend, true);
+  assert.equal(rows[0].artikelkorrektur, true); assert.deepEqual(rows[0].abgelehnte_codes, ['TEST-OLD']);
+  assert.equal(fields.get('foto_' + rows[0].id), original); assert.equal(fields.get('etikett_' + rows[0].id), label);
+});
+
+test('a preview connection failure offers the same accessible label warning', async () => {
+  const f = fixture({previewEndpoint: '/preview'});
+  f.api.fetch = async () => {throw new Error('Synthetischer Verbindungsfehler');};
+  f.controller.addFiles([photo()]); await settle();
+  const panel = f.field(0, 'DIV', el => el.className === 'article-preview');
+  assert.equal(panel.dataset.state, 'unavailable'); assert.equal(panel.dataset.needsLabel, 'true');
+  assert.equal(panel.attributes.role, 'alert'); assert.ok(f.step(0, 'Etikett mit Produktnamen fotografieren'));
+  assert.equal(f.$('submit').disabled, false);
+});
+
+test('an expired personal session cannot open the warning photo action or send a request', async () => {
+  const f = fixture({previewEndpoint: '/preview'});
+  f.api.fetch = async () => reply({error: 'Persönliche Anmeldung abgelaufen', reload_required: true}, 403);
+  f.controller.addFiles([photo()]); await settle();
+  const label = f.step(0, 'Etikett mit Produktnamen fotografieren');
+  assert.equal(label.disabled, true); assert.equal(f.$('submit').disabled, true);
+  label.click(); assert.equal(f.$('camera').clicked, undefined, 'A synthetic click must also respect the existing identity guard');
+  await f.controller.submit(); assert.equal(f.posts().length, 0);
 });
