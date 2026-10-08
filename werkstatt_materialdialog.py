@@ -33,7 +33,7 @@ WORDS = {'ein':'1','eine':'1','einen':'1','einem':'1','zwei':'2','drei':'3','vie
 QUANTITY_PATTERN = r'(?<![\w.,/+−-])(\d{1,8}(?:[.,]\d{1,6})?|' + '|'.join(WORDS) + r')(?:\s*[x×]\s*|\s+)(' + '|'.join(sorted(UNITS, key=len, reverse=True)) + r')\b'
 COUNTED_ITEM_PATTERN = r'(?<![\w.,/+−-])([1-9]\d{0,7})\s*[x×]\s*(?P<product>[^\W\d_][\w/-]{2,})(?!\w)'
 EMPLOYEE_FIELDS = {'order_requested', 'quantity', 'unit', 'urgent', 'article', 'unit_conflict', 'possible_duplicate'}
-INTERNAL_FIELDS = {'supplier_review', 'price', 'budget', 'unit_review', 'parts_inquiry'}
+INTERNAL_FIELDS = {'supplier_review', 'price', 'budget', 'unit_review', 'parts_inquiry', 'article_correction'}
 EXTERNAL_STATES = {'external_pending', 'external_sent'}
 
 
@@ -494,6 +494,19 @@ class MaterialDialog:
                 db.execute("UPDATE einkauf_material_rueckfragen SET state='superseded' WHERE draft_id=? AND state='queued'",(draft['id'],))
                 return
         analysis = json.loads(draft['analysis_json'])
+        manual = fields.get('manual_article',{}).get('value')
+        correction = bool(details and details.get('artikelkorrektur') is True)
+        if manual or correction:
+            # A later employee reply or reanalysis must not silently replace an
+            # admin identity or reuse another article's commercial approval.
+            changed = fields.pop('selected_article',None) is not None
+            if review and (not manual or manual['product_name'] != review.get('product_name')
+                    or manual['article_number'] and manual['article_number'] != review.get('article_number')
+                    or manual['variant'] and manual['variant'] != review.get('variant')):
+                review = {}
+                db.execute("UPDATE einkauf_material_dialoge SET review_json='{}' WHERE id=?",(draft['id'],))
+            if changed:
+                db.execute('UPDATE einkauf_material_dialoge SET fields_json=? WHERE id=?',(_json(fields),draft['id']))
         selected_field = fields.get('selected_article',{})
         if selected_field.get('proof',{}).get('basis')=='exact_photo_catalog_match':
             current_hit = self._exact_photo_hit(draft,analysis)
@@ -501,7 +514,7 @@ class MaterialDialog:
                 fields.pop('selected_article',None)
                 review = {}
                 db.execute("UPDATE einkauf_material_dialoge SET fields_json=?,review_json='{}' WHERE id=?",(_json(fields),draft['id']))
-        if not fields.get('selected_article') and not fields.get('cancelled',{}).get('value'):
+        if not correction and not fields.get('manual_article') and not fields.get('selected_article') and not fields.get('cancelled',{}).get('value'):
             hit = self._exact_photo_hit(draft,analysis)
             source = self._source(db,draft)
             if hit and source['mime']!='text/plain' and not source['forwarded']:
@@ -511,7 +524,7 @@ class MaterialDialog:
         if selected and review and review.get('match_identity') != self._hit_identity(selected):
             review = {}
             db.execute("UPDATE einkauf_material_dialoge SET review_json='{}' WHERE id=?",(draft['id'],))
-        if not review and fields.get('selected_article'):
+        if not correction and not manual and not review and fields.get('selected_article'):
             review = self._reuse_review(db,fields['selected_article']['value'])
             if review:
                 db.execute('UPDATE einkauf_material_dialoge SET review_json=? WHERE id=?',(_json(review),draft['id']))
@@ -536,7 +549,7 @@ class MaterialDialog:
             and not analysis.get('treffer_gekuerzt')
             and all(labels.get(key) for key in ('marke','materialtyp','masse'))
             and all(hits[0].get(key) for key in ('artikelnummer','lieferant','produkt_name')))
-        identified = bool(selected or catalog_review_hint or (draft['analysis_state']=='done' and labels.get('produkt')
+        identified = bool(correction or fields.get('manual_article') or selected or catalog_review_hint or (draft['analysis_state']=='done' and labels.get('produkt')
             and str(labels.get('produkt')).casefold().strip()!=str(labels.get('marke','')).casefold().strip()
             and (labels.get('marke') or labels.get('artikelnummer') or labels.get('breite') or labels.get('farbe'))
             and (not hits or len(hits)==1 and not analysis.get('treffer_gekuerzt'))))
@@ -544,6 +557,8 @@ class MaterialDialog:
         if values.get('cancelled') is True:
             state, payload = 'cancelled', {}
         else:
+            if correction and not manual:
+                missing.append('article_correction')
             for key in ('order_requested','quantity','unit','urgent'):
                 if key not in values or key == 'order_requested' and values[key] is not True:
                     missing.append(key)
@@ -641,7 +656,9 @@ class MaterialDialog:
         source = db.execute('SELECT * FROM einkauf_material_nachrichten WHERE id=?',(row['message_id'],)).fetchone()
         details = portal_request_details(source) if source else None
         row.update(employee_id=source['employee_id'] if source else None, employee_name=source['employee_name'] if source else '',
-                   intake_id=source['intake_id'] if source else None, source_kind='text' if source and source['mime']=='text/plain' else 'image',
+                   intake_id=source['intake_id'] if source else None, file_id=source['file_id'] if source else None,
+                   source_kind='text' if source and source['mime']=='text/plain' else 'image',
+                   article_correction=bool(details and details.get('artikelkorrektur') is True),
                    vorgang=details['vorgang'] if details else 'bestellung', beschreibung=details['beschreibung'] if details else '')
         for source,target in (('fields_json','fields'),('review_json','review'),('analysis_json','analysis'),('missing_json','missing_fields')):
             row[target] = json.loads(row.pop(source))
@@ -920,6 +937,7 @@ class MaterialDialog:
             if self._accepted(db,draft) or draft['state']=='cancelled':
                 raise ValueError('Dieser Vorgang ist bereits übergeben, extern reserviert oder abgebrochen.')
             fields = json.loads(draft['fields_json'])
+            self._check_manual_identity(fields, details, claim)
             values = {key:fields.get(key,{}).get('value') for key in ('quantity','unit','urgent','order_requested')}
             duplicate = fields.get('possible_duplicate',{}).get('value')
             if not duplicate:
@@ -1018,6 +1036,45 @@ class MaterialDialog:
             return self._view(db,draft_id)
 
     @_originals_guard
+    def assign_article(self, draft_id, revision, payload, actor='admin'):
+        """Record identity only. Never reuse terms or submit an order."""
+        if actor != 'admin':
+            raise PermissionError('Nur die Werkstattleitung darf Artikel zuordnen.')
+        if not isinstance(payload, dict) or set(payload) != {'product_name','article_number','variant','reason'}:
+            raise ValueError('Artikelname, Artikelnummer, Variante und Zuordnungsgrund angeben.')
+        identity = {}
+        for key in ('product_name','article_number','variant','reason'):
+            value = payload[key]
+            if not isinstance(value, str) or len(value)>300 or _note(value,300) != value.strip():
+                raise ValueError('Artikelangaben eindeutig und mit höchstens 300 Zeichen angeben.')
+            identity[key] = value.strip()
+        if not identity['product_name'] or not identity['reason']:
+            raise ValueError('Artikelname und Zuordnungsgrund sind erforderlich; unbekannte Nummer und Variante dürfen leer bleiben.')
+        with self.db() as db:
+            draft = self._draft(db,draft_id,revision,lock=True)
+            if self._accepted(db,draft) or draft['state'] in {'accepted','cancelled'}:
+                raise ValueError('Bereits übergebenen oder abgebrochenen Vorgang nicht ändern.')
+            fields = json.loads(draft['fields_json'])
+            fields['manual_article'] = {'value':identity, 'proof':{'kind':'admin', 'actor':actor, 'at':self.clock()}}
+            fields.pop('selected_article',None)
+            fields.pop('possible_duplicate',None)
+            fields.pop('duplicate_confirmation',None)
+            db.execute("UPDATE einkauf_material_dialoge SET fields_json=?,review_json='{}',revision=revision+1 WHERE id=?",(_json(fields),draft_id))
+            self._refresh(db,self._draft(db,draft_id))
+            # Identity editing is entirely internal; do not queue a new chat reply.
+            db.execute("UPDATE einkauf_material_rueckfragen SET state='superseded' WHERE draft_id=? AND state='queued'",(draft_id,))
+            return self._view(db,draft_id)
+
+    @staticmethod
+    def _check_manual_identity(fields, details, product):
+        manual = fields.get('manual_article',{}).get('value')
+        if details and details.get('artikelkorrektur') is True and not manual:
+            raise ValueError('Der Mitarbeiter hat die Artikelerkennung abgelehnt. Zuerst den Artikel am Original manuell zuordnen.')
+        if manual and any(manual.get(key) and manual[key] != product.get(key)
+                          for key in ('product_name','article_number','variant')):
+            raise ValueError('Der Bestellartikel muss zur manuellen Artikelzuordnung passen. Zuerst die Zuordnung ändern.')
+
+    @_originals_guard
     def apply_admin_review(self, draft_id, revision, payload, actor='admin'):
         if actor != 'admin' or not isinstance(payload,dict) or payload.get('reviewed') is not True:
             raise PermissionError('Werkstattleitung muss Artikel und aktuelle Preisbedingungen ausdrücklich prüfen.')
@@ -1050,6 +1107,8 @@ class MaterialDialog:
             if self._accepted(db,draft) or draft['state']=='cancelled':
                 raise ValueError('Bereits übergebenen oder abgebrochenen Vorgang nicht ändern.')
             selected = json.loads(draft['fields_json']).get('selected_article',{}).get('value')
+            details = portal_request_details(self._source(db,draft))
+            self._check_manual_identity(json.loads(draft['fields_json']), details, review)
             if selected:
                 if selected.get('artikelnummer') != review['article_number'] or selected.get('lieferant','').casefold() != supplier.get('name','').casefold():
                     raise ValueError('Bestätigter Artikel und geprüfter Lieferant passen nicht zusammen.')
@@ -1073,6 +1132,10 @@ class MaterialDialog:
             raise PermissionError('Bestellfreigabe gehört einem anderen Vorgang.')
         fields = json.loads(draft['fields_json'])
         review = json.loads(draft['review_json'])
+        try:
+            self._check_manual_identity(fields, details, review)
+        except ValueError as exc:
+            raise PermissionError(str(exc)) from None
         duplicate = fields.get('possible_duplicate',{}).get('value')
         if not duplicate and draft['state']=='approved':
             duplicate = self._duplicate_of(db,draft,source,self._duplicate_signature(fields,review,draft))

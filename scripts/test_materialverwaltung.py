@@ -19,6 +19,7 @@ class MaterialAdminTests(unittest.TestCase):
         self.portal = SimpleNamespace(app=self.app, material_dialog=self.service)
         self.app.add_url_rule('/eingang', 'werkstatt_orders.intake_index', lambda: '')
         self.app.add_url_rule('/bestellungen', 'werkstatt_orders.index', lambda: '')
+        self.app.add_url_rule('/material/<int:draft_id>/artikelzuordnung', 'werkstatt_orders.assign_article', lambda draft_id: '')
         register_material_admin(self.portal)
         self.client = self.app.test_client()
         with self.client.session_transaction() as state:

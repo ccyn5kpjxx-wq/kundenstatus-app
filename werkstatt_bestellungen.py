@@ -22,6 +22,7 @@ from contextvars import ContextVar
 from datetime import datetime, time as day_time, timedelta, timezone
 from decimal import Decimal
 import hmac
+import io
 import json
 import os
 from pathlib import Path
@@ -32,7 +33,7 @@ import threading
 import uuid
 
 import click
-from flask import Blueprint, abort, flash, g, has_request_context, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, flash, g, has_request_context, redirect, render_template, request, session, url_for, send_file
 
 from werkstatt_artikel_identity import parse_unit_price
 from werkstatt_bestellausgang import build_order_dispatch
@@ -575,6 +576,7 @@ def register_orders(portal):
     @bp.after_request
     def private_order_response(response):
         response.headers['Cache-Control'] = 'no-store'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
         return response
 
     @bp.before_request
@@ -586,6 +588,15 @@ def register_orders(portal):
             supplied = request.form.get('csrf_token') or request.headers.get('X-CSRF-Token')
             if not isinstance(expected, str) or not isinstance(supplied, str) or not hmac.compare_digest(expected, supplied):
                 abort(400, description='Die Seite ist veraltet. Bitte neu öffnen.')
+
+    def original_files(item):
+        service = getattr(portal, 'workshop_intake', None)
+        if not item or not item.get('intake_id') or service is None:
+            return []
+        try:
+            return service.detail(item['intake_id'])['files']
+        except (ValueError, LookupError):
+            return []
 
     def page(errors=None, form=None, code=200):
         form = dict(form or {})
@@ -600,10 +611,15 @@ def register_orders(portal):
             pending[request_id] = True
             session['assistant_order_requests'] = dict(list(pending.items())[-20:])
         overview = OrderOverview(portal.get_db).page(request.args)
+        material_current = None
+        material_id = (overview.get('selected') or {}).get('material_id')
+        if material_id and getattr(portal, 'material_dialog', None):
+            material_current = portal.material_dialog.status(material_id)
         intake = getattr(portal, 'workshop_intake', None)
         from werkstatt_bestellvergleich_ui import comparison_context
         return render_template('assistent_bestellungen.html', contacts=manager.contacts(), availability=manager.availability(),
                                overview=overview, cap_cents=manager.cap(), csrf=csrf, request_id=request_id,
+                               order_material=material_current, order_files=original_files(material_current),
                                intake_entries=intake.list(limit=20) if intake else None,
                                errors=errors or [], form=form, **comparison_context(portal, overview)), code
 
@@ -644,6 +660,7 @@ def register_orders(portal):
                 material_current = material_dialog.status(material_id)
             except (ValueError,LookupError):
                 abort(404,description='Dieser Materialbedarf wurde nicht gefunden.')
+        material_files = original_files(material_current)
         employees = []
         if channel:
             db = portal.get_db()
@@ -665,8 +682,40 @@ def register_orders(portal):
                                incoming=channel.status(limit=20) if channel else [],
                                material_dialogs=material_dialog.list(limit=50) if material_dialog else [],
                                material_current=material_current,material_contacts=manager.contacts(),
+                               material_files=material_files,
                                material_replies_enabled=portal.app.config.get('MATERIAL_WHATSAPP_REPLIES_ENABLED') is True,
                                preview_mode=portal.app.config.get('MATERIAL_INTAKE_PREVIEW', False)), code
+
+    @bp.get('/eingang/<int:group_id>/dateien/<int:file_id>/vorschau')
+    @portal.admin_required
+    def original_preview(group_id, file_id):
+        service = getattr(portal, 'workshop_intake', None)
+        if service is None:
+            abort(404)
+        try:
+            raw, mime, filename = service.original(group_id, file_id)
+        except (ValueError, LookupError):
+            abort(404, description='Dieses Original wurde nicht gefunden oder ist beschädigt.')
+        if mime not in {'image/jpeg', 'image/png', 'image/webp', 'application/pdf'}:
+            abort(415)
+        response = send_file(io.BytesIO(raw), mimetype=mime, as_attachment=False, download_name=filename, max_age=0)
+        response.headers['Content-Security-Policy'] = "default-src 'none'; sandbox"
+        return response
+
+    @bp.post('/eingang/material/<int:draft_id>/artikelzuordnung')
+    @portal.admin_required
+    def assign_article(draft_id):
+        service = getattr(portal, 'material_dialog', None)
+        if service is None:
+            abort(404)
+        try:
+            service.assign_article(draft_id, int(request.form.get('revision', '')), {
+                key:request.form.get(key, '') for key in ('product_name', 'article_number', 'variant', 'reason')})
+        except (ValueError, LookupError, PermissionError) as exc:
+            flash(str(exc), 'error')
+        else:
+            flash('Artikelzuordnung gespeichert. Lieferant und aktuelle Kosten bleiben separat zu prüfen.', 'success')
+        return redirect(url_for('werkstatt_orders.intake_index', material=draft_id, _anchor='artikelzuordnung'), code=303)
 
     @bp.get('/eingang/ansicht')
     @portal.admin_required

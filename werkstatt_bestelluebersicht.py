@@ -186,6 +186,7 @@ class OrderOverview:
         snapshot = _object(row['snapshot_json'])
         fields = _object(row['fields_json'])
         review = _object(row['review_json'])
+        manual = fields.get('manual_article',{}).get('value',{})
         analysis = _object(row['analysis_json'])
         labels = analysis.get('merkmale') if isinstance(analysis.get('merkmale'),dict) else {}
         value = lambda key: fields.get(key,{}).get('value') if isinstance(fields.get(key),dict) else None
@@ -246,7 +247,7 @@ class OrderOverview:
         if duplicate_pending:
             warnings.append('Mögliche Doppelbestellung. Die gezielte Rückfrage muss vor einer zusätzlichen Bestellung beantwortet werden.')
         photo_description = ' '.join(_text(labels.get(key)) for key in ('materialtyp','masse')).strip()
-        product = (description if inquiry else '') or _text(commercial.get('product_name') or labels.get('produkt')) or description or photo_description or 'Artikel noch zuordnen'
+        product = _text(commercial.get('product_name') or manual.get('product_name')) or (description if inquiry else '') or _text(labels.get('produkt')) or description or photo_description or 'Artikel noch zuordnen'
         created = row['created_at']
         events = []
         if intact:
@@ -256,8 +257,8 @@ class OrderOverview:
         return {'id':source,'source':source,'draft':False,'material_id':row['id'],
             'channel':'Fotoformular' if row.get('source_channel') == 'portal:personal' else 'WhatsApp','actor':actor,'person':self._person(actor,people),
             'supplier_id':supplier_id,'supplier':supplier or 'Lieferant noch zuordnen','product':product,
-            'sku':_text(commercial.get('article_number'),128) or 'nicht belegt',
-            'variant':_text(commercial.get('variant') or labels.get('farbe') or labels.get('breite')) or 'nicht belegt',
+            'sku':_text(commercial.get('article_number') or manual.get('article_number'),128) or 'nicht belegt',
+            'variant':_text(commercial.get('variant') or manual.get('variant') or labels.get('farbe') or labels.get('breite')) or 'nicht belegt',
             'quantity':_text(snapshot.get('quantity') if intact else value('quantity'),60) or 'nicht belegt',
             'unit':_text(snapshot.get('unit') if intact else value('unit'),60),
             'recipient':_text(commercial.get('recipient'),254) or 'nicht belegt',
