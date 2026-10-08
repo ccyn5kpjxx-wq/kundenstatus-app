@@ -89,6 +89,48 @@ def register_material_admin(p):
             flash('Artikel und Preisbedingungen gespeichert. Eine vollständige Mitarbeiterbestellung wird vom aktiven Bestelldienst gemäß Dringlichkeit übergeben.', 'success')
         return redirect(url_for('werkstatt_orders.intake_index', material=draft_id, _anchor='materialdialog'), code=303)
 
+    @bp.post('/<int:draft_id>/bearbeiten')
+    def edit_request(draft_id):
+        try:
+            revision = request.form.get('revision',type=int)
+            if not revision or revision<1:
+                raise ValueError('Materialvorgang wurde geändert. Bitte neu laden.')
+            payload = {key:request.form.get(key,'') for key in ('product_name','article_number','variant','quantity','unit','reason')}
+            p.material_dialog.edit_request(draft_id,revision,payload,actor='admin')
+            flash('Anforderung geändert. Ursprüngliche Mitarbeiterangaben bleiben erhalten; Artikel und Preisbedingungen bitte erneut prüfen.','success')
+        except (ValueError,PermissionError,LookupError) as exc:
+            flash(str(exc),'error')
+        return redirect(url_for('werkstatt_orders.index',bestellung='material:'+str(draft_id),_anchor='bestelldetail'),303)
+
+    @bp.post('/entfernen')
+    def remove_requests():
+        try:
+            selections = []
+            for value in request.form.getlist('selection'):
+                match = re.fullmatch(r'([1-9][0-9]*):([1-9][0-9]*)',value)
+                if not match:
+                    raise ValueError('Die Auswahl ist veraltet. Bitte neu laden.')
+                selections.append((int(match[1]),int(match[2])))
+            if not 1<=len(selections)<=100:
+                raise ValueError('Eine bis 100 offene Anforderungen auswählen.')
+            count = p.material_dialog.remove_requests(selections,request.form.get('reason',''),actor='admin')
+            flash(f'{count} Anforderung(en) entfernt. Sie können im Bereich „Entfernte Anforderungen“ wiederhergestellt werden.','success')
+        except (ValueError,PermissionError,LookupError) as exc:
+            flash(str(exc),'error')
+        return redirect(url_for('werkstatt_orders.index',_anchor='offene-bestellungen'),303)
+
+    @bp.post('/<int:draft_id>/wiederherstellen')
+    def restore_request(draft_id):
+        try:
+            revision = request.form.get('revision',type=int)
+            if not revision or revision<1:
+                raise ValueError('Materialvorgang wurde geändert. Bitte neu laden.')
+            p.material_dialog.restore_request(draft_id,revision,request.form.get('reason',''),actor='admin')
+            flash('Anforderung wiederhergestellt. Artikel und Preisbedingungen bitte erneut prüfen.','success')
+        except (ValueError,PermissionError,LookupError) as exc:
+            flash(str(exc),'error')
+        return redirect(url_for('werkstatt_orders.index',bestellung='material:'+str(draft_id),_anchor='bestelldetail'),303)
+
     @bp.post('/<int:draft_id>/auslesen')
     def analyze(draft_id):
         try:

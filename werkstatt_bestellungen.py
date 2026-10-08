@@ -76,6 +76,43 @@ def _cents(value, label, positive=False):
     return int(price * 100)
 
 
+def historical_price_context(portal, overview):
+    """Read invoice hints for displayed identities; never approve or edit orders."""
+    catalog = getattr(getattr(portal,'cockpit_data',None),'catalog',None)
+    lookup = getattr(catalog,'historical_price',None)
+    if not callable(lookup):
+        return {}
+    entries = list(overview['open']['items'])+list(overview['removed']['items'])
+    entries += [entry for group in overview['archive_groups'] for entry in group['items']]
+    if overview.get('selected'):
+        entries.append(overview['selected'])
+    result,cache = {},{}
+    for entry in entries:
+        identity = entry.get('historical_identity') or {}
+        supplier,sku,unit,pack = (identity.get(key,'') for key in ('supplier','article_number','unit','packaging'))
+        if entry.get('draft') or not all((supplier,sku,unit)):
+            continue
+        key = (supplier,sku,unit,pack)
+        if key not in cache:
+            try:
+                saved = dict(lookup(supplier,sku,unit,packaging=pack))
+            except (ValueError,LookupError,PermissionError):
+                saved = {'status':'unknown','warnings':['Historischer Rechnungsartikel noch nicht eindeutig zugeordnet.']}
+            source = saved.get('source') or {}
+            saved['source_reference'] = (source.get('reference') or source.get('beleg') or 'Rechnungsquelle') if isinstance(source,dict) else str(source)
+            saved['source_page'] = source.get('page') or source.get('seite') if isinstance(source,dict) else None
+            saved['source_position'] = source.get('position') if isinstance(source,dict) else None
+            saved['date_display'] = 'Datum nicht belegt'
+            if isinstance(saved.get('date'),str):
+                try:
+                    saved['date_display'] = datetime.fromisoformat(saved['date']).strftime('%d.%m.%Y')
+                except ValueError:
+                    pass
+            cache[key] = saved
+        result[entry['source']] = cache[key]
+    return result
+
+
 class OrderManagement:
     def __init__(self, portal):
         self.p = portal
@@ -617,11 +654,14 @@ def register_orders(portal):
             material_current = portal.material_dialog.status(material_id)
         intake = getattr(portal, 'workshop_intake', None)
         from werkstatt_bestellvergleich_ui import comparison_context
+        visible_overview = dict(overview,items=overview['open']['items']+
+            [entry for group in overview['archive_groups'] if group['expanded'] for entry in group['items']])
         return render_template('assistent_bestellungen.html', contacts=manager.contacts(), availability=manager.availability(),
                                overview=overview, cap_cents=manager.cap(), csrf=csrf, request_id=request_id,
                                order_material=material_current, order_files=original_files(material_current),
                                intake_entries=intake.list(limit=20) if intake else None,
-                               errors=errors or [], form=form, **comparison_context(portal, overview)), code
+                               historical_prices=historical_price_context(portal,overview),
+                               errors=errors or [], form=form, **comparison_context(portal, visible_overview)), code
 
     def intake_page(errors=None, code=200, group_id=None):
         service = getattr(portal, 'workshop_intake', None)

@@ -1,9 +1,11 @@
 """Resumable, review-only supplier invoice catalog. Never places an order."""
 import hashlib
 import json
+from pathlib import Path
 import re
 import unicodedata
 import uuid
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta, timezone
 
 from flask import jsonify, render_template, request, flash, redirect, url_for
@@ -166,6 +168,11 @@ def _price_evidence(value):
     rate = _text(value.get('tax_rate'), 30)
     if re.fullmatch(r'\d{1,2}(?:[.,]\d{1,4})?|100(?:[.,]0{1,4})?', rate):
         result['tax_rate'] = rate.replace(',', '.')
+    metadata = value.get('metadata_source')
+    if isinstance(metadata, dict) and metadata.get('method') == 'topcolor_summary_columns_v1':
+        page = _marker(metadata.get('page'))
+        if page and metadata.get('tax_summary_reconciled') is True:
+            result['metadata_source'] = {'page': page, 'method': metadata['method'], 'tax_summary_reconciled': True}
     if result['basis'] == 'gebindepreis_netto_abgeleitet':
         result['calculation'] = 'Inhalt × Grundpreis je Maßeinheit × (1 + Rabatt / 100)'
     return result
@@ -528,6 +535,8 @@ class InvoiceCatalog:
                    'groesse': size, 'farbe': color, 'menge': quantity,
                    'historischer_preishinweis': evidence, 'preis_geprueft': False,
                    'price_evidence': price_evidence,
+                   'auslese_hinweise': [_text(warning, 300) for warning in (candidate.get('auslese_hinweise') or [])[:10]
+                                        if isinstance(warning, str)],
                    'preis_basis': 'Ungeprüft: Einzel-/Gesamtpreis und netto/brutto am Original prüfen.',
                    'status': 'vorschlag', 'bestellbar': False,
                    'quelle': {'art': source['source_kind'], 'beleg': source['reference'],
@@ -571,6 +580,133 @@ class InvoiceCatalog:
                              'offene_auslese': sum(rule['allowed'] and row['state'] in ('offen', 'laeuft') for row, rule in scoped),
                              'auslese_zu_pruefen': sum(rule['allowed'] and row['state'] == 'pruefen' for row, rule in scoped),
                              'positionen': len(items), 'positionen_begrenzt': truncated}}
+
+    def historical_price(self, supplier, article_number, unit, packaging=''):
+        """Pure historical display; never create reviews, prices or purchases.
+
+        Empty packaging is usable only if all observations of this exact SKU
+        and order unit prove the same package. Supplier, SKU and order unit
+        always remain exact; a free product description cannot identify a price.
+        Most recent uncertain/missing-date sources remain visible and block a
+        confident result rather than falling back to an older cheap price.
+        """
+        result = {'status': 'unknown', 'amount': None, 'currency': 'unknown', 'tax_basis': 'unknown',
+                  'tax_rate': None, 'date': None, 'source': {}, 'evidence': {}, 'warnings': [],
+                  'historical': True, 'verified': False, 'dispatchable': False,
+                  'unit': '', 'packaging': '', 'matches': [], 'matched_by': 'exact'}
+        normal = lambda value: _product_text(value).replace(',', '.')
+        supplier, article_number = normal(supplier), normal(article_number)
+        order_unit = material_unit(unit)
+        if not supplier or not article_number:
+            result['warnings'].append('Lieferant und Lieferantenartikelnummer zuerst eindeutig zuordnen.')
+            return result
+        snapshot = self.knowledge_rows(limit=5000)
+        rows = [row for row in snapshot['items'] if normal(row.get('lieferant')) == supplier
+                and normal(row.get('artikelnummer')) == article_number]
+        dated = [invoice_date((row.get('quelle') or {}).get('datum')) for row in rows
+                 if order_unit and material_unit(row.get('ve')) == order_unit
+                 and (not packaging or normal(row.get('gebinde')) == normal(packaging))]
+        newest = max((value for value in dated if value), default='')
+        ambiguous = [row for row in rows if (not material_unit(row.get('ve'))
+                     or material_unit(row.get('ve')) == order_unit and not normal(row.get('gebinde')))
+                     and (not invoice_date((row.get('quelle') or {}).get('datum'))
+                          or invoice_date((row.get('quelle') or {}).get('datum')) >= newest)]
+        if ambiguous:
+            result['warnings'].append('Eine jüngste passende Artikelquelle hat keine eindeutige Bestelleinheit oder Gebindebasis; Original prüfen.')
+            result['matches'] = [{'proposal_id': row.get('vorschlag_id'), 'amount': None,
+                                   'date': invoice_date((row.get('quelle') or {}).get('datum')),
+                                   'source': dict(row.get('quelle') or {}), 'evidence': _price_evidence(row.get('price_evidence'))}
+                                  for row in ambiguous[:100]]
+            return result
+        rows = [row for row in rows if order_unit and material_unit(row.get('ve')) == order_unit]
+        if not rows:
+            result['warnings'].append('Keine historische Quelle mit passender Lieferantenartikelnummer und Bestelleinheit.')
+            return result
+        package_key = normal(packaging)
+        if not package_key:
+            packages = {normal(row.get('gebinde')) for row in rows}
+            if len(packages) != 1 or not next(iter(packages)):
+                result['warnings'].append('Gebinde ist nicht eindeutig belegt; passende Rechnungsvariante prüfen.')
+                return result
+            package_key = next(iter(packages))
+            result['matched_by'] = 'unique_package'
+        rows = [row for row in rows if normal(row.get('gebinde')) == package_key]
+        if not rows:
+            result['warnings'].append('Keine historische Quelle mit genau diesem Gebinde.')
+            return result
+        result.update(unit=order_unit, packaging=rows[0].get('gebinde') or '')
+        candidates = []
+        for row in rows:
+            evidence = _price_evidence(row.get('price_evidence'))
+            raw = _text(evidence.get('value'), 80)
+            amount = None
+            if re.fullmatch(r'\d+(?:[.,]\d+)?', raw):
+                try:
+                    number = Decimal(raw.replace(',', '.'))
+                    if number.is_finite() and 0 <= number <= 10000000:
+                        amount = format(number, 'f')
+                except InvalidOperation:
+                    pass
+            if evidence.get('reconciled') is not True or evidence.get('basis') != 'gebindepreis_netto_abgeleitet':
+                amount = None
+            source = dict(row.get('quelle') or {})
+            source.update(reference=source.get('beleg'), page=source.get('seite'))
+            candidates.append({'proposal_id': row.get('vorschlag_id'), 'amount': amount,
+                'date': invoice_date(source.get('datum')), 'source': source, 'evidence': evidence,
+                'currency': evidence.get('currency') or 'unknown', 'tax_basis': evidence.get('tax_basis') or 'unknown',
+                'tax_rate': evidence.get('tax_rate'), 'warnings': row.get('auslese_hinweise') or []})
+        candidates.sort(key=lambda row: (row['date'] or '', row['proposal_id'] or 0), reverse=True)
+        result['matches'] = candidates[:100]
+        if snapshot.get('truncated') or len(candidates) > 100:
+            result['warnings'].append('Katalogabfrage begrenzt; eine jüngere Quelle kann fehlen.')
+            return result
+        if any(not row['date'] for row in candidates):
+            result['warnings'].append('Eine passende Quelle hat kein eindeutiges Rechnungsdatum; neuester Preis ungeklärt.')
+            return result
+        latest = [row for row in candidates if row['date'] == candidates[0]['date']]
+        signatures = {(row['amount'], row['currency'], row['tax_basis'], row['tax_rate'],
+                       row['evidence'].get('unrounded_value')) for row in latest}
+        result['date'] = candidates[0]['date']
+        if len(signatures) != 1:
+            result['status'] = 'conflict'
+            result['warnings'].append('Widersprüchliche Preisangaben am jüngsten Rechnungsdatum; Originale prüfen.')
+            return result
+        selected = latest[0]
+        if selected['amount'] is None or selected['warnings']:
+            result['warnings'].append('Preis am jüngsten Beleg ist nicht abgestimmt; kein älterer Preis eingesetzt.')
+            result['source'], result['evidence'] = selected['source'], selected['evidence']
+            return result
+        for key in ('amount', 'currency', 'tax_basis', 'tax_rate', 'source', 'evidence'):
+            result[key] = selected[key]
+        result['status'] = 'ok'
+        result['warnings'].append('Historischer Belegpreis; keine aktuellen Einkaufskonditionen oder Bestellfreigabe.')
+        if result['currency'] == 'unknown' or result['tax_basis'] == 'unknown':
+            result['warnings'].append('Währung oder Steuerbasis nicht am Rechnungsoriginal belegt.')
+        return result
+
+    def existing_original_hashes(self, supplier):
+        """Local, scoped original fingerprints; no OCR, remote calls or writes."""
+        root = getattr(self.p, 'UPLOAD_DIR', None)
+        if root is None:
+            return {}
+        root = Path(root).resolve()
+        records = self.rows("SELECT id,lieferant,original_name,stored_name,beleg_typ FROM einkauf_belege WHERE beleg_typ='rechnung'")
+        hashes = {}
+        for row in records:
+            if _product_text(row['lieferant']) != _product_text(supplier) or not self.source_rule(row)['allowed']:
+                continue
+            stored = row['stored_name'] or ''
+            if not stored or '/' in stored or '\\' in stored:
+                continue
+            path = (root / stored).resolve()
+            if path.parent != root or not path.is_file() or path.stat().st_size > 20 * 1024 * 1024:
+                continue
+            digest = hashlib.sha256()
+            with path.open('rb') as stream:
+                for chunk in iter(lambda: stream.read(65536), b''):
+                    digest.update(chunk)
+            hashes.setdefault(digest.hexdigest(), []).append(row['id'])
+        return hashes
 
     def _search(self, query, limit, sources=None, allowed=None):
         allowed = self.allowed_suppliers() if allowed is None else allowed
@@ -636,6 +772,8 @@ def register_invoice_catalog(p, service):
             return redirect(url_for('assistant_invoice_catalog'))
         saved = 0
         seen = set()
+        existing = catalog.existing_original_hashes(supplier)
+        duplicates = 0
         for file in files:
             rule = catalog.source_rule({'supplier': supplier, 'original_name': file.filename})
             if not rule['allowed']:
@@ -656,6 +794,9 @@ def register_invoice_catalog(p, service):
                 if not size or digest.hexdigest() in seen:
                     continue
                 seen.add(digest.hexdigest())
+                if digest.hexdigest() in existing:
+                    duplicates += 1
+                    continue
                 # Save receipt only: legacy import may collapse different variants.
                 if p.save_einkauf_beleg_upload(file, lieferant=supplier, beleg_typ='rechnung'):
                     saved += 1
@@ -663,6 +804,8 @@ def register_invoice_catalog(p, service):
                 flash('Eine Datei konnte nicht als Lieferantenrechnung gespeichert werden.', 'warning')
         catalog.prepare(service.invoice_sources(include_held=True))
         flash(f'{saved} Rechnungsdateien gespeichert. Einlesen setzt die Verarbeitung fort.', 'success')
+        if duplicates:
+            flash(f'{duplicates} bereits vorhandene Originaldatei(en) anhand SHA256 erkannt. Zum Aktualisieren den vorhandenen Beleg erneut einlesen.', 'info')
         return redirect(url_for('assistant_invoice_catalog'))
 
     @p.app.post('/admin/assistent-artikel/start')
@@ -697,7 +840,12 @@ def register_invoice_catalog(p, service):
     @p.app.post('/admin/assistent-artikel/weiter')
     @p.admin_required
     def assistant_invoice_catalog_next():
-        return jsonify(catalog.process_next())
+        raw = request.form.get('source_id')
+        if raw is None and request.is_json:
+            raw = (request.get_json(silent=True) or {}).get('source_id')
+        if raw is not None and (isinstance(raw, bool) or not str(raw).isdigit() or int(raw) <= 0):
+            return jsonify(error='Ungültige Rechnungsquelle.'), 400
+        return jsonify(catalog.process_next(source_id=int(raw) if raw is not None else None))
 
     @p.app.post('/admin/assistent-artikel/quelle/<int:source_id>/wiederholen')
     @p.admin_required

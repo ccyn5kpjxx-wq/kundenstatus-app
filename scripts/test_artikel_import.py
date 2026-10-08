@@ -108,6 +108,17 @@ class CatalogTests(unittest.TestCase):
         self.update("UPDATE assistent_rechnungsimporte SET state='offen'")
         self.assertEqual(self.process(extracted(candidate()))['vorschlaege'], 1)
 
+    def test_process_specific_import_never_reads_another_open_source(self):
+        sources = inventory()
+        sources['einkaufsbelege'].append({'id': 2, 'lieferant': 'Other Supplier', 'original_name': 'second.pdf'})
+        prepare_catalog(self.catalog, sources)
+        target = next(row['id'] for row in self.catalog.status()['quellen'] if row['reference'] == 'second.pdf')
+        with patch('werkstatt_artikel_import.read_source', return_value=extracted(candidate())) as read:
+            self.catalog.process_next(source_id=target)
+            read.assert_called_once_with(self.portal, 'einkauf', '2')
+        states = {row['source_id']: row['state'] for row in self.catalog.rows('SELECT source_id,state FROM assistent_rechnungsimporte')}
+        self.assertEqual(states, {'1': 'offen', '2': 'ausgelesen'})
+
     def test_quarantine_cannot_be_reopened_by_prepare_or_retried_and_never_calls_reader(self):
         self.update("UPDATE einkauf_belege SET beleg_typ='gesperrt' WHERE id=1")
         with patch('werkstatt_artikel_import.read_source') as reader:
@@ -714,6 +725,44 @@ class CatalogUploadAndApprovalTests(unittest.TestCase):
             state['admin'] = True
         self.assertEqual(self.client.post(path, data={'csrf_token': 'synthetic-csrf'}).status_code, 302)
         self.assertEqual(self.catalog.status()['quellen'][0]['state'], 'offen')
+
+    def test_targeted_next_validates_source_and_requires_admin_csrf(self):
+        path = '/admin/assistent-artikel/weiter'
+        with patch.object(self.catalog, 'process_next', return_value={}) as process:
+            self.assertEqual(self.client.post(path, data={'source_id': '1'}).status_code, 400)
+            with self.client.session_transaction() as state:
+                state['admin'] = False
+            self.assertEqual(self.client.post(path, data={'csrf_token': 'synthetic-csrf', 'source_id': '1'}).status_code, 302)
+            process.assert_not_called()
+            with self.client.session_transaction() as state:
+                state['admin'] = True
+            for bad in ('0', '-1', 'invalid'):
+                self.assertEqual(self.client.post(path, data={'csrf_token': 'synthetic-csrf', 'source_id': bad}).status_code, 400)
+            self.assertEqual(self.client.post(path, data={'csrf_token': 'synthetic-csrf', 'source_id': '1'}).status_code, 200)
+            process.assert_called_once_with(source_id=1)
+
+    def test_upload_hash_dedupes_original_already_saved_in_previous_request(self):
+        self.portal.UPLOAD_DIR = pathlib.Path(self.temp.name)
+        raw = b'%PDF-synthetic identical bytes'
+        (self.portal.UPLOAD_DIR / 'existing.pdf').write_bytes(raw)
+        db = self.portal.get_db()
+        try:
+            for column in ('lieferant', 'original_name', 'stored_name'):
+                db.execute('ALTER TABLE einkauf_belege ADD COLUMN ' + column + ' TEXT')
+            db.execute("UPDATE einkauf_belege SET lieferant='Top-Color GmbH',original_name='existing.pdf',stored_name='existing.pdf' WHERE id=1")
+            db.commit()
+        finally:
+            db.close()
+        self.assertEqual(self.upload('Top-Color GmbH').status_code, 302)
+        self.portal.save_einkauf_beleg_upload.assert_not_called()
+        # A stored path outside the upload directory is never opened/hash-used.
+        db = self.portal.get_db()
+        try:
+            db.execute("UPDATE einkauf_belege SET stored_name='../outside.pdf'")
+            db.commit()
+        finally:
+            db.close()
+        self.assertEqual(self.catalog.existing_original_hashes('Top-Color GmbH'), {})
 
 
 if __name__ == '__main__':

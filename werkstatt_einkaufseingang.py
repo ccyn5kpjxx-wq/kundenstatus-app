@@ -527,8 +527,8 @@ class MaterialIntake:
             if not identity['sku'] or not identity['unit'] or _catalog_identity(row) != identity:
                 continue
             price = parse_unit_price(row.get('historischer_preishinweis'))
-            if price is None or price > Decimal('10000000'):
-                continue
+            if price is not None and price > Decimal('10000000'):
+                price = None
             source = row.get('quelle') or {}
             raw_date = source.get('datum')
             try:
@@ -537,10 +537,10 @@ class MaterialIntake:
                 date = None
             evidence = _price_evidence(row.get('price_evidence'))
             matches.append({'proposal_id': _id(row.get('vorschlag_id')), 'identity': identity,
-                            'amount': format(price, 'f'), 'date': date, 'source': source,
-                            'evidence': evidence, 'currency': 'unknown', 'unit': line['unit'], 'pack': line['pack'],
-                            'tax_basis': 'net' if evidence['basis'] == 'gebindepreis_netto_abgeleitet' else 'unknown',
-                            'tax_rate': None, 'verified': False, 'label': 'Historischer Preishinweis – Auslese ungeprüft.'})
+                            'amount': format(price, 'f') if price is not None else None, 'date': date, 'source': source,
+                            'evidence': evidence, 'currency': evidence.get('currency') or 'unknown', 'unit': line['unit'], 'pack': line['pack'],
+                            'tax_basis': evidence.get('tax_basis') or ('net' if evidence['basis'] == 'gebindepreis_netto_abgeleitet' else 'unknown'),
+                            'tax_rate': evidence.get('tax_rate'), 'verified': False, 'label': 'Historischer Preishinweis – Auslese ungeprüft.'})
         matches.sort(key=lambda row: (row['date'] or '', row['proposal_id']), reverse=True)
         warnings = ['Historische Auslese ist keine heutige Lieferantenpreisfreigabe.']
         suggested = matches[0]['proposal_id'] if matches and matches[0]['date'] else None
@@ -549,6 +549,9 @@ class MaterialIntake:
             suggested = None
         if suggested:
             latest = [row for row in matches if row['date'] == matches[0]['date']]
+            if any(row['amount'] is None for row in latest):
+                suggested = None
+                warnings.append('Am jüngsten Rechnungsdatum ist ein Preis ungeklärt; kein älterer Preis wird vorgeschlagen.')
             if len({_json({key: row[key] for key in ('amount', 'tax_basis', 'evidence')}) for row in latest}) > 1:
                 suggested = None
                 warnings.append('Am jüngsten Belegdatum stehen unterschiedliche Preisangaben; Quelle prüfen.')
@@ -584,6 +587,8 @@ class MaterialIntake:
         selected = next((row for row in candidates['matches'] if row['proposal_id'] == proposed_id), None)
         if not selected:
             raise ValueError('Diese aktuelle Rechnungsquelle passt nicht exakt zu Lieferant, Artikel, Variante und Einheit.')
+        if selected['amount'] is None:
+            raise ValueError('Diese historische Preisquelle ist ungeklärt. Zuerst am Original prüfen.')
         record = dict(selected, role='plan', source_type='catalog',
                       warnings=candidates['warnings'], latest_by_date=candidates['suggested_id'] == proposed_id,
                       discount_basis=selected['evidence'].get('calculation') or 'unknown')

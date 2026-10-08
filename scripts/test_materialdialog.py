@@ -42,6 +42,84 @@ class Orders:
 
 
 class DialogTests(unittest.TestCase):
+    def test_later_employee_reply_updates_admin_corrected_quantity_and_unit_without_losing_originals(self):
+        view=self.admin_edit(self.photo())
+        proof=view['fields']['quantity']['proof']
+        self.assertEqual(proof['source_at'],view['fields']['admin_correction']['value']['at'])
+        self.assertEqual(self.answer(view,'3 Stück')['state'],'applied')
+        updated=self.s.status(view['id'])
+        self.assertEqual(updated['fields']['quantity']['value'],'3')
+        self.assertEqual(updated['fields']['unit']['value'],'Stück')
+        self.assertEqual(updated['fields']['quantity']['proof']['kind'],'text')
+        self.assertEqual(updated['fields']['admin_original_fields']['value']['quantity']['value'],'1')
+        self.assertEqual(updated['review'],{})
+        self.assertEqual(self.p.workshop_orders.calls,[])
+        # Old persisted admin proofs also remain readable; an earlier queued
+        # employee reply must not overwrite the newer administrative correction.
+        fields=copy.deepcopy(view['fields'])
+        fields['quantity']['proof'].pop('source_at')
+        self.s._merge(fields,{'quantity':'9'},{'kind':'text','employee_id':1,'source_at':'2026-01-01T00:00:00+00:00'})
+        self.assertEqual(fields['quantity']['value'],'2')
+
+    def admin_edit(self,view,**changes):
+        self.f.sql('CREATE TABLE IF NOT EXISTS assistent_audit(id INTEGER PRIMARY KEY,actor TEXT,auftrag_id INTEGER,aktion TEXT,details TEXT,zeit TEXT)')
+        payload=dict(product_name='Test-Klebeband',article_number='TEST-50',variant='grün 50 mm',quantity='2',unit='Karton',reason='Menge am Original intern korrigiert')
+        payload.update(changes)
+        return self.s.edit_request(view['id'],view['revision'],payload)
+
+    def test_admin_edit_retains_originals_invalidates_prices_and_never_sends(self):
+        original=self.review(self.photo())
+        changed=self.admin_edit(original,product_name='Spachtel',article_number='',variant='',quantity='3',unit='Stück')
+        self.assertEqual(changed['revision'],original['revision']+1)
+        self.assertEqual(changed['review'],{})
+        self.assertEqual(changed['fields']['quantity']['value'],'3')
+        self.assertEqual(changed['fields']['quantity']['proof']['kind'],'admin_correction')
+        self.assertNotIn('employee_id',changed['fields']['quantity']['proof'])
+        self.assertEqual(changed['fields']['admin_original_fields']['value']['quantity'],original['fields']['quantity'])
+        self.assertEqual(changed['fields']['manual_article']['value']['product_name'],'Spachtel')
+        self.assertEqual(self.p.workshop_orders.calls,[])
+        self.assertFalse(any(q['state']=='queued' for q in changed['questions']))
+        with self.s.db() as db:
+            audit=json.loads(db.execute("SELECT details FROM assistent_audit WHERE aktion='material_admin_bearbeitet'").fetchone()['details'])
+        self.assertEqual(audit['before']['quantity']['value'],'1')
+        self.assertEqual(audit['after']['quantity']['value'],'3')
+
+    def test_audited_admin_quantity_can_be_reviewed_but_forged_proof_cannot_dispatch(self):
+        changed=self.review(self.admin_edit(self.photo()))
+        self.assertEqual(changed['state'],'approved')
+        self.assertEqual(self.s.approved_order(changed['id'],changed['revision'])['payload']['quantity'],'2')
+        fields=copy.deepcopy(changed['fields'])
+        fields['quantity']['proof']['correction_id']='forged'
+        self.f.sql('UPDATE einkauf_material_dialoge SET fields_json=? WHERE id=?',(json.dumps(fields),changed['id']))
+        with self.assertRaises(PermissionError):self.s.approved_order(changed['id'],changed['revision'])
+
+    def test_admin_edit_rejects_stale_invalid_and_already_enqueued(self):
+        view=self.photo()
+        for quantity in ('-1','0','1e2','NaN','1.000.000'):
+            with self.subTest(quantity=quantity),self.assertRaises(ValueError):self.admin_edit(view,quantity=quantity)
+        changed=self.admin_edit(view)
+        with self.assertRaises(ValueError):self.admin_edit(view)
+        self.f.sql('INSERT INTO assistent_bestellanforderungen VALUES(?,?,?)',('durable','mitarbeiter:1','material:'+str(view['id'])))
+        with self.assertRaises(ValueError):self.admin_edit(changed)
+        with self.assertRaises(PermissionError):self.s.edit_request(view['id'],changed['revision'],{},actor='mitarbeiter:1')
+
+    def test_bulk_remove_is_atomic_reversible_and_stale_or_bound_requests_are_locked(self):
+        first=self.admin_edit(self.photo())
+        second=self.photo(new=True)
+        self.f.sql('INSERT INTO assistent_bestellanforderungen VALUES(?,?,?)',('durable','mitarbeiter:1','material:'+str(second['id'])))
+        with self.assertRaises(ValueError):self.s.remove_requests([(first['id'],first['revision']),(second['id'],second['revision'])],'Doppelt')
+        self.assertNotEqual(self.s.status(first['id'])['state'],'cancelled')
+        self.assertEqual(self.s.remove_requests([(first['id'],first['revision'])],'Nicht mehr benötigt'),1)
+        removed=self.s.status(first['id'])
+        self.assertEqual(removed['state'],'cancelled')
+        with self.assertRaises(ValueError):self.s.restore_request(first['id'],first['revision'],'Wieder benötigt')
+        restored=self.s.restore_request(first['id'],removed['revision'],'Wieder benötigt')
+        self.assertNotEqual(restored['state'],'cancelled')
+        self.assertEqual(restored['review'],{})
+        self.assertTrue(restored['fields']['admin_requires_review']['value'])
+        self.assertEqual(restored['fields']['quantity']['value'],'2')
+        self.assertEqual(self.p.workshop_orders.calls,[])
+
     def setUp(self):
         self.f=fixtures.MaterialChannelTests('runTest');self.f.setUp()
         self.addCleanup(self.f.tearDown)

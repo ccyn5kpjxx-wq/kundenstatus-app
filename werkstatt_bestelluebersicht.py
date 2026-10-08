@@ -178,6 +178,10 @@ class OrderOverview:
                 urlencode({'material':material_id}) + '#materialdialog') if material_id is not None else '',
             'actual_price': 'nicht belegt', 'actual_price_known': False,
             '_sort_created': row.get('created_at',0),
+            '_archive_sent_at': _object(row.get('result_json')).get('sent_at'),
+            '_archive_run_at': row.get('due_at'), 'editable':False, 'restorable':False,
+            'historical_identity':{'supplier':_text(saved.get('supplier_name')) if not draft else '',
+                'article_number':_text(intent.get('article_number'),128),'unit':_text(intent.get('unit'),60),'packaging':''},
         }
 
     def _material_line(self, raw, people, contacts):
@@ -248,6 +252,11 @@ class OrderOverview:
             warnings.append('Mögliche Doppelbestellung. Die gezielte Rückfrage muss vor einer zusätzlichen Bestellung beantwortet werden.')
         photo_description = ' '.join(_text(labels.get(key)) for key in ('materialtyp','masse')).strip()
         product = _text(commercial.get('product_name') or manual.get('product_name')) or (description if inquiry else '') or _text(labels.get('produkt')) or description or photo_description or 'Artikel noch zuordnen'
+        selected_article = fields.get('selected_article',{}).get('value',{}) if not manual else {}
+        historical_identity = {'supplier':supplier or _text(selected_article.get('lieferant')),
+            'article_number':_text(commercial.get('article_number') or manual.get('article_number') or selected_article.get('artikelnummer'),128),
+            'unit':_text(snapshot.get('unit') if intact else value('unit'),60),
+            'packaging':_text(selected_article.get('gebinde'))}
         created = row['created_at']
         events = []
         if intact:
@@ -274,7 +283,66 @@ class OrderOverview:
             'send_evidence':_text(snapshot.get('send_evidence'),1000) if state=='external_sent' else '',
             'events':events,'siblings':[],'sibling_count':0,'batch_cap':'nicht belegt',
             'detail_url':'/admin/assistent-bestellungen/eingang/ansicht?' + urlencode({'material':row['id']}) + '#materialdialog',
-            '_sort_created':created,'_urgent':urgent}
+            '_sort_created':created,'_urgent':urgent,'revision':row.get('revision',1),
+            'editable':row['state'] in {'open','review','approved'},
+            'restorable':row['state']=='cancelled' and bool(fields.get('admin_removal')),
+            '_archive_sent_at':snapshot.get('sent_at') if state=='external_sent' else None,
+            '_archive_run_at':None,'historical_identity':historical_identity}
+
+    @staticmethod
+    def _archive_key(line):
+        sent = line.get('_archive_sent_at')
+        try:
+            parsed = datetime.fromisoformat(sent) if isinstance(sent,str) else None
+            if parsed is not None and parsed.tzinfo is not None and parsed.utcoffset() is not None:
+                return 'sent:'+parsed.astimezone(BERLIN).date().isoformat()
+        except ValueError:
+            pass
+        run = line.get('_archive_run_at')
+        if isinstance(run,(int,float)) and not isinstance(run,bool):
+            try:
+                return 'run:'+datetime.fromtimestamp(run,timezone.utc).astimezone(BERLIN).date().isoformat()
+            except (ValueError,OverflowError,OSError):
+                pass
+        return 'unknown'
+
+    def _sections(self, db, base, where, params, order_line, material_lines, query):
+        """Independent pages keep open work and every dated archive reachable."""
+        archived = {'sent','copy_pending','external_sent'}
+        rows = db.execute(f'SELECT * FROM ({base}) entries{where} ORDER BY created_at DESC,id DESC',params).fetchall()
+        all_lines = [order_line(row) for row in rows]+material_lines
+        all_lines.sort(key=lambda line:(line['_sort_created'],str(line['id'])),reverse=True)
+        open_lines = [line for line in all_lines if line['state'] not in archived|{'cancelled'}]
+        removed = [line for line in all_lines if line['state']=='cancelled']
+        groups = {}
+        for line in all_lines:
+            if line['state'] in archived:
+                groups.setdefault(self._archive_key(line),[]).append(line)
+        keys = sorted(groups,key=lambda key:(key.split(':')[-1],key),reverse=True)
+        blocks_page = min(_number(query.get('archive_blocks_page')),max(1,(len(keys)+19)//20))
+        requested = _text(query.get('archive_day'),40)
+        requested_page = _number(query.get('archive_page'))
+        archive_groups = []
+        for key in keys[(blocks_page-1)*20:blocks_page*20]:
+            lines = groups[key]
+            pages = max(1,(len(lines)+self.PAGE_SIZE-1)//self.PAGE_SIZE)
+            page = min(requested_page,pages) if requested==key else 1
+            if key=='unknown':
+                label = 'Versand bestätigt – Datum nicht belegt'
+            else:
+                day = date.fromisoformat(key.split(':')[1]).strftime('%d.%m.%Y')
+                label = ('Bestellung am ' if key.startswith('sent:') else 'Bestelllauf am ')+day
+            archive_groups.append({'key':key,'label':label,'count':len(lines),'page':page,'pages':pages,
+                'legacy':not key.startswith('sent:'),'expanded':requested==key,
+                'items':lines[(page-1)*self.PAGE_SIZE:page*self.PAGE_SIZE]})
+        def paginated(lines,key):
+            pages = max(1,(len(lines)+self.PAGE_SIZE-1)//self.PAGE_SIZE)
+            page = min(_number(query.get(key)),pages)
+            return {'items':lines[(page-1)*self.PAGE_SIZE:page*self.PAGE_SIZE],'count':len(lines),'page':page,'pages':pages}
+        return {'open':paginated(open_lines,'open_page'),'removed':paginated(removed,'removed_page'),
+            'archive_groups':archive_groups,'archive_count':sum(len(items) for items in groups.values()),
+            'archive_blocks_count':len(keys),'archive_blocks_page':blocks_page,
+            'archive_blocks_pages':max(1,(len(keys)+19)//20)}
 
     @staticmethod
     def _material_matches(line, filters, dates):
@@ -378,6 +446,7 @@ class OrderOverview:
             rows = db.execute(f'SELECT * FROM ({base}) entries{where} ORDER BY created_at DESC,id DESC LIMIT ?', (*params,page*self.PAGE_SIZE)).fetchall()
             lines = sorted([order_line(row) for row in rows]+filtered_material,
                            key=lambda line:(line['_sort_created'],str(line['id'])),reverse=True)[(page-1)*self.PAGE_SIZE:page*self.PAGE_SIZE]
+            sections = self._sections(db,base,where,params,order_line,filtered_material,query)
             draft_base = """SELECT a.*,CASE WHEN SUBSTR(a.erstellt_am,3,1)='.' AND SUBSTR(a.erstellt_am,6,1)='.'
                 THEN SUBSTR(a.erstellt_am,7,4)||'-'||SUBSTR(a.erstellt_am,4,2)||'-'||SUBSTR(a.erstellt_am,1,2)||' '||SUBSTR(a.erstellt_am,12)
                 ELSE REPLACE(a.erstellt_am,'T',' ') END AS sort_created,
@@ -434,13 +503,21 @@ class OrderOverview:
                             selected['batch_created'] = _stamp(batch['created_at'])
                 elif selected is None:
                     errors.append('Die ausgewählte Bestellung ist nicht vorhanden oder wurde noch nicht an den Versand übergeben.')
+            if selected and selected.get('material_id') and available['assistent_audit']:
+                labels = {'material_admin_bearbeitet':'Anforderung durch Werkstattleitung bearbeitet',
+                    'material_admin_entfernt':'Anforderung entfernt','material_admin_wiederhergestellt':'Anforderung wiederhergestellt'}
+                for event in db.execute("SELECT aktion,details,zeit FROM assistent_audit WHERE actor='admin' AND aktion IN (?,?,?) ORDER BY id",tuple(labels)).fetchall():
+                    detail = _object(event['details'])
+                    if detail.get('draft_id')==selected['material_id']:
+                        selected.setdefault('events',[]).append({'label':labels[event['aktion']]+': '+_text(detail.get('reason'),300),
+                                                                'time':_stamp(event['zeit'])})
             return {'filters': filters, 'errors': errors, 'items': lines, 'count': count, 'page': page,
                     'pages': max(1, (count+self.PAGE_SIZE-1)//self.PAGE_SIZE), 'counts': counts,
                     'drafts': drafts, 'draft_count': draft_count, 'draft_page': draft_page,
                     'draft_pages': max(1, (draft_count+self.PAGE_SIZE-1)//self.PAGE_SIZE), 'selected': selected,
                     'people': [{'id': actor, 'name': self._person(actor, people)} for actor in sorted(actors)],
                     'suppliers': sorted(contacts.values(), key=lambda row: row['name'].casefold()), 'states': STATES,
-                    'stand': _stamp(now.isoformat())}
+                    'stand': _stamp(now.isoformat()),**sections}
         finally:
             db.close()
 
