@@ -93,6 +93,7 @@ from flask import (
     url_for,
 )
 from werkzeug.utils import secure_filename
+from werkzeug.exceptions import ServiceUnavailable
 
 
 def clean_text(value):
@@ -2840,25 +2841,36 @@ def dat_api_status_meta():
 
 @app.context_processor
 def inject_csrf_helpers():
+    # Base-Navigation und Cockpit zeigen dieselben Badges. Ein Render darf
+    # sie nur einmal abfragen; der naechste Render bekommt frische Werte.
+    counts = {}
+
+    def once(function):
+        def count():
+            if function not in counts:
+                counts[function] = function()
+            return counts[function]
+        return count
+
     return {
         "csrf_token": get_csrf_token,
         "csrf_field": csrf_field,
-        "admin_postfach_count": admin_postfach_count,
-        "admin_leads_count": admin_leads_count,
-        "admin_bewerbungen_count": admin_bewerbungen_count,
-        "fahrzeugsuche_count": fahrzeugsuche_count,
-        "fahrzeugsuche_auktion_alert_count": fahrzeugsuche_auktion_alert_count,
-        "fahrzeugverkauf_count": fahrzeugverkauf_count,
-        "fahrzeugeinkauf_count": fahrzeugeinkauf_count,
-        "mietwagen_anfragen_count": mietwagen_anfragen_count,
-        "admin_versicherung_count": admin_versicherung_count,
-        "admin_einkauf_count": admin_einkauf_count,
-        "admin_rechnungen_count": admin_rechnungen_count,
-        "admin_email_count": admin_email_count,
-        "admin_mitarbeiter_urlaub_count": admin_mitarbeiter_urlaub_count,
-        "mahnungen_faellig_count": mahnungen_faellig_anzahl,
-        "aufgaben_offen_heute_count": aufgaben_offen_heute_anzahl,
-        "mietfahrzeuge_unterwegs_count": mietfahrzeuge_unterwegs_anzahl,
+        "admin_postfach_count": once(admin_postfach_count),
+        "admin_leads_count": once(admin_leads_count),
+        "admin_bewerbungen_count": once(admin_bewerbungen_count),
+        "fahrzeugsuche_count": once(fahrzeugsuche_count),
+        "fahrzeugsuche_auktion_alert_count": once(fahrzeugsuche_auktion_alert_count),
+        "fahrzeugverkauf_count": once(fahrzeugverkauf_count),
+        "fahrzeugeinkauf_count": once(fahrzeugeinkauf_count),
+        "mietwagen_anfragen_count": once(mietwagen_anfragen_count),
+        "admin_versicherung_count": once(admin_versicherung_count),
+        "admin_einkauf_count": once(admin_einkauf_count),
+        "admin_rechnungen_count": once(admin_rechnungen_count),
+        "admin_email_count": once(admin_email_count),
+        "admin_mitarbeiter_urlaub_count": once(admin_mitarbeiter_urlaub_count),
+        "mahnungen_faellig_count": once(mahnungen_faellig_anzahl),
+        "aufgaben_offen_heute_count": once(aufgaben_offen_heute_anzahl),
+        "mietfahrzeuge_unterwegs_count": once(mietfahrzeuge_unterwegs_anzahl),
         "analysis_loading_news": analysis_loading_news,
         "gt_motive_configured": bool(GT_MOTIVE_API_KEY or GT_MOTIVE_CLIENT_ID),
         "dat_api_status": dat_api_status_meta,
@@ -7998,10 +8010,10 @@ def get_db():
         if has_request_context():
             db = getattr(g, "db_connection", None)
             if db is None:
-                db = PostgresConnection(psycopg.connect(DATABASE_URL), close_on_close=False)
+                db = PostgresConnection(psycopg.connect(DATABASE_URL, connect_timeout=5), close_on_close=False)
                 g.db_connection = db
             return db
-        return PostgresConnection(psycopg.connect(DATABASE_URL))
+        return PostgresConnection(psycopg.connect(DATABASE_URL, connect_timeout=5))
     conn = sqlite3.connect(DB, timeout=SQLITE_BUSY_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
     configure_sqlite_connection(conn)
@@ -8018,7 +8030,7 @@ def open_fresh_db():
             raise RuntimeError(
                 "DATABASE_URL ist gesetzt, aber psycopg ist nicht installiert."
             )
-        return PostgresConnection(psycopg.connect(DATABASE_URL))
+        return PostgresConnection(psycopg.connect(DATABASE_URL, connect_timeout=5))
     conn = sqlite3.connect(DB, timeout=SQLITE_BUSY_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
     configure_sqlite_connection(conn)
@@ -8368,6 +8380,7 @@ _portal_file_export_lock = threading.Lock()
 _portal_originals_thread_lock = threading.RLock()
 _portal_originals_lock_state = threading.local()
 PORTAL_ORIGINALS_ADVISORY_LOCK_KEY = 6572746_20261003
+PORTAL_ORIGINALS_REQUEST_WAIT_SECONDS = 2.0
 PORTAL_ORIGINALS_FILE_LOCK = (
     pathlib.Path(tempfile.gettempdir()) / "gaertner-portal-originals-v1.lock"
 )
@@ -8574,6 +8587,31 @@ def database_only_backup_coverage(summary, includes_database_snapshot):
     }
 
 
+def _originals_busy():
+    return ServiceUnavailable(
+        description="Ein anderer Vorgang verarbeitet gerade Dateien. Bitte in wenigen Sekunden erneut versuchen.",
+        retry_after=2,
+    )
+
+
+@contextmanager
+def _portal_originals_thread_guard():
+    # Background imports may finish normally; HTTP threads must remain usable
+    # while an import, analysis or mail delivery owns the shared originals lock.
+    if has_request_context():
+        acquired = _portal_originals_thread_lock.acquire(
+            timeout=PORTAL_ORIGINALS_REQUEST_WAIT_SECONDS
+        )
+        if not acquired:
+            raise _originals_busy()
+    else:
+        _portal_originals_thread_lock.acquire()
+    try:
+        yield
+    finally:
+        _portal_originals_thread_lock.release()
+
+
 @contextmanager
 def portal_originals_operation_lock():
     """Serialize destructive imports with the verified Render cleanup.
@@ -8583,7 +8621,7 @@ def portal_originals_operation_lock():
     depth makes the lock safely re-entrant when a guarded route calls a guarded
     importer in the same request.
     """
-    with _portal_originals_thread_lock:
+    with _portal_originals_thread_guard():
         depth = int(getattr(_portal_originals_lock_state, "depth", 0) or 0)
         if depth:
             _portal_originals_lock_state.depth = depth + 1
@@ -8595,13 +8633,28 @@ def portal_originals_operation_lock():
 
         lock_connection = None
         lock_handle = None
+        acquired = False
+        deadline = time.monotonic() + PORTAL_ORIGINALS_REQUEST_WAIT_SECONDS
         try:
             if USE_POSTGRES:
                 lock_connection = open_fresh_db()
-                lock_connection.execute(
-                    "SELECT pg_advisory_lock(?)",
-                    (PORTAL_ORIGINALS_ADVISORY_LOCK_KEY,),
-                ).fetchone()
+                if has_request_context():
+                    while True:
+                        row = lock_connection.execute(
+                            "SELECT pg_try_advisory_lock(?)",
+                            (PORTAL_ORIGINALS_ADVISORY_LOCK_KEY,),
+                        ).fetchone()
+                        if row[0]:
+                            break
+                        if time.monotonic() >= deadline:
+                            raise _originals_busy()
+                        time.sleep(0.05)
+                else:
+                    lock_connection.execute(
+                        "SELECT pg_advisory_lock(?)",
+                        (PORTAL_ORIGINALS_ADVISORY_LOCK_KEY,),
+                    ).fetchone()
+                acquired = True
             else:
                 flags = os.O_RDWR | os.O_CREAT
                 if hasattr(os, "O_BINARY"):
@@ -8610,40 +8663,50 @@ def portal_originals_operation_lock():
                     flags |= os.O_NOFOLLOW
                 fd = os.open(str(PORTAL_ORIGINALS_FILE_LOCK), flags, 0o600)
                 lock_handle = os.fdopen(fd, "r+b", buffering=0)
-                if os.name == "nt":
-                    import msvcrt
-
-                    if lock_handle.seek(0, os.SEEK_END) == 0:
-                        lock_handle.write(b"0")
-                    lock_handle.seek(0)
-                    msvcrt.locking(lock_handle.fileno(), msvcrt.LK_LOCK, 1)
-                else:
-                    import fcntl
-
-                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+                while True:
+                    try:
+                        if os.name == "nt":
+                            import msvcrt
+                            if lock_handle.seek(0, os.SEEK_END) == 0:
+                                lock_handle.write(b"0")
+                            lock_handle.seek(0)
+                            mode = msvcrt.LK_NBLCK if has_request_context() else msvcrt.LK_LOCK
+                            msvcrt.locking(lock_handle.fileno(), mode, 1)
+                        else:
+                            import fcntl
+                            mode = fcntl.LOCK_EX | (fcntl.LOCK_NB if has_request_context() else 0)
+                            fcntl.flock(lock_handle.fileno(), mode)
+                        acquired = True
+                        break
+                    except OSError as exc:
+                        if not has_request_context() or exc.errno not in (11, 13, 35):
+                            raise
+                        if time.monotonic() >= deadline:
+                            raise _originals_busy() from None
+                        time.sleep(0.05)
             _portal_originals_lock_state.depth = 1
             yield
         finally:
             _portal_originals_lock_state.depth = 0
             if lock_connection is not None:
                 try:
-                    lock_connection.execute(
-                        "SELECT pg_advisory_unlock(?)",
-                        (PORTAL_ORIGINALS_ADVISORY_LOCK_KEY,),
-                    ).fetchone()
+                    if acquired:
+                        lock_connection.execute(
+                            "SELECT pg_advisory_unlock(?)",
+                            (PORTAL_ORIGINALS_ADVISORY_LOCK_KEY,),
+                        ).fetchone()
                 finally:
                     lock_connection.close()
             if lock_handle is not None:
                 try:
-                    lock_handle.seek(0)
-                    if os.name == "nt":
-                        import msvcrt
-
-                        msvcrt.locking(lock_handle.fileno(), msvcrt.LK_UNLCK, 1)
-                    else:
-                        import fcntl
-
-                        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                    if acquired:
+                        lock_handle.seek(0)
+                        if os.name == "nt":
+                            import msvcrt
+                            msvcrt.locking(lock_handle.fileno(), msvcrt.LK_UNLCK, 1)
+                        else:
+                            import fcntl
+                            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
                 finally:
                     lock_handle.close()
 
@@ -36290,13 +36353,15 @@ def create_erinnerung(text):
 
 def mark_erinnerung_erledigt(erinnerung_id):
     db = get_db()
-    db.execute(
-        "UPDATE erinnerungen SET status='erledigt', erledigt_am=? WHERE id=?",
-        (now_str(), int(erinnerung_id)),
-    )
-    db.commit()
-    changed = db.total_changes
-    db.close()
+    try:
+        cursor = db.execute(
+            "UPDATE erinnerungen SET status='erledigt', erledigt_am=? WHERE id=?",
+            (now_str(), int(erinnerung_id)),
+        )
+        changed = cursor.rowcount > 0
+        db.commit()
+    finally:
+        db.close()
     if changed:
         schedule_change_backup("erinnerung-erledigt")
     return bool(changed)
@@ -40414,13 +40479,26 @@ def save_mietfahrzeug_bilder(fahrzeug_id, files):
             # Base64-Netz: Bild überlebt Deploys/Disk-Resets (wird beim Abruf wiederhergestellt)
             try:
                 file_base64, _sha, _size = upload_backup_payload(target)
-                if file_base64:
+            except Exception as exc:
+                file_base64 = ""
+                app.logger.warning("Mietbild-Sicherung konnte nicht gelesen werden (%s)", type(exc).__name__)
+            if file_base64:
+                # Eine optionale Sicherung darf die Metadaten-Transaktion auf
+                # PostgreSQL bei einem Fehler nicht in den Abbruchzustand setzen.
+                db.execute("SAVEPOINT mietbild_backup")
+                try:
                     db.execute(
-                        "INSERT OR REPLACE INTO mietbild_backups (bild_id, file_base64, erstellt_am) VALUES (?, ?, ?)",
+                        """INSERT INTO mietbild_backups (bild_id, file_base64, erstellt_am)
+                        VALUES (?, ?, ?) ON CONFLICT(bild_id) DO UPDATE SET
+                        file_base64=excluded.file_base64, erstellt_am=excluded.erstellt_am
+                        RETURNING bild_id""",
                         (cur.lastrowid, file_base64, now_str()),
                     )
-            except Exception:
-                pass
+                except Exception as exc:
+                    db.execute("ROLLBACK TO SAVEPOINT mietbild_backup")
+                    app.logger.warning("Mietbild-Sicherung fehlgeschlagen (%s)", type(exc).__name__)
+                finally:
+                    db.execute("RELEASE SAVEPOINT mietbild_backup")
             gespeichert += 1
         db.commit()
         return gespeichert
