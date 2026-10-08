@@ -10,7 +10,6 @@ approval. Include assistent_materialfotos in private backup/restore.
 import base64
 from contextlib import contextmanager
 import hashlib
-import io
 import json
 import os
 import re
@@ -20,8 +19,8 @@ import threading
 from decimal import Decimal
 
 import requests
-from PIL import Image, ImageOps, UnidentifiedImageError
 from werkstatt_materialwissen import _measurements, _colors
+from werkstatt_fotoauslese import read_photo
 
 
 MAX_BYTES = 8 * 1024 * 1024
@@ -84,43 +83,21 @@ def _code_view(value, digest=None):
     return {'status': state, 'codes': codes, 'hinweis': _CODE_HINTS[state]}
 
 
-def _decode_codes(raw, digest):
-    """Decode actual upload pixels locally; no URL/network/model or action call."""
+def _decode_codes(raw, digest, *, decoded=None):
+    """Revalidate bounded original-pixel hints; never trust a client identifier."""
     evidence = {'version': 1, 'file_sha256': digest, 'status': 'kein_code', 'codes': []}
     try:
-        import cv2
-        import numpy as np
-        # Stage already validates format/size. Read the original before the
-        # metadata-free vision JPEG is made; EXIF orientation also applies here.
-        with Image.open(io.BytesIO(raw)) as image:
-            image = ImageOps.exif_transpose(image).convert('RGB')
-            image.thumbnail((2560, 2560))
-            pixels = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
-        detector = cv2.QRCodeDetector()
-        decoded = []
-        incomplete_multi = False
-        okay, values, regions, _ = detector.detectAndDecodeMulti(pixels)
-        incomplete_multi = regions is not None and len(regions) > 1 and len(regions) > len(values)
-        if okay:
-            incomplete_multi |= len(values) > 8 or len(values) > 1 and any(not value for value in values)
-            decoded.extend(('qr_code', value) for value in values[:8] if value)
-        if not decoded:
-            value, _, _ = detector.detectAndDecode(pixels)
-            if value:
-                decoded.append(('qr_code', value))
-        # OpenCV's barcode module is optional and handles supported EAN/UPC.
-        # QR succeeds independently when that optional decoder is unavailable.
-        try:
-            barcode = cv2.barcode_BarcodeDetector()
-            okay, values, formats, _ = barcode.detectAndDecodeWithType(pixels)
-            if okay:
-                incomplete_multi |= len(values) > 8 or len(values) > 1 and any(not value for value in values)
-                aliases = {'EAN_8': 'ean_8', 'EAN_13': 'ean_13', 'UPC_A': 'upc_a', 'UPC_E': 'upc_e'}
-                decoded.extend((aliases[kind], value) for value, kind in zip(values[:8], formats[:8]) if kind in aliases)
-        except (AttributeError, cv2.error):
-            pass
+        if decoded is None:
+            _, decoded = read_photo(raw, codes_only=True)
+        if not isinstance(decoded, dict) or decoded.get('available') is not True:
+            evidence['status'] = 'nicht_verfuegbar'
+            return evidence
+        incomplete_multi = decoded.get('incomplete') is True
+        decoded = decoded.get('decoded', [])[:16]
         seen = set()
         for kind, value in decoded:
+            if kind not in _CODE_FORMATS:
+                continue
             code = _search_code(value)
             if kind != 'qr_code' and not _labels({'art': 'produkt', 'barcode': code})['barcode']:
                 code = ''
@@ -201,21 +178,10 @@ def _labels(value):
     return result
 
 
-def _image(raw):
-    """Validate actual image bytes, remove metadata and bound vision payload."""
-    try:
-        with Image.open(io.BytesIO(raw)) as image:
-            if image.format not in ('JPEG', 'PNG', 'WEBP') or image.width * image.height > 20_000_000 or getattr(image, 'n_frames', 1) != 1:
-                raise ValueError('Bitte ein einzelnes JPEG-, PNG- oder WebP-Foto wählen (höchstens 20 Megapixel).')
-            image.verify()
-        with Image.open(io.BytesIO(raw)) as image:
-            image = ImageOps.exif_transpose(image).convert('RGB')
-            image.thumbnail((2048, 2048))
-            buffer = io.BytesIO()
-            image.save(buffer, format='JPEG', quality=90)
-            return buffer.getvalue()
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-        raise ValueError('Kein gültiges Materialfoto. Bitte JPEG, PNG oder WebP auswählen.') from exc
+def _image(raw, *, with_codes=False):
+    """Validate/normalize in a bounded child; optionally scan the same original."""
+    clean, decoded = read_photo(raw, decode=with_codes)
+    return (clean, decoded) if with_codes else clean
 
 
 def _source(value):
@@ -295,9 +261,9 @@ class MaterialPhotoService:
         raw = file.read(MAX_BYTES + 1)
         if not raw or len(raw) > MAX_BYTES:
             raise ValueError('Foto leer oder größer als 8 MB.')
-        clean = _image(raw)
+        clean, decoded = _image(raw, with_codes=True)
         digest = hashlib.sha256(clean).hexdigest()
-        code = _code_view(_decode_codes(raw, digest), digest)
+        code = _code_view(_decode_codes(raw, digest, decoded=decoded), digest)
         result = dict(code_erkennung=code, decodedCode='', product='', matches=[],
                       lookup_status='no_code', partial=False, pruefen=True, bestellbar=False)
         if read_label:
@@ -382,9 +348,9 @@ class MaterialPhotoService:
         raw = file.read(MAX_BYTES + 1)
         if not raw or len(raw) > MAX_BYTES:
             raise ValueError('Foto leer oder größer als 8 MB.')
-        clean = _image(raw)
+        clean, decoded = _image(raw, with_codes=True)
         digest = hashlib.sha256(clean).hexdigest()
-        evidence = _decode_codes(raw, digest)
+        evidence = _decode_codes(raw, digest, decoded=decoded)
         with self.db() as db:
             cursor = db.execute('''INSERT INTO assistent_materialfotos
                 (foto_id,actor,request_id,file_sha256,file_base64,erstellt_am,merkmale_json)

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import unittest
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock, patch
 
@@ -16,6 +17,7 @@ import test_materialbestellung_portal as fixtures
 from test_materialfoto_codes import qr_image, png
 from werkstatt_materialbestellung import MAX_PREVIEW_BODY_BYTES
 from werkstatt_materialfoto import LabelPreviewBusy
+import werkstatt_fotoauslese as photo_reader
 from werkzeug.datastructures import FileStorage
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -127,6 +129,23 @@ class ProductPreviewTests(unittest.TestCase):
         self.assertEqual(self.preview(decodedCode='10035120').status_code, 400)
         self.assertEqual(self.preview(b'x' * (MAX_PREVIEW_BODY_BYTES + 1)).status_code, 413)
         self.lookup.assert_not_called()
+
+    def test_native_processing_busy_fails_fast_without_writes_or_lookup_and_recovers(self):
+        before = self.database()
+        self.assertTrue(photo_reader._PHOTO_SLOTS.acquire(blocking=False))
+        try:
+            started = time.perf_counter()
+            response = self.preview()
+            self.assertEqual(response.status_code, 400)
+            self.assertIn('belegt', response.json['error'])
+            self.assertLess(time.perf_counter() - started, 1)
+        finally:
+            photo_reader._PHOTO_SLOTS.release()
+        self.assertEqual(self.database(), before)
+        self.lookup.assert_not_called()
+        self.assertEqual(self.f.f.vision_calls, [])
+        self.assertEqual(self.f.p.workshop_orders.calls, [])
+        self.assertEqual(self.preview().status_code, 200)
 
     def test_personal_rate_limit_and_cache_size_are_bounded_without_writes(self):
         before = self.database()
