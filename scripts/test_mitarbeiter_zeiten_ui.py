@@ -241,10 +241,11 @@ class PersonalTimeUITests(unittest.TestCase):
         for known in (False, True):
             with self.subTest(known=known):
                 html = render('mitarbeiter_portal_admin.html', employee=dict(id=101, name='Synthetic Own'),
-                              profile={}, payrolls=[], arbeitsplan=plan(known))
+                              profile={}, payrolls=[], contracts=[], arbeitsplan=plan(known))
                 posts = [form for form in Forms(html).forms if form.get('method') == 'post']
                 self.assertEqual([form['action'] for form in posts], ['/admin/mitarbeiter/101/portal',
-                    '/admin/mitarbeiter/101/portal/arbeitsplan', '/admin/mitarbeiter/101/portal/lohnzettel'])
+                    '/admin/mitarbeiter/101/portal/arbeitsplan',
+                    '/admin/mitarbeiter/101/portal/arbeitsvertrag', '/admin/mitarbeiter/101/portal/lohnzettel'])
                 fields = posts[1]['inputs']
                 self.assertEqual({item['name'] for item in fields}, {'csrf_token','wochenstunden','tagesstunden',
                     'pausenminuten','beginn','arbeitstage'})

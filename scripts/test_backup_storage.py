@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import base64
+import copy
+from contextlib import closing, contextmanager
+import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import random
 import shutil
+import sqlite3
 import stat
 import sys
 import tempfile
@@ -233,6 +238,10 @@ class ApplicationBackupTests(unittest.TestCase):
             "UPLOAD_DIR": str(cls.root / "uploads"), "BACKUP_DIR": str(cls.root / "backups"),
             "DELETED_UPLOAD_DIR": str(cls.root / "deleted"), "AUTO_BACKUP_ENABLED": "0",
             "AUTO_CHANGE_BACKUP_ENABLED": "0", "GOOGLE_ADS_AUTO_SYNC_ENABLED": "0",
+            "LEXWARE_AUTO_SYNC_ENABLED": "0", "MAILBOX_SEND_ENABLED": "0",
+            "ASSISTANT_ORDER_SEND_ENABLED": "0", "ASSISTANT_ORDER_WORKER_ENABLED": "0",
+            "PURCHASE_MONITOR_WORKER_ENABLED": "0", "MATERIAL_WHATSAPP_ENABLED": "0",
+            "MATERIAL_WHATSAPP_WORKER_ENABLED": "0", "MATERIAL_WHATSAPP_REPLIES_ENABLED": "0",
             "LEXWARE_API_KEY": "", "OPENAI_API_KEY": "", "FLASK_SECRET_KEY": "isolated-test-secret",
             "ADMIN_PASS": "isolated-test-password", "PUBLIC_SITE_ONLY": "0",
         })
@@ -277,6 +286,197 @@ class ApplicationBackupTests(unittest.TestCase):
             self.assertTrue(self.portal.should_backup_after_request())
         with self.portal.app.test_request_context("/admin", method="GET"):
             self.assertFalse(self.portal.should_backup_after_request())
+
+    @contextmanager
+    def contract_database(self):
+        """Every restore gets its own synthetic DB, files, lock and archives."""
+        p = self.portal
+        with tempfile.TemporaryDirectory(prefix="contract-backup-") as directory:
+            root = Path(directory)
+            target = root / "contracts.db"
+            p.copy_sqlite_database_snapshot(p.DB, target)
+            values = dict(DB=target, DATA_DIR=root, UPLOAD_DIR=root / "uploads",
+                          BACKUP_DIR=root / "backups", DELETED_UPLOAD_DIR=root / "deleted",
+                          PORTAL_ORIGINALS_FILE_LOCK=root / "originals.lock",
+                          AUTO_BACKUP_MAX_BYTES=64 * 1024 * 1024,
+                          AUTO_BACKUP_RESERVE_BYTES=0, AUTO_BACKUP_KEEP=10)
+            with patch.multiple(p, **values):
+                p.UPLOAD_DIR.mkdir()
+                p.employee_portal_init_schema()
+                raw = b"%PDF-1.4\nsynthetic-private-contract-original\n%%EOF"
+                with closing(p.get_db()) as db, db:
+                    db.execute("INSERT INTO mitarbeiter(id,name,aktiv,erstellt_am,geaendert_am) "
+                               "VALUES(99997,'Synthetic Contract Owner',1,'synthetic','synthetic')")
+                    db.execute("INSERT INTO assistent_rechte "
+                               "(mitarbeiter_id,passwort_hash,lesen,dokumentieren,einkaufen,limit_cent,version,auth_version) "
+                               "VALUES(99997,'synthetic-hash',1,0,0,0,2,3)")
+                    cursor = db.execute("INSERT INTO mitarbeiter_arbeitsvertraege "
+                                        "(mitarbeiter_id,titel,filename,mime,size_bytes,sha256,original_base64,created_at,created_by) "
+                                        "VALUES(99997,?,?,?,?,?,?,?,?)",
+                                        ('Synthetic contract', 'contract.pdf', 'application/pdf', len(raw),
+                                         hashlib.sha256(raw).hexdigest(), base64.b64encode(raw).decode('ascii'),
+                                         '2026-10-08T12:00:00+00:00', 'admin'))
+                    contract_id = cursor.lastrowid
+                yield root, raw, contract_id
+
+    def contract_row(self, contract_id):
+        with closing(self.portal.get_db()) as db:
+            return dict(db.execute('SELECT * FROM mitarbeiter_arbeitsvertraege WHERE id=?',
+                                   (contract_id,)).fetchone())
+
+    def database_dump(self):
+        with closing(sqlite3.connect(self.portal.DB)) as db:
+            return tuple(db.iterdump())
+
+    def import_package(self, payload):
+        p = self.portal
+        client = p.app.test_client()
+        with client.session_transaction() as state:
+            state['admin'] = True
+            state[p.CSRF_FIELD_NAME] = 'contract-backup-csrf'
+        response = client.post('/admin/daten-import', data={
+            p.CSRF_FIELD_NAME: 'contract-backup-csrf',
+            'datenpaket': (io.BytesIO(payload), 'synthetic-contract-backup.zip')})
+        with client.session_transaction() as state:
+            messages = [message for _, message in state.get('_flashes', [])]
+        self.assertEqual(response.status_code, 302)
+        return messages
+
+    def legacy_contract_package(self, root, package):
+        """Real old SQLite snapshot, without the later contract schema/feature."""
+        p = self.portal
+        unpacked = root / 'legacy-extracted'
+        unpacked.mkdir()
+        with zipfile.ZipFile(package) as archive:
+            names, _ = p.validate_import_package_archive(archive)
+            source, _, export = p.extract_import_package_files(archive, names, unpacked)
+        with closing(sqlite3.connect(source)) as db, db:
+            db.execute('DROP TABLE mitarbeiter_arbeitsvertraege')
+        export['tables'].pop('mitarbeiter_arbeitsvertraege')
+        export['schema_features'].remove('werkstatt_arbeitsvertraege_v1')
+        export['binary_blobs'] = [row for row in export['binary_blobs']
+                                  if row['table'] != 'mitarbeiter_arbeitsvertraege']
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, 'w', zipfile.ZIP_DEFLATED) as archive:
+            archive.write(source, 'auftraege.db')
+            archive.writestr('backup.json', json.dumps(export))
+            archive.writestr('manifest.json', json.dumps({
+                'format_version': p.BACKUP_FORMAT_VERSION,
+                'schema_features': export['schema_features'], 'binary_blob_count': 0,
+                'binary_blob_bytes': 0, 'upload_count': 0}))
+        return source, export, payload.getvalue()
+
+    def test_contract_original_externalized_once_and_both_row_imports_preserve_it(self):
+        p = self.portal
+        with self.contract_database() as (root, raw, contract_id):
+            before = self.contract_row(contract_id)
+            package = p.create_backup_package('synthetic-contract-roundtrip')
+            extracted = root / 'extracted'
+            extracted.mkdir()
+            with zipfile.ZipFile(package) as archive:
+                names, _ = p.validate_import_package_archive(archive)
+                export = json.loads(archive.read('backup.json'))
+                self.assertIn('werkstatt_arbeitsvertraege_v1', export['schema_features'])
+                self.assertEqual(export['tables']['mitarbeiter_arbeitsvertraege'][0]['original_base64'], '')
+                references = [row for row in export['binary_blobs'] if row['table'] == 'mitarbeiter_arbeitsvertraege']
+                self.assertEqual(len(references), 1)
+                self.assertEqual(archive.read(references[0]['zip_path']), raw)
+                self.assertNotIn(base64.b64encode(raw), archive.read('auftraege.db'))
+                self.assertNotIn(raw, archive.read('auftraege.db'))
+                source, _, _ = p.extract_import_package_files(archive, names, extracted)
+                with closing(sqlite3.connect(source)) as db:
+                    self.assertEqual(db.execute('SELECT original_base64 FROM mitarbeiter_arbeitsvertraege').fetchone()[0],
+                                     before['original_base64'])
+                p.import_backup_json_rows_into_current_database(export, archive, names)
+                self.assertEqual(self.contract_row(contract_id), before)
+                p.import_sqlite_rows_into_current_database(source)
+                self.assertEqual(self.contract_row(contract_id), before)
+
+    def test_contract_feature_and_binary_original_are_required_only_for_new_backups(self):
+        p = self.portal
+        with self.contract_database() as (root, raw, contract_id):
+            package = p.create_backup_package('synthetic-contract-manifest')
+            with zipfile.ZipFile(package) as archive:
+                export = json.loads(archive.read('backup.json'))
+                missing_table = copy.deepcopy(export)
+                missing_table['tables'].pop('mitarbeiter_arbeitsvertraege')
+                with self.assertRaisesRegex(ValueError, 'Tabellen fehlen'):
+                    p.validate_backup_binary_reference_completeness(missing_table, {})
+                no_original = copy.deepcopy(export)
+                no_original['binary_blobs'] = []
+                with self.assertRaisesRegex(ValueError, 'Originaldatei'):
+                    p.validate_backup_binary_reference_completeness(no_original, {})
+                legacy = copy.deepcopy(missing_table)
+                legacy['schema_features'].remove('werkstatt_arbeitsvertraege_v1')
+                legacy['binary_blobs'] = []
+                p.validate_backup_binary_reference_completeness(legacy, {})
+                reference = export['binary_blobs'][0]
+                damaged = io.BytesIO()
+                with zipfile.ZipFile(damaged, 'w') as bad:
+                    bad.writestr(reference['zip_path'], b'x' * len(raw))
+                with zipfile.ZipFile(damaged) as bad, self.assertRaisesRegex(ValueError, 'Prüfsumme'):
+                    p.read_backup_binary_blob(bad, bad.namelist(), reference)
+
+    def test_contract_json_restore_cannot_remove_owner_auth_metadata_or_original(self):
+        p = self.portal
+        with self.contract_database() as (_, raw, contract_id):
+            package = p.create_backup_package('synthetic-contract-protection')
+            before = self.database_dump()
+            with zipfile.ZipFile(package) as archive:
+                names = archive.namelist()
+                export = json.loads(archive.read('backup.json'))
+                cases = [('mitarbeiter_arbeitsvertraege', 'mitarbeiter_id', 99998),
+                         ('mitarbeiter_arbeitsvertraege', 'titel', 'Different contract'),
+                         ('mitarbeiter_arbeitsvertraege', 'filename', 'changed.pdf'),
+                         ('mitarbeiter_arbeitsvertraege', 'sha256', '0' * 64),
+                         ('mitarbeiter_arbeitsvertraege', 'size_bytes', len(raw) + 1),
+                         ('mitarbeiter', 'name', 'Different Owner'), ('mitarbeiter', 'aktiv', 0),
+                         ('assistent_rechte', 'auth_version', 1), ('assistent_rechte', 'version', 1),
+                         ('assistent_rechte', 'passwort_hash', 'old-hash')]
+                for table, key, value in cases:
+                    altered = copy.deepcopy(export)
+                    row = next(row for row in altered['tables'][table]
+                               if row.get('mitarbeiter_id', row.get('id')) == 99997)
+                    row[key] = value
+                    with self.subTest(table=table, key=key), self.assertRaises(ValueError):
+                        p.import_backup_json_rows_into_current_database(altered, archive, names)
+                    self.assertEqual(self.database_dump(), before)
+                absent = copy.deepcopy(export)
+                absent['tables']['mitarbeiter_arbeitsvertraege'] = []
+                with self.assertRaises(ValueError):
+                    p.import_backup_json_rows_into_current_database(absent, archive, names)
+                self.assertEqual(self.database_dump(), before)
+
+    def test_contract_old_sqlite_and_outer_route_stop_before_any_live_replacement(self):
+        p = self.portal
+        with self.contract_database() as (root, _, contract_id):
+            package = p.create_backup_package('synthetic-contract-old-source')
+            source, _, payload = self.legacy_contract_package(root, package)
+            before = self.database_dump()
+            with self.assertRaisesRegex(ValueError, 'Arbeitsverträge'):
+                p.import_sqlite_rows_into_current_database(source)
+            self.assertEqual(self.database_dump(), before)
+            with patch.object(p, 'create_backup_package') as create, \
+                 patch.object(p, 'replace_uploads_from_import') as replace:
+                messages = self.import_package(payload)
+            self.assertTrue(any('Arbeitsverträge' in message for message in messages), messages)
+            create.assert_not_called()
+            replace.assert_not_called()
+            self.assertEqual(self.database_dump(), before)
+            self.assertEqual(self.contract_row(contract_id)['mitarbeiter_id'], 99997)
+
+    def test_contract_free_legacy_file_restore_recreates_table_via_existing_schema_hook(self):
+        p = self.portal
+        with self.contract_database() as (root, _, _):
+            package = p.create_backup_package('synthetic-contract-legacy-schema')
+            _, _, payload = self.legacy_contract_package(root, package)
+            with closing(p.get_db()) as db, db:
+                db.execute('DELETE FROM mitarbeiter_arbeitsvertraege')
+            messages = self.import_package(payload)
+            self.assertTrue(any('Daten wurden importiert' in message for message in messages), messages)
+            with closing(p.get_db()) as db:
+                self.assertIn('original_base64', p.get_table_columns(db, 'mitarbeiter_arbeitsvertraege'))
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM mitarbeiter_arbeitsvertraege').fetchone()[0], 0)
 
 
 if __name__ == "__main__":

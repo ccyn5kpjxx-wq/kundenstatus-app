@@ -1,8 +1,8 @@
-"""Private employee profiles and original payslips, without AI/OCR or banking.
+"""Private employee profiles, payslips and contracts, without AI/OCR or banking.
 
 The personal session identifies the employee; request IDs never do. Original
 documents stay in database blobs and are served as protected attachments only.
-Profile and payroll writes share the destructive-restore originals lock.
+Profile and document writes share the destructive-restore originals lock.
 """
 import base64
 from contextlib import contextmanager
@@ -16,8 +16,12 @@ from pathlib import Path
 import re
 import secrets
 import sqlite3
+import struct
 import time
 import warnings
+from xml.etree import ElementTree
+import zipfile
+import zlib
 from zoneinfo import ZoneInfo
 
 import fitz
@@ -26,8 +30,20 @@ from PIL import Image
 from werkzeug.utils import secure_filename
 
 
-TABLES = ('mitarbeiter_portal_profile', 'mitarbeiter_lohnzettel', 'mitarbeiter_betriebsurlaub')
-PROFILE_FIELDS = ('personalnummer', 'steuer_id', 'steuernummer', 'adresse', 'geburtsdatum', 'email', 'telefon')
+TABLES = ('mitarbeiter_portal_profile', 'mitarbeiter_lohnzettel', 'mitarbeiter_betriebsurlaub',
+          'mitarbeiter_arbeitsvertraege')
+OWNER_TABLES = ('mitarbeiter_portal_profile', 'mitarbeiter_lohnzettel', 'mitarbeiter_arbeitsvertraege')
+LEGACY_PROFILE_FIELDS = ('personalnummer', 'steuer_id', 'steuernummer', 'adresse', 'geburtsdatum', 'email', 'telefon')
+PRIVATE_PROFILE_COLUMNS = {
+    'sozialversicherungsnummer': "TEXT NOT NULL DEFAULT ''",
+    'krankenkasse': "TEXT NOT NULL DEFAULT ''",
+    'steuerklasse': "TEXT NOT NULL DEFAULT ''",
+    'eintrittsdatum': "TEXT NOT NULL DEFAULT ''",
+}
+PROFILE_FIELDS = (*LEGACY_PROFILE_FIELDS, *PRIVATE_PROFILE_COLUMNS)
+PROFILE_LIMITS = dict(personalnummer=40, steuer_id=11, steuernummer=30, adresse=300,
+                      geburtsdatum=10, email=254, telefon=40, sozialversicherungsnummer=20,
+                      krankenkasse=120, steuerklasse=1, eintrittsdatum=10)
 WORK_PLAN_FIELDS = ('wochenstunden', 'tagesstunden', 'pausenminuten', 'beginn', 'arbeitstage')
 WORK_PLAN_COLUMNS = {
     'arbeitsplan_wochenminuten': 'INTEGER NOT NULL DEFAULT 0',
@@ -40,10 +56,14 @@ _WEEKDAYS = ('Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag
 _PLAN_NOTE = ('Geplante Sollzeiten, keine erfassten Stempel. Pausen werden nur nach '
               'eigenem Stempel abgezogen; der Arbeitsplan bucht keine Arbeitszeit.')
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+_DOCX_MAIN_TYPE = DOCX_MIME + '.main+xml'
+_OOXML_TYPES = 'http://schemas.openxmlformats.org/package/2006/content-types'
+_OOXML_RELS = 'http://schemas.openxmlformats.org/package/2006/relationships'
 _PERIOD = re.compile(r'20\d{2}-(?:0[1-9]|1[0-2])')
 _BERLIN = ZoneInfo('Europe/Berlin')
 _RESTORE_ERROR = ('Datenimport gesperrt: Die Sicherung enthält vorhandene persönliche '
-                  'Profile, Lohnzettel oder Betriebsurlaubstermine nicht unverändert. '
+                  'Profile, Lohnzettel, Arbeitsverträge oder Betriebsurlaubstermine nicht unverändert. '
                   'Bitte eine aktuelle Sicherung verwenden.')
 
 
@@ -125,18 +145,132 @@ def _plan_view(row):
         return dict(unknown, hinweis='Der hinterlegte Arbeitsplan muss intern geprüft werden. ' + _PLAN_NOTE)
 
 
-def _document(file):
+class _ContractXmlBuilder(ElementTree.TreeBuilder):
+    """Package structure only; no DTD/entities or unbounded XML trees."""
+    def __init__(self):
+        super().__init__()
+        self.depth = self.nodes = 0
+
+    def start(self, tag, attrs):
+        self.depth += 1
+        self.nodes += 1
+        if self.depth > 256 or self.nodes > 100_000:
+            raise ValueError('DOCX-XML ist zu umfangreich.')
+        return super().start(tag, attrs)
+
+    def end(self, tag):
+        result = super().end(tag)
+        self.depth -= 1
+        return result
+
+    def doctype(self, *_):
+        raise ValueError('DOCX darf keine XML-Dokumenttypdefinition enthalten.')
+
+
+def _contract_xml(raw):
+    return ElementTree.fromstring(raw, parser=ElementTree.XMLParser(target=_ContractXmlBuilder()))
+
+
+def _validate_docx(raw):
+    """Inspect a bounded OOXML package in memory; never extract, execute or fetch."""
+    error = 'Nur vollständige DOCX-Dateien ohne Makros oder eingebettete Programme verwenden.'
+    try:
+        if not raw.startswith(b'PK\x03\x04'):
+            raise ValueError(error)
+        # Reject excessive central-directory counts before ZipFile allocates
+        # one ZipInfo per member. Ten-MiB DOCX originals never need ZIP64.
+        end = raw.rfind(b'PK\x05\x06', max(0, len(raw) - 65557))
+        if end < 0 or end + 22 > len(raw):
+            raise ValueError(error)
+        _, disk, central_disk, disk_count, count, central_size, central_offset, comment_size = struct.unpack_from('<4s4H2LH', raw, end)
+        if (disk or central_disk or disk_count != count or not 2 <= count <= 512
+                or central_size > 512 * 1024 or central_offset + central_size != end
+                or end + 22 + comment_size != len(raw)):
+            raise ValueError(error)
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            entries = archive.infolist()
+            if len(entries) != count or sum(item.file_size for item in entries) > 40 * 1024 * 1024:
+                raise ValueError(error)
+            seen, parts = set(), {}
+            for item in entries:
+                name = item.filename
+                lower = name.casefold()
+                components = name.rstrip('/').split('/')
+                if (not name or item.orig_filename != name or name.startswith('/') or '\\' in name or '\x00' in name or ':' in name
+                        or any(part in ('', '.', '..') for part in components) or lower in seen
+                        or item.flag_bits & 1 or item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+                        or ((item.external_attr >> 16) & 0o170000) == 0o120000
+                        or item.file_size > 16 * 1024 * 1024
+                        or item.file_size > max(1, item.compress_size) * 1000
+                        or 'vba' in lower or '/activex/' in lower or '/embeddings/' in lower
+                        or (lower.endswith('.bin') and not lower.startswith('word/printersettings/'))):
+                    raise ValueError(error)
+                seen.add(lower)
+                if item.is_dir():
+                    continue
+                limit = (4 * 1024 * 1024 if name == 'word/document.xml' else
+                         1024 * 1024 if name == '[Content_Types].xml' or lower.endswith('.rels') else
+                         16 * 1024 * 1024)
+                if item.file_size > limit:
+                    raise ValueError(error)
+                with archive.open(item) as member:
+                    content = member.read(limit + 1)
+                if len(content) != item.file_size or len(content) > limit:
+                    raise ValueError(error)
+                if name in ('[Content_Types].xml', 'word/document.xml'):
+                    parts[name] = content
+                if lower.endswith('.rels'):
+                    relationships = _contract_xml(content)
+                    if relationships.tag != '{' + _OOXML_RELS + '}Relationships':
+                        raise ValueError(error)
+                    if any('vba' in child.get('Type', '').casefold()
+                           or 'macro' in child.get('Type', '').casefold()
+                           or 'activex' in child.get('Type', '').casefold()
+                           or 'oleobject' in child.get('Type', '').casefold()
+                           for child in relationships):
+                        raise ValueError(error)
+            types = _contract_xml(parts['[Content_Types].xml'])
+            if types.tag != '{' + _OOXML_TYPES + '}Types':
+                raise ValueError(error)
+            main = []
+            for child in types:
+                content_type = child.get('ContentType', '')
+                if any(marker in content_type.casefold() for marker in ('macro', 'vba', 'activex', 'oleobject')):
+                    raise ValueError(error)
+                if child.get('PartName') == '/word/document.xml':
+                    if child.tag != '{' + _OOXML_TYPES + '}Override':
+                        raise ValueError(error)
+                    main.append(content_type)
+            if main != [_DOCX_MAIN_TYPE]:
+                raise ValueError(error)
+            document = _contract_xml(parts['word/document.xml'])
+            namespaces = ('http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+                          'http://purl.oclc.org/ooxml/wordprocessingml/main')
+            if not any(document.tag == '{' + ns + '}document'
+                       and document.find('{' + ns + '}body') is not None for ns in namespaces):
+                raise ValueError(error)
+    except (ValueError, KeyError, zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError,
+            NotImplementedError, OSError, ElementTree.ParseError, zlib.error):
+        raise ValueError(error) from None
+
+
+def _document(file, *, label='Lohnzettel', allow_docx=False):
+    formats = 'PDF, DOCX, JPEG oder PNG' if allow_docx else 'PDF, JPEG oder PNG'
     if file is None or not file.filename:
-        raise ValueError('Einen Lohnzettel als PDF, JPEG oder PNG auswählen.')
+        selection = 'Einen Lohnzettel' if label == 'Lohnzettel' else label
+        raise ValueError(f'{selection} als {formats} auswählen.')
     raw = file.stream.read(MAX_DOCUMENT_BYTES + 1)
     if not raw or len(raw) > MAX_DOCUMENT_BYTES:
-        raise ValueError('Lohnzettel darf höchstens 10 MB groß sein.')
+        raise ValueError(f'{label} darf höchstens 10 MB groß sein.')
     supplied = str(file.filename).replace('\\', '/').rsplit('/', 1)[-1]
     filename = secure_filename(supplied)[:160]
     extension = Path(filename).suffix.lower()
     mime = ''
     try:
-        if raw.startswith(b'%PDF-') and extension == '.pdf':
+        if allow_docx and extension == '.docx':
+            _validate_docx(raw)
+            mime = DOCX_MIME
+        elif raw.startswith(b'%PDF-') and extension == '.pdf':
             with fitz.open(stream=raw, filetype='pdf') as document:
                 if document.is_encrypted or document.is_repaired or not 1 <= document.page_count <= 100:
                     raise ValueError('PDF muss vollständig lesbar sein und 1 bis 100 Seiten enthalten.')
@@ -160,10 +294,14 @@ def _document(file):
                     image.load()
                 mime = 'image/png' if kind == 'PNG' else 'image/jpeg'
         if not mime or not filename:
-            raise ValueError('Dateityp und Dateiendung müssen zu PDF, JPEG oder PNG passen.')
+            raise ValueError(f'Dateityp und Dateiendung müssen zu {formats} passen.')
     except (fitz.FileDataError, OSError, SyntaxError, Image.DecompressionBombError, Image.DecompressionBombWarning):
-        raise ValueError('Der Lohnzettel ist beschädigt oder kein lesbares PDF/JPEG/PNG.') from None
+        raise ValueError(f'{label} ist beschädigt oder keine lesbare Datei ({formats}).') from None
     return raw, filename, mime
+
+
+def _contract_document(file):
+    return _document(file, label='Personalunterlage', allow_docx=True)
 
 
 class EmployeePortal:
@@ -202,8 +340,16 @@ class EmployeePortal:
                 id INTEGER PRIMARY KEY AUTOINCREMENT, start_datum TEXT NOT NULL,
                 end_datum TEXT NOT NULL, notiz TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL, created_by TEXT NOT NULL,
-                UNIQUE(start_datum,end_datum,notiz));''')
-            for column, definition in WORK_PLAN_COLUMNS.items():
+                UNIQUE(start_datum,end_datum,notiz));
+                CREATE TABLE IF NOT EXISTS mitarbeiter_arbeitsvertraege (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, mitarbeiter_id INTEGER NOT NULL,
+                titel TEXT NOT NULL DEFAULT '', filename TEXT NOT NULL, mime TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, original_base64 TEXT NOT NULL,
+                created_at TEXT NOT NULL, created_by TEXT NOT NULL,
+                UNIQUE(mitarbeiter_id,sha256));
+                CREATE INDEX IF NOT EXISTS idx_mitarbeiter_arbeitsvertraege_owner
+                ON mitarbeiter_arbeitsvertraege(mitarbeiter_id,id);''')
+            for column, definition in {**PRIVATE_PROFILE_COLUMNS, **WORK_PLAN_COLUMNS}.items():
                 self.p.ensure_column(db, 'mitarbeiter_portal_profile', column, definition)
 
     def identity(self, db=None):
@@ -239,7 +385,7 @@ class EmployeePortal:
         return dict(row)
 
     def _audit(self, db, action, mid, **details):
-        # No tax numbers, private address, filename or payroll bytes in audit.
+        # No tax numbers, private address, filename or document bytes in audit.
         db.execute('INSERT INTO assistent_audit(actor,auftrag_id,aktion,details,zeit) VALUES(?,?,?,?,?)',
                    ('admin', None, action, json.dumps({'mitarbeiter': mid, **details}), self.p.now_str()))
 
@@ -261,13 +407,20 @@ class EmployeePortal:
         return [dict(row, bytes=row['size_bytes'], url=(f'/admin/mitarbeiter/{mid}/portal/lohnzettel/'
                     if admin else '/werkstatt/mein-konto/lohnzettel/') + str(row['id'])) for row in rows]
 
+    def _contracts(self, db, mid, *, admin=False):
+        rows = db.execute('''SELECT id,titel,filename,mime,size_bytes,created_at
+            FROM mitarbeiter_arbeitsvertraege WHERE mitarbeiter_id=? ORDER BY id DESC''', (mid,)).fetchall()
+        return [dict(row, bytes=row['size_bytes'], url=(f'/admin/mitarbeiter/{mid}/portal/arbeitsvertrag/'
+                    if admin else '/werkstatt/mein-konto/arbeitsvertrag/') + str(row['id'])) for row in rows]
+
     def admin_view(self, mid):
         self._admin()
         with self.db() as db:
             employee = self._employee(db, mid)
             profile = self._profile(db, mid)
             return {'employee': employee, 'profile': profile, 'arbeitsplan': _plan_view(profile),
-                    'payrolls': self._payrolls(db, mid, admin=True)}
+                    'payrolls': self._payrolls(db, mid, admin=True),
+                    'contracts': self._contracts(db, mid, admin=True)}
 
     def work_plan(self, mid):
         """Read only; the caller supplies its already authorized employee ID."""
@@ -283,7 +436,8 @@ class EmployeePortal:
             mid = who['mitarbeiter_id']
             profile = self._profile(db, mid)
             result = {'who': who, 'employee': {'id': mid, 'name': who['mitarbeiter_name']},
-                      'profile': profile, 'arbeitsplan': _plan_view(profile), 'payrolls': self._payrolls(db, mid)}
+                      'profile': profile, 'arbeitsplan': _plan_view(profile), 'payrolls': self._payrolls(db, mid),
+                      'contracts': self._contracts(db, mid)}
         result['urlaub'] = self.p.assistant_selfservice.summary(who)
         try:
             report = self.p.assistant_time.summary(who)
@@ -300,11 +454,11 @@ class EmployeePortal:
 
     def save_profile(self, mid, payload):
         self._admin()
-        if not isinstance(payload, dict) or set(payload) != set(PROFILE_FIELDS):
+        if (not isinstance(payload, dict) or not set(LEGACY_PROFILE_FIELDS).issubset(payload)
+                or set(payload) - set(PROFILE_FIELDS)):
             raise ValueError('Nur die vorgesehenen persönlichen Profilfelder angeben.')
-        limits = dict(personalnummer=40, steuer_id=11, steuernummer=30, adresse=300,
-                      geburtsdatum=10, email=254, telefon=40)
-        data = {key: _text(payload[key], limits[key], key, multiline=key == 'adresse') for key in PROFILE_FIELDS}
+        data = {key: _text(value, PROFILE_LIMITS[key], key, multiline=key == 'adresse')
+                for key, value in payload.items()}
         if data['steuer_id'] and not re.fullmatch(r'[0-9]{11}', data['steuer_id']):
             raise ValueError('Steuer-ID muss aus genau 11 Ziffern bestehen.')
         if data['steuernummer'] and not re.fullmatch(r'[0-9 /-]{3,30}', data['steuernummer']):
@@ -315,12 +469,21 @@ class EmployeePortal:
             raise ValueError('Eine gültige E-Mail-Adresse angeben.')
         if data['telefon'] and not re.fullmatch(r'[0-9+()/ .-]{3,40}', data['telefon']):
             raise ValueError('Telefonnummer nur mit Ziffern und üblichen Trennzeichen angeben.')
+        if data.get('sozialversicherungsnummer') and not re.fullmatch(r'[0-9A-Za-z /-]{1,20}', data['sozialversicherungsnummer']):
+            raise ValueError('Sozialversicherungsnummer nur mit Buchstaben, Ziffern und üblichen Trennzeichen angeben.')
+        if data.get('steuerklasse') and not re.fullmatch(r'[1-6]', data['steuerklasse']):
+            raise ValueError('Steuerklasse muss 1 bis 6 sein oder leer bleiben.')
+        if data.get('eintrittsdatum'):
+            _iso_date(data['eintrittsdatum'], 'Eintrittsdatum')
         with self.p.portal_originals_operation_lock(), self.db() as db:
             self._employee(db, mid)
+            previous = self._profile(db, mid)
+            # A previously opened seven-field form must not erase newly saved data.
+            data = {key: data[key] if key in data else previous.get(key, '') for key in PROFILE_FIELDS}
             columns = ','.join(PROFILE_FIELDS)
-            updates = ','.join(key + '=excluded.' + key for key in PROFILE_FIELDS)
+            updates = ','.join(key + '=excluded.' + key for key in PROFILE_FIELDS if key in payload)
             db.execute('INSERT INTO mitarbeiter_portal_profile(mitarbeiter_id,' + columns + ',updated_at,updated_by) '
-                       'VALUES(' + ','.join('?' for _ in range(10)) + ') ON CONFLICT(mitarbeiter_id) DO UPDATE SET '
+                       'VALUES(' + ','.join('?' for _ in range(len(PROFILE_FIELDS) + 3)) + ') ON CONFLICT(mitarbeiter_id) DO UPDATE SET '
                        + updates + ',updated_at=excluded.updated_at,updated_by=excluded.updated_by RETURNING mitarbeiter_id',
                        (mid, *(data[key] for key in PROFILE_FIELDS), self.p.now_str(), 'admin')).fetchall()
             self._audit(db, 'mitarbeiter_portal_profil_gespeichert', mid)
@@ -390,6 +553,56 @@ class EmployeePortal:
                 raise ValueError()
         except (ValueError, TypeError):
             raise LookupError('Lohnzettel nicht gefunden.') from None
+        return row, raw
+
+    def upload_contract(self, mid, titel, file):
+        """Keep each contract/addendum original, without a fabricated date or month."""
+        self._admin()
+        titel = _text(titel, 120, 'Dokumentname')
+        raw, filename, mime = _contract_document(file)
+        digest = hashlib.sha256(raw).hexdigest()
+        with self.p.portal_originals_operation_lock(), self.db() as db:
+            self._employee(db, mid)
+            db.execute('UPDATE mitarbeiter SET aktiv=aktiv WHERE id=?', (mid,))
+            prior = db.execute('SELECT id FROM mitarbeiter_arbeitsvertraege WHERE mitarbeiter_id=? AND sha256=?',
+                               (mid, digest)).fetchone()
+            if prior:
+                return prior['id']
+            row = db.execute('''INSERT INTO mitarbeiter_arbeitsvertraege
+                (mitarbeiter_id,titel,filename,mime,size_bytes,sha256,original_base64,created_at,created_by)
+                VALUES(?,?,?,?,?,?,?,?,?) RETURNING id''',
+                (mid, titel, filename, mime, len(raw), digest, base64.b64encode(raw).decode('ascii'),
+                 self.p.now_str(), 'admin')).fetchone()
+            contract_id = row['id']
+            self._audit(db, 'mitarbeiter_portal_arbeitsvertrag_hinterlegt', mid, arbeitsvertrag=contract_id)
+        self._backup()
+        return contract_id
+
+    def contract(self, contract_id, *, admin_mid=None):
+        if type(contract_id) is not int or not 1 <= contract_id <= 2147483647:
+            raise LookupError('Personalunterlage nicht gefunden.')
+        with self.db() as db:
+            if admin_mid is not None:
+                self._admin()
+                mid = self._employee(db, admin_mid)['id']
+            else:
+                who = self.identity(db)
+                if not who:
+                    raise LookupError('Personalunterlage nicht gefunden.')
+                mid = who['mitarbeiter_id']
+            row = db.execute('SELECT * FROM mitarbeiter_arbeitsvertraege WHERE id=? AND mitarbeiter_id=?',
+                             (contract_id, mid)).fetchone()
+            if not row:
+                raise LookupError('Personalunterlage nicht gefunden.')
+            row = dict(row)
+        try:
+            raw = base64.b64decode(row['original_base64'], validate=True)
+            if (not 0 < len(raw) <= MAX_DOCUMENT_BYTES or len(raw) != row['size_bytes']
+                    or hashlib.sha256(raw).hexdigest() != row['sha256']
+                    or row['mime'] not in ('application/pdf', 'image/png', 'image/jpeg', DOCX_MIME)):
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise LookupError('Personalunterlage nicht gefunden.') from None
         return row, raw
 
     def company_holidays(self, jahr=None):
@@ -485,7 +698,8 @@ def register_employee_portal(p):
             try:
                 if set(request.form) - set(PROFILE_FIELDS) - {'csrf_token'}:
                     raise ValueError('Nur die vorgesehenen persönlichen Profilfelder angeben.')
-                service.save_profile(mid, {key: request.form.get(key, '') for key in PROFILE_FIELDS})
+                service.save_profile(mid, {key: request.form.get(key, '') for key in PROFILE_FIELDS
+                                          if key in LEGACY_PROFILE_FIELDS or key in request.form})
                 flash('Persönliches Profil gespeichert.', 'success')
                 return redirect(f'/admin/mitarbeiter/{mid}/portal', code=303)
             except LookupError:
@@ -540,6 +754,43 @@ def register_employee_portal(p):
             except LookupError:
                 abort(404)
             return render_template('mitarbeiter_portal_admin.html', **data, csrf_token=token(), error=str(exc)), 400
+
+    @bp.post('/admin/mitarbeiter/<int:mid>/portal/arbeitsvertrag')
+    @p.admin_required
+    def admin_contract_upload(mid):
+        csrf()
+        try:
+            if (set(request.form) - {'csrf_token', 'titel'} or len(request.form.getlist('titel')) > 1
+                    or set(request.files) != {'file'} or len(request.files.getlist('file')) != 1):
+                raise ValueError('Genau eine Personalunterlage und einen optionalen Dokumentnamen angeben.')
+            service.upload_contract(mid, request.form.get('titel', ''), request.files.get('file'))
+            flash('Personalunterlage im persönlichen Profil hinterlegt.', 'success')
+            return redirect(f'/admin/mitarbeiter/{mid}/portal#arbeitsvertraege', code=303)
+        except LookupError:
+            abort(404)
+        except ValueError as exc:
+            try:
+                data = service.admin_view(mid)
+            except LookupError:
+                abort(404)
+            return render_template('mitarbeiter_portal_admin.html', **data, csrf_token=token(), error=str(exc)), 400
+
+    def download_contract(contract_id, admin_mid=None):
+        try:
+            row, raw = service.contract(contract_id, admin_mid=admin_mid)
+        except LookupError:
+            abort(404)
+        return send_file(io.BytesIO(raw), mimetype=row['mime'], as_attachment=True,
+                         download_name=secure_filename(row['filename']) or 'Personalunterlage', etag=False, conditional=False)
+
+    @bp.get('/werkstatt/mein-konto/arbeitsvertrag/<int:contract_id>')
+    def personal_contract(contract_id):
+        return download_contract(contract_id)
+
+    @bp.get('/admin/mitarbeiter/<int:mid>/portal/arbeitsvertrag/<int:contract_id>')
+    @p.admin_required
+    def admin_contract(mid, contract_id):
+        return download_contract(contract_id, mid)
 
     def download(payroll_id, admin_mid=None):
         try:
@@ -610,7 +861,7 @@ def ensure_employee_private_state_for_import(p, *, export=None, imported_db=None
                      for table in TABLES if p.get_table_columns(target, table)}
         if not any(protected.values()):
             return
-        mids = {row['mitarbeiter_id'] for table in TABLES[:2] for row in protected.get(table, [])}
+        mids = {row['mitarbeiter_id'] for table in OWNER_TABLES for row in protected.get(table, [])}
         protected['mitarbeiter'] = []
         protected['assistent_rechte'] = []
         absent_rights = set()
@@ -651,6 +902,11 @@ def ensure_employee_private_state_for_import(p, *, export=None, imported_db=None
                     raise ValueError(_RESTORE_ERROR)
                 restored = matches[0]
                 for column, original in row.items():
+                    # Older backups predate these optional private columns. A
+                    # missing empty migration default cannot discard real data.
+                    if (table == 'mitarbeiter_portal_profile' and column in PRIVATE_PROFILE_COLUMNS
+                            and column not in restored and original == ''):
+                        continue
                     value = restored.get(column)
                     if column == 'original_base64' and imported_db is None:
                         reference = p.backup_binary_reference_map(export).get((table, row['id'], column))

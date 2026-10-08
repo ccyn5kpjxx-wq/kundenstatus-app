@@ -369,10 +369,14 @@ class EmployeePortalTests(TestCase):
         current = self.snapshot()
         ensure_employee_private_state_for_import(p, export=current)
         for table in (*TABLES,'mitarbeiter','assistent_rechte'):
+            if not current['tables'][table]:
+                continue
             old = copy.deepcopy(current); old['tables'][table] = []
             with self.subTest(table=table), self.assertRaisesRegex(ValueError,'Datenimport gesperrt'):
                 ensure_employee_private_state_for_import(p, export=old)
         for table in TABLES:
+            if not current['tables'][table]:
+                continue
             for column in current['tables'][table][0]:
                 old = copy.deepcopy(current); old['tables'][table][0][column] = 'changed'
                 with self.subTest(table=table,column=column), self.assertRaises(ValueError):
@@ -384,7 +388,9 @@ class EmployeePortalTests(TestCase):
         source = Path(fixture.TEMP.name) / 'private-synthetic-source.db'
         if source.exists(): source.unlink()
         with database() as db:
-            ddl = [row[0] for row in db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name IN (?,?,?,?,?)", (*TABLES,'mitarbeiter','assistent_rechte'))]
+            tables = (*TABLES, 'mitarbeiter', 'assistent_rechte')
+            ddl = [row[0] for row in db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name IN ("
+                    + ','.join('?' for _ in tables) + ')', tables)]
         with closing(sqlite3.connect(source)) as db, db:
             for sql in ddl: db.execute(sql)
             for table,rows in current['tables'].items():

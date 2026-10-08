@@ -8259,6 +8259,7 @@ BACKUP_TABLES = (
     "assistent_einladungen",
     "mitarbeiter_portal_profile",
     "mitarbeiter_lohnzettel",
+    "mitarbeiter_arbeitsvertraege",
     "mitarbeiter_betriebsurlaub",
     "assistent_profile",
     "assistent_aktionen",
@@ -8325,9 +8326,12 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
-BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1")
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1")
 BACKUP_BINARY_FIELDS = {
     "mitarbeiter_lohnzettel": {
+        "original_base64": {"suffix": ".bin", "max_bytes": 10 * 1024 * 1024},
+    },
+    "mitarbeiter_arbeitsvertraege": {
         "original_base64": {"suffix": ".bin", "max_bytes": 10 * 1024 * 1024},
     },
     "einkauf_eingang_dateien": {
@@ -47914,6 +47918,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         "assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen",
         # Personal setup/profile documents arrived after the avatar features.
         "assistent_einladungen", "mitarbeiter_portal_profile", "mitarbeiter_lohnzettel", "mitarbeiter_betriebsurlaub",
+        # Employment contracts postdate the initial private employee portal.
+        "mitarbeiter_arbeitsvertraege",
     }
     if "kunden_termin_mail_versand" in schema_features:
         required_tables.add("kunden_termin_mail_versand")
@@ -47929,6 +47935,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         required_tables.add("assistent_einladungen")
     if "werkstatt_mitarbeiter_portal_v1" in schema_features:
         required_tables.update({"mitarbeiter_portal_profile", "mitarbeiter_lohnzettel", "mitarbeiter_betriebsurlaub"})
+    if "werkstatt_arbeitsvertraege_v1" in schema_features:
+        required_tables.add("mitarbeiter_arbeitsvertraege")
     if "werkstatt_avatar_uploads_v1" in schema_features:
         required_tables.add("assistent_uploads")
     if "werkstatt_personal_v1" in schema_features:
@@ -47976,7 +47984,7 @@ def validate_backup_binary_reference_completeness(export, reference_map):
             if row_id <= 0:
                 raise ValueError(f"Datenpaket ungültig: Tabelle {table_name} enthält eine Zeile ohne ID.")
             for column_name in field_config:
-                if table_name == "einkauf_eingang_dateien" and (table_name, row_id, column_name) not in reference_map:
+                if table_name in {"einkauf_eingang_dateien", "mitarbeiter_arbeitsvertraege"} and (table_name, row_id, column_name) not in reference_map:
                     raise ValueError(
                         f"Datenpaket unvollständig: Originaldatei für {table_name} #{row_id} fehlt."
                     )
