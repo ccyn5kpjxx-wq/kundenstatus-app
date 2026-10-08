@@ -86,8 +86,8 @@
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
     <div>
       <div class="badge-soft mb-3">Mitarbeiter</div>
-      <h1 class="mb-2">Team und Urlaub</h1>
-      <p class="mb-0 text-muted">Mitarbeiter pflegen, Urlaub direkt am Mitarbeiter eintragen und automatisch im Kalender sehen.</p>
+      <h1 class="mb-2">Mitarbeiter &amp; Unterlagen</h1>
+      <p class="mb-0 text-muted">Über „Stammdaten &amp; Unterlagen“ bei jeder Person öffnest du ihre privaten Angaben, Lohnzettel und Verträge. Urlaub bleibt im internen Kalender sichtbar.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
       <a href="/admin/mitarbeiter/einrichtung" class="btn btn-brand">Persönliche Einrichtungslinks</a>
@@ -188,7 +188,7 @@
   <div class="section-title">
     <div>
       <h4 class="mb-1">Mitarbeiterliste</h4>
-      <p>Urlaub wird pro Tag in den internen Kalender übernommen.</p>
+      <p>Person auswählen und Stammdaten, Lohnzettel oder Vertragsunterlagen öffnen.</p>
     </div>
   </div>
 
@@ -213,7 +213,7 @@
               {% if mitarbeiter['email'] %} · {{ mitarbeiter['email'] }}{% endif %}
             </div>
           </div>
-          <div class="d-flex flex-wrap gap-2"><a href="/admin/mitarbeiter/{{ mitarbeiter['id'] }}/portal" class="btn btn-brand btn-sm">Profil &amp; Lohnzettel</a><a href="{{ url_for('kalender', suche=mitarbeiter['name']) }}" class="btn btn-soft btn-sm">Im Kalender suchen</a></div>
+          <div class="d-flex flex-wrap gap-2"><a href="/admin/mitarbeiter/{{ mitarbeiter['id'] }}/portal" class="btn btn-brand btn-sm">Stammdaten &amp; Unterlagen</a><a href="{{ url_for('kalender', suche=mitarbeiter['name']) }}" class="btn btn-soft btn-sm">Im Kalender suchen</a></div>
         </div>
 
         <div class="staff-details">

@@ -687,6 +687,13 @@
     {% endif %}
 
     <div class="module-grid mb-4">
+      {% if session.get('admin') %}
+      <a class="page-card module-tile" href="{{ url_for('admin_mitarbeiter') }}">
+        <span class="module-kicker">Team</span>
+        <h5 class="mb-0">Mitarbeiter</h5>
+        <p class="text-muted mb-0">Stammdaten, Lohnzettel und Verträge je Person geschützt öffnen.</p>
+      </a>
+      {% endif %}
       {% set leads_count = admin_leads_count() %}
       <a class="page-card module-tile" href="{{ url_for('admin_leads') }}">
         <span class="module-kicker">Anfragen</span>
