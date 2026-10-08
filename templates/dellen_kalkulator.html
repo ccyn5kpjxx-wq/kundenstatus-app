@@ -15,22 +15,22 @@
   }
   .dellen-tabelle th:first-child { text-align: left; }
   .dellen-zeile td {
-    background: var(--ws-panel-soft,#fffaf2);
-    border-top: 1px solid var(--ws-line,#e4d6c3);
-    border-bottom: 1px solid var(--ws-line,#e4d6c3);
+    background: #fffaf2;
+    border-top: 1px solid #e4d6c3;
+    border-bottom: 1px solid #e4d6c3;
     padding: .5rem .6rem;
     vertical-align: middle;
     text-align: center;
   }
   .dellen-zeile td:first-child {
-    border-left: 1px solid var(--ws-line,#e4d6c3);
+    border-left: 1px solid #e4d6c3;
     border-radius: 12px 0 0 12px;
     text-align: left;
     font-weight: 600;
     white-space: nowrap;
   }
   .dellen-zeile td:last-child {
-    border-right: 1px solid var(--ws-line,#e4d6c3);
+    border-right: 1px solid #e4d6c3;
     border-radius: 0 12px 12px 0;
     font-weight: 700;
     font-family: "Space Grotesk", sans-serif;
@@ -42,13 +42,13 @@
     border: 1px solid var(--line);
     border-radius: 10px;
     padding: .35rem .3rem;
-    background: var(--ws-panel,#fffdf9);
+    background: #fffdf9;
   }
   .dellen-summe-panel {
     border: 1px solid var(--line);
     border-radius: 18px;
-    background: var(--ws-panel-soft,#132635);
-    color: var(--ws-text,#fff);
+    background: #132635;
+    color: #fff;
     padding: 1.2rem 1.4rem;
   }
   .dellen-summe-panel .netto {
@@ -57,8 +57,8 @@
     font-weight: 700;
     line-height: 1.1;
   }
-  .dellen-summe-panel .brutto { color: var(--ws-muted,rgba(255,255,255,.75)); }
-  .dellen-summe-panel .rabatt-hinweis { color: var(--ws-warning,#ffd479); font-size: .88rem; }
+  .dellen-summe-panel .brutto { color: rgba(255,255,255,.75); }
+  .dellen-summe-panel .rabatt-hinweis { color: #ffd479; font-size: .88rem; }
   .preis-form-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -72,11 +72,11 @@
     margin-bottom: .2rem;
   }
   .richtwert-hinweis {
-    border: 1px solid var(--ws-line,#f0d9a8);
-    background: var(--ws-panel-soft,#fdf6e3);
+    border: 1px solid #f0d9a8;
+    background: #fdf6e3;
     border-radius: 14px;
     padding: .8rem 1rem;
-    color: var(--ws-warning,#7a6039);
+    color: #7a6039;
     font-size: .9rem;
   }
   @media (max-width: 575.98px) {
@@ -133,15 +133,15 @@
   <div class="row g-3 align-items-stretch">
     <div class="col-lg-5">
       <div class="dellen-summe-panel h-100">
-        <div class="text-uppercase" style="font-size:.76rem; letter-spacing:.08em; color:var(--ws-muted,rgba(255,255,255,.7)); font-weight:700;">Kalkulation</div>
+        <div class="text-uppercase" style="font-size:.76rem; letter-spacing:.08em; color:rgba(255,255,255,.7); font-weight:700;">Kalkulation</div>
         <div class="netto" data-summe-netto>0,00 €</div>
         <div class="brutto" data-summe-brutto>inkl. 19% MwSt.: 0,00 €</div>
         <div class="rabatt-hinweis mt-2" data-rabatt-hinweis></div>
-        <div class="mt-2 small" style="color:var(--ws-muted,rgba(255,255,255,.65));" data-dellen-gesamt>0 Dellen erfasst</div>
+        <div class="mt-2 small" style="color:rgba(255,255,255,.65);" data-dellen-gesamt>0 Dellen erfasst</div>
       </div>
     </div>
     <div class="col-lg-7">
-      <div class="reminder-panel h-100" style="border:1px solid var(--ws-line,#e4d6c3); border-radius:14px; background:var(--ws-panel,#fffdf9); padding:1rem;">
+      <div class="reminder-panel h-100" style="border:1px solid #e4d6c3; border-radius:14px; background:#fffdf9; padding:1rem;">
         <div class="fw-bold mb-2">Text für Angebot / Notiz</div>
         <textarea class="form-control mb-2" rows="6" readonly data-angebot-text placeholder="Positionen eintragen — der Text entsteht automatisch."></textarea>
         <div class="d-flex gap-2 flex-wrap">

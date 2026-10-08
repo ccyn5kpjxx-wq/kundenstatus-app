@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta name="theme-color" content="#101114">
+  <meta name="theme-color" content="{{ '#f3efe6' if admin else '#173f35' }}">
   <title>{{ 'Arbeitszeiten' if admin else 'Meine Arbeitszeit' }} · Gärtner</title>
-  {% if admin %}<link rel="stylesheet" href="{{ url_for('static',filename='arbeitszeit_admin.css') }}?v=zeiten-admin-1">
+  {% if admin %}<link rel="stylesheet" href="{{ url_for('static',filename='arbeitszeit_admin.css') }}?v=farben-2">
   {% else %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=werkstatt-1">
-  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=werkstatt-1">
-  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_zeiten.css') }}?v=werkstatt-1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=farben-2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=farben-2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_zeiten.css') }}?v=farben-2">
   {% endif %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=werkstatt-1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=farben-2">
 </head>
 <body>
 {% if admin %}

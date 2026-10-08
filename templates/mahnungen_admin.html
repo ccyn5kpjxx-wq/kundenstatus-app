@@ -3,11 +3,11 @@
 
 {% block extra_css %}
 <style>
-  .mahn-text { font-family: var(--bs-font-monospace, monospace); font-size: .85rem; white-space: pre-wrap; background: var(--ws-panel-soft,#f8f2e8); border: 1px solid var(--ws-line,#e4d6c3); border-radius: 12px; padding: 1rem; max-height: 300px; overflow-y: auto; }
-  .stufe-badge-0 { background: var(--ws-panel-soft,#e7f1ff); color: var(--ws-info,var(--ws-accent,#0a4d8c)); }
-  .stufe-badge-1 { background: var(--ws-panel-soft,#fff3cd); color: var(--ws-warning,#664d03); }
-  .stufe-badge-2 { background: var(--ws-panel-soft,#ffe5d0); color: var(--ws-warning,#8a3b00); }
-  .stufe-badge-3 { background: var(--ws-panel-soft,#f8d7da); color: var(--ws-danger,#842029); }
+  .mahn-text { font-family: var(--bs-font-monospace, monospace); font-size: .85rem; white-space: pre-wrap; background: #f8f2e8; border: 1px solid #e4d6c3; border-radius: 12px; padding: 1rem; max-height: 300px; overflow-y: auto; }
+  .stufe-badge-0 { background: #e7f1ff; color: #0a4d8c; }
+  .stufe-badge-1 { background: #fff3cd; color: #664d03; }
+  .stufe-badge-2 { background: #ffe5d0; color: #8a3b00; }
+  .stufe-badge-3 { background: #f8d7da; color: #842029; }
 </style>
 {% endblock %}
 
@@ -26,7 +26,7 @@
 </div>
 
 {% if faellig %}
-<div class="page-card p-4 mb-4" style="border-left: 6px solid var(--ws-danger,#a23f2d); border-radius: 0 22px 22px 0;">
+<div class="page-card p-4 mb-4" style="border-left: 6px solid #a23f2d; border-radius: 0 22px 22px 0;">
   <h2 class="h5 mb-3">🔔 Jetzt fällig: {{ faellig|length }} Mahnung{{ 'en' if faellig|length != 1 else '' }}</h2>
   <div class="d-grid gap-3">
     {% for m in faellig %}

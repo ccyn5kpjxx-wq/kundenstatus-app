@@ -4,19 +4,19 @@
 {% block extra_css %}
 <style>
   .insurance-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.8rem; }
-  .insurance-metric { border:1px solid var(--ws-line,#e4d6c3); border-radius:16px; background:var(--ws-panel-soft,#fffaf2); padding:1rem; }
+  .insurance-metric { border:1px solid #e4d6c3; border-radius:16px; background:#fffaf2; padding:1rem; }
   .insurance-metric span { display:block; color:var(--muted); font-size:.86rem; }
   .insurance-metric strong { font-family:"Space Grotesk",sans-serif; font-size:1.8rem; line-height:1; }
-  .case-row { display:grid; grid-template-columns:minmax(220px,1.2fr) minmax(160px,.8fr) minmax(160px,.8fr) auto; gap:1rem; align-items:center; border:1px solid var(--ws-line,#e4d6c3); border-radius:16px; background:var(--ws-panel,#fffdf9); padding:1rem; }
+  .case-row { display:grid; grid-template-columns:minmax(220px,1.2fr) minmax(160px,.8fr) minmax(160px,.8fr) auto; gap:1rem; align-items:center; border:1px solid #e4d6c3; border-radius:16px; background:#fffdf9; padding:1rem; }
   .case-list { display:grid; gap:.75rem; }
   .cockpit-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; }
-  .cockpit-box { border:1px solid var(--ws-line,#e4d6c3); border-radius:14px; background:var(--ws-panel,#fffdf9); padding:.9rem; min-height:120px; }
+  .cockpit-box { border:1px solid #e4d6c3; border-radius:14px; background:#fffdf9; padding:.9rem; min-height:120px; }
   .cockpit-box strong { font-family:"Space Grotesk",sans-serif; font-size:1.55rem; line-height:1; }
-  .portal-toggle { display:inline-flex; border:1px solid var(--ws-line,#e4d6c3); border-radius:999px; background:var(--ws-panel,#fffdf9); padding:.2rem; gap:.2rem; flex-wrap:wrap; }
-  .portal-toggle button { border:0; background:transparent; border-radius:999px; padding:.55rem .9rem; font-weight:800; color:var(--ws-muted,#6f6253); }
-  .portal-toggle button.is-active { background:var(--ws-panel-soft,#17212a); color:var(--ws-text,#fff); }
+  .portal-toggle { display:inline-flex; border:1px solid #e4d6c3; border-radius:999px; background:#fffdf9; padding:.2rem; gap:.2rem; flex-wrap:wrap; }
+  .portal-toggle button { border:0; background:transparent; border-radius:999px; padding:.55rem .9rem; font-weight:800; color:#6f6253; }
+  .portal-toggle button.is-active { background:#17212a; color:#fff; }
   .portal-view[hidden] { display:none !important; }
-  .portal-demo-banner { border:1px solid var(--ws-line,#bfd7f4); border-radius:14px; background:var(--ws-panel-soft,#f3f8ff); color:var(--ws-text,#1f416a); padding:.9rem 1rem; }
+  .portal-demo-banner { border:1px solid #bfd7f4; border-radius:14px; background:#f3f8ff; color:#1f416a; padding:.9rem 1rem; }
   @media (max-width: 900px) {
     .insurance-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .cockpit-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }

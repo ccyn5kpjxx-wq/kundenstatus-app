@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token() }}">
-  <meta name="theme-color" content="#101114">
   <title>Werkstatt-Tafel</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -498,8 +497,8 @@
 
     footer a { color: var(--muted); }
   </style>
-  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_legacy.css') }}?v=werkstatt-1" media="screen">
-  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=werkstatt-1" media="screen">
+  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_legacy.css') }}?v=farben-2" media="screen">
+  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=farben-2" media="screen">
 </head>
 <body class="ws-legacy ws-legacy-tafel">
   <div class="topbar">
@@ -517,16 +516,16 @@
       </div>
       <div class="wetter-stunden" data-w-stunden></div>
     </div>
-    <a href="{{ url_for('assistent.page') }}" title="Persönlichen Werkstatt-Assistenten öffnen" style="background:var(--ws-accent, #12685f); border:1px solid #65c9b8; color:var(--ws-on-accent, #fff); border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; white-space:nowrap; align-self:center; text-decoration:none;">Avatar-Assistent</a>
+    <a href="{{ url_for('assistent.page') }}" title="Persönlichen Werkstatt-Assistenten öffnen" style="background:#12685f; border:1px solid #65c9b8; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; white-space:nowrap; align-self:center; text-decoration:none;">Avatar-Assistent</a>
     <div class="meta">
       <div class="uhr" data-uhr data-server-now="{{ server_now_iso }}">{{ stand_label }}</div>
       <div data-datum>{{ datum_label }}</div>
     </div>
-    <a href="{{ url_for('werkstatt_auftrag_anlegen') }}" data-auftrag-anlegen title="Fahrzeug direkt in der Werkstatt annehmen" style="background:var(--ws-accent, #1b7f53); border:1px solid #55c792; color:var(--ws-on-accent, #fff); border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:800; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">＋ Anlegen</a>
+    <a href="{{ url_for('werkstatt_auftrag_anlegen') }}" data-auftrag-anlegen title="Fahrzeug direkt in der Werkstatt annehmen" style="background:#1b7f53; border:1px solid #55c792; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:800; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">＋ Anlegen</a>
     <a href="{{ url_for('werkstatt_abwesenheit') }}" title="Abwesenheit / Urlaub beantragen" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">🌴 Abwesenheit</a>
     <a href="{{ url_for('werkstatt_aufgaben') }}" title="Tagesaufgaben der Werkstatt" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">📋 Aufgaben</a>
-    <a href="https://emea.ppglinq.com/rapid-match" target="_blank" rel="noopener noreferrer" title="PPG LINQ DigiMatch-Messungen öffnen – Anmeldung falls erforderlich" style="background:var(--ws-accent, #087fae); border:1px solid #54c0e6; color:var(--ws-on-accent, #fff); border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">🎨 PPG-Messungen</a>
-    <button type="button" data-team-oeffnen title="Teamvorstellung jetzt starten" style="background:var(--ws-accent, #a23f2d); border:1px solid #df7764; color:var(--ws-on-accent, #fff); border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; cursor:pointer; white-space:nowrap; align-self:center;">👥 Unser Team</button>
+    <a href="https://emea.ppglinq.com/rapid-match" target="_blank" rel="noopener noreferrer" title="PPG LINQ DigiMatch-Messungen öffnen – Anmeldung falls erforderlich" style="background:#087fae; border:1px solid #54c0e6; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">🎨 PPG-Messungen</a>
+    <button type="button" data-team-oeffnen title="Teamvorstellung jetzt starten" style="background:#a23f2d; border:1px solid #df7764; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; cursor:pointer; white-space:nowrap; align-self:center;">👥 Unser Team</button>
     <button type="button" data-vollbild title="Vollbild ein/aus" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center;">⛶ Vollbild</button>
     {% if session.admin %}<a class="ws-back" href="/admin/cockpit">← Werkstatt-Cockpit</a>{% endif %}
   </div>
@@ -597,19 +596,19 @@
             {% if auftrag['fertig_datum'] %}
               <span class="chip">Fertig bis: <strong>{{ auftrag['fertig_datum'] }}</strong></span>
             {% else %}
-              <span class="chip" style="background:var(--ws-warning-bg, #fff0d7);color:var(--ws-warning, #784900);">Fertigtermin fehlt</span>
+              <span class="chip" style="background:#fff0d7;color:#784900;">Fertigtermin fehlt</span>
             {% endif %}
           {% endif %}
           {% if auftrag['status'] >= 3 %}
             {% if auftrag['abholtermin'] %}
               <span class="chip">{{ auftrag['abholung_label'] }}: <strong>{{ auftrag['abholtermin'] }}{% if auftrag['abhol_uhrzeit'] %} · {{ auftrag['abhol_uhrzeit'] }} Uhr{% endif %}</strong></span>
             {% else %}
-              <span class="chip" style="background:var(--ws-warning-bg, #fff0d7);color:var(--ws-warning, #784900);">{{ auftrag['abholung_label'] or 'Rückgabe' }} noch nicht vereinbart</span>
+              <span class="chip" style="background:#fff0d7;color:#784900;">{{ auftrag['abholung_label'] or 'Rückgabe' }} noch nicht vereinbart</span>
             {% endif %}
           {% endif %}
         </div>
         {% if auftrag['status'] == 1 %}
-        <div class="buero-hinweis" style="margin-top:.6rem; padding:.5rem .7rem; border-radius:10px; background:var(--ws-panel-soft, rgba(0,0,0,.05)); color:var(--ws-muted, #6f7a83); font-size:.85rem; font-weight:600; text-align:center;">🔒 Wird vom Büro geprüft &amp; eingeplant</div>
+        <div class="buero-hinweis" style="margin-top:.6rem; padding:.5rem .7rem; border-radius:10px; background:rgba(0,0,0,.05); color:#6f7a83; font-size:.85rem; font-weight:600; text-align:center;">🔒 Wird vom Büro geprüft &amp; eingeplant</div>
         {% elif auftrag['status'] == 2 %}
         <button type="button" class="schnell-knopf" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="3">🔧 In Arbeit nehmen →</button>
         {% elif auftrag['status'] == 3 %}

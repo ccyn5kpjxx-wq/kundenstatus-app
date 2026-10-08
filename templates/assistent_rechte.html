@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="de">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Assistent · Mitarbeiterzugänge</title><link rel="stylesheet" href="{{ url_for('static', filename='assistent.css') }}"><meta name="theme-color" content="#101114"><link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css', v='werkstatt-1') }}"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Assistent · Mitarbeiterzugänge</title><link rel="stylesheet" href="{{ url_for('static', filename='assistent.css') }}"><meta name="theme-color" content="#10232d"><link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css', v='farben-2') }}"></head>
 <body>{% include '_werkstatt_admin_header.html' %}<main>
 <nav><a href="{{ url_for('assistent.page') }}">← Assistent</a><a href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter verwalten</a><a href="{{ url_for('assistent.vacation_admin') }}">Urlaubskonten &amp; Anträge</a><a href="{{ url_for('arbeitszeit_admin.index') }}">Arbeitszeiten</a></nav>
 <p>Persönlich angemeldete Mitarbeiter mit Leserecht können ihren eigenen Urlaubsstand und ihre erfassten Arbeitszeiten sehen, Urlaub beantragen und nach Bestätigung kommen, gehen oder Pausen stempeln. Resturlaub wird erst nach deiner Prüfung des Urlaubskontos angezeigt.</p>

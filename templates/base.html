@@ -389,10 +389,10 @@
   </style>
   {% block extra_css %}{% endblock %}
   <link rel="stylesheet" href="{{ url_for('static', filename='admin-sidebar.css') }}">
-  {% set werkstatt_dark = session.get('admin') and (request.path == '/admin' or request.path.startswith('/admin/')) %}
-  {% if werkstatt_dark %}<meta name="theme-color" content="#101114"><link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css', v='werkstatt-1') }}">{% endif %}
+  {% set werkstatt_internal = session.get('admin') and (request.path == '/admin' or request.path.startswith('/admin/')) %}
+  {% if werkstatt_internal %}<meta name="theme-color" content="#f3efe6"><link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css', v='farben-2') }}">{% endif %}
 </head>
-<body{% if werkstatt_dark %} class="ws-cockpit"{% endif %}>
+<body{% if werkstatt_internal %} class="ws-cockpit"{% endif %}>
 <a class="skip-link" href="#hauptinhalt">Direkt zum Inhalt</a>
 {% set show_customer_news_overlay = not session.get('admin') %}
 <div class="analysis-overlay" data-analysis-overlay>
@@ -461,7 +461,7 @@
 
 <main class="hero-shell" id="hauptinhalt" tabindex="-1">
   <div class="container">
-    {% if werkstatt_dark and request.endpoint != 'betriebs_cockpit' %}<nav class="ws-page-return" aria-label="Zurück zum Cockpit"><a href="{{ url_for('betriebs_cockpit') }}">← Zurück ins Werkstatt-Cockpit</a></nav>{% endif %}
+    {% if werkstatt_internal and request.endpoint != 'betriebs_cockpit' %}<nav class="ws-page-return" aria-label="Zurück zum Cockpit"><a href="{{ url_for('betriebs_cockpit') }}">← Zurück ins Werkstatt-Cockpit</a></nav>{% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
         <div class="alert alert-{{ cat }} alert-dismissible fade show page-card mb-4" role="alert">

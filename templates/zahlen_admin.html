@@ -7,20 +7,20 @@
   @media (max-width: 992px) { .zahlen-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 560px) { .zahlen-grid { grid-template-columns: 1fr; } }
 
-  .ampel-hero { border-radius: var(--radius); padding: 1.6rem 1.8rem; color: var(--ws-text,#fff); box-shadow: var(--shadow); }
-  .ampel-gruen   { background: var(--ws-panel-soft,linear-gradient(135deg, #1b7f53, #29a168)); color:var(--ws-accent,white); }
-  .ampel-gelb    { background: var(--ws-panel-soft,linear-gradient(135deg, #c0820f, #e0a72e)); color:var(--ws-warning,white); }
-  .ampel-rot     { background: var(--ws-panel-soft,linear-gradient(135deg, #a23f2d, #c74b34)); color:var(--ws-danger,white); }
-  .ampel-neutral { background: var(--ws-panel-soft,linear-gradient(135deg, #3a4a57, #54676f)); }
-  .ampel-dot { display: inline-block; width: .85rem; height: .85rem; border-radius: 50%; background: var(--ws-text,#fff); margin-right: .55rem; vertical-align: middle; }
+  .ampel-hero { border-radius: var(--radius); padding: 1.6rem 1.8rem; color: #fff; box-shadow: var(--shadow); }
+  .ampel-gruen   { background: linear-gradient(135deg, #1b7f53, #29a168); }
+  .ampel-gelb    { background: linear-gradient(135deg, #c0820f, #e0a72e); }
+  .ampel-rot     { background: linear-gradient(135deg, #a23f2d, #c74b34); }
+  .ampel-neutral { background: linear-gradient(135deg, #3a4a57, #54676f); }
+  .ampel-dot { display: inline-block; width: .85rem; height: .85rem; border-radius: 50%; background: #fff; margin-right: .55rem; vertical-align: middle; }
   .ampel-headline { font-family: "Space Grotesk", sans-serif; font-size: 1.9rem; font-weight: 700; line-height: 1.1; }
 
-  .ziel-bar { height: 14px; border-radius: 999px; background: var(--ws-line,rgba(255, 255, 255, .28)); overflow: hidden; }
-  .ziel-bar > span { display: block; height: 100%; background: var(--ws-accent,#fff); border-radius: 999px; }
+  .ziel-bar { height: 14px; border-radius: 999px; background: rgba(255, 255, 255, .28); overflow: hidden; }
+  .ziel-bar > span { display: block; height: 100%; background: #fff; border-radius: 999px; }
 
   .month-pill { font-family: "Space Grotesk", sans-serif; font-size: 1.05rem; font-weight: 700; white-space: nowrap; }
   .trend-up { color: var(--good); font-weight: 700; }
-  .trend-down { color: var(--ws-danger,var(--brand)); font-weight: 700; }
+  .trend-down { color: var(--brand); font-weight: 700; }
 </style>
 {% endblock %}
 
@@ -40,7 +40,7 @@
 </div>
 
 {% if mahnungen_anzahl %}
-<a href="{{ url_for('admin_mahnungen') }}" class="d-block page-card p-3 mb-4 text-decoration-none" style="border-left: 6px solid var(--ws-danger,#a23f2d); border-radius: 0 22px 22px 0; color: var(--ink);">
+<a href="{{ url_for('admin_mahnungen') }}" class="d-block page-card p-3 mb-4 text-decoration-none" style="border-left: 6px solid #a23f2d; border-radius: 0 22px 22px 0; color: var(--ink);">
   <strong>🔔 {{ mahnungen_anzahl }} Mahnung{{ 'en' if mahnungen_anzahl != 1 else '' }} fällig</strong>
   <span class="text-muted">— Texte liegen fertig vor, nur prüfen und senden →</span>
 </a>
@@ -89,7 +89,7 @@
   <div class="card metric-card metric-warm">
     <div class="metric-label">Ausgaben{% if z.ist_aktueller_monat %} bisher{% endif %}</div>
     <div class="metric-value">{{ z.ausgaben_bisher_label }}</div>
-    {% if z.hat_investitionen %}<div class="small mt-1" style="color: var(--ws-muted,rgba(255,255,255,.85)); position: relative; z-index: 1;">+ {{ z.investitionen_bisher_label }} Investitionen</div>{% endif %}
+    {% if z.hat_investitionen %}<div class="small mt-1" style="color: rgba(255,255,255,.85); position: relative; z-index: 1;">+ {{ z.investitionen_bisher_label }} Investitionen</div>{% endif %}
   </div>
   <div class="card metric-card metric-blue">
     <div class="metric-label">Differenz</div>
@@ -223,7 +223,7 @@
       </thead>
       <tbody>
         {% for m in z.uebersicht %}
-        <tr {% if m.ist_aktiv %}style="background: var(--ws-panel-soft,rgba(20, 93, 102, .06));"{% endif %}>
+        <tr {% if m.ist_aktiv %}style="background: rgba(20, 93, 102, .06);"{% endif %}>
           <td>
             <a class="fw-bold text-decoration-none" style="color: var(--ink);" href="{{ url_for('admin_zahlen', jahr=m.jahr, monat=m.monat) }}">{{ m.label }}</a>
             {% if m.vormonat_geschlagen %}<span class="badge text-bg-success ms-1" title="Stärker als der Vormonat">&#9650; Vormonat</span>{% endif %}

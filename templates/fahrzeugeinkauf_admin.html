@@ -12,28 +12,28 @@
   .fein-scanbtn {
     background: var(--brand);
     border: none;
-    color: var(--ws-on-accent,#fff);
+    color: #fff;
     font-weight: 700;
     padding: 0.55rem 1.1rem;
     border-radius: 8px;
   }
-  .fein-scanbtn:hover { background: var(--brand-dark); color: var(--ws-on-accent,#fff); }
-  .fein-scanbtn:disabled { background: var(--ws-panel-soft,#8b949e); color:var(--ws-muted,#fff); cursor: not-allowed; opacity: 0.85; }
+  .fein-scanbtn:hover { background: var(--brand-dark); color: #fff; }
+  .fein-scanbtn:disabled { background: #8b949e; cursor: not-allowed; opacity: 0.85; }
   .fein-anfrage-hinweis {
-    background: var(--ws-panel-soft,#fdf3dd);
-    border: 1px solid var(--ws-line,#ecd9a8);
+    background: #fdf3dd;
+    border: 1px solid #ecd9a8;
     border-radius: 8px;
     padding: 0.5rem 0.9rem;
     font-size: 0.9rem;
   }
-  .fein-anfrage-hinweis.success { background: var(--ws-panel-soft,#e9f6ee); border-color: var(--ws-line,#bfe0cb); }
-  .fein-anfrage-hinweis.danger { background: var(--ws-panel-soft,#fbeaea); border-color: var(--ws-line,#e5b7b7); }
-  .fein-anfrage-hinweis.secondary { background: var(--ws-panel-soft,#f0f1f2); border-color: var(--ws-line,#d5d8dc); }
-  .fein-anfrage-hinweis.info { background: var(--ws-panel-soft,#eaf4fb); border-color: var(--ws-line,#bfd8ea); }
+  .fein-anfrage-hinweis.success { background: #e9f6ee; border-color: #bfe0cb; }
+  .fein-anfrage-hinweis.danger { background: #fbeaea; border-color: #e5b7b7; }
+  .fein-anfrage-hinweis.secondary { background: #f0f1f2; border-color: #d5d8dc; }
+  .fein-anfrage-hinweis.info { background: #eaf4fb; border-color: #bfd8ea; }
   .fein-trefferbadge {
     float: right;
-    background: var(--ws-panel,#fff);
-    color: var(--ws-warning,#e8631a);
+    background: #fff;
+    color: #e8631a;
     border-radius: 999px;
     padding: 0 0.55rem;
     font-size: 0.72rem;
@@ -41,7 +41,7 @@
     letter-spacing: 0.06em;
     animation: fein-neu-puls 1.6s ease-in-out infinite;
   }
-  .fein-trefferbadge.aktualisiert { color: var(--ws-accent,#136b45); animation: none; }
+  .fein-trefferbadge.aktualisiert { color: #136b45; animation: none; }
   @keyframes fein-neu-puls {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.55; }
@@ -51,7 +51,7 @@
     width: 0.55rem;
     height: 0.55rem;
     border-radius: 50%;
-    background: var(--ws-warning,#cc8a16);
+    background: #cc8a16;
     margin-right: 0.35rem;
     animation: fein-neu-puls 1.2s ease-in-out infinite;
   }
@@ -69,12 +69,12 @@
     font-size: 0.78rem;
     font-weight: 700;
     letter-spacing: 0.04em;
-    color: var(--ws-on-accent,#fff);
+    color: #fff;
     text-transform: uppercase;
   }
   .fein-ampelleiste.gruen { background: var(--good); }
   .fein-ampelleiste.gelb { background: var(--warning); }
-  .fein-ampelleiste.rot { background: var(--ws-danger,#c0392b); }
+  .fein-ampelleiste.rot { background: #c0392b; }
   .fein-body { display: flex; gap: 1rem; padding: 0.9rem; flex-wrap: wrap; }
   .fein-foto {
     width: 220px;
@@ -97,30 +97,30 @@
   .fein-daten { color: var(--muted); font-size: 0.9rem; }
   .fein-linkbtn {
     display: inline-block;
-    background: var(--ws-warning,#e8631a);
-    color: var(--ws-on-accent,#fff) !important;
+    background: #e8631a;
+    color: #fff !important;
     font-weight: 700;
     padding: 0.4rem 0.9rem;
     border-radius: 7px;
     text-decoration: none;
     font-size: 0.9rem;
   }
-  .fein-linkbtn:hover { background: var(--ws-warning,#c95312); }
+  .fein-linkbtn:hover { background: #c95312; }
   .fein-form { flex: 0 1 280px; background: var(--panel-soft); border: 1px solid var(--line); border-radius: 8px; padding: 0.7rem; }
   .fein-form label { font-size: 0.78rem; font-weight: 700; color: var(--muted); margin-bottom: 0.1rem; }
   .fein-form .form-control, .fein-form .form-select { font-size: 0.88rem; }
-  .fein-kontakt { font-size: 0.9rem; background: var(--ws-panel-soft,#f0f7f2); border: 1px solid var(--ws-line,#cfe3d5); border-radius: 7px; padding: 0.4rem 0.7rem; }
+  .fein-kontakt { font-size: 0.9rem; background: #f0f7f2; border: 1px solid #cfe3d5; border-radius: 7px; padding: 0.4rem 0.7rem; }
   .fein-kontakt a { font-weight: 700; text-decoration: none; }
-  .fein-copybtn { border: 1px solid var(--line); background: var(--ws-panel,#fff); border-radius: 5px; font-size: 0.75rem; padding: 0.1rem 0.45rem; margin-left: 0.2rem; }
-  .fein-wabtn { display: inline-block; background: var(--ws-accent,#25d366); color: var(--ws-on-accent,#fff) !important; font-weight: 700; font-size: 0.78rem; padding: 0.15rem 0.55rem; border-radius: 6px; text-decoration: none; margin-left: 0.2rem; }
+  .fein-copybtn { border: 1px solid var(--line); background: #fff; border-radius: 5px; font-size: 0.75rem; padding: 0.1rem 0.45rem; margin-left: 0.2rem; }
+  .fein-wabtn { display: inline-block; background: #25d366; color: #fff !important; font-weight: 700; font-size: 0.78rem; padding: 0.15rem 0.55rem; border-radius: 6px; text-decoration: none; margin-left: 0.2rem; }
   .fein-sternbtn {
     border: 1px solid var(--line);
-    background: var(--ws-panel,#fff);
+    background: #fff;
     border-radius: 7px;
     padding: 0.35rem 0.7rem;
     font-size: 0.9rem;
   }
-  .fein-sternbtn.aktiv { background: var(--ws-panel-soft,#fdf3dd); border-color: var(--warning); }
+  .fein-sternbtn.aktiv { background: #fdf3dd; border-color: var(--warning); }
   .fein-scan-kopf {
     display: flex;
     flex-wrap: wrap;
