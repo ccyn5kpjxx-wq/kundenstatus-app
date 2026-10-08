@@ -1,1 +1,43 @@
 :root{--ink:#183c35;--muted:#667b75;--line:#dfe7e1;--paper:#fff;--canvas:#f2f6f2;--accent:#173f35;--orange:#f3d4ac;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink);background:var(--canvas)}*{box-sizing:border-box}body{margin:0}a{color:var(--ink)}.access-header{max-width:1160px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:28px 32px;font-size:13px;color:var(--muted)}.brand{font-size:21px;font-weight:850;letter-spacing:1.3px;text-decoration:none}.brand span{display:block;font-size:10px;font-weight:500;letter-spacing:.3px;margin-top:3px}.access-main{max-width:1050px;margin:35px auto 70px;padding:0 32px;display:grid;grid-template-columns:1fr 1fr;gap:70px;align-items:start}.access-intro{padding-top:36px}.eyebrow{font-size:10px;font-weight:800;letter-spacing:1.6px;color:var(--muted)}h1{font-size:clamp(34px,4.5vw,56px);font-weight:750;letter-spacing:-1.8px;line-height:1.08;margin:15px 0 22px}h2{font-size:24px;letter-spacing:-.7px;margin:10px 0 14px}h3{font-size:18px;margin:0 0 8px}p{line-height:1.6;margin:10px 0 18px}.muted{color:var(--muted)}.small{font-size:12px}.steps{list-style:none;counter-reset:step;padding:0;margin-top:36px;display:grid;gap:18px;font-size:14px;font-weight:650}.steps li{display:flex;align-items:center;gap:14px;counter-increment:step}.steps li:before{content:counter(step);width:32px;height:32px;border:1px solid var(--line);background:#fff;border-radius:50%;display:grid;place-items:center}.access-card{background:var(--paper);border:1px solid var(--line);border-radius:24px;padding:30px;box-shadow:0 8px 35px #173f3504}.access-card form{display:grid;gap:17px;margin-top:20px}label{display:grid;gap:8px;font-size:13px;font-weight:650}input{font:inherit;border:1px solid var(--line);border-radius:12px;padding:14px;min-height:48px;min-width:0;width:100%;background:#fcfdfb;color:var(--ink)}input:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid #bece7d;outline-offset:3px}button{font:inherit;cursor:pointer;min-height:48px;border-radius:13px;border:1px solid var(--line);padding:13px 17px;font-size:13px;font-weight:700}button:disabled{opacity:.55;cursor:wait}.primary-button{background:var(--accent);border-color:var(--accent);color:white;display:flex;align-items:center;justify-content:space-between;text-align:left;gap:16px}.secondary-button{background:#f0f5ea;color:var(--ink)}.setup-status{font-size:13px;border-radius:12px;background:#f0f5ea;padding:13px 15px}.is-error{background:#fff1e4;color:#873f1f}.access-footnote{margin:25px 0 0;font-size:11px;line-height:1.6;color:var(--muted)}[hidden]{display:none!important}footer{text-align:center;padding:20px;font-size:11px;color:var(--muted)}.admin-main{max-width:1080px;margin:15px auto 60px;padding:0 32px}.admin-nav{display:flex;gap:22px;flex-wrap:wrap;font-size:12px;margin-bottom:34px}.lead{max-width:620px;color:var(--muted)}.bulk-invite{margin:28px 0}.checkbox-label{display:flex;gap:12px;align-items:flex-start;font-weight:500;line-height:1.6}.checkbox-label input{flex:0 0 20px;width:20px;height:20px;min-height:20px;margin:2px 0}.employee-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.employee-title{display:flex;align-items:center;gap:14px}.employee-title h2{font-size:20px;margin:0}.employee-title p{margin:4px 0 0;font-size:12px}.avatar-initial{display:grid;place-items:center;width:44px;height:44px;border-radius:15px;background:#edf3e4;font-size:18px;font-weight:700}.badge{font-size:11px;background:#f1f4ef;display:inline-block;border-radius:8px;padding:6px 9px}.generated-links{border-color:#b9c8a3;background:#fcfff8;margin:26px 0}.generated-link{border-top:1px solid var(--line);padding:20px 0}.generated-link input{font-family:ui-monospace,monospace;font-size:11px;margin:10px 0;overflow-wrap:anywhere}.generated-link button{width:auto}#password-help{margin:-9px 0 0}#copy-status:empty{display:none}@media(max-width:700px){.access-header{padding:20px;align-items:flex-start}.access-header>span{max-width:130px;text-align:right;font-size:11px}.access-main{display:block;margin:5px auto 30px;padding:0 18px}.access-intro{padding-top:14px}.access-intro h1{font-size:38px}.access-intro>p{font-size:14px}.steps{display:flex;gap:8px;justify-content:space-between;margin:22px 0 26px;font-size:10px}.steps li{gap:5px}.steps li:before{width:24px;height:24px;flex-shrink:0}.access-card{padding:24px 20px;border-radius:20px}.admin-main{padding:0 18px}.employee-grid{grid-template-columns:1fr}.admin-nav{gap:16px}.primary-button{font-size:12px}.access-footnote{font-size:11px}}
+
+/* Employee access overview; existing setup form keeps its established palette. */
+.access-shortcuts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:28px 0}
+.access-shortcut{text-decoration:none;transition:border-color .15s,box-shadow .15s}
+.access-shortcut:hover{border-color:#aabcae;box-shadow:0 8px 28px #173f350b}
+.access-shortcut h2{font-size:21px;display:flex;justify-content:space-between;gap:12px;margin:12px 0 8px}
+.access-shortcut p{font-size:13px;color:var(--muted);margin:0}
+.login-link-card{margin:26px 0 18px}
+.login-link-heading,.access-section-heading{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}
+.login-link-heading h2{margin-bottom:0}
+.copy-link-row{display:flex;gap:10px;margin-top:9px;align-items:stretch}
+.copy-link-row input{flex:1;font-size:12px}
+.copy-link-row button{flex:0 0 auto}
+.button-link{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:48px;border:1px solid var(--line);border-radius:13px;padding:13px 17px;font-size:13px;font-weight:700;text-decoration:none;text-align:center}
+.access-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.access-section-heading{margin:30px 0 16px}
+.access-section-heading h2{margin:0}
+.access-section-heading .badge{margin:0}
+.employee-title>div{min-width:0;overflow-wrap:anywhere}
+.avatar-initial{flex-shrink:0}
+.badge-pending{background:#fff3df;color:#7a5420}
+.invitation-state{font-size:13px;min-height:42px;margin:4px 0 14px}
+.employee-rights{font-size:12px;margin:0 0 18px;line-height:1.7}
+.employee-login-copy{width:100%;text-align:left}
+.employee-card form .access-footnote{margin:0;font-size:11px}
+.password-help{border-top:1px solid var(--line);margin-top:18px;padding-top:16px}
+.password-help summary,.bulk-invite summary{cursor:pointer;font-size:13px;font-weight:650;line-height:1.6}
+.password-help summary{color:var(--muted)}
+.password-help summary:focus-visible,.bulk-invite summary:focus-visible{outline:3px solid #bece7d;outline-offset:4px}
+.bulk-invite{margin-top:28px}
+.admin-nav a[aria-current="page"]{font-weight:800;text-decoration-thickness:2px}
+@media(max-width:700px){
+  .access-shortcuts{grid-template-columns:1fr;gap:12px;margin:22px 0}
+  .access-shortcut{padding:20px}
+  .access-shortcut h2{font-size:20px}
+  .copy-link-row{flex-direction:column}
+  .copy-link-row button{width:100%;text-align:center}
+  .login-link-heading{align-items:flex-start;gap:16px}
+  .login-link-heading .button-link{width:100%}
+  .invitation-state{min-height:0}
+  .admin-main>h1{font-size:clamp(31px,9vw,44px);letter-spacing:-1.3px;overflow-wrap:anywhere}
+}

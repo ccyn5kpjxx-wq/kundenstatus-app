@@ -48,16 +48,19 @@
     });
     window.addEventListener('pageshow', () => { submit.disabled = false; submit.textContent = 'Zugang einrichten und Profil öffnen →'; });
   }
+  const loginLink = document.getElementById('employee-login-link');
+  const loginAnchor = document.getElementById('employee-login-anchor');
+  if (loginLink && loginAnchor) loginLink.value = loginAnchor.href;
   const copyStatus = document.getElementById('copy-status');
   document.querySelectorAll('[data-copy-link]').forEach(button => button.addEventListener('click', async () => {
     const input = document.getElementById(button.dataset.copyLink);
     if (!input) return;
     try {
       await navigator.clipboard.writeText(input.value);
-      copyStatus.textContent = 'Link kopiert. Bitte nur an diese Person weitergeben.';
+      if (copyStatus) copyStatus.textContent = button.dataset.copyMessage || 'Link kopiert. Bitte nur an diese Person weitergeben.';
     } catch (_) {
       input.focus(); input.select();
-      copyStatus.textContent = 'Bitte den markierten Link kopieren und nur an diese Person weitergeben.';
+      if (copyStatus) copyStatus.textContent = input === loginLink ? 'Bitte den markierten Anmeldelink kopieren. Die jeweilige Mitarbeiter-ID mitgeben.' : 'Bitte den markierten Link kopieren und nur an diese Person weitergeben.';
     }
   }));
 })();

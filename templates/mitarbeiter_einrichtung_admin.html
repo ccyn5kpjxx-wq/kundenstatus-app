@@ -1,35 +1,49 @@
 <!doctype html>
 <html lang="de">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Mitarbeiter einladen · Gärtner</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=farben-2">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Mitarbeiterzugänge · Gärtner</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=zugaenge-1">
 <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=farben-2">
-<script defer src="{{ url_for('static', filename='mitarbeiter_einrichtung.js') }}?v=einladung-1"></script></head>
+<script defer src="{{ url_for('static', filename='mitarbeiter_einrichtung.js') }}?v=zugaenge-1"></script></head>
 <body>
 {% include '_werkstatt_admin_header.html' %}
 <main class="admin-main">
-<nav class="admin-nav" aria-label="Bereiche der Werkstattleitung"><a href="/admin/mitarbeiter">Mitarbeiter</a><a href="/admin/arbeitszeit">Arbeitszeiten</a><a href="/werkstatt/assistent/urlaub/verwaltung">Urlaub &amp; Anträge</a><a href="/werkstatt/assistent/rechte">Rechte verwalten</a><a href="/admin/assistent-bestellungen">Bestellordner</a></nav>
-<span class="eyebrow">PERSÖNLICHE ZUGÄNGE</span><h1>Ein Link.<br>Ein eigenes Konto.</h1>
-<p class="lead">Jeder Mitarbeiter wählt sein Passwort selbst und bestätigt es zweimal. Anschließend öffnet sich sein persönliches Profil mit Bestellung, Arbeitszeit, Urlaub, Lohnzetteln und Sprachassistent.</p>
+<nav class="admin-nav" aria-label="Bereiche der Werkstattleitung"><a href="/admin/mitarbeiter">Mitarbeiter</a><a href="/admin/mitarbeiter/einrichtung" aria-current="page">Mitarbeiterzugänge</a><a href="/admin/arbeitszeit">Arbeitszeiten</a><a href="/werkstatt/assistent/urlaub/verwaltung">Urlaub &amp; Anträge</a><a href="/werkstatt/assistent/rechte">Rechte verwalten</a><a href="/admin/assistent-bestellungen">Bestellordner</a></nav>
+<span class="eyebrow">ANMELDUNG &amp; EINLADUNGEN</span><h1>Mitarbeiterzugänge</h1>
+<p class="lead">Alle aktiven Konten an einem Ort. Den Anmeldelink kopieren und zusammen mit der Mitarbeiter-ID an die jeweilige Person schicken. Bereits eingerichtete Zugänge bleiben bestehen.</p>
 {% for category,message in get_flashed_messages(with_categories=true) %}<p role="status" class="setup-status{% if category == 'error' %} is-error{% endif %}">{{ message }}</p>{% endfor %}
 {% if error %}<p role="alert" class="setup-status is-error">{{ error }}</p>{% endif %}
+<section class="access-shortcuts" aria-label="Deine Zugänge">
+<a class="access-card access-shortcut" href="/admin/cockpit"><span class="eyebrow">WERKSTATTLEITUNG</span><h2>Mein Chef-Cockpit <span aria-hidden="true">↗</span></h2><p>Mitarbeiter, Aufträge und Bestellungen verwalten.</p></a>
+<a class="access-card access-shortcut" href="/werkstatt/mein-konto" target="_blank" rel="noopener"><span class="eyebrow">PERSÖNLICHER ZUGANG</span><h2>Mein Profil öffnen <span aria-hidden="true">↗</span></h2><p>Mit eigener Mitarbeiter-ID und persönlichem Passwort anmelden.</p></a>
+</section>
 {% set links = created_invitations or ([created_invitation] if created_invitation else []) %}
 {% if links %}
-<section class="access-card generated-links" aria-labelledby="generated-title"><span class="eyebrow">JETZT PERSÖNLICH WEITERGEBEN</span><h2 id="generated-title">Deine Einrichtungslinks</h2><p>Jeden Link nur an die zugehörige Person schicken. Drei Tage gültig, einmal benutzbar. Die Links werden nur jetzt angezeigt; beim erneuten Erstellen wird der vorige Link ungültig.</p>
-{% for link in links %}<div class="generated-link"><h3>{{ link.name }}</h3><label for="invite-link-{{ link.employee_id }}">Persönlicher Link · Mitarbeiter-ID {{ link.employee_id }}</label><input id="invite-link-{{ link.employee_id }}" type="text" value="{{ link.url }}" readonly autocomplete="off"><button type="button" class="secondary-button" data-copy-link="invite-link-{{ link.employee_id }}">Link kopieren</button></div>{% endfor %}
-<p id="copy-status" role="status" aria-live="polite"></p></section>
+<section class="access-card generated-links" aria-labelledby="generated-title"><span class="eyebrow">JETZT PERSÖNLICH WEITERGEBEN</span><h2 id="generated-title">Deine neuen Einrichtungslinks</h2><p>Nur an die jeweils genannte Person schicken. Drei Tage gültig, einmal benutzbar. Die Links werden nur jetzt angezeigt; ein neuer Link ersetzt den vorigen.</p>
+{% for link in links %}<div class="generated-link"><h3>{{ link.name }}</h3><label for="invite-link-{{ link.employee_id }}">Persönlicher Link · Mitarbeiter-ID {{ link.employee_id }}</label><input id="invite-link-{{ link.employee_id }}" type="text" value="{{ link.url }}" readonly autocomplete="off"><div class="access-actions"><button type="button" class="secondary-button" data-copy-link="invite-link-{{ link.employee_id }}">Einrichtungslink kopieren</button><span class="muted small">Danach im persönlichen WhatsApp-Chat der genannten Person einfügen.</span></div></div>{% endfor %}
+</section>
 {% endif %}
-<section class="access-card bulk-invite"><h2>Alle aktiven Mitarbeiter einladen</h2><p>Bestehende Passwörter bleiben bis zur eigenen Passwortwahl gültig. Materialrechte und offene Bestellungen bleiben erhalten.</p><form method="post" action="/admin/mitarbeiter/einrichtung/alle">{{ csrf_field()|safe }}
-<label class="checkbox-label"><input type="checkbox" name="grant_material" value="on">Falls noch kein Zugang besteht: Materialzugang zum Lesen und Bestellen freigeben, höchstens 250 € brutto im gemeinsamen Kostenrahmen. Kein Admin- oder Bankzugang.</label>
-<button class="primary-button">Persönliche Links für alle erstellen <span aria-hidden="true">→</span></button></form></section>
+<section class="access-card login-link-card" aria-labelledby="login-link-title">
+<div class="login-link-heading"><div><span class="eyebrow">FÜR BEREITS EINGERICHTETE KONTEN</span><h2 id="login-link-title">Der tägliche Anmeldelink</h2></div><a id="employee-login-anchor" class="secondary-button button-link" href="/werkstatt/materialbestellung?next=profil" target="_blank" rel="noopener">Anmeldung öffnen <span aria-hidden="true">↗</span></a></div>
+<p>Dieser Link bleibt gleich. Jeder meldet sich mit seiner eigenen Mitarbeiter-ID und seinem selbst gewählten Passwort an.</p>
+<label for="employee-login-link">Anmeldung zum Mitarbeiterportal</label><div class="copy-link-row"><input id="employee-login-link" type="text" value="/werkstatt/materialbestellung?next=profil" readonly autocomplete="off"><button type="button" class="secondary-button" data-copy-link="employee-login-link" data-copy-message="Anmeldelink kopiert. Die jeweilige Mitarbeiter-ID findest du unten bei der Person.">Anmeldelink kopieren</button></div>
+<p class="access-footnote">Passwörter werden nicht im Klartext gespeichert und können nicht angezeigt werden. Bei Bedarf wählt der Mitarbeiter über einen neuen persönlichen Link selbst ein neues Passwort.</p>
+</section>
+<p id="copy-status" class="setup-status" role="status" aria-live="polite"></p>
+<div class="access-section-heading"><h2>Aktive Mitarbeiter</h2><span class="badge">{{ employees|length }} Konten</span></div>
 <div class="employee-grid">
 {% for employee in employees %}
-<section class="access-card employee-card"><div class="employee-title"><span class="avatar-initial" aria-hidden="true">{{ employee.name[:1] }}</span><div><h2>{{ employee.name }}</h2><p class="muted">Mitarbeiter-ID {{ employee.id }}</p></div></div>
-<p class="badge">{% if employee.has_password %}Persönliches Passwort eingerichtet{% else %}Passwort noch nicht gewählt{% endif %}</p>
-<p class="muted">{% if employee.invitation_state == 'pending' %}Ein Einrichtungslink wartet auf die Passwortwahl.{% elif employee.invitation_state == 'used' %}Die Einladung wurde bereits eingelöst.{% elif employee.invitation_state == 'expired' %}Der letzte Einrichtungslink ist abgelaufen.{% elif employee.invitation_state == 'stale' %}Der vorige Link gilt nach einer Zugangsänderung nicht mehr.{% else %}Noch kein Einrichtungslink erstellt.{% endif %}</p>
-{% if employee.has_rights %}<p class="small">{{ 'Aufträge lesen' if employee.lesen else 'Leserecht gesperrt' }} · {{ 'Material bestellen' if employee.einkaufen else 'Keine Materialbestellungen' }}</p>{% endif %}
+<section class="access-card employee-card" aria-labelledby="employee-name-{{ employee.id }}"><div class="employee-title"><span class="avatar-initial" aria-hidden="true">{{ employee.name[:1] }}</span><div><h2 id="employee-name-{{ employee.id }}">{{ employee.name }}</h2><p class="muted">Anmelden mit Mitarbeiter-ID <strong>{{ employee.id }}</strong></p></div></div>
+<p class="badge{% if not employee.has_password %} badge-pending{% endif %}">{% if employee.has_password %}Zugang eingerichtet{% else %}Passwort noch nicht gewählt{% endif %}</p>
+<p class="invitation-state muted">{% if employee.invitation_state == 'pending' %}Ein persönlicher Link wartet auf die Passwortwahl.{% elif employee.invitation_state == 'used' %}Die Einladung wurde bereits eingelöst.{% elif employee.invitation_state == 'expired' %}Der letzte Einrichtungslink ist abgelaufen.{% elif employee.invitation_state == 'stale' %}Der vorige Link gilt nach einer Zugangsänderung nicht mehr.{% else %}Noch kein Einrichtungslink erstellt.{% endif %}</p>
+{% if employee.has_rights %}<p class="employee-rights">{{ 'Aufträge lesen' if employee.lesen else 'Leserecht gesperrt' }} · {{ 'Material bestellen' if employee.einkaufen else 'Keine Materialbestellungen' }}</p>{% endif %}
+{% if employee.has_password %}<button type="button" class="secondary-button employee-login-copy" data-copy-link="employee-login-link" data-copy-message="Anmeldelink für {{ employee.name }} kopiert. Mitarbeiter-ID {{ employee.id }} mitgeben.">Anmeldelink kopieren</button>{% endif %}
+{% if employee.has_password %}<details class="password-help"><summary>Passwort vergessen?</summary>{% endif %}
 <form method="post" action="/admin/mitarbeiter/{{ employee.id }}/einrichtungslink">{{ csrf_field()|safe }}
 {% if not employee.has_rights %}<label class="checkbox-label"><input type="checkbox" name="grant_material" value="on" required>Persönlichen Materialzugang freigeben: lesen und bestellen, höchstens 250 € brutto im gemeinsamen Rahmen. Kein Admin- oder Bankzugang.</label>{% endif %}
-<button class="secondary-button">{{ 'Neuen Einrichtungslink erstellen' if employee.invitation_state != 'none' else 'Einrichtungslink erstellen' }}</button></form>
+<button class="{{ 'secondary-button' if employee.has_password else 'primary-button' }}">{{ 'Link zum Passwort-Neusetzen erstellen' if employee.has_password else ('Neuen Einrichtungslink erstellen' if employee.invitation_state != 'none' else 'Einrichtungslink erstellen') }}</button><p class="access-footnote">{% if employee.has_password %}Das bisherige Passwort bleibt bis zur neuen Passwortwahl gültig. {% endif %}Ein neuer Link ersetzt einen noch offenen Einrichtungslink.{% if employee.has_rights %} Die Rechte bleiben erhalten.{% endif %}</p></form>
+{% if employee.has_password %}</details>{% endif %}
 </section>{% else %}<p>Noch keine aktiven Mitarbeiter angelegt.</p>{% endfor %}
 </div>
+<details class="access-card bulk-invite"><summary>Weitere Aktion: alle aktiven Mitarbeiter einladen</summary><p>Erstellt für alle aktiven Personen einen neuen Link und ersetzt ihre bisherigen offenen Links. Für einzelne Mitarbeiter bitte die jeweilige Karte oben verwenden.</p><form method="post" action="/admin/mitarbeiter/einrichtung/alle">{{ csrf_field()|safe }}
+<label class="checkbox-label"><input type="checkbox" name="grant_material" value="on">Falls noch kein Zugang besteht: Materialzugang zum Lesen und Bestellen freigeben, höchstens 250 € brutto im gemeinsamen Kostenrahmen. Kein Admin- oder Bankzugang.</label><button class="secondary-button">Persönliche Links für alle erstellen</button></form></details>
 </main><footer>Gärtner GmbH Karosserie + Lack · Werkstattportal</footer></body></html>
