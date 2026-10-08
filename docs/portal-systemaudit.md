@@ -68,6 +68,34 @@ Mitarbeiter-IDs und eine direkte Cursoriteration in der Belegansicht. Beide
 Ursachen sind bereits in der Ausgangsbasis korrigiert. Sie werden nicht
 erneut als neue Reparatur gezählt.
 
+### Abschlusslauf auf dem integrierten Stand
+
+Der eingefrorene Laufzeitstand `fabb4f5e013b222f2d4a5cb35ecf8225fad4ed45`
+wurde mit 72 isolierten Testskripten geprüft. Konsolidiert bestanden 71;
+das MOS-PostgreSQL-Skript benötigt einen separaten lokalen Testcluster und
+wurde nicht gegen die Betriebsdatenbank ausgeführt. 57 Skripte meldeten
+1.023 unittest-Fälle: 1.022 erfolgreich und ein übersprungener Symlinkfall,
+weil Windows das Erstellen des Test-Symlinks nicht erlaubte. Zusätzlich
+bestanden 287 Zeilen mit eigenen Checks; diese werden nicht als weitere
+unittest-Fälle gezählt.
+
+Der ursprüngliche parallele Abschlusslauf bleibt unverändert dokumentiert:
+69 PASS, eine fehlerhafte abgeleitete Liefereingang-Testvorlage, ein
+120-Sekunden-Budgetabbruch der umfangreichen Dialogsuite und der genannte
+Umgebungsskip. Die Testvorlage wurde separat korrigiert, ohne Produktcode
+oder Sicherheitsprüfungen zu entfernen; alle 15 Fälle bestanden danach.
+Die unveränderten 93 Dialogfälle bestanden einzeln mit 180 Sekunden Budget
+in 153,869 Sekunden. Zwei mehrteilige Fälle benötigten 17,286 bzw. 23,452
+Sekunden. Daraus wird keine gleich lange Produktionsanfrage abgeleitet.
+
+Die nachfolgende Integration enthält denselben Laufzeitcode wie der
+Snapshot; Unterschiede betreffen ausschließlich diese Testvorlage und
+Dokumentation. Rohdaten, ursprüngliche Ergebnisse und beide Wiederholungen
+liegen lokal unter `C:/tmp/gaertner-final-audit-20261008/run-fabb4f5e013b/`
+in `results.json`, `consolidated-results.json` und
+`consolidated-summary.json`. Es wurden keine echten Kundenbestellungen,
+Nachrichten oder Produktionsdaten für den breiten Testlauf verwendet.
+
 ## Betrieb und Grenzen
 
 Automatische Deploys bleiben ausgeschaltet. Die gebündelten technischen
