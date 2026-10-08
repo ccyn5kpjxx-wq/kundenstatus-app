@@ -134,9 +134,9 @@ class OrderDelivery:
         orders = {}
         with comparison.db() as db:
             keys = ['material:' + str(row['id']) for row in db.execute(
-                "SELECT id FROM einkauf_material_dialoge WHERE state IN ('external_pending','external_sent') ORDER BY id DESC")]
+                "SELECT id FROM einkauf_material_dialoge WHERE state IN ('external_pending','external_sent') ORDER BY id DESC").fetchall()]
             keys += ['order:' + row['id'] for row in db.execute(
-                'SELECT id FROM assistent_bestellanforderungen ORDER BY created_at DESC,id DESC')]
+                'SELECT id FROM assistent_bestellanforderungen ORDER BY created_at DESC,id DESC').fetchall()]
             for key in keys:
                 try:
                     order = comparison._order(db, key)

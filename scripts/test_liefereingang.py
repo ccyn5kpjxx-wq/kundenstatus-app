@@ -102,6 +102,32 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(html.count('value="material:1"'), 1)
         self.assertNotIn('value="material:2"', html)
 
+    def test_intake_choices_use_actual_noniterable_postgres_cursor_contract(self):
+        import ast
+        source = Path(__file__).resolve().parents[1].joinpath('app.py').read_text(encoding='utf-8')
+        node = next(item for item in ast.parse(source).body
+                    if isinstance(item, ast.ClassDef) and item.name == 'PostgresCursor')
+        namespace = {}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), '<actual-postgres-cursor>', 'exec'), namespace)
+        postgres_cursor = namespace['PostgresCursor']
+        get_db = self.p.get_db
+
+        class PostgresReadTransport:
+            def __init__(self):
+                self.raw = get_db()
+            def execute(self, sql, params=()):
+                cursor = self.raw.execute(sql, params)
+                return postgres_cursor(cursor.fetchall() if cursor.description else None,
+                    lastrowid=cursor.lastrowid, rowcount=cursor.rowcount)
+            def __getattr__(self, name):
+                return getattr(self.raw, name)
+
+        with patch.object(self.p, 'get_db', side_effect=PostgresReadTransport):
+            self.assertEqual([order['key'] for order in self.service.choices()], ['material:1'])
+            response = self.client.get('/admin/assistent-bestellungen/eingang/ansicht')
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('Lieferschein hochladen &amp; prüfen', response.get_data(as_text=True))
+
     def test_upload_analysis_assignment_end_to_end_no_order_changes(self):
         before = self.rows('SELECT * FROM einkauf_material_dialoge')
         with patch.object(self.fixture.f.manager, 'tick', side_effect=AssertionError('No dispatch')):
