@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import io
 import json
+import math
 from pathlib import Path
 import re
 import secrets
@@ -27,6 +28,8 @@ from zoneinfo import ZoneInfo
 import fitz
 from flask import Blueprint, abort, flash, redirect, render_template, request, send_file, session
 from PIL import Image
+from pypdf import PdfReader
+from pypdf.generic import ArrayObject, DictionaryObject, StreamObject
 from werkzeug.utils import secure_filename
 
 
@@ -254,7 +257,67 @@ def _validate_docx(raw):
         raise ValueError(error) from None
 
 
-def _document(file, *, label='Lohnzettel', allow_docx=False):
+def _validate_repaired_contract_pdf(raw, document):
+    """Accept an intact original only when a second strict parser agrees.
+
+    MuPDF can flag historical xref numbering as repaired even though pypdf can
+    read every original page strictly. No repaired/rewritten bytes are saved.
+    """
+    try:
+        with io.BytesIO(raw) as stream:
+            reader = PdfReader(stream, strict=True)
+            if reader.is_encrypted:
+                raise ValueError()
+            root = reader.root_object
+            tree = root.get('/Pages').get_object()
+            pages = reader.pages
+            if (root.get('/Type') != '/Catalog' or not isinstance(tree, DictionaryObject)
+                    or tree.get('/Type') != '/Pages' or tree.get('/Count') != document.page_count
+                    or len(pages) != document.page_count or not 1 <= len(pages) <= 100):
+                raise ValueError()
+            total_contents = 0
+            for number, page in enumerate(pages):
+                box = [float(value) for value in page.mediabox]
+                if (page.get('/Type') != '/Page' or len(box) != 4
+                        or not all(math.isfinite(value) for value in box)
+                        or not 0 < box[2] - box[0] <= 14400
+                        or not 0 < box[3] - box[1] <= 14400):
+                    raise ValueError()
+                resources = page.get('/Resources')
+                if resources is not None and not isinstance(resources.get_object(), DictionaryObject):
+                    raise ValueError()
+                contents = page.get('/Contents')
+                if contents is not None:
+                    contents = contents.get_object()
+                    members = contents if isinstance(contents, ArrayObject) else [contents]
+                    if len(members) > 128:
+                        raise ValueError()
+                    page_contents = 0
+                    for member in members:
+                        member = member.get_object()
+                        if not isinstance(member, StreamObject):
+                            raise ValueError()
+                        data = member.get_data()
+                        page_contents += len(data)
+                        total_contents += len(data)
+                        if page_contents > 1024 * 1024 or total_contents > 8 * 1024 * 1024:
+                            raise ValueError()
+                    # Resolve and parse every page's operators, without executing
+                    # PDF actions, OCR or extracting private text.
+                    parsed = page.get_contents()
+                    if parsed is None or len(parsed.operations) > 100_000:
+                        raise ValueError()
+                mupdf_page = document.load_page(number)
+                scale = 128 / max(mupdf_page.rect.width, mupdf_page.rect.height)
+                thumbnail = mupdf_page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csGRAY, alpha=False)
+                if (not 0 < thumbnail.width <= 129 or not 0 < thumbnail.height <= 129
+                        or not thumbnail.samples):
+                    raise ValueError()
+    except Exception:
+        raise ValueError('Das PDF-Original ist nicht mit zwei unabhängigen Prüfungen vollständig lesbar.') from None
+
+
+def _document(file, *, label='Lohnzettel', allow_docx=False, allow_repaired_pdf=False):
     formats = 'PDF, DOCX, JPEG oder PNG' if allow_docx else 'PDF, JPEG oder PNG'
     if file is None or not file.filename:
         selection = 'Einen Lohnzettel' if label == 'Lohnzettel' else label
@@ -272,12 +335,15 @@ def _document(file, *, label='Lohnzettel', allow_docx=False):
             mime = DOCX_MIME
         elif raw.startswith(b'%PDF-') and extension == '.pdf':
             with fitz.open(stream=raw, filetype='pdf') as document:
-                if document.is_encrypted or document.is_repaired or not 1 <= document.page_count <= 100:
+                if (document.is_encrypted or not 1 <= document.page_count <= 100
+                        or (document.is_repaired and not allow_repaired_pdf)):
                     raise ValueError('PDF muss vollständig lesbar sein und 1 bis 100 Seiten enthalten.')
                 for number in range(document.page_count):
                     page = document.load_page(number)
                     if page.rect.is_empty or page.rect.is_infinite:
                         raise ValueError('PDF enthält eine ungültige Seite.')
+                if document.is_repaired:
+                    _validate_repaired_contract_pdf(raw, document)
                 mime = 'application/pdf'
         elif extension in ('.png', '.jpg', '.jpeg'):
             with warnings.catch_warnings():
@@ -301,7 +367,7 @@ def _document(file, *, label='Lohnzettel', allow_docx=False):
 
 
 def _contract_document(file):
-    return _document(file, label='Personalunterlage', allow_docx=True)
+    return _document(file, label='Personalunterlage', allow_docx=True, allow_repaired_pdf=True)
 
 
 class EmployeePortal:

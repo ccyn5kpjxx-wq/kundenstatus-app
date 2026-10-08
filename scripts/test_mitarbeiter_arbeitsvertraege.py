@@ -7,6 +7,7 @@ from contextlib import closing
 import io
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 import struct
@@ -18,6 +19,7 @@ from unittest.mock import patch
 
 import fitz
 from PIL import Image
+from pypdf import PdfReader, PdfWriter
 from werkzeug.datastructures import MultiDict
 
 ISOLATED = tempfile.TemporaryDirectory(prefix='employee-contract-test-')
@@ -38,6 +40,21 @@ def contract_pdf(text='Synthetic employee contract'):
     with fitz.open() as document:
         document.new_page().insert_text((40, 40), text)
         return document.tobytes()
+
+
+def repaired_contract_pdf():
+    """Real non-zero xref numbering: MuPDF repairs, strict pypdf reads intact pages."""
+    with fitz.open() as document:
+        for number in range(4):
+            document.new_page().insert_text((40,40),'Synthetic contract page '+str(number+1))
+        source=document.tobytes()
+    reader=PdfReader(io.BytesIO(source),strict=True)
+    writer=PdfWriter()
+    for page in reader.pages: writer.add_page(page)
+    stream=io.BytesIO(); writer.write(stream)
+    raw=stream.getvalue()
+    assert b'\nxref\n0 ' in raw
+    return raw.replace(b'\nxref\n0 ',b'\nxref\n1 ',1)
 
 
 def contract_docx(*, content_type=None, document=None, extra=()):
@@ -203,6 +220,36 @@ class ContractTests(TestCase):
         self.assertIn('HINFAELLIG_Entwurf.docx', response.headers['Content-Disposition'])
         self.upload(raw=original, mid=2, filename='other.docx')
         self.assertEqual(self.client.get(self.path(self.rows()[1])).status_code,404)
+
+    def test_verified_repaired_pdf_original_is_downloaded_byte_exact(self):
+        original=repaired_contract_pdf()
+        with fitz.open(stream=original,filetype='pdf') as document:
+            self.assertEqual(document.page_count,4)
+            self.assertTrue(document.is_repaired)
+        with patch('pypdf._reader.logger_warning'):
+            self.assertEqual(self.upload(raw=original,filename='historical-original.pdf',
+                titel='Unterzeichneter Kooperationszusatz').status_code,303)
+        row=self.rows()[0]
+        response=self.client.get(self.path(row))
+        self.assertEqual(response.data,original)
+        self.assertEqual(base64.b64decode(row['original_base64']),original)
+        self.assertIn('attachment;',response.headers['Content-Disposition'])
+        self.assertEqual(response.headers['X-Content-Type-Options'],'nosniff')
+
+    def test_repaired_pdf_is_still_rejected_by_payroll(self):
+        self.assertEqual(self.base.upload(raw=repaired_contract_pdf(),filename='payroll.pdf').status_code,400)
+        with database() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM mitarbeiter_lohnzettel').fetchone()[0],0)
+
+    def test_repaired_pdf_with_broken_xref_or_unreadable_last_page_is_rejected(self):
+        original=repaired_contract_pdf()
+        broken_xref=original.rsplit(b'startxref',1)[0]+b'startxref\n0\n%%EOF\n'
+        contents=list(re.finditer(rb'/Contents\s+(?:\[\s*)?\d+ 0 R',original))[-1]
+        broken_page=original[:contents.start()]+contents.group().replace(b' 0 R',b' 9 R')+original[contents.end():]
+        for raw in (broken_xref,broken_page,original[:-40]):
+            with patch('pypdf._reader.logger_warning'):
+                self.assertEqual(self.upload(raw=raw,filename='broken-original.pdf').status_code,400)
+        self.assertEqual(self.rows(),[])
 
     def test_docx_is_not_accepted_for_payroll_or_other_extensions(self):
         original = contract_docx()
