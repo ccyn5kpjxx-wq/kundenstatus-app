@@ -1,0 +1,12 @@
+.build/
+.swiftpm/
+*.xcodeproj/
+DerivedData/
+build/
+GaertnerMitarbeiter/Info.plist
+*.xcarchive/
+*.ipa
+*.mobileprovision
+*.p12
+*.xcuserstate
+xcuserdata/

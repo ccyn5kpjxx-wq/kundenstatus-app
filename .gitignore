@@ -21,6 +21,8 @@ instance/
 *.key
 *.p12
 *.json
+!native/ios/GaertnerMitarbeiter/Assets.xcassets/**/Contents.json
+!native/ios/GaertnerMitarbeiter/Assets.xcassets/Contents.json
 
 # Local database and uploads
 data/

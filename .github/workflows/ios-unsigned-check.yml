@@ -1,0 +1,63 @@
+name: iOS unsigned check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  simulator-build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Show build tools
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Core URL and QR safety tests
+        working-directory: native/ios/GaertnerCore
+        run: swift test
+      - name: Install project generator
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: native/ios
+        run: xcodegen generate --spec project.yml
+      - name: Build for simulator without signing
+        working-directory: native/ios
+        run: >-
+          xcodebuild -project GaertnerMitarbeiter.xcodeproj
+          -scheme GaertnerMitarbeiter -configuration Debug
+          -sdk iphonesimulator -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+      - name: Launch fresh simulator and capture generic login screen
+        working-directory: native/ios
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, time
+          inventory = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j']))
+          candidates = [device for runtime, devices in inventory['devices'].items()
+                        if 'iOS' in runtime for device in devices
+                        if device.get('isAvailable') and device['name'].startswith('iPhone')]
+          device = candidates[0]
+          simulator_id = device['udid']
+          print('Simulator:', device['name'])
+          try:
+              subprocess.run(['xcrun','simctl','boot',simulator_id], check=True)
+              subprocess.run(['xcrun','simctl','bootstatus',simulator_id,'-b'], check=True, timeout=180)
+              subprocess.run(['xcrun','simctl','install',simulator_id,'build/Build/Products/Debug-iphonesimulator/GaertnerMitarbeiter.app'], check=True)
+              subprocess.run(['xcrun','simctl','launch',simulator_id,'de.gaertner.mitarbeiter.dev'], check=True)
+              time.sleep(10)
+              subprocess.run(['xcrun','simctl','io',simulator_id,'screenshot','build/prototype-iphone.png'], check=True)
+          finally:
+              subprocess.run(['xcrun','simctl','shutdown',simulator_id], check=False)
+          PY
+      - name: Save generic prototype screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: iphone-prototype-screenshot
+          path: native/ios/build/prototype-iphone.png
+          retention-days: 3
