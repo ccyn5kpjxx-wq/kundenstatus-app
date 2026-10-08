@@ -1,15 +1,73 @@
-<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arbeitszeit · Gärtner</title><link rel="stylesheet" href="{{ url_for('static',filename='assistent.css') }}"></head><body><main>
-<nav><a href="{{ url_for('assistent.page') }}">Zum persönlichen Assistenten</a>{% if admin %}<a href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter</a>{% endif %}</nav>
-<header><span class="eyebrow">{{ 'WERKSTATTLEITUNG' if admin else 'MEIN KONTO' }}</span><h1>{{ 'Arbeitszeiten' if admin else 'Meine Arbeitszeit' }}</h1></header>
-{% if not admin %}{% include '_mitarbeiter_portal_nav.html' %}
-{% for category,message in get_flashed_messages(with_categories=true) %}<p role="status">{{ message }}</p>{% endfor %}
-{% if report %}<section><h2>Jetzt stempeln</h2><p>Ein Tipp auf die passende Taste bestätigt den Stempel mit der aktuellen Serverzeit.</p><div class="employee-clock-buttons">
-{% set allowed = {'abwesend':['kommen'],'arbeitet':['pause','gehen'],'pause':['weiter','gehen']}.get(report.status.zustand,[]) %}
-{% for action,label in [('kommen','Start · Kommen'),('pause','Pause beginnen'),('weiter','Pause beenden'),('gehen','Stopp · Gehen')] %}
-<form method="post" action="/werkstatt/mein-konto/zeit">{{ csrf_field()|safe }}<input type="hidden" name="aktion" value="{{ action }}"><input type="hidden" name="revision" value="{{ report.status.revision }}"><input type="hidden" name="request_id" value="{{ request_id }}"><input type="hidden" name="confirmed" value="ja"><button {% if action not in allowed %}disabled{% endif %}>{{ label }}</button></form>{% endfor %}
-</div></section>{% endif %}{% endif %}
-{% if admin %}<section><form method="get"><label>Mitarbeiter<select name="mitarbeiter_id" required><option value="">Bitte auswählen</option>{% for employee in employees %}<option value="{{ employee.id }}" {{ 'selected' if report and report.mitarbeiter.id==employee.id }}>{{ employee.name }}{{ ' · inaktiv' if not employee.aktiv }}</option>{% endfor %}</select></label><label>Monat<input type="month" name="monat" value="{{ month }}" required></label><button>Anzeigen</button></form></section>{% endif %}
-{% if error %}<p role="alert">{{ error }}</p>{% endif %}
-{% if report %}<section><h2>{{ report.mitarbeiter.name }} · {{ report.monat }}</h2>{% if not admin %}<p>Aktuell: {{ {'arbeitet':'Eingestempelt','pause':'In Pause','abwesend':'Ausgestempelt'}.get(report.status.zustand,report.status.zustand) }}</p><p>Mit den Tasten oben stempelst du direkt. Alternativ kannst du im Sprachassistenten Arbeitsbeginn, Pause oder Arbeitsende erfassen und bestätigen.</p><form method="get"><label>Monat<input type="month" name="monat" value="{{ report.monat }}" required></label><button>Anzeigen</button></form>{% endif %}<p>Abgeschlossen und unauffällig: <strong>{{ report.abgeschlossene_arbeitszeit }}</strong></p><p>{{ report.hinweis }}</p>
-{% for shift in report.schichten %}<article style="border-top:1px solid #385060;padding:16px 0"><strong>{{ shift.beginn }} – {{ shift.ende or 'noch offen' }}</strong><p>Erfasste Arbeitszeit: {{ shift.arbeitszeit }} · Erfasste Pause: {{ shift.pause }}</p>{% if shift.pruefen %}<p role="status">Länger als 24 Stunden: Bitte fehlende oder falsche Stempel mit dem Mitarbeiter klären.</p>{% elif shift.offen %}<p>Noch offen. Zwischenstand, nicht als abgeschlossene Arbeitszeit gezählt.</p>{% endif %}</article>{% else %}<p>Für diesen Monat sind noch keine Zeitstempel erfasst.</p>{% endfor %}</section>{% elif not error %}<p>Wähle einen Mitarbeiter, um dessen erfasste Arbeitszeiten zu sehen.</p>{% endif %}
-</main></body></html>
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#173f35">
+  <title>{{ 'Arbeitszeiten' if admin else 'Meine Arbeitszeit' }} · Gärtner</title>
+  {% if admin %}<link rel="stylesheet" href="{{ url_for('static',filename='assistent.css') }}">
+  {% else %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=einladung-1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=mitarbeiter-2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_zeiten.css') }}?v=zeiten-1">
+  {% endif %}
+</head>
+<body>
+{% if admin %}
+<main>
+  <nav><a href="{{ url_for('assistent.page') }}">Zum persönlichen Assistenten</a><a href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter</a></nav>
+  <header><span class="eyebrow">WERKSTATTLEITUNG</span><h1>Arbeitszeiten</h1></header>
+  <section><form method="get"><label>Mitarbeiter<select name="mitarbeiter_id" required><option value="">Bitte auswählen</option>{% for employee in employees %}<option value="{{ employee.id }}" {{ 'selected' if report and report.mitarbeiter.id==employee.id }}>{{ employee.name }}{{ ' · inaktiv' if not employee.aktiv }}</option>{% endfor %}</select></label><label>Monat<input type="month" name="monat" value="{{ month }}" required></label><button>Anzeigen</button></form></section>
+  {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+  {% if report %}<section><h2>{{ report.mitarbeiter.name }} · {{ report.monat }}</h2><p>Abgeschlossen und unauffällig: <strong>{{ report.abgeschlossene_arbeitszeit }}</strong></p><p>{{ report.hinweis }}</p>
+  {% for shift in report.schichten %}<article style="border-top:1px solid #385060;padding:16px 0"><strong>{{ shift.beginn }} – {{ shift.ende or 'noch offen' }}</strong><p>Erfasste Arbeitszeit: {{ shift.arbeitszeit }} · Erfasste Pause: {{ shift.pause }}</p>{% if shift.pruefen %}<p role="status">Länger als 24 Stunden: Bitte fehlende oder falsche Stempel mit dem Mitarbeiter klären.</p>{% elif shift.offen %}<p>Noch offen. Zwischenstand, nicht als abgeschlossene Arbeitszeit gezählt.</p>{% endif %}</article>{% else %}<p>Für diesen Monat sind noch keine Zeitstempel erfasst.</p>{% endfor %}</section>
+  {% elif not error %}<p>Wähle einen Mitarbeiter, um dessen erfasste Arbeitszeiten zu sehen.</p>{% endif %}
+</main>
+{% else %}
+<header class="access-header"><a href="/werkstatt/mein-konto" class="brand">GÄRTNER<span>GmbH · Karosserie + Lack</span></a><span>{{ report.mitarbeiter.name if report else 'Dein Mitarbeiterkonto' }}</span></header>
+<main class="admin-main employee-times">
+  {% include '_mitarbeiter_portal_nav.html' %}
+  <span class="eyebrow">DEINE ZEIT IN DER WERKSTATT</span>
+  <h1>Meine Arbeitszeit</h1>
+  <p class="lead">Kommen, Pause und Feierabend. Ein Tipp erfasst deinen eigenen Zeitstempel.</p>
+  {% for category,message in get_flashed_messages(with_categories=true) %}<p role="status" class="setup-status{% if category in ['danger','error'] %} is-error{% endif %}">{{ message }}</p>{% endfor %}
+  {% if error %}<p role="alert" class="setup-status is-error">{{ error }}</p>{% endif %}
+  {% if report %}
+  {% set state = report.status.zustand %}
+  {% set status_label = {'arbeitet':'Eingestempelt','pause':'In Pause','abwesend':'Ausgestempelt'}.get(state,'Zeitstatus prüfen') %}
+  <div class="employee-summary time-summary" aria-label="Dein Zeitstatus und Monatsstand">
+    <section class="access-card summary-card"><span class="eyebrow">AKTUELL</span><strong class="time-current-status"><span class="time-status-dot state-{{ state }}" aria-hidden="true"></span>{{ status_label }}</strong><span>Dein persönlicher Zeitstatus</span></section>
+    <section class="access-card summary-card"><span class="eyebrow">ABGESCHLOSSEN · {{ report.monat }}</span><strong>{{ report.abgeschlossene_arbeitszeit }}</strong><span>Offene und auffällige Schichten sind nicht enthalten.</span></section>
+  </div>
+  <section class="access-card time-clock" aria-labelledby="clock-heading">
+    <span class="eyebrow">JETZT ERFASSEN</span><h2 id="clock-heading">Einfach stempeln</h2>
+    <p class="muted small">Ein Tipp bestätigt den Stempel mit der aktuellen Serverzeit. Es sind nur die gerade passenden Tasten verfügbar.</p>
+    <div class="employee-clock-buttons time-clock-buttons">
+    {% set allowed = {'abwesend':['kommen'],'arbeitet':['pause','gehen'],'pause':['weiter','gehen']}.get(state,[]) %}
+    {% for action,label,symbol in [('kommen','Start · Kommen','↗'),('pause','Pause beginnen','Ⅱ'),('weiter','Pause beenden','▶'),('gehen','Stopp · Gehen','↘')] %}
+      <form method="post" action="/werkstatt/mein-konto/zeit">{{ csrf_field()|safe }}<input type="hidden" name="aktion" value="{{ action }}"><input type="hidden" name="revision" value="{{ report.status.revision }}"><input type="hidden" name="request_id" value="{{ request_id }}"><input type="hidden" name="confirmed" value="ja"><button type="submit" class="{{ 'primary-button' if action in ['kommen','weiter'] else 'secondary-button' }}" {% if action not in allowed %}disabled{% endif %}><span aria-hidden="true">{{ symbol }}</span>{{ label }}</button></form>
+    {% endfor %}
+    </div>
+  </section>
+  {% set arbeitsplan = report.arbeitsplan %}
+  {% include '_mitarbeiter_arbeitsplan.html' %}
+  <section class="access-card time-history" aria-labelledby="history-heading">
+    <div class="time-section-heading"><div><span class="eyebrow">DEINE ERFASSTEN ZEITEN</span><h2 id="history-heading">Monatsübersicht</h2></div><form method="get" class="time-period-filter"><label for="time-month">Monat<input id="time-month" type="month" name="monat" value="{{ report.monat }}" required></label><button type="submit" class="secondary-button">Anzeigen</button></form></div>
+    {% for shift in report.schichten %}
+    <article class="time-shift{% if shift.pruefen %} needs-review{% elif shift.offen %} is-open{% endif %}">
+      <div class="time-shift-heading"><strong>{{ shift.beginn }}</strong><span class="time-shift-badge">{{ 'Bitte prüfen' if shift.pruefen else ('Noch offen' if shift.offen else 'Abgeschlossen') }}</span></div>
+      <p class="time-shift-end">{% if shift.ende %}Bis {{ shift.ende }}{% else %}Arbeitsende noch nicht erfasst{% endif %}</p>
+      <dl class="time-shift-totals"><div><dt>Erfasste Arbeitszeit</dt><dd>{{ shift.arbeitszeit }}</dd></div><div><dt>Erfasste Pause</dt><dd>{{ shift.pause }}</dd></div></dl>
+      {% if shift.pruefen %}<p role="status" class="setup-status is-error">Länger als 24 Stunden: Bitte fehlende oder falsche Stempel mit der Werkstattleitung klären.</p>{% elif shift.offen %}<p class="muted small">Zwischenstand. Diese Schicht zählt noch nicht zur abgeschlossenen Arbeitszeit.</p>{% endif %}
+    </article>
+    {% else %}<p class="empty-state">Für diesen Monat sind noch keine Zeitstempel erfasst.</p>{% endfor %}
+    <p class="muted small time-footnote">{{ report.hinweis }}</p>
+  </section>
+  <a class="time-voice-link" href="{{ url_for('assistent.page') }}"><span aria-hidden="true">◉</span><div><strong>Lieber mit dem Assistenten sprechen?</strong><p>Arbeitsbeginn, Pause oder Arbeitsende nennen und bestätigen.</p></div><span aria-hidden="true">→</span></a>
+  {% elif not error %}<p class="empty-state">Deine Arbeitszeit kann gerade nicht angezeigt werden. Bitte mit der Werkstattleitung klären.</p>{% endif %}
+</main>
+<footer>Gärtner GmbH Karosserie + Lack · Dein Mitarbeiterkonto</footer>
+{% endif %}
+</body>
+</html>

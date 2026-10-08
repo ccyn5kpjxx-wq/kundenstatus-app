@@ -5,7 +5,7 @@ import re
 import uuid
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, abort, render_template, request
+from flask import Blueprint, abort, redirect, render_template, request
 
 BERLIN = ZoneInfo('Europe/Berlin')
 LABELS = {'kommen': 'Arbeitsbeginn', 'gehen': 'Arbeitsende', 'pause': 'Pause beginnen', 'weiter': 'Pause beenden'}
@@ -155,10 +155,16 @@ class TimeTracking:
             item['arbeitszeit']=self.duration(item['arbeit_sekunden'])
             item['pause']=self.duration(item['pause_sekunden'])
         valid=[item for item in shifts if not item['offen'] and not item['pruefen']]
-        return {'mitarbeiter':dict(employee),'monat':month,'schichten':shifts,
+        result = {'mitarbeiter':dict(employee),'monat':month,'schichten':shifts,
                 'abgeschlossene_arbeitszeit':self.duration(sum(item['arbeit_sekunden'] for item in valid)),
                 'pruefen':any(item['pruefen'] for item in shifts),
                 'hinweis':'Erfasste Zeiten, keine Lohnabrechnung. Pausen werden nur nach eigenem Stempel abgezogen. Offene oder auffällige Schichten sind nicht in der Summe abgeschlossener Zeiten.'}
+        # The optional personal profile supplies a separately labelled Sollplan.
+        # It never changes events, measured work/break duration or monthly sums.
+        work_plan = getattr(getattr(self.p, 'employee_portal', None), 'work_plan', None)
+        if callable(work_plan):
+            result['arbeitsplan'] = work_plan(mid)
+        return result
 
     @staticmethod
     def duration(seconds):
@@ -175,6 +181,15 @@ def register_time_views(p, bp, protected, service):
     @bp.get('/arbeitszeit')
     @protected
     def personal_time(who):
+        # An existing personal session wins even if this shared browser still
+        # carries an admin flag. Resolve it freshly; no client employee ID or
+        # broad admin identity may become the subject of a personal time form.
+        employee_portal = getattr(p, 'employee_portal', None)
+        personal = employee_portal.identity() if employee_portal is not None else None
+        if personal is not None:
+            who = personal
+        elif who.get('actor') == 'admin':
+            return redirect('/admin/arbeitszeit')
         report=service.summary(who,request.args.get('monat'))
         return render_template('assistent_arbeitszeit.html',report=report,admin=False,employees=[],
                                request_id=p.employee_portal.new_time_form(who, report['status']['revision']))

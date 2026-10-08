@@ -1,22 +1,46 @@
 <!doctype html>
-<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mein Urlaub</title><link rel="stylesheet" href="{{ url_for('static',filename='assistent.css') }}"></head>
-<body><main><nav><a href="{{ url_for('assistent.page') }}">← Mein Assistent</a></nav>
-<h1>Mein Urlaub</h1>
-{% include '_mitarbeiter_portal_nav.html' %}
-<section><h2>Betriebsurlaub</h2>{% for item in betriebsurlaub %}<p><strong>{{ item.start_datum }} bis {{ item.end_datum }}</strong><br>{{ item.notiz or 'Betriebsurlaub' }}</p>{% else %}<p>Noch keine Betriebsurlaubstermine hinterlegt.</p>{% endfor %}<p>Diese Termine verändern deinen Resturlaub nicht automatisch.</p></section>
-{% for category,message in get_flashed_messages(with_categories=true) %}<p role="status">{{ message }}</p>{% endfor %}
-<form method="get"><label>Urlaubsjahr<input name="jahr" type="number" min="2000" max="2099" value="{{ urlaub.jahr }}" required></label><button class="secondary">Jahr anzeigen</button></form>
-<section><h2>Resturlaub {{ urlaub.jahr }}</h2>
-{% if urlaub.bekannt %}<p><strong>{{ urlaub.resttage }} Tage verfügbar</strong></p><p>Geprüfter Ausgangsstand vom {{ urlaub.stichtag }}. Änderungen nach der Prüfung werden berücksichtigt.</p>
-{% else %}<p><strong>Resturlaub noch nicht verlässlich bekannt</strong></p><p>{{ urlaub.bedarf }}</p>{% endif %}
-<p>{{ urlaub.hinweis }}</p></section>
-<section><h2>Urlaub beantragen</h2><p>Nur für dein persönliches Profil. Es werden ganze Urlaubstage beantragt. Die Werkstattleitung prüft den Antrag; das Absenden ist noch keine Genehmigung. Für halbe Tage oder einen Jahreswechsel bitte den Zeitraum mit der Werkstattleitung klären.</p>
-<form method="post" action="{{ url_for('assistent.vacation_apply') }}">
-<input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="request_id" value="{{ request_id }}">
-<label>Von<input type="date" name="von" min="{{ today }}" required></label><label>Bis einschließlich<input type="date" name="bis" min="{{ today }}" required></label>
-<label><input type="checkbox" name="confirmed" value="ja" required> Ich habe Von und Bis geprüft und möchte diesen Urlaub beantragen.</label><button>Urlaubsantrag einreichen</button>
-</form></section>
-<section><h2>Meine Anträge</h2>{% for item in urlaub.antraege %}<article><h3>{{ item.start_datum }} bis {{ item.end_datum }}</h3><p><strong>{{ item.status_label }}</strong>{% if item.tage is not none %} · {{ item.tage }} belastete Urlaubstage{% endif %}</p>
-{% if item.status == 'beantragt' %}<p>Prüfung durch die Werkstattleitung steht aus. Noch kein Abzug.</p><form method="post" action="{{ url_for('assistent.vacation_withdraw',request_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="version" value="{{ item.version }}"><button class="secondary">Eigenen offenen Antrag zurückziehen</button></form>{% endif %}</article>{% else %}<p>Noch keine persönlichen Anträge für dieses Jahr.</p>{% endfor %}</section>
-{% if urlaub.kalendereintraege %}<section><h2>Bereits erfasste Kalenderzeiträume</h2><p>Diese Übersicht ist keine zusätzliche Genehmigung und wird nicht nochmals vom geprüften Ausgangsstand abgezogen.</p>{% for item in urlaub.kalendereintraege %}<p>{{ item.von or 'Datum prüfen' }} bis {{ item.bis or 'Datum prüfen' }} · {{ item.status }}</p>{% endfor %}</section>{% endif %}
-</main></body></html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#173f35">
+  <title>Mein Urlaub · Gärtner</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=einladung-1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=mitarbeiter-2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_zeiten.css') }}?v=zeiten-1">
+</head>
+<body>
+<header class="access-header"><a href="/werkstatt/mein-konto" class="brand">GÄRTNER<span>GmbH · Karosserie + Lack</span></a><span>Dein Mitarbeiterkonto</span></header>
+<main class="admin-main employee-times employee-vacation">
+  {% include '_mitarbeiter_portal_nav.html' %}
+  <span class="eyebrow">DEINE FREIE ZEIT</span><h1>Mein Urlaub</h1>
+  <p class="lead">Deinen Stand ansehen und Urlaub beantragen. Alles bleibt deinem persönlichen Konto zugeordnet.</p>
+  {% for category,message in get_flashed_messages(with_categories=true) %}<p role="status" class="setup-status{% if category in ['danger','error'] %} is-error{% endif %}">{{ message }}</p>{% endfor %}
+  <section class="access-card vacation-balance" aria-labelledby="balance-heading">
+    <div class="time-section-heading"><div><span class="eyebrow">DEIN GEPRÜFTER STAND</span><h2 id="balance-heading">Resturlaub {{ urlaub.jahr }}</h2></div><form method="get" class="time-period-filter"><label for="vacation-year">Urlaubsjahr<input id="vacation-year" name="jahr" type="number" min="2000" max="2099" value="{{ urlaub.jahr }}" required></label><button type="submit" class="secondary-button">Jahr anzeigen</button></form></div>
+    {% if urlaub.bekannt %}<p class="vacation-remaining"><strong>{{ urlaub.resttage }}</strong><span>Tage verfügbar</span></p><p class="muted small">Geprüfter Ausgangsstand vom {{ urlaub.stichtag }}. Änderungen nach der Prüfung werden berücksichtigt.</p>
+    {% else %}<p class="empty-state"><strong>Resturlaub noch nicht verlässlich bekannt</strong><br>{{ urlaub.bedarf }}</p>{% endif %}
+    <p class="muted small">{{ urlaub.hinweis }}</p>
+  </section>
+  <section class="access-card vacation-apply" aria-labelledby="apply-heading">
+    <span class="eyebrow">DEIN NÄCHSTER URLAUB</span><h2 id="apply-heading">Urlaub beantragen</h2>
+    <p class="muted small">Ganze Urlaubstage für dein persönliches Profil. Die Werkstattleitung prüft den Antrag; das Absenden ist noch keine Genehmigung. Für halbe Tage oder einen Jahreswechsel bitte den Zeitraum mit der Werkstattleitung klären.</p>
+    <form method="post" action="{{ url_for('assistent.vacation_apply') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="request_id" value="{{ request_id }}">
+      <div class="vacation-dates"><label for="vacation-from">Von<input id="vacation-from" type="date" name="von" min="{{ today }}" required></label><label for="vacation-to">Bis einschließlich<input id="vacation-to" type="date" name="bis" min="{{ today }}" required></label></div>
+      <label class="checkbox-label"><input type="checkbox" name="confirmed" value="ja" required>Ich habe Von und Bis geprüft und möchte diesen Urlaub beantragen.</label>
+      <button type="submit" class="primary-button">Urlaubsantrag einreichen <span aria-hidden="true">→</span></button>
+    </form>
+  </section>
+  <section class="access-card vacation-requests" aria-labelledby="requests-heading"><span class="eyebrow">IM ÜBERBLICK</span><h2 id="requests-heading">Meine Anträge</h2>
+    {% for item in urlaub.antraege %}<article class="vacation-request"><div class="time-shift-heading"><h3>{{ item.start_datum }} bis {{ item.end_datum }}</h3><span class="time-shift-badge">{{ item.status_label }}</span></div>{% if item.tage is not none %}<p class="muted small">{{ item.tage }} belastete Urlaubstage</p>{% endif %}
+      {% if item.status == 'beantragt' %}<p class="muted small">Prüfung durch die Werkstattleitung steht aus. Noch kein Abzug.</p><form method="post" action="{{ url_for('assistent.vacation_withdraw',request_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="version" value="{{ item.version }}"><button type="submit" class="secondary-button">Eigenen offenen Antrag zurückziehen</button></form>{% endif %}
+    </article>{% else %}<p class="empty-state">Noch keine persönlichen Anträge für dieses Jahr.</p>{% endfor %}
+  </section>
+  <section class="access-card" aria-labelledby="company-holidays-heading"><span class="eyebrow">GEMEINSAM GEPLANT</span><h2 id="company-holidays-heading">Betriebsurlaub</h2>{% for item in betriebsurlaub %}<article class="document-row"><div><strong>{{ item.start_datum }} bis {{ item.end_datum }}</strong><p>{{ item.notiz or 'Betriebsurlaub' }}</p></div></article>{% else %}<p class="empty-state">Noch keine Betriebsurlaubstermine hinterlegt.</p>{% endfor %}<p class="muted small">Diese Termine verändern deinen Resturlaub nicht automatisch.</p></section>
+  {% if urlaub.kalendereintraege %}<section class="access-card"><span class="eyebrow">BISHER HINTERLEGT</span><h2>Bereits erfasste Kalenderzeiträume</h2><p class="muted small">Diese Übersicht ist keine zusätzliche Genehmigung und wird nicht nochmals vom geprüften Ausgangsstand abgezogen.</p>{% for item in urlaub.kalendereintraege %}<article class="document-row"><div><strong>{{ item.von or 'Datum prüfen' }} bis {{ item.bis or 'Datum prüfen' }}</strong><p>{{ item.status }}</p></div></article>{% endfor %}</section>{% endif %}
+</main>
+<footer>Gärtner GmbH Karosserie + Lack · Dein Mitarbeiterkonto</footer>
+</body>
+</html>

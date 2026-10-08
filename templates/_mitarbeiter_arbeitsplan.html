@@ -1,0 +1,14 @@
+<section class="access-card employee-work-plan" aria-labelledby="work-plan-heading">
+  <span class="eyebrow">DEIN HINTERLEGTER SOLLPLAN</span><h2 id="work-plan-heading">Meine Arbeitszeiten</h2>
+  {% if arbeitsplan and arbeitsplan.bekannt %}
+  <dl class="profile-fields work-plan-fields">
+    <div><dt>Arbeitstage</dt><dd>{{ arbeitsplan.tage_label }}</dd></div>
+    <div><dt>Arbeitszeit pro Woche</dt><dd>{{ arbeitsplan.wochenstunden }} Stunden</dd></div>
+    <div><dt>Arbeitszeit pro Tag</dt><dd>{{ arbeitsplan.tagesstunden }} Stunden</dd></div>
+    <div><dt>Geplante Pause pro Tag</dt><dd>{{ arbeitsplan.pausenminuten }} Minuten</dd></div>
+    <div><dt>Geplanter Beginn</dt><dd>{{ arbeitsplan.beginn }} Uhr</dd></div>
+    <div><dt>Geplantes Ende</dt><dd>{{ arbeitsplan.ende }} Uhr</dd></div>
+  </dl>
+  <p class="muted small">{{ arbeitsplan.hinweis }}</p>
+  {% else %}<p class="empty-state">{{ arbeitsplan.hinweis if arbeitsplan and arbeitsplan.hinweis else 'Noch kein persönlicher Arbeitsplan hinterlegt. Die Werkstattleitung ergänzt deine vereinbarten Arbeitszeiten.' }}</p>{% endif %}
+</section>

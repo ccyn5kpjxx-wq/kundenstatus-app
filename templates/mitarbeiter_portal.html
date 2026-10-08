@@ -18,6 +18,7 @@
 <a class="portal-area" href="#lohnzettel"><span class="area-symbol" aria-hidden="true">▤</span><h2>Lohnzettel</h2><p>Deine persönlichen Abrechnungen sicher herunterladen.</p><span aria-hidden="true">→</span></a>
 <a class="portal-area area-voice" href="/werkstatt/assistent"><span class="area-symbol" aria-hidden="true">◉</span><h2>Sprachassistent</h2><p>Fragen zum Auftrag? Die Auftragsnummer hängt am Fahrzeug. Sag zum Beispiel: „Was muss ich bei Auftrag 101 machen?“</p><span aria-hidden="true">→</span></a>
 </div>
+{% include '_mitarbeiter_arbeitsplan.html' %}
 <section class="access-card profile-details" aria-labelledby="profile-heading"><span class="eyebrow">NUR FÜR DICH</span><h2 id="profile-heading">Mein Profil</h2><dl class="profile-fields">
 {% for key,label in [('personalnummer','Personalnummer'),('steuer_id','Steuer-ID'),('steuernummer','Steuernummer'),('adresse','Adresse'),('geburtsdatum','Geburtsdatum'),('email','E-Mail'),('telefon','Telefon')] %}<div><dt>{{ label }}</dt><dd>{{ profile.get(key) or 'Noch nicht hinterlegt' }}</dd></div>{% endfor %}
 </dl><p class="muted small">Fehlende oder falsche Angaben korrigiert die Werkstattleitung. Diese Daten sind nur in deinem persönlichen Konto und für die Werkstattleitung sichtbar.</p></section>

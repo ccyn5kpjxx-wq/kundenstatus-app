@@ -7,6 +7,7 @@ Profile and payroll writes share the destructive-restore originals lock.
 import base64
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
+from decimal import Decimal
 import hashlib
 import hmac
 import io
@@ -27,6 +28,17 @@ from werkzeug.utils import secure_filename
 
 TABLES = ('mitarbeiter_portal_profile', 'mitarbeiter_lohnzettel', 'mitarbeiter_betriebsurlaub')
 PROFILE_FIELDS = ('personalnummer', 'steuer_id', 'steuernummer', 'adresse', 'geburtsdatum', 'email', 'telefon')
+WORK_PLAN_FIELDS = ('wochenstunden', 'tagesstunden', 'pausenminuten', 'beginn', 'arbeitstage')
+WORK_PLAN_COLUMNS = {
+    'arbeitsplan_wochenminuten': 'INTEGER NOT NULL DEFAULT 0',
+    'arbeitsplan_tagesminuten': 'INTEGER NOT NULL DEFAULT 0',
+    'arbeitsplan_pausenminuten': 'INTEGER NOT NULL DEFAULT 0',
+    'arbeitsplan_beginn': "TEXT NOT NULL DEFAULT ''",
+    'arbeitsplan_tage_json': "TEXT NOT NULL DEFAULT '[]'",
+}
+_WEEKDAYS = ('Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag')
+_PLAN_NOTE = ('Geplante Sollzeiten, keine erfassten Stempel. Pausen werden nur nach '
+              'eigenem Stempel abgezogen; der Arbeitsplan bucht keine Arbeitszeit.')
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
 _PERIOD = re.compile(r'20\d{2}-(?:0[1-9]|1[0-2])')
 _BERLIN = ZoneInfo('Europe/Berlin')
@@ -52,6 +64,65 @@ def _iso_date(value, label):
         return date.fromisoformat(value)
     except ValueError:
         raise ValueError(f'{label}: gültiges Datum angeben.') from None
+
+
+def _plan_minutes(value, label, maximum):
+    if not isinstance(value, str) or not re.fullmatch(r'(?:0|[1-9][0-9]{0,2})(?:[.,][0-9]{1,2})?', value):
+        raise ValueError(f'{label}: Stunden als Zahl angeben.')
+    minutes = Decimal(value.replace(',', '.')) * 60
+    if minutes != minutes.to_integral_value() or not 0 < minutes <= maximum:
+        raise ValueError(f'{label}: positive Stunden mit minutengenauer Dauer angeben.')
+    return int(minutes)
+
+
+def _plan_data(payload):
+    if not isinstance(payload, dict) or set(payload) != set(WORK_PLAN_FIELDS):
+        raise ValueError('Nur die vorgesehenen Arbeitsplanfelder angeben.')
+    weekly = _plan_minutes(payload['wochenstunden'], 'Wochenstunden', 7 * 24 * 60)
+    daily = _plan_minutes(payload['tagesstunden'], 'Tagesstunden', 24 * 60)
+    pause = payload['pausenminuten']
+    days = payload['arbeitstage']
+    beginning = payload['beginn']
+    if (not isinstance(pause, str) or not re.fullmatch(r'0|[1-9][0-9]{0,3}', pause)
+            or int(pause) > 24 * 60):
+        raise ValueError('Geplante Pause in ganzen Minuten angeben.')
+    if (not isinstance(days, list) or not days or len(days) > 7
+            or any(type(day) is not int or not 0 <= day <= 6 for day in days)
+            or len(set(days)) != len(days)):
+        raise ValueError('Arbeitstage von Montag bis Sonntag eindeutig auswählen.')
+    if weekly != daily * len(days):
+        raise ValueError('Wochenstunden müssen Tagesstunden mal Anzahl der Arbeitstage entsprechen.')
+    if not isinstance(beginning, str) or not re.fullmatch(r'(?:[01][0-9]|2[0-3]):[0-5][0-9]', beginning):
+        raise ValueError('Geplanten Beginn im Format HH:MM angeben.')
+    start = int(beginning[:2]) * 60 + int(beginning[3:])
+    if start + daily + int(pause) > 24 * 60:
+        raise ValueError('Der tägliche Arbeitsplan muss innerhalb desselben Kalendertages enden.')
+    return dict(arbeitsplan_wochenminuten=weekly, arbeitsplan_tagesminuten=daily,
+                arbeitsplan_pausenminuten=int(pause), arbeitsplan_beginn=beginning,
+                arbeitsplan_tage_json=json.dumps(sorted(days), separators=(',', ':')))
+
+
+def _plan_view(row):
+    unknown = dict(bekannt=False, tage=[], tage_label='', wochenstunden='', tagesstunden='',
+                   pausenminuten=None, beginn='', ende='', hinweis='Noch kein persönlicher Arbeitsplan hinterlegt. ' + _PLAN_NOTE)
+    if not row or not row.get('arbeitsplan_beginn'):
+        return unknown
+    try:
+        weekly, daily, pause = (row[key] for key in ('arbeitsplan_wochenminuten', 'arbeitsplan_tagesminuten', 'arbeitsplan_pausenminuten'))
+        if any(type(value) is not int for value in (weekly, daily, pause)):
+            raise ValueError()
+        days = json.loads(row['arbeitsplan_tage_json'])
+        values = _plan_data(dict(wochenstunden=str(Decimal(weekly) / 60), tagesstunden=str(Decimal(daily) / 60),
+                                 pausenminuten=str(pause), beginn=row['arbeitsplan_beginn'], arbeitstage=days))
+        beginning = values['arbeitsplan_beginn']
+        end = int(beginning[:2]) * 60 + int(beginning[3:]) + daily + pause
+        hours = lambda minutes: format(Decimal(minutes) / 60, 'f').rstrip('0').rstrip('.') if minutes % 60 else str(minutes // 60)
+        return dict(bekannt=True, tage=sorted(days),
+                    tage_label='Montag–Freitag' if sorted(days) == [0, 1, 2, 3, 4] else ', '.join(_WEEKDAYS[day] for day in sorted(days)),
+                    wochenstunden=hours(weekly), tagesstunden=hours(daily), pausenminuten=pause,
+                    beginn=beginning, ende=f'{end // 60:02d}:{end % 60:02d}', hinweis=_PLAN_NOTE)
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return dict(unknown, hinweis='Der hinterlegte Arbeitsplan muss intern geprüft werden. ' + _PLAN_NOTE)
 
 
 def _document(file):
@@ -132,6 +203,8 @@ class EmployeePortal:
                 end_datum TEXT NOT NULL, notiz TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL, created_by TEXT NOT NULL,
                 UNIQUE(start_datum,end_datum,notiz));''')
+            for column, definition in WORK_PLAN_COLUMNS.items():
+                self.p.ensure_column(db, 'mitarbeiter_portal_profile', column, definition)
 
     def identity(self, db=None):
         mid, version = session.get('assistent_mid'), session.get('assistent_version')
@@ -191,8 +264,16 @@ class EmployeePortal:
     def admin_view(self, mid):
         self._admin()
         with self.db() as db:
-            return {'employee': self._employee(db, mid), 'profile': self._profile(db, mid),
+            employee = self._employee(db, mid)
+            profile = self._profile(db, mid)
+            return {'employee': employee, 'profile': profile, 'arbeitsplan': _plan_view(profile),
                     'payrolls': self._payrolls(db, mid, admin=True)}
+
+    def work_plan(self, mid):
+        """Read only; the caller supplies its already authorized employee ID."""
+        with self.db() as db:
+            self._employee(db, mid)
+            return _plan_view(self._profile(db, mid))
 
     def personal_view(self):
         with self.db() as db:
@@ -200,8 +281,9 @@ class EmployeePortal:
             if not who:
                 raise PermissionError('Mit deinem persönlichen Mitarbeiterzugang anmelden.')
             mid = who['mitarbeiter_id']
+            profile = self._profile(db, mid)
             result = {'who': who, 'employee': {'id': mid, 'name': who['mitarbeiter_name']},
-                      'profile': self._profile(db, mid), 'payrolls': self._payrolls(db, mid)}
+                      'profile': profile, 'arbeitsplan': _plan_view(profile), 'payrolls': self._payrolls(db, mid)}
         result['urlaub'] = self.p.assistant_selfservice.summary(who)
         try:
             report = self.p.assistant_time.summary(who)
@@ -242,6 +324,24 @@ class EmployeePortal:
                        + updates + ',updated_at=excluded.updated_at,updated_by=excluded.updated_by RETURNING mitarbeiter_id',
                        (mid, *(data[key] for key in PROFILE_FIELDS), self.p.now_str(), 'admin')).fetchall()
             self._audit(db, 'mitarbeiter_portal_profil_gespeichert', mid)
+        self._backup()
+
+    def save_work_plan(self, mid, payload):
+        self._admin()
+        data = _plan_data(payload)
+        with self.p.portal_originals_operation_lock(), self.db() as db:
+            self._employee(db, mid)
+            # Creating the first private row must preserve proven old contact
+            # fields; updating an existing row changes only its plan columns.
+            previous = self._profile(db, mid)
+            columns = (*PROFILE_FIELDS, *WORK_PLAN_COLUMNS)
+            updates = ','.join(key + '=excluded.' + key for key in WORK_PLAN_COLUMNS)
+            db.execute('INSERT INTO mitarbeiter_portal_profile(mitarbeiter_id,' + ','.join(columns) + ',updated_at,updated_by) '
+                       'VALUES(' + ','.join('?' for _ in range(len(columns) + 3)) + ') ON CONFLICT(mitarbeiter_id) DO UPDATE SET '
+                       + updates + ',updated_at=excluded.updated_at,updated_by=excluded.updated_by RETURNING mitarbeiter_id',
+                       (mid, *(previous[key] for key in PROFILE_FIELDS), *(data[key] for key in WORK_PLAN_COLUMNS),
+                        self.p.now_str(), 'admin')).fetchall()
+            self._audit(db, 'mitarbeiter_arbeitsplan_gespeichert', mid)
         self._backup()
 
     def upload_payroll(self, mid, period, file):
@@ -407,6 +507,30 @@ def register_employee_portal(p):
                 raise ValueError('Genau einen Lohnzettel auswählen.')
             service.upload_payroll(mid, request.form.get('period'), request.files.get('file'))
             flash('Lohnzettel im persönlichen Profil hinterlegt.', 'success')
+            return redirect(f'/admin/mitarbeiter/{mid}/portal', code=303)
+        except LookupError:
+            abort(404)
+        except ValueError as exc:
+            try:
+                data = service.admin_view(mid)
+            except LookupError:
+                abort(404)
+            return render_template('mitarbeiter_portal_admin.html', **data, csrf_token=token(), error=str(exc)), 400
+
+    @bp.post('/admin/mitarbeiter/<int:mid>/portal/arbeitsplan')
+    @p.admin_required
+    def admin_work_plan(mid):
+        csrf()
+        try:
+            if (set(request.form) - set(WORK_PLAN_FIELDS) - {'csrf_token'}
+                    or any(len(request.form.getlist(key)) != 1 for key in WORK_PLAN_FIELDS if key != 'arbeitstage')):
+                raise ValueError('Nur die vorgesehenen persönlichen Arbeitsplanfelder angeben.')
+            days = request.form.getlist('arbeitstage')
+            if any(not re.fullmatch('[0-6]', day) for day in days):
+                raise ValueError('Arbeitstage von Montag bis Sonntag auswählen.')
+            payload = {key: request.form.get(key, '') for key in WORK_PLAN_FIELDS if key != 'arbeitstage'}
+            service.save_work_plan(mid, dict(payload, arbeitstage=[int(day) for day in days]))
+            flash('Persönlicher Soll-Arbeitsplan gespeichert. Erfasste Stempel bleiben unverändert.', 'success')
             return redirect(f'/admin/mitarbeiter/{mid}/portal', code=303)
         except LookupError:
             abort(404)

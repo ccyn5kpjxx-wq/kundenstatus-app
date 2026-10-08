@@ -146,6 +146,29 @@ Gescannten PDFs und unbestätigten Dokumentbildern fehlt ein sicher prüfbarer
 Textstand: Sie bleiben zur internen Prüfung gesperrt. Originalunterlagen im
 Admin werden dadurch nicht geändert.
 
+## Persönlicher Arbeitsplan und einheitliche Zeitansicht
+
+Profil, Arbeitszeit und Urlaub verwenden denselben persönlichen Portalrahmen
+mit dem gemeinsamen Menü. Die Arbeitszeitseite zeigt den eigenen Stempelstatus,
+passende Kommen-/Pause-/Gehen-Tasten und die Monatsübersicht. Die Chefübersicht
+bleibt unter `/admin/arbeitszeit` getrennt.
+
+Ein Sollplan wird ausschließlich ausdrücklich je Mitarbeiter im privaten Profil
+gepflegt: Wochenstunden, Tagesstunden, geplante Pause, Beginn und Arbeitstage.
+Die separate Adminaktion `/admin/mitarbeiter/<id>/portal/arbeitsplan` verändert
+keine Kontaktfelder, Lohnzettel, Urlaubsstände oder tatsächlichen Zeitstempel.
+Ohne gespeicherten Plan gibt es keine Vorgabestunden. Bei 40 Wochenstunden,
+fünf Arbeitstagen, acht Arbeitsstunden pro Tag, Beginn 08:00 Uhr und einer Stunde
+geplanter Pause ergibt sich das geplante Ende 17:00 Uhr.
+
+Der Plan erzeugt weder Arbeitszeit noch automatische Pausenabzüge. Maßgeblich
+für die Zeitübersicht bleiben die tatsächlichen Kommen-/Pause-/Gehen-Stempel.
+Die privaten Profilspalten werden auch nach einem alten Datenbankimport ergänzt;
+der bestehende Schutz privater Vollzeilen verhindert das Zurückrollen eines
+gespeicherten Plans. Lohnzettel bleiben personenbezogene Originalunterlagen:
+Sammelabrechnungen müssen vor der Zuordnung auf die eigenen Personenseiten
+getrennt werden. Unbekannte Stammdaten und Resturlaubstage werden nicht erfunden.
+
 ## Prüfung
 
 Die Python-Suiten für Assistent, Cockpit-API, Artikelimport, Rechnungsauslese,
