@@ -12,6 +12,38 @@ from werkstatt_materialverwaltung import euro_cents, register_material_admin
 
 
 class MaterialAdminTests(unittest.TestCase):
+    def test_direct_edit_is_admin_csrf_revision_bound_and_preserves_actor(self):
+        url='/admin/assistent-bestellungen/eingang/material/7/bearbeiten'
+        form=dict(csrf_token='synthetic-csrf',revision='3',product_name='Spachtel',article_number='',variant='',quantity='3',unit='Stück',reason='Korrektur am Original',actor='mitarbeiter:99')
+        self.assertEqual(self.client.post(url,data=dict(form,csrf_token='wrong')).status_code,400)
+        self.service.edit_request.assert_not_called()
+        self.assertEqual(self.client.post(url,data=dict(form,revision='0')).status_code,303)
+        self.service.edit_request.assert_not_called()
+        self.assertEqual(self.client.post(url,data=form).status_code,303)
+        args,kwargs=self.service.edit_request.call_args
+        self.assertEqual(args[:2],(7,3))
+        self.assertEqual(args[2]['quantity'],'3')
+        self.assertNotIn('actor',args[2])
+        self.assertEqual(kwargs,{'actor':'admin'})
+        self.service.process_next.assert_not_called()
+        with self.client.session_transaction() as state:state.clear();state['csrf_token']='synthetic-csrf'
+        self.assertEqual(self.client.post(url,data=form).status_code,403)
+
+    def test_remove_and_restore_validate_selection_revision_admin_and_csrf(self):
+        base='/admin/assistent-bestellungen/eingang/material'
+        self.assertEqual(self.client.post(base+'/entfernen',data={'selection':'7:3'}).status_code,400)
+        self.client.post(base+'/entfernen',data={'csrf_token':'synthetic-csrf','selection':'7:bad','reason':'Doppelt'})
+        self.client.post(base+'/entfernen',data={'csrf_token':'synthetic-csrf','reason':'Doppelt'})
+        self.service.remove_requests.assert_not_called()
+        self.service.remove_requests.return_value=2
+        self.client.post(base+'/entfernen',data={'csrf_token':'synthetic-csrf','selection':['7:3','8:2'],'reason':'Doppelt'})
+        self.service.remove_requests.assert_called_once_with([(7,3),(8,2)],'Doppelt',actor='admin')
+        self.assertEqual(self.client.post(base+'/7/wiederherstellen',data={'revision':4}).status_code,400)
+        self.client.post(base+'/7/wiederherstellen',data={'csrf_token':'synthetic-csrf','revision':'4','reason':'Wieder benötigt'})
+        self.service.restore_request.assert_called_once_with(7,4,'Wieder benötigt',actor='admin')
+        self.service.process_next.assert_not_called()
+        self.service.send_question.assert_not_called()
+
     def setUp(self):
         self.app = Flask(__name__, template_folder=str(Path(__file__).resolve().parents[1] / 'templates'))
         self.app.config.update(SECRET_KEY='synthetic-admin-test', TESTING=True)

@@ -371,6 +371,14 @@ class OrderDispatch:
         if state == 'blocked' and blocked_message:
             public['message'] = str(blocked_message)[:500]
         with self._db() as db:
+            # Preserve the first evidenced acceptance time across later IMAP
+            # copy retries. Never infer it from a legacy outbox update time.
+            previous = db.execute('SELECT result_json FROM assistent_bestellpakete WHERE id=? AND lease=?',(batch_id,owner)).fetchone()
+            saved = json.loads(previous['result_json']) if previous else {}
+            if saved.get('sent_at'):
+                public['sent_at'] = saved['sent_at']
+            elif isinstance(result,dict) and result.get('sent_at') and state in {'sent','copy_pending','partial'}:
+                public['sent_at'] = result['sent_at']
             db.execute('''UPDATE assistent_bestellpakete SET state=?,result_json=?,lease='',lease_until=0,next_attempt_at=?
                 WHERE id=? AND lease=?''', (state, _canonical(public), now.timestamp()+self.RETRY_SECONDS, batch_id, owner))
             db.commit()
@@ -415,6 +423,8 @@ class OrderDispatch:
             if changed.rowcount != 1:
                 return self._record_result(batch['id'], owner, {'state': 'not_sent'}, now)
             result = self.outbox.send(batch['id'], message, config)
+            if isinstance(result,dict) and result.get('state') in {'sent','copy_pending','partial'}:
+                result = dict(result,sent_at=_aware(self.clock()).isoformat())
             return self._record_result(batch['id'], owner, result, now)
         except Exception:
             # MailOutbox alone knows whether DATA was accepted; never guess retry.

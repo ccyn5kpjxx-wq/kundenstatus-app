@@ -292,7 +292,11 @@ class MaterialDialog:
     def _merge(self, fields, parsed, proof):
         for key, value in parsed.items():
             previous = fields.get(key)
-            if previous and previous['proof']['source_at'] > proof['source_at']:
+            previous_proof = previous.get('proof',{}) if previous else {}
+            previous_at = previous_proof.get('source_at','')
+            if previous_proof.get('kind')=='admin_correction' and not previous_at:
+                previous_at = fields.get('admin_correction',{}).get('value',{}).get('at','')
+            if previous_at and previous_at > proof['source_at']:
                 continue
             if key in {'quantity','unit','urgent','selected_article'} and previous and previous['value']!=value:
                 fields.pop('duplicate_confirmation',None)
@@ -531,7 +535,7 @@ class MaterialDialog:
         if selected and review and review.get('match_identity') != self._hit_identity(selected):
             review = {}
             db.execute("UPDATE einkauf_material_dialoge SET review_json='{}' WHERE id=?",(draft['id'],))
-        if not correction and not manual and not review and fields.get('selected_article'):
+        if not correction and not manual and not review and fields.get('selected_article') and not fields.get('admin_requires_review'):
             review = self._reuse_review(db,fields['selected_article']['value'])
             if review:
                 db.execute('UPDATE einkauf_material_dialoge SET review_json=? WHERE id=?',(_json(review),draft['id']))
@@ -1048,6 +1052,120 @@ class MaterialDialog:
             return self._view(db,draft_id)
 
     @_originals_guard
+    def edit_request(self, draft_id, revision, payload, actor='admin'):
+        """Correct an unsent request while retaining its original employee evidence."""
+        if actor != 'admin':
+            raise PermissionError('Nur die Werkstattleitung darf Anforderungen bearbeiten.')
+        if not isinstance(payload, dict) or set(payload) != {'product_name','article_number','variant','quantity','unit','reason'}:
+            raise ValueError('Artikel, Menge, Einheit und Änderungsgrund angeben.')
+        values = {}
+        for key in ('product_name','article_number','variant','unit','reason'):
+            value = payload[key]
+            maximum = 60 if key == 'unit' else 300
+            if not isinstance(value,str) or len(value)>maximum or _note(value,maximum)!=value.strip():
+                raise ValueError('Artikelangaben und Änderungsgrund eindeutig angeben.')
+            values[key] = value.strip()
+        if not values['product_name'] or not values['reason']:
+            raise ValueError('Artikelname und Änderungsgrund sind erforderlich.')
+        quantity = payload['quantity']
+        if not isinstance(quantity,str) or len(quantity)>30 or quantity.strip() and _bare_quantity(quantity) is None:
+            raise ValueError('Menge als positive Zahl angeben, zum Beispiel 1 oder 3; unbekannte Menge darf leer bleiben.')
+        values['quantity'] = _bare_quantity(quantity) if quantity.strip() else ''
+        values['unit'] = UNITS.get(values['unit'].casefold(),values['unit'])
+        with self.db() as db:
+            draft = self._draft(db,draft_id,revision,lock=True)
+            if self._accepted(db,draft) or draft['state'] in {'accepted','cancelled'}:
+                raise ValueError('Bereits übergebene, extern reservierte oder entfernte Anforderungen sind zur Bearbeitung gesperrt.')
+            fields = json.loads(draft['fields_json'])
+            before = copy.deepcopy(fields)
+            fields.setdefault('admin_original_fields', {'value':copy.deepcopy(before)})
+            correction = dict(values,id=secrets.token_hex(16),draft_id=draft_id,revision=revision+1,
+                              at=datetime.fromtimestamp(self.clock(),timezone.utc).isoformat(),actor='admin')
+            proof = {'kind':'admin_correction','actor':'admin','draft_id':draft_id,'correction_id':correction['id'],
+                     'source_at':correction['at']}
+            fields['manual_article'] = {'value':{key:values[key] for key in ('product_name','article_number','variant','reason')},'proof':proof}
+            for key in ('quantity','unit'):
+                if values[key]:
+                    fields[key] = {'value':values[key],'proof':proof}
+                else:
+                    fields.pop(key,None)
+            fields['admin_correction'] = {'value':correction}
+            fields['admin_requires_review'] = {'value':True}
+            for key in ('selected_article','possible_duplicate','duplicate_confirmation'):
+                fields.pop(key,None)
+            db.execute("UPDATE einkauf_material_dialoge SET fields_json=?,review_json='{}',revision=revision+1 WHERE id=?",(_json(fields),draft_id))
+            self._request_audit(db,'material_admin_bearbeitet',draft_id,revision+1,values['reason'],before,fields)
+            self._refresh(db,self._draft(db,draft_id))
+            db.execute("UPDATE einkauf_material_rueckfragen SET state='superseded' WHERE draft_id=? AND state='queued'",(draft_id,))
+            return self._view(db,draft_id)
+
+    def _request_audit(self, db, action, draft_id, revision, reason, before, after):
+        details = {'draft_id':draft_id,'revision':revision,'reason':reason,'before':before,'after':after}
+        db.execute('INSERT INTO assistent_audit(actor,auftrag_id,aktion,details,zeit) VALUES(?,?,?,?,?)',
+                   ('admin',None,action,_json(details),datetime.fromtimestamp(self.clock(),timezone.utc).isoformat()))
+
+    @_originals_guard
+    def remove_requests(self, selections, reason, actor='admin'):
+        """Remove all selected unsent drafts atomically; originals remain available."""
+        if actor != 'admin':
+            raise PermissionError('Nur die Werkstattleitung darf Anforderungen entfernen.')
+        reason = self._external_text(reason,300)
+        if not isinstance(selections,list) or not 1 <= len(selections) <= 100 or any(not isinstance(item,tuple) or len(item)!=2
+                or any(type(value) is not int or value<1 for value in item) for item in selections):
+            raise ValueError('Eine bis 100 offene Anforderungen auswählen.')
+        if len({item[0] for item in selections}) != len(selections):
+            raise ValueError('Jede Anforderung nur einmal auswählen.')
+        with self.db() as db:
+            drafts = [self._draft(db,draft_id,revision,lock=True) for draft_id,revision in sorted(selections)]
+            if any(self._accepted(db,draft) or draft['state'] in {'accepted','cancelled'} for draft in drafts):
+                raise ValueError('Die Auswahl enthält bereits übergebene, extern reservierte oder entfernte Anforderungen. Bitte neu laden.')
+            for draft in drafts:
+                fields = json.loads(draft['fields_json'])
+                before = copy.deepcopy(fields)
+                fields['cancelled'] = {'value':True,'proof':{'kind':'admin','actor':'admin','reason':reason}}
+                fields['admin_removal'] = {'value':{'reason':reason,'at':datetime.fromtimestamp(self.clock(),timezone.utc).isoformat()}}
+                db.execute('UPDATE einkauf_material_dialoge SET fields_json=?,revision=revision+1 WHERE id=?',(_json(fields),draft['id']))
+                self._request_audit(db,'material_admin_entfernt',draft['id'],draft['revision']+1,reason,before,fields)
+                self._refresh(db,self._draft(db,draft['id']))
+                db.execute("UPDATE einkauf_material_rueckfragen SET state='superseded' WHERE draft_id=? AND state='queued'",(draft['id'],))
+        return len(drafts)
+
+    @_originals_guard
+    def restore_request(self, draft_id, revision, reason, actor='admin'):
+        if actor != 'admin':
+            raise PermissionError('Nur die Werkstattleitung darf Anforderungen wiederherstellen.')
+        reason = self._external_text(reason,300)
+        with self.db() as db:
+            draft = self._draft(db,draft_id,revision,lock=True)
+            fields = json.loads(draft['fields_json'])
+            if self._accepted(db,draft) or draft['state']!='cancelled' or not fields.get('admin_removal'):
+                raise ValueError('Nur intern entfernte Anforderungen ohne Versandbindung können wiederhergestellt werden.')
+            before = copy.deepcopy(fields)
+            fields.pop('cancelled',None)
+            fields.pop('admin_removal',None)
+            fields['admin_requires_review'] = {'value':True}
+            db.execute("UPDATE einkauf_material_dialoge SET fields_json=?,review_json='{}',revision=revision+1 WHERE id=?",(_json(fields),draft_id))
+            self._request_audit(db,'material_admin_wiederhergestellt',draft_id,revision+1,reason,before,fields)
+            self._refresh(db,self._draft(db,draft_id))
+            db.execute("UPDATE einkauf_material_rueckfragen SET state='superseded' WHERE draft_id=? AND state='queued'",(draft_id,))
+            return self._view(db,draft_id)
+
+    def _admin_field_proof(self, db, draft, fields, key):
+        field = fields.get(key,{})
+        proof = field.get('proof',{})
+        correction = fields.get('admin_correction',{}).get('value',{})
+        if (key not in {'quantity','unit'} or proof.get('kind')!='admin_correction'
+                or proof.get('actor')!='admin' or proof.get('draft_id')!=draft['id']
+                or proof.get('correction_id')!=correction.get('id') or correction.get('actor')!='admin'
+                or correction.get('draft_id')!=draft['id'] or correction.get(key)!=field.get('value')):
+            return False
+        for row in db.execute("SELECT details FROM assistent_audit WHERE actor='admin' AND aktion='material_admin_bearbeitet' ORDER BY id DESC").fetchall():
+            audit = json.loads(row['details'])
+            if audit.get('draft_id')==draft['id'] and audit.get('after',{}).get('admin_correction',{}).get('value')==correction:
+                return True
+        return False
+
+    @_originals_guard
     def assign_article(self, draft_id, revision, payload, actor='admin'):
         """Record identity only. Never reuse terms or submit an order."""
         if actor != 'admin':
@@ -1167,6 +1285,8 @@ class MaterialDialog:
         for key in ('order_requested','quantity','unit','urgent') + (('selected_article',) if selected else ()) + (('duplicate_confirmation',) if duplicate else ()):
             field = fields.get(key,{})
             proof = field.get('proof',{})
+            if proof.get('kind')=='admin_correction' and self._admin_field_proof(db,draft,fields,key):
+                continue
             if proof.get('employee_id') != source['employee_id']:
                 raise PermissionError('Persönlicher Nachrichtenbeleg fehlt.')
             if proof.get('kind') == 'image':

@@ -371,6 +371,20 @@ class InvoiceSourceTests(unittest.TestCase):
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual(self.calls, [])
 
+    def test_conflicting_later_page_clears_date_on_all_earlier_candidates(self):
+        self.seed_local()
+        with fitz.open() as document:
+            for value in ('01.09.2026', '02.09.2026'):
+                page = document.new_page()
+                page.insert_text((50, 50), 'Rechnungsdatum ' + value + '\nSynthetic product invoice')
+            document.save(self.root / 'invoice.pdf')
+        result = reader.read_source(self.portal, 'einkauf', 1)
+        self.assertIsNone(result['source']['date'])
+        self.assertEqual(len(result['candidates']), 2)
+        self.assertTrue(all(row['source']['date'] is None for row in result['candidates']))
+        self.assertNotIn('_invoice_dates', result)
+        self.assertFalse(self.calls)
+
 
 if __name__ == "__main__":
     unittest.main()

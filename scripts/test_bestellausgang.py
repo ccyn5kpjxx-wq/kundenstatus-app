@@ -31,6 +31,23 @@ def order(**changes):
 
 
 class DispatchTests(unittest.TestCase):
+    def test_first_acceptance_date_is_stable_across_later_sent_copy_retry(self):
+        result=self.enqueue(order(urgent=True))
+        self.mailbox.client.append_result=('NO',[])
+        self.dispatch.dispatch_due()
+        batch=self.dispatch.status(result['id'])['batch_id']
+        with closing(self.get_db()) as db:
+            first=json.loads(db.execute('SELECT result_json FROM assistent_bestellpakete WHERE id=?',(batch,)).fetchone()['result_json'])
+        self.assertEqual(first['sent_at'],self.now.isoformat())
+        self.now+=timedelta(days=2)
+        self.mailbox.client.append_result=('OK',[])
+        self.restarted().dispatch_due()
+        with closing(self.get_db()) as db:
+            later=json.loads(db.execute('SELECT result_json FROM assistent_bestellpakete WHERE id=?',(batch,)).fetchone()['result_json'])
+        self.assertEqual(later['state'],'sent')
+        self.assertEqual(later['sent_at'],first['sent_at'])
+        self.assertEqual(self.smtp.data_calls,1)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

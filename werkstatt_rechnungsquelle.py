@@ -37,6 +37,7 @@ import json
 import pathlib
 import re
 from datetime import date
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import tempfile
 import threading
 import time
@@ -93,13 +94,84 @@ def invoice_date(value):
 
 
 def _date_from_text(text, result):
-    if result["source"].get("date"):
-        return
+    # Topcolor's native text places the invoice number and '= Leistungsdatum'
+    # between Beleg-Datum and its value. Never scan past another date label.
+    date_pattern = r"(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})"
     dates = {invoice_date(match) for match in re.findall(
-        r"\bRechnungsdatum\s*[:=]?\s*(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})\b", text[:12000], re.I)}
+        r"\b(?:Rechnungsdatum|Beleg[ -]?Datum)\s*[:=]?\s*"
+        r"(?:(?:WBAL[\w-]+|=\s*Leistungsdatum)\s*){0,3}" + date_pattern + r"\b",
+        text[:12000], re.I)}
     dates.discard(None)
-    if len(dates) == 1:
-        result["source"]["date"] = next(iter(dates))
+    previous = result.setdefault('_invoice_dates', [])
+    known = invoice_date(result['source'].get('date'))
+    if known and known not in previous:
+        previous.append(known)
+    previous[:] = sorted(set(previous) | dates)
+    result['source']['date'] = previous[0] if len(previous) == 1 else None
+    if len(previous) > 1:
+        _warn(result, 'Widersprüchliche Rechnungsdaten; das Belegdatum bleibt ungeklärt.')
+
+
+def topcolor_price_metadata(pages):
+    """Read only a geometrically aligned, arithmetically reconciled summary.
+
+    Called after the supplier/table gate; arbitrary OCR/model prose cannot
+    supply a currency or VAT default. Unknown/mixed summaries yield no fields.
+    """
+    def number(raw):
+        if not isinstance(raw, str) or not re.fullmatch(r'\d+(?:\.\d{3})*,\d{2}', raw):
+            return None
+        try:
+            return Decimal(raw.replace('.', '').replace(',', '.'))
+        except InvalidOperation:
+            return None
+
+    matches, attempted = [], 0
+    for page in pages:
+        words = page['words']
+        def line(y):
+            return sorted((w for w in words if abs(w[1] - y) <= 2), key=lambda w: w[0])
+        for label in words:
+            if label[4] != 'Netto':
+                continue
+            attempted += 1
+            net_row = line(label[1])
+            currency_words = [w for w in net_row if w[4] in ('€', 'EUR') and w[0] > label[2]]
+            net_values = [w for w in net_row if number(w[4]) is not None and w[0] > label[2]]
+            if len(currency_words) != 1 or len(net_values) != 1 or currency_words[0][2] >= net_values[0][0]:
+                continue
+            net_word = net_values[0]
+            for tax in words:
+                if tax[4] != 'MwSt.' or abs(tax[0] - label[0]) > 3 or not 3 < tax[1] - label[1] < 28:
+                    continue
+                tax_row = line(tax[1])
+                percent = [w for w in tax_row if w[4] == '%' and tax[2] < w[0] < net_word[0]]
+                amounts = [w for w in tax_row if number(w[4]) is not None and w[0] > tax[2]]
+                if len(percent) != 1 or len(amounts) != 2:
+                    continue
+                rate_word, vat_word = amounts
+                rate = number(rate_word[4])
+                if not 0 <= rate <= 100 or not percent[0][2] <= rate_word[0] < vat_word[0] or abs(vat_word[2] - net_word[2]) > 3:
+                    continue
+                for gross in words:
+                    if gross[4] != 'Rechnungs-Betrag' or abs(gross[0] - label[0]) > 3 or not 3 < gross[1] - tax[1] < 40:
+                        continue
+                    gross_row = line(gross[1])
+                    gross_values = [w for w in gross_row if number(w[4]) is not None and w[0] > gross[2]]
+                    gross_currency = [w for w in gross_row if w[4] in ('€', 'EUR') and gross[2] < w[0]]
+                    if len(gross_values) != 1 or len(gross_currency) != 1 or gross_currency[0][2] >= gross_values[0][0] or abs(gross_values[0][2] - net_word[2]) > 3:
+                        continue
+                    net, vat, total = number(net_word[4]), number(vat_word[4]), number(gross_values[0][4])
+                    if (net * rate / 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) != vat or net + vat != total:
+                        continue
+                    matches.append({'currency': 'EUR', 'tax_basis': 'net', 'tax_rate': format(rate.normalize(), 'f'),
+                        'metadata_source': {'page': page['page'], 'method': 'topcolor_summary_columns_v1',
+                                            'tax_summary_reconciled': True}})
+    if len(matches) != attempted or not matches:
+        return {}
+    if len({(m['currency'], m['tax_basis'], m['tax_rate']) for m in matches}) != 1:
+        return {}
+    return matches[0]
 
 
 def _generic_quantity(position):
@@ -398,14 +470,18 @@ def _read_file(portal, path, file_id, result, directory):
             if len(document) > remaining:
                 _warn(result, "Die Rechnung überschreitet die Seitengrenze; sie ist noch nicht vollständig ausgelesen.")
             from werkstatt_topcolor_positionen import parse_topcolor_pages
-            if len(document):
-                _date_from_text(document[0].get_text() or "", result)
-            native = parse_topcolor_pages([
+            # Repeated invoice headers must agree across the whole original,
+            # including the native parser path that skips generic page reads.
+            for index in range(min(len(document), remaining)):
+                _date_from_text(document[index].get_text() or "", result)
+            native_pages = [
                 {"page": index + 1, "height": document[index].rect.height,
                  "words": document[index].get_text("words")}
                 for index in range(min(len(document), remaining))
-            ], result["source"]["supplier"])
+            ]
+            native = parse_topcolor_pages(native_pages, result["source"]["supplier"])
             if native is not None:
+                metadata = topcolor_price_metadata(native_pages)
                 pages_read = min(len(document), remaining)
                 detail["pages_attempted"] += pages_read
                 coverage["pages_attempted"] += pages_read
@@ -415,6 +491,7 @@ def _read_file(portal, path, file_id, result, directory):
                 for warning in native["warnings"]:
                     _warn(result, warning)
                 for position in native["positions"]:
+                    position['price_evidence'] = dict(position['price_evidence'], **metadata)
                     candidate = _candidate(position, result["source"], file_id,
                                            position["native_source"]["page"], digest, native=True)
                     if candidate:
@@ -567,4 +644,9 @@ def read_source(portal, source_kind, source_id):
     except Exception:
         result["status"] = "partial" if result["candidates"] else "error"
         _warn(result, "Die Rechnungsquelle konnte nicht sicher ausgewertet werden.")
+    result.pop('_invoice_dates', None)
+    # All files/pages can contribute a conflicting invoice date. Do not leave
+    # early candidates carrying an apparently certain superseded date.
+    for candidate in result['candidates']:
+        candidate['source']['date'] = result['source'].get('date')
     return result

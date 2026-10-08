@@ -227,6 +227,26 @@ class IntakeTests(unittest.TestCase):
         self.assertEqual(price['currency'], 'unknown')
         self.assertIsNone(row['lines'][0]['planned_total'])
 
+    def test_catalog_propagates_only_explicit_currency_and_tax_evidence(self):
+        group = self.group()
+        row = self.candidate(group)
+        row['price_evidence'] = {'basis': 'gebindepreis_netto_abgeleitet', 'value': '12.50', 'reconciled': True,
+                                 'currency': 'EUR', 'tax_basis': 'net', 'tax_rate': '7'}
+        self.items = [row]
+        result = self.service.catalog_candidates(group['id'], group['lines'][0]['id'])
+        self.assertEqual((result['matches'][0]['currency'], result['matches'][0]['tax_basis'], result['matches'][0]['tax_rate']),
+                         ('EUR', 'net', '7'))
+        self.assertFalse(result['matches'][0]['verified'])
+
+    def test_newest_unreadable_catalog_price_is_visible_and_blocks_old_suggestion(self):
+        group = self.group()
+        self.items = [self.candidate(group, date='2026-08-01'), self.candidate(group, ident=2, amount='', date='2026-09-28')]
+        result = self.service.catalog_candidates(group['id'], group['lines'][0]['id'])
+        self.assertEqual(len(result['matches']), 2)
+        self.assertIsNone(result['matches'][0]['amount'])
+        self.assertIsNone(result['suggested_id'])
+        with self.assertRaises(ValueError):
+            self.service.set_catalog_price(group['id'], group['lines'][0]['id'], {'revision': group['revision'], 'proposal_id': 2})
     def test_catalog_unknown_dates_conflicting_same_day_and_truncation(self):
         group = self.group()
         self.items = [self.candidate(group), self.candidate(group, 2, date=None)]

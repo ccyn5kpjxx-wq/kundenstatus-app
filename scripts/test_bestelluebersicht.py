@@ -6,14 +6,16 @@ from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_bestellungen import FakePortal
 from mailbox_outbox import _DDL as OUTBOX_DDL
 from werkstatt_bestellungen import register_orders
 from werkstatt_bestelluebersicht import OrderOverview
+from werkstatt_materialverwaltung import register_material_admin
 
 
 def canonical(value):
@@ -21,6 +23,81 @@ def canonical(value):
 
 
 class OverviewTests(unittest.TestCase):
+    def test_historical_lookup_uses_frozen_identity_once_without_writing_price_approval(self):
+        self.order('one')
+        self.order('two')
+        self.order('unknown',article_number='')
+        lookup=Mock(return_value={'status':'ok','amount':'47.74','currency':'EUR','tax_basis':'net','unit':'Rollen',
+            'packaging':'6 Rollen','date':'2026-08-14','source':{'beleg':'Synthetische Rechnung TC-123','seite':2,'position':5},
+            'historical':True,'verified':False,'dispatchable':False,'warnings':[]})
+        self.p.cockpit_data=SimpleNamespace(catalog=SimpleNamespace(historical_price=lookup))
+        original=self.p.get_db
+        with self.manager.db() as db:
+            before=[dict(row) for row in db.execute('SELECT * FROM assistent_bestellanforderungen ORDER BY id').fetchall()]
+        def readonly():
+            db=original()
+            forbidden={sqlite3.SQLITE_INSERT,sqlite3.SQLITE_UPDATE,sqlite3.SQLITE_DELETE,sqlite3.SQLITE_CREATE_TABLE,sqlite3.SQLITE_DROP_TABLE}
+            db.set_authorizer(lambda action,*args:sqlite3.SQLITE_DENY if action in forbidden else sqlite3.SQLITE_OK)
+            return db
+        with patch.object(self.p,'get_db',side_effect=readonly),patch.object(self.manager,'tick',side_effect=AssertionError('no dispatch')):
+            response=self.client.get('/admin/assistent-bestellungen')
+        self.assertEqual(response.status_code,200)
+        lookup.assert_called_once_with('Historischer Lieferant A','TEST-50','Rollen',packaging='')
+        self.assertIn('Synthetische Rechnung TC-123',response.get_data(as_text=True))
+        with self.manager.db() as db:
+            after=[dict(row) for row in db.execute('SELECT * FROM assistent_bestellanforderungen ORDER BY id').fetchall()]
+        self.assertEqual(before,after)
+
+    def test_main_overview_exposes_edit_form_checkboxes_and_restore_only_for_open_material(self):
+        self.material(state='review')
+        fields={'quantity':{'value':'3'},'unit':{'value':'Stück'}}
+        current={'id':1,'revision':3,'state':'review','dispatch_id':'','fields':fields,'intake_id':None,'analysis':{}}
+        self.p.material_dialog=SimpleNamespace(status=lambda key:current)
+        register_material_admin(self.p)
+        response=self.client.get('/admin/assistent-bestellungen?bestellung=material:1')
+        self.assertEqual(response.status_code,200)
+        html=response.get_data(as_text=True)
+        for value in ('Anforderung bearbeiten','name="selection" value="1:1"','name="quantity" value="3"','name="unit" value="Stück"','Artikelnummer (optional)'):
+            self.assertIn(value,html)
+        current.update(state='cancelled',fields={'admin_removal':{'value':{'reason':'Doppelt'}}})
+        with self.manager.db() as db:
+            db.execute('UPDATE einkauf_material_dialoge SET state=?,fields_json=? WHERE id=1',('cancelled',canonical(current['fields'])));db.commit()
+        html=self.client.get('/admin/assistent-bestellungen?bestellung=material:1').get_data(as_text=True)
+        self.assertIn('Anforderung wiederherstellen',html)
+        self.assertNotIn('<h3>Anforderung bearbeiten</h3>',html)
+
+    def test_dated_archives_keep_all_126_positions_and_new_open_work_separate(self):
+        self.batch('monday',state='sent')
+        with self.manager.db() as db:
+            db.execute('UPDATE assistent_bestellpakete SET result_json=? WHERE id=?',(canonical({'sent_at':'2026-10-12T12:02:00+00:00'}),'monday'));db.commit()
+        for index in range(126):self.order(f'archive-{index:03d}',batch='monday',actor='mitarbeiter:'+str(1+index%2))
+        self.order('new-open')
+        data=self.reader.page({},now=self.now)
+        self.assertEqual([item['id'] for item in data['open']['items']],['new-open'])
+        group=data['archive_groups'][0]
+        self.assertEqual(group['label'],'Bestellung am 12.10.2026')
+        self.assertEqual((group['count'],group['pages']),(126,6))
+        seen=[]
+        for page in range(1,7):
+            block=self.reader.page({'archive_day':'sent:2026-10-12','archive_page':str(page)},now=self.now)['archive_groups'][0]
+            self.assertTrue(block['expanded'])
+            seen.extend(item['id'] for item in block['items'])
+        self.assertEqual(len(set(seen)),126)
+        self.assertEqual(len(seen),126)
+        self.assertEqual({item['person'] for item in group['items']},{'Testperson A','Testperson B'})
+
+    def test_legacy_copy_update_does_not_invent_a_send_date_or_archive_uncertain(self):
+        self.batch('legacy',state='sent',outbox='sent')
+        self.order('old',batch='legacy')
+        self.batch('unknown',state='uncertain')
+        self.order('uncertain',batch='unknown')
+        with self.manager.db() as db:
+            db.execute('UPDATE mailbox_outbox SET updated_at=?',(datetime(2026,10,15,tzinfo=timezone.utc).timestamp(),));db.commit()
+        data=self.reader.page({},now=self.now)
+        self.assertEqual(data['archive_groups'][0]['label'],'Bestelllauf am 28.09.2026')
+        self.assertTrue(data['archive_groups'][0]['legacy'])
+        self.assertEqual([item['id'] for item in data['open']['items']],['uncertain'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
