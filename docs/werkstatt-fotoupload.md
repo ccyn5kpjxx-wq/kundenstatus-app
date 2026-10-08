@@ -6,7 +6,9 @@ einschließlich der PostgreSQL-Korrektur für die persönliche Auftragssuche.
 ## Bedienung
 
 Auf jeder Fahrzeugkarte der Werkstatt-Tafel und im Kopf des geöffneten Auftrags
-steht **Auftrag <Nummer>**. Diese Nummer ist die bestehende interne Datenbank-ID.
+steht rechts oben die **reine Nummer, groß, fett und schwarz**. Diese Nummer ist
+die bestehende interne Datenbank-ID. Neue Aufträge erhalten aufsteigende IDs;
+vorhandene Nummern bleiben dauerhaft gleich, auch nach Statuswechseln.
 Es werden keine Aufträge neu angelegt oder umnummeriert. Eine vorhandene
 Autohaus-Referenz bleibt davon getrennt.
 

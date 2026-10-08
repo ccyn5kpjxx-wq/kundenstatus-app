@@ -36,14 +36,14 @@ class WorkshopPhotoTests(TestCase):
     def test_tafel_and_detail_expose_same_internal_number_without_replacing_customer_reference(self):
         detail = self.client.get('/werkstatt/auftrag/156')
         self.assertEqual(detail.status_code, 200)
-        self.assertIn('Auftrag 156', detail.text)
+        self.assertIn('aria-label="Auftragsnummer 156"', detail.text)
         self.assertIn('data-auftrag-id="156"', detail.text)
         self.assertIn('AUTOHAUS-REF-555', detail.text)
         self.assertIn('Autohaus-Referenz', detail.text)
         self.assertIn('werkstatt_fotoupload.js', detail.text)
         tafel = self.client.get('/werkstatt/tafel')
         self.assertEqual(tafel.status_code, 200)
-        self.assertIn('Auftrag 156', tafel.text)
+        self.assertIn('aria-label="Auftragsnummer 156"', tafel.text)
         with database() as db:
             self.assertEqual(db.execute('SELECT auftragsnummer FROM auftraege WHERE id=156').fetchone()[0], 'AUTOHAUS-REF-555')
 
