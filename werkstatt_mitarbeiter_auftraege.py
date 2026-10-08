@@ -275,7 +275,7 @@ class EmployeeOrders:
     def _files(self, oid):
         db = self.p.get_db()
         try:
-            rows = [dict(row) for row in db.execute('SELECT ' + ','.join(_FILE_FIELDS) + ' FROM dateien WHERE auftrag_id=? ORDER BY id DESC', (oid,))]
+            rows = [dict(row) for row in db.execute('SELECT ' + ','.join(_FILE_FIELDS) + ' FROM dateien WHERE auftrag_id=? ORDER BY id DESC', (oid,)).fetchall()]
         finally:
             db.close()
         documents, photos = [], []

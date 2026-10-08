@@ -1,8 +1,9 @@
 """Personal order search, scoped writes, private originals and restore: offline."""
+import ast
 import base64
 import copy
 import concurrent.futures
-from contextlib import closing
+from contextlib import closing, contextmanager
 import hashlib
 import io
 import json
@@ -107,6 +108,68 @@ class EmployeeOrderTests(TestCase):
         with database() as db:
             return {'tables': {table: [dict(row) for row in db.execute('SELECT * FROM ' + table)]
                                for table in ('assistent_fortschritt_audit', 'auftraege', 'dateien', 'datei_backups', 'mitarbeiter', 'assistent_rechte')}}
+
+    @contextmanager
+    def postgres_cursor_reads(self):
+        # Exercise the real PostgreSQL cursor API over synthetic offline data.
+        # SQLite's iterable cursor otherwise hides missing fetchall() calls.
+        source = Path(__file__).resolve().parents[1].joinpath('app.py').read_text(encoding='utf-8')
+        node = next(item for item in ast.parse(source).body
+                    if isinstance(item, ast.ClassDef) and item.name == 'PostgresCursor')
+        namespace = {}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), '<actual-postgres-cursor>', 'exec'), namespace)
+        cursor_type = namespace['PostgresCursor']
+        get_db = p.get_db
+
+        class PostgresReadTransport:
+            def __init__(self):
+                self.raw = get_db()
+
+            def execute(self, sql, params=()):
+                cursor = self.raw.execute(sql, params)
+                return cursor_type(cursor.fetchall() if cursor.description else None,
+                                   lastrowid=cursor.lastrowid, rowcount=cursor.rowcount)
+
+            def __getattr__(self, name):
+                return getattr(self.raw, name)
+
+        with patch.object(p, 'get_db', side_effect=PostgresReadTransport):
+            yield
+
+    def test_postgres_cursor_route_valid_order_without_files(self):
+        before = self.state()
+        with self.postgres_cursor_reads():
+            data = self.page()
+        self.assertEqual(data['order']['nummer'], 102)
+        self.assertEqual(data['documents'], [])
+        self.assertEqual(data['photos'], [])
+        self.assertEqual(self.state(), before)
+
+    def test_postgres_cursor_route_keeps_work_copies_and_private_originals_protected(self):
+        original = pdf('Arbeitsauftrag: Stossfaenger lackieren', 'IBAN DE02120300000000202051')
+        document = self.store(original)
+        photo = self.store(png(), name='Arbeitsfoto.png', mime='image/png',
+                           category='assistent', dtype='Arbeitsfoto')
+        private = self.store(pdf('Lohnzettel geheim'), name='Lohnzettel.pdf')
+        other = self.store(pdf('Arbeitsauftrag anderer Auftrag'), oid=156)
+        before = self.snapshot()
+        with self.postgres_cursor_reads():
+            data = self.page()
+            self.assertEqual([item['id'] for item in data['documents']], [document])
+            self.assertEqual([item['id'] for item in data['photos']], [photo])
+            self.assertTrue(data['documents'][0]['arbeitskopie'])
+            response = self.client.get(self.file_url(document))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers['X-Workshop-Work-Copy'], '1')
+            with fitz.open(stream=response.data, filetype='pdf') as working_copy:
+                text = ''.join(page.get_text() for page in working_copy)
+                self.assertIn('Stossfaenger lackieren', text)
+                self.assertNotIn('DE021203', text)
+            self.assertEqual(self.client.get(self.file_url(private)).status_code, 404)
+            self.assertEqual(self.client.get(self.file_url(other)).status_code, 404)
+            self.assertEqual(p.app.test_client().get(self.file_url(document)).status_code, 404)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(p.load_datei_backup_bytes(p.get_datei(document)), original)
 
     def test_exact_number_returns_only_requested_order_without_finance_or_hydration(self):
         before = self.state()
