@@ -193,6 +193,27 @@ Commits:
 
 ## Bekannte Stolperfallen
 
+### Portal-Updates und laufende Stoerungen
+
+- Auto-Deploy des Render-Portals bleibt ausgeschaltet. Auch manuelle Deploys
+  und Neustarts unterbrechen den Dienst mit seiner persistenten Disk.
+- Vor jeder Liveaktion den aktuellen TomorrowWorks-Projektkontext und
+  laufende Stoerungs-/Deploymentaufgaben abrufen. Waehrend einer laufenden
+  Stoerungspruefung keine zusaetzlichen Featuredeploys starten; Aenderungen
+  getestet zur Bereitstellung vorbereiten und die gemeinsame Uebergabe nutzen.
+- Featureupdates sammeln und in ein mit dem Nutzer abgestimmtes
+  Wartungsfenster legen. Eine ausdruecklich angeforderte sofortige Liveaktion
+  bleibt autorisiert; den erforderlichen Neustart zuvor klar ankuendigen.
+- Eine akute Reparatur nur bereitstellen, wenn der getestete Fix den
+  aktuellen Fehler adressiert. Ein gesundes Portal nicht vorsorglich neu
+  starten. Vorher laufenden Build, Zeitpunkt und Fehlerbeleg sichern.
+- Die verantwortliche Deploymentaufgabe haelt ihren Claim bis Live-Build,
+  Healthcheck und betroffene Seiten geprueft und die Uebergabe gespeichert
+  sind. Andere Aufgaben veroeffentlichen in dieser Zeit nicht parallel.
+- Dokumentations-/Testaenderungen mit `[skip render]` benoetigen keinen
+  manuellen Runtime-Deploy. Die Disk niemals als Verfuegbarkeitsfix entfernen.
+  Details und Diagnosegrenzen: `docs/portal-deploy-koordination.md`.
+
 - Niemals `.env`, `.env.local`, API-Keys, Google-Service-Account-JSON oder echte Kundendaten committen.
 - `data/auftraege.db` und `data/uploads/` enthalten lokale Betriebs-/Kundendaten und gehören nicht nach GitHub.
 - Der Server darf nicht mehrfach parallel auf Port `5000` laufen; sonst sieht der Browser manchmal alte Zustände.
