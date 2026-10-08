@@ -128,8 +128,10 @@ Lieferzuordnung. Ohne Bestellauswahl bleibt das Original zunächst in einer
 neutralen Eingangssammlung; eindeutig passende Positionen werden mitsamt
 Original und Auslese bei den kanonischen Bestellungen abgelegt. Eine vorhandene
 Bestellauswahl begrenzt den Abgleich auf diese Bestellung. Originale unklarer
-Positionen bleiben erhalten. Die Eingangsoberfläche wird als Folgeaufgabe an
-diesen Ablauf angeschlossen.
+Positionen bleiben erhalten. Unter **Eingänge & Belege → Lieferung angekommen?**
+ist keine Bestellauswahl erforderlich: Foto/PDF wählen und einmal hochladen.
+Eine optionale Bestellvorgabe bleibt unter einer aufklappbaren Zusatzoption.
+Die Schaltfläche zeigt während des Aufrufs den laufenden Analysezustand.
 
 Regelversion `automatic-v1` unterstützt die bekannte Top-Color-Tabelle mit
 positiv belegtem Lieferantenkopf, Belegnummer und Datum, exakter Artikelnummer,

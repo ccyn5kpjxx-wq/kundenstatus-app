@@ -372,9 +372,10 @@ def register_delivery_forms(bp, portal):
         if action not in {'beleg', 'analyse', 'zuordnen', 'automatisch'}:
             abort(404)
         if request.method != 'POST':
-            if action != 'beleg':
+            if action not in {'beleg', 'automatisch'}:
                 abort(405)
-            flash('Bitte den Lieferschein und die passende Bestellung erneut auswählen.', 'warning')
+            flash('Bitte den Lieferschein und die passende Bestellung erneut auswählen.' if action == 'beleg'
+                  else 'Bitte den Lieferschein erneut auswählen. Die passende Bestellung wird automatisch erkannt.', 'warning')
             return redirect(url_for('werkstatt_orders.intake_index', _anchor='lieferschein-upload'), 303)
         key = request.form.get('order_key', '')
         from_intake = action in {'beleg', 'automatisch'} and request.form.get('return_to') == 'eingang'

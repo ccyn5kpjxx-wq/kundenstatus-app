@@ -3,7 +3,7 @@
 <div class="section-head"><div><p class="eyebrow">WARENEINGANG</p><h3>Lieferung & Lieferscheine</h3></div><span class="badge {{ 'success' if order_delivery.state=='geliefert' else 'warn' }}">{{ order_delivery.label }}</span></div>
 <p><strong>{{ order_delivery.quantity }} von {{ order_delivery.ordered }} {{ order_delivery.unit }} geliefert</strong></p>
 <p>Lieferschein hochladen – die App analysiert und ordnet eindeutige Lieferpositionen automatisch zu. Vollständige Lieferungen werden abgehakt; Restmengen bleiben offen.</p>
-<form method="post" enctype="multipart/form-data" action="{{ url_for('werkstatt_orders.order_delivery_form',action='automatisch') }}">
+<form data-lieferschein-automatik method="post" enctype="multipart/form-data" action="{{ url_for('werkstatt_orders.order_delivery_form',action='automatisch') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="order_key" value="{{ delivery_order.key }}">
 <label>Lieferschein als Foto oder PDF<input type="file" name="file" accept="image/jpeg,image/png,image/webp,application/pdf" required></label>
 <button>Lieferschein hochladen & automatisch zuordnen</button><small>Bis 8 MB. Die Originaldatei bleibt erhalten. Nur bei unklaren Angaben ist eine Prüfung nötig.</small></form>
@@ -12,7 +12,7 @@
 {% set assigned=namespace(value=file.assignment_complete) %}
 {% if file.assignment_partial %}<p class="notice">Ein Teil der Positionen ist zugeordnet. Weitere Positionen sind noch offen.</p>{% endif %}
 {% if assigned.value %}<p class="notice">✓ Lieferung zugeordnet{% if order_delivery.state=='geliefert' %} – Bestellung vollständig geliefert{% endif %}.</p>{% else %}
-<form method="post" action="{{ url_for('werkstatt_orders.order_delivery_form',action='automatisch') }}">
+<form data-lieferschein-automatik method="post" action="{{ url_for('werkstatt_orders.order_delivery_form',action='automatisch') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="order_key" value="{{ delivery_order.key }}"><input type="hidden" name="group_id" value="{{ file.group_id }}"><input type="hidden" name="file_id" value="{{ file.id }}">
 <button>Beleg analysieren & automatisch zuordnen</button></form>{% endif %}
 <small>Auf dem Server dauert die Auslese meist wenige Sekunden, höchstens 20 Sekunden. Vorhandene Ergebnisse werden sofort angezeigt. PDFs: bis zu fünf Seiten.</small>
@@ -36,4 +36,4 @@
 <button>Geprüfte Lieferung zuordnen</button></form></details>{% endif %}</article>
 {% else %}<p>Noch kein Lieferschein bei dieser Bestellung abgelegt.</p>{% endfor %}
 {% if order_delivery.events %}<details><summary>Zugeordnete Lieferungen</summary><ul>{% for event in order_delivery.events %}<li>{{ event.quantity }} {{ event.unit }} · Seite {{ event.page }}, Position {{ event.position }} · <a href="{{ url_for('werkstatt_intake.original',group_id=event.group_id,file_id=event.file_id) }}">Originalbeleg</a>{% if event.ocr_correction %}<small>Auslesekorrektur: {{ event.ocr_correction }}</small>{% endif %}</li>{% endfor %}</ul></details>{% endif %}
-</section>{% endif %}
+</section><script src="{{ url_for('static', filename='lieferschein.js', v='auto-1') }}" defer></script>{% endif %}

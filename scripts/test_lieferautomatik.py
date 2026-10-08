@@ -184,9 +184,19 @@ class AutomaticDeliveryTests(unittest.TestCase):
         route = '/admin/assistent-bestellungen/lieferung/automatisch'
         self.assertEqual(self.p.app.test_client().post(route).status_code, 403)
         self.assertEqual(self.client.post(route).status_code, 400)
-        self.assertEqual(self.client.get(route).status_code, 405)
-        self.assertEqual(self.client.head(route).status_code, 405)
+        self.assertEqual(self.client.get(route).status_code, 303)
+        self.assertEqual(self.client.head(route).status_code, 303)
         self.assertEqual(self.count(), 0)
+
+    def test_incoming_upload_defaults_to_automatic_order_choice_and_neutral_retry(self):
+        view = self.client.get('/admin/assistent-bestellungen/eingang/ansicht').get_data(as_text=True)
+        self.assertIn('action="/admin/assistent-bestellungen/lieferung/automatisch"', view)
+        self.assertIn('<option value="" selected>Automatisch erkennen</option>', view)
+        self.assertNotIn('name="order_key" required', view)
+        self.text = ''
+        result = self.post()
+        view = self.client.get(result.location).get_data(as_text=True)
+        self.assertIn('Zuordnung erneut versuchen', view)
 
     def test_internal_automatic_record_revalidates_proof_and_quantity(self):
         order, group, file = self.service.attach('material:1', __import__('werkzeug').datastructures.FileStorage(stream=BytesIO(png()), filename='test.png'))
