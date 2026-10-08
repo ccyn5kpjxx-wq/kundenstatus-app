@@ -44,6 +44,8 @@ PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
 PDF_BYTES = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
+TEST_INSURANCE_NAME = "Allianz Integration Test"
+TEST_INSURANCE_CODE = "SYNTHETIC-INSURANCE-42"
 
 
 def check(label, condition, detail=""):
@@ -90,7 +92,7 @@ def base_payload(csrf_token, form_token, **overrides):
         "unfall_zeit": "09:40",
         "unfall_ort": "Mosbach Bahnhof",
         "beschreibung": "Beim Ausparken wurde die linke hintere Seite beschaedigt.",
-        "versicherung_name": "Allianz",
+        "versicherung_name": TEST_INSURANCE_NAME,
         "versicherung_police": "POL-INT-42",
         "schaden_nummer": "SCH-INT-42",
         "mobilitaet": "ja",
@@ -121,6 +123,10 @@ def main():
     portal.app.config.update(TESTING=True, SESSION_COOKIE_SECURE=False)
     portal.init_db()
     portal.PUBLIC_FORM_ATTEMPTS.clear()
+    known_insurance = portal.create_versicherung(TEST_INSURANCE_NAME,
+        zugangscode=TEST_INSURANCE_CODE, email="allianz-integration@example.test")
+    check("Bekannte Versicherung explizit synthetisch vorbereitet",
+          known_insurance and not portal.versicherung_ist_platzhalter(known_insurance))
     client = portal.app.test_client()
 
     count_before = int(scalar("SELECT COUNT(*) FROM auftraege") or 0)
@@ -197,6 +203,7 @@ def main():
     check("Originalmeldung strukturiert gespeichert", auftrag["schaden_aufnahme"]["unfall_ort"] == "Mosbach Bahnhof" and auftrag["schaden_aufnahme"]["kontaktweg"] == "email")
     check("Datenschutzaufnahme dokumentiert", bool(auftrag["schaden_datenschutz_bestaetigt_am"]) and auftrag["schaden_aufnahme"]["datenschutz_version"] == portal.SCHADENAUFNAHME_DATENSCHUTZ_VERSION)
     check("Bestehende Versicherung wiederverwendet", int(scalar("SELECT COUNT(*) FROM versicherungen WHERE LOWER(name) LIKE '%allianz%'") or 0) == allianz_before)
+    check("Genau die vorbereitete Versicherung zugeordnet", auftrag["versicherung_id"] == known_insurance["id"])
     check("Initialer Status-Log vorhanden", int(scalar("SELECT COUNT(*) FROM status_log WHERE auftrag_id=? AND status=1", (auftrag_id,)) or 0) == 1)
 
     dateien = portal.list_dateien(auftrag_id)
@@ -379,6 +386,7 @@ def main():
     anschreiben = portal.get_auftrag(auftrag_id)["versicherung_anschreiben"]
     check("Versicherungslink fuehrt durch echten Login", f"/versicherung/login/{versicherung['portal_key']}?next=" in anschreiben)
     check("Anschreiben nutzt echten Versicherungs-Zugangscode", versicherung["zugangscode"] in anschreiben)
+    check("Anschreiben nutzt expliziten Test-Zugangscode", TEST_INSURANCE_CODE in anschreiben)
 
     # Eine noch unbekannte Versicherung bleibt ein rein interner, nicht portalfaehiger Platzhalter.
     client.get("/admin/versicherungsschaden?neu=1")

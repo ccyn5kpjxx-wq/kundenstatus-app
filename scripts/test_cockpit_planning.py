@@ -34,6 +34,7 @@ def template_environment():
         csrf_token=lambda: "synthetic-token",
         get_flashed_messages=lambda **kwargs: [],
         request=SimpleNamespace(args={}),
+        session={},
         mahnungen_faellig_count=lambda: 0,
         admin_leads_count=lambda: 0,
         fahrzeugsuche_auktion_alert_count=lambda: 0,
@@ -93,6 +94,21 @@ class PlanningTemplatesTest(unittest.TestCase):
         self.env.globals["request"] = SimpleNamespace(args={"monat": "2026-10"})
         html = self.render("cockpit.html", aktionsuebersicht={"groups": {}, "total": 0, "waiting": 0}, cockpit={}, start_inbox={"items": []}, mietwagen_heute={})
         self.assertRegex(html, r"<details[^>]*data-cockpit-kalender[^>]* open>")
+
+    def test_employee_module_requires_an_admin_session(self):
+        context = dict(aktionsuebersicht={"groups": {}, "total": 0, "waiting": 0},
+                       cockpit={}, start_inbox={"items": []}, mietwagen_heute={})
+        for identity in ({}, {"mitarbeiter_id": 4}, {"admin": False}):
+            with self.subTest(identity=identity):
+                self.env.globals["session"] = identity
+                html = self.render("cockpit.html", **context)
+                self.assertNotIn('href="/admin_mitarbeiter"', html)
+                self.assertNotIn("Stammdaten, Lohnzettel und Verträge", html)
+                self.assertIn('href="/admin_aufgaben"', html)
+        self.env.globals["session"] = {"admin": True}
+        html = self.render("cockpit.html", **context)
+        self.assertIn('href="/admin_mitarbeiter"', html)
+        self.assertIn("Stammdaten, Lohnzettel und Verträge", html)
 
     def test_assignment_uses_existing_form_and_escapes_order_text(self):
         selected = order(fahrzeug='<script>alert("x")</script>')

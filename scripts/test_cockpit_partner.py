@@ -1,5 +1,6 @@
 """Offline partner order UI checks. Synthetic data; every request intercepted."""
 from pathlib import Path
+import json
 import mimetypes
 import re
 import subprocess
@@ -10,6 +11,12 @@ from test_cockpit_customer import BASE, fixture, template_environment
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = '9f463c96aba98b794faba5becf58f2ecac155242'
+ADDED_ORDER_FIELDS = [
+    ['INPUT', 'abhol_adresse', 'text', ''], ['INPUT', 'abhol_uhrzeit', 'time', ''],
+    ['INPUT', 'analyse_text', 'text', ''], ['INPUT', 'annahme_uhrzeit', 'time', ''],
+    ['INPUT', 'farbcode', 'text', ''], ['INPUT', 'farbton', 'text', ''],
+    ['INPUT', 'farbton_2', 'text', ''], ['TEXTAREA', 'beschreibung', 'textarea', ''],
+]
 
 
 def render(source=None, *, review=True, status=3):
@@ -64,6 +71,24 @@ def signatures(page):
     })).sort()""")
 
 
+def form_contract(signatures):
+    forms = [json.loads(signature) for signature in signatures]
+    return sorted((form['method'], form['action'], form['enctype'],
+                   tuple(sorted(tuple(field) for field in form['fields']))) for form in forms)
+
+
+def current_form_contract(old_signatures):
+    forms = [json.loads(signature) for signature in old_signatures]
+    order_forms = [form for form in forms if ['BUTTON', 'aktion', 'submit', 'speichern'] in form['fields']]
+    assert len(order_forms) == 1, 'The historical order form must stay unambiguous'
+    order_form = order_forms[0]
+    assert not any(field in order_form['fields'] for field in ADDED_ORDER_FIELDS)
+    # Exactly these approved vehicle/transport fields were added. Every old
+    # field, submit value, method, endpoint and enctype remains contractual.
+    order_form['fields'].extend(ADDED_ORDER_FIELDS)
+    return form_contract([json.dumps(form) for form in forms])
+
+
 def run():
     old_source = subprocess.check_output(['git', 'show', BASELINE+':templates/partner_auftrag.html'], cwd=ROOT).decode('utf-8')
     html = render()
@@ -84,7 +109,7 @@ def run():
         old_signatures = signatures(old_page)
         old_context.close()
         context,page,scenario,errors = fresh()
-        assert signatures(page) == old_signatures, 'A form, endpoint, or submitted field contract changed'
+        assert form_contract(signatures(page)) == current_form_contract(old_signatures), 'A form, endpoint, or submitted field contract changed'
         assert page.get_by_role('tab').count() >= 4
         expect(page.get_by_role('heading',name='Audi A3',exact=True)).to_be_visible()
         assert 'Symbolbild' in page.inner_text('body')

@@ -47,7 +47,9 @@ def main():
     assert client.get('/admin/cockpit').status_code==302
     with client.session_transaction() as session:session['admin']=True
     response=client.get('/admin/cockpit')
-    assert response.status_code==200 and 'Das wartet auf dich' in response.get_data(as_text=True)
+    html=response.get_data(as_text=True)
+    assert response.status_code==200 and 'id="aktionen-titel">Das steht jetzt an' in html
+    assert 'data-cockpit-kalender' in html
     print('PASS: Gruppen, Wartezustand, Terminbestaetigung, Archiv/Verlust und Adminschutz')
 
 if __name__=='__main__':main()

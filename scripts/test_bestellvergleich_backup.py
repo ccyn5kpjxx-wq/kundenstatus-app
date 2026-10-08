@@ -13,15 +13,21 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 import zipfile
 
-from flask import Flask, flash, redirect, request, url_for
+from flask import Flask, flash, has_request_context, redirect, request, url_for
+from werkzeug.exceptions import ServiceUnavailable
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from werkstatt_bestellvergleich import OrderPriceComparison, TABLES as PRICE_TABLES
+from werkstatt_einladung_restore import ensure_employee_invitation_state_for_import
+from werkstatt_mitarbeiter_portal import ensure_employee_private_state_for_import
+from werkstatt_mitarbeiter_auftraege import ensure_employee_orders_for_import
 
 TABLES = (*PRICE_TABLES, 'ordinary')
 
@@ -44,7 +50,8 @@ class ComparisonBackupTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tree = ast.parse(ROOT.joinpath('app.py').read_text(encoding='utf-8'))
-        names = {'portal_originals_operation_lock', 'portal_originals_locked',
+        names = {'_originals_busy', '_portal_originals_thread_guard',
+                 'portal_originals_operation_lock', 'portal_originals_locked',
                  'ensure_material_external_claims_for_import', 'admin_daten_import',
                  'import_backup_json_rows_into_current_database', 'import_sqlite_rows_into_current_database'}
         nodes = [node for node in cls.tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
@@ -57,6 +64,7 @@ class ComparisonBackupTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.db_path = self.root / 'target.db'
         self.portal = type('Portal', (), {'get_db': lambda _: connection(self.db_path)})()
+        self.portal.get_table_columns = lambda db, table: {row['name'] for row in db.execute(f'PRAGMA table_info({table})')}
         self.comparison = OrderPriceComparison(self.portal)
         with connection(self.db_path) as db:
             db.execute('CREATE TABLE ordinary (id INTEGER PRIMARY KEY,value TEXT)')
@@ -68,6 +76,10 @@ class ComparisonBackupTests(unittest.TestCase):
         self.ns = {
             'contextmanager': contextmanager, 'wraps': wraps, 'os': os, 'sqlite3': sqlite3,
             'pathlib': pathlib, 'tempfile': tempfile, 'zipfile': zipfile, 'datetime': datetime,
+            'sys': SimpleNamespace(modules={'comparison_restore_fixture': self.portal}),
+            '__name__': 'comparison_restore_fixture', 'time': time,
+            'has_request_context': has_request_context, 'ServiceUnavailable': ServiceUnavailable,
+            'PORTAL_ORIGINALS_REQUEST_WAIT_SECONDS': 2.0,
             'USE_POSTGRES': False, 'DATA_DIR': self.root, 'DB': self.db_path,
             'PORTAL_ORIGINALS_FILE_LOCK': self.root / 'restore.lock',
             '_portal_originals_thread_lock': threading.RLock(), '_portal_originals_lock_state': threading.local(),
@@ -78,6 +90,9 @@ class ComparisonBackupTests(unittest.TestCase):
             'validate_backup_binary_reference_completeness': lambda *args: None,
             'ensure_no_database_only_originals_for_import': lambda *args: None,
             'ensure_no_unrestorable_mos_data_for_import': lambda: None,
+            'ensure_employee_invitation_state_for_import': ensure_employee_invitation_state_for_import,
+            'ensure_employee_private_state_for_import': ensure_employee_private_state_for_import,
+            'ensure_employee_orders_for_import': ensure_employee_orders_for_import,
             'app': self.app, 'admin_required': lambda fn: fn, 'request': request, 'flash': flash,
             'redirect': redirect, 'url_for': url_for, 'clean_text': str,
             'log_import_package_event': lambda *args, **kwargs: None,
