@@ -8296,6 +8296,7 @@ BACKUP_TABLES = (
     "einkauf_material_rueckfragen",
     "assistent_bestellpreis_basis",
     "assistent_bestellpreis_rechnungen",
+    "assistent_bestelllieferungen",
     "google_ads_tageswerte",
 )
 # Der aktuelle ZIP-Import stellt diese MOS-Tabellen noch nicht wieder her.
@@ -8326,7 +8327,7 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
-BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1")
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_liefereingang_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1")
 BACKUP_BINARY_FIELDS = {
     "mitarbeiter_lohnzettel": {
         "original_base64": {"suffix": ".bin", "max_bytes": 10 * 1024 * 1024},
@@ -47916,6 +47917,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         "einkauf_material_dialoge", "einkauf_material_texte", "einkauf_material_rueckfragen",
         # Historical estimates and invoice matches postdate the order dialog.
         "assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen",
+        # Confirmed delivery receipts arrived after historical price matching.
+        "assistent_bestelllieferungen",
         # Personal setup/profile documents arrived after the avatar features.
         "assistent_einladungen", "mitarbeiter_portal_profile", "mitarbeiter_lohnzettel", "mitarbeiter_betriebsurlaub",
         # Employment contracts postdate the initial private employee portal.
@@ -47956,6 +47959,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         required_tables.update({"einkauf_material_dialoge", "einkauf_material_texte", "einkauf_material_rueckfragen"})
     if "werkstatt_bestellvergleich_v1" in schema_features:
         required_tables.update({"assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen"})
+    if "werkstatt_liefereingang_v1" in schema_features:
+        required_tables.add("assistent_bestelllieferungen")
     if "werkstatt_mailquellen_v1" in schema_features:
         required_tables.update({"assistent_mailquellen_laeufe", "assistent_mailquellen_ordner",
                                 "assistent_mailquellen_nachrichten", "assistent_mailquellen_absender",
@@ -48349,13 +48354,13 @@ def import_sqlite_rows_into_current_database(imported_db):
 
 
 def ensure_material_external_claims_for_import(*, export=None, imported_db=None, target=None, archive=None, names=None):
-    """Keep irreversible sends, personal batch identities and price evidence.
+    """Keep irreversible sends, personal batches, price and delivery evidence.
 
     The caller holds portal_originals_operation_lock, as do reserve_external
-    and record_external_sent as well as OrderPriceComparison writes. Otherwise
-    a new claim or price record could appear between this check and destructive
+    and record_external_sent, OrderPriceComparison and OrderDelivery writes. Otherwise
+    a new claim, price or delivery record could appear between this check and destructive
     replacement. Matching recent backups remain valid; older snapshots may not
-    undo a reservation, its frozen content, audit, estimate or invoice match.
+    undo a reservation, frozen content, audit, estimate, invoice match or delivery.
     Personal photo batches also retain their original request key and durable
     order identity: forgetting either would let a browser retry order twice.
     """
@@ -48374,7 +48379,7 @@ def ensure_material_external_claims_for_import(*, export=None, imported_db=None,
                 "SELECT * FROM assistent_audit WHERE aktion IN (?, ?)",
                 ("material_external_reserved", "material_external_sent"),
             ).fetchall()]
-        for table in ("assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen"):
+        for table in ("assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen", "assistent_bestelllieferungen"):
             if get_table_columns(target, table):
                 protected[table] = [dict(row) for row in target.execute(f"SELECT * FROM {table}").fetchall()]
 
@@ -48399,6 +48404,12 @@ def ensure_material_external_claims_for_import(*, export=None, imported_db=None,
                 chunk = values[offset:offset + 400]
                 rows.extend(protect_rows(table, column + " IN (" + ",".join("?" for _ in chunk) + ")", tuple(chunk)))
             return rows
+
+        # A confirmed delivery must retain its original intake/file identity too.
+        for delivery in protected.get("assistent_bestelllieferungen", []):
+            payload = json.loads(delivery["payload_json"])
+            protect_ids("einkauf_eingang", "id", (payload.get("group_id"),))
+            protect_ids("einkauf_eingang_dateien", "id", (payload.get("file_id"),))
 
         messages = protect_rows("einkauf_material_nachrichten", "phone_number_id=?", ("portal:personal",))
         protect_rows("einkauf_material_texte", "phone_number_id=?", ("portal:personal",))
@@ -48440,7 +48451,7 @@ def ensure_material_external_claims_for_import(*, export=None, imported_db=None,
         error = (
             "Datenimport gesperrt: Die Sicherung enthält vorhandene externe "
             "Bestellreservierungen, Versandnachweise oder feste Bestellpreis-Nachweise "
-            "oder persönliche Foto-Bestellungen nicht unverändert. "
+            "oder bestätigte Lieferungen oder persönliche Foto-Bestellungen nicht unverändert. "
             "Eine aktuelle Sicherung mit diesen Vorgängen verwenden."
         )
         if not isinstance(incoming, dict):
@@ -48586,7 +48597,7 @@ def admin_daten_import():
                     intake_schema = globals().get("workshop_intake_init_schema")
                     if callable(intake_schema):
                         intake_schema()
-                    for hook in ("employee_invitations_init_schema", "employee_portal_init_schema", "workshop_progress_init_schema", "workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema", "order_price_comparison_init_schema"):
+                    for hook in ("employee_invitations_init_schema", "employee_portal_init_schema", "workshop_progress_init_schema", "workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema", "order_price_comparison_init_schema", "order_delivery_init_schema"):
                         schema = globals().get(hook)
                         if callable(schema):
                             schema()
@@ -57951,6 +57962,8 @@ employee_orders = register_employee_orders(sys.modules[__name__])
 from werkstatt_bestellvergleich import OrderPriceComparison
 order_price_comparison = OrderPriceComparison(sys.modules[__name__])
 order_price_comparison_init_schema = order_price_comparison.init_schema
+from werkstatt_liefereingang import get_delivery
+get_delivery(sys.modules[__name__])
 from werkstatt_materialverwaltung import register_material_admin
 register_material_admin(sys.modules[__name__])
 if not PUBLIC_SITE_ONLY:
