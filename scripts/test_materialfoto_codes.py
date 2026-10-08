@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image, ImageOps
 from werkzeug.datastructures import FileStorage
 from werkstatt_materialfoto import _code_view, _decode_codes, _search_code, _CODE_KEY
+from werkstatt_fotoauslese import _scan_codes, read_photo
 from werkstatt_materialdialog import MaterialDialog
 import test_materialfoto as photo_fixtures
 import test_materialbestellung_portal as portal_fixtures
@@ -97,8 +98,14 @@ class PhotoCodeTests(unittest.TestCase):
         self.assertEqual(normal['code_erkennung']['status'], 'kein_code')
         self.f.vision.return_value = {'art': 'produkt', 'produkt': 'Test-Klebeband', 'artikelnummer': 'TEST-30'}
         self.assertEqual(self.service.analyze(self.who, normal['id'])['merkmale']['produkt'], 'Test-Klebeband')
+        raw = png(Image.new('RGB', (90, 90), 'blue'))
+        clean, _ = read_photo(raw)
         with patch.dict(sys.modules, {'cv2': None}):
+            missing = _scan_codes(raw)
+        self.assertEqual(missing, {'available': False, 'decoded': [], 'incomplete': False})
+        with patch('werkstatt_materialfoto.read_photo', return_value=(clean, missing)) as bounded_reader:
             unavailable = self.stage(Image.new('RGB', (90, 90), 'blue'), 'decoder-missing-request-123456')
+        bounded_reader.assert_called_once_with(raw, decode=True)
         self.assertEqual(unavailable['code_erkennung']['status'], 'nicht_verfuegbar')
         self.assertEqual(self.service.analyze(self.who, unavailable['id'])['status'], 'pruefen')
 
@@ -153,7 +160,10 @@ class PhotoCodeTests(unittest.TestCase):
                 barcode = Mock()
                 barcode.detectAndDecodeWithType.return_value = (False, (), (), None)
                 with patch('cv2.QRCodeDetector', return_value=detector), patch('cv2.barcode_BarcodeDetector', return_value=barcode):
-                    evidence = _decode_codes(png(Image.new('RGB', (60, 60), 'white')), 'digest')
+                    raw = png(Image.new('RGB', (60, 60), 'white'))
+                    decoded = _scan_codes(raw)
+                with patch('werkstatt_materialfoto.read_photo', side_effect=AssertionError('Reuse the child result')):
+                    evidence = _decode_codes(raw, 'digest', decoded=decoded)
                 self.assertEqual(_code_view(evidence, 'digest')['status'], 'mehrdeutig')
                 self.assertLessEqual(len(evidence['codes']), 8)
 
