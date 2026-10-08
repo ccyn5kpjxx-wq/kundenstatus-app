@@ -15,6 +15,9 @@ import io
 import json
 import re
 import secrets
+import threading
+import time
+from collections import OrderedDict
 from types import SimpleNamespace
 
 from flask import Blueprint, jsonify, render_template, request, session
@@ -22,7 +25,7 @@ from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image
 
-from werkstatt_materialfoto import _image, _code_view, _CODE_KEY
+from werkstatt_materialfoto import _image, _code_view, _CODE_KEY, _search_code, LabelPreviewBusy
 from werkstatt_materialkanal import _BorrowedConnection, _fingerprint, _json, _note
 
 
@@ -31,6 +34,8 @@ MAX_PHOTOS = 10
 MAX_PHOTO_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_BYTES = 50 * 1024 * 1024
 MAX_BODY_BYTES = MAX_TOTAL_BYTES + 512 * 1024
+MAX_PREVIEW_BODY_BYTES = MAX_PHOTO_BYTES + 512 * 1024
+PREVIEW_RATE_LIMIT = 30
 _UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 _PHOTO_REF = re.compile(r'portal\.([1-9][0-9]*)\.(' + _UUID.pattern + r')\.(' + _UUID.pattern + r')')
 _REPLY_REF = re.compile(r'portalreply\.([1-9][0-9]*)\.(' + _UUID.pattern + r')\.([1-9][0-9]*)')
@@ -54,6 +59,13 @@ def _description(value):
     return value.strip()
 
 
+def _rejected_codes(value):
+    if (not isinstance(value, list) or len(value) > 8
+            or any(not isinstance(code, str) or _search_code(code) != code for code in value)):
+        raise ValueError('Abgelehnte Artikelcodes eindeutig angeben.')
+    return list(dict.fromkeys(value))
+
+
 def portal_request_details(source):
     """Read immutable form metadata; free descriptions are never commands.
 
@@ -68,12 +80,19 @@ def portal_request_details(source):
         details = json.loads(source['caption'][len(_REQUEST_PREFIX):])
     except (ValueError, TypeError):
         raise ValueError('Gespeicherte Bildanforderung benötigt eine interne Prüfung.') from None
-    if (not isinstance(details, dict) or set(details) != {'menge', 'dringend', 'vorgang', 'beschreibung'}
+    required = {'menge', 'dringend', 'vorgang', 'beschreibung'}
+    if (not isinstance(details, dict) or not required <= set(details)
+            or set(details) - required - {'artikelkorrektur', 'abgelehnte_codes', 'etikett_sha256'}
             or type(details['menge']) is not int or not 1 <= details['menge'] <= 999
             or type(details['dringend']) is not bool or not isinstance(details['vorgang'], str)
             or details['vorgang'] not in {'bestellung', 'anfrage'}
             or _description(details['beschreibung']) != details['beschreibung']):
         raise ValueError('Gespeicherte Bildanforderung benötigt eine interne Prüfung.')
+    if set(details) - required:
+        if (details.get('artikelkorrektur') is not True or 'abgelehnte_codes' not in details
+                or _rejected_codes(details['abgelehnte_codes']) != details['abgelehnte_codes']
+                or 'etikett_sha256' in details and not re.fullmatch(r'[0-9a-f]{64}', str(details['etikett_sha256']))):
+            raise ValueError('Gespeicherte Artikelkorrektur benötigt eine interne Prüfung.')
     return details
 
 
@@ -82,6 +101,10 @@ def _position_evidence(row):
     # Empty additions preserve the original three-field client's fingerprint.
     if row['vorgang'] != 'bestellung' or row['beschreibung']:
         result.update(vorgang=row['vorgang'], beschreibung=row['beschreibung'])
+    if row.get('artikelkorrektur'):
+        result.update(artikelkorrektur=True, abgelehnte_codes=row['abgelehnte_codes'])
+        if row.get('label'):
+            result['etikett_sha256'] = row['label']['sha256']
     return result
 
 
@@ -89,6 +112,24 @@ class MaterialOrderPortal:
     def __init__(self, portal):
         self.p = portal
         self.clock = portal.material_channel.clock
+        self._preview_requests = OrderedDict()
+        self._preview_lock = threading.Lock()
+
+    def preview_allowed(self, actor):
+        """Bound decoder/catalog work per person; no persisted order state."""
+        now = time.monotonic()
+        with self._preview_lock:
+            for key, times in list(self._preview_requests.items()):
+                if not times or times[-1] <= now - 60:
+                    del self._preview_requests[key]
+            times = [stamp for stamp in self._preview_requests.pop(actor, []) if stamp > now - 60]
+            allowed = len(times) < PREVIEW_RATE_LIMIT
+            if allowed:
+                times.append(now)
+            self._preview_requests[actor] = times
+            while len(self._preview_requests) > 1024:
+                self._preview_requests.popitem(last=False)
+            return allowed
 
     @contextmanager
     def db(self):
@@ -169,11 +210,14 @@ class MaterialOrderPortal:
             raise ValueError('Ein bis zehn Fotos mit zugehöriger Stückzahl auswählen.')
         ids, rows, total = set(), [], 0
         expected_fields = {'foto_' + str(item.get('id')) for item in positions if isinstance(item, dict)}
+        expected_fields.update('etikett_' + str(item.get('id')) for item in positions
+                               if isinstance(item, dict) and item.get('etikett_datei') is True)
         if set(files.keys()) != expected_fields or any(len(files.getlist(key)) != 1 for key in files.keys()):
             raise ValueError('Jedes Foto muss genau einem Eintrag zugeordnet sein.')
         for position in positions:
             if (not isinstance(position, dict) or not {'id', 'menge', 'dringend'} <= set(position)
-                    or set(position) - {'id', 'menge', 'dringend', 'vorgang', 'beschreibung'}):
+                    or set(position) - {'id', 'menge', 'dringend', 'vorgang', 'beschreibung',
+                                        'artikelkorrektur', 'abgelehnte_codes', 'etikett_datei'}):
                 raise ValueError('Zu jedem Bild Vorgangsnummer, Stückzahl, Dringlichkeit und optional Beschreibung oder Anfrage angeben.')
             client_id = _uuid(position['id'])
             if client_id in ids:
@@ -186,6 +230,12 @@ class MaterialOrderPortal:
             if not isinstance(kind, str) or kind not in {'bestellung', 'anfrage'}:
                 raise ValueError('Bestellung oder Teileanfrage wählen.')
             description = _description(position.get('beschreibung', ''))
+            correction = position.get('artikelkorrektur', False)
+            rejected = _rejected_codes(position.get('abgelehnte_codes', []))
+            has_label = position.get('etikett_datei', False)
+            if (type(correction) is not bool or type(has_label) is not bool
+                    or (rejected or has_label) and not correction):
+                raise ValueError('Etikettfoto und abgelehnte Codes benötigen eine Artikelkorrektur.')
             file = files.get('foto_' + client_id)
             if not file or not getattr(file, 'filename', ''):
                 raise ValueError('Bitte zu jedem Eintrag ein Foto auswählen.')
@@ -201,8 +251,23 @@ class MaterialOrderPortal:
             with Image.open(io.BytesIO(raw)) as image:
                 mime, suffix = {'JPEG': ('image/jpeg', '.jpg'), 'PNG': ('image/png', '.png'),
                                 'WEBP': ('image/webp', '.webp')}[image.format]
+            label = None
+            if has_label:
+                label_file = files.get('etikett_' + client_id)
+                label_raw = label_file.read(MAX_PHOTO_BYTES + 1)
+                if not label_raw or len(label_raw) > MAX_PHOTO_BYTES:
+                    raise ValueError('Etikettfoto leer oder größer als 8 MB.')
+                total += len(label_raw)
+                if total > MAX_TOTAL_BYTES:
+                    raise ValueError('Alle Fotos zusammen dürfen höchstens 50 MB groß sein.')
+                _image(label_raw)
+                with Image.open(io.BytesIO(label_raw)) as image:
+                    label_mime, label_suffix = {'JPEG': ('image/jpeg', '.jpg'), 'PNG': ('image/png', '.png'),
+                                               'WEBP': ('image/webp', '.webp')}[image.format]
+                label = dict(raw=label_raw, mime=label_mime, suffix=label_suffix, sha256=hashlib.sha256(label_raw).hexdigest())
             rows.append({'client_id': client_id, 'quantity': quantity, 'urgent': urgent,
                          'vorgang': kind, 'beschreibung': description,
+                         'artikelkorrektur': correction, 'abgelehnte_codes': rejected, 'label': label,
                          'sha256': hashlib.sha256(raw).hexdigest(), 'raw': raw, 'mime': mime, 'suffix': suffix})
         return request_id, rows
 
@@ -248,9 +313,14 @@ class MaterialOrderPortal:
                 reference = prefix + row['client_id']
                 source_key = 'portal-photo:' + str(mid) + ':' + hashlib.sha256(reference.encode()).hexdigest()
                 caption = str(row['quantity']) + ' Stück' + (', dringend' if row['urgent'] else '')
-                if row['vorgang'] != 'bestellung' or row['beschreibung']:
-                    caption = _REQUEST_PREFIX + _json({'menge': row['quantity'], 'dringend': row['urgent'],
-                        'vorgang': row['vorgang'], 'beschreibung': row['beschreibung']})
+                if row['vorgang'] != 'bestellung' or row['beschreibung'] or row['artikelkorrektur']:
+                    details = {'menge': row['quantity'], 'dringend': row['urgent'],
+                               'vorgang': row['vorgang'], 'beschreibung': row['beschreibung']}
+                    if row['artikelkorrektur']:
+                        details.update(artikelkorrektur=True, abgelehnte_codes=row['abgelehnte_codes'])
+                        if row['label']:
+                            details['etikett_sha256'] = row['label']['sha256']
+                    caption = _REQUEST_PREFIX + _json(details)
                 group = intake.create({'supplier': 'Lieferant ungeklärt', 'source_key': source_key,
                     'external_ref': 'Persönliche Foto-Bestellmaske; Mitarbeiter: ' + employee['name'] + '; Abgabe: ' + request_id,
                     'source_at': stamp, 'already_ordered': False, 'original_author': employee['name'],
@@ -266,7 +336,16 @@ class MaterialOrderPortal:
                     (group['id'], 'materialfoto' + row['suffix'], row['mime'], row['suffix'], row['sha256'],
                      base64.b64encode(row['raw']).decode('ascii'), stamp, who['actor'])).fetchone()
                 intake._bump(db, group['id'])
-                photo = photos.stage(who, FileStorage(stream=io.BytesIO(row['raw']), filename='materialfoto.jpg'),
+                analysis_file = row
+                if row['label']:
+                    analysis_file = row['label']
+                    original = db.execute('''INSERT INTO einkauf_eingang_dateien
+                        (eingang_id,kind,original_name,mime,suffix,sha256,original_base64,created_at,created_by)
+                        VALUES(?,'materialfoto',?,?,?,?,?,?,?) RETURNING id''',
+                        (group['id'], 'produktetikett' + analysis_file['suffix'], analysis_file['mime'], analysis_file['suffix'],
+                         analysis_file['sha256'], base64.b64encode(analysis_file['raw']).decode('ascii'), stamp, who['actor'])).fetchone()
+                    intake._bump(db, group['id'])
+                photo = photos.stage(who, FileStorage(stream=io.BytesIO(analysis_file['raw']), filename='materialfoto.jpg'),
                                      'portal-' + hashlib.sha256(reference.encode()).hexdigest())
                 canonical = _fingerprint(dict(batch_hash=batch_hash,
                     **_position_evidence(row)))
@@ -276,7 +355,7 @@ class MaterialOrderPortal:
                      intake_id,file_id,assistant_photo_id,updated_at)
                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ready',?,?,?,?)''',
                     (PORTAL_SOURCE, reference, canonical, 0, employee['version'], mid, employee['name'],
-                     employee['version'], row['client_id'], row['mime'], row['sha256'], caption, stamp, now,
+                     employee['version'], row['client_id'], analysis_file['mime'], analysis_file['sha256'], caption, stamp, now,
                      group['id'], original['id'], photo['id'], now))
                 source = db.execute('SELECT * FROM einkauf_material_nachrichten WHERE phone_number_id=? AND wamid=?',
                                     (PORTAL_SOURCE, reference)).fetchone()
@@ -308,7 +387,8 @@ class MaterialOrderPortal:
         decoded = code['codes'][0]['suchwert'] if code['status'] == 'erkannt' else ''
         labels = view['analysis'].get('merkmale', {})
         selected = view['fields'].get('selected_article', {}).get('value', {})
-        product = selected.get('produkt_name') or view['review'].get('product_name') or labels.get('produkt')
+        manual = view['fields'].get('manual_article', {}).get('value', {})
+        product = manual.get('product_name') or manual.get('produkt_name') or selected.get('produkt_name') or view['review'].get('product_name') or labels.get('produkt')
         if not product:
             product = description or ' '.join(str(labels.get(key) or '') for key in ('marke', 'materialtyp', 'masse')).strip() or 'Materialfoto'
         state = view['state']
@@ -468,7 +548,8 @@ def register_material_order_portal(p):
     def upload_limit():
         # Must precede the app-wide CSRF parser: the global 25 MB limit remains
         # unchanged for all other endpoints. Only personal uploads get 50 MB.
-        if request.endpoint in {'werkstatt_materialbestellung.submit', 'werkstatt_materialbestellung.answer'}:
+        if request.endpoint in {'werkstatt_materialbestellung.submit', 'werkstatt_materialbestellung.answer',
+                                'werkstatt_materialbestellung.preview'}:
             who = service.identity()
             if not who:
                 return jsonify(error='Persönliche Anmeldung erforderlich.', accepted=False), 401
@@ -476,6 +557,10 @@ def register_material_order_portal(p):
                 return jsonify(error='Persönliche Einkaufrechte fehlen.', accepted=False), 403
             supplied = request.headers.get('X-CSRF-Token')
             expected = session.get('csrf_token')
+            if request.endpoint == 'werkstatt_materialbestellung.preview':
+                request.max_content_length = MAX_PREVIEW_BODY_BYTES
+                if supplied is None:
+                    return jsonify(error='Sicherheitsprüfung fehlgeschlagen. Bitte die Seite neu laden.', accepted=False), 403
             if supplied is not None and (not isinstance(expected, str) or not hmac.compare_digest(expected, supplied)):
                 return jsonify(error='Dein persönlicher Zugang hat sich geändert. Bitte die Seite neu laden.',
                                accepted=False, reload_required=True), 403
@@ -501,6 +586,13 @@ def register_material_order_portal(p):
     def denied(exc):
         return jsonify(error=str(exc), accepted=False), 403
 
+    @bp.errorhandler(LabelPreviewBusy)
+    def label_busy(exc):
+        response = jsonify(error=str(exc), accepted=False)
+        response.status_code = 429
+        response.headers['Retry-After'] = '5'
+        return response
+
     @bp.errorhandler(RequestEntityTooLarge)
     def oversized(exc):
         return jsonify(error='Alle Fotos zusammen dürfen höchstens 50 MB groß sein; je Foto höchstens 8 MB.', accepted=False), 413
@@ -519,6 +611,33 @@ def register_material_order_portal(p):
             if not isinstance(expected, str) or not isinstance(supplied, str) or not hmac.compare_digest(expected, supplied):
                 return None, (jsonify(error='Sicherheitsprüfung fehlgeschlagen. Bitte die Seite neu laden.', accepted=False), 403)
         return who, None
+
+    @bp.post('/artikelscan-vorschau')
+    def preview():
+        who, error = protected()
+        if error:
+            return error
+        if not service.preview_allowed(who['actor']):
+            response = jsonify(error='Viele Fotos geprüft. Bitte kurz warten; du kannst den Bestellwunsch bereits senden.', accepted=False)
+            response.status_code = 429
+            response.headers['Retry-After'] = '60'
+            return response
+        if (set(request.form.keys()) - {'csrf_token', 'modus', 'abgelehnte_codes'} or set(request.files.keys()) != {'foto'}
+                or len(request.files.getlist('foto')) != 1):
+            raise ValueError('Für die Artikelvorschau genau ein Foto übermitteln.')
+        mode = request.form.get('modus', 'code')
+        if mode not in {'code', 'etikett'}:
+            raise ValueError('Code- oder Etikettvorschau auswählen.')
+        try:
+            rejected = _rejected_codes(json.loads(request.form.get('abgelehnte_codes', '[]')))
+        except (ValueError, TypeError):
+            raise ValueError('Abgelehnte Artikelcodes konnten nicht gelesen werden.') from None
+        result = p.assistant_material_photos.preview(who, request.files.get('foto'), read_label=mode == 'etikett', rejected_codes=rejected)
+        current = service.identity()
+        if (not service.can_order(current) or current['actor'] != who['actor']
+                or current['version'] != who['version']):
+            raise PermissionError('Deine persönlichen Rechte haben sich geändert. Bitte die Seite neu laden.')
+        return jsonify(result)
 
     @bp.get('')
     def page():

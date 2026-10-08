@@ -18,6 +18,7 @@
   const timeoutMs = options.timeoutMs || 45000;
   const $ = id => document.getElementById('material-' + id), host = document.getElementById('materialbestellung');
   const endpoint = host.dataset.endpoint, token = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  const previewEndpoint = host.dataset.previewEndpoint;
   const limitCents = Number(host.dataset.limitCents);
   const orderLimit = Number.isInteger(limitCents) && limitCents > 0 && limitCents <= 25000
     ? (limitCents / 100).toLocaleString('de-DE', {maximumFractionDigits: 2}) + ' € brutto' : '';
@@ -25,6 +26,9 @@
   const photos = [], replies = new Map();
   let pending = null, busy = false, refreshing = false, history = [], identityExpired = false, intentionalReload = false;
   let scanner = null;
+  const previewQueue = [];
+  let previewBusy = false;
+  let labelTarget = null;
   const node = (tag, text, className) => {
     const el = document.createElement(tag);
     if (text !== undefined) el.textContent = String(text);
@@ -50,13 +54,13 @@
     $('album-button').disabled = locked() || photos.length >= 10;
     if ($('scan-button')) $('scan-button').disabled = locked() || photos.length >= 10;
     if (locked()) scanner?.stop(false);
-    $('submit').disabled = identityExpired || busy || (!pending && !photos.length) || Boolean(pending?.restored);
+    updateSubmitControl();
     $('submit').textContent = identityExpired ? 'Bitte Seite neu laden' : busy ? 'Wünsche werden erfasst …' : pending ? 'Unverändert erneut versuchen' : photos.some(photo => photo.vorgang === 'anfrage') ? 'Wünsche senden →' : 'Bestellwünsche senden →';
     $('form').setAttribute('aria-busy', String(busy));
     $('count').textContent = photos.length + ' / 10';
     $('empty').hidden = photos.length > 0;
     const total = photos.reduce((sum, photo) => sum + photo.quantity, 0);
-    $('summary').textContent = photos.length ? photos.length + (photos.length === 1 ? ' Artikel' : ' Artikel') + ' · ' + total + ' Stück' : 'Noch kein Foto ausgewählt';
+    $('summary').textContent = photos.length ? photos.length + ' Artikel · ' + total + ' Stück' : 'Noch kein Artikel erfasst';
     for (const photo of photos) {
       photo.controls.minus.disabled = locked() || photo.quantity <= 1;
       photo.controls.plus.disabled = locked() || photo.quantity >= 999;
@@ -73,6 +77,7 @@
         ? 'Nur eine Teileanfrage. Die Werkstattleitung klärt das Teil; es wird noch nicht bestellt.'
         : photo.urgent ? (orderLimit ? 'Automatisch sofort bis ' + orderLimit + ' inklusive Versand und Nebenkosten, sobald Artikel, Lieferant und Gesamtkosten eindeutig sind. Offene Angaben oder höhere Beträge klärt die Werkstattleitung.' : 'Artikel, Lieferant und Kosten werden intern geklärt. Die persönliche Bestellgrenze muss feststehen.') : 'Sammelbestellung am Montag um 14 Uhr.';
       photo.controls.remove.disabled = locked();
+      for (const button of photo.previewNodes?.actions || []) button.disabled = locked();
     }
     $('recovery').hidden = !pending && !identityExpired;
     $('recovery-text').textContent = identityExpired ? 'Deine Anmeldung oder Berechtigung hat sich geändert. Lade die Seite neu, bevor du weiterarbeitest. Ein vorheriger unklarer Eingang wird unter dem ursprünglichen persönlichen Zugang geprüft.' : pending?.restored
@@ -83,7 +88,9 @@
     $('refresh').disabled = identityExpired || refreshing;
   }
   function clearPhotos() {
-    for (const photo of photos) URL.revokeObjectURL(photo.url);
+    previewQueue.splice(0);
+    labelTarget = null;
+    for (const photo of photos) {URL.revokeObjectURL(photo.url); if (photo.labelUrl) URL.revokeObjectURL(photo.labelUrl);}
     photos.splice(0); $('items').replaceChildren();
   }
   function updateQuantity(photo, value) {
@@ -99,6 +106,10 @@
     for (const [index, photo] of photos.entries()) {
       const card = node('article', undefined, 'photo-card'); card.dataset.clientId = photo.id;
       const img = node('img', undefined, 'photo-preview'); img.src = photo.url; img.alt = 'Foto oder Screenshot für Artikel ' + (index + 1);
+      const original = node('a', undefined, 'photo-open'); original.href = photo.url;
+      original.target = '_blank'; original.rel = 'noopener noreferrer';
+      original.setAttribute('aria-label', 'Originalfoto für Artikel ' + (index + 1) + ' öffnen');
+      original.append(img, node('span', 'Foto öffnen'));
       const details = node('div', undefined, 'photo-details'), heading = node('div', undefined, 'photo-title-row');
       const title = node('h3', 'Artikel ' + (index + 1));
       const remove = node('button', 'Entfernen', 'remove-button'); remove.type = 'button';
@@ -106,7 +117,9 @@
       remove.addEventListener('click', () => {
         if (locked()) return;
         const at = photos.indexOf(photo); if (at < 0) return;
-        URL.revokeObjectURL(photo.url); photos.splice(at, 1); note(''); renderPhotos();
+        URL.revokeObjectURL(photo.url); if (photo.labelUrl) URL.revokeObjectURL(photo.labelUrl);
+        if (labelTarget === photo) labelTarget = null;
+        photos.splice(at, 1); note(''); renderPhotos();
       });
       heading.append(title, remove);
       const row = node('div', undefined, 'quantity-row'), label = node('label', 'Stückzahl');
@@ -121,7 +134,11 @@
       plus.addEventListener('click', () => updateQuantity(photo, Math.min(999, photo.quantity + 1)));
       quantity.addEventListener('change', () => updateQuantity(photo, quantity.value));
       stepper.append(minus, quantity, plus); row.append(label, stepper);
-      details.append(heading, row, node('p', photo.file.name, 'photo-filename')); card.append(img, details);
+      details.append(heading, row, node('p', photo.file.name, 'photo-filename')); card.append(original, details);
+      const previewPanel = node('div', undefined, 'article-preview');
+      previewPanel.setAttribute('role', 'status'); previewPanel.setAttribute('aria-live', 'polite');
+      photo.previewNodes = {title, panel: previewPanel, index, actions: []};
+      card.append(previewPanel); paintPreview(photo);
       const timing = node('fieldset', undefined, 'timing-choice');
       timing.append(node('legend', 'Wann wird es gebraucht?'));
       const timingOptions = node('div', undefined, 'timing-options');
@@ -140,6 +157,8 @@
       }
       const timingHint = node('p', '', 'timing-hint'); timing.append(timingOptions, timingHint); card.append(timing);
       const extra = node('details', undefined, 'photo-extra');
+      photo.extra = extra;
+      if (photo.preview && !['loading', 'matched', 'label'].includes(photo.preview.lookup_status)) extra.open = true;
       extra.append(node('summary', 'Beschreibung oder Teil anfragen (optional)'));
       const descriptionLabel = node('label', 'Kurze Beschreibung', 'description-label'), description = node('textarea');
       description.id = 'description-' + photo.id; description.rows = 2; description.maxLength = 500;
@@ -155,10 +174,10 @@
     }
     controls();
   }
-  function validateFiles(files) {
+  function validateFiles(files, replacingLabel = null) {
     if (!files.length) return '';
-    if (photos.length + files.length > 10) return 'Du kannst höchstens 10 Fotos auf einmal senden. Bitte weniger Fotos auswählen.';
-    let size = photos.reduce((sum, photo) => sum + photo.file.size, 0);
+    if (!replacingLabel && photos.length + files.length > 10) return 'Du kannst höchstens 10 Fotos auf einmal senden. Bitte weniger Fotos auswählen.';
+    let size = photos.reduce((sum, photo) => sum + photo.file.size + (photo === replacingLabel ? 0 : photo.labelFile?.size || 0), 0);
     for (const file of files) {
       if (/\.(heic|heif)$/i.test(file.name || '') || /image\/(heic|heif)/i.test(file.type || '')) {
         return 'Dieses iPhone-Foto ist im HEIC-Format. Bitte ein JPEG auswählen oder in den Kameraeinstellungen „Maximale Kompatibilität“ verwenden.';
@@ -176,8 +195,120 @@
     if (locked()) return;
     const selected = Array.from(files || []), error = validateFiles(selected);
     if (error) { note(error, 'error'); return; }
-    for (const file of selected) photos.push({id: crypto.randomUUID(), file, quantity: 1, urgent: false, vorgang: 'bestellung', beschreibung: '', url: URL.createObjectURL(file)});
-    if (selected.length) { note(''); renderPhotos(); }
+    for (const file of selected) {
+      const photo = {id: crypto.randomUUID(), file, quantity: 1, urgent: false, vorgang: 'bestellung', beschreibung: '', url: URL.createObjectURL(file),
+        preview: null, artikelkorrektur: false, rejectedCodes: [], previewVersion: 0, confirmedPreview: false};
+      photos.push(photo);
+      if (previewEndpoint) enqueuePreview(photo, file, false);
+    }
+    if (selected.length) { note(''); renderPhotos(); void runPreviews(); }
+  }
+  function needsConfirmation(photo) {return photo.preview?.lookup_status === 'loading' || Boolean(photo.preview?.product && ['matched', 'label'].includes(photo.preview.lookup_status) && !photo.confirmedPreview);}
+  function updateSubmitControl() {
+    $('submit').disabled = identityExpired || busy || (!pending && !photos.length) || Boolean(pending?.restored)
+      || (!pending && photos.some(photo => needsConfirmation(photo)));
+  }
+  function enqueuePreview(photo, file, readLabel) {
+    photo.confirmedPreview = false;
+    photo.preview = {lookup_status: 'loading', message: readLabel ? 'Produktname auf dem Etikett wird gelesen …' : 'Artikelcode wird gelesen und im Katalog gesucht …'};
+    previewQueue.push({photo, file, readLabel, version: ++photo.previewVersion});
+  }
+  function chooseLabel(photo, reject = false) {
+    if (locked() || !photos.includes(photo)) return;
+    photo.artikelkorrektur = true;
+    if (reject) {
+      const rejected = [photo.preview?.decodedCode, ...(photo.preview?.matches || []).map(hit => hit.artikelnummer)].filter(Boolean);
+      photo.rejectedCodes = [...new Set([...photo.rejectedCodes, ...rejected])].slice(0, 8);
+      if (photo.previewDescription && photo.beschreibung === photo.previewDescription) {
+        photo.beschreibung = ''; photo.controls.description.value = '';
+      }
+      photo.previewDescription = '';
+      photo.previewVersion++;
+      photo.preview = {lookup_status: 'awaiting_label', message: 'Zuordnung abgelehnt. Fotografiere jetzt das Etikett mit dem ausgeschriebenen Produktnamen oder trage ihn unten ein.'};
+      photo.confirmedPreview = false; paintPreview(photo); updateSubmitControl();
+    }
+    labelTarget = photo; $('camera').click();
+  }
+  function addLabel(photo, files) {
+    if (locked() || !photos.includes(photo)) return;
+    const file = Array.from(files || [])[0]; if (!file) return;
+    // Validate with the same supported formats and size ceiling, retaining the
+    // first scan photo and counting both originals against the upload limit.
+    const error = validateFiles([file], photo);
+    if (error) {note(error, 'error'); return;}
+    if (photo.labelUrl) URL.revokeObjectURL(photo.labelUrl);
+    photo.labelFile = file; photo.labelUrl = URL.createObjectURL(file); photo.artikelkorrektur = true;
+    enqueuePreview(photo, file, true); renderPhotos(); void runPreviews();
+  }
+  function paintPreview(photo) {
+    if (!photo.previewNodes) return;
+    const {title, panel, index} = photo.previewNodes, result = photo.preview;
+    panel.replaceChildren(); panel.hidden = !result;
+    title.textContent = ['matched', 'label'].includes(result?.lookup_status) && result.product ? result.product : 'Artikel ' + (index + 1);
+    photo.previewNodes.actions = [];
+    if (!result) return;
+    panel.dataset.state = result.lookup_status;
+    if (result.decodedCode) panel.append(node('p', 'Artikelcode: ' + result.decodedCode, 'article-code'));
+    panel.append(node('p', result.message || 'Bitte Foto und Artikel intern zuordnen.', 'article-preview-message'));
+    for (const match of Array.isArray(result.matches) ? result.matches.slice(0, 8) : []) {
+      const candidate = node('div', undefined, 'article-candidate');
+      candidate.append(node('strong', match.produkt_name || 'Artikel prüfen'));
+      candidate.append(node('p', [match.lieferant, match.artikelnummer, match.groesse, match.farbe, match.gebinde, match.ve].filter(Boolean).join(' · ')));
+      if (match.quelle) {
+        const source = match.quelle;
+        candidate.append(node('small', 'Quelle: ' + (source.art === 'lexware' ? 'Lieferantenrechnung' : 'Einkaufsbeleg') + ' ' + source.beleg_id
+          + (source.seite ? ' · Seite ' + source.seite : '') + (source.datum ? ' · ' + source.datum : '')));
+      }
+      panel.append(candidate);
+    }
+    if (photo.labelUrl) {
+      const labelOriginal = node('a', 'Etikettfoto öffnen'); labelOriginal.href = photo.labelUrl;
+      labelOriginal.target = '_blank'; labelOriginal.rel = 'noopener noreferrer'; panel.append(labelOriginal);
+    }
+    const actions = node('div', undefined, 'article-preview-actions');
+    const action = (text, handler) => {
+      const button = node('button', text); button.type = 'button'; button.disabled = locked();
+      button.addEventListener('click', handler); actions.append(button); photo.previewNodes.actions.push(button);
+    };
+    if (['matched', 'label'].includes(result.lookup_status) && result.product) {
+      if (photo.confirmedPreview) actions.append(node('strong', 'Artikel bestätigt · Stückzahl wählen'));
+      else action('Artikel stimmt', () => {
+        if (locked()) return;
+        photo.confirmedPreview = true;
+        if (photo.artikelkorrektur && (!photo.beschreibung || photo.beschreibung === photo.previewDescription)) {
+          photo.beschreibung = result.product; photo.previewDescription = result.product;
+          photo.controls.description.value = photo.beschreibung;
+        }
+        paintPreview(photo); updateSubmitControl(); photo.controls.quantity.focus();
+      });
+      action('Falsches Produkt · Etikett fotografieren', () => chooseLabel(photo, true));
+    } else if (result.lookup_status !== 'loading') action('Etikett mit Produktnamen fotografieren', () => chooseLabel(photo));
+    panel.append(actions);
+    if (!['loading', 'matched', 'label'].includes(result.lookup_status) && photo.extra) photo.extra.open = true;
+  }
+  async function runPreviews() {
+    if (previewBusy || !previewEndpoint) return;
+    previewBusy = true;
+    try {
+      while (previewQueue.length && !locked()) {
+        const {photo, file, readLabel, version} = previewQueue.shift();
+        if (!photos.includes(photo)) continue;
+        const body = new FormData(); body.append('foto', file, file.name);
+        if (readLabel) {body.append('modus', 'etikett'); body.append('abgelehnte_codes', JSON.stringify(photo.rejectedCodes));}
+        try {
+          const result = await request(previewEndpoint, {method: 'POST', body});
+          if (photos.includes(photo) && photo.previewVersion === version) {photo.preview = result; paintPreview(photo); updateSubmitControl();}
+        } catch (error) {
+          if (!photos.includes(photo) || photo.previewVersion !== version) continue;
+          photo.preview = {lookup_status: 'unavailable', message: error.reloadRequired
+            ? 'Dein Zugang hat sich geändert. Bitte die Seite neu laden.'
+            : 'Die Artikelvorschau ist gerade nicht verfügbar. Du kannst den Artikel beschreiben und das Foto senden.'};
+          paintPreview(photo);
+          updateSubmitControl();
+          if (error.reloadRequired) {identityExpired = true; note(photo.preview.message, 'error'); controls();}
+        }
+      }
+    } finally { previewBusy = false; }
   }
   async function request(path, settings = {}) {
     const abort = AbortController ? new AbortController() : null;
@@ -214,7 +345,12 @@
   }
   async function submit() {
     if (identityExpired || busy || pending?.restored || (!pending && !photos.length)) return;
+    if (!pending && photos.some(photo => needsConfirmation(photo))) {
+      note(photos.some(photo => photo.preview?.lookup_status === 'loading') ? 'Der Artikel wird noch erkannt. Bitte kurz auf das Ergebnis warten.'
+        : 'Bitte zuerst „Artikel stimmt“ wählen oder das falsch erkannte Produkt korrigieren.', 'error'); return;
+    }
     scanner?.stop(false);
+    previewQueue.splice(0);
     const retrying = Boolean(pending);
     // Commit the focused number field before freezing the exact batch.
     if (!pending) for (const photo of photos) {
@@ -231,13 +367,18 @@
     }
     if (!pending) {
       pending = {id: crypto.randomUUID(), clientIds: photos.map(photo => photo.id), rows: photos.map(photo => ({
-        id: photo.id, menge: photo.quantity, dringend: photo.urgent, vorgang: photo.vorgang, beschreibung: photo.beschreibung, file: photo.file}))};
+        id: photo.id, menge: photo.quantity, dringend: photo.urgent, vorgang: photo.vorgang, beschreibung: photo.beschreibung, file: photo.file,
+        ...(photo.artikelkorrektur ? {artikelkorrektur: true, abgelehnte_codes: [...photo.rejectedCodes],
+          ...(photo.labelFile ? {etikett_datei: true, labelFile: photo.labelFile} : {})} : {})}))};
       persist({id: pending.id, clientIds: pending.clientIds});
     }
     const batch = pending;
     const body = new FormData(); body.append('csrf_token', token); body.append('request_id', batch.id);
-    body.append('positionen', JSON.stringify(batch.rows.map(({id, menge, dringend, vorgang, beschreibung}) => ({id, menge, dringend, vorgang, beschreibung}))));
-    for (const row of batch.rows) body.append('foto_' + row.id, row.file, row.file.name);
+    body.append('positionen', JSON.stringify(batch.rows.map(({file, labelFile, ...position}) => position)));
+    for (const row of batch.rows) {
+      body.append('foto_' + row.id, row.file, row.file.name);
+      if (row.labelFile) body.append('etikett_' + row.id, row.labelFile, row.labelFile.name);
+    }
     busy = true; note('Fotos und Stückzahlen werden erfasst …'); controls();
     try {
       const data = await request(endpoint, {method: 'POST', body});
@@ -378,14 +519,19 @@
     finally { refreshing = false; controls(); }
   }
   for (const source of ['camera', 'album']) {
-    $(source + '-button').addEventListener('click', () => { if (!locked()) $(source).click(); });
-    $(source).addEventListener('change', () => { addFiles($(source).files); $(source).value = ''; });
+    $(source + '-button').addEventListener('click', () => { if (!locked()) {labelTarget = null; $(source).click();} });
+    $(source).addEventListener('change', () => {
+      const target = source === 'camera' ? labelTarget : null; labelTarget = null;
+      if (target) addLabel(target, $(source).files); else addFiles($(source).files);
+      $(source).value = '';
+    });
+    $(source).addEventListener('cancel', () => {labelTarget = null;});
   }
   if (options.scannerFactory && $('scan-button')) {
     scanner = options.scannerFactory({document, window, canAdd: () => !locked() && photos.length < 10,
-      onPhoto: file => {const before = photos.length; addFiles([file]); if (photos.length > before) note('Codefoto hinzugefügt. Stückzahl wählen und senden; der Artikelcode wird aus dem Foto gelesen.');},
-      onFallback: () => $('camera').click()});
-    $('scan-button').addEventListener('click', () => {void scanner.open();});
+      onPhoto: file => {const before = photos.length; addFiles([file]); if (photos.length > before) note('Codefoto hinzugefügt. Der Artikel wird gesucht; Stückzahl wählen und senden.');},
+      onFallback: () => {labelTarget = null; $('camera').click();}});
+    $('scan-button').addEventListener('click', () => {labelTarget = null; void scanner.open();});
   }
   $('form').addEventListener('submit', event => {event.preventDefault(); void submit();});
   $('refresh').addEventListener('click', () => {void refresh();}); $('check').addEventListener('click', () => {void refresh();});

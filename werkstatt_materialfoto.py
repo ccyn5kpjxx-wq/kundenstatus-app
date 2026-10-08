@@ -16,6 +16,7 @@ import os
 import re
 import secrets
 import time
+import threading
 from decimal import Decimal
 
 import requests
@@ -24,6 +25,12 @@ from werkstatt_materialwissen import _measurements, _colors
 
 
 MAX_BYTES = 8 * 1024 * 1024
+_LABEL_PREVIEW_SLOTS = threading.BoundedSemaphore(1)
+
+
+class LabelPreviewBusy(RuntimeError):
+    """The one bounded optional label reader is already in use."""
+
 FIELDS = {'produkt': 120, 'marke': 60, 'breite': 30, 'farbe': 40,
           'barcode': 32, 'artikelnummer': 60, 'masse': 80, 'materialtyp': 30}
 MATERIAL_TYPES = ('Folie', 'Klebeband', 'Papier', 'Schleifmittel', 'Polierpad', 'Lackgebinde', 'Handschuhe', 'Tuch')
@@ -273,6 +280,98 @@ class MaterialPhotoService:
         if not row:
             raise ValueError('Materialfoto nicht gefunden.')
         return dict(row)
+
+    def preview(self, who, file, *, read_label=False, rejected_codes=()):
+        """Decode a product code and read its recorded identity without saving it.
+
+        The code preview does not stage an assistant photo, call vision, select an
+        article, reuse conditions or create a material request. A fuzzy catalog
+        search is never enough to claim that a decoded identifier is known.
+        Explicit label mode may read printed words as an unverified suggestion.
+        """
+        self._authorize(who)
+        if not file or not getattr(file, 'filename', ''):
+            raise ValueError('Bitte ein Artikelfoto auswählen.')
+        raw = file.read(MAX_BYTES + 1)
+        if not raw or len(raw) > MAX_BYTES:
+            raise ValueError('Foto leer oder größer als 8 MB.')
+        clean = _image(raw)
+        digest = hashlib.sha256(clean).hexdigest()
+        code = _code_view(_decode_codes(raw, digest), digest)
+        result = dict(code_erkennung=code, decodedCode='', product='', matches=[],
+                      lookup_status='no_code', partial=False, pruefen=True, bestellbar=False)
+        if read_label:
+            rejected = {value.casefold() for value in rejected_codes}
+            if not _LABEL_PREVIEW_SLOTS.acquire(blocking=False):
+                raise LabelPreviewBusy('Die Etiketterkennung ist gerade belegt. Bitte kurz erneut versuchen oder den Produktnamen eintragen.')
+            try:
+                try:
+                    labels = _labels(self.vision(clean, 'image/jpeg'))
+                finally:
+                    _LABEL_PREVIEW_SLOTS.release()
+            except Exception:
+                result.update(lookup_status='unavailable', message='Das Etikett konnte gerade nicht gelesen werden. Bitte den Produktnamen eintragen; das Originalfoto bleibt zur manuellen Zuordnung erhalten.')
+                return result
+            if not labels.get('produkt'):
+                result.update(message='Kein lesbarer Produktname auf dem Etikett erkannt. Bitte den Produktnamen eintragen oder das Etikett deutlicher fotografieren.')
+                return result
+            for key in ('artikelnummer', 'barcode'):
+                if labels.get(key, '').casefold() in rejected:
+                    labels[key] = ''
+            try:
+                hits, partial = self._hits(labels)
+                result.update(matches=[hit for hit in hits if hit['artikelnummer'].casefold() not in rejected], partial=partial)
+            except Exception:
+                # A failed catalog does not change the explicitly visible label
+                # into a source-backed identity. The user may still compare it.
+                pass
+            result.update(lookup_status='label', product=labels['produkt'],
+                          message='Vom Etikett gelesen (ungeprüft). Stimmt dieser Produktname? Die Werkstatt prüft die korrigierte Zuordnung.')
+            return result
+        if code['status'] != 'erkannt':
+            result.update(lookup_status='ambiguous' if code['status'] == 'mehrdeutig' else
+                          'unavailable' if code['status'] == 'nicht_verfuegbar' else 'no_code',
+                          message=code['hinweis'] + ' Du kannst das Foto senden und den Artikel beschreiben.')
+            return result
+        decoded = code['codes'][0]['suchwert']
+        result['decodedCode'] = decoded
+        if decoded.casefold() in {value.casefold() for value in rejected_codes}:
+            result.update(lookup_status='no_match', message='Diese Codezuordnung wurde abgelehnt. Bitte das Produktetikett fotografieren oder den Namen eintragen.')
+            return result
+        try:
+            catalog = self.p.cockpit_data.articles(decoded)
+            partial = bool(catalog.get('varianten_gekuerzt') or catalog.get('abdeckung', {}).get('begrenzt'))
+            matches, seen = [], set()
+            for item in catalog.get('varianten', [])[:30]:
+                if not isinstance(item, dict):
+                    continue
+                # The catalog currently records supplier article numbers. A
+                # GTIN without that recorded mapping stays unknown, not guessed.
+                if str(item.get('artikelnummer', '')).strip().casefold() != decoded.casefold():
+                    continue
+                source = next((source for value in item.get('quellen', [])[:50]
+                               if (source := _source(value))), None)
+                identity = {key: _text(item.get(key), 1000) for key in
+                            ('produkt_name', 'lieferant', 'artikelnummer', 'groesse', 'farbe', 'gebinde', 've')}
+                if not source or not all(identity[key] for key in ('produkt_name', 'lieferant', 'artikelnummer')):
+                    continue
+                fingerprint = json.dumps(identity, sort_keys=True, ensure_ascii=False)
+                if fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+                matches.append(dict(identity, quelle=source, pruefen=True, bestellbar=False))
+            result.update(matches=matches[:8], partial=partial or len(matches) > 8)
+        except Exception:
+            result.update(lookup_status='unavailable', message='Code erkannt. Die gespeicherten Artikel sind gerade nicht erreichbar. Du kannst das Foto senden und den Artikel beschreiben.')
+            return result
+        if len(result['matches']) == 1 and not result['partial']:
+            result.update(lookup_status='matched', product=result['matches'][0]['produkt_name'],
+                          message='Artikel im gespeicherten Beleg gefunden. Bitte mit dem Foto vergleichen.')
+        elif result['matches']:
+            result.update(lookup_status='ambiguous', message='Mehrere oder weitere mögliche Zuordnungen. Vergleiche die Varianten oder beschreibe den Artikel; die Werkstatt ordnet ihn zu.')
+        else:
+            result.update(lookup_status='no_match', message='Code erkannt, aber kein exakt zugeordneter Artikel im gespeicherten Katalog. Beschreibe den Artikel oder sende das Foto zur manuellen Zuordnung.')
+        return result
 
     def stage(self, who, file, request_id):
         actor = self._authorize(who)
