@@ -64,7 +64,10 @@
     for (const photo of photos) {
       photo.controls.minus.disabled = locked() || photo.quantity <= 1;
       photo.controls.plus.disabled = locked() || photo.quantity >= 999;
-      photo.controls.quantity.disabled = locked(); photo.controls.quantity.value = String(photo.quantity);
+      photo.controls.quantity.disabled = locked();
+      // Choosing urgency must not overwrite a number that is still being
+      // edited; some mobile browsers emit its change event only later.
+      if (locked()) photo.controls.quantity.value = String(photo.quantity);
       photo.controls.urgent.disabled = locked(); photo.controls.urgent.checked = photo.urgent;
       photo.controls.monday.disabled = locked(); photo.controls.monday.checked = !photo.urgent;
       photo.controls.inquiry.disabled = locked(); photo.controls.inquiry.checked = photo.vorgang === 'anfrage';
@@ -97,9 +100,11 @@
     if (locked()) { controls(); return; }
     const text = String(value);
     if (!/^\d{1,3}$/.test(text) || Number(text) < 1 || Number(text) > 999) {
+      photo.controls.quantity.value = String(photo.quantity);
+      photo.quantityDraft = String(photo.quantity);
       note('Bitte eine ganze Stückzahl von 1 bis 999 wählen.', 'error'); controls(); return;
     }
-    photo.quantity = Number(text); note(''); controls();
+    photo.quantity = Number(text); photo.quantityDraft = text; photo.controls.quantity.value = text; note(''); controls();
   }
   function renderPhotos() {
     $('items').replaceChildren();
@@ -129,9 +134,16 @@
       minus.type = plus.type = 'button'; minus.setAttribute('aria-label', 'Stückzahl für Artikel ' + (index + 1) + ' verringern');
       plus.setAttribute('aria-label', 'Stückzahl für Artikel ' + (index + 1) + ' erhöhen');
       quantity.type = 'number'; quantity.id = 'quantity-' + photo.id; quantity.min = '1'; quantity.max = '999'; quantity.step = '1';
-      quantity.inputMode = 'numeric'; quantity.required = true; quantity.value = String(photo.quantity);
+      quantity.inputMode = 'numeric'; quantity.required = true; quantity.value = photo.quantityDraft ?? String(photo.quantity);
       minus.addEventListener('click', () => updateQuantity(photo, Math.max(1, photo.quantity - 1)));
       plus.addEventListener('click', () => updateQuantity(photo, Math.min(999, photo.quantity + 1)));
+      quantity.addEventListener('input', () => {
+        if (locked()) return;
+        photo.quantityDraft = quantity.value;
+        if (/^\d{1,3}$/.test(quantity.value) && Number(quantity.value) >= 1 && Number(quantity.value) <= 999) {
+          photo.quantity = Number(quantity.value);
+        }
+      });
       quantity.addEventListener('change', () => updateQuantity(photo, quantity.value));
       stepper.append(minus, quantity, plus); row.append(label, stepper);
       details.append(heading, row, node('p', photo.file.name, 'photo-filename')); card.append(original, details);

@@ -60,6 +60,7 @@ class PortalTests(unittest.TestCase):
                          flash=flash, re=__import__('re'), secrets=__import__('secrets'))
         self.p.login_rate_limit_status = lambda *_: (False, None)
         self.p.record_failed_login = self.p.clear_login_attempts = lambda *_: None
+        self.p.clear_remember_login_cookie = lambda *_: None
         exec(compile(ast.fix_missing_locations(ast.Module(body=[login], type_ignores=[])), 'actual-login', 'exec'), namespace)
         self.p.app.add_url_rule('/werkstatt/assistent/login', endpoint='assistent.login', view_func=namespace['login'], methods=['POST'])
         self.p.app.add_url_rule('/werkstatt/assistent', endpoint='assistent.page', view_func=lambda: 'assistant')

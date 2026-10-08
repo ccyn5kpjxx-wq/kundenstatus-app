@@ -100,6 +100,26 @@ test('explicit Monday choice cancels urgency only for that image', async () => {
   assert.deepEqual(JSON.parse(f.posts()[0].settings.body.fields.get('positionen')).map(row => row.dringend), [false, true]);
 });
 
+test('urgency changes preserve a typed quantity before its delayed change event', async () => {
+  const f = fixture(); f.controller.addFiles([photo()]);
+  const quantity = f.quantity(0); quantity.value = '3'; quantity.fire('input');
+  const urgent = f.field(0, 'INPUT', el => el.value === 'dringend');
+  urgent.checked = true; urgent.fire('change');
+  assert.equal(quantity.value, '3');
+  await f.controller.submit();
+  const row = JSON.parse(f.posts()[0].settings.body.fields.get('positionen'))[0];
+  assert.equal(row.menge, 3); assert.equal(row.dringend, true);
+
+  const g = fixture(); g.controller.addFiles([photo()]);
+  g.quantity(0).value = '0'; g.quantity(0).fire('input');
+  const otherUrgent = g.field(0, 'INPUT', el => el.value === 'dringend');
+  otherUrgent.checked = true; otherUrgent.fire('change');
+  assert.equal(g.quantity(0).value, '0');
+  g.controller.addFiles([photo('second.jpg')]);
+  assert.equal(g.quantity(0).value, '0', 'A new photo must preserve the unfinished quantity too');
+  await g.controller.submit(); assert.equal(g.posts().length, 0);
+});
+
 test('screenshot inquiry and description stay bound to their own image without HTML interpretation', async () => {
   const f = fixture(); f.controller.addFiles([photo('teil-screenshot.png', 123, 'image/png'), photo('material.jpg')]);
   const description = f.field(0, 'TEXTAREA'); description.value = 'Halter am Kotflügel <img onerror=alert(1)> dringend 9 Stück'; description.fire('input');
@@ -350,7 +370,7 @@ test('oversized free answer is editable and never reaches backend', async () => 
 
 test('template keeps personal login redirect, native camera, album picker and protected branches', () => {
   const html = fs.readFileSync(path.join(__dirname, '../templates/materialbestellung.html'), 'utf8');
-  assert.match(html, /csrf_field\(\)/); assert.match(html, /name="next" value="\/werkstatt\/materialbestellung"/);
+  assert.match(html, /csrf_field\(\)/); assert.match(html, /name="next" value="{{ login_next }}"/);
   assert.match(html, /action="\/werkstatt\/assistent\/login"/); assert.match(html, /capture="environment"/);
   assert.match(html, /id="material-album"[^>]+multiple/); assert.match(html, /elif not can_order/);
   assert.match(html, /Erfasst bedeutet noch nicht bestellt/); assert.doesNotMatch(html, /impersonat/i);
