@@ -14,8 +14,10 @@ def comparison_key(entry):
 
 
 def comparison_context(portal, overview):
+    from werkstatt_liefereingang import delivery_context
     service = getattr(portal, 'order_price_comparison', None)
     context = dict(price_summaries={}, order_comparison=None, comparison_files=[], comparison_candidates=[])
+    context.update(delivery_context(portal, overview))
     if service is None:
         return context
     selected = overview.get('selected')
@@ -66,6 +68,8 @@ def comparison_context(portal, overview):
 
 
 def register_comparison_forms(bp, portal):
+    from werkstatt_liefereingang import register_delivery_forms, receipt_payload
+    register_delivery_forms(bp, portal)
     @bp.post('/preisvergleich/<action>')
     def price_comparison_form(action):
         service = getattr(portal, 'order_price_comparison', None)
@@ -86,13 +90,7 @@ def register_comparison_forms(bp, portal):
                         raise PermissionError('Diese Rechnungsquelle ist nicht für Materialpreise freigegeben.')
                     # A separate receipt collection keeps the original WhatsApp
                     # intake and the immutable supplier order untouched.
-                    group = portal.workshop_intake.create({
-                        'source_key': 'order-receipts:' + order['key'],
-                        'source_at': order['created_at'],
-                        'supplier': order['supplier'], 'external_ref': 'Belegsammlung zur Bestellung ' + order['key'],
-                        'already_ordered': False, 'original_author': None,
-                        'lines': [{'product': order['product'], 'sku': order['sku'], 'variant': order['variant'],
-                            'quantity': None, 'unit': order['unit'], 'pack': '', 'urgent': None, 'category': 'material'}]})
+                    group = portal.workshop_intake.create(receipt_payload(order))
                     portal.workshop_intake.attach(group['id'], upload, 'rechnung')
                     flash('Rechnungsoriginal beim Bestelllieferanten gespeichert. Jetzt die Position für den Preisvergleich auswählen.', 'success')
                     return redirect(url_for('werkstatt_orders.index',

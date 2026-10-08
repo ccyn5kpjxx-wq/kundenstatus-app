@@ -1,0 +1,251 @@
+"""Synthetic order/delivery HTTP flow. No supplier calls or operational records."""
+from contextlib import contextmanager
+from io import BytesIO
+from pathlib import Path
+import sys
+import unittest
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import test_bestellvergleich_ui as fixtures
+from test_einkaufseingang import png
+from werkstatt_liefereingang import get_delivery, analyze_delivery_text, document_position, receipt_payload, delivery_ocr_rows
+from werkstatt_einkaufseingang import IntakeConflict
+from werkzeug.datastructures import FileStorage
+
+TEXT = '''TOP-COLOR
+LIEFERSCHEIN
+Beleg-Nr. TEST26-LS000001
+Beleg-Datum 07.10.2026
+Seite 1
+Pos. Art.-Nr. Bezeichnung geliefert bestellt Inhalt ME Menge
+0. 10004410 PPG T4000/E0.5 ENVIROBASE 1,00 1,00 0,500 Ltr/KG 0,50
+WF31B CRYSTAL SILBER 0,5 Liter
+1. 00000071 Logistik- 1,00 1,00 1,000 Stück 1,00
+ZZZ999 /Energiekostenpauschale
+'''
+
+
+class DeliveryTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = fixtures.PriceUITests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.p, self.client = self.fixture.p, self.fixture.client
+        self.service = get_delivery(self.p)
+        self.p.extract_document_text_local = lambda path, name: TEXT.replace('10004410', 'TEST-4000')
+
+    def post(self, action, **data):
+        return self.client.post('/admin/assistent-bestellungen/lieferung/' + action,
+            data={'csrf_token': 'price-test', 'order_key': 'material:1', **data})
+
+    def upload(self, color='blue'):
+        return self.post('beleg', file=(BytesIO(png(color)), 'Lieferschein.png'))
+
+    def form(self, **changes):
+        return dict(group_id='1', file_id='1', page='1', position='0', quantity='1',
+            supplier='Testlieferant', sku='TEST-4000', variant='50 mm', unit='Stück', reviewed='ja', **changes)
+
+    def view(self):
+        return self.client.get('/admin/assistent-bestellungen?bestellung=material:1').get_data(as_text=True)
+
+    def rows(self, sql):
+        return self.fixture.rows(sql)
+
+    def test_upload_analysis_assignment_end_to_end_no_order_changes(self):
+        before = self.rows('SELECT * FROM einkauf_material_dialoge')
+        with patch.object(self.fixture.f.manager, 'tick', side_effect=AssertionError('No dispatch')):
+            self.assertEqual(self.upload().status_code, 303)
+            self.assertEqual(self.upload().status_code, 303)
+            self.assertEqual(len(self.rows('SELECT * FROM einkauf_eingang_dateien')), 1)
+            self.assertEqual(self.post('analyse', group_id='1', file_id='1').status_code, 303)
+            self.assertEqual(self.rows('SELECT * FROM assistent_bestelllieferungen'), [])
+            view = self.view()
+            self.assertIn('Analyse vorhanden', view)
+            self.assertIn('TEST-4000', view)
+            self.assertIn('Nebenkostenposition', view)
+            self.assertEqual(self.post('zuordnen', **self.form()).status_code, 303)
+            self.assertIn('Vollständig geliefert', self.view())
+            self.assertEqual(self.rows('SELECT * FROM einkauf_material_dialoge'), before)
+            self.assertEqual(self.rows('SELECT * FROM assistent_bestellanforderungen'), [])
+            self.assertEqual(self.rows('SELECT * FROM assistent_bestellpreis_rechnungen'), [])
+            self.assertEqual(len(self.rows('SELECT * FROM assistent_bestelllieferungen')), 1)
+
+    def test_zero_position_idempotence_conflict_and_partial_overdelivery(self):
+        self.upload()
+        data = self.form(); data['quantity'] = '.5'
+        self.post('zuordnen', **data)
+        self.assertEqual(self.rows('SELECT * FROM assistent_bestelllieferungen'), [])
+        data['quantity'] = '0,5'
+        self.post('zuordnen', **data)
+        self.post('zuordnen', **data)
+        self.assertEqual(self.service.detail('material:1')['state'], 'teillieferung')
+        self.assertEqual(len(self.rows('SELECT * FROM assistent_bestelllieferungen')), 1)
+        data['quantity'] = '1'
+        response = self.post('zuordnen', **data)
+        self.assertIn('bereits anders zugeordnet', self.client.get(response.location).get_data(as_text=True))
+        self.assertEqual(self.service.detail('material:1')['quantity'], '0.5')
+        self.upload('red'); data.update(file_id='2', quantity='1')
+        self.post('zuordnen', **data)
+        self.assertEqual(self.service.detail('material:1')['state'], 'mehrlieferung')
+
+    def test_authentication_csrf_and_foreign_original(self):
+        route = '/admin/assistent-bestellungen/lieferung/beleg'
+        self.assertEqual(self.p.app.test_client().post(route).status_code, 403)
+        self.assertEqual(self.client.post(route).status_code, 400)
+        self.upload()
+        self.fixture.f.material(2, supplier_name='Other supplier')
+        response = self.post('analyse', order_key='material:2', group_id='1', file_id='1')
+        self.assertIn('nicht zur Belegsammlung', self.client.get(response.location).get_data(as_text=True))
+        for field, value in [('reviewed', ''), ('sku', 'WRONG'), ('supplier', 'Other supplier'),
+                             ('variant', '30 mm'), ('unit', 'Liter'), ('position', '-1'), ('page', '2')]:
+            data = self.form(); data[field] = value
+            self.post('zuordnen', **data)
+        self.assertEqual(self.rows('SELECT * FROM assistent_bestelllieferungen'), [])
+
+    def test_restore_lock_covers_upload_analysis_and_booking(self):
+        depth = [0]
+        @contextmanager
+        def lock():
+            depth[0] += 1
+            try:
+                yield
+            finally:
+                depth[0] -= 1
+        self.p.portal_originals_operation_lock = lock
+        attach = self.p.workshop_intake.attach
+        def locked_attach(*args, **kwargs):
+            self.assertEqual(depth[0], 1)
+            return attach(*args, **kwargs)
+        with patch.object(self.p.workshop_intake, 'attach', side_effect=locked_attach):
+            self.upload()
+        self.p.extract_document_text_local = lambda path, name: self.assertEqual(depth[0], 1) or TEXT
+        self.post('analyse', group_id='1', file_id='1')
+        original = self.p.workshop_intake.original
+        def locked_original(*args):
+            self.assertEqual(depth[0], 1)
+            return original(*args)
+        with patch.object(self.p.workshop_intake, 'original', side_effect=locked_original):
+            self.post('zuordnen', **self.form())
+        self.assertEqual(depth[0], 0)
+
+    def test_get_overview_has_no_database_writes(self):
+        self.upload()
+        before = self.rows('SELECT * FROM einkauf_eingang')
+        from werkstatt_liefereingang import OrderDelivery
+        with patch.object(OrderDelivery, 'init_schema', side_effect=AssertionError('GET mutates schema')):
+            self.assertIn('Lieferschein erfassen', self.view())
+        self.assertEqual(before, self.rows('SELECT * FROM einkauf_eingang'))
+
+    def test_analysis_failure_keeps_original_and_manual_form(self):
+        self.upload()
+        self.p.extract_document_text_local = lambda *args: ''
+        response = self.post('analyse', group_id='1', file_id='1')
+        self.assertIn('Keine lesbare Auslese', self.client.get(response.location).get_data(as_text=True))
+        original = self.client.get('/admin/assistent-bestellungen/eingang/1/dateien/1/original')
+        self.assertEqual(original.data, png())
+        self.assertIn('Geprüfte Liefermenge zuordnen', self.view())
+
+    def test_receipt_cannot_be_assigned_twice_to_different_order(self):
+        self.upload(); self.post('zuordnen', **self.form())
+        self.fixture.f.material(2, supplier_name='Testlieferant', variant='50 mm')
+        self.post('beleg', order_key='material:2', file=(BytesIO(png()), 'same-original.png'))
+        data = self.form(); data.update(group_id='2', file_id='2', order_key='material:2')
+        response = self.post('zuordnen', **data)
+        self.assertIn('bereits anders zugeordnet', self.client.get(response.location).get_data(as_text=True))
+        self.assertEqual(self.service.detail('material:2')['state'], 'offen')
+
+    def test_invoice_and_delivery_share_collection_and_remain_separate(self):
+        self.fixture.upload()
+        self.upload('red')
+        self.assertEqual(len(self.rows('SELECT * FROM einkauf_eingang')), 1)
+        self.assertEqual([r['kind'] for r in self.rows('SELECT kind FROM einkauf_eingang_dateien ORDER BY id')], ['rechnung', 'lieferschein'])
+
+    def test_canonical_order_alias_cannot_book_the_same_position_twice(self):
+        self.upload(); self.post('zuordnen', **self.form())
+        self.fixture.f.order('alias', request_id='material:1')
+        data = self.form(); data['reviewed'] = True
+        result = self.service.record('dispatch:alias', data)
+        self.assertEqual(result['state'], 'geliefert')
+        self.assertEqual(len(self.rows('SELECT * FROM assistent_bestelllieferungen')), 1)
+
+    def test_missing_or_changed_original_fails_closed(self):
+        self.upload(); self.post('zuordnen', **self.form())
+        with self.p.workshop_intake.db() as db:
+            db.execute("UPDATE einkauf_eingang_dateien SET kind='rechnung' WHERE id=1")
+        self.assertEqual(self.service.detail('material:1')['state'], 'pruefen')
+        self.assertEqual(self.service.detail('material:1')['quantity'], '0')
+
+    def test_recognized_logistics_position_is_not_material(self):
+        self.upload()
+        with self.p.workshop_intake.db() as db:
+            db.execute('UPDATE einkauf_eingang_dateien SET draft_text=? WHERE id=1', (TEXT,))
+        data = self.form(); data['position'] = '1'
+        response = self.post('zuordnen', **data)
+        self.assertIn('Nebenkosten oder einen anderen Artikel', self.client.get(response.location).get_data(as_text=True))
+        self.assertEqual(self.rows('SELECT * FROM assistent_bestelllieferungen'), [])
+
+    def test_admin_can_correct_ocr_typo_with_audited_reason(self):
+        self.upload()
+        with self.p.workshop_intake.db() as db:
+            db.execute('UPDATE einkauf_eingang_dateien SET draft_text=? WHERE id=1',
+                (TEXT.replace('10004410', 'TEST-400O'),))
+        data = self.form()
+        self.post('zuordnen', **data)
+        self.assertEqual(self.rows('SELECT * FROM assistent_bestelllieferungen'), [])
+        data.update(correction_confirmed='ja', correction_reason='Artikelnummer am Original kontrolliert: 0 statt O.')
+        self.post('zuordnen', **data)
+        self.assertEqual(self.service.detail('material:1')['state'], 'geliefert')
+        self.assertIn('0 statt O', self.service.detail('material:1')['events'][0]['ocr_correction'])
+
+    def test_pdf_pages_with_same_printed_position_are_separate(self):
+        import fitz
+        with fitz.open() as doc:
+            doc.new_page(); doc.new_page(); raw = doc.tobytes()
+        self.post('beleg', file=(BytesIO(raw), 'two-pages.pdf'))
+        data = self.form(); data['quantity'] = '0.5'
+        self.post('zuordnen', **data)
+        data['page'] = '2'; self.post('zuordnen', **data)
+        self.assertEqual(self.service.detail('material:1')['state'], 'geliefert')
+        self.assertEqual(len(self.rows('SELECT * FROM assistent_bestelllieferungen')), 2)
+
+
+class ParserTests(unittest.TestCase):
+    def test_ocr_boxes_keep_columns_in_one_row(self):
+        words = [('0.10004410PPG ENVIROBASE', 10, 20, 250), ('1,00', 400, 20, 45),
+                 ('1,00', 480, 20, 45), ('0,500Ltr/KG', 560, 20, 100), ('0,50', 700, 20, 45),
+                 ('CRYSTAL SILBER 0,5 Liter', 150, 55, 250)]
+        boxes = [([[x,y],[x+w,y],[x+w,y+20],[x,y+20]], word, .99) for word,x,y,w in reversed(words)]
+        text = 'LIEFERSCHEIN\ngeliefert bestellt Inhalt\n' + delivery_ocr_rows(boxes)
+        rows = analyze_delivery_text(text)['items']
+        self.assertEqual(rows[0]['sku'], '10004410')
+        self.assertEqual(rows[0]['quantity'], '1.00')
+        self.assertIn('CRYSTAL', rows[0]['description'])
+
+    def test_topcolor_zero_container_content_and_fee(self):
+        result = analyze_delivery_text(TEXT)
+        self.assertEqual(result['number'], 'TEST26-LS000001')
+        self.assertEqual(result['date'], '07.10.2026')
+        self.assertEqual(len(result['items']), 2)
+        paint, fee = result['items']
+        self.assertEqual(paint['position'], 0)
+        self.assertEqual(paint['quantity'], '1.00')
+        self.assertEqual(paint['content'], '0,500 Ltr/KG')
+        self.assertEqual(paint['total_content'], '0,50')
+        self.assertFalse(paint['fee']); self.assertTrue(fee['fee'])
+
+    def test_ambiguous_ocr_never_guesses_a_quantity(self):
+        for text in ('invoice 0 123456 paint 1.0', TEXT.replace('geliefert', 'unknown'), TEXT.replace('1,00 1,00 0,500', 'unleserlich')):
+            result = analyze_delivery_text(text)
+            self.assertFalse(any(item['sku'] == '10004410' for item in result['items']))
+
+    def test_printed_position_is_not_database_id(self):
+        self.assertEqual(document_position(0), 0)
+        self.assertEqual(document_position('0'), 0)
+        for value in (False, -1, '0.5', '', None, 1000000):
+            with self.assertRaises(ValueError):
+                document_position(value)
+
+
+if __name__ == '__main__':
+    unittest.main()

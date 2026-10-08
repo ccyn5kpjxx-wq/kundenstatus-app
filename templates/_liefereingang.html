@@ -1,0 +1,35 @@
+{% if order_delivery %}{% set delivery_order=order_delivery.order %}
+<section id="liefereingang" aria-label="Lieferung und Lieferscheine">
+<div class="section-head"><div><p class="eyebrow">WARENEINGANG</p><h3>Lieferung & Lieferscheine</h3></div><span class="badge {{ 'success' if order_delivery.state=='geliefert' else 'warn' }}">{{ order_delivery.label }}</span></div>
+<p><strong>{{ order_delivery.quantity }} von {{ order_delivery.ordered }} {{ order_delivery.unit }} geliefert</strong></p>
+<p>Original ablegen → Beleg analysieren → Lieferangaben prüfen und zuordnen. Rechnungspreise werden separat abgeglichen.</p>
+<form method="post" enctype="multipart/form-data" action="{{ url_for('werkstatt_orders.order_delivery_form',action='beleg') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="order_key" value="{{ delivery_order.key }}">
+<label>Lieferschein als Foto oder PDF<input type="file" name="file" accept="image/jpeg,image/png,image/webp,application/pdf" required></label>
+<button>Lieferschein zur Bestellung speichern</button><small>Bis 8 MB. Die Originaldatei bleibt erhalten.</small></form>
+{% for file in delivery_files %}
+<article><h4>{{ file.original_name }}</h4><p><a href="{{ url_for('werkstatt_intake.original',group_id=file.group_id,file_id=file.id) }}" target="_blank" rel="noopener">Original öffnen / herunterladen</a></p>
+<form method="post" action="{{ url_for('werkstatt_orders.order_delivery_form',action='analyse') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="order_key" value="{{ delivery_order.key }}"><input type="hidden" name="group_id" value="{{ file.group_id }}"><input type="hidden" name="file_id" value="{{ file.id }}">
+<button>Beleg analysieren</button></form>
+{% if file.extraction_status!='offen' %}<p class="notice">{{ {'pruefen':'Analyse vorhanden – noch ungeprüft','keine_auslese':'Keine lesbare Auslese – manuell prüfen','fehler':'Analyse fehlgeschlagen – Original manuell prüfen'}.get(file.extraction_status,'Auslese prüfen') }}</p>{% endif %}
+{% if file.draft_text %}
+<details open><summary>Analyse prüfen</summary>
+{% if file.analysis.number %}<p>Lieferschein {{ file.analysis.number }}{% if file.analysis.date %} · {{ file.analysis.date }}{% endif %}</p>{% endif %}
+{% for warning in file.analysis.warnings %}<small>{{ warning }}</small>{% endfor %}
+{% if file.analysis['items'] %}<div class="scroll"><table><thead><tr><th>Seite / Pos.</th><th>Erkannter Artikel</th><th>Geliefert</th><th>Inhalt</th></tr></thead><tbody>
+{% for item in file.analysis['items'] %}<tr><td>{{ item.page }} / {{ item.position }}</td><td>{{ item.sku }} · {{ item.description }}{% if item.fee %}<small>Nebenkostenposition – keine Materiallieferung</small>{% endif %}</td><td>{% if item.fee %}—<small>Keine Lieferzuordnung</small>{% else %}{{ item.quantity|replace('.',',') }} Gebinde{% endif %}</td><td>{{ item.content }}<small>Gesamtmenge: {{ item.total_content }}</small></td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+<details><summary>Vollständigen Auslesetext anzeigen</summary><pre>{{ file.draft_text }}</pre></details></details>{% endif %}
+<details><summary>Geprüfte Liefermenge zuordnen</summary>
+<p>Artikel {{ delivery_order.sku }} · {{ delivery_order.variant }}. Bei einem 0,5-Liter-Gebinde ist „1 Stück“ eine Lieferung von einem Gebinde; „0,5 Liter“ bezeichnet den Inhalt.</p>
+<form method="post" action="{{ url_for('werkstatt_orders.order_delivery_form',action='zuordnen') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="order_key" value="{{ delivery_order.key }}"><input type="hidden" name="group_id" value="{{ file.group_id }}"><input type="hidden" name="file_id" value="{{ file.id }}">
+<div class="grid"><label>Seite des Originals<input name="page" type="number" min="1" value="1" required></label><label>Position laut Lieferschein<input name="position" type="number" min="0" max="999999" placeholder="Auch 0 ist möglich" required></label><label>Gelieferte Menge in {{ delivery_order.unit }}<input name="quantity" inputmode="decimal" required></label><label>Bestelleinheit<input name="unit" value="{{ delivery_order.unit }}" required></label>
+<label>Lieferant laut Original<input name="supplier" value="{{ delivery_order.supplier }}" required></label><label>Artikelnummer laut Original<input name="sku" value="{{ delivery_order.sku }}" required></label><label>Variante / Gebinde<input name="variant" value="{{ delivery_order.variant }}"></label></div>
+<label><input type="checkbox" name="reviewed" value="ja" required> Lieferant, Artikelnummer, Variante, Gebinde, Seite, Position und Liefermenge am Original geprüft. Keine Logistik- oder Nebenkostenposition.</label>
+<details><summary>Fehler in der Auslese korrigieren</summary><p>Nur ausfüllen, wenn die Analyse einen anderen Artikel oder eine Nebenkostenposition nennt und das Original diese Auslese widerlegt.</p><label>Begründung am Original<input name="correction_reason" maxlength="500" placeholder="Zum Beispiel: letzte Ziffer am Original 0 statt Buchstabe O"></label><label><input type="checkbox" name="correction_confirmed" value="ja"> Abweichung am Original geprüft; die Auslese ist an dieser Stelle falsch.</label></details>
+<button>Geprüfte Lieferung zuordnen</button></form></details></article>
+{% else %}<p>Noch kein Lieferschein bei dieser Bestellung abgelegt.</p>{% endfor %}
+{% if order_delivery.events %}<details><summary>Zugeordnete Lieferungen</summary><ul>{% for event in order_delivery.events %}<li>{{ event.quantity }} {{ event.unit }} · Seite {{ event.page }}, Position {{ event.position }} · <a href="{{ url_for('werkstatt_intake.original',group_id=event.group_id,file_id=event.file_id) }}">Originalbeleg</a>{% if event.ocr_correction %}<small>Auslesekorrektur: {{ event.ocr_correction }}</small>{% endif %}</li>{% endfor %}</ul></details>{% endif %}
+</section>{% endif %}

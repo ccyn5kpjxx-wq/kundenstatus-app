@@ -442,11 +442,11 @@ class MaterialIntake:
             raise ValueError('Originaldatei konnte nicht verifiziert werden.')
         return raw, row['mime'], row['original_name']
 
-    def analyze_file(self, group_id, file_id):
+    def analyze_file(self, group_id, file_id, reader=None):
         with self.db() as db:
             row = self._file(db, group_id, file_id)
         raw, _, _ = self.original(group_id, file_id)
-        reader = getattr(self.p, 'extract_document_text_local', None)
+        reader = reader or getattr(self.p, 'extract_document_text_local', None)
         if not callable(reader):
             raise ValueError('Lokale Belegauslese ist nicht verfügbar.')
         text, state = '', 'pruefen'
@@ -468,11 +468,12 @@ class MaterialIntake:
             return self._file_view(self._file(db, group_id, file_id))
 
     def record_delivery(self, group_id, payload, actor='admin'):
+        from werkstatt_liefereingang import document_position
         actor = self._actor(actor)
         _keys(payload, {'revision', 'line_id', 'file_id', 'position', 'quantity', 'unit'})
         _id(payload.get('revision'), 'Bearbeitungsstand')
         record = {'line_id': _id(payload.get('line_id')), 'file_id': _id(payload.get('file_id')),
-                  'position': _id(payload.get('position'), 'Belegposition'),
+                  'position': document_position(payload.get('position')),
                   'quantity': _decimal(payload.get('quantity'), 'Gelieferte Menge'),
                   'unit': _text(payload.get('unit'), 'Liefereinheit', 100)}
         digest = _hash(record)

@@ -34,6 +34,16 @@ def png(color='blue'):
 
 
 class IntakeTests(unittest.TestCase):
+    def test_printed_zero_position_is_valid_and_idempotent(self):
+        group = self.group(quantity='2')
+        file = self.attach(group)
+        value = self.delivery(group, file, position=0)
+        self.service.record_delivery(group['id'], value)
+        self.service.record_delivery(group['id'], value)
+        detail = self.service.detail(group['id'])
+        self.assertEqual(detail['lines'][0]['delivered_quantity'], '2')
+        self.assertEqual(len(detail['lines'][0]['delivery_events']), 1)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.database = Path(self.temporary.name) / 'synthetic.db'
