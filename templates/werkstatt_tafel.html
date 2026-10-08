@@ -555,6 +555,7 @@
       <a class="karte" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}"
          draggable="{{ 'false' if auftrag['status'] == 1 else 'true' }}" data-auftrag="{{ auftrag['id'] }}" data-status="{{ auftrag['status'] }}">
         <div class="karte-kopf">
+          <span class="auftragsnummer" style="font-weight:800; font-size:.85rem; white-space:nowrap;">Auftrag {{ auftrag['id'] }}</span>
           {% if auftrag['werkstatt_neu'] %}
             <span class="neu-badge" title="Neu vom Autohaus eingeplant">1</span>
           {% endif %}

@@ -576,6 +576,14 @@ def register_employee_orders(p):
     p.app.config.setdefault('EMPLOYEE_ORDER_OPERATIONS_ENABLED', False)
     bp = Blueprint('employee_orders', __name__)
 
+    @bp.url_value_preprocessor
+    def photo_request_limit(endpoint, values):
+        # URL preprocessing precedes the app's CSRF hook, which already reads
+        # request.form. Keep the advertised six 8-MiB photos possible without
+        # increasing the request limit of any other upload route.
+        if request.method == 'POST' and endpoint == 'employee_orders.photos':
+            request.max_content_length = MAX_PHOTOS * MAX_PHOTO_BYTES + 1024 * 1024
+
     def token():
         if not session.get('csrf_token'):
             session['csrf_token'] = secrets.token_urlsafe(32)
