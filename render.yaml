@@ -41,6 +41,9 @@ services:
   - type: web
     name: kundenstatus-portal
     runtime: python
+    # Die persistente Disk erzwingt beim Deploy eine Betriebsunterbrechung.
+    # Portalupdates deshalb gesammelt und in einem geplanten Zeitfenster ausliefern.
+    autoDeployTrigger: "off"
     buildCommand: pip install -r requirements.txt
     # Mit nur einem Worker darf kein request-basierter Zwangsneustart aktiv sein.
     # gunicorn.conf.py wird aus dem Repository-Root automatisch geladen.

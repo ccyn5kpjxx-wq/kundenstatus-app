@@ -145,3 +145,50 @@ Veroeffentlichung ersetzte die haengende Instanz vor einem Threadstack-Dump.
 Die exakte Ursache dieser Live-Instanz ist daher nicht abschliessend
 bewiesen. Der Fix beseitigt nachweisbare Blockaden der eingesetzten
 Serverversion und ergaenzt die bisher fehlende HTTP-Selbstueberwachung.
+
+## Wiederholte 502 waehrend automatischer Deploys
+
+Am 08.10.2026 lag ein weiterer 502 zeitlich im automatischen Deploy von
+`2d711620`: Start 15:35:24, Meldung `Your service is live` um 15:37:00
+(Europe/Berlin). Zwei betroffene Browser-Tabs wurden um 15:36:22 und
+15:36:41 geoeffnet. Ab 15:37 antworteten Health und Admin wieder mit HTTP 200.
+Dieser Vorfall unterscheidet sich damit von der zuvor untersuchten
+Worker-Blockade. Er belegt keine Ursache fuer alle historischen Ausfaelle.
+
+Das Portal hat eine persistente Disk unter `/var/data`. Render stoppt bei
+einem Deploy mit Disk die bisherige Instanz vor dem Start der neuen;
+Zero-Downtime-Deploys sind fuer diesen Dienst deshalb nicht verfuegbar.
+Mit der bisherigen Einstellung `On Commit` verursachte jeder tatsaechlich
+ausgerollte Auto-Deploy eine erneute Betriebsunterbrechung. Uebersprungene
+Deploys und fehlgeschlagene Builds unterbrechen die laufende Instanz nicht.
+
+Auto-Deploy wurde am tatsaechlichen Service `kundenstatus-app`
+(`srv-d7odra9f9bms73el7g3g`) auf **Off** gesetzt. Der Portal-Eintrag in
+`render.yaml` sichert dieselbe Einstellung als `autoDeployTrigger: "off"`.
+Die Anfuehrungszeichen sind erforderlich, damit YAML-Werkzeuge `off` nicht
+als Boolean lesen. Der separate Homepage-Eintrag bleibt unveraendert.
+Ein YAML-Push allein aendert einen manuell angelegten Service nicht.
+Die Blueprint-Uebersicht des Render-Workspace zeigte zum Zeitpunkt der
+Umstellung keine Blueprint-Instanzen; es bestand somit kein Auto-Sync-Pfad.
+
+Kuenftige Portalupdates werden gesammelt, getestet und in einem geplanten
+Zeitfenster ueber **Manual Deploy** veroeffentlicht. Vorher im Cockpit den
+aktuellen Betriebszustand und laufende Uploads beachten. Danach Live-Commit,
+`/healthz`, Cockpit und den geaenderten Ablauf pruefen. Ein Git-Push ist ab
+jetzt kein Nachweis fuer eine Live-Veroeffentlichung. Deployment-Hooks,
+API-Aufrufe und manuelle Neustarts bleiben moegliche Ausloeser; auch diese
+muessen das Zeitfenster beachten. Bereits laufende oder wartende Deploys
+werden durch Auto-Deploy Off nicht rueckwirkend aufgehoben.
+
+Blueprint-Auto-Sync ist ein eigener Ausloeser: Vor einer YAML-Aenderung
+pruefen, ob der echte Service zu einem Blueprint gehoert. Falls ja, fuer
+kontrollierte Veroeffentlichungen auch dessen automatische Synchronisierung
+deaktivieren. Keinen zweiten Service oder Blueprint als Ausweichloesung
+anlegen. Persistente Disk, Datenbank und Uploadpfade duerfen nicht entfernt
+werden, um Deploys zu beschleunigen. Unterbrechungsfreie Deploys erfordern
+eine eigene geplante Migration der persistenten Dateien.
+
+Quellen: [Render Deploys](https://render.com/docs/deploys),
+[Disk-Einschraenkungen](https://render.com/docs/disks#disk-limitations-and-considerations),
+[Blueprint-Deploytrigger](https://render.com/docs/blueprint-spec#autodeploytrigger),
+[Blueprint Auto-Sync](https://render.com/docs/infrastructure-as-code#disabling-automatic-sync).
