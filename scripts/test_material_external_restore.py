@@ -17,12 +17,14 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 import zipfile
 
-from flask import Flask, flash, redirect, request, url_for
+from flask import Flask, flash, has_request_context, redirect, request, url_for
+from werkzeug.exceptions import ServiceUnavailable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from werkstatt_einladung_restore import ensure_employee_invitation_state_for_import
@@ -59,7 +61,8 @@ def connection(path):
 class ExternalRestoreTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        names = {'portal_originals_operation_lock', 'portal_originals_locked',
+        names = {'_originals_busy', '_portal_originals_thread_guard',
+                 'portal_originals_operation_lock', 'portal_originals_locked',
                  'ensure_material_external_claims_for_import',
                  'import_backup_json_rows_into_current_database',
                  'import_sqlite_rows_into_current_database', 'admin_daten_import'}
@@ -81,7 +84,9 @@ class ExternalRestoreTests(unittest.TestCase):
         self.app.secret_key = 'synthetic-only-secret'
         self.app.testing = True
         self.app.add_url_rule('/dashboard', endpoint='dashboard', view_func=lambda: 'ok')
-        self.ns = {'contextmanager': contextmanager, 'wraps': wraps, 'os': os,
+        self.ns = {'contextmanager': contextmanager, 'wraps': wraps, 'os': os, 'time': time,
+            'has_request_context': has_request_context, 'ServiceUnavailable': ServiceUnavailable,
+            'PORTAL_ORIGINALS_REQUEST_WAIT_SECONDS': 2.0,
             'sqlite3': sqlite3, 'pathlib': pathlib, 'tempfile': tempfile, 'zipfile': zipfile,
             'datetime': datetime, 'USE_POSTGRES': False, 'DATA_DIR': self.root, 'DB': self.db_path,
             'PORTAL_ORIGINALS_FILE_LOCK': self.root / 'restore.lock',
