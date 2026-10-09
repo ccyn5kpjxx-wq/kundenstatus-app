@@ -26,7 +26,7 @@
     <p class="chef-panel-note">Heute und die nächsten gemeldeten Zeiträume. Schule bleibt getrennt vom Urlaub.</p>
     {% if chef.abwesenheiten.error %}<p class="chef-data-warning" role="status">{{ chef.abwesenheiten.error }}</p>{% else %}
     <div class="chef-absence-list">
-      {% for item in chef.abwesenheiten.rows %}<a class="chef-absence-row" href="{{ item.url }}"><div><span class="chef-absence-kind kind-{{ item.art }}">{{ 'Schule' if item.art == 'schule' else 'Urlaub' }}</span>{% if item.heute %}<span class="chef-today-label">Heute</span>{% endif %}<strong>{{ item.name }}</strong></div><div class="chef-absence-date">{{ item.datum_label }}{% if item.zeit_label %}<span>{{ item.zeit_label }}</span>{% endif %}</div>{% if item.notiz %}<p>{{ item.notiz }}</p>{% endif %}</a>{% else %}<p class="chef-empty">Aktuell keine anstehenden Urlaubs- oder Schultermine.</p>{% endfor %}
+      {% for item in chef.abwesenheiten.rows %}<a class="chef-absence-row" href="{{ item.url }}"><div><span class="chef-absence-kind kind-{{ item.art }}">{{ 'Schule · abwesend' if item.art == 'schule' else 'Urlaub' }}</span>{% if item.heute %}<span class="chef-today-label">Heute</span>{% endif %}<strong>{{ item.name }}</strong></div><div class="chef-absence-date">{{ item.datum_label }}{% if item.art != 'schule' and item.zeit_label %}<span>{{ item.zeit_label }}</span>{% endif %}</div>{% if item.art != 'schule' and item.notiz %}<p>{{ item.notiz }}</p>{% endif %}</a>{% else %}<p class="chef-empty">Aktuell keine anstehenden Urlaubs- oder Schultermine.</p>{% endfor %}
     </div>{% endif %}
   </section>
 </div>

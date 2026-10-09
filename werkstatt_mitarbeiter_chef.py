@@ -48,6 +48,32 @@ def _team(portal):
     return dict(rows=rows, counts=counts, error='')
 
 
+def _school_periods(entries):
+    """Merge only continuous dates with the same owner and evidenced course.
+
+    Daily clock times remain in the source records and do not split a course.
+    Missing course/source information cannot establish a shared multi-day plan.
+    """
+    courses, periods = {}, []
+    for item, start, end in entries:
+        mid, note, source = item['mitarbeiter_id'], item['notiz'], item['quelle']
+        if not isinstance(note, str) or not note.strip() or not isinstance(source, str) or not source.strip():
+            periods.append((mid, note, start, end))
+            continue
+        courses.setdefault((mid, note, source), []).append((start, end))
+    for (mid, note, _source), intervals in courses.items():
+        intervals.sort()
+        start, end = intervals[0]
+        for next_start, next_end in intervals[1:]:
+            if next_start <= end + timedelta(days=1):
+                end = max(end, next_end)
+            else:
+                periods.append((mid, note, start, end))
+                start, end = next_start, next_end
+        periods.append((mid, note, start, end))
+    return periods
+
+
 def _absences(portal, employees, today):
     active = {person['id']: person for person in employees if person.get('aktiv')}
     rows, invalid = [], False
@@ -66,8 +92,10 @@ def _absences(portal, employees, today):
                              datum_label=_date_label(start, end), zeit_label='Im Urlaubskalender',
                              notiz=item.get('notiz', ''), heute=start <= today <= end,
                              url=f'/werkstatt/assistent/urlaub/verwaltung#mitarbeiter-{mid}', _start=start))
-    seen = set()
-    for year in (today.year, today.year + 1):
+    seen, school_entries = set(), []
+    # Include preceding days before grouping so an ongoing course still shows
+    # its real beginning, including courses over the calendar-year boundary.
+    for year in range(max(2000, today.year - 1), min(2099, today.year + 1) + 1):
         for item in portal.employee_school.admin_rows({'actor': 'admin'}, year):
             mid = item['mitarbeiter_id']
             if item['id'] in seen or mid not in active or item['status'] != 'gemeldet':
@@ -78,13 +106,14 @@ def _absences(portal, employees, today):
             except (TypeError, ValueError):
                 invalid = True
                 continue
-            if end < today or start > today + timedelta(days=366):
-                continue
-            times = 'Ganztägig · gemeldet' if item['ganztag'] else item['start_zeit'] + '–' + item['end_zeit'] + ' Uhr · gemeldet'
-            rows.append(dict(mitarbeiter_id=mid, name=active[mid]['name'], art='schule',
-                             datum_label=_date_label(start, end), zeit_label=times,
-                             notiz=item['notiz'], heute=start <= today <= end,
-                             url=f'/werkstatt/assistent/urlaub/verwaltung#mitarbeiter-{mid}', _start=start))
+            school_entries.append((item, start, end))
+    for mid, note, start, end in _school_periods(school_entries):
+        if end < today or start > today + timedelta(days=366):
+            continue
+        rows.append(dict(mitarbeiter_id=mid, name=active[mid]['name'], art='schule',
+                         datum_label=_date_label(start, end), zeit_label='',
+                         notiz=note, heute=start <= today <= end,
+                         url=f'/werkstatt/assistent/urlaub/verwaltung#mitarbeiter-{mid}', _start=start))
     rows.sort(key=lambda row: (not row['heute'], row['_start'], row['name'], row['art']))
     for row in rows:
         row.pop('_start')
