@@ -129,6 +129,64 @@ Der zu pruefende Umbau besteht aus vier Schritten:
    Dienst und Disk fuer einen getesteten Rueckweg erhalten.
 
 Das ist ein vorbereiteter Migrationsumfang, keine bereits erfolgte Migration.
-Speicheranbieter, tatsaechliche Datenmenge, laufende Zusatzkosten und ein
+Speicheranbieter, vollstaendiger verifizierter Migrationsbestand, laufende Zusatzkosten und ein
 Umschaltfenster sind noch nicht bestimmt. Es wurde kein weiterer Dienst
 gebucht, keine Disk geloescht und keine Produktionsdatei verschoben.
+
+## Gepruefter Reparaturstand nach dem Vorfall
+
+Tasks 125, 126 und 128 sind getrennt getestet und unabhaengig geprueft.
+Task 129 integriert ihre freigegebenen Commits auf dem aktuellen Hauptstand:
+
+- Die Bestellhistorie und der echte Preisvergleich teilen pro GET einen
+  frischen, nach Quellenrechten gefilterten Katalogstand. 551 unterschiedliche
+  historische Identitaeten erfordern einen Katalogabruf; der Vergleich von
+  zwoelf Kandidaten nutzt denselben Stand. Die Folgeanfrage beruecksichtigt
+  widerrufene Lieferantenfreigaben und quarantinisierte Quellen.
+- Technische Ausfaelle der optionalen Historie oder Rechnungskandidaten
+  ergeben einen sichtbaren neutralen Hinweis. Angefangene Kandidaten werden
+  verworfen; es gibt keinen Nullpreis oder alten Ersatzkandidaten.
+- Ein Rechteentzug zwischen Urlaubsuebersicht und Schulplanabruf fuehrt vor
+  der Ausgabe persoenlicher Daten zu HTTP 403. Ungueltige Angaben ergeben 400.
+
+Die isolierte Integrationspruefung auf Git-Snapshot `7c0ee857` besteht:
+29 Bestelluebersichts-, 23 Preisvergleichs- und 13 Schulplantests, insgesamt
+65 Faelle. Externe Python-Verbindungen und SQLite ausserhalb des synthetischen
+Testbereichs waren gesperrt; dotenv-Dateien wurden nicht eingelesen.
+Syntaxpruefung und bytegleicher Abgleich mit den geprueften Agentenstaenden
+bestehen. Nachweise: `C:/tmp/gaertner-integration-20261009/`.
+
+Ein parallel gespeichertes Mitarbeiterupdate `7cacaf87` wurde danach
+konfliktfrei uebernommen. Die Reparaturdateien bleiben bytegleich mit den
+unabhaengig geprueften Staenden. Die neue isolierte Schnittstellenpruefung
+auf Snapshot `55e0b159` besteht mit 13 Schul- und 17 Krankmeldungsfaellen;
+die urspruenglichen Nachweise bleiben separat erhalten. Ergebnisse liegen
+unter `C:/tmp/gaertner-integration-20261009/rebased/`.
+
+Diese zusaetzlichen Codefixes sind zur Bereitstellung vorbereitet. Die
+Stoerungspruefung loest keinen weiteren Runtime-Deploy aus. Die
+nachgewiesene Unterbrechung bei Disk-Deploys erfordert eine Trennung der
+dauerhaften Ablage vom Webservice. Der Livecheck um
+09:08:27 Uhr Europe/Berlin lieferte weiterhin HTTP 200 / 0,152 Sekunden mit
+Build `5b4f14282900`; Auto-Deploy wurde im Render-Dashboard erneut als Off
+gelesen. Ein Git-Push allein stellt diese Reparaturen daher nicht live.
+
+## Tatsaechliche Speichermetadaten
+
+Eine begrenzte, lesende Zaehlung am laufenden Dienst ergab um 09:08 Uhr:
+
+| Bereich | Tatsaechlicher Pfad | Dateien | Bytes |
+| --- | --- | ---: | ---: |
+| Portaluploads | `/var/data/uploads` | 124 | 137572330 |
+| Mailausgang | `/var/data/mail_outbox` | 55 | 7864 |
+| TomorrowWorks | `/var/data/tomorrowworks_dashboard` | 19 | 48874967 |
+| Backup-Standardpfad | `/opt/render/project/src/data/backups` | 5 | 1019431134 |
+
+`/var/data/backups` existierte nicht. `BACKUP_DIR` war in der Shellumgebung
+nicht gesetzt; der zugehoerige Code verwendet bei PostgreSQL den
+Source-Standardpfad. Diese Sicherungen liegen deshalb ausserhalb der Disk.
+Die Disk hatte 1020702720 Bytes insgesamt und 814534656 Bytes frei.
+Gespeichert wurden nur Pfade und aggregierte Metadaten; Dateiinhalte wurden
+nicht geoeffnet. Zaehlungen ersetzen weder Pruefsummenabgleich noch
+Restoretest. Der Kostenrahmen fuer eine gemeinsame
+Ablage wurde angefragt; ein Anbieter ist noch nicht ausgewaehlt.
