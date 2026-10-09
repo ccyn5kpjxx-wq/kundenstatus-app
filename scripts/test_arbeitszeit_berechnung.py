@@ -172,7 +172,7 @@ class CalculatedTimeTests(unittest.TestCase):
         self.assertEqual(november['arbeitstage'], [])
         self.assertEqual(november['pausenabzug_sekunden'], 0)
 
-    def test_dst_elapsed_seconds_and_exact_second_display_without_rounding(self):
+    def test_dst_elapsed_seconds_and_original_seconds_survive_derived_rounding(self):
         for start, end, month in (('2026-03-29T00:30:00+00:00', '2026-03-29T02:30:00+00:00', '2026-03'),
                                   ('2026-10-25T00:30:00+00:00', '2026-10-25T02:30:00+00:00', '2026-10')):
             self.shift(start, end)
@@ -181,9 +181,126 @@ class CalculatedTimeTests(unittest.TestCase):
             self.assertEqual(report['berechnete_abgeschlossene_arbeitszeit'], '1:15 Stunden')
         self.shift('2026-11-02T07:00:00+00:00', '2026-11-02T15:00:07+00:00')
         report = self.read('2026-11')
-        self.assertEqual(report['berechnete_abgeschlossene_arbeitszeit'], '7:15:07 Stunden')
-        self.assertEqual(report['berechnete_abgeschlossene_arbeit_sekunden'], 26107)
+        self.assertEqual(report['berechnete_abgeschlossene_arbeitszeit'], '7:15 Stunden')
+        self.assertEqual(report['berechnete_abgeschlossene_arbeit_sekunden'], 26100)
         self.assertEqual(report['schichten'][0]['arbeit_sekunden'], 28807)
+        self.assertEqual(report['schichten'][0]['original_ende'], '02.11.2026 16:00:07')
+
+    def test_visible_minute_rounding_ignores_seconds_for_both_boundaries(self):
+        for minute in range(60):
+            for second in (0, 1, 29, 59):
+                instant = datetime.fromisoformat(f'2026-09-29T12:{minute:02d}:{second:02d}.123456+00:00')
+                rounded = self.s.round_clock(instant)
+                expected = minute - minute % 5 if minute % 5 <= 2 else minute + 5 - minute % 5
+                self.assertEqual(rounded.hour * 60 + rounded.minute, 12 * 60 + expected)
+                self.assertEqual((rounded.second, rounded.microsecond), (0, 0))
+                self.assertEqual(self.s.round_clock(rounded), rounded)
+        self.shift('2026-09-29T12:32:59+00:00', '2026-09-29T15:33:01+00:00')
+        row = self.read()['schichten'][0]
+        self.assertEqual(row['berechneter_beginn'], '29.09.2026 14:30')
+        self.assertEqual(row['berechnetes_ende'], '29.09.2026 17:35')
+        self.assertEqual(row['berechnete_arbeitszeit'], '2:20 Stunden')
+        self.assertEqual(row['original_beginn'], '29.09.2026 14:32:59')
+        self.assertEqual(row['original_ende'], '29.09.2026 17:33:01')
+        self.assertEqual(row['arbeit_sekunden'], 10802)
+
+    def test_rounded_legacy_pause_has_its_own_field_and_counts_towards_floor(self):
+        self.at('2026-09-29T06:02:59+00:00', 'kommen')
+        self.legacy('2026-09-29T10:32:59+00:00', 'pause')
+        self.legacy('2026-09-29T11:03:01+00:00', 'weiter')
+        self.at('2026-09-29T15:32:59+00:00', 'gehen')
+        before = self.events()
+        row = self.read()['schichten'][0]
+        self.assertEqual(row['pause_sekunden'], 1802)
+        self.assertEqual(row['berechnete_pause_sekunden'], 2100)
+        self.assertEqual(row['berechnete_pause'], '0:35 Stunden')
+        self.assertEqual(row['pausenabzug'], '0:10 Stunden')
+        self.assertEqual(row['berechnete_arbeitszeit'], '8:45 Stunden')
+        self.assertEqual(self.events(), before)
+        self.at('2026-09-30T06:02:59+00:00', 'kommen')
+        self.legacy('2026-09-30T10:32:59+00:00', 'pause')
+        self.legacy('2026-09-30T11:33:01+00:00', 'weiter')
+        self.at('2026-09-30T15:32:59+00:00', 'gehen')
+        row = self.read()['schichten'][-1]
+        self.assertEqual(row['pause_sekunden'], 3602)
+        self.assertEqual(row['berechnete_pause'], '1:05 Stunden')
+        self.assertEqual(row['pausenabzug_sekunden'], 0)
+        self.assertEqual(row['berechnete_arbeitszeit'], '8:25 Stunden')
+
+    def test_rounded_zero_shift_is_nonnegative_and_keeps_raw_seconds(self):
+        self.shift('2026-09-29T12:30:01+00:00', '2026-09-29T12:32:59+00:00')
+        row = self.read()['schichten'][0]
+        self.assertEqual(row['arbeit_sekunden'], 178)
+        self.assertEqual(row['berechneter_beginn'], row['berechnetes_ende'])
+        self.assertEqual(row['berechnete_arbeit_sekunden'], 0)
+        self.assertEqual(row['pausenabzug_sekunden'], 0)
+        self.assertFalse(row['berechnung_pruefen'])
+
+    def test_rounded_start_crosses_month_but_workday_and_single_floor_stay_original(self):
+        self.shift('2026-10-31T21:00:00+00:00', '2026-10-31T21:20:00+00:00')
+        self.shift('2026-10-31T22:58:47+00:00', '2026-11-01T00:03:11+00:00')
+        before = self.events()
+        november, october = self.read('2026-11'), self.read('2026-10')
+        self.assertEqual(october['berechnete_abgeschlossene_arbeitszeit'], '0:00 Stunden')
+        self.assertEqual(november['berechnete_abgeschlossene_arbeitszeit'], '0:40 Stunden')
+        self.assertEqual((october['pausenabzug_sekunden'], november['pausenabzug_sekunden']), (1200, 1500))
+        self.assertEqual(november['schichten'][0]['arbeitstag'], '2026-10-31')
+        self.assertEqual(november['schichten'][0]['berechneter_beginn'], '01.11.2026 00:00')
+        self.assertEqual(self.events(), before)
+
+    def test_rounded_end_at_month_midnight_does_not_add_next_month_minutes(self):
+        self.shift('2026-10-31T21:02:59+00:00', '2026-10-31T22:58:59+00:00')
+        october, november = self.read('2026-10'), self.read('2026-11')
+        self.assertEqual(october['schichten'][0]['berechnetes_ende'], '01.11.2026 00:00')
+        self.assertEqual(october['berechnete_abgeschlossene_arbeitszeit'], '1:15 Stunden')
+        self.assertEqual(november['schichten'], [])
+        self.assertEqual(november['berechnete_abgeschlossene_arbeit_sekunden'], 0)
+
+    def test_rounding_preserves_both_autumn_folds_and_spring_gap_without_fake_hour(self):
+        for start, end, expected_start, expected_end, month in (
+            ('2026-03-29T00:59:59+00:00', '2026-03-29T01:04:01+00:00',
+             '2026-03-29T03:00:00+02:00', '2026-03-29T03:05:00+02:00', '2026-03'),
+            ('2026-10-25T00:59:59+00:00', '2026-10-25T01:04:01+00:00',
+             '2026-10-25T02:00:00+01:00', '2026-10-25T02:05:00+01:00', '2026-10')):
+            self.shift(start, end)
+            row = self.read(month)['schichten'][-1]
+            self.assertEqual(row['berechneter_beginn_iso'], expected_start)
+            self.assertEqual(row['berechnetes_ende_iso'], expected_end)
+            self.assertTrue(row['zeitumstellung'])
+            self.assertEqual(row['pausenabzug_sekunden'], 300)
+            self.assertEqual(row['berechnete_arbeit_sekunden'], 0)
+        first = self.s.round_clock(datetime.fromisoformat('2026-10-25T00:32:59+00:00'))
+        second = self.s.round_clock(datetime.fromisoformat('2026-10-25T01:32:59+00:00'))
+        self.assertEqual((second - first).total_seconds(), 3600)
+        self.assertEqual(first.isoformat(), '2026-10-25T00:30:00+00:00')
+        self.assertEqual(second.isoformat(), '2026-10-25T01:30:00+00:00')
+
+    def test_status_details_separate_rounded_and_original_seconds_without_changing_state(self):
+        original_message = self.f.team_status()
+        self.assertEqual(original_message['detail_berechnet'], original_message['detail'])
+        self.assertEqual(original_message['detail_original'], '')
+        self.shift('2026-09-29T06:02:59+00:00', '2026-09-29T14:27:19+00:00')
+        before = self.events()
+        status = self.f.team_status()
+        self.assertEqual(status['key'], 'beendet')
+        self.assertEqual(status['detail'], 'Heute um 16:27 Uhr')
+        self.assertIn('16:25 Uhr', status['detail_berechnet'])
+        self.assertIn('berechnet', status['detail_berechnet'])
+        self.assertIn('16:27:19 Uhr', status['detail_original'])
+        self.assertIn('Originalstempel', status['detail_original'])
+        self.assertEqual(self.events(), before)
+
+    def test_status_rounded_next_day_never_claims_today_at_midnight(self):
+        self.shift('2026-09-29T20:00:00+00:00', '2026-09-29T21:58:59+00:00')
+        status = self.f.team_status()
+        self.assertEqual(status['key'], 'beendet')
+        self.assertIn('Heute um 23:58', status['detail'])
+        self.assertIn('30.09.2026, 00:00', status['detail_berechnet'])
+        self.assertNotIn('Heute um 00:00', status['detail_berechnet'])
+        self.at('2026-09-29T21:59:01+00:00', 'kommen')
+        status = self.f.team_status()
+        self.assertEqual(status['key'], 'arbeitet')
+        self.assertIn('30.09.2026, 00:00', status['detail_berechnet'])
 
     def test_open_second_shift_keeps_raw_closed_work_but_day_calculation_pending(self):
         self.shift('2026-09-29T06:00:00+00:00', '2026-09-29T07:00:00+00:00')

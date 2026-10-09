@@ -1,7 +1,8 @@
 """Confirmed raw clock events and a separate daily break calculation.
 
 Raw work/break seconds remain unchanged. The derived view applies a minimum
-45-minute break once per Berlin work-start date, without rounding or payroll.
+45-minute break once per original Berlin work-start date and rounds segment
+boundaries to the nearest five minutes using the visible full minute.
 """
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -182,6 +183,12 @@ class TimeTracking:
         days = self._calculated_days(all_shifts, start_utc, end_utc)
         shifts = [item for item in all_shifts if item['_in_month']]
         for item in shifts:
+            item['original_beginn_iso'] = item['start'].isoformat()
+            item['original_ende_iso'] = item['ende'].isoformat() if item['ende'] else None
+            item['original_beginn'] = item['start'].astimezone(BERLIN).strftime('%d.%m.%Y %H:%M:%S')
+            item['original_ende'] = item['ende'].astimezone(BERLIN).strftime('%d.%m.%Y %H:%M:%S') if item['ende'] else None
+            item['original_beginn_zeitzone'] = self.offset_label(item['start'].astimezone(BERLIN))
+            item['original_ende_zeitzone'] = self.offset_label(item['ende'].astimezone(BERLIN)) if item['ende'] else None
             item['beginn']=item.pop('start').astimezone(BERLIN).strftime('%d.%m.%Y %H:%M')
             item['ende']=item['ende'].astimezone(BERLIN).strftime('%d.%m.%Y %H:%M') if item['ende'] else None
             item['arbeitszeit']=self.duration(item['arbeit_sekunden'])
@@ -199,7 +206,7 @@ class TimeTracking:
                 'arbeitstage':days,
                 'berechnung_pruefen':any(day['berechnung_pruefen'] for day in days),
                 'pruefen':any(item['pruefen'] for item in shifts),
-                'hinweis':'Berechnet mit mindestens 45 Minuten Pause einmal je Arbeitstag (Berliner Datum des Arbeitsbeginns). Bereits gestempelte Pausen zählen mit; längere Pausen bleiben erhalten. Der zusätzliche rechnerische Abzug verändert keine Stempel oder gemessenen Zeiten. Keine Rundung und keine Lohnabrechnung. Offene oder auffällige Arbeitstage sind nicht in der berechneten Summe abgeschlossener Zeiten.'}
+                'hinweis':'Beginn und Ende werden nur rechnerisch auf die nächstgelegenen 5 Minuten gerundet: volle Minute 0–2 abwärts, 3–4 aufwärts; Originalsekunden bleiben erhalten. Historische Pausengrenzen folgen derselben Rechenregel. Mindestens 45 Minuten Pause einmal je Arbeitstag (ursprüngliches Berliner Datum des Arbeitsbeginns); längere berechnete Altpausen bleiben erhalten. Der zusätzliche Pausenabzug ergänzt nur die fehlenden Minuten. Keine Änderung der Rohstempel, gemessenen Zeiten oder Lohnabrechnung. Offene oder auffällige Arbeitstage sind nicht in der berechneten Summe abgeschlossener Zeiten.'}
         # The optional personal profile supplies a separately labelled Sollplan.
         # It never changes events, measured work/break duration or monthly sums.
         work_plan = getattr(getattr(self.p, 'employee_portal', None), 'work_plan', None)
@@ -211,7 +218,9 @@ class TimeTracking:
     def _calculated_days(cls, shifts, month_start, month_end):
         """Allocate the extra daily deduction before clipping to a month.
 
-        Attribution to the earliest working seconds is accounting only; it
+        Round every historical segment boundary on the real UTC timeline,
+        keeping spring gaps and both autumn folds valid. Attribution of the
+        extra break to the earliest working seconds is accounting only; it
         does not claim when a real break happened and creates no clock events.
         A workday containing an open/suspect shift has no finalized calculation.
         """
@@ -219,6 +228,18 @@ class TimeTracking:
         for item in shifts:
             day = item['start'].astimezone(BERLIN).date().isoformat()
             item['arbeitstag'] = day
+            rounded_start = cls.round_clock(item['start']).astimezone(BERLIN)
+            rounded_end = cls.round_clock(item['ende']).astimezone(BERLIN) if item['ende'] else None
+            offsets = {item['start'].astimezone(BERLIN).utcoffset(), rounded_start.utcoffset()}
+            if rounded_end:
+                offsets.update((item['ende'].astimezone(BERLIN).utcoffset(), rounded_end.utcoffset()))
+            item.update(berechneter_beginn=rounded_start.strftime('%d.%m.%Y %H:%M'),
+                        berechnetes_ende=rounded_end.strftime('%d.%m.%Y %H:%M') if rounded_end else None,
+                        berechneter_beginn_iso=rounded_start.isoformat(),
+                        berechnetes_ende_iso=rounded_end.isoformat() if rounded_end else None,
+                        berechneter_beginn_zeitzone=cls.offset_label(rounded_start),
+                        berechnetes_ende_zeitzone=cls.offset_label(rounded_end) if rounded_end else None,
+                        zeitumstellung=len(offsets) > 1)
             groups.setdefault(day, []).append(item)
         days = []
         for day, items in sorted(groups.items()):
@@ -226,17 +247,22 @@ class TimeTracking:
             if not visible:
                 continue
             incomplete = any(item['offen'] or item['pruefen'] or item['_invalid'] for item in items)
+            segments = {id(item): [(kind, cls.round_clock(start), cls.round_clock(end))
+                                   for kind, start, end in item['_segments']] for item in items}
             work = sum(max(0, int((end-start).total_seconds())) for item in items
-                       for kind, start, end in item['_segments'] if kind == 'arbeit')
-            real_pause = sum(max(0, int((end-start).total_seconds())) for item in items
-                             for kind, start, end in item['_segments'] if kind == 'pause')
-            remaining = min(work, max(0, DAILY_BREAK_SECONDS - real_pause))
+                       for kind, start, end in segments[id(item)] if kind == 'arbeit')
+            rounded_pause = sum(max(0, int((end-start).total_seconds())) for item in items
+                                for kind, start, end in segments[id(item)] if kind == 'pause')
+            remaining = min(work, max(0, DAILY_BREAK_SECONDS - rounded_pause))
             for item in items:
-                extra = 0
+                extra = calculated_work = calculated_pause = 0
                 if not incomplete:
-                    for kind, start, end in item['_segments']:
+                    for kind, start, end in segments[id(item)]:
+                        included = max(0, int((min(end,month_end)-max(start,month_start)).total_seconds()))
                         if kind != 'arbeit':
+                            calculated_pause += included
                             continue
+                        calculated_work += included
                         used = min(remaining, max(0, int((end-start).total_seconds())))
                         stop = start + timedelta(seconds=used)
                         extra += max(0, int((min(stop,month_end)-max(start,month_start)).total_seconds()))
@@ -244,7 +270,9 @@ class TimeTracking:
                 item['berechnung_pruefen'] = incomplete
                 item['pausenabzug_sekunden'] = None if incomplete else extra
                 item['pausenabzug'] = None if incomplete else cls.exact_duration(extra)
-                item['berechnete_arbeit_sekunden'] = None if incomplete else max(0, item['arbeit_sekunden'] - extra)
+                item['berechnete_pause_sekunden'] = None if incomplete else calculated_pause
+                item['berechnete_pause'] = None if incomplete else cls.exact_duration(calculated_pause)
+                item['berechnete_arbeit_sekunden'] = None if incomplete else max(0, calculated_work - extra)
                 item['berechnete_arbeitszeit'] = None if incomplete else cls.exact_duration(item['berechnete_arbeit_sekunden'])
             computed = None if incomplete else sum(item['berechnete_arbeit_sekunden'] for item in visible)
             extra = None if incomplete else sum(item['pausenabzug_sekunden'] for item in visible)
@@ -254,6 +282,19 @@ class TimeTracking:
                              pausenabzug_sekunden=extra,
                              pausenabzug=None if incomplete else cls.exact_duration(extra)))
         return days
+
+    @staticmethod
+    def round_clock(when):
+        """Visible minute rule, independent of seconds and preserving DST fold."""
+        instant = when.astimezone(timezone.utc)
+        minute = instant.astimezone(BERLIN).minute % 5
+        delta = -minute if minute <= 2 else 5 - minute
+        return instant.replace(second=0, microsecond=0) + timedelta(minutes=delta)
+
+    @staticmethod
+    def offset_label(when):
+        offset = when.strftime('%z')
+        return 'UTC' + offset[:3] + ':' + offset[3:]
 
     @staticmethod
     def duration(seconds):
@@ -307,7 +348,22 @@ class TimeTracking:
                     key, label, detail = 'beendet', 'Beendet', when.strftime('Heute um %H:%M Uhr')
                 elif not action or (when and when.date() < now.date() and action == 'gehen'):
                     key, label, detail = 'nicht_angestempelt', 'Noch nicht angestempelt', 'Heute noch kein Arbeitsbeginn'
-            employee['zeitstatus'] = {'key': key, 'label': label, 'detail': detail}
+            computed_detail, original_detail = detail, ''
+            if when and key in ('arbeitet', 'pause', 'beendet'):
+                rounded = self.round_clock(when).astimezone(BERLIN)
+                same_day = rounded.date() == when.date() == now.date()
+                rounded_label = rounded.strftime('%H:%M Uhr' if same_day else '%d.%m.%Y, %H:%M Uhr')
+                original_label = when.strftime('%H:%M:%S Uhr' if when.date() == now.date() else '%d.%m.%Y, %H:%M:%S Uhr')
+                if key == 'beendet':
+                    computed_detail = ('Heute um ' if same_day else 'Arbeitsende ') + rounded_label
+                    original_detail = 'Heute um ' + original_label
+                else:
+                    computed_detail = 'Seit ' + rounded_label
+                    original_detail = 'Seit ' + original_label
+                computed_detail += ' (' + self.offset_label(rounded) + ') · berechnet'
+                original_detail += ' (' + self.offset_label(when) + ') · Originalstempel'
+            employee['zeitstatus'] = {'key': key, 'label': label, 'detail': detail,
+                                     'detail_berechnet': computed_detail, 'detail_original': original_detail}
         return employees
 
 

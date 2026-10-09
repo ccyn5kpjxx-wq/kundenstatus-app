@@ -125,6 +125,30 @@ class PersonalTimeUITests(unittest.TestCase):
         self.assertIn('Seit 12:00 Uhr', html)
         self.assertNotIn('/werkstatt/mein-konto/zeit', html)
 
+    def test_current_clock_detail_uses_calculated_time_with_raw_seconds_collapsed(self):
+        employee = dict(id=101, name='Synthetic Own', aktiv=True, zeitstatus=dict(key='beendet',
+            label='Beendet', detail='Heute um 16:27 Uhr', detail_berechnet='Heute um 16:25 Uhr · berechnet',
+            detail_original='Heute um 16:27:49 Uhr · Originalstempel'))
+        for selected in (False, True):
+            with self.subTest(selected=selected):
+                html = render('assistent_arbeitszeit.html', admin=True, report=report() if selected else None,
+                    month='2026-10', employees=[employee], error='')
+                parts = TextParts(html)
+                main, details = ' '.join(parts.main), ' '.join(parts.details)
+                self.assertIn('Heute um 16:25 Uhr · berechnet', main)
+                self.assertNotIn('Heute um 16:27 Uhr', main)
+                self.assertNotIn('16:27:49', main)
+                if selected:
+                    self.assertIn('Heute um 16:27:49 Uhr · Originalstempel', details)
+                else:
+                    self.assertNotIn('Heute um 16:27:49 Uhr · Originalstempel', html)
+
+    def test_legacy_current_clock_detail_is_explicitly_an_original_stamp(self):
+        html = render('assistent_arbeitszeit.html', admin=True, report=None, month='2026-10', error='',
+            employees=[dict(id=101, name='Synthetic Own', aktiv=True,
+                zeitstatus=dict(key='arbeitet', label='Angestempelt', detail='Seit 08:32 Uhr'))])
+        self.assertIn('Originalstempel: Seit 08:32 Uhr', ' '.join(TextParts(html).main))
+
     def test_personal_status_transitions_keep_all_bound_fields(self):
         for state, allowed in [('abwesend', {'kommen'}), ('arbeitet', {'gehen'}),
                                ('pause', {'gehen'}), ('unknown', set())]:
@@ -168,10 +192,12 @@ class PersonalTimeUITests(unittest.TestCase):
     def test_calculation_is_primary_and_original_seconds_are_not_rewritten(self):
         data = report()
         data.update(abgeschlossene_arbeitszeit='7:35:07 Stunden',
-                    berechnete_abgeschlossene_arbeitszeit='6:50:07 Stunden')
+                    berechnete_abgeschlossene_arbeitszeit='6:50 Stunden')
         data['schichten'] = [dict(beginn='08.10.2026 08:00', ende='08.10.2026 15:35',
+            original_beginn='08.10.2026 08:00:02', original_ende='08.10.2026 15:35:09',
+            berechneter_beginn='08.10.2026 08:00', berechnetes_ende='08.10.2026 15:35',
             arbeitszeit='7:35:07 Stunden', pause='0:00 Stunden',
-            berechnete_arbeitszeit='6:50:07 Stunden', pausenabzug='0:45 Stunden',
+            berechnete_arbeitszeit='6:50 Stunden', pausenabzug='0:45 Stunden',
             offen=False, pruefen=False, berechnung_pruefen=False)]
         for admin in (False, True):
             with self.subTest(admin=admin):
@@ -180,13 +206,85 @@ class PersonalTimeUITests(unittest.TestCase):
                     employees=[dict(id=101,name='Synthetic Own',aktiv=1)])
                 parts = TextParts(html)
                 main, details = ' '.join(parts.main), ' '.join(parts.details)
-                self.assertIn('6:50:07 Stunden', main)
+                self.assertIn('6:50 Stunden', main)
+                self.assertNotIn('6:50:07 Stunden', main)
+                self.assertIn('08.10.2026 08:00', main)
+                self.assertIn('08.10.2026 15:35', main)
+                self.assertNotIn('08.10.2026 08:00:02', main)
+                self.assertNotIn('08.10.2026 15:35:09', main)
+                self.assertIn('08.10.2026 08:00:02', details)
+                self.assertIn('08.10.2026 15:35:09', details)
+                self.assertIn('Auf 5 Minuten gerundet', main)
                 self.assertIn('0:45 Stunden', main)
                 self.assertNotIn('7:35:07 Stunden', main)
                 self.assertIn('7:35:07 Stunden', details)
                 self.assertIn('Erfasste Pause', details)
                 self.assertNotIn('Erfasste Pause', main)
                 self.assertIn('Früher gestempelte Pausen zählen mit', main)
+
+    def test_rounded_start_and_end_are_supplied_without_template_rounding(self):
+        data = report()
+        data['schichten'] = [dict(beginn='08.10.2026 14:32', ende='08.10.2026 15:33',
+            original_beginn='08.10.2026 14:32:59', original_ende='08.10.2026 15:33:01',
+            berechneter_beginn='08.10.2026 14:30', berechnetes_ende='08.10.2026 15:35',
+            arbeitszeit='1:00 Stunden', pause='0:00 Stunden', berechnete_arbeitszeit='0:20 Stunden',
+            pausenabzug='0:45 Stunden', offen=False, pruefen=False, berechnung_pruefen=False)]
+        for admin in (False, True):
+            with self.subTest(admin=admin):
+                html = render('assistent_arbeitszeit.html', admin=admin, report=data,
+                    request_id='synthetic-nonce', month='2026-10', employees=[])
+                parts = TextParts(html)
+                main, details = ' '.join(parts.main), ' '.join(parts.details)
+                self.assertIn('08.10.2026 14:30', main)
+                self.assertIn('08.10.2026 15:35', main)
+                self.assertIn('Beginn · gerundet', main)
+                self.assertIn('Ende · gerundet', main)
+                self.assertNotIn('08.10.2026 14:32:59', main)
+                self.assertNotIn('08.10.2026 15:33:01', main)
+                self.assertIn('08.10.2026 14:32:59', details)
+                self.assertIn('08.10.2026 15:33:01', details)
+                self.assertIn('14:32 wird 14:30, 14:33 wird 14:35', main)
+
+    def test_missing_rounded_timestamps_never_look_like_calculated_raw_stamps(self):
+        data = report()
+        data['schichten'] = [dict(beginn='08.10.2026 14:32', ende='08.10.2026 15:33',
+            berechneter_beginn=None, berechnetes_ende=None, arbeitszeit='1:01 Stunden',
+            pause='0:00 Stunden', berechnete_arbeitszeit=None, pausenabzug=None,
+            offen=False, pruefen=False, berechnung_pruefen=True)]
+        for admin in (False, True):
+            with self.subTest(admin=admin):
+                html = render('assistent_arbeitszeit.html', admin=admin, report=data,
+                    request_id='synthetic-nonce', month='2026-10', employees=[])
+                parts = TextParts(html)
+                main, details = ' '.join(parts.main), ' '.join(parts.details)
+                self.assertIn('Berechnung ausstehend', main)
+                self.assertNotIn('08.10.2026 14:32', main)
+                self.assertNotIn('08.10.2026 15:33', main)
+                self.assertIn('08.10.2026 14:32', details)
+                self.assertIn('08.10.2026 15:33', details)
+
+    def test_dst_offsets_distinguish_equal_rounded_clock_labels(self):
+        data = report()
+        data['schichten'] = [dict(beginn='25.10.2026 02:30', ende='25.10.2026 02:30',
+            berechneter_beginn='25.10.2026 02:30', berechnetes_ende='25.10.2026 02:30',
+            zeitumstellung=True, berechneter_beginn_zeitzone='UTC+02:00', berechnetes_ende_zeitzone='UTC+01:00',
+            original_beginn='25.10.2026 02:30:21', original_ende='25.10.2026 02:30:45',
+            original_beginn_zeitzone='UTC+02:00', original_ende_zeitzone='UTC+01:00',
+            arbeitszeit='1:00 Stunden', pause='0:00 Stunden', berechnete_arbeitszeit='0:15 Stunden',
+            pausenabzug='0:45 Stunden', offen=False, pruefen=False, berechnung_pruefen=False)]
+        for admin in (False, True):
+            with self.subTest(admin=admin):
+                html = render('assistent_arbeitszeit.html', admin=admin, report=data,
+                    request_id='synthetic-nonce', month='2026-10', employees=[])
+                parts = TextParts(html)
+                main, details = ' '.join(parts.main), ' '.join(parts.details)
+                self.assertIn('25.10.2026 02:30:21', details)
+                self.assertIn('25.10.2026 02:30:45', details)
+                self.assertIn('UTC+02:00', details)
+                self.assertIn('UTC+01:00', details)
+                self.assertIn('UTC+02:00', main)
+                self.assertIn('UTC+01:00', main)
+                self.assertIn('0:15 Stunden', main)
 
     def test_closed_shift_with_incomplete_day_is_not_a_finished_calculated_value(self):
         data = report('arbeitet')

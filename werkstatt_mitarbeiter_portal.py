@@ -60,7 +60,8 @@ WORK_PLAN_COLUMNS = {
 _WEEKDAYS = ('Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag')
 _PLAN_NOTE = ('Geplante Sollzeiten, keine erfassten Stempel. Der Arbeitsplan bucht keine '
               'Arbeitszeit. Die separate berechnete Zeitauswertung berücksichtigt mindestens '
-              '45 Minuten Pause je Arbeitstag, ohne die gemessenen Zeiten zu ändern.')
+              '45 Minuten Pause je Arbeitstag und rundet Zeitgrenzen auf die nächstgelegenen '
+              '5 Minuten, ohne die gemessenen Zeiten zu ändern.')
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
 DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 _DOCX_MAIN_TYPE = DOCX_MIME + '.main+xml'
@@ -525,7 +526,7 @@ class EmployeePortal:
                 'monat_stunden': report['abgeschlossene_arbeitszeit'], 'heute_stunden': None,
                 'berechnete_monat_stunden': report.get('berechnete_abgeschlossene_arbeitszeit'),
                 'pausenabzug': report.get('pausenabzug'), 'berechnung_pruefen': report.get('berechnung_pruefen', False),
-                'nachricht': 'Die berechnete Zeit berücksichtigt mindestens 45 Minuten Pause je Arbeitstag. Bereits gestempelte Pausen zählen mit; Rohstempel und gemessene Zeiten bleiben erhalten. Keine Rundung.'}
+                'nachricht': 'Die berechnete Zeit rundet Beginn und Ende nach voller Minute auf die nächstgelegenen 5 Minuten und berücksichtigt mindestens 45 Minuten Pause je Arbeitstag. Gerundete Altpausen zählen mit; Rohstempel mit Sekunden und gemessene Zeiten bleiben erhalten.'}
         except ValueError as exc:
             result['arbeitszeit'] = {'status_label': 'Zeitstatus prüfen', 'monat_stunden': None,
                                     'heute_stunden': None, 'berechnete_monat_stunden': None,

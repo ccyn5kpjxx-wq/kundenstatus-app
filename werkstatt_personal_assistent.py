@@ -26,6 +26,7 @@ RULES = (
     'Bei Urlaubswunsch von/bis eindeutig klären, mit urlaub_beantragen_vorschlagen vorbereiten. Beantragt ist noch nicht genehmigt. '
     'Bei ausdrücklichem Kommen/Arbeitsbeginn oder Gehen/Feierabend arbeitszeit_vorschlagen; nur aktuelle Serverzeit nach separater Bestätigung. '
     'Keine Pause oder Weiter-Stempel vorbereiten. Die separate Berechnung berücksichtigt mindestens 45 Minuten Pause je Arbeitstag; Rohstempel bleiben unverändert. '
+    'Nur berechnete Zeitgrenzen auf die nächsten 5 Minuten runden: sichtbare volle Minute mit Rest0–2 abwärts, Rest3–4 aufwärts; Originalsekunden erhalten. Rohzeiten nicht als gerundete Zeiten ausgeben. '
     'Bei Guten Morgen zuerst Tagesübersicht; ein Gruß allein darf nicht einstempeln. Bei Ich bin jetzt hier nachfragen, ob Arbeitsbeginn erfasst werden soll. '
     'Keine Aussagen zu Konten oder Arbeitszeiten anderer Mitarbeiter. Ein Adminzugang ist keinem persönlichen Urlaubskonto zugeordnet. '
 )

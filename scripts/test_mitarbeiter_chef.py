@@ -136,6 +136,21 @@ class ChefTests(unittest.TestCase):
         self.assertNotIn('online', str(result).lower())
         self.assertNotIn('private-', str(result))
 
+    def test_team_uses_rounded_clock_detail_without_changing_original_event(self):
+        self.now = datetime(2026, 9, 29, 12, 32, 59, tzinfo=timezone.utc)
+        who = dict(mitarbeiter_id=1, actor='mitarbeiter:1', lesen=1)
+        self.p.assistant_time.stamp(who, 'kommen', 'synthetic-rounded-team', 0)
+        with closing(self.p.get_db()) as db:
+            before = [tuple(row) for row in db.execute('SELECT * FROM mitarbeiter_zeitstempel')]
+        row = next(person for person in self.read()['team']['rows'] if person['id'] == 1)
+        self.assertIn('14:30', row['detail'])
+        self.assertNotIn('14:32', row['detail'])
+        self.assertIn('berechnet', row['detail'])
+        with closing(self.p.get_db()) as db:
+            after = [tuple(row) for row in db.execute('SELECT * FROM mitarbeiter_zeitstempel')]
+        self.assertEqual(before, after)
+        self.assertIn('12:32:59', before[0][3])
+
     def test_order_counts_cover_paging_drafts_and_uncertain_states(self):
         for index in range(30):
             self.f.order('queued-' + str(index))

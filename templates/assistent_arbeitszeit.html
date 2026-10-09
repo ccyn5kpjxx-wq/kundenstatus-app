@@ -12,16 +12,30 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=farben-2">
   <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_zeiten.css') }}?v=farben-2">
   {% endif %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='arbeitszeit_berechnung.css') }}?v=pausenabzug-1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='arbeitszeit_berechnung.css') }}?v=rundung-1">
   <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=farben-2">
   {% if not admin %}{% include '_mitarbeiter_app_head.html' %}{% endif %}
 </head>
 <body>
+{% macro rounded_stamp(shift, end=false) -%}
+  {%- if end and not shift.ende -%}Noch nicht erfasst
+  {%- else -%}
+    {{- (shift.berechnetes_ende if end else shift.berechneter_beginn)|default('Berechnung ausstehend',true) -}}
+    {%- if shift.zeitumstellung -%}
+      {% set zone = shift.berechnetes_ende_zeitzone if end else shift.berechneter_beginn_zeitzone %}
+      {% if zone %}<span class="time-zone">{{ zone }}</span>{% endif %}
+    {%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
+{% macro original_stamps(shift) %}
+<details class="time-raw-details"><summary>Originale Stempelwerte ansehen</summary><dl class="time-raw-fields"><div><dt>Originaler Beginn</dt><dd>{{ shift.original_beginn|default(shift.beginn,true) }}{% if shift.zeitumstellung and shift.original_beginn_zeitzone %}<span class="time-zone">{{ shift.original_beginn_zeitzone }}</span>{% endif %}</dd></div><div><dt>Originales Ende</dt><dd>{{ shift.original_ende|default(shift.ende,true) or 'Noch nicht erfasst' }}{% if shift.zeitumstellung and shift.original_ende_zeitzone %}<span class="time-zone">{{ shift.original_ende_zeitzone }}</span>{% endif %}</dd></div><div><dt>Erfasste Arbeitszeit</dt><dd>{{ shift.arbeitszeit }}</dd></div><div><dt>Erfasste Pause</dt><dd>{{ shift.pause }}</dd></div></dl></details>
+{% endmacro %}
 {% if admin %}
-{% macro clock_status(employee) %}
+{% macro clock_status(employee, show_original=false) %}
   {% if employee and employee.zeitstatus %}
   <span class="employee-clock-status state-{{ employee.zeitstatus.key }}"><span class="status-dot" aria-hidden="true"></span>{{ employee.zeitstatus.label }}</span>
-  {% if employee.zeitstatus.detail %}<span class="employee-clock-detail">{{ employee.zeitstatus.detail }}</span>{% endif %}
+  {% if employee.zeitstatus.detail_berechnet %}<span class="employee-clock-detail">{{ employee.zeitstatus.detail_berechnet }}</span>{% elif employee.zeitstatus.detail %}<span class="employee-clock-detail">Originalstempel: {{ employee.zeitstatus.detail }}</span>{% endif %}
+  {% if show_original and employee.zeitstatus.detail_original %}<details class="time-status-original"><summary>Originalstempel ansehen</summary><p>{{ employee.zeitstatus.detail_original }}</p></details>{% endif %}
   {% endif %}
 {% endmacro %}
 <a class="skip-link" href="#arbeitszeiten">Zur Arbeitszeitübersicht</a>
@@ -53,14 +67,14 @@
     {% set open_shifts = report.schichten|selectattr('offen')|list %}
     {% set review_shifts = report.schichten|selectattr('pruefen')|list %}
     {% set current_employee = employees|selectattr('id','equalto',report.mitarbeiter.id)|first %}
-    <div class="report-heading"><div><span class="eyebrow">MONATSÜBERSICHT · {{ report.monat }}</span><h2>{{ report.mitarbeiter.name }}</h2><div class="report-clock-status">{{ clock_status(current_employee) }}</div></div><a class="text-link" href="{{ url_for('arbeitszeit_admin.index', monat=month) }}">Alle Mitarbeiter</a></div>
+    <div class="report-heading"><div><span class="eyebrow">MONATSÜBERSICHT · {{ report.monat }}</span><h2>{{ report.mitarbeiter.name }}</h2><div class="report-clock-status">{{ clock_status(current_employee, true) }}</div></div><a class="text-link" href="{{ url_for('arbeitszeit_admin.index', monat=month) }}">Alle Mitarbeiter</a></div>
     <div class="time-totals" aria-label="Berechnete Monatszeiten">
-      <section class="panel total primary-total"><span>Berechnete Arbeitszeit</span><strong>{{ report.berechnete_abgeschlossene_arbeitszeit|default('Nicht verfügbar',true) }}</strong><small>Nur vollständig abgeschlossene, unauffällige Arbeitstage</small></section>
+      <section class="panel total primary-total"><span>Berechnete Arbeitszeit</span><strong>{{ report.berechnete_abgeschlossene_arbeitszeit|default('Nicht verfügbar',true) }}</strong><small>Auf 5 Minuten gerundet · nur vollständig abgeschlossene, unauffällige Arbeitstage</small></section>
       <section class="panel total"><span>Automatischer Pausenabzug</span><strong>{{ report.pausenabzug|default('Nicht verfügbar',true) }}</strong><small>Zusätzlicher rechnerischer Abzug · {{ completed|length }} abgeschlossene Schichten</small></section>
       <section class="panel total{% if open_shifts %} attention{% endif %}"><span>Noch offen</span><strong>{{ open_shifts|length }}</strong><small>Arbeitsende noch nicht erfasst</small></section>
       <section class="panel total{% if review_shifts %} attention{% endif %}"><span>Bitte prüfen</span><strong>{{ review_shifts|length }}</strong><small>Schichten länger als 24 Stunden</small></section>
     </div>
-    <p class="muted calculation-note">45 Minuten Pause pro Arbeitstag werden rechnerisch berücksichtigt. Früher gestempelte Pausen zählen mit; sie werden nicht doppelt abgezogen.</p>
+    <p class="muted calculation-note">Beginn und Ende werden auf den nächstgelegenen 5-Minuten-Wert gerundet: 14:32 wird 14:30, 14:33 wird 14:35. Die Originalstempel bleiben unverändert. 45 Minuten Pause pro Arbeitstag werden rechnerisch berücksichtigt. Früher gestempelte Pausen zählen mit; sie werden nicht doppelt abgezogen.</p>
     {% if report.berechnung_pruefen %}<p role="status" class="notice">Nicht alle Arbeitstage sind vollständig berechnet. Offene oder auffällige Tage bleiben außerhalb der berechneten Monatszeit.</p>{% endif %}
     <details class="time-raw-details"><summary>Originale Monatswerte ansehen</summary><p>Abgeschlossene Arbeitszeit laut Stempeln: <strong>{{ report.abgeschlossene_arbeitszeit }}</strong></p></details>
     {% if report.arbeitsplan %}
@@ -75,9 +89,9 @@
       <div class="section-heading"><h3 id="shifts-heading">Erfasste Schichten</h3><span>{{ report.schichten|length }} Einträge</span></div>
       {% for shift in report.schichten %}
       <article class="shift{% if shift.pruefen or (shift.berechnung_pruefen and not shift.offen) %} needs-review{% elif shift.offen %} is-open{% endif %}">
-        <div class="shift-top"><strong>{{ shift.beginn }}</strong><span class="shift-badge">{{ 'Bitte prüfen' if shift.pruefen else ('Noch offen' if shift.offen else ('Tagesberechnung ausstehend' if shift.berechnung_pruefen else 'Abgeschlossen')) }}</span></div>
-        <dl class="shift-fields"><div><dt>Arbeitsende</dt><dd>{{ shift.ende or 'Noch nicht erfasst' }}</dd></div><div><dt>Berechnete Arbeitszeit</dt><dd>{{ shift.berechnete_arbeitszeit if shift.berechnete_arbeitszeit is defined and shift.berechnete_arbeitszeit is not none else ('Noch offen' if shift.offen else 'Ausstehend') }}</dd></div><div><dt>Automatischer Pausenabzug</dt><dd>{{ shift.pausenabzug if shift.pausenabzug is defined and shift.pausenabzug is not none else 'Ausstehend' }}</dd></div></dl>
-        <details class="time-raw-details"><summary>Originale Stempelwerte ansehen</summary><dl class="time-raw-fields"><div><dt>Erfasste Arbeitszeit</dt><dd>{{ shift.arbeitszeit }}</dd></div><div><dt>Erfasste Pause</dt><dd>{{ shift.pause }}</dd></div></dl></details>
+        <div class="shift-top"><strong><span class="time-rounded-label">Beginn · gerundet</span>{{ rounded_stamp(shift) }}</strong><span class="shift-badge">{{ 'Bitte prüfen' if shift.pruefen else ('Noch offen' if shift.offen else ('Tagesberechnung ausstehend' if shift.berechnung_pruefen else 'Abgeschlossen')) }}</span></div>
+        <dl class="shift-fields"><div><dt>Ende · gerundet</dt><dd>{{ rounded_stamp(shift, true) }}</dd></div><div><dt>Berechnete Arbeitszeit</dt><dd>{{ shift.berechnete_arbeitszeit if shift.berechnete_arbeitszeit is defined and shift.berechnete_arbeitszeit is not none else ('Noch offen' if shift.offen else 'Ausstehend') }}</dd></div><div><dt>Automatischer Pausenabzug</dt><dd>{{ shift.pausenabzug if shift.pausenabzug is defined and shift.pausenabzug is not none else 'Ausstehend' }}</dd></div></dl>
+        {{ original_stamps(shift) }}
         {% if shift.pruefen %}<p role="status" class="notice">Länger als 24 Stunden: Bitte fehlende oder falsche Stempel mit dem Mitarbeiter klären.</p>{% elif shift.offen %}<p class="muted">Zwischenstand, nicht als abgeschlossene Arbeitszeit gezählt.</p>{% elif shift.berechnung_pruefen %}<p role="status" class="notice">Die Tagesberechnung ist noch offen oder zu prüfen. Diese Schicht ist nicht in der berechneten Monatszeit enthalten.</p>{% endif %}
       </article>
       {% else %}<div class="empty-state"><strong>Noch keine Zeitstempel in diesem Monat</strong><p>Sobald der Mitarbeiter stempelt, erscheinen seine erfassten Zeiten hier.</p></div>{% endfor %}
@@ -104,14 +118,14 @@
   {% set status_label = {'arbeitet':'Eingestempelt','pause':'In Pause','abwesend':'Ausgestempelt'}.get(state,'Zeitstatus prüfen') %}
   <div class="employee-summary time-summary time-summary-calculated" aria-label="Dein Zeitstatus und berechneter Monatsstand">
     <section class="access-card summary-card"><span class="eyebrow">AKTUELL</span><strong class="time-current-status"><span class="time-status-dot state-{{ state }}" aria-hidden="true"></span>{{ status_label }}</strong><span>Dein persönlicher Zeitstatus</span></section>
-    <section class="access-card summary-card"><span class="eyebrow">BERECHNETE ARBEITSZEIT · <span class="time-label-month">{{ report.monat }}</span></span><strong>{{ report.berechnete_abgeschlossene_arbeitszeit|default('Nicht verfügbar',true) }}</strong><span>Nur vollständig abgeschlossene, unauffällige Arbeitstage.</span></section>
+    <section class="access-card summary-card"><span class="eyebrow">BERECHNETE ARBEITSZEIT · <span class="time-label-month">{{ report.monat }}</span></span><strong>{{ report.berechnete_abgeschlossene_arbeitszeit|default('Nicht verfügbar',true) }}</strong><span>Auf 5 Minuten gerundet · nur vollständig abgeschlossene, unauffällige Arbeitstage.</span></section>
     <section class="access-card summary-card"><span class="eyebrow">AUTOMATISCHER PAUSENABZUG</span><strong>{{ report.pausenabzug|default('Nicht verfügbar',true) }}</strong><span>Zusätzlicher rechnerischer Abzug im Monat.</span></section>
   </div>
   {% if report.berechnung_pruefen %}<p role="status" class="setup-status">Nicht alle Arbeitstage sind vollständig berechnet. Offene oder auffällige Tage bleiben außerhalb der berechneten Monatszeit.</p>{% endif %}
   <section class="access-card time-clock" aria-labelledby="clock-heading">
     <span class="eyebrow">JETZT ERFASSEN</span><h2 id="clock-heading">Einfach stempeln</h2>
     <p class="muted small">Ein Tipp bestätigt den Stempel mit der aktuellen Serverzeit. Es sind nur die gerade passenden Tasten verfügbar.</p>
-    <p class="muted small calculation-note">Du stempelst nur Kommen und Gehen. 45 Minuten Pause pro Arbeitstag werden rechnerisch berücksichtigt. Früher gestempelte Pausen zählen mit; sie werden nicht doppelt abgezogen.</p>
+    <p class="muted small calculation-note">Du stempelst nur Kommen und Gehen. Beginn und Ende werden auf den nächstgelegenen 5-Minuten-Wert gerundet: 14:32 wird 14:30, 14:33 wird 14:35. Die Originalstempel bleiben unverändert. 45 Minuten Pause pro Arbeitstag werden rechnerisch berücksichtigt. Früher gestempelte Pausen zählen mit; sie werden nicht doppelt abgezogen.</p>
     <div class="employee-clock-buttons time-clock-buttons">
     {% set allowed = {'abwesend':['kommen'],'arbeitet':['gehen'],'pause':['gehen']}.get(state,[]) %}
     {% for action,label,symbol in [('kommen','Start · Kommen','↗'),('gehen','Stopp · Gehen','↘')] %}
@@ -128,10 +142,10 @@
     <details class="time-raw-details"><summary>Originale Monatswerte ansehen</summary><p>Abgeschlossene Arbeitszeit laut Stempeln: <strong>{{ report.abgeschlossene_arbeitszeit }}</strong></p></details>
     {% for shift in report.schichten %}
     <article class="time-shift{% if shift.pruefen or (shift.berechnung_pruefen and not shift.offen) %} needs-review{% elif shift.offen %} is-open{% endif %}">
-      <div class="time-shift-heading"><strong>{{ shift.beginn }}</strong><span class="time-shift-badge">{{ 'Bitte prüfen' if shift.pruefen else ('Noch offen' if shift.offen else ('Tagesberechnung ausstehend' if shift.berechnung_pruefen else 'Abgeschlossen')) }}</span></div>
-      <p class="time-shift-end">{% if shift.ende %}Bis {{ shift.ende }}{% else %}Arbeitsende noch nicht erfasst{% endif %}</p>
+      <div class="time-shift-heading"><strong><span class="time-rounded-label">Beginn · gerundet</span>{{ rounded_stamp(shift) }}</strong><span class="time-shift-badge">{{ 'Bitte prüfen' if shift.pruefen else ('Noch offen' if shift.offen else ('Tagesberechnung ausstehend' if shift.berechnung_pruefen else 'Abgeschlossen')) }}</span></div>
+      <p class="time-shift-end">Ende · gerundet: {{ rounded_stamp(shift, true) }}</p>
       <dl class="time-shift-totals"><div><dt>Berechnete Arbeitszeit</dt><dd>{{ shift.berechnete_arbeitszeit if shift.berechnete_arbeitszeit is defined and shift.berechnete_arbeitszeit is not none else ('Noch offen' if shift.offen else 'Ausstehend') }}</dd></div><div><dt>Automatischer Pausenabzug</dt><dd>{{ shift.pausenabzug if shift.pausenabzug is defined and shift.pausenabzug is not none else 'Ausstehend' }}</dd></div></dl>
-      <details class="time-raw-details"><summary>Originale Stempelwerte ansehen</summary><dl class="time-raw-fields"><div><dt>Erfasste Arbeitszeit</dt><dd>{{ shift.arbeitszeit }}</dd></div><div><dt>Erfasste Pause</dt><dd>{{ shift.pause }}</dd></div></dl></details>
+      {{ original_stamps(shift) }}
       {% if shift.pruefen %}<p role="status" class="setup-status is-error">Länger als 24 Stunden: Bitte fehlende oder falsche Stempel mit der Werkstattleitung klären.</p>{% elif shift.offen %}<p class="muted small">Zwischenstand. Diese Schicht zählt noch nicht zur abgeschlossenen Arbeitszeit.</p>{% elif shift.berechnung_pruefen %}<p role="status" class="setup-status">Die Tagesberechnung ist noch offen oder zu prüfen. Diese Schicht ist nicht in der berechneten Monatszeit enthalten.</p>{% endif %}
     </article>
     {% else %}<p class="empty-state">Für diesen Monat sind noch keine Zeitstempel erfasst.</p>{% endfor %}

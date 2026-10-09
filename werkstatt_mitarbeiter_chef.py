@@ -44,7 +44,7 @@ def _team(portal):
         key = key if key in counts else 'pruefen'
         counts[key] += 1
         rows.append(dict(id=employee['id'], name=employee['name'], key=key,
-                         label=state['label'], detail=state['detail']))
+                         label=state['label'], detail=state.get('detail_berechnet') or state['detail']))
     return dict(rows=rows, counts=counts, error='')
 
 

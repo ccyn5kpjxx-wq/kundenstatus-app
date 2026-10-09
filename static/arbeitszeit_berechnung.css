@@ -1,6 +1,11 @@
 /* Calculation and original clock values remain visibly separate. */
 .time-summary-calculated{grid-template-columns:repeat(3,minmax(0,1fr))}
 .time-label-month{white-space:nowrap}
+.time-rounded-label{display:block;color:var(--muted);font-size:11px;font-weight:500;margin-bottom:5px}
+.time-status-original{font-size:11px;color:var(--muted)}
+.time-status-original>summary{cursor:pointer;min-height:36px;align-content:center}
+.time-status-original>p{margin:4px 0 8px}
+.time-zone{display:block;color:var(--muted);font-size:11px;font-weight:500;margin-top:4px}
 .time-raw-details{padding:12px 0;color:var(--muted);border-top:1px solid var(--line);font-size:12px}
 .time-raw-details>summary{cursor:pointer;min-height:44px;align-content:center;font-weight:650}
 .time-raw-details>p{margin:12px 0 4px;font-size:12px}
