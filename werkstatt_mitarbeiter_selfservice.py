@@ -442,12 +442,15 @@ def register_selfservice(portal, bp, protected):
             return redirect(url_for('assistent.vacation_admin'))
         try:
             summary = service.summary(who, request.args.get('jahr', _today().year))
-        except (ValueError, PermissionError) as exc:
+            school = getattr(portal, 'employee_school', None)
+            school_view = school.personal(who, summary['jahr']) if school else {'enabled': False, 'eintraege': []}
+        except PermissionError as exc:
+            return str(exc), 403
+        except ValueError as exc:
             return str(exc), 400
         employee_portal = getattr(portal, 'employee_portal', None)
-        school = getattr(portal, 'employee_school', None)
         return render_template('assistent_urlaub.html', urlaub=summary, csrf=token(), request_id=secrets.token_hex(16), today=_today().isoformat(),
-                               schule=school.personal(who, summary['jahr']) if school else {'enabled': False, 'eintraege': []},
+                               schule=school_view,
                                betriebsurlaub=employee_portal.company_holidays(summary['jahr']) if employee_portal else [])
 
     @bp.get('/urlaub/stand')

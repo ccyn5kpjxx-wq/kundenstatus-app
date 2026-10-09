@@ -10,14 +10,15 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
-from flask import Flask, abort, session
+from flask import Blueprint, Flask, abort, session
 from werkzeug.datastructures import MultiDict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from werkstatt_mitarbeiter_schule import register_school, TABLES
 from werkstatt_mitarbeiter_portal import EmployeePortal, ensure_employee_private_state_for_import
-from werkstatt_mitarbeiter_selfservice import EmployeeSelfService
+from werkstatt_mitarbeiter_selfservice import EmployeeSelfService, register_selfservice
 
 
 class Portal:
@@ -227,6 +228,53 @@ class SchoolTests(unittest.TestCase):
             state.clear(); state.update(admin=True, csrf_token='synthetic-csrf')
         self.assertEqual(self.create().status_code, 403)
         self.assertEqual(self.rows(TABLES[1]), [])
+
+    def test_vacation_page_blocks_access_revoked_after_summary(self):
+        bp = Blueprint('school_leave_regression', __name__, url_prefix='/school-leave-regression')
+        def protected(view):
+            @wraps(view)
+            def guarded(*args, **kwargs):
+                with closing(self.p.get_db()) as db:
+                    who = self.p.employee_portal.identity(db)
+                if not who:
+                    abort(403)
+                return view(who, *args, **kwargs)
+            return guarded
+        leave = register_selfservice(self.p, bp, protected)
+        self.p.app.register_blueprint(bp)
+        self.assertEqual(self.create(notiz='Private school plan').status_code, 303)
+        before = {table: self.rows(table) for table in (*TABLES, 'mitarbeiter_urlaub', 'mitarbeiter_zeitstempel')}
+        with patch.object(self.p.employee_portal, 'company_holidays', return_value=[]), \
+                patch('werkstatt_mitarbeiter_selfservice.render_template', return_value='Synthetic vacation page') as render:
+            response = self.client.get('/school-leave-regression/urlaub?jahr=2026')
+        self.assertEqual(response.status_code, 200)
+        render.assert_called_once()
+        self.assertEqual(render.call_args.args[0], 'assistent_urlaub.html')
+        self.assertEqual(render.call_args.kwargs['schule']['eintraege'][0]['notiz'], 'Private school plan')
+        original_summary = leave.summary
+        for sql in ('UPDATE assistent_rechte SET lesen=0 WHERE mitarbeiter_id=1',
+                    'UPDATE assistent_rechte SET version=2 WHERE mitarbeiter_id=1',
+                    'UPDATE assistent_rechte SET auth_version=2 WHERE mitarbeiter_id=1',
+                    'UPDATE mitarbeiter SET aktiv=0 WHERE id=1'):
+            self.update('UPDATE assistent_rechte SET lesen=1,version=1,auth_version=1 WHERE mitarbeiter_id=1')
+            self.update('UPDATE mitarbeiter SET aktiv=1 WHERE id=1')
+            with self.subTest(revocation=sql):
+                def read_then_revoke(who, year):
+                    result = original_summary(who, year)
+                    self.update(sql)
+                    return result
+                with patch.object(leave, 'summary', side_effect=read_then_revoke) as summary, \
+                        patch.object(self.p.school, 'personal', wraps=self.p.school.personal) as personal, \
+                        patch('werkstatt_mitarbeiter_selfservice.render_template') as render:
+                    response = self.client.get('/school-leave-regression/urlaub?jahr=2026')
+                self.assertEqual(response.status_code, 403)
+                summary.assert_called_once()
+                personal.assert_called_once()
+                render.assert_not_called()
+                self.assertNotIn('Private school plan', response.text)
+                self.assertNotIn('Synthetic Own', response.text)
+                self.assertNotIn('Resturlaub', response.text)
+                self.assertEqual({table: self.rows(table) for table in before}, before)
 
     def test_admin_plan_has_real_admin_actor_and_own_target_binding(self):
         admin = self.p.app.test_client()

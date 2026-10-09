@@ -11,8 +11,9 @@ import re
 import sqlite3
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from flask import Flask, Blueprint, abort, session
 
@@ -300,6 +301,36 @@ class RouteTests(LeaveFixture):
         self.assertEqual(response.status_code, 200)
         self.assertIn('Synthetic Own', response.text)
         self.assertEqual(self.client.post('/werkstatt/assistent/urlaub/verwaltung/konto/1', data={}).status_code, 400)
+
+    def test_personal_page_revoked_access_returns_forbidden(self):
+        self.update('UPDATE mitarbeiter SET aktiv=0 WHERE id=1')
+        with patch('werkstatt_mitarbeiter_selfservice.render_template') as render:
+            response = self.client.get('/werkstatt/assistent/urlaub')
+        self.assertEqual(response.status_code, 403)
+        render.assert_not_called()
+        self.assertNotIn('Synthetic Own', response.text)
+
+    def test_personal_page_invalid_year_returns_bad_request(self):
+        with patch('werkstatt_mitarbeiter_selfservice.render_template') as render:
+            response = self.client.get('/werkstatt/assistent/urlaub?jahr=not-a-year')
+        self.assertEqual(response.status_code, 400)
+        render.assert_not_called()
+
+    def test_school_read_failures_never_render_previously_read_leave(self):
+        for error, status in ((PermissionError('synthetic access revoked'), 403),
+                              (ValueError('synthetic invalid school year'), 400)):
+            with self.subTest(error=type(error).__name__):
+                school = SimpleNamespace(personal=Mock(side_effect=error))
+                self.p.employee_school = school
+                with patch.object(self.s, 'summary', wraps=self.s.summary) as summary, \
+                        patch('werkstatt_mitarbeiter_selfservice.render_template') as render:
+                    response = self.client.get('/werkstatt/assistent/urlaub?jahr=2026')
+                self.assertEqual(response.status_code, status)
+                summary.assert_called_once_with(PERSON, '2026')
+                school.personal.assert_called_once_with(PERSON, 2026)
+                render.assert_not_called()
+                self.assertNotIn('Synthetic Own', response.text)
+                self.assertNotIn('Resturlaub', response.text)
 
 
 if __name__ == '__main__':
