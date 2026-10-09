@@ -9,7 +9,7 @@
 {% include '_mitarbeiter_app_card.html' %}
 {% for category,message in get_flashed_messages(with_categories=true) %}<p role="status" class="setup-status">{{ message }}</p>{% endfor %}
 <div class="employee-summary">
-<a class="access-card summary-card" href="/werkstatt/assistent/arbeitszeit"><span class="eyebrow">ARBEITSZEIT</span><strong>{{ arbeitszeit.status_label if arbeitszeit else 'Zeiterfassung öffnen' }}</strong><span>{% if arbeitszeit and arbeitszeit.berechnete_monat_stunden %}{{ arbeitszeit.berechnete_monat_stunden }} berechnet im laufenden Monat · auf 5 Minuten gerundet{% else %}Kommen und Gehen{% endif %}</span>{% if arbeitszeit and arbeitszeit.pausenabzug %}<span>Zusätzlicher Pausenabzug: {{ arbeitszeit.pausenabzug }}</span>{% endif %}</a>
+<a class="access-card summary-card" href="/werkstatt/assistent/arbeitszeit"><span class="eyebrow">ARBEITSZEIT</span><strong>{{ arbeitszeit.status_label if arbeitszeit else 'Zeiterfassung öffnen' }}</strong><span>{% if arbeitszeit and arbeitszeit.berechnete_monat_stunden %}{{ arbeitszeit.berechnete_monat_stunden }} berechnet im laufenden Monat · auf 5 Minuten gerundet{% else %}Kommen und Gehen{% endif %}</span>{% if arbeitszeit %}<span>45 Minuten Pause pro Arbeitstag</span>{% endif %}</a>
 <a class="access-card summary-card" href="/werkstatt/assistent/urlaub"><span class="eyebrow">URLAUB &amp; ABWESENHEITEN</span><strong>{% if urlaub and urlaub.bekannt %}{{ urlaub.resttage }} Tage übrig{% else %}Resttage noch zu prüfen{% endif %}</strong><span>Urlaub beantragen{% if schule and schule.enabled %} oder Schultermin melden{% endif %}</span></a>
 </div>
 <h2 class="area-heading">Was möchtest du machen?</h2>

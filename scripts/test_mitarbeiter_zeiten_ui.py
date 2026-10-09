@@ -320,7 +320,7 @@ class PersonalTimeUITests(unittest.TestCase):
             heute_stunden='9:00', berechnete_monat_stunden='16:30 Stunden', pausenabzug='1:00 Stunden')
         html = render('mitarbeiter_portal.html', **data)
         self.assertIn('16:30 Stunden berechnet im laufenden Monat', html)
-        self.assertIn('Zusätzlicher Pausenabzug: 1:00 Stunden', html)
+        self.assertIn('45 Minuten Pause pro Arbeitstag', html)
         self.assertNotIn('17:30 Stunden', html)
         self.assertNotIn('9:00 Stunden heute', html)
         self.assertNotIn('Start, Pause und Feierabend stempeln', html)
