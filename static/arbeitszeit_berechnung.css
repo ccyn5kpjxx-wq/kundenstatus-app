@@ -1,0 +1,12 @@
+/* Calculation and original clock values remain visibly separate. */
+.time-summary-calculated{grid-template-columns:repeat(3,minmax(0,1fr))}
+.time-label-month{white-space:nowrap}
+.time-raw-details{padding:12px 0;color:var(--muted);border-top:1px solid var(--line);font-size:12px}
+.time-raw-details>summary{cursor:pointer;min-height:44px;align-content:center;font-weight:650}
+.time-raw-details>p{margin:12px 0 4px;font-size:12px}
+.time-raw-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:12px 0 8px}
+.time-raw-fields dt{font-size:11px;margin-bottom:6px}
+.time-raw-fields dd{margin:0;font-size:13px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.calculation-note{line-height:1.65}
+@media(max-width:700px){.time-summary-calculated{grid-template-columns:repeat(2,minmax(0,1fr))}.time-summary-calculated>.summary-card:first-child{grid-column:1/-1}.time-shift-badge{max-width:50%;white-space:normal}.time-shift-heading{flex-wrap:wrap}}
+@media(max-width:360px){.time-summary-calculated{grid-template-columns:1fr}.time-shift-badge{max-width:100%}}

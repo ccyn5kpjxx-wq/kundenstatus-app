@@ -54,6 +54,25 @@ class Forms(HTMLParser):
             self.active = None
 
 
+class TextParts(HTMLParser):
+    """Distinguish initially visible figures from deliberately opened originals."""
+    def __init__(self, html):
+        super().__init__()
+        self.depth, self.main, self.details = 0, [], []
+        self.feed(html)
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'details':
+            self.depth += 1
+
+    def handle_endtag(self, tag):
+        if tag == 'details':
+            self.depth -= 1
+
+    def handle_data(self, text):
+        (self.details if self.depth else self.main).append(text)
+
+
 def plan(known=True):
     return dict(bekannt=known, tage=[0, 1, 2, 3, 4] if known else [],
                 tage_label='Montag–Freitag' if known else '',
@@ -67,6 +86,8 @@ def report(state='abwesend', known=False):
     return dict(mitarbeiter=dict(id=101, name='Synthetic Own'), monat='2026-10',
                 status=dict(zustand=state, revision=7), schichten=[],
                 abgeschlossene_arbeitszeit='7:35 Stunden', hinweis='Erfasste Zeiten, keine Lohnabrechnung.',
+                berechnete_abgeschlossene_arbeitszeit='6:50 Stunden', pausenabzug='0:45 Stunden',
+                berechnung_pruefen=False,
                 arbeitsplan=plan(known))
 
 
@@ -105,14 +126,14 @@ class PersonalTimeUITests(unittest.TestCase):
         self.assertNotIn('/werkstatt/mein-konto/zeit', html)
 
     def test_personal_status_transitions_keep_all_bound_fields(self):
-        for state, allowed in [('abwesend', {'kommen'}), ('arbeitet', {'pause', 'gehen'}),
-                               ('pause', {'weiter', 'gehen'}), ('unknown', set())]:
+        for state, allowed in [('abwesend', {'kommen'}), ('arbeitet', {'gehen'}),
+                               ('pause', {'gehen'}), ('unknown', set())]:
             with self.subTest(state=state):
                 html = render('assistent_arbeitszeit.html', admin=False, report=report(state),
                               request_id='synthetic-personal-nonce', employees=[dict(id=2, name='Other Secret')])
                 parsed = Forms(html)
                 forms = [form for form in parsed.forms if form.get('method') == 'post']
-                self.assertEqual(len(forms), 4)
+                self.assertEqual(len(forms), 2)
                 for form in forms:
                     self.assertEqual(form['action'], '/werkstatt/mein-konto/zeit')
                     fields = {item['name']: item.get('value') for item in form['inputs']}
@@ -120,6 +141,9 @@ class PersonalTimeUITests(unittest.TestCase):
                     self.assertEqual((fields['csrf_token'], fields['revision'], fields['request_id'], fields['confirmed']),
                                      ('synthetic-csrf', '7', 'synthetic-personal-nonce', 'ja'))
                     self.assertEqual('disabled' not in form['buttons'][0], fields['aktion'] in allowed)
+                self.assertEqual({next(item['value'] for item in form['inputs'] if item['name'] == 'aktion') for form in forms}, {'kommen','gehen'})
+                self.assertNotIn('Pause beginnen', html)
+                self.assertNotIn('Pause beenden', html)
                 self.assertNotIn('Other Secret', html)
                 self.assertNotIn('name="mitarbeiter_id"', html)
                 self.assertFalse(any(link.startswith('/admin') for link in parsed.links))
@@ -140,6 +164,68 @@ class PersonalTimeUITests(unittest.TestCase):
         self.assertNotIn('/static/mitarbeiter_zeiten.css', html)
         self.assertIn('/admin/cockpit', parsed.links)
         self.assertIn('/admin/arbeitszeit?mitarbeiter_id=2&monat=2026-10', parsed.links)
+
+    def test_calculation_is_primary_and_original_seconds_are_not_rewritten(self):
+        data = report()
+        data.update(abgeschlossene_arbeitszeit='7:35:07 Stunden',
+                    berechnete_abgeschlossene_arbeitszeit='6:50:07 Stunden')
+        data['schichten'] = [dict(beginn='08.10.2026 08:00', ende='08.10.2026 15:35',
+            arbeitszeit='7:35:07 Stunden', pause='0:00 Stunden',
+            berechnete_arbeitszeit='6:50:07 Stunden', pausenabzug='0:45 Stunden',
+            offen=False, pruefen=False, berechnung_pruefen=False)]
+        for admin in (False, True):
+            with self.subTest(admin=admin):
+                html = render('assistent_arbeitszeit.html', admin=admin, report=data,
+                    request_id='synthetic-nonce', month='2026-10',
+                    employees=[dict(id=101,name='Synthetic Own',aktiv=1)])
+                parts = TextParts(html)
+                main, details = ' '.join(parts.main), ' '.join(parts.details)
+                self.assertIn('6:50:07 Stunden', main)
+                self.assertIn('0:45 Stunden', main)
+                self.assertNotIn('7:35:07 Stunden', main)
+                self.assertIn('7:35:07 Stunden', details)
+                self.assertIn('Erfasste Pause', details)
+                self.assertNotIn('Erfasste Pause', main)
+                self.assertIn('Früher gestempelte Pausen zählen mit', main)
+
+    def test_closed_shift_with_incomplete_day_is_not_a_finished_calculated_value(self):
+        data = report('arbeitet')
+        data.update(berechnung_pruefen=True, berechnete_abgeschlossene_arbeitszeit='0:00 Stunden',
+                    pausenabzug='0:00 Stunden')
+        data['schichten'] = [dict(beginn='08.10.2026 08:00', ende='08.10.2026 12:00',
+            arbeitszeit='4:00 Stunden', pause='0:00 Stunden', berechnete_arbeitszeit=None,
+            pausenabzug=None, offen=False, pruefen=False, berechnung_pruefen=True)]
+        for admin in (False, True):
+            with self.subTest(admin=admin):
+                html = render('assistent_arbeitszeit.html', admin=admin, report=data,
+                    request_id='synthetic-nonce', month='2026-10',
+                    employees=[dict(id=101,name='Synthetic Own',aktiv=1)])
+                main = ' '.join(TextParts(html).main)
+                self.assertIn('Tagesberechnung ausstehend', main)
+                self.assertIn('Diese Schicht ist nicht in der berechneten Monatszeit enthalten', main)
+                self.assertIn('Ausstehend', main)
+                self.assertNotIn('4:00 Stunden', main)
+
+    def test_missing_calculation_never_falls_back_to_raw_sum(self):
+        data = report()
+        del data['berechnete_abgeschlossene_arbeitszeit']
+        del data['pausenabzug']
+        html = render('assistent_arbeitszeit.html', admin=False, report=data, request_id='synthetic-nonce')
+        parts = TextParts(html)
+        self.assertIn('Nicht verfügbar', ' '.join(parts.main))
+        self.assertNotIn('7:35 Stunden', ' '.join(parts.main))
+        self.assertIn('7:35 Stunden', ' '.join(parts.details))
+
+    def test_profile_card_uses_calculated_month_without_a_raw_today_claim(self):
+        data = personal_context()
+        data['arbeitszeit'] = dict(status_label='Bei der Arbeit', monat_stunden='17:30 Stunden',
+            heute_stunden='9:00', berechnete_monat_stunden='16:30 Stunden', pausenabzug='1:00 Stunden')
+        html = render('mitarbeiter_portal.html', **data)
+        self.assertIn('16:30 Stunden berechnet im laufenden Monat', html)
+        self.assertIn('Zusätzlicher Pausenabzug: 1:00 Stunden', html)
+        self.assertNotIn('17:30 Stunden', html)
+        self.assertNotIn('9:00 Stunden heute', html)
+        self.assertNotIn('Start, Pause und Feierabend stempeln', html)
 
     def test_admin_report_needs_no_personal_status_or_stamp_and_keeps_warning_totals(self):
         data = report()

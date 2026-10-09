@@ -31,6 +31,16 @@ class TimeTests(unittest.TestCase):
         revision = self.s.state(who)['revision']
         return self.s.stamp(who, action, key or f'test-request-{revision}', revision)
 
+    def legacy_at(self, instant, action):
+        """Seed an actual historical pause event, before manual pauses ended."""
+        self.clock = datetime.fromisoformat(instant)
+        revision = self.s.state(PERSON)['revision'] + 1
+        state = 'pause' if action == 'pause' else 'arbeitet'
+        with self.s.db() as db:
+            db.execute('INSERT INTO mitarbeiter_zeitstempel VALUES(?,?,?,?,?,?)',
+                       (f'legacy-{revision}', 1, action, self.clock.isoformat(), f'legacy-request-{revision}', revision))
+            db.execute('UPDATE mitarbeiter_zeitstatus SET zustand=?,revision=? WHERE mitarbeiter_id=1', (state, revision))
+
     def team_status(self, mid=1):
         return next(employee['zeitstatus'] for employee in self.s.admin_employees() if employee['id'] == mid)
 
@@ -41,7 +51,7 @@ class TimeTests(unittest.TestCase):
             ('2026-09-29T10:00:00+00:00','pause','pause','In Pause'),
             ('2026-09-29T10:30:00+00:00','weiter','arbeitet','Angestempelt'),
             ('2026-09-29T15:00:00+00:00','gehen','beendet','Beendet')]:
-            self.at(instant, action)
+            (self.legacy_at if action in ('pause', 'weiter') else self.at)(instant, action)
             before = self.s.state(PERSON)
             self.assertEqual((self.team_status()['key'],self.team_status()['label']), (key,label))
             self.assertEqual(self.s.state(PERSON), before)
@@ -55,7 +65,7 @@ class TimeTests(unittest.TestCase):
         self.clock = datetime.fromisoformat('2026-09-30T22:30:00+00:00')
         self.assertEqual(self.team_status()['key'], 'arbeitet')
         self.assertEqual(self.team_status()['detail'], 'Seit 30.09.2026, 22:00 Uhr')
-        self.at('2026-09-30T22:45:00+00:00','pause')
+        self.legacy_at('2026-09-30T22:45:00+00:00','pause')
         self.clock = datetime.fromisoformat('2026-10-01T23:00:00+00:00')
         self.assertEqual(self.team_status()['key'], 'pause')
         self.assertEqual(self.team_status()['detail'], 'Seit 01.10.2026, 00:45 Uhr')
@@ -137,15 +147,15 @@ class TimeTests(unittest.TestCase):
         self.assertEqual(self.s.state(PERSON)['zustand'],'abwesend')
         self.assertEqual(self.s.state(PERSON)['revision'],0)
 
-    def test_pauses_only_explicit_and_open_shifts_excluded(self):
+    def test_legacy_explicit_pauses_and_open_shifts_remain_exact(self):
         self.at('2026-09-29T07:00:00+00:00','kommen')
-        self.at('2026-09-29T10:00:00+00:00','pause')
+        self.legacy_at('2026-09-29T10:00:00+00:00','pause')
         self.clock=datetime(2026,9,29,11,tzinfo=timezone.utc)
         open_report=self.s.summary(PERSON)
         self.assertEqual(open_report['abgeschlossene_arbeitszeit'],'0:00 Stunden')
         self.assertTrue(open_report['schichten'][0]['offen'])
         self.assertEqual(open_report['schichten'][0]['pause'],'1:00 Stunden')
-        self.at('2026-09-29T11:00:00+00:00','weiter')
+        self.legacy_at('2026-09-29T11:00:00+00:00','weiter')
         self.at('2026-09-29T15:00:00+00:00','gehen')
         result=self.s.summary(PERSON)
         self.assertEqual(result['abgeschlossene_arbeitszeit'],'7:00 Stunden')
@@ -165,8 +175,8 @@ class TimeTests(unittest.TestCase):
 
     def test_month_boundary_pause_and_exact_midnight(self):
         self.at('2026-09-30T20:00:00+00:00','kommen')
-        self.at('2026-09-30T21:30:00+00:00','pause')
-        self.at('2026-09-30T22:30:00+00:00','weiter')
+        self.legacy_at('2026-09-30T21:30:00+00:00','pause')
+        self.legacy_at('2026-09-30T22:30:00+00:00','weiter')
         self.at('2026-10-01T00:00:00+00:00','gehen')
         for month in ('2026-09','2026-10'):
             report=self.s.summary(PERSON,month)

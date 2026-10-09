@@ -1,4 +1,8 @@
-"""Personal, explicitly confirmed clock events; no payroll or automatic breaks."""
+"""Confirmed raw clock events and a separate daily break calculation.
+
+Raw work/break seconds remain unchanged. The derived view applies a minimum
+45-minute break once per Berlin work-start date, without rounding or payroll.
+"""
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import re
@@ -9,8 +13,9 @@ from flask import Blueprint, abort, redirect, render_template, request
 
 BERLIN = ZoneInfo('Europe/Berlin')
 LABELS = {'kommen': 'Arbeitsbeginn', 'gehen': 'Arbeitsende', 'pause': 'Pause beginnen', 'weiter': 'Pause beenden'}
-TRANSITIONS = {'abwesend': {'kommen': 'arbeitet'}, 'arbeitet': {'pause': 'pause', 'gehen': 'abwesend'},
-               'pause': {'weiter': 'arbeitet', 'gehen': 'abwesend'}}
+TRANSITIONS = {'abwesend': {'kommen': 'arbeitet'}, 'arbeitet': {'gehen': 'abwesend'},
+               'pause': {'gehen': 'abwesend'}}
+DAILY_BREAK_SECONDS = 45 * 60
 
 
 def personal_id(who):
@@ -82,6 +87,8 @@ class TimeTracking:
                 if prior['aktion'] != action:
                     raise ValueError('Diese Bestätigung gehört zu einem anderen Zeitstempel.')
                 return self._result(action, prior['zeit'], True)
+            if action in ('pause', 'weiter'):
+                raise ValueError('Pausen werden rechnerisch berücksichtigt. Nur Arbeitsbeginn oder Arbeitsende stempeln.')
             db.execute("INSERT INTO mitarbeiter_zeitstatus(mitarbeiter_id) VALUES(?) ON CONFLICT(mitarbeiter_id) DO NOTHING RETURNING mitarbeiter_id", (mid,)).fetchall()
             state = db.execute('SELECT zustand,revision FROM mitarbeiter_zeitstatus WHERE mitarbeiter_id=?', (mid,)).fetchone()
             next_state = TRANSITIONS.get(state['zustand'], {}).get(action)
@@ -113,13 +120,21 @@ class TimeTracking:
             if not employee:
                 raise ValueError('Mitarbeiter nicht gefunden.')
             previous = db.execute("SELECT zeit FROM mitarbeiter_zeitstempel WHERE mitarbeiter_id=? AND aktion='kommen' AND zeit<? ORDER BY zeit DESC LIMIT 1", (mid,start_utc.isoformat())).fetchone()
-            since = previous['zeit'] if previous else start_utc.isoformat()
+            since = start_utc.isoformat()
+            if previous:
+                # The last crossing shift may share its start day with earlier
+                # shifts. Their real pauses and daily deduction must count even
+                # when those earlier shifts lie entirely in the preceding month.
+                previous_day = datetime.fromisoformat(previous['zeit']).astimezone(BERLIN).replace(hour=0, minute=0, second=0, microsecond=0)
+                first = db.execute("SELECT zeit FROM mitarbeiter_zeitstempel WHERE mitarbeiter_id=? AND aktion='kommen' AND zeit>=? AND zeit<=? ORDER BY zeit LIMIT 1",
+                                   (mid, previous_day.astimezone(timezone.utc).isoformat(), previous['zeit'])).fetchone()
+                since = first['zeit']
             closing = db.execute("SELECT zeit FROM mitarbeiter_zeitstempel WHERE mitarbeiter_id=? AND aktion='gehen' AND zeit>=? ORDER BY zeit LIMIT 1", (mid,end_utc.isoformat())).fetchone()
             until = closing['zeit'] if closing else max(now,end_utc).isoformat()
             events = [dict(row) for row in db.execute('SELECT aktion,zeit,revision FROM mitarbeiter_zeitstempel WHERE mitarbeiter_id=? AND zeit>=? AND zeit<=? ORDER BY revision LIMIT 10001', (mid,since,until)).fetchall()]
         if len(events) > 10000:
             raise ValueError('Zu viele Zeitstempel in diesem Zeitraum. Bitte Werkstattleitung prüfen lassen.')
-        shifts, shift, paused, cursor = [], None, False, None
+        all_shifts, shift, paused, cursor, previous_event = [], None, False, None, None
         def seconds(a,b):
             return max(0, int((min(b,end_utc)-max(a,start_utc)).total_seconds()))
         def finish(when, ongoing):
@@ -127,17 +142,26 @@ class TimeTracking:
                 return
             if cursor:
                 shift['pause_sekunden' if paused else 'arbeit_sekunden'] += seconds(cursor,when)
-            if when > start_utc and shift['start'] < end_utc:
-                shift.update(ende=None if ongoing else when, offen=ongoing,
-                             pruefen=(when-shift['start']).total_seconds()>24*3600)
-                shifts.append(shift.copy())
+                shift['_segments'].append(('pause' if paused else 'arbeit', cursor, when))
+                shift['_invalid'] |= when < cursor
+            shift.update(ende=None if ongoing else when, offen=ongoing,
+                         pruefen=(when-shift['start']).total_seconds()>24*3600,
+                         _in_month=when > start_utc and shift['start'] < end_utc)
+            all_shifts.append(shift.copy())
         for event in events:
             when=datetime.fromisoformat(event['zeit']).astimezone(timezone.utc)
             action=event['aktion']
+            backwards = previous_event is not None and when < previous_event
+            previous_event = when
+            if backwards:
+                if shift:
+                    shift['_invalid'] = True
+                elif all_shifts:
+                    all_shifts[-1]['_invalid'] = True
             if action=='kommen':
                 if shift:
                     raise ValueError('Zeitstempel sind nicht lückenlos. Werkstattleitung muss prüfen.')
-                shift={'start':when,'arbeit_sekunden':0,'pause_sekunden':0};cursor=when;paused=False
+                shift={'start':when,'arbeit_sekunden':0,'pause_sekunden':0,'_segments':[],'_invalid':backwards};cursor=when;paused=False
             elif not shift:
                 raise ValueError('Arbeitsbeginn fehlt zu vorhandenen Zeitstempeln. Bitte prüfen lassen.')
             elif action=='gehen':
@@ -146,19 +170,36 @@ class TimeTracking:
                 if paused == (action=='pause'):
                     raise ValueError('Pausenfolge ist widersprüchlich. Bitte prüfen lassen.')
                 shift['pause_sekunden' if paused else 'arbeit_sekunden']+=seconds(cursor,when)
+                shift['_segments'].append(('pause' if paused else 'arbeit', cursor, when))
+                shift['_invalid'] |= when < cursor
                 paused=action=='pause';cursor=when
+            else:
+                # Preserve the old raw view, but never calculate a finalized
+                # total from an unknown historical action.
+                shift['_invalid'] = True
         if shift:
             finish(now,True)
+        days = self._calculated_days(all_shifts, start_utc, end_utc)
+        shifts = [item for item in all_shifts if item['_in_month']]
         for item in shifts:
             item['beginn']=item.pop('start').astimezone(BERLIN).strftime('%d.%m.%Y %H:%M')
             item['ende']=item['ende'].astimezone(BERLIN).strftime('%d.%m.%Y %H:%M') if item['ende'] else None
             item['arbeitszeit']=self.duration(item['arbeit_sekunden'])
             item['pause']=self.duration(item['pause_sekunden'])
+            for private in ('_segments', '_invalid', '_in_month'):
+                item.pop(private)
         valid=[item for item in shifts if not item['offen'] and not item['pruefen']]
         result = {'mitarbeiter':dict(employee),'monat':month,'schichten':shifts,
                 'abgeschlossene_arbeitszeit':self.duration(sum(item['arbeit_sekunden'] for item in valid)),
+                'abgeschlossene_arbeit_sekunden':sum(item['arbeit_sekunden'] for item in valid),
+                'berechnete_abgeschlossene_arbeitszeit':self.exact_duration(sum(day['berechnete_arbeit_sekunden'] or 0 for day in days)),
+                'berechnete_abgeschlossene_arbeit_sekunden':sum(day['berechnete_arbeit_sekunden'] or 0 for day in days),
+                'pausenabzug':self.exact_duration(sum(day['pausenabzug_sekunden'] or 0 for day in days)),
+                'pausenabzug_sekunden':sum(day['pausenabzug_sekunden'] or 0 for day in days),
+                'arbeitstage':days,
+                'berechnung_pruefen':any(day['berechnung_pruefen'] for day in days),
                 'pruefen':any(item['pruefen'] for item in shifts),
-                'hinweis':'Erfasste Zeiten, keine Lohnabrechnung. Pausen werden nur nach eigenem Stempel abgezogen. Offene oder auffällige Schichten sind nicht in der Summe abgeschlossener Zeiten.'}
+                'hinweis':'Berechnet mit mindestens 45 Minuten Pause einmal je Arbeitstag (Berliner Datum des Arbeitsbeginns). Bereits gestempelte Pausen zählen mit; längere Pausen bleiben erhalten. Der zusätzliche rechnerische Abzug verändert keine Stempel oder gemessenen Zeiten. Keine Rundung und keine Lohnabrechnung. Offene oder auffällige Arbeitstage sind nicht in der berechneten Summe abgeschlossener Zeiten.'}
         # The optional personal profile supplies a separately labelled Sollplan.
         # It never changes events, measured work/break duration or monthly sums.
         work_plan = getattr(getattr(self.p, 'employee_portal', None), 'work_plan', None)
@@ -166,10 +207,65 @@ class TimeTracking:
             result['arbeitsplan'] = work_plan(mid)
         return result
 
+    @classmethod
+    def _calculated_days(cls, shifts, month_start, month_end):
+        """Allocate the extra daily deduction before clipping to a month.
+
+        Attribution to the earliest working seconds is accounting only; it
+        does not claim when a real break happened and creates no clock events.
+        A workday containing an open/suspect shift has no finalized calculation.
+        """
+        groups = {}
+        for item in shifts:
+            day = item['start'].astimezone(BERLIN).date().isoformat()
+            item['arbeitstag'] = day
+            groups.setdefault(day, []).append(item)
+        days = []
+        for day, items in sorted(groups.items()):
+            visible = [item for item in items if item['_in_month']]
+            if not visible:
+                continue
+            incomplete = any(item['offen'] or item['pruefen'] or item['_invalid'] for item in items)
+            work = sum(max(0, int((end-start).total_seconds())) for item in items
+                       for kind, start, end in item['_segments'] if kind == 'arbeit')
+            real_pause = sum(max(0, int((end-start).total_seconds())) for item in items
+                             for kind, start, end in item['_segments'] if kind == 'pause')
+            remaining = min(work, max(0, DAILY_BREAK_SECONDS - real_pause))
+            for item in items:
+                extra = 0
+                if not incomplete:
+                    for kind, start, end in item['_segments']:
+                        if kind != 'arbeit':
+                            continue
+                        used = min(remaining, max(0, int((end-start).total_seconds())))
+                        stop = start + timedelta(seconds=used)
+                        extra += max(0, int((min(stop,month_end)-max(start,month_start)).total_seconds()))
+                        remaining -= used
+                item['berechnung_pruefen'] = incomplete
+                item['pausenabzug_sekunden'] = None if incomplete else extra
+                item['pausenabzug'] = None if incomplete else cls.exact_duration(extra)
+                item['berechnete_arbeit_sekunden'] = None if incomplete else max(0, item['arbeit_sekunden'] - extra)
+                item['berechnete_arbeitszeit'] = None if incomplete else cls.exact_duration(item['berechnete_arbeit_sekunden'])
+            computed = None if incomplete else sum(item['berechnete_arbeit_sekunden'] for item in visible)
+            extra = None if incomplete else sum(item['pausenabzug_sekunden'] for item in visible)
+            days.append(dict(datum=day, berechnung_pruefen=incomplete,
+                             berechnete_arbeit_sekunden=computed,
+                             berechnete_arbeitszeit=None if incomplete else cls.exact_duration(computed),
+                             pausenabzug_sekunden=extra,
+                             pausenabzug=None if incomplete else cls.exact_duration(extra)))
+        return days
+
     @staticmethod
     def duration(seconds):
         minutes=seconds//60
         return f'{minutes//60}:{minutes%60:02d} Stunden'
+
+    @staticmethod
+    def exact_duration(seconds):
+        hours, remainder = divmod(seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        suffix = f':{seconds:02d}' if seconds else ''
+        return f'{hours}:{minutes:02d}{suffix} Stunden'
 
     def summary(self, who, month=None):
         state=self.state(who)

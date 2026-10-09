@@ -58,8 +58,9 @@ WORK_PLAN_COLUMNS = {
     'arbeitsplan_tage_json': "TEXT NOT NULL DEFAULT '[]'",
 }
 _WEEKDAYS = ('Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag')
-_PLAN_NOTE = ('Geplante Sollzeiten, keine erfassten Stempel. Pausen werden nur nach '
-              'eigenem Stempel abgezogen; der Arbeitsplan bucht keine Arbeitszeit.')
+_PLAN_NOTE = ('Geplante Sollzeiten, keine erfassten Stempel. Der Arbeitsplan bucht keine '
+              'Arbeitszeit. Die separate berechnete Zeitauswertung berücksichtigt mindestens '
+              '45 Minuten Pause je Arbeitstag, ohne die gemessenen Zeiten zu ändern.')
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
 DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 _DOCX_MAIN_TYPE = DOCX_MIME + '.main+xml'
@@ -522,10 +523,13 @@ class EmployeePortal:
                 'status_label': {'abwesend': 'Nicht eingestempelt', 'arbeitet': 'Bei der Arbeit',
                                  'pause': 'In Pause'}.get(report['status']['zustand'], 'Zeitstatus prüfen'),
                 'monat_stunden': report['abgeschlossene_arbeitszeit'], 'heute_stunden': None,
-                'nachricht': 'Die Zeitübersicht zeigt deine erfassten Stempel und abgeschlossenen Arbeitszeiten.'}
+                'berechnete_monat_stunden': report.get('berechnete_abgeschlossene_arbeitszeit'),
+                'pausenabzug': report.get('pausenabzug'), 'berechnung_pruefen': report.get('berechnung_pruefen', False),
+                'nachricht': 'Die berechnete Zeit berücksichtigt mindestens 45 Minuten Pause je Arbeitstag. Bereits gestempelte Pausen zählen mit; Rohstempel und gemessene Zeiten bleiben erhalten. Keine Rundung.'}
         except ValueError as exc:
             result['arbeitszeit'] = {'status_label': 'Zeitstatus prüfen', 'monat_stunden': None,
-                                    'heute_stunden': None, 'nachricht': str(exc)}
+                                    'heute_stunden': None, 'berechnete_monat_stunden': None,
+                                    'pausenabzug': None, 'berechnung_pruefen': True, 'nachricht': str(exc)}
         result['betriebsurlaub'] = self.company_holidays(datetime.now(_BERLIN).year)
         return result
 

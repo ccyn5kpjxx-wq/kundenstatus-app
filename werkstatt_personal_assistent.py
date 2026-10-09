@@ -14,8 +14,8 @@ TOOLS = [
      'parameters':{'type':'object','properties':{'monat':{'type':'string','description':'YYYY-MM, leer für aktuellen Monat'}},'additionalProperties':False}},
     {'type':'function','name':'urlaub_beantragen_vorschlagen','description':'Eigenen Urlaub von/bis als Antrag vorbereiten. App liest vor und holt ausdrückliche Bestätigung; erst dann beantragt, niemals automatisch genehmigt.',
      'parameters':{'type':'object','properties':{'start_datum':{'type':'string','description':'YYYY-MM-DD'},'end_datum':{'type':'string','description':'YYYY-MM-DD'}},'required':['start_datum','end_datum'],'additionalProperties':False}},
-    {'type':'function','name':'arbeitszeit_vorschlagen','description':'Eigenen Arbeitsbeginn, Arbeitsende oder Pause mit Serverzeit nach Bestätigung erfassen. Keine rückwirkende Uhrzeit. Erst tatsächlichen Stempelwunsch klären; ein Gruß allein ist keine Arbeitsbuchung.',
-     'parameters':{'type':'object','properties':{'aktion':{'type':'string','enum':['kommen','gehen','pause','weiter']}},'required':['aktion'],'additionalProperties':False}},
+    {'type':'function','name':'arbeitszeit_vorschlagen','description':'Eigenen Arbeitsbeginn oder Arbeitsende mit Serverzeit nach Bestätigung erfassen. Pausen berücksichtigt die separate Berechnung, sie werden nicht manuell gestempelt. Keine rückwirkende Uhrzeit. Erst tatsächlichen Stempelwunsch klären; ein Gruß allein ist keine Arbeitsbuchung.',
+     'parameters':{'type':'object','properties':{'aktion':{'type':'string','enum':['kommen','gehen']}},'required':['aktion'],'additionalProperties':False}},
 ]
 for definition in TOOLS:
     definition['strict']=False
@@ -24,7 +24,8 @@ RULES = (
     'Persönliche Mitarbeiterfunktionen nur für das angemeldete eigene Profil verwenden. '
     'Bei Resturlaub mein_urlaub_lesen, bei Arbeitszeiten meine_arbeitszeit_lesen. Fehlendes Urlaubskonto offen nennen, keine Tage erfinden. '
     'Bei Urlaubswunsch von/bis eindeutig klären, mit urlaub_beantragen_vorschlagen vorbereiten. Beantragt ist noch nicht genehmigt. '
-    'Bei ausdrücklichem Kommen/Arbeitsbeginn, Gehen/Feierabend oder Pause arbeitszeit_vorschlagen; nur aktuelle Serverzeit nach separater Bestätigung. '
+    'Bei ausdrücklichem Kommen/Arbeitsbeginn oder Gehen/Feierabend arbeitszeit_vorschlagen; nur aktuelle Serverzeit nach separater Bestätigung. '
+    'Keine Pause oder Weiter-Stempel vorbereiten. Die separate Berechnung berücksichtigt mindestens 45 Minuten Pause je Arbeitstag; Rohstempel bleiben unverändert. '
     'Bei Guten Morgen zuerst Tagesübersicht; ein Gruß allein darf nicht einstempeln. Bei Ich bin jetzt hier nachfragen, ob Arbeitsbeginn erfasst werden soll. '
     'Keine Aussagen zu Konten oder Arbeitszeiten anderer Mitarbeiter. Ein Adminzugang ist keinem persönlichen Urlaubskonto zugeordnet. '
 )
