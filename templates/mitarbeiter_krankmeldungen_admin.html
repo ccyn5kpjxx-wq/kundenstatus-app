@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Krankmeldungen im Team{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_chef.css', v='krankheit-1') }}">{% endblock %}
+{% block content %}
+<div class="page-header"><span class="chef-eyebrow">WERKSTATTLEITUNG</span><h1>Krankmeldungen im Team</h1><p class="text-muted">Alle hinterlegten Zeiträume. Die persönlichen Originalunterlagen öffnen sich nur im jeweiligen Mitarbeiterprofil.</p></div>
+<nav class="chef-quick-links" aria-label="Bereiche der Werkstattleitung"><a href="/admin/mitarbeiter">← Mein Chefbereich</a><a href="/admin/cockpit">Werkstatt-Cockpit</a><a href="/admin/arbeitszeit">Arbeitszeiten</a><a href="/werkstatt/assistent/urlaub/verwaltung">Urlaub &amp; Schule</a></nav>
+<section class="page-card chef-day-panel" aria-labelledby="illness-history-heading"><div class="chef-panel-heading"><h2 id="illness-history-heading">Hinterlegte Krankmeldungen</h2></div><p class="chef-panel-note">„Beendet“ bedeutet, dass der Zeitraum vergangen ist. Urlaub und tatsächliche Zeitstempel bleiben getrennt.</p>
+{% if data.error %}<p class="chef-data-warning" role="status">{{ data.error }}</p>{% else %}<div class="chef-absence-list">{% for item in data.rows %}<a class="chef-absence-row" href="{{ item.url }}"><div><strong>{{ item.name }}</strong><span class="chef-team-state state-{{ item.status_key }}">{{ item.status_label }}</span></div><div class="chef-absence-date">{{ item.datum_label }}</div></a>{% else %}<p class="chef-empty">Noch keine Krankmeldungen hinterlegt.</p>{% endfor %}</div>{% endif %}</section>
+{% endblock %}

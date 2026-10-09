@@ -32,11 +32,12 @@ from pypdf import PdfReader
 from pypdf.generic import ArrayObject, DictionaryObject, StreamObject
 from werkzeug.utils import secure_filename
 from werkstatt_mitarbeiter_schule import TABLES as SCHOOL_TABLES, init_school_schema, register_school
+from werkstatt_mitarbeiter_krankheit import TABLES as ILLNESS_TABLES, init_illness_schema, register_illness
 
 
 TABLES = ('mitarbeiter_portal_profile', 'mitarbeiter_lohnzettel', 'mitarbeiter_betriebsurlaub',
-          'mitarbeiter_arbeitsvertraege', *SCHOOL_TABLES)
-OWNER_TABLES = ('mitarbeiter_portal_profile', 'mitarbeiter_lohnzettel', 'mitarbeiter_arbeitsvertraege', *SCHOOL_TABLES)
+          'mitarbeiter_arbeitsvertraege', *SCHOOL_TABLES, *ILLNESS_TABLES)
+OWNER_TABLES = ('mitarbeiter_portal_profile', 'mitarbeiter_lohnzettel', 'mitarbeiter_arbeitsvertraege', *SCHOOL_TABLES, *ILLNESS_TABLES)
 LEGACY_PROFILE_FIELDS = ('personalnummer', 'steuer_id', 'steuernummer', 'adresse', 'geburtsdatum', 'email', 'telefon')
 PRIVATE_PROFILE_COLUMNS = {
     'sozialversicherungsnummer': "TEXT NOT NULL DEFAULT ''",
@@ -67,7 +68,7 @@ _OOXML_RELS = 'http://schemas.openxmlformats.org/package/2006/relationships'
 _PERIOD = re.compile(r'20\d{2}-(?:0[1-9]|1[0-2])')
 _BERLIN = ZoneInfo('Europe/Berlin')
 _RESTORE_ERROR = ('Datenimport gesperrt: Die Sicherung enthält vorhandene persönliche '
-                  'Profile, Lohnzettel, Arbeitsverträge, Schulmeldungen oder Betriebsurlaubstermine nicht unverändert. '
+                  'Profile, Lohnzettel, Arbeitsverträge, Schulmeldungen, Krankmeldungen oder Betriebsurlaubstermine nicht unverändert. '
                   'Bitte eine aktuelle Sicherung verwenden.')
 
 
@@ -419,6 +420,7 @@ class EmployeePortal:
             for column, definition in {**PRIVATE_PROFILE_COLUMNS, **WORK_PLAN_COLUMNS}.items():
                 self.p.ensure_column(db, 'mitarbeiter_portal_profile', column, definition)
             init_school_schema(db)
+            init_illness_schema(db)
 
     def identity(self, db=None):
         mid, version = session.get('assistent_mid'), session.get('assistent_version')
@@ -486,9 +488,12 @@ class EmployeePortal:
         with self.db() as db:
             employee = self._employee(db, mid)
             profile = self._profile(db, mid)
-            return {'employee': employee, 'profile': profile, 'arbeitsplan': _plan_view(profile),
+            result = {'employee': employee, 'profile': profile, 'arbeitsplan': _plan_view(profile),
                     'payrolls': self._payrolls(db, mid, admin=True),
                     'contracts': self._contracts(db, mid, admin=True)}
+        illness = getattr(self.p, 'employee_illness', None)
+        result['krankmeldungen'] = illness.admin_profile(mid) if illness else {'enabled': False, 'eintraege': [], 'originale': []}
+        return result
 
     def work_plan(self, mid):
         """Read only; the caller supplies its already authorized employee ID."""
@@ -509,6 +514,8 @@ class EmployeePortal:
         result['urlaub'] = self.p.assistant_selfservice.summary(who)
         school = getattr(self.p, 'employee_school', None)
         result['schule'] = school.personal(who, datetime.now(_BERLIN).year) if school else {'enabled': False, 'eintraege': []}
+        illness = getattr(self.p, 'employee_illness', None)
+        result['krankmeldungen'] = illness.personal(who) if illness else {'enabled': False, 'eintraege': [], 'originale': []}
         try:
             report = self.p.assistant_time.summary(who)
             result['arbeitszeit'] = {
@@ -919,6 +926,7 @@ def register_employee_portal(p):
 
     p.app.register_blueprint(bp)
     register_school(p)
+    register_illness(p)
     return service
 
 

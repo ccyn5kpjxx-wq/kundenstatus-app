@@ -29,5 +29,15 @@
       {% for item in chef.abwesenheiten.rows %}<a class="chef-absence-row" href="{{ item.url }}"><div><span class="chef-absence-kind kind-{{ item.art }}">{{ 'Schule · abwesend' if item.art == 'schule' else 'Urlaub' }}</span>{% if item.heute %}<span class="chef-today-label">Heute</span>{% endif %}<strong>{{ item.name }}</strong></div><div class="chef-absence-date">{{ item.datum_label }}{% if item.art != 'schule' and item.zeit_label %}<span>{{ item.zeit_label }}</span>{% endif %}</div>{% if item.art != 'schule' and item.notiz %}<p>{{ item.notiz }}</p>{% endif %}</a>{% else %}<p class="chef-empty">Aktuell keine anstehenden Urlaubs- oder Schultermine.</p>{% endfor %}
     </div>{% endif %}
   </section>
+  {% if chef.krankmeldungen %}
+  <section class="page-card chef-day-panel chef-absence-panel" aria-labelledby="chef-illness-heading">
+    <div class="chef-panel-heading"><div><span class="chef-eyebrow">KRANKHEITSZEITRÄUME</span><h3 id="chef-illness-heading">Krankmeldungen</h3></div><a href="{{ chef.krankmeldungen.history_url }}">Alle Krankmeldungen →</a></div>
+    <p class="chef-panel-note">Aktuelle und zuletzt erfasste Meldungen. Beendete Zeiträume sind keine heutige Abwesenheit.</p>
+    {% if chef.krankmeldungen.error %}<p class="chef-data-warning" role="status">{{ chef.krankmeldungen.error }}</p>{% else %}
+    <div class="chef-absence-list">
+      {% for item in chef.krankmeldungen.rows %}<a class="chef-absence-row" href="{{ item.url }}"><div><strong>{{ item.name }}</strong><span class="chef-team-state state-{{ item.status_key }}">{{ item.status_label }}</span></div><div class="chef-absence-date">{{ item.datum_label }}</div></a>{% else %}<p class="chef-empty">Noch keine Krankmeldungen hinterlegt.</p>{% endfor %}
+    </div>{% endif %}
+  </section>
+  {% endif %}
 </div>
 {% endif %}

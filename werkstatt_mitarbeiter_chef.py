@@ -167,6 +167,7 @@ def chef_overview(portal, who, employees, *, now=None):
         ('team', lambda: _team(portal), 'Der Stempelstatus konnte nicht gelesen werden. Bitte die Arbeitszeiten prüfen.'),
         ('abwesenheiten', lambda: _absences(portal, employees, now.date()), 'Abwesenheiten konnten nicht vollständig gelesen werden. Bitte den Abwesenheitsbereich prüfen.'),
         ('bestellungen', lambda: _orders(portal, now), 'Bestellvorgänge konnten nicht gelesen werden. Bitte den Bestellordner prüfen.'),
+        ('krankmeldungen', lambda: portal.employee_illness.admin_briefing({'actor': 'admin'}, now.date()), 'Krankmeldungen konnten nicht gelesen werden. Bitte die persönlichen Mitarbeiterprofile prüfen.'),
     )
     for key, read, error in components:
         try:
@@ -174,4 +175,5 @@ def chef_overview(portal, who, employees, *, now=None):
         except Exception:
             # The UI must never turn an unavailable source into a zero count.
             result[key] = dict(rows=[], counts=None, error=error)
+    result['krankmeldungen']['history_url'] = '/admin/mitarbeiter/krankmeldungen'
     return result
