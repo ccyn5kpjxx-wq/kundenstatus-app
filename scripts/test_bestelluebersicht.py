@@ -30,7 +30,9 @@ class OverviewTests(unittest.TestCase):
         lookup=Mock(return_value={'status':'ok','amount':'47.74','currency':'EUR','tax_basis':'net','unit':'Rollen',
             'packaging':'6 Rollen','date':'2026-08-14','source':{'beleg':'Synthetische Rechnung TC-123','seite':2,'position':5},
             'historical':True,'verified':False,'dispatchable':False,'warnings':[]})
-        self.p.cockpit_data=SimpleNamespace(catalog=SimpleNamespace(historical_price=lookup))
+        snapshot={'items':[],'truncated':False}
+        read=Mock(return_value=snapshot)
+        self.p.cockpit_data=SimpleNamespace(catalog=SimpleNamespace(historical_price=lookup,knowledge_rows=read))
         original=self.p.get_db
         with self.manager.db() as db:
             before=[dict(row) for row in db.execute('SELECT * FROM assistent_bestellanforderungen ORDER BY id').fetchall()]
@@ -42,7 +44,8 @@ class OverviewTests(unittest.TestCase):
         with patch.object(self.p,'get_db',side_effect=readonly),patch.object(self.manager,'tick',side_effect=AssertionError('no dispatch')):
             response=self.client.get('/admin/assistent-bestellungen')
         self.assertEqual(response.status_code,200)
-        lookup.assert_called_once_with('Historischer Lieferant A','TEST-50','Rollen',packaging='')
+        read.assert_called_once_with(limit=5000)
+        lookup.assert_called_once_with('Historischer Lieferant A','TEST-50','Rollen',packaging='',snapshot=snapshot)
         self.assertIn('Synthetische Rechnung TC-123',response.get_data(as_text=True))
         with self.manager.db() as db:
             after=[dict(row) for row in db.execute('SELECT * FROM assistent_bestellanforderungen ORDER BY id').fetchall()]
@@ -65,6 +68,96 @@ class OverviewTests(unittest.TestCase):
         html=self.client.get('/admin/assistent-bestellungen?bestellung=material:1').get_data(as_text=True)
         self.assertIn('Anforderung wiederherstellen',html)
         self.assertNotIn('<h3>Anforderung bearbeiten</h3>',html)
+
+    def test_catalog_failure_is_visible_in_list_and_selected_detail_without_zero_or_old_price(self):
+        self.order('one')
+        self.p.cockpit_data = SimpleNamespace(catalog=SimpleNamespace(
+            historical_price=Mock(), knowledge_rows=Mock(side_effect=RuntimeError('PRIVATE_DATABASE_DETAIL'))))
+        for query in ('', '?bestellung=one'):
+            with self.subTest(query=query), self.assertLogs('werkstatt_bestellungen', level='WARNING'):
+                response = self.client.get('/admin/assistent-bestellungen' + query)
+            self.assertEqual(response.status_code, 200)
+            html = response.get_data(as_text=True)
+            self.assertIn('Historischer Rechnungspreis derzeit nicht verfügbar.', html)
+            self.assertNotIn('PRIVATE_DATABASE_DETAIL', html)
+            self.assertNotRegex(html, r'(?<![0-9])0,00\s*€')
+        self.p.cockpit_data.catalog.historical_price.assert_not_called()
+
+    def test_next_get_rechecks_real_catalog_source_quarantine_without_cached_old_price(self):
+        import test_artikel_import as catalog_fixture
+        from werkstatt_artikel_import import InvoiceCatalog
+        self.order('one')
+        source_portal = catalog_fixture.FakePortal(str(Path(self.temp.name) / 'catalog.sqlite'))
+        source_portal.settings['ASSISTANT_MATERIAL_SUPPLIERS'] = json.dumps(['Historischer Lieferant A'])
+        catalog = InvoiceCatalog(source_portal)
+        catalog_fixture.prepare_catalog(catalog, {'einkaufsbelege': [
+            {'id': 1, 'lieferant': 'Historischer Lieferant A', 'original_name': 'SYNTHETIC-INVOICE.pdf'}],
+            'lieferantenrechnungen': []})
+        candidate = catalog_fixture.candidate(artikelnummer='TEST-50', ve='Rollen', gebinde='6 Rollen', preis='47.74',
+            source={'page': 2, 'position': 5, 'date': '2026-08-14'},
+            price_evidence={'value': '47.74', 'basis': 'gebindepreis_netto_abgeleitet', 'reconciled': True,
+                            'currency': 'EUR', 'tax_basis': 'net', 'tax_rate': '19'})
+        with patch('werkstatt_artikel_import.read_source', return_value=catalog_fixture.extracted(candidate)):
+            catalog.process_next()
+        self.p.cockpit_data = SimpleNamespace(catalog=catalog)
+        with patch.object(catalog, 'knowledge_rows', wraps=catalog.knowledge_rows) as read:
+            first = self.client.get('/admin/assistent-bestellungen')
+            self.assertEqual(first.status_code, 200)
+            self.assertIn('47,74 € netto / Rolle', first.get_data(as_text=True))
+            db = source_portal.get_db()
+            try:
+                db.execute("UPDATE einkauf_belege SET beleg_typ='quarantaene' WHERE id=1")
+                db.commit()
+            finally:
+                db.close()
+            second = self.client.get('/admin/assistent-bestellungen')
+            self.assertEqual(second.status_code, 200)
+            self.assertNotIn('47,74', second.get_data(as_text=True))
+            self.assertNotIn('SYNTHETIC-INVOICE.pdf', second.get_data(as_text=True))
+            self.assertEqual(read.call_count, 2)
+
+    def test_selected_comparison_12_candidates_share_one_catalog_read_with_history(self):
+        import test_artikel_import as catalog_fixture
+        from werkstatt_artikel_import import InvoiceCatalog
+        from werkstatt_bestellvergleich import OrderPriceComparison
+        from werkstatt_bestellvergleich_ui import comparison_context
+        self.order('one')
+        self.material(state='cancelled')  # Real comparison expects the material-link table.
+        source_portal = catalog_fixture.FakePortal(str(Path(self.temp.name) / 'catalog.sqlite'))
+        source_portal.settings['ASSISTANT_MATERIAL_SUPPLIERS'] = json.dumps(['Historischer Lieferant A'])
+        catalog = InvoiceCatalog(source_portal)
+        catalog_fixture.prepare_catalog(catalog, {'einkaufsbelege': [
+            {'id': 1, 'lieferant': 'Historischer Lieferant A', 'original_name': 'SYNTHETIC-INVOICE.pdf'}],
+            'lieferantenrechnungen': []})
+        candidates = [catalog_fixture.candidate(artikelnummer='TEST-50', ve='Rollen', gebinde='6 Rollen', preis='47.74',
+            source={'page': 2, 'position': index + 1, 'date': '2026-08-14'},
+            price_evidence={'value': '47.74', 'basis': 'gebindepreis_netto_abgeleitet', 'reconciled': True,
+                            'currency': 'EUR', 'tax_basis': 'net', 'tax_rate': '19'}) for index in range(12)]
+        with patch('werkstatt_artikel_import.read_source', return_value=catalog_fixture.extracted(*candidates)):
+            catalog.process_next()
+        self.p.cockpit_data = SimpleNamespace(catalog=catalog)
+        self.p.order_price_comparison = OrderPriceComparison(self.p)
+        contexts = []
+        def capture_context(*args):
+            result = comparison_context(*args)
+            contexts.append(result)
+            return result
+        # Exercise the actual GET, real candidate resolution and permission checks.
+        with patch.object(catalog, '_search', wraps=catalog._search) as read, \
+                patch('werkstatt_bestellvergleich_ui.comparison_context', side_effect=capture_context):
+            response = self.client.get('/admin/assistent-bestellungen?bestellung=one')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(read.call_count, 1)
+            self.assertEqual(len(contexts[-1]['comparison_candidates']), 12)
+            html = response.get_data(as_text=True)
+            self.assertIn('SYNTHETIC-INVOICE.pdf', html)
+            self.assertEqual(html.count('name="proposal_id"'), 12)
+            source_portal.settings['ASSISTANT_MATERIAL_SUPPLIERS'] = '[]'
+            response = self.client.get('/admin/assistent-bestellungen?bestellung=one')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(read.call_count, 2)
+            self.assertNotIn('SYNTHETIC-INVOICE.pdf', response.get_data(as_text=True))
+            self.assertNotIn('name="proposal_id"', response.get_data(as_text=True))
 
     def test_dated_archives_keep_all_126_positions_and_new_open_work_separate(self):
         self.batch('monday',state='sent')

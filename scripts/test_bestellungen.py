@@ -90,6 +90,12 @@ class ManagementTests(unittest.TestCase):
     def post(self, path, values=None):
         return self.client.post('/admin/assistent-bestellungen' + path, data={'csrf_token': 'test-csrf', **(values or {})})
 
+    def test_mutation_failure_is_not_hidden_by_optional_historical_price_fallback(self):
+        with patch.object(self.manager, 'propose_contact', side_effect=RuntimeError('synthetic mutation failure')):
+            with self.assertRaisesRegex(RuntimeError, 'synthetic mutation failure'):
+                self.post('/kontakt', {'name': 'Supplier', 'recipient': 'orders@supplier.example',
+                                       'source_note': 'synthetic invoice'})
+
     def nonce(self):
         with self.client.session_transaction() as state:
             return list(state['assistant_order_requests'])[-1]

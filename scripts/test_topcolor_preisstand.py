@@ -4,7 +4,10 @@ Set TOPCOLOR_ARCHIVE_SAMPLE_DIR to an external invoice directory to exercise
 real PDFs. No originals, prices, production DB, network or app worker in Git.
 """
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, current_thread
 from pathlib import Path
+from types import SimpleNamespace
 import os
 import sys
 import unittest
@@ -13,6 +16,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import werkstatt_rechnungsquelle as reader
 from werkstatt_artikel_import import InvoiceCatalog, _price_evidence
+from werkstatt_bestellungen import historical_price_context
 
 
 def footer(rate='19,00', vat='19,00', total='119,00', currency='EUR'):
@@ -125,6 +129,17 @@ class HistoricalPriceTests(unittest.TestCase):
         self.catalog.p.assert_not_called()
         self.assertEqual(self.catalog.p.mock_calls, [])
 
+    def test_supplied_scoped_snapshot_matches_single_lookup_without_second_catalog_read(self):
+        self.items = [self.row(date='2026-08-01'), self.row(id=2, price='12.00')]
+        expected = self.price()
+        snapshot = self.catalog.knowledge_rows(limit=5000)
+        before = deepcopy(snapshot)
+        self.catalog.knowledge_rows.reset_mock()
+        actual = self.catalog.historical_price('TOP-Color GmbH', 'SYNTHETIC-01', 'Gebinde', '0.5 L', snapshot=snapshot)
+        self.assertEqual(actual, expected)
+        self.assertEqual(snapshot, before)
+        self.catalog.knowledge_rows.assert_not_called()
+
     def test_exact_supplier_sku_unit_and_packaging(self):
         self.items = [self.row()]
         for kwargs in ({'supplier': 'Other Supplier'}, {'sku': ''}, {'unit': 'Stück'}, {'packaging': '1 L'}):
@@ -164,6 +179,133 @@ class HistoricalPriceTests(unittest.TestCase):
         self.items = [row]
         result = self.price()
         self.assertEqual((result['currency'], result['tax_basis'], result['tax_rate']), ('unknown', 'unknown', None))
+
+
+class DisplaySnapshotTests(unittest.TestCase):
+    def catalog(self):
+        catalog = InvoiceCatalog.__new__(InvoiceCatalog)
+        catalog.allowed_suppliers = Mock(return_value=[])
+        catalog._source_rows = Mock(return_value=[])
+        catalog._search = Mock(side_effect=lambda query, limit, **kwargs: [{'marker': current_thread().name}])
+        return catalog
+
+    def test_exact_limit_and_catalog_scope_reset_even_after_exception(self):
+        catalog, other = self.catalog(), self.catalog()
+        with self.assertRaisesRegex(RuntimeError, 'synthetic exit'):
+            with catalog.display_snapshot():
+                first = catalog.knowledge_rows(limit=5000)
+                self.assertIs(catalog.knowledge_rows(limit=5000), first)
+                catalog.knowledge_rows(limit=10)
+                other.knowledge_rows(limit=5000)
+                other.knowledge_rows(limit=5000)
+                raise RuntimeError('synthetic exit')
+        catalog.knowledge_rows(limit=5000)
+        self.assertEqual(catalog._search.call_count, 3)
+        self.assertEqual(other._search.call_count, 2)
+        self.assertEqual(catalog._source_rows.call_count, 3)
+
+    def test_failed_read_is_not_retained_as_empty_or_old_snapshot(self):
+        catalog = self.catalog()
+        catalog._search.side_effect = [RuntimeError('synthetic read failure'), [{'marker': 'recovered'}]]
+        with catalog.display_snapshot():
+            with self.assertRaises(RuntimeError):
+                catalog.knowledge_rows()
+            self.assertEqual(catalog.knowledge_rows()['items'], [{'marker': 'recovered'}])
+        self.assertEqual(catalog._search.call_count, 2)
+
+    def test_concurrent_requests_on_same_catalog_do_not_share_snapshot(self):
+        catalog, barrier = self.catalog(), Barrier(2)
+        def display(_):
+            with catalog.display_snapshot():
+                first = catalog.knowledge_rows()
+                barrier.wait(timeout=3)
+                return first, catalog.knowledge_rows()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(display, range(2)))
+        self.assertTrue(all(first is second for first, second in results))
+        self.assertIsNot(results[0][0], results[1][0])
+        self.assertNotEqual(results[0][0]['items'], results[1][0]['items'])
+        self.assertEqual(catalog._search.call_count, 2)
+
+
+class HistoricalContextTests(unittest.TestCase):
+    def setUp(self):
+        self.f = HistoricalPriceTests('runTest')
+        self.f.setUp()
+        self.catalog = self.f.catalog
+        self.portal = SimpleNamespace(cockpit_data=SimpleNamespace(catalog=self.catalog))
+
+    def entry(self, number):
+        return {'source': 'synthetic:' + str(number), 'draft': False,
+                'historical_identity': {'supplier': 'TOP-Color GmbH', 'article_number': 'SKU-' + str(number),
+                                        'unit': 'Gebinde', 'packaging': '0.5 L'}}
+
+    def overview(self, entries):
+        return {'open': {'items': entries}, 'removed': {'items': []}, 'archive_groups': [], 'selected': None}
+
+    def test_551_distinct_identities_use_one_fresh_catalog_snapshot_including_archives(self):
+        entries = [self.entry(number) for number in range(551)]
+        self.f.items = [self.f.row(id=number + 1, artikelnummer='SKU-' + str(number)) for number in range(551)]
+        overview = {'open': {'items': entries[:25]}, 'removed': {'items': entries[25:50]},
+                    'archive_groups': [{'expanded': False, 'items': entries[50 + group * 25:75 + group * 25]}
+                                       for group in range(20)], 'selected': entries[-1]}
+        before = deepcopy(self.f.items)
+        result = historical_price_context(self.portal, overview)
+        self.catalog.knowledge_rows.assert_called_once_with(limit=5000)
+        self.assertEqual(len(result), 551)
+        self.assertTrue(all(row['status'] == 'ok' and row['amount'] == '10.00' for row in result.values()))
+        self.assertTrue(all(not row['verified'] and not row['dispatchable'] for row in result.values()))
+        self.assertEqual(self.f.items, before)
+
+    def test_duplicate_identity_reuses_result_and_missing_identity_does_not_load_catalog(self):
+        self.f.items = [self.f.row(artikelnummer='SKU-1')]
+        first, second = self.entry(1), dict(self.entry(1), source='synthetic:other')
+        with patch.object(self.catalog, 'historical_price', wraps=self.catalog.historical_price) as lookup:
+            result = historical_price_context(self.portal, self.overview([first, second]))
+        self.assertEqual(result[first['source']], result[second['source']])
+        self.assertEqual(lookup.call_count, 1)
+        self.catalog.knowledge_rows.reset_mock()
+        historical_price_context(self.portal, self.overview([dict(first, draft=True), {'source': 'empty'}]))
+        self.catalog.knowledge_rows.assert_not_called()
+
+    def test_snapshot_failure_is_unavailable_sanitized_and_next_request_recovers(self):
+        self.f.items = [self.f.row(artikelnummer='SKU-1')]
+        overview = self.overview([self.entry(1)])
+        self.assertEqual(historical_price_context(self.portal, overview)['synthetic:1']['amount'], '10.00')
+        with patch.object(self.catalog, 'knowledge_rows', side_effect=RuntimeError('PRIVATE_DATABASE_DETAIL')):
+            with self.assertLogs('werkstatt_bestellungen', level='WARNING') as logs:
+                result = historical_price_context(self.portal, overview)['synthetic:1']
+        self.assertEqual(result['status'], 'unavailable')
+        self.assertIsNone(result['amount'])
+        self.assertFalse(result['verified']); self.assertFalse(result['dispatchable'])
+        self.assertNotIn('PRIVATE_DATABASE_DETAIL', str(result) + str(logs.output))
+        self.assertEqual(historical_price_context(self.portal, overview)['synthetic:1']['amount'], '10.00')
+
+    def test_one_identity_failure_does_not_replace_other_price_or_leak_private_error(self):
+        self.f.items = [self.f.row(artikelnummer='SKU-1')]
+        actual = self.catalog.historical_price
+        def lookup(supplier, sku, unit, **kwargs):
+            if sku == 'SKU-2':
+                raise RuntimeError('PRIVATE_DECODER_DETAIL')
+            return actual(supplier, sku, unit, **kwargs)
+        with patch.object(self.catalog, 'historical_price', side_effect=lookup):
+            with self.assertLogs('werkstatt_bestellungen', level='WARNING'):
+                result = historical_price_context(self.portal, self.overview([self.entry(1), self.entry(2)]))
+        self.assertEqual(result['synthetic:1']['amount'], '10.00')
+        self.assertEqual(result['synthetic:2']['status'], 'unavailable')
+        self.assertIsNone(result['synthetic:2']['amount'])
+        self.assertNotIn('PRIVATE_DECODER_DETAIL', str(result))
+        self.catalog.knowledge_rows.assert_called_once_with(limit=5000)
+
+    def test_malformed_snapshot_cannot_trigger_per_identity_fallback_queries(self):
+        for snapshot in (None, {}, {'items': None}):
+            with self.subTest(snapshot=snapshot), patch.object(self.catalog, 'knowledge_rows', return_value=snapshot) as read:
+                with patch.object(self.catalog, 'historical_price') as lookup:
+                    with self.assertLogs('werkstatt_bestellungen', level='WARNING'):
+                        result = historical_price_context(self.portal, self.overview([self.entry(1), self.entry(2)]))
+                read.assert_called_once_with(limit=5000)
+                lookup.assert_not_called()
+                self.assertTrue(all(row['status'] == 'unavailable' and row['amount'] is None for row in result.values()))
 
 
 class OptionalArchiveSampleTests(unittest.TestCase):

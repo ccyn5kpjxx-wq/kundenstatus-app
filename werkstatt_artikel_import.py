@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 import unicodedata
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta, timezone
 
@@ -14,6 +16,9 @@ from werkstatt_artikel_identity import catalog_identity
 from werkstatt_rechnungsquelle import read_source, invoice_date
 from werkstatt_rechnungsfreigabe import classify_invoice_source
 from werkstatt_topcolor_positionen import quantity_value, material_unit, explicit_package_evidence
+
+
+_DISPLAY_SNAPSHOT = ContextVar('invoice_catalog_display_snapshot', default=None)
 
 
 def _text(value, limit=1000):
@@ -561,9 +566,26 @@ class InvoiceCatalog:
         limit = max(1, min(int(limit), 100))
         return self._search(query, limit)
 
+    @contextmanager
+    def display_snapshot(self):
+        """Share scoped reads only during one explicit, read-only page display.
+
+        The context is isolated between HTTP threads and reset on every exit.
+        It must not wrap writes or source/permission changes.
+        """
+        token = _DISPLAY_SNAPSHOT.set({'catalog': self, 'values': {}})
+        try:
+            yield
+        finally:
+            _DISPLAY_SNAPSHOT.reset(token)
+
     def knowledge_rows(self, limit=5000):
         """Read the scoped active evidence set; never initiate an import/read."""
         limit = max(1, min(int(limit), 5000))
+        scope = _DISPLAY_SNAPSHOT.get()
+        scoped_values = scope['values'] if scope is not None and scope['catalog'] is self else None
+        if scoped_values is not None and limit in scoped_values:
+            return scoped_values[limit]
         allowed = self.allowed_suppliers()
         sources = self._source_rows()
         scoped = [(source, self.source_rule(source, allowed)) for source in sources]
@@ -573,15 +595,18 @@ class InvoiceCatalog:
         # would reload every payload, including all rows beyond the context cap.
         # At the cap, report a lower bound explicitly rather than imply a count
         # of unexamined/possibly invalid historical proposals.
-        return {'items': items[:limit], 'truncated': len(items) > limit,
+        snapshot = {'items': items[:limit], 'truncated': len(items) > limit,
                 'coverage': {'quellen_gesamt': len(sources),
                              'freigegebene_quellen': sum(rule['allowed'] for _, rule in scoped),
                              'ungeklaerte_quellen': sum(rule['decision'] == 'review' for _, rule in scoped),
                              'offene_auslese': sum(rule['allowed'] and row['state'] in ('offen', 'laeuft') for row, rule in scoped),
                              'auslese_zu_pruefen': sum(rule['allowed'] and row['state'] == 'pruefen' for row, rule in scoped),
                              'positionen': len(items), 'positionen_begrenzt': truncated}}
+        if scoped_values is not None:
+            scoped_values[limit] = snapshot
+        return snapshot
 
-    def historical_price(self, supplier, article_number, unit, packaging=''):
+    def historical_price(self, supplier, article_number, unit, packaging='', *, snapshot=None):
         """Pure historical display; never create reviews, prices or purchases.
 
         Empty packaging is usable only if all observations of this exact SKU
@@ -589,6 +614,8 @@ class InvoiceCatalog:
         always remain exact; a free product description cannot identify a price.
         Most recent uncertain/missing-date sources remain visible and block a
         confident result rather than falling back to an older cheap price.
+        A server caller may reuse its freshly permission-filtered knowledge_rows
+        snapshot within one request; no snapshot is retained between requests.
         """
         result = {'status': 'unknown', 'amount': None, 'currency': 'unknown', 'tax_basis': 'unknown',
                   'tax_rate': None, 'date': None, 'source': {}, 'evidence': {}, 'warnings': [],
@@ -600,7 +627,8 @@ class InvoiceCatalog:
         if not supplier or not article_number:
             result['warnings'].append('Lieferant und Lieferantenartikelnummer zuerst eindeutig zuordnen.')
             return result
-        snapshot = self.knowledge_rows(limit=5000)
+        if snapshot is None:
+            snapshot = self.knowledge_rows(limit=5000)
         rows = [row for row in snapshot['items'] if normal(row.get('lieferant')) == supplier
                 and normal(row.get('artikelnummer')) == article_number]
         dated = [invoice_date((row.get('quelle') or {}).get('datum')) for row in rows

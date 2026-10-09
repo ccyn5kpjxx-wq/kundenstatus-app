@@ -24,6 +24,8 @@ from decimal import Decimal
 import hmac
 import io
 import json
+import logging
+from contextlib import nullcontext
 import os
 from pathlib import Path
 import re
@@ -76,8 +78,15 @@ def _cents(value, label, positive=False):
     return int(price * 100)
 
 
+def _historical_price_unavailable():
+    return {'status': 'unavailable', 'amount': None, 'currency': 'unknown',
+            'tax_basis': 'unknown', 'source': {}, 'historical': True,
+            'verified': False, 'dispatchable': False,
+            'warnings': ['Historischer Rechnungspreis derzeit nicht verfügbar. Bitte später erneut prüfen.']}
+
+
 def historical_price_context(portal, overview):
-    """Read invoice hints for displayed identities; never approve or edit orders."""
+    """Read display-only hints from one fresh, scoped snapshot per request."""
     catalog = getattr(getattr(portal,'cockpit_data',None),'catalog',None)
     lookup = getattr(catalog,'historical_price',None)
     if not callable(lookup):
@@ -86,18 +95,34 @@ def historical_price_context(portal, overview):
     entries += [entry for group in overview['archive_groups'] for entry in group['items']]
     if overview.get('selected'):
         entries.append(overview['selected'])
-    result,cache = {},{}
+    eligible = []
     for entry in entries:
         identity = entry.get('historical_identity') or {}
-        supplier,sku,unit,pack = (identity.get(key,'') for key in ('supplier','article_number','unit','packaging'))
-        if entry.get('draft') or not all((supplier,sku,unit)):
-            continue
-        key = (supplier,sku,unit,pack)
+        key = tuple(identity.get(name, '') for name in ('supplier','article_number','unit','packaging'))
+        if not entry.get('draft') and all(key[:3]):
+            eligible.append((entry, key))
+    if not eligible:
+        return {}
+    try:
+        snapshot = catalog.knowledge_rows(limit=5000)
+        if not isinstance(snapshot, dict) or not isinstance(snapshot.get('items'), list):
+            raise TypeError('Invalid historical price snapshot')
+    except Exception as exc:
+        # This catch covers only the optional catalog read, never order writes,
+        # dispatch, or other page services. No old/zero price substitutes it.
+        logging.getLogger(__name__).warning('Historischer Preisabruf nicht verfügbar (%s).', type(exc).__name__)
+        return {entry['source']: _historical_price_unavailable() for entry, _ in eligible}
+    result,cache = {},{}
+    for entry, key in eligible:
+        supplier,sku,unit,pack = key
         if key not in cache:
             try:
-                saved = dict(lookup(supplier,sku,unit,packaging=pack))
+                saved = dict(lookup(supplier,sku,unit,packaging=pack,snapshot=snapshot))
             except (ValueError,LookupError,PermissionError):
                 saved = {'status':'unknown','warnings':['Historischer Rechnungsartikel noch nicht eindeutig zugeordnet.']}
+            except Exception as exc:
+                logging.getLogger(__name__).warning('Historischer Preisvergleich nicht verfügbar (%s).', type(exc).__name__)
+                saved = _historical_price_unavailable()
             source = saved.get('source') or {}
             saved['source_reference'] = (source.get('reference') or source.get('beleg') or 'Rechnungsquelle') if isinstance(source,dict) else str(source)
             saved['source_page'] = source.get('page') or source.get('seite') if isinstance(source,dict) else None
@@ -656,12 +681,18 @@ def register_orders(portal):
         from werkstatt_bestellvergleich_ui import comparison_context
         visible_overview = dict(overview,items=overview['open']['items']+
             [entry for group in overview['archive_groups'] if group['expanded'] for entry in group['items']])
+        catalog = getattr(getattr(portal, 'cockpit_data', None), 'catalog', None)
+        display_snapshot = getattr(catalog, 'display_snapshot', None)
+        scope = display_snapshot() if request.method == 'GET' and callable(display_snapshot) else nullcontext()
+        with scope:
+            historical_prices = historical_price_context(portal, overview)
+            comparisons = comparison_context(portal, visible_overview)
         return render_template('assistent_bestellungen.html', contacts=manager.contacts(), availability=manager.availability(),
                                overview=overview, cap_cents=manager.cap(), csrf=csrf, request_id=request_id,
                                order_material=material_current, order_files=original_files(material_current),
                                intake_entries=intake.list(limit=20) if intake else None,
-                               historical_prices=historical_price_context(portal,overview),
-                               errors=errors or [], form=form, **comparison_context(portal, visible_overview)), code
+                               historical_prices=historical_prices,
+                               errors=errors or [], form=form, **comparisons), code
 
     def intake_page(errors=None, code=200, group_id=None):
         service = getattr(portal, 'workshop_intake', None)

@@ -48,6 +48,21 @@ eingesetzt. Die historischen Werte ändern weder bestehende Versandnachweise noc
 die aktuelle Preisfreigabe. Nicht eindeutig lesbare Rechnungen benötigen eine
 manuelle Prüfung.
 
+Die Übersicht lädt den aktuell nach Quellen und Lieferantenfreigaben gefilterten
+Rechnungskatalog einmal pro GET-Anzeige. Alle historischen Artikelidentitäten
+und die Kandidaten im ausgewählten Preisvergleich verwenden diesen Stand. Er
+gilt nur während dieser Anzeigeberechnung; die nächste Anfrage prüft Freigaben,
+Quarantäne und Quellen erneut. Schreibaktionen verwenden weiterhin ihre eigenen
+aktuellen Prüfungen.
+
+Scheitert ausschließlich die optionale Historienauswertung technisch, erscheint
+**Historischer Rechnungspreis derzeit nicht verfügbar**. Der fehlende Wert wird
+weder durch 0 Euro noch durch einen älteren Rechnungswert ersetzt. Das gilt für
+die Historienauswertung; die getrennte Kandidatenanzeige im Preisvergleich hat
+noch einen eigenen technischen Fehlerpfad und benötigt eine weitere gezielte
+Absicherung. Andere Datenbank- oder Schreibfehler werden nicht als erfolgreiche
+Historienanzeige ausgegeben.
+
 ## Prüfung
 
 Die Regressionen verwenden temporäre Datenbanken und simulierte Kommunikation.
@@ -56,3 +71,16 @@ Wiederherstellung, unveränderliche Bestellinhalte, vollständige Datumsarchive,
 Rechnungsdatum, Preisgrundlage und doppelte Rechnungsimporte. Der lokale
 Browsercheck verwendet ausschließlich synthetische Anforderungen und einen
 deaktivierten Versand.
+
+Die Preisabfrage-Regressionen prüfen 551 verschiedene Artikelidentitäten mit
+einem Katalogabruf und einen echten ausgewählten Vergleich mit zwölf Kandidaten,
+der denselben Abruf mit der Historie teilt. Weitere Fälle prüfen widerrufene
+Lieferantenfreigaben und Quellenquarantäne bei der nächsten GET-Anfrage,
+technische Nichtverfügbarkeit ohne Ersatzpreis, unveränderte Mutationsfehler
+sowie die Trennung gleichzeitiger Anzeigekontexte und deren Auflösung bei Fehlern.
+
+Stand 09.10.2026: `test_topcolor_preisstand.py` (23 bestanden, ein optionaler
+externer Archivtest übersprungen), `test_bestelluebersicht.py` (25),
+`test_bestellungen.py` (28), `test_artikel_import.py` (43) und
+`test_bestellvergleich.py` (23): zusammen 142 bestandene Tests. Syntaxprüfung und
+`git diff --check` sind ebenfalls bestanden. Alle neuen Testdaten sind synthetisch.
