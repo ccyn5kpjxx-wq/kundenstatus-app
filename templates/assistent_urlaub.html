@@ -5,19 +5,22 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#173f35">
-  <title>Mein Urlaub · Gärtner</title>
+  <title>Urlaub &amp; Abwesenheiten · Gärtner</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_einrichtung.css') }}?v=farben-2">
   <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_portal.css') }}?v=farben-2">
   <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_zeiten.css') }}?v=farben-2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mitarbeiter_abwesenheiten.css', v='schule-1') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=farben-2">
+  <script defer src="{{ url_for('static', filename='mitarbeiter_schule.js', v='schule-1') }}"></script>
   {% include '_mitarbeiter_app_head.html' %}
 </head>
 <body>
 <header class="access-header"><a href="/werkstatt/mein-konto" class="brand">GÄRTNER<span>GmbH · Karosserie + Lack</span></a><span>Dein Mitarbeiterkonto</span></header>
 <main class="admin-main employee-times employee-vacation">
   {% include '_mitarbeiter_portal_nav.html' %}
-  <span class="eyebrow">DEINE FREIE ZEIT</span><h1>Mein Urlaub</h1>
-  <p class="lead">Deinen Stand ansehen und Urlaub beantragen. Alles bleibt deinem persönlichen Konto zugeordnet.</p>
+  <span class="eyebrow">PERSÖNLICH PLANEN</span><h1>Urlaub &amp; Abwesenheiten</h1>
+  <p class="lead">Resturlaub ansehen und Urlaub beantragen.{% if schule and schule.enabled %} Schultermine meldest du separat an die Werkstattleitung.{% endif %} Alles bleibt deinem persönlichen Konto zugeordnet.</p>
+  <nav class="absence-section-nav" aria-label="Urlaub und Abwesenheiten"><a href="#balance-heading">Resturlaub</a><a href="#apply-heading">Urlaub beantragen</a>{% if schule and schule.enabled %}<a href="#schule">Schule</a>{% endif %}<a href="#company-holidays-heading">Betriebsurlaub</a></nav>
   {% for category,message in get_flashed_messages(with_categories=true) %}<p role="status" class="setup-status{% if category in ['danger','error'] %} is-error{% endif %}">{{ message }}</p>{% endfor %}
   <section class="access-card vacation-balance" aria-labelledby="balance-heading">
     <div class="time-section-heading"><div><span class="eyebrow">DEIN GEPRÜFTER STAND</span><h2 id="balance-heading">Resturlaub {{ urlaub.jahr }}</h2></div><form method="get" class="time-period-filter"><label for="vacation-year">Urlaubsjahr<input id="vacation-year" name="jahr" type="number" min="2000" max="2099" value="{{ urlaub.jahr }}" required></label><button type="submit" class="secondary-button">Jahr anzeigen</button></form></div>
@@ -25,6 +28,34 @@
     {% else %}<p class="empty-state"><strong>Resturlaub noch nicht verlässlich bekannt</strong><br>{{ urlaub.bedarf }}</p>{% endif %}
     <p class="muted small">{{ urlaub.hinweis }}</p>
   </section>
+  {% if schule and schule.enabled %}
+  <section class="access-card school-section" id="schule" aria-labelledby="school-heading">
+    <span class="eyebrow">EIGENE ABWESENHEIT MELDEN</span><h2 id="school-heading">Schule</h2>
+    <p class="muted small">Trage deinen Schultag oder Schulzeitraum ein. Die Werkstattleitung sieht die Meldung. Schule wird getrennt vom Urlaub gespeichert und verändert keine Zeitstempel.</p>
+    <form method="post" action="/werkstatt/mein-konto/abwesenheiten/schule" data-school-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="request_id" value="{{ schule.request_id }}">
+      <div class="school-date-fields"><label for="school-from">Datum oder Beginn<input id="school-from" name="von" type="date" required></label><label for="school-to">Bis einschließlich <span class="muted">optional</span><input id="school-to" name="bis" type="date"></label></div>
+      <p class="school-form-hint">Für einen einzelnen Schultag bleibt „Bis“ leer.</p>
+      <label class="checkbox-label"><input id="school-all-day" data-school-all-day type="checkbox" name="ganztag" value="ja" checked aria-controls="school-time-fields">Ganztägig in der Schule</label>
+      <div class="school-time-fields" id="school-time-fields" data-school-time-fields><label for="school-start">Beginn <span class="muted">bei einem Teil des Tages</span><input id="school-start" data-school-start name="start_zeit" type="time"></label><label for="school-end">Ende <span class="muted">bei einem Teil des Tages</span><input id="school-end" data-school-end name="end_zeit" type="time"></label></div>
+      <p class="school-form-hint">Für einen Teil des Tages „ganztägig“ abwählen und beide Uhrzeiten eintragen.</p>
+      <label for="school-note">Ort oder Hinweis <span class="muted">optional</span><textarea id="school-note" name="notiz" maxlength="300" rows="2" placeholder="Zum Beispiel Schule, Ort oder Ansprechpartner"></textarea></label>
+      <details class="school-source"><summary>Einladung oder Quelle ergänzen · optional</summary><label for="school-source">Quelle<input id="school-source" name="quelle" maxlength="300" placeholder="Zum Beispiel Betreff oder Datum der Einladung"></label></details>
+      <label class="checkbox-label"><input type="checkbox" name="confirmed" value="ja" required>Datum und Zeiten sind geprüft. Ich möchte diesen Schultermin melden.</label>
+      <button type="submit" class="primary-button">Schultermin melden <span aria-hidden="true">→</span></button>
+    </form>
+    <div class="school-list-heading"><h3>Meine Schultermine {{ urlaub.jahr }}</h3><span class="school-balance-hint">Kein Urlaubabzug</span></div>
+    {% for item in schule.eintraege %}
+    <article class="school-entry{% if item.status == 'zurueckgezogen' %} is-withdrawn{% endif %}">
+      <div class="school-entry-heading"><strong>{{ item.von[8:10] }}.{{ item.von[5:7] }}.{{ item.von[:4] }}{% if item.bis != item.von %} bis {{ item.bis[8:10] }}.{{ item.bis[5:7] }}.{{ item.bis[:4] }}{% endif %}</strong><span class="school-status">{{ 'Zurückgezogen' if item.status == 'zurueckgezogen' else 'Gemeldet' }}</span></div>
+      <p class="school-entry-time">{% if item.ganztag %}Ganztägig{% else %}{{ item.start_zeit }}–{{ item.end_zeit }} Uhr{% endif %} · Schule</p>
+      {% if item.notiz %}<p class="school-entry-note">{{ item.notiz }}</p>{% endif %}
+      {% if item.quelle %}<p class="school-entry-source">Quelle: {{ item.quelle }}</p>{% endif %}
+      {% if item.status == 'gemeldet' %}<form method="post" action="/werkstatt/mein-konto/abwesenheiten/schule/{{ item.id }}/zurueckziehen"><input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="version" value="{{ item.version }}"><input type="hidden" name="confirmed" value="ja"><button type="submit" class="secondary-button">Diesen Schultermin zurückziehen</button></form>{% endif %}
+    </article>
+    {% else %}<p class="empty-state">Noch keine eigenen Schultermine für dieses Jahr gemeldet.</p>{% endfor %}
+  </section>
+  {% endif %}
   <section class="access-card vacation-apply" aria-labelledby="apply-heading">
     <span class="eyebrow">DEIN NÄCHSTER URLAUB</span><h2 id="apply-heading">Urlaub beantragen</h2>
     <p class="muted small">Ganze Urlaubstage für dein persönliches Profil. Die Werkstattleitung prüft den Antrag; das Absenden ist noch keine Genehmigung. Für halbe Tage oder einen Jahreswechsel bitte den Zeitraum mit der Werkstattleitung klären.</p>

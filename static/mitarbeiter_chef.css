@@ -1,0 +1,75 @@
+/* Chef overview uses the established warm cockpit palette. */
+.chef-header .badge-soft{display:inline-flex;width:auto}
+.chef-summary{display:flex;align-items:center;gap:14px 28px;flex-wrap:wrap;margin-top:26px;padding-top:22px;border-top:1px solid var(--line)}
+.chef-summary>span{color:var(--muted);font-size:13px}
+.chef-summary strong{font-size:22px;line-height:1;color:var(--ink);margin-right:5px;font-variant-numeric:tabular-nums}
+.chef-summary .chef-identity{margin-left:auto;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel-soft)}
+.chef-area-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-bottom:20px}
+.chef-area{display:flex;flex-direction:column;min-width:0;padding:25px;border:1px solid var(--line);border-radius:20px;background:var(--panel);color:var(--ink);text-decoration:none;transition:border-color .15s,transform .15s}
+.chef-area:hover{color:var(--ink);border-color:var(--accent);transform:translateY(-2px)}
+.chef-area-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:#edf2ec;color:var(--accent);font:24px/1 system-ui;margin-bottom:17px}
+.chef-area h2{font-size:21px;margin:0 0 10px;overflow-wrap:anywhere}
+.chef-area p{color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 22px;max-width:450px}
+.chef-area-action{font-size:13px;font-weight:700;color:var(--accent);margin-top:auto}
+.chef-quick-links{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 30px}
+.chef-quick-links a{display:inline-flex;align-items:center;min-height:44px;padding:9px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);font-size:13px;font-weight:600;text-decoration:none}
+.staff-quick-links{display:flex;flex-wrap:wrap;gap:8px;max-width:500px}
+.staff-quick-links .btn{min-height:42px;display:inline-flex;align-items:center;justify-content:center}
+#mitarbeiter-profile,.staff-card{scroll-margin-top:24px}
+.chef-inactive-staff{margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}
+.chef-inactive-staff>summary{font-size:14px;font-weight:650;cursor:pointer;min-height:44px;line-height:1.8}
+@media(max-width:700px){.chef-header{padding:22px!important}.chef-header>div>div{width:100%}.chef-header .badge-soft{font-size:11px;margin-bottom:12px!important}.chef-header h1{font-size:27px}.chef-header .text-muted{font-size:13px;line-height:1.6}.chef-summary{gap:10px 20px;margin-top:18px;padding-top:16px}.chef-summary .chef-identity{margin-left:0;width:auto;border:0;background:none;padding:0;font-size:11px}.chef-area-grid{grid-template-columns:1fr;gap:12px}.chef-area{padding:22px}.chef-area h2{font-size:20px}.chef-area p{font-size:13px;margin-bottom:18px}.chef-area-icon{margin-bottom:14px}.staff-quick-links{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.staff-quick-links .btn:first-child{grid-column:1/-1}.staff-quick-links .btn{font-size:12px}.chef-quick-links{gap:8px}.chef-quick-links a{font-size:12px;padding:9px 11px}}
+@media(prefers-reduced-motion:reduce){.chef-area{transition:none}.chef-area:hover{transform:none}}
+.chef-day-heading{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap;margin:30px 0 20px}
+.chef-day-heading h2{font-size:25px;margin:8px 0 6px}
+.chef-day-heading p{margin:0;color:var(--muted);font-size:13px}
+.chef-eyebrow{font-size:10px;font-weight:800;letter-spacing:.13em;color:var(--muted)}
+.chef-update-time{font-size:11px;line-height:1.7;color:var(--muted)}
+.chef-day-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:20px;margin-bottom:26px}
+.chef-day-panel{padding:26px;min-width:0}
+.chef-panel-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+.chef-panel-heading h3{font-size:21px;margin:8px 0 0}
+.chef-panel-heading>a{display:inline-flex;align-items:center;min-height:44px;font-size:12px;font-weight:700;color:var(--accent);text-decoration:none}
+.chef-panel-note{font-size:12px;line-height:1.65;color:var(--muted);margin:16px 0}
+.chef-team-counts{display:flex;gap:10px 20px;flex-wrap:wrap;margin:20px 0;padding:15px;border:1px solid var(--line);border-radius:13px;background:var(--panel-soft)}
+.chef-team-counts>span{font-size:11px;color:var(--muted)}
+.chef-team-counts strong{font-size:17px;margin-right:3px;color:var(--ink);font-variant-numeric:tabular-nums}
+.chef-team-person{display:flex;align-items:center;gap:12px;padding:15px 0;border-top:1px solid var(--line);color:var(--ink);text-decoration:none}
+.chef-person-initial{display:grid;place-items:center;flex:0 0 37px;height:37px;border-radius:12px;background:#edf2ec;color:var(--accent);font-weight:700}
+.chef-person-copy{display:grid;gap:4px;min-width:0;flex:1}
+.chef-person-copy>strong{font-size:13px;overflow-wrap:anywhere}
+.chef-person-copy>span{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.chef-team-state{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:650;padding:6px 8px;border-radius:8px;background:#eef0ed;color:#75837d;flex-shrink:0}
+.chef-team-state>span{width:6px;height:6px;border-radius:50%;background:currentColor;flex:0 0 6px}
+.chef-team-state.state-arbeitet{background:#edf7ef;color:#2c7751}
+.chef-team-state.state-pause{background:#fcf0db;color:#996e26}
+.chef-team-state.state-pruefen{background:#fff0e9;color:#9a4d31}
+.chef-order-counts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:23px 0}
+.chef-order-counts>div{display:grid;gap:5px;padding:16px 12px;border:1px solid var(--line);border-radius:13px;background:var(--panel-soft)}
+.chef-order-counts strong{font-size:26px;font-variant-numeric:tabular-nums;line-height:1.1}
+.chef-order-counts span{font-size:11px;color:var(--muted)}
+.chef-order-row{display:block;min-width:0;padding:17px 0;border-top:1px solid var(--line);color:var(--ink);text-decoration:none}
+.chef-order-topline{display:flex;gap:12px;justify-content:space-between;align-items:flex-start}
+.chef-order-topline strong{font-size:13px;line-height:1.6;overflow-wrap:anywhere;min-width:0}
+.chef-order-status{display:inline-block;font-size:9px;line-height:1.5;padding:5px 7px;border-radius:7px;background:#f0eee8;color:#777166;flex-shrink:0}
+.chef-order-status.status-versandt{background:#edf7ef;color:#2c7751}
+.chef-order-status.status-eingeplant{background:#e9f0f4;color:#456b7b}
+.chef-order-status.status-offen,.chef-order-status.status-pruefen{background:#fff0e1;color:#90652e}
+.chef-order-row p{font-size:11px;color:var(--muted);margin:6px 0 8px}
+.chef-order-bottomline{display:flex;justify-content:space-between;gap:5px 14px;flex-wrap:wrap;font-size:10px;line-height:1.7;color:var(--muted)}
+.chef-absence-panel{grid-column:1/-1}
+.chef-absence-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.chef-absence-row{display:block;min-width:0;border:1px solid var(--line);border-radius:14px;padding:17px;background:var(--panel-soft);color:var(--ink);text-decoration:none}
+.chef-absence-row>div:first-child{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.chef-absence-row strong{font-size:13px;overflow-wrap:anywhere}
+.chef-absence-kind{padding:5px 7px;border-radius:7px;font-size:10px;font-weight:650;background:#e7f1e8;color:#416448}
+.chef-absence-kind.kind-schule{background:#e6eef8;color:#426482}
+.chef-today-label{font-size:10px;font-weight:700;color:var(--accent)}
+.chef-absence-date{display:flex;gap:5px 14px;flex-wrap:wrap;font-size:12px;margin-top:12px}
+.chef-absence-date span{color:var(--muted);font-size:11px}
+.chef-absence-row p{font-size:11px;color:var(--muted);margin:8px 0 0;overflow-wrap:anywhere;white-space:pre-wrap}
+.chef-empty{font-size:13px;line-height:1.6;color:var(--muted);padding:17px;border-radius:12px;background:var(--panel-soft);margin:17px 0 0}
+.chef-data-warning{font-size:12px;line-height:1.7;color:#8d562b;padding:14px 16px;border-radius:12px;background:#fff0df;margin:17px 0}
+.chef-team-person:hover,.chef-order-row:hover,.chef-absence-row:hover{color:var(--accent)}
+@media(max-width:1050px){.chef-day-grid{grid-template-columns:1fr}.chef-absence-panel{grid-column:auto}}
+@media(max-width:700px){.chef-day-heading{margin-top:24px;gap:10px}.chef-day-heading h2{font-size:23px}.chef-day-panel{padding:20px 18px}.chef-panel-heading{gap:10px}.chef-panel-heading h3{font-size:20px}.chef-panel-heading>a{font-size:11px}.chef-team-person{flex-wrap:wrap;gap:9px}.chef-person-copy{flex-basis:calc(100% - 49px)}.chef-team-state{margin-left:46px}.chef-order-counts{gap:8px}.chef-order-counts>div{padding:15px 11px}.chef-order-counts strong{font-size:25px}.chef-order-topline{flex-wrap:wrap;gap:6px}.chef-absence-list{grid-template-columns:1fr}.chef-absence-row{padding:16px}.chef-team-counts{gap:8px 15px;padding:13px}.chef-team-counts>span{font-size:10px}}

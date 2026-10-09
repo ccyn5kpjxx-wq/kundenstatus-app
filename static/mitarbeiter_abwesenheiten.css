@@ -1,0 +1,50 @@
+/* School absence stays visually and functionally separate from vacation. */
+.absence-section-nav{display:flex;flex-wrap:wrap;gap:9px;margin:22px 0}
+.absence-section-nav a{display:inline-flex;align-items:center;min-height:44px;padding:10px 14px;border:1px solid var(--line);border-radius:11px;background:var(--paper);font-size:12px;font-weight:650;text-decoration:none}
+.school-section,.school-admin-panel{scroll-margin-top:24px}
+.school-section>form{padding:20px;border:1px solid var(--line);border-radius:16px;background:#f6f8f3}
+.school-section form>label:first-of-type{max-width:320px}
+.school-time-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.school-date-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.school-date-fields label{display:flex;flex-direction:column;justify-content:space-between;margin:0}
+.school-date-fields .muted{font-size:11px;font-weight:400}
+.school-time-fields label>.muted{font-size:11px;font-weight:400}
+.school-form-hint{font-size:11px;line-height:1.6;color:var(--muted);margin:-5px 0 0}
+.school-section form .primary-button{max-width:420px}
+.school-list-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:30px 0 14px}
+.school-list-heading h3{margin:0;font-size:17px}
+.school-balance-hint{font-size:10px;font-weight:650;color:#526b5e;padding:6px 9px;border-radius:8px;background:#edf3e4}
+.school-entry{padding:18px 0;border-top:1px solid var(--line);min-width:0}
+.school-entry-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.school-entry-heading strong{font-size:14px;font-variant-numeric:tabular-nums}
+.school-status{padding:5px 8px;font-size:10px;font-weight:650;line-height:1.5;border-radius:8px;background:#edf3e4;color:#42614e}
+.school-entry-time{font-size:12px;color:var(--muted);margin:7px 0 0}
+.school-entry-note{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;margin:9px 0 0}
+.school-entry-source{font-size:11px;color:var(--muted);overflow-wrap:anywhere;margin:8px 0 0}
+.school-source{margin:0 0 10px}
+.school-source summary{font-size:12px;color:var(--muted);cursor:pointer;min-height:36px;display:list-item}
+.school-admin-create{margin:20px 0;border-top:1px solid var(--line);padding-top:14px}
+.school-admin-create>summary{font-size:13px;font-weight:650;cursor:pointer;min-height:44px;line-height:1.7}
+.school-admin-create form{padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--paper)}
+.school-admin-create input,.school-admin-create textarea{font-family:inherit}
+.school-entry.is-withdrawn .school-status{background:#eef0ed;color:#748178}
+.school-entry.is-withdrawn .school-entry-time{color:#859289}
+.school-entry form{display:block;margin:14px 0 0}
+.school-entry button{font-size:11px;min-height:44px}
+.absence-admin-person{margin:24px 0;scroll-margin-top:24px}
+.absence-admin-person-title{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:20px}
+.absence-admin-person-title h2{margin:0}
+.absence-admin-person-links{display:flex;gap:8px;flex-wrap:wrap}
+.absence-admin-person-links a{display:inline-flex;align-items:center;min-height:42px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:#f0f5ea;font-size:12px;font-weight:650;text-decoration:none}
+.school-admin-panel{padding:20px;margin:22px 0;border:1px solid var(--line);border-radius:16px;background:#f8faf6}
+.school-admin-panel h3{margin:0;font-size:18px}
+.school-admin-panel>.small{margin:9px 0 14px}
+.school-admin-panel .empty-state{font-size:12px;color:var(--muted)}
+.absence-admin-person>.vacation-admin-request{padding:18px;border:1px solid var(--line);border-radius:15px;margin:14px 0;background:#fcfdfb}
+.vacation-admin-request h4{font-size:16px;margin:0 0 10px}
+.vacation-admin-request>p{font-size:13px}
+.absence-admin-person details>summary{font-size:13px;font-weight:650;line-height:1.7;cursor:pointer;min-height:44px}
+.absence-admin-person .empty-state{font-size:13px;color:var(--muted)}
+@media(max-width:700px){.school-section>form{padding:17px 14px}.school-time-fields{gap:12px}.school-time-fields input{padding:11px;font-size:13px}.school-section form .primary-button{max-width:none;width:100%}.school-list-heading{margin-top:26px}.school-entry-heading strong{font-size:13px}.school-admin-panel{padding:18px 14px}.absence-admin-person-links{width:100%}.absence-admin-person-links a{flex:1;justify-content:center}.absence-section-nav{gap:7px}.absence-section-nav a{font-size:11px;padding:9px 11px}.employee-vacation>h1{font-size:clamp(30px,8vw,42px);overflow-wrap:anywhere;letter-spacing:-1.1px}}
+@media(max-width:500px){.school-date-fields{grid-template-columns:1fr}}
+@media(max-width:360px){.school-time-fields{grid-template-columns:1fr}}

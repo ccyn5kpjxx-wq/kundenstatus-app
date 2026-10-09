@@ -7,14 +7,14 @@
 <body>
 {% include '_werkstatt_admin_header.html' %}
 <main class="admin-main">
-<nav class="admin-nav" aria-label="Bereiche der Werkstattleitung"><a href="/admin/mitarbeiter">Mitarbeiter</a><a href="/admin/mitarbeiter/einrichtung" aria-current="page">Mitarbeiterzugänge</a><a href="/admin/arbeitszeit">Arbeitszeiten</a><a href="/werkstatt/assistent/urlaub/verwaltung">Urlaub &amp; Anträge</a><a href="/werkstatt/assistent/rechte">Rechte verwalten</a><a href="/admin/assistent-bestellungen">Bestellordner</a></nav>
+<nav class="admin-nav" aria-label="Bereiche der Werkstattleitung"><a href="/admin/mitarbeiter">Mein Chefbereich</a><a href="/admin/mitarbeiter/einrichtung" aria-current="page">Mitarbeiterzugänge</a><a href="/admin/arbeitszeit">Arbeitszeiten</a><a href="/werkstatt/assistent/urlaub/verwaltung">Urlaub &amp; Abwesenheiten</a><a href="/werkstatt/assistent/rechte">Rechte verwalten</a><a href="/admin/assistent-bestellungen">Bestellordner</a></nav>
 <span class="eyebrow">ANMELDUNG &amp; EINLADUNGEN</span><h1>Mitarbeiterzugänge</h1>
 <p class="lead">Alle aktiven Konten an einem Ort. Den Anmeldelink kopieren und zusammen mit der Mitarbeiter-ID an die jeweilige Person schicken. Bereits eingerichtete Zugänge bleiben bestehen.</p>
 {% for category,message in get_flashed_messages(with_categories=true) %}<p role="status" class="setup-status{% if category == 'error' %} is-error{% endif %}">{{ message }}</p>{% endfor %}
 {% if error %}<p role="alert" class="setup-status is-error">{{ error }}</p>{% endif %}
 <section class="access-shortcuts" aria-label="Deine Zugänge">
-<a class="access-card access-shortcut" href="/admin/cockpit"><span class="eyebrow">WERKSTATTLEITUNG</span><h2>Mein Chef-Cockpit <span aria-hidden="true">↗</span></h2><p>Mitarbeiter, Aufträge und Bestellungen verwalten.</p></a>
-<a class="access-card access-shortcut" href="/werkstatt/mein-konto" target="_blank" rel="noopener"><span class="eyebrow">PERSÖNLICHER ZUGANG</span><h2>Mein Profil öffnen <span aria-hidden="true">↗</span></h2><p>Mit eigener Mitarbeiter-ID und persönlichem Passwort anmelden.</p></a>
+<a class="access-card access-shortcut" href="/admin/mitarbeiter"><span class="eyebrow">WERKSTATTLEITUNG</span><h2>Mein Chefbereich <span aria-hidden="true">→</span></h2><p>Profile, Lohnzettel, Verträge, Arbeitszeiten und Abwesenheiten verwalten.</p></a>
+<a class="access-card access-shortcut" href="/admin/cockpit"><span class="eyebrow">BETRIEBSÜBERSICHT</span><h2>Werkstatt-Cockpit <span aria-hidden="true">→</span></h2><p>Zurück zu Aufträgen, Bestellungen und dem laufenden Betrieb.</p></a>
 </section>
 {% set links = created_invitations or ([created_invitation] if created_invitation else []) %}
 {% if links %}

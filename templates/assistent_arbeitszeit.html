@@ -32,9 +32,9 @@
 </header>
 <main id="arbeitszeiten" class="time-admin">
   <nav class="area-nav" aria-label="Bereiche der Werkstattleitung">
-    <a href="{{ url_for('admin_mitarbeiter') }}">Mitarbeiter</a>
+    <a href="{{ url_for('admin_mitarbeiter') }}">Mein Chefbereich</a>
     <a href="{{ url_for('arbeitszeit_admin.index') }}" aria-current="page">Arbeitszeiten</a>
-    <a href="{{ url_for('assistent.vacation_admin') }}">Urlaub &amp; Anträge</a>
+    <a href="{{ url_for('assistent.vacation_admin') }}">Urlaub &amp; Abwesenheiten</a>
   </nav>
   <div class="page-heading"><div><span class="eyebrow">DEIN TEAM IM ÜBERBLICK</span><h1>Arbeitszeiten</h1><p>Aktuellen Stempelstatus sehen, Mitarbeiter auswählen und Monatszeiten ansehen.</p></div><span class="team-count">{{ employees|selectattr('aktiv','equalto',1)|list|length }} aktive Mitarbeiter</span></div>
   {% if status_as_of %}<p class="status-as-of">Aktueller Stempelstatus · Stand {{ status_as_of }}</p>{% endif %}

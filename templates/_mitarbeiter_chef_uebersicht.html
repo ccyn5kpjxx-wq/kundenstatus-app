@@ -1,0 +1,33 @@
+{% if chef %}
+<div class="chef-day-heading"><div><span class="chef-eyebrow">DEIN BETRIEB HEUTE</span><h2>Heute im Überblick</h2><p>{{ chef.today_label }}</p></div>{% if chef.as_of %}<span class="chef-update-time">Stand {{ chef.as_of }} · Stempelstatus</span>{% endif %}</div>
+<div class="chef-day-grid">
+  <section class="page-card chef-day-panel chef-team-panel" aria-labelledby="chef-team-heading">
+    <div class="chef-panel-heading"><div><span class="chef-eyebrow">ANWESENHEIT</span><h3 id="chef-team-heading">Heute im Team</h3></div><a href="/admin/arbeitszeit">Alle Zeiten →</a></div>
+    <p class="chef-panel-note">Kommen, Pause und Gehen aus der Zeiterfassung.</p>
+    {% if chef.team.error %}<p class="chef-data-warning" role="status">{{ chef.team.error }}</p>{% else %}
+    <div class="chef-team-counts"><span><strong>{{ chef.team.counts.arbeitet }}</strong> bei der Arbeit</span><span><strong>{{ chef.team.counts.pause }}</strong> in Pause</span><span><strong>{{ chef.team.counts.abwesend }}</strong> nicht angestempelt</span>{% if chef.team.counts.pruefen %}<span><strong>{{ chef.team.counts.pruefen }}</strong> zu prüfen</span>{% endif %}</div>
+    <div class="chef-team-list">
+      {% for person in chef.team.rows %}<a class="chef-team-person" href="/admin/arbeitszeit?mitarbeiter_id={{ person.id }}"><span class="chef-person-initial" aria-hidden="true">{{ person.name[:1] }}</span><span class="chef-person-copy"><strong>{{ person.name }}</strong>{% if person.detail %}<span>{{ person.detail }}</span>{% endif %}</span><span class="chef-team-state state-{{ person.key }}"><span aria-hidden="true"></span>{{ person.label }}</span></a>{% else %}<p class="chef-empty">Keine aktiven Mitarbeiter hinterlegt.</p>{% endfor %}
+    </div>{% endif %}
+  </section>
+
+  <section class="page-card chef-day-panel chef-orders-panel" aria-labelledby="chef-orders-heading">
+    <div class="chef-panel-heading"><div><span class="chef-eyebrow">MATERIAL</span><h3 id="chef-orders-heading">Bestellungen</h3></div><a href="/admin/assistent-bestellungen">Bestellordner →</a></div>
+    {% if chef.bestellungen.error %}<p class="chef-data-warning" role="status">{{ chef.bestellungen.error }}</p>{% else %}
+    <div class="chef-order-counts"><div><strong>{{ chef.bestellungen.counts.offen }}</strong><span>Offen</span></div><div><strong>{{ chef.bestellungen.counts.eingeplant }}</strong><span>Eingeplant</span></div><div><strong>{{ chef.bestellungen.counts.versandt }}</strong><span>Versandt</span></div></div>
+    {% if chef.bestellungen.counts.pruefen %}<p class="chef-data-warning">{{ chef.bestellungen.counts.pruefen }} Bestellvorgänge benötigen eine Prüfung.</p>{% endif %}
+    <div class="chef-order-list">
+    {% for item in chef.bestellungen.rows %}<a class="chef-order-row" href="{{ item.url }}"><div class="chef-order-topline"><strong>{{ item.titel }}</strong><span class="chef-order-status status-{{ item.status_key }}">{{ item.status_label }}</span></div><p>{{ item.mitarbeiter }}{% if item.lieferant %} · {{ item.lieferant }}{% endif %}</p><div class="chef-order-bottomline"><span>{{ item.menge_label }}</span>{% if item.preis_label %}<span>{{ item.preis_label }}</span>{% endif %}{% if item.datum_label %}<span>{{ item.datum_label }}</span>{% endif %}</div></a>{% else %}<p class="chef-empty">Noch keine Bestellvorgänge vorhanden.</p>{% endfor %}
+    </div>{% endif %}
+  </section>
+
+  <section class="page-card chef-day-panel chef-absence-panel" aria-labelledby="chef-absence-heading">
+    <div class="chef-panel-heading"><div><span class="chef-eyebrow">URLAUB &amp; SCHULE</span><h3 id="chef-absence-heading">Abwesenheiten im Team</h3></div><a href="/werkstatt/assistent/urlaub/verwaltung">Alle Abwesenheiten →</a></div>
+    <p class="chef-panel-note">Heute und die nächsten gemeldeten Zeiträume. Schule bleibt getrennt vom Urlaub.</p>
+    {% if chef.abwesenheiten.error %}<p class="chef-data-warning" role="status">{{ chef.abwesenheiten.error }}</p>{% else %}
+    <div class="chef-absence-list">
+      {% for item in chef.abwesenheiten.rows %}<a class="chef-absence-row" href="{{ item.url }}"><div><span class="chef-absence-kind kind-{{ item.art }}">{{ 'Schule' if item.art == 'schule' else 'Urlaub' }}</span>{% if item.heute %}<span class="chef-today-label">Heute</span>{% endif %}<strong>{{ item.name }}</strong></div><div class="chef-absence-date">{{ item.datum_label }}{% if item.zeit_label %}<span>{{ item.zeit_label }}</span>{% endif %}</div>{% if item.notiz %}<p>{{ item.notiz }}</p>{% endif %}</a>{% else %}<p class="chef-empty">Aktuell keine anstehenden Urlaubs- oder Schultermine.</p>{% endfor %}
+    </div>{% endif %}
+  </section>
+</div>
+{% endif %}

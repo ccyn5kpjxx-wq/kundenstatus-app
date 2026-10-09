@@ -3132,6 +3132,8 @@ def protect_csrf():
         if request.endpoint in {"login", "partner_login", "partner_login_key", "versicherung_login", "versicherung_login_key", "werkstatt_login"}:
             session.pop(CSRF_FIELD_NAME, None)
             flash("Die Login-Seite war veraltet. Bitte Passwort noch einmal eingeben.", "warning")
+            if request.endpoint == "login" and admin_login_destination() == "admin_mitarbeiter":
+                return redirect(url_for("login", return_to="chef"))
             return redirect(request.path)
         abort(400)
     return None
@@ -8289,6 +8291,8 @@ BACKUP_TABLES = (
     "mitarbeiter_urlaubskonten",
     "mitarbeiter_urlaubsantraege",
     "mitarbeiter_urlaub_audit",
+    "mitarbeiter_schulabwesenheiten",
+    "mitarbeiter_schule_audit",
     "mitarbeiter_zeitstatus",
     "mitarbeiter_zeitstempel",
     "assistent_materialfotos",
@@ -8339,7 +8343,7 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
-BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_liefereingang_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1")
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_liefereingang_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1", "werkstatt_schule_v1")
 BACKUP_BINARY_FIELDS = {
     "mitarbeiter_lohnzettel": {
         "original_base64": {"suffix": ".bin", "max_bytes": 10 * 1024 * 1024},
@@ -38449,10 +38453,17 @@ def iso_date_filter(value):
     return iso_date(value)
 
 
+def admin_login_destination():
+    # A fixed destination for the direct Chef entry, never a caller-provided URL.
+    return "admin_mitarbeiter" if request.args.getlist("return_to") == ["chef"] else "betriebs_cockpit"
+
+
 def admin_required(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not session.get("admin"):
+            if request.endpoint == "admin_mitarbeiter" and request.method == "GET":
+                return redirect(url_for("login", return_to="chef"))
             return redirect(url_for("login"))
         return func(*args, **kwargs)
 
@@ -38631,8 +38642,9 @@ def render_partner_new_form(autohaus, form=None):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    destination = admin_login_destination()
     if request.method == "GET" and session.get("admin"):
-        return redirect(url_for("betriebs_cockpit"))
+        return redirect(url_for(destination))
     if request.method == "POST":
         limited, wait_seconds = login_rate_limit_status("admin", "admin")
         if limited:
@@ -38644,7 +38656,7 @@ def login():
             session.clear()
             session.permanent = True
             session["admin"] = True
-            response = redirect(url_for("betriebs_cockpit"))
+            response = redirect(url_for(destination))
             remember_authenticated_login(response, "admin")
             return response
         record_failed_login("admin", "admin")
@@ -47985,6 +47997,7 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         "assistent_mailquellen_nachrichten", "assistent_mailquellen_absender",
         "assistent_mailquellen_dateien",
         "mitarbeiter_urlaubskonten", "mitarbeiter_urlaubsantraege", "mitarbeiter_urlaub_audit",
+        "mitarbeiter_schulabwesenheiten", "mitarbeiter_schule_audit",
         "mitarbeiter_zeitstatus", "mitarbeiter_zeitstempel", "assistent_materialfotos",
         "einkauf_eingang", "einkauf_eingang_positionen", "einkauf_eingang_dateien",
         "einkauf_eingang_lieferungen", "einkauf_eingang_preise",
@@ -48018,6 +48031,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         required_tables.update({"mitarbeiter_portal_profile", "mitarbeiter_lohnzettel", "mitarbeiter_betriebsurlaub"})
     if "werkstatt_arbeitsvertraege_v1" in schema_features:
         required_tables.add("mitarbeiter_arbeitsvertraege")
+    if "werkstatt_schule_v1" in schema_features:
+        required_tables.update({"mitarbeiter_schulabwesenheiten", "mitarbeiter_schule_audit"})
     if "werkstatt_avatar_uploads_v1" in schema_features:
         required_tables.add("assistent_uploads")
     if "werkstatt_personal_v1" in schema_features:
@@ -48675,7 +48690,7 @@ def admin_daten_import():
                     intake_schema = globals().get("workshop_intake_init_schema")
                     if callable(intake_schema):
                         intake_schema()
-                    for hook in ("employee_invitations_init_schema", "employee_portal_init_schema", "workshop_progress_init_schema", "workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema", "order_price_comparison_init_schema", "order_delivery_init_schema"):
+                    for hook in ("employee_invitations_init_schema", "employee_portal_init_schema", "employee_school_init_schema", "workshop_progress_init_schema", "workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema", "order_price_comparison_init_schema", "order_delivery_init_schema"):
                         schema = globals().get(hook)
                         if callable(schema):
                             schema()
@@ -52144,10 +52159,12 @@ def admin_zurueckgegebene_archivieren():
 @admin_required
 def admin_mitarbeiter():
     mitarbeiter_liste = list_mitarbeiter(include_inactive=True)
+    from werkstatt_mitarbeiter_chef import chef_overview
     return render_template(
         "mitarbeiter.html",
         mitarbeiter_liste=mitarbeiter_liste,
         summary=mitarbeiter_urlaub_summary(mitarbeiter_liste),
+        chef=chef_overview(sys.modules[__name__], {'actor': 'admin'}, mitarbeiter_liste),
     )
 
 

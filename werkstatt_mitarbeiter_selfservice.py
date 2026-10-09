@@ -389,9 +389,13 @@ class EmployeeSelfService:
     def admin_view(self, who, year=None):
         self._admin(who)
         year = _year(year if year is not None else _today().year)
+        school = getattr(self.p, 'employee_school', None)
+        school_rows = school.admin_rows(who, year) if school else []
         with self.db() as db:
             employees = [dict(r) for r in db.execute('SELECT id,name,aktiv FROM mitarbeiter ORDER BY aktiv DESC,name,id').fetchall()]
             for person in employees:
+                person['schule'] = [row for row in school_rows if row['mitarbeiter_id'] == person['id']]
+                person['schule_request_id'] = secrets.token_hex(16)
                 person['konto'] = self._summary(db, person['id'], year)
                 row = db.execute('SELECT * FROM mitarbeiter_urlaubskonten WHERE mitarbeiter_id=? AND jahr=?', (person['id'], year)).fetchone()
                 person['basis'] = {'version': row['version'], 'arbeitstage': json.loads(row['arbeitstage_json']), 'feiertage': row['feiertage']} if row else {'version': 0, 'arbeitstage': [], 'feiertage': ''}
@@ -441,7 +445,9 @@ def register_selfservice(portal, bp, protected):
         except (ValueError, PermissionError) as exc:
             return str(exc), 400
         employee_portal = getattr(portal, 'employee_portal', None)
+        school = getattr(portal, 'employee_school', None)
         return render_template('assistent_urlaub.html', urlaub=summary, csrf=token(), request_id=secrets.token_hex(16), today=_today().isoformat(),
+                               schule=school.personal(who, summary['jahr']) if school else {'enabled': False, 'eintraege': []},
                                betriebsurlaub=employee_portal.company_holidays(summary['jahr']) if employee_portal else [])
 
     @bp.get('/urlaub/stand')

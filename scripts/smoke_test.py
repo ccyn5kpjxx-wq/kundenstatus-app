@@ -502,19 +502,25 @@ def main():
     ok &= check("Mitarbeiter mit Login", mitarbeiter_response, {200})
     mitarbeiter_html = mitarbeiter_response.get_data(as_text=True)
     mitarbeiter_page_ok = (
-        "Mitarbeiter &amp; Unterlagen</h1>" in mitarbeiter_html
+        "Mein Chefbereich</h1>" in mitarbeiter_html
         and "Stammdaten &amp; Unterlagen" in mitarbeiter_html
         and 'href="/admin/mitarbeiter/einrichtung"' in mitarbeiter_html
         and 'href="/admin/mitarbeiter/betriebsurlaub"' in mitarbeiter_html
         and 'href="/werkstatt/assistent/urlaub/verwaltung"' in mitarbeiter_html
-        and "Urlaubskonten &amp; Anträge" in mitarbeiter_html
+        and "Urlaub &amp; Abwesenheiten" in mitarbeiter_html
+        and 'id="chef-team-heading"' in mitarbeiter_html
+        and 'id="chef-orders-heading"' in mitarbeiter_html
+        and 'id="chef-absence-heading"' in mitarbeiter_html
+        and "Stempelstatus" in mitarbeiter_html
+        and 'href="/admin/arbeitszeit"' in mitarbeiter_html
+        and 'href="/admin/assistent-bestellungen"' in mitarbeiter_html
         and '<form method="POST" action="/admin/mitarbeiter/neu"' in mitarbeiter_html
         and "Mitarbeiter speichern" in mitarbeiter_html
     )
     print(
-        "[OK] Mitarbeiterseite zeigt Unterlagen, Zugänge, Urlaubsverwaltung und Anlageformular"
+        "[OK] Chefbereich zeigt Teamstatus, Abwesenheiten, Bestellungen, Unterlagen, Zugänge und Anlageformular"
         if mitarbeiter_page_ok
-        else "[FEHLER] Mitarbeiterseite fehlt Unterlagen-, Zugangs-, Urlaubs- oder Anlageeinstieg"
+        else "[FEHLER] Chefbereich fehlt Tagesübersicht, Unterlagen-, Zugangs-, Urlaubs- oder Anlageeinstieg"
     )
     ok &= mitarbeiter_page_ok
 
