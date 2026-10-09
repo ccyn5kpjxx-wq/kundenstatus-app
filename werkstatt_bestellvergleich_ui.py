@@ -1,7 +1,15 @@
 """Admin presentation for immutable order-price evidence; no dispatch actions."""
+import logging
+
 from flask import abort, flash, redirect, request, url_for
 
 from werkstatt_rechnungsfreigabe import normalize_supplier
+
+
+def _unavailable_candidates(context, error):
+    context['comparison_candidates'].clear()
+    context['comparison_candidates_unavailable'] = True
+    logging.getLogger(__name__).warning('Optional invoice candidates unavailable (%s)', type(error).__name__)
 
 
 def comparison_key(entry):
@@ -16,7 +24,8 @@ def comparison_key(entry):
 def comparison_context(portal, overview):
     from werkstatt_liefereingang import delivery_context
     service = getattr(portal, 'order_price_comparison', None)
-    context = dict(price_summaries={}, order_comparison=None, comparison_files=[], comparison_candidates=[])
+    context = dict(price_summaries={}, order_comparison=None, comparison_files=[], comparison_candidates=[],
+                   comparison_candidates_unavailable=False)
     context.update(delivery_context(portal, overview))
     if service is None:
         return context
@@ -52,18 +61,24 @@ def comparison_context(portal, overview):
     if not detail['estimate']:
         try:
             rows = service._catalog().knowledge_rows(limit=5000)['items']
-            for row in rows:
-                if (normalize_supplier(row.get('lieferant')) != normalize_supplier(order['supplier'])
-                        or (row.get('artikelnummer') or '').strip().casefold() != order['sku'].strip().casefold()):
-                    continue
-                try:
-                    price = service._catalog_estimate(order, {'proposal_id': row.get('vorschlag_id'),
-                        'identity_confirmed': True, 'unit_matches_order': True})
-                except (ValueError, LookupError, PermissionError):
-                    continue
-                context['comparison_candidates'].append(dict(row, comparison_price=price))
         except (ValueError, LookupError, PermissionError):
-            pass
+            return context
+        except Exception as error:
+            _unavailable_candidates(context, error)
+            return context
+        for row in rows:
+            if (normalize_supplier(row.get('lieferant')) != normalize_supplier(order['supplier'])
+                    or (row.get('artikelnummer') or '').strip().casefold() != order['sku'].strip().casefold()):
+                continue
+            try:
+                price = service._catalog_estimate(order, {'proposal_id': row.get('vorschlag_id'),
+                    'identity_confirmed': True, 'unit_matches_order': True})
+            except (ValueError, LookupError, PermissionError):
+                continue
+            except Exception as error:
+                _unavailable_candidates(context, error)
+                break
+            context['comparison_candidates'].append(dict(row, comparison_price=price))
     return context
 
 

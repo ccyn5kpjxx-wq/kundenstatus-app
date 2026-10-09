@@ -159,6 +159,156 @@ class OverviewTests(unittest.TestCase):
             self.assertNotIn('SYNTHETIC-INVOICE.pdf', response.get_data(as_text=True))
             self.assertNotIn('name="proposal_id"', response.get_data(as_text=True))
 
+    def comparison_fixture(self, count=2):
+        """Real catalog and comparison services with synthetic invoice evidence."""
+        import test_artikel_import as catalog_fixture
+        from werkstatt_artikel_import import InvoiceCatalog
+        from werkstatt_bestellvergleich import OrderPriceComparison
+        self.order('one')
+        self.material(state='cancelled')
+        source_portal = catalog_fixture.FakePortal(str(Path(self.temp.name) / 'catalog.sqlite'))
+        source_portal.settings['ASSISTANT_MATERIAL_SUPPLIERS'] = json.dumps(['Historischer Lieferant A'])
+        catalog = InvoiceCatalog(source_portal)
+        catalog_fixture.prepare_catalog(catalog, {'einkaufsbelege': [
+            {'id': 1, 'lieferant': 'Historischer Lieferant A', 'original_name': 'SYNTHETIC-INVOICE.pdf'}],
+            'lieferantenrechnungen': []})
+        candidates = [catalog_fixture.candidate(artikelnummer='TEST-50', ve='Rollen', gebinde='6 Rollen', preis='47.74',
+            source={'page': 2, 'position': index + 1, 'date': '2026-08-14'},
+            price_evidence={'value': '47.74', 'basis': 'gebindepreis_netto_abgeleitet', 'reconciled': True,
+                            'currency': 'EUR', 'tax_basis': 'net', 'tax_rate': '19'}) for index in range(count)]
+        with patch('werkstatt_artikel_import.read_source', return_value=catalog_fixture.extracted(*candidates)):
+            catalog.process_next()
+        self.p.cockpit_data = SimpleNamespace(catalog=catalog)
+        service = self.p.order_price_comparison = OrderPriceComparison(self.p)
+        return source_portal, catalog, service
+
+    @staticmethod
+    def comparison_rows(get_db):
+        db = get_db()
+        try:
+            tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+            return {name: [tuple(row) for row in db.execute('SELECT * FROM "' + name.replace('"', '""') + '"')]
+                    for name in tables}
+        finally:
+            db.close()
+
+    @staticmethod
+    def readonly_db(get_db):
+        def connect():
+            db = get_db()
+            forbidden = {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE,
+                         sqlite3.SQLITE_CREATE_TABLE, sqlite3.SQLITE_DROP_TABLE}
+            db.set_authorizer(lambda action, *args: sqlite3.SQLITE_DENY if action in forbidden else sqlite3.SQLITE_OK)
+            return db
+        return connect
+
+    def test_selected_real_comparison_catalog_failure_is_visible_readonly_and_recovers(self):
+        from werkstatt_bestellvergleich_ui import comparison_context
+        source_portal, catalog, service = self.comparison_fixture()
+        before = self.comparison_rows(self.p.get_db), self.comparison_rows(source_portal.get_db)
+        contexts = []
+        def capture(*args):
+            result = comparison_context(*args)
+            contexts.append(result)
+            return result
+        for error_type in (RuntimeError, sqlite3.OperationalError):
+            with self.subTest(error=error_type.__name__), \
+                    patch.object(catalog, 'knowledge_rows', side_effect=error_type('PRIVATE_DATABASE_DETAIL')), \
+                    patch.object(self.p, 'get_db', side_effect=self.readonly_db(self.p.get_db)), \
+                    patch.object(source_portal, 'get_db', side_effect=self.readonly_db(source_portal.get_db)), \
+                    patch.object(self.manager, 'tick', side_effect=AssertionError('no dispatch')), \
+                    patch('werkstatt_bestellvergleich_ui.comparison_context', side_effect=capture), \
+                    self.assertLogs(level='WARNING') as logs:
+                response = self.client.get('/admin/assistent-bestellungen?bestellung=one')
+            self.assertEqual(response.status_code, 200)
+            html = response.get_data(as_text=True)
+            self.assertIn('Rechnungskandidaten derzeit nicht verfügbar.', html)
+            self.assertIn('Preisvergleich zur Bestellung', html)
+            self.assertIn('Grünes Band', html)
+            self.assertNotIn('PRIVATE_DATABASE_DETAIL', html + '\n'.join(logs.output))
+            self.assertNotIn('name="proposal_id"', html)
+            self.assertNotRegex(html, r'(?<![0-9])0,00\s*€')
+            self.assertEqual(contexts[-1]['order_comparison']['order']['key'], 'order:one')
+            self.assertEqual(contexts[-1]['comparison_candidates'], [])
+            self.assertTrue(contexts[-1]['comparison_candidates_unavailable'])
+            self.assertEqual(before, (self.comparison_rows(self.p.get_db), self.comparison_rows(source_portal.get_db)))
+        # Failed reads do not leave an unavailable flag or stale data on the next GET.
+        recovered = self.client.get('/admin/assistent-bestellungen?bestellung=one')
+        self.assertEqual(recovered.status_code, 200)
+        self.assertNotIn('Rechnungskandidaten derzeit nicht verfügbar.', recovered.get_data(as_text=True))
+        self.assertEqual(recovered.get_data(as_text=True).count('name="proposal_id"'), 2)
+
+    def test_selected_candidate_failure_discards_successful_partial_candidates(self):
+        from werkstatt_bestellvergleich_ui import comparison_context
+        source_portal, catalog, service = self.comparison_fixture()
+        before = self.comparison_rows(self.p.get_db), self.comparison_rows(source_portal.get_db)
+        contexts = []
+        successful = []
+        original = service._catalog_estimate
+        def capture(*args):
+            result = comparison_context(*args)
+            contexts.append(result)
+            return result
+        for error_type in (RuntimeError, sqlite3.OperationalError):
+            successful.clear()
+            def estimate(order, payload):
+                if successful:
+                    raise error_type('PRIVATE_CANDIDATE_DETAIL')
+                price = original(order, payload)
+                successful.append(price)
+                return price
+            with self.subTest(error=error_type.__name__), \
+                    patch.object(service, '_catalog_estimate', side_effect=estimate) as lookup, \
+                    patch('werkstatt_bestellvergleich_ui.comparison_context', side_effect=capture), \
+                    self.assertLogs('werkstatt_bestellvergleich_ui', level='WARNING') as logs:
+                response = self.client.get('/admin/assistent-bestellungen?bestellung=one')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(lookup.call_count, 2)
+            self.assertEqual(len(successful), 1)  # The first real candidate was valid before the second failed.
+            html = response.get_data(as_text=True)
+            self.assertIn('Rechnungskandidaten derzeit nicht verfügbar.', html)
+            self.assertNotIn('PRIVATE_CANDIDATE_DETAIL', html + '\n'.join(logs.output))
+            self.assertNotIn('name="proposal_id"', html)
+            self.assertEqual(contexts[-1]['comparison_candidates'], [])
+            self.assertTrue(contexts[-1]['comparison_candidates_unavailable'])
+            self.assertEqual(contexts[-1]['order_comparison']['order']['key'], 'order:one')
+            self.assertEqual(before, (self.comparison_rows(self.p.get_db), self.comparison_rows(source_portal.get_db)))
+
+    def test_candidate_domain_rejections_keep_existing_behavior_and_other_valid_candidate(self):
+        from werkstatt_bestellvergleich_ui import comparison_context
+        source_portal, catalog, service = self.comparison_fixture()
+        original = service._catalog_estimate
+        for error_type in (PermissionError, ValueError, LookupError):
+            calls = []
+            def estimate(order, payload):
+                calls.append(payload)
+                if len(calls) == 1:
+                    raise error_type('PRIVATE_REJECTION_DETAIL')
+                return original(order, payload)
+            with self.subTest(error=error_type.__name__), patch.object(service, '_catalog_estimate', side_effect=estimate):
+                response = self.client.get('/admin/assistent-bestellungen?bestellung=one')
+            self.assertEqual(response.status_code, 200)
+            html = response.get_data(as_text=True)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(html.count('name="proposal_id"'), 1)
+            self.assertNotIn('Rechnungskandidaten derzeit nicht verfügbar.', html)
+            self.assertNotIn('PRIVATE_REJECTION_DETAIL', html)
+            with self.subTest(read_rejection=error_type.__name__), \
+                    patch.object(catalog, 'knowledge_rows', side_effect=error_type('PRIVATE_REJECTION_DETAIL')), \
+                    self.assertLogs('werkstatt_bestellungen', level='WARNING'):
+                response = self.client.get('/admin/assistent-bestellungen?bestellung=one')
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn('Rechnungskandidaten derzeit nicht verfügbar.', response.get_data(as_text=True))
+            self.assertNotIn('name="proposal_id"', response.get_data(as_text=True))
+
+    def test_selected_detail_and_delivery_errors_are_not_masked_as_catalog_unavailability(self):
+        source_portal, catalog, service = self.comparison_fixture()
+        for target, attribute in ((service, 'detail'), ('werkstatt_liefereingang', 'delivery_context')):
+            context = (patch.object(target, attribute, side_effect=RuntimeError('REQUIRED_DATA_ERROR'))
+                       if not isinstance(target, str) else patch(target + '.' + attribute, side_effect=RuntimeError('REQUIRED_DATA_ERROR')))
+            with self.subTest(attribute=attribute), context, self.assertRaisesRegex(RuntimeError, 'REQUIRED_DATA_ERROR'):
+                self.client.get('/admin/assistent-bestellungen?bestellung=one')
+
     def test_dated_archives_keep_all_126_positions_and_new_open_work_separate(self):
         self.batch('monday',state='sent')
         with self.manager.db() as db:

@@ -57,11 +57,17 @@ aktuellen Prüfungen.
 
 Scheitert ausschließlich die optionale Historienauswertung technisch, erscheint
 **Historischer Rechnungspreis derzeit nicht verfügbar**. Der fehlende Wert wird
-weder durch 0 Euro noch durch einen älteren Rechnungswert ersetzt. Das gilt für
-die Historienauswertung; die getrennte Kandidatenanzeige im Preisvergleich hat
-noch einen eigenen technischen Fehlerpfad und benötigt eine weitere gezielte
-Absicherung. Andere Datenbank- oder Schreibfehler werden nicht als erfolgreiche
-Historienanzeige ausgegeben.
+weder durch 0 Euro noch durch einen älteren Rechnungswert ersetzt.
+
+Scheitert die optionale Katalogabfrage für die Kandidaten im ausgewählten
+Preisvergleich technisch, erscheint **Rechnungskandidaten derzeit nicht
+verfügbar**. Das gilt auch, wenn erst die Auflösung eines späteren Kandidaten
+ausfällt: Bereits gesammelte Kandidaten werden für diese Anzeige verworfen.
+Gespeicherte Vergleichsnachweise, Bestell- und Lieferdaten bleiben erhalten.
+Die nächste GET-Anfrage prüft den Katalog erneut. Fachliche Ablehnungen wegen
+fehlender Freigaben oder unpassender Identitäten behalten ihre bisherige
+Behandlung; andere Datenbank-, Liefer- oder Schreibfehler werden nicht als
+erfolgreiche Kataloganzeige ausgegeben.
 
 ## Prüfung
 
@@ -79,8 +85,18 @@ Lieferantenfreigaben und Quellenquarantäne bei der nächsten GET-Anfrage,
 technische Nichtverfügbarkeit ohne Ersatzpreis, unveränderte Mutationsfehler
 sowie die Trennung gleichzeitiger Anzeigekontexte und deren Auflösung bei Fehlern.
 
-Stand 09.10.2026: `test_topcolor_preisstand.py` (23 bestanden, ein optionaler
+Der Historienfix wurde am 09.10.2026 zuvor geprüft: `test_topcolor_preisstand.py` (23 bestanden, ein optionaler
 externer Archivtest übersprungen), `test_bestelluebersicht.py` (25),
 `test_bestellungen.py` (28), `test_artikel_import.py` (43) und
 `test_bestellvergleich.py` (23): zusammen 142 bestandene Tests. Syntaxprüfung und
 `git diff --check` sind ebenfalls bestanden. Alle neuen Testdaten sind synthetisch.
+
+Die gezielte Kandidatenabsicherung wurde anschließend mit
+`test_bestelluebersicht.py` (29), `test_bestellvergleich.py` (23) und
+`test_bestellvergleich_ui.py` (36) geprüft: 88 bestandene Testausführungen,
+darunter 59 verschiedene Testfälle, weil die UI-Suite die 29 Übersichtstests
+erneut ausführt. Neue echte GET-Fälle prüfen technische Katalogfehler, einen
+Ausfall nach einem gültigen Kandidaten, die erneute erfolgreiche Anzeige,
+unveränderte fachliche Ablehnungen sowie weiterhin propagierende Bestell- und
+Lieferfehler. Die Prozesse liefen mit temporären synthetischen Datenbanken,
+gesperrtem Netzwerk und einer harten Frist von jeweils 120 Sekunden.
