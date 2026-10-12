@@ -676,7 +676,8 @@ class MaterialDialog:
         snapshot = json.loads(row.pop('snapshot_json'))
         fingerprint = row.pop('snapshot_hash')
         row['external_order'] = snapshot if (row['state'] in EXTERNAL_STATES
-            and snapshot.get('kind') == 'manual_external_order' and _fingerprint(snapshot) == fingerprint) else {}
+            and snapshot.get('kind') in {'manual_external_order','recorded_external_order'}
+            and _fingerprint(snapshot) == fingerprint) else {}
         row.pop('analysis_lease')
         row['code'] = 'M-' + str(row['id']) + ' R' + str(row['revision'])
         row['questions'] = [dict(q) for q in db.execute('SELECT id,revision,field,body,state,error_code FROM einkauf_material_rueckfragen WHERE draft_id=? ORDER BY id DESC LIMIT 8',(draft_id,)).fetchall()]
@@ -1010,6 +1011,128 @@ class MaterialDialog:
             db.execute("UPDATE einkauf_material_rueckfragen SET state='superseded',updated_at=? WHERE draft_id=? AND state='queued'",(self.clock(),draft_id))
             self._external_audit(db,'material_external_reserved',draft_id,draft['revision']+1,claim)
             return self._view(db,draft_id)
+
+    def record_external_batch(self, selections, payload, actor='admin'):
+        """Record a witnessed WhatsApp batch after sending; never reserve or send.
+
+        The shared receipt and budget apply to the whole batch. The original
+        employee quantities, identities and prices are not rewritten. Even an
+        inactive employee's already completed action must remain recordable.
+        """
+        keys = {'supplier_id','recipient','subject','sent_at','send_evidence',
+                'source_key','max_total_cents','confirmed'}
+        if actor != 'admin' or not isinstance(payload,dict) or payload.get('confirmed') is not True:
+            raise PermissionError('Den bereits erfolgten WhatsApp-Versand muss die Werkstattleitung ausdrücklich belegen.')
+        if set(payload) != keys:
+            raise ValueError('Lieferant, WhatsApp-Empfänger, Versandzeit und gemeinsamer Versandnachweis fehlen.')
+        if not isinstance(selections,(list,tuple)) or not 1 <= len(selections) <= 100:
+            raise ValueError('Eine bis 100 tatsächlich versandte Anforderungen auswählen.')
+        selected = []
+        for pair in selections:
+            if not isinstance(pair,(list,tuple)) or len(pair) != 2:
+                raise ValueError('Die Auswahl ist veraltet. Bitte neu laden.')
+            selected.append((_row_id(pair[0]),_row_id(pair[1])))
+        selected.sort()
+        if len({key for key,_ in selected}) != len(selected):
+            raise ValueError('Jede Anforderung genau einmal auswählen.')
+        data = {key:self._external_text(payload[key],1000 if key == 'send_evidence' else 500)
+                for key in keys - {'confirmed','max_total_cents'}}
+        if not re.fullmatch(r'\+[1-9][0-9]{6,14}',data['recipient']):
+            raise ValueError('Die tatsächlich verwendete WhatsApp-Nummer im internationalen Format +49… angeben.')
+        if not _key(data['source_key'],200):
+            raise ValueError('Eine eindeutige Versandreferenz mit höchstens 200 Zeichen angeben.')
+        try:
+            sent = datetime.fromisoformat(data['sent_at'])
+            if sent.tzinfo is None or sent.utcoffset() is None:
+                raise ValueError()
+            if sent.timestamp() > self.clock() + 60:
+                raise ValueError()
+            data['sent_at'] = sent.astimezone(timezone.utc).isoformat()
+        except (TypeError,ValueError,OverflowError):
+            raise ValueError('Den tatsächlichen, bereits erfolgten Versand mit Zeitzone angeben.') from None
+        cap = payload['max_total_cents']
+        if cap is not None and (type(cap) is not int or not 0 < cap <= min(25000,self.p.workshop_orders.cap())):
+            raise ValueError('Die belegte gemeinsame Brutto-Obergrenze darf höchstens 250 Euro betragen.')
+        supplier = self.p.workshop_orders.resolve_supplier(data['supplier_id'])
+        if not supplier or not isinstance(supplier.get('name'),str) or not supplier['name'].strip():
+            raise ValueError('Den vorhandenen Lieferantenkontakt auswählen.')
+        data.update(max_total_cents=cap,channel='whatsapp',cap_scope='batch')
+        batch_selection = [{'id':key,'revision':revision} for key,revision in selected]
+        payload_hash = _fingerprint(dict(data,selection=batch_selection))
+        with self.p.portal_originals_operation_lock(), self.db() as db:
+            # Take the same row write locks used by dispatch before inspecting
+            # ownership or enqueue state. All selected rows commit together.
+            for draft_id,_ in selected:
+                db.execute('UPDATE einkauf_material_dialoge SET updated_at=updated_at WHERE id=?',(draft_id,))
+            existing = []
+            for row in db.execute("SELECT * FROM einkauf_material_dialoge WHERE state='external_sent'").fetchall():
+                claim = json.loads(row['snapshot_json'])
+                if claim.get('kind') == 'recorded_external_order' and claim.get('source_key') == data['source_key']:
+                    existing.append((dict(row),claim))
+            if existing:
+                if (len(existing) != len(selected) or {row['id'] for row,_ in existing} != {key for key,_ in selected}
+                        or any(_fingerprint(claim) != row['snapshot_hash']
+                               or claim.get('batch_payload_hash') != payload_hash
+                               or claim.get('batch_selection') != batch_selection
+                               or any(claim.get(key) != json.loads(row['fields_json']).get(key,{}).get('value')
+                                      for key in ('quantity','unit','urgent')) for row,claim in existing)
+                        or len({claim.get('batch_id') for _,claim in existing}) != 1):
+                    raise ValueError('Diese Versandreferenz ist bereits mit einem anderen oder veränderten Nachweis gespeichert.')
+                return {'count':len(existing),'batch_id':existing[0][1]['batch_id'],
+                        'sent_at':data['sent_at'],'ids':[key for key,_ in selected],'replayed':True}
+            prepared = []
+            for draft_id,revision in selected:
+                draft = self._draft(db,draft_id,revision)
+                if self._accepted(db,draft) or draft['state'] in {'accepted','cancelled'}:
+                    raise ValueError('Ein ausgewählter Vorgang ist bereits übergeben, extern bestellt oder entfernt. Nicht erneut bestellen.')
+                source = db.execute('SELECT * FROM einkauf_material_nachrichten WHERE id=?',(draft['message_id'],)).fetchone()
+                if (not source or source['state'] not in {'ready','text_ready'} or source['forwarded']
+                        or type(source['employee_id']) is not int or source['employee_id'] < 1):
+                    raise PermissionError('Die ursprüngliche persönliche Anforderung muss erhalten und eindeutig zugeordnet sein.')
+                details = portal_request_details(source)
+                if details and details['vorgang'] == 'anfrage':
+                    raise ValueError('Eine Teileanfrage darf nicht als versandte Bestellung erfasst werden.')
+                if sent.timestamp() < draft['created_at']:
+                    raise ValueError('Eine erst nach dem Versand angelegte Anforderung gehört nicht zu diesem Nachweis.')
+                fields = json.loads(draft['fields_json'])
+                values = {key:fields.get(key,{}).get('value') for key in ('quantity','unit','urgent','order_requested')}
+                if (values['order_requested'] is not True or type(values['urgent']) is not bool
+                        or not isinstance(values['quantity'],str)
+                        or not re.fullmatch(r'[0-9]{1,8}(?:\.[0-9]{1,6})?',values['quantity'])
+                        or Decimal(values['quantity']) <= 0 or values['unit'] not in set(UNITS.values())):
+                    raise ValueError('Die gespeicherte Anforderung benötigt einen eindeutigen Bestellwunsch, Menge und Einheit.')
+                review = json.loads(draft['review_json'])
+                manual = fields.get('manual_article',{}).get('value',{})
+                analysis = json.loads(draft['analysis_json'])
+                labels = analysis.get('merkmale',{}) if isinstance(analysis.get('merkmale'),dict) else {}
+                identity = {'product_name':review.get('product_name') or manual.get('product_name') or labels.get('produkt') or '',
+                            'article_number':review.get('article_number') or manual.get('article_number') or '',
+                            'variant':review.get('variant') or manual.get('variant') or labels.get('farbe') or labels.get('breite') or ''}
+                prepared.append((draft,dict(source),values,{key:_note(value,500) for key,value in identity.items()}))
+            batch_id = secrets.token_hex(16)
+            recorded_at = datetime.fromtimestamp(self.clock(),timezone.utc).isoformat()
+            for draft,source,values,identity in prepared:
+                claim = dict(data,kind='recorded_external_order',batch_id=batch_id,batch_selection=batch_selection,
+                             batch_payload_hash=payload_hash,draft_id=draft['id'],source_revision=draft['revision'],
+                             supplier_name=supplier['name'],employee_id=source['employee_id'],
+                             quantity=values['quantity'],unit=values['unit'],urgent=values['urgent'],
+                             recorded_by='admin',recorded_at=recorded_at,**identity)
+                changed = db.execute("""UPDATE einkauf_material_dialoge SET state='external_sent',revision=revision+1,
+                    snapshot_json=?,snapshot_hash=?,analysis_lease='',analysis_until=0,missing_json='[]',error_code='',updated_at=?
+                    WHERE id=? AND revision=?""",(_json(claim),_fingerprint(claim),self.clock(),draft['id'],draft['revision']))
+                if changed.rowcount != 1:
+                    raise ValueError('Eine ausgewählte Anforderung wurde zwischenzeitlich geändert. Bitte neu laden.')
+                db.execute("UPDATE einkauf_material_rueckfragen SET state='superseded',updated_at=? WHERE draft_id=? AND state='queued'",
+                           (self.clock(),draft['id']))
+                # Keep the existing irreversible-send audit action so the
+                # restore guard also protects this channel's receipt.
+                audit = {'draft_id':draft['id'],'revision':draft['revision']+1,'batch_id':batch_id,
+                         'source_key':data['source_key'],'snapshot_hash':_fingerprint(claim),
+                         'channel':'whatsapp','recipient':data['recipient'],'max_total_cents':cap,'cap_scope':'batch'}
+                db.execute('INSERT INTO assistent_audit(actor,auftrag_id,aktion,details,zeit) VALUES(?,?,?,?,?)',
+                           ('admin',None,'material_external_sent',_json(audit),recorded_at))
+            return {'count':len(prepared),'batch_id':batch_id,'sent_at':data['sent_at'],
+                    'ids':[key for key,_ in selected],'replayed':False}
 
     def record_external_sent(self, draft_id, revision, payload, actor='admin'):
         """Record a witnessed external send, including after rights revocation."""

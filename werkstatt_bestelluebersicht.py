@@ -184,6 +184,49 @@ class OrderOverview:
                 'article_number':_text(intent.get('article_number'),128),'unit':_text(intent.get('unit'),60),'packaging':''},
         }
 
+    @staticmethod
+    def _recorded_external_intact(row, snapshot, fields, fingerprint):
+        """Validate a retrospective WhatsApp batch without inventing a reservation."""
+        selection = snapshot.get('batch_selection')
+        if (row['state'] != 'external_sent' or snapshot.get('kind') != 'recorded_external_order'
+                or fingerprint != row['snapshot_hash'] or snapshot.get('draft_id') != row['id']
+                or snapshot.get('channel') != 'whatsapp' or snapshot.get('cap_scope') != 'batch'
+                or snapshot.get('recorded_by') != 'admin'
+                or not isinstance(selection,list) or not 1 <= len(selection) <= 100
+                or type(snapshot.get('source_revision')) is not int or snapshot['source_revision'] < 1
+                or type(snapshot.get('employee_id')) is not int or snapshot['employee_id'] < 1
+                or type(snapshot.get('urgent')) is not bool
+                or not re.fullmatch(r'[a-f0-9]{32}',_text(snapshot.get('batch_id')))
+                or not re.fullmatch(r'[a-f0-9]{64}',_text(snapshot.get('batch_payload_hash')))
+                or not re.fullmatch(r'\+[1-9][0-9]{6,14}',_text(snapshot.get('recipient')))
+                or any(not isinstance(snapshot.get(k),str) or not snapshot[k].strip()
+                       for k in ('supplier_id','supplier_name','subject','source_key','send_evidence'))
+                or any(not isinstance(member,dict) or set(member) != {'id','revision'}
+                       or any(type(member[k]) is not int or member[k] < 1 for k in ('id','revision'))
+                       for member in selection)):
+            return False
+        ids = [member['id'] for member in selection]
+        if (ids != sorted(set(ids)) or {'id':row['id'],'revision':snapshot.get('source_revision')} not in selection
+                or any(snapshot.get(k) != fields.get(k,{}).get('value') for k in ('quantity','unit','urgent'))
+                or not re.fullmatch(r'[0-9]{1,8}(?:\.[0-9]{1,6})?',_text(snapshot.get('quantity')))
+                or float(snapshot['quantity']) <= 0 or not _text(snapshot.get('unit'))):
+            return False
+        cap = snapshot.get('max_total_cents')
+        if cap is not None and (type(cap) is not int or not 0 < cap <= 25000):
+            return False
+        shared = {key:snapshot.get(key) for key in ('supplier_id','recipient','subject','sent_at',
+                  'send_evidence','source_key','max_total_cents','channel','cap_scope')}
+        shared['selection'] = selection
+        payload_hash = hashlib.sha256(json.dumps(shared,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        if payload_hash != snapshot['batch_payload_hash']:
+            return False
+        try:
+            sent,recorded = (datetime.fromisoformat(snapshot.get(k,'')) for k in ('sent_at','recorded_at'))
+            return (sent.utcoffset() is not None and recorded.utcoffset() is not None
+                    and sent.timestamp() <= recorded.timestamp()+60)
+        except (TypeError,ValueError,OverflowError):
+            return False
+
     def _material_line(self, raw, people, contacts):
         """Project evidence only; never run MaterialDialog or dispatch recovery."""
         row = dict(raw)
@@ -224,6 +267,11 @@ class OrderOverview:
                 intact = False
             intact = (intact and isinstance(snapshot.get('send_evidence'),str)
                 and bool(snapshot['send_evidence'].strip()) and snapshot.get('recorded_by')=='admin')
+        recorded = snapshot.get('kind') == 'recorded_external_order'
+        if recorded:
+            intact = self._recorded_external_intact(row,snapshot,fields,fingerprint)
+            if row.get('source_employee_id') is not None:
+                intact = intact and snapshot.get('employee_id') == row['source_employee_id']
         warnings = []
         state = {'open':'material_open','review':'material_review','approved':'material_ready',
                  'accepted':'material_accepted','cancelled':'cancelled'}.get(row['state'],'unknown')
@@ -260,9 +308,12 @@ class OrderOverview:
         created = row['created_at']
         events = []
         if intact:
-            events.append({'label':'Einzelbestellung extern reserviert','time':_stamp(snapshot.get('reserved_at'))})
+            if recorded:
+                events.append({'label':'WhatsApp-Bestellung nachgetragen','time':_stamp(snapshot.get('recorded_at'))})
+            else:
+                events.append({'label':'Einzelbestellung extern reserviert','time':_stamp(snapshot.get('reserved_at'))})
             if state=='external_sent':
-                events.append({'label':'Externer Mailversand nachgewiesen','time':_stamp(snapshot['sent_at'])})
+                events.append({'label':'WhatsApp-Versand nachgewiesen' if recorded else 'Externer Mailversand nachgewiesen','time':_stamp(snapshot['sent_at'])})
         return {'id':source,'source':source,'draft':False,'material_id':row['id'],
             'channel':'Fotoformular' if row.get('source_channel') == 'portal:personal' else 'WhatsApp','actor':actor,'person':self._person(actor,people),
             'supplier_id':supplier_id,'supplier':supplier or 'Lieferant noch zuordnen','product':product,
@@ -274,8 +325,8 @@ class OrderOverview:
             'urgency':'Dringende Anfrage' if inquiry and urgent is True else 'Reguläre Anfrage' if inquiry else 'Dringend' if urgent is True else 'Sammelbestellung' if urgent is False else 'Nicht geklärt',
             'vorgang':'anfrage' if inquiry else 'bestellung','beschreibung':description,
             'created':_stamp(created),'due':'Interne Teileklärung' if inquiry else 'Extern versandt' if state=='external_sent' else 'Versandnachweis offen' if state=='external_pending' else 'Noch nicht eingeplant',
-            'state':state,'state_label':'Mögliche Doppelbestellung – Rückfrage offen' if duplicate_pending else STATES[state],'warnings':warnings,'overdue':False,
-            'total':'nicht belegt','cap':_money(snapshot.get('max_total_cents')) if intact else 'nicht belegt',
+            'state':state,'state_label':'Bestellt – WhatsApp-Nachweis gespeichert' if recorded and intact else 'Mögliche Doppelbestellung – Rückfrage offen' if duplicate_pending else STATES[state],'warnings':warnings,'overdue':False,
+            'total':'nicht belegt','cap':(_money(snapshot.get('max_total_cents')) + ' gesamt' if recorded and snapshot.get('max_total_cents') is not None else _money(snapshot.get('max_total_cents'))) if intact else 'nicht belegt',
             'verified':False,'unit_price':'nicht belegt','shipping':'nicht belegt','extra':'nicht belegt',
             'actual_price':'nicht belegt','actual_price_known':False,'price_source':'Aktueller Rechnungsbetrag noch nicht belegt',
             'request_id':source,'action_id':None,'order_id':0,'batch_id':'','attempts':0,
@@ -331,7 +382,7 @@ class OrderOverview:
                 label = 'Versand bestätigt – Datum nicht belegt'
             else:
                 day = date.fromisoformat(key.split(':')[1]).strftime('%d.%m.%Y')
-                label = ('Bestellung am ' if key.startswith('sent:') else 'Bestelllauf am ')+day
+                label = ('Bestellt am ' if key.startswith('sent:') else 'Bestelllauf am ')+day
             archive_groups.append({'key':key,'label':label,'count':len(lines),'page':page,'pages':pages,
                 'legacy':not key.startswith('sent:'),'expanded':requested==key,
                 'items':lines[(page-1)*self.PAGE_SIZE:page*self.PAGE_SIZE]})

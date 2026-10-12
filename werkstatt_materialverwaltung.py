@@ -209,4 +209,35 @@ def register_material_admin(p):
             flash(str(exc),'error')
         return redirect(url_for('werkstatt_orders.intake_index', material=draft_id, _anchor='materialdialog'),code=303)
 
+    @bp.post('/extern-sammelbestellung-nachtragen')
+    def record_external_batch():
+        archive_day = ''
+        try:
+            selections = []
+            for value in request.form.getlist('selection'):
+                match = re.fullmatch(r'([1-9][0-9]*):([1-9][0-9]*)',value)
+                if not match:
+                    raise ValueError('Die Auswahl ist veraltet. Bitte neu laden.')
+                selections.append((int(match[1]),int(match[2])))
+            if not 1 <= len(selections) <= 100 or request.form.get('confirmed') != 'ja':
+                raise ValueError('Die ausgewählten Anforderungen und ihren bereits erfolgten WhatsApp-Versand ausdrücklich bestätigen.')
+            sent = datetime.fromisoformat(request.form.get('sent_at','').strip())
+            berlin = ZoneInfo('Europe/Berlin')
+            if sent.tzinfo is None:
+                # datetime-local has no offset. Reject ambiguous/nonexistent
+                # wall times instead of guessing a DST fold.
+                if sent.replace(tzinfo=berlin,fold=0).utcoffset() != sent.replace(tzinfo=berlin,fold=1).utcoffset():
+                    raise ValueError('Diese Uhrzeit ist durch die Zeitumstellung nicht eindeutig. Bitte eine Sendezeit mit Zeitzone angeben.')
+                sent = sent.replace(tzinfo=berlin)
+            payload = {key:request.form.get(key,'').strip() for key in (
+                'supplier_id','recipient','subject','send_evidence','source_key')}
+            maximum = request.form.get('max_total','').strip()
+            payload.update(sent_at=sent.isoformat(),max_total_cents=euro_cents(maximum) if maximum else None,confirmed=True)
+            result = p.material_dialog.record_external_batch(selections,payload,actor='admin')
+            archive_day = 'sent:' + datetime.fromisoformat(result['sent_at']).astimezone(berlin).date().isoformat()
+            flash(f"{result['count']} bereits per WhatsApp bestellte Positionen mit gemeinsamem Versandnachweis gespeichert. Kein erneuter Versand wurde ausgelöst.",'success')
+        except (ValueError,PermissionError,LookupError) as exc:
+            flash(str(exc),'error')
+        return redirect(url_for('werkstatt_orders.index',archive_day=archive_day,_anchor='versandte-bestellungen' if archive_day else 'offene-bestellungen'),code=303)
+
     p.app.register_blueprint(bp)

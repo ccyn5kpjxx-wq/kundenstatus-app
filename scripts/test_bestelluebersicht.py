@@ -318,7 +318,7 @@ class OverviewTests(unittest.TestCase):
         data=self.reader.page({},now=self.now)
         self.assertEqual([item['id'] for item in data['open']['items']],['new-open'])
         group=data['archive_groups'][0]
-        self.assertEqual(group['label'],'Bestellung am 12.10.2026')
+        self.assertEqual(group['label'],'Bestellt am 12.10.2026')
         self.assertEqual((group['count'],group['pages']),(126,6))
         seen=[]
         for page in range(1,7):
@@ -427,6 +427,98 @@ class OverviewTests(unittest.TestCase):
                  canonical(snapshot),'broken' if broken else hashlib.sha256(canonical(snapshot).encode()).hexdigest(),dispatch,
                  created if created is not None else self.now.timestamp()))
             db.commit()
+
+    def recorded_material(self, key=1, *, members=None, cap=25000, recipient='+491701234567', **changes):
+        selection = [{'id':i,'revision':1} for i in (members or [key])]
+        shared = dict(supplier_id='supplier-a',recipient=recipient,
+            subject='Synthetische Montagsbestellung',sent_at='2026-10-12T13:08:00+00:00',
+            send_evidence='Zugestellt, zwei Seiten, synthetischer Nachweis',source_key='synthetic-batch-1',
+            max_total_cents=cap,channel='whatsapp',cap_scope='batch')
+        shared_hash=hashlib.sha256(canonical(dict(shared,selection=selection)).encode()).hexdigest()
+        snapshot=dict(shared,kind='recorded_external_order',batch_id='a'*32,batch_payload_hash=shared_hash,
+            batch_selection=selection,source_revision=1,recorded_at='2026-10-12T13:30:00+00:00',
+            product_name='Synthetisches Material',article_number='',variant='')
+        snapshot.update(changes)
+        self.material(key,**snapshot)
+
+    def test_recorded_whatsapp_batch_moves_all_22_to_date_folder_preserving_older_order(self):
+        members=list(range(1,23))
+        for key in members:
+            self.recorded_material(key,members=members)
+        self.material(99)
+        data=self.reader.page({'archive_day':'sent:2026-10-12'},now=self.now)
+        self.assertEqual(data['open']['count'],0)
+        self.assertEqual(data['archive_count'],23)
+        group=data['archive_groups'][0]
+        self.assertEqual((group['label'],group['count']),('Bestellt am 12.10.2026',22))
+        self.assertEqual(len(group['items']),22)
+        self.assertEqual(data['archive_groups'][1]['count'],1)
+        for item in group['items']:
+            self.assertEqual(item['state_label'],'Bestellt – WhatsApp-Nachweis gespeichert')
+            self.assertEqual((item['quantity'],item['unit']),('1','Stück'))
+            self.assertEqual(item['cap'],'250,00 € gesamt')
+            self.assertFalse(item['actual_price_known'])
+            self.assertFalse(item['editable'])
+            self.assertFalse(any('reserviert' in e['label'] for e in item['events']))
+
+    def test_recorded_batch_nullable_cap_and_identity_render_without_private_reservation_fields(self):
+        self.recorded_material(cap=None,product_name='',article_number='',variant='')
+        item=self.reader.page({'bestellung':'material:1'},now=self.now)['selected']
+        self.assertEqual(item['state'],'external_sent')
+        self.assertEqual(item['cap'],'nicht belegt')
+        self.assertEqual(item['sku'],'nicht belegt')
+        html=self.client.get('/admin/assistent-bestellungen?bestellung=material:1&archive_day=sent:2026-10-12').get_data(as_text=True)
+        self.assertIn('Bestellt am 12.10.2026',html)
+        self.assertIn('WhatsApp-Nachweis gespeichert',html)
+        self.assertNotIn('PRIVATE_MAIL_BODY',html)
+        self.assertNotIn('PRIVATE_AUTHORIZATION',html)
+
+    def test_recorded_whatsapp_phone_minimum_matches_backend(self):
+        self.recorded_material(recipient='+4912345')
+        item=self.reader.page({'bestellung':'material:1'},now=self.now)['selected']
+        self.assertEqual(item['state'],'external_sent')
+        self.assertEqual(item['recipient'],'+4912345')
+
+    def test_rehashed_inconsistent_batch_evidence_is_not_projected_as_valid_order(self):
+        for index,change in enumerate(({'recipient':'bad-email@example.invalid'},
+                {'source_revision':2},{'batch_selection':[{'id':99,'revision':1}]},
+                {'sent_at':'2026-10-13T13:08:00+00:00'}, {'batch_payload_hash':'b'*64}),1):
+            self.recorded_material(index,**change)
+        data=self.reader.page({},now=self.now)
+        self.assertEqual(data['archive_count'],0)
+        self.assertEqual(data['open']['count'],5)
+        self.assertTrue(all(not item['editable'] for item in data['open']['items']))
+
+    def test_open_overview_offers_explicit_batch_record_separately_from_removal(self):
+        self.material(state='review')
+        html=self.client.get('/admin/assistent-bestellungen').get_data(as_text=True)
+        self.assertIn('Bereits per WhatsApp bestellt',html)
+        self.assertIn('Als bestellt ablegen',html)
+        self.assertIn('extern-sammelbestellung-nachtragen',html)
+        self.assertIn('formnovalidate',html)
+        self.assertIn('name="selection" value="1:1"',html)
+        self.assertIn('Grund für das Entfernen',html)
+        self.assertIn('name="confirmed" value="ja"',html)
+
+    def test_whatsapp_detail_template_handles_unknown_cap_without_fake_reservation(self):
+        self.recorded_material(cap=None)
+        with self.manager.db() as db:
+            row=db.execute('SELECT snapshot_json FROM einkauf_material_dialoge WHERE id=1').fetchone()
+        snapshot=json.loads(row['snapshot_json'])
+        register_material_admin(self.p)
+        current=dict(id=1,code='M-1',review={},fields={},analysis={},state='external_sent',
+            external_order=snapshot,vorgang='bestellung',internal_review_pending=False,
+            employee_reply_required=False,beschreibung='',article_correction=False,intake_id=None,dispatch_id='')
+        with self.p.app.test_request_context('/'):
+            html=self.p.app.jinja_env.get_template('materialdialog.html').render(material_dialogs=[],
+                material_current=current,material_files=[],material_replies_enabled=True,
+                material_unresolved_texts=lambda:[])
+        self.assertIn('WhatsApp-Sammelbestellung',html)
+        self.assertIn('Nicht belegt',html)
+        self.assertIn('Nachgetragen am',html)
+        self.assertNotIn('Reservierter Bestelltext',html)
+        self.assertNotIn('PRIVATE_MAIL_BODY',html)
+        self.assertNotIn('PRIVATE_AUTHORIZATION',html)
 
     def test_admin_only_and_readonly_no_dispatch_or_file_recovery(self):
         self.order('one')

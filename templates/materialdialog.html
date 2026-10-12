@@ -37,14 +37,17 @@
 {% if item.analysis.get('treffer') %}<details><summary>Ursprüngliche Artikelerkennung ansehen</summary>{% for hit in item.analysis.treffer %}<article><p><strong>{{ hit.produkt_name }}</strong> · {{ hit.groesse }} {{ hit.farbe }}</p><small>{{ hit.lieferant }} · Artikel {{ hit.artikelnummer }} · {{ hit.gebinde }} {{ hit.ve }}</small>{% if hit.quelle %}<small>Quelle: {{ hit.quelle.get('bezeichnung') or hit.quelle.get('quelle') or 'Gespeicherter Rechnungsartikel' }}{% if hit.quelle.get('seite') %} · Seite {{ hit.quelle.seite }}{% endif %}</small>{% endif %}</article>{% endfor %}</details>{% endif %}
 {% if item.state in ['external_pending','external_sent'] %}
 {% set external=item.external_order %}
-<article class="notice"><h4>Einmalige externe Bestellung</h4>
+<article class="notice"><h4>{{ 'Bestellt - WhatsApp-Sammelbestellung' if external and external.kind=='recorded_external_order' else 'Einmalige externe Bestellung' }}</h4>
 <p>Dieser Vorgang ist dauerhaft für die Bestellautomatik gesperrt.</p>
 {% if external %}<dl><dt>Artikel</dt><dd>{{ external.quantity }} {{ external.unit }} {{ external.product_name }} · {{ external.variant }} · Artikel {{ external.article_number }}</dd>
 <dt>Lieferant / Empfänger</dt><dd>{{ external.supplier_name }} · {{ external.recipient }}</dd><dt>Betreff</dt><dd>{{ external.subject }}</dd>
-<dt>Verbindliche Gesamtobergrenze</dt><dd>{{ '%.2f'|format(external.max_total_cents/100) }} € einschließlich Mehrwertsteuer, Versand und aller Nebenkosten</dd>
+<dt>{{ 'Gemeinsame Obergrenze der gesamten Bestellung' if external.kind=='recorded_external_order' else 'Verbindliche Gesamtobergrenze' }}</dt><dd>{% if external.max_total_cents is not none %}{{ '%.2f'|format(external.max_total_cents/100) }} € einschließlich Mehrwertsteuer, Versand und aller Nebenkosten{% else %}Nicht belegt{% endif %}</dd>
+{% if external.kind=='recorded_external_order' %}<dt>Nachgetragen am</dt><dd>{{ material_time(external.recorded_at) }}</dd><dt>Positionen dieser Bestellung</dt><dd>{{ external.batch_selection|length }}</dd></dl>
+{% else %}
 <dt>Reservierung</dt><dd>{{ external.reservation_id }} · {{ material_time(external.reserved_at) }}</dd>
 <dt>Empfängerbeleg</dt><dd>{{ external.recipient_source }}</dd><dt>Einzelfreigabe</dt><dd>{{ external.authorization_note }}</dd></dl>
 <details><summary>Reservierter Bestelltext</summary><pre>{{ external.body }}</pre></details>
+{% endif %}
 {% if item.state=='external_sent' %}<p><strong>Versandt am {{ material_time(external.sent_at) }}</strong></p><p>Nachweis: {{ external.send_evidence }}</p><small>Der Lieferant muss Gesamtpreis und Liefertermin noch bestätigen. Dieser Nachweis ist keine Lieferbestätigung.</small>
 {% else %}<p><strong>Noch kein Versandnachweis gespeichert.</strong> Vor dem einmaligen Versand Empfänger, Betreff und Bestelltext mit dieser Reservierung abgleichen. Bei unklarem Sendeausgang zuerst das Postfach prüfen; nicht erneut senden.</p>
 <form method="post" action="{{ url_for('werkstatt_materialverwaltung.record_external_sent',draft_id=item.id) }}">

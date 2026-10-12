@@ -270,6 +270,8 @@ class OrderDelivery:
         identity = {name: _text(payload.get(name), name, 500, name == 'variant') for name in ('supplier', 'sku', 'variant', 'unit')}
         with self.p.portal_originals_operation_lock():
             order, group, file = self.source(key, group_id, file_id)
+            if order.get('identity_complete') is False:
+                raise ValueError(order['identity_reason'])
             automatic_fields = {}
             if automatic:
                 from werkstatt_lieferautomatik import matching_item, previous_delivery, document_identity

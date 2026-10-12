@@ -24,7 +24,20 @@
 <p class="muted">Artikel anklicken, um Name, Menge oder Einheit zu ändern. Noch offene Anforderungen können ausgewählt und entfernt werden.</p>
 <form method="post" action="/admin/assistent-bestellungen/eingang/material/entfernen" class="bulk-removal"><input type="hidden" name="csrf_token" value="{{ csrf }}">
 {{ order_table(overview.open['items'],selectable=true) }}
-{% if overview.open['items']|selectattr('editable')|list %}<div class="bulk-actions"><label>Grund für das Entfernen<input name="reason" maxlength="300" placeholder="z. B. doppelt angefordert oder nicht mehr benötigt" required></label><button class="danger-secondary">Ausgewählte entfernen</button><small>Bleibt im Verlauf erhalten und kann wiederhergestellt werden.</small></div>{% endif %}</form>
+{% if overview.open['items']|selectattr('editable')|list %}<div class="bulk-actions"><label>Grund für das Entfernen<input name="reason" maxlength="300" placeholder="z. B. doppelt angefordert oder nicht mehr benötigt" required></label><button class="danger-secondary">Ausgewählte entfernen</button><small>Bleibt im Verlauf erhalten und kann wiederhergestellt werden.</small></div>
+<details class="request-editor" id="externer-versand"><summary>Bereits per WhatsApp bestellt</summary>
+<p>Wähle oben die tatsächlich versandten Positionen aus. Mit dem Nachweis werden sie als bestellt unter dem Versanddatum abgelegt und für die automatische Bestellung gesperrt.</p>
+<input type="hidden" name="source_key" value="whatsapp-{{ request_id }}">
+<div class="grid"><label>Lieferant der versandten Bestellung<select name="supplier_id"><option value="">Bitte auswählen</option>{% for contact in contacts %}<option value="{{ contact.id }}">{{ contact.name }}</option>{% endfor %}</select></label>
+<label>WhatsApp-Empfänger<input name="recipient" type="tel" maxlength="20" placeholder="+49 …"></label>
+<label>Tatsächlich versandt am (Deutschland)<input name="sent_at" type="datetime-local"></label>
+<label>Bezeichnung der Bestellung<input name="subject" maxlength="300" placeholder="z. B. Montagsbestellung 12.10.2026"></label>
+<label>Gemeinsamer Höchstbetrag brutto (falls belegt)<input name="max_total" inputmode="decimal" maxlength="20" placeholder="Gilt für die ganze Bestellung"></label></div>
+<label>Versandnachweis<textarea name="send_evidence" maxlength="1000" rows="3" placeholder="Chatname, Datum, Uhrzeit, Dokument und sichtbarer Zustellstatus"></textarea></label>
+<label class="check"><input type="checkbox" name="confirmed" value="ja">Die ausgewählten Positionen wurden bereits an diesen Kontakt versandt. Ich bestätige den Nachtrag.</label>
+<button formaction="/admin/assistent-bestellungen/eingang/material/extern-sammelbestellung-nachtragen" formnovalidate>Als bestellt ablegen</button>
+<p class="muted">Ein Nachtrag verschickt keine Nachricht. Preis, Verpackungsinhalt und Lieferung bleiben bis zur Bestätigung offen.</p></details>
+{% endif %}</form>
 <p class="pagination">{{ overview.open.count }} offene Positionen · Seite {{ overview.open.page }} von {{ overview.open.pages }}{% if overview.open.page>1 %} · <a href="{{ overview_url(open_page=overview.open.page-1) }}#offene-bestellungen">Zurück</a>{% endif %}{% if overview.open.page<overview.open.pages %} · <a href="{{ overview_url(open_page=overview.open.page+1) }}#offene-bestellungen">Weitere</a>{% endif %}</p>
 <div id="versandte-bestellungen" class="order-section-head"><h3>Versandte Bestellungen</h3><span>{{ overview.archive_count }} Positionen</span></div>
 {% for group in overview.archive_groups %}<details class="order-archive" {% if group.expanded %}open{% endif %}><summary><strong>{{ group.label }}</strong><span>{{ group.count }} Artikel / Anforderungen</span></summary>

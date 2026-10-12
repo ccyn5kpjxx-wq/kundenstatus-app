@@ -17,6 +17,7 @@ from werkstatt_einkaufseingang import MaterialIntake, IntakeConflict, _decimal, 
 from werkstatt_rechnungsquelle import invoice_date
 from werkstatt_rechnungsfreigabe import normalize_supplier
 from werkstatt_materialwissen import _measurements, _colors, tokens
+from werkstatt_bestelluebersicht import OrderOverview
 
 
 TABLES = ('assistent_bestellpreis_basis', 'assistent_bestellpreis_rechnungen')
@@ -113,6 +114,19 @@ class OrderPriceComparison:
             draft = db.execute('SELECT * FROM einkauf_material_dialoge WHERE id=?', (int(material[1]),)).fetchone()
             if draft and draft['state'] in {'external_pending', 'external_sent'}:
                 claim = json.loads(draft['snapshot_json'])
+                if claim.get('kind') == 'recorded_external_order':
+                    raw = dict(draft)
+                    fields = json.loads(raw.get('fields_json') or '{}')
+                    source = db.execute('SELECT employee_id FROM einkauf_material_nachrichten WHERE id=?',
+                                        (raw.get('message_id'),)).fetchone()
+                    if (not OrderOverview._recorded_external_intact(raw,claim,fields,_hash(claim))
+                            or not source or source['employee_id'] != claim.get('employee_id')
+                            or any(not isinstance(claim.get(name),str) for name in ('product_name','article_number','variant'))):
+                        raise ValueError('Die nachgetragene WhatsApp-Bestellung ist nicht unverändert persönlich belegt.')
+                    # Include the witnessed batch receipt in the frozen identity,
+                    # but never interpret its shared ceiling as an article price.
+                    return self._order_view(key,claim,claim['supplier_name'],claim,
+                        claim['sent_at'],claim['sent_at'],'external_recorded',draft['state'],allow_incomplete=True)
                 if claim.get('kind') != 'manual_external_order' or _hash(claim) != draft['snapshot_hash']:
                     raise ValueError('Gespeicherte externe Bestellung ist nicht unverändert belegt.')
                 if (claim.get('draft_id') != int(material[1]) or not re.fullmatch(r'[a-f0-9]{32}', str(claim.get('reservation_id', '')))
@@ -157,13 +171,17 @@ class OrderPriceComparison:
             saved.get('supplier_name', ''), intent, row['created_at'], sent_at, 'dispatch', state)
 
     @staticmethod
-    def _order_view(key, stable, supplier, order, created, sent, kind, state):
-        if not supplier or not order.get('article_number') or not order.get('unit'):
+    def _order_view(key, stable, supplier, order, created, sent, kind, state, allow_incomplete=False):
+        if not supplier or not order.get('unit') or not allow_incomplete and not order.get('article_number'):
             raise ValueError('Lieferant, Artikelnummer oder Bestelleinheit der Bestellung fehlen.')
+        sku = order.get('article_number') or ''
+        variant = order.get('variant') or ''
+        complete = not allow_incomplete or bool(sku.strip() and variant.strip())
         return {'key': key, 'fingerprint': _hash(stable), 'kind': kind, 'state': state,
-            'supplier': supplier, 'sku': order['article_number'], 'product': order.get('product_name', ''),
-            'variant': order.get('variant', ''), 'unit': order['unit'], 'quantity': str(order.get('quantity', '')),
-            'identity': _identity(supplier, order['article_number'], order.get('variant', '')),
+            'supplier': supplier, 'sku': sku, 'product': order.get('product_name', ''),
+            'variant': variant, 'unit': order['unit'], 'quantity': str(order.get('quantity', '')),
+            'identity': _identity(supplier, sku, variant), 'identity_complete':complete,
+            'identity_reason':'' if complete else 'Artikelnummer oder Variante ist in der versandten Bestellung nicht belegt; noch nicht vergleichbar.',
             'created_at': _stamp(created), 'sent_at': _stamp(sent),
             'dispatch_known': state in {'external_sent', 'sent', 'copy_pending', 'partial'}}
 
@@ -272,6 +290,8 @@ class OrderPriceComparison:
         with self.p.portal_originals_operation_lock():
             with self.db() as db:
                 order = self._order(db, order_key)
+            if order.get('identity_complete') is False:
+                raise ValueError(order['identity_reason'])
             record = self._catalog_estimate(order, payload) if role == 'estimate' and 'proposal_id' in payload else self._original_price(order, payload)
             order_day = datetime.fromisoformat(order['created_at']).astimezone(ZoneInfo('Europe/Berlin')).date().isoformat() if order['created_at'] else None
             if role == 'estimate' and record['date'] and order_day and record['date'] > order_day:
@@ -380,7 +400,9 @@ class OrderPriceComparison:
         for row in rows:
             value = self._view_record(row, order)
             invoices.append(dict(value, id=row['id'], comparison=self.compare(estimate, value)))
-        if not estimate:
+        if order.get('identity_complete') is False:
+            status = 'not_comparable'
+        elif not estimate:
             status = 'no_estimate'
         elif not estimate.get('available'):
             status = 'source_blocked'

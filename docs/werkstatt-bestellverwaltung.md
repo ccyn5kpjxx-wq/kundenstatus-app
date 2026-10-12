@@ -91,6 +91,27 @@ externer Archivtest übersprungen), `test_bestelluebersicht.py` (25),
 `test_bestellvergleich.py` (23): zusammen 142 bestandene Tests. Syntaxprüfung und
 `git diff --check` sind ebenfalls bestanden. Alle neuen Testdaten sind synthetisch.
 
+## Bereits versandte WhatsApp-Sammelbestellungen nachtragen
+
+In der Bestellübersicht können ausgewählte, noch nicht übergebene Anforderungen
+unter „Bereits per WhatsApp bestellt“ mit Lieferant, tatsächlicher Empfängernummer,
+Sendezeit und gemeinsamem Versandnachweis nachgetragen werden. Die Sendezeit
+ist der tatsächliche Versandzeitpunkt; der spätere Erfassungszeitpunkt wird
+separat gespeichert. Ein Nachtrag löst keinen weiteren Versand aus.
+
+Alle ausgewählten Positionen werden in einer Transaktion übernommen. Eine
+zwischenzeitlich geänderte, entfernte oder bereits übergebene Position verhindert
+den gesamten Nachtrag. Originalmengen, Einheiten und Mitarbeiterzuordnung bleiben
+erhalten. Der gemeinsame Höchstbetrag gilt für die gesamte Sammelbestellung;
+unbekannte Preise, Artikelnummern und Verpackungsangaben bleiben offen.
+
+Der Status „Bestellt - WhatsApp-Nachweis gespeichert“ erscheint im Datumsordner
+„Bestellt am …“. Er bestätigt den dokumentierten Versand, nicht Preis oder
+Lieferung. Die Anforderungen sind anschließend für automatische Bestellungen
+gesperrt. Eine unveränderte Wiederholung mit derselben Nachweiskennung ist
+idempotent; alte Sicherungen dürfen diesen Status und seinen Auditnachweis
+nicht entfernen. Der bisherige externe Einzelmailversand bleibt getrennt.
+
 Die gezielte Kandidatenabsicherung wurde anschließend mit
 `test_bestelluebersicht.py` (29), `test_bestellvergleich.py` (23) und
 `test_bestellvergleich_ui.py` (36) geprüft: 88 bestandene Testausführungen,
