@@ -679,8 +679,10 @@ def register_orders(portal):
             material_current = portal.material_dialog.status(material_id)
         intake = getattr(portal, 'workshop_intake', None)
         from werkstatt_bestellvergleich_ui import comparison_context
+        # Native details can be opened without another request. Every archive
+        # row rendered into this response therefore needs its price context.
         visible_overview = dict(overview,items=overview['open']['items']+
-            [entry for group in overview['archive_groups'] if group['expanded'] for entry in group['items']])
+            [entry for group in overview['archive_groups'] for entry in group['items']])
         catalog = getattr(getattr(portal, 'cockpit_data', None), 'catalog', None)
         display_snapshot = getattr(catalog, 'display_snapshot', None)
         scope = display_snapshot() if request.method == 'GET' and callable(display_snapshot) else nullcontext()

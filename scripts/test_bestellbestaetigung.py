@@ -160,6 +160,19 @@ class ConfirmationLinkTests(ConfirmationFixture,unittest.TestCase):
         quote=dict(quote,product='PPG T4000/E0.5',sku='10004410')
         self.assertTrue(self.links._review(order,quote,''))
 
+    def test_candidate_record_text_source_id_is_accepted_without_source_or_hash_rewrite(self):
+        # add_proposal uses the real InvoiceCatalog._candidate_record with its
+        # canonical source_id TEXT, exactly like production import rows.
+        row=self.catalog.knowledge_rows()['items'][0]
+        self.assertEqual(row['quelle']['beleg_id'],'99')
+        self.assertIsInstance(row['quelle']['beleg_id'],str)
+        quote=self.links._fresh_proposals()[1]
+        self.assertEqual(quote['source']['beleg_id'],'99')
+        self.assertEqual(quote['source']['sha256'],self.sha)
+        self.assertEqual(quote['proposal_fingerprint'],self.links._fresh_proposals()[1]['proposal_fingerprint'])
+        self.links.record_batch([self.assignment()])
+        self.assertTrue(self.links.summaries(['material:1'])['material:1']['available'])
+
     def test_berlin_order_day_not_utc_or_recording_day(self):
         self.base.claim.update(sent_at='2026-10-05T22:01:00+00:00',recorded_at='2026-10-06T10:00:00+00:00')
         self.base.save()
@@ -181,6 +194,53 @@ class ConfirmationLinkTests(ConfirmationFixture,unittest.TestCase):
             self.assertNotIn('PRIVATE_DATABASE_DETAIL',' '.join(logs.output))
         with self.links.request_snapshot():
             self.assertTrue(self.comparison.detail('material:1')['confirmation']['available'])
+
+    def test_real_get_closed_archive_contains_saved_quote_without_enabling_batch_form(self):
+        from test_bestelluebersicht import OverviewTests
+        from werkstatt_bestellvergleich import OrderPriceComparison
+        archive = OverviewTests('runTest')
+        archive.setUp()
+        self.addCleanup(archive.doCleanups)
+        archive.material(supplier_name='Testlieferant',product_name='Original-Testband',
+            article_number='TEST-50',variant='50 mm',unit='Karton',
+            reserved_at='2026-10-06T12:00:00+00:00',sent_at='2026-10-06T12:01:00+00:00')
+        portal = archive.p
+        portal.UPLOAD_DIR = self.p.UPLOAD_DIR
+        portal.get_app_setting = self.p.get_app_setting
+        portal.cockpit_data = type(self.p.cockpit_data)(catalog=InvoiceCatalog(portal))
+        service = portal.order_price_comparison = OrderPriceComparison(portal)
+        with archive.manager.db() as db:
+            db.execute('UPDATE einkauf_material_dialoge SET fields_json=? WHERE id=1',
+                (json.dumps({'quantity':{'value':'1'},'unit':{'value':'Karton'},'urgent':{'value':True}}),))
+            db.execute('CREATE TABLE einkauf_belege(id INTEGER PRIMARY KEY,beleg_typ TEXT,lieferant TEXT,original_name TEXT,stored_name TEXT,status TEXT)')
+            db.execute("INSERT INTO einkauf_belege VALUES(99,'auftragsbestaetigung','Testlieferant','SyntheticAB.pdf','synthetic-ab.pdf','importiert')")
+            db.execute("INSERT INTO assistent_rechnungsimporte(id,source_key,source_kind,source_id,supplier,reference,state) VALUES(5,'einkauf:99','einkauf','99','Testlieferant','SyntheticAB.pdf','ausgelesen')")
+            proposal = self.sql('SELECT id,fingerprint,identity_key,import_id,supplier,product_name,article_number,payload_json,created_at FROM assistent_rechnungsartikel WHERE id=1')[0]
+            db.execute('INSERT INTO assistent_rechnungsartikel(id,fingerprint,identity_key,import_id,supplier,product_name,article_number,payload_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)',tuple(proposal.values()))
+            before = [dict(row) for row in db.execute('SELECT * FROM einkauf_material_dialoge')]
+            db.commit()
+        links = get_order_confirmations(portal,service)
+        order = service.detail('material:1')['order']
+        quote = links._proposals()[1]
+        links.record_batch([dict(order_key='material:1',order_fingerprint=order['fingerprint'],
+            proposal_id=1,proposal_fingerprint=quote['proposal_fingerprint'],
+            review_reason='Die Belegmenge bleibt getrennt von der Bestellung.',reviewed=True)])
+        self.assertFalse(archive.reader.page({})['archive_groups'][0]['expanded'])
+        with patch.object(archive.manager,'tick',side_effect=AssertionError('GET must not dispatch')):
+            closed = archive.client.get('/admin/assistent-bestellungen')
+            expanded = archive.client.get('/admin/assistent-bestellungen?archive_day=sent:2026-10-06')
+        for response in (closed,expanded):
+            self.assertEqual(response.status_code,200)
+            html = response.get_data(as_text=True)
+            self.assertIn('12,50 € netto je Karton',html)
+            self.assertIn('Auftragsbestätigung vom 06.10.2026',html)
+            self.assertIn('Original-Testband',html)
+        self.assertNotIn('name="proposal_ref_material:1"',closed.get_data(as_text=True))
+        self.assertIn('name="proposal_ref_material:1"',expanded.get_data(as_text=True))
+        with archive.manager.db() as db:
+            self.assertEqual([dict(row) for row in db.execute('SELECT * FROM einkauf_material_dialoge')],before)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM '+TABLE).fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM assistent_bestellanforderungen').fetchone()[0],0)
 
 
 class ConfirmationRouteTests(ConfirmationFixture,unittest.TestCase):
