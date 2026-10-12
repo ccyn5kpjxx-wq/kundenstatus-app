@@ -1,10 +1,37 @@
 from pathlib import Path
 import sys
+import os
+import tempfile
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import app as portal  # noqa: E402
+# Never load operational configuration or write to an existing order database.
+TEMP_DIR = Path(tempfile.mkdtemp(prefix="pickup-ready-test-"))
+os.environ.update({
+    "RENDER": "isolated-regression-test", "DATABASE_URL": "", "REQUIRE_POSTGRES_ON_RENDER": "0",
+    "DATA_DIR": str(TEMP_DIR), "SQLITE_DB_PATH": str(TEMP_DIR / "test.db"),
+    "UPLOAD_DIR": str(TEMP_DIR / "uploads"), "BACKUP_DIR": str(TEMP_DIR / "backups"),
+    "DELETED_UPLOAD_DIR": str(TEMP_DIR / "deleted"), "AUTO_BACKUP_ENABLED": "0",
+    "AUTO_CHANGE_BACKUP_ENABLED": "0", "OPENAI_API_KEY": "", "LEXWARE_API_KEY": "",
+    "GOOGLE_APPLICATION_CREDENTIALS": "", "WHATSAPP_ACCESS_TOKEN": "", "WHATSAPP_WORKSHOP_NUMBERS": "",
+    "MAIL_IMAP_PASS": "", "MAIL_SMTP_PASS": "", "SCHADEN_IMAP_PASS": "", "SCHADEN_SMTP_PASS": "",
+    "SMTP_PASSWORD": "", "FLASK_SECRET_KEY": "isolated-regression-test", "ADMIN_PASS": "isolated-regression-test",
+})
+
+def deny_network(*args, **kwargs):
+    raise AssertionError("Network is forbidden in pickup-ready tests")
+
+patch("socket.socket.connect", deny_network).start()
+patch("socket.socket.connect_ex", deny_network).start()
+patch("socket.create_connection", deny_network).start()
+_original_exists = Path.exists
+with patch.object(Path, "exists", lambda p: False if p in (ROOT / ".env", ROOT / ".env.local") else _original_exists(p)):
+    import app as portal  # noqa: E402
+# Exercise stored notifications even when the optional WhatsApp bridge cannot send.
+whatsapp = patch.object(portal, "notify_workshop_whatsapp_abholbereit", return_value=False).start()
+
 
 FEHLER = []
 
@@ -63,6 +90,55 @@ def main():
     db.commit()
     db.close()
 
+    # Status1 is the reported production case; there must be one action in the hero.
+    pc = portal.app.test_client()
+    with pc.session_transaction() as session:
+        session["partner_autohaus_id"] = haus_id
+    for state in (1, 2):
+        db = portal.get_db()
+        db.execute("UPDATE auftraege SET status=?, archiviert=0, transport_art='hol_und_bring', fahrzeug_abholbereit=0, fahrzeug_abholbereit_am='' WHERE id=?", (state, aid))
+        db.commit(); db.close()
+        html = pc.get(f"/partner/{slug}/auftrag/{aid}").get_data(as_text=True)
+        check(f"Status{state}: one pickup action in the visible hero", html.count('value="abholbereit"') == 1 and html.index('value="abholbereit"') < html.index('data-partner-tabs'))
+        before = portal.get_auftrag(aid)
+        notifications_before = len(portal.list_benachrichtigungen(aid))
+        whatsapp.reset_mock()
+        resp = pc.post(f"/partner/{slug}/auftrag/{aid}", data=csrf_data(pc, {"aktion":"abholbereit"}))
+        after = portal.get_auftrag(aid)
+        check(f"Status{state}: notice stored when WhatsApp fails", resp.status_code == 302 and after['fahrzeug_abholbereit'] and len(portal.list_benachrichtigungen(aid)) == notifications_before + 1 and whatsapp.call_count == 1)
+        check(f"Status{state}: order data and repair state unchanged", all(after[k] == before[k] for k in ['status','kunde_name','kennzeichen','fahrzeug','transport_art','start_datum','fertig_datum','abholtermin']))
+        html = pc.get(f"/partner/{slug}/auftrag/{aid}").get_data(as_text=True)
+        check(f"Status{state}: confirmation replaces the action in hero", 'Als abholbereit gemeldet' in html.split('data-partner-tabs')[0] and 'value="abholbereit"' not in html)
+        # Simulate a second handler that read the old snapshot before the first update.
+        with patch.object(portal, 'get_auftrag', return_value=before):
+            pc.post(f"/partner/{slug}/auftrag/{aid}", data=csrf_data(pc, {"aktion":"abholbereit"}))
+        check(f"Status{state}: stale parallel POST does not notify twice", len(portal.list_benachrichtigungen(aid)) == notifications_before + 1 and whatsapp.call_count == 1)
+        pc.post(f"/partner/{slug}/auftrag/{aid}", data=csrf_data(pc, {"aktion":"abholbereit"}))
+        check(f"Status{state}: ordinary replay does not notify twice", len(portal.list_benachrichtigungen(aid)) == notifications_before + 1 and whatsapp.call_count == 1)
+
+    for state, archived, transport in [(3,0,'hol_und_bring'),(4,0,'hol_und_bring'),(5,0,'hol_und_bring'),(1,1,'hol_und_bring'),(1,0,'standard')]:
+        db=portal.get_db(); db.execute("UPDATE auftraege SET status=?, archiviert=?, transport_art=?, fahrzeug_abholbereit=0 WHERE id=?",(state,archived,transport,aid)); db.commit(); db.close()
+        html=pc.get(f"/partner/{slug}/auftrag/{aid}").get_data(as_text=True)
+        count=len(portal.list_benachrichtigungen(aid)); whatsapp.reset_mock()
+        pc.post(f"/partner/{slug}/auftrag/{aid}",data=csrf_data(pc,{'aktion':'abholbereit'}))
+        check(f"Unsupported case{state}/{archived}/{transport} hidden and rejected", 'value="abholbereit"' not in html and not portal.get_auftrag(aid)['fahrzeug_abholbereit'] and len(portal.list_benachrichtigungen(aid)) == count and not whatsapp.called)
+    db=portal.get_db(); db.execute("UPDATE auftraege SET status=1, archiviert=0, transport_art='hol_und_bring', fahrzeug_abholbereit=0 WHERE id=?",(aid,)); db.commit(); db.close()
+    snapshot=portal.get_auftrag(aid)
+    db=portal.get_db(); db.execute('UPDATE auftraege SET status=3 WHERE id=?',(aid,)); db.commit(); db.close()
+    count=len(portal.list_benachrichtigungen(aid)); whatsapp.reset_mock()
+    with patch.object(portal,'get_auftrag',return_value=snapshot):
+        pc.post(f"/partner/{slug}/auftrag/{aid}",data=csrf_data(pc,{'aktion':'abholbereit'}))
+    check('Concurrent change to status3 rejects stale notice', not portal.get_auftrag(aid)['fahrzeug_abholbereit'] and len(portal.list_benachrichtigungen(aid)) == count and not whatsapp.called)
+    db=portal.get_db(); db.execute("UPDATE auftraege SET status=2 WHERE id=?",(aid,)); db.commit(); db.close()
+    resp=pc.post(f"/partner/{slug}/auftrag/{aid}",data={'aktion':'abholbereit'})
+    check('Missing CSRF cannot set pickup-ready flag', resp.status_code == 400 and not portal.get_auftrag(aid)['fahrzeug_abholbereit'])
+    other = next(h for h in portal.list_autohaeuser() if h['id'] != haus_id)
+    stranger=portal.app.test_client()
+    with stranger.session_transaction() as session: session['partner_autohaus_id']=other['id']
+    stranger.get(f"/partner/{other['slug']}/auftrag/{aid}")
+    resp=stranger.post(f"/partner/{other['slug']}/auftrag/{aid}",data=csrf_data(stranger,{'aktion':'abholbereit'}))
+    check('Foreign partner cannot set pickup-ready flag', resp.status_code == 404 and not portal.get_auftrag(aid)['fahrzeug_abholbereit'])
+
     # 2) Partner-Seite (eingeloggt) zeigt den Button
     pc = portal.app.test_client()
     with pc.session_transaction() as session:
@@ -71,7 +147,7 @@ def main():
     html = pc.get(f"/partner/{slug}/auftrag/{aid}").get_data(as_text=True)
     check(
         "Partner-Seite zeigt Abholbereit-Button (Status 2 + Hol/Bring)",
-        'value="abholbereit"' in html and "Fahrzeug ist abholbereit" in html,
+        'value="abholbereit"' in html and ">Abholbereit</button>" in html,
     )
 
     # 3) POST abholbereit -> Flag + Zeitstempel gesetzt

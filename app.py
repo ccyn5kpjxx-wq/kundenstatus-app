@@ -55951,19 +55951,33 @@ def partner_auftrag(slug, auftrag_id):
         if aktion == "abholbereit":
             # Eigene, schlanke Aktion: NICHT in das grosse Felder-UPDATE unten fallen lassen
             # (das wuerde alle nicht mitgesendeten Felder leeren). Nur das Flag setzen + melden.
-            if int(auftrag.get("status") or 1) >= 3:
-                flash("Das Fahrzeug ist bereits in Arbeit — die Werkstatt ist informiert.", "info")
+            if (
+                int(auftrag.get("status") or 1) not in (1, 2)
+                or auftrag.get("archiviert")
+                or auftrag.get("transport_art") != "hol_und_bring"
+            ):
+                flash("Für diesen Auftrag ist keine Abholbereit-Meldung vorgesehen.", "info")
                 return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
             if auftrag.get("fahrzeug_abholbereit"):
                 flash("Das Fahrzeug ist bereits als abholbereit gemeldet. Die Werkstatt holt es ab.", "info")
                 return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
             db = get_db()
-            db.execute(
-                "UPDATE auftraege SET fahrzeug_abholbereit=1, fahrzeug_abholbereit_am=?, geaendert_am=? WHERE id=? AND autohaus_id=?",
-                (now_str(), now_str(), auftrag_id, autohaus["id"]),
-            )
-            db.commit()
-            db.close()
+            timestamp = now_str()
+            try:
+                changed = db.execute(
+                    """UPDATE auftraege
+                       SET fahrzeug_abholbereit=1, fahrzeug_abholbereit_am=?, geaendert_am=?
+                       WHERE id=? AND autohaus_id=? AND status IN (1, 2)
+                         AND COALESCE(archiviert, 0)=0 AND transport_art='hol_und_bring'
+                         AND COALESCE(fahrzeug_abholbereit, 0)=0""",
+                    (timestamp, timestamp, auftrag_id, autohaus["id"]),
+                ).rowcount
+                db.commit()
+            finally:
+                db.close()
+            if not changed:
+                flash("Die Abholbereit-Meldung wurde bereits erfasst oder der Auftrag hat sich geändert.", "info")
+                return redirect(url_for("partner_auftrag", slug=slug, auftrag_id=auftrag_id))
             haus_name = clean_text(autohaus.get("name")) or clean_text(autohaus.get("portal_label")) or "Das Autohaus"
             add_benachrichtigung(
                 auftrag_id,

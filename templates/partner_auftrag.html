@@ -44,6 +44,23 @@
         <div class="partner-eyebrow">IHR FAHRZEUG. ALLES IM BLICK.</div>
         <h1 id="partner-order-title">{{ auftrag['fahrzeug'] }}</h1>
         <div class="partner-identity">{% if auftrag['kennzeichen'] %}<span class="partner-plate"><span aria-hidden="true">D</span>{{ auftrag['kennzeichen'] }}</span>{% endif %}<span>{{ auftrag['kunde_name'] or autohaus['name'] }}</span></div>
+        {% if auftrag['status'] in [1, 2] and auftrag['transport_art'] == 'hol_und_bring' and not auftrag['archiviert'] %}
+        <div class="partner-pickup" data-pickup-ready>
+          {% if auftrag['fahrzeug_abholbereit'] %}
+          <div class="partner-pickup-confirmation" role="status">
+            <strong>✓ Als abholbereit gemeldet</strong>
+            <span>Die Meldung ist bei der Werkstatt hinterlegt{% if auftrag['fahrzeug_abholbereit_am'] %} · {{ auftrag['fahrzeug_abholbereit_am'] }}{% endif %}.</span>
+          </div>
+          {% else %}
+          <form method="POST" class="partner-pickup-form">
+            {{ csrf_field()|safe }}
+            <input type="hidden" name="aktion" value="abholbereit">
+            <button type="submit" class="partner-pickup-button" aria-describedby="pickup-ready-help">Abholbereit</button>
+            <p id="pickup-ready-help">Ihr Fahrzeug steht zur Abholung bereit? Hier melden Sie es der Werkstatt.</p>
+          </form>
+          {% endif %}
+        </div>
+        {% endif %}
         <div class="partner-status"><span class="partner-status-dot" aria-hidden="true"></span><h2>{{ auftrag['status_meta']['label'] }}</h2></div>
         {% if auftrag['status'] == 3 and auftrag['produktion_schritt_label'] %}<p class="partner-production">{{ auftrag['produktion_schritt_label'] }}</p>{% endif %}
         <p class="partner-hero-description">{% if auftrag['status'] <= 1 %}Ihre Angaben sind bei uns. Wir prüfen den Auftrag und melden uns bei Rückfragen.{% elif auftrag['status'] == 2 %}Ihr Fahrzeug ist eingeplant. Hier finden Sie alle Informationen zur Übergabe.{% elif auftrag['status'] == 3 %}Wir kümmern uns um Ihr Fahrzeug. Behalten Sie den Fortschritt und die nächsten Schritte im Blick.{% elif auftrag['status'] == 4 %}Die Arbeiten sind abgeschlossen. Stimmen Sie die Rückgabe mit uns ab.{% else %}Vielen Dank für Ihr Vertrauen. Ihre Dokumente und Nachrichten bleiben hier für Sie verfügbar.{% endif %}</p>
@@ -100,32 +117,6 @@
       <div class="partner-section-heading"><h2>Schritt für Schritt zu Ihrem Fahrzeug.</h2><span>Ihr Reparaturverlauf</span></div>
       <ol>{% for nr, label in [(1, 'Angelegt'), (2, 'Eingeplant'), (3, 'In Arbeit'), (4, 'Fertig'), (5, 'Zurückgegeben')] %}<li class="{{ 'is-current' if auftrag['status'] == nr else ('is-done' if auftrag['status'] > nr else '') }}"{% if auftrag['status'] == nr %} aria-current="step"{% endif %}><span>{{ '✓' if auftrag['status'] > nr else nr }}</span><strong>{{ label }}</strong></li>{% endfor %}</ol>
     </section>
-    {% if auftrag['status'] == 2 and auftrag['transport_art'] == 'hol_und_bring' %}
-    <div class="panel mb-4" style="border:2px solid #1f9d57; background:#f1fbf5;">
-      {% if auftrag['fahrzeug_abholbereit'] %}
-      <div class="d-flex align-items-start gap-3 flex-wrap">
-        <span class="whatsapp-mark" aria-hidden="true" style="background:#1f9d57;">OK</span>
-        <div>
-          <h4 class="mb-1" style="color:#136b3a;">Als abholbereit gemeldet</h4>
-          <div class="text-muted">Die Werkstatt wurde benachrichtigt{% if auftrag['fahrzeug_abholbereit_am'] %} ({{ auftrag['fahrzeug_abholbereit_am'] }}){% endif %} und holt das Fahrzeug ab. Sobald wir es abgeholt haben, wechselt der Status automatisch auf „In Arbeit".</div>
-        </div>
-      </div>
-      {% else %}
-      <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap">
-        <div>
-          <div class="section-kicker" style="color:#136b3a;">Fahrzeug steht bei Ihnen bereit?</div>
-          <h4 class="mb-1">Der Werkstatt melden: Fahrzeug ist abholbereit</h4>
-          <div class="text-muted">Ein Klick benachrichtigt die Werkstatt sofort (WhatsApp + Werkstatt-Tafel), dass das Fahrzeug jetzt abgeholt werden kann — keine Rückfrage mehr nötig.</div>
-        </div>
-        <form method="POST" class="m-0">
-          {{ csrf_field()|safe }}
-          <input type="hidden" name="aktion" value="abholbereit">
-          <button type="submit" class="btn btn-lg" style="background:#1f9d57; color:#fff; font-weight:700; white-space:nowrap;">🚗 Fahrzeug ist abholbereit</button>
-        </form>
-      </div>
-      {% endif %}
-    </div>
-    {% endif %}
     {% if auftrag['angebot_status'] == 'angenommen' and (auftrag['werkstatt_angebot_preis'] or auftrag['werkstatt_angebot_text_display'] or auftrag['werkstatt_angebot_notiz']) %}
     <div class="panel mb-4 border border-success-subtle">
       <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">

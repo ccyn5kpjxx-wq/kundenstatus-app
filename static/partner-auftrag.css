@@ -759,3 +759,14 @@ body.partner-order-portal { background:#f4f6f3; color:var(--partner-ink); font-f
   .partner-hero { animation:partner-appear .4s ease-out both; }
   @keyframes partner-appear { from { opacity:0; transform:translateY(7px); } to { opacity:1; transform:none; } }
 }
+
+/* Pickup readiness is a partner handover notice, separate from repair status. */
+.partner-pickup { margin:22px 0; max-width:440px; }
+.partner-pickup-form { margin:0; }
+.partner-pickup-button { display:block; width:100%; min-height:76px; padding:16px 24px; border:2px solid #8add9e; border-radius:12px; background:#b4efb8; color:#102e1d; font:700 clamp(1.6rem,3vw,2rem)/1.2 "Space Grotesk",sans-serif; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.15); }
+.partner-pickup-button:hover { background:#ccf5cf; }
+.partner-pickup-button:focus-visible { outline:3px solid #fff; outline-offset:4px; }
+.partner-pickup-form p { margin:9px 0 0; color:#d2ddd6; font-size:13px; line-height:1.5; }
+.partner-pickup-confirmation { display:flex; flex-direction:column; gap:7px; padding:18px 20px; border:1px solid #8add9e; border-radius:12px; background:#d9f5df; color:#153821; overflow-wrap:anywhere; }
+.partner-pickup-confirmation strong { font-size:clamp(1.1rem,2vw,1.4rem); }
+.partner-pickup-confirmation span { font-size:13px; line-height:1.5; }
