@@ -95,6 +95,8 @@ class OrderPriceComparison:
                     dispatch_state_at_capture TEXT NOT NULL,
                     created_at TEXT NOT NULL, created_by TEXT NOT NULL);
             ''')
+            from werkstatt_bestellbestaetigung import init_confirmation_schema
+            init_confirmation_schema(db)
 
     @staticmethod
     def _actor(actor):
@@ -414,7 +416,12 @@ class OrderPriceComparison:
             status = 'difference'
         else:
             status = 'matched'
+        from werkstatt_bestellbestaetigung import get_order_confirmations, TABLE as CONFIRMATION_TABLE
+        with self.db() as db:
+            has_confirmation = db.execute(f'SELECT id FROM {CONFIRMATION_TABLE} WHERE order_key=? LIMIT 1',(order['key'],)).fetchone()
+        confirmation = get_order_confirmations(self.p,self).summaries([order['key']]).get(order['key']) if has_confirmation else None
         return {'order': order, 'estimate': estimate, 'invoices': invoices, 'status': status,
+            'confirmation':confirmation,
             'can_dispatch': False, 'notice': 'Historischer Vergleich ohne Preisfreigabe, Bestellversand oder Zahlungsbuchung.'}
 
     def summaries(self, order_keys, actor='admin'):

@@ -22,15 +22,32 @@ def comparison_key(entry):
 
 
 def comparison_context(portal, overview):
+    from werkstatt_bestellbestaetigung import get_order_confirmations
+    service = getattr(portal,'order_price_comparison',None)
+    if service is None:
+        return _comparison_context(portal,overview)
+    links = get_order_confirmations(portal,service)
+    with links.request_snapshot():
+        return _comparison_context(portal,overview)
+
+
+def _comparison_context(portal, overview, confirmations=True):
     from werkstatt_liefereingang import delivery_context
     service = getattr(portal, 'order_price_comparison', None)
     context = dict(price_summaries={}, order_comparison=None, comparison_files=[], comparison_candidates=[],
-                   comparison_candidates_unavailable=False)
+                   comparison_candidates_unavailable=False,confirmation_summaries={},confirmation_orders={},confirmation_candidates=[])
     context.update(delivery_context(portal, overview))
     if service is None:
         return context
     selected = overview.get('selected')
     entries = list(overview.get('items', [])) + ([selected] if selected else [])
+    if confirmations:
+        from werkstatt_bestellbestaetigung import get_order_confirmations
+        links = get_order_confirmations(portal,service)
+        batch = links.batch_form(entries)
+        context['confirmation_summaries'] = batch['summaries']
+        context['confirmation_orders'] = {binding['source']:binding for binding in batch['orders']}
+        context['confirmation_candidates'] = list(links._proposals().values())
     for entry in entries:
         key = comparison_key(entry)
         if not key:
@@ -88,12 +105,37 @@ def register_comparison_forms(bp, portal):
     @bp.post('/preisvergleich/<action>')
     def price_comparison_form(action):
         service = getattr(portal, 'order_price_comparison', None)
-        if service is None or action not in {'schaetzung', 'rechnung', 'katalog', 'beleg'}:
+        if service is None or action not in {'schaetzung', 'rechnung', 'katalog', 'beleg','bestaetigung'}:
             abort(404)
         key = request.form.get('order_key', '')
         # The blueprint already enforces admin authentication and CSRF.
         try:
-            if action == 'beleg':
+            if action == 'bestaetigung':
+                from werkstatt_bestellbestaetigung import get_order_confirmations
+                assignments = []
+                if request.form.get('reviewed') != 'ja':
+                    raise ValueError('AB-Positionen und Prüfhinweise am Original bestätigen.')
+                keys = request.form.getlist('confirmation_order')
+                if not keys:
+                    keys = [key]
+                for order_key in keys:
+                    ref = request.form.get('proposal_ref_'+order_key,'') if request.form.getlist('confirmation_order') else request.form.get('proposal_ref','')
+                    if not ref:
+                        continue
+                    import re
+                    match = re.fullmatch(r'([1-9][0-9]*):([a-f0-9]{64})',ref)
+                    if not match:
+                        raise ValueError('Die AB-Auswahl ist veraltet. Bitte neu laden.')
+                    assignments.append(dict(order_key=order_key,
+                        order_fingerprint=request.form.get('order_fingerprint_'+order_key,request.form.get('order_fingerprint','')),
+                        proposal_id=int(match[1]),proposal_fingerprint=match[2],
+                        review_reason=request.form.get('review_reason_'+order_key,request.form.get('review_reason','')),
+                        reviewed=True))
+                result = get_order_confirmations(portal,service).record_batch(assignments,actor='admin')
+                flash(f"{result['count']} AB-Preispositionen bei den bestehenden Bestellungen gespeichert. Bestellinhalt und Freigaben bleiben unverändert.",'success')
+                archive_day = request.form.get('archive_day','')
+                return redirect(url_for('werkstatt_orders.index',archive_day=archive_day,_anchor='versandte-bestellungen'),303)
+            elif action == 'beleg':
                 with portal.portal_originals_operation_lock():
                     order = service.detail(key)['order']
                     upload = request.files.get('file')

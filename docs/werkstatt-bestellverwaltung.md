@@ -143,3 +143,17 @@ Bestelleinheit und Gebinde. Der Hinweis nennt die Auftragsbestätigung und ihr
 Datum. Unklare, widersprüchliche oder nicht verfügbare Quellen bekommen keinen
 Ersatzpreis. Die Vorschau ändert keine Bestellungen und übermittelt ihren
 Anzeigepreis nicht als Freigabe; aktuelle Nebenkosten bleiben separat zu prüfen.
+
+Die gespeicherten Artikelpreise werden separat den bestehenden Bestellpositionen
+zugeordnet. Der Admin wählt die bestätigte Belegposition und dokumentiert
+abweichende Artikelnummern, Mengen oder Kartoninhalte. Die Übersicht zeigt den
+Nettopreis je Gebinde der Bestätigung mit Datum; die ursprüngliche Bestellung
+bleibt unverändert. Das Original lässt sich im Bestelldetail öffnen.
+
+Eine Sammelzuordnung wird vollständig gespeichert oder vollständig abgewiesen,
+wenn Bestellung, Beleg oder Artikelquelle inzwischen geändert wurden. Dieselbe
+Belegposition kann nicht zweimal zu verschiedenen Bestellungen gehören. Die
+Zuordnung ist weder eine Rechnung noch eine zusätzliche Kostenfreigabe und
+versendet keine Bestellung. Gedruckte Belegbeträge bleiben auch bei einer
+abweichenden Preisformel erhalten und gekennzeichnet. Unbekannte oder fehlende
+Positionen erhalten keinen erfundenen Preis.

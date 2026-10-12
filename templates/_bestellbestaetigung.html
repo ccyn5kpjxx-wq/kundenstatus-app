@@ -1,0 +1,26 @@
+{% set confirmation_orders = confirmation_orders|default({}) %}
+{% set confirmation_candidates = confirmation_candidates|default([]) %}
+{% if confirmation_candidates and confirmation_entries %}
+<details class="settings"><summary>Preise aus Auftragsbestätigung zuordnen</summary>
+<p>Wähle zu jeder Bestellung die passende Belegposition. Der Belegpreis bleibt mit seinem Artikel und Gebinde gespeichert. Abweichende Artikel, Kartoninhalte und Einheiten benötigen eine Begründung.</p>
+<form method="post" action="{{ url_for('werkstatt_orders.price_comparison_form', action='bestaetigung') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+{% if group is defined %}<input type="hidden" name="archive_day" value="{{ group.key }}">{% endif %}
+{% for entry in confirmation_entries %}{% set binding=confirmation_orders.get(entry.source) %}{% if binding %}
+<article>
+<h4>{{ entry.product }}</h4><small>{{ entry.person }} · {{ entry.quantity }} {{ entry.unit }}</small>
+<input type="hidden" name="confirmation_order" value="{{ binding.order_key }}">
+<input type="hidden" name="order_fingerprint_{{ binding.order_key }}" value="{{ binding.order_fingerprint }}">
+<label>Belegposition für {{ entry.product }}<select name="proposal_ref_{{ binding.order_key }}">
+<option value="">Nicht zuordnen</option>
+{% for candidate in confirmation_candidates %}<option value="{{ candidate.id }}:{{ candidate.proposal_fingerprint }}">{{ candidate.label }} · {{ candidate.date_display }} · {{ candidate.source_reference }}</option>{% endfor %}
+</select></label>
+<label>Zuordnung oder Abweichung bei {{ entry.product }}<textarea name="review_reason_{{ binding.order_key }}" maxlength="500" rows="2" placeholder="Bei unterschiedlichen Artikelnummern oder Gebinden den Abgleich dokumentieren."></textarea></label>
+</article>
+{% endif %}{% endfor %}
+<label class="check"><input type="checkbox" name="reviewed" value="ja" required>Ich habe Artikel, Gebinde und Belegpositionen geprüft. Abweichungen sind dokumentiert.</label>
+<button>Belegpreise an Bestellungen speichern</button>
+<p class="muted">Die ursprünglichen Bestellangaben bleiben erhalten. Die Zuordnung löst keine Bestellung aus und gibt keine zusätzlichen Kosten frei.</p>
+</form>
+</details>
+{% endif %}

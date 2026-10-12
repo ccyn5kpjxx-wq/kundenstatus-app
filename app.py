@@ -8314,6 +8314,7 @@ BACKUP_TABLES = (
     "einkauf_material_rueckfragen",
     "assistent_bestellpreis_basis",
     "assistent_bestellpreis_rechnungen",
+    "assistent_bestellpreis_bestaetigungen",
     "assistent_bestelllieferungen",
     "google_ads_tageswerte",
 )
@@ -8345,7 +8346,7 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
-BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_liefereingang_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1", "werkstatt_schule_v1", "werkstatt_krankheit_v1")
+BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_liefereingang_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1", "werkstatt_schule_v1", "werkstatt_krankheit_v1", "werkstatt_bestellbestaetigung_v1")
 BACKUP_BINARY_FIELDS = {
     "mitarbeiter_lohnzettel": {
         "original_base64": {"suffix": ".bin", "max_bytes": 10 * 1024 * 1024},
@@ -48011,6 +48012,7 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         "einkauf_material_dialoge", "einkauf_material_texte", "einkauf_material_rueckfragen",
         # Historical estimates and invoice matches postdate the order dialog.
         "assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen",
+        "assistent_bestellpreis_bestaetigungen",
         # Confirmed delivery receipts arrived after historical price matching.
         "assistent_bestelllieferungen",
         # Personal setup/profile documents arrived after the avatar features.
@@ -48057,6 +48059,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         required_tables.update({"einkauf_material_dialoge", "einkauf_material_texte", "einkauf_material_rueckfragen"})
     if "werkstatt_bestellvergleich_v1" in schema_features:
         required_tables.update({"assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen"})
+    if "werkstatt_bestellbestaetigung_v1" in schema_features:
+        required_tables.add("assistent_bestellpreis_bestaetigungen")
     if "werkstatt_liefereingang_v1" in schema_features:
         required_tables.add("assistent_bestelllieferungen")
     if "werkstatt_mailquellen_v1" in schema_features:
@@ -48477,7 +48481,7 @@ def ensure_material_external_claims_for_import(*, export=None, imported_db=None,
                 "SELECT * FROM assistent_audit WHERE aktion IN (?, ?)",
                 ("material_external_reserved", "material_external_sent"),
             ).fetchall()]
-        for table in ("assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen", "assistent_bestelllieferungen"):
+        for table in ("assistent_bestellpreis_basis", "assistent_bestellpreis_rechnungen", "assistent_bestellpreis_bestaetigungen", "assistent_bestelllieferungen"):
             if get_table_columns(target, table):
                 protected[table] = [dict(row) for row in target.execute(f"SELECT * FROM {table}").fetchall()]
 
@@ -48502,6 +48506,15 @@ def ensure_material_external_claims_for_import(*, export=None, imported_db=None,
                 chunk = values[offset:offset + 400]
                 rows.extend(protect_rows(table, column + " IN (" + ",".join("?" for _ in chunk) + ")", tuple(chunk)))
             return rows
+
+        # A dated supplier confirmation is its own immutable appendix, not an
+        # invoice. Keep its scoped proposal and uploaded original source chain.
+        for confirmation in protected.get("assistent_bestellpreis_bestaetigungen", []):
+            payload = json.loads(confirmation["payload_json"])
+            confirmation_source = payload.get("source") or {}
+            protect_ids("einkauf_belege", "id", (confirmation_source.get("beleg_id"),))
+            proposals = protect_ids("assistent_rechnungsartikel", "id", (payload.get("proposal_id"),))
+            protect_ids("assistent_rechnungsimporte", "id", (row.get("import_id") for row in proposals))
 
         # A confirmed delivery must retain its original intake/file identity too.
         for delivery in protected.get("assistent_bestelllieferungen", []):

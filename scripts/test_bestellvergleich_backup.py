@@ -300,7 +300,8 @@ class ComparisonBackupTests(unittest.TestCase):
         adapter = namespace['PostgresConnection'](pg)
         portal = type('Portal', (), {'get_db': lambda _: adapter})()
         OrderPriceComparison(portal)
-        self.assertEqual(len(statements), 2)
+        self.assertEqual(len(statements), 3)
+        self.assertTrue(any('assistent_bestellpreis_bestaetigungen' in sql for sql in statements))
         self.assertTrue(all('SERIAL PRIMARY KEY' in sql and 'AUTOINCREMENT' not in sql for sql in statements))
         pg.commit.assert_called_once_with()
 
