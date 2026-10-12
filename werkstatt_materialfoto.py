@@ -198,7 +198,30 @@ def _source(value):
             result[key] = value[key]
     if isinstance(value.get('datum'), str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', value['datum']):
         result['datum'] = value['datum']
+    if value.get('beleg_typ') == 'auftragsbestaetigung':
+        result['beleg_typ'] = 'auftragsbestaetigung'
     return result
+
+
+def _exact_product_code(item, code, code_format):
+    """A full printed manufacturer token may identify this recorded package.
+
+    Supplier SKU stays canonical. Numeric codes, prefixes and a bare model in
+    front of a package suffix cannot become inferred manufacturer aliases.
+    """
+    if str(item.get('artikelnummer', '')).strip().casefold() == code.casefold():
+        return True
+    if code_format != 'qr_code' or not item.get('gebinde') or not item.get('ve'):
+        return False
+    product = str(item.get('produkt_name') or '')
+    # Mipa's recorded nine-digit manufacturer numbers are not GTIN lengths.
+    # A free numeric occurrence in a description is never such a mapping.
+    if re.fullmatch(r'[0-9]{9}', code):
+        return bool(re.search(r'(?<!\w)Mipa\s*'+re.escape(code)+r'(?![\w./-])',product,re.I))
+    if not re.fullmatch(r'[A-Za-z]{1,8}[0-9]{2,8}(?:[._/-][A-Za-z0-9]+)*', code):
+        return False
+    return bool(re.search(r'(?<![\w./-])'+re.escape(code)+r'(?![\w./-])',
+                          product, re.I))
 
 
 class MaterialPhotoService:
@@ -254,7 +277,10 @@ class MaterialPhotoService:
         candidate. It never changes the label match or approves a purchase.
         """
         catalog = getattr(self.p.cockpit_data, 'catalog', None)
-        lookup = getattr(catalog, 'historical_price', None)
+        historical_lookup = getattr(catalog, 'historical_price', None)
+        lookup = getattr(catalog, 'preview_price', None)
+        if not callable(lookup):
+            lookup = historical_lookup
         if not matches or not callable(lookup):
             return matches
         try:
@@ -269,6 +295,8 @@ class MaterialPhotoService:
             try:
                 saved = lookup(hit['lieferant'], hit['artikelnummer'], hit.get('ve', ''),
                                packaging=hit.get('gebinde', ''), snapshot=snapshot)
+                if not isinstance(saved, dict):
+                    saved = {}
                 if (saved.get('status') == 'ok' and saved.get('currency') == 'EUR'
                         and saved.get('tax_basis') in ('net', 'gross')
                         and re.fullmatch(r'\d{4}-\d{2}-\d{2}', str(saved.get('date', '')))
@@ -276,14 +304,14 @@ class MaterialPhotoService:
                         and Decimal(str(saved.get('amount'))) > 0):
                     item['price'] = {key: saved.get(key) for key in
                         ('amount', 'currency', 'tax_basis', 'unit', 'packaging', 'date',
-                         'document_type', 'source_label')}
+                         'document_type', 'source_label', 'review_required', 'review_notice')}
             except Exception:
                 # Optional price lookup cannot block photos or expose internals.
                 pass
             decorated.append(item)
         return decorated
 
-    def preview(self, who, file, *, read_label=False, rejected_codes=()):
+    def preview(self, who, file, *, read_label=False, auto_label=False, rejected_codes=()):
         """Decode a product code and read its recorded identity without saving it.
 
         The code preview does not stage an assistant photo, call vision, select an
@@ -302,7 +330,7 @@ class MaterialPhotoService:
         code = _code_view(_decode_codes(raw, digest, decoded=decoded), digest)
         result = dict(code_erkennung=code, decodedCode='', product='', matches=[],
                       lookup_status='no_code', partial=False, pruefen=True, bestellbar=False)
-        if read_label:
+        def label_preview():
             rejected = {value.casefold() for value in rejected_codes}
             if not _LABEL_PREVIEW_SLOTS.acquire(blocking=False):
                 raise LabelPreviewBusy('Die Etiketterkennung ist gerade belegt. Bitte kurz erneut versuchen oder den Produktnamen eintragen.')
@@ -331,10 +359,14 @@ class MaterialPhotoService:
                           message='Vom Etikett gelesen (ungeprüft). Stimmt dieser Produktname? Die Werkstatt prüft die korrigierte Zuordnung.')
             result['matches'] = self._preview_prices(result['matches'])
             return result
+        if read_label:
+            return label_preview()
         if code['status'] != 'erkannt':
             result.update(lookup_status='ambiguous' if code['status'] == 'mehrdeutig' else
                           'unavailable' if code['status'] == 'nicht_verfuegbar' else 'no_code',
                           message=code['hinweis'] + ' Du kannst das Foto senden und den Artikel beschreiben.')
+            if auto_label and result['lookup_status'] in {'no_code', 'unavailable'}:
+                return label_preview()
             return result
         decoded = code['codes'][0]['suchwert']
         result['decodedCode'] = decoded
@@ -348,9 +380,7 @@ class MaterialPhotoService:
             for item in catalog.get('varianten', [])[:30]:
                 if not isinstance(item, dict):
                     continue
-                # The catalog currently records supplier article numbers. A
-                # GTIN without that recorded mapping stays unknown, not guessed.
-                if str(item.get('artikelnummer', '')).strip().casefold() != decoded.casefold():
+                if not _exact_product_code(item, decoded, code['codes'][0]['format']):
                     continue
                 source = next((source for value in item.get('quellen', [])[:50]
                                if (source := _source(value))), None)
@@ -374,6 +404,8 @@ class MaterialPhotoService:
             result.update(lookup_status='ambiguous', message='Mehrere oder weitere mögliche Zuordnungen. Vergleiche die Varianten oder beschreibe den Artikel; die Werkstatt ordnet ihn zu.')
         else:
             result.update(lookup_status='no_match', message='Code erkannt, aber kein exakt zugeordneter Artikel im gespeicherten Katalog. Beschreibe den Artikel oder sende das Foto zur manuellen Zuordnung.')
+            if auto_label:
+                return label_preview()
         result['matches'] = self._preview_prices(result['matches'])
         return result
 

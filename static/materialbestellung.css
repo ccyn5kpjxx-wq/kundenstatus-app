@@ -104,6 +104,7 @@ h1 span { color: var(--lime); }
 .article-preview[data-needs-label=true] { border: 2px solid #b91c1c; border-left-width: 5px; background: #fef2f2; color: #7f1d1d; }
 .article-preview .article-preview-warning { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; font-size: 14px; line-height: 1.5; }
 .article-preview p { margin: 3px 0; }
+.article-preview .article-price-review { color: #805313; font-weight: 600; }
 .article-code { font-weight: 650; }
 .article-candidate { padding-top: 9px; margin-top: 7px; border-top: 1px solid var(--line); }
 .article-candidate small { display: block; margin-top: 4px; color: var(--muted); }

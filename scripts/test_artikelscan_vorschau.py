@@ -74,6 +74,7 @@ class ProductPreviewTests(unittest.TestCase):
         before = self.database()
         snapshot = {'items': [self.hit]}
         catalog = Mock()
+        catalog.preview_price = None  # Legacy adapter, deliberately no preview API.
         catalog.knowledge_rows.return_value = snapshot
         catalog.historical_price.return_value = dict(status='ok', amount='23.45', currency='EUR',
             tax_basis='net', unit=self.hit['ve'], packaging=self.hit['gebinde'], date='2026-02-03',
@@ -93,6 +94,7 @@ class ProductPreviewTests(unittest.TestCase):
 
     def test_uncertain_price_or_catalog_error_does_not_invent_price_or_block_product(self):
         catalog = Mock()
+        catalog.preview_price = None
         catalog.knowledge_rows.return_value = {'items': []}
         self.f.p.cockpit_data.catalog = catalog
         for changes in ({'status': 'unknown'}, {'date': None}, {'amount': 'NaN'}, {'currency': 'unknown'}):

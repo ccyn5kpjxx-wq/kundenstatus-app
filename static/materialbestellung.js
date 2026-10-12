@@ -225,7 +225,7 @@
   }
   function enqueuePreview(photo, file, readLabel) {
     photo.confirmedPreview = false;
-    photo.preview = {lookup_status: 'loading', message: readLabel ? 'Produktname auf dem Etikett wird gelesen …' : 'Artikelcode wird gelesen und im Katalog gesucht …'};
+    photo.preview = {lookup_status: 'loading', message: readLabel ? 'Produktname auf dem Etikett wird gelesen …' : 'Artikel und gespeicherter Preis werden erkannt …'};
     previewQueue.push({photo, file, readLabel, version: ++photo.previewVersion});
   }
   function chooseLabel(photo, reject = false) {
@@ -282,7 +282,7 @@
       candidate.append(node('p', [match.lieferant, match.artikelnummer, match.groesse, match.farbe, match.gebinde, match.ve].filter(Boolean).join(' · ')));
       if (match.quelle) {
         const source = match.quelle;
-        candidate.append(node('small', 'Quelle: ' + (source.art === 'lexware' ? 'Lieferantenrechnung' : 'Einkaufsbeleg') + ' ' + source.beleg_id
+        candidate.append(node('small', 'Quelle: ' + (source.beleg_typ === 'auftragsbestaetigung' ? 'Auftragsbestätigung' : source.art === 'lexware' ? 'Lieferantenrechnung' : 'Einkaufsbeleg') + ' ' + source.beleg_id
           + (source.seite ? ' · Seite ' + source.seite : '') + (source.datum ? ' · ' + source.datum : '')));
       }
       const price = match.price;
@@ -292,6 +292,9 @@
           + (price.tax_basis === 'net' ? 'netto' : 'brutto') + ' je ' + price.unit));
         candidate.append(node('small', (price.source_label || 'Preisstand ' + price.date)
           + ' · Orientierung, Nebenkosten werden separat geprüft.'));
+        if (price.review_required === true) {
+          candidate.append(node('p', price.review_notice || 'Gedruckter Belegpreis · Preisberechnung prüfen.', 'article-price-review'));
+        }
       }
       panel.append(candidate);
     }
@@ -328,7 +331,8 @@
         const {photo, file, readLabel, version} = previewQueue.shift();
         if (!photos.includes(photo)) continue;
         const body = new FormData(); body.append('foto', file, file.name);
-        if (readLabel) {body.append('modus', 'etikett'); body.append('abgelehnte_codes', JSON.stringify(photo.rejectedCodes));}
+        body.append('modus', readLabel ? 'etikett' : 'auto');
+        if (readLabel) body.append('abgelehnte_codes', JSON.stringify(photo.rejectedCodes));
         try {
           const result = await request(previewEndpoint, {method: 'POST', body});
           if (photos.includes(photo) && photo.previewVersion === version) {photo.preview = result; paintPreview(photo); updateSubmitControl();}

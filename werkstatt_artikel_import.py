@@ -7,7 +7,7 @@ import unicodedata
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
 
 from flask import jsonify, render_template, request, flash, redirect, url_for
@@ -743,6 +743,114 @@ class InvoiceCatalog:
             if document_type == 'auftragsbestaetigung' else 'Historischer Belegpreis; keine aktuellen Einkaufskonditionen oder Bestellfreigabe.')
         if result['currency'] == 'unknown' or result['tax_basis'] == 'unknown':
             result['warnings'].append('Währung oder Steuerbasis nicht am Rechnungsoriginal belegt.')
+        return result
+
+    def _preview_confirmation_original(self, row, hashes):
+        """Recheck one canonical AB source without importing, restoring or writing."""
+        ident = row.get('vorschlag_id')
+        if type(ident) is not int or ident < 1:
+            return False
+        records = self.rows('''SELECT a.id,a.supplier,a.product_name,a.article_number,a.payload_json,
+            i.source_id,i.source_kind,i.state,b.id AS original_id,b.beleg_typ,b.lieferant,
+            b.original_name,b.stored_name,b.status FROM assistent_rechnungsartikel a
+            JOIN assistent_rechnungsimporte i ON i.id=a.import_id
+            LEFT JOIN einkauf_belege b ON i.source_kind='einkauf' AND i.source_id=CAST(b.id AS TEXT)
+            WHERE a.id=? AND a.active=1''', (ident,))
+        if len(records) != 1:
+            return False
+        original = records[0]
+        source = row.get('quelle') or {}
+        expected = dict(row)
+        expected.pop('vorschlag_id', None)
+        if (original['source_kind'] != 'einkauf' or original['state'] not in {'ausgelesen', 'pruefen'}
+                or original['beleg_typ'] != 'auftragsbestaetigung'
+                or str(original['original_id']) != str(source.get('beleg_id'))
+                or _product_text(original['lieferant']) != _product_text(row.get('lieferant'))
+                or _visible_article_payload(original) != expected
+                or not self.source_rule(original)['allowed']
+                or _product_text(original['status']) in {'deleted', 'geloescht', 'void', 'voided', 'canceled',
+                    'cancelled', 'storniert', 'quarantine', 'quarantaene', 'gesperrt'}):
+            return False
+        root = getattr(self.p, 'UPLOAD_DIR', None)
+        stored = original['stored_name'] or ''
+        if root is None or not stored or '/' in stored or '\\' in stored:
+            return False
+        root = Path(root).resolve()
+        path = (root / stored).resolve()
+        if path.parent != root or not path.is_file() or not 0 < path.stat().st_size <= 20 * 1024 * 1024:
+            return False
+        if path not in hashes:
+            digest = hashlib.sha256()
+            with path.open('rb') as stream:
+                for chunk in iter(lambda: stream.read(65536), b''):
+                    digest.update(chunk)
+            hashes[path] = digest.hexdigest()
+        return bool(re.fullmatch(r'[a-f0-9]{64}', str(source.get('datei_sha256', '')))
+                    and hashes[path] == source['datei_sha256'])
+
+    def preview_price(self, supplier, article_number, unit, packaging='', *, snapshot=None):
+        """Display the printed dated quote; historical_price remains strict.
+
+        A formula discrepancy is a visible review note, never a purchasing
+        approval. An invalid latest quote stays in the evidence set as a blocker
+        rather than revealing an older price. All preparation is on copies.
+        """
+        snapshot = self.knowledge_rows(limit=5000) if snapshot is None else snapshot
+        normal = lambda value: _product_text(value).replace(',', '.')
+        selected_supplier, selected_number = normal(supplier), normal(article_number)
+        prepared, warnings, hashes = [], {}, {}
+        for row in snapshot['items']:
+            source = row.get('quelle') or {}
+            raw_evidence = row.get('price_evidence') or {}
+            confirmation = (row.get('document_type') == 'auftragsbestaetigung'
+                or source.get('beleg_typ') == 'auftragsbestaetigung'
+                or raw_evidence.get('document_type') == 'auftragsbestaetigung'
+                or raw_evidence.get('basis') == 'auftragsbestaetigung_netto_positionswert')
+            if (not confirmation
+                    or normal(row.get('lieferant')) != selected_supplier
+                    or normal(row.get('artikelnummer')) != selected_number):
+                prepared.append(row)
+                continue
+            evidence = _price_evidence(row.get('price_evidence'))
+            valid = False
+            try:
+                amount, total, quantity, quoted = (Decimal(evidence.get(key, '')) for key in
+                    ('value', 'quoted_line_total_net', 'quantity', 'quoted_unit_net'))
+                valid = (row.get('document_type') == 'auftragsbestaetigung'
+                    and source.get('beleg_typ') == 'auftragsbestaetigung'
+                    and evidence.get('document_type') == 'auftragsbestaetigung'
+                    and evidence.get('basis') == 'auftragsbestaetigung_netto_positionswert'
+                    and evidence.get('currency') == 'EUR' and evidence.get('tax_basis') == 'net'
+                    and bool(evidence.get('tax_rate'))
+                    and evidence.get('metadata_source', {}).get('tax_summary_reconciled') is True
+                    and all(number.is_finite() and 0 < number <= 10000000 for number in (amount, total, quantity, quoted))
+                    and abs(total / quantity - quoted) <= Decimal('0.000001')
+                    and amount == quoted.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    and bool(invoice_date(source.get('datum')))
+                    and type(source.get('seite')) is int and source['seite'] > 0
+                    and type(source.get('position')) is int and source['position'] > 0
+                    and bool(material_unit(row.get('ve'))) and bool(row.get('gebinde'))
+                    and self._preview_confirmation_original(row, hashes))
+            except (InvalidOperation, ValueError, TypeError, OSError):
+                pass
+            item = dict(row, price_evidence=dict(evidence, reconciled=valid))
+            notices = list(row.get('auslese_hinweise') or [])
+            if valid:
+                # Only the known arithmetic warning is a display exception.
+                # Missing/contradictory product, package or tax evidence remains.
+                notices = [note for note in notices if note != 'Positionssumme passt nicht zu Menge, Inhalt, Grundpreis und Rabatt.']
+                warnings[row.get('vorschlag_id')] = evidence.get('quote_formula_reconciled') is not True
+            else:
+                notices.append('Original und Basis des gedruckten AB-Preises sind nicht vollständig belegt.')
+            item['auslese_hinweise'] = notices
+            prepared.append(item)
+        result = self.historical_price(supplier, article_number, unit, packaging,
+            snapshot=dict(snapshot, items=prepared))
+        selected = (result.get('matches') or [{}])[0]
+        review = (result['status'] == 'ok' and result.get('document_type') == 'auftragsbestaetigung'
+                  and warnings.get(selected.get('proposal_id')) is True)
+        result.update(review_required=review,
+            review_notice='Gedruckter AB-Preis; die Preisformel weicht ab und bleibt zu prüfen.' if review else '')
         return result
 
     def existing_original_hashes(self, supplier):

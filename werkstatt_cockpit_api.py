@@ -36,6 +36,31 @@ def _clean_fields(row):
     return result
 
 
+def _split_bank_identifier(values):
+    """Catch structured IBAN fragments without concatenating product prose."""
+    from werkstatt_einkaufseingang import _IBAN_COUNTRIES
+    parts = [re.sub(r'\s+', '', value).upper() for value in values]
+    for index, prefix in enumerate(parts):
+        if (not re.fullmatch(r'[A-Z]{2}[0-9]{2}[A-Z0-9]{0,30}', prefix)
+                or prefix[:2] not in _IBAN_COUNTRIES):
+            continue
+        candidate = prefix
+        for fragment in parts[index+1:]:
+            # Whole numeric/alphanumeric field fragments only. Units and
+            # description prose never become characters in a bank identifier.
+            if not re.fullmatch(r'[A-Z0-9]{4,30}', fragment) or not re.search(r'[0-9]', fragment):
+                continue
+            candidate += fragment
+            if len(candidate) > 34:
+                break
+            if len(candidate) >= 15:
+                digits = ''.join(str(ord(char)-55) if char.isalpha() else char
+                                 for char in candidate[4:]+candidate[:4])
+                if int(digits) % 97 == 1:
+                    return True
+    return False
+
+
 def _invoice_product(row, supplier, bid, proposal=False, source_kind='einkauf'):
     """Allowlist one persisted product, never invoice text or arbitrary payload keys."""
     from werkstatt_artikel_import import is_product_candidate, _price_evidence, _quantity_evidence, _package_evidence
@@ -47,8 +72,12 @@ def _invoice_product(row, supplier, bid, proposal=False, source_kind='einkauf'):
     if any(not isinstance(value, str) or len(value) > 1000 for value in item.values()):
         return None
     # Check all exported text fields, including variants/SKUs, for footer leakage.
-    candidate = dict(item, produkt_beschreibung=' '.join(item.values()))
-    if not is_product_candidate(candidate, supplier) or any(_BANK_DATA.search(v) for v in item.values()):
+    # Combining dimensions, SKU and quantity manufactures strings resembling
+    # IBANs (e.g. "ml 10001234 Gebinde 400 ml 3"). Inspect the original fields
+    # separately, preserving the product/description checks and finance gate.
+    if (not is_product_candidate(item, supplier)
+            or any(_BANK_DATA.search(v) or v and not is_product_candidate({'produkt_name':v}, supplier)
+                   for v in item.values()) or _split_bank_identifier(item.values())):
         return None
     price = parse_unit_price(row.get('historischer_preishinweis' if proposal else 'letzter_preis'))
     item.update(lieferant=supplier, historischer_preishinweis=str(price) if price is not None else '',

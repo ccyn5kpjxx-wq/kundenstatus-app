@@ -630,13 +630,16 @@ def register_material_order_portal(p):
                 or len(request.files.getlist('foto')) != 1):
             raise ValueError('Für die Artikelvorschau genau ein Foto übermitteln.')
         mode = request.form.get('modus', 'code')
-        if mode not in {'code', 'etikett'}:
-            raise ValueError('Code- oder Etikettvorschau auswählen.')
+        if mode not in {'code', 'etikett', 'auto'}:
+            raise ValueError('Automatische, Code- oder Etikettvorschau auswählen.')
         try:
             rejected = _rejected_codes(json.loads(request.form.get('abgelehnte_codes', '[]')))
         except (ValueError, TypeError):
             raise ValueError('Abgelehnte Artikelcodes konnten nicht gelesen werden.') from None
-        result = p.assistant_material_photos.preview(who, request.files.get('foto'), read_label=mode == 'etikett', rejected_codes=rejected)
+        options = {'read_label':mode == 'etikett', 'rejected_codes':rejected}
+        if mode == 'auto':
+            options['auto_label'] = True
+        result = p.assistant_material_photos.preview(who, request.files.get('foto'), **options)
         current = service.identity()
         if (not service.can_order(current) or current['actor'] != who['actor']
                 or current['version'] != who['version']):

@@ -144,6 +144,19 @@ Datum. Unklare, widersprüchliche oder nicht verfügbare Quellen bekommen keinen
 Ersatzpreis. Die Vorschau ändert keine Bestellungen und übermittelt ihren
 Anzeigepreis nicht als Freigabe; aktuelle Nebenkosten bleiben separat zu prüfen.
 
+Beim ersten Foto nutzt die persönliche Maske die automatische Vorschau: zuerst
+wird der Code geprüft, anschließend bei fehlender eindeutiger Codezuordnung
+das Etikett desselben Fotos gelesen. Ein zusätzliches Etikettfoto ist nur bei
+einer unlesbaren oder falschen Zuordnung nötig. Vollständig belegte
+Herstellerkennungen dürfen zur vorhandenen Lieferantenartikelnummer führen;
+ähnliche Kennungen, Ersatzartikel und andere Gebinde bleiben getrennt.
+
+Ein gedruckter Preis aus einer vollständig belegten Auftragsbestätigung kann
+auch bei einer Centabweichung der Preisformel als Belegpreis mit Prüfhinweis
+erscheinen. Die strenge Preisfreigabe und die gespeicherte Bestellobergrenze
+bleiben davon unberührt. Die Vorschau übernimmt keine Belegmenge als neuen
+Bestellwunsch und speichert oder versendet keine Bestellung.
+
 Die gespeicherten Artikelpreise werden separat den bestehenden Bestellpositionen
 zugeordnet. Der Admin wählt die bestätigte Belegposition und dokumentiert
 abweichende Artikelnummern, Mengen oder Kartoninhalte. Die Übersicht zeigt den

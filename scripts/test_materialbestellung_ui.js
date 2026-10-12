@@ -511,3 +511,45 @@ test('an expired personal session cannot open the warning photo action or send a
   label.click(); assert.equal(f.$('camera').clicked, undefined, 'A synthetic click must also respect the existing identity guard');
   await f.controller.submit(); assert.equal(f.posts().length, 0);
 });
+
+test('the first photo requests automatic identification and shows its dated package price before sending', async () => {
+  const f = fixture({previewEndpoint: '/preview'}), fetch = f.api.fetch, scans = [];
+  const original = photo('product.jpg');
+  f.api.fetch = (url, settings) => {
+    if (url !== '/preview') return fetch(url, settings);
+    scans.push(settings);
+    return reply({lookup_status: 'label', product: 'Testlack 2,5 Liter', matches: [{
+      produkt_name: 'Testlack 2,5 Liter', lieferant: 'Testlieferant', artikelnummer: 'TEST-25',
+      gebinde: '2.5 L', ve: 'Gebinde', quelle: {art: 'einkauf', beleg_id: 5, beleg_typ: 'auftragsbestaetigung'},
+      price: {amount: '181.50', currency: 'EUR', tax_basis: 'net', unit: 'Gebinde', packaging: '2.5 L',
+        date: '2026-10-12', source_label: 'Auftragsbestätigung vom 12.10.2026'}
+    }]});
+  };
+  f.controller.addFiles([original]); await settle();
+  assert.equal(scans.length, 1); assert.equal(scans[0].body.fields.get('modus'), 'auto');
+  assert.equal(scans[0].body.fields.get('foto'), original);
+  const text = descendants(f.cards()[0]).map(el => el.textContent).join(' ');
+  assert.match(text, /181,50 € netto je Gebinde/); assert.match(text, /2\.5 L/);
+  assert.match(text, /Auftragsbestätigung vom 12\.10\.2026/);
+  assert.equal(f.posts().length, 0, 'Price preview must not create an order');
+  f.quantity(0).value = '2'; f.quantity(0).fire('input');
+  f.step(0, 'Artikel stimmt').click(); await f.controller.submit();
+  const body = f.posts()[0].settings.body.fields, rows = JSON.parse(body.get('positionen'));
+  assert.equal(rows[0].menge, 2); assert.equal(body.get('foto_' + rows[0].id), original);
+  assert.equal(Object.keys(rows[0]).some(key => /preis|price|approval/i.test(key)), false);
+});
+
+test('printed confirmation price keeps its visible calculation warning as plain text', async () => {
+  const f = fixture({previewEndpoint: '/preview'});
+  const notice = 'Gedruckter Preis; Berechnung um 0,01 Euro abweichend. <b>Prüfen</b>';
+  f.api.fetch = async () => reply({lookup_status: 'matched', product: 'Testharz', matches: [{
+    produkt_name: 'Testharz', price: {amount: '20.62', currency: 'EUR', tax_basis: 'net', unit: 'Gebinde',
+      packaging: '1 kg', date: '2026-10-12', source_label: 'Auftragsbestätigung vom 12.10.2026',
+      review_required: true, review_notice: notice}
+  }]});
+  f.controller.addFiles([photo()]); await settle();
+  const text = descendants(f.cards()[0]).map(el => el.textContent).join(' ');
+  assert.match(text, /20,62 € netto je Gebinde/);
+  assert.equal(descendants(f.cards()[0]).find(el => el.className === 'article-price-review').textContent, notice);
+  assert.equal(f.posts().length, 0);
+});
