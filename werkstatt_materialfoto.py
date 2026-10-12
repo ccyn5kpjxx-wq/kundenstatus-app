@@ -247,6 +247,42 @@ class MaterialPhotoService:
             raise ValueError('Materialfoto nicht gefunden.')
         return dict(row)
 
+    def _preview_prices(self, matches):
+        """Decorate identified catalog variants with dated, read-only prices.
+
+        A price belongs to the exact supplier, SKU, unit and package of each
+        candidate. It never changes the label match or approves a purchase.
+        """
+        catalog = getattr(self.p.cockpit_data, 'catalog', None)
+        lookup = getattr(catalog, 'historical_price', None)
+        if not matches or not callable(lookup):
+            return matches
+        try:
+            snapshot = catalog.knowledge_rows(limit=5000)
+            if not isinstance(snapshot, dict) or not isinstance(snapshot.get('items'), list):
+                return matches
+        except Exception:
+            return matches
+        decorated = []
+        for hit in matches:
+            item = dict(hit)
+            try:
+                saved = lookup(hit['lieferant'], hit['artikelnummer'], hit.get('ve', ''),
+                               packaging=hit.get('gebinde', ''), snapshot=snapshot)
+                if (saved.get('status') == 'ok' and saved.get('currency') == 'EUR'
+                        and saved.get('tax_basis') in ('net', 'gross')
+                        and re.fullmatch(r'\d{4}-\d{2}-\d{2}', str(saved.get('date', '')))
+                        and Decimal(str(saved.get('amount'))).is_finite()
+                        and Decimal(str(saved.get('amount'))) > 0):
+                    item['price'] = {key: saved.get(key) for key in
+                        ('amount', 'currency', 'tax_basis', 'unit', 'packaging', 'date',
+                         'document_type', 'source_label')}
+            except Exception:
+                # Optional price lookup cannot block photos or expose internals.
+                pass
+            decorated.append(item)
+        return decorated
+
     def preview(self, who, file, *, read_label=False, rejected_codes=()):
         """Decode a product code and read its recorded identity without saving it.
 
@@ -293,6 +329,7 @@ class MaterialPhotoService:
                 pass
             result.update(lookup_status='label', product=labels['produkt'],
                           message='Vom Etikett gelesen (ungeprüft). Stimmt dieser Produktname? Die Werkstatt prüft die korrigierte Zuordnung.')
+            result['matches'] = self._preview_prices(result['matches'])
             return result
         if code['status'] != 'erkannt':
             result.update(lookup_status='ambiguous' if code['status'] == 'mehrdeutig' else
@@ -337,6 +374,7 @@ class MaterialPhotoService:
             result.update(lookup_status='ambiguous', message='Mehrere oder weitere mögliche Zuordnungen. Vergleiche die Varianten oder beschreibe den Artikel; die Werkstatt ordnet ihn zu.')
         else:
             result.update(lookup_status='no_match', message='Code erkannt, aber kein exakt zugeordneter Artikel im gespeicherten Katalog. Beschreibe den Artikel oder sende das Foto zur manuellen Zuordnung.')
+        result['matches'] = self._preview_prices(result['matches'])
         return result
 
     def stage(self, who, file, request_id):

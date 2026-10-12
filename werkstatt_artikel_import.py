@@ -1,4 +1,4 @@
-"""Resumable, review-only supplier invoice catalog. Never places an order."""
+"""Review-only supplier invoices and dated order confirmations; never orders."""
 import hashlib
 import json
 from pathlib import Path
@@ -19,6 +19,15 @@ from werkstatt_topcolor_positionen import quantity_value, material_unit, explici
 
 
 _DISPLAY_SNAPSHOT = ContextVar('invoice_catalog_display_snapshot', default=None)
+DOCUMENT_TYPES = frozenset({'rechnung', 'auftragsbestaetigung'})
+
+
+def price_source_label(document_type, source_date):
+    date = invoice_date(source_date)
+    display = datetime.strptime(date, '%Y-%m-%d').strftime('%d.%m.%Y') if date else 'Datum offen'
+    if document_type == 'auftragsbestaetigung':
+        return 'Preis laut Auftragsbestätigung vom ' + display
+    return 'Historischer Rechnungspreis vom ' + display
 
 
 def _text(value, limit=1000):
@@ -119,9 +128,10 @@ def _quantity_evidence(value, source=None):
     value = value if isinstance(value, dict) else {}
     number = quantity_value(value.get('value'))
     field = value.get('source_field') if value.get('source_field') in ('Menge', 'stueckzahl', 'quantity', 'menge') else None
-    known = value.get('basis') == 'invoice_line' and number is not None and field is not None
+    basis = value.get('basis')
+    known = basis in ('invoice_line', 'document_line') and number is not None and field is not None
     result = {'value': number if known else None, 'unit': material_unit(value.get('unit')) if known else None,
-              'basis': 'invoice_line' if known else 'unknown', 'source_field': field if known else None,
+              'basis': basis if known else 'unknown', 'source_field': field if known else None,
               'verified': False}
     if isinstance(source, dict):
         result['source'] = source
@@ -157,7 +167,10 @@ def _marker(value):
 def _price_evidence(value):
     if not isinstance(value, dict):
         return {'verified': False, 'basis': 'unknown'}
-    result = {'verified': False, 'basis': value.get('basis') if value.get('basis') in ('unknown', 'gebindepreis_netto_abgeleitet') else 'unknown'}
+    bases = {'unknown', 'gebindepreis_netto_abgeleitet'}
+    if value.get('document_type') == 'auftragsbestaetigung':
+        bases.add('auftragsbestaetigung_netto_positionswert')
+    result = {'verified': False, 'basis': value.get('basis') if value.get('basis') in bases else 'unknown'}
     for key in ('value', 'unrounded_value', 'quantity', 'content', 'base_price_per_measure', 'discount_percent', 'line_total_net'):
         raw = _text(value.get(key), 80)
         result[key] = raw if re.fullmatch(r'[+-]?\d+(?:[.,]\d+)?', raw) else ''
@@ -180,6 +193,14 @@ def _price_evidence(value):
             result['metadata_source'] = {'page': page, 'method': metadata['method'], 'tax_summary_reconciled': True}
     if result['basis'] == 'gebindepreis_netto_abgeleitet':
         result['calculation'] = 'Inhalt × Grundpreis je Maßeinheit × (1 + Rabatt / 100)'
+    if value.get('document_type') == 'auftragsbestaetigung':
+        result['document_type'] = 'auftragsbestaetigung'
+        for key in ('quoted_line_total_net', 'quoted_unit_net', 'formula_unit_net'):
+            raw = _text(value.get(key), 80)
+            result[key] = raw if re.fullmatch(r'\d+(?:[.,]\d+)?', raw) else ''
+        result['quote_formula_reconciled'] = value.get('quote_formula_reconciled') is True
+        if result['basis'] == 'auftragsbestaetigung_netto_positionswert':
+            result['calculation'] = 'Gedruckter Netto-Positionsbetrag / belegte Menge; Anzeigepreis auf Cent gerundet'
     return result
 
 
@@ -273,7 +294,7 @@ class InvoiceCatalog:
                 current = self.rows('SELECT beleg_typ FROM einkauf_belege WHERE CAST(id AS TEXT)=?', (str(source.get('source_id') or ''),))
                 current_type = current[0]['beleg_typ'] if current else None
             source = dict(source, beleg_typ=current_type)
-        return classify_invoice_source(source, allowed_suppliers=allowed)
+        return classify_invoice_source(source, allowed_suppliers=allowed, allow_order_confirmation=True)
 
     def _source_rows(self, db=None, source_id=None, include_result=False):
         # One batched metadata join for search/status/context; no per-source DB
@@ -460,7 +481,7 @@ class InvoiceCatalog:
         if missing_provenance:
             warnings.append(f'Bei {missing_provenance} Position(en) fehlt ein genauer Seiten-/Positionsnachweis.')
         if not records:
-            warnings.append('Keine Produktpositionen erkannt. Originalrechnung muss geprüft werden.')
+            warnings.append('Keine Produktpositionen erkannt. Originalbeleg muss geprüft werden.')
         if malformed or missing_provenance:
             coverage['complete'] = False
         state = 'ausgelesen' if records and result.get('status') == 'ok' and coverage.get('complete') is True else 'pruefen'
@@ -556,6 +577,14 @@ class InvoiceCatalog:
         core = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         fingerprint = hashlib.sha256((source['source_key']+core).encode()).hexdigest()
         payload['quelle']['datum'] = invoice_date(raw_source.get('date'))
+        if raw_source.get('document_type') == 'auftragsbestaetigung':
+            payload['document_type'] = 'auftragsbestaetigung'
+            payload['quelle']['beleg_typ'] = 'auftragsbestaetigung'
+            payload['preisquellenhinweis'] = price_source_label('auftragsbestaetigung', payload['quelle']['datum'])
+            payload['hinweis'] = 'Aus Auftragsbestätigung vorgeschlagen. Artikel, Gebinde und Preisbasis am Original prüfen; keine Rechnung oder Bestellfreigabe.'
+            payload['preis_basis'] = 'Datierter Preisvorschlag laut Auftragsbestätigung, kein dauerhaft garantierter Einkaufspreis.'
+            if not payload['historischer_preishinweis']:
+                payload['historischer_preishinweis'] = price_evidence.get('quoted_unit_net', '')
         payload['quantity_evidence'] = _quantity_evidence(candidate.get('quantity_evidence'), payload['quelle'])
         payload['package_evidence'] = _package_evidence(candidate.get('package_evidence'), payload['quelle'])
         payload['evidence_version'] = 1
@@ -675,7 +704,7 @@ class InvoiceCatalog:
                         amount = format(number, 'f')
                 except InvalidOperation:
                     pass
-            if evidence.get('reconciled') is not True or evidence.get('basis') != 'gebindepreis_netto_abgeleitet':
+            if evidence.get('reconciled') is not True or evidence.get('basis') not in {'gebindepreis_netto_abgeleitet', 'auftragsbestaetigung_netto_positionswert'}:
                 amount = None
             source = dict(row.get('quelle') or {})
             source.update(reference=source.get('beleg'), page=source.get('seite'))
@@ -700,6 +729,9 @@ class InvoiceCatalog:
             result['warnings'].append('Widersprüchliche Preisangaben am jüngsten Rechnungsdatum; Originale prüfen.')
             return result
         selected = latest[0]
+        document_type = selected['source'].get('beleg_typ', 'rechnung')
+        result['document_type'] = document_type
+        result['source_label'] = price_source_label(document_type, result['date'])
         if selected['amount'] is None or selected['warnings']:
             result['warnings'].append('Preis am jüngsten Beleg ist nicht abgestimmt; kein älterer Preis eingesetzt.')
             result['source'], result['evidence'] = selected['source'], selected['evidence']
@@ -707,7 +739,8 @@ class InvoiceCatalog:
         for key in ('amount', 'currency', 'tax_basis', 'tax_rate', 'source', 'evidence'):
             result[key] = selected[key]
         result['status'] = 'ok'
-        result['warnings'].append('Historischer Belegpreis; keine aktuellen Einkaufskonditionen oder Bestellfreigabe.')
+        result['warnings'].append('Datierter Preis laut Auftragsbestätigung; keine Bestellfreigabe oder Garantie für künftige Preise.'
+            if document_type == 'auftragsbestaetigung' else 'Historischer Belegpreis; keine aktuellen Einkaufskonditionen oder Bestellfreigabe.')
         if result['currency'] == 'unknown' or result['tax_basis'] == 'unknown':
             result['warnings'].append('Währung oder Steuerbasis nicht am Rechnungsoriginal belegt.')
         return result
@@ -718,7 +751,7 @@ class InvoiceCatalog:
         if root is None:
             return {}
         root = Path(root).resolve()
-        records = self.rows("SELECT id,lieferant,original_name,stored_name,beleg_typ FROM einkauf_belege WHERE beleg_typ='rechnung'")
+        records = self.rows("SELECT id,lieferant,original_name,stored_name,beleg_typ FROM einkauf_belege WHERE beleg_typ IN ('rechnung','auftragsbestaetigung')")
         hashes = {}
         for row in records:
             if _product_text(row['lieferant']) != _product_text(supplier) or not self.source_rule(row)['allowed']:
@@ -790,13 +823,17 @@ def register_invoice_catalog(p, service):
     @p.admin_required
     def assistant_invoice_catalog_upload():
         supplier = str(request.form.get('lieferant') or '').strip()
-        rule = catalog.source_rule({'supplier': supplier})
+        document_type = request.form.get('beleg_typ', 'rechnung')
+        if document_type not in DOCUMENT_TYPES:
+            flash('Bitte Rechnung oder Auftragsbestätigung als Belegart wählen.', 'warning')
+            return redirect(url_for('assistant_invoice_catalog'))
+        rule = catalog.source_rule({'supplier': supplier, 'beleg_typ': document_type})
         if not rule['allowed']:
             flash(rule['reason'], 'warning')
             return redirect(url_for('assistant_invoice_catalog'))
         files = [f for f in request.files.getlist('rechnungen') if f.filename]
         if not files or len(files) > 20:
-            flash('Bitte 1 bis 20 Lieferantenrechnungen auswählen.', 'warning')
+            flash('Bitte 1 bis 20 Originalbelege auswählen.', 'warning')
             return redirect(url_for('assistant_invoice_catalog'))
         saved = 0
         seen = set()
@@ -826,12 +863,13 @@ def register_invoice_catalog(p, service):
                     duplicates += 1
                     continue
                 # Save receipt only: legacy import may collapse different variants.
-                if p.save_einkauf_beleg_upload(file, lieferant=supplier, beleg_typ='rechnung'):
+                if p.save_einkauf_beleg_upload(file, lieferant=supplier, beleg_typ=document_type):
                     saved += 1
             except ValueError:
-                flash('Eine Datei konnte nicht als Lieferantenrechnung gespeichert werden.', 'warning')
+                flash('Eine Datei konnte nicht als Originalbeleg gespeichert werden.', 'warning')
         catalog.prepare(service.invoice_sources(include_held=True))
-        flash(f'{saved} Rechnungsdateien gespeichert. Einlesen setzt die Verarbeitung fort.', 'success')
+        label = 'Auftragsbestätigungen' if document_type == 'auftragsbestaetigung' else 'Rechnungsdateien'
+        flash(f'{saved} {label} gespeichert. Einlesen setzt die Verarbeitung fort.', 'success')
         if duplicates:
             flash(f'{duplicates} bereits vorhandene Originaldatei(en) anhand SHA256 erkannt. Zum Aktualisieren den vorhandenen Beleg erneut einlesen.', 'info')
         return redirect(url_for('assistant_invoice_catalog'))

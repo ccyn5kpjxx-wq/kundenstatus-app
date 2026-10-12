@@ -75,6 +75,12 @@ def _invoice_product(row, supplier, bid, proposal=False, source_kind='einkauf'):
         item['quelle']['datum']=source['datum']
     if isinstance(source.get('datei_sha256'),str) and re.fullmatch(r'[0-9a-fA-F]{64}',source['datei_sha256']):
         item['quelle']['datei_sha256']=source['datei_sha256'].lower()
+    if source.get('beleg_typ') == 'auftragsbestaetigung':
+        from werkstatt_artikel_import import price_source_label
+        item['quelle']['beleg_typ'] = 'auftragsbestaetigung'
+        item['document_type'] = 'auftragsbestaetigung'
+        item['preisquellenhinweis'] = price_source_label('auftragsbestaetigung', item['quelle'].get('datum'))
+        item['preis_basis'] = 'Preis laut datierter Auftragsbestätigung; kein Rechnungspreis oder garantierter künftiger Bestellpreis.'
     for field in ('quantity_evidence','package_evidence'):
         item[field]=(_package_evidence if field=='package_evidence' else _quantity_evidence)(row.get(field))
         if any(isinstance(v,str) and _BANK_DATA.search(v) for v in item[field].values()):
@@ -97,10 +103,10 @@ class CockpitData:
     def __init__(self, portal):
         self.p = portal
 
-    def material_allowed(self, row):
+    def material_allowed(self, row, *, allow_order_confirmation=False):
         try:allowed=json.loads(self.p.get_app_setting('ASSISTANT_MATERIAL_SUPPLIERS','[]') or '[]')
         except (ValueError,TypeError):allowed=[]
-        return classify_invoice_source(row,allowed_suppliers=allowed)['allowed']
+        return classify_invoice_source(row,allowed_suppliers=allowed,allow_order_confirmation=allow_order_confirmation)['allowed']
 
     def rows(self, sql, args=()):
         db = self.p.get_db()
@@ -285,6 +291,9 @@ class CockpitData:
         compact=[]
         for variant in variants[:limit]:
             item={key:variant[key] for key in ('variante_id','produkt_name','lieferant','artikelnummer','groesse','farbe','farbabgleich','gebinde','ve','packinhalt','uebliche_menge','letzte_belegte_menge','historischer_preishinweis','fehlende_angaben','pruefen','bestellbar')}
+            if variant.get('document_type') == 'auftragsbestaetigung':
+                item['document_type'] = 'auftragsbestaetigung'
+                item['preisquellenhinweis'] = variant.get('preisquellenhinweis', '')
             item['belege_anzahl']=variant['belege_anzahl']
             item['historie_gekuerzt']=variant['historie_gekuerzt'] or len(variant['quellen'])>2 or len(variant['mengenhistorie'])>3
             item['quellen']=variant['quellen'][:2]
@@ -302,18 +311,18 @@ class CockpitData:
 
     def invoice_sources(self, include_held=False):
         # Product-import inventory only: no amounts, payments, balances or bank data.
-        local = self.rows("SELECT id,lieferant,original_name,status FROM einkauf_belege WHERE beleg_typ='rechnung' ORDER BY id")
+        local = self.rows("SELECT id,lieferant,original_name,status,beleg_typ FROM einkauf_belege WHERE beleg_typ IN ('rechnung','auftragsbestaetigung') ORDER BY id")
         remote = self.rows("SELECT voucher_id,contact_name,voucher_number,voucher_date FROM lexware_rechnungen WHERE voucher_type='purchaseinvoice' AND status NOT IN ('storniert','geloescht') ORDER BY voucher_date,voucher_id")
         if include_held:
             return {'einkaufsbelege':local,'lieferantenrechnungen':remote}
-        return {'einkaufsbelege': [r for r in local if self.material_allowed(r)],
+        return {'einkaufsbelege': [r for r in local if self.material_allowed(r, allow_order_confirmation=True)],
                 'lieferantenrechnungen': [r for r in remote if self.material_allowed(r)],
                 'hinweis': 'Nur freigegebene Materiallieferanten. Unbekannte Lieferanten benötigen eine Zuordnung. Banking und andere Finanzbelege sind ausgeschlossen.'}
 
     def invoice(self, bid):
         rows=self.rows('SELECT id,beleg_typ,lieferant,original_name,status,erstellt_am FROM einkauf_belege WHERE id=?',(bid,))
         if not rows:raise ValueError('Einkaufsbeleg nicht gefunden.')
-        if not self.material_allowed(rows[0]):raise ValueError('Beleg ist nicht für den Materialeinkauf freigegeben.')
+        if not self.material_allowed(rows[0], allow_order_confirmation=True):raise ValueError('Beleg ist nicht für den Materialeinkauf freigegeben.')
         result=_clean_fields(rows[0])
         supplier=result['lieferant']
         saved=self.rows('SELECT id,lieferant,artikelnummer,produkt_name,produkt_beschreibung,ve,gebinde,letzter_preis FROM einkauf_artikel WHERE quelle_beleg_id=? ORDER BY id LIMIT 501',(bid,))

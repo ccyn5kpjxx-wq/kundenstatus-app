@@ -3,7 +3,9 @@
 ``read_source(portal, source_kind, source_id)`` accepts a local integer row id
 from ``einkauf_belege`` (kind ``einkauf``), or the voucher UUID of an existing
 ``lexware_rechnungen`` row (kind ``lexware``).
-Only invoices are eligible; Lexware ids must already be known purchase invoices.
+Local invoice or explicitly typed order-confirmation originals are eligible;
+Lexware ids must already be known purchase invoices. Confirmations never become
+invoice prices, purchase approval or observed invoice quantities.
 The injected portal supplies get_db(), existing invoice extraction helpers and,
 for Lexware, get_requests() and its configured credentials.
 Importing this module does not import/start the Flask app or perform any I/O.
@@ -34,6 +36,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import unicodedata
 import pathlib
 import re
 from datetime import date
@@ -93,6 +96,17 @@ def invoice_date(value):
         return None
 
 
+def _confirmation_header(text):
+    if not isinstance(text, str):
+        return False
+    normalized = unicodedata.normalize('NFKC', text[:3000]).casefold().replace('ä', 'ae')
+    # A reference in invoice prose does not change the document's type.
+    lines = [line.strip() for line in normalized.splitlines()]
+    if any(re.fullmatch(r'(?:rechnung|invoice|gutschrift)(?:\s+(?:nr[.:]?|nummer)\s*\S+)?', line) for line in lines):
+        return False
+    return 'auftragsbestaetigung' in lines
+
+
 def _date_from_text(text, result):
     # Topcolor's native text places the invoice number and '= Leistungsdatum'
     # between Beleg-Datum and its value. Never scan past another date label.
@@ -112,7 +126,23 @@ def _date_from_text(text, result):
         _warn(result, 'Widersprüchliche Rechnungsdaten; das Belegdatum bleibt ungeklärt.')
 
 
-def topcolor_price_metadata(pages):
+def _confirmation_date_from_words(pages, result):
+    """AB header dates are geometrical cells, never delivery/import dates."""
+    dates = set()
+    for page in pages:
+        words = page['words']
+        for label in words:
+            if label[4] != 'Beleg-Datum':
+                continue
+            below = [word[4] for word in words if abs(word[0] - label[0]) <= 3
+                     and 3 < word[1] - label[1] < 28 and invoice_date(word[4])]
+            if len(below) == 1:
+                dates.add(below[0])
+    for date in sorted(dates):
+        _date_from_text('Beleg-Datum: ' + date, result)
+
+
+def topcolor_price_metadata(pages, *, document_type="rechnung"):
     """Read only a geometrically aligned, arithmetically reconciled summary.
 
     Called after the supplier/table gate; arbitrary OCR/model prose cannot
@@ -154,7 +184,8 @@ def topcolor_price_metadata(pages):
                 if not 0 <= rate <= 100 or not percent[0][2] <= rate_word[0] < vat_word[0] or abs(vat_word[2] - net_word[2]) > 3:
                     continue
                 for gross in words:
-                    if gross[4] != 'Rechnungs-Betrag' or abs(gross[0] - label[0]) > 3 or not 3 < gross[1] - tax[1] < 40:
+                    gross_label = 'Betrag' if document_type == 'auftragsbestaetigung' else 'Rechnungs-Betrag'
+                    if gross[4] != gross_label or abs(gross[0] - label[0]) > 3 or not 3 < gross[1] - tax[1] < 40:
                         continue
                     gross_row = line(gross[1])
                     gross_values = [w for w in gross_row if number(w[4]) is not None and w[0] > gross[2]]
@@ -230,9 +261,9 @@ def _row(portal, kind, source_id):
         raise SourceUnavailable("Gelöschte oder stornierte Rechnungen werden nicht ausgelesen.")
     if kind == "lexware" and str(item.get("voucher_type") or "").lower() != "purchaseinvoice":
         raise SourceUnavailable("Die Quelle ist keine bekannte Lieferantenrechnung.")
-    if kind == "einkauf" and str(item.get("beleg_typ") or "").lower() != "rechnung":
+    if kind == "einkauf" and item.get("beleg_typ") not in {"rechnung", "auftragsbestaetigung"}:
         raise SourceUnavailable("Der Einkaufsbeleg ist nicht als Rechnung gekennzeichnet.")
-    if classify_invoice_source(item)['decision'] == 'block':
+    if classify_invoice_source(item, allow_order_confirmation=True)['decision'] == 'block':
         raise SourceUnavailable("Diese Quelle gehört nicht zu den erlaubten Materialrechnungen.")
     return item
 
@@ -470,6 +501,13 @@ def _read_file(portal, path, file_id, result, directory):
             if len(document) > remaining:
                 _warn(result, "Die Rechnung überschreitet die Seitengrenze; sie ist noch nicht vollständig ausgelesen.")
             from werkstatt_topcolor_positionen import parse_topcolor_pages
+            document_type = result['source'].get('document_type', 'rechnung')
+            if document_type == 'auftragsbestaetigung':
+                # Declaring a file an AB must not turn an invoice, arbitrary
+                # attachment or missing original into an AB price source.
+                first_text = document[0].get_text() if len(document) else ''
+                if not _confirmation_header(first_text):
+                    raise SourceUnavailable('Der Originalbeleg ist nicht eindeutig als Auftragsbestätigung lesbar. Am Original prüfen.')
             # Repeated invoice headers must agree across the whole original,
             # including the native parser path that skips generic page reads.
             for index in range(min(len(document), remaining)):
@@ -479,9 +517,12 @@ def _read_file(portal, path, file_id, result, directory):
                  "words": document[index].get_text("words")}
                 for index in range(min(len(document), remaining))
             ]
-            native = parse_topcolor_pages(native_pages, result["source"]["supplier"])
+            if document_type == 'auftragsbestaetigung':
+                _confirmation_date_from_words(native_pages, result)
+            native = (parse_topcolor_pages(native_pages, result["source"]["supplier"], document_type=document_type)
+                      if document_type == 'auftragsbestaetigung' else parse_topcolor_pages(native_pages, result["source"]["supplier"]))
             if native is not None:
-                metadata = topcolor_price_metadata(native_pages)
+                metadata = topcolor_price_metadata(native_pages, document_type=document_type)
                 pages_read = min(len(document), remaining)
                 detail["pages_attempted"] += pages_read
                 coverage["pages_attempted"] += pages_read
@@ -530,6 +571,8 @@ def _read_file(portal, path, file_id, result, directory):
         text = ""
         if callable(getattr(portal, "extract_document_text_local", None)):
             text = portal.extract_document_text_local(image_path, image_path.name) or ""
+        if result['source'].get('document_type') == 'auftragsbestaetigung' and not _confirmation_header(text):
+            raise SourceUnavailable('Der Originalbeleg ist nicht eindeutig als Auftragsbestätigung lesbar. Am Original prüfen.')
         detail["complete"] = _extract_page(portal, image_path, image_path.name, text, result, file_id, 1, digest)
         detail["pages_read"] = 1
         coverage["pages_read"] += 1
@@ -542,6 +585,9 @@ def _read_file(portal, path, file_id, result, directory):
 def _stored_text(portal, row, result):
     # Only after the metadata/type gate, and only if the original is missing.
     # Quarantined documents must not even load their persisted OCR fallback.
+    if row.get('beleg_typ') == 'auftragsbestaetigung':
+        _warn(result, 'Eine Auftragsbestätigung benötigt ihr lesbares Original; gespeicherter Rechnungstext ist kein Ersatz.')
+        return
     db = portal.get_db()
     try:
         stored = db.execute("SELECT extrahierter_text FROM einkauf_belege WHERE id=? AND beleg_typ='rechnung'", (row['id'],)).fetchone()
@@ -587,6 +633,8 @@ def read_source(portal, source_kind, source_id):
         result["source"]["supplier"] = _text(row.get("lieferant" if kind == "einkauf" else "contact_name"), 240)
         result["source"]["reference"] = _text(row.get("original_name" if kind == "einkauf" else "voucher_number"), 240)
         result["source"]["date"] = invoice_date(row.get("voucher_date"))
+        if row.get('beleg_typ') == 'auftragsbestaetigung':
+            result['source']['document_type'] = 'auftragsbestaetigung'
         if not result["source"]["supplier"]:
             _warn(result, "Der Lieferant ist in der Quelle nicht zugeordnet und muss geprüft werden.")
         with tempfile.TemporaryDirectory(prefix="werkstatt-rechnungsquelle-") as temporary:
@@ -649,4 +697,8 @@ def read_source(portal, source_kind, source_id):
     # early candidates carrying an apparently certain superseded date.
     for candidate in result['candidates']:
         candidate['source']['date'] = result['source'].get('date')
+        if result['source'].get('document_type') == 'auftragsbestaetigung':
+            candidate['source']['document_type'] = 'auftragsbestaetigung'
+            candidate['quantity_evidence']['basis'] = ('document_line'
+                if candidate['quantity_evidence'].get('value') else 'unknown')
     return result

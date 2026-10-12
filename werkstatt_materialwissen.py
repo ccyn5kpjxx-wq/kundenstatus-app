@@ -153,7 +153,7 @@ def _number(value):
 def _source(row):
     raw = row.get('quelle') if isinstance(row.get('quelle'), dict) else {}
     result = {}
-    for key in ('art', 'beleg_id', 'artikel_id', 'seite', 'position', 'zeile', 'extraktionsindex', 'datum', 'methode'):
+    for key in ('art', 'beleg_id', 'artikel_id', 'seite', 'position', 'zeile', 'extraktionsindex', 'datum', 'methode', 'beleg_typ'):
         value = raw.get(key)
         if type(value) is int and value >= 0:
             result[key] = value
@@ -177,7 +177,7 @@ def _variant_fields(row):
 
 def _quantity(row):
     evidence = row.get('quantity_evidence') if isinstance(row.get('quantity_evidence'), dict) else {}
-    if evidence.get('basis') != 'invoice_line':
+    if evidence.get('basis') != 'invoice_line' or (row.get('quelle') or {}).get('beleg_typ') == 'auftragsbestaetigung':
         return None
     value = _number(evidence.get('value'))
     unit = _text(evidence.get('unit'), 60)
@@ -345,6 +345,11 @@ def build_variants(records, query='', limit=30):
                            'uebliche_menge': None, 'letzte_belegte_menge': None,
                            'historischer_preishinweis': _text(row.get('historischer_preishinweis')),
                            'preis_geprueft': False, 'bestellbar': False, 'pruefen': True}
+            # Price, kind and caption belong to this same observation. A later
+            # source in the group must not relabel its predecessor's amount.
+            if row.get('document_type') == 'auftragsbestaetigung':
+                groups[key]['document_type'] = 'auftragsbestaetigung'
+                groups[key]['preisquellenhinweis'] = _text(row.get('preisquellenhinweis'), 200)
         group = groups[key]
         source = _source(row)
         source_key=json.dumps(source,sort_keys=True)
@@ -396,7 +401,9 @@ def build_variants(records, query='', limit=30):
         group['historie_gekuerzt'] = len(group['mengenhistorie']) > 50 or len(group['quellen']) > 50
         group['mengenhistorie'] = group['mengenhistorie'][:50]
         group['quellen'] = group['quellen'][:50]
-        group['hinweis'] = 'Varianten und Rechnungsangaben prüfen. Keine Freigabe oder Bestellung durch Vorlesen.'
+        group['hinweis'] = ('Datierter Preisvorschlag laut Auftragsbestätigung; keine Rechnung, Verbrauchsmenge oder Bestellfreigabe.'
+            if group.get('document_type') == 'auftragsbestaetigung'
+            else 'Varianten und Rechnungsangaben prüfen. Keine Freigabe oder Bestellung durch Vorlesen.')
         results.append(group)
     if not query.strip():
         results.sort(key=lambda item: item['belege_anzahl'], reverse=True)

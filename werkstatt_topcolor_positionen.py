@@ -141,7 +141,7 @@ def _packaging(name, content, measure):
     return (_plain(content) + " " + measure).strip() if content else "", measure
 
 
-def _candidate(row):
+def _candidate(row, document_type="rechnung"):
     name = " ".join(row["description"]).strip()
     values = row["values"]
     quantity, content = _decimal(values["quantity"]), _decimal(values["content"])
@@ -190,7 +190,7 @@ def _candidate(row):
                 package_evidence.update(value=None, unit=None, per_unit=None, basis="unknown")
     dimensions = re.findall(r"(?:Ø\s*)?\d+(?:[.,]\d+)?\s*(?:[x×]\s*\d+(?:[.,]\d+)?\s*)?(?:mm|mtr|µm)\b", name, re.I)
     grits = re.findall(r"\bP\d{2,4}\b", name)
-    return {
+    item = {
         "produkt_name": name, "artikelnummer": row["article"],
         "produkt_beschreibung": name, "stueckzahl": _plain(quantity) or None,
         "ve": invoice_unit or "", "gebinde": packaging, "groesse": " / ".join(dimensions + grits),
@@ -215,9 +215,25 @@ def _candidate(row):
         "native_source": {"page": row["pages"][0], "pages": row["pages"],
                           "position": row["position"], "method": "topcolor_word_columns_v1"},
     }
+    if document_type == "auftragsbestaetigung":
+        # The printed quote is evidence even when the supplier's unprinted
+        # precision differs from the displayed price/rate. Never silently
+        # replace it with our calculation or call that calculation reconciled.
+        quoted = total / quantity if total is not None and quantity else None
+        if quoted is not None:
+            item['preis'] = format(quoted.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), 'f')
+            item['price_evidence'].update(value=item['preis'],
+                basis='auftragsbestaetigung_netto_positionswert', unrounded_value=_plain(quoted),
+                calculation='Gedruckter Netto-Positionsbetrag / belegte Menge; Anzeigepreis auf Cent gerundet')
+        item["price_evidence"].update(document_type=document_type,
+            quoted_line_total_net=_plain(total), quoted_unit_net=_plain(quoted),
+            formula_unit_net=_plain(derived),
+            quote_formula_reconciled=bool(price))
+        item["quantity_evidence"]["basis"] = "document_line" if quantity else "unknown"
+    return item
 
 
-def parse_topcolor_pages(pages, supplier):
+def parse_topcolor_pages(pages, supplier, *, document_type="rechnung"):
     """Return positions/fees/coverage, or None for unrecognized supplier/layout.
 
     pages is [{page: one-based integer, height: number, words: fitz words}, ...].
@@ -284,7 +300,13 @@ def parse_topcolor_pages(pages, supplier):
                 continue
             # Only continuation words entirely within the description column.
             # AUFTRAG/LIEFERSCHEIN are outside that column and cannot contaminate it.
-            if current and description and all(layout["name"] - 2 <= word[0] < layout["quantity"] - 4 for word in words):
+            # AB rows repeat an internal stock code in the article column beside
+            # their description continuation. It is neither a product alias nor
+            # text to append to the description. Keep all other columns closed.
+            continuation_words = words
+            if document_type == "auftragsbestaetigung" and re.fullmatch(r"[A-Z]{2,3}[0-9][A-Z0-9]{1,4}", article):
+                continuation_words = [word for word in words if word[0] >= layout["name"] - 2]
+            if current and description and all(layout["name"] - 2 <= word[0] < layout["quantity"] - 4 for word in continuation_words):
                 current["description"].append(description)
                 if page_number not in current["pages"]:
                     current["pages"].append(page_number)
@@ -297,7 +319,7 @@ def parse_topcolor_pages(pages, supplier):
             warnings.append(f"Position {row['position']}: Produktbezeichnung fehlt.")
             page_complete[row["pages"][0]] = False
             continue
-        item = _candidate(row)
+        item = _candidate(row, document_type=document_type)
         if item["auslese_hinweise"]:
             page_complete[row["pages"][0]] = False
         candidates.append(item)

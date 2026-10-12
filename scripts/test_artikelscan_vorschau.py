@@ -70,6 +70,44 @@ class ProductPreviewTests(unittest.TestCase):
             self.assertEqual(result['product'], '')
             self.assertEqual(result['matches'], [])
 
+    def test_dated_confirmation_price_belongs_to_exact_variant_without_writes(self):
+        before = self.database()
+        snapshot = {'items': [self.hit]}
+        catalog = Mock()
+        catalog.knowledge_rows.return_value = snapshot
+        catalog.historical_price.return_value = dict(status='ok', amount='23.45', currency='EUR',
+            tax_basis='net', unit=self.hit['ve'], packaging=self.hit['gebinde'], date='2026-02-03',
+            document_type='auftragsbestaetigung', source_label='Preis laut Auftragsbestätigung vom 03.02.2026',
+            verified=False, dispatchable=False, private_field='DO_NOT_EXPOSE')
+        self.f.p.cockpit_data.catalog = catalog
+        result = self.preview().json
+        price = result['matches'][0]['price']
+        self.assertEqual(price['amount'], '23.45')
+        self.assertEqual(price['document_type'], 'auftragsbestaetigung')
+        self.assertFalse(result['bestellbar'])
+        self.assertNotIn('DO_NOT_EXPOSE', json.dumps(result))
+        catalog.historical_price.assert_called_once_with(self.hit['lieferant'], self.hit['artikelnummer'],
+            self.hit['ve'], packaging=self.hit['gebinde'], snapshot=snapshot)
+        self.assertEqual(self.database(), before)
+        self.assertEqual(self.f.p.workshop_orders.calls, [])
+
+    def test_uncertain_price_or_catalog_error_does_not_invent_price_or_block_product(self):
+        catalog = Mock()
+        catalog.knowledge_rows.return_value = {'items': []}
+        self.f.p.cockpit_data.catalog = catalog
+        for changes in ({'status': 'unknown'}, {'date': None}, {'amount': 'NaN'}, {'currency': 'unknown'}):
+            catalog.historical_price.return_value = dict(status='ok', amount='12.34', currency='EUR',
+                tax_basis='net', date='2026-02-03')
+            catalog.historical_price.return_value.update(changes)
+            result = self.preview().json
+            self.assertEqual(result['lookup_status'], 'matched')
+            self.assertNotIn('price', result['matches'][0])
+        catalog.historical_price.side_effect = RuntimeError('PRIVATE_DETAIL')
+        result = self.preview().json
+        self.assertEqual(result['lookup_status'], 'matched')
+        self.assertNotIn('price', result['matches'][0])
+        self.assertNotIn('PRIVATE_DETAIL', json.dumps(result))
+
     def test_multiple_supplier_variants_and_partial_coverage_stay_ambiguous(self):
         self.lookup.return_value = {'varianten': [self.hit, dict(self.hit, lieferant='Anderer Lieferant')]}
         result = self.preview().json
@@ -269,13 +307,17 @@ class ProductPreviewBrowserTests(unittest.TestCase):
   const input = f.quantity(0); input.value = '7';
   gate.resolve(reply({lookup_status: 'matched', decodedCode: '10035120', product: '<script>literal</script>',
     message: 'Mit dem Foto vergleichen', matches: [{produkt_name: 'Klebeband', lieferant: 'Testlieferant',
-      artikelnummer: '10035120', quelle: {art: 'einkauf', beleg_id: 17, seite: 2}}]}));
+      artikelnummer: '10035120', quelle: {art: 'einkauf', beleg_id: 17, seite: 2},
+      price: {amount:'23.45', currency:'EUR', tax_basis:'net', unit:'Gebinde', date:'2026-02-03',
+        source_label:'Preis laut Auftragsbestätigung vom 03.02.2026'}}]}));
   await settle();
   assert.equal(f.quantity(0), input, 'Late preview must not rebuild focused controls');
   assert.equal(input.value, '7');
   const all = descendants(f.cards()[0]);
   assert.ok(all.some(el => el.tagName === 'H3' && el.textContent === '<script>literal</script>'));
   assert.ok(all.some(el => /Quelle: Einkaufsbeleg 17/.test(el.textContent)));
+  assert.ok(all.some(el => /23,45 € netto je Gebinde/.test(el.textContent)));
+  assert.ok(all.some(el => /Auftragsbestätigung vom 03.02.2026/.test(el.textContent)));
   const original = all.find(el => el.tagName === 'A');
   assert.match(original.href, /^blob:/); assert.equal(original.target, '_blank');
   assert.equal(f.$('submit').disabled, true, 'A displayed name needs explicit confirmation');
@@ -285,6 +327,7 @@ class ProductPreviewBrowserTests(unittest.TestCase):
   const rows = JSON.parse(submitted.settings.body.fields.get('positionen'));
   assert.equal(rows[0].menge, 7); assert.equal(submitted.settings.body.fields.get('foto_' + rows[0].id), first);
   assert.equal('decodedCode' in rows[0], false); assert.equal('product' in rows[0], false);
+  assert.equal('price' in rows[0], false, 'Displayed historical price is never a submitted approval');
 
   const g = fixture(); g.api.fetch = async () => {throw new Error('offline');};
   g.controller.addFiles([photo()]); await settle();

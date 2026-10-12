@@ -87,7 +87,7 @@ def _answer(decision, supplier, reason, rule):
     }
 
 
-def classify_invoice_source(source, allowed_suppliers=()):
+def classify_invoice_source(source, allowed_suppliers=(), *, allow_order_confirmation=False):
     """Allow only known/explicit workshop suppliers; unknown means no file read."""
     if isinstance(source, str):
         source = {"supplier": source}
@@ -106,7 +106,10 @@ def classify_invoice_source(source, allowed_suppliers=()):
     for key in ("voucher_type", "voucherType"):
         if key in source and source[key] != "purchaseinvoice":
             return _answer("block", supplier, "Die Quelle ist keine Lieferantenrechnung.", "not_purchase_invoice")
-    if "beleg_typ" in source and source["beleg_typ"] != "rechnung":
+    # Only the product-proposal catalog may explicitly opt into a dated order
+    # confirmation. All invoice/price/payment callers keep their invoice gate.
+    types = {"rechnung", "auftragsbestaetigung"} if allow_order_confirmation is True else {"rechnung"}
+    if "beleg_typ" in source and source["beleg_typ"] not in types:
         return _answer("block", supplier, "Die Quelle ist kein Rechnungsbeleg.", "not_invoice")
     keys = {_compact(name) for name in names}
     if len(keys) > 1:

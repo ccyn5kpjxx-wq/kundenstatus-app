@@ -285,6 +285,14 @@
         candidate.append(node('small', 'Quelle: ' + (source.art === 'lexware' ? 'Lieferantenrechnung' : 'Einkaufsbeleg') + ' ' + source.beleg_id
           + (source.seite ? ' · Seite ' + source.seite : '') + (source.datum ? ' · ' + source.datum : '')));
       }
+      const price = match.price;
+      if (price && price.currency === 'EUR' && ['net', 'gross'].includes(price.tax_basis)
+          && /^\d{4}-\d{2}-\d{2}$/.test(price.date || '') && Number.isFinite(Number(price.amount)) && Number(price.amount) > 0) {
+        candidate.append(node('strong', Number(price.amount).toFixed(2).replace('.', ',') + ' € '
+          + (price.tax_basis === 'net' ? 'netto' : 'brutto') + ' je ' + price.unit));
+        candidate.append(node('small', (price.source_label || 'Preisstand ' + price.date)
+          + ' · Orientierung, Nebenkosten werden separat geprüft.'));
+      }
       panel.append(candidate);
     }
     if (photo.labelUrl) {

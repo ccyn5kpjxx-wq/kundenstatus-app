@@ -121,3 +121,25 @@ Ausfall nach einem gültigen Kandidaten, die erneute erfolgreiche Anzeige,
 unveränderte fachliche Ablehnungen sowie weiterhin propagierende Bestell- und
 Lieferfehler. Die Prozesse liefen mit temporären synthetischen Datenbanken,
 gesperrtem Netzwerk und einer harten Frist von jeweils 120 Sekunden.
+
+## Datierte Preise aus Auftragsbestätigungen
+
+Der Artikelkatalog nimmt Materiallieferantenbelege wahlweise als Rechnung oder
+Auftragsbestätigung auf. Die Bestätigung bleibt als eigene Belegart mit Original,
+Datum, Seite und Position gespeichert. Sie erzeugt keine Rechnung, Lieferung,
+Verbrauchsmenge oder Bestellfreigabe. Die bestehende Rechnungskontrolle bleibt
+für tatsächliche Rechnungen zuständig.
+
+Bei der bekannten Top-Color-Tabelle werden Preis je Maßeinheit, Gebindeinhalt,
+Rabatt und gedruckter Netto-Positionsbetrag getrennt bewahrt. Der Preis je
+Gebinde wird aus dem gedruckten Positionsbetrag und der belegten Menge
+abgeleitet; eine abweichende Formelsumme bleibt zur Prüfung gekennzeichnet.
+Logistikkosten werden nicht als Artikel gelernt. Ersatzartikel und andere
+Gebinde werden nicht allein wegen ähnlicher Namen zusammengeführt.
+
+Bestellübersicht und persönliche Foto-/Scanvorschau zeigen den letzten
+eindeutigen Preis zur genauen Kombination aus Lieferant, Artikelnummer,
+Bestelleinheit und Gebinde. Der Hinweis nennt die Auftragsbestätigung und ihr
+Datum. Unklare, widersprüchliche oder nicht verfügbare Quellen bekommen keinen
+Ersatzpreis. Die Vorschau ändert keine Bestellungen und übermittelt ihren
+Anzeigepreis nicht als Freigabe; aktuelle Nebenkosten bleiben separat zu prüfen.
