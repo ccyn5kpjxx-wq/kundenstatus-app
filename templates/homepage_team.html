@@ -19,6 +19,13 @@
     .team-quote footer{margin-top:10px;color:#aaa7a1;font-size:12px;font-style:normal;font-weight:850;letter-spacing:.08em;text-transform:uppercase}
     @media(max-width:620px){.group-copy{align-items:flex-start;flex-direction:column;gap:14px;padding:24px}.team-group img{height:280px;object-position:center 45%}}
   </style>
+
+  <style>
+    .member.is-margita{grid-column:1/-1;grid-template-columns:.7fr 1.3fr;min-height:430px}
+    .member.is-margita img{object-position:50% 25%}
+    .member.is-margita .copy{max-width:700px}
+    @media(max-width:750px){.member.is-margita{grid-template-columns:1fr}}
+  </style>
 </head>
 <body>
   <header class="header"><nav class="wrap nav" aria-label="Team-Navigation"><a class="back" href="{{ url_for('oeffentliche_homepage') }}">← Zur Startseite</a><a class="cta" href="tel:+4915227706694">Kontakt aufnehmen</a></nav></header>
@@ -26,6 +33,8 @@
     <section class="hero"><div class="wrap"><div class="eyebrow">Menschen hinter der Qualität</div><h1>Unser Team.</h1><p>Persönliche Ansprechpartner, sorgfältiges Handwerk und Spezialisten für Karosserie, Lack und mobile Dellenreparatur.</p></div></section>
     <section class="wrap grid" aria-label="Unser Team">
       <article class="member is-lead"><img src="{{ url_for('static', filename='homepage/portrait.webp') }}" alt="Christopher Gärtner, Geschäftsführer von Gärtner GmbH Karosserie + Lack" decoding="async" fetchpriority="high"><div class="copy"><div class="eyebrow">Geschäftsführung &amp; Kundenbetreuung</div><h2>Christopher Gärtner</h2><p>Als Geschäftsführer und persönlicher Ansprechpartner begleitet Christopher Gärtner Ihr Anliegen von der ersten Einschätzung bis zur klar abgestimmten Lösung für Ihr Fahrzeug.</p><span class="role">Geschäftsführer · Persönlicher Ansprechpartner</span><a class="action" href="{{ portal_links.anfrage }}?anliegen=allgemein">Direkt Kontakt aufnehmen</a></div></article>
+
+      <article class="member is-margita" id="margita-hoefer"><img src="{{ url_for('static', filename='homepage/margita-hoefer-portrait.jpg') }}" alt="Margita Höfer, Büro und Partnerbetreuung" width="1003" height="1568" loading="lazy" decoding="async"><div class="copy"><div class="eyebrow">Büro &amp; Partnerbetreuung</div><h2>Margita Höfer</h2><p>Margita Höfer ist Ihre Ansprechpartnerin für die persönliche Abstimmung und unsere Zusammenarbeit mit Autohäusern, Versicherungen und Flottenpartnern. Sie begleitet den Kontakt und hilft, Anliegen und nächste Schritte klar zu koordinieren.</p><span class="role">Büro · Kooperationen · Persönliche Abstimmung</span><a class="action" href="tel:+4917660477486">Margita anrufen · 0176 60477486</a></div></article>
       <figure class="team-group"><img src="{{ url_for('static', filename='homepage/team-daniel-hannes-abdul-v2.png') }}" alt="Daniel, Hannes und Abdul gemeinsam in der Gärtner Werkstatt" width="1448" height="1086" loading="lazy" decoding="async"><figcaption class="group-copy"><div><div class="eyebrow">Gemeinsam in der Werkstatt</div><h2>Daniel, Hannes &amp; Abdul.</h2></div><blockquote class="team-quote">„Gute Arbeit entsteht, wenn Können, Verantwortung und Teamgeist zusammenkommen.“<footer>Unser Anspruch bei Gärtner</footer></blockquote></figcaption></figure>
       <article class="member"><img src="{{ url_for('static', filename='homepage/abdul-lackiervorbereitung-v1.webp') }}" alt="Abdul aus der Lackiervorbereitung" loading="lazy" decoding="async"><div class="copy"><div class="eyebrow">Lackiervorbereitung</div><h2>Abdul</h2><p>Sorgfältiges Schleifen, präzises Abkleben und gewissenhafte Vorbereitung schaffen die Grundlage für ein hochwertiges Lackierergebnis.</p><span class="role">Lackiervorbereitung</span></div></article>
       <article class="member is-hannes"><div class="member-photo"><img src="{{ url_for('static', filename='homepage/team-daniel-hannes-abdul-v2.png') }}" alt="Hannes, Auszubildender zum Fahrzeuglackierer" width="1448" height="1086" loading="lazy" decoding="async"></div><div class="copy"><div class="eyebrow">Unser Nachwuchs</div><h2>Hannes</h2><p>Als Auszubildender zum Fahrzeuglackierer lernt Hannes jeden Arbeitsschritt von der Vorbereitung bis zum präzisen Lackaufbau und Finish.</p><span class="role">Auszubildender zum Fahrzeuglackierer</span></div></article>
