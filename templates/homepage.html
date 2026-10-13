@@ -268,6 +268,15 @@
       line-height: 1.58;
     }
     .routes { padding: 88px 0 78px; }
+    .workshop-gallery { padding: 0 0 clamp(55px,7vw,88px); scroll-margin-top: 110px; }
+    .workshop-gallery .section-title > p { max-width: 340px; }
+    .workshop-gallery figure { max-width: 1000px; margin: 0 auto; }
+    .workshop-gallery-link { display: block; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: #fff; color: var(--charcoal); text-decoration: none; box-shadow: 0 16px 45px rgba(28,31,29,.08); }
+    .workshop-gallery-link:focus-visible { outline: 3px solid var(--red); outline-offset: 5px; }
+    .workshop-gallery-link img { display: block; width: 100%; height: auto; }
+    .workshop-gallery-caption { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 24px; padding: 18px 22px; font-size: 14px; font-weight: 800; }
+    .workshop-gallery-caption span { color: var(--red); }
+    .move-links { display: flex; flex-wrap: wrap; gap: 12px 24px; }
     .route-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
     .route-card {
       position: relative;
@@ -781,7 +790,7 @@
 
   <main id="inhalt">
     <section class="move-announcement" aria-labelledby="move-title">
-      <div class="wrap move-inner"><div><p class="move-label">Ein neuer Standort. Der gleiche Anspruch.</p><h2 id="move-title">Ab 1. November 2026<br>in Mosbach.</h2></div><div class="move-details"><strong>Alte Neckarelzer Straße 18</strong><span>74821 Mosbach</span><p>Bis zum Umzug erreichen Sie uns wie gewohnt in Mosbach-Lohrbach. Termine stimmen wir persönlich mit Ihnen ab.</p><a href="#unsere-geschichte">Unsere Geschichte kennenlernen →</a></div></div>
+      <div class="wrap move-inner"><div><p class="move-label">Ein neuer Standort. Der gleiche Anspruch.</p><h2 id="move-title">Ab 1. November 2026<br>in Mosbach.</h2></div><div class="move-details"><strong>Alte Neckarelzer Straße 18</strong><span>74821 Mosbach</span><p>Bis zum Umzug erreichen Sie uns wie gewohnt in Mosbach-Lohrbach. Termine stimmen wir persönlich mit Ihnen ab.</p><div class="move-links"><a href="#neue-werkstatt">Neue Werkstatt entdecken →</a><a href="#unsere-geschichte">Unsere Geschichte kennenlernen →</a></div></div></div>
     </section>
 
     <section class="hero-image" aria-label="Werkstatt und Unfallinstandsetzung bei Gärtner">
@@ -829,6 +838,21 @@
           <figure class="craft-card"><img src="{{ url_for('static', filename='homepage/lackdichte-messen.webp') }}" alt="Digitale Messung der Lackschicht am Fahrzeug" loading="lazy" decoding="async"><figcaption><span>Lackkontrolle</span><strong>Messen, bevor wir gezielt aufbauen</strong></figcaption></figure>
           <figure class="craft-card"><img src="{{ url_for('static', filename='homepage/fahrzeuglackierung.webp') }}" alt="Fahrzeuglackierung mit der Spritzpistole in der Lackierkabine" loading="lazy" decoding="async"><figcaption><span>Lackierung</span><strong>Gleichmäßig lackieren. Sauber finishen.</strong></figcaption></figure>
         </div>
+      </div>
+    </section>
+
+    <section class="workshop-gallery" id="neue-werkstatt" aria-labelledby="workshop-title">
+      <div class="wrap">
+        <div class="section-title">
+          <div><div class="eyebrow">Gärtner in Mosbach</div><h2 id="workshop-title">Entdecke unsere neue Werkstatt.</h2></div>
+          <p>Ein Blick in unsere Werkstatt.<br>Ab 1. November 2026 finden Sie uns in der Alten Neckarelzer Straße 18 in Mosbach.</p>
+        </div>
+        <figure>
+          <a class="workshop-gallery-link" href="{{ url_for('static', filename='homepage/werkstatt-collage-mosbach.png') }}" target="_blank" rel="noopener" aria-label="Werkstattcollage vergrößert öffnen (neuer Tab)">
+            <img src="{{ url_for('static', filename='homepage/werkstatt-collage-mosbach.png') }}" alt="Vier Ansichten unserer Werkstatt mit Lackierkabine, Arbeitsplätzen und Scherenhebebühne" width="1448" height="1086" loading="lazy" decoding="async">
+            <div class="workshop-gallery-caption">Unsere Werkstatt in Mosbach<span>Bild vergrößern ↗</span></div>
+          </a>
+        </figure>
       </div>
     </section>
 
