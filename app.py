@@ -56,6 +56,8 @@ import mos_public_booking
 import mos_termination
 from cockpit_rules import document_visible as base_document_visible, price_state, price_record, decimal_input, has_invoice, exact_contact, workshop_completion_photo
 from werkstatt_assistent_uploads import ensure_upload_schema, is_assistant_private
+from werkstatt_kundenflotten import (register_kundenflotten, ensure_kundenflotten_schema,
+    BACKUP_TABLES as KUNDENFLOTTEN_BACKUP_TABLES, SCHEMA_FEATURE as KUNDENFLOTTEN_SCHEMA_FEATURE)
 
 try:
     import psycopg
@@ -3079,6 +3081,7 @@ def restrict_public_site_service():
         "mietwagen_vorschau",
         "mietwagen_vorschau_datei",
         "oeffentliche_leistungen",
+        "oeffentliche_geschaeftspartner",
         "oeffentliche_portale",
         "oeffentliches_team",
         "oeffentliche_karriere",
@@ -8114,7 +8117,8 @@ class PostgresConnection:
         # Some tables use a natural/text primary key instead of an `id` column.
         # A synthetic RETURNING id makes an otherwise valid INSERT fail on PG.
         inserts_with_id = bool(insert_table and insert_table not in {
-            "app_settings", "miet_checkout_contracts", "miet_checkout_review_refunds"
+            "app_settings", "miet_checkout_contracts", "miet_checkout_review_refunds",
+            "kundenflotten_fahrer", "kundenflotten_reifen"
         }
                                and " returning " not in lowered)
         if inserts_with_id:
@@ -8359,7 +8363,9 @@ MOS_IMPORT_PROTECTED_TABLES = (
 )
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
+BACKUP_TABLES += KUNDENFLOTTEN_BACKUP_TABLES
 BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_liefereingang_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1", "werkstatt_schule_v1", "werkstatt_krankheit_v1", "werkstatt_bestellbestaetigung_v1")
+BACKUP_SCHEMA_FEATURES += (KUNDENFLOTTEN_SCHEMA_FEATURE,)
 BACKUP_BINARY_FIELDS = {
     "mitarbeiter_lohnzettel": {
         "original_base64": {"suffix": ".bin", "max_bytes": 10 * 1024 * 1024},
@@ -11332,6 +11338,7 @@ def init_db():
         """
     )
 
+    ensure_kundenflotten_schema(db)
     backfill_existing_upload_backups(db)
     backfill_legacy_mietvertrag_versionen(db)
 
@@ -45188,7 +45195,7 @@ def public_robots():
 def public_sitemap():
     if not public_site_is_indexable_request():
         abort(404)
-    urls = ("", "/leistungen", "/team", "/portale", "/impressum", "/datenschutz")
+    urls = ("", "/leistungen", "/geschaeftspartner", "/team", "/portale", "/impressum", "/datenschutz")
     entries = "".join(f"<url><loc>{escape(PUBLIC_BASE_URL + path)}</loc></url>" for path in urls)
     body = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{entries}</urlset>'
     return body, 200, {"Content-Type": "application/xml; charset=utf-8"}
@@ -45391,6 +45398,16 @@ def oeffentliche_leistungen():
         portal_links=homepage_portal_links(),
         site_indexable=public_site_is_indexable_request(),
         canonical_url=f"{PUBLIC_BASE_URL}/leistungen" if PUBLIC_BASE_URL else "",
+    )
+
+
+@app.route("/geschaeftspartner")
+def oeffentliche_geschaeftspartner():
+    return render_template(
+        "homepage_geschaeftspartner.html",
+        portal_links=homepage_portal_links(),
+        site_indexable=public_site_is_indexable_request(),
+        canonical_url=f"{PUBLIC_BASE_URL}/geschaeftspartner" if PUBLIC_BASE_URL else "",
     )
 
 
@@ -48017,7 +48034,7 @@ def validate_backup_binary_reference_completeness(export, reference_map):
     ):
         raise ValueError("Datenpaket ungültig: schema_features ist fehlerhaft.")
     schema_features = {clean_text(feature) for feature in schema_features if clean_text(feature)}
-    required_tables = set(BACKUP_TABLES) - {
+    required_tables = (set(BACKUP_TABLES) - set(KUNDENFLOTTEN_BACKUP_TABLES)) - {
         "datei_backups",
         "fahrzeugeinkauf_scan_treffer",
         # Vor Einführung der Google-Ads-Kosten gab es diese Tabelle in
@@ -48074,6 +48091,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
     if "werkstatt_avatar_v1" in schema_features:
         required_tables.update({"assistent_rechte", "assistent_profile", "assistent_aktionen",
                                 "assistent_audit", "assistent_dialog"})
+    if KUNDENFLOTTEN_SCHEMA_FEATURE in schema_features:
+        required_tables.update(KUNDENFLOTTEN_BACKUP_TABLES)
     if "werkstatt_mitarbeiter_einladung_v1" in schema_features:
         required_tables.add("assistent_einladungen")
     if "werkstatt_mitarbeiter_portal_v1" in schema_features:
@@ -48366,6 +48385,7 @@ def import_backup_json_rows_into_current_database(export, archive, names):
     target = get_db()
     try:
         ensure_no_database_only_originals_for_import(target)
+        ensure_kundenflotten_state_for_import(export=export, target=target)
         ensure_employee_invitation_state_for_import(sys.modules[__name__], export=export, target=target)
         ensure_employee_private_state_for_import(sys.modules[__name__], export=export, target=target, archive=archive, names=names)
         ensure_employee_orders_for_import(sys.modules[__name__], export=export, target=target, archive=archive, names=names)
@@ -48452,6 +48472,7 @@ def import_sqlite_rows_into_current_database(imported_db):
             ).fetchall()
         }
         ensure_no_database_only_originals_for_import(target)
+        ensure_kundenflotten_state_for_import(imported_db=imported_db, target=target)
         ensure_employee_invitation_state_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
         ensure_employee_private_state_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
         ensure_employee_orders_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
@@ -48497,6 +48518,36 @@ def import_sqlite_rows_into_current_database(imported_db):
     finally:
         source.close()
         target.close()
+
+
+def ensure_kundenflotten_state_for_import(*, export=None, imported_db=None, target=None):
+    """Reject older backups that would silently erase newly introduced fleet data."""
+    if imported_db is not None:
+        source = sqlite3.connect(str(imported_db))
+        try:
+            source_tables = {row[0] for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        finally:
+            source.close()
+    else:
+        tables = (export or {}).get("tables") or {}
+        if not isinstance(tables, dict):
+            raise ValueError("Datenpaket ungültig: Kundendaten-Tabellen fehlen.")
+        for name in KUNDENFLOTTEN_BACKUP_TABLES:
+            if name in tables and not isinstance(tables[name], list):
+                raise ValueError("Datenpaket ungültig: Kundenflotten-Tabelle ist keine Liste.")
+        source_tables = set(tables)
+    missing = set(KUNDENFLOTTEN_BACKUP_TABLES) - source_tables
+    if not missing:
+        return
+    owned = target is None
+    db = target if target is not None else get_db()
+    try:
+        for name in sorted(missing):
+            if db.execute(f"SELECT 1 FROM {name} LIMIT 1").fetchone():
+                raise ValueError("Import gestoppt: Diese Sicherung enthält nicht alle vorhandenen Kundenflotten-Daten. Bitte eine vollständige aktuelle Sicherung verwenden.")
+    finally:
+        if owned:
+            db.close()
 
 
 def ensure_material_external_claims_for_import(*, export=None, imported_db=None, target=None, archive=None, names=None):
@@ -48701,6 +48752,7 @@ def admin_daten_import():
                 with portal_originals_operation_lock():
                     ensure_no_unrestorable_mos_data_for_import()
                     ensure_no_database_only_originals_for_import()
+                    ensure_kundenflotten_state_for_import(export=backup_export, imported_db=imported_db)
                     ensure_employee_invitation_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db)
                     ensure_employee_private_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db, archive=archive, names=names)
                     ensure_employee_orders_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db, archive=archive, names=names)
@@ -58127,6 +58179,7 @@ employee_portal = register_employee_portal(sys.modules[__name__])
 employee_portal_init_schema = employee_portal.init_schema
 from werkstatt_mitarbeiter_app import register_employee_app
 register_employee_app(sys.modules[__name__])
+kundenflotten = register_kundenflotten(sys.modules[__name__])
 from werkstatt_mitarbeiter_auftraege import register_employee_orders, ensure_employee_orders_for_import
 # Personal order controls have a narrow grant; general assistant permissions
 # and the shared workshop login remain independent.

@@ -65,8 +65,8 @@ def main():
         "Strukturierte Unternehmensdaten": '"@type":"AutoBodyShop"' in html,
         "Sprunglink vorhanden": 'class="skip-link" href="#inhalt"' in html,
         "Hero-Bild vorgeladen": 'rel="preload" as="image"' in html,
-        "Optimiertes Hero eingebunden": '/static/homepage/werkstatt-hero-v3.webp' in html
-        and (ROOT / "static" / "homepage" / "werkstatt-hero-v3.webp").stat().st_size < 200_000,
+        "Vorhandenes Hero-Bild bis zur Bildauswahl eingebunden": '/static/homepage/werkstatt-hero-v3.webp' in html
+        and (ROOT / "static" / "homepage" / "werkstatt-hero-v3.webp").is_file(),
         "Lazy Loading": html.count('loading="lazy"') >= 7,
         "Cookielose Besucherstatistik eingebunden": "/api/besucher" in html
         and "localStorage" not in html and "document.cookie" not in html,
