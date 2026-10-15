@@ -2,740 +2,149 @@
 {% block title %}Betriebs-Cockpit{% endblock %}
 {% block extra_css %}
 <style>
-  .cockpit-shell {
-    display: grid;
-    grid-template-columns: 300px minmax(0, 1fr);
-    gap: 1.5rem;
-    align-items: start;
-  }
-  .cockpit-rail {
-    display: grid;
-    gap: 1rem;
-    position: sticky;
-    top: 1.25rem;
-    align-self: start;
-  }
-  .rail-card {
-    background: rgba(255, 253, 249, .94);
-    border: 1px solid rgba(221, 209, 192, .9);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    padding: 1.1rem 1.2rem;
-  }
-  .rail-brand {
-    display: flex;
-    align-items: center;
-    gap: .7rem;
-    background: #16202a;
-    color: #fff;
-  }
-  .rail-brand img {
-    height: 40px;
-    width: auto;
-  }
-  .rail-brand-name {
-    font-family: "Space Grotesk", sans-serif;
-    font-weight: 700;
-    font-size: 1.02rem;
-    line-height: 1.2;
-  }
-  .rail-brand-sub {
-    color: rgba(255, 255, 255, .65);
-    font-size: .76rem;
-  }
-  .rail-clock {
-    background: #132635;
-    color: #fff;
-  }
-  .rail-label {
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    font-size: .74rem;
-    color: var(--muted);
-    font-weight: 700;
-  }
-  .rail-clock .rail-label {
-    color: rgba(255, 255, 255, .68);
-  }
-  .rail-clock-time {
-    font-family: "Space Grotesk", sans-serif;
-    font-size: 2.05rem;
-    line-height: 1;
-    font-weight: 700;
-    margin-top: .3rem;
-  }
-  .rail-clock-date {
-    margin-top: .3rem;
-    color: rgba(255, 255, 255, .82);
-    font-weight: 600;
-    font-size: .86rem;
-  }
-  .rail-weather-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: .6rem;
-    margin-top: .75rem;
-    padding-top: .65rem;
-    border-top: 1px solid rgba(255, 255, 255, .14);
-  }
-  .rail-weather-place {
-    font-size: .82rem;
-    color: rgba(255, 255, 255, .82);
-  }
-  .rail-weather-current {
-    display: flex;
-    align-items: center;
-    gap: .45rem;
-  }
-  .rail-weather-icon {
-    width: 28px;
-    height: 28px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, .12);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.05rem;
-  }
-  .rail-weather-temp {
-    font-family: "Space Grotesk", sans-serif;
-    font-size: 1.3rem;
-  }
-  .rail-weather-hours {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 6px;
-    margin-top: .6rem;
-  }
-  .rail-weather-hour {
-    text-align: center;
-    background: rgba(255, 255, 255, .08);
-    border-radius: 8px;
-    padding: .3rem .2rem;
-    font-size: .74rem;
-    color: rgba(255, 255, 255, .82);
-  }
-  .rail-weather-hour-time { color: rgba(255, 255, 255, .6); font-size: .68rem; }
-  .rail-weather-hour-main { font-weight: 700; margin-top: 2px; }
-  .today-steps {
-    display: grid;
-    gap: .55rem;
-    margin-top: .5rem;
-  }
-  .today-step {
-    display: grid;
-    grid-template-columns: 34px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: .7rem;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: #fffdf9;
-    padding: .55rem .7rem;
-  }
-  .today-step-icon {
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-  }
-  .today-step-icon.tone-blue { background: linear-gradient(135deg, #145d66, #2b808b); }
-  .today-step-icon.tone-gold { background: linear-gradient(135deg, #a66b00, #d38f13); }
-  .today-step-icon.tone-green { background: linear-gradient(135deg, #1b7f53, #29a168); }
-  .today-step-icon.tone-warm { background: linear-gradient(135deg, #a23f2d, #c1602b); }
-  .today-step-label {
-    font-weight: 700;
-    font-size: .9rem;
-    line-height: 1.15;
-  }
-  .today-step-sub {
-    color: var(--muted);
-    font-size: .74rem;
-  }
-  .today-step-count {
-    font-family: "Space Grotesk", sans-serif;
-    font-weight: 700;
-    font-size: 1.25rem;
-  }
-  .rail-actions {
-    display: grid;
-    gap: .5rem;
-    margin-top: .5rem;
-  }
-  .rail-btn {
-    display: block;
-    text-align: center;
-    border-radius: 12px;
-    padding: .6rem .8rem;
-    text-decoration: none;
-    font-weight: 600;
-    font-size: .86rem;
-  }
-  .rail-btn.primary { background: var(--brand); color: #fff; }
-  .rail-btn.primary:hover { background: var(--brand-dark); color: #fff; }
-  .rail-btn.soft { background: var(--panel-soft); color: var(--ink); border: 1px solid var(--line); }
-  .rail-btn.soft:hover { background: #efe5d7; border-color: #d6c4ac; color: var(--ink); }
-  .rail-actions-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: .5rem;
-    margin-top: .5rem;
-  }
-  .greeting-date-badge {
-    white-space: nowrap;
-  }
-  .mietwagen-heute-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
-  }
-  .mietwagen-heute-col-title {
-    display: flex;
-    align-items: center;
-    gap: .5rem;
-    font-weight: 700;
-    margin-bottom: .65rem;
-  }
-  .mietwagen-heute-icon {
-    width: 30px;
-    height: 30px;
-    border-radius: 9px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-  }
-  .mietwagen-heute-list {
-    display: grid;
-    gap: .5rem;
-  }
-  .mietwagen-heute-item {
-    border: 1px solid #e4d6c3;
-    border-radius: 12px;
-    background: #fffaf2;
-    padding: .6rem .75rem;
-  }
-  .mietwagen-heute-item strong {
-    display: block;
-    font-size: .92rem;
-  }
-  .mietwagen-heute-item span {
-    color: var(--muted);
-    font-size: .82rem;
-  }
-  .mietwagen-heute-empty {
-    border: 1px dashed #d8c7b0;
-    border-radius: 12px;
-    padding: .65rem .75rem;
-    color: var(--muted);
-    font-size: .86rem;
-  }
-  .source-mix-compact {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    flex-wrap: wrap;
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    background: #fffaf2;
-    padding: .8rem 1.1rem;
-  }
-  .source-mix-compact-title {
-    color: var(--muted);
-    font-size: .82rem;
-    margin-right: .3rem;
-  }
-  .source-mix-compact-item {
-    display: inline-flex;
-    align-items: center;
-    gap: .4rem;
-    font-size: .86rem;
-    font-weight: 600;
-  }
-  .source-mix-compact-dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 999px;
-    display: inline-block;
-  }
-  .source-mix-compact-dot.versicherung { background: #1f6feb; }
-  .source-mix-compact-dot.autohaus { background: #198754; }
-  .source-mix-compact-dot.privat { background: #6c757d; }
-  .module-tile {
-    display: flex;
-    flex-direction: column;
-    gap: .85rem;
-    height: 100%;
-    padding: 1.15rem;
-    text-decoration: none;
-    color: var(--ink);
-    border-left: 5px solid var(--accent);
-    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
-  }
-  .module-tile:hover {
-    color: var(--ink);
-    transform: translateY(-2px);
-    box-shadow: 0 18px 46px rgba(64, 47, 25, .16);
-    border-color: var(--brand);
-  }
-  .module-kicker {
-    font-size: .76rem;
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    color: var(--muted);
-    font-weight: 700;
-  }
-  .module-count {
-    align-self: flex-start;
-    min-width: 42px;
-    padding: .35rem .65rem;
-    border-radius: 999px;
-    background: #eef5f6;
-    color: #145d66;
-    font-weight: 700;
-    text-align: center;
-  }
-  .module-count.is-alert {
-    background: #d64545;
-    color: #fff;
-    box-shadow: 0 0 0 3px rgba(214, 69, 69, .16);
-  }
-  .module-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 1rem;
-  }
-  .start-focus-grid { align-items: stretch; }
-  .start-counter-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: .75rem;
-  }
-  .start-counter {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: .8rem;
-    border: 1px solid #e4d6c3;
-    border-radius: 14px;
-    background: #fffaf2;
-    padding: .9rem 1rem;
-    color: var(--ink);
-    text-decoration: none;
-  }
-  .start-counter:hover { color: var(--ink); border-color: var(--brand); }
-  .start-counter span { display: block; color: var(--muted); font-size: .88rem; }
-  .start-counter strong { font-family: "Space Grotesk", sans-serif; font-size: 1.65rem; line-height: 1; }
-  .start-list { display: grid; gap: .65rem; }
-  .start-list-item {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: start;
-    gap: .75rem;
-    border: 1px solid #e4d6c3;
-    border-radius: 14px;
-    background: #fffdf9;
-    padding: .85rem 1rem;
-    color: var(--ink);
-    text-decoration: none;
-  }
-  .start-list-item:hover { border-color: var(--brand); }
-  .start-list-link { color: var(--ink); text-decoration: none; min-width: 0; }
-  .start-list-link:hover { color: var(--ink); }
-  .start-list-actions { display: flex; justify-content: flex-end; }
-  .start-list-meta { color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
-  .email-ki-toggle {
-    border: 1px solid #cfe0df;
-    background: #eef6f5;
-    color: #145d66;
-    border-radius: 999px;
-    padding: .4rem .75rem;
-    font-size: .82rem;
-    font-weight: 700;
-  }
-  .email-ki-toggle:hover { background: #e0eeed; }
-  .email-ki-analyse {
-    display: none;
-    margin-top: .6rem;
-    border-top: 1px dashed #d8c7b0;
-    padding-top: .6rem;
-    font-size: .88rem;
-    color: #41505a;
-  }
-  .email-ki-analyse.is-open { display: block; }
-  .email-ki-analyse .ai-kicker {
-    color: #145d66;
-    font-weight: 800;
-    text-transform: uppercase;
-    font-size: .72rem;
-    letter-spacing: .06em;
-    margin-bottom: .3rem;
-  }
-  .reminder-panel { border: 1px solid #e4d6c3; border-radius: 14px; background: #fffdf9; padding: 1rem; }
-  .reminder-form { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: .65rem; }
-  .reminder-list { display: grid; gap: .55rem; }
-  .reminder-item {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: .75rem;
-    border: 1px solid #eadfce;
-    border-radius: 12px;
-    background: #fffaf2;
-    padding: .7rem .8rem;
-  }
-  .reminder-text { overflow-wrap: anywhere; }
-  .reminder-meta { color: var(--muted); font-size: .82rem; }
-  .news-empty {
-    border: 1px dashed #d8c7b0;
-    border-radius: 16px;
-    padding: 1rem;
-    color: var(--muted);
-    background: #fffaf2;
-  }
-  @media (max-width: 991.98px) {
-    .cockpit-shell { grid-template-columns: minmax(0, 1fr); }
-    .cockpit-rail { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .rail-brand { grid-column: 1 / -1; }
-    .mietwagen-heute-grid { grid-template-columns: minmax(0, 1fr); }
-  }
-  @media (max-width: 575.98px) {
-    .cockpit-rail { grid-template-columns: minmax(0, 1fr); }
-    .rail-actions-grid { grid-template-columns: minmax(0, 1fr); }
-    .greeting-date-badge { white-space: normal; text-align: center; }
-    .start-counter-grid { grid-template-columns: minmax(0, 1fr); }
-    .reminder-form, .reminder-item, .start-list-item { grid-template-columns: minmax(0, 1fr); }
-    .start-list-actions { justify-content: flex-start; }
-  }
+  .cockpit-compact { --cockpit-line:#dfd9d0; display:grid; gap:16px; max-width:1320px; margin:auto; }
+  .cockpit-compact * { box-sizing:border-box; }
+  .cockpit-compact h1,.cockpit-compact h2,.cockpit-compact p { margin:0; }
+  .cockpit-head { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:4px 0; }
+  .cockpit-eyebrow { font-size:.7rem; text-transform:uppercase; letter-spacing:.14em; font-weight:750; color:var(--muted); }
+  .cockpit-head h1 { font-size:clamp(1.5rem,2.5vw,2rem); letter-spacing:-.035em; margin:4px 0 6px; }
+  .cockpit-subtitle { font-size:.88rem; color:var(--muted); }
+  .cockpit-time { font-variant-numeric:tabular-nums; font-size:1.25rem; font-weight:700; text-align:right; }
+  .cockpit-weather { position:relative; font-size:.78rem; color:var(--muted); text-align:right; margin-top:4px; }
+  .cockpit-weather summary { cursor:pointer; min-height:26px; }
+  .rail-weather-hours { display:flex; gap:12px; justify-content:flex-end; padding:8px 0; }
+  .rail-weather-hour-main { font-weight:650; }
+  .cockpit-tools { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .cockpit-search { flex:1 1 340px; position:relative; }
+  .cockpit-search label { display:block; margin-bottom:5px; font-size:.75rem; font-weight:700; color:var(--muted); }
+  .cockpit-search input { width:100%; min-height:46px; border:1px solid var(--cockpit-line); border-radius:12px; padding:10px 14px; background:#fffefa; font:inherit; }
+  .cockpit-search input:focus { outline:3px solid #145d6630; border-color:#145d66; }
+  .cockpit-search-results { position:absolute; z-index:20; top:100%; left:0; right:0; margin-top:5px; background:#fffefa; border:1px solid var(--cockpit-line); border-radius:12px; box-shadow:0 12px 30px #25313818; overflow:hidden; max-height:420px; overflow-y:auto; }
+  .cockpit-search-results[hidden] { display:none; }
+  .cockpit-search-result { display:grid; gap:3px; padding:12px 14px; text-decoration:none; color:var(--ink); border-bottom:1px solid var(--cockpit-line); }
+  .cockpit-search-result:hover,.cockpit-search-result:focus { background:#edf3f2; color:var(--ink); }
+  .cockpit-search-result span,.cockpit-search-message { font-size:.8rem; color:var(--muted); }
+  .cockpit-search-message { padding:14px; margin:0; }
+  .cockpit-shortcuts { display:flex; align-self:end; gap:8px; flex-wrap:wrap; }
+  .cockpit-shortcuts .btn { min-height:44px; display:inline-flex; align-items:center; justify-content:center; border-radius:11px; font-size:.82rem; }
+  .cockpit-card { background:rgba(255,254,250,.95); border:1px solid var(--cockpit-line); border-radius:16px; overflow:hidden; }
+  .cockpit-day { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; background:var(--cockpit-line); }
+  .cockpit-day details { min-width:0; background:#fffefa; }
+  .cockpit-day summary { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:13px 16px; cursor:pointer; list-style:none; min-height:65px; }
+  .cockpit-day summary::-webkit-details-marker { display:none; }
+  .cockpit-day summary span { font-size:.86rem; font-weight:650; }
+  .cockpit-day summary small { display:block; font-size:.7rem; font-weight:400; color:var(--muted); margin-top:3px; }
+  .cockpit-day summary::after { content:'⌄'; color:var(--muted); font-size:.85rem; }
+  .cockpit-day details[open] summary::after { content:'⌃'; }
+  .cockpit-day summary strong { font-size:1.55rem; font-variant-numeric:tabular-nums; color:#145d66; }
+  .cockpit-day-list { padding:0 13px 12px; font-size:.8rem; }
+  .cockpit-day-list a { display:block; padding:7px 0; color:var(--ink); border-top:1px solid var(--cockpit-line); text-decoration:none; overflow-wrap:anywhere; }
+  .cockpit-alerts { display:flex; flex-wrap:wrap; gap:8px; }
+  .cockpit-alert { display:block; padding:10px 12px; border:1px solid #e8b8af; border-radius:11px; background:#fff1ec; color:#8d3325; font-size:.85rem; text-decoration:none; }
+  .cockpit-alert:hover { background:#ffe7dd; color:#6b251b; }
+  .cockpit-section-summary { min-height:60px; padding:15px 18px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; cursor:pointer; list-style:none; }
+  .cockpit-section-summary::-webkit-details-marker { display:none; }
+  .cockpit-section-title { font-size:1rem; font-weight:750; }
+  .cockpit-section-title::before { content:'＋'; font-weight:400; color:#798179; margin-right:9px; }
+  details[open] > .cockpit-section-summary .cockpit-section-title::before { content:'−'; }
+  .cockpit-counts { display:flex; gap:10px; flex-wrap:wrap; font-size:.8rem; color:var(--muted); }
+  .cockpit-counts strong { color:var(--ink); font-variant-numeric:tabular-nums; }
+  .cockpit-detail-body { border-top:1px solid var(--cockpit-line); padding:16px 18px; }
+  .cockpit-detail-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:12px; font-size:.82rem; color:var(--muted); }
+  .cockpit-detail-head a { color:#145d66; font-weight:650; }
+  .cockpit-bottom { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
+  .mietwagen-heute-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .mietwagen-heute-col-title { font-size:.83rem; font-weight:700; margin-bottom:8px; }
+  .mietwagen-heute-item { padding:8px 0; border-top:1px solid var(--cockpit-line); font-size:.83rem; }
+  .mietwagen-heute-item strong,.mietwagen-heute-item span { display:block; overflow-wrap:anywhere; }
+  .mietwagen-heute-item span,.mietwagen-heute-empty { font-size:.78rem; color:var(--muted); }
+  .start-list { display:grid; gap:0; }
+  .start-list-item { display:flex; align-items:flex-start; gap:12px; flex-wrap:wrap; padding:12px 0; border-top:1px solid var(--cockpit-line); }
+  .start-list-item:first-child { border-top:0; padding-top:0; }
+  .start-list-link { flex:1 1 300px; min-width:0; color:var(--ink); text-decoration:none; }
+  .start-list-link:hover { color:#145d66; }
+  .start-list-title { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:.9rem; }
+  .start-list-meta { margin-top:4px; color:var(--muted); font-size:.78rem; overflow-wrap:anywhere; }
+  .start-list-actions { display:flex; gap:7px; flex-wrap:wrap; }
+  .email-ki-toggle { border:1px solid #cadbd7; background:#eef5f2; color:#145d66; border-radius:9px; padding:7px 10px; font-size:.76rem; }
+  .email-ki-analyse { display:none; flex-basis:100%; padding:10px; background:#f3f6f1; font-size:.82rem; }
+  .email-ki-analyse.is-open { display:block; }
+  .ai-kicker { font-weight:700; margin-bottom:4px; }
+  .reminder-form { display:flex; gap:8px; }
+  .reminder-form input { min-width:0; }
+  .reminder-list { display:grid; gap:8px; margin-top:14px; }
+  .reminder-item { display:flex; justify-content:space-between; gap:12px; align-items:center; font-size:.84rem; }
+  .reminder-text { overflow-wrap:anywhere; }
+  .reminder-meta { color:var(--muted); font-size:.73rem; }
+  .cockpit-modules { display:flex; flex-wrap:wrap; gap:8px; }
+  .cockpit-module { display:inline-flex; align-items:center; gap:8px; padding:11px 13px; border:1px solid var(--cockpit-line); border-radius:11px; background:#fffefa; color:var(--ink); font-size:.8rem; text-decoration:none; min-height:43px; }
+  .cockpit-module:hover { border-color:#145d66; color:#145d66; }
+  .module-count { border-radius:6px; background:#edf0e9; padding:1px 6px; font-size:.75rem; }
+  .module-count.is-alert { background:#fce3db; color:#933b2d; }
+  .cockpit-secondary { display:flex; gap:12px; flex-wrap:wrap; font-size:.78rem; color:var(--muted); }
+  .cockpit-secondary summary { cursor:pointer; }
+  .cockpit-source-mix { display:flex; flex-wrap:wrap; gap:12px; padding-top:8px; }
+  .cockpit-compact summary:focus-visible,.cockpit-compact a:focus-visible,.cockpit-compact button:focus-visible { outline:3px solid #087d91; outline-offset:3px; }
+  @media(max-width:850px) { .cockpit-bottom{grid-template-columns:1fr;} .cockpit-head{align-items:flex-start;} .cockpit-shortcuts{align-self:auto;} }
+  @media(max-width:575px) { .cockpit-compact{gap:12px;} .cockpit-head{gap:10px;} .cockpit-head h1{font-size:1.45rem;} .cockpit-time{font-size:1rem;} .cockpit-day{grid-template-columns:repeat(2,minmax(0,1fr));} .cockpit-day summary{padding:11px 12px;} .cockpit-day summary strong{font-size:1.3rem;} .cockpit-weather{font-size:.7rem;} .cockpit-section-summary{padding:13px;} .cockpit-detail-body{padding:13px;} .mietwagen-heute-grid{grid-template-columns:1fr;} .cockpit-shortcuts{width:100%;} .cockpit-shortcuts .btn{flex:1 1 auto;} .reminder-form{flex-direction:column;} .cockpit-modules{gap:6px;} .cockpit-module{padding:9px 10px;} }
 </style>
 {% endblock %}
-
 {% block content %}
 {% set mahn_cockpit_badge = mahnungen_faellig_count() %}
-{% if mahn_cockpit_badge %}
-<a href="{{ url_for('admin_mahnungen') }}" class="d-block page-card p-3 mb-4 text-decoration-none" style="border-left: 6px solid #a23f2d; border-radius: 0 22px 22px 0; color: var(--ink);">
-  <strong>🔔 {{ mahn_cockpit_badge }} Mahnung{{ 'en' if mahn_cockpit_badge != 1 else '' }} fällig</strong>
-  <span class="text-muted">— Mahntexte liegen fertig vor: prüfen, kopieren, senden →</span>
-</a>
-{% endif %}
-
-
-<div class="cockpit-shell">
-  <aside class="cockpit-rail">
-    <div class="rail-card rail-brand">
-      <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
-      <div>
-        <div class="rail-brand-name">Gärtner GmbH Karosserie + Lack</div>
-        <div class="rail-brand-sub">Betriebs-Cockpit</div>
-      </div>
+<div class="cockpit-compact">
+  <header class="cockpit-head">
+    <div><div class="cockpit-eyebrow">Werkstatt · Tagesüberblick</div><h1>{{ tages_gruss }}, Christopher.</h1><p class="cockpit-subtitle" data-live-date>{{ current_date_label }}</p></div>
+    <div data-live-clock-root data-server-now="{{ current_datetime_iso }}"><div class="cockpit-time" data-live-clock>{{ current_time_label }}</div><details class="cockpit-weather" data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}"><summary><span data-weather-current-icon aria-hidden="true">☁</span> <strong data-weather-current-temp>--°C</strong> <span data-weather-current-text>Mosbach · wird geladen …</span></summary><div class="rail-weather-hours" data-weather-hours aria-label="Wetter in den nächsten 3 Stunden"></div></details></div>
+  </header>
+  <div class="cockpit-tools">
+    <div class="cockpit-search" data-cockpit-search data-search-url="{{ url_for('admin_cockpit_auftraege_suche') }}">
+      <label for="cockpit-auftrag-suche">Auftrag finden</label><input id="cockpit-auftrag-suche" type="search" autocomplete="off" placeholder="Kennzeichen, Auftrag, Fahrzeug oder Kunde" aria-controls="cockpit-suchergebnisse" aria-describedby="cockpit-suchhinweis"><span id="cockpit-suchhinweis" class="visually-hidden">Ab zwei Zeichen suchen. Treffer mit Tab auswählen.</span>
+      <div id="cockpit-suchergebnisse" class="cockpit-search-results" data-search-results aria-live="polite" hidden></div>
     </div>
-
-    <div class="rail-card rail-clock" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
-      <div class="rail-label">Heute</div>
-      <div class="rail-clock-time" data-live-clock>{{ current_time_label }}</div>
-      <div class="rail-clock-date" data-live-date>{{ current_date_label }}</div>
-      <div data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}">
-        <div class="rail-weather-row">
-          <span class="rail-weather-place" data-weather-current-text>Mosbach · wird geladen …</span>
-          <span class="rail-weather-current">
-            <span class="rail-weather-icon" data-weather-current-icon aria-hidden="true">--</span>
-            <strong class="rail-weather-temp" data-weather-current-temp>--°C</strong>
-          </span>
-        </div>
-        <div class="rail-weather-hours" data-weather-hours aria-label="Wetter in den nächsten 3 Stunden"></div>
-      </div>
-    </div>
-
-    <div class="rail-card">
-      <div class="rail-label">Tagesablauf</div>
-      <div class="today-steps">
-        <div class="today-step">
-          <span class="today-step-icon tone-blue" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="7" width="13" height="9"></rect><path d="M14 10h4l3 3v3h-7z"></path><circle cx="6" cy="18" r="1.6"></circle><circle cx="17.5" cy="18" r="1.6"></circle></svg>
-          </span>
-          <div>
-            <div class="today-step-label">Übernehmen</div>
-            <div class="today-step-sub">Anlieferung &amp; Holservice</div>
-          </div>
-          <span class="today-step-count">{{ cockpit['heute_bringen']|length }}</span>
-        </div>
-        <div class="today-step">
-          <span class="today-step-icon tone-gold" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M7 5v14l12-7z"></path></svg>
-          </span>
-          <div>
-            <div class="today-step-label">Starten</div>
-            <div class="today-step-sub">Geplanter Arbeitsstart</div>
-          </div>
-          <span class="today-step-count">{{ cockpit['heute_starten']|length }}</span>
-        </div>
-        <div class="today-step">
-          <span class="today-step-icon tone-green" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6"></path></svg>
-          </span>
-          <div>
-            <div class="today-step-label">Fertig</div>
-            <div class="today-step-sub">Fertigstellung heute</div>
-          </div>
-          <span class="today-step-count">{{ cockpit['heute_fertig']|length }}</span>
-        </div>
-        <div class="today-step">
-          <span class="today-step-icon tone-warm" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14l-5-4 5-4"></path><path d="M4 10h10a5 5 0 0 1 5 5v1"></path></svg>
-          </span>
-          <div>
-            <div class="today-step-label">Zurückgeben</div>
-            <div class="today-step-sub">Abholung / Rückbringung</div>
-          </div>
-          <span class="today-step-count">{{ cockpit['heute_abholen']|length }}</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="rail-card">
-      <div class="rail-label">Schnellzugriff</div>
-      <div class="rail-actions">
-        <a href="{{ url_for('dashboard') }}#auftraege" class="rail-btn primary">Lackierportal öffnen</a>
-      </div>
-      <div class="rail-actions-grid">
-        <a href="{{ url_for('neuer_auftrag') }}" class="rail-btn soft">Fahrzeug neu</a>
-        <a href="{{ url_for('admin_versicherungsschaden') }}" class="rail-btn soft">Versicherungsschaden</a>
-        <a href="{{ url_for('admin_postfach') }}" class="rail-btn soft">Postfach</a>
-        <a href="{{ url_for('admin_zugaenge') }}" class="rail-btn soft">Zugänge</a>
-      </div>
-    </div>
-  </aside>
-
-  <div class="cockpit-main">
-    <div class="page-card p-4 mb-4">
-      <div class="section-title align-items-start mb-0">
-        <div>
-          <h4 class="mb-1">{{ tages_gruss }}, Christopher.</h4>
-          <p>Schneller Überblick über Werkstatt, Autohaus-Kommunikation und offene Freigaben.</p>
-        </div>
-        <span class="badge-soft greeting-date-badge">{{ current_date_label }}</span>
-      </div>
-    </div>
-
-    {% include "_cockpit_aktionen.html" %}
-
-    <details class="mb-4" data-cockpit-kalender {% if request.args.get('monat') or request.args.get('tag') %}open{% endif %}>
-      <summary class="page-card p-3 fw-semibold">Monatskalender öffnen · Termine im Überblick</summary>
-      <div class="mt-3">{% include "_mini_month_calendar.html" %}</div>
-    </details>
-
-    <div class="page-card p-4 mb-4">
-      <div class="section-title align-items-start">
-        <div>
-          <h4 class="mb-1">Mietfahrzeuge heute</h4>
-          <p>Was heute rausgeht und was zurückkommt — zur Vorbereitung.</p>
-        </div>
-        <a href="{{ url_for('admin_mietfahrzeuge') }}" class="btn btn-soft btn-sm">Mietfahrzeuge öffnen</a>
-      </div>
-      <div class="mietwagen-heute-grid">
-        <div>
-          <div class="mietwagen-heute-col-title">
-            <span class="mietwagen-heute-icon tone-gold" style="background: linear-gradient(135deg, #a66b00, #d38f13);" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2-5a2 2 0 0 1 2-1h10a2 2 0 0 1 2 1l2 5"></path><rect x="2" y="13" width="20" height="6" rx="1.5"></rect><circle cx="7" cy="19" r="1.6"></circle><circle cx="17" cy="19" r="1.6"></circle></svg>
-            </span>
-            Heute wird vermietet ({{ mietwagen_heute['heute_start']|length }})
-          </div>
-          <div class="mietwagen-heute-list">
-            {% for eintrag in mietwagen_heute['heute_start'] %}
-            <div class="mietwagen-heute-item">
-              <strong>{{ eintrag['bezeichnung'] or 'Mietfahrzeug' }} · {{ eintrag['kennzeichen'] }}</strong>
-              <span>{{ eintrag['kunde_name'] or 'Kunde folgt' }}</span>
-            </div>
-            {% else %}
-            <div class="mietwagen-heute-empty">Heute startet keine Vermietung.</div>
-            {% endfor %}
-          </div>
-        </div>
-        <div>
-          <div class="mietwagen-heute-col-title">
-            <span class="mietwagen-heute-icon tone-warm" style="background: linear-gradient(135deg, #a23f2d, #c1602b);" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14l-5-4 5-4"></path><path d="M4 10h10a5 5 0 0 1 5 5v1"></path></svg>
-            </span>
-            Heute kommt zurück ({{ mietwagen_heute['heute_rueckgabe']|length }})
-          </div>
-          <div class="mietwagen-heute-list">
-            {% for eintrag in mietwagen_heute['heute_rueckgabe'] %}
-            <div class="mietwagen-heute-item">
-              <strong>{{ eintrag['bezeichnung'] or 'Mietfahrzeug' }} · {{ eintrag['kennzeichen'] }}</strong>
-              <span>{{ eintrag['kunde_name'] or 'Kunde folgt' }}</span>
-            </div>
-            {% else %}
-            <div class="mietwagen-heute-empty">Heute ist keine Rückgabe fällig.</div>
-            {% endfor %}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="mb-4">
-      <div class="page-card p-4">
-        <div class="section-title align-items-start">
-          <div>
-              <h4 class="mb-1">Eingang</h4>
-              <p>Nur das, was neu ist oder erledigt werden muss.</p>
-            </div>
-            <a href="{{ url_for('admin_postfach') }}" class="btn btn-soft btn-sm">Postfach</a>
-          </div>
-          <div class="start-counter-grid mb-3">
-            <a href="{{ url_for('admin_postfach') }}" class="start-counter">
-              <span>Neue Fahrzeuge</span>
-              <strong>{{ start_inbox['fahrzeuge_count'] }}</strong>
-            </a>
-            <a href="{{ url_for('admin_postfach') }}" class="start-counter">
-              <span>Neue Anfragen</span>
-              <strong>{{ start_inbox['anfragen_count'] }}</strong>
-            </a>
-            <a href="{{ url_for('admin_postfach') }}" class="start-counter">
-              <span>Neue Aufgaben</span>
-              <strong>{{ start_inbox['aufgaben_count'] }}</strong>
-            </a>
-          </div>
-          <div class="reminder-panel mb-3">
-            <form method="POST" action="{{ url_for('admin_erinnerung_neu') }}" class="reminder-form mb-3">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}">
-              <input type="text" name="text" class="form-control" placeholder="Kurz notieren, was später erledigt werden soll" required>
-              <button type="submit" class="btn btn-brand">Merken</button>
-            </form>
-            {% if erinnerungen %}
-              <div class="reminder-list">
-                {% for erinnerung in erinnerungen %}
-                <div class="reminder-item">
-                  <div>
-                    <div class="reminder-text">{{ erinnerung['text'] }}</div>
-                    <div class="reminder-meta">{{ erinnerung['erstellt_am'] }}</div>
-                  </div>
-                  <form method="POST" action="{{ url_for('admin_erinnerung_erledigt', erinnerung_id=erinnerung['id']) }}" class="m-0">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}">
-                    <button type="submit" class="btn btn-soft btn-sm">Erledigt</button>
-                  </form>
-                </div>
-                {% endfor %}
-              </div>
-            {% else %}
-              <div class="text-muted small">Keine offenen Erinnerungen.</div>
-            {% endif %}
-          </div>
-          {% if start_inbox['items'] %}
-            <div class="start-list">
-              {% for item in start_inbox['items'] %}
-              <div class="start-list-item">
-                <a href="{{ url_for('admin_cockpit_eingang_oeffnen', item_key=item['item_key']) }}" class="start-list-link">
-                  <div class="d-flex justify-content-between gap-2 flex-wrap mb-1">
-                    <div>
-                      <span class="badge-soft me-2">{{ item['typ'] }}</span>
-                      <strong>{{ item['titel'] }}</strong>
-                    </div>
-                    <span class="text-muted small">{{ item['erstellt_am'] }}</span>
-                  </div>
-                  <div class="start-list-meta">
-                    {{ item['autohaus_name'] or 'Werkstatt' }}{% if item['fahrzeug'] %} · {{ item['fahrzeug'] }}{% endif %}{% if item['kennzeichen'] %} · {{ item['kennzeichen'] }}{% endif %}
-                  </div>
-                  {% if item['nachricht'] %}
-                    <div class="start-list-meta mt-1">{{ item['nachricht'] }}</div>
-                  {% endif %}
-                </a>
-                {% if item['typ'] == 'E-Mail' %}
-                {% set email_id = item['item_key'].split('-')[-1] %}
-                <div class="start-list-actions">
-                  <button type="button" class="email-ki-toggle" data-email-ki-toggle data-email-id="{{ email_id }}">KI-Analyse anzeigen</button>
-                </div>
-                <div class="email-ki-analyse" data-email-ki-analyse="{{ email_id }}">
-                  <div class="ai-kicker">KI-Kurzanalyse</div>
-                  <div data-email-ki-text></div>
-                </div>
-                {% endif %}
-                {% if item['whatsapp_auftrag_id'] %}
-                <form method="POST" action="{{ url_for('admin_auftrag_whatsapp_hinweis', auftrag_id=item['whatsapp_auftrag_id']) }}" class="start-list-actions m-0">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}">
-                  <button type="submit" class="btn btn-soft btn-sm">WhatsApp senden</button>
-                </form>
-                {% endif %}
-                <form method="POST" action="{{ url_for('admin_cockpit_eingang_loeschen', item_key=item['item_key']) }}" class="start-list-actions m-0">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}">
-                  <button type="submit" class="btn btn-soft btn-sm">Löschen</button>
-                </form>
-              </div>
-              {% endfor %}
-            </div>
-          {% else %}
-            <div class="news-empty">Alles ruhig. Neue Fahrzeuge, Anfragen und Aufgaben erscheinen hier.</div>
-          {% endif %}
-        </div>
-      </div>
-    {% if cockpit['quelle_mix'] %}
-    <div class="source-mix-compact mb-4">
-      <span class="source-mix-compact-title">Quellen im Werkstattportal:</span>
-      {% for item in cockpit['quelle_mix'] %}
-      <span class="source-mix-compact-item">
-        <span class="source-mix-compact-dot {{ item['key'] }}"></span>
-        {{ item['label'] }} {{ item['percent'] }}% ({{ item['count'] }})
-      </span>
-      {% endfor %}
-    </div>
-    {% endif %}
-
-    <div class="module-grid mb-4">
-      {% if session.get('admin') %}
-      <a class="page-card module-tile" href="{{ url_for('admin_mitarbeiter') }}">
-        <span class="module-kicker">Team</span>
-        <h5 class="mb-0">Mitarbeiter</h5>
-        <p class="text-muted mb-0">Stammdaten, Lohnzettel und Verträge je Person geschützt öffnen.</p>
-      </a>
-      {% endif %}
-      {% set leads_count = admin_leads_count() %}
-      <a class="page-card module-tile" href="{{ url_for('admin_leads') }}">
-        <span class="module-kicker">Anfragen</span>
-        <h5 class="mb-0">Leads</h5>
-        <p class="text-muted mb-0">Neue Anfragen, Rückrufe und nächste Aktionen bündeln.</p>
-        <span class="module-count {% if leads_count %}is-alert{% endif %}" title="{% if leads_count %}{{ leads_count }} aktive Lead-Anfrage{% if leads_count != 1 %}n{% endif %}{% else %}Keine aktiven Leads{% endif %}">{{ leads_count }}</span>
-      </a>
-      <a class="page-card module-tile" href="{{ url_for('admin_fahrzeugsuche') }}">
-        <span class="module-kicker">Auktion</span>
-        <h5 class="mb-0">Fahrzeugsuche</h5>
-        <p class="text-muted mb-0">Suchprofile, Kandidaten und Auktionsalarme prüfen.</p>
-        <span class="module-count">{{ fahrzeugsuche_auktion_alert_count() or fahrzeugsuche_count() }}</span>
-      </a>
-      <a class="page-card module-tile" href="{{ url_for('admin_fahrzeugverkauf') }}">
-        <span class="module-kicker">Verkauf</span>
-        <h5 class="mb-0">Fahrzeugverkauf</h5>
-        <p class="text-muted mb-0">Verkaufsfahrzeuge, Preisprüfung und Verkaufsschild vorbereiten.</p>
-        <span class="module-count">{{ fahrzeugverkauf_count() }}</span>
-      </a>
-      <a class="page-card module-tile" href="{{ url_for('admin_versicherungsschaden') }}">
-        <span class="module-kicker">Schadenportal</span>
-        <h5 class="mb-0">Versicherungsportal</h5>
-        <p class="text-muted mb-0">Versicherungsschaden aufnehmen und danach im Portal weiterbearbeiten.</p>
-        <span class="module-count">{{ admin_versicherung_count() }}</span>
-      </a>
-      <a class="page-card module-tile" href="{{ url_for('admin_aufgaben') }}">
-        <span class="module-kicker">Werkstatt</span>
-        <h5 class="mb-0">Aufgabenplanung</h5>
-        <p class="text-muted mb-0">Tagesaufgaben mit Zeit-Richtwert ans Team verteilen.</p>
-        <span class="module-count">{{ aufgaben_offen_heute_count() }}</span>
-      </a>
-      <a class="page-card module-tile" href="{{ url_for('admin_dellen_kalkulator') }}">
-        <span class="module-kicker">Smart Repair</span>
-        <h5 class="mb-0">Dellen-Kalkulator</h5>
-        <p class="text-muted mb-0">Hagel- und Parkdellen je Bauteil erfassen und sofort kalkulieren.</p>
-        <span class="module-count">Neu</span>
-      </a>
-    </div>
+    <nav class="cockpit-shortcuts" aria-label="Schnellaktionen"><a class="btn btn-brand" href="{{ url_for('neuer_auftrag') }}">+ Fahrzeug neu</a><a class="btn btn-soft" href="{{ url_for('dashboard') }}#auftraege">Lackierportal öffnen</a><a class="btn btn-soft" href="{{ url_for('admin_versicherungsschaden') }}">Versicherungsschaden</a></nav>
   </div>
+  {% if mahn_cockpit_badge or cockpit.get('offene_reklamationen') or cockpit.get('offene_verzoegerungen') or cockpit.get('ueberfaellig') %}
+  <div class="cockpit-alerts" aria-label="Dringende Hinweise">
+    {% if mahn_cockpit_badge %}<a href="{{ url_for('admin_mahnungen') }}" class="cockpit-alert"><strong>{{ mahn_cockpit_badge }} Mahnung{{ 'en' if mahn_cockpit_badge != 1 else '' }} fällig</strong> · prüfen →</a>{% endif %}
+    {% if cockpit.get('offene_reklamationen') %}<a href="{{ url_for('dashboard') }}#reklamationen" class="cockpit-alert"><strong>{{ cockpit['offene_reklamationen']|length }} offene Reklamation{{ 'en' if cockpit['offene_reklamationen']|length != 1 else '' }}</strong> →</a>{% endif %}
+    {% for key, label in [('offene_verzoegerungen','Verzögerung(en) prüfen'),('ueberfaellig','Fertigstellung überfällig')] %}{% if cockpit.get(key) %}<details class="cockpit-alert"><summary><strong>{{ cockpit[key]|length }} · {{ label }}</strong></summary>{% for item in cockpit[key] %}<a class="d-block mt-2" href="{{ url_for('auftrag_detail', auftrag_id=item['auftrag_id'] if key == 'offene_verzoegerungen' else item['id']) }}">{{ item['kennzeichen'] or item['fahrzeug'] }} · Auftrag öffnen</a>{% endfor %}</details>{% endif %}{% endfor %}
+  </div>
+  {% endif %}
+  <section class="cockpit-card cockpit-day" aria-label="Fahrzeuge heute">
+    {% for key, label, sub in [('heute_bringen','Übernehmen','Anlieferung & Holservice'),('heute_starten','Starten','Arbeitsbeginn heute'),('heute_fertig','Fertig','Fertigstellung heute'),('heute_abholen','Zurückgeben','Abholung & Rückbringung')] %}
+    <details><summary><span>{{ label }}<small>{{ sub }}</small></span><strong>{{ cockpit[key]|length }}</strong></summary><div class="cockpit-day-list">{% for item in cockpit[key] %}<a href="{{ url_for('auftrag_detail', auftrag_id=item['id']) }}"><strong>{{ item['kennzeichen'] or item['fahrzeug'] }}</strong><br>{{ item['fahrzeug'] }}{% if key == 'heute_bringen' and item['annahme_uhrzeit'] %} · {{ item['annahme_uhrzeit'] }} Uhr{% elif key == 'heute_abholen' and item['abhol_uhrzeit'] %} · {{ item['abhol_uhrzeit'] }} Uhr{% endif %}</a>{% else %}<span class="text-muted">Heute kein Eintrag.</span>{% endfor %}</div></details>
+    {% endfor %}
+  </section>
+  {% include "_cockpit_aktionen.html" %}
+  <details class="cockpit-card" data-cockpit-eingang>
+    <summary class="cockpit-section-summary"><span class="cockpit-section-title">Eingang</span><span class="cockpit-counts"><span>Fahrzeuge <strong>{{ start_inbox['fahrzeuge_count'] or 0 }}</strong></span><span>Anfragen <strong>{{ start_inbox['anfragen_count'] or 0 }}</strong></span><span>Aufgaben <strong>{{ start_inbox['aufgaben_count'] or 0 }}</strong></span></span></summary>
+    <div class="cockpit-detail-body"><div class="cockpit-detail-head"><span>Neue Fahrzeuge, Anfragen und Rückmeldungen.</span><a href="{{ url_for('admin_postfach') }}">Vollständiges Postfach →</a></div>
+      {% if start_inbox['items'] %}<div class="start-list">{% for item in start_inbox['items'] %}<div class="start-list-item">
+        <a href="{{ url_for('admin_cockpit_eingang_oeffnen', item_key=item['item_key']) }}" class="start-list-link"><div class="start-list-title"><span class="badge-soft">{{ item['typ'] }}</span><strong>{{ item['titel'] }}</strong></div><div class="start-list-meta">{{ item['autohaus_name'] or 'Werkstatt' }}{% if item['fahrzeug'] %} · {{ item['fahrzeug'] }}{% endif %}{% if item['kennzeichen'] %} · {{ item['kennzeichen'] }}{% endif %} · {{ item['erstellt_am'] }}</div>{% if item['nachricht'] %}<div class="start-list-meta">{{ item['nachricht'] }}</div>{% endif %}</a>
+        <div class="start-list-actions">{% if item['typ'] == 'E-Mail' %}{% set email_id = item['item_key'].split('-')[-1] %}<button type="button" class="email-ki-toggle" data-email-ki-toggle data-email-id="{{ email_id }}">KI-Analyse anzeigen</button>{% endif %}
+          {% if item['whatsapp_auftrag_id'] %}<form method="POST" action="{{ url_for('admin_auftrag_whatsapp_hinweis', auftrag_id=item['whatsapp_auftrag_id']) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}"><button type="submit" class="btn btn-soft btn-sm">WhatsApp senden</button></form>{% endif %}
+          <form method="POST" action="{{ url_for('admin_cockpit_eingang_loeschen', item_key=item['item_key']) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}"><button type="submit" class="btn btn-soft btn-sm">Löschen</button></form>
+        </div>{% if item['typ'] == 'E-Mail' %}<div class="email-ki-analyse" data-email-ki-analyse="{{ email_id }}"><div class="ai-kicker">KI-Kurzanalyse</div><div data-email-ki-text></div></div>{% endif %}
+      </div>{% endfor %}</div>{% else %}<p class="text-muted small">Keine neuen Eingänge in dieser Übersicht.</p>{% endif %}
+    </div>
+  </details>
+  <div class="cockpit-bottom">
+    <details class="cockpit-card" data-cockpit-mietwagen><summary class="cockpit-section-summary"><span class="cockpit-section-title">Mietfahrzeuge heute</span><span class="cockpit-counts"><span>Raus <strong>{{ mietwagen_heute['heute_start']|length }}</strong></span><span>Zurück <strong>{{ mietwagen_heute['heute_rueckgabe']|length }}</strong></span></span></summary><div class="cockpit-detail-body"><div class="cockpit-detail-head"><span>Ausgaben und Rücknahmen vorbereiten.</span><a href="{{ url_for('admin_mietfahrzeuge') }}">Mietfahrzeuge öffnen →</a></div><div class="mietwagen-heute-grid">{% for key,label in [('heute_start','Heute wird vermietet'),('heute_rueckgabe','Heute kommt zurück')] %}<div><div class="mietwagen-heute-col-title">{{ label }}</div>{% for item in mietwagen_heute[key] %}<div class="mietwagen-heute-item"><strong>{{ item['bezeichnung'] or 'Mietfahrzeug' }} · {{ item['kennzeichen'] }}</strong><span>{{ item['kunde_name'] or 'Kunde folgt' }}</span></div>{% else %}<p class="mietwagen-heute-empty">Heute kein Eintrag.</p>{% endfor %}</div>{% endfor %}</div></div></details>
+    <details class="cockpit-card" data-cockpit-notizen><summary class="cockpit-section-summary"><span class="cockpit-section-title">Notizen</span><span class="cockpit-counts"><strong>{{ erinnerungen|length }}</strong> angezeigt</span></summary><div class="cockpit-detail-body"><form method="POST" action="{{ url_for('admin_erinnerung_neu') }}" class="reminder-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}"><input type="text" name="text" aria-label="Neue Erinnerung" class="form-control" placeholder="Kurz notieren, was später erledigt werden soll" required><button type="submit" class="btn btn-brand">Merken</button></form><div class="reminder-list">{% for erinnerung in erinnerungen %}<div class="reminder-item"><div><div class="reminder-text">{{ erinnerung['text'] }}</div><div class="reminder-meta">{{ erinnerung['erstellt_am'] }}</div></div><form method="POST" action="{{ url_for('admin_erinnerung_erledigt', erinnerung_id=erinnerung['id']) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ url_for('betriebs_cockpit') }}"><button type="submit" class="btn btn-soft btn-sm">Erledigt</button></form></div>{% else %}<p class="text-muted small">Keine offenen Erinnerungen.</p>{% endfor %}</div></div></details>
+  </div>
+  <details class="cockpit-card" data-cockpit-kalender {% if request.args.get('monat') or request.args.get('tag') %}open{% endif %}><summary class="cockpit-section-summary"><span class="cockpit-section-title">Monatskalender</span><span class="cockpit-counts">Termine im Überblick</span></summary><div class="cockpit-detail-body">{% include "_mini_month_calendar.html" %}<a class="btn btn-soft btn-sm mt-2" href="{{ url_for('kalender') }}">Kalender öffnen</a></div></details>
+  <nav class="cockpit-modules" aria-label="Weitere Arbeitsbereiche">
+    {% if session.get('admin') %}<a class="cockpit-module" href="{{ url_for('admin_mitarbeiter') }}" title="Stammdaten, Lohnzettel und Verträge">Mitarbeiter</a>{% endif %}
+    {% set leads_count = admin_leads_count() %}<a class="cockpit-module" href="{{ url_for('admin_leads') }}">Anfragen <span class="module-count {% if leads_count %}is-alert{% endif %}">{{ leads_count }}</span></a>
+    <a class="cockpit-module" href="{{ url_for('admin_aufgaben') }}">Aufgabenplanung <span class="module-count">{{ aufgaben_offen_heute_count() }}</span></a>
+    <a class="cockpit-module" href="{{ url_for('admin_versicherungsschaden') }}" title="Versicherungsschaden aufnehmen und danach im Portal weiterbearbeiten.">Versicherungsportal <span class="module-count">{{ admin_versicherung_count() }}</span></a>
+    <a class="cockpit-module" href="{{ url_for('admin_fahrzeugsuche') }}">Fahrzeugsuche <span class="module-count">{{ fahrzeugsuche_auktion_alert_count() or fahrzeugsuche_count() }}</span></a>
+    <a class="cockpit-module" href="{{ url_for('admin_fahrzeugverkauf') }}">Fahrzeugverkauf <span class="module-count">{{ fahrzeugverkauf_count() }}</span></a>
+    <a class="cockpit-module" href="{{ url_for('admin_dellen_kalkulator') }}">Dellen-Kalkulator</a><a class="cockpit-module" href="{{ url_for('admin_zugaenge') }}">Zugänge</a>
+  </nav>
+  {% if cockpit['quelle_mix'] %}<details class="cockpit-secondary"><summary>Auftragsquellen anzeigen</summary><div class="cockpit-source-mix">{% for item in cockpit['quelle_mix'] %}<span>{{ item['label'] }} {{ item['percent'] }}% ({{ item['count'] }})</span>{% endfor %}</div></details>{% endif %}
 </div>
 {% endblock %}
-
 {% block extra_js %}
 <script>
   (() => {
@@ -744,7 +153,7 @@
       return;
     }
     const timeTarget = root.querySelector('[data-live-clock]');
-    const dateTarget = root.querySelector('[data-live-date]');
+    const dateTarget = document.querySelector('[data-live-date]');
     const timeFormatter = new Intl.DateTimeFormat('de-DE', {
       hour: '2-digit',
       minute: '2-digit',
@@ -952,6 +361,77 @@
           button.disabled = false;
         }
       });
+    });
+  })();
+
+  // Cockpit lookup only reads the existing admin search endpoint.
+  (() => {
+    const root = document.querySelector('[data-cockpit-search]');
+    if (!root) return;
+    const input = root.querySelector('input');
+    const results = root.querySelector('[data-search-results]');
+    let timer;
+    let requestNumber = 0;
+    let controller;
+    const message = (text) => {
+      const line = document.createElement('p');
+      line.className = 'cockpit-search-message';
+      line.textContent = text;
+      results.replaceChildren(line);
+      results.hidden = false;
+    };
+    const lookup = async (query, requestId) => {
+      controller = new AbortController();
+      message('Aufträge werden gesucht …');
+      try {
+        const endpoint = new URL(root.dataset.searchUrl, window.location.origin);
+        endpoint.searchParams.set('q', query);
+        const response = await fetch(endpoint, {headers: {Accept: 'application/json'}, signal: controller.signal});
+        if (!response.ok) throw new Error('Search unavailable');
+        const data = await response.json();
+        if (requestId !== requestNumber) return;
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (!items.length) { message('Kein Auftrag gefunden. Bitte Kennzeichen oder Namen prüfen.'); return; }
+        const fragment = document.createDocumentFragment();
+        for (const item of items) {
+          const url = new URL(item.url || '', window.location.origin);
+          if (url.origin !== window.location.origin || !/^\/admin\/auftrag\/\d+$/.test(url.pathname)) continue;
+          const link = document.createElement('a');
+          link.className = 'cockpit-search-result';
+          link.href = url.pathname;
+          const title = document.createElement('strong');
+          title.textContent = [item.kennzeichen, item.fahrzeug].filter(Boolean).join(' · ');
+          const meta = document.createElement('span');
+          meta.textContent = [item.meta, item.status].filter(Boolean).join(' · ');
+          link.append(title, meta);
+          fragment.append(link);
+        }
+        if (!fragment.childNodes.length) { message('Keine passenden Aufträge gefunden.'); return; }
+        results.replaceChildren(fragment);
+        results.hidden = false;
+      } catch (error) {
+        if (error.name !== 'AbortError' && requestId === requestNumber) message('Suche gerade nicht verfügbar. Bitte das Lackierportal öffnen.');
+      }
+    };
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      controller?.abort();
+      const requestId = ++requestNumber;
+      const query = input.value.trim();
+      results.hidden = true;
+      results.replaceChildren();
+      if (query.length >= 2) timer = setTimeout(() => lookup(query, requestId), 250);
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        clearTimeout(timer);
+        controller?.abort();
+        ++requestNumber;
+        results.hidden = true;
+      }
+    });
+    document.addEventListener('click', (event) => {
+      if (!root.contains(event.target)) results.hidden = true;
     });
   })();
 </script>

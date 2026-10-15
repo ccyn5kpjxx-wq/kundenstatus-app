@@ -78,14 +78,15 @@ class PlanningTemplatesTest(unittest.TestCase):
     def render(self, template, **context):
         return self.env.get_template(template).render(**context)
 
-    def test_actions_precede_secondary_calendar_and_active_groups_are_open(self):
+    def test_actions_precede_secondary_calendar_and_counts_remain_visible(self):
         item = {"name": "Testperson", "vehicle": "Testfahrzeug", "detail": "3 Dateien in diesem Auftrag", "title": "Unterlagen prüfen", "url": "/admin/auftrag/71"}
         actions = {"groups": {"angebote": [], "antworten": [], "dokumente": [item], "termine": []}, "total": 1, "waiting": 0}
         html = self.render("cockpit.html", aktionsuebersicht=actions, cockpit={}, start_inbox={"items": []}, mietwagen_heute={}, erinnerungen=[])
         self.assertLess(html.index('id="aktionen-titel"'), html.index('data-cockpit-kalender'))
         calendar_tag = re.search(r"<details[^>]*data-cockpit-kalender[^>]*>", html).group(0)
         self.assertNotIn("open", calendar_tag)
-        self.assertRegex(html, r'<details class="aktion-gruppe" open>\s*<summary><span>Unterlagen prüfen</span>')
+        self.assertRegex(html, r'<details class="aktion-gruppe" data-action-group="dokumente"\s*>\s*<summary><span>Unterlagen prüfen</span>')
+        self.assertNotRegex(html, r'<details class="aktion-gruppe"[^>]*\bopen(?:\s|>)')
         self.assertIn('aria-label="1 Vorgang"', html)
         self.assertIn("3 Dateien in diesem Auftrag", html)
         self.assertIn("1 offene Aktion", html)
