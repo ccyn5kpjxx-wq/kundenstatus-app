@@ -111,6 +111,7 @@
     .photo-preview-name { display:block; margin-top:7px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:800; }
     .photo-preview-status { grid-column:1/-1; margin:0; color:var(--muted); font-size:12px; font-weight:750; }
     .photo-preview-status.is-error { color:#a1261f; }
+    .photo-remove { grid-column:1/-1; justify-self:start; padding:9px 12px; border:1px solid var(--line); border-radius:8px; background:white; color:var(--ink); font:inherit; cursor:pointer; }
     .privacy { margin:24px 0 18px; color:var(--muted); font-size:12px; line-height:1.55; }
     .button { width:100%; min-height:55px; border:0; border-radius:999px; color:white; background:linear-gradient(135deg,var(--red),var(--red-dark)); box-shadow:0 13px 28px rgba(227,34,25,.23); font:inherit; font-weight:900; cursor:pointer; }
     .button:hover { transform:translateY(-1px); }
@@ -324,8 +325,8 @@
             <div class="field full"><label for="nachricht">{{ kurzanfrage_optionen[formdata.get('anliegen')]['frage'] }} *</label><textarea id="nachricht" name="nachricht" maxlength="2000" placeholder="{{ kurzanfrage_optionen[formdata.get('anliegen')]['placeholder'] }}" required>{{ formdata.get('nachricht','') }}</textarea></div>
             <label class="upload-box" for="bilder">
               <span class="upload-icon" aria-hidden="true">＋📷</span>
-              <span class="upload-copy"><strong>Bilder hinzufügen <span class="hint">(optional)</span></strong><span>Bis zu 5 Bilder · JPG, PNG, WebP oder HEIC · je max. 12 MB, zusammen max. 24 MB</span></span>
-              <input id="bilder" name="bilder" type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,.heic">
+              <span class="upload-copy"><strong>Bilder hinzufügen <span class="hint">(optional)</span></strong><span>Bis zu {{ bilder_max_anzahl }} Bilder · JPG, PNG, WebP oder HEIC · je max. {{ bilder_max_datei_mb }} MB, zusammen max. {{ bilder_max_gesamt_mb }} MB. Sie können die Anfrage auch ohne Bilder senden.</span></span>
+              <input id="bilder" name="bilder" type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,.heic" data-max-files="{{ bilder_max_anzahl }}" data-max-file-mb="{{ bilder_max_datei_mb }}" data-max-total-mb="{{ bilder_max_gesamt_mb }}">
             </label>
             <div class="photo-preview" id="photo-preview" aria-live="polite"></div>
           </div>
@@ -360,8 +361,8 @@
             <div class="field full"><label for="nachricht">Kurze Beschreibung</label><textarea id="nachricht" name="nachricht" maxlength="2000" placeholder="Was sollen wir prüfen oder vorbereiten?">{{ formdata.get('nachricht','') }}</textarea></div>
             <label class="upload-box" for="bilder">
               <span class="upload-icon" aria-hidden="true">＋📷</span>
-              <span class="upload-copy"><strong>Bilder hinzufügen <span class="hint">(optional)</span></strong><span>Bis zu 5 Bilder · JPG, PNG, WebP oder HEIC · je max. 12 MB, zusammen max. 24 MB</span></span>
-              <input id="bilder" name="bilder" type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,.heic">
+              <span class="upload-copy"><strong>Bilder hinzufügen <span class="hint">(optional)</span></strong><span>Bis zu {{ bilder_max_anzahl }} Bilder · JPG, PNG, WebP oder HEIC · je max. {{ bilder_max_datei_mb }} MB, zusammen max. {{ bilder_max_gesamt_mb }} MB. Sie können die Anfrage auch ohne Bilder senden.</span></span>
+              <input id="bilder" name="bilder" type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,.heic" data-max-files="{{ bilder_max_anzahl }}" data-max-file-mb="{{ bilder_max_datei_mb }}" data-max-total-mb="{{ bilder_max_gesamt_mb }}">
             </label>
             <div class="photo-preview" id="photo-preview" aria-live="polite"></div>
           </div>
@@ -374,72 +375,7 @@
   </main>
   {% include "_besucher_tracking.html" %}
   {% if gesendet %}<script>window.gaertnerAdsTrack?.('form');</script>{% endif %}
-  <script>
-    (() => {
-      const input = document.getElementById('bilder');
-      const preview = document.getElementById('photo-preview');
-      const form = input && input.closest('form');
-      if (!input || !preview || !form) return;
-      let objectUrls = [];
-
-      const clearPreview = () => {
-        objectUrls.forEach((url) => URL.revokeObjectURL(url));
-        objectUrls = [];
-        preview.replaceChildren();
-      };
-
-      input.addEventListener('change', () => {
-        clearPreview();
-        const files = Array.from(input.files || []);
-        if (!files.length) { preview.classList.remove('is-visible'); return; }
-
-        const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-        const problems = [];
-        if (files.length > 5) problems.push('Bitte höchstens 5 Bilder auswählen.');
-        if (files.some((file) => file.size > 12 * 1024 * 1024)) problems.push('Ein einzelnes Bild darf höchstens 12 MB groß sein.');
-        if (totalBytes > 24 * 1024 * 1024) problems.push('Alle Bilder zusammen dürfen höchstens 24 MB groß sein.');
-
-        files.slice(0, 5).forEach((file) => {
-          const item = document.createElement('div');
-          item.className = 'photo-preview-item';
-          if (file.type && file.type !== 'image/heic') {
-            const image = document.createElement('img');
-            const objectUrl = URL.createObjectURL(file);
-            objectUrls.push(objectUrl);
-            image.src = objectUrl;
-            image.alt = '';
-            item.appendChild(image);
-          } else {
-            const placeholder = document.createElement('div');
-            placeholder.className = 'photo-preview-placeholder';
-            placeholder.textContent = 'HEIC';
-            item.appendChild(placeholder);
-          }
-          const name = document.createElement('span');
-          name.className = 'photo-preview-name';
-          name.textContent = file.name;
-          item.appendChild(name);
-          preview.appendChild(item);
-        });
-
-        const status = document.createElement('p');
-        status.className = `photo-preview-status${problems.length ? ' is-error' : ''}`;
-        status.textContent = problems.length
-          ? problems.join(' ')
-          : `${files.length} Bild${files.length === 1 ? '' : 'er'} ausgewählt.`;
-        preview.appendChild(status);
-        preview.dataset.invalid = problems.length ? '1' : '';
-        preview.classList.add('is-visible');
-      });
-
-      form.addEventListener('submit', (event) => {
-        if (preview.dataset.invalid === '1') {
-          event.preventDefault();
-          input.focus();
-        }
-      });
-    })();
-  </script>
+  <script src="{{ url_for('static', filename='homepage-anfrage-upload.js') }}" defer></script>
   <script>
     (() => {
       const anliegen = document.getElementById('anliegen');

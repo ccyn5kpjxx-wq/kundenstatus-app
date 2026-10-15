@@ -2471,6 +2471,8 @@ SCHADENAUFNAHME_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", 
 WEBSITE_LEAD_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
 WEBSITE_LEAD_MAX_BILDER = 5
 WEBSITE_LEAD_MAX_GESAMT_MB = 24
+WEBSITE_ANFRAGE_MAX_DATEI_MB = 50
+WEBSITE_ANFRAGE_MAX_GESAMT_MB = 100
 SCHADENAUFNAHME_MAX_DATEIEN = 10
 SCHADENAUFNAHME_MAX_DATEI_MB = 12
 SCHADENAUFNAHME_DATENSCHUTZ_VERSION = "2026-07-werkstatt-v1"
@@ -3060,6 +3062,13 @@ def public_site_is_indexable_request():
 
 
 @app.before_request
+def configure_website_upload_limit():
+    # Must run before CSRF validation first parses the multipart form.
+    if request.endpoint == "website_anfrage" and request.method == "POST":
+        request.max_content_length = (WEBSITE_ANFRAGE_MAX_GESAMT_MB + 1) * 1024 * 1024
+
+
+@app.before_request
 def restrict_public_site_service():
     if not is_public_site_request():
         return None
@@ -3389,12 +3398,16 @@ def seite_nicht_gefunden(error):
 
 @app.errorhandler(413)
 def upload_zu_gross(error):
+    max_upload_mb = (
+        WEBSITE_ANFRAGE_MAX_GESAMT_MB
+        if request.endpoint == "website_anfrage" else MAX_UPLOAD_MB
+    )
     return render_template_string(
         FEHLERSEITE_PORTAL_TEMPLATE,
         titel="Die Dateien sind zusammen zu groß.",
         text=(
             f"Bitte laden Sie die Fotos in kleineren Gruppen hoch "
-            f"(zusammen höchstens {MAX_UPLOAD_MB} MB pro Vorgang). "
+            f"(zusammen höchstens {max_upload_mb} MB pro Vorgang). "
             "Die bisherige Auswahl wurde nicht gespeichert."
         ),
         zurueck_url=request.referrer or "",
@@ -13108,7 +13121,10 @@ def list_lead_portal_events(lead_id, customer_only=False, limit=50):
     return [dict(row) for row in rows]
 
 
-def save_lead_attachment_bytes(lead_id, original_name, payload, mime_type="", quelle="upload"):
+def save_lead_attachment_bytes(
+    lead_id, original_name, payload, mime_type="", quelle="upload", *,
+    max_file_mb=SCHADENAUFNAHME_MAX_DATEI_MB,
+):
     original_name = secure_filename(original_name or "")
     suffix = pathlib.Path(original_name).suffix.lower()
     payload = bytes(payload or b"")
@@ -13116,14 +13132,15 @@ def save_lead_attachment_bytes(lead_id, original_name, payload, mime_type="", qu
         raise ValueError("Dieser Dateityp ist für Lead-Anhänge nicht erlaubt.")
     if not payload:
         raise ValueError("Die Datei ist leer.")
-    if len(payload) > SCHADENAUFNAHME_MAX_DATEI_MB * 1024 * 1024:
-        raise ValueError(f"Die Datei darf höchstens {SCHADENAUFNAHME_MAX_DATEI_MB} MB groß sein.")
+    if len(payload) > max_file_mb * 1024 * 1024:
+        raise ValueError(f"Die Datei darf höchstens {max_file_mb} MB groß sein.")
     stored_name = f"lead-{int(lead_id)}-{uuid.uuid4().hex}{suffix}"
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     target = UPLOAD_DIR / stored_name
-    target.write_bytes(payload)
-    db = get_db()
+    db = None
     try:
+        target.write_bytes(payload)
+        db = get_db()
         cursor = db.execute(
             """
             INSERT INTO lead_dateien
@@ -13142,10 +13159,13 @@ def save_lead_attachment_bytes(lead_id, original_name, payload, mime_type="", qu
         target.unlink(missing_ok=True)
         raise
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
-def save_lead_upload_file(lead_id, file, quelle="upload"):
+def save_lead_upload_file(
+    lead_id, file, quelle="upload", *, max_file_mb=SCHADENAUFNAHME_MAX_DATEI_MB,
+):
     if not file or not file.filename:
         return 0
     return save_lead_attachment_bytes(
@@ -13154,6 +13174,7 @@ def save_lead_upload_file(lead_id, file, quelle="upload"):
         file.read(),
         file.mimetype or "",
         quelle=quelle,
+        max_file_mb=max_file_mb,
     )
 
 
@@ -31940,7 +31961,10 @@ def schadenaufnahme_upload_size(file):
         return int(getattr(file, "content_length", 0) or 0)
 
 
-def validate_schadenaufnahme_uploads(files, require_file=False):
+def validate_schadenaufnahme_uploads(
+    files, require_file=False, *, max_file_mb=SCHADENAUFNAHME_MAX_DATEI_MB,
+    max_total_mb=MAX_UPLOAD_MB,
+):
     selected = [file for file in (files or []) if file and file.filename]
     errors = []
     if require_file and not selected:
@@ -31951,7 +31975,7 @@ def validate_schadenaufnahme_uploads(files, require_file=False):
         )
     valid = []
     total_size = 0
-    max_file_bytes = SCHADENAUFNAHME_MAX_DATEI_MB * 1024 * 1024
+    max_file_bytes = max_file_mb * 1024 * 1024
     for file in selected[:SCHADENAUFNAHME_MAX_DATEIEN]:
         original_name = secure_filename(file.filename or "")
         suffix = pathlib.Path(original_name).suffix.lower()
@@ -31967,19 +31991,19 @@ def validate_schadenaufnahme_uploads(files, require_file=False):
             continue
         if size > max_file_bytes:
             errors.append(
-                f"{original_name}: Eine einzelne Datei darf höchstens {SCHADENAUFNAHME_MAX_DATEI_MB} MB groß sein."
+                f"{original_name}: Eine einzelne Datei darf höchstens {max_file_mb} MB groß sein."
             )
             continue
         if not schadenaufnahme_upload_signature_ok(file, suffix):
             errors.append(f"{original_name}: Dateityp und Dateiinhalt passen nicht zusammen.")
             continue
         valid.append(file)
-    if total_size > MAX_UPLOAD_MB * 1024 * 1024:
-        errors.append(f"Alle Dateien zusammen dürfen höchstens {MAX_UPLOAD_MB} MB groß sein.")
+    if total_size > max_total_mb * 1024 * 1024:
+        errors.append(f"Alle Dateien zusammen dürfen höchstens {max_total_mb} MB groß sein.")
     return (valid if not errors else []), errors
 
 
-def validate_website_lead_upload(file):
+def validate_website_lead_upload(file, *, max_file_mb=SCHADENAUFNAHME_MAX_DATEI_MB):
     """Prüft das eine optionale Foto einer öffentlichen Kurzanfrage."""
     if not file or not file.filename:
         return None, []
@@ -31987,11 +32011,16 @@ def validate_website_lead_upload(file):
     suffix = pathlib.Path(original_name).suffix.lower()
     if not original_name or suffix not in WEBSITE_LEAD_IMAGE_EXTENSIONS:
         return None, ["Beim Foto sind nur JPG, PNG, WebP oder HEIC erlaubt."]
-    valid, errors = validate_schadenaufnahme_uploads([file])
+    valid, errors = validate_schadenaufnahme_uploads(
+        [file], max_file_mb=max_file_mb, max_total_mb=max_file_mb
+    )
     return (valid[0] if valid else None), errors
 
 
-def validate_website_lead_uploads(files):
+def validate_website_lead_uploads(
+    files, *, max_file_mb=SCHADENAUFNAHME_MAX_DATEI_MB,
+    max_total_mb=WEBSITE_LEAD_MAX_GESAMT_MB,
+):
     """Prüft bis zu fünf optionale Bilder einer öffentlichen Anfrage."""
     selected = [file for file in files or [] if file and file.filename]
     if len(selected) > WEBSITE_LEAD_MAX_BILDER:
@@ -32000,14 +32029,14 @@ def validate_website_lead_uploads(files):
     errors = []
     total_size = 0
     for file in selected:
-        checked, file_errors = validate_website_lead_upload(file)
+        checked, file_errors = validate_website_lead_upload(file, max_file_mb=max_file_mb)
         errors.extend(file_errors)
         if checked:
             valid.append(checked)
             total_size += schadenaufnahme_upload_size(checked)
-    if total_size > WEBSITE_LEAD_MAX_GESAMT_MB * 1024 * 1024:
+    if total_size > max_total_mb * 1024 * 1024:
         errors.append(
-            f"Alle Bilder zusammen dürfen höchstens {WEBSITE_LEAD_MAX_GESAMT_MB} MB groß sein."
+            f"Alle Bilder zusammen dürfen höchstens {max_total_mb} MB groß sein."
         )
     return (valid if not errors else []), errors
 
@@ -44824,6 +44853,9 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             kundenlink=session.get("website_anfrage_kundenlink", "") if gesendet else "",
             anliegen_optionen=WEBSITE_ANLIEGEN,
             kurzanfrage_optionen=WEBSITE_KURZANFRAGEN,
+            bilder_max_anzahl=WEBSITE_LEAD_MAX_BILDER,
+            bilder_max_datei_mb=WEBSITE_ANFRAGE_MAX_DATEI_MB,
+            bilder_max_gesamt_mb=WEBSITE_ANFRAGE_MAX_GESAMT_MB,
             pflege_kategorien=WEBSITE_PFLEGE_KATEGORIEN,
             pflege_auswahl=pflege_auswahl,
             mechanik_kategorien=WEBSITE_MECHANIK_KATEGORIEN,
@@ -44972,7 +45004,11 @@ def website_anfrage():
                 errors.append("Bitte ein gültiges Wunschdatum angeben.")
         if fahrzeug_link and not re.match(r"^https?://", fahrzeug_link, flags=re.IGNORECASE):
             errors.append("Der Link zur Fahrzeuganzeige muss mit http:// oder https:// beginnen.")
-        valid_bilder, bilder_errors = validate_website_lead_uploads(bilder)
+        valid_bilder, bilder_errors = validate_website_lead_uploads(
+            bilder,
+            max_file_mb=WEBSITE_ANFRAGE_MAX_DATEI_MB,
+            max_total_mb=WEBSITE_ANFRAGE_MAX_GESAMT_MB,
+        )
         errors.extend(bilder_errors)
         if errors:
             return render_website_anfrage(formdata=request.form, errors=errors, status_code=400)
@@ -45069,7 +45105,10 @@ def website_anfrage():
         )
         try:
             for bild in valid_bilder:
-                save_lead_upload_file(lead_id, bild, quelle="website_formular")
+                save_lead_upload_file(
+                    lead_id, bild, quelle="website_formular",
+                    max_file_mb=WEBSITE_ANFRAGE_MAX_DATEI_MB,
+                )
         except (OSError, ValueError):
             delete_lead(lead_id)
             return render_website_anfrage(
