@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Kundenflotten · Werkstatt{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='kundenflotten.css') }}">
+<div class="kf-wrap"><div class="kf-heading"><div><p class="kf-eyebrow">BETREUUNG AUS EINER HAND</p><h1>Kundenflotten</h1><p>Firmen, Fahrzeuge und Fälligkeiten an einem Ort.</p></div><a class="btn btn-outline-secondary" href="/admin/cockpit">Zum Cockpit</a></div>
+<div class="kf-note">Interne Betreuung für Kundenfahrzeuge. Eigene Mietwagen und Mitarbeiterzugänge bleiben separate Bereiche. Aus diesem Modul werden keine Nachrichten, Einladungen oder Bestellungen versendet.</div>
+<div class="kf-grid">
+{% for company in companies %}<a class="kf-company" href="{{ url_for('kundenflotten.company', company_id=company.id) }}"><span class="kf-count">{{ company.anzahl }} Fahrzeuge</span><h2>{{ company.name }}</h2><p>{{ company.kontakt or 'Ansprechpartner noch ergänzen' }}</p><span class="kf-link">Fahrzeugakten öffnen →</span></a>{% else %}<div class="kf-card"><h2>Die erste Firmenflotte anlegen</h2><p>Starten Sie mit den Kontaktdaten der Firma. Danach können Sie Fahrzeuge, Fahrer und Wartungsvorgaben hinterlegen.</p></div>{% endfor %}
+</div>
+<details class="kf-card kf-details"><summary>+ Firma anlegen</summary><form method="post" action="{{ url_for('kundenflotten.create_company') }}" class="kf-form">{{ csrf_field() }}
+<label>Firmenname *<input name="name" maxlength="200" required></label><label>Ansprechpartner<input name="kontakt" maxlength="200"></label><label>E-Mail<input type="email" name="email" maxlength="254"></label><label>Telefon<input name="telefon" maxlength="60"></label><label>Vereinbarte Freigabegrenze netto (€)<input name="freigabe_limit" inputmode="decimal" placeholder="Leer = keine Grenze vereinbart"></label><label class="kf-wide">Individuelle Konditionen / Freigabeweg<textarea name="konditionen" maxlength="2000" placeholder="Nur intern: Vereinbarung, Gültigkeit, zuständiger Freigeber. Ein erfasster Grenzwert ist keine Reparaturfreigabe."></textarea></label><div class="kf-wide"><button class="btn btn-dark">Firma speichern</button></div></form></details>
+</div>{% endblock %}
