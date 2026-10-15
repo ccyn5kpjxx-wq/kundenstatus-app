@@ -8,9 +8,11 @@ import io
 import json
 import os
 import pathlib
+import re
 import sys
 import tempfile
 from datetime import date
+from urllib.parse import urlsplit
 
 from werkzeug.datastructures import FileStorage
 
@@ -112,7 +114,7 @@ def base_payload(csrf_token, form_token, **overrides):
 def main():
     portal.app.config.update(TESTING=True, SESSION_COOKIE_SECURE=False)
     portal.init_db()
-    test_insurance_id = portal.create_versicherung(
+    test_insurance = portal.create_versicherung(
         TEST_INSURANCE_NAME,
         zugangscode=TEST_INSURANCE_CODE,
         email="versicherung@example.test",
@@ -220,7 +222,7 @@ def main():
 
     versicherung = portal.get_versicherung(auftrag.get("versicherung_id"))
     check("Freie Versicherungsangabe bleibt beim internen Platzhalter", portal.versicherung_ist_platzhalter(versicherung))
-    allianz = portal.get_versicherung(test_insurance_id)
+    allianz = test_insurance
     check(
         "Privatfall ist fuer echte Versicherung nicht sichtbar",
         bool(allianz) and not portal.versicherung_auftrag_im_portal_sichtbar(auftrag, allianz["id"]),
@@ -344,10 +346,11 @@ def main():
         client.get(f"/status/{alter_token}").status_code == 404,
     )
     active_order_html = admin.get(f"/admin/auftrag/{auftrag_id}").get_data(as_text=True)
+    preview_link = re.search(r'<a\b[^>]*href="([^"]+)"[^>]*>Kundensicht prüfen</a>', active_order_html)
     check(
         "Kundensicht-Vorschau erst nach Freigabe mit aktuellem Token",
-        "Kundensicht prüfen" in active_order_html
-        and f'href="{auftrag["kunden_status_url"]}"' in active_order_html
+        bool(preview_link)
+        and urlsplit(preview_link.group(1)).path == f"/status/{token}"
         and alter_token not in active_order_html,
     )
 
