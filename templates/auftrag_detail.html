@@ -767,7 +767,7 @@
     </div>
   </form>
   {% else %}<p>Noch keine Dateien hinterlegt.</p>{% endfor %}
-  {% if auftrag['kunden_status_token'] %}<a class="btn btn-soft mt-2" href="{{ url_for('kunden_status', token=auftrag['kunden_status_token']) }}" target="_blank" rel="noopener">Kundensicht prüfen</a>{% endif %}
+  {% if auftrag['kunden_status_url'] %}<a class="btn btn-soft mt-2" href="{{ auftrag['kunden_status_url'] }}" target="_blank" rel="noopener">Kundensicht prüfen</a>{% endif %}
 </details>
 
 <details class="page-card p-4 mb-4">

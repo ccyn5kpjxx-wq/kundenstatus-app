@@ -46,6 +46,8 @@ import app as portal  # noqa: E402
 PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
+TEST_INSURANCE_NAME = "Allianz Privatportal Integrationstest"
+TEST_INSURANCE_CODE = "SYNTHETIC-PRIVATE-INSURANCE-42"
 
 
 def check(label, condition, detail=""):
@@ -110,6 +112,11 @@ def base_payload(csrf_token, form_token, **overrides):
 def main():
     portal.app.config.update(TESTING=True, SESSION_COOKIE_SECURE=False)
     portal.init_db()
+    test_insurance_id = portal.create_versicherung(
+        TEST_INSURANCE_NAME,
+        zugangscode=TEST_INSURANCE_CODE,
+        email="versicherung@example.test",
+    )
     portal.PUBLIC_FORM_ATTEMPTS.clear()
     client = portal.app.test_client()
 
@@ -118,10 +125,12 @@ def main():
     check("Privatkunden-Portal ist oeffentlich", home.status_code == 200)
     check(
         "Portal verlinkt alle drei sicheren Wege",
-        'href="/privat/schaden"' in home_html
+        'href="/anfrage?anliegen=schaden"' in home_html
         and 'href="/mietwagen"' in home_html
         and 'href="/privat/status"' in home_html,
     )
+    chooser_html = client.get("/anfrage?anliegen=schaden").get_data(as_text=True)
+    check("Anfrageauswahl verlinkt die Versicherungsschadenmeldung", 'href="/privat/schaden"' in chooser_html)
     check("Portal nennt Automechanik", "AUTOMECHANIK" in home_html)
 
     form_response = client.get("/privat/schaden")
@@ -211,7 +220,7 @@ def main():
 
     versicherung = portal.get_versicherung(auftrag.get("versicherung_id"))
     check("Freie Versicherungsangabe bleibt beim internen Platzhalter", portal.versicherung_ist_platzhalter(versicherung))
-    allianz = next((item for item in portal.list_versicherungen() if "allianz" in item["name"].lower() and not portal.versicherung_ist_platzhalter(item)), None)
+    allianz = portal.get_versicherung(test_insurance_id)
     check(
         "Privatfall ist fuer echte Versicherung nicht sichtbar",
         bool(allianz) and not portal.versicherung_auftrag_im_portal_sichtbar(auftrag, allianz["id"]),
@@ -333,6 +342,13 @@ def main():
     check(
         "Rotierter alter Token bleibt unbrauchbar",
         client.get(f"/status/{alter_token}").status_code == 404,
+    )
+    active_order_html = admin.get(f"/admin/auftrag/{auftrag_id}").get_data(as_text=True)
+    check(
+        "Kundensicht-Vorschau erst nach Freigabe mit aktuellem Token",
+        "Kundensicht prüfen" in active_order_html
+        and f'href="{auftrag["kunden_status_url"]}"' in active_order_html
+        and alter_token not in active_order_html,
     )
 
     status = client.get(f"/status/{token}")

@@ -3064,7 +3064,7 @@ def public_site_is_indexable_request():
 @app.before_request
 def configure_website_upload_limit():
     # Must run before CSRF validation first parses the multipart form.
-    if request.endpoint == "website_anfrage" and request.method == "POST":
+    if request.endpoint in {"website_anfrage", "privat_schadenaufnahme"} and request.method == "POST":
         request.max_content_length = (WEBSITE_ANFRAGE_MAX_GESAMT_MB + 1) * 1024 * 1024
 
 
@@ -3400,7 +3400,7 @@ def seite_nicht_gefunden(error):
 def upload_zu_gross(error):
     max_upload_mb = (
         WEBSITE_ANFRAGE_MAX_GESAMT_MB
-        if request.endpoint == "website_anfrage" else MAX_UPLOAD_MB
+        if request.endpoint in {"website_anfrage", "privat_schadenaufnahme"} else MAX_UPLOAD_MB
     )
     return render_template_string(
         FEHLERSEITE_PORTAL_TEMPLATE,
@@ -44332,7 +44332,10 @@ def render_schadenaufnahme_assistent(
             item for item in list_versicherungen() if not versicherung_ist_platzhalter(item)
         ],
         max_dateien=SCHADENAUFNAHME_MAX_DATEIEN,
-        max_upload_mb=MAX_UPLOAD_MB,
+        max_datei_mb=(
+            WEBSITE_ANFRAGE_MAX_DATEI_MB if public_mode else SCHADENAUFNAHME_MAX_DATEI_MB
+        ),
+        max_upload_mb=WEBSITE_ANFRAGE_MAX_GESAMT_MB if public_mode else MAX_UPLOAD_MB,
     )
     if public_mode:
         return rendered, status_code, {"Cache-Control": "no-store"}
@@ -45500,7 +45503,9 @@ def privat_schadenaufnahme():
             require_address=True,
         )
         files, upload_errors = validate_schadenaufnahme_uploads(
-            request.files.getlist("dateien")
+            request.files.getlist("dateien"),
+            max_file_mb=WEBSITE_ANFRAGE_MAX_DATEI_MB,
+            max_total_mb=WEBSITE_ANFRAGE_MAX_GESAMT_MB,
         )
         errors.extend(upload_errors)
         if errors:

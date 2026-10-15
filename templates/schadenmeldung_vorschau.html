@@ -564,12 +564,14 @@
             <section class="step-panel" data-step="4" hidden>
               <div class="step-kicker">Schritt 4</div>
               <h2>Zeigen Sie uns den Schaden</h2>
-              <p class="step-intro">{% if cockpit_mode %}Mehrere Fotos und PDFs werden sicher in derselben Fallakte gespeichert. Die Auslese liefert nur Prüfvorschläge und ändert keine bestätigten Eingaben.{% else %}Mehrere Fotos und PDFs dürfen gemeinsam ausgewählt werden. In dieser Designvorschau bleiben sie ausschließlich auf Ihrem Gerät.{% endif %}</p>
+              <p class="step-intro">{% if public_mode %}Die ausgewählten Fotos und PDFs werden mit Ihrer Schadenmeldung sicher an uns übermittelt und persönlich geprüft. Sie können die Meldung auch ohne Dateien senden.{% elif cockpit_mode %}Mehrere Fotos und PDFs werden sicher in derselben Fallakte gespeichert. Die Auslese liefert nur Prüfvorschläge und ändert keine bestätigten Eingaben.{% else %}Mehrere Fotos und PDFs dürfen gemeinsam ausgewählt werden. In dieser Designvorschau bleiben sie ausschließlich auf Ihrem Gerät.{% endif %}</p>
               <div class="upload-zone" id="upload-zone">
                 <input id="dateien" name="dateien" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,image/jpeg,image/png,image/webp,image/heic,application/pdf" aria-describedby="upload-copy">
-                <div><div class="upload-icon">＋</div><strong>Fotos oder Unterlagen auswählen</strong><span id="upload-copy">Antippen oder hierher ziehen · JPG, PNG, WebP, HEIC oder PDF · max. {{ max_dateien|default(10) }} Dateien / {{ max_upload_mb|default(25) }} MB gesamt</span></div>
+                <div><div class="upload-icon">＋</div><strong>Fotos oder Unterlagen auswählen</strong><span id="upload-copy">Antippen oder hierher ziehen · JPG, PNG, WebP, HEIC oder PDF · max. {{ max_dateien|default(10) }} Dateien · je max. {{ max_datei_mb|default(12) }} MB / {{ max_upload_mb|default(25) }} MB gesamt</span></div>
               </div>
               <div class="upload-file-list" id="upload-files" aria-live="polite"></div>
+              <p id="upload-error" class="soft-note" role="alert" hidden></p>
+              <button type="button" id="remove-files" class="btn btn-secondary" hidden>Dateien entfernen / ohne Dateien fortfahren</button>
               <div class="photo-guide">
                 <div class="photo-tip"><b>Übersicht</b>Ganzes Fahrzeug</div>
                 <div class="photo-tip"><b>Nahaufnahme</b>Beschädigtes Teil</div>
@@ -706,6 +708,8 @@
       const liveSubmit = {{ 'true' if cockpit_mode or public_mode else 'false' }};
       const hasCreatedCase = {{ 'true' if (cockpit_mode or public_mode) and created_auftrag else 'false' }};
       const maxFiles = {{ max_dateien|default(10) }};
+      const maxFileMb = {{ max_datei_mb|default(12) }};
+      const maxTotalMb = {{ max_upload_mb|default(25) }};
       const labels = ["Schadenart", "Kontakt & Fahrzeug", "Unfall & Versicherung", "Fotos & Mobilität", "Prüfen & senden"];
       const typeLabels = {
         haftpflicht: "Haftpflicht · Gegner ist verantwortlich",
@@ -733,9 +737,12 @@
       const uploadZone = document.getElementById("upload-zone");
       const uploadInput = document.getElementById("dateien");
       const uploadFiles = document.getElementById("upload-files");
+      const uploadError = document.getElementById("upload-error");
+      const removeFiles = document.getElementById("remove-files");
       const toast = document.getElementById("toast");
       let currentStep = 1;
       let selectedFiles = [];
+      let uploadSelectionError = "";
       let toastTimer = null;
 
       const value = (name) => {
@@ -774,6 +781,19 @@
       };
 
       const validateStep = (stepNumber) => {
+        if (stepNumber === 4) {
+          const problems = uploadProblems(Array.from(uploadInput.files || []));
+          if (problems.length) {
+            uploadSelectionError = problems.join(" ");
+            uploadError.textContent = uploadSelectionError;
+            uploadError.hidden = false;
+            removeFiles.hidden = false;
+          }
+          if (uploadSelectionError) {
+            uploadInput.focus();
+            return false;
+          }
+        }
         const panel = panels.find((item) => Number(item.dataset.step) === stepNumber);
         if (!panel) return true;
         const fields = Array.from(panel.querySelectorAll("input[required], select[required], textarea[required]"));
@@ -836,22 +856,48 @@
         scrollTop();
       };
 
-      const renderFiles = (files) => {
-        const incoming = Array.from(files || []);
-        selectedFiles = incoming.slice(0, maxFiles);
-        if (incoming.length > maxFiles) showToast(`Bitte höchstens ${maxFiles} Dateien auswählen`);
-        uploadFiles.innerHTML = selectedFiles.map((file) => `<span class="file-chip">✓ <span>${file.name.replace(/[<>&"]/g, "")}</span></span>`).join("");
-        if (selectedFiles.length && incoming.length <= maxFiles) showToast(`${selectedFiles.length} Datei${selectedFiles.length === 1 ? "" : "en"} ausgewählt`);
+      const uploadProblems = (files) => {
+        const problems = [];
+        if (files.length > maxFiles) problems.push(`Sie haben ${files.length} Dateien ausgewählt. Bitte höchstens ${maxFiles} Dateien auswählen; die Meldung wurde noch nicht gesendet.`);
+        if (files.some((file) => !/\.(jpe?g|png|webp|heic|pdf)$/i.test(file.name))) problems.push("Bitte nur JPG, PNG, WebP, HEIC oder PDF auswählen.");
+        if (files.some((file) => file.size <= 0)) problems.push("Eine ausgewählte Datei ist leer.");
+        if (files.some((file) => file.size > maxFileMb * 1024 * 1024)) problems.push(`Eine einzelne Datei darf höchstens ${maxFileMb} MB groß sein.`);
+        if (files.reduce((sum, file) => sum + file.size, 0) > maxTotalMb * 1024 * 1024) problems.push(`Alle Dateien zusammen dürfen höchstens ${maxTotalMb} MB groß sein.`);
+        return problems;
       };
 
-      const setUploadFiles = (files) => {
-        const selected = Array.from(files || []).slice(0, maxFiles);
-        if (typeof DataTransfer !== "undefined") {
-          const transfer = new DataTransfer();
-          selected.forEach((file) => transfer.items.add(file));
-          uploadInput.files = transfer.files;
+      const renderFiles = (files) => {
+        selectedFiles = Array.from(files || []);
+        uploadSelectionError = uploadProblems(selectedFiles).join(" ");
+        uploadError.textContent = uploadSelectionError;
+        uploadError.hidden = !uploadSelectionError;
+        removeFiles.hidden = !selectedFiles.length && !uploadSelectionError;
+        uploadFiles.innerHTML = selectedFiles.map((file) => `<span class="file-chip">✓ <span>${file.name.replace(/[<>&"]/g, "")}</span></span>`).join("");
+        if (uploadSelectionError) showToast(uploadSelectionError);
+        else if (selectedFiles.length) showToast(`${selectedFiles.length} Datei${selectedFiles.length === 1 ? "" : "en"} ausgewählt`);
+      };
+
+      const clearUploadFiles = () => {
+        uploadInput.value = "";
+        renderFiles([]);
+      };
+
+      const setUploadFiles = (files, dropped = false) => {
+        if (dropped) {
+          try {
+            const transfer = new DataTransfer();
+            Array.from(files || []).forEach((file) => transfer.items.add(file));
+            uploadInput.files = transfer.files;
+          } catch (error) {
+            clearUploadFiles();
+            uploadSelectionError = "Diese Dateiauswahl konnte nicht übernommen werden. Bitte Dateien über die Schaltfläche auswählen oder ohne Dateien fortfahren.";
+            uploadError.textContent = uploadSelectionError;
+            uploadError.hidden = false;
+            removeFiles.hidden = false;
+            return;
+          }
         }
-        renderFiles(uploadInput.files && uploadInput.files.length ? uploadInput.files : selected);
+        renderFiles(uploadInput.files);
       };
 
       const fillDemo = () => {
@@ -886,6 +932,7 @@
 
       form.addEventListener("submit", (event) => {
         if (!liveSubmit) event.preventDefault();
+        if (!validateStep(4)) { event.preventDefault(); goToStep(4); }
       });
       form.addEventListener("change", (event) => {
         if (event.target.name === "schadenart") updateDamageType();
@@ -895,6 +942,7 @@
       nextButton.addEventListener("click", () => { if (validateStep(currentStep)) goToStep(currentStep + 1); });
       backButton.addEventListener("click", () => goToStep(currentStep - 1));
       submitButton.addEventListener("click", () => {
+        if (!validateStep(4)) { goToStep(4); return; }
         if (!validateStep(5)) return;
         refreshSummary();
         if (liveSubmit) {
@@ -910,14 +958,15 @@
         if (target <= currentStep || Array.from({ length: target - currentStep }, (_, index) => currentStep + index).every(validateStep)) goToStep(target);
       }));
       uploadInput.addEventListener("change", () => setUploadFiles(uploadInput.files));
+      removeFiles.addEventListener("click", () => { clearUploadFiles(); uploadInput.focus(); });
       ["dragenter", "dragover"].forEach((name) => uploadZone.addEventListener(name, (event) => { event.preventDefault(); uploadZone.classList.add("is-dragging"); }));
       ["dragleave", "drop"].forEach((name) => uploadZone.addEventListener(name, (event) => { event.preventDefault(); uploadZone.classList.remove("is-dragging"); }));
-      uploadZone.addEventListener("drop", (event) => setUploadFiles(event.dataTransfer.files));
+      uploadZone.addEventListener("drop", (event) => setUploadFiles(event.dataTransfer.files, true));
       document.querySelectorAll("[data-show-status]").forEach((button) => button.addEventListener("click", () => showView("status")));
       document.querySelectorAll("[data-back-to-form]").forEach((button) => button.addEventListener("click", () => { showView("wizard"); goToStep(1); }));
       document.querySelectorAll("[data-demo-fill]").forEach((button) => button.addEventListener("click", fillDemo));
       const restartButton = document.getElementById("restart-button");
-      if (restartButton) restartButton.addEventListener("click", () => { form.reset(); selectedFiles = []; uploadFiles.innerHTML = ""; opponentUnknown.checked = true; opponentFields.hidden = true; showView("wizard"); goToStep(1); });
+      if (restartButton) restartButton.addEventListener("click", () => { form.reset(); clearUploadFiles(); opponentUnknown.checked = true; opponentFields.hidden = true; showView("wizard"); goToStep(1); });
       const statusUpload = document.getElementById("status-upload");
       if (statusUpload) statusUpload.addEventListener("click", () => showToast("In der echten Version öffnet sich hier der geschützte Mehrfach-Upload."));
       const statusMessage = document.getElementById("status-message");
