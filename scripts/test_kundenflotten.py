@@ -118,6 +118,13 @@ class CustomerFleetTests(unittest.TestCase):
             with self.assertRaises(ValueError): self.plan(**values)
         self.assertEqual(self.count("kundenflotten_plaene"), 0)
 
+    def test_vehicle_file_lists_urgent_maintenance_before_future_plans(self):
+        self.plan(titel="Bald", faellig_datum=(date.today()+timedelta(days=10)).isoformat(), faellig_km="", intervall_km="")
+        self.plan(titel="Später", faellig_datum=(date.today()+timedelta(days=120)).isoformat(), faellig_km="", intervall_km="")
+        self.plan(titel="Heute", faellig_datum=self.today, faellig_km="", intervall_km="")
+        self.plan(titel="Überfällig", faellig_datum=(date.today()-timedelta(days=5)).isoformat(), faellig_km="", intervall_km="")
+        self.assertEqual([plan['titel'] for plan in self.service.vehicle(self.company, self.vehicle)['plans']], ["Überfällig", "Heute", "Bald", "Später"])
+
     def test_completion_rolls_over_and_replay_rejected(self):
         plan = self.plan()
         data = {"erledigt_am":self.today,"km":"10100","version":"1"}

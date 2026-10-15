@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from werkstatt_einladung_restore import ensure_employee_invitation_state_for_import
 from werkstatt_mitarbeiter_portal import ensure_employee_private_state_for_import
 from werkstatt_mitarbeiter_auftraege import ensure_employee_orders_for_import
+from werkstatt_kundenflotten import BACKUP_TABLES as FLEET_TABLES, ensure_kundenflotten_schema
 
 
 TABLES = ('einkauf_material_dialoge', 'assistent_audit', 'ordinary')
@@ -64,6 +65,7 @@ class ExternalRestoreTests(unittest.TestCase):
         names = {'_originals_busy', '_portal_originals_thread_guard',
                  'portal_originals_operation_lock', 'portal_originals_locked',
                  'ensure_material_external_claims_for_import',
+                 'ensure_kundenflotten_state_for_import',
                  'import_backup_json_rows_into_current_database',
                  'import_sqlite_rows_into_current_database', 'admin_daten_import'}
         tree = ast.parse(Path(__file__).resolve().parents[1].joinpath('app.py').read_text(encoding='utf-8'))
@@ -79,6 +81,7 @@ class ExternalRestoreTests(unittest.TestCase):
         self.db_path = self.root / 'target.db'
         with connection(self.db_path) as db:
             db.executescript(SCHEMA)
+            ensure_kundenflotten_schema(db)
             db.execute('INSERT INTO ordinary VALUES(1,?)', ('current',))
         self.app = Flask(__name__)
         self.app.secret_key = 'synthetic-only-secret'
@@ -95,6 +98,7 @@ class ExternalRestoreTests(unittest.TestCase):
             'get_table_columns': lambda db, table: {row['name'] for row in db.execute(f'PRAGMA table_info({table})')},
             'get_table_column_types': lambda db, table: {},
             'normalize_import_value': lambda value, _type: value, 'BACKUP_TABLES': TABLES,
+            'KUNDENFLOTTEN_BACKUP_TABLES': FLEET_TABLES,
             'BACKUP_BINARY_FIELDS': {}, 'backup_binary_reference_map': lambda export: {},
             'validate_backup_binary_reference_completeness': lambda *args: None,
             'ensure_no_database_only_originals_for_import': lambda *args: None,

@@ -222,6 +222,8 @@ class Kundenflotten:
             plans = [dict(r) for r in db.execute("SELECT * FROM kundenflotten_plaene WHERE fahrzeug_id=? ORDER BY erstellt_am DESC,id", (key,)).fetchall()]
             for plan in plans:
                 plan["due"] = due_state(plan, vehicle["km"])
+            urgency = {"ueberfaellig": 0, "faellig": 1, "bald": 2, "geplant": 3, "abgeschlossen": 4}
+            plans.sort(key=lambda plan: (urgency[plan["due"]], plan["faellig_datum"] or "9999-12-31", plan["faellig_km"] if plan["faellig_km"] is not None else 3000001, plan["id"]))
             def single(table):
                 row = db.execute(f"SELECT * FROM {table} WHERE fahrzeug_id=?", (key,)).fetchone()
                 return dict(row) if row else {}

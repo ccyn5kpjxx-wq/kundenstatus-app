@@ -253,7 +253,8 @@ class DeliveryBackupTests(unittest.TestCase):
         self.assertIn(DELIVERIES, values['BACKUP_TABLES'])
         self.assertIn('werkstatt_liefereingang_v1', values['BACKUP_SCHEMA_FEATURES'])
         node = next(node for node in self.tree.body if isinstance(node, ast.FunctionDef) and node.name == 'validate_backup_binary_reference_completeness')
-        values.update(BACKUP_BINARY_FIELDS={}, clean_text=str)
+        from werkstatt_kundenflotten import BACKUP_TABLES as FLEET_TABLES, SCHEMA_FEATURE as FLEET_FEATURE
+        values.update(BACKUP_BINARY_FIELDS={}, clean_text=str, KUNDENFLOTTEN_BACKUP_TABLES=FLEET_TABLES, KUNDENFLOTTEN_SCHEMA_FEATURE=FLEET_FEATURE)
         exec(compile(ast.Module(body=[node], type_ignores=[]), '<actual-delivery-backup-features>', 'exec'), values)
         old = {'format_version': 4, 'tables': {name: [] for name in values['BACKUP_TABLES'] if name != DELIVERIES}}
         validate = values['validate_backup_binary_reference_completeness']

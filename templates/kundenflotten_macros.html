@@ -1,0 +1,3 @@
+{% macro datum(value) -%}
+{%- if value -%}{{ value[8:10] }}.{{ value[5:7] }}.{{ value[:4] }}{%- endif -%}
+{%- endmacro %}
