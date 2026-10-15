@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import calendar
 import hmac
+import hashlib
+import json
 import re
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
@@ -18,7 +20,7 @@ from flask import Blueprint, abort, flash, redirect, render_template, request, s
 BACKUP_TABLES = (
     "kundenflotten_firmen", "kundenflotten_fahrzeuge", "kundenflotten_fahrer",
     "kundenflotten_plaene", "kundenflotten_termine", "kundenflotten_reifen",
-    "kundenflotten_historie",
+    "kundenflotten_historie", "kundenflotten_anlagen",
 )
 SCHEMA_FEATURE = "kundenflotten_v1"
 KINDS = {"service": "Service / Inspektion", "oel": "Ölwechsel", "reifen": "Reifen",
@@ -60,6 +62,9 @@ def ensure_kundenflotten_schema(db):
         """CREATE TABLE IF NOT EXISTS kundenflotten_historie (
             id TEXT PRIMARY KEY, fahrzeug_id TEXT NOT NULL REFERENCES kundenflotten_fahrzeuge(id),
             art TEXT NOT NULL, text TEXT NOT NULL, erstellt_am TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS kundenflotten_anlagen (
+            id TEXT PRIMARY KEY, fahrzeug_id TEXT NOT NULL REFERENCES kundenflotten_fahrzeuge(id),
+            art TEXT NOT NULL, fingerprint TEXT NOT NULL, erstellt_am TEXT NOT NULL)""",
         "CREATE INDEX IF NOT EXISTS idx_kundenflotten_firma ON kundenflotten_fahrzeuge(firma_id)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_kundenflotten_fin ON kundenflotten_fahrzeuge(fin) WHERE fin <> ''",
         "CREATE INDEX IF NOT EXISTS idx_kundenflotten_plan ON kundenflotten_plaene(fahrzeug_id, status)",
@@ -170,6 +175,26 @@ class Kundenflotten:
     def history(db, vehicle_id, kind, text):
         db.execute("INSERT INTO kundenflotten_historie VALUES (?,?,?,?,?)", (uuid4().hex, vehicle_id, kind, text, _timestamp()))
 
+    @staticmethod
+    def claim_submission(db, vehicle_id, kind, data, values):
+        """Durable per-form receipt, committed atomically with its record/history.
+
+        Replays keep the first successful result even after a plan is completed.
+        A fresh form can intentionally create another identical service/visit.
+        """
+        request_id = _text(data, "request_id", 32, True)
+        if not re.fullmatch(r"[a-f0-9]{32}", request_id):
+            raise ValueError("Das Formular ist veraltet. Bitte die Seite neu laden.")
+        fingerprint = hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode("utf8")).hexdigest()
+        result = db.execute("""INSERT INTO kundenflotten_anlagen (id,fahrzeug_id,art,fingerprint,erstellt_am)
+            VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING""", (request_id, vehicle_id, kind, fingerprint, _timestamp()))
+        if result.rowcount == 1:
+            return True
+        previous = db.execute("SELECT * FROM kundenflotten_anlagen WHERE id=?", (request_id,)).fetchone()
+        if previous and previous["fahrzeug_id"] == vehicle_id and previous["art"] == kind and hmac.compare_digest(previous["fingerprint"], fingerprint):
+            return False
+        raise ValueError("Dieses Formular wurde bereits mit anderen Angaben verwendet. Bitte neu laden und den neuen Eintrag prüfen.")
+
     def companies(self):
         with self.db() as db:
             return [dict(r) for r in db.execute("""SELECT f.*, COUNT(v.id) AS anzahl
@@ -269,13 +294,20 @@ class Kundenflotten:
                 if months and not due or interval_km and km is None:
                     raise ValueError("Zum Intervall muss auch das entsprechende erste Datum bzw. Kilometerziel angegeben werden.")
                 title = _text(data, "titel", 160, True)
-                db.execute("INSERT INTO kundenflotten_plaene VALUES (?,?,?,?,?,?,?,?,?,'offen',1,?)", (uuid4().hex, key, _choice(data, "art", KINDS), title, due, km, months, interval_km, _text(data, "quelle", 500, True), _timestamp()))
+                kind, source = _choice(data, "art", KINDS), _text(data, "quelle", 500, True)
+                values = (kind, title, due, km, months, interval_km, source)
+                if not self.claim_submission(db, key, action, data, values):
+                    return
+                db.execute("INSERT INTO kundenflotten_plaene VALUES (?,?,?,?,?,?,?,?,?,'offen',1,?)", (uuid4().hex, key, *values, _timestamp()))
                 self.history(db, key, "plan", f"Plan angelegt: {title}.")
             elif action == "termin":
                 day = _date(data, "datum", True)
                 kind = _choice(data, "art", KINDS)
                 transport = _choice(data, "transport", {"bringt", "abholen", "offen"})
-                db.execute("INSERT INTO kundenflotten_termine VALUES (?,?,?,?,?,?, 'angefragt',?,?)", (uuid4().hex, key, day, kind, transport, int(data.get("ersatzwagen") == "1"), _text(data, "notiz", 1200), _timestamp()))
+                replacement, note = int(data.get("ersatzwagen") == "1"), _text(data, "notiz", 1200)
+                if not self.claim_submission(db, key, action, data, (day, kind, transport, replacement, note)):
+                    return
+                db.execute("INSERT INTO kundenflotten_termine VALUES (?,?,?,?,?,?, 'angefragt',?,?)", (uuid4().hex, key, day, kind, transport, replacement, note, _timestamp()))
                 self.history(db, key, "termin", f"Terminwunsch {day} für {KINDS[kind]} intern erfasst. Bestätigung und Kostenfreigabe offen.")
             elif action == "reifen":
                 season = _choice(data, "saison", {"sommer", "winter", "ganzjahr"})
@@ -374,7 +406,7 @@ def register_kundenflotten(portal):
             data = service.vehicle(company_id, vehicle_id)
         except LookupError:
             abort(404)
-        return render_template("kundenflotten_fahrzeug.html", **data, kinds=KINDS, today=date.today().isoformat())
+        return render_template("kundenflotten_fahrzeug.html", **data, kinds=KINDS, today=date.today().isoformat(), request_tokens={"plan": uuid4().hex, "termin": uuid4().hex})
 
     @bp.post("/admin/kundenflotten/firma/<company_id>/fahrzeug/<vehicle_id>/<action>")
     @portal.admin_required

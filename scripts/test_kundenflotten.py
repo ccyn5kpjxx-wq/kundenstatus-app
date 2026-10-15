@@ -1,5 +1,6 @@
 """Synthetic, isolated customer fleet tests; never open the workshop database."""
 import sqlite3
+import re
 import sys
 import tempfile
 import unittest
@@ -8,6 +9,9 @@ from functools import wraps
 from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 from flask import Flask, abort, session
 from jinja2 import ChoiceLoader, DictLoader
@@ -57,7 +61,7 @@ class CustomerFleetTests(unittest.TestCase):
             sess["csrf_token"] = "test-csrf"
 
     def plan(self, **changes):
-        data = dict(art="service", titel="Service", faellig_datum=self.today, faellig_km="10000", intervall_monate="12", intervall_km="15000", quelle="Individuell bestätigter Wartungsplan")
+        data = dict(art="service", titel="Service", faellig_datum=self.today, faellig_km="10000", intervall_monate="12", intervall_km="15000", quelle="Individuell bestätigter Wartungsplan", request_id=uuid4().hex)
         data.update(changes)
         self.service.change_vehicle(self.company, self.vehicle, "plan", data)
         return self.service.vehicle(self.company, self.vehicle)["plans"][0]
@@ -145,7 +149,7 @@ class CustomerFleetTests(unittest.TestCase):
 
     def test_tires_and_transport_do_not_order_or_confirm(self):
         self.service.change_vehicle(self.company,self.vehicle,"reifen",{"saison":"winter","lagerplatz":"A-01","beschreibung":"205/55 R16 Test","bestellbedarf":"Preis für zwei Reifen anfragen"})
-        self.service.change_vehicle(self.company,self.vehicle,"termin",{"datum":self.today,"art":"reifen","transport":"abholen","ersatzwagen":"1"})
+        self.service.change_vehicle(self.company,self.vehicle,"termin",{"datum":self.today,"art":"reifen","transport":"abholen","ersatzwagen":"1","request_id":uuid4().hex})
         record = self.service.vehicle(self.company,self.vehicle)
         self.assertEqual(record["tires"]["lagerplatz"],"A-01")
         self.assertEqual(record["appointments"][0]["status"],"angefragt")
@@ -193,6 +197,94 @@ class CustomerFleetTests(unittest.TestCase):
             self.assertNotIn(forbidden,js)
         routes=[str(rule) for rule in self.app.url_map.iter_rules() if rule.endpoint.startswith("kundenflotten.")]
         self.assertTrue(all(path.startswith(("/admin/kundenflotten","/kunden-app/vorschau")) for path in routes))
+
+    def test_double_post_plan_and_visit_create_once(self):
+        self.admin()
+        base=f"/admin/kundenflotten/firma/{self.company}/fahrzeug/{self.vehicle}"
+        html=self.client.get(base).get_data(as_text=True)
+        forms={action:re.search(r'<form method="post" action="'+re.escape(base+'/'+action)+r'".*?</form>',html,re.S).group(0) for action in ('plan','termin')}
+        data={
+            'plan':{'art':'service','titel':'Testwartung','faellig_datum':self.today,'quelle':'Testvorgabe'},
+            'termin':{'art':'reifen','datum':self.today,'transport':'abholen','ersatzwagen':'1'},
+        }
+        for action in data:
+            token=re.search(r'name="request_id" value="([a-f0-9]{32})"',forms[action]).group(1)
+            data[action].update(csrf_token='test-csrf',request_id=token)
+            for _ in range(2):
+                self.assertEqual(self.client.post(base+'/'+action,data=data[action]).status_code,303)
+        self.assertEqual(self.count('kundenflotten_plaene'),1)
+        self.assertEqual(self.count('kundenflotten_termine'),1)
+        self.assertEqual(self.count('kundenflotten_anlagen'),2)
+        history=self.service.vehicle(self.company,self.vehicle)['history']
+        self.assertEqual(sum(h['art']=='plan' for h in history),1)
+        self.assertEqual(sum(h['art']=='termin' for h in history),1)
+
+    def test_fresh_request_allows_intentionally_identical_appointments(self):
+        data={'art':'reifen','datum':self.today,'transport':'offen','request_id':uuid4().hex}
+        self.service.change_vehicle(self.company,self.vehicle,'termin',data)
+        self.service.change_vehicle(self.company,self.vehicle,'termin',dict(data,request_id=uuid4().hex))
+        self.assertEqual(self.count('kundenflotten_termine'),2)
+
+    def test_changed_payload_with_used_token_is_rejected(self):
+        data={'art':'reifen','datum':self.today,'transport':'offen','request_id':uuid4().hex}
+        self.service.change_vehicle(self.company,self.vehicle,'termin',data)
+        with self.assertRaises(ValueError):
+            self.service.change_vehicle(self.company,self.vehicle,'termin',dict(data,transport='abholen'))
+        self.assertEqual(self.count('kundenflotten_termine'),1)
+        self.assertEqual(self.count('kundenflotten_anlagen'),1)
+
+    def test_submission_token_cannot_be_reused_across_vehicles(self):
+        data={'art':'reifen','datum':self.today,'transport':'offen','request_id':uuid4().hex}
+        self.service.change_vehicle(self.company,self.vehicle,'termin',data)
+        other=self.service.create_vehicle(self.company,{'kennzeichen':'TEST 2','modell':'Zweites Demoauto','km':'0','km_datum':self.today})
+        with self.assertRaises(ValueError): self.service.change_vehicle(self.company,other,'termin',data)
+        self.assertEqual(self.count('kundenflotten_termine'),1)
+
+    def test_missing_or_invalid_submission_token_cannot_write(self):
+        for token in ('','not-a-form-token','../'+'a'*29):
+            with self.assertRaises(ValueError):
+                self.service.change_vehicle(self.company,self.vehicle,'termin',{'art':'reifen','datum':self.today,'transport':'offen','request_id':token})
+        self.assertEqual(self.count('kundenflotten_termine'),0)
+        self.assertEqual(self.count('kundenflotten_anlagen'),0)
+
+    def test_plan_replay_after_completion_does_not_recreate_it(self):
+        token=uuid4().hex
+        plan=self.plan(request_id=token)
+        self.service.complete_plan(self.company,self.vehicle,plan['id'],{'erledigt_am':self.today,'km':'10000','version':'1'})
+        self.plan(request_id=token)
+        self.assertEqual(self.count('kundenflotten_plaene'),1)
+        record=self.service.vehicle(self.company,self.vehicle)['plans'][0]
+        self.assertEqual(record['version'],2)
+        self.assertEqual(record['faellig_km'],25000)
+
+    def test_failed_creation_rolls_back_submission_receipt(self):
+        data={'art':'reifen','datum':self.today,'transport':'offen','request_id':uuid4().hex}
+        original=self.service.history
+        def fail(*args): raise ValueError('synthetic write failure')
+        self.service.history=fail
+        with self.assertRaises(ValueError): self.service.change_vehicle(self.company,self.vehicle,'termin',data)
+        self.service.history=original
+        self.assertEqual(self.count('kundenflotten_termine'),0)
+        self.assertEqual(self.count('kundenflotten_anlagen'),0)
+        self.service.change_vehicle(self.company,self.vehicle,'termin',data)
+        self.assertEqual(self.count('kundenflotten_termine'),1)
+
+    def test_parallel_double_click_is_atomic(self):
+        forms={
+            'termin':{'art':'reifen','datum':self.today,'transport':'offen','request_id':uuid4().hex},
+            'plan':{'art':'service','titel':'Paralleler Testplan','faellig_datum':self.today,'quelle':'Testvorgabe','request_id':uuid4().hex},
+        }
+        for action,data in forms.items():
+            barrier=Barrier(2)
+            def submit():
+                barrier.wait(timeout=5)
+                self.service.change_vehicle(self.company,self.vehicle,action,data)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures=[pool.submit(submit) for _ in range(2)]
+                for future in futures: future.result(timeout=10)
+        self.assertEqual(self.count('kundenflotten_termine'),1)
+        self.assertEqual(self.count('kundenflotten_plaene'),1)
+        self.assertEqual(self.count('kundenflotten_anlagen'),2)
 
 
 if __name__ == "__main__":
