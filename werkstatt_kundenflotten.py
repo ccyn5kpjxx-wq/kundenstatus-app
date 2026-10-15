@@ -149,6 +149,9 @@ class Kundenflotten:
 
     @contextmanager
     def db(self):
+        # Mutators acquire the shared originals/restore lock BEFORE entering
+        # this context. Keep it until commit/rollback and close have finished,
+        # otherwise a SQLite file replacement could discard a successful write.
         conn = self.p.get_db()
         try:
             yield conn
@@ -160,7 +163,7 @@ class Kundenflotten:
             conn.close()
 
     def init_schema(self):
-        with self.db() as db:
+        with self.p.portal_originals_operation_lock(), self.db() as db:
             ensure_kundenflotten_schema(db)
 
     @staticmethod
@@ -237,7 +240,7 @@ class Kundenflotten:
         except (InvalidOperation, ValueError):
             raise ValueError("Die Freigabegrenze bitte als gültigen Eurobetrag mit höchstens zwei Nachkommastellen angeben.") from None
         key = uuid4().hex
-        with self.db() as db:
+        with self.p.portal_originals_operation_lock(), self.db() as db:
             db.execute("INSERT INTO kundenflotten_firmen VALUES (?,?,?,?,?,?,?,?)", (key, name, _text(data, "kontakt"), _email(data), _text(data, "telefon", 60), _text(data, "konditionen", 2000), cents, _timestamp()))
         return key
 
@@ -251,7 +254,7 @@ class Kundenflotten:
         if recorded > date.today().isoformat():
             raise ValueError("Der Kilometerstand darf nicht in der Zukunft liegen.")
         key = uuid4().hex
-        with self.db() as db:
+        with self.p.portal_originals_operation_lock(), self.db() as db:
             self.row(db, "kundenflotten_firmen", company_id)
             if db.execute("SELECT id FROM kundenflotten_fahrzeuge WHERE firma_id=? AND kennzeichen=?", (company_id, plate)).fetchone():
                 raise ValueError("Dieses Kennzeichen ist bei der Firma bereits angelegt.")
@@ -262,7 +265,7 @@ class Kundenflotten:
         return key
 
     def change_vehicle(self, company_id, key, action, data):
-        with self.db() as db:
+        with self.p.portal_originals_operation_lock(), self.db() as db:
             vehicle = self.row(db, "kundenflotten_fahrzeuge", key)
             if vehicle["firma_id"] != company_id:
                 raise LookupError()
@@ -322,7 +325,7 @@ class Kundenflotten:
         version = _number(data, "version", required=True)
         if completed > date.today().isoformat():
             raise ValueError("Arbeiten können nicht für die Zukunft abgeschlossen werden.")
-        with self.db() as db:
+        with self.p.portal_originals_operation_lock(), self.db() as db:
             vehicle = self.row(db, "kundenflotten_fahrzeuge", vehicle_id)
             plan = self.row(db, "kundenflotten_plaene", plan_id)
             if vehicle["firma_id"] != company_id or plan["fahrzeug_id"] != vehicle_id:

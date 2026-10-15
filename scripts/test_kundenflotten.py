@@ -1,17 +1,19 @@
 """Synthetic, isolated customer fleet tests; never open the workshop database."""
 import sqlite3
 import re
+import shutil
 import sys
 import tempfile
 import unittest
 from datetime import date, timedelta
 from functools import wraps
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from threading import Barrier, RLock, local, Event
+from werkzeug.exceptions import ServiceUnavailable
 
 from flask import Flask, abort, session
 from jinja2 import ChoiceLoader, DictLoader
@@ -20,6 +22,30 @@ from markupsafe import Markup
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from werkstatt_kundenflotten import BACKUP_TABLES, Kundenflotten, add_months, due_state, register_kundenflotten
+
+
+class OperationLock:
+    """Inject the same shared-lock contract the production portal provides."""
+    def __init__(self):
+        self.lock = RLock()
+        self.state = local()
+        self.calls = 0
+        self.attempt = None
+
+    def held(self):
+        return getattr(self.state, 'depth', 0) > 0
+
+    @contextmanager
+    def __call__(self):
+        if self.attempt:
+            self.attempt.set()
+        with self.lock:
+            self.calls += 1
+            self.state.depth = getattr(self.state, 'depth', 0) + 1
+            try:
+                yield
+            finally:
+                self.state.depth -= 1
 
 
 class CustomerFleetTests(unittest.TestCase):
@@ -43,7 +69,9 @@ class CustomerFleetTests(unittest.TestCase):
                     abort(403)
                 return fn(*args, **kwargs)
             return wrapped
-        self.portal = SimpleNamespace(app=self.app, get_db=get_db, admin_required=protected)
+        self.operation_lock = OperationLock()
+        self.portal = SimpleNamespace(app=self.app, get_db=get_db, admin_required=protected,
+                                      portal_originals_operation_lock=self.operation_lock)
         self.service = register_kundenflotten(self.portal)
         self.service.init_schema()
         self.service.init_schema()
@@ -285,6 +313,129 @@ class CustomerFleetTests(unittest.TestCase):
         self.assertEqual(self.count('kundenflotten_termine'),1)
         self.assertEqual(self.count('kundenflotten_plaene'),1)
         self.assertEqual(self.count('kundenflotten_anlagen'),2)
+
+    def track_locked_database(self):
+        original = self.portal.get_db
+        events = []
+        test = self
+        class LockedConnection:
+            def __init__(self, connection):
+                self.connection = connection
+            def __getattr__(self, key):
+                return getattr(self.connection, key)
+            def commit(self):
+                test.assertTrue(test.operation_lock.held(), 'commit must remain inside shared lock')
+                events.append('commit')
+                self.connection.commit()
+            def rollback(self):
+                test.assertTrue(test.operation_lock.held(), 'rollback must remain inside shared lock')
+                events.append('rollback')
+                self.connection.rollback()
+            def close(self):
+                test.assertTrue(test.operation_lock.held(), 'close must precede shared lock release')
+                events.append('close')
+                self.connection.close()
+        def guarded_open():
+            self.assertTrue(self.operation_lock.held(), 'DB must open only after shared lock acquisition')
+            events.append('open')
+            return LockedConnection(original())
+        self.portal.get_db = guarded_open
+        return original, events
+
+    def test_all_mutations_hold_restore_lock_through_connection_close(self):
+        plan = self.plan()
+        original, events = self.track_locked_database()
+        calls = self.operation_lock.calls
+        operations = [
+            self.service.init_schema,
+            lambda:self.service.create_company({'name':'Locked company'}),
+            lambda:self.service.create_vehicle(self.company,{'kennzeichen':'LOCK 2','modell':'Locktest','km':'0','km_datum':self.today}),
+            lambda:self.service.change_vehicle(self.company,self.vehicle,'km',{'km':'10001','km_datum':self.today}),
+            lambda:self.service.change_vehicle(self.company,self.vehicle,'fahrer',{'name':'Locktest','kanal':'keine'}),
+            lambda:self.service.change_vehicle(self.company,self.vehicle,'reifen',{'saison':'winter'}),
+            lambda:self.service.change_vehicle(self.company,self.vehicle,'plan',{'art':'service','titel':'Lockplan','faellig_datum':self.today,'quelle':'Test','request_id':uuid4().hex}),
+            lambda:self.service.change_vehicle(self.company,self.vehicle,'termin',{'art':'reifen','datum':self.today,'transport':'offen','request_id':uuid4().hex}),
+            lambda:self.service.complete_plan(self.company,self.vehicle,plan['id'],{'erledigt_am':self.today,'km':'10002','version':'1'}),
+        ]
+        try:
+            for operation in operations:
+                start = len(events)
+                operation()
+                self.assertEqual(events[start:], ['open','commit','close'])
+                self.assertFalse(self.operation_lock.held())
+        finally:
+            self.portal.get_db = original
+        self.assertEqual(self.operation_lock.calls-calls,len(operations))
+
+    def test_failed_write_rolls_back_and_closes_before_unlock(self):
+        original, events = self.track_locked_database()
+        previous_history = self.service.history
+        def fail(*args): raise ValueError('synthetic history failure')
+        self.service.history = fail
+        try:
+            with self.assertRaises(ValueError):
+                self.service.change_vehicle(self.company,self.vehicle,'termin',{'art':'reifen','datum':self.today,'transport':'offen','request_id':uuid4().hex})
+            self.assertEqual(events,['open','rollback','close'])
+            self.assertFalse(self.operation_lock.held())
+        finally:
+            self.portal.get_db = original
+            self.service.history = previous_history
+        self.assertEqual(self.count('kundenflotten_termine'),0)
+        self.assertEqual(self.count('kundenflotten_anlagen'),0)
+
+    def test_connection_open_failure_releases_shared_lock(self):
+        original = self.portal.get_db
+        def fail():
+            self.assertTrue(self.operation_lock.held())
+            raise sqlite3.OperationalError('synthetic opening failure')
+        self.portal.get_db = fail
+        try:
+            with self.assertRaises(sqlite3.OperationalError):
+                self.service.create_company({'name':'Will fail'})
+            self.assertFalse(self.operation_lock.held())
+        finally:
+            self.portal.get_db = original
+        self.service.create_company({'name':'Works after error'})
+
+    def test_busy_restore_refuses_post_before_database_open(self):
+        self.admin()
+        @contextmanager
+        def busy():
+            raise ServiceUnavailable('Synthetic restore busy')
+            yield
+        original = self.portal.get_db
+        self.portal.portal_originals_operation_lock = busy
+        self.portal.get_db = lambda: (_ for _ in ()).throw(AssertionError('No DB may open while restore lock is busy'))
+        try:
+            response = self.client.post('/admin/kundenflotten/firma',data={'csrf_token':'test-csrf','name':'Not created'})
+            self.assertEqual(response.status_code,503)
+        finally:
+            self.portal.get_db = original
+            self.portal.portal_originals_operation_lock = self.operation_lock
+        self.assertEqual(self.count('kundenflotten_firmen'),1)
+
+    def test_restore_replacement_finishes_before_waiting_write_opens_database(self):
+        # A backup snapshot lacks the about-to-be-created company. Replacing the
+        # SQLite file while the writer waits must not erase that later write.
+        backup = Path(self.tmp.name) / 'restore-snapshot.db'
+        shutil.copyfile(self.db_path,backup)
+        attempted, opened = Event(), Event()
+        original = self.portal.get_db
+        def tracked_open():
+            opened.set()
+            return original()
+        self.portal.get_db = tracked_open
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with self.operation_lock():
+                self.operation_lock.attempt = attempted
+                future=pool.submit(self.service.create_company,{'name':'Survives restore'})
+                self.assertTrue(attempted.wait(5))
+                self.assertFalse(opened.is_set(), 'Writer must not open the old file while restore owns the lock')
+                backup.replace(self.db_path)
+            key=future.result(timeout=10)
+        self.portal.get_db = original
+        self.operation_lock.attempt = None
+        self.assertEqual(self.service.company(key)[0]['name'],'Survives restore')
 
 
 if __name__ == "__main__":
