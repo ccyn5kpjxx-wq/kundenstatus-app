@@ -65,6 +65,33 @@ class PartnerPageTests(unittest.TestCase):
         self.assertIn('tel:+4917660477486', html)
         self.assertNotIn('mailto:service@', html)
 
+    def test_driver_preview_link_is_available_only_with_local_opt_in(self):
+        old = portal.app.config.get('KUNDENFLOTTEN_DEMO_ENABLED', False)
+        client = portal.app.test_client()
+        try:
+            for enabled, remote, expected in [
+                (False, '127.0.0.1', False),
+                (True, '192.0.2.15', False),
+                (True, '127.0.0.1', True),
+                (True, '::1', True),
+            ]:
+                with self.subTest(enabled=enabled, remote=remote):
+                    portal.app.config['KUNDENFLOTTEN_DEMO_ENABLED'] = enabled
+                    response = client.get('/geschaeftspartner', environ_base={'REMOTE_ADDR': remote})
+                    self.assertEqual(response.status_code, 200)
+                    parser = Links()
+                    parser.feed(response.text)
+                    demo_links = [url for url in parser.urls if url == '/kunden-app/vorschau']
+                    self.assertEqual(bool(demo_links), expected)
+                    if expected:
+                        demo = client.get(demo_links[0], environ_base={'REMOTE_ADDR': remote})
+                        self.assertEqual(demo.status_code, 200)
+                        self.assertIn('Beispielfahrzeug', demo.text)
+                    else:
+                        self.assertIn('Fahrzeugbetreuung kennenlernen', response.text)
+        finally:
+            portal.app.config['KUNDENFLOTTEN_DEMO_ENABLED'] = old
+
     def test_homepage_discovery_and_team_assets(self):
         client = portal.app.test_client()
         self.assertIn('href="/geschaeftspartner"', client.get('/homepage').text)

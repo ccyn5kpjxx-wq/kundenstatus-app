@@ -2,36 +2,52 @@
 <html lang="de">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#1e2e2a">
+  <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#ffffff">
   <title>Mein Fahrzeug · Gärtner Kunden-App · Vorschau</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='kundenflotten-demo.css') }}">
   <script src="{{ url_for('static', filename='kundenflotten-demo.js') }}" defer></script>
 </head>
 <body>
+  {% macro icon(name) -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+{% if name == 'wheel' %}<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v5m0 8v5M3 12h5m8 0h5"/>
+{% elif name == 'service' %}<path d="M14.6 6.4a5 5 0 0 0-6.5 6.5L3 18a2.1 2.1 0 0 0 3 3l5.1-5.1a5 5 0 0 0 6.5-6.5l-3.3 3.3-3-3z"/>
+{% elif name == 'camera' %}<path d="m8 6 1.5-2h5L16 6h4a1 1 0 0 1 1 1v12H3V7a1 1 0 0 1 1-1z"/><circle cx="12" cy="12.5" r="3.5"/>
+{% elif name == 'warning' %}<path d="m12 3 10 18H2zM12 9v5m0 3h.01"/>
+{% elif name == 'home' %}<path d="m3 10 9-7 9 7v11h-7v-7h-4v7H3z"/>
+{% elif name == 'calendar' %}<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18m-13 5h3m3 0h2"/>
+{% elif name == 'message' %}<path d="M21 16a2 2 0 0 1-2 2H9l-6 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM7 8h10M7 12h7"/>
+{% elif name == 'profile' %}<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>
+{% elif name == 'bell' %}<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>
+{% endif %}</svg>
+{%- endmacro %}
+
   <div class="demo-ribbon">Lokale Vorschau · Beispieldaten · kein Versand</div>
-  <header class="app-header"><a href="#start" aria-label="Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie und Lack"></a><span class="app-name">Mein Fahrzeug</span><button type="button" class="avatar" data-open="profil" aria-label="Beispielprofil öffnen">AM</button></header>
+  <header class="app-header"><a href="#start" aria-label="Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie und Lack"></a><span class="app-name">Mein Fahrzeug</span><a class="back-link" href="/geschaeftspartner#fahreransicht">← Zur Übersicht</a><button type="button" class="avatar" data-open="profil" aria-label="Beispielprofil öffnen">AM</button></header>
   <main id="start" class="app-shell">
-    <div class="greeting"><div><p class="eyebrow">GUT UNTERWEGS.</p><h1>Hallo, Alex.</h1><p>Ihr Fahrzeug. Wir kümmern uns.</p></div><button type="button" class="notification" data-open="nachrichten" aria-label="Zwei Beispielnachrichten ansehen">{{ '&#128276;'|safe }}<span>2</span></button></div>
+    <div class="greeting"><div><p class="eyebrow">GUT UNTERWEGS.</p><h1>Hallo, Alex.</h1><p>Ihr Fahrzeug. Wir kümmern uns.</p></div><button type="button" class="notification" data-open="nachrichten" aria-label="Zwei Beispielnachrichten ansehen">{{ icon('bell') }}<span>2</span></button></div>
+    <div class="vehicle-overview">
     <section class="vehicle-hero" aria-labelledby="vehicle-name">
-      <div class="vehicle-heading"><span class="pill">IHR FAHRZEUG</span><p class="plate">MOS · DEMO</p></div>
-      <div class="vehicle-content"><div><h2 id="vehicle-name">Hyundai Kona</h2><p>Beispielfahrzeug · Firmenflotte</p><div class="hero-meta"><span><strong>42.850</strong> km</span><span><strong>Service</strong> im Blick</span></div></div><img src="{{ url_for('static', filename='mietwagen/kona-white.webp') }}" alt="Weißer Hyundai Kona als Beispielfahrzeug" class="car-image"></div>
+      <div class="vehicle-heading"><span class="pill">Ihr Fahrzeug</span><p class="plate">MOS · DEMO</p></div>
+      <div class="vehicle-content"><div><h2 id="vehicle-name">Hyundai Kona</h2><p>Beispielfahrzeug · Firmenflotte</p><div class="hero-meta"><span><strong>42.850</strong> km</span><span><strong>Alex Muster</strong> Fahrer</span></div></div><img src="{{ url_for('static', filename='mietwagen/kona-white.webp') }}" alt="Weißer Hyundai Kona als Beispielfahrzeug" class="car-image"></div>
       <button type="button" class="hero-bottom" data-open="kilometer"><span>Kilometerstand aktualisieren</span><span aria-hidden="true">↗</span></button>
     </section>
     <section class="next-card" aria-labelledby="next-title"><div class="calendar-icon"><span>OKT</span><strong>28</strong></div><div><p class="eyebrow">IHR NÄCHSTER SCHRITT</p><h2 id="next-title">Zeit für die Winterräder</h2><p>Wir stimmen Wechsel und Einlagerung mit Ihnen ab.</p><button type="button" class="text-button" data-open="reifen">Terminwunsch auswählen <span aria-hidden="true">→</span></button></div></section>
+    </div>
     <section class="services" aria-labelledby="services-title"><div class="section-heading"><h2 id="services-title">Was können wir für Sie tun?</h2><span>Alles an einem Ort</span></div>
       <div class="service-grid">
-        <button type="button" class="service-card" data-open="reifen"><span class="service-icon" aria-hidden="true">◉</span><strong>Reifen &amp; Räder</strong><span>Wechsel, Bestellung, Einlagerung</span><b aria-hidden="true">↗</b></button>
-        <button type="button" class="service-card" data-open="service"><span class="service-icon" aria-hidden="true">⌁</span><strong>Service &amp; Wartung</strong><span>Inspektion, Öl, Bremsen</span><b aria-hidden="true">↗</b></button>
-        <button type="button" class="service-card" data-open="schaden"><span class="service-icon" aria-hidden="true">▧</span><strong>Schaden melden</strong><span>Fotos aufnehmen &amp; Hilfe anfragen</span><b aria-hidden="true">↗</b></button>
-        <button type="button" class="service-card breakdown" data-open="panne"><span class="service-icon" aria-hidden="true">△</span><strong>Panne melden</strong><span>Standort &amp; Abholung abstimmen</span><b aria-hidden="true">↗</b></button>
+        <button type="button" class="service-card" data-open="reifen"><span class="service-icon">{{ icon('wheel') }}</span><strong>Reifen &amp; Räder</strong><span>Wechsel, Bestellung, Einlagerung</span><b aria-hidden="true">↗</b></button>
+        <button type="button" class="service-card" data-open="service"><span class="service-icon">{{ icon('service') }}</span><strong>Service &amp; Wartung</strong><span>Inspektion, Öl, Bremsen</span><b aria-hidden="true">↗</b></button>
+        <button type="button" class="service-card" data-open="schaden"><span class="service-icon">{{ icon('camera') }}</span><strong>Schaden melden</strong><span>Fotos aufnehmen &amp; Hilfe anfragen</span><b aria-hidden="true">↗</b></button>
+        <button type="button" class="service-card breakdown" data-open="panne"><span class="service-icon">{{ icon('warning') }}</span><strong>Panne melden</strong><span>Standort &amp; Abholung abstimmen</span><b aria-hidden="true">↗</b></button>
       </div>
     </section>
-    <section class="care-card"><div><p class="eyebrow">WIR HALTEN SIE MOBIL.</p><h2>Ein Ansprechpartner.<br>Alles rund ums Auto.</h2><p>Hol- und Bringservice, Ersatzwagen und die Abstimmung mit Ihrer Firma – passend zu Ihrem Bedarf.</p><button type="button" class="dark-button" data-open="kontakt">Kontakt zur Werkstatt <span aria-hidden="true">→</span></button></div><div class="care-mark" aria-hidden="true">G<span>+ L</span></div></section>
+    <section class="care-card"><div><p class="eyebrow">WIR HALTEN SIE MOBIL.</p><h2>Ein Ansprechpartner.<br>Alles rund ums Auto.</h2><p>Hol- und Bringservice, Ersatzwagen und die Abstimmung mit Ihrer Firma – passend zu Ihrem Bedarf.</p><button type="button" class="dark-button" data-open="kontakt">Kontakt zur Werkstatt <span aria-hidden="true">→</span></button></div><div class="care-person"><img src="{{ url_for('static', filename='homepage/margita-hoefer-portrait.jpg') }}" alt="Margita Höfer" width="88" height="100" loading="lazy"><strong>Margita Höfer</strong><span>Persönlich für Sie da</span></div></section>
     <div class="availability"><span class="green-dot"></span><p><strong>Digital melden – rund um die Uhr.</strong><br>Die Werkstatt meldet sich während der Geschäftszeiten. Abholung und Ersatzwagen nach Vereinbarung.</p></div>
     <section id="demo-result" class="result-card" hidden aria-live="polite"></section>
     <footer class="demo-footer">Interaktive Gestaltungsvorschau mit Beispieldaten. Kein Kundenkonto, kein echter Termin, keine externe Nachricht. Mitarbeiterzugänge sind getrennt.</footer>
   </main>
-  <nav class="bottom-nav" aria-label="Kunden-App"><a class="active" href="#start"><span aria-hidden="true">⌂</span>Übersicht</a><button type="button" data-open="termine"><span aria-hidden="true">▦</span>Termine</button><button type="button" data-open="nachrichten"><span aria-hidden="true">▤</span>Nachrichten <i>2</i></button><button type="button" data-open="profil"><span aria-hidden="true">○</span>Profil</button></nav>
+  <nav class="bottom-nav" aria-label="Kunden-App"><a class="active" href="#start" aria-current="page">{{ icon('home') }}Übersicht</a><button type="button" data-open="termine">{{ icon('calendar') }}Termine</button><button type="button" data-open="nachrichten">{{ icon('message') }}Nachrichten <i>2</i></button><button type="button" data-open="profil">{{ icon('profile') }}Profil</button></nav>
   <dialog id="app-dialog" aria-labelledby="dialog-title"><div class="dialog-heading"><p class="eyebrow">GÄRTNER · KUNDEN-APP</p><button id="dialog-close" type="button" aria-label="Schließen">×</button></div><h2 id="dialog-title"></h2><div id="dialog-content"></div></dialog>
   <template id="tpl-reifen"><p>Wir kümmern uns um Ihre Räder – vom Wechsel bis zur Einlagerung.</p><form data-demo-form="Reifen-Terminwunsch"><label>Was benötigen Sie?<select name="leistung"><option>Räderwechsel &amp; Einlagerung</option><option>Räderwechsel</option><option>Neue Reifen anfragen</option><option>Reifen einlagern</option></select></label><label>Ihr Wunschtag<input name="datum" type="date" required></label><label class="checkbox"><input type="checkbox" name="abholung"> Fahrzeug bitte abholen</label><label class="checkbox"><input type="checkbox" name="ersatzwagen"> Ersatzwagen gewünscht</label><label>Hinweis<textarea name="hinweis" maxlength="500" placeholder="Zum Beispiel: Rückruf am Vormittag"></textarea></label><p class="form-note">Vorschau: Der Termin ist erst nach Bestätigung verbindlich.</p><button class="dark-button" type="submit">Terminwunsch ausprobieren →</button></form></template>
   <template id="tpl-service"><p>Wir planen die passenden Arbeiten anhand Ihres Fahrzeugs und seiner Wartungsvorgaben.</p><form data-demo-form="Service-Anfrage"><label>Leistung<select name="leistung"><option>Inspektion / Service</option><option>Ölwechsel</option><option>Bremsen prüfen</option><option>Andere Arbeiten</option></select></label><label>Kilometerstand<input name="km" type="number" min="42850" max="3000000" value="42850" required></label><label>Ihr Wunschtag<input name="datum" type="date" required></label><label class="checkbox"><input type="checkbox" name="ersatzwagen"> Ersatzwagen gewünscht</label><p class="form-note">Individuelle Wartungsintervalle und die Kostenfreigabe werden mit Ihrer Firma abgestimmt.</p><button class="dark-button" type="submit">Service-Anfrage ausprobieren →</button></form></template>

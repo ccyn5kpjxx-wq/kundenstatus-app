@@ -20,7 +20,7 @@ Erinnerungen stützen sich auf tatsächlich hinterlegte Herstellerintervalle und
 
 Das Modul `werkstatt_kundenflotten.py` stellt Schema, Blueprint und eine geordnete Liste seiner Sicherungstabellen bereit. `app.py` registriert es, übernimmt die Tabellen und die Featurekennung in Backups und verhindert, dass Sicherungen ohne neu eingeführte Tabellen bestehende Flottendaten still löschen. Modul-Schreiboperationen und Wiederherstellungen müssen denselben Betriebslock verwenden.
 
-Die gemeinsame Fassung liegt lokal im Branch `feature/fuhrpark-lokale-integration`. Der Vorschau-Server läuft ausschließlich mit synthetischen Daten auf `http://127.0.0.1:5152`. Dort sind `/admin/kundenflotten`, `/kunden-app/vorschau`, `/admin/cockpit` und `/geschaeftspartner` erreichbar. Diese Vorschau verwendet einen automatisch angemeldeten lokalen Test-Admin; diese Einstellung gehört nicht in einen produktiven Start.
+Die gemeinsame Fassung wird lokal in eigenen Folgebranches weiterentwickelt; der aktuelle Gestaltungsstand liegt in `codex/kunden-app-weiss-vorschau`. Der Vorschau-Server läuft ausschließlich mit synthetischen Daten auf `http://127.0.0.1:5152`. Dort sind `/admin/kundenflotten`, `/kunden-app/vorschau`, `/admin/cockpit` und `/geschaeftspartner` erreichbar. Diese Vorschau verwendet einen automatisch angemeldeten lokalen Test-Admin; diese Einstellung gehört nicht in einen produktiven Start.
 
 Bestanden: 52 abschließende Modul-, Integrations-, Geschäftspartner- und Cockpit-Tests, der Homepage-Prüflauf, Smoke-Test und Flow-Test. Zusätzlich bestanden 44 bestehende Restore-Regressionen sowie die bisherigen Bestellvergleich-, Liefer- und Bestellbestätigungs-Backupprüfungen. JSON- und SQLite-Roundtrips erhalten sämtliche acht Flottentabellen. Ein getrennter Review hat auch den tatsächlichen HTTP-Import mit SQLite-Dateiaustausch geprüft. PostgreSQL wurde am Adapter geprüft, nicht an einem echten PostgreSQL-Server.
 
@@ -54,3 +54,14 @@ Enthalten: Reifenmontage/Radwechsel, Bremsenservice, Ölservice, Inspektion, Lac
 Vorschlag für den Kopfbereich: 15–20 Sekunden ruhige, stumme Montage mit Pause-Schalter, Standbild bei reduzierter Bewegung und für sparsame mobile Nutzung. Die Montage wurde noch nicht erstellt oder eingebaut. Envato-Lizenzbasis: https://help.elements.envato.com/hc/en-us/articles/360000628966-Envato-Elements-License . Keine kostenpflichtige Lizenz gekauft; nur die frei lizenzierten Pexels-Fotos für die Kacheln wurden heruntergeladen.
 
 Die Galerie ist zur lokalen Bildabnahme bereit. Bei der nächsten Auswahlrunde verdienen größere Unfall-/Richtarbeiten, Ölwechsel statt Ölstandprüfung und Autoglas in einer Halle besonders passende eigene Arbeitsaufnahmen. Die aktuelle Karosseriekachel zeigt Stoßfängermontage, die Ölservicekachel eine Ölstandprüfung und die Glaskachel einen Scheibenkleberauftrag im Freien. Der Videohintergrund bleibt eine separate offene Medienentscheidung. Keine Veröffentlichung oder Kundenkommunikation.
+
+
+## Lokale Gestaltung: Kunden-App und Fahrzeugvorschau
+
+Die Kunden-App ist überwiegend weiß gestaltet: helle Fahrzeugkarte mit Foto, vier gleichwertige Serviceaktionen, klare Linien-Symbole und rote Hauptaktionen. Reifenwunsch, Service, Schaden und Panne verwenden die unveränderten lokalen Demo-Dialoge. Margita ist als persönliche Ansprechpartnerin mit dem vorhandenen Portrait eingebunden. Textaktionen und Schließen haben ausreichend große Treffflächen; Fokus und Escape bleiben erhalten.
+
+Auf der Geschäftspartnerseite führt die Fahrzeugkarte mit Beispielfoto zur Fahreransicht. Foto und beschrifteter Button sind anklickbar, wenn die Demo ausdrücklich aktiviert ist und der Zugriff über Loopback erfolgt. Andernfalls zeigt die Seite eine Kontaktaktion; ein nicht erreichbarer Demo-Link wird nicht veröffentlicht. Die bestehende Zusammenarbeit über das Partnerportal bleibt davon unabhängig.
+
+Die interne Fahrzeugakte fasst Fahrer, Kilometerstand, offene Wartungsvorgaben und Reifenlager oben zusammen. Es werden ausschließlich bereits erfasste Daten dargestellt; ein Marketing-Beispielfoto wird keiner echten Fahrzeugakte zugewiesen.
+
+Geprüft: 37 Modul-/Seitentests und bestehender Homepage-Prüflauf, Demo-Link bei ausgeschalteter Konfiguration, Netzwerkzugriff sowie IPv4-/IPv6-Loopback. Desktop und 390-Pixel-Ansichten ohne Überlauf, Reifenwunsch mit Abholung/Ersatzwagen durchgespielt, alle vier Hauptdialoge und Rückkehrfokus nach Escape geprüft. Getrennter read-only Review ohne Blocker. Nur lokale Vorschau, kein Push/Deployment und keine Benachrichtigung.
