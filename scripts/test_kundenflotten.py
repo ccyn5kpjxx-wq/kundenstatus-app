@@ -55,6 +55,7 @@ class CustomerFleetTests(unittest.TestCase):
         self.app = Flask(__name__, template_folder=str(ROOT / "templates"), static_folder=str(ROOT / "static"))
         self.app.secret_key = "test-only-no-customer-data"
         self.app.config.update(TESTING=True, KUNDENFLOTTEN_DEMO_ENABLED=True)
+        self.app.add_url_rule("/homepage", "oeffentliche_homepage", lambda: "Testhomepage")
         self.app.jinja_loader = ChoiceLoader([DictLoader({"base.html": "<html>{% for c,m in get_flashed_messages(with_categories=true) %}<p>{{ m }}</p>{% endfor %}{% block content %}{% endblock %}</html>"}), self.app.jinja_loader])
         self.app.jinja_env.globals["csrf_field"] = lambda: Markup('<input type="hidden" name="csrf_token" value="test-csrf">')
         def get_db():
