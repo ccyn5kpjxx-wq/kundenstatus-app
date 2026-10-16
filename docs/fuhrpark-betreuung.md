@@ -65,3 +65,12 @@ Auf der Geschäftspartnerseite führt die Fahrzeugkarte mit Beispielfoto zur Fah
 Die interne Fahrzeugakte fasst Fahrer, Kilometerstand, offene Wartungsvorgaben und Reifenlager oben zusammen. Es werden ausschließlich bereits erfasste Daten dargestellt; ein Marketing-Beispielfoto wird keiner echten Fahrzeugakte zugewiesen.
 
 Geprüft: 37 Modul-/Seitentests und bestehender Homepage-Prüflauf, Demo-Link bei ausgeschalteter Konfiguration, Netzwerkzugriff sowie IPv4-/IPv6-Loopback. Desktop und 390-Pixel-Ansichten ohne Überlauf, Reifenwunsch mit Abholung/Ersatzwagen durchgespielt, alle vier Hauptdialoge und Rückkehrfokus nach Escape geprüft. Getrennter read-only Review ohne Blocker. Nur lokale Vorschau, kein Push/Deployment und keine Benachrichtigung.
+
+
+### Zielgruppenfotos und direkter Pannenanruf
+
+Die drei Einstiege unter dem Homepage-Titel erhalten gleich große Fotos: Privatkundin mit Pkw/Schlüssel, Gespräch im Autohaus und geordnete Reihen von Firmenfahrzeugen. Es sind illustrative Stockfotos; es werden keine fremden Personen als eigene Kunden oder Mitarbeiter bezeichnet. Die drei bestehenden Anfrage-/Partnerziele bleiben erhalten. Quellen, Autoren, Lizenz, Bildmaße und Hashes stehen in `static/homepage/zielgruppen/quellen.json`.
+
+Der lokale Pannendialog zeigt nach dem unveränderten Sicherheits- und Notrufhinweis eine klare Aufforderung, online zu melden und zusätzlich die Werkstatt anzurufen. Der manuell betätigte Telefonlink verwendet die auf Homepage und Impressum bestätigte Hauptnummer +49 1522 7706694. Die Online-Demo versendet nichts; die Rufnummer ist als echter Anrufweg erkennbar. Es gibt keine automatische Anwahl oder Zusage einer sofortigen Abholung. Bei der Prüfung wurde kein Anruf ausgelöst.
+
+Geprüft: fünf bestehende Seiten-/Linktests, Homepage-Prüflauf, Auslieferung aller drei Bilddateien sowie Desktop/390px ohne Überlauf. Die Anrufaktion ist beim Öffnen des mobilen Pannendialogs sichtbar. Unabhängiger read-only Review ohne Blocker. Weiterhin ausschließlich lokale Vorschau.

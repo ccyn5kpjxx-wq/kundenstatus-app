@@ -1,0 +1,47 @@
+[
+  {
+    "name": "privatkunden",
+    "creator": "Antoni Shkraba",
+    "id": "7144189",
+    "page": "https://www.pexels.com/photo/a-woman-holding-a-car-key-7144189/",
+    "image": "https://images.pexels.com/photos/7144189/pexels-photo-7144189.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    "license": "https://www.pexels.com/license/",
+    "bytes": 223569,
+    "dimensions": [
+      1200,
+      1800
+    ],
+    "sha256": "2ac160c5bdddfe1babad1a55e68aa5699cd5f906322a953b6ffb6538eb0ec0be",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "autohaeuser",
+    "creator": "Gustavo Fring",
+    "id": "4895421",
+    "page": "https://www.pexels.com/photo/dealership-employee-selling-car-to-client-4895421/",
+    "image": "https://images.pexels.com/photos/4895421/pexels-photo-4895421.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    "license": "https://www.pexels.com/license/",
+    "bytes": 101270,
+    "dimensions": [
+      1200,
+      800
+    ],
+    "sha256": "4f37f25e42236e28241c7c7fee0ae1c324cb3600ea6f6c308cb80313ec19c25a",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "firmenflotten",
+    "creator": "abdo alshreef",
+    "id": "33623771",
+    "page": "https://www.pexels.com/photo/aerial-view-of-white-vans-in-rows-in-parking-lot-33623771/",
+    "image": "https://images.pexels.com/photos/33623771/pexels-photo-33623771.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    "license": "https://www.pexels.com/license/",
+    "bytes": 192121,
+    "dimensions": [
+      1200,
+      674
+    ],
+    "sha256": "4224e5cf851f6bb7b3506ec51451077f1aea4f073dfd045791c2ba5fcbcdd91c",
+    "visual_review": "2026-10-16"
+  }
+]

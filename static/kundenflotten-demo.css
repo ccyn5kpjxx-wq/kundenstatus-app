@@ -161,3 +161,14 @@ body:has(dialog[open]) { overflow: hidden; }
   .service-card { padding-inline: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+
+/* A breakdown needs direct coordination as well as the online report. */
+.panne-contact { border: 1px solid var(--line); border-radius: 12px; padding: 17px; margin: 20px 0; background: #f8f9fb; }
+.panne-contact > p:first-child { margin-top: 0; color: var(--ink); }
+.panne-call { display: flex; flex-direction: column; gap: 4px; padding: 13px 16px; border-radius: 9px; background: var(--red); color: #fff; text-decoration: none; min-height: 64px; }
+.panne-call:hover { background: #ae251f; }
+.panne-call > span { font-size: 12px; }
+.panne-call strong { display: flex; justify-content: space-between; gap: 16px; font-size: 19px; letter-spacing: .015em; }
+.panne-contact .form-note { margin-bottom: 0; }
+.secondary-button { background: #fff; color: var(--ink); border-color: #cbd5e2; }
+.secondary-button:hover { background: #f3f6fa; border-color: #91a3bc; }
