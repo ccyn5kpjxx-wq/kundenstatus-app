@@ -222,6 +222,16 @@
     .hero-contact strong { font-size: 14px; }
     .hero-contact small { margin-top: 3px; color: #cbc8c2; font-size: 12px; }
 
+    .hero-audiences { width:min(1180px,calc(100% - 42px));margin:14px auto 25px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px; }
+    .hero-audience { display:flex;flex-direction:column;align-items:flex-start;padding:26px 27px;background:#fff;border:1px solid #dcdcd4;border-radius:12px;color:var(--ink);text-decoration:none;transition:border-color .2s,transform .2s; }
+    .hero-audience:hover { border-color:var(--red);transform:translateY(-3px); }
+    .hero-audience:focus-visible { outline:3px solid var(--red);outline-offset:3px; }
+    .hero-audience small { color:var(--red);font-size:10px;font-weight:850;letter-spacing:.1em;text-transform:uppercase; }
+    .hero-audience h2 { margin:13px 0 11px;font-size:24px;line-height:1.15;letter-spacing:-.035em; }
+    .hero-audience p { margin:0 0 21px;color:#62675f;font-size:14px;line-height:1.65; }
+    .hero-audience strong { margin-top:auto;font-size:12px; }
+    @media(max-width:760px){.hero-audiences{grid-template-columns:1fr;width:calc(100% - 32px)}.hero-audience{padding:23px}.hero-audience h2{font-size:25px}.hero-audience p{margin-bottom:15px}}
+
     .proof-strip { margin-top: 12px; }
     .proof-grid {
       display: grid;
@@ -799,8 +809,14 @@
 
     <section class="hero-image" aria-label="Werkstatt und Unfallinstandsetzung bei Gärtner">
       <div class="hero-work" role="img" aria-label="Fahrzeug in der Gärtner-Werkstatt"></div>
-      <div class="hero-message"><span>Karosserie- &amp; Lackiermeisterbetrieb · Mosbach-Lohrbach</span><h1>Schaden am Fahrzeug? Wir kümmern uns persönlich.</h1><p>Vom ersten Foto bis zur sauberen Fahrzeugübergabe: fachgerechte Reparatur, klare Abstimmung und ein digitaler Status.</p><div class="hero-actions"><a class="btn primary" href="{{ portal_links.schaden }}">Schaden mit Fotos melden</a><a class="btn" href="tel:+4915227706694">Direkt anrufen</a></div><div class="hero-contact"><img src="{{ url_for('static', filename='homepage/portrait.webp') }}" alt="Christopher Gärtner" width="1200" height="1600"><div><strong>Christopher Gärtner</strong><small>Ihr direkter Ansprechpartner</small></div></div></div>
+      <div class="hero-message"><span>Karosserie- &amp; Lackiermeisterbetrieb · Mosbach-Lohrbach</span><h1>Schaden am Fahrzeug? Wir kümmern uns persönlich.</h1><p>Für Ihr privates Fahrzeug, Ihr Autohaus oder Ihre Firmenflotte: ein persönlicher Ansprechpartner und der passende Service.</p><div class="hero-actions"><a class="btn primary" href="{{ portal_links.schaden }}">Schaden mit Fotos melden</a><a class="btn" href="tel:+4915227706694">Direkt anrufen</a></div><div class="hero-contact"><img src="{{ url_for('static', filename='homepage/portrait.webp') }}" alt="Christopher Gärtner" width="1200" height="1600"><div><strong>Christopher Gärtner</strong><small>Ihr direkter Ansprechpartner</small></div></div></div>
     </section>
+
+    <nav class="hero-audiences" id="fuer-sie" aria-label="Der passende Einstieg für Sie">
+      <a class="hero-audience" href="{{ portal_links.anfrage }}?anliegen=allgemein"><small>Für Privatkunden</small><h2>Ihr Fahrzeug.<br>Wir kümmern uns.</h2><p>Ob Service, Reifen oder Reparatur: Wir betreuen Ihr Fahrzeug persönlich.</p><strong>Hilfe für mein Fahrzeug →</strong></a>
+      <a class="hero-audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}#autohaeuser"><small>Für Autohäuser &amp; Werkstätten</small><h2>Ihr fester Partner<br>für Karosserie &amp; Lack.</h2><p>Verlässliche Unterstützung mit klarer Abstimmung und digitaler Auftragsübergabe.</p><strong>Partnerschaft kennenlernen →</strong></a>
+      <a class="hero-audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}#flotten"><small>Für Firmenflotten</small><h2>Ihr Fuhrpark.<br>Bei uns in guten Händen.</h2><p>Wir koordinieren Wartung, Reifen, Reparaturen und Mobilität für Ihre Fahrzeuge.</p><strong>Fuhrparkbetreuung ansehen →</strong></a>
+    </nav>
 
     <section class="proof-strip" aria-label="Vertrauen und Erreichbarkeit">
       <div class="wrap proof-grid">
@@ -822,8 +838,6 @@
         </div>
       </div>
     </section>
-
-    <section class="business-entry" aria-labelledby="business-title"><div class="wrap business-entry-inner"><div><div class="eyebrow">Für Firmenflotten, Autohäuser &amp; Werkstätten</div><h2 id="business-title">Ein fester Partner.<br>Weniger Aufwand im Alltag.</h2><p>Komplette Fahrzeugbetreuung für Unternehmen. Verlässliche Karosserie- und Lackarbeiten für Autohäuser. Mit persönlicher Abstimmung und digitaler Auftragsübergabe.</p></div><a class="btn primary" href="{{ url_for('oeffentliche_geschaeftspartner') }}">Zusammenarbeit kennenlernen →</a></div></section>
 
     <section class="process" id="so-gehts" aria-labelledby="process-title">
       <div class="wrap">
