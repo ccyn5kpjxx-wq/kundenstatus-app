@@ -235,6 +235,23 @@
     .hero-audience strong { margin-top:auto;font-size:12px; }
     @media(max-width:760px){.hero-audiences{grid-template-columns:1fr;width:calc(100% - 32px)}.hero-audience-copy{padding:23px}.hero-audience h2{font-size:25px}.hero-audience p{margin-bottom:15px}}
 
+
+    .fleet-management { width:min(1180px,calc(100% - 42px));margin:28px auto 36px;padding:42px;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:52px;background:#232729;color:#fff;border-radius:16px;scroll-margin-top:105px; }
+    .fleet-management .eyebrow { color:#ff8d82;font-size:11px;letter-spacing:.1em; }
+    .fleet-management h2 { margin:17px 0 20px;font-size:clamp(32px,3.3vw,44px);letter-spacing:-.04em;line-height:1.08; }
+    .fleet-management h2 em { color:#ff8d82;font-style:normal; }
+    .fleet-management p { color:#d4d8da;font-size:15px;line-height:1.7;margin:0 0 24px; }
+    .fleet-management .btn { min-height:48px;text-align:center;line-height:1.4;padding:13px 20px; }
+    .fleet-management ol { list-style:none;padding:0;margin:0;display:grid;gap:0; }
+    .fleet-management li { display:grid;grid-template-columns:32px minmax(0,1fr);gap:16px;padding:21px 0;border-top:1px solid #ffffff2b; }
+    .fleet-management li:first-child { border-top:0;padding-top:3px; }
+    .fleet-management li:last-child { padding-bottom:0; }
+    .fleet-management li > span { color:#ff8d82;font-size:12px;font-weight:850;letter-spacing:.06em;padding-top:3px; }
+    .fleet-management li strong { display:block;font-size:20px;letter-spacing:-.02em;margin-bottom:5px; }
+    .fleet-management li p { margin:0;font-size:13px;color:#c9cfd1;line-height:1.65; }
+    @media(max-width:850px){.fleet-management{grid-template-columns:1fr;gap:30px;padding:32px}.fleet-management h2{max-width:650px}.fleet-management>div>p{max-width:650px}}
+    @media(max-width:600px){.fleet-management{width:calc(100% - 32px);padding:27px 24px;margin-block:24px}.fleet-management h2{font-size:33px}.fleet-management .btn{width:100%;font-size:12px}.fleet-management li{gap:12px}}
+
     .proof-strip { margin-top: 12px; }
     .proof-grid {
       display: grid;
@@ -812,15 +829,19 @@
 
     <section class="hero-image" aria-label="Werkstatt und Unfallinstandsetzung bei Gärtner">
       <div class="hero-work" role="img" aria-label="Fahrzeug in der Gärtner-Werkstatt"></div>
-      <div class="hero-message"><span>Karosserie- &amp; Lackiermeisterbetrieb · Mosbach-Lohrbach</span><h1>Schaden am Fahrzeug? Wir kümmern uns persönlich.</h1><p>Für Ihr privates Fahrzeug, Ihr Autohaus oder Ihre Firmenflotte: ein persönlicher Ansprechpartner und der passende Service.</p><div class="hero-actions"><a class="btn primary" href="{{ portal_links.schaden }}">Schaden mit Fotos melden</a><a class="btn" href="tel:+4915227706694">Direkt anrufen</a></div><div class="hero-contact"><img src="{{ url_for('static', filename='homepage/portrait.webp') }}" alt="Christopher Gärtner" width="1200" height="1600"><div><strong>Christopher Gärtner</strong><small>Ihr direkter Ansprechpartner</small></div></div></div>
+      <div class="hero-message"><span>Karosserie- &amp; Lackiermeisterbetrieb · Mosbach-Lohrbach</span><h1>Schaden am Fahrzeug? Wir kümmern uns persönlich.</h1><p>Für Privatkunden persönlich da. Für Autohäuser ein fester Reparaturpartner. Für Unternehmen übernehmen wir auch die Organisation rund um den Fuhrpark.</p><div class="hero-actions"><a class="btn primary" href="{{ portal_links.schaden }}">Schaden mit Fotos melden</a><a class="btn" href="tel:+4915227706694">Direkt anrufen</a></div><div class="hero-contact"><img src="{{ url_for('static', filename='homepage/portrait.webp') }}" alt="Christopher Gärtner" width="1200" height="1600"><div><strong>Christopher Gärtner</strong><small>Ihr direkter Ansprechpartner</small></div></div></div>
     </section>
 
     <nav class="hero-audiences" id="fuer-sie" aria-label="Der passende Einstieg für Sie">
       <a class="hero-audience" href="{{ portal_links.anfrage }}?anliegen=allgemein"><img class="hero-audience-image private" src="{{ url_for('static', filename='homepage/zielgruppen/privatkunden.jpg') }}" alt="Frau mit Autoschlüssel an einem Pkw" width="1200" height="1800" loading="lazy" decoding="async"><div class="hero-audience-copy"><small>Für Privatkunden</small><h2>Ihr Fahrzeug.<br>Wir kümmern uns.</h2><p>Ob Service, Reifen oder Reparatur: Wir betreuen Ihr Fahrzeug persönlich.</p><strong>Hilfe für mein Fahrzeug →</strong></div></a>
       <a class="hero-audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}#autohaeuser"><img class="hero-audience-image" src="{{ url_for('static', filename='homepage/zielgruppen/autohaeuser.jpg') }}" alt="Persönliche Abstimmung an Fahrzeugen in einem Autohaus" width="1200" height="800" loading="lazy" decoding="async"><div class="hero-audience-copy"><small>Für Autohäuser &amp; Werkstätten</small><h2>Ihr fester Partner<br>für Karosserie &amp; Lack.</h2><p>Verlässliche Unterstützung mit klarer Abstimmung und digitaler Auftragsübergabe.</p><strong>Partnerschaft kennenlernen →</strong></div></a>
-      <a class="hero-audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}#flotten"><img class="hero-audience-image" src="{{ url_for('static', filename='homepage/zielgruppen/firmenflotten.jpg') }}" alt="Mehrere gleichartige Firmenfahrzeuge in geordneten Reihen" width="1200" height="674" loading="lazy" decoding="async"><div class="hero-audience-copy"><small>Für Firmenflotten</small><h2>Ihr Fuhrpark.<br>Bei uns in guten Händen.</h2><p>Wir koordinieren Wartung, Reifen, Reparaturen und Mobilität für Ihre Fahrzeuge.</p><strong>Fuhrparkbetreuung ansehen →</strong></div></a>
+      <a class="hero-audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}#flotten"><img class="hero-audience-image" src="{{ url_for('static', filename='homepage/zielgruppen/firmenflotten.jpg') }}" alt="Mehrere gleichartige Firmenfahrzeuge in geordneten Reihen" width="1200" height="674" loading="lazy" decoding="async"><div class="hero-audience-copy"><small>Für Firmenflotten</small><h2>Ihr Fuhrpark.<br>Wir übernehmen die Organisation.</h2><p>Wartung, Reifen, Reparaturen und Fahrertermine – damit Ihr Team mehr Zeit für sein Geschäft hat.</p><strong>So entlasten wir Ihren Betrieb →</strong></div></a>
     </nav>
 
+    <section class="fleet-management" id="fuhrparkmanagement" aria-labelledby="fleet-management-title">
+      <div><span class="eyebrow">Werkstatt &amp; Fuhrparkmanagement aus einer Hand</span><h2 id="fleet-management-title">Sie führen Ihr Unternehmen.<br><em>Wir managen Ihren Fuhrpark.</em></h2><p>Wartung fällig, Reifenwechsel oder ein Schaden? Wir übernehmen die Abstimmung mit Ihren Fahrern, organisieren die Werkstatttermine und erledigen die Arbeiten bei uns im Betrieb. Ein Ansprechpartner. Weniger Aufwand für Ihr Team.</p><a class="btn primary" href="{{ url_for('oeffentliche_geschaeftspartner') }}#kontakt">Fünf Minuten über Ihren Fuhrpark sprechen →</a></div>
+      <ol aria-label="So entlasten wir Ihren Betrieb"><li><span aria-hidden="true">01</span><div><strong>Wir denken mit.</strong><p>Fälligkeiten anhand von Fahrzeugdaten, Datum und Kilometerstand im Blick behalten.</p></div></li><li><span aria-hidden="true">02</span><div><strong>Wir organisieren.</strong><p>Termine mit Ihren Fahrern abstimmen. Abholung, Rückgabe und Ersatzwagen nach Vereinbarung und Verfügbarkeit.</p></div></li><li><span aria-hidden="true">03</span><div><strong>Wir erledigen.</strong><p>Service, Öl, Bremsen und Reifen ebenso wie Karosserie, Lack, Glas und Unfallreparaturen – in einem Betrieb.</p></div></li></ol>
+    </section>
     <section class="proof-strip" aria-label="Vertrauen und Erreichbarkeit">
       <div class="wrap proof-grid">
         {% if google_reviews.available %}<a class="proof-item" href="{{ google_reviews.maps_url }}" target="_blank" rel="noopener noreferrer"><span>Google-Bewertungen</span><strong>{{ '%.1f'|format(google_reviews.rating) }} von 5</strong><small>{{ google_reviews.count }} aktuelle Bewertungen</small></a>{% else %}<a class="proof-item" href="{{ google_reviews.maps_url }}" target="_blank" rel="noopener noreferrer"><span>Google-Bewertungen</span><strong>Erfahrungen ansehen</strong><small>Direkt im Google-Unternehmensprofil</small></a>{% endif %}
