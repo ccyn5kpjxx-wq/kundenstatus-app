@@ -28,17 +28,18 @@
     <div class="greeting"><div><p class="eyebrow">GUT UNTERWEGS.</p><h1>Hallo, Alex.</h1><p>Ihr Fahrzeug. Wir kümmern uns.</p></div><button type="button" class="notification" data-open="nachrichten" aria-label="Zwei Beispielnachrichten ansehen">{{ icon('bell') }}<span>2</span></button></div>
     <div class="vehicle-overview">
     <section class="vehicle-hero" aria-labelledby="vehicle-name">
-      <div class="vehicle-heading"><span class="pill">Ihr Fahrzeug</span><p class="plate">MOS · DEMO</p></div>
-      <div class="vehicle-content"><div><h2 id="vehicle-name">Hyundai Kona</h2><p>Beispielfahrzeug · Firmenflotte</p><div class="hero-meta"><span><strong>42.850</strong> km</span><span><strong>Alex Muster</strong> Fahrer</span></div></div><img src="{{ url_for('static', filename='mietwagen/kona-white.webp') }}" alt="Weißer Hyundai Kona als Beispielfahrzeug" class="car-image"></div>
+      <div class="vehicle-heading"><span class="pill">MEINE FAHRZEUGAKTE</span><p class="plate">MOS · DEMO</p></div>
+      <div class="vehicle-content"><div class="vehicle-intro"><h2 id="vehicle-name">Hyundai Kona<span class="model-dot" aria-hidden="true">.</span></h2><p>Beispielfahrzeug · Firmenflotte</p></div><img src="{{ url_for('static', filename='mietwagen/kona-white.webp') }}" alt="Weißer Hyundai Kona als Beispielfahrzeug" class="car-image"></div>
+      <div class="hero-meta"><span><small>KILOMETERSTAND</small><strong>42.850 <em>km</em></strong></span><span><small>AM STEUER</small><strong>Alex Muster</strong></span><button type="button" class="vehicle-details" data-open="profil">Fahrzeugdetails <span aria-hidden="true">↗</span></button></div>
       <button type="button" class="hero-bottom" data-open="kilometer"><span>Kilometerstand aktualisieren</span><span aria-hidden="true">↗</span></button>
     </section>
-    <section class="next-card" aria-labelledby="next-title"><div class="calendar-icon"><span>OKT</span><strong>28</strong></div><div><p class="eyebrow">IHR NÄCHSTER SCHRITT</p><h2 id="next-title">Zeit für die Winterräder</h2><p>Wir stimmen Wechsel und Einlagerung mit Ihnen ab.</p><button type="button" class="text-button" data-open="reifen">Terminwunsch auswählen <span aria-hidden="true">→</span></button></div></section>
+    <section class="next-card" aria-labelledby="next-title"><div class="next-top"><span class="next-label">SAISONWECHSEL</span>{{ icon('wheel') }}</div><div class="calendar-icon"><span>OKT</span><strong>28</strong></div><div class="next-copy"><p class="eyebrow">BEISPIEL · TERMINWUNSCH OFFEN</p><h2 id="next-title">Zeit für die Winterräder</h2><p>Wir stimmen Wechsel und Einlagerung mit Ihnen ab.</p><button type="button" class="text-button" data-open="reifen">Terminwunsch auswählen <span aria-hidden="true">→</span></button></div><p class="next-footnote">Persönlich abgestimmt. Damit Sie mobil bleiben.</p></section>
     </div>
-    <section class="services" aria-labelledby="services-title"><div class="section-heading"><h2 id="services-title">Was können wir für Sie tun?</h2><span>Alles an einem Ort</span></div>
+    <section class="services" aria-labelledby="services-title"><div class="section-heading"><div><p class="eyebrow">DIREKT ERLEDIGEN</p><h2 id="services-title">Was können wir für Sie tun?</h2></div><span>Ein Klick. Der richtige Weg.</span></div>
       <div class="service-grid">
-        <button type="button" class="service-card" data-open="reifen"><span class="service-icon">{{ icon('wheel') }}</span><strong>Reifen &amp; Räder</strong><span>Wechsel, Bestellung, Einlagerung</span><b aria-hidden="true">↗</b></button>
-        <button type="button" class="service-card" data-open="service"><span class="service-icon">{{ icon('service') }}</span><strong>Service &amp; Wartung</strong><span>Inspektion, Öl, Bremsen</span><b aria-hidden="true">↗</b></button>
-        <button type="button" class="service-card" data-open="schaden"><span class="service-icon">{{ icon('camera') }}</span><strong>Schaden melden</strong><span>Fotos aufnehmen &amp; Hilfe anfragen</span><b aria-hidden="true">↗</b></button>
+        <button type="button" class="service-card tires" data-open="reifen"><span class="service-icon">{{ icon('wheel') }}</span><strong>Reifen &amp; Räder</strong><span>Wechsel, Bestellung, Einlagerung</span><b aria-hidden="true">↗</b></button>
+        <button type="button" class="service-card maintenance" data-open="service"><span class="service-icon">{{ icon('service') }}</span><strong>Service &amp; Wartung</strong><span>Inspektion, Öl, Bremsen</span><b aria-hidden="true">↗</b></button>
+        <button type="button" class="service-card damage" data-open="schaden"><span class="service-icon">{{ icon('camera') }}</span><strong>Schaden melden</strong><span>Fotos aufnehmen &amp; Hilfe anfragen</span><b aria-hidden="true">↗</b></button>
         <button type="button" class="service-card breakdown" data-open="panne"><span class="service-icon">{{ icon('warning') }}</span><strong>Panne melden</strong><span>Standort &amp; Abholung abstimmen</span><b aria-hidden="true">↗</b></button>
       </div>
     </section>
