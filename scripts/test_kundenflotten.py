@@ -188,7 +188,7 @@ class CustomerFleetTests(unittest.TestCase):
 
     def test_schema_persistent_and_backup_table_set(self):
         with closing(self.portal.get_db()) as db:
-            names = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            names = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
         self.assertEqual(names, set(BACKUP_TABLES))
         self.assertEqual(self.service.companies()[0]["anzahl"], 1)
         self.assertEqual(self.service.companies()[0]["freigabe_limit_cent"], 25050)

@@ -3,15 +3,18 @@ from contextlib import closing
 from copy import deepcopy
 from datetime import date
 from html.parser import HTMLParser
+from io import BytesIO
 import json
 import sqlite3
 import unittest
 from unittest.mock import MagicMock
 from uuid import uuid4
 import zipfile
+from PIL import Image
+from werkzeug.datastructures import FileStorage
 
 import smoke_test as isolated
-from werkstatt_kundenflotten import BACKUP_TABLES, CORE_BACKUP_TABLES, SCHEMA_FEATURE, ORDER_SCHEMA_FEATURE
+from werkstatt_kundenflotten import BACKUP_TABLES, CORE_BACKUP_TABLES, SCHEMA_FEATURE, ORDER_SCHEMA_FEATURE, PORTAL_TABLES, PORTAL_FEATURE
 
 portal = isolated.portal
 
@@ -32,11 +35,15 @@ class FleetIntegrationTests(unittest.TestCase):
             order = db.execute("INSERT INTO auftraege(fahrzeug,kennzeichen,status,kunden_status_token,kunden_status_aktiv,erstellt_am,geaendert_am) VALUES('Testfahrzeug','TEST 1',2,?,1,?,?)", (uuid4().hex, portal.now_str(), portal.now_str())).lastrowid
             db.commit()
         cls.service.change_vehicle(cls.company,cls.vehicle,'auftrag',{'auftrag_id':str(order),'art':'service','bestaetigt':'1','request_id':uuid4().hex})
+        portal.flottenportal.configure_access(cls.company,{'benutzername':'synthetic-integration','passwort':'Nur-lokaler-Test-2026','passwort_wiederholen':'Nur-lokaler-Test-2026'})
+        picture=BytesIO();Image.new('RGB',(80,100),'white').save(picture,'PNG')
+        portal.flottenportal.upload(cls.company,cls.vehicle,{'art':'rechnung','belegdatum':today,'request_id':uuid4().hex,'sichtbar':'1'},[FileStorage(stream=BytesIO(picture.getvalue()),filename='Testbeleg.png')],internal=True)
         cls.backup = portal.create_backup_package(reason='kundenflotten-integrationstest')
         with zipfile.ZipFile(cls.backup) as archive:
             cls.export = json.loads(archive.read('backup.json'))
             cls.source = isolated.TEMP_DIR / 'fleet-source.db'
             cls.source.write_bytes(archive.read('auftraege.db'))
+            portal.hydrate_imported_sqlite_backup_blobs(cls.source,archive,archive.namelist(),cls.export)
         cls.expected = cls.snapshot()
 
     @classmethod
@@ -51,6 +58,7 @@ class FleetIntegrationTests(unittest.TestCase):
     def test_real_backup_contains_all_tables_and_both_schema_features(self):
         self.assertIn(SCHEMA_FEATURE, self.export['schema_features'])
         self.assertIn(ORDER_SCHEMA_FEATURE, self.export['schema_features'])
+        self.assertIn(PORTAL_FEATURE,self.export['schema_features'])
         self.assertTrue(set(BACKUP_TABLES).issubset(portal.BACKUP_TABLES))
         for table in BACKUP_TABLES:
             with self.subTest(table=table):
@@ -74,6 +82,8 @@ class FleetIntegrationTests(unittest.TestCase):
         old = deepcopy(self.export)
         old['schema_features'].remove(SCHEMA_FEATURE)
         old['schema_features'].remove(ORDER_SCHEMA_FEATURE)
+        old['schema_features'].remove(PORTAL_FEATURE)
+        old['binary_blobs']=[r for r in old.get('binary_blobs',[]) if r['table'] not in PORTAL_TABLES]
         for table in BACKUP_TABLES:
             del old['tables'][table]
         with self.assertRaisesRegex(ValueError, 'Kundenflotten'):
@@ -113,12 +123,16 @@ class FleetIntegrationTests(unittest.TestCase):
     def test_old_eight_table_json_valid_but_cannot_remove_existing_mapping(self):
         old=deepcopy(self.export)
         old['schema_features'].remove(ORDER_SCHEMA_FEATURE)
+        old['schema_features'].remove(PORTAL_FEATURE)
         del old['tables']['kundenflotten_auftraege']
+        for table in PORTAL_TABLES: del old['tables'][table]
+        old['binary_blobs']=[r for r in old.get('binary_blobs',[]) if r['table'] not in PORTAL_TABLES]
         portal.validate_backup_binary_reference_completeness(old,portal.backup_binary_reference_map(old))
         with self.assertRaisesRegex(ValueError,'Kundenflotten'):
             portal.import_backup_json_rows_into_current_database(old,None,[])
         self.assertEqual(self.snapshot(),self.expected)
         with closing(portal.get_db()) as db:
+            for table in reversed(PORTAL_TABLES): db.execute(f'DELETE FROM {table}')
             db.execute('DELETE FROM kundenflotten_auftraege'); db.commit()
         with zipfile.ZipFile(self.backup) as archive:
             portal.import_backup_json_rows_into_current_database(old,archive,archive.namelist())
@@ -130,11 +144,13 @@ class FleetIntegrationTests(unittest.TestCase):
         source=isolated.TEMP_DIR/'old-eight-tables.db'
         source.write_bytes(self.source.read_bytes())
         with closing(sqlite3.connect(source)) as db:
+            for table in reversed(PORTAL_TABLES): db.execute(f'DROP TABLE {table}')
             db.execute('DROP TABLE kundenflotten_auftraege'); db.commit()
         with self.assertRaisesRegex(ValueError,'Kundenflotten'):
             portal.import_sqlite_rows_into_current_database(source)
         self.assertEqual(self.snapshot(),self.expected)
         with closing(portal.get_db()) as db:
+            for table in reversed(PORTAL_TABLES): db.execute(f'DELETE FROM {table}')
             db.execute('DELETE FROM kundenflotten_auftraege'); db.commit()
         portal.import_sqlite_rows_into_current_database(source)
         self.assertEqual(self.snapshot()['kundenflotten_auftraege'],[])

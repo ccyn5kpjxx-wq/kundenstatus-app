@@ -58,7 +58,8 @@ from cockpit_rules import document_visible as base_document_visible, price_state
 from werkstatt_assistent_uploads import ensure_upload_schema, is_assistant_private
 from werkstatt_kundenflotten import (register_kundenflotten, ensure_kundenflotten_schema,
     BACKUP_TABLES as KUNDENFLOTTEN_BACKUP_TABLES, SCHEMA_FEATURE as KUNDENFLOTTEN_SCHEMA_FEATURE,
-    CORE_BACKUP_TABLES as KUNDENFLOTTEN_CORE_TABLES, ORDER_SCHEMA_FEATURE as KUNDENFLOTTEN_ORDER_FEATURE)
+    CORE_BACKUP_TABLES as KUNDENFLOTTEN_CORE_TABLES, ORDER_SCHEMA_FEATURE as KUNDENFLOTTEN_ORDER_FEATURE,
+    PORTAL_TABLES as KUNDENFLOTTEN_PORTAL_TABLES, PORTAL_FEATURE as KUNDENFLOTTEN_PORTAL_FEATURE)
 
 try:
     import psycopg
@@ -8366,8 +8367,11 @@ BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
 BACKUP_TABLES += KUNDENFLOTTEN_BACKUP_TABLES
 BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_liefereingang_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1", "werkstatt_schule_v1", "werkstatt_krankheit_v1", "werkstatt_bestellbestaetigung_v1")
-BACKUP_SCHEMA_FEATURES += (KUNDENFLOTTEN_SCHEMA_FEATURE, KUNDENFLOTTEN_ORDER_FEATURE)
+BACKUP_SCHEMA_FEATURES += (KUNDENFLOTTEN_SCHEMA_FEATURE, KUNDENFLOTTEN_ORDER_FEATURE, KUNDENFLOTTEN_PORTAL_FEATURE)
 BACKUP_BINARY_FIELDS = {
+    "kundenflotten_belege": {
+        "original_base64": {"suffix": ".bin", "max_bytes": 8 * 1024 * 1024},
+    },
     "mitarbeiter_lohnzettel": {
         "original_base64": {"suffix": ".bin", "max_bytes": 10 * 1024 * 1024},
     },
@@ -48096,6 +48100,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         required_tables.update(KUNDENFLOTTEN_CORE_TABLES)
     if KUNDENFLOTTEN_ORDER_FEATURE in schema_features:
         required_tables.add("kundenflotten_auftraege")
+    if KUNDENFLOTTEN_PORTAL_FEATURE in schema_features:
+        required_tables.update(KUNDENFLOTTEN_PORTAL_TABLES)
     if "werkstatt_mitarbeiter_einladung_v1" in schema_features:
         required_tables.add("assistent_einladungen")
     if "werkstatt_mitarbeiter_portal_v1" in schema_features:
@@ -48157,7 +48163,7 @@ def validate_backup_binary_reference_completeness(export, reference_map):
             if row_id <= 0:
                 raise ValueError(f"Datenpaket ungültig: Tabelle {table_name} enthält eine Zeile ohne ID.")
             for column_name in field_config:
-                if table_name in {"einkauf_eingang_dateien", "mitarbeiter_arbeitsvertraege"} and (table_name, row_id, column_name) not in reference_map:
+                if table_name in {"einkauf_eingang_dateien", "mitarbeiter_arbeitsvertraege", "kundenflotten_belege"} and (table_name, row_id, column_name) not in reference_map:
                     raise ValueError(
                         f"Datenpaket unvollständig: Originaldatei für {table_name} #{row_id} fehlt."
                     )
@@ -48525,8 +48531,10 @@ def import_sqlite_rows_into_current_database(imported_db):
 
 def ensure_kundenflotten_state_for_import(*, export=None, imported_db=None, target=None):
     """Reject older backups that would silently erase newly introduced fleet data."""
+    from pathlib import Path
+    from werkstatt_flottenportal import ensure_originals_for_import
     if imported_db is not None:
-        source = sqlite3.connect(str(imported_db))
+        source = sqlite3.connect(Path(imported_db).resolve().as_uri() + '?mode=ro', uri=True)
         try:
             source_tables = {row[0] for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         finally:
@@ -48541,6 +48549,7 @@ def ensure_kundenflotten_state_for_import(*, export=None, imported_db=None, targ
         source_tables = set(tables)
     missing = set(KUNDENFLOTTEN_BACKUP_TABLES) - source_tables
     if not missing:
+        ensure_originals_for_import(get_db=get_db,reference_map=lambda:backup_binary_reference_map(export),export=export,imported_db=imported_db,target=target)
         return
     owned = target is None
     db = target if target is not None else get_db()
@@ -48548,6 +48557,7 @@ def ensure_kundenflotten_state_for_import(*, export=None, imported_db=None, targ
         for name in sorted(missing):
             if db.execute(f"SELECT 1 FROM {name} LIMIT 1").fetchone():
                 raise ValueError("Import gestoppt: Diese Sicherung enthält nicht alle vorhandenen Kundenflotten-Daten. Bitte eine vollständige aktuelle Sicherung verwenden.")
+        ensure_originals_for_import(get_db=get_db,reference_map=lambda:backup_binary_reference_map(export),export=export,imported_db=imported_db,target=db)
     finally:
         if owned:
             db.close()

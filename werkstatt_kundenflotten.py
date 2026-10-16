@@ -18,6 +18,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, session, url_for
+from werkstatt_flottenportal import PORTAL_TABLES, PORTAL_FEATURE, ensure_schema as ensure_flottenportal_schema, register_flottenportal
 
 CORE_BACKUP_TABLES = (
     "kundenflotten_firmen", "kundenflotten_fahrzeuge", "kundenflotten_fahrer",
@@ -25,7 +26,7 @@ CORE_BACKUP_TABLES = (
     "kundenflotten_historie", "kundenflotten_anlagen",
 )
 ORDER_SCHEMA_FEATURE = "kundenflotten_auftraege_v1"
-BACKUP_TABLES = CORE_BACKUP_TABLES + ("kundenflotten_auftraege",)
+BACKUP_TABLES = CORE_BACKUP_TABLES + ("kundenflotten_auftraege",) + PORTAL_TABLES
 SCHEMA_FEATURE = "kundenflotten_v1"
 KINDS = {"service": "Service / Inspektion", "oel": "Ölwechsel", "reifen": "Reifen",
          "hu": "HU / AU", "bremsen": "Bremsen", "karosserie": "Karosserie / Lack", "sonstiges": "Sonstiges"}
@@ -109,6 +110,7 @@ def ensure_kundenflotten_schema(db):
     )
     for statement in statements:
         db.execute(statement)
+    ensure_flottenportal_schema(db)
 
 
 def _text(data, field, limit=200, required=False):
@@ -623,4 +625,5 @@ def register_kundenflotten(portal):
 
     portal.app.register_blueprint(bp)
     portal.kundenflotten = service
+    register_flottenportal(portal,service)
     return service

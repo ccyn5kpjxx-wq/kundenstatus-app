@@ -28,7 +28,7 @@ from werkstatt_bestellvergleich import OrderPriceComparison, TABLES as PRICE_TAB
 from werkstatt_einladung_restore import ensure_employee_invitation_state_for_import
 from werkstatt_mitarbeiter_portal import ensure_employee_private_state_for_import
 from werkstatt_mitarbeiter_auftraege import ensure_employee_orders_for_import
-from werkstatt_kundenflotten import BACKUP_TABLES as FLEET_TABLES, SCHEMA_FEATURE as FLEET_FEATURE, CORE_BACKUP_TABLES as FLEET_CORE_TABLES, ORDER_SCHEMA_FEATURE as FLEET_ORDER_FEATURE, ensure_kundenflotten_schema
+from werkstatt_kundenflotten import BACKUP_TABLES as FLEET_TABLES, SCHEMA_FEATURE as FLEET_FEATURE, CORE_BACKUP_TABLES as FLEET_CORE_TABLES, ORDER_SCHEMA_FEATURE as FLEET_ORDER_FEATURE, PORTAL_FEATURE as FLEET_PORTAL_FEATURE, PORTAL_TABLES as FLEET_PORTAL_TABLES, ensure_kundenflotten_schema
 
 TABLES = (*PRICE_TABLES, 'ordinary')
 
@@ -276,7 +276,7 @@ class ComparisonBackupTests(unittest.TestCase):
         self.assertTrue(set(PRICE_TABLES) <= set(values['BACKUP_TABLES']))
         self.assertIn('werkstatt_bestellvergleich_v1', values['BACKUP_SCHEMA_FEATURES'])
         node = next(node for node in self.tree.body if isinstance(node, ast.FunctionDef) and node.name == 'validate_backup_binary_reference_completeness')
-        values.update(BACKUP_BINARY_FIELDS={}, clean_text=str, KUNDENFLOTTEN_BACKUP_TABLES=FLEET_TABLES, KUNDENFLOTTEN_SCHEMA_FEATURE=FLEET_FEATURE, KUNDENFLOTTEN_CORE_TABLES=FLEET_CORE_TABLES, KUNDENFLOTTEN_ORDER_FEATURE=FLEET_ORDER_FEATURE)
+        values.update(BACKUP_BINARY_FIELDS={}, clean_text=str, KUNDENFLOTTEN_BACKUP_TABLES=FLEET_TABLES, KUNDENFLOTTEN_SCHEMA_FEATURE=FLEET_FEATURE, KUNDENFLOTTEN_CORE_TABLES=FLEET_CORE_TABLES, KUNDENFLOTTEN_ORDER_FEATURE=FLEET_ORDER_FEATURE, KUNDENFLOTTEN_PORTAL_FEATURE=FLEET_PORTAL_FEATURE, KUNDENFLOTTEN_PORTAL_TABLES=FLEET_PORTAL_TABLES)
         exec(compile(ast.Module(body=[node], type_ignores=[]), '<actual-backup-features>', 'exec'), values)
         legacy = {'format_version': 4, 'tables': {name: [] for name in values['BACKUP_TABLES'] if name not in PRICE_TABLES}}
         validate = values['validate_backup_binary_reference_completeness']
