@@ -1,0 +1,19 @@
+/* Fleet coordination imagery belongs to the business page hero only. */
+.management-visual{min-width:0;background:#fff;border:1px solid #dfdfd5;border-radius:16px;box-shadow:0 15px 42px #292e2410;overflow:hidden}
+.management-main-frame{position:relative;isolation:isolate}
+.hero-photo.management-visual img.management-main{width:100%;height:auto;aspect-ratio:1.5;object-fit:cover;object-position:center;border-radius:0;display:block}
+.management-photo-label{position:absolute;left:18px;bottom:16px;display:inline-flex;align-items:center;gap:8px;padding:8px 12px;background:#fffffff0;border:1px solid #ffffffc9;border-radius:30px;font-size:10px;line-height:1.3;font-weight:750;color:#343e32;box-shadow:0 3px 14px #0000000c}
+.management-photo-label>span{width:6px;height:6px;border-radius:50%;background:#627757;flex-shrink:0}
+.management-planning{display:grid;grid-template-columns:.95fr 1.05fr;gap:18px;padding:20px;align-items:center}
+.hero-photo.management-visual img.management-support{width:100%;height:auto;aspect-ratio:1.5;object-fit:cover;object-position:50% 55%;border-radius:10px;display:block}
+.management-kicker{display:block;font-size:9px;line-height:1.5;letter-spacing:.1em;text-transform:uppercase;color:#7b7669;font-weight:750;margin:0 0 8px}
+.management-planning-copy{min-width:0}
+.management-planning-copy>strong{font-size:clamp(16px,1.65vw,21px);line-height:1.25;letter-spacing:-.03em;color:#2d342b}
+.management-planning-copy ul{list-style:none;margin:13px 0 0;padding:0;display:grid;gap:6px}
+.management-planning-copy li{font-size:11px;line-height:1.45;color:#626858;display:flex;gap:7px;align-items:baseline}
+.management-planning-copy li::before{content:'✓';color:#657b55;font-weight:800}
+.hero-photo.management-visual figcaption{background:#eef0e9;color:#505a48;margin:0;padding:18px 21px;border-radius:0;font-size:11px;line-height:1.6;border-top:1px solid #e2e5d9}
+.hero-photo.management-visual figcaption strong{font-size:14px;color:#303c2b;margin:0 0 3px;line-height:1.4}
+@media(max-width:1000px) and (min-width:751px){.management-planning{grid-template-columns:1fr;gap:14px}.hero-photo.management-visual img.management-support{aspect-ratio:2.4;min-height:0;max-height:145px}.management-planning-copy>strong br{display:none}.management-planning-copy ul{display:flex;gap:8px 12px;flex-wrap:wrap}}
+@media(max-width:750px){.management-visual{max-width:590px;width:100%;margin-left:auto;margin-right:auto}.management-planning{gap:18px}.management-planning-copy>strong{font-size:20px}.management-kicker{font-size:9px}.management-planning-copy li{font-size:11px}}
+@media(max-width:420px){.management-planning{padding:15px;gap:14px;grid-template-columns:1fr 1.1fr}.hero-photo.management-visual img.management-support{min-height:145px;aspect-ratio:1;object-position:42% 55%}.management-kicker{font-size:8px}.management-planning-copy>strong{font-size:17px}.management-planning-copy li{font-size:10px}.management-photo-label{left:12px;bottom:12px;font-size:9px}.hero-photo.management-visual figcaption{padding:16px;font-size:10px}}

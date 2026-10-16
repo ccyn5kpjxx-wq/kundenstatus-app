@@ -1,0 +1,23 @@
+{
+  "created_at": "2026-10-16",
+  "method": "image_gen built-in",
+  "purpose": "Illustrative anonymous fleet office and appointment planning scenes; no real staff or customer data depicted.",
+  "images": [
+    {
+      "file": "fuhrpark-buero.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: hero photograph for a German regional fleet management service website, landscape 3:2. Primary request: a believable, candid office scene showing a fleet coordinator actively managing company vehicles. Subject: one ordinary middle-aged woman in professional casual clothing, seen from a three-quarter rear/side angle at a real desk, using a headset while looking at a desktop monitor with a softly out-of-focus vehicle scheduling dashboard. A few car keys, a paper calendar and a pen on the tidy desk. Bright modest office at a regional automotive business, a few parked company cars softly visible outside the window. Natural afternoon daylight, real camera texture and authentic proportions, restrained warm white and charcoal palette. Composition: medium-wide environmental view, person and desk clearly visible, not posed, no looking at camera. Screen content is incidental and blurred; no readable letters or numbers. No logos, no watermark, no typography, no inset collage, no exaggerated luxury, no synthetic showroom look. This is an illustrative anonymous scene, not a portrait of a real employee.",
+      "width": 1536,
+      "height": 1024,
+      "sha256": "0036390e9784a6cae311eeca6afd21ec41ef4725b7c8d67b35f8e37215655621",
+      "format": "WebP, quality90, source retained unchanged"
+    },
+    {
+      "file": "terminplanung.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: supporting website photograph about fleet appointment planning, landscape 3:2. Primary request: close-up of practical fleet coordination in a bright modest German automotive office. A coordinator's natural hands are arranging two car key fobs beside a paper appointment calendar with discreet unreadable colored markings, a pen and an open laptop. The laptop is seen obliquely and shows softly blurred rows of vehicle thumbnails and calendar blocks without readable text. A colleague's hand points to a date on the calendar, a calm concrete planning interaction. Focus on keys, calendar and hands. Natural soft daylight, authentic materials, real camera photography, same restrained warm white/charcoal office styling as an understated regional fleet management business. No faces, no branding, no logos, no watermark, no readable text or distorted letters, no collage, no rendered UI mockup.",
+      "width": 1536,
+      "height": 1024,
+      "sha256": "c4a405a725a3031dc85dd1cee575374931613654251c7855f7d01a7b649e2082",
+      "format": "WebP, quality90, source retained unchanged"
+    }
+  ]
+}
