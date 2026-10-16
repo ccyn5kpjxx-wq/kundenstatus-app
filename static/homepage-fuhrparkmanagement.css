@@ -1,4 +1,5 @@
 /* Fleet coordination imagery belongs to the business page hero only. */
+.links .home-nav{gap:9px;color:#a52f27;border-color:#d7bdb5;background:#fff;font-size:12px;white-space:nowrap}
 .management-visual{min-width:0;background:#fff;border:1px solid #dfdfd5;border-radius:16px;box-shadow:0 15px 42px #292e2410;overflow:hidden}
 .management-main-frame{position:relative;isolation:isolate}
 .hero-photo.management-visual img.management-main{width:100%;height:auto;aspect-ratio:1.5;object-fit:cover;object-position:center;border-radius:0;display:block}

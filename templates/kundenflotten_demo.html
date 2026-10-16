@@ -25,7 +25,7 @@
 {%- endmacro %}
 
   <div class="demo-ribbon">Lokale Vorschau · Beispieldaten · kein Versand</div>
-  <header class="app-header"><a href="#start" aria-label="Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie und Lack"></a><span class="app-name">Mein Fahrzeug</span><a class="back-link" href="/geschaeftspartner#fahreransicht">← Zur Übersicht</a><button type="button" class="avatar" data-open="profil" aria-label="Beispielprofil öffnen">AM</button></header>
+  <header class="app-header"><a href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie und Lack"></a><span class="app-name">Mein Fahrzeug</span><a class="back-link" href="/geschaeftspartner#fahreransicht">← Zur Übersicht</a><button type="button" class="avatar" data-open="profil" aria-label="Beispielprofil öffnen">AM</button><a class="homepage-link" href="{{ url_for('oeffentliche_homepage') }}">{{ icon('home') }}<span>Startseite</span></a></header>
   <main id="start" class="app-shell">
     <div class="greeting"><div><p class="eyebrow">GUT UNTERWEGS.</p><h1>Hallo, Alex.</h1><p>Ihr Fahrzeug. Wir kümmern uns.</p></div><button type="button" class="notification" data-open="nachrichten" aria-label="Drei Beispielnachrichten ansehen">{{ icon('bell') }}<span>3</span></button></div>
     <div class="vehicle-overview">

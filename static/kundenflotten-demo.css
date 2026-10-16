@@ -20,6 +20,9 @@ svg { display: block; width: 24px; height: 24px; flex-shrink: 0; }
 .app-name { font-size: 14px; font-weight: 650; border-left: 1px solid var(--line); padding-left: 26px; }
 .back-link { margin-left: auto; font-size: 12px; color: var(--muted); text-decoration: none; padding: 12px 0; }
 .back-link:hover { color: var(--ink); text-decoration: underline; }
+.homepage-link { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 9px; color: var(--red); font-size: 12px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.homepage-link svg { width: 17px; height: 17px; }
+.homepage-link:hover { background: #fcf4f3; border-color: #dbc3c0; }
 .avatar { border: 1px solid var(--line); background: #f5f6f8; border-radius: 50%; height: 44px; width: 44px; font-size: 12px; font-weight: 750; }
 .app-shell { max-width: 1124px; margin: auto; padding: 32px 32px 125px; }
 .greeting { display: flex; justify-content: space-between; align-items: center; margin-bottom: 26px; }
@@ -142,6 +145,7 @@ body:has(dialog[open]) { overflow: hidden; }
   .app-header { padding: 14px 20px; gap: 16px; min-height: 78px; }
   .app-header img { width: 116px; }
   .app-name { font-size: 12px; padding-left: 16px; }
+  .app-name { display: none; }
   .back-link { display: none; }
   .avatar { margin-left: auto; height: 40px; width: 40px; font-size: 10px; }
   .app-shell { padding: 27px 20px 130px; }
@@ -183,6 +187,8 @@ body:has(dialog[open]) { overflow: hidden; }
 @media (max-width: 360px) {
   .app-header { gap: 12px; padding-inline: 16px; }
   .app-name { font-size: 10px; padding-left: 12px; }
+  .app-header img { width: 100px; }
+  .homepage-link { padding: 9px 10px; gap: 6px; font-size: 11px; }
   .app-shell { padding-inline: 16px; }
   .hero-meta { gap: 20px; }
   .service-card { padding-inline: 12px; }
