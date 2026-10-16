@@ -44457,6 +44457,7 @@ def homepage_portal_links():
         "mietwagen": link("mietwagen_anfrage", "/mietwagen"),
         "anfrage": link("website_anfrage", "/anfrage"),
         "partner": link("partner_login", "/partner"),
+        "flotte": link("flottenportal.login", "/flotte/anmelden"),
         "versicherung": link("versicherung_login", "/versicherung"),
         "karriere": link("oeffentliche_karriere", "/karriere"),
     }

@@ -26,6 +26,26 @@ class Links(HTMLParser):
 
 
 class PartnerPageTests(unittest.TestCase):
+    def test_enabled_fleet_login_uses_portal_host(self):
+        old = portal.PUBLIC_SITE_ONLY, portal.PUBLIC_HOSTS, portal.PORTAL_BASE_URL
+        enabled = portal.app.config.get('FLOTTENPORTAL_ENABLED', False)
+        try:
+            portal.PUBLIC_SITE_ONLY = False
+            portal.PUBLIC_HOSTS = {'www.example.test'}
+            portal.PORTAL_BASE_URL = 'https://portal.example.test'
+            portal.app.config['FLOTTENPORTAL_ENABLED'] = True
+            client = portal.app.test_client()
+            response = client.get('/geschaeftspartner', base_url='https://www.example.test')
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('href="https://portal.example.test/flotte/anmelden"', response.text)
+            self.assertNotIn('href="/flotte/anmelden"', response.text)
+            self.assertEqual(client.get('/flotte/anmelden', base_url=portal.PORTAL_BASE_URL).status_code, 200)
+            portal.PORTAL_BASE_URL = ''
+            self.assertIn('href="/flotte/anmelden"', client.get('/geschaeftspartner').text)
+        finally:
+            portal.PUBLIC_SITE_ONLY, portal.PUBLIC_HOSTS, portal.PORTAL_BASE_URL = old
+            portal.app.config['FLOTTENPORTAL_ENABLED'] = enabled
+
     def test_public_host_route_and_sitemap(self):
         old = portal.PUBLIC_SITE_ONLY, portal.PUBLIC_HOSTS, portal.PUBLIC_BASE_URL, portal.PUBLIC_SITE_INDEXABLE
         try:

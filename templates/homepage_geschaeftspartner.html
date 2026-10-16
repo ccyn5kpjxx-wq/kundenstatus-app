@@ -33,7 +33,7 @@
       <div class="digital" id="fahreransicht">
         <div><span class="eyebrow">Persönlich betreut. Digital organisiert.</span><h3>Das Fahrzeug im Blick.<br>Auch für Ihre Fahrer.</h3><p>Ihr Autohaus übergibt Aufträge, Bilder und Unterlagen wie gewohnt im Partnerportal. Für die Fuhrparkbetreuung richten wir die Fahrzeug- und Terminorganisation passend zu Ihrem Betrieb ein.</p>
           <ul class="digital-list"><li><strong>Eine klare Fahrzeugübersicht</strong>Fahrzeugdaten, Fahrer und anstehende Arbeiten zusammenführen.</li><li><strong>Kurze Wege zur Werkstatt</strong>Reifen- und Servicetermine abstimmen oder einen Schaden mit Fotos melden.</li><li><strong>Persönliche Einführung</strong>Den Ablauf und die Fahreransicht besprechen wir gerne bei Ihnen vor Ort.</li></ul>
-          {% if config.FLOTTENPORTAL_ENABLED %}<p><a class="btn primary" href="{{ url_for('flottenportal.login') }}">Zum Firmen-Flottenzugang →</a></p>{% endif %}
+          {% if config.FLOTTENPORTAL_ENABLED %}<p><a class="btn primary" href="{{ portal_links.flotte }}">Zum Firmen-Flottenzugang →</a></p>{% endif %}
           {% if local_driver_demo %}<a class="digital-secondary" href="{{ url_for('kundenflotten.demo') }}">Kunden-App als Fahrer ausprobieren →</a>{% else %}<a class="digital-secondary" href="#kontakt">Digitale Fahrzeugbetreuung kennenlernen →</a>{% endif %}
         </div>
         <div class="file-preview" aria-label="Beispiel einer digitalen Fahrzeugakte">
