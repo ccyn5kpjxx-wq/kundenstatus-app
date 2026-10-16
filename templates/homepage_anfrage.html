@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>{% if kurzanfrage %}Schnelle Anfrage senden{% else %}Anfrage & Beratung{% endif %} | Gärtner GmbH Karosserie + Lack</title>
-  <meta name="description" content="Unverbindliche Anfrage für Lack, Glasschaden, Reparatur, Fahrzeugpflege, Mietwagen oder Fahrzeugcheck bei Gärtner in Mosbach.">
+  <meta name="description" content="Unverbindliche Privatkunden-Anfrage für Lack, Glasschaden, Reparatur, Reifenservice, Einlagerung, Fahrzeugpflege, Mietwagen oder Fahrzeugcheck bei Gärtner in Mosbach.">
   <style>
     :root { --ink:#252624; --ink-soft:#343532; --cream:#f2ede5; --paper:#fffdf9; --muted:#676660; --red:#e32219; --red-dark:#bd1c16; --line:#ded5c8; --teal:#0b6b67; --shadow:0 26px 70px rgba(49,42,33,.14); }
     * { box-sizing:border-box; }
@@ -142,9 +142,9 @@
       <div class="wrap">
         {% if kurzanfrage %}
         <div class="time-pill">● Schnell &amp; unverbindlich</div>
-        <div class="eyebrow">Alle Anfragen an einem Ort</div>
+        <div class="eyebrow">Privatkunden · Service und Reparatur</div>
         <h1>Was möchten Sie anfragen?</h1>
-        <p>Wählen Sie den passenden Bereich und senden Sie uns in etwa einer Minute die wichtigsten Angaben und optional Bilder. Einen Versicherungsschaden erfassen Sie separat und ausführlicher.</p>
+        <p>Wählen Sie den passenden Bereich und senden Sie uns die wichtigsten Angaben. Fotos sind optional – auch Reifenservice, Einlagerung und Terminwünsche können Sie hier anfragen. Einen Versicherungsschaden erfassen Sie separat und ausführlicher.</p>
         {% else %}
         <div class="eyebrow">Unverbindlich anfragen</div>
         <h1>Ihr Anliegen. Direkt bei uns.</h1>
@@ -183,6 +183,10 @@
           <h2>Mechanik &amp; Wartung</h2>
           <p>Bremsen, Ölwechsel, Inspektion oder ein anderes technisches Problem.</p>
           <span class="intent-link">Mechanik anfragen →</span>
+        </a>
+        <a class="intent-card {% if formdata.get('anliegen') == 'reifenservice' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='reifenservice') }}#kurzanfrage">
+          <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="12"/><circle cx="16" cy="16" r="6"/><path d="M16 4v6m0 12v6M4 16h6m12 0h6M7.5 7.5l4 4m9 9 4 4m0-17-4 4m-9 9-4 4"/></svg></span>
+          <span class="intent-kicker">Auch ohne Foto</span><h2>Reifenservice &amp; Einlagerung</h2><p>Radwechsel, Montage, Auswuchten, neue Reifen und Einlagerung mit Terminwunsch.</p><span class="intent-link">Reifenservice anfragen →</span>
         </a>
         <a class="intent-card {% if formdata.get('anliegen') == 'fahrzeugpflege' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='fahrzeugpflege') }}#kurzanfrage">
           <span class="intent-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 5v5M16 22v5M5 16h5M22 16h5M9 9l3 3M20 20l3 3M23 9l-3 3M12 20l-3 3"/><circle cx="16" cy="16" r="5"/></svg></span>
@@ -227,7 +231,7 @@
           <span class="intent-link">Versicherungsschaden melden →</span>
         </a>
       </div>
-      {% if formdata.get('anliegen') == 'schaden' %}<p class="selection-note">Für alle normalen Anliegen genügt die jeweilige Kurzanfrage. Nur wenn eine Versicherung beteiligt ist, nutzen Sie die ausführliche Schadenmeldung.</p>{% endif %}
+      {% if formdata.get('anliegen') in ['schaden','auswahl'] %}<p class="selection-note">Für alle normalen Anliegen genügt die jeweilige Kurzanfrage. Nur wenn eine Versicherung beteiligt ist, nutzen Sie die ausführliche Schadenmeldung.</p>{% endif %}
     </section>
     {% endif %}
 
@@ -278,6 +282,11 @@
               </div>
               <p class="hint">Mehrfachauswahl möglich.</p>
             </fieldset>
+            {% elif formdata.get('anliegen') == 'reifenservice' %}
+            <fieldset><legend>Welche Reifenleistungen wünschen Sie? *</legend><div class="choice-grid">{% for key,label in reifen_leistungen.items() %}<label class="choice"><input type="checkbox" name="reifen_leistung" value="{{ key }}" {% if key in reifen_auswahl %}checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div><p class="hint">Mehrfachauswahl möglich. Reifengröße und Lagerwunsch können Sie unten ergänzen.</p></fieldset>
+            <div class="field"><label for="wunschdatum">Wunschdatum <span class="hint">(optional)</span></label><input id="wunschdatum" name="wunschdatum" type="date" min="{{ today_iso }}" value="{{ formdata.get('wunschdatum','') }}"></div>
+            <div class="field"><label for="wunschzeit">Zeitraum oder Rückrufwunsch <span class="hint">(optional)</span></label><input id="wunschzeit" name="wunschzeit" maxlength="100" placeholder="z. B. vormittags oder Rückruf zur Abstimmung" value="{{ formdata.get('wunschzeit','') }}"></div>
+            <p class="hint field full">Wir prüfen Leistungen und Einlagerungsmöglichkeiten persönlich. Ihr Wunschtermin ist erst nach unserer Bestätigung vereinbart.</p>
             {% elif formdata.get('anliegen') == 'fahrzeugpflege' %}
             <fieldset>
               <legend>Welche Fahrzeugpflege wünschen Sie? *</legend>
@@ -331,7 +340,7 @@
             <div class="photo-preview" id="photo-preview" aria-live="polite"></div>
           </div>
           <p class="privacy">Wir verwenden Ihre Angaben und die optionalen Bilder ausschließlich zur Bearbeitung dieser Anfrage und zur persönlichen Kontaktaufnahme. Mehr dazu in der <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>.</p>
-          <button class="button" type="submit">{% if formdata.get('anliegen') == 'glasschaden' %}Glasschaden melden{% else %}Kurzanfrage senden{% endif %}</button>
+          <button class="button" type="submit">{% if formdata.get('anliegen') == 'glasschaden' %}Glasschaden melden{% elif formdata.get('anliegen') == 'reifenservice' %}Reifenservice und Termin anfragen{% else %}Kurzanfrage senden{% endif %}</button>
         </form>
       {% elif not kurzanfrage %}
         {% set ausgewaehltes_anliegen = formdata.get('anliegen','allgemein') %}

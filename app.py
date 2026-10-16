@@ -44450,6 +44450,7 @@ def homepage_portal_links():
         return url_for(endpoint, **values)
 
     return {
+        "auswahl": link("website_anfrage", "/anfrage?anliegen=auswahl", anliegen="auswahl"),
         "schaden": link("website_anfrage", "/anfrage?anliegen=schaden", anliegen="schaden"),
         "status": link("privat_status_zugang", "/privat/status"),
         "privat": link("privat_portal", "/privat/"),
@@ -44695,6 +44696,7 @@ WEBSITE_ANLIEGEN = {
     "glasschaden": "Glasschaden",
     "reparaturanfrage": "Reparaturanfrage",
     "mechanikanfrage": "Mechanik & Wartung",
+    "reifenservice": "Reifenservice & Einlagerung",
     "fahrzeugpflege": "Fahrzeugpflege & Aufbereitung",
     "mietwagenanfrage": "Mietwagenanfrage",
     "fahrzeugcheck": "Fahrzeugcheck",
@@ -44709,6 +44711,12 @@ WEBSITE_ANLIEGEN = {
 }
 
 WEBSITE_KURZANFRAGEN = {
+    "reifenservice": {
+        "label": "Reifenservice & Einlagerung",
+        "kurz": "Räder wechseln, Reifen montieren oder einlagern",
+        "frage": "Was dürfen wir rund um Ihre Reifen organisieren?",
+        "placeholder": "z. B. Winterräder montieren und Sommerräder einlagern; Reifengröße falls bekannt",
+    },
     "lackanfrage": {
         "label": "Lackanfrage",
         "kurz": "Kratzer, Lackschaden oder Farbproblem",
@@ -44777,6 +44785,15 @@ WEBSITE_MECHANIK_KATEGORIEN = {
     "elektrik_batterie": "Elektrik / Batterie",
     "klima": "Klimaanlage",
     "sonstiges": "Sonstiges Mechanikproblem",
+}
+
+WEBSITE_REIFEN_LEISTUNGEN = {
+    "radwechsel": "Radwechsel / Saisonwechsel",
+    "montage": "Reifenmontage",
+    "wuchten": "Räder auswuchten",
+    "einlagerung": "Reifeneinlagerung",
+    "bestellung": "Neue Reifen anfragen",
+    "pruefung": "Reifen prüfen / Beratung",
 }
 
 WEBSITE_MIETWAGEN_FLOTTE = {
@@ -44859,6 +44876,11 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
         if hasattr(formdata, "getlist")
         else list(formdata.get("mechanik_kategorie") or [])
     )
+    reifen_auswahl = (
+        [clean_text(value) for value in formdata.getlist("reifen_leistung")]
+        if hasattr(formdata, "getlist")
+        else list(formdata.get("reifen_leistung") or [])
+    )
     response = make_response(
         render_template(
             "homepage_anfrage.html",
@@ -44875,10 +44897,12 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             pflege_auswahl=pflege_auswahl,
             mechanik_kategorien=WEBSITE_MECHANIK_KATEGORIEN,
             mechanik_auswahl=mechanik_auswahl,
+            reifen_leistungen=WEBSITE_REIFEN_LEISTUNGEN,
+            reifen_auswahl=reifen_auswahl,
             mietwagen_flotte=WEBSITE_MIETWAGEN_FLOTTE,
             fahrzeugcheck_arten=WEBSITE_FAHRZEUGCHECK_ARTEN,
             weitere_anfrage_arten=WEBSITE_WEITERE_ANFRAGE_ARTEN,
-            kurzanfrage=ausgewaehltes_anliegen in {*WEBSITE_KURZANFRAGEN, "schaden"},
+            kurzanfrage=ausgewaehltes_anliegen in {*WEBSITE_KURZANFRAGEN, "schaden", "auswahl"},
             ausgewaehltes_anliegen=ausgewaehltes_anliegen,
             besichtigungsarten=WEBSITE_BESICHTIGUNGSARTEN,
             today_iso=date.today().isoformat(),
@@ -44940,6 +44964,11 @@ def website_anfrage():
             for value in request.form.getlist("mechanik_kategorie")
             if clean_text(value)
         ))
+        reifen_leistungen = list(dict.fromkeys(
+            clean_text(value) for value in request.form.getlist("reifen_leistung")
+            if clean_text(value)
+        ))
+        wunschzeit = clean_text(request.form.get("wunschzeit"))[:100] if anliegen == "reifenservice" else ""
         fahrzeugcheck_art = clean_text(request.form.get("fahrzeugcheck_art"))
         weitere_anfrage_art = clean_text(request.form.get("weitere_anfrage_art"))
         mietwagen_fahrzeug = clean_text(request.form.get("mietwagen_fahrzeug"))
@@ -44988,6 +45017,11 @@ def website_anfrage():
                 errors.append("Bitte nur gültige Mechanik- oder Wartungskategorien auswählen.")
             elif not mechanik_kategorien:
                 errors.append("Bitte mindestens eine Mechanik- oder Wartungskategorie auswählen.")
+        if anliegen == "reifenservice":
+            if any(value not in WEBSITE_REIFEN_LEISTUNGEN for value in reifen_leistungen):
+                errors.append("Bitte nur gültige Reifenleistungen auswählen.")
+            elif not reifen_leistungen:
+                errors.append("Bitte mindestens eine Reifenleistung auswählen.")
         if anliegen == "fahrzeugcheck" and fahrzeugcheck_art not in WEBSITE_FAHRZEUGCHECK_ARTEN:
             errors.append("Bitte die gewünschte Art des Fahrzeugchecks auswählen.")
         if anliegen == "weitere_anfrage" and weitere_anfrage_art not in WEBSITE_WEITERE_ANFRAGE_ARTEN:
@@ -45031,6 +45065,10 @@ def website_anfrage():
         anliegen_label = WEBSITE_ANLIEGEN[anliegen]
         besichtigung_label = WEBSITE_BESICHTIGUNGSARTEN.get(besichtigungsart, "")
         beschreibungsteile = [anliegen_label]
+        if anliegen == "reifenservice":
+            beschreibungsteile.append("Reifenservice: " + ", ".join(WEBSITE_REIFEN_LEISTUNGEN[value] for value in reifen_leistungen))
+        if wunschzeit:
+            beschreibungsteile.append(f"Gewünschter Zeitraum / Rückruf: {wunschzeit}")
         if fahrzeug:
             fahrzeug_label = "Gewünschtes Mietfahrzeug" if anliegen == "mietwagenanfrage" else "Fahrzeug"
             beschreibungsteile.append(f"{fahrzeug_label}: {fahrzeug}")
@@ -45089,6 +45127,7 @@ def website_anfrage():
             "glasschaden": "Glasschaden prüfen, Scheibe über FIN zuordnen und Angebot vorbereiten",
             "reparaturanfrage": "Reparaturumfang prüfen und Kunden zurückrufen",
             "mechanikanfrage": "Mechanik- oder Wartungsbedarf prüfen und Kunden zurückrufen",
+            "reifenservice": "Reifenservice / Einlagerung prüfen und Termin persönlich abstimmen",
             "fahrzeugpflege": "Aufbereitungsumfang prüfen und Kunden zurückrufen",
             "mietwagenanfrage": "Mietwagen-Verfügbarkeit prüfen und Kunden kontaktieren",
             "fahrzeugcheck": "Gewünschten Fahrzeugcheck besprechen und Termin abstimmen",
@@ -45159,7 +45198,7 @@ def website_anfrage():
         return redirect(url_for("website_anfrage", gesendet=1))
 
     vorauswahl = clean_text(request.args.get("anliegen"))
-    if vorauswahl == "schaden":
+    if vorauswahl in {"schaden", "auswahl"}:
         pass
     elif vorauswahl not in WEBSITE_ANLIEGEN:
         vorauswahl = "allgemein"

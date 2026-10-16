@@ -6,40 +6,19 @@ from __future__ import annotations
 import base64
 from datetime import date, timedelta
 from io import BytesIO
-import os
 import pathlib
 import sys
-import tempfile
 
+from unittest.mock import patch
 from werkzeug.datastructures import MultiDict
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-TEMP_DIR = pathlib.Path(tempfile.mkdtemp(prefix="homepage_kurzanfrage_"))
-os.environ.update(
-    {
-        "RENDER": "local-homepage-kurzanfrage-test",
-        "DATABASE_URL": "",
-        "REQUIRE_POSTGRES_ON_RENDER": "0",
-        "DATA_DIR": str(TEMP_DIR),
-        "SQLITE_DB_PATH": str(TEMP_DIR / "test.db"),
-        "UPLOAD_DIR": str(TEMP_DIR / "uploads"),
-        "BACKUP_DIR": str(TEMP_DIR / "backups"),
-        "DELETED_UPLOAD_DIR": str(TEMP_DIR / "deleted"),
-        "AUTO_BACKUP_ENABLED": "0",
-        "AUTO_CHANGE_BACKUP_ENABLED": "0",
-        "LEXWARE_API_KEY": "",
-        "OPENAI_API_KEY": "",
-        "WHATSAPP_ACCESS_TOKEN": "",
-        "WHATSAPP_PHONE_NUMBER_ID": "",
-        "SCHADEN_VORSCHAU_AKTIV": "0",
-        "FLASK_SECRET_KEY": "homepage-kurzanfrage-test",
-        "ADMIN_PASS": "homepage-kurzanfrage-test",
-    }
-)
-
-import app as portal  # noqa: E402
+# Reuse the shared bootstrap: disposable DB, hidden local secrets, network denied.
+import smoke_test as isolated  # noqa: E402
+portal = isolated.portal
+TEMP_DIR = isolated.TEMP_DIR
 
 
 PNG_1X1 = base64.b64decode(
@@ -60,6 +39,63 @@ def scalar(sql, params=()):
         return row[0] if row else None
     finally:
         db.close()
+
+
+
+def reifenservice_checks():
+    client = portal.app.test_client()
+    selected = client.get('/anfrage?anliegen=auswahl')
+    page = client.get('/anfrage?anliegen=reifenservice')
+    text = page.get_data(as_text=True)
+    with client.session_transaction() as session:
+        csrf = session.get(portal.CSRF_FIELD_NAME)
+    result = [
+        check('Privatauswahl bietet Reifenservice statt Geschäftspartnergespräch', selected.status_code == 200 and 'Reifenservice &amp; Einlagerung' in selected.text and 'anliegen=gespraech' not in selected.text),
+        check('Alter Fotoauswahl-Link bleibt kompatibel', client.get('/anfrage?anliegen=schaden').status_code == 200),
+        check('Reifenformular zeigt Leistungen und unverbindlichen Terminwunsch', page.status_code == 200 and all(x in text for x in ('Radwechsel / Saisonwechsel', 'Reifenmontage', 'Räder auswuchten', 'Reifeneinlagerung', 'Neue Reifen anfragen', 'name="wunschdatum"', 'name="wunschzeit"', 'erst nach unserer Bestätigung', 'Fotos sind optional'))),
+    ]
+    def post(changes=(), files=()):
+        with portal.PUBLIC_FORM_ATTEMPTS_LOCK:
+            portal.PUBLIC_FORM_ATTEMPTS.clear()
+        data = MultiDict([(portal.CSRF_FIELD_NAME, csrf), ('anliegen','reifenservice'), ('name','Privater Reifen Testkunde'), ('email','reifen@example.invalid'), ('telefon',''), ('nachricht','Winterräder wechseln und den alten Satz einlagern'), ('reifen_leistung','radwechsel'), ('reifen_leistung','einlagerung'), ('reifen_leistung','radwechsel'), ('wunschdatum',(date.today()+timedelta(days=10)).isoformat()), ('wunschzeit','vormittags')])
+        for key,value in changes:
+            data.setlist(key,value if isinstance(value,list) else [value])
+        for key,value in files:
+            data.add(key,value)
+        return client.post('/anfrage',data=data,content_type='multipart/form-data')
+    with patch.object(portal,'sende_website_lead_benachrichtigung'), patch.object(portal,'lead_notice'), patch.object(portal,'notify_lead_workshop'):
+        before = scalar('SELECT COUNT(*) FROM auftraege')
+        response = post()
+        lead = portal.get_lead(int(scalar('SELECT MAX(id) FROM leads')))
+        description = lead['beschreibung']
+        result += [
+            check('Reifenanfrage ohne Fahrzeug und Fotos wird gespeichert', response.status_code == 302 and lead['fahrzeug'] == '' and not portal.list_lead_dateien(lead['id'])),
+            check('Mehrfachauswahl dedupliziert und Terminwunsch bleiben erhalten', description.count('Radwechsel / Saisonwechsel') == 1 and 'Reifeneinlagerung' in description and 'vormittags' in description and (date.today()+timedelta(days=10)).isoformat() in description),
+            check('Folgeaktion ist persönliche Terminabstimmung ohne Werkstattauftrag', 'persönlich abstimmen' in lead['naechste_aktion'] and scalar('SELECT COUNT(*) FROM auftraege') == before),
+        ]
+        success = client.get(response.headers['Location'])
+        result.append(check('Erfolg bestätigt keinen verbindlichen Termin', 'noch keine Termin-, Preis- oder Auftragsbestätigung' in success.text))
+        for label,changes,error in [
+            ('Leere Reifenleistung', [('reifen_leistung',[])], 'mindestens eine Reifenleistung'),
+            ('Unbekannte Reifenleistung', [('reifen_leistung',['invalid'])], 'gültige Reifenleistungen'),
+            ('Vergangenes Wunschdatum', [('wunschdatum',(date.today()-timedelta(days=1)).isoformat())], 'nicht in der Vergangenheit'),
+            ('Ungültiges Wunschdatum', [('wunschdatum','2026-02-30')], 'gültiges Wunschdatum'),
+            ('Fehlende Kurzbeschreibung', [('nachricht','')], 'Anliegen kurz beschreiben'),
+            ('Geschäftspartnerart wird nicht eingeführt', [('anliegen','gespraech')], 'Anliegen auswählen'),
+        ]:
+            count = scalar('SELECT COUNT(*) FROM leads')
+            bad = post(changes)
+            result.append(check(label+' wird ohne Leadanlage abgewiesen', bad.status_code == 400 and error in bad.text and scalar('SELECT COUNT(*) FROM leads') == count))
+            if 'Wunschdatum' in label:
+                result.append(check(label+': Reifenwahl und Rückrufwunsch bleiben sichtbar', 'value="radwechsel" checked' in bad.text and 'value="vormittags"' in bad.text))
+        count = scalar('SELECT COUNT(*) FROM leads')
+        no_csrf = post([(portal.CSRF_FIELD_NAME,'wrong')])
+        result.append(check('Neue Reifenroute bleibt CSRF-geschützt', no_csrf.status_code == 400 and scalar('SELECT COUNT(*) FROM leads') == count))
+        photo = post([('reifen_leistung',['pruefung'])], [('bilder',(BytesIO(PNG_1X1),'reifen-test.png'))])
+        photo_lead = portal.get_lead(int(scalar('SELECT MAX(id) FROM leads')))
+        documents = portal.list_lead_dateien(photo_lead['id'])
+        result.append(check('Optionales Reifenfoto wird als Original gespeichert', photo.status_code == 302 and len(documents) == 1 and (portal.UPLOAD_DIR/documents[0]['stored_name']).read_bytes() == PNG_1X1))
+    return result
 
 
 def main():
@@ -96,7 +132,7 @@ def main():
     dellen_html = dellen.get_data(as_text=True)
 
     checks += [
-        check("Homepage verlinkt neue Auswahl", "/anfrage?anliegen=schaden" in homepage_html),
+        check("Homepage verlinkt neue Auswahl", "/anfrage?anliegen=auswahl" in homepage_html and "Anfrage mit Foto" in homepage_html),
         check("Alle Anfragewege sind auswählbar", auswahl.status_code == 200 and all(
             text in auswahl_html for text in (
                 "Lackanfrage", "Glasschaden", "Reparaturanfrage", "Mechanik &amp; Wartung",
@@ -395,6 +431,7 @@ def main():
         check("Bestehender Auftrag bleibt unverändert", bestand_nachher == bestand_vorher),
     ]
 
+    checks += reifenservice_checks()
     print(f"Temporäre Testdaten: {TEMP_DIR}")
     return 0 if all(checks) else 1
 
