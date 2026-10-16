@@ -779,6 +779,7 @@
   <style>
     .business-entry{padding:44px 0;background:#e6e9e0;color:#282d27}.business-entry-inner{display:flex;align-items:center;justify-content:space-between;gap:38px}.business-entry h2{font-size:clamp(28px,3vw,42px);line-height:1.12;letter-spacing:-.04em;margin:14px 0}.business-entry p{max-width:690px;color:#565e50;line-height:1.65;margin:0}.business-entry .btn{flex-shrink:0}@media(max-width:1000px){.business-entry-inner{align-items:flex-start;flex-direction:column;gap:24px}}
   </style>
+<link rel="stylesheet" href="{{ url_for('static', filename='homepage-arbeitsbilder.css') }}">
 </head>
 <body>
   <a class="skip-link" href="#inhalt">Direkt zum Inhalt</a>
@@ -835,16 +836,7 @@
       </div>
     </section>
 
-    <section class="craft" aria-labelledby="craft-title">
-      <div class="wrap">
-        <div class="section-title"><div><div class="eyebrow">Echtes Handwerk aus Mosbach</div><h2 id="craft-title">Nicht nur versprochen. So arbeiten wir.</h2></div><p>Karosserie, Lackkontrolle und Lackierung greifen bei uns direkt ineinander.</p></div>
-        <div class="craft-grid">
-          <figure class="craft-card craft-card-wide"><img src="{{ url_for('static', filename='homepage/dellendoktor.webp') }}" alt="Fachgerechtes Ausbeulen einer Fahrzeugtür" loading="lazy" decoding="async"><figcaption><span>Karosserie</span><strong>Dellen präzise in Form bringen</strong></figcaption></figure>
-          <figure class="craft-card"><img src="{{ url_for('static', filename='homepage/lackdichte-messen.webp') }}" alt="Digitale Messung der Lackschicht am Fahrzeug" loading="lazy" decoding="async"><figcaption><span>Lackkontrolle</span><strong>Messen, bevor wir gezielt aufbauen</strong></figcaption></figure>
-          <figure class="craft-card"><img src="{{ url_for('static', filename='homepage/fahrzeuglackierung.webp') }}" alt="Fahrzeuglackierung mit der Spritzpistole in der Lackierkabine" loading="lazy" decoding="async"><figcaption><span>Lackierung</span><strong>Gleichmäßig lackieren. Sauber finishen.</strong></figcaption></figure>
-        </div>
-      </div>
-    </section>
+    {% include '_homepage_arbeitsbilder.html' %}
 
     <section class="workshop-gallery" id="neue-werkstatt" aria-labelledby="workshop-title">
       <div class="wrap">

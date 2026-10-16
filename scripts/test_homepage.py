@@ -56,10 +56,10 @@ def main():
             "Wir arbeiten als Team", "Gute Arbeit entsteht", "Unser Team kennenlernen",
             "Digital starten", "Persönlich abstimmen", "Wir kümmern uns"
         )) and 'class="process-step"' not in html,
-        "Reparaturablauf und echtes Handwerk sichtbar": all(marker in html for marker in (
+        "Reparaturablauf und Arbeitsfotos sichtbar": all(marker in html for marker in (
             'class="process"', "Drei Schritte. Ein fester Ansprechpartner.",
             "Fotos &amp; Anliegen senden", "Persönlich prüfen", "Reparieren &amp; informieren",
-            'class="craft"', "Echtes Handwerk aus Mosbach", "Nicht nur versprochen. So arbeiten wir."
+            'class="arbeitsbilder-section"', 'id="unsere-arbeiten"', "Unser Leistungsspektrum", "Was wir für Ihr"
         )),
         "Google-Sterne dynamisch": "{{ '★' * rounded_rating }}" not in html and 'aria-label="' in html,
         "Strukturierte Unternehmensdaten": '"@type":"AutoBodyShop"' in html,

@@ -5,7 +5,7 @@ Stand 16.10.2026. Keine Veröffentlichung und kein Kundenversand beauftragt.
 ## Umfang
 
 - Öffentliche Geschäftspartnerseite `/geschaeftspartner`: Firmenflotten und feste Karosserie-/Lackpartnerschaft für Autohäuser. Margita Höfer als Ansprechpartnerin; Konditionen werden persönlich vereinbart.
-- Homepage: Verweis auf die Geschäftspartnerseite. Die endgültige Bildauswahl ist noch offen. Vorgabe: gleich große Kacheln je Leistung, echte Arbeit erkennbar, keine Schrift im Foto. Zusätzlich wird ein ruhiges Hintergrundvideo geprüft.
+- Homepage: Verweis auf die Geschäftspartnerseite. Auf beiden Seiten ist eine erste vollständige lokale Übersicht aus zwölf gleich großen Arbeitsfoto-Kacheln eingebaut. Zusätzlich wird ein ruhiges Hintergrundvideo geprüft.
 - Team: Christopher als Geschäftsführer, Meister und Fahrzeuglackierer; Ümit ohne erfundenes Foto als erfahrener Allrounder für Lackiervorbereitung und Lackierung.
 - Interne Kundenflotten: Firmen, Fahrzeuge, Fahrer, Kontaktfreigaben, Kilometerstände, zeit-/kilometerabhängige Wartung, Reifen und Einlagerung, Terminwünsche, Mobilitätsbedarf, private Konditionen und Historie.
 - Kompaktes Betriebs-Cockpit mit sichtbaren Warnungen und gezielt aufklappbaren Detailbereichen.
@@ -36,7 +36,9 @@ Noch auszubauen: mehrere Reifensätze und strukturierte Zustands-/Profil-/DOT-Do
 
 Der Nutzer wünscht hochwertigere Motive als die ersten Referenzen. Frühere KI-Hallenbilder und die Vierer-Collage sind nicht final freigegeben. Fremde Werkstatt- oder Mitarbeiterbilder dürfen nicht als dokumentarische Aufnahmen dieses Betriebs beschrieben werden. Kein Medienkauf erfolgt.
 
-Die abgelehnten neuen Motive sind aus der lokalen Homepage entfernt. Bis zur vollständigen Auswahl bleiben dort die bisherigen Bildmotive und die bisherige Titelgestaltung erhalten. Die neue Übersicht soll gleich große Fotokacheln pro Tätigkeit bekommen; keine Leistung wird größer gewichtet.
+Die abgelehnten neuen Motive sind aus der lokalen Homepage entfernt. Die Titelgestaltung bleibt vorerst erhalten. Unter `#unsere-arbeiten` zeigen Homepage und Geschäftspartnerseite dieselbe Übersicht mit zwölf gleich großen Fotokacheln. Jede Kachel zeigt ein eigenes konkretes Motiv mit einer HTML-Überschrift unter dem Foto und öffnet das vollständige Bild auf Wunsch. Desktop zeigt drei Spalten, mittlere Breiten zwei und Handys eine.
+
+Enthalten: Reifenmontage/Radwechsel, Bremsenservice, Ölservice, Inspektion, Lackierung, Unfallinstandsetzung, Smart Repair, Dellen/Hagel, Autoglas, Reifeneinlagerung, Schadenabwicklung und Fahrzeugübergabe/Ersatzmobilität. Neun frei lizenzierte Pexels-Motive ergänzen drei vorhandene Arbeitsfotos. Autoren, Detailseiten, Original-URLs und Lizenznachweise stehen in `static/homepage/leistungsfotos/quellen.json`. Alle heruntergeladenen Motive wurden visuell geprüft. Keine falschen Teamnamen oder dokumentarischen Behauptungen über fremde Werkstattbilder. Die Schadenabwicklungskachel illustriert Unterlagenarbeit, die Mobilitätskachel eine Schlüsselübergabe; sie behaupten keine abgebildete konkrete Versicherung oder Transportleistung.
 
 ### Kuratierte, visuell geprüfte Kandidaten
 
@@ -49,6 +51,6 @@ Die abgelehnten neuen Motive sind aus der lokalen Homepage entfernt. Bis zur vol
 | Hintergrundvideo: Diagnose | https://elements.envato.com/hands-of-mechanic-working-in-auto-repair-shop-29Q8W53 | 17 Sekunden, 4K; Hände und Diagnosegerät, kostenpflichtige Projektlizenz nötig |
 | Hintergrundvideo: Karosserievorbereitung | https://elements.envato.com/professional-repairman-in-garage-works-with-automo-8CXLTHU | 31 Sekunden, Full HD; Stoßfänger präzise abkleben, kostenpflichtige Projektlizenz nötig |
 
-Vorschlag für den Kopfbereich: 15–20 Sekunden ruhige, stumme Montage mit Pause-Schalter, Standbild bei reduzierter Bewegung und für sparsame mobile Nutzung. Die Montage wurde noch nicht erstellt oder eingebaut. Envato-Lizenzbasis: https://help.elements.envato.com/hc/en-us/articles/360000628966-Envato-Elements-License . Keine Lizenz gekauft und keine Stockdateien heruntergeladen.
+Vorschlag für den Kopfbereich: 15–20 Sekunden ruhige, stumme Montage mit Pause-Schalter, Standbild bei reduzierter Bewegung und für sparsame mobile Nutzung. Die Montage wurde noch nicht erstellt oder eingebaut. Envato-Lizenzbasis: https://help.elements.envato.com/hc/en-us/articles/360000628966-Envato-Elements-License . Keine kostenpflichtige Lizenz gekauft; nur die frei lizenzierten Pexels-Fotos für die Kacheln wurden heruntergeladen.
 
-Weiterhin fehlen überzeugende Motive für Reifenmontage, Lackierkabine, größere Unfallinstandsetzung, Richtarbeit, Dellendrücken, Autoglas und Mobilitätsservice. Die Bildrecherche ist daher eine konkrete Auswahlgrundlage, noch keine vollständige neue Galerie.
+Die Galerie ist zur lokalen Bildabnahme bereit. Bei der nächsten Auswahlrunde verdienen größere Unfall-/Richtarbeiten, Ölwechsel statt Ölstandprüfung und Autoglas in einer Halle besonders passende eigene Arbeitsaufnahmen. Die aktuelle Karosseriekachel zeigt Stoßfängermontage, die Ölservicekachel eine Ölstandprüfung und die Glaskachel einen Scheibenkleberauftrag im Freien. Der Videohintergrund bleibt eine separate offene Medienentscheidung. Keine Veröffentlichung oder Kundenkommunikation.

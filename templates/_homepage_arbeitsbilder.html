@@ -1,0 +1,33 @@
+{% set arbeitsmotive = [
+  ('reifenmontage', 'Reifen & Räder', 'Reifenmontage & Radwechsel', 'Montieren, wuchten und die Räder für die nächste Saison vorbereiten.', 'homepage/leistungsfotos/reifenmontage.jpg', 'Mechaniker beim Radwechsel am Fahrzeug', '50% 65%'),
+  ('bremsenservice', 'Mechanik', 'Bremsenservice', 'Bremsen prüfen, Verschleiß beurteilen und Scheiben sowie Beläge erneuern.', 'homepage/leistungsfotos/bremsenservice.jpg', 'Nahaufnahme der Arbeit an Bremssattel und Bremsscheibe', '45% 50%'),
+  ('oelservice', 'Wartung', 'Ölwechsel & Flüssigkeiten', 'Motoröl, Filter und Betriebsflüssigkeiten passend zum Fahrzeug warten.', 'homepage/leistungsfotos/oelservice.jpg', 'Ölstandprüfung mit dem Peilstab im Motorraum', '50% 63%'),
+  ('inspektion', 'Service', 'Inspektion & Fahrzeugcheck', 'Wartung nach Fahrzeugvorgabe – mit Blick auf Technik, Sicherheit und Fälligkeiten.', 'homepage/unfallinstandsetzung.webp', 'Technische Prüfung eines angehobenen Fahrzeugs in der Werkstatt', '50% 58%'),
+  ('lackierung', 'Fahrzeuglackierung', 'Lackierung & Farbton', 'Vom einzelnen Bauteil bis zur umfangreichen Lackierung mit sauberem Finish.', 'homepage/leistungsfotos/lackierung.jpg', 'Fahrzeuglackierer in Schutzkleidung lackiert einen Stoßfänger', '50% 58%'),
+  ('karosserie', 'Karosserie', 'Unfallinstandsetzung', 'Karosserieteile reparieren, erneuern und montieren – auch bei größeren Unfallschäden.', 'homepage/leistungsfotos/karosserie.jpg', 'Montagearbeit an einem abgebauten Fahrzeugstoßfänger', '50% 64%'),
+  ('smart-repair', 'Kleine Schäden', 'Smart Repair', 'Kratzer und kleinere Lackschäden gezielt und passend zum Schaden beheben.', 'homepage/praeziser-farbauftrag.webp', 'Präziser Lackauftrag mit der Spritzpistole an einem Fahrzeugbauteil', '50% 52%'),
+  ('dellen-hagel', 'Dellen & Hagel', 'Dellendrücken & Hagelschäden', 'Dellen mit geeigneter Technik bearbeiten; mobiler Einsatz nach Vereinbarung.', 'homepage/dellendoktor.webp', 'Dellenbearbeitung an einer Fahrzeugtür mit Zugwerkzeug und Reflexionsleuchte', '50% 42%'),
+  ('autoglas', 'Glas', 'Autoglas', 'Glasschäden beurteilen und die passende Reparatur oder Erneuerung übernehmen.', 'homepage/leistungsfotos/autoglas.jpg', 'Scheibenkleber wird am Rand einer Fahrzeugfrontscheibe aufgetragen', '50% 55%'),
+  ('reifenlager', 'Reifenhotel', 'Reifeneinlagerung', 'Räder kennzeichnen, lagern und den nächsten Wechsel gemeinsam planen.', 'homepage/leistungsfotos/reifenlager.jpg', 'Geordnete Lagerregale mit Fahrzeugreifen', '50% 50%'),
+  ('schadenabwicklung', 'Versicherungsschäden', 'Schadenabwicklung', 'Unterlagen, Kostenvoranschlag und Reparaturfreigabe mit Ihnen abstimmen.', 'homepage/leistungsfotos/schadenaufnahme.jpg', 'Fahrzeugbezogene Unterlagen werden auf einem Klemmbrett ausgefüllt', '70% 44%'),
+  ('mobilitaet', 'Mobil bleiben', 'Fahrzeugübergabe & Ersatzwagen', 'Hol- und Bringservice sowie Ersatzmobilität nach Absprache und Verfügbarkeit.', 'homepage/leistungsfotos/fahrzeuguebergabe.jpg', 'Nahaufnahme einer Fahrzeugschlüsselübergabe', '50% 55%')
+] %}
+<section class="arbeitsbilder-section" id="unsere-arbeiten" aria-labelledby="arbeitsbilder-titel">
+  <div class="arbeitsbilder-wrap">
+    <div class="arbeitsbilder-heading">
+      <div><span class="arbeitsbilder-eyebrow">Unser Leistungsspektrum</span><h2 id="arbeitsbilder-titel">Was wir für Ihr<br>Fahrzeug tun.</h2></div>
+      <p>Reifen, Mechanik, Karosserie und Lack. Alle Bereiche greifen bei uns ineinander – mit persönlicher Betreuung vom ersten Kontakt bis zur Übergabe.</p>
+    </div>
+    <div class="arbeitsbilder-grid">
+      {% for slug, bereich, titel, beschreibung, datei, alt, position in arbeitsmotive %}
+      <figure class="arbeitsbild" id="arbeit-{{ slug }}">
+        <a class="arbeitsbild-foto" href="{{ url_for('static', filename=datei) }}" target="_blank" rel="noopener" aria-label="Bild vergrößern: {{ titel }}">
+          <img src="{{ url_for('static', filename=datei) }}" alt="{{ alt }}" width="600" height="450" style="object-position:{{ position }}" loading="lazy" decoding="async">
+          <span class="arbeitsbild-zoom" aria-hidden="true">↗</span>
+        </a>
+        <figcaption><span class="arbeitsbild-bereich">{{ '%02d'|format(loop.index) }} / {{ bereich }}</span><h3>{{ titel }}</h3><p>{{ beschreibung }}</p></figcaption>
+      </figure>
+      {% endfor %}
+    </div>
+  </div>
+</section>
