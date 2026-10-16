@@ -1,0 +1,158 @@
+[
+  {
+    "name": "reifenmontage",
+    "creator": "Artem Podrez",
+    "page": "https://www.pexels.com/photo/mechanic-removing-a-tire-8985603/",
+    "license": "https://www.pexels.com/license/",
+    "image": "https://images.pexels.com/photos/8985603/pexels-photo-8985603.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    "bytes": 69244,
+    "status": "downloaded",
+    "dimensions": [
+      1200,
+      675
+    ],
+    "sha256": "d81e3c5e7f4058deda6cd232483cfe1c81adfd1de403b8725de283e68c2bd323",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "bremsenservice",
+    "creator": "Gustavo Fring",
+    "page": "https://www.pexels.com/photo/a-close-up-shot-of-a-vehicle-disc-brake-6870299/",
+    "license": "https://www.pexels.com/license/",
+    "image": "https://images.pexels.com/photos/6870299/pexels-photo-6870299.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    "bytes": 77297,
+    "status": "downloaded",
+    "dimensions": [
+      1200,
+      800
+    ],
+    "sha256": "b42a283f954566543c8eb394c32ad38c5e3087fd7c21f15214cda978774a5cfe",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "oelservice",
+    "creator": "Fatih Erden",
+    "page": "https://www.pexels.com/photo/a-mechanic-checking-the-oil-of-a-car-10490610/",
+    "license": "https://www.pexels.com/license/",
+    "image": "https://images.pexels.com/photos/10490610/pexels-photo-10490610.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    "bytes": 99155,
+    "status": "downloaded",
+    "dimensions": [
+      1200,
+      1800
+    ],
+    "sha256": "e95d60b07a0508b0f795a651c3a3f9e3b6ac3ec9aa421072c83361e1396d9c88",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "autoglas",
+    "creator": "UK CAR GLASS",
+    "page": "https://www.pexels.com/photo/man-fixing-windshield-of-car-11950156/",
+    "license": "https://www.pexels.com/license/",
+    "image": "https://images.pexels.com/photos/11950156/pexels-photo-11950156.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    "bytes": 315745,
+    "status": "downloaded",
+    "dimensions": [
+      1200,
+      1600
+    ],
+    "sha256": "f01d5448a6a8ea014fd9f70332086237fb26344efadc2c3ab355668f87a87349",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "reifenlager",
+    "creator": "Andrea Piacquadio",
+    "page": "https://www.pexels.com/photo/stack-of-rubber-tires-3806252/",
+    "license": "https://www.pexels.com/license/",
+    "image": "https://images.pexels.com/photos/3806252/pexels-photo-3806252.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    "bytes": 178702,
+    "status": "downloaded",
+    "dimensions": [
+      1200,
+      800
+    ],
+    "sha256": "ddb99a7fcf73b42cf7c1ccfc766d193a39af20e271dfe42feec43b22c4af6b64",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "schadenaufnahme",
+    "creator": "Mikhail Nilov",
+    "page": "https://www.pexels.com/photo/person-writing-on-a-clipboard-inside-the-vehicle-8943323/",
+    "license": "https://www.pexels.com/license/",
+    "image": "https://images.pexels.com/photos/8943323/pexels-photo-8943323.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    "bytes": 76090,
+    "status": "downloaded",
+    "dimensions": [
+      1200,
+      800
+    ],
+    "sha256": "8b9f66c9c7d337b4f90e362b0c1ea4696a5746edad15578e1335c196c89a708b",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "fahrzeuguebergabe",
+    "creator": "Antoni Shkraba",
+    "page": "https://www.pexels.com/photo/close-up-of-men-shaking-hands-and-handing-in-keys-to-a-new-car-at-the-car-salon-7144212/",
+    "license": "https://www.pexels.com/license/",
+    "image": "https://images.pexels.com/photos/7144212/pexels-photo-7144212.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    "bytes": 208691,
+    "status": "downloaded",
+    "dimensions": [
+      1200,
+      1800
+    ],
+    "sha256": "2b5715febad67b1b573b5649ccfdb2f1c7ed6f00a6756726f64f755a57f9788d",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "lackierung",
+    "creator": "Mohammad Hammad",
+    "page": "https://www.pexels.com/photo/professional-auto-body-spray-painting-workshop-30250199/",
+    "license": "https://www.pexels.com/license/",
+    "image": "https://images.pexels.com/photos/30250199/pexels-photo-30250199.jpeg?auto=compress&cs=tinysrgb&w=1200",
+    "bytes": 152399,
+    "status": "downloaded",
+    "dimensions": [
+      1200,
+      1800
+    ],
+    "sha256": "a39bb9ef211f4e9387422c95097ad10422da046370ee61eb04e2d880d4f734cf",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "karosserie",
+    "creator": "Alireza Heidarpour",
+    "page": "https://www.pexels.com/photo/focused-mechanic-working-on-car-bumper-repair-29945082/",
+    "license": "https://www.pexels.com/license/",
+    "image": "https://images.pexels.com/photos/29945082/pexels-photo-29945082.jpeg?cs=srgb&dl=pexels-ahcapture-29945082.jpg&fm=jpg",
+    "bytes": 1139547,
+    "status": "downloaded",
+    "dimensions": [
+      4000,
+      5328
+    ],
+    "sha256": "22d31f241d3adb1e2aaef46a4646cf25f9f206e8513590a60bc49fbe14c53204",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "unfallinstandsetzung.webp",
+    "origin": "Vorhandenes Projektmotiv; unverändert wiederverwendet",
+    "path": "static/homepage/unfallinstandsetzung.webp",
+    "sha256": "b34f98fbfa8f144cb159e1b789beedae91e9431a80c95e05119af1d4a8e453d3",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "praeziser-farbauftrag.webp",
+    "origin": "Vorhandenes Projektmotiv; unverändert wiederverwendet",
+    "path": "static/homepage/praeziser-farbauftrag.webp",
+    "sha256": "9730f32a415f741a8238ef128aa4403a363ea16f6170cb0bf14f4a5ff445b8e4",
+    "visual_review": "2026-10-16"
+  },
+  {
+    "name": "dellendoktor.webp",
+    "origin": "Vorhandenes Projektmotiv; unverändert wiederverwendet",
+    "path": "static/homepage/dellendoktor.webp",
+    "sha256": "09222e5544462cfa49133e40b1d43e8ea5c4de11fc049e57c571a592735140dd",
+    "visual_review": "2026-10-16"
+  }
+]
