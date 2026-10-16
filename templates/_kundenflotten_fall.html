@@ -1,0 +1,6 @@
+<article class="kf-case" data-case-card data-case-id="{{ case.id }}">
+  <div class="kf-case-head"><span class="kf-case-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.6 6.4a5 5 0 0 0-6.5 6.5L3 18a2.1 2.1 0 0 0 3 3l5.1-5.1a5 5 0 0 0 6.5-6.5l-3.3 3.3-3-3z"/></svg></span><div><p class="kf-case-kicker">{{ 'AKTUELLER FALL · BEISPIEL' if case.id == 0 else 'IHR WERKSTATTFALL' }}</p><h2 data-case-title>{{ case.title }}</h2></div><span class="kf-case-state" data-case-state>{{ case.label }}</span></div>
+  <p class="kf-case-description" data-case-description>{{ case.description }}</p><p class="kf-case-stage" data-case-stage {% if not case.stage %}hidden{% endif %}>{{ case.stage }}</p>
+  <ol class="kf-case-steps" aria-label="Bearbeitungsstand">{% for step in case.steps %}<li class="{{ 'done' if step.done else 'current' if step.current else '' }}" {% if step.current %}aria-current="step"{% endif %}><span aria-hidden="true">{{ loop.index }}</span><b>{{ step.label }}</b></li>{% endfor %}</ol>
+  <div class="kf-case-foot"><span>Letztes Update: <time data-case-time>{{ case.updated }}</time></span><span>{{ 'Lokale Gestaltungsvorschau' if case.id == 0 else 'Stand aus dem Werkstattauftrag' }}</span></div>
+</article>

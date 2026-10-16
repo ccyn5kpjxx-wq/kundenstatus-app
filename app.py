@@ -57,7 +57,8 @@ import mos_termination
 from cockpit_rules import document_visible as base_document_visible, price_state, price_record, decimal_input, has_invoice, exact_contact, workshop_completion_photo
 from werkstatt_assistent_uploads import ensure_upload_schema, is_assistant_private
 from werkstatt_kundenflotten import (register_kundenflotten, ensure_kundenflotten_schema,
-    BACKUP_TABLES as KUNDENFLOTTEN_BACKUP_TABLES, SCHEMA_FEATURE as KUNDENFLOTTEN_SCHEMA_FEATURE)
+    BACKUP_TABLES as KUNDENFLOTTEN_BACKUP_TABLES, SCHEMA_FEATURE as KUNDENFLOTTEN_SCHEMA_FEATURE,
+    CORE_BACKUP_TABLES as KUNDENFLOTTEN_CORE_TABLES, ORDER_SCHEMA_FEATURE as KUNDENFLOTTEN_ORDER_FEATURE)
 
 try:
     import psycopg
@@ -8365,7 +8366,7 @@ BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
 BACKUP_TABLES += KUNDENFLOTTEN_BACKUP_TABLES
 BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_liefereingang_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1", "werkstatt_schule_v1", "werkstatt_krankheit_v1", "werkstatt_bestellbestaetigung_v1")
-BACKUP_SCHEMA_FEATURES += (KUNDENFLOTTEN_SCHEMA_FEATURE,)
+BACKUP_SCHEMA_FEATURES += (KUNDENFLOTTEN_SCHEMA_FEATURE, KUNDENFLOTTEN_ORDER_FEATURE)
 BACKUP_BINARY_FIELDS = {
     "mitarbeiter_lohnzettel": {
         "original_base64": {"suffix": ".bin", "max_bytes": 10 * 1024 * 1024},
@@ -48092,7 +48093,9 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         required_tables.update({"assistent_rechte", "assistent_profile", "assistent_aktionen",
                                 "assistent_audit", "assistent_dialog"})
     if KUNDENFLOTTEN_SCHEMA_FEATURE in schema_features:
-        required_tables.update(KUNDENFLOTTEN_BACKUP_TABLES)
+        required_tables.update(KUNDENFLOTTEN_CORE_TABLES)
+    if KUNDENFLOTTEN_ORDER_FEATURE in schema_features:
+        required_tables.add("kundenflotten_auftraege")
     if "werkstatt_mitarbeiter_einladung_v1" in schema_features:
         required_tables.add("assistent_einladungen")
     if "werkstatt_mitarbeiter_portal_v1" in schema_features:

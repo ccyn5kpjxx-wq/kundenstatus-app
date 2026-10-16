@@ -6,6 +6,7 @@
   <title>Mein Fahrzeug · Gärtner Kunden-App · Vorschau</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='kundenflotten-demo.css') }}">
   <script src="{{ url_for('static', filename='kundenflotten-demo.js') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static',filename='kundenflotten-status.css') }}">
 </head>
 <body>
   {% macro icon(name) -%}
@@ -36,6 +37,7 @@
     </section>
     <section class="next-card" aria-labelledby="next-title"><div class="next-top"><span class="next-label">SAISONWECHSEL</span>{{ icon('wheel') }}</div><div class="calendar-icon"><span>OKT</span><strong>28</strong></div><div class="next-copy"><p class="eyebrow">BEISPIEL · TERMINWUNSCH OFFEN</p><h2 id="next-title">Zeit für die Winterräder</h2><p>Wir stimmen Wechsel und Einlagerung mit Ihnen ab.</p><button type="button" class="text-button" data-open="reifen">Terminwunsch auswählen <span aria-hidden="true">→</span></button></div><p class="next-footnote">Persönlich abgestimmt. Damit Sie mobil bleiben.</p></section>
     </div>
+    {% include '_kundenflotten_fall.html' %}
     <section class="inspection-reminder" aria-labelledby="hu-title"><span class="inspection-icon">{{ icon('inspection') }}</span><div><p class="eyebrow">PRÜFTERMIN IM BLICK · BEISPIEL</p><h2 id="hu-title">HU / AU im November 2026</h2><p>Fällig bis 30.11.2026. Wir stimmen den Termin mit unserem externen Prüfpartner ab.</p></div><button type="button" class="text-button" data-open="hu">HU/AU-Termin anfragen <span aria-hidden="true">→</span></button></section>
     <section class="services" aria-labelledby="services-title"><div class="section-heading"><div><p class="eyebrow">DIREKT ERLEDIGEN</p><h2 id="services-title">Was können wir für Sie tun?</h2></div><span>Ein Klick. Der richtige Weg.</span></div>
       <div class="service-grid">

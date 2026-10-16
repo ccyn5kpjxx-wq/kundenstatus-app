@@ -270,9 +270,9 @@ class BackupInvitationCompatibilityTests(unittest.TestCase):
         assignment = next(node for node in tree.body if isinstance(node, ast.Assign)
                           and any(isinstance(target, ast.Name) and target.id == 'BACKUP_TABLES' for target in node.targets))
         tables = ast.literal_eval(assignment.value)
-        from werkstatt_kundenflotten import BACKUP_TABLES as FLEET_TABLES, SCHEMA_FEATURE as FLEET_FEATURE
+        from werkstatt_kundenflotten import BACKUP_TABLES as FLEET_TABLES, SCHEMA_FEATURE as FLEET_FEATURE, CORE_BACKUP_TABLES as FLEET_CORE_TABLES, ORDER_SCHEMA_FEATURE as FLEET_ORDER_FEATURE
         namespace = {'BACKUP_TABLES': tables, 'BACKUP_BINARY_FIELDS': {},
-                     'KUNDENFLOTTEN_BACKUP_TABLES': FLEET_TABLES, 'KUNDENFLOTTEN_SCHEMA_FEATURE': FLEET_FEATURE,
+                     'KUNDENFLOTTEN_BACKUP_TABLES': FLEET_TABLES, 'KUNDENFLOTTEN_SCHEMA_FEATURE': FLEET_FEATURE, 'KUNDENFLOTTEN_CORE_TABLES': FLEET_CORE_TABLES, 'KUNDENFLOTTEN_ORDER_FEATURE': FLEET_ORDER_FEATURE,
                      'BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION': 2,
                      'clean_text': lambda value: str(value or '').strip()}
         exec(compile(ast.Module(body=[function], type_ignores=[]), '<actual-backup-validator>', 'exec'), namespace)

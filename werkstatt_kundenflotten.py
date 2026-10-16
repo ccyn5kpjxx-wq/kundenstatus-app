@@ -13,18 +13,51 @@ import re
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from urllib.parse import quote
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, session, url_for
 
-BACKUP_TABLES = (
+CORE_BACKUP_TABLES = (
     "kundenflotten_firmen", "kundenflotten_fahrzeuge", "kundenflotten_fahrer",
     "kundenflotten_plaene", "kundenflotten_termine", "kundenflotten_reifen",
     "kundenflotten_historie", "kundenflotten_anlagen",
 )
+ORDER_SCHEMA_FEATURE = "kundenflotten_auftraege_v1"
+BACKUP_TABLES = CORE_BACKUP_TABLES + ("kundenflotten_auftraege",)
 SCHEMA_FEATURE = "kundenflotten_v1"
 KINDS = {"service": "Service / Inspektion", "oel": "Ölwechsel", "reifen": "Reifen",
          "hu": "HU / AU", "bremsen": "Bremsen", "karosserie": "Karosserie / Lack", "sonstiges": "Sonstiges"}
+
+
+
+CASE_LABELS = {1: "Auftrag erfasst", 2: "Eingeplant", 3: "In Arbeit", 4: "Arbeiten abgeschlossen", 5: "Zurückgegeben"}
+CASE_COPY = {1: "Wir stimmen die nächsten Schritte mit Ihnen ab.", 2: "Ihr Werkstatttermin ist eingeplant.", 3: "Unser Team arbeitet an Ihrem Fahrzeug.", 4: "Die Arbeiten sind abgeschlossen. Die Übergabe stimmen wir mit Ihnen ab.", 5: "Das Fahrzeug wurde zurückgegeben."}
+
+
+def case_view(order, kind):
+    """Explicit customer-safe allowlist. Never return the raw order or tokens."""
+    try:
+        status = int(order.get("status") or 0)
+    except (ValueError, TypeError):
+        status = 0
+    if status not in CASE_LABELS:
+        status = 0
+    stamp = str(order.get("geaendert_am") or "")
+    try:
+        parsed = datetime.fromisoformat(stamp)
+        if parsed.tzinfo:
+            parsed = parsed.astimezone(ZoneInfo("Europe/Berlin"))
+        stamp = parsed.strftime("%d.%m.%Y · %H:%M")
+    except ValueError:
+        pass  # Legacy portal timestamps are already a human-readable local time.
+    stage = {"vorarbeit":"Vorbereitung", "karosserie":"Karosseriearbeiten", "lackierung":"Lackierung", "finish":"Finish"}.get(order.get("produktion_schritt"), "") if kind == "karosserie" and status == 3 else ""
+    return {"id":order["id"], "title":KINDS.get(kind,"Werkstattauftrag"), "vehicle":str(order.get("fahrzeug") or "Ihr Fahrzeug"),
+            "plate":str(order.get("kennzeichen") or ""), "status":status if status in CASE_LABELS else 0,
+            "label":CASE_LABELS.get(status,"Status wird geprüft"), "description":CASE_COPY.get(status,"Bitte stimmen Sie den aktuellen Stand mit uns ab."),
+            "updated":stamp or "Noch kein Zeitstempel", "stage":stage,
+            "steps":[{"label":label,"done":value < status,"current":value == status} for value,label in CASE_LABELS.items()]}
 
 
 def ensure_kundenflotten_schema(db):
@@ -65,6 +98,10 @@ def ensure_kundenflotten_schema(db):
         """CREATE TABLE IF NOT EXISTS kundenflotten_anlagen (
             id TEXT PRIMARY KEY, fahrzeug_id TEXT NOT NULL REFERENCES kundenflotten_fahrzeuge(id),
             art TEXT NOT NULL, fingerprint TEXT NOT NULL, erstellt_am TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS kundenflotten_auftraege (
+            id TEXT PRIMARY KEY, fahrzeug_id TEXT NOT NULL REFERENCES kundenflotten_fahrzeuge(id),
+            auftrag_id INTEGER NOT NULL UNIQUE, art TEXT NOT NULL, erstellt_am TEXT NOT NULL)""",
+        "CREATE INDEX IF NOT EXISTS idx_kundenflotten_auftrag_fahrzeug ON kundenflotten_auftraege(fahrzeug_id)",
         "CREATE INDEX IF NOT EXISTS idx_kundenflotten_firma ON kundenflotten_fahrzeuge(firma_id)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_kundenflotten_fin ON kundenflotten_fahrzeuge(fin) WHERE fin <> ''",
         "CREATE INDEX IF NOT EXISTS idx_kundenflotten_plan ON kundenflotten_plaene(fahrzeug_id, status)",
@@ -137,6 +174,15 @@ def _same_plate(left, right):
     # Flag matching text for review rather than creating an accidental copy.
     compact = lambda value: re.sub(r"[\s\-\u2010-\u2015]+", "", value)
     return compact(left) == compact(right)
+
+
+def _same_vehicle(vehicle, order):
+    """Recheck a link when reading too: an order can be corrected later."""
+    vin = str(vehicle["fin"] or "").strip().upper()
+    order_vin = str(order["fin_nummer"] or "").strip().upper()
+    if vin and order_vin:
+        return vin == order_vin
+    return bool(vehicle["kennzeichen"] and order["kennzeichen"]) and _same_plate(vehicle["kennzeichen"], order["kennzeichen"])
 
 
 def _timestamp():
@@ -253,6 +299,36 @@ class Kundenflotten:
                         appointments=[dict(r) for r in db.execute("SELECT * FROM kundenflotten_termine WHERE fahrzeug_id=? ORDER BY datum DESC,id", (key,)).fetchall()],
                         history=[dict(r) for r in db.execute("SELECT * FROM kundenflotten_historie WHERE fahrzeug_id=? ORDER BY erstellt_am DESC,id DESC LIMIT 80", (key,)).fetchall()])
 
+    @staticmethod
+    def order_row(db, number):
+        row = db.execute("SELECT id,fahrzeug,kennzeichen,fin_nummer,status,archiviert,produktion_schritt,geaendert_am,kunden_status_token,kunden_status_aktiv FROM auftraege WHERE id=?", (number,)).fetchone()
+        return dict(row) if row else None
+
+    def linked_cases(self, company_id, vehicle_id):
+        with self.db() as db:
+            vehicle = self.row(db,"kundenflotten_fahrzeuge",vehicle_id)
+            if vehicle["firma_id"] != company_id:
+                raise LookupError()
+            cases=[]
+            for link in db.execute("SELECT * FROM kundenflotten_auftraege WHERE fahrzeug_id=? ORDER BY erstellt_am DESC,id",(vehicle_id,)).fetchall():
+                order=self.order_row(db,link["auftrag_id"])
+                if not order or order["archiviert"] or not _same_vehicle(vehicle,order):
+                    continue
+                view=case_view(order,link["art"])
+                # These links exist only in the authenticated internal vehicle file.
+                view["customer_url"] = "/kunden-app/fall/"+quote(order["kunden_status_token"],safe="") if order["kunden_status_token"] and order["kunden_status_aktiv"] else ""
+                cases.append(view)
+            return cases
+
+    def case_for_order(self, number):
+        with self.db() as db:
+            link=db.execute("SELECT art,fahrzeug_id FROM kundenflotten_auftraege WHERE auftrag_id=?",(number,)).fetchone()
+            if not link:
+                return None
+            order=self.order_row(db,number)
+            vehicle=self.row(db,"kundenflotten_fahrzeuge",link["fahrzeug_id"])
+            return case_view(order,link["art"]) if order and not order["archiviert"] and _same_vehicle(vehicle,order) else None
+
     def create_company(self, data, *, require_submission=False):
         name = _text(data, "name", required=True)
         limit = _text(data, "freigabe_limit", 16)
@@ -328,6 +404,24 @@ class Kundenflotten:
                 db.execute("DELETE FROM kundenflotten_fahrer WHERE fahrzeug_id=?", (key,))
                 db.execute("INSERT INTO kundenflotten_fahrer VALUES (?,?,?,?,?,?,?)", (key, name, email, phone, channel, consent, _timestamp()))
                 self.history(db, key, "fahrer", f"Fahrerzuordnung: {previous['name'] if previous else 'noch keine'} → {name}; Kontaktkanal {channel}. Kein Versand.")
+            elif action == "auftrag":
+                number, kind = _number(data,"auftrag_id",2147483647,True), _choice(data,"art",KINDS)
+                if not number or data.get("bestaetigt") != "1":
+                    raise ValueError("Bitte den Auftrag ausdrücklich mit der Fahrzeugakte abgleichen und die Zuordnung bestätigen.")
+                order=self.order_row(db,number)
+                if not order or order["archiviert"] or order["status"] not in (1,2,3,4):
+                    raise ValueError("Bitte einen vorhandenen, nicht archivierten Werkstattauftrag auswählen.")
+                if not _same_vehicle(vehicle,order):
+                    raise ValueError("Kennzeichen oder FIN müssen die Zuordnung zum selben Fahrzeug bestätigen.")
+                if not self.claim_submission(db,key,action,data,(number,kind)):
+                    return
+                previous=db.execute("SELECT fahrzeug_id,art FROM kundenflotten_auftraege WHERE auftrag_id=?",(number,)).fetchone()
+                if previous:
+                    if previous["fahrzeug_id"] == key and previous["art"] == kind:
+                        return
+                    raise ValueError("Dieser Werkstattauftrag ist bereits einer Fahrzeugakte oder einem anderen Leistungsbereich zugeordnet.")
+                db.execute("INSERT INTO kundenflotten_auftraege VALUES (?,?,?,?,?)",(uuid4().hex,key,number,kind,_timestamp()))
+                self.history(db,key,"auftrag",f"Werkstattauftrag {number} für {KINDS[kind]} ausdrücklich zugeordnet. Status wird direkt aus dem Auftrag gelesen. Kein Versand.")
             elif action == "plan":
                 kind = _choice(data, "art", KINDS)
                 due = _month_end(data, "faellig_monat") if kind == "hu" and data.get("faellig_monat") else _date(data, "faellig_datum")
@@ -473,7 +567,7 @@ def register_kundenflotten(portal):
             data = service.vehicle(company_id, vehicle_id)
         except LookupError:
             abort(404)
-        return render_template("kundenflotten_fahrzeug.html", **data, kinds=KINDS, today=date.today().isoformat(), request_tokens={"plan": uuid4().hex, "termin": uuid4().hex})
+        return render_template("kundenflotten_fahrzeug.html", **data, cases=service.linked_cases(company_id,vehicle_id), kinds=KINDS, today=date.today().isoformat(), request_tokens={"plan": uuid4().hex, "termin": uuid4().hex, "auftrag":uuid4().hex})
 
     @bp.post("/admin/kundenflotten/firma/<company_id>/fahrzeug/<vehicle_id>/<action>")
     @portal.admin_required
@@ -485,11 +579,47 @@ def register_kundenflotten(portal):
     def complete(company_id, vehicle_id, plan_id):
         return save(lambda: service.complete_plan(company_id, vehicle_id, plan_id, request.form), url_for("kundenflotten.vehicle", company_id=company_id, vehicle_id=vehicle_id))
 
+    @bp.get("/admin/kundenflotten/firma/<company_id>/fahrzeug/<vehicle_id>/kundenansicht")
+    @portal.admin_required
+    def vehicle_preview(company_id,vehicle_id):
+        try:
+            data=service.vehicle(company_id,vehicle_id)
+            cases=service.linked_cases(company_id,vehicle_id)
+        except LookupError:
+            abort(404)
+        return render_template("kundenflotten_status.html",cases=cases,vehicle_title=data["vehicle"]["modell"],plate=data["vehicle"]["kennzeichen"],internal=True,status_url=url_for("kundenflotten.vehicle_status",company_id=company_id,vehicle_id=vehicle_id),back_url=url_for("kundenflotten.vehicle",company_id=company_id,vehicle_id=vehicle_id))
+
+    @bp.get("/admin/kundenflotten/firma/<company_id>/fahrzeug/<vehicle_id>/kundenansicht/status")
+    @portal.admin_required
+    def vehicle_status(company_id,vehicle_id):
+        try:
+            cases=service.linked_cases(company_id,vehicle_id)
+        except LookupError:
+            abort(404)
+        return jsonify(cases=[{k:v for k,v in c.items() if k != "customer_url"} for c in cases])
+
+    def authorized_case(token):
+        order=portal.get_auftrag_by_kunden_status_token(token)
+        case=service.case_for_order(order["id"]) if order else None
+        if not case:
+            abort(404)
+        return case
+
+    @bp.get("/kunden-app/fall/<token>")
+    def customer_case(token):
+        case=authorized_case(token)
+        return render_template("kundenflotten_status.html",cases=[case],vehicle_title=case["vehicle"],plate=case["plate"],internal=False,status_url=url_for("kundenflotten.customer_case_status",token=token),back_url=url_for("kunden_status",token=token))
+
+    @bp.get("/kunden-app/fall/<token>/status")
+    def customer_case_status(token):
+        return jsonify(cases=[authorized_case(token)])
+
     @bp.get("/kunden-app/vorschau")
     def demo():
         if not portal.app.config.get("KUNDENFLOTTEN_DEMO_ENABLED", False) or request.remote_addr not in {"127.0.0.1", "::1"}:
             abort(404)
-        return render_template("kundenflotten_demo.html")
+        example=case_view({"id":0,"fahrzeug":"Hyundai Kona","kennzeichen":"MOS · DEMO","status":3,"geaendert_am":datetime.now().strftime("%d.%m.%Y")+" · 09:42"},"service")
+        return render_template("kundenflotten_demo.html",case=example)
 
     portal.app.register_blueprint(bp)
     portal.kundenflotten = service

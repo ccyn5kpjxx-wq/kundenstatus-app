@@ -11,7 +11,7 @@ from uuid import uuid4
 import zipfile
 
 import smoke_test as isolated
-from werkstatt_kundenflotten import BACKUP_TABLES, SCHEMA_FEATURE
+from werkstatt_kundenflotten import BACKUP_TABLES, CORE_BACKUP_TABLES, SCHEMA_FEATURE, ORDER_SCHEMA_FEATURE
 
 portal = isolated.portal
 
@@ -28,6 +28,10 @@ class FleetIntegrationTests(unittest.TestCase):
         cls.service.change_vehicle(cls.company, cls.vehicle, 'reifen', {'saison': 'winter', 'beschreibung': 'Testreifensatz', 'lagerplatz': 'R01-F02', 'bestellbedarf': 'Profil prüfen'})
         cls.service.change_vehicle(cls.company, cls.vehicle, 'plan', {'art': 'service', 'titel': 'Inspektion', 'faellig_datum': today, 'faellig_km': '25000', 'intervall_monate': '12', 'intervall_km': '15000', 'quelle': 'Synthetischer Wartungsplan', 'request_id': uuid4().hex})
         cls.service.change_vehicle(cls.company, cls.vehicle, 'termin', {'datum': today, 'art': 'reifen', 'transport': 'abholen', 'ersatzwagen': '1', 'notiz': 'Nur Test', 'request_id': uuid4().hex})
+        with closing(portal.get_db()) as db:
+            order = db.execute("INSERT INTO auftraege(fahrzeug,kennzeichen,status,kunden_status_token,kunden_status_aktiv,erstellt_am,geaendert_am) VALUES('Testfahrzeug','TEST 1',2,?,1,?,?)", (uuid4().hex, portal.now_str(), portal.now_str())).lastrowid
+            db.commit()
+        cls.service.change_vehicle(cls.company,cls.vehicle,'auftrag',{'auftrag_id':str(order),'art':'service','bestaetigt':'1','request_id':uuid4().hex})
         cls.backup = portal.create_backup_package(reason='kundenflotten-integrationstest')
         with zipfile.ZipFile(cls.backup) as archive:
             cls.export = json.loads(archive.read('backup.json'))
@@ -44,8 +48,9 @@ class FleetIntegrationTests(unittest.TestCase):
         with zipfile.ZipFile(self.backup) as archive:
             portal.import_backup_json_rows_into_current_database(self.export, archive, archive.namelist())
 
-    def test_real_backup_contains_all_eight_tables_and_schema_feature(self):
+    def test_real_backup_contains_all_tables_and_both_schema_features(self):
         self.assertIn(SCHEMA_FEATURE, self.export['schema_features'])
+        self.assertIn(ORDER_SCHEMA_FEATURE, self.export['schema_features'])
         self.assertTrue(set(BACKUP_TABLES).issubset(portal.BACKUP_TABLES))
         for table in BACKUP_TABLES:
             with self.subTest(table=table):
@@ -68,6 +73,7 @@ class FleetIntegrationTests(unittest.TestCase):
     def test_old_json_without_fleet_data_is_rejected_before_any_deletion(self):
         old = deepcopy(self.export)
         old['schema_features'].remove(SCHEMA_FEATURE)
+        old['schema_features'].remove(ORDER_SCHEMA_FEATURE)
         for table in BACKUP_TABLES:
             del old['tables'][table]
         with self.assertRaisesRegex(ValueError, 'Kundenflotten'):
@@ -103,6 +109,41 @@ class FleetIntegrationTests(unittest.TestCase):
         del incomplete['tables']['kundenflotten_reifen']
         with self.assertRaises(ValueError):
             portal.validate_backup_binary_reference_completeness(incomplete, {})
+
+    def test_old_eight_table_json_valid_but_cannot_remove_existing_mapping(self):
+        old=deepcopy(self.export)
+        old['schema_features'].remove(ORDER_SCHEMA_FEATURE)
+        del old['tables']['kundenflotten_auftraege']
+        portal.validate_backup_binary_reference_completeness(old,portal.backup_binary_reference_map(old))
+        with self.assertRaisesRegex(ValueError,'Kundenflotten'):
+            portal.import_backup_json_rows_into_current_database(old,None,[])
+        self.assertEqual(self.snapshot(),self.expected)
+        with closing(portal.get_db()) as db:
+            db.execute('DELETE FROM kundenflotten_auftraege'); db.commit()
+        with zipfile.ZipFile(self.backup) as archive:
+            portal.import_backup_json_rows_into_current_database(old,archive,archive.namelist())
+        self.assertEqual(self.snapshot()['kundenflotten_auftraege'],[])
+        for table in CORE_BACKUP_TABLES:
+            self.assertEqual(self.snapshot()[table],self.expected[table])
+
+    def test_old_eight_table_sqlite_requires_empty_target_mapping(self):
+        source=isolated.TEMP_DIR/'old-eight-tables.db'
+        source.write_bytes(self.source.read_bytes())
+        with closing(sqlite3.connect(source)) as db:
+            db.execute('DROP TABLE kundenflotten_auftraege'); db.commit()
+        with self.assertRaisesRegex(ValueError,'Kundenflotten'):
+            portal.import_sqlite_rows_into_current_database(source)
+        self.assertEqual(self.snapshot(),self.expected)
+        with closing(portal.get_db()) as db:
+            db.execute('DELETE FROM kundenflotten_auftraege'); db.commit()
+        portal.import_sqlite_rows_into_current_database(source)
+        self.assertEqual(self.snapshot()['kundenflotten_auftraege'],[])
+
+    def test_mapping_feature_cannot_omit_its_table(self):
+        broken=deepcopy(self.export)
+        del broken['tables']['kundenflotten_auftraege']
+        with self.assertRaises(ValueError):
+            portal.validate_backup_binary_reference_completeness(broken,{})
 
     def test_postgres_adapter_does_not_invent_id_for_vehicle_key_tables(self):
         connection = MagicMock()

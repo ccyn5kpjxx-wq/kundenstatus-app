@@ -387,7 +387,11 @@ class CustomerFleetTests(unittest.TestCase):
         for forbidden in ("fetch(","XMLHttpRequest","sendBeacon","serviceWorker.register","localStorage"):
             self.assertNotIn(forbidden,js)
         routes=[str(rule) for rule in self.app.url_map.iter_rules() if rule.endpoint.startswith("kundenflotten.")]
-        self.assertTrue(all(path.startswith(("/admin/kundenflotten","/kunden-app/vorschau")) for path in routes))
+        self.assertTrue(all(path.startswith(("/admin/kundenflotten","/kunden-app/vorschau","/kunden-app/fall/<token>")) for path in routes))
+        # The only non-demo customer routes are read-only single-order views.
+        public=[rule for rule in self.app.url_map.iter_rules() if rule.endpoint.startswith('kundenflotten.') and str(rule).startswith('/kunden-app/fall/')]
+        self.assertEqual(len(public),2)
+        self.assertTrue(all(rule.methods <= {'GET','HEAD','OPTIONS'} for rule in public))
 
     def test_double_post_plan_and_visit_create_once(self):
         self.admin()
