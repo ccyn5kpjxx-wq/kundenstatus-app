@@ -103,6 +103,14 @@ def _date(data, field, required=False):
         raise ValueError("Bitte ein gültiges Datum zwischen 2000 und 2100 angeben.") from None
 
 
+def _month_end(data, field):
+    raw = _text(data, field, 7, True)
+    if not re.fullmatch(r"(?:20[0-9]{2}|2100)-(?:0[1-9]|1[0-2])", raw):
+        raise ValueError("Bitte einen gültigen Prüfmonat zwischen 2000 und 2100 angeben.")
+    year, month = map(int, raw.split("-"))
+    return date(year, month, calendar.monthrange(year, month)[1]).isoformat()
+
+
 def _email(data):
     value = _text(data, "email", 254)
     if value and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
@@ -321,8 +329,12 @@ class Kundenflotten:
                 db.execute("INSERT INTO kundenflotten_fahrer VALUES (?,?,?,?,?,?,?)", (key, name, email, phone, channel, consent, _timestamp()))
                 self.history(db, key, "fahrer", f"Fahrerzuordnung: {previous['name'] if previous else 'noch keine'} → {name}; Kontaktkanal {channel}. Kein Versand.")
             elif action == "plan":
-                due, km = _date(data, "faellig_datum"), _number(data, "faellig_km")
+                kind = _choice(data, "art", KINDS)
+                due = _month_end(data, "faellig_monat") if kind == "hu" and data.get("faellig_monat") else _date(data, "faellig_datum")
+                km = _number(data, "faellig_km")
                 months, interval_km = _number(data, "intervall_monate", 120), _number(data, "intervall_km", 200000)
+                if kind == "hu" and (not due or km is not None or months is not None or interval_km is not None):
+                    raise ValueError("HU/AU bitte mit belegtem Fälligkeitsdatum erfassen, ohne Kilometerziel oder pauschales Wiederholungsintervall.")
                 if not due and km is None:
                     raise ValueError("Mindestens ein Fälligkeitsdatum oder ein Kilometerziel ist erforderlich.")
                 if months == 0 or interval_km == 0:
@@ -330,10 +342,12 @@ class Kundenflotten:
                 if months and not due or interval_km and km is None:
                     raise ValueError("Zum Intervall muss auch das entsprechende erste Datum bzw. Kilometerziel angegeben werden.")
                 title = _text(data, "titel", 160, True)
-                kind, source = _choice(data, "art", KINDS), _text(data, "quelle", 500, True)
+                source = _text(data, "quelle", 500, True)
                 values = (kind, title, due, km, months, interval_km, source)
                 if not self.claim_submission(db, key, action, data, values):
                     return
+                if kind == "hu" and db.execute("SELECT id FROM kundenflotten_plaene WHERE fahrzeug_id=? AND art='hu' AND status='offen'", (key,)).fetchone():
+                    raise ValueError("Für dieses Fahrzeug ist bereits eine offene HU/AU-Fälligkeit hinterlegt. Bitte zuerst den bestehenden Prüfplan prüfen.")
                 db.execute("INSERT INTO kundenflotten_plaene VALUES (?,?,?,?,?,?,?,?,?,'offen',1,?)", (uuid4().hex, key, *values, _timestamp()))
                 self.history(db, key, "plan", f"Plan angelegt: {title}.")
             elif action == "termin":
@@ -369,20 +383,31 @@ class Kundenflotten:
                 raise ValueError("Dieser Stand wurde bereits geändert. Bitte die Seite neu laden.")
             if km < vehicle["km"] or completed < vehicle["km_datum"]:
                 raise ValueError("Für historische Arbeiten bitte zuerst die Fahrzeugakte prüfen; der aktuelle Kilometerstand wird nicht zurückgesetzt.")
-            next_date = add_months(date.fromisoformat(completed), plan["intervall_monate"]).isoformat() if plan["intervall_monate"] else ""
-            next_km = km + plan["intervall_km"] if plan["intervall_km"] else None
+            source, months, interval_km = plan["quelle"], plan["intervall_monate"], plan["intervall_km"]
+            if plan["art"] == "hu":
+                if data.get("pruefung_bestanden") != "1":
+                    raise ValueError("Bitte nur eine bestandene HU/AU anhand des Prüfberichts abschließen. Bei Mängeln bleibt die Fälligkeit offen.")
+                next_date = _month_end(data, "naechste_hu_monat")
+                source = _text(data, "pruefbericht", 500, True)
+                if next_date <= completed:
+                    raise ValueError("Die nächste HU/AU-Fälligkeit aus dem Prüfbericht muss nach dem Prüftag liegen.")
+                next_km, months, interval_km = None, None, None
+            else:
+                next_date = add_months(date.fromisoformat(completed), months).isoformat() if months else ""
+                next_km = km + interval_km if interval_km else None
             if next_km is not None and next_km > 3000000:
                 raise ValueError("Das nächste Kilometerziel liegt über 3.000.000 km. Bitte Kilometerstand und Wartungsintervall prüfen; es wurde nichts gespeichert.")
             if next_date and next_date > "2100-12-31":
                 raise ValueError("Das nächste Fälligkeitsdatum liegt außerhalb des unterstützten Zeitraums. Bitte das Wartungsintervall prüfen.")
             status = "offen" if next_date or next_km is not None else "abgeschlossen"
-            changed = db.execute("UPDATE kundenflotten_plaene SET faellig_datum=?,faellig_km=?,status=?,version=version+1 WHERE id=? AND version=? AND status='offen'", (next_date, next_km, status, plan_id, version))
+            changed = db.execute("UPDATE kundenflotten_plaene SET faellig_datum=?,faellig_km=?,status=?,quelle=?,intervall_monate=?,intervall_km=?,version=version+1 WHERE id=? AND version=? AND status='offen'", (next_date, next_km, status, source, months, interval_km, plan_id, version))
             if changed.rowcount != 1:
                 raise ValueError("Der Plan wurde zwischenzeitlich geändert. Bitte neu laden.")
             changed_vehicle = db.execute("UPDATE kundenflotten_fahrzeuge SET km=?,km_datum=? WHERE id=? AND km=? AND km_datum=?", (km, completed, vehicle_id, vehicle["km"], vehicle["km_datum"]))
             if changed_vehicle.rowcount != 1:
                 raise ValueError("Die Fahrzeugakte wurde zwischenzeitlich geändert. Bitte neu laden; es wurde kein Abschluss gespeichert.")
-            self.history(db, vehicle_id, "abschluss", f"{plan['titel']} am {completed} bei {km} km erledigt. Nächster Termin: {next_date or 'kein Zeitintervall'}; Kilometerziel: {next_km if next_km is not None else 'kein KM-Intervall'}. Keine Nachricht versendet.")
+            report_note = f" Bisherige HU/AU-Frist: {plan['faellig_datum']}; bisherige Quelle: {plan['quelle']}; neuer Prüfbericht: {source}." if plan["art"] == "hu" else ""
+            self.history(db, vehicle_id, "abschluss", f"{plan['titel']} am {completed} bei {km} km erledigt. Nächster Termin: {next_date or 'kein Zeitintervall'}; Kilometerziel: {next_km if next_km is not None else 'kein KM-Intervall'}.{report_note} Keine Nachricht versendet.")
 
 
 def register_kundenflotten(portal):

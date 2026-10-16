@@ -3,7 +3,7 @@
   const dialog = document.getElementById('app-dialog');
   const content = document.getElementById('dialog-content');
   const result = document.getElementById('demo-result');
-  const titles = {reifen:'Reifen & Räder',service:'Service planen',schaden:'Schaden melden',panne:'Panne melden',kilometer:'Kilometer aktualisieren',termine:'Ihre Termine',nachrichten:'Ihre Nachrichten',kontakt:'Persönlich für Sie da.',profil:'Ihr Profil'};
+  const titles = {hu:'HU / AU planen',reifen:'Reifen & Räder',service:'Service planen',schaden:'Schaden melden',panne:'Panne melden',kilometer:'Kilometer aktualisieren',termine:'Ihre Termine',nachrichten:'Ihre Nachrichten',kontakt:'Persönlich für Sie da.',profil:'Ihr Profil'};
   let urls = [];
   let opener;
   function cleanup() { urls.forEach(url => URL.revokeObjectURL(url)); urls = []; }

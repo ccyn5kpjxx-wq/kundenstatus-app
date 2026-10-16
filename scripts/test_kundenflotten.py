@@ -98,6 +98,94 @@ class CustomerFleetTests(unittest.TestCase):
         with closing(self.portal.get_db()) as db:
             return db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
+    def hu_plan(self, **changes):
+        data = dict(art="hu", titel="HU / AU", faellig_monat="2030-02", quelle="Prüfbericht Beispiel 1 · externer Prüfpartner", request_id=uuid4().hex)
+        data.update(changes)
+        self.service.change_vehicle(self.company, self.vehicle, "plan", data)
+        return next(p for p in self.service.vehicle(self.company, self.vehicle)["plans"] if p["art"] == "hu")
+
+    def test_hu_month_preserves_month_end_and_leap_year(self):
+        from werkstatt_kundenflotten import _month_end
+        self.assertEqual(_month_end({"monat":"2028-02"}, "monat"), "2028-02-29")
+        self.assertEqual(_month_end({"monat":"2100-02"}, "monat"), "2100-02-28")
+        plan = self.hu_plan()
+        self.assertEqual(plan["faellig_datum"], "2030-02-28")
+        self.assertIsNone(plan["faellig_km"])
+        self.assertIsNone(plan["intervall_monate"])
+        self.assertEqual(due_state(plan, 3000000), "geplant")
+
+    def test_hu_rejects_missing_date_and_guessed_intervals_without_writes(self):
+        initial_history = self.count("kundenflotten_historie")
+        for change in [dict(faellig_monat="",faellig_datum=""), dict(faellig_km="50000"), dict(intervall_monate="24"), dict(intervall_km="15000"), dict(faellig_monat="2030-13"), dict(faellig_monat="1999-12"), dict(quelle="")]:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.hu_plan(**change)
+            self.assertEqual(self.count("kundenflotten_plaene"),0)
+            self.assertEqual(self.count("kundenflotten_anlagen"),0)
+            self.assertEqual(self.count("kundenflotten_historie"),initial_history)
+
+    def test_hu_replay_is_safe_and_second_open_plan_rejected(self):
+        receipt = uuid4().hex
+        first = self.hu_plan(request_id=receipt)
+        self.hu_plan(request_id=receipt)
+        with self.assertRaises(ValueError):
+            self.hu_plan(faellig_monat="2031-01")
+        self.assertEqual(self.count("kundenflotten_plaene"),1)
+        self.assertEqual(self.count("kundenflotten_anlagen"),1)
+        self.assertEqual(self.service.vehicle(self.company,self.vehicle)["plans"][0]["id"],first["id"])
+
+    def test_hu_requires_passed_report_and_next_month_without_partial_completion(self):
+        plan = self.hu_plan()
+        base = dict(erledigt_am=self.today, km="10050", version="1", pruefung_bestanden="1", naechste_hu_monat="2031-04", pruefbericht="Neuer Prüfbericht Beispiel 2")
+        before = self.count("kundenflotten_historie")
+        for changes in [dict(pruefung_bestanden=""),dict(naechste_hu_monat=""),dict(naechste_hu_monat="2001-01"),dict(pruefbericht="")]:
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.service.complete_plan(self.company,self.vehicle,plan["id"],dict(base,**changes))
+            record = self.service.vehicle(self.company,self.vehicle)
+            self.assertEqual(record["vehicle"]["km"],10000)
+            self.assertEqual(record["plans"][0]["version"],1)
+            self.assertEqual(record["plans"][0]["faellig_datum"],"2030-02-28")
+            self.assertEqual(self.count("kundenflotten_historie"),before)
+
+    def test_hu_next_date_is_report_based_and_scoped(self):
+        plan = self.hu_plan()
+        data = dict(erledigt_am=self.today,km="10050",version="1",pruefung_bestanden="1",naechste_hu_monat="2031-04",pruefbericht="Prüfbericht 2 · externer Prüfpartner")
+        other=self.service.create_company({"name":"Andere Testfirma"})
+        with self.assertRaises(LookupError):
+            self.service.complete_plan(other,self.vehicle,plan["id"],data)
+        self.service.complete_plan(self.company,self.vehicle,plan["id"],data)
+        record = self.service.vehicle(self.company,self.vehicle)
+        updated = record["plans"][0]
+        self.assertEqual(updated["faellig_datum"],"2031-04-30")
+        self.assertEqual(updated["quelle"],data["pruefbericht"])
+        completion = next(item["text"] for item in record["history"] if item["art"] == "abschluss")
+        self.assertIn(plan["quelle"], completion)
+        self.assertIn(data["pruefbericht"], completion)
+        self.assertIn("2030-02-28", completion)
+        self.assertEqual(updated["version"],2)
+        self.assertEqual(record["vehicle"]["km"],10050)
+        self.assertIsNone(updated["intervall_monate"])
+        self.assertIsNone(updated["faellig_km"])
+        with self.assertRaises(ValueError):
+            self.service.complete_plan(self.company,self.vehicle,plan["id"],data)
+        self.assertEqual(sum(h["art"]=="abschluss" for h in self.service.vehicle(self.company,self.vehicle)["history"]),1)
+
+    def test_hu_http_form_and_completion_keep_real_report(self):
+        self.admin()
+        path=f"/admin/kundenflotten/firma/{self.company}/fahrzeug/{self.vehicle}"
+        before=self.client.get(path).text
+        self.assertIn('name="faellig_monat"',before)
+        self.assertIn('name="art" value="hu"',before)
+        response=self.client.post(path+'/plan',data=dict(csrf_token="test-csrf",request_id=uuid4().hex,art="hu",titel="HU / AU",faellig_monat="2030-02",quelle="Testprüfbericht"),follow_redirects=True)
+        self.assertEqual(response.status_code,200)
+        self.assertIn("28.02.2030",response.text)
+        self.assertIn('name="naechste_hu_monat"',response.text)
+        self.assertNotIn('name="faellig_monat"',response.text)
+        plan=self.service.vehicle(self.company,self.vehicle)["plans"][0]
+        response=self.client.post(path+f'/plan/{plan["id"]}/erledigt',data=dict(csrf_token="test-csrf",erledigt_am=self.today,km="10000",version="1",pruefung_bestanden="1",naechste_hu_monat="2031-04",pruefbericht="Folgebericht"),follow_redirects=True)
+        self.assertEqual(response.status_code,200)
+        self.assertIn("30.04.2031",response.text)
+        self.assertIn("Folgebericht",response.text)
+
     def test_schema_persistent_and_backup_table_set(self):
         with closing(self.portal.get_db()) as db:
             names = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}

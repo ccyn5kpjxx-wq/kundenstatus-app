@@ -105,3 +105,12 @@ Die Kunden-App erhält eine größere Fahrzeugdarstellung, lesbarere Metadaten, 
 ### Lokale Positionierung als Werkstatt und Fuhrparkmanagement
 
 Leitidee: „Wir managen Ihren Fuhrpark. Damit Sie sich auf Ihr Geschäft konzentrieren können.“ Der Nutzen wird auf der Startseite in einem eigenen Bereich und auf der Geschäftspartnerseite im Hero konkret erklärt: Fälligkeiten im Blick behalten, mit Fahrern abstimmen, Werkstatttermine organisieren und Arbeiten im eigenen Betrieb ausführen. Die Flottenkachel führt weiterhin in den bestehenden Firmenbereich; Privatkunden und Autohäuser bleiben sichtbar. Leistungen, Konditionen und Kostenfreigaben werden vereinbart; Abholung und Ersatzwagen nach Vereinbarung/Verfügbarkeit. Es werden keine pauschale Kostenübernahme, unbegrenzte Verfügbarkeit oder bereits produktive Fahrerbenachrichtigungen behauptet. Bestehende App und Fotos bleiben unverändert, kein Versand und keine Veröffentlichung.
+
+
+### HU/AU mit externem Prüfpartner
+
+HU/AU wird als organisierte Leistung mit externem Prüfpartner auf Startseite, Geschäftspartnerseite und beim Fahrzeugcheck genannt. Die Prüfung wird nicht als eigene amtliche Prüfbefugnis des Betriebs dargestellt. Primäre Hintergrundinformation: https://www.tuvsud.com/de-de/branchen/mobilitaet-und-automotive/hauptuntersuchung . Eine konkrete Prüforganisation wird ohne Namensbestätigung nicht genannt.
+
+Die interne Fahrzeugakte hat eine eigene Erfassung für HU/AU-Prüfmonat und belegte Quelle. Der Prüfmonat wird als Monatsende gespeichert, inklusive Schaltjahren. HU/AU erhält kein Kilometerziel oder pauschales Wiederholungsintervall. Ein weiterer offener HU/AU-Plan wird verhindert; Wiederholung desselben Formulars bleibt idempotent. Bestehende HU-Pläne bleiben lesbar. Nach bestandener Prüfung wird der nächste Monat ausdrücklich aus dem neuen Prüfbericht erfasst; das Backend verlangt Bestätigung, Bericht und eine Frist nach dem Prüftag. Nicht bestandene Prüfungen verschieben die Fälligkeit nicht. Keine neuen Tabellen oder Spalten.
+
+Die bestehende interne Vorwarnung greift 30 Tage vor dem gespeicherten Datum. Die Kunden-App zeigt ein synthetisches HU/AU-Erinnerungsbeispiel mit Prüfmonat, Nachricht, Fahrzeugprofil und Terminwunsch inkl. Abholung/Ersatzwagen. Dies ist eine lokale Gestaltungsvorschau, keine produktive Erinnerung. Für echten Kundenversand fehlen weiterhin produktive Fahrerzugänge, Freigaben und ein geprüfter Benachrichtigungsdienst. Es werden weder Nachrichten noch Terminbuchungen ausgelöst.

@@ -2,3 +2,5 @@
 
 /* Quiet summary at the top of the internal vehicle file. */
 .kf-heading-vehicle{background:#fff;border:1px solid #e1e6ed;border-radius:18px;padding:26px 28px;margin-top:12px;align-items:flex-start}.kf-heading-vehicle h1{font-weight:700;letter-spacing:-1.1px}.kf-heading-vehicle .kf-eyebrow{display:block;color:#667181;margin-bottom:12px}.kf-overview{display:flex;gap:28px;flex-wrap:wrap;margin:0 0 22px;padding:0 5px}.kf-overview div{min-width:130px}.kf-overview dt{font-size:11px;font-weight:500;color:#667181;margin-bottom:4px}.kf-overview dd{margin:0;font-size:13px;font-weight:650;color:#273241}.kf-wrap .kf-details summary{min-height:36px;padding-block:8px}.kf-wrap .btn:focus-visible,.kf-wrap summary:focus-visible{outline:3px solid #2862bb;outline-offset:4px}@media(max-width:500px){.kf-heading-vehicle{padding:22px}.kf-overview{gap:16px 24px}.kf-overview div{min-width:120px}}
+
+.kf-hu-info{padding:17px 19px;border:1px solid #dce5f0;background:#f7f9fc;border-radius:12px;margin:22px 0 17px}.kf-hu-info strong{font-size:14px}.kf-hu-info p{font-size:12px;color:#596a7f;margin:7px 0 0;line-height:1.65}
