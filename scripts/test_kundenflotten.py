@@ -174,6 +174,74 @@ class CustomerFleetTests(unittest.TestCase):
             with self.assertRaises(ValueError): self.service.change_vehicle(self.company,self.vehicle,"km",data)
         self.assertEqual(self.service.vehicle(self.company,self.vehicle)["vehicle"]["km"],10000)
 
+    def test_company_form_replay_creates_one_company_and_preserves_data(self):
+        self.admin()
+        html = self.client.get('/admin/kundenflotten').get_data(as_text=True)
+        token = re.search(r'name="request_id" value="([a-f0-9]{32})"', html).group(1)
+        data = {'csrf_token': 'test-csrf', 'request_id': token, 'name': 'Neue Testfirma', 'kontakt': 'Alex'}
+        for _ in range(2):
+            self.assertEqual(self.client.post('/admin/kundenflotten/firma', data=data).status_code, 303)
+        self.assertEqual(self.count('kundenflotten_firmen'), 2)
+        self.assertEqual(self.service.company(token)[0]['kontakt'], 'Alex')
+        with self.assertRaises(ValueError):
+            self.service.create_company(dict(data, kontakt='Geänderter Inhalt'), require_submission=True)
+        self.assertEqual(self.service.company(token)[0]['kontakt'], 'Alex')
+
+    def test_company_http_creation_requires_a_valid_form_receipt(self):
+        self.admin()
+        for token in ('', 'not-a-form-token'):
+            response = self.client.post('/admin/kundenflotten/firma', data={
+                'csrf_token': 'test-csrf', 'name': 'Nicht anlegen', 'request_id': token})
+            self.assertEqual(response.status_code, 303)
+        self.assertEqual(self.count('kundenflotten_firmen'), 1)
+
+    def test_parallel_company_form_replay_is_atomic(self):
+        data = {'name': 'Parallele Testfirma', 'request_id': uuid4().hex}
+        barrier = Barrier(2)
+        def submit():
+            barrier.wait(timeout=5)
+            return self.service.create_company(data, require_submission=True)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [future.result(timeout=10) for future in [pool.submit(submit), pool.submit(submit)]]
+        self.assertEqual(results, [data['request_id'], data['request_id']])
+        self.assertEqual(self.count('kundenflotten_firmen'), 2)
+        another = self.service.create_company(dict(data, request_id=uuid4().hex), require_submission=True)
+        self.assertNotEqual(another, data['request_id'])
+
+    def test_plate_separator_variants_cannot_create_duplicate_vehicle_files(self):
+        self.service.create_vehicle(self.company, {'kennzeichen': 'MOS-AB 123', 'modell': 'Testauto', 'km': '0', 'km_datum': self.today})
+        for plate in ('MOS AB 123', 'mos-ab123', 'MOS–AB 123', 'MOSAB123'):
+            with self.subTest(plate=plate), self.assertRaises(ValueError):
+                self.service.create_vehicle(self.company, {'kennzeichen': plate, 'modell': 'Doppeltes Auto', 'km': '0', 'km_datum': self.today})
+        self.assertEqual(self.count('kundenflotten_fahrzeuge'), 2)
+
+    def test_distinct_district_boundaries_are_not_false_duplicates(self):
+        for plate in ('B-AB 123', 'BA-B 123'):
+            self.service.create_vehicle(self.company, {'kennzeichen': plate, 'modell': 'Eigenes Testauto', 'km': '0', 'km_datum': self.today})
+        self.assertEqual(self.count('kundenflotten_fahrzeuge'), 3)
+        for plate in ('B AB123', 'BA B123'):
+            with self.subTest(plate=plate), self.assertRaises(ValueError):
+                self.service.create_vehicle(self.company, {'kennzeichen': plate, 'modell': 'Dublette', 'km': '0', 'km_datum': self.today})
+
+    def test_past_new_appointment_rolls_back_receipt_and_record(self):
+        with self.assertRaises(ValueError):
+            self.service.change_vehicle(self.company, self.vehicle, 'termin', {
+                'art': 'reifen', 'datum': (date.today()-timedelta(days=1)).isoformat(),
+                'transport': 'offen', 'request_id': uuid4().hex})
+        self.assertEqual(self.count('kundenflotten_termine'), 0)
+        self.assertEqual(self.count('kundenflotten_anlagen'), 0)
+
+    def test_impossible_next_mileage_does_not_partially_complete_plan(self):
+        plan = self.plan(faellig_km='3000000', intervall_km='200000', faellig_datum='', intervall_monate='')
+        with self.assertRaises(ValueError):
+            self.service.complete_plan(self.company, self.vehicle, plan['id'], {
+                'erledigt_am': self.today, 'km': '3000000', 'version': '1'})
+        record = self.service.vehicle(self.company, self.vehicle)
+        self.assertEqual(record['vehicle']['km'], 10000)
+        self.assertEqual(record['plans'][0]['version'], 1)
+        self.assertEqual(record['plans'][0]['faellig_km'], 3000000)
+        self.assertFalse(any(item['art']=='abschluss' for item in record['history']))
+
     def test_duplicate_vehicle_rejected(self):
         with self.assertRaises(ValueError): self.service.create_vehicle(self.company,{"kennzeichen":"MOS DEMO","modell":"Duplicate","km":"0","km_datum":self.today})
 
@@ -414,7 +482,7 @@ class CustomerFleetTests(unittest.TestCase):
         self.portal.portal_originals_operation_lock = busy
         self.portal.get_db = lambda: (_ for _ in ()).throw(AssertionError('No DB may open while restore lock is busy'))
         try:
-            response = self.client.post('/admin/kundenflotten/firma',data={'csrf_token':'test-csrf','name':'Not created'})
+            response = self.client.post('/admin/kundenflotten/firma',data={'csrf_token':'test-csrf','name':'Not created','request_id':uuid4().hex})
             self.assertEqual(response.status_code,503)
         finally:
             self.portal.get_db = original

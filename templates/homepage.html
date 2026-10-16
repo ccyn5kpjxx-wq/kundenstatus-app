@@ -967,7 +967,7 @@
         menu.classList.toggle('is-open', open);
       });
       menu.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => closeMenu()));
-      document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeMenu(true); });
+      document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && toggle.getAttribute('aria-expanded') === 'true') closeMenu(true); });
       document.addEventListener('click', (event) => { if (!nav.contains(event.target)) closeMenu(); });
     })();
   </script>

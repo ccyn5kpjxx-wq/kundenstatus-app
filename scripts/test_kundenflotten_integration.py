@@ -2,6 +2,7 @@
 from contextlib import closing
 from copy import deepcopy
 from datetime import date
+from html.parser import HTMLParser
 import json
 import sqlite3
 import unittest
@@ -112,6 +113,41 @@ class FleetIntegrationTests(unittest.TestCase):
         for table in ('kundenflotten_fahrer', 'kundenflotten_reifen'):
             adapter.execute(f'INSERT INTO {table} (fahrzeug_id) VALUES (?)', ('synthetic',))
             self.assertNotIn('RETURNING id', cursor.execute.call_args.args[0])
+
+    def test_real_csrf_helper_is_hidden_not_rendered_as_form_text(self):
+        class Forms(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.current = None
+                self.forms = []
+                self.visible_helper = False
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if tag == 'form':
+                    self.current = [] if attrs.get('method', '').lower() == 'post' else None
+                elif tag == 'input' and self.current is not None and attrs.get('name') == 'csrf_token':
+                    self.current.append(attrs.get('value'))
+            def handle_endtag(self, tag):
+                if tag == 'form' and self.current is not None:
+                    self.forms.append(self.current)
+                    self.current = None
+            def handle_data(self, data):
+                if '<input type="hidden" name="csrf_token"' in data:
+                    self.visible_helper = True
+        client = portal.app.test_client()
+        with client.session_transaction() as session:
+            session['admin'] = True
+        paths = ['/admin/kundenflotten', f'/admin/kundenflotten/firma/{self.company}',
+                 f'/admin/kundenflotten/firma/{self.company}/fahrzeug/{self.vehicle}']
+        for path in paths:
+            with self.subTest(path=path):
+                response = client.get(path)
+                self.assertEqual(response.status_code, 200)
+                parser = Forms()
+                parser.feed(response.text)
+                self.assertFalse(parser.visible_helper, 'Generated CSRF HTML must not appear as visible source text')
+                self.assertTrue(parser.forms)
+                self.assertTrue(all(tokens and all(tokens) and len(set(tokens)) == 1 for tokens in parser.forms))
 
     def test_real_routes_require_admin_and_demo_requires_local_explicit_opt_in(self):
         client = portal.app.test_client()

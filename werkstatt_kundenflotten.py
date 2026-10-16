@@ -117,6 +117,20 @@ def _choice(data, field, choices):
     return value
 
 
+def _same_plate(left, right):
+    # A separator also marks the district boundary: B-AB 123 and BA-B 123
+    # are different vehicles. Preserve it whenever both inputs are structured.
+    pattern = r"^([A-ZÄÖÜ]{1,3})[\s\-\u2010-\u2015]+([A-Z]{1,2})\s*(\d{1,4}[EH]?)$"
+    left, right = left.upper(), right.upper()
+    a, b = re.fullmatch(pattern, left), re.fullmatch(pattern, right)
+    if a and b:
+        return a.groups() == b.groups()
+    # Legacy compact/free-form entries have no reliable district boundary.
+    # Flag matching text for review rather than creating an accidental copy.
+    compact = lambda value: re.sub(r"[\s\-\u2010-\u2015]+", "", value)
+    return compact(left) == compact(right)
+
+
 def _timestamp():
     return datetime.now().isoformat(timespec="seconds")
 
@@ -231,7 +245,7 @@ class Kundenflotten:
                         appointments=[dict(r) for r in db.execute("SELECT * FROM kundenflotten_termine WHERE fahrzeug_id=? ORDER BY datum DESC,id", (key,)).fetchall()],
                         history=[dict(r) for r in db.execute("SELECT * FROM kundenflotten_historie WHERE fahrzeug_id=? ORDER BY erstellt_am DESC,id DESC LIMIT 80", (key,)).fetchall()])
 
-    def create_company(self, data):
+    def create_company(self, data, *, require_submission=False):
         name = _text(data, "name", required=True)
         limit = _text(data, "freigabe_limit", 16)
         try:
@@ -241,9 +255,22 @@ class Kundenflotten:
             cents = int(amount * 100) if amount is not None else None
         except (InvalidOperation, ValueError):
             raise ValueError("Die Freigabegrenze bitte als gültigen Eurobetrag mit höchstens zwei Nachkommastellen angeben.") from None
-        key = uuid4().hex
+        request_id = _text(data, "request_id", 32, require_submission)
+        if request_id and not re.fullmatch(r"[a-f0-9]{32}", request_id):
+            raise ValueError("Das Formular ist veraltet. Bitte die Seite neu laden.")
+        # Use the form's random receipt as the stable company ID. This keeps
+        # retries atomic and survives backups without a separate receipt table.
+        key = request_id or uuid4().hex
+        fields = ("name", "kontakt", "email", "telefon", "konditionen", "freigabe_limit_cent")
+        values = (name, _text(data, "kontakt"), _email(data), _text(data, "telefon", 60), _text(data, "konditionen", 2000), cents)
         with self.p.portal_originals_operation_lock(), self.db() as db:
-            db.execute("INSERT INTO kundenflotten_firmen VALUES (?,?,?,?,?,?,?,?)", (key, name, _text(data, "kontakt"), _email(data), _text(data, "telefon", 60), _text(data, "konditionen", 2000), cents, _timestamp()))
+            result = db.execute("""INSERT INTO kundenflotten_firmen
+                (id,name,kontakt,email,telefon,konditionen,freigabe_limit_cent,erstellt_am)
+                VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING""", (key, *values, _timestamp()))
+            if result.rowcount != 1:
+                previous = self.row(db, "kundenflotten_firmen", key)
+                if tuple(previous[field] for field in fields) != values:
+                    raise ValueError("Dieses Firmenformular wurde bereits mit anderen Angaben verwendet. Bitte neu laden.")
         return key
 
     def create_vehicle(self, company_id, data):
@@ -258,8 +285,12 @@ class Kundenflotten:
         key = uuid4().hex
         with self.p.portal_originals_operation_lock(), self.db() as db:
             self.row(db, "kundenflotten_firmen", company_id)
-            if db.execute("SELECT id FROM kundenflotten_fahrzeuge WHERE firma_id=? AND kennzeichen=?", (company_id, plate)).fetchone():
-                raise ValueError("Dieses Kennzeichen ist bei der Firma bereits angelegt.")
+            plate_key = re.sub(r"[\s\-\u2010-\u2015]+", "", plate)
+            if not plate_key or not any(char.isalnum() for char in plate_key):
+                raise ValueError("Bitte ein gültiges Kennzeichen angeben.")
+            existing_plates = db.execute("SELECT kennzeichen FROM kundenflotten_fahrzeuge WHERE firma_id=?", (company_id,)).fetchall()
+            if any(_same_plate(item["kennzeichen"], plate) for item in existing_plates):
+                raise ValueError("Dieses Kennzeichen ist bei der Firma bereits angelegt, möglicherweise in einer anderen Schreibweise.")
             if vin and db.execute("SELECT id FROM kundenflotten_fahrzeuge WHERE fin=?", (vin,)).fetchone():
                 raise ValueError("Für diese FIN gibt es bereits eine Fahrzeugakte. Bitte die vorhandene Akte prüfen.")
             db.execute("INSERT INTO kundenflotten_fahrzeuge VALUES (?,?,?,?,?,?,?,?)", (key, company_id, plate, vin, _text(data, "modell", 120, True), km, recorded, _timestamp()))
@@ -312,6 +343,8 @@ class Kundenflotten:
                 replacement, note = int(data.get("ersatzwagen") == "1"), _text(data, "notiz", 1200)
                 if not self.claim_submission(db, key, action, data, (day, kind, transport, replacement, note)):
                     return
+                if day < date.today().isoformat():
+                    raise ValueError("Ein neuer Terminwunsch darf nicht in der Vergangenheit liegen.")
                 db.execute("INSERT INTO kundenflotten_termine VALUES (?,?,?,?,?,?, 'angefragt',?,?)", (uuid4().hex, key, day, kind, transport, replacement, note, _timestamp()))
                 self.history(db, key, "termin", f"Terminwunsch {day} für {KINDS[kind]} intern erfasst. Bestätigung und Kostenfreigabe offen.")
             elif action == "reifen":
@@ -338,6 +371,10 @@ class Kundenflotten:
                 raise ValueError("Für historische Arbeiten bitte zuerst die Fahrzeugakte prüfen; der aktuelle Kilometerstand wird nicht zurückgesetzt.")
             next_date = add_months(date.fromisoformat(completed), plan["intervall_monate"]).isoformat() if plan["intervall_monate"] else ""
             next_km = km + plan["intervall_km"] if plan["intervall_km"] else None
+            if next_km is not None and next_km > 3000000:
+                raise ValueError("Das nächste Kilometerziel liegt über 3.000.000 km. Bitte Kilometerstand und Wartungsintervall prüfen; es wurde nichts gespeichert.")
+            if next_date and next_date > "2100-12-31":
+                raise ValueError("Das nächste Fälligkeitsdatum liegt außerhalb des unterstützten Zeitraums. Bitte das Wartungsintervall prüfen.")
             status = "offen" if next_date or next_km is not None else "abgeschlossen"
             changed = db.execute("UPDATE kundenflotten_plaene SET faellig_datum=?,faellig_km=?,status=?,version=version+1 WHERE id=? AND version=? AND status='offen'", (next_date, next_km, status, plan_id, version))
             if changed.rowcount != 1:
@@ -383,12 +420,12 @@ def register_kundenflotten(portal):
     @bp.get("/admin/kundenflotten")
     @portal.admin_required
     def index():
-        return render_template("kundenflotten_index.html", companies=service.companies())
+        return render_template("kundenflotten_index.html", companies=service.companies(), request_token=uuid4().hex)
 
     @bp.post("/admin/kundenflotten/firma")
     @portal.admin_required
     def create_company():
-        return save(lambda: service.create_company(request.form), url_for("kundenflotten.index"))
+        return save(lambda: service.create_company(request.form, require_submission=True), url_for("kundenflotten.index"))
 
     @bp.get("/admin/kundenflotten/firma/<company_id>")
     @portal.admin_required

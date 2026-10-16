@@ -20,7 +20,7 @@ Erinnerungen stützen sich auf tatsächlich hinterlegte Herstellerintervalle und
 
 Das Modul `werkstatt_kundenflotten.py` stellt Schema, Blueprint und eine geordnete Liste seiner Sicherungstabellen bereit. `app.py` registriert es, übernimmt die Tabellen und die Featurekennung in Backups und verhindert, dass Sicherungen ohne neu eingeführte Tabellen bestehende Flottendaten still löschen. Modul-Schreiboperationen und Wiederherstellungen müssen denselben Betriebslock verwenden.
 
-Die gemeinsame Fassung wird lokal in eigenen Folgebranches weiterentwickelt; der aktuelle Gestaltungsstand liegt in `codex/kunden-app-weiss-vorschau`. Der Vorschau-Server läuft ausschließlich mit synthetischen Daten auf `http://127.0.0.1:5152`. Dort sind `/admin/kundenflotten`, `/kunden-app/vorschau`, `/admin/cockpit` und `/geschaeftspartner` erreichbar. Diese Vorschau verwendet einen automatisch angemeldeten lokalen Test-Admin; diese Einstellung gehört nicht in einen produktiven Start.
+Die gemeinsame Fassung wird lokal in eigenen Folgebranches weiterentwickelt; der aktuelle geprüfte Stand liegt in `codex/fuhrpark-qualitaetspruefung`. Der Vorschau-Server läuft ausschließlich mit synthetischen Daten auf `http://127.0.0.1:5152`. Dort sind `/admin/kundenflotten`, `/kunden-app/vorschau`, `/admin/cockpit` und `/geschaeftspartner` erreichbar. Diese Vorschau verwendet einen automatisch angemeldeten lokalen Test-Admin; diese Einstellung gehört nicht in einen produktiven Start.
 
 Bestanden: 52 abschließende Modul-, Integrations-, Geschäftspartner- und Cockpit-Tests, der Homepage-Prüflauf, Smoke-Test und Flow-Test. Zusätzlich bestanden 44 bestehende Restore-Regressionen sowie die bisherigen Bestellvergleich-, Liefer- und Bestellbestätigungs-Backupprüfungen. JSON- und SQLite-Roundtrips erhalten sämtliche acht Flottentabellen. Ein getrennter Review hat auch den tatsächlichen HTTP-Import mit SQLite-Dateiaustausch geprüft. PostgreSQL wurde am Adapter geprüft, nicht an einem echten PostgreSQL-Server.
 
@@ -74,3 +74,22 @@ Die drei Einstiege unter dem Homepage-Titel erhalten gleich große Fotos: Privat
 Der lokale Pannendialog zeigt nach dem unveränderten Sicherheits- und Notrufhinweis eine klare Aufforderung, online zu melden und zusätzlich die Werkstatt anzurufen. Der manuell betätigte Telefonlink verwendet die auf Homepage und Impressum bestätigte Hauptnummer +49 1522 7706694. Die Online-Demo versendet nichts; die Rufnummer ist als echter Anrufweg erkennbar. Es gibt keine automatische Anwahl oder Zusage einer sofortigen Abholung. Bei der Prüfung wurde kein Anruf ausgelöst.
 
 Geprüft: fünf bestehende Seiten-/Linktests, Homepage-Prüflauf, Auslieferung aller drei Bilddateien sowie Desktop/390px ohne Überlauf. Die Anrufaktion ist beim Öffnen des mobilen Pannendialogs sichtbar. Unabhängiger read-only Review ohne Blocker. Weiterhin ausschließlich lokale Vorschau.
+
+
+## Gesamtprüfung und Nachbesserungen vom 16.10.2026
+
+Die lokale Fassung wurde funktional und auf kleinen Displays geprüft. Behoben wurden:
+
+- Firmenanlage: Ein zufälliger Formularbeleg dient als dauerhafte Firmen-ID. Gleichzeitige bzw. wiederholte Übermittlung desselben Formulars erzeugt genau eine Firma, abweichende Inhalte überschreiben keinen Datensatz. Keine zusätzliche Tabelle; bestehende Backups erhalten die ID.
+- Fahrzeuganlage: übliche Kennzeichentrenner vereinheitlicht, ohne die Ortskennungsgrenze zu verlieren. `B-AB 123` und `BA-B 123` bleiben verschiedene Kennzeichen; gleiche Schreibvarianten werden abgefangen. Mehrdeutige kompakte Alteinträge werden vorsichtig zur Prüfung gemeldet.
+- Terminwünsche: neue Termine in der Vergangenheit werden im Server abgelehnt; die Demo setzt zusätzlich den lokalen Kalendertag als frühestes Wunschdatum. Bereits gespeicherte Formularbelege verhindern weiterhin doppelte Anlage.
+- Wartung: unmögliche Folgeziele außerhalb der unterstützten Eingabegrenzen werden vor Änderungen an Plan, Fahrzeugstand oder Historie abgelehnt.
+- Pannenmeldung: Anrufaktion bekommt den Fokus, der Dialog bleibt oben. Auf 320 × 568 bleiben Sicherheits-/112-Hinweis und Telefonnummer sofort sichtbar; keine automatische Bildschirmtastatur am Standortfeld.
+- Navigation: auf der Geschäftspartnerseite sind auch mobil sämtliche Einstiege erreichbar. Escape auf der Startseite verschiebt den Fokus nur bei tatsächlich geöffnetem Menü.
+- Formulardarstellung: CSRF-Felder werden mit dem tatsächlichen Portal-Helper als unsichtbare Felder ausgegeben. Sichtbar dargestellter HTML-Quelltext ist entfernt; übrige Eingaben bleiben escaped. Ein neuer Integrationstest verwendet die echte Portalvorlage, statt den Helper durch Markup zu ersetzen.
+
+Abschlussprüfung: 92 automatisierte Modul-, Integrations-, Cockpit- und Seitentests bestanden, darunter acht neue gezielte Regressionen. Zusätzlich bestanden der bestehende Homepage-Prüflauf, Smoke-Test und Angebots-/Status-/Archivierungs-Flow-Test. Syntax- und Diffprüfung sauber. Drei getrennte read-only Reviews ohne offene Blocker. Ein zusätzlicher Link-/Asset-/Ankercheck über 60 lokale Ziele blieb ohne Fehler.
+
+Im Browser wurden mit ausschließlich synthetischen Daten Firma, Fahrzeug, Fahrer, Wartungsplan, Abschluss mit Folgefälligkeit, Reifensatz/Lagerort und Terminwunsch mit Abholung/Ersatzwagen durchgespielt. Der Wartungsabschluss aktualisierte 15.000 auf 15.010 km und erzeugte das erwartete Folgeziel von 30.010 km bzw. 16.10.2027. Foto-Schadenmeldung: ungültiger Dateityp sichtbar abgelehnt, gültiger Ersatz zeigt Vorschau und lässt den lokalen Demoabschluss zu. Auf Handybreite kein horizontaler Überlauf bei Startseite, Geschäftspartnerseite, Kunden-App, Fahrzeugakte und Cockpit; aufklappbare Cockpitbereiche funktionieren.
+
+Es wurden keine echten Betriebsdaten verändert, keine Nachrichten oder Bestellungen versendet und keine Anrufe ausgelöst. Es gab keinen Push oder Deployment. Produktive Fahrerzugänge, Benachrichtigungen, verbindliche Terminbestätigung, Ersatzwagenreservierung und mehrere strukturierte Reifensätze bleiben ausdrücklich eigenständige Ausbauschritte. PostgreSQL wurde weiterhin nur über den vorhandenen Adaptertest geprüft, nicht gegen einen echten Server.

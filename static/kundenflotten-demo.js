@@ -14,9 +14,14 @@
     cleanup();
     document.getElementById('dialog-title').textContent = titles[name];
     content.replaceChildren(template.content.cloneNode(true));
+    const now = new Date();
+    const today = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+    content.querySelectorAll('input[type="date"]').forEach(input => { input.min = today; });
     if (!dialog.open) dialog.showModal();
-    const first = content.querySelector('input,select,textarea,button');
-    if (first) first.focus();
+    dialog.scrollTop = 0;
+    const first = name === 'panne' ? content.querySelector('.panne-call') : content.querySelector('input,select,textarea,button');
+    if (first) first.focus({preventScroll: name === 'panne'});
+    if (name === 'panne') dialog.scrollTop = 0;
   }
   document.addEventListener('click', event => {
     const trigger = event.target.closest('[data-open]');
