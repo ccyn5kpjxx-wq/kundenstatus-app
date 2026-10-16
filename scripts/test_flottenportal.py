@@ -3,6 +3,7 @@ from contextlib import closing
 from copy import deepcopy
 from datetime import date
 from io import BytesIO
+import csv
 import json
 import sqlite3
 import time
@@ -10,11 +11,13 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 import zipfile
+from urllib.parse import urlencode
 
 import fitz
 from PIL import Image
 from werkzeug.datastructures import FileStorage
 import smoke_test as isolated
+import werkstatt_flottenportal as module
 
 p=isolated.portal
 
@@ -247,6 +250,144 @@ class FleetPortalTests(unittest.TestCase):
             session.update(assistent_mid=1,assistent_version=1,kunden_status_token=uuid4().hex,csrf_token='test-csrf')
         self.assertEqual(client.get('/flotte').status_code,302)
         self.assertEqual(self.upload(client=client).status_code,403)
+
+    def export(self,kind='csv',vehicle=None,**filters):
+        return self.customer.get(f'/flotte/fahrzeug/{vehicle or self.vehicle}/belege/export/{kind}?'+urlencode(filters))
+
+    def csv_rows(self,raw):
+        self.assertTrue(raw.startswith(b'\xef\xbb\xbf'))
+        return list(csv.DictReader(raw.decode('utf-8-sig').splitlines(),delimiter=';'))
+
+    def test_filters_csv_and_zip_share_exact_visible_selection_and_original_bytes(self):
+        raw=pdf()
+        match=self.store(titel='Ölservice 100%_ Rechnung',art='rechnung',belegdatum='2026-01-15',raw=raw,name='Original.pdf')
+        self.store(titel='Ölservice 100%_ Rechnung',art='tank',belegdatum='2026-01-15')
+        self.store(titel='Ölservice 100%_ Rechnung',art='rechnung',belegdatum='2026-01-14')
+        self.store(internal=True,titel='Ölservice 100%_ Rechnung',art='rechnung',belegdatum='2026-01-15')
+        filters=dict(q='ÖLSERVICE 100%_',belegart='rechnung',von='2026-01-15',bis='2026-01-15')
+        html=self.customer.get(f'/flotte/fahrzeug/{self.vehicle}?'+urlencode(filters))
+        self.assertEqual(html.status_code,200)
+        self.assertIn('1 Beleg</span>',html.text);self.assertIn('Original.pdf',html.text)
+        self.assertNotIn('NUR INTERN',html.text)
+        response=self.export(**filters)
+        self.assertEqual(response.status_code,200)
+        rows=self.csv_rows(response.data)
+        self.assertEqual([r['Beleg-ID'] for r in rows],[str(match)])
+        self.assertEqual(rows[0]['Betrag brutto EUR'],'68,40')
+        self.assertEqual(rows[0]['Kennzeichen'],'MOS FP 1')
+        self.assertIn('MOS_FP_1',response.headers['Content-Disposition'])
+        result=self.export('zip',**filters)
+        self.assertEqual(result.status_code,200)
+        with zipfile.ZipFile(BytesIO(result.data)) as archive:
+            manifest=self.csv_rows(archive.read('Beleguebersicht.csv'))
+            self.assertEqual([r['Beleg-ID'] for r in manifest],[str(match)])
+            self.assertEqual(archive.read(manifest[0]['Datei im ZIP']),raw)
+            self.assertEqual(len(archive.namelist()),2)
+        for response in (html,response,result): self.assertIn('no-store',response.headers['Cache-Control'])
+        self.assertEqual(self.csv_rows(self.export(q='nonexistent').data),[])
+        with zipfile.ZipFile(BytesIO(self.export('zip',q='nonexistent').data)) as archive:
+            self.assertEqual(archive.namelist(),['Beleguebersicht.csv'])
+
+    def test_invalid_filters_never_broaden_list_or_exports(self):
+        self.store()
+        for query in ('belegart=invalid','von=2026-02-30','von=20260115','von=2026-W01-1','von=2026-02-01&bis=2026-01-01','q='+('x'*121),'q=a&q=b'):
+            for path in (f'/flotte/fahrzeug/{self.vehicle}',f'/flotte/fahrzeug/{self.vehicle}/belege/export/csv',f'/flotte/fahrzeug/{self.vehicle}/belege/export/zip'):
+                with self.subTest(path=path,query=query):self.assertEqual(self.customer.get(path+'?'+query).status_code,400)
+        self.assertEqual(self.export('exe').status_code,404)
+
+    def test_csv_formula_injection_and_zip_paths_are_safe_without_changing_originals(self):
+        ids=[]
+        for title in ('=HYPERLINK("http://example.invalid")','+1','-1','@SUM(1)','  =1'):
+            ids.append(self.store(titel=title,name='same.png'))
+        self.sql('UPDATE kundenflotten_belege SET original_name=? WHERE id=?',('../../=evil.png',ids[0]))
+        response=self.export()
+        rows=self.csv_rows(response.data)
+        self.assertTrue(all(row['Bezeichnung'].startswith("'") for row in rows))
+        result=self.export('zip')
+        with zipfile.ZipFile(BytesIO(result.data)) as archive:
+            self.assertEqual(len(archive.namelist()),len(ids)+1)
+            self.assertEqual(len(set(archive.namelist())),len(archive.namelist()))
+            for name in archive.namelist():
+                self.assertNotIn('/',name);self.assertNotIn('\\',name);self.assertNotIn('..',name)
+                if name.endswith('.png'):self.assertEqual(archive.read(name),png())
+        # Control prefix can only occur in old/imported metadata, still escaped in CSV.
+        self.sql('UPDATE kundenflotten_belege SET titel=? WHERE id=?',('\t=1',ids[0]))
+        self.assertIn(b"'\t=1",self.export().data)
+
+    def test_export_limits_and_corrupt_original_abort_whole_archive(self):
+        first=self.store();self.store()
+        with patch.object(module,'EXPORT_MAX_DOCUMENTS',1):
+            self.assertEqual(self.export().status_code,413);self.assertEqual(self.export('zip').status_code,413)
+        with patch.object(module,'EXPORT_MAX_BYTES',len(png())):
+            self.assertEqual(self.export('zip').status_code,413)
+        self.sql("UPDATE kundenflotten_belege SET original_base64='eA==' WHERE id=?",(first,))
+        try:
+            response=self.export('zip')
+            self.assertEqual(response.status_code,409);self.assertFalse(response.data.startswith(b'PK'))
+        finally:self.sql('DELETE FROM kundenflotten_belege WHERE id=?',(first,))
+
+    def test_exports_status_and_admin_cookies_never_cross_tenants(self):
+        self.store(self.other,self.other_vehicle)
+        for kind in ('csv','zip'):self.assertEqual(self.export(kind,vehicle=self.other_vehicle).status_code,404)
+        self.assertEqual(self.customer.get(f'/flotte/fahrzeug/{self.other_vehicle}/status').status_code,404)
+        self.assertEqual(self.admin.get('/flotte/status').status_code,403)
+        self.assertEqual(self.admin.get(f'/flotte/fahrzeug/{self.vehicle}/belege/export/csv').status_code,403)
+        payload=self.customer.get('/flotte/status')
+        self.assertEqual(payload.status_code,200)
+        self.assertEqual([v['id'] for v in payload.json['vehicles']],[self.vehicle])
+        self.assertNotIn('INTERNAL-CONDITIONS-NOT-PUBLIC',payload.text)
+        self.assertNotIn('MOS FP 2',payload.text)
+        self.assertIn('no-store',payload.headers['Cache-Control'])
+
+    def test_revocation_during_export_and_status_build_is_rechecked(self):
+        self.store()
+        original=self.service.original
+        def revoke(*args,**kwargs):
+            result=original(*args,**kwargs)
+            self.service.configure_access(self.company,{'aktion':'sperren'})
+            return result
+        with patch.object(self.service,'original',side_effect=revoke):self.assertEqual(self.export('zip').status_code,403)
+        self.service.configure_access(self.company,self.credentials());self.login()
+        original_company=self.service.safe_company
+        def revoke_company(*args):
+            result=original_company(*args)
+            self.service.configure_access(self.company,{'aktion':'sperren'})
+            return result
+        with patch.object(self.service,'safe_company',side_effect=revoke_company):self.assertEqual(self.customer.get('/flotte/status').status_code,403)
+
+    def test_status_json_uses_real_order_and_hides_removed_case_without_second_state(self):
+        order=self.sql("INSERT INTO auftraege(fahrzeug,kennzeichen,status,archiviert,kunden_status_token,notiz_intern,erstellt_am,geaendert_am) VALUES('Synthetic','MOS FP 1',2,0,?,'INTERNAL-NOTE',?,?) RETURNING id",(uuid4().hex,p.now_str(),p.now_str()))[0][0]
+        self.fleet.change_vehicle(self.company,self.vehicle,'auftrag',dict(auftrag_id=str(order),art='service',bestaetigt='1',request_id=uuid4().hex))
+        path=f'/flotte/fahrzeug/{self.vehicle}/status'
+        for status in (2,3,4):
+            self.sql('UPDATE auftraege SET status=? WHERE id=?',(status,order))
+            response=self.customer.get(path)
+            self.assertEqual(response.status_code,200)
+            case=response.json['cases'][0]
+            self.assertEqual(case['status'],status)
+            self.assertEqual(set(case),{'id','title','vehicle','plate','status','label','description','updated','stage','steps'})
+            self.assertNotIn('INTERNAL-NOTE',response.text)
+            self.assertEqual(response.json['view'],self.customer.get('/flotte/status').json['view'])
+        self.sql('UPDATE auftraege SET archiviert=1 WHERE id=?',(order,))
+        self.assertEqual(self.customer.get(path).json['cases'],[])
+        self.sql('UPDATE kundenflotten_fahrzeuge SET firma_id=? WHERE id=?',(self.other,self.vehicle))
+        self.assertEqual(self.customer.get(path).status_code,404)
+        self.assertEqual(self.customer.get('/flotte/status').json['vehicles'],[])
+
+    def test_expired_and_rotated_access_denies_json_and_exports_with_no_redirect(self):
+        paths=['/flotte/status',f'/flotte/fahrzeug/{self.vehicle}/status',f'/flotte/fahrzeug/{self.vehicle}/belege/export/csv',f'/flotte/fahrzeug/{self.vehicle}/belege/export/zip']
+        for reason in ('expiry','rotation','disabled'):
+            self.service.configure_access(self.company,self.credentials());self.login()
+            if reason=='expiry':
+                with self.customer.session_transaction() as session:session['flotte_login_am']=time.time()-9*3600
+            else:self.service.configure_access(self.company,{'aktion':'sperren'} if reason=='disabled' else self.credentials())
+            for path in paths:
+                response=self.customer.get(path)
+                self.assertEqual(response.status_code,403)
+                self.assertIsNone(response.headers.get('Location'))
+                self.assertEqual(response.json,{'error':'Anmeldung erforderlich.'})
+        with patch.dict(p.app.config,FLOTTENPORTAL_ENABLED=False):
+            for path in paths:self.assertEqual(self.customer.get(path).status_code,404)
 
 
 if __name__=='__main__':unittest.main()

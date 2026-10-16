@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import base64
+import csv
 import hashlib
 import hmac
-from io import BytesIO
+from io import BytesIO, StringIO
 import os
 from pathlib import Path
 import re
@@ -12,18 +13,21 @@ import secrets
 import sqlite3
 import time
 import warnings
+import zipfile
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 from uuid import uuid4
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, send_file, session, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 PORTAL_TABLES = ('kundenflotten_zugaenge', 'kundenflotten_belege')
 PORTAL_FEATURE = 'kundenflotten_portal_v1'
 MAX_BYTES = 8 * 1024 * 1024
+EXPORT_MAX_DOCUMENTS = 100
+EXPORT_MAX_BYTES = 32 * 1024 * 1024
 DOC_KINDS = {'tank':'Tankbeleg', 'rechnung':'Rechnung', 'reparatur':'Reparaturbeleg', 'sonstiges':'Sonstiger Fahrzeugbeleg'}
 MIMES = {'.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.webp':'image/webp','.pdf':'application/pdf'}
 DOC_COLUMNS = 'id,fahrzeug_id,art,titel,belegdatum,betrag_cent,quelle,sichtbar,original_name,mime_type,size,sha256,request_id,erstellt_am'
@@ -54,6 +58,44 @@ def clean(value, maximum=200):
     if len(value)>maximum or any(ord(c)<32 for c in value):
         raise ValueError('Bitte die Eingabe prüfen; sie ist zu lang oder enthält ungültige Zeichen.')
     return value
+
+
+def receipt_filters(args):
+    values={key:clean(args.get(key),120 if key=='q' else 10) for key in ('q','belegart','von','bis')}
+    if any(len(args.getlist(key))>1 for key in values): raise ValueError('Bitte jeden Filter nur einmal angeben.')
+    if values['belegart'] and values['belegart'] not in DOC_KINDS: raise ValueError('Bitte eine gültige Belegart wählen.')
+    for key in ('von','bis'):
+        value=values[key]
+        if value:
+            try:
+                if date.fromisoformat(value).isoformat()!=value: raise ValueError()
+            except ValueError: raise ValueError('Bitte ein gültiges Datum im Format JJJJ-MM-TT angeben.') from None
+    if values['von'] and values['bis'] and values['von']>values['bis']: raise ValueError('Das Enddatum muss am oder nach dem Startdatum liegen.')
+    return values
+
+
+def filtered_receipts(documents, filters):
+    return [doc for doc in documents if
+            (not filters['belegart'] or doc['art']==filters['belegart']) and
+            (not filters['von'] or doc['belegdatum']>=filters['von']) and
+            (not filters['bis'] or doc['belegdatum']<=filters['bis']) and
+            (not filters['q'] or filters['q'].casefold() in (doc['titel']+' '+doc['original_name']).casefold())]
+
+
+def receipt_csv(documents, *, archive_names=None, vehicle=None):
+    def safe(value):
+        text=str(value if value is not None else '')
+        # Quoting alone does not stop spreadsheet formulas, including leading whitespace.
+        return "'"+text if text.lstrip().startswith(('=','+','-','@')) or any(ord(c)<32 for c in text) else text
+    out=StringIO(newline='')
+    writer=csv.writer(out,delimiter=';')
+    writer.writerow(['Beleg-ID','Kennzeichen','Fahrzeug','Belegdatum','Belegart','Bezeichnung','Betrag brutto EUR','Quelle','Originaldatei','Datei im ZIP','SHA256'])
+    for doc in documents:
+        cents=doc['betrag_cent']
+        amount='' if cents is None else f'{cents//100},{cents%100:02d}'
+        writer.writerow([safe(v) for v in (doc['id'],(vehicle or {}).get('kennzeichen',''),(vehicle or {}).get('modell',''),doc['belegdatum'],DOC_KINDS.get(doc['art'],''),doc['titel'],amount,
+            'Werkstatt' if doc['quelle']=='werkstatt' else 'Firma',doc['original_name'],(archive_names or {}).get(doc['id'],''),doc['sha256'])])
+    return out.getvalue().encode('utf-8-sig')
 
 
 class FleetPortal:
@@ -107,7 +149,8 @@ class FleetPortal:
         return {'name':firm['name']},cards
 
     def safe_cases(self, company, vehicle):
-        return [{k:v for k,v in case.items() if k!='customer_url'} for case in self.fleet.linked_cases(company,vehicle)]
+        public=('id','title','vehicle','plate','status','label','description','updated','stage','steps')
+        return [{k:case[k] for k in public} for case in self.fleet.linked_cases(company,vehicle)]
 
     def documents(self, company, vehicle, *, internal=False):
         with self.fleet.db() as db:
@@ -256,27 +299,47 @@ def register_flottenportal(p, fleet):
         response.vary.add('Cookie')
         return response
 
-    def protected(fn):
-        @wraps(fn)
-        def wrapped(*args,**kwargs):
-            who=service.identity()
-            if not who:
-                for key in ('flotte_zugang','flotte_version','flotte_login_am'): session.pop(key,None)
-                return redirect(url_for('flottenportal.login')) if request.method=='GET' else abort(403)
-            return fn(who,*args,**kwargs)
-        return wrapped
+    def protected(fn=None, *, machine=False):
+        def decorate(view):
+            @wraps(view)
+            def wrapped(*args,**kwargs):
+                who=service.identity()
+                if not who:
+                    for key in ('flotte_zugang','flotte_version','flotte_login_am'): session.pop(key,None)
+                    if machine: return jsonify(error='Anmeldung erforderlich.'),403
+                    return redirect(url_for('flottenportal.login')) if request.method=='GET' else abort(403)
+                return view(who,*args,**kwargs)
+            return wrapped
+        return decorate(fn) if fn is not None else decorate
+
+    def confirm_identity(who):
+        current=service.identity()
+        if not current or any(current[k]!=who[k] for k in ('id','firma_id','version')): abort(403)
+
+    def view_key(who):
+        return hashlib.sha256(f'{who["id"]}:{who["firma_id"]}:{who["version"]}'.encode()).hexdigest()
+
+    @bp.context_processor
+    def page_identity():
+        who=service.identity()
+        return {'portal_view':view_key(who) if who else ''}
+
+    def filters():
+        try: return receipt_filters(request.args)
+        except ValueError as exc: abort(400,description=str(exc))
 
     def company_page(company):
         firm,vehicles=service.safe_company(company)
         return render_template('flottenportal_uebersicht.html',company=firm,vehicles=vehicles,csrf_token=csrf_token())
 
     def vehicle_page(company,vehicle,*,internal=False):
+        selected=filters()
         try:
             data=fleet.vehicle(company,vehicle)
-            documents=service.documents(company,vehicle,internal=internal)
+            documents=filtered_receipts(service.documents(company,vehicle,internal=internal),selected)
             cases=service.safe_cases(company,vehicle)
         except LookupError: abort(404)
-        return render_template('flottenportal_fahrzeug.html',company={'name':data['company']['name'],'id':company},vehicle={k:data['vehicle'][k] for k in ('id','kennzeichen','modell','km','km_datum')},plans=[{k:plan[k] for k in ('titel','art','faellig_datum','faellig_km','due')} for plan in data['plans'] if plan['status']=='offen'],cases=cases,documents=documents,kinds=DOC_KINDS,internal=internal,request_id=uuid4().hex,today=date.today().isoformat(),csrf_token=csrf_token())
+        return render_template('flottenportal_fahrzeug.html',company={'name':data['company']['name'],'id':company},vehicle={k:data['vehicle'][k] for k in ('id','kennzeichen','modell','km','km_datum')},plans=[{k:plan[k] for k in ('titel','art','faellig_datum','faellig_km','due')} for plan in data['plans'] if plan['status']=='offen'],cases=cases,documents=documents,filters=selected,kinds=DOC_KINDS,internal=internal,request_id=uuid4().hex,today=date.today().isoformat(),csrf_token=csrf_token())
 
     @bp.route('/flotte/anmelden',methods=['GET','POST'])
     def login():
@@ -316,6 +379,71 @@ def register_flottenportal(p, fleet):
     @bp.get('/flotte/fahrzeug/<vehicle>')
     @protected
     def vehicle(who,vehicle): return vehicle_page(who['firma_id'],vehicle)
+
+    @bp.get('/flotte/status')
+    @protected(machine=True)
+    def company_status(who):
+        with p.portal_originals_operation_lock():
+            try: _,vehicles=service.safe_company(who['firma_id'])
+            except LookupError: abort(404)
+            confirm_identity(who)
+        return jsonify(vehicles=vehicles,view=view_key(who))
+
+    @bp.get('/flotte/fahrzeug/<vehicle>/status')
+    @protected(machine=True)
+    def vehicle_status(who,vehicle):
+        with p.portal_originals_operation_lock():
+            try:
+                # Ownership is checked even when there are no linked cases.
+                with fleet.db() as db:
+                    if fleet.row(db,'kundenflotten_fahrzeuge',vehicle)['firma_id']!=who['firma_id']: abort(404)
+                cases=service.safe_cases(who['firma_id'],vehicle)
+            except LookupError: abort(404)
+            confirm_identity(who)
+        return jsonify(cases=cases,view=view_key(who))
+
+    @bp.get('/flotte/fahrzeug/<vehicle>/belege/export/<format>')
+    @protected(machine=True)
+    def receipt_export(who,vehicle,format):
+        if format not in ('csv','zip'): abort(404)
+        selected=filters()
+        with p.portal_originals_operation_lock():
+            confirm_identity(who)
+            try:
+                documents=filtered_receipts(service.documents(who['firma_id'],vehicle),selected)
+                with fleet.db() as db:
+                    car=fleet.row(db,'kundenflotten_fahrzeuge',vehicle)
+                    car={key:car[key] for key in ('kennzeichen','modell')}
+            except LookupError: abort(404)
+            if len(documents)>EXPORT_MAX_DOCUMENTS or sum(d['size'] for d in documents)>EXPORT_MAX_BYTES:
+                abort(413,description='Bitte den Filter eingrenzen: höchstens 100 Belege und 32 MB pro Export.')
+            if format=='zip':
+                out=BytesIO()
+                names={}
+                total=0
+                try:
+                    with zipfile.ZipFile(out,'w',compression=zipfile.ZIP_STORED) as archive:
+                        for doc in documents:
+                            row,raw=service.original(who['firma_id'],vehicle,doc['id'])
+                            # Avoid a mixed manifest if a concurrent writer changed metadata.
+                            if any(row[k]!=doc[k] for k in DOC_COLUMNS.split(',')): raise ValueError()
+                            total+=len(raw)
+                            if total>EXPORT_MAX_BYTES: abort(413)
+                            name=f'{doc["id"]:06d}_'+(secure_filename(doc['original_name'])[:180] or 'Beleg')
+                            names[doc['id']]=name
+                            archive.writestr(name,raw)
+                        archive.writestr('Beleguebersicht.csv',receipt_csv(documents,archive_names=names,vehicle=car))
+                except (LookupError,ValueError): abort(409,description='Ein Originalbeleg ist nicht verfügbar oder beschädigt. Der Export wurde vollständig abgebrochen.')
+                out.seek(0)
+                mime='application/zip'
+            else:
+                out=BytesIO(receipt_csv(documents,vehicle=car))
+                mime='text/csv; charset=utf-8'
+            confirm_identity(who)
+        filename=secure_filename(car['kennzeichen'])[:60] or 'Fahrzeug'
+        response=send_file(out,mimetype=mime,download_name=f'Belege-{filename}-{date.today().isoformat()}.{format}',as_attachment=True,max_age=0)
+        response.headers['Content-Security-Policy']="default-src 'none'; sandbox"
+        return response
 
     def upload(company,vehicle,internal):
         try:
