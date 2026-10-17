@@ -98,6 +98,42 @@ def reifenservice_checks():
     return result
 
 
+def achsvermessung_checks():
+    client = portal.app.test_client()
+    page = client.get('/anfrage?anliegen=mechanikanfrage&mechanik_kategorie=achsvermessung')
+    with client.session_transaction() as session:
+        csrf = session.get(portal.CSRF_FIELD_NAME)
+    checked = 'value="achsvermessung" checked'
+    checks = [check('Achsvermessung ist im Direktformular vorausgewählt', page.status_code == 200 and checked in page.text)]
+    invalid_get = client.get('/anfrage?anliegen=mechanikanfrage&mechanik_kategorie=unbekannt')
+    other_get = client.get('/anfrage?anliegen=reifenservice&mechanik_kategorie=achsvermessung')
+    checks += [
+        check('Unbekannte GET-Kategorie wird nicht ausgewählt', invalid_get.status_code == 200 and 'value="unbekannt"' not in invalid_get.text and ' checked' not in invalid_get.text),
+        check('Mechanikvorauswahl bleibt auf Mechanikanfragen begrenzt', other_get.status_code == 200 and 'name="mechanik_kategorie"' not in other_get.text),
+    ]
+    def post(categories, description='Fahrzeug zieht nach rechts', query=''):
+        with portal.PUBLIC_FORM_ATTEMPTS_LOCK:
+            portal.PUBLIC_FORM_ATTEMPTS.clear()
+        data = MultiDict([(portal.CSRF_FIELD_NAME, csrf), ('anliegen', 'mechanikanfrage'), ('name', 'Achsvermessung Testkunde'), ('telefon', '0171 1234567'), ('email', ''), ('nachricht', description)])
+        data.setlist('mechanik_kategorie', categories)
+        return client.post('/anfrage'+query, data=data)
+    with patch.object(portal, 'sende_website_lead_benachrichtigung'), patch.object(portal, 'lead_notice'), patch.object(portal, 'notify_lead_workshop'):
+        count = scalar('SELECT COUNT(*) FROM leads')
+        bad = post(['achsvermessung'], '')
+        checks.append(check('Fehlende Beschreibung bewahrt Achsvermessung ohne Leadanlage', bad.status_code == 400 and checked in bad.text and scalar('SELECT COUNT(*) FROM leads') == count))
+        unknown = post(['unbekannt'])
+        checks.append(check('Unbekannte POST-Kategorie wird ohne Leadanlage abgewiesen', unknown.status_code == 400 and scalar('SELECT COUNT(*) FROM leads') == count))
+        before_orders = scalar('SELECT COUNT(*) FROM auftraege')
+        good = post(['achsvermessung', 'achsvermessung'])
+        lead = portal.get_lead(int(scalar('SELECT MAX(id) FROM leads')))
+        checks.append(check('Achsvermessung wird genau einmal im Lead gespeichert', good.status_code == 302 and scalar('SELECT COUNT(*) FROM leads') == count+1 and lead['beschreibung'].count('Achsvermessung / Spureinstellung') == 1))
+        checks.append(check('Achsvermessungsanfrage bucht keinen Werkstattauftrag', scalar('SELECT COUNT(*) FROM auftraege') == before_orders))
+        changed = post(['bremsen'], query='?anliegen=mechanikanfrage&mechanik_kategorie=achsvermessung')
+        changed_lead = portal.get_lead(int(scalar('SELECT MAX(id) FROM leads')))
+        checks.append(check('Eigene POST-Auswahl hat Vorrang vor der URL-Vorauswahl', changed.status_code == 302 and 'Bremsen prüfen / wechseln' in changed_lead['beschreibung'] and 'Achsvermessung / Spureinstellung' not in changed_lead['beschreibung']))
+    return checks
+
+
 def main():
     portal.app.config["TESTING"] = True
     client = portal.app.test_client()
@@ -432,6 +468,7 @@ def main():
     ]
 
     checks += reifenservice_checks()
+    checks += achsvermessung_checks()
     print(f"Temporäre Testdaten: {TEMP_DIR}")
     return 0 if all(checks) else 1
 

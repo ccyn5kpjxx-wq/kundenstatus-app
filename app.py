@@ -44792,6 +44792,7 @@ WEBSITE_MECHANIK_KATEGORIEN = {
     "inspektion": "Inspektion / Wartung",
     "motor_antrieb": "Motor / Antrieb",
     "fahrwerk_lenkung": "Fahrwerk / Lenkung",
+    "achsvermessung": "Achsvermessung / Spureinstellung",
     "auspuff": "Auspuff / Abgasanlage",
     "elektrik_batterie": "Elektrik / Batterie",
     "klima": "Klimaanlage",
@@ -45219,8 +45220,13 @@ def website_anfrage():
     bestaetigt = bool(request.args.get("gesendet")) and bool(
         session.pop("website_anfrage_gesendet", 0)
     )
+    mechanik_vorauswahl = list(dict.fromkeys(
+        value for value in request.args.getlist("mechanik_kategorie")
+        if vorauswahl == "mechanikanfrage" and value in WEBSITE_MECHANIK_KATEGORIEN
+    ))
     return render_website_anfrage(
-        formdata={"anliegen": vorauswahl, "besichtigungsart": besichtigungsart},
+        formdata={"anliegen": vorauswahl, "besichtigungsart": besichtigungsart,
+                  "mechanik_kategorie": mechanik_vorauswahl},
         gesendet=bestaetigt,
     )
 
@@ -45305,6 +45311,21 @@ HOMEPAGE_LEISTUNGEN = {
         "anliegen": "mechanikanfrage", "aktion": "Wartung oder Reparatur anfragen",
         "hinweis": "Welche Arbeiten und Teile Ihr Fahrzeug benötigt, klären wir anhand des Fahrzeugtyps und der Prüfung. Ein Wunschtermin wird persönlich bestätigt.",
     },
+    "achsvermessung": {
+        "titel": "Achsvermessung", "kurz": "Spur prüfen. Fahrwerk richtig einstellen.",
+        "bild": "leistungsfotos-v2/achsvermessung-v1.webp",
+        "intro": "Ihr Fahrzeug zieht zur Seite, das Lenkrad steht schief oder die Reifen nutzen sich ungleichmäßig ab? Wir prüfen die Achsgeometrie und besprechen die passende Einstellung für Ihr Fahrzeug.",
+        "arbeiten": [
+            ("Fahrzeug & Reifen prüfen", "Auffälligkeiten an Bereifung, Fahrwerk und Lenkung vor der Vermessung beurteilen."),
+            ("Achsgeometrie vermessen", "Spur- und Sturzwerte erfassen und mit den fahrzeugspezifischen Herstellervorgaben vergleichen."),
+            ("Spur & Fahrwerk einstellen", "Erforderliche Einstellarbeiten nach Befund und im Rahmen der vorgesehenen Einstellmöglichkeiten abstimmen und ausführen."),
+            ("Nach Reparatur oder Anstoß", "Nach Arbeiten am Fahrwerk oder einem Bordsteinkontakt prüfen, ob eine Vermessung und weitere Maßnahmen nötig sind."),
+            ("Ergebnis besprechen", "Festgestellte Abweichungen und durchgeführte Einstellarbeiten verständlich mit Ihnen durchgehen."),
+        ],
+        "anliegen": "mechanikanfrage", "mechanik_kategorie": "achsvermessung",
+        "aktion": "Achsvermessung anfragen",
+        "hinweis": "Welche Werte einstellbar sind und ob vorab Teile erneuert werden müssen, hängt vom Fahrzeug und seinem Zustand ab. Umfang, Preis und Termin stimmen wir vor Beginn persönlich mit Ihnen ab.",
+    },
     "reifenservice": {
         "titel": "Reifen & Einlagerung", "kurz": "Montieren, wuchten und sicher lagern.",
         "bild": "leistungsfotos-v2/reifenmontage.jpg",
@@ -45380,6 +45401,7 @@ HOMEPAGE_LEISTUNGEN = {
 }
 
 HOMEPAGE_ARBEIT_ZU_LEISTUNG = {
+    "achsvermessung": "achsvermessung",
     "reifenmontage": "reifenservice", "reifenlager": "reifenservice",
     "bremsenservice": "wartung-mechanik", "oelservice": "wartung-mechanik", "inspektion": "wartung-mechanik",
     "lackierung": "karosserie-lack", "karosserie": "karosserie-lack",
