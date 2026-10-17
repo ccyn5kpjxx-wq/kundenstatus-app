@@ -56,7 +56,7 @@ import mos_public_booking
 import mos_termination
 from cockpit_rules import document_visible as base_document_visible, price_state, price_record, decimal_input, has_invoice, exact_contact, workshop_completion_photo
 from werkstatt_assistent_uploads import ensure_upload_schema, is_assistant_private
-from werkstatt_kundenflotten import (register_kundenflotten, ensure_kundenflotten_schema,
+from werkstatt_kundenflotten import (register_kundenflotten, ensure_kundenflotten_schema, render_kundenapp_demo,
     BACKUP_TABLES as KUNDENFLOTTEN_BACKUP_TABLES, SCHEMA_FEATURE as KUNDENFLOTTEN_SCHEMA_FEATURE,
     CORE_BACKUP_TABLES as KUNDENFLOTTEN_CORE_TABLES, ORDER_SCHEMA_FEATURE as KUNDENFLOTTEN_ORDER_FEATURE,
     PORTAL_TABLES as KUNDENFLOTTEN_PORTAL_TABLES, PORTAL_FEATURE as KUNDENFLOTTEN_PORTAL_FEATURE)
@@ -44459,6 +44459,7 @@ def homepage_portal_links():
         "privat": link("privat_portal", "/privat/"),
         "mietwagen": link("mietwagen_anfrage", "/mietwagen"),
         "anfrage": link("website_anfrage", "/anfrage"),
+        "fahrer_demo": link("oeffentliche_kundenapp_demo", "/kunden-app/demo"),
         "partner": link("partner_login", "/partner"),
         "flotte": link("flottenportal.login", "/flotte/anmelden"),
         "versicherung": link("versicherung_login", "/versicherung"),
@@ -45596,6 +45597,12 @@ def oeffentliche_geschaeftspartner():
         site_indexable=public_site_is_indexable_request(),
         canonical_url=f"{PUBLIC_BASE_URL}/geschaeftspartner" if PUBLIC_BASE_URL else "",
     )
+
+
+@app.get("/kunden-app/demo")
+def oeffentliche_kundenapp_demo():
+    """Public website prototype, separate from authenticated fleet routes."""
+    return render_kundenapp_demo(is_public=True)
 
 
 @app.route("/portale")

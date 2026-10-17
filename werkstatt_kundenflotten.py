@@ -17,7 +17,7 @@ from urllib.parse import quote
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, flash, jsonify, make_response, redirect, render_template, request, session, url_for
 from werkstatt_flottenportal import PORTAL_TABLES, PORTAL_FEATURE, ensure_schema as ensure_flottenportal_schema, register_flottenportal
 
 CORE_BACKUP_TABLES = (
@@ -59,6 +59,18 @@ def case_view(order, kind):
             "label":CASE_LABELS.get(status,"Status wird geprüft"), "description":CASE_COPY.get(status,"Bitte stimmen Sie den aktuellen Stand mit uns ab."),
             "updated":stamp or "Noch kein Zeitstempel", "stage":stage,
             "steps":[{"label":label,"done":value < status,"current":value == status} for value,label in CASE_LABELS.items()]}
+
+
+def render_kundenapp_demo(*, is_public=False):
+    """Render fixed fictional data without company, driver or order lookups."""
+    example = case_view({"id": 0, "fahrzeug": "Hyundai Kona", "kennzeichen": "MOS · DEMO",
+                         "status": 3, "geaendert_am": datetime.now().strftime("%d.%m.%Y") + " · 09:42"}, "service")
+    response = make_response(render_template("kundenflotten_demo.html", case=example, is_public_demo=is_public))
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 def ensure_kundenflotten_schema(db):
@@ -620,8 +632,7 @@ def register_kundenflotten(portal):
     def demo():
         if not portal.app.config.get("KUNDENFLOTTEN_DEMO_ENABLED", False) or request.remote_addr not in {"127.0.0.1", "::1"}:
             abort(404)
-        example=case_view({"id":0,"fahrzeug":"Hyundai Kona","kennzeichen":"MOS · DEMO","status":3,"geaendert_am":datetime.now().strftime("%d.%m.%Y")+" · 09:42"},"service")
-        return render_template("kundenflotten_demo.html",case=example)
+        return render_kundenapp_demo()
 
     portal.app.register_blueprint(bp)
     portal.kundenflotten = service
