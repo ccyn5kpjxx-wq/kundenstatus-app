@@ -3083,6 +3083,7 @@ def restrict_public_site_service():
         "mietwagen_vorschau",
         "mietwagen_vorschau_datei",
         "oeffentliche_leistungen",
+        "oeffentliche_leistung_detail",
         "oeffentliche_geschaeftspartner",
         "oeffentliche_portale",
         "oeffentliches_team",
@@ -44776,6 +44777,7 @@ WEBSITE_PFLEGE_KATEGORIEN = {
     "polieren": "Politur / Glanzauffrischung",
     "1-step": "1-Step-Politur",
     "2-step": "2-Step-Politur",
+    "wachs": "Wachsversiegelung",
     "komplett": "Komplettaufbereitung",
 }
 
@@ -44785,6 +44787,7 @@ WEBSITE_MECHANIK_KATEGORIEN = {
     "inspektion": "Inspektion / Wartung",
     "motor_antrieb": "Motor / Antrieb",
     "fahrwerk_lenkung": "Fahrwerk / Lenkung",
+    "auspuff": "Auspuff / Abgasanlage",
     "elektrik_batterie": "Elektrik / Batterie",
     "klima": "Klimaanlage",
     "sonstiges": "Sonstiges Mechanikproblem",
@@ -45243,6 +45246,7 @@ def public_sitemap():
     if not public_site_is_indexable_request():
         abort(404)
     urls = ("", "/leistungen", "/geschaeftspartner", "/team", "/portale", "/impressum", "/datenschutz")
+    urls += tuple(f"/leistungen/{slug}" for slug in HOMEPAGE_LEISTUNGEN)
     entries = "".join(f"<url><loc>{escape(PUBLIC_BASE_URL + path)}</loc></url>" for path in urls)
     body = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{entries}</urlset>'
     return body, 200, {"Content-Type": "application/xml; charset=utf-8"}
@@ -45263,6 +45267,123 @@ def legacy_public_redirect():
     return redirect(target, code=301)
 
 
+HOMEPAGE_LEISTUNGEN = {
+    "karosserie-lack": {
+        "titel": "Karosserie & Lack", "kurz": "Vom Kratzer bis zum Unfallschaden.",
+        "bild": "leistungsfotos-v2/lackierung.jpg",
+        "intro": "Kratzer, Lackschaden oder Unfall: Wir prüfen den Schaden und besprechen die passende Reparatur – vom einzelnen Bauteil bis zur umfangreichen Instandsetzung.",
+        "arbeiten": [
+            ("Kratzer & Lackschäden", "Beschädigte Lackflächen beurteilen, vorbereiten und passend zum Schaden lackieren."),
+            ("Karosserie instand setzen", "Verformte Karosserie- und Anbauteile reparieren oder nach Prüfung erneuern und montieren."),
+            ("Unfallinstandsetzung", "Auch umfangreiche Unfallschäden aufnehmen, kalkulieren und die Reparaturschritte abstimmen."),
+            ("Farbton & Übergänge", "Farbton digital messen, abstimmen und erforderliche Lackübergänge sorgfältig ausführen."),
+            ("Bauteil- & Fahrzeuglackierung", "Türen, Stoßfänger, Kotflügel und weitere Bauteile vorbereiten und lackieren."),
+            ("Vorbereitung & Finish", "Untergrund vorbereiten, grundieren, füllern, schleifen und das Lackierergebnis kontrollieren."),
+        ],
+        "anliegen": "reparaturanfrage", "aktion": "Karosserie anfragen",
+        "zweite_aktion": ("Lackierung anfragen", "lackanfrage"),
+        "hinweis": "Bei einem Versicherungsschaden unterstützen wir bei Unterlagen, Kostenvoranschlag und Abstimmung mit Ihrer Versicherung. Die Kostenübernahme klären wir im jeweiligen Fall.",
+    },
+    "wartung-mechanik": {
+        "titel": "Wartung & Mechanik", "kurz": "Inspektion, Ölwechsel und Bremsen.",
+        "bild": "leistungsfotos-v2/bremsenservice.jpg",
+        "intro": "Vom fälligen Service bis zum technischen Problem: Wir prüfen Ihr Fahrzeug und stimmen notwendige Wartungs- und Reparaturarbeiten mit Ihnen ab.",
+        "arbeiten": [
+            ("Ölwechsel & Filter", "Motoröl und Filter passend zum Fahrzeug wechseln und Betriebsflüssigkeiten prüfen."),
+            ("Inspektion & Wartung", "Fällige Wartungsarbeiten nach dem fahrzeugspezifischen Wartungsplan abstimmen und durchführen."),
+            ("Bremsenservice", "Bremsanlage prüfen sowie verschlissene Bremsscheiben und Bremsbeläge erneuern."),
+            ("Auspuff & Abgasanlage", "Schäden und Undichtigkeiten prüfen und betroffene Auspuffteile nach Befund wechseln."),
+            ("Fahrwerk & Lenkung", "Verschleiß und Auffälligkeiten prüfen und erforderliche mechanische Bauteile ersetzen."),
+            ("Batterie & technische Bauteile", "Startprobleme und weitere technische Auffälligkeiten prüfen; Reparaturumfang und Ersatzteile vorab besprechen."),
+            ("HU / AU", "Prüftermin mit unserem externen Prüfpartner organisieren und erforderliche Vorarbeiten mit Ihnen abstimmen."),
+        ],
+        "anliegen": "mechanikanfrage", "aktion": "Wartung oder Reparatur anfragen",
+        "hinweis": "Welche Arbeiten und Teile Ihr Fahrzeug benötigt, klären wir anhand des Fahrzeugtyps und der Prüfung. Ein Wunschtermin wird persönlich bestätigt.",
+    },
+    "reifenservice": {
+        "titel": "Reifen & Einlagerung", "kurz": "Montieren, wuchten und sicher lagern.",
+        "bild": "leistungsfotos-v2/reifenmontage.jpg",
+        "intro": "Wir kümmern uns um Ihre Reifen – vom saisonalen Radwechsel über neue Reifen bis zur Einlagerung des zweiten Radsatzes.",
+        "arbeiten": [
+            ("Rad- & Saisonwechsel", "Sommer- und Winterräder wechseln und den nächsten Termin gemeinsam planen."),
+            ("Reifenmontage", "Reifen auf die Felgen montieren und die Räder für den Einsatz vorbereiten."),
+            ("Räder auswuchten", "Unwuchten ausgleichen und den Rundlauf prüfen."),
+            ("Reifenkontrolle", "Profiltiefe, Zustand und Luftdruck prüfen sowie Auffälligkeiten besprechen."),
+            ("Neue Reifen", "Passende Bereifung anhand der Fahrzeugdaten auswählen und die Bestellung abstimmen."),
+            ("Reifeneinlagerung", "Räder kennzeichnen, den Zustand erfassen und die Einlagerung sowie den nächsten Wechsel vereinbaren."),
+        ],
+        "anliegen": "reifenservice", "aktion": "Reifenservice und Termin anfragen",
+        "hinweis": "Reifengröße, gewünschte Leistung und ein Wunschtermin helfen uns bei der Vorbereitung. Fotos können Sie ergänzen, müssen Sie aber nicht.",
+    },
+    "autoglas": {
+        "titel": "Autoglas", "kurz": "Steinschlag, Riss oder Scheibentausch.",
+        "bild": "leistungsfotos/autoglas.jpg",
+        "intro": "Ein Steinschlag oder eine beschädigte Scheibe? Wir beurteilen den Schaden und klären, ob eine Reparatur möglich ist oder die Scheibe erneuert werden muss.",
+        "arbeiten": [
+            ("Glasschaden prüfen", "Position, Größe und Art der Beschädigung beurteilen und das weitere Vorgehen besprechen."),
+            ("Steinschlag reparieren", "Geeignete Steinschläge nach Prüfung reparieren."),
+            ("Scheibe erneuern", "Die passende Front-, Seiten- oder Heckscheibe anhand der Fahrzeugdaten zuordnen und den Austausch abstimmen."),
+            ("Fahrzeugausstattung berücksichtigen", "Sensoren, Kameras und erforderliche Folgeschritte bei der Planung berücksichtigen."),
+            ("Versicherung abstimmen", "Bei Bedarf Unterlagen und die Abstimmung zum Glasschaden unterstützen."),
+        ],
+        "anliegen": "glasschaden", "aktion": "Glasschaden anfragen",
+        "hinweis": "Für die eindeutige Scheibenzuordnung fragt das Formular die FIN ab. Ein Foto des Schadens hilft bei der ersten Einschätzung.",
+    },
+    "dellen-smart-repair": {
+        "titel": "Dellen & Smart Repair", "kurz": "Gezielt reparieren und Werte erhalten.",
+        "bild": "leistungsfotos-v2/dellen-hagel.jpg",
+        "intro": "Kleine Schäden verdienen eine passende Lösung. Wir prüfen Dellen, Hagel- und Lackschäden und wählen die Reparatur nach Zustand und Zugänglichkeit.",
+        "arbeiten": [
+            ("Dellen drücken", "Geeignete Dellen mit lackschonender Technik bearbeiten, sofern Zustand und Zugänglichkeit dies erlauben."),
+            ("Hagelschäden", "Den Umfang dokumentieren und die Bearbeitung der betroffenen Flächen abstimmen."),
+            ("Smart Repair", "Kleinere Lackschäden und Kratzer gezielt reparieren, wenn das Schadenbild dafür geeignet ist."),
+            ("Mobiler Dellenservice", "Einen Einsatz vor Ort auf Wunsch und nach Vereinbarung abstimmen."),
+        ],
+        "anliegen": "reparaturanfrage", "aktion": "Delle oder kleinen Schaden anfragen",
+        "hinweis": "Ob eine Reparatur ohne Lackierung möglich ist, beurteilen wir am Schaden. Senden Sie uns gern Übersichts- und Detailfotos.",
+    },
+    "schaden-mobilitaet": {
+        "titel": "Schaden & Mobilität", "kurz": "Abwicklung, Abholung und Ersatzwagen.",
+        "bild": "leistungsfotos-v2/schadenaufnahme.jpg",
+        "intro": "Nach einem Schaden behalten wir mit Ihnen die nächsten Schritte im Blick – von der Aufnahme über die Reparatur bis zur Fahrzeugübergabe.",
+        "arbeiten": [
+            ("Schaden aufnehmen", "Fahrzeug und Schaden dokumentieren und vorhandene Fotos sowie Unterlagen zuordnen."),
+            ("Kostenvoranschlag", "Den Reparaturumfang prüfen und ein nachvollziehbares Angebot vorbereiten."),
+            ("Versicherungsabwicklung", "Unterlagen zusammenstellen sowie Reparaturfreigabe und weitere Schritte mit Ihnen und der Versicherung abstimmen."),
+            ("Hol- & Bringservice", "Abholung und Rückgabe nach Vereinbarung organisieren."),
+            ("Ersatzwagen", "Eine passende Ersatzmobilität nach Bedarf, Vereinbarung und Verfügbarkeit besprechen."),
+        ],
+        "anliegen": "reparaturanfrage", "aktion": "Schaden und Unterstützung anfragen",
+        "zweite_aktion": ("Ersatzwagen anfragen", "mietwagenanfrage"),
+        "hinweis": "Eine Versicherungsfreigabe oder Kostenübernahme wird im Einzelfall geklärt. Bei Panne oder Unfall bitte zusätzlich direkt anrufen; bei akuter Gefahr gilt der Notruf 112.",
+    },
+    "fahrzeugaufbereitung": {
+        "titel": "Fahrzeugaufbereitung", "kurz": "Innen gepflegt. Außen neuer Glanz.",
+        "bild": "fahrzeugpflege.webp",
+        "intro": "Für den Alltag, vor dem Verkauf oder zur Leasingrückgabe: Wir besprechen mit Ihnen die passende Innen- und Außenpflege und bereiten Ihr Fahrzeug nach dem vereinbarten Umfang auf.",
+        "arbeiten": [
+            ("Innenraum & Kofferraum", "Innenraum reinigen, aussaugen und Scheiben sowie Kunststoffflächen pflegen."),
+            ("Polster & Leder", "Reinigung und Pflege passend zum Material und zum Zustand vereinbaren."),
+            ("Außenpflege", "Karosserie, Felgen und Türkanten reinigen und sichtbare Gebrauchsspuren gemeinsam beurteilen."),
+            ("Lackpolitur", "Glanz auffrischen und feine Gebrauchsspuren je nach Lackzustand reduzieren; den passenden Polierumfang vorher abstimmen."),
+            ("Wachsversiegelung", "Die Lackpflege durch einen aufgetragenen Wachsschutz ergänzen."),
+            ("Verkauf & Leasingrückgabe", "Den Pflegeumfang passend zum Anlass festlegen und notwendige Reparaturen getrennt besprechen."),
+        ],
+        "anliegen": "fahrzeugpflege", "aktion": "Fahrzeugaufbereitung und Termin anfragen",
+        "hinweis": "Innenpflege, Außenpflege, Politur und Wachsversiegelung stellen wir passend zum Fahrzeug zusammen. Den Umfang und Preis stimmen wir vor Beginn mit Ihnen ab.",
+    },
+}
+
+HOMEPAGE_ARBEIT_ZU_LEISTUNG = {
+    "reifenmontage": "reifenservice", "reifenlager": "reifenservice",
+    "bremsenservice": "wartung-mechanik", "oelservice": "wartung-mechanik", "inspektion": "wartung-mechanik",
+    "lackierung": "karosserie-lack", "karosserie": "karosserie-lack",
+    "smart-repair": "dellen-smart-repair", "dellen-hagel": "dellen-smart-repair",
+    "autoglas": "autoglas", "schadenabwicklung": "schaden-mobilitaet", "mobilitaet": "schaden-mobilitaet",
+    "fahrzeugaufbereitung": "fahrzeugaufbereitung",
+}
+
+
 @app.route("/homepage")
 def oeffentliche_homepage():
     return (
@@ -45270,6 +45391,7 @@ def oeffentliche_homepage():
             "homepage.html",
             google_reviews=get_google_reviews(),
             portal_links=homepage_portal_links(),
+            leistungen=HOMEPAGE_LEISTUNGEN,
             homepage_stellenanzeigen=DEFAULT_STELLENANZEIGEN,
             site_indexable=public_site_is_indexable_request(),
             canonical_url=f"{PUBLIC_BASE_URL}/" if PUBLIC_BASE_URL else "",
@@ -45443,8 +45565,25 @@ def oeffentliche_leistungen():
     return render_template(
         "homepage_leistungen.html",
         portal_links=homepage_portal_links(),
+        arbeit_zu_leistung=HOMEPAGE_ARBEIT_ZU_LEISTUNG,
         site_indexable=public_site_is_indexable_request(),
         canonical_url=f"{PUBLIC_BASE_URL}/leistungen" if PUBLIC_BASE_URL else "",
+    )
+
+
+@app.route("/leistungen/<slug>")
+def oeffentliche_leistung_detail(slug):
+    leistung = HOMEPAGE_LEISTUNGEN.get(slug)
+    if leistung is None:
+        abort(404)
+    return render_template(
+        "homepage_leistung_detail.html",
+        leistung=leistung,
+        leistungen=HOMEPAGE_LEISTUNGEN,
+        slug=slug,
+        portal_links=homepage_portal_links(),
+        site_indexable=public_site_is_indexable_request(),
+        canonical_url=f"{PUBLIC_BASE_URL}/leistungen/{slug}" if PUBLIC_BASE_URL else "",
     )
 
 

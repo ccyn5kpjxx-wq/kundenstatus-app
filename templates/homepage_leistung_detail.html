@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ leistung.titel }} in Mosbach | Gärtner GmbH Karosserie + Lack</title>
+  <meta name="description" content="{{ leistung.intro }}">
+  <meta name="robots" content="{{ 'index, follow' if site_indexable else 'noindex, nofollow' }}">
+  {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='homepage/homepage-kompakt.css') }}">
+</head>
+<body class="compact-home service-detail-page">
+  <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
+  <header class="site-header"><nav class="wrap site-nav" aria-label="Leistungsnavigation">
+    <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie + Lack" width="210" height="60"></a>
+    <a class="detail-home" href="{{ url_for('oeffentliche_homepage') }}">Startseite</a>
+    <a class="button light detail-overview" href="{{ url_for('oeffentliche_leistungen') }}">Alle Leistungen</a>
+  </nav></header>
+  <main id="inhalt">
+    <section class="service-detail-hero">
+      <div class="wrap service-detail-inner">
+      <div class="service-detail-copy">
+        <nav class="detail-breadcrumb" aria-label="Brotkrümelnavigation"><a href="{{ url_for('oeffentliche_homepage') }}#leistungen">Was Ihr Fahrzeug braucht</a><span aria-hidden="true">/</span><span>{{ leistung.titel }}</span></nav>
+        <span class="eyebrow">Ihre Werkstatt in Mosbach</span>
+        <h1>{% if slug == 'fahrzeugaufbereitung' %}Fahrzeug&shy;aufbereitung{% else %}{{ leistung.titel }}{% endif %}</h1>
+        <p>{{ leistung.intro }}</p>
+        <div class="actions"><a class="button red service-enquiry" href="{{ portal_links.anfrage }}?anliegen={{ leistung.anliegen }}#kurzanfrage">{{ leistung.aktion }} <span aria-hidden="true">→</span></a><a class="text-link" href="tel:+4915227706694">Direkt anrufen</a></div>
+        <p class="detail-reassurance">Unverbindlich anfragen. Umfang, Preis und Termin stimmen wir persönlich mit Ihnen ab.</p>
+      </div>
+      </div>
+      <figure class="service-detail-photo"><img src="{{ url_for('static', filename='homepage/' ~ leistung.bild) }}" alt="{{ leistung.titel }} – Einblick in die Arbeit" width="900" height="750" fetchpriority="high"></figure>
+    </section>
+    <section class="service-detail-work section-pad" aria-labelledby="work-title"><div class="wrap">
+      <div class="section-head"><div><span class="eyebrow">Leistungen im Überblick</span><h2 id="work-title">Das übernehmen wir für Sie.</h2></div></div>
+      <ul class="detail-work-grid">{% for titel, text in leistung.arbeiten %}<li><span class="detail-work-number" aria-hidden="true">{{ '%02d'|format(loop.index) }}</span><div><h3>{{ titel }}</h3><p>{{ text }}</p></div></li>{% endfor %}</ul>
+      <p class="detail-note">{{ leistung.hinweis }}</p>
+    </div></section>
+    <section class="contact-band"><div class="wrap contact-inner"><div><span class="eyebrow">Ihr nächster Schritt</span><h2>Was dürfen wir für Sie tun?</h2><p>{% if leistung.anliegen == 'glasschaden' %}Halten Sie bitte Ihre FIN zur Scheibenzuordnung bereit. {% else %}Kontaktdaten und Ihr Anliegen genügen. {% endif %}Fotos sind optional.</p></div><div class="actions"><a class="button red service-enquiry" href="{{ portal_links.anfrage }}?anliegen={{ leistung.anliegen }}#kurzanfrage">{{ leistung.aktion }} →</a>{% if leistung.zweite_aktion %}<a class="button light service-enquiry" href="{{ portal_links.anfrage }}?anliegen={{ leistung.zweite_aktion[1] }}#kurzanfrage">{{ leistung.zweite_aktion[0] }}</a>{% endif %}</div></div></section>
+    <nav class="wrap detail-related" aria-label="Weitere Leistungen"><h2>Auch dafür sind wir da.</h2><div>{% for weiterer_slug, weitere in leistungen.items() %}{% if weiterer_slug != slug %}<a href="{{ url_for('oeffentliche_leistung_detail', slug=weiterer_slug) }}">{{ weitere.titel }} <span aria-hidden="true">↗</span></a>{% endif %}{% endfor %}</div></nav>
+  </main>
+  <footer class="site-footer"><div class="wrap detail-footer"><strong>Gärtner GmbH Karosserie + Lack</strong><nav aria-label="Weitere Informationen"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungsübersicht</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></nav></div></footer>
+  {% include "_besucher_tracking.html" %}
+</body>
+</html>

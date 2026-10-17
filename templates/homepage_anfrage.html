@@ -140,7 +140,12 @@
   <main>
     <section class="hero">
       <div class="wrap">
-        {% if kurzanfrage %}
+        {% if kurzanfrage and ausgewaehltes_anliegen in kurzanfrage_optionen %}
+        <div class="time-pill">● Schnell &amp; unverbindlich</div>
+        <div class="eyebrow">Ihre Anfrage direkt bei uns</div>
+        <h1>{{ kurzanfrage_optionen[ausgewaehltes_anliegen]['label'] }}</h1>
+        <p>Tragen Sie Ihre Kontaktdaten und Ihr Anliegen ein. Fotos sind optional. Wir melden uns persönlich, um Umfang, Kosten und einen passenden Termin abzustimmen.</p>
+        {% elif kurzanfrage %}
         <div class="time-pill">● Schnell &amp; unverbindlich</div>
         <div class="eyebrow">Privatkunden · Service und Reparatur</div>
         <h1>Was möchten Sie anfragen?</h1>
@@ -153,7 +158,7 @@
       </div>
     </section>
 
-    {% if kurzanfrage and not gesendet %}
+    {% if kurzanfrage and not gesendet and ausgewaehltes_anliegen not in kurzanfrage_optionen %}
     <section class="wrap intent-wrap" aria-label="Anliegen auswählen">
       <div class="intent-grid">
         <a class="intent-card {% if formdata.get('anliegen') == 'lackanfrage' %}is-selected{% endif %}" href="{{ url_for('website_anfrage', anliegen='lackanfrage') }}#kurzanfrage">

@@ -10,7 +10,8 @@
   ('autoglas', 'Glas', 'Autoglas', 'Glasschäden beurteilen und die passende Reparatur oder Erneuerung übernehmen.', 'homepage/leistungsfotos/autoglas.jpg', 'Scheibenkleber wird am Rand einer Fahrzeugfrontscheibe aufgetragen', '50% 55%'),
   ('reifenlager', 'Reifenhotel', 'Reifeneinlagerung', 'Räder kennzeichnen, lagern und den nächsten Wechsel gemeinsam planen.', 'homepage/leistungsfotos/reifenlager.jpg', 'Geordnete Lagerregale mit Fahrzeugreifen', '50% 50%'),
   ('schadenabwicklung', 'Versicherungsschäden', 'Schadenabwicklung', 'Unterlagen, Kostenvoranschlag und Reparaturfreigabe mit Ihnen abstimmen.', 'homepage/leistungsfotos-v2/schadenaufnahme.jpg', 'Werkstattmitarbeiter dokumentiert Fahrzeugdaten mit einem Tablet am Fahrzeug', '50% 38%'),
-  ('mobilitaet', 'Mobil bleiben', 'Fahrzeugübergabe & Ersatzwagen', 'Hol- und Bringservice sowie Ersatzmobilität nach Absprache und Verfügbarkeit.', 'homepage/leistungsfotos/fahrzeuguebergabe.jpg', 'Nahaufnahme einer Fahrzeugschlüsselübergabe', '50% 55%')
+  ('mobilitaet', 'Mobil bleiben', 'Fahrzeugübergabe & Ersatzwagen', 'Hol- und Bringservice sowie Ersatzmobilität nach Absprache und Verfügbarkeit.', 'homepage/leistungsfotos/fahrzeuguebergabe.jpg', 'Nahaufnahme einer Fahrzeugschlüsselübergabe', '50% 55%'),
+  ('fahrzeugaufbereitung', 'Pflege & Werterhalt', 'Fahrzeugaufbereitung', 'Innen- und Außenpflege, Lackpolitur und Wachsversiegelung nach vereinbartem Umfang.', 'homepage/fahrzeugpflege.webp', 'Pflege der Armaturen mit einem Mikrofasertuch', '50% 38%')
 ] %}
 <section class="arbeitsbilder-section" id="unsere-arbeiten" aria-labelledby="arbeitsbilder-titel">
   <div class="arbeitsbilder-wrap">
@@ -21,11 +22,11 @@
     <div class="arbeitsbilder-grid">
       {% for slug, bereich, titel, beschreibung, datei, alt, position in arbeitsmotive %}
       <figure class="arbeitsbild" id="arbeit-{{ slug }}">
-        <a class="arbeitsbild-foto" href="{{ portal_links.auswahl }}" aria-label="{{ titel }} anfragen">
+        <a class="arbeitsbild-foto" href="{{ url_for('oeffentliche_leistung_detail', slug=arbeit_zu_leistung[slug]) }}" aria-label="{{ titel }} – Leistungen ansehen">
           <img src="{{ url_for('static', filename=datei) }}" alt="{{ alt }}" width="600" height="450" style="object-position:{{ position }}" loading="lazy" decoding="async">
           <span class="arbeitsbild-zoom" aria-hidden="true">→</span>
         </a>
-        <figcaption><span class="arbeitsbild-bereich">{{ '%02d'|format(loop.index) }} / {{ bereich }}</span><h3>{{ titel }}</h3><p>{{ beschreibung }}</p></figcaption>
+        <figcaption><span class="arbeitsbild-bereich">{{ '%02d'|format(loop.index) }} / {{ bereich }}</span><h3>{{ titel }}</h3><p>{{ beschreibung }}</p><a class="arbeitsbild-detail" href="{{ url_for('oeffentliche_leistung_detail', slug=arbeit_zu_leistung[slug]) }}">Leistungen ansehen →</a></figcaption>
       </figure>
       {% endfor %}
     </div>
