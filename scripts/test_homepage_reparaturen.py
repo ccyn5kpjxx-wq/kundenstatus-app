@@ -79,16 +79,26 @@ class HomepageRepairTests(unittest.TestCase):
             db.close()
 
     def test_public_portal_buttons_use_working_portal_host(self):
-        with patch.object(portal, "PUBLIC_SITE_ONLY", True), patch.object(portal, "PORTAL_BASE_URL", "https://portal.example.test"):
+        with patch.object(portal, "PUBLIC_SITE_ONLY", True), patch.object(portal, "PORTAL_BASE_URL", "https://portal.example.test"), patch.dict(portal.app.config, {"FLOTTENPORTAL_ENABLED": True}):
             response = self.client.get("/portale")
             self.assertEqual(response.status_code, 200)
             links = Links()
             links.feed(response.get_data(as_text=True))
-            for path in ("/privat/", "/partner", "/versicherung"):
+            self.assertIn("https://portal.example.test/privat/status", links.hrefs)
+            self.assertNotIn("https://portal.example.test/privat/", links.hrefs)
+            self.assertIn("/portale?bereich=geschaeftlich", links.hrefs)
+            self.assertEqual(response.text.count('class="portal-choice"'), 2)
+            response = self.client.get("/portale?bereich=geschaeftlich")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.text.count('class="portal-choice"'), 3)
+            links = Links()
+            links.feed(response.text)
+            for path in ("/partner", "/flotte/anmelden", "/versicherung"):
                 self.assertIn("https://portal.example.test" + path, links.hrefs)
                 self.assertNotIn(path, links.hrefs)
-        for path in ("/privat/", "/partner", "/versicherung"):
-            self.assertEqual(self.client.get(path).status_code, 200)
+        with patch.dict(portal.app.config, {"FLOTTENPORTAL_ENABLED": True}):
+            for path in ("/privat/", "/privat/status", "/partner", "/flotte/anmelden", "/versicherung"):
+                self.assertEqual(self.client.get(path).status_code, 200)
 
     def test_public_upload_shows_actual_limits_and_live_copy(self):
         html = self.client.get("/privat/schaden").get_data(as_text=True)

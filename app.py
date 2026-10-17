@@ -45613,6 +45613,7 @@ def oeffentliche_kundenapp_demo():
 def oeffentliche_portale():
     return render_template(
         "homepage_portale.html",
+        business_access=request.args.get("bereich") == "geschaeftlich",
         portal_links=homepage_portal_links(),
         site_indexable=public_site_is_indexable_request(),
         canonical_url=f"{PUBLIC_BASE_URL}/portale" if PUBLIC_BASE_URL else "",

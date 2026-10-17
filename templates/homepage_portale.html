@@ -1,5 +1,54 @@
 <!doctype html>
 <html lang="de">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kunden- und Partnerportale | Gärtner</title><meta name="robots" content="{{ 'index, follow' if site_indexable else 'noindex, nofollow' }}">{% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}<style>
-  :root{--bg:#30302f;--panel:#3a3a38;--yellow:#f1c232;--text:#fff;--muted:#b9b7b1;--line:rgba(255,255,255,.14)}*{box-sizing:border-box}body{margin:0;color:var(--text);background:var(--bg);font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}a{color:inherit}.wrap{width:min(1120px,calc(100% - 40px));margin:auto}.top{background:#262625;border-bottom:1px solid var(--line)}.nav{min-height:78px;display:flex;align-items:center;justify-content:space-between}.logo{width:230px;filter:brightness(0) invert(1)}.back{padding:11px 17px;border:1px solid var(--line);border-radius:999px;text-decoration:none;font-size:13px;font-weight:800}.hero{padding:78px 0 55px}.eyebrow{color:var(--yellow);font-size:13px;font-weight:900}.hero h1{max-width:850px;margin:18px 0;font-size:clamp(47px,6vw,76px);line-height:.96;letter-spacing:-.05em}.hero p{max-width:680px;color:var(--muted);font-size:19px;line-height:1.6}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding-bottom:90px}.card{min-height:390px;display:flex;flex-direction:column;padding:29px;border:1px solid var(--line);border-radius:16px;background:var(--panel)}.card.is-yellow{color:#29261f;border-color:var(--yellow);background:var(--yellow)}.number{font-size:12px;font-weight:900}.card h2{margin:75px 0 12px;font-size:29px;line-height:1.05}.card p{margin:0;color:var(--muted);line-height:1.55}.card.is-yellow p{color:#5d4e2a}.button{margin-top:auto;padding-top:28px;font-weight:900;text-decoration:none}.button:after{content:" ↗";color:var(--yellow)}.is-yellow .button:after{color:#29261f}@media(max-width:800px){.grid{grid-template-columns:1fr}.card{min-height:300px}}@media(max-width:620px){.wrap{width:min(100% - 22px,1120px)}.logo{width:190px}.hero{padding-top:55px}}
-</style></head><body><header class="top"><div class="wrap nav"><a href="{{ url_for('oeffentliche_homepage') }}"><img class="logo" src="{{ url_for('static',filename='logo-transparent.png') }}" alt="Gärtner GmbH Karosserie + Lack"></a><a class="back" href="{{ url_for('oeffentliche_homepage') }}">← Zur Homepage</a></div></header><main><section class="hero"><div class="wrap"><div class="eyebrow">KATEGORIE · PORTALE</div><h1>Der passende Zugang für jede Zusammenarbeit.</h1><p>Wählen Sie Ihre Rolle. Persönliche Daten und Vorgänge bleiben in getrennten, geschützten Bereichen.</p></div></section><section><div class="wrap grid"><article class="card is-yellow"><span class="number">01 / PRIVATKUNDEN</span><h2>Schaden, Mietwagen und Reparaturstatus</h2><p>Schaden melden, Ersatzmobilität anfragen oder persönlichen Status öffnen.</p><a class="button" href="{{ portal_links.privat }}">Privatkunden-Portal</a></article><article class="card"><span class="number">02 / AUTOHÄUSER</span><h2>Fahrzeuge und Aufträge koordinieren</h2><p>Termine, Angebote, Dokumente und Status je Partnerbetrieb verwalten.</p><a class="button" href="{{ portal_links.partner }}">Autohaus-Portal</a></article><article class="card"><span class="number">03 / VERSICHERUNGEN</span><h2>Schadenfälle strukturiert bearbeiten</h2><p>Freigegebene Vorgänge, Unterlagen und Rückmeldungen sicher einsehen.</p><a class="button" href="{{ portal_links.versicherung }}">Versicherungsportal</a></article></div></section></main>{% include "_besucher_tracking.html" %}</body></html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ 'Geschäftszugänge' if business_access else 'Portale & Zugänge' }} | Gärtner</title>
+  <meta name="robots" content="{{ 'index, follow' if site_indexable else 'noindex, nofollow' }}">
+  {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='homepage/homepage-kompakt.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='homepage/portale.css') }}">
+</head>
+<body class="compact-home portal-page">
+  <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
+  <header class="site-header"><nav class="wrap site-nav" aria-label="Hauptnavigation">
+    <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie und Lack" width="210" height="80"></a>
+    <a class="portal-back" href="{{ url_for('oeffentliche_portale') if business_access else url_for('oeffentliche_homepage') }}">← {{ 'Alle Zugänge' if business_access else 'Startseite' }}</a>
+  </nav></header>
+  <main id="inhalt" class="wrap">
+    <section class="portal-intro" aria-labelledby="portal-title">
+      <span class="eyebrow">Gärtner · Portale &amp; Zugänge</span>
+      <h1 id="portal-title">{{ 'Ihr Geschäftszugang.' if business_access else 'Ihr Zugang. Ganz einfach.' }}</h1>
+      <p>{{ 'Autohaus, Fuhrpark oder Versicherung: Öffnen Sie direkt Ihren geschützten Bereich.' if business_access else 'Für Ihr eigenes Fahrzeug oder für die Zusammenarbeit mit Ihrem Unternehmen.' }}</p>
+    </section>
+    <section class="portal-choices {{ 'business-choices' if business_access else '' }}" aria-label="{{ 'Geschäftszugänge' if business_access else 'Zugang auswählen' }}">
+      {% if business_access %}
+      <a class="portal-choice" href="{{ portal_links.partner }}">
+        <img class="dealership-photo" src="{{ url_for('static', filename='homepage/zielgruppen/autohaeuser.jpg') }}" alt="Beratung im Autohaus" width="1200" height="800">
+        <div class="portal-choice-copy"><span class="eyebrow">Ihr Partnerbetrieb</span><h2>Autohäuser &amp;<br>Werkstätten</h2><p>Fahrzeuge, Termine, Angebote und Unterlagen für Ihre Aufträge.</p><span class="portal-action">Autohaus-Zugang öffnen <span aria-hidden="true">↗</span></span></div>
+      </a>
+      <a class="portal-choice" href="{{ portal_links.flotte if config.FLOTTENPORTAL_ENABLED else url_for('oeffentliche_geschaeftspartner') ~ '#kontakt' }}">
+        <img src="{{ url_for('static', filename='homepage/zielgruppen/firmenflotten.jpg') }}" alt="Firmenfahrzeuge einer Flotte" width="1200" height="674">
+        <div class="portal-choice-copy"><span class="eyebrow">Ihr Unternehmen</span><h2>Firmenflotten</h2><p>{{ 'Ihre Fahrzeuge, Fälligkeiten, Werkstattfälle und Belege im Überblick.' if config.FLOTTENPORTAL_ENABLED else 'Wir richten den geschützten Zugang für Ihren Fuhrpark persönlich mit Ihnen ein.' }}</p><span class="portal-action">{{ 'Fuhrpark-Zugang öffnen' if config.FLOTTENPORTAL_ENABLED else 'Fuhrpark-Zugang anfragen' }} <span aria-hidden="true">↗</span></span></div>
+      </a>
+      <a class="portal-choice" href="{{ portal_links.versicherung }}">
+        <img src="{{ url_for('static', filename='homepage/schadenaufnahme-christopher-v1.png') }}" alt="Schadenaufnahme am Fahrzeug" width="1536" height="1024">
+        <div class="portal-choice-copy"><span class="eyebrow">Ihre Schadenbearbeitung</span><h2>Versicherungen</h2><p>Freigegebene Schadenfälle, Dokumente und Rückmeldungen einsehen.</p><span class="portal-action">Versicherungszugang öffnen <span aria-hidden="true">↗</span></span></div>
+      </a>
+      {% else %}
+      <a class="portal-choice" href="{{ portal_links.status }}">
+        <img class="private-photo" src="{{ url_for('static', filename='homepage/zielgruppen/privatkunden.jpg') }}" alt="Privatkundin mit Fahrzeugschlüssel" width="1200" height="1800">
+        <div class="portal-choice-copy"><span class="eyebrow">Für Ihr eigenes Fahrzeug</span><h2>Privat</h2><p>Direkt zum persönlichen Reparaturzugang. Halten Sie Ihren Zugangscode oder Statuslink bereit.</p><span class="portal-action">Persönlichen Zugang öffnen <span aria-hidden="true">↗</span></span></div>
+      </a>
+      <a class="portal-choice" href="{{ url_for('oeffentliche_portale', bereich='geschaeftlich') }}">
+        <img src="{{ url_for('static', filename='homepage/fuhrparkmanagement/fuhrpark-buero.webp') }}" alt="Organisation und persönliche Betreuung im Büro" width="1536" height="1024">
+        <div class="portal-choice-copy"><span class="eyebrow">Für Unternehmen &amp; Partner</span><h2>Geschäftlich</h2><p>Die Zugänge für Autohäuser, Werkstätten, Firmenflotten und Versicherungen.</p><span class="portal-action">Geschäftszugänge auswählen <span aria-hidden="true">→</span></span></div>
+      </a>
+      {% endif %}
+    </section>
+    <aside class="portal-help"><p><strong>Sie brauchen Unterstützung beim Zugang?</strong><br>Wir helfen Ihnen persönlich weiter.</p><a class="text-link" href="tel:+4915227706694">0152 277 066 94 <span aria-hidden="true">↗</span></a></aside>
+  </main>
+  <footer class="site-footer"><div class="wrap portal-footer"><span>Gärtner GmbH Karosserie + Lack</span><nav aria-label="Weitere Informationen"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></nav></div></footer>
+  {% include '_besucher_tracking.html' %}
+</body>
+</html>
