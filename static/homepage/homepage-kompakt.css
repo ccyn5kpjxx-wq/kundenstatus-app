@@ -20,3 +20,18 @@
 .nav-links .mobile-portal-link{display:none}@media(max-width:560px){.nav-links .mobile-portal-link{display:block}}
 
 .insurance-line{display:block;margin-top:14px;font-size:clamp(19px,1.8vw,25px);line-height:1.3;font-weight:650;letter-spacing:-.025em;color:var(--ink)}
+
+/* Full-width workshop scene with the main message inside the dark area. */
+.compact-home .intro.hero-wide{position:relative;display:flex;align-items:center;isolation:isolate;min-height:610px;width:100%;max-width:none;gap:0;margin:0 0 38px;padding:64px max(32px,calc((100% - 1200px)/2));overflow:hidden;color:#fff;background:#151817}
+.hero-wide .intro-copy{position:relative;z-index:1;max-width:590px}
+.hero-wide .intro-photo{position:absolute;z-index:0;inset:0;width:100%;height:100%;border-radius:0}
+.hero-wide .intro-photo>img{width:100%;height:100%;object-fit:cover;object-position:50% 58%}
+.hero-wide .intro-photo::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,rgba(9,13,11,.92) 0%,rgba(9,13,11,.7) 33%,rgba(9,13,11,.25) 60%,rgba(9,13,11,.04) 100%)}
+.compact-home .hero-wide .eyebrow{color:#e9e9e3}
+.hero-wide h1{font-size:clamp(48px,4.7vw,70px);color:#fff}
+.hero-wide .insurance-line{color:#fff}
+.hero-wide .intro-copy>p{color:#e3e5df;max-width:450px}
+.hero-wide .text-link{color:#fff}
+@media(min-width:1500px){.compact-home .intro.hero-wide{min-height:670px}}
+@media(max-width:900px){.compact-home .intro.hero-wide{min-height:600px;padding:48px 28px}.hero-wide .intro-copy{max-width:510px}.hero-wide .intro-photo>img{object-position:58% 55%}.hero-wide .intro-photo::after{background:linear-gradient(90deg,rgba(9,13,11,.94),rgba(9,13,11,.78) 38%,rgba(9,13,11,.18) 100%)}}
+@media(max-width:560px){.compact-home .intro.hero-wide{min-height:690px;margin-bottom:24px;padding:40px 20px;align-items:flex-start}.hero-wide .intro-copy{max-width:100%}.hero-wide h1{font-size:clamp(39px,10vw,49px)}.hero-wide .intro-copy>p{font-size:14px;max-width:350px}.hero-wide .intro-photo>img{object-position:67% 50%}.hero-wide .intro-photo::after{background:linear-gradient(180deg,rgba(9,13,11,.92) 0%,rgba(9,13,11,.76) 48%,rgba(9,13,11,.12) 100%)}.hero-wide .actions{gap:18px}.hero-wide .insurance-line{font-size:20px}}
