@@ -22,6 +22,7 @@ def main():
     html = response.get_data(as_text=True)
     team_html = client.get("/team").get_data(as_text=True)
     leistungen_html = client.get("/leistungen").get_data(as_text=True)
+    partner_html = client.get("/geschaeftspartner").get_data(as_text=True)
     css = client.get("/static/homepage/homepage-kompakt.css")
     checks = {
         "Status 200": response.status_code == 200,
@@ -29,7 +30,9 @@ def main():
         "Eine Hauptueberschrift mit Fahrzeug und Fuhrpark": html.count("<h1") == 1 and all(x in html for x in ("Ihr Fahrzeug.", "Ihr Fuhrpark.", "Wir kümmern uns.")),
         "Versicherungsabwicklung im Titel und Einstieg": "Auch im Versicherungsfall." in html and "Abstimmung mit Ihrer Versicherung" in html,
         "Fotoanfrage und Anruf direkt erreichbar": "Anfrage mit Foto" in html and 'href="tel:+4915227706694"' in html,
-        "Alle drei Kundengruppen erreichbar": all(x in html for x in ("Privatkunden", "Autohäuser &amp;", "Werkstätten", "Firmenflotten", "/geschaeftspartner#autohaeuser", "/geschaeftspartner#flotten")),
+        "Alle drei Kundengruppen erreichbar": all(x in html for x in ("Privatkunden", "Autohäuser &amp;", "Werkstätten", "Firmenflotten", "/geschaeftspartner")),
+        "Beide Partner-Kacheln starten am Seitenanfang": html.count('class="audience" href="/geschaeftspartner"') == 2,
+        "Interne Partner-Sprunglinks bleiben erhalten": all(x in partner_html for x in ('href="#autohaeuser"', 'href="#flotten"', 'id="autohaeuser"', 'id="flotten"')),
         "Portalzugang getrennt von Fotoanfrage": 'href="/portale"' in html and "Portale &amp; Zugänge" in html and "/anfrage?anliegen=auswahl" in html,
         "Ausfuehrliche Leistungen ueber Unterseite erreichbar": 'href="/leistungen"' in html and 'id="unsere-arbeiten"' not in html and all(f'id="arbeit-{slug}"' in leistungen_html for slug in ("reifenmontage", "bremsenservice", "oelservice", "inspektion", "lackierung", "karosserie", "smart-repair", "dellen-hagel", "autoglas", "reifenlager", "schadenabwicklung", "mobilitaet")),
         "Werkstatt und Geschichte auf Ueber-uns-Seite": '/team#neue-werkstatt' in html and '/team#unsere-geschichte' in html and all(f'id="{anchor}"' in team_html for anchor in ("neue-werkstatt", "unsere-geschichte")),
