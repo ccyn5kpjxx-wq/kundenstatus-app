@@ -28,6 +28,7 @@
 .service-detail-photo{position:absolute;inset:0;z-index:0;margin:0;overflow:hidden;width:100%;height:100%;background:#ddd}
 .service-detail-photo img{width:100%;height:100%;object-fit:cover;object-position:60% 50%;display:block}
 .service-detail-photo::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,rgba(246,243,238,.99) 0%,rgba(246,243,238,.96) 29%,rgba(246,243,238,.89) 44%,rgba(246,243,238,.35) 65%,rgba(246,243,238,.04) 100%)}
+@media(min-width:851px){[data-service="schaden-mobilitaet"] .service-detail-copy{max-width:520px}[data-service="schaden-mobilitaet"] .service-detail-photo{background:var(--paper)}[data-service="schaden-mobilitaet"] .service-detail-photo img{object-fit:contain;object-position:right center}[data-service="schaden-mobilitaet"] .service-detail-photo::after{background:linear-gradient(90deg,#f6f3ee 0%,rgba(246,243,238,.98) 31%,rgba(246,243,238,.86) 42%,rgba(246,243,238,0) 60%)}}
 .service-detail-work{background:white;border-block:1px solid var(--line)}
 .detail-work-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 44px;list-style:none;margin:0;padding:0}
 .detail-work-grid li{display:flex;align-items:start;gap:18px;padding:24px 0;border-top:1px solid var(--line)}

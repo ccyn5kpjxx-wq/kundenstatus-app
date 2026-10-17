@@ -45344,7 +45344,7 @@ HOMEPAGE_LEISTUNGEN = {
     },
     "schaden-mobilitaet": {
         "titel": "Schaden & Mobilität", "kurz": "Abwicklung, Abholung und Ersatzwagen.",
-        "bild": "leistungsfotos-v2/schadenaufnahme.jpg",
+        "bild": "schadenaufnahme-christopher-v1.png",
         "intro": "Nach einem Schaden behalten wir mit Ihnen die nächsten Schritte im Blick – von der Aufnahme über die Reparatur bis zur Fahrzeugübergabe.",
         "arbeiten": [
             ("Schaden aufnehmen", "Fahrzeug und Schaden dokumentieren und vorhandene Fotos sowie Unterlagen zuordnen."),
@@ -45592,6 +45592,7 @@ def oeffentliche_geschaeftspartner():
     return render_template(
         "homepage_geschaeftspartner.html",
         portal_links=homepage_portal_links(),
+        arbeit_zu_leistung=HOMEPAGE_ARBEIT_ZU_LEISTUNG,
         site_indexable=public_site_is_indexable_request(),
         canonical_url=f"{PUBLIC_BASE_URL}/geschaeftspartner" if PUBLIC_BASE_URL else "",
     )

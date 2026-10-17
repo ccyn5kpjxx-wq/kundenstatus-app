@@ -8,7 +8,7 @@
   {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
   <link rel="stylesheet" href="{{ url_for('static', filename='homepage/homepage-kompakt.css') }}">
 </head>
-<body class="compact-home service-detail-page">
+<body class="compact-home service-detail-page" data-service="{{ slug }}">
   <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
   <header class="site-header"><nav class="wrap site-nav" aria-label="Leistungsnavigation">
     <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie + Lack" width="210" height="60"></a>
