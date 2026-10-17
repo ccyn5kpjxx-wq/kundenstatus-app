@@ -5,7 +5,9 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import app as portal  # noqa: E402
+import smoke_test as isolated  # noqa: E402
+
+portal = isolated.portal
 
 
 def print_checks(checks):
@@ -18,58 +20,31 @@ def main():
     client = portal.app.test_client()
     response = client.get("/homepage")
     html = response.get_data(as_text=True)
+    team_html = client.get("/team").get_data(as_text=True)
+    leistungen_html = client.get("/leistungen").get_data(as_text=True)
+    css = client.get("/static/homepage/homepage-kompakt.css")
     checks = {
         "Status 200": response.status_code == 200,
         "Homepage nicht veraltet cachen": "no-store" in response.headers.get("Cache-Control", ""),
-        "Eine Hauptueberschrift im Hero": html.count("<h1") == 1 and "Schaden am Fahrzeug? Wir kümmern uns persönlich." in html,
-        "Hero hat zwei klare Aktionen": "Anfrage mit Foto" in html and "Direkt anrufen" in html,
-        "Vier Hauptkategorien": html.count('class="route-card') == 4 and all(
-            f'href="#{anchor}"' in html for anchor in ("schaden", "mietwagen", "fahrzeugcheck", "werkstatt")
-        ),
-        "Portale nicht als Kundenkategorie": 'href="#portale"' not in html and 'href="/portale"' in html,
-        "Details auf Wunsch erreichbar": 'class="category-disclosure"' in html and "Leistungen und Möglichkeiten im Detail" in html,
-        "Fahrzeugcheck klar vermarktet": all(label in html for label in (
-            "Gebrauchtwagen-Kaufcheck", "Leasingfahrzeug vor der Rückgabe kontrollieren",
-            "Nachforderungen vermeiden", "Kleine Spuren können sich summieren",
-            "Felgen &amp; Glasschäden", "Fotodokumentation",
-            "kein amtliches Gutachten", "endgültige Leasingbewertung"
-        )),
-        "Glasschaden direkt erreichbar": "/anfrage?anliegen=glasschaden" in html
-        and "Glasschaden melden" in html
-        and "17-stellige FIN" in html,
+        "Eine Hauptueberschrift mit Fahrzeug und Fuhrpark": html.count("<h1") == 1 and all(x in html for x in ("Ihr Fahrzeug.", "Ihr Fuhrpark.", "Wir kümmern uns.")),
+        "Versicherungsabwicklung im Titel und Einstieg": "Auch im Versicherungsfall." in html and "Abstimmung mit Ihrer Versicherung" in html,
+        "Fotoanfrage und Anruf direkt erreichbar": "Anfrage mit Foto" in html and 'href="tel:+4915227706694"' in html,
+        "Alle drei Kundengruppen erreichbar": all(x in html for x in ("Privatkunden", "Autohäuser &amp;", "Werkstätten", "Firmenflotten", "/geschaeftspartner#autohaeuser", "/geschaeftspartner#flotten")),
+        "Portalzugang getrennt von Fotoanfrage": 'href="/portale"' in html and "Portale &amp; Zugänge" in html and "/anfrage?anliegen=auswahl" in html,
+        "Ausfuehrliche Leistungen ueber Unterseite erreichbar": 'href="/leistungen"' in html and 'id="unsere-arbeiten"' not in html and all(f'id="arbeit-{slug}"' in leistungen_html for slug in ("reifenmontage", "bremsenservice", "oelservice", "inspektion", "lackierung", "karosserie", "smart-repair", "dellen-hagel", "autoglas", "reifenlager", "schadenabwicklung", "mobilitaet")),
+        "Werkstatt und Geschichte auf Ueber-uns-Seite": '/team#neue-werkstatt' in html and '/team#unsere-geschichte' in html and all(f'id="{anchor}"' in team_html for anchor in ("neue-werkstatt", "unsere-geschichte")),
         "Zentrales Anfrageformular verlinkt": '/anfrage?anliegen=' in html and "mailto:info@auto-lackierzentrum.de?subject=" not in html,
-        "Mobile Navigation vorhanden": all(marker in html for marker in (
-            'class="nav-toggle"', 'aria-controls="hauptmenue"', 'class="nav-menu"', "aria-expanded"
-        )),
-        "Mobile Schnellleiste reduziert": 'aria-label="Mobile Schnellaktionen"' in html and html.count('class="outline"') == 1,
-        "Fruehe Vertrauenssignale": 'class="proof-strip"' in html and all(label in html for label in (
-            "Google-Bewertungen", "Mosbach-Lohrbach", "Reparaturstatus online", "Persönlich erreichbar"
-        )),
+        "Mobile Navigation und Portale vorhanden": all(x in html for x in ('class="menu-toggle"', 'aria-controls="hauptmenue"', 'class="mobile-portal-link"', "aria-expanded")),
+        "Vertrauen und persoenlicher Kontakt gebuendelt": all(x in html for x in ('id="vertrauen"', "Meisterbetrieb für Karosserie", "Margita Höfer", "Google-Bewertungen ansehen")),
         "Unbestaetigte Oeffnungszeiten entfernt": "Mo–Sa:" not in html and '"openingHoursSpecification"' not in html,
-        "Technik kompakt kundenorientiert": all(label in html for label in (
-            "Farbton treffen statt schätzen", "Digitale Mehrwinkel-Messung",
-            "/static/homepage/ppg-logo.svg", "/static/homepage/top-color-logo.png"
-        )) and 'class="technology-grid"' not in html,
-        "Vertrauen gebuendelt": 'class="confidence"' in html and 'class="trust-grid"' not in html and 'class="personal-card"' not in html,
-        "Team kompakt auf der Homepage": all(marker in html for marker in (
-            'class="team-preview"', "homepage/team-daniel-hannes-abdul-v2.png",
-            "Wir arbeiten als Team", "Gute Arbeit entsteht", "Unser Team kennenlernen",
-            "Digital starten", "Persönlich abstimmen", "Wir kümmern uns"
-        )) and 'class="process-step"' not in html,
-        "Reparaturablauf und Arbeitsfotos sichtbar": all(marker in html for marker in (
-            'class="process"', "Drei Schritte. Ein fester Ansprechpartner.",
-            "Fotos &amp; Anliegen senden", "Persönlich prüfen", "Reparieren &amp; informieren",
-            'class="arbeitsbilder-section"', 'id="unsere-arbeiten"', "Unser Leistungsspektrum", "Was wir für Ihr"
-        )),
-        "Google-Sterne dynamisch": "{{ '★' * rounded_rating }}" not in html and 'aria-label="' in html,
+        "HU-AU korrekt ueber externen Pruefpartner": "externen Prüfpartner" in html and "externen Prüfpartner" in leistungen_html,
         "Strukturierte Unternehmensdaten": '"@type":"AutoBodyShop"' in html,
         "Sprunglink vorhanden": 'class="skip-link" href="#inhalt"' in html,
         "Hero-Bild vorgeladen": 'rel="preload" as="image"' in html,
-        "Vorhandenes Hero-Bild bis zur Bildauswahl eingebunden": '/static/homepage/werkstatt-hero-v3.webp' in html
-        and (ROOT / "static" / "homepage" / "werkstatt-hero-v3.webp").is_file(),
-        "Lazy Loading": html.count('loading="lazy"') >= 7,
-        "Cookielose Besucherstatistik eingebunden": "/api/besucher" in html
-        and "localStorage" not in html and "document.cookie" not in html,
+        "Freigegebenes Titelbild vorhanden": '/static/homepage/werkstatt-hero-v3.webp' in html and (ROOT / "static/homepage/werkstatt-hero-v3.webp").is_file(),
+        "Umzugshinweis und Stylesheet verfuegbar": "1. November 2026" in html and "Alte Neckarelzer Straße 18" in html and css.status_code == 200,
+        "Lazy Loading ausserhalb des Titelbilds": html.count('loading="lazy"') >= 4,
+        "Cookielose Besucherstatistik eingebunden": "/api/besucher" in html and "localStorage" not in html and "document.cookie" not in html,
         "Vorschau nicht indexierbar": 'name="robots" content="noindex, nofollow"' in html,
     }
     print_checks(checks)
@@ -189,15 +164,15 @@ def main():
             "member is-hannes", "member-photo", 'alt="Hannes, Auszubildender zum Fahrzeuglackierer"'
         )) and "hannes-azubi-fahrzeuglackierer-v2.webp" not in team_html,
         "Teamseite nutzt Anfrageformular": "Dellenreparatur anfragen" in team_html and "/anfrage?anliegen=dellenreparatur" in team_html,
-        "Leistungsseite nutzt Anfrageformular": "Anfrage senden" in leistungen_html
+        "Leistungsseite nutzt Anfrageformular": "Anfrage mit Foto" in leistungen_html
         and "/anfrage?anliegen=leasingrueckgabe" in leistungen_html,
-        "Glasschaden auf Leistungsseite": all(marker in leistungen_html for marker in (
-            "Glasschaden", "17-stelligen FIN", "Glasschaden melden",
-            "/anfrage?anliegen=glasschaden",
+        "Autoglas und Schadenabwicklung auf Leistungsseite": all(marker in leistungen_html for marker in (
+            "Autoglas", "Glasschäden", 'id="arbeit-autoglas"', 'id="arbeit-schadenabwicklung"',
         )),
-        "Leasingrueckgabe auf Leistungsseite": all(label in leistungen_html for label in (
-            "Leasingrückgabe-Check", "hohen Nachforderungen", "wirtschaftlich sinnvoll"
+        "Leasingrueckgabe und Kaufcheck erreichbar": all(label in leistungen_html for label in (
+            "Leasingrückgabe", "Kaufcheck", "/anfrage?anliegen=leasingrueckgabe", "/anfrage?anliegen=kaufberatung"
         )),
+
     }
     print_checks(category_checks)
 
