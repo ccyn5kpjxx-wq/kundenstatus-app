@@ -26,6 +26,21 @@ class Links(HTMLParser):
 
 
 class PartnerPageTests(unittest.TestCase):
+    def test_fleet_entry_shows_app_preview_and_real_approval_process(self):
+        response = portal.app.test_client().get('/geschaeftspartner')
+        self.assertEqual(response.status_code, 200)
+        html = response.text
+        self.assertIn('Fahrer-App und Firmenübersicht.', html)
+        self.assertIn('persönliche Fahrerzugänge und digitale Firmenfreigaben sind noch im Aufbau', html)
+        self.assertLess(html.index('id="flotten"'), html.index('id="angebot"'))
+        self.assertLess(html.index('id="fahreransicht"'), html.index('id="angebot"'))
+        self.assertIn('Separater Firmenzugang', html)
+        self.assertIn('persönlich oder per E-Mail', html)
+        self.assertIn('Werkstattstundensätze', html)
+        self.assertIn('fallbezogen', html)
+        self.assertEqual(html.count('id="flotten"'), 1)
+        self.assertEqual(html.count('id="fahreransicht"'), 1)
+
     def test_enabled_fleet_login_uses_portal_host(self):
         old = portal.PUBLIC_SITE_ONLY, portal.PUBLIC_HOSTS, portal.PORTAL_BASE_URL
         enabled = portal.app.config.get('FLOTTENPORTAL_ENABLED', False)

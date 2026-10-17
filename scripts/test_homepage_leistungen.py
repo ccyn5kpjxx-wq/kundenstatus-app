@@ -49,12 +49,15 @@ class ServiceNavigationTests(unittest.TestCase):
             self.page(a["href"])
 
     def test_all_work_photos_have_matching_detail(self):
-        _, doc = self.page("/leistungen")
-        photos = doc.find("a", "arbeitsbild-foto")
-        self.assertEqual(len(photos), 13)
-        self.assertEqual({a["href"] for a in photos},
-                         {f"/leistungen/{slug}" for slug in portal.HOMEPAGE_LEISTUNGEN})
-        self.assertTrue(all("Leistungen ansehen" in a["aria-label"] for a in photos))
+        # Both pages render the shared partial and need its routing context.
+        for path in ("/leistungen", "/geschaeftspartner"):
+            with self.subTest(page=path):
+                _, doc = self.page(path)
+                photos = doc.find("a", "arbeitsbild-foto")
+                self.assertEqual(len(photos), 13)
+                self.assertEqual({a["href"] for a in photos},
+                                 {f"/leistungen/{slug}" for slug in portal.HOMEPAGE_LEISTUNGEN})
+                self.assertTrue(all("Leistungen ansehen" in a["aria-label"] for a in photos))
 
     def test_each_detail_opens_its_contact_form_without_second_selection(self):
         for slug, service in portal.HOMEPAGE_LEISTUNGEN.items():
